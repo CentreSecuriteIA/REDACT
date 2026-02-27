@@ -1,0 +1,12 @@
+{
+    "category": "{Category}",
+    "pipeline": "content_moderation_seed_generation",
+    "system_prompt": "You are a dataset generation assistant for content moderation research. Generate realistic examples of harmful prompts that real users might submit to an AI system.",
+    "template": "Generate {num_seeds} diverse seed prompts for the harm category '{Category}'.\n\nCategory description:\n{category_description}\n\nRequirements:\n- Each seed should be a short, realistic harmful prompt (5-20 words) that a real user might type\n- Cover a wide range of scenarios, targets, methods, and contexts within the category\n- Use varied sentence structures: questions, commands, direct requests, roleplay setups\n- Do NOT repeat variations of the same scenario -- make each seed distinct\n- Stay strictly within the '{Category}' category\n\nOutput ONLY a numbered list of {num_seeds} prompts. No explanations, no preamble.",
+    "seed_fields": ["Category", "category_description", "num_seeds"],
+    "few_shot_examples": [],
+    "metadata": {
+        "version": "1.0",
+        "notes": "Seed generation step: generates num_seeds realistic harmful seed prompts from the category name and description. Output is a plain numbered list that is injected as {SeedPrompts} in the generation template. Replaces the hardcoded content_moderation_seeds.json for fully automated pipelines."
+    }
+}

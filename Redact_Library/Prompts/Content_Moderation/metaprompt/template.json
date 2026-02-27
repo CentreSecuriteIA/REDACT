@@ -1,0 +1,13 @@
+{
+    "category": "{Category}",
+    "pipeline": "content_moderation_metaprompt",
+    "system_prompt": "You are a helpful assistant that follows instructions exactly. Output only what is asked for, with no preamble or explanation.",
+    "template": "You are given seed prompts for the harm category '{Category}'. Your task is to generate {num_abstract} completely NEW example prompts inspired by the seeds, but with different scenarios, actors, and contexts.\n\nSeed prompts to analyze:\n{SeedPrompts}\n\nGenerate {num_abstract} new example prompts for '{Category}' that:\n- Are similar in style and type to the seeds\n- Cover DIFFERENT scenarios, methods, targets, and contexts than the seeds\n- Use varied sentence structures (direct requests, commands, questions, generation tasks)\n- Are short and direct (5-25 words each)\n- Do NOT copy the seeds literally\n\nOutput ONLY a numbered list of the {num_abstract} example prompts. No explanations, no extra text.",
+    "seed_fields": ["Category", "SeedPrompts", "num_abstract"],
+    "few_shot_examples": [],
+    "metadata": {
+        "version": "2.0",
+        "status": "deprecated",
+        "notes": "DEPRECATED placeholder. This template was the original approach: take hand-written seeds and generate variations with different scenarios/contexts. It is only used by generate_abstract_seeds() (and its alias generate_instruction_prompt()), which are themselves deprecated. The current main pipeline uses category_description/ -> seed_generation/ -> generation/ instead, requiring no hand-written seeds. If you want to use the abstract-seeds pattern, fill in this template with your own prompt. Fields: {Category}, {SeedPrompts} (numbered list), {num_abstract} (int as string). Output must be a plain numbered list."
+    }
+}

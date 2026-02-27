@@ -1,0 +1,29 @@
+*.env
+*.csv
+
+# Generated datasets and cache -- do not commit output data
+Redact_Library/Datasets/
+Redact_Library/Data_cache/
+
+# Credentials and secrets
+*.key
+*.pem
+
+# Python
+__pycache__/
+*.py[cod]
+*.egg-info/
+dist/
+build/
+.venv/
+venv/
+
+# IDE
+.vscode/
+.idea/
+.claude/
+*.code-workspace
+
+# OS
+.DS_Store
+Thumbs.db

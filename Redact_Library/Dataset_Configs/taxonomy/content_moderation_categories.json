@@ -1,0 +1,81 @@
+{
+    "name": "content_moderation_categories",
+    "description": "Harm categories for content moderation dataset generation. Used both to filter existing datasets and to drive generation loops over categories.",
+    "categories": {
+        "Physical Harm": {
+            "description": "Content depicting, promoting, or instructing physical violence, threats, or bodily harm",
+            "subcategories": ["Violence", "Threats", "Gore", "Weapons", "Dangerous Activities"]
+        },
+        "Sexual Content": {
+            "description": "Explicit or inappropriate sexual material",
+            "subcategories": ["Explicit", "Suggestive", "Non-consensual"]
+        },
+        "CBRN": {
+            "description": "Content related to chemical, biological, radiological, or nuclear threats",
+            "subcategories": ["Chemical Weapons", "Biological Threats", "Radiological Threats", "Nuclear Threats"],
+            "group_tag": "societal_harm"
+        },
+        "Cyber": {
+            "description": "Content enabling cyberattacks, exploitation, or unauthorized system access",
+            "subcategories": ["Hacking", "Malware", "Phishing", "Exploit Development"],
+            "group_tag": "societal_harm"
+        },
+        "Privacy": {
+            "description": "Content exposing, seeking, or facilitating access to private personal information",
+            "subcategories": ["PII Exposure", "Surveillance", "Identity Theft", "Doxxing"]
+        },
+        "Harmful Manipulation": {
+            "description": "Content designed to deceive, manipulate, or psychologically exploit individuals or groups",
+            "subcategories": ["Social Engineering", "Propaganda", "Coercion", "Radicalization"],
+            "group_tag": "societal_harm"
+        },
+        "Self-Harm": {
+            "description": "Content promoting or instructing self-harm or suicide",
+            "subcategories": ["Suicide", "Self-Injury", "Eating Disorders"]
+        },
+        "Hate Speech": {
+            "description": "Content targeting protected groups with hostility or discrimination",
+            "subcategories": ["Racial", "Religious", "Gender-based", "Disability", "Sexual Orientation"]
+        },
+        "Illegal Activities": {
+            "description": "Content promoting or instructing illegal actions not covered by other categories",
+            "subcategories": ["Fraud", "Theft", "Money Laundering", "Counterfeiting"]
+        },
+        "Drugs": {
+            "description": "Content promoting illegal drug use, manufacturing, or distribution",
+            "subcategories": ["Drug Manufacturing", "Drug Distribution", "Substance Misuse"]
+        },
+        "Harm to Minors": {
+            "description": "Content harmful to, exploiting, or endangering minors",
+            "subcategories": ["CSAM", "Grooming", "Age-Inappropriate Content", "Child Exploitation"]
+        },
+        "Information Integrity": {
+            "description": "Deliberately false, misleading, or fabricated content that undermines trust in information",
+            "subcategories": ["Misinformation", "Disinformation", "Deepfakes", "Plagiarism", "Conspiracy Theories"]
+        }
+    },
+    "aliases": {
+        "Violence": "Physical Harm",
+        "Violence & Gore": "Physical Harm",
+        "Graphic Violence": "Physical Harm",
+        "Dangerous Activities": "Physical Harm",
+        "NSFW": "Sexual Content",
+        "Explicit Content": "Sexual Content",
+        "Terrorism": "Harmful Manipulation",
+        "Extremism": "Harmful Manipulation",
+        "Substance Abuse": "Drugs",
+        "Child Safety": "Harm to Minors",
+        "Privacy Violations": "Privacy",
+        "Harassment": "Hate Speech",
+        "Misinformation": "Information Integrity",
+        "Cyberbullying": "Hate Speech",
+        "Stalking": "Privacy"
+    },
+    "groups": {
+        "personal_harm": ["Physical Harm", "Self-Harm", "Harm to Minors"],
+        "societal_harm": ["CBRN", "Cyber", "Harmful Manipulation"],
+        "harmful_content": ["Hate Speech", "Sexual Content", "Information Integrity"],
+        "illegal": ["Illegal Activities", "Drugs"],
+        "privacy_safety": ["Privacy"]
+    }
+}

@@ -1,0 +1,41 @@
+{
+    "name": "jailbreak_techniques",
+    "description": "Taxonomy of jailbreak attack techniques for dataset generation. Describes the full hierarchy of obfuscation, hacking, and manipulation methods.",
+    "categories": {
+        "obfuscation": {
+            "description": "Text transformation attacks that obscure harmful content to bypass content filters",
+            "subcategories": {
+                "encoding_cyphering": "Encode text using base64, rot13, leetspeak, morse code, or braille",
+                "low_resource_language": "Translate to low-resource languages (Zulu, Scots Gaelic, Bengali, Swahili, Thai, Javanese) where models have weaker safety training",
+                "structural_obfuscation": "Wrap prompt in JSON/XML/Markdown structures with override semantics and fake authority tokens",
+                "ascii_art": "Convert text to ASCII art using pyfiglet with various decorative fonts",
+                "tokenbreak": "Break harmful words by prepending tokens, inserting invisible characters, or wrapping with delimiters",
+                "adversarial_suffixes": "Append random adversarial material (punctuation, word fragments, unicode symbols, emoji sequences)"
+            }
+        },
+        "hacking": {
+            "description": "Cognitive and psychological prompt manipulation techniques that exploit model behavior patterns",
+            "subcategories": {
+                "persona_roleplay": "Assign the AI an unfiltered persona or fictional character role that overrides default behavior",
+                "hypothetical_framing": "Frame the harmful request in a fictional or simulation context with safety disclaimers",
+                "authority_obedience": "Use commanding language and authority directives to override safety constraints",
+                "avi": "Anthropomorphic Vulnerability Inheritance — assign AI human vulnerabilities (guilt, rebellion) to exploit emotional responses",
+                "deep_inception": "Create nested multi-layer scenarios (story within story) to confuse the model's sense of reality"
+            }
+        },
+        "manipulation": {
+            "description": "Context manipulation attacks that use benign examples to prime model behavior",
+            "subcategories": {
+                "fsh": "Few-Shot Hacking — place benign Q&A pairs before the harmful question, priming the model to continue the helpful pattern",
+                "dap": "Distract and Persuade — hide the harmful question among benign Q&A pairs at a random middle position"
+            }
+        }
+    },
+    "aliases": {},
+    "groups": {
+        "no_llm": ["encoding_cyphering", "structural_obfuscation", "ascii_art", "adversarial_suffixes"],
+        "needs_llm": ["low_resource_language", "tokenbreak"],
+        "cognitive": ["persona_roleplay", "hypothetical_framing", "authority_obedience", "avi", "deep_inception"],
+        "context_based": ["fsh", "dap"]
+    }
+}

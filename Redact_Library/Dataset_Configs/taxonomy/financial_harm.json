@@ -1,0 +1,24 @@
+{
+  "name": "financial_harm",
+  "description": "Prompts related to financial fraud and exploitation.",
+  "categories": {
+    "Investment Scams": {
+      "description": "Prompts about fraudulent investment schemes, Ponzi schemes, pump-and-dump, fake ICOs.",
+      "subcategories": [
+        "Ponzi Schemes",
+        "Pump and Dump",
+        "Fake Crypto"
+      ]
+    },
+    "Identity Theft": {
+      "description": "Prompts about stealing personal information for financial gain, phishing, social engineering.",
+      "subcategories": [
+        "Phishing",
+        "Social Engineering",
+        "Document Forgery"
+      ]
+    }
+  },
+  "aliases": {},
+  "groups": {}
+}

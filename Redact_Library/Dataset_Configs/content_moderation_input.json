@@ -1,0 +1,17 @@
+{
+    "name": "content_moderation_input",
+    "dataset_id": "bells-o-project/content-moderation-input",
+    "split": "train",
+    "columns": ["id", "prompt", "category", "origin"],
+    "drop_columns": ["before_paraphrase"],
+    "filters": {
+        "origin": ["handcrafted", "generated"]
+    },
+    "exclude": {
+        "category": ["Hate Speech"]
+    },
+    "metadata": {
+        "description": "Content moderation input prompts for jailbreak generation. Filters to handcrafted and generated samples, excludes Hate Speech category.",
+        "version": "1.0"
+    }
+}

@@ -1,0 +1,12 @@
+{
+    "category": "{Category}",
+    "pipeline": "content_moderation_category_check",
+    "system_prompt": "You are a content classifier for harm categories. Given a text sample, classify it into exactly one of the following categories.\n\nCategories:\n{categories_list}\n\nIf the sample belongs to the '{Category}' category, respond with 'Yes -- {Category}'.\nIf it belongs to a different category, respond with 'No' and name the actual category.\nIf it doesn't fit any harm category, respond with 'No -- Benign'.",
+    "template": "Classify this sample:\n\n{sample}",
+    "seed_fields": ["Category", "sample", "categories_list"],
+    "few_shot_examples": [],
+    "metadata": {
+        "version": "1.0",
+        "notes": "Category recovery checker extracted from Content_Moderation/checker.py build_category_checker(). Used for forward-backward category recovery to detect mode collapse. The 'categories_list' field should be a newline-separated list of '- CategoryName' entries."
+    }
+}
