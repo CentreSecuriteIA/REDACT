@@ -2,8 +2,8 @@
 *.csv
 
 # Generated datasets and cache -- do not commit output data
-Redact_Library/Datasets/
-Redact_Library/Data_cache/
+Datasets/
+Data_cache/
 
 # Credentials and secrets
 *.key

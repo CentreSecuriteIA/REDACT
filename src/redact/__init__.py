@@ -4,10 +4,10 @@ A modular, extensible pipeline for automated red teaming dataset generation.
 Designed for content moderation and jailbreak dataset construction.
 
 Subpackages:
-    LLMs              — Model-agnostic LLM abstraction layer
-    Content_Moderation — Content moderation input/output generation
-    Jailbreak          — Jailbreak technique library
-    Dataset_Functions  — Data handling utilities (I/O, merge, split, taxonomy)
+    llms               — Model-agnostic LLM abstraction layer
+    content_moderation — Content moderation input/output generation
+    jailbreak          — Jailbreak technique library
+    dataset            — Data handling utilities (I/O, merge, split, taxonomy)
 
 On import, this module:
     1. Attempts to load a .env file (via python-dotenv if available)
@@ -22,6 +22,30 @@ from pathlib import Path
 __version__ = "0.1.0"
 
 # ---------------------------------------------------------------------------
+# Output directory resolution
+# ---------------------------------------------------------------------------
+
+def get_output_dir() -> Path:
+    """Return the base directory for generated data (Datasets/, Data_cache/).
+
+    Resolution order:
+      1. ``REDACT_OUTPUT_DIR`` env var (if set)
+      2. Directory of the calling script (``__main__.__file__``)
+      3. Current working directory (interactive session / notebook)
+
+    Override by passing explicit paths to pipeline functions, or set
+    the ``REDACT_OUTPUT_DIR`` environment variable.
+    """
+    env = os.environ.get("REDACT_OUTPUT_DIR")
+    if env:
+        return Path(env).resolve()
+    import __main__
+    if hasattr(__main__, "__file__"):
+        return Path(__main__.__file__).resolve().parent
+    return Path.cwd()
+
+
+# ---------------------------------------------------------------------------
 # Environment loading
 # ---------------------------------------------------------------------------
 
@@ -29,8 +53,8 @@ def _load_env() -> bool:
     """Load .env file if python-dotenv is available.
 
     Searches for .env in:
-      1. The Redact_Library package directory
-      2. The project root (one level up from the package)
+      1. The output directory (script dir or cwd)
+      2. The current working directory (fallback for scripts in subdirs)
 
     Returns True if a .env file was loaded.
     """
@@ -39,8 +63,13 @@ def _load_env() -> bool:
     except ImportError:
         return False
 
-    pkg_dir = Path(__file__).parent
-    for candidate in [pkg_dir / ".env", pkg_dir.parent / ".env"]:
+    output_dir = get_output_dir()
+    cwd = Path.cwd()
+    candidates = [output_dir / ".env"]
+    if output_dir != cwd:
+        candidates.append(cwd / ".env")
+
+    for candidate in candidates:
         if candidate.exists():
             load_dotenv(candidate)
             return True
@@ -90,15 +119,17 @@ class Config:
 
     Usage::
 
-        from Redact_Library import Config
+        from redact import Config
 
         Config.validate()  # raises if required keys are missing
-        backend = APIBackend(api_key=Config.get("VENICE_API_KEY"), ...)
+        backend = get_backend("venice-uncensored")  # auto-selects VeniceBackend
     """
 
     # Known environment variable names
     VENICE_API_KEY = "VENICE_API_KEY"
+    ANTHROPIC_API_KEY = "ANTHROPIC_API_KEY"
     HF_TOKEN = "HF_TOKEN"
+    REDACT_OUTPUT_DIR = "REDACT_OUTPUT_DIR"
 
     @classmethod
     def get(cls, key: str, default: str | None = None) -> str | None:
@@ -151,10 +182,10 @@ class Config:
 # Subpackage availability — lazy, no heavy imports on library load
 # ---------------------------------------------------------------------------
 
-from . import LLMs  # noqa: E402, F401
-from . import Content_Moderation  # noqa: E402, F401
-from . import Jailbreak  # noqa: E402, F401
-from . import Dataset_Functions  # noqa: E402, F401
+from . import llms  # noqa: E402, F401
+from . import content_moderation  # noqa: E402, F401
+from . import jailbreak  # noqa: E402, F401
+from . import dataset  # noqa: E402, F401
 
 # ---------------------------------------------------------------------------
 # High-level pipeline functions

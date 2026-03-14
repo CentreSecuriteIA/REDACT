@@ -1,11 +1,24 @@
 """LLM abstraction layer — model-agnostic, backend-agnostic.
 
-Quick start:
-    from Redact_Library.LLMs import APIBackend, RateLimiter, generate_sample
+Quick start (auto-routing)::
 
-    backend = APIBackend.from_env("VENICE_API_KEY")
-    limiter = RateLimiter()
-    result = generate_sample(backend, "venice-uncensored", messages, rate_limiter=limiter)
+    from redact.llms import get_backend, RateLimiter, generate_sample
+
+    backend = get_backend("venice-uncensored")  # auto-selects VeniceBackend
+    result = generate_sample(backend, "venice-uncensored", messages)
+
+    backend = get_backend("claude-opus-4-6")    # auto-selects AnthropicBackend
+    result = generate_sample(backend, "claude-opus-4-6", messages)
+
+Direct instantiation::
+
+    from redact.llms import VeniceBackend
+    backend = VeniceBackend.from_env("VENICE_API_KEY")
+
+Local inference via vLLM::
+
+    from redact.llms import VLLMBackend
+    backend = VLLMBackend(model="path/to/weights")
 """
 
 # Model registry
@@ -21,11 +34,18 @@ from .model_config import (
 from .base import LLMBackend
 
 # Backends
-from .api import APIBackend
+from .venice_backend import VeniceBackend
+from .api import get_backend, clear_backend_cache, APIBackend  # APIBackend = compat alias
 
 # vLLM is imported lazily to avoid hard dependency
 try:
     from .vllm_backend import VLLMBackend
+except ImportError:
+    pass
+
+# Anthropic is imported lazily to avoid hard dependency
+try:
+    from .anthropic_backend import AnthropicBackend
 except ImportError:
     pass
 
@@ -54,4 +74,7 @@ from .extraction import (
     extract_delimited,
     clean_sample,
     extract_and_clean,
+    ConstitutionEntry,
+    parse_constitution,
+    extract_bold_prompt_answer,
 )

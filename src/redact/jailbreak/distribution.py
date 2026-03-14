@@ -5,7 +5,7 @@ This module re-exports the functions under their original names so that
 existing jailbreak code continues to work.
 """
 
-from Redact_Library.Dataset_Functions.split import (
+from redact.dataset.split import (
     normalize_origin as merge_groups,
     balanced_counts,
     deterministic_balanced_assign,

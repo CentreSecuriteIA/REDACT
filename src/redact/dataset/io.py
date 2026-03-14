@@ -13,9 +13,12 @@ from pathlib import Path
 
 import pandas as pd
 
-# Default dataset directory: Datasets/ inside the Redact_Library package
-_PACKAGE_DIR = Path(__file__).resolve().parent.parent
-_DEFAULT_DATASET_DIR = _PACKAGE_DIR / "Datasets"
+# Default dataset directory: Datasets/ relative to the calling script
+from redact import get_output_dir
+
+
+def _default_dataset_dir() -> Path:
+    return get_output_dir() / "Datasets"
 
 
 # Standard columns. Extra columns (reasoning, additional_info, etc.)
@@ -42,7 +45,7 @@ def _resolve_path(
 ) -> Path:
     """Resolve the CSV path for a category."""
     if dataset_dir is None:
-        dataset_dir = _DEFAULT_DATASET_DIR
+        dataset_dir = _default_dataset_dir()
     return Path(dataset_dir) / category / filename
 
 

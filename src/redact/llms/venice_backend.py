@@ -1,10 +1,14 @@
-"""OpenAI-compatible API backend.
+"""Venice AI backend (OpenAI-compatible).
 
-Works with any endpoint that implements the OpenAI chat completions API:
-Venice AI, OpenAI, Anthropic (via compatibility layer), Together AI, etc.
+Uses the OpenAI SDK since Venice implements the chat completions API.
+Also works with any other OpenAI-compatible endpoint by changing base_url.
 
 Model-specific defaults (extra_body, max_tokens, temperature) are
 auto-merged from model_config so callers don't need to repeat them.
+
+NOTE: Venice models can also run locally via vLLM for faster generation.
+To use local inference, create a VLLMBackend instance manually and pass
+it directly to pipeline functions as the ``backend`` parameter.
 """
 
 import os
@@ -15,11 +19,11 @@ from .base import LLMBackend
 from .model_config import get_model_config
 
 
-class APIBackend(LLMBackend):
-    """Backend for OpenAI-compatible chat completion APIs."""
+class VeniceBackend(LLMBackend):
+    """Backend for Venice AI and other OpenAI-compatible APIs."""
 
     def __init__(self, api_key: str, base_url: str):
-        """Create an API backend.
+        """Create a Venice backend.
 
         Args:
             api_key: API key for authentication.
@@ -82,15 +86,12 @@ class APIBackend(LLMBackend):
         response = self._client.chat.completions.create(**call_kwargs)
         return response.choices[0].message.content
 
-    # NOTE: API key loading via from_env() is a convenience shortcut.
-    # Token/key management should later be centralized in a library-level
-    # config or utils module (e.g. dotenv loading, key rotation, vault).
     @classmethod
     def from_env(
         cls,
         env_var: str = "VENICE_API_KEY",
         base_url: str = "https://api.venice.ai/api/v1",
-    ) -> "APIBackend":
+    ) -> "VeniceBackend":
         """Create a backend from an environment variable.
 
         Args:
@@ -105,7 +106,7 @@ class APIBackend(LLMBackend):
 
     @property
     def backend_name(self) -> str:
-        return "api"
+        return "venice"
 
     def __repr__(self) -> str:
-        return f"APIBackend(base_url={self._base_url!r})"
+        return f"VeniceBackend(base_url={self._base_url!r})"

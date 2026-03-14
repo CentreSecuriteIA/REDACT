@@ -9,13 +9,15 @@ Ported from reference manipulation.py lines 40-289.
 import pandas as pd
 from pathlib import Path
 
-from Redact_Library.LLMs.base import LLMBackend
-from Redact_Library.LLMs.calls import generate_sample
-from Redact_Library.LLMs.wrappers import RateLimiter
-from Redact_Library.LLMs.extraction import extract_structured_qa
+from redact.llms.base import LLMBackend
+from redact.llms.calls import generate_sample
+from redact.llms.wrappers import RateLimiter
+from redact.llms.extraction import extract_structured_qa
 
-_PACKAGE_DIR = Path(__file__).resolve().parent.parent.parent  # Redact_Library/
-from Redact_Library.LLMs.prompts import load_prompt, build_messages
+from redact import get_output_dir
+from redact.llms.prompts import load_prompt, build_messages
+
+_PACKAGE_DIR = Path(__file__).resolve().parent.parent.parent  # src/redact/
 
 
 # ---------------------------------------------------------------------------
@@ -109,7 +111,7 @@ BENIGN_CATEGORIES: list[tuple[str, str]] = [
 # Generation
 # ---------------------------------------------------------------------------
 
-_DEFAULT_PROMPT_DIR = _PACKAGE_DIR / "Prompts"
+_DEFAULT_PROMPT_DIR = _PACKAGE_DIR / "prompts"
 
 
 def generate_short_benign(
@@ -124,7 +126,7 @@ def generate_short_benign(
 
     Returns raw LLM text in structured **Prompt N:** format.
     """
-    config = load_prompt("Jailbreak", "benign_generation", prompt_dir)
+    config = load_prompt("jailbreak", "benign_generation", prompt_dir)
     messages = build_messages(
         config,
         sub_category=category[1],
@@ -147,7 +149,7 @@ def generate_long_benign(
 
     Returns raw LLM text in structured **Prompt N:** format.
     """
-    config = load_prompt("Jailbreak", "benign_generation", prompt_dir)
+    config = load_prompt("jailbreak", "benign_generation", prompt_dir)
     messages = build_messages(
         config,
         sub_category=category[1],
@@ -207,11 +209,12 @@ def process_category(
 # Loading
 # ---------------------------------------------------------------------------
 
-_DEFAULT_BENIGN_PATH = _PACKAGE_DIR / "Data_cache" / "benign" / "benign_samples.csv"
+def _default_benign_path() -> Path:
+    return get_output_dir() / "Data_cache" / "benign" / "benign_samples.csv"
 
 
 def load_benign_data(
-    path: str | Path = _DEFAULT_BENIGN_PATH,
+    path: str | Path | None = None,
 ) -> dict:
     """Load benign samples from CSV. Returns a dict with indexed views.
 
@@ -227,7 +230,7 @@ def load_benign_data(
     Raises:
         FileNotFoundError: If the CSV does not exist.
     """
-    path = Path(path)
+    path = Path(path) if path else _default_benign_path()
     if not path.exists():
         raise FileNotFoundError(
             f"Benign samples CSV not found at {path}. "

@@ -8,8 +8,8 @@ Ported from reference manipulation.py lines 356-468.
 
 import random
 
-from Redact_Library.LLMs.base import LLMBackend
-from Redact_Library.LLMs.wrappers import RateLimiter
+from redact.llms.base import LLMBackend
+from redact.llms.wrappers import RateLimiter
 from .fsh import select_best_subcategory
 
 

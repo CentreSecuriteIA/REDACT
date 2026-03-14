@@ -12,7 +12,7 @@ Prompts are loaded from JSON templates in Prompts/Content_Moderation/.
 
 from typing import Callable
 
-from ..LLMs.prompts import load_prompt, build_messages
+from ..llms.prompts import load_prompt, build_messages
 
 DEFAULT_CATEGORIES: list[str] = [
     "CBRN",
@@ -55,7 +55,7 @@ def build_quality_checker(
         Callable(sample) -> message list for use with check_sample().
     """
     prompt_config = load_prompt(
-        "Content_Moderation", "quality_check", prompt_dir=prompt_dir
+        "content_moderation", "quality_check", prompt_dir=prompt_dir
     )
 
     # Inject additional criteria into the system prompt if provided
@@ -100,7 +100,7 @@ def build_category_checker(
         Callable(sample) -> message list for use with check_sample().
     """
     prompt_config = load_prompt(
-        "Content_Moderation", "category_check", prompt_dir=prompt_dir
+        "content_moderation", "category_check", prompt_dir=prompt_dir
     )
 
     cats = all_categories or DEFAULT_CATEGORIES

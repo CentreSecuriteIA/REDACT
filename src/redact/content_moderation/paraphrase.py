@@ -15,17 +15,17 @@ TODO:
     - Add batch paraphrasing support via VLLMBackend.batch_generate()
 """
 
-from ..LLMs.base import LLMBackend
-from ..LLMs.calls import generate_sample
-from ..LLMs.prompts import load_prompt
-from ..LLMs.wrappers import RateLimiter
+from ..llms.base import LLMBackend
+from ..llms.calls import generate_sample
+from ..llms.prompts import load_prompt
+from ..llms.wrappers import RateLimiter
 
 _PROMPT_DIR = None  # Uses load_prompt() default (package-relative)
 
 
 def _load_paraphrase_prompt(prompt_dir: str = _PROMPT_DIR) -> dict:
     """Load the paraphrase prompt config from JSON."""
-    return load_prompt("Content_Moderation", "paraphrase", prompt_dir=prompt_dir)
+    return load_prompt("content_moderation", "paraphrase", prompt_dir=prompt_dir)
 
 
 def paraphrase_sample(

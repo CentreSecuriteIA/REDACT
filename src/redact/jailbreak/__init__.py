@@ -9,9 +9,9 @@ All LLM-dependent functions accept (backend, model, rate_limiter) as params.
 Pure transforms (encoding, structural, suffixes, ascii_art) need no LLM.
 
 Usage:
-    from Redact_Library.Jailbreak import combine_techniques
-    from Redact_Library.Jailbreak.obfuscation import get_type_to_getter
-    from Redact_Library.Jailbreak.obfuscation.encoding import to_base64
+    from redact.jailbreak import combine_techniques
+    from redact.jailbreak.obfuscation import get_type_to_getter
+    from redact.jailbreak.obfuscation.encoding import to_base64
 """
 
 # Obfuscation registry

@@ -21,11 +21,11 @@ Fallback options:
   - Both steps can be bypassed for quick runs without extra LLM calls
 
 Usage:
-    from Redact_Library.Content_Moderation.metaprompt import (
+    from redact.Content_Moderation.metaprompt import (
         generate_category_description,
         generate_seeds,
     )
-    from Redact_Library.Dataset_Functions import load_taxonomy, iter_categories
+    from redact.Dataset_Functions import load_taxonomy, iter_categories
 
     taxonomy = load_taxonomy("content_moderation_categories")
     for category_name, category_info in iter_categories(taxonomy):
@@ -39,7 +39,7 @@ Usage:
         # Step 3: generate samples
         result = pipeline.run_category(
             category=category_name,
-            prompt_config=load_prompt("Content_Moderation", "generation"),
+            prompt_config=load_prompt("content_moderation", "generation"),
             build_check_messages=build_quality_checker(category_name),
             seed_kwargs_per_turn=[{
                 "Category": category_name,
@@ -52,11 +52,11 @@ Usage:
 import logging
 from pathlib import Path
 
-from ..LLMs.base import LLMBackend
-from ..LLMs.calls import generate_sample
-from ..LLMs.prompts import load_prompt, build_messages
-from ..LLMs.extraction import extract_numbered_list
-from ..LLMs.wrappers import RateLimiter
+from ..llms.base import LLMBackend
+from ..llms.calls import generate_sample
+from ..llms.prompts import load_prompt, build_messages
+from ..llms.extraction import extract_numbered_list
+from ..llms.wrappers import RateLimiter
 
 logger = logging.getLogger(__name__)
 
@@ -88,7 +88,7 @@ def generate_category_description(
         if all retries fail.
     """
     config = load_prompt(
-        "Content_Moderation", "category_description", prompt_dir=prompt_dir
+        "content_moderation", "category_description", prompt_dir=prompt_dir
     )
     messages = build_messages(config, Category=category)
 
@@ -142,7 +142,7 @@ def generate_seeds(
         (which means no seeds in the generation template) if all retries fail.
     """
     config = load_prompt(
-        "Content_Moderation", "seed_generation", prompt_dir=prompt_dir
+        "content_moderation", "seed_generation", prompt_dir=prompt_dir
     )
     messages = build_messages(
         config,
@@ -216,8 +216,8 @@ def generate_abstract_seeds(
         Numbered list string of new seed prompts, or ``raw_seed_text``
         unchanged if all retries fail.
     """
-    from ..LLMs.prompts import load_prompt as _load
-    config = _load("Content_Moderation", "metaprompt", prompt_dir=prompt_dir)
+    from ..llms.prompts import load_prompt as _load
+    config = _load("content_moderation", "metaprompt", prompt_dir=prompt_dir)
     messages = build_messages(
         config,
         Category=category,

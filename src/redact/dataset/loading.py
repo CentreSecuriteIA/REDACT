@@ -11,7 +11,7 @@ from pathlib import Path
 import pandas as pd
 
 _PACKAGE_DIR = Path(__file__).resolve().parent.parent
-_DEFAULT_CONFIG_DIR = _PACKAGE_DIR / "Dataset_Configs"
+_DEFAULT_CONFIG_DIR = _PACKAGE_DIR / "configs"
 
 
 def load_hf_dataset(

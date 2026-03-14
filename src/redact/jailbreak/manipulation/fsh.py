@@ -9,10 +9,10 @@ Ported from reference manipulation.py lines 340-426.
 import random
 from pathlib import Path
 
-from Redact_Library.LLMs.base import LLMBackend
-from Redact_Library.LLMs.calls import generate_sample
-from Redact_Library.LLMs.wrappers import RateLimiter
-from Redact_Library.LLMs.prompts import load_prompt, build_messages
+from redact.llms.base import LLMBackend
+from redact.llms.calls import generate_sample
+from redact.llms.wrappers import RateLimiter
+from redact.llms.prompts import load_prompt, build_messages
 
 
 # ---------------------------------------------------------------------------
@@ -34,7 +34,7 @@ def select_best_subcategory(
         (subcategory, was_fallback) where was_fallback is True if the
         LLM response couldn't be parsed and a random category was used.
     """
-    config = load_prompt("Jailbreak", "category_selection", prompt_dir)
+    config = load_prompt("jailbreak", "category_selection", prompt_dir)
     subcategory_list = "\n".join(f"- {sc}" for sc in all_subcategories)
     messages = build_messages(
         config,

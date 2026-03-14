@@ -12,7 +12,7 @@ from pathlib import Path
 
 import pandas as pd
 
-from .io import read_category_csv, _DEFAULT_DATASET_DIR
+from .io import read_category_csv, _default_dataset_dir
 
 
 def merge_category_csvs(
@@ -55,7 +55,7 @@ def discover_categories(dataset_dir: str | Path | None = None) -> list[str]:
     Returns:
         Sorted list of category directory names.
     """
-    base = Path(dataset_dir) if dataset_dir is not None else _DEFAULT_DATASET_DIR
+    base = Path(dataset_dir) if dataset_dir is not None else _default_dataset_dir()
     if not base.is_dir():
         return []
     return sorted(

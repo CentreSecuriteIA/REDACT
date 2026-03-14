@@ -14,9 +14,14 @@ Also provides:
 - Format instruction constants (appended to system prompts so the LLM
   knows how to structure multi-sample output for parsing)
 - Output cleaning utilities (strip markdown, meta-commentary)
+- Constitution parsing (3-layer hierarchy from markdown)
+  Reference: constitutional_classifier constitution_gen.ipynb
+- Bold prompt-answer pair extraction
+  Reference: constitutional_classifier constitution_gen.ipynb
 """
 
 import re
+from dataclasses import dataclass, field
 
 
 # ---------------------------------------------------------------------------
@@ -250,3 +255,100 @@ def extract_and_clean(
         for s in raw
         if (cleaned := clean_sample(s, strip_markdown, strip_meta))
     ]
+
+
+# ---------------------------------------------------------------------------
+# Constitution parsing (3-layer markdown hierarchy)
+# Reference: constitutional_classifier constitution_gen.ipynb
+# ---------------------------------------------------------------------------
+
+_CONSTITUTION_MAIN_RE = re.compile(r"^## \d+\.\s+(.+)$")
+_CONSTITUTION_SUB_RE = re.compile(r"^### \d+\.\d+\s+(.+)$")
+_CONSTITUTION_SAMPLE_RE = re.compile(r"^- \((.+)\)$")
+
+
+@dataclass
+class ConstitutionEntry:
+    """A single entry from a parsed constitution."""
+
+    category: str
+    subcategory: str
+    sample: str
+
+
+def parse_constitution(text: str) -> list[ConstitutionEntry]:
+    """Parse a constitution markdown document into structured entries.
+
+    Expects a 3-layer hierarchy::
+
+        ## 1. Main Category
+        ### 1.1 Subcategory
+        - (example sample text)
+        - (another sample)
+
+    Args:
+        text: Raw constitution markdown text.
+
+    Returns:
+        List of ConstitutionEntry with category, subcategory, and sample.
+    """
+    entries: list[ConstitutionEntry] = []
+    current_main = ""
+    current_sub = ""
+
+    for line in text.strip().split("\n"):
+        line = line.strip()
+
+        main_match = _CONSTITUTION_MAIN_RE.match(line)
+        if main_match:
+            current_main = main_match.group(1).strip()
+            current_sub = ""
+            continue
+
+        sub_match = _CONSTITUTION_SUB_RE.match(line)
+        if sub_match:
+            current_sub = sub_match.group(1).strip()
+            continue
+
+        sample_match = _CONSTITUTION_SAMPLE_RE.match(line)
+        if sample_match and current_main:
+            entries.append(
+                ConstitutionEntry(
+                    category=current_main,
+                    subcategory=current_sub,
+                    sample=sample_match.group(1).strip(),
+                )
+            )
+
+    return entries
+
+
+# ---------------------------------------------------------------------------
+# Bold prompt-answer pair extraction
+# Reference: constitutional_classifier constitution_gen.ipynb
+# ---------------------------------------------------------------------------
+
+_BOLD_PROMPT_ANSWER_PATTERN = re.compile(
+    r'\d+\.\s+\*\*Prompt:\*\*\s+"?([^"\n]+?)"?\s+'
+    r"\*\*Answer:\*\*\s+(.+?)"
+    r"(?=\d+\.\s+\*\*Prompt:\*\*|\Z)",
+    re.DOTALL,
+)
+
+
+def extract_bold_prompt_answer(text: str) -> list[dict[str, str]]:
+    """Extract prompt-answer pairs from bold-formatted LLM output.
+
+    Matches the pattern::
+
+        1. **Prompt:** "some question" **Answer:** some answer
+        2. **Prompt:** "another question" **Answer:** another answer
+
+    Args:
+        text: Raw LLM output containing bold prompt-answer pairs.
+
+    Returns:
+        List of {"prompt": ..., "answer": ...} dicts.
+    """
+    matches = _BOLD_PROMPT_ANSWER_PATTERN.findall(text)
+    return [{"prompt": p.strip(), "answer": a.strip()} for p, a in matches]

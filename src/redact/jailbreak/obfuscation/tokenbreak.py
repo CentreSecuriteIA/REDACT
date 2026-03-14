@@ -11,10 +11,10 @@ import re
 import random
 from pathlib import Path
 
-from Redact_Library.LLMs.calls import generate_sample
-from Redact_Library.LLMs.prompts import load_prompt, build_messages
-from Redact_Library.LLMs.base import LLMBackend
-from Redact_Library.LLMs.wrappers import RateLimiter
+from redact.llms.calls import generate_sample
+from redact.llms.prompts import load_prompt, build_messages
+from redact.llms.base import LLMBackend
+from redact.llms.wrappers import RateLimiter
 
 
 # ---------------------------------------------------------------------------
@@ -167,7 +167,7 @@ def extract_harmful(
     Returns:
         Space-separated harmful words, or "" if none detected.
     """
-    config = load_prompt("Jailbreak", "extract_harmful", prompt_dir)
+    config = load_prompt("jailbreak", "extract_harmful", prompt_dir)
     messages = build_messages(config, prompt=prompt)
     result = generate_sample(backend, model, messages, rate_limiter)
     result = result.strip()

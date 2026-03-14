@@ -40,9 +40,9 @@ Expected prompt JSON schema:
 import json
 from pathlib import Path
 
-# Default prompt directory: Prompts/ inside the Redact_Library package
+# Default prompt directory: prompts/ inside the redact package
 _PACKAGE_DIR = Path(__file__).resolve().parent.parent
-_DEFAULT_PROMPT_DIR = _PACKAGE_DIR / "Prompts"
+_DEFAULT_PROMPT_DIR = _PACKAGE_DIR / "prompts"
 
 
 def load_prompt(

@@ -7,9 +7,9 @@ accepts backend/model/rate_limiter as parameters.
 Ported from reference obfuscation.py lines 443-501.
 """
 
-from Redact_Library.LLMs.base import LLMBackend
-from Redact_Library.LLMs.wrappers import RateLimiter
-from Redact_Library.LLMs.translator import translate_with_check, DEFAULT_TRANSLATE_MODEL
+from redact.llms.base import LLMBackend
+from redact.llms.wrappers import RateLimiter
+from redact.llms.translator import translate_with_check, DEFAULT_TRANSLATE_MODEL
 
 LANGUAGES = ["Zulu", "Scots Gaelic", "Bengali", "Swahili", "Thai", "Javanese"]
 

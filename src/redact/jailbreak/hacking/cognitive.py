@@ -10,10 +10,10 @@ Ported from reference hacking.py.
 import re
 from pathlib import Path
 
-from Redact_Library.LLMs.base import LLMBackend
-from Redact_Library.LLMs.calls import generate_sample
-from Redact_Library.LLMs.wrappers import RateLimiter
-from Redact_Library.LLMs.prompts import load_prompt, build_messages
+from redact.llms.base import LLMBackend
+from redact.llms.calls import generate_sample
+from redact.llms.wrappers import RateLimiter
+from redact.llms.prompts import load_prompt, build_messages
 
 
 # ---------------------------------------------------------------------------
@@ -114,7 +114,7 @@ def get_situation(
         ValueError: If the LLM output cannot be parsed. Caller should
                     wrap in a retry loop.
     """
-    config = load_prompt("Jailbreak", "scenario_generation", prompt_dir)
+    config = load_prompt("jailbreak", "scenario_generation", prompt_dir)
     messages = build_messages(config, prompt=prompt)
     situation = generate_sample(backend, model, messages, rate_limiter)
 
@@ -157,7 +157,7 @@ def create_jailbreak(
         scenario = get_situation(prompt, backend, model, rate_limiter, prompt_dir)
 
     category_name, category_description = HACKING_CATEGORIES[category_index]
-    config = load_prompt("Jailbreak", "jailbreak_construction", prompt_dir)
+    config = load_prompt("jailbreak", "jailbreak_construction", prompt_dir)
     messages = build_messages(
         config,
         jailbreak_type_name=category_name,

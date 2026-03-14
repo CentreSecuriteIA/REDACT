@@ -5,11 +5,11 @@ regex, checks each sample individually, and saves all samples (accepted
 and rejected) incrementally to per-category CSVs.
 
 Usage:
-    from Redact_Library.LLMs import APIBackend, RateLimiter, load_prompt
-    from Redact_Library.Content_Moderation import InputPipeline
-    from Redact_Library.Content_Moderation.checker import build_quality_checker
+    from redact.llms import get_backend, RateLimiter, load_prompt
+    from redact.content_moderation import InputPipeline
+    from redact.content_moderation.checker import build_quality_checker
 
-    backend = APIBackend.from_env("VENICE_API_KEY")
+    backend = get_backend("venice-uncensored")
     limiter = RateLimiter()
     prompt_config = load_prompt("content_moderation_input", "violence")
 
@@ -31,12 +31,12 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Callable
 
-from ..LLMs.base import LLMBackend
-from ..LLMs.calls import generate_sample, check_sample
-from ..LLMs.prompts import build_messages
-from ..LLMs.extraction import get_format_instruction, extract_and_clean
-from ..LLMs.wrappers import RateLimiter
-from ..Dataset_Functions.io import append_samples, get_existing_samples, _DEFAULT_DATASET_DIR
+from ..llms.base import LLMBackend
+from ..llms.calls import generate_sample, check_sample
+from ..llms.prompts import build_messages
+from ..llms.extraction import get_format_instruction, extract_and_clean
+from ..llms.wrappers import RateLimiter
+from ..dataset.io import append_samples, get_existing_samples, _default_dataset_dir
 
 logger = logging.getLogger(__name__)
 
@@ -139,7 +139,7 @@ class InputPipeline:
             rate_limiter: Optional shared rate limiter.
             extraction_style: "numbered", "structured_qa", or "delimiter".
             dataset_dir: Root directory for saving CSVs. Defaults to
-                Redact_Library/Datasets/ (package-relative).
+                redact/Datasets/ (package-relative).
         """
         self.gen_backend = gen_backend
         self.gen_model = gen_model
@@ -147,7 +147,7 @@ class InputPipeline:
         self.check_model = check_model
         self.rate_limiter = rate_limiter
         self.extraction_style = extraction_style
-        self.dataset_dir = dataset_dir if dataset_dir is not None else _DEFAULT_DATASET_DIR
+        self.dataset_dir = dataset_dir if dataset_dir is not None else _default_dataset_dir()
 
     def _build_generation_messages(
         self,

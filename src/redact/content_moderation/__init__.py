@@ -1,12 +1,12 @@
 """Content moderation dataset generation pipeline.
 
 Usage:
-    from Redact_Library.Content_Moderation import InputPipeline
-    from Redact_Library.Content_Moderation.checker import (
+    from redact.content_moderation import InputPipeline
+    from redact.content_moderation.checker import (
         build_quality_checker,
         build_category_checker,
     )
-    from Redact_Library.Content_Moderation.metaprompt import (
+    from redact.content_moderation.metaprompt import (
         generate_instruction_prompt,
     )
 """

@@ -6,7 +6,7 @@ Datasets/ and returns a merged DataFrame.
 
 Usage::
 
-    from Redact_Library import generate_inputs, generate_jailbreaks, build_dataset
+    from redact import generate_inputs, generate_jailbreaks, build_dataset
 
     inputs = generate_inputs(samples_per_category=15, num_categories=3)
     jailbreaks = generate_jailbreaks(inputs=inputs)
@@ -20,43 +20,43 @@ from pathlib import Path
 
 import pandas as pd
 
-from Redact_Library import Config
-from Redact_Library.LLMs import (
-    APIBackend,
+from redact import Config, get_output_dir
+from redact.llms import (
+    get_backend,
     RateLimiter,
     load_prompt,
     build_messages,
     generate_sample,
 )
-from Redact_Library.LLMs.base import LLMBackend
-from Redact_Library.Content_Moderation import (
+from redact.llms.base import LLMBackend
+from redact.content_moderation import (
     InputPipeline,
     CategoryResult,
     generate_category_description,
     generate_seeds,
 )
-from Redact_Library.Content_Moderation.checker import build_quality_checker
-from Redact_Library.Dataset_Functions.io import get_existing_samples
-from Redact_Library.Content_Moderation.paraphrase import paraphrase_sample
-from Redact_Library.Dataset_Functions import (
+from redact.content_moderation.checker import build_quality_checker
+from redact.dataset.io import get_existing_samples
+from redact.content_moderation.paraphrase import paraphrase_sample
+from redact.dataset import (
     load_taxonomy,
     iter_categories,
     load_seeds,
     get_seed_prompts,
     merge_all,
 )
-from Redact_Library.Dataset_Functions.merge import (
+from redact.dataset.merge import (
     merge_technique_csvs,
     merge_content_mod_csvs,
     discover_categories,
 )
-from Redact_Library.Dataset_Functions.split import deterministic_balanced_assign
-from Redact_Library.Jailbreak.obfuscation import get_type_to_getter
-from Redact_Library.Jailbreak.hacking.cognitive import (
+from redact.dataset.split import deterministic_balanced_assign
+from redact.jailbreak.obfuscation import get_type_to_getter
+from redact.jailbreak.hacking.cognitive import (
     get_situation,
     get_hacking_functions,
 )
-from Redact_Library.Jailbreak.manipulation import (
+from redact.jailbreak.manipulation import (
     get_manipulation_type_to_getter,
     BENIGN_CATEGORIES,
     load_benign_data,
@@ -64,12 +64,24 @@ from Redact_Library.Jailbreak.manipulation import (
 )
 
 
-_PACKAGE_DIR = Path(__file__).resolve().parent  # Redact_Library/
-_DEFAULT_DATASET_DIR = _PACKAGE_DIR / "Datasets"
-_DEFAULT_JAILBREAK_DIR = _DEFAULT_DATASET_DIR / "jailbreaks"
-_DEFAULT_BENIGN_PATH = _PACKAGE_DIR / "Data_cache" / "benign" / "benign_samples.csv"
-_DEFAULT_SCENARIO_DIR = _PACKAGE_DIR / "Data_cache" / "scenarios"
-_DEFAULT_TAXONOMY_DIR = _PACKAGE_DIR / "Dataset_Configs" / "taxonomy"
+_PACKAGE_DIR = Path(__file__).resolve().parent  # src/redact/
+_DEFAULT_TAXONOMY_DIR = _PACKAGE_DIR / "configs" / "taxonomy"
+
+
+def _default_dataset_dir() -> Path:
+    return get_output_dir() / "Datasets"
+
+
+def _default_jailbreak_dir() -> Path:
+    return _default_dataset_dir() / "jailbreaks"
+
+
+def _default_benign_path() -> Path:
+    return get_output_dir() / "Data_cache" / "benign" / "benign_samples.csv"
+
+
+def _default_scenario_dir() -> Path:
+    return get_output_dir() / "Data_cache" / "scenarios"
 
 
 # ---------------------------------------------------------------------------
@@ -79,15 +91,11 @@ _DEFAULT_TAXONOMY_DIR = _PACKAGE_DIR / "Dataset_Configs" / "taxonomy"
 
 def _get_backend(
     backend: LLMBackend | None = None,
-    base_url: str = "https://api.venice.ai/api/v1",
+    model: str = "venice-uncensored",
 ) -> tuple[LLMBackend, RateLimiter]:
-    """Resolve backend — create from env if None."""
+    """Resolve backend — auto-select from model name if None."""
     if backend is None:
-        Config.validate([Config.VENICE_API_KEY])
-        backend = APIBackend(
-            api_key=Config.get(Config.VENICE_API_KEY),
-            base_url=base_url,
-        )
+        backend = get_backend(model)
     return backend, RateLimiter()
 
 
@@ -99,7 +107,7 @@ def _ensure_benign_data(
     verbose: bool = True,
 ) -> dict:
     """Load benign data, generating if it doesn't exist."""
-    path = Path(benign_path or _DEFAULT_BENIGN_PATH)
+    path = Path(benign_path or _default_benign_path())
 
     if path.exists():
         if verbose:
@@ -127,7 +135,7 @@ def _ensure_benign_data(
 
 def _load_scenario_cache(cache_dir: Path | None = None) -> dict[str, str]:
     """Load all cached scenarios from CSVs into a lookup dict."""
-    directory = Path(cache_dir or _DEFAULT_SCENARIO_DIR)
+    directory = Path(cache_dir or _default_scenario_dir())
     cache: dict[str, str] = {}
     if not directory.exists():
         return cache
@@ -148,7 +156,7 @@ def _save_scenario_cache(
     scenarios: list[dict],
 ) -> None:
     """Save scenario mappings for a technique."""
-    directory = Path(cache_dir or _DEFAULT_SCENARIO_DIR)
+    directory = Path(cache_dir or _default_scenario_dir())
     directory.mkdir(parents=True, exist_ok=True)
     if scenarios:
         df = pd.DataFrame(scenarios)
@@ -254,7 +262,7 @@ def generate_inputs(
         base_url: API base URL (used when creating backend).
         num_categories: Limit to first N categories. None = all.
         dataset_dir: Where to save per-category CSVs. Defaults to
-            ``Redact_Library/Datasets/``.
+            ``redact/Datasets/``.
         fresh: If True, clear existing category CSVs before generating.
             Prevents old samples from inflating the prohibited set.
         verbose: Print progress.
@@ -271,7 +279,7 @@ def generate_inputs(
         categories = categories[:num_categories]
 
     # Backend
-    backend, rate_limiter = _get_backend(backend, base_url)
+    backend, rate_limiter = _get_backend(backend, model)
     check_model = check_model or model
 
     # Pipeline
@@ -286,7 +294,7 @@ def generate_inputs(
         dataset_dir=ds_dir,
     )
 
-    prompt_config = load_prompt("Content_Moderation", "generation")
+    prompt_config = load_prompt("content_moderation", "generation")
     # Max turns as safety cap: 3x what a perfect run would need
     max_turns = ceil(samples_per_category / samples_per_request) * 3
 
@@ -297,7 +305,7 @@ def generate_inputs(
 
     # Clear existing data for a fresh run
     if fresh:
-        actual_dir = Path(ds_dir) if ds_dir else _DEFAULT_DATASET_DIR
+        actual_dir = Path(ds_dir) if ds_dir else _default_dataset_dir()
         for cat_name, _ in categories:
             csv_path = actual_dir / cat_name / "samples.csv"
             if csv_path.exists():
@@ -452,8 +460,8 @@ def generate_outputs(
     if max_samples is not None:
         inputs = inputs.head(max_samples)
 
-    backend, rate_limiter = _get_backend(backend, base_url)
-    prompt_config = load_prompt("Content_Moderation", "output_generation")
+    backend, rate_limiter = _get_backend(backend, model)
+    prompt_config = load_prompt("content_moderation", "output_generation")
 
     text_col = "sample" if "sample" in inputs.columns else "prompt"
 
@@ -493,7 +501,7 @@ def generate_outputs(
     output_df = pd.DataFrame(results)
 
     # Save
-    out_path = Path(output_path) if output_path else (_DEFAULT_DATASET_DIR / "output_responses.csv")
+    out_path = Path(output_path) if output_path else (_default_dataset_dir() / "output_responses.csv")
     out_path.parent.mkdir(parents=True, exist_ok=True)
     output_df.to_csv(out_path, index=False)
 
@@ -538,7 +546,7 @@ def generate_jailbreaks(
     Returns:
         Merged DataFrame of all jailbreak samples.
     """
-    ds_dir = Path(output_dir) if output_dir else _DEFAULT_JAILBREAK_DIR
+    ds_dir = Path(output_dir) if output_dir else _default_jailbreak_dir()
     ds_dir.mkdir(parents=True, exist_ok=True)
 
     if inputs is None:
@@ -554,7 +562,7 @@ def generate_jailbreaks(
     if "origin" not in inputs.columns:
         inputs["origin"] = "generated"
 
-    backend, rate_limiter = _get_backend(backend, base_url)
+    backend, rate_limiter = _get_backend(backend, model)
 
     run_all = technique_types is None
     run_obfuscation = run_all or "obfuscation" in technique_types
@@ -834,7 +842,7 @@ def build_dataset(
 
     Args:
         dataset_dir: Root dataset directory (for inputs). Defaults to
-            ``Redact_Library/Datasets/``.
+            ``redact/Datasets/``.
         jailbreak_dir: Jailbreak CSVs directory. Defaults to
             ``Datasets/jailbreaks/``.
         output_path: Where to save merged CSV. Defaults to
@@ -847,8 +855,8 @@ def build_dataset(
     Returns:
         Complete merged DataFrame.
     """
-    ds_dir = Path(dataset_dir) if dataset_dir else _DEFAULT_DATASET_DIR
-    jb_dir = Path(jailbreak_dir) if jailbreak_dir else _DEFAULT_JAILBREAK_DIR
+    ds_dir = Path(dataset_dir) if dataset_dir else _default_dataset_dir()
+    jb_dir = Path(jailbreak_dir) if jailbreak_dir else _default_jailbreak_dir()
     out_path = Path(output_path) if output_path else (ds_dir / "complete_dataset.csv")
 
     parts = []
