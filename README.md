@@ -6,10 +6,11 @@ A modular Python library for generating, validating, and managing synthetic red-
 
 REDACT automates the full lifecycle of red-teaming dataset construction:
 
-1. **Generate** harmful content samples across configurable harm categories
-2. **Validate** each sample via a checker LLM with feedback-driven retry
-3. **Transform** inputs into jailbreak attacks using 30+ techniques
-4. **Split, merge, and manage** datasets with balanced distribution across techniques
+1. **Constitution** — generate structured category hierarchies (harmful, benign, dual-use) using Claude Opus
+2. **Generate** harmful content samples across configurable harm categories
+3. **Validate** each sample via a checker LLM with feedback-driven retry
+4. **Transform** inputs into jailbreak attacks using 30+ techniques
+5. **Split, merge, and manage** datasets with balanced distribution across techniques
 
 The library is **model-agnostic** (API or local vLLM), **prompt-agnostic** (all prompts are external JSON files), and **category-agnostic** (new categories require only a taxonomy entry and prompt file).
 
@@ -91,6 +92,9 @@ src/redact/
 │   ├── extraction.py              # Multi-sample + constitution extraction
 │   ├── translator.py              # Translation with fidelity checking
 │   └── model_config.py            # Model registry (RPM, backend_type, defaults)
+│
+├── constitution/                  # Constitution generation for classifiers
+│   └── pipeline.py               # ConstitutionPipeline (4 severity types)
 │
 ├── content_moderation/            # Content moderation generation pipeline
 │   ├── generation.py              # InputPipeline — the main driver
@@ -216,6 +220,34 @@ register_model("my-model", rpm=50, default_max_tokens=4000, backend_type="venice
 | `venice-uncensored` | 75 | venice | Can also run locally via vLLM |
 | `deepseek-v3.2` | 20 | venice | Stronger multilingual (used for translation) |
 | `claude-opus-4-6` | 5 | anthropic | Set `max_workers=1` to avoid TPM limits |
+
+---
+
+### Constitution — Category Hierarchy Generation
+
+Generates structured constitutions for constitutional classifier training. Each constitution spans 4 severity levels:
+
+| Entry Type | Description | CSV File |
+|---|---|---|
+| `harmful` | Absolutely harmful — always flag | `harmful.csv` |
+| `dual_use_harmful` | Borderline harmful framing — debatable | `dual_use_harmful.csv` |
+| `dual_use_benign` | Borderline benign framing — could look harmful | `dual_use_benign.csv` |
+| `benign` | Absolutely benign — never flag (hard negatives) | `benign.csv` |
+
+```python
+from redact import generate_constitution
+
+# Generate constitution for all taxonomy categories
+constitution = generate_constitution(
+    taxonomy="content_moderation_categories",
+    num_categories=10,          # constitution categories per type per taxonomy category
+    model="claude-opus-4-6",
+    num_taxonomy_categories=3,  # limit to first 3 taxonomy categories (None = all)
+)
+print(f"{len(constitution)} constitution entries")
+```
+
+Output saved to `Data_cache/constitution/` as 4 type-based CSVs + `merged.csv`. Each entry can later seed N input samples for classifier training.
 
 ---
 

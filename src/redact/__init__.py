@@ -186,6 +186,7 @@ from . import llms  # noqa: E402, F401
 from . import content_moderation  # noqa: E402, F401
 from . import jailbreak  # noqa: E402, F401
 from . import dataset  # noqa: E402, F401
+from . import constitution  # noqa: E402, F401
 
 # ---------------------------------------------------------------------------
 # High-level pipeline functions
@@ -193,6 +194,7 @@ from . import dataset  # noqa: E402, F401
 
 from .pipelines import (  # noqa: E402
     create_taxonomy,
+    generate_constitution,
     generate_inputs,
     generate_outputs,
     generate_jailbreaks,

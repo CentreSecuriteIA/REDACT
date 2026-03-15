@@ -46,6 +46,9 @@ REDACT/
 │       │   ├── dedup.py             # Deduplication utilities
 │       │   └── loading.py           # HuggingFace dataset loading
 │       │
+│       ├── constitution/            # Constitution generation for classifiers
+│       │   └── pipeline.py         # ConstitutionPipeline, EntryType, results
+│       │
 │       ├── jailbreak/               # Jailbreak dataset generation
 │       │   ├── utils.py             # Technique combination utilities
 │       │   ├── distribution.py      # Balanced splitting re-exports
@@ -70,7 +73,8 @@ REDACT/
 │       │
 │       └── prompts/                 # [REDACTED IN PUBLIC RELEASE]
 │           ├── content_moderation/  # Prompt templates per pipeline step
-│           └── jailbreak/           # Jailbreak prompt templates
+│           ├── jailbreak/           # Jailbreak prompt templates
+│           └── constitution/        # Constitution generation prompts (4 severity types)
 │
 ├── tests/                           # Test suite
 ├── full_pipeline.ipynb              # Complete pipeline walkthrough
@@ -136,6 +140,19 @@ Benign samples for FSH/DAP are cached in `Data_cache/benign/`.
 **Output pipeline**: Run model on input samples → optionally paraphrase through fingerprint removal LLM → save to `Datasets/`.
 
 Fingerprint removal is called as an optional LLM pass. The full training pipeline for the removal model lives in a separate repository.
+
+---
+
+### `constitution/` — Constitution Generation
+
+Generates structured category hierarchies for constitutional classifier training. Each constitution spans 4 severity levels:
+
+1. **Absolutely harmful** — clear-cut violations, always flag
+2. **Dual-use harmful** — borderline, harmful framing, debatable
+3. **Dual-use benign** — borderline, benign framing, could look harmful
+4. **Absolutely benign** — clearly safe, never flag (hard negatives)
+
+`ConstitutionPipeline` generates entries per taxonomy category using Claude Opus. Uses `parse_constitution()` from `llms/extraction.py` to parse the 3-layer markdown output. Entries saved to `Data_cache/constitution/` as 4 type-based CSVs. Each entry later seeds N input samples for classifier training.
 
 ---
 

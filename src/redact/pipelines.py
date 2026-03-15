@@ -226,6 +226,96 @@ def create_taxonomy(
     return taxonomy
 
 
+# ---------------------------------------------------------------------------
+# Constitution generation
+# ---------------------------------------------------------------------------
+
+
+def generate_constitution(
+    taxonomy: dict | str = "content_moderation_categories",
+    entry_types: list[str] | None = None,
+    num_categories: int = 10,
+    model: str = "claude-opus-4-6",
+    backend: LLMBackend | None = None,
+    num_taxonomy_categories: int | None = None,
+    include_standalone_benign: bool = False,
+    standalone_benign_categories: int = 10,
+    output_dir: str | Path | None = None,
+    verbose: bool = True,
+) -> pd.DataFrame:
+    """Generate a constitution (category hierarchy) for classifier training.
+
+    For each taxonomy category, generates harmful, benign, and dual-use
+    constitution entries using the specified model. Each entry defines a
+    subcategory with sample descriptions that can later drive input sample
+    generation.
+
+    Args:
+        taxonomy: Taxonomy name or pre-loaded dict.
+        entry_types: Which entry types to generate. Choices:
+            ``"harmful"``, ``"benign"``, ``"dual_use_benign"``,
+            ``"dual_use_harmful"``. Default: all four.
+        num_categories: Number of constitution categories per entry type per
+            taxonomy category. Range 5-15 recommended.
+        model: Model for generation (default: Claude Opus).
+        backend: LLM backend. If None, auto-selects from model name.
+        num_taxonomy_categories: Limit to first N taxonomy categories
+            (None = all).
+        include_standalone_benign: If True, also generate benign entries for
+            ALL taxonomy categories (not just those selected via
+            ``num_taxonomy_categories``). Broadens hard-negative coverage.
+        standalone_benign_categories: Number of benign constitution categories
+            per taxonomy category in standalone benign mode.
+        output_dir: Where to save CSVs. Defaults to
+            ``Data_cache/constitution/``.
+        verbose: Print progress.
+
+    Returns:
+        DataFrame of all constitution entries.
+    """
+    from redact.constitution import ConstitutionPipeline, EntryType
+
+    # Resolve taxonomy
+    if isinstance(taxonomy, str):
+        taxonomy = load_taxonomy(taxonomy)
+
+    # Resolve entry types
+    resolved_types: list[EntryType] | None = None
+    if entry_types is not None:
+        resolved_types = [EntryType(t) for t in entry_types]
+
+    # Resolve backend
+    if backend is None:
+        backend = get_backend(model)
+
+    rate_limiter = RateLimiter()
+
+    pipeline = ConstitutionPipeline(
+        backend=backend,
+        model=model,
+        rate_limiter=rate_limiter,
+        output_dir=output_dir,
+    )
+
+    result = pipeline.run(
+        taxonomy=taxonomy,
+        entry_types=resolved_types,
+        num_categories=num_categories,
+        num_taxonomy_categories=num_taxonomy_categories,
+        include_standalone_benign=include_standalone_benign,
+        standalone_benign_categories=standalone_benign_categories,
+        save=True,
+        verbose=verbose,
+    )
+
+    return result.to_dataframe()
+
+
+# ---------------------------------------------------------------------------
+# Content moderation input generation
+# ---------------------------------------------------------------------------
+
+
 def generate_inputs(
     taxonomy: dict | str = "content_moderation_categories",
     samples_per_category: int = 15,
