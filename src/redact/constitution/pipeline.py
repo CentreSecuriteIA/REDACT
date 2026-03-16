@@ -475,16 +475,7 @@ class ConstitutionPipeline:
             if verbose:
                 print(f"\n  --- Standalone Benign Generation ---")
 
-            # Determine which categories already got benign entries
-            main_cat_names = {name for name, _ in categories}
-            already_has_benign = (
-                main_cat_names if EntryType.BENIGN in entry_types else set()
-            )
-
             for i, (cat_name, cat_info) in enumerate(all_categories, 1):
-                if cat_name in already_has_benign:
-                    continue
-
                 if verbose:
                     print(f"  [benign {i}/{len(all_categories)}] {cat_name}")
 
