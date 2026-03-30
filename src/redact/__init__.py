@@ -195,6 +195,7 @@ from . import constitution  # noqa: E402, F401
 from .pipelines import (  # noqa: E402
     create_taxonomy,
     generate_constitution,
+    generate_inputs_from_constitution,
     generate_inputs,
     generate_outputs,
     generate_jailbreaks,

@@ -242,7 +242,7 @@ class ConstitutionPipeline:
             (entries, raw_output): List of tagged entries and raw LLM text.
             Returns ([], "") if all attempts fail.
         """
-        prompt_config = load_prompt("constitution", entry_type.value)
+        prompt_config = load_prompt("constitution/generation", entry_type.value)
         kwargs = self._format_category_info(category_name, category_info)
         kwargs["num_categories"] = str(num_categories)
         messages = build_messages(prompt_config, **kwargs)
@@ -344,6 +344,81 @@ class ConstitutionPipeline:
 
         return result
 
+    def generate_general_benign(
+        self,
+        num_categories: int = 10,
+    ) -> tuple[list[ConstitutionEntry], str]:
+        """Generate category-free standalone benign constitution entries.
+
+        Makes a single LLM call to generate diverse benign content with no
+        taxonomy category influence. Entries are tagged with source_category
+        and source_group_tag set to "general".
+
+        Args:
+            num_categories: Number of benign constitution categories to generate.
+
+        Returns:
+            (entries, raw_output): List of tagged entries and raw LLM text.
+            Returns ([], "") if all attempts fail.
+        """
+        prompt_config = load_prompt("constitution/generation", "general_benign")
+        kwargs = {"num_categories": str(num_categories)}
+        messages = build_messages(prompt_config, **kwargs)
+
+        max_attempts = 3
+        for attempt in range(max_attempts):
+            try:
+                raw_output = generate_sample(
+                    self.backend,
+                    self.model,
+                    messages,
+                    rate_limiter=self.rate_limiter,
+                    max_tokens=10000,
+                )
+
+                clean_output, was_complete = _strip_end_marker(raw_output)
+                if not was_complete:
+                    logger.warning(
+                        "General benign output may be truncated (no [END] marker)."
+                    )
+
+                parsed = _parse_raw(clean_output)
+
+                entries = [
+                    ConstitutionEntry(
+                        category=p.category,
+                        subcategory=p.subcategory,
+                        sample=p.sample,
+                        entry_type="general_benign",
+                        source_category="general",
+                        source_group_tag="general",
+                    )
+                    for p in parsed
+                ]
+
+                if not entries:
+                    raise ValueError(
+                        f"No entries parsed (raw length: {len(raw_output)} chars)"
+                    )
+
+                return entries, raw_output
+
+            except Exception as e:
+                if attempt < max_attempts - 1:
+                    logger.warning(
+                        "Attempt %d/%d failed for general benign: %s. Retrying...",
+                        attempt + 1,
+                        max_attempts,
+                        e,
+                    )
+                else:
+                    logger.error(
+                        "All %d attempts failed for general benign: %s. Skipping.",
+                        max_attempts,
+                        e,
+                    )
+                    return [], ""
+
     def _save_category_entries(
         self,
         cat_result: ConstitutionResult,
@@ -388,11 +463,11 @@ class ConstitutionPipeline:
             entry_types: Which types to generate. Default: all four.
             num_categories: Constitution categories per type per taxonomy category.
             num_taxonomy_categories: Limit to first N taxonomy categories (None = all).
-            include_standalone_benign: If True, also generate benign entries for
-                ALL taxonomy categories (not just those selected for the main run).
-                This broadens hard-negative coverage for classifier training.
+            include_standalone_benign: If True, also generate category-free
+                benign entries in a single LLM call (no taxonomy influence).
+                Saved to general_benign.csv.
             standalone_benign_categories: Number of benign constitution categories
-                to generate per taxonomy category in standalone benign mode.
+                to generate in the standalone benign call.
             save: Whether to save CSVs to output_dir.
             verbose: Print progress.
 
@@ -417,16 +492,9 @@ class ConstitutionPipeline:
             print(f"  Taxonomy categories: {len(categories)}")
             total_calls = len(categories) * len(entry_types)
             if include_standalone_benign:
-                # Standalone benign covers all taxonomy categories not already
-                # getting benign entries in the main run
-                standalone_extra = (
-                    len(all_categories) - len(categories)
-                    if EntryType.BENIGN in entry_types
-                    else len(all_categories)
-                )
-                total_calls += standalone_extra
-                print(f"  Standalone benign: {len(all_categories)} taxonomy categories"
-                      f" x {standalone_benign_categories} categories each")
+                total_calls += 1
+                print(f"  Standalone benign: 1 category-free call"
+                      f" ({standalone_benign_categories} categories)")
             print(f"  Total LLM calls: ~{total_calls}")
             print()
 
@@ -470,37 +538,38 @@ class ConstitutionPipeline:
             if save and cat_result.entries:
                 self._save_category_entries(cat_result)
 
-        # ── Standalone benign generation ──────────────────────────────
+        # ── Standalone benign generation (category-free) ─────────────
         if include_standalone_benign:
             if verbose:
-                print(f"\n  --- Standalone Benign Generation ---")
+                print(f"\n  --- Standalone Benign Generation (category-free) ---")
 
-            for i, (cat_name, cat_info) in enumerate(all_categories, 1):
-                if verbose:
-                    print(f"  [benign {i}/{len(all_categories)}] {cat_name}")
+            entries, raw = self.generate_general_benign(
+                num_categories=standalone_benign_categories,
+            )
 
-                entries, raw = self.generate_for_type(
-                    cat_name, cat_info, EntryType.BENIGN,
-                    num_categories=standalone_benign_categories,
-                )
-
-                if not entries:
-                    skipped.append(f"{cat_name}/benign (standalone)")
-                    continue
-
-                cat_result = ConstitutionResult(
-                    entries=entries,
-                    raw_outputs={f"{cat_name}/benign_standalone": raw},
-                )
-
+            if not entries:
+                skipped.append("general_benign (standalone)")
+            else:
                 all_result.entries.extend(entries)
-                all_result.raw_outputs[f"{cat_name}/benign_standalone"] = raw
+                all_result.raw_outputs["general_benign"] = raw
 
                 if verbose:
-                    print(f"    -> {len(entries)} benign entries")
+                    print(f"    -> {len(entries)} general benign entries")
 
                 if save:
-                    self._save_category_entries(cat_result)
+                    self.output_dir.mkdir(parents=True, exist_ok=True)
+                    _save_entries_csv(
+                        entries,
+                        self.output_dir / "general_benign.csv",
+                        self.model,
+                        append=True,
+                    )
+                    _save_entries_csv(
+                        entries,
+                        self.output_dir / "merged.csv",
+                        self.model,
+                        append=True,
+                    )
 
         if verbose:
             print(f"\n  Total: {len(all_result.entries)} constitution entries")

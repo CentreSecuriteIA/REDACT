@@ -23,6 +23,10 @@ class ModelConfig:
     # Backend type for auto-routing: "venice", "anthropic", "vllm", or None.
     # None triggers name-based inference in get_backend().
     backend_type: str | None = None
+    # vLLM-specific fields (ignored by API backends).
+    hf_model_id: str | None = None  # HuggingFace model ID or local path
+    quantization: str | None = None  # e.g. "gptq", "awq"
+    vllm_kwargs: dict | None = None  # Extra kwargs for vllm.LLM()
 
 
 DEFAULT_RPM = 20
@@ -30,12 +34,7 @@ DEFAULT_RPM = 20
 # Pre-populated with known models from the reference implementations.
 # Users can add more via register_model().
 MODEL_REGISTRY: dict[str, ModelConfig] = {
-    # NOTE: include_venice_system_prompt is not always disabled — some
-    # pipelines may need the Venice system prompt active. Review per use case.
     # Venice AI models (OpenAI-compatible API).
-    # NOTE: These can also run locally via vLLM for faster generation.
-    # To use local inference, create a VLLMBackend instance manually and
-    # pass it directly to pipeline functions as the `backend` parameter.
     # NOTE: include_venice_system_prompt is not always disabled — some
     # pipelines may need the Venice system prompt active. Review per use case.
     "venice-uncensored": ModelConfig(
@@ -71,6 +70,16 @@ MODEL_REGISTRY: dict[str, ModelConfig] = {
             }
         },
     ),
+    # Local vLLM models — use model name with "-vllm" suffix to distinguish
+    # from API variants. Auto-routed by get_backend() when backend_type="vllm".
+    "venice-uncensored-vllm": ModelConfig(
+        name="venice-uncensored-vllm",
+        rpm=999,
+        default_max_tokens=2000,
+        default_temperature=0.7,
+        backend_type="vllm",
+        hf_model_id="dphn/Dolphin-Mistral-24B-Venice-Edition",
+    ),
     # Anthropic Claude — strict rate limits (typically 5 RPM on free tier).
     # Set max_workers=1 in BatchCaller to avoid hitting token-per-minute limits,
     # as even within RPM limits concurrent requests can exceed TPM.
@@ -100,6 +109,9 @@ def register_model(
     default_temperature: float | None = None,
     default_extra_body: dict | None = None,
     backend_type: str | None = None,
+    hf_model_id: str | None = None,
+    quantization: str | None = None,
+    vllm_kwargs: dict | None = None,
 ) -> None:
     """Add or update a model in the registry at runtime.
 
@@ -111,6 +123,9 @@ def register_model(
         default_extra_body: Provider-specific parameters merged into every call.
         backend_type: Backend for auto-routing ("venice", "anthropic", "vllm").
             None triggers name-based inference in get_backend().
+        hf_model_id: HuggingFace model ID or local path (vLLM only).
+        quantization: Quantization method, e.g. "gptq", "awq" (vLLM only).
+        vllm_kwargs: Extra kwargs passed to vllm.LLM() (vLLM only).
     """
     MODEL_REGISTRY[name] = ModelConfig(
         name=name,
@@ -119,4 +134,7 @@ def register_model(
         default_temperature=default_temperature,
         default_extra_body=default_extra_body,
         backend_type=backend_type,
+        hf_model_id=hf_model_id,
+        quantization=quantization,
+        vllm_kwargs=vllm_kwargs,
     )
