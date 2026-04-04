@@ -328,6 +328,7 @@ def generate_inputs_from_constitution(
     constitution_dir: str | Path | None = None,
     output_dir: str | Path | None = None,
     verbose: bool = True,
+    batch_size: int = 32,
 ) -> pd.DataFrame:
     """Generate input prompts from constitution entries.
 
@@ -385,6 +386,7 @@ def generate_inputs_from_constitution(
         use_checker=use_checker,
         save=True,
         verbose=verbose,
+        batch_size=batch_size,
     )
 
     # Return merged DataFrame from saved CSVs

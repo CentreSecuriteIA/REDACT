@@ -16,10 +16,13 @@ from .merge import (
     normalize_technique_csv,
     merge_technique_csvs,
     merge_content_mod_csvs,
+    merge_constitution_input_csvs,
     JAILBREAK_KEEP_COLUMNS,
     JAILBREAK_COLUMN_MAP,
     CONTENT_MOD_KEEP_COLUMNS,
     CONTENT_MOD_COLUMN_MAP,
+    CONSTITUTION_INPUT_KEEP_COLUMNS,
+    CONSTITUTION_INPUT_COLUMN_MAP,
     TYPE_COLUMN_MAP,
 )
 from .dedup import exact_dedup, normalized_dedup

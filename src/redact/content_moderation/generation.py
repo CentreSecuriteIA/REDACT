@@ -32,7 +32,7 @@ from pathlib import Path
 from typing import Callable
 
 from ..llms.base import LLMBackend
-from ..llms.calls import generate_sample, check_sample
+from ..llms.calls import generate_sample, check_sample, batch_check_samples
 from ..llms.prompts import build_messages
 from ..llms.extraction import get_format_instruction, extract_and_clean
 from ..llms.wrappers import RateLimiter
@@ -269,7 +269,18 @@ class InputPipeline:
         build_check_messages: Callable[[str], list[dict]],
         turn_index: int,
     ) -> list[SampleResult]:
-        """Check each sample individually via the checker LLM.
+        """Check all samples in a single batched engine pass.
+
+        Delegates to ``batch_check_samples()`` which sends all checker prompts
+        to ``backend.batch_generate()`` at once (one vLLM engine pass per
+        chunk of 32). For API backends the call falls back to sequential.
+
+        This method is shared by both the content moderation pipeline
+        (``run_turn()`` / ``run_category()``) and the constitution input
+        pipeline (``ConstitutionInputPipeline`` wraps an ``InputPipeline``
+        and calls this method directly). Rejected samples are returned with
+        ``accepted=False`` and their reasoning preserved — no regeneration
+        is attempted here.
 
         Args:
             samples: List of extracted sample strings.
@@ -277,26 +288,23 @@ class InputPipeline:
             turn_index: Current turn index (for tracking).
 
         Returns:
-            List of SampleResult objects.
+            List of SampleResult objects in the same order as ``samples``.
         """
-        results: list[SampleResult] = []
-        for sample_text in samples:
-            accepted, reasoning = check_sample(
-                self.check_backend,
-                self.check_model,
-                sample_text,
-                build_check_messages,
-                self.rate_limiter,
+        check_results = batch_check_samples(
+            self.check_backend,
+            self.check_model,
+            samples,
+            build_check_messages,
+        )
+        return [
+            SampleResult(
+                text=sample_text,
+                accepted=accepted,
+                reasoning=reasoning,
+                turn=turn_index,
             )
-            results.append(
-                SampleResult(
-                    text=sample_text,
-                    accepted=accepted,
-                    reasoning=reasoning,
-                    turn=turn_index,
-                )
-            )
-        return results
+            for sample_text, (accepted, reasoning) in zip(samples, check_results)
+        ]
 
     def run_turn(
         self,

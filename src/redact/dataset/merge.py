@@ -262,6 +262,67 @@ CONTENT_MOD_COLUMN_MAP = {
     "label": "category",
 }
 
+CONSTITUTION_INPUT_KEEP_COLUMNS = [
+    "id",
+    "prompt",
+    "category",
+    "constitution_category",
+    "constitution_subcategory",
+    "sample_description",
+    "entry_type",
+]
+
+CONSTITUTION_INPUT_COLUMN_MAP = {
+    "sample": "prompt",
+}
+
+
+def merge_constitution_input_csvs(
+    base_dir: str | Path,
+    scan_dirs: list[str] | None = None,
+    output_path: str | Path | None = None,
+    keep_columns: list[str] | None = None,
+    accepted_only: bool = True,
+) -> pd.DataFrame:
+    """Merge constitution-to-input CSVs. Preset wrapper around :func:`merge_csvs_from_dirs`.
+
+    Renames ``sample`` → ``prompt``, drops generation artifacts (turn, source,
+    source_group_tag, template_style, reasoning), and filters to accepted samples only.
+
+    Args:
+        base_dir: Root directory to scan (e.g. ``Datasets/constitution_inputs``).
+        scan_dirs: Optional subdirectory names to limit the scan.
+        output_path: If provided, save the merged CSV here.
+        keep_columns: Final column subset. Defaults to CONSTITUTION_INPUT_KEEP_COLUMNS.
+        accepted_only: If True, filter to rows where ``accepted == True``.
+
+    Returns:
+        Merged DataFrame.
+    """
+    final_columns = keep_columns or CONSTITUTION_INPUT_KEEP_COLUMNS
+
+    # keep_columns=None so that 'accepted' survives for filtering below
+    merged = merge_csvs_from_dirs(
+        base_dir,
+        scan_dirs=scan_dirs,
+        output_path=None,
+        keep_columns=None,
+        column_map=CONSTITUTION_INPUT_COLUMN_MAP,
+        text_column="prompt",
+    )
+
+    if accepted_only and "accepted" in merged.columns:
+        merged = merged[merged["accepted"] == True].reset_index(drop=True)  # noqa: E712
+
+    available = [c for c in final_columns if c in merged.columns]
+    merged = merged[available]
+
+    if output_path is not None:
+        Path(output_path).parent.mkdir(parents=True, exist_ok=True)
+        merged.to_csv(output_path, index=False)
+
+    return merged
+
 
 def normalize_technique_csv(
     df: pd.DataFrame,

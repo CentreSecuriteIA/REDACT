@@ -58,7 +58,7 @@ from .wrappers import (
 )
 
 # High-level calls
-from .calls import generate_sample, check_sample, generate_with_check
+from .calls import generate_sample, check_sample, batch_check_samples, generate_with_check
 
 # Translation
 from .translator import translate, check_translation, translate_with_check

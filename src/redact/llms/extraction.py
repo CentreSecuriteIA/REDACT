@@ -204,6 +204,8 @@ def clean_sample(
         Cleaned text.
     """
     result = text
+    # Strip ChatML stop tokens if they leaked through (belt-and-suspenders for vLLM)
+    result = result.replace("<|im_end|>", "").replace("<|im_start|>", "")
     if strip_meta:
         result = _META_COMMENTARY.sub("", result)
     if strip_markdown:

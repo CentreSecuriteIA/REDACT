@@ -83,6 +83,59 @@ def check_sample(
     return False, response
 
 
+def batch_check_samples(
+    backend: LLMBackend,
+    model: str,
+    samples: list[str],
+    build_check_messages: Callable[[str], list[dict]],
+    batch_size: int = 32,
+    **kwargs,
+) -> list[tuple[bool, str]]:
+    """Check multiple samples in batched engine passes.
+
+    Splits samples into chunks of ``batch_size``, calls
+    ``backend.batch_generate()`` once per chunk. Order is preserved.
+    Returns a list of ``(accepted, reasoning)`` tuples parallel to ``samples``.
+
+    For vLLM this means one engine pass per chunk (much faster than N
+    individual ``generate()`` calls). For API backends the base-class
+    ``batch_generate()`` falls back to a sequential loop — behaviour is
+    identical to the old per-sample loop.
+
+    Used by both ``InputPipeline.check_samples()`` (content moderation) and
+    ``ConstitutionInputPipeline`` — both share the same ``InputPipeline``
+    implementation so this function serves both pipelines.
+
+    Args:
+        backend: LLM backend for the checker.
+        model: Checker model identifier.
+        samples: Sample texts to validate.
+        build_check_messages: Function(sample_text) -> checker message list.
+        batch_size: Max prompts per engine pass (default 32).
+        **kwargs: Passed to backend.batch_generate().
+
+    Returns:
+        List of (accepted, reasoning) in the same order as ``samples``.
+        reasoning is empty string on acceptance, full checker response on
+        rejection.
+    """
+    if not samples:
+        return []
+
+    results: list[tuple[bool, str]] = []
+    for i in range(0, len(samples), batch_size):
+        chunk = samples[i : i + batch_size]
+        messages_list = [build_check_messages(s) for s in chunk]
+        responses = backend.batch_generate(messages_list, model, **kwargs)
+        for response in responses:
+            accepted = any(
+                response.strip().lower().startswith(prefix)
+                for prefix in ("yes", "ok", "accept", "pass")
+            )
+            results.append((accepted, "" if accepted else response))
+    return results
+
+
 def generate_with_check(
     gen_backend: LLMBackend,
     gen_model: str,

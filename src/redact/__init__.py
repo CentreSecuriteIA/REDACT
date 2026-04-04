@@ -30,8 +30,10 @@ def get_output_dir() -> Path:
 
     Resolution order:
       1. ``REDACT_OUTPUT_DIR`` env var (if set)
-      2. Directory of the calling script (``__main__.__file__``)
-      3. Current working directory (interactive session / notebook)
+      2. Walk upward from the redact package source directory until a
+         ``pyproject.toml`` or ``.git`` marker is found — stable regardless
+         of the caller's cwd (same approach used by pytest, ruff, black).
+      3. ``Path.cwd()`` — fallback for installed wheels with no source tree.
 
     Override by passing explicit paths to pipeline functions, or set
     the ``REDACT_OUTPUT_DIR`` environment variable.
@@ -39,9 +41,17 @@ def get_output_dir() -> Path:
     env = os.environ.get("REDACT_OUTPUT_DIR")
     if env:
         return Path(env).resolve()
-    import __main__
-    if hasattr(__main__, "__file__"):
-        return Path(__main__.__file__).resolve().parent
+
+    markers = {"pyproject.toml", ".git"}
+    current = Path(__file__).resolve().parent
+    while True:
+        if any((current / m).exists() for m in markers):
+            return current
+        parent = current.parent
+        if parent == current:
+            break
+        current = parent
+
     return Path.cwd()
 
 
@@ -50,11 +60,10 @@ def get_output_dir() -> Path:
 # ---------------------------------------------------------------------------
 
 def _load_env() -> bool:
-    """Load .env file if python-dotenv is available.
+    """Load .env file from the project root returned by ``get_output_dir()``.
 
-    Searches for .env in:
-      1. The output directory (script dir or cwd)
-      2. The current working directory (fallback for scripts in subdirs)
+    Uses ``override=True`` so .env values take precedence over any
+    pre-existing (potentially stale) shell environment variables.
 
     Returns True if a .env file was loaded.
     """
@@ -63,16 +72,10 @@ def _load_env() -> bool:
     except ImportError:
         return False
 
-    output_dir = get_output_dir()
-    cwd = Path.cwd()
-    candidates = [output_dir / ".env"]
-    if output_dir != cwd:
-        candidates.append(cwd / ".env")
-
-    for candidate in candidates:
-        if candidate.exists():
-            load_dotenv(candidate)
-            return True
+    candidate = get_output_dir() / ".env"
+    if candidate.exists():
+        load_dotenv(candidate, override=True)
+        return True
     return False
 
 

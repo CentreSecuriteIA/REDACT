@@ -37,8 +37,9 @@ from typing import Callable
 import pandas as pd
 
 from ..content_moderation.generation import InputPipeline, SampleResult
-from ..content_moderation.checker import build_quality_checker
 from ..llms.base import LLMBackend
+from ..llms.calls import batch_check_samples
+from ..llms.extraction import extract_and_clean
 from ..llms.prompts import load_prompt
 from ..llms.wrappers import RateLimiter
 from ..dataset.io import append_samples, get_existing_samples
@@ -51,6 +52,47 @@ _PROMPT_PIPELINE = "constitution/input_generation"
 # Default prompt directory (prompts/ inside the redact package)
 _PACKAGE_DIR = Path(__file__).resolve().parent.parent
 _DEFAULT_PROMPT_DIR = _PACKAGE_DIR / "prompts"
+
+
+# ---------------------------------------------------------------------------
+# Constitution-specific checker
+# ---------------------------------------------------------------------------
+
+
+def _build_constitution_checker(
+    category: str,
+    entry_type: str,
+    subcategory: str = "",
+    prompt_dir: str | Path | None = None,
+) -> Callable[[str], list[dict]]:
+    """Build a quality checker aware of entry type and subcategory.
+
+    Loads ``prompts/constitution/checker/template.json`` and injects
+    category, subcategory, and entry_type into the system prompt so the
+    evaluator knows what kind of sample it is validating (harmful vs
+    benign vs dual-use).
+
+    This is separate from ``content_moderation.checker.build_quality_checker``
+    which only handles harmful content. See checker.py for the TODO on
+    extending that function when benign content moderation is added.
+    """
+    if prompt_dir is None:
+        prompt_dir = _DEFAULT_PROMPT_DIR
+    prompt_config = load_prompt("constitution", "checker", prompt_dir=prompt_dir)
+    system_prompt = prompt_config["system_prompt"].format(
+        Category=category,
+        entry_type=entry_type,
+        subcategory=subcategory or category,
+    )
+
+    def _build(sample: str) -> list[dict]:
+        template = prompt_config["template"].format(sample=sample)
+        return [
+            {"role": "system", "content": system_prompt},
+            {"role": "user", "content": template},
+        ]
+
+    return _build
 
 
 # ---------------------------------------------------------------------------
@@ -375,12 +417,16 @@ class ConstitutionInputPipeline:
         use_checker: bool = True,
         save: bool = True,
         verbose: bool = True,
+        batch_size: int = 32,
     ) -> ConstitutionInputResult:
-        """Run constitution-to-input generation.
+        """Run constitution-to-input generation with batched vLLM inference.
 
         # CONSTITUTION-TO-INPUT: Main pipeline entry point.
-        # Loads constitution entries, expands each into full prompts using
-        # the content moderation InputPipeline, and saves with metadata.
+        # Processes entries in batches of ``batch_size`` for efficiency:
+        #   1. Batch-generate prompts for all entries in the chunk (one vLLM pass)
+        #   2. Extract samples per entry
+        #   3. Batch-check all extracted samples across the chunk (one vLLM pass)
+        #   4. Redistribute results back to their entries, save, update stats
 
         Args:
             style: Template style ("long", "short", or any custom style
@@ -390,9 +436,10 @@ class ConstitutionInputPipeline:
                 (e.g. ["harmful", "benign", "dual_use_harmful", "dual_use_benign"]).
             source_categories: Filter to specific taxonomy categories.
             use_checker: Whether to quality-check generated prompts via
-                build_quality_checker(). Set False for faster iteration.
+                _build_constitution_checker(). Set False for faster iteration.
             save: Whether to save results to CSV.
             verbose: Print progress.
+            batch_size: Number of entries to process per vLLM engine pass (default 32).
 
         Returns:
             ConstitutionInputResult with generation statistics.
@@ -410,6 +457,7 @@ class ConstitutionInputPipeline:
             print(f"Style: {style}")
             print(f"Entries: {len(constitution_df)}")
             print(f"Samples per entry: {samples_per_entry}")
+            print(f"Batch size: {batch_size}")
             print(f"Quality checker: {'enabled' if use_checker else 'disabled'}")
             if entry_types:
                 print(f"Entry types: {entry_types}")
@@ -419,64 +467,184 @@ class ConstitutionInputPipeline:
         result = ConstitutionInputResult()
         prohibited: set[str] = set()
 
-        # Build a cache of checkers per source_category to avoid reloading
-        checker_cache: dict[str, Callable[[str], list[dict]]] = {}
+        # Cache checkers per source_category to avoid rebuilding
+        checker_cache: dict[tuple[str, str], Callable[[str], list[dict]]] = {}
 
-        for idx, (_, entry) in enumerate(constitution_df.iterrows()):
-            category = str(entry.get("source_category", "unknown"))
-            sample_desc = str(entry.get("sample_description", ""))
+        entries = list(constitution_df.iterrows())
+        total = len(entries)
 
-            if verbose:
-                print(
-                    f"\n  [{idx + 1}/{len(constitution_df)}] "
-                    f"{category} | {entry.get('entry_type', '?')} | "
-                    f"{sample_desc[:60]}{'...' if len(sample_desc) > 60 else ''}"
+        for batch_start in range(0, total, batch_size):
+            batch = entries[batch_start : batch_start + batch_size]
+
+            # -----------------------------------------------------------------
+            # Step 1: Build one generation message list per entry in the batch
+            # -----------------------------------------------------------------
+            messages_list = []
+            for _, entry in batch:
+                seed_kwargs = {
+                    "Category": str(entry.get("source_category", "")),
+                    "sample_description": str(entry.get("sample_description", "")),
+                    "constitution_subcategory": str(entry.get("constitution_subcategory", "")),
+                    "entry_type": str(entry.get("entry_type", "")),
+                }
+                messages = self.input_pipeline._build_generation_messages(
+                    prompt_config,
+                    samples_per_request=samples_per_entry,
+                    prohibited=prohibited,
+                    **seed_kwargs,
                 )
+                messages_list.append(messages)
 
-            # Get or build checker for this category
-            checker = None
-            if use_checker:
-                if category not in checker_cache:
-                    checker_cache[category] = build_quality_checker(category)
-                checker = checker_cache[category]
-
-            # Generate via content moderation InputPipeline
-            sample_results = self.generate_for_entry(
-                entry=entry,
-                prompt_config=prompt_config,
-                samples_per_entry=samples_per_entry,
-                build_check_messages=checker,
-                prohibited=prohibited,
+            # -----------------------------------------------------------------
+            # Step 2: One batch_generate call for all entries in the chunk
+            # -----------------------------------------------------------------
+            raw_outputs = self.input_pipeline.gen_backend.batch_generate(
+                messages_list, self.input_pipeline.gen_model
             )
 
-            if not sample_results:
-                result.skipped_entries += 1
-                if verbose:
-                    print(f"    -> No samples extracted, skipping")
-                continue
+            # -----------------------------------------------------------------
+            # Step 3: Extract samples per entry; track flat index ranges
+            # -----------------------------------------------------------------
+            # all_samples[i] is the flat list of extracted texts across entries.
+            # entry_ranges[i] = (start, end) slice into all_samples for entry i.
+            all_samples: list[str] = []
+            entry_ranges: list[tuple[int, int]] = []
+            per_entry_extracted: list[list[str]] = []
 
-            # Save with constitution metadata
-            if save:
-                self._save_results(entry, sample_results, style)
-
-            # Update tracking
-            accepted = [r for r in sample_results if r.accepted]
-            rejected = [r for r in sample_results if not r.accepted]
-
-            result.total_entries_processed += 1
-            result.total_prompts_generated += len(sample_results)
-            result.total_prompts_accepted += len(accepted)
-            result.total_prompts_rejected += len(rejected)
-
-            # Add to prohibited set for dedup
-            for sr in sample_results:
-                prohibited.add(sr.text)
-
-            if verbose:
-                print(
-                    f"    -> {len(accepted)} accepted, "
-                    f"{len(rejected)} rejected"
+            for (_, entry), raw_output in zip(batch, raw_outputs):
+                extracted = extract_and_clean(
+                    raw_output,
+                    style=self.input_pipeline.extraction_style,
                 )
+
+                logger.info(
+                    "Entry '%s': extracted %d samples",
+                    entry.get("sample_description", "")[:50],
+                    len(extracted),
+                )
+
+                # Dedup against prohibited set
+                if prohibited:
+                    before = len(extracted)
+                    extracted = [s for s in extracted if s not in prohibited]
+                    removed = before - len(extracted)
+                    if removed > 0:
+                        logger.info("Removed %d duplicates", removed)
+
+                start = len(all_samples)
+                all_samples.extend(extracted)
+                end = len(all_samples)
+                entry_ranges.append((start, end))
+                per_entry_extracted.append(extracted)
+
+            # -----------------------------------------------------------------
+            # Step 4: Batch-check all extracted samples across the chunk
+            # -----------------------------------------------------------------
+            if use_checker and all_samples:
+                # We need a checker — use the first entry's category to look up
+                # one (all entries may have different categories, so we build
+                # per-entry checkers and call them on their own slices below).
+                # Here we collect all check results in one batch pass, using
+                # each sample's own checker determined by entry index.
+
+                # Build the flat checker list parallel to all_samples.
+                # Cache key is (category, entry_type) — benign and harmful
+                # entries for the same category need different checkers.
+                sample_checkers: list[Callable[[str], list[dict]]] = []
+                for (entry_idx, (_, entry)), (start, end) in zip(
+                    enumerate(batch), entry_ranges
+                ):
+                    category = str(entry.get("source_category", "unknown"))
+                    entry_type = str(entry.get("entry_type", "harmful"))
+                    subcategory = str(entry.get("constitution_subcategory", ""))
+                    cache_key = (category, entry_type)
+                    if cache_key not in checker_cache:
+                        checker_cache[cache_key] = _build_constitution_checker(
+                            category, entry_type, subcategory
+                        )
+                    checker = checker_cache[cache_key]
+                    sample_checkers.extend([checker] * (end - start))
+
+                # Single batch_check_samples call — but checkers may differ per
+                # sample. batch_check_samples takes one build_check_messages
+                # function, so we inline the batching here to support per-sample
+                # checkers:
+                messages_to_check = [
+                    checker(sample)
+                    for checker, sample in zip(sample_checkers, all_samples)
+                ]
+                if messages_to_check:
+                    check_responses = self.input_pipeline.check_backend.batch_generate(
+                        messages_to_check, self.input_pipeline.check_model
+                    )
+                    flat_check_results = []
+                    for response in check_responses:
+                        accepted = any(
+                            response.strip().lower().startswith(p)
+                            for p in ("yes", "ok", "accept", "pass")
+                        )
+                        flat_check_results.append((accepted, "" if accepted else response))
+                else:
+                    flat_check_results = []
+            else:
+                # No checker: accept all
+                flat_check_results = [(True, "") for _ in all_samples]
+
+            # -----------------------------------------------------------------
+            # Step 5: Redistribute results back to entries, save, update stats
+            # -----------------------------------------------------------------
+            for entry_idx, (_, entry) in enumerate(batch):
+                global_idx = batch_start + entry_idx
+                start, end = entry_ranges[entry_idx]
+                extracted = per_entry_extracted[entry_idx]
+
+                category = str(entry.get("source_category", "unknown"))
+                sample_desc = str(entry.get("sample_description", ""))
+
+                if verbose:
+                    print(
+                        f"\n  [{global_idx + 1}/{total}] "
+                        f"{category} | {entry.get('entry_type', '?')} | "
+                        f"{sample_desc[:60]}{'...' if len(sample_desc) > 60 else ''}"
+                    )
+
+                if not extracted:
+                    result.skipped_entries += 1
+                    if verbose:
+                        print(f"    -> No samples extracted, skipping")
+                    continue
+
+                sample_results = [
+                    SampleResult(
+                        text=sample_text,
+                        accepted=accepted,
+                        reasoning=reasoning,
+                        turn=0,
+                    )
+                    for sample_text, (accepted, reasoning) in zip(
+                        extracted, flat_check_results[start:end]
+                    )
+                ]
+
+                if save:
+                    self._save_results(entry, sample_results, style)
+
+                accepted_list = [r for r in sample_results if r.accepted]
+                rejected_list = [r for r in sample_results if not r.accepted]
+
+                result.total_entries_processed += 1
+                result.total_prompts_generated += len(sample_results)
+                result.total_prompts_accepted += len(accepted_list)
+                result.total_prompts_rejected += len(rejected_list)
+
+                for sr in sample_results:
+                    prohibited.add(sr.text)
+
+                if verbose:
+                    print(
+                        f"    -> {len(accepted_list)} accepted, "
+                        f"{len(rejected_list)} rejected"
+                    )
 
         # Summary
         if verbose:

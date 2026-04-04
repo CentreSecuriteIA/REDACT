@@ -1,7 +1,22 @@
 """Shared test fixtures for the REDACT test suite."""
 
+import multiprocessing
 import pytest
 import pandas as pd
+
+
+def pytest_configure(config):
+    # vLLM v1 explicitly uses multiprocessing.get_context("fork") by default,
+    # ignoring the global start method. Setting this env var before vLLM is
+    # imported forces it to use 'spawn', which avoids CUDA re-init failures
+    # in forked subprocesses. The global set_start_method call is kept as a
+    # belt-and-suspenders fallback.
+    import os
+    os.environ["VLLM_WORKER_MULTIPROC_METHOD"] = "spawn"
+    try:
+        multiprocessing.set_start_method("spawn", force=True)
+    except RuntimeError:
+        pass
 
 from redact.llms.base import LLMBackend
 
