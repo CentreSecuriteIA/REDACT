@@ -53,14 +53,17 @@ REDACT/
 │       │   ├── utils.py             # Technique combination utilities
 │       │   ├── distribution.py      # Balanced splitting re-exports
 │       │   ├── obfuscation/         # Text transformation attacks
-│       │   │   ├── encoding.py      # Base64, ROT13, hex, etc.
-│       │   │   ├── translation.py   # Low-resource language translation
+│       │   │   ├── encoding.py      # base64, rot13/18/47, unicode, ordinal, separator, leetspeak, morse, braille
+│       │   │   ├── translation.py   # 20 languages across resource tiers
 │       │   │   ├── structural.py    # JSON/XML/markdown wrapping
-│       │   │   ├── ascii_art.py     # ASCII art obfuscation
-│       │   │   ├── tokenbreak.py    # Token-level splitting
+│       │   │   ├── ascii_art.py     # ASCII art obfuscation (19 fonts)
+│       │   │   ├── tokenbreak.py    # Token-level splitting + sensitive-word encoding (16 functions)
+│       │   │   ├── typos.py         # LLM-rewritten typos at 4 density levels
 │       │   │   └── suffixes.py      # Adversarial suffix injection
 │       │   ├── hacking/             # Cognitive/psychological attacks
-│       │   │   └── cognitive.py     # Persona, framing, authority, AVI, inception
+│       │   │   ├── cognitive.py     # 5 techniques; definitions loaded from cognitive_techniques.json
+│       │   │   ├── personas.py      # 14 named persona archetypes + invented persona; loaded from personas.json
+│       │   │   └── framing.py       # 10 framing directives (pure transforms); templates in framing_templates.json
 │       │   └── manipulation/        # Few-shot manipulation
 │       │       ├── benign.py        # Benign sample generation
 │       │       ├── fsh.py           # Few-Shot Hacking
@@ -68,8 +71,13 @@ REDACT/
 │       │
 │       ├── configs/                 # Configuration data (package data)
 │       │   ├── content_moderation_input.json
+│       │   ├── framing_templates.json   # Multi-variant templates for framing directives
 │       │   ├── seeds/               # Hand-written seed prompts
 │       │   └── taxonomy/            # Category taxonomy definitions
+│       │       ├── content_moderation_categories.json
+│       │       ├── jailbreak_techniques.json
+│       │       ├── cognitive_techniques.json  # Cognitive hacking technique definitions (editable)
+│       │       └── personas.json              # Named persona archetypes (editable)
 │       │
 │       └── prompts/                 # [REDACTED IN PUBLIC RELEASE]
 │           ├── content_moderation/  # Prompt templates per pipeline step

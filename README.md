@@ -104,14 +104,17 @@ src/redact/
 │
 ├── jailbreak/                     # Jailbreak technique library
 │   ├── obfuscation/               # Text transformation attacks
-│   │   ├── encoding.py            # base64, rot13, leetspeak, morse, braille
+│   │   ├── encoding.py            # base64, rot13/18/47, unicode, ordinal, separator, leetspeak, morse, braille
 │   │   ├── structural.py          # JSON, XML, markdown wrapping
-│   │   ├── ascii_art.py           # pyfiglet-based text art
+│   │   ├── ascii_art.py           # pyfiglet-based text art (19 fonts)
 │   │   ├── suffixes.py            # Adversarial suffix generators
-│   │   ├── tokenbreak.py          # Token-breaking (LLM-dependent)
-│   │   └── translation.py         # Low-resource language translation
+│   │   ├── tokenbreak.py          # Token-breaking + sensitive-word encoding (LLM-dependent)
+│   │   ├── typos.py               # LLM-rewritten typos at 4 density levels
+│   │   └── translation.py         # 20 languages across resource tiers
 │   ├── hacking/                   # Cognitive/psychological manipulation
-│   │   └── cognitive.py           # 5 techniques (persona, framing, etc.)
+│   │   ├── cognitive.py           # 5 techniques (persona, framing, AVI, authority, inception)
+│   │   ├── personas.py            # 14 named persona archetypes + invented persona
+│   │   └── framing.py             # 10 framing directives (pure transforms, multi-template)
 │   ├── manipulation/              # Context manipulation with benign examples
 │   │   ├── benign.py              # Benign sample generation + caching
 │   │   ├── fsh.py                 # Few-Shot Hacking (4 variants)
@@ -313,30 +316,34 @@ For each turn:
 
 ### Jailbreak — Technique Library
 
-30+ jailbreak techniques organized in three families:
+80+ jailbreak techniques organized in three families. Technique definitions are taxonomy-driven where applicable — adding a new variant means adding a JSON entry, not a new function.
 
-#### Obfuscation (22 functions)
+#### Obfuscation
 
-| Type | Functions | LLM Required |
-|---|---|---|
-| Encoding | `to_base64`, `to_rot13`, `to_leetspeak`, `to_morse`, `to_braille` | No |
-| Structural | `to_json`, `to_xml`, `to_markdown` | No |
-| ASCII Art | `to_ascii_art` (16 pyfiglet fonts) | No |
-| Suffixes | `to_adversarial_suffix_{punctuation,fragments,unicode,emoji}` | No |
-| TokenBreak | `to_tokenbreak_{prepend,split,delimiter}` | Yes |
-| Translation | `to_{zulu,scots_gaelic,bengali,swahili,thai,javanese}` | Yes |
+| Type | Module | Functions | LLM Required |
+|---|---|---|---|
+| Encoding | `encoding.py` | `to_base64`, `to_rot13`, `to_rot18`, `to_rot47`, `to_unicode_escape`, `to_ascii_ordinal`, `to_separator`, `to_leetspeak_{basic,intermediate,advanced}`, `to_morse`, `to_braille` | No |
+| Structural | `structural.py` | `to_json`, `to_xml`, `to_markdown` | No |
+| ASCII Art | `ascii_art.py` | `to_ascii_art` (19 pyfiglet fonts) | No |
+| Suffixes | `suffixes.py` | `to_adversarial_suffix_{punctuation,fragments,unicode,emoji}` | No |
+| TokenBreak | `tokenbreak.py` | `to_tokenbreak_{prepend,split,delimiter}` | Yes |
+| Sensitive Words | `tokenbreak.py` | `to_sensitive_words_encode_{base64,rot13,rot18,rot47,unicode,ascii,separator,leetspeak_*}`, `to_sensitive_words_{split,star,hyphen,underscore,variables}`, `to_synonym_substitution` | Yes |
+| Typos | `typos.py` | `to_rewrite_with_typos_{low,medium,high,insane}` | Yes |
+| Translation | `translation.py` | 20 languages across resource tiers: French, Japanese, Russian, Spanish, German, Arabic, Turkish, Czech, Vietnamese, Greek, Croatian, Swahili, Thai, Khmer, Maori, Nepali, Zulu, Scots Gaelic, Bengali, Javanese | Yes |
 
-#### Hacking (5 functions)
+Sensitive-words functions share the `extract_harmful()` LLM detection step from TokenBreak — encoding is then applied only to the detected harmful words rather than the whole prompt. Typo rewriting uses a single LLM call with a level-description injected into the template.
 
-| Function | Description |
-|---|---|
-| `to_persona_roleplay` | Assign AI an unfiltered persona |
-| `to_hypothetical_framing` | Frame in fictional context |
-| `to_authority_obedience` | Authority directives override |
-| `to_avi` | Anthropomorphic vulnerability exploitation |
-| `to_deep_inception` | Nested multi-layer scenarios |
+#### Hacking
 
-Each is a two-step LLM process: **scenario generation** -> **jailbreak construction**.
+| Type | Module | Functions | LLM Required |
+|---|---|---|---|
+| Cognitive | `cognitive.py` | `to_persona_roleplay`, `to_hypothetical_framing`, `to_authority_obedience`, `to_avi`, `to_deep_inception` | Yes |
+| Named Personas | `personas.py` | `to_invented_persona` + 14 named archetypes (psychopath, alien, cult_leader, very_advanced_ai, cartel_leader, artist, mentally_ill, deformed_scientist, politician, deformed_professor, religious_figure, radical_politician, actor, someone_from_the_future) | Yes |
+| Framing | `framing.py` | `to_fictional_world`, `to_noble_goal`, `to_nefarious_goal`, `to_high_stake`, `to_no_moral_constraints`, `to_refusal_then_comply`, `to_apology_prevention`, `to_prefix_injection`, `to_answer_in_markdown`, `to_answer_as_tutorial` | No |
+
+Cognitive and persona techniques are two-step LLM processes: **scenario generation → jailbreak construction**. Named personas use a persona-grounded scenario prompt that grounds the scenario in the persona's character before construction. Cognitive technique definitions are loaded from `configs/taxonomy/cognitive_techniques.json`; persona definitions from `configs/taxonomy/personas.json` — both are editable without touching code.
+
+Framing directives are pure transforms. Each has 4 named template variants stored in `configs/framing_templates.json`; one is randomly selected per call with the variant name recorded in `additional_info`.
 
 #### Manipulation (8 functions)
 
