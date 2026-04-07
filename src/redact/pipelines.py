@@ -56,6 +56,10 @@ from redact.jailbreak.hacking.cognitive import (
     get_situation,
     get_hacking_functions,
 )
+from redact.jailbreak.hacking.personas import (
+    get_persona_functions,
+    get_persona_situation,
+)
 from redact.jailbreak.manipulation import (
     get_manipulation_type_to_getter,
     BENIGN_CATEGORIES,
@@ -694,13 +698,14 @@ def generate_jailbreaks(
     output_dir: str | Path | None = None,
     save_scenarios: bool = True,
     auto_generate_benign: bool = True,
+    run_personas: bool = True,
     verbose: bool = True,
 ) -> pd.DataFrame:
     """Generate jailbreak variants of input prompts.
 
-    Applies obfuscation (including translation), hacking, and manipulation
-    techniques. Translation is a subgroup within obfuscation, handled by
-    the same ``get_type_to_getter()`` registry.
+    Applies obfuscation (including translation), hacking, manipulation, and
+    persona techniques. Translation is a subgroup within obfuscation, handled
+    by the same ``get_type_to_getter()`` registry.
 
     Args:
         inputs: Input prompts DataFrame. If None, loads from Datasets/.
@@ -714,6 +719,8 @@ def generate_jailbreaks(
             ``Datasets/jailbreaks/``.
         save_scenarios: Cache hacking scenarios to Data_cache/scenarios/.
         auto_generate_benign: Generate benign data if missing (for manipulation).
+        run_personas: Run named persona jailbreak techniques (15 variants).
+            Independent of technique_types — set False to skip personas entirely.
         verbose: Print progress.
 
     Returns:
@@ -895,6 +902,87 @@ def generate_jailbreaks(
                         "origin": row.get("origin", "generated"),
                         "technique": tech_name,
                         "technique_type": "hacking",
+                        "model": model,
+                        "additional_info": info,
+                        "scenario": scenario_used,
+                    })
+                except Exception as e:
+                    if verbose:
+                        print(f"    Failed ({tech_name}): {e}")
+
+            if results:
+                out_df = pd.DataFrame(results)
+                out_df.to_csv(ds_dir / f"{tech_name}.csv", index=False)
+                if verbose:
+                    print(f"    -> {len(results)} saved")
+
+            if save_scenarios and new_scenarios:
+                _save_scenario_cache(None, tech_name, new_scenarios)
+
+    # ── Personas ───────────────────────────────────────────────────────
+
+    if run_personas:
+        if verbose:
+            print(f"\n--- Personas ---")
+
+        # Reuse scenario cache initialised in hacking block (or start fresh)
+        if not run_hacking:
+            scenario_cache = _load_scenario_cache()
+
+        persona_fns = get_persona_functions()
+
+        splits = deterministic_balanced_assign(inputs, num_splits=len(persona_fns))
+
+        for fn, split_df in zip(persona_fns, splits):
+            tech_name = fn.__name__
+
+            if max_samples_per_technique is not None:
+                split_df = split_df.head(max_samples_per_technique)
+
+            if verbose:
+                print(f"  {tech_name}: {len(split_df)} samples")
+
+            results = []
+            new_scenarios = []
+
+            for _, row in split_df.iterrows():
+                prompt_text = row["prompt"]
+
+                # Check scenario cache — personas generate their own scenarios
+                # so we do NOT reuse generic hacking scenarios here
+                persona_cache_key = f"{tech_name}::{prompt_text}"
+                scenario = scenario_cache.get(persona_cache_key)
+                if scenario is None:
+                    try:
+                        # to_invented_persona falls back to get_situation();
+                        # named personas call get_persona_situation() internally.
+                        # Pass scenario=None so the function generates its own.
+                        scenario = None  # will be generated inside fn
+                    except ValueError as e:
+                        if verbose:
+                            print(f"    Scenario failed: {e}")
+                        continue
+
+                try:
+                    jailbreak, info, scenario_used = fn(
+                        prompt_text, backend, model,
+                        rate_limiter=rate_limiter,
+                        scenario=scenario,
+                    )
+                    scenario_cache[persona_cache_key] = scenario_used
+                    new_scenarios.append({
+                        "input_prompt": prompt_text,
+                        "scenario": scenario_used,
+                    })
+                    results.append({
+                        "id": row.get("id", ""),
+                        "prompt": jailbreak,
+                        "input_prompt": prompt_text,
+                        "input_id": row.get("id", ""),
+                        "category": row.get("category", ""),
+                        "origin": row.get("origin", "generated"),
+                        "technique": tech_name,
+                        "technique_type": "personas",
                         "model": model,
                         "additional_info": info,
                         "scenario": scenario_used,

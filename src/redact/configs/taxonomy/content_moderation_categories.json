@@ -39,11 +39,7 @@
         },
         "Illegal Activities": {
             "description": "Content promoting or instructing illegal actions not covered by other categories",
-            "subcategories": ["Fraud", "Theft", "Money Laundering", "Counterfeiting"]
-        },
-        "Drugs": {
-            "description": "Content promoting illegal drug use, manufacturing, or distribution",
-            "subcategories": ["Drug Manufacturing", "Drug Distribution", "Substance Misuse"]
+            "subcategories": ["Fraud", "Theft", "Money Laundering", "Counterfeiting", "Drug Manufacturing", "Drug Distribution", "Substance Misuse"]
         },
         "Harm to Minors": {
             "description": "Content harmful to, exploiting, or endangering minors",
@@ -75,7 +71,7 @@
         "personal_harm": ["Physical Harm", "Self-Harm", "Harm to Minors"],
         "societal_harm": ["CBRN", "Cyber", "Harmful Manipulation"],
         "harmful_content": ["Hate Speech", "Sexual Content", "Information Integrity"],
-        "illegal": ["Illegal Activities", "Drugs"],
+        "illegal": ["Illegal Activities"],
         "privacy_safety": ["Privacy"]
     }
 }
