@@ -6,10 +6,11 @@ A modular Python library for generating, validating, and managing synthetic red-
 
 REDACT automates the full lifecycle of red-teaming dataset construction:
 
-1. **Generate** harmful content samples across configurable harm categories
-2. **Validate** each sample via a checker LLM with feedback-driven retry
-3. **Transform** inputs into jailbreak attacks using 30+ techniques
-4. **Split, merge, and manage** datasets with balanced distribution across techniques
+1. **Constitution** — generate structured category hierarchies (harmful, benign, dual-use) using Claude Opus
+2. **Generate** harmful content samples across configurable harm categories
+3. **Validate** each sample via a checker LLM with feedback-driven retry
+4. **Transform** inputs into jailbreak attacks using 30+ techniques
+5. **Split, merge, and manage** datasets with balanced distribution across techniques
 
 The library is **model-agnostic** (API or local vLLM), **prompt-agnostic** (all prompts are external JSON files), and **category-agnostic** (new categories require only a taxonomy entry and prompt file).
 
@@ -86,11 +87,14 @@ src/redact/
 │   ├── anthropic_backend.py       # Anthropic Claude backend (native SDK)
 │   ├── vllm_backend.py            # Local vLLM backend for self-hosted inference
 │   ├── wrappers.py                # Rate limiter, retry, batch caller
-│   ├── calls.py                   # generate_sample(), check_sample()
+│   ├── calls.py                   # generate_sample(), check_sample(), batch_check_samples()
 │   ├── prompts.py                 # JSON prompt loader + template renderer
 │   ├── extraction.py              # Multi-sample + constitution extraction
 │   ├── translator.py              # Translation with fidelity checking
 │   └── model_config.py            # Model registry (RPM, backend_type, defaults)
+│
+├── constitution/                  # Constitution generation for classifiers
+│   └── pipeline.py               # ConstitutionPipeline (4 severity types)
 │
 ├── content_moderation/            # Content moderation generation pipeline
 │   ├── generation.py              # InputPipeline — the main driver
@@ -160,7 +164,8 @@ Everything above this layer calls a unified interface and is backend-agnostic.
 | `RateLimiter` | Per-model sliding-window RPM enforcement (thread-safe) |
 | `BatchCaller` | Sequential or multithreaded batch dispatch |
 | `generate_sample()` | Single generation with rate limiting |
-| `check_sample()` | Validate a sample (yes/no + reasoning) |
+| `check_sample()` | Validate a single sample (yes/no + reasoning) |
+| `batch_check_samples()` | Validate multiple samples in one `batch_generate()` pass — used automatically by all pipelines |
 | `generate_with_check()` | Full generate -> check -> feedback loop |
 | `load_prompt()` | Load prompt JSON by pipeline/category |
 | `extract_and_clean()` | Extract numbered lists / Q&A / delimited from LLM output |
@@ -189,16 +194,26 @@ backend = VeniceBackend(api_key="...", base_url="https://api.example.com/v1")
 backend = AnthropicBackend.from_env("ANTHROPIC_API_KEY")
 ```
 
-**Local inference via vLLM** — create manually and pass to pipelines:
+**Local inference via vLLM** — use the pre-registered `venice-uncensored-vllm` model or any HuggingFace model ID:
+
+```python
+from redact import generate_inputs_from_constitution
+
+# Use the registered local model — backend is auto-initialized
+generate_inputs_from_constitution(model="venice-uncensored-vllm", ...)
+```
+
+When `venice-uncensored-vllm` is requested, `get_backend()` automatically creates a `VLLMBackend` for `dphn/Dolphin-Mistral-24B-Venice-Edition`. On first use vLLM downloads the model weights from HuggingFace and caches them at the path set by `HF_HOME` in your `.env`. Subsequent runs load directly from cache — no re-download.
+
+All pipelines use `batch_generate()` internally to send multiple prompts in a single vLLM engine pass. The `batch_size` parameter (default 32) controls how many entries are processed per pass — equivalent to `max_workers` for API backends. For API backends `batch_generate()` falls back to a sequential loop, so `max_workers` on `BatchCaller` is the relevant parallelism knob there.
+
+For a custom model, instantiate `VLLMBackend` directly and pass it to any pipeline:
 
 ```python
 from redact.llms import VLLMBackend
 
-# vLLM requires manual init (model path, quantization, GPU config)
 backend = VLLMBackend(model="mistralai/Mistral-7B-v0.3")
-
-# Pass directly — overrides auto-routing
-generate_inputs(model="venice-uncensored", backend=backend)
+generate_inputs(model="my-model", backend=backend)
 ```
 
 **Registering a new model:**
@@ -213,9 +228,42 @@ register_model("my-model", rpm=50, default_max_tokens=4000, backend_type="venice
 
 | Model | RPM | Backend | Notes |
 |---|---|---|---|
-| `venice-uncensored` | 75 | venice | Can also run locally via vLLM |
+| `venice-uncensored` | 75 | venice | Venice AI API |
+| `venice-uncensored-vllm` | 999 | vllm | Local self-hosted version of `venice-uncensored` (`dphn/Dolphin-Mistral-24B-Venice-Edition`) |
 | `deepseek-v3.2` | 20 | venice | Stronger multilingual (used for translation) |
 | `claude-opus-4-6` | 5 | anthropic | Set `max_workers=1` to avoid TPM limits |
+
+---
+
+### Constitution — Category Hierarchy Generation
+
+Generates structured constitutions for constitutional classifier training. Each constitution spans 4 severity levels:
+
+| Entry Type | Description | CSV File |
+|---|---|---|
+| `harmful` | Absolutely harmful — always flag | `harmful.csv` |
+| `dual_use_harmful` | Borderline harmful framing — debatable | `dual_use_harmful.csv` |
+| `dual_use_benign` | Borderline benign framing — could look harmful | `dual_use_benign.csv` |
+| `benign` | Absolutely benign — never flag (hard negatives) | `benign.csv` |
+
+```python
+from redact import generate_constitution
+
+# Generate constitution for all taxonomy categories
+constitution = generate_constitution(
+    taxonomy="content_moderation_categories",
+    num_categories=10,          # constitution categories per type per taxonomy category
+    model="claude-opus-4-6",
+    num_taxonomy_categories=3,  # limit to first 3 taxonomy categories (None = all)
+)
+print(f"{len(constitution)} constitution entries")
+```
+
+Output saved to `Data_cache/constitution/` as 4 type-based CSVs + `merged.csv`. Each entry can later seed N input samples for classifier training.
+
+**Constitution-to-input checker** — `ConstitutionInputPipeline` uses a dedicated quality checker (`prompts/constitution/checker/template.json`) that injects `category`, `subcategory`, and `entry_type` into the evaluation prompt. This ensures benign and dual-use samples are evaluated correctly rather than rejected for "not belonging to the harm category."
+
+> **Note:** `content_moderation/checker.py` `build_quality_checker()` is currently harmful-only. Benign/dual-use generation in the content moderation pipeline will need the same `entry_type` extension.
 
 ---
 
@@ -320,7 +368,7 @@ Multi-format extraction from LLM output, plus constitution parsing:
 | `extract_delimited()` | Samples separated by `---`, `===`, blank lines |
 | `parse_constitution()` | 3-layer markdown hierarchy -> `ConstitutionEntry` list |
 | `extract_bold_prompt_answer()` | `**Prompt:** ... **Answer:** ...` pairs |
-| `clean_sample()` | Strip markdown formatting and meta-commentary |
+| `clean_sample()` | Strip markdown formatting, meta-commentary, and ChatML tokens (`<\|im_end\|>`) |
 | `get_format_instruction()` | Format instructions to append to system prompts |
 
 Constitution parsing example:
@@ -411,6 +459,7 @@ backend = VLLMBackend(model="mistralai/Mistral-7B-v0.3")
 | `VENICE_API_KEY` | Venice models | Venice AI API key |
 | `ANTHROPIC_API_KEY` | Claude models | Anthropic API key |
 | `HF_TOKEN` | HuggingFace loading | HuggingFace access token |
+| `HF_HOME` | vLLM models | Directory where vLLM downloads and caches model weights. Defaults to `~/.cache/huggingface` if unset. Set this to a path with sufficient disk space (the `venice-uncensored-vllm` model requires ~48 GB). |
 | `REDACT_OUTPUT_DIR` | Optional | Base directory for `Datasets/` and `Data_cache/` (defaults to script directory) |
 
 Place in a `.env` file in the project root. Loaded automatically via `python-dotenv`.

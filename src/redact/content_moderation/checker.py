@@ -43,6 +43,13 @@ def build_quality_checker(
     3. Is sufficiently distinct (not generic/templated)
     4. Meets any additional criteria
 
+    NOTE: This checker is designed for harmful content generation only.
+    It evaluates samples against the harm category criteria. When content
+    moderation benign/dual-use generation is added, extend this function
+    with an ``entry_type`` parameter (see
+    ``constitution/input_generation.py`` and
+    ``prompts/constitution/checker/template.json`` for the pattern).
+
     Loads the system prompt and template from
     ``Prompts/Content_Moderation/quality_check/template.json``.
 

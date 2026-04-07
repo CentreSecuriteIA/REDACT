@@ -8,6 +8,9 @@ engine pass.
 Reference: output dataset paraphraser.py (TheBloke/dolphin-2.2-70B-GPTQ).
 """
 
+import multiprocessing
+import os
+
 from .base import LLMBackend
 from .model_config import get_model_config
 
@@ -32,9 +35,19 @@ class VLLMBackend(LLMBackend):
             **vllm_kwargs: Passed to vllm.LLM() (e.g. revision,
                            trust_remote_code, gpu_memory_utilization).
         """
+        # vLLM v1 spawns engine core subprocesses. On Linux the default
+        # multiprocessing start method is 'fork', which causes CUDA to fail
+        # if it was already initialised in the parent (e.g. in a notebook).
+        try:
+            multiprocessing.set_start_method("spawn", force=True)
+        except RuntimeError:
+            pass
+
         from vllm import LLM  # Lazy import — vllm is heavy and optional
 
         self._model_name = model
+        if "download_dir" not in vllm_kwargs and os.environ.get("HF_HOME"):
+            vllm_kwargs["download_dir"] = os.environ["HF_HOME"]
         self._llm = LLM(
             model=model,
             quantization=quantization,
@@ -86,6 +99,7 @@ class VLLMBackend(LLMBackend):
             max_tokens=resolved_max_tokens,
             temperature=resolved_temperature,
             top_p=resolved_top_p,
+            stop=["<|im_end|>"],  # prevent ChatML end-token from leaking into output
         )
 
         formatted = self._format_messages(messages)
@@ -117,8 +131,11 @@ class VLLMBackend(LLMBackend):
             max_tokens=resolved_max_tokens,
             temperature=resolved_temperature,
             top_p=resolved_top_p,
+            stop=["<|im_end|>"],  # prevent ChatML end-token from leaking into output
         )
 
+        if not messages_list:
+            return []
         formatted = [self._format_messages(msgs) for msgs in messages_list]
         outputs = self._llm.generate(formatted, sampling_params)
         return [out.outputs[0].text.strip() for out in outputs]

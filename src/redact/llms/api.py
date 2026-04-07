@@ -1,29 +1,25 @@
 """LLM backend router — auto-selects backend from model name.
 
 Given a model name, the router looks up its ``backend_type`` in the model
-registry and returns the appropriate backend instance. Backends are cached
-by type (not model name) since they are stateless API wrappers.
+registry and returns the appropriate backend instance. API backends are
+cached by type (stateless wrappers), vLLM backends are cached by model
+name (each loads unique weights).
 
 Usage::
 
     from redact.llms import get_backend, generate_sample
 
-    backend = get_backend("venice-uncensored")   # → VeniceBackend
-    backend = get_backend("claude-opus-4-6")      # → AnthropicBackend
+    backend = get_backend("venice-uncensored")       # → VeniceBackend (API)
+    backend = get_backend("claude-opus-4-6")          # → AnthropicBackend
+    backend = get_backend("venice-uncensored-vllm")   # → VLLMBackend (local)
 
-For vLLM (local inference), create the backend manually::
+Register new vLLM models at runtime::
 
-    from redact.llms import VLLMBackend
+    from redact.llms import register_model, get_backend
 
-    backend = VLLMBackend(model="path/to/weights", quantization="gptq")
-    # Then pass it directly to pipeline functions:
-    generate_inputs(model="venice-uncensored", backend=backend)
-
-NOTE: Some models (e.g. venice-uncensored) can run both via API and locally
-via vLLM for faster generation. To use local inference, create a VLLMBackend
-instance and pass it as the ``backend`` parameter to pipeline functions.
-The router only handles API backends (Venice, Anthropic) — vLLM requires
-manual init with model path and GPU config.
+    register_model("my-llama", rpm=999, backend_type="vllm",
+                   hf_model_id="meta-llama/Llama-3-70B-GPTQ", quantization="gptq")
+    backend = get_backend("my-llama")  # → VLLMBackend
 """
 
 from .base import LLMBackend
@@ -33,8 +29,8 @@ from .venice_backend import VeniceBackend
 # Backward-compat alias: existing code that imports APIBackend still works.
 APIBackend = VeniceBackend
 
-# Cache keyed by backend type ("venice", "anthropic"), not model name.
-# One instance per type serves all models of that type.
+# Cache keyed by backend type for API backends ("venice", "anthropic")
+# and by "vllm:{model_name}" for vLLM backends (per-model instances).
 _backend_cache: dict[str, LLMBackend] = {}
 
 
@@ -52,28 +48,45 @@ def get_backend(model: str) -> LLMBackend:
     not registered, infers the backend from the model name
     (``claude-*`` → Anthropic, everything else → Venice).
 
-    Backends are cached by type — repeated calls for different models
-    of the same type return the same backend instance.
+    API backends are cached by type — repeated calls for different models
+    of the same type return the same backend instance. vLLM backends are
+    cached by model name since each loads unique weights.
 
     Args:
-        model: Model identifier (e.g. "venice-uncensored", "claude-opus-4-6").
+        model: Model identifier (e.g. "venice-uncensored",
+            "claude-opus-4-6", "venice-uncensored-vllm").
 
     Returns:
         A cached LLMBackend instance for the model's provider.
 
     Raises:
-        ValueError: If the model's backend_type is "vllm" (requires manual init).
+        ValueError: If backend_type is "vllm" but no ``hf_model_id`` is set.
         KeyError: If the required API key env var is not set.
     """
     config = get_model_config(model)
     backend_type = config.backend_type or _infer_backend_type(model)
 
     if backend_type == "vllm":
-        raise ValueError(
-            "vLLM backends require manual init with model path and GPU config. "
-            "Use VLLMBackend(model=...) directly and pass it as the `backend` "
-            "parameter to pipeline functions."
+        cache_key = f"vllm:{model}"
+        if cache_key in _backend_cache:
+            return _backend_cache[cache_key]
+
+        if not config.hf_model_id:
+            raise ValueError(
+                f"Model {model!r} has backend_type='vllm' but no hf_model_id. "
+                f"Register it with register_model(..., hf_model_id='...') or "
+                f"create VLLMBackend manually."
+            )
+
+        from .vllm_backend import VLLMBackend
+
+        backend: LLMBackend = VLLMBackend(
+            model=config.hf_model_id,
+            quantization=config.quantization,
+            **(config.vllm_kwargs or {}),
         )
+        _backend_cache[cache_key] = backend
+        return backend
 
     if backend_type in _backend_cache:
         return _backend_cache[backend_type]
@@ -81,7 +94,7 @@ def get_backend(model: str) -> LLMBackend:
     if backend_type == "anthropic":
         from .anthropic_backend import AnthropicBackend
 
-        backend: LLMBackend = AnthropicBackend.from_env()
+        backend = AnthropicBackend.from_env()
     else:
         backend = VeniceBackend.from_env()
 

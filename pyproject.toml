@@ -30,9 +30,9 @@ dependencies = [
 
 [project.optional-dependencies]
 anthropic = ["anthropic>=0.30"]
-vllm = ["vllm>=0.4"]
+vllm = ["vllm>=0.4", "hf_transfer>=0.1"]
 hf = ["datasets>=2.0"]
-dev = ["pytest>=7.0", "ruff>=0.4", "mypy>=1.0"]
+dev = ["pytest>=7.0", "ruff>=0.4", "mypy>=1.0", "ipykernel>=7.0"]
 
 [project.urls]
 Homepage = "https://github.com/leonhamnett/REDACT"

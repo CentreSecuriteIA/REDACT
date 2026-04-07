@@ -46,6 +46,9 @@ REDACT/
 │       │   ├── dedup.py             # Deduplication utilities
 │       │   └── loading.py           # HuggingFace dataset loading
 │       │
+│       ├── constitution/            # Constitution generation for classifiers
+│       │   └── pipeline.py         # ConstitutionPipeline, EntryType, results
+│       │
 │       ├── jailbreak/               # Jailbreak dataset generation
 │       │   ├── utils.py             # Technique combination utilities
 │       │   ├── distribution.py      # Balanced splitting re-exports
@@ -70,7 +73,8 @@ REDACT/
 │       │
 │       └── prompts/                 # [REDACTED IN PUBLIC RELEASE]
 │           ├── content_moderation/  # Prompt templates per pipeline step
-│           └── jailbreak/           # Jailbreak prompt templates
+│           ├── jailbreak/           # Jailbreak prompt templates
+│           └── constitution/        # Constitution generation prompts (4 severity types)
 │
 ├── tests/                           # Test suite
 ├── full_pipeline.ipynb              # Complete pipeline walkthrough
@@ -97,7 +101,7 @@ The core abstraction. Everything above this layer calls a unified interface and 
 
 **`wrappers.py`**: Rate limiter, exponential backoff retry, multithreaded batch caller.
 
-**`calls.py`**: High-level paired calls — `generate_sample()` and `check_sample()`. Checker receives generated output and returns accept/reject with reasoning. Reasoning is passed back to generator on rejection for directed improvement.
+**`calls.py`**: High-level paired calls — `generate_sample()`, `check_sample()`, and `batch_check_samples()`. Checker receives generated output and returns accept/reject with reasoning. Reasoning is passed back to generator on rejection for directed improvement. `batch_check_samples()` sends all checker prompts in one `batch_generate()` call — this is the primary speed lever for vLLM. For API backends, `batch_generate()` falls back to sequential; use `BatchCaller(max_workers=N)` for parallelism there.
 
 **`prompts.py`**: Loads prompt JSON files by category. Renders templates with seed injections.
 
@@ -136,6 +140,23 @@ Benign samples for FSH/DAP are cached in `Data_cache/benign/`.
 **Output pipeline**: Run model on input samples → optionally paraphrase through fingerprint removal LLM → save to `Datasets/`.
 
 Fingerprint removal is called as an optional LLM pass. The full training pipeline for the removal model lives in a separate repository.
+
+---
+
+### `constitution/` — Constitution Generation
+
+Generates structured category hierarchies for constitutional classifier training. Each constitution spans 4 severity levels:
+
+1. **Absolutely harmful** — clear-cut violations, always flag
+2. **Dual-use harmful** — borderline, harmful framing, debatable
+3. **Dual-use benign** — borderline, benign framing, could look harmful
+4. **Absolutely benign** — clearly safe, never flag (hard negatives)
+
+`ConstitutionPipeline` generates entries per taxonomy category using Claude Opus. Uses `parse_constitution()` from `llms/extraction.py` to parse the 3-layer markdown output. Entries saved to `Data_cache/constitution/` as 4 type-based CSVs. Each entry later seeds N input samples for classifier training.
+
+`ConstitutionInputPipeline` expands constitution entries into full prompts. Uses a dedicated checker at `prompts/constitution/checker/template.json` (via `_build_constitution_checker()`) that injects `category`, `subcategory`, and `entry_type` — so it correctly evaluates benign and dual-use samples, not just harmful ones.
+
+**Known limitation:** `content_moderation/checker.py` `build_quality_checker()` is harmful-only. When content moderation benign/dual-use sample generation is added, extend it with an `entry_type` parameter following the same pattern as `_build_constitution_checker()` in `constitution/input_generation.py`.
 
 ---
 

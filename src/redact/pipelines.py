@@ -226,6 +226,179 @@ def create_taxonomy(
     return taxonomy
 
 
+# ---------------------------------------------------------------------------
+# Constitution generation
+# ---------------------------------------------------------------------------
+
+
+def generate_constitution(
+    taxonomy: dict | str = "content_moderation_categories",
+    entry_types: list[str] | None = None,
+    num_categories: int = 10,
+    model: str = "claude-opus-4-6",
+    backend: LLMBackend | None = None,
+    num_taxonomy_categories: int | None = None,
+    include_standalone_benign: bool = False,
+    standalone_benign_categories: int = 10,
+    output_dir: str | Path | None = None,
+    verbose: bool = True,
+) -> pd.DataFrame:
+    """Generate a constitution (category hierarchy) for classifier training.
+
+    For each taxonomy category, generates harmful, benign, and dual-use
+    constitution entries using the specified model. Each entry defines a
+    subcategory with sample descriptions that can later drive input sample
+    generation.
+
+    Args:
+        taxonomy: Taxonomy name or pre-loaded dict.
+        entry_types: Which entry types to generate. Choices:
+            ``"harmful"``, ``"benign"``, ``"dual_use_benign"``,
+            ``"dual_use_harmful"``. Default: all four.
+        num_categories: Number of constitution categories per entry type per
+            taxonomy category. Range 5-15 recommended.
+        model: Model for generation (default: Claude Opus).
+        backend: LLM backend. If None, auto-selects from model name.
+        num_taxonomy_categories: Limit to first N taxonomy categories
+            (None = all).
+        include_standalone_benign: If True, also generate category-free
+            benign entries in a single LLM call (no taxonomy influence).
+            Saved to general_benign.csv.
+        standalone_benign_categories: Number of benign constitution categories
+            to generate in the standalone benign call.
+        output_dir: Where to save CSVs. Defaults to
+            ``Data_cache/constitution/``.
+        verbose: Print progress.
+
+    Returns:
+        DataFrame of all constitution entries.
+    """
+    from redact.constitution import ConstitutionPipeline, EntryType
+
+    # Resolve taxonomy
+    if isinstance(taxonomy, str):
+        taxonomy = load_taxonomy(taxonomy)
+
+    # Resolve entry types
+    resolved_types: list[EntryType] | None = None
+    if entry_types is not None:
+        resolved_types = [EntryType(t) for t in entry_types]
+
+    # Resolve backend
+    if backend is None:
+        backend = get_backend(model)
+
+    rate_limiter = RateLimiter()
+
+    pipeline = ConstitutionPipeline(
+        backend=backend,
+        model=model,
+        rate_limiter=rate_limiter,
+        output_dir=output_dir,
+    )
+
+    result = pipeline.run(
+        taxonomy=taxonomy,
+        entry_types=resolved_types,
+        num_categories=num_categories,
+        num_taxonomy_categories=num_taxonomy_categories,
+        include_standalone_benign=include_standalone_benign,
+        standalone_benign_categories=standalone_benign_categories,
+        save=True,
+        verbose=verbose,
+    )
+
+    return result.to_dataframe()
+
+
+# ---------------------------------------------------------------------------
+# Constitution-to-input generation
+# ---------------------------------------------------------------------------
+
+
+def generate_inputs_from_constitution(
+    style: str = "long",
+    samples_per_entry: int = 3,
+    entry_types: list[str] | None = None,
+    source_categories: list[str] | None = None,
+    model: str = "venice-uncensored",
+    check_model: str | None = None,
+    backend: LLMBackend | None = None,
+    use_checker: bool = True,
+    constitution_dir: str | Path | None = None,
+    output_dir: str | Path | None = None,
+    verbose: bool = True,
+    batch_size: int = 32,
+) -> pd.DataFrame:
+    """Generate input prompts from constitution entries.
+
+    # CONSTITUTION-TO-INPUT: High-level pipeline function.
+    # Reads constitution CSVs and expands each entry's sample_description
+    # into full realistic prompts using the specified template style.
+    #
+    # Future work: chain with generate_outputs() and generate_jailbreaks().
+
+    For each constitution entry, uses the content moderation InputPipeline
+    to generate full-length prompts from the short sample_description.
+    Output is saved in standard content moderation format with constitution
+    metadata preserved as extra columns.
+
+    Args:
+        style: Template style ("long", "short", or custom). Controls
+            prompt length/detail. See prompts/constitution/input_generation/.
+        samples_per_entry: Number of prompts to generate per constitution entry.
+        entry_types: Filter to specific entry types (e.g. ["harmful", "benign",
+            "dual_use_harmful", "dual_use_benign", "general_benign"]).
+        source_categories: Filter to specific taxonomy categories.
+        model: Model for generation.
+        check_model: Model for quality checking. Defaults to same as model.
+        backend: LLM backend. If None, auto-selects from model name.
+        use_checker: Whether to quality-check generated prompts.
+        constitution_dir: Where to read constitution CSVs. Defaults to
+            Data_cache/constitution/.
+        output_dir: Where to save generated prompts. Defaults to
+            Datasets/constitution_inputs/.
+        verbose: Print progress.
+
+    Returns:
+        DataFrame of all generated prompts with constitution metadata.
+    """
+    from redact.constitution.input_generation import ConstitutionInputPipeline
+
+    backend, rate_limiter = _get_backend(backend, model)
+    check_model = check_model or model
+
+    pipeline = ConstitutionInputPipeline(
+        gen_backend=backend,
+        gen_model=model,
+        check_backend=backend,
+        check_model=check_model,
+        rate_limiter=rate_limiter,
+        constitution_dir=constitution_dir,
+        output_dir=output_dir,
+    )
+
+    pipeline.run(
+        style=style,
+        samples_per_entry=samples_per_entry,
+        entry_types=entry_types,
+        source_categories=source_categories,
+        use_checker=use_checker,
+        save=True,
+        verbose=verbose,
+        batch_size=batch_size,
+    )
+
+    # Return merged DataFrame from saved CSVs
+    actual_dir = pipeline.output_dir
+    return merge_content_mod_csvs(actual_dir, accepted_only=True)
+
+
+# ---------------------------------------------------------------------------
+# Content moderation input generation
+# ---------------------------------------------------------------------------
+
+
 def generate_inputs(
     taxonomy: dict | str = "content_moderation_categories",
     samples_per_category: int = 15,
