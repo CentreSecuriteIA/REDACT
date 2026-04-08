@@ -30,3 +30,8 @@ def get_hacking_type_to_getter() -> dict[str, callable]:
         "personas": get_persona_functions,
         "framing": get_framing_functions,
     }
+
+
+def get_all_hacking_functions() -> list:
+    """Return flat list of all hacking technique functions."""
+    return get_hacking_functions() + get_persona_functions() + get_framing_functions()

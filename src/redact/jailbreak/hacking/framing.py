@@ -1,6 +1,10 @@
-"""Framing directive jailbreak techniques.
+"""Scenario-modifying framing jailbreak techniques.
 
 Pure string transforms: str -> tuple[str, str]. No LLM dependency.
+
+These directives modify the *context or scenario* around the request —
+fictional worlds, intent framing, urgency, and constraint removal.
+Answer-format and output-conditioning directives live in requests/answer.py.
 
 Each directive has multiple template variants stored in
 configs/framing_templates.json. One variant is selected per call using the
@@ -20,7 +24,7 @@ from pathlib import Path
 # Template loading
 # ---------------------------------------------------------------------------
 
-_TEMPLATES_PATH = Path(__file__).parent.parent.parent / "configs" / "framing_templates.json"
+_TEMPLATES_PATH = Path(__file__).parent.parent.parent / "configs" / "jailbreak" / "hacking" / "framing_templates.json"
 _TEMPLATES: dict[str, list[dict]] = json.loads(_TEMPLATES_PATH.read_text(encoding="utf-8"))
 
 
@@ -45,7 +49,7 @@ def _apply(directive: str, prompt: str) -> tuple[str, str]:
 
 
 # ---------------------------------------------------------------------------
-# Public directive functions
+# Public directive functions — scenario/context modifiers
 # ---------------------------------------------------------------------------
 
 
@@ -74,47 +78,17 @@ def to_no_moral_constraints(prompt: str) -> tuple[str, str]:
     return _apply("no_moral_constraints", prompt)
 
 
-def to_refusal_then_comply(prompt: str) -> tuple[str, str]:
-    """Instruct the model to acknowledge sensitivity and then answer fully."""
-    return _apply("refusal_then_comply", prompt)
-
-
-def to_apology_prevention(prompt: str) -> tuple[str, str]:
-    """Append a directive preventing refusals, apologies, and disclaimers."""
-    return _apply("apology_prevention", prompt)
-
-
-def to_prefix_injection(prompt: str) -> tuple[str, str]:
-    """Instruct the model to begin its response with a compliance prefix."""
-    return _apply("prefix_injection", prompt)
-
-
-def to_answer_in_markdown(prompt: str) -> tuple[str, str]:
-    """Request structured Markdown output format."""
-    return _apply("answer_in_markdown", prompt)
-
-
-def to_answer_as_tutorial(prompt: str) -> tuple[str, str]:
-    """Request step-by-step tutorial output format."""
-    return _apply("answer_as_tutorial", prompt)
-
-
 # ---------------------------------------------------------------------------
 # Registry
 # ---------------------------------------------------------------------------
 
 
 def get_framing_functions() -> list:
-    """Return all framing directive technique functions."""
+    """Return scenario-modifying framing directive functions."""
     return [
         to_fictional_world,
         to_noble_goal,
         to_nefarious_goal,
         to_high_stake,
         to_no_moral_constraints,
-        to_refusal_then_comply,
-        to_apology_prevention,
-        to_prefix_injection,
-        to_answer_in_markdown,
-        to_answer_as_tutorial,
     ]

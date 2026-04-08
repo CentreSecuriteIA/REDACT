@@ -65,7 +65,9 @@ from redact.jailbreak.manipulation import (
     BENIGN_CATEGORIES,
     load_benign_data,
     process_category,
+    get_or_generate_benign_data,
 )
+from redact.jailbreak.requests import get_request_type_to_getter
 
 
 _PACKAGE_DIR = Path(__file__).resolve().parent  # src/redact/
@@ -111,30 +113,13 @@ def _ensure_benign_data(
     verbose: bool = True,
 ) -> dict:
     """Load benign data, generating if it doesn't exist."""
-    path = Path(benign_path or _default_benign_path())
-
-    if path.exists():
-        if verbose:
-            print(f"  Loading cached benign data from {path}")
-        return load_benign_data(path)
-
-    if verbose:
-        print(f"  Generating benign data ({len(BENIGN_CATEGORIES)} categories)...")
-
-    path.parent.mkdir(parents=True, exist_ok=True)
-    all_rows = []
-    for i, category in enumerate(BENIGN_CATEGORIES):
-        if verbose:
-            print(f"    [{i+1}/{len(BENIGN_CATEGORIES)}] {category[0]} / {category[1]}")
-        rows = process_category(category, backend, model, rate_limiter)
-        all_rows.extend(rows)
-
-    df = pd.DataFrame(all_rows)
-    df.to_csv(path, index=False)
-    if verbose:
-        print(f"  Saved {len(df)} benign samples to {path}")
-
-    return load_benign_data(path)
+    return get_or_generate_benign_data(
+        backend=backend,
+        model=model,
+        rate_limiter=rate_limiter,
+        cache_path=benign_path or _default_benign_path(),
+        verbose=verbose,
+    )
 
 
 def _load_scenario_cache(cache_dir: Path | None = None) -> dict[str, str]:
@@ -703,14 +688,14 @@ def generate_jailbreaks(
 ) -> pd.DataFrame:
     """Generate jailbreak variants of input prompts.
 
-    Applies obfuscation (including translation), hacking, manipulation, and
-    persona techniques. Translation is a subgroup within obfuscation, handled
-    by the same ``get_type_to_getter()`` registry.
+    Applies obfuscation (including translation), hacking, manipulation,
+    persona, and request-structure techniques. Translation is a subgroup
+    within obfuscation, handled by the same ``get_type_to_getter()`` registry.
 
     Args:
         inputs: Input prompts DataFrame. If None, loads from Datasets/.
         technique_types: Which families to run. Options: ``"obfuscation"``,
-            ``"hacking"``, ``"manipulation"``. None = all.
+            ``"hacking"``, ``"manipulation"``, ``"requests"``. None = all.
         max_samples_per_technique: Limit samples per individual technique.
         model: Model for LLM-dependent techniques.
         backend: LLM backend. If None, creates from environment.
@@ -748,6 +733,7 @@ def generate_jailbreaks(
     run_obfuscation = run_all or "obfuscation" in technique_types
     run_hacking = run_all or "hacking" in technique_types
     run_manipulation = run_all or "manipulation" in technique_types
+    run_requests = run_all or "requests" in technique_types
 
     if verbose:
         print(f"\n{'='*60}")
@@ -760,6 +746,8 @@ def generate_jailbreaks(
             families.append("hacking")
         if run_manipulation:
             families.append("manipulation")
+        if run_requests:
+            families.append("requests")
         print(f"Families: {', '.join(families)}")
         print(f"Input samples: {len(inputs)} | Model: {model}")
 
@@ -1058,6 +1046,59 @@ def generate_jailbreaks(
                         "technique_type": "manipulation",
                         "manipulation_subtype": subtype,
                         "model": model if needs_backend else "",
+                        "additional_info": info,
+                    })
+                except Exception as e:
+                    if verbose:
+                        print(f"    Failed ({tech_name}): {e}")
+
+            if results:
+                out_df = pd.DataFrame(results)
+                out_df.to_csv(ds_dir / f"{tech_name}.csv", index=False)
+                if verbose:
+                    print(f"    -> {len(results)} saved")
+
+    # ── Requests ───────────────────────────────────────────────────────
+
+    if run_requests:
+        if verbose:
+            print(f"\n--- Requests ---")
+
+        req_type_to_getter = get_request_type_to_getter()
+        all_req_fns = []
+        fn_to_req_subtype = {}
+        for subtype_name, getter_fn in req_type_to_getter.items():
+            for fn in getter_fn():
+                all_req_fns.append(fn)
+                fn_to_req_subtype[fn.__name__] = subtype_name
+
+        splits = deterministic_balanced_assign(inputs, num_splits=len(all_req_fns))
+
+        for fn, split_df in zip(all_req_fns, splits):
+            tech_name = fn.__name__
+            subtype = fn_to_req_subtype[tech_name]
+
+            if max_samples_per_technique is not None:
+                split_df = split_df.head(max_samples_per_technique)
+
+            if verbose:
+                print(f"  {tech_name} [{subtype}]: {len(split_df)} samples")
+
+            results = []
+            for _, row in split_df.iterrows():
+                try:
+                    jailbreak, info = fn(row["prompt"])
+                    results.append({
+                        "id": row.get("id", ""),
+                        "prompt": jailbreak,
+                        "input_prompt": row["prompt"],
+                        "input_id": row.get("id", ""),
+                        "category": row.get("category", ""),
+                        "origin": row.get("origin", "generated"),
+                        "technique": tech_name,
+                        "technique_type": "requests",
+                        "request_subtype": subtype,
+                        "model": "",
                         "additional_info": info,
                     })
                 except Exception as e:

@@ -25,7 +25,8 @@ class TestCombineTechniques:
         assert result == "HELLO!"
         assert info == "exclaim;upper"
 
-    def test_empty_info_skipped(self):
+    def test_noop_recorded(self):
+        """No-op steps (text unchanged) are recorded as 'noop=<name>' in info."""
         def tech1(text, **kwargs):
             return text, ""
 
@@ -34,7 +35,7 @@ class TestCombineTechniques:
 
         combined = combine_techniques(tech1, tech2)
         _, info = combined("hi")
-        assert info == "added_x"
+        assert info == "noop=tech1;added_x"
 
     def test_kwargs_passed_through(self):
         received = {}

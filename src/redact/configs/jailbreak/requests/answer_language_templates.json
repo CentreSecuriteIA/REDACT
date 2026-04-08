@@ -1,0 +1,14 @@
+{
+  "templates": [
+    {"name": "respond_in",    "template": "{prompt}\n\nPlease respond in {language}."},
+    {"name": "answer_in",     "template": "{prompt}\n\nAnswer in {language} only."},
+    {"name": "reply_in",      "template": "{prompt}\n\nYour entire reply must be in {language}."},
+    {"name": "write_in",      "template": "{prompt}\n\nWrite your response entirely in {language}."}
+  ],
+  "languages": [
+    "French", "Japanese", "Russian", "Spanish", "German", "Arabic",
+    "Turkish", "Czech", "Vietnamese", "Greek", "Croatian", "Thai",
+    "Swahili", "Khmer", "Maori", "Nepali", "Zulu",
+    "Scots Gaelic", "Bengali", "Javanese"
+  ]
+}

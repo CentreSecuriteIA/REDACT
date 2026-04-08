@@ -63,15 +63,35 @@ REDACT/
 │       │   ├── hacking/             # Cognitive/psychological attacks
 │       │   │   ├── cognitive.py     # 5 techniques; definitions loaded from cognitive_techniques.json
 │       │   │   ├── personas.py      # 14 named persona archetypes + invented persona; loaded from personas.json
-│       │   │   └── framing.py       # 10 framing directives (pure transforms); templates in framing_templates.json
-│       │   └── manipulation/        # Few-shot manipulation
-│       │       ├── benign.py        # Benign sample generation
-│       │       ├── fsh.py           # Few-Shot Hacking
-│       │       └── dap.py           # Distract and Persuade
+│       │   │   └── framing.py       # 5 scenario-modifying directives (pure transforms); templates in framing_templates.json
+│       │   ├── manipulation/        # Few-shot manipulation
+│       │   │   ├── benign.py        # Benign sample generation
+│       │   │   ├── fsh.py           # Few-Shot Hacking
+│       │   │   └── dap.py           # Distract and Persuade
+│       │   └── requests/            # Request-structure attacks (all pure transforms)
+│       │       ├── answer.py          # 9 output-format + conditioning directives; answer_templates.json
+│       │       ├── answer_language.py # 20 ask-answer-in-language functions; answer_language_templates.json
+│       │       ├── continuation.py    # 4 continuation-attack functions; continuation_templates.json
+│       │       ├── indirect.py        # 6 task-embedding functions; indirect_templates.json
+│       │       ├── distractor.py      # 4 prefix/suffix distractor functions; distractor_templates.json
+│       │       ├── impersonation.py   # 1 good-person impersonation function; impersonation_templates.json
+│       │       ├── temporal.py        # 1 past-tense reframing function; temporal_templates.json
+│       │       └── asking.py          # 2 question-framing functions; asking_templates.json
 │       │
 │       ├── configs/                 # Configuration data (package data)
 │       │   ├── content_moderation_input.json
-│       │   ├── framing_templates.json   # Multi-variant templates for framing directives
+│       │   ├── jailbreak/
+│       │   │   ├── hacking/
+│       │   │   │   └── framing_templates.json         # 5 scenario-modifying framing directives
+│       │   │   └── requests/
+│       │   │       ├── answer_templates.json          # 9 output-format + conditioning directives
+│       │   │       ├── answer_language_templates.json # 20 languages + 4 template variants
+│       │   │       ├── continuation_templates.json    # 4 continuation-attack templates
+│       │   │       ├── indirect_templates.json        # 6 task-embedding templates
+│       │   │       ├── distractor_templates.json      # prefix/suffix × related/unrelated × 4 variants
+│       │   │       ├── impersonation_templates.json   # 8 good-person profession variants
+│       │   │       ├── temporal_templates.json        # 4 past-tense framing variants
+│       │   │       └── asking_templates.json          # innocuous_question + ask_for_details variants
 │       │   ├── seeds/               # Hand-written seed prompts
 │       │   └── taxonomy/            # Category taxonomy definitions
 │       │       ├── content_moderation_categories.json
@@ -132,12 +152,15 @@ All output is saved as CSVs in `Datasets/{category}/`. Functions:
 
 ### `jailbreak/` — Jailbreak Generation
 
-Three attack families:
+Four attack families:
 - **obfuscation/** — Pure text transforms (encoding, structural) + LLM-based (translation, tokenbreak)
-- **hacking/** — Two-step cognitive attacks: scenario generation → jailbreak construction
+- **hacking/** — Two-step cognitive attacks: scenario generation → jailbreak construction. `framing.py` covers the 5 scenario-modifying directives (fictional world, noble/nefarious goal, urgency, constraint removal).
 - **manipulation/** — FSH (few-shot hacking) and DAP (distract and persuade) using benign Q&A pairs
+- **requests/** — Pure transforms that modify request structure. 8 subtype modules, all no-LLM, each backed by its own JSON config. Subtypes: `format` (9), `answer_language` (20, generated dynamically), `continuation` (4), `indirect` (6), `distractor` (4), `impersonation` (1), `temporal` (1), `asking` (2). Total: 47 functions.
 
 Benign samples for FSH/DAP are cached in `Data_cache/benign/`.
+
+**Reference list coverage:** Benchmarked against 73 instruction primitives + 74 request primitives. All feasible primitives are covered. Intentionally excluded: `agent_context_additional_instr` (system-prompt access required), `fine_tuning` (out of scope), `use_highly_specialized_language` (unclear path), `direct_question` (no-op). The library is a strict superset of the reference list on everything else, with additional techniques not in the reference set (ASCII art, adversarial suffixes, structural wrapping, cognitive hacking, manipulation, continuation attacks, indirect embedding, extra encodings, extra languages).
 
 ---
 

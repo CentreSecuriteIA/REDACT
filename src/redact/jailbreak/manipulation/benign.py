@@ -213,6 +213,63 @@ def _default_benign_path() -> Path:
     return get_output_dir() / "Data_cache" / "benign" / "benign_samples.csv"
 
 
+def get_or_generate_benign_data(
+    backend=None,
+    model: str | None = None,
+    rate_limiter=None,
+    cache_path=None,
+    verbose: bool = True,
+) -> dict:
+    """Load benign data from cache, or generate and cache it if missing.
+
+    Used by apply_combination() to auto-provision benign data for FSH/DAP
+    manipulation techniques without requiring the caller to pre-generate it.
+
+    Args:
+        backend: LLM backend (required only if generation is needed).
+        model: Model identifier (required only if generation is needed).
+        rate_limiter: Optional rate limiter.
+        cache_path: Path to benign CSV. Uses default Data_cache/benign/ if None.
+        verbose: Print progress messages during generation.
+
+    Returns:
+        Benign data dict (same format as load_benign_data).
+
+    Raises:
+        ValueError: If generation is needed but backend/model are not provided.
+    """
+    path = Path(cache_path) if cache_path else _default_benign_path()
+
+    if path.exists():
+        if verbose:
+            print(f"  Loading cached benign data from {path}")
+        return load_benign_data(path)
+
+    if backend is None or model is None:
+        raise ValueError(
+            "Benign data not found and no backend/model provided for generation. "
+            f"Either pre-generate benign data at {path} or pass backend and model."
+        )
+
+    if verbose:
+        print(f"  Generating benign data ({len(BENIGN_CATEGORIES)} categories)...")
+
+    path.parent.mkdir(parents=True, exist_ok=True)
+    all_rows = []
+    for i, category in enumerate(BENIGN_CATEGORIES):
+        if verbose:
+            print(f"    [{i + 1}/{len(BENIGN_CATEGORIES)}] {category[0]} / {category[1]}")
+        rows = process_category(category, backend, model, rate_limiter)
+        all_rows.extend(rows)
+
+    df = pd.DataFrame(all_rows)
+    df.to_csv(path, index=False)
+    if verbose:
+        print(f"  Saved {len(df)} benign samples to {path}")
+
+    return load_benign_data(path)
+
+
 def load_benign_data(
     path: str | Path | None = None,
 ) -> dict:
