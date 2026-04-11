@@ -118,7 +118,15 @@ def combine_techniques(*techniques: Callable, sort_by_hierarchy: bool = True) ->
         result = text
         info_parts: list[str] = []
         for technique in ordered:
-            output = technique(result, **kwargs)
+            # Filter kwargs to only what this function accepts.
+            # Pure transforms have (prompt: str) with no **kwargs — passing
+            # unrecognised keys would raise TypeError.
+            sig_params = inspect.signature(technique).parameters
+            has_var_kw = any(
+                p.kind == inspect.Parameter.VAR_KEYWORD for p in sig_params.values()
+            )
+            tech_kwargs = kwargs if has_var_kw else {k: v for k, v in kwargs.items() if k in sig_params}
+            output = technique(result, **tech_kwargs)
             # Normalize 3-tuple returns from cognitive/persona (discard scenario)
             if isinstance(output, tuple) and len(output) == 3:
                 new_text, info, _ = output
