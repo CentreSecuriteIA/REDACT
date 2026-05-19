@@ -13,8 +13,8 @@ Usage::
     dataset = build_dataset()
 """
 
-import inspect
 import json
+import random as _random
 from math import ceil
 from pathlib import Path
 
@@ -46,21 +46,23 @@ from redact.dataset import (
     merge_all,
 )
 from redact.dataset.merge import (
-    merge_technique_csvs,
     merge_content_mod_csvs,
     discover_categories,
 )
-from redact.dataset.split import deterministic_balanced_assign
-from redact.jailbreak.obfuscation import get_type_to_getter
-from redact.jailbreak.hacking.cognitive import (
-    get_situation,
-    get_hacking_functions,
+from redact.jailbreak import (
+    get_all_obfuscation_functions,
+    get_all_hacking_functions,
+    get_all_manipulation_functions,
+    get_all_request_functions,
+    sample_combination,
+    apply_combination,
+    is_noop,
 )
 from redact.jailbreak.manipulation import (
-    get_manipulation_type_to_getter,
     BENIGN_CATEGORIES,
     load_benign_data,
     process_category,
+    get_or_generate_benign_data,
 )
 
 
@@ -72,8 +74,8 @@ def _default_dataset_dir() -> Path:
     return get_output_dir() / "Datasets"
 
 
-def _default_jailbreak_dir() -> Path:
-    return _default_dataset_dir() / "jailbreaks"
+def _default_jailbreak_path() -> Path:
+    return _default_dataset_dir() / "jailbreaks.csv"
 
 
 def _default_benign_path() -> Path:
@@ -107,70 +109,14 @@ def _ensure_benign_data(
     verbose: bool = True,
 ) -> dict:
     """Load benign data, generating if it doesn't exist."""
-    path = Path(benign_path or _default_benign_path())
+    return get_or_generate_benign_data(
+        backend=backend,
+        model=model,
+        rate_limiter=rate_limiter,
+        cache_path=benign_path or _default_benign_path(),
+        verbose=verbose,
+    )
 
-    if path.exists():
-        if verbose:
-            print(f"  Loading cached benign data from {path}")
-        return load_benign_data(path)
-
-    if verbose:
-        print(f"  Generating benign data ({len(BENIGN_CATEGORIES)} categories)...")
-
-    path.parent.mkdir(parents=True, exist_ok=True)
-    all_rows = []
-    for i, category in enumerate(BENIGN_CATEGORIES):
-        if verbose:
-            print(f"    [{i+1}/{len(BENIGN_CATEGORIES)}] {category[0]} / {category[1]}")
-        rows = process_category(category, backend, model, rate_limiter)
-        all_rows.extend(rows)
-
-    df = pd.DataFrame(all_rows)
-    df.to_csv(path, index=False)
-    if verbose:
-        print(f"  Saved {len(df)} benign samples to {path}")
-
-    return load_benign_data(path)
-
-
-def _load_scenario_cache(cache_dir: Path | None = None) -> dict[str, str]:
-    """Load all cached scenarios from CSVs into a lookup dict."""
-    directory = Path(cache_dir or _default_scenario_dir())
-    cache: dict[str, str] = {}
-    if not directory.exists():
-        return cache
-    for csv_path in directory.glob("*.csv"):
-        try:
-            df = pd.read_csv(csv_path)
-            for _, row in df.iterrows():
-                if "input_prompt" in df.columns and "scenario" in df.columns:
-                    cache[row["input_prompt"]] = row["scenario"]
-        except Exception:
-            continue
-    return cache
-
-
-def _save_scenario_cache(
-    cache_dir: Path | None,
-    technique_name: str,
-    scenarios: list[dict],
-) -> None:
-    """Save scenario mappings for a technique."""
-    directory = Path(cache_dir or _default_scenario_dir())
-    directory.mkdir(parents=True, exist_ok=True)
-    if scenarios:
-        df = pd.DataFrame(scenarios)
-        df.to_csv(directory / f"{technique_name}_scenarios.csv", index=False)
-
-
-def _fn_needs_backend(fn) -> bool:
-    """Check if a technique function requires a 'backend' parameter."""
-    return "backend" in inspect.signature(fn).parameters
-
-
-def _fn_needs_benign(fn) -> bool:
-    """Check if a technique function requires 'benign_data' parameter."""
-    return "benign_data" in inspect.signature(fn).parameters
 
 
 # ---------------------------------------------------------------------------
@@ -686,322 +632,164 @@ def generate_outputs(
 
 def generate_jailbreaks(
     inputs: pd.DataFrame | None = None,
-    technique_types: list[str] | None = None,
-    max_samples_per_technique: int | None = None,
+    output_path: str | Path | None = None,
+    max_complexity: int = 6,
+    max_obfuscations: int = 2,
+    seed: int = 42,
+    pure_only: bool = False,
+    entry_types: list[str] | None = None,
+    include_hacking: bool = True,
+    include_manipulation: bool = True,
+    include_obfuscation: bool = True,
+    include_requests: bool = True,
     model: str = "venice-uncensored",
     backend: LLMBackend | None = None,
     base_url: str = "https://api.venice.ai/api/v1",
-    output_dir: str | Path | None = None,
-    save_scenarios: bool = True,
     auto_generate_benign: bool = True,
     verbose: bool = True,
 ) -> pd.DataFrame:
-    """Generate jailbreak variants of input prompts.
+    """Generate jailbreak variants of input prompts using technique combinations.
 
-    Applies obfuscation (including translation), hacking, and manipulation
-    techniques. Translation is a subgroup within obfuscation, handled by
-    the same ``get_type_to_getter()`` registry.
+    Each prompt receives a randomly sampled valid combination of techniques
+    applied in series (e.g. framing → rot13 → indirect embedding). The sampler
+    respects compatibility rules from combination_spec.json. Single-technique
+    attacks are a natural subset when the sampler picks only one technique.
 
     Args:
         inputs: Input prompts DataFrame. If None, loads from Datasets/.
-        technique_types: Which families to run. Options: ``"obfuscation"``,
-            ``"hacking"``, ``"manipulation"``. None = all.
-        max_samples_per_technique: Limit samples per individual technique.
+        output_path: Where to save the output CSV. Defaults to
+            ``Datasets/jailbreaks.csv``.
+        max_complexity: Max total complexity score across all selected techniques.
+        max_obfuscations: Max number of obfuscation families per combination.
+            Set to 1 with include_hacking/manipulation/requests=False for
+            single-technique mode.
+        seed: Random seed for reproducible combination sampling.
+        pure_only: If True, exclude techniques that require LLM calls.
+        entry_types: If set, filter inputs to these entry_type values.
+        include_hacking: Allow hacking-layer techniques in combinations.
+        include_manipulation: Allow manipulation-layer techniques (FSH/DAP).
+        include_obfuscation: Allow obfuscation-layer techniques.
+        include_requests: Allow request-layer techniques.
         model: Model for LLM-dependent techniques.
         backend: LLM backend. If None, creates from environment.
         base_url: API base URL.
-        output_dir: Where to save per-technique CSVs. Defaults to
-            ``Datasets/jailbreaks/``.
-        save_scenarios: Cache hacking scenarios to Data_cache/scenarios/.
-        auto_generate_benign: Generate benign data if missing (for manipulation).
+        auto_generate_benign: Pre-load or generate benign data for FSH/DAP.
         verbose: Print progress.
 
     Returns:
-        Merged DataFrame of all jailbreak samples.
+        DataFrame of jailbreak samples with one row per input prompt.
     """
-    ds_dir = Path(output_dir) if output_dir else _default_jailbreak_dir()
-    ds_dir.mkdir(parents=True, exist_ok=True)
+    out = Path(output_path) if output_path else _default_jailbreak_path()
 
     if inputs is None:
         inputs = merge_all(accepted_only=True)
         if inputs.empty:
             raise ValueError("No input samples found. Run generate_inputs() first.")
 
-    # Normalize column names: content mod uses 'sample', jailbreak expects 'prompt'
-    text_col = "sample" if "sample" in inputs.columns else "prompt"
-    if text_col == "sample" and "prompt" not in inputs.columns:
+    # Normalize: content mod uses 'sample', jailbreak expects 'prompt'
+    if "sample" in inputs.columns and "prompt" not in inputs.columns:
         inputs = inputs.rename(columns={"sample": "prompt"})
 
-    if "origin" not in inputs.columns:
-        inputs["origin"] = "generated"
+    if entry_types:
+        inputs = inputs[inputs["entry_type"].isin(entry_types)].reset_index(drop=True)
 
     backend, rate_limiter = _get_backend(backend, model)
 
-    run_all = technique_types is None
-    run_obfuscation = run_all or "obfuscation" in technique_types
-    run_hacking = run_all or "hacking" in technique_types
-    run_manipulation = run_all or "manipulation" in technique_types
+    # Build pool — respect include_* flags
+    pool = []
+    if include_obfuscation:
+        pool += get_all_obfuscation_functions()
+    if include_hacking:
+        pool += get_all_hacking_functions()
+    if include_manipulation:
+        pool += get_all_manipulation_functions()
+    if include_requests:
+        pool += get_all_request_functions()
+
+    if pure_only:
+        pool = [f for f in pool if not getattr(f, "requires_llm", False)]
 
     if verbose:
         print(f"\n{'='*60}")
         print(f"Generate Jailbreaks")
         print(f"{'='*60}")
-        families = []
-        if run_obfuscation:
-            families.append("obfuscation (incl. translation)")
-        if run_hacking:
-            families.append("hacking")
-        if run_manipulation:
-            families.append("manipulation")
-        print(f"Families: {', '.join(families)}")
-        print(f"Input samples: {len(inputs)} | Model: {model}")
+        print(f"Pool: {len(pool)} techniques | Input: {len(inputs)} prompts | Model: {model}")
 
-    # ── Obfuscation (includes translation as subgroup) ─────────────────
+    # Pre-load benign data upfront if any manipulation technique is in pool
+    has_manipulation = any(
+        "fsh" in getattr(f, "families", []) or "dap" in getattr(f, "families", [])
+        for f in pool
+    )
+    benign_data = None
+    if auto_generate_benign and has_manipulation:
+        benign_data = _ensure_benign_data(backend, model, rate_limiter, verbose=verbose)
 
-    if run_obfuscation:
-        if verbose:
-            print(f"\n--- Obfuscation ---")
+    # Sample one valid combination per prompt and apply in series
+    rng = _random.Random(seed)
+    all_results = []
+    for i, (_, row) in enumerate(inputs.iterrows()):
+        if verbose and (i % 10 == 0 or i == len(inputs) - 1):
+            print(f"  [{i + 1}/{len(inputs)}] sampling combination...")
 
-        type_to_getter = get_type_to_getter()
-        # Collect all individual technique functions
-        all_obfuscation_fns = []
-        fn_to_subtype = {}
-        for subtype_name, getter_fn in type_to_getter.items():
-            for fn in getter_fn():
-                all_obfuscation_fns.append(fn)
-                fn_to_subtype[fn.__name__] = subtype_name
-
-        # Split inputs across all obfuscation techniques
-        splits = deterministic_balanced_assign(inputs, num_splits=len(all_obfuscation_fns))
-
-        for fn, split_df in zip(all_obfuscation_fns, splits):
-            tech_name = fn.__name__
-            subtype = fn_to_subtype[tech_name]
-            needs_backend = _fn_needs_backend(fn)
-
-            if max_samples_per_technique is not None:
-                split_df = split_df.head(max_samples_per_technique)
-
+        fn = sample_combination(
+            rng, pool,
+            max_complexity=max_complexity,
+            max_obfuscations=max_obfuscations,
+            include_hacking=include_hacking,
+            include_manipulation=include_manipulation,
+            include_obfuscation=include_obfuscation,
+            include_requests=include_requests,
+        )
+        try:
+            result, info, accepted, reasoning = apply_combination(
+                fn, row["prompt"],
+                backend=backend, model=model, rate_limiter=rate_limiter,
+                benign_data=benign_data, auto_benign=False,
+            )
+        except Exception as e:
             if verbose:
-                label = f"{tech_name} [{subtype}]"
-                if needs_backend:
-                    label += " (LLM)"
-                print(f"  {label}: {len(split_df)} samples")
+                print(f"    Failed (combination={fn.__name__}): {e}")
+            result = row["prompt"]
+            info = f"ERROR: {e}"
+            accepted = False
+            reasoning = str(e)
 
-            is_translation = subtype == "low_resource_language"
+        techniques = getattr(fn, "techniques", [] if fn.__name__ == "identity" else [fn])
+        all_results.append({
+            **row.to_dict(),
+            "jailbreak": result,
+            "technique": fn.__name__,
+            "technique_info": info,
+            "complexity": sum(getattr(t, "complexity", 0) for t in techniques),
+            "num_techniques": len(techniques),
+            "is_noop": is_noop(row["prompt"], result),
+            "accepted": accepted,
+            "reasoning": reasoning,
+        })
 
-            results = []
-            for _, row in split_df.iterrows():
-                try:
-                    if is_translation:
-                        # Translation functions use gen_model/check_model
-                        # which default to deepseek-v3.2 — don't pass model
-                        obfuscated, info = fn(
-                            row["prompt"], backend=backend,
-                            rate_limiter=rate_limiter,
-                        )
-                    elif needs_backend:
-                        obfuscated, info = fn(
-                            row["prompt"], backend=backend, model=model,
-                            rate_limiter=rate_limiter,
-                        )
-                    else:
-                        obfuscated, info = fn(row["prompt"])
-
-                    result_row = {
-                        "id": row.get("id", ""),
-                        "prompt": obfuscated,
-                        "input_prompt": row["prompt"],
-                        "input_id": row.get("id", ""),
-                        "category": row.get("category", ""),
-                        "origin": row.get("origin", "generated"),
-                        "technique": tech_name,
-                        "technique_type": "obfuscation",
-                        "obfuscation_subtype": subtype,
-                        "model": "deepseek-v3.2" if is_translation else (model if needs_backend else ""),
-                        "additional_info": info,
-                    }
-
-                    # Add language for translation techniques
-                    if is_translation and info and not info.startswith("DISCARDED"):
-                        result_row["language"] = info
-
-                    results.append(result_row)
-                except Exception as e:
-                    if verbose:
-                        print(f"    Failed ({tech_name}): {e}")
-
-            if results:
-                out_df = pd.DataFrame(results)
-                out_df.to_csv(ds_dir / f"{tech_name}.csv", index=False)
-                if verbose:
-                    print(f"    -> {len(results)} saved")
-
-    # ── Hacking ────────────────────────────────────────────────────────
-
-    if run_hacking:
-        if verbose:
-            print(f"\n--- Hacking ---")
-
-        scenario_cache = _load_scenario_cache()
-        hacking_fns = get_hacking_functions()
-
-        # Split inputs across hacking techniques
-        splits = deterministic_balanced_assign(inputs, num_splits=len(hacking_fns))
-
-        for fn, split_df in zip(hacking_fns, splits):
-            tech_name = fn.__name__
-
-            if max_samples_per_technique is not None:
-                split_df = split_df.head(max_samples_per_technique)
-
-            if verbose:
-                print(f"  {tech_name}: {len(split_df)} samples")
-
-            results = []
-            new_scenarios = []
-
-            for _, row in split_df.iterrows():
-                prompt_text = row["prompt"]
-
-                # Check scenario cache
-                scenario = scenario_cache.get(prompt_text)
-                if scenario is None:
-                    try:
-                        scenario = get_situation(prompt_text, backend, model, rate_limiter)
-                        scenario_cache[prompt_text] = scenario
-                    except ValueError as e:
-                        if verbose:
-                            print(f"    Scenario failed: {e}")
-                        continue
-
-                new_scenarios.append({
-                    "input_prompt": prompt_text,
-                    "scenario": scenario,
-                })
-
-                try:
-                    jailbreak, info, scenario_used = fn(
-                        prompt_text, backend, model,
-                        rate_limiter=rate_limiter,
-                        scenario=scenario,
-                    )
-                    results.append({
-                        "id": row.get("id", ""),
-                        "prompt": jailbreak,
-                        "input_prompt": prompt_text,
-                        "input_id": row.get("id", ""),
-                        "category": row.get("category", ""),
-                        "origin": row.get("origin", "generated"),
-                        "technique": tech_name,
-                        "technique_type": "hacking",
-                        "model": model,
-                        "additional_info": info,
-                        "scenario": scenario_used,
-                    })
-                except Exception as e:
-                    if verbose:
-                        print(f"    Failed ({tech_name}): {e}")
-
-            if results:
-                out_df = pd.DataFrame(results)
-                out_df.to_csv(ds_dir / f"{tech_name}.csv", index=False)
-                if verbose:
-                    print(f"    -> {len(results)} saved")
-
-            if save_scenarios and new_scenarios:
-                _save_scenario_cache(None, tech_name, new_scenarios)
-
-    # ── Manipulation ───────────────────────────────────────────────────
-
-    if run_manipulation:
-        if verbose:
-            print(f"\n--- Manipulation ---")
-
-        # Ensure benign data exists
-        if auto_generate_benign:
-            benign_data = _ensure_benign_data(backend, model, rate_limiter, verbose=verbose)
-        else:
-            benign_data = load_benign_data()
-
-        manip_type_to_getter = get_manipulation_type_to_getter()
-        all_manip_fns = []
-        fn_to_manip_subtype = {}
-        for subtype_name, getter_fn in manip_type_to_getter.items():
-            for fn in getter_fn():
-                all_manip_fns.append(fn)
-                fn_to_manip_subtype[fn.__name__] = subtype_name
-
-        splits = deterministic_balanced_assign(inputs, num_splits=len(all_manip_fns))
-
-        for fn, split_df in zip(all_manip_fns, splits):
-            tech_name = fn.__name__
-            subtype = fn_to_manip_subtype[tech_name]
-            needs_backend = _fn_needs_backend(fn)
-
-            if max_samples_per_technique is not None:
-                split_df = split_df.head(max_samples_per_technique)
-
-            if verbose:
-                label = f"{tech_name} [{subtype}]"
-                if needs_backend:
-                    label += " (LLM)"
-                print(f"  {label}: {len(split_df)} samples")
-
-            results = []
-            for _, row in split_df.iterrows():
-                try:
-                    if needs_backend:
-                        jailbreak, info = fn(
-                            row["prompt"], benign_data, backend, model,
-                            rate_limiter=rate_limiter,
-                        )
-                    else:
-                        jailbreak, info = fn(row["prompt"], benign_data)
-
-                    results.append({
-                        "id": row.get("id", ""),
-                        "prompt": jailbreak,
-                        "input_prompt": row["prompt"],
-                        "input_id": row.get("id", ""),
-                        "category": row.get("category", ""),
-                        "origin": row.get("origin", "generated"),
-                        "technique": tech_name,
-                        "technique_type": "manipulation",
-                        "manipulation_subtype": subtype,
-                        "model": model if needs_backend else "",
-                        "additional_info": info,
-                    })
-                except Exception as e:
-                    if verbose:
-                        print(f"    Failed ({tech_name}): {e}")
-
-            if results:
-                out_df = pd.DataFrame(results)
-                out_df.to_csv(ds_dir / f"{tech_name}.csv", index=False)
-                if verbose:
-                    print(f"    -> {len(results)} saved")
-
-    # ── Merge ──────────────────────────────────────────────────────────
-
-    merged = merge_technique_csvs(ds_dir)
+    jailbreaks = pd.DataFrame(all_results)
+    out.parent.mkdir(parents=True, exist_ok=True)
+    jailbreaks.to_csv(out, index=False)
 
     if verbose:
         print(f"\n{'='*60}")
         print(f"Jailbreak Summary")
         print(f"{'='*60}")
-        print(f"  Total: {len(merged)} jailbreak samples")
-        if not merged.empty and "technique" in merged.columns:
-            for tech, count in merged["technique"].value_counts().items():
-                print(f"    {tech}: {count}")
-        print(f"  Saved to: {ds_dir}/")
+        print(f"  Total: {len(jailbreaks)} samples")
+        n_noop = int(jailbreaks["is_noop"].sum()) if not jailbreaks.empty else 0
+        n_accepted = int(jailbreaks["accepted"].sum()) if not jailbreaks.empty else 0
+        n_rejected = len(jailbreaks) - n_accepted if not jailbreaks.empty else 0
+        print(f"  Accepted: {n_accepted} | Rejected: {n_rejected}")
+        print(f"  Transformed: {len(jailbreaks) - n_noop} | No-ops: {n_noop}")
+        if not jailbreaks.empty:
+            print(f"  Saved to: {out}")
 
-    return merged
+    return jailbreaks
 
 
 def build_dataset(
     dataset_dir: str | Path | None = None,
-    jailbreak_dir: str | Path | None = None,
+    jailbreak_path: str | Path | None = None,
     output_path: str | Path | None = None,
     include_inputs: bool = True,
     include_jailbreaks: bool = True,
@@ -1016,8 +804,8 @@ def build_dataset(
     Args:
         dataset_dir: Root dataset directory (for inputs). Defaults to
             ``redact/Datasets/``.
-        jailbreak_dir: Jailbreak CSVs directory. Defaults to
-            ``Datasets/jailbreaks/``.
+        jailbreak_path: Path to the jailbreaks CSV. Defaults to
+            ``Datasets/jailbreaks.csv``.
         output_path: Where to save merged CSV. Defaults to
             ``Datasets/complete_dataset.csv``.
         include_inputs: Include content moderation input samples.
@@ -1029,7 +817,7 @@ def build_dataset(
         Complete merged DataFrame.
     """
     ds_dir = Path(dataset_dir) if dataset_dir else _default_dataset_dir()
-    jb_dir = Path(jailbreak_dir) if jailbreak_dir else _default_jailbreak_dir()
+    jb_path = Path(jailbreak_path) if jailbreak_path else _default_jailbreak_path()
     out_path = Path(output_path) if output_path else (ds_dir / "complete_dataset.csv")
 
     parts = []
@@ -1052,8 +840,8 @@ def build_dataset(
             print(f"  Inputs: none found")
 
     # Jailbreaks
-    if include_jailbreaks and jb_dir.exists():
-        jb_df = merge_technique_csvs(jb_dir)
+    if include_jailbreaks and jb_path.exists():
+        jb_df = pd.read_csv(jb_path)
         if not jb_df.empty:
             jb_df["dataset_type"] = "jailbreak"
             parts.append(jb_df)
@@ -1062,7 +850,7 @@ def build_dataset(
         elif verbose:
             print(f"  Jailbreaks: none found")
     elif verbose and include_jailbreaks:
-        print(f"  Jailbreaks: directory not found ({jb_dir})")
+        print(f"  Jailbreaks: file not found ({jb_path})")
 
     # Output responses
     output_csv = ds_dir / "output_responses.csv"

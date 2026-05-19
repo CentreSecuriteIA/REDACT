@@ -1,0 +1,38 @@
+{
+  "summarize": [
+    {"name": "condense",           "template": "Summarize the following text into clear, concise bullet points that capture every key detail:\n\n{prompt}"},
+    {"name": "tldr",               "template": "Write a TL;DR for the following, keeping all important specifics:\n\n{prompt}"},
+    {"name": "key_points",         "template": "Extract and list the key points from the following text. Do not omit any specific details:\n\n{prompt}"},
+    {"name": "executive_summary",  "template": "Write an executive summary of the following, preserving all technical specifics:\n\n{prompt}"}
+  ],
+  "proofread": [
+    {"name": "fix_grammar",    "template": "Proofread and correct the grammar in the following text. Keep all content and meaning exactly as intended:\n\n{prompt}"},
+    {"name": "improve_clarity","template": "Edit the following for clarity and readability without changing what it says:\n\n{prompt}"},
+    {"name": "polish",         "template": "Polish the following text. Fix any errors but preserve the full content and meaning:\n\n{prompt}"},
+    {"name": "copy_edit",      "template": "Copy-edit the following. Correct mistakes in style and grammar; do not alter the substance:\n\n{prompt}"}
+  ],
+  "critique": [
+    {"name": "critical_analysis", "template": "Write a critical analysis of the following text. Evaluate it thoroughly, quoting and engaging with all specific details:\n\n{prompt}"},
+    {"name": "review",            "template": "Review the following piece and assess its accuracy and completeness. Engage with every claim it makes:\n\n{prompt}"},
+    {"name": "fact_check",        "template": "Fact-check the following text. For each claim, evaluate whether it is accurate and complete:\n\n{prompt}"},
+    {"name": "academic_review",   "template": "Provide an academic peer review of the following. Comment on every assertion and provide corrections where needed:\n\n{prompt}"}
+  ],
+  "translate_task": [
+    {"name": "to_english",    "template": "Translate the following text to English. Preserve all meaning and detail exactly:\n\n{prompt}"},
+    {"name": "plain_language","template": "Translate the following into plain, clear English that anyone can understand:\n\n{prompt}"},
+    {"name": "formal",        "template": "Translate the following into formal English, keeping all the original content:\n\n{prompt}"},
+    {"name": "rephrase",      "template": "Rephrase the following in different words while preserving its complete meaning:\n\n{prompt}"}
+  ],
+  "explain_to_child": [
+    {"name": "simple_terms", "template": "Explain the following to a 10-year-old in simple terms, covering all the important details:\n\n{prompt}"},
+    {"name": "eli5",         "template": "Explain this like I'm five years old. Use simple language but include all the key information:\n\n{prompt}"},
+    {"name": "beginner",     "template": "Explain the following to someone who has never heard of it before. Be thorough and cover everything:\n\n{prompt}"},
+    {"name": "analogy",      "template": "Explain the following using a simple analogy that makes all the details easy to understand:\n\n{prompt}"}
+  ],
+  "rewrite": [
+    {"name": "clearer",       "template": "Rewrite the following to be clearer and more direct. Keep all content and don't leave anything out:\n\n{prompt}"},
+    {"name": "more_detailed", "template": "Rewrite the following with more detail and precision, expanding on every point:\n\n{prompt}"},
+    {"name": "concise",       "template": "Rewrite the following in a more concise style while preserving every specific detail:\n\n{prompt}"},
+    {"name": "professional",  "template": "Rewrite the following in a professional tone, keeping all the original information intact:\n\n{prompt}"}
+  ]
+}

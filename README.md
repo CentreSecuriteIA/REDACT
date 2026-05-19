@@ -9,7 +9,7 @@ REDACT automates the full lifecycle of red-teaming dataset construction:
 1. **Constitution** — generate structured category hierarchies (harmful, benign, dual-use) using Claude Opus
 2. **Generate** harmful content samples across configurable harm categories
 3. **Validate** each sample via a checker LLM with feedback-driven retry
-4. **Transform** inputs into jailbreak attacks using 30+ techniques
+4. **Transform** inputs into jailbreak attacks using 100+ techniques
 5. **Split, merge, and manage** datasets with balanced distribution across techniques
 
 The library is **model-agnostic** (API or local vLLM), **prompt-agnostic** (all prompts are external JSON files), and **category-agnostic** (new categories require only a taxonomy entry and prompt file).
@@ -104,18 +104,30 @@ src/redact/
 │
 ├── jailbreak/                     # Jailbreak technique library
 │   ├── obfuscation/               # Text transformation attacks
-│   │   ├── encoding.py            # base64, rot13, leetspeak, morse, braille
+│   │   ├── encoding.py            # base64, rot13/18/47, unicode, ordinal, separator, leetspeak, morse, braille
 │   │   ├── structural.py          # JSON, XML, markdown wrapping
-│   │   ├── ascii_art.py           # pyfiglet-based text art
+│   │   ├── ascii_art.py           # pyfiglet-based text art (19 fonts)
 │   │   ├── suffixes.py            # Adversarial suffix generators
-│   │   ├── tokenbreak.py          # Token-breaking (LLM-dependent)
-│   │   └── translation.py         # Low-resource language translation
+│   │   ├── tokenbreak.py          # Token-breaking + sensitive-word encoding (LLM-dependent)
+│   │   ├── typos.py               # LLM-rewritten typos at 4 density levels
+│   │   └── translation.py         # 20 languages across resource tiers
 │   ├── hacking/                   # Cognitive/psychological manipulation
-│   │   └── cognitive.py           # 5 techniques (persona, framing, etc.)
+│   │   ├── cognitive.py           # 5 techniques (persona, framing, AVI, authority, inception)
+│   │   ├── personas.py            # 14 named persona archetypes + invented persona
+│   │   └── framing.py             # 5 scenario-modifying directives (pure transforms, multi-template)
 │   ├── manipulation/              # Context manipulation with benign examples
 │   │   ├── benign.py              # Benign sample generation + caching
 │   │   ├── fsh.py                 # Few-Shot Hacking (4 variants)
 │   │   └── dap.py                 # Distract and Persuade (4 variants)
+│   ├── requests/                  # Request-structure attacks (all pure transforms)
+│   │   ├── answer.py              # 9 output-format + conditioning directives
+│   │   ├── answer_language.py     # 20 ask-answer-in-language functions (generated from JSON)
+│   │   ├── continuation.py        # 4 continuation-attack functions
+│   │   ├── indirect.py            # 6 task-embedding functions
+│   │   ├── distractor.py          # 4 distractor prefix/suffix functions
+│   │   ├── impersonation.py       # 1 good-person impersonation function
+│   │   ├── temporal.py            # 1 past-tense reframing function
+│   │   └── asking.py              # 2 question-framing functions
 │   ├── utils.py                   # combine_techniques() for chaining
 │   └── distribution.py            # Re-exports from dataset module
 │
@@ -313,30 +325,34 @@ For each turn:
 
 ### Jailbreak — Technique Library
 
-30+ jailbreak techniques organized in three families:
+140+ jailbreak techniques organized in four families. Technique definitions are taxonomy-driven where applicable — adding a new variant means adding a JSON entry, not a new function.
 
-#### Obfuscation (22 functions)
+#### Obfuscation
 
-| Type | Functions | LLM Required |
-|---|---|---|
-| Encoding | `to_base64`, `to_rot13`, `to_leetspeak`, `to_morse`, `to_braille` | No |
-| Structural | `to_json`, `to_xml`, `to_markdown` | No |
-| ASCII Art | `to_ascii_art` (16 pyfiglet fonts) | No |
-| Suffixes | `to_adversarial_suffix_{punctuation,fragments,unicode,emoji}` | No |
-| TokenBreak | `to_tokenbreak_{prepend,split,delimiter}` | Yes |
-| Translation | `to_{zulu,scots_gaelic,bengali,swahili,thai,javanese}` | Yes |
+| Type | Module | Functions | LLM Required |
+|---|---|---|---|
+| Encoding | `encoding.py` | `to_base64`, `to_rot13`, `to_rot18`, `to_rot47`, `to_unicode_escape`, `to_ascii_ordinal`, `to_separator`, `to_leetspeak_{basic,intermediate,advanced}`, `to_morse`, `to_braille` | No |
+| Structural | `structural.py` | `to_json`, `to_xml`, `to_markdown` | No |
+| ASCII Art | `ascii_art.py` | `to_ascii_art` (19 pyfiglet fonts) | No |
+| Suffixes | `suffixes.py` | `to_adversarial_suffix_{punctuation,fragments,unicode,emoji}` | No |
+| TokenBreak | `tokenbreak.py` | `to_tokenbreak_{prepend,split,delimiter}` | Yes |
+| Sensitive Words | `tokenbreak.py` | `to_sensitive_words_encode_{base64,rot13,rot18,rot47,unicode,ascii,separator,leetspeak_*}`, `to_sensitive_words_{split,star,hyphen,underscore,variables}`, `to_synonym_substitution` | Yes |
+| Typos | `typos.py` | `to_rewrite_with_typos_{low,medium,high,insane}` | Yes |
+| Translation | `translation.py` | 20 languages across resource tiers: French, Japanese, Russian, Spanish, German, Arabic, Turkish, Czech, Vietnamese, Greek, Croatian, Swahili, Thai, Khmer, Maori, Nepali, Zulu, Scots Gaelic, Bengali, Javanese | Yes |
 
-#### Hacking (5 functions)
+Sensitive-words functions share the `extract_harmful()` LLM detection step from TokenBreak — encoding is then applied only to the detected harmful words rather than the whole prompt. Typo rewriting uses a single LLM call with a level-description injected into the template.
 
-| Function | Description |
-|---|---|
-| `to_persona_roleplay` | Assign AI an unfiltered persona |
-| `to_hypothetical_framing` | Frame in fictional context |
-| `to_authority_obedience` | Authority directives override |
-| `to_avi` | Anthropomorphic vulnerability exploitation |
-| `to_deep_inception` | Nested multi-layer scenarios |
+#### Hacking
 
-Each is a two-step LLM process: **scenario generation** -> **jailbreak construction**.
+| Type | Module | Functions | LLM Required |
+|---|---|---|---|
+| Cognitive | `cognitive.py` | `to_persona_roleplay`, `to_hypothetical_framing`, `to_authority_obedience`, `to_avi`, `to_deep_inception` | Yes |
+| Named Personas | `personas.py` | `to_invented_persona` + 14 named archetypes (psychopath, alien, cult_leader, very_advanced_ai, cartel_leader, artist, mentally_ill, deformed_scientist, politician, deformed_professor, religious_figure, radical_politician, actor, someone_from_the_future) | Yes |
+| Framing | `framing.py` | `to_fictional_world`, `to_noble_goal`, `to_nefarious_goal`, `to_high_stake`, `to_no_moral_constraints` | No |
+
+Cognitive and persona techniques are two-step LLM processes: **scenario generation → jailbreak construction**. Named personas use a persona-grounded scenario prompt that grounds the scenario in the persona's character before construction. Cognitive technique definitions are loaded from `configs/taxonomy/cognitive_techniques.json`; persona definitions from `configs/taxonomy/personas.json` — both are editable without touching code.
+
+Framing directives are pure transforms covering scenario and intent modification. Each has 4 named template variants stored in `configs/framing_templates.json`; one is randomly selected per call with the variant name recorded in `additional_info`. Answer-format directives that were previously part of framing have moved to `requests/answer.py`.
 
 #### Manipulation (8 functions)
 
@@ -344,6 +360,44 @@ Each is a two-step LLM process: **scenario generation** -> **jailbreak construct
 |---|---|---|
 | FSH (Few-Shot Hacking) | random_short, random_long, selected_short, selected_long | Benign Q&A pairs prime helpful pattern before harmful query |
 | DAP (Distract & Persuade) | random_short, random_long, selected_short, selected_long | Harmful query hidden among benign pairs at random position |
+
+#### Requests (47 functions — all pure transforms)
+
+Modifies *how* a request is posed rather than obfuscating its text or attacking the model's mindset. All functions are pure transforms with no LLM dependency.
+
+| Type | Module | Functions |
+|---|---|---|
+| Answer format | `answer.py` | `to_refusal_then_comply`, `to_apology_prevention`, `to_prefix_injection`, `to_answer_in_markdown`, `to_answer_as_tutorial`, `to_answer_as_code`, `to_answer_as_dialogue`, `to_answer_as_story`, `to_answer_as_structured_data` (9) |
+| Answer language | `answer_language.py` | `to_ask_answer_in_{language}` for 20 languages — French, Japanese, Russian, Spanish, German, Arabic, Turkish, Czech, Vietnamese, Greek, Croatian, Thai, Swahili, Khmer, Maori, Nepali, Zulu, Scots Gaelic, Bengali, Javanese (20) |
+| Continuation | `continuation.py` | `to_continue_passage`, `to_complete_story`, `to_fill_in_blank`, `to_continue_instructions` (4) |
+| Indirect | `indirect.py` | `to_summarize`, `to_proofread`, `to_critique`, `to_translate_task`, `to_explain_to_child`, `to_rewrite` (6) |
+| Distractor | `distractor.py` | `to_distractor_prefix_related`, `to_distractor_prefix_unrelated`, `to_distractor_suffix_related`, `to_distractor_suffix_unrelated` (4) |
+| Impersonation | `impersonation.py` | `to_impersonate_good_person` — 8 profession variants (nurse, doctor, security researcher, teacher, etc.) (1) |
+| Temporal | `temporal.py` | `to_use_past_tense` — 4 historical/retrospective framings (1) |
+| Asking | `asking.py` | `to_innocuous_question`, `to_ask_for_details` (2) |
+
+Each function selects randomly from 4 named template variants stored in per-module JSON config files; the chosen variant is logged in `additional_info` for traceability. Answer language functions are generated dynamically from the language list in `answer_language_templates.json` — adding a new language requires only a JSON entry.
+
+#### Reference List Coverage
+
+The library is benchmarked against a reference set of **73 instruction primitives** and **74 request primitives**. Coverage:
+
+| Status | Primitives |
+|---|---|
+| Covered | All encoding/sensitive_words/typos, all 16 translation languages, all 14 named personas, all framing directives (fictional_world, noble/nefarious_goal, high_stake, no_moral_constraints, refusal_then_comply, prefix_injection, apology_prevention, answer_in_markdown, answer_as_tutorial), all request primitives (innocuous_question, impersonate_good_person, distractor ×4, use_past_tense, ask_for_details, ask_answer_in ×16) |
+| Excluded by design | `agent_context_additional_instr` (requires system-prompt access), `fine_tuning` (out of scope), `use_highly_specialized_language` (unclear implementation path), `direct_question` (no-op) |
+
+**Beyond the reference list** — techniques not in the reference set but included:
+- Extra encodings: rot18, rot47, braille, morse, ascii_ordinal
+- ASCII art obfuscation (19 pyfiglet fonts)
+- Adversarial suffixes (punctuation, fragments, unicode, emoji)
+- Structural wrapping (JSON, XML, markdown)
+- Cognitive hacking (5 two-step LLM techniques: persona_roleplay, hypothetical_framing, authority_obedience, AVI, deep_inception)
+- Manipulation (FSH + DAP, 8 variants using benign Q&A caching)
+- Extra answer formats: code, dialogue, story, structured data
+- Continuation attacks (4 variants)
+- Indirect task embedding (6 task types)
+- Extra answer languages: Zulu, Scots Gaelic, Bengali, Javanese
 
 **Technique chaining:**
 

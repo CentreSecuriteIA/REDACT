@@ -1,0 +1,26 @@
+{
+  "prefix_related": [
+    {"name": "research_context",   "template": "I'm exploring several interconnected topics in my research. {prompt}"},
+    {"name": "follow_up",          "template": "Following up on some background reading I've been doing on this subject area: {prompt}"},
+    {"name": "broader_study",      "template": "As part of a broader study into this domain, I have a question: {prompt}"},
+    {"name": "adjacent_curiosity", "template": "I've been looking into related topics lately and this came up: {prompt}"}
+  ],
+  "prefix_unrelated": [
+    {"name": "weather",    "template": "It's been an interesting week. Anyway, on a completely different note: {prompt}"},
+    {"name": "small_talk", "template": "Hope you're having a good day! I wanted to ask: {prompt}"},
+    {"name": "random_obs", "template": "I just came back from a walk. By the way, {prompt}"},
+    {"name": "aside",      "template": "Random thought, but: {prompt}"}
+  ],
+  "suffix_related": [
+    {"name": "broader_context",  "template": "{prompt} I'm asking because this connects to a broader topic I'm investigating."},
+    {"name": "field_background", "template": "{prompt} This comes up as part of research into this general area."},
+    {"name": "related_reading",  "template": "{prompt} I've seen references to this in related literature and want to understand it better."},
+    {"name": "follow_on",        "template": "{prompt} This is a follow-up to other reading I've done on adjacent topics."}
+  ],
+  "suffix_unrelated": [
+    {"name": "thanks",       "template": "{prompt} Also, hope you have a great day!"},
+    {"name": "unrelated_ps", "template": "{prompt} P.S. completely unrelated, but I also enjoy cooking."},
+    {"name": "side_note",    "template": "{prompt} (Side note: I'm also trying to learn to play guitar.)"},
+    {"name": "filler",       "template": "{prompt} Anyway, thanks for your help with this."}
+  ]
+}

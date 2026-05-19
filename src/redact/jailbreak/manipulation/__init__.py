@@ -6,7 +6,7 @@
 
 from .fsh import get_fsh_functions
 from .dap import get_dap_functions
-from .benign import BENIGN_CATEGORIES, load_benign_data, process_category
+from .benign import BENIGN_CATEGORIES, load_benign_data, process_category, get_or_generate_benign_data
 
 
 def get_manipulation_types() -> list[str]:
@@ -20,3 +20,8 @@ def get_manipulation_type_to_getter() -> dict[str, callable]:
         "fsh": get_fsh_functions,
         "dap": get_dap_functions,
     }
+
+
+def get_all_manipulation_functions() -> list:
+    """Return flat list of all manipulation technique functions."""
+    return get_fsh_functions() + get_dap_functions()
