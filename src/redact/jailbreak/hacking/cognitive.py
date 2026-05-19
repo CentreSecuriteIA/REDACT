@@ -71,7 +71,7 @@ def get_situation(
     )
     if match:
         return match.group(1).strip()
-    raise ValueError("No 'scenario description' found in LLM output")
+    return situation.strip()
 
 
 def create_jailbreak(

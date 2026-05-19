@@ -82,7 +82,8 @@ def get_persona_situation(
     )
     if match:
         return match.group(1).strip()
-    raise ValueError(f"No 'Scenario Description' found in LLM output for persona '{persona_name}'")
+    # LLM didn't use the expected header — use the raw output as the scenario
+    return output.strip()
 
 
 # ---------------------------------------------------------------------------

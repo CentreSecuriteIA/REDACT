@@ -258,14 +258,16 @@ def get_or_generate_benign_data(
     all_rows = []
     for i, category in enumerate(BENIGN_CATEGORIES):
         if verbose:
-            print(f"    [{i + 1}/{len(BENIGN_CATEGORIES)}] {category[0]} / {category[1]}")
+            print(f"    [{i + 1}/{len(BENIGN_CATEGORIES)}] {category[0]} / {category[1]}", end="", flush=True)
         rows = process_category(category, backend, model, rate_limiter)
         all_rows.extend(rows)
+        pd.DataFrame(all_rows).to_csv(path, index=False)
+        if verbose:
+            print(f" → saved ({len(all_rows)} rows total)")
 
     df = pd.DataFrame(all_rows)
-    df.to_csv(path, index=False)
     if verbose:
-        print(f"  Saved {len(df)} benign samples to {path}")
+        print(f"  Done. {len(df)} benign samples saved to {path}")
 
     return load_benign_data(path)
 

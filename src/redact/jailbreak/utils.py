@@ -132,6 +132,11 @@ def combine_techniques(*techniques: Callable, sort_by_hierarchy: bool = True) ->
                 new_text, info, _ = output
             else:
                 new_text, info = output
+
+            # Early exit on rejection — don't apply remaining techniques
+            if info.startswith("DISCARDED"):
+                return result, f"DISCARDED; technique={technique.__name__}; {info[len('DISCARDED; '):]}"
+
             # Track no-ops
             if new_text == result:
                 info_parts.append(f"noop={technique.__name__}")
@@ -364,6 +369,26 @@ def sample_combination(
 
 
 # ---------------------------------------------------------------------------
+# Rejection parsing
+# ---------------------------------------------------------------------------
+
+
+def _parse_rejection_info(info_str: str) -> tuple[bool, str]:
+    """Parse technique info string to extract acceptance status and reason.
+
+    Returns (accepted: bool, reasoning: str):
+    - If info_str starts with "DISCARDED": accepted=False, reasoning=full info string
+    - Otherwise: accepted=True, reasoning="" (empty)
+
+    The "DISCARDED" prefix is a sentinel set by with_feedback_retries() when
+    checks are exhausted, so checking it reliably identifies rejections.
+    """
+    if info_str.startswith("DISCARDED"):
+        return False, info_str
+    return True, ""
+
+
+# ---------------------------------------------------------------------------
 # apply_combination
 # ---------------------------------------------------------------------------
 
@@ -377,7 +402,7 @@ def apply_combination(
     benign_data: dict | None = None,
     auto_benign: bool = True,
     benign_cache_path=None,
-) -> tuple[str, str]:
+) -> tuple[str, str, bool, str]:
     """Apply a technique function (or combined function) to a prompt.
 
     Handles benign_data auto-generation for manipulation techniques:
@@ -395,7 +420,9 @@ def apply_combination(
         benign_cache_path: Path to benign CSV cache. Uses default if None.
 
     Returns:
-        (result_text, additional_info)
+        (result_text, additional_info, accepted: bool, reasoning: str)
+        - accepted: False if any step produced "DISCARDED; ..." output
+        - reasoning: Full rejection message if accepted=False, empty string otherwise
     """
     # Check if benign_data is needed
     inner_fns = getattr(fn, "techniques", [fn])
@@ -419,8 +446,13 @@ def apply_combination(
     )
     # Normalize 3-tuple (cognitive/persona scenario return)
     if isinstance(output, tuple) and len(output) == 3:
-        return output[0], output[1]
-    return output
+        text, info, _ = output
+    else:
+        text, info = output
+
+    # Parse rejection status from info string
+    accepted, reasoning = _parse_rejection_info(info)
+    return text, info, accepted, reasoning
 
 
 # ---------------------------------------------------------------------------
