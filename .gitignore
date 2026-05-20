@@ -27,3 +27,8 @@ venv/
 # OS
 .DS_Store
 Thumbs.db
+
+# Documentation files
+REFACTOR.md
+refactor-reference.md
+CLAUDE.md

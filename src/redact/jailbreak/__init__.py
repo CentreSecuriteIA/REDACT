@@ -43,12 +43,30 @@ from .requests import get_request_type_to_getter, get_request_types, get_all_req
 # Utilities
 from .utils import (
     combine_techniques,
+    make_combination_gen,
     tag_all_functions,
     get_compatible_remaining,
     sample_combination,
     apply_combination,
+    assign_combination,
+    build_combination,
+    build_function_registry,
     is_noop,
     load_spec,
+)
+
+# Request protocol + batched engine
+from .protocol import LLMRequest, run_sync
+from .engine import batch_apply_combinations
+
+# Run planning + resumable manifest ledger
+from .manifest import (
+    plan_run,
+    load_plan,
+    plan_index,
+    completed_from_output,
+    compute_sample_id,
+    default_manifest_path,
 )
 
 # Distribution

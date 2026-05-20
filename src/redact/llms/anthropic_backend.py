@@ -106,5 +106,11 @@ class AnthropicBackend(LLMBackend):
     def backend_name(self) -> str:
         return "anthropic"
 
+    @property
+    def supports_parallel_calls(self) -> bool:
+        # Claude has tight TPM/RPM limits — concurrent requests inside the
+        # RPM budget can still trip TPM. Router enforces series-only.
+        return False
+
     def __repr__(self) -> str:
         return "AnthropicBackend()"

@@ -11,10 +11,7 @@ from .cognitive import (
     get_situation,
     create_jailbreak,
 )
-from .personas import (
-    get_persona_functions,
-    get_persona_situation,
-)
+from .personas import get_persona_functions
 from .framing import get_framing_functions
 
 

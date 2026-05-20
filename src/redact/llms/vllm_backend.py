@@ -144,5 +144,16 @@ class VLLMBackend(LLMBackend):
     def backend_name(self) -> str:
         return "vllm"
 
+    @property
+    def supports_native_batching(self) -> bool:
+        # batch_generate() runs a single engine pass over the whole list.
+        return True
+
+    @property
+    def supports_parallel_calls(self) -> bool:
+        # Concurrent generate() calls from threads compete for GPU memory —
+        # batching must go through batch_generate() instead.
+        return False
+
     def __repr__(self) -> str:
         return f"VLLMBackend(model={self._model_name!r})"

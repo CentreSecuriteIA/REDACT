@@ -23,11 +23,11 @@ import csv
 import logging
 import re
 from dataclasses import dataclass, field
-from enum import Enum
 from pathlib import Path
 
 import pandas as pd
 
+from ..types import EntryType, ALL_ENTRY_TYPES
 from ..llms.base import LLMBackend
 from ..llms.calls import generate_sample
 from ..llms.extraction import parse_constitution as _parse_raw
@@ -36,27 +36,6 @@ from ..llms.wrappers import RateLimiter
 from ..dataset.taxonomy import iter_categories, get_subcategories
 
 logger = logging.getLogger(__name__)
-
-
-# ---------------------------------------------------------------------------
-# Entry type enum
-# ---------------------------------------------------------------------------
-
-
-class EntryType(str, Enum):
-    """Severity level for a constitution entry.
-
-    Spectrum:
-        HARMFUL <-> DUAL_USE_HARMFUL <-> DUAL_USE_BENIGN <-> BENIGN
-    """
-
-    HARMFUL = "harmful"
-    DUAL_USE_HARMFUL = "dual_use_harmful"
-    DUAL_USE_BENIGN = "dual_use_benign"
-    BENIGN = "benign"
-
-
-ALL_ENTRY_TYPES = list(EntryType)
 
 
 # ---------------------------------------------------------------------------
@@ -187,11 +166,16 @@ class ConstitutionPipeline:
     def __init__(
         self,
         backend: LLMBackend,
-        model: str = "claude-opus-4-6",
+        model: str | None = "claude-opus-4-6",
         rate_limiter: RateLimiter | None = None,
         output_dir: str | Path | None = None,
     ):
         self.backend = backend
+        if model is None:
+            # Fallback to the registered constitution-gen role. Kept opt-in
+            # (None) so the explicit literal default still wins.
+            from ..llms.model_config import default_model_for_role
+            model = default_model_for_role("constitution_gen")
         self.model = model
         self.rate_limiter = rate_limiter
 

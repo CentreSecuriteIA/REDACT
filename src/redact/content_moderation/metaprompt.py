@@ -39,7 +39,7 @@ Usage:
         # Step 3: generate samples
         result = pipeline.run_category(
             category=category_name,
-            prompt_config=load_prompt("content_moderation", "generation"),
+            prompt_config=load_prompt("input", "generation/standalone"),
             build_check_messages=build_quality_checker(category_name),
             seed_kwargs_per_turn=[{
                 "Category": category_name,
@@ -88,7 +88,7 @@ def generate_category_description(
         if all retries fail.
     """
     config = load_prompt(
-        "content_moderation", "category_description", prompt_dir=prompt_dir
+        "input", "category_description", prompt_dir=prompt_dir
     )
     messages = build_messages(config, Category=category)
 
@@ -142,7 +142,7 @@ def generate_seeds(
         (which means no seeds in the generation template) if all retries fail.
     """
     config = load_prompt(
-        "content_moderation", "seed_generation", prompt_dir=prompt_dir
+        "input", "seed_generation", prompt_dir=prompt_dir
     )
     messages = build_messages(
         config,
@@ -217,7 +217,7 @@ def generate_abstract_seeds(
         unchanged if all retries fail.
     """
     from ..llms.prompts import load_prompt as _load
-    config = _load("content_moderation", "metaprompt", prompt_dir=prompt_dir)
+    config = _load("input", "metaprompt", prompt_dir=prompt_dir)
     messages = build_messages(
         config,
         Category=category,

@@ -7,12 +7,14 @@ Each builder returns a function with signature:
 The checker LLM should respond starting with "Yes"/"Accept" if the sample
 is good, or provide feedback explaining what's wrong if it's not.
 
-Prompts are loaded from JSON templates in Prompts/Content_Moderation/.
+Prompts are loaded from JSON templates under ``prompts/input/`` (input-side
+checkers) and ``prompts/output/`` (output checker).
 """
 
 from typing import Callable
 
-from ..llms.prompts import load_prompt, build_messages
+from ..types import EntryType
+from ..llms.prompts import load_prompt
 
 DEFAULT_CATEGORIES: list[str] = [
     "CBRN",
@@ -29,44 +31,93 @@ DEFAULT_CATEGORIES: list[str] = [
     "Benign",
 ]
 
+
 def build_quality_checker(
     category: str,
     criteria: str = "",
+    entry_type: str | EntryType = "harmful",
+    subcategory: str = "",
     prompt_dir: str | None = None,
 ) -> Callable[[str], list[dict]]:
     """Build a checker that validates sample quality and category fit.
 
-    The returned function creates a message list that asks the checker LLM
-    to evaluate whether a generated sample:
-    1. Actually belongs to the specified harm category
-    2. Is realistic and plausible
-    3. Is sufficiently distinct (not generic/templated)
-    4. Meets any additional criteria
-
-    NOTE: This checker is designed for harmful content generation only.
-    It evaluates samples against the harm category criteria. When content
-    moderation benign/dual-use generation is added, extend this function
-    with an ``entry_type`` parameter (see
-    ``constitution/input_generation.py`` and
-    ``prompts/constitution/checker/template.json`` for the pattern).
-
-    Loads the system prompt and template from
-    ``Prompts/Content_Moderation/quality_check/template.json``.
+    Loads the unified entry-type-aware template from
+    ``prompts/input/quality_check/template.json`` and injects ``category``,
+    ``subcategory``, and ``entry_type`` so the evaluator knows what kind of
+    sample it is validating (harmful vs benign vs dual-use).
 
     Args:
-        category: The target harm category.
-        criteria: Additional acceptance criteria (optional).
+        category: The target category (harm domain or benign category).
+        criteria: Additional acceptance criteria appended to the system
+            prompt (optional).
+        entry_type: ``"harmful"`` / ``"dual_use_harmful"`` /
+            ``"dual_use_benign"`` / ``"benign"``. Default ``"harmful"`` —
+            preserves the prior harmful-only behaviour for callers that
+            don't pass this argument.
+        subcategory: Constitution subcategory, or ``""`` (defaults to
+            ``category`` inside the prompt for standalone CM use).
         prompt_dir: Root directory for prompt JSON files.
 
     Returns:
         Callable(sample) -> message list for use with check_sample().
     """
-    prompt_config = load_prompt(
-        "content_moderation", "quality_check", prompt_dir=prompt_dir
+    entry_type_value = (
+        entry_type.value if isinstance(entry_type, EntryType) else str(entry_type)
     )
 
-    # Inject additional criteria into the system prompt if provided
-    system_prompt = prompt_config["system_prompt"].format(Category=category)
+    prompt_config = load_prompt(
+        "input", "quality_check", prompt_dir=prompt_dir
+    )
+
+    system_prompt = prompt_config["system_prompt"].format(
+        Category=category,
+        entry_type=entry_type_value,
+        subcategory=subcategory or category,
+    )
+    if criteria:
+        system_prompt += f"\n6. Additional criteria: {criteria}"
+
+    def _build(sample: str) -> list[dict]:
+        template = prompt_config["template"].format(sample=sample)
+        return [
+            {"role": "system", "content": system_prompt},
+            {"role": "user", "content": template},
+        ]
+
+    return _build
+
+
+def build_output_quality_checker(
+    category: str,
+    entry_type: str | EntryType = "harmful",
+    criteria: str = "",
+    prompt_dir: str | None = None,
+) -> Callable[[str], list[dict]]:
+    """Build a checker that validates the model's output to a given input.
+
+    For harmful inputs the checker should accept outputs that actually
+    contain the harmful response (not a refusal). For benign inputs the
+    checker should accept normal helpful answers.
+
+    The returned callable takes a single string formatted as
+    ``"INPUT:\\n<input_prompt>\\n\\nOUTPUT:\\n<output_response>"`` (this is
+    what ``batch_check_samples`` already supplies when fed input-output
+    pairs concatenated via ``\\n\\n``-delimiter convention).
+
+    Loads ``prompts/output/quality_check/template.json``.
+    """
+    entry_type_value = (
+        entry_type.value if isinstance(entry_type, EntryType) else str(entry_type)
+    )
+
+    prompt_config = load_prompt(
+        "output", "quality_check", prompt_dir=prompt_dir
+    )
+
+    system_prompt = prompt_config["system_prompt"].format(
+        Category=category,
+        entry_type=entry_type_value,
+    )
     if criteria:
         system_prompt += f"\n5. Additional criteria: {criteria}"
 
@@ -95,7 +146,7 @@ def build_category_checker(
     recovery" for mode collapse detection.
 
     Loads the system prompt and template from
-    ``Prompts/Content_Moderation/category_check/template.json``.
+    ``prompts/input/category_check/template.json``.
 
     Args:
         category: The expected category.
@@ -107,7 +158,7 @@ def build_category_checker(
         Callable(sample) -> message list for use with check_sample().
     """
     prompt_config = load_prompt(
-        "content_moderation", "category_check", prompt_dir=prompt_dir
+        "input", "category_check", prompt_dir=prompt_dir
     )
 
     cats = all_categories or DEFAULT_CATEGORIES

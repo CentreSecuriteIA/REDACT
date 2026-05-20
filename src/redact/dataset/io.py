@@ -21,15 +21,20 @@ def _default_dataset_dir() -> Path:
     return get_output_dir() / "Datasets"
 
 
-# Standard columns. Extra columns (reasoning, additional_info, etc.)
-# are allowed and preserved on read/write.
+# Standard input-sample CSV schema. Extra columns (technique, language,
+# source_sample_description, etc.) are allowed and preserved on read/write.
+# This is the contract the jailbreak pipeline (handled in a separate
+# session) consumes from generated input CSVs.
 SAMPLE_COLUMNS: list[str] = [
-    "id",        # MD5 hash of sample text
-    "sample",    # The generated text content
-    "category",  # Harm category name
-    "turn",      # Generation turn index
-    "accepted",  # Whether the sample passed the checker
-    "source",    # "generated" / "paraphrased" / etc.
+    "id",                # MD5 hash of sample text
+    "sample",            # The generated text content
+    "category",          # Harm or benign category name
+    "subcategory",       # Constitution subcategory, or ""
+    "entry_type",        # harmful / dual_use_harmful / dual_use_benign / benign
+    "turn",              # Generation turn index
+    "accepted",          # Whether the sample passed the checker
+    "rejection_reason",  # Checker reasoning on reject; "" on accept
+    "source",            # metaprompt / constitution / handcrafted / generated
 ]
 
 

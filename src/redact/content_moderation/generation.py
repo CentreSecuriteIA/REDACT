@@ -31,12 +31,16 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Callable
 
+import pandas as pd
+
 from ..llms.base import LLMBackend
 from ..llms.calls import generate_sample, check_sample, batch_check_samples
 from ..llms.prompts import build_messages
 from ..llms.extraction import get_format_instruction, extract_and_clean
 from ..llms.wrappers import RateLimiter
 from ..dataset.io import append_samples, get_existing_samples, _default_dataset_dir
+from ..types import EntryType
+from .checker import build_quality_checker
 
 logger = logging.getLogger(__name__)
 
@@ -98,6 +102,27 @@ class CategoryResult:
         if self.total_extracted == 0:
             return 0.0
         return self.total_accepted / self.total_extracted
+
+
+@dataclass
+class ConstitutionInputResult:
+    """Aggregate result of constitution-seeded input generation.
+
+    Returned by ``InputPipeline.run_from_constitution()``. Tracks per-batch
+    statistics so callers can detect mode collapse or model degradation.
+    """
+
+    total_entries_processed: int = 0
+    skipped_entries: int = 0
+    total_prompts_generated: int = 0
+    total_prompts_accepted: int = 0
+    total_prompts_rejected: int = 0
+
+    @property
+    def acceptance_rate(self) -> float:
+        if self.total_prompts_generated == 0:
+            return 0.0
+        return self.total_prompts_accepted / self.total_prompts_generated
 
 
 # ---------------------------------------------------------------------------
@@ -316,6 +341,10 @@ class InputPipeline:
         category: str = "",
         save: bool = True,
         prohibited: set[str] | None = None,
+        entry_type: str | EntryType = "harmful",
+        subcategory: str = "",
+        source: str = "metaprompt",
+        extra_row_metadata: dict | None = None,
         **seed_kwargs: str,
     ) -> TurnResult:
         """Execute a single generation turn: generate, extract, check, save.
@@ -329,6 +358,13 @@ class InputPipeline:
             category: Category name (for saving).
             save: Whether to save samples to CSV.
             prohibited: Existing samples to avoid during generation.
+            entry_type: Severity tag for every sample saved this turn
+                (default "harmful" — backward-compatible).
+            subcategory: Constitution subcategory tag, or "".
+            source: "metaprompt" / "constitution" / etc. — written to the
+                ``source`` CSV column.
+            extra_row_metadata: Extra per-turn metadata applied to every row
+                (e.g. ``{"source_sample_description": "..."}``).
             **seed_kwargs: Template variables.
 
         Returns:
@@ -376,12 +412,23 @@ class InputPipeline:
             len(rejected_samples),
         )
 
-        # Save ALL samples (accepted + rejected) with metadata
+        # Save ALL samples (accepted + rejected) with the unified schema
         if save and sample_results and category:
+            entry_type_value = (
+                entry_type.value
+                if isinstance(entry_type, EntryType)
+                else str(entry_type)
+            )
+            base_meta = {
+                "entry_type": entry_type_value,
+                "subcategory": subcategory,
+            }
+            if extra_row_metadata:
+                base_meta.update(extra_row_metadata)
             all_texts = [r.text for r in sample_results]
             all_accepted = [r.accepted for r in sample_results]
             all_extra = [
-                {"reasoning": r.reasoning} if r.reasoning else {}
+                {**base_meta, "rejection_reason": r.reasoning}
                 for r in sample_results
             ]
             append_samples(
@@ -389,7 +436,7 @@ class InputPipeline:
                 category=category,
                 turn=turn_index,
                 accepted=all_accepted,
-                source="generated",
+                source=source,
                 extra_columns=all_extra,
                 dataset_dir=self.dataset_dir,
             )
@@ -414,6 +461,9 @@ class InputPipeline:
         use_prohibited: bool = True,
         seed_kwargs_per_turn: list[dict[str, str]] | None = None,
         save: bool = True,
+        entry_type: str | EntryType = "harmful",
+        subcategory: str = "",
+        source: str = "metaprompt",
     ) -> CategoryResult:
         """Run the full generation pipeline for a single category.
 
@@ -435,6 +485,11 @@ class InputPipeline:
                 unpacked as **kwargs into the prompt template.
                 If None, only Category=category is passed each turn.
             save: Whether to save to CSV.
+            entry_type: Severity tag for every sample saved this run
+                (default ``"harmful"`` — preserves prior behaviour).
+            subcategory: Constitution subcategory tag, or ``""``.
+            source: ``"metaprompt"`` (standalone CM) or ``"constitution"``
+                (constitution-seeded). Written to the ``source`` CSV column.
 
         Returns:
             CategoryResult with all turn outcomes.
@@ -468,6 +523,9 @@ class InputPipeline:
                 category=category,
                 save=save,
                 prohibited=prohibited,
+                entry_type=entry_type,
+                subcategory=subcategory,
+                source=source,
                 **seed_kwargs,
             )
 
@@ -503,5 +561,223 @@ class InputPipeline:
             f"{result.total_accepted}/{result.total_extracted} accepted "
             f"({result.overall_acceptance_rate:.0%})"
         )
+
+        return result
+
+    # ------------------------------------------------------------------
+    # Constitution-seeded mode
+    # ------------------------------------------------------------------
+
+    def run_from_constitution(
+        self,
+        constitution_df: pd.DataFrame,
+        prompt_config: dict,
+        samples_per_entry: int = 3,
+        use_checker: bool = True,
+        save: bool = True,
+        verbose: bool = True,
+        batch_size: int = 32,
+    ) -> ConstitutionInputResult:
+        """Run constitution-seeded input generation, batched across entries.
+
+        Each row in ``constitution_df`` becomes a generation request. The
+        per-entry feedback loop is handled inside the LLM checker — failed
+        samples are saved with their rejection reason but no regeneration
+        loop runs here (this mode prioritises throughput over per-sample
+        retries). For per-sample retry use ``generate_with_check`` directly.
+
+        Each batch of ``batch_size`` entries triggers exactly one
+        ``batch_generate`` call (one vLLM engine pass) followed by one
+        checker batch_generate. CSV append happens per batch, so a crash
+        mid-run loses at most ``batch_size`` entries' worth of work.
+
+        Args:
+            constitution_df: DataFrame with columns ``source_category``,
+                ``sample_description``, ``constitution_subcategory``,
+                ``entry_type`` (matches the output of
+                ``ConstitutionPipeline.to_dataframe()``).
+            prompt_config: Loaded prompt JSON config from
+                ``prompts/input/generation/from_constitution/{style}/``.
+            samples_per_entry: Prompts to generate per constitution entry.
+            use_checker: Whether to run the entry-type-aware quality checker.
+            save: Whether to append rows to CSV per batch.
+            verbose: Print per-entry progress.
+            batch_size: Entries per LLM engine pass.
+
+        Returns:
+            ConstitutionInputResult with generation statistics.
+        """
+        if constitution_df.empty:
+            logger.warning("run_from_constitution: empty constitution_df, nothing to do")
+            return ConstitutionInputResult()
+
+        result = ConstitutionInputResult()
+        prohibited: set[str] = set()
+        checker_cache: dict[tuple[str, str, str], Callable[[str], list[dict]]] = {}
+
+        entries = list(constitution_df.iterrows())
+        total = len(entries)
+
+        if verbose:
+            print(f"\n  Constitution-seeded generation: {total} entries, "
+                  f"batch_size={batch_size}, samples_per_entry={samples_per_entry}")
+
+        for batch_start in range(0, total, batch_size):
+            batch = entries[batch_start : batch_start + batch_size]
+
+            # 1. Build per-entry generation messages
+            messages_list = []
+            for _, entry in batch:
+                seed_kwargs = {
+                    "Category": str(entry.get("source_category", "")),
+                    "sample_description": str(entry.get("sample_description", "")),
+                    "constitution_subcategory": str(
+                        entry.get("constitution_subcategory", "")
+                    ),
+                    "entry_type": str(entry.get("entry_type", "harmful")),
+                }
+                messages_list.append(
+                    self._build_generation_messages(
+                        prompt_config,
+                        samples_per_request=samples_per_entry,
+                        prohibited=prohibited,
+                        **seed_kwargs,
+                    )
+                )
+
+            # 2. Single batch_generate for the whole chunk
+            raw_outputs = self.gen_backend.batch_generate(
+                messages_list, self.gen_model
+            )
+
+            # 3. Extract per entry
+            per_entry_extracted: list[list[str]] = []
+            for (_, entry), raw_output in zip(batch, raw_outputs):
+                extracted = extract_and_clean(
+                    raw_output, style=self.extraction_style
+                )
+                if prohibited:
+                    extracted = [s for s in extracted if s not in prohibited]
+                per_entry_extracted.append(extracted)
+
+            # 4. Build flat checker list + single batch_generate for checks
+            flat_samples: list[str] = []
+            flat_check_msgs: list[list[dict]] = []
+            entry_ranges: list[tuple[int, int]] = []
+            for (_, entry), extracted in zip(batch, per_entry_extracted):
+                start = len(flat_samples)
+                flat_samples.extend(extracted)
+                entry_ranges.append((start, len(flat_samples)))
+
+                if use_checker and extracted:
+                    category = str(entry.get("source_category", "unknown"))
+                    entry_type = str(entry.get("entry_type", "harmful"))
+                    subcategory = str(entry.get("constitution_subcategory", ""))
+                    cache_key = (category, entry_type, subcategory)
+                    if cache_key not in checker_cache:
+                        checker_cache[cache_key] = build_quality_checker(
+                            category=category,
+                            entry_type=entry_type,
+                            subcategory=subcategory,
+                        )
+                    checker = checker_cache[cache_key]
+                    flat_check_msgs.extend(checker(s) for s in extracted)
+
+            flat_check_results: list[tuple[bool, str]]
+            if use_checker and flat_check_msgs:
+                responses = self.check_backend.batch_generate(
+                    flat_check_msgs, self.check_model
+                )
+                flat_check_results = []
+                for response in responses:
+                    accepted = any(
+                        response.strip().lower().startswith(p)
+                        for p in ("yes", "ok", "accept", "pass")
+                    )
+                    flat_check_results.append((accepted, "" if accepted else response))
+            else:
+                flat_check_results = [(True, "") for _ in flat_samples]
+
+            # 5. Per-entry save (incremental) and stats
+            for entry_idx, (_, entry) in enumerate(batch):
+                global_idx = batch_start + entry_idx
+                start, end = entry_ranges[entry_idx]
+                extracted = per_entry_extracted[entry_idx]
+
+                category = str(entry.get("source_category", "unknown"))
+                entry_type = str(entry.get("entry_type", "harmful"))
+                subcategory = str(entry.get("constitution_subcategory", ""))
+                sample_desc = str(entry.get("sample_description", ""))
+
+                if verbose:
+                    print(
+                        f"    [{global_idx + 1}/{total}] {category} | {entry_type} | "
+                        f"{sample_desc[:60]}{'...' if len(sample_desc) > 60 else ''}"
+                    )
+
+                if not extracted:
+                    result.skipped_entries += 1
+                    if verbose:
+                        print("       -> no samples extracted")
+                    continue
+
+                sample_results = [
+                    SampleResult(
+                        text=text,
+                        accepted=accepted,
+                        reasoning=reasoning,
+                        turn=0,
+                    )
+                    for text, (accepted, reasoning) in zip(
+                        extracted, flat_check_results[start:end]
+                    )
+                ]
+
+                if save:
+                    extra = [
+                        {
+                            "entry_type": entry_type,
+                            "subcategory": subcategory,
+                            "source_sample_description": sample_desc,
+                            "constitution_category": str(
+                                entry.get("constitution_category", "")
+                            ),
+                            "source_group_tag": str(
+                                entry.get("source_group_tag", "")
+                            ),
+                            "rejection_reason": sr.reasoning,
+                        }
+                        for sr in sample_results
+                    ]
+                    append_samples(
+                        [sr.text for sr in sample_results],
+                        category=category,
+                        turn=0,
+                        accepted=[sr.accepted for sr in sample_results],
+                        source="constitution",
+                        extra_columns=extra,
+                        dataset_dir=self.dataset_dir,
+                    )
+
+                accepted_count = sum(1 for sr in sample_results if sr.accepted)
+                rejected_count = len(sample_results) - accepted_count
+
+                result.total_entries_processed += 1
+                result.total_prompts_generated += len(sample_results)
+                result.total_prompts_accepted += accepted_count
+                result.total_prompts_rejected += rejected_count
+
+                for sr in sample_results:
+                    prohibited.add(sr.text)
+
+                if verbose:
+                    print(f"       -> {accepted_count} accepted, {rejected_count} rejected")
+
+        if verbose:
+            print(
+                f"\n  Constitution-seeded run complete: "
+                f"{result.total_prompts_accepted}/{result.total_prompts_generated} "
+                f"accepted ({result.acceptance_rate:.0%})"
+            )
 
         return result

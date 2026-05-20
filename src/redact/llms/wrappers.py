@@ -162,6 +162,12 @@ class BatchCaller:
     When max_workers=1 (default), runs sequentially for easy debugging.
     When max_workers>1, uses ThreadPoolExecutor for parallel execution.
 
+    Use ``BatchCaller.from_model(backend, model)`` to construct one whose
+    concurrency matches the model's ``recommended_max_workers``. Use
+    ``batch_generate()`` as the entry point — it routes through the
+    backend's native batching when available (vLLM) and raises ValueError
+    if a caller misconfigures concurrency on a series-only backend.
+
     NOTE: When using a VLLMBackend, keep max_workers=1 — vLLM manages
     GPU memory internally and its batch_generate() is the correct way to
     parallelize. Multiple concurrent generate() calls from threads would
@@ -177,6 +183,35 @@ class BatchCaller:
         self._backend = backend
         self._rate_limiter = rate_limiter
         self._max_workers = max_workers
+
+    @classmethod
+    def from_model(
+        cls,
+        backend: LLMBackend,
+        model: str,
+        rate_limiter: "RateLimiter | None" = None,
+    ) -> "BatchCaller":
+        """Construct a BatchCaller using the model's recommended concurrency.
+
+        Reads ``recommended_max_workers`` from the model registry. If the
+        backend reports ``supports_parallel_calls=False`` we clamp to 1
+        defensively (catches a misconfigured registry entry); the same
+        invariant is re-checked at ``batch_generate()`` time so a caller
+        who mutates max_workers afterwards still hits a hard error.
+        """
+        config = get_model_config(model)
+        workers = config.recommended_max_workers
+        if not backend.supports_parallel_calls and workers > 1:
+            workers = 1
+        return cls(backend, rate_limiter=rate_limiter, max_workers=workers)
+
+    @property
+    def backend(self) -> LLMBackend:
+        return self._backend
+
+    @property
+    def max_workers(self) -> int:
+        return self._max_workers
 
     def _call_one(
         self, messages: list[dict], model: str, **kwargs
@@ -229,3 +264,54 @@ class BatchCaller:
                         on_complete(idx, result)
 
         return results  # type: ignore[return-value]
+
+    def batch_generate(
+        self,
+        messages_list: list[list[dict]],
+        model: str,
+        on_complete: Callable[[int, str], None] | None = None,
+        **kwargs,
+    ) -> list[str]:
+        """Capability-aware batched generation.
+
+        Routes to the right execution mode based on backend capability flags:
+        - ``supports_native_batching`` (vLLM): single engine pass via
+          ``backend.batch_generate()``.
+        - ``supports_parallel_calls`` (Venice, GLM, DeepSeek): ThreadPool
+          parallel via ``run()`` with ``max_workers``.
+        - Otherwise (Anthropic): sequential via ``run()``.
+
+        Hard-fails on two known footguns to make misconfiguration explicit:
+        - vLLM + ``max_workers>1``: GPU contention; use native batch.
+        - Series-only backend (Anthropic) + ``max_workers>1``: TPM/RPM blow-out.
+        """
+        if self._backend.supports_native_batching and self._max_workers > 1:
+            raise ValueError(
+                f"{type(self._backend).__name__} uses native batching; "
+                f"max_workers must be 1 (got {self._max_workers}). "
+                f"Construct BatchCaller via BatchCaller.from_model() or pass "
+                f"max_workers=1 explicitly."
+            )
+        if not self._backend.supports_parallel_calls and self._max_workers > 1:
+            raise ValueError(
+                f"{type(self._backend).__name__} requires series calls; "
+                f"max_workers must be 1 (got {self._max_workers}). "
+                f"Construct BatchCaller via BatchCaller.from_model() or pass "
+                f"max_workers=1 explicitly."
+            )
+
+        if not messages_list:
+            return []
+
+        # Native batch (vLLM): single engine pass, one rate-limit slot.
+        if self._backend.supports_native_batching:
+            if self._rate_limiter:
+                self._rate_limiter.wait_if_needed(model)
+            results = self._backend.batch_generate(messages_list, model, **kwargs)
+            if on_complete:
+                for i, r in enumerate(results):
+                    on_complete(i, r)
+            return results
+
+        # API backends: thread-pool (parallel-safe) or sequential (series-only)
+        return self.run(messages_list, model, on_complete=on_complete, **kwargs)

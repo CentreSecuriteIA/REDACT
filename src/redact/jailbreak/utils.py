@@ -13,12 +13,15 @@ Ported from reference utils.py combine_techniques (lines 24-49).
 Retry wrappers (with_retries, with_feedback_retries) live in LLMs/wrappers.py.
 """
 
+import hashlib
 import inspect
 import json
 import random
 from functools import lru_cache
 from pathlib import Path
 from typing import Callable
+
+from .protocol import LLMRequest, TechniqueGen, run_sync
 
 
 _SPEC_PATH = Path(__file__).parent.parent / "configs" / "jailbreak" / "combination_spec.json"
@@ -78,30 +81,101 @@ def tag_all_functions(funcs: list[Callable]) -> None:
 # ---------------------------------------------------------------------------
 
 
+def _normalize_output(output) -> tuple[str, str]:
+    """Coerce a technique return into ``(text, info)``.
+
+    Cognitive/persona techniques may return a 3-tuple ``(text, info, scenario)``
+    — the scenario is discarded in combined chains (callers needing it must run
+    the technique standalone).
+    """
+    if isinstance(output, tuple) and len(output) == 3:
+        text, info, _ = output
+        return text, info
+    return output
+
+
+def _select_kwargs(technique: Callable, kwargs: dict) -> dict:
+    """Filter ``kwargs`` to what ``technique`` accepts.
+
+    Pure transforms have ``(prompt: str)`` with no ``**kwargs`` — passing
+    unrecognised keys would raise TypeError. Techniques declaring ``**kwargs``
+    receive everything.
+    """
+    sig_params = inspect.signature(technique).parameters
+    has_var_kw = any(
+        p.kind == inspect.Parameter.VAR_KEYWORD for p in sig_params.values()
+    )
+    if has_var_kw:
+        return dict(kwargs)
+    return {k: v for k, v in kwargs.items() if k in sig_params}
+
+
+def _run_chain(techniques: list[Callable], text: str, **kwargs) -> TechniqueGen:
+    """Generator that chains techniques, threading text through.
+
+    Pure transforms run inline (zero rounds); LLM-dependent technique
+    generators are delegated to via ``yield from`` so their :class:`LLMRequest`
+    yields propagate up to the batched engine (or to ``run_sync`` for the
+    single-sample path). Early-exits with a ``DISCARDED`` info string the moment
+    any step rejects, returning the pre-failure text. Returns ``(text, info)``.
+    """
+    # gen-model techniques tag their requests with `gen_model`; accept the
+    # legacy `model` kwarg as the source when gen_model isn't given explicitly.
+    if not kwargs.get("gen_model") and kwargs.get("model"):
+        kwargs = {**kwargs, "gen_model": kwargs["model"]}
+
+    result = text
+    info_parts: list[str] = []
+    for technique in techniques:
+        tech_kwargs = _select_kwargs(technique, kwargs)
+        if inspect.isgeneratorfunction(technique):
+            output = yield from technique(result, **tech_kwargs)
+        else:
+            output = technique(result, **tech_kwargs)
+        new_text, info = _normalize_output(output)
+
+        # Early exit on rejection — don't apply remaining techniques
+        if info.startswith("DISCARDED"):
+            return result, (
+                f"DISCARDED; technique={technique.__name__}; "
+                f"{info[len('DISCARDED; '):]}"
+            )
+
+        # Track no-ops
+        if new_text == result:
+            info_parts.append(f"noop={technique.__name__}")
+        elif info:
+            info_parts.append(info)
+        result = new_text
+    return result, ";".join(info_parts)
+
+
 def combine_techniques(*techniques: Callable, sort_by_hierarchy: bool = True) -> Callable:
-    """Chain multiple technique functions sequentially.
+    """Chain multiple technique functions into one callable.
 
-    Each technique receives the output of the previous one.
-    Additional_info strings are joined with ';'.
+    Each technique receives the output of the previous one; info strings are
+    joined with ';'. Mixes pure transforms and LLM-dependent technique
+    *generators* transparently (see ``protocol.py``).
 
-    If sort_by_hierarchy=True (default), techniques are reordered by
-    (layer_order_index, within_layer_order) before chaining — so callers
-    can pass techniques in any order and the correct semantic sequence is
-    always applied.
+    If ``sort_by_hierarchy=True`` (default), techniques are reordered by
+    (layer_order_index, within_layer_order) before chaining — so callers can
+    pass techniques in any order and the correct semantic sequence is applied.
 
-    Supports:
-    - Pure functions (str -> (str, str))
-    - LLM functions that accept **kwargs (backend, model, rate_limiter, benign_data, etc.)
-    - Cognitive/persona functions that return (str, str, str): the scenario (third element)
-      is discarded in combined chains. Callers needing the scenario should not use
-      combine_techniques for those functions.
+    The returned ``combined`` callable runs **synchronously**: calling
+    ``combined(text, backend=..., model=..., rate_limiter=..., benign_data=...)``
+    drives the chain to completion (issuing real LLM calls for generator steps
+    via :func:`protocol.run_sync`) and returns ``(text, info)``. This preserves
+    the single-sample / test contract. The batched engine does **not** call
+    ``combined`` — it builds the chain generator directly via
+    :func:`make_combination_gen` and interleaves many samples.
 
-    Args:
-        *techniques: Functions with signature (str, **kwargs) -> (str, str) or (str, str, str)
-        sort_by_hierarchy: If True, sort by layer and within_layer_order before chaining.
+    ``combined.techniques`` exposes the ordered inner technique list (used by
+    the engine and the manifest); ``combined.__name__`` is the '+'-joined names
+    (or ``"identity"`` when empty).
 
     Returns:
-        Combined function: (str, **kwargs) -> (str, str)
+        Combined callable: ``(str, **kwargs) -> (str, str)`` with
+        ``.techniques`` and ``.__name__`` attributes.
     """
     spec = load_spec()
     layer_order = spec["layer_order"]
@@ -115,40 +189,39 @@ def combine_techniques(*techniques: Callable, sort_by_hierarchy: bool = True) ->
     ordered = sorted(techniques, key=_sort_key) if sort_by_hierarchy else list(techniques)
 
     def combined(text: str, **kwargs) -> tuple[str, str]:
-        result = text
-        info_parts: list[str] = []
-        for technique in ordered:
-            # Filter kwargs to only what this function accepts.
-            # Pure transforms have (prompt: str) with no **kwargs — passing
-            # unrecognised keys would raise TypeError.
-            sig_params = inspect.signature(technique).parameters
-            has_var_kw = any(
-                p.kind == inspect.Parameter.VAR_KEYWORD for p in sig_params.values()
-            )
-            tech_kwargs = kwargs if has_var_kw else {k: v for k, v in kwargs.items() if k in sig_params}
-            output = technique(result, **tech_kwargs)
-            # Normalize 3-tuple returns from cognitive/persona (discard scenario)
-            if isinstance(output, tuple) and len(output) == 3:
-                new_text, info, _ = output
-            else:
-                new_text, info = output
+        gen = _run_chain(ordered, text, **kwargs)
+        backend = kwargs.get("backend")
+        rate_limiter = kwargs.get("rate_limiter")
 
-            # Early exit on rejection — don't apply remaining techniques
-            if info.startswith("DISCARDED"):
-                return result, f"DISCARDED; technique={technique.__name__}; {info[len('DISCARDED; '):]}"
+        def call(request: LLMRequest) -> str:
+            # Lazy imports keep utils import-time light and avoid any
+            # llms<->jailbreak import ordering surprises.
+            from redact.llms.calls import generate_sample
+            b = backend
+            if b is None:
+                from redact.llms.api import get_backend
+                b = get_backend(request.model)
+            return generate_sample(b, request.model, request.messages, rate_limiter)
 
-            # Track no-ops
-            if new_text == result:
-                info_parts.append(f"noop={technique.__name__}")
-            else:
-                if info:
-                    info_parts.append(info)
-            result = new_text
-        return result, ";".join(info_parts)
+        return run_sync(gen, call)
 
-    combined.__name__ = "+".join(t.__name__ for t in ordered)
+    combined.__name__ = "+".join(t.__name__ for t in ordered) or "identity"
     combined.techniques = list(ordered)  # expose inner techniques for inspection
     return combined
+
+
+def make_combination_gen(fn: Callable, text: str, **kwargs) -> TechniqueGen:
+    """Build the chain *generator* for a combined technique, for the engine.
+
+    Reads ``fn.techniques`` (set by :func:`combine_techniques`) and returns a
+    generator that yields :class:`LLMRequest` per LLM step. The engine drives
+    many of these concurrently, pooling yields by model. ``kwargs`` should
+    carry ``gen_model`` and ``benign_data``.
+    """
+    techniques = getattr(fn, "techniques", None)
+    if techniques is None:
+        techniques = [fn]
+    return _run_chain(techniques, text, **kwargs)
 
 
 # ---------------------------------------------------------------------------
@@ -280,6 +353,7 @@ def sample_combination(
     include_obfuscation: bool = True,
     include_requests: bool = True,
     allow_request_obfuscation: bool = False,
+    sampling_probs: dict | None = None,
 ) -> Callable:
     """Sample a random valid technique combination from pool.
 
@@ -294,11 +368,21 @@ def sample_combination(
         include_requests: Whether to consider request-layer techniques.
         allow_request_obfuscation: If True, optionally add a light obfuscation after
             the request layer (encode_light or translation only).
+        sampling_probs: Per-layer inclusion probabilities. Overrides the
+            ``sampling_probs`` block in combination_spec.json. Recognised keys:
+            ``hacking``, ``manipulation``, ``requests``, ``request_obfuscation``.
 
     Returns:
         A combined technique function, or an identity function if nothing was selected.
     """
     spec = load_spec()
+    probs = dict(spec.get("sampling_probs", {}))
+    if sampling_probs:
+        probs.update(sampling_probs)
+    p_hacking = probs.get("hacking", 0.5)
+    p_manipulation = probs.get("manipulation", 0.33)
+    p_requests = probs.get("requests", 0.7)
+    p_request_obfuscation = probs.get("request_obfuscation", 0.5)
     selected: list[Callable] = []
     remaining_complexity = max_complexity
     current_pool = list(pool)
@@ -319,14 +403,14 @@ def sample_combination(
         remaining_complexity -= getattr(fn, "complexity", 0)
         _update_pool()
 
-    # Phase 1: Hacking (50% chance)
-    if include_hacking and rng.random() < 0.5:
+    # Phase 1: Hacking
+    if include_hacking and rng.random() < p_hacking:
         pick = _pick_from_layer("hacking")
         if pick is not None:
             _commit(pick)
 
-    # Phase 2: Manipulation (33% chance)
-    if include_manipulation and rng.random() < 0.33:
+    # Phase 2: Manipulation
+    if include_manipulation and rng.random() < p_manipulation:
         pick = _pick_from_layer("manipulation")
         if pick is not None:
             _commit(pick)
@@ -342,14 +426,14 @@ def sample_combination(
             _commit(pick)
             obfusc_count += 1
 
-    # Phase 4: Requests (70% chance)
-    if include_requests and rng.random() < 0.7:
+    # Phase 4: Requests
+    if include_requests and rng.random() < p_requests:
         pick = _pick_from_layer("requests")
         if pick is not None:
             _commit(pick)
 
-    # Phase 5: Request-layer obfuscation (optional, 50% chance if enabled)
-    if allow_request_obfuscation and rng.random() < 0.5:
+    # Phase 5: Request-layer obfuscation (optional, if enabled)
+    if allow_request_obfuscation and rng.random() < p_request_obfuscation:
         req_obfusc_candidates = [
             f for f in current_pool
             if _is_request_obfuscation_compatible(f, spec)
@@ -359,11 +443,9 @@ def sample_combination(
             selected.append(pick)  # don't update pool; this is the final step
 
     if not selected:
-        def identity(text: str, **kwargs) -> tuple[str, str]:
-            return text, ""
-        identity.__name__ = "identity"
-        identity.techniques = []
-        return identity
+        # combine_techniques() with no techniques returns a no-op combined
+        # callable named "identity" with .techniques == [].
+        return combine_techniques()
 
     return combine_techniques(*selected)
 
@@ -441,14 +523,11 @@ def apply_combination(
         prompt,
         backend=backend,
         model=model,
+        gen_model=model,
         rate_limiter=rate_limiter,
         benign_data=benign_data,
     )
-    # Normalize 3-tuple (cognitive/persona scenario return)
-    if isinstance(output, tuple) and len(output) == 3:
-        text, info, _ = output
-    else:
-        text, info = output
+    text, info = _normalize_output(output)
 
     # Parse rejection status from info string
     accepted, reasoning = _parse_rejection_info(info)
@@ -467,3 +546,81 @@ def is_noop(original: str, result: str) -> bool:
     sensitive_words with no detectable harmful words) had no effect.
     """
     return original == result
+
+
+# ---------------------------------------------------------------------------
+# Combination assignment (manifest planning) + reconstruction
+# ---------------------------------------------------------------------------
+
+
+def _stable_seed(*parts) -> int:
+    """Deterministic, process-independent seed from arbitrary parts.
+
+    Uses SHA-256 (not builtin ``hash``, which is salted per process) so the
+    same ``(seed, sample_id, iteration)`` always yields the same RNG stream —
+    a requirement for reproducible, chunk-independent combination assignment.
+    """
+    digest = hashlib.sha256("::".join(str(p) for p in parts).encode("utf-8"))
+    return int(digest.hexdigest()[:16], 16)
+
+
+def build_function_registry(pool: list[Callable]) -> dict[str, Callable]:
+    """Map technique ``__name__`` -> function for reconstruction from a manifest."""
+    return {getattr(fn, "__name__", ""): fn for fn in pool}
+
+
+def assign_combination(
+    sample_id: str,
+    pool: list[Callable],
+    *,
+    seed: int = 42,
+    iteration: int = 0,
+    used: "tuple | list | set" = (),
+    max_resamples: int = 8,
+    **sample_kwargs,
+) -> list[str]:
+    """Deterministically assign a technique combination to one sample.
+
+    Seeds an RNG from ``hash(seed, sample_id, iteration)`` so assignment is
+    reproducible and independent of input order / chunking. Resamples (bounded
+    by ``max_resamples``) until the combination's technique-name tuple is not
+    already in ``used`` — so repeated iterations of the same sample don't draw
+    duplicates. Falls back to the last sampled combination if a fresh one can't
+    be found within the budget.
+
+    Args:
+        sample_id: Stable per-sample key (the prompt-content MD5).
+        pool: Tagged technique functions to sample from.
+        seed: Global run seed.
+        iteration: Round index (0 for single-round runs).
+        used: Already-assigned combinations for this sample, each a sequence of
+            technique names.
+        max_resamples: Max resample attempts to avoid a duplicate.
+        **sample_kwargs: Forwarded to :func:`sample_combination`
+            (``max_complexity``, ``include_*``, ``sampling_probs``, ...).
+
+    Returns:
+        Ordered list of technique names (empty list == identity / no-op).
+    """
+    used_set = {tuple(c) for c in used}
+    base = _stable_seed(seed, sample_id, iteration)
+    chosen: list[str] = []
+    for attempt in range(max_resamples):
+        rng = random.Random(base + attempt)
+        fn = sample_combination(rng, pool, **sample_kwargs)
+        names = [getattr(t, "__name__", "") for t in getattr(fn, "techniques", [])]
+        chosen = names
+        if tuple(names) not in used_set:
+            break
+    return chosen
+
+
+def build_combination(names: list[str], registry: dict[str, Callable]) -> Callable:
+    """Reconstruct a combined technique callable from recorded technique names.
+
+    ``sort_by_hierarchy=False`` preserves the exact order recorded at planning
+    time (which was already hierarchy-sorted by :func:`sample_combination`).
+    Unknown names raise ``KeyError`` so a stale manifest fails loudly.
+    """
+    fns = [registry[n] for n in names]
+    return combine_techniques(*fns, sort_by_hierarchy=False)

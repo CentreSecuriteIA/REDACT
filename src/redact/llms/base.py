@@ -39,3 +39,24 @@ class LLMBackend(ABC):
     @abstractmethod
     def backend_name(self) -> str:
         """Short identifier for the backend type (e.g. 'api', 'vllm')."""
+
+    @property
+    def supports_native_batching(self) -> bool:
+        """True if ``batch_generate()`` is a true single engine pass.
+
+        Default False (API backends loop sequentially). vLLM overrides to True.
+        Read by BatchCaller and ModelRouter to choose the right batching path.
+        """
+        return False
+
+    @property
+    def supports_parallel_calls(self) -> bool:
+        """True if ``generate()`` is safe to call concurrently from threads.
+
+        Default True (most API backends are fine). Override to False for
+        backends that require series execution — e.g. Anthropic (TPM/RPM are
+        tight) or vLLM (concurrent generate() calls compete for GPU memory).
+        BatchCaller raises ValueError if a caller sets ``max_workers>1`` on
+        a backend that returns False here.
+        """
+        return True

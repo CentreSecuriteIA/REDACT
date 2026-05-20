@@ -17,8 +17,8 @@ Usage::
     result = pipeline.run(taxonomy, num_categories=10)
 """
 
+from ..types import EntryType, ALL_ENTRY_TYPES
 from .generation import (
-    EntryType,
     ConstitutionEntry,
     ConstitutionResult,
     ConstitutionPipeline,
@@ -32,6 +32,7 @@ from .input_generation import (
 __all__ = [
     # Constitution generation
     "EntryType",
+    "ALL_ENTRY_TYPES",
     "ConstitutionEntry",
     "ConstitutionResult",
     "ConstitutionPipeline",

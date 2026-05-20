@@ -185,6 +185,7 @@ class Config:
 # Subpackage availability — lazy, no heavy imports on library load
 # ---------------------------------------------------------------------------
 
+from .types import EntryType, ALL_ENTRY_TYPES  # noqa: E402, F401
 from . import llms  # noqa: E402, F401
 from . import content_moderation  # noqa: E402, F401
 from . import jailbreak  # noqa: E402, F401

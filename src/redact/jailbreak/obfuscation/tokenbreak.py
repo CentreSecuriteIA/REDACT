@@ -25,6 +25,7 @@ import re
 import random
 from pathlib import Path
 
+from redact.jailbreak.protocol import LLMRequest, TechniqueGen
 from redact.llms.calls import generate_sample
 from redact.llms.prompts import load_prompt, build_messages
 from redact.llms.base import LLMBackend
@@ -203,32 +204,37 @@ def _get_harmful_words(
     rate_limiter: RateLimiter | None = None,
     prompt_dir: str | Path | None = None,
 ) -> list[str]:
-    """Run extract_harmful and return a clean list of detected words."""
+    """Run extract_harmful and return a clean list of detected words (sync)."""
     raw = extract_harmful(prompt, backend, model, rate_limiter, prompt_dir)
     return [w for w in raw.split() if w.lower() not in _TOKENBREAK_EMPTY_RESPONSES]
 
 
+def _harmful_words_gen(
+    prompt: str, *, gen_model: str | None = None, prompt_dir=None, **kwargs
+) -> TechniqueGen:
+    """Yield the extract-harmful request; return the cleaned harmful-word list.
+
+    Shared first round for every tokenbreak/sensitive-word technique generator.
+    """
+    config = load_prompt("jailbreak", "extract_harmful", prompt_dir)
+    messages = build_messages(config, prompt=prompt)
+    raw = (yield LLMRequest(gen_model, messages)).strip()
+    if raw.lower() == "none" or len(raw.split()) > 10:
+        return []
+    return [w for w in raw.split() if w.lower() not in _TOKENBREAK_EMPTY_RESPONSES]
+
+
 # ---------------------------------------------------------------------------
-# Tier 1 — Structural tokenbreak
+# Pure finishers — apply a transform given the already-detected harmful words
 # ---------------------------------------------------------------------------
 
 
-def _apply_tokenbreak(
-    prompt: str,
-    attack: str,
-    backend: LLMBackend,
-    model: str,
-    rate_limiter: RateLimiter | None = None,
-    prompt_dir: str | Path | None = None,
-) -> tuple[str, str]:
-    """Extract harmful words, apply structural tokenbreak attack to each."""
-    harmful_words = _get_harmful_words(prompt, backend, model, rate_limiter, prompt_dir)
-
+def _tokenbreak_finish(prompt: str, attack: str, harmful_words: list[str]) -> tuple[str, str]:
+    """Structural tokenbreak applied to each harmful word (or every word)."""
     if not harmful_words:
         def _obfuscate_token(m: re.Match) -> str:
             return tokenbreak_obfuscate_word(m.group(), attack)[0]
-        obfuscated = re.sub(r"\S+", _obfuscate_token, prompt)
-        return obfuscated, "detected_words="
+        return re.sub(r"\S+", _obfuscate_token, prompt), "detected_words="
 
     token_infos: list[str] = []
     result = prompt
@@ -244,55 +250,13 @@ def _apply_tokenbreak(
     return result, f"detected_words={' '.join(harmful_words)};tokens={','.join(token_infos)}"
 
 
-def to_tokenbreak_prepend(
-    prompt: str, backend: LLMBackend, model: str,
-    rate_limiter: RateLimiter | None = None,
+def _sensitive_encode_finish(
+    prompt: str, encode_fn, encode_name: str, harmful_words: list[str]
 ) -> tuple[str, str]:
-    """TokenBreak: prepend a random token before each harmful word."""
-    return _apply_tokenbreak(prompt, "prepend", backend, model, rate_limiter)
-
-
-def to_tokenbreak_split(
-    prompt: str, backend: LLMBackend, model: str,
-    rate_limiter: RateLimiter | None = None,
-) -> tuple[str, str]:
-    """TokenBreak: insert a random character inside each harmful word."""
-    return _apply_tokenbreak(prompt, "split", backend, model, rate_limiter)
-
-
-def to_tokenbreak_delimiter(
-    prompt: str, backend: LLMBackend, model: str,
-    rate_limiter: RateLimiter | None = None,
-) -> tuple[str, str]:
-    """TokenBreak: wrap each harmful word with randomly chosen delimiters."""
-    return _apply_tokenbreak(prompt, "delimiter", backend, model, rate_limiter)
-
-
-# ---------------------------------------------------------------------------
-# Tier 2a — Sensitive-word encoding (fixed encoding per function)
-# ---------------------------------------------------------------------------
-
-
-def _apply_sensitive_words_encode(
-    prompt: str,
-    encode_fn,
-    encode_name: str,
-    backend: LLMBackend,
-    model: str,
-    rate_limiter: RateLimiter | None = None,
-    prompt_dir: str | Path | None = None,
-) -> tuple[str, str]:
-    """Apply a specific encoding function to each detected harmful word.
-
-    If no harmful words are detected, encodes the entire prompt as fallback.
-    encode_fn must follow the (str) -> (str, str) signature from encoding.py.
-    """
-    harmful_words = _get_harmful_words(prompt, backend, model, rate_limiter, prompt_dir)
-
+    """Apply ``encode_fn`` to each harmful word (or the whole prompt as fallback)."""
     if not harmful_words:
         encoded, _ = encode_fn(prompt)
         return encoded, f"encoding={encode_name};detected_words="
-
     result = prompt
     for word in harmful_words:
         encoded_word, _ = encode_fn(word)
@@ -300,261 +264,163 @@ def _apply_sensitive_words_encode(
     return result, f"encoding={encode_name};detected_words={' '.join(harmful_words)}"
 
 
-def to_sensitive_words_encode_base64(
-    prompt: str, backend: LLMBackend, model: str,
-    rate_limiter: RateLimiter | None = None,
-) -> tuple[str, str]:
-    """Encode each harmful word with Base64."""
-    return _apply_sensitive_words_encode(prompt, to_base64, "base64", backend, model, rate_limiter)
-
-
-def to_sensitive_words_encode_rot13(
-    prompt: str, backend: LLMBackend, model: str,
-    rate_limiter: RateLimiter | None = None,
-) -> tuple[str, str]:
-    """Encode each harmful word with ROT13."""
-    return _apply_sensitive_words_encode(prompt, to_rot13, "rot13", backend, model, rate_limiter)
-
-
-def to_sensitive_words_encode_rot18(
-    prompt: str, backend: LLMBackend, model: str,
-    rate_limiter: RateLimiter | None = None,
-) -> tuple[str, str]:
-    """Encode each harmful word with ROT18 (ROT13 + ROT5)."""
-    return _apply_sensitive_words_encode(prompt, to_rot18, "rot18", backend, model, rate_limiter)
-
-
-def to_sensitive_words_encode_rot47(
-    prompt: str, backend: LLMBackend, model: str,
-    rate_limiter: RateLimiter | None = None,
-) -> tuple[str, str]:
-    """Encode each harmful word with ROT47."""
-    return _apply_sensitive_words_encode(prompt, to_rot47, "rot47", backend, model, rate_limiter)
-
-
-def to_sensitive_words_encode_unicode(
-    prompt: str, backend: LLMBackend, model: str,
-    rate_limiter: RateLimiter | None = None,
-) -> tuple[str, str]:
-    """Encode each harmful word as Unicode escape sequences."""
-    return _apply_sensitive_words_encode(prompt, to_unicode_escape, "unicode", backend, model, rate_limiter)
-
-
-def to_sensitive_words_encode_ascii(
-    prompt: str, backend: LLMBackend, model: str,
-    rate_limiter: RateLimiter | None = None,
-) -> tuple[str, str]:
-    """Encode each harmful word as space-separated ASCII ordinals."""
-    return _apply_sensitive_words_encode(prompt, to_ascii_ordinal, "ascii", backend, model, rate_limiter)
-
-
-def to_sensitive_words_encode_separator(
-    prompt: str, backend: LLMBackend, model: str,
-    rate_limiter: RateLimiter | None = None,
-) -> tuple[str, str]:
-    """Separate each character of harmful words with a randomly chosen separator.
-
-    Separator is chosen once per call and applied consistently to all detected
-    words. The chosen separator is recorded in additional_info.
-    """
-    harmful_words = _get_harmful_words(prompt, backend, model, rate_limiter)
+def _sensitive_separator_finish(prompt: str, harmful_words: list[str]) -> tuple[str, str]:
+    """Split each harmful word's characters with one randomly chosen separator."""
     sep = random.choice(_SEPARATORS)
-
     if not harmful_words:
-        encoded = sep.join(prompt)
-        return encoded, f"encoding=separator;sep={sep};detected_words="
-
+        return sep.join(prompt), f"encoding=separator;sep={sep};detected_words="
     result = prompt
     for word in harmful_words:
         result = re.sub(re.escape(word), sep.join(word), result, flags=re.IGNORECASE)
     return result, f"encoding=separator;sep={sep};detected_words={' '.join(harmful_words)}"
 
 
-def to_sensitive_words_encode_leetspeak_basic(
-    prompt: str, backend: LLMBackend, model: str,
-    rate_limiter: RateLimiter | None = None,
+def _sensitive_char_finish(
+    prompt: str, separator: str, sep_name: str, harmful_words: list[str]
 ) -> tuple[str, str]:
-    """Apply basic leetspeak substitution to each harmful word."""
-    return _apply_sensitive_words_encode(prompt, to_leetspeak_basic, "leetspeak_basic", backend, model, rate_limiter)
-
-
-def to_sensitive_words_encode_leetspeak_intermediate(
-    prompt: str, backend: LLMBackend, model: str,
-    rate_limiter: RateLimiter | None = None,
-) -> tuple[str, str]:
-    """Apply intermediate leetspeak substitution to each harmful word."""
-    return _apply_sensitive_words_encode(prompt, to_leetspeak_intermediate, "leetspeak_intermediate", backend, model, rate_limiter)
-
-
-def to_sensitive_words_encode_leetspeak_advanced(
-    prompt: str, backend: LLMBackend, model: str,
-    rate_limiter: RateLimiter | None = None,
-) -> tuple[str, str]:
-    """Apply advanced leetspeak substitution to each harmful word."""
-    return _apply_sensitive_words_encode(prompt, to_leetspeak_advanced, "leetspeak_advanced", backend, model, rate_limiter)
-
-
-# ---------------------------------------------------------------------------
-# Tier 2b — Sensitive-word character-level obfuscation (fixed separators)
-# ---------------------------------------------------------------------------
-
-
-def _apply_sensitive_words_char(
-    prompt: str,
-    separator: str,
-    sep_name: str,
-    backend: LLMBackend,
-    model: str,
-    rate_limiter: RateLimiter | None = None,
-    prompt_dir: str | Path | None = None,
-) -> tuple[str, str]:
-    """Separate each character of each harmful word with a fixed separator.
-
-    If no harmful words are detected, applies to every word in the prompt.
-    """
-    harmful_words = _get_harmful_words(prompt, backend, model, rate_limiter, prompt_dir)
-
+    """Split each harmful word's characters with a fixed separator."""
     if not harmful_words:
         obfuscated = re.sub(r"\S+", lambda m: separator.join(m.group()), prompt)
         return obfuscated, f"char_sep={sep_name};detected_words="
-
     result = prompt
     for word in harmful_words:
         result = re.sub(re.escape(word), separator.join(word), result, flags=re.IGNORECASE)
     return result, f"char_sep={sep_name};detected_words={' '.join(harmful_words)}"
 
 
-def to_sensitive_words_split(
-    prompt: str, backend: LLMBackend, model: str,
-    rate_limiter: RateLimiter | None = None,
-) -> tuple[str, str]:
-    """Separate each character of harmful words with spaces: bomb -> b o m b."""
-    return _apply_sensitive_words_char(prompt, " ", "split", backend, model, rate_limiter)
-
-
-def to_sensitive_words_star(
-    prompt: str, backend: LLMBackend, model: str,
-    rate_limiter: RateLimiter | None = None,
-) -> tuple[str, str]:
-    """Separate each character of harmful words with stars: bomb -> b*o*m*b."""
-    return _apply_sensitive_words_char(prompt, "*", "star", backend, model, rate_limiter)
-
-
-def to_sensitive_words_hyphen(
-    prompt: str, backend: LLMBackend, model: str,
-    rate_limiter: RateLimiter | None = None,
-) -> tuple[str, str]:
-    """Separate each character of harmful words with hyphens: bomb -> b-o-m-b.
-
-    Fixed-separator counterpart of tokenbreak_delimiter's random separator mode.
-    """
-    return _apply_sensitive_words_char(prompt, "-", "hyphen", backend, model, rate_limiter)
-
-
-def to_sensitive_words_underscore(
-    prompt: str, backend: LLMBackend, model: str,
-    rate_limiter: RateLimiter | None = None,
-) -> tuple[str, str]:
-    """Separate each character of harmful words with underscores: bomb -> b_o_m_b.
-
-    Fixed-separator counterpart of tokenbreak_delimiter's random separator mode.
-    """
-    return _apply_sensitive_words_char(prompt, "_", "underscore", backend, model, rate_limiter)
-
-
-def to_sensitive_words_variables(
-    prompt: str, backend: LLMBackend, model: str,
-    rate_limiter: RateLimiter | None = None,
-) -> tuple[str, str]:
-    """Replace harmful words with placeholder variable names.
-
-    Each detected harmful word is substituted with VAR_1, VAR_2, etc.
-    A definition clause is appended at the end of the prompt:
-    "where VAR_1 = {word1}, VAR_2 = {word2}..."
-
-    This indirection separates the harmful term from its use in the sentence
-    while keeping the meaning recoverable from context.
-
-    If no harmful words are detected, the prompt is returned unchanged.
-    """
-    harmful_words = _get_harmful_words(prompt, backend, model, rate_limiter)
-
+def _sensitive_variables_finish(prompt: str, harmful_words: list[str]) -> tuple[str, str]:
+    """Replace harmful words with VAR_n placeholders + a definitions clause."""
     if not harmful_words:
         return prompt, "char_sep=variables;detected_words="
-
     result = prompt
     definitions: list[str] = []
     for i, word in enumerate(harmful_words, start=1):
         var_name = f"VAR_{i}"
         result = re.sub(re.escape(word), var_name, result, flags=re.IGNORECASE)
         definitions.append(f"{var_name} = {word}")
-
     result += "\n\nwhere " + ", ".join(definitions)
     return result, f"char_sep=variables;detected_words={' '.join(harmful_words)}"
 
 
 # ---------------------------------------------------------------------------
-# Tier 2c — Synonym substitution (LLM-generated benign synonyms)
+# Tier 1 — Structural tokenbreak (technique generators)
 # ---------------------------------------------------------------------------
 
 
-def _get_synonym(
-    word: str,
-    prompt: str,
-    backend: LLMBackend,
-    model: str,
-    rate_limiter: RateLimiter | None = None,
-    prompt_dir: str | Path | None = None,
-) -> str:
-    """Ask the LLM for a creative benign synonym for word in context of prompt.
-
-    Returns the raw LLM response stripped of whitespace. Caller handles
-    fallback if the response is empty or looks like prose.
-    """
-    config = load_prompt("jailbreak", "synonym_substitution", prompt_dir)
-    messages = build_messages(config, word=word, prompt=prompt)
-    result = generate_sample(backend, model, messages, rate_limiter)
-    return result.strip()
+def to_tokenbreak_prepend(prompt: str, **kwargs) -> TechniqueGen:
+    """TokenBreak: prepend a random token before each harmful word."""
+    words = yield from _harmful_words_gen(prompt, **kwargs)
+    return _tokenbreak_finish(prompt, "prepend", words)
 
 
-def to_synonym_substitution(
-    prompt: str,
-    backend: LLMBackend,
-    model: str,
-    rate_limiter: RateLimiter | None = None,
-    prompt_dir: str | Path | None = None,
-) -> tuple[str, str]:
+def to_tokenbreak_split(prompt: str, **kwargs) -> TechniqueGen:
+    """TokenBreak: insert a random character inside each harmful word."""
+    words = yield from _harmful_words_gen(prompt, **kwargs)
+    return _tokenbreak_finish(prompt, "split", words)
+
+
+def to_tokenbreak_delimiter(prompt: str, **kwargs) -> TechniqueGen:
+    """TokenBreak: wrap each harmful word with randomly chosen delimiters."""
+    words = yield from _harmful_words_gen(prompt, **kwargs)
+    return _tokenbreak_finish(prompt, "delimiter", words)
+
+
+# ---------------------------------------------------------------------------
+# Tier 2a — Sensitive-word encoding (technique generators, fixed encoding each)
+# ---------------------------------------------------------------------------
+
+# (function name, encode_fn, encode_name, docstring) — encode_fn is None for
+# the special separator variant handled by _sensitive_separator_finish.
+_ENCODE_SPECS = [
+    ("to_sensitive_words_encode_base64", to_base64, "base64", "Encode each harmful word with Base64."),
+    ("to_sensitive_words_encode_rot13", to_rot13, "rot13", "Encode each harmful word with ROT13."),
+    ("to_sensitive_words_encode_rot18", to_rot18, "rot18", "Encode each harmful word with ROT18."),
+    ("to_sensitive_words_encode_rot47", to_rot47, "rot47", "Encode each harmful word with ROT47."),
+    ("to_sensitive_words_encode_unicode", to_unicode_escape, "unicode", "Encode each harmful word as Unicode escapes."),
+    ("to_sensitive_words_encode_ascii", to_ascii_ordinal, "ascii", "Encode each harmful word as ASCII ordinals."),
+    ("to_sensitive_words_encode_leetspeak_basic", to_leetspeak_basic, "leetspeak_basic", "Basic leetspeak on each harmful word."),
+    ("to_sensitive_words_encode_leetspeak_intermediate", to_leetspeak_intermediate, "leetspeak_intermediate", "Intermediate leetspeak on each harmful word."),
+    ("to_sensitive_words_encode_leetspeak_advanced", to_leetspeak_advanced, "leetspeak_advanced", "Advanced leetspeak on each harmful word."),
+]
+
+
+def _make_encode_fn(fname: str, encode_fn, encode_name: str, doc: str):
+    def fn(prompt: str, **kwargs) -> TechniqueGen:
+        words = yield from _harmful_words_gen(prompt, **kwargs)
+        return _sensitive_encode_finish(prompt, encode_fn, encode_name, words)
+    fn.__name__ = fname
+    fn.__qualname__ = fname
+    fn.__doc__ = doc
+    return fn
+
+
+for _fname, _encode_fn, _encode_name, _doc in _ENCODE_SPECS:
+    globals()[_fname] = _make_encode_fn(_fname, _encode_fn, _encode_name, _doc)
+
+
+def to_sensitive_words_encode_separator(prompt: str, **kwargs) -> TechniqueGen:
+    """Separate each character of harmful words with a randomly chosen separator."""
+    words = yield from _harmful_words_gen(prompt, **kwargs)
+    return _sensitive_separator_finish(prompt, words)
+
+
+# ---------------------------------------------------------------------------
+# Tier 2b — Sensitive-word character-level obfuscation (technique generators)
+# ---------------------------------------------------------------------------
+
+_CHAR_SPECS = [
+    ("to_sensitive_words_split", " ", "split", "Separate harmful-word chars with spaces: bomb -> b o m b."),
+    ("to_sensitive_words_star", "*", "star", "Separate harmful-word chars with stars: bomb -> b*o*m*b."),
+    ("to_sensitive_words_hyphen", "-", "hyphen", "Separate harmful-word chars with hyphens: bomb -> b-o-m-b."),
+    ("to_sensitive_words_underscore", "_", "underscore", "Separate harmful-word chars with underscores: bomb -> b_o_m_b."),
+]
+
+
+def _make_char_fn(fname: str, separator: str, sep_name: str, doc: str):
+    def fn(prompt: str, **kwargs) -> TechniqueGen:
+        words = yield from _harmful_words_gen(prompt, **kwargs)
+        return _sensitive_char_finish(prompt, separator, sep_name, words)
+    fn.__name__ = fname
+    fn.__qualname__ = fname
+    fn.__doc__ = doc
+    return fn
+
+
+for _fname, _sep, _sep_name, _doc in _CHAR_SPECS:
+    globals()[_fname] = _make_char_fn(_fname, _sep, _sep_name, _doc)
+
+
+def to_sensitive_words_variables(prompt: str, **kwargs) -> TechniqueGen:
+    """Replace harmful words with VAR_n placeholders + a definitions clause."""
+    words = yield from _harmful_words_gen(prompt, **kwargs)
+    return _sensitive_variables_finish(prompt, words)
+
+
+# ---------------------------------------------------------------------------
+# Tier 2c — Synonym substitution (extract round + one synonym round per word)
+# ---------------------------------------------------------------------------
+
+
+def to_synonym_substitution(prompt: str, *, prompt_dir=None, **kwargs) -> TechniqueGen:
     """Replace each harmful word with a creative LLM-generated benign synonym.
 
-    Steps:
-      1. Detect harmful words via extract_harmful() (one LLM call).
-      2. For each detected word, call the LLM to generate one imaginative
-         benign synonym that preserves contextual meaning (one call per word).
-      3. Substitute each word in the prompt; record the mapping in additional_info.
-
-    If no harmful words are detected, the prompt is returned unchanged.
-    If synonym generation produces a multi-word response (>4 words) it is
-    discarded and the original word is kept for that slot.
-
-    Returns:
-        (modified_prompt, additional_info)
-        additional_info format: "substitutions=word1->syn1;word2->syn2"
+    Yields the harmful-word extraction request, then one synonym request per
+    detected word. A multi-word (>4) synonym response is discarded (original
+    kept). Returns ``(modified_prompt, "substitutions=w1->s1;...")``.
     """
-    harmful_words = _get_harmful_words(prompt, backend, model, rate_limiter, prompt_dir)
-
-    if not harmful_words:
+    gen_model = kwargs.get("gen_model")
+    words = yield from _harmful_words_gen(prompt, prompt_dir=prompt_dir, **kwargs)
+    if not words:
         return prompt, "substitutions="
 
+    config = load_prompt("jailbreak", "synonym_substitution", prompt_dir)
     result = prompt
     substitution_pairs: list[str] = []
-
-    for word in harmful_words:
-        synonym = _get_synonym(word, prompt, backend, model, rate_limiter, prompt_dir)
-
-        # Discard if the model returned prose instead of a word/phrase
+    for word in words:
+        messages = build_messages(config, word=word, prompt=prompt)
+        synonym = (yield LLMRequest(gen_model, messages)).strip()
         if not synonym or len(synonym.split()) > 4:
             synonym = word  # keep original as fallback
-
         result = re.sub(
             re.escape(word),
             lambda m, s=synonym: match_case(m.group(), s),
@@ -562,7 +428,6 @@ def to_synonym_substitution(
             flags=re.IGNORECASE,
         )
         substitution_pairs.append(f"{word}->{synonym}")
-
     return result, f"substitutions={';'.join(substitution_pairs)}"
 
 

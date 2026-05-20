@@ -14,9 +14,9 @@ Usage::
 """
 
 import json
-import random as _random
 from math import ceil
 from pathlib import Path
+from typing import Callable
 
 import pandas as pd
 
@@ -27,6 +27,8 @@ from redact.llms import (
     load_prompt,
     build_messages,
     generate_sample,
+    get_router,
+    BatchCaller,
 )
 from redact.llms.base import LLMBackend
 from redact.content_moderation import (
@@ -35,9 +37,11 @@ from redact.content_moderation import (
     generate_category_description,
     generate_seeds,
 )
-from redact.content_moderation.checker import build_quality_checker
+from redact.content_moderation.checker import (
+    build_quality_checker,
+    build_output_quality_checker,
+)
 from redact.dataset.io import get_existing_samples
-from redact.content_moderation.paraphrase import paraphrase_sample
 from redact.dataset import (
     load_taxonomy,
     iter_categories,
@@ -54,9 +58,15 @@ from redact.jailbreak import (
     get_all_hacking_functions,
     get_all_manipulation_functions,
     get_all_request_functions,
-    sample_combination,
-    apply_combination,
-    is_noop,
+    load_spec,
+    build_combination,
+    build_function_registry,
+    batch_apply_combinations,
+    plan_run,
+    load_plan,
+    completed_from_output,
+    compute_sample_id,
+    default_manifest_path,
 )
 from redact.jailbreak.manipulation import (
     BENIGN_CATEGORIES,
@@ -95,10 +105,16 @@ def _get_backend(
     backend: LLMBackend | None = None,
     model: str = "venice-uncensored",
 ) -> tuple[LLMBackend, RateLimiter]:
-    """Resolve backend — auto-select from model name if None."""
+    """Resolve backend — auto-select from model name if None.
+
+    Returns the process-wide rate limiter (owned by :func:`get_router`) so
+    every pipeline shares one RPM budget per model. Previously each call
+    constructed a fresh ``RateLimiter()``, which silently allowed each
+    pipeline to consume the full budget independently.
+    """
     if backend is None:
         backend = get_backend(model)
-    return backend, RateLimiter()
+    return backend, get_router().rate_limiter
 
 
 def _ensure_benign_data(
@@ -234,7 +250,7 @@ def generate_constitution(
     if backend is None:
         backend = get_backend(model)
 
-    rate_limiter = RateLimiter()
+    rate_limiter = get_router().rate_limiter
 
     pipeline = ConstitutionPipeline(
         backend=backend,
@@ -276,18 +292,15 @@ def generate_inputs_from_constitution(
     verbose: bool = True,
     batch_size: int = 32,
 ) -> pd.DataFrame:
-    """Generate input prompts from constitution entries.
+    """[Deprecated] Generate input prompts from constitution entries.
 
-    # CONSTITUTION-TO-INPUT: High-level pipeline function.
-    # Reads constitution CSVs and expands each entry's sample_description
-    # into full realistic prompts using the specified template style.
-    #
-    # Future work: chain with generate_outputs() and generate_jailbreaks().
+    Loads constitution CSVs from disk, then delegates to the unified
+    ``InputPipeline.run_from_constitution()`` via ``ConstitutionInputPipeline``.
 
-    For each constitution entry, uses the content moderation InputPipeline
-    to generate full-length prompts from the short sample_description.
-    Output is saved in standard content moderation format with constitution
-    metadata preserved as extra columns.
+    **Prefer** the composable API:
+    ``df = generate_constitution(...); generate_inputs(constitution_df=df, ...)``.
+    This wrapper is kept for backward compatibility with existing notebooks
+    and runner scripts.
 
     Args:
         style: Template style ("long", "short", or custom). Controls
@@ -309,7 +322,15 @@ def generate_inputs_from_constitution(
     Returns:
         DataFrame of all generated prompts with constitution metadata.
     """
+    import warnings
     from redact.constitution.input_generation import ConstitutionInputPipeline
+
+    warnings.warn(
+        "generate_inputs_from_constitution() is deprecated; prefer "
+        "generate_inputs(constitution_df=generate_constitution(...)).",
+        DeprecationWarning,
+        stacklevel=2,
+    )
 
     backend, rate_limiter = _get_backend(backend, model)
     check_model = check_model or model
@@ -360,35 +381,105 @@ def generate_inputs(
     dataset_dir: str | Path | None = None,
     fresh: bool = False,
     verbose: bool = True,
+    constitution_df: pd.DataFrame | None = None,
+    style: str = "long",
+    samples_per_entry: int = 3,
+    entry_types: list[str] | None = None,
+    batch_size: int = 32,
 ) -> pd.DataFrame:
-    """Generate content moderation input samples.
+    """Generate content moderation input samples (standalone or constitution-seeded).
 
-    Wraps the full input pipeline: taxonomy loading, description/seed
-    generation, sample generation with quality checking, and per-category
-    CSV saving.
+    Two modes share one implementation:
+
+    - **Standalone** (``constitution_df is None``, default): meta-prompt
+      seeds drive per-category multi-turn generation with the
+      entry-type-aware quality checker (entry_type defaults to ``harmful``).
+      This is the existing content-moderation path.
+    - **Constitution-seeded** (``constitution_df`` provided): each
+      constitution entry becomes one generation request via
+      ``InputPipeline.run_from_constitution()``. ``style``,
+      ``samples_per_entry``, ``entry_types``, ``batch_size`` configure this
+      mode. ``taxonomy`` / ``samples_per_category`` / ``num_seeds`` are
+      ignored.
 
     Args:
-        taxonomy: Taxonomy name (string) or pre-loaded taxonomy dict.
-        samples_per_category: Target number of accepted samples per category.
-        use_metaprompt: If True, use LLM to generate descriptions and seeds.
-            If False, use taxonomy descriptions and hand-written seeds.
-        seeds_name: Name of seeds JSON (only used when use_metaprompt=False).
-        samples_per_request: Samples requested per LLM call.
-        num_seeds: Number of seed prompts to generate (metaprompt mode).
-        model: Model for generation.
-        check_model: Model for quality checking. Defaults to same as model.
-        backend: LLM backend. If None, creates from environment.
-        base_url: API base URL (used when creating backend).
-        num_categories: Limit to first N categories. None = all.
-        dataset_dir: Where to save per-category CSVs. Defaults to
-            ``redact/Datasets/``.
-        fresh: If True, clear existing category CSVs before generating.
-            Prevents old samples from inflating the prohibited set.
+        taxonomy: Taxonomy name or pre-loaded dict. (Standalone mode only.)
+        samples_per_category: Target accepted samples per category. (Standalone.)
+        use_metaprompt: LLM-generate descriptions+seeds vs. hand-written. (Standalone.)
+        seeds_name: Seeds JSON name when ``use_metaprompt=False``. (Standalone.)
+        samples_per_request: Samples per LLM call per turn. (Standalone.)
+        num_seeds: Number of seed prompts to generate. (Standalone.)
+        model: Generation model.
+        check_model: Checker model; defaults to ``model``.
+        backend: LLM backend; auto-resolved if None.
+        base_url: API base URL (legacy).
+        num_categories: First N categories from taxonomy. (Standalone.)
+        dataset_dir: Where to save per-category CSVs.
+        fresh: Clear existing category CSVs first. (Standalone.)
         verbose: Print progress.
+        constitution_df: DataFrame of constitution entries. Triggers
+            constitution-seeded mode when non-None.
+        style: Template style for constitution mode (``"long"`` / ``"short"`` /
+            any directory under ``prompts/input/generation/from_constitution/``).
+        samples_per_entry: Prompts to generate per constitution entry.
+        entry_types: Filter constitution entries to these types
+            (e.g. ``["harmful", "benign"]``). None = all.
+        batch_size: Entries per LLM engine pass (constitution mode).
 
     Returns:
-        Merged DataFrame of all accepted samples.
+        Merged DataFrame of accepted samples.
     """
+    # ------------------------------------------------------------------
+    # Constitution-seeded mode (delegates to InputPipeline.run_from_constitution)
+    # ------------------------------------------------------------------
+    if constitution_df is not None:
+        backend, rate_limiter = _get_backend(backend, model)
+        check_model = check_model or model
+
+        ds_dir = Path(dataset_dir) if dataset_dir else None
+        pipeline = InputPipeline(
+            gen_backend=backend,
+            gen_model=model,
+            check_backend=backend,
+            check_model=check_model,
+            rate_limiter=rate_limiter,
+            extraction_style="numbered",
+            dataset_dir=ds_dir,
+        )
+
+        if entry_types is not None:
+            constitution_df = constitution_df[
+                constitution_df["entry_type"].isin(entry_types)
+            ].reset_index(drop=True)
+
+        prompt_config = load_prompt(
+            "input", f"generation/from_constitution/{style}"
+        )
+
+        if verbose:
+            print(f"\n{'='*60}")
+            print(f"Generate Inputs (constitution-seeded)")
+            print(f"{'='*60}")
+            print(
+                f"Entries: {len(constitution_df)} | Style: {style} | "
+                f"Samples/entry: {samples_per_entry} | Batch: {batch_size}"
+            )
+
+        pipeline.run_from_constitution(
+            constitution_df=constitution_df,
+            prompt_config=prompt_config,
+            samples_per_entry=samples_per_entry,
+            use_checker=True,
+            save=True,
+            verbose=verbose,
+            batch_size=batch_size,
+        )
+
+        return merge_all(ds_dir, accepted_only=True)
+
+    # ------------------------------------------------------------------
+    # Standalone (meta-prompt) mode
+    # ------------------------------------------------------------------
     # Resolve taxonomy
     if isinstance(taxonomy, str):
         taxonomy = load_taxonomy(taxonomy)
@@ -413,7 +504,7 @@ def generate_inputs(
         dataset_dir=ds_dir,
     )
 
-    prompt_config = load_prompt("content_moderation", "generation")
+    prompt_config = load_prompt("input", "generation/standalone")
     # Max turns as safety cap: 3x what a perfect run would need
     max_turns = ceil(samples_per_category / samples_per_request) * 3
 
@@ -544,7 +635,9 @@ def generate_inputs(
 def generate_outputs(
     inputs: pd.DataFrame | None = None,
     model: str = "venice-uncensored",
-    use_paraphrase: bool = False,
+    check_outputs: bool = True,
+    check_model: str | None = None,
+    batch_size: int = 32,
     max_samples: int | None = None,
     backend: LLMBackend | None = None,
     base_url: str = "https://api.venice.ai/api/v1",
@@ -552,22 +645,39 @@ def generate_outputs(
     output_path: str | Path | None = None,
     verbose: bool = True,
 ) -> pd.DataFrame:
-    """Generate model responses for content moderation input samples.
+    """Generate model responses for input samples, batched and quality-checked.
+
+    Pipeline per ``batch_size`` chunk:
+      1. Build all messages upfront.
+      2. ``BatchCaller.from_model(...).batch_generate(messages_list, model)``
+         — single vLLM engine pass (or thread-pool / sequential per backend
+         capability). One rate-limit slot per batch.
+      3. ``batch_check_samples`` over (input, output) pairs with the
+         entry-type-aware output checker. Refusals on harmful inputs are
+         rejected; refusals on benign inputs are evaluated normally.
+      4. Incremental append to the output CSV per batch — crash-resilient.
 
     Args:
-        inputs: Input samples DataFrame. If None, loads from dataset_dir.
-        model: Model for response generation.
-        use_paraphrase: Apply fingerprint removal paraphrase.
-        max_samples: Limit to first N samples. None = all.
-        backend: LLM backend. If None, creates from environment.
-        base_url: API base URL.
-        dataset_dir: Where to find input CSVs (if inputs is None).
-        output_path: Where to save output CSV. Defaults to
+        inputs: Input samples DataFrame. If None, loads accepted samples
+            from ``dataset_dir`` via :func:`merge_all`.
+        model: Generation model identifier.
+        check_outputs: Run the entry-type-aware output quality checker.
+            Set False to skip checking (accept everything).
+        check_model: Checker model; defaults to ``model``.
+        batch_size: Inputs per engine pass.
+        max_samples: Cap on inputs processed; None = all.
+        backend: LLM backend; auto-resolved if None.
+        base_url: API base URL (legacy, kept for callers).
+        dataset_dir: Where to find input CSVs (when ``inputs`` is None).
+        output_path: Where to save the output CSV. Defaults to
             ``Datasets/output_responses.csv``.
-        verbose: Print progress.
+        verbose: Print per-batch progress.
 
     Returns:
-        DataFrame with input-output pairs.
+        DataFrame with the unified output schema: ``input_id``,
+        ``input_prompt``, ``category``, ``subcategory``, ``entry_type``,
+        ``output_response``, ``accepted``, ``rejection_reason``, ``model``,
+        ``source``.
     """
     ds_dir = Path(dataset_dir) if dataset_dir else None
 
@@ -580,52 +690,127 @@ def generate_outputs(
         inputs = inputs.head(max_samples)
 
     backend, rate_limiter = _get_backend(backend, model)
-    prompt_config = load_prompt("content_moderation", "output_generation")
+    check_model = check_model or model
+    if check_outputs:
+        check_backend, _ = _get_backend(None, check_model)
+    else:
+        check_backend = None
+    prompt_config = load_prompt("output", "generation")
+    gen_caller = BatchCaller.from_model(backend, model, rate_limiter=rate_limiter)
 
     text_col = "sample" if "sample" in inputs.columns else "prompt"
+    inputs = inputs.reset_index(drop=True)
 
     if verbose:
         print(f"\n{'='*60}")
         print(f"Generate Output Responses")
         print(f"{'='*60}")
-        print(f"Samples: {len(inputs)} | Model: {model} | Paraphrase: {use_paraphrase}")
+        print(
+            f"Samples: {len(inputs)} | Model: {model} | "
+            f"Checker: {'enabled (' + check_model + ')' if check_outputs else 'disabled'} | "
+            f"Batch: {batch_size}"
+        )
 
-    results = []
-    for idx, (_, row) in enumerate(inputs.iterrows()):
-        input_text = row[text_col]
-        category = row.get("category", "unknown")
+    out_path = (
+        Path(output_path) if output_path
+        else (_default_dataset_dir() / "output_responses.csv")
+    )
+    out_path.parent.mkdir(parents=True, exist_ok=True)
+
+    # Per-(category, entry_type) checker cache so we build each prompt once.
+    checker_cache: dict[tuple[str, str], "Callable[[str], list[dict]]"] = {}
+
+    def _checker_for(category: str, entry_type: str):
+        key = (category, entry_type)
+        if key not in checker_cache:
+            checker_cache[key] = build_output_quality_checker(
+                category=category, entry_type=entry_type
+            )
+        return checker_cache[key]
+
+    all_rows: list[dict] = []
+
+    for batch_start in range(0, len(inputs), batch_size):
+        chunk = inputs.iloc[batch_start : batch_start + batch_size]
+
+        # 1. Build all messages for this chunk
+        messages_list = []
+        chunk_rows = []
+        for _, row in chunk.iterrows():
+            input_text = row[text_col]
+            category = str(row.get("category", "unknown"))
+            entry_type = str(row.get("entry_type", "harmful"))
+            subcategory = str(row.get("subcategory", ""))
+
+            messages_list.append(
+                build_messages(
+                    prompt_config,
+                    input_prompt=input_text,
+                    Category=category,
+                )
+            )
+            chunk_rows.append({
+                "input_id": str(row.get("id", "")),
+                "input_prompt": input_text,
+                "category": category,
+                "subcategory": subcategory,
+                "entry_type": entry_type,
+                "model": model,
+                "source": str(row.get("source", "")),
+            })
+
+        # 2. Single batched generation
+        responses = gen_caller.batch_generate(messages_list, model)
+
+        # 3. Batched output checking (per-row checker, flat batch)
+        if check_outputs and check_backend is not None:
+            check_msgs_list: list[list[dict]] = []
+            for r, resp in zip(chunk_rows, responses):
+                payload = f"INPUT:\n{r['input_prompt']}\n\nOUTPUT:\n{resp}"
+                check_msgs_list.append(
+                    _checker_for(r["category"], r["entry_type"])(payload)
+                )
+            check_responses = check_backend.batch_generate(
+                check_msgs_list, check_model
+            )
+            check_results = []
+            for cr in check_responses:
+                accepted = any(
+                    cr.strip().lower().startswith(p)
+                    for p in ("yes", "ok", "accept", "pass")
+                )
+                check_results.append((accepted, "" if accepted else cr))
+        else:
+            check_results = [(True, "")] * len(chunk_rows)
+
+        # 4. Assemble + incremental append
+        for r, resp, (accepted, reasoning) in zip(chunk_rows, responses, check_results):
+            r["output_response"] = resp
+            r["accepted"] = accepted
+            r["rejection_reason"] = reasoning
+        all_rows.extend(chunk_rows)
+
+        new_df = pd.DataFrame(chunk_rows)
+        if out_path.exists():
+            new_df.to_csv(out_path, mode="a", header=False, index=False)
+        else:
+            new_df.to_csv(out_path, index=False)
 
         if verbose:
-            print(f"  [{idx+1}/{len(inputs)}] {category}: {input_text[:60]}...")
+            accepted_count = sum(1 for r in chunk_rows if r["accepted"])
+            print(
+                f"  [{batch_start + len(chunk_rows)}/{len(inputs)}] "
+                f"{accepted_count}/{len(chunk_rows)} accepted "
+                f"-> appended to {out_path.name}"
+            )
 
-        messages = build_messages(
-            prompt_config,
-            input_prompt=input_text,
-            Category=category,
-        )
-        response = generate_sample(backend, model, messages, rate_limiter)
-
-        if use_paraphrase:
-            response = paraphrase_sample(backend, model, response, rate_limiter)
-
-        results.append({
-            "input_id": row.get("id", ""),
-            "input_prompt": input_text,
-            "category": category,
-            "output_response": response,
-            "model": model,
-            "paraphrased": use_paraphrase,
-        })
-
-    output_df = pd.DataFrame(results)
-
-    # Save
-    out_path = Path(output_path) if output_path else (_default_dataset_dir() / "output_responses.csv")
-    out_path.parent.mkdir(parents=True, exist_ok=True)
-    output_df.to_csv(out_path, index=False)
-
+    output_df = pd.DataFrame(all_rows)
     if verbose:
-        print(f"\n  Saved {len(output_df)} output responses to {out_path}")
+        accepted_total = int(output_df["accepted"].sum()) if not output_df.empty else 0
+        print(
+            f"\n  Saved {len(output_df)} responses "
+            f"({accepted_total} accepted) to {out_path}"
+        )
 
     return output_df
 
@@ -642,60 +827,97 @@ def generate_jailbreaks(
     include_manipulation: bool = True,
     include_obfuscation: bool = True,
     include_requests: bool = True,
+    sampling_probs: dict | None = None,
     model: str = "venice-uncensored",
     backend: LLMBackend | None = None,
     base_url: str = "https://api.venice.ai/api/v1",
     auto_generate_benign: bool = True,
+    chunk_size: int = 256,
+    iterations: int = 1,
+    resume: bool = True,
+    manifest_path: str | Path | None = None,
     verbose: bool = True,
 ) -> pd.DataFrame:
-    """Generate jailbreak variants of input prompts using technique combinations.
+    """Augment input prompts with jailbreak technique combinations (batched).
 
-    Each prompt receives a randomly sampled valid combination of techniques
-    applied in series (e.g. framing → rot13 → indirect embedding). The sampler
-    respects compatibility rules from combination_spec.json. Single-technique
-    attacks are a natural subset when the sampler picks only one technique.
+    Two explicit phases:
+
+    1. **Plan** — :func:`redact.jailbreak.plan_run` lays out the full run before
+       any generation: every input sample × ``iterations`` gets a
+       deterministically assigned combination (seeded on the prompt-content id,
+       deduped per sample) written to a JSONL manifest beside the output CSV.
+       Skipped when ``resume=True`` and a manifest already exists.
+    2. **Execute** — the manifest is streamed in ``chunk_size`` chunks; each
+       chunk is run through the batched engine
+       (:func:`redact.jailbreak.batch_apply_combinations`), which pools LLM calls
+       per model per round via the router (vLLM native batch / API multi-worker).
+       Output rows are appended to the CSV per chunk, so a crash loses at most
+       one chunk and a re-run resumes from the output (its
+       ``(input_id, iteration)`` pairs are the source of truth).
 
     Args:
-        inputs: Input prompts DataFrame. If None, loads from Datasets/.
-        output_path: Where to save the output CSV. Defaults to
-            ``Datasets/jailbreaks.csv``.
-        max_complexity: Max total complexity score across all selected techniques.
-        max_obfuscations: Max number of obfuscation families per combination.
-            Set to 1 with include_hacking/manipulation/requests=False for
-            single-technique mode.
-        seed: Random seed for reproducible combination sampling.
-        pure_only: If True, exclude techniques that require LLM calls.
+        inputs: Input prompts DataFrame. If None, loads accepted samples from
+            ``Datasets/`` via :func:`merge_all`.
+        output_path: Output CSV path. Defaults to ``Datasets/jailbreaks.csv``.
+            The manifest defaults to ``<output>.manifest.jsonl``.
+        max_complexity / max_obfuscations: Combination-sampler limits.
+        seed: Global run seed (combined with each sample's id + iteration).
+        pure_only: Exclude LLM-dependent techniques (no router calls).
         entry_types: If set, filter inputs to these entry_type values.
-        include_hacking: Allow hacking-layer techniques in combinations.
-        include_manipulation: Allow manipulation-layer techniques (FSH/DAP).
-        include_obfuscation: Allow obfuscation-layer techniques.
-        include_requests: Allow request-layer techniques.
-        model: Model for LLM-dependent techniques.
-        backend: LLM backend. If None, creates from environment.
-        base_url: API base URL.
-        auto_generate_benign: Pre-load or generate benign data for FSH/DAP.
+        include_hacking / include_manipulation / include_obfuscation /
+            include_requests: Layer toggles for the pool.
+        sampling_probs: Override per-layer inclusion probabilities (see
+            combination_spec.json ``sampling_probs``).
+        model: Generation model for LLM-dependent techniques.
+        backend: LLM backend (used only for benign pre-load); engine routes via
+            the process-wide router.
+        auto_generate_benign: Pre-load/generate benign data for FSH/DAP.
+        chunk_size: Manifest units per engine batch.
+        iterations: Combinations to assign per sample (1 = single-round).
+        resume: Reuse an existing manifest and skip already-written output rows.
+        manifest_path: Override manifest location.
         verbose: Print progress.
 
     Returns:
-        DataFrame of jailbreak samples with one row per input prompt.
+        DataFrame of all jailbreak rows from the output CSV (one per planned
+        unit), with the input columns plus ``jailbreak``, ``technique``,
+        ``technique_info``, ``complexity``, ``num_techniques``, ``is_noop``,
+        ``accepted``, ``reasoning``, ``iteration``, ``combination_spec_version``.
     """
     out = Path(output_path) if output_path else _default_jailbreak_path()
+    man_path = Path(manifest_path) if manifest_path else default_manifest_path(out)
 
+    # ------------------------------------------------------------------
+    # Load + normalize inputs (ensure a prompt column and a content-hash id)
+    # ------------------------------------------------------------------
     if inputs is None:
         inputs = merge_all(accepted_only=True)
         if inputs.empty:
             raise ValueError("No input samples found. Run generate_inputs() first.")
 
-    # Normalize: content mod uses 'sample', jailbreak expects 'prompt'
+    inputs = inputs.copy()
     if "sample" in inputs.columns and "prompt" not in inputs.columns:
         inputs = inputs.rename(columns={"sample": "prompt"})
-
+    if "prompt" not in inputs.columns:
+        raise ValueError("inputs must contain a 'prompt' (or 'sample') column.")
     if entry_types:
         inputs = inputs[inputs["entry_type"].isin(entry_types)].reset_index(drop=True)
 
+    if "id" not in inputs.columns:
+        inputs["id"] = inputs["prompt"].map(lambda p: compute_sample_id(str(p)))
+    else:
+        missing = inputs["id"].isna() | (inputs["id"].astype(str).isin(["", "nan"]))
+        if missing.any():
+            inputs.loc[missing, "id"] = inputs.loc[missing, "prompt"].map(
+                lambda p: compute_sample_id(str(p))
+            )
+    inputs["id"] = inputs["id"].astype(str)
+
     backend, rate_limiter = _get_backend(backend, model)
 
-    # Build pool — respect include_* flags
+    # ------------------------------------------------------------------
+    # Build technique pool + assignment settings
+    # ------------------------------------------------------------------
     pool = []
     if include_obfuscation:
         pool += get_all_obfuscation_functions()
@@ -705,17 +927,53 @@ def generate_jailbreaks(
         pool += get_all_manipulation_functions()
     if include_requests:
         pool += get_all_request_functions()
-
     if pure_only:
         pool = [f for f in pool if not getattr(f, "requires_llm", False)]
+    registry = build_function_registry(pool)
+
+    sample_kwargs = {
+        "max_complexity": max_complexity,
+        "max_obfuscations": max_obfuscations,
+        "include_hacking": include_hacking,
+        "include_manipulation": include_manipulation,
+        "include_obfuscation": include_obfuscation,
+        "include_requests": include_requests,
+    }
+    if sampling_probs is not None:
+        sample_kwargs["sampling_probs"] = sampling_probs
+    spec_version = load_spec().get("version", "")
 
     if verbose:
         print(f"\n{'='*60}")
-        print(f"Generate Jailbreaks")
+        print(f"Generate Jailbreaks (plan + batched execute)")
         print(f"{'='*60}")
-        print(f"Pool: {len(pool)} techniques | Input: {len(inputs)} prompts | Model: {model}")
+        print(
+            f"Pool: {len(pool)} techniques | Samples: {len(inputs)} | "
+            f"Iterations: {iterations} | Model: {model} | Chunk: {chunk_size}"
+        )
 
-    # Pre-load benign data upfront if any manipulation technique is in pool
+    # ------------------------------------------------------------------
+    # Phase 1 — Plan (lay out every unit before generation)
+    # ------------------------------------------------------------------
+    if resume and man_path.exists():
+        if verbose:
+            print(f"  Reusing existing manifest: {man_path}")
+    else:
+        plan_run(
+            inputs, pool, manifest_path=man_path, seed=seed,
+            iterations=iterations, sample_kwargs=sample_kwargs, verbose=verbose,
+        )
+
+    plan_rows = load_plan(man_path)
+
+    # Fresh (non-resume) run overwrites prior output; resume keeps + skips.
+    if not resume and out.exists():
+        out.unlink()
+    completed = completed_from_output(out) if resume else set()
+
+    # ------------------------------------------------------------------
+    # Phase 2 — Execute (stream manifest in chunks through the engine)
+    # ------------------------------------------------------------------
     has_manipulation = any(
         "fsh" in getattr(f, "families", []) or "dap" in getattr(f, "families", [])
         for f in pool
@@ -724,65 +982,68 @@ def generate_jailbreaks(
     if auto_generate_benign and has_manipulation:
         benign_data = _ensure_benign_data(backend, model, rate_limiter, verbose=verbose)
 
-    # Sample one valid combination per prompt and apply in series
-    rng = _random.Random(seed)
-    all_results = []
-    for i, (_, row) in enumerate(inputs.iterrows()):
-        if verbose and (i % 10 == 0 or i == len(inputs) - 1):
-            print(f"  [{i + 1}/{len(inputs)}] sampling combination...")
+    prompt_map = dict(zip(inputs["id"], inputs["prompt"]))
+    meta_map = {r["id"]: r for r in inputs.to_dict("records")}
 
-        fn = sample_combination(
-            rng, pool,
-            max_complexity=max_complexity,
-            max_obfuscations=max_obfuscations,
-            include_hacking=include_hacking,
-            include_manipulation=include_manipulation,
-            include_obfuscation=include_obfuscation,
-            include_requests=include_requests,
-        )
-        try:
-            result, info, accepted, reasoning = apply_combination(
-                fn, row["prompt"],
-                backend=backend, model=model, rate_limiter=rate_limiter,
-                benign_data=benign_data, auto_benign=False,
-            )
-        except Exception as e:
-            if verbose:
-                print(f"    Failed (combination={fn.__name__}): {e}")
-            result = row["prompt"]
-            info = f"ERROR: {e}"
-            accepted = False
-            reasoning = str(e)
+    pending = [
+        r for r in plan_rows
+        if str(r["sample_id"]) in prompt_map
+        and (str(r["sample_id"]), int(r["iteration"])) not in completed
+    ]
 
-        techniques = getattr(fn, "techniques", [] if fn.__name__ == "identity" else [fn])
-        all_results.append({
-            **row.to_dict(),
-            "jailbreak": result,
-            "technique": fn.__name__,
-            "technique_info": info,
-            "complexity": sum(getattr(t, "complexity", 0) for t in techniques),
-            "num_techniques": len(techniques),
-            "is_noop": is_noop(row["prompt"], result),
-            "accepted": accepted,
-            "reasoning": reasoning,
-        })
-
-    jailbreaks = pd.DataFrame(all_results)
     out.parent.mkdir(parents=True, exist_ok=True)
-    jailbreaks.to_csv(out, index=False)
+    router = get_router()
+    total = len(pending)
+    written = 0
+
+    for start in range(0, total, chunk_size):
+        chunk = pending[start : start + chunk_size]
+        samples = [
+            {
+                "id": str(r["sample_id"]),
+                "prompt": prompt_map[str(r["sample_id"])],
+                "combination": build_combination(r["combination"], registry),
+            }
+            for r in chunk
+        ]
+        results = batch_apply_combinations(
+            samples, gen_model=model, benign_data=benign_data, router=router,
+        )
+
+        rows = []
+        for plan_row, res in zip(chunk, results):
+            row = dict(meta_map.get(res["input_id"], {}))
+            row.update(res)
+            row["iteration"] = plan_row["iteration"]
+            row["combination_spec_version"] = spec_version
+            rows.append(row)
+
+        chunk_df = pd.DataFrame(rows)
+        if out.exists():
+            chunk_df.to_csv(out, mode="a", header=False, index=False)
+        else:
+            chunk_df.to_csv(out, index=False)
+        written += len(rows)
+
+        if verbose:
+            n_acc = sum(1 for x in rows if x.get("accepted"))
+            print(f"  [{start + len(rows)}/{total}] {n_acc} accepted -> appended to {out.name}")
+
+    jailbreaks = pd.read_csv(out) if out.exists() else pd.DataFrame()
 
     if verbose:
         print(f"\n{'='*60}")
         print(f"Jailbreak Summary")
         print(f"{'='*60}")
-        print(f"  Total: {len(jailbreaks)} samples")
-        n_noop = int(jailbreaks["is_noop"].sum()) if not jailbreaks.empty else 0
-        n_accepted = int(jailbreaks["accepted"].sum()) if not jailbreaks.empty else 0
-        n_rejected = len(jailbreaks) - n_accepted if not jailbreaks.empty else 0
-        print(f"  Accepted: {n_accepted} | Rejected: {n_rejected}")
-        print(f"  Transformed: {len(jailbreaks) - n_noop} | No-ops: {n_noop}")
-        if not jailbreaks.empty:
-            print(f"  Saved to: {out}")
+        print(f"  Planned units: {len(plan_rows)} | Newly written: {written}")
+        print(f"  Total rows in {out.name}: {len(jailbreaks)}")
+        if not jailbreaks.empty and "accepted" in jailbreaks.columns:
+            n_accepted = int(jailbreaks["accepted"].sum())
+            n_noop = int(jailbreaks["is_noop"].sum()) if "is_noop" in jailbreaks.columns else 0
+            print(f"  Accepted: {n_accepted} | Rejected: {len(jailbreaks) - n_accepted}")
+            print(f"  No-ops: {n_noop}")
+        print(f"  Manifest: {man_path}")
+        print(f"  Saved to: {out}")
 
     return jailbreaks
 

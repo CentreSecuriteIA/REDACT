@@ -1,7 +1,17 @@
 {
   "_comment": "Jailbreak technique compatibility specification. All rules enforced by get_compatible_remaining() in jailbreak/utils.py.",
 
+  "version": "1.0",
+
   "layer_order": ["hacking", "manipulation", "obfuscation", "requests"],
+
+  "sampling_probs": {
+    "_comment": "Per-layer inclusion probabilities used by sample_combination(). Overridable per-call via the sampling_probs argument.",
+    "hacking": 0.5,
+    "manipulation": 0.33,
+    "requests": 0.7,
+    "request_obfuscation": 0.5
+  },
 
   "layer_max_picks": {
     "hacking": 1,

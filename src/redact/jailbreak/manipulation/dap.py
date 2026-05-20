@@ -8,9 +8,8 @@ Ported from reference manipulation.py lines 356-468.
 
 import random
 
-from redact.llms.base import LLMBackend
-from redact.llms.wrappers import RateLimiter
-from .fsh import select_best_subcategory
+from redact.jailbreak.protocol import TechniqueGen
+from .fsh import _select_subcategory_gen
 
 
 # ---------------------------------------------------------------------------
@@ -72,16 +71,13 @@ def to_dap_random_long(prompt: str, benign_data: dict) -> tuple[str, str]:
 
 
 def to_dap_selected_short(
-    prompt: str,
-    benign_data: dict,
-    backend: LLMBackend,
-    model: str,
-    rate_limiter: RateLimiter | None = None,
-) -> tuple[str, str]:
-    """DAP with LLM-selected category, short answers."""
+    prompt: str, benign_data: dict | None = None, *,
+    gen_model: str | None = None, prompt_dir=None, **kwargs,
+) -> TechniqueGen:
+    """DAP with LLM-selected category, short answers (technique generator)."""
     num_shots = random.randint(3, 7)
-    subcat, was_fallback = select_best_subcategory(
-        prompt, benign_data["all_subcategories"], backend, model, rate_limiter
+    subcat, was_fallback = yield from _select_subcategory_gen(
+        prompt, benign_data["all_subcategories"], gen_model=gen_model, prompt_dir=prompt_dir
     )
     pairs = benign_data["by_subcat_short"].get(subcat, benign_data["short"])
     jailbreak, harmful_idx = _build_dap_prompt(prompt, pairs, num_shots)
@@ -90,16 +86,13 @@ def to_dap_selected_short(
 
 
 def to_dap_selected_long(
-    prompt: str,
-    benign_data: dict,
-    backend: LLMBackend,
-    model: str,
-    rate_limiter: RateLimiter | None = None,
-) -> tuple[str, str]:
-    """DAP with LLM-selected category, long answers."""
+    prompt: str, benign_data: dict | None = None, *,
+    gen_model: str | None = None, prompt_dir=None, **kwargs,
+) -> TechniqueGen:
+    """DAP with LLM-selected category, long answers (technique generator)."""
     num_shots = random.randint(3, 7)
-    subcat, was_fallback = select_best_subcategory(
-        prompt, benign_data["all_subcategories"], backend, model, rate_limiter
+    subcat, was_fallback = yield from _select_subcategory_gen(
+        prompt, benign_data["all_subcategories"], gen_model=gen_model, prompt_dir=prompt_dir
     )
     pairs = benign_data["by_subcat_long"].get(subcat, benign_data["long"])
     jailbreak, harmful_idx = _build_dap_prompt(prompt, pairs, num_shots)

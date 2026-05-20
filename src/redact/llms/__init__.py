@@ -28,6 +28,8 @@ from .model_config import (
     DEFAULT_RPM,
     get_model_config,
     register_model,
+    get_models_by_role,
+    default_model_for_role,
 )
 
 # Abstract base
@@ -56,6 +58,9 @@ from .wrappers import (
     with_feedback_retries,
     BatchCaller,
 )
+
+# Router (process-wide LLM access surface)
+from .router import ModelRouter, get_router, clear_router
 
 # High-level calls
 from .calls import generate_sample, check_sample, batch_check_samples, generate_with_check
