@@ -618,6 +618,7 @@ class InputPipeline:
 
         entries = list(constitution_df.iterrows())
         total = len(entries)
+        n_chunks = (total + batch_size - 1) // batch_size if batch_size else 1
 
         if verbose:
             print(f"\n  Constitution-seeded generation: {total} entries, "
@@ -625,6 +626,7 @@ class InputPipeline:
 
         for batch_start in range(0, total, batch_size):
             batch = entries[batch_start : batch_start + batch_size]
+            batch_idx = batch_start // batch_size + 1
 
             # 1. Build per-entry generation messages
             messages_list = []
@@ -651,7 +653,10 @@ class InputPipeline:
             gen_caller = BatchCaller.from_model(
                 self.gen_backend, self.gen_model, rate_limiter=self.rate_limiter
             )
-            raw_outputs = gen_caller.batch_generate(messages_list, self.gen_model)
+            raw_outputs = gen_caller.batch_generate(
+                messages_list, self.gen_model,
+                progress=f"gen batch {batch_idx}/{n_chunks}" if verbose else None,
+            )
 
             # 3. Extract per entry
             per_entry_extracted: list[list[str]] = []
@@ -693,7 +698,8 @@ class InputPipeline:
                     rate_limiter=self.rate_limiter,
                 )
                 responses = check_caller.batch_generate(
-                    flat_check_msgs, self.check_model
+                    flat_check_msgs, self.check_model,
+                    progress=f"check batch {batch_idx}/{n_chunks}" if verbose else None,
                 )
                 flat_check_results = []
                 for response in responses:

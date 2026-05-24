@@ -164,3 +164,30 @@ class TestBatchCaller:
             max_tokens=50,
         )
         assert backend.calls[0]["max_tokens"] == 50
+
+    def test_progress_label_emits_ticks_without_changing_results(self, capsys):
+        backend = MockBackend(["x", "y", "z"])
+        caller = BatchCaller(backend)  # series path, max_workers=1
+        results = caller.batch_generate(
+            [[{"role": "user", "content": str(i)}] for i in range(3)],
+            "m",
+            progress="gen chunk 1/1",
+        )
+        assert results == ["x", "y", "z"]
+        out = capsys.readouterr().out
+        assert "gen chunk 1/1: 0/3 ..." in out   # announce line
+        assert "gen chunk 1/1: 3/3 done" in out  # final tick
+
+    def test_progress_chains_with_on_complete(self, capsys):
+        backend = MockBackend(["a", "b"])
+        caller = BatchCaller(backend)
+        seen = []
+        results = caller.batch_generate(
+            [[{"role": "user", "content": "a"}], [{"role": "user", "content": "b"}]],
+            "m",
+            on_complete=lambda i, r: seen.append((i, r)),
+            progress="lbl",
+        )
+        assert results == ["a", "b"]
+        assert sorted(seen) == [(0, "a"), (1, "b")]   # user callback still fired
+        assert "lbl: 2/2 done" in capsys.readouterr().out

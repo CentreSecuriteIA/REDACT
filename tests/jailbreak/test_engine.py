@@ -21,10 +21,12 @@ class FakeRouter:
 
     def __init__(self, check_reply="Yes"):
         self.calls = []  # list of (model, batch_size)
+        self.progress_labels = []  # progress= kwarg seen per call (None if absent)
         self.check_reply = check_reply
 
-    def batch_generate(self, model, messages_list):
+    def batch_generate(self, model, messages_list, **kwargs):
         self.calls.append((model, len(messages_list)))
+        self.progress_labels.append(kwargs.get("progress"))
         out = []
         for msgs in messages_list:
             system = msgs[0]["content"].lower()
@@ -134,3 +136,34 @@ class TestBatchApplyCombinations:
         assert results[0]["accepted"] is False
         assert "DISCARDED" in results[0]["reasoning"]
         assert "Swahili" in results[0]["reasoning"]
+
+    def test_verbose_passes_round_progress_labels(self):
+        # The engine delegates printing to the router/BatchCaller; its job is to
+        # pass a per-round progress label. Actual tick printing is covered in
+        # tests/llms/test_progress.py and test_wrappers.py.
+        def make():
+            return [
+                _sample(0, "alpha", upper),       # pure, no rounds
+                _sample(1, "gamma", two_step),    # 2 LLM rounds
+            ]
+
+        quiet_router = FakeRouter()
+        quiet = batch_apply_combinations(
+            make(), gen_model=GEN_MODEL, router=quiet_router
+        )
+        verbose_router = FakeRouter()
+        verbose = batch_apply_combinations(
+            make(), gen_model=GEN_MODEL, router=verbose_router, verbose=True
+        )
+
+        # verbose must not change outcomes.
+        assert {r["input_id"]: r["jailbreak"] for r in quiet} == \
+               {r["input_id"]: r["jailbreak"] for r in verbose}
+
+        # Quiet: no progress kwarg ever passed (preserves minimal router contract).
+        assert all(p is None for p in quiet_router.progress_labels)
+        # Verbose: a "round N (model)" label per dispatch.
+        assert verbose_router.progress_labels == [
+            f"round 1 ({GEN_MODEL})",
+            f"round 2 ({GEN_MODEL})",
+        ]

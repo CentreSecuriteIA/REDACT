@@ -108,6 +108,7 @@ class ModelRouter:
         self,
         model: str,
         messages_list: list[list[dict]],
+        progress: str | None = None,
         **kwargs,
     ) -> list[str]:
         """Batch generation routed through the model's executor.
@@ -115,9 +116,17 @@ class ModelRouter:
         Picks the right execution mode (native batch / parallel / serial)
         based on backend capabilities. See :meth:`BatchCaller.batch_generate`
         for the dispatch rules.
+
+        Args:
+            model: Model identifier (selects the executor).
+            messages_list: One chat message list per call.
+            progress: Optional label enabling live progress ticks (forwarded to
+                :meth:`BatchCaller.batch_generate`). Pass a label when verbose.
+            **kwargs: Forwarded to the executor (e.g. ``on_complete``, sampling
+                params).
         """
         return self.get_executor(model).batch_generate(
-            messages_list, model, **kwargs
+            messages_list, model, progress=progress, **kwargs
         )
 
     def clear_executors(self) -> None:

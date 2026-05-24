@@ -47,6 +47,8 @@ from .utils import (
     tag_all_functions,
     get_compatible_remaining,
     sample_combination,
+    sample_exact_combination,
+    default_escalation_schedule,
     apply_combination,
     assign_combination,
     build_combination,

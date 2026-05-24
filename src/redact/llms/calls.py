@@ -90,6 +90,7 @@ def batch_check_samples(
     build_check_messages: Callable[[str], list[dict]],
     batch_size: int = 32,
     rate_limiter: RateLimiter | None = None,
+    progress: str | None = None,
     **kwargs,
 ) -> list[tuple[bool, str]]:
     """Check multiple samples in batched engine passes.
@@ -115,6 +116,9 @@ def batch_check_samples(
         build_check_messages: Function(sample_text) -> checker message list.
         batch_size: Max prompts per engine pass (default 32).
         rate_limiter: Optional shared rate limiter applied per dispatch.
+        progress: Optional label enabling live progress ticks per chunk (the
+            chunk index is appended when there is more than one chunk). Pass a
+            label when verbose, ``None`` otherwise.
         **kwargs: Passed to BatchCaller.batch_generate().
 
     Returns:
@@ -126,11 +130,19 @@ def batch_check_samples(
         return []
 
     caller = BatchCaller.from_model(backend, model, rate_limiter=rate_limiter)
+    n_chunks = (len(samples) + batch_size - 1) // batch_size
     results: list[tuple[bool, str]] = []
-    for i in range(0, len(samples), batch_size):
+    for chunk_i, i in enumerate(range(0, len(samples), batch_size), start=1):
         chunk = samples[i : i + batch_size]
         messages_list = [build_check_messages(s) for s in chunk]
-        responses = caller.batch_generate(messages_list, model, **kwargs)
+        chunk_progress = None
+        if progress is not None:
+            chunk_progress = (
+                f"{progress} [{chunk_i}/{n_chunks}]" if n_chunks > 1 else progress
+            )
+        responses = caller.batch_generate(
+            messages_list, model, progress=chunk_progress, **kwargs
+        )
         for response in responses:
             accepted = any(
                 response.strip().lower().startswith(prefix)

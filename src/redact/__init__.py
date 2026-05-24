@@ -205,3 +205,7 @@ from .pipelines import (  # noqa: E402
     generate_jailbreaks,
     build_dataset,
 )
+
+# Convenience re-export: the built-in 4-round escalation schedule for
+# generate_jailbreaks(settings_per_iteration=...).
+from .jailbreak import default_escalation_schedule  # noqa: E402, F401

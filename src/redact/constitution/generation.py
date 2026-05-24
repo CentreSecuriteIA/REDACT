@@ -20,6 +20,7 @@ Usage:
 """
 
 import csv
+import json
 import logging
 import re
 from dataclasses import dataclass, field
@@ -142,6 +143,51 @@ def _save_entries_csv(
                     "model": model,
                 }
             )
+
+
+# ---------------------------------------------------------------------------
+# Resume-state ledger (sidecar JSONL beside the constitution CSVs)
+# ---------------------------------------------------------------------------
+# Resume is driven by a separate state file rather than the CSVs: each unit of
+# work is one (source_category, entry_type) LLM call. A unit is recorded only
+# after its entries are saved, so a crash mid-save leaves it un-acked and it
+# re-runs next time. Same idea as the output ledger in pipelines.py and the
+# jailbreak manifest in jailbreak/manifest.py.
+
+
+def _state_path(output_dir: Path) -> Path:
+    """Sidecar resume-state path beside the constitution CSVs."""
+    return Path(output_dir) / "constitution.state.jsonl"
+
+
+def _unit_key(source_category: str, entry_type: str) -> str:
+    """Composite key identifying one (source_category, entry_type) LLM call."""
+    return f"{source_category}::{entry_type}"
+
+
+def _read_state(path: Path) -> set[str]:
+    """Return the set of completed unit keys (one JSON object per line)."""
+    if not path.exists():
+        return set()
+    done: set[str] = set()
+    with path.open(encoding="utf-8") as fh:
+        for line in fh:
+            line = line.strip()
+            if not line:
+                continue
+            try:
+                done.add(str(json.loads(line)["unit"]))
+            except (json.JSONDecodeError, KeyError):
+                continue
+    return done
+
+
+def _append_state(path: Path, units: list[str]) -> None:
+    """Append completed unit keys to the resume-state file."""
+    path.parent.mkdir(parents=True, exist_ok=True)
+    with path.open("a", encoding="utf-8") as fh:
+        for unit in units:
+            fh.write(json.dumps({"unit": unit}) + "\n")
 
 
 # ---------------------------------------------------------------------------
@@ -429,6 +475,32 @@ class ConstitutionPipeline:
             append=True,
         )
 
+    def _load_saved_result(self) -> ConstitutionResult:
+        """Rebuild a ConstitutionResult from the saved merged.csv.
+
+        Used as the return value of :meth:`run` so the result reflects
+        everything on disk (including rows from prior resumed runs) rather than
+        an in-memory accumulator. ``raw_outputs`` is left empty — raw LLM text
+        is not persisted and no caller needs it.
+        """
+        merged_path = self.output_dir / "merged.csv"
+        if not merged_path.exists():
+            return ConstitutionResult()
+
+        df = pd.read_csv(merged_path).fillna("")
+        entries = [
+            ConstitutionEntry(
+                category=str(row["constitution_category"]),
+                subcategory=str(row["constitution_subcategory"]),
+                sample=str(row["sample_description"]),
+                entry_type=str(row["entry_type"]),
+                source_category=str(row["source_category"]),
+                source_group_tag=str(row["source_group_tag"]),
+            )
+            for _, row in df.iterrows()
+        ]
+        return ConstitutionResult(entries=entries)
+
     def run(
         self,
         taxonomy: dict,
@@ -438,9 +510,22 @@ class ConstitutionPipeline:
         include_standalone_benign: bool = False,
         standalone_benign_categories: int = 10,
         save: bool = True,
+        resume: bool = True,
         verbose: bool = True,
     ) -> ConstitutionResult:
         """Run constitution generation across taxonomy categories.
+
+        Each ``(source_category, entry_type)`` LLM call is one resumable unit.
+        Entries are flushed to CSV per category as they are generated (never
+        held in memory for the whole run) and the unit is recorded in a sidecar
+        ``constitution.state.jsonl`` ledger only after its rows are saved.
+
+        ``resume`` is the single control over prior state:
+
+        - ``resume=True`` (default): keep the existing CSVs + ledger and skip
+          units already recorded, so a crash loses at most one unit's work.
+        - ``resume=False``: wipe the CSVs and the ledger first, regenerating
+          from scratch (never appends onto an existing run).
 
         Args:
             taxonomy: Loaded taxonomy dict.
@@ -452,11 +537,19 @@ class ConstitutionPipeline:
                 Saved to general_benign.csv.
             standalone_benign_categories: Number of benign constitution categories
                 to generate in the standalone benign call.
-            save: Whether to save CSVs to output_dir.
+            save: Whether to save CSVs to output_dir. When False, entries are
+                accumulated in memory and returned (no resume/read-back).
+            resume: When True (default), keep prior CSVs + ledger and skip
+                units already recorded. When False, wipe the CSVs and the
+                ledger first and regenerate from scratch. Ignored when
+                ``save=False``.
             verbose: Print progress.
 
         Returns:
-            ConstitutionResult with all entries across all categories.
+            ConstitutionResult. When ``save=True`` it is read back from the
+            saved ``merged.csv`` (the full dataset on disk, including rows from
+            prior resumed runs); when ``save=False`` it is the in-memory result
+            of this run only.
         """
         if entry_types is None:
             entry_types = ALL_ENTRY_TYPES
@@ -465,6 +558,20 @@ class ConstitutionPipeline:
         categories = all_categories
         if num_taxonomy_categories is not None:
             categories = categories[:num_taxonomy_categories]
+
+        state_path = _state_path(self.output_dir)
+
+        if save:
+            self.output_dir.mkdir(parents=True, exist_ok=True)
+            # resume=False regenerates from scratch: wipe prior CSVs + ledger so
+            # we never append onto an existing run. resume=True keeps + skips.
+            if not resume:
+                for f in self.output_dir.glob("*.csv"):
+                    f.unlink()
+                if state_path.exists():
+                    state_path.unlink()
+
+        completed = _read_state(state_path) if (save and resume) else set()
 
         if verbose:
             print(f"\n{'='*60}")
@@ -480,32 +587,37 @@ class ConstitutionPipeline:
                 print(f"  Standalone benign: 1 category-free call"
                       f" ({standalone_benign_categories} categories)")
             print(f"  Total LLM calls: ~{total_calls}")
+            if completed:
+                print(f"  Resume: {len(completed)} units already completed")
             print()
 
-        # Clear existing CSVs for a fresh run
-        if save:
-            self.output_dir.mkdir(parents=True, exist_ok=True)
-            for f in self.output_dir.glob("*.csv"):
-                f.unlink()
-
-        all_result = ConstitutionResult()
+        # Accumulate entries in memory only when not saving (no CSV to read back).
+        in_memory = ConstitutionResult() if not save else None
+        total_written = 0
         skipped: list[str] = []
 
         for i, (cat_name, cat_info) in enumerate(categories, 1):
+            # Only generate units (entry types) not already completed.
+            pending_types = [
+                et for et in entry_types
+                if _unit_key(cat_name, et.value) not in completed
+            ]
+            if not pending_types:
+                if verbose:
+                    print(f"  [{i}/{len(categories)}] {cat_name} - all units done, skipping")
+                continue
+
             if verbose:
                 print(f"  [{i}/{len(categories)}] {cat_name}")
 
             cat_result = self.generate_for_category(
-                cat_name, cat_info, entry_types, num_categories
+                cat_name, cat_info, pending_types, num_categories
             )
 
-            all_result.entries.extend(cat_result.entries)
-            all_result.raw_outputs.update(cat_result.raw_outputs)
-
             # Track skipped types (empty results from failed retries)
-            for et in entry_types:
+            for et in pending_types:
                 key = f"{cat_name}/{et.value}"
-                if key in cat_result.raw_outputs and cat_result.raw_outputs[key] == "":
+                if cat_result.raw_outputs.get(key) == "":
                     skipped.append(f"{cat_name}/{et.value}")
 
             # Count by type for this category
@@ -518,12 +630,27 @@ class ConstitutionPipeline:
                 )
                 print(f"    -> {len(cat_result.entries)} entries ({counts_str})")
 
-            # Save iteratively after each category
-            if save and cat_result.entries:
+            if not cat_result.entries:
+                continue
+
+            total_written += len(cat_result.entries)
+
+            if save:
+                # Flush to CSV, then ack each type that actually produced rows
+                # (types that failed all retries stay un-acked → retried later).
                 self._save_category_entries(cat_result)
+                produced_types = {e.entry_type for e in cat_result.entries}
+                _append_state(
+                    state_path,
+                    [_unit_key(cat_name, t) for t in produced_types],
+                )
+            else:
+                in_memory.entries.extend(cat_result.entries)
+                in_memory.raw_outputs.update(cat_result.raw_outputs)
 
         # ── Standalone benign generation (category-free) ─────────────
-        if include_standalone_benign:
+        benign_unit = _unit_key("general", "general_benign")
+        if include_standalone_benign and benign_unit not in completed:
             if verbose:
                 print(f"\n  --- Standalone Benign Generation (category-free) ---")
 
@@ -534,11 +661,10 @@ class ConstitutionPipeline:
             if not entries:
                 skipped.append("general_benign (standalone)")
             else:
-                all_result.entries.extend(entries)
-                all_result.raw_outputs["general_benign"] = raw
-
                 if verbose:
                     print(f"    -> {len(entries)} general benign entries")
+
+                total_written += len(entries)
 
                 if save:
                     self.output_dir.mkdir(parents=True, exist_ok=True)
@@ -554,9 +680,18 @@ class ConstitutionPipeline:
                         self.model,
                         append=True,
                     )
+                    _append_state(state_path, [benign_unit])
+                else:
+                    in_memory.entries.extend(entries)
+                    in_memory.raw_outputs["general_benign"] = raw
+
+        # Result is the constitution CSV (read back) when saving; else in-memory.
+        result = self._load_saved_result() if save else in_memory
 
         if verbose:
-            print(f"\n  Total: {len(all_result.entries)} constitution entries")
+            print(f"\n  Generated this run: {total_written} entries")
+            if save:
+                print(f"  Total in constitution CSV: {len(result.entries)} entries")
             if skipped:
                 print(f"  Skipped (failed after retries): {len(skipped)}")
                 for s in skipped:
@@ -564,7 +699,7 @@ class ConstitutionPipeline:
             if save:
                 print(f"  Saved to: {self.output_dir}")
 
-        return all_result
+        return result
 
     def save(self, result: ConstitutionResult) -> None:
         """Save entries to 4 type-based CSVs + merged.csv.

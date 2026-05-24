@@ -1,6 +1,28 @@
 """Tests for jailbreak technique composition utilities."""
 
-from redact.jailbreak.utils import combine_techniques, _parse_rejection_info, apply_combination
+import random
+
+from redact.jailbreak.utils import (
+    combine_techniques,
+    _parse_rejection_info,
+    apply_combination,
+    sample_combination,
+    sample_exact_combination,
+    default_escalation_schedule,
+)
+
+
+def _tech(name, layer, families, complexity=1, encode_weight=None):
+    """Build a fake tagged technique function (mirrors tag_all_functions output)."""
+    def fn(text, **kwargs):
+        return text, name
+    fn.__name__ = name
+    fn.layer = layer
+    fn.families = families
+    fn.complexity = complexity
+    fn.encode_weight = encode_weight
+    fn.within_layer_order = 0
+    return fn
 
 
 class TestCombineTechniques:
@@ -194,3 +216,90 @@ class TestApplyCombination:
         assert accepted is False
         assert "DISCARDED" in reasoning
         assert "_extra" not in result  # unused technique was skipped
+
+
+class TestSampleExactCombination:
+    def _obfuscation_pool(self):
+        # Three distinct obfuscation families, all high-complexity, so a budget
+        # would block stacking — but the exact path ignores complexity.
+        return [
+            _tech("t_encode", "obfuscation", ["encode"], complexity=3),
+            _tech("t_structural", "obfuscation", ["structural"], complexity=3),
+            _tech("t_suffix", "obfuscation", ["suffixes"], complexity=1),
+        ]
+
+    def test_exactly_one(self):
+        fn = sample_exact_combination(random.Random(0), self._obfuscation_pool(), 1)
+        assert len(fn.techniques) == 1
+
+    def test_exactly_two(self):
+        fn = sample_exact_combination(random.Random(0), self._obfuscation_pool(), 2)
+        assert len(fn.techniques) == 2
+
+    def test_ignores_complexity(self):
+        """High-complexity techniques still stack — count is the only constraint."""
+        # 2 x complexity-3 = 6; a budget run would often reject the second pick.
+        for seed in range(10):
+            fn = sample_exact_combination(random.Random(seed), self._obfuscation_pool(), 2)
+            assert len(fn.techniques) == 2
+
+    def test_distinct_families(self):
+        """The two picks come from different families (family dedup)."""
+        fn = sample_exact_combination(random.Random(3), self._obfuscation_pool(), 2)
+        fams = [t.families[0] for t in fn.techniques]
+        assert len(set(fams)) == 2
+
+    def test_layer_cap_best_effort(self):
+        """Layer cap (1 hacking) means n=2 from a hacking-only pool yields 1."""
+        pool = [
+            _tech("h1", "hacking", ["framing"]),
+            _tech("h2", "hacking", ["persona"]),
+        ]
+        fn = sample_exact_combination(random.Random(0), pool, 2)
+        assert len(fn.techniques) == 1  # second hacking pick blocked by layer cap
+
+    def test_include_flags_filter_pool(self):
+        """include_* restrict the initial candidate pool by layer."""
+        pool = self._obfuscation_pool() + [_tech("h1", "hacking", ["framing"])]
+        fn = sample_exact_combination(
+            random.Random(0), pool, 1, include_obfuscation=False
+        )
+        # Only the hacking technique was eligible.
+        assert [t.__name__ for t in fn.techniques] == ["h1"]
+
+    def test_reproducible(self):
+        p = self._obfuscation_pool()
+        a = sample_exact_combination(random.Random(7), p, 2)
+        b = sample_exact_combination(random.Random(7), p, 2)
+        assert [t.__name__ for t in a.techniques] == [t.__name__ for t in b.techniques]
+
+    def test_zero_returns_identity(self):
+        fn = sample_exact_combination(random.Random(0), self._obfuscation_pool(), 0)
+        assert fn.techniques == []
+        assert fn.__name__ == "identity"
+
+    def test_sample_combination_dispatches(self):
+        """sample_combination(exact_techniques=2) delegates to the exact path."""
+        fn = sample_combination(
+            random.Random(0), self._obfuscation_pool(), exact_techniques=2,
+        )
+        assert len(fn.techniques) == 2
+
+
+class TestDefaultEscalationSchedule:
+    def test_four_rounds(self):
+        sched = default_escalation_schedule()
+        assert len(sched) == 4
+
+    def test_first_two_are_count_driven(self):
+        sched = default_escalation_schedule()
+        assert sched[0] == {"exact_techniques": 1}
+        assert sched[1] == {"exact_techniques": 2}
+
+    def test_last_two_are_budget_driven(self):
+        sched = default_escalation_schedule()
+        for r in sched[2:]:
+            assert "exact_techniques" not in r
+            assert "max_complexity" in r
+        # Complexity escalates between the two budget rounds.
+        assert sched[3]["max_complexity"] > sched[2]["max_complexity"]

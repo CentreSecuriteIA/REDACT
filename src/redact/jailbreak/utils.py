@@ -331,6 +331,20 @@ def get_compatible_remaining(
 # ---------------------------------------------------------------------------
 
 
+def _pick_by_family(rng: random.Random, candidates: list[Callable]) -> Callable:
+    """Pick uniformly by family first, then uniformly within the chosen family.
+
+    Prevents over-sized families (e.g. 20 translation languages) from dominating
+    over smaller families that have fewer individual functions.
+    """
+    family_map: dict[str, list[Callable]] = {}
+    for fn in candidates:
+        fam = (getattr(fn, "families", None) or [""])[0]
+        family_map.setdefault(fam, []).append(fn)
+    chosen_family = rng.choice(list(family_map.keys()))
+    return rng.choice(family_map[chosen_family])
+
+
 def _is_request_obfuscation_compatible(fn: Callable, spec: dict) -> bool:
     """Return True if fn can be used as request-layer obfuscation.
 
@@ -359,8 +373,18 @@ def sample_combination(
     include_requests: bool = True,
     allow_request_obfuscation: bool = False,
     sampling_probs: dict | None = None,
+    exact_techniques: int | None = None,
 ) -> Callable:
     """Sample a random valid technique combination from pool.
+
+    Two modes:
+
+    - **Budget-driven** (default): probabilistic per-layer picking governed by
+        ``max_complexity``, ``max_obfuscations``, and ``sampling_probs``.
+    - **Count-driven** (``exact_techniques`` set): delegates to
+        :func:`sample_exact_combination`, which picks exactly that many compatible
+        techniques and ignores the complexity / obfuscation budget entirely. The
+        budget knobs are meaningless in this mode and are not consulted.
 
     Args:
         rng: Random instance for reproducibility.
@@ -376,10 +400,22 @@ def sample_combination(
         sampling_probs: Per-layer inclusion probabilities. Overrides the
             ``sampling_probs`` block in combination_spec.json. Recognised keys:
             ``hacking``, ``manipulation``, ``requests``, ``request_obfuscation``.
+        exact_techniques: If set, switch to count-driven mode and pick exactly this
+            many techniques (best-effort if the pool runs out). The budget knobs are
+            ignored in this mode.
 
     Returns:
         A combined technique function, or an identity function if nothing was selected.
     """
+    if exact_techniques is not None:
+        return sample_exact_combination(
+            rng, pool, exact_techniques,
+            include_hacking=include_hacking,
+            include_manipulation=include_manipulation,
+            include_obfuscation=include_obfuscation,
+            include_requests=include_requests,
+        )
+
     spec = load_spec()
     probs = dict(spec.get("sampling_probs", {}))
     if sampling_probs:
@@ -400,7 +436,7 @@ def sample_combination(
         candidates = [f for f in current_pool if getattr(f, "layer", None) == layer]
         if not candidates:
             return None
-        return rng.choice(candidates)
+        return _pick_by_family(rng, candidates)
 
     def _commit(fn: Callable) -> None:
         selected.append(fn)
@@ -427,7 +463,7 @@ def sample_combination(
             candidates = [f for f in current_pool if getattr(f, "layer", None) == "obfuscation"]
             if not candidates:
                 break
-            pick = rng.choice(candidates)
+            pick = _pick_by_family(rng, candidates)
             _commit(pick)
             obfusc_count += 1
 
@@ -444,7 +480,7 @@ def sample_combination(
             if _is_request_obfuscation_compatible(f, spec)
         ]
         if req_obfusc_candidates:
-            pick = rng.choice(req_obfusc_candidates)
+            pick = _pick_by_family(rng, req_obfusc_candidates)
             selected.append(pick)  # don't update pool; this is the final step
 
     if not selected:
@@ -453,6 +489,118 @@ def sample_combination(
         return combine_techniques()
 
     return combine_techniques(*selected)
+
+
+# ---------------------------------------------------------------------------
+# sample_exact_combination
+# ---------------------------------------------------------------------------
+
+
+def sample_exact_combination(
+    rng: random.Random,
+    pool: list[Callable],
+    n: int,
+    *,
+    include_hacking: bool = True,
+    include_manipulation: bool = True,
+    include_obfuscation: bool = True,
+    include_requests: bool = True,
+) -> Callable:
+    """Pick exactly ``n`` compatible techniques (count-driven, not budget-driven).
+
+    Unlike :func:`sample_combination`, the **count is the only knob** — there is no
+    complexity or obfuscation budget. Each pick is still validated through
+    :func:`get_compatible_remaining` (with ``remaining_complexity=None``, so complexity
+    never filters anything) to enforce layer caps (1 hacking / 1 manipulation /
+    1 request) and cross-incompatibilities. The obfuscation layer has no per-layer
+    pick cap, so e.g. ``n=2`` may yield two obfuscation-family techniques — intended
+    diversity.
+
+    Best-effort: if the compatible pool is exhausted before ``n`` picks (only possible
+    via caps / incompatibilities, never via complexity), fewer techniques are returned.
+    With the full pool, ``n`` of 1 or 2 is always reachable.
+
+    Args:
+        rng: Random instance for reproducibility.
+        pool: All available tagged technique functions.
+        n: Exact number of techniques to select.
+        include_hacking / include_manipulation / include_obfuscation /
+            include_requests: Layer toggles applied to the initial candidate pool.
+
+    Returns:
+        A combined technique function (``"identity"`` if ``n <= 0`` or nothing picked).
+    """
+    layer_included = {
+        "hacking": include_hacking,
+        "manipulation": include_manipulation,
+        "obfuscation": include_obfuscation,
+        "requests": include_requests,
+    }
+    current_pool = [
+        f for f in pool if layer_included.get(getattr(f, "layer", None), True)
+    ]
+
+    selected: list[Callable] = []
+    for _ in range(max(0, n)):
+        if not current_pool:
+            break
+        pick = _pick_by_family(rng, current_pool)
+        selected.append(pick)
+        # remaining_complexity=None → no complexity filtering; only caps + incompat.
+        current_pool = get_compatible_remaining(selected, current_pool, None)
+
+    if not selected:
+        return combine_techniques()
+    return combine_techniques(*selected)
+
+
+# ---------------------------------------------------------------------------
+# default_escalation_schedule
+# ---------------------------------------------------------------------------
+
+
+def default_escalation_schedule() -> list[dict]:
+    """Return the built-in 4-round increasing-complexity schedule (overridable).
+
+    Each dict is one round's ``sample_combination`` kwargs, passed per-iteration to
+    :func:`redact.jailbreak.manifest.plan_run` via ``settings_per_iteration``. Every
+    input sample is augmented once per round (4 times total), escalating in intensity:
+
+    1. exactly 1 technique (count-driven)
+    2. exactly 2 techniques (count-driven, a real combination)
+    3. higher complexity (budget-driven, probabilistic stacking)
+    4. even higher complexity (budget-driven, largest budget + most stacking)
+
+    Exact rounds carry only ``exact_techniques`` (the count is the whole story); budget
+    rounds carry only the budget knobs. ``allow_request_obfuscation`` is required for
+    the ``request_obfuscation`` probability to take effect.
+
+    Override by passing your own list to ``generate_jailbreaks(settings_per_iteration=...)``.
+    """
+    return [
+        # Rounds 1-2: COUNT-driven. exact_techniques is the only knob.
+        {"exact_techniques": 1},
+        {"exact_techniques": 2},
+        # Rounds 3-4: BUDGET-driven. Probabilistic sampler runs.
+        {
+            "max_complexity": 6,
+            "max_obfuscations": 2,
+            "sampling_probs": {
+                "hacking": 0.7, "manipulation": 0.5,
+                "requests": 0.8, "request_obfuscation": 0.5,
+            },
+            "allow_request_obfuscation": True,
+        },
+        {
+            "max_complexity": 9,
+            "max_obfuscations": 3,
+            "sampling_probs": {
+                "hacking": 0.9, "manipulation": 0.7,
+                "requests": 0.9, "request_obfuscation": 0.7,
+            },
+            "allow_request_obfuscation": True,
+        },
+    ]
 
 
 # ---------------------------------------------------------------------------

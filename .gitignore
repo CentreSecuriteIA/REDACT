@@ -13,6 +13,7 @@ Data_cache/
 __pycache__/
 *.py[cod]
 *.egg-info/
+.pytest_cache/
 dist/
 build/
 .venv/
@@ -32,3 +33,6 @@ Thumbs.db
 REFACTOR.md
 refactor-reference.md
 CLAUDE.md
+
+# Backups
+old_data.zip

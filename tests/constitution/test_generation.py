@@ -13,6 +13,10 @@ from redact.constitution.generation import (
     _strip_end_marker,
     _save_entries_csv,
     _CSV_COLUMNS,
+    _state_path,
+    _unit_key,
+    _read_state,
+    _append_state,
 )
 
 
@@ -220,3 +224,143 @@ class TestConstitutionPipeline:
         assert len(entries) > 0
         assert all(e.entry_type == "general_benign" for e in entries)
         assert all(e.source_category == "general" for e in entries)
+
+
+class TestStateLedger:
+    """Sidecar resume-state ledger for constitution generation."""
+
+    def test_state_path_is_sidecar(self, tmp_path):
+        sp = _state_path(tmp_path / "constitution")
+        assert sp.name == "constitution.state.jsonl"
+        assert sp.parent == tmp_path / "constitution"
+
+    def test_unit_key(self):
+        assert _unit_key("Violence", "harmful") == "Violence::harmful"
+
+    def test_read_missing_returns_empty(self, tmp_path):
+        assert _read_state(tmp_path / "nope.state.jsonl") == set()
+
+    def test_append_then_read_roundtrip(self, tmp_path):
+        sp = tmp_path / "s.state.jsonl"
+        _append_state(sp, ["A::harmful", "A::benign"])
+        _append_state(sp, ["B::harmful"])
+        assert _read_state(sp) == {"A::harmful", "A::benign", "B::harmful"}
+
+    def test_read_ignores_malformed_lines(self, tmp_path):
+        sp = tmp_path / "s.state.jsonl"
+        sp.write_text(
+            '{"unit": "x"}\nnot json\n{"no_unit": 1}\n{"unit": "y"}\n',
+            encoding="utf-8",
+        )
+        assert _read_state(sp) == {"x", "y"}
+
+
+class TestRunResume:
+    """run() resume behaviour + incremental save + CSV-backed result."""
+
+    _TAXONOMY = {
+        "categories": {
+            "CatA": {"description": "A", "subcategories": ["S"]},
+            "CatB": {"description": "B", "subcategories": ["S"]},
+        },
+    }
+
+    def _make_pipeline(self, backend, tmp_path):
+        return ConstitutionPipeline(
+            backend=backend, model="test-model",
+            output_dir=tmp_path / "constitution",
+        )
+
+    def test_run_writes_ledger_units(self, tmp_path):
+        backend = MockBackend(_VALID_CONSTITUTION_OUTPUT)
+        pipeline = self._make_pipeline(backend, tmp_path)
+        pipeline.run(
+            taxonomy=self._TAXONOMY,
+            entry_types=[EntryType.HARMFUL, EntryType.BENIGN],
+            num_categories=2, save=True, verbose=False,
+        )
+        units = _read_state(_state_path(tmp_path / "constitution"))
+        assert units == {
+            "CatA::harmful", "CatA::benign",
+            "CatB::harmful", "CatB::benign",
+        }
+
+    def test_resume_skips_completed_and_no_duplicates(self, tmp_path):
+        backend = MockBackend(_VALID_CONSTITUTION_OUTPUT)
+        pipeline = self._make_pipeline(backend, tmp_path)
+        types = [EntryType.HARMFUL, EntryType.BENIGN]
+
+        first = pipeline.run(
+            taxonomy=self._TAXONOMY, entry_types=types,
+            num_categories=2, save=True, verbose=False,
+        )
+        calls_after_first = len(backend.calls)
+        rows_after_first = len(first.entries)
+        assert calls_after_first == 4  # 2 categories x 2 types
+
+        # Re-run: everything is already in the ledger -> no new LLM calls,
+        # and the CSV-backed result does not double.
+        second = pipeline.run(
+            taxonomy=self._TAXONOMY, entry_types=types,
+            num_categories=2, save=True, resume=True, verbose=False,
+        )
+        assert len(backend.calls) == calls_after_first  # no new calls
+        assert len(second.entries) == rows_after_first  # no duplicate rows
+
+    def test_resume_continues_after_partial(self, tmp_path):
+        backend = MockBackend(_VALID_CONSTITUTION_OUTPUT)
+        out_dir = tmp_path / "constitution"
+
+        # Pre-seed the ledger as if CatA was already completed.
+        _append_state(_state_path(out_dir), ["CatA::harmful"])
+
+        pipeline = self._make_pipeline(backend, tmp_path)
+        pipeline.run(
+            taxonomy=self._TAXONOMY, entry_types=[EntryType.HARMFUL],
+            num_categories=2, save=True, resume=True, verbose=False,
+        )
+        # Only CatB should have been generated (CatA skipped).
+        assert len(backend.calls) == 1
+        assert _read_state(_state_path(out_dir)) == {"CatA::harmful", "CatB::harmful"}
+
+    def test_resume_false_wipes_csvs_and_ledger(self, tmp_path):
+        backend = MockBackend(_VALID_CONSTITUTION_OUTPUT)
+        out_dir = tmp_path / "constitution"
+        pipeline = self._make_pipeline(backend, tmp_path)
+
+        pipeline.run(
+            taxonomy=self._TAXONOMY, entry_types=[EntryType.HARMFUL],
+            num_categories=2, save=True, verbose=False,
+        )
+        rows_first = len(pd.read_csv(out_dir / "merged.csv"))
+
+        # resume=False should wipe and regenerate, not append.
+        result = pipeline.run(
+            taxonomy=self._TAXONOMY, entry_types=[EntryType.HARMFUL],
+            num_categories=2, save=True, resume=False, verbose=False,
+        )
+        assert len(pd.read_csv(out_dir / "merged.csv")) == rows_first
+        assert len(result.entries) == rows_first
+
+    def test_result_is_csv_backed(self, tmp_path):
+        backend = MockBackend(_VALID_CONSTITUTION_OUTPUT)
+        out_dir = tmp_path / "constitution"
+        pipeline = self._make_pipeline(backend, tmp_path)
+        result = pipeline.run(
+            taxonomy=self._TAXONOMY, entry_types=[EntryType.HARMFUL],
+            num_categories=2, save=True, verbose=False,
+        )
+        merged = pd.read_csv(out_dir / "merged.csv")
+        assert len(result.entries) == len(merged)
+
+    def test_save_false_keeps_in_memory_and_writes_nothing(self, tmp_path):
+        backend = MockBackend(_VALID_CONSTITUTION_OUTPUT)
+        out_dir = tmp_path / "constitution"
+        pipeline = self._make_pipeline(backend, tmp_path)
+        result = pipeline.run(
+            taxonomy=self._TAXONOMY, entry_types=[EntryType.HARMFUL],
+            num_categories=2, save=False, verbose=False,
+        )
+        assert len(result.entries) > 0
+        assert not (out_dir / "merged.csv").exists()
+        assert not _state_path(out_dir).exists()

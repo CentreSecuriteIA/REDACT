@@ -89,3 +89,62 @@ def test_resume_skips_completed(tmp_path):
                                 resume=True, **PURE_KW)
     assert len(again) == 5  # no duplicate rows
     assert len(pd.read_csv(out)) == 5
+
+
+def test_settings_per_iteration_escalation(tmp_path):
+    """Multi-round escalation: 4 rounds per sample, exact counts for rounds 0-1."""
+    out = tmp_path / "jb.csv"
+    schedule = [
+        {"exact_techniques": 1},
+        {"exact_techniques": 2},
+        {"max_complexity": 6, "max_obfuscations": 2},
+        {"max_complexity": 9, "max_obfuscations": 3},
+    ]
+    df = generate_jailbreaks(inputs=_inputs(), output_path=out, seed=11,
+                             settings_per_iteration=schedule, **PURE_KW)
+
+    # iterations derived from schedule length: 5 samples x 4 rounds.
+    plan = load_plan(out.with_name("jb.manifest.jsonl"))
+    assert len(plan) == 20
+    assert sorted({r["iteration"] for r in plan}) == [0, 1, 2, 3]
+
+    # Per-round settings recorded; count-driven rounds have exact combination sizes.
+    for r in plan:
+        if r["iteration"] == 0:
+            assert r["settings"].get("exact_techniques") == 1
+            assert len(r["combination"]) == 1
+        elif r["iteration"] == 1:
+            assert r["settings"].get("exact_techniques") == 2
+            assert len(r["combination"]) == 2
+
+    # Output mirrors the exact counts for the count-driven rounds.
+    assert (df[df["iteration"] == 0]["num_techniques"] == 1).all()
+    assert (df[df["iteration"] == 1]["num_techniques"] == 2).all()
+
+
+def test_settings_per_iteration_empty_raises(tmp_path):
+    with pytest.raises(ValueError):
+        generate_jailbreaks(inputs=_inputs(), output_path=tmp_path / "jb.csv",
+                            settings_per_iteration=[], **PURE_KW)
+
+
+def test_include_translation_filter_removes_translation_family():
+    """The include_translation=False filter drops exactly the translation family.
+
+    Translation techniques all require an LLM, so an end-to-end (executing) test
+    would hit the network. This checks the pool filter the pipeline applies, on the
+    real spec-tagged obfuscation pool, offline.
+    """
+    from redact.jailbreak.obfuscation import get_all_obfuscation_functions
+
+    pool = get_all_obfuscation_functions()
+    # Baseline: translation is part of the obfuscation pool.
+    assert any("translation" in getattr(f, "families", []) for f in pool)
+
+    # The exact predicate generate_jailbreaks uses when include_translation=False.
+    filtered = [f for f in pool if "translation" not in getattr(f, "families", [])]
+    assert not any("translation" in getattr(f, "families", []) for f in filtered)
+    # Nothing else is dropped.
+    assert len(pool) - len(filtered) == sum(
+        1 for f in pool if "translation" in getattr(f, "families", [])
+    )

@@ -155,6 +155,41 @@ def split_by_column(
     }
 
 
+def take_per_group(
+    df: pd.DataFrame,
+    n: int | None,
+    group_by: tuple[str, ...] | list[str] = ("category", "entry_type"),
+) -> pd.DataFrame:
+    """Take the first ``n`` rows of each (existing) group, order-preserving.
+
+    A deterministic alternative to a global ``df.head(n)`` for capping a merged,
+    category-ordered frame: instead of skewing to whichever categories appear
+    first, it keeps up to ``n`` rows from every ``group_by`` group so all
+    categories (and severity levels) are represented.
+
+    Args:
+        df: Source DataFrame.
+        n: Max rows to keep per group. ``None`` returns ``df`` unchanged.
+        group_by: Columns to group on. Only columns actually present are used
+            (same idiom as :func:`deterministic_balanced_assign`); when none are
+            present it falls back to a plain ``df.head(n)``.
+
+    Returns:
+        A new DataFrame with at most ``n`` rows per group, overall row order
+        preserved, index reset.
+    """
+    if n is None:
+        return df
+    valid = [c for c in group_by if c in df.columns]
+    if not valid:
+        return df.head(n).reset_index(drop=True)
+    return (
+        df.groupby(valid, sort=False, group_keys=False)
+        .head(n)
+        .reset_index(drop=True)
+    )
+
+
 def split_by_functions(
     df: pd.DataFrame,
     type_to_getter: dict[str, callable],

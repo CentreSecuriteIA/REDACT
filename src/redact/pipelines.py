@@ -48,6 +48,7 @@ from redact.dataset import (
     load_seeds,
     get_seed_prompts,
     merge_all,
+    take_per_group,
 )
 from redact.dataset.merge import (
     merge_content_mod_csvs,
@@ -241,6 +242,7 @@ def generate_constitution(
     include_standalone_benign: bool = False,
     standalone_benign_categories: int = 10,
     output_dir: str | Path | None = None,
+    resume: bool = True,
     verbose: bool = True,
 ) -> pd.DataFrame:
     """Generate a constitution (category hierarchy) for classifier training.
@@ -268,10 +270,17 @@ def generate_constitution(
             to generate in the standalone benign call.
         output_dir: Where to save CSVs. Defaults to
             ``Data_cache/constitution/``.
+        resume: When True (default), skip ``(source_category, entry_type)``
+            units already recorded in the sidecar ``constitution.state.jsonl``
+            ledger beside the CSVs and append to the existing CSVs (a crash
+            loses at most one unit's work). When False, clear the CSVs and the
+            ledger first and regenerate from scratch.
         verbose: Print progress.
 
     Returns:
-        DataFrame of all constitution entries.
+        DataFrame of all constitution entries, backed by the on-disk
+        ``merged.csv`` (the full dataset, including rows from prior resumed
+        runs — not just this run's delta).
     """
     from redact.constitution import ConstitutionPipeline, EntryType
 
@@ -305,6 +314,7 @@ def generate_constitution(
         include_standalone_benign=include_standalone_benign,
         standalone_benign_categories=standalone_benign_categories,
         save=True,
+        resume=resume,
         verbose=verbose,
     )
 
@@ -677,6 +687,7 @@ def generate_outputs(
     check_model: str | None = None,
     batch_size: int = 32,
     max_samples: int | None = None,
+    max_per_category: int | None = None,
     backend: LLMBackend | None = None,
     base_url: str = "https://api.venice.ai/api/v1",
     dataset_dir: str | Path | None = None,
@@ -711,7 +722,14 @@ def generate_outputs(
             Set False to skip checking (accept everything).
         check_model: Checker model; defaults to ``model``.
         batch_size: Inputs per engine pass.
-        max_samples: Cap on inputs processed; None = all.
+        max_samples: Global cap on inputs processed (``head(N)`` over the whole
+            frame); None = all. Applied *after* ``max_per_category``.
+        max_per_category: Deterministic cap of N inputs per
+            ``(category, entry_type)`` group (falls back to per-``category``,
+            then to a plain head, when those columns are absent). Unlike
+            ``max_samples`` this keeps every category and severity level
+            represented instead of skewing to the first categories in the
+            (category-ordered) merged frame. None = no per-group cap.
         backend: LLM backend; auto-resolved if None.
         base_url: API base URL (legacy, kept for callers).
         dataset_dir: Where to find input CSVs (when ``inputs`` is None).
@@ -735,6 +753,10 @@ def generate_outputs(
         if inputs.empty:
             raise ValueError("No input samples found. Run generate_inputs() first.")
 
+    # Per-group cap first (keeps every category/severity represented), then the
+    # global head as a final safety cap.
+    if max_per_category is not None:
+        inputs = take_per_group(inputs, max_per_category)
     if max_samples is not None:
         inputs = inputs.head(max_samples)
 
@@ -788,10 +810,14 @@ def generate_outputs(
         print(f"\n{'='*60}")
         print(f"Generate Output Responses")
         print(f"{'='*60}")
+        cap_str = (
+            f" | Per-category cap: {max_per_category}"
+            if max_per_category is not None else ""
+        )
         print(
             f"Samples: {len(inputs)} | Model: {model} | "
             f"Checker: {'enabled (' + check_model + ')' if check_outputs else 'disabled'} | "
-            f"Batch: {batch_size}"
+            f"Batch: {batch_size}{cap_str}"
         )
 
     # Per-(category, entry_type) checker cache so we build each prompt once.
@@ -806,9 +832,11 @@ def generate_outputs(
         return checker_cache[key]
 
     all_rows: list[dict] = []
+    n_chunks = ceil(len(inputs) / batch_size) if batch_size else 1
 
     for batch_start in range(0, len(inputs), batch_size):
         chunk = inputs.iloc[batch_start : batch_start + batch_size]
+        chunk_idx = batch_start // batch_size + 1
 
         # 1. Build all messages for this chunk
         messages_list = []
@@ -837,7 +865,10 @@ def generate_outputs(
             })
 
         # 2. Single batched generation
-        responses = gen_caller.batch_generate(messages_list, model)
+        responses = gen_caller.batch_generate(
+            messages_list, model,
+            progress=f"gen chunk {chunk_idx}/{n_chunks}" if verbose else None,
+        )
 
         # 3. Batched output checking (per-row checker, flat batch)
         if check_outputs and check_caller is not None:
@@ -848,7 +879,8 @@ def generate_outputs(
                     _checker_for(r["category"], r["entry_type"])(payload)
                 )
             check_responses = check_caller.batch_generate(
-                check_msgs_list, check_model
+                check_msgs_list, check_model,
+                progress=f"check chunk {chunk_idx}/{n_chunks}" if verbose else None,
             )
             check_results = []
             for cr in check_responses:
@@ -913,6 +945,7 @@ def generate_jailbreaks(
     include_manipulation: bool = True,
     include_obfuscation: bool = True,
     include_requests: bool = True,
+    include_translation: bool = True,
     sampling_probs: dict | None = None,
     model: str = "venice-uncensored",
     backend: LLMBackend | None = None,
@@ -920,6 +953,7 @@ def generate_jailbreaks(
     auto_generate_benign: bool = True,
     chunk_size: int = 256,
     iterations: int = 1,
+    settings_per_iteration: list[dict] | None = None,
     resume: bool = True,
     manifest_path: str | Path | None = None,
     verbose: bool = True,
@@ -952,6 +986,11 @@ def generate_jailbreaks(
         entry_types: If set, filter inputs to these entry_type values.
         include_hacking / include_manipulation / include_obfuscation /
             include_requests: Layer toggles for the pool.
+        include_translation: When False, drop the translation family from the pool
+            so it is never sampled. Translation is the most expensive technique
+            family (each is a translate→check→retry loop = 2–8 LLM calls on the
+            translation-role model) and adds little to a first-pass dataset.
+            Defaults to True.
         sampling_probs: Override per-layer inclusion probabilities (see
             combination_spec.json ``sampling_probs``).
         model: Generation model for LLM-dependent techniques.
@@ -959,7 +998,18 @@ def generate_jailbreaks(
             the process-wide router.
         auto_generate_benign: Pre-load/generate benign data for FSH/DAP.
         chunk_size: Manifest units per engine batch.
-        iterations: Combinations to assign per sample (1 = single-round).
+        iterations: Combinations to assign per sample (1 = single-round). Ignored when
+            ``settings_per_iteration`` is given (its length wins).
+        settings_per_iteration: Per-round sampler kwargs for a multi-round
+            increasing-complexity run — one dict per round, each merged into the
+            combination sampler for that iteration. When provided, ``iterations`` is
+            set to ``len(settings_per_iteration)`` and every sample is augmented once
+            per round (e.g. 4 rounds → 4 augmentations per sample). The technique
+            **pool** is still built once from the top-level ``include_*`` flags (the
+            full superset); per-round ``include_*`` / ``sampling_probs`` /
+            ``exact_techniques`` keys are *sampling* restrictions, not pool membership.
+            See :func:`redact.jailbreak.default_escalation_schedule` for the built-in
+            default. ``None`` (default) → single flat-settings run.
         resume: Reuse an existing manifest and skip already-written output rows.
         manifest_path: Override manifest location.
         verbose: Print progress.
@@ -1004,6 +1054,22 @@ def generate_jailbreaks(
     # ------------------------------------------------------------------
     # Build technique pool + assignment settings
     # ------------------------------------------------------------------
+    # The registry maps every known technique name → callable for reconstructing
+    # a planned combination at execution time. It is built from the FULL technique
+    # set, independent of the include_* / pure_only / include_translation filters:
+    # those filters govern what new plans may *sample*, not what an existing
+    # manifest can *reconstruct*. Building it from the filtered pool would make a
+    # stale manifest (e.g. one planned with translation, now run with
+    # include_translation=False) raise KeyError in build_combination.
+    full_pool = (
+        get_all_obfuscation_functions()
+        + get_all_hacking_functions()
+        + get_all_manipulation_functions()
+        + get_all_request_functions()
+    )
+    registry = build_function_registry(full_pool)
+
+    # The sampling pool is the filtered subset — what a fresh plan may draw from.
     pool = []
     if include_obfuscation:
         pool += get_all_obfuscation_functions()
@@ -1022,7 +1088,11 @@ def generate_jailbreaks(
             if not getattr(f, "requires_llm", False)
             and not getattr(f, "requires_benign", False)
         ]
-    registry = build_function_registry(pool)
+    if not include_translation:
+        # Translation is the most expensive family per technique (each is a
+        # translate→check→retry loop = 2–8 LLM calls) and adds little to a first-pass
+        # dataset. Drop it from the pool so it is never sampled.
+        pool = [f for f in pool if "translation" not in getattr(f, "families", [])]
 
     sample_kwargs = {
         "max_complexity": max_complexity,
@@ -1034,6 +1104,13 @@ def generate_jailbreaks(
     }
     if sampling_probs is not None:
         sample_kwargs["sampling_probs"] = sampling_probs
+
+    # Multi-round escalation: the per-iteration settings list drives the round count.
+    if settings_per_iteration is not None:
+        if not settings_per_iteration:
+            raise ValueError("settings_per_iteration must be a non-empty list of dicts.")
+        iterations = len(settings_per_iteration)
+
     spec_version = load_spec().get("version", "")
 
     if verbose:
@@ -1054,7 +1131,8 @@ def generate_jailbreaks(
     else:
         plan_run(
             inputs, pool, manifest_path=man_path, seed=seed,
-            iterations=iterations, sample_kwargs=sample_kwargs, verbose=verbose,
+            iterations=iterations, settings_per_iteration=settings_per_iteration,
+            sample_kwargs=sample_kwargs, verbose=verbose,
         )
 
     plan_rows = load_plan(man_path)
@@ -1088,9 +1166,15 @@ def generate_jailbreaks(
     router = get_router()
     total = len(pending)
     written = 0
+    n_chunks = ceil(total / chunk_size) if (total and chunk_size) else 0
+
+    if verbose and total:
+        print(f"  Executing {total} units in {n_chunks} chunk(s)...")
 
     for start in range(0, total, chunk_size):
         chunk = pending[start : start + chunk_size]
+        if verbose:
+            print(f"  chunk {start // chunk_size + 1}/{n_chunks}: {len(chunk)} units")
         samples = [
             {
                 "id": str(r["sample_id"]),
@@ -1101,6 +1185,7 @@ def generate_jailbreaks(
         ]
         results = batch_apply_combinations(
             samples, gen_model=model, benign_data=benign_data, router=router,
+            verbose=verbose,
         )
 
         rows = []

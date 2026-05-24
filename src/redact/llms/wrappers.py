@@ -14,6 +14,7 @@ from typing import Callable
 
 from .base import LLMBackend
 from .model_config import get_model_config
+from .progress import ProgressReporter
 
 
 class RateLimiter:
@@ -270,6 +271,7 @@ class BatchCaller:
         messages_list: list[list[dict]],
         model: str,
         on_complete: Callable[[int, str], None] | None = None,
+        progress: str | None = None,
         **kwargs,
     ) -> list[str]:
         """Capability-aware batched generation.
@@ -280,6 +282,16 @@ class BatchCaller:
         - ``supports_parallel_calls`` (Venice, GLM, DeepSeek): ThreadPool
           parallel via ``run()`` with ``max_workers``.
         - Otherwise (Anthropic): sequential via ``run()``.
+
+        Args:
+            messages_list: One chat message list per call.
+            model: Model identifier.
+            on_complete: Optional callback(index, result) per completion.
+            progress: Optional label enabling live progress ticks via a
+                :class:`ProgressReporter` (chained with ``on_complete`` if both
+                given). This is the shared progress mechanism every pipeline
+                uses; pass a label when ``verbose``, ``None`` otherwise.
+            **kwargs: Passed through to the backend generate call(s).
 
         Hard-fails on two known footguns to make misconfiguration explicit:
         - vLLM + ``max_workers>1``: GPU contention; use native batch.
@@ -302,6 +314,19 @@ class BatchCaller:
 
         if not messages_list:
             return []
+
+        # Optional live progress: build a reporter and chain its tick with any
+        # caller-supplied on_complete. One mechanism for every batched call.
+        if progress is not None:
+            reporter = ProgressReporter(progress, len(messages_list))
+            if on_complete is None:
+                on_complete = reporter.on_complete
+            else:
+                _user_cb = on_complete
+
+                def on_complete(i, r, _cb=_user_cb, _rep=reporter):
+                    _cb(i, r)
+                    _rep.on_complete(i, r)
 
         # Native batch (vLLM): single engine pass, one rate-limit slot.
         if self._backend.supports_native_batching:

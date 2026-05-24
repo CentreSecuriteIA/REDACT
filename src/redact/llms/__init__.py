@@ -59,6 +59,9 @@ from .wrappers import (
     BatchCaller,
 )
 
+# Progress reporting (shared across all batched generation)
+from .progress import ProgressReporter
+
 # Router (process-wide LLM access surface)
 from .router import ModelRouter, get_router, clear_router
 

@@ -32,6 +32,7 @@ from .split import (
     deterministic_balanced_assign,
     split_by_column,
     split_by_functions,
+    take_per_group,
 )
 from .loading import load_hf_dataset, load_from_config, filter_dataset
 from .taxonomy import (

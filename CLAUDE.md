@@ -178,7 +178,10 @@ Benign samples for FSH/DAP are cached in `Data_cache/benign/`.
 - Every LLM-dependent technique is a **generator** (`protocol.py`): it `yield`s an `LLMRequest(model, messages)` and resumes via `.send(response)`. Pure transforms stay plain `(str, **kwargs) -> (str, str)` functions and run inline. Multi-round techniques (translation translate→check→retry, cognitive scenario→construction) simply yield more than once.
 - `engine.batch_apply_combinations()` drives a whole chunk of samples **round by round**: it collects every live sample's pending request, groups by `request.model`, and dispatches **one batch per model per round** through the router. So all translations for a round go out together, then all checks, etc.
 - `combine_techniques()` chains techniques and re-orders them by `(layer_order, within_layer_order)`; `sample_combination()` / `assign_combination()` pick a valid combination per sample using `combination_spec.json` (family caps, cross-incompatibilities, complexity budget). Assignment is seeded by SHA-256 of `(seed, content-id, iteration)` so it is reproducible and chunk-independent. Any technique whose `__name__` is absent from the spec gets no metadata and is silently never sampled — keep `combination_spec.json` in sync when adding techniques.
+- **Family-first sampling.** Every technique draw goes through `_pick_by_family()` (in `utils.py`): it picks a **family** uniformly first, then a technique within it. This stops over-sized families (e.g. 20 translation languages, 15 personas) from dominating a flat `rng.choice` over individual functions — translation competes as *one* obfuscation family, not 20. Used by all four pick sites: the hacking/manipulation/requests layer picks, the obfuscation loop, the Phase-5 request-obfuscation pick, and `sample_exact_combination`.
+- **Translation is the cost hot-spot.** Each translation technique is a translate→check→retry generator (`obfuscation/translation.py`, `num_retries=4`), so a *single* translation makes **2–8 LLM calls** on the translation-role model (DeepSeek), not one — both the translate and the faithfulness check route there. `generate_jailbreaks(include_translation=False)` drops the whole translation family from the pool at build time (after the `pure_only` filter, matched by `"translation" in fn.families`) so it is never sampled — the recommended first-pass setting.
 - `pipelines.generate_jailbreaks()` runs two phases: **plan** (`manifest.plan_run` writes one JSONL line per sample×iteration before any generation) then **execute** (stream the manifest in chunks through the engine, appending output per chunk). Resume is driven by the output CSV as source of truth — `(input_id, iteration)` pairs already present are skipped. `run_sync` (in `protocol.py`) is the single-sample equivalent used by `apply_combination` and tests.
+- **Multi-round escalation.** `generate_jailbreaks(settings_per_iteration=...)` augments every sample across a schedule of rounds — one dict of sampler kwargs per round; the list length sets `iterations` (it wins over the scalar). `default_escalation_schedule()` (in `jailbreak/utils.py`, re-exported from `redact`) is the built-in 4-round default (each sample targeted 4×): round 1 = exactly 1 technique, round 2 = exactly 2, rounds 3–4 = rising complexity budgets. Rounds 1–2 are **count-driven** via `sample_exact_combination()` / `sample_combination(exact_techniques=N)`, which pick exactly N compatible techniques and **ignore the complexity budget** (`remaining_complexity=None`; only layer caps + cross-incompatibilities apply, best-effort if the pool runs out); rounds 3–4 are **budget-driven** (the probabilistic `max_complexity`/`max_obfuscations`/`sampling_probs` path). Keep the two modes' knobs disjoint in a custom schedule — `max_complexity` on an `exact_techniques` round is a silent no-op. The whole run is still planned up front from one shared pool, built once from top-level `include_*` flags (the superset); per-round `include_*`/`sampling_probs` only restrict sampling. `settings_per_iteration=None` (default) keeps single-round behavior, and the manifest still freezes choices (re-run with `resume=False` after changing the schedule).
 
 **Reference list coverage:** Benchmarked against 73 instruction primitives + 74 request primitives. All feasible primitives are covered. Intentionally excluded: `agent_context_additional_instr` (system-prompt access required), `fine_tuning` (out of scope), `use_highly_specialized_language` (unclear path), `direct_question` (no-op). The library is a strict superset of the reference list on everything else, with additional techniques not in the reference set (ASCII art, adversarial suffixes, structural wrapping, cognitive hacking, manipulation, continuation attacks, indirect embedding, extra encodings, extra languages).
 
@@ -205,6 +208,8 @@ Generates structured category hierarchies for constitutional classifier training
 4. **Absolutely benign** — clearly safe, never flag (hard negatives)
 
 `ConstitutionPipeline` (in `generation.py`) generates entries per taxonomy category using Claude Opus. Uses `parse_constitution()` from `llms/extraction.py` to parse the 3-layer markdown output. Entries are saved to `Data_cache/constitution/` as per-type CSVs plus `merged.csv`. Each entry later seeds N input samples for classifier training.
+
+**Resumable + incremental.** Each `(source_category, entry_type)` LLM call (plus the standalone-benign call, keyed `general::general_benign`) is one resumable unit. Entries are flushed to the per-type / `merged.csv` CSVs as each category completes — never held in memory for the whole run — and the unit is recorded in a sidecar `constitution.state.jsonl` ledger (`_state_path` / `_read_state` / `_append_state` in `generation.py`) only after its rows are saved. `resume=True` (default) skips ledger-recorded units and appends; a unit that fails all retries stays un-acked so it retries next run, so a crash loses at most one unit. `fresh=True` clears the CSVs and the ledger first. `run()` / `generate_constitution()` return the on-disk `merged.csv` (read back via `_load_saved_result()`), mirroring how `generate_outputs` returns `pd.read_csv(out_path)`. Same sidecar-ledger pattern as the content-moderation output pipeline.
 
 `ConstitutionInputPipeline` (in `input_generation.py`) expands constitution entries into full prompts. It is a thin wrapper that loads the constitution CSVs from disk and delegates to `InputPipeline.run_from_constitution()`; prefer the composable `generate_inputs(constitution_df=generate_constitution(...))` in new code.
 
@@ -248,7 +253,7 @@ pip install -e ".[vllm]"   # with vLLM support
 ```python
 from redact import (
     generate_constitution, generate_inputs, generate_outputs,
-    generate_jailbreaks, build_dataset,
+    generate_jailbreaks, build_dataset, default_escalation_schedule,
 )
 
 # Optional: constitution-seeded inputs (Claude Opus → entries → prompts)
@@ -259,6 +264,13 @@ inputs = generate_inputs(constitution_df=constitution, samples_per_entry=3)
 inputs = generate_inputs(samples_per_category=15, num_categories=3)
 
 jailbreaks = generate_jailbreaks(inputs=inputs)   # plan → batched execute, resumable
+
+# Or escalate: each sample augmented 4× (1 technique → 2 → higher complexity → even higher)
+jailbreaks = generate_jailbreaks(
+    inputs=inputs,
+    settings_per_iteration=default_escalation_schedule(),  # or a custom list[dict]
+)
+
 outputs = generate_outputs(inputs=inputs)         # model responses + output checker
 dataset = build_dataset()                         # merge inputs + jailbreaks + outputs
 ```

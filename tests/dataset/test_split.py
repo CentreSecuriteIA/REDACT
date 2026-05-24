@@ -7,6 +7,7 @@ from redact.dataset.split import (
     balanced_counts,
     deterministic_balanced_assign,
     split_by_column,
+    take_per_group,
 )
 
 
@@ -116,3 +117,51 @@ class TestSplitByColumn:
         import pytest
         with pytest.raises(ValueError, match="not in DataFrame"):
             split_by_column(df, "missing")
+
+
+class TestTakePerGroup:
+    def _frame(self):
+        # 2 categories x 2 entry_types x 5 rows, in category-then-entry_type order.
+        rows = []
+        i = 0
+        for cat in ("cbrn", "violence"):
+            for et in ("harmful", "benign"):
+                for _ in range(5):
+                    rows.append({"prompt": f"p{i}", "category": cat, "entry_type": et})
+                    i += 1
+        return pd.DataFrame(rows)
+
+    def test_caps_per_category_entry_type(self):
+        df = self._frame()
+        result = take_per_group(df, 2)
+        assert len(result) == 8  # 4 groups x 2
+        counts = result.groupby(["category", "entry_type"]).size()
+        assert (counts == 2).all()
+
+    def test_preserves_order(self):
+        df = self._frame()
+        result = take_per_group(df, 2)
+        # First two of the very first group (cbrn/harmful) lead, in order.
+        assert list(result["prompt"])[:2] == ["p0", "p1"]
+
+    def test_fallback_category_only(self):
+        df = self._frame().drop(columns=["entry_type"])
+        result = take_per_group(df, 3)
+        assert len(result) == 6  # 2 categories x 3
+        assert (result.groupby("category").size() == 3).all()
+
+    def test_fallback_no_group_columns(self):
+        df = pd.DataFrame({"prompt": [f"p{i}" for i in range(10)]})
+        result = take_per_group(df, 4)
+        assert len(result) == 4
+        assert list(result["prompt"]) == ["p0", "p1", "p2", "p3"]
+
+    def test_none_returns_unchanged(self):
+        df = self._frame()
+        result = take_per_group(df, None)
+        assert len(result) == len(df)
+
+    def test_n_larger_than_group_returns_full(self):
+        df = self._frame()
+        result = take_per_group(df, 100)
+        assert len(result) == len(df)  # no padding, no error

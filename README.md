@@ -42,6 +42,8 @@ outputs = generate_outputs(inputs=inputs)         # model responses + output che
 dataset = build_dataset()                         # merge everything on disk
 ```
 
+`generate_jailbreaks(inputs, settings_per_iteration=default_escalation_schedule())` instead runs a multi-round escalation — each sample augmented 4× from a single technique up to high-complexity combinations (see the [Jailbreak section](#jailbreak--technique-library)).
+
 **Lower-level building blocks:**
 
 ```python
@@ -349,6 +351,20 @@ For each turn:
 140+ jailbreak techniques organized in four families. Technique definitions are taxonomy-driven where applicable — adding a new variant means adding a JSON entry, not a new function.
 
 **Execution model.** LLM-dependent techniques are **generators** that `yield` an `LLMRequest` and resume via `.send(response)` (`protocol.py`); pure transforms are plain callables. `engine.batch_apply_combinations()` advances a chunk of samples **round by round**, grouping pending requests by model and dispatching one batch per model per round through the router. `generate_jailbreaks()` first **plans** the whole run to a JSONL manifest (`manifest.py`), then **executes** it in chunks — resumable from the output CSV. `combination_spec.json` defines layers, family caps, cross-incompatibilities, and complexity budgets; combinations are assigned deterministically (SHA-256 of seed + content-id + iteration). Any technique whose name is missing from the spec is silently never sampled — keep them in sync.
+
+**Multi-round escalation.** Pass `settings_per_iteration` (a `list[dict]`, one dict of sampler kwargs per round) to augment every sample across an escalating schedule — the list length sets the round count. `default_escalation_schedule()` is the built-in 4-round default (each sample targeted 4×): round 1 = exactly 1 technique, round 2 = exactly 2, rounds 3–4 = rising complexity budgets. Rounds 1–2 are *count-driven* (`exact_techniques`, which ignores the complexity budget — count is the only constraint); rounds 3–4 are *budget-driven* (`max_complexity` / `max_obfuscations` / `sampling_probs`). The run is still planned up front from one shared pool; `settings_per_iteration=None` (default) keeps single-round behavior.
+
+```python
+from redact import generate_jailbreaks, default_escalation_schedule
+
+# 4 rounds per sample: 1 technique → 2 techniques → higher → even higher complexity
+jailbreaks = generate_jailbreaks(inputs=inputs, settings_per_iteration=default_escalation_schedule())
+
+# Or a custom schedule — exact-count rounds carry only exact_techniques,
+# budget rounds carry only the budget knobs:
+schedule = [{"exact_techniques": 1}, {"exact_techniques": 3}, {"max_complexity": 9, "max_obfuscations": 3}]
+jailbreaks = generate_jailbreaks(inputs=inputs, settings_per_iteration=schedule)
+```
 
 #### Obfuscation
 

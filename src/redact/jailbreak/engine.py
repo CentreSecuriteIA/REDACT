@@ -73,6 +73,7 @@ def batch_apply_combinations(
     gen_model: str,
     benign_data: dict | None = None,
     router=None,
+    verbose: bool = False,
 ) -> list[dict]:
     """Apply each sample's technique combination, batching LLM calls per round.
 
@@ -86,6 +87,10 @@ def batch_apply_combinations(
         benign_data: Pre-loaded benign Q&A dict for FSH/DAP techniques.
         router: Optional router override (defaults to the process-wide
             :func:`redact.llms.get_router`). Injectable for testing.
+        verbose: When True, emit live per-round progress via the shared
+            ``progress`` label on ``router.batch_generate`` (one tick stream
+            per model per round). When False, dispatch with no progress kwarg
+            (preserves the minimal router contract used by tests).
 
     Returns:
         One result dict per input sample, in input order. Keys: ``input_id``,
@@ -118,7 +123,9 @@ def batch_apply_combinations(
         advance(i, None)
 
     # Drive remaining samples round by round: one batch call per model per round.
+    round_idx = 0
     while pending:
+        round_idx += 1
         groups: dict[str, list[int]] = defaultdict(list)
         for i, req in pending.items():
             groups[req.model].append(i)
@@ -128,8 +135,13 @@ def batch_apply_combinations(
 
         for model, idxs in groups.items():
             messages_list = [round_requests[i].messages for i in idxs]
+            # Pass a progress label only when verbose, so non-verbose runs keep
+            # the minimal router.batch_generate(model, messages) contract.
+            kwargs = (
+                {"progress": f"round {round_idx} ({model})"} if verbose else {}
+            )
             try:
-                responses = router.batch_generate(model, messages_list)
+                responses = router.batch_generate(model, messages_list, **kwargs)
             except Exception as exc:  # noqa: BLE001 — whole batch failed
                 for i in idxs:
                     results[i] = _finalize_error(samples[i], exc)
