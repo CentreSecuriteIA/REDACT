@@ -41,7 +41,7 @@ from redact.content_moderation.checker import (
     build_quality_checker,
     build_output_quality_checker,
 )
-from redact.dataset.io import get_existing_samples
+from redact.dataset.io import get_existing_samples, _hash_text
 from redact.dataset import (
     load_taxonomy,
     iter_categories,
@@ -94,6 +94,44 @@ def _default_benign_path() -> Path:
 
 def _default_scenario_dir() -> Path:
     return get_output_dir() / "Data_cache" / "scenarios"
+
+
+# ---------------------------------------------------------------------------
+# Output-generation resume state (sidecar JSONL beside the output CSV)
+# ---------------------------------------------------------------------------
+# Resume is driven by a separate state file rather than the output CSV: the CSV
+# can be large or hand-edited, so a dedicated ledger of completed input ids is a
+# cleaner source of truth (same idea as the jailbreak manifest in
+# jailbreak/manifest.py).
+
+
+def _output_state_path(output_path: Path) -> Path:
+    """Sidecar resume-state path beside the output CSV (``*.state.jsonl``)."""
+    return output_path.with_name(output_path.stem + ".state.jsonl")
+
+
+def _read_output_state(state_path: Path) -> set[str]:
+    """Return the set of input ids already completed (one JSON object per line)."""
+    if not state_path.exists():
+        return set()
+    done: set[str] = set()
+    with state_path.open(encoding="utf-8") as fh:
+        for line in fh:
+            line = line.strip()
+            if not line:
+                continue
+            try:
+                done.add(str(json.loads(line)["input_id"]))
+            except (json.JSONDecodeError, KeyError):
+                continue
+    return done
+
+
+def _append_output_state(state_path: Path, ids: list[str]) -> None:
+    """Append completed input ids to the resume-state file."""
+    with state_path.open("a", encoding="utf-8") as fh:
+        for input_id in ids:
+            fh.write(json.dumps({"input_id": input_id}) + "\n")
 
 
 # ---------------------------------------------------------------------------
@@ -643,6 +681,8 @@ def generate_outputs(
     base_url: str = "https://api.venice.ai/api/v1",
     dataset_dir: str | Path | None = None,
     output_path: str | Path | None = None,
+    resume: bool = True,
+    fresh: bool = False,
     verbose: bool = True,
 ) -> pd.DataFrame:
     """Generate model responses for input samples, batched and quality-checked.
@@ -656,6 +696,12 @@ def generate_outputs(
          entry-type-aware output checker. Refusals on harmful inputs are
          rejected; refusals on benign inputs are evaluated normally.
       4. Incremental append to the output CSV per batch — crash-resilient.
+
+    Resume: each input gets a stable content-hash id (its ``id`` column when
+    present, else ``_hash_text(prompt)``). Completed ids are recorded in a
+    sidecar ``*.state.jsonl`` ledger beside the output CSV. On a re-run
+    (``resume=True``) inputs already in the ledger are skipped, so a crash loses
+    at most one chunk. ``fresh=True`` clears both the CSV and the ledger first.
 
     Args:
         inputs: Input samples DataFrame. If None, loads accepted samples
@@ -671,13 +717,16 @@ def generate_outputs(
         dataset_dir: Where to find input CSVs (when ``inputs`` is None).
         output_path: Where to save the output CSV. Defaults to
             ``Datasets/output_responses.csv``.
+        resume: Skip inputs already recorded in the sidecar state ledger.
+        fresh: Clear the output CSV and state ledger before running.
         verbose: Print per-batch progress.
 
     Returns:
-        DataFrame with the unified output schema: ``input_id``,
-        ``input_prompt``, ``category``, ``subcategory``, ``entry_type``,
-        ``output_response``, ``accepted``, ``rejection_reason``, ``model``,
-        ``source``.
+        DataFrame of all rows in the output CSV (the full dataset, including
+        rows from prior resumed runs) with the unified output schema:
+        ``input_id``, ``input_prompt``, ``category``, ``subcategory``,
+        ``entry_type``, ``output_response``, ``accepted``, ``rejection_reason``,
+        ``model``, ``source``.
     """
     ds_dir = Path(dataset_dir) if dataset_dir else None
 
@@ -697,9 +746,43 @@ def generate_outputs(
         check_backend = None
     prompt_config = load_prompt("output", "generation")
     gen_caller = BatchCaller.from_model(backend, model, rate_limiter=rate_limiter)
+    check_caller = (
+        BatchCaller.from_model(check_backend, check_model, rate_limiter=rate_limiter)
+        if check_backend is not None
+        else None
+    )
 
     text_col = "sample" if "sample" in inputs.columns else "prompt"
     inputs = inputs.reset_index(drop=True)
+
+    out_path = (
+        Path(output_path) if output_path
+        else (_default_dataset_dir() / "output_responses.csv")
+    )
+    out_path.parent.mkdir(parents=True, exist_ok=True)
+    state_path = _output_state_path(out_path)
+
+    # Stable per-input id (content-hash) for resume — matches the jailbreak id.
+    def _input_id(row) -> str:
+        existing = str(row.get("id", "")).strip()
+        if existing and existing.lower() != "nan":
+            return existing
+        return _hash_text(str(row[text_col]))
+
+    inputs = inputs.copy()
+    inputs["_state_id"] = [_input_id(row) for _, row in inputs.iterrows()]
+
+    # Fresh run wipes prior output + ledger; resume skips already-done ids.
+    if fresh:
+        for p in (out_path, state_path):
+            if p.exists():
+                p.unlink()
+    completed = _read_output_state(state_path) if resume else set()
+    if completed:
+        before = len(inputs)
+        inputs = inputs[~inputs["_state_id"].isin(completed)].reset_index(drop=True)
+        if verbose and before != len(inputs):
+            print(f"  Resume: skipping {before - len(inputs)} already-completed inputs")
 
     if verbose:
         print(f"\n{'='*60}")
@@ -710,12 +793,6 @@ def generate_outputs(
             f"Checker: {'enabled (' + check_model + ')' if check_outputs else 'disabled'} | "
             f"Batch: {batch_size}"
         )
-
-    out_path = (
-        Path(output_path) if output_path
-        else (_default_dataset_dir() / "output_responses.csv")
-    )
-    out_path.parent.mkdir(parents=True, exist_ok=True)
 
     # Per-(category, entry_type) checker cache so we build each prompt once.
     checker_cache: dict[tuple[str, str], "Callable[[str], list[dict]]"] = {}
@@ -750,7 +827,7 @@ def generate_outputs(
                 )
             )
             chunk_rows.append({
-                "input_id": str(row.get("id", "")),
+                "input_id": str(row["_state_id"]),
                 "input_prompt": input_text,
                 "category": category,
                 "subcategory": subcategory,
@@ -763,14 +840,14 @@ def generate_outputs(
         responses = gen_caller.batch_generate(messages_list, model)
 
         # 3. Batched output checking (per-row checker, flat batch)
-        if check_outputs and check_backend is not None:
+        if check_outputs and check_caller is not None:
             check_msgs_list: list[list[dict]] = []
             for r, resp in zip(chunk_rows, responses):
                 payload = f"INPUT:\n{r['input_prompt']}\n\nOUTPUT:\n{resp}"
                 check_msgs_list.append(
                     _checker_for(r["category"], r["entry_type"])(payload)
                 )
-            check_responses = check_backend.batch_generate(
+            check_responses = check_caller.batch_generate(
                 check_msgs_list, check_model
             )
             check_results = []
@@ -795,6 +872,9 @@ def generate_outputs(
             new_df.to_csv(out_path, mode="a", header=False, index=False)
         else:
             new_df.to_csv(out_path, index=False)
+        # Record completion only after the CSV append succeeds, so a crash
+        # mid-chunk leaves those ids un-acked and they re-run next time.
+        _append_output_state(state_path, [r["input_id"] for r in chunk_rows])
 
         if verbose:
             accepted_count = sum(1 for r in chunk_rows if r["accepted"])
@@ -804,12 +884,18 @@ def generate_outputs(
                 f"-> appended to {out_path.name}"
             )
 
-    output_df = pd.DataFrame(all_rows)
+    # Return the full dataset on disk (includes rows from prior resumed runs),
+    # not just this run's newly-written delta.
+    output_df = pd.read_csv(out_path) if out_path.exists() else pd.DataFrame(all_rows)
     if verbose:
-        accepted_total = int(output_df["accepted"].sum()) if not output_df.empty else 0
+        accepted_total = (
+            int(output_df["accepted"].sum())
+            if not output_df.empty and "accepted" in output_df.columns
+            else 0
+        )
         print(
-            f"\n  Saved {len(output_df)} responses "
-            f"({accepted_total} accepted) to {out_path}"
+            f"\n  Output CSV now holds {len(output_df)} responses "
+            f"({accepted_total} accepted) at {out_path}"
         )
 
     return output_df
@@ -928,7 +1014,14 @@ def generate_jailbreaks(
     if include_requests:
         pool += get_all_request_functions()
     if pure_only:
-        pool = [f for f in pool if not getattr(f, "requires_llm", False)]
+        # Exclude both per-call LLM techniques and benign-data-dependent ones
+        # (FSH/DAP): the latter need a one-time LLM benign-data generation, so
+        # they aren't safe in a strictly no-LLM run.
+        pool = [
+            f for f in pool
+            if not getattr(f, "requires_llm", False)
+            and not getattr(f, "requires_benign", False)
+        ]
     registry = build_function_registry(pool)
 
     sample_kwargs = {

@@ -84,7 +84,8 @@ class VeniceBackend(LLMBackend):
             call_kwargs["extra_body"] = merged_extra
 
         response = self._client.chat.completions.create(**call_kwargs)
-        return response.choices[0].message.content
+        content = response.choices[0].message.content
+        return content if content is not None else ""
 
     @classmethod
     def from_env(

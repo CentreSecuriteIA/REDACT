@@ -37,7 +37,7 @@ from ..llms.base import LLMBackend
 from ..llms.calls import generate_sample, check_sample, batch_check_samples
 from ..llms.prompts import build_messages
 from ..llms.extraction import get_format_instruction, extract_and_clean
-from ..llms.wrappers import RateLimiter
+from ..llms.wrappers import RateLimiter, BatchCaller
 from ..dataset.io import append_samples, get_existing_samples, _default_dataset_dir
 from ..types import EntryType
 from .checker import build_quality_checker
@@ -320,6 +320,7 @@ class InputPipeline:
             self.check_model,
             samples,
             build_check_messages,
+            rate_limiter=self.rate_limiter,
         )
         return [
             SampleResult(
@@ -645,10 +646,12 @@ class InputPipeline:
                     )
                 )
 
-            # 2. Single batch_generate for the whole chunk
-            raw_outputs = self.gen_backend.batch_generate(
-                messages_list, self.gen_model
+            # 2. Single batched generation for the whole chunk (rate-limited,
+            #    capability-aware) — routed through BatchCaller, not the raw backend.
+            gen_caller = BatchCaller.from_model(
+                self.gen_backend, self.gen_model, rate_limiter=self.rate_limiter
             )
+            raw_outputs = gen_caller.batch_generate(messages_list, self.gen_model)
 
             # 3. Extract per entry
             per_entry_extracted: list[list[str]] = []
@@ -685,7 +688,11 @@ class InputPipeline:
 
             flat_check_results: list[tuple[bool, str]]
             if use_checker and flat_check_msgs:
-                responses = self.check_backend.batch_generate(
+                check_caller = BatchCaller.from_model(
+                    self.check_backend, self.check_model,
+                    rate_limiter=self.rate_limiter,
+                )
+                responses = check_caller.batch_generate(
                     flat_check_msgs, self.check_model
                 )
                 flat_check_results = []

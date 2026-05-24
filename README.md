@@ -31,9 +31,22 @@ Requires Python 3.11+. See [pyproject.toml](pyproject.toml) for full dependency 
 
 ## Quick Start
 
+**High-level API** — the common path; backends are auto-selected from model names:
+
+```python
+from redact import generate_inputs, generate_jailbreaks, generate_outputs, build_dataset
+
+inputs = generate_inputs(samples_per_category=15, num_categories=3)
+jailbreaks = generate_jailbreaks(inputs=inputs)   # plan → batched execute, resumable
+outputs = generate_outputs(inputs=inputs)         # model responses + output checker, resumable
+dataset = build_dataset()                         # merge everything on disk
+```
+
+**Lower-level building blocks:**
+
 ```python
 # 1. Auto-select backend from model name
-from redact.llms import get_backend, RateLimiter, generate_sample
+from redact.llms import get_backend, RateLimiter, load_prompt
 
 backend = get_backend("venice-uncensored")  # -> VeniceBackend (via VENICE_API_KEY env var)
 rate_limiter = RateLimiter()
@@ -41,7 +54,6 @@ rate_limiter = RateLimiter()
 # 2. Generate content moderation samples
 from redact.content_moderation import InputPipeline
 from redact.content_moderation.checker import build_quality_checker
-from redact.llms import load_prompt
 
 pipeline = InputPipeline(
     gen_backend=backend, gen_model="venice-uncensored",
@@ -49,7 +61,7 @@ pipeline = InputPipeline(
     rate_limiter=rate_limiter,
 )
 
-prompt_config = load_prompt("content_moderation", "generation")
+prompt_config = load_prompt("input", "generation/standalone")
 result = pipeline.run_category(
     category="Physical Harm",
     prompt_config=prompt_config,
@@ -60,17 +72,21 @@ print(f"Generated {result.total_accepted} accepted samples")
 
 # 3. Apply jailbreak techniques
 from redact.jailbreak.obfuscation.encoding import to_base64
+from redact.jailbreak.utils import apply_combination
 from redact.jailbreak.hacking.cognitive import to_persona_roleplay
 
-# Pure technique (no LLM)
+# Pure technique (no LLM) — plain (str) -> (text, info)
 obfuscated, info = to_base64("How to pick a lock")
 
-# LLM-dependent technique
-jailbreak, info, scenario = to_persona_roleplay(
-    "How to pick a lock",
+# LLM-dependent techniques are generators (they yield LLMRequests). Drive a
+# single one synchronously with apply_combination():
+text, info, accepted, reasoning = apply_combination(
+    to_persona_roleplay, "How to pick a lock",
     backend=backend, model="venice-uncensored", rate_limiter=rate_limiter,
 )
 ```
+
+> LLM-dependent techniques (cognitive, personas, translation, typos, tokenbreak, FSH/DAP-selected) are **technique generators** — calling them directly returns a generator, not a result. Use `apply_combination()` for one sample, or let `generate_jailbreaks()` / the batched engine drive them. Pure transforms (encoding, structural, suffixes, ascii_art, framing, all `requests/`) are still plain callables.
 
 See [`full_pipeline.ipynb`](full_pipeline.ipynb) for a complete pipeline walkthrough.
 
@@ -86,15 +102,17 @@ src/redact/
 │   ├── venice_backend.py          # Venice AI / OpenAI-compatible API backend
 │   ├── anthropic_backend.py       # Anthropic Claude backend (native SDK)
 │   ├── vllm_backend.py            # Local vLLM backend for self-hosted inference
-│   ├── wrappers.py                # Rate limiter, retry, batch caller
+│   ├── router.py                  # ModelRouter — shared RateLimiter + per-model BatchCaller + role lookup
+│   ├── wrappers.py                # RateLimiter, retry, capability-aware BatchCaller
 │   ├── calls.py                   # generate_sample(), check_sample(), batch_check_samples()
 │   ├── prompts.py                 # JSON prompt loader + template renderer
 │   ├── extraction.py              # Multi-sample + constitution extraction
 │   ├── translator.py              # Translation with fidelity checking
-│   └── model_config.py            # Model registry (RPM, backend_type, defaults)
+│   └── model_config.py            # Model registry (RPM, backend_type, capability flags, roles)
 │
 ├── constitution/                  # Constitution generation for classifiers
-│   └── pipeline.py               # ConstitutionPipeline (4 severity types)
+│   ├── generation.py              # ConstitutionPipeline (4 severity types)
+│   └── input_generation.py        # ConstitutionInputPipeline (→ InputPipeline.run_from_constitution)
 │
 ├── content_moderation/            # Content moderation generation pipeline
 │   ├── generation.py              # InputPipeline — the main driver
@@ -128,7 +146,10 @@ src/redact/
 │   │   ├── impersonation.py       # 1 good-person impersonation function
 │   │   ├── temporal.py            # 1 past-tense reframing function
 │   │   └── asking.py              # 2 question-framing functions
-│   ├── utils.py                   # combine_techniques() for chaining
+│   ├── utils.py                   # combine/sample/assign techniques, tagging, spec rules
+│   ├── protocol.py                # LLMRequest + technique-generator contract, run_sync
+│   ├── engine.py                  # batch_apply_combinations — round-by-round batched engine
+│   ├── manifest.py                # plan_run / load_plan / resumable JSONL ledger
 │   └── distribution.py            # Re-exports from dataset module
 │
 ├── dataset/                       # Data handling utilities
@@ -149,8 +170,9 @@ src/redact/
 │   └── jailbreak/                 # Per-technique prompt templates
 │
 ├── exceptions.py                  # RedactError, ConfigError, etc.
+├── types.py                       # Shared dependency-free types (EntryType)
 ├── pipelines.py                   # High-level pipeline functions
-├── __init__.py                    # Config, PROJECT_ROOT, package exports
+├── __init__.py                    # Config, get_output_dir(), package exports
 └── py.typed                       # PEP 561 type marker
 
 Datasets/                          # Generated output (per-category CSVs)
@@ -173,8 +195,9 @@ Everything above this layer calls a unified interface and is backend-agnostic.
 | `AnthropicBackend` | Anthropic Claude (native SDK, separate system param) |
 | `VLLMBackend` | Local vLLM for self-hosted GPU inference |
 | `get_backend()` | Auto-select backend from model name |
+| `get_router()` | Process-wide `ModelRouter` — one shared `RateLimiter`, a per-model `BatchCaller` cache, and `for_role()` lookup. The intended single entry point for rate-limited, capability-aware generation |
 | `RateLimiter` | Per-model sliding-window RPM enforcement (thread-safe) |
-| `BatchCaller` | Sequential or multithreaded batch dispatch |
+| `BatchCaller` | Capability-aware dispatch: vLLM native batch / API thread pool / series-only sequential |
 | `generate_sample()` | Single generation with rate limiting |
 | `check_sample()` | Validate a single sample (yes/no + reasoning) |
 | `batch_check_samples()` | Validate multiple samples in one `batch_generate()` pass — used automatically by all pipelines |
@@ -217,7 +240,7 @@ generate_inputs_from_constitution(model="venice-uncensored-vllm", ...)
 
 When `venice-uncensored-vllm` is requested, `get_backend()` automatically creates a `VLLMBackend` for `dphn/Dolphin-Mistral-24B-Venice-Edition`. On first use vLLM downloads the model weights from HuggingFace and caches them at the path set by `HF_HOME` in your `.env`. Subsequent runs load directly from cache — no re-download.
 
-All pipelines use `batch_generate()` internally to send multiple prompts in a single vLLM engine pass. The `batch_size` parameter (default 32) controls how many entries are processed per pass — equivalent to `max_workers` for API backends. For API backends `batch_generate()` falls back to a sequential loop, so `max_workers` on `BatchCaller` is the relevant parallelism knob there.
+Both generation and checker paths dispatch through a `BatchCaller` (never the raw backend), so every batch is rate-limited and uses the right execution mode for its backend: one vLLM engine pass for native backends, a thread pool sized by the registry's `recommended_max_workers` for parallel-safe APIs, or sequential for series-only backends (Anthropic). The `batch_size` parameter (default 32) controls how many entries are grouped per pass.
 
 For a custom model, instantiate `VLLMBackend` directly and pass it to any pipeline:
 
@@ -273,9 +296,7 @@ print(f"{len(constitution)} constitution entries")
 
 Output saved to `Data_cache/constitution/` as 4 type-based CSVs + `merged.csv`. Each entry can later seed N input samples for classifier training.
 
-**Constitution-to-input checker** — `ConstitutionInputPipeline` uses a dedicated quality checker (`prompts/constitution/checker/template.json`) that injects `category`, `subcategory`, and `entry_type` into the evaluation prompt. This ensures benign and dual-use samples are evaluated correctly rather than rejected for "not belonging to the harm category."
-
-> **Note:** `content_moderation/checker.py` `build_quality_checker()` is currently harmful-only. Benign/dual-use generation in the content moderation pipeline will need the same `entry_type` extension.
+**Entry-type-aware checker** — `build_quality_checker(category, entry_type, subcategory)` in `content_moderation/checker.py` loads the unified template `prompts/input/quality_check/template.json` and injects all three fields, so benign and dual-use samples are evaluated correctly rather than rejected for "not belonging to the harm category." The same checker serves standalone content-moderation, constitution-seeded inputs, and (via `build_output_quality_checker`) output checking. `_build_constitution_checker()` is a thin backward-compatible alias.
 
 ---
 
@@ -326,6 +347,8 @@ For each turn:
 ### Jailbreak — Technique Library
 
 140+ jailbreak techniques organized in four families. Technique definitions are taxonomy-driven where applicable — adding a new variant means adding a JSON entry, not a new function.
+
+**Execution model.** LLM-dependent techniques are **generators** that `yield` an `LLMRequest` and resume via `.send(response)` (`protocol.py`); pure transforms are plain callables. `engine.batch_apply_combinations()` advances a chunk of samples **round by round**, grouping pending requests by model and dispatching one batch per model per round through the router. `generate_jailbreaks()` first **plans** the whole run to a JSONL manifest (`manifest.py`), then **executes** it in chunks — resumable from the output CSV. `combination_spec.json` defines layers, family caps, cross-incompatibilities, and complexity budgets; combinations are assigned deterministically (SHA-256 of seed + content-id + iteration). Any technique whose name is missing from the spec is silently never sampled — keep them in sync.
 
 #### Obfuscation
 
@@ -476,15 +499,19 @@ def my_technique(prompt: str, **kwargs) -> tuple[str, str]:
     return f"[OVERRIDE] {prompt}", "my_technique_v1"
 ```
 
-For LLM-dependent techniques, accept `backend`, `model`, `rate_limiter`:
+For LLM-dependent techniques, write a **technique generator**: `yield` an `LLMRequest` and resume with the model's reply. This lets the batched engine pool your call with every other sample's call for the same model. Add a matching entry to `combination_spec.json` (with a `families`/`complexity`) or the technique will never be sampled.
 
 ```python
-def my_llm_technique(prompt, backend=None, model=None, rate_limiter=None, **kwargs):
-    from redact.llms import generate_sample
+from redact.jailbreak.protocol import LLMRequest, TechniqueGen
+
+def my_llm_technique(prompt: str, *, gen_model: str | None = None, **kwargs) -> TechniqueGen:
+    """Reframe the prompt via one LLM round."""
     messages = [{"role": "user", "content": f"Reframe: {prompt}"}]
-    result = generate_sample(backend, model, messages, rate_limiter)
-    return result, "llm_reframed"
+    result = yield LLMRequest(gen_model, messages)   # engine batches this call
+    return result.strip(), "llm_reframed"
 ```
+
+Multi-round techniques (translate→check→retry, scenario→construction) simply `yield` more than once. The engine drives every generator round-by-round; for a single sample, `apply_combination()` runs the same generator synchronously.
 
 ### Swapping Backends
 

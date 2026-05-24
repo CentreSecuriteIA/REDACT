@@ -68,6 +68,11 @@ def tag_all_functions(funcs: list[Callable]) -> None:
         fn.families = t.get("families", [])
         fn.complexity = t.get("complexity", 1)
         fn.requires_llm = t.get("requires_llm", False)
+        # Needs pre-generated benign Q&A data (FSH/DAP). Distinct from
+        # requires_llm: the data is generated once up front, not per call — so
+        # these aren't per-sample LLM techniques, but they still can't run in a
+        # strictly no-LLM (pure_only) run.
+        fn.requires_benign = t.get("requires_benign", False)
         fn.encode_weight = t.get("encode_weight", None)
 
         # Derive layer and within_layer_order from the first family

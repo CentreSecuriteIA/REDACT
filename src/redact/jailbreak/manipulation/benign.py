@@ -303,16 +303,14 @@ def load_benign_data(
     short = short_df.to_dict("records")
     long_ = long_df.to_dict("records")
 
-    by_subcat_short = (
-        short_df.groupby("sub_category")
-        .apply(lambda g: g.to_dict("records"))
-        .to_dict()
-    )
-    by_subcat_long = (
-        long_df.groupby("sub_category")
-        .apply(lambda g: g.to_dict("records"))
-        .to_dict()
-    )
+    by_subcat_short = {
+        subcat: group.to_dict("records")
+        for subcat, group in short_df.groupby("sub_category")
+    }
+    by_subcat_long = {
+        subcat: group.to_dict("records")
+        for subcat, group in long_df.groupby("sub_category")
+    }
 
     return {
         "short": short,

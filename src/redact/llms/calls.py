@@ -11,7 +11,7 @@ differ, supporting patterns like "Venice generates, Claude validates".
 from typing import Callable
 
 from .base import LLMBackend
-from .wrappers import RateLimiter, with_retries, with_feedback_retries
+from .wrappers import RateLimiter, with_retries, with_feedback_retries, BatchCaller
 
 
 def generate_sample(
@@ -89,18 +89,20 @@ def batch_check_samples(
     samples: list[str],
     build_check_messages: Callable[[str], list[dict]],
     batch_size: int = 32,
+    rate_limiter: RateLimiter | None = None,
     **kwargs,
 ) -> list[tuple[bool, str]]:
     """Check multiple samples in batched engine passes.
 
-    Splits samples into chunks of ``batch_size``, calls
-    ``backend.batch_generate()`` once per chunk. Order is preserved.
-    Returns a list of ``(accepted, reasoning)`` tuples parallel to ``samples``.
+    Splits samples into chunks of ``batch_size``. Each chunk is dispatched
+    through a capability-aware :class:`BatchCaller` wrapping ``backend`` (vLLM
+    native batch / parallel API thread-pool / series-only sequential), with the
+    shared ``rate_limiter`` applied. Order is preserved. Returns a list of
+    ``(accepted, reasoning)`` tuples parallel to ``samples``.
 
-    For vLLM this means one engine pass per chunk (much faster than N
-    individual ``generate()`` calls). For API backends the base-class
-    ``batch_generate()`` falls back to a sequential loop — behaviour is
-    identical to the old per-sample loop.
+    Routing through ``BatchCaller`` (rather than ``backend.batch_generate()``
+    directly) is what subjects the checker path to per-model RPM limits — the
+    same enforcement the generation path already gets.
 
     Used by both ``InputPipeline.check_samples()`` (content moderation) and
     ``ConstitutionInputPipeline`` — both share the same ``InputPipeline``
@@ -112,7 +114,8 @@ def batch_check_samples(
         samples: Sample texts to validate.
         build_check_messages: Function(sample_text) -> checker message list.
         batch_size: Max prompts per engine pass (default 32).
-        **kwargs: Passed to backend.batch_generate().
+        rate_limiter: Optional shared rate limiter applied per dispatch.
+        **kwargs: Passed to BatchCaller.batch_generate().
 
     Returns:
         List of (accepted, reasoning) in the same order as ``samples``.
@@ -122,11 +125,12 @@ def batch_check_samples(
     if not samples:
         return []
 
+    caller = BatchCaller.from_model(backend, model, rate_limiter=rate_limiter)
     results: list[tuple[bool, str]] = []
     for i in range(0, len(samples), batch_size):
         chunk = samples[i : i + batch_size]
         messages_list = [build_check_messages(s) for s in chunk]
-        responses = backend.batch_generate(messages_list, model, **kwargs)
+        responses = caller.batch_generate(messages_list, model, **kwargs)
         for response in responses:
             accepted = any(
                 response.strip().lower().startswith(prefix)

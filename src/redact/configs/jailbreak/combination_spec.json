@@ -286,15 +286,15 @@
     "to_actor_persona":                 { "families": ["persona"], "complexity": 2, "requires_llm": true },
     "to_someone_from_the_future_persona": { "families": ["persona"], "complexity": 2, "requires_llm": true },
 
-    "to_fsh_random_short":   { "families": ["fsh"], "complexity": 2, "requires_llm": false },
-    "to_fsh_random_long":    { "families": ["fsh"], "complexity": 2, "requires_llm": false },
-    "to_fsh_selected_short": { "families": ["fsh"], "complexity": 3, "requires_llm": true },
-    "to_fsh_selected_long":  { "families": ["fsh"], "complexity": 3, "requires_llm": true },
+    "to_fsh_random_short":   { "families": ["fsh"], "complexity": 2, "requires_llm": false, "requires_benign": true },
+    "to_fsh_random_long":    { "families": ["fsh"], "complexity": 2, "requires_llm": false, "requires_benign": true },
+    "to_fsh_selected_short": { "families": ["fsh"], "complexity": 3, "requires_llm": true, "requires_benign": true },
+    "to_fsh_selected_long":  { "families": ["fsh"], "complexity": 3, "requires_llm": true, "requires_benign": true },
 
-    "to_dap_random_short":   { "families": ["dap"], "complexity": 2, "requires_llm": false },
-    "to_dap_random_long":    { "families": ["dap"], "complexity": 2, "requires_llm": false },
-    "to_dap_selected_short": { "families": ["dap"], "complexity": 3, "requires_llm": true },
-    "to_dap_selected_long":  { "families": ["dap"], "complexity": 3, "requires_llm": true },
+    "to_dap_random_short":   { "families": ["dap"], "complexity": 2, "requires_llm": false, "requires_benign": true },
+    "to_dap_random_long":    { "families": ["dap"], "complexity": 2, "requires_llm": false, "requires_benign": true },
+    "to_dap_selected_short": { "families": ["dap"], "complexity": 3, "requires_llm": true, "requires_benign": true },
+    "to_dap_selected_long":  { "families": ["dap"], "complexity": 3, "requires_llm": true, "requires_benign": true },
 
     "to_refusal_then_comply":     { "families": ["answer_format"], "complexity": 3, "requires_llm": false },
     "to_apology_prevention":      { "families": ["answer_format"], "complexity": 2, "requires_llm": false },

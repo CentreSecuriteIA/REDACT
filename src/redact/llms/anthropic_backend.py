@@ -84,7 +84,9 @@ class AnthropicBackend(LLMBackend):
             call_kwargs["temperature"] = resolved_temperature
 
         response = self._client.messages.create(**call_kwargs)
-        return response.content[0].text
+        if not response.content:
+            return ""
+        return response.content[0].text or ""
 
     @classmethod
     def from_env(

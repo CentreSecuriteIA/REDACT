@@ -6,11 +6,18 @@ import codecs
 from redact.jailbreak.obfuscation.encoding import (
     to_base64,
     to_rot13,
+    to_rot18,
+    to_rot47,
+    to_unicode_escape,
+    to_ascii_ordinal,
+    to_separator,
     to_leetspeak,
+    to_leetspeak_basic,
+    to_leetspeak_intermediate,
+    to_leetspeak_advanced,
     to_morse,
     to_braille,
     get_encoding_functions,
-    LEET_MAP,
 )
 
 
@@ -39,10 +46,56 @@ class TestRot13:
         assert encoded == "nop"
 
 
+class TestRot18:
+    def test_letters_and_digits(self):
+        # ROT13 on letters, ROT5 on digits
+        encoded, _ = to_rot18("abc123")
+        assert encoded == "nop678"
+
+    def test_roundtrip(self):
+        encoded, _ = to_rot18(SAMPLE)
+        decoded, _ = to_rot18(encoded)
+        assert decoded == SAMPLE
+
+
+class TestRot47:
+    def test_roundtrip(self):
+        encoded, _ = to_rot47(SAMPLE)
+        decoded, _ = to_rot47(encoded)
+        assert decoded == SAMPLE
+
+    def test_changes_printable(self):
+        encoded, _ = to_rot47("Hello")
+        assert encoded != "Hello"
+
+
+class TestUnicodeEscape:
+    def test_format(self):
+        encoded, _ = to_unicode_escape("AB")
+        assert encoded == "\\u0041\\u0042"
+
+
+class TestAsciiOrdinal:
+    def test_format(self):
+        encoded, _ = to_ascii_ordinal("AB")
+        assert encoded == "65 66"
+
+
+class TestSeparator:
+    def test_inserts_separator(self):
+        result, info = to_separator("abc")
+        # one separator char between each character
+        assert len(result) == 5
+        assert info.startswith("sep=")
+
+
 class TestLeetspeak:
     def test_known_replacements(self):
         result, _ = to_leetspeak("aeiost")
         assert result == "431057"
+
+    def test_basic_alias(self):
+        assert to_leetspeak("aeiost") == to_leetspeak_basic("aeiost")
 
     def test_preserves_unmapped(self):
         result, _ = to_leetspeak("xyz")
@@ -51,6 +104,16 @@ class TestLeetspeak:
     def test_preserves_length(self):
         result, _ = to_leetspeak(SAMPLE)
         assert len(result) == len(SAMPLE)
+
+    def test_intermediate_adds_substitutions(self):
+        # 'b' is unmapped in basic but '8' in intermediate
+        assert to_leetspeak_basic("b")[0] == "b"
+        assert to_leetspeak_intermediate("b")[0] == "8"
+
+    def test_advanced_multichar(self):
+        # advanced map has multi-character substitutions (e.g. h -> |-|)
+        result, _ = to_leetspeak_advanced("h")
+        assert result == "|-|"
 
 
 class TestMorse:
@@ -81,7 +144,7 @@ class TestAllEncodings:
             assert len(result) == 2
 
     def test_get_encoding_functions_count(self):
-        assert len(get_encoding_functions()) == 5
+        assert len(get_encoding_functions()) == 12
 
     def test_output_differs_from_input(self):
         for fn in get_encoding_functions():

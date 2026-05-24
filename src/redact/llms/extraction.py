@@ -182,9 +182,13 @@ _MARKDOWN_BOLD = re.compile(r"\*\*(.+?)\*\*")
 _MARKDOWN_ITALIC = re.compile(r"\*(.+?)\*")
 _MARKDOWN_CODE_BLOCK = re.compile(r"```[\s\S]*?```")
 _MARKDOWN_INLINE_CODE = re.compile(r"`(.+?)`")
-_META_COMMENTARY = re.compile(
-    r"^\s*(Note:|Here are|Below are|Sure|Of course|I'll|Let me|Certainly).*$",
-    re.MULTILINE | re.IGNORECASE,
+# Matches a *leading* preamble line only (anchored, no MULTILINE) so we strip an
+# introductory "Sure, here are ...:" line without touching content lines that
+# happen to start with the same words further down a sample.
+_META_PREAMBLE = re.compile(
+    r"^\s*(Note:|Here are|Here is|Below are|Below is|Sure[,!.]|Of course[,!.]|"
+    r"Certainly[,!.]|I'll |I will |Let me )",
+    re.IGNORECASE,
 )
 
 
@@ -207,7 +211,11 @@ def clean_sample(
     # Strip ChatML stop tokens if they leaked through (belt-and-suspenders for vLLM)
     result = result.replace("<|im_end|>", "").replace("<|im_start|>", "")
     if strip_meta:
-        result = _META_COMMENTARY.sub("", result)
+        # Drop only a leading preamble line, and only when real content follows.
+        # Avoids gutting content lines that legitimately start with these words.
+        head_tail = result.lstrip("\n").split("\n", 1)
+        if len(head_tail) == 2 and _META_PREAMBLE.match(head_tail[0]):
+            result = head_tail[1]
     if strip_markdown:
         result = _MARKDOWN_CODE_BLOCK.sub("", result)
         result = _MARKDOWN_BOLD.sub(r"\1", result)

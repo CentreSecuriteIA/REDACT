@@ -1,6 +1,5 @@
 """Tests for cognitive/psychological hacking techniques."""
 
-import pytest
 from tests.conftest import MockBackend
 from redact.jailbreak.hacking.cognitive import (
     HACKING_CATEGORIES,
@@ -32,10 +31,12 @@ class TestGetSituation:
         result = get_situation("test prompt", backend, "model")
         assert "dark alley" in result
 
-    def test_raises_on_no_match(self):
+    def test_falls_back_to_full_text_on_no_match(self):
+        # _extract_scenario() now returns the whole reply (stripped) when no
+        # "Scenario Description" marker is present, rather than raising.
         backend = MockBackend("No scenario here, just random text")
-        with pytest.raises(ValueError, match="scenario description"):
-            get_situation("test", backend, "model")
+        result = get_situation("test", backend, "model")
+        assert result == "No scenario here, just random text"
 
 
 class TestCreateJailbreak:

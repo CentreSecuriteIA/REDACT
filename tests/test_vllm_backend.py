@@ -138,6 +138,13 @@ class MockBackend(LLMBackend):
     def backend_name(self) -> str:
         return "mock"
 
+    @property
+    def supports_native_batching(self) -> bool:
+        # Behave like vLLM: batch_check_samples now dispatches through a
+        # capability-aware BatchCaller, which uses backend.batch_generate()
+        # (one engine pass per chunk) only for native-batching backends.
+        return True
+
 
 def _checker(sample: str) -> list[dict]:
     return [{"role": "user", "content": f"Is this acceptable? {sample}"}]

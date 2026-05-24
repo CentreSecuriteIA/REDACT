@@ -10,8 +10,9 @@ import pytest
 from redact.pipelines import (
     create_taxonomy,
     _get_backend,
-    _fn_needs_backend,
-    _fn_needs_benign,
+    _output_state_path,
+    _read_output_state,
+    _append_output_state,
 )
 
 
@@ -70,23 +71,28 @@ class TestGetBackendHelper:
                 mock_get.assert_called_once_with("venice-uncensored")
 
 
-class TestFnInspection:
-    def test_fn_needs_backend_true(self):
-        def func(prompt, backend, model):
-            pass
-        assert _fn_needs_backend(func) is True
+class TestOutputResumeState:
+    """Resume-state ledger used by generate_outputs() (#5)."""
 
-    def test_fn_needs_backend_false(self):
-        def func(prompt):
-            pass
-        assert _fn_needs_backend(func) is False
+    def test_state_path_is_sidecar(self, tmp_path):
+        out = tmp_path / "output_responses.csv"
+        sp = _output_state_path(out)
+        assert sp.name == "output_responses.state.jsonl"
+        assert sp.parent == out.parent
 
-    def test_fn_needs_benign_true(self):
-        def func(prompt, benign_data):
-            pass
-        assert _fn_needs_benign(func) is True
+    def test_read_missing_returns_empty(self, tmp_path):
+        assert _read_output_state(tmp_path / "nope.state.jsonl") == set()
 
-    def test_fn_needs_benign_false(self):
-        def func(prompt):
-            pass
-        assert _fn_needs_benign(func) is False
+    def test_append_then_read_roundtrip(self, tmp_path):
+        sp = tmp_path / "s.state.jsonl"
+        _append_output_state(sp, ["a", "b"])
+        _append_output_state(sp, ["c"])
+        assert _read_output_state(sp) == {"a", "b", "c"}
+
+    def test_read_ignores_malformed_lines(self, tmp_path):
+        sp = tmp_path / "s.state.jsonl"
+        sp.write_text(
+            '{"input_id": "x"}\nnot json\n{"no_id": 1}\n{"input_id": "y"}\n',
+            encoding="utf-8",
+        )
+        assert _read_output_state(sp) == {"x", "y"}
