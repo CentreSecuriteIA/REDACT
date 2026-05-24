@@ -521,6 +521,7 @@ def generate_inputs(
             save=True,
             verbose=verbose,
             batch_size=batch_size,
+            fresh=fresh,
         )
 
         return merge_all(ds_dir, accepted_only=True)

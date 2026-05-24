@@ -39,6 +39,7 @@ from ..llms.prompts import build_messages
 from ..llms.extraction import get_format_instruction, extract_and_clean
 from ..llms.wrappers import RateLimiter, BatchCaller
 from ..dataset.io import append_samples, get_existing_samples, _default_dataset_dir
+from ..dataset.merge import merge_all
 from ..types import EntryType
 from .checker import build_quality_checker
 
@@ -578,6 +579,7 @@ class InputPipeline:
         save: bool = True,
         verbose: bool = True,
         batch_size: int = 32,
+        fresh: bool = False,
     ) -> ConstitutionInputResult:
         """Run constitution-seeded input generation, batched across entries.
 
@@ -613,6 +615,34 @@ class InputPipeline:
             return ConstitutionInputResult()
 
         result = ConstitutionInputResult()
+
+        if fresh and self.dataset_dir is not None:
+            for csv_path in Path(self.dataset_dir).glob("*/samples.csv"):
+                csv_path.unlink()
+                if verbose:
+                    print(f"  Cleared {csv_path}")
+        elif not fresh and self.dataset_dir is not None:
+            existing = merge_all(self.dataset_dir, accepted_only=False)
+            if not existing.empty and "source_sample_description" in existing.columns:
+                processed = set(zip(
+                    existing["source_sample_description"],
+                    existing["entry_type"],
+                ))
+                original_count = len(constitution_df)
+                constitution_df = constitution_df[
+                    ~constitution_df.apply(
+                        lambda r: (r["sample_description"], r["entry_type"]) in processed,
+                        axis=1,
+                    )
+                ].reset_index(drop=True)
+                skipped = original_count - len(constitution_df)
+                if verbose and skipped > 0:
+                    print(f"  Resuming: skipped {skipped} already-processed entries, "
+                          f"{len(constitution_df)} remaining")
+                if constitution_df.empty:
+                    if verbose:
+                        print("  All entries already processed — nothing to do.")
+                    return result
         prohibited: set[str] = set()
         checker_cache: dict[tuple[str, str, str], Callable[[str], list[dict]]] = {}
 

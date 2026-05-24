@@ -298,6 +298,23 @@ print(f"{len(constitution)} constitution entries")
 
 Output saved to `Data_cache/constitution/` as 4 type-based CSVs + `merged.csv`. Each entry can later seed N input samples for classifier training.
 
+**Expanding constitution entries into input prompts** — pass the returned DataFrame to `generate_inputs()`:
+
+```python
+from redact import generate_inputs
+
+inputs = generate_inputs(
+    constitution_df=constitution,
+    style="long",                   # "long" (2-5 sentences) or "short" (5-20 words)
+    samples_per_entry=3,
+    model="venice-uncensored-vllm",
+    fresh=False,                    # False = resume (skip already-processed entries);
+                                    # True = clear per-category CSVs and regenerate
+)
+```
+
+Both `generate_constitution()` and `generate_inputs(constitution_df=...)` are **resumable by default**: re-running with `fresh=False` (the default) skips work already saved to disk, so an interrupted run picks up where it left off. Set `fresh=True` to clear previous output and regenerate from scratch.
+
 **Entry-type-aware checker** — `build_quality_checker(category, entry_type, subcategory)` in `content_moderation/checker.py` loads the unified template `prompts/input/quality_check/template.json` and injects all three fields, so benign and dual-use samples are evaluated correctly rather than rejected for "not belonging to the harm category." The same checker serves standalone content-moderation, constitution-seeded inputs, and (via `build_output_quality_checker`) output checking. `_build_constitution_checker()` is a thin backward-compatible alias.
 
 ---
