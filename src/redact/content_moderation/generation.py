@@ -580,6 +580,7 @@ class InputPipeline:
         verbose: bool = True,
         batch_size: int = 32,
         fresh: bool = False,
+        style: str = "",
     ) -> ConstitutionInputResult:
         """Run constitution-seeded input generation, batched across entries.
 
@@ -618,20 +619,47 @@ class InputPipeline:
 
         if fresh and self.dataset_dir is not None:
             for csv_path in Path(self.dataset_dir).glob("*/samples.csv"):
-                csv_path.unlink()
+                if style:
+                    # Style-aware fresh: only remove rows for this style so
+                    # data from other styles in the same dir is preserved.
+                    try:
+                        df_existing = pd.read_csv(csv_path)
+                        if "template_style" in df_existing.columns:
+                            df_existing = df_existing[
+                                df_existing["template_style"] != style
+                            ].reset_index(drop=True)
+                            if df_existing.empty:
+                                csv_path.unlink()
+                            else:
+                                df_existing.to_csv(csv_path, index=False)
+                        else:
+                            csv_path.unlink()
+                    except Exception:
+                        csv_path.unlink()
+                else:
+                    csv_path.unlink()
                 if verbose:
                     print(f"  Cleared {csv_path}")
         elif not fresh and self.dataset_dir is not None:
             existing = merge_all(self.dataset_dir, accepted_only=False)
-            if not existing.empty and "source_sample_description" in existing.columns:
-                processed = set(zip(
-                    existing["source_sample_description"],
-                    existing["entry_type"],
-                ))
+            # Handle both old column name (sample_description) and new
+            # (source_sample_description) so resume works across both formats.
+            desc_col = (
+                "source_sample_description" if "source_sample_description" in existing.columns
+                else "sample_description" if "sample_description" in existing.columns
+                else None
+            )
+            if not existing.empty and desc_col:
+                style_vals = (
+                    existing["template_style"]
+                    if "template_style" in existing.columns
+                    else pd.Series([""] * len(existing), index=existing.index)
+                )
+                processed = set(zip(existing[desc_col], existing["entry_type"], style_vals))
                 original_count = len(constitution_df)
                 constitution_df = constitution_df[
                     ~constitution_df.apply(
-                        lambda r: (r["sample_description"], r["entry_type"]) in processed,
+                        lambda r: (r["sample_description"], r["entry_type"], style) in processed,
                         axis=1,
                     )
                 ].reset_index(drop=True)
@@ -651,8 +679,9 @@ class InputPipeline:
         n_chunks = (total + batch_size - 1) // batch_size if batch_size else 1
 
         if verbose:
+            style_label = f" | style='{style}'" if style else ""
             print(f"\n  Constitution-seeded generation: {total} entries, "
-                  f"batch_size={batch_size}, samples_per_entry={samples_per_entry}")
+                  f"batch_size={batch_size}, samples_per_entry={samples_per_entry}{style_label}")
 
         for batch_start in range(0, total, batch_size):
             batch = entries[batch_start : batch_start + batch_size]
@@ -788,6 +817,7 @@ class InputPipeline:
                             "source_group_tag": str(
                                 entry.get("source_group_tag", "")
                             ),
+                            "template_style": style,
                             "rejection_reason": sr.reasoning,
                         }
                         for sr in sample_results
@@ -817,8 +847,9 @@ class InputPipeline:
                     print(f"       -> {accepted_count} accepted, {rejected_count} rejected")
 
         if verbose:
+            style_label = f" | style='{style}'" if style else ""
             print(
-                f"\n  Constitution-seeded run complete: "
+                f"\n  Constitution-seeded run complete{style_label}: "
                 f"{result.total_prompts_accepted}/{result.total_prompts_generated} "
                 f"accepted ({result.acceptance_rate:.0%})"
             )

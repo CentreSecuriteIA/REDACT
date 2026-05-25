@@ -134,7 +134,7 @@ The core abstraction. Everything above this layer calls a unified interface and 
 **Backends** (one class per provider; `api.get_backend(model)` auto-selects by `backend_type`/name and caches per type):
 - `venice_backend.py` — Venice / OpenAI-compatible API (uncensored hosted models)
 - `anthropic_backend.py` — Claude via native SDK (system param split out); series-only
-- `vllm_backend.py` — Local vLLM for self-hosted inference; native single-pass batching
+- `vllm_backend.py` — Local vLLM for self-hosted inference; native single-pass batching. Supports two prompt formats: ChatML (default, for Dolphin/Hermes) and Mistral `[INST]/[SYSTEM_PROMPT]` (set `use_mistral_format=True` via `vllm_kwargs` in the model config, required for Mistral-3.x family models). Also strips the `|>` artifact that appears in responses when ChatML tokens are absent from the tokenizer vocabulary (vLLM ≥ 0.16.0 with Mistral-3.x tokenizers).
 
 **`model_config.py`**: `MODEL_REGISTRY` of `ModelConfig` entries — RPM, default gen params, `backend_type`, capability flags, `recommended_max_workers`, and a logical `role` (`uncensored_gen`, `translation`, `constitution_gen`, `uncensored_local`). `register_model()` adds entries at runtime; `default_model_for_role()` powers role lookup.
 

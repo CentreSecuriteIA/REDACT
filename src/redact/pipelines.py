@@ -522,9 +522,13 @@ def generate_inputs(
             verbose=verbose,
             batch_size=batch_size,
             fresh=fresh,
+            style=style,
         )
 
-        return merge_all(ds_dir, accepted_only=True)
+        result = merge_all(ds_dir, accepted_only=True)
+        if style and not result.empty and "template_style" in result.columns:
+            result = result[result["template_style"] == style].reset_index(drop=True)
+        return result
 
     # ------------------------------------------------------------------
     # Standalone (meta-prompt) mode
@@ -1231,6 +1235,8 @@ def build_dataset(
     dataset_dir: str | Path | None = None,
     jailbreak_path: str | Path | None = None,
     output_path: str | Path | None = None,
+    inputs_path: str | Path | None = None,
+    responses_path: str | Path | None = None,
     include_inputs: bool = True,
     include_jailbreaks: bool = True,
     include_outputs: bool = True,
@@ -1241,6 +1247,15 @@ def build_dataset(
     Combines content moderation inputs, jailbreak variants, and output
     responses from their saved CSVs on disk.
 
+    Inputs and output responses each have two on-disk shapes depending on the
+    upstream pipeline: a single merged handoff CSV (the constitution and
+    content-moderation notebooks write ``constitution_inputs_merged.csv`` /
+    ``cm_inputs_merged.csv`` and ``constitution_output_responses.csv`` /
+    ``output_responses.csv``), or per-category ``{category}/samples.csv``
+    folders (standalone generation). Pass ``inputs_path`` / ``responses_path``
+    to pick the exact files; otherwise they are auto-detected, preferring an
+    explicit merged CSV, then the per-category scan.
+
     Args:
         dataset_dir: Root dataset directory (for inputs). Defaults to
             ``redact/Datasets/``.
@@ -1248,6 +1263,12 @@ def build_dataset(
             ``Datasets/jailbreaks.csv``.
         output_path: Where to save merged CSV. Defaults to
             ``Datasets/complete_dataset.csv``.
+        inputs_path: Explicit merged-inputs CSV (e.g.
+            ``Datasets/constitution_inputs_merged.csv``). If omitted, a merged
+            CSV is auto-detected, falling back to the per-category scan.
+        responses_path: Explicit output-responses CSV (e.g.
+            ``Datasets/constitution_output_responses.csv``). If omitted, a
+            responses CSV is auto-detected.
         include_inputs: Include content moderation input samples.
         include_jailbreaks: Include jailbreak samples.
         include_outputs: Include output response samples.
@@ -1267,17 +1288,33 @@ def build_dataset(
         print(f"Build Complete Dataset")
         print(f"{'='*60}")
 
-    # Content moderation inputs
+    # Content moderation inputs.
+    # Prefer an explicit/auto-detected merged handoff CSV (constitution or
+    # content-moderation), then fall back to the per-category samples.csv scan.
     if include_inputs:
-        categories = discover_categories(ds_dir)
-        if categories:
-            cm_df = merge_content_mod_csvs(ds_dir, accepted_only=True)
+        in_path = Path(inputs_path) if inputs_path else None
+        if in_path is None:
+            for candidate in ("constitution_inputs_merged.csv", "cm_inputs_merged.csv"):
+                if (ds_dir / candidate).exists():
+                    in_path = ds_dir / candidate
+                    break
+
+        if in_path is not None and in_path.exists():
+            cm_df = pd.read_csv(in_path)
             cm_df["dataset_type"] = "content_moderation_input"
             parts.append(cm_df)
             if verbose:
-                print(f"  Inputs: {len(cm_df)} samples from {len(categories)} categories")
-        elif verbose:
-            print(f"  Inputs: none found")
+                print(f"  Inputs: {len(cm_df)} samples from {in_path.name}")
+        else:
+            categories = discover_categories(ds_dir)
+            if categories:
+                cm_df = merge_content_mod_csvs(ds_dir, accepted_only=True)
+                cm_df["dataset_type"] = "content_moderation_input"
+                parts.append(cm_df)
+                if verbose:
+                    print(f"  Inputs: {len(cm_df)} samples from {len(categories)} categories")
+            elif verbose:
+                print(f"  Inputs: none found")
 
     # Jailbreaks
     if include_jailbreaks and jb_path.exists():
@@ -1292,16 +1329,23 @@ def build_dataset(
     elif verbose and include_jailbreaks:
         print(f"  Jailbreaks: file not found ({jb_path})")
 
-    # Output responses
-    output_csv = ds_dir / "output_responses.csv"
-    if include_outputs and output_csv.exists():
-        out_df = pd.read_csv(output_csv)
-        out_df["dataset_type"] = "content_moderation_output"
-        parts.append(out_df)
-        if verbose:
-            print(f"  Outputs: {len(out_df)} samples")
-    elif verbose and include_outputs:
-        print(f"  Outputs: none found")
+    # Output responses (explicit/auto-detected: constitution or content-moderation).
+    if include_outputs:
+        resp_path = Path(responses_path) if responses_path else None
+        if resp_path is None:
+            for candidate in ("constitution_output_responses.csv", "output_responses.csv"):
+                if (ds_dir / candidate).exists():
+                    resp_path = ds_dir / candidate
+                    break
+
+        if resp_path is not None and resp_path.exists():
+            out_df = pd.read_csv(resp_path)
+            out_df["dataset_type"] = "content_moderation_output"
+            parts.append(out_df)
+            if verbose:
+                print(f"  Outputs: {len(out_df)} samples from {resp_path.name}")
+        elif verbose:
+            print(f"  Outputs: none found")
 
     if not parts:
         if verbose:

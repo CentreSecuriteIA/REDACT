@@ -208,8 +208,9 @@ def clean_sample(
         Cleaned text.
     """
     result = text
-    # Strip ChatML stop tokens if they leaked through (belt-and-suspenders for vLLM)
-    result = result.replace("<|im_end|>", "").replace("<|im_start|>", "")
+    # Strip ChatML token fragments that may leak through (belt-and-suspenders for vLLM).
+    # Regex catches full tokens and partial fragments: <|im_end|, |>, <|im_start, etc.
+    result = re.sub(r"<?\|im_(start|end)\|?>?", "", result)
     if strip_meta:
         # Drop only a leading preamble line, and only when real content follows.
         # Avoids gutting content lines that legitimately start with these words.

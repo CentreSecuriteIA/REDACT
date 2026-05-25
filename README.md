@@ -242,6 +242,8 @@ generate_inputs_from_constitution(model="venice-uncensored-vllm", ...)
 
 When `venice-uncensored-vllm` is requested, `get_backend()` automatically creates a `VLLMBackend` for `dphn/Dolphin-Mistral-24B-Venice-Edition`. On first use vLLM downloads the model weights from HuggingFace and caches them at the path set by `HF_HOME` in your `.env`. Subsequent runs load directly from cache — no re-download.
 
+This model uses Mistral `[INST]/[SYSTEM_PROMPT]` prompt format (not ChatML). The registry entry sets `vllm_kwargs={"use_mistral_format": True}` so `VLLMBackend` formats prompts correctly. If you register a different Mistral-3.x model, set the same flag; ChatML models (Dolphin, Hermes) use the default and need no flag.
+
 Both generation and checker paths dispatch through a `BatchCaller` (never the raw backend), so every batch is rate-limited and uses the right execution mode for its backend: one vLLM engine pass for native backends, a thread pool sized by the registry's `recommended_max_workers` for parallel-safe APIs, or sequential for series-only backends (Anthropic). The `batch_size` parameter (default 32) controls how many entries are grouped per pass.
 
 For a custom model, instantiate `VLLMBackend` directly and pass it to any pipeline:

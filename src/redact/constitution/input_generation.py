@@ -455,5 +455,6 @@ class ConstitutionInputPipeline:
             save=save,
             verbose=verbose,
             batch_size=batch_size,
+            style=style,
         )
 

@@ -22,7 +22,6 @@ class VLLMBackend(LLMBackend):
         self,
         model: str,
         quantization: str | None = None,
-        chat_template: str | None = None,
         **vllm_kwargs,
     ):
         """Load a model with vLLM.
@@ -30,8 +29,6 @@ class VLLMBackend(LLMBackend):
         Args:
             model: HuggingFace model ID or local path.
             quantization: Quantization method (e.g. "gptq", "awq").
-            chat_template: Optional chat template string. If None, uses
-                           a default ChatML template.
             **vllm_kwargs: Passed to vllm.LLM() (e.g. revision,
                            trust_remote_code, gpu_memory_utilization).
         """
@@ -53,21 +50,17 @@ class VLLMBackend(LLMBackend):
             quantization=quantization,
             **vllm_kwargs,
         )
-        self._chat_template = chat_template
 
-    def _format_messages(self, messages: list[dict]) -> str:
-        """Convert chat messages to a prompt string using ChatML format."""
-        if self._chat_template:
-            return self._chat_template.format(messages=messages)
+    def _clean_output(self, text: str) -> str:
+        """Strip known tokenizer artifacts from raw vLLM output.
 
-        # Default ChatML format (used by Dolphin, Hermes, etc.)
-        parts = []
-        for msg in messages:
-            role = msg["role"]
-            content = msg["content"]
-            parts.append(f"<|im_start|>{role}\n{content}<|im_end|>")
-        parts.append("<|im_start|>assistant")
-        return "\n".join(parts)
+        Belt-and-suspenders fallback. With llm.chat() the model's own
+        tokenizer handles stop tokens, so this should rarely fire.
+        """
+        text = text.strip()
+        if text.startswith("|>"):
+            text = text[2:].lstrip()
+        return text
 
     def generate(
         self,
@@ -99,12 +92,10 @@ class VLLMBackend(LLMBackend):
             max_tokens=resolved_max_tokens,
             temperature=resolved_temperature,
             top_p=resolved_top_p,
-            stop=["<|im_end|>"],  # prevent ChatML end-token from leaking into output
         )
 
-        formatted = self._format_messages(messages)
-        outputs = self._llm.generate([formatted], sampling_params)
-        return outputs[0].outputs[0].text.strip()
+        outputs = self._llm.chat([messages], sampling_params)
+        return self._clean_output(outputs[0].outputs[0].text)
 
     def batch_generate(
         self,
@@ -131,14 +122,12 @@ class VLLMBackend(LLMBackend):
             max_tokens=resolved_max_tokens,
             temperature=resolved_temperature,
             top_p=resolved_top_p,
-            stop=["<|im_end|>"],  # prevent ChatML end-token from leaking into output
         )
 
         if not messages_list:
             return []
-        formatted = [self._format_messages(msgs) for msgs in messages_list]
-        outputs = self._llm.generate(formatted, sampling_params)
-        return [out.outputs[0].text.strip() for out in outputs]
+        outputs = self._llm.chat(messages_list, sampling_params)
+        return [self._clean_output(out.outputs[0].text) for out in outputs]
 
     @property
     def backend_name(self) -> str:
