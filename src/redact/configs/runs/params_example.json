@@ -1,0 +1,6 @@
+{
+  "constitution": { "num_categories": 10, "num_taxonomy_categories": 3 },
+  "inputs": { "samples_per_category": 15, "num_categories": 3, "samples_per_request": 5, "num_seeds": 8 },
+  "outputs": { "check_outputs": true, "max_per_category": 20, "batch_size": 32 },
+  "jailbreaks": { "max_complexity": 6, "max_obfuscations": 2, "seed": 42, "batch_size": 256 }
+}

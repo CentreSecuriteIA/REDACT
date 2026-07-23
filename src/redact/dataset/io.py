@@ -13,12 +13,13 @@ from pathlib import Path
 
 import pandas as pd
 
-# Default dataset directory: Datasets/ relative to the calling script
-from redact import get_output_dir
+# Default dataset directory + per-category layout come from the single-source
+# path module so this and the pipelines never drift.
+from redact import paths
 
 
 def _default_dataset_dir() -> Path:
-    return get_output_dir() / "Datasets"
+    return paths.datasets()
 
 
 # Standard input-sample CSV schema. Extra columns (technique, language,
@@ -46,18 +47,16 @@ def _hash_text(text: str) -> str:
 def _resolve_path(
     category: str,
     dataset_dir: str | Path | None = None,
-    filename: str = "samples.csv",
+    filename: str = paths.SAMPLES_FILENAME,
 ) -> Path:
     """Resolve the CSV path for a category."""
-    if dataset_dir is None:
-        dataset_dir = _default_dataset_dir()
-    return Path(dataset_dir) / category / filename
+    return paths.category_csv(category, base=dataset_dir, filename=filename)
 
 
 def read_category_csv(
     category: str,
     dataset_dir: str | Path | None = None,
-    filename: str = "samples.csv",
+    filename: str = paths.SAMPLES_FILENAME,
 ) -> pd.DataFrame:
     """Read the CSV for a category. Returns empty DataFrame if not found.
 
@@ -79,7 +78,7 @@ def write_category_csv(
     df: pd.DataFrame,
     category: str,
     dataset_dir: str | Path | None = None,
-    filename: str = "samples.csv",
+    filename: str = paths.SAMPLES_FILENAME,
 ) -> Path:
     """Write a DataFrame as the category CSV (full overwrite).
 
@@ -103,7 +102,7 @@ def write_category_csv(
 def get_existing_samples(
     category: str,
     dataset_dir: str | Path | None = None,
-    filename: str = "samples.csv",
+    filename: str = paths.SAMPLES_FILENAME,
 ) -> set[str]:
     """Return the set of sample texts already in the category CSV.
 
@@ -132,7 +131,7 @@ def append_samples(
     source: str = "generated",
     extra_columns: list[dict] | None = None,
     dataset_dir: str | Path | None = None,
-    filename: str = "samples.csv",
+    filename: str = paths.SAMPLES_FILENAME,
 ) -> pd.DataFrame:
     """Append new samples to a category CSV incrementally.
 

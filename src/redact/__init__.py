@@ -199,7 +199,6 @@ from . import constitution  # noqa: E402, F401
 from .pipelines import (  # noqa: E402
     create_taxonomy,
     generate_constitution,
-    generate_inputs_from_constitution,
     generate_inputs,
     generate_outputs,
     generate_jailbreaks,
@@ -209,3 +208,12 @@ from .pipelines import (  # noqa: E402
 # Convenience re-export: the built-in 4-round escalation schedule for
 # generate_jailbreaks(settings_per_iteration=...).
 from .jailbreak import default_escalation_schedule  # noqa: E402, F401
+
+# Config-driven runs (recipe + input-params + per-stage manifests).
+from .runconfig import (  # noqa: E402, F401
+    run_pipeline,
+    load_recipe,
+    load_params,
+    write_manifest,
+    read_manifest,
+)

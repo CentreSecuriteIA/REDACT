@@ -20,7 +20,7 @@ from typing import Callable
 
 import pandas as pd
 
-from redact import Config, get_output_dir
+from redact import Config, get_output_dir, paths
 from redact.llms import (
     get_backend,
     RateLimiter,
@@ -31,6 +31,7 @@ from redact.llms import (
     BatchCaller,
 )
 from redact.llms.base import LLMBackend
+from redact.llms.model_config import default_model_for_role
 from redact.content_moderation import (
     InputPipeline,
     CategoryResult,
@@ -78,23 +79,22 @@ from redact.jailbreak.manipulation import (
 
 
 _PACKAGE_DIR = Path(__file__).resolve().parent  # src/redact/
-_DEFAULT_TAXONOMY_DIR = _PACKAGE_DIR / "configs" / "taxonomy"
+_DEFAULT_TAXONOMY_DIR = paths.taxonomy_dir()
 
 
+# Thin delegators to the single-source path module (redact/paths.py). Kept as
+# local names so existing call sites read unchanged; all resolution lives in
+# one place now.
 def _default_dataset_dir() -> Path:
-    return get_output_dir() / "Datasets"
+    return paths.datasets()
 
 
 def _default_jailbreak_path() -> Path:
-    return _default_dataset_dir() / "jailbreaks.csv"
+    return paths.jailbreaks_csv()
 
 
 def _default_benign_path() -> Path:
-    return get_output_dir() / "Data_cache" / "benign" / "benign_samples.csv"
-
-
-def _default_scenario_dir() -> Path:
-    return get_output_dir() / "Data_cache" / "scenarios"
+    return paths.benign_csv()
 
 
 # ---------------------------------------------------------------------------
@@ -185,9 +185,14 @@ def create_taxonomy(
     description: str = "",
     aliases: dict[str, str] | None = None,
     groups: dict[str, list[str]] | None = None,
-    config_dir: str | Path | None = None,
+    taxonomy_dir: str | Path | None = None,
+    verbose: bool = True,
 ) -> dict:
     """Create and save a taxonomy JSON file.
+
+    A small authoring helper: writes a taxonomy JSON (same shape as the bundled
+    ones in ``configs/taxonomy/``) so it can be loaded by name via
+    ``generate_inputs(taxonomy=name, taxonomy_dir=...)``.
 
     Args:
         name: Taxonomy name (used as filename).
@@ -196,8 +201,9 @@ def create_taxonomy(
         description: Top-level taxonomy description.
         aliases: Mapping of alternate names to canonical names.
         groups: Named groups of categories.
-        config_dir: Directory to save the JSON file. Defaults to
-            ``Dataset_Configs/taxonomy/``.
+        taxonomy_dir: Directory to save the JSON file. Defaults to the bundled
+            ``configs/taxonomy/`` (same dir ``load_taxonomy`` reads by default).
+        verbose: Print the saved path.
 
     Returns:
         The taxonomy dict (usable directly in ``generate_inputs(taxonomy=...)``)
@@ -217,13 +223,14 @@ def create_taxonomy(
         "groups": groups or {},
     }
 
-    save_dir = Path(config_dir or _DEFAULT_TAXONOMY_DIR)
+    save_dir = Path(taxonomy_dir or _DEFAULT_TAXONOMY_DIR)
     save_dir.mkdir(parents=True, exist_ok=True)
     path = save_dir / f"{name}.json"
     with open(path, "w", encoding="utf-8") as f:
         json.dump(taxonomy, f, indent=2, ensure_ascii=False)
 
-    print(f"Taxonomy '{name}' saved to {path}")
+    if verbose:
+        print(f"Taxonomy '{name}' saved to {path}")
     return taxonomy
 
 
@@ -236,12 +243,12 @@ def generate_constitution(
     taxonomy: dict | str = "content_moderation_categories",
     entry_types: list[str] | None = None,
     num_categories: int = 10,
-    model: str = "claude-opus-4-6",
-    backend: LLMBackend | None = None,
+    model: str | None = None,
     num_taxonomy_categories: int | None = None,
     include_standalone_benign: bool = False,
     standalone_benign_categories: int = 10,
-    output_dir: str | Path | None = None,
+    data_dir: str | Path | None = None,
+    taxonomy_dir: str | Path | None = None,
     resume: bool = True,
     verbose: bool = True,
 ) -> pd.DataFrame:
@@ -259,8 +266,9 @@ def generate_constitution(
             ``"dual_use_harmful"``. Default: all four.
         num_categories: Number of constitution categories per entry type per
             taxonomy category. Range 5-15 recommended.
-        model: Model for generation (default: Claude Opus).
-        backend: LLM backend. If None, auto-selects from model name.
+        model: Generation model. ``None`` (default) resolves to the
+            ``constitution_gen`` role — Claude Opus. The backend is auto-selected
+            from the model name.
         num_taxonomy_categories: Limit to first N taxonomy categories
             (None = all).
         include_standalone_benign: If True, also generate category-free
@@ -268,8 +276,11 @@ def generate_constitution(
             Saved to general_benign.csv.
         standalone_benign_categories: Number of benign constitution categories
             to generate in the standalone benign call.
-        output_dir: Where to save CSVs. Defaults to
-            ``Data_cache/constitution/``.
+        data_dir: Working root; the constitution CSVs land in
+            ``{data_dir}/Data_cache/constitution/``. Defaults to the project root
+            (``get_output_dir()``).
+        taxonomy_dir: Directory to load the taxonomy from (when ``taxonomy`` is a
+            name). Defaults to the bundled ``configs/taxonomy/``.
         resume: When True (default), skip ``(source_category, entry_type)``
             units already recorded in the sidecar ``constitution.state.jsonl``
             ledger beside the CSVs and append to the existing CSVs (a crash
@@ -286,24 +297,25 @@ def generate_constitution(
 
     # Resolve taxonomy
     if isinstance(taxonomy, str):
-        taxonomy = load_taxonomy(taxonomy)
+        taxonomy = load_taxonomy(taxonomy, config_dir=taxonomy_dir)
 
     # Resolve entry types
     resolved_types: list[EntryType] | None = None
     if entry_types is not None:
         resolved_types = [EntryType(t) for t in entry_types]
 
-    # Resolve backend
-    if backend is None:
-        backend = get_backend(model)
+    # Resolve model (role default) + backend from the model name
+    model = model or default_model_for_role("constitution_gen")
+    backend = get_backend(model)
 
     rate_limiter = get_router().rate_limiter
 
+    const_dir = paths.constitution_dir(data_dir)
     pipeline = ConstitutionPipeline(
         backend=backend,
         model=model,
         rate_limiter=rate_limiter,
-        output_dir=output_dir,
+        output_dir=const_dir,
     )
 
     result = pipeline.run(
@@ -322,94 +334,6 @@ def generate_constitution(
 
 
 # ---------------------------------------------------------------------------
-# Constitution-to-input generation
-# ---------------------------------------------------------------------------
-
-
-def generate_inputs_from_constitution(
-    style: str = "long",
-    samples_per_entry: int = 3,
-    entry_types: list[str] | None = None,
-    source_categories: list[str] | None = None,
-    model: str = "venice-uncensored",
-    check_model: str | None = None,
-    backend: LLMBackend | None = None,
-    use_checker: bool = True,
-    constitution_dir: str | Path | None = None,
-    output_dir: str | Path | None = None,
-    verbose: bool = True,
-    batch_size: int = 32,
-) -> pd.DataFrame:
-    """[Deprecated] Generate input prompts from constitution entries.
-
-    Loads constitution CSVs from disk, then delegates to the unified
-    ``InputPipeline.run_from_constitution()`` via ``ConstitutionInputPipeline``.
-
-    **Prefer** the composable API:
-    ``df = generate_constitution(...); generate_inputs(constitution_df=df, ...)``.
-    This wrapper is kept for backward compatibility with existing notebooks
-    and runner scripts.
-
-    Args:
-        style: Template style ("long", "short", or custom). Controls
-            prompt length/detail. See prompts/constitution/input_generation/.
-        samples_per_entry: Number of prompts to generate per constitution entry.
-        entry_types: Filter to specific entry types (e.g. ["harmful", "benign",
-            "dual_use_harmful", "dual_use_benign", "general_benign"]).
-        source_categories: Filter to specific taxonomy categories.
-        model: Model for generation.
-        check_model: Model for quality checking. Defaults to same as model.
-        backend: LLM backend. If None, auto-selects from model name.
-        use_checker: Whether to quality-check generated prompts.
-        constitution_dir: Where to read constitution CSVs. Defaults to
-            Data_cache/constitution/.
-        output_dir: Where to save generated prompts. Defaults to
-            Datasets/constitution_inputs/.
-        verbose: Print progress.
-
-    Returns:
-        DataFrame of all generated prompts with constitution metadata.
-    """
-    import warnings
-    from redact.constitution.input_generation import ConstitutionInputPipeline
-
-    warnings.warn(
-        "generate_inputs_from_constitution() is deprecated; prefer "
-        "generate_inputs(constitution_df=generate_constitution(...)).",
-        DeprecationWarning,
-        stacklevel=2,
-    )
-
-    backend, rate_limiter = _get_backend(backend, model)
-    check_model = check_model or model
-
-    pipeline = ConstitutionInputPipeline(
-        gen_backend=backend,
-        gen_model=model,
-        check_backend=backend,
-        check_model=check_model,
-        rate_limiter=rate_limiter,
-        constitution_dir=constitution_dir,
-        output_dir=output_dir,
-    )
-
-    pipeline.run(
-        style=style,
-        samples_per_entry=samples_per_entry,
-        entry_types=entry_types,
-        source_categories=source_categories,
-        use_checker=use_checker,
-        save=True,
-        verbose=verbose,
-        batch_size=batch_size,
-    )
-
-    # Return merged DataFrame from saved CSVs
-    actual_dir = pipeline.output_dir
-    return merge_content_mod_csvs(actual_dir, accepted_only=True)
-
-
-# ---------------------------------------------------------------------------
 # Content moderation input generation
 # ---------------------------------------------------------------------------
 
@@ -421,13 +345,13 @@ def generate_inputs(
     seeds_name: str = "content_moderation_seeds",
     samples_per_request: int = 5,
     num_seeds: int = 8,
-    model: str = "venice-uncensored",
+    model: str | None = None,
     check_model: str | None = None,
-    backend: LLMBackend | None = None,
-    base_url: str = "https://api.venice.ai/api/v1",
     num_categories: int | None = None,
-    dataset_dir: str | Path | None = None,
-    fresh: bool = False,
+    data_dir: str | Path | None = None,
+    taxonomy_dir: str | Path | None = None,
+    prompt_dir: str | Path | None = None,
+    resume: bool = True,
     verbose: bool = True,
     constitution_df: pd.DataFrame | None = None,
     style: str = "long",
@@ -457,13 +381,23 @@ def generate_inputs(
         seeds_name: Seeds JSON name when ``use_metaprompt=False``. (Standalone.)
         samples_per_request: Samples per LLM call per turn. (Standalone.)
         num_seeds: Number of seed prompts to generate. (Standalone.)
-        model: Generation model.
+        model: Generation model. ``None`` (default) resolves to the
+            ``uncensored_gen`` role. Backend is auto-selected from the name.
         check_model: Checker model; defaults to ``model``.
-        backend: LLM backend; auto-resolved if None.
-        base_url: API base URL (legacy).
         num_categories: First N categories from taxonomy. (Standalone.)
-        dataset_dir: Where to save per-category CSVs.
-        fresh: Clear existing category CSVs first. (Standalone.)
+        data_dir: Working root. Standalone inputs land under
+            ``{data_dir}/Datasets/``; constitution-seeded inputs auto-route to
+            ``{data_dir}/Datasets/constitution_inputs/`` so they never clash.
+            Defaults to the project root (``get_output_dir()``).
+        taxonomy_dir: Directory to load the taxonomy from (name mode).
+            Defaults to the bundled ``configs/taxonomy/``.
+        prompt_dir: Root prompt directory for the generation prompt. Defaults to
+            the bundled ``prompts/``. (Checker prompts still use the default;
+            deeper threading is a follow-up.)
+        resume: When True (default), keep and extend existing per-category CSVs
+            (standalone dedups against them; constitution mode skips entries
+            already present). When False, clear the relevant CSVs first and
+            regenerate from scratch.
         verbose: Print progress.
         constitution_df: DataFrame of constitution entries. Triggers
             constitution-seeded mode when non-None.
@@ -477,14 +411,19 @@ def generate_inputs(
     Returns:
         Merged DataFrame of accepted samples.
     """
+    # Generation model defaults to the uncensored_gen role (both modes).
+    model = model or default_model_for_role("uncensored_gen")
+
     # ------------------------------------------------------------------
     # Constitution-seeded mode (delegates to InputPipeline.run_from_constitution)
     # ------------------------------------------------------------------
     if constitution_df is not None:
-        backend, rate_limiter = _get_backend(backend, model)
+        backend, rate_limiter = _get_backend(None, model)
         check_model = check_model or model
 
-        ds_dir = Path(dataset_dir) if dataset_dir else None
+        # Constitution-seeded inputs auto-route to a dedicated subfolder so they
+        # never collide with standalone content-moderation inputs.
+        ds_dir = paths.constitution_inputs_dir(data_dir)
         pipeline = InputPipeline(
             gen_backend=backend,
             gen_model=model,
@@ -501,7 +440,7 @@ def generate_inputs(
             ].reset_index(drop=True)
 
         prompt_config = load_prompt(
-            "input", f"generation/from_constitution/{style}"
+            "input", f"generation/from_constitution/{style}", prompt_dir=prompt_dir
         )
 
         if verbose:
@@ -521,7 +460,7 @@ def generate_inputs(
             save=True,
             verbose=verbose,
             batch_size=batch_size,
-            fresh=fresh,
+            fresh=not resume,
             style=style,
         )
 
@@ -535,18 +474,18 @@ def generate_inputs(
     # ------------------------------------------------------------------
     # Resolve taxonomy
     if isinstance(taxonomy, str):
-        taxonomy = load_taxonomy(taxonomy)
+        taxonomy = load_taxonomy(taxonomy, config_dir=taxonomy_dir)
 
     categories = list(iter_categories(taxonomy))
     if num_categories is not None:
         categories = categories[:num_categories]
 
-    # Backend
-    backend, rate_limiter = _get_backend(backend, model)
+    # Backend (auto-resolved from the model name)
+    backend, rate_limiter = _get_backend(None, model)
     check_model = check_model or model
 
     # Pipeline
-    ds_dir = Path(dataset_dir) if dataset_dir else None
+    ds_dir = paths.datasets(data_dir)
     pipeline = InputPipeline(
         gen_backend=backend,
         gen_model=model,
@@ -557,7 +496,7 @@ def generate_inputs(
         dataset_dir=ds_dir,
     )
 
-    prompt_config = load_prompt("input", "generation/standalone")
+    prompt_config = load_prompt("input", "generation/standalone", prompt_dir=prompt_dir)
     # Max turns as safety cap: 3x what a perfect run would need
     max_turns = ceil(samples_per_category / samples_per_request) * 3
 
@@ -566,11 +505,11 @@ def generate_inputs(
     if not use_metaprompt:
         seeds_db = load_seeds(seeds_name)
 
-    # Clear existing data for a fresh run
-    if fresh:
+    # Clear existing data when not resuming
+    if not resume:
         actual_dir = Path(ds_dir) if ds_dir else _default_dataset_dir()
         for cat_name, _ in categories:
-            csv_path = actual_dir / cat_name / "samples.csv"
+            csv_path = paths.category_csv(cat_name, base=actual_dir)
             if csv_path.exists():
                 csv_path.unlink()
                 if verbose:
@@ -687,18 +626,15 @@ def generate_inputs(
 
 def generate_outputs(
     inputs: pd.DataFrame | None = None,
-    model: str = "venice-uncensored",
+    model: str | None = None,
     check_outputs: bool = True,
     check_model: str | None = None,
     batch_size: int = 32,
     max_samples: int | None = None,
     max_per_category: int | None = None,
-    backend: LLMBackend | None = None,
-    base_url: str = "https://api.venice.ai/api/v1",
-    dataset_dir: str | Path | None = None,
+    data_dir: str | Path | None = None,
     output_path: str | Path | None = None,
     resume: bool = True,
-    fresh: bool = False,
     verbose: bool = True,
 ) -> pd.DataFrame:
     """Generate model responses for input samples, batched and quality-checked.
@@ -717,12 +653,13 @@ def generate_outputs(
     present, else ``_hash_text(prompt)``). Completed ids are recorded in a
     sidecar ``*.state.jsonl`` ledger beside the output CSV. On a re-run
     (``resume=True``) inputs already in the ledger are skipped, so a crash loses
-    at most one chunk. ``fresh=True`` clears both the CSV and the ledger first.
+    at most one chunk. ``resume=False`` clears both the CSV and the ledger first.
 
     Args:
         inputs: Input samples DataFrame. If None, loads accepted samples
-            from ``dataset_dir`` via :func:`merge_all`.
-        model: Generation model identifier.
+            from ``{data_dir}/Datasets/`` via :func:`merge_all`.
+        model: Generation model. ``None`` (default) resolves to the
+            ``uncensored_gen`` role. Backend is auto-selected from the name.
         check_outputs: Run the entry-type-aware output quality checker.
             Set False to skip checking (accept everything).
         check_model: Checker model; defaults to ``model``.
@@ -735,13 +672,14 @@ def generate_outputs(
             ``max_samples`` this keeps every category and severity level
             represented instead of skewing to the first categories in the
             (category-ordered) merged frame. None = no per-group cap.
-        backend: LLM backend; auto-resolved if None.
-        base_url: API base URL (legacy, kept for callers).
-        dataset_dir: Where to find input CSVs (when ``inputs`` is None).
-        output_path: Where to save the output CSV. Defaults to
-            ``Datasets/output_responses.csv``.
-        resume: Skip inputs already recorded in the sidecar state ledger.
-        fresh: Clear the output CSV and state ledger before running.
+        data_dir: Working root. Inputs are read from ``{data_dir}/Datasets/``
+            (when ``inputs`` is None) and the responses CSV defaults to
+            ``{data_dir}/Datasets/output_responses.csv``. Defaults to the project
+            root (``get_output_dir()``).
+        output_path: Explicit override for the output CSV path. Takes precedence
+            over ``data_dir``.
+        resume: When True (default), skip inputs already recorded in the sidecar
+            state ledger. When False, clear the output CSV and ledger first.
         verbose: Print per-batch progress.
 
     Returns:
@@ -751,7 +689,7 @@ def generate_outputs(
         ``entry_type``, ``output_response``, ``accepted``, ``rejection_reason``,
         ``model``, ``source``.
     """
-    ds_dir = Path(dataset_dir) if dataset_dir else None
+    ds_dir = paths.datasets(data_dir)
 
     if inputs is None:
         inputs = merge_all(ds_dir, accepted_only=True)
@@ -765,7 +703,8 @@ def generate_outputs(
     if max_samples is not None:
         inputs = inputs.head(max_samples)
 
-    backend, rate_limiter = _get_backend(backend, model)
+    model = model or default_model_for_role("uncensored_gen")
+    backend, rate_limiter = _get_backend(None, model)
     check_model = check_model or model
     if check_outputs:
         check_backend, _ = _get_backend(None, check_model)
@@ -784,7 +723,7 @@ def generate_outputs(
 
     out_path = (
         Path(output_path) if output_path
-        else (_default_dataset_dir() / "output_responses.csv")
+        else paths.output_responses_csv(data_dir)
     )
     out_path.parent.mkdir(parents=True, exist_ok=True)
     state_path = _output_state_path(out_path)
@@ -799,8 +738,8 @@ def generate_outputs(
     inputs = inputs.copy()
     inputs["_state_id"] = [_input_id(row) for _, row in inputs.iterrows()]
 
-    # Fresh run wipes prior output + ledger; resume skips already-done ids.
-    if fresh:
+    # Non-resume run wipes prior output + ledger; resume skips already-done ids.
+    if not resume:
         for p in (out_path, state_path):
             if p.exists():
                 p.unlink()
@@ -940,7 +879,9 @@ def generate_outputs(
 
 def generate_jailbreaks(
     inputs: pd.DataFrame | None = None,
+    data_dir: str | Path | None = None,
     output_path: str | Path | None = None,
+    benign_path: str | Path | None = None,
     max_complexity: int = 6,
     max_obfuscations: int = 2,
     seed: int = 42,
@@ -952,11 +893,10 @@ def generate_jailbreaks(
     include_requests: bool = True,
     include_translation: bool = True,
     sampling_probs: dict | None = None,
-    model: str = "venice-uncensored",
-    backend: LLMBackend | None = None,
-    base_url: str = "https://api.venice.ai/api/v1",
+    model: str | None = None,
+    translation_model: str | None = None,
     auto_generate_benign: bool = True,
-    chunk_size: int = 256,
+    batch_size: int = 256,
     iterations: int = 1,
     settings_per_iteration: list[dict] | None = None,
     resume: bool = True,
@@ -972,7 +912,7 @@ def generate_jailbreaks(
        deterministically assigned combination (seeded on the prompt-content id,
        deduped per sample) written to a JSONL manifest beside the output CSV.
        Skipped when ``resume=True`` and a manifest already exists.
-    2. **Execute** — the manifest is streamed in ``chunk_size`` chunks; each
+    2. **Execute** — the manifest is streamed in ``batch_size`` chunks; each
        chunk is run through the batched engine
        (:func:`redact.jailbreak.batch_apply_combinations`), which pools LLM calls
        per model per round via the router (vLLM native batch / API multi-worker).
@@ -983,8 +923,16 @@ def generate_jailbreaks(
     Args:
         inputs: Input prompts DataFrame. If None, loads accepted samples from
             ``Datasets/`` via :func:`merge_all`.
-        output_path: Output CSV path. Defaults to ``Datasets/jailbreaks.csv``.
-            The manifest defaults to ``<output>.manifest.jsonl``.
+        data_dir: Working root. Inputs are read from ``{data_dir}/Datasets/``
+            (when ``inputs`` is None), the jailbreaks CSV defaults to
+            ``{data_dir}/Datasets/jailbreaks.csv``, and the benign cache to
+            ``{data_dir}/Data_cache/benign/``. Defaults to the project root
+            (``get_output_dir()``).
+        output_path: Explicit override for the jailbreaks CSV. Defaults to the
+            ``data_dir``-derived path. The manifest defaults to
+            ``<output>.manifest.jsonl``.
+        benign_path: Explicit override for the FSH/DAP benign-cache CSV. Defaults
+            to the ``data_dir``-derived path.
         max_complexity / max_obfuscations: Combination-sampler limits.
         seed: Global run seed (combined with each sample's id + iteration).
         pure_only: Exclude LLM-dependent techniques (no router calls).
@@ -998,11 +946,14 @@ def generate_jailbreaks(
             Defaults to True.
         sampling_probs: Override per-layer inclusion probabilities (see
             combination_spec.json ``sampling_probs``).
-        model: Generation model for LLM-dependent techniques.
-        backend: LLM backend (used only for benign pre-load); engine routes via
-            the process-wide router.
+        model: Generation model for LLM-dependent techniques. ``None`` (default)
+            resolves to the ``uncensored_gen`` role. Backend auto-resolved from
+            the name; the engine routes via the process-wide router.
+        translation_model: Model for the translation family. ``None`` (default)
+            uses the ``translation`` role (DeepSeek). Translation always routes to
+            its own model independently of ``model``.
         auto_generate_benign: Pre-load/generate benign data for FSH/DAP.
-        chunk_size: Manifest units per engine batch.
+        batch_size: Manifest units per engine batch.
         iterations: Combinations to assign per sample (1 = single-round). Ignored when
             ``settings_per_iteration`` is given (its length wins).
         settings_per_iteration: Per-round sampler kwargs for a multi-round
@@ -1025,14 +976,14 @@ def generate_jailbreaks(
         ``technique_info``, ``complexity``, ``num_techniques``, ``is_noop``,
         ``accepted``, ``reasoning``, ``iteration``, ``combination_spec_version``.
     """
-    out = Path(output_path) if output_path else _default_jailbreak_path()
+    out = Path(output_path) if output_path else paths.jailbreaks_csv(data_dir)
     man_path = Path(manifest_path) if manifest_path else default_manifest_path(out)
 
     # ------------------------------------------------------------------
     # Load + normalize inputs (ensure a prompt column and a content-hash id)
     # ------------------------------------------------------------------
     if inputs is None:
-        inputs = merge_all(accepted_only=True)
+        inputs = merge_all(paths.datasets(data_dir), accepted_only=True)
         if inputs.empty:
             raise ValueError("No input samples found. Run generate_inputs() first.")
 
@@ -1054,7 +1005,10 @@ def generate_jailbreaks(
             )
     inputs["id"] = inputs["id"].astype(str)
 
-    backend, rate_limiter = _get_backend(backend, model)
+    # Generation model defaults to the uncensored_gen role; translation defaults
+    # to the translation role (DeepSeek). Backend auto-resolved from the name.
+    model = model or default_model_for_role("uncensored_gen")
+    backend, rate_limiter = _get_backend(None, model)
 
     # ------------------------------------------------------------------
     # Build technique pool + assignment settings
@@ -1124,7 +1078,7 @@ def generate_jailbreaks(
         print(f"{'='*60}")
         print(
             f"Pool: {len(pool)} techniques | Samples: {len(inputs)} | "
-            f"Iterations: {iterations} | Model: {model} | Chunk: {chunk_size}"
+            f"Iterations: {iterations} | Model: {model} | Chunk: {batch_size}"
         )
 
     # ------------------------------------------------------------------
@@ -1156,7 +1110,11 @@ def generate_jailbreaks(
     )
     benign_data = None
     if auto_generate_benign and has_manipulation:
-        benign_data = _ensure_benign_data(backend, model, rate_limiter, verbose=verbose)
+        benign_data = _ensure_benign_data(
+            backend, model, rate_limiter,
+            benign_path=benign_path or paths.benign_csv(data_dir),
+            verbose=verbose,
+        )
 
     prompt_map = dict(zip(inputs["id"], inputs["prompt"]))
     meta_map = {r["id"]: r for r in inputs.to_dict("records")}
@@ -1171,15 +1129,15 @@ def generate_jailbreaks(
     router = get_router()
     total = len(pending)
     written = 0
-    n_chunks = ceil(total / chunk_size) if (total and chunk_size) else 0
+    n_chunks = ceil(total / batch_size) if (total and batch_size) else 0
 
     if verbose and total:
         print(f"  Executing {total} units in {n_chunks} chunk(s)...")
 
-    for start in range(0, total, chunk_size):
-        chunk = pending[start : start + chunk_size]
+    for start in range(0, total, batch_size):
+        chunk = pending[start : start + batch_size]
         if verbose:
-            print(f"  chunk {start // chunk_size + 1}/{n_chunks}: {len(chunk)} units")
+            print(f"  chunk {start // batch_size + 1}/{n_chunks}: {len(chunk)} units")
         samples = [
             {
                 "id": str(r["sample_id"]),
@@ -1189,8 +1147,8 @@ def generate_jailbreaks(
             for r in chunk
         ]
         results = batch_apply_combinations(
-            samples, gen_model=model, benign_data=benign_data, router=router,
-            verbose=verbose,
+            samples, gen_model=model, translate_model=translation_model,
+            benign_data=benign_data, router=router, verbose=verbose,
         )
 
         rows = []
@@ -1232,7 +1190,7 @@ def generate_jailbreaks(
 
 
 def build_dataset(
-    dataset_dir: str | Path | None = None,
+    data_dir: str | Path | None = None,
     jailbreak_path: str | Path | None = None,
     output_path: str | Path | None = None,
     inputs_path: str | Path | None = None,
@@ -1257,8 +1215,11 @@ def build_dataset(
     explicit merged CSV, then the per-category scan.
 
     Args:
-        dataset_dir: Root dataset directory (for inputs). Defaults to
-            ``redact/Datasets/``.
+        data_dir: Working root. Inputs are discovered under
+            ``{data_dir}/Datasets/``, the jailbreaks CSV defaults to
+            ``{data_dir}/Datasets/jailbreaks.csv``, and the merged CSV to
+            ``{data_dir}/Datasets/complete_dataset.csv``. Defaults to the project
+            root (``get_output_dir()``).
         jailbreak_path: Path to the jailbreaks CSV. Defaults to
             ``Datasets/jailbreaks.csv``.
         output_path: Where to save merged CSV. Defaults to
@@ -1277,9 +1238,9 @@ def build_dataset(
     Returns:
         Complete merged DataFrame.
     """
-    ds_dir = Path(dataset_dir) if dataset_dir else _default_dataset_dir()
-    jb_path = Path(jailbreak_path) if jailbreak_path else _default_jailbreak_path()
-    out_path = Path(output_path) if output_path else (ds_dir / "complete_dataset.csv")
+    ds_dir = paths.datasets(data_dir)
+    jb_path = Path(jailbreak_path) if jailbreak_path else paths.jailbreaks_csv(data_dir)
+    out_path = Path(output_path) if output_path else (ds_dir / paths.COMPLETE_DATASET_FILENAME)
 
     parts = []
 

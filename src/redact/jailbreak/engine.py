@@ -71,6 +71,7 @@ def batch_apply_combinations(
     samples: list[dict],
     *,
     gen_model: str,
+    translate_model: str | None = None,
     benign_data: dict | None = None,
     router=None,
     verbose: bool = False,
@@ -118,7 +119,8 @@ def batch_apply_combinations(
     for i, s in enumerate(samples):
         gens[i] = make_combination_gen(
             s["combination"], s["prompt"],
-            gen_model=gen_model, benign_data=benign_data,
+            gen_model=gen_model, translate_model=translate_model,
+            benign_data=benign_data,
         )
         advance(i, None)
 

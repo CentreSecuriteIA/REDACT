@@ -226,9 +226,9 @@ class ConstitutionPipeline:
         self.rate_limiter = rate_limiter
 
         if output_dir is None:
-            from redact import get_output_dir
+            from redact import paths
 
-            output_dir = get_output_dir() / "Data_cache" / "constitution"
+            output_dir = paths.constitution_dir()
         self.output_dir = Path(output_dir)
 
     def _format_category_info(

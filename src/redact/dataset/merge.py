@@ -12,13 +12,14 @@ from pathlib import Path
 
 import pandas as pd
 
+from redact import paths
 from .io import read_category_csv, _default_dataset_dir
 
 
 def merge_category_csvs(
     categories: list[str],
     dataset_dir: str | Path | None = None,
-    filename: str = "samples.csv",
+    filename: str = paths.SAMPLES_FILENAME,
     accepted_only: bool = True,
 ) -> pd.DataFrame:
     """Merge multiple category CSVs into a single DataFrame.
@@ -60,7 +61,7 @@ def discover_categories(dataset_dir: str | Path | None = None) -> list[str]:
         return []
     return sorted(
         d.name for d in base.iterdir()
-        if d.is_dir() and (d / "samples.csv").exists()
+        if d.is_dir() and (d / paths.SAMPLES_FILENAME).exists()
     )
 
 

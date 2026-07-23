@@ -179,7 +179,20 @@ class ConstitutionInputPipeline:
         check_backend = check_backend or gen_backend
         check_model = check_model or gen_model
 
-        # Compose with InputPipeline for generate+extract+check
+        # Resolve default directories first (single-source path module) so the
+        # composed InputPipeline is created pointing at the right output dir.
+        from redact import paths
+        if constitution_dir is None:
+            constitution_dir = paths.constitution_dir()
+        self.constitution_dir = Path(constitution_dir)
+
+        if output_dir is None:
+            output_dir = paths.constitution_inputs_dir()
+        self.output_dir = Path(output_dir)
+
+        # Compose with InputPipeline for generate+extract+check. Pass the
+        # resolved output dir up front so per-category CSVs land there instead of
+        # defaulting to Datasets/ (was previously patched via a runtime mutation).
         self.input_pipeline = InputPipeline(
             gen_backend=gen_backend,
             gen_model=gen_model,
@@ -187,18 +200,8 @@ class ConstitutionInputPipeline:
             check_model=check_model,
             rate_limiter=rate_limiter,
             extraction_style=extraction_style,
+            dataset_dir=self.output_dir,
         )
-
-        # Resolve default directories
-        if constitution_dir is None:
-            from redact import get_output_dir
-            constitution_dir = get_output_dir() / "Data_cache" / "constitution"
-        self.constitution_dir = Path(constitution_dir)
-
-        if output_dir is None:
-            from redact import get_output_dir
-            output_dir = get_output_dir() / "Datasets" / "constitution_inputs"
-        self.output_dir = Path(output_dir)
 
     # -----------------------------------------------------------------
     # Constitution loading
@@ -433,8 +436,8 @@ class ConstitutionInputPipeline:
                 print("\n  No constitution entries match filters; nothing to do.")
             return ConstitutionInputResult()
 
-        # Route saving to this pipeline's configured output_dir.
-        self.input_pipeline.dataset_dir = self.output_dir
+        # (Saving already routes to self.output_dir — the inner InputPipeline was
+        # constructed with dataset_dir=self.output_dir in __init__.)
 
         if verbose:
             print(f"\n{'='*60}")

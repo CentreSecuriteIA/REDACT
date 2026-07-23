@@ -18,7 +18,9 @@ REDACT/
 │   └── redact/                      # Main package
 │       ├── __init__.py              # Config, seed, get_output_dir(), subpackage imports
 │       ├── types.py                 # Shared dependency-free types (EntryType) — avoids circular imports
-│       ├── pipelines.py             # High-level pipeline functions
+│       ├── paths.py                 # Single source of truth for on-disk layout (data_dir → all default paths)
+│       ├── pipelines.py             # High-level pipeline functions (one data_dir root, models by role)
+│       ├── runconfig.py             # Config-driven runs: recipe + input-params + per-stage run manifests
 │       ├── exceptions.py            # Custom exception hierarchy
 │       ├── py.typed                 # PEP 561 type marker
 │       │
@@ -113,7 +115,9 @@ REDACT/
 │           └── constitution/        # Constitution generation prompts (4 severity types)
 │
 ├── tests/                           # Test suite
-├── full_pipeline.ipynb              # Complete pipeline walkthrough
+├── notebooks/                       # Walkthroughs: eval_pipeline, training_pipeline, content_moderation, jailbreak_augmentation
+├── scripts/                         # run.py (recipe → pipeline), inspect_run.py (summarize manifests)
+├── src/redact/configs/runs/         # Example recipe + input-params JSON
 ├── Datasets/                        # Generated output (gitignored)
 ├── Data_cache/                      # Intermediate cache (gitignored)
 ├── pyproject.toml                   # Build config and dependencies
@@ -250,32 +254,48 @@ pip install -e ".[vllm]"   # with vLLM support
 
 ## Usage
 
+Every public function takes one **`data_dir`** working root (all `Datasets/`/`Data_cache/` output
+derives from it via `paths.py`), a **role-defaulted `model`** (pass `None` → the registry role;
+constitution → Opus, generation → uncensored), and a single **`resume`** flag (default `True`).
+The public `backend` param was removed — backends auto-resolve from the model name.
+
 ```python
 from redact import (
     generate_constitution, generate_inputs, generate_outputs,
     generate_jailbreaks, build_dataset, default_escalation_schedule,
 )
 
-# Optional: constitution-seeded inputs (Claude Opus → entries → prompts)
-constitution = generate_constitution(num_categories=10, num_taxonomy_categories=3)
-inputs = generate_inputs(constitution_df=constitution, samples_per_entry=3)
+DATA_DIR = "./runs/training"
 
-# Or standalone meta-prompt inputs
-inputs = generate_inputs(samples_per_category=15, num_categories=3)
+# Training path: constitution-seeded inputs (Claude Opus → entries → prompts).
+# Constitution-seeded inputs auto-route to Datasets/constitution_inputs/.
+constitution = generate_constitution(data_dir=DATA_DIR, num_taxonomy_categories=3)
+inputs = generate_inputs(data_dir=DATA_DIR, constitution_df=constitution, samples_per_entry=3)
 
-jailbreaks = generate_jailbreaks(inputs=inputs)   # plan → batched execute, resumable
+# Eval path: standalone meta-prompt inputs.
+inputs = generate_inputs(data_dir=DATA_DIR, samples_per_category=15, num_categories=3)
+
+jailbreaks = generate_jailbreaks(data_dir=DATA_DIR, inputs=inputs)   # plan → batched execute
 
 # Or escalate: each sample augmented 4× (1 technique → 2 → higher complexity → even higher)
 jailbreaks = generate_jailbreaks(
-    inputs=inputs,
+    data_dir=DATA_DIR, inputs=inputs,
+    translation_model=None,                               # None → translation role (DeepSeek)
     settings_per_iteration=default_escalation_schedule(),  # or a custom list[dict]
 )
 
-outputs = generate_outputs(inputs=inputs)         # model responses + output checker
-dataset = build_dataset()                         # merge inputs + jailbreaks + outputs
+outputs = generate_outputs(data_dir=DATA_DIR, inputs=inputs)  # model responses + output checker
+dataset = build_dataset(data_dir=DATA_DIR)                    # merge inputs + jailbreaks + outputs
 ```
 
-Backends are auto-selected from the model name (`get_backend`), and all model-name strings resolve through the registry in `llms/model_config.py`. Pass `backend=` explicitly only for custom endpoints or a manually-constructed `VLLMBackend`.
+**Config-driven** — a whole run from a recipe (`dataset_type` `"eval"`/`"training"`) + input-params:
+
+```python
+from redact import run_pipeline
+summary = run_pipeline("src/redact/configs/runs/eval_example.json")   # or scripts/run.py
+```
+
+Backends are auto-selected from the model name (`get_backend`), and all model-name strings resolve through the registry in `llms/model_config.py`. Single-file `*_path` overrides (`output_path`, `jailbreak_path`, `benign_path`, `inputs_path`, `responses_path`, `manifest_path`) remain for power users; `taxonomy_dir`/`prompt_dir` relocate config/prompt inputs. For a genuinely custom endpoint, `register_model()` it (the backend resolves from the name) or construct a `VLLMBackend` and use it via the lower-level pipeline classes.
 
 ---
 

@@ -22,7 +22,7 @@ class TestCreateTaxonomy:
             "test_tax",
             categories={"CatA": "Description A", "CatB": {"description": "B"}},
             description="Test taxonomy",
-            config_dir=tmp_path,
+            taxonomy_dir=tmp_path,
         )
         path = tmp_path / "test_tax.json"
         assert path.exists()
@@ -36,7 +36,7 @@ class TestCreateTaxonomy:
         tax = create_taxonomy(
             "norm_test",
             categories={"Cat": "just a string"},
-            config_dir=tmp_path,
+            taxonomy_dir=tmp_path,
         )
         assert tax["categories"]["Cat"] == {"description": "just a string"}
 
@@ -46,13 +46,13 @@ class TestCreateTaxonomy:
             categories={"A": "desc"},
             aliases={"B": "A"},
             groups={"g1": ["A"]},
-            config_dir=tmp_path,
+            taxonomy_dir=tmp_path,
         )
         assert tax["aliases"] == {"B": "A"}
         assert tax["groups"] == {"g1": ["A"]}
 
     def test_returns_dict(self, tmp_path):
-        result = create_taxonomy("ret_test", {"X": "Y"}, config_dir=tmp_path)
+        result = create_taxonomy("ret_test", {"X": "Y"}, taxonomy_dir=tmp_path)
         assert isinstance(result, dict)
         assert result["name"] == "ret_test"
 

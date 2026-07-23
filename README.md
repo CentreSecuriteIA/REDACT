@@ -31,18 +31,35 @@ Requires Python 3.11+. See [pyproject.toml](pyproject.toml) for full dependency 
 
 ## Quick Start
 
-**High-level API** — the common path; backends are auto-selected from model names:
+**High-level API** — the common path. Every function takes one `data_dir` working root (all
+`Datasets/` and `Data_cache/` output lands under it); models default to their registry **role**
+(pass `None`), and backends are auto-selected from the model name. A single `resume` flag
+(default `True`) makes every stage restartable.
 
 ```python
 from redact import generate_inputs, generate_jailbreaks, generate_outputs, build_dataset
 
-inputs = generate_inputs(samples_per_category=15, num_categories=3)
-jailbreaks = generate_jailbreaks(inputs=inputs)   # plan → batched execute, resumable
-outputs = generate_outputs(inputs=inputs)         # model responses + output checker, resumable
-dataset = build_dataset()                         # merge everything on disk
+DATA_DIR = "./runs/eval"                           # one root for the whole run
+inputs = generate_inputs(data_dir=DATA_DIR, samples_per_category=15, num_categories=3)
+jailbreaks = generate_jailbreaks(data_dir=DATA_DIR, inputs=inputs)   # plan → batched execute
+outputs = generate_outputs(data_dir=DATA_DIR, inputs=inputs)         # responses + output checker
+dataset = build_dataset(data_dir=DATA_DIR)                           # merge everything on disk
 ```
 
 `generate_jailbreaks(inputs, settings_per_iteration=default_escalation_schedule())` instead runs a multi-round escalation — each sample augmented 4× from a single technique up to high-complexity combinations (see the [Jailbreak section](#jailbreak--technique-library)).
+
+**Config-driven runs** — define a whole run in a **recipe** JSON (`dataset_type` `"eval"` = no
+constitution / `"training"` = with) + a separate **input-params** file, and drive it with one call.
+Each stage writes a `{stage}.run.json` manifest under `{data_dir}/Datasets/`.
+
+```python
+from redact import run_pipeline
+
+summary = run_pipeline("src/redact/configs/runs/eval_example.json")
+# or from the CLI:  python scripts/run.py src/redact/configs/runs/eval_example.json --data-dir ./runs/eval
+```
+
+See `notebooks/eval_pipeline.ipynb` and `notebooks/training_pipeline.ipynb` for the full walkthroughs.
 
 **Lower-level building blocks:**
 
@@ -234,10 +251,11 @@ backend = AnthropicBackend.from_env("ANTHROPIC_API_KEY")
 **Local inference via vLLM** — use the pre-registered `venice-uncensored-vllm` model or any HuggingFace model ID:
 
 ```python
-from redact import generate_inputs_from_constitution
+from redact import generate_constitution, generate_inputs
 
-# Use the registered local model — backend is auto-initialized
-generate_inputs_from_constitution(model="venice-uncensored-vllm", ...)
+# Use the registered local model — backend is auto-initialized from the name
+constitution = generate_constitution(model="venice-uncensored-vllm")
+generate_inputs(constitution_df=constitution, model="venice-uncensored-vllm")
 ```
 
 When `venice-uncensored-vllm` is requested, `get_backend()` automatically creates a `VLLMBackend` for `dphn/Dolphin-Mistral-24B-Venice-Edition`. On first use vLLM downloads the model weights from HuggingFace and caches them at the path set by `HF_HOME` in your `.env`. Subsequent runs load directly from cache — no re-download.
@@ -246,13 +264,14 @@ This model uses Mistral `[INST]/[SYSTEM_PROMPT]` prompt format (not ChatML). The
 
 Both generation and checker paths dispatch through a `BatchCaller` (never the raw backend), so every batch is rate-limited and uses the right execution mode for its backend: one vLLM engine pass for native backends, a thread pool sized by the registry's `recommended_max_workers` for parallel-safe APIs, or sequential for series-only backends (Anthropic). The `batch_size` parameter (default 32) controls how many entries are grouped per pass.
 
-For a custom model, instantiate `VLLMBackend` directly and pass it to any pipeline:
+For a custom model, register it (or an existing HF id) so the backend auto-resolves from the name:
 
 ```python
-from redact.llms import VLLMBackend
+from redact.llms import register_model
 
-backend = VLLMBackend(model="mistralai/Mistral-7B-v0.3")
-generate_inputs(model="my-model", backend=backend)
+register_model("my-model", rpm=999, backend_type="vllm",
+               hf_model_id="mistralai/Mistral-7B-v0.3", role="uncensored_local")
+generate_inputs(model="my-model")   # backend auto-selected from the registry
 ```
 
 **Registering a new model:**
@@ -310,12 +329,12 @@ inputs = generate_inputs(
     style="long",                   # "long" (2-5 sentences) or "short" (5-20 words)
     samples_per_entry=3,
     model="venice-uncensored-vllm",
-    fresh=False,                    # False = resume (skip already-processed entries);
-                                    # True = clear per-category CSVs and regenerate
+    resume=True,                    # True = resume (skip already-processed entries);
+                                    # False = clear per-category CSVs and regenerate
 )
 ```
 
-Both `generate_constitution()` and `generate_inputs(constitution_df=...)` are **resumable by default**: re-running with `fresh=False` (the default) skips work already saved to disk, so an interrupted run picks up where it left off. Set `fresh=True` to clear previous output and regenerate from scratch.
+Both `generate_constitution()` and `generate_inputs(constitution_df=...)` are **resumable by default**: re-running with `resume=True` (the default) skips work already saved to disk, so an interrupted run picks up where it left off. Set `resume=False` to clear previous output and regenerate from scratch.
 
 **Entry-type-aware checker** — `build_quality_checker(category, entry_type, subcategory)` in `content_moderation/checker.py` loads the unified template `prompts/input/quality_check/template.json` and injects all three fields, so benign and dual-use samples are evaluated correctly rather than rejected for "not belonging to the harm category." The same checker serves standalone content-moderation, constitution-seeded inputs, and (via `build_output_quality_checker`) output checking. `_build_constitution_checker()` is a thin backward-compatible alias.
 

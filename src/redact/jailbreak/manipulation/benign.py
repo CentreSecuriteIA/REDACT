@@ -14,7 +14,7 @@ from redact.llms.calls import generate_sample
 from redact.llms.wrappers import RateLimiter
 from redact.llms.extraction import extract_structured_qa
 
-from redact import get_output_dir
+from redact import paths
 from redact.llms.prompts import load_prompt, build_messages
 
 _PACKAGE_DIR = Path(__file__).resolve().parent.parent.parent  # src/redact/
@@ -210,7 +210,7 @@ def process_category(
 # ---------------------------------------------------------------------------
 
 def _default_benign_path() -> Path:
-    return get_output_dir() / "Data_cache" / "benign" / "benign_samples.csv"
+    return paths.benign_csv()
 
 
 def get_or_generate_benign_data(

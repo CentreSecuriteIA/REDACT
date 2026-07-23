@@ -386,3 +386,220 @@ Steps 1, 2, and 4 have no inter-dependencies and can be done in parallel.
 - **Step 5**: Generating jailbreaks with `sampling_probs={"hacking": 0.9}` shifts technique distribution measurably
 - **Step 6**: `load_pipeline_config("full_pipeline")` parses without error
 - **Step 7**: `from redact import generate_jailbreaks, run_pipeline_from_config` both resolve; `run_pipeline_from_config("full_pipeline")` dispatches correctly
+
+---
+
+# Theme 1 + 2 — Interface Uniformity & Folder-as-kwargs (implementation log)
+
+Follow-on restructuring after the Phase 0/Steps 1–7 work above. Goal: make the public
+interface uniform and fold folder discovery into a single `data_dir` root. Design docs:
+[`.claude/theme1_2_unified_interface_plan.md`](.claude/theme1_2_unified_interface_plan.md),
+[`.claude/theme1_interface_comparison.md`](.claude/theme1_interface_comparison.md).
+
+**Locked decisions:** single `data_dir` root · models by role (drop public `backend`) ·
+single `resume` (drop `fresh`) · drop dead `base_url` · unified `generate_inputs` · split config
+(recipe + input-params) with per-stage run-manifests · eval = no constitution, training = with
+constitution · multi-round jailbreak escalation preserved.
+
+## Stage 1a — single-source path module (mechanical, no behavior change)
+
+**New:** `src/redact/paths.py` — one place that derives every default file/dir from a working
+root (`get_output_dir()` unless a root is passed). Layout constants (`DATASETS_DIRNAME`,
+`DATA_CACHE_DIRNAME`, `SAMPLES_FILENAME`, …) + per-artifact resolvers: `datasets()`,
+`data_cache()`, `category_csv()`, `jailbreaks_csv()`, `output_responses_csv()`,
+`complete_dataset_csv()`, `benign_csv()`, `constitution_dir()`, `constitution_inputs_dir()`,
+`taxonomy_dir()`.
+
+**Repointed to `paths` (killed duplicated computations):**
+- `dataset/io.py` — `_default_dataset_dir()` → `paths.datasets()`; `_resolve_path()` →
+  `paths.category_csv()`; `samples.csv` literals → `paths.SAMPLES_FILENAME`.
+- `dataset/merge.py` — `samples.csv` sentinels → `paths.SAMPLES_FILENAME`.
+- `pipelines.py` — `_default_dataset_dir` / `_default_jailbreak_path` / `_default_benign_path`
+  delegate to `paths.*`; **deleted dead `_default_scenario_dir`**; `_DEFAULT_TAXONOMY_DIR` →
+  `paths.taxonomy_dir()`; `output_responses.csv` / `complete_dataset.csv` / inline per-category
+  `samples.csv` → `paths.*`.
+- `jailbreak/manipulation/benign.py` — `_default_benign_path()` → `paths.benign_csv()`.
+- `constitution/generation.py` + `constitution/input_generation.py` — inline
+  `Data_cache/constitution` and `Datasets/constitution_inputs` → `paths.constitution_dir()` /
+  `paths.constitution_inputs_dir()`.
+
+**Eliminated:** two `_default_dataset_dir`, two `_default_benign_path`, two
+`Data_cache/constitution` computations, and the dead `_default_scenario_dir`.
+
+**Behavior:** unchanged — all names delegate to identical results; public signatures untouched
+(that's Stage 1b). Circular-import safe (`paths` imports only `get_output_dir`, same pattern
+`io.py` already used).
+
+**Verification:** import smoke-test resolves all paths; full suite **548 passed, 9 skipped**.
+
+## Stage 1b — `data_dir` root on the public API (additive)
+
+Introduced a single working root, `data_dir`, on every public generation/build function.
+All default artifact paths now derive from it via `paths.*(data_dir)`. Kept the existing
+`dataset_dir` / `output_dir` / `output_path` params working as **explicit overrides** (they win
+over the `data_dir`-derived default); Stage 3 removes/renames the now-redundant ones. When
+`data_dir` is `None`, every path is byte-identical to before — fully backward compatible.
+
+**Signatures (added params):**
+- `generate_constitution(…, data_dir, output_dir, taxonomy_dir, …)` — const CSVs →
+  `paths.constitution_dir(data_dir)` unless `output_dir` given; taxonomy loaded via `taxonomy_dir`.
+- `generate_inputs(…, data_dir, dataset_dir, taxonomy_dir, prompt_dir, …)` — **standalone** inputs →
+  `paths.datasets(data_dir)`; **constitution-seeded** inputs **auto-route** to
+  `paths.constitution_inputs_dir(data_dir)` (no more manually passing `dataset_dir=CONSTITUTION_INPUTS_DIR`).
+- `generate_outputs(…, data_dir, dataset_dir, output_path, …)` — reads inputs from
+  `paths.datasets(data_dir)`; responses CSV → `paths.output_responses_csv(data_dir)`.
+- `generate_jailbreaks(…, data_dir, output_path, benign_path, …)` — **new** `data_dir` +
+  `benign_path`; now reads inputs from `paths.datasets(data_dir)` (previously an un-redirectable
+  `merge_all()`); jailbreaks CSV → `paths.jailbreaks_csv(data_dir)`; benign cache →
+  `paths.benign_csv(data_dir)`.
+- `build_dataset(…, data_dir, dataset_dir, …)` — inputs/jailbreaks/merged all derive from `data_dir`.
+
+**Threaded:** `taxonomy_dir` → `load_taxonomy(config_dir=…)`; `prompt_dir` → the top-level
+`load_prompt(...)` calls in `generate_inputs`. (Checker-prompt `prompt_dir` threading is a
+documented follow-up — checker prompts still use the bundled default.)
+
+**Bug fixed:** `ConstitutionInputPipeline.__init__` now resolves its dirs first and constructs the
+inner `InputPipeline(dataset_dir=self.output_dir)` up front, so per-category CSVs land in the
+configured dir instead of defaulting to `Datasets/`. Removed the run-time
+`self.input_pipeline.dataset_dir = self.output_dir` patch.
+
+**Verification:** `paths.*(root)` relocate correctly; `ConstitutionInputPipeline(output_dir=X)` →
+inner `dataset_dir == X`; full suite **548 passed, 9 skipped**.
+
+## Stage 2 — models by role
+
+Every generation function now selects its model **by role**, resolves the backend from the model
+name, and no longer exposes a `backend` param on the public API.
+
+- **Dropped public `backend`** from `generate_inputs` / `generate_outputs` / `generate_jailbreaks` /
+  `generate_constitution`. Backend is always `get_backend(model)` (internal `_get_backend` helper
+  retained for tests + advanced use). No notebook passed `backend=`; one README example updated in
+  Stage 6.
+- **Role-default `model`** — signatures changed `model: str = "<literal>"` → `model: str | None =
+  None`; each body resolves `model or default_model_for_role(<role>)`: inputs/outputs/jailbreaks →
+  `uncensored_gen` (venice-uncensored), constitution → `constitution_gen` (claude-opus-4-6). The
+  effective default is unchanged; it's just role-driven now, so re-registering a role's model
+  changes every default at once.
+- **`check_model`** unchanged — plain model param, `None` falls back to `model`.
+- **`translation_model`** added to `generate_jailbreaks`. Threaded through
+  `batch_apply_combinations(translate_model=…)` → `make_combination_gen` → the translation technique
+  (which already accepted `translate_model`, defaulting to the `translation` role = DeepSeek).
+  Translation still routes to its own model independently of `model`; `include_translation=False`
+  still drops the family entirely.
+
+**Verification:** role lookups resolve as expected; `backend` gone + `model` defaults `None` on all
+four; a driven translation generator emits its `LLMRequest` against the passed `translation_model`;
+full suite **548 passed, 9 skipped**.
+
+## Stage 3 — resume-only + cleanup
+
+Collapsed the redundant/dead params so the public surface matches the design.
+
+- **Single `resume`** everywhere; deleted `fresh`. `resume=False` now means "clear + restart":
+  `generate_inputs` (standalone clears category CSVs / constitution mode passes `fresh=not resume`),
+  `generate_outputs` (clears CSV + ledger). `generate_jailbreaks` / `generate_constitution` already
+  had `resume`.
+- **Deleted dead `base_url`** from `generate_inputs` / `generate_outputs` / `generate_jailbreaks`
+  (the real endpoint lives in `venice_backend.py`; the params were never wired).
+- **`chunk_size` → `batch_size`** in `generate_jailbreaks` (one batch-size name across the library).
+- **Deleted deprecated `generate_inputs_from_constitution`** + its `__init__` export
+  (`generate_inputs(constitution_df=…)` is the path). `ConstitutionInputPipeline` kept (still tested).
+- **Removed redundant directory params** now covered by `data_dir`: `dataset_dir` from
+  `generate_inputs` / `generate_outputs` / `build_dataset`, `output_dir` from `generate_constitution`.
+  Single-file `*_path` overrides (`output_path`, `inputs_path`, `responses_path`, `jailbreak_path`,
+  `benign_path`, `manifest_path`) are retained as power-user knobs.
+- **`create_taxonomy`**: `config_dir` → `taxonomy_dir`, added `verbose` (print now gated).
+
+**Tests touched:** `tests/test_pipelines.py` — `create_taxonomy(config_dir=…)` → `taxonomy_dir=…`
+(4 sites). Everything else already used kept params (io/merge/class `dataset_dir`/`output_dir`,
+`generate_jailbreaks(output_path=…)`).
+
+**Verification:** signature assertions confirm the removed params are gone and the canonical ones
+present; deprecated fn no longer importable; full suite **548 passed, 9 skipped**.
+
+## Stage 4 — config layer
+
+Config-driven runs: a run is now a **recipe** + **input-params** JSON, and every stage leaves a
+manifest the next stage can read.
+
+**New `src/redact/runconfig.py`:**
+- `write_manifest` / `read_manifest` / `manifest_path` — per-stage `{stage}.run.json` under
+  `{data_dir}/Datasets/`, recording resolved params, models, row counts, spec version, timestamp.
+- `load_recipe` — parse + validate (dataset_type ∈ {eval, training}; known stages; eval can't
+  include the `constitution` stage); records the recipe's `_base_dir` for relative `params_file`.
+- `load_params` — load the input-params file (resolved relative to the recipe dir).
+- `run_pipeline(recipe, params=None)` — the driver. Maps recipe + params → the `generate_*`
+  kwargs, runs the named stages in order, threads the constitution DataFrame into `generate_inputs`
+  for `training` runs, and writes a manifest per stage. Returns a summary dict.
+- Exported from `redact`: `run_pipeline`, `load_recipe`, `load_params`, `write_manifest`,
+  `read_manifest`.
+
+**Config split (per the locked decision):** `augmentations` (jailbreak `include_*`/`pure_only`)
+live in the **recipe** (structural); numeric tunables live in the **input-params** file. `eval` vs
+`training` = presence of the `constitution` stage / `dataset_type`.
+
+**New files:** `configs/runs/{eval_example,training_example,params_example}.json`;
+`scripts/run.py` (recipe → pipeline, `--params`/`--data-dir`/`--quiet`); `scripts/inspect_run.py`
+(summarize a run's manifests).
+
+**Tests:** `tests/test_runconfig.py` (9) — manifest round-trip, recipe/params validation, and an
+**offline** `run_pipeline` over jailbreaks+build (pure_only, no network) asserting counts +
+manifests + cross-stage chaining; plus a training-without-constitution-stage error. Also verified
+via the CLI end-to-end (`run.py` → manifests → `inspect_run.py`).
+
+**Verification:** full suite **557 passed, 9 skipped**; packaged example recipe + `params_file`
+resolve; CLI run produced jailbreaks (3 rows) + build (6 rows) with both manifests.
+
+## Stage 5 — notebooks reorg
+
+All notebooks moved into **`notebooks/`** and rewritten on the new interface (single `data_dir`,
+role-defaulted models, `resume`, no `base_url`/`chunk_size`/`dataset_dir`). Framed around the
+eval-vs-training split:
+
+- **`notebooks/eval_pipeline.ipynb`** — no constitution: standalone inputs → outputs → jailbreaks →
+  build eval dataset. Ends with a one-shot `run_pipeline({...eval...})` cell.
+- **`notebooks/training_pipeline.ipynb`** — with constitution: constitution → seeded inputs →
+  outputs → jailbreaks → build training dataset. Ends with a one-shot `run_pipeline({...training...})`.
+- **`notebooks/content_moderation.ipynb`** — per-stage inputs+outputs, plus a `create_taxonomy`
+  (`taxonomy_dir`) + custom-taxonomy demo.
+- **`notebooks/jailbreak_augmentation.ipynb`** — per-stage jailbreaks (pure-only toggle, escalation
+  schedule) + build.
+
+Old root notebooks (`full_pipeline`, `constitution_generation`, `content_moderation`,
+`jailbreak_augmentation`) removed. Verified: all four parse as valid nbformat-4; no notebook
+references any removed param.
+
+## Stage 6 — tests + docs
+
+- **Tests** were kept green stage-by-stage (config-driven changes updated `tests/test_pipelines.py`
+  in Stage 3; `tests/test_runconfig.py` added in Stage 4). Final: **557 passed, 9 skipped**.
+- **README.md** — Quick Start rewritten around `data_dir` + role-defaulted models + `run_pipeline`;
+  replaced the removed `generate_inputs_from_constitution` example and the `generate_inputs(backend=…)`
+  example (now `register_model(...)` → auto-resolve); `fresh` → `resume` in the constitution section.
+- **CLAUDE.md** — architecture tree gains `paths.py`, `runconfig.py`, `notebooks/`, `scripts/`,
+  `configs/runs/`; Usage section rewritten to the new surface (one `data_dir`, models by role, no
+  public `backend`, `run_pipeline`, retained `*_path`/`taxonomy_dir`/`prompt_dir` overrides).
+- Packaging: hatchling includes `configs/runs/*.json` as package data by default (same as existing
+  `configs/*.json`); no `pyproject.toml` change needed.
+
+---
+
+## Refactor complete — new public interface at a glance
+
+| Concept | Before | After |
+|---|---|---|
+| Output location | `dataset_dir` / `output_dir` / `output_path` (5 names) | one **`data_dir`** root + optional single-file `*_path` overrides |
+| Path resolution | duplicated `_default_*` in 5 modules | single-source **`redact/paths.py`** |
+| Model / backend | `model` literal defaults + public `backend` | **`model=None` → role default**; backend auto-resolved (no public `backend`) |
+| Translation model | implicit only | explicit **`translation_model`** on `generate_jailbreaks` |
+| Restart idiom | `fresh` / `resume` / both / neither | single **`resume`** everywhere |
+| Batch size | `batch_size` vs `chunk_size` | **`batch_size`** everywhere |
+| Dead params | `base_url` (×3) | removed |
+| Deprecated fn | `generate_inputs_from_constitution` | removed (use `generate_inputs(constitution_df=…)`) |
+| Config / orchestration | hardcoded in notebooks | **recipe + input-params JSON + per-stage manifests**; `run_pipeline` / `scripts/run.py` |
+| Notebooks | 4 at repo root, stale API | `notebooks/` — eval (no constitution) vs training (with) + 2 per-stage |
+| Constitution inputs | manual `dataset_dir=…` | auto-route to `Datasets/constitution_inputs/` (+ propagation bug fixed) |
+
+Deferred (future work): Theme 3 (paraphrase as extra rows + indicator, inputs & outputs,
+constitution vs eval) and Theme 4 (multistep jailbreak outputs). Also a follow-up: thread
+`prompt_dir` into checker prompts (currently only the top-level generation prompts).
