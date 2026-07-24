@@ -622,14 +622,19 @@ round-robin over a new `paraphraser` role, a separate meaning-preservation check
   (was asserting pass-through) → asserts real model output + call shape.
 - `model_config.py`: new **`paraphraser`** role.
 
-**Problem/decision logged:** the registry couples the dict key to the model name sent to the
-API, and roles are one-per-model, so there's no first-class "role alias to an existing model."
-Per the instruction *not* to repurpose an existing model's role, I added a **dedicated**
-`"venice-paraphraser"` entry whose `name="venice-uncensored"` (only `name`+`role` are
-load-bearing — role lookup returns `name`). So the paraphraser role resolves to the real
-venice-uncensored model as a **stand-in until the external defingerprinting model is
-registered**. GLM stays `uncensored_gen`. Verified: `paraphraser → venice-uncensored`, other
-roles unchanged, full suite **558 passed, 9 skipped**.
+**Decision logged:** added a **dedicated `"venice-paraphraser"` model with its own identity**
+(not an alias / not repurposing a gen model). As a stand-in until the external defingerprinting
+model is registered, it **loads the same HF weights** as `venice-uncensored-vllm`
+(`hf_model_id="dphn/Dolphin-Mistral-24B-Venice-Edition"`, `backend_type="vllm"`) — its own model
+that happens to load the same weights. Swap `hf_model_id` / `register_model(role="paraphraser")`
+for the real one when it lands. GLM stays `uncensored_gen`. Because it's a distinct model, the
+paraphrase checker default (`uncensored_gen` = venice-uncensored) is now genuinely independent
+of the paraphraser. Verified: `paraphraser → venice-paraphraser` (vLLM, Dolphin weights), full
+suite **567 passed, 9 skipped**.
+
+**Future note (no code, deferred):** optionally prepend a short random token (e.g. `osdjoi27 `)
+to the text before paraphrasing to push each attempt in a different direction — also reusable in
+finetuning for in-context variety. Not implemented.
 
 ## T3.1 — meaning-preservation checker (done)
 
@@ -656,10 +661,19 @@ paraphrases_per_sample, target, check, resume, batch_size, seed, …)`:
   check-drop, accepted-only outputs — all offline via monkeypatch).
 
 **Problem/decision:** dropped (deduped/rejected) `(base_id,k)` units aren't written, so a resume
-re-attempts them — acceptable for now (idempotent output), noted for a possible "attempted" ledger
-later. Also, under the placeholder the checker resolves to the same model as the paraphraser
-(both `venice-uncensored`) — a warning is emitted; set an explicit `check_model` (or register a
-distinct paraphraser) to make validation independent.
+re-attempts them (see explanation below) — acceptable for now (idempotent output, and a
+stochastic paraphraser gets another chance), noted for a possible "attempted" ledger later. The
+`check_model==paraphraser` guard-warning remains for safety, but with the dedicated
+`venice-paraphraser` model it no longer fires by default (checker = venice-uncensored ≠ paraphraser).
+
+**"Dropped units re-attempt on resume" — what it means.** Planning lays out K units per base
+sample, keyed `(base_id, k)`. Resume skips any `(base_id, k)` already **present in the output
+CSV**. But a unit that was *dropped* (its paraphrase equalled the original / duplicated another,
+or the checker rejected it) is never written — so on a re-run it isn't seen as done and is
+attempted again. Net effect: successful units are never redone; only the units that produced
+nothing are retried (extra LLM calls, but a chance to succeed since the paraphraser samples at
+temperature > 0). The alternative (an "attempted" ledger that records drops so they're skipped)
+is the noted future improvement.
 
 ## T3.4 — `build_dataset` paraphrase merge (done)
 

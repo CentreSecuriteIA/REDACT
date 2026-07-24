@@ -47,7 +47,7 @@ def test_paraphrase_inputs_dedup_and_manifest(tmp_path, patched):
     # 2 inputs x K=2 = 4 units, but PARA::<text> is identical across k -> dedup to 1/input.
     assert set(df["sample"]) == {"PARA::alpha prompt", "PARA::beta prompt"}
     assert bool((df["accepted"] == True).all())  # noqa: E712
-    assert set(df["paraphrase_model"]) == {"venice-uncensored"}
+    assert set(df["paraphrase_model"]) == {"venice-paraphraser"}
     out = paths.paraphrases_inputs_csv(tmp_path)
     assert out.exists()
     assert out.with_name("paraphrases_inputs.manifest.jsonl").exists()

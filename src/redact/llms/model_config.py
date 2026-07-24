@@ -125,26 +125,22 @@ MODEL_REGISTRY: dict[str, ModelConfig] = {
         recommended_max_workers=1,
         role="constitution_gen",
     ),
-    # Paraphraser role — a DEDICATED entry (does NOT repurpose a generation model).
-    # The real defingerprinting model is trained separately and unavailable here, so
-    # this stands in on the real ``venice-uncensored`` model (via ``name``) until the
-    # real one is registered — swap ``name`` or ``register_model(role="paraphraser")``
-    # when it lands. ``name`` + ``role`` are the load-bearing fields (role lookup
-    # returns ``name``, so runtime uses venice-uncensored's own RPM/capabilities).
+    # Paraphraser role - a DEDICATED model with its OWN identity (not an alias). The
+    # real defingerprinting model is trained separately and unavailable here, so as a
+    # stand-in this entry LOADS THE SAME HF WEIGHTS as venice-uncensored-vllm
+    # (Dolphin-Mistral-24B-Venice-Edition) via vLLM - it is its own model that happens
+    # to load the same weights, not the same registry entry. Swap hf_model_id, or
+    # register the real paraphraser with role="paraphraser", when it lands.
     "venice-paraphraser": ModelConfig(
-        name="venice-uncensored",
-        rpm=75,
-        backend_type="venice",
-        default_extra_body={
-            "venice_parameters": {
-                "disable_thinking": True,
-                "include_venice_system_prompt": False,
-            }
-        },
+        name="venice-paraphraser",
+        rpm=999,
+        default_temperature=0.8,
+        backend_type="vllm",
+        hf_model_id="dphn/Dolphin-Mistral-24B-Venice-Edition",
         is_uncensored=True,
-        supports_parallel_calls=True,
-        supports_native_batching=False,
-        recommended_max_workers=3,
+        supports_parallel_calls=False,
+        supports_native_batching=True,
+        recommended_max_workers=1,
         role="paraphraser",
     ),
 }
