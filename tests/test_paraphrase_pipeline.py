@@ -91,6 +91,29 @@ def test_paraphrase_outputs_accepted_only(tmp_path, patched):
     assert list(df["input_id"]) == ["id1"]
 
 
+def test_ledger_prevents_reattempt_of_dropped_units(tmp_path, monkeypatch):
+    _seed_inputs(tmp_path)
+    calls = {"n": 0}
+
+    def fake_para(backend, model, texts, **kw):
+        calls["n"] += len(texts)
+        return ["SAME" for _ in texts]  # identical -> 2nd unit is a dedup-drop
+
+    monkeypatch.setattr(P, "get_backend", lambda m: MockBackend())
+    monkeypatch.setattr(P, "paraphrase_batch", fake_para)
+    monkeypatch.setattr(P, "batch_check_samples",
+                        lambda b, m, samples, chk, **k: [(True, "") for _ in samples])
+
+    generate_paraphrases(data_dir=tmp_path, target="inputs", verbose=False)
+    assert calls["n"] == 2  # 2 units attempted (1 kept, 1 deduped-dropped)
+    state = paths.paraphrases_inputs_csv(tmp_path).with_name("paraphrases_inputs.state.jsonl")
+    assert state.exists()  # ledger recorded both attempts, including the drop
+
+    # Resume: the dropped unit is in the ledger, so nothing is re-attempted.
+    generate_paraphrases(data_dir=tmp_path, target="inputs", resume=True, verbose=False)
+    assert calls["n"] == 2  # no new paraphrase calls
+
+
 def _seed_paraphrase_artifact(tmp_path):
     para = pd.DataFrame({
         "id": ["x1"], "input_id": ["b1"], "iteration": [0], "sample": ["PARA::p"],

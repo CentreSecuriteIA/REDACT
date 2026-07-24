@@ -654,26 +654,24 @@ paraphrases_per_sample, target, check, resume, batch_size, seed, …)`:
   checker via `batch_check_samples` (check→drop). Warns if checker == paraphraser (placeholder).
 - **Dedup**: drops no-op (== original) and duplicate paraphrase texts.
 - Writes `paraphrases_inputs.csv` / `paraphrases_outputs.csv` (id, `input_id`=base id, `iteration`,
-  sample, category, entry_type, `paraphrase_model`, accepted, reasoning, source) + a
-  `*.manifest.jsonl` mapping file. **Resume** on `(input_id, iteration)` per artifact.
+  sample, category, entry_type, `paraphrase_model`, accepted, reasoning, source). Per artifact:
+  a `*.manifest.jsonl` = the full plan (every unit → its model), and a sidecar `*.state.jsonl`
+  **ledger** (mirrors constitution / output-response) recording every *attempted* unit +
+  model + status (`accepted`/`rejected`/`dropped_dedup`). **Resume reads the ledger**, so drops
+  are never silently re-attempted, and different paraphrasers are mapped per unit.
 - New `paths.py` helpers: `paraphrases_inputs_csv` / `paraphrases_outputs_csv` / `paraphrased_csv`.
 - Exported `generate_paraphrases`. Tests: `tests/test_paraphrase_pipeline.py` (dedup, resume,
   check-drop, accepted-only outputs — all offline via monkeypatch).
 
-**Problem/decision:** dropped (deduped/rejected) `(base_id,k)` units aren't written, so a resume
-re-attempts them (see explanation below) — acceptable for now (idempotent output, and a
-stochastic paraphraser gets another chance), noted for a possible "attempted" ledger later. The
-`check_model==paraphraser` guard-warning remains for safety, but with the dedicated
-`venice-paraphraser` model it no longer fires by default (checker = venice-uncensored ≠ paraphraser).
-
-**"Dropped units re-attempt on resume" — what it means.** Planning lays out K units per base
-sample, keyed `(base_id, k)`. Resume skips any `(base_id, k)` already **present in the output
-CSV**. But a unit that was *dropped* (its paraphrase equalled the original / duplicated another,
-or the checker rejected it) is never written — so on a re-run it isn't seen as done and is
-attempted again. Net effect: successful units are never redone; only the units that produced
-nothing are retried (extra LLM calls, but a chance to succeed since the paraphraser samples at
-temperature > 0). The alternative (an "attempted" ledger that records drops so they're skipped)
-is the noted future improvement.
+**Resolved (was: "dropped units re-attempt on resume").** Originally resume was driven by the
+output CSV, so units that produced no row (dedup no-ops) were re-attempted on a re-run. **Now
+switched to a sidecar `*.state.jsonl` ledger** (the pattern the user pointed to from constitution
+generation / jailbreak augmentation): every *attempted* `(base_id, iteration)` unit is appended
+with its `paraphrase_model` + `status` after the chunk's CSV write, and resume reads the ledger —
+so nothing is ever silently re-attempted, and the plan/ledger cleanly map units to (possibly
+different) paraphrasers. The `check_model==paraphraser` guard-warning remains but no longer fires
+by default (dedicated `venice-paraphraser` ≠ venice-uncensored checker). Test:
+`test_ledger_prevents_reattempt_of_dropped_units`.
 
 ## T3.4 — `build_dataset` paraphrase merge (done)
 

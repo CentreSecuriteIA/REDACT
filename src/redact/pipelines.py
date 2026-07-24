@@ -1198,6 +1198,38 @@ def generate_jailbreaks(
 # ---------------------------------------------------------------------------
 
 
+def _paraphrase_state_path(out_path: Path) -> Path:
+    """Sidecar state-ledger path beside a paraphrase artifact (``*.state.jsonl``)."""
+    return out_path.with_name(out_path.stem + ".state.jsonl")
+
+
+def _read_paraphrase_state(state_path: Path) -> set[tuple[str, int]]:
+    """Return ``(input_id, iteration)`` units already recorded in the ledger."""
+    if not state_path.exists():
+        return set()
+    done: set[tuple[str, int]] = set()
+    with state_path.open(encoding="utf-8") as fh:
+        for line in fh:
+            line = line.strip()
+            if not line:
+                continue
+            try:
+                r = json.loads(line)
+                done.add((str(r["input_id"]), int(r["iteration"])))
+            except (json.JSONDecodeError, KeyError, ValueError, TypeError):
+                continue
+    return done
+
+
+def _append_paraphrase_state(state_path: Path, records: list[dict]) -> None:
+    """Append attempted-unit records (``input_id``/``iteration``/``paraphrase_model``/``status``)."""
+    if not records:
+        return
+    with state_path.open("a", encoding="utf-8") as fh:
+        for r in records:
+            fh.write(json.dumps(r) + "\n")
+
+
 def _paraphrase_pool(paraphraser: str | None) -> list[str]:
     """Resolve the paraphraser model pool.
 
@@ -1265,39 +1297,44 @@ def _run_paraphrase_target(
             return existing
         return _hash_text(str(row[text_col]))
 
-    # ---- Resume: skip (base_id, iteration) already in the artifact -----------
-    if not resume and out_path.exists():
-        out_path.unlink()
-    completed: set[tuple[str, int]] = set()
+    # ---- Resume via a sidecar STATE LEDGER (like constitution/output) ---------
+    # The ledger records every *attempted* (base_id, iteration) unit + its model +
+    # outcome, so a re-run skips them all — including drops (deduped/rejected), which
+    # the output CSV alone would silently re-attempt. The CSV is still read for
+    # content dedup (seen_texts), but completion is the ledger's job.
+    state_path = _paraphrase_state_path(out_path)
+    man = out_path.with_name(out_path.stem + ".manifest.jsonl")
+    if not resume:
+        for p in (out_path, state_path, man):
+            if p.exists():
+                p.unlink()
+    completed: set[tuple[str, int]] = _read_paraphrase_state(state_path) if resume else set()
     seen_texts: set[str] = set()
-    if resume and out_path.exists():
+    if out_path.exists():
         prev = pd.read_csv(out_path)
-        if not prev.empty and {"input_id", "iteration"} <= set(prev.columns):
-            completed = set(zip(prev["input_id"].astype(str), prev["iteration"].astype(int)))
-            seen_texts = set(prev.get("sample", pd.Series(dtype=str)).astype(str))
+        if not prev.empty and "sample" in prev.columns:
+            seen_texts = set(prev["sample"].astype(str))
 
-    # ---- Plan units + write the mapping/ledger file --------------------------
-    units: list[tuple] = []  # (base_id, k, model, original_text, category, entry_type)
+    # ---- Plan the FULL run -> manifest = the whole (base_id, k -> model) mapping
+    all_units: list[tuple] = []  # (base_id, k, model, original_text, category, entry_type)
     for _, row in src.iterrows():
         bid = _base_id(row)
         otext = str(row[text_col])
         cat, et = str(row.get("category", "")), str(row.get("entry_type", ""))
         for k in range(K):
-            if (bid, k) in completed:
-                continue
-            units.append((bid, k, _assign_paraphraser(bid, k, pool, seed), otext, cat, et))
+            all_units.append((bid, k, _assign_paraphraser(bid, k, pool, seed), otext, cat, et))
 
-    man = out_path.with_name(out_path.stem + ".manifest.jsonl")
     with man.open("w", encoding="utf-8") as fh:
-        for bid, k, m, _o, cat, et in units:
+        for bid, k, m, _o, cat, et in all_units:
             fh.write(json.dumps({
                 "input_id": bid, "iteration": k, "paraphrase_model": m,
-                "category": cat, "entry_type": et,
+                "category": cat, "entry_type": et, "status": "planned",
             }) + "\n")
 
+    units = [u for u in all_units if (u[0], u[1]) not in completed]
     if not units:
         if verbose:
-            print(f"  [paraphrase:{tgt}] nothing to do (all done).")
+            print(f"  [paraphrase:{tgt}] nothing to do (all {len(all_units)} units done).")
         return pd.read_csv(out_path) if out_path.exists() else pd.DataFrame()
 
     # ---- Execute grouped by model (one paraphraser loaded at a time) ---------
@@ -1328,10 +1365,12 @@ def _run_paraphrase_target(
             else:
                 checks = [(True, "")] * len(chunk)
 
-            rows = []
+            rows, ledger = [], []
             for (bid, k, m, otext, cat, et), ptext, (acc, reason) in zip(chunk, paraphrased, checks):
                 pt = str(ptext).strip()
                 if not pt or pt == otext or pt in seen_texts:
+                    ledger.append({"input_id": bid, "iteration": k,
+                                   "paraphrase_model": m, "status": "dropped_dedup"})
                     continue  # dedup: drop no-op / duplicate paraphrases
                 seen_texts.add(pt)
                 rows.append({
@@ -1340,10 +1379,15 @@ def _run_paraphrase_target(
                     "paraphrase_model": m, "accepted": bool(acc),
                     "reasoning": reason, "source": f"paraphrase_{tgt}",
                 })
+                ledger.append({"input_id": bid, "iteration": k, "paraphrase_model": m,
+                               "status": "accepted" if acc else "rejected"})
             if rows:
                 cdf = pd.DataFrame(rows)
                 cdf.to_csv(out_path, mode="a", header=not out_path.exists(), index=False)
                 written += len(rows)
+            # Record every attempted unit only after the CSV append — a crash mid-chunk
+            # leaves those units un-acked so they re-run next time (never duplicated).
+            _append_paraphrase_state(state_path, ledger)
 
     if verbose:
         n = len(pd.read_csv(out_path)) if out_path.exists() else 0
@@ -1375,9 +1419,11 @@ def generate_paraphrases(
     meaning-preservation checker (check→drop, no retry) and deduped so no two stored
     samples are identical. Rows land in ``paraphrases_inputs.csv`` /
     ``paraphrases_outputs.csv`` under ``data_dir``, each keyed by
-    ``(input_id, iteration)`` and carrying ``paraphrase_model`` provenance. A mapping
-    file (``*.manifest.jsonl``) is written per artifact and resume is driven by the
-    artifact CSV (re-runs only missing units).
+    ``(input_id, iteration)`` and carrying ``paraphrase_model`` provenance. Per
+    artifact: a ``*.manifest.jsonl`` holds the full plan (every unit -> its model),
+    and a sidecar ``*.state.jsonl`` **ledger** records every attempted unit + outcome
+    — resume reads the ledger and re-runs only unrecorded units (so drops are never
+    silently retried), mirroring the constitution / output-response ledgers.
 
     Args:
         inputs: Base inputs DataFrame; if None loads accepted base inputs from
