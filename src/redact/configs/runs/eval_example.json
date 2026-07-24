@@ -1,11 +1,14 @@
 {
   "dataset_type": "eval",
   "data_dir": "./runs/eval_example",
-  "models": { "gen": null, "check": null, "translation": null, "constitution": null },
+  "models": {
+    "gen": null, "check": null, "translation": null,
+    "paraphraser": null, "paraphrase_check": null
+  },
   "taxonomy": "content_moderation_categories",
   "taxonomy_dir": null,
   "prompt_dir": null,
-  "stages": ["inputs", "outputs", "jailbreaks", "build"],
+  "stages": ["inputs", "outputs", "paraphrase", "jailbreaks", "build"],
   "augmentations": {
     "include_hacking": true,
     "include_obfuscation": true,

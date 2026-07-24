@@ -24,12 +24,17 @@ import json
 import time
 from pathlib import Path
 
+import pandas as pd
+
 from redact import paths
 
 # Ordered canonical stage names. A recipe's ``stages`` is any subset, in order.
-STAGES = ("constitution", "inputs", "outputs", "jailbreaks", "build")
+STAGES = ("constitution", "inputs", "outputs", "paraphrase", "jailbreaks", "build")
 
-_DEFAULT_MODELS = {"gen": None, "check": None, "translation": None, "constitution": None}
+_DEFAULT_MODELS = {
+    "gen": None, "check": None, "translation": None, "constitution": None,
+    "paraphraser": None, "paraphrase_check": None,
+}
 
 
 # ---------------------------------------------------------------------------
@@ -153,7 +158,7 @@ def run_pipeline(
     """
     from redact import (
         generate_constitution, generate_inputs, generate_outputs,
-        generate_jailbreaks, build_dataset,
+        generate_jailbreaks, generate_paraphrases, build_dataset,
     )
     from redact.jailbreak import load_spec
 
@@ -213,6 +218,15 @@ def run_pipeline(
                 resume=resume, verbose=verbose, **P("outputs"),
             )
 
+        elif stage == "paraphrase":
+            res = generate_paraphrases(
+                data_dir=data_dir, paraphraser=models["paraphraser"],
+                check_model=models["paraphrase_check"], resume=resume,
+                verbose=verbose, **P("paraphrase"),
+            )
+            frames = [v for v in res.values() if v is not None and not v.empty]
+            df = pd.concat(frames, ignore_index=True) if frames else pd.DataFrame()
+
         elif stage == "jailbreaks":
             df = generate_jailbreaks(
                 data_dir=data_dir, model=models["gen"],
@@ -221,7 +235,9 @@ def run_pipeline(
             )
 
         elif stage == "build":
-            df = build_dataset(data_dir=data_dir, verbose=verbose)
+            df = build_dataset(
+                data_dir=data_dir, mode=dataset_type, verbose=verbose, **P("build"),
+            )
 
         else:  # pragma: no cover — load_recipe already validated
             raise ValueError(f"Unknown stage {stage!r}")

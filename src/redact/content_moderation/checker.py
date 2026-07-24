@@ -131,6 +131,46 @@ def build_output_quality_checker(
     return _build
 
 
+def build_paraphrase_checker(
+    prompt_dir: str | None = None,
+) -> Callable[[str], list[dict]]:
+    """Build a meaning-preservation checker for the paraphrase pass.
+
+    The returned callable takes a single string formatted as
+    ``"ORIGINAL:\\n<original>\\n\\nPARAPHRASE:\\n<paraphrase>"`` and returns the
+    checker message list. Via ``check_sample`` / ``batch_check_samples`` it
+    accepts when the reply starts with yes/ok/accept/pass (check→drop, no retry).
+
+    Deliberately separate from the paraphraser — a weak paraphraser must never
+    grade its own output. Loads
+    ``prompts/content_moderation/paraphrase_check/template.json``.
+
+    Args:
+        prompt_dir: Root directory for prompt JSON files.
+
+    Returns:
+        Callable(payload) -> checker message list.
+    """
+    prompt_config = load_prompt(
+        "content_moderation", "paraphrase_check", prompt_dir=prompt_dir
+    )
+    system_prompt = prompt_config["system_prompt"]
+
+    def _build(sample: str) -> list[dict]:
+        template = prompt_config["template"].format(sample=sample)
+        return [
+            {"role": "system", "content": system_prompt},
+            {"role": "user", "content": template},
+        ]
+
+    return _build
+
+
+def paraphrase_check_payload(original: str, paraphrase: str) -> str:
+    """Format an (original, paraphrase) pair for :func:`build_paraphrase_checker`."""
+    return f"ORIGINAL:\n{original}\n\nPARAPHRASE:\n{paraphrase}"
+
+
 def build_category_checker(
     category: str,
     all_categories: list[str] | None = None,

@@ -22,7 +22,10 @@ from .checker import (
     build_quality_checker,
     build_output_quality_checker,
     build_category_checker,
+    build_paraphrase_checker,
+    paraphrase_check_payload,
 )
+from .paraphrase import paraphrase_batch, paraphrase_sample
 from .metaprompt import (
     generate_category_description,
     generate_seeds,

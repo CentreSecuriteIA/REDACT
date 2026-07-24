@@ -1,31 +1,63 @@
-"""Placeholder for paraphrasing / fingerprint removal pipeline.
+"""Paraphrasing / fingerprint removal.
 
-This module wraps calls to a fine-tuned paraphrasing model that removes
-stylistic fingerprints from generated samples. The actual paraphrasing model
-is trained and maintained in a separate repository.
+Batched paraphrase pass: rephrase generated samples to strip the stylistic
+fingerprints of the generating model while preserving meaning. The prompt is
+loaded from ``prompts/content_moderation/paraphrase/template.json`` (a 1:1
+"rephrase this" instruction).
 
-For now, this is a pass-through stub that can be called from the pipeline
-without error.
+The real defingerprinting model is trained in a separate repository; here any
+capable model (the ``paraphraser`` role) drives the prompt. Whether a paraphrase
+actually preserved meaning is a *separate* concern — validated by a dedicated
+checker (:func:`redact.content_moderation.checker.build_paraphrase_checker`),
+never by the paraphraser itself.
 
-Prompt is loaded from Prompts/Content_Moderation/paraphrase/template.json.
-
-TODO:
-    - Integrate with the defingerprinting model API endpoint or local vLLM
-    - Add paraphrase quality checking (semantic similarity threshold)
-    - Add batch paraphrasing support via VLLMBackend.batch_generate()
+Dispatch goes through a capability-aware :class:`BatchCaller` (one vLLM engine
+pass / parallel API thread-pool / series-only sequential), so paraphrasing is
+rate-limited and batched like every other stage.
 """
 
 from ..llms.base import LLMBackend
 from ..llms.calls import generate_sample
-from ..llms.prompts import load_prompt
-from ..llms.wrappers import RateLimiter
+from ..llms.prompts import load_prompt, build_messages
+from ..llms.wrappers import RateLimiter, BatchCaller
 
 _PROMPT_DIR = None  # Uses load_prompt() default (package-relative)
 
 
-def _load_paraphrase_prompt(prompt_dir: str = _PROMPT_DIR) -> dict:
+def _load_paraphrase_prompt(prompt_dir: str | None = _PROMPT_DIR) -> dict:
     """Load the paraphrase prompt config from JSON."""
     return load_prompt("content_moderation", "paraphrase", prompt_dir=prompt_dir)
+
+
+def paraphrase_batch(
+    backend: LLMBackend,
+    model: str,
+    samples: list[str],
+    rate_limiter: RateLimiter | None = None,
+    prompt_dir: str | None = _PROMPT_DIR,
+    progress: str | None = None,
+    **kwargs,
+) -> list[str]:
+    """Paraphrase a batch of samples in one capability-aware dispatch.
+
+    Args:
+        backend: Paraphraser backend.
+        model: Paraphraser model identifier.
+        samples: Texts to paraphrase.
+        rate_limiter: Optional shared rate limiter.
+        prompt_dir: Root prompt directory (defaults to the package prompts/).
+        progress: Optional progress label for the batch dispatch.
+        **kwargs: Passed to ``BatchCaller.batch_generate`` / the backend.
+
+    Returns:
+        Paraphrased texts, one per input, in order.
+    """
+    if not samples:
+        return []
+    prompt_config = _load_paraphrase_prompt(prompt_dir)
+    messages_list = [build_messages(prompt_config, sample=s) for s in samples]
+    caller = BatchCaller.from_model(backend, model, rate_limiter=rate_limiter)
+    return caller.batch_generate(messages_list, model, progress=progress, **kwargs)
 
 
 def paraphrase_sample(
@@ -34,65 +66,33 @@ def paraphrase_sample(
     sample: str,
     rate_limiter: RateLimiter | None = None,
     system_prompt: str | None = None,
-    prompt_dir: str = _PROMPT_DIR,
+    prompt_dir: str | None = _PROMPT_DIR,
     **kwargs,
 ) -> str:
-    """Paraphrase a sample to remove stylistic fingerprints.
+    """Paraphrase a single sample to remove stylistic fingerprints.
 
-    PLACEHOLDER: Currently returns the sample unchanged.
-    Will be implemented when the defingerprinting model is available.
+    Thin wrapper over :func:`paraphrase_batch`. Pass ``system_prompt`` to override
+    the JSON template's system prompt for this call.
 
     Args:
-        backend: LLM backend for the paraphraser.
+        backend: Paraphraser backend.
         model: Paraphraser model identifier.
         sample: Text to paraphrase.
-        rate_limiter: Optional rate limiter.
-        system_prompt: Custom system prompt (overrides JSON template).
-        prompt_dir: Root directory for prompt JSON files.
-        **kwargs: Passed to backend.generate().
+        rate_limiter: Optional shared rate limiter.
+        system_prompt: Custom system prompt (overrides the JSON template).
+        prompt_dir: Root prompt directory.
+        **kwargs: Passed to the backend.
 
     Returns:
-        Paraphrased text (currently: original text unchanged).
+        Paraphrased text.
     """
-    # TODO: Replace stub with actual paraphrasing call when model is available:
-    #
-    # prompt_config = _load_paraphrase_prompt(prompt_dir)
-    # sys_prompt = system_prompt or prompt_config["system_prompt"]
-    # messages = [
-    #     {"role": "system", "content": sys_prompt},
-    #     {"role": "user", "content": sample},
-    # ]
-    # return generate_sample(backend, model, messages, rate_limiter, **kwargs)
-    #
-    return sample
-
-
-def paraphrase_batch(
-    backend: LLMBackend,
-    model: str,
-    samples: list[str],
-    rate_limiter: RateLimiter | None = None,
-    prompt_dir: str = _PROMPT_DIR,
-    **kwargs,
-) -> list[str]:
-    """Paraphrase a batch of samples.
-
-    PLACEHOLDER: Currently returns all samples unchanged.
-
-    Args:
-        backend: LLM backend.
-        model: Model identifier.
-        samples: List of texts to paraphrase.
-        rate_limiter: Optional rate limiter.
-        prompt_dir: Root directory for prompt JSON files.
-        **kwargs: Passed to generate.
-
-    Returns:
-        List of paraphrased texts (currently: originals unchanged).
-    """
-    return [
-        paraphrase_sample(
-            backend, model, s, rate_limiter, prompt_dir=prompt_dir, **kwargs
-        )
-        for s in samples
-    ]
+    if system_prompt is not None:
+        messages = [
+            {"role": "system", "content": system_prompt},
+            {"role": "user", "content": sample},
+        ]
+        return generate_sample(backend, model, messages, rate_limiter, **kwargs)
+    return paraphrase_batch(
+        backend, model, [sample], rate_limiter=rate_limiter,
+        prompt_dir=prompt_dir, **kwargs,
+    )[0]

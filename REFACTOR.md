@@ -600,6 +600,80 @@ references any removed param.
 | Notebooks | 4 at repo root, stale API | `notebooks/` — eval (no constitution) vs training (with) + 2 per-stage |
 | Constitution inputs | manual `dataset_dir=…` | auto-route to `Datasets/constitution_inputs/` (+ propagation bug fixed) |
 
-Deferred (future work): Theme 3 (paraphrase as extra rows + indicator, inputs & outputs,
-constitution vs eval) and Theme 4 (multistep jailbreak outputs). Also a follow-up: thread
-`prompt_dir` into checker prompts (currently only the top-level generation prompts).
+Deferred (future work): Theme 3 (paraphrase — see below) and Theme 4 (multistep jailbreak
+outputs). Also a follow-up: thread `prompt_dir` into checker prompts (currently only the
+top-level generation prompts).
+
+---
+
+# Theme 3 — Paraphrase / Fingerprint Removal (in progress)
+
+Design/plan: `.claude/theme3_paraphrase_plan.md` (v5). Adds paraphrased copies of base inputs
+and accepted base outputs as additive artifacts (like `jailbreaks.csv`), K 1:1 calls
+round-robin over a new `paraphraser` role, a separate meaning-preservation checker
+(check→drop), merged per `build_dataset(mode=…)` (eval → separate `paraphrased.csv`, training
+→ merged). No folder reorg, no `kind` column (artifact file + metadata field carry provenance).
+
+## T3.0 — paraphraser role + real `paraphrase_batch` (done)
+
+- `paraphrase.py`: replaced the identity stub with a real **batched** `paraphrase_batch`
+  (dispatch via `BatchCaller`, prompt from `paraphrase/template.json`) + `paraphrase_sample`
+  wrapper (with `system_prompt` override). Updated `tests/content_moderation/test_paraphrase.py`
+  (was asserting pass-through) → asserts real model output + call shape.
+- `model_config.py`: new **`paraphraser`** role.
+
+**Problem/decision logged:** the registry couples the dict key to the model name sent to the
+API, and roles are one-per-model, so there's no first-class "role alias to an existing model."
+Per the instruction *not* to repurpose an existing model's role, I added a **dedicated**
+`"venice-paraphraser"` entry whose `name="venice-uncensored"` (only `name`+`role` are
+load-bearing — role lookup returns `name`). So the paraphraser role resolves to the real
+venice-uncensored model as a **stand-in until the external defingerprinting model is
+registered**. GLM stays `uncensored_gen`. Verified: `paraphraser → venice-uncensored`, other
+roles unchanged, full suite **558 passed, 9 skipped**.
+
+## T3.1 — meaning-preservation checker (done)
+
+New `prompts/content_moderation/paraphrase_check/template.json` + `checker.build_paraphrase_checker`
+(payload `"ORIGINAL:\n…\n\nPARAPHRASE:\n…"` via `paraphrase_check_payload`), parsed by the existing
+`batch_check_samples` (starts-with-"yes" → accept, else drop). Exported from `content_moderation`.
+Test: `tests/content_moderation/test_paraphrase_checker.py`.
+
+## T3.2 / T3.3 — `generate_paraphrases` (done)
+
+`pipelines.generate_paraphrases(inputs, outputs, data_dir, paraphraser, check_model,
+paraphrases_per_sample, target, check, resume, batch_size, seed, …)`:
+- Paraphrases **base inputs** and/or **accepted base outputs** (target `inputs`/`outputs`/`both`).
+- K units per sample (K repeated 1:1 calls), paraphraser assigned **round-robin** (hash of
+  `seed:base_id:k`; trivial with 1 model). Warns on K>1 with a single paraphraser.
+- **Model-grouped batched execute**, paraphrase via `paraphrase_batch`, **separate** meaning
+  checker via `batch_check_samples` (check→drop). Warns if checker == paraphraser (placeholder).
+- **Dedup**: drops no-op (== original) and duplicate paraphrase texts.
+- Writes `paraphrases_inputs.csv` / `paraphrases_outputs.csv` (id, `input_id`=base id, `iteration`,
+  sample, category, entry_type, `paraphrase_model`, accepted, reasoning, source) + a
+  `*.manifest.jsonl` mapping file. **Resume** on `(input_id, iteration)` per artifact.
+- New `paths.py` helpers: `paraphrases_inputs_csv` / `paraphrases_outputs_csv` / `paraphrased_csv`.
+- Exported `generate_paraphrases`. Tests: `tests/test_paraphrase_pipeline.py` (dedup, resume,
+  check-drop, accepted-only outputs — all offline via monkeypatch).
+
+**Problem/decision:** dropped (deduped/rejected) `(base_id,k)` units aren't written, so a resume
+re-attempts them — acceptable for now (idempotent output), noted for a possible "attempted" ledger
+later. Also, under the placeholder the checker resolves to the same model as the paraphraser
+(both `venice-uncensored`) — a warning is emitted; set an explicit `check_model` (or register a
+distinct paraphraser) to make validation independent.
+
+## T3.4 — `build_dataset` paraphrase merge (done)
+
+`build_dataset(mode="training"|"eval", include_paraphrases, paraphrase_*_path)`: **training** merges
+accepted paraphrases into `complete_dataset.csv` (`dataset_type="content_moderation_paraphrase"`);
+**eval** keeps them out and writes a separate `paraphrased.csv`. Base always present; jailbreaks
+still only ever built from base inputs. Compatible with the existing auto-detect (no folder reorg).
+
+## T3.5 — `paraphrase` stage in runconfig (done)
+
+`STAGES` gains `paraphrase`; `run_pipeline` dispatches it (`models.paraphraser` /
+`models.paraphrase_check`, `params.paraphrase`), and the `build` stage now passes
+`mode=dataset_type` (+ `params.build`, e.g. `include_paraphrases`). Recipe surface lets a run select
+the paraphraser(s) and control the merge. Test: `test_run_pipeline_paraphrase_stage`.
+
+**Status:** T3.0–T3.5 done, offline-tested — full suite **567 passed, 9 skipped**. Remaining: T3.6
+docs (CLAUDE.md/README + example configs).

@@ -26,6 +26,9 @@ SAMPLES_FILENAME = "samples.csv"
 JAILBREAKS_FILENAME = "jailbreaks.csv"
 OUTPUT_RESPONSES_FILENAME = "output_responses.csv"
 COMPLETE_DATASET_FILENAME = "complete_dataset.csv"
+PARAPHRASES_INPUTS_FILENAME = "paraphrases_inputs.csv"
+PARAPHRASES_OUTPUTS_FILENAME = "paraphrases_outputs.csv"
+PARAPHRASED_FILENAME = "paraphrased.csv"
 
 
 def _root(root: str | Path | None = None) -> Path:
@@ -71,6 +74,19 @@ def output_responses_csv(root: str | Path | None = None) -> Path:
 
 def complete_dataset_csv(root: str | Path | None = None) -> Path:
     return datasets(root) / COMPLETE_DATASET_FILENAME
+
+
+def paraphrases_inputs_csv(root: str | Path | None = None) -> Path:
+    return datasets(root) / PARAPHRASES_INPUTS_FILENAME
+
+
+def paraphrases_outputs_csv(root: str | Path | None = None) -> Path:
+    return datasets(root) / PARAPHRASES_OUTPUTS_FILENAME
+
+
+def paraphrased_csv(root: str | Path | None = None) -> Path:
+    """The eval-mode merged paraphrase artifact (paraphrased inputs + outputs)."""
+    return datasets(root) / PARAPHRASED_FILENAME
 
 
 def benign_csv(root: str | Path | None = None) -> Path:

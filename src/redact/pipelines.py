@@ -31,7 +31,8 @@ from redact.llms import (
     BatchCaller,
 )
 from redact.llms.base import LLMBackend
-from redact.llms.model_config import default_model_for_role
+from redact.llms.model_config import default_model_for_role, get_models_by_role
+from redact.llms.calls import batch_check_samples
 from redact.content_moderation import (
     InputPipeline,
     CategoryResult,
@@ -41,7 +42,10 @@ from redact.content_moderation import (
 from redact.content_moderation.checker import (
     build_quality_checker,
     build_output_quality_checker,
+    build_paraphrase_checker,
+    paraphrase_check_payload,
 )
+from redact.content_moderation.paraphrase import paraphrase_batch
 from redact.dataset.io import get_existing_samples, _hash_text
 from redact.dataset import (
     load_taxonomy,
@@ -1189,15 +1193,266 @@ def generate_jailbreaks(
     return jailbreaks
 
 
+# ---------------------------------------------------------------------------
+# Paraphrase / fingerprint removal
+# ---------------------------------------------------------------------------
+
+
+def _paraphrase_pool(paraphraser: str | None) -> list[str]:
+    """Resolve the paraphraser model pool.
+
+    ``None`` → the ``paraphraser`` role default; a model name → just that model;
+    ``"distribution"`` → all models registered with ``role="paraphraser"``.
+    """
+    if paraphraser == "distribution":
+        seen: set[str] = set()
+        pool = [
+            c.name for c in get_models_by_role("paraphraser")
+            if not (c.name in seen or seen.add(c.name))
+        ]
+        if not pool:
+            raise ValueError("paraphraser='distribution' but no model has role='paraphraser'.")
+        return pool
+    if paraphraser:
+        return [paraphraser]
+    return [default_model_for_role("paraphraser")]
+
+
+def _assign_paraphraser(base_id: str, k: int, pool: list[str], seed: int) -> str:
+    """Deterministic round-robin pick (content-hash of base_id + k + seed)."""
+    import hashlib
+    if len(pool) == 1:
+        return pool[0]
+    h = hashlib.sha256(f"{seed}:{base_id}:{k}".encode("utf-8")).hexdigest()
+    return pool[int(h, 16) % len(pool)]
+
+
+def _run_paraphrase_target(
+    tgt, source, data_dir, pool, check, check_model, K, resume, batch_size,
+    seed, out_path_override, verbose,
+) -> pd.DataFrame:
+    """Paraphrase one target (``"inputs"`` or ``"outputs"``) → its artifact CSV."""
+    # ---- Load source rows (base_id, text, category, entry_type) --------------
+    if tgt == "inputs":
+        src = source if source is not None else merge_all(paths.datasets(data_dir), accepted_only=True)
+        src = src.copy()
+        text_col = "sample" if "sample" in src.columns else "prompt"
+        id_col = "id"
+        out_path = Path(out_path_override) if out_path_override else paths.paraphrases_inputs_csv(data_dir)
+    else:  # outputs
+        if source is not None:
+            src = source.copy()
+        else:
+            rp = paths.output_responses_csv(data_dir)
+            src = pd.read_csv(rp) if rp.exists() else pd.DataFrame()
+        if not src.empty and "accepted" in src.columns:
+            src = src[src["accepted"] == True]  # noqa: E712 — accepted base outputs only
+        text_col = "output_response" if "output_response" in getattr(src, "columns", []) else "sample"
+        id_col = "input_id"
+        out_path = Path(out_path_override) if out_path_override else paths.paraphrases_outputs_csv(data_dir)
+
+    if src is None or src.empty:
+        if verbose:
+            print(f"  [paraphrase:{tgt}] no source rows; skipping.")
+        return pd.DataFrame()
+
+    src = src.reset_index(drop=True)
+    out_path.parent.mkdir(parents=True, exist_ok=True)
+
+    def _base_id(row) -> str:
+        existing = str(row.get(id_col, "")).strip()
+        if existing and existing.lower() != "nan":
+            return existing
+        return _hash_text(str(row[text_col]))
+
+    # ---- Resume: skip (base_id, iteration) already in the artifact -----------
+    if not resume and out_path.exists():
+        out_path.unlink()
+    completed: set[tuple[str, int]] = set()
+    seen_texts: set[str] = set()
+    if resume and out_path.exists():
+        prev = pd.read_csv(out_path)
+        if not prev.empty and {"input_id", "iteration"} <= set(prev.columns):
+            completed = set(zip(prev["input_id"].astype(str), prev["iteration"].astype(int)))
+            seen_texts = set(prev.get("sample", pd.Series(dtype=str)).astype(str))
+
+    # ---- Plan units + write the mapping/ledger file --------------------------
+    units: list[tuple] = []  # (base_id, k, model, original_text, category, entry_type)
+    for _, row in src.iterrows():
+        bid = _base_id(row)
+        otext = str(row[text_col])
+        cat, et = str(row.get("category", "")), str(row.get("entry_type", ""))
+        for k in range(K):
+            if (bid, k) in completed:
+                continue
+            units.append((bid, k, _assign_paraphraser(bid, k, pool, seed), otext, cat, et))
+
+    man = out_path.with_name(out_path.stem + ".manifest.jsonl")
+    with man.open("w", encoding="utf-8") as fh:
+        for bid, k, m, _o, cat, et in units:
+            fh.write(json.dumps({
+                "input_id": bid, "iteration": k, "paraphrase_model": m,
+                "category": cat, "entry_type": et,
+            }) + "\n")
+
+    if not units:
+        if verbose:
+            print(f"  [paraphrase:{tgt}] nothing to do (all done).")
+        return pd.read_csv(out_path) if out_path.exists() else pd.DataFrame()
+
+    # ---- Execute grouped by model (one paraphraser loaded at a time) ---------
+    from collections import defaultdict
+    groups: dict[str, list[tuple]] = defaultdict(list)
+    for u in units:
+        groups[u[2]].append(u)
+
+    rate_limiter = get_router().rate_limiter
+    check_backend = get_backend(check_model) if check else None
+    written = 0
+    for model, gunits in groups.items():
+        backend = get_backend(model)
+        for start in range(0, len(gunits), batch_size):
+            chunk = gunits[start : start + batch_size]
+            texts = [u[3] for u in chunk]
+            paraphrased = paraphrase_batch(
+                backend, model, texts, rate_limiter=rate_limiter,
+                progress=f"paraphrase:{tgt} ({model})" if verbose else None,
+            )
+            if check:
+                payloads = [paraphrase_check_payload(u[3], p) for u, p in zip(chunk, paraphrased)]
+                checks = batch_check_samples(
+                    check_backend, check_model, payloads, build_paraphrase_checker(),
+                    batch_size=batch_size, rate_limiter=rate_limiter,
+                    progress=f"paraphrase-check:{tgt}" if verbose else None,
+                )
+            else:
+                checks = [(True, "")] * len(chunk)
+
+            rows = []
+            for (bid, k, m, otext, cat, et), ptext, (acc, reason) in zip(chunk, paraphrased, checks):
+                pt = str(ptext).strip()
+                if not pt or pt == otext or pt in seen_texts:
+                    continue  # dedup: drop no-op / duplicate paraphrases
+                seen_texts.add(pt)
+                rows.append({
+                    "id": _hash_text(pt), "input_id": bid, "iteration": k,
+                    "sample": pt, "category": cat, "entry_type": et,
+                    "paraphrase_model": m, "accepted": bool(acc),
+                    "reasoning": reason, "source": f"paraphrase_{tgt}",
+                })
+            if rows:
+                cdf = pd.DataFrame(rows)
+                cdf.to_csv(out_path, mode="a", header=not out_path.exists(), index=False)
+                written += len(rows)
+
+    if verbose:
+        n = len(pd.read_csv(out_path)) if out_path.exists() else 0
+        print(f"  [paraphrase:{tgt}] +{written} rows (artifact now {n}) -> {out_path.name}")
+    return pd.read_csv(out_path) if out_path.exists() else pd.DataFrame()
+
+
+def generate_paraphrases(
+    inputs: pd.DataFrame | None = None,
+    outputs: pd.DataFrame | None = None,
+    data_dir: str | Path | None = None,
+    paraphraser: str | None = None,
+    check_model: str | None = None,
+    paraphrases_per_sample: int = 1,
+    target: str = "both",
+    check: bool = True,
+    resume: bool = True,
+    batch_size: int = 256,
+    seed: int = 42,
+    inputs_path: str | Path | None = None,
+    outputs_path: str | Path | None = None,
+    verbose: bool = True,
+) -> dict[str, pd.DataFrame]:
+    """Paraphrase base inputs and/or accepted base outputs into additive artifacts.
+
+    Each base sample is paraphrased ``paraphrases_per_sample`` times (K repeated 1:1
+    calls, one per unit), with paraphraser models assigned round-robin from the
+    ``paraphraser`` pool. Each paraphrase is validated by a **separate**
+    meaning-preservation checker (check→drop, no retry) and deduped so no two stored
+    samples are identical. Rows land in ``paraphrases_inputs.csv`` /
+    ``paraphrases_outputs.csv`` under ``data_dir``, each keyed by
+    ``(input_id, iteration)`` and carrying ``paraphrase_model`` provenance. A mapping
+    file (``*.manifest.jsonl``) is written per artifact and resume is driven by the
+    artifact CSV (re-runs only missing units).
+
+    Args:
+        inputs: Base inputs DataFrame; if None loads accepted base inputs from
+            ``data_dir``. (target ``"inputs"``/``"both"``.)
+        outputs: Base outputs DataFrame; if None loads ``output_responses.csv`` and
+            keeps accepted rows. (target ``"outputs"``/``"both"``.)
+        data_dir: Working root.
+        paraphraser: ``None`` → ``paraphraser`` role default; a model name; or
+            ``"distribution"`` → round-robin over all ``paraphraser``-role models.
+        check_model: Validator model. ``None`` → ``uncensored_gen`` role (kept
+            separate from the paraphraser; warns if they coincide).
+        paraphrases_per_sample: K units per base sample (warns if K>1 with 1 model).
+        target: ``"inputs"`` | ``"outputs"`` | ``"both"``.
+        check: Run the meaning-preservation checker (drop failures if it rejects).
+        resume: Skip already-produced ``(input_id, iteration)`` units.
+        batch_size: Units per paraphrase/check batch.
+        seed: Round-robin assignment seed.
+        inputs_path / outputs_path: Artifact path overrides.
+        verbose: Print progress.
+
+    Returns:
+        ``{"inputs": df, "outputs": df}`` for whichever targets ran.
+    """
+    import warnings
+
+    pool = _paraphrase_pool(paraphraser)
+    if paraphrases_per_sample > 1 and len(pool) == 1:
+        warnings.warn(
+            f"paraphrases_per_sample={paraphrases_per_sample} with a single paraphraser "
+            f"({pool[0]}): the K paraphrases rely on sampling variety and identical ones are "
+            f"deduped, so the realized count may be < K.",
+            stacklevel=2,
+        )
+    if check:
+        check_model = check_model or default_model_for_role("uncensored_gen")
+        if check_model in pool:
+            warnings.warn(
+                f"paraphrase check_model ({check_model}) is also a paraphraser - validation is "
+                f"not independent (expected under the placeholder paraphraser setup).",
+                stacklevel=2,
+            )
+
+    if verbose:
+        print(f"\n{'='*60}\nGenerate Paraphrases (target={target})\n{'='*60}")
+        print(f"Paraphraser(s): {pool} | K: {paraphrases_per_sample} | "
+              f"Checker: {check_model if check else 'disabled'}")
+
+    targets = ["inputs", "outputs"] if target == "both" else [target]
+    if not set(targets) <= {"inputs", "outputs"}:
+        raise ValueError("target must be 'inputs', 'outputs', or 'both'.")
+
+    results: dict[str, pd.DataFrame] = {}
+    for tgt in targets:
+        source = inputs if tgt == "inputs" else outputs
+        override = inputs_path if tgt == "inputs" else outputs_path
+        results[tgt] = _run_paraphrase_target(
+            tgt, source, data_dir, pool, check, check_model, paraphrases_per_sample,
+            resume, batch_size, seed, override, verbose,
+        )
+    return results
+
+
 def build_dataset(
     data_dir: str | Path | None = None,
     jailbreak_path: str | Path | None = None,
     output_path: str | Path | None = None,
     inputs_path: str | Path | None = None,
     responses_path: str | Path | None = None,
+    paraphrase_inputs_path: str | Path | None = None,
+    paraphrase_outputs_path: str | Path | None = None,
+    mode: str = "training",
     include_inputs: bool = True,
     include_jailbreaks: bool = True,
     include_outputs: bool = True,
+    include_paraphrases: bool = True,
     verbose: bool = True,
 ) -> pd.DataFrame:
     """Merge all generated data into a single dataset.
@@ -1230,14 +1485,24 @@ def build_dataset(
         responses_path: Explicit output-responses CSV (e.g.
             ``Datasets/constitution_output_responses.csv``). If omitted, a
             responses CSV is auto-detected.
+        paraphrase_inputs_path / paraphrase_outputs_path: Explicit paraphrase
+            artifact CSVs. Default to ``Datasets/paraphrases_{inputs,outputs}.csv``.
+        mode: ``"training"`` merges paraphrases into ``complete_dataset.csv``;
+            ``"eval"`` keeps them out of the complete dataset and writes them to a
+            separate ``Datasets/paraphrased.csv``. (Maps from the recipe
+            ``dataset_type``.)
         include_inputs: Include content moderation input samples.
         include_jailbreaks: Include jailbreak samples.
         include_outputs: Include output response samples.
+        include_paraphrases: Include paraphrase artifacts (per ``mode``).
         verbose: Print progress.
 
     Returns:
-        Complete merged DataFrame.
+        Complete merged DataFrame (the base+jailbreak+output set, plus paraphrases
+        when ``mode="training"``).
     """
+    if mode not in ("training", "eval"):
+        raise ValueError("mode must be 'training' or 'eval'.")
     ds_dir = paths.datasets(data_dir)
     jb_path = Path(jailbreak_path) if jailbreak_path else paths.jailbreaks_csv(data_dir)
     out_path = Path(output_path) if output_path else (ds_dir / paths.COMPLETE_DATASET_FILENAME)
@@ -1307,6 +1572,36 @@ def build_dataset(
                 print(f"  Outputs: {len(out_df)} samples from {resp_path.name}")
         elif verbose:
             print(f"  Outputs: none found")
+
+    # Paraphrases — additive. In ``training`` mode they merge into the complete
+    # dataset; in ``eval`` mode they're kept separate in ``paraphrased.csv`` and
+    # excluded from the complete set (base always stays put either way).
+    if include_paraphrases:
+        pi_path = Path(paraphrase_inputs_path) if paraphrase_inputs_path else paths.paraphrases_inputs_csv(data_dir)
+        po_path = Path(paraphrase_outputs_path) if paraphrase_outputs_path else paths.paraphrases_outputs_csv(data_dir)
+        para_parts = []
+        for p in (pi_path, po_path):
+            if p.exists():
+                pdf = pd.read_csv(p)
+                if not pdf.empty:
+                    if "accepted" in pdf.columns:
+                        pdf = pdf[pdf["accepted"] == True]  # noqa: E712
+                    pdf["dataset_type"] = "content_moderation_paraphrase"
+                    para_parts.append(pdf)
+        if para_parts:
+            para_df = pd.concat(para_parts, ignore_index=True)
+            if mode == "eval":
+                para_out = ds_dir / paths.PARAPHRASED_FILENAME
+                para_out.parent.mkdir(parents=True, exist_ok=True)
+                para_df.to_csv(para_out, index=False)
+                if verbose:
+                    print(f"  Paraphrases: {len(para_df)} -> separate {para_out.name} (eval mode)")
+            else:  # training — merge in
+                parts.append(para_df)
+                if verbose:
+                    print(f"  Paraphrases: {len(para_df)} merged (training mode)")
+        elif verbose:
+            print(f"  Paraphrases: none found")
 
     if not parts:
         if verbose:

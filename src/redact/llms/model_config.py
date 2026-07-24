@@ -125,6 +125,28 @@ MODEL_REGISTRY: dict[str, ModelConfig] = {
         recommended_max_workers=1,
         role="constitution_gen",
     ),
+    # Paraphraser role — a DEDICATED entry (does NOT repurpose a generation model).
+    # The real defingerprinting model is trained separately and unavailable here, so
+    # this stands in on the real ``venice-uncensored`` model (via ``name``) until the
+    # real one is registered — swap ``name`` or ``register_model(role="paraphraser")``
+    # when it lands. ``name`` + ``role`` are the load-bearing fields (role lookup
+    # returns ``name``, so runtime uses venice-uncensored's own RPM/capabilities).
+    "venice-paraphraser": ModelConfig(
+        name="venice-uncensored",
+        rpm=75,
+        backend_type="venice",
+        default_extra_body={
+            "venice_parameters": {
+                "disable_thinking": True,
+                "include_venice_system_prompt": False,
+            }
+        },
+        is_uncensored=True,
+        supports_parallel_calls=True,
+        supports_native_batching=False,
+        recommended_max_workers=3,
+        role="paraphraser",
+    ),
 }
 
 

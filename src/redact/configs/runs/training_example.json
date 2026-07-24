@@ -1,11 +1,14 @@
 {
   "dataset_type": "training",
   "data_dir": "./runs/training_example",
-  "models": { "gen": null, "check": null, "translation": null, "constitution": null },
+  "models": {
+    "gen": null, "check": null, "translation": null, "constitution": null,
+    "paraphraser": null, "paraphrase_check": null
+  },
   "taxonomy": "content_moderation_categories",
   "taxonomy_dir": null,
   "prompt_dir": null,
-  "stages": ["constitution", "inputs", "outputs", "jailbreaks", "build"],
+  "stages": ["constitution", "inputs", "outputs", "paraphrase", "jailbreaks", "build"],
   "augmentations": {
     "include_hacking": true,
     "include_obfuscation": true,

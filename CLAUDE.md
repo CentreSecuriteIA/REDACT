@@ -42,7 +42,7 @@ REDACT/
 │       │   ├── generation.py        # InputPipeline: standalone (run_category) + constitution-seeded (run_from_constitution)
 │       │   ├── checker.py           # Entry-type-aware quality + output + category checkers
 │       │   ├── metaprompt.py        # Meta-prompt generation (description + seeds)
-│       │   └── paraphrase.py        # Fingerprint removal (stub)
+│       │   └── paraphrase.py        # Batched paraphrase / fingerprint removal (real; paraphraser role)
 │       │
 │       ├── dataset/                 # Data handling utilities
 │       │   ├── io.py                # CSV read/write per category folder (+ _hash_text content id)
@@ -262,7 +262,8 @@ The public `backend` param was removed — backends auto-resolve from the model 
 ```python
 from redact import (
     generate_constitution, generate_inputs, generate_outputs,
-    generate_jailbreaks, build_dataset, default_escalation_schedule,
+    generate_jailbreaks, generate_paraphrases, build_dataset,
+    default_escalation_schedule,
 )
 
 DATA_DIR = "./runs/training"
@@ -285,7 +286,15 @@ jailbreaks = generate_jailbreaks(
 )
 
 outputs = generate_outputs(data_dir=DATA_DIR, inputs=inputs)  # model responses + output checker
-dataset = build_dataset(data_dir=DATA_DIR)                    # merge inputs + jailbreaks + outputs
+
+# Paraphrase (fingerprint removal) — additive copies of base inputs + accepted base outputs.
+# K 1:1 calls round-robin over the `paraphraser` role; a SEPARATE meaning-preservation checker
+# (check→drop); deduped. Writes paraphrases_{inputs,outputs}.csv, resumable via a mapping file.
+paraphrases = generate_paraphrases(data_dir=DATA_DIR, target="both", paraphrases_per_sample=1)
+
+# Merge. mode="training" merges paraphrases into complete_dataset.csv; mode="eval" writes them
+# to a separate paraphrased.csv. Jailbreaks are only ever built from the base inputs.
+dataset = build_dataset(data_dir=DATA_DIR, mode="training")   # base + jailbreaks + outputs (+ paraphrases)
 ```
 
 **Config-driven** — a whole run from a recipe (`dataset_type` `"eval"`/`"training"`) + input-params:

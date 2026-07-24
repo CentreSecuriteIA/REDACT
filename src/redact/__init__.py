@@ -202,6 +202,7 @@ from .pipelines import (  # noqa: E402
     generate_inputs,
     generate_outputs,
     generate_jailbreaks,
+    generate_paraphrases,
     build_dataset,
 )
 
