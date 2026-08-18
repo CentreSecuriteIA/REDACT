@@ -51,6 +51,13 @@ def test_paraphrase_inputs_dedup_and_manifest(tmp_path, patched):
     out = paths.paraphrases_inputs_csv(tmp_path)
     assert out.exists()
     assert out.with_name("paraphrases_inputs.manifest.jsonl").exists()
+    # sample_id is this row's own content-hash identity, distinct from input_id
+    # (which points back to the origin sample).
+    from redact.dataset.io import _hash_text
+    assert "sample_id" in df.columns
+    for _, row in df.iterrows():
+        assert row["sample_id"] == _hash_text(row["sample"])
+        assert row["sample_id"] != row["input_id"]
 
 
 def test_paraphrase_resume_is_idempotent(tmp_path, patched):
@@ -114,9 +121,34 @@ def test_ledger_prevents_reattempt_of_dropped_units(tmp_path, monkeypatch):
     assert calls["n"] == 2  # no new paraphrase calls
 
 
+def test_prompt_dir_threads_to_paraphrase_and_check(tmp_path, monkeypatch):
+    _seed_inputs(tmp_path)
+    seen = {}
+    monkeypatch.setattr(P, "get_backend", lambda m: MockBackend())
+    monkeypatch.setattr(
+        P, "paraphrase_batch",
+        lambda backend, model, texts, prompt_dir=None, **kw: (
+            seen.__setitem__("para", prompt_dir) or [f"P::{t}" for t in texts]
+        ),
+    )
+    monkeypatch.setattr(
+        P, "batch_check_samples",
+        lambda b, m, samples, chk, **k: [(True, "") for _ in samples],
+    )
+    # capture the checker's prompt_dir without loading real prompt files
+    monkeypatch.setattr(
+        P, "build_paraphrase_checker",
+        lambda prompt_dir=None: seen.__setitem__("check", prompt_dir) or (lambda s: []),
+    )
+    custom = str(tmp_path / "myprompts")
+    generate_paraphrases(data_dir=tmp_path, target="inputs", prompt_dir=custom, verbose=False)
+    assert seen["para"] == custom   # paraphrase prompt dir threaded
+    assert seen["check"] == custom  # paraphrase-check prompt dir threaded
+
+
 def _seed_paraphrase_artifact(tmp_path):
     para = pd.DataFrame({
-        "id": ["x1"], "input_id": ["b1"], "iteration": [0], "sample": ["PARA::p"],
+        "sample_id": ["x1"], "input_id": ["b1"], "iteration": [0], "sample": ["PARA::p"],
         "category": ["Cyber"], "entry_type": ["harmful"], "paraphrase_model": ["m"],
         "accepted": [True], "reasoning": [""], "source": ["paraphrase_inputs"],
     })

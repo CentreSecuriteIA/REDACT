@@ -115,14 +115,52 @@ def _select_kwargs(technique: Callable, kwargs: dict) -> dict:
     return {k: v for k, v in kwargs.items() if k in sig_params}
 
 
-def _run_chain(techniques: list[Callable], text: str, **kwargs) -> TechniqueGen:
+def _tag_yields(gen: TechniqueGen, root: str) -> TechniqueGen:
+    """Wrap a technique generator's yields, tagging each with a sequential
+    ``internals_id`` rooted at ``root`` — ``{root}/0``, ``{root}/1``, ...
+
+    Numbered generically per yield within *this one* technique's execution,
+    not distinguishing "a genuinely new step" (e.g. cognitive hacking's
+    scenario -> construction) from "a retry of the same step" (e.g.
+    translation's own translate -> check -> retry loop) — that distinction
+    isn't visible at this level without each technique explicitly
+    cooperating, which no technique currently does. Every LLM call still gets
+    its own distinct, capturable path either way.
+
+    Only tags a request when its *own* target model's backend actually
+    supports internals capture (checked per request, not assumed from the
+    caller) — so a chain that mixes an internals-capable ``gen_model`` with a
+    non-capable ``translate_model`` (or vice versa) tags exactly the calls
+    that can be captured, and never trips BatchCaller's guard on the other.
+    """
+    from redact.llms.api import get_backend  # lazy import — avoids import cycles
+
+    n = 0
+    try:
+        request = gen.send(None)
+    except StopIteration as stop:
+        return stop.value
+    while True:
+        if getattr(get_backend(request.model), "supports_internals", False):
+            request = LLMRequest(request.model, request.messages, internals_id=f"{root}/{n}")
+            n += 1
+        reply = yield request
+        try:
+            request = gen.send(reply)
+        except StopIteration as stop:
+            return stop.value
+
+
+def _run_chain(techniques: list[Callable], text: str, internals_root: str | None = None, **kwargs) -> TechniqueGen:
     """Generator that chains techniques, threading text through.
 
     Pure transforms run inline (zero rounds); LLM-dependent technique
     generators are delegated to via ``yield from`` so their :class:`LLMRequest`
     yields propagate up to the batched engine (or to ``run_sync`` for the
-    single-sample path). Early-exits with a ``DISCARDED`` info string the moment
-    any step rejects, returning the pre-failure text. Returns ``(text, info)``.
+    single-sample path) — tagged with ``internals_id`` (see :func:`_tag_yields`)
+    when ``internals_root`` is given. Early-exits with a ``DISCARDED`` info
+    string the moment any step rejects, returning the pre-failure text.
+    Returns ``(text, info)``.
     """
     # gen-model techniques tag their requests with `gen_model`; accept the
     # legacy `model` kwarg as the source when gen_model isn't given explicitly.
@@ -134,7 +172,10 @@ def _run_chain(techniques: list[Callable], text: str, **kwargs) -> TechniqueGen:
     for technique in techniques:
         tech_kwargs = _select_kwargs(technique, kwargs)
         if inspect.isgeneratorfunction(technique):
-            output = yield from technique(result, **tech_kwargs)
+            tech_gen = technique(result, **tech_kwargs)
+            if internals_root:
+                tech_gen = _tag_yields(tech_gen, f"{internals_root}/{technique.__name__}")
+            output = yield from tech_gen
         else:
             output = technique(result, **tech_kwargs)
         new_text, info = _normalize_output(output)

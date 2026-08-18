@@ -1,19 +1,22 @@
-"""Planning pass + JSONL ledger for jailbreak runs.
+"""Planning pass for jailbreak runs (built on the shared ``Manifest``).
 
 A jailbreak run is **planned in full before any generation**:
 :func:`plan_run` walks every input sample × every iteration, assigns a
 technique combination (deterministically, with per-sample dedup so repeated
 iterations don't draw the same combination), and writes one JSON line per unit
-to a manifest. Generation then streams the manifest in chunks.
+via :class:`redact.dataset.Manifest`. Generation then streams the manifest in
+chunks (:func:`load_plan`).
 
-Identity is the **prompt-content MD5** (the same ``id`` ``dataset/io.py`` writes
-for input samples), so the manifest, the assignment seed, and every output row
-are all keyed to the exact prompt — stable across re-runs and content-based.
+Identity is the **prompt-content MD5** (the same ``sample_id`` ``dataset/io.py``
+writes for input samples), so the manifest, the assignment seed, and every output
+row are all keyed to the exact prompt — stable across re-runs and content-based.
 
-Resume is driven by the **output CSV as source of truth**: any
-``(sample_id, iteration)`` already present there is skipped on a re-run. The
-manifest itself is immutable after planning, so a chunk crash never corrupts the
-plan.
+Resume is driven by the sidecar ``jailbreaks.state.jsonl`` **ledger**
+(``redact.dataset.Ledger``, keyed ``(input_id, iteration)``, acked per chunk
+after the CSV append) **unioned** with the output CSV so pre-ledger runs still
+resume — see :func:`redact.pipelines.generate_jailbreaks` and
+:func:`completed_from_output`. The manifest itself is immutable after planning,
+so a chunk crash never corrupts the plan.
 
 Manifest row schema (one JSON object per line)::
 
@@ -29,12 +32,12 @@ this module only plans, it does not run the rounds.
 
 from __future__ import annotations
 
-import json
 from pathlib import Path
 
 import pandas as pd
 
 from redact.dataset.io import _hash_text
+from redact.dataset.manifest import Manifest
 
 from .utils import assign_combination
 
@@ -60,7 +63,7 @@ def plan_run(
     settings_per_iteration: list[dict] | None = None,
     sample_kwargs: dict | None = None,
     text_col: str = "prompt",
-    id_col: str = "id",
+    id_col: str = "sample_id",
     verbose: bool = True,
 ) -> Path:
     """Write the full run plan to ``manifest_path`` (one JSON line per unit).
@@ -86,54 +89,46 @@ def plan_run(
     """
     sample_kwargs = sample_kwargs or {}
     manifest_path = Path(manifest_path)
-    manifest_path.parent.mkdir(parents=True, exist_ok=True)
 
     has_id = id_col in inputs.columns
-    n_units = 0
-    with manifest_path.open("w", encoding="utf-8") as fh:
-        for _, row in inputs.iterrows():
-            if has_id and pd.notna(row.get(id_col)) and str(row.get(id_col)):
-                sid = str(row[id_col])
-            else:
-                sid = compute_sample_id(str(row[text_col]))
+    recs: list[dict] = []
+    for _, row in inputs.iterrows():
+        if has_id and pd.notna(row.get(id_col)) and str(row.get(id_col)):
+            sid = str(row[id_col])
+        else:
+            sid = compute_sample_id(str(row[text_col]))
 
-            used: list[tuple] = []
-            for it in range(iterations):
-                settings = (
-                    settings_per_iteration[it]
-                    if settings_per_iteration is not None
-                    else sample_kwargs
-                )
-                names = assign_combination(
-                    sid, pool, seed=seed, iteration=it, used=used, **settings
-                )
-                used.append(tuple(names))
-                rec = {
-                    "sample_id": sid,
-                    "iteration": it,
-                    "combination": names,
-                    "settings": {**settings, "seed": seed},
-                    "category": str(row.get("category", "")),
-                    "entry_type": str(row.get("entry_type", "")),
-                    "status": "planned",
-                }
-                fh.write(json.dumps(rec, ensure_ascii=False) + "\n")
-                n_units += 1
+        used: list[tuple] = []
+        for it in range(iterations):
+            settings = (
+                settings_per_iteration[it]
+                if settings_per_iteration is not None
+                else sample_kwargs
+            )
+            names = assign_combination(
+                sid, pool, seed=seed, iteration=it, used=used, **settings
+            )
+            used.append(tuple(names))
+            recs.append({
+                "sample_id": sid,
+                "iteration": it,
+                "combination": names,
+                "settings": {**settings, "seed": seed},
+                "category": str(row.get("category", "")),
+                "entry_type": str(row.get("entry_type", "")),
+                "status": "planned",
+            })
+
+    Manifest(manifest_path).write(recs)
 
     if verbose:
-        print(f"  Planned {n_units} units ({len(inputs)} samples x {iterations}) -> {manifest_path}")
+        print(f"  Planned {len(recs)} units ({len(inputs)} samples x {iterations}) -> {manifest_path}")
     return manifest_path
 
 
 def load_plan(manifest_path) -> list[dict]:
     """Read all plan rows from a manifest JSONL file."""
-    rows: list[dict] = []
-    with Path(manifest_path).open(encoding="utf-8") as fh:
-        for line in fh:
-            line = line.strip()
-            if line:
-                rows.append(json.loads(line))
-    return rows
+    return Manifest(manifest_path).load()
 
 
 def plan_index(rows: list[dict]) -> dict[str, list[dict]]:
@@ -145,10 +140,11 @@ def plan_index(rows: list[dict]) -> dict[str, list[dict]]:
 
 
 def completed_from_output(output_path) -> set[tuple[str, int]]:
-    """Return ``(sample_id, iteration)`` units already written to the output CSV.
+    """Return ``(input_id, iteration)`` units already written to the output CSV.
 
-    The output CSV is the resume source of truth — anything present here is
-    skipped on a re-run, so partial chunks never duplicate rows.
+    Unioned with the sidecar ``jailbreaks.state.jsonl`` ledger by
+    :func:`redact.pipelines.generate_jailbreaks` to drive resume; reading the CSV
+    keeps runs created before the ledger existed resumable (back-compat).
     """
     p = Path(output_path)
     if not p.exists():

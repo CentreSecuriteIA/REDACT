@@ -93,7 +93,7 @@ def normalize_csv(
     text_column: str = "prompt",
     discard_values: list[str] | None = None,
     recompute_ids: bool = True,
-    id_column: str = "id",
+    id_column: str = "sample_id",
 ) -> pd.DataFrame | None:
     """Normalize a CSV DataFrame for merging.
 
@@ -113,7 +113,7 @@ def normalize_csv(
             discarded rows (case-insensitive, stripped). Defaults
             to ``["DISCARDED"]``.
         recompute_ids: If True, recompute IDs from the text column.
-        id_column: Name of the ID column. Defaults to ``"id"``.
+        id_column: Name of the ID column. Defaults to ``"sample_id"``.
 
     Returns:
         Normalized DataFrame, or None if *text_column* is missing.
@@ -228,8 +228,8 @@ def merge_csvs_from_dirs(
         merged = merged[available]
 
     # Deduplicate by ID
-    if deduplicate and "id" in merged.columns:
-        merged = merged.drop_duplicates(subset=["id"]).reset_index(drop=True)
+    if deduplicate and "sample_id" in merged.columns:
+        merged = merged.drop_duplicates(subset=["sample_id"]).reset_index(drop=True)
 
     if output_path is not None:
         Path(output_path).parent.mkdir(parents=True, exist_ok=True)
@@ -243,7 +243,7 @@ def merge_csvs_from_dirs(
 # ---------------------------------------------------------------------------
 
 JAILBREAK_KEEP_COLUMNS = [
-    "id", "prompt", "category", "origin",
+    "sample_id", "prompt", "category", "origin",
     "input_prompt", "input_id", "technique", "technique_type",
 ]
 
@@ -254,7 +254,7 @@ JAILBREAK_COLUMN_MAP = {
 }
 
 CONTENT_MOD_KEEP_COLUMNS = [
-    "id", "sample", "category", "turn", "accepted", "source",
+    "sample_id", "sample", "category", "turn", "accepted", "source",
 ]
 
 CONTENT_MOD_COLUMN_MAP = {
@@ -264,7 +264,7 @@ CONTENT_MOD_COLUMN_MAP = {
 }
 
 CONSTITUTION_INPUT_KEEP_COLUMNS = [
-    "id",
+    "sample_id",
     "prompt",
     "category",
     "constitution_category",

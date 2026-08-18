@@ -16,7 +16,7 @@ def _write_test_csv(dataset_dir, category, samples, accepted=None):
     if accepted is None:
         accepted = [True] * len(samples)
     df = pd.DataFrame({
-        "id": [f"id{i}" for i in range(len(samples))],
+        "sample_id": [f"id{i}" for i in range(len(samples))],
         "sample": samples,
         "category": [category] * len(samples),
         "turn": [0] * len(samples),
@@ -85,9 +85,9 @@ class TestNormalizeCsv:
         assert len(result) == 2
 
     def test_recompute_ids(self):
-        df = pd.DataFrame({"prompt": ["hello"], "id": ["old_id"]})
+        df = pd.DataFrame({"prompt": ["hello"], "sample_id": ["old_id"]})
         result = normalize_csv(df, recompute_ids=True)
-        assert result.iloc[0]["id"] != "old_id"
+        assert result.iloc[0]["sample_id"] != "old_id"
 
     def test_missing_text_column_returns_none(self):
         df = pd.DataFrame({"other": ["x"]})

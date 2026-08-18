@@ -27,6 +27,7 @@ Usage:
 """
 
 import logging
+import warnings
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Callable
@@ -37,13 +38,38 @@ from ..llms.base import LLMBackend
 from ..llms.calls import generate_sample, check_sample, batch_check_samples
 from ..llms.prompts import build_messages
 from ..llms.extraction import get_format_instruction, extract_and_clean
-from ..llms.wrappers import RateLimiter, BatchCaller
-from ..dataset.io import append_samples, get_existing_samples, _default_dataset_dir
+from ..llms.wrappers import RateLimiter, BatchCaller, assert_single_sample_per_call
+from ..dataset.io import append_samples, get_existing_samples, _default_dataset_dir, _hash_text
 from ..dataset.merge import merge_all
+from ..dataset.ledger import Ledger
+from ..dataset.manifest import Manifest
 from ..types import EntryType
 from .checker import build_quality_checker
 
 logger = logging.getLogger(__name__)
+
+
+def _constitution_inputs_ledger(dataset_dir: str | Path) -> Ledger:
+    """Shared resume-ledger for constitution-seeded input generation.
+
+    One JSON object per completed constitution entry, keyed on
+    ``(sample_description, entry_type, style)`` and stored at
+    ``{dataset_dir}/constitution_inputs.state.jsonl`` beside the per-category
+    CSVs.
+    """
+    return Ledger(
+        Path(dataset_dir) / "constitution_inputs.state.jsonl",
+        key_fields=("sample_description", "entry_type", "style"),
+        casters={"sample_description": str, "entry_type": str, "style": str},
+    )
+
+
+def _constitution_inputs_manifest(dataset_dir: str | Path) -> Manifest:
+    """Run-plan for constitution-seeded input generation, at
+    ``{dataset_dir}/constitution_inputs.manifest.jsonl`` beside the ledger. One
+    row per constitution entry, keyed like the ledger
+    (``sample_description``/``entry_type``/``style``)."""
+    return Manifest(Path(dataset_dir) / "constitution_inputs.manifest.jsonl")
 
 
 # ---------------------------------------------------------------------------
@@ -495,7 +521,21 @@ class InputPipeline:
 
         Returns:
             CategoryResult with all turn outcomes.
+
+        .. deprecated::
+            Standalone meta-prompt input generation is deprecated in favour of
+            constitution-seeded generation, which gives better/more adjustable
+            coverage — use ``run_from_constitution`` /
+            ``generate_inputs(constitution_df=...)``. This method remains fully
+            functional.
         """
+        warnings.warn(
+            "InputPipeline.run_category (standalone meta-prompt input generation) is "
+            "deprecated in favour of constitution-seeded generation "
+            "(generate_inputs(constitution_df=...)); it remains functional.",
+            DeprecationWarning,
+            stacklevel=2,
+        )
         result = CategoryResult(category=category)
         feedback = ""
 
@@ -615,9 +655,49 @@ class InputPipeline:
             logger.warning("run_from_constitution: empty constitution_df, nothing to do")
             return ConstitutionInputResult()
 
+        # Internals capture (opt-in, non-interfering — no CSV column, see
+        # .claude/introspection_backend_plan.md). Generation asks for
+        # samples_per_entry outputs in one completion, so one forward pass can't
+        # be attributed to any single resulting sample unless there's exactly
+        # one — assert_single_sample_per_call is a no-op unless gen_backend
+        # actually supports internals, in which case it raises if not.
+        assert_single_sample_per_call(self.gen_backend, samples_per_entry)
+        capture_input = getattr(self.gen_backend, "supports_internals", False)
+        # The checker dispatches one call per already-extracted sample (a flat
+        # batch), so it's always attributable regardless of samples_per_entry —
+        # no gate needed here.
+        capture_val_in = use_checker and getattr(self.check_backend, "supports_internals", False)
+
         result = ConstitutionInputResult()
 
+        # Sidecar resume-ledger, keyed on one constitution entry
+        # (sample_description, entry_type, style) — the same crash-safe pattern
+        # as the constitution / output / paraphrase stages. A unit is acked only
+        # after its rows are flushed to CSV, so a crash loses at most one entry.
+        ledger = (
+            _constitution_inputs_ledger(self.dataset_dir)
+            if (save and self.dataset_dir is not None)
+            else None
+        )
+
+        # Plan → manifest: one row per constitution entry (full set for this
+        # style), keyed like the ledger, written before the batch loop.
+        if save and self.dataset_dir is not None:
+            _constitution_inputs_manifest(self.dataset_dir).write(
+                {
+                    "sample_description": str(entry.get("sample_description", "")),
+                    "entry_type": str(entry.get("entry_type", "harmful")),
+                    "style": style,
+                    "status": "planned",
+                }
+                for _, entry in constitution_df.iterrows()
+            )
+
         if fresh and self.dataset_dir is not None:
+            # Whole-dir fresh wipes every unit's acks; style-aware fresh keeps
+            # other styles' acks (they aren't being regenerated).
+            if ledger is not None and not style:
+                ledger.reset()
             for csv_path in Path(self.dataset_dir).glob("*/samples.csv"):
                 if style:
                     # Style-aware fresh: only remove rows for this style so
@@ -641,6 +721,12 @@ class InputPipeline:
                 if verbose:
                     print(f"  Cleared {csv_path}")
         elif not fresh and self.dataset_dir is not None:
+            # Resume source of truth is the sidecar ledger; we also union the
+            # existing-CSV set so runs created before the ledger existed still
+            # resume (back-compat). Keys are stringified on both sides to match.
+            processed: set[tuple[str, str, str]] = (
+                set(ledger.completed()) if ledger is not None else set()
+            )
             existing = merge_all(self.dataset_dir, accepted_only=False)
             # Handle both old column name (sample_description) and new
             # (source_sample_description) so resume works across both formats.
@@ -655,11 +741,16 @@ class InputPipeline:
                     if "template_style" in existing.columns
                     else pd.Series([""] * len(existing), index=existing.index)
                 )
-                processed = set(zip(existing[desc_col], existing["entry_type"], style_vals))
+                processed |= {
+                    (str(d), str(t), str(s))
+                    for d, t, s in zip(existing[desc_col], existing["entry_type"], style_vals)
+                }
+            if processed:
                 original_count = len(constitution_df)
                 constitution_df = constitution_df[
                     ~constitution_df.apply(
-                        lambda r: (r["sample_description"], r["entry_type"], style) in processed,
+                        lambda r: (str(r["sample_description"]), str(r["entry_type"]), str(style))
+                        in processed,
                         axis=1,
                     )
                 ].reset_index(drop=True)
@@ -689,6 +780,9 @@ class InputPipeline:
 
             # 1. Build per-entry generation messages
             messages_list = []
+            entry_ids = []  # pre-call identity (composite of the ledger's own key
+                             # fields) — samples don't exist yet, so this entry is
+                             # the only thing capturable internals can be rooted at.
             for _, entry in batch:
                 seed_kwargs = {
                     "Category": str(entry.get("source_category", "")),
@@ -706,6 +800,9 @@ class InputPipeline:
                         **seed_kwargs,
                     )
                 )
+                entry_ids.append(_hash_text(
+                    f"{seed_kwargs['sample_description']}:{seed_kwargs['entry_type']}:{style}"
+                ))
 
             # 2. Single batched generation for the whole chunk (rate-limited,
             #    capability-aware) — routed through BatchCaller, not the raw backend.
@@ -715,6 +812,10 @@ class InputPipeline:
             raw_outputs = gen_caller.batch_generate(
                 messages_list, self.gen_model,
                 progress=f"gen batch {batch_idx}/{n_chunks}" if verbose else None,
+                internals_ids=(
+                    [f"{eid}/input_{style}" if style else f"{eid}/input" for eid in entry_ids]
+                    if capture_input else None
+                ),
             )
 
             # 3. Extract per entry
@@ -730,6 +831,10 @@ class InputPipeline:
             # 4. Build flat checker list + single batch_generate for checks
             flat_samples: list[str] = []
             flat_check_msgs: list[list[dict]] = []
+            # sample_id per extracted sample — its own eventual CSV identity
+            # (append_samples() computes the same hash), known pre-checker-call
+            # since the sample text already exists by this point.
+            flat_internals_ids: list[str] = []
             entry_ranges: list[tuple[int, int]] = []
             for (_, entry), extracted in zip(batch, per_entry_extracted):
                 start = len(flat_samples)
@@ -749,6 +854,9 @@ class InputPipeline:
                         )
                     checker = checker_cache[cache_key]
                     flat_check_msgs.extend(checker(s) for s in extracted)
+                    if capture_val_in:
+                        suffix = f"val_in_{style}" if style else "val_in"
+                        flat_internals_ids.extend(f"{_hash_text(s)}/{suffix}" for s in extracted)
 
             flat_check_results: list[tuple[bool, str]]
             if use_checker and flat_check_msgs:
@@ -759,6 +867,7 @@ class InputPipeline:
                 responses = check_caller.batch_generate(
                     flat_check_msgs, self.check_model,
                     progress=f"check batch {batch_idx}/{n_chunks}" if verbose else None,
+                    internals_ids=flat_internals_ids if capture_val_in else None,
                 )
                 flat_check_results = []
                 for response in responses:
@@ -831,6 +940,13 @@ class InputPipeline:
                         extra_columns=extra,
                         dataset_dir=self.dataset_dir,
                     )
+                    # Ack this entry only after its rows are on disk (crash-safe).
+                    if ledger is not None:
+                        ledger.record([{
+                            "sample_description": sample_desc,
+                            "entry_type": entry_type,
+                            "style": style,
+                        }])
 
                 accepted_count = sum(1 for sr in sample_results if sr.accepted)
                 rejected_count = len(sample_results) - accepted_count

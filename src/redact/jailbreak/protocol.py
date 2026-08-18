@@ -27,22 +27,12 @@ when run one sample at a time.
 
 from __future__ import annotations
 
-from dataclasses import dataclass
 from typing import Callable, Generator
 
-
-@dataclass
-class LLMRequest:
-    """A single pending LLM call yielded by a technique generator.
-
-    ``model`` is the resolved model name (e.g. ``"venice-uncensored"`` for
-    generation techniques, the translation-role model for translation). The
-    engine groups pending requests by ``model`` and dispatches one batch per
-    model per round, so the model name is the routing key.
-    """
-
-    model: str
-    messages: list[dict]
+# LLMRequest is a model-layer type — defined in redact.llms.conversation and
+# re-exported here so existing jailbreak imports (`from .protocol import LLMRequest`)
+# keep working while `llms/` and `multi_turn/` share the same class.
+from redact.llms.conversation import LLMRequest  # noqa: F401
 
 
 # A technique generator yields LLMRequests, is resumed with the response

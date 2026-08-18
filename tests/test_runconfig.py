@@ -38,6 +38,31 @@ def test_read_missing_manifest_returns_none(tmp_path):
     assert read_manifest("outputs", tmp_path) is None
 
 
+def test_write_manifest_with_extra_and_spec(tmp_path):
+    write_manifest("jailbreaks", data_dir=tmp_path, extra={"note": "hi"}, spec_version="1.0")
+    m = read_manifest("jailbreaks", tmp_path)
+    assert m["note"] == "hi" and m["spec_version"] == "1.0"
+
+
+def test_counts_none_is_empty():
+    from redact.runconfig import _counts
+    assert _counts(None) == {}
+
+
+def test_run_pipeline_loads_params_file(tmp_path, monkeypatch):
+    import redact
+    monkeypatch.setattr(redact, "build_dataset", lambda **k: pd.DataFrame({"x": [1]}))
+    (tmp_path / "params.json").write_text(json.dumps({"build": {}}))
+    recipe = tmp_path / "recipe.json"
+    recipe.write_text(json.dumps({
+        "dataset_type": "eval", "data_dir": str(tmp_path),
+        "stages": ["build"], "params_file": "params.json",
+    }))
+    from redact import run_pipeline
+    summary = run_pipeline(str(recipe), verbose=False)  # params=None -> load params_file
+    assert "build" in summary["stages"]
+
+
 # --- recipe / params loading -------------------------------------------------
 
 def test_load_recipe_defaults_and_base_dir(tmp_path):
@@ -110,6 +135,40 @@ def test_run_pipeline_eval_jailbreaks_and_build(tmp_path):
     assert paths.complete_dataset_csv(tmp_path).exists()
     assert read_manifest("build", tmp_path) is not None
     assert summary["stages"]["build"]["counts"]["rows"] >= 3
+
+
+def test_run_pipeline_all_stages_mocked(tmp_path, monkeypatch):
+    """Cover every stage dispatch (incl. constitution/inputs/outputs/paraphrase) by
+    mocking the generate_* functions."""
+    import redact
+
+    calls = []
+
+    def mk(name, ret):
+        def f(*a, **k):
+            calls.append(name)
+            return ret
+        return f
+
+    const_df = pd.DataFrame({"entry_type": ["harmful"], "source_category": ["c"]})
+    monkeypatch.setattr(redact, "generate_constitution", mk("constitution", const_df))
+    monkeypatch.setattr(redact, "generate_inputs", mk("inputs", pd.DataFrame({"sample": ["s"], "accepted": [True]})))
+    monkeypatch.setattr(redact, "generate_outputs", mk("outputs", pd.DataFrame({"output_response": ["o"], "accepted": [True]})))
+    monkeypatch.setattr(redact, "generate_paraphrases", mk("paraphrase", {"inputs": pd.DataFrame({"sample": ["p"]}), "outputs": pd.DataFrame()}))
+    monkeypatch.setattr(redact, "generate_jailbreaks", mk("jailbreaks", pd.DataFrame({"jailbreak": ["j"], "accepted": [True]})))
+    monkeypatch.setattr(redact, "build_dataset", mk("build", pd.DataFrame({"x": [1, 2]})))
+
+    from redact import run_pipeline
+    summary = run_pipeline(
+        {"dataset_type": "training", "data_dir": str(tmp_path),
+         "stages": ["constitution", "inputs", "outputs", "paraphrase", "jailbreaks", "build"],
+         "augmentations": {"include_translation": False}},
+        params={"inputs": {"num_categories": 1}, "paraphrase": {"target": "inputs"}},
+        verbose=True,
+    )
+    assert calls == ["constitution", "inputs", "outputs", "paraphrase", "jailbreaks", "build"]
+    assert set(summary["stages"]) == {"constitution", "inputs", "outputs", "paraphrase", "jailbreaks", "build"}
+    assert summary["stages"]["paraphrase"]["counts"]["rows"] == 1  # concat of the non-empty frame
 
 
 def test_training_inputs_without_constitution_stage_raises(tmp_path):

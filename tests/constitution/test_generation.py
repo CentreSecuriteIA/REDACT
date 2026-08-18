@@ -86,12 +86,16 @@ class TestConstitutionResult:
         df = result.to_dataframe()
         assert len(df) == 2
         assert list(df.columns) == [
+            "sample_id",
             "constitution_category", "constitution_subcategory",
             "sample_description", "entry_type",
             "source_category", "source_group_tag",
         ]
         assert df.iloc[0]["constitution_category"] == "Cat"
         assert df.iloc[1]["entry_type"] == "benign"
+        # sample_id is a content-hash of the entry's own text (own identity,
+        # distinct from source_category/group_tag which describe its origin).
+        assert df.iloc[0]["sample_id"] and df.iloc[0]["sample_id"] != df.iloc[1]["sample_id"]
 
 
 class TestStripEndMarker:
@@ -284,6 +288,22 @@ class TestRunResume:
             "CatA::harmful", "CatA::benign",
             "CatB::harmful", "CatB::benign",
         }
+
+    def test_run_writes_manifest_units(self, tmp_path):
+        backend = MockBackend(_VALID_CONSTITUTION_OUTPUT)
+        pipeline = self._make_pipeline(backend, tmp_path)
+        pipeline.run(
+            taxonomy=self._TAXONOMY,
+            entry_types=[EntryType.HARMFUL, EntryType.BENIGN],
+            num_categories=2, save=True, verbose=False,
+        )
+        from redact.dataset import Manifest
+        rows = Manifest(tmp_path / "constitution" / "constitution.manifest.jsonl").load()
+        assert {(r["source_category"], r["entry_type"]) for r in rows} == {
+            ("CatA", "harmful"), ("CatA", "benign"),
+            ("CatB", "harmful"), ("CatB", "benign"),
+        }
+        assert all(r["status"] == "planned" for r in rows)
 
     def test_resume_skips_completed_and_no_duplicates(self, tmp_path):
         backend = MockBackend(_VALID_CONSTITUTION_OUTPUT)

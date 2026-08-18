@@ -88,6 +88,33 @@ def get_backend(model: str) -> LLMBackend:
         _backend_cache[cache_key] = backend
         return backend
 
+    if backend_type == "transformers_introspect":
+        cache_key = f"introspect:{model}"
+        if cache_key in _backend_cache:
+            return _backend_cache[cache_key]
+
+        if not config.hf_model_id:
+            raise ValueError(
+                f"Model {model!r} has backend_type='transformers_introspect' but "
+                f"no hf_model_id. Register it with register_model(..., "
+                f"hf_model_id='...', introspect_kwargs={{'log_dir': ...}})."
+            )
+        introspect_kwargs = dict(config.introspect_kwargs or {})
+        if "log_dir" not in introspect_kwargs:
+            raise ValueError(
+                f"Model {model!r} has backend_type='transformers_introspect' but "
+                f"introspect_kwargs has no 'log_dir'. Register it with "
+                f"register_model(..., introspect_kwargs={{'log_dir': ...}})."
+            )
+
+        from .introspection_backend import TransformersIntrospectionBackend
+
+        backend = TransformersIntrospectionBackend(
+            model=config.hf_model_id, **introspect_kwargs,
+        )
+        _backend_cache[cache_key] = backend
+        return backend
+
     if backend_type in _backend_cache:
         return _backend_cache[backend_type]
 

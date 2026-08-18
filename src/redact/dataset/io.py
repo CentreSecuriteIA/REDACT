@@ -27,7 +27,7 @@ def _default_dataset_dir() -> Path:
 # This is the contract the jailbreak pipeline (handled in a separate
 # session) consumes from generated input CSVs.
 SAMPLE_COLUMNS: list[str] = [
-    "id",                # MD5 hash of sample text
+    "sample_id",         # MD5 hash of sample text — this row's own identity
     "sample",            # The generated text content
     "category",          # Harm or benign category name
     "subcategory",       # Constitution subcategory, or ""
@@ -159,14 +159,14 @@ def append_samples(
         extra_columns = [{}] * len(samples)
 
     existing = read_category_csv(category, dataset_dir, filename)
-    existing_ids = set(existing["id"].tolist()) if not existing.empty else set()
+    existing_ids = set(existing["sample_id"].tolist()) if not existing.empty else set()
 
     new_rows: list[dict] = []
     for i, (text, acc) in enumerate(zip(samples, accepted)):
         sample_id = _hash_text(text)
         if sample_id not in existing_ids:
             row = {
-                "id": sample_id,
+                "sample_id": sample_id,
                 "sample": text,
                 "category": category,
                 "turn": turn,

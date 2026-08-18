@@ -191,3 +191,100 @@ class TestBatchCaller:
         assert results == ["a", "b"]
         assert sorted(seen) == [(0, "a"), (1, "b")]   # user callback still fired
         assert "lbl: 2/2 done" in capsys.readouterr().out
+
+
+class _InternalsBackend(MockBackend):
+    """MockBackend variant that declares internals support."""
+
+    @property
+    def supports_internals(self) -> bool:
+        return True
+
+
+class TestBatchCallerInternalsIds:
+    """internals_ids/internals_id: capability-gated, never leaks to unsupported backends."""
+
+    def test_run_raises_when_backend_does_not_support_internals(self):
+        backend = MockBackend("ok")  # supports_internals=False (base default)
+        caller = BatchCaller(backend)
+        with pytest.raises(ValueError, match="does not support internals"):
+            caller.run(
+                [[{"role": "user", "content": "hi"}]], "m",
+                internals_ids=["id-0"],
+            )
+
+    def test_batch_generate_raises_when_backend_does_not_support_internals(self):
+        backend = MockBackend("ok")
+        caller = BatchCaller(backend)
+        with pytest.raises(ValueError, match="does not support internals"):
+            caller.batch_generate(
+                [[{"role": "user", "content": "hi"}]], "m",
+                internals_ids=["id-0"],
+            )
+
+    def test_no_error_and_no_kwarg_leak_when_internals_ids_is_none(self):
+        # The common case: internals_ids omitted entirely — must be a total no-op,
+        # not just "no crash" (confirms nothing reaches backend.generate as a kwarg).
+        backend = MockBackend("ok")
+        caller = BatchCaller(backend)
+        caller.run([[{"role": "user", "content": "hi"}]], "m")
+        assert "internals_id" not in backend.calls[0]
+
+    def test_run_unzips_internals_ids_per_call(self):
+        backend = _InternalsBackend(["r0", "r1"])
+        caller = BatchCaller(backend)
+        caller.run(
+            [[{"role": "user", "content": "a"}], [{"role": "user", "content": "b"}]],
+            "m",
+            internals_ids=["id-0", "id-1"],
+        )
+        assert backend.calls[0]["internals_id"] == "id-0"
+        assert backend.calls[1]["internals_id"] == "id-1"
+
+    def test_batch_generate_forwards_internals_ids_through_native_batch(self):
+        class _NativeBatchInternalsBackend(_InternalsBackend):
+            @property
+            def supports_native_batching(self) -> bool:
+                return True
+
+            def batch_generate(self, messages_list, model, **kwargs):
+                self.batch_calls = kwargs
+                return ["r0", "r1"]
+
+        backend = _NativeBatchInternalsBackend(["r0", "r1"])
+        caller = BatchCaller(backend)
+        results = caller.batch_generate(
+            [[{"role": "user", "content": "a"}], [{"role": "user", "content": "b"}]],
+            "m",
+            internals_ids=["id-0", "id-1"],
+        )
+        assert results == ["r0", "r1"]
+        assert backend.batch_calls["internals_ids"] == ["id-0", "id-1"]
+
+    def test_length_mismatch_raises(self):
+        backend = _InternalsBackend(["r0", "r1"])
+        caller = BatchCaller(backend)
+        with pytest.raises(ValueError, match="same length"):
+            caller.batch_generate(
+                [[{"role": "user", "content": "a"}], [{"role": "user", "content": "b"}]],
+                "m",
+                internals_ids=["only-one"],
+            )
+
+
+class TestAssertSingleSamplePerCall:
+    """Guard for pipelines shaped like run_from_constitution (N samples/call)."""
+
+    def test_noop_when_backend_does_not_support_internals(self):
+        from redact.llms.wrappers import assert_single_sample_per_call
+        backend = MockBackend("ok")  # supports_internals=False
+        assert_single_sample_per_call(backend, samples_per_call=5)  # no raise
+
+    def test_noop_when_samples_per_call_is_one(self):
+        from redact.llms.wrappers import assert_single_sample_per_call
+        assert_single_sample_per_call(_InternalsBackend("ok"), samples_per_call=1)  # no raise
+
+    def test_raises_when_internals_and_multi_sample(self):
+        from redact.llms.wrappers import assert_single_sample_per_call
+        with pytest.raises(ValueError, match="internals capture"):
+            assert_single_sample_per_call(_InternalsBackend("ok"), samples_per_call=3)

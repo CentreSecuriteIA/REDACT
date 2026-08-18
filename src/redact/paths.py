@@ -89,6 +89,13 @@ def paraphrased_csv(root: str | Path | None = None) -> Path:
     return datasets(root) / PARAPHRASED_FILENAME
 
 
+CONVERSATIONS_FILENAME = "conversations.csv"
+
+
+def conversations_csv(root: str | Path | None = None) -> Path:
+    return datasets(root) / CONVERSATIONS_FILENAME
+
+
 def benign_csv(root: str | Path | None = None) -> Path:
     return data_cache(root) / "benign" / "benign_samples.csv"
 

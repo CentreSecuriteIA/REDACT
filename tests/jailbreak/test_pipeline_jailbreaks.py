@@ -65,8 +65,8 @@ def test_reproducible_assignment(tmp_path):
 
 def test_iterations_dedup(tmp_path):
     out = tmp_path / "jb.csv"
-    generate_jailbreaks(inputs=_inputs(), output_path=out, seed=3,
-                        iterations=3, max_obfuscations=1, **PURE_KW)
+    df = generate_jailbreaks(inputs=_inputs(), output_path=out, seed=3,
+                             iterations=3, max_obfuscations=1, **PURE_KW)
     plan = load_plan(out.with_name("jb.manifest.jsonl"))
     assert len(plan) == 15  # 5 samples x 3 iterations
 
@@ -76,6 +76,14 @@ def test_iterations_dedup(tmp_path):
         by_sample.setdefault(r["sample_id"], []).append(tuple(r["combination"]))
     for combos in by_sample.values():
         assert len(set(combos)) == len(combos)
+
+    # Regression: sample_id (this row's own id) used to be silently inherited
+    # from input_id, so every iteration of the same input shared one value.
+    # Each of the 3 iterations per input_id must now have its own distinct
+    # sample_id (jailbreak/engine.py's _finalize()).
+    for input_id, group in df.groupby("input_id"):
+        assert group["sample_id"].nunique() == len(group)
+        assert not (group["sample_id"] == input_id).any()
 
 
 def test_resume_skips_completed(tmp_path):
@@ -89,6 +97,38 @@ def test_resume_skips_completed(tmp_path):
                                 resume=True, **PURE_KW)
     assert len(again) == 5  # no duplicate rows
     assert len(pd.read_csv(out)) == 5
+
+
+def test_completion_ledger_written_and_drives_resume(tmp_path):
+    out = tmp_path / "jb.csv"
+    generate_jailbreaks(inputs=_inputs(), output_path=out, seed=1, **PURE_KW)
+
+    # Sidecar ledger has one (input_id, iteration) line per written unit.
+    from redact.dataset import Ledger
+    led = Ledger.sidecar(out, key_fields=("input_id", "iteration"),
+                         casters={"input_id": str, "iteration": int})
+    assert len(led.completed()) == 5
+
+    # Ledger alone drives resume: delete the output CSV, keep the ledger. A
+    # resume run must still skip everything (nothing regenerated, no new rows).
+    out.unlink()
+    again = generate_jailbreaks(inputs=_inputs(), output_path=out, seed=1,
+                                resume=True, **PURE_KW)
+    assert len(again) == 0  # all units already acked in the ledger -> no output
+
+
+def test_fresh_run_clears_ledger(tmp_path):
+    out = tmp_path / "jb.csv"
+    generate_jailbreaks(inputs=_inputs(), output_path=out, seed=1, **PURE_KW)
+    from redact.dataset import Ledger
+    led = Ledger.sidecar(out, key_fields=("input_id", "iteration"),
+                         casters={"input_id": str, "iteration": int})
+    assert led.completed()
+
+    # resume=False regenerates from scratch: ledger reset then re-acked to 5.
+    generate_jailbreaks(inputs=_inputs(), output_path=out, seed=1, resume=False, **PURE_KW)
+    assert len(led.completed()) == 5
+    assert len(pd.read_csv(out)) == 5  # not doubled
 
 
 def test_settings_per_iteration_escalation(tmp_path):

@@ -23,22 +23,37 @@ runs the same chains synchronously via ``protocol.run_sync``.
 
 from __future__ import annotations
 
-from collections import defaultdict
-
+from redact.dataset.io import _hash_text
 from redact.llms import get_router
+from redact.llms.conversation import drive_generators
 
-from .protocol import LLMRequest
 from .utils import make_combination_gen, _parse_rejection_info, is_noop
 
 
-def _finalize(sample: dict, value) -> dict:
+def _rename_capture(sample: dict, gen_model: str, final_sample_id: str) -> None:
+    """Relabel a sample's provisional internals capture to its final sample_id.
+
+    No-op unless the sample actually carries a provisional root (i.e.
+    capture_internals was on for this run) — safe to call unconditionally.
+    """
+    root = sample.get("_internals_root")
+    if not root:
+        return
+    from redact.llms.api import get_backend
+    get_backend(gen_model).rename_capture(root, f"{sample.get('id', '')}/jailbreak/{final_sample_id}")
+
+
+def _finalize(sample: dict, value, gen_model: str) -> dict:
     """Build the output row for a completed sample from its ``(text, info)``."""
     text, info = value
     accepted, reasoning = _parse_rejection_info(info)
     fn = sample["combination"]
     techniques = list(getattr(fn, "techniques", []))
+    sample_id = _hash_text(text)
+    _rename_capture(sample, gen_model, sample_id)
     return {
         "input_id": sample.get("id", ""),
+        "sample_id": sample_id,
         "jailbreak": text,
         "technique": getattr(fn, "__name__", "identity"),
         "technique_info": info,
@@ -50,12 +65,15 @@ def _finalize(sample: dict, value) -> dict:
     }
 
 
-def _finalize_error(sample: dict, exc: Exception) -> dict:
+def _finalize_error(sample: dict, exc: Exception, gen_model: str) -> dict:
     """Build the output row for a sample whose chain raised — original kept."""
     fn = sample["combination"]
     techniques = list(getattr(fn, "techniques", []))
+    sample_id = _hash_text(sample["prompt"])
+    _rename_capture(sample, gen_model, sample_id)
     return {
         "input_id": sample.get("id", ""),
+        "sample_id": sample_id,
         "jailbreak": sample["prompt"],
         "technique": getattr(fn, "__name__", "identity"),
         "technique_info": f"ERROR: {exc}",
@@ -75,6 +93,7 @@ def batch_apply_combinations(
     benign_data: dict | None = None,
     router=None,
     verbose: bool = False,
+    capture_internals: bool = False,
 ) -> list[dict]:
     """Apply each sample's technique combination, batching LLM calls per round.
 
@@ -82,6 +101,8 @@ def batch_apply_combinations(
         samples: ``[{"id": str, "prompt": str, "combination": fn}, ...]`` where
             ``fn`` is a combined callable from ``utils.combine_techniques`` /
             ``utils.build_combination`` (carries ``.techniques`` + ``.__name__``).
+            An optional ``"iteration"`` key seeds the provisional internals
+            path when ``capture_internals`` is on (defaults to 0).
         gen_model: Model name that generation-layer techniques tag their
             requests with (translation tags its own translation-role model and
             ignores this).
@@ -92,63 +113,43 @@ def batch_apply_combinations(
             ``progress`` label on ``router.batch_generate`` (one tick stream
             per model per round). When False, dispatch with no progress kwarg
             (preserves the minimal router contract used by tests).
+        capture_internals: When True, each sample's LLM-backed technique calls
+            get tagged for internals capture (per-request, only for whichever
+            target model's backend actually supports it — see
+            ``utils._tag_yields``), under a provisional
+            ``{id}/jailbreak/attempt_{iteration}`` root; ``_finalize`` relabels
+            it to ``{id}/jailbreak/{sample_id}`` once the final jailbroken
+            text (and thus its real sample_id) is known — a pure side effect,
+            never a CSV column (see .claude/introspection_backend_plan.md).
 
     Returns:
         One result dict per input sample, in input order. Keys: ``input_id``,
-        ``jailbreak``, ``technique``, ``technique_info``, ``complexity``,
-        ``num_techniques``, ``is_noop``, ``accepted``, ``reasoning``.
+        ``sample_id``, ``jailbreak``, ``technique``, ``technique_info``,
+        ``complexity``, ``num_techniques``, ``is_noop``, ``accepted``,
+        ``reasoning``.
     """
     router = router or get_router()
     n = len(samples)
-    results: list[dict | None] = [None] * n
-    gens: dict[int, object] = {}
-    pending: dict[int, LLMRequest] = {}
 
-    def advance(i: int, response):
-        """Resume sample ``i`` with ``response`` (None to prime); record/queue."""
-        gen = gens[i]
-        try:
-            pending[i] = gen.send(response)
-        except StopIteration as stop:
-            results[i] = _finalize(samples[i], stop.value)
-        except Exception as exc:  # noqa: BLE001 — isolate one sample's failure
-            results[i] = _finalize_error(samples[i], exc)
-
-    # Prime every sample: run inline pure steps up to the first LLM request
-    # (or to completion for all-pure chains).
+    # Build one chain generator per sample; the generic round-driver
+    # (llms.conversation.drive_generators) pools LLM calls by model per round.
+    gens = {}
     for i, s in enumerate(samples):
+        internals_root = None
+        if capture_internals:
+            internals_root = f"{s.get('id', '')}/jailbreak/attempt_{s.get('iteration', 0)}"
+            s["_internals_root"] = internals_root  # read back in _finalize for the rename
         gens[i] = make_combination_gen(
             s["combination"], s["prompt"],
             gen_model=gen_model, translate_model=translate_model,
-            benign_data=benign_data,
+            benign_data=benign_data, internals_root=internals_root,
         )
-        advance(i, None)
-
-    # Drive remaining samples round by round: one batch call per model per round.
-    round_idx = 0
-    while pending:
-        round_idx += 1
-        groups: dict[str, list[int]] = defaultdict(list)
-        for i, req in pending.items():
-            groups[req.model].append(i)
-
-        round_requests = dict(pending)
-        pending.clear()
-
-        for model, idxs in groups.items():
-            messages_list = [round_requests[i].messages for i in idxs]
-            # Pass a progress label only when verbose, so non-verbose runs keep
-            # the minimal router.batch_generate(model, messages) contract.
-            kwargs = (
-                {"progress": f"round {round_idx} ({model})"} if verbose else {}
-            )
-            try:
-                responses = router.batch_generate(model, messages_list, **kwargs)
-            except Exception as exc:  # noqa: BLE001 — whole batch failed
-                for i in idxs:
-                    results[i] = _finalize_error(samples[i], exc)
-                continue
-            for i, resp in zip(idxs, responses):
-                advance(i, resp)
-
-    return [r for r in results if r is not None]
+    results = drive_generators(
+        gens,
+        router=router,
+        finalize=lambda i, value: _finalize(samples[i], value, gen_model),
+        on_error=lambda i, exc: _finalize_error(samples[i], exc, gen_model),
+        verbose=verbose,
+        progress="jailbreak" if verbose else None,
+    )
+    return [results[i] for i in range(n) if i in results]

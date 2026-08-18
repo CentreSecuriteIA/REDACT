@@ -51,12 +51,19 @@ try:
 except ImportError:
     pass
 
+# transformers/torch introspection backend is imported lazily to avoid hard dependency
+try:
+    from .introspection_backend import TransformersIntrospectionBackend
+except ImportError:
+    pass
+
 # Wrappers
 from .wrappers import (
     RateLimiter,
     with_retries,
     with_feedback_retries,
     BatchCaller,
+    assert_single_sample_per_call,
 )
 
 # Progress reporting (shared across all batched generation)

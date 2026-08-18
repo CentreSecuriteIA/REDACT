@@ -222,11 +222,28 @@ class BatchCaller:
             self._rate_limiter.wait_if_needed(model)
         return self._backend.generate(messages, model, **kwargs)
 
+    def _check_internals_support(self, internals_ids: list | None) -> None:
+        """Raise a clear error if internals capture is requested but unsupported.
+
+        Guards the one place ``internals_id(s)`` cross from generic pipeline
+        kwargs into an actual backend call. Without this, an unsupported
+        kwarg would silently ride ``**kwargs`` into e.g. Venice/Anthropic's
+        SDK client call and crash there instead — this fails fast, before
+        dispatch, with a message that says what happened.
+        """
+        if internals_ids is not None and not self._backend.supports_internals:
+            raise ValueError(
+                f"{type(self._backend).__name__} does not support internals "
+                f"capture (supports_internals=False); remove internals_ids/"
+                f"internals_id or use an internals-capable backend."
+            )
+
     def run(
         self,
         messages_list: list[list[dict]],
         model: str,
         on_complete: Callable[[int, str], None] | None = None,
+        internals_ids: list[str | None] | None = None,
         **kwargs,
     ) -> list[str]:
         """Run generation for a list of message sets.
@@ -236,27 +253,46 @@ class BatchCaller:
             model: Model identifier.
             on_complete: Optional callback(index, result) called after each
                          completion. Useful for incremental checkpointing.
+            internals_ids: Optional per-item ids (same length as
+                messages_list) requesting internals capture — only valid
+                when ``backend.supports_internals`` is True; each id is
+                forwarded as ``internals_id=internals_ids[i]`` to that item's
+                ``backend.generate()`` call. Raises ``ValueError`` if passed
+                to a backend that doesn't support it.
             **kwargs: Passed through to backend.generate().
 
         Returns:
             List of generated texts, in the same order as messages_list.
         """
+        self._check_internals_support(internals_ids)
+        if internals_ids is not None and len(internals_ids) != len(messages_list):
+            raise ValueError(
+                f"internals_ids must be the same length as messages_list "
+                f"({len(internals_ids)} != {len(messages_list)})."
+            )
+
         results: list[str | None] = [None] * len(messages_list)
 
         if self._max_workers <= 1:
             # Sequential
             for i, msgs in enumerate(messages_list):
-                result = self._call_one(msgs, model, **kwargs)
+                call_kwargs = dict(kwargs)
+                if internals_ids is not None:
+                    call_kwargs["internals_id"] = internals_ids[i]
+                result = self._call_one(msgs, model, **call_kwargs)
                 results[i] = result
                 if on_complete:
                     on_complete(i, result)
         else:
             # Concurrent
             with ThreadPoolExecutor(max_workers=self._max_workers) as executor:
-                future_to_idx = {
-                    executor.submit(self._call_one, msgs, model, **kwargs): i
-                    for i, msgs in enumerate(messages_list)
-                }
+                future_to_idx = {}
+                for i, msgs in enumerate(messages_list):
+                    call_kwargs = dict(kwargs)
+                    if internals_ids is not None:
+                        call_kwargs["internals_id"] = internals_ids[i]
+                    future = executor.submit(self._call_one, msgs, model, **call_kwargs)
+                    future_to_idx[future] = i
                 for future in as_completed(future_to_idx):
                     idx = future_to_idx[future]
                     result = future.result()  # Propagates exceptions
@@ -272,6 +308,7 @@ class BatchCaller:
         model: str,
         on_complete: Callable[[int, str], None] | None = None,
         progress: str | None = None,
+        internals_ids: list[str | None] | None = None,
         **kwargs,
     ) -> list[str]:
         """Capability-aware batched generation.
@@ -291,11 +328,18 @@ class BatchCaller:
                 :class:`ProgressReporter` (chained with ``on_complete`` if both
                 given). This is the shared progress mechanism every pipeline
                 uses; pass a label when ``verbose``, ``None`` otherwise.
+            internals_ids: Optional per-item ids (same length as
+                messages_list) requesting internals capture — only valid
+                when ``backend.supports_internals`` is True. Raises
+                ``ValueError`` immediately (before any dispatch) if passed to
+                a backend that doesn't support it, rather than letting it
+                reach — and crash inside — the backend's underlying call.
             **kwargs: Passed through to the backend generate call(s).
 
-        Hard-fails on two known footguns to make misconfiguration explicit:
+        Hard-fails on three known footguns to make misconfiguration explicit:
         - vLLM + ``max_workers>1``: GPU contention; use native batch.
         - Series-only backend (Anthropic) + ``max_workers>1``: TPM/RPM blow-out.
+        - ``internals_ids`` on a backend with ``supports_internals=False``.
         """
         if self._backend.supports_native_batching and self._max_workers > 1:
             raise ValueError(
@@ -310,6 +354,12 @@ class BatchCaller:
                 f"max_workers must be 1 (got {self._max_workers}). "
                 f"Construct BatchCaller via BatchCaller.from_model() or pass "
                 f"max_workers=1 explicitly."
+            )
+        self._check_internals_support(internals_ids)
+        if internals_ids is not None and len(internals_ids) != len(messages_list):
+            raise ValueError(
+                f"internals_ids must be the same length as messages_list "
+                f"({len(internals_ids)} != {len(messages_list)})."
             )
 
         if not messages_list:
@@ -328,10 +378,13 @@ class BatchCaller:
                     _cb(i, r)
                     _rep.on_complete(i, r)
 
-        # Native batch (vLLM): single engine pass, one rate-limit slot.
+        # Native batch (vLLM / introspection): single engine pass (or single
+        # sequential-in-one-call pass), one rate-limit slot.
         if self._backend.supports_native_batching:
             if self._rate_limiter:
                 self._rate_limiter.wait_if_needed(model)
+            if internals_ids is not None:
+                kwargs["internals_ids"] = internals_ids
             results = self._backend.batch_generate(messages_list, model, **kwargs)
             if on_complete:
                 for i, r in enumerate(results):
@@ -339,4 +392,30 @@ class BatchCaller:
             return results
 
         # API backends: thread-pool (parallel-safe) or sequential (series-only)
-        return self.run(messages_list, model, on_complete=on_complete, **kwargs)
+        return self.run(
+            messages_list, model, on_complete=on_complete,
+            internals_ids=internals_ids, **kwargs,
+        )
+
+
+def assert_single_sample_per_call(backend: LLMBackend, samples_per_call: int) -> None:
+    """Guard against internals capture on a multi-sample-per-call request.
+
+    A backend has no visibility into whether the *prompt* it's given asks for
+    one sample or several in one completion (e.g. content-moderation input
+    generation's ``samples_per_entry``) — that's business logic only the caller
+    knows. When ``samples_per_call > 1``, one forward pass produces several
+    logical samples at once, so its captured internals can't be attributed to
+    any one of them; raise rather than silently capturing something meaningless.
+
+    Callers with a multi-sample-per-call shape (e.g.
+    ``InputPipeline.run_from_constitution``) should call this before dispatch,
+    passing their own ``samples_per_entry``/``samples_per_request``.
+    """
+    if getattr(backend, "supports_internals", False) and samples_per_call != 1:
+        raise ValueError(
+            f"{type(backend).__name__} supports internals capture, but this call "
+            f"requests {samples_per_call} samples per LLM call — one forward pass "
+            f"can't be attributed to more than one resulting sample. Set the "
+            f"samples-per-call parameter to 1, or don't request internals capture."
+        )

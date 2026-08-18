@@ -215,14 +215,14 @@ def run_pipeline(
         elif stage == "outputs":
             df = generate_outputs(
                 data_dir=data_dir, model=models["gen"], check_model=models["check"],
-                resume=resume, verbose=verbose, **P("outputs"),
+                prompt_dir=prompt_dir, resume=resume, verbose=verbose, **P("outputs"),
             )
 
         elif stage == "paraphrase":
             res = generate_paraphrases(
                 data_dir=data_dir, paraphraser=models["paraphraser"],
-                check_model=models["paraphrase_check"], resume=resume,
-                verbose=verbose, **P("paraphrase"),
+                check_model=models["paraphrase_check"], prompt_dir=prompt_dir,
+                resume=resume, verbose=verbose, **P("paraphrase"),
             )
             frames = [v for v in res.values() if v is not None and not v.empty]
             df = pd.concat(frames, ignore_index=True) if frames else pd.DataFrame()

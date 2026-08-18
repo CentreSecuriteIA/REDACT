@@ -35,6 +35,9 @@ from ..llms.extraction import parse_constitution as _parse_raw
 from ..llms.prompts import load_prompt, build_messages
 from ..llms.wrappers import RateLimiter
 from ..dataset.taxonomy import iter_categories, get_subcategories
+from ..dataset.ledger import Ledger
+from ..dataset.manifest import Manifest
+from ..dataset.io import _hash_text
 
 logger = logging.getLogger(__name__)
 
@@ -54,6 +57,10 @@ class ConstitutionEntry:
     entry_type: str  # "harmful" / "benign" / "dual_use_benign" / "dual_use_harmful"
     source_category: str  # Taxonomy category that seeded this
     source_group_tag: str  # group_tag from taxonomy
+    sample_id: str = field(init=False, default="")  # this entry's own content-hash identity
+
+    def __post_init__(self) -> None:
+        self.sample_id = _hash_text(self.sample)
 
 
 @dataclass
@@ -70,6 +77,7 @@ class ConstitutionResult:
         return pd.DataFrame(
             [
                 {
+                    "sample_id": e.sample_id,
                     "constitution_category": e.category,
                     "constitution_subcategory": e.subcategory,
                     "sample_description": e.sample,
@@ -106,6 +114,7 @@ def _strip_end_marker(text: str) -> tuple[str, bool]:
 # ---------------------------------------------------------------------------
 
 _CSV_COLUMNS = [
+    "sample_id",
     "constitution_category",
     "constitution_subcategory",
     "sample_description",
@@ -134,6 +143,7 @@ def _save_entries_csv(
         for e in entries:
             writer.writerow(
                 {
+                    "sample_id": e.sample_id,
                     "constitution_category": e.category,
                     "constitution_subcategory": e.subcategory,
                     "sample_description": e.sample,
@@ -165,29 +175,19 @@ def _unit_key(source_category: str, entry_type: str) -> str:
     return f"{source_category}::{entry_type}"
 
 
+def _ledger(path: Path) -> Ledger:
+    """The shared resume-ledger for constitution units (key field ``unit``)."""
+    return Ledger(path, key_fields=("unit",), casters={"unit": str})
+
+
 def _read_state(path: Path) -> set[str]:
-    """Return the set of completed unit keys (one JSON object per line)."""
-    if not path.exists():
-        return set()
-    done: set[str] = set()
-    with path.open(encoding="utf-8") as fh:
-        for line in fh:
-            line = line.strip()
-            if not line:
-                continue
-            try:
-                done.add(str(json.loads(line)["unit"]))
-            except (json.JSONDecodeError, KeyError):
-                continue
-    return done
+    """Return the set of completed unit keys (delegates to the shared Ledger)."""
+    return _ledger(path).completed()
 
 
 def _append_state(path: Path, units: list[str]) -> None:
-    """Append completed unit keys to the resume-state file."""
-    path.parent.mkdir(parents=True, exist_ok=True)
-    with path.open("a", encoding="utf-8") as fh:
-        for unit in units:
-            fh.write(json.dumps({"unit": unit}) + "\n")
+    """Append completed unit keys to the resume-state file (shared Ledger)."""
+    _ledger(path).record([{"unit": u} for u in units])
 
 
 # ---------------------------------------------------------------------------
@@ -572,6 +572,22 @@ class ConstitutionPipeline:
                     state_path.unlink()
 
         completed = _read_state(state_path) if (save and resume) else set()
+
+        # Plan the full run → manifest (one row per (source_category, entry_type)
+        # unit, keyed like the ledger, plus the standalone-benign unit), written
+        # before any generation so the intended scope is inspectable up front.
+        if save:
+            manifest_rows = [
+                {"source_category": cat_name, "entry_type": et.value, "status": "planned"}
+                for cat_name, _ in categories
+                for et in entry_types
+            ]
+            if include_standalone_benign:
+                manifest_rows.append(
+                    {"source_category": "general", "entry_type": "general_benign",
+                     "status": "planned"}
+                )
+            Manifest(self.output_dir / "constitution.manifest.jsonl").write(manifest_rows)
 
         if verbose:
             print(f"\n{'='*60}")

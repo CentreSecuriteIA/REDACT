@@ -27,6 +27,8 @@ class ModelConfig:
     hf_model_id: str | None = None  # HuggingFace model ID or local path
     quantization: str | None = None  # e.g. "gptq", "awq"
     vllm_kwargs: dict | None = None  # Extra kwargs for vllm.LLM()
+    # transformers-introspection-specific fields (ignored by other backends).
+    introspect_kwargs: dict | None = None  # log_dir, capture, device_map, etc.
     # Capability flags consumed by the router + BatchCaller. These describe
     # what the model can do, independent of which backend implements it.
     is_uncensored: bool = False
@@ -166,6 +168,7 @@ def register_model(
     hf_model_id: str | None = None,
     quantization: str | None = None,
     vllm_kwargs: dict | None = None,
+    introspect_kwargs: dict | None = None,
     is_uncensored: bool = False,
     supports_system_prompt: bool = True,
     supports_parallel_calls: bool = True,
@@ -181,11 +184,16 @@ def register_model(
         default_max_tokens: Default max tokens for generation.
         default_temperature: Default sampling temperature (None = provider default).
         default_extra_body: Provider-specific parameters merged into every call.
-        backend_type: Backend for auto-routing ("venice", "anthropic", "vllm").
-            None triggers name-based inference in get_backend().
-        hf_model_id: HuggingFace model ID or local path (vLLM only).
+        backend_type: Backend for auto-routing ("venice", "anthropic", "vllm",
+            "transformers_introspect"). None triggers name-based inference in
+            get_backend().
+        hf_model_id: HuggingFace model ID or local path (vLLM /
+            transformers_introspect).
         quantization: Quantization method, e.g. "gptq", "awq" (vLLM only).
         vllm_kwargs: Extra kwargs passed to vllm.LLM() (vLLM only).
+        introspect_kwargs: Extra kwargs passed to
+            TransformersIntrospectionBackend() (transformers_introspect only)
+            — e.g. ``{"log_dir": ..., "capture": {...}}``.
         is_uncensored: True for uncensored generation models.
         supports_system_prompt: False if the model ignores system messages.
         supports_parallel_calls: False forces series-only execution (Claude).
@@ -203,6 +211,7 @@ def register_model(
         hf_model_id=hf_model_id,
         quantization=quantization,
         vllm_kwargs=vllm_kwargs,
+        introspect_kwargs=introspect_kwargs,
         is_uncensored=is_uncensored,
         supports_system_prompt=supports_system_prompt,
         supports_parallel_calls=supports_parallel_calls,

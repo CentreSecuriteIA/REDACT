@@ -14,6 +14,7 @@ Usage::
 """
 
 import json
+import warnings
 from math import ceil
 from pathlib import Path
 from typing import Callable
@@ -54,6 +55,8 @@ from redact.dataset import (
     get_seed_prompts,
     merge_all,
     take_per_group,
+    Ledger,
+    Manifest,
 )
 from redact.dataset.merge import (
     merge_content_mod_csvs,
@@ -116,27 +119,13 @@ def _output_state_path(output_path: Path) -> Path:
 
 
 def _read_output_state(state_path: Path) -> set[str]:
-    """Return the set of input ids already completed (one JSON object per line)."""
-    if not state_path.exists():
-        return set()
-    done: set[str] = set()
-    with state_path.open(encoding="utf-8") as fh:
-        for line in fh:
-            line = line.strip()
-            if not line:
-                continue
-            try:
-                done.add(str(json.loads(line)["input_id"]))
-            except (json.JSONDecodeError, KeyError):
-                continue
-    return done
+    """Completed input ids (delegates to the shared Ledger)."""
+    return Ledger(state_path, key_fields=("input_id",), casters={"input_id": str}).completed()
 
 
 def _append_output_state(state_path: Path, ids: list[str]) -> None:
-    """Append completed input ids to the resume-state file."""
-    with state_path.open("a", encoding="utf-8") as fh:
-        for input_id in ids:
-            fh.write(json.dumps({"input_id": input_id}) + "\n")
+    """Append completed input ids to the resume-state file (shared Ledger)."""
+    Ledger(state_path, key_fields=("input_id",)).record([{"input_id": i} for i in ids])
 
 
 # ---------------------------------------------------------------------------
@@ -370,7 +359,9 @@ def generate_inputs(
     - **Standalone** (``constitution_df is None``, default): meta-prompt
       seeds drive per-category multi-turn generation with the
       entry-type-aware quality checker (entry_type defaults to ``harmful``).
-      This is the existing content-moderation path.
+      **Deprecated** (emits ``DeprecationWarning``) in favour of the
+      constitution-seeded mode, which gives better/more adjustable coverage;
+      still fully functional as the cheap/simple "quick eval" path.
     - **Constitution-seeded** (``constitution_df`` provided): each
       constitution entry becomes one generation request via
       ``InputPipeline.run_from_constitution()``. ``style``,
@@ -476,6 +467,13 @@ def generate_inputs(
     # ------------------------------------------------------------------
     # Standalone (meta-prompt) mode
     # ------------------------------------------------------------------
+    warnings.warn(
+        "Standalone meta-prompt input generation (generate_inputs without "
+        "constitution_df) is deprecated in favour of constitution-seeded "
+        "generation (generate_inputs(constitution_df=...)); it remains functional.",
+        DeprecationWarning,
+        stacklevel=2,
+    )
     # Resolve taxonomy
     if isinstance(taxonomy, str):
         taxonomy = load_taxonomy(taxonomy, config_dir=taxonomy_dir)
@@ -638,6 +636,7 @@ def generate_outputs(
     max_per_category: int | None = None,
     data_dir: str | Path | None = None,
     output_path: str | Path | None = None,
+    prompt_dir: str | Path | None = None,
     resume: bool = True,
     verbose: bool = True,
 ) -> pd.DataFrame:
@@ -682,6 +681,8 @@ def generate_outputs(
             root (``get_output_dir()``).
         output_path: Explicit override for the output CSV path. Takes precedence
             over ``data_dir``.
+        prompt_dir: Root prompt directory for the generation **and** output-check
+            prompts. ``None`` (default) falls back to the bundled ``prompts/``.
         resume: When True (default), skip inputs already recorded in the sidecar
             state ledger. When False, clear the output CSV and ledger first.
         verbose: Print per-batch progress.
@@ -689,9 +690,11 @@ def generate_outputs(
     Returns:
         DataFrame of all rows in the output CSV (the full dataset, including
         rows from prior resumed runs) with the unified output schema:
-        ``input_id``, ``input_prompt``, ``category``, ``subcategory``,
-        ``entry_type``, ``output_response``, ``accepted``, ``rejection_reason``,
-        ``model``, ``source``.
+        ``input_id``, ``sample_id``, ``input_prompt``, ``category``,
+        ``subcategory``, ``entry_type``, ``output_response``, ``accepted``,
+        ``rejection_reason``, ``model``, ``source``. ``sample_id`` is this
+        row's own content-hash identity (``_hash_text(output_response)``),
+        distinct from ``input_id`` (the origin sample it responds to).
     """
     ds_dir = paths.datasets(data_dir)
 
@@ -714,12 +717,21 @@ def generate_outputs(
         check_backend, _ = _get_backend(None, check_model)
     else:
         check_backend = None
-    prompt_config = load_prompt("output", "generation")
+    # Internals capture (opt-in): only true for an introspection-capable
+    # backend (e.g. TransformersIntrospectionBackend); a no-op for the default
+    # Venice/vLLM path — no internals_ids kwarg is passed below. Captures land
+    # under {log_dir}/{input_id}/output/ and .../val_out/ — a pure side channel,
+    # never a CSV column (see .claude/introspection_backend_plan.md).
+    capture_internals_gen = getattr(backend, "supports_internals", False)
+    prompt_config = load_prompt("output", "generation", prompt_dir=prompt_dir)
     gen_caller = BatchCaller.from_model(backend, model, rate_limiter=rate_limiter)
     check_caller = (
         BatchCaller.from_model(check_backend, check_model, rate_limiter=rate_limiter)
         if check_backend is not None
         else None
+    )
+    capture_internals_check = (
+        check_backend is not None and getattr(check_backend, "supports_internals", False)
     )
 
     text_col = "sample" if "sample" in inputs.columns else "prompt"
@@ -734,13 +746,19 @@ def generate_outputs(
 
     # Stable per-input id (content-hash) for resume — matches the jailbreak id.
     def _input_id(row) -> str:
-        existing = str(row.get("id", "")).strip()
+        existing = str(row.get("sample_id", "")).strip()
         if existing and existing.lower() != "nan":
             return existing
         return _hash_text(str(row[text_col]))
 
     inputs = inputs.copy()
     inputs["_state_id"] = [_input_id(row) for _, row in inputs.iterrows()]
+
+    # Plan → manifest: one row per input_id, written before the batch loop so the
+    # run's full intended scope is inspectable up front (keyed like the ledger).
+    Manifest.sidecar(out_path).write(
+        {"input_id": sid, "status": "planned"} for sid in inputs["_state_id"]
+    )
 
     # Non-resume run wipes prior output + ledger; resume skips already-done ids.
     if not resume:
@@ -775,7 +793,7 @@ def generate_outputs(
         key = (category, entry_type)
         if key not in checker_cache:
             checker_cache[key] = build_output_quality_checker(
-                category=category, entry_type=entry_type
+                category=category, entry_type=entry_type, prompt_dir=prompt_dir
             )
         return checker_cache[key]
 
@@ -816,6 +834,10 @@ def generate_outputs(
         responses = gen_caller.batch_generate(
             messages_list, model,
             progress=f"gen chunk {chunk_idx}/{n_chunks}" if verbose else None,
+            internals_ids=(
+                [f'{r["input_id"]}/output' for r in chunk_rows]
+                if capture_internals_gen else None
+            ),
         )
 
         # 3. Batched output checking (per-row checker, flat batch)
@@ -829,6 +851,10 @@ def generate_outputs(
             check_responses = check_caller.batch_generate(
                 check_msgs_list, check_model,
                 progress=f"check chunk {chunk_idx}/{n_chunks}" if verbose else None,
+                internals_ids=(
+                    [f'{r["input_id"]}/val_out' for r in chunk_rows]
+                    if capture_internals_check else None
+                ),
             )
             check_results = []
             for cr in check_responses:
@@ -840,8 +866,11 @@ def generate_outputs(
         else:
             check_results = [(True, "")] * len(chunk_rows)
 
-        # 4. Assemble + incremental append
+        # 4. Assemble + incremental append. sample_id is this row's own content-hash
+        # identity (distinct from input_id, which points back to the origin sample) —
+        # only knowable once the response text exists.
         for r, resp, (accepted, reasoning) in zip(chunk_rows, responses, check_results):
+            r["sample_id"] = _hash_text(resp)
             r["output_response"] = resp
             r["accepted"] = accepted
             r["rejection_reason"] = reasoning
@@ -976,9 +1005,12 @@ def generate_jailbreaks(
 
     Returns:
         DataFrame of all jailbreak rows from the output CSV (one per planned
-        unit), with the input columns plus ``jailbreak``, ``technique``,
-        ``technique_info``, ``complexity``, ``num_techniques``, ``is_noop``,
-        ``accepted``, ``reasoning``, ``iteration``, ``combination_spec_version``.
+        unit), with the input columns plus ``sample_id``, ``jailbreak``,
+        ``technique``, ``technique_info``, ``complexity``, ``num_techniques``,
+        ``is_noop``, ``accepted``, ``reasoning``, ``iteration``,
+        ``combination_spec_version``. ``sample_id`` is this row's own
+        content-hash identity (``_hash_text(jailbreak_text)``), distinct from
+        ``input_id`` (the origin sample it was derived from).
     """
     out = Path(output_path) if output_path else paths.jailbreaks_csv(data_dir)
     man_path = Path(manifest_path) if manifest_path else default_manifest_path(out)
@@ -999,20 +1031,25 @@ def generate_jailbreaks(
     if entry_types:
         inputs = inputs[inputs["entry_type"].isin(entry_types)].reset_index(drop=True)
 
-    if "id" not in inputs.columns:
-        inputs["id"] = inputs["prompt"].map(lambda p: compute_sample_id(str(p)))
+    if "sample_id" not in inputs.columns:
+        inputs["sample_id"] = inputs["prompt"].map(lambda p: compute_sample_id(str(p)))
     else:
-        missing = inputs["id"].isna() | (inputs["id"].astype(str).isin(["", "nan"]))
+        missing = inputs["sample_id"].isna() | (inputs["sample_id"].astype(str).isin(["", "nan"]))
         if missing.any():
-            inputs.loc[missing, "id"] = inputs.loc[missing, "prompt"].map(
+            inputs.loc[missing, "sample_id"] = inputs.loc[missing, "prompt"].map(
                 lambda p: compute_sample_id(str(p))
             )
-    inputs["id"] = inputs["id"].astype(str)
+    inputs["sample_id"] = inputs["sample_id"].astype(str)
 
     # Generation model defaults to the uncensored_gen role; translation defaults
     # to the translation role (DeepSeek). Backend auto-resolved from the name.
     model = model or default_model_for_role("uncensored_gen")
     backend, rate_limiter = _get_backend(None, model)
+    # Internals capture (opt-in, non-interfering — no CSV column). Gated on the
+    # gen_model's backend; batch_apply_combinations/_tag_yields separately check
+    # each individual request's own target model, so a chain that also routes to
+    # translate_model only captures the calls whose model actually supports it.
+    capture_jailbreak = getattr(backend, "supports_internals", False)
 
     # ------------------------------------------------------------------
     # Build technique pool + assignment settings
@@ -1100,10 +1137,21 @@ def generate_jailbreaks(
 
     plan_rows = load_plan(man_path)
 
-    # Fresh (non-resume) run overwrites prior output; resume keeps + skips.
-    if not resume and out.exists():
-        out.unlink()
-    completed = completed_from_output(out) if resume else set()
+    # Sidecar completion ledger (same crash-safe pattern as every other stage),
+    # keyed on the planned unit ``(input_id, iteration)``.
+    jb_ledger = Ledger.sidecar(
+        out, key_fields=("input_id", "iteration"),
+        casters={"input_id": str, "iteration": int},
+    )
+
+    # Fresh (non-resume) run overwrites prior output + ledger; resume keeps + skips.
+    if not resume:
+        if out.exists():
+            out.unlink()
+        jb_ledger.reset()
+    # Resume source of truth is the ledger, unioned with the output CSV so a run
+    # created before the ledger existed still resumes (back-compat).
+    completed = (jb_ledger.completed() | completed_from_output(out)) if resume else set()
 
     # ------------------------------------------------------------------
     # Phase 2 — Execute (stream manifest in chunks through the engine)
@@ -1120,8 +1168,11 @@ def generate_jailbreaks(
             verbose=verbose,
         )
 
-    prompt_map = dict(zip(inputs["id"], inputs["prompt"]))
-    meta_map = {r["id"]: r for r in inputs.to_dict("records")}
+    prompt_map = dict(zip(inputs["sample_id"], inputs["prompt"]))
+    # meta_map's records carry the CM input's own "sample_id" (this row's origin
+    # identity) — _finalize()'s result overwrites it with the jailbreak's own
+    # sample_id via row.update(res) below, since res is applied after this seed.
+    meta_map = {r["sample_id"]: r for r in inputs.to_dict("records")}
 
     pending = [
         r for r in plan_rows
@@ -1147,12 +1198,14 @@ def generate_jailbreaks(
                 "id": str(r["sample_id"]),
                 "prompt": prompt_map[str(r["sample_id"])],
                 "combination": build_combination(r["combination"], registry),
+                "iteration": int(r["iteration"]),
             }
             for r in chunk
         ]
         results = batch_apply_combinations(
             samples, gen_model=model, translate_model=translation_model,
             benign_data=benign_data, router=router, verbose=verbose,
+            capture_internals=capture_jailbreak,
         )
 
         rows = []
@@ -1168,6 +1221,12 @@ def generate_jailbreaks(
             chunk_df.to_csv(out, mode="a", header=False, index=False)
         else:
             chunk_df.to_csv(out, index=False)
+        # Ack only after the CSV append succeeds (crash-safe): a crash mid-chunk
+        # leaves these units un-acked so they re-run next time.
+        jb_ledger.record([
+            {"input_id": str(x["input_id"]), "iteration": int(x["iteration"])}
+            for x in rows
+        ])
         written += len(rows)
 
         if verbose:
@@ -1203,31 +1262,20 @@ def _paraphrase_state_path(out_path: Path) -> Path:
     return out_path.with_name(out_path.stem + ".state.jsonl")
 
 
+def _paraphrase_ledger(state_path: Path) -> Ledger:
+    """Shared resume-ledger for paraphrase units, keyed ``(input_id, iteration)``."""
+    return Ledger(state_path, key_fields=("input_id", "iteration"),
+                  casters={"input_id": str, "iteration": int})
+
+
 def _read_paraphrase_state(state_path: Path) -> set[tuple[str, int]]:
     """Return ``(input_id, iteration)`` units already recorded in the ledger."""
-    if not state_path.exists():
-        return set()
-    done: set[tuple[str, int]] = set()
-    with state_path.open(encoding="utf-8") as fh:
-        for line in fh:
-            line = line.strip()
-            if not line:
-                continue
-            try:
-                r = json.loads(line)
-                done.add((str(r["input_id"]), int(r["iteration"])))
-            except (json.JSONDecodeError, KeyError, ValueError, TypeError):
-                continue
-    return done
+    return _paraphrase_ledger(state_path).completed()
 
 
 def _append_paraphrase_state(state_path: Path, records: list[dict]) -> None:
     """Append attempted-unit records (``input_id``/``iteration``/``paraphrase_model``/``status``)."""
-    if not records:
-        return
-    with state_path.open("a", encoding="utf-8") as fh:
-        for r in records:
-            fh.write(json.dumps(r) + "\n")
+    _paraphrase_ledger(state_path).record(records)
 
 
 def _paraphrase_pool(paraphraser: str | None) -> list[str]:
@@ -1261,7 +1309,7 @@ def _assign_paraphraser(base_id: str, k: int, pool: list[str], seed: int) -> str
 
 def _run_paraphrase_target(
     tgt, source, data_dir, pool, check, check_model, K, resume, batch_size,
-    seed, out_path_override, verbose,
+    seed, prompt_dir, out_path_override, verbose,
 ) -> pd.DataFrame:
     """Paraphrase one target (``"inputs"`` or ``"outputs"``) → its artifact CSV."""
     # ---- Load source rows (base_id, text, category, entry_type) --------------
@@ -1269,7 +1317,7 @@ def _run_paraphrase_target(
         src = source if source is not None else merge_all(paths.datasets(data_dir), accepted_only=True)
         src = src.copy()
         text_col = "sample" if "sample" in src.columns else "prompt"
-        id_col = "id"
+        id_col = "sample_id"
         out_path = Path(out_path_override) if out_path_override else paths.paraphrases_inputs_csv(data_dir)
     else:  # outputs
         if source is not None:
@@ -1303,9 +1351,10 @@ def _run_paraphrase_target(
     # the output CSV alone would silently re-attempt. The CSV is still read for
     # content dedup (seen_texts), but completion is the ledger's job.
     state_path = _paraphrase_state_path(out_path)
-    man = out_path.with_name(out_path.stem + ".manifest.jsonl")
+    manifest = Manifest.sidecar(out_path)
     if not resume:
-        for p in (out_path, state_path, man):
+        manifest.reset()
+        for p in (out_path, state_path):
             if p.exists():
                 p.unlink()
     completed: set[tuple[str, int]] = _read_paraphrase_state(state_path) if resume else set()
@@ -1324,12 +1373,13 @@ def _run_paraphrase_target(
         for k in range(K):
             all_units.append((bid, k, _assign_paraphraser(bid, k, pool, seed), otext, cat, et))
 
-    with man.open("w", encoding="utf-8") as fh:
-        for bid, k, m, _o, cat, et in all_units:
-            fh.write(json.dumps({
-                "input_id": bid, "iteration": k, "paraphrase_model": m,
-                "category": cat, "entry_type": et, "status": "planned",
-            }) + "\n")
+    manifest.write(
+        {
+            "input_id": bid, "iteration": k, "paraphrase_model": m,
+            "category": cat, "entry_type": et, "status": "planned",
+        }
+        for bid, k, m, _o, cat, et in all_units
+    )
 
     units = [u for u in all_units if (u[0], u[1]) not in completed]
     if not units:
@@ -1348,17 +1398,26 @@ def _run_paraphrase_target(
     written = 0
     for model, gunits in groups.items():
         backend = get_backend(model)
+        # Internals capture: paraphrase's own output text (its eventual sample_id)
+        # isn't known until the call returns, but internals_id has to be supplied
+        # before it — capture under a pre-call-known provisional id (bid/k, always
+        # unique) and relabel to the real sample_id once it's computed below.
+        capture_paraphrase = getattr(backend, "supports_internals", False)
         for start in range(0, len(gunits), batch_size):
             chunk = gunits[start : start + batch_size]
             texts = [u[3] for u in chunk]
+            provisional_ids = [f"{bid}/paraphrase/attempt_{k}" for bid, k, *_ in chunk]
             paraphrased = paraphrase_batch(
                 backend, model, texts, rate_limiter=rate_limiter,
+                prompt_dir=prompt_dir,
                 progress=f"paraphrase:{tgt} ({model})" if verbose else None,
+                internals_ids=provisional_ids if capture_paraphrase else None,
             )
             if check:
                 payloads = [paraphrase_check_payload(u[3], p) for u, p in zip(chunk, paraphrased)]
                 checks = batch_check_samples(
-                    check_backend, check_model, payloads, build_paraphrase_checker(),
+                    check_backend, check_model, payloads,
+                    build_paraphrase_checker(prompt_dir=prompt_dir),
                     batch_size=batch_size, rate_limiter=rate_limiter,
                     progress=f"paraphrase-check:{tgt}" if verbose else None,
                 )
@@ -1366,15 +1425,20 @@ def _run_paraphrase_target(
                 checks = [(True, "")] * len(chunk)
 
             rows, ledger = [], []
-            for (bid, k, m, otext, cat, et), ptext, (acc, reason) in zip(chunk, paraphrased, checks):
+            for (bid, k, m, otext, cat, et), ptext, (acc, reason), prov_id in zip(
+                chunk, paraphrased, checks, provisional_ids
+            ):
                 pt = str(ptext).strip()
                 if not pt or pt == otext or pt in seen_texts:
                     ledger.append({"input_id": bid, "iteration": k,
                                    "paraphrase_model": m, "status": "dropped_dedup"})
                     continue  # dedup: drop no-op / duplicate paraphrases
                 seen_texts.add(pt)
+                sample_id = _hash_text(pt)
+                if capture_paraphrase:
+                    backend.rename_capture(prov_id, f"{bid}/paraphrase/{sample_id}")
                 rows.append({
-                    "id": _hash_text(pt), "input_id": bid, "iteration": k,
+                    "sample_id": sample_id, "input_id": bid, "iteration": k,
                     "sample": pt, "category": cat, "entry_type": et,
                     "paraphrase_model": m, "accepted": bool(acc),
                     "reasoning": reason, "source": f"paraphrase_{tgt}",
@@ -1407,6 +1471,7 @@ def generate_paraphrases(
     resume: bool = True,
     batch_size: int = 256,
     seed: int = 42,
+    prompt_dir: str | Path | None = None,
     inputs_path: str | Path | None = None,
     outputs_path: str | Path | None = None,
     verbose: bool = True,
@@ -1441,6 +1506,8 @@ def generate_paraphrases(
         resume: Skip already-produced ``(input_id, iteration)`` units.
         batch_size: Units per paraphrase/check batch.
         seed: Round-robin assignment seed.
+        prompt_dir: Root prompt directory for the paraphrase **and** paraphrase-check
+            prompts. ``None`` (default) falls back to the bundled ``prompts/``.
         inputs_path / outputs_path: Artifact path overrides.
         verbose: Print progress.
 
@@ -1481,7 +1548,7 @@ def generate_paraphrases(
         override = inputs_path if tgt == "inputs" else outputs_path
         results[tgt] = _run_paraphrase_target(
             tgt, source, data_dir, pool, check, check_model, paraphrases_per_sample,
-            resume, batch_size, seed, override, verbose,
+            resume, batch_size, seed, prompt_dir, override, verbose,
         )
     return results
 

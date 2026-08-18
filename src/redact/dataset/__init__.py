@@ -7,6 +7,9 @@ from .io import (
     append_samples,
     get_existing_samples,
 )
+from .sidecar import JsonlSidecar
+from .ledger import Ledger
+from .manifest import Manifest
 from .merge import (
     merge_category_csvs,
     discover_categories,

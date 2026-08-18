@@ -22,11 +22,13 @@ class FakeRouter:
     def __init__(self, check_reply="Yes"):
         self.calls = []  # list of (model, batch_size)
         self.progress_labels = []  # progress= kwarg seen per call (None if absent)
+        self.internals_ids_seen = []  # internals_ids kwarg per call (None if absent)
         self.check_reply = check_reply
 
     def batch_generate(self, model, messages_list, **kwargs):
         self.calls.append((model, len(messages_list)))
         self.progress_labels.append(kwargs.get("progress"))
+        self.internals_ids_seen.append(kwargs.get("internals_ids"))
         out = []
         for msgs in messages_list:
             system = msgs[0]["content"].lower()
@@ -87,6 +89,26 @@ class TestBatchApplyCombinations:
         assert by_id["id1"]["accepted"] is True
         assert by_id["id2"]["jailbreak"] == "DONE"
         assert by_id["id2"]["technique"] == "two_step"
+
+    def test_sample_id_is_unique_per_row_not_a_duplicate_of_input_id(self):
+        # Regression test: sample_id used to be silently inherited from the input
+        # row (== input_id) for every technique/iteration variant of the same
+        # input. It must now be a hash of the jailbroken text itself.
+        from redact.dataset.io import _hash_text
+
+        samples = [
+            _sample(0, "alpha", upper),
+            _sample(0, "alpha", to_swahili),  # same input_id "id0", different technique
+        ]
+        router = FakeRouter()
+        results = batch_apply_combinations(samples, gen_model=GEN_MODEL, router=router)
+
+        assert all(r["input_id"] == "id0" for r in results)
+        sample_ids = {r["sample_id"] for r in results}
+        assert len(sample_ids) == 2  # distinct per row, not both == "id0"
+        for r in results:
+            assert r["sample_id"] == _hash_text(r["jailbreak"])
+            assert r["sample_id"] != r["input_id"]
 
     def test_one_batch_call_per_model_per_round(self):
         samples = [
@@ -162,8 +184,9 @@ class TestBatchApplyCombinations:
 
         # Quiet: no progress kwarg ever passed (preserves minimal router contract).
         assert all(p is None for p in quiet_router.progress_labels)
-        # Verbose: a "round N (model)" label per dispatch.
+        # Verbose: a "<label> round N (model)" label per dispatch (the shared
+        # drive_generators prefixes the caller's progress label — here "jailbreak").
         assert verbose_router.progress_labels == [
-            f"round 1 ({GEN_MODEL})",
-            f"round 2 ({GEN_MODEL})",
+            f"jailbreak round 1 ({GEN_MODEL})",
+            f"jailbreak round 2 ({GEN_MODEL})",
         ]

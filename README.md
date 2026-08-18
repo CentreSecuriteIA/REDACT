@@ -37,16 +37,24 @@ Requires Python 3.11+. See [pyproject.toml](pyproject.toml) for full dependency 
 (default `True`) makes every stage restartable.
 
 ```python
-from redact import generate_inputs, generate_jailbreaks, generate_outputs, build_dataset
+from redact import generate_inputs, generate_jailbreaks, generate_outputs, generate_paraphrases, build_dataset
 
 DATA_DIR = "./runs/eval"                           # one root for the whole run
-inputs = generate_inputs(data_dir=DATA_DIR, samples_per_category=15, num_categories=3)
+inputs = generate_inputs(data_dir=DATA_DIR, samples_per_category=15, num_categories=3)  # standalone*
 jailbreaks = generate_jailbreaks(data_dir=DATA_DIR, inputs=inputs)   # plan → batched execute
 outputs = generate_outputs(data_dir=DATA_DIR, inputs=inputs)         # responses + output checker
 dataset = build_dataset(data_dir=DATA_DIR)                           # merge everything on disk
 ```
 
+> **\*Standalone input generation is deprecated** (still functional; emits `DeprecationWarning`).
+> Prefer **constitution-seeded** generation for better/more adjustable coverage:
+> `generate_inputs(data_dir=DATA_DIR, constitution_df=generate_constitution(data_dir=DATA_DIR, num_taxonomy_categories=3))`.
+
 `generate_jailbreaks(inputs, settings_per_iteration=default_escalation_schedule())` instead runs a multi-round escalation — each sample augmented 4× from a single technique up to high-complexity combinations (see the [Jailbreak section](#jailbreak--technique-library)).
+
+**Paraphrase / fingerprint removal** — `generate_paraphrases(data_dir=DATA_DIR, target="both")` adds reworded ("defingerprinted") copies of the base inputs and *accepted* base outputs as **additive rows** (`paraphrases_inputs.csv` / `paraphrases_outputs.csv`). A **separate** meaning-preservation checker drops paraphrases that don't preserve meaning (check→drop), duplicates are deduped, and each artifact gets a `*.manifest.jsonl` plan + `*.state.jsonl` resume ledger like every other stage (see [Resume model](#resume-model-one-modular-sidecar-system)). As a `paraphrase` stage, `build_dataset(mode="training")` merges the paraphrases into the dataset while `mode="eval"` writes a separate `paraphrased.csv`.
+
+> **⚠️ Disclaimer — placeholder paraphraser.** The actual defingerprinting / paraphraser model is trained in a separate repository (see [Out of Scope](#out-of-scope)) and is **not shipped here**. The `paraphraser` role is a stand-in that loads the same Dolphin-Mistral-24B weights as `venice-uncensored-vllm`; register your real paraphraser with `register_model(..., role="paraphraser")` for production fingerprint removal.
 
 **Config-driven runs** — define a whole run in a **recipe** JSON (`dataset_type` `"eval"` = no
 constitution / `"training"` = with) + a separate **input-params** file, and drive it with one call.
@@ -60,6 +68,43 @@ summary = run_pipeline("src/redact/configs/runs/eval_example.json")
 ```
 
 See `notebooks/eval_pipeline.ipynb` and `notebooks/training_pipeline.ipynb` for the full walkthroughs.
+
+### Resume model (one modular sidecar system)
+
+Every batched stage plans and resumes through **one shared mechanism** — two sidecar
+JSONL files next to the stage's output CSV, both built on a single
+`redact.dataset.JsonlSidecar` foundation (path/mkdir/reset/bad-line-robust reads):
+
+- a **`<artifact>.manifest.jsonl`** (`redact.dataset.Manifest`) — the **plan**: one JSON
+  object per unit, written *before* generation so a run's full intended scope is
+  inspectable up front. Planning is idempotent (overwrite).
+- a **`<artifact>.state.jsonl`** (`redact.dataset.Ledger`) — the **resume state**: one
+  object per *completed* unit, appended **only after** that unit's rows are flushed to
+  CSV, so a crash loses at most one chunk and resume never trusts a large/hand-edited CSV.
+
+`resume=True` (default) skips ledger-recorded units; `resume=False` clears the artifact,
+its ledger, **and** its manifest, then restarts. Each stage keys both files on the *same*
+stable unit id — and the multi-turn stages use the **same vocabulary as the rest of the
+library** (`input_id` for the source row, `iteration` for the per-source index), so every
+derived artifact joins, dedups, plans, and resumes identically:
+
+| Stage | Manifest | Ledger | Unit key |
+|---|---|---|---|
+| Constitution generation | `constitution.manifest.jsonl` | `constitution.state.jsonl` | `source_category::entry_type` |
+| Content-mod input (from constitution) | `constitution_inputs.manifest.jsonl` | `constitution_inputs.state.jsonl` | `(sample_description, entry_type, style)` |
+| Content-mod output | `output_responses.manifest.jsonl` | `output_responses.state.jsonl` | `input_id` |
+| Paraphrase | `paraphrases_*.manifest.jsonl` | `paraphrases_*.state.jsonl` | `(input_id, iteration)` |
+| Jailbreaks | `jailbreaks.manifest.jsonl` | `jailbreaks.state.jsonl` | `(input_id, iteration)` |
+| Conversations | `conversations.manifest.jsonl` | `conversations.state.jsonl` | `(input_id, iteration)` |
+| Conversation scoring | — (scores existing rows) | `conversations_scored.state.jsonl` | `sample_id` |
+
+Plan-backed stages (jailbreaks, conversations) additionally stream their manifest back to
+drive execution; the ledger unions with the output CSV so pre-ledger runs still resume. The
+one intentional exception is **standalone meta-prompt input generation** — it has no discrete
+idempotent units (it generates open-endedly toward a per-category sample count), so it gets
+neither a manifest nor a ledger and resumes by extending its CSVs. That path is now
+**deprecated** (emits `DeprecationWarning`) in favour of constitution-seeded generation, but
+remains fully functional.
 
 **Lower-level building blocks:**
 
@@ -168,11 +213,14 @@ src/redact/
 │   ├── utils.py                   # combine/sample/assign techniques, tagging, spec rules
 │   ├── protocol.py                # LLMRequest + technique-generator contract, run_sync
 │   ├── engine.py                  # batch_apply_combinations — round-by-round batched engine
-│   ├── manifest.py                # plan_run / load_plan / resumable JSONL ledger
+│   ├── manifest.py                # plan_run / load_plan (jailbreak plan; built on dataset.Manifest)
 │   └── distribution.py            # Re-exports from dataset module
 │
 ├── dataset/                       # Data handling utilities
 │   ├── io.py                      # CSV read/write per category folder
+│   ├── sidecar.py                 # JsonlSidecar — shared base for the ledger + manifest
+│   ├── ledger.py                  # Ledger — sidecar *.state.jsonl resume state (one impl for every stage)
+│   ├── manifest.py                # Manifest — sidecar *.manifest.jsonl run plan (one impl for every stage)
 │   ├── merge.py                   # Merge + normalize CSVs (general + presets)
 │   ├── split.py                   # Balanced splitting across techniques
 │   ├── dedup.py                   # Exact + normalized deduplication
@@ -213,6 +261,7 @@ Everything above this layer calls a unified interface and is backend-agnostic.
 | `VeniceBackend` | Venice AI / OpenAI-compatible API backend |
 | `AnthropicBackend` | Anthropic Claude (native SDK, separate system param) |
 | `VLLMBackend` | Local vLLM for self-hosted GPU inference |
+| `TransformersIntrospectionBackend` | Local raw-`transformers` inference with hidden-state/attention/logprob capture (research/interpretability) |
 | `get_backend()` | Auto-select backend from model name |
 | `get_router()` | Process-wide `ModelRouter` — one shared `RateLimiter`, a per-model `BatchCaller` cache, and `for_role()` lookup. The intended single entry point for rate-limited, capability-aware generation |
 | `RateLimiter` | Per-model sliding-window RPM enforcement (thread-safe) |
@@ -290,6 +339,40 @@ register_model("my-model", rpm=50, default_max_tokens=4000, backend_type="venice
 | `venice-uncensored-vllm` | 999 | vllm | Local self-hosted version of `venice-uncensored` (`dphn/Dolphin-Mistral-24B-Venice-Edition`) |
 | `deepseek-v3.2` | 20 | venice | Stronger multilingual (used for translation) |
 | `claude-opus-4-6` | 5 | anthropic | Set `max_workers=1` to avoid TPM limits |
+
+**Deep-internals logging (research/interpretability)** — a fourth backend,
+`TransformersIntrospectionBackend`, captures hidden states / attention / logprobs
+during generation. Not a vLLM extension: vLLM's continuous batching discards
+intermediate activations by design, so this runs a standalone local HF
+`transformers` model instead (used *instead of* vLLM for whichever run needs
+capture, not alongside a live vLLM instance of the same weights).
+
+```python
+from redact.llms import register_model
+
+register_model(
+    "my-model-introspect", rpm=999, backend_type="transformers_introspect",
+    hf_model_id="mistralai/Mistral-7B-v0.3",
+    introspect_kwargs={
+        "log_dir": "./runs/internals",
+        "capture": {"logprobs": True, "hidden_states": "last", "attention": False},
+    },
+)
+generate_outputs(model="my-model-introspect")   # capture is automatic once the backend supports it
+```
+
+Capture is a **pure side effect** — it never adds a CSV column or changes what a
+pipeline returns. Every dataset row already has a `sample_id` (this row's own
+content-hash identity) and, where traceable, an `input_id` (the origin row's
+`sample_id`); captures are filed under `{log_dir}/{input_id}/...` using those
+same ids, so a CSV row and its captured internals always cross-reference with no
+separate bookkeeping — e.g. `generate_outputs()` writes to
+`{log_dir}/{input_id}/output/` and `.../val_out/` (generation and checker calls
+respectively), each with an always-on `meta.json` (resolved settings, messages,
+output text) alongside whatever tensors `capture` asked for. Wired into
+`generate_outputs`, constitution-seeded input generation, paraphrase, and the
+jailbreak engine; not yet multi-turn conversations. Full design:
+`.claude/introspection_backend_plan.md`.
 
 ---
 
@@ -388,7 +471,7 @@ For each turn:
 
 140+ jailbreak techniques organized in four families. Technique definitions are taxonomy-driven where applicable — adding a new variant means adding a JSON entry, not a new function.
 
-**Execution model.** LLM-dependent techniques are **generators** that `yield` an `LLMRequest` and resume via `.send(response)` (`protocol.py`); pure transforms are plain callables. `engine.batch_apply_combinations()` advances a chunk of samples **round by round**, grouping pending requests by model and dispatching one batch per model per round through the router. `generate_jailbreaks()` first **plans** the whole run to a JSONL manifest (`manifest.py`), then **executes** it in chunks — resumable from the output CSV. `combination_spec.json` defines layers, family caps, cross-incompatibilities, and complexity budgets; combinations are assigned deterministically (SHA-256 of seed + content-id + iteration). Any technique whose name is missing from the spec is silently never sampled — keep them in sync.
+**Execution model.** LLM-dependent techniques are **generators** that `yield` an `LLMRequest` and resume via `.send(response)` (`protocol.py`); pure transforms are plain callables. `engine.batch_apply_combinations()` advances a chunk of samples **round by round**, grouping pending requests by model and dispatching one batch per model per round through the router. `generate_jailbreaks()` first **plans** the whole run to a `jailbreaks.manifest.jsonl` (`manifest.py`, built on the shared `dataset.Manifest`), then **executes** it in chunks — resumable via the sidecar `jailbreaks.state.jsonl` ledger unioned with the output CSV (see [Resume model](#resume-model-one-modular-sidecar-system)). `combination_spec.json` defines layers, family caps, cross-incompatibilities, and complexity budgets; combinations are assigned deterministically (SHA-256 of seed + content-id + iteration). Any technique whose name is missing from the spec is silently never sampled — keep them in sync.
 
 **Multi-round escalation.** Pass `settings_per_iteration` (a `list[dict]`, one dict of sampler kwargs per round) to augment every sample across an escalating schedule — the list length sets the round count. `default_escalation_schedule()` is the built-in 4-round default (each sample targeted 4×): round 1 = exactly 1 technique, round 2 = exactly 2, rounds 3–4 = rising complexity budgets. Rounds 1–2 are *count-driven* (`exact_techniques`, which ignores the complexity budget — count is the only constraint); rounds 3–4 are *budget-driven* (`max_complexity` / `max_obfuscations` / `sampling_probs`). The run is still planned up front from one shared pool; `settings_per_iteration=None` (default) keeps single-round behavior.
 
@@ -488,6 +571,84 @@ result, info = combo("some harmful prompt")
 
 ---
 
+### Multi-turn Conversations
+
+A **use-case-agnostic** subsystem for generating multi-turn **conversation datasets**. Define a `Setting` (how the conversation is *driven* — plain `conversation` vs adaptive `feedback` — plus participants, `max_turns`, an optional stop) and play it on a seed to produce a `Trajectory` — a **typed step log** that captures every step, including an actor's *strategy*/*analysis* provenance alongside the visible turns (a multi-turn transcript/trace, not just a final answer).
+
+Layering (dependency direction strictly downward): `llms/conversation.py` (shared primitives: `LLMRequest`, `Transcript`/`Step`, `drive_generators`) ← **`multi_turn/`** (the general core) ← **`multiturn_attacks/`** and **`optimization/`** (applications, each its own top-level folder). Design is Inspect-oriented (seed ≈ `Sample`, messages ≈ `ChatMessage`, `Setting.drive` ≈ solver, judge ≈ scorer, branching ≈ `fork`).
+
+**Actors** — an actor's turn is a generator `turn(transcript) -> yields LLMRequest, returns list[Step]`:
+- `ScriptedActor` — fixed/templated turns or replay a given transcript (no LLM)
+- `ModelActor` — one LLM turn (renders the transcript, calls its model)
+- `StrategyActor` — an adaptive, multi-step turn: strategize → compose (optionally applying jailbreak augmentations) → send → analyze, with **every sub-step logged**
+
+**Generate conversations** (batched, resumable):
+
+```python
+import pandas as pd
+from redact import generate_conversations
+from redact.multi_turn import ScriptedActor, ModelActor, Setting
+
+seeds = pd.DataFrame({"seed": ["opening question one", "opening question two"]})
+# pass a Setting factory (fresh actors per conversation) or a template Setting (deep-copied)
+make_setting = lambda: Setting(
+    participants=[ScriptedActor("user", ["go deeper"]), ModelActor("bot", "venice-uncensored")],
+    max_turns=6,
+)
+convos = generate_conversations(seeds, make_setting, data_dir="./runs/convo", iterations=1)
+# -> Datasets/conversations.csv (sample_id, input_id, iteration, setting, turns_used, stop_reason, transcript[JSON], …)
+# resumable via a full-plan *.manifest.jsonl + a sidecar *.state.jsonl ledger
+```
+
+**Evaluate — optional and separable** (generate → *then* judge; nothing about success is hardwired into generation):
+
+```python
+from redact import evaluate_conversations
+
+scored = evaluate_conversations(
+    data_dir="./runs/convo", judge_model="claude-opus-4-6",
+    judge_system="Did the assistant accomplish the GOAL?", scope="last_reply",  # or "transcript"
+)   # -> Datasets/conversations_scored.csv (sample_id, success, judge_reasoning, …)
+```
+
+#### Multi-turn jailbreak attacks (`multiturn_attacks/`)
+
+Attacker-vs-target conversations that probe a **safety-trained target** over several turns (**crescendo** template escalation or **PAIR-lite** attacker-LLM), optionally composing jailbreak augmentations from `jailbreak/` into each turn. An attack is just a `Setting` fed to `generate_conversations`, scored by a jailbreak-success judge.
+
+```python
+from redact.multiturn_attacks import generate_attacks, score_attacks
+from redact.jailbreak.obfuscation.encoding import to_rot13
+
+harmful_seeds = pd.DataFrame({"seed": ["<a harmful request>"]})
+attacks = generate_attacks(
+    harmful_seeds, target_model="claude-opus-4-6",   # target is REQUIRED (must be safety-trained)
+    attack="crescendo", jailbreak_technique=to_rot13, max_turns=6, data_dir="./runs/attack",
+)
+scored = score_attacks(data_dir="./runs/attack", judge_model="venice-uncensored")  # attack-success rate
+```
+
+> ⚠️ Attacking an *uncensored* model is meaningless (it complies on turn 1). The target must be a **safety-trained** model that resists single-shot; there is no default — you pass it explicitly.
+
+#### Optimization / search (`optimization/`)
+
+A general **optimize-toward-an-objective** search (the controller above `drive_generators`): expand candidate next-turns in parallel, score each with a judge, **log the whole tree**, keep the best `beam`, continue with backtracking. Objective-general; subsumes PAIR (`beam=1`), TAP (`beam>1`), and optimized-crescendo (candidates = jailbreak technique combinations, keep the best, escalate).
+
+```python
+from redact.multiturn_attacks import optimize_attack
+from redact.jailbreak.obfuscation.encoding import to_rot13, to_base64
+
+best, tree = optimize_attack(
+    "<a harmful request>", target_model="claude-opus-4-6",
+    techniques=[to_rot13, to_base64], judge_model="venice-uncensored",
+    beam=2, depth=3,
+)
+# best = highest-scoring conversation found; tree = every candidate + judge score (the full trajectory)
+```
+
+Everything above is **batched, resumable, and offline-testable** (drive it with a fake router / mock judge — see `tests/test_multi_turn.py`, `tests/test_multiturn_attacks.py`, `tests/test_optimization.py`).
+
+---
+
 ### Extraction Utilities
 
 Multi-format extraction from LLM output, plus constitution parsing:
@@ -526,6 +687,9 @@ for e in entries:
 | Function | Purpose |
 |---|---|
 | `append_samples()` | Incremental CSV save with MD5 dedup |
+| `Ledger` | Sidecar `*.state.jsonl` resume state — `.completed()` / `.record()` / `.reset()` / `.sidecar()` (see [Resume model](#resume-model-one-modular-sidecar-system)) |
+| `Manifest` | Sidecar `*.manifest.jsonl` run plan — `.write()` / `.load()` / `.sidecar()` |
+| `JsonlSidecar` | Shared base for `Ledger` + `Manifest` (path / mkdir / bad-line-robust JSONL) |
 | `merge_technique_csvs()` | Jailbreak preset — renames type columns, drops DISCARDED |
 | `merge_content_mod_csvs()` | Content mod preset — filters accepted, normalizes columns |
 | `deterministic_balanced_assign()` | Stratified splitting across N bins |

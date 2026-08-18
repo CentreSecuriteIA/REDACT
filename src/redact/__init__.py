@@ -191,6 +191,9 @@ from . import content_moderation  # noqa: E402, F401
 from . import jailbreak  # noqa: E402, F401
 from . import dataset  # noqa: E402, F401
 from . import constitution  # noqa: E402, F401
+from . import multi_turn  # noqa: E402, F401
+from . import optimization  # noqa: E402, F401
+from . import multiturn_attacks  # noqa: E402, F401
 
 # ---------------------------------------------------------------------------
 # High-level pipeline functions
@@ -209,6 +212,9 @@ from .pipelines import (  # noqa: E402
 # Convenience re-export: the built-in 4-round escalation schedule for
 # generate_jailbreaks(settings_per_iteration=...).
 from .jailbreak import default_escalation_schedule  # noqa: E402, F401
+
+# Multi-turn conversation datasets.
+from .multi_turn import generate_conversations, evaluate_conversations  # noqa: E402, F401
 
 # Config-driven runs (recipe + input-params + per-stage manifests).
 from .runconfig import (  # noqa: E402, F401
