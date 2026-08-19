@@ -1,7 +1,7 @@
 """High-level pipeline functions for end-to-end dataset generation.
 
-Thin wrappers over the existing building blocks (LLMs, Content_Moderation,
-Jailbreak, Dataset_Functions). Each function saves intermediate results to
+Thin wrappers over the existing building blocks (LLMs, content_moderation,
+jailbreak, dataset). Each function saves intermediate results to
 Datasets/ and returns a merged DataFrame.
 
 Usage::
@@ -14,76 +14,60 @@ Usage::
 """
 
 import json
+import logging
 import warnings
 from math import ceil
 from pathlib import Path
-from typing import Callable
 
 import pandas as pd
 
-from redact import Config, get_output_dir, paths
-from redact.llms import (
-    get_backend,
-    RateLimiter,
-    load_prompt,
-    build_messages,
-    generate_sample,
-    get_router,
-    BatchCaller,
-)
-from redact.llms.base import LLMBackend
-from redact.llms.model_config import default_model_for_role, get_models_by_role
-from redact.llms.calls import batch_check_samples
+from redact import paths
 from redact.content_moderation import (
     InputPipeline,
-    CategoryResult,
-    generate_category_description,
-    generate_seeds,
+    run_output_generation,
 )
-from redact.content_moderation.checker import (
-    build_quality_checker,
-    build_output_quality_checker,
-    build_paraphrase_checker,
-    paraphrase_check_payload,
+from redact.content_moderation.paraphrase import (
+    paraphrase_pool,
+    run_paraphrase_target,
 )
-from redact.content_moderation.paraphrase import paraphrase_batch
-from redact.dataset.io import get_existing_samples, _hash_text
 from redact.dataset import (
-    load_taxonomy,
+    Ledger,
     iter_categories,
     load_seeds,
-    get_seed_prompts,
+    load_taxonomy,
     merge_all,
     take_per_group,
-    Ledger,
-    Manifest,
 )
 from redact.dataset.merge import (
-    merge_content_mod_csvs,
     discover_categories,
+    merge_content_mod_csvs,
 )
 from redact.jailbreak import (
-    get_all_obfuscation_functions,
-    get_all_hacking_functions,
-    get_all_manipulation_functions,
-    get_all_request_functions,
-    load_spec,
+    batch_apply_combinations,
     build_combination,
     build_function_registry,
-    batch_apply_combinations,
-    plan_run,
-    load_plan,
     completed_from_output,
     compute_sample_id,
     default_manifest_path,
+    get_all_hacking_functions,
+    get_all_manipulation_functions,
+    get_all_obfuscation_functions,
+    get_all_request_functions,
+    load_plan,
+    load_spec,
+    plan_run,
 )
-from redact.jailbreak.manipulation import (
-    BENIGN_CATEGORIES,
-    load_benign_data,
-    process_category,
-    get_or_generate_benign_data,
+from redact.jailbreak.manipulation import get_or_generate_benign_data
+from redact.llms import (
+    RateLimiter,
+    get_backend,
+    get_router,
+    load_prompt,
 )
+from redact.llms.base import LLMBackend
+from redact.llms.model_config import default_model_for_role
 
+logger = logging.getLogger(__name__)
 
 _PACKAGE_DIR = Path(__file__).resolve().parent  # src/redact/
 _DEFAULT_TAXONOMY_DIR = paths.taxonomy_dir()
@@ -102,30 +86,6 @@ def _default_jailbreak_path() -> Path:
 
 def _default_benign_path() -> Path:
     return paths.benign_csv()
-
-
-# ---------------------------------------------------------------------------
-# Output-generation resume state (sidecar JSONL beside the output CSV)
-# ---------------------------------------------------------------------------
-# Resume is driven by a separate state file rather than the output CSV: the CSV
-# can be large or hand-edited, so a dedicated ledger of completed input ids is a
-# cleaner source of truth (same idea as the jailbreak manifest in
-# jailbreak/manifest.py).
-
-
-def _output_state_path(output_path: Path) -> Path:
-    """Sidecar resume-state path beside the output CSV (``*.state.jsonl``)."""
-    return output_path.with_name(output_path.stem + ".state.jsonl")
-
-
-def _read_output_state(state_path: Path) -> set[str]:
-    """Completed input ids (delegates to the shared Ledger)."""
-    return Ledger(state_path, key_fields=("input_id",), casters={"input_id": str}).completed()
-
-
-def _append_output_state(state_path: Path, ids: list[str]) -> None:
-    """Append completed input ids to the resume-state file (shared Ledger)."""
-    Ledger(state_path, key_fields=("input_id",)).record([{"input_id": i} for i in ids])
 
 
 # ---------------------------------------------------------------------------
@@ -223,7 +183,7 @@ def create_taxonomy(
         json.dump(taxonomy, f, indent=2, ensure_ascii=False)
 
     if verbose:
-        print(f"Taxonomy '{name}' saved to {path}")
+        logger.info("Taxonomy '%s' saved to %s", name, path)
     return taxonomy
 
 
@@ -439,13 +399,9 @@ def generate_inputs(
         )
 
         if verbose:
-            print(f"\n{'='*60}")
-            print(f"Generate Inputs (constitution-seeded)")
-            print(f"{'='*60}")
-            print(
-                f"Entries: {len(constitution_df)} | Style: {style} | "
-                f"Samples/entry: {samples_per_entry} | Batch: {batch_size}"
-            )
+            logger.info("Generate Inputs (constitution-seeded)")
+            logger.info("Entries: %d | Style: %s | Samples/entry: %d | Batch: %d",
+                        len(constitution_df), style, samples_per_entry, batch_size)
 
         pipeline.run_from_constitution(
             constitution_df=constitution_df,
@@ -499,8 +455,6 @@ def generate_inputs(
     )
 
     prompt_config = load_prompt("input", "generation/standalone", prompt_dir=prompt_dir)
-    # Max turns as safety cap: 3x what a perfect run would need
-    max_turns = ceil(samples_per_category / samples_per_request) * 3
 
     # Seeds (simple mode)
     seeds_db = None
@@ -515,113 +469,25 @@ def generate_inputs(
             if csv_path.exists():
                 csv_path.unlink()
                 if verbose:
-                    print(f"  Cleared existing {csv_path}")
+                    logger.info("Cleared existing %s", csv_path)
 
     if verbose:
         mode = "automated (LLM descriptions + seeds)" if use_metaprompt else "simple (taxonomy + hand-written seeds)"
-        print(f"\n{'='*60}")
-        print(f"Generate Content Moderation Inputs")
-        print(f"{'='*60}")
-        print(f"Mode: {mode}")
-        print(f"Categories: {len(categories)} | Target: {samples_per_category} samples each ({samples_per_request}/request)")
+        logger.info("Generate Content Moderation Inputs")
+        logger.info("Mode: %s", mode)
+        logger.info("Categories: %d | Target: %d samples each (%d/request)",
+                    len(categories), samples_per_category, samples_per_request)
 
-    all_results = []
-    for i, (category_name, category_info) in enumerate(categories):
-        if verbose:
-            print(f"\n[{i+1}/{len(categories)}] {category_name}")
-
-        if use_metaprompt:
-            if verbose:
-                print(f"  Generating description...")
-            description = generate_category_description(
-                backend, model, category_name, rate_limiter
-            )
-            if verbose:
-                print(f"  Description: {len(description)} chars")
-                print(f"  Generating seeds...")
-            seed_text = generate_seeds(
-                backend, model, category_name, description,
-                num_seeds=num_seeds, rate_limiter=rate_limiter,
-            )
-            if verbose:
-                print(f"  Seeds: {seed_text.count(chr(10)) + 1} generated")
-        else:
-            description = category_info.get("description", category_name)
-            seed_text = get_seed_prompts(seeds_db, category_name)
-
-        if not seed_text:
-            if verbose:
-                print(f"  No seeds available, skipping.")
-            continue
-
-        seed_kwargs = {
-            "Category": category_name,
-            "category_description": description,
-            "SeedPrompts": seed_text,
-        }
-
-        # Run turns until target is reached or max_turns exceeded
-        checker = build_quality_checker(category_name)
-        result = CategoryResult(category=category_name)
-        feedback = ""
-        prohibited = get_existing_samples(category_name, ds_dir)
-
-        for turn_idx in range(max_turns):
-            if result.total_accepted >= samples_per_category:
-                break
-
-            remaining = samples_per_category - result.total_accepted
-            if verbose:
-                print(f"  Turn {turn_idx + 1}: {result.total_accepted}/{samples_per_category} accepted, requesting {samples_per_request}...")
-
-            turn_result = pipeline.run_turn(
-                prompt_config=prompt_config,
-                build_check_messages=checker,
-                turn_index=turn_idx,
-                samples_per_request=samples_per_request,
-                feedback=feedback,
-                category=category_name,
-                save=True,
-                prohibited=prohibited,
-                **seed_kwargs,
-            )
-            result.turns.append(turn_result)
-
-            # Update prohibited set
-            for sr in turn_result.samples:
-                prohibited.add(sr.text)
-
-            # Collect feedback for next turn
-            rejections = [
-                r.reasoning for r in turn_result.samples
-                if not r.accepted and r.reasoning
-            ]
-            feedback = "\n".join(f"- {r[:200]}" for r in rejections[:3]) if rejections else ""
-
-            if verbose:
-                print(f"    -> {turn_result.accepted_count} accepted, {turn_result.rejected_count} rejected ({turn_result.acceptance_rate:.0%})")
-
-            # Stop early if no samples were extracted at all (model issue)
-            if turn_result.extracted_count == 0:
-                if verbose:
-                    print(f"    No samples extracted, stopping category.")
-                break
-
-        all_results.append(result)
-
-        if verbose:
-            print(f"  -> {result.total_accepted} accepted / {result.total_extracted} extracted ({result.overall_acceptance_rate:.0%})")
-
-    # Summary
-    if verbose and all_results:
-        print(f"\n{'='*60}")
-        print("Summary")
-        print(f"{'='*60}")
-        for result in all_results:
-            print(f"  {result.category:30s} {result.total_accepted:3d} / {result.total_extracted:3d} ({result.overall_acceptance_rate:.0%})")
-        total_accepted = sum(r.total_accepted for r in all_results)
-        total_extracted = sum(r.total_extracted for r in all_results)
-        print(f"\n  Total: {total_accepted} accepted / {total_extracted} extracted")
+    pipeline.run_standalone(
+        categories=categories,
+        prompt_config=prompt_config,
+        samples_per_category=samples_per_category,
+        samples_per_request=samples_per_request,
+        use_metaprompt=use_metaprompt,
+        num_seeds=num_seeds,
+        seeds_db=seeds_db,
+        verbose=verbose,
+    )
 
     return merge_all(ds_dir, accepted_only=True)
 
@@ -707,207 +573,27 @@ def generate_outputs(
     # global head as a final safety cap.
     if max_per_category is not None:
         inputs = take_per_group(inputs, max_per_category)
+        if verbose:
+            logger.info("Per-category cap: %d -> %d samples", max_per_category, len(inputs))
     if max_samples is not None:
         inputs = inputs.head(max_samples)
 
     model = model or default_model_for_role("uncensored_gen")
     backend, rate_limiter = _get_backend(None, model)
     check_model = check_model or model
-    if check_outputs:
-        check_backend, _ = _get_backend(None, check_model)
-    else:
-        check_backend = None
-    # Internals capture (opt-in): only true for an introspection-capable
-    # backend (e.g. TransformersIntrospectionBackend); a no-op for the default
-    # Venice/vLLM path — no internals_ids kwarg is passed below. Captures land
-    # under {log_dir}/{input_id}/output/ and .../val_out/ — a pure side channel,
-    # never a CSV column (see .claude/introspection_backend_plan.md).
-    capture_internals_gen = getattr(backend, "supports_internals", False)
-    prompt_config = load_prompt("output", "generation", prompt_dir=prompt_dir)
-    gen_caller = BatchCaller.from_model(backend, model, rate_limiter=rate_limiter)
-    check_caller = (
-        BatchCaller.from_model(check_backend, check_model, rate_limiter=rate_limiter)
-        if check_backend is not None
-        else None
-    )
-    capture_internals_check = (
-        check_backend is not None and getattr(check_backend, "supports_internals", False)
-    )
-
-    text_col = "sample" if "sample" in inputs.columns else "prompt"
-    inputs = inputs.reset_index(drop=True)
+    check_backend, _ = _get_backend(None, check_model) if check_outputs else (None, None)
 
     out_path = (
         Path(output_path) if output_path
         else paths.output_responses_csv(data_dir)
     )
-    out_path.parent.mkdir(parents=True, exist_ok=True)
-    state_path = _output_state_path(out_path)
 
-    # Stable per-input id (content-hash) for resume — matches the jailbreak id.
-    def _input_id(row) -> str:
-        existing = str(row.get("sample_id", "")).strip()
-        if existing and existing.lower() != "nan":
-            return existing
-        return _hash_text(str(row[text_col]))
-
-    inputs = inputs.copy()
-    inputs["_state_id"] = [_input_id(row) for _, row in inputs.iterrows()]
-
-    # Plan → manifest: one row per input_id, written before the batch loop so the
-    # run's full intended scope is inspectable up front (keyed like the ledger).
-    Manifest.sidecar(out_path).write(
-        {"input_id": sid, "status": "planned"} for sid in inputs["_state_id"]
+    return run_output_generation(
+        inputs=inputs, model=model, backend=backend, rate_limiter=rate_limiter,
+        check_outputs=check_outputs, check_model=check_model, check_backend=check_backend,
+        batch_size=batch_size, out_path=out_path, prompt_dir=prompt_dir,
+        resume=resume, verbose=verbose,
     )
-
-    # Non-resume run wipes prior output + ledger; resume skips already-done ids.
-    if not resume:
-        for p in (out_path, state_path):
-            if p.exists():
-                p.unlink()
-    completed = _read_output_state(state_path) if resume else set()
-    if completed:
-        before = len(inputs)
-        inputs = inputs[~inputs["_state_id"].isin(completed)].reset_index(drop=True)
-        if verbose and before != len(inputs):
-            print(f"  Resume: skipping {before - len(inputs)} already-completed inputs")
-
-    if verbose:
-        print(f"\n{'='*60}")
-        print(f"Generate Output Responses")
-        print(f"{'='*60}")
-        cap_str = (
-            f" | Per-category cap: {max_per_category}"
-            if max_per_category is not None else ""
-        )
-        print(
-            f"Samples: {len(inputs)} | Model: {model} | "
-            f"Checker: {'enabled (' + check_model + ')' if check_outputs else 'disabled'} | "
-            f"Batch: {batch_size}{cap_str}"
-        )
-
-    # Per-(category, entry_type) checker cache so we build each prompt once.
-    checker_cache: dict[tuple[str, str], "Callable[[str], list[dict]]"] = {}
-
-    def _checker_for(category: str, entry_type: str):
-        key = (category, entry_type)
-        if key not in checker_cache:
-            checker_cache[key] = build_output_quality_checker(
-                category=category, entry_type=entry_type, prompt_dir=prompt_dir
-            )
-        return checker_cache[key]
-
-    all_rows: list[dict] = []
-    n_chunks = ceil(len(inputs) / batch_size) if batch_size else 1
-
-    for batch_start in range(0, len(inputs), batch_size):
-        chunk = inputs.iloc[batch_start : batch_start + batch_size]
-        chunk_idx = batch_start // batch_size + 1
-
-        # 1. Build all messages for this chunk
-        messages_list = []
-        chunk_rows = []
-        for _, row in chunk.iterrows():
-            input_text = row[text_col]
-            category = str(row.get("category", "unknown"))
-            entry_type = str(row.get("entry_type", "harmful"))
-            subcategory = str(row.get("subcategory", ""))
-
-            messages_list.append(
-                build_messages(
-                    prompt_config,
-                    input_prompt=input_text,
-                    Category=category,
-                )
-            )
-            chunk_rows.append({
-                "input_id": str(row["_state_id"]),
-                "input_prompt": input_text,
-                "category": category,
-                "subcategory": subcategory,
-                "entry_type": entry_type,
-                "model": model,
-                "source": str(row.get("source", "")),
-            })
-
-        # 2. Single batched generation
-        responses = gen_caller.batch_generate(
-            messages_list, model,
-            progress=f"gen chunk {chunk_idx}/{n_chunks}" if verbose else None,
-            internals_ids=(
-                [f'{r["input_id"]}/output' for r in chunk_rows]
-                if capture_internals_gen else None
-            ),
-        )
-
-        # 3. Batched output checking (per-row checker, flat batch)
-        if check_outputs and check_caller is not None:
-            check_msgs_list: list[list[dict]] = []
-            for r, resp in zip(chunk_rows, responses):
-                payload = f"INPUT:\n{r['input_prompt']}\n\nOUTPUT:\n{resp}"
-                check_msgs_list.append(
-                    _checker_for(r["category"], r["entry_type"])(payload)
-                )
-            check_responses = check_caller.batch_generate(
-                check_msgs_list, check_model,
-                progress=f"check chunk {chunk_idx}/{n_chunks}" if verbose else None,
-                internals_ids=(
-                    [f'{r["input_id"]}/val_out' for r in chunk_rows]
-                    if capture_internals_check else None
-                ),
-            )
-            check_results = []
-            for cr in check_responses:
-                accepted = any(
-                    cr.strip().lower().startswith(p)
-                    for p in ("yes", "ok", "accept", "pass")
-                )
-                check_results.append((accepted, "" if accepted else cr))
-        else:
-            check_results = [(True, "")] * len(chunk_rows)
-
-        # 4. Assemble + incremental append. sample_id is this row's own content-hash
-        # identity (distinct from input_id, which points back to the origin sample) —
-        # only knowable once the response text exists.
-        for r, resp, (accepted, reasoning) in zip(chunk_rows, responses, check_results):
-            r["sample_id"] = _hash_text(resp)
-            r["output_response"] = resp
-            r["accepted"] = accepted
-            r["rejection_reason"] = reasoning
-        all_rows.extend(chunk_rows)
-
-        new_df = pd.DataFrame(chunk_rows)
-        if out_path.exists():
-            new_df.to_csv(out_path, mode="a", header=False, index=False)
-        else:
-            new_df.to_csv(out_path, index=False)
-        # Record completion only after the CSV append succeeds, so a crash
-        # mid-chunk leaves those ids un-acked and they re-run next time.
-        _append_output_state(state_path, [r["input_id"] for r in chunk_rows])
-
-        if verbose:
-            accepted_count = sum(1 for r in chunk_rows if r["accepted"])
-            print(
-                f"  [{batch_start + len(chunk_rows)}/{len(inputs)}] "
-                f"{accepted_count}/{len(chunk_rows)} accepted "
-                f"-> appended to {out_path.name}"
-            )
-
-    # Return the full dataset on disk (includes rows from prior resumed runs),
-    # not just this run's newly-written delta.
-    output_df = pd.read_csv(out_path) if out_path.exists() else pd.DataFrame(all_rows)
-    if verbose:
-        accepted_total = (
-            int(output_df["accepted"].sum())
-            if not output_df.empty and "accepted" in output_df.columns
-            else 0
-        )
-        print(
-            f"\n  Output CSV now holds {len(output_df)} responses "
-            f"({accepted_total} accepted) at {out_path}"
-        )
-
-    return output_df
 
 
 def generate_jailbreaks(
@@ -1114,20 +800,16 @@ def generate_jailbreaks(
     spec_version = load_spec().get("version", "")
 
     if verbose:
-        print(f"\n{'='*60}")
-        print(f"Generate Jailbreaks (plan + batched execute)")
-        print(f"{'='*60}")
-        print(
-            f"Pool: {len(pool)} techniques | Samples: {len(inputs)} | "
-            f"Iterations: {iterations} | Model: {model} | Chunk: {batch_size}"
-        )
+        logger.info("Generate Jailbreaks (plan + batched execute)")
+        logger.info("Pool: %d techniques | Samples: %d | Iterations: %d | Model: %s | Chunk: %d",
+                    len(pool), len(inputs), iterations, model, batch_size)
 
     # ------------------------------------------------------------------
     # Phase 1 — Plan (lay out every unit before generation)
     # ------------------------------------------------------------------
     if resume and man_path.exists():
         if verbose:
-            print(f"  Reusing existing manifest: {man_path}")
+            logger.info("Reusing existing manifest: %s", man_path)
     else:
         plan_run(
             inputs, pool, manifest_path=man_path, seed=seed,
@@ -1187,12 +869,12 @@ def generate_jailbreaks(
     n_chunks = ceil(total / batch_size) if (total and batch_size) else 0
 
     if verbose and total:
-        print(f"  Executing {total} units in {n_chunks} chunk(s)...")
+        logger.info("Executing %d units in %d chunk(s)...", total, n_chunks)
 
     for start in range(0, total, batch_size):
         chunk = pending[start : start + batch_size]
         if verbose:
-            print(f"  chunk {start // batch_size + 1}/{n_chunks}: {len(chunk)} units")
+            logger.info("chunk %d/%d: %d units", start // batch_size + 1, n_chunks, len(chunk))
         samples = [
             {
                 "id": str(r["sample_id"]),
@@ -1231,232 +913,34 @@ def generate_jailbreaks(
 
         if verbose:
             n_acc = sum(1 for x in rows if x.get("accepted"))
-            print(f"  [{start + len(rows)}/{total}] {n_acc} accepted -> appended to {out.name}")
+            logger.info("[%d/%d] %d accepted -> appended to %s",
+                        start + len(rows), total, n_acc, out.name)
 
     jailbreaks = pd.read_csv(out) if out.exists() else pd.DataFrame()
 
     if verbose:
-        print(f"\n{'='*60}")
-        print(f"Jailbreak Summary")
-        print(f"{'='*60}")
-        print(f"  Planned units: {len(plan_rows)} | Newly written: {written}")
-        print(f"  Total rows in {out.name}: {len(jailbreaks)}")
+        logger.info("Jailbreak Summary")
+        logger.info("Planned units: %d | Newly written: %d", len(plan_rows), written)
+        logger.info("Total rows in %s: %d", out.name, len(jailbreaks))
         if not jailbreaks.empty and "accepted" in jailbreaks.columns:
             n_accepted = int(jailbreaks["accepted"].sum())
             n_noop = int(jailbreaks["is_noop"].sum()) if "is_noop" in jailbreaks.columns else 0
-            print(f"  Accepted: {n_accepted} | Rejected: {len(jailbreaks) - n_accepted}")
-            print(f"  No-ops: {n_noop}")
-        print(f"  Manifest: {man_path}")
-        print(f"  Saved to: {out}")
+            logger.info("Accepted: %d | Rejected: %d", n_accepted, len(jailbreaks) - n_accepted)
+            logger.info("No-ops: %d", n_noop)
+        logger.info("Manifest: %s", man_path)
+        logger.info("Saved to: %s", out)
 
     return jailbreaks
 
 
 # ---------------------------------------------------------------------------
 # Paraphrase / fingerprint removal
+#
+# The plan/ledger/execute orchestration (model-pool resolution +
+# run_paraphrase_target's plan->execute loop) lives in
+# content_moderation/paraphrase.py — generate_paraphrases() below just
+# validates args and dispatches per target.
 # ---------------------------------------------------------------------------
-
-
-def _paraphrase_state_path(out_path: Path) -> Path:
-    """Sidecar state-ledger path beside a paraphrase artifact (``*.state.jsonl``)."""
-    return out_path.with_name(out_path.stem + ".state.jsonl")
-
-
-def _paraphrase_ledger(state_path: Path) -> Ledger:
-    """Shared resume-ledger for paraphrase units, keyed ``(input_id, iteration)``."""
-    return Ledger(state_path, key_fields=("input_id", "iteration"),
-                  casters={"input_id": str, "iteration": int})
-
-
-def _read_paraphrase_state(state_path: Path) -> set[tuple[str, int]]:
-    """Return ``(input_id, iteration)`` units already recorded in the ledger."""
-    return _paraphrase_ledger(state_path).completed()
-
-
-def _append_paraphrase_state(state_path: Path, records: list[dict]) -> None:
-    """Append attempted-unit records (``input_id``/``iteration``/``paraphrase_model``/``status``)."""
-    _paraphrase_ledger(state_path).record(records)
-
-
-def _paraphrase_pool(paraphraser: str | None) -> list[str]:
-    """Resolve the paraphraser model pool.
-
-    ``None`` → the ``paraphraser`` role default; a model name → just that model;
-    ``"distribution"`` → all models registered with ``role="paraphraser"``.
-    """
-    if paraphraser == "distribution":
-        seen: set[str] = set()
-        pool = [
-            c.name for c in get_models_by_role("paraphraser")
-            if not (c.name in seen or seen.add(c.name))
-        ]
-        if not pool:
-            raise ValueError("paraphraser='distribution' but no model has role='paraphraser'.")
-        return pool
-    if paraphraser:
-        return [paraphraser]
-    return [default_model_for_role("paraphraser")]
-
-
-def _assign_paraphraser(base_id: str, k: int, pool: list[str], seed: int) -> str:
-    """Deterministic round-robin pick (content-hash of base_id + k + seed)."""
-    import hashlib
-    if len(pool) == 1:
-        return pool[0]
-    h = hashlib.sha256(f"{seed}:{base_id}:{k}".encode("utf-8")).hexdigest()
-    return pool[int(h, 16) % len(pool)]
-
-
-def _run_paraphrase_target(
-    tgt, source, data_dir, pool, check, check_model, K, resume, batch_size,
-    seed, prompt_dir, out_path_override, verbose,
-) -> pd.DataFrame:
-    """Paraphrase one target (``"inputs"`` or ``"outputs"``) → its artifact CSV."""
-    # ---- Load source rows (base_id, text, category, entry_type) --------------
-    if tgt == "inputs":
-        src = source if source is not None else merge_all(paths.datasets(data_dir), accepted_only=True)
-        src = src.copy()
-        text_col = "sample" if "sample" in src.columns else "prompt"
-        id_col = "sample_id"
-        out_path = Path(out_path_override) if out_path_override else paths.paraphrases_inputs_csv(data_dir)
-    else:  # outputs
-        if source is not None:
-            src = source.copy()
-        else:
-            rp = paths.output_responses_csv(data_dir)
-            src = pd.read_csv(rp) if rp.exists() else pd.DataFrame()
-        if not src.empty and "accepted" in src.columns:
-            src = src[src["accepted"] == True]  # noqa: E712 — accepted base outputs only
-        text_col = "output_response" if "output_response" in getattr(src, "columns", []) else "sample"
-        id_col = "input_id"
-        out_path = Path(out_path_override) if out_path_override else paths.paraphrases_outputs_csv(data_dir)
-
-    if src is None or src.empty:
-        if verbose:
-            print(f"  [paraphrase:{tgt}] no source rows; skipping.")
-        return pd.DataFrame()
-
-    src = src.reset_index(drop=True)
-    out_path.parent.mkdir(parents=True, exist_ok=True)
-
-    def _base_id(row) -> str:
-        existing = str(row.get(id_col, "")).strip()
-        if existing and existing.lower() != "nan":
-            return existing
-        return _hash_text(str(row[text_col]))
-
-    # ---- Resume via a sidecar STATE LEDGER (like constitution/output) ---------
-    # The ledger records every *attempted* (base_id, iteration) unit + its model +
-    # outcome, so a re-run skips them all — including drops (deduped/rejected), which
-    # the output CSV alone would silently re-attempt. The CSV is still read for
-    # content dedup (seen_texts), but completion is the ledger's job.
-    state_path = _paraphrase_state_path(out_path)
-    manifest = Manifest.sidecar(out_path)
-    if not resume:
-        manifest.reset()
-        for p in (out_path, state_path):
-            if p.exists():
-                p.unlink()
-    completed: set[tuple[str, int]] = _read_paraphrase_state(state_path) if resume else set()
-    seen_texts: set[str] = set()
-    if out_path.exists():
-        prev = pd.read_csv(out_path)
-        if not prev.empty and "sample" in prev.columns:
-            seen_texts = set(prev["sample"].astype(str))
-
-    # ---- Plan the FULL run -> manifest = the whole (base_id, k -> model) mapping
-    all_units: list[tuple] = []  # (base_id, k, model, original_text, category, entry_type)
-    for _, row in src.iterrows():
-        bid = _base_id(row)
-        otext = str(row[text_col])
-        cat, et = str(row.get("category", "")), str(row.get("entry_type", ""))
-        for k in range(K):
-            all_units.append((bid, k, _assign_paraphraser(bid, k, pool, seed), otext, cat, et))
-
-    manifest.write(
-        {
-            "input_id": bid, "iteration": k, "paraphrase_model": m,
-            "category": cat, "entry_type": et, "status": "planned",
-        }
-        for bid, k, m, _o, cat, et in all_units
-    )
-
-    units = [u for u in all_units if (u[0], u[1]) not in completed]
-    if not units:
-        if verbose:
-            print(f"  [paraphrase:{tgt}] nothing to do (all {len(all_units)} units done).")
-        return pd.read_csv(out_path) if out_path.exists() else pd.DataFrame()
-
-    # ---- Execute grouped by model (one paraphraser loaded at a time) ---------
-    from collections import defaultdict
-    groups: dict[str, list[tuple]] = defaultdict(list)
-    for u in units:
-        groups[u[2]].append(u)
-
-    rate_limiter = get_router().rate_limiter
-    check_backend = get_backend(check_model) if check else None
-    written = 0
-    for model, gunits in groups.items():
-        backend = get_backend(model)
-        # Internals capture: paraphrase's own output text (its eventual sample_id)
-        # isn't known until the call returns, but internals_id has to be supplied
-        # before it — capture under a pre-call-known provisional id (bid/k, always
-        # unique) and relabel to the real sample_id once it's computed below.
-        capture_paraphrase = getattr(backend, "supports_internals", False)
-        for start in range(0, len(gunits), batch_size):
-            chunk = gunits[start : start + batch_size]
-            texts = [u[3] for u in chunk]
-            provisional_ids = [f"{bid}/paraphrase/attempt_{k}" for bid, k, *_ in chunk]
-            paraphrased = paraphrase_batch(
-                backend, model, texts, rate_limiter=rate_limiter,
-                prompt_dir=prompt_dir,
-                progress=f"paraphrase:{tgt} ({model})" if verbose else None,
-                internals_ids=provisional_ids if capture_paraphrase else None,
-            )
-            if check:
-                payloads = [paraphrase_check_payload(u[3], p) for u, p in zip(chunk, paraphrased)]
-                checks = batch_check_samples(
-                    check_backend, check_model, payloads,
-                    build_paraphrase_checker(prompt_dir=prompt_dir),
-                    batch_size=batch_size, rate_limiter=rate_limiter,
-                    progress=f"paraphrase-check:{tgt}" if verbose else None,
-                )
-            else:
-                checks = [(True, "")] * len(chunk)
-
-            rows, ledger = [], []
-            for (bid, k, m, otext, cat, et), ptext, (acc, reason), prov_id in zip(
-                chunk, paraphrased, checks, provisional_ids
-            ):
-                pt = str(ptext).strip()
-                if not pt or pt == otext or pt in seen_texts:
-                    ledger.append({"input_id": bid, "iteration": k,
-                                   "paraphrase_model": m, "status": "dropped_dedup"})
-                    continue  # dedup: drop no-op / duplicate paraphrases
-                seen_texts.add(pt)
-                sample_id = _hash_text(pt)
-                if capture_paraphrase:
-                    backend.rename_capture(prov_id, f"{bid}/paraphrase/{sample_id}")
-                rows.append({
-                    "sample_id": sample_id, "input_id": bid, "iteration": k,
-                    "sample": pt, "category": cat, "entry_type": et,
-                    "paraphrase_model": m, "accepted": bool(acc),
-                    "reasoning": reason, "source": f"paraphrase_{tgt}",
-                })
-                ledger.append({"input_id": bid, "iteration": k, "paraphrase_model": m,
-                               "status": "accepted" if acc else "rejected"})
-            if rows:
-                cdf = pd.DataFrame(rows)
-                cdf.to_csv(out_path, mode="a", header=not out_path.exists(), index=False)
-                written += len(rows)
-            # Record every attempted unit only after the CSV append — a crash mid-chunk
-            # leaves those units un-acked so they re-run next time (never duplicated).
-            _append_paraphrase_state(state_path, ledger)
-
-    if verbose:
-        n = len(pd.read_csv(out_path)) if out_path.exists() else 0
-        print(f"  [paraphrase:{tgt}] +{written} rows (artifact now {n}) -> {out_path.name}")
-    return pd.read_csv(out_path) if out_path.exists() else pd.DataFrame()
 
 
 def generate_paraphrases(
@@ -1514,9 +998,7 @@ def generate_paraphrases(
     Returns:
         ``{"inputs": df, "outputs": df}`` for whichever targets ran.
     """
-    import warnings
-
-    pool = _paraphrase_pool(paraphraser)
+    pool = paraphrase_pool(paraphraser)
     if paraphrases_per_sample > 1 and len(pool) == 1:
         warnings.warn(
             f"paraphrases_per_sample={paraphrases_per_sample} with a single paraphraser "
@@ -1534,9 +1016,9 @@ def generate_paraphrases(
             )
 
     if verbose:
-        print(f"\n{'='*60}\nGenerate Paraphrases (target={target})\n{'='*60}")
-        print(f"Paraphraser(s): {pool} | K: {paraphrases_per_sample} | "
-              f"Checker: {check_model if check else 'disabled'}")
+        logger.info("Generate Paraphrases (target=%s)", target)
+        logger.info("Paraphraser(s): %s | K: %d | Checker: %s",
+                    pool, paraphrases_per_sample, check_model if check else "disabled")
 
     targets = ["inputs", "outputs"] if target == "both" else [target]
     if not set(targets) <= {"inputs", "outputs"}:
@@ -1546,7 +1028,7 @@ def generate_paraphrases(
     for tgt in targets:
         source = inputs if tgt == "inputs" else outputs
         override = inputs_path if tgt == "inputs" else outputs_path
-        results[tgt] = _run_paraphrase_target(
+        results[tgt] = run_paraphrase_target(
             tgt, source, data_dir, pool, check, check_model, paraphrases_per_sample,
             resume, batch_size, seed, prompt_dir, override, verbose,
         )
@@ -1623,9 +1105,7 @@ def build_dataset(
     parts = []
 
     if verbose:
-        print(f"\n{'='*60}")
-        print(f"Build Complete Dataset")
-        print(f"{'='*60}")
+        logger.info("Build Complete Dataset")
 
     # Content moderation inputs.
     # Prefer an explicit/auto-detected merged handoff CSV (constitution or
@@ -1643,7 +1123,7 @@ def build_dataset(
             cm_df["dataset_type"] = "content_moderation_input"
             parts.append(cm_df)
             if verbose:
-                print(f"  Inputs: {len(cm_df)} samples from {in_path.name}")
+                logger.info("Inputs: %d samples from %s", len(cm_df), in_path.name)
         else:
             categories = discover_categories(ds_dir)
             if categories:
@@ -1651,9 +1131,9 @@ def build_dataset(
                 cm_df["dataset_type"] = "content_moderation_input"
                 parts.append(cm_df)
                 if verbose:
-                    print(f"  Inputs: {len(cm_df)} samples from {len(categories)} categories")
+                    logger.info("Inputs: %d samples from %d categories", len(cm_df), len(categories))
             elif verbose:
-                print(f"  Inputs: none found")
+                logger.info("Inputs: none found")
 
     # Jailbreaks
     if include_jailbreaks and jb_path.exists():
@@ -1662,11 +1142,11 @@ def build_dataset(
             jb_df["dataset_type"] = "jailbreak"
             parts.append(jb_df)
             if verbose:
-                print(f"  Jailbreaks: {len(jb_df)} samples")
+                logger.info("Jailbreaks: %d samples", len(jb_df))
         elif verbose:
-            print(f"  Jailbreaks: none found")
+            logger.info("Jailbreaks: none found")
     elif verbose and include_jailbreaks:
-        print(f"  Jailbreaks: file not found ({jb_path})")
+        logger.info("Jailbreaks: file not found (%s)", jb_path)
 
     # Output responses (explicit/auto-detected: constitution or content-moderation).
     if include_outputs:
@@ -1682,9 +1162,9 @@ def build_dataset(
             out_df["dataset_type"] = "content_moderation_output"
             parts.append(out_df)
             if verbose:
-                print(f"  Outputs: {len(out_df)} samples from {resp_path.name}")
+                logger.info("Outputs: %d samples from %s", len(out_df), resp_path.name)
         elif verbose:
-            print(f"  Outputs: none found")
+            logger.info("Outputs: none found")
 
     # Paraphrases — additive. In ``training`` mode they merge into the complete
     # dataset; in ``eval`` mode they're kept separate in ``paraphrased.csv`` and
@@ -1708,17 +1188,18 @@ def build_dataset(
                 para_out.parent.mkdir(parents=True, exist_ok=True)
                 para_df.to_csv(para_out, index=False)
                 if verbose:
-                    print(f"  Paraphrases: {len(para_df)} -> separate {para_out.name} (eval mode)")
+                    logger.info("Paraphrases: %d -> separate %s (eval mode)",
+                                len(para_df), para_out.name)
             else:  # training — merge in
                 parts.append(para_df)
                 if verbose:
-                    print(f"  Paraphrases: {len(para_df)} merged (training mode)")
+                    logger.info("Paraphrases: %d merged (training mode)", len(para_df))
         elif verbose:
-            print(f"  Paraphrases: none found")
+            logger.info("Paraphrases: none found")
 
     if not parts:
         if verbose:
-            print(f"\n  No data found. Run generate_inputs/jailbreaks/outputs first.")
+            logger.info("No data found. Run generate_inputs/jailbreaks/outputs first.")
         return pd.DataFrame()
 
     merged = pd.concat(parts, ignore_index=True)
@@ -1727,10 +1208,10 @@ def build_dataset(
     merged.to_csv(out_path, index=False)
 
     if verbose:
-        print(f"\n  Total: {len(merged)} samples")
+        logger.info("Total: %d samples", len(merged))
         if "dataset_type" in merged.columns:
             for dtype, count in merged["dataset_type"].value_counts().items():
-                print(f"    {dtype}: {count}")
-        print(f"  Saved to: {out_path}")
+                logger.info("%s: %d", dtype, count)
+        logger.info("Saved to: %s", out_path)
 
     return merged

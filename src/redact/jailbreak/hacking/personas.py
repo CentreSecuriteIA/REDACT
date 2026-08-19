@@ -15,11 +15,11 @@ scenarios can still be injected via the ``scenario`` kwarg.
 """
 
 from redact.dataset.taxonomy import load_taxonomy
+from redact.jailbreak.dynamic_functions import bind_functions
 from redact.jailbreak.protocol import LLMRequest, TechniqueGen
-from redact.llms.prompts import load_prompt, build_messages
+from redact.llms.prompts import build_messages, load_prompt
 
 from .cognitive import _extract_scenario, cognitive_gen
-
 
 # ---------------------------------------------------------------------------
 # Load persona taxonomy at module level
@@ -121,7 +121,7 @@ def _make_persona_fn(persona_name: str):
 
 # Bind one module-level generator per named persona.
 _PERSONA_FNS = {name: _make_persona_fn(name) for name in _NAMED_PERSONAS}
-globals().update({fn.__name__: fn for fn in _PERSONA_FNS.values()})
+bind_functions(globals(), list(_PERSONA_FNS.values()))
 
 
 # ---------------------------------------------------------------------------

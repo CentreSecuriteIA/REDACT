@@ -15,17 +15,13 @@ following the same pattern as structural.py.
 additional_info format: "directive={name};variant={variant_name}"
 """
 
-import json
-import random
-from pathlib import Path
-
+from ..directives import apply_template_directive, load_templates
 
 # ---------------------------------------------------------------------------
 # Template loading
 # ---------------------------------------------------------------------------
 
-_TEMPLATES_PATH = Path(__file__).parent.parent.parent / "configs" / "jailbreak" / "hacking" / "framing_templates.json"
-_TEMPLATES: dict[str, list[dict]] = json.loads(_TEMPLATES_PATH.read_text(encoding="utf-8"))
+_TEMPLATES: dict[str, list[dict]] = load_templates("hacking", "framing_templates.json")
 
 
 # ---------------------------------------------------------------------------
@@ -43,9 +39,7 @@ def _apply(directive: str, prompt: str) -> tuple[str, str]:
     Returns:
         (modified_prompt, additional_info)
     """
-    variant = random.choice(_TEMPLATES[directive])
-    result = variant["template"].format_map({"prompt": prompt})
-    return result, f"directive={directive};variant={variant['name']}"
+    return apply_template_directive(_TEMPLATES, directive, prompt, info_key="directive")
 
 
 # ---------------------------------------------------------------------------

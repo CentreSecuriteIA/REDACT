@@ -7,11 +7,14 @@ into :meth:`BatchCaller.batch_generate`'s ``on_complete(index, result)`` hook
 (constitution-seeded), and jailbreak generation all emit progress in the same
 format — controlled by each pipeline's existing ``verbose`` flag.
 
-The reporter prints throttled plain-text ticks (no tqdm dependency) to stdout,
-matching the print style of the pipeline summaries.
+The reporter logs throttled plain-text ticks at INFO (no tqdm dependency),
+matching the level pipeline progress narration uses elsewhere.
 """
 
+import logging
 import threading
+
+logger = logging.getLogger(__name__)
 
 
 class ProgressReporter:
@@ -53,7 +56,7 @@ class ProgressReporter:
         # A "started" line so a slow batch shows something before the first
         # completion (which may be minutes away on a large LLM call).
         if announce and total > 0:
-            print(f"{indent}{label}: 0/{total} ...")
+            logger.info("%s%s: 0/%d ...", indent, label, total)
 
     def on_complete(self, index: int, result: str) -> None:
         """Record one completion and print a tick when due.
@@ -66,4 +69,4 @@ class ProgressReporter:
             self._done += 1
             done = self._done
         if done % self.every == 0 or done == self.total:
-            print(f"{self.indent}{self.label}: {done}/{self.total} done")
+            logger.info("%s%s: %d/%d done", self.indent, self.label, done, self.total)

@@ -13,17 +13,13 @@ selected per call using the globally seeded random module.
 additional_info format: "type={type_name};variant={variant_name}"
 """
 
-import json
-import random
-from pathlib import Path
-
+from ..directives import apply_template_directive, load_templates
 
 # ---------------------------------------------------------------------------
 # Template loading
 # ---------------------------------------------------------------------------
 
-_TEMPLATES_PATH = Path(__file__).parent.parent.parent / "configs" / "jailbreak" / "requests" / "asking_templates.json"
-_TEMPLATES: dict[str, list[dict]] = json.loads(_TEMPLATES_PATH.read_text(encoding="utf-8"))
+_TEMPLATES: dict[str, list[dict]] = load_templates("requests", "asking_templates.json")
 
 
 # ---------------------------------------------------------------------------
@@ -32,9 +28,7 @@ _TEMPLATES: dict[str, list[dict]] = json.loads(_TEMPLATES_PATH.read_text(encodin
 
 
 def _apply(directive: str, prompt: str) -> tuple[str, str]:
-    t = random.choice(_TEMPLATES[directive])
-    result = t["template"].format_map({"prompt": prompt})
-    return result, f"type={directive};variant={t['name']}"
+    return apply_template_directive(_TEMPLATES, directive, prompt, info_key="type")
 
 
 # ---------------------------------------------------------------------------

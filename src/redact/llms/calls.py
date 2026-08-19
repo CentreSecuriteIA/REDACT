@@ -8,10 +8,24 @@ Key feature: gen_backend/gen_model and check_backend/check_model can
 differ, supporting patterns like "Venice generates, Claude validates".
 """
 
-from typing import Callable
+from collections.abc import Callable
 
 from .base import LLMBackend
-from .wrappers import RateLimiter, with_retries, with_feedback_retries, BatchCaller
+from .wrappers import BatchCaller, RateLimiter, with_feedback_retries, with_retries
+
+_ACCEPT_PREFIXES = ("yes", "ok", "accept", "pass")
+
+
+def is_accepted(response: str) -> bool:
+    """Parse a checker/judge LLM response into accept/reject.
+
+    Accepts when the response starts with "yes", "ok", "accept", or "pass"
+    (case-insensitive). This is the single acceptance rule shared by every
+    checker/judge in the library (content moderation, output, paraphrase,
+    translation, jailbreak-technique checks) — keep it here rather than
+    reimplementing it at each call site.
+    """
+    return response.strip().lower().startswith(_ACCEPT_PREFIXES)
 
 
 def generate_sample(
@@ -71,14 +85,8 @@ def check_sample(
 
     messages = build_check_messages(sample)
     response = backend.generate(messages, model, **kwargs)
-    response_stripped = response.strip().lower()
 
-    accepted = any(
-        response_stripped.startswith(prefix)
-        for prefix in ("yes", "ok", "accept", "pass")
-    )
-
-    if accepted:
+    if is_accepted(response):
         return True, ""
     return False, response
 
@@ -144,10 +152,7 @@ def batch_check_samples(
             messages_list, model, progress=chunk_progress, **kwargs
         )
         for response in responses:
-            accepted = any(
-                response.strip().lower().startswith(prefix)
-                for prefix in ("yes", "ok", "accept", "pass")
-            )
+            accepted = is_accepted(response)
             results.append((accepted, "" if accepted else response))
     return results
 

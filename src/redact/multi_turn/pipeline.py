@@ -14,6 +14,7 @@ from __future__ import annotations
 
 import copy
 import json
+import logging
 from math import ceil
 from pathlib import Path
 
@@ -27,6 +28,8 @@ from redact.llms import get_router
 from redact.llms.conversation import drive_generators
 
 from .core import Setting, conversation_gen
+
+logger = logging.getLogger(__name__)
 
 
 def _seed_text_col(df: pd.DataFrame) -> str:
@@ -44,7 +47,7 @@ def _ledger(out: Path) -> Ledger:
 
 def generate_conversations(
     seeds: pd.DataFrame,
-    setting: "Setting | callable",
+    setting: Setting | callable,
     data_dir: str | Path | None = None,
     iterations: int = 1,
     resume: bool = True,
@@ -110,9 +113,9 @@ def generate_conversations(
 
     pending = [u for u in units if (u[0], u[1]) not in completed]
     if verbose:
-        print(f"\n{'='*60}\nGenerate Conversations\n{'='*60}")
-        print(f"Seeds: {len(seeds)} | iterations: {iterations} | "
-              f"units: {len(units)} | pending: {len(pending)}")
+        logger.info("Generate Conversations")
+        logger.info("Seeds: %d | iterations: %d | units: %d | pending: %d",
+                    len(seeds), iterations, len(units), len(pending))
     if not pending:
         return pd.read_csv(out) if out.exists() else pd.DataFrame()
 
@@ -159,6 +162,6 @@ def generate_conversations(
             for r in rows
         ])
         if verbose:
-            print(f"  [{start + len(rows)}/{n}] wrote {len(rows)} conversations")
+            logger.info("[%d/%d] wrote %d conversations", start + len(rows), n, len(rows))
 
     return pd.read_csv(out) if out.exists() else pd.DataFrame()

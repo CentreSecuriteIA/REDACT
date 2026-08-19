@@ -14,8 +14,8 @@ Plan: `.claude/theme4_multiturn_plan.md`.
 
 from __future__ import annotations
 
+from collections.abc import Callable, Generator
 from dataclasses import dataclass, field
-from typing import Callable, Generator
 
 from redact.llms.conversation import LLMRequest, Step, Transcript, drive_sync
 

@@ -8,7 +8,7 @@ _translate_with_retry (lines 143-299).
 """
 
 from .base import LLMBackend
-from .calls import generate_sample, check_sample
+from .calls import check_sample, generate_sample, is_accepted
 from .model_config import default_model_for_role
 from .wrappers import RateLimiter, with_feedback_retries
 
@@ -108,13 +108,10 @@ def build_check_messages(
 def is_faithful_response(response: str) -> bool:
     """Parse a translation-checker response into accept/reject.
 
-    Mirrors :func:`redact.llms.calls.check_sample` — accepts when the reply
-    starts with yes/ok/accept/pass (case-insensitive).
+    Thin alias for :func:`redact.llms.calls.is_accepted` — kept as its own
+    name here since it's the public entry point translation callers use.
     """
-    stripped = response.strip().lower()
-    return any(
-        stripped.startswith(prefix) for prefix in ("yes", "ok", "accept", "pass")
-    )
+    return is_accepted(response)
 
 
 def translate(
@@ -216,6 +213,8 @@ def translate_with_check(
             On exhaustion: (last_attempt, "DISCARDED; language=<lang>; feedback=<text>")
     """
 
+    last_feedback = ""
+
     def gen_fn(text_: str, feedback: str = "") -> str:
         return translate(
             backend, gen_model, text_, target_language,
@@ -226,12 +225,15 @@ def translate_with_check(
         )
 
     def check_fn(original: str, generated: str) -> tuple[bool, str]:
-        return check_translation(
+        nonlocal last_feedback
+        accepted, feedback = check_translation(
             backend, check_model, original, generated, target_language,
             system_prompt=check_system_prompt,
             rate_limiter=rate_limiter,
             **kwargs,
         )
+        last_feedback = feedback
+        return accepted, feedback
 
     wrapped = with_feedback_retries(gen_fn, check_fn, num_retries=num_retries)
     result, info = wrapped(text)
@@ -239,5 +241,7 @@ def translate_with_check(
     if not info:
         # Success — return language as additional info
         return result, target_language
-    # Failure — inject language into DISCARDED info string
-    return result, f"DISCARDED; language={target_language}; {info[len('DISCARDED; '):]}"
+    # Failure — build the DISCARDED info string from data captured directly
+    # in check_fn above, rather than parsing it back out of `info` (which
+    # would silently break if with_feedback_retries's own format ever changes).
+    return result, f"DISCARDED; language={target_language}; feedback={last_feedback}"

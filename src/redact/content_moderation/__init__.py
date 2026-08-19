@@ -6,29 +6,25 @@ Usage:
         build_quality_checker,
         build_category_checker,
     )
-    from redact.content_moderation.metaprompt import (
-        generate_instruction_prompt,
-    )
 """
 
+from .checker import (
+    build_category_checker,
+    build_output_quality_checker,
+    build_paraphrase_checker,
+    build_quality_checker,
+    paraphrase_check_payload,
+)
 from .generation import (
+    CategoryResult,
+    ConstitutionInputResult,
     InputPipeline,
     SampleResult,
     TurnResult,
-    CategoryResult,
-    ConstitutionInputResult,
+    run_output_generation,
 )
-from .checker import (
-    build_quality_checker,
-    build_output_quality_checker,
-    build_category_checker,
-    build_paraphrase_checker,
-    paraphrase_check_payload,
-)
-from .paraphrase import paraphrase_batch, paraphrase_sample
 from .metaprompt import (
     generate_category_description,
     generate_seeds,
-    generate_abstract_seeds,
-    generate_instruction_prompt,  # legacy alias
 )
+from .paraphrase import paraphrase_batch, paraphrase_sample

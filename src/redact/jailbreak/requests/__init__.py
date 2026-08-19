@@ -15,12 +15,12 @@ All functions: str -> tuple[str, str]. No LLM dependency.
 
 from .answer import get_answer_functions
 from .answer_language import get_answer_language_functions
+from .asking import get_asking_functions
 from .continuation import get_continuation_functions
-from .indirect import get_indirect_functions
 from .distractor import get_distractor_functions
 from .impersonation import get_impersonation_functions
+from .indirect import get_indirect_functions
 from .temporal import get_temporal_functions
-from .asking import get_asking_functions
 
 
 def get_request_types() -> list[str]:

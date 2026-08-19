@@ -1,16 +1,15 @@
 """Process-wide router for LLM access.
 
 Owns one shared ``RateLimiter`` and one ``BatchCaller`` per model (lazily
-created, cached). Provides role-based lookup so pipelines don't hardcode
-model strings — e.g. ``router.for_role("translation")`` returns the
-canonical (backend, model) pair for translation work.
+created, cached), so every pipeline shares the same RPM budget and the same
+capability-aware dispatch (native batch / thread pool / sequential) per model.
 
-Why a router: the LLM layer has three special-use models (Anthropic for
-constitution gen, DeepSeek for translation, vLLM for local inference) plus
-the uncensored generation models. Each has different concurrency rules.
-The router is the single place that knows which model gets which executor,
-so callers can ask for "translation" or "venice-uncensored" and always get
-the right batching / parallelism / rate-limit behavior.
+Role → model name resolution (e.g. "translation" → "deepseek-v3.2") is a
+separate, smaller concern handled by :func:`redact.llms.model_config.
+default_model_for_role`, which every real call site uses directly since it
+composes with an explicit override (``model = model or
+default_model_for_role(role)``) — something a fixed role-lookup method on the
+router can't express.
 
 Usage::
 
@@ -24,17 +23,12 @@ Usage::
     # Batch — picks the right path (vLLM native batch, API thread pool,
     # or Anthropic sequential) based on backend capabilities
     results = router.batch_generate("venice-uncensored", messages_list)
-
-    # Role lookup
-    backend, model = router.for_role("translation")  # → DeepSeek
-    backend, model = router.for_role("constitution_gen")  # → Claude
 """
 
 from __future__ import annotations
 
 from .api import get_backend as _get_backend_module
 from .base import LLMBackend
-from .model_config import default_model_for_role
 from .wrappers import BatchCaller, RateLimiter
 
 
@@ -77,21 +71,6 @@ class ModelRouter:
                 backend, model, rate_limiter=self._rate_limiter,
             )
         return self._executors[model]
-
-    def for_role(self, role: str) -> tuple[LLMBackend, str]:
-        """Return ``(backend, model_name)`` for the canonical model of a role.
-
-        Roles defined in the default registry:
-        - ``"constitution_gen"`` → ``claude-opus-4-6``
-        - ``"translation"``      → ``deepseek-v3.2``
-        - ``"uncensored_gen"``   → ``venice-uncensored``
-        - ``"uncensored_local"`` → ``venice-uncensored-vllm``
-
-        Raises:
-            KeyError: If no model in the registry has this role.
-        """
-        model = default_model_for_role(role)
-        return self.get_backend(model), model
 
     def generate(
         self,

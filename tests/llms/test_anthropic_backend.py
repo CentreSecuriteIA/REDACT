@@ -106,3 +106,26 @@ class TestAnthropicGenerate:
         call_kwargs = anthropic_backend._client.messages.create.call_args[1]
         assert call_kwargs["max_tokens"] == 1000
         assert call_kwargs["temperature"] == 0.3
+
+    def test_supports_system_prompt_false_folds_into_user_message(self, anthropic_backend):
+        from redact.llms.model_config import MODEL_REGISTRY, register_model
+
+        name = "_test_no_system_prompt_claude"
+        try:
+            register_model(name, rpm=5, backend_type="anthropic", supports_system_prompt=False)
+            anthropic_backend.generate(
+                [
+                    {"role": "system", "content": "You are helpful."},
+                    {"role": "user", "content": "hi"},
+                ],
+                name,
+            )
+            call_kwargs = anthropic_backend._client.messages.create.call_args[1]
+            # folded away before the system/conversation split runs, so there's
+            # no separate `system` param — it's part of the one user message.
+            assert "system" not in call_kwargs
+            assert call_kwargs["messages"] == [
+                {"role": "user", "content": "You are helpful.\n\nhi"}
+            ]
+        finally:
+            MODEL_REGISTRY.pop(name, None)

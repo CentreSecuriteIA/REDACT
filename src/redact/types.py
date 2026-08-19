@@ -9,7 +9,7 @@ risk that motivated splitting these out in the first place.
 from enum import Enum
 
 
-class EntryType(str, Enum):
+class EntryType(str, Enum):  # noqa: UP042 — used pervasively across subpackages; not migrating to enum.StrEnum without dedicated verification of every call site's repr()/serialization assumptions
     """Severity level for a generated dataset sample.
 
     Spectrum:

@@ -13,7 +13,7 @@ The success judge is a separate step: score the produced ``conversations.csv`` w
 
 from __future__ import annotations
 
-from typing import Callable
+from collections.abc import Callable
 
 from redact.multi_turn import ModelActor, Setting, StrategyActor
 

@@ -21,75 +21,81 @@ Local inference via vLLM::
     backend = VLLMBackend(model="path/to/weights")
 """
 
-# Model registry
-from .model_config import (
-    ModelConfig,
-    MODEL_REGISTRY,
-    DEFAULT_RPM,
-    get_model_config,
-    register_model,
-    get_models_by_role,
-    default_model_for_role,
+import contextlib
+
+from .api import (  # APIBackend = compat alias
+    APIBackend,
+    clear_backend_cache,
+    get_backend,
 )
 
 # Abstract base
 from .base import LLMBackend
 
+# Model registry
+from .model_config import (
+    DEFAULT_RPM,
+    MODEL_REGISTRY,
+    ModelConfig,
+    default_model_for_role,
+    get_model_config,
+    get_models_by_role,
+    register_model,
+)
+
 # Backends
 from .venice_backend import VeniceBackend
-from .api import get_backend, clear_backend_cache, APIBackend  # APIBackend = compat alias
 
 # vLLM is imported lazily to avoid hard dependency
-try:
+with contextlib.suppress(ImportError):
     from .vllm_backend import VLLMBackend
-except ImportError:
-    pass
 
 # Anthropic is imported lazily to avoid hard dependency
-try:
+with contextlib.suppress(ImportError):
     from .anthropic_backend import AnthropicBackend
-except ImportError:
-    pass
 
 # transformers/torch introspection backend is imported lazily to avoid hard dependency
-try:
+with contextlib.suppress(ImportError):
     from .introspection_backend import TransformersIntrospectionBackend
-except ImportError:
-    pass
 
 # Wrappers
-from .wrappers import (
-    RateLimiter,
-    with_retries,
-    with_feedback_retries,
-    BatchCaller,
-    assert_single_sample_per_call,
+# High-level calls
+from .calls import (
+    batch_check_samples,
+    check_sample,
+    generate_sample,
+    generate_with_check,
+    is_accepted,
+)
+
+# Extraction utilities
+from .extraction import (
+    ConstitutionEntry,
+    clean_sample,
+    extract_and_clean,
+    extract_bold_prompt_answer,
+    extract_delimited,
+    extract_numbered_list,
+    extract_structured_qa,
+    get_format_instruction,
+    parse_constitution,
 )
 
 # Progress reporting (shared across all batched generation)
 from .progress import ProgressReporter
 
-# Router (process-wide LLM access surface)
-from .router import ModelRouter, get_router, clear_router
+# Prompt loading
+from .prompts import build_messages, load_prompt, render_template
 
-# High-level calls
-from .calls import generate_sample, check_sample, batch_check_samples, generate_with_check
+# Router (process-wide LLM access surface)
+from .router import ModelRouter, clear_router, get_router
 
 # Translation
-from .translator import translate, check_translation, translate_with_check
-
-# Prompt loading
-from .prompts import load_prompt, render_template, build_messages
-
-# Extraction utilities
-from .extraction import (
-    get_format_instruction,
-    extract_numbered_list,
-    extract_structured_qa,
-    extract_delimited,
-    clean_sample,
-    extract_and_clean,
-    ConstitutionEntry,
-    parse_constitution,
-    extract_bold_prompt_answer,
+from .translator import check_translation, translate, translate_with_check
+from .wrappers import (
+    BatchCaller,
+    RateLimiter,
+    assert_single_sample_per_call,
+    with_feedback_retries,
+    with_retries,
 )

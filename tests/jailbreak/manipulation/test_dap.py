@@ -2,9 +2,13 @@
 
 import random
 
+from tests.conftest import MockBackend
+from redact.jailbreak.protocol import run_sync
 from redact.jailbreak.manipulation.dap import (
     to_dap_random_short,
     to_dap_random_long,
+    to_dap_selected_short,
+    to_dap_selected_long,
     get_dap_functions,
     _build_dap_prompt,
 )
@@ -59,6 +63,40 @@ class TestDapRandom:
         data = _make_benign_data()
         result, info = to_dap_random_long("harmful prompt", data)
         assert "harmful prompt" in result
+
+
+def _run(fn, prompt, backend, **kwargs):
+    """Drive a technique generator to completion against a MockBackend."""
+    def call(request):
+        return backend.generate(request.messages, request.model)
+    return run_sync(fn(prompt, **kwargs), call)
+
+
+class TestDapSelected:
+    def test_short_exact_match(self):
+        random.seed(42)
+        data = _make_benign_data()
+        backend = MockBackend("Cooking")
+        result, info = _run(to_dap_selected_short, "harmful prompt", backend, benign_data=data)
+        assert "harmful prompt" in result
+        assert "sub_category=Cooking" in info
+        assert "selection=selected" in info
+        assert "harmful_idx=" in info  # DAP includes the insertion position
+
+    def test_long_exact_match(self):
+        random.seed(42)
+        data = _make_benign_data()
+        backend = MockBackend("Cooking")
+        result, info = _run(to_dap_selected_long, "harmful prompt", backend, benign_data=data)
+        assert "harmful prompt" in result
+        assert "harmful_idx=" in info
+
+    def test_fallback_when_unparseable(self):
+        random.seed(42)
+        data = _make_benign_data()
+        backend = MockBackend("totally unrelated response xyz")
+        _, info = _run(to_dap_selected_short, "harmful prompt", backend, benign_data=data)
+        assert "selection=fallback_random" in info
 
 
 class TestGetDapFunctions:

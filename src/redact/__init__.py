@@ -15,11 +15,20 @@ On import, this module:
     3. Makes all subpackages importable
 """
 
+import logging
 import os
 import random
 from pathlib import Path
 
 __version__ = "0.1.0"
+
+# Every module logs via logging.getLogger(__name__) under this "redact" root —
+# never print(). As a library we attach no handler and set no level (that's the
+# application's call); NullHandler only silences the "no handlers found"
+# warning if the caller never configures logging at all. To see progress,
+# configure it yourself, e.g. logging.basicConfig(level=logging.INFO), or use
+# scripts/run.py, which already does this (--quiet -> WARNING, --debug -> DEBUG).
+logging.getLogger(__name__).addHandler(logging.NullHandler())
 
 # ---------------------------------------------------------------------------
 # Output directory resolution
@@ -185,8 +194,11 @@ class Config:
 # Subpackage availability — lazy, no heavy imports on library load
 # ---------------------------------------------------------------------------
 
-from .types import EntryType, ALL_ENTRY_TYPES  # noqa: E402, F401
-from . import llms  # noqa: E402, F401
+# Deliberately one import per line (not merged into one `from . import (...)`
+# block): each line's own noqa suppression stays attached to the line ruff
+# actually reports E402 on — a merged block only lets the *opening* line
+# suppress E402, silently un-suppressing it for every other name inside it.
+from . import llms  # noqa: E402, F401, I001
 from . import content_moderation  # noqa: E402, F401
 from . import jailbreak  # noqa: E402, F401
 from . import dataset  # noqa: E402, F401
@@ -195,32 +207,35 @@ from . import multi_turn  # noqa: E402, F401
 from . import optimization  # noqa: E402, F401
 from . import multiturn_attacks  # noqa: E402, F401
 
-# ---------------------------------------------------------------------------
-# High-level pipeline functions
-# ---------------------------------------------------------------------------
-
-from .pipelines import (  # noqa: E402
-    create_taxonomy,
-    generate_constitution,
-    generate_inputs,
-    generate_outputs,
-    generate_jailbreaks,
-    generate_paraphrases,
-    build_dataset,
-)
-
 # Convenience re-export: the built-in 4-round escalation schedule for
 # generate_jailbreaks(settings_per_iteration=...).
 from .jailbreak import default_escalation_schedule  # noqa: E402, F401
 
 # Multi-turn conversation datasets.
-from .multi_turn import generate_conversations, evaluate_conversations  # noqa: E402, F401
+from .multi_turn import (  # noqa: E402, F401
+    evaluate_conversations,
+    generate_conversations,
+)
+
+# ---------------------------------------------------------------------------
+# High-level pipeline functions
+# ---------------------------------------------------------------------------
+from .pipelines import (  # noqa: E402
+    build_dataset,
+    create_taxonomy,
+    generate_constitution,
+    generate_inputs,
+    generate_jailbreaks,
+    generate_outputs,
+    generate_paraphrases,
+)
 
 # Config-driven runs (recipe + input-params + per-stage manifests).
 from .runconfig import (  # noqa: E402, F401
-    run_pipeline,
-    load_recipe,
     load_params,
-    write_manifest,
+    load_recipe,
     read_manifest,
+    run_pipeline,
+    write_manifest,
 )
+from .types import ALL_ENTRY_TYPES, EntryType  # noqa: E402, F401

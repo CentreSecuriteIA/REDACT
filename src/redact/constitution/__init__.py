@@ -17,11 +17,11 @@ Usage::
     result = pipeline.run(taxonomy, num_categories=10)
 """
 
-from ..types import EntryType, ALL_ENTRY_TYPES
+from ..types import ALL_ENTRY_TYPES, EntryType
 from .generation import (
     ConstitutionEntry,
-    ConstitutionResult,
     ConstitutionPipeline,
+    ConstitutionResult,
 )
 from .input_generation import (
     ConstitutionInputPipeline,

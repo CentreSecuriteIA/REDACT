@@ -91,6 +91,17 @@ class _FakeRouter:
         return out
 
 
+class _JudgeRouter:
+    """Fake router for evaluate_conversations: resolves to a fixed backend."""
+
+    def __init__(self, backend):
+        self._backend = backend
+        self.rate_limiter = None
+
+    def get_backend(self, model):
+        return self._backend
+
+
 def test_generate_conversations_offline(tmp_path):
     import json
     import pandas as pd
@@ -136,9 +147,8 @@ def test_generate_conversations_variants(tmp_path):
     assert len(df) == 3 and set(df["iteration"]) == {0, 1, 2}
 
 
-def test_evaluate_conversations_offline(tmp_path, monkeypatch):
+def test_evaluate_conversations_offline(tmp_path):
     import pandas as pd
-    import redact.multi_turn.evaluate as EV
     from redact import generate_conversations, evaluate_conversations
     from redact.multi_turn import ScriptedActor, ModelActor, Setting
 
@@ -146,19 +156,22 @@ def test_evaluate_conversations_offline(tmp_path, monkeypatch):
     make = lambda: Setting(participants=[ScriptedActor("u", ["more"]), ModelActor("b", "m")], max_turns=2)
     generate_conversations(seeds, make, data_dir=tmp_path, router=_FakeRouter(), verbose=False)
 
-    # Judge model mocked: "Yes ..." for the first, "No ..." for the second.
-    monkeypatch.setattr(EV, "get_backend", lambda m: MockBackend(["Yes ok", "No refused"]))
+    # Judge model mocked via a fake router: "Yes ..." for the first, "No ..." for the second.
     scored = evaluate_conversations(
         data_dir=tmp_path, judge_model="judge", judge_system="did it work?",
         scope="last_reply", verbose=False,
+        router=_JudgeRouter(MockBackend(["Yes ok", "No refused"])),
     )
     assert set(scored["success"]) == {True, False}
     assert set(scored["judge_model"]) == {"judge"}
-    # Resume: nothing re-judged.
+    # Resume: nothing re-judged (no router needed — nothing pending reaches the backend).
     again = evaluate_conversations(data_dir=tmp_path, judge_model="judge", verbose=False)
     assert len(again) == 2
     # resume=False re-judges from scratch (unlinks the existing scored artifacts).
-    fresh = evaluate_conversations(data_dir=tmp_path, judge_model="judge", resume=False, verbose=False)
+    fresh = evaluate_conversations(
+        data_dir=tmp_path, judge_model="judge", resume=False, verbose=False,
+        router=_JudgeRouter(MockBackend(["Yes ok", "No refused"])),
+    )
     assert len(fresh) == 2
 
 
@@ -264,14 +277,13 @@ def test_evaluate_validation(tmp_path):
         evaluate_conversations(data_dir=tmp_path, judge_model="j")           # no conversations.csv
 
 
-def test_evaluate_transcript_scope_and_bad_json(tmp_path, monkeypatch):
+def test_evaluate_transcript_scope_and_bad_json(tmp_path):
     import pandas as pd
-    import redact.multi_turn.evaluate as EV
     from redact import evaluate_conversations
     convs = pd.DataFrame({"sample_id": ["a", "b"], "transcript": ["not json", "[]"]})
-    monkeypatch.setattr(EV, "get_backend", lambda m: MockBackend("Yes ok"))
     scored = evaluate_conversations(conversations=convs, data_dir=tmp_path,
-                                    judge_model="j", scope="transcript", verbose=True)
+                                    judge_model="j", scope="transcript", verbose=True,
+                                    router=_JudgeRouter(MockBackend("Yes ok")))
     assert len(scored) == 2 and set(scored["success"]) == {True}
 
 
@@ -310,17 +322,16 @@ def test_pipeline_ledger_empty_record_is_noop(tmp_path):
     assert not led.exists()
 
 
-def test_evaluate_transcript_scope_renders_and_fresh(tmp_path, monkeypatch):
+def test_evaluate_transcript_scope_renders_and_fresh(tmp_path):
     import json
     import pandas as pd
-    import redact.multi_turn.evaluate as EV
     from redact import evaluate_conversations
     transcript = json.dumps([
         {"type": "message", "actor": "u", "content": "goal here", "role": "user", "model": None, "meta": {}},
         {"type": "reply", "actor": "b", "content": "the answer", "role": "assistant", "model": "m", "meta": {}},
     ])
     convs = pd.DataFrame({"sample_id": ["a"], "transcript": [transcript]})
-    monkeypatch.setattr(EV, "get_backend", lambda m: MockBackend("Yes"))
     scored = evaluate_conversations(conversations=convs, data_dir=tmp_path, judge_model="j",
-                                    scope="transcript", resume=False, verbose=False)
+                                    scope="transcript", resume=False, verbose=False,
+                                    router=_JudgeRouter(MockBackend("Yes")))
     assert list(scored["success"]) == [True]

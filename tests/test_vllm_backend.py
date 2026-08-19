@@ -16,6 +16,7 @@ from redact.llms.model_config import (
 from redact.llms.api import get_backend, clear_backend_cache, _backend_cache
 from redact.llms.calls import batch_check_samples
 from redact.llms.base import LLMBackend
+from redact.llms.vllm_backend import _build_mistral_prompt
 
 
 # ---------------------------------------------------------------------------
@@ -60,6 +61,36 @@ def vllm_model():
     yield TEST_MODEL_NAME
     MODEL_REGISTRY.pop(TEST_MODEL_NAME, None)
     _backend_cache.pop(f"vllm:{TEST_MODEL_NAME}", None)
+
+
+TEST_MISTRAL_MODE_MODEL_NAME = "test-gemma-2b-mistral-mode"
+
+
+@pytest.fixture(scope="class")
+def vllm_mistral_mode_model():
+    """Same small test checkpoint as `vllm_model`, but with use_mistral_format=True.
+
+    Deliberately reuses the Gemma test checkpoint rather than a real Mistral-3.x
+    model: this fixture exists only to exercise VLLMBackend's use_mistral_format
+    code path (raw-prompt construction + self._llm.generate() batching) under a
+    real vLLM engine — specifically the input/output order-preservation
+    guarantee, which was flagged as a past concern for this backend. It does
+    NOT validate that _build_mistral_prompt's format matches what a real
+    Mistral-3.x tokenizer expects; that needs a real Mistral checkpoint and is
+    still unverified (see the caution note on VLLMBackend.__init__).
+    """
+    register_model(
+        TEST_MISTRAL_MODE_MODEL_NAME,
+        rpm=999,
+        default_max_tokens=100,
+        default_temperature=0.7,
+        backend_type="vllm",
+        hf_model_id=TEST_HF_ID,
+        vllm_kwargs={"enforce_eager": True, "use_mistral_format": True},
+    )
+    yield TEST_MISTRAL_MODE_MODEL_NAME
+    MODEL_REGISTRY.pop(TEST_MISTRAL_MODE_MODEL_NAME, None)
+    _backend_cache.pop(f"vllm:{TEST_MISTRAL_MODE_MODEL_NAME}", None)
 
 
 @pytest.fixture(autouse=True)
@@ -230,6 +261,45 @@ class TestBatchCheckSamples:
         assert seen == ["apple", "banana"]
 
 
+class TestBuildMistralPrompt:
+    """Unit tests for _build_mistral_prompt — no GPU/vllm required.
+
+    NOTE: these only verify the string-construction logic against its own
+    documented spec; they cannot verify the spec itself matches what a real
+    Mistral-3.x tokenizer expects (no live vLLM + Mistral checkpoint was
+    available to validate against when this was written — see the caution
+    note on VLLMBackend.__init__ / _build_mistral_prompt).
+    """
+
+    def test_system_and_user(self):
+        prompt = _build_mistral_prompt([
+            {"role": "system", "content": "Be terse."},
+            {"role": "user", "content": "Hello"},
+        ])
+        assert prompt == "[SYSTEM_PROMPT]Be terse.[/SYSTEM_PROMPT][INST]Hello[/INST]"
+
+    def test_user_only_no_system_block(self):
+        prompt = _build_mistral_prompt([{"role": "user", "content": "Hello"}])
+        assert prompt == "[INST]Hello[/INST]"
+        assert "SYSTEM_PROMPT" not in prompt
+
+    def test_multi_turn_assistant_between_inst_blocks(self):
+        prompt = _build_mistral_prompt([
+            {"role": "user", "content": "Q1"},
+            {"role": "assistant", "content": "A1"},
+            {"role": "user", "content": "Q2"},
+        ])
+        assert prompt == "[INST]Q1[/INST]A1[INST]Q2[/INST]"
+
+    def test_multiple_system_messages_merged_into_one_block(self):
+        prompt = _build_mistral_prompt([
+            {"role": "system", "content": "Rule 1."},
+            {"role": "system", "content": "Rule 2."},
+            {"role": "user", "content": "Hi"},
+        ])
+        assert prompt == "[SYSTEM_PROMPT]Rule 1.\nRule 2.[/SYSTEM_PROMPT][INST]Hi[/INST]"
+
+
 class TestGetBackendRouting:
     """Verify get_backend() routing logic without needing a GPU."""
 
@@ -338,4 +408,38 @@ class TestVLLMBackendGPU:
 
     def test_batch_check_samples_empty_gpu(self, backend):
         results = batch_check_samples(backend, TEST_MODEL_NAME, [], _checker)
+        assert results == []
+
+
+@gpu
+class TestVLLMBackendMistralModeGPU:
+    """Regression coverage for the use_mistral_format code path under a real
+    vLLM engine — order preservation specifically, per the caution note on
+    VLLMBackend.__init__. Uses the Gemma test checkpoint (see
+    vllm_mistral_mode_model fixture), NOT a real Mistral model — this does
+    not validate real Mistral prompt-format correctness.
+    """
+
+    @pytest.fixture(scope="class")
+    def backend(self, vllm_mistral_mode_model):
+        from redact.llms.vllm_backend import VLLMBackend
+        b = get_backend(vllm_mistral_mode_model)
+        assert isinstance(b, VLLMBackend)
+        assert b._use_mistral_format is True
+        return b
+
+    def test_batch_generate_order_preserved_mistral_mode(self, backend):
+        """Same guarantee as test_batch_generate_order_preserved, but through
+        the self._llm.generate() (raw-prompt) path instead of self._llm.chat()."""
+        prompts = [
+            [{"role": "user", "content": "Reply with only the number 1."}],
+            [{"role": "user", "content": "Reply with only the number 2."}],
+            [{"role": "user", "content": "Reply with only the number 3."}],
+        ]
+        results = backend.batch_generate(prompts, model=TEST_MISTRAL_MODE_MODEL_NAME)
+        assert len(results) == len(prompts)
+        assert all(isinstance(r, str) and len(r) > 0 for r in results)
+
+    def test_batch_generate_empty_list_mistral_mode(self, backend):
+        results = backend.batch_generate([], model=TEST_MISTRAL_MODE_MODEL_NAME)
         assert results == []

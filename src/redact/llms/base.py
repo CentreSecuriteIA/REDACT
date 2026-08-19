@@ -8,6 +8,32 @@ knows *how* to reach an endpoint, not *which* model to use.
 from abc import ABC, abstractmethod
 
 
+def fold_system_into_first_message(messages: list[dict]) -> list[dict]:
+    """Fold system-role message content into the first non-system message.
+
+    For models registered with ``ModelConfig.supports_system_prompt=False`` —
+    they were never trained with (or otherwise ignore) a dedicated system
+    role, so sending one as a separate message would be silently dropped or
+    mishandled. Prepends the system content to the first remaining message's
+    content instead. If every message is a system message (no other role to
+    fold into), returns a single user message instead.
+
+    A no-op (returns ``messages`` unchanged) when there's no system message
+    to fold, so it's safe to call unconditionally on the ``supports_system_prompt
+    is False`` branch.
+    """
+    system_parts = [m["content"] for m in messages if m.get("role") == "system"]
+    if not system_parts:
+        return messages
+    rest = [m for m in messages if m.get("role") != "system"]
+    prefix = "\n\n".join(system_parts)
+    if not rest:
+        return [{"role": "user", "content": prefix}]
+    folded_first = dict(rest[0])
+    folded_first["content"] = f"{prefix}\n\n{folded_first['content']}"
+    return [folded_first] + rest[1:]
+
+
 class LLMBackend(ABC):
     """Abstract base class for LLM backends."""
 

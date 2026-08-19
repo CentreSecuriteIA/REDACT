@@ -4,6 +4,20 @@ Generates multi-sample batches via LLM, extracts individual samples via
 regex, checks each sample individually, and saves all samples (accepted
 and rejected) incrementally to per-category CSVs.
 
+This module owns the *active* constitution-seeded path
+(``InputPipeline.run_from_constitution``) plus the shared core every mode
+needs (``__init__``, ``_build_generation_messages``). The *deprecated*
+standalone (meta-prompt) path — ``run_category``, ``run_standalone``, and
+the ``generate_batch``/``check_samples``/``run_turn`` primitives only it
+uses — lives in ``standalone_generation.py`` as a mixin
+(:class:`~redact.content_moderation.standalone_generation._StandaloneGenerationMixin`)
+that ``InputPipeline`` inherits from, so the two previously-fused paths are
+now separately readable while every existing ``pipeline.run_category(...)``
+/ ``pipeline.run_turn(...)`` call site keeps working unchanged. Result
+dataclasses (``SampleResult``, ``TurnResult``, ``CategoryResult``,
+``ConstitutionInputResult``) live in ``results.py`` so neither this module
+nor ``standalone_generation.py`` has to import the other.
+
 Usage:
     from redact.llms import get_backend, RateLimiter, load_prompt
     from redact.content_moderation import InputPipeline
@@ -27,26 +41,44 @@ Usage:
 """
 
 import logging
-import warnings
-from dataclasses import dataclass, field
+from collections.abc import Callable
+from math import ceil
 from pathlib import Path
-from typing import Callable
 
 import pandas as pd
 
-from ..llms.base import LLMBackend
-from ..llms.calls import generate_sample, check_sample, batch_check_samples
-from ..llms.prompts import build_messages
-from ..llms.extraction import get_format_instruction, extract_and_clean
-from ..llms.wrappers import RateLimiter, BatchCaller, assert_single_sample_per_call
-from ..dataset.io import append_samples, get_existing_samples, _default_dataset_dir, _hash_text
-from ..dataset.merge import merge_all
+from ..dataset.io import _default_dataset_dir, _hash_text, append_samples
 from ..dataset.ledger import Ledger
 from ..dataset.manifest import Manifest
-from ..types import EntryType
-from .checker import build_quality_checker
+from ..dataset.merge import merge_all
+from ..llms.base import LLMBackend
+from ..llms.calls import is_accepted
+from ..llms.extraction import extract_and_clean, get_format_instruction
+from ..llms.prompts import build_messages, load_prompt
+from ..llms.wrappers import BatchCaller, RateLimiter, assert_single_sample_per_call
+from .checker import build_output_quality_checker, build_quality_checker
+from .results import CategoryResult, ConstitutionInputResult, SampleResult, TurnResult
+from .standalone_generation import _StandaloneGenerationMixin
+
+# CategoryResult/TurnResult aren't used in this file's own code (only by the
+# standalone mixin, in standalone_generation.py) — re-exported here anyway
+# since existing code (e.g. tests/content_moderation/test_generation.py)
+# imports them from `redact.content_moderation.generation`, not `.results`.
+__all__ = [
+    "InputPipeline",
+    "SampleResult",
+    "TurnResult",
+    "CategoryResult",
+    "ConstitutionInputResult",
+    "run_output_generation",
+]
 
 logger = logging.getLogger(__name__)
+
+# Cap on existing samples shown in the "don't repeat these" prompt section.
+_PROHIBITED_PREVIEW_LIMIT = 20
+# Truncation length for the sample_description preview in verbose progress lines.
+_DESC_PREVIEW_LEN = 60
 
 
 def _constitution_inputs_ledger(dataset_dir: str | Path) -> Ledger:
@@ -73,94 +105,14 @@ def _constitution_inputs_manifest(dataset_dir: str | Path) -> Manifest:
 
 
 # ---------------------------------------------------------------------------
-# Result data classes
-# ---------------------------------------------------------------------------
-
-
-@dataclass
-class SampleResult:
-    """Result of checking a single extracted sample."""
-
-    text: str
-    accepted: bool
-    reasoning: str  # empty if accepted, checker feedback if rejected
-    turn: int
-
-
-@dataclass
-class TurnResult:
-    """Result of a single generation turn."""
-
-    turn_index: int
-    raw_output: str
-    extracted_count: int
-    accepted_count: int
-    rejected_count: int
-    samples: list[SampleResult] = field(default_factory=list)
-
-    @property
-    def acceptance_rate(self) -> float:
-        if self.extracted_count == 0:
-            return 0.0
-        return self.accepted_count / self.extracted_count
-
-
-@dataclass
-class CategoryResult:
-    """Aggregate result for a full category generation run."""
-
-    category: str
-    turns: list[TurnResult] = field(default_factory=list)
-
-    @property
-    def total_extracted(self) -> int:
-        return sum(t.extracted_count for t in self.turns)
-
-    @property
-    def total_accepted(self) -> int:
-        return sum(t.accepted_count for t in self.turns)
-
-    @property
-    def total_rejected(self) -> int:
-        return sum(t.rejected_count for t in self.turns)
-
-    @property
-    def overall_acceptance_rate(self) -> float:
-        if self.total_extracted == 0:
-            return 0.0
-        return self.total_accepted / self.total_extracted
-
-
-@dataclass
-class ConstitutionInputResult:
-    """Aggregate result of constitution-seeded input generation.
-
-    Returned by ``InputPipeline.run_from_constitution()``. Tracks per-batch
-    statistics so callers can detect mode collapse or model degradation.
-    """
-
-    total_entries_processed: int = 0
-    skipped_entries: int = 0
-    total_prompts_generated: int = 0
-    total_prompts_accepted: int = 0
-    total_prompts_rejected: int = 0
-
-    @property
-    def acceptance_rate(self) -> float:
-        if self.total_prompts_generated == 0:
-            return 0.0
-        return self.total_prompts_accepted / self.total_prompts_generated
-
-
-# ---------------------------------------------------------------------------
 # Pipeline
 # ---------------------------------------------------------------------------
 
 
-class InputPipeline:
+class InputPipeline(_StandaloneGenerationMixin):
     """Multi-sample content moderation input generation pipeline.
 
-    Workflow per turn:
+    Workflow per turn (standalone mode, see ``standalone_generation.py``):
     1. Build messages from prompt config + seed kwargs + format instruction
     2. Optionally inject prohibited outputs (already-generated samples)
     3. Call generator LLM (single request producing N samples)
@@ -169,6 +121,9 @@ class InputPipeline:
     6. Check each sample individually via checker LLM
     7. Save all samples (accepted + rejected) to category CSV with metadata
     8. Collect rejection feedback for next turn
+
+    Constitution-seeded mode (``run_from_constitution``, below) batches
+    generation + checking across many entries per LLM engine pass instead.
     """
 
     def __init__(
@@ -241,16 +196,16 @@ class InputPipeline:
         # Append prohibited outputs so the LLM avoids repeating them
         if prohibited:
             # Show a sample of existing outputs (cap to avoid prompt bloat)
-            sample_list = list(prohibited)[:20]
+            sample_list = list(prohibited)[:_PROHIBITED_PREVIEW_LIMIT]
             prohibited_text = "\n".join(f"- {s}" for s in sample_list)
             prohibited_msg = (
                 f"\n\nIMPORTANT: The following samples already exist in the "
                 f"dataset. Do NOT generate anything similar to these:\n"
                 f"{prohibited_text}"
             )
-            if len(prohibited) > 20:
+            if len(prohibited) > _PROHIBITED_PREVIEW_LIMIT:
                 prohibited_msg += (
-                    f"\n(... and {len(prohibited) - 20} more. "
+                    f"\n(... and {len(prohibited) - _PROHIBITED_PREVIEW_LIMIT} more. "
                     f"Ensure all your outputs are novel.)"
                 )
             if messages and messages[-1]["role"] == "user":
@@ -272,339 +227,6 @@ class InputPipeline:
                 messages.append({"role": "user", "content": feedback_msg})
 
         return messages
-
-    def generate_batch(
-        self,
-        prompt_config: dict,
-        samples_per_request: int = 5,
-        feedback: str = "",
-        prohibited: set[str] | None = None,
-        **seed_kwargs: str,
-    ) -> tuple[str, list[str]]:
-        """Generate one batch: single LLM call producing multiple samples.
-
-        Args:
-            prompt_config: Loaded prompt JSON config.
-            samples_per_request: Number of samples to request.
-            feedback: Rejection feedback from previous turn.
-            prohibited: Existing samples to avoid.
-            **seed_kwargs: Template variables for prompt rendering.
-
-        Returns:
-            (raw_output, extracted_samples) tuple.
-        """
-        messages = self._build_generation_messages(
-            prompt_config,
-            samples_per_request,
-            feedback=feedback,
-            prohibited=prohibited,
-            **seed_kwargs,
-        )
-
-        raw_output = generate_sample(
-            self.gen_backend,
-            self.gen_model,
-            messages,
-            self.rate_limiter,
-        )
-
-        extracted = extract_and_clean(
-            raw_output,
-            style=self.extraction_style,
-        )
-
-        return raw_output, extracted
-
-    def check_samples(
-        self,
-        samples: list[str],
-        build_check_messages: Callable[[str], list[dict]],
-        turn_index: int,
-    ) -> list[SampleResult]:
-        """Check all samples in a single batched engine pass.
-
-        Delegates to ``batch_check_samples()`` which sends all checker prompts
-        to ``backend.batch_generate()`` at once (one vLLM engine pass per
-        chunk of 32). For API backends the call falls back to sequential.
-
-        This method is shared by both the content moderation pipeline
-        (``run_turn()`` / ``run_category()``) and the constitution input
-        pipeline (``ConstitutionInputPipeline`` wraps an ``InputPipeline``
-        and calls this method directly). Rejected samples are returned with
-        ``accepted=False`` and their reasoning preserved — no regeneration
-        is attempted here.
-
-        Args:
-            samples: List of extracted sample strings.
-            build_check_messages: Function(sample_text) -> checker message list.
-            turn_index: Current turn index (for tracking).
-
-        Returns:
-            List of SampleResult objects in the same order as ``samples``.
-        """
-        check_results = batch_check_samples(
-            self.check_backend,
-            self.check_model,
-            samples,
-            build_check_messages,
-            rate_limiter=self.rate_limiter,
-        )
-        return [
-            SampleResult(
-                text=sample_text,
-                accepted=accepted,
-                reasoning=reasoning,
-                turn=turn_index,
-            )
-            for sample_text, (accepted, reasoning) in zip(samples, check_results)
-        ]
-
-    def run_turn(
-        self,
-        prompt_config: dict,
-        build_check_messages: Callable[[str], list[dict]],
-        turn_index: int,
-        samples_per_request: int = 5,
-        feedback: str = "",
-        category: str = "",
-        save: bool = True,
-        prohibited: set[str] | None = None,
-        entry_type: str | EntryType = "harmful",
-        subcategory: str = "",
-        source: str = "metaprompt",
-        extra_row_metadata: dict | None = None,
-        **seed_kwargs: str,
-    ) -> TurnResult:
-        """Execute a single generation turn: generate, extract, check, save.
-
-        Args:
-            prompt_config: Loaded prompt JSON config.
-            build_check_messages: Function(sample_text) -> checker messages.
-            turn_index: Turn number (for tracking/seeds).
-            samples_per_request: Samples to request per LLM call.
-            feedback: Rejection reasoning from prior turn.
-            category: Category name (for saving).
-            save: Whether to save samples to CSV.
-            prohibited: Existing samples to avoid during generation.
-            entry_type: Severity tag for every sample saved this turn
-                (default "harmful" — backward-compatible).
-            subcategory: Constitution subcategory tag, or "".
-            source: "metaprompt" / "constitution" / etc. — written to the
-                ``source`` CSV column.
-            extra_row_metadata: Extra per-turn metadata applied to every row
-                (e.g. ``{"source_sample_description": "..."}``).
-            **seed_kwargs: Template variables.
-
-        Returns:
-            TurnResult with all sample outcomes.
-        """
-        # Generate + extract
-        raw_output, extracted = self.generate_batch(
-            prompt_config,
-            samples_per_request=samples_per_request,
-            feedback=feedback,
-            prohibited=prohibited,
-            **seed_kwargs,
-        )
-
-        logger.info(
-            "Turn %d: extracted %d samples from LLM output",
-            turn_index,
-            len(extracted),
-        )
-
-        # Exact dedup against existing samples before checking
-        if prohibited:
-            before_count = len(extracted)
-            extracted = [s for s in extracted if s not in prohibited]
-            dedup_removed = before_count - len(extracted)
-            if dedup_removed > 0:
-                logger.info(
-                    "Turn %d: removed %d duplicates of existing samples",
-                    turn_index,
-                    dedup_removed,
-                )
-
-        # Check each sample individually
-        sample_results = self.check_samples(
-            extracted, build_check_messages, turn_index
-        )
-
-        accepted_samples = [r for r in sample_results if r.accepted]
-        rejected_samples = [r for r in sample_results if not r.accepted]
-
-        logger.info(
-            "Turn %d: %d accepted, %d rejected",
-            turn_index,
-            len(accepted_samples),
-            len(rejected_samples),
-        )
-
-        # Save ALL samples (accepted + rejected) with the unified schema
-        if save and sample_results and category:
-            entry_type_value = (
-                entry_type.value
-                if isinstance(entry_type, EntryType)
-                else str(entry_type)
-            )
-            base_meta = {
-                "entry_type": entry_type_value,
-                "subcategory": subcategory,
-            }
-            if extra_row_metadata:
-                base_meta.update(extra_row_metadata)
-            all_texts = [r.text for r in sample_results]
-            all_accepted = [r.accepted for r in sample_results]
-            all_extra = [
-                {**base_meta, "rejection_reason": r.reasoning}
-                for r in sample_results
-            ]
-            append_samples(
-                all_texts,
-                category=category,
-                turn=turn_index,
-                accepted=all_accepted,
-                source=source,
-                extra_columns=all_extra,
-                dataset_dir=self.dataset_dir,
-            )
-
-        return TurnResult(
-            turn_index=turn_index,
-            raw_output=raw_output,
-            extracted_count=len(extracted),
-            accepted_count=len(accepted_samples),
-            rejected_count=len(rejected_samples),
-            samples=sample_results,
-        )
-
-    def run_category(
-        self,
-        category: str,
-        prompt_config: dict,
-        build_check_messages: Callable[[str], list[dict]],
-        num_turns: int = 10,
-        samples_per_request: int = 5,
-        use_feedback: bool = True,
-        use_prohibited: bool = True,
-        seed_kwargs_per_turn: list[dict[str, str]] | None = None,
-        save: bool = True,
-        entry_type: str | EntryType = "harmful",
-        subcategory: str = "",
-        source: str = "metaprompt",
-    ) -> CategoryResult:
-        """Run the full generation pipeline for a single category.
-
-        Executes num_turns generation turns, optionally passing rejection
-        feedback from each turn to the next and injecting existing samples
-        as prohibited outputs.
-
-        Args:
-            category: Harm category name.
-            prompt_config: Loaded prompt JSON config for this category.
-            build_check_messages: Function(sample_text) -> checker messages.
-            num_turns: Number of generation turns.
-            samples_per_request: Samples per LLM call per turn.
-            use_feedback: Whether to pass rejection reasoning to next turn.
-            use_prohibited: Whether to inject existing samples as "do not
-                repeat" in the generation prompt.
-            seed_kwargs_per_turn: Optional list of per-turn seed dictionaries.
-                If provided, must have length >= num_turns. Each dict is
-                unpacked as **kwargs into the prompt template.
-                If None, only Category=category is passed each turn.
-            save: Whether to save to CSV.
-            entry_type: Severity tag for every sample saved this run
-                (default ``"harmful"`` — preserves prior behaviour).
-            subcategory: Constitution subcategory tag, or ``""``.
-            source: ``"metaprompt"`` (standalone CM) or ``"constitution"``
-                (constitution-seeded). Written to the ``source`` CSV column.
-
-        Returns:
-            CategoryResult with all turn outcomes.
-
-        .. deprecated::
-            Standalone meta-prompt input generation is deprecated in favour of
-            constitution-seeded generation, which gives better/more adjustable
-            coverage — use ``run_from_constitution`` /
-            ``generate_inputs(constitution_df=...)``. This method remains fully
-            functional.
-        """
-        warnings.warn(
-            "InputPipeline.run_category (standalone meta-prompt input generation) is "
-            "deprecated in favour of constitution-seeded generation "
-            "(generate_inputs(constitution_df=...)); it remains functional.",
-            DeprecationWarning,
-            stacklevel=2,
-        )
-        result = CategoryResult(category=category)
-        feedback = ""
-
-        # Load existing samples for prohibited list + dedup
-        prohibited: set[str] | None = None
-        if use_prohibited:
-            prohibited = get_existing_samples(category, self.dataset_dir)
-
-        for turn_idx in range(num_turns):
-            # Determine seed kwargs for this turn
-            if seed_kwargs_per_turn and turn_idx < len(seed_kwargs_per_turn):
-                seed_kwargs = seed_kwargs_per_turn[turn_idx]
-            else:
-                seed_kwargs = {"Category": category}
-
-            print(
-                f"  [Turn {turn_idx + 1}/{num_turns}] "
-                f"Category={category}, seeds={list(seed_kwargs.keys())}"
-            )
-
-            turn_result = self.run_turn(
-                prompt_config=prompt_config,
-                build_check_messages=build_check_messages,
-                turn_index=turn_idx,
-                samples_per_request=samples_per_request,
-                feedback=feedback if use_feedback else "",
-                category=category,
-                save=save,
-                prohibited=prohibited,
-                entry_type=entry_type,
-                subcategory=subcategory,
-                source=source,
-                **seed_kwargs,
-            )
-
-            result.turns.append(turn_result)
-
-            # Update prohibited set with newly generated samples
-            if prohibited is not None:
-                for sr in turn_result.samples:
-                    prohibited.add(sr.text)
-
-            # Collect feedback for next turn
-            if use_feedback:
-                rejections = [
-                    r.reasoning
-                    for r in turn_result.samples
-                    if not r.accepted and r.reasoning
-                ]
-                if rejections:
-                    feedback = "\n".join(
-                        f"- {reason[:200]}" for reason in rejections[:3]
-                    )
-                else:
-                    feedback = ""
-
-            print(
-                f"    -> {turn_result.accepted_count} accepted, "
-                f"{turn_result.rejected_count} rejected "
-                f"(rate: {turn_result.acceptance_rate:.0%})"
-            )
-
-        print(
-            f"\n  Category '{category}' complete: "
-            f"{result.total_accepted}/{result.total_extracted} accepted "
-            f"({result.overall_acceptance_rate:.0%})"
-        )
-
-        return result
 
     # ------------------------------------------------------------------
     # Constitution-seeded mode
@@ -673,7 +295,7 @@ class InputPipeline:
         # Sidecar resume-ledger, keyed on one constitution entry
         # (sample_description, entry_type, style) — the same crash-safe pattern
         # as the constitution / output / paraphrase stages. A unit is acked only
-        # after its rows are flushed to CSV, so a crash loses at most one entry.
+        # after its rows are saved, so a crash loses at most one entry.
         ledger = (
             _constitution_inputs_ledger(self.dataset_dir)
             if (save and self.dataset_dir is not None)
@@ -714,12 +336,17 @@ class InputPipeline:
                                 df_existing.to_csv(csv_path, index=False)
                         else:
                             csv_path.unlink()
-                    except Exception:
+                    except Exception as exc:
+                        logger.warning(
+                            "Style-aware fresh could not read %s (%s: %s); "
+                            "deleting it instead of filtering by style.",
+                            csv_path, type(exc).__name__, exc,
+                        )
                         csv_path.unlink()
                 else:
                     csv_path.unlink()
                 if verbose:
-                    print(f"  Cleared {csv_path}")
+                    logger.info("Cleared %s", csv_path)
         elif not fresh and self.dataset_dir is not None:
             # Resume source of truth is the sidecar ledger; we also union the
             # existing-CSV set so runs created before the ledger existed still
@@ -756,11 +383,11 @@ class InputPipeline:
                 ].reset_index(drop=True)
                 skipped = original_count - len(constitution_df)
                 if verbose and skipped > 0:
-                    print(f"  Resuming: skipped {skipped} already-processed entries, "
-                          f"{len(constitution_df)} remaining")
+                    logger.info("Resuming: skipped %d already-processed entries, %d remaining",
+                                skipped, len(constitution_df))
                 if constitution_df.empty:
                     if verbose:
-                        print("  All entries already processed — nothing to do.")
+                        logger.info("All entries already processed — nothing to do.")
                     return result
         prohibited: set[str] = set()
         checker_cache: dict[tuple[str, str, str], Callable[[str], list[dict]]] = {}
@@ -771,8 +398,8 @@ class InputPipeline:
 
         if verbose:
             style_label = f" | style='{style}'" if style else ""
-            print(f"\n  Constitution-seeded generation: {total} entries, "
-                  f"batch_size={batch_size}, samples_per_entry={samples_per_entry}{style_label}")
+            logger.info("Constitution-seeded generation: %d entries, batch_size=%d, "
+                        "samples_per_entry=%d%s", total, batch_size, samples_per_entry, style_label)
 
         for batch_start in range(0, total, batch_size):
             batch = entries[batch_start : batch_start + batch_size]
@@ -871,10 +498,7 @@ class InputPipeline:
                 )
                 flat_check_results = []
                 for response in responses:
-                    accepted = any(
-                        response.strip().lower().startswith(p)
-                        for p in ("yes", "ok", "accept", "pass")
-                    )
+                    accepted = is_accepted(response)
                     flat_check_results.append((accepted, "" if accepted else response))
             else:
                 flat_check_results = [(True, "") for _ in flat_samples]
@@ -891,15 +515,16 @@ class InputPipeline:
                 sample_desc = str(entry.get("sample_description", ""))
 
                 if verbose:
-                    print(
-                        f"    [{global_idx + 1}/{total}] {category} | {entry_type} | "
-                        f"{sample_desc[:60]}{'...' if len(sample_desc) > 60 else ''}"
-                    )
+                    desc_preview = sample_desc[:_DESC_PREVIEW_LEN]
+                    if len(sample_desc) > _DESC_PREVIEW_LEN:
+                        desc_preview += "..."
+                    logger.debug("[%d/%d] %s | %s | %s",
+                                 global_idx + 1, total, category, entry_type, desc_preview)
 
                 if not extracted:
                     result.skipped_entries += 1
                     if verbose:
-                        print("       -> no samples extracted")
+                        logger.debug("-> no samples extracted")
                     continue
 
                 sample_results = [
@@ -960,14 +585,253 @@ class InputPipeline:
                     prohibited.add(sr.text)
 
                 if verbose:
-                    print(f"       -> {accepted_count} accepted, {rejected_count} rejected")
+                    logger.debug("-> %d accepted, %d rejected", accepted_count, rejected_count)
 
         if verbose:
             style_label = f" | style='{style}'" if style else ""
-            print(
-                f"\n  Constitution-seeded run complete{style_label}: "
-                f"{result.total_prompts_accepted}/{result.total_prompts_generated} "
-                f"accepted ({result.acceptance_rate:.0%})"
-            )
+            logger.info("Constitution-seeded run complete%s: %d/%d accepted (%.0f%%)",
+                        style_label, result.total_prompts_accepted,
+                        result.total_prompts_generated, result.acceptance_rate * 100)
 
         return result
+
+
+# ---------------------------------------------------------------------------
+# Output generation — moved here from pipelines.py so that module stays a
+# thin path/model-resolution wrapper. pipelines.py's generate_outputs()
+# resolves inputs/model/backend/out_path, then calls this directly.
+# ---------------------------------------------------------------------------
+
+
+def run_output_generation(
+    inputs: pd.DataFrame,
+    model: str,
+    backend: LLMBackend,
+    rate_limiter: RateLimiter | None,
+    check_outputs: bool,
+    check_model: str,
+    check_backend: LLMBackend | None,
+    batch_size: int,
+    out_path: Path,
+    prompt_dir: str | Path | None = None,
+    resume: bool = True,
+    verbose: bool = True,
+) -> pd.DataFrame:
+    """Generate model responses for input samples, batched and quality-checked.
+
+    Pipeline per ``batch_size`` chunk:
+      1. Build all messages upfront.
+      2. ``BatchCaller.from_model(...).batch_generate(messages_list, model)``
+         — single vLLM engine pass (or thread-pool / sequential per backend
+         capability). One rate-limit slot per batch.
+      3. ``batch_check_samples`` over (input, output) pairs with the
+         entry-type-aware output checker. Refusals on harmful inputs are
+         rejected; refusals on benign inputs are evaluated normally.
+      4. Incremental append to the output CSV per batch — crash-resilient.
+
+    Resume: each input gets a stable content-hash id (its ``id``/``sample_id``
+    column when present, else ``_hash_text(prompt)``). Completed ids are
+    recorded in a sidecar ``*.state.jsonl`` ledger beside ``out_path``. On a
+    re-run (``resume=True``) inputs already in the ledger are skipped, so a
+    crash loses at most one chunk. ``resume=False`` clears both the CSV and
+    the ledger first.
+
+    Args:
+        inputs: Input samples DataFrame — already loaded/capped by the caller.
+        model: Generation model identifier.
+        backend: Generation backend (already resolved from ``model``).
+        rate_limiter: Shared rate limiter.
+        check_outputs: Run the entry-type-aware output quality checker.
+            Set False to skip checking (accept everything).
+        check_model: Checker model identifier.
+        check_backend: Checker backend, or None when ``check_outputs`` is False.
+        batch_size: Inputs per engine pass.
+        out_path: Resolved output CSV path.
+        prompt_dir: Root prompt directory for the generation **and**
+            output-check prompts. ``None`` falls back to the bundled ``prompts/``.
+        resume: When True (default), skip inputs already recorded in the sidecar
+            state ledger. When False, clear the output CSV and ledger first.
+        verbose: Print per-batch progress.
+
+    Returns:
+        DataFrame of all rows in the output CSV (the full dataset, including
+        rows from prior resumed runs) with the unified output schema:
+        ``input_id``, ``sample_id``, ``input_prompt``, ``category``,
+        ``subcategory``, ``entry_type``, ``output_response``, ``accepted``,
+        ``rejection_reason``, ``model``, ``source``. ``sample_id`` is this
+        row's own content-hash identity (``_hash_text(output_response)``),
+        distinct from ``input_id`` (the origin sample it responds to).
+    """
+    # Internals capture (opt-in): only true for an introspection-capable
+    # backend (e.g. TransformersIntrospectionBackend); a no-op for the default
+    # Venice/vLLM path — no internals_ids kwarg is passed below. Captures land
+    # under {log_dir}/{input_id}/output/ and .../val_out/ — a pure side channel,
+    # never a CSV column (see .claude/introspection_backend_plan.md).
+    capture_internals_gen = getattr(backend, "supports_internals", False)
+    prompt_config = load_prompt("output", "generation", prompt_dir=prompt_dir)
+    gen_caller = BatchCaller.from_model(backend, model, rate_limiter=rate_limiter)
+    check_caller = (
+        BatchCaller.from_model(check_backend, check_model, rate_limiter=rate_limiter)
+        if check_backend is not None
+        else None
+    )
+    capture_internals_check = (
+        check_backend is not None and getattr(check_backend, "supports_internals", False)
+    )
+
+    text_col = "sample" if "sample" in inputs.columns else "prompt"
+    inputs = inputs.reset_index(drop=True)
+
+    out_path.parent.mkdir(parents=True, exist_ok=True)
+    ledger = Ledger.sidecar(out_path, key_fields=("input_id",), casters={"input_id": str})
+
+    # Stable per-input id (content-hash) for resume — matches the jailbreak id.
+    def _input_id(row) -> str:
+        existing = str(row.get("sample_id", "")).strip()
+        if existing and existing.lower() != "nan":
+            return existing
+        return _hash_text(str(row[text_col]))
+
+    inputs = inputs.copy()
+    inputs["_state_id"] = [_input_id(row) for _, row in inputs.iterrows()]
+
+    # Plan → manifest: one row per input_id, written before the batch loop so the
+    # run's full intended scope is inspectable up front (keyed like the ledger).
+    Manifest.sidecar(out_path).write(
+        {"input_id": sid, "status": "planned"} for sid in inputs["_state_id"]
+    )
+
+    # Non-resume run wipes prior output + ledger; resume skips already-done ids.
+    if not resume:
+        if out_path.exists():
+            out_path.unlink()
+        ledger.reset()
+    completed = ledger.completed() if resume else set()
+    if completed:
+        before = len(inputs)
+        inputs = inputs[~inputs["_state_id"].isin(completed)].reset_index(drop=True)
+        if verbose and before != len(inputs):
+            logger.info("Resume: skipping %d already-completed inputs", before - len(inputs))
+
+    if verbose:
+        logger.info("Generate Output Responses")
+        logger.info("Samples: %d | Model: %s | Checker: %s | Batch: %d",
+                    len(inputs), model,
+                    f"enabled ({check_model})" if check_outputs else "disabled",
+                    batch_size)
+
+    # Per-(category, entry_type) checker cache so we build each prompt once.
+    checker_cache: dict[tuple[str, str], Callable[[str], list[dict]]] = {}
+
+    def _checker_for(category: str, entry_type: str):
+        key = (category, entry_type)
+        if key not in checker_cache:
+            checker_cache[key] = build_output_quality_checker(
+                category=category, entry_type=entry_type, prompt_dir=prompt_dir
+            )
+        return checker_cache[key]
+
+    all_rows: list[dict] = []
+    n_chunks = ceil(len(inputs) / batch_size) if batch_size else 1
+
+    for batch_start in range(0, len(inputs), batch_size):
+        chunk = inputs.iloc[batch_start : batch_start + batch_size]
+        chunk_idx = batch_start // batch_size + 1
+
+        # 1. Build all messages for this chunk
+        messages_list = []
+        chunk_rows = []
+        for _, row in chunk.iterrows():
+            input_text = row[text_col]
+            category = str(row.get("category", "unknown"))
+            entry_type = str(row.get("entry_type", "harmful"))
+            subcategory = str(row.get("subcategory", ""))
+
+            messages_list.append(
+                build_messages(
+                    prompt_config,
+                    input_prompt=input_text,
+                    Category=category,
+                )
+            )
+            chunk_rows.append({
+                "input_id": str(row["_state_id"]),
+                "input_prompt": input_text,
+                "category": category,
+                "subcategory": subcategory,
+                "entry_type": entry_type,
+                "model": model,
+                "source": str(row.get("source", "")),
+            })
+
+        # 2. Single batched generation
+        responses = gen_caller.batch_generate(
+            messages_list, model,
+            progress=f"gen chunk {chunk_idx}/{n_chunks}" if verbose else None,
+            internals_ids=(
+                [f'{r["input_id"]}/output' for r in chunk_rows]
+                if capture_internals_gen else None
+            ),
+        )
+
+        # 3. Batched output checking (per-row checker, flat batch)
+        if check_outputs and check_caller is not None:
+            check_msgs_list: list[list[dict]] = []
+            for r, resp in zip(chunk_rows, responses):
+                payload = f"INPUT:\n{r['input_prompt']}\n\nOUTPUT:\n{resp}"
+                check_msgs_list.append(
+                    _checker_for(r["category"], r["entry_type"])(payload)
+                )
+            check_responses = check_caller.batch_generate(
+                check_msgs_list, check_model,
+                progress=f"check chunk {chunk_idx}/{n_chunks}" if verbose else None,
+                internals_ids=(
+                    [f'{r["input_id"]}/val_out' for r in chunk_rows]
+                    if capture_internals_check else None
+                ),
+            )
+            check_results = []
+            for cr in check_responses:
+                accepted = is_accepted(cr)
+                check_results.append((accepted, "" if accepted else cr))
+        else:
+            check_results = [(True, "")] * len(chunk_rows)
+
+        # 4. Assemble + incremental append. sample_id is this row's own content-hash
+        # identity (distinct from input_id, which points back to the origin sample) —
+        # only knowable once the response text exists.
+        for r, resp, (accepted, reasoning) in zip(chunk_rows, responses, check_results):
+            r["sample_id"] = _hash_text(resp)
+            r["output_response"] = resp
+            r["accepted"] = accepted
+            r["rejection_reason"] = reasoning
+        all_rows.extend(chunk_rows)
+
+        new_df = pd.DataFrame(chunk_rows)
+        if out_path.exists():
+            new_df.to_csv(out_path, mode="a", header=False, index=False)
+        else:
+            new_df.to_csv(out_path, index=False)
+        # Record completion only after the CSV append succeeds, so a crash
+        # mid-chunk leaves those ids un-acked and they re-run next time.
+        ledger.record([{"input_id": r["input_id"]} for r in chunk_rows])
+
+        if verbose:
+            accepted_count = sum(1 for r in chunk_rows if r["accepted"])
+            logger.info("[%d/%d] %d/%d accepted -> appended to %s",
+                        batch_start + len(chunk_rows), len(inputs),
+                        accepted_count, len(chunk_rows), out_path.name)
+
+    # Return the full dataset on disk (includes rows from prior resumed runs),
+    # not just this run's newly-written delta.
+    output_df = pd.read_csv(out_path) if out_path.exists() else pd.DataFrame(all_rows)
+    if verbose:
+        accepted_total = (
+            int(output_df["accepted"].sum())
+            if not output_df.empty and "accepted" in output_df.columns
+            else 0
+        )
+        logger.info("Output CSV now holds %d responses (%d accepted) at %s",
+                    len(output_df), accepted_total, out_path)
+
+    return output_df

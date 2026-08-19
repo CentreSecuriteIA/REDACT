@@ -13,7 +13,7 @@ The *goal* is the seed = the first message in the transcript.
 
 from __future__ import annotations
 
-from typing import Callable
+from collections.abc import Callable
 
 from redact.llms.conversation import LLMRequest
 

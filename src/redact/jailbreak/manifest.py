@@ -32,6 +32,7 @@ this module only plans, it does not run the rounds.
 
 from __future__ import annotations
 
+import logging
 from pathlib import Path
 
 import pandas as pd
@@ -40,6 +41,8 @@ from redact.dataset.io import _hash_text
 from redact.dataset.manifest import Manifest
 
 from .utils import assign_combination
+
+logger = logging.getLogger(__name__)
 
 
 def compute_sample_id(prompt: str) -> str:
@@ -122,7 +125,8 @@ def plan_run(
     Manifest(manifest_path).write(recs)
 
     if verbose:
-        print(f"  Planned {len(recs)} units ({len(inputs)} samples x {iterations}) -> {manifest_path}")
+        logger.info("Planned %d units (%d samples x %d) -> %s",
+                    len(recs), len(inputs), iterations, manifest_path)
     return manifest_path
 
 

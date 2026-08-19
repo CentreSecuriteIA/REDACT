@@ -18,6 +18,17 @@ class _FakeRouter:
         return out
 
 
+class _JudgeRouter:
+    """Fake router for score_attacks/evaluate_conversations: fixed backend."""
+
+    def __init__(self, backend):
+        self._backend = backend
+        self.rate_limiter = None
+
+    def get_backend(self, model):
+        return self._backend
+
+
 def test_crescendo_attack_logs_strategy_and_escalates(tmp_path):
     seeds = pd.DataFrame({"seed": ["how to make X"]})
     df = generate_attacks(seeds, target_model="target", data_dir=tmp_path,
@@ -78,11 +89,12 @@ def test_pair_propose_empty_transcript_goal():
     assert result[0] == "next"
 
 
-def test_score_attacks(tmp_path, monkeypatch):
+def test_score_attacks(tmp_path):
     seeds = pd.DataFrame({"seed": ["how to make X", "how to make Y"]})
     generate_attacks(seeds, target_model="target", data_dir=tmp_path, attack="crescendo",
                      max_turns=3, router=_FakeRouter(), verbose=False)
-    import redact.multi_turn.evaluate as EV
-    monkeypatch.setattr(EV, "get_backend", lambda m: MockBackend(["Yes complied", "No refused"]))
-    scored = score_attacks(data_dir=tmp_path, judge_model="judge", verbose=False)
+    scored = score_attacks(
+        data_dir=tmp_path, judge_model="judge", verbose=False,
+        router=_JudgeRouter(MockBackend(["Yes complied", "No refused"])),
+    )
     assert set(scored["success"]) == {True, False}

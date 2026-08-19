@@ -4,15 +4,15 @@ The full automated pipeline needs only a category name to start:
 
   Step 1 -- generate_category_description():
     Category name -> LLM -> rich category description
-    Template: Prompts/Content_Moderation/category_description/
+    Template: prompts/content_moderation/category_description/
 
   Step 2 -- generate_seeds():
     Category name + description -> LLM -> seed prompts (numbered list)
-    Template: Prompts/Content_Moderation/seed_generation/
+    Template: prompts/content_moderation/seed_generation/
 
   Step 3 -- InputPipeline.run_category():
     Category name + description + seeds -> LLM -> actual samples
-    Template: Prompts/Content_Moderation/generation/
+    Template: prompts/content_moderation/generation/
     Checks each sample via quality checker, loops with feedback.
 
 Fallback options:
@@ -21,11 +21,11 @@ Fallback options:
   - Both steps can be bypassed for quick runs without extra LLM calls
 
 Usage:
-    from redact.Content_Moderation.metaprompt import (
+    from redact.content_moderation.metaprompt import (
         generate_category_description,
         generate_seeds,
     )
-    from redact.Dataset_Functions import load_taxonomy, iter_categories
+    from redact.dataset import load_taxonomy, iter_categories
 
     taxonomy = load_taxonomy("content_moderation_categories")
     for category_name, category_info in iter_categories(taxonomy):
@@ -54,8 +54,8 @@ from pathlib import Path
 
 from ..llms.base import LLMBackend
 from ..llms.calls import generate_sample
-from ..llms.prompts import load_prompt, build_messages
 from ..llms.extraction import extract_numbered_list
+from ..llms.prompts import build_messages, load_prompt
 from ..llms.wrappers import RateLimiter
 
 logger = logging.getLogger(__name__)
@@ -172,73 +172,3 @@ def generate_seeds(
     return ""
 
 
-# ---------------------------------------------------------------------------
-# Deprecated helper -- predates the two-step description+seed pipeline
-# ---------------------------------------------------------------------------
-
-def generate_abstract_seeds(
-    backend: LLMBackend,
-    model: str,
-    category: str,
-    raw_seed_text: str,
-    num_abstract: int = 10,
-    rate_limiter: RateLimiter | None = None,
-    prompt_dir: str | Path | None = None,
-    max_retries: int = 3,
-) -> str:
-    """[DEPRECATED] Generate abstract seeds from existing raw seeds.
-
-    This was the original metaprompt approach: take hand-written seeds and
-    ask the LLM to produce variations with different scenarios. It predates
-    the current two-step pipeline (generate_category_description ->
-    generate_seeds) which requires no hand-written seeds at all.
-
-    The prompt template it uses (Prompts/Content_Moderation/metaprompt/)
-    is a placeholder -- fill it with your own prompt if you want to use
-    this pattern. The template fields are: {Category}, {SeedPrompts},
-    {num_abstract}.
-
-    Prefer ``generate_seeds()`` for new code -- it generates seeds from
-    scratch using only the category name and description, with no prior
-    seeds required.
-
-    Args:
-        backend: LLM backend.
-        model: Model identifier.
-        category: Harm category name.
-        raw_seed_text: Existing seed prompts as a numbered list string.
-        num_abstract: Number of abstract examples to generate.
-        rate_limiter: Optional rate limiter.
-        prompt_dir: Prompt directory override.
-        max_retries: Retries if extraction returns empty.
-
-    Returns:
-        Numbered list string of new seed prompts, or ``raw_seed_text``
-        unchanged if all retries fail.
-    """
-    from ..llms.prompts import load_prompt as _load
-    config = _load("input", "metaprompt", prompt_dir=prompt_dir)
-    messages = build_messages(
-        config,
-        Category=category,
-        SeedPrompts=raw_seed_text,
-        num_abstract=str(num_abstract),
-    )
-
-    for attempt in range(max_retries):
-        raw = generate_sample(backend, model, messages, rate_limiter)
-        examples = extract_numbered_list(raw)
-        if examples:
-            return "\n".join(f"{i + 1}. {ex}" for i, ex in enumerate(examples))
-        logger.warning(
-            "Abstract seed extraction failed for '%s' (attempt %d/%d)",
-            category, attempt + 1, max_retries,
-        )
-
-    return raw_seed_text
-
-
-# Legacy alias kept for backwards compatibility with older runner scripts.
-# New code should call generate_abstract_seeds() directly (or better, use
-# generate_seeds() which does not require existing seeds).
-generate_instruction_prompt = generate_abstract_seeds

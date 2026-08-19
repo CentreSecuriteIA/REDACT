@@ -8,6 +8,10 @@ Ported from reference obfuscation.py lines 388-436.
 import codecs
 import random
 
+# ROT47 operates on the printable-ASCII range '!' (33) through '~' (126).
+_ROT47_PRINTABLE_MIN = 33
+_ROT47_PRINTABLE_MAX = 126
+
 
 def to_base64(prompt: str) -> tuple[str, str]:
     """Encode string to Base64."""
@@ -37,8 +41,8 @@ def to_rot47(prompt: str) -> tuple[str, str]:
     result = []
     for c in prompt:
         o = ord(c)
-        if 33 <= o <= 126:
-            result.append(chr((o - 33 + 47) % 94 + 33))
+        if _ROT47_PRINTABLE_MIN <= o <= _ROT47_PRINTABLE_MAX:
+            result.append(chr((o - _ROT47_PRINTABLE_MIN + 47) % 94 + _ROT47_PRINTABLE_MIN))
         else:
             result.append(c)
     return "".join(result), ""

@@ -11,10 +11,10 @@ Prompts are loaded from JSON templates under ``prompts/input/`` (input-side
 checkers) and ``prompts/output/`` (output checker).
 """
 
-from typing import Callable
+from collections.abc import Callable
 
-from ..types import EntryType
 from ..llms.prompts import load_prompt
+from ..types import EntryType
 
 DEFAULT_CATEGORIES: list[str] = [
     "CBRN",

@@ -20,7 +20,6 @@ Usage:
 """
 
 import csv
-import json
 import logging
 import re
 from dataclasses import dataclass, field
@@ -28,16 +27,16 @@ from pathlib import Path
 
 import pandas as pd
 
-from ..types import EntryType, ALL_ENTRY_TYPES
+from ..dataset.io import _hash_text
+from ..dataset.ledger import Ledger
+from ..dataset.manifest import Manifest
+from ..dataset.taxonomy import iter_categories
 from ..llms.base import LLMBackend
 from ..llms.calls import generate_sample
 from ..llms.extraction import parse_constitution as _parse_raw
-from ..llms.prompts import load_prompt, build_messages
+from ..llms.prompts import build_messages, load_prompt
 from ..llms.wrappers import RateLimiter
-from ..dataset.taxonomy import iter_categories, get_subcategories
-from ..dataset.ledger import Ledger
-from ..dataset.manifest import Manifest
-from ..dataset.io import _hash_text
+from ..types import ALL_ENTRY_TYPES, EntryType
 
 logger = logging.getLogger(__name__)
 
@@ -590,22 +589,19 @@ class ConstitutionPipeline:
             Manifest(self.output_dir / "constitution.manifest.jsonl").write(manifest_rows)
 
         if verbose:
-            print(f"\n{'='*60}")
-            print("Constitution Generation")
-            print(f"{'='*60}")
-            print(f"  Model: {self.model}")
-            print(f"  Entry types: {[t.value for t in entry_types]}")
-            print(f"  Categories per type: {num_categories}")
-            print(f"  Taxonomy categories: {len(categories)}")
+            logger.info("Constitution Generation")
+            logger.info("Model: %s | Entry types: %s | Categories per type: %d | "
+                        "Taxonomy categories: %d",
+                        self.model, [t.value for t in entry_types], num_categories,
+                        len(categories))
             total_calls = len(categories) * len(entry_types)
             if include_standalone_benign:
                 total_calls += 1
-                print(f"  Standalone benign: 1 category-free call"
-                      f" ({standalone_benign_categories} categories)")
-            print(f"  Total LLM calls: ~{total_calls}")
+                logger.info("Standalone benign: 1 category-free call (%d categories)",
+                            standalone_benign_categories)
+            logger.info("Total LLM calls: ~%d", total_calls)
             if completed:
-                print(f"  Resume: {len(completed)} units already completed")
-            print()
+                logger.info("Resume: %d units already completed", len(completed))
 
         # Accumulate entries in memory only when not saving (no CSV to read back).
         in_memory = ConstitutionResult() if not save else None
@@ -620,11 +616,12 @@ class ConstitutionPipeline:
             ]
             if not pending_types:
                 if verbose:
-                    print(f"  [{i}/{len(categories)}] {cat_name} - all units done, skipping")
+                    logger.info("[%d/%d] %s - all units done, skipping",
+                                i, len(categories), cat_name)
                 continue
 
             if verbose:
-                print(f"  [{i}/{len(categories)}] {cat_name}")
+                logger.info("[%d/%d] %s", i, len(categories), cat_name)
 
             cat_result = self.generate_for_category(
                 cat_name, cat_info, pending_types, num_categories
@@ -644,7 +641,7 @@ class ConstitutionPipeline:
                 counts_str = ", ".join(
                     f"{t}: {c}" for t, c in sorted(type_counts.items())
                 )
-                print(f"    -> {len(cat_result.entries)} entries ({counts_str})")
+                logger.info("-> %d entries (%s)", len(cat_result.entries), counts_str)
 
             if not cat_result.entries:
                 continue
@@ -668,7 +665,7 @@ class ConstitutionPipeline:
         benign_unit = _unit_key("general", "general_benign")
         if include_standalone_benign and benign_unit not in completed:
             if verbose:
-                print(f"\n  --- Standalone Benign Generation (category-free) ---")
+                logger.info("--- Standalone Benign Generation (category-free) ---")
 
             entries, raw = self.generate_general_benign(
                 num_categories=standalone_benign_categories,
@@ -678,7 +675,7 @@ class ConstitutionPipeline:
                 skipped.append("general_benign (standalone)")
             else:
                 if verbose:
-                    print(f"    -> {len(entries)} general benign entries")
+                    logger.info("-> %d general benign entries", len(entries))
 
                 total_written += len(entries)
 
@@ -705,15 +702,15 @@ class ConstitutionPipeline:
         result = self._load_saved_result() if save else in_memory
 
         if verbose:
-            print(f"\n  Generated this run: {total_written} entries")
+            logger.info("Generated this run: %d entries", total_written)
             if save:
-                print(f"  Total in constitution CSV: {len(result.entries)} entries")
+                logger.info("Total in constitution CSV: %d entries", len(result.entries))
             if skipped:
-                print(f"  Skipped (failed after retries): {len(skipped)}")
+                logger.info("Skipped (failed after retries): %d", len(skipped))
                 for s in skipped:
-                    print(f"    - {s}")
+                    logger.info("- %s", s)
             if save:
-                print(f"  Saved to: {self.output_dir}")
+                logger.info("Saved to: %s", self.output_dir)
 
         return result
 

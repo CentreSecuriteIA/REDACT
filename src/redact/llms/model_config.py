@@ -8,7 +8,7 @@ and provider-specific extra_body parameters so callers don't need to
 repeat them on every call.
 """
 
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 
 
 @dataclass
@@ -36,9 +36,8 @@ class ModelConfig:
     supports_parallel_calls: bool = True   # False => series-only (Claude)
     supports_native_batching: bool = False  # True => single engine pass (vLLM)
     recommended_max_workers: int = 1
-    # Logical role this model fills. Used by router.for_role() and by
-    # default_model_for_role() so callers can ask for "translation" instead
-    # of hardcoding "deepseek-v3.2".
+    # Logical role this model fills. Used by default_model_for_role() so
+    # callers can ask for "translation" instead of hardcoding "deepseek-v3.2".
     role: str | None = None
 
 
@@ -199,7 +198,7 @@ def register_model(
         supports_parallel_calls: False forces series-only execution (Claude).
         supports_native_batching: True if backend has a true batch path (vLLM).
         recommended_max_workers: Default concurrency the router applies.
-        role: Logical role for router.for_role() lookup.
+        role: Logical role for default_model_for_role() lookup.
     """
     MODEL_REGISTRY[name] = ModelConfig(
         name=name,

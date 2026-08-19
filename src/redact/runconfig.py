@@ -21,12 +21,15 @@ Usage::
 """
 
 import json
+import logging
 import time
 from pathlib import Path
 
 import pandas as pd
 
 from redact import paths
+
+logger = logging.getLogger(__name__)
 
 # Ordered canonical stage names. A recipe's ``stages`` is any subset, in order.
 STAGES = ("constitution", "inputs", "outputs", "paraphrase", "jailbreaks", "build")
@@ -157,8 +160,12 @@ def run_pipeline(
     Returns a summary dict ``{"stages": {stage: {counts, manifest}}}``.
     """
     from redact import (
-        generate_constitution, generate_inputs, generate_outputs,
-        generate_jailbreaks, generate_paraphrases, build_dataset,
+        build_dataset,
+        generate_constitution,
+        generate_inputs,
+        generate_jailbreaks,
+        generate_outputs,
+        generate_paraphrases,
     )
     from redact.jailbreak import load_spec
 
@@ -183,7 +190,7 @@ def run_pipeline(
         return dict(params.get(stage) or {})
 
     if verbose:
-        print(f"\n{'='*60}\nRun pipeline ({dataset_type}) — stages: {stages}\n{'='*60}")
+        logger.info("Run pipeline (%s) — stages: %s", dataset_type, stages)
 
     summary: dict = {"dataset_type": dataset_type, "data_dir": str(data_dir), "stages": {}}
     constitution_df = None
@@ -250,6 +257,6 @@ def run_pipeline(
         )
         summary["stages"][stage] = {"counts": _counts(df), "manifest": str(mpath)}
         if verbose:
-            print(f"  [{stage}] {_counts(df)} -> manifest {mpath.name}")
+            logger.info("[%s] %s -> manifest %s", stage, _counts(df), mpath.name)
 
     return summary

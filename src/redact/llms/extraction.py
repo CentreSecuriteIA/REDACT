@@ -21,8 +21,7 @@ Also provides:
 """
 
 import re
-from dataclasses import dataclass, field
-
+from dataclasses import dataclass
 
 # ---------------------------------------------------------------------------
 # Format instruction constants
@@ -215,7 +214,7 @@ def clean_sample(
         # Drop only a leading preamble line, and only when real content follows.
         # Avoids gutting content lines that legitimately start with these words.
         head_tail = result.lstrip("\n").split("\n", 1)
-        if len(head_tail) == 2 and _META_PREAMBLE.match(head_tail[0]):
+        if len(head_tail) == 2 and _META_PREAMBLE.match(head_tail[0]):  # noqa: PLR2004 — split(..., 1) is always length 1 or 2, not a tunable value
             result = head_tail[1]
     if strip_markdown:
         result = _MARKDOWN_CODE_BLOCK.sub("", result)

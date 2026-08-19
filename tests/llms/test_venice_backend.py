@@ -6,6 +6,7 @@ from unittest.mock import patch, MagicMock
 import pytest
 
 from redact.llms.venice_backend import VeniceBackend
+from redact.llms.model_config import MODEL_REGISTRY, register_model
 
 
 @pytest.fixture()
@@ -106,3 +107,28 @@ class TestVeniceGenerate:
         )
         call_kwargs = mock_openai_client.chat.completions.create.call_args[1]
         assert call_kwargs["top_p"] == 0.9
+
+    def test_default_model_keeps_system_message_separate(self, venice_backend, mock_openai_client):
+        # supports_system_prompt defaults to True: no folding.
+        venice_backend.generate(
+            [{"role": "system", "content": "Sys."}, {"role": "user", "content": "hi"}],
+            "unknown-model-xyz",
+        )
+        call_kwargs = mock_openai_client.chat.completions.create.call_args[1]
+        assert call_kwargs["messages"] == [
+            {"role": "system", "content": "Sys."},
+            {"role": "user", "content": "hi"},
+        ]
+
+    def test_supports_system_prompt_false_folds_system_message(self, venice_backend, mock_openai_client):
+        name = "_test_no_system_prompt_model"
+        try:
+            register_model(name, rpm=999, backend_type="venice", supports_system_prompt=False)
+            venice_backend.generate(
+                [{"role": "system", "content": "Sys."}, {"role": "user", "content": "hi"}],
+                name,
+            )
+            call_kwargs = mock_openai_client.chat.completions.create.call_args[1]
+            assert call_kwargs["messages"] == [{"role": "user", "content": "Sys.\n\nhi"}]
+        finally:
+            MODEL_REGISTRY.pop(name, None)

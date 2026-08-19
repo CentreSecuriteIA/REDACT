@@ -8,9 +8,9 @@ escalating that way." ``optimize_attack`` wires it to the success judge.
 
 from __future__ import annotations
 
-from typing import Callable
+from collections.abc import Callable
 
-from redact.optimization import optimize, tree_to_records  # noqa: F401 (re-export)
+from redact.optimization import optimize
 
 from .attacks import DEFAULT_CRESCENDO_FOLLOWUPS
 from .setting import SUCCESS_JUDGE_SYSTEM

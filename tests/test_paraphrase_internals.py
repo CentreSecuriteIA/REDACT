@@ -9,7 +9,7 @@ rename_capture calls the pipeline makes are exercised, not just monkeypatched aw
 import pandas as pd
 import pytest
 
-import redact.pipelines as P
+import redact.content_moderation.paraphrase as P
 from redact import generate_paraphrases, paths
 from redact.dataset.io import append_samples, _hash_text
 from tests.conftest import MockBackend

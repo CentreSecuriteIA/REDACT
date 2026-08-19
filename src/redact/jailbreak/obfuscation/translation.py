@@ -23,8 +23,8 @@ Languages are grouped by resource level (safety training coverage):
 from redact.jailbreak.protocol import LLMRequest, TechniqueGen
 from redact.llms.translator import (
     DEFAULT_TRANSLATE_MODEL,
-    build_translate_messages,
     build_check_messages,
+    build_translate_messages,
     is_faithful_response,
 )
 

@@ -71,10 +71,7 @@ def load_prompt(
         raise FileNotFoundError(f"Prompt directory not found: {base}")
 
     json_files = list(base.glob("*.json"))
-    if len(json_files) == 1:
-        target = json_files[0]
-    else:
-        target = base / "template.json"
+    target = json_files[0] if len(json_files) == 1 else base / "template.json"
 
     if not target.exists():
         raise FileNotFoundError(

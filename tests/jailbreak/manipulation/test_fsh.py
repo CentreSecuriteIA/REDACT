@@ -3,10 +3,13 @@
 import random
 
 from tests.conftest import MockBackend
+from redact.jailbreak.protocol import run_sync
 from redact.jailbreak.manipulation.fsh import (
     select_best_subcategory,
     to_fsh_random_short,
     to_fsh_random_long,
+    to_fsh_selected_short,
+    to_fsh_selected_long,
     get_fsh_functions,
     _build_fsh_prompt,
 )
@@ -84,6 +87,40 @@ class TestFshRandom:
         result, info = to_fsh_random_long("harmful prompt", data)
         assert "harmful prompt" in result
         assert "num_shots=" in info
+
+
+def _run(fn, prompt, backend, **kwargs):
+    """Drive a technique generator to completion against a MockBackend."""
+    def call(request):
+        return backend.generate(request.messages, request.model)
+    return run_sync(fn(prompt, **kwargs), call)
+
+
+class TestFshSelected:
+    def test_short_exact_match(self):
+        random.seed(42)
+        data = _make_benign_data()
+        backend = MockBackend("Cooking")
+        result, info = _run(to_fsh_selected_short, "harmful prompt", backend, benign_data=data)
+        assert "harmful prompt" in result
+        assert "sub_category=Cooking" in info
+        assert "selection=selected" in info
+        assert "harmful_idx" not in info  # FSH has no position field (that's DAP)
+
+    def test_long_exact_match(self):
+        random.seed(42)
+        data = _make_benign_data()
+        backend = MockBackend("Cooking")
+        result, info = _run(to_fsh_selected_long, "harmful prompt", backend, benign_data=data)
+        assert "harmful prompt" in result
+        assert "sub_category=Cooking" in info
+
+    def test_fallback_when_unparseable(self):
+        random.seed(42)
+        data = _make_benign_data()
+        backend = MockBackend("totally unrelated response xyz")
+        _, info = _run(to_fsh_selected_short, "harmful prompt", backend, benign_data=data)
+        assert "selection=fallback_random" in info
 
 
 class TestGetFshFunctions:

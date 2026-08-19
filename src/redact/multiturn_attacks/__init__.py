@@ -11,15 +11,15 @@ technique transforms), never the reverse.
 
 from __future__ import annotations
 
-from typing import Callable
+from collections.abc import Callable
 
 import pandas as pd
 
-from redact.multi_turn import generate_conversations, evaluate_conversations
+from redact.multi_turn import evaluate_conversations, generate_conversations
 
-from .attacks import crescendo_propose, pair_propose, DEFAULT_CRESCENDO_FOLLOWUPS
-from .setting import build_attack_setting, SUCCESS_JUDGE_SYSTEM
+from .attacks import DEFAULT_CRESCENDO_FOLLOWUPS, crescendo_propose, pair_propose
 from .optimize import jailbreak_candidates, optimize_attack
+from .setting import SUCCESS_JUDGE_SYSTEM, build_attack_setting
 
 __all__ = [
     "build_attack_setting",

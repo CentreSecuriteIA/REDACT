@@ -19,6 +19,7 @@ sidecar ``*.state.jsonl`` ledger.
 from __future__ import annotations
 
 import json
+import logging
 from math import ceil
 from pathlib import Path
 
@@ -26,8 +27,10 @@ import pandas as pd
 
 from redact import paths
 from redact.dataset.ledger import Ledger
-from redact.llms import get_backend, get_router
+from redact.llms import get_router
 from redact.llms.calls import batch_check_samples
+
+logger = logging.getLogger(__name__)
 
 _DEFAULT_JUDGE_SYSTEM = (
     "You are evaluating whether the assistant's response accomplishes the stated GOAL. "
@@ -91,6 +94,11 @@ def evaluate_conversations(
         scope: ``"last_reply"`` or ``"transcript"``.
         resume: skip conversation ids already scored (sidecar ledger).
         batch_size: judgments per batch.
+        conversations_path: override for the input CSV path (defaults to
+            ``paths.conversations_csv(data_dir)``).
+        verbose: log progress per batch.
+        router: router override (defaults to the process-wide one) — supplies
+            the judge backend and rate limiter.
 
     Returns:
         DataFrame of ``conversations_scored.csv``: ``sample_id, success,
@@ -100,7 +108,7 @@ def evaluate_conversations(
         raise ValueError("evaluate_conversations requires a judge_model.")
     if scope not in ("last_reply", "transcript"):
         raise ValueError("scope must be 'last_reply' or 'transcript'.")
-    router = router or get_router()  # noqa: F841 — kept for symmetry / future batched routing
+    router = router or get_router()
     judge_system = judge_system or _DEFAULT_JUDGE_SYSTEM
 
     conv_path = Path(conversations_path) if conversations_path else paths.conversations_csv(data_dir)
@@ -121,8 +129,9 @@ def evaluate_conversations(
 
     pending = conversations[~conversations["sample_id"].astype(str).isin(done)].reset_index(drop=True)
     if verbose:
-        print(f"\n{'='*60}\nEvaluate Conversations (scope={scope})\n{'='*60}")
-        print(f"Judge: {judge_model} | total: {len(conversations)} | pending: {len(pending)}")
+        logger.info("Evaluate Conversations (scope=%s)", scope)
+        logger.info("Judge: %s | total: %d | pending: %d",
+                    judge_model, len(conversations), len(pending))
     if pending.empty:
         return pd.read_csv(scored_path) if scored_path.exists() else pd.DataFrame()
 
@@ -130,8 +139,8 @@ def evaluate_conversations(
         return [{"role": "system", "content": judge_system},
                 {"role": "user", "content": sample}]
 
-    backend = get_backend(judge_model)
-    rate_limiter = get_router().rate_limiter
+    backend = router.get_backend(judge_model)
+    rate_limiter = router.rate_limiter
     n = len(pending)
     n_chunks = ceil(n / batch_size) if batch_size else 1
 
@@ -157,6 +166,7 @@ def evaluate_conversations(
         pd.DataFrame(rows).to_csv(scored_path, mode="a", header=not scored_path.exists(), index=False)
         ledger.record([{"sample_id": r["sample_id"]} for r in rows])
         if verbose:
-            print(f"  [{start + len(rows)}/{n}] scored ({sum(r['success'] for r in rows)} success)")
+            logger.info("[%d/%d] scored (%d success)",
+                        start + len(rows), n, sum(r["success"] for r in rows))
 
     return pd.read_csv(scored_path) if scored_path.exists() else pd.DataFrame()

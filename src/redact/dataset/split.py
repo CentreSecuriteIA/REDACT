@@ -89,22 +89,16 @@ def deterministic_balanced_assign(
     Returns:
         List of DataFrames, one per split.
     """
-    if isinstance(num_splits, list):
-        k = len(num_splits)
-    else:
-        k = num_splits
+    k = len(num_splits) if isinstance(num_splits, list) else num_splits
 
     # Filter group_by to only columns that exist
     valid_group_by = [col for col in group_by if col in df.columns]
 
     if not valid_group_by:
-        # No grouping columns — simple round-robin
-        splits = [pd.DataFrame(columns=df.columns) for _ in range(k)]
-        for i, (_, row) in enumerate(df.iterrows()):
-            splits[i % k] = pd.concat(
-                [splits[i % k], row.to_frame().T], ignore_index=True
-            )
-        return splits
+        # No grouping columns — simple round-robin. Sliced directly (one
+        # slice per split) rather than one pd.concat per row, which was
+        # O(n^2) (each concat copies the whole growing frame).
+        return [df.iloc[i::k].reset_index(drop=True) for i in range(k)]
 
     # Normalize origin if it's in the group columns
     if "origin" in valid_group_by:

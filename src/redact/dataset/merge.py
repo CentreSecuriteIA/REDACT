@@ -7,13 +7,13 @@ Also provides general-purpose CSV normalization and directory-based merging,
 with presets for jailbreak technique pipelines and content moderation output.
 """
 
-import hashlib
 from pathlib import Path
 
 import pandas as pd
 
 from redact import paths
-from .io import read_category_csv, _default_dataset_dir
+
+from .io import _default_dataset_dir, _hash_text, read_category_csv
 
 
 def merge_category_csvs(
@@ -144,11 +144,12 @@ def normalize_csv(
 
     df = df.copy()
 
-    # Recompute deterministic IDs
+    # Recompute deterministic IDs — shares the same hash + truncation as
+    # dataset.io._hash_text so ids agree with those computed at write time
+    # (append_samples etc.); a separate/shorter hash here would silently
+    # break joins against ids computed via the other path.
     if recompute_ids:
-        df[id_column] = df[text_column].apply(
-            lambda t: hashlib.md5(str(t).encode()).hexdigest()[:12]
-        )
+        df[id_column] = df[text_column].apply(lambda t: _hash_text(str(t)))
 
     return df.reset_index(drop=True)
 

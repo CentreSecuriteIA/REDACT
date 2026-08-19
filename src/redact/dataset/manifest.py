@@ -16,8 +16,9 @@ does not key or interpret them.
 
 from __future__ import annotations
 
+from collections.abc import Iterable, Mapping
 from pathlib import Path
-from typing import Any, Iterable, Mapping
+from typing import Any
 
 from .sidecar import JsonlSidecar
 
@@ -28,7 +29,7 @@ class Manifest(JsonlSidecar):
     _SUFFIX = ".manifest.jsonl"
 
     @classmethod
-    def sidecar(cls, artifact_path: str | Path, *, name: str | None = None) -> "Manifest":
+    def sidecar(cls, artifact_path: str | Path, *, name: str | None = None) -> Manifest:
         """Build a manifest sitting beside ``artifact_path``.
 
         By default the manifest is ``<artifact-stem>.manifest.jsonl`` next to the

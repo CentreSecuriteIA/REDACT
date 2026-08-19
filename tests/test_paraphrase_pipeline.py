@@ -8,7 +8,7 @@ targets without any network access.
 import pandas as pd
 import pytest
 
-import redact.pipelines as P
+import redact.content_moderation.paraphrase as CP
 from redact import generate_paraphrases, paths
 from redact.dataset.io import append_samples
 from tests.conftest import MockBackend
@@ -16,15 +16,20 @@ from tests.conftest import MockBackend
 
 @pytest.fixture()
 def patched(monkeypatch):
-    """Patch backend + paraphrase + check to deterministic offline behavior."""
-    monkeypatch.setattr(P, "get_backend", lambda m: MockBackend())
+    """Patch backend + paraphrase + check to deterministic offline behavior.
+
+    The plan/execute loop these patch points live in now runs in
+    content_moderation.paraphrase (moved out of pipelines.py), so the
+    monkeypatches target that module.
+    """
+    monkeypatch.setattr(CP, "get_backend", lambda m: MockBackend())
     monkeypatch.setattr(
-        P, "paraphrase_batch",
+        CP, "paraphrase_batch",
         lambda backend, model, texts, **kw: [f"PARA::{t}" for t in texts],
     )
     # accept everything by default
     monkeypatch.setattr(
-        P, "batch_check_samples",
+        CP, "batch_check_samples",
         lambda cb, cm, payloads, checker, **kw: [(True, "") for _ in payloads],
     )
     return monkeypatch
@@ -73,7 +78,7 @@ def test_paraphrase_check_drop(tmp_path, monkeypatch, patched):
     _seed_inputs(tmp_path)
     # Reject everything -> all dropped -> empty / no artifact rows.
     monkeypatch.setattr(
-        P, "batch_check_samples",
+        CP, "batch_check_samples",
         lambda cb, cm, payloads, checker, **kw: [(False, "no") for _ in payloads],
     )
     res = generate_paraphrases(data_dir=tmp_path, target="inputs", verbose=False)
@@ -106,9 +111,9 @@ def test_ledger_prevents_reattempt_of_dropped_units(tmp_path, monkeypatch):
         calls["n"] += len(texts)
         return ["SAME" for _ in texts]  # identical -> 2nd unit is a dedup-drop
 
-    monkeypatch.setattr(P, "get_backend", lambda m: MockBackend())
-    monkeypatch.setattr(P, "paraphrase_batch", fake_para)
-    monkeypatch.setattr(P, "batch_check_samples",
+    monkeypatch.setattr(CP, "get_backend", lambda m: MockBackend())
+    monkeypatch.setattr(CP, "paraphrase_batch", fake_para)
+    monkeypatch.setattr(CP, "batch_check_samples",
                         lambda b, m, samples, chk, **k: [(True, "") for _ in samples])
 
     generate_paraphrases(data_dir=tmp_path, target="inputs", verbose=False)
@@ -124,20 +129,20 @@ def test_ledger_prevents_reattempt_of_dropped_units(tmp_path, monkeypatch):
 def test_prompt_dir_threads_to_paraphrase_and_check(tmp_path, monkeypatch):
     _seed_inputs(tmp_path)
     seen = {}
-    monkeypatch.setattr(P, "get_backend", lambda m: MockBackend())
+    monkeypatch.setattr(CP, "get_backend", lambda m: MockBackend())
     monkeypatch.setattr(
-        P, "paraphrase_batch",
+        CP, "paraphrase_batch",
         lambda backend, model, texts, prompt_dir=None, **kw: (
             seen.__setitem__("para", prompt_dir) or [f"P::{t}" for t in texts]
         ),
     )
     monkeypatch.setattr(
-        P, "batch_check_samples",
+        CP, "batch_check_samples",
         lambda b, m, samples, chk, **k: [(True, "") for _ in samples],
     )
     # capture the checker's prompt_dir without loading real prompt files
     monkeypatch.setattr(
-        P, "build_paraphrase_checker",
+        CP, "build_paraphrase_checker",
         lambda prompt_dir=None: seen.__setitem__("check", prompt_dir) or (lambda s: []),
     )
     custom = str(tmp_path / "myprompts")

@@ -17,62 +17,65 @@ Usage:
 """
 
 # Obfuscation registry
-from .obfuscation import (
-    get_type_to_getter,
-    get_obfuscation_types,
-    get_all_obfuscation_functions,
-)
+# Distribution
+from .distribution import deterministic_balanced_assign, split_by_technique_functions
+from .engine import batch_apply_combinations
 
 # Hacking registry
 from .hacking import (
+    get_all_hacking_functions,
     get_hacking_type_to_getter,
     get_hacking_types,
-    get_all_hacking_functions,
+)
+
+# Run planning + resumable manifest ledger
+from .manifest import (
+    completed_from_output,
+    compute_sample_id,
+    default_manifest_path,
+    load_plan,
+    plan_index,
+    plan_run,
 )
 
 # Manipulation registry
 from .manipulation import (
+    get_all_manipulation_functions,
     get_manipulation_type_to_getter,
     get_manipulation_types,
-    get_all_manipulation_functions,
 )
-
-# Requests registry
-from .requests import get_request_type_to_getter, get_request_types, get_all_request_functions
-
-# Utilities
-from .utils import (
-    combine_techniques,
-    make_combination_gen,
-    tag_all_functions,
-    get_compatible_remaining,
-    sample_combination,
-    sample_exact_combination,
-    default_escalation_schedule,
-    apply_combination,
-    assign_combination,
-    build_combination,
-    build_function_registry,
-    is_noop,
-    load_spec,
+from .obfuscation import (
+    get_all_obfuscation_functions,
+    get_obfuscation_types,
+    get_type_to_getter,
 )
 
 # Request protocol + batched engine
 from .protocol import LLMRequest, run_sync
-from .engine import batch_apply_combinations
 
-# Run planning + resumable manifest ledger
-from .manifest import (
-    plan_run,
-    load_plan,
-    plan_index,
-    completed_from_output,
-    compute_sample_id,
-    default_manifest_path,
+# Requests registry
+from .requests import (
+    get_all_request_functions,
+    get_request_type_to_getter,
+    get_request_types,
 )
 
-# Distribution
-from .distribution import deterministic_balanced_assign, split_by_technique_functions
+# Utilities
+from .utils import (
+    apply_combination,
+    assign_combination,
+    build_combination,
+    build_function_registry,
+    combine_techniques,
+    default_escalation_schedule,
+    get_compatible_remaining,
+    is_noop,
+    load_spec,
+    make_combination_gen,
+    sample_combination,
+    sample_exact_combination,
+    tag_all_functions,
+)
 
 # ---------------------------------------------------------------------------
 # Tag all technique functions with compatibility metadata at import time

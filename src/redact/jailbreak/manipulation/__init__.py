@@ -4,9 +4,14 @@
 - DAP (Distract and Persuade): harmful question hidden among benign pairs
 """
 
-from .fsh import get_fsh_functions
+from .benign import (
+    BENIGN_CATEGORIES,
+    get_or_generate_benign_data,
+    load_benign_data,
+    process_category,
+)
 from .dap import get_dap_functions
-from .benign import BENIGN_CATEGORIES, load_benign_data, process_category, get_or_generate_benign_data
+from .fsh import get_fsh_functions
 
 
 def get_manipulation_types() -> list[str]:

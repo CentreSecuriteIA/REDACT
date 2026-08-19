@@ -27,7 +27,7 @@ from redact.dataset.io import _hash_text
 from redact.llms import get_router
 from redact.llms.conversation import drive_generators
 
-from .utils import make_combination_gen, _parse_rejection_info, is_noop
+from .utils import _parse_rejection_info, is_noop, make_combination_gen
 
 
 def _rename_capture(sample: dict, gen_model: str, final_sample_id: str) -> None:

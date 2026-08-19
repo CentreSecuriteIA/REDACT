@@ -10,9 +10,6 @@ import pytest
 from redact.pipelines import (
     create_taxonomy,
     _get_backend,
-    _output_state_path,
-    _read_output_state,
-    _append_output_state,
 )
 
 
@@ -71,33 +68,6 @@ class TestGetBackendHelper:
                 mock_get.assert_called_once_with("venice-uncensored")
 
 
-class TestOutputResumeState:
-    """Resume-state ledger used by generate_outputs() (#5)."""
-
-    def test_state_path_is_sidecar(self, tmp_path):
-        out = tmp_path / "output_responses.csv"
-        sp = _output_state_path(out)
-        assert sp.name == "output_responses.state.jsonl"
-        assert sp.parent == out.parent
-
-    def test_read_missing_returns_empty(self, tmp_path):
-        assert _read_output_state(tmp_path / "nope.state.jsonl") == set()
-
-    def test_append_then_read_roundtrip(self, tmp_path):
-        sp = tmp_path / "s.state.jsonl"
-        _append_output_state(sp, ["a", "b"])
-        _append_output_state(sp, ["c"])
-        assert _read_output_state(sp) == {"a", "b", "c"}
-
-    def test_read_ignores_malformed_lines(self, tmp_path):
-        sp = tmp_path / "s.state.jsonl"
-        sp.write_text(
-            '{"input_id": "x"}\nnot json\n{"no_id": 1}\n{"input_id": "y"}\n',
-            encoding="utf-8",
-        )
-        assert _read_output_state(sp) == {"x", "y"}
-
-
 class TestStandaloneInputsDeprecation:
     def test_standalone_generate_inputs_emits_deprecation_warning(self, tmp_path, monkeypatch):
         import redact.pipelines as P
@@ -143,9 +113,8 @@ class TestGenerateOutputsManifest:
         # records every planned unit in the manifest.
         import redact.pipelines as P
         from redact import generate_outputs, paths
-        from redact.dataset import Manifest
+        from redact.dataset import Manifest, Ledger
         from redact.dataset.io import _hash_text
-        from redact.pipelines import _output_state_path, _append_output_state
         from tests.conftest import MockBackend
 
         monkeypatch.setattr(P, "get_backend", lambda m: MockBackend("ans"))
@@ -155,7 +124,9 @@ class TestGenerateOutputsManifest:
         })
         out = paths.output_responses_csv(tmp_path)
         # Pre-seed the ledger as if "p one" was already completed.
-        _append_output_state(_output_state_path(out), [_hash_text("p one")])
+        Ledger.sidecar(out, key_fields=("input_id",), casters={"input_id": str}).record(
+            [{"input_id": _hash_text("p one")}]
+        )
 
         generate_outputs(data_dir=tmp_path, inputs=inputs, check_outputs=False,
                          resume=True, verbose=False)

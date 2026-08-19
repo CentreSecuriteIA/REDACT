@@ -6,16 +6,19 @@ Loading is lazy (explicit function call, not module-level import).
 Ported from reference manipulation.py lines 40-289.
 """
 
-import pandas as pd
+import logging
 from pathlib import Path
 
-from redact.llms.base import LLMBackend
-from redact.llms.calls import generate_sample
-from redact.llms.wrappers import RateLimiter
-from redact.llms.extraction import extract_structured_qa
+import pandas as pd
 
 from redact import paths
-from redact.llms.prompts import load_prompt, build_messages
+from redact.llms.base import LLMBackend
+from redact.llms.calls import generate_sample
+from redact.llms.extraction import extract_structured_qa
+from redact.llms.prompts import build_messages, load_prompt
+from redact.llms.wrappers import RateLimiter
+
+logger = logging.getLogger(__name__)
 
 _PACKAGE_DIR = Path(__file__).resolve().parent.parent.parent  # src/redact/
 
@@ -242,7 +245,7 @@ def get_or_generate_benign_data(
 
     if path.exists():
         if verbose:
-            print(f"  Loading cached benign data from {path}")
+            logger.info("Loading cached benign data from %s", path)
         return load_benign_data(path)
 
     if backend is None or model is None:
@@ -252,22 +255,21 @@ def get_or_generate_benign_data(
         )
 
     if verbose:
-        print(f"  Generating benign data ({len(BENIGN_CATEGORIES)} categories)...")
+        logger.info("Generating benign data (%d categories)...", len(BENIGN_CATEGORIES))
 
     path.parent.mkdir(parents=True, exist_ok=True)
     all_rows = []
     for i, category in enumerate(BENIGN_CATEGORIES):
-        if verbose:
-            print(f"    [{i + 1}/{len(BENIGN_CATEGORIES)}] {category[0]} / {category[1]}", end="", flush=True)
         rows = process_category(category, backend, model, rate_limiter)
         all_rows.extend(rows)
         pd.DataFrame(all_rows).to_csv(path, index=False)
         if verbose:
-            print(f" → saved ({len(all_rows)} rows total)")
+            logger.info("[%d/%d] %s / %s → saved (%d rows total)",
+                        i + 1, len(BENIGN_CATEGORIES), category[0], category[1], len(all_rows))
 
     df = pd.DataFrame(all_rows)
     if verbose:
-        print(f"  Done. {len(df)} benign samples saved to {path}")
+        logger.info("Done. %d benign samples saved to %s", len(df), path)
 
     return load_benign_data(path)
 

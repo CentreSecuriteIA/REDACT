@@ -7,14 +7,21 @@ Generalized from the jailbreak reference library:
 - BatchCaller:         from runner script ThreadPoolExecutor patterns
 """
 
+import logging
 import threading
 import time
+from collections.abc import Callable
 from concurrent.futures import ThreadPoolExecutor, as_completed
-from typing import Callable
 
 from .base import LLMBackend
 from .model_config import get_model_config
 from .progress import ProgressReporter
+
+logger = logging.getLogger(__name__)
+
+# RPM is requests-per-minute, so the sliding window RateLimiter prunes/limits
+# on a 60-second window.
+_RATE_LIMIT_WINDOW_SECONDS = 60.0
 
 
 class RateLimiter:
@@ -54,16 +61,14 @@ class RateLimiter:
 
         with lock:
             now = time.time()
-            # Prune timestamps older than 60 seconds
-            timestamps[:] = [t for t in timestamps if now - t < 60.0]
+            # Prune timestamps older than the window
+            timestamps[:] = [t for t in timestamps if now - t < _RATE_LIMIT_WINDOW_SECONDS]
 
             if len(timestamps) >= rpm:
-                sleep_for = 60.0 - (now - timestamps[0]) + 0.1
+                sleep_for = _RATE_LIMIT_WINDOW_SECONDS - (now - timestamps[0]) + 0.1
                 if sleep_for > 0:
-                    print(
-                        f"    [rate-limit] {model}: pausing {sleep_for:.1f}s "
-                        f"({rpm} RPM)"
-                    )
+                    logger.info("[rate-limit] %s: pausing %.1fs (%d RPM)",
+                                model, sleep_for, rpm)
                     # Release lock while sleeping so other models aren't blocked
                     lock.release()
                     try:
@@ -72,7 +77,7 @@ class RateLimiter:
                         lock.acquire()
                     # Re-prune after sleeping
                     now = time.time()
-                    timestamps[:] = [t for t in timestamps if now - t < 60.0]
+                    timestamps[:] = [t for t in timestamps if now - t < _RATE_LIMIT_WINDOW_SECONDS]
 
             timestamps.append(time.time())
 
@@ -378,8 +383,7 @@ class BatchCaller:
                     _cb(i, r)
                     _rep.on_complete(i, r)
 
-        # Native batch (vLLM / introspection): single engine pass (or single
-        # sequential-in-one-call pass), one rate-limit slot.
+        # Native batch (vLLM): single engine pass, one rate-limit slot.
         if self._backend.supports_native_batching:
             if self._rate_limiter:
                 self._rate_limiter.wait_if_needed(model)

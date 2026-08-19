@@ -21,28 +21,28 @@ Two tiers:
 Ported from reference obfuscation.py lines 600-843.
 """
 
-import re
 import random
+import re
 from pathlib import Path
 
-from redact.jailbreak.protocol import LLMRequest, TechniqueGen
-from redact.llms.calls import generate_sample
-from redact.llms.prompts import load_prompt, build_messages
-from redact.llms.base import LLMBackend
-from redact.llms.wrappers import RateLimiter
+from redact.jailbreak.dynamic_functions import bind_functions
 from redact.jailbreak.obfuscation.encoding import (
+    _SEPARATORS,
+    to_ascii_ordinal,
     to_base64,
+    to_leetspeak_advanced,
+    to_leetspeak_basic,
+    to_leetspeak_intermediate,
     to_rot13,
     to_rot18,
     to_rot47,
     to_unicode_escape,
-    to_ascii_ordinal,
-    to_leetspeak_basic,
-    to_leetspeak_intermediate,
-    to_leetspeak_advanced,
-    _SEPARATORS,
 )
-
+from redact.jailbreak.protocol import LLMRequest, TechniqueGen
+from redact.llms.base import LLMBackend
+from redact.llms.calls import generate_sample
+from redact.llms.prompts import build_messages, load_prompt
+from redact.llms.wrappers import RateLimiter
 
 # ---------------------------------------------------------------------------
 # Pure word-level transforms (no LLM) — Tier 1 helpers
@@ -170,6 +170,9 @@ def tokenbreak_obfuscate_word(word: str, attack: str) -> tuple[str, str]:
 # ---------------------------------------------------------------------------
 
 _TOKENBREAK_EMPTY_RESPONSES = {"none", "n/a", "no harmful words", ""}
+# Above this many words, treat the extraction response as a non-answer
+# (the model rambled instead of returning a short word list).
+_MAX_HARMFUL_WORDS_RESPONSE_LEN = 10
 
 
 def extract_harmful(
@@ -192,7 +195,7 @@ def extract_harmful(
     result = result.strip()
     if result.lower() == "none":
         return ""
-    if len(result.split()) > 10:
+    if len(result.split()) > _MAX_HARMFUL_WORDS_RESPONSE_LEN:
         return ""
     return result
 
@@ -219,7 +222,7 @@ def _harmful_words_gen(
     config = load_prompt("jailbreak", "extract_harmful", prompt_dir)
     messages = build_messages(config, prompt=prompt)
     raw = (yield LLMRequest(gen_model, messages)).strip()
-    if raw.lower() == "none" or len(raw.split()) > 10:
+    if raw.lower() == "none" or len(raw.split()) > _MAX_HARMFUL_WORDS_RESPONSE_LEN:
         return []
     return [w for w in raw.split() if w.lower() not in _TOKENBREAK_EMPTY_RESPONSES]
 
@@ -354,8 +357,10 @@ def _make_encode_fn(fname: str, encode_fn, encode_name: str, doc: str):
     return fn
 
 
-for _fname, _encode_fn, _encode_name, _doc in _ENCODE_SPECS:
-    globals()[_fname] = _make_encode_fn(_fname, _encode_fn, _encode_name, _doc)
+bind_functions(globals(), [
+    _make_encode_fn(_fname, _encode_fn, _encode_name, _doc)
+    for _fname, _encode_fn, _encode_name, _doc in _ENCODE_SPECS
+])
 
 
 def to_sensitive_words_encode_separator(prompt: str, **kwargs) -> TechniqueGen:
@@ -386,8 +391,10 @@ def _make_char_fn(fname: str, separator: str, sep_name: str, doc: str):
     return fn
 
 
-for _fname, _sep, _sep_name, _doc in _CHAR_SPECS:
-    globals()[_fname] = _make_char_fn(_fname, _sep, _sep_name, _doc)
+bind_functions(globals(), [
+    _make_char_fn(_fname, _sep, _sep_name, _doc)
+    for _fname, _sep, _sep_name, _doc in _CHAR_SPECS
+])
 
 
 def to_sensitive_words_variables(prompt: str, **kwargs) -> TechniqueGen:
@@ -399,6 +406,10 @@ def to_sensitive_words_variables(prompt: str, **kwargs) -> TechniqueGen:
 # ---------------------------------------------------------------------------
 # Tier 2c — Synonym substitution (extract round + one synonym round per word)
 # ---------------------------------------------------------------------------
+
+# A "synonym" longer than this many words is treated as a non-answer (the
+# original word is kept instead) — a single creative synonym, not a phrase.
+_MAX_SYNONYM_WORDS = 4
 
 
 def to_synonym_substitution(prompt: str, *, prompt_dir=None, **kwargs) -> TechniqueGen:
@@ -419,7 +430,7 @@ def to_synonym_substitution(prompt: str, *, prompt_dir=None, **kwargs) -> Techni
     for word in words:
         messages = build_messages(config, word=word, prompt=prompt)
         synonym = (yield LLMRequest(gen_model, messages)).strip()
-        if not synonym or len(synonym.split()) > 4:
+        if not synonym or len(synonym.split()) > _MAX_SYNONYM_WORDS:
             synonym = word  # keep original as fallback
         result = re.sub(
             re.escape(word),

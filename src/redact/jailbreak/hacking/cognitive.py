@@ -20,9 +20,8 @@ from redact.dataset.taxonomy import load_taxonomy
 from redact.jailbreak.protocol import LLMRequest, TechniqueGen
 from redact.llms.base import LLMBackend
 from redact.llms.calls import generate_sample
+from redact.llms.prompts import build_messages, load_prompt
 from redact.llms.wrappers import RateLimiter
-from redact.llms.prompts import load_prompt, build_messages
-
 
 # ---------------------------------------------------------------------------
 # Category definitions — loaded from taxonomy JSON

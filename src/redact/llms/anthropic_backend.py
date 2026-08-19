@@ -11,7 +11,7 @@ as even within RPM limits concurrent requests can exceed TPM.
 
 import os
 
-from .base import LLMBackend
+from .base import LLMBackend, fold_system_into_first_message
 from .model_config import get_model_config
 
 
@@ -47,6 +47,11 @@ class AnthropicBackend(LLMBackend):
         - System messages are extracted and passed as the ``system`` param.
         - Remaining messages are passed as the ``messages`` list.
 
+        If ``model``'s config has ``supports_system_prompt=False``, system
+        messages are folded into the first remaining message *before* the
+        above split, so no ``system`` param is sent at all (see
+        :func:`redact.llms.base.fold_system_into_first_message`).
+
         Args:
             messages: Chat messages in OpenAI format.
             model: Model identifier (e.g. "claude-opus-4-6").
@@ -58,6 +63,9 @@ class AnthropicBackend(LLMBackend):
             The generated text content.
         """
         config = get_model_config(model)
+
+        if not config.supports_system_prompt:
+            messages = fold_system_into_first_message(messages)
 
         resolved_max_tokens = max_tokens if max_tokens is not None else config.default_max_tokens
         resolved_temperature = temperature if temperature is not None else config.default_temperature

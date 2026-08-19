@@ -8,16 +8,16 @@ jailbreak multi-turn attacks (``multiturn_attacks/``) and optimization loops
 
 from .core import (
     Actor,
-    ScriptedActor,
     ModelActor,
-    StrategyActor,
+    ScriptedActor,
     Setting,
+    StrategyActor,
     Trajectory,
     conversation_gen,
     run_conversation,
 )
-from .pipeline import generate_conversations
 from .evaluate import evaluate_conversations
+from .pipeline import generate_conversations
 
 __all__ = [
     "Actor",

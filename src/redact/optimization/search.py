@@ -22,10 +22,10 @@ from __future__ import annotations
 
 import copy
 import itertools
-from dataclasses import dataclass, field
-from typing import Callable
+from collections.abc import Callable
+from dataclasses import dataclass
 
-from redact.llms import get_backend, get_router
+from redact.llms import get_router
 from redact.llms.calls import batch_check_samples
 from redact.llms.conversation import LLMRequest, Transcript, drive_generators
 
@@ -90,8 +90,8 @@ def optimize(
     if not target_model:
         raise ValueError("optimize requires a target_model.")
     router = router or get_router()
-    judge_backend = get_backend(judge_model)
-    rate_limiter = get_router().rate_limiter
+    judge_backend = router.get_backend(judge_model)
+    rate_limiter = router.rate_limiter
     ids = itertools.count()
 
     root_t = Transcript()

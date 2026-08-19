@@ -21,8 +21,9 @@ Contents:
 from __future__ import annotations
 
 from collections import defaultdict
+from collections.abc import Callable, Generator, Hashable
 from dataclasses import dataclass, field
-from typing import Callable, Generator, Hashable, Literal
+from typing import Literal
 
 
 @dataclass

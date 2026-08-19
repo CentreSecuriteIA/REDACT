@@ -11,8 +11,7 @@ Each function is a single-round **technique generator** (see
 """
 
 from redact.jailbreak.protocol import LLMRequest, TechniqueGen
-from redact.llms.prompts import load_prompt, build_messages
-
+from redact.llms.prompts import build_messages, load_prompt
 
 # ---------------------------------------------------------------------------
 # Level descriptions injected into the prompt template

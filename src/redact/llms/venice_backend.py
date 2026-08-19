@@ -15,7 +15,7 @@ import os
 
 import openai
 
-from .base import LLMBackend
+from .base import LLMBackend, fold_system_into_first_message
 from .model_config import get_model_config
 
 
@@ -46,6 +46,11 @@ class VeniceBackend(LLMBackend):
         Parameters are resolved in priority order:
         explicit arg > model config default > omitted.
 
+        If ``model``'s config has ``supports_system_prompt=False``, any
+        ``system``-role message is folded into the first remaining message
+        instead of being sent as its own message (see
+        :func:`redact.llms.base.fold_system_into_first_message`).
+
         Args:
             messages: Chat messages in OpenAI format.
             model: Model identifier (e.g. "venice-uncensored").
@@ -59,6 +64,9 @@ class VeniceBackend(LLMBackend):
             The generated text content.
         """
         config = get_model_config(model)
+
+        if not config.supports_system_prompt:
+            messages = fold_system_into_first_message(messages)
 
         # Resolve parameters: explicit > model default > omit
         resolved_max_tokens = max_tokens if max_tokens is not None else config.default_max_tokens

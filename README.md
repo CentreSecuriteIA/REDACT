@@ -263,7 +263,7 @@ Everything above this layer calls a unified interface and is backend-agnostic.
 | `VLLMBackend` | Local vLLM for self-hosted GPU inference |
 | `TransformersIntrospectionBackend` | Local raw-`transformers` inference with hidden-state/attention/logprob capture (research/interpretability) |
 | `get_backend()` | Auto-select backend from model name |
-| `get_router()` | Process-wide `ModelRouter` — one shared `RateLimiter`, a per-model `BatchCaller` cache, and `for_role()` lookup. The intended single entry point for rate-limited, capability-aware generation |
+| `get_router()` | Process-wide `ModelRouter` — one shared `RateLimiter` and a per-model `BatchCaller` cache. The intended single entry point for rate-limited, capability-aware generation |
 | `RateLimiter` | Per-model sliding-window RPM enforcement (thread-safe) |
 | `BatchCaller` | Capability-aware dispatch: vLLM native batch / API thread pool / series-only sequential |
 | `generate_sample()` | Single generation with rate limiting |

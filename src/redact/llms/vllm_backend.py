@@ -8,11 +8,47 @@ engine pass.
 Reference: output dataset paraphraser.py (TheBloke/dolphin-2.2-70B-GPTQ).
 """
 
+import contextlib
 import multiprocessing
 import os
 
 from .base import LLMBackend
 from .model_config import get_model_config
+
+# Mistral-3.x instruct format, used only when use_mistral_format=True (see
+# _build_mistral_prompt below) — CAUTION, see that function's docstring.
+_MISTRAL_SYSTEM_TEMPLATE = "[SYSTEM_PROMPT]{system}[/SYSTEM_PROMPT]"
+_MISTRAL_INST_TEMPLATE = "[INST]{user}[/INST]"
+
+
+def _build_mistral_prompt(messages: list[dict]) -> str:
+    """Render OpenAI-style chat messages as a raw Mistral-3.x instruct prompt.
+
+    CAUTION: this is a best-effort reconstruction, written without access to
+    a live vLLM + Mistral-3.x checkpoint to validate against — see the
+    ``use_mistral_format`` note in ``VLLMBackend.__init__`` before relying on
+    this in production.
+
+    Targets the Mistral-3.x format: any system message(s) become one leading
+    ``[SYSTEM_PROMPT]...[/SYSTEM_PROMPT]`` block, then each user turn becomes
+    ``[INST]...[/INST]`` with assistant turns appended as plain text between
+    them (matching multi-turn Mistral instruct conversations). System
+    messages after the first user turn are folded into that leading block too
+    (Mistral's format has no mid-conversation system slot).
+    """
+    system_parts = [m["content"] for m in messages if m.get("role") == "system"]
+    parts = []
+    if system_parts:
+        parts.append(_MISTRAL_SYSTEM_TEMPLATE.format(system="\n".join(system_parts)))
+    for m in messages:
+        role = m.get("role")
+        if role == "system":
+            continue
+        elif role == "user":
+            parts.append(_MISTRAL_INST_TEMPLATE.format(user=m["content"]))
+        elif role == "assistant":
+            parts.append(m["content"])
+    return "".join(parts)
 
 
 class VLLMBackend(LLMBackend):
@@ -30,19 +66,36 @@ class VLLMBackend(LLMBackend):
             model: HuggingFace model ID or local path.
             quantization: Quantization method (e.g. "gptq", "awq").
             **vllm_kwargs: Passed to vllm.LLM() (e.g. revision,
-                           trust_remote_code, gpu_memory_utilization).
+                           trust_remote_code, gpu_memory_utilization), with
+                           one exception: ``use_mistral_format`` (bool) is
+                           popped out here rather than forwarded — it is not
+                           a real vllm.LLM() kwarg, it's this backend's own
+                           flag (see the note below).
         """
         # vLLM v1 spawns engine core subprocesses. On Linux the default
         # multiprocessing start method is 'fork', which causes CUDA to fail
         # if it was already initialised in the parent (e.g. in a notebook).
-        try:
+        with contextlib.suppress(RuntimeError):
             multiprocessing.set_start_method("spawn", force=True)
-        except RuntimeError:
-            pass
 
         from vllm import LLM  # Lazy import — vllm is heavy and optional
 
         self._model_name = model
+        # CAUTION — best-effort implementation, not yet validated against a
+        # live vLLM engine + real Mistral-3.x weights (no GPU available where
+        # this was written): when True, generate()/batch_generate() build a
+        # raw [INST]/[SYSTEM_PROMPT] prompt string (_build_mistral_prompt)
+        # and call self._llm.generate() instead of self._llm.chat() — for
+        # checkpoints whose tokenizer_config.json lacks a working
+        # chat_template, so vLLM's own template application can't be trusted.
+        # Required for Mistral-3.x family models per the project docs. Before
+        # depending on this in production, verify the constructed prompt
+        # against the target checkpoint's own tokenizer (e.g. compare with
+        # AutoTokenizer.apply_chat_template, or against passing
+        # tokenizer_mode="mistral" — a real vllm.LLM() kwarg that lets vLLM's
+        # own mistral-common integration format the prompt instead of this
+        # hand-rolled version, if available for the installed vllm version).
+        self._use_mistral_format = bool(vllm_kwargs.pop("use_mistral_format", False))
         if "download_dir" not in vllm_kwargs and os.environ.get("HF_HOME"):
             vllm_kwargs["download_dir"] = os.environ["HF_HOME"]
         self._llm = LLM(
@@ -94,7 +147,10 @@ class VLLMBackend(LLMBackend):
             top_p=resolved_top_p,
         )
 
-        outputs = self._llm.chat([messages], sampling_params)
+        if self._use_mistral_format:
+            outputs = self._llm.generate([_build_mistral_prompt(messages)], sampling_params)
+        else:
+            outputs = self._llm.chat([messages], sampling_params)
         return self._clean_output(outputs[0].outputs[0].text)
 
     def batch_generate(
@@ -126,7 +182,11 @@ class VLLMBackend(LLMBackend):
 
         if not messages_list:
             return []
-        outputs = self._llm.chat(messages_list, sampling_params)
+        if self._use_mistral_format:
+            prompts = [_build_mistral_prompt(m) for m in messages_list]
+            outputs = self._llm.generate(prompts, sampling_params)
+        else:
+            outputs = self._llm.chat(messages_list, sampling_params)
         return [self._clean_output(out.outputs[0].text) for out in outputs]
 
     @property

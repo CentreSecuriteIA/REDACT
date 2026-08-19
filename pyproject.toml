@@ -46,7 +46,38 @@ line-length = 88
 target-version = "py311"
 
 [tool.ruff.lint]
-select = ["E", "F", "I", "UP"]
+# SIM (flake8-simplify) and PLR2004 (magic-value-comparison) are enabled and
+# clean as of this writing. The rest of the "PLR" (pylint-refactor) group and
+# C901 (mccabe complexity) were evaluated and deliberately left off:
+#   - PLR0913 (too-many-arguments): 57 findings. Conflicts with this project's
+#     own API design — public pipeline functions (e.g. generate_jailbreaks,
+#     generate_paraphrases) intentionally take many explicit keyword params
+#     rather than a config object; see CLAUDE.md. Not a code smell here.
+#   - C901 / PLR0912 / PLR0915 (complexity / branches / statements): ~35
+#     findings, mostly the batch/plan/execute orchestration functions
+#     (run_from_constitution, generate_jailbreaks, build_dataset, etc.).
+#     Real complexity worth reducing over time via targeted extraction, but
+#     fixing all of them is a much larger, higher-risk initiative than a
+#     lint-rule toggle — tracked separately (see cleanup.md), not enforced
+#     as a blanket rule yet.
+select = ["E", "F", "I", "UP", "SIM", "PLR2004"]
+
+[tool.ruff.lint.per-file-ignores]
+# __init__.py files re-export names for the public API (e.g. `from redact
+# import generate_jailbreaks`); ruff can't distinguish that from a genuinely
+# unused import without an `__all__` list everywhere, which this project
+# doesn't use. Not dead code — verified case by case for every other file
+# (see cleanup.md) before deciding this pattern was safe to blanket-ignore
+# only here.
+"__init__.py" = ["F401"]
+# tokenbreak.py binds several technique functions into its own module
+# namespace at runtime via dynamic_functions.bind_functions(globals(), ...)
+# (mirrors answer_language.py / personas.py) — get_sensitive_words_functions()
+# then references those names directly. Ruff can't trace a `globals()`
+# mutation, so it reports them as undefined even though they exist by the
+# time that function is ever called. Verified via the full test suite, not
+# just asserted.
+"src/redact/jailbreak/obfuscation/tokenbreak.py" = ["F821"]
 
 [tool.mypy]
 strict = true

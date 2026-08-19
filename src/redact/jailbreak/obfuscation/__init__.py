@@ -11,13 +11,13 @@ Eight technique families, each in its own module:
 - suffixes: punctuation, fragments, unicode, emoji (pure, no LLM)
 """
 
-from .encoding import get_encoding_functions
-from .translation import get_translation_functions
-from .structural import get_structural_functions
 from .ascii_art import get_ascii_art_functions
-from .tokenbreak import get_tokenbreak_functions, get_sensitive_words_functions
-from .typos import get_typos_functions
+from .encoding import get_encoding_functions
+from .structural import get_structural_functions
 from .suffixes import get_suffix_functions
+from .tokenbreak import get_sensitive_words_functions, get_tokenbreak_functions
+from .translation import get_translation_functions
+from .typos import get_typos_functions
 
 
 def get_obfuscation_types() -> list[str]:

@@ -9,8 +9,8 @@ Ported from reference manipulation.py lines 356-468.
 import random
 
 from redact.jailbreak.protocol import TechniqueGen
-from .fsh import _select_subcategory_gen
 
+from .fsh import run_random_manipulation, run_selected_manipulation
 
 # ---------------------------------------------------------------------------
 # Prompt assembly
@@ -52,22 +52,20 @@ def _build_dap_prompt(
 # ---------------------------------------------------------------------------
 
 
+def _dap_build_prompt(harmful_prompt: str, pairs: list[dict], num_shots: int) -> tuple[str, dict]:
+    """Adapt _build_dap_prompt's (str, int) return to the shared runner's (str, extra) shape."""
+    text, harmful_idx = _build_dap_prompt(harmful_prompt, pairs, num_shots)
+    return text, {"harmful_idx": harmful_idx}
+
+
 def to_dap_random_short(prompt: str, benign_data: dict) -> tuple[str, str]:
     """DAP with randomly chosen category, short answers. No LLM needed."""
-    num_shots = random.randint(3, 7)
-    subcat = random.choice(benign_data["all_subcategories"])
-    pairs = benign_data["by_subcat_short"].get(subcat, benign_data["short"])
-    jailbreak, harmful_idx = _build_dap_prompt(prompt, pairs, num_shots)
-    return jailbreak, f"num_shots={num_shots};harmful_idx={harmful_idx};sub_category={subcat}"
+    return run_random_manipulation(prompt, benign_data, "short", _dap_build_prompt)
 
 
 def to_dap_random_long(prompt: str, benign_data: dict) -> tuple[str, str]:
     """DAP with randomly chosen category, long answers. No LLM needed."""
-    num_shots = random.randint(3, 7)
-    subcat = random.choice(benign_data["all_subcategories"])
-    pairs = benign_data["by_subcat_long"].get(subcat, benign_data["long"])
-    jailbreak, harmful_idx = _build_dap_prompt(prompt, pairs, num_shots)
-    return jailbreak, f"num_shots={num_shots};harmful_idx={harmful_idx};sub_category={subcat}"
+    return run_random_manipulation(prompt, benign_data, "long", _dap_build_prompt)
 
 
 def to_dap_selected_short(
@@ -75,14 +73,10 @@ def to_dap_selected_short(
     gen_model: str | None = None, prompt_dir=None, **kwargs,
 ) -> TechniqueGen:
     """DAP with LLM-selected category, short answers (technique generator)."""
-    num_shots = random.randint(3, 7)
-    subcat, was_fallback = yield from _select_subcategory_gen(
-        prompt, benign_data["all_subcategories"], gen_model=gen_model, prompt_dir=prompt_dir
-    )
-    pairs = benign_data["by_subcat_short"].get(subcat, benign_data["short"])
-    jailbreak, harmful_idx = _build_dap_prompt(prompt, pairs, num_shots)
-    selection = "fallback_random" if was_fallback else "selected"
-    return jailbreak, f"num_shots={num_shots};harmful_idx={harmful_idx};sub_category={subcat};selection={selection}"
+    return (yield from run_selected_manipulation(
+        prompt, benign_data, "short", _dap_build_prompt,
+        gen_model=gen_model, prompt_dir=prompt_dir,
+    ))
 
 
 def to_dap_selected_long(
@@ -90,14 +84,10 @@ def to_dap_selected_long(
     gen_model: str | None = None, prompt_dir=None, **kwargs,
 ) -> TechniqueGen:
     """DAP with LLM-selected category, long answers (technique generator)."""
-    num_shots = random.randint(3, 7)
-    subcat, was_fallback = yield from _select_subcategory_gen(
-        prompt, benign_data["all_subcategories"], gen_model=gen_model, prompt_dir=prompt_dir
-    )
-    pairs = benign_data["by_subcat_long"].get(subcat, benign_data["long"])
-    jailbreak, harmful_idx = _build_dap_prompt(prompt, pairs, num_shots)
-    selection = "fallback_random" if was_fallback else "selected"
-    return jailbreak, f"num_shots={num_shots};harmful_idx={harmful_idx};sub_category={subcat};selection={selection}"
+    return (yield from run_selected_manipulation(
+        prompt, benign_data, "long", _dap_build_prompt,
+        gen_model=gen_model, prompt_dir=prompt_dir,
+    ))
 
 
 def get_dap_functions() -> list:

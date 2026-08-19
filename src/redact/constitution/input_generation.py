@@ -30,24 +30,19 @@ Usage:
 """
 
 import logging
-from dataclasses import dataclass, field
+from collections.abc import Callable
 from pathlib import Path
-from typing import Callable
 
 import pandas as pd
 
-from ..content_moderation.generation import (
-    InputPipeline,
-    SampleResult,
-    ConstitutionInputResult,
-)
 from ..content_moderation.checker import build_quality_checker
+from ..content_moderation.generation import (
+    ConstitutionInputResult,
+    InputPipeline,
+)
 from ..llms.base import LLMBackend
-from ..llms.calls import batch_check_samples
-from ..llms.extraction import extract_and_clean
 from ..llms.prompts import load_prompt
 from ..llms.wrappers import RateLimiter
-from ..dataset.io import append_samples, get_existing_samples
 
 logger = logging.getLogger(__name__)
 
@@ -87,7 +82,7 @@ def _build_constitution_checker(
 
 
 # ---------------------------------------------------------------------------
-# Result data class â€” now defined in content_moderation/generation.py and
+# Result data class — now defined in content_moderation/generation.py and
 # re-exported here for backward compatibility.
 # ---------------------------------------------------------------------------
 
@@ -137,7 +132,7 @@ class ConstitutionInputPipeline:
 
     # CONSTITUTION-TO-INPUT: Core pipeline class.
     # Composes with content moderation InputPipeline for generation/extraction/checking.
-    # Does NOT extend InputPipeline â€” the iteration pattern is fundamentally
+    # Does NOT extend InputPipeline — the iteration pattern is fundamentally
     # different (per-entry with unique sample_description vs per-category multi-turn).
 
     Each constitution entry has a short sample_description (e.g. "Instructions
@@ -263,131 +258,6 @@ class ConstitutionInputPipeline:
         return df.reset_index(drop=True)
 
     # -----------------------------------------------------------------
-    # Per-entry generation
-    # -----------------------------------------------------------------
-
-    def generate_for_entry(
-        self,
-        entry: pd.Series,
-        prompt_config: dict,
-        samples_per_entry: int = 3,
-        build_check_messages: Callable[[str], list[dict]] | None = None,
-        prohibited: set[str] | None = None,
-    ) -> list[SampleResult]:
-        """Generate full prompts from a single constitution entry.
-
-        # CONSTITUTION-TO-INPUT: Per-entry generation via InputPipeline composition.
-        # Uses InputPipeline.generate_batch() for LLM call + extraction,
-        # then InputPipeline.check_samples() for quality validation.
-
-        Args:
-            entry: Single row from the constitution DataFrame.
-            prompt_config: Loaded prompt template config.
-            samples_per_entry: Number of prompts to generate per entry.
-            build_check_messages: Quality checker callable. If None, skips checking.
-            prohibited: Existing sample texts to avoid.
-
-        Returns:
-            List of SampleResult objects (accepted or rejected).
-        """
-        # Build seed kwargs from constitution entry metadata
-        seed_kwargs = {
-            "Category": str(entry.get("source_category", "")),
-            "sample_description": str(entry.get("sample_description", "")),
-            "constitution_subcategory": str(entry.get("constitution_subcategory", "")),
-            "entry_type": str(entry.get("entry_type", "")),
-        }
-
-        # Generate via InputPipeline (handles prompt rendering, format
-        # instruction injection, LLM call, and numbered-list extraction)
-        raw_output, extracted = self.input_pipeline.generate_batch(
-            prompt_config=prompt_config,
-            samples_per_request=samples_per_entry,
-            prohibited=prohibited,
-            **seed_kwargs,
-        )
-
-        logger.info(
-            "Entry '%s': extracted %d samples",
-            entry.get("sample_description", "")[:50],
-            len(extracted),
-        )
-
-        # Dedup against existing samples
-        if prohibited:
-            before = len(extracted)
-            extracted = [s for s in extracted if s not in prohibited]
-            removed = before - len(extracted)
-            if removed > 0:
-                logger.info("Removed %d duplicates", removed)
-
-        if not extracted:
-            return []
-
-        # Quality check via InputPipeline (optional)
-        if build_check_messages is not None:
-            return self.input_pipeline.check_samples(
-                extracted, build_check_messages, turn_index=0
-            )
-
-        # Accept all without checking
-        return [
-            SampleResult(text=s, accepted=True, reasoning="", turn=0)
-            for s in extracted
-        ]
-
-    # -----------------------------------------------------------------
-    # Saving
-    # -----------------------------------------------------------------
-
-    def _save_results(
-        self,
-        entry: pd.Series,
-        results: list[SampleResult],
-        style: str,
-    ) -> None:
-        """Save generated prompts in standard content moderation format.
-
-        # CONSTITUTION-TO-INPUT: Saves with constitution metadata as extra columns.
-        # Output is compatible with generate_outputs() and generate_jailbreaks().
-
-        Args:
-            entry: Constitution entry that seeded the generation.
-            results: List of SampleResult objects to save.
-            style: Template style used (e.g. "long", "short").
-        """
-        if not results:
-            return
-
-        category = str(entry.get("source_category", "unknown"))
-        texts = [r.text for r in results]
-        accepted = [r.accepted for r in results]
-
-        # Constitution metadata saved as extra columns for traceability
-        extra = [
-            {
-                "constitution_category": str(entry.get("constitution_category", "")),
-                "constitution_subcategory": str(entry.get("constitution_subcategory", "")),
-                "sample_description": str(entry.get("sample_description", "")),
-                "entry_type": str(entry.get("entry_type", "")),
-                "source_group_tag": str(entry.get("source_group_tag", "")),
-                "template_style": style,
-                "reasoning": r.reasoning,
-            }
-            for r in results
-        ]
-
-        append_samples(
-            texts,
-            category=category,
-            turn=0,
-            accepted=accepted,
-            source="constitution_to_input",
-            extra_columns=extra,
-            dataset_dir=self.output_dir,
-        )
-
-    # -----------------------------------------------------------------
     # Main run
     # -----------------------------------------------------------------
 
@@ -433,22 +303,20 @@ class ConstitutionInputPipeline:
         constitution_df = self._load_constitution(entry_types, source_categories)
         if constitution_df.empty:
             if verbose:
-                print("\n  No constitution entries match filters; nothing to do.")
+                logger.info("No constitution entries match filters; nothing to do.")
             return ConstitutionInputResult()
 
         # (Saving already routes to self.output_dir — the inner InputPipeline was
         # constructed with dataset_dir=self.output_dir in __init__.)
 
         if verbose:
-            print(f"\n{'='*60}")
-            print(f"Constitution-to-Input Generation")
-            print(f"{'='*60}")
-            print(f"Style: {style} | Entries: {len(constitution_df)} | "
-                  f"Samples/entry: {samples_per_entry} | Batch: {batch_size}")
+            logger.info("Constitution-to-Input Generation")
+            logger.info("Style: %s | Entries: %d | Samples/entry: %d | Batch: %d",
+                        style, len(constitution_df), samples_per_entry, batch_size)
             if entry_types:
-                print(f"Entry types: {entry_types}")
+                logger.info("Entry types: %s", entry_types)
             if source_categories:
-                print(f"Source categories: {source_categories}")
+                logger.info("Source categories: %s", source_categories)
 
         return self.input_pipeline.run_from_constitution(
             constitution_df=constitution_df,

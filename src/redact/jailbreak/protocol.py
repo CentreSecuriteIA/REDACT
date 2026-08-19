@@ -27,13 +27,12 @@ when run one sample at a time.
 
 from __future__ import annotations
 
-from typing import Callable, Generator
+from collections.abc import Callable, Generator
 
 # LLMRequest is a model-layer type — defined in redact.llms.conversation and
 # re-exported here so existing jailbreak imports (`from .protocol import LLMRequest`)
 # keep working while `llms/` and `multi_turn/` share the same class.
 from redact.llms.conversation import LLMRequest  # noqa: F401
-
 
 # A technique generator yields LLMRequests, is resumed with the response
 # string, and returns the (text, info) result. info is "" on success or

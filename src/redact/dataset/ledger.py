@@ -26,8 +26,9 @@ DataFrame or a Python range. Malformed lines are skipped, never fatal.
 
 from __future__ import annotations
 
+from collections.abc import Callable, Iterable, Mapping
 from pathlib import Path
-from typing import Any, Callable, Iterable, Mapping
+from typing import Any
 
 from .sidecar import JsonlSidecar
 
@@ -57,7 +58,7 @@ class Ledger(JsonlSidecar):
         casters: Mapping[str, Callable[[Any], Any]] | None = None,
         *,
         name: str | None = None,
-    ) -> "Ledger":
+    ) -> Ledger:
         """Build a ledger sitting beside ``artifact_path``.
 
         By default the ledger is ``<artifact-stem>.state.jsonl`` next to the
