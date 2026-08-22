@@ -112,6 +112,50 @@ MODEL_REGISTRY: dict[str, ModelConfig] = {
         recommended_max_workers=1,
         role="uncensored_local",
     ),
+    # Small local debug model — fast-loading (3B) for iterating on pipeline
+    # mechanics (batching, prompt formatting, manifest/ledger, resume) without
+    # API cost or a multi-minute model load. Abliterated rather than the plain
+    # aligned Instruct model so refusals don't block exercising the "accepted"
+    # code path (CSV writes, sample_id hashing on real content, downstream
+    # stages). Not a substitute for judging generation quality — validate
+    # that against the real generation models (venice-uncensored etc.).
+    # Real-hardware-verified settings (RTX 2080 Super, 8GB, via WSL2) — three
+    # issues found by actually loading this, not guessed:
+    # 1. gpu_memory_utilization: vLLM's 0.9 default (7.2GB) exceeds what's
+    #    actually free once the Windows desktop session's ~1-1.5GB VRAM use is
+    #    accounted for. 0.86 fits, but only just, and fluctuates with what
+    #    else is using the GPU at the moment — see #3.
+    # 2. enforce_eager=True: without it, CUDA graph capture/profiling ate the
+    #    last ~0.4GB of headroom, leaving *negative* room for the KV cache
+    #    ("Available KV cache memory: -0.93 GiB"). Also a genuine win for the
+    #    fast-debug-loop goal — skips a slow compile step on every load.
+    # 3. max_model_len=384: this checkpoint's native 131072 context inflates
+    #    fixed per-sequence buffer overhead for no reason on debug-sized
+    #    prompts; capping it frees more of the budget for actual KV cache.
+    #    Even after capping this and #1/#2, headroom was thin enough that one
+    #    retry failed when desktop VRAM usage spiked, then succeeded once it
+    #    dropped back — see cleanup.md item 33 for the full story.
+    # If gpu_memory_utilization=0.86 is still too tight for real batches after
+    # this, the correct next fix is an int8/int4-quantized checkpoint, not a
+    # further-raised fraction (weights alone are ~6.4GB in fp16 already).
+    "llama-3.2-3b-debug": ModelConfig(
+        name="llama-3.2-3b-debug",
+        rpm=999,
+        default_max_tokens=2000,
+        default_temperature=0.7,
+        backend_type="vllm",
+        hf_model_id="huihui-ai/Llama-3.2-3B-Instruct-abliterated",
+        vllm_kwargs={
+            "gpu_memory_utilization": 0.86,
+            "enforce_eager": True,
+            "max_model_len": 384,
+        },
+        is_uncensored=True,
+        supports_parallel_calls=False,   # thread-level parallel => GPU contention
+        supports_native_batching=True,    # use backend.batch_generate() instead
+        recommended_max_workers=1,
+        role="debug_local",
+    ),
     # Anthropic Claude — strict rate limits (typically 5 RPM on free tier).
     # Series-only enforced by the router; BatchCaller raises ValueError if a
     # caller tries to use max_workers>1.

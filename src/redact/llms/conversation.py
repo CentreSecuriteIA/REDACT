@@ -122,7 +122,7 @@ def drive_generators(
     router,
     finalize: Callable[[Hashable, object], object],
     on_error: Callable[[Hashable, Exception], object] | None = None,
-    verbose: bool = False,
+    verbose: bool = True,
     progress: str | None = None,
 ) -> dict[Hashable, object]:
     """Advance many generators **round-by-round, batching LLM calls by model**.

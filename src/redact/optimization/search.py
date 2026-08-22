@@ -70,6 +70,7 @@ def optimize(
     beam: int = 2,
     depth: int = 3,
     stop_on_success: bool = True,
+    verbose: bool = True,
     router=None,
 ) -> tuple[Node, list[Node]]:
     """Beam/tree search for the highest-scoring conversation continuation.
@@ -83,6 +84,7 @@ def optimize(
         beam: nodes kept per depth. ``1`` = linear refine; ``>1`` = tree/beam.
         depth: max search depth (turns of optimization).
         stop_on_success: stop as soon as any candidate succeeds.
+        verbose: log per-round progress via ``drive_generators``.
 
     Returns:
         ``(best_node, tree)`` where ``tree`` is every node explored (the full trajectory).
@@ -114,6 +116,8 @@ def optimize(
         expanded = drive_generators(
             gens, router=router,
             finalize=lambda k, t: t, on_error=lambda k, exc: None,
+            verbose=verbose,
+            progress=f"optimize depth {d}/{depth}" if verbose else None,
         )
         keys = [k for k in gens if expanded.get(k) is not None]
         if not keys:

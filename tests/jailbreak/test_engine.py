@@ -171,7 +171,7 @@ class TestBatchApplyCombinations:
 
         quiet_router = FakeRouter()
         quiet = batch_apply_combinations(
-            make(), gen_model=GEN_MODEL, router=quiet_router
+            make(), gen_model=GEN_MODEL, router=quiet_router, verbose=False
         )
         verbose_router = FakeRouter()
         verbose = batch_apply_combinations(

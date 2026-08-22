@@ -92,7 +92,7 @@ def batch_apply_combinations(
     translate_model: str | None = None,
     benign_data: dict | None = None,
     router=None,
-    verbose: bool = False,
+    verbose: bool = True,
     capture_internals: bool = False,
 ) -> list[dict]:
     """Apply each sample's technique combination, batching LLM calls per round.

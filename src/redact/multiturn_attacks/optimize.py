@@ -44,6 +44,7 @@ def optimize_attack(
     beam: int = 2,
     depth: int = 3,
     followups: list[str] | None = None,
+    verbose: bool = True,
     router=None,
 ):
     """Search jailbreak technique-combinations against ``target_model`` toward success.
@@ -53,5 +54,6 @@ def optimize_attack(
     """
     return optimize(
         seed, target_model, jailbreak_candidates(techniques, followups),
-        judge_model, SUCCESS_JUDGE_SYSTEM, beam=beam, depth=depth, router=router,
+        judge_model, SUCCESS_JUDGE_SYSTEM, beam=beam, depth=depth,
+        verbose=verbose, router=router,
     )

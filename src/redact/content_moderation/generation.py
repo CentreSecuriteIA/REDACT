@@ -18,26 +18,31 @@ dataclasses (``SampleResult``, ``TurnResult``, ``CategoryResult``,
 ``ConstitutionInputResult``) live in ``results.py`` so neither this module
 nor ``standalone_generation.py`` has to import the other.
 
-Usage:
+Usage (the active constitution-seeded path — prefer this over
+``run_category``/``run_standalone`` in ``standalone_generation.py``, which
+are deprecated):
     from redact.llms import get_backend, RateLimiter, load_prompt
     from redact.content_moderation import InputPipeline
-    from redact.content_moderation.checker import build_quality_checker
 
     backend = get_backend("venice-uncensored")
     limiter = RateLimiter()
-    prompt_config = load_prompt("content_moderation_input", "violence")
+    prompt_config = load_prompt("input", "generation/from_constitution/long")
 
     pipeline = InputPipeline(
         gen_backend=backend, gen_model="venice-uncensored",
         check_backend=backend, check_model="venice-uncensored",
-        rate_limiter=limiter,
+        rate_limiter=limiter, dataset_dir="./Datasets/constitution_inputs",
     )
-    result = pipeline.run_category(
-        category="violence",
+    result = pipeline.run_from_constitution(
+        constitution_df=constitution_df,  # from ConstitutionPipeline
         prompt_config=prompt_config,
-        build_check_messages=build_quality_checker("violence"),
-        num_turns=10, samples_per_request=5,
+        samples_per_entry=3, style="long",
     )
+
+Most callers should use the higher-level ``redact.generate_inputs(data_dir=...,
+constitution_df=...)`` wrapper in ``pipelines.py`` instead of constructing
+``InputPipeline`` directly — it resolves the backend/model from the registry
+role and the dataset path from ``data_dir`` for you.
 """
 
 import logging
@@ -267,8 +272,14 @@ class InputPipeline(_StandaloneGenerationMixin):
             samples_per_entry: Prompts to generate per constitution entry.
             use_checker: Whether to run the entry-type-aware quality checker.
             save: Whether to append rows to CSV per batch.
-            verbose: Print per-entry progress.
+            verbose: Log per-entry progress (INFO for stage milestones, DEBUG
+                for per-entry detail).
             batch_size: Entries per LLM engine pass.
+            fresh: When True, clears this style's rows from the per-category
+                CSVs and the ledger before generating (style-aware — other
+                styles' saved rows/ledger entries are left alone).
+            style: Template style under ``from_constitution/{style}`` — also
+                used as part of the ledger key and saved as a CSV column.
 
         Returns:
             ConstitutionInputResult with generation statistics.

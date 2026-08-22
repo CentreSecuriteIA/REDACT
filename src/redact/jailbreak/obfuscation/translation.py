@@ -22,7 +22,7 @@ Languages are grouped by resource level (safety training coverage):
 
 from redact.jailbreak.protocol import LLMRequest, TechniqueGen
 from redact.llms.translator import (
-    DEFAULT_TRANSLATE_MODEL,
+    _resolve_translate_model,
     build_check_messages,
     build_translate_messages,
     is_faithful_response,
@@ -57,8 +57,11 @@ def _translate_gen(
     ``**kwargs`` swallows engine-supplied keys (``gen_model``, ``benign_data``)
     that translation does not use — it always uses the translation-role model.
     """
-    gen_model = translate_model or DEFAULT_TRANSLATE_MODEL
-    chk_model = check_model or DEFAULT_TRANSLATE_MODEL
+    # Resolved fresh per call (not a frozen import-time constant) so a
+    # runtime register_model(..., role="translation") takes effect
+    # immediately, same as every other role default in the library.
+    gen_model = translate_model or _resolve_translate_model()
+    chk_model = check_model or _resolve_translate_model()
     feedback = ""
     last = prompt
     for _ in range(num_retries):

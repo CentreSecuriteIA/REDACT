@@ -4,13 +4,21 @@ Thin wrappers over the existing building blocks (LLMs, content_moderation,
 jailbreak, dataset). Each function saves intermediate results to
 Datasets/ and returns a merged DataFrame.
 
-Usage::
+Usage — constitution-seeded (recommended; see ``generate_constitution``)::
 
-    from redact import generate_inputs, generate_jailbreaks, build_dataset
+    from redact import (
+        generate_constitution, generate_inputs, generate_jailbreaks, build_dataset,
+    )
 
-    inputs = generate_inputs(samples_per_category=15, num_categories=3)
+    constitution = generate_constitution(num_taxonomy_categories=3)
+    inputs = generate_inputs(constitution_df=constitution, samples_per_entry=3)
     jailbreaks = generate_jailbreaks(inputs=inputs)
     dataset = build_dataset()
+
+Usage — standalone meta-prompt inputs (DEPRECATED path, still functional;
+skips constitution generation, so it's the cheaper "quick eval" option)::
+
+    inputs = generate_inputs(samples_per_category=15, num_categories=3)
 """
 
 import json
@@ -416,6 +424,18 @@ def generate_inputs(
         )
 
         result = merge_all(ds_dir, accepted_only=True)
+        # Write the root-level handoff CSV build_dataset() actually looks for
+        # (paths.datasets(data_dir) / "constitution_inputs_merged.csv") —
+        # without this, build_dataset() silently drops every constitution-
+        # seeded input row, since its own category-folder discovery scans
+        # Datasets/ directly and never finds the one-level-deeper
+        # Datasets/constitution_inputs/{category}/samples.csv layout.
+        # Unfiltered by style so build_dataset() sees every style generated
+        # under this data_dir, not just whichever style this call used.
+        if not result.empty:
+            root_dir = paths.datasets(data_dir)
+            root_dir.mkdir(parents=True, exist_ok=True)
+            result.to_csv(root_dir / "constitution_inputs_merged.csv", index=False)
         if style and not result.empty and "template_style" in result.columns:
             result = result[result["template_style"] == style].reset_index(drop=True)
         return result

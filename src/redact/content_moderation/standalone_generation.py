@@ -405,12 +405,24 @@ class _StandaloneGenerationMixin:
             use_metaprompt: LLM-generate descriptions+seeds vs. hand-written.
             num_seeds: Number of seed prompts to generate (``use_metaprompt=True``).
             seeds_db: Hand-written seeds DB (required when ``use_metaprompt=False``).
-            verbose: Print progress.
+            verbose: Log progress.
 
         Returns:
             One :class:`CategoryResult` per category (categories with no
             available seeds are skipped and omitted).
+
+        Raises:
+            ValueError: If ``use_metaprompt=False`` and ``seeds_db`` is not
+                provided — without this check the failure surfaces several
+                calls later as an opaque ``AttributeError`` inside
+                ``get_seed_prompts()``.
         """
+        if not use_metaprompt and seeds_db is None:
+            raise ValueError(
+                "run_standalone(use_metaprompt=False) requires seeds_db "
+                "(hand-written seed prompts) — there's no LLM call to "
+                "generate them from in this mode."
+            )
         max_turns = ceil(samples_per_category / samples_per_request) * 3
 
         all_results: list[CategoryResult] = []

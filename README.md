@@ -115,7 +115,8 @@ from redact.llms import get_backend, RateLimiter, load_prompt
 backend = get_backend("venice-uncensored")  # -> VeniceBackend (via VENICE_API_KEY env var)
 rate_limiter = RateLimiter()
 
-# 2. Generate content moderation samples
+# 2. Generate content moderation samples (via the deprecated standalone path —
+#    see the note above; run_from_constitution() is the recommended equivalent)
 from redact.content_moderation import InputPipeline
 from redact.content_moderation.checker import build_quality_checker
 
@@ -309,7 +310,7 @@ generate_inputs(constitution_df=constitution, model="venice-uncensored-vllm")
 
 When `venice-uncensored-vllm` is requested, `get_backend()` automatically creates a `VLLMBackend` for `dphn/Dolphin-Mistral-24B-Venice-Edition`. On first use vLLM downloads the model weights from HuggingFace and caches them at the path set by `HF_HOME` in your `.env`. Subsequent runs load directly from cache — no re-download.
 
-This model uses Mistral `[INST]/[SYSTEM_PROMPT]` prompt format (not ChatML). The registry entry sets `vllm_kwargs={"use_mistral_format": True}` so `VLLMBackend` formats prompts correctly. If you register a different Mistral-3.x model, set the same flag; ChatML models (Dolphin, Hermes) use the default and need no flag.
+This model (a Dolphin fine-tune) uses the default ChatML prompt format via `VLLMBackend`'s `.chat()` path — no extra flag needed. If you register a genuine Mistral-3.x model instead, set `vllm_kwargs={"use_mistral_format": True}` so prompts are built as raw `[INST]/[SYSTEM_PROMPT]` text instead of ChatML; ChatML models (Dolphin, Hermes) use the default and need no flag.
 
 Both generation and checker paths dispatch through a `BatchCaller` (never the raw backend), so every batch is rate-limited and uses the right execution mode for its backend: one vLLM engine pass for native backends, a thread pool sized by the registry's `recommended_max_workers` for parallel-safe APIs, or sequential for series-only backends (Anthropic). The `batch_size` parameter (default 32) controls how many entries are grouped per pass.
 
@@ -337,6 +338,8 @@ register_model("my-model", rpm=50, default_max_tokens=4000, backend_type="venice
 |---|---|---|---|
 | `venice-uncensored` | 75 | venice | Venice AI API |
 | `venice-uncensored-vllm` | 999 | vllm | Local self-hosted version of `venice-uncensored` (`dphn/Dolphin-Mistral-24B-Venice-Edition`) |
+| `venice-paraphraser` | 999 | vllm | Paraphraser-role placeholder — loads the same weights as `venice-uncensored-vllm`, its own registry identity (see the paraphrase section's disclaimer) |
+| `llama-3.2-3b-debug` | 999 | vllm | Small (3B), fast-loading local debug model (`huihui-ai/Llama-3.2-3B-Instruct-abliterated`) for iterating on pipeline mechanics against a real vLLM engine, not for judging generation quality |
 | `deepseek-v3.2` | 20 | venice | Stronger multilingual (used for translation) |
 | `claude-opus-4-6` | 5 | anthropic | Set `max_workers=1` to avoid TPM limits |
 
@@ -425,6 +428,14 @@ Both `generate_constitution()` and `generate_inputs(constitution_df=...)` are **
 
 ### Content Moderation — Input/Output Generation
 
+> **Note:** the two input-generation modes below (automated/simple) are the
+> **deprecated** standalone meta-prompt path (`DeprecationWarning`, still
+> fully functional) — see the note earlier in this README. Prefer
+> constitution-seeded generation (previous section,
+> `generate_inputs(constitution_df=...)`) for new work; this section covers
+> the cheaper Opus-free "quick eval" alternative and the output-generation
+> step, which both modes share.
+
 The pipeline operates in two modes:
 
 **Automated mode (`USE_METAPROMPT=True`)** — three LLM steps per category:
@@ -461,7 +472,7 @@ For each turn:
   7. Collect rejection feedback for next turn
 ```
 
-**Key classes:** `InputPipeline`, `SampleResult`, `TurnResult`, `CategoryResult`
+**Key classes:** `InputPipeline`, `SampleResult`, `TurnResult`, `CategoryResult` (plus `ConstitutionInputResult` for the constitution-seeded path above)
 
 **Feedback loop** — rejection reasoning from turn N is injected into turn N+1's prompt.
 

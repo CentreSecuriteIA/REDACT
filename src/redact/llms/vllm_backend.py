@@ -78,6 +78,20 @@ class VLLMBackend(LLMBackend):
         with contextlib.suppress(RuntimeError):
             multiprocessing.set_start_method("spawn", force=True)
 
+        # WSL2-specific workaround, verified by actually hitting this on a
+        # real WSL2 + RTX 2080 Super setup: vLLM's V2 GPU model runner
+        # unconditionally allocates a UVA (Unified Virtual Addressing)
+        # buffer, but is_pin_memory_available() defaults to False on WSL2,
+        # so UVA allocation raises `RuntimeError: UVA is not available` on
+        # every load. This is an open, unmerged upstream bug as of vLLM
+        # 0.27.1 (vllm-project/vllm#47387, fix proposed in #47579) — forcing
+        # the older V1 runner sidesteps it entirely (no UVA dependency).
+        # setdefault so an explicit VLLM_USE_V2_MODEL_RUNNER from the caller
+        # still wins; remove this block once the upstream fix ships.
+        with contextlib.suppress(OSError), open("/proc/version") as f:
+            if "microsoft" in f.read().lower():
+                os.environ.setdefault("VLLM_USE_V2_MODEL_RUNNER", "0")
+
         from vllm import LLM  # Lazy import — vllm is heavy and optional
 
         self._model_name = model

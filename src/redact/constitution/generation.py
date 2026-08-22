@@ -339,6 +339,10 @@ class ConstitutionPipeline:
                         e,
                     )
                     return [], ""
+        return [], ""  # unreachable with the hardcoded max_attempts=3 above,
+        # but the loop falls off the end (returning None) if that's ever
+        # parameterized down to 0 — this keeps the documented ([], "")
+        # contract instead of a silent TypeError three layers up on unpack.
 
     def generate_for_category(
         self,
@@ -447,6 +451,9 @@ class ConstitutionPipeline:
                         e,
                     )
                     return [], ""
+        return [], ""  # unreachable with the hardcoded max_attempts=3 above,
+        # but the loop falls off the end (returning None) if that's ever
+        # parameterized down to 0 — see the matching note in generate_for_type.
 
     def _save_category_entries(
         self,
