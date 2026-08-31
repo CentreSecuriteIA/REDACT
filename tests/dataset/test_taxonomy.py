@@ -1,18 +1,18 @@
 """Tests for taxonomy loading and application."""
 
-import pytest
 import pandas as pd
+import pytest
 
 from redact.dataset.taxonomy import (
-    load_taxonomy,
+    filter_by_group,
     get_categories,
     get_category_descriptions,
-    get_subcategories,
-    normalize_categories,
-    filter_by_group,
     get_group_categories,
-    iter_categories,
     get_seed_prompts,
+    get_subcategories,
+    iter_categories,
+    load_taxonomy,
+    normalize_categories,
 )
 
 

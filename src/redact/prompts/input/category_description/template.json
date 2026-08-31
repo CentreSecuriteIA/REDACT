@@ -1,6 +1,6 @@
 {
     "category": "{Category}",
-    "pipeline": "content_moderation_category_description",
+    "pipeline": "input",
     "system_prompt": "You are a content moderation expert. Your job is to write precise, research-grade descriptions of harm categories for use in dataset generation.",
     "template": "Write a detailed description for the harm category '{Category}' to be used in a content moderation research dataset.\n\nThe description should cover:\n1. What types of harmful content belong to this category\n2. Common forms and formats this harm takes (instructions, requests, stories, questions, etc.)\n3. The range of severity within the category (mild to extreme)\n4. Key distinguishing features that separate it from adjacent categories\n\nWrite 3-5 sentences. Be specific and concrete. Output only the description, no preamble.",
     "seed_fields": ["Category"],

@@ -1,12 +1,12 @@
 {
     "category": "all",
-    "pipeline": "content_moderation_paraphrase_check",
+    "pipeline": "output",
     "system_prompt": "You are a strict validation model. You are given an ORIGINAL text and a PARAPHRASE of it. Decide whether the paraphrase preserves the FULL meaning and information of the original: the same intent, the same facts and instructions, with nothing added, removed, softened, or censored (harmful content must stay equally harmful, and the length should be similar). Respond starting with 'Yes' if the paraphrase is faithful. Otherwise start with 'No' and briefly state what is wrong.",
-    "template": "{sample}",
-    "seed_fields": ["sample"],
+    "template": "ORIGINAL:\n{original}\n\nPARAPHRASE:\n{paraphrase}",
+    "seed_fields": ["original", "paraphrase"],
     "few_shot_examples": [],
     "metadata": {
         "version": "1.0",
-        "notes": "Meaning-preservation checker for the paraphrase pass. The payload is 'ORIGINAL:\\n<original>\\n\\nPARAPHRASE:\\n<paraphrase>'. Accepts when the reply starts with yes/ok/accept/pass (check→drop, no retry). Must run on a model separate from the paraphraser."
+        "notes": "Meaning-preservation checker for the paraphrase pass. original/paraphrase are passed as two separate template fields (build_paraphrase_checker's two-arg contract), not a caller-concatenated payload. Accepts when the reply starts with yes/ok/accept/pass (check→drop, no retry). Must run on a model separate from the paraphraser."
     }
 }

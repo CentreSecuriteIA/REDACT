@@ -27,8 +27,8 @@ import pandas as pd
 
 from redact import paths
 from redact.dataset.ledger import Ledger
-from redact.llms import get_router
-from redact.llms.calls import batch_check_samples
+from redact.llms import ModelClient
+from redact.llms.router import batch_check_samples
 
 logger = logging.getLogger(__name__)
 
@@ -80,7 +80,7 @@ def evaluate_conversations(
     batch_size: int = 32,
     conversations_path: str | Path | None = None,
     verbose: bool = True,
-    router=None,
+    resolve=None,
 ) -> pd.DataFrame:
     """Score conversation trajectories with a judge model (optional, separable).
 
@@ -97,8 +97,6 @@ def evaluate_conversations(
         conversations_path: override for the input CSV path (defaults to
             ``paths.conversations_csv(data_dir)``).
         verbose: log progress per batch.
-        router: router override (defaults to the process-wide one) — supplies
-            the judge backend and rate limiter.
 
     Returns:
         DataFrame of ``conversations_scored.csv``: ``sample_id, success,
@@ -108,7 +106,6 @@ def evaluate_conversations(
         raise ValueError("evaluate_conversations requires a judge_model.")
     if scope not in ("last_reply", "transcript"):
         raise ValueError("scope must be 'last_reply' or 'transcript'.")
-    router = router or get_router()
     judge_system = judge_system or _DEFAULT_JUDGE_SYSTEM
 
     conv_path = Path(conversations_path) if conversations_path else paths.conversations_csv(data_dir)
@@ -135,27 +132,30 @@ def evaluate_conversations(
     if pending.empty:
         return pd.read_csv(scored_path) if scored_path.exists() else pd.DataFrame()
 
-    def _build_check(sample: str) -> list[dict]:
+    def _build_check(goal: str, sample: str) -> list[dict]:
+        label = "RESPONSE" if scope == "last_reply" else "CONVERSATION"
         return [{"role": "system", "content": judge_system},
-                {"role": "user", "content": sample}]
+                {"role": "user", "content": f"GOAL:\n{goal}\n\n{label}:\n{sample}"}]
 
-    backend = router.get_backend(judge_model)
-    rate_limiter = router.rate_limiter
+    resolve = resolve or ModelClient.create
+    judge = resolve(judge_model)
     n = len(pending)
     n_chunks = ceil(n / batch_size) if batch_size else 1
 
     for start in range(0, n, batch_size):
         chunk = pending.iloc[start : start + batch_size]
-        payloads = []
+        goals, samples = [], []
         for _, row in chunk.iterrows():
             seed, final = _seed_and_final(str(row.get("transcript", "")))
+            goals.append(seed)
             if scope == "last_reply":
-                payloads.append(f"GOAL:\n{seed}\n\nRESPONSE:\n{final}")
+                samples.append(final)
             else:
-                payloads.append(f"GOAL:\n{seed}\n\nCONVERSATION:\n{_render_transcript(str(row.get('transcript', '')))}")
+                samples.append(_render_transcript(str(row.get("transcript", ""))))
         checks = batch_check_samples(
-            backend, judge_model, payloads, _build_check,
-            batch_size=batch_size, rate_limiter=rate_limiter,
+            judge, samples, _build_check,
+            originals=goals,
+            batch_size=batch_size,
             progress=f"judge {start // batch_size + 1}/{n_chunks}" if verbose else None,
         )
         rows = [

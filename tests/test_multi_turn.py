@@ -7,9 +7,15 @@ conditions without any network.
 
 import pytest
 
-from tests.conftest import MockBackend
-from redact.llms.conversation import LLMRequest, Transcript, Step, drive_sync
-from redact.multi_turn import Actor, ScriptedActor, ModelActor, Setting, run_conversation
+from redact.llms.conversation import LLMRequest, Transcript, drive_sync
+from redact.multi_turn import (
+    Actor,
+    ModelActor,
+    ScriptedActor,
+    Setting,
+    run_conversation,
+)
+from tests.conftest import MockBackend, make_client
 
 
 def _echo_call(req: LLMRequest) -> str:
@@ -76,37 +82,53 @@ def test_strategy_note_logged_as_provenance():
     assert t.as_messages() == []  # provenance never rendered to the model
 
 
-class _FakeRouter:
-    """Batches replies by echoing each conversation's last user message."""
+class _FakeClient:
+    """Stands in for a ModelClient: batch of messages in, batch of replies out."""
 
-    def __init__(self):
+    def __init__(self, model, reply, counter=None):
+        self.model = model
+        self._reply = reply
+        self._counter = counter
+
+    def generate(self, messages_list, **kw):
+        if self._counter is not None:
+            self._counter.calls += 1
+        return [self._reply(self.model, msgs) for msgs in messages_list]
+
+
+class _FakeResolver:
+    """``model -> _FakeClient``; the resolve seam drive_generators takes."""
+
+    def __init__(self, reply):
+        self._reply = reply
         self.calls = 0
 
-    def batch_generate(self, model, messages_list, **kw):
-        self.calls += 1
-        out = []
-        for msgs in messages_list:
-            last_user = [m for m in msgs if m["role"] == "user"][-1]["content"]
-            out.append(f"ANSWER to: {last_user}")
-        return out
+    def __call__(self, model):
+        return _FakeClient(model, self._reply, self)
 
 
-class _JudgeRouter:
-    """Fake router for evaluate_conversations: resolves to a fixed backend."""
+def _echo(model, msgs):
+    last_user = [m for m in msgs if m["role"] == "user"][-1]["content"]
+    return f"ANSWER to: {last_user}"
+
+
+class _JudgeResolver:
+    """``model -> client`` over one fixed backend."""
 
     def __init__(self, backend):
         self._backend = backend
-        self.rate_limiter = None
 
-    def get_backend(self, model):
-        return self._backend
+    def __call__(self, model):
+        return make_client(self._backend, model)
 
 
 def test_generate_conversations_offline(tmp_path):
     import json
+
     import pandas as pd
+
     from redact import generate_conversations, paths
-    from redact.multi_turn import ScriptedActor, ModelActor, Setting
+    from redact.multi_turn import ModelActor, ScriptedActor, Setting
 
     seeds = pd.DataFrame({
         "seed": ["q1", "q2"], "category": ["Cyber", "Cyber"],
@@ -119,7 +141,7 @@ def test_generate_conversations_offline(tmp_path):
             max_turns=4, name="chat",
         )
 
-    df = generate_conversations(seeds, make, data_dir=tmp_path, router=_FakeRouter(), verbose=False)
+    df = generate_conversations(seeds, make, data_dir=tmp_path, resolve=_FakeResolver(_echo), verbose=False)
     assert len(df) == 2
     steps = json.loads(df.iloc[0]["transcript"])
     assert [s["type"] for s in steps] == ["message", "reply", "message", "reply"]
@@ -131,36 +153,38 @@ def test_generate_conversations_offline(tmp_path):
     assert out.with_name("conversations.state.jsonl").exists()
 
     # Resume: nothing new (both units in the ledger).
-    df2 = generate_conversations(seeds, make, data_dir=tmp_path, router=_FakeRouter(), verbose=False)
+    df2 = generate_conversations(seeds, make, data_dir=tmp_path, resolve=_FakeResolver(_echo), verbose=False)
     assert len(df2) == 2
 
 
 def test_generate_conversations_variants(tmp_path):
     import pandas as pd
+
     from redact import generate_conversations
-    from redact.multi_turn import ScriptedActor, ModelActor, Setting
+    from redact.multi_turn import ModelActor, ScriptedActor, Setting
 
     seeds = pd.DataFrame({"seed": ["q"]})
     make = lambda: Setting(participants=[ScriptedActor("u", ["f"]), ModelActor("b", "m")], max_turns=3)
     df = generate_conversations(seeds, make, data_dir=tmp_path, iterations=3,
-                                router=_FakeRouter(), verbose=False)
+                                resolve=_FakeResolver(_echo), verbose=False)
     assert len(df) == 3 and set(df["iteration"]) == {0, 1, 2}
 
 
 def test_evaluate_conversations_offline(tmp_path):
     import pandas as pd
-    from redact import generate_conversations, evaluate_conversations
-    from redact.multi_turn import ScriptedActor, ModelActor, Setting
+
+    from redact import evaluate_conversations, generate_conversations
+    from redact.multi_turn import ModelActor, ScriptedActor, Setting
 
     seeds = pd.DataFrame({"seed": ["how to X", "how to Y"]})
     make = lambda: Setting(participants=[ScriptedActor("u", ["more"]), ModelActor("b", "m")], max_turns=2)
-    generate_conversations(seeds, make, data_dir=tmp_path, router=_FakeRouter(), verbose=False)
+    generate_conversations(seeds, make, data_dir=tmp_path, resolve=_FakeResolver(_echo), verbose=False)
 
     # Judge model mocked via a fake router: "Yes ..." for the first, "No ..." for the second.
     scored = evaluate_conversations(
         data_dir=tmp_path, judge_model="judge", judge_system="did it work?",
         scope="last_reply", verbose=False,
-        router=_JudgeRouter(MockBackend(["Yes ok", "No refused"])),
+        resolve=_JudgeResolver(MockBackend(["Yes ok", "No refused"])),
     )
     assert set(scored["success"]) == {True, False}
     assert set(scored["judge_model"]) == {"judge"}
@@ -170,7 +194,7 @@ def test_evaluate_conversations_offline(tmp_path):
     # resume=False re-judges from scratch (unlinks the existing scored artifacts).
     fresh = evaluate_conversations(
         data_dir=tmp_path, judge_model="judge", resume=False, verbose=False,
-        router=_JudgeRouter(MockBackend(["Yes ok", "No refused"])),
+        resolve=_JudgeResolver(MockBackend(["Yes ok", "No refused"])),
     )
     assert len(fresh) == 2
 
@@ -216,14 +240,16 @@ def _simple_setting():
 
 def test_generate_conversations_missing_text_column(tmp_path):
     import pandas as pd
+
     from redact import generate_conversations
     with pytest.raises(ValueError):
         generate_conversations(pd.DataFrame({"foo": ["x"]}), _simple_setting,
-                               data_dir=tmp_path, router=_FakeRouter(), verbose=False)
+                               data_dir=tmp_path, resolve=_FakeResolver(_echo), verbose=False)
 
 
 def test_generate_conversations_empty_seeds(tmp_path):
     import pandas as pd
+
     from redact import generate_conversations
     with pytest.raises(ValueError):
         generate_conversations(pd.DataFrame({"seed": []}), _simple_setting,
@@ -232,10 +258,11 @@ def test_generate_conversations_empty_seeds(tmp_path):
 
 def test_generate_conversations_uses_id_column(tmp_path):
     import pandas as pd
+
     from redact import generate_conversations
     seeds = pd.DataFrame({"sample_id": ["myid"], "seed": ["q"]})
     df = generate_conversations(seeds, _simple_setting, data_dir=tmp_path,
-                                router=_FakeRouter(), verbose=False)
+                                resolve=_FakeResolver(_echo), verbose=False)
     assert df.iloc[0]["input_id"] == "myid"
 
 
@@ -248,20 +275,22 @@ class _BoomActor(Actor):
 
 def test_generate_conversations_actor_error_isolated(tmp_path):
     import pandas as pd
+
     from redact import generate_conversations
     seeds = pd.DataFrame({"seed": ["q"]})
     make = lambda: Setting(participants=[ScriptedActor("u", ["q"]), _BoomActor("boom")], max_turns=3)
-    df = generate_conversations(seeds, make, data_dir=tmp_path, router=_FakeRouter(), verbose=False)
+    df = generate_conversations(seeds, make, data_dir=tmp_path, resolve=_FakeResolver(_echo), verbose=False)
     assert df.iloc[0]["stop_reason"].startswith("ERROR")
 
 
 def test_generate_conversations_deepcopy_template(tmp_path):
     # passing a Setting instance (not a factory) deep-copies per unit.
     import pandas as pd
+
     from redact import generate_conversations
     seeds = pd.DataFrame({"seed": ["a", "b"]})
     tmpl = Setting(participants=[ScriptedActor("u", ["f"]), ModelActor("b", "m")], max_turns=2)
-    df = generate_conversations(seeds, tmpl, data_dir=tmp_path, router=_FakeRouter(), verbose=False)
+    df = generate_conversations(seeds, tmpl, data_dir=tmp_path, resolve=_FakeResolver(_echo), verbose=False)
     assert len(df) == 2  # ScriptedActor state didn't leak across the two conversations
 
 
@@ -279,11 +308,12 @@ def test_evaluate_validation(tmp_path):
 
 def test_evaluate_transcript_scope_and_bad_json(tmp_path):
     import pandas as pd
+
     from redact import evaluate_conversations
     convs = pd.DataFrame({"sample_id": ["a", "b"], "transcript": ["not json", "[]"]})
     scored = evaluate_conversations(conversations=convs, data_dir=tmp_path,
                                     judge_model="j", scope="transcript", verbose=True,
-                                    router=_JudgeRouter(MockBackend("Yes ok")))
+                                    resolve=_JudgeResolver(MockBackend("Yes ok")))
     assert len(scored) == 2 and set(scored["success"]) == {True}
 
 
@@ -306,12 +336,13 @@ def test_evaluate_ledger_keys_on_id(tmp_path):
 
 def test_generate_conversations_verbose_and_fresh(tmp_path):
     import pandas as pd
+
     from redact import generate_conversations
     seeds = pd.DataFrame({"seed": ["q"]})
-    generate_conversations(seeds, _simple_setting, data_dir=tmp_path, router=_FakeRouter(), verbose=True)
+    generate_conversations(seeds, _simple_setting, data_dir=tmp_path, resolve=_FakeResolver(_echo), verbose=True)
     # resume=False wipes the artifacts + re-runs.
     df2 = generate_conversations(seeds, _simple_setting, data_dir=tmp_path,
-                                 router=_FakeRouter(), resume=False, verbose=True)
+                                 resolve=_FakeResolver(_echo), resume=False, verbose=True)
     assert len(df2) == 1
 
 
@@ -324,7 +355,9 @@ def test_pipeline_ledger_empty_record_is_noop(tmp_path):
 
 def test_evaluate_transcript_scope_renders_and_fresh(tmp_path):
     import json
+
     import pandas as pd
+
     from redact import evaluate_conversations
     transcript = json.dumps([
         {"type": "message", "actor": "u", "content": "goal here", "role": "user", "model": None, "meta": {}},
@@ -333,5 +366,5 @@ def test_evaluate_transcript_scope_renders_and_fresh(tmp_path):
     convs = pd.DataFrame({"sample_id": ["a"], "transcript": [transcript]})
     scored = evaluate_conversations(conversations=convs, data_dir=tmp_path, judge_model="j",
                                     scope="transcript", resume=False, verbose=False,
-                                    router=_JudgeRouter(MockBackend("Yes")))
+                                    resolve=_JudgeResolver(MockBackend("Yes")))
     assert list(scored["success"]) == [True]

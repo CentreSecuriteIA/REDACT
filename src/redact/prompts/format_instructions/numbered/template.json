@@ -1,0 +1,10 @@
+{
+    "category": "numbered",
+    "pipeline": "format_instructions",
+    "instruction": "\n\nOUTPUT FORMAT INSTRUCTIONS:\nGenerate exactly {num_samples} samples.\nFormat your response as a numbered list. Each sample must be on its own line, starting with the number followed by a period and a space.\nExample format:\n1. [first sample]\n2. [second sample]\n...\n{num_samples}. [last sample]\n\nDo NOT include any preamble, explanation, or commentary. Output ONLY the numbered list.",
+    "seed_fields": ["num_samples"],
+    "metadata": {
+        "version": "1.0",
+        "notes": "Appended to a generation prompt's system_prompt (PromptTemplate's format_style=\"numbered\") so its paired extractor (extract_and_clean(style=\"numbered\")) can parse the reply. Not a full chat prompt on its own — a snippet, loaded via load_prompt() for consistency with every other prompt file rather than a hardcoded Python string."
+    }
+}

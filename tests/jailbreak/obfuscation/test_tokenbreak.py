@@ -3,12 +3,12 @@
 import random
 
 from redact.jailbreak.obfuscation.tokenbreak import (
+    get_tokenbreak_functions,
     match_case,
-    tokenbreak_prepend,
-    tokenbreak_split,
     tokenbreak_delimiter,
     tokenbreak_obfuscate_word,
-    get_tokenbreak_functions,
+    tokenbreak_prepend,
+    tokenbreak_split,
 )
 
 

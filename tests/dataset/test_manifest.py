@@ -8,7 +8,7 @@ JsonlSidecar base so Ledger and Manifest agree on file conventions.
 
 import json
 
-from redact.dataset import Manifest, Ledger, JsonlSidecar
+from redact.dataset import JsonlSidecar, Ledger, Manifest
 
 
 def test_write_then_load_roundtrip(tmp_path):

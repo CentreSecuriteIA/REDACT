@@ -6,7 +6,7 @@ Technique modules are organized by attack family:
 - manipulation/ — few-shot hacking (FSH) and attention shifting (DAP)
 - requests/ — request-structure attacks (answer format, continuation, indirect)
 
-All LLM-dependent functions accept (backend, model, rate_limiter) as params.
+All LLM-dependent functions accept (backend, model) as params.
 Pure transforms (encoding, structural, suffixes, ascii_art, requests) need no LLM.
 
 Usage:

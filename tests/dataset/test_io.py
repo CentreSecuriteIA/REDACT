@@ -4,10 +4,10 @@ import pandas as pd
 
 from redact.dataset.io import (
     SAMPLE_COLUMNS,
-    read_category_csv,
-    write_category_csv,
     append_samples,
     get_existing_samples,
+    read_category_csv,
+    write_category_csv,
 )
 
 

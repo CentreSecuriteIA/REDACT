@@ -10,10 +10,9 @@ Usage::
 
     from redact.constitution import ConstitutionPipeline, EntryType
     from redact.constitution import ConstitutionInputPipeline
-    from redact.llms import get_backend, RateLimiter
+    from redact.llms import ModelClient
 
-    backend = get_backend("claude-opus-4-6")
-    pipeline = ConstitutionPipeline(backend, "claude-opus-4-6", RateLimiter())
+    pipeline = ConstitutionPipeline(ModelClient.create("claude-opus-4-6"))
     result = pipeline.run(taxonomy, num_categories=10)
 """
 

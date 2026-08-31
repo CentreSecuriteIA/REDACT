@@ -1,10 +1,10 @@
 """Tests for the custom exception hierarchy."""
 
 from redact.exceptions import (
-    RedactError,
     ConfigError,
-    PromptNotFoundError,
     GenerationError,
+    PromptNotFoundError,
+    RedactError,
 )
 
 

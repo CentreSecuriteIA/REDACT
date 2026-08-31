@@ -3,12 +3,12 @@
 import pandas as pd
 import pytest
 
-from tests.conftest import MockBackend
 from redact.constitution.input_generation import (
-    ConstitutionInputResult,
     ConstitutionInputPipeline,
+    ConstitutionInputResult,
     get_available_styles,
 )
+from tests.conftest import MockBackend, make_client
 
 
 class TestConstitutionInputResult:
@@ -61,7 +61,7 @@ class TestConstitutionInputPipelineLoading:
         ])
         backend = MockBackend()
         pipeline = ConstitutionInputPipeline(
-            gen_backend=backend, gen_model="m",
+            gen=make_client(backend, "m"),
             constitution_dir=const_dir,
             output_dir=tmp_path / "output",
         )
@@ -81,7 +81,7 @@ class TestConstitutionInputPipelineLoading:
         ])
         backend = MockBackend()
         pipeline = ConstitutionInputPipeline(
-            gen_backend=backend, gen_model="m",
+            gen=make_client(backend, "m"),
             constitution_dir=const_dir,
             output_dir=tmp_path / "output",
         )
@@ -96,7 +96,7 @@ class TestConstitutionInputPipelineLoading:
     def test_load_constitution_missing_raises(self, tmp_path):
         backend = MockBackend()
         pipeline = ConstitutionInputPipeline(
-            gen_backend=backend, gen_model="m",
+            gen=make_client(backend, "m"),
             constitution_dir=tmp_path / "empty",
             output_dir=tmp_path / "output",
         )

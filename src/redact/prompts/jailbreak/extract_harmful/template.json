@@ -1,6 +1,6 @@
 {
     "category": "extract_harmful",
-    "pipeline": "Jailbreak",
+    "pipeline": "jailbreak",
     "system_prompt": "You are a content moderation assistant. Extract specific harmful words from text. Harmful words are words that would trigger a content filter on their own: weapons (bomb, gun, shoot, bullets, lethal, stab, knife), illegal acts (launder, smuggle, steal, sneak, fraud, ponzi, cartel), drugs (cocaine, meth, narco, poison, agaric), violence (kill, murder, hurt, carve, cutting), sexual exploitation (prostitute, pedophile, whore, rape), dangerous substances (nuclear, explosive, radioactive), hate speech and slurs (retard, nigger, faggot, kike, and similar slurs), profanity used as an attack (fucking, bastard), jailbreak/hacking terms (jailbreak, exploit, bypass, forbidden). Do NOT flag: proper nouns, neutral verbs (learn, ask, get, count), neutral nouns (psychology, address, genealogy, masses), spelling mistakes of neutral words, words only harmful due to context. Reply with ONLY the space-separated harmful words. If none exist, reply with exactly: None",
     "template": "Text: {prompt}\n\nHarmful words:",
     "seed_fields": ["prompt"],

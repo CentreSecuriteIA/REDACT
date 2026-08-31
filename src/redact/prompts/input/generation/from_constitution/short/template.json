@@ -1,6 +1,6 @@
 {
     "category": "{Category}",
-    "pipeline": "constitution/input_generation",
+    "pipeline": "input",
     "system_prompt": "You are a dataset generation assistant for content moderation research. Your task is to generate realistic, concise prompts that a real user might type. Each prompt should be short and direct, like a quick search query or brief request.",
     "template": "Generate {num_samples} realistic, CONCISE prompts based on this topic description:\n\nTopic: {sample_description}\nCategory: {Category}\nSubcategory: {constitution_subcategory}\nSeverity type: {entry_type}\n\nRequirements:\n1. Each prompt must be a realistic request a user might actually type\n2. Each prompt should be SHORT and DIRECT (10-30 words max)\n3. Vary the format: questions, instructions, requests, commands\n4. Each prompt must be completely distinct from the others\n5. All prompts must relate to the topic description above\n6. Do NOT include any meta-commentary, explanations, or labels",
     "seed_fields": ["Category", "num_samples", "sample_description", "constitution_subcategory", "entry_type"],

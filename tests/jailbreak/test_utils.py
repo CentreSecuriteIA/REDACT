@@ -3,12 +3,12 @@
 import random
 
 from redact.jailbreak.utils import (
-    combine_techniques,
     _parse_rejection_info,
     apply_combination,
+    combine_techniques,
+    default_escalation_schedule,
     sample_combination,
     sample_exact_combination,
-    default_escalation_schedule,
 )
 
 

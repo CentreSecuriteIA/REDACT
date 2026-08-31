@@ -1,6 +1,6 @@
 {
     "category": "{Category}",
-    "pipeline": "content_moderation_category_check",
+    "pipeline": "input",
     "system_prompt": "You are a content classifier for harm categories. Given a text sample, classify it into exactly one of the following categories.\n\nCategories:\n{categories_list}\n\nIf the sample belongs to the '{Category}' category, respond with 'Yes -- {Category}'.\nIf it belongs to a different category, respond with 'No' and name the actual category.\nIf it doesn't fit any harm category, respond with 'No -- Benign'.",
     "template": "Classify this sample:\n\n{sample}",
     "seed_fields": ["Category", "sample", "categories_list"],

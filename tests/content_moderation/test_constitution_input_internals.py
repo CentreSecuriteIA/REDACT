@@ -11,11 +11,11 @@ sample's own content-hash (its eventual sample_id) for the checker.
 
 import pytest
 
-from tests.conftest import MockBackend
+import tests.content_moderation.test_constitution_input_ledger as ledger_mod
 from redact.content_moderation.generation import InputPipeline
 from redact.dataset.io import _hash_text
-
-import tests.content_moderation.test_constitution_input_ledger as ledger_mod
+from redact.llms.backends import ComputeConfig
+from tests.conftest import MockBackend, make_client
 
 _PROMPT = ledger_mod._PROMPT
 _const_df = ledger_mod._const_df
@@ -23,16 +23,14 @@ _const_df = ledger_mod._const_df
 
 class _InternalsBackend(MockBackend):
     @property
-    def supports_internals(self) -> bool:
-        return True
+    def compute_config(self) -> ComputeConfig:
+        return ComputeConfig(supports_internals=True)
 
 
 def _pipeline(tmp_path, gen_backend=None, check_backend=None):
     return InputPipeline(
-        gen_backend=gen_backend or MockBackend("1. alpha sample"),
-        gen_model="m",
-        check_backend=check_backend or MockBackend("Yes"),
-        check_model="m",
+        gen=make_client(gen_backend or MockBackend("1. alpha sample"), "m"),
+        check=make_client(check_backend or MockBackend("Yes"), "m"),
         dataset_dir=tmp_path,
     )
 
@@ -40,8 +38,8 @@ def _pipeline(tmp_path, gen_backend=None, check_backend=None):
 def test_no_internals_kwarg_for_default_backends(tmp_path):
     pipe = _pipeline(tmp_path)
     pipe.run_from_constitution(_const_df(), _PROMPT, samples_per_entry=2, verbose=False)
-    assert all("internals_id" not in c for c in pipe.gen_backend.calls)
-    assert all("internals_id" not in c for c in pipe.check_backend.calls)
+    assert all("internals_id" not in c for c in pipe.gen.backend.calls)
+    assert all("internals_id" not in c for c in pipe.check.backend.calls)
 
 
 def test_gen_raises_when_samples_per_entry_multi(tmp_path):

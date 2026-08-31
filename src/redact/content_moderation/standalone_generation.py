@@ -23,8 +23,8 @@ from math import ceil
 
 from ..dataset.io import append_samples, get_existing_samples
 from ..dataset.taxonomy import get_seed_prompts
-from ..llms.calls import batch_check_samples, generate_sample
 from ..llms.extraction import extract_and_clean
+from ..llms.router import batch_check_samples, generate_sample
 from ..types import EntryType
 from .checker import build_quality_checker
 from .metaprompt import generate_category_description, generate_seeds
@@ -36,8 +36,8 @@ logger = logging.getLogger(__name__)
 class _StandaloneGenerationMixin:
     """Standalone (meta-prompt) generation methods for ``InputPipeline``.
 
-    Assumes the attributes set by ``InputPipeline.__init__`` (``gen_backend``,
-    ``gen_model``, ``check_backend``, ``check_model``, ``rate_limiter``,
+    Assumes the attributes set by ``InputPipeline.__init__`` (``gen``,
+    ``check``,
     ``extraction_style``, ``dataset_dir``) and the
     ``_build_generation_messages`` method defined on the base class in
     ``generation.py`` — a standard mixin, not meant to be instantiated on its
@@ -72,12 +72,7 @@ class _StandaloneGenerationMixin:
             **seed_kwargs,
         )
 
-        raw_output = generate_sample(
-            self.gen_backend,
-            self.gen_model,
-            messages,
-            self.rate_limiter,
-        )
+        raw_output = generate_sample(self.gen, messages)
 
         extracted = extract_and_clean(
             raw_output,
@@ -89,32 +84,33 @@ class _StandaloneGenerationMixin:
     def check_samples(
         self,
         samples: list[str],
-        build_check_messages: Callable[[str], list[dict]],
+        build_check_messages: Callable[[str, str], list[dict]],
         turn_index: int,
     ) -> list[SampleResult]:
         """Check all samples in a single batched engine pass.
 
-        Delegates to ``batch_check_samples()`` which sends all checker prompts
-        to ``backend.batch_generate()`` at once (one vLLM engine pass per
-        chunk of 32). For API backends the call falls back to sequential.
+        Delegates to ``batch_check_samples()``, which chunks the samples and
+        hands each chunk to the checker client — how that batch actually runs
+        (native engine pass vs. fan-out) is the client's business, not this
+        pipeline's.
 
         Rejected samples are returned with ``accepted=False`` and their
         reasoning preserved — no regeneration is attempted here.
 
         Args:
             samples: List of extracted sample strings.
-            build_check_messages: Function(sample_text) -> checker message list.
+            build_check_messages: Function(original, sample_text) -> checker
+                message list (original is "" — no comparison text at this
+                call site).
             turn_index: Current turn index (for tracking).
 
         Returns:
             List of SampleResult objects in the same order as ``samples``.
         """
         check_results = batch_check_samples(
-            self.check_backend,
-            self.check_model,
+            self.check,
             samples,
             build_check_messages,
-            rate_limiter=self.rate_limiter,
         )
         return [
             SampleResult(
@@ -129,7 +125,7 @@ class _StandaloneGenerationMixin:
     def run_turn(
         self,
         prompt_config: dict,
-        build_check_messages: Callable[[str], list[dict]],
+        build_check_messages: Callable[[str, str], list[dict]],
         turn_index: int,
         samples_per_request: int = 5,
         feedback: str = "",
@@ -146,7 +142,8 @@ class _StandaloneGenerationMixin:
 
         Args:
             prompt_config: Loaded prompt JSON config.
-            build_check_messages: Function(sample_text) -> checker messages.
+            build_check_messages: Function(original, sample_text) -> checker
+                messages (original is "" — no comparison text at this call site).
             turn_index: Turn number (for tracking/seeds).
             samples_per_request: Samples to request per LLM call.
             feedback: Rejection reasoning from prior turn.
@@ -249,7 +246,7 @@ class _StandaloneGenerationMixin:
         self,
         category: str,
         prompt_config: dict,
-        build_check_messages: Callable[[str], list[dict]],
+        build_check_messages: Callable[[str, str], list[dict]],
         num_turns: int = 10,
         samples_per_request: int = 5,
         use_feedback: bool = True,
@@ -280,7 +277,8 @@ class _StandaloneGenerationMixin:
         Args:
             category: Harm category name.
             prompt_config: Loaded prompt JSON config for this category.
-            build_check_messages: Function(sample_text) -> checker messages.
+            build_check_messages: Function(original, sample_text) -> checker
+                messages (original is "" — no comparison text at this call site).
             num_turns: Number of generation turns.
             samples_per_request: Samples per LLM call per turn.
             use_feedback: Whether to pass rejection reasoning to next turn.
@@ -433,15 +431,13 @@ class _StandaloneGenerationMixin:
             if use_metaprompt:
                 if verbose:
                     logger.debug("Generating description...")
-                description = generate_category_description(
-                    self.gen_backend, self.gen_model, category_name, self.rate_limiter
-                )
+                description = generate_category_description(self.gen, category_name)
                 if verbose:
                     logger.debug("Description: %d chars", len(description))
                     logger.debug("Generating seeds...")
                 seed_text = generate_seeds(
-                    self.gen_backend, self.gen_model, category_name, description,
-                    num_seeds=num_seeds, rate_limiter=self.rate_limiter,
+                    self.gen, category_name, description,
+                    num_seeds=num_seeds,
                 )
                 if verbose:
                     logger.debug("Seeds: %d generated", seed_text.count(chr(10)) + 1)

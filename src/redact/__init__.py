@@ -134,7 +134,7 @@ class Config:
         from redact import Config
 
         Config.validate()  # raises if required keys are missing
-        backend = get_backend("venice-uncensored")  # auto-selects VeniceBackend
+        client = ModelClient.create("venice-uncensored")  # resolves its backend
     """
 
     # Known environment variable names
@@ -142,6 +142,10 @@ class Config:
     ANTHROPIC_API_KEY = "ANTHROPIC_API_KEY"
     HF_TOKEN = "HF_TOKEN"
     REDACT_OUTPUT_DIR = "REDACT_OUTPUT_DIR"
+    # Telemetry sink: "jsonl" (default) | "wandb" | "off". See redact.telemetry.
+    REDACT_TRACE = "REDACT_TRACE"
+    # Key into configs/llm/gpu_pricing.json, e.g. "runpod". Default "local" (rate 0).
+    REDACT_GPU_PROVIDER = "REDACT_GPU_PROVIDER"
 
     @classmethod
     def get(cls, key: str, default: str | None = None) -> str | None:

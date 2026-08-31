@@ -1,6 +1,5 @@
 """Tests for the single-source path module (redact/paths.py)."""
 
-from pathlib import Path
 
 from redact import paths
 

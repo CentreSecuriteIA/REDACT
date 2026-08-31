@@ -9,9 +9,10 @@ technique functions with the metadata it describes.
 import json
 from collections.abc import Callable
 from functools import lru_cache
-from pathlib import Path
 
-_SPEC_PATH = Path(__file__).parent.parent / "configs" / "jailbreak" / "combination_spec.json"
+from .. import paths
+
+_SPEC_PATH = paths.jailbreak_configs_dir() / "combination_spec.json"
 
 
 @lru_cache(maxsize=1)

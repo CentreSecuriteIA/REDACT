@@ -27,7 +27,7 @@ from pathlib import Path
 
 import pandas as pd
 
-from redact import paths
+from redact import paths, telemetry
 
 logger = logging.getLogger(__name__)
 
@@ -148,6 +148,50 @@ def _counts(df) -> dict:
     return out
 
 
+def _plan_and_preload(models: dict, stages: list[str], verbose: bool = True) -> None:
+    """Report what this run needs on the GPU, then start warming it.
+
+    Runs before the stage loop so a configuration that cannot fit says so at
+    minute zero rather than after the constitution stage has spent its budget.
+    Neither the plan nor a failed preload aborts the run — see
+    :func:`redact.residency.preload` for why finishing an API-only stage is
+    strictly better than killing it.
+    """
+    from . import residency
+    from .llms.model_config import default_model_for_role
+
+    roles = {r for stage in stages for r in residency.STAGE_ROLES.get(stage, ())}
+    wanted: list[str] = []
+    for role in sorted(roles):
+        name = models.get(role)
+        if name is None:
+            # Recipe left it to the registry; resolve the same way the stage will.
+            try:
+                name = default_model_for_role(_ROLE_TO_REGISTRY_ROLE.get(role, role))
+            except KeyError:
+                continue
+        wanted.append(name)
+
+    if not wanted:
+        return
+    plan = residency.plan_residency(wanted)
+    residency.report(plan, verbose=verbose)
+    # Only warm the first group: later groups exist precisely because they do
+    # not fit alongside it, so loading them now would defeat the plan.
+    first = [fp.model for fp in plan.groups[0]] if plan.groups else []
+    residency.preload(first, verbose=verbose)
+
+
+#: Recipe role name -> registry role name, where they differ. The recipe speaks
+#: in stage terms ("gen", "check"); the registry speaks in capability terms.
+_ROLE_TO_REGISTRY_ROLE = {
+    "gen": "uncensored_gen",
+    "check": "uncensored_gen",
+    "constitution": "constitution_gen",
+    "paraphrase_check": "uncensored_gen",
+}
+
+
 def run_pipeline(
     recipe: str | Path | dict,
     params: str | Path | dict | None = None,
@@ -192,71 +236,82 @@ def run_pipeline(
     if verbose:
         logger.info("Run pipeline (%s) — stages: %s", dataset_type, stages)
 
+    # Telemetry first, so the plan and preload below are themselves recorded.
+    telemetry.install(data_dir=data_dir)
+    _plan_and_preload(models, stages, verbose=verbose)
+
     summary: dict = {"dataset_type": dataset_type, "data_dir": str(data_dir), "stages": {}}
     constitution_df = None
 
     for stage in stages:
-        if stage == "constitution":
-            constitution_df = generate_constitution(
-                taxonomy=taxonomy, taxonomy_dir=taxonomy_dir,
-                model=models["constitution"], data_dir=data_dir,
-                resume=resume, verbose=verbose, **P("constitution"),
+        with telemetry.stage(stage):
+            if stage == "constitution":
+                constitution_df = generate_constitution(
+                    taxonomy=taxonomy, taxonomy_dir=taxonomy_dir,
+                    model=models["constitution"], data_dir=data_dir,
+                    resume=resume, verbose=verbose, **P("constitution"),
+                )
+                df = constitution_df
+
+            elif stage == "inputs":
+                kw = dict(
+                    data_dir=data_dir, taxonomy=taxonomy, taxonomy_dir=taxonomy_dir,
+                    prompt_dir=prompt_dir, model=models["gen"], check_model=models["check"],
+                    resume=resume, verbose=verbose, **P("inputs"),
+                )
+                if dataset_type == "training":
+                    if constitution_df is None:
+                        raise ValueError(
+                            "training run: the 'constitution' stage must precede 'inputs' "
+                            "(so its entries can seed input generation)."
+                        )
+                    kw["constitution_df"] = constitution_df
+                df = generate_inputs(**kw)
+
+            elif stage == "outputs":
+                df = generate_outputs(
+                    data_dir=data_dir, model=models["gen"], check_model=models["check"],
+                    prompt_dir=prompt_dir, resume=resume, verbose=verbose, **P("outputs"),
+                )
+
+            elif stage == "paraphrase":
+                res = generate_paraphrases(
+                    data_dir=data_dir, paraphraser=models["paraphraser"],
+                    check_model=models["paraphrase_check"], prompt_dir=prompt_dir,
+                    resume=resume, verbose=verbose, **P("paraphrase"),
+                )
+                frames = [v for v in res.values() if v is not None and not v.empty]
+                df = pd.concat(frames, ignore_index=True) if frames else pd.DataFrame()
+
+            elif stage == "jailbreaks":
+                df = generate_jailbreaks(
+                    data_dir=data_dir, model=models["gen"],
+                    translation_model=models["translation"],
+                    resume=resume, verbose=verbose, **aug, **P("jailbreaks"),
+                )
+
+            elif stage == "build":
+                df = build_dataset(
+                    data_dir=data_dir, mode=dataset_type, verbose=verbose, **P("build"),
+                )
+
+            else:  # pragma: no cover — load_recipe already validated
+                raise ValueError(f"Unknown stage {stage!r}")
+
+            stage_params = {**(aug if stage == "jailbreaks" else {}), **P(stage)}
+            spec = load_spec().get("version", "") if stage == "jailbreaks" else None
+            mpath = write_manifest(
+                stage, data_dir=data_dir, params=stage_params, models=models,
+                counts=_counts(df), spec_version=spec,
             )
-            df = constitution_df
+            summary["stages"][stage] = {"counts": _counts(df), "manifest": str(mpath)}
+            if verbose:
+                logger.info("[%s] %s -> manifest %s", stage, _counts(df), mpath.name)
 
-        elif stage == "inputs":
-            kw = dict(
-                data_dir=data_dir, taxonomy=taxonomy, taxonomy_dir=taxonomy_dir,
-                prompt_dir=prompt_dir, model=models["gen"], check_model=models["check"],
-                resume=resume, verbose=verbose, **P("inputs"),
-            )
-            if dataset_type == "training":
-                if constitution_df is None:
-                    raise ValueError(
-                        "training run: the 'constitution' stage must precede 'inputs' "
-                        "(so its entries can seed input generation)."
-                    )
-                kw["constitution_df"] = constitution_df
-            df = generate_inputs(**kw)
-
-        elif stage == "outputs":
-            df = generate_outputs(
-                data_dir=data_dir, model=models["gen"], check_model=models["check"],
-                prompt_dir=prompt_dir, resume=resume, verbose=verbose, **P("outputs"),
-            )
-
-        elif stage == "paraphrase":
-            res = generate_paraphrases(
-                data_dir=data_dir, paraphraser=models["paraphraser"],
-                check_model=models["paraphrase_check"], prompt_dir=prompt_dir,
-                resume=resume, verbose=verbose, **P("paraphrase"),
-            )
-            frames = [v for v in res.values() if v is not None and not v.empty]
-            df = pd.concat(frames, ignore_index=True) if frames else pd.DataFrame()
-
-        elif stage == "jailbreaks":
-            df = generate_jailbreaks(
-                data_dir=data_dir, model=models["gen"],
-                translation_model=models["translation"],
-                resume=resume, verbose=verbose, **aug, **P("jailbreaks"),
-            )
-
-        elif stage == "build":
-            df = build_dataset(
-                data_dir=data_dir, mode=dataset_type, verbose=verbose, **P("build"),
-            )
-
-        else:  # pragma: no cover — load_recipe already validated
-            raise ValueError(f"Unknown stage {stage!r}")
-
-        stage_params = {**(aug if stage == "jailbreaks" else {}), **P(stage)}
-        spec = load_spec().get("version", "") if stage == "jailbreaks" else None
-        mpath = write_manifest(
-            stage, data_dir=data_dir, params=stage_params, models=models,
-            counts=_counts(df), spec_version=spec,
-        )
-        summary["stages"][stage] = {"counts": _counts(df), "manifest": str(mpath)}
-        if verbose:
-            logger.info("[%s] %s -> manifest %s", stage, _counts(df), mpath.name)
-
+    # Roll up tokens, engine time and cost. Also logged at INFO, so run.py's
+    # existing --quiet/--debug already control whether it is shown.
+    summary["telemetry"] = telemetry.summary()
+    trace = telemetry.collector()
+    if trace is not None and trace.trace_path is not None:
+        summary["trace"] = str(trace.trace_path)
     return summary

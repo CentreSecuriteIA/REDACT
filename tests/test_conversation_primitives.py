@@ -7,6 +7,7 @@ hand-built generators and a fake router (no network).
 import pytest
 
 from redact.llms.conversation import LLMRequest, drive_generators, drive_sync
+from tests.conftest import as_resolver
 
 
 class _FakeRouter:
@@ -41,21 +42,21 @@ def _raises():
 def test_drive_generators_multi_round_batched():
     router = _FakeRouter()
     gens = {"a": _two_round("a"), "b": _two_round("b")}
-    results = drive_generators(gens, router=router, finalize=lambda k, v: v)
+    results = drive_generators(gens, resolve=as_resolver(router), finalize=lambda k, v: v)
     assert results["a"] == ("a", "m:0", "m:0")
     assert results["b"] == ("b", "m:1", "m:1")
     assert router.rounds == 2  # two rounds, each one batched call per model
 
 
 def test_drive_generators_immediate_completion_at_prime():
-    results = drive_generators({"x": _immediate("x")}, router=_FakeRouter(), finalize=lambda k, v: v)
+    results = drive_generators({"x": _immediate("x")}, resolve=as_resolver(_FakeRouter()), finalize=lambda k, v: v)
     assert results["x"] == ("x", "done")
 
 
 def test_drive_generators_on_error_isolates():
     results = drive_generators(
         {"ok": _two_round("ok"), "bad": _raises()},
-        router=_FakeRouter(), finalize=lambda k, v: v,
+        resolve=as_resolver(_FakeRouter()), finalize=lambda k, v: v,
         on_error=lambda k, exc: ("ERR", type(exc).__name__),
     )
     assert results["ok"][0] == "ok"
@@ -64,12 +65,12 @@ def test_drive_generators_on_error_isolates():
 
 def test_drive_generators_reraises_without_on_error():
     with pytest.raises(ValueError):
-        drive_generators({"bad": _raises()}, router=_FakeRouter(), finalize=lambda k, v: v)
+        drive_generators({"bad": _raises()}, resolve=as_resolver(_FakeRouter()), finalize=lambda k, v: v)
 
 
 def test_drive_generators_batch_failure_isolated():
     results = drive_generators(
-        {"a": _two_round("a")}, router=_FakeRouter(fail=True),
+        {"a": _two_round("a")}, resolve=as_resolver(_FakeRouter(fail=True)),
         finalize=lambda k, v: v, on_error=lambda k, exc: "FAILED",
     )
     assert results["a"] == "FAILED"
@@ -77,7 +78,7 @@ def test_drive_generators_batch_failure_isolated():
 
 def test_drive_generators_batch_failure_reraises():
     with pytest.raises(RuntimeError):
-        drive_generators({"a": _two_round("a")}, router=_FakeRouter(fail=True), finalize=lambda k, v: v)
+        drive_generators({"a": _two_round("a")}, resolve=as_resolver(_FakeRouter(fail=True)), finalize=lambda k, v: v)
 
 
 def test_drive_sync_drives_one_generator():
@@ -100,10 +101,10 @@ def test_drive_generators_verbose_progress_label():
             labels.append(progress)
             return ["r"] * len(messages_list)
 
-    drive_generators({"a": _immediate("a")}, router=_R(), finalize=lambda k, v: v)  # no rounds
+    drive_generators({"a": _immediate("a")}, resolve=as_resolver(_R()), finalize=lambda k, v: v)  # no rounds
     # a one-round generator with verbose+progress records a formatted label
     drive_generators({"b": (lambda: (yield LLMRequest("m", [])))()},
-                     router=_R(), finalize=lambda k, v: v, verbose=True, progress="lbl")
+                     resolve=as_resolver(_R()), finalize=lambda k, v: v, verbose=True, progress="lbl")
     assert any(p and p.startswith("lbl round 1 (m)") for p in labels)
 
 
@@ -122,7 +123,7 @@ class _CapturingRouter:
 def test_drive_generators_omits_internals_ids_when_none_set():
     router = _CapturingRouter()
     gens = {"a": (lambda: (yield LLMRequest("m", [{"role": "user", "content": "x"}])))()}
-    drive_generators(gens, router=router, finalize=lambda k, v: v)
+    drive_generators(gens, resolve=as_resolver(router), finalize=lambda k, v: v)
     # every request had internals_id=None (the default) -> the kwarg must be
     # omitted entirely, not passed as [None] (which would wrongly trip
     # BatchCaller's guard on a backend that doesn't support internals).
@@ -135,7 +136,7 @@ def test_drive_generators_forwards_internals_ids_when_set():
         "a": (lambda: (yield LLMRequest("m", [{"role": "user", "content": "x"}], internals_id="root/0")))(),
         "b": (lambda: (yield LLMRequest("m", [{"role": "user", "content": "y"}])))(),  # no id
     }
-    drive_generators(gens, router=router, finalize=lambda k, v: v)
+    drive_generators(gens, resolve=as_resolver(router), finalize=lambda k, v: v)
     # mixed batch: one real id, one None, in request order (dict-pooled but
     # order is whatever groups[model] collected them in for this round).
     assert router.internals_ids_seen == [["root/0", None]] or router.internals_ids_seen == [[None, "root/0"]]

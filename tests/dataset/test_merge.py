@@ -4,9 +4,9 @@ import pandas as pd
 
 from redact.dataset.io import write_category_csv
 from redact.dataset.merge import (
-    merge_category_csvs,
     discover_categories,
     merge_all,
+    merge_category_csvs,
     normalize_csv,
 )
 

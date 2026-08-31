@@ -1,0 +1,10 @@
+{
+    "category": "structured_qa",
+    "pipeline": "format_instructions",
+    "instruction": "\n\nOUTPUT FORMAT INSTRUCTIONS:\nGenerate exactly {num_samples} prompt-answer pairs.\nUse exactly this format for each:\n\n**Prompt 1:**\n**Question:** <question here>\n**Answer:** <answer here>\n\n**Prompt 2:**\n**Question:** <question here>\n**Answer:** <answer here>\n\nContinue this pattern for all {num_samples} pairs. Do NOT include any preamble or commentary.",
+    "seed_fields": ["num_samples"],
+    "metadata": {
+        "version": "1.0",
+        "notes": "Appended to a generation prompt's system_prompt (PromptTemplate's format_style=\"structured_qa\") so its paired extractor (extract_and_clean(style=\"structured_qa\") / extract_structured_qa()) can parse the reply."
+    }
+}

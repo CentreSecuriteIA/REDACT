@@ -1,14 +1,18 @@
 """Single source of truth for on-disk layout.
 
-Every default file/directory the pipelines read or write is derived here from a
-single working root, so a caller can relocate an entire run by pointing one
-``data_dir`` at a new folder (or setting ``REDACT_OUTPUT_DIR``). Previously the
-same ``Datasets/`` and ``Data_cache/...`` paths were recomputed independently in
-``pipelines.py``, ``dataset/io.py``, ``jailbreak/manipulation/benign.py`` and the
-two constitution modules; those now all delegate here.
+Two independent families of paths live here:
 
-All functions take an optional ``root``; when ``None`` they fall back to
-:func:`redact.get_output_dir` (env ``REDACT_OUTPUT_DIR`` → project marker → cwd).
+**Run outputs**, derived from a single working root — every default
+file/directory the pipelines read or write, so a caller can relocate an
+entire run by pointing one ``data_dir`` at a new folder (or setting
+``REDACT_OUTPUT_DIR``). These take an optional ``root``; when ``None`` they
+fall back to :func:`redact.get_output_dir` (env ``REDACT_OUTPUT_DIR`` →
+project marker → cwd).
+
+**Package resources** — :func:`package_dir`, :func:`prompts_dir`,
+:func:`configs_dir`, :func:`taxonomy_dir`, :func:`seeds_dir`,
+:func:`jailbreak_configs_dir`. These resolve relative to the installed
+package, independent of the working root, and take no ``root``.
 """
 
 from pathlib import Path
@@ -108,10 +112,76 @@ def constitution_inputs_dir(root: str | Path | None = None) -> Path:
     return datasets(root) / "constitution_inputs"
 
 
-def taxonomy_dir() -> Path:
-    """Package-bundled taxonomy config dir (``src/redact/configs/taxonomy``).
+def package_dir() -> Path:
+    """Root of the installed ``redact`` package (``src/redact/``).
 
-    Package data, not run output — resolved relative to this file, independent
-    of the working root.
+    Package data, not run output — resolved relative to this file,
+    independent of the working root. Single source of truth for the
+    package-root-relative lookup previously recomputed independently (with
+    inconsistent ``.resolve()`` usage and per-file-tuned ``.parent`` depth)
+    in ``constitution/input_generation.py``, ``dataset/loading.py``,
+    ``dataset/taxonomy.py``, ``llms/prompts.py``,
+    ``jailbreak/manipulation/benign.py``, ``jailbreak/directives.py``,
+    ``jailbreak/spec.py``, and ``jailbreak/requests/continuation.py``.
     """
-    return Path(__file__).resolve().parent / "configs" / "taxonomy"
+    return Path(__file__).resolve().parent
+
+
+def prompts_dir() -> Path:
+    """Package-bundled prompt templates (``src/redact/prompts``)."""
+    return package_dir() / "prompts"
+
+
+def configs_dir() -> Path:
+    """Package-bundled config root (``src/redact/configs``)."""
+    return package_dir() / "configs"
+
+
+def llm_configs_dir() -> Path:
+    """Package-bundled LLM config dir (``src/redact/configs/llm``)."""
+    return configs_dir() / "llm"
+
+
+def models_json() -> Path:
+    """The shipped model registry (``configs/llm/models.json``)."""
+    return llm_configs_dir() / "models.json"
+
+
+def roles_json() -> Path:
+    """The shipped role catalogue (``configs/llm/roles.json``)."""
+    return llm_configs_dir() / "roles.json"
+
+
+def gpu_pricing_json() -> Path:
+    """The shipped GPU rate table (``configs/llm/gpu_pricing.json``).
+
+    Provider -> GPU name -> hourly USD, used by ``telemetry`` to price local
+    engine time. Data, meant to be edited.
+    """
+    return llm_configs_dir() / "gpu_pricing.json"
+
+
+def vram_cache_json(root: str | Path | None = None) -> Path:
+    """Measured VRAM footprints (``Data_cache/vram.json``).
+
+    Written after a real local load and read by the residency planner, so a
+    second run plans from what a checkpoint actually took rather than an
+    estimate. Under ``Data_cache/`` because it is an intermediate artifact, not
+    dataset output.
+    """
+    return data_cache(root) / "vram.json"
+
+
+def taxonomy_dir() -> Path:
+    """Package-bundled taxonomy config dir (``src/redact/configs/taxonomy``)."""
+    return configs_dir() / "taxonomy"
+
+
+def seeds_dir() -> Path:
+    """Package-bundled seed prompts (``src/redact/configs/seeds``)."""
+    return configs_dir() / "seeds"
+
+
+def jailbreak_configs_dir() -> Path:
+    """Package-bundled jailbreak technique configs (``src/redact/configs/jailbreak``)."""
+    return configs_dir() / "jailbreak"

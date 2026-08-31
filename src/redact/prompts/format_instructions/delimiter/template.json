@@ -1,0 +1,10 @@
+{
+    "category": "delimiter",
+    "pipeline": "format_instructions",
+    "instruction": "\n\nOUTPUT FORMAT INSTRUCTIONS:\nGenerate exactly {num_samples} samples.\nSeparate each sample with a line containing only '---'.\nDo NOT include any preamble, explanation, or commentary.\nOutput ONLY the samples separated by '---'.",
+    "seed_fields": ["num_samples"],
+    "metadata": {
+        "version": "1.0",
+        "notes": "Appended to a generation prompt's system_prompt (PromptTemplate's format_style=\"delimiter\") so its paired extractor (extract_and_clean(style=\"delimiter\") / extract_delimited()) can parse the reply."
+    }
+}

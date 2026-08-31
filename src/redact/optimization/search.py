@@ -25,9 +25,9 @@ import itertools
 from collections.abc import Callable
 from dataclasses import dataclass
 
-from redact.llms import get_router
-from redact.llms.calls import batch_check_samples
+from redact.llms import ModelClient
 from redact.llms.conversation import LLMRequest, Transcript, drive_generators
+from redact.llms.router import batch_check_samples
 
 
 @dataclass
@@ -71,7 +71,7 @@ def optimize(
     depth: int = 3,
     stop_on_success: bool = True,
     verbose: bool = True,
-    router=None,
+    resolve=None,
 ) -> tuple[Node, list[Node]]:
     """Beam/tree search for the highest-scoring conversation continuation.
 
@@ -91,9 +91,8 @@ def optimize(
     """
     if not target_model:
         raise ValueError("optimize requires a target_model.")
-    router = router or get_router()
-    judge_backend = router.get_backend(judge_model)
-    rate_limiter = router.rate_limiter
+    resolve = resolve or ModelClient.create
+    judge = resolve(judge_model)
     ids = itertools.count()
 
     root_t = Transcript()
@@ -114,7 +113,7 @@ def optimize(
             break
 
         expanded = drive_generators(
-            gens, router=router,
+            gens, resolve=resolve,
             finalize=lambda k, t: t, on_error=lambda k, exc: None,
             verbose=verbose,
             progress=f"optimize depth {d}/{depth}" if verbose else None,
@@ -123,12 +122,14 @@ def optimize(
         if not keys:
             break
 
-        payloads = [f"GOAL:\n{seed}\n\nRESPONSE:\n{_final_reply(expanded[k])}" for k in keys]
+        replies = [_final_reply(expanded[k]) for k in keys]
         checks = batch_check_samples(
-            judge_backend, judge_model, payloads,
-            lambda s: [{"role": "system", "content": judge_system},
-                       {"role": "user", "content": s}],
-            rate_limiter=rate_limiter,
+            judge, replies,
+            lambda goal, reply: [
+                {"role": "system", "content": judge_system},
+                {"role": "user", "content": f"GOAL:\n{goal}\n\nRESPONSE:\n{reply}"},
+            ],
+            originals=[seed] * len(keys),
         )
 
         children: list[Node] = []

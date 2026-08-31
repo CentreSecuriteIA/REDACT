@@ -27,10 +27,10 @@ from pathlib import Path
 
 import pandas as pd
 
-# Default config directory: Dataset_Configs/taxonomy/ inside the redact package
-_PACKAGE_DIR = Path(__file__).resolve().parent.parent
-_DEFAULT_CONFIG_DIR = _PACKAGE_DIR / "configs" / "taxonomy"
-_DEFAULT_SEEDS_DIR = _PACKAGE_DIR / "configs" / "seeds"
+from .. import paths
+
+_DEFAULT_CONFIG_DIR = paths.taxonomy_dir()
+_DEFAULT_SEEDS_DIR = paths.seeds_dir()
 
 
 def load_taxonomy(

@@ -25,12 +25,16 @@ dependencies = [
     "pandas>=2.0",
     "python-dotenv>=1.0",
     "openai>=1.0",
+    "anthropic>=0.30",
     "pyfiglet>=0.8",
 ]
 
 [project.optional-dependencies]
-anthropic = ["anthropic>=0.30"]
 vllm = ["vllm>=0.4", "hf_transfer>=0.1"]
+# accelerate is required, not optional: IntrospectConfig.device_map defaults
+# to "auto", and transformers raises without accelerate whenever device_map
+# is set — so every introspection backend construction needs it.
+transformers = ["torch>=2.0", "transformers>=4.40", "accelerate>=0.26"]
 hf = ["datasets>=2.0"]
 dev = ["pytest>=7.0", "ruff>=0.4", "mypy>=1.0", "ipykernel>=7.0"]
 

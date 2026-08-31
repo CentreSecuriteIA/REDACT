@@ -2,7 +2,7 @@
 
 The model-load path (torch/transformers + real weights) is GPU/heavy-dependency
 territory and is not exercised here — these tests cover the parts that matter
-without a real model: capability flags, get_backend() routing, and the
+without a real model: capability flags, backend_for() routing, and the
 registry error messages, all offline.
 """
 
@@ -10,111 +10,104 @@ import json
 
 import pytest
 
-from redact.llms.model_config import MODEL_REGISTRY, get_model_config, register_model
-from redact.llms.api import get_backend, clear_backend_cache, _backend_cache
+from redact.llms.backends import backend_for, clear_transport_caches
+from redact.llms.model_config import (
+    MODEL_REGISTRY,
+    APIConfig,
+    IntrospectConfig,
+    ModelConfig,
+    get_model_config,
+    register_model,
+)
 
 
 @pytest.fixture(autouse=True)
 def _clean_cache():
     yield
-    clear_backend_cache()
+    clear_transport_caches()
 
 
 class TestModelConfigIntrospectFields:
-    def test_introspect_kwargs_field_present(self):
-        from redact.llms.model_config import ModelConfig
+    def test_introspect_fields_present(self):
+        from redact.llms.model_config import IntrospectConfig
         config = ModelConfig(
-            name="test", rpm=100, backend_type="transformers_introspect",
-            hf_model_id="org/model", introspect_kwargs={"log_dir": "/tmp/x"},
+            name="test", backend_type="introspect",
+            introspect=IntrospectConfig(hf_model_id="org/model", log_dir="/tmp/x"),
         )
-        assert config.introspect_kwargs == {"log_dir": "/tmp/x"}
+        assert config.introspect.hf_model_id == "org/model"
+        assert config.introspect.log_dir == "/tmp/x"
 
-    def test_introspect_kwargs_default_none(self):
-        from redact.llms.model_config import ModelConfig
-        config = ModelConfig(name="test", rpm=100)
-        assert config.introspect_kwargs is None
+    def test_introspect_default_none(self):
+        config = ModelConfig(name="test")
+        assert config.introspect is None
 
-    def test_register_model_passes_introspect_kwargs(self):
+    def test_register_model_passes_introspect_fields(self):
         name = "_test_register_introspect"
         try:
             register_model(
-                name, rpm=999, backend_type="transformers_introspect",
-                hf_model_id="org/model", introspect_kwargs={"log_dir": "/tmp/x", "capture": {"attention": True}},
+                name,
+                backend_type="introspect",
+                introspect=IntrospectConfig(hf_model_id="org/model", log_dir="/tmp/x", capture={"attention": True}),
             )
             config = get_model_config(name)
-            assert config.backend_type == "transformers_introspect"
-            assert config.hf_model_id == "org/model"
-            assert config.introspect_kwargs == {"log_dir": "/tmp/x", "capture": {"attention": True}}
+            assert config.backend_type == "introspect"
+            assert config.introspect.hf_model_id == "org/model"
+            assert config.introspect.log_dir == "/tmp/x"
+            assert config.introspect.capture == {"attention": True}
         finally:
             MODEL_REGISTRY.pop(name, None)
 
 
-class TestGetBackendRoutingIntrospect:
-    def test_missing_hf_id_raises(self):
-        name = "_test_introspect_no_hf_id"
+class TestBackendForRoutingIntrospect:
+    def test_raises_when_the_entry_has_no_introspect_setup(self):
+        # IntrospectConfig requires hf_model_id AND log_dir at construction,
+        # so an incomplete setup can't reach here — only a missing one.
+        name = "_test_introspect_absent"
         try:
-            register_model(name, rpm=999, backend_type="transformers_introspect",
-                            introspect_kwargs={"log_dir": "/tmp/x"})
-            with pytest.raises(ValueError, match="no hf_model_id"):
-                get_backend(name)
+            register_model(name, api=APIConfig(backend_type="openai", api_key_env="TEST_API_KEY", base_url="https://test.example/v1", rpm=10))
+            with pytest.raises(ValueError, match="no introspect setup"):
+                backend_for(get_model_config(name), "introspect")
         finally:
             MODEL_REGISTRY.pop(name, None)
 
-    def test_missing_log_dir_raises(self):
-        name = "_test_introspect_no_log_dir"
-        try:
-            register_model(name, rpm=999, backend_type="transformers_introspect",
-                            hf_model_id="org/model")
-            with pytest.raises(ValueError, match="log_dir"):
-                get_backend(name)
-        finally:
-            MODEL_REGISTRY.pop(name, None)
+    def test_load_cache_is_private_to_this_backend(self):
+        # Same hf_model_id under vLLM and under transformers is two different
+        # runtimes and two independent loads — the caches must not be shared.
+        import redact.llms.backends.introspection as intro_module
+        import redact.llms.backends.vllm as vllm_module
 
-    def test_cache_key_is_namespaced(self):
-        # Cache key uses an "introspect:" prefix distinct from vLLM's "vllm:"
-        # prefix, so a model name can't collide across backend types.
-        name = "_test_introspect_cache_key"
-        try:
-            register_model(name, rpm=999, backend_type="transformers_introspect",
-                            hf_model_id="org/model", introspect_kwargs={"log_dir": "/tmp/x"})
-            # Don't actually construct it (needs torch/transformers) — just check
-            # the ValueError-free path up to backend construction would use this key.
-            assert f"introspect:{name}" not in _backend_cache
-        finally:
-            MODEL_REGISTRY.pop(name, None)
+        clear_transport_caches()
+        vllm_module._engines[("org/model", None, "[]")] = "a vllm engine"
+        assert intro_module._models == {}
+        clear_transport_caches()
+        assert vllm_module._engines == {}
 
 
 class TestSupportsInternalsCapabilityFlag:
     def test_default_backend_does_not_support_internals(self):
-        from redact.llms.base import LLMBackend
+        from redact.llms.backends import LLMBackend
 
         class _Dummy(LLMBackend):
-            def generate(self, messages, model, **kwargs):
-                return "x"
+            def generate(self, messages_list, **kwargs):
+                return ["x"] * len(messages_list)
 
             @property
             def backend_name(self):
                 return "dummy"
 
-        assert _Dummy().supports_internals is False
+        assert _Dummy("dummy-model").compute_config.supports_internals is False
 
     def test_introspection_backend_declares_support_without_loading_model(self):
-        # supports_internals is a plain property on the class — check it via
-        # the class attribute lookup pattern other backends use, without
-        # instantiating (which would require torch/transformers + weights).
-        transformers = pytest.importorskip("transformers")
-        pytest.importorskip("torch")
-        from redact.llms.introspection_backend import TransformersIntrospectionBackend
+        # compute_config is a CLASS attribute, so its full profile is readable
+        # straight off the class — no instance, no torch/transformers import,
+        # no weights. That is what lets registration validate concurrency for
+        # this backend type without touching a transport.
+        from redact.llms.backends import TransformersIntrospectionBackend
 
-        # supports_internals/supports_native_batching/supports_parallel_calls
-        # are properties, but they don't touch self._model etc., so they're
-        # safe to read via a bare (unconstructed) instance check using
-        # object.__new__ to skip __init__.
-        instance = object.__new__(TransformersIntrospectionBackend)
-        assert TransformersIntrospectionBackend.supports_internals.fget(instance) is True
-        assert TransformersIntrospectionBackend.supports_native_batching.fget(instance) is False
-        assert TransformersIntrospectionBackend.supports_parallel_calls.fget(instance) is False
-        assert instance.backend_name == "transformers_introspect"
+        cc = TransformersIntrospectionBackend.compute_config
+        assert cc.supports_internals is True
+        assert cc.supports_native_batching is False
+        assert cc.supports_parallel_calls is False
 
 
 class TestMetaJson:
@@ -127,11 +120,12 @@ class TestMetaJson:
     """
 
     def _backend(self, tmp_path, capture=None):
-        from redact.llms.introspection_backend import TransformersIntrospectionBackend
+        from redact.llms.backends import TransformersIntrospectionBackend
 
         b = object.__new__(TransformersIntrospectionBackend)
         b._log_dir = tmp_path
-        b._model_name = "org/model"
+        b.model = "test-model"
+        b.hf_model_id = "org/model"
         b._capture = capture or {"logprobs": False, "hidden_states": False, "attention": False}
         b._torch = None  # unused when all capture flags are off; just needs to exist
         return b
@@ -172,7 +166,7 @@ class TestRenameCapture:
     returns, but internals_id has to be supplied before it)."""
 
     def _backend(self, tmp_path):
-        from redact.llms.introspection_backend import TransformersIntrospectionBackend
+        from redact.llms.backends import TransformersIntrospectionBackend
         b = object.__new__(TransformersIntrospectionBackend)
         b._log_dir = tmp_path
         return b
@@ -197,17 +191,3 @@ class TestRenameCapture:
         b._capture_dir("base1/attempt_0")
         b.rename_capture("base1/attempt_0", "base1/nested/deeper/final")
         assert (tmp_path / "base1" / "nested" / "deeper" / "final").is_dir()
-
-
-def test_base_llm_backend_rename_capture_is_a_noop(tmp_path):
-    from redact.llms.base import LLMBackend
-
-    class _Dummy(LLMBackend):
-        def generate(self, messages, model, **kwargs):
-            return "x"
-
-        @property
-        def backend_name(self):
-            return "dummy"
-
-    _Dummy().rename_capture("anything", "anything-else")  # must not raise

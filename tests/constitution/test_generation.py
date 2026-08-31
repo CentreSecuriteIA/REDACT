@@ -1,24 +1,21 @@
 """Tests for constitution generation pipeline."""
 
 import pandas as pd
-import pytest
 
-from tests.conftest import MockBackend
 from redact.constitution.generation import (
-    EntryType,
     ALL_ENTRY_TYPES,
     ConstitutionEntry,
-    ConstitutionResult,
     ConstitutionPipeline,
-    _strip_end_marker,
-    _save_entries_csv,
-    _CSV_COLUMNS,
-    _state_path,
-    _unit_key,
-    _read_state,
+    ConstitutionResult,
+    EntryType,
     _append_state,
+    _read_state,
+    _save_entries_csv,
+    _state_path,
+    _strip_end_marker,
+    _unit_key,
 )
-
+from tests.conftest import MockBackend, make_client
 
 # Valid 3-layer markdown that parse_constitution can parse
 _VALID_CONSTITUTION_OUTPUT = """\
@@ -138,8 +135,7 @@ class TestSaveEntriesCsv:
 
 class TestConstitutionPipeline:
     def _make_pipeline(self, backend, tmp_path):
-        return ConstitutionPipeline(
-            backend=backend, model="test-model",
+        return ConstitutionPipeline(client=make_client(backend, "test-model"),
             output_dir=tmp_path / "constitution",
         )
 
@@ -270,8 +266,7 @@ class TestRunResume:
     }
 
     def _make_pipeline(self, backend, tmp_path):
-        return ConstitutionPipeline(
-            backend=backend, model="test-model",
+        return ConstitutionPipeline(client=make_client(backend, "test-model"),
             output_dir=tmp_path / "constitution",
         )
 

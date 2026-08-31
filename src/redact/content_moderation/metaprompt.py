@@ -4,15 +4,15 @@ The full automated pipeline needs only a category name to start:
 
   Step 1 -- generate_category_description():
     Category name -> LLM -> rich category description
-    Template: prompts/content_moderation/category_description/
+    Template: prompts/input/category_description/
 
   Step 2 -- generate_seeds():
     Category name + description -> LLM -> seed prompts (numbered list)
-    Template: prompts/content_moderation/seed_generation/
+    Template: prompts/input/seed_generation/
 
   Step 3 -- InputPipeline.run_category():
     Category name + description + seeds -> LLM -> actual samples
-    Template: prompts/content_moderation/generation/
+    Template: prompts/input/generation/standalone/
     Checks each sample via quality checker, loops with feedback.
 
 Fallback options:
@@ -31,10 +31,10 @@ Usage:
     for category_name, category_info in iter_categories(taxonomy):
 
         # Step 1: rich description (or use taxonomy short description as fallback)
-        description = generate_category_description(backend, model, category_name)
+        description = generate_category_description(client, category_name)
 
         # Step 2: seeds (or load from content_moderation_seeds.json as fallback)
-        seed_text = generate_seeds(backend, model, category_name, description)
+        seed_text = generate_seeds(client, category_name, description)
 
         # Step 3: generate samples
         result = pipeline.run_category(
@@ -52,20 +52,17 @@ Usage:
 import logging
 from pathlib import Path
 
-from ..llms.base import LLMBackend
-from ..llms.calls import generate_sample
+from ..llms.client import ModelClient
 from ..llms.extraction import extract_numbered_list
 from ..llms.prompts import build_messages, load_prompt
-from ..llms.wrappers import RateLimiter
+from ..llms.router import generate_sample
 
 logger = logging.getLogger(__name__)
 
 
 def generate_category_description(
-    backend: LLMBackend,
-    model: str,
+    client: ModelClient,
     category: str,
-    rate_limiter: RateLimiter | None = None,
     prompt_dir: str | Path | None = None,
     max_retries: int = 2,
 ) -> str:
@@ -76,10 +73,8 @@ def generate_category_description(
     formats, severity range, and distinguishing features.
 
     Args:
-        backend: LLM backend.
-        model: Model identifier.
+        client: The model to call, bound to its transport.
         category: Harm category name (e.g. "CBRN", "Self-Harm").
-        rate_limiter: Optional rate limiter.
         prompt_dir: Prompt directory override.
         max_retries: Retries on empty output.
 
@@ -93,7 +88,7 @@ def generate_category_description(
     messages = build_messages(config, Category=category)
 
     for attempt in range(max_retries):
-        result = generate_sample(backend, model, messages, rate_limiter)
+        result = generate_sample(client, messages)
         result = result.strip()
         if result:
             logger.info(
@@ -111,12 +106,10 @@ def generate_category_description(
 
 
 def generate_seeds(
-    backend: LLMBackend,
-    model: str,
+    client: ModelClient,
     category: str,
     category_description: str,
     num_seeds: int = 10,
-    rate_limiter: RateLimiter | None = None,
     prompt_dir: str | Path | None = None,
     max_retries: int = 3,
 ) -> str:
@@ -128,12 +121,10 @@ def generate_seeds(
     inject as {SeedPrompts} in the generation template.
 
     Args:
-        backend: LLM backend.
-        model: Model identifier.
+        client: The model to call, bound to its transport.
         category: Harm category name.
         category_description: Rich description from generate_category_description().
         num_seeds: Number of seed prompts to generate.
-        rate_limiter: Optional rate limiter.
         prompt_dir: Prompt directory override.
         max_retries: Retries if extraction returns empty.
 
@@ -152,7 +143,7 @@ def generate_seeds(
     )
 
     for attempt in range(max_retries):
-        raw = generate_sample(backend, model, messages, rate_limiter)
+        raw = generate_sample(client, messages)
         examples = extract_numbered_list(raw)
 
         if examples:

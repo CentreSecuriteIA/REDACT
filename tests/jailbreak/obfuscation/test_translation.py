@@ -6,24 +6,24 @@ to a MockBackend — the same way ``utils.apply_combination`` runs a single
 sample.
 """
 
-from tests.conftest import MockBackend
-from redact.jailbreak.protocol import run_sync
 from redact.jailbreak.obfuscation.translation import (
     LANGUAGES,
-    to_zulu,
-    to_scots_gaelic,
+    get_translation_functions,
     to_bengali,
+    to_javanese,
+    to_scots_gaelic,
     to_swahili,
     to_thai,
-    to_javanese,
-    get_translation_functions,
+    to_zulu,
 )
+from redact.jailbreak.protocol import run_sync
+from tests.conftest import MockBackend
 
 
 def _run(fn, prompt, backend):
     """Drive a translation generator to completion against a MockBackend."""
     def call(request):
-        return backend.generate(request.messages, request.model)
+        return backend.generate([request.messages])[0]
     return run_sync(fn(prompt), call)
 
 

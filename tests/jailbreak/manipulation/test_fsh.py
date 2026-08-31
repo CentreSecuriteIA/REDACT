@@ -2,17 +2,17 @@
 
 import random
 
-from tests.conftest import MockBackend
-from redact.jailbreak.protocol import run_sync
 from redact.jailbreak.manipulation.fsh import (
-    select_best_subcategory,
-    to_fsh_random_short,
-    to_fsh_random_long,
-    to_fsh_selected_short,
-    to_fsh_selected_long,
-    get_fsh_functions,
     _build_fsh_prompt,
+    get_fsh_functions,
+    select_best_subcategory,
+    to_fsh_random_long,
+    to_fsh_random_short,
+    to_fsh_selected_long,
+    to_fsh_selected_short,
 )
+from redact.jailbreak.protocol import run_sync
+from tests.conftest import MockBackend, make_client
 
 
 def _make_benign_data():
@@ -33,7 +33,7 @@ class TestSelectBestSubcategory:
     def test_exact_match(self):
         backend = MockBackend("Cooking")
         subcat, fallback = select_best_subcategory(
-            "test", ["Cooking", "Gardening"], backend, "model"
+            "test", ["Cooking", "Gardening"], make_client(backend)
         )
         assert subcat == "Cooking"
         assert fallback is False
@@ -41,7 +41,7 @@ class TestSelectBestSubcategory:
     def test_fuzzy_match(self):
         backend = MockBackend("I think Cooking & Baking is closest")
         subcat, fallback = select_best_subcategory(
-            "test", ["Cooking", "Gardening"], backend, "model"
+            "test", ["Cooking", "Gardening"], make_client(backend)
         )
         assert subcat == "Cooking"
         assert fallback is False
@@ -49,7 +49,7 @@ class TestSelectBestSubcategory:
     def test_fallback_random(self):
         backend = MockBackend("totally irrelevant response xyz")
         subcat, fallback = select_best_subcategory(
-            "test", ["Cooking", "Gardening"], backend, "model"
+            "test", ["Cooking", "Gardening"], make_client(backend)
         )
         assert subcat in ["Cooking", "Gardening"]
         assert fallback is True
@@ -92,7 +92,7 @@ class TestFshRandom:
 def _run(fn, prompt, backend, **kwargs):
     """Drive a technique generator to completion against a MockBackend."""
     def call(request):
-        return backend.generate(request.messages, request.model)
+        return backend.generate([request.messages])[0]
     return run_sync(fn(prompt, **kwargs), call)
 
 

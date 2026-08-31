@@ -18,10 +18,9 @@ from pathlib import Path
 
 from redact.dataset.taxonomy import load_taxonomy
 from redact.jailbreak.protocol import LLMRequest, TechniqueGen
-from redact.llms.base import LLMBackend
-from redact.llms.calls import generate_sample
+from redact.llms.client import ModelClient
 from redact.llms.prompts import build_messages, load_prompt
-from redact.llms.wrappers import RateLimiter
+from redact.llms.router import generate_sample
 
 # ---------------------------------------------------------------------------
 # Category definitions — loaded from taxonomy JSON
@@ -82,24 +81,18 @@ def _construction_messages(
 
 def get_situation(
     prompt: str,
-    backend: LLMBackend,
-    model: str,
-    rate_limiter: RateLimiter | None = None,
+    client: ModelClient,
     prompt_dir: str | Path | None = None,
 ) -> str:
     """Generate a plausible scenario for the given prompt (single LLM call)."""
-    situation = generate_sample(
-        backend, model, _scenario_messages(prompt, prompt_dir), rate_limiter
-    )
+    situation = generate_sample(client, _scenario_messages(prompt, prompt_dir))
     return _extract_scenario(situation)
 
 
 def create_jailbreak(
     prompt: str,
     category_index: int,
-    backend: LLMBackend,
-    model: str,
-    rate_limiter: RateLimiter | None = None,
+    client: ModelClient,
     prompt_dir: str | Path | None = None,
     scenario: str | None = None,
 ) -> tuple[str, str, str]:
@@ -109,10 +102,10 @@ def create_jailbreak(
     uses :func:`cognitive_gen` instead.
     """
     if scenario is None:
-        scenario = get_situation(prompt, backend, model, rate_limiter, prompt_dir)
+        scenario = get_situation(prompt, client, prompt_dir)
 
     messages = _construction_messages(prompt, category_index, scenario, prompt_dir)
-    jailbreak = generate_sample(backend, model, messages, rate_limiter)
+    jailbreak = generate_sample(client, messages)
     snake_name = CATEGORY_NAMES[category_index]
     return jailbreak, f"category={snake_name}", scenario
 

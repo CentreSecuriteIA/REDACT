@@ -1,48 +1,35 @@
 """Constitution-to-input sample generation pipeline.
 
-# CONSTITUTION-TO-INPUT PIPELINE
-# Converts constitution entry descriptions into full realistic input prompts.
-# This bridges the constitution pipeline (short descriptions) to the content
-# moderation input pipeline (full prompts for classifier training).
-#
-# Each constitution entry's sample_description is expanded into multiple
-# full-length prompts using configurable template styles ("long", "short",
-# or any custom style added to prompts/constitution/input_generation/).
-#
-# Future work: chain with generate_outputs() for output samples, and
-# generate_jailbreaks() for augmented training data.
-
-Reads constitution CSVs from Data_cache/constitution/, expands each entry's
-sample_description into full prompts using the content moderation InputPipeline
-as the generation engine, and saves results in standard content moderation
+Bridges the constitution pipeline (short entry descriptions) to the content
+moderation input pipeline (full prompts for classifier training): reads
+constitution CSVs from Data_cache/constitution/, expands each entry's
+sample_description into multiple full-length prompts via the content
+moderation InputPipeline, and saves results in standard content moderation
 format with constitution metadata preserved.
 
+Template styles are "long", "short", or any custom style added under
+prompts/input/generation/from_constitution/.
+
 Usage:
-    from redact.llms import get_backend, RateLimiter
+    from redact.llms import get_client
     from redact.constitution.input_generation import ConstitutionInputPipeline
 
-    backend = get_backend("venice-uncensored")
-    pipeline = ConstitutionInputPipeline(
-        gen_backend=backend, gen_model="venice-uncensored",
-        check_backend=backend, check_model="venice-uncensored",
-    )
+    pipeline = ConstitutionInputPipeline(gen=ModelClient.create("venice-uncensored"))
     result = pipeline.run(style="long", samples_per_entry=3)
 """
 
 import logging
-from collections.abc import Callable
 from pathlib import Path
 
 import pandas as pd
 
-from ..content_moderation.checker import build_quality_checker
+from .. import paths
 from ..content_moderation.generation import (
     ConstitutionInputResult,
     InputPipeline,
 )
-from ..llms.base import LLMBackend
+from ..llms.client import ModelClient
 from ..llms.prompts import load_prompt
-from ..llms.wrappers import RateLimiter
 
 logger = logging.getLogger(__name__)
 
@@ -50,43 +37,7 @@ logger = logging.getLogger(__name__)
 # now live under prompts/input/generation/from_constitution/{style}/.
 _PROMPT_PIPELINE = "input"
 
-# Default prompt directory (prompts/ inside the redact package)
-_PACKAGE_DIR = Path(__file__).resolve().parent.parent
-_DEFAULT_PROMPT_DIR = _PACKAGE_DIR / "prompts"
-
-
-# ---------------------------------------------------------------------------
-# Constitution-specific checker
-# ---------------------------------------------------------------------------
-
-
-def _build_constitution_checker(
-    category: str,
-    entry_type: str,
-    subcategory: str = "",
-    prompt_dir: str | Path | None = None,
-) -> Callable[[str], list[dict]]:
-    """Backward-compatible alias for the unified entry-type-aware checker.
-
-    Delegates to ``content_moderation.checker.build_quality_checker`` which
-    now reads the unified ``prompts/input/quality_check/template.json``.
-    Kept here so existing imports of ``_build_constitution_checker`` keep
-    working during the migration window.
-    """
-    return build_quality_checker(
-        category=category,
-        entry_type=entry_type,
-        subcategory=subcategory,
-        prompt_dir=str(prompt_dir) if prompt_dir is not None else None,
-    )
-
-
-# ---------------------------------------------------------------------------
-# Result data class — now defined in content_moderation/generation.py and
-# re-exported here for backward compatibility.
-# ---------------------------------------------------------------------------
-
-# (ConstitutionInputResult imported above from content_moderation.generation)
+_DEFAULT_PROMPT_DIR = paths.prompts_dir()
 
 
 # ---------------------------------------------------------------------------
@@ -130,10 +81,9 @@ def get_available_styles(prompt_dir: Path | None = None) -> list[str]:
 class ConstitutionInputPipeline:
     """Expand constitution descriptions into full input prompts.
 
-    # CONSTITUTION-TO-INPUT: Core pipeline class.
-    # Composes with content moderation InputPipeline for generation/extraction/checking.
-    # Does NOT extend InputPipeline — the iteration pattern is fundamentally
-    # different (per-entry with unique sample_description vs per-category multi-turn).
+    Composes with (rather than extends) the content moderation InputPipeline:
+    the iteration pattern differs — per-entry with a unique sample_description,
+    vs. InputPipeline's per-category multi-turn loop.
 
     Each constitution entry has a short sample_description (e.g. "Instructions
     for making pipe bombs"). This pipeline uses the content moderation
@@ -147,11 +97,8 @@ class ConstitutionInputPipeline:
 
     def __init__(
         self,
-        gen_backend: LLMBackend,
-        gen_model: str,
-        check_backend: LLMBackend | None = None,
-        check_model: str | None = None,
-        rate_limiter: RateLimiter | None = None,
+        gen: ModelClient,
+        check: ModelClient | None = None,
         extraction_style: str = "numbered",
         constitution_dir: str | Path | None = None,
         output_dir: str | Path | None = None,
@@ -159,20 +106,10 @@ class ConstitutionInputPipeline:
         """Create a ConstitutionInputPipeline.
 
         Args:
-            gen_backend: LLM backend for generation.
-            gen_model: Model identifier for generation.
-            check_backend: LLM backend for checking. Defaults to gen_backend.
-            check_model: Model identifier for checking. Defaults to gen_model.
-            rate_limiter: Optional shared rate limiter.
-            extraction_style: Extraction style for InputPipeline ("numbered",
-                "structured_qa", or "delimiter").
-            constitution_dir: Where to read constitution CSVs.
-                Defaults to Data_cache/constitution/.
-            output_dir: Where to save generated input samples.
-                Defaults to Datasets/constitution_inputs/.
+            gen: Generation model, bound to its transport.
+            check: Checker model. Defaults to ``gen``.
         """
-        check_backend = check_backend or gen_backend
-        check_model = check_model or gen_model
+        check = check or gen
 
         # Resolve default directories first (single-source path module) so the
         # composed InputPipeline is created pointing at the right output dir.
@@ -189,11 +126,8 @@ class ConstitutionInputPipeline:
         # resolved output dir up front so per-category CSVs land there instead of
         # defaulting to Datasets/ (was previously patched via a runtime mutation).
         self.input_pipeline = InputPipeline(
-            gen_backend=gen_backend,
-            gen_model=gen_model,
-            check_backend=check_backend,
-            check_model=check_model,
-            rate_limiter=rate_limiter,
+            gen=gen,
+            check=check,
             extraction_style=extraction_style,
             dataset_dir=self.output_dir,
         )
@@ -208,8 +142,6 @@ class ConstitutionInputPipeline:
         source_categories: list[str] | None = None,
     ) -> pd.DataFrame:
         """Load and filter constitution entries from CSVs.
-
-        # CONSTITUTION-TO-INPUT: Reads from Data_cache/constitution/.
 
         Tries merged.csv first, then falls back to loading individual
         type CSVs and concatenating them.
@@ -290,7 +222,7 @@ class ConstitutionInputPipeline:
             source_categories: Filter to specific taxonomy categories.
             use_checker: Whether to quality-check generated prompts.
             save: Whether to save results to CSV.
-            verbose: Print progress.
+            verbose: Log progress.
             batch_size: Entries per LLM engine pass (default 32).
 
         Returns:

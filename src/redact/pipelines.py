@@ -66,18 +66,11 @@ from redact.jailbreak import (
     plan_run,
 )
 from redact.jailbreak.manipulation import get_or_generate_benign_data
-from redact.llms import (
-    RateLimiter,
-    get_backend,
-    get_router,
-    load_prompt,
-)
-from redact.llms.base import LLMBackend
+from redact.llms import ModelClient, load_prompt
 from redact.llms.model_config import default_model_for_role
 
 logger = logging.getLogger(__name__)
 
-_PACKAGE_DIR = Path(__file__).resolve().parent  # src/redact/
 _DEFAULT_TAXONOMY_DIR = paths.taxonomy_dir()
 
 
@@ -101,34 +94,24 @@ def _default_benign_path() -> Path:
 # ---------------------------------------------------------------------------
 
 
-def _get_backend(
-    backend: LLMBackend | None = None,
-    model: str = "venice-uncensored",
-) -> tuple[LLMBackend, RateLimiter]:
-    """Resolve backend — auto-select from model name if None.
+def _get_client(model: str = "venice-uncensored") -> ModelClient:
+    """Resolve a model name to its ready-to-call client.
 
-    Returns the process-wide rate limiter (owned by :func:`get_router`) so
-    every pipeline shares one RPM budget per model. Previously each call
-    constructed a fresh ``RateLimiter()``, which silently allowed each
-    pipeline to consume the full budget independently.
+    Thin alias for :meth:`ModelClient.create` — kept so pipeline code reads
+    consistently and has one place to change if resolution ever needs a
+    pipeline-specific default.
     """
-    if backend is None:
-        backend = get_backend(model)
-    return backend, get_router().rate_limiter
+    return ModelClient.create(model)
 
 
 def _ensure_benign_data(
-    backend: LLMBackend,
-    model: str,
-    rate_limiter: RateLimiter,
+    client: ModelClient,
     benign_path: Path | None = None,
     verbose: bool = True,
 ) -> dict:
     """Load benign data, generating if it doesn't exist."""
     return get_or_generate_benign_data(
-        backend=backend,
-        model=model,
-        rate_limiter=rate_limiter,
+        client=client,
         cache_path=benign_path or _default_benign_path(),
         verbose=verbose,
     )
@@ -247,7 +230,7 @@ def generate_constitution(
             ledger beside the CSVs and append to the existing CSVs (a crash
             loses at most one unit's work). When False, clear the CSVs and the
             ledger first and regenerate from scratch.
-        verbose: Print progress.
+        verbose: Log progress.
 
     Returns:
         DataFrame of all constitution entries, backed by the on-disk
@@ -265,17 +248,13 @@ def generate_constitution(
     if entry_types is not None:
         resolved_types = [EntryType(t) for t in entry_types]
 
-    # Resolve model (role default) + backend from the model name
+    # Resolve model (role default) + client from the model name
     model = model or default_model_for_role("constitution_gen")
-    backend = get_backend(model)
-
-    rate_limiter = get_router().rate_limiter
+    client = ModelClient.create(model)
 
     const_dir = paths.constitution_dir(data_dir)
     pipeline = ConstitutionPipeline(
-        backend=backend,
-        model=model,
-        rate_limiter=rate_limiter,
+        client=client,
         output_dir=const_dir,
     )
 
@@ -361,7 +340,7 @@ def generate_inputs(
             (standalone dedups against them; constitution mode skips entries
             already present). When False, clear the relevant CSVs first and
             regenerate from scratch.
-        verbose: Print progress.
+        verbose: Log progress.
         constitution_df: DataFrame of constitution entries. Triggers
             constitution-seeded mode when non-None.
         style: Template style for constitution mode (``"long"`` / ``"short"`` /
@@ -381,18 +360,16 @@ def generate_inputs(
     # Constitution-seeded mode (delegates to InputPipeline.run_from_constitution)
     # ------------------------------------------------------------------
     if constitution_df is not None:
-        backend, rate_limiter = _get_backend(None, model)
+        client = _get_client(model)
         check_model = check_model or model
+        check_client = ModelClient.create(check_model)
 
         # Constitution-seeded inputs auto-route to a dedicated subfolder so they
         # never collide with standalone content-moderation inputs.
         ds_dir = paths.constitution_inputs_dir(data_dir)
         pipeline = InputPipeline(
-            gen_backend=backend,
-            gen_model=model,
-            check_backend=backend,
-            check_model=check_model,
-            rate_limiter=rate_limiter,
+            gen=client,
+            check=check_client,
             extraction_style="numbered",
             dataset_dir=ds_dir,
         )
@@ -459,17 +436,14 @@ def generate_inputs(
         categories = categories[:num_categories]
 
     # Backend (auto-resolved from the model name)
-    backend, rate_limiter = _get_backend(None, model)
+    client = _get_client(model)
     check_model = check_model or model
 
     # Pipeline
     ds_dir = paths.datasets(data_dir)
     pipeline = InputPipeline(
-        gen_backend=backend,
-        gen_model=model,
-        check_backend=backend,
-        check_model=check_model,
-        rate_limiter=rate_limiter,
+        gen=client,
+        check=ModelClient.create(check_model),
         extraction_style="numbered",
         dataset_dir=ds_dir,
     )
@@ -530,11 +504,13 @@ def generate_outputs(
 
     Pipeline per ``batch_size`` chunk:
       1. Build all messages upfront.
-      2. ``BatchCaller.from_model(...).batch_generate(messages_list, model)``
-         — single vLLM engine pass (or thread-pool / sequential per backend
-         capability). One rate-limit slot per batch.
-      3. ``batch_check_samples`` over (input, output) pairs with the
-         entry-type-aware output checker. Refusals on harmful inputs are
+      2. ``batch_generate_samples(...)`` — single vLLM engine pass (or
+         thread-pool / sequential per backend capability). One rate-limit
+         slot per batch.
+      3. Each (input, output) pair checked with its own row's entry-type-aware
+         output checker via another ``batch_generate_samples`` pass (not
+         ``batch_check_samples`` — a chunk can mix several categories/entry
+         types, each with its own checker). Refusals on harmful inputs are
          rejected; refusals on benign inputs are evaluated normally.
       4. Incremental append to the output CSV per batch — crash-resilient.
 
@@ -599,9 +575,9 @@ def generate_outputs(
         inputs = inputs.head(max_samples)
 
     model = model or default_model_for_role("uncensored_gen")
-    backend, rate_limiter = _get_backend(None, model)
+    client = _get_client(model)
     check_model = check_model or model
-    check_backend, _ = _get_backend(None, check_model) if check_outputs else (None, None)
+    check_client = ModelClient.create(check_model) if check_outputs else None
 
     out_path = (
         Path(output_path) if output_path
@@ -609,8 +585,8 @@ def generate_outputs(
     )
 
     return run_output_generation(
-        inputs=inputs, model=model, backend=backend, rate_limiter=rate_limiter,
-        check_outputs=check_outputs, check_model=check_model, check_backend=check_backend,
+        inputs=inputs, client=client,
+        check_outputs=check_outputs, check=check_client,
         batch_size=batch_size, out_path=out_path, prompt_dir=prompt_dir,
         resume=resume, verbose=verbose,
     )
@@ -654,7 +630,7 @@ def generate_jailbreaks(
     2. **Execute** — the manifest is streamed in ``batch_size`` chunks; each
        chunk is run through the batched engine
        (:func:`redact.jailbreak.batch_apply_combinations`), which pools LLM calls
-       per model per round via the router (vLLM native batch / API multi-worker).
+       per model per round via each model's client (vLLM native batch / API multi-worker).
        Output rows are appended to the CSV per chunk, so a crash loses at most
        one chunk and a re-run resumes from the output (its
        ``(input_id, iteration)`` pairs are the source of truth).
@@ -674,7 +650,7 @@ def generate_jailbreaks(
             to the ``data_dir``-derived path.
         max_complexity / max_obfuscations: Combination-sampler limits.
         seed: Global run seed (combined with each sample's id + iteration).
-        pure_only: Exclude LLM-dependent techniques (no router calls).
+        pure_only: Exclude LLM-dependent techniques (no LLM calls).
         entry_types: If set, filter inputs to these entry_type values.
         include_hacking / include_manipulation / include_obfuscation /
             include_requests: Layer toggles for the pool.
@@ -687,7 +663,7 @@ def generate_jailbreaks(
             combination_spec.json ``sampling_probs``).
         model: Generation model for LLM-dependent techniques. ``None`` (default)
             resolves to the ``uncensored_gen`` role. Backend auto-resolved from
-            the name; the engine routes via the process-wide router.
+            the name; the engine resolves a client per model.
         translation_model: Model for the translation family. ``None`` (default)
             uses the ``translation`` role (DeepSeek). Translation always routes to
             its own model independently of ``model``.
@@ -707,7 +683,7 @@ def generate_jailbreaks(
             default. ``None`` (default) → single flat-settings run.
         resume: Reuse an existing manifest and skip already-written output rows.
         manifest_path: Override manifest location.
-        verbose: Print progress.
+        verbose: Log progress.
 
     Returns:
         DataFrame of all jailbreak rows from the output CSV (one per planned
@@ -750,12 +726,12 @@ def generate_jailbreaks(
     # Generation model defaults to the uncensored_gen role; translation defaults
     # to the translation role (DeepSeek). Backend auto-resolved from the name.
     model = model or default_model_for_role("uncensored_gen")
-    backend, rate_limiter = _get_backend(None, model)
+    client = _get_client(model)
     # Internals capture (opt-in, non-interfering — no CSV column). Gated on the
-    # gen_model's backend; batch_apply_combinations/_tag_yields separately check
+    # gen model's transport; batch_apply_combinations/_tag_yields separately check
     # each individual request's own target model, so a chain that also routes to
     # translate_model only captures the calls whose model actually supports it.
-    capture_jailbreak = getattr(backend, "supports_internals", False)
+    capture_jailbreak = client.compute_config.supports_internals
 
     # ------------------------------------------------------------------
     # Build technique pool + assignment settings
@@ -865,7 +841,7 @@ def generate_jailbreaks(
     benign_data = None
     if auto_generate_benign and has_manipulation:
         benign_data = _ensure_benign_data(
-            backend, model, rate_limiter,
+            client,
             benign_path=benign_path or paths.benign_csv(data_dir),
             verbose=verbose,
         )
@@ -883,7 +859,6 @@ def generate_jailbreaks(
     ]
 
     out.parent.mkdir(parents=True, exist_ok=True)
-    router = get_router()
     total = len(pending)
     written = 0
     n_chunks = ceil(total / batch_size) if (total and batch_size) else 0
@@ -906,7 +881,7 @@ def generate_jailbreaks(
         ]
         results = batch_apply_combinations(
             samples, gen_model=model, translate_model=translation_model,
-            benign_data=benign_data, router=router, verbose=verbose,
+            benign_data=benign_data, verbose=verbose,
             capture_internals=capture_jailbreak,
         )
 
@@ -1013,7 +988,7 @@ def generate_paraphrases(
         prompt_dir: Root prompt directory for the paraphrase **and** paraphrase-check
             prompts. ``None`` (default) falls back to the bundled ``prompts/``.
         inputs_path / outputs_path: Artifact path overrides.
-        verbose: Print progress.
+        verbose: Log progress.
 
     Returns:
         ``{"inputs": df, "outputs": df}`` for whichever targets ran.
@@ -1110,7 +1085,7 @@ def build_dataset(
         include_jailbreaks: Include jailbreak samples.
         include_outputs: Include output response samples.
         include_paraphrases: Include paraphrase artifacts (per ``mode``).
-        verbose: Print progress.
+        verbose: Log progress.
 
     Returns:
         Complete merged DataFrame (the base+jailbreak+output set, plus paraphrases

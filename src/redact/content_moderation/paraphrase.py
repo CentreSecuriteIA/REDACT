@@ -2,8 +2,9 @@
 
 Batched paraphrase pass: rephrase generated samples to strip the stylistic
 fingerprints of the generating model while preserving meaning. The prompt is
-loaded from ``prompts/content_moderation/paraphrase/template.json`` (a 1:1
-"rephrase this" instruction).
+loaded from ``prompts/output/paraphrase/template.json`` (a 1:1 "rephrase
+this" instruction) — grouped under ``output/`` since paraphrasing is a
+post-generation transform, not its own pipeline.
 
 The real defingerprinting model is trained in a separate repository; here any
 capable model (the ``paraphraser`` role) drives the prompt. Whether a paraphrase
@@ -30,13 +31,11 @@ import pandas as pd
 from .. import paths
 from ..dataset import Ledger, Manifest, merge_all
 from ..dataset.io import _hash_text
-from ..llms import get_backend, get_router
-from ..llms.base import LLMBackend
-from ..llms.calls import batch_check_samples, generate_sample
+from ..llms.client import ModelClient
 from ..llms.model_config import default_model_for_role, get_models_by_role
 from ..llms.prompts import build_messages, load_prompt
-from ..llms.wrappers import BatchCaller, RateLimiter
-from .checker import build_paraphrase_checker, paraphrase_check_payload
+from ..llms.router import batch_check_samples, batch_generate_samples, generate_sample
+from .checker import build_paraphrase_checker
 
 logger = logging.getLogger(__name__)
 
@@ -45,14 +44,12 @@ _PROMPT_DIR = None  # Uses load_prompt() default (package-relative)
 
 def _load_paraphrase_prompt(prompt_dir: str | None = _PROMPT_DIR) -> dict:
     """Load the paraphrase prompt config from JSON."""
-    return load_prompt("content_moderation", "paraphrase", prompt_dir=prompt_dir)
+    return load_prompt("output", "paraphrase", prompt_dir=prompt_dir)
 
 
 def paraphrase_batch(
-    backend: LLMBackend,
-    model: str,
+    client: ModelClient,
     samples: list[str],
-    rate_limiter: RateLimiter | None = None,
     prompt_dir: str | None = _PROMPT_DIR,
     progress: str | None = None,
     **kwargs,
@@ -60,13 +57,12 @@ def paraphrase_batch(
     """Paraphrase a batch of samples in one capability-aware dispatch.
 
     Args:
-        backend: Paraphraser backend.
+        client: Paraphraser model, bound to its transport.
         model: Paraphraser model identifier.
         samples: Texts to paraphrase.
-        rate_limiter: Optional shared rate limiter.
         prompt_dir: Root prompt directory (defaults to the package prompts/).
         progress: Optional progress label for the batch dispatch.
-        **kwargs: Passed to ``BatchCaller.batch_generate`` / the backend.
+        **kwargs: Passed to ``batch_generate_samples`` / the transport.
 
     Returns:
         Paraphrased texts, one per input, in order.
@@ -75,15 +71,15 @@ def paraphrase_batch(
         return []
     prompt_config = _load_paraphrase_prompt(prompt_dir)
     messages_list = [build_messages(prompt_config, sample=s) for s in samples]
-    caller = BatchCaller.from_model(backend, model, rate_limiter=rate_limiter)
-    return caller.batch_generate(messages_list, model, progress=progress, **kwargs)
+    return batch_generate_samples(
+        client, messages_list,
+        batch_size=len(messages_list), progress=progress, **kwargs,
+    )
 
 
 def paraphrase_sample(
-    backend: LLMBackend,
-    model: str,
+    client: ModelClient,
     sample: str,
-    rate_limiter: RateLimiter | None = None,
     system_prompt: str | None = None,
     prompt_dir: str | None = _PROMPT_DIR,
     **kwargs,
@@ -94,13 +90,12 @@ def paraphrase_sample(
     the JSON template's system prompt for this call.
 
     Args:
-        backend: Paraphraser backend.
+        client: Paraphraser model, bound to its transport.
         model: Paraphraser model identifier.
         sample: Text to paraphrase.
-        rate_limiter: Optional shared rate limiter.
         system_prompt: Custom system prompt (overrides the JSON template).
         prompt_dir: Root prompt directory.
-        **kwargs: Passed to the backend.
+        **kwargs: Passed to the transport.
 
     Returns:
         Paraphrased text.
@@ -110,9 +105,9 @@ def paraphrase_sample(
             {"role": "system", "content": system_prompt},
             {"role": "user", "content": sample},
         ]
-        return generate_sample(backend, model, messages, rate_limiter, **kwargs)
+        return generate_sample(client, messages, **kwargs)
     return paraphrase_batch(
-        backend, model, [sample], rate_limiter=rate_limiter,
+        client, [sample],
         prompt_dir=prompt_dir, **kwargs,
     )[0]
 
@@ -255,38 +250,60 @@ def run_paraphrase_target(
             logger.info("[paraphrase:%s] nothing to do (all %d units done).", tgt, len(all_units))
         return pd.read_csv(out_path) if out_path.exists() else pd.DataFrame()
 
-    # ---- Execute grouped by model (one paraphraser loaded at a time) ---------
+    # ---- Execute grouped by model ------------------------------------------
+    # Grouping keeps one paraphraser in play at a time. Whether the previous
+    # one is actually *unloaded* between groups is a residency question, not a
+    # paraphrase one: two models sharing a checkpoint share a single engine and
+    # must NOT be unloaded between groups, while two large distinct models on
+    # one card must be. plan_residency() knows which case this is.
     from collections import defaultdict
     groups: dict[str, list[tuple]] = defaultdict(list)
     for u in units:
         groups[u[2]].append(u)
 
-    rate_limiter = get_router().rate_limiter
-    check_backend = get_backend(check_model) if check else None
+    unload_between = False
+    if len(groups) > 1:
+        from redact import residency
+
+        plan = residency.plan_residency(list(groups))
+        unload_between = plan.sequential
+        if verbose and unload_between:
+            logger.info(
+                "[paraphrase:%s] %d paraphrasers do not co-fit; unloading between groups.",
+                tgt, len(groups),
+            )
+
+    check_client = ModelClient.create(check_model) if check else None
     written = 0
-    for model, gunits in groups.items():
-        backend = get_backend(model)
+    for group_i, (model, gunits) in enumerate(groups.items()):
+        if group_i and unload_between:
+            # Frees the previous group's weights. check_client is held by a
+            # local reference and keeps working; if it is itself local, its
+            # engine stays resident by design.
+            residency.unload_local(keep=[check_model] if check else None)
+        client = ModelClient.create(model)
         # Internals capture: paraphrase's own output text (its eventual sample_id)
         # isn't known until the call returns, but internals_id has to be supplied
         # before it — capture under a pre-call-known provisional id (bid/k, always
         # unique) and relabel to the real sample_id once it's computed below.
-        capture_paraphrase = getattr(backend, "supports_internals", False)
+        capture_paraphrase = client.compute_config.supports_internals
         for start in range(0, len(gunits), batch_size):
             chunk = gunits[start : start + batch_size]
             texts = [u[3] for u in chunk]
             provisional_ids = [f"{bid}/paraphrase/attempt_{k}" for bid, k, *_ in chunk]
             paraphrased = paraphrase_batch(
-                backend, model, texts, rate_limiter=rate_limiter,
+                client, texts,
                 prompt_dir=prompt_dir,
                 progress=f"paraphrase:{tgt} ({model})" if verbose else None,
                 internals_ids=provisional_ids if capture_paraphrase else None,
             )
             if check:
-                payloads = [paraphrase_check_payload(u[3], p) for u, p in zip(chunk, paraphrased)]
+                originals = [u[3] for u in chunk]
                 checks = batch_check_samples(
-                    check_backend, check_model, payloads,
+                    check_client, paraphrased,
                     build_paraphrase_checker(prompt_dir=prompt_dir),
-                    batch_size=batch_size, rate_limiter=rate_limiter,
+                    originals=originals,
+                    batch_size=batch_size,
                     progress=f"paraphrase-check:{tgt}" if verbose else None,
                 )
             else:
@@ -304,7 +321,7 @@ def run_paraphrase_target(
                 seen_texts.add(pt)
                 sample_id = _hash_text(pt)
                 if capture_paraphrase:
-                    backend.rename_capture(prov_id, f"{bid}/paraphrase/{sample_id}")
+                    client.rename_capture(prov_id, f"{bid}/paraphrase/{sample_id}")
                 rows.append({
                     "sample_id": sample_id, "input_id": bid, "iteration": k,
                     "sample": pt, "category": cat, "entry_type": et,

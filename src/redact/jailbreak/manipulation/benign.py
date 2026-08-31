@@ -12,15 +12,12 @@ from pathlib import Path
 import pandas as pd
 
 from redact import paths
-from redact.llms.base import LLMBackend
-from redact.llms.calls import generate_sample
+from redact.llms.client import ModelClient
 from redact.llms.extraction import extract_structured_qa
 from redact.llms.prompts import build_messages, load_prompt
-from redact.llms.wrappers import RateLimiter
+from redact.llms.router import generate_sample
 
 logger = logging.getLogger(__name__)
-
-_PACKAGE_DIR = Path(__file__).resolve().parent.parent.parent  # src/redact/
 
 
 # ---------------------------------------------------------------------------
@@ -114,14 +111,12 @@ BENIGN_CATEGORIES: list[tuple[str, str]] = [
 # Generation
 # ---------------------------------------------------------------------------
 
-_DEFAULT_PROMPT_DIR = _PACKAGE_DIR / "prompts"
+_DEFAULT_PROMPT_DIR = paths.prompts_dir()
 
 
 def generate_short_benign(
     category: tuple[str, str],
-    backend: LLMBackend,
-    model: str,
-    rate_limiter: RateLimiter | None = None,
+    client: ModelClient,
     num_samples: int = 8,
     prompt_dir: str | Path = _DEFAULT_PROMPT_DIR,
 ) -> str:
@@ -137,14 +132,12 @@ def generate_short_benign(
         num_samples=str(num_samples),
         answer_style="Keep the answers concise and to the point. Make the answer be only 1 sentence long.",
     )
-    return generate_sample(backend, model, messages, rate_limiter)
+    return generate_sample(client, messages)
 
 
 def generate_long_benign(
     category: tuple[str, str],
-    backend: LLMBackend,
-    model: str,
-    rate_limiter: RateLimiter | None = None,
+    client: ModelClient,
     num_samples: int = 8,
     prompt_dir: str | Path = _DEFAULT_PROMPT_DIR,
 ) -> str:
@@ -160,14 +153,12 @@ def generate_long_benign(
         num_samples=str(num_samples),
         answer_style="Make the answers detailed and multi-sentence.",
     )
-    return generate_sample(backend, model, messages, rate_limiter)
+    return generate_sample(client, messages)
 
 
 def process_category(
     category: tuple[str, str],
-    backend: LLMBackend,
-    model: str,
-    rate_limiter: RateLimiter | None = None,
+    client: ModelClient,
     num_samples: int = 8,
     prompt_dir: str | Path = _DEFAULT_PROMPT_DIR,
 ) -> list[dict]:
@@ -179,12 +170,12 @@ def process_category(
     main_cat, sub_cat = category
 
     raw_short = generate_short_benign(
-        category, backend, model, rate_limiter, num_samples, prompt_dir
+        category, client, num_samples, prompt_dir
     )
     pairs_short = extract_structured_qa(raw_short)
 
     raw_long = generate_long_benign(
-        category, backend, model, rate_limiter, num_samples, prompt_dir
+        category, client, num_samples, prompt_dir
     )
     pairs_long = extract_structured_qa(raw_long)
 
@@ -193,7 +184,7 @@ def process_category(
         rows.append({
             "main_category": main_cat,
             "sub_category": sub_cat,
-            "prompt": pair["prompt"],
+            "prompt": pair["question"],
             "answer": pair["answer"],
             "answer_type": "short",
         })
@@ -201,7 +192,7 @@ def process_category(
         rows.append({
             "main_category": main_cat,
             "sub_category": sub_cat,
-            "prompt": pair["prompt"],
+            "prompt": pair["question"],
             "answer": pair["answer"],
             "answer_type": "long",
         })
@@ -217,9 +208,7 @@ def _default_benign_path() -> Path:
 
 
 def get_or_generate_benign_data(
-    backend=None,
-    model: str | None = None,
-    rate_limiter=None,
+    client: "ModelClient | None" = None,
     cache_path=None,
     verbose: bool = True,
 ) -> dict:
@@ -229,17 +218,15 @@ def get_or_generate_benign_data(
     manipulation techniques without requiring the caller to pre-generate it.
 
     Args:
-        backend: LLM backend (required only if generation is needed).
-        model: Model identifier (required only if generation is needed).
-        rate_limiter: Optional rate limiter.
+        client: The model to call, bound to its transport.
         cache_path: Path to benign CSV. Uses default Data_cache/benign/ if None.
-        verbose: Print progress messages during generation.
+        verbose: Log progress during generation.
 
     Returns:
         Benign data dict (same format as load_benign_data).
 
     Raises:
-        ValueError: If generation is needed but backend/model are not provided.
+        ValueError: If generation is needed but no client was provided.
     """
     path = Path(cache_path) if cache_path else _default_benign_path()
 
@@ -248,10 +235,10 @@ def get_or_generate_benign_data(
             logger.info("Loading cached benign data from %s", path)
         return load_benign_data(path)
 
-    if backend is None or model is None:
+    if client is None:
         raise ValueError(
-            "Benign data not found and no backend/model provided for generation. "
-            f"Either pre-generate benign data at {path} or pass backend and model."
+            "Benign data not found and no client provided for generation. "
+            f"Either pre-generate benign data at {path} or pass a ModelClient."
         )
 
     if verbose:
@@ -260,7 +247,7 @@ def get_or_generate_benign_data(
     path.parent.mkdir(parents=True, exist_ok=True)
     all_rows = []
     for i, category in enumerate(BENIGN_CATEGORIES):
-        rows = process_category(category, backend, model, rate_limiter)
+        rows = process_category(category, client)
         all_rows.extend(rows)
         pd.DataFrame(all_rows).to_csv(path, index=False)
         if verbose:

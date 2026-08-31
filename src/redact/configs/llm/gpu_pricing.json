@@ -1,0 +1,19 @@
+{
+  "_notes": "Hourly USD rate per SINGLE GPU, keyed by provider then by the name nvidia-smi reports (nvidia-smi --query-gpu=name --format=csv,noheader). Figures below are ILLUSTRATIVE and go stale - check your provider's current pricing and edit. Select a provider with REDACT_GPU_PROVIDER; the default 'local' prices at 0 so running on your own machine reports GPU-seconds without inventing a dollar figure. A '*' key is the fallback rate for any GPU under that provider; with no match at all, telemetry reports time only and never guesses.",
+  "local": {
+    "*": 0.0
+  },
+  "runpod": {
+    "NVIDIA A100-SXM4-80GB": 1.5,
+    "NVIDIA A100 80GB PCIe": 1.19,
+    "NVIDIA H100 80GB HBM3": 2.4,
+    "NVIDIA H100 PCIe": 2.09,
+    "NVIDIA L40S": 0.86,
+    "NVIDIA GeForce RTX 4090": 0.44,
+    "NVIDIA RTX A6000": 0.49
+  },
+  "lambda": {
+    "NVIDIA A100-SXM4-80GB": 1.29,
+    "NVIDIA H100 80GB HBM3": 2.49
+  }
+}

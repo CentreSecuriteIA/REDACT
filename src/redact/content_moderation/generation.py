@@ -21,17 +21,15 @@ nor ``standalone_generation.py`` has to import the other.
 Usage (the active constitution-seeded path — prefer this over
 ``run_category``/``run_standalone`` in ``standalone_generation.py``, which
 are deprecated):
-    from redact.llms import get_backend, RateLimiter, load_prompt
+    from redact.llms import ModelClient, load_prompt
     from redact.content_moderation import InputPipeline
 
-    backend = get_backend("venice-uncensored")
-    limiter = RateLimiter()
     prompt_config = load_prompt("input", "generation/from_constitution/long")
 
     pipeline = InputPipeline(
-        gen_backend=backend, gen_model="venice-uncensored",
-        check_backend=backend, check_model="venice-uncensored",
-        rate_limiter=limiter, dataset_dir="./Datasets/constitution_inputs",
+        gen=ModelClient.create("venice-uncensored"),
+        check=ModelClient.create("venice-uncensored"),
+        dataset_dir="./Datasets/constitution_inputs",
     )
     result = pipeline.run_from_constitution(
         constitution_df=constitution_df,  # from ConstitutionPipeline
@@ -56,11 +54,11 @@ from ..dataset.io import _default_dataset_dir, _hash_text, append_samples
 from ..dataset.ledger import Ledger
 from ..dataset.manifest import Manifest
 from ..dataset.merge import merge_all
-from ..llms.base import LLMBackend
-from ..llms.calls import is_accepted
-from ..llms.extraction import extract_and_clean, get_format_instruction
+from ..llms.client import ModelClient
+from ..llms.extraction import extract_and_clean
 from ..llms.prompts import build_messages, load_prompt
-from ..llms.wrappers import BatchCaller, RateLimiter, assert_single_sample_per_call
+from ..llms.router import batch_generate_samples, is_accepted
+from ..llms.wrappers import assert_single_sample_per_call
 from .checker import build_output_quality_checker, build_quality_checker
 from .results import CategoryResult, ConstitutionInputResult, SampleResult, TurnResult
 from .standalone_generation import _StandaloneGenerationMixin
@@ -133,31 +131,19 @@ class InputPipeline(_StandaloneGenerationMixin):
 
     def __init__(
         self,
-        gen_backend: LLMBackend,
-        gen_model: str,
-        check_backend: LLMBackend,
-        check_model: str,
-        rate_limiter: RateLimiter | None = None,
+        gen: ModelClient,
+        check: ModelClient,
         extraction_style: str = "numbered",
         dataset_dir: str | Path | None = None,
     ):
         """Create an InputPipeline.
 
         Args:
-            gen_backend: LLM backend for generation.
-            gen_model: Model identifier for generation.
-            check_backend: LLM backend for checking (can be same as gen).
-            check_model: Model identifier for checking (can differ from gen).
-            rate_limiter: Optional shared rate limiter.
-            extraction_style: "numbered", "structured_qa", or "delimiter".
-            dataset_dir: Root directory for saving CSVs. Defaults to
-                redact/Datasets/ (package-relative).
+            gen: Generation model, bound to its transport.
+            check: Checker model (may be the same client as ``gen``).
         """
-        self.gen_backend = gen_backend
-        self.gen_model = gen_model
-        self.check_backend = check_backend
-        self.check_model = check_model
-        self.rate_limiter = rate_limiter
+        self.gen = gen
+        self.check = check
         self.extraction_style = extraction_style
         self.dataset_dir = dataset_dir if dataset_dir is not None else _default_dataset_dir()
 
@@ -181,19 +167,13 @@ class InputPipeline(_StandaloneGenerationMixin):
         Returns:
             Chat messages list ready for generate_sample().
         """
-        # Deep copy to avoid mutating the original config
-        config = dict(prompt_config)
-
-        # Inject format instruction into system prompt
-        format_instr = get_format_instruction(
-            style=self.extraction_style,
-            num_samples=samples_per_request,
-        )
-        config["system_prompt"] = config.get("system_prompt", "") + format_instr
-
-        # Build the base message list
+        # Build the base message list — format_style appends the matching
+        # output-format instruction to system_prompt and is exactly the
+        # style extract_and_clean() is later called with (self.extraction_style),
+        # so the two can't independently drift.
         messages = build_messages(
-            config,
+            prompt_config,
+            format_style=self.extraction_style,
             num_samples=str(samples_per_request),
             **seed_kwargs,
         )
@@ -255,7 +235,10 @@ class InputPipeline(_StandaloneGenerationMixin):
         per-entry feedback loop is handled inside the LLM checker — failed
         samples are saved with their rejection reason but no regeneration
         loop runs here (this mode prioritises throughput over per-sample
-        retries). For per-sample retry use ``generate_with_check`` directly.
+        retries; the standalone/deprecated path in
+        ``standalone_generation.py`` is the one place in this library that
+        does per-sample feedback-driven regeneration, hand-rolled rather
+        than built on a shared retry primitive).
 
         Each batch of ``batch_size`` entries triggers exactly one
         ``batch_generate`` call (one vLLM engine pass) followed by one
@@ -292,14 +275,14 @@ class InputPipeline(_StandaloneGenerationMixin):
         # .claude/introspection_backend_plan.md). Generation asks for
         # samples_per_entry outputs in one completion, so one forward pass can't
         # be attributed to any single resulting sample unless there's exactly
-        # one — assert_single_sample_per_call is a no-op unless gen_backend
+        # one — assert_single_sample_per_call is a no-op unless the gen client
         # actually supports internals, in which case it raises if not.
-        assert_single_sample_per_call(self.gen_backend, samples_per_entry)
-        capture_input = getattr(self.gen_backend, "supports_internals", False)
+        assert_single_sample_per_call(self.gen, samples_per_entry)
+        capture_input = self.gen.compute_config.supports_internals
         # The checker dispatches one call per already-extracted sample (a flat
         # batch), so it's always attributable regardless of samples_per_entry —
         # no gate needed here.
-        capture_val_in = use_checker and getattr(self.check_backend, "supports_internals", False)
+        capture_val_in = use_checker and self.check.compute_config.supports_internals
 
         result = ConstitutionInputResult()
 
@@ -401,7 +384,7 @@ class InputPipeline(_StandaloneGenerationMixin):
                         logger.info("All entries already processed — nothing to do.")
                     return result
         prohibited: set[str] = set()
-        checker_cache: dict[tuple[str, str, str], Callable[[str], list[dict]]] = {}
+        checker_cache: dict[tuple[str, str, str], Callable[[str, str], list[dict]]] = {}
 
         entries = list(constitution_df.iterrows())
         total = len(entries)
@@ -443,12 +426,11 @@ class InputPipeline(_StandaloneGenerationMixin):
                 ))
 
             # 2. Single batched generation for the whole chunk (rate-limited,
-            #    capability-aware) — routed through BatchCaller, not the raw backend.
-            gen_caller = BatchCaller.from_model(
-                self.gen_backend, self.gen_model, rate_limiter=self.rate_limiter
-            )
-            raw_outputs = gen_caller.batch_generate(
-                messages_list, self.gen_model,
+            #    capability-aware) — routed through the shared router entry
+            #    point, not a hand-rolled BatchCaller.
+            raw_outputs = batch_generate_samples(
+                self.gen, messages_list,
+                batch_size=len(messages_list) or 1,
                 progress=f"gen batch {batch_idx}/{n_chunks}" if verbose else None,
                 internals_ids=(
                     [f"{eid}/input_{style}" if style else f"{eid}/input" for eid in entry_ids]
@@ -491,19 +473,20 @@ class InputPipeline(_StandaloneGenerationMixin):
                             subcategory=subcategory,
                         )
                     checker = checker_cache[cache_key]
-                    flat_check_msgs.extend(checker(s) for s in extracted)
+                    flat_check_msgs.extend(checker("", s) for s in extracted)
                     if capture_val_in:
                         suffix = f"val_in_{style}" if style else "val_in"
                         flat_internals_ids.extend(f"{_hash_text(s)}/{suffix}" for s in extracted)
 
             flat_check_results: list[tuple[bool, str]]
             if use_checker and flat_check_msgs:
-                check_caller = BatchCaller.from_model(
-                    self.check_backend, self.check_model,
-                    rate_limiter=self.rate_limiter,
-                )
-                responses = check_caller.batch_generate(
-                    flat_check_msgs, self.check_model,
+                # Not batch_check_samples: each entry in this chunk can carry a
+                # different (category, entry_type, subcategory) checker, so
+                # there's no single build_check_messages describing the whole
+                # flat batch — messages are already built per-entry above.
+                responses = batch_generate_samples(
+                    self.check, flat_check_msgs,
+                    batch_size=len(flat_check_msgs),
                     progress=f"check batch {batch_idx}/{n_chunks}" if verbose else None,
                     internals_ids=flat_internals_ids if capture_val_in else None,
                 )
@@ -616,12 +599,9 @@ class InputPipeline(_StandaloneGenerationMixin):
 
 def run_output_generation(
     inputs: pd.DataFrame,
-    model: str,
-    backend: LLMBackend,
-    rate_limiter: RateLimiter | None,
+    client: ModelClient,
     check_outputs: bool,
-    check_model: str,
-    check_backend: LLMBackend | None,
+    check: ModelClient | None,
     batch_size: int,
     out_path: Path,
     prompt_dir: str | Path | None = None,
@@ -632,12 +612,15 @@ def run_output_generation(
 
     Pipeline per ``batch_size`` chunk:
       1. Build all messages upfront.
-      2. ``BatchCaller.from_model(...).batch_generate(messages_list, model)``
-         — single vLLM engine pass (or thread-pool / sequential per backend
-         capability). One rate-limit slot per batch.
-      3. ``batch_check_samples`` over (input, output) pairs with the
-         entry-type-aware output checker. Refusals on harmful inputs are
-         rejected; refusals on benign inputs are evaluated normally.
+      2. ``batch_generate_samples(...)`` — single vLLM engine pass (or
+         thread-pool / sequential per backend capability). One rate-limit
+         slot per batch.
+      3. Each (input, output) pair checked with its own row's entry-type-aware
+         output checker (``build_output_quality_checker`` keyed by category/
+         entry_type — not ``batch_check_samples``, since a chunk can mix
+         several checkers) via another ``batch_generate_samples`` pass.
+         Refusals on harmful inputs are rejected; refusals on benign inputs
+         are evaluated normally.
       4. Incremental append to the output CSV per batch — crash-resilient.
 
     Resume: each input gets a stable content-hash id (its ``id``/``sample_id``
@@ -649,13 +632,10 @@ def run_output_generation(
 
     Args:
         inputs: Input samples DataFrame — already loaded/capped by the caller.
-        model: Generation model identifier.
-        backend: Generation backend (already resolved from ``model``).
-        rate_limiter: Shared rate limiter.
+        client: Generation model, bound to its transport.
         check_outputs: Run the entry-type-aware output quality checker.
             Set False to skip checking (accept everything).
-        check_model: Checker model identifier.
-        check_backend: Checker backend, or None when ``check_outputs`` is False.
+        check: Checker model, or None when ``check_outputs`` is False.
         batch_size: Inputs per engine pass.
         out_path: Resolved output CSV path.
         prompt_dir: Root prompt directory for the generation **and**
@@ -678,16 +658,10 @@ def run_output_generation(
     # Venice/vLLM path — no internals_ids kwarg is passed below. Captures land
     # under {log_dir}/{input_id}/output/ and .../val_out/ — a pure side channel,
     # never a CSV column (see .claude/introspection_backend_plan.md).
-    capture_internals_gen = getattr(backend, "supports_internals", False)
+    capture_internals_gen = client.compute_config.supports_internals
     prompt_config = load_prompt("output", "generation", prompt_dir=prompt_dir)
-    gen_caller = BatchCaller.from_model(backend, model, rate_limiter=rate_limiter)
-    check_caller = (
-        BatchCaller.from_model(check_backend, check_model, rate_limiter=rate_limiter)
-        if check_backend is not None
-        else None
-    )
     capture_internals_check = (
-        check_backend is not None and getattr(check_backend, "supports_internals", False)
+        check is not None and check.compute_config.supports_internals
     )
 
     text_col = "sample" if "sample" in inputs.columns else "prompt"
@@ -727,12 +701,12 @@ def run_output_generation(
     if verbose:
         logger.info("Generate Output Responses")
         logger.info("Samples: %d | Model: %s | Checker: %s | Batch: %d",
-                    len(inputs), model,
-                    f"enabled ({check_model})" if check_outputs else "disabled",
+                    len(inputs), client.model,
+                    f"enabled ({check.model})" if check_outputs and check else "disabled",
                     batch_size)
 
     # Per-(category, entry_type) checker cache so we build each prompt once.
-    checker_cache: dict[tuple[str, str], Callable[[str], list[dict]]] = {}
+    checker_cache: dict[tuple[str, str], Callable[[str, str], list[dict]]] = {}
 
     def _checker_for(category: str, entry_type: str):
         key = (category, entry_type)
@@ -771,13 +745,14 @@ def run_output_generation(
                 "category": category,
                 "subcategory": subcategory,
                 "entry_type": entry_type,
-                "model": model,
+                "model": client.model,
                 "source": str(row.get("source", "")),
             })
 
         # 2. Single batched generation
-        responses = gen_caller.batch_generate(
-            messages_list, model,
+        responses = batch_generate_samples(
+            client, messages_list,
+            batch_size=len(messages_list) or 1,
             progress=f"gen chunk {chunk_idx}/{n_chunks}" if verbose else None,
             internals_ids=(
                 [f'{r["input_id"]}/output' for r in chunk_rows]
@@ -785,16 +760,19 @@ def run_output_generation(
             ),
         )
 
-        # 3. Batched output checking (per-row checker, flat batch)
-        if check_outputs and check_caller is not None:
+        # 3. Batched output checking (per-row checker, flat batch). Not
+        # batch_check_samples: each row's checker is keyed by its own
+        # (category, entry_type), so there's no single build_check_messages
+        # for the whole chunk — messages are built per-row below instead.
+        if check_outputs and check is not None:
             check_msgs_list: list[list[dict]] = []
             for r, resp in zip(chunk_rows, responses):
-                payload = f"INPUT:\n{r['input_prompt']}\n\nOUTPUT:\n{resp}"
                 check_msgs_list.append(
-                    _checker_for(r["category"], r["entry_type"])(payload)
+                    _checker_for(r["category"], r["entry_type"])(r["input_prompt"], resp)
                 )
-            check_responses = check_caller.batch_generate(
-                check_msgs_list, check_model,
+            check_responses = batch_generate_samples(
+                check, check_msgs_list,
+                batch_size=len(check_msgs_list) or 1,
                 progress=f"check chunk {chunk_idx}/{n_chunks}" if verbose else None,
                 internals_ids=(
                     [f'{r["input_id"]}/val_out' for r in chunk_rows]

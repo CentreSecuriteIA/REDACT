@@ -39,10 +39,9 @@ from redact.jailbreak.obfuscation.encoding import (
     to_unicode_escape,
 )
 from redact.jailbreak.protocol import LLMRequest, TechniqueGen
-from redact.llms.base import LLMBackend
-from redact.llms.calls import generate_sample
+from redact.llms.client import ModelClient
 from redact.llms.prompts import build_messages, load_prompt
-from redact.llms.wrappers import RateLimiter
+from redact.llms.router import generate_sample
 
 # ---------------------------------------------------------------------------
 # Pure word-level transforms (no LLM) — Tier 1 helpers
@@ -177,9 +176,7 @@ _MAX_HARMFUL_WORDS_RESPONSE_LEN = 10
 
 def extract_harmful(
     prompt: str,
-    backend: LLMBackend,
-    model: str,
-    rate_limiter: RateLimiter | None = None,
+    client: ModelClient,
     prompt_dir: str | Path | None = None,
 ) -> str:
     """Extract harmful words from prompt using LLM.
@@ -191,7 +188,7 @@ def extract_harmful(
     """
     config = load_prompt("jailbreak", "extract_harmful", prompt_dir)
     messages = build_messages(config, prompt=prompt)
-    result = generate_sample(backend, model, messages, rate_limiter)
+    result = generate_sample(client, messages)
     result = result.strip()
     if result.lower() == "none":
         return ""
@@ -202,13 +199,11 @@ def extract_harmful(
 
 def _get_harmful_words(
     prompt: str,
-    backend: LLMBackend,
-    model: str,
-    rate_limiter: RateLimiter | None = None,
+    client: ModelClient,
     prompt_dir: str | Path | None = None,
 ) -> list[str]:
     """Run extract_harmful and return a clean list of detected words (sync)."""
-    raw = extract_harmful(prompt, backend, model, rate_limiter, prompt_dir)
+    raw = extract_harmful(prompt, client, prompt_dir)
     return [w for w in raw.split() if w.lower() not in _TOKENBREAK_EMPTY_RESPONSES]
 
 

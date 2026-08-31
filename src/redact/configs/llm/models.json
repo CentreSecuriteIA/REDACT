@@ -1,0 +1,136 @@
+{
+  "venice-uncensored": {
+    "backend_type": "api",
+    "roles": [
+      "uncensored_gen"
+    ],
+    "is_uncensored": true,
+    "supports_system_prompt": true,
+    "default_max_tokens": 2000,
+    "api": {
+      "backend_type": "openai",
+      "api_key_env": "VENICE_API_KEY",
+      "rpm": 75,
+      "base_url": "https://api.venice.ai/api/v1",
+      "api_model_id": "venice-uncensored-1-2",
+      "recommended_max_workers": 3,
+      "default_extra_body": {
+        "venice_parameters": {
+          "disable_thinking": true,
+          "include_venice_system_prompt": false
+        }
+      },
+      "price_per_1m_input": 0.2,
+      "price_per_1m_output": 0.9
+    },
+    "vllm": {
+      "hf_model_id": "dphn/Dolphin-Mistral-24B-Venice-Edition",
+      "vram_gb": 50.0
+    },
+    "notes": "Carries BOTH setups: .api (the hosted Venice endpoint, its default) and .vllm (the same weights run locally). There is deliberately no separate '-vllm' entry — ModelClient.create(name, backend_type='vllm') selects the local setup off this one. NOTE: include_venice_system_prompt is not always disabled; some pipelines may need the Venice system prompt active. Review per use case. vram_gb=50 is a derived estimate: ~23.6B params x 2 bytes (bf16) = ~47GB of weights plus KV/activations. It is corrected automatically after the first real load (Data_cache/vram.json). Well beyond a single consumer card - expect the residency planner to say so. Venice list price as of 2026-08-30: $0.20/$0.90 per 1M in/out. The endpoint slug is versioned and now reads 'venice-uncensored-1-2', carried in api_model_id — the registry name stays 'venice-uncensored' because it keys roles, the client cache, telemetry rows and the price lookup, and renaming it on every provider bump would orphan past traces."
+  },
+  "deepseek-v3.2": {
+    "backend_type": "api",
+    "roles": [
+      "translation"
+    ],
+    "is_uncensored": true,
+    "supports_system_prompt": true,
+    "default_max_tokens": 2000,
+    "api": {
+      "backend_type": "openai",
+      "api_key_env": "VENICE_API_KEY",
+      "rpm": 20,
+      "base_url": "https://api.venice.ai/api/v1",
+      "recommended_max_workers": 2,
+      "default_extra_body": {
+        "venice_parameters": {
+          "disable_thinking": true,
+          "include_venice_system_prompt": false
+        }
+      },
+      "price_per_1m_input": 0.33,
+      "price_per_1m_output": 0.48
+    },
+    "notes": "Venice-hosted; the translation role's default. Venice list price as of 2026-08-30: $0.33/$0.48 per 1M in/out ($0.16 cached input, not modelled — the library sends no cache control, so no call is ever billed at that rate)."
+  },
+  "olafangensan-glm-4.7-flash-heretic": {
+    "backend_type": "api",
+    "roles": [
+      "uncensored_gen"
+    ],
+    "is_uncensored": true,
+    "supports_system_prompt": true,
+    "default_max_tokens": 2000,
+    "api": {
+      "backend_type": "openai",
+      "api_key_env": "VENICE_API_KEY",
+      "rpm": 20,
+      "base_url": "https://api.venice.ai/api/v1",
+      "recommended_max_workers": 2,
+      "default_extra_body": {
+        "venice_parameters": {
+          "disable_thinking": true,
+          "include_venice_system_prompt": false
+        }
+      },
+      "price_per_1m_input": 0.07,
+      "price_per_1m_output": 0.4
+    },
+    "notes": "Venice-hosted alternative uncensored generator. Venice list price as of 2026-08-30: $0.07/$0.40 per 1M in/out ($0.035 cached input, not modelled — see deepseek-v3.2)."
+  },
+  "llama-3.2-3b-debug": {
+    "backend_type": "vllm",
+    "roles": [
+      "debug_local"
+    ],
+    "is_uncensored": true,
+    "supports_system_prompt": true,
+    "default_max_tokens": 2000,
+    "default_temperature": 0.7,
+    "vllm": {
+      "hf_model_id": "huihui-ai/Llama-3.2-3B-Instruct-abliterated",
+      "vllm_kwargs": {
+        "gpu_memory_utilization": 0.86,
+        "enforce_eager": true,
+        "max_model_len": 384
+      },
+      "vram_gb": 7.0
+    },
+    "notes": "Small local debug model — fast-loading (3B) for iterating on pipeline mechanics (batching, prompt formatting, manifest/ledger, resume) without API cost or a multi-minute load. Abliterated rather than the plain aligned Instruct model so refusals don't block the 'accepted' code path. Not a substitute for judging generation quality. vllm_kwargs are real-hardware-tuned (RTX 2080 Super, 8GB, via WSL2): the default gpu_memory_utilization overcommits a Windows-desktop-shared GPU, enforce_eager skips a slow compile step, and max_model_len=384 avoids spending KV-cache budget on this checkpoint's unused 131k native context. Full story in cleanup.md item 33. vram_gb=7 is a derived estimate: ~3.2B params x 2 bytes (bf16) = ~6.4GB of weights plus a small KV cache at max_model_len=384. That is deliberately close to the 8GB card it was tuned for - gpu_memory_utilization=0.86 leaves ~6.9GB, which is why max_model_len is capped."
+  },
+  "claude-opus-4-6": {
+    "backend_type": "api",
+    "roles": [
+      "constitution_gen"
+    ],
+    "is_uncensored": false,
+    "supports_system_prompt": true,
+    "default_max_tokens": 300,
+    "api": {
+      "backend_type": "anthropic",
+      "api_key_env": "ANTHROPIC_API_KEY",
+      "rpm": 5,
+      "rate_limit_scope": "endpoint",
+      "recommended_max_workers": 1,
+      "price_per_1m_input": 5.0,
+      "price_per_1m_output": 25.0
+    },
+    "notes": "default_max_tokens=300 is a fallback for hypothetical other uses — the one real caller (constitution generation) always passes max_tokens=10000 explicitly. Anthropic's limits are tight (typically 5 RPM on the free tier) and the transport is series-only, so recommended_max_workers must stay 1. Anthropic list price as of 2026-08-30: $5/$25 per 1M in/out (cache write $6.25, cache read $0.50 — not modelled, the library sends no cache_control). rate_limit_scope='endpoint' because Anthropic meters the account, not the model: any second Anthropic entry must declare this same rpm and will share one window with this one, rather than receiving its own full budget."
+  },
+  "venice-paraphraser": {
+    "backend_type": "vllm",
+    "roles": [
+      "paraphraser"
+    ],
+    "is_uncensored": true,
+    "supports_system_prompt": true,
+    "default_max_tokens": 2000,
+    "default_temperature": 0.8,
+    "vllm": {
+      "hf_model_id": "dphn/Dolphin-Mistral-24B-Venice-Edition",
+      "vram_gb": 50.0
+    },
+    "notes": "A DEDICATED model with its OWN identity, not an alias. The real defingerprinting model is trained separately and unavailable here, so as a stand-in this entry loads the SAME HF weights as venice-uncensored's local setup — it is its own model that happens to share weights. Swap hf_model_id, or register the real paraphraser with roles=['paraphraser'], when it lands. Shares venice-uncensored's checkpoint, so it shares its engine AND its 50GB footprint - the planner counts the load once, not twice."
+  }
+}

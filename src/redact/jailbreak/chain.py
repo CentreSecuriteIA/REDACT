@@ -65,7 +65,9 @@ def _tag_yields(gen: TechniqueGen, root: str) -> TechniqueGen:
     non-capable ``translate_model`` (or vice versa) tags exactly the calls
     that can be captured, and never trips BatchCaller's guard on the other.
     """
-    from redact.llms.api import get_backend  # lazy import — avoids import cycles
+    from redact.llms.model_config import (
+        model_compute_config,  # lazy import — avoids import cycles
+    )
 
     n = 0
     try:
@@ -73,7 +75,11 @@ def _tag_yields(gen: TechniqueGen, root: str) -> TechniqueGen:
     except StopIteration as stop:
         return stop.value
     while True:
-        if getattr(get_backend(request.model), "supports_internals", False):
+        # Read off the backend *class*, never a constructed one: this asks the
+        # question for every model in the chain, including ones this sample
+        # never actually calls, and building a local transport to answer it
+        # would load model weights.
+        if model_compute_config(request.model).supports_internals:
             request = LLMRequest(request.model, request.messages, internals_id=f"{root}/{n}")
             n += 1
         reply = yield request
@@ -140,7 +146,7 @@ def combine_techniques(*techniques: Callable, sort_by_hierarchy: bool = True) ->
     pass techniques in any order and the correct semantic sequence is applied.
 
     The returned ``combined`` callable runs **synchronously**: calling
-    ``combined(text, backend=..., model=..., rate_limiter=..., benign_data=...)``
+    ``combined(text, client=..., benign_data=...)``
     drives the chain to completion (issuing real LLM calls for generator steps
     via :func:`protocol.run_sync`) and returns ``(text, info)``. This preserves
     the single-sample / test contract. The batched engine does **not** call
@@ -168,18 +174,19 @@ def combine_techniques(*techniques: Callable, sort_by_hierarchy: bool = True) ->
 
     def combined(text: str, **kwargs) -> tuple[str, str]:
         gen = _run_chain(ordered, text, **kwargs)
-        backend = kwargs.get("backend")
-        rate_limiter = kwargs.get("rate_limiter")
+        client = kwargs.get("client")
 
         def call(request: LLMRequest) -> str:
             # Lazy imports keep utils import-time light and avoid any
             # llms<->jailbreak import ordering surprises.
-            from redact.llms.calls import generate_sample
-            b = backend
-            if b is None:
-                from redact.llms.api import get_backend
-                b = get_backend(request.model)
-            return generate_sample(b, request.model, request.messages, rate_limiter)
+            from redact.llms.client import ModelClient
+            from redact.llms.router import generate_sample
+            c = client
+            if c is None or c.model != request.model:
+                # A chain can mix models (e.g. gen vs translate); resolve the
+                # client for whichever model this request actually targets.
+                c = ModelClient.create(request.model)
+            return generate_sample(c, request.messages)
 
         return run_sync(gen, call)
 
@@ -220,9 +227,8 @@ def _parse_rejection_info(info_str: str) -> tuple[bool, str]:
 def apply_combination(
     fn: Callable,
     prompt: str,
-    backend=None,
+    client=None,
     model: str | None = None,
-    rate_limiter=None,
     benign_data: dict | None = None,
     auto_benign: bool = True,
     benign_cache_path=None,
@@ -236,9 +242,9 @@ def apply_combination(
     Args:
         fn: A technique function or the result of combine_techniques().
         prompt: The input prompt string.
-        backend: LLM backend (required for LLM-dependent techniques).
-        model: Model identifier.
-        rate_limiter: Optional rate limiter.
+        client: ModelClient (required for LLM-dependent techniques).
+        model: Model identifier used to tag gen-model requests; defaults to
+            ``client.model`` when a client is given.
         benign_data: Pre-loaded benign data dict for FSH/DAP manipulation.
         auto_benign: If True, auto-load or auto-generate benign data when needed.
         benign_cache_path: Path to benign CSV cache. Uses default if None.
@@ -255,18 +261,14 @@ def apply_combination(
     if needs_benign and benign_data is None and auto_benign:
         from redact.jailbreak.manipulation.benign import get_or_generate_benign_data
         benign_data = get_or_generate_benign_data(
-            backend=backend,
-            model=model,
-            rate_limiter=rate_limiter,
+            client=client,
             cache_path=benign_cache_path,
         )
 
     output = fn(
         prompt,
-        backend=backend,
-        model=model,
-        gen_model=model,
-        rate_limiter=rate_limiter,
+        client=client,
+        gen_model=model or (client.model if client is not None else None),
         benign_data=benign_data,
     )
     text, info = _normalize_output(output)

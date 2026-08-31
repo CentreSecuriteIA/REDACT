@@ -2,14 +2,17 @@
 
 from collections import Counter
 
+from redact.jailbreak.engine import batch_apply_combinations
+from redact.jailbreak.obfuscation.translation import (
+    _resolve_translate_model,
+    to_swahili,
+)
 from redact.jailbreak.protocol import LLMRequest
 from redact.jailbreak.utils import combine_techniques
-from redact.jailbreak.engine import batch_apply_combinations
-from redact.jailbreak.obfuscation.translation import to_swahili
-from redact.llms.translator import DEFAULT_TRANSLATE_MODEL
-
+from tests.conftest import as_resolver
 
 GEN_MODEL = "test-gen"
+DEFAULT_TRANSLATE_MODEL = _resolve_translate_model()
 
 
 class FakeRouter:
@@ -79,7 +82,7 @@ class TestBatchApplyCombinations:
             _sample(2, "gamma", two_step),       # 2-step generator
         ]
         router = FakeRouter()
-        results = batch_apply_combinations(samples, gen_model=GEN_MODEL, router=router)
+        results = batch_apply_combinations(samples, gen_model=GEN_MODEL, resolve=as_resolver(router))
 
         assert len(results) == 3
         by_id = {r["input_id"]: r for r in results}
@@ -101,7 +104,7 @@ class TestBatchApplyCombinations:
             _sample(0, "alpha", to_swahili),  # same input_id "id0", different technique
         ]
         router = FakeRouter()
-        results = batch_apply_combinations(samples, gen_model=GEN_MODEL, router=router)
+        results = batch_apply_combinations(samples, gen_model=GEN_MODEL, resolve=as_resolver(router))
 
         assert all(r["input_id"] == "id0" for r in results)
         sample_ids = {r["sample_id"] for r in results}
@@ -117,7 +120,7 @@ class TestBatchApplyCombinations:
             _sample(2, "gamma", two_step),   # test-gen: step1 r1, step2 r2
         ]
         router = FakeRouter()
-        batch_apply_combinations(samples, gen_model=GEN_MODEL, router=router)
+        batch_apply_combinations(samples, gen_model=GEN_MODEL, resolve=as_resolver(router))
 
         # Two rounds, two distinct models each round -> 4 calls, each batch of 1.
         assert len(router.calls) == 4
@@ -130,7 +133,7 @@ class TestBatchApplyCombinations:
         # Two same-model generator samples in one round -> one batched call.
         samples = [_sample(0, "a", two_step), _sample(1, "b", two_step)]
         router = FakeRouter()
-        batch_apply_combinations(samples, gen_model=GEN_MODEL, router=router)
+        batch_apply_combinations(samples, gen_model=GEN_MODEL, resolve=as_resolver(router))
         # Round 1 (step1) and round 2 (step2), each batching both samples.
         assert router.calls == [(GEN_MODEL, 2), (GEN_MODEL, 2)]
 
@@ -140,7 +143,7 @@ class TestBatchApplyCombinations:
             _sample(1, "beta", two_step),           # completes over 2 rounds
         ]
         router = FakeRouter()
-        results = batch_apply_combinations(samples, gen_model=GEN_MODEL, router=router)
+        results = batch_apply_combinations(samples, gen_model=GEN_MODEL, resolve=as_resolver(router))
         by_id = {r["input_id"]: r for r in results}
 
         assert by_id["id0"]["accepted"] is False
@@ -154,7 +157,7 @@ class TestBatchApplyCombinations:
         # Checker always rejects -> translation generator exhausts retries.
         samples = [_sample(0, "beta", to_swahili)]
         router = FakeRouter(check_reply="No, the tone is wrong")
-        results = batch_apply_combinations(samples, gen_model=GEN_MODEL, router=router)
+        results = batch_apply_combinations(samples, gen_model=GEN_MODEL, resolve=as_resolver(router))
         assert results[0]["accepted"] is False
         assert "DISCARDED" in results[0]["reasoning"]
         assert "Swahili" in results[0]["reasoning"]
@@ -171,11 +174,11 @@ class TestBatchApplyCombinations:
 
         quiet_router = FakeRouter()
         quiet = batch_apply_combinations(
-            make(), gen_model=GEN_MODEL, router=quiet_router, verbose=False
+            make(), gen_model=GEN_MODEL, resolve=as_resolver(quiet_router), verbose=False
         )
         verbose_router = FakeRouter()
         verbose = batch_apply_combinations(
-            make(), gen_model=GEN_MODEL, router=verbose_router, verbose=True
+            make(), gen_model=GEN_MODEL, resolve=as_resolver(verbose_router), verbose=True
         )
 
         # verbose must not change outcomes.

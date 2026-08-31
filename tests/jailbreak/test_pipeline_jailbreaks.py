@@ -6,14 +6,12 @@ called. This exercises planning, chunked execution, manifest, the prompt-content
 id, and resume without any network access.
 """
 
-import json
 
 import pandas as pd
 import pytest
 
-from redact.pipelines import generate_jailbreaks
 from redact.jailbreak.manifest import compute_sample_id, load_plan
-
+from redact.pipelines import generate_jailbreaks
 
 PURE_KW = dict(
     pure_only=True,

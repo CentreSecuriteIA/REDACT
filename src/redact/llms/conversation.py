@@ -7,9 +7,8 @@ never the reverse).
 
 Contents:
 - :class:`LLMRequest` — a pending model call (``model`` + ``messages``) yielded by
-  any generator; ``model`` is the routing key. (Historically defined in
-  ``jailbreak/protocol.py``; it is the model layer's type and is now defined here,
-  re-exported there for backward compatibility.)
+  any generator; ``model`` is the routing key. Re-exported from
+  ``jailbreak/protocol.py``.
 - :class:`Step` / :class:`Transcript` — a **typed step log** for multi-turn
   conversations: visible turns (``message``/``reply`` — Inspect ``ChatMessage``-like,
   rendered into a backend ``messages`` list) plus provenance events
@@ -33,8 +32,9 @@ class LLMRequest:
     ``model`` is the resolved model name and the engine's routing key (pending
     requests are grouped by ``model`` and dispatched one batch per model).
     ``internals_id`` is optional — set by a caller that wants this specific
-    call's internals captured (see ``LLMBackend.supports_internals``); left
-    ``None`` by default, which is a no-op all the way down.
+    call's internals captured (see ``LLMBackend.compute_config``'s
+    ``supports_internals``); left ``None`` by default, which is a no-op all
+    the way down.
     """
 
     model: str
@@ -101,11 +101,18 @@ class Transcript:
 
 
 def drive_sync(gen: Generator, call: Callable[[LLMRequest], str]):
-    """Drive one generator to completion with a blocking ``call(LLMRequest) -> str``.
+    """Drive one generator to completion with a blocking call function.
 
-    The generator yields :class:`LLMRequest`s and is resumed with the reply string;
-    returns whatever the generator returns (e.g. a ``Trajectory`` or ``(text, info)``).
-    :func:`drive_generators` drives many such generators at once instead.
+    The generator yields :class:`LLMRequest`s and is resumed with the reply
+    string. :func:`drive_generators` drives many generators at once instead.
+
+    Args:
+        gen: Generator yielding :class:`LLMRequest`s.
+        call: Blocking function turning one request into a reply string.
+
+    Returns:
+        Whatever the generator returns (e.g. a ``Trajectory`` or
+        ``(text, info)``).
     """
     try:
         request = next(gen)
@@ -119,7 +126,7 @@ def drive_sync(gen: Generator, call: Callable[[LLMRequest], str]):
 def drive_generators(
     gens: dict[Hashable, Generator],
     *,
-    router,
+    resolve: Callable[[str], object] | None = None,
     finalize: Callable[[Hashable, object], object],
     on_error: Callable[[Hashable, Exception], object] | None = None,
     verbose: bool = True,
@@ -131,24 +138,29 @@ def drive_generators(
     multi-turn conversation runner. Each generator in ``gens`` yields
     :class:`LLMRequest`s and is resumed with the reply string. Every round, all
     live generators' pending requests are pooled by ``request.model`` and
-    dispatched in one ``router.batch_generate(model, messages_list, ...)`` per
+    dispatched in one ``resolve(model).generate(messages_list, ...)`` per
     model; replies are fed back via ``.send``.
 
     Args:
         gens: ``{key: generator}``. Keys are arbitrary hashables (returned as-is).
-        router: object with ``batch_generate(model, messages_list, **kw) -> list[str]``.
+        resolve: ``model_name -> ModelClient``. Defaults to
+            :meth:`ModelClient.create`, which caches, so resolving once per
+            model per round costs nothing. Injectable for testing.
         finalize: ``(key, return_value) -> result`` — called when a generator
             completes (``StopIteration``).
         on_error: ``(key, exc) -> result`` — called if a generator (or a whole
             batch) raises, isolating that unit. If ``None``, the exception
             propagates.
         verbose / progress: when both set, a progress label is passed to
-            ``batch_generate`` (per model per round); otherwise no ``progress``
-            kwarg is passed (preserving the minimal ``batch_generate`` contract).
+            ``generate`` (per model per round); otherwise it is omitted.
 
     Returns:
         ``{key: result}`` for every input key.
     """
+    if resolve is None:
+        from .client import ModelClient  # local: avoids an import cycle
+        resolve = ModelClient.create
+
     results: dict[Hashable, object] = {}
     pending: dict[Hashable, LLMRequest] = {}
 
@@ -199,7 +211,7 @@ def drive_generators(
             if any(i is not None for i in batch_internals_ids):
                 kw["internals_ids"] = batch_internals_ids
             try:
-                responses = router.batch_generate(model, messages_list, **kw)
+                responses = resolve(model).generate(messages_list, **kw)
             except Exception as exc:  # noqa: BLE001 — whole batch failed
                 for k in keys:
                     _fail(k, exc)

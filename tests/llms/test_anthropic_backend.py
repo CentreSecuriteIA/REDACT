@@ -2,7 +2,7 @@
 
 import os
 import sys
-from unittest.mock import patch, MagicMock
+from unittest.mock import MagicMock, patch
 
 import pytest
 
@@ -21,26 +21,41 @@ def mock_anthropic_module():
 
 @pytest.fixture()
 def anthropic_backend(mock_anthropic_module):
-    """Create an AnthropicBackend with a mocked client."""
-    from redact.llms.anthropic_backend import AnthropicBackend
-    backend = AnthropicBackend(api_key="test-key")
-    return backend
+    """Create a configured AnthropicBackend with a mocked SDK client."""
+    from redact.llms.backends import AnthropicBackend
+    AnthropicBackend.clear_cache()
+    backend = AnthropicBackend(
+        "claude-opus-4-6", api_key="test-key", default_max_tokens=300,
+    )
+    yield backend
+    AnthropicBackend.clear_cache()
 
 
 class TestAnthropicBackendInit:
-    def test_from_env(self, mock_anthropic_module):
-        from redact.llms.anthropic_backend import AnthropicBackend
-        with patch.dict(os.environ, {"ANTHROPIC_API_KEY": "test-key"}):
-            backend = AnthropicBackend.from_env()
-            mock_anthropic_module.Anthropic.assert_called_with(api_key="test-key")
+    def test_from_config_uses_the_entrys_credentials(self, mock_anthropic_module):
+        """The registry entry's key env var and budget reach the backend."""
+        from redact.llms.backends import AnthropicBackend
+        from redact.llms.model_config import get_model_config
 
-    def test_from_env_missing_raises(self, mock_anthropic_module):
-        from redact.llms.anthropic_backend import AnthropicBackend
+        config = get_model_config("claude-opus-4-6")
+        AnthropicBackend.clear_cache()
+        with patch.dict(os.environ, {"ANTHROPIC_API_KEY": "test-key"}):
+            backend = AnthropicBackend.from_config(config)
+            mock_anthropic_module.Anthropic.assert_called_with(api_key="test-key")
+        assert backend.rpm == config.api.rpm
+        assert backend.max_workers == config.api.recommended_max_workers
+        AnthropicBackend.clear_cache()
+
+    def test_from_config_missing_api_key_raises(self, mock_anthropic_module):
+        from redact.llms.backends import AnthropicBackend
+        from redact.llms.model_config import get_model_config
+
+        config = get_model_config("claude-opus-4-6")
         env = os.environ.copy()
         env.pop("ANTHROPIC_API_KEY", None)
         with patch.dict(os.environ, env, clear=True):
             with pytest.raises(KeyError):
-                AnthropicBackend.from_env()
+                AnthropicBackend.from_config(config)
 
     def test_backend_name(self, anthropic_backend):
         assert anthropic_backend.backend_name == "anthropic"
@@ -50,56 +65,53 @@ class TestAnthropicBackendInit:
 
 
 class TestAnthropicGenerate:
+    """The backend is a configured model: the model name and max_tokens
+    default come from construction, and only messages/system prompt/overrides
+    are per call.
+    """
+
+    def test_models_default_max_tokens_used_when_not_overridden(self, anthropic_backend):
+        anthropic_backend.generate([[{"role": "user", "content": "hi"}]])
+        assert anthropic_backend._client.messages.create.call_args[1]["max_tokens"] == 300
+
     def test_basic_generate(self, anthropic_backend):
         result = anthropic_backend.generate(
-            [{"role": "user", "content": "hi"}], "claude-opus-4-6"
+            [[{"role": "user", "content": "hi"}]]
         )
-        assert result == "claude response"
+        assert result == ["claude response"]
 
-    def test_system_message_extraction(self, anthropic_backend):
-        anthropic_backend.generate(
+    def test_batch_preserves_order(self, anthropic_backend):
+        anthropic_backend._client.messages.create.side_effect = [
+            MagicMock(content=[MagicMock(text="first")]),
+            MagicMock(content=[MagicMock(text="second")]),
+        ]
+        result = anthropic_backend.generate(
             [
-                {"role": "system", "content": "You are helpful."},
-                {"role": "user", "content": "hi"},
-            ],
-            "claude-opus-4-6",
+                [{"role": "user", "content": "a"}],
+                [{"role": "user", "content": "b"}],
+            ]
+        )
+        assert result == ["first", "second"]
+
+    def test_system_prompt_passed_as_system_param(self, anthropic_backend):
+        anthropic_backend.generate(
+            [[{"role": "user", "content": "hi"}]],
+            system_prompts=["You are helpful."],
         )
         call_kwargs = anthropic_backend._client.messages.create.call_args[1]
         assert call_kwargs["system"] == "You are helpful."
-        assert len(call_kwargs["messages"]) == 1
-        assert call_kwargs["messages"][0]["role"] == "user"
+        assert call_kwargs["messages"] == [{"role": "user", "content": "hi"}]
 
-    def test_no_system_message(self, anthropic_backend):
+    def test_no_system_prompt_omits_system_key(self, anthropic_backend):
         anthropic_backend.generate(
-            [{"role": "user", "content": "hi"}],
-            "claude-opus-4-6",
+            [[{"role": "user", "content": "hi"}]],
         )
         call_kwargs = anthropic_backend._client.messages.create.call_args[1]
         assert "system" not in call_kwargs
 
-    def test_multiple_system_messages_joined(self, anthropic_backend):
+    def test_explicit_overrides_forwarded(self, anthropic_backend):
         anthropic_backend.generate(
-            [
-                {"role": "system", "content": "Part 1."},
-                {"role": "system", "content": "Part 2."},
-                {"role": "user", "content": "hi"},
-            ],
-            "claude-opus-4-6",
-        )
-        call_kwargs = anthropic_backend._client.messages.create.call_args[1]
-        assert call_kwargs["system"] == "Part 1.\n\nPart 2."
-
-    def test_resolves_defaults(self, anthropic_backend):
-        anthropic_backend.generate(
-            [{"role": "user", "content": "hi"}], "claude-opus-4-6"
-        )
-        call_kwargs = anthropic_backend._client.messages.create.call_args[1]
-        assert call_kwargs["max_tokens"] == 300  # from model config
-
-    def test_explicit_overrides(self, anthropic_backend):
-        anthropic_backend.generate(
-            [{"role": "user", "content": "hi"}],
-            "claude-opus-4-6",
+            [[{"role": "user", "content": "hi"}]],
             max_tokens=1000,
             temperature=0.3,
         )
@@ -107,25 +119,16 @@ class TestAnthropicGenerate:
         assert call_kwargs["max_tokens"] == 1000
         assert call_kwargs["temperature"] == 0.3
 
-    def test_supports_system_prompt_false_folds_into_user_message(self, anthropic_backend):
-        from redact.llms.model_config import MODEL_REGISTRY, register_model
+    def test_omits_temperature_when_not_given(self, anthropic_backend):
+        anthropic_backend.generate(
+            [[{"role": "user", "content": "hi"}]],
+        )
+        call_kwargs = anthropic_backend._client.messages.create.call_args[1]
+        assert "temperature" not in call_kwargs
 
-        name = "_test_no_system_prompt_claude"
-        try:
-            register_model(name, rpm=5, backend_type="anthropic", supports_system_prompt=False)
-            anthropic_backend.generate(
-                [
-                    {"role": "system", "content": "You are helpful."},
-                    {"role": "user", "content": "hi"},
-                ],
-                name,
-            )
-            call_kwargs = anthropic_backend._client.messages.create.call_args[1]
-            # folded away before the system/conversation split runs, so there's
-            # no separate `system` param — it's part of the one user message.
-            assert "system" not in call_kwargs
-            assert call_kwargs["messages"] == [
-                {"role": "user", "content": "You are helpful.\n\nhi"}
-            ]
-        finally:
-            MODEL_REGISTRY.pop(name, None)
+    def test_strips_extra_message_keys(self, anthropic_backend):
+        anthropic_backend.generate(
+            [[{"role": "user", "content": "hi", "extra_field": "drop me"}]],
+        )
+        call_kwargs = anthropic_backend._client.messages.create.call_args[1]
+        assert call_kwargs["messages"] == [{"role": "user", "content": "hi"}]

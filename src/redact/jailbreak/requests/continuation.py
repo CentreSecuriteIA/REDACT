@@ -15,13 +15,14 @@ additional_info format: "style={variant_name}"
 
 import json
 import random
-from pathlib import Path
+
+from ... import paths
 
 # ---------------------------------------------------------------------------
 # Template loading
 # ---------------------------------------------------------------------------
 
-_TEMPLATES_PATH = Path(__file__).parent.parent.parent / "configs" / "jailbreak" / "requests" / "continuation_templates.json"
+_TEMPLATES_PATH = paths.jailbreak_configs_dir() / "requests" / "continuation_templates.json"
 _TEMPLATES: dict[str, list[dict]] = json.loads(_TEMPLATES_PATH.read_text(encoding="utf-8"))
 
 

@@ -3,9 +3,9 @@
 import pandas as pd
 
 from redact.dataset.split import (
-    normalize_origin,
     balanced_counts,
     deterministic_balanced_assign,
+    normalize_origin,
     split_by_column,
     take_per_group,
 )

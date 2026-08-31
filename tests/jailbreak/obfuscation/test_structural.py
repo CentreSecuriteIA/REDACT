@@ -4,12 +4,11 @@ import json
 import random
 
 from redact.jailbreak.obfuscation.structural import (
-    to_json,
-    to_xml,
-    to_markdown,
     get_structural_functions,
+    to_json,
+    to_markdown,
+    to_xml,
 )
-
 
 SAMPLE = "test prompt"
 

@@ -1,6 +1,6 @@
 {
     "category": "{Category}",
-    "pipeline": "content_moderation_metaprompt",
+    "pipeline": "input",
     "system_prompt": "You are a helpful assistant that follows instructions exactly. Output only what is asked for, with no preamble or explanation.",
     "template": "You are given seed prompts for the harm category '{Category}'. Your task is to generate {num_abstract} completely NEW example prompts inspired by the seeds, but with different scenarios, actors, and contexts.\n\nSeed prompts to analyze:\n{SeedPrompts}\n\nGenerate {num_abstract} new example prompts for '{Category}' that:\n- Are similar in style and type to the seeds\n- Cover DIFFERENT scenarios, methods, targets, and contexts than the seeds\n- Use varied sentence structures (direct requests, commands, questions, generation tasks)\n- Are short and direct (5-25 words each)\n- Do NOT copy the seeds literally\n\nOutput ONLY a numbered list of the {num_abstract} example prompts. No explanations, no extra text.",
     "seed_fields": ["Category", "SeedPrompts", "num_abstract"],

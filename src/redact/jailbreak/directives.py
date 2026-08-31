@@ -16,9 +16,10 @@ different mechanic, not an accidental duplicate of this one.
 
 import json
 import random
-from pathlib import Path
 
-_CONFIGS_JAILBREAK_DIR = Path(__file__).parent.parent / "configs" / "jailbreak"
+from .. import paths
+
+_CONFIGS_JAILBREAK_DIR = paths.jailbreak_configs_dir()
 
 
 def load_templates(*relative_parts: str) -> dict:

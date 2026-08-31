@@ -1,6 +1,6 @@
 {
     "category": "all",
-    "pipeline": "content_moderation_paraphrase",
+    "pipeline": "output",
     "system_prompt": "You are a paraphrasing model. Rephrase the user prompt as your answer, add nothing extra to it and keep the intent and information intact. Also make sure to keep harmful text harmful. The length of the paraphrased text should be similar to the length of the original text. Do not summarize, only paraphrase.",
     "template": "{sample}",
     "seed_fields": ["sample"],

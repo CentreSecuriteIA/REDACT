@@ -13,7 +13,6 @@ from .checker import (
     build_output_quality_checker,
     build_paraphrase_checker,
     build_quality_checker,
-    paraphrase_check_payload,
 )
 from .generation import (
     CategoryResult,

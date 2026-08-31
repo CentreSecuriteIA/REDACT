@@ -6,6 +6,8 @@ dispatch, manifest writing, and cross-stage chaining fully offline.
 """
 
 import json
+from pathlib import Path
+from unittest.mock import patch
 
 import pandas as pd
 import pytest
@@ -13,9 +15,12 @@ import pytest
 from redact import paths
 from redact.dataset.io import append_samples
 from redact.runconfig import (
-    load_recipe, load_params, write_manifest, read_manifest, run_pipeline,
+    load_params,
+    load_recipe,
+    read_manifest,
+    run_pipeline,
+    write_manifest,
 )
-
 
 # --- manifests ---------------------------------------------------------------
 
@@ -181,3 +186,52 @@ def test_training_inputs_without_constitution_stage_raises(tmp_path):
     }
     with pytest.raises(ValueError, match="constitution"):
         run_pipeline(recipe, params={}, verbose=False)
+
+
+# --- telemetry wiring --------------------------------------------------------
+
+def test_run_pipeline_writes_a_trace_and_summarises(tmp_path, monkeypatch):
+    """A run leaves a machine-readable record beside its other sidecars."""
+    import redact
+    from redact import telemetry
+
+    monkeypatch.setattr(redact, "build_dataset", lambda **k: pd.DataFrame({"x": [1]}))
+    recipe = {
+        "dataset_type": "eval", "data_dir": str(tmp_path), "stages": ["build"],
+    }
+    try:
+        summary = run_pipeline(recipe, params={"build": {}}, verbose=False)
+
+        assert "telemetry" in summary
+        trace = Path(summary["trace"])
+        assert trace.parent.name == "Datasets"     # same home as manifest/state
+        events = [json.loads(ln) for ln in trace.read_text(encoding="utf-8").splitlines()]
+        stages = [e for e in events if e["ev"] == "stage"]
+        assert [e["stage"] for e in stages] == ["build"]
+        assert stages[0]["duration_s"] >= 0
+    finally:
+        telemetry.uninstall()
+
+
+def test_run_pipeline_reports_residency_before_running(tmp_path, monkeypatch, caplog):
+    """The plan is surfaced at minute zero, not after the budget is spent."""
+    import logging
+
+    import redact
+    from redact import telemetry
+
+    monkeypatch.setattr(redact, "build_dataset", lambda **k: pd.DataFrame({"x": [1]}))
+    recipe = {
+        "dataset_type": "eval", "data_dir": str(tmp_path),
+        "stages": ["inputs", "build"],
+        "models": {"gen": "llama-3.2-3b-debug", "check": "llama-3.2-3b-debug"},
+    }
+    monkeypatch.setattr(redact, "generate_inputs", lambda **k: pd.DataFrame({"x": [1]}))
+    try:
+        with caplog.at_level(logging.INFO, logger="redact.residency"):
+            with patch("redact.llms.ModelClient.create"):
+                run_pipeline(recipe, params={"inputs": {}, "build": {}}, verbose=True)
+        assert "[residency]" in caplog.text
+        assert "llama-3.2-3b-debug" in caplog.text
+    finally:
+        telemetry.uninstall()

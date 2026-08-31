@@ -1,13 +1,13 @@
 """Tests for cognitive/psychological hacking techniques."""
 
-from tests.conftest import MockBackend
 from redact.jailbreak.hacking.cognitive import (
-    HACKING_CATEGORIES,
     CATEGORY_NAMES,
-    get_situation,
+    HACKING_CATEGORIES,
     create_jailbreak,
     get_hacking_functions,
+    get_situation,
 )
+from tests.conftest import MockBackend, make_client
 
 
 class TestConstants:
@@ -28,14 +28,14 @@ class TestConstants:
 class TestGetSituation:
     def test_extracts_scenario(self):
         backend = MockBackend("Some preamble\n**Scenario Description**: A dark alley at midnight")
-        result = get_situation("test prompt", backend, "model")
+        result = get_situation("test prompt", make_client(backend))
         assert "dark alley" in result
 
     def test_falls_back_to_full_text_on_no_match(self):
         # _extract_scenario() now returns the whole reply (stripped) when no
         # "Scenario Description" marker is present, rather than raising.
         backend = MockBackend("No scenario here, just random text")
-        result = get_situation("test", backend, "model")
+        result = get_situation("test", make_client(backend))
         assert result == "No scenario here, just random text"
 
 
@@ -43,7 +43,7 @@ class TestCreateJailbreak:
     def test_with_scenario(self):
         backend = MockBackend("jailbreak output text")
         jailbreak, info, scenario = create_jailbreak(
-            "harmful prompt", 0, backend, "model", scenario="pre-gen scenario"
+            "harmful prompt", 0, make_client(backend), scenario="pre-gen scenario"
         )
         assert jailbreak == "jailbreak output text"
         assert "persona_roleplay" in info
@@ -53,7 +53,7 @@ class TestCreateJailbreak:
         backend = MockBackend("output")
         for i in range(5):
             _, info, _ = create_jailbreak(
-                "prompt", i, backend, "model", scenario="scenario"
+                "prompt", i, make_client(backend), scenario="scenario"
             )
             assert CATEGORY_NAMES[i] in info
 

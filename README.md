@@ -33,7 +33,7 @@ Requires Python 3.11+. See [pyproject.toml](pyproject.toml) for full dependency 
 
 **High-level API** — the common path. Every function takes one `data_dir` working root (all
 `Datasets/` and `Data_cache/` output lands under it); models default to their registry **role**
-(pass `None`), and backends are auto-selected from the model name. A single `resume` flag
+(pass `None`), and a model name resolves to a ready-to-call `ModelClient`. A single `resume` flag
 (default `True`) makes every stage restartable.
 
 ```python
@@ -54,7 +54,7 @@ dataset = build_dataset(data_dir=DATA_DIR)                           # merge eve
 
 **Paraphrase / fingerprint removal** — `generate_paraphrases(data_dir=DATA_DIR, target="both")` adds reworded ("defingerprinted") copies of the base inputs and *accepted* base outputs as **additive rows** (`paraphrases_inputs.csv` / `paraphrases_outputs.csv`). A **separate** meaning-preservation checker drops paraphrases that don't preserve meaning (check→drop), duplicates are deduped, and each artifact gets a `*.manifest.jsonl` plan + `*.state.jsonl` resume ledger like every other stage (see [Resume model](#resume-model-one-modular-sidecar-system)). As a `paraphrase` stage, `build_dataset(mode="training")` merges the paraphrases into the dataset while `mode="eval"` writes a separate `paraphrased.csv`.
 
-> **⚠️ Disclaimer — placeholder paraphraser.** The actual defingerprinting / paraphraser model is trained in a separate repository (see [Out of Scope](#out-of-scope)) and is **not shipped here**. The `paraphraser` role is a stand-in that loads the same Dolphin-Mistral-24B weights as `venice-uncensored-vllm`; register your real paraphraser with `register_model(..., role="paraphraser")` for production fingerprint removal.
+> **⚠️ Disclaimer — placeholder paraphraser.** The actual defingerprinting / paraphraser model is trained in a separate repository (see [Out of Scope](#out-of-scope)) and is **not shipped here**. The `paraphraser` role is a stand-in that loads the same Dolphin-Mistral-24B weights as `venice-uncensored`'s local setup; register your real paraphraser with `register_model(..., role="paraphraser")` for production fingerprint removal.
 
 **Config-driven runs** — define a whole run in a **recipe** JSON (`dataset_type` `"eval"` = no
 constitution / `"training"` = with) + a separate **input-params** file, and drive it with one call.
@@ -110,10 +110,9 @@ remains fully functional.
 
 ```python
 # 1. Auto-select backend from model name
-from redact.llms import get_backend, RateLimiter, load_prompt
+from redact.llms import ModelClient, load_prompt
 
-backend = get_backend("venice-uncensored")  # -> VeniceBackend (via VENICE_API_KEY env var)
-rate_limiter = RateLimiter()
+client = ModelClient.create("venice-uncensored")  # ready to call (via VENICE_API_KEY)
 
 # 2. Generate content moderation samples (via the deprecated standalone path —
 #    see the note above; run_from_constitution() is the recommended equivalent)
@@ -121,8 +120,8 @@ from redact.content_moderation import InputPipeline
 from redact.content_moderation.checker import build_quality_checker
 
 pipeline = InputPipeline(
-    gen_backend=backend, gen_model="venice-uncensored",
-    check_backend=backend, check_model="venice-uncensored",
+    gen=client,
+    check=client,
     rate_limiter=rate_limiter,
 )
 
@@ -162,17 +161,21 @@ See [`full_pipeline.ipynb`](full_pipeline.ipynb) for a complete pipeline walkthr
 ```
 src/redact/
 ├── llms/                          # Model-agnostic LLM abstraction
-│   ├── base.py                    # Abstract LLMBackend base class
-│   ├── api.py                     # Backend router: get_backend(model) -> auto-select
-│   ├── venice_backend.py          # Venice AI / OpenAI-compatible API backend
-│   ├── anthropic_backend.py       # Anthropic Claude backend (native SDK)
-│   ├── vllm_backend.py            # Local vLLM backend for self-hosted inference
-│   ├── router.py                  # ModelRouter — shared RateLimiter + per-model BatchCaller + role lookup
-│   ├── wrappers.py                # RateLimiter, retry, capability-aware BatchCaller
-│   ├── calls.py                   # generate_sample(), check_sample(), batch_check_samples()
+│   ├── backends/                  # One file per provider, each a *configured model*
+│   │   ├── base.py                # Abstract LLMBackend + ComputeConfig capability flags
+│   │   ├── capabilities.py        # BACKEND_TYPES + resolve_setup/transport_for/backend_for
+│   │   ├── openai.py              # Generic OpenAI-compatible API backend (Venice today)
+│   │   ├── anthropic.py           # Anthropic Claude backend (native SDK)
+│   │   ├── vllm.py                # Local vLLM backend for self-hosted inference
+│   │   ├── introspection.py       # Local transformers backend with internals capture
+│   │   └── vram.py                # What a local load took: claimed vs weights vs KV
+│   ├── observe.py                 # Telemetry emit hook (no-op by default; keeps llms/ dep-free)
+│   ├── client.py                  # ModelClient: a configured backend + its dispatch strategy
+│   ├── router.py                  # generate_sample(), check_sample(), batch_* helpers
+│   ├── wrappers.py                # RateLimiter + BatchCaller, both wired from a backend
 │   ├── prompts.py                 # JSON prompt loader + template renderer
 │   ├── extraction.py              # Multi-sample + constitution extraction
-│   ├── translator.py              # Translation with fidelity checking
+│   ├── conversation.py            # LLMRequest, Step/Transcript, drive_sync
 │   └── model_config.py            # Model registry (RPM, backend_type, capability flags, roles)
 │
 ├── constitution/                  # Constitution generation for classifiers
@@ -258,69 +261,88 @@ Everything above this layer calls a unified interface and is backend-agnostic.
 
 | Component | Purpose |
 |---|---|
-| `LLMBackend` | Abstract base class — `generate(messages, model)` |
-| `VeniceBackend` | Venice AI / OpenAI-compatible API backend |
+| `LLMBackend` | Abstract base class. A backend **is one configured model** — name, generation defaults, provider params, rpm and worker budget are bound at construction, so `generate(messages_list, *, system_prompts=..., max_tokens=..., temperature=...)` takes only what varies per call. Always batch-shaped (a single sample is a batch of one) |
+| `OpenAIBackend` | Generic OpenAI-compatible API backend (Venice AI is the provider registered against it today) |
 | `AnthropicBackend` | Anthropic Claude (native SDK, separate system param) |
 | `VLLMBackend` | Local vLLM for self-hosted GPU inference |
 | `TransformersIntrospectionBackend` | Local raw-`transformers` inference with hidden-state/attention/logprob capture (research/interpretability) |
-| `get_backend()` | Auto-select backend from model name |
-| `get_router()` | Process-wide `ModelRouter` — one shared `RateLimiter` and a per-model `BatchCaller` cache. The intended single entry point for rate-limited, capability-aware generation |
-| `RateLimiter` | Per-model sliding-window RPM enforcement (thread-safe) |
-| `BatchCaller` | Capability-aware dispatch: vLLM native batch / API thread pool / series-only sequential |
+| `ModelClient.create()` | Resolve a model name to a ready-to-call client (backend + limiter + batch strategy) |
+| `backend_for()` | Build the finished backend for one model on one of its setups |
+| `ModelClient` | A configured backend plus its dispatch strategy, bound once at construction |
+| `RateLimiter` | Per-model sliding-window RPM enforcement (thread-safe); inert when the backend carries no rpm |
+| `BatchCaller` | Parallel/sequential fan-out + rate limiting for backends without native batching. Native batching (vLLM) is dispatched by `ModelClient` straight to the engine, bypassing this class entirely |
 | `generate_sample()` | Single generation with rate limiting |
-| `check_sample()` | Validate a single sample (yes/no + reasoning) |
-| `batch_check_samples()` | Validate multiple samples in one `batch_generate()` pass — used automatically by all pipelines |
-| `generate_with_check()` | Full generate -> check -> feedback loop |
+| `check_sample()` | Validate a single sample against a `(original, sample) -> messages` checker |
+| `batch_check_samples()` | Validate multiple samples in batched engine passes |
+| `batch_generate_samples()` | Generate multiple samples in batched engine passes — the generation-side counterpart to `batch_check_samples()` |
+| `telemetry.install()` | Start the run trace (JSONL by default) and cost roll-up |
+| `telemetry.stage()` | Label every event inside a block with its pipeline stage |
+| `residency.plan_residency()` | Which local models fit on this machine, and in what order |
+| `residency.preload()` | Warm local models in the background while API stages run |
 | `load_prompt()` | Load prompt JSON by pipeline/category |
+| `PromptTemplate` | Two-stage prompt render: system prompt built once, template rendered per call |
 | `extract_and_clean()` | Extract numbered lists / Q&A / delimited from LLM output |
 | `parse_constitution()` | Parse 3-layer markdown constitution into structured entries |
-| `extract_bold_prompt_answer()` | Extract bold-formatted prompt-answer pairs |
-| `translate_with_check()` | Translation with fidelity validation |
 
 **Backend auto-routing** — just pass a model name:
 
 ```python
-from redact.llms import get_backend
+from redact.llms import ModelClient
 
-backend = get_backend("venice-uncensored")   # -> VeniceBackend
-backend = get_backend("claude-opus-4-6")      # -> AnthropicBackend
+client = ModelClient.create("venice-uncensored")   # -> client over OpenAIBackend
+client = ModelClient.create("claude-opus-4-6")     # -> client over AnthropicBackend
 ```
 
 **Direct instantiation** (when you need custom config):
 
 ```python
-from redact.llms import VeniceBackend, AnthropicBackend
+from redact.llms import AnthropicBackend, ModelClient, OpenAIBackend
 
-# Custom API endpoint
-backend = VeniceBackend(api_key="...", base_url="https://api.example.com/v1")
+# Custom API endpoint. A backend is one configured model, so the name comes
+# first and the model's facts (defaults, rpm) are bound here, not per call.
+backend = OpenAIBackend("my-model", api_key="...",
+                        base_url="https://api.example.com/v1", rpm=60)
+client = ModelClient(backend)
 
 # Anthropic
-backend = AnthropicBackend.from_env("ANTHROPIC_API_KEY")
+backend = AnthropicBackend("claude-opus-4-6", api_key=os.environ["ANTHROPIC_API_KEY"])
 ```
 
-**Local inference via vLLM** — use the pre-registered `venice-uncensored-vllm` model or any HuggingFace model ID:
+Anything you leave out here falls back to `LLMBackend`'s defaults — including
+`rpm=None`, which means no rate limiting at all. For anything you'll reuse,
+`register_model()` it instead: the setup is validated up front and
+`ModelClient.create(name)` then wires it the same way as every shipped model.
+
+**Local inference via vLLM** — select the local setup of a registered model with `backend_type="vllm"`, or register any HuggingFace model ID:
 
 ```python
 from redact import generate_constitution, generate_inputs
 
 # Use the registered local model — backend is auto-initialized from the name
-constitution = generate_constitution(model="venice-uncensored-vllm")
-generate_inputs(constitution_df=constitution, model="venice-uncensored-vllm")
+client = ModelClient.create("venice-uncensored", backend_type="vllm")   # local weights
+constitution = generate_constitution(model="llama-3.2-3b-debug")
+generate_inputs(constitution_df=constitution, model="llama-3.2-3b-debug")
 ```
 
-When `venice-uncensored-vllm` is requested, `get_backend()` automatically creates a `VLLMBackend` for `dphn/Dolphin-Mistral-24B-Venice-Edition`. On first use vLLM downloads the model weights from HuggingFace and caches them at the path set by `HF_HOME` in your `.env`. Subsequent runs load directly from cache — no re-download.
+When the `vllm` setup of `venice-uncensored` is requested, `ModelClient.create()` automatically creates a `VLLMBackend` for `dphn/Dolphin-Mistral-24B-Venice-Edition`. On first use vLLM downloads the model weights from HuggingFace and caches them at the path set by `HF_HOME` in your `.env`. Subsequent runs load directly from cache — no re-download.
 
-This model (a Dolphin fine-tune) uses the default ChatML prompt format via `VLLMBackend`'s `.chat()` path — no extra flag needed. If you register a genuine Mistral-3.x model instead, set `vllm_kwargs={"use_mistral_format": True}` so prompts are built as raw `[INST]/[SYSTEM_PROMPT]` text instead of ChatML; ChatML models (Dolphin, Hermes) use the default and need no flag.
+Prompts always go through vLLM's own chat template (`llm.chat()`), so any checkpoint whose tokenizer ships a usable `chat_template` — Dolphin, Hermes, and most instruct models — works with no extra flag. For one that doesn't (Mistral-3.x), pass vLLM's native `vllm_kwargs={"tokenizer_mode": "mistral"}`; there is no hand-rolled prompt formatting in this library.
 
-Both generation and checker paths dispatch through a `BatchCaller` (never the raw backend), so every batch is rate-limited and uses the right execution mode for its backend: one vLLM engine pass for native backends, a thread pool sized by the registry's `recommended_max_workers` for parallel-safe APIs, or sequential for series-only backends (Anthropic). The `batch_size` parameter (default 32) controls how many entries are grouped per pass.
+The engine is cached per checkpoint, not per model name, so two registry rows naming the same `hf_model_id` (as `venice-uncensored`'s `.vllm` setup and `venice-paraphraser` do) share one load instead of filling GPU memory twice. That cache is private to `VLLMBackend`: the introspection backend loads the same weights through `transformers`, a different runtime, and keeps its own.
+
+There is deliberately **no separate `venice-uncensored-vllm` row**: the hosted endpoint and the local weights are the same model, so one entry carries both `.api` and `.vllm`, and `ModelClient.create("venice-uncensored", backend_type="vllm")` selects the local one. Which setup is bound also decides the budget: a backend built from the `.vllm` setup carries no rpm and no `extra_body`, so running locally never inherits the endpoint's rate limit or its provider params.
+
+Both generation and checker paths dispatch through a `ModelClient` (never the raw backend), so every batch is rate-limited and uses the right execution mode for its backend: one vLLM engine pass for native backends, a thread pool sized by the registry's `recommended_max_workers` for parallel-safe APIs, or sequential for series-only backends (Anthropic). That choice is made once, when the client is built. The `batch_size` parameter (default 32) controls how many entries are grouped per pass.
 
 For a custom model, register it (or an existing HF id) so the backend auto-resolves from the name:
 
 ```python
 from redact.llms import register_model
 
-register_model("my-model", rpm=999, backend_type="vllm",
-               hf_model_id="mistralai/Mistral-7B-v0.3", role="uncensored_local")
+from redact.llms import VLLMConfig
+
+register_model("my-model", backend_type="vllm", roles=["uncensored_gen"],
+               vllm=VLLMConfig(hf_model_id="mistralai/Mistral-7B-v0.3"))
 generate_inputs(model="my-model")   # backend auto-selected from the registry
 ```
 
@@ -329,18 +351,23 @@ generate_inputs(model="my-model")   # backend auto-selected from the registry
 ```python
 from redact.llms import register_model
 
-register_model("my-model", rpm=50, default_max_tokens=4000, backend_type="venice")
+from redact.llms import APIConfig
+
+register_model("my-model", backend_type="api", default_max_tokens=4000,
+               api=APIConfig(backend_type="openai", api_key_env="MY_API_KEY",
+                             base_url="https://api.example.com/v1", rpm=50))
 ```
 
-**Model registry** — pre-configured models with rate limits and backend routing:
+**Model registry** — pre-configured models with rate limits and backend routing. RPM only
+applies to API backends (`openai`/`anthropic`) — local backends (`vllm`) aren't rate-limited,
+so they have no RPM at all, not an unlimited one:
 
 | Model | RPM | Backend | Notes |
 |---|---|---|---|
-| `venice-uncensored` | 75 | venice | Venice AI API |
-| `venice-uncensored-vllm` | 999 | vllm | Local self-hosted version of `venice-uncensored` (`dphn/Dolphin-Mistral-24B-Venice-Edition`) |
-| `venice-paraphraser` | 999 | vllm | Paraphraser-role placeholder — loads the same weights as `venice-uncensored-vllm`, its own registry identity (see the paraphrase section's disclaimer) |
-| `llama-3.2-3b-debug` | 999 | vllm | Small (3B), fast-loading local debug model (`huihui-ai/Llama-3.2-3B-Instruct-abliterated`) for iterating on pipeline mechanics against a real vLLM engine, not for judging generation quality |
-| `deepseek-v3.2` | 20 | venice | Stronger multilingual (used for translation) |
+| `venice-uncensored` | 75 | openai | Venice AI API (generic OpenAI-compatible backend) |
+| `venice-paraphraser` | — | vllm | Paraphraser-role placeholder — loads the same weights as `venice-uncensored`'s local setup, its own registry identity (see the paraphrase section's disclaimer) |
+| `llama-3.2-3b-debug` | — | vllm | Small (3B), fast-loading local debug model (`huihui-ai/Llama-3.2-3B-Instruct-abliterated`) for iterating on pipeline mechanics against a real vLLM engine, not for judging generation quality |
+| `deepseek-v3.2` | 20 | openai | Stronger multilingual (used for translation) |
 | `claude-opus-4-6` | 5 | anthropic | Set `max_workers=1` to avoid TPM limits |
 
 **Deep-internals logging (research/interpretability)** — a fourth backend,
@@ -351,15 +378,15 @@ intermediate activations by design, so this runs a standalone local HF
 capture, not alongside a live vLLM instance of the same weights).
 
 ```python
-from redact.llms import register_model
+from redact.llms import IntrospectConfig, register_model
 
 register_model(
-    "my-model-introspect", rpm=999, backend_type="transformers_introspect",
-    hf_model_id="mistralai/Mistral-7B-v0.3",
-    introspect_kwargs={
-        "log_dir": "./runs/internals",
-        "capture": {"logprobs": True, "hidden_states": "last", "attention": False},
-    },
+    "my-model-introspect", backend_type="introspect",
+    introspect=IntrospectConfig(
+        hf_model_id="mistralai/Mistral-7B-v0.3",
+        log_dir="./runs/internals",
+        capture={"logprobs": True, "hidden_states": "last", "attention": False},
+    ),
 )
 generate_outputs(model="my-model-introspect")   # capture is automatic once the backend supports it
 ```
@@ -414,7 +441,7 @@ inputs = generate_inputs(
     constitution_df=constitution,
     style="long",                   # "long" (2-5 sentences) or "short" (5-20 words)
     samples_per_entry=3,
-    model="venice-uncensored-vllm",
+    model="llama-3.2-3b-debug",
     resume=True,                    # True = resume (skip already-processed entries);
                                     # False = clear per-category CSVs and regenerate
 )
@@ -422,7 +449,7 @@ inputs = generate_inputs(
 
 Both `generate_constitution()` and `generate_inputs(constitution_df=...)` are **resumable by default**: re-running with `resume=True` (the default) skips work already saved to disk, so an interrupted run picks up where it left off. Set `resume=False` to clear previous output and regenerate from scratch.
 
-**Entry-type-aware checker** — `build_quality_checker(category, entry_type, subcategory)` in `content_moderation/checker.py` loads the unified template `prompts/input/quality_check/template.json` and injects all three fields, so benign and dual-use samples are evaluated correctly rather than rejected for "not belonging to the harm category." The same checker serves standalone content-moderation, constitution-seeded inputs, and (via `build_output_quality_checker`) output checking. `_build_constitution_checker()` is a thin backward-compatible alias.
+**Entry-type-aware checker** — `build_quality_checker(category, entry_type, subcategory)` in `content_moderation/checker.py` loads the unified template `prompts/input/quality_check/template.json` and injects all three fields, so benign and dual-use samples are evaluated correctly rather than rejected for "not belonging to the harm category." The same checker serves standalone content-moderation, constitution-seeded inputs, and (via `build_output_quality_checker`) output checking.
 
 ---
 
@@ -670,9 +697,8 @@ Multi-format extraction from LLM output, plus constitution parsing:
 | `extract_structured_qa()` | `**Prompt N:** **Question:** ... **Answer:** ...` |
 | `extract_delimited()` | Samples separated by `---`, `===`, blank lines |
 | `parse_constitution()` | 3-layer markdown hierarchy -> `ConstitutionEntry` list |
-| `extract_bold_prompt_answer()` | `**Prompt:** ... **Answer:** ...` pairs |
 | `clean_sample()` | Strip markdown formatting, meta-commentary, and ChatML tokens (`<\|im_end\|>`) |
-| `get_format_instruction()` | Format instructions to append to system prompts |
+| `get_format_instruction()` | Format instructions to append to system prompts — loaded from `prompts/format_instructions/{style}/`, one of `EXTRACTION_STYLES` |
 
 Constitution parsing example:
 
@@ -715,7 +741,7 @@ for e in entries:
 ### Adding a New Harm Category
 
 1. Add to taxonomy — `configs/taxonomy/content_moderation_categories.json`
-2. Create prompt template — `prompts/content_moderation/generation/template.json`
+2. Create prompt template — `prompts/input/generation/template.json`
 3. Run the pipeline — the category appears automatically in `iter_categories()`
 
 ### Adding a Custom Jailbreak Technique
@@ -745,16 +771,20 @@ Multi-round techniques (translate→check→retry, scenario→construction) simp
 ### Swapping Backends
 
 ```python
-from redact.llms import get_backend, VeniceBackend, VLLMBackend
+from redact.llms import (
+    ModelClient, OpenAIBackend, VLLMBackend, get_model_config,
+)
 
-# Auto-routing (recommended)
-backend = get_backend("venice-uncensored")   # Venice API
-backend = get_backend("claude-opus-4-6")      # Anthropic API
+# Auto-routing (recommended) — returns a ModelClient, model already bound
+client = ModelClient.create("venice-uncensored")   # Venice API
+client = ModelClient.create("claude-opus-4-6")     # Anthropic API
 
-# Direct instantiation
-backend = VeniceBackend(api_key="...", base_url="https://api.example.com/v1")
+# Direct instantiation, when the registry doesn't describe your endpoint
+backend = OpenAIBackend(api_key="...", base_url="https://api.example.com/v1")
+client = ModelClient(backend, "venice-uncensored",
+                     get_model_config("venice-uncensored"))
 
-# Local vLLM (manual init, pass directly to pipelines)
+# Local vLLM transport built by hand
 backend = VLLMBackend(model="mistralai/Mistral-7B-v0.3")
 ```
 
@@ -769,10 +799,56 @@ backend = VLLMBackend(model="mistralai/Mistral-7B-v0.3")
 | `VENICE_API_KEY` | Venice models | Venice AI API key |
 | `ANTHROPIC_API_KEY` | Claude models | Anthropic API key |
 | `HF_TOKEN` | HuggingFace loading | HuggingFace access token |
-| `HF_HOME` | vLLM models | Directory where vLLM downloads and caches model weights. Defaults to `~/.cache/huggingface` if unset. Set this to a path with sufficient disk space (the `venice-uncensored-vllm` model requires ~48 GB). |
+| `HF_HOME` | vLLM models | Directory where vLLM downloads and caches model weights. Defaults to `~/.cache/huggingface` if unset. Set this to a path with sufficient disk space (`venice-uncensored`'s local setup requires ~48 GB). |
 | `REDACT_OUTPUT_DIR` | Optional | Base directory for `Datasets/` and `Data_cache/` (defaults to script directory) |
+| `REDACT_TRACE` | Optional | Telemetry sink: `jsonl` (default), `wandb`, or `off` |
+| `REDACT_GPU_PROVIDER` | Optional | Key into `configs/llm/gpu_pricing.json` (e.g. `runpod`) for costing local GPU time. Defaults to `local`, which prices at 0 |
 
 Place in a `.env` file in the project root. Loaded automatically via `python-dotenv`.
+
+### Telemetry, cost, and GPU planning
+
+Every run writes a trace beside its other sidecars — no configuration, no account, no
+dependency:
+
+```
+Datasets/
+  constitution.manifest.jsonl
+  constitution.state.jsonl
+  run-20260829-142211.trace.jsonl     <- what was called, and what it cost
+```
+
+One event per **transport call** (a native vLLM pass over 32 prompts is one event with
+`n_items=32`, not 32 events), labelled with the pipeline stage it belongs to. Set
+`REDACT_TRACE=wandb` to mirror the same events to Weights & Biases, or `off` for nothing.
+
+`run_pipeline` also logs a cost roll-up at the end. **Two meters, because two different
+things are being bought:** API cost is tokens × price per *model* (set
+`price_per_1m_input`/`price_per_1m_output` on the model's `APIConfig`), while local cost is
+engine wall-clock lifetime × GPU rate per *checkpoint* — you lease the card for as long as
+an engine is alive, not just while it generates. Rates live in
+`configs/llm/gpu_pricing.json`; the GPU is detected with `nvidia-smi`. An unpriced GPU
+reports **time only** rather than guessing a number.
+
+Before anything loads, a residency plan says whether the run fits:
+
+```
+[residency] plan needs 2 GPU(s); detected 1 x NVIDIA GeForce RTX 2080 SUPER, 8GB each
+  group 1:
+    venice-uncensored[vllm]  ~20.4GB (measured)
+  group 2:  -> sequential, unload between
+    some-other-model[vllm]  ~20.4GB (declared)
+```
+
+Declare `vram_gb` (and `min_gpus` for a model too large for one card) on a `VLLMConfig` or
+`IntrospectConfig`; after each real load the actual usage is measured back into
+`Data_cache/vram.json` and preferred on later runs, as long as the settings that move it
+(`max_model_len`, quantization, `gpu_memory_utilization`) still match.
+
+Local models in the first group are then **preloaded on a background thread**, so a
+multi-minute 24B load overlaps with the API stages ahead of it instead of waiting behind
+them. A preload that fails logs the reason and lets the run continue — an API-only stage is
+ledger-backed and its output is saved as it goes, so finishing it beats killing it.
 
 ### Prompt JSON Schema
 
@@ -810,7 +886,7 @@ Place in a `.env` file in the project root. Loaded automatically via `python-dot
 ## Key Design Decisions
 
 - **Prompts are external** — no prompts hardcoded in library code. Adding a category = adding a JSON file. Prompts are redacted in public releases for safety.
-- **Backend auto-routing** — `get_backend(model)` picks the right backend from model name. Manual instantiation available for custom setups. vLLM requires manual init (heavy GPU setup).
+- **Backend auto-routing** — `ModelClient.create(model)` resolves the registry entry, picks the setup, and builds a fully-configured backend for it. Manual instantiation available for custom setups.
 - **Data is per-category** — all output lands in `Datasets/{category}/` as CSV. Merging is explicit.
 - **Checker feedback feeds back** — rejection reasoning is injected into the next generation call for directed improvement.
 - **Technique functions are pure** — most obfuscation functions take a string and return a string. No side effects, no hidden state.

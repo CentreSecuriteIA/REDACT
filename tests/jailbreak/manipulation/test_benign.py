@@ -5,10 +5,10 @@ import pytest
 
 from redact.jailbreak.manipulation.benign import (
     BENIGN_CATEGORIES,
-    process_category,
     load_benign_data,
+    process_category,
 )
-from tests.conftest import MockBackend
+from tests.conftest import MockBackend, make_client
 
 
 class TestBenignCategories:
@@ -40,7 +40,7 @@ class TestProcessCategory:
         backend = MockBackend(qa_text)
         rows = process_category(
             ("Home & Daily Life", "Cooking & Baking"),
-            backend, "model",
+            make_client(backend),
         )
         assert len(rows) > 0
         assert all("prompt" in r for r in rows)
@@ -54,7 +54,7 @@ class TestProcessCategory:
         )
         backend = MockBackend(qa_text)
         rows = process_category(
-            ("Test", "Sub"), backend, "model",
+            ("Test", "Sub"), make_client(backend),
         )
         types = set(r["answer_type"] for r in rows)
         assert "short" in types

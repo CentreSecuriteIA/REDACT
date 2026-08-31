@@ -3,17 +3,16 @@
 import pytest
 
 from redact.llms.extraction import (
-    get_format_instruction,
-    extract_numbered_list,
-    extract_structured_qa,
-    extract_delimited,
+    EXTRACTION_STYLES,
+    ConstitutionEntry,
     clean_sample,
     extract_and_clean,
+    extract_delimited,
+    extract_numbered_list,
+    extract_structured_qa,
+    get_format_instruction,
     parse_constitution,
-    extract_bold_prompt_answer,
-    ConstitutionEntry,
 )
-
 
 # ---------------------------------------------------------------------------
 # get_format_instruction
@@ -37,6 +36,12 @@ class TestGetFormatInstruction:
     def test_unknown_style_raises(self):
         with pytest.raises(ValueError, match="Unknown format style"):
             get_format_instruction("invalid")
+
+    def test_every_extraction_style_has_a_format_instruction(self):
+        # EXTRACTION_STYLES is shared with extract_and_clean()'s own
+        # validation — this is the "the two can't silently drift" guarantee.
+        for style in EXTRACTION_STYLES:
+            assert get_format_instruction(style, num_samples=1)
 
 
 # ---------------------------------------------------------------------------
@@ -100,9 +105,9 @@ class TestExtractStructuredQA:
         )
         result = extract_structured_qa(text)
         assert len(result) == 2
-        assert result[0]["prompt"] == "What is AI?"
+        assert result[0]["question"] == "What is AI?"
         assert result[0]["answer"] == "Artificial Intelligence."
-        assert result[1]["prompt"] == "What is ML?"
+        assert result[1]["question"] == "What is ML?"
 
     def test_empty(self):
         assert extract_structured_qa("no structured content") == []
@@ -182,6 +187,83 @@ class TestCleanSample:
 # extract_and_clean
 # ---------------------------------------------------------------------------
 
+class TestCleanSamplePreservesContent:
+    """Markdown *markup* comes off; the text it wraps stays.
+
+    Every rule here unwraps except the code fence, which used to delete the
+    block outright — so a content-moderation sample whose whole point was a
+    script came back with the script gone.
+    """
+
+    def test_code_block_is_unwrapped_not_deleted(self):
+        text = 'Write this:\n```python\nimport os\nos.system("x")\n```\nThen run it.'
+        out = clean_sample(text)
+        assert "import os" in out
+        assert 'os.system("x")' in out
+        assert "```" not in out
+
+    def test_two_code_blocks_both_survive(self):
+        out = clean_sample("A:\n```\nx=1\n```\nB:\n```js\ny=2\n```\ndone")
+        assert "x=1" in out and "y=2" in out and "```" not in out
+
+    def test_unclosed_fence_does_not_mangle_the_line(self):
+        """What truncation at max_tokens looks like: an opener, no closer.
+
+        The leftover backticks used to fall through to the inline-code rule,
+        which ate two of them and left a mangled '`python...' line.
+        """
+        out = clean_sample("Write a script:\n```python\nimport os")
+        assert out == "Write a script:\nimport os"
+        assert "`" not in out
+
+    def test_arithmetic_asterisks_are_left_alone(self):
+        """'3 * 4 * 5' is multiplication, not emphasis; it became '3  4  5'."""
+        assert clean_sample("Compute 3 * 4 * 5 and report") == "Compute 3 * 4 * 5 and report"
+
+    def test_real_emphasis_is_still_unwrapped(self):
+        assert clean_sample("This is *emphasised* text") == "This is emphasised text"
+
+    def test_bold_and_inline_code_still_unwrapped(self):
+        assert clean_sample("Explain **how** to run `ls -la`") == "Explain how to run ls -la"
+
+
+class TestStructuredQAHeaderIsOptional:
+    """The '**Prompt N:**' line is a pure index — never required.
+
+    The prompts that produce this format put nothing after it (the question is
+    on the next line), so requiring it made a contentless line a failure point:
+    a model dropping it yielded zero pairs, silently.
+    """
+
+    CANONICAL = (
+        "**Prompt 1:**\n**Question:** What is X?\n**Answer:** It is Y.\n\n"
+        "**Prompt 2:**\n**Question:** And Z?\n**Answer:** Sure."
+    )
+
+    def test_canonical_format_still_parses(self):
+        pairs = extract_structured_qa(self.CANONICAL)
+        assert pairs == [
+            {"question": "What is X?", "answer": "It is Y."},
+            {"question": "And Z?", "answer": "Sure."},
+        ]
+
+    def test_pairs_parse_without_the_index_header(self):
+        text = self.CANONICAL.replace("**Prompt 1:**", "").replace("**Prompt 2:**", "")
+        pairs = extract_structured_qa(text)
+        assert len(pairs) == 2
+        assert pairs[0]["question"] == "What is X?"
+        assert pairs[1]["answer"] == "Sure."
+
+    def test_missing_colon_in_the_header_still_parses(self):
+        pairs = extract_structured_qa(self.CANONICAL.replace("Prompt 1:**", "Prompt 1**"))
+        assert len(pairs) == 2
+
+    def test_answers_still_stop_at_the_next_pair(self):
+        """Without headers the terminator has to fall back to **Question:**."""
+        text = self.CANONICAL.replace("**Prompt 1:**", "").replace("**Prompt 2:**", "")
+        assert extract_structured_qa(text)[0]["answer"] == "It is Y."
+
+
 class TestExtractAndClean:
     def test_numbered_pipeline(self):
         text = "1. **Bold item**\n2. Plain item"
@@ -260,24 +342,3 @@ class TestParseConstitution:
         text = "## 1. Cat\n### 1.1 Sub\n- (Sample)\n[END]\n"
         entries = parse_constitution(text)
         assert len(entries) == 1
-
-
-# ---------------------------------------------------------------------------
-# extract_bold_prompt_answer
-# ---------------------------------------------------------------------------
-
-class TestExtractBoldPromptAnswer:
-    def test_basic_pairs(self):
-        text = (
-            '1. **Prompt:** "What is gravity?" '
-            "**Answer:** A fundamental force.\n"
-            '2. **Prompt:** "What is light?" '
-            "**Answer:** Electromagnetic radiation."
-        )
-        result = extract_bold_prompt_answer(text)
-        assert len(result) == 2
-        assert result[0]["prompt"] == "What is gravity?"
-        assert "force" in result[0]["answer"]
-
-    def test_empty(self):
-        assert extract_bold_prompt_answer("no matches here") == []

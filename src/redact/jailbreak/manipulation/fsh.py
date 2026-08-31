@@ -11,10 +11,9 @@ from collections.abc import Callable
 from pathlib import Path
 
 from redact.jailbreak.protocol import LLMRequest, TechniqueGen
-from redact.llms.base import LLMBackend
-from redact.llms.calls import generate_sample
+from redact.llms.client import ModelClient
 from redact.llms.prompts import build_messages, load_prompt
-from redact.llms.wrappers import RateLimiter
+from redact.llms.router import generate_sample
 
 # ---------------------------------------------------------------------------
 # LLM-based category selection (shared with dap.py)
@@ -45,9 +44,7 @@ def _parse_subcategory(chosen: str, all_subcategories: list[str]) -> tuple[str, 
 def select_best_subcategory(
     harmful_prompt: str,
     all_subcategories: list[str],
-    backend: LLMBackend,
-    model: str,
-    rate_limiter: RateLimiter | None = None,
+    client: ModelClient,
     prompt_dir: str | Path | None = None,
 ) -> tuple[str, bool]:
     """Use LLM to select the benign subcategory most similar to harmful prompt (sync).
@@ -57,7 +54,7 @@ def select_best_subcategory(
         LLM response couldn't be parsed and a random category was used.
     """
     messages = _build_subcategory_messages(harmful_prompt, all_subcategories, prompt_dir)
-    chosen = generate_sample(backend, model, messages, rate_limiter)
+    chosen = generate_sample(client, messages)
     return _parse_subcategory(chosen, all_subcategories)
 
 

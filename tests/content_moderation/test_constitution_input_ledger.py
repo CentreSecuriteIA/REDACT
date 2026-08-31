@@ -8,22 +8,20 @@ clears it. Fully offline (MockBackend).
 
 import pandas as pd
 
-from tests.conftest import MockBackend
 from redact.content_moderation.generation import (
     InputPipeline,
     _constitution_inputs_ledger,
     _constitution_inputs_manifest,
 )
+from tests.conftest import MockBackend, make_client
 
 _PROMPT = {"system_prompt": "sys", "template": "Generate items about {sample_description}"}
 
 
 def _pipeline(tmp_path):
     return InputPipeline(
-        gen_backend=MockBackend("1. alpha sample\n2. beta sample"),
-        gen_model="m",
-        check_backend=MockBackend("Yes"),
-        check_model="m",
+        gen=make_client(MockBackend("1. alpha sample\n2. beta sample"), "m"),
+        check=make_client(MockBackend("Yes"), "m"),
         dataset_dir=tmp_path,
     )
 
@@ -50,7 +48,7 @@ def test_ledger_written_and_resume_skips(tmp_path):
     pipe2 = _pipeline(tmp_path)
     r2 = pipe2.run_from_constitution(_const_df(), _PROMPT, samples_per_entry=2, verbose=False)
     assert r2.total_entries_processed == 0
-    assert pipe2.gen_backend.calls == []
+    assert pipe2.gen.backend.calls == []
 
 
 def test_manifest_written_before_generation(tmp_path):
@@ -75,7 +73,7 @@ def test_fresh_clears_ledger_and_regenerates(tmp_path):
     r = pipe2.run_from_constitution(_const_df(), _PROMPT, samples_per_entry=2,
                                     fresh=True, verbose=False)
     assert r.total_entries_processed == 2          # regenerated despite prior ledger
-    assert pipe2.gen_backend.calls != []
+    assert pipe2.gen.backend.calls != []
 
 
 def test_resume_falls_back_to_csv_when_ledger_absent(tmp_path):
@@ -90,4 +88,4 @@ def test_resume_falls_back_to_csv_when_ledger_absent(tmp_path):
     r = pipe2.run_from_constitution(_const_df(), _PROMPT, samples_per_entry=2,
                                     style="long", verbose=False)
     assert r.total_entries_processed == 0
-    assert pipe2.gen_backend.calls == []
+    assert pipe2.gen.backend.calls == []

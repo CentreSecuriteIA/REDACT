@@ -1,134 +1,213 @@
-"""Process-wide router for LLM access.
+"""Caller-facing helpers around a :class:`~redact.llms.client.ModelClient`.
 
-Owns one shared ``RateLimiter`` and one ``BatchCaller`` per model (lazily
-created, cached), so every pipeline shares the same RPM budget and the same
-capability-aware dispatch (native batch / thread pool / sequential) per model.
+The client itself is the model: fully wired at construction, it takes a batch
+of messages and returns a batch of replies. This module is the thin layer other
+subsystems call on top of that — single-sample convenience, chunking, and the
+check loop (build messages with the caller's checker, run them, map the replies
+through :func:`is_accepted`).
 
-Role → model name resolution (e.g. "translation" → "deepseek-v3.2") is a
-separate, smaller concern handled by :func:`redact.llms.model_config.
-default_model_for_role`, which every real call site uses directly since it
-composes with an explicit override (``model = model or
-default_model_for_role(role)``) — something a fixed role-lookup method on the
-router can't express.
+Nothing here decides *how* a batch executes — rate limiting, fan-out, and the
+native-vs-wrapped choice all live inside the client.
 
 Usage::
 
-    from redact.llms import get_router
+    from redact.llms import ModelClient, generate_sample, check_sample
 
-    router = get_router()
+    gen = ModelClient.create("venice-uncensored")
+    check = ModelClient.create("claude-opus-4-6")
 
-    # Single call (rate-limited, routed through the right executor)
-    result = router.generate("venice-uncensored", messages)
-
-    # Batch — picks the right path (vLLM native batch, API thread pool,
-    # or Anthropic sequential) based on backend capabilities
-    results = router.batch_generate("venice-uncensored", messages_list)
+    text = generate_sample(gen, messages)
+    accepted, reasoning = check_sample(check, text, build_check_messages)
 """
 
 from __future__ import annotations
 
-from .api import get_backend as _get_backend_module
-from .base import LLMBackend
-from .wrappers import BatchCaller, RateLimiter
+from collections.abc import Callable
+
+from .client import ModelClient
+
+_ACCEPT_PREFIXES = ("yes", "ok", "accept", "pass")
 
 
-class ModelRouter:
-    """Per-process LLM routing layer.
+def _chunk_label(progress: str | None, chunk_i: int, n_chunks: int) -> str | None:
+    """Progress label for one chunk — indexed only when there's more than one."""
+    if progress is None:
+        return None
+    return f"{progress} [{chunk_i}/{n_chunks}]" if n_chunks > 1 else progress
 
-    One instance per process via :func:`get_router`. Holds:
-    - a single shared :class:`RateLimiter` (all callers share the same RPM budget)
-    - a lazy cache of :class:`BatchCaller` instances, one per model name
 
-    The router does not own backends — those remain cached at module level
-    in ``llms.api``. The router owns *executors* (BatchCallers) and rate
-    limiting state. Backend instances themselves are stateless wrappers
-    that can be shared across executors.
+def is_accepted(response: str) -> bool:
+    """Parse a checker/judge LLM response into accept/reject.
+
+    The single acceptance rule shared by every checker/judge in the library
+    (content moderation, output, paraphrase, translation, jailbreak-technique
+    checks) — use this rather than reimplementing it at a call site.
+
+    Args:
+        response: Raw checker/judge response text.
+
+    Returns:
+        True when the response starts with "yes", "ok", "accept", or "pass"
+        (case-insensitive).
     """
+    return response.strip().lower().startswith(_ACCEPT_PREFIXES)
 
-    def __init__(self) -> None:
-        self._rate_limiter = RateLimiter()
-        self._executors: dict[str, BatchCaller] = {}
 
-    @property
-    def rate_limiter(self) -> RateLimiter:
-        """The shared rate limiter used by every executor this router owns."""
-        return self._rate_limiter
+def generate_sample(client: ModelClient, messages: list[dict], **kwargs) -> str:
+    """Generate one sample — a batch of one, unwrapped.
 
-    def get_backend(self, model: str) -> LLMBackend:
-        """Return the backend instance for a model (cached at module level)."""
-        return _get_backend_module(model)
+    Args:
+        client: The model to call.
+        messages: Chat messages for the single item.
+        **kwargs: Forwarded to :meth:`ModelClient.generate` (``max_tokens``,
+            ``temperature``, ``extra_body``, transport extras).
 
-    def get_executor(self, model: str) -> BatchCaller:
-        """Return the cached BatchCaller for a model, creating it if needed.
+    Returns:
+        Generated text.
+    """
+    return client.generate([messages], **kwargs)[0]
 
-        Concurrency is set from ``ModelConfig.recommended_max_workers`` via
-        :meth:`BatchCaller.from_model`. The executor shares this router's
-        rate limiter so per-model RPM is enforced globally.
-        """
-        if model not in self._executors:
-            backend = self.get_backend(model)
-            self._executors[model] = BatchCaller.from_model(
-                backend, model, rate_limiter=self._rate_limiter,
-            )
-        return self._executors[model]
 
-    def generate(
-        self,
-        model: str,
-        messages: list[dict],
-        **kwargs,
-    ) -> str:
-        """Single rate-limited generation routed through the model's executor."""
-        return self.get_executor(model).batch_generate(
-            [messages], model, **kwargs
-        )[0]
+def check_sample(
+    client: ModelClient,
+    sample: str,
+    build_check_messages: Callable[[str, str], list[dict]],
+    original: str = "",
+    **kwargs,
+) -> tuple[bool, str]:
+    """Run one sample past a checker model and interpret the verdict.
 
-    def batch_generate(
-        self,
-        model: str,
-        messages_list: list[list[dict]],
-        progress: str | None = None,
-        **kwargs,
-    ) -> list[str]:
-        """Batch generation routed through the model's executor.
+    Args:
+        client: The checker model.
+        sample: The generated text to validate.
+        build_check_messages: ``(original, sample) -> messages``. Checkers that
+            only need the text to validate ignore ``original``; it exists so
+            checkers genuinely comparing two texts (output-vs-input,
+            paraphrase-vs-source) get both as real arguments instead of the
+            caller concatenating them into ``sample``.
+        original: The other half of a two-text comparison; ``""`` when the
+            checker doesn't need one.
+        **kwargs: Forwarded to :meth:`ModelClient.generate`.
 
-        Picks the right execution mode (native batch / parallel / serial)
-        based on backend capabilities. See :meth:`BatchCaller.batch_generate`
-        for the dispatch rules.
+    Returns:
+        ``(accepted, reasoning)`` — reasoning is empty on acceptance, and the
+        checker's full response on rejection.
+    """
+    response = client.generate([build_check_messages(original, sample)], **kwargs)[0]
+    return (True, "") if is_accepted(response) else (False, response)
 
-        Args:
-            model: Model identifier (selects the executor).
-            messages_list: One chat message list per call.
-            progress: Optional label enabling live progress ticks (forwarded to
-                :meth:`BatchCaller.batch_generate`). Pass a label when verbose.
-            **kwargs: Forwarded to the executor (e.g. ``on_complete``, sampling
-                params).
-        """
-        return self.get_executor(model).batch_generate(
-            messages_list, model, progress=progress, **kwargs
+
+def batch_check_samples(
+    client: ModelClient,
+    samples: list[str],
+    build_check_messages: Callable[[str, str], list[dict]],
+    originals: list[str] | None = None,
+    batch_size: int = 32,
+    progress: str | None = None,
+    internals_ids: list[str | None] | None = None,
+    **kwargs,
+) -> list[tuple[bool, str]]:
+    """Check many samples, in chunks, preserving order.
+
+    Splits into chunks of ``batch_size`` and hands each to the client, which
+    runs it however its transport runs batches. The accept/reject
+    interpretation stays here — the client only returns text.
+
+    Args:
+        client: The checker model.
+        samples: Sample texts to validate.
+        build_check_messages: ``(original, sample) -> messages`` — see
+            :func:`check_sample` for the two-arg contract.
+        originals: One "other half" per sample, for checkers comparing two
+            texts. ``None`` means every item gets ``""``.
+        batch_size: Max items per chunk.
+        progress: Label enabling progress ticks; the chunk index is appended
+            when there is more than one chunk.
+        internals_ids: One capture id per sample, sliced per chunk.
+        **kwargs: Forwarded to :meth:`ModelClient.generate`.
+
+    Returns:
+        ``(accepted, reasoning)`` per sample, in input order.
+    """
+    if not samples:
+        return []
+    if originals is not None and len(originals) != len(samples):
+        raise ValueError(
+            f"originals must be the same length as samples "
+            f"({len(originals)} != {len(samples)})."
+        )
+    if internals_ids is not None and len(internals_ids) != len(samples):
+        raise ValueError(
+            f"internals_ids must be the same length as samples "
+            f"({len(internals_ids)} != {len(samples)})."
         )
 
-    def clear_executors(self) -> None:
-        """Drop cached executors so the next call recreates them.
+    n_chunks = (len(samples) + batch_size - 1) // batch_size
+    results: list[tuple[bool, str]] = []
+    for chunk_i, i in enumerate(range(0, len(samples), batch_size), start=1):
+        chunk = samples[i : i + batch_size]
+        chunk_originals = (
+            originals[i : i + batch_size] if originals is not None else [""] * len(chunk)
+        )
+        messages_list = [build_check_messages(o, s) for o, s in zip(chunk_originals, chunk)]
+        responses = client.generate(
+            messages_list,
+            progress=_chunk_label(progress, chunk_i, n_chunks),
+            internals_ids=(
+                internals_ids[i : i + batch_size] if internals_ids is not None else None
+            ),
+            **kwargs,
+        )
+        for response in responses:
+            accepted = is_accepted(response)
+            results.append((accepted, "" if accepted else response))
+    return results
 
-        Useful when ``recommended_max_workers`` is changed at runtime via
-        :func:`register_model`.
-        """
-        self._executors.clear()
 
+def batch_generate_samples(
+    client: ModelClient,
+    messages_list: list[list[dict]],
+    batch_size: int = 32,
+    progress: str | None = None,
+    internals_ids: list[str | None] | None = None,
+    **kwargs,
+) -> list[str]:
+    """Generate many samples in chunks — the generation-side counterpart to
+    :func:`batch_check_samples`.
 
-_default_router: ModelRouter | None = None
+    Use this over calling the client directly when the batch is large enough
+    to want chunk-level progress, or when a caller needs each reply mapped
+    through its own checker afterwards (so a single ``build_check_messages``
+    can't describe the whole batch).
 
+    Args:
+        client: The model to call.
+        messages_list: One chat message list per item.
+        batch_size: Max items per chunk.
+        progress: Label enabling progress ticks per chunk.
+        internals_ids: One capture id per item, sliced per chunk.
+        **kwargs: Forwarded to :meth:`ModelClient.generate`.
 
-def get_router() -> ModelRouter:
-    """Return the process-wide ModelRouter, creating it on first call."""
-    global _default_router
-    if _default_router is None:
-        _default_router = ModelRouter()
-    return _default_router
+    Returns:
+        Generated text, one per item, in input order.
+    """
+    if not messages_list:
+        return []
+    if internals_ids is not None and len(internals_ids) != len(messages_list):
+        raise ValueError(
+            f"internals_ids must be the same length as messages_list "
+            f"({len(internals_ids)} != {len(messages_list)})."
+        )
 
-
-def clear_router() -> None:
-    """Drop the process-wide router (e.g. for tests or env changes)."""
-    global _default_router
-    _default_router = None
+    n_chunks = (len(messages_list) + batch_size - 1) // batch_size
+    results: list[str] = []
+    for chunk_i, i in enumerate(range(0, len(messages_list), batch_size), start=1):
+        results.extend(client.generate(
+            messages_list[i : i + batch_size],
+            progress=_chunk_label(progress, chunk_i, n_chunks),
+            internals_ids=(
+                internals_ids[i : i + batch_size] if internals_ids is not None else None
+            ),
+            **kwargs,
+        ))
+    return results

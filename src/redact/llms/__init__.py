@@ -2,78 +2,55 @@
 
 Quick start (auto-routing)::
 
-    from redact.llms import get_backend, RateLimiter, generate_sample
+    from redact.llms import ModelClient
 
-    backend = get_backend("venice-uncensored")  # auto-selects VeniceBackend
-    result = generate_sample(backend, "venice-uncensored", messages)
+    venice = ModelClient.create("venice-uncensored")   # Venice API
+    replies = venice.generate(messages_list)           # batch in -> batch out
 
-    backend = get_backend("claude-opus-4-6")    # auto-selects AnthropicBackend
-    result = generate_sample(backend, "claude-opus-4-6", messages)
+    local = ModelClient.create("venice-uncensored", backend_type="vllm")
+    replies = local.generate(messages_list)            # same call, local engine
 
-Direct instantiation::
+A :class:`ModelClient` *is* the model: transport, rate limiter and batch
+strategy are wired at construction, so every client is called the same way and
+no call site threads a limiter or picks a dispatch mode — see ``client.py``.
 
-    from redact.llms import VeniceBackend
-    backend = VeniceBackend.from_env("VENICE_API_KEY")
+Direct instantiation (when you need a transport the registry doesn't describe).
+Prefer ``register_model()`` — it validates the setup and gives you
+``ModelClient.create()`` — since anything you don't pass here falls back to
+:class:`~redact.llms.backends.base.LLMBackend`'s defaults, including
+``rpm=None`` (no rate limiting)::
 
-Local inference via vLLM::
+    import os
+    from redact.llms import ModelClient, OpenAIBackend
 
-    from redact.llms import VLLMBackend
-    backend = VLLMBackend(model="path/to/weights")
+    backend = OpenAIBackend("venice-uncensored", api_key=os.environ["VENICE_API_KEY"],
+                            base_url="https://api.venice.ai/api/v1", rpm=75)
+    client = ModelClient(backend)
 """
 
-import contextlib
-
-from .api import (  # APIBackend = compat alias
-    APIBackend,
-    clear_backend_cache,
-    get_backend,
+# Backends — importing the classes never requires their optional heavy
+# dependency (vllm/anthropic/torch+transformers) to be installed; each
+# backend's own __init__ lazily imports and guards that, only at
+# instantiation time. See backends/__init__.py.
+from .backends import (
+    AnthropicBackend,
+    ComputeConfig,
+    LLMBackend,
+    OpenAIBackend,
+    TransformersIntrospectionBackend,
+    VLLMBackend,
+    backend_for,
+    clear_transport_caches,
+    resolve_setup,
 )
-
-# Abstract base
-from .base import LLMBackend
-
-# Model registry
-from .model_config import (
-    DEFAULT_RPM,
-    MODEL_REGISTRY,
-    ModelConfig,
-    default_model_for_role,
-    get_model_config,
-    get_models_by_role,
-    register_model,
-)
-
-# Backends
-from .venice_backend import VeniceBackend
-
-# vLLM is imported lazily to avoid hard dependency
-with contextlib.suppress(ImportError):
-    from .vllm_backend import VLLMBackend
-
-# Anthropic is imported lazily to avoid hard dependency
-with contextlib.suppress(ImportError):
-    from .anthropic_backend import AnthropicBackend
-
-# transformers/torch introspection backend is imported lazily to avoid hard dependency
-with contextlib.suppress(ImportError):
-    from .introspection_backend import TransformersIntrospectionBackend
-
-# Wrappers
-# High-level calls
-from .calls import (
-    batch_check_samples,
-    check_sample,
-    generate_sample,
-    generate_with_check,
-    is_accepted,
-)
+from .client import ModelClient, clear_client_cache
 
 # Extraction utilities
 from .extraction import (
+    EXTRACTION_STYLES,
     ConstitutionEntry,
     clean_sample,
     extract_and_clean,
-    extract_bold_prompt_answer,
     extract_delimited,
     extract_numbered_list,
     extract_structured_qa,
@@ -81,21 +58,33 @@ from .extraction import (
     parse_constitution,
 )
 
+# Model registry
+from .model_config import (
+    DEFAULT_RPM,
+    MODEL_REGISTRY,
+    APIConfig,
+    IntrospectConfig,
+    ModelConfig,
+    VLLMConfig,
+    available_roles,
+    default_model_for_role,
+    get_model_config,
+    get_models_by_role,
+    register_model,
+)
+
 # Progress reporting (shared across all batched generation)
 from .progress import ProgressReporter
 
 # Prompt loading
-from .prompts import build_messages, load_prompt, render_template
+from .prompts import PromptTemplate, build_messages, load_prompt, render_template
 
-# Router (process-wide LLM access surface)
-from .router import ModelRouter, clear_router, get_router
-
-# Translation
-from .translator import check_translation, translate, translate_with_check
-from .wrappers import (
-    BatchCaller,
-    RateLimiter,
-    assert_single_sample_per_call,
-    with_feedback_retries,
-    with_retries,
+# Caller-facing helpers over a client: single-sample, chunking, check loop.
+from .router import (
+    batch_check_samples,
+    batch_generate_samples,
+    check_sample,
+    generate_sample,
+    is_accepted,
 )
+from .wrappers import BatchCaller, RateLimiter, assert_single_sample_per_call

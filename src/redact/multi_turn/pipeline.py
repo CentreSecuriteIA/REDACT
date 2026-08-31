@@ -24,7 +24,6 @@ from redact import paths
 from redact.dataset.io import _hash_text
 from redact.dataset.ledger import Ledger
 from redact.dataset.manifest import Manifest
-from redact.llms import get_router
 from redact.llms.conversation import drive_generators
 
 from .core import Setting, conversation_gen
@@ -54,7 +53,7 @@ def generate_conversations(
     batch_size: int = 256,
     output_path: str | Path | None = None,
     verbose: bool = True,
-    router=None,
+    resolve=None,
 ) -> pd.DataFrame:
     """Generate conversation trajectories from seeds under a Setting.
 
@@ -72,14 +71,14 @@ def generate_conversations(
         resume: skip ``(input_id, iteration)`` units already in the sidecar ledger.
         batch_size: conversations per chunk (each chunk driven together, pooled by model).
         output_path: artifact override.
-        router: router override (defaults to the process-wide one).
+        resolve: ``model_name -> ModelClient`` override (defaults to
+            ``ModelClient.create``).
 
     Returns:
         DataFrame of all rows in ``conversations.csv``: ``sample_id``, ``input_id``,
         ``iteration``, ``setting``, ``turns_used``, ``stop_reason``, ``transcript``
         (JSON step log), ``category``, ``entry_type``, ``source``.
     """
-    router = router or get_router()
     if seeds is None or len(seeds) == 0:
         raise ValueError("generate_conversations needs a non-empty `seeds` DataFrame.")
     seeds = seeds.reset_index(drop=True)
@@ -150,7 +149,7 @@ def generate_conversations(
                         transcript_json="[]", meta=keymeta[key])
 
         results = drive_generators(
-            gens, router=router, finalize=finalize, on_error=on_error,
+            gens, resolve=resolve, finalize=finalize, on_error=on_error,
             verbose=verbose,
             progress=f"conversations {start // batch_size + 1}/{n_chunks}" if verbose else None,
         )

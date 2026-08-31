@@ -4,22 +4,21 @@ import base64
 import codecs
 
 from redact.jailbreak.obfuscation.encoding import (
+    get_encoding_functions,
+    to_ascii_ordinal,
     to_base64,
+    to_braille,
+    to_leetspeak,
+    to_leetspeak_advanced,
+    to_leetspeak_basic,
+    to_leetspeak_intermediate,
+    to_morse,
     to_rot13,
     to_rot18,
     to_rot47,
-    to_unicode_escape,
-    to_ascii_ordinal,
     to_separator,
-    to_leetspeak,
-    to_leetspeak_basic,
-    to_leetspeak_intermediate,
-    to_leetspeak_advanced,
-    to_morse,
-    to_braille,
-    get_encoding_functions,
+    to_unicode_escape,
 )
-
 
 SAMPLE = "Hello World"
 

@@ -7,7 +7,7 @@ Advances a chunk of samples through their technique chains **round by round**:
    to ``yield`` an :class:`LLMRequest` for an LLM step.
 2. Each round, the engine collects every live sample's pending request, groups
    them by ``request.model``, and dispatches **one batch per model** through
-   the process-wide router (``get_router().batch_generate``). The router picks
+   the model's own client (``ModelClient.create(model).generate``). The client picks
    the execution mode from backend capabilities — vLLM native batch, API
    thread-pool, or sequential — so the engine never branches on backend type.
 3. Responses are fed back via ``gen.send(...)``; each sample advances to its
@@ -24,13 +24,12 @@ runs the same chains synchronously via ``protocol.run_sync``.
 from __future__ import annotations
 
 from redact.dataset.io import _hash_text
-from redact.llms import get_router
 from redact.llms.conversation import drive_generators
 
 from .utils import _parse_rejection_info, is_noop, make_combination_gen
 
 
-def _rename_capture(sample: dict, gen_model: str, final_sample_id: str) -> None:
+def _rename_capture(sample: dict, gen_model: str, final_sample_id: str, resolve=None) -> None:
     """Relabel a sample's provisional internals capture to its final sample_id.
 
     No-op unless the sample actually carries a provisional root (i.e.
@@ -39,18 +38,23 @@ def _rename_capture(sample: dict, gen_model: str, final_sample_id: str) -> None:
     root = sample.get("_internals_root")
     if not root:
         return
-    from redact.llms.api import get_backend
-    get_backend(gen_model).rename_capture(root, f"{sample.get('id', '')}/jailbreak/{final_sample_id}")
+    if resolve is None:
+        from redact.llms.client import ModelClient
+        resolve = ModelClient.create
+
+    resolve(gen_model).rename_capture(
+        root, f"{sample.get('id', '')}/jailbreak/{final_sample_id}"
+    )
 
 
-def _finalize(sample: dict, value, gen_model: str) -> dict:
+def _finalize(sample: dict, value, gen_model: str, resolve=None) -> dict:
     """Build the output row for a completed sample from its ``(text, info)``."""
     text, info = value
     accepted, reasoning = _parse_rejection_info(info)
     fn = sample["combination"]
     techniques = list(getattr(fn, "techniques", []))
     sample_id = _hash_text(text)
-    _rename_capture(sample, gen_model, sample_id)
+    _rename_capture(sample, gen_model, sample_id, resolve=resolve)
     return {
         "input_id": sample.get("id", ""),
         "sample_id": sample_id,
@@ -65,12 +69,12 @@ def _finalize(sample: dict, value, gen_model: str) -> dict:
     }
 
 
-def _finalize_error(sample: dict, exc: Exception, gen_model: str) -> dict:
+def _finalize_error(sample: dict, exc: Exception, gen_model: str, resolve=None) -> dict:
     """Build the output row for a sample whose chain raised — original kept."""
     fn = sample["combination"]
     techniques = list(getattr(fn, "techniques", []))
     sample_id = _hash_text(sample["prompt"])
-    _rename_capture(sample, gen_model, sample_id)
+    _rename_capture(sample, gen_model, sample_id, resolve=resolve)
     return {
         "input_id": sample.get("id", ""),
         "sample_id": sample_id,
@@ -91,7 +95,7 @@ def batch_apply_combinations(
     gen_model: str,
     translate_model: str | None = None,
     benign_data: dict | None = None,
-    router=None,
+    resolve=None,
     verbose: bool = True,
     capture_internals: bool = False,
 ) -> list[dict]:
@@ -108,7 +112,7 @@ def batch_apply_combinations(
             ignores this).
         benign_data: Pre-loaded benign Q&A dict for FSH/DAP techniques.
         router: Optional router override (defaults to the process-wide
-            :func:`redact.llms.get_router`). Injectable for testing.
+            :meth:`ModelClient.create`). Injectable for testing.
         verbose: When True, emit live per-round progress via the shared
             ``progress`` label on ``router.batch_generate`` (one tick stream
             per model per round). When False, dispatch with no progress kwarg
@@ -128,7 +132,6 @@ def batch_apply_combinations(
         ``complexity``, ``num_techniques``, ``is_noop``, ``accepted``,
         ``reasoning``.
     """
-    router = router or get_router()
     n = len(samples)
 
     # Build one chain generator per sample; the generic round-driver
@@ -146,9 +149,9 @@ def batch_apply_combinations(
         )
     results = drive_generators(
         gens,
-        router=router,
-        finalize=lambda i, value: _finalize(samples[i], value, gen_model),
-        on_error=lambda i, exc: _finalize_error(samples[i], exc, gen_model),
+        resolve=resolve,
+        finalize=lambda i, value: _finalize(samples[i], value, gen_model, resolve),
+        on_error=lambda i, exc: _finalize_error(samples[i], exc, gen_model, resolve),
         verbose=verbose,
         progress="jailbreak" if verbose else None,
     )

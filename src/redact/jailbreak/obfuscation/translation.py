@@ -21,12 +21,9 @@ Languages are grouped by resource level (safety training coverage):
 """
 
 from redact.jailbreak.protocol import LLMRequest, TechniqueGen
-from redact.llms.translator import (
-    _resolve_translate_model,
-    build_check_messages,
-    build_translate_messages,
-    is_faithful_response,
-)
+from redact.llms.model_config import default_model_for_role
+from redact.llms.prompts import build_messages, load_prompt
+from redact.llms.router import is_accepted
 
 LANGUAGES = [
     # High-resource
@@ -37,6 +34,39 @@ LANGUAGES = [
     "Swahili", "Thai", "Khmer", "Maori", "Nepali",
     "Zulu", "Scots Gaelic", "Bengali", "Javanese",
 ]
+
+
+def _resolve_translate_model() -> str:
+    """Return the canonical translation model from the registry.
+
+    Looked up by role so the choice can be changed by registering a
+    different model with ``role="translation"``. Falls back to the
+    historical default ``deepseek-v3.2`` if the role isn't registered
+    (e.g. user mutated the registry).
+    """
+    try:
+        return default_model_for_role("translation")
+    except KeyError:
+        return "deepseek-v3.2"
+
+
+def _build_translate_messages(text: str, language: str, feedback: str = "") -> list[dict]:
+    """Build the chat messages for a translation request (pure, no LLM call).
+
+    Loads ``translate`` (first attempt) or ``translate_retry`` (feedback
+    from a prior rejected attempt) — two separate prompt categories rather
+    than one template with a conditional block, since ``str.format_map()``
+    has no conditionals.
+    """
+    category = "translate_retry" if feedback else "translate"
+    config = load_prompt("jailbreak", category)
+    return build_messages(config, language=language, text=text, feedback=feedback)
+
+
+def _build_check_messages(original: str, translation: str, language: str) -> list[dict]:
+    """Build the chat messages for a translation-quality check (pure)."""
+    config = load_prompt("jailbreak", "translate_check")
+    return build_messages(config, original=original, translation=translation, language=language)
 
 
 def _translate_gen(
@@ -66,12 +96,12 @@ def _translate_gen(
     last = prompt
     for _ in range(num_retries):
         translation = yield LLMRequest(
-            gen_model, build_translate_messages(prompt, language, feedback)
+            gen_model, _build_translate_messages(prompt, language, feedback)
         )
         verdict = yield LLMRequest(
-            chk_model, build_check_messages(prompt, translation, language)
+            chk_model, _build_check_messages(prompt, translation, language)
         )
-        if is_faithful_response(verdict):
+        if is_accepted(verdict):
             return translation, language
         feedback = verdict
         last = translation

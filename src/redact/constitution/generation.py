@@ -6,11 +6,10 @@ benign. Each constitution entry later seeds N input samples for classifier
 training.
 
 Usage:
-    from redact.llms import get_backend, RateLimiter
+    from redact.llms import get_client, RateLimiter
     from redact.constitution import ConstitutionPipeline, EntryType
 
-    backend = get_backend("claude-opus-4-6")
-    pipeline = ConstitutionPipeline(backend, "claude-opus-4-6", RateLimiter())
+    pipeline = ConstitutionPipeline(ModelClient.create("claude-opus-4-6"), RateLimiter())
 
     result = pipeline.run(
         taxonomy=load_taxonomy("content_moderation_categories"),
@@ -31,11 +30,10 @@ from ..dataset.io import _hash_text
 from ..dataset.ledger import Ledger
 from ..dataset.manifest import Manifest
 from ..dataset.taxonomy import iter_categories
-from ..llms.base import LLMBackend
-from ..llms.calls import generate_sample
+from ..llms.client import ModelClient
 from ..llms.extraction import parse_constitution as _parse_raw
 from ..llms.prompts import build_messages, load_prompt
-from ..llms.wrappers import RateLimiter
+from ..llms.router import generate_sample
 from ..types import ALL_ENTRY_TYPES, EntryType
 
 logger = logging.getLogger(__name__)
@@ -202,27 +200,18 @@ class ConstitutionPipeline:
     saves type-based CSVs.
 
     Attributes:
-        backend: LLM backend for generation.
+        client: Generation model, bound to its transport.
         model: Model identifier (default: claude-opus-4-6).
-        rate_limiter: Optional shared rate limiter.
         output_dir: Directory for saving CSVs (Data_cache/constitution/).
     """
 
     def __init__(
         self,
-        backend: LLMBackend,
-        model: str | None = "claude-opus-4-6",
-        rate_limiter: RateLimiter | None = None,
+        client: ModelClient,
         output_dir: str | Path | None = None,
     ):
-        self.backend = backend
-        if model is None:
-            # Fallback to the registered constitution-gen role. Kept opt-in
-            # (None) so the explicit literal default still wins.
-            from ..llms.model_config import default_model_for_role
-            model = default_model_for_role("constitution_gen")
-        self.model = model
-        self.rate_limiter = rate_limiter
+        self.client = client
+        self.model = client.model
 
         if output_dir is None:
             from redact import paths
@@ -281,10 +270,8 @@ class ConstitutionPipeline:
         for attempt in range(max_attempts):
             try:
                 raw_output = generate_sample(
-                    self.backend,
-                    self.model,
+                    self.client,
                     messages,
-                    rate_limiter=self.rate_limiter,
                     max_tokens=10000,
                 )
 
@@ -402,10 +389,8 @@ class ConstitutionPipeline:
         for attempt in range(max_attempts):
             try:
                 raw_output = generate_sample(
-                    self.backend,
-                    self.model,
+                    self.client,
                     messages,
-                    rate_limiter=self.rate_limiter,
                     max_tokens=10000,
                 )
 
@@ -549,7 +534,7 @@ class ConstitutionPipeline:
                 units already recorded. When False, wipe the CSVs and the
                 ledger first and regenerate from scratch. Ignored when
                 ``save=False``.
-            verbose: Print progress.
+            verbose: Log progress.
 
         Returns:
             ConstitutionResult. When ``save=True`` it is read back from the

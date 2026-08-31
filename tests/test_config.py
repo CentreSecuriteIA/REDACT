@@ -1,6 +1,5 @@
 """Tests for package-level config, seed, and output directory."""
 
-import os
 import random
 
 import pytest

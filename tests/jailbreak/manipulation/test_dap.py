@@ -2,16 +2,16 @@
 
 import random
 
-from tests.conftest import MockBackend
-from redact.jailbreak.protocol import run_sync
 from redact.jailbreak.manipulation.dap import (
-    to_dap_random_short,
-    to_dap_random_long,
-    to_dap_selected_short,
-    to_dap_selected_long,
-    get_dap_functions,
     _build_dap_prompt,
+    get_dap_functions,
+    to_dap_random_long,
+    to_dap_random_short,
+    to_dap_selected_long,
+    to_dap_selected_short,
 )
+from redact.jailbreak.protocol import run_sync
+from tests.conftest import MockBackend
 
 
 def _make_benign_data():
@@ -68,7 +68,7 @@ class TestDapRandom:
 def _run(fn, prompt, backend, **kwargs):
     """Drive a technique generator to completion against a MockBackend."""
     def call(request):
-        return backend.generate(request.messages, request.model)
+        return backend.generate([request.messages])[0]
     return run_sync(fn(prompt, **kwargs), call)
 
 

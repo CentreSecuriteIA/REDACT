@@ -2,14 +2,15 @@
 
 import json
 import os
-from unittest.mock import patch, MagicMock
+from unittest.mock import MagicMock, patch
 
 import pandas as pd
 import pytest
 
+from redact.llms.backends import ComputeConfig
 from redact.pipelines import (
+    _get_client,
     create_taxonomy,
-    _get_backend,
 )
 
 
@@ -54,17 +55,20 @@ class TestCreateTaxonomy:
         assert result["name"] == "ret_test"
 
 
-class TestGetBackendHelper:
-    def test_passthrough(self):
-        mock_backend = MagicMock()
-        backend, limiter = _get_backend(backend=mock_backend, model="m")
-        assert backend is mock_backend
-
-    def test_auto_resolve(self):
+class TestGetClientHelper:
+    def test_returns_ready_client(self):
         with patch.dict(os.environ, {"VENICE_API_KEY": "test"}):
-            with patch("redact.pipelines.get_backend") as mock_get:
+            client = _get_client(model="venice-uncensored")
+        assert client.model == "venice-uncensored"
+        # Fully wired: the budget is bound to the backend, and the limiter
+        # lives inside the client rather than alongside it.
+        assert client.backend.rpm == 75
+
+    def test_resolves_via_get_client(self):
+        with patch.dict(os.environ, {"VENICE_API_KEY": "test"}):
+            with patch("redact.pipelines.ModelClient.create") as mock_get:
                 mock_get.return_value = MagicMock()
-                backend, limiter = _get_backend(backend=None, model="venice-uncensored")
+                _get_client(model="venice-uncensored")
                 mock_get.assert_called_once_with("venice-uncensored")
 
 
@@ -72,9 +76,9 @@ class TestStandaloneInputsDeprecation:
     def test_standalone_generate_inputs_emits_deprecation_warning(self, tmp_path, monkeypatch):
         import redact.pipelines as P
         from redact import generate_inputs
-        from tests.conftest import MockBackend
+        from tests.conftest import MockBackend, make_client
 
-        monkeypatch.setattr(P, "get_backend", lambda m: MockBackend())
+        monkeypatch.setattr(P.ModelClient, "create", lambda m: make_client(MockBackend(), m))
         # empty taxonomy -> no categories -> warning fires, then a fast empty return
         with pytest.warns(DeprecationWarning, match="constitution-seeded"):
             generate_inputs(
@@ -90,9 +94,9 @@ class TestGenerateOutputsManifest:
         import redact.pipelines as P
         from redact import generate_outputs, paths
         from redact.dataset import Manifest
-        from tests.conftest import MockBackend
+        from tests.conftest import MockBackend, make_client
 
-        monkeypatch.setattr(P, "get_backend", lambda m: MockBackend("a plain answer"))
+        monkeypatch.setattr(P.ModelClient, "create", lambda m: make_client(MockBackend("a plain answer"), m))
         inputs = pd.DataFrame({
             "sample": ["prompt one", "prompt two", "prompt three"],
             "category": ["Cyber"] * 3,
@@ -113,11 +117,11 @@ class TestGenerateOutputsManifest:
         # records every planned unit in the manifest.
         import redact.pipelines as P
         from redact import generate_outputs, paths
-        from redact.dataset import Manifest, Ledger
+        from redact.dataset import Ledger, Manifest
         from redact.dataset.io import _hash_text
-        from tests.conftest import MockBackend
+        from tests.conftest import MockBackend, make_client
 
-        monkeypatch.setattr(P, "get_backend", lambda m: MockBackend("ans"))
+        monkeypatch.setattr(P.ModelClient, "create", lambda m: make_client(MockBackend("ans"), m))
         inputs = pd.DataFrame({
             "sample": ["p one", "p two", "p three"],
             "category": ["Cyber"] * 3, "entry_type": ["harmful"] * 3,
@@ -143,10 +147,10 @@ class TestGenerateOutputsInternals:
     def test_no_internals_kwarg_for_default_backend(self, tmp_path, monkeypatch):
         import redact.pipelines as P
         from redact import generate_outputs
-        from tests.conftest import MockBackend
+        from tests.conftest import MockBackend, make_client
 
         backend = MockBackend("ans")
-        monkeypatch.setattr(P, "get_backend", lambda m: backend)
+        monkeypatch.setattr(P.ModelClient, "create", lambda m: make_client(backend, m))
         inputs = pd.DataFrame({
             "sample": ["p one"], "category": ["Cyber"], "entry_type": ["harmful"],
         })
@@ -157,15 +161,15 @@ class TestGenerateOutputsInternals:
     def test_gen_internals_id_is_input_id_slash_output(self, tmp_path, monkeypatch):
         import redact.pipelines as P
         from redact import generate_outputs
-        from tests.conftest import MockBackend
+        from tests.conftest import MockBackend, make_client
 
         class _InternalsBackend(MockBackend):
             @property
-            def supports_internals(self) -> bool:
-                return True
+            def compute_config(self) -> ComputeConfig:
+                return ComputeConfig(supports_internals=True)
 
         backend = _InternalsBackend("ans")
-        monkeypatch.setattr(P, "get_backend", lambda m: backend)
+        monkeypatch.setattr(P.ModelClient, "create", lambda m: make_client(backend, m))
         inputs = pd.DataFrame({
             "sample": ["p one", "p two"], "category": ["Cyber"] * 2, "entry_type": ["harmful"] * 2,
         })
@@ -180,17 +184,17 @@ class TestGenerateOutputsInternals:
     def test_check_internals_id_is_input_id_slash_val_out(self, tmp_path, monkeypatch):
         import redact.pipelines as P
         from redact import generate_outputs
-        from tests.conftest import MockBackend
+        from tests.conftest import MockBackend, make_client
 
         class _InternalsBackend(MockBackend):
             @property
-            def supports_internals(self) -> bool:
-                return True
+            def compute_config(self) -> ComputeConfig:
+                return ComputeConfig(supports_internals=True)
 
         gen_backend = _InternalsBackend("the answer")
         check_backend = _InternalsBackend("Yes, fine")
         backends = {"gen-model": gen_backend, "check-model": check_backend}
-        monkeypatch.setattr(P, "get_backend", lambda m: backends[m])
+        monkeypatch.setattr(P.ModelClient, "create", lambda m: make_client(backends[m], m))
         inputs = pd.DataFrame({
             "sample": ["p one"], "category": ["Cyber"], "entry_type": ["harmful"],
         })
@@ -208,17 +212,17 @@ class TestGenerateOutputsInternals:
     def test_check_internals_not_requested_when_check_backend_lacks_support(self, tmp_path, monkeypatch):
         import redact.pipelines as P
         from redact import generate_outputs
-        from tests.conftest import MockBackend
+        from tests.conftest import MockBackend, make_client
 
         class _InternalsBackend(MockBackend):
             @property
-            def supports_internals(self) -> bool:
-                return True
+            def compute_config(self) -> ComputeConfig:
+                return ComputeConfig(supports_internals=True)
 
         gen_backend = _InternalsBackend("the answer")
         check_backend = MockBackend("Yes, fine")  # no internals support
         backends = {"gen-model": gen_backend, "check-model": check_backend}
-        monkeypatch.setattr(P, "get_backend", lambda m: backends[m])
+        monkeypatch.setattr(P.ModelClient, "create", lambda m: make_client(backends[m], m))
         inputs = pd.DataFrame({
             "sample": ["p one"], "category": ["Cyber"], "entry_type": ["harmful"],
         })
@@ -239,9 +243,9 @@ class TestGenerateOutputsSampleId:
         import redact.pipelines as P
         from redact import generate_outputs
         from redact.dataset.io import _hash_text
-        from tests.conftest import MockBackend
+        from tests.conftest import MockBackend, make_client
 
-        monkeypatch.setattr(P, "get_backend", lambda m: MockBackend("a plain answer"))
+        monkeypatch.setattr(P.ModelClient, "create", lambda m: make_client(MockBackend("a plain answer"), m))
         inputs = pd.DataFrame({
             "sample": ["p one", "p two"], "category": ["Cyber"] * 2, "entry_type": ["harmful"] * 2,
         })
