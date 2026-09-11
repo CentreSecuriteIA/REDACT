@@ -15,10 +15,6 @@ resolution (that is settled at backend construction, see
   belongs to ``ModelClient``, which calls a native-batching backend directly
   and never constructs a ``BatchCaller`` for one. Raises rather than silently
   degrading on a misconfigured combination.
-
-Generalized from the jailbreak reference library:
-- RateLimiter:         from _RateLimitedClient (obfuscation.py:47-119)
-- BatchCaller:         from runner script ThreadPoolExecutor patterns
 """
 
 import logging
@@ -40,36 +36,30 @@ _RATE_LIMIT_WINDOW_SECONDS = 60.0
 
 
 class RateLimiter:
-    """Thread-safe per-model RPM enforcement using a sliding window.
+    """Thread-safe RPM enforcement over a 60-second sliding window.
 
-    The budget comes from the backend passed to :meth:`wait_if_needed` — a
-    backend built from a model's *local* setup carries ``rpm=None`` and is
-    correctly exempt, even when the same registry entry also describes a
-    rate-limited hosted endpoint.
+    One window per key. The key is whatever :meth:`wait_if_needed` is handed —
+    a model name for a per-model budget, an endpoint id for a per-account one
+    — so this class enforces a scope it never chooses. That choice is made
+    once in ``client._resolve_rate_limit()`` from the setup's
+    ``rate_limit_scope``, which also pairs the key with the matching limiter
+    instance (a shared key in a private limiter would still be one window per
+    client).
 
-    **Scope in practice: one limiter per (model, setup).**
-    :meth:`ModelClient.create` passes no limiter, so each client builds its
-    own, and clients are cached per ``(model, setup)``. The per-model keying
-    below is therefore vestigial — each instance only ever holds one key — but
-    it is kept because :class:`ModelClient` still accepts a shared limiter,
-    which is the hook for the case below.
+    **What each ``None`` means here**, since none of the three is "unlimited":
 
-    **That scope is right for a per-model cap and wrong for a per-account
-    one.** Venice prices and limits each model separately (75 / 20 / 20 RPM
-    across three models on one key), so independent windows enforce exactly
-    what is declared. Anthropic caps the *account*, so several Anthropic
-    models would each get their own full budget and collectively exceed it —
-    two models at ``rpm=5`` would issue 10/min against a 5/min account. This
-    is latent, not live: ``claude-opus-4-6`` is currently the only Anthropic
-    entry, so its per-model limiter *is* the account limiter. Registering a
-    second one is what makes it real, and the fix then is to hand both clients
-    one shared limiter keyed on endpoint identity (the ``base_url`` +
-    ``api_key_env`` pair the SDK client already caches on) rather than to
-    change anything here.
-
-    Algorithm: same as jailbreak _RateLimitedClient — track request
-    timestamps per model in a 60-second sliding window, sleep if at
-    capacity.
+    - ``backend.rpm is None`` — the only real exemption. :meth:`wait_if_needed`
+      returns before touching any state. Every local setup lands here by
+      construction: neither ``VLLMConfig`` nor the introspection setup has an
+      ``rpm`` field, so those backends fall back to ``LLMBackend``'s default.
+      A dual-setup entry is exempt on its local binding even though its
+      ``.api`` declares an rpm.
+    - ``key=None`` — window keyed on ``backend.model``.
+    - ``rate_limiter=None`` into :class:`ModelClient` — a *private* limiter
+      for a model that has a budget, and no limiter at all for one that
+      doesn't. The client keys that on ``backend.rpm``, so a local binding
+      holds ``None`` rather than a live object that no-ops on every call;
+      both it and ``BatchCaller`` then skip throttling on a ``None``.
     """
 
     def __init__(self):
@@ -97,15 +87,10 @@ class RateLimiter:
 
         Args:
             backend: The configured model whose ``rpm`` budget to enforce.
-                A no-op when ``backend.rpm`` is ``None`` (any local
-                transport).
+                Returns immediately when its ``rpm`` is ``None``.
             key: Identity the window belongs to. Defaults to
-                ``backend.model`` — one window per model, which is what a
-                per-model cap needs. A caller enforcing a per-account cap
-                passes the endpoint id instead, so every model behind that
-                key shares one window. Sharing the *instance* is not enough
-                on its own: two models in one limiter still get two windows
-                unless they also agree on this key.
+                ``backend.model``; a per-account cap passes the endpoint id
+                instead, so every model behind it shares one window.
         """
         rpm = backend.rpm
         if rpm is None:

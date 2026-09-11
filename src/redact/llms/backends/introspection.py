@@ -21,13 +21,19 @@ Reference: backends/vllm.py (lazy import + cache pattern).
 """
 
 import json
+import logging
 import threading
 import time
 from pathlib import Path
-from typing import ClassVar
+from typing import TYPE_CHECKING, ClassVar
 
 from . import vram
 from .base import ComputeConfig, LLMBackend
+
+if TYPE_CHECKING:
+    from ..model_config import ModelConfig
+
+logger = logging.getLogger(__name__)
 
 _DEFAULT_CAPTURE = {"logprobs": True, "hidden_states": "last", "attention": False}
 
@@ -188,7 +194,7 @@ class TransformersIntrospectionBackend(LLMBackend):
         )
 
     @classmethod
-    def from_config(cls, config) -> "TransformersIntrospectionBackend":
+    def from_config(cls, config: "ModelConfig") -> "TransformersIntrospectionBackend":
         """Build from a registry entry's ``.introspect`` setup.
 
         Raises:
@@ -230,10 +236,15 @@ class TransformersIntrospectionBackend(LLMBackend):
         """
         old_dir = self._log_dir / old_internals_id
         if not old_dir.exists():
+            # Silent otherwise, and a mistyped provisional id looks identical
+            # to "this call captured nothing" — leaving the real capture
+            # orphaned under its provisional name with no error anywhere.
+            logger.debug("[internals] nothing to rename at %s", old_dir)
             return
         new_dir = self._log_dir / new_internals_id
         new_dir.parent.mkdir(parents=True, exist_ok=True)
         old_dir.rename(new_dir)
+        logger.info("[internals] %s -> %s", old_internals_id, new_internals_id)
 
     def _save_meta(self, out_dir: Path, meta: dict) -> None:
         """Always-written companion JSON: resolved settings, prompt, and output.
@@ -290,6 +301,11 @@ class TransformersIntrospectionBackend(LLMBackend):
                 for step in outputs.attentions
             ]
             torch.save(stacked_attn, out_dir / "attention.pt")
+
+        # INFO rather than DEBUG: internals runs are rare and expensive, and
+        # where a capture landed is the thing you go looking for afterwards.
+        written = sorted(p.name for p in out_dir.iterdir() if p.is_file())
+        logger.info("[internals] saved %s -> %s", ", ".join(written), out_dir)
 
     def generate(
         self,

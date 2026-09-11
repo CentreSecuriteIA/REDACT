@@ -25,9 +25,12 @@ defaults — notably ``rpm=None``, which means no rate limiting at all.
 import time
 from abc import ABC, abstractmethod
 from dataclasses import dataclass
-from typing import ClassVar
+from typing import TYPE_CHECKING, ClassVar
 
 from .. import observe
+
+if TYPE_CHECKING:
+    from ..model_config import ModelConfig
 
 
 @dataclass(frozen=True)
@@ -37,6 +40,7 @@ class ComputeConfig:
     Every layer above reads these flags instead of branching on backend type,
     which is what keeps it backend-agnostic. No two backend types share a
     profile, so dispatch can key off the flags alone.
+    The standard values provided are a plain API-style backend (as used with Venice)
 
     Attributes:
         supports_native_batching: ``generate()`` is one engine pass over the
@@ -58,7 +62,9 @@ class ComputeConfig:
 
 
 def extract_system_prompt(messages: list[dict]) -> tuple[str | None, list[dict]]:
-    """Split system-role content out of a message list.
+    """Split system-role content out of a message list. 
+    Example: ``[{"role": "system", "content": "A"}, {"role": "user", "content": "B"}]``
+    becomes ``("A", [{"role": "user", "content": "B"}]) #TODO check if this is correct
 
     Args:
         messages: Chat messages, possibly containing system-role entries.
@@ -77,6 +83,8 @@ def extract_system_prompt(messages: list[dict]) -> tuple[str | None, list[dict]]
 
 def fold_system_into_first_message(messages: list[dict]) -> list[dict]:
     """Fold system-role message content into the first non-system message.
+    Example: ``[{"role": "system", "content": "A"}, {"role": "user", "content": "B"}]``
+    becomes ``[{"role": "user", "content": "A\n\nB"} #TODO check if this is correct
 
     For models registered with ``ModelConfig.supports_system_prompt=False``,
     which ignore a dedicated system role.
@@ -159,7 +167,7 @@ class LLMBackend(ABC):
         )
 
     @classmethod
-    def from_config(cls, config) -> "LLMBackend":
+    def from_config(cls, config: "ModelConfig") -> "LLMBackend":
         """Build a finished backend from a registry entry.
 
         Each subclass reads *its own* setup off ``config`` (``.api`` /
@@ -176,7 +184,7 @@ class LLMBackend(ABC):
         )
 
     @staticmethod
-    def _identity(config) -> dict:
+    def _identity(config: "ModelConfig") -> dict:
         """The backend-agnostic ``__init__`` kwargs every subclass passes up.
 
         Args:
@@ -346,6 +354,18 @@ class LLMBackend(ABC):
 
         Returns:
             Generated text, one per batch item, same order as ``messages_list``.
+        """
+
+    def rename_capture(self, old_internals_id: str, new_internals_id: str) -> None:
+        """Relabel a captured-internals folder once its final id is known.
+
+        A no-op here, overridden only by an internals-capable transport. Stages
+        whose real id is a hash of the *output* (paraphrase, jailbreak) must
+        supply an ``internals_id`` before the call and relabel after, so they
+        call this unconditionally — on a transport that captured nothing there
+        is nothing to move, exactly as when the id was never captured under.
+        Not a raise: renaming absent captures is cleanup, not a request for a
+        capability the transport lacks (which is what ``generate()`` rejects).
         """
 
     @property

@@ -20,11 +20,14 @@ instead. See ``model_config.py``.
 import os
 import threading
 import time
-from typing import ClassVar
+from typing import TYPE_CHECKING, ClassVar
 
 import openai
 
 from .base import ComputeConfig, LLMBackend
+
+if TYPE_CHECKING:
+    from ..model_config import ModelConfig
 
 # Shared SDK clients, keyed on endpoint identity — two OpenAI-compatible
 # providers are different transports even though both are "openai", so the
@@ -90,7 +93,7 @@ class OpenAIBackend(LLMBackend):
         self._extra_body = extra_body or None
 
     @classmethod
-    def from_config(cls, config) -> "OpenAIBackend":
+    def from_config(cls, config: "ModelConfig") -> "OpenAIBackend":
         """Build from a registry entry's ``.api`` setup.
 
         Raises:

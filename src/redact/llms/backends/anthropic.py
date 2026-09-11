@@ -20,9 +20,12 @@ registry entry that asks for it.
 import os
 import threading
 import time
-from typing import ClassVar
+from typing import TYPE_CHECKING, ClassVar
 
 from .base import ComputeConfig, LLMBackend
+
+if TYPE_CHECKING:
+    from ..model_config import ModelConfig
 
 # Shared SDK clients, keyed by API key — the endpoint is the SDK's own business.
 _sdk_clients: dict[str, object] = {}
@@ -77,7 +80,7 @@ class AnthropicBackend(LLMBackend):
         self._client = _sdk_client(api_key)
 
     @classmethod
-    def from_config(cls, config) -> "AnthropicBackend":
+    def from_config(cls, config: "ModelConfig") -> "AnthropicBackend":
         """Build from a registry entry's ``.api`` setup.
 
         Raises:

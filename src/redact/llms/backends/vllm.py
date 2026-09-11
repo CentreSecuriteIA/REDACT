@@ -23,11 +23,14 @@ import multiprocessing
 import os
 import threading
 import time
-from typing import ClassVar
+from typing import TYPE_CHECKING, ClassVar
 
 from .. import observe
 from . import vram
 from .base import ComputeConfig, LLMBackend
+
+if TYPE_CHECKING:
+    from ..model_config import ModelConfig
 
 # Sampling values with no ModelConfig field of their own — a backend default,
 # not a registry lookup. Overridable per model via VLLMConfig.sampling.
@@ -225,7 +228,7 @@ class VLLMBackend(LLMBackend):
         self._llm = _engine(hf_model_id, quantization, vllm_kwargs or {})
 
     @classmethod
-    def from_config(cls, config) -> "VLLMBackend":
+    def from_config(cls, config: "ModelConfig") -> "VLLMBackend":
         """Build from a registry entry's ``.vllm`` setup.
 
         Raises:

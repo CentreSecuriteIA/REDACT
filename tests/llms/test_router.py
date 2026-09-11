@@ -140,18 +140,6 @@ class TestDispatchBatch:
         assert "gen chunk 1/1: 0/3 ..." in caplog.text
         assert "gen chunk 1/1: 3/3 done" in caplog.text
 
-    def test_progress_chains_with_on_complete(self, caplog):
-        backend = _CountingBackend(["a", "b"])
-        seen = []
-        with caplog.at_level(logging.INFO, logger="redact.llms.progress"):
-            results = make_client(backend).generate(self._messages(2),
-                on_complete=lambda i, r: seen.append((i, r)),
-                progress="lbl",
-            )
-        assert results == ["a", "b"]
-        assert sorted(seen) == [(0, "a"), (1, "b")]
-        assert "lbl: 2/2 done" in caplog.text
-
     def test_uses_batch_caller_for_non_native(self):
         # Sanity: the non-native path really does go through BatchCaller,
         # not some parallel hand-rolled fan-out.

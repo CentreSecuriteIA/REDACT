@@ -19,7 +19,6 @@ Build one with :meth:`ModelClient.create`::
     replies = client.generate(messages_list)
 """
 
-from collections.abc import Callable
 
 from .backends import ComputeConfig, LLMBackend, backend_for, resolve_setup
 from .model_config import get_model_config
@@ -47,8 +46,9 @@ def _resolve_rate_limit(model, config, setup) -> tuple[RateLimiter | None, str |
     """Decide which window this model's calls count against.
 
     ``(None, None)`` means "private limiter keyed on the model" — the default,
-    correct wherever the provider meters per model, and for every local setup
-    (whose ``rpm`` is ``None``, making the limiter inert anyway).
+    correct wherever the provider meters per model. Also returned for every
+    local setup, which then gets no limiter at all: ``__init__`` keys that on
+    ``backend.rpm``, not on anything decided here.
 
     Under ``rate_limit_scope="endpoint"`` the model instead shares one limiter
     *and* one key with every other model behind the same provider+URL+key, so
@@ -93,7 +93,8 @@ class ModelClient:
             backend: The configured model. Everything about *what* to call is
                 already on it; this only decides *how* a batch runs.
             rate_limiter: Optional shared limiter, so several clients can
-                enforce one window. Defaults to a private one.
+                enforce one window. Defaults to a private one — or to none at
+                all for a backend with no budget (see below).
             limit_key: Identity that window belongs to; defaults to the
                 model's own name. :meth:`create` supplies the endpoint id
                 instead for a provider that meters the account — and supplies
@@ -106,9 +107,16 @@ class ModelClient:
         # native-batching transport takes the whole list in one pass and needs
         # no wrapper; everything else fans out through a BatchCaller, whose
         # worker count the backend already clamped against its own capability.
-        # wait_if_needed() is itself a no-op when backend.rpm is None, so a
-        # local client is genuinely inert rather than "limited at 999".
-        self._rate_limiter = rate_limiter or RateLimiter()
+        #
+        # No budget, no limiter — a local binding carries rpm=None (neither
+        # VLLMConfig nor IntrospectConfig has an rpm field), so it gets None
+        # rather than a live object that no-ops on every call. Keyed on rpm
+        # and NOT on _native below: "does this have a budget" and "how does a
+        # batch run" are independent facts that merely coincide today, so a
+        # metered native-batching transport would still be limited correctly.
+        self._rate_limiter = (
+            None if backend.rpm is None else (rate_limiter or RateLimiter())
+        )
         self._native = backend.compute_config.supports_native_batching
         self._caller = (
             None if self._native
@@ -170,7 +178,6 @@ class ModelClient:
         max_tokens: int | None = None,
         temperature: float | None = None,
         internals_ids: list[str | None] | None = None,
-        on_complete: Callable[[int, str], None] | None = None,
         progress: str | None = None,
         **kwargs,
     ) -> list[str]:
@@ -189,7 +196,6 @@ class ModelClient:
             temperature: Overrides the model's default.
             internals_ids: One capture id (or ``None``) per item. Only valid
                 on an internals-capable transport.
-            on_complete: ``(index, result)`` callback per completion.
             progress: Label enabling throttled progress ticks.
             **kwargs: Transport-specific extras.
 
@@ -216,21 +222,22 @@ class ModelClient:
                     f"({len(internals_ids)} != {len(messages_list)})."
                 )
 
-        if progress is not None:
-            reporter = ProgressReporter(progress, len(messages_list))
-            if on_complete is None:
-                on_complete = reporter.on_complete
-            else:
-                _user_cb = on_complete
-
-                def on_complete(i, r, _cb=_user_cb, _rep=reporter):
-                    _cb(i, r)
-                    _rep.on_complete(i, r)
+        # Progress is the only per-item hook: the public on_complete callback
+        # this used to chain with is gone (resume is ledger-driven per chunk,
+        # so nothing ever checkpointed off it). BatchCaller keeps its own
+        # on_complete param — that is how these ticks reach it.
+        on_complete = (
+            ProgressReporter(progress, len(messages_list)).on_complete
+            if progress is not None else None
+        )
 
         if self._native:
             # One engine pass over the whole list already IS the batch —
             # neither the limiter's fan-out nor the BatchCaller adds anything.
-            self._rate_limiter.wait_if_needed(self._backend, self._limit_key)
+            # Dead for vLLM (rpm=None → no limiter); live only if a metered
+            # native-batching transport is ever added, and then per batch.
+            if self._rate_limiter is not None:
+                self._rate_limiter.wait_if_needed(self._backend, self._limit_key)
             results = self._backend.generate(
                 messages_list,
                 system_prompts=system_prompts,

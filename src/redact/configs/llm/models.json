@@ -13,6 +13,7 @@
       "rpm": 75,
       "base_url": "https://api.venice.ai/api/v1",
       "api_model_id": "venice-uncensored-1-2",
+      "rate_limit_scope": "model",
       "recommended_max_workers": 3,
       "default_extra_body": {
         "venice_parameters": {
@@ -42,6 +43,7 @@
       "api_key_env": "VENICE_API_KEY",
       "rpm": 20,
       "base_url": "https://api.venice.ai/api/v1",
+      "rate_limit_scope": "model",
       "recommended_max_workers": 2,
       "default_extra_body": {
         "venice_parameters": {
@@ -67,6 +69,7 @@
       "api_key_env": "VENICE_API_KEY",
       "rpm": 20,
       "base_url": "https://api.venice.ai/api/v1",
+      "rate_limit_scope": "model",
       "recommended_max_workers": 2,
       "default_extra_body": {
         "venice_parameters": {

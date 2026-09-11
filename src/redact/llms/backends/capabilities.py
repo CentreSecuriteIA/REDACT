@@ -17,11 +17,16 @@ time: a user registering their own model gets told immediately that, say,
 of finding out on the first dispatch of a long run.
 """
 
+from typing import TYPE_CHECKING
+
 from .anthropic import AnthropicBackend
 from .base import ComputeConfig, LLMBackend
 from .introspection import TransformersIntrospectionBackend
 from .openai import OpenAIBackend
 from .vllm import VLLMBackend
+
+if TYPE_CHECKING:
+    from ..model_config import ModelConfig
 
 #: ``backend_type`` string -> the class implementing it. Adding a provider
 #: means adding it here; everything that dispatches on backend type reads
@@ -100,7 +105,7 @@ def validate_concurrency(
         )
 
 
-def resolve_setup(config, requested: str | None = None) -> str:
+def resolve_setup(config: "ModelConfig", requested: str | None = None) -> str:
     """Decide which setup on a registry entry to bind.
 
     Explicit request wins, then the entry's own ``backend_type``, then — when
@@ -148,7 +153,7 @@ def resolve_setup(config, requested: str | None = None) -> str:
     return setup
 
 
-def transport_for(config, setup: str | None = None) -> str:
+def transport_for(config: "ModelConfig", setup: str | None = None) -> str:
     """Which transport class serves this entry, as a :data:`BACKEND_TYPES` key.
 
     Distinct from the *setup* name: ``"api"`` covers both API providers, and
@@ -177,7 +182,7 @@ def transport_for(config, setup: str | None = None) -> str:
     return transport
 
 
-def backend_for(config, setup: str | None = None) -> LLMBackend:
+def backend_for(config: "ModelConfig", setup: str | None = None) -> LLMBackend:
     """Build the finished backend for one model on one of its setups.
 
     The whole of model→transport resolution: pick the setup, map it to the
