@@ -256,13 +256,31 @@ class TestClientIsTheExecutor:
 
 
 class TestCreateFactory:
-    def test_caches_per_model_and_setup(self):
+    def test_repeated_create_shares_the_window_not_the_object(self):
+        """Clients are cheap and rebuilt per create(); what must be shared is
+        the rate-limit window, or two call sites on one model would each start
+        a fresh 60s budget and collectively overspend."""
         clear_client_cache()
         clear_transport_caches()
         with patch.dict(os.environ, {"VENICE_API_KEY": "test"}):
             a = ModelClient.create("venice-uncensored")
             b = ModelClient.create("venice-uncensored")
-        assert a is b
+        assert a is not b, "no client cache: each create() builds a fresh wrapper"
+        assert a._rate_limiter is b._rate_limiter, "but one shared window"
+        assert a._limit_key == b._limit_key == "venice-uncensored"
+        assert a.backend._client is b.backend._client, "and one SDK connection pool"
+
+    def test_create_picks_up_a_rotated_api_key(self):
+        """The bug the client cache caused: a cached client held the old SDK
+        client, so rotating the key had no effect until the cache was cleared."""
+        clear_client_cache()
+        clear_transport_caches()
+        with patch.dict(os.environ, {"VENICE_API_KEY": "first"}):
+            a = ModelClient.create("venice-uncensored")
+        clear_transport_caches()
+        with patch.dict(os.environ, {"VENICE_API_KEY": "second"}):
+            b = ModelClient.create("venice-uncensored")
+        assert a.backend._client is not b.backend._client
 
     def test_local_binding_carries_no_api_budget(self):
         """One entry, two setups: binding the local one must not inherit the

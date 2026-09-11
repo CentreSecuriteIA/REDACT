@@ -25,8 +25,15 @@ from .model_config import get_model_config
 from .progress import ProgressReporter
 from .wrappers import BatchCaller, RateLimiter, clear_shared_limiters, shared_limiter
 
-# One client per (model, resolved setup) — see ModelClient.create().
-_client_cache: dict[tuple[str, str], "ModelClient"] = {}
+# There is deliberately **no client cache**. A client is a backend plus two
+# bound choices — microseconds to build — while everything expensive it
+# reaches is already cached on that thing's own identity: SDK connection pools
+# per endpoint and vLLM engines per checkpoint (in ``backends/``), rate-limit
+# windows per key (``wrappers._shared_limiters``). Caching the cheap wrapper
+# on top bought nothing and cost correctness: the cached client held the only
+# other reference to an engine, so ``clear_transport_caches()`` freed no GPU
+# memory and a rotated API key never took effect. Rebuilding per ``create()``
+# also means a runtime ``register_model()`` is picked up immediately.
 
 
 # Budget already claimed for an endpoint under "endpoint" scope, as
@@ -36,8 +43,12 @@ _endpoint_rpm: dict[str, tuple[int, str]] = {}
 
 
 def clear_client_cache() -> None:
-    """Drop every cached client. For tests, or after changing the registry."""
-    _client_cache.clear()
+    """Drop every rate-limit window and endpoint budget claim.
+
+    For tests, or after changing the registry. Named for history: there is no
+    client cache any more (see above), but this is still the call that resets
+    the per-key state a rebuilt client picks straight back up.
+    """
     _endpoint_rpm.clear()
     clear_shared_limiters()
 
@@ -45,25 +56,34 @@ def clear_client_cache() -> None:
 def _resolve_rate_limit(model, config, setup) -> tuple[RateLimiter | None, str | None]:
     """Decide which window this model's calls count against.
 
-    ``(None, None)`` means "private limiter keyed on the model" — the default,
-    correct wherever the provider meters per model. Also returned for every
-    local setup, which then gets no limiter at all: ``__init__`` keys that on
-    ``backend.rpm``, not on anything decided here.
+    Returns the ``(limiter, key)`` pair for this model. Both halves matter:
+    the same key in two limiter instances is still two windows, and one
+    instance under two keys likewise. They always come from
+    ``wrappers.shared_limiter``, so the window survives this client — clients
+    are rebuilt per :meth:`ModelClient.create`, windows must not be.
 
-    Under ``rate_limit_scope="endpoint"`` the model instead shares one limiter
-    *and* one key with every other model behind the same provider+URL+key, so
-    an account-metered provider is not handed N times its budget.
+    The key is the *model* by default, which is right wherever the provider
+    meters per model (Venice: three models on one API key, three independent
+    budgets). Under ``rate_limit_scope="endpoint"`` it is the endpoint id
+    instead, so every model behind the same provider+URL+key shares one
+    window and an account-metered provider is not handed N times its budget.
+
+    ``(None, None)`` means "no budget, so no window" — every local setup,
+    whose ``rpm`` is ``None``.
 
     Raises:
         ValueError: If two models sharing an endpoint disagree about ``rpm``.
             One window cannot honour two budgets, and silently picking either
-            would over- or under-spend with nothing to point at. Checked here
-            rather than at load time so it covers runtime ``register_model``
-            too, and it still fires before any request goes out.
+            would over- or under-spend with nothing to point at. Checked on
+            every call (there is no client cache to skip it), so a runtime
+            ``register_model`` is covered and it fires before any request.
     """
     api = getattr(config, setup, None) if setup == "api" else None
-    if api is None or api.rate_limit_scope != "endpoint":
+    if api is None:
+        # No API setup means no budget — a local binding carries rpm=None.
         return None, None
+    if api.rate_limit_scope != "endpoint":
+        return shared_limiter(model), model
 
     endpoint = api.endpoint_id
     claimed = _endpoint_rpm.get(endpoint)
@@ -92,9 +112,13 @@ class ModelClient:
         Args:
             backend: The configured model. Everything about *what* to call is
                 already on it; this only decides *how* a batch runs.
-            rate_limiter: Optional shared limiter, so several clients can
-                enforce one window. Defaults to a private one — or to none at
-                all for a backend with no budget (see below).
+            rate_limiter: The window this client's calls count against.
+                :meth:`create` always supplies one from
+                ``wrappers.shared_limiter`` so the window outlives the client.
+                Omitting it builds a **private** limiter — fine for a
+                one-off/direct construction, wrong for anything sharing a
+                budget. ``None`` is also what a backend with no budget gets
+                (see below).
             limit_key: Identity that window belongs to; defaults to the
                 model's own name. :meth:`create` supplies the endpoint id
                 instead for a provider that meters the account — and supplies
@@ -127,9 +151,13 @@ class ModelClient:
     def create(cls, model: str, backend_type: str | None = None) -> "ModelClient":
         """Build a ready-to-call model — the one factory callers should use.
 
-        Cached per ``(model, resolved setup)`` so repeated calls share one
-        client — and therefore one rate-limit window — rather than each
-        starting a fresh budget.
+        Builds a **fresh** client every call (~3us: a registry lookup, a setup
+        resolution and an object). Nothing expensive is rebuilt — the SDK
+        connection pool or vLLM engine comes from its own cache in
+        ``backends/``, and the rate-limit window from ``shared_limiter``, so
+        two clients for one model still share one budget. ``create(m) is
+        create(m)`` is therefore False, deliberately: identity was never the
+        contract, the shared window is.
 
         Args:
             model: Registered model name.
@@ -138,7 +166,7 @@ class ModelClient:
                 that defaults to its hosted endpoint.
 
         Returns:
-            The cached client for that model and setup.
+            A client for that model and setup.
 
         Raises:
             KeyError: If the model isn't registered, or the setup's API-key
@@ -147,13 +175,8 @@ class ModelClient:
         """
         config = get_model_config(model)
         setup = resolve_setup(config, backend_type)
-        key = (model, setup)
-        if key not in _client_cache:
-            limiter, limit_key = _resolve_rate_limit(model, config, setup)
-            _client_cache[key] = cls(
-                backend_for(config, setup), limiter, limit_key=limit_key
-            )
-        return _client_cache[key]
+        limiter, limit_key = _resolve_rate_limit(model, config, setup)
+        return cls(backend_for(config, setup), limiter, limit_key=limit_key)
 
     @property
     def model(self) -> str:

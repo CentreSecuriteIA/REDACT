@@ -403,11 +403,12 @@ def preload(
 def unload_local(keep: list[str] | None = None) -> None:
     """Free loaded local models so the next one has room.
 
-    Clears **both** the transport caches and the client cache, and both are
-    required: a cached ``ModelClient`` holds a reference to its backend, which
-    holds the engine, so dropping only the engine cache would leave the weights
-    alive and the GPU still occupied. Freeing is still Python's business — the
-    memory comes back when the last reference goes, not when this returns.
+    Drops the engine caches, and the rate-limit windows with them so a fresh
+    run starts clean. Freeing is Python's business: the memory comes back when
+    the *last* reference to an engine goes, not when this returns. Since
+    clients are rebuilt per ``ModelClient.create()`` and nothing caches them,
+    the cache is usually the last holder — but a caller still holding a client
+    keeps its engine resident, correctly, because it is still in use.
 
     Args:
         keep: Model names whose clients are still in use by the caller. They

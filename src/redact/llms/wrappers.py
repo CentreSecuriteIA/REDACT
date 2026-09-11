@@ -121,26 +121,35 @@ class RateLimiter:
             timestamps.append(time.time())
 
 
-# Limiters shared by every model behind one endpoint, for providers that meter
-# the account rather than the model. Keyed on APIConfig.endpoint_id. Module
-# level because the sharing has to outlive any one client — that is the whole
-# point — and double-checked like every other cache here, since clients can be
-# built from a preload thread.
+# One limiter per window key — a model name where the provider meters per
+# model, an APIConfig.endpoint_id where it meters the account. **This cache is
+# what makes a rate-limit window outlive any one client**, which matters
+# because clients are cheap and rebuilt per ``ModelClient.create()``: without
+# it, two call sites generating against the same model would each start a
+# fresh 60-second window and collectively exceed the budget. Double-checked
+# like every other cache here, since clients can be built from a preload
+# thread.
 _shared_limiters: dict[str, RateLimiter] = {}
 _shared_limiters_lock = threading.Lock()
 
 
-def shared_limiter(endpoint_id: str) -> RateLimiter:
-    """Get (or create) the one limiter every model on this endpoint shares."""
-    if endpoint_id not in _shared_limiters:
+def shared_limiter(key: str) -> RateLimiter:
+    """Get (or create) the one limiter every caller on this key shares.
+
+    Args:
+        key: The window's identity — ``backend.model`` for a per-model budget,
+            ``APIConfig.endpoint_id`` for a per-account one. Callers that pass
+            the same key share one window; that is the whole mechanism.
+    """
+    if key not in _shared_limiters:
         with _shared_limiters_lock:
-            if endpoint_id not in _shared_limiters:
-                _shared_limiters[endpoint_id] = RateLimiter()
-    return _shared_limiters[endpoint_id]
+            if key not in _shared_limiters:
+                _shared_limiters[key] = RateLimiter()
+    return _shared_limiters[key]
 
 
 def clear_shared_limiters() -> None:
-    """Drop the endpoint-shared limiters. For tests, or a registry change."""
+    """Drop every rate-limit window. For tests, or a registry change."""
     with _shared_limiters_lock:
         _shared_limiters.clear()
 

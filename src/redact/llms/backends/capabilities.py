@@ -211,8 +211,15 @@ def backend_for(config: "ModelConfig", setup: str | None = None) -> LLMBackend:
 def clear_transport_caches() -> None:
     """Reset every backend class's shared-resource cache.
 
-    For tests, or after changing environment variables. Each class clears its
-    own — see :meth:`LLMBackend.clear_cache`.
+    For tests, after changing environment variables, or to free GPU memory
+    between local models. Each class clears its own — see
+    :meth:`LLMBackend.clear_cache`.
+
+    This drops the cache's reference; the resource dies when the *last* one
+    does. Since clients are rebuilt per ``ModelClient.create()`` and hold no
+    cache of their own, that is usually immediate — but a caller still
+    holding a client keeps its engine resident, correctly, because it is
+    still in use.
     """
     for backend_cls in BACKEND_TYPES.values():
         backend_cls.clear_cache()
