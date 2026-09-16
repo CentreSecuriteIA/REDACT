@@ -2,7 +2,7 @@
 
 import pytest
 
-from redact.llms.extraction import (
+from redact.llms.prompting import (
     EXTRACTION_STYLES,
     ConstitutionEntry,
     clean_sample,
@@ -275,15 +275,19 @@ class TestExtractAndClean:
         result = extract_and_clean(text, style="delimiter")
         assert result == ["First", "Second"]
 
-    def test_structured_qa_returns_prompts(self):
-        text = (
-            "**Prompt 1:**\n"
-            "**Question:** **What?**\n"
-            "**Answer:** Something\n\n"
-        )
-        result = extract_and_clean(text, style="structured_qa")
-        assert len(result) == 1
-        assert "What?" in result[0]
+    def test_paired_style_raises_and_names_the_right_function(self):
+        """It used to accept structured_qa and silently keep only the
+        questions. Anyone asking for QA pairs wants both halves, so a quiet
+        half-result is worse than no result."""
+        text = "**Question:** What?\n**Answer:** Something\n"
+        with pytest.raises(ValueError, match="extract_structured_qa"):
+            extract_and_clean(text, style="structured_qa")
+
+    def test_paired_style_is_still_requestable_as_a_format(self):
+        """Only the *dispatch* rejects it — asking a model for QA output is a
+        legitimate thing to do, and benign_generation does exactly that."""
+        assert "structured_qa" in EXTRACTION_STYLES
+        assert "Prompt" in get_format_instruction("structured_qa", num_samples=2)
 
     def test_unknown_style_raises(self):
         with pytest.raises(ValueError, match="Unknown extraction style"):

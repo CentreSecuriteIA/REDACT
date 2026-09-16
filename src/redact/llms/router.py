@@ -68,6 +68,19 @@ def generate_sample(client: ModelClient, messages: list[dict], **kwargs) -> str:
     return client.generate([messages], **kwargs)[0]
 
 
+# TODO(review): the generic half of checker construction belongs here.
+#
+# ``build_check_messages`` is a ``(original, sample) -> messages`` callable,
+# and every caller builds one the same way: take a PromptTemplate, wrap it in
+# a closure that maps the two positional args onto the template's own kwarg
+# names. content_moderation/checker.py writes that closure out four times.
+#
+# Define it once here (or on PromptTemplate) so a pipeline only says *which*
+# prompt and *which* fields, not how a checker is shaped. See the TODO at the
+# top of content_moderation/checker.py for the other half — what stays there
+# is the domain knowledge, which must not move into this layer.
+
+
 def check_sample(
     client: ModelClient,
     sample: str,

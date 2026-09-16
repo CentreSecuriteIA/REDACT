@@ -46,7 +46,7 @@ from .backends import (
 from .client import ModelClient, clear_client_cache
 
 # Extraction utilities
-from .extraction import (
+from .prompting import (
     EXTRACTION_STYLES,
     ConstitutionEntry,
     clean_sample,
@@ -77,7 +77,7 @@ from .model_config import (
 from .progress import ProgressReporter
 
 # Prompt loading
-from .prompts import PromptTemplate, build_messages, load_prompt, render_template
+from .prompting import PromptTemplate, build_messages, load_prompt
 
 # Caller-facing helpers over a client: single-sample, chunking, check loop.
 from .router import (

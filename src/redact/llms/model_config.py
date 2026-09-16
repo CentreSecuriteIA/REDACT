@@ -222,10 +222,11 @@ class VLLMConfig:
         vram_gb: Estimated VRAM this model *needs*, for pre-flight residency
             planning. An estimate: real usage moves with ``max_model_len``,
             quantization and KV cache. ``None`` means the planner falls back to
-            a measured value (``Data_cache/vram.json``) or plans optimistically.
+            an estimate computed from the checkpoint's HF config, or plans
+            optimistically. Set it to *override* that estimate.
             NOTE: this is the model's need, **not** what vLLM reserves —
             ``gpu_memory_utilization`` makes it claim a fraction of the whole
-            card regardless of model size. See ``redact.residency``.
+            card regardless of model size. See ``redact.llms.resources``.
         min_gpus: Whole devices this model claims, i.e. ``tensor_parallel_size``.
             A model too large for one card takes N cards outright, which is a
             different packing problem from "does it fit in the leftover GB".

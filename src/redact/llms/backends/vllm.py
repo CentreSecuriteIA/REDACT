@@ -26,7 +26,7 @@ import time
 from typing import TYPE_CHECKING, ClassVar
 
 from .. import observe
-from . import vram
+from ..resources import measure
 from .base import ComputeConfig, LLMBackend
 
 if TYPE_CHECKING:
@@ -113,47 +113,26 @@ def _engine(hf_model_id: str, quantization: str | None, vllm_kwargs: dict):
         kwargs = dict(vllm_kwargs)
 
         started = time.perf_counter()
-        with vram.Measurement() as measured:
+        with measure.Measurement() as measured:
             _engines[key] = LLM(model=hf_model_id, quantization=quantization, **kwargs)
         _engine_loaded_at[key] = time.perf_counter()
 
-        # What this load took, recorded for the residency planner. CAUTION:
-        # `claimed_gb` here is essentially gpu_memory_utilization x card, since
-        # vLLM preallocates weights AND KV cache — it is NOT the model's need.
-        # vram.planning_gb() is what reads this back correctly.
-        settings = {
-            "gpu_memory_utilization": kwargs.get("gpu_memory_utilization"),
-            "max_model_len": kwargs.get("max_model_len"),
-            "tensor_parallel_size": kwargs.get("tensor_parallel_size", 1),
-            "quantization": quantization,
-            "dtype": kwargs.get("dtype"),
-        }
-        from ... import paths  # local import: paths is above llms in the tree
-
-        # The variable half of the footprint. Not measurable from the delta —
-        # vLLM's pool is sized by gpu_memory_utilization, not by need — so it
-        # is derived from the checkpoint's own shapes instead. Without it
-        # planning_gb() silently reduces to weights-only and the planner
-        # under-books every local model.
-        measured.record(
-            paths.vram_cache_json(), f"vllm:{hf_model_id}", settings, backend="vllm",
-            kv_gb_est=vram.estimate_kv_gb(
-                hf_model_id,
-                max_model_len=settings["max_model_len"],
-                dtype=settings["dtype"],
-                tensor_parallel_size=settings["tensor_parallel_size"] or 1,
-            ),
-        )
+        # Measured for telemetry only — never fed back into planning. For vLLM
+        # `claimed_gib` is essentially gpu_memory_utilization x card (it
+        # preallocates weights AND KV), and `weights_gib` is usually None here
+        # because the V1 engine core runs in a separate process, so this
+        # process's torch allocator never sees the load. Footprints come from
+        # llms/resources/estimate.py instead, computed from config shapes.
         observe.record({
             "ev": "engine",
             "phase": "load",
             "backend": "vllm",
             "hf_model_id": hf_model_id,
             "quantization": quantization,
-            "tensor_parallel_size": settings["tensor_parallel_size"],
+            "tensor_parallel_size": kwargs.get("tensor_parallel_size", 1),
             "load_ms": round((_engine_loaded_at[key] - started) * 1000, 1),
-            "claimed_gb": measured.claimed_gb,
-            "weights_gb": measured.weights_gb,
+            "claimed_gib": measured.claimed_gib,
+            "weights_gib": measured.weights_gib,
         })
         return _engines[key]
 

@@ -20,6 +20,7 @@ and log directory are bound in
 Reference: backends/vllm.py (lazy import + cache pattern).
 """
 
+import atexit
 import json
 import logging
 import threading
@@ -27,7 +28,8 @@ import time
 from pathlib import Path
 from typing import TYPE_CHECKING, ClassVar
 
-from . import vram
+from .. import observe
+from ..resources import measure
 from .base import ComputeConfig, LLMBackend
 
 if TYPE_CHECKING:
@@ -49,6 +51,14 @@ _models: dict[tuple, tuple] = {}
 # duplicate from_pretrained() would put two copies of the weights on the card.
 _models_lock = threading.Lock()
 
+# When each loaded checkpoint went onto the card. Same cost model as vllm.py:
+# the GPU is leased for as long as weights are resident, so lifetime is billed
+# per *checkpoint* — not per backend instance, and not per call. Without these
+# events telemetry's engines_s stays empty and a run on this backend (the
+# slowest local transport, with no batching to amortize) reports
+# local_cost_usd 0.0 while actually holding a card for the whole run.
+_models_loaded_at: dict[tuple, float] = {}
+
 
 def _load(hf_model_id: str, device_map: str, torch_dtype: str, hf_kwargs: dict):
     """Get or load the tokenizer + model pair for one checkpoint."""
@@ -65,6 +75,7 @@ def _load(hf_model_id: str, device_map: str, torch_dtype: str, hf_kwargs: dict):
 
 def _load_locked(key, hf_model_id: str, device_map: str, torch_dtype: str, hf_kwargs: dict):
     """The real load. Only ever called with ``_models_lock`` held."""
+    started = time.perf_counter()
     try:
         from transformers import AutoModelForCausalLM, AutoTokenizer
     except ImportError:
@@ -84,25 +95,54 @@ def _load_locked(key, hf_model_id: str, device_map: str, torch_dtype: str, hf_kw
     dtype_kwarg = (
         "dtype" if int(transformers.__version__.split(".")[0]) >= 5 else "torch_dtype"
     )
-    with vram.Measurement() as measured:
+    with measure.Measurement() as measured:
         model = AutoModelForCausalLM.from_pretrained(
             hf_model_id, device_map=device_map, **{dtype_kwarg: torch_dtype}, **hf_kwargs,
         )
     model.eval()
 
-    # Unlike vLLM this preallocates no KV pool, so the measured delta really is
-    # the model's need — vram.planning_gb() relies on the recorded backend name
-    # to tell the two cases apart.
-    from ... import paths  # local import: paths is above llms in the tree
-
-    measured.record(
-        paths.vram_cache_json(),
-        f"introspect:{hf_model_id}",
-        {"device_map": device_map, "torch_dtype": torch_dtype},
-        backend="introspect",
-    )
+    # Unlike vLLM this preallocates no KV pool and loads in-process, so here
+    # the delta really is the model's need — the one place Measurement gives a
+    # trustworthy weights figure. Still telemetry only: planning reads
+    # llms/resources/estimate.py, which needs no load at all.
     _models[key] = (tokenizer, model)
+    _models_loaded_at[key] = time.perf_counter()
+    observe.record({
+        "ev": "engine",
+        "phase": "load",
+        "backend": "introspect",
+        "hf_model_id": hf_model_id,
+        "device_map": device_map,
+        "torch_dtype": torch_dtype,
+        "load_ms": round((_models_loaded_at[key] - started) * 1000, 1),
+        "claimed_gib": measured.claimed_gib,
+        "weights_gib": measured.weights_gib,
+    })
     return _models[key]
+
+
+def _release_models() -> None:
+    """Emit a lifetime event per loaded checkpoint, then forget the timers.
+
+    Called from :meth:`TransformersIntrospectionBackend.clear_cache` and from
+    an ``atexit`` hook — without the latter a process that simply exits never
+    reports ``held_s``, and the local cost of the whole run goes unrecorded.
+    Mirrors ``vllm._release_engines``; telemetry builds ``engines_s`` from
+    these events alone, without caring which backend emitted them.
+    """
+    now = time.perf_counter()
+    for key, loaded_at in list(_models_loaded_at.items()):
+        observe.record({
+            "ev": "engine",
+            "phase": "release",
+            "backend": "introspect",
+            "hf_model_id": key[0],
+            "held_s": round(now - loaded_at, 1),
+        })
+    _models_loaded_at.clear()
+
+
+atexit.register(_release_models)
 
 
 class TransformersIntrospectionBackend(LLMBackend):
@@ -220,7 +260,12 @@ class TransformersIntrospectionBackend(LLMBackend):
 
     @classmethod
     def clear_cache(cls) -> None:
-        """Drop the loaded models — frees GPU memory between local models."""
+        """Drop the loaded models — frees GPU memory between local models.
+
+        Reports each checkpoint's lifetime before forgetting it, so unloading
+        to make room for the next model still bills the time the card was held.
+        """
+        _release_models()
         _models.clear()
 
     def _capture_dir(self, internals_id: str) -> Path:

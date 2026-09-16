@@ -33,7 +33,7 @@ from ..dataset import Ledger, Manifest, merge_all
 from ..dataset.io import _hash_text
 from ..llms.client import ModelClient
 from ..llms.model_config import default_model_for_role, get_models_by_role
-from ..llms.prompts import build_messages, load_prompt
+from ..llms.prompting import build_messages, load_prompt
 from ..llms.router import batch_check_samples, batch_generate_samples, generate_sample
 from .checker import build_paraphrase_checker
 
@@ -44,7 +44,7 @@ _PROMPT_DIR = None  # Uses load_prompt() default (package-relative)
 
 def _load_paraphrase_prompt(prompt_dir: str | None = _PROMPT_DIR) -> dict:
     """Load the paraphrase prompt config from JSON."""
-    return load_prompt("output", "paraphrase", prompt_dir=prompt_dir)
+    return load_prompt("paraphrase", "generation", prompt_dir=prompt_dir)
 
 
 def paraphrase_batch(
@@ -263,7 +263,7 @@ def run_paraphrase_target(
 
     unload_between = False
     if len(groups) > 1:
-        from redact import residency
+        from redact.llms.resources import residency
 
         plan = residency.plan_residency(list(groups))
         unload_between = plan.sequential

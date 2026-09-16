@@ -28,6 +28,7 @@ from pathlib import Path
 import pandas as pd
 
 from redact import paths, telemetry
+from redact.llms.prompting import report_prompt_sources
 
 logger = logging.getLogger(__name__)
 
@@ -109,7 +110,12 @@ def load_recipe(recipe: str | Path | dict) -> dict:
     if dtype not in ("eval", "training"):
         raise ValueError(f"dataset_type must be 'eval' or 'training', got {dtype!r}")
 
-    stages = data.get("stages") or ["inputs", "outputs", "jailbreaks", "build"]
+    # `is None`, not `or`: an explicit `stages: []` means "run nothing", and
+    # `or` turned that into the full default pipeline — the opposite of what
+    # was asked for, with no error to notice.
+    stages = data.get("stages")
+    if stages is None:
+        stages = ["inputs", "outputs", "jailbreaks", "build"]
     unknown = [s for s in stages if s not in STAGES]
     if unknown:
         raise ValueError(f"Unknown stage(s) {unknown}; valid: {list(STAGES)}")
@@ -154,11 +160,11 @@ def _plan_and_preload(models: dict, stages: list[str], verbose: bool = True) -> 
     Runs before the stage loop so a configuration that cannot fit says so at
     minute zero rather than after the constitution stage has spent its budget.
     Neither the plan nor a failed preload aborts the run — see
-    :func:`redact.residency.preload` for why finishing an API-only stage is
-    strictly better than killing it.
+    :func:`redact.llms.resources.residency.preload` for why finishing an
+    API-only stage is strictly better than killing it.
     """
-    from . import residency
     from .llms.model_config import default_model_for_role
+    from .llms.resources import residency
 
     roles = {r for stage in stages for r in residency.STAGE_ROLES.get(stage, ())}
     wanted: list[str] = []
@@ -238,6 +244,12 @@ def run_pipeline(
 
     # Telemetry first, so the plan and preload below are themselves recorded.
     telemetry.install(data_dir=data_dir)
+    if verbose:
+        # Alongside the residency plan: one "here's your setup" block, before
+        # anything runs. With prompts resolving per file against an overlay,
+        # "which prompt ran?" stops being obvious, and an override that
+        # silently matches nothing is invisible without this.
+        report_prompt_sources(prompt_dir)
     _plan_and_preload(models, stages, verbose=verbose)
 
     summary: dict = {"dataset_type": dataset_type, "data_dir": str(data_dir), "stages": {}}

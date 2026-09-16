@@ -17,7 +17,7 @@ scenarios can still be injected via the ``scenario`` kwarg.
 from redact.dataset.taxonomy import load_taxonomy
 from redact.jailbreak.dynamic_functions import bind_functions
 from redact.jailbreak.protocol import LLMRequest, TechniqueGen
-from redact.llms.prompts import build_messages, load_prompt
+from redact.llms.prompting import build_messages, load_prompt
 
 from .cognitive import _extract_scenario, cognitive_gen
 

@@ -13,8 +13,8 @@ import pandas as pd
 
 from redact import paths
 from redact.llms.client import ModelClient
-from redact.llms.extraction import extract_structured_qa
-from redact.llms.prompts import build_messages, load_prompt
+from redact.llms.prompting import extract_structured_qa
+from redact.llms.prompting import build_messages, load_prompt
 from redact.llms.router import generate_sample
 
 logger = logging.getLogger(__name__)

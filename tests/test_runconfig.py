@@ -12,7 +12,7 @@ from unittest.mock import patch
 import pandas as pd
 import pytest
 
-from redact import paths
+from redact import paths, telemetry
 from redact.dataset.io import append_samples
 from redact.runconfig import (
     load_params,
@@ -235,3 +235,36 @@ def test_run_pipeline_reports_residency_before_running(tmp_path, monkeypatch, ca
         assert "llama-3.2-3b-debug" in caplog.text
     finally:
         telemetry.uninstall()
+
+
+def test_run_pipeline_reports_prompt_overrides(tmp_path, monkeypatch, caplog):
+    """The overlay makes "which prompt ran?" non-obvious, so the setup block
+    says. Sits next to the residency plan, under the same verbose flag."""
+    import json
+    import logging
+
+    import redact
+
+    over = tmp_path / "my_prompts" / "input" / "quality_check"
+    over.mkdir(parents=True)
+    (over / "template.json").write_text(json.dumps({"system_prompt": "MINE"}))
+
+    monkeypatch.setattr(redact, "build_dataset", lambda **k: pd.DataFrame({"x": [1]}))
+    recipe = {
+        "dataset_type": "eval", "data_dir": str(tmp_path), "stages": ["build"],
+        "prompt_dir": str(tmp_path / "my_prompts"),
+    }
+    try:
+        with caplog.at_level(logging.INFO, logger="redact.llms.prompting.prompts"):
+            run_pipeline(recipe, params={"build": {}}, verbose=True)
+        assert "1 overridden" in caplog.text
+        assert "input/quality_check" in caplog.text
+    finally:
+        telemetry.uninstall()
+
+
+def test_empty_stages_list_is_not_the_default_pipeline(tmp_path):
+    """`stages: []` is falsy, so `or` turned "run nothing" into the full
+    default pipeline — the opposite of what was asked for, silently."""
+    recipe = {"dataset_type": "eval", "data_dir": str(tmp_path), "stages": []}
+    assert load_recipe(recipe)["stages"] == []

@@ -31,8 +31,8 @@ from ..dataset.ledger import Ledger
 from ..dataset.manifest import Manifest
 from ..dataset.taxonomy import iter_categories
 from ..llms.client import ModelClient
-from ..llms.extraction import parse_constitution as _parse_raw
-from ..llms.prompts import build_messages, load_prompt
+from ..llms.prompting import parse_constitution as _parse_raw
+from ..llms.prompting import build_messages, load_prompt
 from ..llms.router import generate_sample
 from ..types import ALL_ENTRY_TYPES, EntryType
 
@@ -260,7 +260,7 @@ class ConstitutionPipeline:
             (entries, raw_output): List of tagged entries and raw LLM text.
             Returns ([], "") if all attempts fail.
         """
-        prompt_config = load_prompt("constitution/generation", entry_type.value)
+        prompt_config = load_prompt("constitution", entry_type.value)
         kwargs = self._format_category_info(category_name, category_info)
         kwargs["num_categories"] = str(num_categories)
         messages = build_messages(prompt_config, **kwargs)
@@ -381,7 +381,7 @@ class ConstitutionPipeline:
             (entries, raw_output): List of tagged entries and raw LLM text.
             Returns ([], "") if all attempts fail.
         """
-        prompt_config = load_prompt("constitution/generation", "general_benign")
+        prompt_config = load_prompt("constitution", "general_benign")
         kwargs = {"num_categories": str(num_categories)}
         messages = build_messages(prompt_config, **kwargs)
 

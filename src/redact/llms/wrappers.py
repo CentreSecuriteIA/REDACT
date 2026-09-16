@@ -8,8 +8,11 @@ resolution (that is settled at backend construction, see
 ``backends/base.py``), and they never call back into
 :class:`~redact.llms.client.ModelClient`, which is what *holds* them.
 
-- ``RateLimiter`` — thread-safe sliding-window RPM enforcement, keyed per
-  model. Inert for a backend with ``rpm=None``, i.e. anything local.
+- ``RateLimiter`` — thread-safe sliding-window RPM enforcement, one window per
+  key (a model name, or an endpoint id where the provider meters the account).
+  A backend with no budget — ``rpm=None``, i.e. anything local — gets **no
+  limiter at all**: ``ModelClient`` keys that off ``backend.rpm`` and stores
+  ``None``, rather than attaching a live object that no-ops on every call.
 - ``BatchCaller`` — parallel-or-sequential fan-out for backends that do no
   native batching. It has no notion of native batching at all; that decision
   belongs to ``ModelClient``, which calls a native-batching backend directly
@@ -38,87 +41,96 @@ _RATE_LIMIT_WINDOW_SECONDS = 60.0
 class RateLimiter:
     """Thread-safe RPM enforcement over a 60-second sliding window.
 
-    One window per key. The key is whatever :meth:`wait_if_needed` is handed —
-    a model name for a per-model budget, an endpoint id for a per-account one
-    — so this class enforces a scope it never chooses. That choice is made
-    once in ``client._resolve_rate_limit()`` from the setup's
-    ``rate_limit_scope``, which also pairs the key with the matching limiter
-    instance (a shared key in a private limiter would still be one window per
-    client).
+    **One instance is one window.** Which window — a model name for a
+    per-model budget, an endpoint id for a per-account one — is decided
+    entirely by :func:`shared_limiter` before this object is handed to anyone;
+    ``client._resolve_rate_limit()` picks the key from the setup's
+    ``rate_limit_scope``. So this class never sees a key and never chooses a
+    scope: it counts requests against the one window it is.
 
-    **What each ``None`` means here**, since none of the three is "unlimited":
+    **Instances outlive clients, deliberately.** ``ModelClient`` is rebuilt on
+    every ``create()`` (there is no client cache), so a window anchored to a
+    client would reset constantly and two call sites on one model would each
+    start a fresh 60 seconds. :func:`shared_limiter` is what anchors it
+    instead — which is also why :class:`ModelClient`'s own default is the
+    shared window for its key, not a private limiter.
 
-    - ``backend.rpm is None`` — the only real exemption. :meth:`wait_if_needed`
-      returns before touching any state. Every local setup lands here by
-      construction: neither ``VLLMConfig`` nor the introspection setup has an
-      ``rpm`` field, so those backends fall back to ``LLMBackend``'s default.
-      A dual-setup entry is exempt on its local binding even though its
-      ``.api`` declares an rpm.
-    - ``key=None`` — window keyed on ``backend.model``.
-    - ``rate_limiter=None`` into :class:`ModelClient` — a *private* limiter
-      for a model that has a budget, and no limiter at all for one that
-      doesn't. The client keys that on ``backend.rpm``, so a local binding
-      holds ``None`` rather than a live object that no-ops on every call;
-      both it and ``BatchCaller`` then skip throttling on a ``None``.
+    **When there is no limiter at all.** ``backend.rpm is None`` means no
+    budget, and ``ModelClient`` then stores ``None`` rather than attaching a
+    live object that no-ops on every call. Every local setup lands there by
+    construction: neither ``VLLMConfig`` nor the introspection setup has an
+    ``rpm`` field, so those backends fall back to ``LLMBackend``'s default —
+    and a dual-setup entry is exempt on its local binding even though its
+    ``.api`` declares an rpm. :meth:`wait_if_needed` keeps its own ``rpm``
+    guard regardless, since it is public and takes any backend.
+
     """
 
     def __init__(self):
-        # One dict keyed by model, each value the (lock, timestamps) pair —
-        # not two parallel dicts. _get_model_state()'s fast path below reads
-        # this dict without the global lock, so the pair must come into
-        # existence as a single atomic assignment; two separate dict
-        # assignments (self._locks[m]=...; self._timestamps[m]=...) would
-        # leave a narrow window where a concurrent fast-path reader could
-        # observe the lock but not yet the timestamps list.
-        self._state: dict[str, tuple[threading.Lock, list[float]]] = {}
-        self._global_lock = threading.Lock()
+        # ONE window per instance, not a dict keyed by model. Which key an
+        # instance serves is decided by shared_limiter() before this object is
+        # ever handed out, so an internal per-key dict was a second lookup of
+        # the same key that could only ever hold one entry.
+        self._timestamps: list[float] = []
+        self._lock = threading.Lock()
 
-    def _get_model_state(self, model: str) -> tuple[threading.Lock, list[float]]:
-        """Get or create the lock and timestamp list for a model."""
-        if model not in self._state:
-            with self._global_lock:
-                # Double-check after acquiring global lock
-                if model not in self._state:
-                    self._state[model] = (threading.Lock(), [])
-        return self._state[model]
-
-    def wait_if_needed(self, backend: "LLMBackend", key: str | None = None) -> None:
+    def wait_if_needed(self, backend: "LLMBackend") -> None:
         """Block until making a request against this backend is safe.
 
         Args:
             backend: The configured model whose ``rpm`` budget to enforce.
-                Returns immediately when its ``rpm`` is ``None``.
-            key: Identity the window belongs to. Defaults to
-                ``backend.model``; a per-account cap passes the endpoint id
-                instead, so every model behind it shares one window.
+                Returns immediately when its ``rpm`` is ``None``. Only the
+                budget is read from it — *which* window this is was settled
+                when the instance was chosen.
         """
         rpm = backend.rpm
         if rpm is None:
             return
-        model = key or backend.model
-        lock, timestamps = self._get_model_state(model)
 
-        with lock:
-            now = time.time()
-            # Prune timestamps older than the window
-            timestamps[:] = [t for t in timestamps if now - t < _RATE_LIMIT_WINDOW_SECONDS]
+        with self._lock:
+            # A loop, not a single check: the lock is released while sleeping,
+            # so N workers can all find the window full, all sleep on the same
+            # oldest timestamp, and all wake together. Appending unconditionally
+            # after one sleep would let every one of them through at once and
+            # overshoot the cap. Re-pruning and re-testing on each pass is what
+            # actually holds it.
+            while True:
+                now = time.time()
+                # Drops everything older than the window, in place. This is the
+                # only thing that trims the list — and it runs on every call,
+                # not just when full, so the list cannot grow without bound:
+                # the loop below exits only while len < rpm and appends exactly
+                # once, so it holds at most `rpm` entries. (Nothing prunes while
+                # idle, but the same bound applies — tens of floats.)
+                self._timestamps[:] = [
+                    t for t in self._timestamps
+                    if now - t < _RATE_LIMIT_WINDOW_SECONDS
+                ]
+                if len(self._timestamps) < rpm:
+                    break
 
-            if len(timestamps) >= rpm:
-                sleep_for = _RATE_LIMIT_WINDOW_SECONDS - (now - timestamps[0]) + 0.1
-                if sleep_for > 0:
-                    logger.info("[rate-limit] %s: pausing %.1fs (%d RPM)",
-                                model, sleep_for, rpm)
-                    # Release lock while sleeping so other models aren't blocked
-                    lock.release()
-                    try:
-                        time.sleep(sleep_for)
-                    finally:
-                        lock.acquire()
-                    # Re-prune after sleeping
-                    now = time.time()
-                    timestamps[:] = [t for t in timestamps if now - t < _RATE_LIMIT_WINDOW_SECONDS]
+                sleep_for = (
+                    _RATE_LIMIT_WINDOW_SECONDS - (now - self._timestamps[0]) + 0.1
+                )
+                if sleep_for <= 0:
+                    continue  # the oldest already aged out; re-prune and retry
+                logger.info("[rate-limit] %s: pausing %.1fs (%d RPM)",
+                            backend.model, sleep_for, rpm)
+                # Released while sleeping so other workers on this same window
+                # can re-check rather than queueing behind the sleeper — they
+                # re-test above, so this costs nothing in correctness.
+                #
+                # Waiters race for the lock rather than queueing, so which one
+                # goes next is arbitrary. That decides scheduling order within
+                # a batch and nothing else: BatchCaller reassembles by index
+                # and returns only once every item is done.
+                self._lock.release()
+                try:
+                    time.sleep(sleep_for)
+                finally:
+                    self._lock.acquire()
 
-            timestamps.append(time.time())
+            self._timestamps.append(time.time())
 
 
 # One limiter per window key — a model name where the provider meters per
@@ -175,22 +187,21 @@ class BatchCaller:
         backend: "LLMBackend",
         rate_limiter: RateLimiter | None = None,
         max_workers: int | None = None,
-        limit_key: str | None = None,
     ):
         """Wire fan-out around one configured backend.
 
         Args:
             backend: The configured model to dispatch to.
-            rate_limiter: Optional shared limiter; without one, no throttling.
+            rate_limiter: The window to count against, or ``None`` for no
+                throttling at all. ``ModelClient`` passes ``None`` only for a
+                backend with no budget (``rpm=None``, i.e. any local one) —
+                everything else gets the shared window for its key.
             max_workers: Override for ``backend.max_workers``. Omit in normal
                 use — the backend's value is already reconciled with its
                 transport's capability.
-            limit_key: Identity the rate window belongs to, forwarded to
-                :meth:`RateLimiter.wait_if_needed`. ``None`` means per model.
         """
         self._backend = backend
         self._rate_limiter = rate_limiter
-        self._limit_key = limit_key
         self._max_workers = (
             backend.max_workers if max_workers is None else max_workers
         )
@@ -225,7 +236,7 @@ class BatchCaller:
         yielding several samples in one completion — a different problem.)
         """
         if self._rate_limiter:
-            self._rate_limiter.wait_if_needed(self._backend, self._limit_key)
+            self._rate_limiter.wait_if_needed(self._backend)
         results = self._backend.generate(
             [messages],
             system_prompts=[system_prompt],

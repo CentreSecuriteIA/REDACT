@@ -29,10 +29,10 @@ import math
 import threading
 from dataclasses import dataclass, field
 
-from . import paths
-from .llms import observe
-from .llms.backends import resolve_setup, vram
-from .llms.model_config import get_model_config
+from .. import observe
+from ..backends import resolve_setup
+from ..model_config import get_model_config
+from . import estimate, measure
 
 logger = logging.getLogger(__name__)
 
@@ -50,23 +50,62 @@ class ModelFootprint:
     hf_model_id: str
     gb: float | None
     min_gpus: int
-    source: str  # "measured" | "declared" | "unknown"
+    source: str  # "declared" | "estimated" | "unknown"
+    #: The terms behind an estimate (weights/KV/TP/max_model_len), so a report
+    #: can show why the number is what it is. Empty for a declared footprint —
+    #: a pinned number has no derivation to show.
+    parts: dict = field(default_factory=dict)
 
     @property
     def known(self) -> bool:
         return self.gb is not None
 
+    def breakdown(self) -> str:
+        """One-line derivation, e.g. ``43.9 weights + 2.1 KV, x1.1 +0.6``."""
+        if self.source == "declared":
+            return "declared"
+        w, kv = self.parts.get("weights_gib"), self.parts.get("kv_gib")
+        if w is None:
+            return self.source
+        terms = f"{w:.1f} weights"
+        if kv:
+            terms += f" + {kv:.1f} KV"
+        return (
+            f"estimated: {terms}, x{estimate.DEFAULT_FRAGMENTATION} "
+            f"+{estimate.DEFAULT_CUDA_CONTEXT_GIB}"
+        )
 
-def footprint(model: str, backend_type: str | None = None) -> ModelFootprint | None:
-    """Estimate one model's VRAM need, without loading anything.
 
-    Resolution order — measured beats declared, because a measurement taken
-    under the same settings is the only number grounded in reality:
+def footprint(
+    model: str,
+    backend_type: str | None = None,
+    *,
+    seq_len: int | None = None,
+    batch: int = 1,
+) -> ModelFootprint | None:
+    """What one model is expected to need, without loading anything.
 
-    1. ``Data_cache/vram.json`` for this checkpoint, **if the settings it was
-       measured under still match** the registry entry.
-    2. The setup's declared ``vram_gb``.
+    Resolution order — **declared beats estimated**, the inverse of the old
+    measured-beats-declared rule. ``vram_gb`` is now the *override*: the place
+    someone pins a number they know better than the estimate (an MoE
+    checkpoint, an architecture the shape math doesn't model, a figure from a
+    real OOM). Absent that, the estimate is computed from the checkpoint's HF
+    config, so a newly registered model plans correctly with nothing
+    hand-derived.
+
+    1. The setup's declared ``vram_gb``, if set.
+    2. :mod:`~redact.llms.resources.estimate` — weights + KV + explicit
+       headroom, from config shapes alone.
     3. Unknown — planning continues optimistically and says so.
+
+    Args:
+        model: Registered model name.
+        backend_type: Optional setup override, e.g. ``"vllm"``.
+        seq_len: Tokens per sequence (input + output) to size the KV cache
+            for. ``None`` uses the engine's configured ``max_model_len`` —
+            the feasibility floor, i.e. one request at full context.
+        batch: Concurrent sequences. ``1`` answers "can this run at all";
+            the pipeline's real chunk size answers "can it run that batch".
 
     Returns:
         The footprint, or ``None`` when this model has no local setup at all
@@ -78,38 +117,66 @@ def footprint(model: str, backend_type: str | None = None) -> ModelFootprint | N
         return None
     local = getattr(config, setup)
 
-    cache = vram.load_cache(paths.vram_cache_json())
-    entry = cache.get(f"{setup}:{local.hf_model_id}")
-    if entry is not None and _settings_match(entry.get("settings") or {}, local, setup):
-        gb = vram.planning_gb(entry)
-        if gb is not None:
-            return ModelFootprint(model, setup, local.hf_model_id, gb,
-                                  local.min_gpus, "measured")
-
     if local.vram_gb is not None:
+        # Still carry the setup facts: gpu_memory_utilization and TP describe
+        # the *engine*, not the estimate, so the grant check below applies to a
+        # pinned footprint exactly as much as to a computed one.
         return ModelFootprint(model, setup, local.hf_model_id, local.vram_gb,
-                              local.min_gpus, "declared")
+                              local.min_gpus, "declared",
+                              parts=_setup_parts(local, setup))
+
+    parts = _estimate_parts(local, setup, seq_len=seq_len, batch=batch)
+    gib = estimate.planning_gib(parts["weights_gib"], parts["kv_gib"])
+    if gib is not None:
+        return ModelFootprint(model, setup, local.hf_model_id, gib,
+                              local.min_gpus, "estimated", parts=parts)
     return ModelFootprint(model, setup, local.hf_model_id, None,
                           local.min_gpus, "unknown")
 
 
-def _settings_match(recorded: dict, local, setup: str) -> bool:
-    """Is a stored measurement still describing this configuration?
+def _setup_parts(local, setup: str) -> dict:
+    """Engine facts read straight off the setup — no estimation involved.
 
-    A measurement taken at ``max_model_len=384`` says nothing about the same
-    checkpoint at 32k, so every setting that moves the number is compared.
+    Split out from :func:`_estimate_parts` because these describe how the
+    *engine* is configured, so they are just as true for a pinned ``vram_gb``
+    as for a computed footprint. Keeping them together is what previously let
+    the grant check silently skip every declared model.
     """
     if setup == "introspect":
-        return (recorded.get("device_map") == local.device_map
-                and recorded.get("torch_dtype") == local.torch_dtype)
+        return {"tensor_parallel_size": 1, "max_model_len": None}
     kw = local.vllm_kwargs or {}
-    return (
-        recorded.get("gpu_memory_utilization") == kw.get("gpu_memory_utilization")
-        and recorded.get("max_model_len") == kw.get("max_model_len")
-        and recorded.get("tensor_parallel_size") == kw.get("tensor_parallel_size", 1)
-        and recorded.get("quantization") == local.quantization
-        and recorded.get("dtype") == kw.get("dtype")
-    )
+    return {
+        "tensor_parallel_size": kw.get("tensor_parallel_size", local.min_gpus or 1),
+        "max_model_len": kw.get("max_model_len"),
+        "gpu_memory_utilization": kw.get("gpu_memory_utilization"),
+    }
+
+
+def _estimate_parts(local, setup: str, *, seq_len: int | None, batch: int) -> dict:
+    """Weights and KV for one local setup, with the terms kept separate.
+
+    Returned as parts rather than a total so :meth:`ResidencyPlan.explain` can
+    show *why* a number is what it is — which is what lets someone decide
+    whether to override it with ``vram_gb``.
+    """
+    parts = _setup_parts(local, setup)
+    tp = parts["tensor_parallel_size"]
+    if setup == "introspect":
+        parts["weights_gib"] = estimate.estimate_weights_gib(
+            local.hf_model_id, dtype=local.torch_dtype)
+        # transformers holds no preallocated pool; its per-call KV is transient
+        # and small next to the weights, so it is not modelled.
+        parts["kv_gib"] = None
+        return parts
+
+    kw = local.vllm_kwargs or {}
+    parts["weights_gib"] = estimate.estimate_weights_gib(
+        local.hf_model_id, dtype=kw.get("dtype"),
+        quantization=local.quantization, tensor_parallel_size=tp)
+    parts["kv_gib"] = estimate.estimate_kv_gib(
+        local.hf_model_id, seq_len=seq_len, max_model_len=parts["max_model_len"],
+        dtype=kw.get("dtype"), tensor_parallel_size=tp, batch=batch)
+    return parts
 
 
 @dataclass
@@ -144,39 +211,114 @@ class ResidencyPlan:
         return len(self.groups) > 1
 
     def explain(self) -> str:
-        """The pre-flight message — what will load, in what order, on what."""
-        gpu = f"{self.gpus_available} x {self.gpu_name}" if self.gpu_name else "no GPU detected"
+        """The pre-flight message — what loads, in what order, on what.
+
+        Prints the whole allocation schema rather than only the grouping: the
+        per-model derivation (so a number can be judged and overridden), the
+        device split for a tensor-parallel model, and for anything that does
+        not fit, a **concrete configuration that would** — not just advice to
+        go find one.
+        """
+        gpu = (
+            f"{self.gpus_available} x {self.gpu_name}"
+            if self.gpu_name else "no GPU detected"
+        )
         if self.per_gpu_gb:
-            gpu += f", {self.per_gpu_gb:.0f}GB each"
-        lines = [
-            f"plan needs {self.gpus_required} GPU(s); detected {gpu}"
-        ]
+            gpu += f", {self.per_gpu_gb:.1f}GiB each"
+        lines = [f"plan needs {self.gpus_required} GPU(s); detected {gpu}"]
+
         for i, group in enumerate(self.groups, start=1):
             tail = "" if i == 1 else "  -> sequential, unload between"
             lines.append(f"  group {i}:{tail}")
             for fp in group:
-                gb = f"~{fp.gb:.1f}GB" if fp.known else "size unknown"
-                gpus = f", {fp.min_gpus} GPU(s)" if fp.min_gpus > 1 else ""
-                lines.append(
-                    f"    {fp.model}[{fp.setup}]  {gb} ({fp.source}){gpus}"
-                )
+                gb = f"~{fp.gb:.1f}GiB" if fp.known else "size unknown"
+                lines.append(f"    {fp.model}[{fp.setup}]  {gb}  ({fp.breakdown()})")
+                if fp.min_gpus > 1 and fp.known:
+                    lines.append(
+                        f"      -> {fp.min_gpus} GPUs "
+                        f"(tensor_parallel_size={fp.min_gpus}), "
+                        f"~{fp.gb / fp.min_gpus:.1f}GiB each"
+                    )
+            lines.extend(self._grant_warnings(group))
+
         for fp in self.oversized:
-            lines.append(
-                f"  PROBLEM: {fp.model} needs ~{fp.gb:.1f}GB but a device has "
-                f"{self.per_gpu_gb:.0f}GB — one model cannot be split across "
-                f"cards by packing. Set min_gpus (tensor_parallel_size), use a "
-                f"quantized checkpoint, or serve it over an API."
-            )
+            lines.extend(self._oversized_advice(fp))
+
         unknown = [fp.model for g in self.groups for fp in g if not fp.known]
         if unknown:
             lines.append(
                 f"  note: no footprint for {', '.join(unknown)} — planned "
-                f"optimistically; declare vram_gb or run once to measure"
+                f"optimistically; declare vram_gb to pin one"
             )
         return "\n".join(lines)
 
+    def _grant_warnings(self, group: list[ModelFootprint]) -> list[str]:
+        """Flag a model that fits the card but not its own vLLM grant.
 
-def plan_residency(models: list[str], backend_types: dict | None = None) -> ResidencyPlan:
+        ``gpu_memory_utilization`` caps what vLLM may reserve, so a model can
+        fit a device and still OOM because the *grant* is smaller than the
+        need. That is the constraint which actually produces the failure, and
+        nothing checked it before.
+        """
+        out = []
+        if not self.per_gpu_gb:
+            return out
+        for fp in group:
+            util = fp.parts.get("gpu_memory_utilization")
+            if not (fp.known and util):
+                continue
+            granted = self.per_gpu_gb * util
+            need = fp.gb / max(1, fp.min_gpus)
+            if need > granted:
+                out.append(
+                    f"    WARNING: {fp.model} needs ~{need:.1f}GiB per GPU but "
+                    f"gpu_memory_utilization={util} grants {granted:.1f}GiB. "
+                    f"Raise it to >={min(0.98, need / self.per_gpu_gb + 0.02):.2f} "
+                    f"or lower max_model_len."
+                )
+        return out
+
+    def _oversized_advice(self, fp: ModelFootprint) -> list[str]:
+        """A model too large for one device — say which config *would* work.
+
+        Packing never splits a model across cards; only tensor parallelism
+        does. So the useful output is the smallest TP that fits and what each
+        device would then hold, rather than "set min_gpus" and leave the
+        arithmetic to the reader.
+        """
+        per = self.per_gpu_gb or 0
+        lines = [
+            f"  PROBLEM: {fp.model}[{fp.setup}] needs ~{fp.gb:.1f}GiB but a "
+            f"device has {per:.1f}GiB — packing never splits one model across "
+            f"cards."
+        ]
+        # TP must divide the attention heads, so only powers of two are worth
+        # proposing without reading the config again.
+        for n in (2, 4, 8):
+            if per and fp.gb / n <= per:
+                fits = "" if n <= self.gpus_available else "  (more GPUs than detected)"
+                lines.append(
+                    f"    suggested: min_gpus={n} (tensor_parallel_size={n})"
+                    f" -> ~{fp.gb / n:.1f}GiB per GPU{fits}"
+                )
+                break
+        else:
+            if per:
+                need = math.ceil(fp.gb / per)
+                lines.append(
+                    f"    would need >={need} GPUs of {per:.1f}GiB at "
+                    f"tensor_parallel_size={need}"
+                )
+        lines.append(
+            "    alternatives: a quantized checkpoint (~4x smaller at "
+            "awq/gptq), a lower max_model_len, or the .api setup"
+        )
+        return lines
+
+
+def plan_residency(
+    models: list[str], backend_types: dict | None = None
+) -> ResidencyPlan:
     """Group a run's local models into what can be co-resident.
 
     Greedy first-fit: models are packed onto the detected devices in declared
@@ -192,7 +334,7 @@ def plan_residency(models: list[str], backend_types: dict | None = None) -> Resi
         A :class:`ResidencyPlan`. Never raises for a plan that does not fit:
         it reports, and the caller decides (``run_pipeline`` logs and continues).
     """
-    from .telemetry import detect_gpu_memory_gb, detect_gpus
+    from ...telemetry import detect_gpu_memory_gib, detect_gpus
 
     backend_types = backend_types or {}
     footprints = []
@@ -208,8 +350,8 @@ def plan_residency(models: list[str], backend_types: dict | None = None) -> Resi
     gpu_name, gpus_available = detect_gpus()
     # torch knows the live figure, but needs torch installed AND CUDA usable.
     # nvidia-smi answers on any machine that has a card, which is most of them.
-    ft = vram.free_total_gb()
-    per_gpu_gb = ft[1] if ft else detect_gpu_memory_gb()
+    ft = measure.free_total_gib()
+    per_gpu_gb = ft[1] if ft else detect_gpu_memory_gib()
 
     plan = ResidencyPlan(
         gpus_available=gpus_available, gpu_name=gpu_name, per_gpu_gb=per_gpu_gb,
@@ -362,7 +504,7 @@ def preload(
     Returns:
         The daemon thread, or ``None`` when there is nothing local to load.
     """
-    from .llms import ModelClient
+    from ..client import ModelClient
 
     backend_types = backend_types or {}
     local = []
@@ -415,8 +557,8 @@ def unload_local(keep: list[str] | None = None) -> None:
             are logged, not protected: a live local reference anywhere keeps
             its engine resident regardless of what this clears.
     """
-    from .llms.backends import clear_transport_caches
-    from .llms.client import clear_client_cache
+    from ..backends import clear_transport_caches
+    from ..client import clear_client_cache
 
     if keep:
         logger.debug("[residency] unloading local models; %s still referenced", keep)

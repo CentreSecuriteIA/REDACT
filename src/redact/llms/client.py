@@ -109,21 +109,40 @@ class ModelClient:
     ):
         """Wire a finished backend for batch dispatch.
 
+        **Prefer :meth:`create`.** This constructor is the escape hatch for a
+        backend the registry doesn't describe, and it can only see what is on
+        the backend — which leaves three things it cannot get right on its own:
+
+        - **Account-metered providers.** ``rate_limit_scope`` lives in the
+          registry, so this defaults the window to one per *model*. For an
+          endpoint-scoped provider (Anthropic) two models on one key then hold
+          two windows and collectively exceed the account budget. Pass
+          ``limit_key=config.api.endpoint_id`` for every client sharing that
+          account, or use :meth:`create`.
+        - **The rpm-agreement check.** ``_resolve_rate_limit``'s ValueError for
+          two models on one endpoint declaring different ``rpm`` is raised in
+          :meth:`create`; nothing checks it here.
+        - **Whatever the backend was built with.** A backend constructed
+          directly rather than through ``from_config`` falls back to
+          ``LLMBackend``'s defaults — notably ``rpm=None``, i.e. no rate
+          limiting at all, and ``max_workers=1``. That is silent: an unmetered
+          client looks identical to a metered one until you hit 429s.
+
         Args:
             backend: The configured model. Everything about *what* to call is
                 already on it; this only decides *how* a batch runs.
             rate_limiter: The window this client's calls count against.
-                :meth:`create` always supplies one from
-                ``wrappers.shared_limiter`` so the window outlives the client.
-                Omitting it builds a **private** limiter — fine for a
-                one-off/direct construction, wrong for anything sharing a
-                budget. ``None`` is also what a backend with no budget gets
-                (see below).
-            limit_key: Identity that window belongs to; defaults to the
-                model's own name. :meth:`create` supplies the endpoint id
-                instead for a provider that meters the account — and supplies
-                the matching shared limiter with it, since one without the
-                other still yields independent windows.
+                Defaults to the shared window for ``limit_key``, the same one
+                :meth:`create` uses — so a directly-constructed client and a
+                created one for the same model count against *one* budget
+                rather than two. Pass an explicit limiter only to deliberately
+                isolate a window. Ignored entirely for a backend with no
+                budget (see below).
+            limit_key: Which shared window to join; defaults to the model's
+                own name. :meth:`create` supplies the endpoint id instead for
+                a provider that meters the account. Used *only* to select the
+                limiter instance — a limiter is one window, so the key is not
+                passed any further down.
         """
         self._backend = backend
         self._limit_key = limit_key or backend.model
@@ -138,13 +157,19 @@ class ModelClient:
         # and NOT on _native below: "does this have a budget" and "how does a
         # batch run" are independent facts that merely coincide today, so a
         # metered native-batching transport would still be limited correctly.
+        #
+        # Defaulting to the SHARED window, not a private one: with no client
+        # cache, `create()` and direct construction are otherwise two paths to
+        # two independent windows on one budget. Same key, same window, however
+        # the client was built — the caller has to ask for isolation.
         self._rate_limiter = (
-            None if backend.rpm is None else (rate_limiter or RateLimiter())
+            None if backend.rpm is None
+            else (rate_limiter or shared_limiter(self._limit_key))
         )
         self._native = backend.compute_config.supports_native_batching
         self._caller = (
             None if self._native
-            else BatchCaller(backend, self._rate_limiter, limit_key=self._limit_key)
+            else BatchCaller(backend, self._rate_limiter)
         )
 
     @classmethod
@@ -260,7 +285,7 @@ class ModelClient:
             # Dead for vLLM (rpm=None → no limiter); live only if a metered
             # native-batching transport is ever added, and then per batch.
             if self._rate_limiter is not None:
-                self._rate_limiter.wait_if_needed(self._backend, self._limit_key)
+                self._rate_limiter.wait_if_needed(self._backend)
             results = self._backend.generate(
                 messages_list,
                 system_prompts=system_prompts,

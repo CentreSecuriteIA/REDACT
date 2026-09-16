@@ -40,7 +40,7 @@ from redact.jailbreak.obfuscation.encoding import (
 )
 from redact.jailbreak.protocol import LLMRequest, TechniqueGen
 from redact.llms.client import ModelClient
-from redact.llms.prompts import build_messages, load_prompt
+from redact.llms.prompting import build_messages, load_prompt
 from redact.llms.router import generate_sample
 
 # ---------------------------------------------------------------------------

@@ -1,6 +1,7 @@
 """Tests for rate limiting, the system-prompt policy, and the batch caller."""
 
 import os
+import threading
 import time
 from unittest.mock import patch
 
@@ -18,6 +19,7 @@ from redact.llms.model_config import (
     get_model_config,
     register_model,
 )
+from redact.llms import wrappers
 from redact.llms.wrappers import BatchCaller, RateLimiter
 from tests.conftest import MockBackend, make_client
 
@@ -242,13 +244,6 @@ class TestRateLimiter:
         elapsed = time.time() - start
         assert elapsed < 1.0
 
-    def test_creates_per_model_state(self):
-        limiter = RateLimiter()
-        limiter.wait_if_needed(make_client(model="model-a").backend)
-        limiter.wait_if_needed(make_client(model="model-b").backend)
-        assert "model-a" in limiter._state
-        assert "model-b" in limiter._state
-
     def test_local_backend_is_not_rate_limited(self):
         # A backend built from a model's local setup carries rpm=None, so the
         # limiter must not track it at all — even though its registry entry
@@ -267,29 +262,52 @@ class TestRateLimiter:
         assert backend.rpm is None
         limiter = RateLimiter()
         limiter.wait_if_needed(backend)
-        assert limiter._state == {}
+        assert limiter._timestamps == []
 
-    def test_get_model_state_returns_matching_lock_and_timestamps(self):
-        # Regression: lock and timestamps used to live in two separate dicts,
-        # populated by two separate statements — a concurrent fast-path
-        # reader (checking only the lock dict) could observe the lock
-        # without its timestamps list yet existing. Now both come from one
-        # dict entry, written in a single atomic assignment.
+    def test_one_instance_is_one_window(self):
+        """The key lives in shared_limiter(), not inside the limiter. Two
+        backends handed to the same instance deliberately share its window —
+        keeping them apart is the caller's job, done by asking for two
+        instances."""
         limiter = RateLimiter()
-        lock, timestamps = limiter._get_model_state("model-a")
-        assert limiter._state["model-a"] == (lock, timestamps)
-        # Same model again returns the identical pair, not a fresh one.
-        lock2, timestamps2 = limiter._get_model_state("model-a")
-        assert lock2 is lock
-        assert timestamps2 is timestamps
+        limiter.wait_if_needed(make_client(model="model-a").backend)
+        limiter.wait_if_needed(make_client(model="model-b").backend)
+        assert len(limiter._timestamps) == 2
+
+    def test_rechecks_capacity_after_sleeping(self):
+        """Regression: the sleep path was a single `if` with an unconditional
+        append, so a waiter that woke to a *still-full* window issued its
+        request anyway and overshot the cap. Deterministic here: the first
+        sleep frees nothing, so a correct limiter must sleep again rather than
+        proceed.
+        """
+        rpm = 3
+        backend = make_client(model="rl-recheck").backend
+        backend.rpm = rpm
+        limiter = RateLimiter()
+        for _ in range(rpm):
+            limiter.wait_if_needed(backend)
+        assert len(limiter._timestamps) == rpm
+
+        calls = []
+
+        def _sleep(_seconds):
+            calls.append(_seconds)
+            if len(calls) == 2:        # only the SECOND sleep frees a slot
+                limiter._timestamps[0] -= 120.0
+
+        with patch.object(wrappers.time, "sleep", side_effect=_sleep):
+            limiter.wait_if_needed(backend)
+
+        assert len(calls) == 2, "woke to a full window and proceeded anyway"
+        assert len(limiter._timestamps) == rpm, "cap exceeded"
 
     def test_tracks_timestamps(self):
         limiter = RateLimiter()
         backend = make_client(model="rl-timestamps").backend
         limiter.wait_if_needed(backend)
         limiter.wait_if_needed(backend)
-        _, timestamps = limiter._state["rl-timestamps"]
-        assert len(timestamps) == 2
+        assert len(limiter._timestamps) == 2
 
 
 class TestBatchCaller:
@@ -340,7 +358,7 @@ class TestBatchCaller:
         caller = caller_for(backend, "rl-test-model", rate_limiter=limiter)
         results = caller.run([[{"role": "user", "content": "hi"}]])
         assert results == ["ok"]
-        assert "rl-test-model" in limiter._state
+        assert len(limiter._timestamps) == 1
 
     def test_passes_kwargs(self):
         backend = MockBackend("ok")
@@ -480,11 +498,9 @@ class TestRateLimitScope:
         with patch("redact.llms.backends.openai.openai.OpenAI"):
             with patch.dict(os.environ, {"TEST_KEY": "k"}):
                 ca, cb = ModelClient.create(a), ModelClient.create(b)
-        ca._rate_limiter.wait_if_needed(ca.backend, ca._limit_key)
-        cb._rate_limiter.wait_if_needed(cb.backend, cb._limit_key)
-        endpoint = get_model_config(a).api.endpoint_id
-        _lock, timestamps = ca._rate_limiter._get_model_state(endpoint)
-        assert len(timestamps) == 2, "both models must count against one window"
+        ca._rate_limiter.wait_if_needed(ca.backend)
+        cb._rate_limiter.wait_if_needed(cb.backend)
+        assert len(ca._rate_limiter._timestamps) == 2,             "both models must count against one window"
 
     def test_disagreeing_rpm_on_one_endpoint_is_rejected(self):
         """One window cannot honour two budgets; picking either silently would

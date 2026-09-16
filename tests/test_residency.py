@@ -6,17 +6,20 @@ load-time measurement against a live engine is a GPU-session job.
 """
 
 import json
-import sys
 import threading
 import time
-from types import SimpleNamespace
-from unittest.mock import MagicMock, patch
+from unittest.mock import patch
 
 import pytest
 
-from redact import residency, telemetry
-from redact.llms.backends import vram
+from redact import telemetry
 from redact.llms.model_config import MODEL_REGISTRY, VLLMConfig, register_model
+from redact.llms.resources import measure, residency
+
+GIB = 1024 ** 3
+#: Fixture card size and the TP factor the suggestions land on.
+CARD_GIB = 48.0
+EXPECTED_TP = 2
 
 
 @pytest.fixture(autouse=True)
@@ -40,173 +43,103 @@ def registered():
         MODEL_REGISTRY.pop(n, None)
 
 
-class TestPlanningGb:
-    """The KV-cache trap: what vLLM *reserved* is not what the model *needs*."""
+class TestReporting:
+    """explain() is the pre-flight message — it has to be actionable, not just
+    true. These cover the two things it grew: the vLLM grant check, and a
+    concrete suggested configuration instead of 'go configure something'."""
 
-    def test_vllm_claimed_gb_is_never_used_for_planning(self):
-        # A 3B at gpu_memory_utilization=0.86 reserves ~86% of the card. Planning
-        # from that would say the model needs 6.9GB and make co-residency
-        # impossible forever.
-        entry = {"backend": "vllm", "claimed_gb": 6.9,
-                 "weights_gb": 2.1, "kv_gb_est": 0.4}
-        assert vram.planning_gb(entry) == pytest.approx(2.5)
+    def test_grant_warning_fires_when_utilization_is_too_low(self, registered):
+        """A model can fit the card and still OOM because gpu_memory_utilization
+        caps what vLLM may reserve. That is the constraint which actually
+        produces the failure, and nothing checked it before."""
+        m = registered("_res_grant", hf_model_id="org/g", vram_gb=20.0,
+                       vllm_kwargs={"gpu_memory_utilization": 0.1})
+        caps = _capacity(48.0, 1)
+        with caps[0], caps[1]:
+            plan = residency.plan_residency([m])
+        out = plan.explain()
+        assert "gpu_memory_utilization=0.1 grants 4.8GiB" in out
+        assert "Raise it to >=" in out
 
-    def test_vllm_without_a_weights_floor_declines_to_guess(self):
-        assert vram.planning_gb({"backend": "vllm", "claimed_gb": 6.9}) is None
+    def test_grant_check_applies_to_a_declared_footprint(self, registered):
+        """The util is an engine fact, not an estimate detail — pinning
+        vram_gb must not silently skip the check."""
+        m = registered("_res_grant_decl", hf_model_id="org/gd", vram_gb=40.0,
+                       vllm_kwargs={"gpu_memory_utilization": 0.5})
+        caps = _capacity(48.0, 1)
+        with caps[0], caps[1]:
+            plan = residency.plan_residency([m])
+        assert "WARNING" in plan.explain()
 
-    def test_introspect_delta_really_is_the_need(self):
-        # transformers preallocates no KV pool, so there the delta is honest.
-        assert vram.planning_gb({"backend": "introspect", "claimed_gb": 6.2}) == 6.2
+    def test_oversized_model_gets_a_concrete_configuration(self, registered):
+        m = registered("_res_suggest", hf_model_id="org/s", vram_gb=52.0)
+        caps = _capacity(48.0, 2)
+        with caps[0], caps[1]:
+            plan = residency.plan_residency([m])
+        out = plan.explain()
+        assert "suggested: min_gpus=2 (tensor_parallel_size=2)" in out
+        assert "~26.0GiB per GPU" in out
 
-
-class TestEstimateKvGb:
-    """The variable half of a footprint, derived from shapes not from a delta."""
-
-    @staticmethod
-    def _fake_transformers(cfg):
-        """A stand-in ``transformers`` exposing only AutoConfig.from_pretrained."""
-        mod = MagicMock()
-        mod.AutoConfig.from_pretrained.return_value = cfg
-        return patch.dict(sys.modules, {"transformers": mod})
-
-    def test_computes_two_x_layers_x_kv_heads_x_head_dim_x_tokens(self):
-        # Llama-3-8B's shapes, head_dim = 4096 // 32 = 128:
-        #   2 * 32 * 8 * 128 * 8192 * 2 bytes = 1.0737e9 -> 1.07 GB.
-        # Matches the ~1GB-per-sequence-at-8k figure quoted for that model,
-        # which is what makes this a check on the formula and not just on
-        # arithmetic I wrote twice.
-        cfg = SimpleNamespace(
-            num_hidden_layers=32, num_attention_heads=32, num_key_value_heads=8,
-            hidden_size=4096, max_position_embeddings=8192,
-        )
-        with self._fake_transformers(cfg):
-            got = vram.estimate_kv_gb("fake/model", max_model_len=8192)
-        # 2 * 32 * 8 * 128 * 8192 * 2 = 1.073...e9 bytes
-        assert got == pytest.approx(1.07, abs=0.01)
-
-    def test_gqa_caches_kv_heads_not_attention_heads(self):
-        """The 4x difference between 8 KV heads and 32 attention heads is real."""
-        mha = SimpleNamespace(
-            num_hidden_layers=32, num_attention_heads=32, num_key_value_heads=32,
-            hidden_size=4096, max_position_embeddings=8192,
-        )
-        gqa = SimpleNamespace(
-            num_hidden_layers=32, num_attention_heads=32, num_key_value_heads=8,
-            hidden_size=4096, max_position_embeddings=8192,
-        )
-        with self._fake_transformers(mha):
-            big = vram.estimate_kv_gb("fake/model", max_model_len=8192)
-        with self._fake_transformers(gqa):
-            small = vram.estimate_kv_gb("fake/model", max_model_len=8192)
-        assert big == pytest.approx(small * 4, rel=0.01)
-
-    def test_max_model_len_falls_back_to_the_models_own_context(self):
-        cfg = SimpleNamespace(
-            num_hidden_layers=32, num_attention_heads=32, num_key_value_heads=8,
-            hidden_size=4096, max_position_embeddings=8192,
-        )
-        with self._fake_transformers(cfg):
-            explicit = vram.estimate_kv_gb("fake/model", max_model_len=8192)
-            implied = vram.estimate_kv_gb("fake/model")
-        assert explicit == implied
-
-    def test_shorter_context_needs_proportionally_less(self):
-        cfg = SimpleNamespace(
-            num_hidden_layers=32, num_attention_heads=32, num_key_value_heads=8,
-            hidden_size=4096, max_position_embeddings=8192,
-        )
-        with self._fake_transformers(cfg):
-            full = vram.estimate_kv_gb("fake/model", max_model_len=8192)
-            half = vram.estimate_kv_gb("fake/model", max_model_len=4096)
-        assert half == pytest.approx(full / 2, rel=0.01)
-
-    def test_tensor_parallel_shards_the_per_gpu_need(self):
-        cfg = SimpleNamespace(
-            num_hidden_layers=32, num_attention_heads=32, num_key_value_heads=8,
-            hidden_size=4096, max_position_embeddings=8192,
-        )
-        with self._fake_transformers(cfg):
-            one = vram.estimate_kv_gb("fake/model", max_model_len=8192)
-            four = vram.estimate_kv_gb(
-                "fake/model", max_model_len=8192, tensor_parallel_size=4
-            )
-        assert four == pytest.approx(one / 4, rel=0.01)
-
-    def test_fp32_kv_is_twice_bf16(self):
-        cfg = SimpleNamespace(
-            num_hidden_layers=32, num_attention_heads=32, num_key_value_heads=8,
-            hidden_size=4096, max_position_embeddings=8192,
-        )
-        with self._fake_transformers(cfg):
-            bf16 = vram.estimate_kv_gb("fake/model", max_model_len=8192, dtype="bfloat16")
-            fp32 = vram.estimate_kv_gb("fake/model", max_model_len=8192, dtype="float32")
-        assert fp32 == pytest.approx(bf16 * 2, rel=0.01)
-
-    def test_nested_text_config_is_unwrapped(self):
-        """A multimodal entry keeps the language model's shapes one level down."""
-        inner = SimpleNamespace(
-            num_hidden_layers=32, num_attention_heads=32, num_key_value_heads=8,
-            hidden_size=4096, max_position_embeddings=8192,
-        )
-        with self._fake_transformers(SimpleNamespace(text_config=inner)):
-            assert vram.estimate_kv_gb("fake/model", max_model_len=8192) == pytest.approx(
-                1.07, abs=0.01
-            )
-
-    def test_incomplete_config_declines_to_guess(self):
-        with self._fake_transformers(SimpleNamespace(num_hidden_layers=32)):
-            assert vram.estimate_kv_gb("fake/model", max_model_len=8192) is None
-
-    def test_unreadable_config_never_raises(self):
-        """A planning hint must not take down a load that would have worked."""
-        mod = MagicMock()
-        mod.AutoConfig.from_pretrained.side_effect = OSError("no network")
-        with patch.dict(sys.modules, {"transformers": mod}):
-            assert vram.estimate_kv_gb("fake/model") is None
-
-    def test_planning_uses_the_estimate_once_it_is_recorded(self, tmp_path):
-        """End to end: a recorded estimate is what lifts planning off the floor."""
-        path = tmp_path / "vram.json"
-        m = vram.Measurement()
-        m.claimed_gb, m.weights_gb, m.total_gb = 6.9, 2.1, 8.0
-        m.record(path, "vllm:fake/model", {}, backend="vllm", kv_gb_est=0.4)
-        entry = vram.load_cache(path)["vllm:fake/model"]
-        assert entry["kv_gb_est"] == 0.4
-        assert vram.planning_gb(entry) == pytest.approx(2.5)
+    def test_tensor_parallel_split_is_shown(self, registered):
+        m = registered("_res_tp_report", hf_model_id="org/t", vram_gb=60.0,
+                       min_gpus=2)
+        caps = _capacity(48.0, 2)
+        with caps[0], caps[1]:
+            plan = residency.plan_residency([m])
+        assert "-> 2 GPUs (tensor_parallel_size=2), ~30.0GiB each" in plan.explain()
 
 
 class TestMeasurement:
-    def test_no_ops_without_cuda(self, tmp_path):
-        with patch("redact.llms.backends.vram._torch", return_value=None):
-            with vram.Measurement() as m:
-                pass
-            m.record(tmp_path / "vram.json", "vllm:org/x", {}, backend="vllm")
-        assert m.claimed_gb is None
-        assert not (tmp_path / "vram.json").exists()   # nothing to record
+    """Post-hoc diagnostic only — nothing here feeds planning any more."""
 
-    def test_records_all_three_numbers_with_settings(self, tmp_path):
-        fake = _FakeTorch(free_before=20e9, free_after=8e9, peak=4e9, total=24e9)
-        with patch("redact.llms.backends.vram._torch", return_value=fake):
-            with vram.Measurement() as m:
+    def test_no_ops_without_cuda(self):
+        with patch("redact.llms.resources.measure._torch", return_value=None):
+            with measure.Measurement() as m:
                 pass
-            m.record(tmp_path / "vram.json", "vllm:org/x",
-                     {"max_model_len": 4096, "gpu_memory_utilization": 0.9},
-                     backend="vllm", kv_gb_est=1.5)
-        entry = json.loads((tmp_path / "vram.json").read_text())["vllm:org/x"]
-        assert entry["claimed_gb"] == pytest.approx(12.0)   # what it reserved
-        assert entry["weights_gb"] == pytest.approx(4.0)    # the real floor
-        assert entry["settings"]["max_model_len"] == 4096
-        assert vram.planning_gb(entry) == pytest.approx(5.5)
+        assert m.claimed_gib is None and m.weights_gib is None
+
+    def test_reports_claimed_and_weights_in_gib(self):
+        fake = _FakeTorch(free_before=20 * GIB, free_after=8 * GIB,
+                          peak=4 * GIB, total=24 * GIB)
+        with patch("redact.llms.resources.measure._torch", return_value=fake):
+            with measure.Measurement() as m:
+                pass
+        assert m.claimed_gib == pytest.approx(12.0)   # 20 -> 8 free
+        assert m.weights_gib == pytest.approx(4.0)    # torch allocator peak
+        assert m.total_gib == pytest.approx(24.0)
+
+    def test_weights_exclude_what_was_already_resident(self):
+        """reset_peak_memory_stats() resets the peak to *currently allocated*,
+        not to zero — so with another checkpoint on the card the raw peak is
+        (resident + mine). preload() loads sequentially in one process, so this
+        is the normal case, not an edge one."""
+        fake = _FakeTorch(free_before=20 * GIB, free_after=16 * GIB,
+                          peak=10 * GIB, total=24 * GIB, already_allocated=6 * GIB)
+        with patch("redact.llms.resources.measure._torch", return_value=fake):
+            with measure.Measurement() as m:
+                pass
+        assert m.weights_gib == pytest.approx(4.0)   # 10 peak - 6 resident
+
+    def test_load_failure_is_not_swallowed(self):
+        fake = _FakeTorch(free_before=20 * GIB, free_after=20 * GIB,
+                          peak=0, total=24 * GIB)
+        with patch("redact.llms.resources.measure._torch", return_value=fake):
+            with pytest.raises(RuntimeError), measure.Measurement():
+                raise RuntimeError("load blew up")
 
 
 class _FakeTorch:
     """Minimal stand-in for the torch surface Measurement touches."""
 
-    def __init__(self, free_before, free_after, peak, total):
+    def __init__(self, free_before, free_after, peak, total, already_allocated=0):
         self._free = [free_before, free_after]
         self._peak = peak
         self._total = total
+        self._allocated = already_allocated
         self.cuda = self
+
+    def memory_allocated(self):
+        return self._allocated
 
     def is_available(self):
         return True
@@ -224,7 +157,7 @@ class _FakeTorch:
 def _capacity(total_gb, n_gpus, name="FakeGPU"):
     """Pin every capacity source, so the real machine never leaks into a test."""
     return (
-        patch("redact.llms.backends.vram.free_total_gb",
+        patch("redact.llms.resources.measure.free_total_gib",
               return_value=(total_gb, total_gb)),
         patch("redact.telemetry.detect_gpus", return_value=(name, n_gpus)),
     )
@@ -236,30 +169,33 @@ class TestFootprintResolution:
         fp = residency.footprint(m)
         assert (fp.gb, fp.source) == (20.0, "declared")
 
-    def test_measured_beats_declared_when_settings_match(self, registered, tmp_path):
-        m = registered("_res_measured", hf_model_id="org/b", vram_gb=20.0)
-        cache = {"vllm:org/b": {"backend": "vllm", "claimed_gb": 22.0,
-                                "weights_gb": 12.0, "kv_gb_est": 1.0,
-                                "settings": {"gpu_memory_utilization": None,
-                                             "max_model_len": None,
-                                             "tensor_parallel_size": 1,
-                                             "quantization": None, "dtype": None}}}
-        (tmp_path / "vram.json").write_text(json.dumps(cache))
-        with patch("redact.paths.vram_cache_json", return_value=tmp_path / "vram.json"):
-            fp = residency.footprint(m)
-        assert (fp.gb, fp.source) == (13.0, "measured")
-
-    def test_measurement_is_not_reused_when_settings_differ(self, registered, tmp_path):
-        # Measured at max_model_len=384 says nothing about the same checkpoint
-        # at 32k, so it must fall back to the declared estimate.
-        m = registered("_res_stale", hf_model_id="org/c", vram_gb=20.0,
-                       vllm_kwargs={"max_model_len": 32768})
-        cache = {"vllm:org/c": {"backend": "vllm", "weights_gb": 12.0,
-                                "settings": {"max_model_len": 384}}}
-        (tmp_path / "vram.json").write_text(json.dumps(cache))
-        with patch("redact.paths.vram_cache_json", return_value=tmp_path / "vram.json"):
+    def test_declared_beats_estimated(self, registered):
+        """vram_gb is now the *override*, not the fallback — the place someone
+        pins a number they know better than the shape math."""
+        m = registered("_res_override", hf_model_id="org/b", vram_gb=20.0)
+        with patch("redact.llms.resources.estimate.estimate_weights_gib",
+                   return_value=99.0):
             fp = residency.footprint(m)
         assert (fp.gb, fp.source) == (20.0, "declared")
+
+    def test_estimated_when_nothing_is_declared(self, registered):
+        """A newly registered model must plan correctly with nothing
+        hand-derived — the whole point of dropping the measurement loop."""
+        m = registered("_res_estimated", hf_model_id="org/c")
+        with patch("redact.llms.resources.estimate.estimate_weights_gib",
+                   return_value=12.0),              patch("redact.llms.resources.estimate.estimate_kv_gib",
+                   return_value=1.0):
+            fp = residency.footprint(m)
+        assert fp.source == "estimated"
+        assert fp.gb > 13.0  # noqa: PLR2004 — weights 12 + KV 1, before headroom
+        assert "12.0 weights" in fp.breakdown()
+
+    def test_estimate_failure_is_unknown_not_zero(self, registered):
+        m = registered("_res_noconfig", hf_model_id="org/unreadable")
+        with patch("redact.llms.resources.estimate.estimate_weights_gib",
+                   return_value=None):
+            fp = residency.footprint(m)
+        assert fp.gb is None and fp.source == "unknown"
 
     def test_api_only_model_has_no_footprint(self):
         assert residency.footprint("claude-opus-4-6") is None
@@ -315,9 +251,9 @@ class TestPlanResidency:
         a = registered("_res_nocap_a", hf_model_id="org/na", vram_gb=20.0)
         b = registered("_res_nocap_b", hf_model_id="org/nb", vram_gb=20.0)
         # Both capacity sources blind: no torch, and no nvidia-smi either.
-        with patch("redact.llms.backends.vram.free_total_gb", return_value=None):
+        with patch("redact.llms.resources.measure.free_total_gib", return_value=None):
             with patch("redact.telemetry.detect_gpus", return_value=(None, 0)):
-                with patch("redact.telemetry.detect_gpu_memory_gb", return_value=None):
+                with patch("redact.telemetry.detect_gpu_memory_gib", return_value=None):
                     plan = residency.plan_residency([a, b])
         assert len(plan.groups) == 1          # grouped, not falsely split
         assert not plan.sequential
@@ -443,7 +379,7 @@ class TestOversizedModels:
             plan = residency.plan_residency([big])
         assert not plan.fits
         assert [fp.model for fp in plan.oversized] == [big]
-        assert "cannot be split across" in plan.explain()
+        assert "packing never splits one model across cards" in plan.explain()
         assert "min_gpus" in plan.explain()
 
     def test_declaring_min_gpus_clears_the_problem(self, registered):
@@ -467,18 +403,18 @@ class TestCapacityDetection:
         # A machine with a card but no torch/CUDA stack still gets a real plan
         # instead of the optimistic "capacity unknown" fallback.
         m = registered("_res_smi", hf_model_id="org/smi", vram_gb=50.0)
-        with patch("redact.llms.backends.vram.free_total_gb", return_value=None):
+        with patch("redact.llms.resources.measure.free_total_gib", return_value=None):
             with patch("redact.telemetry.detect_gpus", return_value=("FakeGPU", 1)):
-                with patch("redact.telemetry.detect_gpu_memory_gb", return_value=8.0):
+                with patch("redact.telemetry.detect_gpu_memory_gib", return_value=8.0):
                     plan = residency.plan_residency([m])
         assert plan.per_gpu_gb == 8.0
         assert not plan.fits          # 50GB on an 8GB card: correctly refused
 
     def test_torch_wins_over_nvidia_smi_when_both_are_available(self, registered):
         m = registered("_res_both", hf_model_id="org/both", vram_gb=1.0)
-        with patch("redact.llms.backends.vram.free_total_gb", return_value=(20.0, 24.0)):
+        with patch("redact.llms.resources.measure.free_total_gib", return_value=(20.0, 24.0)):
             with patch("redact.telemetry.detect_gpus", return_value=("FakeGPU", 1)):
-                with patch("redact.telemetry.detect_gpu_memory_gb", return_value=8.0):
+                with patch("redact.telemetry.detect_gpu_memory_gib", return_value=8.0):
                     plan = residency.plan_residency([m])
         assert plan.per_gpu_gb == 24.0     # the live figure, not the static one
 

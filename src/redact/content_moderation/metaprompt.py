@@ -53,8 +53,8 @@ import logging
 from pathlib import Path
 
 from ..llms.client import ModelClient
-from ..llms.extraction import extract_numbered_list
-from ..llms.prompts import build_messages, load_prompt
+from ..llms.prompting import extract_numbered_list
+from ..llms.prompting import build_messages, load_prompt
 from ..llms.router import generate_sample
 
 logger = logging.getLogger(__name__)

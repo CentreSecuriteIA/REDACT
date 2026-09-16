@@ -35,7 +35,25 @@ from .prompts import load_prompt
 # EXTRACTION_STYLES is that one shared source of truth.
 # ---------------------------------------------------------------------------
 
-EXTRACTION_STYLES: frozenset[str] = frozenset({"numbered", "structured_qa", "delimiter"})
+#: Every output format the library can both *request* and *parse*. All three
+#: are valid for :func:`get_format_instruction` — they are real formats to ask
+#: a model for.
+EXTRACTION_STYLES: frozenset[str] = frozenset(
+    {"numbered", "structured_qa", "delimiter"}
+)
+
+#: Of those, the ones that yield **pairs** rather than plain samples, mapped to
+#: the extractor to call instead.
+#:
+#: They are real styles but not interchangeable ones: ``"numbered"`` and
+#: ``"delimiter"`` both return ``list[str]`` ("N samples, differently marked"),
+#: while ``"structured_qa"`` returns question/answer dicts.
+#: :func:`extract_and_clean`
+#: used to accept it anyway and silently keep only the questions — and its one
+#: real caller (``jailbreak/manipulation/benign.py``) needs both halves, so it
+#: bypassed the dispatch entirely. The lossy branch served nobody; it now
+#: raises and names the right function.
+_PAIRED_STYLES: dict[str, str] = {"structured_qa": "extract_structured_qa"}
 
 
 def get_format_instruction(
@@ -249,29 +267,39 @@ def extract_and_clean(
 
     Args:
         text: Raw LLM output.
-        style: Extraction style — one of ``EXTRACTION_STYLES``, the same set
-            ``get_format_instruction()`` accepts (they're meant to be used
-            together: the format instruction told the model how to
-            structure output, this parses that structure back out).
+        style: One of ``EXTRACTION_STYLES`` **minus** the paired ones — i.e.
+            ``"numbered"`` or ``"delimiter"``. ``get_format_instruction()``
+            accepts a wider set, since a format can be worth *requesting*
+            without its result being a plain list of samples; see
+            ``_PAIRED_STYLES``.
         strip_markdown: Clean markdown formatting from each sample.
         strip_meta: Remove meta-commentary lines from each sample.
         delimiter: Delimiter for "delimiter" style.
 
     Returns:
         List of cleaned sample strings.
-        For "structured_qa" style, returns list of cleaned question strings
-        (answers are discarded — use extract_structured_qa() directly if
-        you need both).
+
+    Raises:
+        ValueError: On an unknown style, or on a *paired* style such as
+            ``"structured_qa"`` — see below.
     """
+    if style in _PAIRED_STYLES:
+        # Previously this silently did [p["question"] for p in pairs], i.e.
+        # threw away every answer. Anyone wanting QA pairs wants both halves,
+        # so a quiet half-result is worse than no result.
+        raise ValueError(
+            f"'{style}' yields question/answer pairs, not plain samples, so it "
+            f"cannot go through extract_and_clean(). Call "
+            f"{_PAIRED_STYLES[style]}() directly — it returns both halves, "
+            f"which this would have discarded."
+        )
     if style not in EXTRACTION_STYLES:
         raise ValueError(
-            f"Unknown extraction style '{style}'. Choose from: {sorted(EXTRACTION_STYLES)}"
+            f"Unknown extraction style '{style}'. "
+            f"Choose from: {sorted(EXTRACTION_STYLES)}"
         )
     if style == "numbered":
         raw = extract_numbered_list(text)
-    elif style == "structured_qa":
-        pairs = extract_structured_qa(text)
-        raw = [p["question"] for p in pairs]
     else:  # "delimiter"
         raw = extract_delimited(text, delimiter)
 

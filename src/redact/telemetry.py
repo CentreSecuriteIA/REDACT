@@ -85,7 +85,7 @@ def detect_gpus() -> tuple[str | None, int]:
     return (names[0] if names else None), len(names)
 
 
-def detect_gpu_memory_gb() -> float | None:
+def detect_gpu_memory_gib() -> float | None:
     """Total VRAM per device, via ``nvidia-smi``.
 
     The residency planner's other capacity source, ``torch.cuda.mem_get_info``,
@@ -94,8 +94,9 @@ def detect_gpu_memory_gb() -> float | None:
     known wherever a GPU is, not only where the full stack is.
 
     Returns:
-        Per-device total in GB (the first device; mixed-card machines are not
-        modelled), or ``None`` when ``nvidia-smi`` is absent or unparseable.
+        Per-device total in **GiB** (the first device; mixed-card machines
+        are not modelled), or ``None`` when ``nvidia-smi`` is absent or
+        unparseable.
     """
     exe = shutil.which("nvidia-smi")
     if exe is None:
@@ -112,10 +113,96 @@ def detect_gpu_memory_gb() -> float | None:
         line = line.strip()
         if line:
             try:
-                return round(int(line) / 1024, 1)   # MiB -> GB
+                # MiB -> GiB. 1024-based, matching resources/estimate.py:
+                # mixing this with a decimal-GB divisor there is what made
+                # the same card read 48.0 or 44.7 depending on the path.
+                return round(int(line) / 1024, 1)
             except ValueError:
                 return None
     return None
+
+
+_warned_default_provider = False
+
+#: Rate set by :func:`set_gpu_rate`, overriding the pricing table entirely.
+_gpu_rate_override: float | None = None
+
+
+def set_gpu_rate(usd_per_hour: float | None) -> None:
+    """Price this machine's GPUs directly, without editing the pricing table.
+
+    ``configs/llm/gpu_pricing.json`` ships inside the package, so editing it to
+    say what your own card costs means editing an installed file — fine for a
+    provider's published rates, wrong for a number only you know (your
+    electricity, your amortization, your lab's internal chargeback).
+
+    Wins over both ``REDACT_GPU_PROVIDER`` and the table, and applies to
+    whatever GPU is detected. Setting it also silences the unset-provider
+    warning: a rate you chose is an answer, including ``0.0``.
+
+    Args:
+        usd_per_hour: Hourly USD per **single** GPU — the same unit the table
+            uses, since billing multiplies by the number of GPUs rented.
+            ``None`` clears the override and restores table lookup.
+
+    Raises:
+        ValueError: If negative.
+    """
+    global _gpu_rate_override
+    if usd_per_hour is not None:
+        usd_per_hour = float(usd_per_hour)
+        if usd_per_hour < 0:
+            raise ValueError(f"GPU rate must be >= 0, got {usd_per_hour}")
+    _gpu_rate_override = usd_per_hour
+
+
+def _env_gpu_rate() -> float | None:
+    """``REDACT_GPU_HOURLY_USD``, for setting a rate without importing anything.
+
+    Ignores an unparseable value rather than failing a run over a typo in an
+    env var — the rate is reporting, not correctness.
+    """
+    raw = os.environ.get("REDACT_GPU_HOURLY_USD")
+    if not raw:
+        return None
+    try:
+        return float(raw)
+    except ValueError:
+        logger.debug("REDACT_GPU_HOURLY_USD=%r is not a number; ignoring", raw)
+        return None
+
+
+def _warn_if_unpriced_by_default(
+    rented: int, held_h: float, rate: float | None
+) -> None:
+    """Warn once when a $0 GPU bill is the default talking, not a measurement.
+
+    Every other unpriced case degrades to ``None`` — "time only, no guess".
+    This one doesn't: ``REDACT_GPU_PROVIDER`` is *declared*, not detected, and
+    defaults to ``local``, whose ``"*"`` entry is a real rate of 0.0. So
+    forgetting the variable on a rented pod produces a confident
+    ``local_cost_usd: 0.0`` — the one wrong number the cost model can emit,
+    reached by the likeliest mistake. Nothing is changed here; the zero is
+    just made legible.
+    """
+    global _warned_default_provider
+    if _warned_default_provider or rate != 0.0:
+        return
+    # A rate the caller chose is an answer, 0.0 included — only the default
+    # talking is worth a warning.
+    if _gpu_rate_override is not None or _env_gpu_rate() is not None:
+        return
+    if not (rented and held_h > 0) or os.environ.get("REDACT_GPU_PROVIDER"):
+        return
+    _warned_default_provider = True
+    logger.warning(
+        "GPU cost reported as $0: no GPU price is set, so pricing fell back to "
+        "provider 'local'. %d GPU(s) held for %.2fh. To price it: call "
+        "redact.telemetry.set_gpu_rate(<usd_per_hour>), or set "
+        "REDACT_GPU_HOURLY_USD, or set REDACT_GPU_PROVIDER if this machine is "
+        "rented from a provider in configs/llm/gpu_pricing.json.",
+        rented, held_h,
+    )
 
 
 def gpu_hourly_rate(name: str | None, provider: str | None = None) -> float | None:
@@ -127,11 +214,20 @@ def gpu_hourly_rate(name: str | None, provider: str | None = None) -> float | No
             then ``"local"`` (rate 0 — running on your own machine reports
             GPU-seconds without inventing a dollar figure).
 
+    Checked in order: :func:`set_gpu_rate`, ``REDACT_GPU_HOURLY_USD``, then
+    the table — so a machine-specific rate never requires editing a file that
+    ships inside the package.
+
     Returns:
         The rate, or ``None`` when the provider or GPU isn't in the table.
         ``None`` means *report time only* — a missing entry must never be
         guessed at, since a wrong rate is worse than no rate.
     """
+    if _gpu_rate_override is not None:
+        return _gpu_rate_override
+    env_rate = _env_gpu_rate()
+    if env_rate is not None:
+        return env_rate
     provider = provider or os.environ.get("REDACT_GPU_PROVIDER") or "local"
     path = paths.gpu_pricing_json()
     try:
@@ -225,6 +321,7 @@ class Collector:
         name, rented = detect_gpus()
         rate = gpu_hourly_rate(name)
         held_h = sum(engine_s.values()) / 3600.0
+        _warn_if_unpriced_by_default(rented, held_h, rate)
         # Billed on GPUs *rented*, not the one an engine occupies: you rent the
         # whole pod. Reporting both is what makes idle capacity visible.
         local_cost = (

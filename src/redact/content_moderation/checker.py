@@ -20,9 +20,36 @@ checkers) and ``prompts/output/`` (output checker + paraphrase checker — a
 post-generation transform, grouped with output rather than input).
 """
 
+# TODO(review): this file should end up as *configuration*, not logic.
+#
+# Every builder here hand-rolls the same three steps — load a prompt, bind
+# domain values, wrap the result in a ``(a, b) -> messages`` closure. Only the
+# third step is specific to checking, and it is generic across pipelines, so
+# it belongs in ``llms/`` with the rest of the model-facing machinery:
+#
+#   1. The ``(original, sample) -> messages`` adapter -> ``llms/router.py``
+#      (or ``llms/prompting``), so the shape is defined once instead of as
+#      four near-identical ``_build`` closures. ``check_sample`` /
+#      ``batch_check_samples`` already consume exactly that contract.
+#   2. Load + construct -> one ``PromptTemplate`` constructor that also
+#      remembers its source path and whether it came from an override, so a
+#      render error can say which file it was.
+#
+# What must NOT move is the content-moderation knowledge: the harm taxonomy,
+# ``EntryType``, and which prompt each checker uses. Those would drag dataset
+# concepts into the model-agnostic layer and invert the dependency direction.
+# After the two extractions above, each builder is ~4 lines and this file
+# reads as a table: checker -> prompt -> domain kwargs.
+#
+# Also: DEFAULT_CATEGORIES below duplicates
+# ``configs/taxonomy/content_moderation_categories.json`` by hand (verified:
+# all 11 harm categories match exactly, plus "Benign"), so a category added to
+# the taxonomy silently never reaches the category checker. Read the taxonomy
+# instead.
+
 from collections.abc import Callable
 
-from ..llms.prompts import PromptTemplate, load_prompt
+from ..llms.prompting import PromptTemplate, load_prompt
 from ..types import EntryType
 
 DEFAULT_CATEGORIES: list[str] = [
@@ -153,7 +180,7 @@ def build_paraphrase_checker(
         Callable(original, paraphrase) -> checker message list.
     """
     prompt_config = load_prompt(
-        "output", "paraphrase_check", prompt_dir=prompt_dir
+        "paraphrase", "check", prompt_dir=prompt_dir
     )
     tmpl = PromptTemplate(prompt_config)
 

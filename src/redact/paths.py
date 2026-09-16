@@ -161,17 +161,6 @@ def gpu_pricing_json() -> Path:
     return llm_configs_dir() / "gpu_pricing.json"
 
 
-def vram_cache_json(root: str | Path | None = None) -> Path:
-    """Measured VRAM footprints (``Data_cache/vram.json``).
-
-    Written after a real local load and read by the residency planner, so a
-    second run plans from what a checkpoint actually took rather than an
-    estimate. Under ``Data_cache/`` because it is an intermediate artifact, not
-    dataset output.
-    """
-    return data_cache(root) / "vram.json"
-
-
 def taxonomy_dir() -> Path:
     """Package-bundled taxonomy config dir (``src/redact/configs/taxonomy``)."""
     return configs_dir() / "taxonomy"

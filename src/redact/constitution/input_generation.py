@@ -29,7 +29,7 @@ from ..content_moderation.generation import (
     InputPipeline,
 )
 from ..llms.client import ModelClient
-from ..llms.prompts import load_prompt
+from ..llms.prompting import load_prompt
 
 logger = logging.getLogger(__name__)
 

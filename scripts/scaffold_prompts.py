@@ -1,33 +1,49 @@
-"""Generate a placeholder prompts/ tree for the public release.
+"""Write an editable copy of the prompts/ tree.
 
-    python scripts/scaffold_prompts.py ./redacted_prompts
+    python scripts/scaffold_prompts.py ./my_prompts            # real prompts
+    python scripts/scaffold_prompts.py ./my_prompts --empty    # skeletons
 
-Implements CLAUDE.md's Public Release Notes pre-release step: mirrors the
-real prompts/ directory structure, but with system_prompt/template/
-instruction text replaced by a documented placeholder — external users get
-a starting structure matching every real load_prompt() call site, without
-this repo's actual prompt content. Review the output before publishing; this
-is a starting point, not a guarantee nothing sensitive leaks through
-directory/category names themselves.
+Then point a run at it (``prompt_dir="./my_prompts"``). The directory is an
+**overlay**: each prompt is read from there if present and from the library
+otherwise, so delete every file you don't intend to change — keeping only
+your edits means the rest stay current when the library's prompts improve.
+
+``--empty`` replaces system_prompt/template/instruction with documented
+TODOs that still name each seed_fields entry as a real {placeholder}, so a
+scaffolded file round-trips through build_messages() before anyone fills it
+in. It redacts prompt *text* only: directory and category names describe harm
+categories by design and are left as-is, so review the output before
+publishing anything built from it.
 """
 
 import argparse
 import sys
 
-from redact.llms.prompts import scaffold_prompt_tree
+from redact.llms.prompting import scaffold_prompt_tree
 
 
 def main(argv=None) -> int:
-    parser = argparse.ArgumentParser(description="Scaffold a placeholder prompts/ tree.")
-    parser.add_argument("target_dir", help="Directory to write the placeholder tree into.")
+    parser = argparse.ArgumentParser(
+        description="Write an editable copy of the prompts/ tree."
+    )
+    parser.add_argument("target_dir", help="Directory to write the tree into.")
     parser.add_argument(
         "--source-dir", default=None,
         help="Directory to scaffold from (default: this package's own prompts/).",
     )
+    parser.add_argument(
+        "--empty", action="store_true",
+        help="Write TODO skeletons instead of the real prompts.",
+    )
     args = parser.parse_args(argv)
 
-    written = scaffold_prompt_tree(args.target_dir, source_dir=args.source_dir)
-    print(f"Wrote {written} placeholder prompt file(s) under {args.target_dir}")
+    mode = "empty" if args.empty else "copy"
+    written = scaffold_prompt_tree(
+        args.target_dir, source_dir=args.source_dir, mode=mode
+    )
+    kind = "placeholder" if args.empty else "prompt"
+    print(f"Wrote {written} {kind} file(s) under {args.target_dir}")
+    print("Overlay: delete any file you don't intend to override.")
     return 0
 
 
