@@ -560,6 +560,16 @@ class TestIntrospectConfigValidatesItself:
         with pytest.raises(TypeError, match="capture"):
             IntrospectConfig(hf_model_id="org/m", log_dir="/tmp/x", capture="all")
 
+    @pytest.mark.parametrize("capture", [
+        {"hidden_state": "all"},      # misspelled key
+        {"hidden_states": "first"},   # unknown mode
+        {"hidden_states": True},      # ambiguous: "last" or "all"?
+        {"attention": 1},             # not a bool
+    ])
+    def test_rejects_unknown_capture_keys_and_values(self, capture):
+        with pytest.raises(ValueError, match="capture"):
+            IntrospectConfig(hf_model_id="org/m", log_dir="/tmp/x", capture=capture)
+
 
 class TestModelConfigValidatesIdentityAndComposition:
     """What only makes sense once the setups are assembled."""

@@ -264,13 +264,14 @@ class Collector:
         self._sinks = sinks
         self._lock = threading.Lock()
         self.events: list[dict] = []
-        # Per-model API usage, and per-checkpoint local engine time. Two
-        # meters because two different things are being bought: tokens from an
-        # endpoint, wall-clock from a leased card.
+        # Per-model usage (every backend, local ones included), and
+        # per-checkpoint local hold time. Two meters because two different
+        # things are being bought: tokens from an endpoint, wall-clock from a
+        # leased card.
         self.tokens: dict[str, dict[str, int]] = defaultdict(
             lambda: {"in": 0, "out": 0, "calls": 0, "items": 0, "ms": 0.0}
         )
-        self.engine_s: dict[str, float] = defaultdict(float)
+        self.local_s: dict[str, float] = defaultdict(float)
         self.errors: list[dict] = []
 
     def __call__(self, event: dict) -> None:
@@ -287,8 +288,8 @@ class Collector:
                 acc["ms"] += event.get("ms") or 0.0
                 if event.get("error"):
                     self.errors.append(event)
-            elif event.get("ev") == "engine" and event.get("phase") == "release":
-                self.engine_s[event.get("hf_model_id", "?")] += event.get("held_s") or 0.0
+            elif event.get("ev") == "local" and event.get("phase") == "release":
+                self.local_s[event.get("hf_model_id", "?")] += event.get("held_s") or 0.0
         for sink in self._sinks:
             try:
                 sink(event)
@@ -315,12 +316,12 @@ class Collector:
                     api_cost += cost
                     priced = True
                 per_model[model] = row
-            engine_s = dict(self.engine_s)
+            local_s = dict(self.local_s)
             n_errors = len(self.errors)
 
         name, rented = detect_gpus()
         rate = gpu_hourly_rate(name)
-        held_h = sum(engine_s.values()) / 3600.0
+        held_h = sum(local_s.values()) / 3600.0
         _warn_if_unpriced_by_default(rented, held_h, rate)
         # Billed on GPUs *rented*, not the one an engine occupies: you rent the
         # whole pod. Reporting both is what makes idle capacity visible.
@@ -330,7 +331,7 @@ class Collector:
 
         out = {
             "models": per_model,
-            "engines_s": {k: round(v, 1) for k, v in engine_s.items()},
+            "local_s": {k: round(v, 1) for k, v in local_s.items()},
             "gpu": {"name": name, "rented": rented, "hourly_rate_usd": rate},
             "api_cost_usd": round(api_cost, 4) if priced else None,
             "local_cost_usd": local_cost,
@@ -349,8 +350,8 @@ def _log_summary(s: dict) -> None:
             model, row["calls"], row["items"], row["in"], row["out"],
             row["ms"] / 1000.0, cost,
         )
-    for hf_id, secs in s["engines_s"].items():
-        logger.info("[telemetry] engine %s held %.1fs", hf_id, secs)
+    for hf_id, secs in s["local_s"].items():
+        logger.info("[telemetry] local %s held %.1fs", hf_id, secs)
     gpu = s["gpu"]
     if gpu["rented"]:
         rate = (

@@ -88,6 +88,7 @@ class AnthropicBackend(LLMBackend):
             api_model_id=api.api_model_id,
             rpm=api.rpm,
             max_workers=api.recommended_max_workers,
+            # Supplies model=config.name and the other shared identity fields.
             **cls._identity(config),
         )
 
@@ -124,6 +125,7 @@ class AnthropicBackend(LLMBackend):
         max_tok, temp = self._resolve(max_tokens, temperature)
 
         results = []
+        # Runs once via ModelClient (one item per call); loops only for direct callers.
         for messages, system_prompt in zip(resolved, prompts):
             conv_messages = [{"role": m["role"], "content": m["content"]} for m in messages]
             call_kwargs: dict = {

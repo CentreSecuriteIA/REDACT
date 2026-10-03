@@ -194,6 +194,24 @@ class TestRenameCapture:
         b.rename_capture("base1/attempt_0", "base1/nested/deeper/final")
         assert (tmp_path / "base1" / "nested" / "deeper" / "final").is_dir()
 
+    def test_replaces_an_existing_capture_under_the_new_id(self, tmp_path):
+        # A re-run that produces the same text lands on the same sample_id.
+        b = self._backend(tmp_path)
+        (b._capture_dir("base1/paraphrase/deadbeef") / "meta.json").write_text("old")
+        (b._capture_dir("base1/paraphrase/attempt_0") / "meta.json").write_text("new")
+
+        b.rename_capture("base1/paraphrase/attempt_0", "base1/paraphrase/deadbeef")
+
+        final = tmp_path / "base1" / "paraphrase" / "deadbeef"
+        assert (final / "meta.json").read_text() == "new"
+        assert not (tmp_path / "base1" / "paraphrase" / "attempt_0").exists()
+
+    def test_same_old_and_new_id_keeps_the_capture(self, tmp_path):
+        b = self._backend(tmp_path)
+        (b._capture_dir("base1/output") / "meta.json").write_text("{}")
+        b.rename_capture("base1/output", "base1/output")
+        assert (tmp_path / "base1" / "output" / "meta.json").exists()
+
 
 class _FakeIds(list):
     @property

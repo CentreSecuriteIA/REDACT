@@ -54,7 +54,7 @@ def record(event: dict) -> None:
 
     Args:
         event: Must carry an ``"ev"`` key naming the event type (e.g.
-            ``call`` or ``engine``). ``stage`` is filled in here if absent.
+            ``call`` or ``local``). ``stage`` is filled in here if absent.
     """
     emitter = _emitter
     if emitter is None:

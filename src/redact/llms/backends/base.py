@@ -6,7 +6,7 @@ construction, and ``generate()`` takes only what varies per call.
 
 Build backends with :func:`redact.llms.backends.capabilities.backend_for`. A
 backend constructed directly uses this class's defaults for anything not
-passed, including ``rpm=None`` (no rate limiting).
+passed, including ``rpm=None`` (no rate limiting; enforced in ``ModelClient``).
 """
 
 import os
@@ -46,6 +46,7 @@ class ComputeConfig:
 # ---------------------------------------------------------------------------
 # System-prompt helpers
 # ---------------------------------------------------------------------------
+# These live here, not in prompting/, because split-vs-fold depends on the model.
 
 
 def extract_system_prompt(messages: list[dict]) -> tuple[str | None, list[dict]]:

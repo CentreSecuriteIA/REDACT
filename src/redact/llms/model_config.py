@@ -27,6 +27,7 @@ from .backends import (
     transport_for,
     validate_concurrency,
 )
+from .backends.introspection import validate_capture
 
 # Whose budget an APIConfig's rpm is: "model" for this model alone, "endpoint"
 # for every model behind the same provider, URL and key.
@@ -234,6 +235,7 @@ class IntrospectConfig:
         _check_str("IntrospectConfig.hf_model_id", self.hf_model_id)
         _check_str("IntrospectConfig.log_dir", self.log_dir)
         _check_dict("IntrospectConfig.capture", self.capture)
+        validate_capture(self.capture)
         _check_str("IntrospectConfig.device_map", self.device_map)
         _check_str("IntrospectConfig.torch_dtype", self.torch_dtype)
         _check_dict("IntrospectConfig.sampling", self.sampling)

@@ -234,11 +234,11 @@ class TestCost:
         # The GPU is leased per engine, so two models sharing a checkpoint share
         # one meter — the cost centre is the checkpoint, not the model name.
         telemetry.install(data_dir=tmp_path)
-        observe.record({"ev": "engine", "phase": "release",
+        observe.record({"ev": "local", "phase": "release",
                         "hf_model_id": "org/big", "held_s": 600.0})
-        observe.record({"ev": "engine", "phase": "release",
+        observe.record({"ev": "local", "phase": "release",
                         "hf_model_id": "org/big", "held_s": 300.0})
-        assert telemetry.summary()["engines_s"]["org/big"] == 900.0
+        assert telemetry.summary()["local_s"]["org/big"] == 900.0
 
 
 class TestGpuPricing:
@@ -274,7 +274,7 @@ class TestGpuPricing:
         # You rent the pod, so the bill is rate x rented, not rate x occupied.
         # Surfacing both is what makes idle capacity visible.
         telemetry.install(data_dir=tmp_path)
-        observe.record({"ev": "engine", "phase": "release",
+        observe.record({"ev": "local", "phase": "release",
                         "hf_model_id": "org/big", "held_s": 3600.0,
                         "tensor_parallel_size": 1})
         with patch("redact.telemetry.detect_gpus",

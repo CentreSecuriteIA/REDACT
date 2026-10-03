@@ -12,6 +12,7 @@ whose id is ``None`` is generated without capturing anything.
 import atexit
 import json
 import logging
+import shutil
 import threading
 import time
 from pathlib import Path
@@ -27,6 +28,12 @@ if TYPE_CHECKING:
 logger = logging.getLogger(__name__)
 
 _DEFAULT_CAPTURE = {"logprobs": True, "hidden_states": "last", "attention": False}
+# The values each capture key accepts.
+_CAPTURE_VALUES = {
+    "logprobs": (True, False),
+    "hidden_states": (False, "last", "all"),
+    "attention": (True, False),
+}
 
 # Backend defaults for sampling values that have no ModelConfig field.
 # Override them per model with IntrospectConfig.sampling.
@@ -40,10 +47,32 @@ _models: dict[tuple, tuple] = {}
 _models_lock = threading.Lock()
 
 # Load time of each checkpoint. Lifetime is timed per checkpoint, not per
-# backend instance, and reported as an "engine" release event.
+# backend instance, and reported as a "local" release event.
 _models_loaded_at: dict[tuple, float] = {}
 
 
+def validate_capture(capture: dict | None) -> None:
+    """Check the keys and values of a ``capture`` dict.
+
+    Raises:
+        ValueError: An unknown key, or a value that key does not accept.
+    """
+    for key, value in (capture or {}).items():
+        allowed = _CAPTURE_VALUES.get(key)
+        if allowed is None:
+            raise ValueError(
+                f"Unknown capture key {key!r}. Expected one of {sorted(_CAPTURE_VALUES)}."
+            )
+        # The type check keeps 1 and 0 from passing as True and False.
+        if type(value) not in (bool, str) or value not in allowed:
+            raise ValueError(
+                f"capture[{key!r}] must be one of {list(allowed)}, got {value!r}."
+            )
+
+
+# Same caching as vllm._engine(). The load is split into _load_locked() so
+# tests can replace it without loading a model.
+#TODO: With the memory-management work, check the naming/structure inconsistency between this and vllm._engine().
 def _load(hf_model_id: str, device_map: str, torch_dtype: str, hf_kwargs: dict):
     """Get or load the tokenizer + model pair for one checkpoint."""
     key = (hf_model_id, device_map, torch_dtype, repr(sorted(hf_kwargs.items())))
@@ -60,6 +89,7 @@ def _load(hf_model_id: str, device_map: str, torch_dtype: str, hf_kwargs: dict):
 def _load_locked(key, hf_model_id: str, device_map: str, torch_dtype: str, hf_kwargs: dict):
     """Load the tokenizer and model. Call with ``_models_lock`` held."""
     started = time.perf_counter()
+    # torch is not imported here: __init__ already did, before any load.
     try:
         from transformers import AutoModelForCausalLM, AutoTokenizer
     except ImportError:
@@ -88,7 +118,7 @@ def _load_locked(key, hf_model_id: str, device_map: str, torch_dtype: str, hf_kw
     _models[key] = (tokenizer, model)
     _models_loaded_at[key] = time.perf_counter()
     observe.record({
-        "ev": "engine",
+        "ev": "local",
         "phase": "load",
         "backend": "introspect",
         "hf_model_id": hf_model_id,
@@ -108,10 +138,11 @@ def _release_models() -> None:
     exit, so a process that just exits still reports how long each
     checkpoint was held.
     """
+    #TODO: Release checks as in vllm
     now = time.perf_counter()
     for key, loaded_at in list(_models_loaded_at.items()):
         observe.record({
-            "ev": "engine",
+            "ev": "local",
             "phase": "release",
             "backend": "introspect",
             "hf_model_id": key[0],
@@ -171,7 +202,11 @@ class TransformersIntrospectionBackend(LLMBackend):
             hf_kwargs: Extra kwargs for ``from_pretrained`` (e.g.
                 ``trust_remote_code``).
             **identity: Forwarded to :meth:`LLMBackend.__init__`.
+
+        Raises:
+            ValueError: ``capture`` has an unknown key or value.
         """
+        validate_capture(capture)
         try:
             import torch  # lazy: torch is heavy and optional
         except ImportError:
@@ -223,6 +258,7 @@ class TransformersIntrospectionBackend(LLMBackend):
     @classmethod
     def clear_cache(cls) -> None:
         """Drop the loaded models, after reporting how long each was held."""
+        #TODO: Release checks as in vllm
         _release_models()
         _models.clear()
 
@@ -234,7 +270,8 @@ class TransformersIntrospectionBackend(LLMBackend):
     def rename_capture(self, old_internals_id: str, new_internals_id: str) -> None:
         """Move a capture folder from a provisional id to its final one.
 
-        Does nothing if no folder exists under ``old_internals_id``.
+        Does nothing if no folder exists under ``old_internals_id``. A folder
+        already at ``new_internals_id`` is replaced.
         """
         old_dir = self._log_dir / old_internals_id
         if not old_dir.exists():
@@ -243,7 +280,13 @@ class TransformersIntrospectionBackend(LLMBackend):
             logger.debug("[internals] nothing to rename at %s", old_dir)
             return
         new_dir = self._log_dir / new_internals_id
+        if new_dir == old_dir:
+            return
         new_dir.parent.mkdir(parents=True, exist_ok=True)
+        if new_dir.exists():
+            # A re-run produced the same id. rename() would raise, so keep the
+            # newer capture.
+            shutil.rmtree(new_dir)
         old_dir.rename(new_dir)
         logger.info("[internals] %s -> %s", old_internals_id, new_internals_id)
 
@@ -337,6 +380,7 @@ class TransformersIntrospectionBackend(LLMBackend):
         sampling = {**self._sampling, **kwargs}
 
         results: list[str] = []
+        # Runs once via ModelClient (one item per call); the list is just the return contract.
         for messages, system_prompt, internals_id in zip(resolved, prompts, ids):
             chat_messages = (
                 [{"role": "system", "content": system_prompt}, *messages]

@@ -94,6 +94,7 @@ class OpenAIBackend(LLMBackend):
             extra_body=api.default_extra_body,
             rpm=api.rpm,
             max_workers=api.recommended_max_workers,
+            # Supplies model=config.name and the other shared identity fields.
             **cls._identity(config),
         )
 
@@ -129,6 +130,7 @@ class OpenAIBackend(LLMBackend):
         max_tok, temp = self._resolve(max_tokens, temperature)
 
         results = []
+        # Runs once via ModelClient (one item per call); loops only for direct callers.
         for messages, system_prompt in zip(resolved, prompts):
             call_messages = messages
             if system_prompt:

@@ -95,7 +95,7 @@ def _engine(hf_model_id: str, quantization: str | None, vllm_kwargs: dict):
         # and weights_gib is usually None because the engine runs in a
         # separate process.
         observe.record({
-            "ev": "engine",
+            "ev": "local",
             "phase": "load",
             "backend": "vllm",
             "hf_model_id": hf_model_id,
@@ -117,7 +117,7 @@ def _release_engines() -> None:
     now = time.perf_counter()
     for key, loaded_at in list(_engine_loaded_at.items()):
         observe.record({
-            "ev": "engine",
+            "ev": "local",
             "phase": "release",
             "backend": "vllm",
             "hf_model_id": key[0],
