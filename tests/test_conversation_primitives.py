@@ -68,12 +68,18 @@ def test_drive_generators_reraises_without_on_error():
         drive_generators({"bad": _raises()}, resolve=as_resolver(_FakeRouter()), finalize=lambda k, v: v)
 
 
-def test_drive_generators_batch_failure_isolated():
-    results = drive_generators(
-        {"a": _two_round("a")}, resolve=as_resolver(_FakeRouter(fail=True)),
-        finalize=lambda k, v: v, on_error=lambda k, exc: "FAILED",
-    )
-    assert results["a"] == "FAILED"
+def test_drive_generators_batch_failure_propagates_despite_on_error():
+    """A dispatch failure is the transport failing, not the unit.
+
+    Routing it through ``on_error`` would hand the caller a result per unit,
+    which it then writes *and acks* — an outage would look like a finished run.
+    ``on_error`` covers generator errors only.
+    """
+    with pytest.raises(RuntimeError):
+        drive_generators(
+            {"a": _two_round("a")}, resolve=as_resolver(_FakeRouter(fail=True)),
+            finalize=lambda k, v: v, on_error=lambda k, exc: "FAILED",
+        )
 
 
 def test_drive_generators_batch_failure_reraises():

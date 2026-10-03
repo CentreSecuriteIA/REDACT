@@ -1,27 +1,15 @@
-"""Abstract base class for LLM backends.
+"""Base class for LLM backends.
 
-A backend **is a configured model**, not a bare transport. Everything fixed
-about one registered model — its name, its generation defaults, its
-system-prompt policy, its rate budget, its provider params — is resolved once
-in ``from_config()``/``__init__`` and stored. ``generate()`` then takes only
-what genuinely varies per call: the messages, an optional system prompt, and
-the two overrides that have real callers (``max_tokens``/``temperature``).
+A backend is one configured model. Its name, generation defaults,
+system-prompt policy, rate budget and provider parameters are bound at
+construction, and ``generate()`` takes only what varies per call.
 
-That is what lets :class:`~redact.llms.client.ModelClient` be pure routing.
-It receives a finished backend and decides only *how* a batch runs — one
-native engine pass, or fan-out through ``BatchCaller`` — reading the class's
-:attr:`LLMBackend.compute_config` and the instance's ``rpm``/``max_workers``.
-It never looks at the registry.
-
-Construct backends through
-:func:`redact.llms.backends.capabilities.backend_for`, which resolves the setup
-and calls ``from_config()``. A transport the registry doesn't describe is
-registered first (:func:`redact.llms.model_config.register_model`) so it is
-validated like every other model; constructing one directly is the escape hatch
-below that, and then every field it doesn't pass falls back to this class's
-defaults — notably ``rpm=None``, which means no rate limiting at all.
+Build backends with :func:`redact.llms.backends.capabilities.backend_for`. A
+backend constructed directly uses this class's defaults for anything not
+passed, including ``rpm=None`` (no rate limiting).
 """
 
+import os
 import time
 from abc import ABC, abstractmethod
 from dataclasses import dataclass
@@ -35,20 +23,19 @@ if TYPE_CHECKING:
 
 @dataclass(frozen=True)
 class ComputeConfig:
-    """Static dispatch facts about a backend class.
+    """Static capability flags of a backend class.
 
-    Every layer above reads these flags instead of branching on backend type,
-    which is what keeps it backend-agnostic. No two backend types share a
-    profile, so dispatch can key off the flags alone.
-    The standard values provided are a plain API-style backend (as used with Venice)
+    Callers read these flags instead of branching on the backend type. The
+    defaults describe a plain API backend.
 
     Attributes:
-        supports_native_batching: ``generate()`` is one engine pass over the
-            whole batch (vLLM). False means a caller fans the batch out.
-        supports_parallel_calls: ``generate()`` is safe to call concurrently.
-            False for tight API limits (Anthropic) or GPU contention (local).
-        supports_internals: The backend can persist hidden states / attention
-            / logprobs, keyed on caller-supplied ``internals_ids``.
+        supports_native_batching: ``generate()`` handles the whole batch in
+            one engine pass (vLLM). When False, the caller fans the batch out.
+        supports_parallel_calls: ``generate()`` may be called concurrently.
+            False for Anthropic (rate limits) and for local backends (GPU
+            contention).
+        supports_internals: The backend can save hidden states, attention
+            and logprobs under caller-supplied ``internals_ids``.
     """
 
     supports_native_batching: bool = False
@@ -57,23 +44,23 @@ class ComputeConfig:
 
 
 # ---------------------------------------------------------------------------
-# System-prompt policy — the two halves of supports_system_prompt
+# System-prompt helpers
 # ---------------------------------------------------------------------------
 
 
 def extract_system_prompt(messages: list[dict]) -> tuple[str | None, list[dict]]:
-    """Split system-role content out of a message list. 
+    """Split system-role content out of a message list.
+
     Example: ``[{"role": "system", "content": "A"}, {"role": "user", "content": "B"}]``
-    becomes ``("A", [{"role": "user", "content": "B"}]) #TODO check if this is correct
+    becomes ``("A", [{"role": "user", "content": "B"}])``.
 
     Args:
-        messages: Chat messages, possibly containing system-role entries.
+        messages: Chat messages, possibly with system-role entries.
 
     Returns:
-        ``(system_prompt, rest)`` — ``system_prompt`` is ``None`` when there
-        was none, otherwise every system-role message's content joined with a
-        blank line (same convention as :func:`fold_system_into_first_message`).
-        ``rest`` is every non-system message, in order.
+        ``(system_prompt, rest)``. ``system_prompt`` is the content of every
+        system message joined with a blank line, or ``None`` if there is
+        none. ``rest`` is the non-system messages, in order.
     """
     system_parts = [m["content"] for m in messages if m.get("role") == "system"]
     rest = [m for m in messages if m.get("role") != "system"]
@@ -82,21 +69,21 @@ def extract_system_prompt(messages: list[dict]) -> tuple[str | None, list[dict]]
 
 
 def fold_system_into_first_message(messages: list[dict]) -> list[dict]:
-    """Fold system-role message content into the first non-system message.
-    Example: ``[{"role": "system", "content": "A"}, {"role": "user", "content": "B"}]``
-    becomes ``[{"role": "user", "content": "A\n\nB"} #TODO check if this is correct
+    """Fold system-role content into the first non-system message.
 
-    For models registered with ``ModelConfig.supports_system_prompt=False``,
-    which ignore a dedicated system role.
+    For models registered with ``supports_system_prompt=False``.
+
+    Example: ``[{"role": "system", "content": "A"}, {"role": "user", "content": "B"}]``
+    becomes ``[{"role": "user", "content": "A\\n\\nB"}]``.
 
     Args:
-        messages: Chat messages, possibly containing system-role entries.
+        messages: Chat messages, possibly with system-role entries.
 
     Returns:
-        A message list with system content prepended to the first non-system
-        message. If every message is a system message, a single user message.
-        Returns ``messages`` unchanged when there's nothing to fold, so it's
-        safe to call unconditionally.
+        The messages with the system content prepended to the first
+        non-system message, separated by a blank line. If every message is a
+        system message, a single user message. ``messages`` itself when there
+        is no system content.
     """
     system_parts = [m["content"] for m in messages if m.get("role") == "system"]
     if not system_parts:
@@ -111,21 +98,18 @@ def fold_system_into_first_message(messages: list[dict]) -> list[dict]:
 
 
 class LLMBackend(ABC):
-    """One registered model, on one transport, fully configured."""
+    """One registered model on one backend, fully configured."""
 
     compute_config: ClassVar[ComputeConfig] = ComputeConfig(
         supports_native_batching=False,
         supports_parallel_calls=True,
         supports_internals=False,
     )
-    """This backend's dispatch-relevant capability flags.
+    """Capability flags of this backend class.
 
-    A **class** attribute, not an instance property: these are static facts
-    about the backend type, so ``model_config``'s registration-time checker can
-    read them off the class without constructing a transport — which for vLLM
-    or introspection would mean loading model weights. Override by assignment
-    in a subclass; the default is a plain API-style backend (no native
-    batching, safe to parallelize, no internals capture).
+    A class attribute, so the flags can be read without constructing a
+    backend, which for a local one would load model weights. Subclasses
+    override it by assignment.
     """
 
     def __init__(
@@ -138,24 +122,19 @@ class LLMBackend(ABC):
         rpm: int | None = None,
         max_workers: int = 1,
     ):
-        """Bind the model-level facts that never change between calls.
+        """Bind the model-level settings that stay fixed between calls.
 
         Args:
-            model: Registry name of the model this backend serves. For a
-                multi-model transport it is also the name sent upstream; for a
-                single-checkpoint one it is just the row's identity.
-            default_max_tokens: Applied when ``generate()`` gets no override.
-            default_temperature: Applied when ``generate()`` gets no override.
-                ``None`` means "omit, let the provider decide".
+            model: Registry name of the model. An API backend sends its
+                ``api_model_id`` to the provider when that differs.
+            default_max_tokens: Used when ``generate()`` gets no override.
+            default_temperature: Used when ``generate()`` gets no override.
+                ``None`` leaves it to the backend or provider.
             supports_system_prompt: False folds system content into the first
-                user message instead of passing it separately.
-            rpm: Requests-per-minute budget, or ``None`` for an unmetered
-                (local) transport. Read by ``RateLimiter``.
-            max_workers: Requested concurrency. **Clamped here** to 1 when this
-                class reports ``supports_parallel_calls=False``, so the
-                setup's ``recommended_max_workers`` and the transport's own
-                parallelism facts are reconciled exactly once, at construction
-                — nothing downstream re-decides it.
+                user message.
+            rpm: Requests-per-minute budget, or ``None`` for no rate limiting.
+            max_workers: Requested concurrency. Clamped to 1 when the class
+                has ``supports_parallel_calls=False``.
         """
         self.model = model
         self.default_max_tokens = default_max_tokens
@@ -168,16 +147,10 @@ class LLMBackend(ABC):
 
     @classmethod
     def from_config(cls, config: "ModelConfig") -> "LLMBackend":
-        """Build a finished backend from a registry entry.
+        """Build a backend from a registry entry.
 
-        Each subclass reads *its own* setup off ``config`` (``.api`` /
-        ``.vllm`` / ``.introspect``) plus the shared identity fields, so the
-        knowledge of what a setup means to a transport lives with that
-        transport. Called through
-        :func:`redact.llms.backends.capabilities.backend_for`.
-
-        Args:
-            config: The model's :class:`~redact.llms.model_config.ModelConfig`.
+        Each subclass reads its own setup (``.api``, ``.vllm`` or
+        ``.introspect``) and the shared identity fields from ``config``.
         """
         raise NotImplementedError(
             f"{cls.__name__} has no from_config(); construct it directly."
@@ -185,16 +158,7 @@ class LLMBackend(ABC):
 
     @staticmethod
     def _identity(config: "ModelConfig") -> dict:
-        """The backend-agnostic ``__init__`` kwargs every subclass passes up.
-
-        Args:
-            config: The model's ``ModelConfig``.
-
-        Returns:
-            Kwargs for :meth:`LLMBackend.__init__` covering the identity
-            fields — the per-setup ones (``rpm``, ``max_workers``, engine,
-            credentials) are the subclass's own business.
-        """
+        """``__init__`` kwargs for the identity fields every backend shares."""
         return {
             "model": config.name,
             "default_max_tokens": config.default_max_tokens,
@@ -202,30 +166,37 @@ class LLMBackend(ABC):
             "supports_system_prompt": config.supports_system_prompt,
         }
 
+    @staticmethod
+    def _api_key(config: "ModelConfig") -> str:
+        """The API key for ``config``'s ``.api`` setup, read from its env var.
+
+        Raises:
+            KeyError: The variable is not set, or is empty.
+        """
+        env = config.api.api_key_env
+        key = os.environ.get(env)
+        if not key:
+            raise KeyError(
+                f"Model {config.name!r} needs an API key, but the environment "
+                f"variable {env} is not set. Set it in your shell or in a .env file."
+            )
+        return key
+
     def _prepare(
         self,
         messages_list: list[list[dict]],
         system_prompts: str | list[str | None] | None,
     ) -> tuple[list[str | None], list[list[dict]]]:
-        """Apply this model's fixed system-prompt policy to a batch.
+        """Apply the model's system-prompt policy to a batch.
 
-        Merges an explicitly-passed system prompt with any system-role message
-        already inside ``messages_list`` (explicit first), then either splits
-        the result out as a separate prompt or folds it into the first user
-        message, according to ``supports_system_prompt``.
-
-        Args:
-            messages_list: One chat message list per item.
-            system_prompts: ``None``, one string applied to every item, or one
-                string (or ``None``) per item.
+        An explicit system prompt is merged with any system-role message in
+        the item (explicit first). The result is returned separately when the
+        model supports a system role, and folded into the first user message
+        otherwise.
 
         Returns:
-            ``(system_prompts, messages_list)`` — both aligned with and the
-            same length as the input. The first is all-``None`` for a model
-            that doesn't support a system role.
-
-        Raises:
-            ValueError: If a per-item list's length doesn't match the batch.
+            ``(system_prompts, messages_list)``, both aligned with the input.
+            The prompts are all ``None`` for a model without a system role.
         """
         n = len(messages_list)
         if system_prompts is None:
@@ -269,23 +240,12 @@ class LLMBackend(ABC):
         temperature: float | None = None,
         error: str | None = None,
     ) -> None:
-        """Emit one ``call`` telemetry event for a real transport call.
+        """Emit one ``call`` telemetry event for one transport call.
 
-        Called from inside each backend's ``generate()``, because token counts
-        and call latency exist nowhere else — the client above never sees the
-        provider's response object, and ``on_complete`` fires per *item*.
-
-        **One call, not one item.** A native-batching pass over N prompts emits
-        a single event with ``n_items=N``; a per-item API loop emits one event
-        per iteration. That distinction is the whole reason this lives here.
-
-        Args:
-            n_items: Batch items covered by this one transport call.
-            started: ``time.perf_counter()`` taken immediately before the call.
-            in_tok / out_tok: Prompt and completion tokens, or ``None`` when the
-                provider didn't report them.
-            max_tokens / temperature: Resolved values actually sent.
-            error: Exception summary when the call failed, else ``None``.
+        One event per call, not per item: a native pass over N prompts emits
+        a single event with ``n_items=N``, and a per-item loop emits one
+        event per iteration. ``started`` is ``time.perf_counter()`` taken
+        just before the call.
         """
         event = {
             "ev": "call",
@@ -305,7 +265,7 @@ class LLMBackend(ABC):
     def _resolve(
         self, max_tokens: int | None, temperature: float | None
     ) -> tuple[int, float | None]:
-        """Fill per-call overrides in from this model's stored defaults."""
+        """Fill unset overrides from the model's defaults."""
         return (
             max_tokens if max_tokens is not None else self.default_max_tokens,
             temperature if temperature is not None else self.default_temperature,
@@ -322,50 +282,30 @@ class LLMBackend(ABC):
         internals_ids: list[str | None] | None = None,
         **kwargs,
     ) -> list[str]:
-        """Generate responses for a batch of message lists.
+        """Generate one reply per message list.
 
-        Always batch-shaped — a single sample is just a batch of one, there is
-        no separate singular method. For backends with no real batching of
-        their own (API backends), this loops internally; real concurrency for
-        those comes from ``BatchCaller`` calling this multiple times in
-        parallel with a batch of one each, not from this method itself. For
-        vLLM, this is a genuine single engine pass over however many prompts
-        arrive.
-
-        Everything not listed here — the model name, provider params,
-        ``top_p`` and other sampling defaults, the system-prompt policy — is
-        already bound to this instance and is not a call argument.
+        Always batch-shaped: a single sample is a batch of one. vLLM runs one
+        engine pass over all items; the other backends loop over them.
 
         Args:
-            messages_list: One chat message list per batch item. System-role
-                entries are allowed and handled by :meth:`_prepare`.
-            system_prompts: Optional system prompt — one string for the whole
-                batch, or one (or ``None``) per item. Merged with any
-                system-role message already present.
-            max_tokens: Overrides this model's ``default_max_tokens``.
-            temperature: Overrides this model's ``default_temperature``.
-            internals_ids: One internals-capture id (or ``None``) per batch
-                item, aligned with ``messages_list`` — only meaningful when
-                ``compute_config.supports_internals`` is True; backends that
-                don't support it never receive this (``ModelClient`` and
-                ``BatchCaller`` both enforce that before dispatch).
-            **kwargs: Backend-specific extras, forwarded to the underlying
-                SDK/sampling call.
+            messages_list: One chat message list per item.
+            system_prompts: One string for the whole batch, or one (or
+                ``None``) per item. Merged with any system-role message
+                already in the item.
+            max_tokens: Overrides the model's ``default_max_tokens``.
+            temperature: Overrides the model's ``default_temperature``.
+            internals_ids: One capture id (or ``None``) per item. Used only
+                by a backend with ``supports_internals``.
+            **kwargs: Backend-specific extras for the SDK or sampling call.
 
         Returns:
-            Generated text, one per batch item, same order as ``messages_list``.
+            Generated text, one per item, in the order of ``messages_list``.
         """
 
     def rename_capture(self, old_internals_id: str, new_internals_id: str) -> None:
-        """Relabel a captured-internals folder once its final id is known.
+        """Rename a captured-internals folder once its final id is known.
 
-        A no-op here, overridden only by an internals-capable transport. Stages
-        whose real id is a hash of the *output* (paraphrase, jailbreak) must
-        supply an ``internals_id`` before the call and relabel after, so they
-        call this unconditionally — on a transport that captured nothing there
-        is nothing to move, exactly as when the id was never captured under.
-        Not a raise: renaming absent captures is cleanup, not a request for a
-        capability the transport lacks (which is what ``generate()`` rejects).
+        Does nothing here. A backend that captures internals overrides it.
         """
 
     @property
@@ -375,16 +315,9 @@ class LLMBackend(ABC):
 
     @classmethod
     def clear_cache(cls) -> None:
-        """Drop this backend class's shared-resource cache.
+        """Drop this backend class's cache of shared resources.
 
-        Backends per-model are cheap, but what they *hold* may not be — an
-        HTTP connection pool, or loaded model weights — so each class caches
-        that resource itself, keyed on the resource's own identity. Caches are
-        strictly **per class**: a vLLM engine and a ``transformers`` model are
-        different runtimes, so the same ``hf_model_id`` means two independent
-        loads that must never share an entry.
-
-        A no-op for backends holding nothing shareable. Call
+        Each class caches its own connection pools or loaded weights. Use
         :func:`redact.llms.backends.capabilities.clear_transport_caches` to
-        reset all of them at once.
+        clear every class at once.
         """

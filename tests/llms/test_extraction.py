@@ -346,3 +346,17 @@ class TestParseConstitution:
         text = "## 1. Cat\n### 1.1 Sub\n- (Sample)\n[END]\n"
         entries = parse_constitution(text)
         assert len(entries) == 1
+
+
+class TestNumberedSamplesKeepTheirFirstLine:
+    def test_a_first_line_that_looks_like_a_preamble_is_kept(self):
+        text = ("Here are two:\n1. I will find you.\nYou cannot hide.\n"
+                "2. Let me in.\nOr else.")
+        assert extract_and_clean(text, style="numbered") == [
+            "I will find you.\nYou cannot hide.",
+            "Let me in.\nOr else.",
+        ]
+
+    def test_delimited_output_still_loses_its_preamble(self):
+        text = "Here are two:\nfirst\n---\nsecond"
+        assert extract_and_clean(text, style="delimiter") == ["first", "second"]

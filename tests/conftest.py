@@ -29,6 +29,19 @@ from redact.llms.model_config import (
     register_model,
 )
 
+@pytest.fixture(autouse=True)
+def _api_keys(monkeypatch):
+    """Give every registry model a dummy API key, so the suite needs no .env.
+
+    A key that is already set (e.g. from a real .env) is left alone.
+    """
+    import os
+
+    for config in list(MODEL_REGISTRY.values()):
+        if config.api is not None and not os.environ.get(config.api.api_key_env):
+            monkeypatch.setenv(config.api.api_key_env, "test-key")
+
+
 # ---------------------------------------------------------------------------
 # Mock LLM backend
 # ---------------------------------------------------------------------------

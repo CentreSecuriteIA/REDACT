@@ -53,6 +53,7 @@ import pandas as pd
 from ..dataset.io import _default_dataset_dir, _hash_text, append_samples
 from ..dataset.ledger import Ledger
 from ..dataset.manifest import Manifest
+from ..dataset.resume import commit, resume_state
 from ..dataset.merge import merge_all
 from ..llms.client import ModelClient
 from ..llms.prompting import extract_and_clean
@@ -517,6 +518,16 @@ class InputPipeline(_StandaloneGenerationMixin):
 
                 if not extracted:
                     result.skipped_entries += 1
+                    # Ack it anyway: the entry produced no rows, so the CSV
+                    # fallback can never cover it, and leaving it un-acked means
+                    # re-generating (and re-paying for) it on every resume.
+                    if save and ledger is not None:
+                        ledger.record([{
+                            "sample_description": sample_desc,
+                            "entry_type": entry_type,
+                            "style": style,
+                            "status": "no_samples",
+                        }])
                     if verbose:
                         logger.debug("-> no samples extracted")
                     continue
@@ -595,6 +606,21 @@ class InputPipeline(_StandaloneGenerationMixin):
 # thin path/model-resolution wrapper. pipelines.py's generate_outputs()
 # resolves inputs/model/backend/out_path, then calls this directly.
 # ---------------------------------------------------------------------------
+
+
+def _ids_in_output(out_path: Path) -> set[str]:
+    """``input_id``s already written to the output CSV.
+
+    Unioned into the resume set so a crash between the CSV append and the
+    ledger ack doesn't re-generate those inputs (which would append a second
+    row per input, with its own ``sample_id``, that no later dedup removes).
+    """
+    if not out_path.exists():
+        return set()
+    df = pd.read_csv(out_path)
+    if df.empty or "input_id" not in df.columns:
+        return set()
+    return set(df["input_id"].astype(str))
 
 
 def run_output_generation(
@@ -687,11 +713,14 @@ def run_output_generation(
     )
 
     # Non-resume run wipes prior output + ledger; resume skips already-done ids.
-    if not resume:
-        if out_path.exists():
-            out_path.unlink()
-        ledger.reset()
-    completed = ledger.completed() if resume else set()
+    # The ledger is unioned with the ids already in the CSV (same back-compat
+    # union the jailbreak and constitution-input stages use): a crash between
+    # the append and the ack would otherwise re-generate those inputs and append
+    # a second row for each, which nothing downstream dedups.
+    completed = resume_state(
+        ledger, resume=resume, artifact=out_path,
+        extra=_ids_in_output(out_path) if resume else None,
+    )
     if completed:
         before = len(inputs)
         inputs = inputs[~inputs["_state_id"].isin(completed)].reset_index(drop=True)
@@ -715,6 +744,11 @@ def run_output_generation(
                 category=category, entry_type=entry_type, prompt_dir=prompt_dir
             )
         return checker_cache[key]
+
+    def _append_chunk(rows: list[dict]) -> None:
+        pd.DataFrame(rows).to_csv(
+            out_path, mode="a", header=not out_path.exists(), index=False
+        )
 
     all_rows: list[dict] = []
     n_chunks = ceil(len(inputs) / batch_size) if batch_size else 1
@@ -796,14 +830,9 @@ def run_output_generation(
             r["rejection_reason"] = reasoning
         all_rows.extend(chunk_rows)
 
-        new_df = pd.DataFrame(chunk_rows)
-        if out_path.exists():
-            new_df.to_csv(out_path, mode="a", header=False, index=False)
-        else:
-            new_df.to_csv(out_path, index=False)
-        # Record completion only after the CSV append succeeds, so a crash
-        # mid-chunk leaves those ids un-acked and they re-run next time.
-        ledger.record([{"input_id": r["input_id"]} for r in chunk_rows])
+        # append-then-ack, see dataset/resume.py: a crash between the two
+        # leaves these ids un-acked so they re-run rather than being lost.
+        commit(chunk_rows, append=_append_chunk, ledger=ledger)
 
         if verbose:
             accepted_count = sum(1 for r in chunk_rows if r["accepted"])

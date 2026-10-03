@@ -91,7 +91,7 @@ class TestPromptTemplate:
         tmpl = PromptTemplate(config, category="privacy")
         assert tmpl.system_prompt == "You check privacy."
 
-    def test_call_renders_template_independently_of_construction_kwargs(self):
+    def test_system_prompt_is_rendered_once_and_reused(self):
         config = {"system_prompt": "Checker for {category}.", "template": "{sample}"}
         tmpl = PromptTemplate(config, category="privacy")
         first = tmpl(sample="apple")
@@ -404,3 +404,78 @@ class TestPromptOverlay:
         assert summary["overridden"] == ["input/quality_check"]
         assert summary["unused"] == ["input/quality_chek"]
         assert "never loaded" in caplog.text
+
+
+class TestPromptTemplateLoad:
+    """load() is the normal entry point: resolve + read + construct in one
+    step, keeping the path that load_prompt()+build_messages() threw away."""
+
+    def test_loads_a_packaged_prompt_and_records_provenance(self):
+        tmpl = PromptTemplate.load(
+            "input", "quality_check",
+            Category="violence", subcategory="", entry_type="harmful",
+        )
+        assert tmpl.name == "input/quality_check"
+        assert tmpl.is_override is False
+        assert tmpl.source.name.endswith(".json")
+        assert "violence" in tmpl.system_prompt
+
+    def test_an_override_is_used_and_flagged(self, tmp_path):
+        d = tmp_path / "input" / "quality_check"
+        d.mkdir(parents=True)
+        (d / "template.json").write_text(
+            json.dumps({"system_prompt": "MINE", "template": "T"}), encoding="utf-8"
+        )
+        tmpl = PromptTemplate.load("input", "quality_check", prompt_dir=tmp_path)
+        assert tmpl.is_override is True
+        assert tmpl.source.parent == d
+        assert tmpl.system_prompt == "MINE"
+
+    def test_render_error_names_the_file_and_the_origin(self, tmp_path):
+        """The reason provenance is carried at all: realistic failures are
+        user overrides, and a traceback alone does not say which file."""
+        d = tmp_path / "input" / "quality_check"
+        d.mkdir(parents=True)
+        (d / "template.json").write_text(
+            json.dumps({"system_prompt": "S", "template": "{Severity}"}),
+            encoding="utf-8",
+        )
+        tmpl = PromptTemplate.load("input", "quality_check", prompt_dir=tmp_path)
+        with pytest.raises(ValueError) as exc:
+            tmpl()
+        msg = str(exc.value)
+        assert "input/quality_check" in msg
+        assert "override" in msg
+        assert "template.json" in msg
+        assert "{Severity}" in msg
+
+    def test_a_bare_dict_still_works_without_provenance(self):
+        """Constructing from a dict stays supported; the error just cannot
+        name a file."""
+        tmpl = PromptTemplate({"system_prompt": "S", "template": "{x}"})
+        assert tmpl.name is None
+        with pytest.raises(ValueError, match=r"^Prompt template is missing"):
+            tmpl()
+
+    def test_missing_prompt_raises_before_construction(self, tmp_path):
+        with pytest.raises(FileNotFoundError):
+            PromptTemplate.load("input", "no_such_prompt", prompt_dir=tmp_path)
+
+
+class TestTemplateKwargs:
+    def test_a_placeholder_used_in_both_fields_is_passed_once(self):
+        config = {"system_prompt": "Cat {Category}",
+                  "template": "Check {sample} for {Category}"}
+        tmpl = PromptTemplate(config, Category="violence")
+        assert tmpl(sample="s")[-1]["content"] == "Check s for violence"
+        assert tmpl(sample="s", Category="x")[-1]["content"] == "Check s for x"
+
+    def test_format_instruction_honours_the_override_dir(self, tmp_path):
+        d = tmp_path / "format_instructions" / "numbered"
+        d.mkdir(parents=True)
+        (d / "template.json").write_text(
+            json.dumps({"instruction": "\n\nMINE {num_samples}"}), encoding="utf-8"
+        )
+        tmpl = PromptTemplate.load("output", "generation", prompt_dir=tmp_path,
+                                   format_style="numbered", num_samples=3)
+        assert tmpl.system_prompt.endswith("MINE 3")

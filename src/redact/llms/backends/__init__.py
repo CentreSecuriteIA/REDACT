@@ -1,9 +1,9 @@
-"""Backend implementations — one file per provider, each implementing LLMBackend.
+"""LLM backends, one module per provider, each implementing ``LLMBackend``.
 
-To add a new provider: implement the ``LLMBackend`` contract (``base.py``) in a
-new module here — including its ``from_config()`` — then add it to
-``capabilities.BACKEND_TYPES``. Nothing else needs to change: resolution,
-capability checks and dispatch all read that one mapping.
+To add a provider, implement ``LLMBackend`` (``base.py``), including
+``from_config()``, in a new module here and add it to
+``capabilities.BACKEND_TYPES``. A hosted API also goes in
+``capabilities.API_BACKEND_TYPES``.
 """
 
 from .anthropic import AnthropicBackend

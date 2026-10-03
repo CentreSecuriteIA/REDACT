@@ -2,6 +2,7 @@
 
 import random
 
+from redact.jailbreak.chain import order_by_hierarchy
 from redact.jailbreak.utils import (
     _parse_rejection_info,
     apply_combination,
@@ -284,6 +285,36 @@ class TestSampleExactCombination:
             random.Random(0), self._obfuscation_pool(), exact_techniques=2,
         )
         assert len(fn.techniques) == 2
+
+
+class TestRequestLayerObfuscation:
+    """The phase-5 pick obfuscates the *finished* request, so it runs last.
+
+    Its layer is "obfuscation", so the usual hierarchy sort would move it ahead
+    of the request template — which is what used to happen.
+    """
+
+    def _pool(self):
+        request = _tech("ask_politely", "requests", ["asking"])
+        light_encode = _tech("to_fake_rot13", "obfuscation", ["encode"], encode_weight="light")
+        return [request, light_encode], request, light_encode
+
+    def test_pick_runs_after_the_request_technique(self):
+        pool, request, light_encode = self._pool()
+        fn = sample_combination(
+            random.Random(0), pool,
+            include_hacking=False, include_manipulation=False,
+            max_obfuscations=0, max_complexity=10,
+            allow_request_obfuscation=True,
+            sampling_probs={"requests": 1.0, "request_obfuscation": 1.0},
+        )
+        assert [t.__name__ for t in fn.techniques] == [request.__name__, light_encode.__name__]
+
+    def test_hierarchy_order_alone_would_put_it_first(self):
+        _pool, request, light_encode = self._pool()
+        assert [t.__name__ for t in order_by_hierarchy([request, light_encode])] == [
+            light_encode.__name__, request.__name__,
+        ]
 
 
 class TestDefaultEscalationSchedule:

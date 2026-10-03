@@ -1,18 +1,11 @@
-"""Write a prompt tree a user can edit — empty skeletons or the real thing.
+"""Write a prompt tree that a user can edit.
 
-Split from ``prompts.py`` because this is the only code here that **writes**
-rather than reads: setup and release tooling, one caller
-(``scripts/scaffold_prompts.py``), not part of any generation path.
+``mode="copy"`` writes the real prompts. ``mode="empty"`` writes skeletons
+with the same keys and the text replaced by TODOs. Used by
+``scripts/scaffold_prompts.py``.
 
-Both modes exist because they answer different questions. ``mode="copy"``
-gives the real prompts to edit in place — what someone tuning an existing
-pipeline wants. ``mode="empty"`` gives skeletons that mirror each file's real
-key set — what someone authoring a new prompt wants, and what a release build
-would use if the prompts were ever withheld again.
-
-Neither is required to customize a prompt: ``load_prompt`` falls back to the
-packaged copy per file, so a user's directory only needs the files they
-actually changed. These just give them a starting point.
+A user's prompt directory only needs the files they changed, because prompts
+fall back to the packaged copy per file.
 """
 
 import json
@@ -24,33 +17,15 @@ from ... import paths
 _DEFAULT_PROMPT_DIR = paths.prompts_dir()
 
 def _placeholder_prompt(config: dict) -> dict:
-    """Redact one prompt config's real text, keeping its structure real.
+    """Replace one prompt config's text with placeholders, keeping its keys.
 
-    What survives:
+    - ``system_prompt``, ``template`` and ``instruction`` (whichever the file
+      has) become a TODO that names every ``seed_fields`` entry as a
+      ``{placeholder}``.
+    - ``few_shot_examples`` is emptied if present.
+    - ``metadata`` is set to version ``0.0`` with a placeholder note.
 
-    - ``seed_fields`` — the prompt's contract with its callers, and the only
-      field here that does real work (it drives the placeholder text below).
-    - ``system_prompt``/``template``/``instruction``, whichever the file has
-      (the last is the ``format_instructions/`` shape) — replaced by a TODO
-      that still names every ``seed_fields`` entry as a real ``{placeholder}``
-      token, so a scaffolded file round-trips through
-      ``build_messages()``/``PromptTemplate`` before anyone fills it in.
-
-    What does not:
-
-    - ``few_shot_examples`` is emptied — never carry real example content into
-      a placeholder.
-    - ``metadata`` is **replaced**, not preserved: a redacted file must not
-      claim the real prompt's version, so it is reset to ``0.0`` with a note.
-
-    **The stub's key set matches its source file's exactly**, so the scaffold
-    teaches the shape rather than one generic template. A chat prompt keeps
-    ``system_prompt``/``template``/``few_shot_examples``; a
-    ``format_instructions/`` snippet keeps ``instruction`` and gains none of
-    them. Every file under one directory therefore looks like its siblings,
-    and nobody has to work out which fields their pipeline actually uses —
-    which a single all-fields example could not show, since no real prompt
-    has both ``template`` and ``instruction``.
+    Every other key, including ``seed_fields``, is kept unchanged.
     """
     stub = dict(config)
     seed_fields = config.get("seed_fields", [])
@@ -62,14 +37,12 @@ def _placeholder_prompt(config: dict) -> dict:
             stub[key] = (
                 f"TODO: replace with a real {key}. Available placeholder fields: {fields_note}"
             )
-    # Only empty what was there. Assigning unconditionally gave the three
-    # format_instructions/ files a few_shot_examples they never had, so the
-    # scaffold stopped mirroring the shape it is meant to document.
+    # Emptied only if present, so the stub gains no key its source lacks.
     if "few_shot_examples" in stub:
         stub["few_shot_examples"] = []
     stub["metadata"] = {
         "version": "0.0",
-        "notes": "PLACEHOLDER — replace before use. See CLAUDE.md's Public Release Notes.",
+        "notes": "PLACEHOLDER — replace before use.",
     }
     return stub
 
@@ -79,35 +52,27 @@ def scaffold_prompt_tree(
     source_dir: str | Path | None = None,
     mode: str = "copy",
 ) -> int:
-    """Write an editable ``prompts/``-shaped tree, mirroring the real one.
+    """Write an editable copy of a ``prompts/`` tree.
 
-    A starting point, never a requirement: ``load_prompt`` falls back to the
-    packaged copy per file, so a user's directory only needs the prompts they
-    actually changed. Delete what you don't intend to override.
+    Delete the files you do not intend to override: a prompt missing from a
+    user's directory is read from the packaged copy.
 
     Args:
         target_dir: Root directory to write into.
-        source_dir: Root to scaffold from. Defaults to the package's own
-            ``prompts/``.
-        mode: ``"copy"`` (default) writes the real prompts, to edit in place —
-            what someone tuning an existing pipeline wants, and readable as a
-            worked example. ``"empty"`` writes skeletons with the text
-            replaced by TODOs that still name every ``seed_fields`` entry as a
-            real ``{placeholder}``, so the file round-trips through
-            ``build_messages()`` before anyone fills it in — what someone
-            authoring a new prompt wants, and what a release build would use
-            if the prompts were ever withheld again.
+        source_dir: Root to copy from. Defaults to the packaged ``prompts/``.
+        mode: ``"copy"`` (default) writes the real prompts. ``"empty"``
+            writes skeletons whose text is replaced by TODOs naming each
+            ``seed_fields`` entry as a ``{placeholder}``.
 
     Returns:
         Number of files written.
 
     Raises:
-        ValueError: On an unknown ``mode``.
+        ValueError: Unknown ``mode``.
 
     Note:
-        ``"empty"`` redacts prompt *text* only. Directory and category names
-        describe harm categories by design and are left as-is, so review the
-        output before publishing — a starting point, not a guarantee.
+        ``"empty"`` replaces prompt text only. Directory and category names
+        are left as they are, so review the output before publishing.
     """
     if mode not in ("copy", "empty"):
         raise ValueError(f"mode must be 'copy' or 'empty', got {mode!r}")

@@ -74,6 +74,22 @@ def test_paraphrase_resume_is_idempotent(tmp_path, patched):
     assert n1 == n2 == 2  # no duplicate rows on re-run
 
 
+def test_rows_in_the_csv_are_not_reparaphrased(tmp_path, patched):
+    """Units whose rows reached the CSV but whose ack didn't (a crash in between,
+    or a pre-ledger run) must not be paraphrased again — that appends a second
+    row per unit."""
+    _seed_inputs(tmp_path)
+    generate_paraphrases(data_dir=tmp_path, target="inputs", verbose=False)
+    out = paths.paraphrases_inputs_csv(tmp_path)
+    before = pd.read_csv(out)
+    out.with_name("paraphrases_inputs.state.jsonl").unlink()   # ack lost
+
+    generate_paraphrases(data_dir=tmp_path, target="inputs", resume=True, verbose=False)
+    after = pd.read_csv(out)
+    assert len(after) == len(before)
+    assert list(after["sample"]) == list(before["sample"])
+
+
 def test_paraphrase_check_drop(tmp_path, monkeypatch, patched):
     _seed_inputs(tmp_path)
     # Reject everything -> all dropped -> empty / no artifact rows.

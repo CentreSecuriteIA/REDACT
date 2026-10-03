@@ -1,20 +1,9 @@
-"""Which backend type a ``backend_type`` string means, what it can do, and
-how to build one.
+"""Map ``backend_type`` strings to backend classes, and build backends.
 
-The one place mapping the registry's ``backend_type`` strings to the classes
-that implement them — and, on top of that mapping,
-:func:`resolve_setup`/:func:`backend_for`, which turn a registry entry into a
-finished backend. There is no separate resolver module: picking the setup is
-three lines over facts the entry already holds, and the class that implements
-each transport reads its own config in ``from_config()``. Because :attr:`LLMBackend.compute_config` is a *class*
-attribute, capabilities can be read straight off the class — no transport is
-constructed, which matters because constructing a vLLM or introspection
-backend loads model weights.
-
-That is what lets :func:`validate_concurrency` run at ``register_model()``
-time: a user registering their own model gets told immediately that, say,
-``backend_type="anthropic"`` can't take ``recommended_max_workers=4``, instead
-of finding out on the first dispatch of a long run.
+:func:`resolve_setup` picks which setup of a registry entry to use and
+:func:`backend_for` builds the backend for it. Capability checks read
+``compute_config`` from the backend class, so they never construct a backend
+(which for a local one would load model weights).
 """
 
 from typing import TYPE_CHECKING
@@ -28,9 +17,8 @@ from .vllm import VLLMBackend
 if TYPE_CHECKING:
     from ..model_config import ModelConfig
 
-#: ``backend_type`` string -> the class implementing it. Adding a provider
-#: means adding it here; everything that dispatches on backend type reads
-#: capabilities through this mapping rather than hardcoding a second copy.
+#: ``backend_type`` string -> the class implementing it. Add a new provider
+#: here.
 BACKEND_TYPES: dict[str, type[LLMBackend]] = {
     "openai": OpenAIBackend,
     "anthropic": AnthropicBackend,
@@ -39,30 +27,24 @@ BACKEND_TYPES: dict[str, type[LLMBackend]] = {
 }
 
 
-#: The subset of :data:`BACKEND_TYPES` that reaches a model over the network.
-#: These are the only types an ``APIConfig``'s rpm/worker budget describes —
-#: a local transport is never rate-limited. Kept beside the mapping it filters
-#: so adding a provider is one file, not a hunt for parallel copies.
+#: The backend types reached over the network. These are the valid values of
+#: ``APIConfig.backend_type``.
 API_BACKEND_TYPES = frozenset({"openai", "anthropic"})
 
-#: The *setup* names a ``ModelConfig`` can prefer, each matching the field
-#: holding it (``.api`` / ``.vllm`` / ``.introspect``). Distinct from
-#: :data:`BACKEND_TYPES`, which names *transports*: "api" covers both API
-#: providers, and which one is in play is the ``APIConfig``'s own business.
+#: Setup names a ``ModelConfig`` can default to. Each is also the name of the
+#: field holding that setup. "api" covers every API provider.
 SETUP_TYPES = frozenset({"api", "vllm", "introspect"})
 
 
 def compute_config_for(backend_type: str | None) -> ComputeConfig | None:
-    """Capabilities of a backend type, without constructing one.
+    """Capability flags of a backend type, without constructing a backend.
 
     Args:
         backend_type: A key of :data:`BACKEND_TYPES`.
 
     Returns:
         That backend class's :class:`ComputeConfig`, or ``None`` for an
-        unknown or absent type — callers decide whether that's an error, since
-        a registry entry may legitimately leave ``backend_type`` unset and have
-        it inferred later from the model name.
+        unknown or missing type.
     """
     if backend_type is None:
         return None
@@ -73,24 +55,21 @@ def compute_config_for(backend_type: str | None) -> ComputeConfig | None:
 def validate_concurrency(
     name: str, backend_type: str | None, recommended_max_workers: int
 ) -> None:
-    """Reject a model registered with more workers than its backend can take.
+    """Reject a model registered with more workers than its backend can use.
 
-    ``BatchCaller.run()`` raises the same class of error, but only once the
-    model is actually dispatched. This catches it at registration — which is
-    the useful moment for someone registering their own model, since the
-    mistake is in the call they just wrote.
+    Runs at registration. Without it the mismatch would go unnoticed, because
+    the backend clamps ``max_workers`` to 1 at construction.
 
-    A no-op when there's nothing to check: ``backend_type=None`` (inferred
-    later from the model name, so no class to ask yet), an unrecognized type,
-    or ``recommended_max_workers <= 1``.
+    Does nothing when ``backend_type`` is ``None`` or unknown, or when
+    ``recommended_max_workers <= 1``.
 
     Args:
         name: Model name, for the error message.
-        backend_type: The type whose capabilities to check.
+        backend_type: The backend type to check.
         recommended_max_workers: Concurrency the registry entry declares.
 
     Raises:
-        ValueError: If that backend type can't make parallel calls.
+        ValueError: The backend type cannot make parallel calls.
     """
     if recommended_max_workers <= 1:
         return
@@ -100,29 +79,27 @@ def validate_concurrency(
             f"Model {name!r} (backend_type={backend_type!r}) is registered "
             f"with recommended_max_workers={recommended_max_workers}, but "
             f"this backend type doesn't support parallel calls — "
-            f"BatchCaller would raise the same error on first dispatch. "
+            f"the backend would silently clamp it to 1. "
             f"Set recommended_max_workers=1."
         )
 
 
 def resolve_setup(config: "ModelConfig", requested: str | None = None) -> str:
-    """Decide which setup on a registry entry to bind.
+    """Pick which setup of a registry entry to use.
 
-    Explicit request wins, then the entry's own ``backend_type``, then — when
-    exactly one setup is populated — that one, since there is nothing to
-    choose between. More than one with no declared preference is genuinely
-    ambiguous, so the entry has to say.
+    An explicit request wins, then the entry's ``backend_type``, then the
+    only populated setup.
 
     Args:
         config: The model's ``ModelConfig``.
         requested: Optional override, one of :data:`SETUP_TYPES`.
 
     Returns:
-        One of ``"api"`` / ``"vllm"`` / ``"introspect"``.
+        ``"api"``, ``"vllm"`` or ``"introspect"``.
 
     Raises:
-        ValueError: If the name isn't a known setup, the entry has no such
-            setup, it has none at all, or it has several and no preference.
+        ValueError: The name is not a known setup, the entry lacks that
+            setup, it has no setup, or it has several and no default.
     """
     setup = requested or config.backend_type
     if setup is None:
@@ -154,23 +131,18 @@ def resolve_setup(config: "ModelConfig", requested: str | None = None) -> str:
 
 
 def transport_for(config: "ModelConfig", setup: str | None = None) -> str:
-    """Which transport class serves this entry, as a :data:`BACKEND_TYPES` key.
+    """The :data:`BACKEND_TYPES` key of the class that serves this entry.
 
-    Distinct from the *setup* name: ``"api"`` covers both API providers, and
-    which one is in play is the ``APIConfig``'s own ``backend_type``. Kept as
-    its own function because it is answerable without building anything — see
-    :func:`redact.llms.model_config.model_compute_config`, which uses it to
-    read capabilities off the class rather than constructing a transport.
+    For the ``"api"`` setup this is the ``APIConfig``'s own ``backend_type``;
+    for a local setup it is the setup name.
 
     Args:
         config: The model's ``ModelConfig``.
-        setup: Optional setup override; resolved via :func:`resolve_setup`.
-
-    Returns:
-        A key of :data:`BACKEND_TYPES`.
+        setup: Optional setup override, resolved by :func:`resolve_setup`.
 
     Raises:
-        ValueError: If the setup can't be resolved, or names no known transport.
+        ValueError: The setup cannot be resolved, or names no known backend
+            type.
     """
     resolved = resolve_setup(config, setup)
     transport = config.api.backend_type if resolved == "api" else resolved
@@ -183,43 +155,27 @@ def transport_for(config: "ModelConfig", setup: str | None = None) -> str:
 
 
 def backend_for(config: "ModelConfig", setup: str | None = None) -> LLMBackend:
-    """Build the finished backend for one model on one of its setups.
-
-    The whole of model→transport resolution: pick the setup, map it to the
-    class that implements it, and let that class read its own config off the
-    entry. Which API *provider* an ``.api`` setup uses is that config's own
-    ``backend_type``, so endpoint identity stays out of the entry-level
-    selector.
+    """Build the backend for one model on one of its setups.
 
     Args:
         config: The model's ``ModelConfig``.
-        setup: Optional override selecting which setup to bind on an entry
-            with more than one, e.g. ``"vllm"`` to run locally a model that
-            defaults to its hosted endpoint.
-
-    Returns:
-        A fully-configured :class:`LLMBackend` — model name, generation
-        defaults, provider params, rpm and worker budget all bound.
+        setup: Which setup to use when the entry has more than one, e.g.
+            ``"vllm"``. Defaults to the entry's own.
 
     Raises:
-        ValueError: If the setup can't be resolved or names no known transport.
-        KeyError: If the setup's API-key env var is not set.
+        ValueError: The setup cannot be resolved, or names no known backend
+            type.
+        KeyError: The setup's API-key env var is not set.
     """
     return BACKEND_TYPES[transport_for(config, setup)].from_config(config)
 
 
 def clear_transport_caches() -> None:
-    """Reset every backend class's shared-resource cache.
+    """Clear every backend class's cache of shared resources.
 
     For tests, after changing environment variables, or to free GPU memory
-    between local models. Each class clears its own — see
-    :meth:`LLMBackend.clear_cache`.
-
-    This drops the cache's reference; the resource dies when the *last* one
-    does. Since clients are rebuilt per ``ModelClient.create()`` and hold no
-    cache of their own, that is usually immediate — but a caller still
-    holding a client keeps its engine resident, correctly, because it is
-    still in use.
+    between local models. This drops the caches' references only: an engine
+    stays loaded while a client or backend still refers to it.
     """
     for backend_cls in BACKEND_TYPES.values():
         backend_cls.clear_cache()

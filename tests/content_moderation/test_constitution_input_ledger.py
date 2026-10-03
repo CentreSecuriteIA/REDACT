@@ -76,6 +76,27 @@ def test_fresh_clears_ledger_and_regenerates(tmp_path):
     assert pipe2.gen.backend.calls != []
 
 
+def test_entry_with_no_extracted_samples_is_acked(tmp_path):
+    """An entry that yields nothing writes no row, so the CSV fallback can't
+    cover it — un-acked it would be re-generated (and re-paid for) forever."""
+    def _pipe():
+        return InputPipeline(
+            gen=make_client(MockBackend("sorry, nothing here"), "m"),
+            check=make_client(MockBackend("Yes"), "m"),
+            dataset_dir=tmp_path,
+        )
+
+    r = _pipe().run_from_constitution(_const_df(), _PROMPT, samples_per_entry=2, verbose=False)
+    assert r.skipped_entries == 2 and r.total_entries_processed == 0
+    assert _constitution_inputs_ledger(tmp_path).completed() == {
+        ("desc one", "harmful", ""), ("desc two", "benign", ""),
+    }
+
+    pipe2 = _pipe()
+    pipe2.run_from_constitution(_const_df(), _PROMPT, samples_per_entry=2, verbose=False)
+    assert pipe2.gen.backend.calls == []     # not re-attempted on resume
+
+
 def test_resume_falls_back_to_csv_when_ledger_absent(tmp_path):
     # Simulate a pre-ledger run: generate under a named style, then delete the
     # ledger. Resume must still skip via the existing-CSV set (back-compat).

@@ -1,27 +1,17 @@
-"""Model registry with rate limits and provider-specific defaults.
+"""Model registry: one entry per model, with the setups that can serve it.
 
-Centralizes model metadata that was previously hardcoded across modules
-(e.g. MODEL_RPMS in the jailbreak library's _RateLimitedClient).
+A :class:`ModelConfig` holds the backend-independent facts about a model
+(name, roles, generation defaults) plus the setups that can serve it:
 
-Split into an identity (backend-agnostic facts) plus per-backend-type setup
-configs, since most fields only mean something for one backend type:
-- ``APIConfig`` — rate limiting/concurrency, only meaningful for backends
-  that reach a model over the network (openai, anthropic).
-- ``VLLMConfig`` — which local weights to load via vLLM, and how.
-- ``IntrospectConfig`` — same, plus where captured internals get written.
+- ``APIConfig``: a hosted endpoint, with its rate limit and concurrency.
+- ``VLLMConfig``: local weights loaded through vLLM.
+- ``IntrospectConfig``: local weights loaded through transformers, with
+  internals capture.
 
-**One entry may populate more than one setup.** A model that exists both as a
-hosted endpoint and as local weights is one model, so it gets one entry with
-both ``.api`` and ``.vllm`` rather than two near-duplicate rows;
-``ModelClient.create(name, backend_type=...)`` picks which setup to bind.
-``backend_type`` is the selector for which setup a row *defaults* to, not an
-identity fact.
-
-Which setup is active decides which budget applies: a backend built from the
-``.vllm`` setup carries ``rpm=None``, so selecting the local setup on a
-dual-setup entry does not inherit the endpoint's RPM — or its provider params.
-Both are bound when the backend is built (see
-:func:`redact.llms.backends.capabilities.backend_for`), never looked up per call.
+An entry may have more than one setup. ``backend_type`` names the default
+one, and ``ModelClient.create(name, backend_type=...)`` selects another. A
+backend built from a local setup has ``rpm=None`` and none of the endpoint's
+provider parameters.
 """
 
 import dataclasses
@@ -38,33 +28,22 @@ from .backends import (
     validate_concurrency,
 )
 
-# Whose budget an APIConfig's `rpm` describes. "model" = this model alone
-# (Venice meters per model); "endpoint" = every model behind the same
-# provider+URL+key shares one window (Anthropic meters the account).
+# Whose budget an APIConfig's rpm is: "model" for this model alone, "endpoint"
+# for every model behind the same provider, URL and key.
 RATE_LIMIT_SCOPES: frozenset[str] = frozenset({"model", "endpoint"})
 
 
 def _require(condition: bool, message: str, exc: type[Exception] = ValueError) -> None:
-    """Reject an invalid config field.
+    """Raise ``exc(message)`` unless ``condition`` holds.
 
-    A raise, not ``assert``: ``python -O`` strips asserts, and these validate
-    caller-supplied input at a public API boundary — exactly the checks that
-    must survive optimization.
-
-    Args:
-        condition: What must hold.
-        message: Shown when it doesn't.
-        exc: ``ValueError`` for a bad value, ``TypeError`` for a bad type —
-            the ``_check_*`` helpers below pick the right one per field.
+    Used instead of ``assert``, which ``python -O`` strips.
     """
     if not condition:
         raise exc(message)
 
 
-# The four field shapes this module validates. Each separates "wrong kind of
-# thing" (TypeError) from "right kind, bad value" (ValueError), so a caller
-# who passes rpm="60" is told it isn't an int rather than that it isn't
-# positive.
+# Field checks. Each raises TypeError for the wrong type and ValueError for a
+# bad value.
 
 def _check_str(label: str, value, *, optional: bool = False) -> None:
     """Non-empty string (or ``None`` when optional)."""
@@ -76,8 +55,7 @@ def _check_str(label: str, value, *, optional: bool = False) -> None:
 
 
 def _check_int(label: str, value, *, minimum: int) -> None:
-    """Integer at or above ``minimum``. ``bool`` is rejected: it subclasses
-    ``int``, so ``rpm=True`` would otherwise pass as the number 1."""
+    """Integer at or above ``minimum``. Rejects ``bool``, which subclasses ``int``."""
     _require(isinstance(value, int) and not isinstance(value, bool),
              f"{label} must be an int, got {type(value).__name__}", TypeError)
     _require(value >= minimum, f"{label} must be >= {minimum}, got {value!r}")
@@ -89,8 +67,7 @@ def _check_bool(label: str, value) -> None:
 
 
 def _check_number(label: str, value, *, minimum: float = 0.0) -> None:
-    """Optional non-negative number (or ``None``). Rejects ``bool``, which
-    subclasses ``int`` and would otherwise pass as 1."""
+    """Number at or above ``minimum``, or ``None``. Rejects ``bool``."""
     if value is None:
         return
     _require(isinstance(value, int | float) and not isinstance(value, bool),
@@ -99,61 +76,37 @@ def _check_number(label: str, value, *, minimum: float = 0.0) -> None:
 
 
 def _check_dict(label: str, value) -> None:
-    """Optional dict — every dict field in this module may be ``None``."""
+    """Dict or ``None``."""
     _require(value is None or isinstance(value, dict),
              f"{label} must be a dict or None, got {type(value).__name__}", TypeError)
 
 
 @dataclass
 class APIConfig:
-    """A hosted endpoint: which provider, where it is, and its budget.
-
-    Self-sufficient by design. ``ModelConfig.backend_type`` says which *setup*
-    an entry prefers, not which provider its API is — so everything needed to
-    actually reach the endpoint lives here. Without that, a dual-setup entry
-    defaulting to ``"vllm"`` would have no way to say what its ``.api`` even
-    was, and every OpenAI-compatible model would silently inherit one
-    hardcoded provider's URL and key.
+    """A hosted endpoint: provider, location and budget.
 
     Attributes:
-        backend_type: Which API transport serves this — "openai" (any
-            OpenAI-compatible endpoint) or "anthropic".
+        backend_type: API transport: "openai" (any OpenAI-compatible
+            endpoint) or "anthropic".
         api_key_env: Name of the environment variable holding the API key.
-        rpm: Requests-per-minute limit enforced by ``RateLimiter``.
-        base_url: Endpoint URL. Required for "openai", since that transport
-            works against any compatible provider and has no meaningful
-            default. Unused for "anthropic", whose SDK knows its own endpoint.
-        api_model_id: The identifier sent upstream, when the provider's slug
-            differs from this entry's registry name. ``None`` means they match.
-            The registry name is the library's *stable* identity — it keys
-            roles, the client cache, telemetry rows and every price lookup — so
-            it must survive a provider's version bumps. Venice renaming
-            ``venice-uncensored`` to ``venice-uncensored-1-2`` is exactly that
-            case: without this field the choice would be renaming the entry
-            (churning roles, docs, ledgers, and orphaning past traces) or
-            calling a stale model. Same role as ``hf_model_id`` on the local
-            setups: what the runtime is actually asked for.
-        rate_limit_scope: Whose budget ``rpm`` describes — ``"model"``
-            (default) or ``"endpoint"``. Venice meters each model separately,
-            so three models on one key hold three independent windows and
-            ``"model"`` is correct. Anthropic meters the *account*, so every
-            model behind one key draws on one budget; ``"endpoint"`` makes
-            them share a single window keyed on ``backend_type`` + ``base_url``
-            + ``api_key_env``. Without it, N models each get the full budget
-            and collectively blow it — two entries at ``rpm=5`` issuing 10/min
-            against a 5/min account. Only rate limiting is shared this way:
-            ``recommended_max_workers`` is pipeline depth (3 workers saturate
-            60 RPM fine), not a budget that adds up across models.
-        recommended_max_workers: Concurrency the backend binds as its
-            ``max_workers``, clamped there against the transport's own
-            parallelism capability. Also checked against the provider at
-            registration time by :class:`ModelConfig`.
-        default_extra_body: Provider-specific parameters sent with every call.
-            Bound only when this setup is the one built, so a local binding of
-            the same entry never inherits them.
-        price_per_1m_input: USD per 1M prompt tokens, for cost roll-up. ``None``
-            means unpriced — telemetry then reports tokens without a dollar
-            figure rather than guessing.
+        rpm: Requests-per-minute limit.
+        base_url: Endpoint URL. Required for "openai", unused for
+            "anthropic".
+        api_model_id: Model identifier sent to the provider when it differs
+            from the registry name (``venice-uncensored`` is sent as
+            ``venice-uncensored-1-2``). ``None`` sends the registry name.
+            The registry name stays the key for roles, telemetry and pricing.
+        rate_limit_scope: Whose budget ``rpm`` is. ``"model"`` (default)
+            gives each model its own window. ``"endpoint"`` makes every model
+            with the same :attr:`endpoint_id` share one window, for providers
+            that meter the account (Anthropic).
+        recommended_max_workers: Concurrency the backend uses as its
+            ``max_workers``. Use 1 for a provider that cannot take parallel
+            calls (Anthropic).
+        default_extra_body: Provider-specific parameters sent with every
+            call. Only the OpenAI-compatible backend reads it.
+        price_per_1m_input: USD per 1M prompt tokens, for cost reporting.
+            ``None`` means unpriced.
         price_per_1m_output: USD per 1M completion tokens.
     """
 
@@ -194,42 +147,33 @@ class APIConfig:
 
     @property
     def endpoint_id(self) -> str:
-        """Identity of the endpoint this setup talks to.
+        """Identity of the endpoint: provider, URL and API-key variable.
 
-        The unit a per-account budget belongs to: same provider, same URL,
-        same key. Deliberately the same triple ``_sdk_client`` caches its HTTP
-        pool on, so "one connection pool" and "one rate budget" can never
-        disagree about what counts as the same endpoint.
+        Models with the same id share one rate-limit window under
+        ``rate_limit_scope="endpoint"``.
         """
         return f"{self.backend_type}:{self.base_url}:{self.api_key_env}"
 
 
 @dataclass
 class VLLMConfig:
-    """Which local weights to load via vLLM, and how.
-
-    ``hf_model_id`` is required rather than validated later: a vLLM setup
-    without weights isn't a setup, so the invalid state is unrepresentable.
+    """Local weights to load through vLLM.
 
     Attributes:
         hf_model_id: HuggingFace model ID or local path.
         quantization: Quantization method, e.g. "gptq", "awq".
-        vllm_kwargs: Extra kwargs passed to ``vllm.LLM()`` (e.g.
+        vllm_kwargs: Extra kwargs for ``vllm.LLM()`` (e.g.
             ``gpu_memory_utilization``, ``tokenizer_mode``).
-        sampling: Per-model ``SamplingParams`` defaults with no identity field
-            of their own (``top_p``, ``top_k``, ...). Bound at construction so
-            they are never magic numbers inside ``generate()``.
-        vram_gb: Estimated VRAM this model *needs*, for pre-flight residency
-            planning. An estimate: real usage moves with ``max_model_len``,
-            quantization and KV cache. ``None`` means the planner falls back to
-            an estimate computed from the checkpoint's HF config, or plans
-            optimistically. Set it to *override* that estimate.
-            NOTE: this is the model's need, **not** what vLLM reserves —
-            ``gpu_memory_utilization`` makes it claim a fraction of the whole
-            card regardless of model size. See ``redact.llms.resources``.
-        min_gpus: Whole devices this model claims, i.e. ``tensor_parallel_size``.
-            A model too large for one card takes N cards outright, which is a
-            different packing problem from "does it fit in the leftover GB".
+        sampling: Default ``SamplingParams`` values for this model
+            (``top_p``, ``top_k``, ...).
+        vram_gb: VRAM the model needs, in GiB, for residency planning.
+            ``None`` lets the planner estimate it from the checkpoint's HF
+            config; set it to override that estimate. This is the model's
+            need, not what vLLM reserves, which is ``gpu_memory_utilization``
+            of the whole card.
+        min_gpus: Whole devices the model claims. Above 1 it is passed to
+            vLLM as ``tensor_parallel_size``, unless ``vllm_kwargs`` sets
+            that itself.
     """
 
     hf_model_id: str
@@ -247,29 +191,33 @@ class VLLMConfig:
         _check_number("VLLMConfig.vram_gb", self.vram_gb)
         _check_int("VLLMConfig.min_gpus", self.min_gpus, minimum=1)
 
+    @property
+    def engine_kwargs(self) -> dict:
+        """The kwargs ``vllm.LLM()`` is built with, ``min_gpus`` included."""
+        kwargs = dict(self.vllm_kwargs or {})
+        if self.min_gpus > 1:
+            kwargs.setdefault("tensor_parallel_size", self.min_gpus)
+        return kwargs
+
 
 @dataclass
 class IntrospectConfig:
-    """Which local weights to load for internals capture, and where to write it.
-
-    Both ``hf_model_id`` and ``log_dir`` are required: capture with nowhere to
-    write is as broken as weights that don't exist, so neither is optional.
+    """Local weights to load through transformers, and where captures go.
 
     Attributes:
         hf_model_id: HuggingFace model ID or local path.
-        log_dir: Root dir captured internals are written under.
-        capture: Which internals to capture — logprobs / hidden_states /
-            attention flags.
+        log_dir: Root directory for captured internals.
+        capture: Which internals to capture: ``logprobs``, ``hidden_states``
+            and ``attention`` settings.
         device_map: Passed to ``AutoModelForCausalLM.from_pretrained``.
         torch_dtype: Passed to ``AutoModelForCausalLM.from_pretrained``.
-        sampling: Per-model generation defaults with no identity field of
-            their own (``top_p``, ``top_k``, ...), bound at construction.
-        vram_gb: Estimated VRAM need, for residency planning. Unlike vLLM this
-            backend preallocates nothing, so a measured figure here really is
-            the model's need.
-        min_gpus: Whole devices this model claims.
-        extra_kwargs: Extra kwargs for ``from_pretrained``, e.g.
-            trust_remote_code.
+        sampling: Default generation values for this model (``top_p``,
+            ``top_k``, ...).
+        vram_gb: VRAM the model needs, in GiB, for residency planning.
+            ``None`` lets the planner estimate it.
+        min_gpus: Whole devices the model claims.
+        extra_kwargs: Extra kwargs for ``from_pretrained`` (e.g.
+            ``trust_remote_code``).
     """
 
     hf_model_id: str
@@ -296,37 +244,28 @@ class IntrospectConfig:
 
 @dataclass
 class ModelConfig:
-    """One model: backend-agnostic identity plus the setups that can serve it.
+    """One model: its identity and the setups that can serve it.
 
-    Validates itself on construction, so any ``ModelConfig`` in the registry
-    is coherent — the setup fields are already valid by their own
-    construction, and this checks the identity fields plus the cross-setup
-    rules that only make sense once assembled.
-
-    **More than one setup may be populated.** A model that exists both as a
-    hosted endpoint and as local weights is one model: give it ``api`` *and*
-    ``vllm``. ``backend_type`` then names which setup it *defaults* to; the
-    others stay reachable via
-    ``ModelClient.create(name, backend_type=...)``, which checks the
-    corresponding field is present.
+    Validated on construction. When several setups are present,
+    ``backend_type`` names the default and the others are reachable through
+    ``ModelClient.create(name, backend_type=...)``.
 
     Attributes:
         name: Model identifier used at call sites.
         roles: Logical roles this model can fill, for
-            :func:`default_model_for_role` lookup. A model may hold several.
+            :func:`default_model_for_role`.
         is_uncensored: True for uncensored generation models.
-        supports_system_prompt: False if the model ignores system messages —
-            drives the system-prompt fold the backend applies in
-            ``LLMBackend._prepare()``.
-        default_max_tokens: Fallback when a caller passes no max_tokens.
-        default_temperature: Fallback sampling temperature (None = provider
-            default).
-        backend_type: Which **setup** this entry prefers — "api", "vllm", or
-            "introspect", each naming the field that holds it. ``None`` means
-            "the only setup present". Which API *provider* an ``.api`` setup
-            uses is that config's own ``backend_type``, not this one.
-        api: Network budget, or None for a local-only model.
-        vllm: vLLM weight-loading setup, or None.
+        supports_system_prompt: False if the model ignores system messages.
+            The backend then folds system content into the first user
+            message.
+        default_max_tokens: Used when a caller passes no ``max_tokens``.
+        default_temperature: Used when a caller passes no temperature.
+            ``None`` leaves it to the backend or provider.
+        backend_type: The default setup: "api", "vllm" or "introspect".
+            ``None`` means the only setup present. The API provider is named
+            by ``api.backend_type``, not here.
+        api: Hosted-endpoint setup, or None.
+        vllm: vLLM setup, or None.
         introspect: Internals-capture setup, or None.
     """
 
@@ -383,43 +322,37 @@ class ModelConfig:
                 TypeError,
             )
 
+        # The worker count must suit the API provider, whichever setup is the
+        # default. A local setup on the same entry does not use it.
+        if self.api is not None:
+            validate_concurrency(
+                self.name, self.api.backend_type, self.api.recommended_max_workers
+            )
+
         if self.backend_type is None:
-            return  # inferred from the name later; nothing to cross-check yet
+            return  # no default declared; the setup checks below are skipped
 
         _require(
             self.backend_type in SETUP_TYPES,
             f"{self.name!r}: unknown backend_type {self.backend_type!r}; "
             f"expected one of {sorted(SETUP_TYPES)}",
         )
-        # Every setup name is the field that holds it, so this needs no
-        # lookup table — that uniformity is why the names were chosen.
+        # Each setup name is also the name of the field that holds it.
         _require(
             getattr(self, self.backend_type) is not None,
             f"{self.name!r}: backend_type={self.backend_type!r} needs a "
             f"{self.backend_type} config — pass {self.backend_type}=...",
         )
-        # Concurrency is a property of the API provider, which the APIConfig
-        # names itself — so this holds whichever setup the entry prefers. A
-        # local setup alongside it ignores the value entirely (a
-        # native-batching client never builds a BatchCaller), which is what
-        # makes a dual-setup entry with workers>1 legitimate.
-        if self.api is not None:
-            validate_concurrency(
-                self.name, self.api.backend_type, self.api.recommended_max_workers
-            )
 
-
-DEFAULT_RPM = 20
 
 _SETUP_CLASSES = {"api": APIConfig, "vllm": VLLMConfig, "introspect": IntrospectConfig}
 
 
 def available_roles() -> dict[str, str]:
-    """Every role a model may claim, mapped to what it is for.
+    """Every role a model may claim, mapped to its description.
 
-    Loaded from ``configs/llm/roles.json``. This is the list :func:`register_model`
-    validates against, so a typo'd role is rejected at load rather than
-    surfacing much later as "no model registered for role".
+    Loaded from ``configs/llm/roles.json``. A role outside this list is
+    rejected when a model is registered.
     """
     return dict(_ROLES)
 
@@ -435,12 +368,7 @@ def _load_roles() -> dict[str, str]:
 
 
 def _build_entry(name: str, raw: dict) -> ModelConfig:
-    """Turn one JSON entry into a validated :class:`ModelConfig`.
-
-    Setups are constructed through their own dataclasses, so a file entry gets
-    exactly the validation a hand-written registration does — no second,
-    weaker schema check that could drift from it.
-    """
+    """Turn one JSON entry into a validated :class:`ModelConfig`."""
     _require(isinstance(raw, dict), f"model {name!r}: entry must be a JSON object", TypeError)
     fields = {k: v for k, v in raw.items() if k not in _SETUP_CLASSES and k != "notes"}
     unknown = set(fields) - {f.name for f in dataclasses.fields(ModelConfig)}
@@ -455,9 +383,7 @@ def _build_entry(name: str, raw: dict) -> ModelConfig:
 def _load_registry() -> dict[str, ModelConfig]:
     """Build the registry from ``configs/llm/models.json``.
 
-    Every entry is validated, and **all** failures are collected before
-    raising — one malformed model would otherwise hide the rest, so you'd fix
-    them one import at a time.
+    Every invalid entry is collected and reported in one ``ValueError``.
     """
     path = paths.models_json()
     try:
@@ -485,24 +411,19 @@ def _load_registry() -> dict[str, ModelConfig]:
 _ROLES: dict[str, str] = _load_roles()
 
 #: Every model the library knows about, loaded from ``configs/llm/models.json``.
-#: Add or edit entries there — they persist across sessions, unlike a runtime
-#: :func:`register_model` call.
+#: Edit that file to add a model permanently. A :func:`register_model` call
+#: lasts only for the process.
 MODEL_REGISTRY: dict[str, ModelConfig] = _load_registry()
 
 
 def get_model_config(model: str) -> ModelConfig:
-    """Look up model config from registry.
+    """Return the :class:`ModelConfig` of a registered model.
 
     Args:
         model: Registered model name.
 
-    Returns:
-        The model's :class:`ModelConfig`.
-
     Raises:
-        KeyError: If ``model`` isn't registered — there is no generic-default
-            fallback, so a typo'd name errors rather than silently resolving.
-            Register it first via :func:`register_model`.
+        KeyError: ``model`` is not registered.
     """
     if model not in MODEL_REGISTRY:
         raise KeyError(
@@ -515,24 +436,18 @@ def get_model_config(model: str) -> ModelConfig:
 def model_compute_config(
     model: str, backend_type: str | None = None
 ) -> ComputeConfig:
-    """Capability flags for a registered model, **without building anything**.
+    """Capability flags for a registered model, without building a backend.
 
-    Answers "could this model capture internals / be called in parallel?" by
-    reading the flags off the backend *class* that would serve it. Constructing
-    the backend to ask would load model weights for a local setup — so any
-    caller that only needs the answer (e.g. ``jailbreak/chain.py`` deciding
-    whether to tag a request for capture) should use this instead.
+    Reads the flags from the backend class that would serve the model, so no
+    weights are loaded.
 
     Args:
         model: Registered model name.
         backend_type: Optional setup override, as for ``ModelClient.create``.
 
-    Returns:
-        The serving backend class's :class:`ComputeConfig`.
-
     Raises:
-        KeyError: If the model isn't registered.
-        ValueError: If the setup can't be resolved.
+        KeyError: The model is not registered.
+        ValueError: The setup cannot be resolved.
     """
     return compute_config_for(transport_for(get_model_config(model), backend_type))
 
@@ -549,54 +464,41 @@ def register_model(
     vllm: VLLMConfig | None = None,
     introspect: IntrospectConfig | None = None,
 ) -> None:
-    """Add or update a model in the registry at runtime.
+    """Add or replace a model in the registry for this process.
 
-    Build the setups you need and pass them in. Each config validates itself
-    on construction, so by the time it reaches here it is already known-good;
-    this only assembles them and checks the rules that need the whole picture
-    (does the default setup exist, does the concurrency suit the provider).
-
-    **Pass more than one setup** for a model that exists both as a hosted
-    endpoint and as local weights — the same shape the built-in
-    ``venice-uncensored`` entry uses::
+    Build the setup configs and pass them in. Pass more than one for a model
+    that is both a hosted endpoint and local weights::
 
         register_model(
             "my-model",
-            backend_type="openai",                        # the default setup
+            backend_type="api",                           # the default setup
             api=APIConfig(backend_type="openai", api_key_env="MY_API_KEY",
                           base_url="https://api.example.com/v1",
                           rpm=60, recommended_max_workers=3),
-            vllm=VLLMConfig(hf_model_id="org/my-model"),  # also reachable
+            vllm=VLLMConfig(hf_model_id="org/my-model"),  # also available
         )
 
-    ``ModelClient.create("my-model")`` then uses the API;
+    ``ModelClient.create("my-model")`` then uses the API, and
     ``ModelClient.create("my-model", backend_type="vllm")`` runs it locally.
 
     Args:
         name: Model identifier.
-        backend_type: Which **setup** this entry defaults to — "api",
-            "vllm" or "introspect", each naming the field that holds it.
-            ``None`` means "the only setup present"; an entry with more than
-            one must say. Which API *provider* an ``.api`` setup uses is that
-            config's own ``backend_type``.
-        roles: Logical roles this model can fill, for
-            :func:`default_model_for_role` lookup. A model may hold several.
+        backend_type: The default setup: "api", "vllm" or "introspect".
+            ``None`` means the only setup present.
+        roles: Logical roles this model can fill.
         is_uncensored: True for uncensored generation models.
         supports_system_prompt: False if the model ignores system messages.
         default_max_tokens: Default max tokens for generation.
-        default_temperature: Default sampling temperature (None = provider
-            default). Must be within 0.0-2.0.
-        api: :class:`APIConfig` — rate limit and concurrency for a networked
-            model.
-        vllm: :class:`VLLMConfig` — which local weights to load via vLLM.
-        introspect: :class:`IntrospectConfig` — local weights plus where
-            captured internals are written.
+        default_temperature: Default sampling temperature, within 0.0-2.0.
+            ``None`` leaves it to the backend or provider.
+        api: Hosted-endpoint setup.
+        vllm: vLLM setup.
+        introspect: Internals-capture setup.
 
     Raises:
-        ValueError: If an identity field is invalid, the default
-            ``backend_type`` has no matching config, or the concurrency
-            doesn't suit the provider. (Field-level problems inside a setup
-            surface earlier, when that config is constructed.)
+        TypeError: A field has the wrong type.
+        ValueError: A field is invalid, the default ``backend_type`` has no
+            matching config, or the concurrency does not suit the provider.
     """
     MODEL_REGISTRY[name] = ModelConfig(
         name=name,
@@ -615,8 +517,6 @@ def register_model(
 def get_models_by_role(role: str) -> list[ModelConfig]:
     """Return every registered model that can fill ``role``.
 
-    A model may hold several roles, so it can appear under more than one.
-
     Args:
         role: Logical role to match (e.g. "uncensored_gen").
 
@@ -627,16 +527,13 @@ def get_models_by_role(role: str) -> list[ModelConfig]:
 
 
 def default_model_for_role(role: str) -> str:
-    """Return the first registered model name for a role.
+    """Return the name of the first registered model with a role.
 
     Args:
         role: Logical role to look up (e.g. "constitution_gen").
 
-    Returns:
-        Name of the first registered model with that role.
-
     Raises:
-        KeyError: If no model in the registry has this role.
+        KeyError: No registered model has this role.
     """
     matches = get_models_by_role(role)
     if not matches:

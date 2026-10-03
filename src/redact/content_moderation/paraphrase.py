@@ -29,7 +29,7 @@ from pathlib import Path
 import pandas as pd
 
 from .. import paths
-from ..dataset import Ledger, Manifest, merge_all
+from ..dataset import Ledger, Manifest, merge_all, resume_state
 from ..dataset.io import _hash_text
 from ..llms.client import ModelClient
 from ..llms.model_config import default_model_for_role, get_models_by_role
@@ -131,11 +131,6 @@ def _paraphrase_ledger(state_path: Path) -> Ledger:
                   casters={"input_id": str, "iteration": int})
 
 
-def _read_paraphrase_state(state_path: Path) -> set[tuple[str, int]]:
-    """Return ``(input_id, iteration)`` units already recorded in the ledger."""
-    return _paraphrase_ledger(state_path).completed()
-
-
 def _append_paraphrase_state(state_path: Path, records: list[dict]) -> None:
     """Append attempted-unit records (``input_id``/``iteration``/``paraphrase_model``/``status``)."""
     _paraphrase_ledger(state_path).record(records)
@@ -217,15 +212,25 @@ def run_paraphrase_target(
     manifest = Manifest.sidecar(out_path)
     if not resume:
         manifest.reset()
-        for p in (out_path, state_path):
-            if p.exists():
-                p.unlink()
-    completed: set[tuple[str, int]] = _read_paraphrase_state(state_path) if resume else set()
-    seen_texts: set[str] = set()
-    if out_path.exists():
-        prev = pd.read_csv(out_path)
-        if not prev.empty and "sample" in prev.columns:
-            seen_texts = set(prev["sample"].astype(str))
+    # Read the artifact before resume_state, which deletes it on a fresh run.
+    prev = pd.read_csv(out_path) if (resume and out_path.exists()) else pd.DataFrame()
+    # Units already in the CSV are unioned into the completed set (as the
+    # jailbreak stage does): a crash between the append and the ack would
+    # otherwise re-paraphrase them and append a second row each.
+    csv_units: set[tuple[str, int]] = (
+        {(str(i), int(k)) for i, k in zip(prev["input_id"], prev["iteration"])}
+        if not prev.empty and {"input_id", "iteration"} <= set(prev.columns)
+        else set()
+    )
+    completed: set[tuple[str, int]] = resume_state(
+        _paraphrase_ledger(state_path), resume=resume, artifact=out_path,
+        extra=csv_units or None,
+    )
+    seen_texts: set[str] = (
+        set(prev["sample"].astype(str))
+        if not prev.empty and "sample" in prev.columns
+        else set()
+    )
 
     # ---- Plan the FULL run -> manifest = the whole (base_id, k -> model) mapping
     all_units: list[tuple] = []  # (base_id, k, model, original_text, category, entry_type)

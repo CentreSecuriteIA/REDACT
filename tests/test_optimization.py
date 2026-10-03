@@ -1,5 +1,7 @@
 """Offline tests for the optimization search controller (beam/tree)."""
 
+import pytest
+
 from redact.optimization import optimize, tree_to_records
 from tests.conftest import MockBackend, make_client
 
@@ -87,7 +89,12 @@ def test_optimize_empty_candidates_returns_root():
     assert len(tree) == 1 and tree[0].move == "seed" and best is tree[0]
 
 
-def test_optimize_batch_failure_yields_no_children():
+def test_optimize_dispatch_failure_propagates():
+    """An unreachable target model is not a scoring result.
+
+    Swallowing it would return "the seed is the best node" — an answer derived
+    from zero expansions — instead of surfacing that nothing could be called.
+    """
     class _FailingResolver(_FakeResolver):
         """Judge resolves normally; every target expansion raises."""
 
@@ -96,8 +103,8 @@ def test_optimize_batch_failure_yields_no_children():
                 return super().__call__(model)
             raise RuntimeError("boom")
 
-    best, tree = optimize(
-        "s", "target", _candidates, "j", "sys",
-        resolve=_FailingResolver(MockBackend("No"), judge_model="j"),
-    )
-    assert len(tree) == 1  # expansions failed -> isolated -> no scored children
+    with pytest.raises(RuntimeError):
+        optimize(
+            "s", "target", _candidates, "j", "sys",
+            resolve=_FailingResolver(MockBackend("No"), judge_model="j"),
+        )

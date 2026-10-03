@@ -1,22 +1,14 @@
-"""Regex-based extraction of individual samples from multi-sample LLM output.
+"""Parse individual samples out of multi-sample LLM output.
 
-Three extraction strategies:
+Supported formats:
 
-1. Numbered list:     "1. sample text" / "2) sample text" / "3: sample text"
-   Reference: input dataset notebook regex r'^\\s*\\d+\\s*[\\.\\)\\-\\:]\\s+'
+- Numbered list: "1. text" / "2) text" / "3: text".
+- Structured Q&A: "**Prompt N:** ... **Question:** ... **Answer:** ...".
+- Delimited: samples separated by a delimiter line ("---" by default).
 
-2. Structured Q&A:   "**Prompt N:** ... **Question:** ... **Answer:** ..."
-   Reference: jailbreak manipulation.py extract_prompt_answer_pairs()
-
-3. Delimiter-based:   Samples separated by known delimiters (---, ===, blank lines)
-
-Also provides:
-- Format instructions (loaded from prompts/format_instructions/{style}/,
-  appended to system prompts so the LLM knows how to structure multi-sample
-  output for parsing — see get_format_instruction()/EXTRACTION_STYLES)
-- Output cleaning utilities (strip markdown, meta-commentary)
-- Constitution parsing (3-layer hierarchy from markdown)
-  Reference: constitutional_classifier constitution_gen.ipynb
+Also provides the format instructions that ask a model for these formats
+(:func:`get_format_instruction`), sample cleaning (:func:`clean_sample`) and
+constitution parsing (:func:`parse_constitution`).
 """
 
 import re
@@ -25,34 +17,17 @@ from dataclasses import dataclass
 from .prompts import load_prompt
 
 # ---------------------------------------------------------------------------
-# Format instructions — loaded from prompts/format_instructions/{style}/,
-# not hardcoded here, per "prompts are external" (see CLAUDE.md). The set of
-# valid styles is exactly this dict's keys, shared with extract_and_clean()'s
-# own style dispatch below — the two lived as independently-defined string
-# sets before, a coincidental duplication rather than a real coupling
-# (both already read the *same* caller-supplied style value, just via two
-# separate dicts/if-chains that had no way to notice if they drifted apart).
-# EXTRACTION_STYLES is that one shared source of truth.
+# Format instructions (loaded from prompts/format_instructions/{style}/)
 # ---------------------------------------------------------------------------
 
-#: Every output format the library can both *request* and *parse*. All three
-#: are valid for :func:`get_format_instruction` — they are real formats to ask
-#: a model for.
+#: Output formats the library can request and parse. All of them are valid
+#: for :func:`get_format_instruction`.
 EXTRACTION_STYLES: frozenset[str] = frozenset(
     {"numbered", "structured_qa", "delimiter"}
 )
 
-#: Of those, the ones that yield **pairs** rather than plain samples, mapped to
-#: the extractor to call instead.
-#:
-#: They are real styles but not interchangeable ones: ``"numbered"`` and
-#: ``"delimiter"`` both return ``list[str]`` ("N samples, differently marked"),
-#: while ``"structured_qa"`` returns question/answer dicts.
-#: :func:`extract_and_clean`
-#: used to accept it anyway and silently keep only the questions — and its one
-#: real caller (``jailbreak/manipulation/benign.py``) needs both halves, so it
-#: bypassed the dispatch entirely. The lossy branch served nobody; it now
-#: raises and names the right function.
+#: Styles that yield question/answer pairs instead of plain samples, mapped to
+#: the extractor to call. :func:`extract_and_clean` rejects them.
 _PAIRED_STYLES: dict[str, str] = {"structured_qa": "extract_structured_qa"}
 
 
@@ -61,16 +36,15 @@ def get_format_instruction(
     num_samples: int = 5,
     prompt_dir: str | None = None,
 ) -> str:
-    """Return a format instruction string to append to a system prompt.
+    """Return the format instruction to append to a system prompt.
 
     Args:
-        style: One of "numbered", "structured_qa", "delimiter"
-            (``EXTRACTION_STYLES``).
+        style: One of ``EXTRACTION_STYLES``.
         num_samples: Number of samples to request.
-        prompt_dir: Root directory for prompt JSON files.
+        prompt_dir: Optional prompt override directory.
 
-    Returns:
-        Rendered instruction string ready to append to a system prompt.
+    Raises:
+        ValueError: Unknown ``style``.
     """
     if style not in EXTRACTION_STYLES:
         raise ValueError(
@@ -90,15 +64,15 @@ _NUMBERED_PATTERN = re.compile(r"^\s*\d+\s*[\.\)\-\:]\s+", re.MULTILINE)
 def extract_numbered_list(text: str) -> list[str]:
     """Extract samples from a numbered list.
 
-    Matches lines starting with a number followed by '.', ')', '-', or ':'
-    and a space. Handles multi-line samples (continuation lines without a
-    number prefix are joined to the previous sample).
+    A sample starts on a line that begins with a number followed by '.',
+    ')', '-' or ':' and whitespace. Following lines without a number belong
+    to the same sample. Text before the first numbered line is ignored.
 
     Args:
         text: Raw LLM output containing a numbered list.
 
     Returns:
-        List of extracted sample strings, stripped of numbering.
+        The samples, with the numbering removed.
     """
     lines = text.strip().split("\n")
     samples: list[str] = []
@@ -107,30 +81,22 @@ def extract_numbered_list(text: str) -> list[str]:
     for line in lines:
         match = _NUMBERED_PATTERN.match(line)
         if match:
-            # Save previous accumulated sample
             if current_lines:
                 samples.append("\n".join(current_lines).strip())
-            # Start new sample: strip the number prefix
             content = _NUMBERED_PATTERN.sub("", line, count=1).strip()
             current_lines = [content] if content else []
         elif current_lines:
-            # Continuation line of a multi-line sample
+            # Continuation line of a multi-line sample.
             current_lines.append(line)
 
-    # Don't forget the last sample
     if current_lines:
         samples.append("\n".join(current_lines).strip())
 
     return [s for s in samples if s]
 
 
-# The "**Prompt N:**" header is a pure index — the prompts that produce this
-# format (format_instructions/structured_qa, jailbreak/benign_generation) put
-# nothing after it, the question is on the next line. So it is matched
-# *optionally*: requiring a line that carries no information is a failure mode
-# for nothing, and a contentless line is exactly what a model drifts on. The
-# terminator therefore also accepts the next "**Question:**", so pairs still
-# separate correctly when the headers are absent.
+# The "**Prompt N:**" header is optional. A pair ends at the next header, the
+# next "**Question:**" or the end of the text.
 _STRUCTURED_QA_PATTERN = re.compile(
     r"(?:\*\*Prompt\s*\d+:?\*\*\s*)?"
     r"\*\*Question:\*\*\s*(.+?)\s*"
@@ -141,40 +107,34 @@ _STRUCTURED_QA_PATTERN = re.compile(
 
 
 def extract_structured_qa(text: str) -> list[dict[str, str]]:
-    """Extract question-answer pairs from structured **Prompt N:** format.
+    """Extract question/answer pairs from structured Q&A output.
 
-    Reference: jailbreak manipulation.py extract_prompt_answer_pairs().
+    Each pair is a ``**Question:** ... **Answer:** ...`` block, optionally
+    headed by ``**Prompt N:**``.
 
     Args:
-        text: Raw LLM output in structured format.
+        text: Raw LLM output in the structured format.
 
     Returns:
-        List of {"question": ..., "answer": ...} dicts — "question" (not
-        "prompt") to match what the format instruction itself labels this
-        field (**Question:**), even though the surrounding block is headed
-        **Prompt N:**.
+        List of ``{"question": ..., "answer": ...}`` dicts.
     """
     matches = _STRUCTURED_QA_PATTERN.findall(text)
     return [{"question": q.strip(), "answer": a.strip()} for q, a in matches]
 
 
 def extract_delimited(text: str, delimiter: str = "---") -> list[str]:
-    """Extract samples separated by a delimiter line.
+    """Split text into samples on delimiter lines.
 
-    No pipeline currently selects this style — every call site passes
-    ``"numbered"`` — but it is kept deliberately. Its original purpose was
-    **in-chat chain-of-thought**: let the model reason freely, then emit a
-    delimiter and give the final answer after it, so the reasoning can be
-    dropped and only the answer parsed out. That makes it the right style for
-    any prompt that wants thinking-then-answer from a model without native
-    reasoning output, so it stays available rather than being pruned as unused.
+    Every delimited part is returned. No pipeline currently selects this
+    style.
 
     Args:
         text: Raw LLM output with delimiter-separated samples.
-        delimiter: The delimiter string (entire line must match).
+        delimiter: The delimiter string. A line must consist of it alone,
+            apart from surrounding whitespace.
 
     Returns:
-        List of extracted sample strings.
+        The non-empty parts, stripped.
     """
     parts = re.split(
         rf"^\s*{re.escape(delimiter)}\s*$", text, flags=re.MULTILINE
@@ -187,26 +147,17 @@ def extract_delimited(text: str, delimiter: str = "---") -> list[str]:
 # ---------------------------------------------------------------------------
 
 _MARKDOWN_BOLD = re.compile(r"\*\*(.+?)\*\*")
-# Emphasis only when the asterisks actually hug the text, per CommonMark: no
-# space after the opener, none before the closer, no line break between. A
-# bare "3 * 4 * 5" is arithmetic, not italics, and the permissive r"\*(.+?)\*"
-# silently turned it into "3  4  5". Leaving a stray asterisk in a sample is
-# far cheaper than deleting the characters between two of them.
+# Italics only when the asterisks touch the text on one line, so that
+# "3 * 4 * 5" is left alone.
 _MARKDOWN_ITALIC = re.compile(r"(?<!\*)\*(?!\s)([^*\n]+?)(?<!\s)\*(?!\*)")
-# Fences are *unwrapped*, not deleted — every other rule here keeps the text
-# and drops the markup, and this one used to drop the code with it. Content
-# moderation generates samples that legitimately contain scripts, so deleting
-# the block deleted the sample's whole point. The optional language tag
-# ("```python") goes with the fence.
+# Code fences are unwrapped: the fence and its language tag are removed and
+# the code is kept.
 _MARKDOWN_CODE_BLOCK = re.compile(r"```[^\n`]*\n?(.*?)```", re.DOTALL)
-# An opener with no closer — what truncation at max_tokens looks like. Without
-# this the leftover backticks fall through to the inline-code rule, which eats
-# two of them and mangles the line ("```python\nimport os" -> "`python...").
+# An opening fence with no closing one, as left by truncation at max_tokens.
 _MARKDOWN_LONE_FENCE = re.compile(r"```[^\n`]*\n?")
 _MARKDOWN_INLINE_CODE = re.compile(r"`(.+?)`")
-# Matches a *leading* preamble line only (anchored, no MULTILINE) so we strip an
-# introductory "Sure, here are ...:" line without touching content lines that
-# happen to start with the same words further down a sample.
+# Anchored at the start of the text (no MULTILINE), so only a leading preamble
+# line matches and content lines further down are not affected.
 _META_PREAMBLE = re.compile(
     r"^\s*(Note:|Here are|Here is|Below are|Below is|Sure[,!.]|Of course[,!.]|"
     r"Certainly[,!.]|I'll |I will |Let me )",
@@ -219,31 +170,28 @@ def clean_sample(
     strip_markdown: bool = True,
     strip_meta: bool = True,
 ) -> str:
-    """Clean a single extracted sample.
+    """Clean one extracted sample.
 
     Args:
         text: Raw sample text.
-        strip_markdown: Remove markdown *markup*, keeping the text it wraps —
-            including code, which is unwrapped from its fences rather than
-            deleted with them.
-        strip_meta: Remove lines that look like LLM meta-commentary.
-
-    Returns:
-        Cleaned text.
+        strip_markdown: Remove markdown markup and keep the text it wraps.
+            Code blocks are unwrapped, not deleted.
+        strip_meta: Remove one leading preamble line (e.g. "Sure, here
+            are ..."), when more text follows it.
     """
     result = text
-    # Strip ChatML token fragments that may leak through (belt-and-suspenders for vLLM).
-    # Regex catches full tokens and partial fragments: <|im_end|, |>, <|im_start, etc.
+    # Remove ChatML tokens that leak through, whole or partial (e.g.
+    # "<|im_end|>", "|im_start").
     result = re.sub(r"<?\|im_(start|end)\|?>?", "", result)
     if strip_meta:
-        # Drop only a leading preamble line, and only when real content follows.
-        # Avoids gutting content lines that legitimately start with these words.
+        # Only the first line, and only when more text follows it. split(..., 1)
+        # yields one or two parts.
         head_tail = result.lstrip("\n").split("\n", 1)
-        if len(head_tail) == 2 and _META_PREAMBLE.match(head_tail[0]):  # noqa: PLR2004 — split(..., 1) is always length 1 or 2, not a tunable value
+        if len(head_tail) == 2 and _META_PREAMBLE.match(head_tail[0]):  # noqa: PLR2004
             result = head_tail[1]
     if strip_markdown:
-        # Order matters: unwrap balanced fences first, then clear any unpaired
-        # opener, and only then treat single backticks as inline code.
+        # Order matters: unwrap paired fences, then remove a lone opener, and
+        # only then treat single backticks as inline code.
         result = _MARKDOWN_CODE_BLOCK.sub(r"\1", result)
         result = _MARKDOWN_LONE_FENCE.sub("", result)
         result = _MARKDOWN_BOLD.sub(r"\1", result)
@@ -263,30 +211,24 @@ def extract_and_clean(
 ) -> list[str]:
     """Extract samples from LLM output and clean each one.
 
-    Convenience function combining extraction + cleaning in one call.
-
     Args:
         text: Raw LLM output.
-        style: One of ``EXTRACTION_STYLES`` **minus** the paired ones — i.e.
-            ``"numbered"`` or ``"delimiter"``. ``get_format_instruction()``
-            accepts a wider set, since a format can be worth *requesting*
-            without its result being a plain list of samples; see
-            ``_PAIRED_STYLES``.
-        strip_markdown: Clean markdown formatting from each sample.
-        strip_meta: Remove meta-commentary lines from each sample.
-        delimiter: Delimiter for "delimiter" style.
+        style: ``"numbered"`` or ``"delimiter"``.
+        strip_markdown: Passed to :func:`clean_sample`.
+        strip_meta: Passed to :func:`clean_sample` for the ``"delimiter"``
+            style. Not applied to numbered samples.
+        delimiter: Delimiter for the ``"delimiter"`` style.
 
     Returns:
-        List of cleaned sample strings.
+        The cleaned samples. Samples that are empty after cleaning are
+        dropped.
 
     Raises:
-        ValueError: On an unknown style, or on a *paired* style such as
-            ``"structured_qa"`` — see below.
+        ValueError: Unknown style, or a paired style such as
+            ``"structured_qa"``. For that one, call
+            :func:`extract_structured_qa`.
     """
     if style in _PAIRED_STYLES:
-        # Previously this silently did [p["question"] for p in pairs], i.e.
-        # threw away every answer. Anyone wanting QA pairs wants both halves,
-        # so a quiet half-result is worse than no result.
         raise ValueError(
             f"'{style}' yields question/answer pairs, not plain samples, so it "
             f"cannot go through extract_and_clean(). Call "
@@ -300,6 +242,9 @@ def extract_and_clean(
         )
     if style == "numbered":
         raw = extract_numbered_list(text)
+        # Text before the first item is already dropped, so a first line that
+        # looks like a preamble belongs to the sample.
+        strip_meta = False
     else:  # "delimiter"
         raw = extract_delimited(text, delimiter)
 
@@ -312,7 +257,6 @@ def extract_and_clean(
 
 # ---------------------------------------------------------------------------
 # Constitution parsing (3-layer markdown hierarchy)
-# Reference: constitutional_classifier constitution_gen.ipynb
 # ---------------------------------------------------------------------------
 
 _CONSTITUTION_MAIN_RE = re.compile(r"^## \d+\.\s+(.+)$")
@@ -330,7 +274,7 @@ class ConstitutionEntry:
 
 
 def parse_constitution(text: str) -> list[ConstitutionEntry]:
-    """Parse a constitution markdown document into structured entries.
+    """Parse constitution markdown into entries.
 
     Expects a 3-layer hierarchy::
 
@@ -339,16 +283,14 @@ def parse_constitution(text: str) -> list[ConstitutionEntry]:
         - (example sample text)
         - (another sample)
 
-    This is the counterpart to the constitution generation prompts
-    (``prompts/constitution/generation/{entry_type}/template.json``) — each
-    one's ``system_prompt`` explicitly instructs the model to produce exactly
-    this markdown shape, so the two must be kept in sync if either changes.
+    The constitution prompts (``prompts/constitution/{entry_type}/``) ask
+    the model for this format, so keep the two in sync.
 
     Args:
-        text: Raw constitution markdown text.
+        text: Raw constitution markdown.
 
     Returns:
-        List of ConstitutionEntry with category, subcategory, and sample.
+        One :class:`ConstitutionEntry` per sample line.
     """
     entries: list[ConstitutionEntry] = []
     current_main = ""

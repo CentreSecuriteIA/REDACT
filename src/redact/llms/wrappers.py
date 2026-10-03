@@ -1,23 +1,12 @@
-"""Rate limiting and the parallel/sequential fan-out primitive that backends
-without native batching dispatch through.
+"""Rate limiting and per-item fan-out for backends without native batching.
 
-Both wrappers take a **finished backend** — one configured model — and read
-what they need straight off it: ``backend.rpm``, ``backend.max_workers``,
-``backend.compute_config``. They do no registry lookups and no param
-resolution (that is settled at backend construction, see
-``backends/base.py``), and they never call back into
-:class:`~redact.llms.client.ModelClient`, which is what *holds* them.
+- ``RateLimiter``: thread-safe requests-per-minute limit over a sliding
+  60-second window.
+- ``BatchCaller``: runs a batch one item per call, in sequence or on a thread
+  pool.
 
-- ``RateLimiter`` — thread-safe sliding-window RPM enforcement, one window per
-  key (a model name, or an endpoint id where the provider meters the account).
-  A backend with no budget — ``rpm=None``, i.e. anything local — gets **no
-  limiter at all**: ``ModelClient`` keys that off ``backend.rpm`` and stores
-  ``None``, rather than attaching a live object that no-ops on every call.
-- ``BatchCaller`` — parallel-or-sequential fan-out for backends that do no
-  native batching. It has no notion of native batching at all; that decision
-  belongs to ``ModelClient``, which calls a native-batching backend directly
-  and never constructs a ``BatchCaller`` for one. Raises rather than silently
-  degrading on a misconfigured combination.
+Both take a finished backend and read ``rpm``, ``max_workers`` and
+``compute_config`` from it.
 """
 
 import logging
@@ -33,75 +22,43 @@ if TYPE_CHECKING:
 
 logger = logging.getLogger(__name__)
 
-# RPM is requests-per-minute, so the sliding window RateLimiter prunes/limits
-# on a 60-second window.
 _RATE_LIMIT_WINDOW_SECONDS = 60.0
 
 
 class RateLimiter:
-    """Thread-safe RPM enforcement over a 60-second sliding window.
+    """Thread-safe RPM limit over a 60-second sliding window.
 
-    **One instance is one window.** Which window — a model name for a
-    per-model budget, an endpoint id for a per-account one — is decided
-    entirely by :func:`shared_limiter` before this object is handed to anyone;
-    ``client._resolve_rate_limit()` picks the key from the setup's
-    ``rate_limit_scope``. So this class never sees a key and never chooses a
-    scope: it counts requests against the one window it is.
+    One instance is one window. :func:`shared_limiter` hands out one instance
+    per key (a model name, or an endpoint id for an account-wide budget), and
+    ``client._resolve_rate_limit()`` picks the key.
 
-    **Instances outlive clients, deliberately.** ``ModelClient`` is rebuilt on
-    every ``create()`` (there is no client cache), so a window anchored to a
-    client would reset constantly and two call sites on one model would each
-    start a fresh 60 seconds. :func:`shared_limiter` is what anchors it
-    instead — which is also why :class:`ModelClient`'s own default is the
-    shared window for its key, not a private limiter.
-
-    **When there is no limiter at all.** ``backend.rpm is None`` means no
-    budget, and ``ModelClient`` then stores ``None`` rather than attaching a
-    live object that no-ops on every call. Every local setup lands there by
-    construction: neither ``VLLMConfig`` nor the introspection setup has an
-    ``rpm`` field, so those backends fall back to ``LLMBackend``'s default —
-    and a dual-setup entry is exempt on its local binding even though its
-    ``.api`` declares an rpm. :meth:`wait_if_needed` keeps its own ``rpm``
-    guard regardless, since it is public and takes any backend.
-
+    Instances outlive clients. A client is rebuilt on every
+    ``ModelClient.create()``, so a window tied to a client would reset each
+    time and two call sites on one model would exceed the budget together.
     """
 
     def __init__(self):
-        # ONE window per instance, not a dict keyed by model. Which key an
-        # instance serves is decided by shared_limiter() before this object is
-        # ever handed out, so an internal per-key dict was a second lookup of
-        # the same key that could only ever hold one entry.
         self._timestamps: list[float] = []
         self._lock = threading.Lock()
 
     def wait_if_needed(self, backend: "LLMBackend") -> None:
-        """Block until making a request against this backend is safe.
+        """Block until a request against this backend fits in the window.
 
         Args:
-            backend: The configured model whose ``rpm`` budget to enforce.
-                Returns immediately when its ``rpm`` is ``None``. Only the
-                budget is read from it — *which* window this is was settled
-                when the instance was chosen.
+            backend: The model whose ``rpm`` to enforce. Returns immediately
+                when its ``rpm`` is ``None``.
         """
         rpm = backend.rpm
         if rpm is None:
             return
 
         with self._lock:
-            # A loop, not a single check: the lock is released while sleeping,
-            # so N workers can all find the window full, all sleep on the same
-            # oldest timestamp, and all wake together. Appending unconditionally
-            # after one sleep would let every one of them through at once and
-            # overshoot the cap. Re-pruning and re-testing on each pass is what
-            # actually holds it.
+            # Loop and re-check: the lock is released while sleeping, so
+            # several workers can wake together. Each must prune and test
+            # again before appending, or they would all pass at once and
+            # exceed the limit.
             while True:
                 now = time.time()
-                # Drops everything older than the window, in place. This is the
-                # only thing that trims the list — and it runs on every call,
-                # not just when full, so the list cannot grow without bound:
-                # the loop below exits only while len < rpm and appends exactly
-                # once, so it holds at most `rpm` entries. (Nothing prunes while
-                # idle, but the same bound applies — tens of floats.)
                 self._timestamps[:] = [
                     t for t in self._timestamps
                     if now - t < _RATE_LIMIT_WINDOW_SECONDS
@@ -116,14 +73,8 @@ class RateLimiter:
                     continue  # the oldest already aged out; re-prune and retry
                 logger.info("[rate-limit] %s: pausing %.1fs (%d RPM)",
                             backend.model, sleep_for, rpm)
-                # Released while sleeping so other workers on this same window
-                # can re-check rather than queueing behind the sleeper — they
-                # re-test above, so this costs nothing in correctness.
-                #
-                # Waiters race for the lock rather than queueing, so which one
-                # goes next is arbitrary. That decides scheduling order within
-                # a batch and nothing else: BatchCaller reassembles by index
-                # and returns only once every item is done.
+                # Sleep without the lock so other workers are not blocked
+                # behind this one.
                 self._lock.release()
                 try:
                     time.sleep(sleep_for)
@@ -133,25 +84,17 @@ class RateLimiter:
             self._timestamps.append(time.time())
 
 
-# One limiter per window key — a model name where the provider meters per
-# model, an APIConfig.endpoint_id where it meters the account. **This cache is
-# what makes a rate-limit window outlive any one client**, which matters
-# because clients are cheap and rebuilt per ``ModelClient.create()``: without
-# it, two call sites generating against the same model would each start a
-# fresh 60-second window and collectively exceed the budget. Double-checked
-# like every other cache here, since clients can be built from a preload
-# thread.
+# One limiter per window key, kept here so that windows outlive clients.
 _shared_limiters: dict[str, RateLimiter] = {}
 _shared_limiters_lock = threading.Lock()
 
 
 def shared_limiter(key: str) -> RateLimiter:
-    """Get (or create) the one limiter every caller on this key shares.
+    """Return the limiter shared by every caller on this key.
 
     Args:
-        key: The window's identity — ``backend.model`` for a per-model budget,
-            ``APIConfig.endpoint_id`` for a per-account one. Callers that pass
-            the same key share one window; that is the whole mechanism.
+        key: ``backend.model`` for a per-model budget, or
+            ``APIConfig.endpoint_id`` for a per-account one.
     """
     if key not in _shared_limiters:
         with _shared_limiters_lock:
@@ -161,25 +104,18 @@ def shared_limiter(key: str) -> RateLimiter:
 
 
 def clear_shared_limiters() -> None:
-    """Drop every rate-limit window. For tests, or a registry change."""
+    """Drop every rate-limit window. For tests, or after a registry change."""
     with _shared_limiters_lock:
         _shared_limiters.clear()
 
 
 class BatchCaller:
-    """Parallel-or-sequential fan-out, with rate limiting, for backends whose
-    transport does no native batching.
+    """Run a batch one item per call, in sequence or on a thread pool.
 
-    Reads only ``supports_parallel_calls`` and ``supports_internals`` off the
-    backend's ``compute_config`` — never ``supports_native_batching``, which
-    ``ModelClient`` owns: it calls a native-batching backend directly and
-    never constructs a ``BatchCaller`` for one.
-
-    Concurrency comes from ``backend.max_workers``, which the backend already
-    clamped at construction against its own parallelism capability. Passing
-    ``max_workers`` here overrides that — ``run()`` re-checks the invariant, so
-    an override that a series-only transport can't honour raises rather than
-    silently over-dispatching.
+    For backends without native batching. Concurrency defaults to
+    ``backend.max_workers``, which the backend already clamped to 1 if it
+    cannot take parallel calls. An explicit ``max_workers`` above 1 on such a
+    backend raises in :meth:`run`.
     """
 
     def __init__(
@@ -188,17 +124,13 @@ class BatchCaller:
         rate_limiter: RateLimiter | None = None,
         max_workers: int | None = None,
     ):
-        """Wire fan-out around one configured backend.
+        """Set up fan-out around one configured backend.
 
         Args:
-            backend: The configured model to dispatch to.
-            rate_limiter: The window to count against, or ``None`` for no
-                throttling at all. ``ModelClient`` passes ``None`` only for a
-                backend with no budget (``rpm=None``, i.e. any local one) —
-                everything else gets the shared window for its key.
-            max_workers: Override for ``backend.max_workers``. Omit in normal
-                use — the backend's value is already reconciled with its
-                transport's capability.
+            backend: The configured model to call.
+            rate_limiter: Window to count calls against, or ``None`` for no
+                throttling.
+            max_workers: Override for ``backend.max_workers``.
         """
         self._backend = backend
         self._rate_limiter = rate_limiter
@@ -221,20 +153,7 @@ class BatchCaller:
         internals_id: str | None = None,
         **kwargs,
     ) -> str:
-        """Make a single rate-limited call.
-
-        Wraps the item into a batch of one for the backend's (always
-        batch-shaped) ``generate()`` and unwraps the one result.
-
-        Every ``run()`` dispatch, sequential or thread-pooled, goes through
-        here, so exactly one item reaches each underlying ``generate()`` call.
-        That is a property of this fan-out, not a constraint any backend
-        imposes: ``TransformersIntrospectionBackend.generate()`` is fully
-        list-shaped and loops internally, it simply never receives more than
-        one item by this route. (Not to be confused with
-        :func:`assert_single_sample_per_call`, which is about one *prompt*
-        yielding several samples in one completion — a different problem.)
-        """
+        """Make one rate-limited call for a single item (a batch of one)."""
         if self._rate_limiter:
             self._rate_limiter.wait_if_needed(self._backend)
         results = self._backend.generate(
@@ -246,13 +165,11 @@ class BatchCaller:
         return results[0]
 
     def _check_internals_support(self, internals_ids: list | None) -> None:
-        """Raise a clear error if internals capture is requested but unsupported.
+        """Raise if ``internals_ids`` is passed to a backend that cannot capture.
 
-        Guards the one place ``internals_id(s)`` cross from generic pipeline
-        kwargs into an actual backend call. Without this, an unsupported
-        kwarg would silently ride ``**kwargs`` into e.g. Venice/Anthropic's
-        SDK client call and crash there instead — this fails fast, before
-        dispatch, with a message that says what happened.
+        Backends without capture would accept and ignore the ids, so the
+        request is rejected here. ``ModelClient.generate()`` makes the same
+        check.
         """
         if internals_ids is not None and not self._backend.compute_config.supports_internals:
             raise ValueError(
@@ -262,12 +179,10 @@ class BatchCaller:
             )
 
     def _check_concurrency(self) -> None:
-        """Raise if ``max_workers>1`` on a backend that requires series calls.
+        """Raise if ``max_workers > 1`` on a backend that needs series calls.
 
-        Checks at dispatch time, not only against the backend's own
-        construction-time clamp, so a caller who overrode ``max_workers`` (or
-        mutated it afterwards) still hits a hard error rather than silently
-        over-concurrent dispatch.
+        The backend clamps its own value at construction, so in normal use
+        this fires only for an explicit ``max_workers`` override.
         """
         if not self._backend.compute_config.supports_parallel_calls and self._max_workers > 1:
             raise ValueError(
@@ -284,26 +199,27 @@ class BatchCaller:
         internals_ids: list[str | None] | None = None,
         **kwargs,
     ) -> list[str]:
-        """Fan out generation for a list of message sets — sequential if
-        ``max_workers<=1``, thread-pooled otherwise.
+        """Generate one reply per message list.
+
+        Sequential when ``max_workers <= 1``, thread-pooled otherwise.
 
         Args:
-            messages_list: List of chat message lists.
-            on_complete: Optional callback(index, result) called after each
-                         completion. Useful for incremental checkpointing.
-            system_prompts: Optional per-item system prompts (same length as
-                messages_list) — each forwarded as that item's own
-                ``system_prompts`` to ``backend.generate()``. ``None`` (the
-                whole param) means no item has one.
-            internals_ids: Optional per-item ids (same length as
-                messages_list) requesting internals capture — only valid
-                when ``backend.compute_config.supports_internals`` is True.
-                Raises ``ValueError`` if passed to a backend without it.
-            **kwargs: Passed through to ``backend.generate()`` (e.g.
-                ``max_tokens``/``temperature`` overrides).
+            messages_list: One chat message list per item.
+            on_complete: Called as ``on_complete(index, result)`` after each
+                item finishes. Drives progress ticks.
+            system_prompts: One system prompt (or ``None``) per item.
+            internals_ids: One capture id (or ``None``) per item. Only valid
+                when the backend supports internals capture.
+            **kwargs: Passed to ``backend.generate()`` (e.g. ``max_tokens``,
+                ``temperature``).
 
         Returns:
-            List of generated texts, in the same order as messages_list.
+            Generated text, in the same order as ``messages_list``.
+
+        Raises:
+            ValueError: A per-item list has the wrong length, the backend
+                cannot capture internals, or ``max_workers > 1`` on a
+                series-only backend.
         """
         self._check_concurrency()
         self._check_internals_support(internals_ids)
@@ -332,14 +248,12 @@ class BatchCaller:
             return call_kwargs
 
         if self._max_workers <= 1:
-            # Sequential
             for i, msgs in enumerate(messages_list):
                 result = self._call_one(msgs, **item_kwargs(i))
                 results[i] = result
                 if on_complete:
                     on_complete(i, result)
         else:
-            # Concurrent
             with ThreadPoolExecutor(max_workers=self._max_workers) as executor:
                 future_to_idx = {
                     executor.submit(self._call_one, msgs, **item_kwargs(i)): i
@@ -347,7 +261,7 @@ class BatchCaller:
                 }
                 for future in as_completed(future_to_idx):
                     idx = future_to_idx[future]
-                    result = future.result()  # Propagates exceptions
+                    result = future.result()  # re-raises a worker's exception
                     results[idx] = result
                     if on_complete:
                         on_complete(idx, result)
@@ -356,18 +270,20 @@ class BatchCaller:
 
 
 def assert_single_sample_per_call(client: "ModelClient", samples_per_call: int) -> None:
-    """Guard against internals capture on a multi-sample-per-call request.
+    """Raise if internals capture is combined with several samples per call.
 
-    A transport has no visibility into whether the *prompt* it's given asks for
-    one sample or several in one completion (e.g. content-moderation input
-    generation's ``samples_per_entry``) — that's business logic only the caller
-    knows. When ``samples_per_call > 1``, one forward pass produces several
-    logical samples at once, so its captured internals can't be attributed to
-    any one of them; raise rather than silently capturing something meaningless.
+    When one prompt asks for several samples in one completion, the captured
+    internals of that forward pass cannot be attributed to any single sample.
+    Pipelines with that shape (e.g. ``InputPipeline.run_from_constitution``)
+    call this before dispatch with their own samples-per-call setting.
 
-    Callers with a multi-sample-per-call shape (e.g.
-    ``InputPipeline.run_from_constitution``) should call this before dispatch,
-    passing their own ``samples_per_entry``/``samples_per_request``.
+    Args:
+        client: The generation client.
+        samples_per_call: Samples one LLM call is asked to produce.
+
+    Raises:
+        ValueError: The client's backend supports internals capture and
+            ``samples_per_call`` is not 1.
     """
     if client.compute_config.supports_internals and samples_per_call != 1:
         raise ValueError(

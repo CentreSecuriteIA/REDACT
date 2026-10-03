@@ -1,13 +1,8 @@
-"""Caller-facing helpers around a :class:`~redact.llms.client.ModelClient`.
+"""Helpers over a :class:`~redact.llms.client.ModelClient`.
 
-The client itself is the model: fully wired at construction, it takes a batch
-of messages and returns a batch of replies. This module is the thin layer other
-subsystems call on top of that — single-sample convenience, chunking, and the
-check loop (build messages with the caller's checker, run them, map the replies
-through :func:`is_accepted`).
-
-Nothing here decides *how* a batch executes — rate limiting, fan-out, and the
-native-vs-wrapped choice all live inside the client.
+Single-sample generation, chunked batches, and the check loop that turns a
+checker model's replies into accept/reject verdicts. How a batch is executed
+is left to the client.
 
 Usage::
 
@@ -30,55 +25,43 @@ _ACCEPT_PREFIXES = ("yes", "ok", "accept", "pass")
 
 
 def _chunk_label(progress: str | None, chunk_i: int, n_chunks: int) -> str | None:
-    """Progress label for one chunk — indexed only when there's more than one."""
+    """Progress label for one chunk, indexed only when there are several."""
     if progress is None:
         return None
     return f"{progress} [{chunk_i}/{n_chunks}]" if n_chunks > 1 else progress
 
 
 def is_accepted(response: str) -> bool:
-    """Parse a checker/judge LLM response into accept/reject.
+    """Parse a checker or judge reply into accept/reject.
 
-    The single acceptance rule shared by every checker/judge in the library
-    (content moderation, output, paraphrase, translation, jailbreak-technique
-    checks) — use this rather than reimplementing it at a call site.
+    The shared acceptance rule. Use it instead of re-implementing the check.
 
     Args:
-        response: Raw checker/judge response text.
+        response: Raw reply text.
 
     Returns:
-        True when the response starts with "yes", "ok", "accept", or "pass"
-        (case-insensitive).
+        True when the reply starts with "yes", "ok", "accept" or "pass"
+        (case-insensitive, surrounding whitespace ignored).
     """
     return response.strip().lower().startswith(_ACCEPT_PREFIXES)
 
 
 def generate_sample(client: ModelClient, messages: list[dict], **kwargs) -> str:
-    """Generate one sample — a batch of one, unwrapped.
+    """Generate one sample (a batch of one, unwrapped).
 
     Args:
         client: The model to call.
-        messages: Chat messages for the single item.
-        **kwargs: Forwarded to :meth:`ModelClient.generate` (``max_tokens``,
-            ``temperature``, ``extra_body``, transport extras).
-
-    Returns:
-        Generated text.
+        messages: Chat messages for the item.
+        **kwargs: Forwarded to :meth:`ModelClient.generate` (e.g.
+            ``max_tokens``, ``temperature``).
     """
     return client.generate([messages], **kwargs)[0]
 
 
-# TODO(review): the generic half of checker construction belongs here.
-#
-# ``build_check_messages`` is a ``(original, sample) -> messages`` callable,
-# and every caller builds one the same way: take a PromptTemplate, wrap it in
-# a closure that maps the two positional args onto the template's own kwarg
-# names. content_moderation/checker.py writes that closure out four times.
-#
-# Define it once here (or on PromptTemplate) so a pipeline only says *which*
-# prompt and *which* fields, not how a checker is shaped. See the TODO at the
-# top of content_moderation/checker.py for the other half — what stays there
-# is the domain knowledge, which must not move into this layer.
+# TODO(review): ``build_check_messages`` is an ``(original, sample) -> messages``
+# callable, and content_moderation/checker.py builds each one as its own closure
+# over a PromptTemplate. Define that adapter once on PromptTemplate. The check
+# helpers below belong with the pipelines and are due to move out of llms/.
 
 
 def check_sample(
@@ -88,23 +71,19 @@ def check_sample(
     original: str = "",
     **kwargs,
 ) -> tuple[bool, str]:
-    """Run one sample past a checker model and interpret the verdict.
+    """Check one sample with a checker model.
 
     Args:
         client: The checker model.
         sample: The generated text to validate.
-        build_check_messages: ``(original, sample) -> messages``. Checkers that
-            only need the text to validate ignore ``original``; it exists so
-            checkers genuinely comparing two texts (output-vs-input,
-            paraphrase-vs-source) get both as real arguments instead of the
-            caller concatenating them into ``sample``.
-        original: The other half of a two-text comparison; ``""`` when the
-            checker doesn't need one.
+        build_check_messages: ``(original, sample) -> messages``.
+        original: Text the sample is compared against, e.g. the input for an
+            output check. ``""`` when the checker needs none.
         **kwargs: Forwarded to :meth:`ModelClient.generate`.
 
     Returns:
-        ``(accepted, reasoning)`` — reasoning is empty on acceptance, and the
-        checker's full response on rejection.
+        ``(accepted, reasoning)``. ``reasoning`` is empty on acceptance and
+        the checker's full reply on rejection.
     """
     response = client.generate([build_check_messages(original, sample)], **kwargs)[0]
     return (True, "") if is_accepted(response) else (False, response)
@@ -120,23 +99,19 @@ def batch_check_samples(
     internals_ids: list[str | None] | None = None,
     **kwargs,
 ) -> list[tuple[bool, str]]:
-    """Check many samples, in chunks, preserving order.
-
-    Splits into chunks of ``batch_size`` and hands each to the client, which
-    runs it however its transport runs batches. The accept/reject
-    interpretation stays here — the client only returns text.
+    """Check many samples in chunks, preserving order.
 
     Args:
         client: The checker model.
-        samples: Sample texts to validate.
-        build_check_messages: ``(original, sample) -> messages`` — see
-            :func:`check_sample` for the two-arg contract.
-        originals: One "other half" per sample, for checkers comparing two
-            texts. ``None`` means every item gets ``""``.
-        batch_size: Max items per chunk.
-        progress: Label enabling progress ticks; the chunk index is appended
+        samples: Texts to validate.
+        build_check_messages: ``(original, sample) -> messages``, as in
+            :func:`check_sample`.
+        originals: One comparison text per sample. ``None`` passes ``""`` for
+            every item.
+        batch_size: Maximum items per chunk.
+        progress: Label for progress logging. The chunk index is appended
             when there is more than one chunk.
-        internals_ids: One capture id per sample, sliced per chunk.
+        internals_ids: One capture id (or ``None``) per sample.
         **kwargs: Forwarded to :meth:`ModelClient.generate`.
 
     Returns:
@@ -185,20 +160,15 @@ def batch_generate_samples(
     internals_ids: list[str | None] | None = None,
     **kwargs,
 ) -> list[str]:
-    """Generate many samples in chunks — the generation-side counterpart to
-    :func:`batch_check_samples`.
-
-    Use this over calling the client directly when the batch is large enough
-    to want chunk-level progress, or when a caller needs each reply mapped
-    through its own checker afterwards (so a single ``build_check_messages``
-    can't describe the whole batch).
+    """Generate many samples in chunks, preserving order.
 
     Args:
         client: The model to call.
         messages_list: One chat message list per item.
-        batch_size: Max items per chunk.
-        progress: Label enabling progress ticks per chunk.
-        internals_ids: One capture id per item, sliced per chunk.
+        batch_size: Maximum items per chunk.
+        progress: Label for progress logging. The chunk index is appended
+            when there is more than one chunk.
+        internals_ids: One capture id (or ``None``) per item.
         **kwargs: Forwarded to :meth:`ModelClient.generate`.
 
     Returns:

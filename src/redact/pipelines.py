@@ -40,10 +40,12 @@ from redact.content_moderation.paraphrase import (
 )
 from redact.dataset import (
     Ledger,
+    commit,
     iter_categories,
     load_seeds,
     load_taxonomy,
     merge_all,
+    resume_state,
     take_per_group,
 )
 from redact.dataset.merge import (
@@ -823,13 +825,14 @@ def generate_jailbreaks(
     )
 
     # Fresh (non-resume) run overwrites prior output + ledger; resume keeps + skips.
-    if not resume:
-        if out.exists():
-            out.unlink()
-        jb_ledger.reset()
     # Resume source of truth is the ledger, unioned with the output CSV so a run
     # created before the ledger existed still resumes (back-compat).
-    completed = (jb_ledger.completed() | completed_from_output(out)) if resume else set()
+    completed = resume_state(
+        jb_ledger,
+        resume=resume,
+        artifact=out,
+        extra=completed_from_output(out) if resume else None,
+    )
 
     # ------------------------------------------------------------------
     # Phase 2 — Execute (stream manifest in chunks through the engine)
@@ -893,17 +896,19 @@ def generate_jailbreaks(
             row["combination_spec_version"] = spec_version
             rows.append(row)
 
-        chunk_df = pd.DataFrame(rows)
-        if out.exists():
-            chunk_df.to_csv(out, mode="a", header=False, index=False)
-        else:
-            chunk_df.to_csv(out, index=False)
-        # Ack only after the CSV append succeeds (crash-safe): a crash mid-chunk
-        # leaves these units un-acked so they re-run next time.
-        jb_ledger.record([
-            {"input_id": str(x["input_id"]), "iteration": int(x["iteration"])}
-            for x in rows
-        ])
+        # append-then-ack, see dataset/resume.py. Records are explicit so the
+        # on-disk key types stay str/int whatever the rows happen to carry.
+        commit(
+            rows,
+            append=lambda rs: pd.DataFrame(rs).to_csv(
+                out, mode="a", header=not out.exists(), index=False
+            ),
+            ledger=jb_ledger,
+            records=[
+                {"input_id": str(x["input_id"]), "iteration": int(x["iteration"])}
+                for x in rows
+            ],
+        )
         written += len(rows)
 
         if verbose:

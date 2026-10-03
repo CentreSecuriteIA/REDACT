@@ -235,3 +235,45 @@ class TestEngineCacheIsPerBackendClass:
         assert intro_module._models == {}
         clear_transport_caches()
         assert vllm_module._engines == {}
+
+
+class TestSetupReachesTheBackend:
+    def test_min_gpus_reaches_the_engine_as_tensor_parallel_size(self):
+        import redact.llms.backends.vllm as vllm_module
+        seen = []
+
+        class _StubLLM:
+            def __init__(self, **kw):
+                seen.append(kw)
+
+        clear_transport_caches()
+        try:
+            with patch.dict(sys.modules, {"vllm": type("m", (), {"LLM": _StubLLM})}), \
+                 patch.object(vllm_module, "_prepare_environment"):
+                backend_for(ModelConfig(name="m", backend_type="vllm", vllm=VLLMConfig(
+                    hf_model_id="org/big", min_gpus=2)))
+                backend_for(ModelConfig(name="m2", backend_type="vllm", vllm=VLLMConfig(
+                    hf_model_id="org/big2", min_gpus=2,
+                    vllm_kwargs={"tensor_parallel_size": 4})))
+                backend_for(ModelConfig(name="m3", backend_type="vllm", vllm=VLLMConfig(
+                    hf_model_id="org/small")))
+        finally:
+            clear_transport_caches()
+        assert seen[0]["tensor_parallel_size"] == 2
+        assert seen[1]["tensor_parallel_size"] == 4       # explicit kwarg wins
+        assert "tensor_parallel_size" not in seen[2]
+
+    def test_a_missing_api_key_names_the_model_and_the_variable(self):
+        config = ModelConfig(name="m", api=APIConfig(
+            backend_type="openai", api_key_env="_REDACT_TEST_MISSING_KEY",
+            base_url="https://test.example/v1", rpm=10))
+        with pytest.raises(KeyError, match="'m' needs an API key.*_REDACT_TEST_MISSING_KEY"):
+            backend_for(config)
+
+    def test_an_empty_api_key_counts_as_missing(self):
+        config = ModelConfig(name="m", api=APIConfig(
+            backend_type="openai", api_key_env="_REDACT_TEST_EMPTY_KEY",
+            base_url="https://test.example/v1", rpm=10))
+        with patch.dict(os.environ, {"_REDACT_TEST_EMPTY_KEY": ""}):
+            with pytest.raises(KeyError, match="_REDACT_TEST_EMPTY_KEY"):
+                backend_for(config)

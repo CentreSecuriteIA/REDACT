@@ -1,23 +1,10 @@
-"""Generic OpenAI-compatible API backend.
+"""Backend for OpenAI-compatible chat completion APIs.
 
-Uses the OpenAI SDK against the chat completions API — works with Venice AI
-and any other OpenAI-compatible endpoint by changing base_url. Venice is the
-only provider currently registered against it, but the class itself has no
-Venice-specific logic — the endpoint identity lives entirely in the registry
-entry's ``APIConfig``.
-
-One instance **is one registered model**: the model name and the endpoint's
-``extra_body``/rpm/worker budget are bound in :meth:`OpenAIBackend.from_config`
-and never re-passed per call. The underlying ``openai.OpenAI`` object is what's
-actually expensive (an HTTP connection pool), so *that* is cached by endpoint
-identity and shared between the per-model backends pointing at it.
-
-A registry entry can describe the same model both here and as local weights;
-``ModelClient.create(name, backend_type="vllm")`` binds the local setup
-instead. See ``model_config.py``.
+Works with any compatible endpoint through ``base_url`` (e.g. Venice AI). The
+``openai.OpenAI`` SDK client holds an HTTP connection pool, so it is cached
+per endpoint and shared between the backends that use it.
 """
 
-import os
 import threading
 import time
 from typing import TYPE_CHECKING, ClassVar
@@ -29,9 +16,7 @@ from .base import ComputeConfig, LLMBackend
 if TYPE_CHECKING:
     from ..model_config import ModelConfig
 
-# Shared SDK clients, keyed on endpoint identity — two OpenAI-compatible
-# providers are different transports even though both are "openai", so the
-# base_url is part of the key.
+# SDK clients shared between backends, keyed on (base_url, api_key).
 _sdk_clients: dict[tuple[str, str], "openai.OpenAI"] = {}
 _sdk_clients_lock = threading.Lock()
 
@@ -41,19 +26,16 @@ def _sdk_client(api_key: str, base_url: str) -> "openai.OpenAI":
     if key in _sdk_clients:
         return _sdk_clients[key]
     with _sdk_clients_lock:
-        # Re-check under the lock: a duplicate here only wastes a connection
-        # pool rather than GPU memory, but the cache should still hold one
-        # object per endpoint so the pool is genuinely shared.
+        # Re-check under the lock so each endpoint gets one client.
         if key not in _sdk_clients:
             _sdk_clients[key] = openai.OpenAI(api_key=api_key, base_url=base_url)
         return _sdk_clients[key]
 
 
 class OpenAIBackend(LLMBackend):
-    """One model on an OpenAI-compatible endpoint (Venice AI and friends)."""
+    """One model on an OpenAI-compatible endpoint."""
 
-    # Spelled out rather than inherited from the ABC: reading this class
-    # should tell you its whole dispatch profile.
+    # Every backend class sets each flag explicitly.
     compute_config: ClassVar[ComputeConfig] = ComputeConfig(
         supports_native_batching=False,  # no batch endpoint; BatchCaller fans out
         supports_parallel_calls=True,    # independent HTTP calls are safe
@@ -73,20 +55,18 @@ class OpenAIBackend(LLMBackend):
         """Bind one model to an OpenAI-compatible endpoint.
 
         Args:
-            model: Model identifier sent upstream (e.g. "venice-uncensored").
-            api_key: API key for authentication.
+            model: Registry name of the model (e.g. "venice-uncensored").
+            api_key: API key.
             base_url: Base URL of the API (e.g. "https://api.venice.ai/api/v1").
-            api_model_id: Identifier to send upstream when the provider's slug
-                differs from ``model``. Defaults to ``model``. ``self.model``
-                stays the registry name, because it keys telemetry rows and the
-                price lookup in ``telemetry.summary()``.
+            api_model_id: Model identifier sent to the provider. Defaults to
+                ``model``.
             extra_body: Provider-specific parameters sent with every call.
-            **identity: Forwarded to :meth:`LLMBackend.__init__` —
-                generation defaults, system-prompt policy, rpm, max_workers.
+            **identity: Forwarded to :meth:`LLMBackend.__init__` (generation
+                defaults, system-prompt policy, rpm, max_workers).
         """
         super().__init__(model, **identity)
-        # Registry name stays self.model (telemetry key, price lookup); only
-        # the request payload uses the provider's own slug.
+        # self.model stays the registry name, which telemetry and pricing key
+        # on. Requests use the provider's identifier.
         self._api_model_id = api_model_id or model
         self._client = _sdk_client(api_key, base_url)
         self._base_url = base_url
@@ -97,8 +77,8 @@ class OpenAIBackend(LLMBackend):
         """Build from a registry entry's ``.api`` setup.
 
         Raises:
-            ValueError: If the entry has no ``.api`` setup.
-            KeyError: If the setup's API-key env var is not set.
+            ValueError: The entry has no ``.api`` setup.
+            KeyError: The setup's API-key env var is not set.
         """
         api = config.api
         if api is None:
@@ -108,7 +88,7 @@ class OpenAIBackend(LLMBackend):
                 f"api_key_env='...', base_url='...', rpm=...))."
             )
         return cls(
-            api_key=os.environ[api.api_key_env],
+            api_key=cls._api_key(config),
             base_url=api.base_url,
             api_model_id=api.api_model_id,
             extra_body=api.default_extra_body,
@@ -119,7 +99,7 @@ class OpenAIBackend(LLMBackend):
 
     @classmethod
     def clear_cache(cls) -> None:
-        """Drop the shared SDK clients (env vars changed, or tests)."""
+        """Drop the shared SDK clients (for tests, or after env vars change)."""
         _sdk_clients.clear()
 
     def generate(
@@ -132,26 +112,18 @@ class OpenAIBackend(LLMBackend):
         internals_ids: list[str | None] | None = None,
         **kwargs,
     ) -> list[str]:
-        """Generate responses via the API — one real SDK call per batch item.
-
-        No native batching (the chat completions API has no batch endpoint);
-        real concurrency comes from ``BatchCaller`` calling this in parallel
-        with a batch of one each, not from looping here. ``internals_ids`` is
-        accepted for signature parity but never used — this backend never
-        declares ``compute_config.supports_internals``, so the client
-        guarantees it's always None by the time it reaches here.
+        """Generate replies, one SDK call per item.
 
         Args:
-            messages_list: One chat message list per batch item.
-            system_prompts: Optional system prompt(s) — re-inserted as a
-                system-role message per call.
-            max_tokens: Overrides this model's default.
-            temperature: Overrides this model's default.
-            internals_ids: Unused — see above.
-            **kwargs: Passed through to the OpenAI client.
+            messages_list: One chat message list per item.
+            system_prompts: Sent as a leading system-role message.
+            max_tokens: Overrides the model's default.
+            temperature: Overrides the model's default.
+            internals_ids: Ignored. This backend does not capture internals.
+            **kwargs: Passed to ``chat.completions.create()``.
 
         Returns:
-            Generated text, one per batch item, same order as ``messages_list``.
+            Generated text, one per item, in the order of ``messages_list``.
         """
         prompts, resolved = self._prepare(messages_list, system_prompts)
         max_tok, temp = self._resolve(max_tokens, temperature)
@@ -184,8 +156,7 @@ class OpenAIBackend(LLMBackend):
                 )
                 raise
             content = response.choices[0].message.content
-            # usage is optional in the OpenAI-compatible spec — plenty of
-            # endpoints omit it, so this must degrade to None, not raise.
+            # Some OpenAI-compatible endpoints omit usage.
             usage = getattr(response, "usage", None)
             self._record_call(
                 n_items=1, started=started,

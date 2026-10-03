@@ -12,7 +12,7 @@ Retry wrappers (with_retries, with_feedback_retries) live in LLMs/wrappers.py.
 """
 
 import inspect
-from collections.abc import Callable
+from collections.abc import Callable, Iterable
 
 from .protocol import LLMRequest, TechniqueGen, run_sync
 from .spec import load_spec
@@ -134,6 +134,26 @@ def _run_chain(techniques: list[Callable], text: str, internals_root: str | None
     return result, ";".join(info_parts)
 
 
+def order_by_hierarchy(techniques: Iterable[Callable]) -> list[Callable]:
+    """Sort techniques into application order: layer, then within-layer rank.
+
+    The one place the hierarchy is read, so a caller that needs the order
+    *plus* one deliberate exception (``sample_combination``'s request-layer
+    obfuscation, which must wrap the finished request) can sort the rest here
+    and append its own step, instead of handing everything to
+    :func:`combine_techniques` and having it sorted back into the obfuscation
+    slot.
+    """
+    layer_order = load_spec()["layer_order"]
+
+    def _sort_key(fn: Callable) -> tuple[int, int]:
+        layer = getattr(fn, "layer", None)
+        layer_idx = layer_order.index(layer) if layer in layer_order else len(layer_order)
+        return (layer_idx, getattr(fn, "within_layer_order", 0))
+
+    return sorted(techniques, key=_sort_key)
+
+
 def combine_techniques(*techniques: Callable, sort_by_hierarchy: bool = True) -> Callable:
     """Chain multiple technique functions into one callable.
 
@@ -161,16 +181,7 @@ def combine_techniques(*techniques: Callable, sort_by_hierarchy: bool = True) ->
         Combined callable: ``(str, **kwargs) -> (str, str)`` with
         ``.techniques`` and ``.__name__`` attributes.
     """
-    spec = load_spec()
-    layer_order = spec["layer_order"]
-
-    def _sort_key(fn: Callable) -> tuple[int, int]:
-        layer = getattr(fn, "layer", None)
-        layer_idx = layer_order.index(layer) if layer in layer_order else len(layer_order)
-        wlo = getattr(fn, "within_layer_order", 0)
-        return (layer_idx, wlo)
-
-    ordered = sorted(techniques, key=_sort_key) if sort_by_hierarchy else list(techniques)
+    ordered = order_by_hierarchy(techniques) if sort_by_hierarchy else list(techniques)
 
     def combined(text: str, **kwargs) -> tuple[str, str]:
         gen = _run_chain(ordered, text, **kwargs)

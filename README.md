@@ -9,7 +9,7 @@ REDACT automates the full lifecycle of red-teaming dataset construction:
 1. **Constitution** — generate structured category hierarchies (harmful, benign, dual-use) using Claude Opus
 2. **Generate** harmful content samples across configurable harm categories
 3. **Validate** each sample via a checker LLM with feedback-driven retry
-4. **Transform** inputs into jailbreak attacks using 100+ techniques
+4. **Transform** inputs into jailbreak attacks using 143 techniques
 5. **Split, merge, and manage** datasets with balanced distribution across techniques
 
 The library is **model-agnostic** (API or local vLLM), **prompt-agnostic** (all prompts are external JSON files), and **category-agnostic** (new categories require only a taxonomy entry and prompt file).
@@ -192,7 +192,7 @@ src/redact/
 │   ├── obfuscation/               # Text transformation attacks
 │   │   ├── encoding.py            # base64, rot13/18/47, unicode, ordinal, separator, leetspeak, morse, braille
 │   │   ├── structural.py          # JSON, XML, markdown wrapping
-│   │   ├── ascii_art.py           # pyfiglet-based text art (19 fonts)
+│   │   ├── ascii_art.py           # pyfiglet-based text art (16 fonts)
 │   │   ├── suffixes.py            # Adversarial suffix generators
 │   │   ├── tokenbreak.py          # Token-breaking + sensitive-word encoding (LLM-dependent)
 │   │   ├── typos.py               # LLM-rewritten typos at 4 density levels
@@ -507,7 +507,58 @@ For each turn:
 
 ### Jailbreak — Technique Library
 
-140+ jailbreak techniques organized in four families. Technique definitions are taxonomy-driven where applicable — adding a new variant means adding a JSON entry, not a new function.
+143 single-turn jailbreak techniques, segmented into **4 layers** and **21 families** by `configs/jailbreak/combination_spec.json`. Technique definitions are taxonomy-driven where applicable — adding a new variant means adding a JSON entry, not a new function.
+
+#### Layers and families
+
+A combination takes at most one technique per family, and techniques are always applied in layer order: **hacking → manipulation → obfuscation → requests**. The per-layer tables further down list every function.
+
+| Layer | Max per combo | Families (technique count) |
+|---|---|---|
+| 1. Hacking | 1 | `framing` (5) · `cognitive` (5) · `persona` (15) |
+| 2. Manipulation | 1 | `fsh` (4) · `dap` (4) |
+| 3. Obfuscation | no cap (budget: `max_obfuscations`) | applied in this order: `sensitive_words` (16) → `tokenbreak` (3) → `translation` (20) → `typos` (4) → `suffixes` (4) → `encode` (12) → `structural` (3) → `ascii_art` (1) |
+| 4. Requests | 1 | `answer_format` (9) · `answer_language` (20) · `continuation` (4) · `indirect` (6) · `distractor_prefix` (2) · `distractor_suffix` (2) · `impersonation` (1) · `temporal` (1) · `asking` (2) |
+
+The ten `to_sensitive_words_encode_*` functions belong to both `sensitive_words` and `encode`, so picking one blocks both families. The layer caps mean that, for example, framing, persona and cognitive never appear together, and neither do FSH and DAP.
+
+#### Combination rules
+
+Enforced by `get_compatible_remaining()` in `jailbreak/sampling.py`:
+
+| Rule | Effect |
+|---|---|
+| One per family | A family that has already been picked can't be picked again |
+| Layer caps | 1 hacking, 1 manipulation, 1 request technique |
+| `fsh` / `dap` | ✗ `continuation`, `indirect`, `framing`, `persona`, `cognitive` |
+| `continuation` | ✗ `indirect` |
+| `structural` | ✗ `ascii_art` |
+| `ascii_art` | ✗ `structural`, `framing`, `persona`, `cognitive`, `fsh`, `dap` (output size) |
+| Manipulation blocking | Once `fsh`/`dap` is picked: no `translation`, no `ascii_art`, no *heavy* full-text encoding (base64, unicode_escape, ascii_ordinal, morse, braille). Word-level `sensitive_words_encode_*` is still allowed |
+| Complexity budget | Each technique scores 0–3; budget mode stops adding techniques once `max_complexity` is reached |
+
+`combine_techniques()` on its own does **not** check these rules. It only sorts techniques into layer order, so chaining techniques by hand (see below) can produce combinations the sampler never would.
+
+#### Sampling
+
+- **Family-first:** each pick chooses a family uniformly, then a technique within it, so the 20 translation languages count as one choice, not 20.
+- **Budget-driven** (`sample_combination`, default). The phases are:
+  1. hacking (p=0.5)
+  2. manipulation (p=0.33)
+  3. obfuscation, up to `max_obfuscations` families
+  4. requests (p=0.7)
+  5. optionally, with `allow_request_obfuscation=True`, one extra light encoding or translation (p=0.5)
+
+  Override the probabilities with `sampling_probs`.
+- **Count-driven** (`exact_techniques=N`): picks exactly N compatible techniques and ignores the complexity budget.
+- **Pool filters** on `generate_jailbreaks()`:
+  - `include_hacking` / `include_manipulation` / `include_obfuscation` / `include_requests`
+  - `pure_only=True`: no LLM calls at all, which also drops FSH/DAP because they need benign data
+  - `include_translation=False`: the cheapest first pass, since each translation takes 2–8 LLM calls
+
+**Known limitations:**
+- The phase-5 "request obfuscation" is meant to run after the request template, but the hierarchy sort currently moves it before the template. It also isn't counted against `max_obfuscations` or the complexity budget.
+- `to_ascii_art` picks its font with the global `random` module, so the font isn't reproducible across runs.
 
 **Execution model.** LLM-dependent techniques are **generators** that `yield` an `LLMRequest` and resume via `.send(response)` (`protocol.py`); pure transforms are plain callables. `engine.batch_apply_combinations()` advances a chunk of samples **round by round**, grouping pending requests by model and dispatching one batch per model per round through the router. `generate_jailbreaks()` first **plans** the whole run to a `jailbreaks.manifest.jsonl` (`manifest.py`, built on the shared `dataset.Manifest`), then **executes** it in chunks — resumable via the sidecar `jailbreaks.state.jsonl` ledger unioned with the output CSV (see [Resume model](#resume-model-one-modular-sidecar-system)). `combination_spec.json` defines layers, family caps, cross-incompatibilities, and complexity budgets; combinations are assigned deterministically (SHA-256 of seed + content-id + iteration). Any technique whose name is missing from the spec is silently never sampled — keep them in sync.
 
@@ -525,13 +576,13 @@ schedule = [{"exact_techniques": 1}, {"exact_techniques": 3}, {"max_complexity":
 jailbreaks = generate_jailbreaks(inputs=inputs, settings_per_iteration=schedule)
 ```
 
-#### Obfuscation
+#### Obfuscation (63 functions)
 
 | Type | Module | Functions | LLM Required |
 |---|---|---|---|
 | Encoding | `encoding.py` | `to_base64`, `to_rot13`, `to_rot18`, `to_rot47`, `to_unicode_escape`, `to_ascii_ordinal`, `to_separator`, `to_leetspeak_{basic,intermediate,advanced}`, `to_morse`, `to_braille` | No |
 | Structural | `structural.py` | `to_json`, `to_xml`, `to_markdown` | No |
-| ASCII Art | `ascii_art.py` | `to_ascii_art` (19 pyfiglet fonts) | No |
+| ASCII Art | `ascii_art.py` | `to_ascii_art` (random one of 16 pyfiglet fonts) | No |
 | Suffixes | `suffixes.py` | `to_adversarial_suffix_{punctuation,fragments,unicode,emoji}` | No |
 | TokenBreak | `tokenbreak.py` | `to_tokenbreak_{prepend,split,delimiter}` | Yes |
 | Sensitive Words | `tokenbreak.py` | `to_sensitive_words_encode_{base64,rot13,rot18,rot47,unicode,ascii,separator,leetspeak_*}`, `to_sensitive_words_{split,star,hyphen,underscore,variables}`, `to_synonym_substitution` | Yes |
@@ -540,7 +591,7 @@ jailbreaks = generate_jailbreaks(inputs=inputs, settings_per_iteration=schedule)
 
 Sensitive-words functions share the `extract_harmful()` LLM detection step from TokenBreak — encoding is then applied only to the detected harmful words rather than the whole prompt. Typo rewriting uses a single LLM call with a level-description injected into the template.
 
-#### Hacking
+#### Hacking (25 functions)
 
 | Type | Module | Functions | LLM Required |
 |---|---|---|---|
@@ -550,7 +601,7 @@ Sensitive-words functions share the `extract_harmful()` LLM detection step from 
 
 Cognitive and persona techniques are two-step LLM processes: **scenario generation → jailbreak construction**. Named personas use a persona-grounded scenario prompt that grounds the scenario in the persona's character before construction. Cognitive technique definitions are loaded from `configs/taxonomy/cognitive_techniques.json`; persona definitions from `configs/taxonomy/personas.json` — both are editable without touching code.
 
-Framing directives are pure transforms covering scenario and intent modification. Each has 4 named template variants stored in `configs/framing_templates.json`; one is randomly selected per call with the variant name recorded in `additional_info`. Answer-format directives that were previously part of framing have moved to `requests/answer.py`.
+Framing directives are pure transforms covering scenario and intent modification. Each has 4 named template variants stored in `configs/jailbreak/hacking/framing_templates.json`; one is randomly selected per call with the variant name recorded in `additional_info`. Answer-format directives that were previously part of framing have moved to `requests/answer.py`.
 
 #### Manipulation (8 functions)
 
@@ -587,7 +638,7 @@ The library is benchmarked against a reference set of **73 instruction primitive
 
 **Beyond the reference list** — techniques not in the reference set but included:
 - Extra encodings: rot18, rot47, braille, morse, ascii_ordinal
-- ASCII art obfuscation (19 pyfiglet fonts)
+- ASCII art obfuscation (16 pyfiglet fonts)
 - Adversarial suffixes (punctuation, fragments, unicode, emoji)
 - Structural wrapping (JSON, XML, markdown)
 - Cognitive hacking (5 two-step LLM techniques: persona_roleplay, hypothetical_framing, authority_obedience, AVI, deep_inception)
@@ -603,7 +654,7 @@ The library is benchmarked against a reference set of **73 instruction primitive
 from redact.jailbreak import combine_techniques
 from redact.jailbreak.obfuscation.encoding import to_base64, to_rot13
 
-combo = combine_techniques(to_rot13, to_base64)
+combo = combine_techniques(to_rot13, to_base64)  # manual chaining: order is sorted, compatibility is NOT checked
 result, info = combo("some harmful prompt")
 ```
 

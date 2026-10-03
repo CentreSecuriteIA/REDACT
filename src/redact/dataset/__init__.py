@@ -29,6 +29,7 @@ from .merge import (
     normalize_csv,
     normalize_technique_csv,
 )
+from .resume import commit, resume_state
 from .sidecar import JsonlSidecar
 from .split import (
     balanced_counts,

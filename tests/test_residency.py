@@ -438,3 +438,60 @@ class TestRegistryEstimates:
         b = residency.footprint("venice-paraphraser")
         assert a.hf_model_id == b.hf_model_id
         assert a.gb == b.gb        # one engine, one footprint
+
+
+def test_estimated_tensor_parallel_footprint_is_a_total_like_a_declared_one():
+    name = "_res_tp_estimated"
+    register_model(name, backend_type="vllm", vllm=VLLMConfig(
+        hf_model_id="org/tp", min_gpus=2, vllm_kwargs={"gpu_memory_utilization": 0.5}))
+    try:
+        with patch("redact.llms.resources.estimate.estimate_weights_gib",
+                   return_value=30.0), \
+             patch("redact.llms.resources.estimate.estimate_kv_gib", return_value=0.0), \
+             patch("redact.llms.resources.measure.free_total_gib",
+                   return_value=(48.0, 48.0)), \
+             patch("redact.telemetry.detect_gpus", return_value=("FakeGPU", 2)):
+            fp = residency.footprint(name)
+            out = residency.plan_residency([name]).explain()
+    finally:
+        MODEL_REGISTRY.pop(name, None)
+    assert fp.gb == 68.0            # (30 + 0) * 1.1 + 0.6 -> 34.0 per GPU, x2
+    assert "~34.0GiB each" in out
+    assert "needs ~34.0GiB per GPU but gpu_memory_utilization=0.5 grants 24.0GiB" in out
+
+
+def test_same_checkpoint_with_different_engine_settings_is_two_loads():
+    names = ("_res_same_a", "_res_same_b")
+    for name, length in zip(names, (4096, 8192)):
+        register_model(name, backend_type="vllm", vllm=VLLMConfig(
+            hf_model_id="org/same", vram_gb=20.0, vllm_kwargs={"max_model_len": length}))
+    try:
+        with patch("redact.llms.resources.measure.free_total_gib",
+                   return_value=(24.0, 24.0)), \
+             patch("redact.telemetry.detect_gpus", return_value=("FakeGPU", 1)):
+            plan = residency.plan_residency(list(names))
+    finally:
+        for name in names:
+            MODEL_REGISTRY.pop(name, None)
+    assert len(plan.groups) == 2    # 2 x 20GiB on one 24GiB card: one after the other
+
+
+def test_planner_engine_id_matches_the_vllm_cache_key():
+    import redact.llms.backends.vllm as vllm_module
+
+    cfg = VLLMConfig(hf_model_id="org/m", quantization="awq", min_gpus=2,
+                     vllm_kwargs={"max_model_len": 4096})
+    assert residency._engine_id(cfg, "vllm")[1:] == vllm_module._engine_key(
+        cfg.hf_model_id, cfg.quantization, cfg.engine_kwargs)
+
+
+def test_unload_local_keeps_rate_limit_windows():
+    from redact.llms import wrappers
+    from redact.llms.client import clear_client_cache
+
+    window = wrappers.shared_limiter("_test_unload_key")
+    try:
+        residency.unload_local()
+        assert wrappers.shared_limiter("_test_unload_key") is window
+    finally:
+        clear_client_cache()

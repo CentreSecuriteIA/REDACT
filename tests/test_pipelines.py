@@ -139,6 +139,41 @@ class TestGenerateOutputsManifest:
         assert len(pd.read_csv(out)) == 2               # only the 2 pending generated
 
 
+class TestGenerateOutputsResume:
+    def test_rows_already_in_the_csv_are_not_regenerated(self, tmp_path, monkeypatch):
+        """A crash between the CSV append and the ledger ack leaves a row with no
+        ack. Without the CSV union, resume regenerates that input and appends a
+        *second* row for it — two rows, two sample_ids, no dedup downstream."""
+        import redact.pipelines as P
+        from redact import generate_outputs, paths
+        from redact.dataset.io import _hash_text
+        from tests.conftest import MockBackend, make_client
+
+        out = paths.output_responses_csv(tmp_path)
+        out.parent.mkdir(parents=True, exist_ok=True)
+        # Same column order the stage appends in, since the append is headerless.
+        pd.DataFrame([{
+            "input_id": _hash_text("p one"), "input_prompt": "p one",
+            "category": "Cyber", "subcategory": "", "entry_type": "harmful",
+            "model": "mock-model", "source": "", "sample_id": "prior",
+            "output_response": "written before the crash",
+            "accepted": True, "rejection_reason": "",
+        }]).to_csv(out, index=False)
+
+        backend = MockBackend("ans")
+        monkeypatch.setattr(P.ModelClient, "create", lambda m: make_client(backend, m))
+        inputs = pd.DataFrame({
+            "sample": ["p one", "p two"],
+            "category": ["Cyber"] * 2, "entry_type": ["harmful"] * 2,
+        })
+        df = generate_outputs(data_dir=tmp_path, inputs=inputs, check_outputs=False,
+                              resume=True, verbose=False)
+
+        assert len(backend.calls) == 1                      # only "p two" generated
+        assert len(df) == 2                                 # prior row kept, one added
+        assert list(df["input_id"]).count(_hash_text("p one")) == 1
+
+
 class TestGenerateOutputsInternals:
     """Internals capture is a folder-per-input_id side channel — no CSV column,
     ever (see .claude/introspection_backend_plan.md's non-interference principle).

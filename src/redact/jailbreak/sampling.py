@@ -10,7 +10,7 @@ compatibility filter and the family-first picker have no other callers.
 import random
 from collections.abc import Callable
 
-from .chain import combine_techniques
+from .chain import combine_techniques, order_by_hierarchy
 from .spec import load_spec
 
 
@@ -250,22 +250,30 @@ def sample_combination(
         if pick is not None:
             _commit(pick)
 
-    # Phase 5: Request-layer obfuscation (optional, if enabled)
+    # Phase 5: Request-layer obfuscation (optional, if enabled). Kept out of
+    # `selected` because it is the one pick whose position is *not* its layer's:
+    # it obfuscates the finished request, so it runs after the request template.
+    request_obfuscation: Callable | None = None
     if allow_request_obfuscation and rng.random() < p_request_obfuscation:
         req_obfusc_candidates = [
             f for f in current_pool
             if _is_request_obfuscation_compatible(f, spec)
         ]
         if req_obfusc_candidates:
-            pick = _pick_by_family(rng, req_obfusc_candidates)
-            selected.append(pick)  # don't update pool; this is the final step
+            request_obfuscation = _pick_by_family(rng, req_obfusc_candidates)
 
-    if not selected:
+    if not selected and request_obfuscation is None:
         # combine_techniques() with no techniques returns a no-op combined
         # callable named "identity" with .techniques == [].
         return combine_techniques()
 
-    return combine_techniques(*selected)
+    # Order the regular picks here and chain in that exact order: passing the
+    # request-layer obfuscation to combine_techniques() for sorting would move
+    # it back into the obfuscation slot, i.e. before the request template.
+    ordered = order_by_hierarchy(selected)
+    if request_obfuscation is not None:
+        ordered.append(request_obfuscation)
+    return combine_techniques(*ordered, sort_by_hierarchy=False)
 
 
 def sample_exact_combination(

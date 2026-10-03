@@ -643,8 +643,7 @@ class TestModelConfigValidatesIdentityAndComposition:
         )
         assert cfg.api.recommended_max_workers == 3
 
-    def test_backend_type_none_defers_cross_checks(self):
-        # Inferred from the name later, so there is nothing to check yet.
+    def test_backend_type_none_is_allowed_with_one_setup(self):
         cfg = ModelConfig(name="m", api=APIConfig(backend_type="openai", api_key_env="TEST_API_KEY", base_url="https://test.example/v1", rpm=10))
         assert cfg.backend_type is None
 
@@ -715,3 +714,33 @@ class TestRegisterModelComposesSetups:
             assert get_model_config(name).api.rpm == 99
         finally:
             MODEL_REGISTRY.pop(name, None)
+
+
+class TestChecksWithoutADefaultSetup:
+    def test_workers_are_checked_even_without_a_backend_type(self):
+        with pytest.raises(ValueError, match="support parallel calls"):
+            ModelConfig(name="m",
+                        api=APIConfig(backend_type="anthropic", api_key_env="K",
+                                      rpm=5, recommended_max_workers=4))
+
+    def test_error_says_the_backend_would_clamp(self):
+        with pytest.raises(ValueError, match="silently clamp"):
+            ModelConfig(name="m", backend_type="api",
+                        api=APIConfig(backend_type="anthropic", api_key_env="K",
+                                      rpm=5, recommended_max_workers=4))
+
+
+class TestEngineKwargs:
+    def test_min_gpus_becomes_tensor_parallel_size(self):
+        cfg = VLLMConfig(hf_model_id="org/m", min_gpus=2)
+        assert cfg.engine_kwargs == {"tensor_parallel_size": 2}
+
+    def test_an_explicit_tensor_parallel_size_wins(self):
+        cfg = VLLMConfig(hf_model_id="org/m", min_gpus=2,
+                         vllm_kwargs={"tensor_parallel_size": 4})
+        assert cfg.engine_kwargs == {"tensor_parallel_size": 4}
+
+    def test_single_gpu_kwargs_are_passed_through(self):
+        cfg = VLLMConfig(hf_model_id="org/m", vllm_kwargs={"max_model_len": 384})
+        assert cfg.engine_kwargs == {"max_model_len": 384}
+        assert VLLMConfig(hf_model_id="org/m").engine_kwargs == {}

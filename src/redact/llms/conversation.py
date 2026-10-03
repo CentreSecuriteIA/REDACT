@@ -1,20 +1,11 @@
-"""Conversation primitives shared across the library (model-layer).
+"""Conversation primitives shared by ``jailbreak/`` and ``multi_turn/``.
 
-These are use-case-agnostic and live in ``llms/`` so both ``jailbreak/`` (technique
-generators) and ``multi_turn/`` (conversation actors) reuse them without a
-cross-dependency (``multi_turn/`` and the jailbreak layer depend on ``llms/``,
-never the reverse).
-
-Contents:
-- :class:`LLMRequest` — a pending model call (``model`` + ``messages``) yielded by
-  any generator; ``model`` is the routing key. Re-exported from
-  ``jailbreak/protocol.py``.
-- :class:`Step` / :class:`Transcript` — a **typed step log** for multi-turn
-  conversations: visible turns (``message``/``reply`` — Inspect ``ChatMessage``-like,
-  rendered into a backend ``messages`` list) plus provenance events
-  (``strategy``/``analysis``/``evaluation``) that are logged but never sent to models.
-- :func:`drive_sync` — drive one generator to completion with a blocking call fn
-  (the single-conversation / single-sample path; the batched engine drives many).
+- :class:`LLMRequest`: a pending model call yielded by a generator.
+- :class:`Step` / :class:`Transcript`: a typed step log for multi-turn
+  conversations.
+- :func:`drive_sync`: drive one generator to completion with a blocking call.
+- :func:`drive_generators`: drive many generators round by round, batching
+  their requests per model.
 """
 
 from __future__ import annotations
@@ -27,14 +18,14 @@ from typing import Literal
 
 @dataclass
 class LLMRequest:
-    """A single pending LLM call yielded by a generator.
+    """A pending LLM call yielded by a generator.
 
-    ``model`` is the resolved model name and the engine's routing key (pending
-    requests are grouped by ``model`` and dispatched one batch per model).
-    ``internals_id`` is optional — set by a caller that wants this specific
-    call's internals captured (see ``LLMBackend.compute_config``'s
-    ``supports_internals``); left ``None`` by default, which is a no-op all
-    the way down.
+    Attributes:
+        model: Model name. Pending requests are grouped by it and sent one
+            batch per model.
+        messages: Chat messages for the call.
+        internals_id: Capture this call's internals under this id. ``None``
+            captures nothing.
     """
 
     model: str
@@ -42,18 +33,19 @@ class LLMRequest:
     internals_id: str | None = None
 
 
-# Step kinds: visible turns vs provenance events (Inspect-transcript-event-like).
+# Step kinds. Only "message" and "reply" steps are sent to models.
 StepType = Literal["strategy", "message", "reply", "analysis", "evaluation"]
 _VISIBLE = ("message", "reply")
 
 
 @dataclass
 class Step:
-    """One entry in a conversation's typed step log.
+    """One entry in a conversation's step log.
 
-    ``message``/``reply`` steps carry a ChatMessage ``role`` and render into the
-    ``messages`` sent to a backend; ``strategy``/``analysis``/``evaluation`` steps
-    are provenance (the actor's *ideas*/analyses/scores) and are not sent to models.
+    ``message`` and ``reply`` steps carry a chat ``role`` and are rendered
+    into the messages sent to a model. ``strategy``, ``analysis`` and
+    ``evaluation`` steps record the actor's ideas, analyses and scores, and
+    are never sent.
     """
 
     type: StepType
@@ -66,7 +58,7 @@ class Step:
 
 @dataclass
 class Transcript:
-    """Ordered step log of a conversation (the trace)."""
+    """Ordered step log of a conversation."""
 
     steps: list[Step] = field(default_factory=list)
 
@@ -88,7 +80,7 @@ class Transcript:
         return self.add(Step(type, actor, content, model=model, meta=meta or {}))
 
     def as_messages(self, system: str | None = None) -> list[dict]:
-        """Render the visible turns into a backend ``messages`` list."""
+        """Render the visible turns into a chat ``messages`` list."""
         msgs: list[dict] = [{"role": "system", "content": system}] if system else []
         for s in self.steps:
             if s.type in _VISIBLE and s.role:
@@ -96,23 +88,22 @@ class Transcript:
         return msgs
 
     def to_records(self) -> list[dict]:
-        """Serializable form of the full step log (for JSON storage)."""
+        """The full step log as a list of dicts, for JSON storage."""
         return [vars(s) for s in self.steps]
 
 
 def drive_sync(gen: Generator, call: Callable[[LLMRequest], str]):
     """Drive one generator to completion with a blocking call function.
 
-    The generator yields :class:`LLMRequest`s and is resumed with the reply
-    string. :func:`drive_generators` drives many generators at once instead.
+    The generator yields :class:`LLMRequest`s and is resumed with each reply.
+    :func:`drive_generators` drives many generators at once.
 
     Args:
         gen: Generator yielding :class:`LLMRequest`s.
-        call: Blocking function turning one request into a reply string.
+        call: Blocking function that turns one request into a reply string.
 
     Returns:
-        Whatever the generator returns (e.g. a ``Trajectory`` or
-        ``(text, info)``).
+        The generator's return value.
     """
     try:
         request = next(gen)
@@ -132,27 +123,25 @@ def drive_generators(
     verbose: bool = True,
     progress: str | None = None,
 ) -> dict[Hashable, object]:
-    """Advance many generators **round-by-round, batching LLM calls by model**.
+    """Advance many generators round by round, batching LLM calls per model.
 
-    The generic engine behind both the jailbreak combination engine and the
-    multi-turn conversation runner. Each generator in ``gens`` yields
-    :class:`LLMRequest`s and is resumed with the reply string. Every round, all
-    live generators' pending requests are pooled by ``request.model`` and
-    dispatched in one ``resolve(model).generate(messages_list, ...)`` per
-    model; replies are fed back via ``.send``.
+    Each generator yields :class:`LLMRequest`s and is resumed with the reply.
+    Every round, the pending requests are grouped by ``request.model`` and
+    sent as one ``generate()`` call per model. Used by the jailbreak engine
+    and the multi-turn pipeline.
 
     Args:
-        gens: ``{key: generator}``. Keys are arbitrary hashables (returned as-is).
+        gens: ``{key: generator}``. Keys are returned unchanged.
         resolve: ``model_name -> ModelClient``. Defaults to
-            :meth:`ModelClient.create`, which caches, so resolving once per
-            model per round costs nothing. Injectable for testing.
-        finalize: ``(key, return_value) -> result`` — called when a generator
-            completes (``StopIteration``).
-        on_error: ``(key, exc) -> result`` — called if a generator (or a whole
-            batch) raises, isolating that unit. If ``None``, the exception
-            propagates.
-        verbose / progress: when both set, a progress label is passed to
-            ``generate`` (per model per round); otherwise it is omitted.
+            :meth:`ModelClient.create`.
+        finalize: ``(key, return_value) -> result``, called when a generator
+            finishes.
+        on_error: ``(key, exc) -> result``, called when a generator raises.
+            ``None`` lets the exception propagate. A failed batch dispatch
+            always propagates and never goes through ``on_error``.
+        verbose: Pass a progress label to ``generate`` when ``progress`` is
+            also set.
+        progress: Label prefix for progress logging.
 
     Returns:
         ``{key: result}`` for every input key.
@@ -202,20 +191,16 @@ def drive_generators(
                 {"progress": f"{progress} round {round_idx} ({model})"}
                 if (verbose and progress) else {}
             )
-            # Only pass internals_ids when at least one request in this
-            # model's batch actually wants capture — a list of all-None would
-            # still trip BatchCaller's "backend doesn't support this" guard on
-            # a non-introspection model, since it only treats a bare `None`
-            # (the kwarg omitted) as "capture not requested".
+            # Pass internals_ids only when a request in this batch wants
+            # capture. A client whose backend cannot capture rejects any
+            # list, even one that is all None.
             batch_internals_ids = [round_requests[k].internals_id for k in keys]
             if any(i is not None for i in batch_internals_ids):
                 kw["internals_ids"] = batch_internals_ids
-            try:
-                responses = resolve(model).generate(messages_list, **kw)
-            except Exception as exc:  # noqa: BLE001 — whole batch failed
-                for k in keys:
-                    _fail(k, exc)
-                continue
+            # A dispatch failure propagates and does not go through on_error.
+            # It is the transport failing, not these units, and turning it
+            # into results would let the caller record work that never ran.
+            responses = resolve(model).generate(messages_list, **kw)
             for k, resp in zip(keys, responses):
                 advance(k, resp)
 

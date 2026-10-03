@@ -1,6 +1,6 @@
-"""LLM abstraction layer — model-agnostic, backend-agnostic.
+"""LLM layer: the model registry, the backends that serve it, and prompt helpers.
 
-Quick start (auto-routing)::
+Usage::
 
     from redact.llms import ModelClient
 
@@ -10,28 +10,14 @@ Quick start (auto-routing)::
     local = ModelClient.create("venice-uncensored", backend_type="vllm")
     replies = local.generate(messages_list)            # same call, local engine
 
-A :class:`ModelClient` *is* the model: transport, rate limiter and batch
-strategy are wired at construction, so every client is called the same way and
-no call site threads a limiter or picks a dispatch mode — see ``client.py``.
-
-Direct instantiation (when you need a transport the registry doesn't describe).
-Prefer ``register_model()`` — it validates the setup and gives you
-``ModelClient.create()`` — since anything you don't pass here falls back to
-:class:`~redact.llms.backends.base.LLMBackend`'s defaults, including
-``rpm=None`` (no rate limiting)::
-
-    import os
-    from redact.llms import ModelClient, OpenAIBackend
-
-    backend = OpenAIBackend("venice-uncensored", api_key=os.environ["VENICE_API_KEY"],
-                            base_url="https://api.venice.ai/api/v1", rpm=75)
-    client = ModelClient(backend)
+For a model the registry does not have, call ``register_model()`` and then
+``ModelClient.create()``. A backend built by hand and wrapped in
+``ModelClient(backend)`` uses ``LLMBackend``'s defaults for anything not
+passed, including ``rpm=None`` (no rate limiting).
 """
 
-# Backends — importing the classes never requires their optional heavy
-# dependency (vllm/anthropic/torch+transformers) to be installed; each
-# backend's own __init__ lazily imports and guards that, only at
-# instantiation time. See backends/__init__.py.
+# vllm, torch and transformers are optional extras. They are imported lazily
+# (as is anthropic), so importing this package does not need them.
 from .backends import (
     AnthropicBackend,
     ComputeConfig,
@@ -45,7 +31,7 @@ from .backends import (
 )
 from .client import ModelClient, clear_client_cache
 
-# Extraction utilities
+# Extraction
 from .prompting import (
     EXTRACTION_STYLES,
     ConstitutionEntry,
@@ -60,7 +46,6 @@ from .prompting import (
 
 # Model registry
 from .model_config import (
-    DEFAULT_RPM,
     MODEL_REGISTRY,
     APIConfig,
     IntrospectConfig,
@@ -73,13 +58,13 @@ from .model_config import (
     register_model,
 )
 
-# Progress reporting (shared across all batched generation)
+# Progress reporting
 from .progress import ProgressReporter
 
 # Prompt loading
 from .prompting import PromptTemplate, build_messages, load_prompt
 
-# Caller-facing helpers over a client: single-sample, chunking, check loop.
+# Helpers over a client
 from .router import (
     batch_check_samples,
     batch_generate_samples,

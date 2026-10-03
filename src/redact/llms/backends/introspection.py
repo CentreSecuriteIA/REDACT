@@ -1,23 +1,12 @@
-"""Local raw-transformers backend for deep-internals logging.
+"""Local transformers backend that can capture model internals.
 
-Not a vLLM extension — vLLM's serving API (continuous batching + paged
-KV-cache) discards intermediate activations by design, so there is no
-supported way to recover hidden states or attention weights from it. This
-backend is a standalone model load via HuggingFace ``transformers``, used
-instead of vLLM for whichever run needs internals captured. Its loaded-model
-cache is therefore **separate from vLLM's**: the same ``hf_model_id`` under
-the two backends is two different runtimes and two independent loads.
+Loads the model through HuggingFace ``transformers`` instead of vLLM, which
+does not expose hidden states or attention weights. Its model cache is
+separate from vLLM's: the same ``hf_model_id`` under both backends is loaded
+twice.
 
-Capture is a side effect keyed on caller-supplied ``internals_ids`` (see
-:attr:`LLMBackend.compute_config`'s ``supports_internals``) — the backend
-never invents its own ids. A ``None`` entry means generation proceeds
-normally with nothing captured for that batch item.
-
-One instance **is one registered model**: sampling defaults, capture config
-and log directory are bound in
-:meth:`TransformersIntrospectionBackend.from_config`, not re-passed per call.
-
-Reference: backends/vllm.py (lazy import + cache pattern).
+Capture is requested per item with caller-supplied ``internals_ids``. An item
+whose id is ``None`` is generated without capturing anything.
 """
 
 import atexit
@@ -39,24 +28,19 @@ logger = logging.getLogger(__name__)
 
 _DEFAULT_CAPTURE = {"logprobs": True, "hidden_states": "last", "attention": False}
 
-# Sampling values with no ModelConfig field of their own — a backend default,
-# not a registry lookup. Overridable per model via IntrospectConfig.sampling.
+# Backend defaults for sampling values that have no ModelConfig field.
+# Override them per model with IntrospectConfig.sampling.
 _DEFAULT_SAMPLING = {"top_p": 0.85}
 _DEFAULT_TEMPERATURE = 0.7
 
-# Loaded (tokenizer, model) pairs, keyed on what determines the load. Private
-# to this class — never shared with vLLM's engine cache.
+# Loaded (tokenizer, model) pairs, keyed on the load arguments.
 _models: dict[tuple, tuple] = {}
-# Same reasoning as vllm.py's _engines_lock: preload runs off-thread, and a
-# duplicate from_pretrained() would put two copies of the weights on the card.
+# Held during a load, so a preload thread and a real call cannot load the same
+# checkpoint twice.
 _models_lock = threading.Lock()
 
-# When each loaded checkpoint went onto the card. Same cost model as vllm.py:
-# the GPU is leased for as long as weights are resident, so lifetime is billed
-# per *checkpoint* — not per backend instance, and not per call. Without these
-# events telemetry's engines_s stays empty and a run on this backend (the
-# slowest local transport, with no batching to amortize) reports
-# local_cost_usd 0.0 while actually holding a card for the whole run.
+# Load time of each checkpoint. Lifetime is timed per checkpoint, not per
+# backend instance, and reported as an "engine" release event.
 _models_loaded_at: dict[tuple, float] = {}
 
 
@@ -74,7 +58,7 @@ def _load(hf_model_id: str, device_map: str, torch_dtype: str, hf_kwargs: dict):
 
 
 def _load_locked(key, hf_model_id: str, device_map: str, torch_dtype: str, hf_kwargs: dict):
-    """The real load. Only ever called with ``_models_lock`` held."""
+    """Load the tokenizer and model. Call with ``_models_lock`` held."""
     started = time.perf_counter()
     try:
         from transformers import AutoModelForCausalLM, AutoTokenizer
@@ -86,10 +70,8 @@ def _load_locked(key, hf_model_id: str, device_map: str, torch_dtype: str, hf_kw
         )
 
     tokenizer = AutoTokenizer.from_pretrained(hf_model_id, **hf_kwargs)
-    # transformers renamed `torch_dtype` to `dtype` in 5.0 (4.x still
-    # accepts torch_dtype but warns; 5.x warns on torch_dtype). Pick the
-    # name the installed version actually wants, since pyproject allows
-    # transformers>=4.40 — i.e. both sides of that rename.
+    # transformers renamed the `torch_dtype` keyword to `dtype`. Pass `dtype`
+    # on version 5 and later and `torch_dtype` on 4.x; pyproject allows both.
     import transformers
 
     dtype_kwarg = (
@@ -101,10 +83,8 @@ def _load_locked(key, hf_model_id: str, device_map: str, torch_dtype: str, hf_kw
         )
     model.eval()
 
-    # Unlike vLLM this preallocates no KV pool and loads in-process, so here
-    # the delta really is the model's need — the one place Measurement gives a
-    # trustworthy weights figure. Still telemetry only: planning reads
-    # llms/resources/estimate.py, which needs no load at all.
+    # The load runs in this process with no preallocated pool, so the measured
+    # figures describe the model itself. They are used for telemetry only.
     _models[key] = (tokenizer, model)
     _models_loaded_at[key] = time.perf_counter()
     observe.record({
@@ -124,11 +104,9 @@ def _load_locked(key, hf_model_id: str, device_map: str, torch_dtype: str, hf_kw
 def _release_models() -> None:
     """Emit a lifetime event per loaded checkpoint, then forget the timers.
 
-    Called from :meth:`TransformersIntrospectionBackend.clear_cache` and from
-    an ``atexit`` hook — without the latter a process that simply exits never
-    reports ``held_s``, and the local cost of the whole run goes unrecorded.
-    Mirrors ``vllm._release_engines``; telemetry builds ``engines_s`` from
-    these events alone, without caring which backend emitted them.
+    Called from :meth:`TransformersIntrospectionBackend.clear_cache` and at
+    exit, so a process that just exits still reports how long each
+    checkpoint was held.
     """
     now = time.perf_counter()
     for key, loaded_at in list(_models_loaded_at.items()):
@@ -148,30 +126,13 @@ atexit.register(_release_models)
 class TransformersIntrospectionBackend(LLMBackend):
     """One model on local HF ``transformers``, with internals capture."""
 
-    # No true engine-level batch pass — single GPU, no continuous
-    # batching (native_batching=False). BatchCaller routes through run()
-    # instead, which already zips internals_ids[i] into each sequential
-    # generate() call. Concurrent generate() calls from threads compete
-    # for GPU memory, same reasoning as VLLMBackend (parallel_calls=False).
-    #
-    # native_batching stays False *even though* generate() below accepts and
-    # loops over a full list, so it would technically survive being handed the
-    # whole batch. Two reasons not to:
-    #
-    #   1. The flag means "one transport call is one engine pass", which is
-    #      what lets a caller read the trace: vLLM fuses 32 prompts into a
-    #      single `call` event with n_items=32. This backend runs 32 forward
-    #      passes and correctly emits 32 events. Claiming native batching
-    #      would leave a "native" transport emitting per-item events, and the
-    #      telemetry contract stops describing anything.
-    #   2. ModelClient's native branch fires on_complete only after the whole
-    #      call returns, so progress would jump 0 -> 100% at the end — on the
-    #      slowest backend here, where a batch takes minutes. Nothing
-    #      checkpoints off on_complete (resume is ledger-driven per chunk), so
-    #      this is display only, but it is display exactly where it matters.
-    #
-    # What going native would actually save is the BatchCaller wrap and N-1
-    # redundant _prepare()/_resolve() calls — noise next to GPU generation.
+    # supports_native_batching stays False even though generate() loops over
+    # a list. Each item is its own forward pass and emits its own `call`
+    # telemetry event, where a native batch emits one event for the whole
+    # list. ModelClient's native path also reports progress only after the
+    # whole call returns, so it would jump from 0 to 100%.
+    # Concurrent generate() calls would compete for GPU memory, so parallel
+    # calls are off.
     compute_config: ClassVar[ComputeConfig] = ComputeConfig(
         supports_native_batching=False,
         supports_parallel_calls=False,
@@ -191,28 +152,28 @@ class TransformersIntrospectionBackend(LLMBackend):
         hf_kwargs: dict | None = None,
         **identity,
     ):
-        """Bind one registered model to a locally-loaded HF model.
+        """Bind one registered model to a locally loaded HF model.
 
         Args:
             model: Registry name of the model.
             hf_model_id: HuggingFace model ID or local path.
-            log_dir: Root directory captured internals are written under
-                (one subfolder per ``internals_id``).
+            log_dir: Root directory for captured internals, with one
+                subfolder per ``internals_id``.
             capture: Which internals to capture. Keys: ``"logprobs"`` (bool),
                 ``"hidden_states"`` (``False`` / ``"last"`` / ``"all"``),
-                ``"attention"`` (bool). Defaults are deliberately light
-                (logprobs + last-layer hidden state only) — attention scales
-                ``layers x heads x seq_len**2`` and this backend has no
-                batching to amortize storage cost over.
-            device_map / torch_dtype: Passed to ``from_pretrained``.
-            sampling: Extra generation defaults for this model (``top_p``,
-                ...), merged over :data:`_DEFAULT_SAMPLING`.
+                ``"attention"`` (bool). Defaults to logprobs and the
+                last-layer hidden state. Attention is large: it scales with
+                ``layers x heads x seq_len**2``.
+            device_map: Passed to ``from_pretrained``.
+            torch_dtype: Passed to ``from_pretrained``.
+            sampling: Generation defaults for this model (``top_p``, ...),
+                merged over :data:`_DEFAULT_SAMPLING`.
             hf_kwargs: Extra kwargs for ``from_pretrained`` (e.g.
                 ``trust_remote_code``).
             **identity: Forwarded to :meth:`LLMBackend.__init__`.
         """
         try:
-            import torch  # Lazy import — torch is heavy and optional
+            import torch  # lazy: torch is heavy and optional
         except ImportError:
             raise ImportError(
                 "The 'torch' and 'transformers' packages are required for "
@@ -221,7 +182,8 @@ class TransformersIntrospectionBackend(LLMBackend):
             )
 
         super().__init__(model, **identity)
-        # A real number is required for sampling; ModelConfig's is optional.
+        # Sampling needs a number, so fill in a default when the model has
+        # none.
         if self.default_temperature is None:
             self.default_temperature = _DEFAULT_TEMPERATURE
         self.hf_model_id = hf_model_id
@@ -238,7 +200,7 @@ class TransformersIntrospectionBackend(LLMBackend):
         """Build from a registry entry's ``.introspect`` setup.
 
         Raises:
-            ValueError: If the entry has no ``.introspect`` setup.
+            ValueError: The entry has no ``.introspect`` setup.
         """
         introspect = config.introspect
         if introspect is None:
@@ -260,11 +222,7 @@ class TransformersIntrospectionBackend(LLMBackend):
 
     @classmethod
     def clear_cache(cls) -> None:
-        """Drop the loaded models — frees GPU memory between local models.
-
-        Reports each checkpoint's lifetime before forgetting it, so unloading
-        to make room for the next model still bills the time the card was held.
-        """
+        """Drop the loaded models, after reporting how long each was held."""
         _release_models()
         _models.clear()
 
@@ -276,14 +234,12 @@ class TransformersIntrospectionBackend(LLMBackend):
     def rename_capture(self, old_internals_id: str, new_internals_id: str) -> None:
         """Move a capture folder from a provisional id to its final one.
 
-        No-op if nothing was captured under ``old_internals_id`` (e.g. the
-        call wasn't given an ``internals_id`` at all).
+        Does nothing if no folder exists under ``old_internals_id``.
         """
         old_dir = self._log_dir / old_internals_id
         if not old_dir.exists():
-            # Silent otherwise, and a mistyped provisional id looks identical
-            # to "this call captured nothing" — leaving the real capture
-            # orphaned under its provisional name with no error anywhere.
+            # Logged because a mistyped provisional id looks the same as a
+            # call that captured nothing.
             logger.debug("[internals] nothing to rename at %s", old_dir)
             return
         new_dir = self._log_dir / new_internals_id
@@ -292,28 +248,24 @@ class TransformersIntrospectionBackend(LLMBackend):
         logger.info("[internals] %s -> %s", old_internals_id, new_internals_id)
 
     def _save_meta(self, out_dir: Path, meta: dict) -> None:
-        """Always-written companion JSON: resolved settings, prompt, and output.
+        """Write ``meta.json``: resolved settings, input messages and output.
 
-        Not gated by ``capture`` config — cheap, and it's the *only* place some
-        of this data survives at all. Multi-round jailbreak techniques discard
-        intermediate prompts/completions once the final row is written (a
-        rejected translation attempt, a scenario draft); this file is what
-        keeps that data recoverable for analysis.
+        Always written for a captured item, whatever the ``capture`` settings.
         """
         with (out_dir / "meta.json").open("w", encoding="utf-8") as f:
             json.dump(meta, f, indent=2, ensure_ascii=False)
 
     def _save_capture(self, internals_id: str, outputs, prompt_len: int, meta: dict) -> None:
-        """Persist whatever ``capture`` config asks for from one generate() call."""
+        """Write ``meta.json`` and the internals that ``capture`` asks for."""
         torch = self._torch
         out_dir = self._capture_dir(internals_id)
         self._save_meta(out_dir, meta)
         gen_token_ids = outputs.sequences[0][prompt_len:]
 
-        if self._capture.get("logprobs") and outputs.scores:
+        if self._capture.get("logprobs") and outputs.logits:
             logprobs = [
                 torch.log_softmax(step_logits[0], dim=-1)
-                for step_logits in outputs.scores
+                for step_logits in outputs.logits
             ]
             record = {
                 "tokens": self._tokenizer.convert_ids_to_tokens(gen_token_ids.tolist()),
@@ -326,9 +278,9 @@ class TransformersIntrospectionBackend(LLMBackend):
 
         hs_mode = self._capture.get("hidden_states")
         if hs_mode and outputs.hidden_states:
-            # outputs.hidden_states: tuple (per generated token) of tuple (per layer)
-            # of [batch, seq, hidden] tensors. Keep only the last generated token's
-            # hidden state per layer per step (decode-step hidden states).
+            # outputs.hidden_states is a tuple (per generated token) of tuples
+            # (per layer) of [batch, seq, hidden] tensors. Keep the last
+            # position of each selected layer at each step.
             layers = (
                 [-1] if hs_mode == "last" else range(len(outputs.hidden_states[0]))
             )
@@ -347,8 +299,6 @@ class TransformersIntrospectionBackend(LLMBackend):
             ]
             torch.save(stacked_attn, out_dir / "attention.pt")
 
-        # INFO rather than DEBUG: internals runs are rare and expensive, and
-        # where a capture landed is the thing you go looking for afterwards.
         written = sorted(p.name for p in out_dir.iterdir() if p.is_file())
         logger.info("[internals] saved %s -> %s", ", ".join(written), out_dir)
 
@@ -362,35 +312,22 @@ class TransformersIntrospectionBackend(LLMBackend):
         internals_ids: list[str | None] | None = None,
         **kwargs,
     ) -> list[str]:
-        """Generate responses for a batch, optionally capturing internals per item.
-
-        Sequential — this backend makes no claim of true batching (single
-        GPU, no continuous batching; ``compute_config.supports_native_batching
-        =False``). A single sample is just a batch of one, same code path.
-
-        The per-item work is inline in the loop, matching ``openai.py`` and
-        ``anthropic.py``: every non-fusing backend here is a batch-shaped
-        ``generate()`` wrapping its own item loop, and only ``vllm.py`` differs
-        because its pass genuinely is fused. Keeping the body here also keeps
-        it *behind* ``_prepare()`` — the system-prompt split/fold has to run
-        over the batch before any item is touched, so there is deliberately no
-        single-item entry point for a caller to reach past it.
+        """Generate replies one item at a time, capturing internals where asked.
 
         Args:
-            messages_list: One chat message list per batch item.
-            system_prompts: Optional system prompt(s) — re-inserted before the
-                tokenizer's chat template is applied.
-            max_tokens: Overrides this model's default.
-            temperature: Overrides this model's default.
-            internals_ids: One internals-capture id (or None) per item. When
-                an item's id is given, captured internals (per ``capture``
-                config) are written under ``{log_dir}/{internals_id}/``.
-            **kwargs: Extra generation parameters (e.g. top_k,
-                repetition_penalty), merged over this model's sampling
+            messages_list: One chat message list per item.
+            system_prompts: Inserted as the leading message of each item.
+            max_tokens: Overrides the model's default.
+            temperature: Overrides the model's default.
+            internals_ids: One capture id (or ``None``) per item. Internals
+                for an item with an id are written under
+                ``{log_dir}/{internals_id}/``.
+            **kwargs: Extra generation parameters (e.g. ``top_k``,
+                ``repetition_penalty``), merged over the model's sampling
                 defaults.
 
         Returns:
-            Generated text, one per batch item, same order as ``messages_list``.
+            Generated text, one per item, in the order of ``messages_list``.
         """
         if not messages_list:
             return []
@@ -408,7 +345,9 @@ class TransformersIntrospectionBackend(LLMBackend):
             prompt = self._tokenizer.apply_chat_template(
                 chat_messages, tokenize=False, add_generation_prompt=True,
             )
-            inputs = self._tokenizer(prompt, return_tensors="pt").to(self._model.device)
+            inputs = self._tokenizer(
+                prompt, return_tensors="pt", add_special_tokens=False,
+            ).to(self._model.device)
             prompt_len = inputs["input_ids"].shape[1]
 
             want_capture = internals_id is not None
@@ -417,10 +356,10 @@ class TransformersIntrospectionBackend(LLMBackend):
                 outputs = self._model.generate(
                     **inputs,
                     max_new_tokens=max_tok,
-                    temperature=temp,
-                    do_sample=True,
+                    temperature=float(temp),
+                    do_sample=temp > 0,
                     return_dict_in_generate=True,
-                    output_scores=want_capture and self._capture.get("logprobs", False),
+                    output_logits=want_capture and self._capture.get("logprobs", False),
                     output_hidden_states=(
                         want_capture and bool(self._capture.get("hidden_states"))
                     ),
@@ -428,8 +367,7 @@ class TransformersIntrospectionBackend(LLMBackend):
                     **sampling,
                 )
 
-            # One forward pass = one event; this backend never fuses a batch,
-            # so a batch of N emits N events rather than one with n_items=N.
+            # One telemetry event per forward pass.
             self._record_call(
                 n_items=1, started=started,
                 in_tok=prompt_len,

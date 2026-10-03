@@ -6,7 +6,9 @@ without a real model: capability flags, backend_for() routing, and the
 registry error messages, all offline.
 """
 
+import contextlib
 import json
+import types
 
 import pytest
 
@@ -191,3 +193,89 @@ class TestRenameCapture:
         b._capture_dir("base1/attempt_0")
         b.rename_capture("base1/attempt_0", "base1/nested/deeper/final")
         assert (tmp_path / "base1" / "nested" / "deeper" / "final").is_dir()
+
+
+class _FakeIds(list):
+    @property
+    def shape(self):
+        return (len(self),)
+
+    def __getitem__(self, key):
+        out = list.__getitem__(self, key)
+        return _FakeIds(out) if isinstance(key, slice) else out
+
+
+class _FakeInputs(dict):
+    def to(self, device):
+        return self
+
+
+class _FakeTokenizer:
+    def __init__(self):
+        self.calls = []
+
+    def apply_chat_template(self, messages, tokenize, add_generation_prompt):
+        return "<s>PROMPT"
+
+    def __call__(self, prompt, **kwargs):
+        self.calls.append(kwargs)
+        return _FakeInputs(input_ids=types.SimpleNamespace(shape=(1, 3)))
+
+    def decode(self, ids, skip_special_tokens):
+        return " reply "
+
+
+class _FakeModel:
+    device = "cpu"
+
+    def __init__(self):
+        self.calls = []
+
+    def generate(self, **kwargs):
+        self.calls.append(kwargs)
+        return types.SimpleNamespace(
+            sequences=[_FakeIds([1, 2, 3, 4, 5])],
+            logits=None, hidden_states=None, attentions=None,
+        )
+
+
+def _generate_backend(log_dir, temperature=0.7):
+    from redact.llms.backends import LLMBackend, TransformersIntrospectionBackend
+
+    b = object.__new__(TransformersIntrospectionBackend)
+    LLMBackend.__init__(b, "test-model", default_temperature=temperature)
+    b.hf_model_id, b._log_dir = "org/model", log_dir
+    b._capture = {"logprobs": True, "hidden_states": False, "attention": False}
+    b._sampling = {}
+    b._torch = types.SimpleNamespace(no_grad=contextlib.nullcontext)
+    b._tokenizer, b._model = _FakeTokenizer(), _FakeModel()
+    return b
+
+
+_MSG = [[{"role": "user", "content": "hi"}]]
+
+
+class TestGenerate:
+    """generate() against a fake tokenizer and model (no torch needed)."""
+
+    def test_chat_template_output_gets_no_second_set_of_special_tokens(self, tmp_path):
+        b = _generate_backend(tmp_path)
+        assert b.generate(_MSG) == ["reply"]
+        assert b._tokenizer.calls == [
+            {"return_tensors": "pt", "add_special_tokens": False}
+        ]
+
+    def test_logprobs_are_requested_as_raw_logits(self, tmp_path):
+        b = _generate_backend(tmp_path)
+        b.generate(_MSG, internals_ids=["u1/output"])
+        sent = b._model.calls[0]
+        assert sent["output_logits"] is True
+        assert "output_scores" not in sent
+        assert (tmp_path / "u1" / "output" / "meta.json").exists()
+
+    def test_zero_temperature_is_greedy_and_an_integer_is_accepted(self, tmp_path):
+        b = _generate_backend(tmp_path, temperature=0.0)
+        b.generate(_MSG)
+        b.generate(_MSG, temperature=1)
+        assert [c["do_sample"] for c in b._model.calls] == [False, True]
+        assert all(isinstance(c["temperature"], float) for c in b._model.calls)
