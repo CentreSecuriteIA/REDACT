@@ -172,12 +172,13 @@ def process_category(
     raw_short = generate_short_benign(
         category, client, num_samples, prompt_dir
     )
-    pairs_short = extract_structured_qa(raw_short)
+    # A reply with any other number of pairs is rejected whole.
+    pairs_short = extract_structured_qa(raw_short, expected_count=num_samples)
 
     raw_long = generate_long_benign(
         category, client, num_samples, prompt_dir
     )
-    pairs_long = extract_structured_qa(raw_long)
+    pairs_long = extract_structured_qa(raw_long, expected_count=num_samples)
 
     rows: list[dict] = []
     for pair in pairs_short:

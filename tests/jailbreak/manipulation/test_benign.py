@@ -28,6 +28,11 @@ class TestBenignCategories:
 
 
 class TestProcessCategory:
+    def test_wrong_pair_count_rejects_the_reply(self):
+        backend = MockBackend("**Question:** Q?\n**Answer:** A.")
+        rows = process_category(("Test", "Sub"), make_client(backend), num_samples=2)
+        assert rows == []
+
     def test_returns_rows(self):
         qa_text = (
             "**Prompt 1:**\n"
@@ -41,6 +46,7 @@ class TestProcessCategory:
         rows = process_category(
             ("Home & Daily Life", "Cooking & Baking"),
             make_client(backend),
+            num_samples=2,
         )
         assert len(rows) > 0
         assert all("prompt" in r for r in rows)
@@ -54,7 +60,7 @@ class TestProcessCategory:
         )
         backend = MockBackend(qa_text)
         rows = process_category(
-            ("Test", "Sub"), make_client(backend),
+            ("Test", "Sub"), make_client(backend), num_samples=1,
         )
         types = set(r["answer_type"] for r in rows)
         assert "short" in types

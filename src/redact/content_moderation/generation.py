@@ -442,8 +442,10 @@ class InputPipeline(_StandaloneGenerationMixin):
             # 3. Extract per entry
             per_entry_extracted: list[list[str]] = []
             for (_, entry), raw_output in zip(batch, raw_outputs):
+                # A reply with any other number of samples is rejected whole.
                 extracted = extract_and_clean(
-                    raw_output, style=self.extraction_style
+                    raw_output, style=self.extraction_style,
+                    expected_count=samples_per_entry,
                 )
                 if prohibited:
                     extracted = [s for s in extracted if s not in prohibited]

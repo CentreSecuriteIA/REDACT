@@ -8,12 +8,11 @@ Then point a run at it (``prompt_dir="./my_prompts"``). The directory is an
 otherwise, so delete every file you don't intend to change — keeping only
 your edits means the rest stay current when the library's prompts improve.
 
-``--empty`` replaces system_prompt/template/instruction with documented
-TODOs that still name each seed_fields entry as a real {placeholder}, so a
-scaffolded file round-trips through build_messages() before anyone fills it
-in. It redacts prompt *text* only: directory and category names describe harm
-categories by design and are left as-is, so review the output before
-publishing anything built from it.
+``--empty`` replaces system_prompt/template/instruction with TODOs that keep
+each field's own {placeholders}, so a scaffolded file renders with the same
+values as the original before anyone fills it in. It redacts prompt *text*
+only: directory and category names describe harm categories by design and are
+left as-is, so review the output before publishing anything built from it.
 """
 
 import argparse

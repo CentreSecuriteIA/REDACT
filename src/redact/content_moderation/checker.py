@@ -171,7 +171,7 @@ def build_paraphrase_checker(
 
     Deliberately separate from the paraphraser — a weak paraphraser must never
     grade its own output. Loads
-    ``prompts/output/paraphrase_check/template.json``.
+    ``prompts/paraphrase/check/template.json``.
 
     Args:
         prompt_dir: Root directory for prompt JSON files.

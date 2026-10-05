@@ -27,16 +27,23 @@ class TestGenerateCategoryDescription:
 class TestGenerateSeeds:
     def test_returns_numbered_list(self):
         backend = MockBackend("1. Seed one\n2. Seed two\n3. Seed three")
-        result = generate_seeds(make_client(backend, "model"), "Violence", "Description of violence"
+        result = generate_seeds(make_client(backend, "model"), "Violence", "Description of violence",
+            num_seeds=3,
         )
         assert "1." in result
         assert "Seed one" in result
 
     def test_retry_on_empty(self):
         backend = MockBackend(["No format here", "1. Real seed"])
-        result = generate_seeds(make_client(backend, "model"), "Test", "desc", max_retries=3
+        result = generate_seeds(make_client(backend, "model"), "Test", "desc", max_retries=3,
+            num_seeds=1,
         )
         assert "Real seed" in result
+
+    def test_wrong_seed_count_is_retried(self):
+        backend = MockBackend(["1. only one", "1. first\n2. second"])
+        result = generate_seeds(make_client(backend, "model"), "Test", "desc", num_seeds=2)
+        assert result == "1. first\n2. second"
 
     def test_fallback_to_empty(self):
         backend = MockBackend("No numbered items at all")

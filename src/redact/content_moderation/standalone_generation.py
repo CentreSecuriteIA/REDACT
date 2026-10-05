@@ -74,9 +74,11 @@ class _StandaloneGenerationMixin:
 
         raw_output = generate_sample(self.gen, messages)
 
+        # A reply with any other number of samples is rejected whole.
         extracted = extract_and_clean(
             raw_output,
             style=self.extraction_style,
+            expected_count=samples_per_request,
         )
 
         return raw_output, extracted

@@ -144,9 +144,10 @@ def generate_seeds(
 
     for attempt in range(max_retries):
         raw = generate_sample(client, messages)
-        examples = extract_numbered_list(raw)
+        examples = extract_numbered_list(raw, strict=True)
 
-        if examples:
+        # Anything but exactly num_seeds seeds counts as a failed attempt.
+        if len(examples) == num_seeds:
             result = "\n".join(f"{i + 1}. {ex}" for i, ex in enumerate(examples))
             logger.info(
                 "Generated %d seeds for '%s' (attempt %d)",
@@ -155,8 +156,8 @@ def generate_seeds(
             return result
 
         logger.warning(
-            "No seeds extracted for '%s' (attempt %d/%d)",
-            category, attempt + 1, max_retries,
+            "Expected %d seeds for '%s', extracted %d (attempt %d/%d)",
+            num_seeds, category, len(examples), attempt + 1, max_retries,
         )
 
     logger.warning("Could not generate seeds for '%s', returning empty", category)

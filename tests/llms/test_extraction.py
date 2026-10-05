@@ -1,5 +1,7 @@
 """Tests for regex extraction, cleaning, and constitution parsing."""
 
+import time
+
 import pytest
 
 from redact.llms.prompting import (
@@ -42,6 +44,18 @@ class TestGetFormatInstruction:
         # validation — this is the "the two can't silently drift" guarantee.
         for style in EXTRACTION_STYLES:
             assert get_format_instruction(style, num_samples=1)
+
+    @pytest.mark.parametrize("content, reason", [
+        ('{"instruction": "Give {num_sample}"}', r"is missing \{num_sample\}"),
+        ('{"system_prompt": "S", "template": "T"}', 'needs an "instruction"'),
+    ], ids=["wrong-placeholder", "no-instruction-key"])
+    def test_a_broken_override_is_named(self, tmp_path, content, reason):
+        override = tmp_path / "format_instructions" / "numbered"
+        override.mkdir(parents=True)
+        (override / "template.json").write_text(content, encoding="utf-8")
+        with pytest.raises(ValueError, match=reason) as exc:
+            get_format_instruction("numbered", num_samples=2, prompt_dir=tmp_path)
+        assert "instruction of format_instructions/numbered (override:" in str(exc.value)
 
 
 # ---------------------------------------------------------------------------
@@ -165,11 +179,24 @@ class TestCleanSample:
         assert "Here are" not in result
         assert "Actual content" in result
 
-    def test_meta_patterns(self):
-        for prefix in ["Note:", "Sure", "Of course", "I'll", "Let me", "Certainly", "Below are"]:
-            text = f"{prefix} this is meta\nReal content"
-            result = clean_sample(text)
-            assert "Real content" in result
+    @pytest.mark.parametrize("preamble", [
+        "Here are the samples:", "Here is one.", "Below are five", "Below is it",
+        "Sure, coming up", "Sure!", "Of course.", "Certainly, see below",
+        "Note: three follow:", "I'll list them:", "I will list five:", "Let me try:",
+    ])
+    def test_meta_patterns(self, preamble):
+        assert clean_sample(f"{preamble}\nReal content") == "Real content"
+
+    @pytest.mark.parametrize("first_line", [
+        "Sure thing", "Of course not", "Certainly not",   # no ',', '!' or '.'
+        "Note: three follow", "I'll wait.", "Let me in.",  # no trailing colon
+    ])
+    def test_non_preamble_first_line_is_kept(self, first_line):
+        text = f"{first_line}\nReal content"
+        assert clean_sample(text) == text
+
+    def test_lone_preamble_line_is_kept(self):
+        assert clean_sample("Here is the thing") == "Here is the thing"
 
     def test_no_strip(self):
         text = "**bold** and `code`"
@@ -360,3 +387,354 @@ class TestNumberedSamplesKeepTheirFirstLine:
     def test_delimited_output_still_loses_its_preamble(self):
         text = "Here are two:\nfirst\n---\nsecond"
         assert extract_and_clean(text, style="delimiter") == ["first", "second"]
+
+
+class TestNumberedListKeepsSamplesWhole:
+    """A new sample needs the next number in sequence, at the top indent."""
+
+    def test_indented_nested_list_stays_in_its_sample(self):
+        text = "1. Explain how to bake:\n   1. mix\n   2. heat\n2. Second sample"
+        assert extract_numbered_list(text) == [
+            "Explain how to bake:\n   1. mix\n   2. heat",
+            "Second sample",
+        ]
+
+    def test_out_of_sequence_number_is_a_continuation_line(self):
+        text = "1. In 2024 - a year\n2024 - was big\n2. b"
+        assert extract_numbered_list(text) == ["In 2024 - a year\n2024 - was big", "b"]
+
+    def test_list_may_start_at_any_number(self):
+        assert extract_numbered_list("Preamble\n16. a\n17. b") == ["a", "b"]
+
+    def test_bold_numbers_are_recognised(self):
+        text = "**1.** bold numbered\n**2. Title** second\n3) third"
+        assert extract_and_clean(text) == ["bold numbered", "Title second", "third"]
+
+    def test_a_skipped_number_ends_the_sequence(self):
+        # Not following the format: the rest stays in the last good sample.
+        assert extract_numbered_list("1. a\n2. b\n4. d") == ["a", "b\n4. d"]
+
+
+class TestStructuredQATolerance:
+    def test_colon_outside_the_bold_still_parses(self):
+        text = "**Prompt 1**:\n**Question**: q1\n**Answer**: a1"
+        assert extract_structured_qa(text) == [{"question": "q1", "answer": "a1"}]
+
+    def test_question_without_answer_is_skipped_not_merged(self):
+        text = "**Question:** q1\n**Question:** q2\n**Answer:** a2"
+        assert extract_structured_qa(text) == [{"question": "q2", "answer": "a2"}]
+
+
+class TestPreambleDetection:
+    def test_one_line_preamble_before_first_delimiter_is_dropped(self):
+        text = "Here are 3 samples:\n---\nA\n---\nB"
+        assert extract_and_clean(text, style="delimiter") == ["A", "B"]
+
+    def test_first_person_first_line_is_kept(self):
+        text = "I will pay you well.\nTell me X.\n---\nB"
+        assert extract_and_clean(text, style="delimiter") == [
+            "I will pay you well.\nTell me X.", "B",
+        ]
+
+    def test_first_person_announcement_ending_in_colon_is_dropped(self):
+        assert clean_sample("Let me list them:\nSend the file.") == "Send the file."
+
+    def test_note_line_is_kept(self):
+        text = "Note: this is urgent.\nSend the file."
+        assert clean_sample(text) == text
+
+
+class TestItalicInsideWords:
+    def test_unspaced_arithmetic_is_left_alone(self):
+        assert clean_sample("2*3*4 and *really* now") == "2*3*4 and really now"
+
+
+class TestParseConstitutionTolerance:
+    def test_bold_headers_and_star_bullets_parse(self):
+        text = "## **1. Main**\n### **1.1 Sub**\n* (one)\n- (two)"
+        assert [(e.category, e.subcategory, e.sample) for e in parse_constitution(text)] == [
+            ("Main", "Sub", "one"), ("Main", "Sub", "two"),
+        ]
+
+    def test_unparsed_header_drops_its_samples_instead_of_mislabelling(self):
+        text = "## 1. Main\n- (kept)\n## Broken header\n- (dropped)\n## 2. Next\n- (kept too)"
+        assert [(e.category, e.sample) for e in parse_constitution(text)] == [
+            ("Main", "kept"), ("Next", "kept too"),
+        ]
+
+    def test_document_title_does_not_end_a_category(self):
+        text = "## 1. Main\n# Title\n- (kept)"
+        assert [e.sample for e in parse_constitution(text)] == ["kept"]
+
+
+class TestExpectedCountRejectsTheWholeReply:
+    """With a requested count, a reply is all or nothing."""
+
+    def test_matching_count_is_returned(self):
+        assert extract_and_clean("1. a\n2. b", expected_count=2) == ["a", "b"]
+
+    @pytest.mark.parametrize("text", [
+        "1. a",                    # too few (cut off)
+        "1. a\n2. b\n3. c",        # too many
+        "1. a\n2. b\n4. d",        # skipped a number
+        "1. a\n1. b\n2. c",        # repeated a number: split is ambiguous
+        "2. a\n3. b",              # does not start at 1
+        "1. a\n2024 - not a new item\n2. b",   # stray numbered line
+        "no list at all",
+    ])
+    def test_malformed_numbered_reply_is_rejected(self, text):
+        assert extract_and_clean(text, expected_count=2) == []
+
+    def test_indented_nested_list_is_still_one_sample(self):
+        text = "1. Steps:\n   1. mix\n   2. heat\n2. b"
+        assert extract_and_clean(text, expected_count=2) == [
+            "Steps:\n   1. mix\n   2. heat", "b",
+        ]
+
+    def test_delimiter_count_mismatch_is_rejected(self):
+        assert extract_and_clean("a\n---\nb", style="delimiter", expected_count=3) == []
+
+    def test_structured_qa_count_mismatch_is_rejected(self):
+        text = "**Question:** q\n**Answer:** a"
+        assert extract_structured_qa(text, expected_count=1) == [{"question": "q", "answer": "a"}]
+        assert extract_structured_qa(text, expected_count=2) == []
+
+    def test_without_a_count_parsing_stays_lenient(self):
+        assert extract_and_clean("1. a\n2. b\n3. c") == ["a", "b", "c"]
+
+
+class TestStrictNumberedList:
+    """A count is never met by dropping, splitting or relabelling items."""
+
+    @pytest.mark.parametrize("text", [
+        "1. \n2. b\n3. c",                 # empty item, extra one fills the count
+        "1. a\n2. \n3. c",
+        "1. ```\n```\n2. b\n3. c",         # item emptied by cleaning
+        "1. a\n2) b",                      # separator changes
+        "**1.** a\n2. b",                  # bold style changes
+        "1. Ranged from\n2 - 5 degrees",   # wrapped line that looks like item 2
+        "١. a\n٢. b",            # non-ASCII digits
+    ])
+    def test_ambiguous_reply_is_rejected(self, text):
+        assert extract_and_clean(text, expected_count=2) == []
+
+    def test_strict_list_rejects_an_empty_item(self):
+        assert extract_numbered_list("1. \n2. b\n3. c", strict=True) == []
+
+    @pytest.mark.parametrize("text, expected", [
+        ("1) a\n2) b", ["a", "b"]),
+        ("**1.** a\n**2.** b", ["a", "b"]),
+        ("**1. T** a\n**2. U** b", ["T a", "U b"]),
+        ("1. 3 ways to do it\n2. 2024 was big", ["3 ways to do it", "2024 was big"]),
+        ("1. a\n\nsecond paragraph\n2. b", ["a\n\nsecond paragraph", "b"]),
+    ])
+    def test_consistent_reply_is_accepted(self, text, expected):
+        assert extract_and_clean(text, expected_count=2) == expected
+
+    def test_mixed_styles_still_parse_without_a_count(self):
+        assert extract_numbered_list("1. a\n2) b\n3: c") == ["a", "b", "c"]
+
+    def test_oversized_number_does_not_raise(self):
+        # int() refuses strings over 4300 digits.
+        text = "1. a\n2. b\n" + "9" * 5000 + ". c"
+        assert len(extract_numbered_list(text)) == 2
+
+
+class TestLeakedChatTokens:
+    """A leaked token means the model ran past its turn."""
+
+    @pytest.mark.parametrize("text, style", [
+        ("1. a<|im_end|>\n2. b", "numbered"),
+        ("1. a\n2. b\n<|im_start|>user", "numbered"),
+        ("1. a\n2. b|im_end", "numbered"),
+        ("a\n---\nb<|im_end|>", "delimiter"),
+    ])
+    def test_rejected_when_a_count_is_requested(self, text, style):
+        assert extract_and_clean(text, style=style, expected_count=2) == []
+
+    def test_strict_list_rejects_it(self):
+        assert extract_numbered_list("1. a\n2. b<|im_end|>", strict=True) == []
+
+    def test_structured_qa_rejects_it(self):
+        text = "**Question:** q\n**Answer:** a<|im_end|>"
+        assert extract_structured_qa(text, expected_count=1) == []
+
+    @pytest.mark.parametrize("text, expected", [
+        ("done<|im_end|>", "done"),
+        ("<|im_start|>assistant\nHello", "Hello"),
+        ("<|im_start|>user\nfoo<|im_end|>\n<|im_start|>assistant", "foo"),
+        ("one|im_end|two", "one\ntwo"),            # words are not joined
+        ("ok<|im_start|>users agree", "ok\nusers agree"),  # not a role name
+    ])
+    def test_stripped_without_a_count(self, text, expected):
+        assert clean_sample(text) == expected
+
+    def test_lenient_extraction_strips_the_role_too(self):
+        text = "1. a<|im_end|>\n2. b<|im_start|>assistant"
+        assert extract_and_clean(text) == ["a", "b"]
+
+
+class TestStructuredQAStrict:
+    PAIRS = "**Question:** q1\n**Answer:** a1\n**Question:** q2\n**Answer:** a2"
+
+    @pytest.mark.parametrize("text", [
+        "**Question:**\n**Answer:** a1\n**Question:** q2\n**Answer:** a2",   # empty question
+        "**Question:** q1\n**Answer:**\n**Question:** q2\n**Answer:** a2",   # empty answer
+        "**Question:** q1\n**Answer:** a1\n**Question:** q2\n**Answer:**  \n",
+        "**Question:** q1\n**Answer:**\n**Prompt 2:**\n**Question:** q2\n**Answer:** a2",
+        "**Question:** q0\n" + PAIRS,                                        # orphan question
+        PAIRS.replace("a1\n", "a1\n**Answer:** again\n"),                    # second answer
+        PAIRS.replace("a1\n", "a1\n\n---\n\n"),                              # separators between pairs
+        PAIRS.replace("a1\n", "a1\n\n### Prompt 2\n"),
+        PAIRS.replace("a1\n", "a1\n\n**Pair 2:**\n"),
+        PAIRS.replace("a1\n", "a1\nPrompt 2:\n"),
+        "1. **Question:** q1\n**Answer:** a1\n2. **Question:** q2\n**Answer:** a2",
+        PAIRS + "\n\n---",
+    ])
+    def test_malformed_reply_is_rejected(self, text):
+        assert extract_structured_qa(text, expected_count=2) == []
+
+    @pytest.mark.parametrize("answer", [
+        "as in **Prompt 3:** above, do X",
+        "write **Question:** then **Answer:** below",
+        "steps:\n1. mix\n2. heat",
+        "line one\n\n## Heading\n- **bold** point",
+    ])
+    def test_label_like_and_markdown_text_stays_in_the_answer(self, answer):
+        text = f"**Question:** q\n**Answer:** {answer}"
+        assert extract_structured_qa(text, expected_count=1) == [
+            {"question": "q", "answer": answer}
+        ]
+
+    def test_label_like_text_stays_in_the_question(self):
+        text = "**Question:** what does **Answer:** mean?\n**Answer:** a"
+        assert extract_structured_qa(text, expected_count=1) == [
+            {"question": "what does **Answer:** mean?", "answer": "a"}
+        ]
+
+    def test_incomplete_pair_is_skipped_without_a_count(self):
+        text = "**Question:**\n**Answer:** a1\n" + self.PAIRS
+        assert [p["question"] for p in extract_structured_qa(text)] == ["q1", "q2"]
+
+
+class TestCrlf:
+    def test_numbered(self):
+        text = "1. a\r\nmore\r\n\r\n\r\n\r\nend\r\n2. b\r\n"
+        assert extract_and_clean(text, expected_count=2) == ["a\nmore\n\nend", "b"]
+
+    def test_structured_qa(self):
+        text = "**Prompt 1:**\r\n**Question:** q\r\n**Answer:** a\r\nmore\r\n"
+        assert extract_structured_qa(text, expected_count=1) == [
+            {"question": "q", "answer": "a\nmore"}
+        ]
+
+    def test_delimited(self):
+        assert extract_delimited("a\r\n---\r\nb\r\n") == ["a", "b"]
+
+    def test_constitution(self):
+        text = "## 1. Main\r\n### 1.1 Sub\r\n- (one)\r\n"
+        assert parse_constitution(text) == [ConstitutionEntry("Main", "Sub", "one")]
+
+
+class TestCleanSampleKeepsOperators:
+    @pytest.mark.parametrize("text", [
+        "2**3 equals 8 and 3**2 is 9",
+        "Use **kwargs and **opts here",
+        "def f(*args, **kwargs): pass",
+        "E = m*c**2",
+        "Rate it *****",
+    ])
+    def test_double_asterisk_operator_is_left_alone(self, text):
+        assert clean_sample(text) == text
+
+    @pytest.mark.parametrize("text, expected", [
+        ("**Title:** text and **b c**", "Title: text and b c"),
+        ("***both***", "both"),
+        ("Run ```rm -rf /``` now", "Run rm -rf / now"),          # one-line fence
+        ("x = ```c```", "x = c"),
+        ("Use ``` to open a block", "Use  to open a block"),     # stray fence
+        ("a\n \n \t\n \nb", "a\n\nb"),                           # whitespace-only lines
+        ("a\n\n\n   indented", "a\n\n   indented"),
+    ])
+    def test_markup_is_removed_and_text_kept(self, text, expected):
+        assert clean_sample(text) == expected
+
+
+class TestDelimitedPreamble:
+    def test_only_the_first_part_loses_a_preamble(self):
+        text = "first\n---\nHere is my plan.\nStep one.\n---\nSure, why not.\nGo."
+        assert extract_and_clean(text, style="delimiter", expected_count=3) == [
+            "first", "Here is my plan.\nStep one.", "Sure, why not.\nGo.",
+        ]
+
+    def test_part_emptied_by_cleaning_rejects_the_reply(self):
+        text = "a\n---\n```\n```\n---\nb"
+        assert extract_and_clean(text, style="delimiter", expected_count=2) == []
+
+
+class TestParseConstitutionStrictness:
+    @pytest.mark.parametrize("header, name", [
+        ("## 1. **Main**", "Main"),
+        ("## *1. Main*", "Main"),
+        ("## __1. Main__", "Main"),
+        ("## 1. Main:", "Main"),
+        ("##   1.   Main   ", "Main"),
+        ("## 1. Main (with note)", "Main (with note)"),
+    ])
+    def test_header_markup_is_stripped_from_the_name(self, header, name):
+        entries = parse_constitution(f"{header}\n### 1.1 **Sub**:\n- (one)")
+        assert entries == [ConstitutionEntry(name, "Sub", "one")]
+
+    @pytest.mark.parametrize("bullet, sample", [
+        ("- (text (with parens) more)", "text (with parens) more"),
+        ("- (a (b) c (d) e)", "a (b) c (d) e"),
+    ])
+    def test_nested_parentheses_are_kept(self, bullet, sample):
+        assert [e.sample for e in parse_constitution(f"## 1. M\n{bullet}")] == [sample]
+
+    @pytest.mark.parametrize("bullet", [
+        "- (one) and (two)",       # two groups: which is the sample is a guess
+        "- (e.g.) bad (really)",
+        "- (one) trailing note",
+        "- (one (unbalanced)",
+        "- ( )",
+        "- ()",
+        "1. (numbered)",
+    ])
+    def test_ambiguous_or_empty_sample_is_skipped(self, bullet):
+        assert parse_constitution(f"## 1. M\n{bullet}\n- (kept)") == [
+            ConstitutionEntry("M", "", "kept")
+        ]
+
+    @pytest.mark.parametrize("header", ["## 1. **", "## 1. :", "#### 1.1.1 Deep", "### Broken"])
+    def test_unparsed_header_ends_the_category(self, header):
+        text = f"## 1. A\n- (kept)\n{header}\n- (dropped)\n## 2. B\n- (kept too)"
+        assert [(e.category, e.sample) for e in parse_constitution(text)] == [
+            ("A", "kept"), ("B", "kept too"),
+        ]
+
+    def test_subcategory_before_any_category_has_no_samples(self):
+        text = "### 1.1 Sub\n- (dropped)\n## 1. Main\n- (kept)"
+        assert parse_constitution(text) == [ConstitutionEntry("Main", "", "kept")]
+
+
+class TestLinearTime:
+    """Each of these took from seconds to minutes when the pattern was quadratic."""
+
+    SIZE = 200_000
+
+    @pytest.mark.parametrize("parse, text", [
+        (extract_structured_qa, "**Question:** q" + " " * SIZE),
+        (extract_structured_qa, "**Question:** q" + "\n" * SIZE),
+        (extract_delimited, "\n" * SIZE),
+        (extract_delimited, " \n" * (SIZE // 2)),
+        (parse_constitution, "##" + " " * SIZE + "x"),
+        (parse_constitution, "## 1. a" + " " * SIZE + "b"),
+        (parse_constitution, "### 1.1 a" + " " * SIZE + "b"),
+        (clean_sample, " **a" * (SIZE // 4)),
+    ], ids=["qa-spaces", "qa-newlines", "delimiter-blank", "delimiter-whitespace",
+            "main-header", "main-name", "sub-name", "bold"])
+    def test_whitespace_run_is_parsed_quickly(self, parse, text):
+        start = time.perf_counter()
+        parse(text)
+        assert time.perf_counter() - start < 2.0

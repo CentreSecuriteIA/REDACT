@@ -1,8 +1,8 @@
 """Write a prompt tree that a user can edit.
 
 ``mode="copy"`` writes the real prompts. ``mode="empty"`` writes skeletons
-with the same keys and the text replaced by TODOs. Used by
-``scripts/scaffold_prompts.py``.
+with the same keys, each text field replaced by a TODO that keeps that field's
+own placeholders. Used by ``scripts/scaffold_prompts.py``.
 
 A user's prompt directory only needs the files they changed, because prompts
 fall back to the packaged copy per file.
@@ -13,29 +13,38 @@ import shutil
 from pathlib import Path
 
 from ... import paths
+from .prompts import _field_roots
 
 _DEFAULT_PROMPT_DIR = paths.prompts_dir()
+
+
+def _placeholders(text: object) -> str:
+    """The ``{placeholders}`` one prompt text field uses, as stub text."""
+    try:
+        roots = _field_roots(text) if isinstance(text, str) else []
+    except ValueError:
+        # A malformed source field has no placeholders to carry over.
+        roots = []
+    return " ".join(f"{{{r}}}" for r in roots if r.isidentifier()) or "(none)"
+
 
 def _placeholder_prompt(config: dict) -> dict:
     """Replace one prompt config's text with placeholders, keeping its keys.
 
     - ``system_prompt``, ``template`` and ``instruction`` (whichever the file
-      has) become a TODO that names every ``seed_fields`` entry as a
-      ``{placeholder}``.
+      has) each become a TODO holding the ``{placeholders}`` that field used,
+      so the stub renders with the same values as the original.
     - ``few_shot_examples`` is emptied if present.
     - ``metadata`` is set to version ``0.0`` with a placeholder note.
 
     Every other key, including ``seed_fields``, is kept unchanged.
     """
     stub = dict(config)
-    seed_fields = config.get("seed_fields", [])
-    fields_note = (
-        " ".join(f"{{{f}}}" for f in seed_fields) if seed_fields else "(no seed_fields declared)"
-    )
     for key in ("system_prompt", "template", "instruction"):
         if key in stub:
             stub[key] = (
-                f"TODO: replace with a real {key}. Available placeholder fields: {fields_note}"
+                f"TODO: replace with a real {key}. "
+                f"Placeholders: {_placeholders(config[key])}"
             )
     # Emptied only if present, so the stub gains no key its source lacks.
     if "few_shot_examples" in stub:
@@ -61,8 +70,8 @@ def scaffold_prompt_tree(
         target_dir: Root directory to write into.
         source_dir: Root to copy from. Defaults to the packaged ``prompts/``.
         mode: ``"copy"`` (default) writes the real prompts. ``"empty"``
-            writes skeletons whose text is replaced by TODOs naming each
-            ``seed_fields`` entry as a ``{placeholder}``.
+            writes skeletons whose text fields are replaced by TODOs that
+            keep each field's own ``{placeholders}``.
 
     Returns:
         Number of files written.
