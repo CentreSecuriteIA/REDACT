@@ -98,9 +98,10 @@ def _engine(hf_model_id: str, quantization: str | None, vllm_kwargs: dict):
 
         # No download_dir is passed: the hub cache is $HF_HOME/hub, so HF_HOME would download again.
         kwargs = dict(vllm_kwargs)
-        planned = _planned_utilization.get(key)
-        if planned is not None:
-            kwargs.setdefault("gpu_memory_utilization", planned)
+        # The plan's share, else the planner's whole-card one: vLLM's own
+        # default is more than the plan assumes.
+        kwargs.setdefault("gpu_memory_utilization", _planned_utilization.get(
+            key, estimate.DEFAULT_GPU_MEMORY_UTILIZATION))
         # After the key is built, so the default never splits a shared engine.
         if not kwargs.get("max_model_len"):
             kwargs["max_model_len"] = estimate.effective_max_model_len(hf_model_id)

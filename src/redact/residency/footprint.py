@@ -8,9 +8,9 @@ from redact.llms.resources import estimate
 
 # The two constants below are shared by placement.py and explain.py.
 
-#: Share of a card the plan hands out once a vLLM engine is on it. The rest
-#: is headroom: allocator fragmentation and each process's CUDA context.
-_CARD_CEILING = 0.9
+#: Share of a card the plan hands out once a vLLM engine is on it: the same
+#: share an unplanned engine loads with.
+_CARD_CEILING = estimate.DEFAULT_GPU_MEMORY_UTILIZATION
 
 #: ``device_map`` values that let transformers split one model across cards.
 _SPANNING_DEVICE_MAPS = frozenset({"auto", "balanced", "balanced_low_0", "sequential"})

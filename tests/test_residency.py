@@ -1314,11 +1314,11 @@ class TestPlannedUtilization:
         # Pool 43.2, padded needs 22.6 + 11.6, spare 9.0: 27.1 and 16.1 of the 48.
         assert [c["gpu_memory_utilization"] for c in calls] == [0.5645, 0.3354]
 
-    def test_no_plan_leaves_the_vllm_default(self, engine):
+    def test_no_plan_loads_with_the_planners_whole_card_share(self, engine):
         vllm_module, calls = engine
         vllm_module._engine("org/noplan", None, {"max_model_len": 512})
         assert calls == [{"model": "org/noplan", "quantization": None,
-                          "max_model_len": 512}]
+                          "max_model_len": 512, "gpu_memory_utilization": 0.9}]
 
     def test_a_plan_is_swapped_in_whole(self, engine):
         """A load must never read a cleared, half-filled plan."""
@@ -1389,7 +1389,7 @@ class TestPlannedUtilization:
             residency.apply_plan(_plan([a], 40.0, 1))
         assert vllm_module._planned_utilization == {key_a: 0.9}
         vllm_module._engine("org/p2b", None, {})
-        assert "gpu_memory_utilization" not in calls[0]
+        assert calls[0]["gpu_memory_utilization"] == 0.9
 
     def test_replace_false_keeps_the_values_already_set(self, registered, engine):
         vllm_module, _ = engine
@@ -1568,7 +1568,7 @@ class TestDefaultContextLength:
         with _config(MISTRAL_24B):
             vllm_module._engine("org/dc-noplan", None, {})
         assert calls == [{"model": "org/dc-noplan", "quantization": None,
-                          "max_model_len": 10_000}]
+                          "max_model_len": 10_000, "gpu_memory_utilization": 0.9}]
 
     def test_the_default_reaches_the_engine_with_a_plan(self, registered, engine):
         vllm_module, calls = engine

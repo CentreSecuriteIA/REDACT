@@ -54,6 +54,11 @@ DEFAULT_CUDA_CONTEXT_GIB = 0.6
 #: Context length of a vLLM engine whose setup sets no ``max_model_len``.
 DEFAULT_MAX_MODEL_LEN = 10_000
 
+#: ``gpu_memory_utilization`` of a vLLM engine loaded without a plan, and the
+#: share of a card the planner hands out. The rest is headroom: allocator
+#: fragmentation and each process's CUDA context.
+DEFAULT_GPU_MEMORY_UTILIZATION = 0.9
+
 #: Default for ``config=``: the caller has not read the config yet.
 _UNREAD = object()
 
