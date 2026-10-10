@@ -371,6 +371,11 @@ class VLLMBackend(LLMBackend):
             out_tok=sum(len(getattr(o.outputs[0], "token_ids", None) or ()) for o in outputs),
             max_tokens=max_tok, temperature=temp,
         )
+        # vLLM says "length" for both caps, max_tokens and max_model_len.
+        self._warn_cut(
+            sum(getattr(o.outputs[0], "finish_reason", None) == "length" for o in outputs),
+            len(messages_list), max_tok,
+        )
         return [self._clean_output(out.outputs[0].text) for out in outputs]
 
     @property

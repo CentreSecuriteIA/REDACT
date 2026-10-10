@@ -17,10 +17,12 @@ cached locally::
 """
 
 import json
+import logging
 import os
 import subprocess
 import sys
 import textwrap
+import types
 
 import pytest
 
@@ -259,6 +261,63 @@ class TestExitHook:
         assert "shut down" in result.stdout
 
 
+_HI = [{"role": "user", "content": "hi"}]
+
+
+def _output(text, **attrs):
+    """One vLLM RequestOutput as generate() reads it; attrs land on the CompletionOutput."""
+    return types.SimpleNamespace(
+        prompt_token_ids=[1, 2],
+        outputs=[types.SimpleNamespace(text=text, token_ids=[3, 4], **attrs)],
+    )
+
+
+class _FakeEngine:
+    def __init__(self, outputs):
+        self._outputs = outputs
+
+    def chat(self, chat_inputs, sampling_params):
+        return self._outputs
+
+    def shutdown(self):
+        """So clear_cache() at teardown finds a hook and stays quiet."""
+
+
+def _vllm_backend(monkeypatch, outputs):
+    """A VLLMBackend on a fake engine. vllm is not installed, so SamplingParams is faked too."""
+    import redact.llms.backends.vllm as vllm_module
+    from redact.llms.backends import VLLMBackend
+
+    monkeypatch.setitem(sys.modules, "vllm", types.SimpleNamespace(SamplingParams=lambda **kw: kw))
+    # _engine() returns a cached engine before it imports vllm.
+    vllm_module._engines[vllm_module._engine_key("org/x", None, {})] = _FakeEngine(outputs)
+    return VLLMBackend("m", "org/x", default_max_tokens=8)
+
+
+class TestVLLMCutReplies:
+    """One warning per engine pass, counting the replies vLLM ended with "length"."""
+
+    def test_cut_replies_warn_once_per_pass(self, monkeypatch, caplog):
+        b = _vllm_backend(monkeypatch, [
+            _output("a", finish_reason="length"),
+            _output("b", finish_reason="stop"),
+            _output("c", finish_reason="length"),
+        ])
+        with caplog.at_level(logging.WARNING, logger="redact.llms.backends"):
+            assert b.generate([_HI] * 3) == ["a", "b", "c"]
+        assert [r.getMessage() for r in caplog.records] == [
+            "m: 2 of 3 replies were cut at the token limit (max_tokens=8) and are "
+            "incomplete; raise max_tokens or the context length (max_model_len), or ask for shorter replies."
+        ]
+
+    @pytest.mark.parametrize("attrs", [{"finish_reason": "stop"}, {}], ids=["stop", "no-attribute"])
+    def test_complete_replies_do_not_warn(self, monkeypatch, caplog, attrs):
+        b = _vllm_backend(monkeypatch, [_output("a", **attrs), _output("b", **attrs)])
+        with caplog.at_level(logging.WARNING, logger="redact.llms.backends"):
+            assert b.generate([_HI] * 2) == ["a", "b"]
+        assert caplog.records == []
+
+
 class MockBackend(LLMBackend):
     """Minimal backend that returns preset responses for testing."""
 
@@ -436,6 +495,11 @@ class TestVLLMBackendGPU:
     def test_batch_generate_empty_list(self, backend):
         results = backend.generate([])
         assert results == []
+
+    def test_a_cut_reply_warns(self, backend, caplog):
+        with caplog.at_level(logging.WARNING, logger="redact.llms.backends"):
+            backend.generate([[{"role": "user", "content": "Count from 1 to 500."}]], max_tokens=4)
+        assert any("1 of 1 replies were cut" in r.getMessage() for r in caplog.records)
 
     def test_batch_generate_single_item(self, backend):
         prompts = [[{"role": "user", "content": "Say the word yes."}]]
