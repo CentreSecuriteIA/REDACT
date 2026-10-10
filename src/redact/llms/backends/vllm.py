@@ -41,6 +41,8 @@ _engine_loaded_at: dict[tuple, float] = {}
 # gpu_memory_utilization per engine key, set by the residency plan. Applied
 # at load and kept out of the key, so it never splits a shared engine.
 _planned_utilization: dict[tuple, float] = {}
+# Set once the exit hook is registered, at the first load (see _engine).
+_exit_hook_registered = False
 
 
 def set_planned_utilization(planned: dict[tuple, float], replace: bool = True) -> None:
@@ -73,6 +75,7 @@ def _prepare_environment() -> None:
 
 def _engine(hf_model_id: str, quantization: str | None, vllm_kwargs: dict):
     """Get or load the vLLM engine for one checkpoint."""
+    global _exit_hook_registered
     key = _engine_key(hf_model_id, quantization, vllm_kwargs)
     # One read: clear_cache() may drop the key between a test and a lookup.
     engine = _engines.get(key)
@@ -107,6 +110,13 @@ def _engine(hf_model_id: str, quantization: str | None, vllm_kwargs: dict):
         # process, so a measurement would restate the setting.
         _engines[key] = LLM(model=hf_model_id, quantization=quantization, **kwargs)
         _engine_loaded_at[key] = time.perf_counter()
+        if not _exit_hook_registered:
+            # After the first load, so it runs before every exit hook registered
+            # until then (atexit runs them last-registered first): among them
+            # multiprocessing's, which joins the engine's child process and
+            # never returns while the engine runs.
+            atexit.register(VLLMBackend.clear_cache)
+            _exit_hook_registered = True
 
         observe.record({
             "ev": "local",
@@ -159,7 +169,7 @@ def _shut_down(engine) -> None:
 def _release_engines(keep: Collection[tuple] = ()) -> None:
     """Emit a lifetime event per loaded engine, then forget the timers.
 
-    Called from :meth:`VLLMBackend.clear_cache` and at exit, so a process
+    Called from :meth:`VLLMBackend.clear_cache`, at exit too, so a process
     that just exits still reports how long each engine was held. Engines
     whose key is in ``keep`` stay timed.
     """
@@ -176,11 +186,6 @@ def _release_engines(keep: Collection[tuple] = ()) -> None:
             "quantization": key[1],
             "held_s": round(now - loaded_at, 1),
         })
-
-
-# At exit only the hold time is recorded: a teardown could block on the lock
-# a preload thread holds, and process exit returns the card anyway.
-atexit.register(_release_engines)
 
 
 def held_seconds() -> dict[str, float]:
@@ -279,6 +284,8 @@ class VLLMBackend(LLMBackend):
         stays, so a reload gets the same share. A backend built on a released
         engine raises on ``generate()`` until the checkpoint is loaded again.
         A call in flight on a released engine is not waited for.
+        Also the exit hook: an engine's child process would otherwise keep
+        the interpreter from exiting.
 
         Args:
             keep: Engine keys (:func:`_engine_key`) to leave loaded and timed.

@@ -18,7 +18,9 @@ cached locally::
 
 import json
 import os
+import subprocess
 import sys
+import textwrap
 
 import pytest
 
@@ -223,6 +225,38 @@ class TestWorkerStartMethod:
         monkeypatch.delenv("VLLM_WORKER_MULTIPROC_METHOD")
         vllm_module._prepare_environment()
         assert os.environ["VLLM_WORKER_MULTIPROC_METHOD"] == "spawn"
+
+
+class TestExitHook:
+    """A process that ends with an engine loaded shuts it down first, or
+    multiprocessing's exit hook waits for the engine's child process forever."""
+
+    def test_exit_shuts_down_a_loaded_engine(self):
+        code = textwrap.dedent("""
+            import multiprocessing, sys, time, types
+            import redact.llms.backends.vllm as vllm_module
+            import redact.llms.resources.estimate as estimate
+
+            class _LLM:
+                def __init__(self, **kw):
+                    self.proc = multiprocessing.get_context("spawn").Process(
+                        target=time.sleep, args=(60,))
+                    self.proc.start()
+
+                def shutdown(self):
+                    self.proc.terminate()
+                    self.proc.join()
+                    print("shut down", flush=True)
+
+            sys.modules["vllm"] = types.SimpleNamespace(LLM=_LLM)
+            vllm_module._prepare_environment = lambda: None
+            estimate._load_config = lambda _id: None
+            vllm_module._engine("org/x", None, {})
+        """)
+        result = subprocess.run([sys.executable, "-c", code], capture_output=True,
+                                text=True, timeout=60)
+        assert result.returncode == 0, result.stderr
+        assert "shut down" in result.stdout
 
 
 class MockBackend(LLMBackend):

@@ -166,7 +166,8 @@ def _release_models(keep: Collection[tuple] = ()) -> None:
         })
 
 
-# At exit the hold time is recorded and nothing is freed, as in vllm.py.
+# At exit only the hold time is recorded: the model lives in this process,
+# which exit frees.
 atexit.register(_release_models)
 
 
