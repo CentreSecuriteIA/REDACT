@@ -565,6 +565,42 @@ def test_run_pipeline_summary_counts_engines_still_loaded(tmp_path, monkeypatch)
     assert summary["telemetry"]["local_s"]["org/still-loaded"] == pytest.approx(120.0, abs=5)
 
 
+def test_a_failed_stage_still_releases_the_models_and_logs_the_summary(
+        tmp_path, monkeypatch, caplog):
+    """The card comes back and the cost is reported, whatever the stage did."""
+    import logging
+    import time
+
+    import redact
+    import redact.llms.backends.vllm as vllm_module
+    from redact import residency
+
+    def boom(**k):
+        raise RuntimeError("boom")
+
+    monkeypatch.setattr(redact, "generate_inputs", boom)
+    key = ("org/left-loaded", None, "[]")
+    vllm_module._engine_loaded_at[key] = time.perf_counter() - 120.0
+    wanted = []
+    recipe = {"dataset_type": "eval", "data_dir": str(tmp_path), "stages": ["inputs"],
+              "models": {"gen": "llama-3.2-3b-debug"}}
+    card = _one_card(10.0)
+    try:
+        with card[0], card[1], \
+             patch.object(residency, "preload",
+                          side_effect=lambda names, **kw: wanted.append(kw["wanted"])), \
+             caplog.at_level(logging.INFO, logger="redact.telemetry"), \
+             pytest.raises(RuntimeError, match="boom"):
+            run_pipeline(recipe, params={"inputs": {}}, verbose=False)
+    finally:
+        released = key not in vllm_module._engine_loaded_at    # read before the cleanup
+        vllm_module._engine_loaded_at.pop(key, None)
+        telemetry.uninstall()
+    assert released                                            # released at the end
+    assert wanted == [set()]                                   # the preloader was told to stop
+    assert "[telemetry] local org/left-loaded held" in caplog.text
+
+
 def test_load_recipe_rejects_a_repeated_stage():
     from redact.runconfig import load_recipe
 
