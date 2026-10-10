@@ -154,41 +154,85 @@ def _counts(df) -> dict:
     return out
 
 
-def _plan_and_preload(
+def _plan_phases(
     models: dict,
     stages: list[str],
     verbose: bool = True,
     augmentations: dict | None = None,
-):
-    """Plan the run's local models, report and apply the plan, start preloading.
+) -> list:
+    """Plan each stage's local models, report the plans and apply the grants.
 
-    Runs before the stage loop, so a run that does not fit says so before any
-    stage spends its budget. Nothing here aborts the run: a plan that does
-    not fit, a failed preload and a planning error are only logged.
+    Runs before the stage loop, so a stage that does not fit says so before
+    any stage spends its budget. Nothing here aborts the run: a plan that
+    does not fit and a planning error are only logged.
 
     Returns:
-        The :class:`~redact.residency.ResidencyPlan`, or
-        ``None`` when the stages call no model or planning failed.
+        One :class:`~redact.residency.Phase` per stage, or ``[]`` when no
+        stage calls a local model or planning failed.
     """
     from . import residency
 
     try:
-        wanted = _stage_models(models, stages, augmentations or {})
-        if not wanted:
-            return None
-        plan = residency.plan_residency(wanted)
-        residency.report(plan, verbose=verbose)
-        # Before the preload, so it loads with the planned grants too.
-        residency.apply_plan(plan)
-        # Only warm the first group: a later one cannot load beside it. Models
-        # are in stage order, so the first group holds what is needed first.
-        first = [fp.model for fp in plan.groups[0]] if plan.groups else []
-        residency.preload(first, verbose=verbose)
+        aug = augmentations or {}
+        phases = residency.plan_phases(
+            {stage: _stage_models(models, [stage], aug) for stage in stages})
+        if not any(phase.resident for phase in phases):
+            return []
+        # One report per plan, naming the stages it covers.
+        stages_of: dict[int, list[str]] = {}
+        for phase in phases:
+            if phase.resident:
+                stages_of.setdefault(id(phase.plan), []).append(phase.stage)
+        reported = set()
+        for i, phase in enumerate(phases):
+            if phase.resident and id(phase.plan) not in reported:
+                reported.add(id(phase.plan))
+                residency.report(
+                    phase.plan, verbose=verbose, stages=stages_of[id(phase.plan)])
+            # Every plan carries the same share per engine; the first replaces
+            # what an earlier run left.
+            residency.apply_plan(phase.plan, replace=(i == 0))
     except Exception as exc:  # noqa: BLE001 — a planning bug must not abort a run
         logger.error("[residency] planning failed (%s: %s); the run continues "
                      "without a plan.", type(exc).__name__, exc)
-        return None
-    return plan
+        return []
+    return phases
+
+
+def _enter_phase(phases: list, i: int, warm: set[str], verbose: bool = True) -> None:
+    """Make stage ``i``'s local models the resident ones.
+
+    Unloads the engines no stage from ``i`` on calls, then starts loading
+    this stage's models in the background, and the next stage's too when
+    they fit beside them without an unload. Nothing here aborts the run.
+
+    Args:
+        phases: The run's phases, as :func:`_plan_phases` returns them.
+        i: Index of the stage about to run.
+        warm: Models already handed to the preloader; updated in place.
+    """
+    if not phases:
+        return
+    from . import residency
+
+    try:
+        phase = phases[i]
+        if i > 0 and set(phases[i - 1].resident) - set(phase.resident):
+            residency.unload_local(keep=phase.resident)
+        warm &= set(phase.resident)
+        ahead = list(phase.loadable)
+        if i + 1 < len(phases):
+            following = phases[i + 1]
+            if (following.plan.co_resident
+                    and set(phase.resident) <= set(following.resident)):
+                ahead += following.loadable
+        todo = [m for m in dict.fromkeys(ahead) if m not in warm]
+        if todo:
+            residency.preload(todo, verbose=verbose)
+            warm |= set(todo)
+    except Exception as exc:  # noqa: BLE001 — residency must not abort a run
+        logger.error("[residency] stage %s: could not switch models (%s: %s); "
+                     "the run continues.", phases[i].stage, type(exc).__name__, exc)
 
 
 def _stage_models(models: dict, stages: list[str], augmentations: dict) -> list[str]:
@@ -304,14 +348,20 @@ def run_pipeline(
         # "which prompt ran?" stops being obvious, and an override that
         # silently matches nothing is invisible without this.
         report_prompt_sources(prompt_dir)
-    plan = _plan_and_preload(models, stages, verbose=verbose, augmentations=aug)
+    phases = _plan_phases(models, stages, verbose=verbose, augmentations=aug)
 
     summary: dict = {"dataset_type": dataset_type, "data_dir": str(data_dir), "stages": {}}
-    if plan is not None:
-        summary["residency"] = plan.as_dict()
+    if phases:
+        summary["residency"] = {
+            "fits": all(phase.plan.fits for phase in phases),
+            "phases": [{"stage": phase.stage, "resident": phase.resident,
+                        **phase.plan.as_dict()} for phase in phases],
+        }
     constitution_df = None
 
-    for stage in stages:
+    warm: set[str] = set()
+    for i, stage in enumerate(stages):
+        _enter_phase(phases, i, warm, verbose=verbose)
         with telemetry.stage(stage):
             if stage == "constitution":
                 constitution_df = generate_constitution(

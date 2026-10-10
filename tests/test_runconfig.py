@@ -357,60 +357,121 @@ def test_a_paraphraser_pool_plans_every_model_in_it(local_models):
     assert wanted == ["venice-paraphraser", extra, "venice-uncensored"]
 
 
-def test_plan_and_preload_warms_the_first_needed_model(local_models):
-    """Two local models that cannot share a card: the plan says so, and the
-    one its stage needs first is the one preloaded."""
+def _one_card(gib):
+    """Plan for one fake card of ``gib`` GiB."""
+    return (patch("redact.llms.resources.measure.detect_gpus",
+                  return_value=("FakeGPU", 1)),
+            patch("redact.llms.resources.measure.detect_gpu_memory_gib",
+                  return_value=gib))
+
+
+def _recorded(calls):
+    """Patches that record preload and unload_local calls in ``calls``."""
     from redact import residency
-    from redact.runconfig import _plan_and_preload
+    return (patch.object(residency, "preload",
+                         side_effect=lambda names, **kw: calls.append(("preload", names))),
+            patch.object(residency, "unload_local",
+                         side_effect=lambda keep=None, **kw: calls.append(("unload", keep))))
+
+
+def test_phases_plan_each_stage_and_preload_what_fits(local_models):
+    """Two local models that cannot share a card: the paraphrase stage's plan
+    says so, and only the model that fits is loaded ahead."""
+    from redact.runconfig import _enter_phase, _plan_phases
 
     gen = local_models("_rc_zz_gen")              # sorts last by role and name
     paraphraser = local_models("_rc_aa_paraphraser")
     models = _models(gen=gen, paraphraser=paraphraser, paraphrase_check=gen)
-    seen = []
+    calls = []
+    card = _one_card(8.0)                         # 5 + 5 GiB is over 0.9 x 8
+    rec = _recorded(calls)
     try:
-        # 5 + 5 GiB of weights is over 0.9 x 8.
-        with patch("redact.llms.resources.measure.detect_gpus", return_value=("FakeGPU", 1)), \
-             patch("redact.llms.resources.measure.detect_gpu_memory_gib", return_value=8.0), \
-             patch.object(residency, "preload",
-                          side_effect=lambda names, **kw: seen.append(names)):
-            plan = _plan_and_preload(models, ["inputs", "paraphrase"], verbose=False)
+        with card[0], card[1], rec[0], rec[1]:
+            phases = _plan_phases(models, ["inputs", "paraphrase"], verbose=False)
+            _enter_phase(phases, 0, set(), verbose=False)
     finally:
         telemetry.uninstall()
-    assert plan.as_dict()["groups"] == [[gen], [paraphraser]]
-    assert not plan.fits
-    assert seen == [[gen]]
+    assert [p.resident for p in phases] == [[gen], [gen, paraphraser]]
+    assert phases[0].plan.fits and not phases[1].plan.fits
+    assert phases[1].plan.as_dict()["groups"] == [[gen], [paraphraser]]
+    assert calls == [("preload", [gen])]
 
 
-def test_plan_and_preload_applies_the_plan_before_preloading(local_models):
-    """Two models that share the card: each loads with its planned grant."""
+def test_phases_apply_one_share_per_engine_for_the_run(local_models):
+    """gen is alone in the inputs stage and shares the card in the paraphrase
+    stage: it loads once, with the smaller share."""
     import redact.llms.backends.vllm as vllm_module
-    from redact import residency
-    from redact.runconfig import _plan_and_preload
+    from redact.runconfig import _plan_phases
 
     gen = local_models("_rc_share_gen")
     paraphraser = local_models("_rc_share_para")
     models = _models(gen=gen, paraphraser=paraphraser, paraphrase_check=gen)
-    planned = []
+    card = _one_card(24.0)
     try:
-        with patch("redact.llms.resources.measure.detect_gpus", return_value=("FakeGPU", 1)), \
-             patch("redact.llms.resources.measure.detect_gpu_memory_gib", return_value=24.0), \
-             patch.object(residency, "preload", side_effect=lambda names, **kw:
-                          planned.append(dict(vllm_module._planned_utilization))):
-            plan = _plan_and_preload(models, ["inputs", "paraphrase"], verbose=False)
+        with card[0], card[1]:
+            phases = _plan_phases(models, ["inputs", "paraphrase"], verbose=False)
     finally:
         telemetry.uninstall()
-    assert plan.fits and plan.as_dict()["groups"] == [[gen, paraphraser]]
+    assert all(p.plan.fits for p in phases)
     # Pool 21.6; needs 5 + 5 leave 11.6, so each gets 10.8 GiB of the 24.
-    assert planned == [{
+    assert dict(vllm_module._planned_utilization) == {
         vllm_module._engine_key(f"org/{name}", None, {}): 0.45
         for name in (gen, paraphraser)
-    }]
+    }
 
 
-def test_plan_and_preload_returns_none_without_models():
-    from redact.runconfig import _plan_and_preload
+def test_entering_a_stage_unloads_what_no_later_stage_calls(local_models):
+    """gen is done after the inputs stage: it is released at the transition
+    and the paraphrase stage's models are loaded."""
+    from redact.runconfig import _enter_phase, _plan_phases
 
-    assert _plan_and_preload(_models(), ["build"], verbose=False) is None
+    gen = local_models("_rc_done_gen")
+    paraphraser = local_models("_rc_done_para")
+    check = local_models("_rc_done_check")
+    models = _models(gen=gen, paraphraser=paraphraser, paraphrase_check=check)
+    calls, warm = [], set()
+    card = _one_card(24.0)
+    rec = _recorded(calls)
+    try:
+        with card[0], card[1], rec[0], rec[1]:
+            phases = _plan_phases(models, ["inputs", "paraphrase"], verbose=False)
+            _enter_phase(phases, 0, warm, verbose=False)
+            _enter_phase(phases, 1, warm, verbose=False)
+    finally:
+        telemetry.uninstall()
+    assert calls == [
+        ("preload", [gen]),
+        ("unload", [paraphraser, check]),
+        ("preload", [paraphraser, check]),
+    ]
+    assert warm == {paraphraser, check}
+
+
+def test_the_next_stage_loads_during_a_stage_without_local_models(local_models):
+    """constitution calls an API model, so the inputs stage's model loads
+    while it runs and is not loaded a second time."""
+    from redact.runconfig import _enter_phase, _plan_phases
+
+    gen = local_models("_rc_ahead_gen")
+    calls, warm = [], set()
+    card = _one_card(24.0)
+    rec = _recorded(calls)
+    try:
+        with card[0], card[1], rec[0], rec[1]:
+            phases = _plan_phases(_models(gen=gen), ["constitution", "inputs"],
+                                  verbose=False)
+            _enter_phase(phases, 0, warm, verbose=False)
+            _enter_phase(phases, 1, warm, verbose=False)
+    finally:
+        telemetry.uninstall()
+    assert [p.resident for p in phases] == [[], [gen]]
+    assert calls == [("preload", [gen])]
+
+
+def test_plan_phases_returns_nothing_without_local_models():
+    from redact.runconfig import _plan_phases
+
+    assert _plan_phases(_models(), ["build"], verbose=False) == []
 
 
 def test_run_pipeline_puts_the_plan_in_the_summary(tmp_path, monkeypatch, caplog):
@@ -436,7 +497,10 @@ def test_run_pipeline_puts_the_plan_in_the_summary(tmp_path, monkeypatch, caplog
             summary = run_pipeline(recipe, params={"inputs": {}, "build": {}}, verbose=True)
     finally:
         telemetry.uninstall()
-    plan = summary["residency"]
+    assert summary["residency"]["fits"] is True
+    inputs, build = summary["residency"]["phases"]
+    assert (inputs["stage"], build["resident"]) == ("inputs", [])
+    plan = inputs
     assert plan["fits"] is True and plan["warnings"] == []
     assert plan["groups"] == [["llama-3.2-3b-debug"]]
     assert plan["models"][0]["devices"] == [0]
@@ -460,7 +524,7 @@ def test_a_planner_exception_does_not_abort_the_run(tmp_path, monkeypatch, caplo
 
     monkeypatch.setattr(redact, "build_dataset", lambda **k: pd.DataFrame({"x": [1]}))
     monkeypatch.setattr(redact, "generate_inputs", lambda **k: pd.DataFrame({"x": [1]}))
-    monkeypatch.setattr(residency, "plan_residency",
+    monkeypatch.setattr(residency, "plan_phases",
                         lambda *a, **k: 1 / 0)
     recipe = {
         "dataset_type": "eval", "data_dir": str(tmp_path),
