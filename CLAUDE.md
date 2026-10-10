@@ -33,14 +33,20 @@ REDACT/
 │       │   │   ├── anthropic.py     # Anthropic Claude backend (native SDK, series-only)
 │       │   │   ├── vllm.py          # Local vLLM backend (native single-pass batching) — engine cached per checkpoint, load path locked
 │       │   │   └── introspection.py # Local transformers backend — captures hidden states/attention/logprobs, keyed on caller-supplied internals_id(s)
-│       │   ├── resources/          # Local GPU capacity: estimate.py (static footprints from HF config), residency.py (packing/preload/unload), measure.py (nvidia-smi probes + post-hoc load diagnostic)
+│       │   ├── resources/          # Local GPU footprints: estimate.py (static footprints from HF config), measure.py (nvidia-smi probes + post-hoc load measurement)
 │       │   ├── client.py           # ModelClient — a configured backend + its dispatch strategy (rate limiter, batch fan-out), bound at construction; ModelClient.create() is the one factory
-│       │   ├── router.py            # Caller-facing helpers over a client: generate_sample/check_sample/batch_check_samples/batch_generate_samples + is_accepted + assert_single_sample_per_call
+│       │   ├── router.py            # Plain calls over a client: generate_sample / batch_generate_samples, plus assert_single_sample_per_call
 │       │   ├── wrappers.py          # RateLimiter, BatchCaller (parallel/sequential fan-out) — both take a finished backend
 │       │   ├── observe.py           # The telemetry emit hook, and nothing else — keeps llms/ dependency-free
 │       │   ├── prompting/           # Prompts in, samples out: prompts.py (load + overlay resolution + PromptTemplate + format instructions), extraction.py (parse replies), scaffold.py (write an editable tree)
-│       │   ├── model_config.py      # Model registry (RPM, backend_type, capability flags, roles)
-│       │   └── conversation.py      # Model-layer conversation primitives: LLMRequest, Step/Transcript (typed step log), drive_sync
+│       │   └── model_config.py      # Model registry (RPM, backend_type, capability flags, roles)
+│       │
+│       ├── llm_pipeline/            # Between the stages and llms/: reads replies to decide the next call
+│       │   ├── request.py           # LLMRequest — a pending call a generator yields; may carry its client
+│       │   ├── drive.py             # drive_sync, drive_generators — round loop, one batch per client per round
+│       │   └── check.py             # is_accepted, check_sample, batch_check_samples, checked() and extracted() retry steps
+│       │
+│       ├── residency/               # GPU planning for local models: footprint, placement, plan, explain, lifecycle (preload/unload), phases (plan per stage)
 │       │
 │       ├── multi_turn/              # General multi-turn conversation datasets (Setting → Trajectory); Actors, runner
 │       │
