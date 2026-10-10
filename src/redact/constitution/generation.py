@@ -31,7 +31,7 @@ from ..dataset.ledger import Ledger
 from ..dataset.manifest import Manifest
 from ..dataset.taxonomy import iter_categories
 from ..llms.client import ModelClient
-from ..llms.prompting import parse_constitution as _parse_raw
+from .parse import parse_constitution as _parse_raw
 from ..llms.prompting import build_messages, load_prompt
 from ..llms.router import generate_sample
 from ..types import ALL_ENTRY_TYPES, EntryType
