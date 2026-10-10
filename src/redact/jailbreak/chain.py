@@ -11,6 +11,7 @@ Ported from reference utils.py combine_techniques (lines 24-49).
 Retry wrappers (with_retries, with_feedback_retries) live in LLMs/wrappers.py.
 """
 
+import dataclasses
 import inspect
 from collections.abc import Callable, Iterable
 
@@ -80,7 +81,7 @@ def _tag_yields(gen: TechniqueGen, root: str) -> TechniqueGen:
         # never actually calls, and building a local transport to answer it
         # would load model weights.
         if model_compute_config(request.model).supports_internals:
-            request = LLMRequest(request.model, request.messages, internals_id=f"{root}/{n}")
+            request = dataclasses.replace(request, internals_id=f"{root}/{n}")
             n += 1
         reply = yield request
         try:

@@ -45,14 +45,15 @@ def drive_generators(
     """Advance many generators round by round, batching LLM calls per model.
 
     Each generator yields :class:`LLMRequest`s and is resumed with the reply.
-    Every round, the pending requests are grouped by ``request.model`` and
-    sent as one ``generate()`` call per model. Used by the jailbreak engine,
-    the multi-turn pipeline and the optimization search.
+    Every round, the pending requests are grouped by ``request.client`` (by
+    ``request.model`` when none is attached) and sent as one ``generate()``
+    call per group. Used by the jailbreak engine, the multi-turn pipeline
+    and the optimization search.
 
     Args:
         gens: ``{key: generator}``. Keys are returned unchanged.
-        resolve: ``model_name -> ModelClient``. Defaults to
-            :meth:`ModelClient.create`.
+        resolve: ``model_name -> ModelClient`` for requests without a
+            client. Defaults to :meth:`ModelClient.create`.
         finalize: ``(key, return_value) -> result``, called when a generator
             finishes. An exception from it propagates.
         on_error: ``(key, exc) -> result``, called when a generator raises
@@ -103,14 +104,17 @@ def drive_generators(
     round_idx = 0
     while pending:
         round_idx += 1
-        groups: dict[str, list] = defaultdict(list)
+        groups: dict[Hashable, list] = defaultdict(list)
         for key, req in pending.items():
-            groups[req.model].append(key)
+            groups[req.client if req.client is not None else req.model].append(key)
 
         round_requests = dict(pending)
         pending.clear()
 
-        for model, keys in groups.items():
+        for keys in groups.values():
+            first = round_requests[keys[0]]
+            model = first.model
+            client = first.client if first.client is not None else resolve(model)
             messages_list = [round_requests[k].messages for k in keys]
             kw = (
                 {"progress": f"{progress} round {round_idx} ({model})"}
@@ -125,7 +129,7 @@ def drive_generators(
             # A dispatch failure propagates and does not go through on_error.
             # It is the transport failing, not these units, and turning it
             # into results would let the caller record work that never ran.
-            responses = resolve(model).generate(messages_list, **kw)
+            responses = client.generate(messages_list, **kw)
             if len(responses) != len(keys):
                 raise RuntimeError(
                     f"Model {model!r} returned {len(responses)} replies for "

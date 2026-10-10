@@ -201,3 +201,59 @@ def test_drive_generators_forwards_internals_ids_when_set():
     # mixed batch: one real id, one None, in request order (dict-pooled but
     # order is whatever groups[model] collected them in for this round).
     assert router.internals_ids_seen == [["root/0", None]] or router.internals_ids_seen == [[None, "root/0"]]
+
+
+# --- Requests that carry their client ----------------------------------------
+
+def _one_round(client, tag):
+    reply = yield LLMRequest.for_client(client, [{"role": "user", "content": tag}])
+    return reply
+
+
+def test_two_clients_with_one_name_are_separate_batches():
+    from tests.conftest import MockBackend, make_client
+
+    backend_a, backend_b = MockBackend("A"), MockBackend("B")
+    gens = {"a": _one_round(make_client(backend_a, "m"), "a"),
+            "b": _one_round(make_client(backend_b, "m"), "b")}
+    results = drive_generators(gens, resolve=lambda m: pytest.fail("resolved by name"),
+                               finalize=lambda k, v: v)
+    assert results == {"a": "A", "b": "B"}
+    assert len(backend_a.calls) == 1 and len(backend_b.calls) == 1
+
+
+def test_one_client_shared_by_two_generators_is_one_batch():
+    from tests.conftest import make_client
+    from tests.llms.test_router import _CountingBackend
+
+    backend = _CountingBackend(["A1", "A2"], native=True)
+    client = make_client(backend, "m")
+    results = drive_generators({"a": _one_round(client, "a"), "b": _one_round(client, "b")},
+                               finalize=lambda k, v: v)
+    assert results == {"a": "A1", "b": "A2"}
+    assert backend.generate_call_count == 1
+
+
+def test_a_round_mixing_client_and_name_requests_dispatches_both():
+    from tests.conftest import MockBackend, make_client
+
+    backend = MockBackend("A")
+    gens = {"c": _one_round(make_client(backend, "m"), "c"), "n": _two_round("n")}
+    router = _FakeRouter()
+    results = drive_generators(gens, resolve=as_resolver(router), finalize=lambda k, v: v)
+    assert results["c"] == "A"
+    assert results["n"] == ("n", "m:0", "m:0")
+    assert len(backend.calls) == 1 and router.rounds == 2
+
+
+def test_for_client_sets_model_and_replace_keeps_client():
+    import dataclasses
+
+    from tests.conftest import MockBackend, make_client
+
+    client = make_client(MockBackend("A"), "m")
+    req = LLMRequest.for_client(client, [], internals_id="x/0")
+    assert (req.model, req.client, req.internals_id) == ("m", client, "x/0")
+    tagged = dataclasses.replace(req, internals_id="x/1")
+    assert tagged.client is client and tagged.internals_id == "x/1"
+    assert LLMRequest("m", []).client is None
