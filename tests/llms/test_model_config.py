@@ -31,11 +31,9 @@ class TestModelConfig:
         assert config.vllm is None
         assert config.introspect is None
 
-    def test_identity_fields_have_no_backend_setup_by_default(self):
-        config = ModelConfig(name="bare")
-        assert config.api is None
-        assert config.vllm is None
-        assert config.introspect is None
+    def test_a_config_with_no_setup_is_rejected(self):
+        with pytest.raises(ValueError, match="api=, vllm= or introspect="):
+            ModelConfig(name="bare")
 
     def test_vllm_fields(self):
         config = ModelConfig(
@@ -44,12 +42,12 @@ class TestModelConfig:
             vllm=VLLMConfig(
                 hf_model_id="org/model",
                 quantization="gptq",
-                vllm_kwargs={"gpu_memory_utilization": 0.9},
+                vllm_kwargs={"max_model_len": 512},
             ),
         )
         assert config.vllm.hf_model_id == "org/model"
         assert config.vllm.quantization == "gptq"
-        assert config.vllm.vllm_kwargs["gpu_memory_utilization"] == 0.9
+        assert config.vllm.vllm_kwargs["max_model_len"] == 512
 
     def test_introspect_fields(self):
         config = ModelConfig(
@@ -533,6 +531,20 @@ class TestVLLMConfigValidatesItself:
         with pytest.raises(TypeError, match="quantization"):
             VLLMConfig(hf_model_id="org/m", quantization=8)
 
+    @pytest.mark.parametrize("grant", [0.86, 1.5, "0.5", None])
+    def test_rejects_a_memory_grant_in_vllm_kwargs(self, grant):
+        """Whatever the value: the planner computes it."""
+        with pytest.raises(ValueError, match=(
+                r"gpu_memory_utilization'\] is not a setting: the planner "
+                r"computes it from vram_gb \(or the estimate\) and the card")):
+            VLLMConfig(hf_model_id="org/m",
+                       vllm_kwargs={"gpu_memory_utilization": grant})
+
+    def test_no_shipped_entry_sets_a_memory_grant(self):
+        for name, config in MODEL_REGISTRY.items():
+            kwargs = (config.vllm.vllm_kwargs or {}) if config.vllm else {}
+            assert "gpu_memory_utilization" not in kwargs, name
+
 
 class TestIntrospectConfigValidatesItself:
     def test_accepts_a_valid_setup(self):
@@ -555,6 +567,11 @@ class TestIntrospectConfigValidatesItself:
     def test_rejects_wrong_typed_log_dir(self, log_dir):
         with pytest.raises(TypeError, match="log_dir"):
             IntrospectConfig(hf_model_id="org/m", log_dir=log_dir)
+
+    def test_min_gpus_is_not_a_field(self):
+        """device_map decides a transformers model's span."""
+        with pytest.raises(TypeError, match="min_gpus"):
+            IntrospectConfig(hf_model_id="org/m", log_dir="/tmp/x", min_gpus=2)
 
     def test_rejects_non_dict_capture(self):
         with pytest.raises(TypeError, match="capture"):
@@ -596,6 +613,25 @@ class TestModelConfigValidatesIdentityAndComposition:
     def test_rejects_non_list_roles(self):
         with pytest.raises(TypeError, match="roles"):
             ModelConfig(name="m", roles="uncensored_gen")
+
+    def test_register_model_rejects_a_string_of_roles(self):
+        name = "_test_roles_as_string"
+        try:
+            with pytest.raises(TypeError, match="roles must be a list, got str"):
+                register_model(name, roles="paraphraser",
+                               vllm=VLLMConfig(hf_model_id="org/m"))
+            assert name not in MODEL_REGISTRY
+        finally:
+            MODEL_REGISTRY.pop(name, None)
+
+    def test_register_model_copies_a_tuple_of_roles(self):
+        name = "_test_roles_as_tuple"
+        try:
+            register_model(name, roles=("paraphraser",),
+                           vllm=VLLMConfig(hf_model_id="org/m"))
+            assert MODEL_REGISTRY[name].roles == ["paraphraser"]
+        finally:
+            MODEL_REGISTRY.pop(name, None)
 
     @pytest.mark.parametrize("temp", [-0.1, 2.5])
     def test_rejects_temperature_out_of_range(self, temp):
@@ -745,10 +781,31 @@ class TestEngineKwargs:
         cfg = VLLMConfig(hf_model_id="org/m", min_gpus=2)
         assert cfg.engine_kwargs == {"tensor_parallel_size": 2}
 
-    def test_an_explicit_tensor_parallel_size_wins(self):
-        cfg = VLLMConfig(hf_model_id="org/m", min_gpus=2,
+    def test_a_matching_tensor_parallel_size_is_accepted(self):
+        cfg = VLLMConfig(hf_model_id="org/m", min_gpus=4,
                          vllm_kwargs={"tensor_parallel_size": 4})
         assert cfg.engine_kwargs == {"tensor_parallel_size": 4}
+
+    @pytest.mark.parametrize("min_gpus,tp", [(2, 4), (1, 2), (2, 1)])
+    def test_a_tensor_parallel_size_that_disagrees_with_min_gpus_is_rejected(
+            self, min_gpus, tp):
+        """The planner places the model on min_gpus cards; the engine would
+        split it across tensor_parallel_size."""
+        with pytest.raises(ValueError, match=f"disagrees with min_gpus={min_gpus}"):
+            VLLMConfig(hf_model_id="org/m", min_gpus=min_gpus,
+                       vllm_kwargs={"tensor_parallel_size": tp})
+
+    def test_a_none_tensor_parallel_size_is_dropped(self):
+        single = VLLMConfig(hf_model_id="org/m",
+                            vllm_kwargs={"tensor_parallel_size": None, "seed": 1})
+        multi = VLLMConfig(hf_model_id="org/m", min_gpus=2,
+                           vllm_kwargs={"tensor_parallel_size": None})
+        assert single.engine_kwargs == {"seed": 1}
+        assert multi.engine_kwargs == {"tensor_parallel_size": 2}
+
+    def test_the_shipped_registry_passes_the_check(self):
+        local = [c for c in MODEL_REGISTRY.values() if c.vllm is not None]
+        assert local and all(c.vllm.min_gpus >= 1 for c in local)
 
     def test_single_gpu_kwargs_are_passed_through(self):
         cfg = VLLMConfig(hf_model_id="org/m", vllm_kwargs={"max_model_len": 384})

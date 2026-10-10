@@ -15,12 +15,13 @@ import logging
 import shutil
 import threading
 import time
+from collections.abc import Collection
 from pathlib import Path
 from typing import TYPE_CHECKING, ClassVar
 
 from .. import observe
 from ..resources import measure
-from .base import ComputeConfig, LLMBackend
+from .base import ComputeConfig, LLMBackend, free_memory
 
 if TYPE_CHECKING:
     from ..model_config import ModelConfig
@@ -40,7 +41,8 @@ _CAPTURE_VALUES = {
 _DEFAULT_SAMPLING = {"top_p": 0.85}
 _DEFAULT_TEMPERATURE = 0.7
 
-# Loaded (tokenizer, model) pairs, keyed on the load arguments.
+# Loaded (tokenizer, model) pairs, keyed by _model_key(). This holds the only
+# reference to each: a backend keeps the key, so a released model is freed.
 _models: dict[tuple, tuple] = {}
 # Held during a load, so a preload thread and a real call cannot load the same
 # checkpoint twice.
@@ -70,14 +72,22 @@ def validate_capture(capture: dict | None) -> None:
             )
 
 
+def _model_key(
+    hf_model_id: str, device_map: str, torch_dtype: str, hf_kwargs: dict
+) -> tuple:
+    return (hf_model_id, device_map, torch_dtype, repr(sorted(hf_kwargs.items())))
+
+
 # Same caching as vllm._engine(). The load is split into _load_locked() so
 # tests can replace it without loading a model.
 #TODO: With the memory-management work, check the naming/structure inconsistency between this and vllm._engine().
 def _load(hf_model_id: str, device_map: str, torch_dtype: str, hf_kwargs: dict):
     """Get or load the tokenizer + model pair for one checkpoint."""
-    key = (hf_model_id, device_map, torch_dtype, repr(sorted(hf_kwargs.items())))
-    if key in _models:
-        return _models[key]
+    key = _model_key(hf_model_id, device_map, torch_dtype, hf_kwargs)
+    # One read: clear_cache() may drop the key between a test and a lookup.
+    loaded = _models.get(key)
+    if loaded is not None:
+        return loaded
 
     with _models_lock:
         # Re-check: another thread may have finished the load while we waited.
@@ -99,7 +109,11 @@ def _load_locked(key, hf_model_id: str, device_map: str, torch_dtype: str, hf_kw
             "pip install redact[transformers]"
         )
 
-    tokenizer = AutoTokenizer.from_pretrained(hf_model_id, **hf_kwargs)
+    # attn_implementation is a model argument; a tokenizer does not take it.
+    tokenizer = AutoTokenizer.from_pretrained(
+        hf_model_id,
+        **{k: v for k, v in hf_kwargs.items() if k != "attn_implementation"},
+    )
     # transformers renamed the `torch_dtype` keyword to `dtype`. Pass `dtype`
     # on version 5 and later and `torch_dtype` on 4.x; pyproject allows both.
     import transformers
@@ -131,16 +145,18 @@ def _load_locked(key, hf_model_id: str, device_map: str, torch_dtype: str, hf_kw
     return _models[key]
 
 
-def _release_models() -> None:
+def _release_models(keep: Collection[tuple] = ()) -> None:
     """Emit a lifetime event per loaded checkpoint, then forget the timers.
 
     Called from :meth:`TransformersIntrospectionBackend.clear_cache` and at
     exit, so a process that just exits still reports how long each
-    checkpoint was held.
+    checkpoint was held. Checkpoints whose key is in ``keep`` stay timed.
     """
-    #TODO: Release checks as in vllm
     now = time.perf_counter()
     for key, loaded_at in list(_models_loaded_at.items()):
+        if key in keep:
+            continue
+        del _models_loaded_at[key]
         observe.record({
             "ev": "local",
             "phase": "release",
@@ -148,10 +164,19 @@ def _release_models() -> None:
             "hf_model_id": key[0],
             "held_s": round(now - loaded_at, 1),
         })
-    _models_loaded_at.clear()
 
 
+# At exit the hold time is recorded and nothing is freed, as in vllm.py.
 atexit.register(_release_models)
+
+
+def held_seconds() -> dict[str, float]:
+    """Seconds each loaded checkpoint has been held so far, per ``hf_model_id``."""
+    now = time.perf_counter()
+    held: dict[str, float] = {}
+    for key, loaded_at in list(_models_loaded_at.items()):
+        held[key[0]] = held.get(key[0], 0.0) + now - loaded_at
+    return held
 
 
 class TransformersIntrospectionBackend(LLMBackend):
@@ -194,7 +219,9 @@ class TransformersIntrospectionBackend(LLMBackend):
                 ``"hidden_states"`` (``False`` / ``"last"`` / ``"all"``),
                 ``"attention"`` (bool). Defaults to logprobs and the
                 last-layer hidden state. Attention is large: it scales with
-                ``layers x heads x seq_len**2``.
+                ``layers x heads x seq_len**2``. It is returned only under
+                ``attn_implementation="eager"``, which :meth:`from_config`
+                adds to ``hf_kwargs``.
             device_map: Passed to ``from_pretrained``.
             torch_dtype: Passed to ``from_pretrained``.
             sampling: Generation defaults for this model (``top_p``, ...),
@@ -226,9 +253,22 @@ class TransformersIntrospectionBackend(LLMBackend):
         self._capture = {**_DEFAULT_CAPTURE, **(capture or {})}
         self._sampling = {**_DEFAULT_SAMPLING, **(sampling or {})}
         self._torch = torch
-        self._tokenizer, self._model = _load(
-            hf_model_id, device_map, torch_dtype, hf_kwargs or {}
-        )
+        self._key = _model_key(hf_model_id, device_map, torch_dtype, hf_kwargs or {})
+        _load(hf_model_id, device_map, torch_dtype, hf_kwargs or {})
+
+    def _loaded(self) -> tuple:
+        """This model's ``(tokenizer, model)``, read from the cache.
+
+        Raises:
+            RuntimeError: The model was released and not loaded again.
+        """
+        loaded = _models.get(self._key)
+        if loaded is None:
+            raise RuntimeError(
+                f"The transformers model of {self.model!r} ({self.hf_model_id}) "
+                f"was released. Build a new client with ModelClient.create()."
+            )
+        return loaded
 
     @classmethod
     def from_config(cls, config: "ModelConfig") -> "TransformersIntrospectionBackend":
@@ -251,19 +291,48 @@ class TransformersIntrospectionBackend(LLMBackend):
             device_map=introspect.device_map,
             torch_dtype=introspect.torch_dtype,
             sampling=introspect.sampling,
-            hf_kwargs=introspect.extra_kwargs,
+            hf_kwargs=introspect.load_kwargs,
             **cls._identity(config),
         )
 
     @classmethod
-    def clear_cache(cls) -> None:
-        """Drop the loaded models, after reporting how long each was held."""
-        #TODO: Release checks as in vllm
-        _release_models()
-        _models.clear()
+    def clear_cache(cls, keep: Collection[tuple] = ()) -> None:
+        """Release the loaded models and free their memory.
+
+        The hold time of each is reported. A backend built on a released
+        model raises on ``generate()`` until the checkpoint is loaded again.
+        A call in flight on a released model is not waited for.
+
+        Args:
+            keep: Load keys (:func:`_model_key`) to leave loaded and timed.
+                A collection of keys, not one key.
+        """
+        if any(not isinstance(key, tuple) for key in keep):
+            raise TypeError(f"keep takes a collection of load keys, got {keep!r}.")
+        # Locked: a preload may be inserting a model, and the next load must
+        # wait until this memory is back.
+        with _models_lock:
+            released = [k for k in _models if k not in keep]
+            for key in released:
+                del _models[key]
+            if released:
+                free_memory()
+            # After the memory is freed, so held_s covers it.
+            _release_models(keep)
+
+    def _capture_path(self, internals_id: str) -> Path:
+        """The folder of one capture, which must lie inside ``log_dir``."""
+        path = self._log_dir / internals_id
+        # Captures are replaced and moved, so an id may not reach other files.
+        if not internals_id or self._log_dir.resolve() not in path.resolve().parents:
+            raise ValueError(
+                f"internals_id must be a relative path inside {self._log_dir}, "
+                f"got {internals_id!r}."
+            )
+        return path
 
     def _capture_dir(self, internals_id: str) -> Path:
-        d = self._log_dir / internals_id
+        d = self._capture_path(internals_id)
         d.mkdir(parents=True, exist_ok=True)
         return d
 
@@ -273,13 +342,13 @@ class TransformersIntrospectionBackend(LLMBackend):
         Does nothing if no folder exists under ``old_internals_id``. A folder
         already at ``new_internals_id`` is replaced.
         """
-        old_dir = self._log_dir / old_internals_id
+        old_dir = self._capture_path(old_internals_id)
+        new_dir = self._capture_path(new_internals_id)
         if not old_dir.exists():
             # Logged because a mistyped provisional id looks the same as a
             # call that captured nothing.
             logger.debug("[internals] nothing to rename at %s", old_dir)
             return
-        new_dir = self._log_dir / new_internals_id
         if new_dir == old_dir:
             return
         new_dir.parent.mkdir(parents=True, exist_ok=True)
@@ -288,7 +357,7 @@ class TransformersIntrospectionBackend(LLMBackend):
             # newer capture.
             shutil.rmtree(new_dir)
         old_dir.rename(new_dir)
-        logger.info("[internals] %s -> %s", old_internals_id, new_internals_id)
+        logger.debug("[internals] %s -> %s", old_internals_id, new_internals_id)
 
     def _save_meta(self, out_dir: Path, meta: dict) -> None:
         """Write ``meta.json``: resolved settings, input messages and output.
@@ -298,10 +367,19 @@ class TransformersIntrospectionBackend(LLMBackend):
         with (out_dir / "meta.json").open("w", encoding="utf-8") as f:
             json.dump(meta, f, indent=2, ensure_ascii=False)
 
-    def _save_capture(self, internals_id: str, outputs, prompt_len: int, meta: dict) -> None:
-        """Write ``meta.json`` and the internals that ``capture`` asks for."""
+    def _save_capture(
+        self, internals_id: str, outputs, prompt_len: int, meta: dict, tokenizer
+    ) -> None:
+        """Write ``meta.json`` and the internals that ``capture`` asks for.
+
+        The files of an earlier capture under the same id are removed first.
+        """
         torch = self._torch
         out_dir = self._capture_dir(internals_id)
+        # Files only: a subfolder is another capture, under a longer id.
+        for stale in out_dir.iterdir():
+            if stale.is_file():
+                stale.unlink()
         self._save_meta(out_dir, meta)
         gen_token_ids = outputs.sequences[0][prompt_len:]
 
@@ -311,7 +389,7 @@ class TransformersIntrospectionBackend(LLMBackend):
                 for step_logits in outputs.logits
             ]
             record = {
-                "tokens": self._tokenizer.convert_ids_to_tokens(gen_token_ids.tolist()),
+                "tokens": tokenizer.convert_ids_to_tokens(gen_token_ids.tolist()),
                 "token_ids": gen_token_ids.tolist(),
                 "logprob": [
                     lp[tok].item() for lp, tok in zip(logprobs, gen_token_ids)
@@ -343,13 +421,12 @@ class TransformersIntrospectionBackend(LLMBackend):
             torch.save(stacked_attn, out_dir / "attention.pt")
 
         written = sorted(p.name for p in out_dir.iterdir() if p.is_file())
-        logger.info("[internals] saved %s -> %s", ", ".join(written), out_dir)
+        logger.debug("[internals] saved %s -> %s", ", ".join(written), out_dir)
 
     def generate(
         self,
         messages_list: list[list[dict]],
         *,
-        system_prompts: str | list[str | None] | None = None,
         max_tokens: int | None = None,
         temperature: float | None = None,
         internals_ids: list[str | None] | None = None,
@@ -359,7 +436,6 @@ class TransformersIntrospectionBackend(LLMBackend):
 
         Args:
             messages_list: One chat message list per item.
-            system_prompts: Inserted as the leading message of each item.
             max_tokens: Overrides the model's default.
             temperature: Overrides the model's default.
             internals_ids: One capture id (or ``None``) per item. Internals
@@ -371,45 +447,68 @@ class TransformersIntrospectionBackend(LLMBackend):
 
         Returns:
             Generated text, one per item, in the order of ``messages_list``.
+
+        Raises:
+            ValueError: ``internals_ids`` and ``messages_list`` differ in length.
         """
         if not messages_list:
             return []
-        prompts, resolved = self._prepare(messages_list, system_prompts)
+        # Checked before the loop, so a mismatch costs no forward pass.
+        if internals_ids is not None and len(internals_ids) != len(messages_list):
+            raise ValueError(
+                f"internals_ids must be the same length as messages_list "
+                f"({len(internals_ids)} != {len(messages_list)})."
+            )
+        tokenizer, model = self._loaded()  # raises before any work if released
+        prompts, resolved = self._prepare(messages_list)
         max_tok, temp = self._resolve(max_tokens, temperature)
         ids = internals_ids if internals_ids is not None else [None] * len(messages_list)
         sampling = {**self._sampling, **kwargs}
 
         results: list[str] = []
         # Runs once via ModelClient (one item per call); the list is just the return contract.
-        for messages, system_prompt, internals_id in zip(resolved, prompts, ids):
+        for messages, system_prompt, internals_id in zip(
+            resolved, prompts, ids, strict=True
+        ):
             chat_messages = (
                 [{"role": "system", "content": system_prompt}, *messages]
                 if system_prompt else messages
             )
-            prompt = self._tokenizer.apply_chat_template(
+            prompt = tokenizer.apply_chat_template(
                 chat_messages, tokenize=False, add_generation_prompt=True,
             )
-            inputs = self._tokenizer(
+            inputs = tokenizer(
                 prompt, return_tensors="pt", add_special_tokens=False,
-            ).to(self._model.device)
+            ).to(model.device)
             prompt_len = inputs["input_ids"].shape[1]
 
             want_capture = internals_id is not None
             started = time.perf_counter()
-            with self._torch.no_grad():
-                outputs = self._model.generate(
-                    **inputs,
-                    max_new_tokens=max_tok,
-                    temperature=float(temp),
-                    do_sample=temp > 0,
-                    return_dict_in_generate=True,
-                    output_logits=want_capture and self._capture.get("logprobs", False),
-                    output_hidden_states=(
-                        want_capture and bool(self._capture.get("hidden_states"))
-                    ),
-                    output_attentions=want_capture and self._capture.get("attention", False),
-                    **sampling,
+            try:
+                with self._torch.no_grad():
+                    outputs = model.generate(
+                        **inputs,
+                        max_new_tokens=max_tok,
+                        temperature=float(temp),
+                        do_sample=temp > 0,
+                        return_dict_in_generate=True,
+                        output_logits=(
+                            want_capture and self._capture.get("logprobs", False)
+                        ),
+                        output_hidden_states=(
+                            want_capture and bool(self._capture.get("hidden_states"))
+                        ),
+                        output_attentions=(
+                            want_capture and self._capture.get("attention", False)
+                        ),
+                        **sampling,
+                    )
+            except Exception as exc:
+                self._record_call(
+                    n_items=1, started=started, max_tokens=max_tok,
+                    temperature=temp, error=f"{type(exc).__name__}: {exc}",
                 )
+                raise
 
             # One telemetry event per forward pass.
             self._record_call(
@@ -419,7 +518,7 @@ class TransformersIntrospectionBackend(LLMBackend):
                 max_tokens=max_tok, temperature=temp,
             )
 
-            text = self._tokenizer.decode(
+            text = tokenizer.decode(
                 outputs.sequences[0][prompt_len:], skip_special_tokens=True,
             ).strip()
 
@@ -436,7 +535,7 @@ class TransformersIntrospectionBackend(LLMBackend):
                     "messages": chat_messages,
                     "output": text,
                 }
-                self._save_capture(internals_id, outputs, prompt_len, meta)
+                self._save_capture(internals_id, outputs, prompt_len, meta, tokenizer)
 
             results.append(text)
 

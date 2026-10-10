@@ -111,12 +111,11 @@ def batch_apply_combinations(
             requests with (translation tags its own translation-role model and
             ignores this).
         benign_data: Pre-loaded benign Q&A dict for FSH/DAP techniques.
-        router: Optional router override (defaults to the process-wide
+        resolve: Optional ``model_name -> ModelClient`` override (defaults to
             :meth:`ModelClient.create`). Injectable for testing.
-        verbose: When True, emit live per-round progress via the shared
-            ``progress`` label on ``router.batch_generate`` (one tick stream
-            per model per round). When False, dispatch with no progress kwarg
-            (preserves the minimal router contract used by tests).
+        verbose: When True, emit live per-round progress via the ``progress``
+            label on each client's ``generate`` (one tick stream per model
+            per round). When False, dispatch with no progress kwarg.
         capture_internals: When True, each sample's LLM-backed technique calls
             get tagged for internals capture (per-request, only for whichever
             target model's backend actually supports it — see
@@ -152,7 +151,6 @@ def batch_apply_combinations(
         resolve=resolve,
         finalize=lambda i, value: _finalize(samples[i], value, gen_model, resolve),
         on_error=lambda i, exc: _finalize_error(samples[i], exc, gen_model, resolve),
-        verbose=verbose,
         progress="jailbreak" if verbose else None,
     )
     return [results[i] for i in range(n) if i in results]

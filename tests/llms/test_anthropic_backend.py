@@ -1,10 +1,13 @@
 """Tests for AnthropicBackend with mocked Anthropic client."""
 
+import logging
 import os
 import sys
 from unittest.mock import MagicMock, patch
 
 import pytest
+
+from redact.llms import observe
 
 
 @pytest.fixture()
@@ -57,6 +60,22 @@ class TestAnthropicBackendInit:
             with pytest.raises(KeyError):
                 AnthropicBackend.from_config(config)
 
+    def test_a_cache_cleared_during_the_lookup_does_not_raise(self):
+        """A concurrent clear_cache() can empty the cache right after a
+        lookup finds the client."""
+        import redact.llms.backends.anthropic as anthropic_module
+
+        class _ClearedAfterContains(dict):
+            def __contains__(self, key):
+                found = super().__contains__(key)
+                self.clear()
+                return found
+
+        client = object()
+        cache = _ClearedAfterContains({"k": client})
+        with patch.object(anthropic_module, "_sdk_clients", cache):
+            assert anthropic_module._sdk_client("k") is client
+
     def test_backend_name(self, anthropic_backend):
         assert anthropic_backend.backend_name == "anthropic"
 
@@ -94,10 +113,10 @@ class TestAnthropicGenerate:
         assert result == ["first", "second"]
 
     def test_system_prompt_passed_as_system_param(self, anthropic_backend):
-        anthropic_backend.generate(
-            [[{"role": "user", "content": "hi"}]],
-            system_prompts=["You are helpful."],
-        )
+        anthropic_backend.generate([[
+            {"role": "system", "content": "You are helpful."},
+            {"role": "user", "content": "hi"},
+        ]])
         call_kwargs = anthropic_backend._client.messages.create.call_args[1]
         assert call_kwargs["system"] == "You are helpful."
         assert call_kwargs["messages"] == [{"role": "user", "content": "hi"}]
@@ -132,3 +151,50 @@ class TestAnthropicGenerate:
         )
         call_kwargs = anthropic_backend._client.messages.create.call_args[1]
         assert call_kwargs["messages"] == [{"role": "user", "content": "hi"}]
+
+    def test_kwargs_cannot_retarget_the_call(self, anthropic_backend):
+        anthropic_backend.generate(
+            [[{"role": "user", "content": "hi"}]],
+            model="another-model", messages=[{"role": "user", "content": "other"}],
+        )
+        call_kwargs = anthropic_backend._client.messages.create.call_args[1]
+        assert call_kwargs["model"] == "claude-opus-4-6"
+        assert call_kwargs["messages"] == [{"role": "user", "content": "hi"}]
+
+
+class TestAnthropicEmptyReply:
+    """An empty reply is returned as "" with its stop reason on record."""
+
+    HI = [[{"role": "user", "content": "hi"}]]
+    LOGGER = "redact.llms.backends.anthropic"
+
+    @pytest.fixture()
+    def events(self):
+        seen = []
+        observe.set_emitter(seen.append)
+        yield seen
+        observe.set_emitter(None)
+
+    @pytest.mark.parametrize("content", [[], None, [MagicMock(text="")]],
+                             ids=["no-blocks", "content-none", "empty-text"])
+    def test_empty_reply_is_returned_and_warned_about(
+        self, anthropic_backend, events, caplog, content
+    ):
+        anthropic_backend._client.messages.create.return_value = MagicMock(
+            content=content, stop_reason="refusal", usage=None)
+        with caplog.at_level(logging.WARNING, logger=self.LOGGER):
+            assert anthropic_backend.generate(self.HI) == [""]
+        assert [r.getMessage() for r in caplog.records] == [
+            "claude-opus-4-6 returned an empty reply (stop_reason=refusal)."
+        ]
+        assert events[0]["finish_reason"] == "refusal"
+
+    def test_stop_reason_is_recorded_without_a_warning(
+        self, anthropic_backend, events, caplog
+    ):
+        anthropic_backend._client.messages.create.return_value = MagicMock(
+            content=[MagicMock(text="ok")], stop_reason="end_turn", usage=None)
+        with caplog.at_level(logging.WARNING, logger=self.LOGGER):
+            assert anthropic_backend.generate(self.HI) == ["ok"]
+        assert caplog.records == []
+        assert events[0]["finish_reason"] == "end_turn"

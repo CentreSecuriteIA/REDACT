@@ -9,6 +9,7 @@ import pytest
 from redact import telemetry
 from redact.llms import observe
 from redact.llms.backends import ComputeConfig
+from redact.llms.resources import measure
 from tests.conftest import MockBackend, make_client
 
 
@@ -31,13 +32,17 @@ class TestObserveHook:
         observe.set_emitter(None)
         observe.record({"ev": "call"})  # no exception
 
-    def test_a_failing_sink_never_breaks_a_run(self):
+    def test_a_failing_sink_never_breaks_a_run(self, caplog):
         def boom(event):
             raise RuntimeError("sink is down")
 
         observe.set_emitter(boom)
-        observe.record({"ev": "call"})  # swallowed on purpose
+        with caplog.at_level(logging.DEBUG, logger="redact.llms.observe"):
+            observe.record({"ev": "call"})  # logged at DEBUG, not raised
         observe.set_emitter(None)
+        assert [(r.levelname, r.getMessage()) for r in caplog.records] == [
+            ("DEBUG", "Telemetry emitter failed (RuntimeError: sink is down)"),
+        ]
 
     def test_stage_label_is_attached_to_events(self):
         seen = []
@@ -241,6 +246,60 @@ class TestCost:
         assert telemetry.summary()["local_s"]["org/big"] == 900.0
 
 
+class TestLiveEngineTime:
+    """Engines still loaded when the summary is built have sent no release."""
+
+    @pytest.fixture()
+    def clock(self):
+        import redact.llms.backends.introspection as intro
+        import redact.llms.backends.vllm as vllm_module
+
+        vllm_module.VLLMBackend.clear_cache()
+        intro.TransformersIntrospectionBackend.clear_cache()
+        now = [1000.0]
+        with patch("time.perf_counter", lambda: now[0]):
+            yield vllm_module, intro, now
+        vllm_module._engine_loaded_at.clear()
+        intro._models_loaded_at.clear()
+
+    def test_summary_counts_engines_that_are_still_loaded(self, tmp_path, clock):
+        vllm_module, intro, now = clock
+        telemetry.install(data_dir=tmp_path)
+        vllm_module._engine_loaded_at[("org/live", None, "[]")] = 400.0
+        intro._models_loaded_at[("org/tf", "auto", "auto", "[]")] = 900.0
+        s = telemetry.summary()
+        assert s["local_s"] == {"org/live": 600.0, "org/tf": 100.0}
+        with patch("redact.llms.resources.measure.detect_gpus", return_value=("FakeGPU", 2)), \
+             patch("redact.telemetry.gpu_hourly_rate", return_value=3.0):
+            # 700 s on 2 rented cards at $3/h.
+            assert telemetry.summary()["local_cost_usd"] == pytest.approx(1.1667)
+
+    def test_a_later_release_is_not_counted_twice(self, tmp_path, clock):
+        vllm_module, _, now = clock
+        telemetry.install(data_dir=tmp_path)
+        vllm_module._engine_loaded_at[("org/live", None, "[]")] = 400.0
+        assert telemetry.summary()["local_s"] == {"org/live": 600.0}
+        assert telemetry.summary()["local_s"] == {"org/live": 600.0}   # not accumulated
+        now[0] = 1100.0
+        vllm_module.VLLMBackend.clear_cache()         # emits held_s=700
+        assert telemetry.summary()["local_s"] == {"org/live": 700.0}
+
+    def test_released_and_live_time_of_one_checkpoint_add_up(self, tmp_path, clock):
+        vllm_module, _, _ = clock
+        telemetry.install(data_dir=tmp_path)
+        observe.record({"ev": "local", "phase": "release",
+                        "hf_model_id": "org/live", "held_s": 50.0})
+        vllm_module._engine_loaded_at[("org/live", None, "[]")] = 900.0
+        assert telemetry.summary()["local_s"] == {"org/live": 150.0}
+
+    def test_the_backends_do_not_import_telemetry(self):
+        import redact.llms.backends.introspection as intro
+        import redact.llms.backends.vllm as vllm_module
+
+        for module in (vllm_module, intro):
+            assert "telemetry" not in vars(module)
+
+
 class TestGpuPricing:
     def test_local_provider_is_free_not_unknown(self):
         # 0.0 is a real rate meaning "your own machine", distinct from None
@@ -261,14 +320,15 @@ class TestGpuPricing:
 
     def test_detect_gpus_parses_one_line_per_device(self):
         out = "NVIDIA A100-SXM4-80GB\nNVIDIA A100-SXM4-80GB\n"
-        with patch("redact.telemetry.shutil.which", return_value="/usr/bin/nvidia-smi"):
-            with patch("redact.telemetry.subprocess.run",
+        with patch("redact.llms.resources.measure.shutil.which",
+                   return_value="/usr/bin/nvidia-smi"):
+            with patch("redact.llms.resources.measure.subprocess.run",
                        return_value=MagicMock(stdout=out)):
-                assert telemetry.detect_gpus() == ("NVIDIA A100-SXM4-80GB", 2)
+                assert measure.detect_gpus() == ("NVIDIA A100-SXM4-80GB", 2)
 
     def test_no_nvidia_smi_reports_no_gpus(self):
-        with patch("redact.telemetry.shutil.which", return_value=None):
-            assert telemetry.detect_gpus() == (None, 0)
+        with patch("redact.llms.resources.measure.shutil.which", return_value=None):
+            assert measure.detect_gpus() == (None, 0)
 
     def test_billed_on_rented_gpus_with_used_reported_separately(self, tmp_path):
         # You rent the pod, so the bill is rate x rented, not rate x occupied.
@@ -277,7 +337,7 @@ class TestGpuPricing:
         observe.record({"ev": "local", "phase": "release",
                         "hf_model_id": "org/big", "held_s": 3600.0,
                         "tensor_parallel_size": 1})
-        with patch("redact.telemetry.detect_gpus",
+        with patch("redact.llms.resources.measure.detect_gpus",
                    return_value=("NVIDIA H100 80GB HBM3", 4)):
             with patch("redact.telemetry.gpu_hourly_rate", return_value=2.4):
                 s = telemetry.summary()

@@ -154,45 +154,99 @@ def _counts(df) -> dict:
     return out
 
 
-def _plan_and_preload(models: dict, stages: list[str], verbose: bool = True) -> None:
-    """Report what this run needs on the GPU, then start warming it.
+def _plan_and_preload(
+    models: dict,
+    stages: list[str],
+    verbose: bool = True,
+    augmentations: dict | None = None,
+):
+    """Plan the run's local models, report and apply the plan, start preloading.
 
-    Runs before the stage loop so a configuration that cannot fit says so at
-    minute zero rather than after the constitution stage has spent its budget.
-    Neither the plan nor a failed preload aborts the run — see
-    :func:`redact.llms.resources.residency.preload` for why finishing an
-    API-only stage is strictly better than killing it.
+    Runs before the stage loop, so a run that does not fit says so before any
+    stage spends its budget. Nothing here aborts the run: a plan that does
+    not fit, a failed preload and a planning error are only logged.
+
+    Returns:
+        The :class:`~redact.llms.resources.residency.ResidencyPlan`, or
+        ``None`` when the stages call no model or planning failed.
     """
-    from .llms.model_config import default_model_for_role
     from .llms.resources import residency
 
-    roles = {r for stage in stages for r in residency.STAGE_ROLES.get(stage, ())}
-    wanted: list[str] = []
-    for role in sorted(roles):
+    try:
+        wanted = _stage_models(models, stages, augmentations or {})
+        if not wanted:
+            return None
+        plan = residency.plan_residency(wanted)
+        residency.report(plan, verbose=verbose)
+        # Before the preload, so it loads with the planned grants too.
+        residency.apply_plan(plan)
+        # Only warm the first group: a later one cannot load beside it. Models
+        # are in stage order, so the first group holds what is needed first.
+        first = [fp.model for fp in plan.groups[0]] if plan.groups else []
+        residency.preload(first, verbose=verbose)
+    except Exception as exc:  # noqa: BLE001 — a planning bug must not abort a run
+        logger.error("[residency] planning failed (%s: %s); the run continues "
+                     "without a plan.", type(exc).__name__, exc)
+        return None
+    return plan
+
+
+def _stage_models(models: dict, stages: list[str], augmentations: dict) -> list[str]:
+    """The models the stages will call, in the order the stages first need them.
+
+    Each role resolves the way its stage resolves it, so the plan covers the
+    models that will actually load.
+    """
+    from .content_moderation.paraphrase import paraphrase_pool
+    from .llms.model_config import default_model_for_role
+
+    def resolve(role: str) -> list[str]:
         name = models.get(role)
-        if name is None:
-            # Recipe left it to the registry; resolve the same way the stage will.
+        if role == "paraphraser":
+            # One model, or every paraphraser for the "distribution" pool.
+            return paraphrase_pool(name)
+        if role == "check":
+            # The stages check with the generation model unless told otherwise.
+            return [name] if name else resolve("gen")
+        if role == "translation" and not _uses_translation(augmentations):
+            return []
+        return [name or default_model_for_role(_ROLE_TO_REGISTRY_ROLE.get(role, role))]
+
+    wanted: list[str] = []
+    for stage in stages:
+        for role in STAGE_ROLES.get(stage, ()):
             try:
-                name = default_model_for_role(_ROLE_TO_REGISTRY_ROLE.get(role, role))
-            except KeyError:
+                wanted.extend(resolve(role))
+            except (KeyError, ValueError):
+                # No model registered for the role; the stage reports it.
                 continue
-        wanted.append(name)
+    return list(dict.fromkeys(wanted))
 
-    if not wanted:
-        return
-    plan = residency.plan_residency(wanted)
-    residency.report(plan, verbose=verbose)
-    # Only warm the first group: later groups exist precisely because they do
-    # not fit alongside it, so loading them now would defeat the plan.
-    first = [fp.model for fp in plan.groups[0]] if plan.groups else []
-    residency.preload(first, verbose=verbose)
 
+def _uses_translation(augmentations: dict) -> bool:
+    """Whether the jailbreak stage can sample a translation technique."""
+    return (
+        augmentations.get("include_translation", True)
+        and augmentations.get("include_obfuscation", True)
+        and not augmentations.get("pure_only", False)
+    )
+
+
+#: The model roles each pipeline stage calls, for planning and preloading
+#: only the models a run will use.
+STAGE_ROLES = {
+    "constitution": ("constitution",),
+    "inputs": ("gen", "check"),
+    "outputs": ("gen", "check"),
+    "paraphrase": ("paraphraser", "paraphrase_check"),
+    "jailbreaks": ("gen", "translation"),
+    "build": (),
+}
 
 #: Recipe role name -> registry role name, where they differ. The recipe speaks
 #: in stage terms ("gen", "check"); the registry speaks in capability terms.
 _ROLE_TO_REGISTRY_ROLE = {
     "gen": "uncensored_gen",
-    "check": "uncensored_gen",
     "constitution": "constitution_gen",
     "paraphrase_check": "uncensored_gen",
 }
@@ -250,9 +304,11 @@ def run_pipeline(
         # "which prompt ran?" stops being obvious, and an override that
         # silently matches nothing is invisible without this.
         report_prompt_sources(prompt_dir)
-    _plan_and_preload(models, stages, verbose=verbose)
+    plan = _plan_and_preload(models, stages, verbose=verbose, augmentations=aug)
 
     summary: dict = {"dataset_type": dataset_type, "data_dir": str(data_dir), "stages": {}}
+    if plan is not None:
+        summary["residency"] = plan.as_dict()
     constitution_df = None
 
     for stage in stages:

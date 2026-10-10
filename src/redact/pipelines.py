@@ -21,6 +21,9 @@ skips constitution generation, so it's the cheaper "quick eval" option)::
     inputs = generate_inputs(samples_per_category=15, num_categories=3)
 """
 
+#TODO(driver script): the generate_* functions should not be called on their
+# own; only the pipeline entry point should call them. Fix them to that later.
+
 import json
 import logging
 import warnings

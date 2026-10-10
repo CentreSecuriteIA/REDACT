@@ -32,6 +32,8 @@ def patched(monkeypatch):
         CP, "batch_check_samples",
         lambda cc, payloads, checker, **kw: [(True, "") for _ in payloads],
     )
+    # A residency plan must not read an HF config over the network.
+    monkeypatch.setattr("redact.llms.resources.estimate._load_config", lambda _id: None)
     return monkeypatch
 
 
@@ -207,3 +209,158 @@ def test_run_pipeline_paraphrase_stage(tmp_path, patched):
     assert summary["stages"]["paraphrase"]["counts"]["rows"] >= 1
     assert paths.paraphrases_inputs_csv(tmp_path).exists()
     assert read_manifest("paraphrase", tmp_path) is not None
+
+
+def test_previous_paraphraser_is_unreferenced_before_unload(tmp_path, patched):
+    """When paraphrasers do not co-fit, the previous client must be gone
+    before its engine's cache entry is dropped, or the engine stays alive
+    while the next one loads. The check model is kept."""
+    import weakref
+    from types import SimpleNamespace
+
+    import redact.llms.backends.vllm as vllm_module
+    from redact.llms.model_config import MODEL_REGISTRY, VLLMConfig, register_model
+    from redact.llms.resources import residency
+
+    register_model("_para_second", backend_type="vllm", roles=["paraphraser"],
+                   vllm=VLLMConfig(hf_model_id="org/second"))
+    created: list = []     # (model, weak reference to its client)
+
+    def create(model):
+        # A preload finishes during the stage: its engine must be kept too.
+        patched.setitem(vllm_module._engines, late, object())
+        client = make_client(MockBackend(), model)
+        created.append((model, weakref.ref(client)))
+        return client
+
+    late = vllm_module._engine_key("org/late-preload", None, {})
+    unloads = []
+    events = []
+
+    def unload_local(keep=None, engines=None):
+        paraphrasers = [ref for model, ref in created if model != "venice-uncensored"]
+        unloads.append((keep, [ref() is None for ref in paraphrasers]))
+        kept_engines.append(engines)
+        events.append("unload")
+
+    # Loaded before the stage: another stage's engine, and a pool paraphraser.
+    kept_engines = []
+    other = vllm_module._engine_key("org/other-stage", None, {})
+    preloaded = vllm_module._engine_key("org/second", None, {})
+    patched.setitem(vllm_module._engines, other, object())
+    patched.setitem(vllm_module._engines, preloaded, object())
+
+    plan = SimpleNamespace(sequential=True)
+    patched.setattr(CP.ModelClient, "create", create)
+    patched.setattr(residency, "plan_residency", lambda models: plan)
+    patched.setattr(residency, "unload_local", unload_local)
+    patched.setattr(residency, "apply_plan",
+                    lambda p, replace=True: events.append((p is plan, replace)))
+    _seed_inputs(tmp_path)
+    try:
+        generate_paraphrases(
+            data_dir=tmp_path, target="inputs", paraphraser="distribution",
+            paraphrases_per_sample=2, verbose=False,
+        )
+    finally:
+        MODEL_REGISTRY.pop("_para_second", None)
+    # One unload, between the two paraphrasers: the first client is gone.
+    assert unloads == [(["venice-uncensored"], [True])]
+    # Other stages' engines survive the unload; the pool's own does not.
+    assert kept_engines == [{"vllm": {other, late}, "introspect": set()}]
+    # Its plan never replaces a run's, and is applied once: it outlives the unload.
+    assert events == [(True, False), "unload"]
+
+
+def test_co_fitting_paraphrasers_load_with_planned_grants(tmp_path, patched):
+    """Two paraphrasers that share a card get the plan's fractions, and
+    nothing is unloaded between them."""
+    import redact.llms.backends.vllm as vllm_module
+    from redact.llms.model_config import MODEL_REGISTRY, VLLMConfig, register_model
+    from redact.llms.resources import estimate, residency
+
+    register_model("_para_small", backend_type="vllm", roles=["paraphraser"],
+                   vllm=VLLMConfig(hf_model_id="org/small", vram_gb=4.3))
+    patched.setattr(estimate, "estimate_kv_gib", lambda *a, **k: 0.0)
+    patched.setattr("redact.llms.resources.measure.detect_gpus", lambda: ("FakeGPU", 1))
+    patched.setattr("redact.llms.resources.measure.detect_gpu_memory_gib", lambda: 80.0)
+    patched.setattr(residency, "unload_local",
+                    lambda keep=None, engines=None: pytest.fail("unloaded"))
+    vllm_module.VLLMBackend.clear_cache()
+    _seed_inputs(tmp_path)
+    try:
+        generate_paraphrases(
+            data_dir=tmp_path, target="inputs", paraphraser="distribution",
+            paraphrases_per_sample=2, verbose=False,
+        )
+        # Pool 72; padded needs 48.89 + 5.33 leave 17.78, so each gets 8.89
+        # on top.
+        assert vllm_module._planned_utilization == {
+            vllm_module._engine_key(
+                "dphn/Dolphin-Mistral-24B-Venice-Edition", None, {}): 0.7222,
+            vllm_module._engine_key("org/small", None, {}): 0.1777,
+        }
+    finally:
+        MODEL_REGISTRY.pop("_para_small", None)
+        vllm_module.VLLMBackend.clear_cache()
+        vllm_module.set_planned_utilization({})     # a release keeps the plan
+
+
+def test_an_unload_between_paraphrasers_shuts_down_only_their_engine(
+        tmp_path, monkeypatch):
+    """With paraphrasers that do not co-fit, the engine of the one that ran
+    first is shut down before the next loads. The check model's engine and
+    another stage's stay loaded."""
+    import sys
+    import weakref
+    from types import SimpleNamespace
+
+    import redact.llms.backends.vllm as vllm_module
+    from redact.llms.model_config import MODEL_REGISTRY, VLLMConfig, register_model
+    from redact.llms.resources import residency
+
+    shutdowns, engines = [], {}
+
+    class _LLM:
+        def __init__(self, **kw):
+            model = kw["model"]
+            engines[model] = weakref.ref(self)
+            self.llm_engine = SimpleNamespace(engine_core=SimpleNamespace(
+                shutdown=lambda: shutdowns.append(model)))
+
+    monkeypatch.setitem(sys.modules, "vllm", SimpleNamespace(LLM=_LLM))
+    monkeypatch.setattr(vllm_module, "_prepare_environment", lambda: None)
+    monkeypatch.setattr("redact.llms.resources.estimate._load_config", lambda _id: None)
+    monkeypatch.setattr(
+        CP, "paraphrase_batch",
+        lambda client, texts, **kw: [f"PARA::{t}" for t in texts])
+    monkeypatch.setattr(
+        CP, "batch_check_samples",
+        lambda cc, payloads, checker, **kw: [(True, "") for _ in payloads])
+    monkeypatch.setattr(
+        residency, "plan_residency", lambda models: SimpleNamespace(sequential=True))
+    monkeypatch.setattr(residency, "apply_plan", lambda plan, replace=True: None)
+
+    register_model("_para_second", backend_type="vllm", roles=["paraphraser"],
+                   vllm=VLLMConfig(hf_model_id="org/second"))
+    register_model("_para_check", backend_type="vllm",
+                   vllm=VLLMConfig(hf_model_id="org/check"))
+    pool = {"dphn/Dolphin-Mistral-24B-Venice-Edition", "org/second"}
+    vllm_module.VLLMBackend.clear_cache()
+    _seed_inputs(tmp_path)
+    try:
+        vllm_module._engine("org/other-stage", None, {})    # loaded before the stage
+        generate_paraphrases(
+            data_dir=tmp_path, target="inputs", paraphraser="distribution",
+            check_model="_para_check", paraphrases_per_sample=2, verbose=False,
+        )
+        # One unload, between the two paraphrasers: the first one's engine.
+        assert len(shutdowns) == 1 and shutdowns[0] in pool
+        assert engines[shutdowns[0]]() is None
+        (still_loaded,) = pool - set(shutdowns)
+        assert {key[0] for key in vllm_module._engines} == {
+            "org/check", "org/other-stage", still_loaded}
+    finally:
+        MODEL_REGISTRY.pop("_para_second", None)
+        MODEL_REGISTRY.pop("_para_check", None)
+        vllm_module.VLLMBackend.clear_cache()

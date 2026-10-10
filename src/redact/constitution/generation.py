@@ -6,10 +6,10 @@ benign. Each constitution entry later seeds N input samples for classifier
 training.
 
 Usage:
-    from redact.llms import get_client, RateLimiter
+    from redact.llms import ModelClient
     from redact.constitution import ConstitutionPipeline, EntryType
 
-    pipeline = ConstitutionPipeline(ModelClient.create("claude-opus-4-6"), RateLimiter())
+    pipeline = ConstitutionPipeline(ModelClient.create("claude-opus-4-6"))
 
     result = pipeline.run(
         taxonomy=load_taxonomy("content_moderation_categories"),

@@ -27,12 +27,12 @@ when run one sample at a time.
 
 from __future__ import annotations
 
-from collections.abc import Callable, Generator
+from collections.abc import Generator
 
 # LLMRequest is a model-layer type — defined in redact.llms.conversation and
 # re-exported here so existing jailbreak imports (`from .protocol import LLMRequest`)
 # keep working while `llms/` and `multi_turn/` share the same class.
-from redact.llms.conversation import LLMRequest  # noqa: F401
+from redact.llms.conversation import LLMRequest, drive_sync  # noqa: F401
 
 # A technique generator yields LLMRequests, is resumed with the response
 # string, and returns the (text, info) result. info is "" on success or
@@ -40,23 +40,6 @@ from redact.llms.conversation import LLMRequest  # noqa: F401
 TechniqueResult = tuple[str, str]
 TechniqueGen = Generator[LLMRequest, str, TechniqueResult]
 
-
-def run_sync(gen: TechniqueGen, call: Callable[[LLMRequest], str]):
-    """Drive a technique generator to completion with a blocking call fn.
-
-    Args:
-        gen: A primed-or-unprimed technique generator object.
-        call: ``callable(LLMRequest) -> str`` that performs the LLM call
-            (e.g. routing each request to its backend by ``request.model``).
-
-    Returns:
-        The generator's return value — ``(text, info)`` for technique
-        generators, or whatever a combined-chain generator returns.
-    """
-    try:
-        request = next(gen)
-        while True:
-            response = call(request)
-            request = gen.send(response)
-    except StopIteration as stop:
-        return stop.value
+#: ``run_sync(gen, call)``: drive one technique generator to completion with
+#: a blocking ``call(LLMRequest) -> str`` and return its ``(text, info)``.
+run_sync = drive_sync

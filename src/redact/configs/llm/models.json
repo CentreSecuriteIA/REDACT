@@ -26,9 +26,9 @@
     },
     "vllm": {
       "hf_model_id": "dphn/Dolphin-Mistral-24B-Venice-Edition",
-      "vram_gb": 50.0
+      "vram_gb": 43.9
     },
-    "notes": "Carries BOTH setups: .api (the hosted Venice endpoint, its default) and .vllm (the same weights run locally). There is deliberately no separate '-vllm' entry — ModelClient.create(name, backend_type='vllm') selects the local setup off this one. NOTE: include_venice_system_prompt is not always disabled; some pipelines may need the Venice system prompt active. Review per use case. vram_gb=50 is a derived estimate: ~23.6B params x 2 bytes (bf16) = ~47GB of weights plus KV/activations. Well beyond a single consumer card - expect the residency planner to say so. Venice list price as of 2026-08-30: $0.20/$0.90 per 1M in/out. The endpoint slug is versioned and now reads 'venice-uncensored-1-2', carried in api_model_id — the registry name stays 'venice-uncensored' because it keys roles, telemetry rows and the price lookup, and renaming it on every provider bump would orphan past traces."
+    "notes": "Carries BOTH setups: .api (the hosted Venice endpoint, its default) and .vllm (the same weights run locally). There is deliberately no separate '-vllm' entry — ModelClient.create(name, backend_type='vllm') selects the local setup off this one. NOTE: include_venice_system_prompt is false on every call that passes no extra_body of its own; a pipeline that needs the Venice system prompt active passes its own extra_body, which replaces default_extra_body whole. vram_gb=43.9 is the weights only, in GiB: ~23.6B params x 2 bytes (bf16). The planner adds the KV cache for max_model_len (10,000 tokens while unset, capped at the checkpoint's maximum) on top. Well beyond a single consumer card - expect the residency planner to say so. Venice list price as of 2026-08-30: $0.20/$0.90 per 1M in/out. The endpoint slug is versioned and now reads 'venice-uncensored-1-2', carried in api_model_id — the registry name stays 'venice-uncensored' because it keys roles, telemetry rows and the price lookup, and renaming it on every provider bump would orphan past traces."
   },
   "deepseek-v3.2": {
     "backend_type": "api",
@@ -94,13 +94,12 @@
     "vllm": {
       "hf_model_id": "huihui-ai/Llama-3.2-3B-Instruct-abliterated",
       "vllm_kwargs": {
-        "gpu_memory_utilization": 0.86,
         "enforce_eager": true,
         "max_model_len": 384
       },
-      "vram_gb": 7.0
+      "vram_gb": 6.0
     },
-    "notes": "Small local debug model — fast-loading (3B) for iterating on pipeline mechanics (batching, prompt formatting, manifest/ledger, resume) without API cost or a multi-minute load. Abliterated rather than the plain aligned Instruct model so refusals don't block the 'accepted' code path. Not a substitute for judging generation quality. vllm_kwargs are real-hardware-tuned (RTX 2080 Super, 8GB, via WSL2): the default gpu_memory_utilization overcommits a Windows-desktop-shared GPU, enforce_eager skips a slow compile step, and max_model_len=384 avoids spending KV-cache budget on this checkpoint's unused 131k native context. Full story in cleanup.md item 33. vram_gb=7 is a derived estimate: ~3.2B params x 2 bytes (bf16) = ~6.4GB of weights plus a small KV cache at max_model_len=384. That is deliberately close to the 8GB card it was tuned for - gpu_memory_utilization=0.86 leaves ~6.9GB, which is why max_model_len is capped."
+    "notes": "Small local debug model — fast-loading (3B) for iterating on pipeline mechanics (batching, prompt formatting, manifest/ledger, resume) without API cost or a multi-minute load. Abliterated rather than the plain aligned Instruct model so refusals don't block the 'accepted' code path. Not a substitute for judging generation quality. vllm_kwargs are real-hardware-tuned (RTX 2080 Super, 8GB, via WSL2): enforce_eager skips a slow compile step, and max_model_len=384 avoids spending KV-cache budget on this checkpoint's unused 131k native context. vram_gb=6.0 is the weights only, in GiB: ~3.2B params x 2 bytes (bf16). The planner adds the KV cache on top, small at max_model_len=384. With overhead that is 7.24GiB, just over the 7.2GiB the plan grants on an 8GB card."
   },
   "claude-opus-4-6": {
     "backend_type": "api",
@@ -132,8 +131,8 @@
     "default_temperature": 0.8,
     "vllm": {
       "hf_model_id": "dphn/Dolphin-Mistral-24B-Venice-Edition",
-      "vram_gb": 50.0
+      "vram_gb": 43.9
     },
-    "notes": "A DEDICATED model with its OWN identity, not an alias. The real defingerprinting model is trained separately and unavailable here, so as a stand-in this entry loads the SAME HF weights as venice-uncensored's local setup — it is its own model that happens to share weights. Swap hf_model_id, or register the real paraphraser with roles=['paraphraser'], when it lands. Shares venice-uncensored's checkpoint, so it shares its engine AND its 50GB footprint - the planner counts the load once, not twice."
+    "notes": "A DEDICATED model with its OWN identity, not an alias. The real defingerprinting model is trained separately and unavailable here, so as a stand-in this entry loads the SAME HF weights as venice-uncensored's local setup — it is its own model that happens to share weights. Swap hf_model_id, or register the real paraphraser with roles=['paraphraser'], when it lands. Shares venice-uncensored's checkpoint, so it shares its engine AND its footprint (vram_gb=43.9: weights only, GiB) - the planner counts the load once, not twice."
   }
 }

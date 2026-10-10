@@ -9,7 +9,10 @@ backend constructed directly uses this class's defaults for anything not
 passed, including ``rpm=None`` (no rate limiting; enforced in ``ModelClient``).
 """
 
+import gc
+import logging
 import os
+import sys
 import time
 from abc import ABC, abstractmethod
 from dataclasses import dataclass
@@ -19,6 +22,8 @@ from .. import observe
 
 if TYPE_CHECKING:
     from ..model_config import ModelConfig
+
+logger = logging.getLogger(__name__)
 
 
 @dataclass(frozen=True)
@@ -98,6 +103,25 @@ def fold_system_into_first_message(messages: list[dict]) -> list[dict]:
     return [folded_first] + rest[1:]
 
 
+def free_memory() -> None:
+    """Collect garbage, then empty torch's CUDA cache. Never raises.
+
+    A local backend calls this once it has dropped a released model, so the
+    memory is back before the next load.
+    """
+    gc.collect()
+    # Looked up, not imported: a process that never loaded torch has no cache.
+    torch = sys.modules.get("torch")
+    if torch is None:
+        return
+    try:
+        # is_initialized(), not is_available(), which starts CUDA in this process.
+        if torch.cuda.is_initialized():
+            torch.cuda.empty_cache()
+    except Exception as exc:  # noqa: BLE001 — cleanup must not fail a release
+        logger.debug("empty_cache failed (%s: %s)", type(exc).__name__, exc)
+
+
 class LLMBackend(ABC):
     """One registered model on one backend, fully configured."""
 
@@ -132,7 +156,7 @@ class LLMBackend(ABC):
             default_temperature: Used when ``generate()`` gets no override.
                 ``None`` leaves it to the backend or provider.
             supports_system_prompt: False folds system content into the first
-                user message.
+                non-system message.
             rpm: Requests-per-minute budget, or ``None`` for no rate limiting.
             max_workers: Requested concurrency. Clamped to 1 when the class
                 has ``supports_parallel_calls=False``.
@@ -184,51 +208,29 @@ class LLMBackend(ABC):
         return key
 
     def _prepare(
-        self,
-        messages_list: list[list[dict]],
-        system_prompts: str | list[str | None] | None,
+        self, messages_list: list[list[dict]]
     ) -> tuple[list[str | None], list[list[dict]]]:
         """Apply the model's system-prompt policy to a batch.
 
-        An explicit system prompt is merged with any system-role message in
-        the item (explicit first). The result is returned separately when the
-        model supports a system role, and folded into the first user message
-        otherwise.
+        The system-role messages of an item are returned separately when the
+        model supports a system role, and folded into the first non-system
+        message otherwise.
 
         Returns:
             ``(system_prompts, messages_list)``, both aligned with the input.
             The prompts are all ``None`` for a model without a system role.
         """
-        n = len(messages_list)
-        if system_prompts is None:
-            explicit: list[str | None] = [None] * n
-        elif isinstance(system_prompts, str):
-            explicit = [system_prompts] * n
-        else:
-            explicit = list(system_prompts)
-            if len(explicit) != n:
-                raise ValueError(
-                    f"system_prompts must be the same length as messages_list "
-                    f"({len(explicit)} != {n})."
-                )
-
-        if self.supports_system_prompt:
-            prompts: list[str | None] = []
-            resolved: list[list[dict]] = []
-            for messages, given in zip(messages_list, explicit):
-                inline, rest = extract_system_prompt(messages)
-                parts = [p for p in (given, inline) if p]
-                prompts.append("\n\n".join(parts) if parts else None)
-                resolved.append(rest)
-            return prompts, resolved
-
-        folded = []
-        for messages, given in zip(messages_list, explicit):
-            merged = (
-                [{"role": "system", "content": given}, *messages] if given else messages
-            )
-            folded.append(fold_system_into_first_message(merged))
-        return [None] * n, folded
+        prompts: list[str | None] = []
+        resolved: list[list[dict]] = []
+        for messages in messages_list:
+            if self.supports_system_prompt:
+                prompt, messages = extract_system_prompt(messages)
+            else:
+                prompt, messages = None, fold_system_into_first_message(messages)
+            # An empty system prompt counts as none.
+            prompts.append(prompt or None)
+            resolved.append(messages)
+        return prompts, resolved
 
     def _record_call(
         self,
@@ -240,13 +242,15 @@ class LLMBackend(ABC):
         max_tokens: int | None = None,
         temperature: float | None = None,
         error: str | None = None,
+        finish_reason: str | None = None,
     ) -> None:
         """Emit one ``call`` telemetry event for one transport call.
 
         One event per call, not per item: a native pass over N prompts emits
         a single event with ``n_items=N``, and a per-item loop emits one
         event per iteration. ``started`` is ``time.perf_counter()`` taken
-        just before the call.
+        just before the call. ``finish_reason`` is the provider's reason the
+        reply ended, when it reports one.
         """
         event = {
             "ev": "call",
@@ -261,6 +265,8 @@ class LLMBackend(ABC):
         }
         if error is not None:
             event["error"] = error
+        if finish_reason is not None:
+            event["finish_reason"] = finish_reason
         observe.record(event)
 
     def _resolve(
@@ -277,7 +283,6 @@ class LLMBackend(ABC):
         self,
         messages_list: list[list[dict]],
         *,
-        system_prompts: str | list[str | None] | None = None,
         max_tokens: int | None = None,
         temperature: float | None = None,
         internals_ids: list[str | None] | None = None,
@@ -290,9 +295,6 @@ class LLMBackend(ABC):
 
         Args:
             messages_list: One chat message list per item.
-            system_prompts: One string for the whole batch, or one (or
-                ``None``) per item. Merged with any system-role message
-                already in the item.
             max_tokens: Overrides the model's ``default_max_tokens``.
             temperature: Overrides the model's ``default_temperature``.
             internals_ids: One capture id (or ``None``) per item. Used only

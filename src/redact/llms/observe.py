@@ -8,8 +8,10 @@ A ``call`` event is one transport call, not one batch item: a native vLLM pass
 over 32 prompts is a single event with ``n_items=32``.
 """
 
-import threading
+import logging
 from collections.abc import Callable
+
+logger = logging.getLogger(__name__)
 
 # The installed sink. None means record() returns immediately.
 _emitter: Callable[[dict], None] | None = None
@@ -18,7 +20,6 @@ _emitter: Callable[[dict], None] | None = None
 # not propagate context variables to their workers, so a ContextVar would read
 # empty in every call BatchCaller fans out.
 _stage: str | None = None
-_lock = threading.Lock()
 
 
 def set_emitter(fn: Callable[[dict], None] | None) -> None:
@@ -37,8 +38,7 @@ def set_stage(stage: str | None) -> None:
     no stage is set.
     """
     global _stage
-    with _lock:
-        _stage = stage
+    _stage = stage
 
 
 def current_stage() -> str | None:
@@ -49,8 +49,8 @@ def current_stage() -> str | None:
 def record(event: dict) -> None:
     """Emit one telemetry event.
 
-    Does nothing when no emitter is installed. Never raises: exceptions from
-    the emitter are swallowed so a broken sink cannot stop a run.
+    Does nothing when no emitter is installed. Never raises: an exception from
+    the emitter is logged at DEBUG, so a broken sink cannot stop a run.
 
     Args:
         event: Must carry an ``"ev"`` key naming the event type (e.g.
@@ -62,5 +62,5 @@ def record(event: dict) -> None:
     event.setdefault("stage", _stage)
     try:
         emitter(event)
-    except Exception:  # noqa: BLE001 — telemetry must never break a run
-        pass
+    except Exception as exc:  # noqa: BLE001 — telemetry must never break a run
+        logger.debug("Telemetry emitter failed (%s: %s)", type(exc).__name__, exc)

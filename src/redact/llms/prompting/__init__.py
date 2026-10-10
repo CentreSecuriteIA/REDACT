@@ -1,14 +1,12 @@
 """Prompt loading, reply parsing and prompt-tree scaffolding.
 
-- :mod:`prompts`: load a prompt JSON and render it into chat messages.
-- :mod:`extraction`: parse a reply into samples, and supply the format
-  instruction that asks the model for that shape.
+- :mod:`prompts`: load a prompt JSON and render it into chat messages, and
+  supply the format instruction that asks the model for a reply shape.
+- :mod:`extraction`: parse a reply into samples.
 - :mod:`scaffold`: write an editable copy of the prompt tree.
 
-``prompts`` and ``extraction`` import each other: ``extraction`` loads the
-``format_instructions/`` prompts, and ``prompts`` appends a format instruction
-for ``format_style=``. The cycle is broken by a function-local import in
-``prompts``.
+``prompts`` imports ``extraction`` for the style names. ``extraction``
+imports nothing from this package.
 """
 
 from .extraction import (
@@ -16,15 +14,14 @@ from .extraction import (
     ConstitutionEntry,
     clean_sample,
     extract_and_clean,
-    extract_delimited,
     extract_numbered_list,
     extract_structured_qa,
-    get_format_instruction,
     parse_constitution,
 )
 from .prompts import (
     PromptTemplate,
     build_messages,
+    get_format_instruction,
     load_prompt,
     report_prompt_sources,
     resolve_prompt,
@@ -38,7 +35,6 @@ __all__ = [
     "build_messages",
     "clean_sample",
     "extract_and_clean",
-    "extract_delimited",
     "extract_numbered_list",
     "extract_structured_qa",
     "get_format_instruction",

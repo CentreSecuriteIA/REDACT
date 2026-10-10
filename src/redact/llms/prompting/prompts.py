@@ -17,6 +17,7 @@ from pathlib import Path, PureWindowsPath
 from typing import Any
 
 from ... import paths
+from .extraction import EXTRACTION_STYLES, _sample_count
 
 logger = logging.getLogger(__name__)
 
@@ -158,6 +159,37 @@ def load_prompt(
     return _read_prompt(*resolve_prompt(pipeline, category, prompt_dir))
 
 
+def get_format_instruction(
+    style: str,
+    num_samples: Any,
+    prompt_dir: str | Path | None = None,
+) -> str:
+    """Return the format instruction to append to a system prompt.
+
+    Args:
+        style: One of ``EXTRACTION_STYLES``.
+        num_samples: Number of samples to request: an integer >= 1, or a
+            string of one.
+        prompt_dir: Optional prompt override directory.
+
+    Raises:
+        ValueError: Unknown ``style``, an invalid ``num_samples``, or the
+            instruction file has no ``instruction`` text or cannot be
+            rendered.
+    """
+    if style not in EXTRACTION_STYLES:
+        raise ValueError(
+            f"Unknown format style '{style}'. Choose from: {sorted(EXTRACTION_STYLES)}"
+        )
+    count = _sample_count(num_samples)
+    path, is_override = resolve_prompt("format_instructions", style, prompt_dir)
+    what = _where("instruction", f"format_instructions/{style}", path, is_override)
+    config = _read_prompt(path, is_override)
+    if not isinstance(config.get("instruction"), str):
+        raise ValueError(f'Prompt {what} is missing: the file needs an "instruction".')
+    return _render(config["instruction"], {"num_samples": count}, what)
+
+
 def report_prompt_sources(
     prompt_dir: str | Path | None = None,
 ) -> dict[str, list[str]]:
@@ -254,9 +286,13 @@ def _render(text: str, kwargs: dict[str, Any], what: str) -> str:
     """Render one field with ``str.format_map``.
 
     Raises:
-        ValueError: Rendering failed. The message names the field (``what``)
-            and the cause.
+        ValueError: ``text`` is not a string, or rendering failed. The
+            message names the field (``what``) and the cause.
     """
+    if not isinstance(text, str):
+        raise ValueError(
+            f"Prompt {what} must be a string, got {type(text).__name__}."
+        )
     if not text:
         return text
     try:
@@ -295,25 +331,6 @@ def _explain(text: str, kwargs: dict[str, Any], what: str, exc: Exception) -> st
     )
 
 
-def _sample_count(value: Any) -> int:
-    """Validate ``num_samples``: an int >= 1, or a string of one.
-
-    Raises:
-        ValueError: Anything else, such as a float, ``None`` or ``0``.
-    """
-    try:
-        count = int(value) if isinstance(value, str) else value
-    except ValueError:
-        count = None
-    # type(), not isinstance(): a bool is an int but not a count.
-    if type(count) is not int or count < 1:
-        raise ValueError(
-            f"num_samples must be an integer >= 1 (or a string of one), "
-            f"got {value!r}."
-        )
-    return count
-
-
 class PromptTemplate:
     """One prompt config, rendered into ``[system, *few_shot, user]`` messages.
 
@@ -321,8 +338,8 @@ class PromptTemplate:
 
     - The system prompt is rendered once, at construction, from the
       construction kwargs only. With ``format_style`` set, the matching
-      format instruction (see ``llms/prompting/extraction.py``) is appended
-      to it, which requires ``num_samples``.
+      format instruction (:func:`get_format_instruction`) is appended to it,
+      which requires ``num_samples``.
     - The template is rendered on each call and becomes the user message. It
       sees the construction kwargs too; a call kwarg of the same name wins.
 
@@ -384,26 +401,11 @@ class PromptTemplate:
         )
 
         if format_style:
-            # Imported here because extraction.py imports this module.
-            from .extraction import EXTRACTION_STYLES, get_format_instruction
-
-            if format_style not in EXTRACTION_STYLES:
-                raise ValueError(
-                    f"Unknown format style '{format_style}'. Choose from: "
-                    f"{sorted(EXTRACTION_STYLES)}"
-                )
             # num_samples is required. A default of 1 could contradict the
             # number of samples the template asks for.
-            if "num_samples" not in build_kwargs:
-                raise ValueError(
-                    f"format_style={format_style!r} needs num_samples, since the "
-                    f"format instruction states how many samples to return. "
-                    f"Pass num_samples=..., or omit format_style for a prompt "
-                    f"that asks for one."
-                )
             system_prompt += get_format_instruction(
                 format_style,
-                num_samples=_sample_count(build_kwargs["num_samples"]),
+                num_samples=build_kwargs.get("num_samples"),
                 prompt_dir=prompt_dir,
             )
 

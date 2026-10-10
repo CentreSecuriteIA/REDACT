@@ -168,17 +168,29 @@ class TestBoundParamResolution:
         assert calls[0]["system_prompt"] == "Sys."
         assert calls[0]["messages"] == [{"role": "user", "content": "hi"}]
 
-    def test_explicit_system_prompt_argument_reaches_the_transport(self):
-        calls = self._call("venice-uncensored", [[{"role": "user", "content": "hi"}]],
-                           system_prompts="Sys.")
-        assert calls[0]["system_prompt"] == "Sys."
-
-    def test_explicit_and_inline_system_prompts_are_merged(self):
+    def test_system_message_after_the_user_turn_reaches_the_transport(self):
         calls = self._call("venice-uncensored", [[
-            {"role": "system", "content": "Inline."},
             {"role": "user", "content": "hi"},
-        ]], system_prompts="Explicit.")
-        assert calls[0]["system_prompt"] == "Explicit.\n\nInline."
+            {"role": "system", "content": "Sys."},
+        ]])
+        assert calls[0]["system_prompt"] == "Sys."
+        assert calls[0]["messages"] == [{"role": "user", "content": "hi"}]
+
+    def test_several_system_messages_are_merged_in_order(self):
+        calls = self._call("venice-uncensored", [[
+            {"role": "system", "content": "First."},
+            {"role": "system", "content": "Second."},
+            {"role": "user", "content": "hi"},
+        ]])
+        assert calls[0]["system_prompt"] == "First.\n\nSecond."
+
+    def test_empty_system_message_counts_as_none(self):
+        calls = self._call("venice-uncensored", [[
+            {"role": "system", "content": ""},
+            {"role": "user", "content": "hi"},
+        ]])
+        assert "system_prompt" not in calls[0]
+        assert calls[0]["messages"] == [{"role": "user", "content": "hi"}]
 
     def test_supports_system_prompt_false_folds(self):
         name = "_test_no_system_prompt_model"
@@ -199,8 +211,8 @@ class TestBoundParamResolution:
         finally:
             MODEL_REGISTRY.pop(name, None)
 
-    def test_explicit_system_prompt_is_folded_too(self):
-        name = "_test_no_system_prompt_model_explicit"
+    def test_several_system_messages_are_folded_in_order(self):
+        name = "_test_no_system_prompt_model_several"
         try:
             register_model(
                 name,
@@ -209,10 +221,15 @@ class TestBoundParamResolution:
                 api=APIConfig(backend_type="openai", api_key_env="TEST_API_KEY",
                               base_url="https://test.example/v1", rpm=5),
             )
-            calls = self._call(name, [[{"role": "user", "content": "hi"}]],
-                               system_prompts="Sys.")
+            calls = self._call(name, [[
+                {"role": "system", "content": "First."},
+                {"role": "user", "content": "hi"},
+                {"role": "system", "content": "Second."},
+            ]])
             assert "system_prompt" not in calls[0]
-            assert calls[0]["messages"] == [{"role": "user", "content": "Sys.\n\nhi"}]
+            assert calls[0]["messages"] == [
+                {"role": "user", "content": "First.\n\nSecond.\n\nhi"}
+            ]
         finally:
             MODEL_REGISTRY.pop(name, None)
 
@@ -309,6 +326,29 @@ class TestRateLimiter:
         limiter.wait_if_needed(backend)
         assert len(limiter._timestamps) == 2
 
+    def test_a_wall_clock_jump_does_not_empty_the_window(self):
+        """The window runs on the monotonic clock, so a full window stays
+        full when the system clock is set forward."""
+        rpm = 2
+        backend = make_client(model="rl-monotonic").backend
+        backend.rpm = rpm
+        limiter = RateLimiter()
+        for _ in range(rpm):
+            limiter.wait_if_needed(backend)
+
+        slept = []
+
+        def _sleep(seconds):
+            slept.append(seconds)
+            limiter._timestamps.clear()      # the window has passed
+
+        wall_clock = time.time
+        with patch.object(wrappers.time, "time", lambda: wall_clock() + 3600.0), \
+             patch.object(wrappers.time, "sleep", side_effect=_sleep):
+            limiter.wait_if_needed(backend)
+
+        assert len(slept) == 1, "a clock jump let a request through a full window"
+
 
 class TestBatchCaller:
     def test_sequential(self):
@@ -368,6 +408,24 @@ class TestBatchCaller:
         )
         assert backend.calls[0]["max_tokens"] == 50
 
+    def test_a_failed_item_cancels_the_items_not_yet_started(self):
+        started = []
+
+        class _FailsOnTheFirstItem(MockBackend):
+            def generate(self, messages_list, **kwargs):
+                text = messages_list[0][0]["content"]
+                started.append(text)
+                if text == "0":
+                    raise RuntimeError("boom")
+                time.sleep(0.05)
+                return ["ok"]
+
+        caller = caller_for(_FailsOnTheFirstItem(), max_workers=2)
+        batch = [[{"role": "user", "content": str(i)}] for i in range(30)]
+        with pytest.raises(RuntimeError, match="boom"):
+            caller.run(batch)
+        assert len(started) < len(batch)
+
 
 class _InternalsBackend(MockBackend):
     """MockBackend variant that declares internals support."""
@@ -416,16 +474,16 @@ class TestAssertSingleSamplePerCall:
     """Guard for pipelines shaped like run_from_constitution (N samples/call)."""
 
     def test_noop_when_backend_does_not_support_internals(self):
-        from redact.llms.wrappers import assert_single_sample_per_call
+        from redact.llms.router import assert_single_sample_per_call
         backend = MockBackend("ok")  # supports_internals=False
         assert_single_sample_per_call(make_client(backend), samples_per_call=5)  # no raise
 
     def test_noop_when_samples_per_call_is_one(self):
-        from redact.llms.wrappers import assert_single_sample_per_call
+        from redact.llms.router import assert_single_sample_per_call
         assert_single_sample_per_call(make_client(_InternalsBackend("ok")), samples_per_call=1)  # no raise
 
     def test_raises_when_internals_and_multi_sample(self):
-        from redact.llms.wrappers import assert_single_sample_per_call
+        from redact.llms.router import assert_single_sample_per_call
         with pytest.raises(ValueError, match="internals capture"):
             assert_single_sample_per_call(make_client(_InternalsBackend("ok")), samples_per_call=3)
 
@@ -512,6 +570,19 @@ class TestRateLimitScope:
                 ModelClient.create(a)
                 with pytest.raises(ValueError, match="different rpm"):
                     ModelClient.create(b)
+
+    def test_a_model_registered_again_refreshes_its_own_claim(self):
+        a = self._register("_test_scope_again_a", scope="endpoint", rpm=5)
+        b = self._register("_test_scope_again_b", scope="endpoint", rpm=5)
+        raised = 50
+        with patch("redact.llms.backends.openai.openai.OpenAI"), \
+             patch.dict(os.environ, {"TEST_KEY": "k"}):
+            ModelClient.create(a)
+            self._register(a, scope="endpoint", rpm=raised)
+            assert ModelClient.create(a).backend.rpm == raised
+            # The refreshed claim still binds the other models.
+            with pytest.raises(ValueError, match="different rpm"):
+                ModelClient.create(b)
 
     def test_local_setup_never_takes_a_shared_limiter(self):
         """A local binding carries rpm=None, so the limiter is inert anyway —

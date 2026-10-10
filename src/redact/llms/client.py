@@ -30,7 +30,8 @@ _endpoint_rpm: dict[str, tuple[int, str]] = {}
 def clear_client_cache() -> None:
     """Drop every rate-limit window and endpoint budget claim.
 
-    For tests, or after changing the registry.
+    For tests, or after changing the registry. Clients built before the call
+    keep their old window.
     """
     _endpoint_rpm.clear()
     clear_shared_limiters()
@@ -58,14 +59,16 @@ def _resolve_rate_limit(model, config, setup) -> tuple[RateLimiter | None, str |
 
     endpoint = api.endpoint_id
     claimed = _endpoint_rpm.get(endpoint)
-    if claimed is not None and claimed[0] != api.rpm:
+    # A claim by the same model is a refresh: it was registered again.
+    if claimed is None or claimed[1] == model:
+        _endpoint_rpm[endpoint] = (api.rpm, model)
+    elif claimed[0] != api.rpm:
         raise ValueError(
             f"Models {claimed[1]!r} and {model!r} share endpoint {endpoint} "
             f"with rate_limit_scope='endpoint' but declare different rpm "
             f"({claimed[0]} vs {api.rpm}). An account-wide budget is one "
             f"number: make every model on this endpoint declare the same rpm."
         )
-    _endpoint_rpm.setdefault(endpoint, (api.rpm, model))
     return shared_limiter(endpoint), endpoint
 
 
@@ -149,7 +152,6 @@ class ModelClient:
         self,
         messages_list: list[list[dict]],
         *,
-        system_prompts: str | list[str | None] | None = None,
         max_tokens: int | None = None,
         temperature: float | None = None,
         internals_ids: list[str | None] | None = None,
@@ -161,9 +163,6 @@ class ModelClient:
         Args:
             messages_list: One chat message list per item. An empty list
                 returns ``[]``.
-            system_prompts: One string for the whole batch, or one (or
-                ``None``) per item. Merged with any system-role message
-                already in ``messages_list``.
             max_tokens: Overrides the model's default.
             temperature: Overrides the model's default.
             internals_ids: One capture id (or ``None``) per item. Only valid
@@ -176,8 +175,7 @@ class ModelClient:
 
         Raises:
             ValueError: ``internals_ids`` is passed to a backend that cannot
-                capture, or a per-item list's length differs from
-                ``messages_list``.
+                capture, or its length differs from ``messages_list``.
         """
         if not messages_list:
             return []
@@ -206,7 +204,6 @@ class ModelClient:
                 self._rate_limiter.wait_if_needed(self._backend)
             results = self._backend.generate(
                 messages_list,
-                system_prompts=system_prompts,
                 max_tokens=max_tokens, temperature=temperature,
                 internals_ids=internals_ids, **kwargs,
             )
@@ -215,12 +212,8 @@ class ModelClient:
                     on_complete(i, r)
             return results
 
-        # BatchCaller takes one system prompt per item.
-        if isinstance(system_prompts, str):
-            system_prompts = [system_prompts] * len(messages_list)
         return self._caller.run(
             messages_list, on_complete=on_complete,
-            system_prompts=system_prompts,
             max_tokens=max_tokens, temperature=temperature,
             internals_ids=internals_ids, **kwargs,
         )

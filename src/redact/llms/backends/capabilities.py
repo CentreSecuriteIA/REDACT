@@ -174,8 +174,8 @@ def clear_transport_caches() -> None:
     """Clear every backend class's cache of shared resources.
 
     For tests, after changing environment variables, or to free GPU memory
-    between local models. This drops the caches' references only: an engine
-    stays loaded while a client or backend still refers to it.
+    between local models. Local engines are shut down and their memory
+    freed; a client built on one raises on its next call.
     """
     for backend_cls in BACKEND_TYPES.values():
         backend_cls.clear_cache()

@@ -13,7 +13,7 @@ import shutil
 from pathlib import Path
 
 from ... import paths
-from .prompts import _field_roots
+from .prompts import _field_roots, _read_prompt
 
 _DEFAULT_PROMPT_DIR = paths.prompts_dir()
 
@@ -35,7 +35,8 @@ def _placeholder_prompt(config: dict) -> dict:
       has) each become a TODO holding the ``{placeholders}`` that field used,
       so the stub renders with the same values as the original.
     - ``few_shot_examples`` is emptied if present.
-    - ``metadata`` is set to version ``0.0`` with a placeholder note.
+    - ``metadata``, if present, is set to version ``0.0`` with a placeholder
+      note.
 
     Every other key, including ``seed_fields``, is kept unchanged.
     """
@@ -46,13 +47,14 @@ def _placeholder_prompt(config: dict) -> dict:
                 f"TODO: replace with a real {key}. "
                 f"Placeholders: {_placeholders(config[key])}"
             )
-    # Emptied only if present, so the stub gains no key its source lacks.
+    # Replaced only if present, so the stub gains no key its source lacks.
     if "few_shot_examples" in stub:
         stub["few_shot_examples"] = []
-    stub["metadata"] = {
-        "version": "0.0",
-        "notes": "PLACEHOLDER — replace before use.",
-    }
+    if "metadata" in stub:
+        stub["metadata"] = {
+            "version": "0.0",
+            "notes": "PLACEHOLDER — replace before use.",
+        }
     return stub
 
 
@@ -78,6 +80,7 @@ def scaffold_prompt_tree(
 
     Raises:
         ValueError: Unknown ``mode``.
+        FileNotFoundError: The source directory does not exist.
 
     Note:
         ``"empty"`` replaces prompt text only. Directory and category names
@@ -87,6 +90,8 @@ def scaffold_prompt_tree(
         raise ValueError(f"mode must be 'copy' or 'empty', got {mode!r}")
 
     source = Path(source_dir) if source_dir is not None else _DEFAULT_PROMPT_DIR
+    if not source.is_dir():
+        raise FileNotFoundError(f"Prompt source directory {source} does not exist.")
     target = Path(target_dir)
     written = 0
     for src_path in source.rglob("*.json"):
@@ -95,8 +100,7 @@ def scaffold_prompt_tree(
         if mode == "copy":
             shutil.copy2(src_path, dst_path)
         else:
-            with open(src_path, encoding="utf-8") as f:
-                config = json.load(f)
+            config = _read_prompt(src_path, source_dir is not None)
             with open(dst_path, "w", encoding="utf-8") as f:
                 json.dump(_placeholder_prompt(config), f, indent=4)
                 f.write("\n")

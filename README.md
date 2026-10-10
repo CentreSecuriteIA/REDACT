@@ -167,11 +167,10 @@ src/redact/
 │   │   ├── openai.py              # Generic OpenAI-compatible API backend (Venice today)
 │   │   ├── anthropic.py           # Anthropic Claude backend (native SDK)
 │   │   ├── vllm.py                # Local vLLM backend for self-hosted inference
-│   │   ├── introspection.py       # Local transformers backend with internals capture
-│   │   └── vram.py                # What a local load took: claimed vs weights vs KV
+│   │   └── introspection.py       # Local transformers backend with internals capture
 │   ├── observe.py                 # Telemetry emit hook (no-op by default; keeps llms/ dep-free)
 │   ├── client.py                  # ModelClient: a configured backend + its dispatch strategy
-│   ├── router.py                  # generate_sample(), check_sample(), batch_* helpers
+│   ├── router.py                  # generate_sample(), check_sample(), batch_* helpers, assert_single_sample_per_call()
 │   ├── wrappers.py                # RateLimiter + BatchCaller, both wired from a backend
 │   ├── prompts.py                 # JSON prompt loader + template renderer
 │   ├── extraction.py              # Multi-sample + constitution extraction
@@ -261,7 +260,7 @@ Everything above this layer calls a unified interface and is backend-agnostic.
 
 | Component | Purpose |
 |---|---|
-| `LLMBackend` | Abstract base class. A backend **is one configured model** — name, generation defaults, provider params, rpm and worker budget are bound at construction, so `generate(messages_list, *, system_prompts=..., max_tokens=..., temperature=...)` takes only what varies per call. Always batch-shaped (a single sample is a batch of one) |
+| `LLMBackend` | Abstract base class. A backend **is one configured model** — name, generation defaults, provider params, rpm and worker budget are bound at construction, so `generate(messages_list, *, max_tokens=..., temperature=...)` takes only what varies per call. Always batch-shaped (a single sample is a batch of one) |
 | `OpenAIBackend` | Generic OpenAI-compatible API backend (Venice AI is the provider registered against it today) |
 | `AnthropicBackend` | Anthropic Claude (native SDK, separate system param) |
 | `VLLMBackend` | Local vLLM for self-hosted GPU inference |
@@ -281,7 +280,7 @@ Everything above this layer calls a unified interface and is backend-agnostic.
 | `residency.preload()` | Warm local models in the background while API stages run |
 | `load_prompt()` | Load prompt JSON by pipeline/category |
 | `PromptTemplate` | Two-stage prompt render: system prompt built once, template rendered per call |
-| `extract_and_clean()` | Extract numbered lists / Q&A / delimited from LLM output |
+| `extract_and_clean()` | Extract a numbered list from LLM output and clean each sample (Q&A pairs: `extract_structured_qa()`) |
 | `parse_constitution()` | Parse 3-layer markdown constitution into structured entries |
 
 **Backend auto-routing** — just pass a model name:
@@ -746,9 +745,8 @@ Multi-format extraction from LLM output, plus constitution parsing:
 |---|---|
 | `extract_numbered_list()` | `"1. sample"` / `"2) sample"` / `"3: sample"` |
 | `extract_structured_qa()` | `**Prompt N:** **Question:** ... **Answer:** ...` |
-| `extract_delimited()` | Samples separated by `---`, `===`, blank lines |
 | `parse_constitution()` | 3-layer markdown hierarchy -> `ConstitutionEntry` list |
-| `clean_sample()` | Strip markdown formatting, meta-commentary, and ChatML tokens (`<\|im_end\|>`) |
+| `clean_sample()` | Strip markdown formatting and ChatML tokens (`<\|im_end\|>`) |
 | `get_format_instruction()` | Format instructions to append to system prompts — loaded from `prompts/format_instructions/{style}/`, one of `EXTRACTION_STYLES` |
 
 Constitution parsing example:
@@ -884,17 +882,23 @@ reports **time only** rather than guessing a number.
 Before anything loads, a residency plan says whether the run fits:
 
 ```
-[residency] plan needs 2 GPU(s); detected 1 x NVIDIA GeForce RTX 2080 SUPER, 8GB each
+[residency] plan needs 1 GPU(s); detected 1 x NVIDIA RTX A5000, 24.0GiB each
   group 1:
-    venice-uncensored[vllm]  ~20.4GB (measured)
-  group 2:  -> sequential, unload between
-    some-other-model[vllm]  ~20.4GB (declared)
+    gen-model[vllm]  ~18.5GiB  (declared: 15.0 weights + 1.20 KV, x1.1 +0.6)  -> card 0, vLLM gets 21.6GiB (gpu_memory_utilization=0.90)
+  group 2:  -> cannot be resident with the above
+    other-model[vllm]  ~18.5GiB  (declared: 15.0 weights + 1.20 KV, x1.1 +0.6)  -> card 0, vLLM gets 21.6GiB (gpu_memory_utilization=0.90)
+  PROBLEM: these groups cannot be resident together, and nothing is unloaded
+  between stages, so a later group would load on top of the earlier ones. ...
 ```
 
-Declare `vram_gb` (and `min_gpus` for a model too large for one card) on a `VLLMConfig` or
-`IntrospectConfig`; after each real load the actual usage is measured back into
-`Data_cache/vram.json` and preferred on later runs, as long as the settings that move it
-(`max_model_len`, quantization, `gpu_memory_utilization`) still match.
+A footprint is estimated from the checkpoint's HF config (weights + KV cache, plus
+headroom) without loading anything. Declare `vram_gb` on a `VLLMConfig` or
+`IntrospectConfig` to override the estimated weights (the KV cache is always estimated on
+top, at `max_model_len` or a default of 10,000 tokens), and `min_gpus` on a `VLLMConfig` for a model too large for one
+card. The vLLM engines on a card split 0.9 of it: each is granted its need with overhead ((weights + KV) x1.1 + 0.6 GiB)
+plus an equal share of the spare, and loads with that `gpu_memory_utilization`
+(it is not a `vllm_kwargs` setting). A grant below that padded need means the plan does not fit. Nothing is unloaded between stages: if a run's local models do not fit together,
+run those stages as separate `run_pipeline` calls.
 
 Local models in the first group are then **preloaded on a background thread**, so a
 multi-minute 24B load overlaps with the API stages ahead of it instead of waiting behind

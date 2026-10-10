@@ -16,8 +16,9 @@ For a model the registry does not have, call ``register_model()`` and then
 passed, including ``rpm=None`` (no rate limiting).
 """
 
-# vllm, torch and transformers are optional extras. They are imported lazily
-# (as is anthropic), so importing this package does not need them.
+# vllm, torch and transformers are optional extras and are imported lazily, so
+# importing this package does not need them. anthropic is a required
+# dependency that is imported lazily too.
 from .backends import (
     AnthropicBackend,
     ComputeConfig,
@@ -37,7 +38,6 @@ from .prompting import (
     ConstitutionEntry,
     clean_sample,
     extract_and_clean,
-    extract_delimited,
     extract_numbered_list,
     extract_structured_qa,
     get_format_instruction,
@@ -66,10 +66,11 @@ from .prompting import PromptTemplate, build_messages, load_prompt
 
 # Helpers over a client
 from .router import (
+    assert_single_sample_per_call,
     batch_check_samples,
     batch_generate_samples,
     check_sample,
     generate_sample,
     is_accepted,
 )
-from .wrappers import BatchCaller, RateLimiter, assert_single_sample_per_call
+from .wrappers import BatchCaller, RateLimiter

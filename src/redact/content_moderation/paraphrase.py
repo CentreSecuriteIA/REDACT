@@ -58,7 +58,6 @@ def paraphrase_batch(
 
     Args:
         client: Paraphraser model, bound to its transport.
-        model: Paraphraser model identifier.
         samples: Texts to paraphrase.
         prompt_dir: Root prompt directory (defaults to the package prompts/).
         progress: Optional progress label for the batch dispatch.
@@ -91,7 +90,6 @@ def paraphrase_sample(
 
     Args:
         client: Paraphraser model, bound to its transport.
-        model: Paraphraser model identifier.
         sample: Text to paraphrase.
         system_prompt: Custom system prompt (overrides the JSON template).
         prompt_dir: Root prompt directory.
@@ -256,11 +254,9 @@ def run_paraphrase_target(
         return pd.read_csv(out_path) if out_path.exists() else pd.DataFrame()
 
     # ---- Execute grouped by model ------------------------------------------
-    # Grouping keeps one paraphraser in play at a time. Whether the previous
-    # one is actually *unloaded* between groups is a residency question, not a
-    # paraphrase one: two models sharing a checkpoint share a single engine and
-    # must NOT be unloaded between groups, while two large distinct models on
-    # one card must be. plan_residency() knows which case this is.
+    # One paraphraser runs at a time. The residency plan decides whether the
+    # pool's engines are unloaded between groups: they stay loaded when the
+    # whole pool can be resident together and are all dropped otherwise.
     from collections import defaultdict
     groups: dict[str, list[tuple]] = defaultdict(list)
     for u in units:
@@ -272,6 +268,8 @@ def run_paraphrase_target(
 
         plan = residency.plan_residency(list(groups))
         unload_between = plan.sequential
+        # replace=False: a run's own plan, when applied, covers the pool.
+        residency.apply_plan(plan, replace=False)
         if verbose and unload_between:
             logger.info(
                 "[paraphrase:%s] %d paraphrasers do not co-fit; unloading between groups.",
@@ -282,10 +280,12 @@ def run_paraphrase_target(
     written = 0
     for group_i, (model, gunits) in enumerate(groups.items()):
         if group_i and unload_between:
-            # Frees the previous group's weights. check_client is held by a
-            # local reference and keeps working; if it is itself local, its
-            # engine stays resident by design.
-            residency.unload_local(keep=[check_model] if check else None)
+            # The previous client's engine is released next; the check model's is kept.
+            client = None
+            # Engines of other stages, read now so one loaded meanwhile is kept too.
+            resident = residency.loaded_engines(exclude=list(groups))
+            residency.unload_local(keep=[check_model] if check else None,
+                                   engines=resident)
         client = ModelClient.create(model)
         # Internals capture: paraphrase's own output text (its eventual sample_id)
         # isn't known until the call returns, but internals_id has to be supplied

@@ -150,7 +150,6 @@ def generate_conversations(
 
         results = drive_generators(
             gens, resolve=resolve, finalize=finalize, on_error=on_error,
-            verbose=verbose,
             progress=f"conversations {start // batch_size + 1}/{n_chunks}" if verbose else None,
         )
         rows = [results[(iid, it)] for iid, it, _t, _m in chunk]

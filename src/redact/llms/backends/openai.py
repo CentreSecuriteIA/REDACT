@@ -5,6 +5,7 @@ Works with any compatible endpoint through ``base_url`` (e.g. Venice AI). The
 per endpoint and shared between the backends that use it.
 """
 
+import logging
 import threading
 import time
 from typing import TYPE_CHECKING, ClassVar
@@ -16,6 +17,8 @@ from .base import ComputeConfig, LLMBackend
 if TYPE_CHECKING:
     from ..model_config import ModelConfig
 
+logger = logging.getLogger(__name__)
+
 # SDK clients shared between backends, keyed on (base_url, api_key).
 _sdk_clients: dict[tuple[str, str], "openai.OpenAI"] = {}
 _sdk_clients_lock = threading.Lock()
@@ -23,13 +26,18 @@ _sdk_clients_lock = threading.Lock()
 
 def _sdk_client(api_key: str, base_url: str) -> "openai.OpenAI":
     key = (base_url, api_key)
-    if key in _sdk_clients:
-        return _sdk_clients[key]
+    # One read: clear_cache() may drop the key between a test and a lookup.
+    client = _sdk_clients.get(key)
+    if client is not None:
+        return client
     with _sdk_clients_lock:
         # Re-check under the lock so each endpoint gets one client.
-        if key not in _sdk_clients:
-            _sdk_clients[key] = openai.OpenAI(api_key=api_key, base_url=base_url)
-        return _sdk_clients[key]
+        client = _sdk_clients.get(key)
+        if client is None:
+            # The SDK retries a failed call itself (2 by default), unseen by the rate limiter and the trace.
+            client = openai.OpenAI(api_key=api_key, base_url=base_url)
+            _sdk_clients[key] = client
+        return client
 
 
 class OpenAIBackend(LLMBackend):
@@ -60,7 +68,8 @@ class OpenAIBackend(LLMBackend):
             base_url: Base URL of the API (e.g. "https://api.venice.ai/api/v1").
             api_model_id: Model identifier sent to the provider. Defaults to
                 ``model``.
-            extra_body: Provider-specific parameters sent with every call.
+            extra_body: Provider-specific parameters sent with each call. A
+                call that passes its own ``extra_body`` replaces them whole.
             **identity: Forwarded to :meth:`LLMBackend.__init__` (generation
                 defaults, system-prompt policy, rpm, max_workers).
         """
@@ -107,7 +116,6 @@ class OpenAIBackend(LLMBackend):
         self,
         messages_list: list[list[dict]],
         *,
-        system_prompts: str | list[str | None] | None = None,
         max_tokens: int | None = None,
         temperature: float | None = None,
         internals_ids: list[str | None] | None = None,
@@ -117,7 +125,6 @@ class OpenAIBackend(LLMBackend):
 
         Args:
             messages_list: One chat message list per item.
-            system_prompts: Sent as a leading system-role message.
             max_tokens: Overrides the model's default.
             temperature: Overrides the model's default.
             internals_ids: Ignored. This backend does not capture internals.
@@ -126,7 +133,7 @@ class OpenAIBackend(LLMBackend):
         Returns:
             Generated text, one per item, in the order of ``messages_list``.
         """
-        prompts, resolved = self._prepare(messages_list, system_prompts)
+        prompts, resolved = self._prepare(messages_list)
         max_tok, temp = self._resolve(max_tokens, temperature)
 
         results = []
@@ -136,13 +143,13 @@ class OpenAIBackend(LLMBackend):
             if system_prompt:
                 call_messages = [{"role": "system", "content": system_prompt}, *messages]
 
+            # kwargs first: a model= or messages= in them must not re-target the call.
             call_kwargs: dict = {
+                **kwargs,
                 "model": self._api_model_id,
                 "messages": call_messages,
-                **kwargs,
+                "max_tokens": max_tok,
             }
-            if max_tok is not None:
-                call_kwargs["max_tokens"] = max_tok
             if temp is not None:
                 call_kwargs["temperature"] = temp
             if self._extra_body:
@@ -157,16 +164,22 @@ class OpenAIBackend(LLMBackend):
                     temperature=temp, error=f"{type(exc).__name__}: {exc}",
                 )
                 raise
-            content = response.choices[0].message.content
+            # A response with no choices counts as an empty reply.
+            choice = response.choices[0] if response.choices else None
+            content = (choice.message.content if choice else None) or ""
+            finish_reason = getattr(choice, "finish_reason", None)
             # Some OpenAI-compatible endpoints omit usage.
             usage = getattr(response, "usage", None)
             self._record_call(
                 n_items=1, started=started,
                 in_tok=getattr(usage, "prompt_tokens", None),
                 out_tok=getattr(usage, "completion_tokens", None),
-                max_tokens=max_tok, temperature=temp,
+                max_tokens=max_tok, temperature=temp, finish_reason=finish_reason,
             )
-            results.append(content if content is not None else "")
+            if not content:
+                logger.warning("%s returned an empty reply (finish_reason=%s).",
+                               self.model, finish_reason)
+            results.append(content)
         return results
 
     @property

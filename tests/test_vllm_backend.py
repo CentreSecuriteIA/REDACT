@@ -12,7 +12,7 @@ the default via env vars when the default doesn't fit your GPU or isn't
 cached locally::
 
     REDACT_TEST_VLLM_MODEL=Qwen/Qwen2.5-0.5B-Instruct \
-    REDACT_TEST_VLLM_KWARGS='{"gpu_memory_utilization":0.5,"max_model_len":512}' \
+    REDACT_TEST_VLLM_KWARGS='{"max_model_len":512}' \
     pytest tests/test_vllm_backend.py -v
 """
 
@@ -116,15 +116,17 @@ class TestModelConfigVLLMFields:
             vllm=VLLMConfig(
                 hf_model_id="org/model",
                 quantization="gptq",
-                vllm_kwargs={"gpu_memory_utilization": 0.9},
+                vllm_kwargs={"max_model_len": 512},
             ),
         )
         assert config.vllm.hf_model_id == "org/model"
         assert config.vllm.quantization == "gptq"
-        assert config.vllm.vllm_kwargs == {"gpu_memory_utilization": 0.9}
+        assert config.vllm.vllm_kwargs == {"max_model_len": 512}
 
     def test_fields_default_none(self):
-        config = ModelConfig(name="test")
+        config = ModelConfig(name="test", api=APIConfig(
+            backend_type="openai", api_key_env="TEST_API_KEY",
+            base_url="https://test.example/v1", rpm=10))
         assert config.vllm is None
 
     def test_register_model_passes_vllm_fields(self):
@@ -169,6 +171,9 @@ class TestEngineDownloadDir:
 
         monkeypatch.setitem(sys.modules, "vllm", type("m", (), {"LLM": _StubLLM}))
         monkeypatch.setattr(vllm_module, "_prepare_environment", lambda: None)
+        # The load reads the HF config for the default context length.
+        monkeypatch.setattr(
+            "redact.llms.resources.estimate._load_config", lambda _id: None)
         vllm_module._engines.clear()
         vllm_module._engine_loaded_at.clear()
         try:
@@ -198,6 +203,26 @@ class TestEngineDownloadDir:
         original = {"gpu_memory_utilization": 0.9}
         self._load(monkeypatch, original)
         assert original == {"gpu_memory_utilization": 0.9}
+
+
+class TestWorkerStartMethod:
+    """vLLM reads its worker start method from an environment variable, so
+    Python's process-wide start method is left alone."""
+
+    def test_spawn_is_set_unless_a_method_is_already_chosen(self, monkeypatch):
+        import multiprocessing
+
+        import redact.llms.backends.vllm as vllm_module
+
+        monkeypatch.setattr(
+            multiprocessing, "set_start_method",
+            lambda *a, **k: pytest.fail("changed the global start method"))
+        monkeypatch.setenv("VLLM_WORKER_MULTIPROC_METHOD", "fork")
+        vllm_module._prepare_environment()
+        assert os.environ["VLLM_WORKER_MULTIPROC_METHOD"] == "fork"
+        monkeypatch.delenv("VLLM_WORKER_MULTIPROC_METHOD")
+        vllm_module._prepare_environment()
+        assert os.environ["VLLM_WORKER_MULTIPROC_METHOD"] == "spawn"
 
 
 class MockBackend(LLMBackend):

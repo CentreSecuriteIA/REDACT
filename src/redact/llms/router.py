@@ -21,6 +21,7 @@ from collections.abc import Callable
 
 from .client import ModelClient
 
+#TODO: Decide how strict the accept probe should be (which phrase the checker prompts ask for, word boundary).
 _ACCEPT_PREFIXES = ("yes", "ok", "accept", "pass")
 
 
@@ -108,7 +109,7 @@ def batch_check_samples(
             :func:`check_sample`.
         originals: One comparison text per sample. ``None`` passes ``""`` for
             every item.
-        batch_size: Maximum items per chunk.
+        batch_size: Maximum items per chunk, at least 1.
         progress: Label for progress logging. The chunk index is appended
             when there is more than one chunk.
         internals_ids: One capture id (or ``None``) per sample.
@@ -117,6 +118,8 @@ def batch_check_samples(
     Returns:
         ``(accepted, reasoning)`` per sample, in input order.
     """
+    if batch_size < 1:
+        raise ValueError(f"batch_size must be at least 1, got {batch_size}.")
     if not samples:
         return []
     if originals is not None and len(originals) != len(samples):
@@ -165,7 +168,7 @@ def batch_generate_samples(
     Args:
         client: The model to call.
         messages_list: One chat message list per item.
-        batch_size: Maximum items per chunk.
+        batch_size: Maximum items per chunk, at least 1.
         progress: Label for progress logging. The chunk index is appended
             when there is more than one chunk.
         internals_ids: One capture id (or ``None``) per item.
@@ -174,6 +177,8 @@ def batch_generate_samples(
     Returns:
         Generated text, one per item, in input order.
     """
+    if batch_size < 1:
+        raise ValueError(f"batch_size must be at least 1, got {batch_size}.")
     if not messages_list:
         return []
     if internals_ids is not None and len(internals_ids) != len(messages_list):
@@ -194,3 +199,28 @@ def batch_generate_samples(
             **kwargs,
         ))
     return results
+
+
+def assert_single_sample_per_call(client: ModelClient, samples_per_call: int) -> None:
+    """Raise if internals capture is combined with several samples per call.
+
+    When one prompt asks for several samples in one completion, the captured
+    internals of that forward pass cannot be attributed to any single sample.
+    Pipelines with that shape (e.g. ``InputPipeline.run_from_constitution``)
+    call this before dispatch with their own samples-per-call setting.
+
+    Args:
+        client: The generation client.
+        samples_per_call: Samples one LLM call is asked to produce.
+
+    Raises:
+        ValueError: The client's backend supports internals capture and
+            ``samples_per_call`` is not 1.
+    """
+    if client.compute_config.supports_internals and samples_per_call != 1:
+        raise ValueError(
+            f"{type(client.backend).__name__} supports internals capture, but this call "
+            f"requests {samples_per_call} samples per LLM call — one forward pass "
+            f"can't be attributed to more than one resulting sample. Set the "
+            f"samples-per-call parameter to 1, or don't request internals capture."
+        )

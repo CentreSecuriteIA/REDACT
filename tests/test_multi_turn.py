@@ -82,6 +82,16 @@ def test_strategy_note_logged_as_provenance():
     assert t.as_messages() == []  # provenance never rendered to the model
 
 
+def test_records_are_copies_of_the_steps():
+    t = Transcript()
+    t.message("user", "hello", meta={"turn": 1})
+    record = t.to_records()[0]
+    record["content"] = "changed"
+    record["meta"]["turn"] = 2
+    assert t.steps[0].content == "hello"
+    assert t.steps[0].meta == {"turn": 1}
+
+
 class _FakeClient:
     """Stands in for a ModelClient: batch of messages in, batch of replies out."""
 

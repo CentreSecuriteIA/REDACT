@@ -189,6 +189,21 @@ class TestBatchChunkingWithInternalsIds:
             batch_generate_samples(make_client(backend), self._messages(2), internals_ids=["only-one"],
             )
 
+    @pytest.mark.parametrize("batch_size", [0, -2])
+    def test_a_batch_size_below_one_raises(self, batch_size):
+        backend = _CountingBackend(["yes", "yes"])
+        reason = f"batch_size must be at least 1, got {batch_size}"
+        with pytest.raises(ValueError, match=reason):
+            batch_generate_samples(
+                make_client(backend), self._messages(2), batch_size=batch_size)
+        with pytest.raises(ValueError, match=reason):
+            batch_check_samples(
+                make_client(backend), ["s0", "s1"],
+                build_check_messages=lambda o, s: [{"role": "user", "content": s}],
+                batch_size=batch_size,
+            )
+        assert backend.generate_call_count == 0
+
 
 class TestBatchCallerConcurrencyGuard:
     """max_workers>1 on a series-only backend must raise, not silently degrade."""
@@ -196,11 +211,10 @@ class TestBatchCallerConcurrencyGuard:
     class _SeriesOnly(MockBackend):
         compute_config = ComputeConfig(supports_parallel_calls=False)
 
-    def test_run_raises_on_explicit_parallel_override(self):
+    def test_explicit_parallel_override_raises_at_construction(self):
         backend = make_client(self._SeriesOnly("ok")).backend
-        caller = BatchCaller(backend, max_workers=4)
         with pytest.raises(ValueError, match="requires series calls"):
-            caller.run([[{"role": "user", "content": "hi"}]])
+            BatchCaller(backend, max_workers=4)
 
     def test_backend_construction_clamps_instead_of_raising(self):
         # The clamp happens once, when the backend binds its budget — so a

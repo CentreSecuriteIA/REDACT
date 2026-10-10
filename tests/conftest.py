@@ -11,8 +11,9 @@ def pytest_configure(config):
     # vLLM v1 explicitly uses multiprocessing.get_context("fork") by default,
     # ignoring the global start method. Setting this env var before vLLM is
     # imported forces it to use 'spawn', which avoids CUDA re-init failures
-    # in forked subprocesses. The global set_start_method call is kept as a
-    # belt-and-suspenders fallback.
+    # in forked subprocesses. The library sets the variable itself at engine
+    # load and makes no global call; the set_start_method here is the suite's
+    # own fallback for anything else that starts a process.
     import os
     os.environ["VLLM_WORKER_MULTIPROC_METHOD"] = "spawn"
     try:
@@ -76,13 +77,12 @@ class MockBackend(LLMBackend):
         self,
         messages_list: list[list[dict]],
         *,
-        system_prompts=None,
         max_tokens: int | None = None,
         temperature: float | None = None,
         internals_ids: list[str | None] | None = None,
         **kwargs,
     ) -> list[str]:
-        prompts, resolved = self._prepare(messages_list, system_prompts)
+        prompts, resolved = self._prepare(messages_list)
         max_tok, temp = self._resolve(max_tokens, temperature)
         if internals_ids is None:
             internals_ids = [None] * len(messages_list)

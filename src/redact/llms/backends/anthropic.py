@@ -8,6 +8,7 @@ Calls are made in series: this backend declares
 ``supports_parallel_calls=False``, so ``max_workers`` is always 1.
 """
 
+import logging
 import threading
 import time
 from typing import TYPE_CHECKING, ClassVar
@@ -17,26 +18,33 @@ from .base import ComputeConfig, LLMBackend
 if TYPE_CHECKING:
     from ..model_config import ModelConfig
 
+logger = logging.getLogger(__name__)
+
 # SDK clients shared between backends, keyed by API key.
 _sdk_clients: dict[str, object] = {}
 _sdk_clients_lock = threading.Lock()
 
 
 def _sdk_client(api_key: str):
-    if api_key in _sdk_clients:
-        return _sdk_clients[api_key]
+    # One read: clear_cache() may drop the key between a test and a lookup.
+    client = _sdk_clients.get(api_key)
+    if client is not None:
+        return client
     with _sdk_clients_lock:
         # Re-check under the lock so each key gets one client.
-        if api_key not in _sdk_clients:
+        client = _sdk_clients.get(api_key)
+        if client is None:
             try:
                 import anthropic
             except ImportError:
                 raise ImportError(
-                    "The 'anthropic' package is required for AnthropicBackend. "
-                    "Install it with: pip install anthropic"
+                    "The 'anthropic' package could not be imported. It is a "
+                    "required dependency: reinstall redact (pip install -e .)."
                 )
-            _sdk_clients[api_key] = anthropic.Anthropic(api_key=api_key)
-        return _sdk_clients[api_key]
+            # The SDK retries a failed call itself (2 by default), unseen by the rate limiter and the trace.
+            client = anthropic.Anthropic(api_key=api_key)
+            _sdk_clients[api_key] = client
+        return client
 
 
 class AnthropicBackend(LLMBackend):
@@ -101,7 +109,6 @@ class AnthropicBackend(LLMBackend):
         self,
         messages_list: list[list[dict]],
         *,
-        system_prompts: str | list[str | None] | None = None,
         max_tokens: int | None = None,
         temperature: float | None = None,
         internals_ids: list[str | None] | None = None,
@@ -112,7 +119,6 @@ class AnthropicBackend(LLMBackend):
         Args:
             messages_list: One chat message list per item. Only ``role`` and
                 ``content`` of each message are sent.
-            system_prompts: Sent as the call's ``system`` parameter.
             max_tokens: Overrides the model's default.
             temperature: Overrides the model's default.
             internals_ids: Ignored. This backend does not capture internals.
@@ -121,18 +127,19 @@ class AnthropicBackend(LLMBackend):
         Returns:
             Generated text, one per item, in the order of ``messages_list``.
         """
-        prompts, resolved = self._prepare(messages_list, system_prompts)
+        prompts, resolved = self._prepare(messages_list)
         max_tok, temp = self._resolve(max_tokens, temperature)
 
         results = []
         # Runs once via ModelClient (one item per call); loops only for direct callers.
         for messages, system_prompt in zip(resolved, prompts):
             conv_messages = [{"role": m["role"], "content": m["content"]} for m in messages]
+            # kwargs first: a model= or messages= in them must not re-target the call.
             call_kwargs: dict = {
+                **kwargs,
                 "model": self._api_model_id,
                 "messages": conv_messages,
                 "max_tokens": max_tok,
-                **kwargs,
             }
             if system_prompt:
                 call_kwargs["system"] = system_prompt
@@ -149,16 +156,19 @@ class AnthropicBackend(LLMBackend):
                 )
                 raise
             usage = getattr(response, "usage", None)
+            stop_reason = getattr(response, "stop_reason", None)
             self._record_call(
                 n_items=1, started=started,
                 in_tok=getattr(usage, "input_tokens", None),
                 out_tok=getattr(usage, "output_tokens", None),
-                max_tokens=max_tok, temperature=temp,
+                max_tokens=max_tok, temperature=temp, finish_reason=stop_reason,
             )
-            if not response.content:
-                results.append("")
-            else:
-                results.append(response.content[0].text or "")
+            # A response with no content blocks counts as an empty reply.
+            text = (response.content[0].text or "") if response.content else ""
+            if not text:
+                logger.warning("%s returned an empty reply (stop_reason=%s).",
+                               self.model, stop_reason)
+            results.append(text)
         return results
 
     @property

@@ -11,7 +11,7 @@ Template styles are "long", "short", or any custom style added under
 prompts/input/generation/from_constitution/.
 
 Usage:
-    from redact.llms import get_client
+    from redact.llms import ModelClient
     from redact.constitution.input_generation import ConstitutionInputPipeline
 
     pipeline = ConstitutionInputPipeline(gen=ModelClient.create("venice-uncensored"))

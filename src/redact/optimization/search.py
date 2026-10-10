@@ -115,7 +115,6 @@ def optimize(
         expanded = drive_generators(
             gens, resolve=resolve,
             finalize=lambda k, t: t, on_error=lambda k, exc: None,
-            verbose=verbose,
             progress=f"optimize depth {d}/{depth}" if verbose else None,
         )
         keys = [k for k in gens if expanded.get(k) is not None]

@@ -104,8 +104,9 @@ class APIConfig:
         recommended_max_workers: Concurrency the backend uses as its
             ``max_workers``. Use 1 for a provider that cannot take parallel
             calls (Anthropic).
-        default_extra_body: Provider-specific parameters sent with every
-            call. Only the OpenAI-compatible backend reads it.
+        default_extra_body: Provider-specific parameters sent with each call
+            that passes no ``extra_body`` of its own. Only the
+            OpenAI-compatible backend reads it.
         price_per_1m_input: USD per 1M prompt tokens, for cost reporting.
             ``None`` means unpriced.
         price_per_1m_output: USD per 1M completion tokens.
@@ -163,18 +164,17 @@ class VLLMConfig:
     Attributes:
         hf_model_id: HuggingFace model ID or local path.
         quantization: Quantization method, e.g. "gptq", "awq".
-        vllm_kwargs: Extra kwargs for ``vllm.LLM()`` (e.g.
-            ``gpu_memory_utilization``, ``tokenizer_mode``).
+        vllm_kwargs: Extra kwargs for ``vllm.LLM()`` (e.g. ``max_model_len``,
+            ``tokenizer_mode``). ``gpu_memory_utilization`` is rejected: the
+            planner computes it.
         sampling: Default ``SamplingParams`` values for this model
             (``top_p``, ``top_k``, ...).
-        vram_gb: VRAM the model needs, in GiB, for residency planning.
-            ``None`` lets the planner estimate it from the checkpoint's HF
-            config; set it to override that estimate. This is the model's
-            need, not what vLLM reserves, which is ``gpu_memory_utilization``
-            of the whole card.
-        min_gpus: Whole devices the model claims. Above 1 it is passed to
-            vLLM as ``tensor_parallel_size``, unless ``vllm_kwargs`` sets
-            that itself.
+        vram_gb: The weights in GiB, total across the model's cards, when
+            known better than the estimate. The KV cache is always estimated
+            on top.
+        min_gpus: Cards the engine is split across. Above 1 it is passed to
+            vLLM as ``tensor_parallel_size``; a ``tensor_parallel_size`` in
+            ``vllm_kwargs`` must equal it.
     """
 
     hf_model_id: str
@@ -191,13 +191,30 @@ class VLLMConfig:
         _check_dict("VLLMConfig.sampling", self.sampling)
         _check_number("VLLMConfig.vram_gb", self.vram_gb)
         _check_int("VLLMConfig.min_gpus", self.min_gpus, minimum=1)
+        _require(
+            "gpu_memory_utilization" not in (self.vllm_kwargs or {}),
+            "VLLMConfig.vllm_kwargs['gpu_memory_utilization'] is not a "
+            "setting: the planner computes it from vram_gb (or the estimate) "
+            "and the card. Remove it from vllm_kwargs.",
+        )
+        # The planner places the model on min_gpus cards and the engine
+        # splits it across tensor_parallel_size, so the two must agree.
+        tp = (self.vllm_kwargs or {}).get("tensor_parallel_size")
+        _require(
+            tp is None or tp == self.min_gpus,
+            f"VLLMConfig.vllm_kwargs['tensor_parallel_size']={tp!r} disagrees "
+            f"with min_gpus={self.min_gpus}. Set min_gpus={tp!r} and drop "
+            f"tensor_parallel_size from vllm_kwargs.",
+        )
 
     @property
     def engine_kwargs(self) -> dict:
         """The kwargs ``vllm.LLM()`` is built with, ``min_gpus`` included."""
         kwargs = dict(self.vllm_kwargs or {})
+        if kwargs.get("tensor_parallel_size", 0) is None:
+            del kwargs["tensor_parallel_size"]
         if self.min_gpus > 1:
-            kwargs.setdefault("tensor_parallel_size", self.min_gpus)
+            kwargs["tensor_parallel_size"] = self.min_gpus
         return kwargs
 
 
@@ -214,9 +231,7 @@ class IntrospectConfig:
         torch_dtype: Passed to ``AutoModelForCausalLM.from_pretrained``.
         sampling: Default generation values for this model (``top_p``,
             ``top_k``, ...).
-        vram_gb: VRAM the model needs, in GiB, for residency planning.
-            ``None`` lets the planner estimate it.
-        min_gpus: Whole devices the model claims.
+        vram_gb: The weights in GiB, when known better than the estimate.
         extra_kwargs: Extra kwargs for ``from_pretrained`` (e.g.
             ``trust_remote_code``).
     """
@@ -228,7 +243,6 @@ class IntrospectConfig:
     torch_dtype: str = "auto"
     sampling: dict | None = None
     vram_gb: float | None = None
-    min_gpus: int = 1
     extra_kwargs: dict | None = None
 
     def __post_init__(self) -> None:
@@ -240,17 +254,29 @@ class IntrospectConfig:
         _check_str("IntrospectConfig.torch_dtype", self.torch_dtype)
         _check_dict("IntrospectConfig.sampling", self.sampling)
         _check_number("IntrospectConfig.vram_gb", self.vram_gb)
-        _check_int("IntrospectConfig.min_gpus", self.min_gpus, minimum=1)
         _check_dict("IntrospectConfig.extra_kwargs", self.extra_kwargs)
+
+    @property
+    def load_kwargs(self) -> dict:
+        """The kwargs the model is loaded with, eager attention included.
+
+        Attention weights are returned only by the eager implementation, so
+        a setup that captures attention loads with it unless ``extra_kwargs``
+        names one.
+        """
+        kwargs = dict(self.extra_kwargs or {})
+        if (self.capture or {}).get("attention"):
+            kwargs.setdefault("attn_implementation", "eager")
+        return kwargs
 
 
 @dataclass
 class ModelConfig:
     """One model: its identity and the setups that can serve it.
 
-    Validated on construction. When several setups are present,
-    ``backend_type`` names the default and the others are reachable through
-    ``ModelClient.create(name, backend_type=...)``.
+    Validated on construction, and at least one setup is required. When
+    several are present, ``backend_type`` names the default and the others are
+    reachable through ``ModelClient.create(name, backend_type=...)``.
 
     Attributes:
         name: Model identifier used at call sites.
@@ -258,7 +284,7 @@ class ModelConfig:
             :func:`default_model_for_role`.
         is_uncensored: True for uncensored generation models.
         supports_system_prompt: False if the model ignores system messages.
-            The backend then folds system content into the first user
+            The backend then folds system content into the first non-system
             message.
         default_max_tokens: Used when a caller passes no ``max_tokens``.
         default_temperature: Used when a caller passes no temperature.
@@ -332,6 +358,11 @@ class ModelConfig:
             )
 
         if self.backend_type is None:
+            _require(
+                any(s is not None for s in (self.api, self.vllm, self.introspect)),
+                f"{self.name!r}: no setup, so the model could never be called — "
+                f"pass at least one of api=, vllm= or introspect=.",
+            )
             return  # no default declared; the setup checks below are skipped
 
         _require(
@@ -348,6 +379,10 @@ class ModelConfig:
 
 
 _SETUP_CLASSES = {"api": APIConfig, "vllm": VLLMConfig, "introspect": IntrospectConfig}
+# backends.SETUP_TYPES lists the same names where the classes cannot be imported.
+_require(_SETUP_CLASSES.keys() == SETUP_TYPES,
+         f"_SETUP_CLASSES {sorted(_SETUP_CLASSES)} and backends.SETUP_TYPES "
+         f"{sorted(SETUP_TYPES)} must name the same setups")
 
 
 def available_roles() -> dict[str, str]:
@@ -499,12 +534,14 @@ def register_model(
 
     Raises:
         TypeError: A field has the wrong type.
-        ValueError: A field is invalid, the default ``backend_type`` has no
-            matching config, or the concurrency does not suit the provider.
+        ValueError: A field is invalid, no setup is given, the default
+            ``backend_type`` has no matching config, or the concurrency does
+            not suit the provider.
     """
     MODEL_REGISTRY[name] = ModelConfig(
         name=name,
-        roles=list(roles or []),
+        # A string is passed on whole, so ModelConfig rejects it as not a list.
+        roles=roles if isinstance(roles, str) else list(roles or []),
         is_uncensored=is_uncensored,
         supports_system_prompt=supports_system_prompt,
         default_max_tokens=default_max_tokens,

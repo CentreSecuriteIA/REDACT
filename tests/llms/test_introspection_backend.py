@@ -8,6 +8,7 @@ registry error messages, all offline.
 
 import contextlib
 import json
+import logging
 import types
 
 import pytest
@@ -40,7 +41,9 @@ class TestModelConfigIntrospectFields:
         assert config.introspect.log_dir == "/tmp/x"
 
     def test_introspect_default_none(self):
-        config = ModelConfig(name="test")
+        config = ModelConfig(name="test", api=APIConfig(
+            backend_type="openai", api_key_env="TEST_API_KEY",
+            base_url="https://test.example/v1", rpm=10))
         assert config.introspect is None
 
     def test_register_model_passes_introspect_fields(self):
@@ -145,12 +148,58 @@ class TestMetaJson:
             "messages": [{"role": "user", "content": "hi"}],
             "output": "hello there",
         }
-        b._save_capture("abc123/output", outputs, prompt_len=0, meta=meta)
+        b._save_capture(
+            "abc123/output", outputs, prompt_len=0, meta=meta, tokenizer=None)
 
         meta_path = tmp_path / "abc123" / "output" / "meta.json"
         assert meta_path.exists()
         loaded = json.loads(meta_path.read_text(encoding="utf-8"))
         assert loaded == meta
+
+    def test_a_capture_replaces_the_files_of_an_earlier_one(self, tmp_path, caplog):
+        # A re-run under the same id with less captured: the old tensor file
+        # must not stay beside a meta.json that says it was not captured.
+        b = self._backend(tmp_path)
+        outputs = types.SimpleNamespace(
+            sequences=[[]], logits=None, hidden_states=None, attentions=None,
+        )
+        folder = b._capture_dir("abc123/output")
+        (folder / "attention.pt").write_text("stale")
+        nested = b._capture_dir("abc123/output/val")
+        (nested / "meta.json").write_text("another capture")
+
+        logger = "redact.llms.backends.introspection"
+        with caplog.at_level(logging.DEBUG, logger=logger):
+            b._save_capture(
+                "abc123/output", outputs, prompt_len=0, meta={}, tokenizer=None)
+
+        assert sorted(p.name for p in folder.iterdir()) == ["meta.json", "val"]
+        assert (nested / "meta.json").read_text() == "another capture"
+        assert [(r.levelname, r.getMessage()) for r in caplog.records] == [
+            ("DEBUG", f"[internals] saved meta.json -> {folder}"),
+        ]
+
+    @pytest.mark.parametrize("bad", ["", "..", "abc/../..", "ABSOLUTE"])
+    def test_an_id_outside_the_log_dir_is_refused(self, tmp_path, bad):
+        # A capture replaces and moves files, so its id must stay in log_dir.
+        outside = tmp_path / "elsewhere"
+        outside.mkdir()
+        (outside / "keep.txt").write_text("x")
+        (tmp_path / "log").mkdir()
+        (tmp_path / "log" / "notes.txt").write_text("x")
+        b = self._backend(tmp_path / "log")
+        bad = str(outside) if bad == "ABSOLUTE" else bad
+        outputs = types.SimpleNamespace(
+            sequences=[[]], logits=None, hidden_states=None, attentions=None,
+        )
+        with pytest.raises(ValueError, match="internals_id"):
+            b._save_capture(bad, outputs, prompt_len=0, meta={}, tokenizer=None)
+        with pytest.raises(ValueError, match="internals_id"):
+            b.rename_capture(bad, "ok/id")
+        with pytest.raises(ValueError, match="internals_id"):
+            b.rename_capture("ok/id", bad)
+        assert (outside / "keep.txt").read_text() == "x"
+        assert (tmp_path / "log" / "notes.txt").read_text() == "x"
 
     def test_capture_dir_nests_on_embedded_slash(self, tmp_path):
         # internals_id = "{input_id}/{subfolder}" must nest correctly — no
@@ -257,7 +306,8 @@ class _FakeModel:
         )
 
 
-def _generate_backend(log_dir, temperature=0.7):
+def _generate_backend(log_dir, temperature=0.7, model=None):
+    import redact.llms.backends.introspection as intro_module
     from redact.llms.backends import LLMBackend, TransformersIntrospectionBackend
 
     b = object.__new__(TransformersIntrospectionBackend)
@@ -266,7 +316,9 @@ def _generate_backend(log_dir, temperature=0.7):
     b._capture = {"logprobs": True, "hidden_states": False, "attention": False}
     b._sampling = {}
     b._torch = types.SimpleNamespace(no_grad=contextlib.nullcontext)
-    b._tokenizer, b._model = _FakeTokenizer(), _FakeModel()
+    # The backend reads its tokenizer and model from the cache, by key.
+    b._key = intro_module._model_key("org/model", "auto", "auto", {})
+    intro_module._models[b._key] = (_FakeTokenizer(), model or _FakeModel())
     return b
 
 
@@ -279,14 +331,14 @@ class TestGenerate:
     def test_chat_template_output_gets_no_second_set_of_special_tokens(self, tmp_path):
         b = _generate_backend(tmp_path)
         assert b.generate(_MSG) == ["reply"]
-        assert b._tokenizer.calls == [
+        assert b._loaded()[0].calls == [
             {"return_tensors": "pt", "add_special_tokens": False}
         ]
 
     def test_logprobs_are_requested_as_raw_logits(self, tmp_path):
         b = _generate_backend(tmp_path)
         b.generate(_MSG, internals_ids=["u1/output"])
-        sent = b._model.calls[0]
+        sent = b._loaded()[1].calls[0]
         assert sent["output_logits"] is True
         assert "output_scores" not in sent
         assert (tmp_path / "u1" / "output" / "meta.json").exists()
@@ -295,5 +347,125 @@ class TestGenerate:
         b = _generate_backend(tmp_path, temperature=0.0)
         b.generate(_MSG)
         b.generate(_MSG, temperature=1)
-        assert [c["do_sample"] for c in b._model.calls] == [False, True]
-        assert all(isinstance(c["temperature"], float) for c in b._model.calls)
+        calls = b._loaded()[1].calls
+        assert [c["do_sample"] for c in calls] == [False, True]
+        assert all(isinstance(c["temperature"], float) for c in calls)
+
+    def test_a_failed_model_call_is_recorded_and_raised(self, tmp_path):
+        from redact.llms import observe
+
+        class _FailingModel(_FakeModel):
+            def generate(self, **kwargs):
+                raise RuntimeError("CUDA out of memory")
+
+        events = []
+        observe.set_emitter(events.append)
+        try:
+            b = _generate_backend(tmp_path, model=_FailingModel())
+            with pytest.raises(RuntimeError, match="out of memory"):
+                b.generate(_MSG, max_tokens=5)
+        finally:
+            observe.set_emitter(None)
+        assert [(e["ev"], e["model"], e["n_items"], e["max_tokens"], e["error"])
+                for e in events] == [
+            ("call", "test-model", 1, 5, "RuntimeError: CUDA out of memory"),
+        ]
+
+    def test_a_short_internals_ids_list_costs_no_forward_pass(self, tmp_path):
+        b = _generate_backend(tmp_path)
+        with pytest.raises(ValueError, match=r"same length as messages_list \(1 != 2\)"):
+            b.generate(_MSG * 2, internals_ids=["only/one"])
+        assert b._loaded()[1].calls == []
+
+    def test_the_cache_is_read_once_per_generate(self, tmp_path):
+        b = _generate_backend(tmp_path)
+        loaded = b._loaded()
+        reads = []
+        b._loaded = lambda: reads.append(1) or loaded
+        b.generate(_MSG * 3, internals_ids=["a/output", None, "c/output"])
+        assert reads == [1]
+
+    def test_a_released_model_raises_on_generate(self, tmp_path):
+        from redact.llms.backends import TransformersIntrospectionBackend
+
+        b = _generate_backend(tmp_path)
+        assert b.generate(_MSG) == ["reply"]
+        TransformersIntrospectionBackend.clear_cache()
+        with pytest.raises(RuntimeError, match="was released"):
+            b.generate(_MSG)
+
+
+def _introspect(**kwargs):
+    return IntrospectConfig(hf_model_id="org/model", log_dir="/tmp/x", **kwargs)
+
+
+class TestEagerAttention:
+    """Attention weights come back only under the eager implementation, so a
+    setup that captures attention loads with it. Run against fakes: a real
+    load needs a GPU session."""
+
+    @pytest.mark.parametrize("config, expected", [
+        (_introspect(capture={"attention": True}), {"attn_implementation": "eager"}),
+        (_introspect(capture={"attention": True},
+                     extra_kwargs={"attn_implementation": "sdpa"}),
+         {"attn_implementation": "sdpa"}),
+        (_introspect(capture={"attention": False}), {}),
+        (_introspect(extra_kwargs={"trust_remote_code": True}),
+         {"trust_remote_code": True}),
+    ], ids=["attention", "own-implementation-wins", "no-attention", "no-capture"])
+    def test_load_kwargs(self, config, expected):
+        assert config.load_kwargs == expected
+
+    def test_load_kwargs_does_not_change_the_setup(self):
+        config = _introspect(capture={"attention": True}, extra_kwargs={"a": 1})
+        config.load_kwargs["b"] = 2
+        assert config.extra_kwargs == {"a": 1}
+
+    def test_the_model_load_receives_it_and_the_tokenizer_does_not(self, monkeypatch):
+        import sys
+
+        import redact.llms.backends.introspection as intro_module
+
+        seen = {}
+
+        class _Auto:
+            def __init__(self, kind):
+                self.kind = kind
+
+            def from_pretrained(self, hf_model_id, **kwargs):
+                seen[self.kind] = kwargs
+                return types.SimpleNamespace(eval=lambda: None)
+
+        monkeypatch.setitem(sys.modules, "transformers", types.SimpleNamespace(
+            __version__="4.50.0",
+            AutoTokenizer=_Auto("tokenizer"), AutoModelForCausalLM=_Auto("model"),
+        ))
+        config = _introspect(capture={"attention": True},
+                             extra_kwargs={"trust_remote_code": True})
+        intro_module._load("org/model", "auto", "auto", config.load_kwargs)
+
+        assert seen["tokenizer"] == {"trust_remote_code": True}
+        assert seen["model"] == {
+            "device_map": "auto", "torch_dtype": "auto",
+            "trust_remote_code": True, "attn_implementation": "eager",
+        }
+
+    @pytest.mark.parametrize("capture", [{"attention": True}, None])
+    def test_the_planner_and_the_backend_share_a_load_key(self, monkeypatch, capture):
+        import sys
+
+        import redact.llms.backends.introspection as intro_module
+        from redact.llms.backends import TransformersIntrospectionBackend
+        from redact.llms.resources import residency
+
+        monkeypatch.setitem(sys.modules, "torch", types.SimpleNamespace())
+        loads = []
+        monkeypatch.setattr(intro_module, "_load", lambda *args: loads.append(args))
+        config = ModelConfig(name="m", introspect=_introspect(
+            capture=capture, extra_kwargs={"trust_remote_code": True}))
+
+        backend = TransformersIntrospectionBackend.from_config(config)
+
+        assert backend._key == residency._engine_id(config.introspect, "introspect")[1:]
+        assert backend._key == intro_module._model_key(*loads[0])
+        assert ("attn_implementation" in backend._key[-1]) is bool(capture)

@@ -1,4 +1,5 @@
-"""Conversation primitives shared by ``jailbreak/`` and ``multi_turn/``.
+"""Conversation primitives shared by ``jailbreak/``, ``multi_turn/``,
+``multiturn_attacks/`` and ``optimization/``.
 
 - :class:`LLMRequest`: a pending model call yielded by a generator.
 - :class:`Step` / :class:`Transcript`: a typed step log for multi-turn
@@ -12,7 +13,7 @@ from __future__ import annotations
 
 from collections import defaultdict
 from collections.abc import Callable, Generator, Hashable
-from dataclasses import dataclass, field
+from dataclasses import asdict, dataclass, field
 from typing import Literal
 
 
@@ -88,8 +89,8 @@ class Transcript:
         return msgs
 
     def to_records(self) -> list[dict]:
-        """The full step log as a list of dicts, for JSON storage."""
-        return [vars(s) for s in self.steps]
+        """The full step log as a list of dicts (copies), for JSON storage."""
+        return [asdict(s) for s in self.steps]
 
 
 def drive_sync(gen: Generator, call: Callable[[LLMRequest], str]):
@@ -120,34 +121,36 @@ def drive_generators(
     resolve: Callable[[str], object] | None = None,
     finalize: Callable[[Hashable, object], object],
     on_error: Callable[[Hashable, Exception], object] | None = None,
-    verbose: bool = True,
     progress: str | None = None,
 ) -> dict[Hashable, object]:
     """Advance many generators round by round, batching LLM calls per model.
 
     Each generator yields :class:`LLMRequest`s and is resumed with the reply.
     Every round, the pending requests are grouped by ``request.model`` and
-    sent as one ``generate()`` call per model. Used by the jailbreak engine
-    and the multi-turn pipeline.
+    sent as one ``generate()`` call per model. Used by the jailbreak engine,
+    the multi-turn pipeline and the optimization search.
 
     Args:
         gens: ``{key: generator}``. Keys are returned unchanged.
         resolve: ``model_name -> ModelClient``. Defaults to
             :meth:`ModelClient.create`.
         finalize: ``(key, return_value) -> result``, called when a generator
-            finishes.
-        on_error: ``(key, exc) -> result``, called when a generator raises.
-            ``None`` lets the exception propagate. A failed batch dispatch
-            always propagates and never goes through ``on_error``.
-        verbose: Pass a progress label to ``generate`` when ``progress`` is
-            also set.
-        progress: Label prefix for progress logging.
+            finishes. An exception from it propagates.
+        on_error: ``(key, exc) -> result``, called when a generator raises
+            or yields something other than an :class:`LLMRequest`. ``None``
+            lets the exception propagate. A failed batch dispatch always
+            propagates and never goes through ``on_error``.
+        progress: Label prefix for progress logging. ``None`` logs nothing.
 
     Returns:
         ``{key: result}`` for every input key.
+
+    Raises:
+        RuntimeError: A model returned a different number of replies than
+            it was sent requests.
     """
     if resolve is None:
-        from .client import ModelClient  # local: avoids an import cycle
+        from .client import ModelClient  # local: only this default needs it
         resolve = ModelClient.create
 
     results: dict[Hashable, object] = {}
@@ -160,20 +163,24 @@ def drive_generators(
 
     def advance(key: Hashable, response):
         try:
-            pending[key] = gens[key].send(response)
+            request = gens[key].send(response)
+            if not isinstance(request, LLMRequest):
+                raise TypeError(
+                    f"generator yielded {type(request).__name__}, not an LLMRequest"
+                )
+            pending[key] = request
+            return
         except StopIteration as stop:
-            results[key] = finalize(key, stop.value)
+            value = stop.value
         except Exception as exc:  # noqa: BLE001 — isolate one unit
             _fail(key, exc)
+            return
+        results[key] = finalize(key, value)
 
-    # Prime every generator to its first request (or completion).
+    # Prime every generator to its first request (or completion): sending
+    # None starts a generator.
     for key in list(gens):
-        try:
-            pending[key] = next(gens[key])
-        except StopIteration as stop:
-            results[key] = finalize(key, stop.value)
-        except Exception as exc:  # noqa: BLE001
-            _fail(key, exc)
+        advance(key, None)
 
     round_idx = 0
     while pending:
@@ -189,7 +196,7 @@ def drive_generators(
             messages_list = [round_requests[k].messages for k in keys]
             kw = (
                 {"progress": f"{progress} round {round_idx} ({model})"}
-                if (verbose and progress) else {}
+                if progress else {}
             )
             # Pass internals_ids only when a request in this batch wants
             # capture. A client whose backend cannot capture rejects any
@@ -201,6 +208,11 @@ def drive_generators(
             # It is the transport failing, not these units, and turning it
             # into results would let the caller record work that never ran.
             responses = resolve(model).generate(messages_list, **kw)
+            if len(responses) != len(keys):
+                raise RuntimeError(
+                    f"Model {model!r} returned {len(responses)} replies for "
+                    f"{len(keys)} requests."
+                )
             for k, resp in zip(keys, responses):
                 advance(k, resp)
 

@@ -34,8 +34,6 @@ Usage::
 import json
 import logging
 import os
-import shutil
-import subprocess
 import threading
 import time
 from collections import defaultdict
@@ -45,6 +43,7 @@ from pathlib import Path
 
 from . import paths
 from .llms import observe
+from .llms.resources import measure
 
 logger = logging.getLogger(__name__)
 
@@ -56,71 +55,8 @@ DEFAULT_SINK = "jsonl"
 
 
 # ---------------------------------------------------------------------------
-# GPU detection and rates
+# GPU rates
 # ---------------------------------------------------------------------------
-
-
-def detect_gpus() -> tuple[str | None, int]:
-    """Which GPU this machine has, and how many, via ``nvidia-smi``.
-
-    Returns:
-        ``(name, count)`` — one line per device from
-        ``nvidia-smi --query-gpu=name --format=csv,noheader``, so the name
-        matches the pricing table and the line count is the device count.
-        ``(None, 0)`` when ``nvidia-smi`` is absent or fails: a machine without
-        it reports no GPUs rather than raising.
-    """
-    exe = shutil.which("nvidia-smi")
-    if exe is None:
-        return None, 0
-    try:
-        out = subprocess.run(
-            [exe, "--query-gpu=name", "--format=csv,noheader"],
-            capture_output=True, text=True, timeout=10, check=True,
-        ).stdout
-    except (subprocess.SubprocessError, OSError) as exc:
-        logger.debug("nvidia-smi failed (%s: %s); reporting no GPUs", type(exc).__name__, exc)
-        return None, 0
-    names = [ln.strip() for ln in out.splitlines() if ln.strip()]
-    return (names[0] if names else None), len(names)
-
-
-def detect_gpu_memory_gib() -> float | None:
-    """Total VRAM per device, via ``nvidia-smi``.
-
-    The residency planner's other capacity source, ``torch.cuda.mem_get_info``,
-    needs torch installed *and* CUDA usable — neither is true on a machine that
-    merely has a card. ``nvidia-smi`` answers without either, so capacity is
-    known wherever a GPU is, not only where the full stack is.
-
-    Returns:
-        Per-device total in **GiB** (the first device; mixed-card machines
-        are not modelled), or ``None`` when ``nvidia-smi`` is absent or
-        unparseable.
-    """
-    exe = shutil.which("nvidia-smi")
-    if exe is None:
-        return None
-    try:
-        out = subprocess.run(
-            [exe, "--query-gpu=memory.total", "--format=csv,noheader,nounits"],
-            capture_output=True, text=True, timeout=10, check=True,
-        ).stdout
-    except (subprocess.SubprocessError, OSError) as exc:
-        logger.debug("nvidia-smi memory query failed (%s)", exc)
-        return None
-    for line in out.splitlines():
-        line = line.strip()
-        if line:
-            try:
-                # MiB -> GiB. 1024-based, matching resources/estimate.py:
-                # mixing this with a decimal-GB divisor there is what made
-                # the same card read 48.0 or 44.7 depending on the path.
-                return round(int(line) / 1024, 1)
-            except ValueError:
-                return None
-    return None
-
 
 _warned_default_provider = False
 
@@ -318,8 +254,13 @@ class Collector:
                 per_model[model] = row
             local_s = dict(self.local_s)
             n_errors = len(self.errors)
+        # Engines still loaded have sent no release event yet.
+        from .llms.backends import introspection, vllm
+        for backend in (vllm, introspection):
+            for hf_id, held in backend.held_seconds().items():
+                local_s[hf_id] = local_s.get(hf_id, 0.0) + held
 
-        name, rented = detect_gpus()
+        name, rented = measure.detect_gpus()
         rate = gpu_hourly_rate(name)
         held_h = sum(local_s.values()) / 3600.0
         _warn_if_unpriced_by_default(rented, held_h, rate)

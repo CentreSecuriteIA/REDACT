@@ -1,9 +1,12 @@
 """Tests for prompt loading, template rendering, and message building."""
 
+import ast
 import json
 import logging
 import pathlib
 import string
+import subprocess
+import sys
 
 import pytest
 
@@ -15,6 +18,30 @@ from redact.llms.prompting import (
     resolve_prompt,
     scaffold_prompt_tree,
 )
+
+
+@pytest.mark.parametrize("first", ["prompts", "extraction"])
+def test_either_prompting_module_can_be_imported_first(first):
+    done = subprocess.run(
+        [sys.executable, "-c", f"import redact.llms.prompting.{first}"],
+        capture_output=True, text=True,
+    )
+    assert done.returncode == 0, done.stderr
+
+
+def test_prompts_and_extraction_do_not_import_each_other():
+    """``extraction`` imports nothing from the package, and ``prompts``
+    imports only at module top."""
+    from redact.llms.prompting import extraction, prompts
+
+    extraction, prompts = (
+        ast.parse(pathlib.Path(module.__file__).read_text(encoding="utf-8"))
+        for module in (extraction, prompts)
+    )
+    assert not [n for n in ast.walk(extraction)
+                if isinstance(n, ast.ImportFrom) and n.level]
+    assert not [n for n in ast.walk(prompts)
+                if isinstance(n, ast.Import | ast.ImportFrom) and n not in prompts.body]
 
 
 class TestLoadPrompt:
@@ -168,19 +195,19 @@ class TestPromptTemplate:
         assert tmpl.system_prompt == "S"
 
     def test_format_style_requires_num_samples(self):
-        """It used to default to 1, which asks the model for one sample while
-        the template asks for fifteen — a mismatch that only surfaces later as
-        a short extraction. Omitting format_style is how you say "just one"."""
+        """num_samples has no default: a default of 1 would ask the model for
+        one sample while the template asks for fifteen. Omitting format_style
+        is how you say "just one"."""
         config = {"system_prompt": "S", "template": "T"}
         with pytest.raises(ValueError, match="num_samples"):
-            PromptTemplate(config, format_style="delimiter")
+            PromptTemplate(config, format_style="numbered")
 
 
 class TestBuildMessagesFormatStyle:
     def test_format_style_threaded_through(self):
         config = {"system_prompt": "S.", "template": "T"}
-        msgs = build_messages(config, format_style="delimiter", num_samples="2")
-        assert "---" in msgs[0]["content"]
+        msgs = build_messages(config, format_style="numbered", num_samples="2")
+        assert "exactly 2 samples" in msgs[0]["content"]
 
     def test_default_omits_format_instruction(self):
         config = {"system_prompt": "S.", "template": "T"}
@@ -245,11 +272,21 @@ class TestScaffoldPromptTree:
         msgs = build_messages(stub, Category="violence", sample="text")
         assert len(msgs) == 2  # system + user; few-shot cleared
 
+    def test_a_source_file_with_a_utf8_bom_is_scaffolded(self, tmp_path):
+        source = tmp_path / "source"
+        path = self._write_source(source)
+        path.write_bytes(b"\xef\xbb\xbf" + path.read_bytes())
+        target = tmp_path / "target"
+
+        assert scaffold_prompt_tree(target, source_dir=source, mode="empty") == 1
+        stub = target / "input" / "quality_check" / "template.json"
+        assert json.loads(stub.read_text())["seed_fields"] == ["Category", "sample"]
+
 
 class TestMissingPlaceholders:
-    """Agent finding #8: rendering used to be guarded by `if text and kwargs`,
-    so zero kwargs sent the literal `{Category}` to the model while partial
-    kwargs raised a bare KeyError — two outcomes for one mistake, one silent."""
+    """A placeholder with no value raises a ValueError naming it, whether no
+    kwargs or only some were passed: the literal `{Category}` never reaches
+    the model."""
 
     CONFIG = {"system_prompt": "Judge {Category}.", "template": "Sample: {sample}"}
 
@@ -300,9 +337,8 @@ class TestMissingPlaceholders:
         assert str(exc.value).count("{A}") == 1
 
     def test_malformed_template_is_reported_as_malformed(self):
-        """A missing key hit before the bad braces used to be reported as the
-        problem — a wrong diagnosis, since supplying it fixes nothing and the
-        next call dies on the braces anyway."""
+        """Bad braces are reported ahead of a missing key that comes before
+        them, since supplying the key would fix nothing."""
         cfg = {"system_prompt": "{Category} and {unclosed", "template": "T"}
         with pytest.raises(ValueError, match="not a valid template") as exc:
             PromptTemplate(cfg)
@@ -325,8 +361,7 @@ class TestMissingPlaceholders:
 def test_scaffold_mirrors_every_real_prompt_shape(tmp_path):
     """The scaffold documents the schema by example, so a stub's key set must
     equal its source's — otherwise it teaches a shape that doesn't exist.
-    Regression: few_shot_examples was assigned unconditionally, giving the
-    format_instructions/ snippets a field no real one has.
+    The format_instructions/ snippets, for one, gain no few_shot_examples.
     """
     real = pathlib.Path(__file__).resolve().parents[2] / "src" / "redact" / "prompts"
     scaffold_prompt_tree(tmp_path, mode="empty")
@@ -363,10 +398,27 @@ class TestScaffoldModes:
         with pytest.raises(ValueError, match="copy.*empty"):
             scaffold_prompt_tree(tmp_path, mode="partial")
 
+    @pytest.mark.parametrize("mode", ["copy", "empty"])
+    def test_a_missing_source_directory_raises(self, tmp_path, mode):
+        with pytest.raises(FileNotFoundError, match="no_such_source"):
+            scaffold_prompt_tree(
+                tmp_path / "target", source_dir=tmp_path / "no_such_source", mode=mode)
+        assert not (tmp_path / "target").exists()
+
+    def test_a_stub_gains_no_key_its_source_lacks(self, tmp_path):
+        d = tmp_path / "source" / "input" / "bare"
+        d.mkdir(parents=True)
+        (d / "template.json").write_text('{"template": "T {x}"}', encoding="utf-8")
+        scaffold_prompt_tree(tmp_path / "target", source_dir=tmp_path / "source",
+                             mode="empty")
+        stub = json.loads(
+            (tmp_path / "target" / "input" / "bare" / "template.json").read_text())
+        assert set(stub) == {"template"}
+
 
 class TestPromptOverlay:
     """prompt_dir is an overlay, not a replacement. The point is that copying
-    one file to change one checker doesn't fork the other 33 — which would
+    one file to change one checker doesn't fork the other 32 — which would
     silently miss every later improvement to them."""
 
     def _override(self, root, pipeline, category, text):
@@ -411,7 +463,7 @@ class TestPromptOverlay:
 
 class TestPromptTemplateLoad:
     """load() is the normal entry point: resolve + read + construct in one
-    step, keeping the path that load_prompt()+build_messages() threw away."""
+    step, keeping the file path that load_prompt()+build_messages() does not."""
 
     def test_loads_a_packaged_prompt_and_records_provenance(self):
         tmpl = PromptTemplate.load(
@@ -661,6 +713,25 @@ class TestRenderErrors:
     def test_a_field_nested_in_a_format_spec_is_named(self):
         with pytest.raises(ValueError, match=r"is missing \{b\}"):
             PromptTemplate({"system_prompt": "{a:{b}}"}, a="x")
+
+    @pytest.mark.parametrize("field, value, kind", [
+        ("system_prompt", ["two", "lines"], "list"),
+        ("template", {"text": "T"}, "dict"),
+        ("template", 5, "int"),
+    ])
+    def test_a_field_that_is_not_a_string_names_the_field_and_its_file(
+        self, tmp_path, field, value, kind
+    ):
+        d = tmp_path / "input" / "quality_check"
+        d.mkdir(parents=True)
+        path = d / "template.json"
+        path.write_text(json.dumps({field: value}), encoding="utf-8")
+        with pytest.raises(ValueError) as exc:
+            PromptTemplate.load("input", "quality_check", prompt_dir=tmp_path)()
+        assert str(exc.value) == (
+            f"Prompt {field} of input/quality_check (override: {path}) "
+            f"must be a string, got {kind}."
+        )
 
 
 class TestMessageAssembly:

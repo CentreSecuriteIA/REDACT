@@ -47,8 +47,11 @@ class TestResolveSetup:
             resolve_setup(cfg)
 
     def test_entry_with_no_setup_at_all(self):
+        # ModelConfig rejects this at construction, so the setup is removed after.
+        cfg = ModelConfig(name="m", vllm=VLLMConfig(hf_model_id="org/m"))
+        cfg.vllm = None
         with pytest.raises(ValueError, match="no setup at all"):
-            resolve_setup(ModelConfig(name="m"))
+            resolve_setup(cfg)
 
     def test_explicit_request_wins_over_the_entry_default(self):
         cfg = ModelConfig(
@@ -212,7 +215,8 @@ class TestEngineCacheIsPerBackendClass:
 
         fake_vllm = MagicMock()
         fake_vllm.LLM = _FakeLLM
-        with patch("redact.llms.backends.vllm._prepare_environment"):
+        # The load reads the HF config for the default context length.
+        with patch("redact.llms.backends.vllm._prepare_environment"),              patch("redact.llms.resources.estimate._load_config", return_value=None):
             with patch.dict(sys.modules, {"vllm": fake_vllm}):
                 a = backend_for(MODEL_REGISTRY["venice-uncensored"], "vllm")
                 b = backend_for(MODEL_REGISTRY["venice-paraphraser"], "vllm")
@@ -249,18 +253,18 @@ class TestSetupReachesTheBackend:
         clear_transport_caches()
         try:
             with patch.dict(sys.modules, {"vllm": type("m", (), {"LLM": _StubLLM})}), \
-                 patch.object(vllm_module, "_prepare_environment"):
+                 patch.object(vllm_module, "_prepare_environment"),                  patch("redact.llms.resources.estimate._load_config", return_value=None):
                 backend_for(ModelConfig(name="m", backend_type="vllm", vllm=VLLMConfig(
                     hf_model_id="org/big", min_gpus=2)))
                 backend_for(ModelConfig(name="m2", backend_type="vllm", vllm=VLLMConfig(
-                    hf_model_id="org/big2", min_gpus=2,
+                    hf_model_id="org/big2", min_gpus=4,
                     vllm_kwargs={"tensor_parallel_size": 4})))
                 backend_for(ModelConfig(name="m3", backend_type="vllm", vllm=VLLMConfig(
                     hf_model_id="org/small")))
         finally:
             clear_transport_caches()
         assert seen[0]["tensor_parallel_size"] == 2
-        assert seen[1]["tensor_parallel_size"] == 4       # explicit kwarg wins
+        assert seen[1]["tensor_parallel_size"] == 4       # stated twice, in agreement
         assert "tensor_parallel_size" not in seen[2]
 
     def test_a_missing_api_key_names_the_model_and_the_variable(self):

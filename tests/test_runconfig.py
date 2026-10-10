@@ -228,7 +228,9 @@ def test_run_pipeline_reports_residency_before_running(tmp_path, monkeypatch, ca
     }
     monkeypatch.setattr(redact, "generate_inputs", lambda **k: pd.DataFrame({"x": [1]}))
     try:
-        with caplog.at_level(logging.INFO, logger="redact.residency"):
+        from redact.llms.resources import residency
+
+        with caplog.at_level(logging.INFO, logger=residency.logger.name):
             with patch("redact.llms.ModelClient.create"):
                 run_pipeline(recipe, params={"inputs": {}, "build": {}}, verbose=True)
         assert "[residency]" in caplog.text
@@ -268,3 +270,232 @@ def test_empty_stages_list_is_not_the_default_pipeline(tmp_path):
     default pipeline — the opposite of what was asked for, silently."""
     recipe = {"dataset_type": "eval", "data_dir": str(tmp_path), "stages": []}
     assert load_recipe(recipe)["stages"] == []
+
+
+# --- residency wiring --------------------------------------------------------
+
+@pytest.fixture()
+def local_models():
+    """Register throwaway local vLLM models; clean up after."""
+    from redact.llms.model_config import MODEL_REGISTRY, VLLMConfig, register_model
+
+    made = []
+
+    def _make(name, roles=None, **kwargs):
+        register_model(name, backend_type="vllm", roles=roles,
+                       vllm=VLLMConfig(hf_model_id=f"org/{name}", vram_gb=5.0, **kwargs))
+        made.append(name)
+        return name
+
+    yield _make
+    for name in made:
+        MODEL_REGISTRY.pop(name, None)
+
+
+@pytest.fixture(autouse=True)
+def _offline_plans():
+    """Plans read no HF config, load no model and leave no planned grant."""
+    import redact.llms.backends.vllm as vllm_module
+
+    with patch("redact.llms.resources.estimate._load_config", return_value=None), \
+         patch("redact.llms.resources.residency.preload", return_value=None):
+        yield
+    vllm_module._planned_utilization.clear()
+
+
+ALL_STAGES = ["constitution", "inputs", "outputs", "paraphrase", "jailbreaks", "build"]
+
+
+def _models(**overrides):
+    from redact.runconfig import _DEFAULT_MODELS
+    return {**_DEFAULT_MODELS, **overrides}
+
+
+def test_stage_models_follow_the_order_the_stages_run():
+    """Stage order, not role name: what loads first is planned first."""
+    from redact.runconfig import _stage_models
+
+    assert _stage_models(_models(), ALL_STAGES, {}) == [
+        "claude-opus-4-6",        # constitution
+        "venice-uncensored",      # inputs: gen, and check falls back to it
+        "venice-paraphraser",     # paraphrase
+        "deepseek-v3.2",          # jailbreaks: translation
+    ]
+    assert _stage_models(_models(), ["jailbreaks", "paraphrase"], {}) == [
+        "venice-uncensored", "deepseek-v3.2", "venice-paraphraser",
+    ]
+    assert _stage_models(_models(), ["build"], {}) == []
+
+
+def test_check_resolves_to_the_generation_model_like_the_stages(local_models):
+    from redact.runconfig import _stage_models
+
+    gen = local_models("_rc_gen")
+    check = local_models("_rc_check")
+    assert _stage_models(_models(gen=gen), ["inputs"], {}) == [gen]
+    assert _stage_models(_models(gen=gen, check=check), ["outputs"], {}) == [gen, check]
+
+
+@pytest.mark.parametrize("augmentations", [
+    {"include_translation": False},
+    {"pure_only": True},
+    {"include_obfuscation": False},
+])
+def test_translation_is_not_planned_when_the_recipe_excludes_it(augmentations):
+    from redact.runconfig import _stage_models
+
+    assert _stage_models(_models(), ["jailbreaks"], augmentations) == ["venice-uncensored"]
+    assert "deepseek-v3.2" in _stage_models(
+        _models(), ["jailbreaks"], {"include_translation": True})
+
+
+def test_a_paraphraser_pool_plans_every_model_in_it(local_models):
+    from redact.runconfig import _stage_models
+
+    extra = local_models("_rc_paraphraser", roles=["paraphraser"])
+    wanted = _stage_models(_models(paraphraser="distribution"), ["paraphrase"], {})
+    assert wanted == ["venice-paraphraser", extra, "venice-uncensored"]
+
+
+def test_plan_and_preload_warms_the_first_needed_model(local_models):
+    """Two local models that cannot share a card: the plan says so, and the
+    one its stage needs first is the one preloaded."""
+    from redact.llms.resources import residency
+    from redact.runconfig import _plan_and_preload
+
+    gen = local_models("_rc_zz_gen")              # sorts last by role and name
+    paraphraser = local_models("_rc_aa_paraphraser")
+    models = _models(gen=gen, paraphraser=paraphraser, paraphrase_check=gen)
+    seen = []
+    try:
+        # 5 + 5 GiB of weights is over 0.9 x 8.
+        with patch("redact.llms.resources.measure.detect_gpus", return_value=("FakeGPU", 1)), \
+             patch("redact.llms.resources.measure.detect_gpu_memory_gib", return_value=8.0), \
+             patch.object(residency, "preload",
+                          side_effect=lambda names, **kw: seen.append(names)):
+            plan = _plan_and_preload(models, ["inputs", "paraphrase"], verbose=False)
+    finally:
+        telemetry.uninstall()
+    assert plan.as_dict()["groups"] == [[gen], [paraphraser]]
+    assert not plan.fits
+    assert seen == [[gen]]
+
+
+def test_plan_and_preload_applies_the_plan_before_preloading(local_models):
+    """Two models that share the card: each loads with its planned grant."""
+    import redact.llms.backends.vllm as vllm_module
+    from redact.llms.resources import residency
+    from redact.runconfig import _plan_and_preload
+
+    gen = local_models("_rc_share_gen")
+    paraphraser = local_models("_rc_share_para")
+    models = _models(gen=gen, paraphraser=paraphraser, paraphrase_check=gen)
+    planned = []
+    try:
+        with patch("redact.llms.resources.measure.detect_gpus", return_value=("FakeGPU", 1)), \
+             patch("redact.llms.resources.measure.detect_gpu_memory_gib", return_value=24.0), \
+             patch.object(residency, "preload", side_effect=lambda names, **kw:
+                          planned.append(dict(vllm_module._planned_utilization))):
+            plan = _plan_and_preload(models, ["inputs", "paraphrase"], verbose=False)
+    finally:
+        telemetry.uninstall()
+    assert plan.fits and plan.as_dict()["groups"] == [[gen, paraphraser]]
+    # Pool 21.6; needs 5 + 5 leave 11.6, so each gets 10.8 GiB of the 24.
+    assert planned == [{
+        vllm_module._engine_key(f"org/{name}", None, {}): 0.45
+        for name in (gen, paraphraser)
+    }]
+
+
+def test_plan_and_preload_returns_none_without_models():
+    from redact.runconfig import _plan_and_preload
+
+    assert _plan_and_preload(_models(), ["build"], verbose=False) is None
+
+
+def test_run_pipeline_puts_the_plan_in_the_summary(tmp_path, monkeypatch, caplog):
+    import logging
+
+    import redact
+    from redact.llms.resources import residency
+
+    monkeypatch.setattr(redact, "build_dataset", lambda **k: pd.DataFrame({"x": [1]}))
+    monkeypatch.setattr(redact, "generate_inputs", lambda **k: pd.DataFrame({"x": [1]}))
+    recipe = {
+        "dataset_type": "eval", "data_dir": str(tmp_path),
+        "stages": ["inputs", "build"],
+        "models": {"gen": "llama-3.2-3b-debug"},
+    }
+    try:
+        with caplog.at_level(logging.INFO, logger=residency.logger.name), \
+             patch("redact.llms.resources.measure.detect_gpus", return_value=("FakeGPU", 1)), \
+             patch("redact.llms.resources.measure.detect_gpu_memory_gib", return_value=10.0), \
+             patch("redact.llms.resources.estimate.estimate_kv_gib",
+                   return_value=0.04), \
+             patch("redact.llms.ModelClient.create"):
+            summary = run_pipeline(recipe, params={"inputs": {}, "build": {}}, verbose=True)
+    finally:
+        telemetry.uninstall()
+    plan = summary["residency"]
+    assert plan["fits"] is True and plan["warnings"] == []
+    assert plan["groups"] == [["llama-3.2-3b-debug"]]
+    assert plan["models"][0]["devices"] == [0]
+    json.dumps(summary["residency"])                 # plain data
+    assert "WARNING" not in caplog.text
+    # 6.04 x 1.1 + 0.6 = 7.24 GiB, inside the 9.0 a lone engine is granted.
+    assert "card 0, vLLM gets 9.0GiB (gpu_memory_utilization=0.90)" in caplog.text
+
+    api_only = run_pipeline(
+        {"dataset_type": "eval", "data_dir": str(tmp_path), "stages": ["build"]},
+        params={"build": {}}, verbose=False)
+    telemetry.uninstall()
+    assert "residency" not in api_only
+
+
+def test_a_planner_exception_does_not_abort_the_run(tmp_path, monkeypatch, caplog):
+    import logging
+
+    import redact
+    from redact.llms.resources import residency
+
+    monkeypatch.setattr(redact, "build_dataset", lambda **k: pd.DataFrame({"x": [1]}))
+    monkeypatch.setattr(redact, "generate_inputs", lambda **k: pd.DataFrame({"x": [1]}))
+    monkeypatch.setattr(residency, "plan_residency",
+                        lambda *a, **k: 1 / 0)
+    recipe = {
+        "dataset_type": "eval", "data_dir": str(tmp_path),
+        "stages": ["inputs", "build"],
+        "models": {"gen": "llama-3.2-3b-debug"},
+    }
+    try:
+        with caplog.at_level(logging.ERROR, logger="redact.runconfig"):
+            summary = run_pipeline(recipe, params={"inputs": {}, "build": {}},
+                                   verbose=False)
+    finally:
+        telemetry.uninstall()
+    assert list(summary["stages"]) == ["inputs", "build"]
+    assert "residency" not in summary
+    mine = [r for r in caplog.records if r.name == "redact.runconfig"]
+    assert [r.levelname for r in mine] == ["ERROR"]
+    assert "planning failed (ZeroDivisionError" in caplog.text
+    assert "continues without a plan" in caplog.text
+
+
+def test_run_pipeline_summary_counts_engines_still_loaded(tmp_path, monkeypatch):
+    """Nothing is released before the summary is built, so live time counts."""
+    import time
+
+    import redact
+    import redact.llms.backends.vllm as vllm_module
+
+    monkeypatch.setattr(redact, "build_dataset", lambda **k: pd.DataFrame({"x": [1]}))
+    key = ("org/still-loaded", None, "[]")
+    vllm_module._engine_loaded_at[key] = time.perf_counter() - 120.0
+    try:
+        summary = run_pipeline(
+            {"dataset_type": "eval", "data_dir": str(tmp_path), "stages": ["build"]},
+            params={"build": {}}, verbose=False)
+    finally:
+        vllm_module._engine_loaded_at.pop(key, None)
+        telemetry.uninstall()
+    assert summary["telemetry"]["local_s"]["org/still-loaded"] == pytest.approx(120.0, abs=5)

@@ -1,10 +1,12 @@
 """Tests for OpenAIBackend with mocked OpenAI client."""
 
+import logging
 import os
 from unittest.mock import MagicMock, patch
 
 import pytest
 
+from redact.llms import observe
 from redact.llms.backends import OpenAIBackend
 from redact.llms.model_config import get_model_config
 
@@ -56,6 +58,22 @@ class TestOpenAIBackendInit:
             assert a.model != b.model
             assert a._client is b._client
         OpenAIBackend.clear_cache()
+
+    def test_a_cache_cleared_during_the_lookup_does_not_raise(self):
+        """A concurrent clear_cache() can empty the cache right after a
+        lookup finds the client."""
+        import redact.llms.backends.openai as openai_module
+
+        class _ClearedAfterContains(dict):
+            def __contains__(self, key):
+                found = super().__contains__(key)
+                self.clear()
+                return found
+
+        client = object()
+        cache = _ClearedAfterContains({("https://one.api/v1", "k"): client})
+        with patch.object(openai_module, "_sdk_clients", cache):
+            assert openai_module._sdk_client("k", "https://one.api/v1") is client
 
     def test_from_config_missing_api_key_raises(self):
         config = get_model_config("venice-uncensored")
@@ -132,10 +150,10 @@ class TestOpenAIGenerate:
         assert call_kwargs["top_p"] == 0.9
 
     def test_system_prompt_prepended_as_system_message(self, openai_backend, mock_openai_client):
-        openai_backend.generate(
-            [[{"role": "user", "content": "hi"}]],
-            system_prompts=["Sys."],
-        )
+        openai_backend.generate([[
+            {"role": "user", "content": "hi"},
+            {"role": "system", "content": "Sys."},
+        ]])
         call_kwargs = mock_openai_client.chat.completions.create.call_args[1]
         assert call_kwargs["messages"] == [
             {"role": "system", "content": "Sys."},
@@ -148,3 +166,59 @@ class TestOpenAIGenerate:
         )
         call_kwargs = mock_openai_client.chat.completions.create.call_args[1]
         assert call_kwargs["messages"] == [{"role": "user", "content": "hi"}]
+
+    def test_kwargs_cannot_retarget_the_call(self, openai_backend, mock_openai_client):
+        openai_backend.generate(
+            [[{"role": "user", "content": "hi"}]],
+            model="another-model", messages=[{"role": "user", "content": "other"}],
+        )
+        call_kwargs = mock_openai_client.chat.completions.create.call_args[1]
+        assert call_kwargs["model"] == "venice-uncensored"
+        assert call_kwargs["messages"] == [{"role": "user", "content": "hi"}]
+
+
+_HI = [[{"role": "user", "content": "hi"}]]
+
+
+def _response(content, finish_reason):
+    choice = MagicMock(finish_reason=finish_reason)
+    choice.message.content = content
+    return MagicMock(choices=[choice], usage=None)
+
+
+class TestOpenAIEmptyReply:
+    """An empty reply is returned as "" with its finish reason on record."""
+
+    @pytest.fixture()
+    def events(self):
+        seen = []
+        observe.set_emitter(seen.append)
+        yield seen
+        observe.set_emitter(None)
+
+    @pytest.mark.parametrize("response, reason", [
+        (_response(None, "content_filter"), "content_filter"),
+        (_response("", "length"), "length"),
+        (MagicMock(choices=[], usage=None), None),
+        (MagicMock(choices=None, usage=None), None),
+    ], ids=["no-content", "empty-content", "no-choices", "choices-none"])
+    def test_empty_reply_is_returned_and_warned_about(
+        self, openai_backend, mock_openai_client, events, caplog, response, reason
+    ):
+        mock_openai_client.chat.completions.create.return_value = response
+        with caplog.at_level(logging.WARNING, logger="redact.llms.backends.openai"):
+            assert openai_backend.generate(_HI) == [""]
+        assert [r.getMessage() for r in caplog.records] == [
+            f"venice-uncensored returned an empty reply (finish_reason={reason})."
+        ]
+        assert events[0].get("finish_reason") == reason
+
+    def test_finish_reason_is_recorded_without_a_warning(
+        self, openai_backend, mock_openai_client, events, caplog
+    ):
+        create = mock_openai_client.chat.completions.create
+        create.return_value = _response("ok", "stop")
+        with caplog.at_level(logging.WARNING, logger="redact.llms.backends.openai"):
+            assert openai_backend.generate(_HI) == ["ok"]
+        assert caplog.records == []
+        assert events[0]["finish_reason"] == "stop"

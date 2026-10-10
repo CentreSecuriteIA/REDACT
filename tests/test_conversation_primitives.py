@@ -82,6 +82,20 @@ def test_drive_generators_batch_failure_propagates_despite_on_error():
         )
 
 
+def test_drive_generators_finalize_exception_propagates():
+    """finalize failing is not the unit failing: on_error never sees it."""
+    def finalize(key, value):
+        raise KeyError("finalize boom")
+
+    with pytest.raises(KeyError, match="finalize boom") as raised:
+        drive_generators(
+            {"x": _immediate("x"), "y": _two_round("y")},
+            resolve=as_resolver(_FakeRouter()),
+            finalize=finalize, on_error=lambda k, exc: "FAILED",
+        )
+    assert raised.value.__context__ is None  # not chained to StopIteration
+
+
 def test_drive_generators_batch_failure_reraises():
     with pytest.raises(RuntimeError):
         drive_generators({"a": _two_round("a")}, resolve=as_resolver(_FakeRouter(fail=True)), finalize=lambda k, v: v)
@@ -99,7 +113,7 @@ def test_drive_sync_drives_one_generator():
     assert calls == ["t-1", "t-2:R:t-1"]
 
 
-def test_drive_generators_verbose_progress_label():
+def test_drive_generators_progress_label():
     labels = []
 
     class _R:
@@ -108,10 +122,51 @@ def test_drive_generators_verbose_progress_label():
             return ["r"] * len(messages_list)
 
     drive_generators({"a": _immediate("a")}, resolve=as_resolver(_R()), finalize=lambda k, v: v)  # no rounds
-    # a one-round generator with verbose+progress records a formatted label
+    # a one-round generator without a label passes none; with one, a formatted label
     drive_generators({"b": (lambda: (yield LLMRequest("m", [])))()},
-                     resolve=as_resolver(_R()), finalize=lambda k, v: v, verbose=True, progress="lbl")
-    assert any(p and p.startswith("lbl round 1 (m)") for p in labels)
+                     resolve=as_resolver(_R()), finalize=lambda k, v: v)
+    drive_generators({"c": (lambda: (yield LLMRequest("m", [])))()},
+                     resolve=as_resolver(_R()), finalize=lambda k, v: v, progress="lbl")
+    assert labels == [None, "lbl round 1 (m)"]
+
+
+def test_drive_generators_reply_count_mismatch_raises():
+    """A model returning fewer replies than requests is a transport failure:
+    it raises, and does not leave the unanswered generators out of the result."""
+    class _Short:
+        def batch_generate(self, model, messages_list, **kw):
+            return ["only one"]
+
+    with pytest.raises(RuntimeError, match="returned 1 replies for 2 requests"):
+        drive_generators(
+            {"a": _two_round("a"), "b": _two_round("b")},
+            resolve=as_resolver(_Short()), finalize=lambda k, v: v,
+            on_error=lambda k, exc: "FAILED",
+        )
+
+
+def _yields_no_request(first):
+    if first is not None:
+        yield first
+    yield "not a request"
+
+
+@pytest.mark.parametrize(
+    "first", [None, LLMRequest("m", [])], ids=["at-prime", "later"])
+def test_drive_generators_isolates_a_generator_that_yields_no_request(first):
+    results = drive_generators(
+        {"ok": _two_round("ok"), "bad": _yields_no_request(first)},
+        resolve=as_resolver(_FakeRouter()), finalize=lambda k, v: v,
+        on_error=lambda k, exc: ("ERR", type(exc).__name__),
+    )
+    assert results["ok"][0] == "ok"
+    assert results["bad"] == ("ERR", "TypeError")
+
+
+def test_run_sync_is_drive_sync():
+    from redact.jailbreak.protocol import run_sync
+
+    assert run_sync is drive_sync
 
 
 class _CapturingRouter:
