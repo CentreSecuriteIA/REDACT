@@ -563,3 +563,29 @@ def test_run_pipeline_summary_counts_engines_still_loaded(tmp_path, monkeypatch)
         vllm_module._engine_loaded_at.pop(key, None)
         telemetry.uninstall()
     assert summary["telemetry"]["local_s"]["org/still-loaded"] == pytest.approx(120.0, abs=5)
+
+
+def test_load_recipe_rejects_a_repeated_stage():
+    from redact.runconfig import load_recipe
+
+    with pytest.raises(ValueError, match="more than once"):
+        load_recipe({"dataset_type": "eval", "stages": ["inputs", "inputs"]})
+
+
+def test_a_failed_model_switch_does_not_abort_the_run(local_models, caplog):
+    import logging
+
+    from redact import residency
+    from redact.runconfig import _enter_phase, _plan_phases
+
+    gen = local_models("_rc_switch_gen")
+    card = _one_card(24.0)
+    try:
+        with card[0], card[1], \
+             patch.object(residency, "preload", side_effect=RuntimeError("boom")), \
+             caplog.at_level(logging.ERROR, logger="redact.runconfig"):
+            phases = _plan_phases(_models(gen=gen), ["inputs"], verbose=False)
+            _enter_phase(phases, 0, set(), verbose=False)
+    finally:
+        telemetry.uninstall()
+    assert "could not switch models (RuntimeError: boom)" in caplog.text

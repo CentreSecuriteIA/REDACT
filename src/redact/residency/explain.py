@@ -102,9 +102,8 @@ def _placement(plan: "ResidencyPlan", fp: ModelFootprint) -> str:
 def co_residency_problem(plan: "ResidencyPlan") -> str:
     """Why several groups do not fit a run, and what to do instead."""
     text = (
-        "these groups cannot be resident together, and nothing is "
-        "unloaded between stages, so a later group would load on top of "
-        f"the earlier ones. {_SEPARATE_RUNS}"
+        "these groups cannot be resident together, so a later group "
+        f"would load on top of the earlier ones. {_SEPARATE_RUNS}"
     )
     engines = {fp.engine for fp in plan.footprints
                if fp.setup == "vllm" and fp.min_gpus == 1}

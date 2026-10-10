@@ -80,7 +80,9 @@ def _tag_yields(gen: TechniqueGen, root: str) -> TechniqueGen:
         # question for every model in the chain, including ones this sample
         # never actually calls, and building a local transport to answer it
         # would load model weights.
-        if model_compute_config(request.model).supports_internals:
+        config = (request.client.compute_config if request.client is not None
+                  else model_compute_config(request.model))
+        if config.supports_internals:
             request = dataclasses.replace(request, internals_id=f"{root}/{n}")
             n += 1
         reply = yield request
@@ -193,7 +195,7 @@ def combine_techniques(*techniques: Callable, sort_by_hierarchy: bool = True) ->
             # llms<->jailbreak import ordering surprises.
             from redact.llms.client import ModelClient
             from redact.llms.router import generate_sample
-            c = client
+            c = request.client or client
             if c is None or c.model != request.model:
                 # A chain can mix models (e.g. gen vs translate); resolve the
                 # client for whichever model this request actually targets.

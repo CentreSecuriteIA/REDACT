@@ -333,3 +333,21 @@ class TestGenerateOutputsRetry:
         assert not bool(row["accepted"]) and row["rejection_reason"] == "No: two"
         # The feedback is not stacked: the second prompt carries one verdict.
         assert gen.calls[1]["messages"][-1]["content"].count("[FEEDBACK") == 1
+
+    def test_a_chunk_is_one_generation_call_and_one_check_call(self, tmp_path, monkeypatch):
+        import redact.pipelines as P
+        from redact import generate_outputs
+        from tests.conftest import make_client
+        from tests.llms.test_router import _CountingBackend
+
+        gen = _CountingBackend("an answer", native=True)
+        check = _CountingBackend("Yes", native=True)
+        backends = {"gen-model": gen, "check-model": check}
+        monkeypatch.setattr(P.ModelClient, "create", lambda m: make_client(backends[m], m))
+        inputs = pd.DataFrame({
+            "sample": ["p one", "p two", "p three"],
+            "category": ["Cyber"] * 3, "entry_type": ["harmful"] * 3,
+        })
+        generate_outputs(data_dir=tmp_path, inputs=inputs, model="gen-model",
+                         check_model="check-model", batch_size=3, verbose=False)
+        assert (gen.generate_call_count, check.generate_call_count) == (1, 1)

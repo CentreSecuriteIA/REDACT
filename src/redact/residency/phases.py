@@ -1,10 +1,13 @@
 """Residency per stage: which local models are loaded while each stage runs."""
 
+import logging
 from dataclasses import dataclass
 
 from .footprint import _engine_id, _local_setup
 from .placement import plan_residency
 from .plan import ResidencyPlan
+
+logger = logging.getLogger(__name__)
 
 
 @dataclass
@@ -87,7 +90,16 @@ def plan_phases(
         share = (fp.planned_utilization, fp.reserved_gb)
         if fp.engine not in smallest or share[0] < smallest[fp.engine][0]:
             smallest[fp.engine] = share
+    lowered = set()
     for fp in footprints:
-        if fp.planned_utilization is not None:
-            fp.planned_utilization, fp.reserved_gb = smallest[fp.engine]
+        if fp.planned_utilization is None:
+            continue
+        share, reserved = smallest[fp.engine]
+        if share < fp.planned_utilization and fp.engine not in lowered:
+            lowered.add(fp.engine)
+            logger.info(
+                "[residency] %s loads once, with gpu_memory_utilization=%.2f: "
+                "its share in the stage where its card is most crowded.",
+                fp.model, share)
+        fp.planned_utilization, fp.reserved_gb = share, reserved
     return phases

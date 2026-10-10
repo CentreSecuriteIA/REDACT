@@ -47,8 +47,7 @@ def drive_generators(
     Each generator yields :class:`LLMRequest`s and is resumed with the reply.
     Every round, the pending requests are grouped by ``request.client`` (by
     ``request.model`` when none is attached) and sent as one ``generate()``
-    call per group. Used by the jailbreak engine, the multi-turn pipeline
-    and the optimization search.
+    call per group.
 
     Args:
         gens: ``{key: generator}``. Keys are returned unchanged.

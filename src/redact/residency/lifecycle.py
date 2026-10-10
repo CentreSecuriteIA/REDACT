@@ -36,6 +36,7 @@ def preload(
     models: list[str],
     backend_types: dict | None = None,
     verbose: bool = True,
+    wanted: set[str] | None = None,
 ) -> threading.Thread | None:
     """Start loading local models on a background thread and return at once.
 
@@ -52,6 +53,8 @@ def preload(
         models: Model names to load. Unregistered and non-local ones are
             skipped.
         backend_types: Optional per-model setup override.
+        wanted: A set the caller may shrink while the thread runs. A model
+            no longer in it when its turn comes is not loaded.
 
     Returns:
         The daemon thread, or ``None`` when there is nothing local to load.
@@ -71,6 +74,8 @@ def preload(
 
     def _load_all() -> None:
         for name in local:
+            if wanted is not None and name not in wanted:
+                continue
             try:
                 if verbose:
                     logger.info("[preload] loading %s ...", name)

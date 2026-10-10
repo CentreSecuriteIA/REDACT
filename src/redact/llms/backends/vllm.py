@@ -150,7 +150,7 @@ def _shut_down(engine) -> None:
             continue
         logger.debug("[vllm] engine shut down through %s()", path)
         return
-    logger.debug(
+    logger.warning(
         "[vllm] %s has no shutdown hook (tried %s); left to garbage collection",
         type(engine).__name__, ", ".join(_SHUTDOWN_HOOKS),
     )

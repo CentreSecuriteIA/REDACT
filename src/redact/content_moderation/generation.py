@@ -86,19 +86,29 @@ _PROHIBITED_PREVIEW_LIMIT = 20
 _DESC_PREVIEW_LEN = 60
 
 
-def _append_feedback(messages: list[dict], feedback: str) -> list[dict]:
+_INPUT_FEEDBACK = (
+    "\n\n[FEEDBACK FROM PREVIOUS ATTEMPT]\n"
+    "Some previously generated samples were rejected for these "
+    "reasons:\n{feedback}\n"
+    "Please avoid similar issues in your new samples."
+)
+_OUTPUT_FEEDBACK = (
+    "\n\n[FEEDBACK FROM PREVIOUS ATTEMPT]\n"
+    "Your previous response was rejected for this reason:\n{feedback}\n"
+    "Please avoid this issue in your new response."
+)
+
+
+def _append_feedback(
+    messages: list[dict], feedback: str, template: str = _INPUT_FEEDBACK,
+) -> list[dict]:
     """``messages`` with rejection feedback appended to the last user turn.
 
     Returns a new list; ``messages`` itself for an empty ``feedback``.
     """
     if not feedback:
         return messages
-    feedback_msg = (
-        "\n\n[FEEDBACK FROM PREVIOUS ATTEMPT]\n"
-        "Some previously generated samples were rejected for these "
-        f"reasons:\n{feedback}\n"
-        "Please avoid similar issues in your new samples."
-    )
+    feedback_msg = template.format(feedback=feedback)
     if messages and messages[-1]["role"] == "user":
         last = {**messages[-1], "content": messages[-1]["content"] + feedback_msg}
         return [*messages[:-1], last]
@@ -240,14 +250,9 @@ class InputPipeline(_StandaloneGenerationMixin):
     ) -> ConstitutionInputResult:
         """Run constitution-seeded input generation, batched across entries.
 
-        Each row in ``constitution_df`` becomes a generation request. The
-        per-entry feedback loop is handled inside the LLM checker — failed
-        samples are saved with their rejection reason but no regeneration
-        loop runs here (this mode prioritises throughput over per-sample
-        retries; the standalone/deprecated path in
-        ``standalone_generation.py`` is the one place in this library that
-        does per-sample feedback-driven regeneration, hand-rolled rather
-        than built on a shared retry primitive).
+        Each row in ``constitution_df`` becomes a generation request.
+        Samples the checker rejects are saved with their rejection reason
+        and not regenerated.
 
         Each batch of ``batch_size`` entries triggers one generation batch
         (one vLLM engine pass), a further one per round for the entries
@@ -807,7 +812,8 @@ def run_output_generation(
             units[i] = checked(
                 client,
                 # base=base: a bare closure would see the last row's messages.
-                lambda feedback, base=base: _append_feedback(base, feedback),
+                lambda feedback, base=base: _append_feedback(
+                    base, feedback, _OUTPUT_FEEDBACK),
                 check if use_checker else None,
                 _checker_for(category, entry_type) if use_checker else None,
                 original=input_text,

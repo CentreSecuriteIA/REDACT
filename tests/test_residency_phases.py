@@ -82,3 +82,28 @@ def test_loadable_is_what_fits_together(local_model):
     (phase,) = _plan({"a": [x, y]}, gib=8.0)      # 5 + 5 GiB is over 0.9 x 8
     assert not phase.plan.fits
     assert phase.loadable == [x]
+
+
+def test_a_share_lowered_for_a_crowded_stage_is_logged(local_model, caplog):
+    import logging
+
+    x, y = local_model("_ph_log_x"), local_model("_ph_log_y")
+    with caplog.at_level(logging.INFO, logger="redact.residency.phases"):
+        _plan({"a": [x], "b": [x, y]})
+    assert f"{x} loads once, with gpu_memory_utilization=0.45" in caplog.text
+    assert y not in caplog.text
+
+
+def test_preload_skips_a_model_no_longer_wanted(local_model):
+    from redact import residency
+
+    a, b = local_model("_ph_pre_a"), local_model("_ph_pre_b")
+    wanted, created = {a, b}, []
+
+    def create(name, backend_type=None):
+        created.append(name)
+        wanted.discard(b)           # dropped while the first model loads
+
+    with patch("redact.llms.client.ModelClient.create", side_effect=create):
+        residency.preload([a, b], verbose=False, wanted=wanted).join()
+    assert created == [a]

@@ -119,6 +119,8 @@ def load_recipe(recipe: str | Path | dict) -> dict:
     unknown = [s for s in stages if s not in STAGES]
     if unknown:
         raise ValueError(f"Unknown stage(s) {unknown}; valid: {list(STAGES)}")
+    if len(set(stages)) != len(stages):
+        raise ValueError(f"A stage is listed more than once in {stages}.")
     if dtype == "eval" and "constitution" in stages:
         raise ValueError("dataset_type 'eval' cannot include the 'constitution' stage.")
     data["stages"] = stages
@@ -209,7 +211,8 @@ def _enter_phase(phases: list, i: int, warm: set[str], verbose: bool = True) -> 
     Args:
         phases: The run's phases, as :func:`_plan_phases` returns them.
         i: Index of the stage about to run.
-        warm: Models already handed to the preloader; updated in place.
+        warm: Models handed to the preloader and still resident; updated
+            in place. A running preload skips a model that leaves it.
     """
     if not phases:
         return
@@ -217,9 +220,13 @@ def _enter_phase(phases: list, i: int, warm: set[str], verbose: bool = True) -> 
 
     try:
         phase = phases[i]
-        if i > 0 and set(phases[i - 1].resident) - set(phase.resident):
-            residency.unload_local(keep=phase.resident)
         warm &= set(phase.resident)
+        dropped = set(phases[i - 1].resident) - set(phase.resident) if i else ()
+        if dropped:
+            if verbose:
+                logger.info("[residency] stage %s: unloading %s",
+                            phase.stage, ", ".join(sorted(dropped)))
+            residency.unload_local(keep=phase.resident)
         ahead = list(phase.loadable)
         if i + 1 < len(phases):
             following = phases[i + 1]
@@ -228,11 +235,11 @@ def _enter_phase(phases: list, i: int, warm: set[str], verbose: bool = True) -> 
                 ahead += following.loadable
         todo = [m for m in dict.fromkeys(ahead) if m not in warm]
         if todo:
-            residency.preload(todo, verbose=verbose)
             warm |= set(todo)
+            residency.preload(todo, verbose=verbose, wanted=warm)
     except Exception as exc:  # noqa: BLE001 — residency must not abort a run
-        logger.error("[residency] stage %s: could not switch models (%s: %s); "
-                     "the run continues.", phases[i].stage, type(exc).__name__, exc)
+        logger.error("[residency] stage %d: could not switch models (%s: %s); "
+                     "the run continues.", i + 1, type(exc).__name__, exc)
 
 
 def _stage_models(models: dict, stages: list[str], augmentations: dict) -> list[str]:
