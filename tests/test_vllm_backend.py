@@ -36,7 +36,7 @@ from redact.llms.model_config import (
     get_model_config,
     register_model,
 )
-from redact.llms.router import batch_check_samples
+from redact.llm_pipeline import batch_check_samples
 from tests.conftest import make_client
 
 # ---------------------------------------------------------------------------

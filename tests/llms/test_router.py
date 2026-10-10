@@ -1,5 +1,5 @@
 """Tests for router.py's caller-facing helpers and for the client that
-executes them — dispatch strategy, chunking, and the check loop.
+executes them — dispatch strategy and chunking.
 """
 
 import logging
@@ -12,12 +12,7 @@ from redact.llms import ModelClient
 from redact.llms.backends import ComputeConfig, backend_for, clear_transport_caches
 from redact.llms.client import clear_client_cache
 from redact.llms.model_config import get_model_config
-from redact.llms.router import (
-    batch_check_samples,
-    batch_generate_samples,
-    check_sample,
-    generate_sample,
-)
+from redact.llms.router import batch_generate_samples, generate_sample
 from redact.llms.wrappers import BatchCaller
 from tests.conftest import MockBackend, make_client
 
@@ -34,35 +29,6 @@ class TestGenerateSample:
         messages = [{"role": "user", "content": "hi"}]
         generate_sample(make_client(mock_backend), messages, max_tokens=100)
         assert mock_backend.calls[0]["max_tokens"] == 100
-
-
-class TestCheckSample:
-    def _check(self, backend, response_text):
-        b = MockBackend(response_text)
-        return check_sample(make_client(b), "sample text",
-            build_check_messages=lambda o, s: [{"role": "user", "content": f"Check: {s}"}],
-        )
-
-    def test_accepted_yes(self, mock_backend):
-        assert self._check(mock_backend, "Yes, this looks good")[0] is True
-
-    def test_accepted_ok(self, mock_backend):
-        assert self._check(mock_backend, "ok")[0] is True
-
-    def test_accepted_accept(self, mock_backend):
-        assert self._check(mock_backend, "ACCEPT")[0] is True
-
-    def test_accepted_pass(self, mock_backend):
-        assert self._check(mock_backend, "Pass - looks fine")[0] is True
-
-    def test_rejected(self, mock_backend):
-        accepted, reasoning = self._check(mock_backend, "No, this is off-topic")
-        assert accepted is False
-        assert "off-topic" in reasoning
-
-    def test_reasoning_empty_on_accept(self, mock_backend):
-        _, reasoning = self._check(mock_backend, "yes")
-        assert reasoning == ""
 
 
 class _CountingBackend(MockBackend):
@@ -171,18 +137,6 @@ class TestBatchChunkingWithInternalsIds:
             "id-0", "id-1", "id-2", "id-3", "id-4",
         ]
 
-    def test_check_slices_internals_ids_across_chunks(self):
-        backend = _CountingBackend(["yes"] * 5)
-        results = batch_check_samples(make_client(backend), [f"s{i}" for i in range(5)],
-            build_check_messages=lambda o, s: [{"role": "user", "content": s}],
-            batch_size=2,
-            internals_ids=[f"id-{i}" for i in range(5)],
-        )
-        assert [accepted for accepted, _ in results] == [True] * 5
-        assert [c["internals_id"] for c in backend.calls] == [
-            "id-0", "id-1", "id-2", "id-3", "id-4",
-        ]
-
     def test_length_mismatch_raises(self):
         backend = _CountingBackend(["a", "b"])
         with pytest.raises(ValueError, match="internals_ids"):
@@ -196,12 +150,6 @@ class TestBatchChunkingWithInternalsIds:
         with pytest.raises(ValueError, match=reason):
             batch_generate_samples(
                 make_client(backend), self._messages(2), batch_size=batch_size)
-        with pytest.raises(ValueError, match=reason):
-            batch_check_samples(
-                make_client(backend), ["s0", "s1"],
-                build_check_messages=lambda o, s: [{"role": "user", "content": s}],
-                batch_size=batch_size,
-            )
         assert backend.generate_call_count == 0
 
 

@@ -24,7 +24,8 @@ from math import ceil
 from ..dataset.io import append_samples, get_existing_samples
 from ..dataset.taxonomy import get_seed_prompts
 from ..llms.prompting import extract_and_clean
-from ..llms.router import batch_check_samples, generate_sample
+from ..llm_pipeline import batch_check_samples
+from ..llms.router import generate_sample
 from ..types import EntryType
 from .checker import build_quality_checker
 from .metaprompt import generate_category_description, generate_seeds

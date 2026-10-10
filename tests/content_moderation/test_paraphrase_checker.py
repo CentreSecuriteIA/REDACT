@@ -1,7 +1,7 @@
 """Tests for the paraphrase meaning-preservation checker (check→drop)."""
 
 from redact.content_moderation.checker import build_paraphrase_checker
-from redact.llms.router import batch_check_samples
+from redact.llm_pipeline import batch_check_samples
 from tests.conftest import MockBackend, make_client
 
 

@@ -5,7 +5,7 @@ Each builder returns a function with signature:
     (original: str, sample: str) -> list[dict]
 
 matching the two-arg checker contract used by ``check_sample``/
-``batch_check_samples`` (``redact.llms.router``). Checkers that only need
+``batch_check_samples`` (``redact.llm_pipeline.check``). Checkers that only need
 the one text to validate (``build_quality_checker``, ``build_category_checker``)
 simply ignore ``original``; checkers that genuinely compare two texts
 (``build_output_quality_checker``, ``build_paraphrase_checker``) use both as
@@ -27,7 +27,7 @@ post-generation transform, grouped with output rather than input).
 # third step is specific to checking, and it is generic across pipelines, so
 # it belongs in ``llms/`` with the rest of the model-facing machinery:
 #
-#   1. The ``(original, sample) -> messages`` adapter -> ``llms/router.py``
+#   1. The ``(original, sample) -> messages`` adapter -> ``llm_pipeline/check.py``
 #      (or ``llms/prompting``), so the shape is defined once instead of as
 #      four near-identical ``_build`` closures. ``check_sample`` /
 #      ``batch_check_samples`` already consume exactly that contract.

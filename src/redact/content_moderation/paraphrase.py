@@ -34,7 +34,8 @@ from ..dataset.io import _hash_text
 from ..llms.client import ModelClient
 from ..llms.model_config import default_model_for_role, get_models_by_role
 from ..llms.prompting import build_messages, load_prompt
-from ..llms.router import batch_check_samples, batch_generate_samples, generate_sample
+from ..llm_pipeline import batch_check_samples
+from ..llms.router import batch_generate_samples, generate_sample
 from .checker import build_paraphrase_checker
 
 logger = logging.getLogger(__name__)

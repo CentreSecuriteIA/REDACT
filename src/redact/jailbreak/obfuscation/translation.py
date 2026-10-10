@@ -23,7 +23,7 @@ Languages are grouped by resource level (safety training coverage):
 from redact.jailbreak.protocol import LLMRequest, TechniqueGen
 from redact.llms.model_config import default_model_for_role
 from redact.llms.prompting import build_messages, load_prompt
-from redact.llms.router import is_accepted
+from redact.llm_pipeline import is_accepted
 
 LANGUAGES = [
     # High-resource

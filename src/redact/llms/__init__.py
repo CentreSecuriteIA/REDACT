@@ -67,10 +67,7 @@ from .prompting import PromptTemplate, build_messages, load_prompt
 # Helpers over a client
 from .router import (
     assert_single_sample_per_call,
-    batch_check_samples,
     batch_generate_samples,
-    check_sample,
     generate_sample,
-    is_accepted,
 )
 from .wrappers import BatchCaller, RateLimiter
