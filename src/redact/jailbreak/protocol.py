@@ -29,10 +29,8 @@ from __future__ import annotations
 
 from collections.abc import Generator
 
-# LLMRequest is a model-layer type — defined in redact.llms.conversation and
-# re-exported here so existing jailbreak imports (`from .protocol import LLMRequest`)
-# keep working while `llms/` and `multi_turn/` share the same class.
-from redact.llms.conversation import LLMRequest, drive_sync  # noqa: F401
+# Re-exported so `from .protocol import LLMRequest` keeps working.
+from redact.llm_pipeline import LLMRequest, drive_sync  # noqa: F401
 
 # A technique generator yields LLMRequests, is resumed with the response
 # string, and returns the (text, info) result. info is "" on success or

@@ -203,6 +203,7 @@ class Config:
 # actually reports E402 on — a merged block only lets the *opening* line
 # suppress E402, silently un-suppressing it for every other name inside it.
 from . import llms  # noqa: E402, F401, I001
+from . import llm_pipeline  # noqa: E402, F401
 from . import content_moderation  # noqa: E402, F401
 from . import jailbreak  # noqa: E402, F401
 from . import dataset  # noqa: E402, F401

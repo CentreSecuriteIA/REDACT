@@ -7,12 +7,13 @@ conditions without any network.
 
 import pytest
 
-from redact.llms.conversation import LLMRequest, Transcript, drive_sync
+from redact.llm_pipeline import LLMRequest, drive_sync
 from redact.multi_turn import (
     Actor,
     ModelActor,
     ScriptedActor,
     Setting,
+    Transcript,
     run_conversation,
 )
 from tests.conftest import MockBackend, make_client

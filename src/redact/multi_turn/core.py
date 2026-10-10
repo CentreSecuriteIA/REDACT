@@ -1,8 +1,9 @@
 """General multi-turn conversation core: a ``Setting`` played to a ``Trajectory``.
 
-Use-case-agnostic. Reuses ``llms/`` primitives (``LLMRequest``, ``Transcript``,
-``Step``, ``drive_sync``); higher layers (``multiturn_attacks/``, ``optimization/``)
-build on this. Dependency direction: ``multi_turn/`` → ``llms/`` only.
+Use-case-agnostic. Reuses ``llm_pipeline/`` (``LLMRequest``, ``drive_sync``) and
+the step log in ``transcript.py``; higher layers (``multiturn_attacks/``,
+``optimization/``) build on this. Dependency direction: ``multi_turn/`` →
+``llm_pipeline/`` → ``llms/``.
 
 An **actor**'s turn is a generator ``turn(transcript) -> yields LLMRequest, returns
 list[Step]`` (see :class:`Actor`). The runner plays actors in order (seed as the
@@ -17,7 +18,9 @@ from __future__ import annotations
 from collections.abc import Callable, Generator
 from dataclasses import dataclass, field
 
-from redact.llms.conversation import LLMRequest, Step, Transcript, drive_sync
+from redact.llm_pipeline import LLMRequest, drive_sync
+
+from .transcript import Step, Transcript
 
 # An actor's turn yields LLMRequests, is resumed with replies, and returns the
 # Steps it produced (e.g. [strategy?, message] or [reply]).

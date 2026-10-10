@@ -1,96 +1,15 @@
-"""Conversation primitives shared by ``jailbreak/``, ``multi_turn/``,
-``multiturn_attacks/`` and ``optimization/``.
-
-- :class:`LLMRequest`: a pending model call yielded by a generator.
-- :class:`Step` / :class:`Transcript`: a typed step log for multi-turn
-  conversations.
-- :func:`drive_sync`: drive one generator to completion with a blocking call.
-- :func:`drive_generators`: drive many generators round by round, batching
-  their requests per model.
+"""Drive generators that yield :class:`LLMRequest`: one with a blocking call,
+or many round by round with one batch per model.
 """
 
 from __future__ import annotations
 
 from collections import defaultdict
 from collections.abc import Callable, Generator, Hashable
-from dataclasses import asdict, dataclass, field
-from typing import Literal
 
+from redact.llms.client import ModelClient
 
-@dataclass
-class LLMRequest:
-    """A pending LLM call yielded by a generator.
-
-    Attributes:
-        model: Model name. Pending requests are grouped by it and sent one
-            batch per model.
-        messages: Chat messages for the call.
-        internals_id: Capture this call's internals under this id. ``None``
-            captures nothing.
-    """
-
-    model: str
-    messages: list[dict]
-    internals_id: str | None = None
-
-
-# Step kinds. Only "message" and "reply" steps are sent to models.
-StepType = Literal["strategy", "message", "reply", "analysis", "evaluation"]
-_VISIBLE = ("message", "reply")
-
-
-@dataclass
-class Step:
-    """One entry in a conversation's step log.
-
-    ``message`` and ``reply`` steps carry a chat ``role`` and are rendered
-    into the messages sent to a model. ``strategy``, ``analysis`` and
-    ``evaluation`` steps record the actor's ideas, analyses and scores, and
-    are never sent.
-    """
-
-    type: StepType
-    actor: str
-    content: str
-    role: str | None = None          # ChatMessage role for visible steps
-    model: str | None = None
-    meta: dict = field(default_factory=dict)
-
-
-@dataclass
-class Transcript:
-    """Ordered step log of a conversation."""
-
-    steps: list[Step] = field(default_factory=list)
-
-    def add(self, step: Step) -> Step:
-        self.steps.append(step)
-        return step
-
-    def message(self, actor: str, content: str, role: str = "user",
-                model: str | None = None, meta: dict | None = None) -> Step:
-        return self.add(Step("message", actor, content, role=role, model=model, meta=meta or {}))
-
-    def reply(self, actor: str, content: str, role: str = "assistant",
-              model: str | None = None, meta: dict | None = None) -> Step:
-        return self.add(Step("reply", actor, content, role=role, model=model, meta=meta or {}))
-
-    def note(self, type: StepType, actor: str, content: str,
-             model: str | None = None, meta: dict | None = None) -> Step:
-        """Log a provenance event (strategy / analysis / evaluation)."""
-        return self.add(Step(type, actor, content, model=model, meta=meta or {}))
-
-    def as_messages(self, system: str | None = None) -> list[dict]:
-        """Render the visible turns into a chat ``messages`` list."""
-        msgs: list[dict] = [{"role": "system", "content": system}] if system else []
-        for s in self.steps:
-            if s.type in _VISIBLE and s.role:
-                msgs.append({"role": s.role, "content": s.content})
-        return msgs
-
-    def to_records(self) -> list[dict]:
-        """The full step log as a list of dicts (copies), for JSON storage."""
-        return [asdict(s) for s in self.steps]
+from .request import LLMRequest
 
 
 def drive_sync(gen: Generator, call: Callable[[LLMRequest], str]):
@@ -150,7 +69,6 @@ def drive_generators(
             it was sent requests.
     """
     if resolve is None:
-        from .client import ModelClient  # local: only this default needs it
         resolve = ModelClient.create
 
     results: dict[Hashable, object] = {}

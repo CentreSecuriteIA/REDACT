@@ -1,4 +1,4 @@
-"""Tests for the shared model-layer conversation primitives (llms/conversation.py).
+"""Tests for the request driver (llm_pipeline/drive.py).
 
 Covers drive_generators' batching + error-isolation paths and drive_sync, with
 hand-built generators and a fake router (no network).
@@ -6,7 +6,7 @@ hand-built generators and a fake router (no network).
 
 import pytest
 
-from redact.llms.conversation import LLMRequest, drive_generators, drive_sync
+from redact.llm_pipeline import LLMRequest, drive_generators, drive_sync
 from tests.conftest import as_resolver
 
 

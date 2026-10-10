@@ -2,7 +2,7 @@
 
 Plays a :class:`~redact.multi_turn.core.Setting` on each seed (× ``iterations``)
 to a :class:`~redact.multi_turn.core.Trajectory`, driven at scale by
-:func:`redact.llms.conversation.drive_generators` (one batch per model per round).
+:func:`redact.llm_pipeline.drive_generators` (one batch per model per round).
 Resumable via a sidecar ``*.state.jsonl`` **ledger** + a full-plan ``*.manifest.jsonl``,
 mirroring the paraphrase / output pipelines. The unit key ``(input_id, iteration)``
 and the ``source`` provenance label match the rest of the library, so conversation
@@ -24,7 +24,7 @@ from redact import paths
 from redact.dataset.io import _hash_text
 from redact.dataset.ledger import Ledger
 from redact.dataset.manifest import Manifest
-from redact.llms.conversation import drive_generators
+from redact.llm_pipeline import drive_generators
 
 from .core import Setting, conversation_gen
 

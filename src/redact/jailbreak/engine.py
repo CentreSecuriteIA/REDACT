@@ -24,7 +24,7 @@ runs the same chains synchronously via ``protocol.run_sync``.
 from __future__ import annotations
 
 from redact.dataset.io import _hash_text
-from redact.llms.conversation import drive_generators
+from redact.llm_pipeline import drive_generators
 
 from .utils import _parse_rejection_info, is_noop, make_combination_gen
 
@@ -134,7 +134,7 @@ def batch_apply_combinations(
     n = len(samples)
 
     # Build one chain generator per sample; the generic round-driver
-    # (llms.conversation.drive_generators) pools LLM calls by model per round.
+    # (llm_pipeline.drive_generators) pools LLM calls by model per round.
     gens = {}
     for i, s in enumerate(samples):
         internals_root = None

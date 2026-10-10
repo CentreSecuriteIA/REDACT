@@ -25,9 +25,10 @@ import itertools
 from collections.abc import Callable
 from dataclasses import dataclass
 
+from redact.llm_pipeline import LLMRequest, drive_generators
 from redact.llms import ModelClient
-from redact.llms.conversation import LLMRequest, Transcript, drive_generators
 from redact.llms.router import batch_check_samples
+from redact.multi_turn import Transcript
 
 
 @dataclass

@@ -18,6 +18,7 @@ from .core import (
 )
 from .evaluate import evaluate_conversations
 from .pipeline import generate_conversations
+from .transcript import Step, StepType, Transcript
 
 __all__ = [
     "Actor",
@@ -26,6 +27,9 @@ __all__ = [
     "StrategyActor",
     "Setting",
     "Trajectory",
+    "Step",
+    "StepType",
+    "Transcript",
     "conversation_gen",
     "run_conversation",
     "generate_conversations",
