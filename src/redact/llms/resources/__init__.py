@@ -1,17 +1,9 @@
-"""Local GPU footprint estimation and residency planning. All sizes are GiB.
+"""Local GPU footprint estimation and machine measurement. All sizes are GiB.
 
 - :mod:`estimate`: what a model will need, computed from its HF config
-  without loading it. Planning uses this.
-- :mod:`residency`: places the footprints on the machine's cards and
-  explains the result.
+  without loading it. :mod:`redact.residency` plans with this.
 - :mod:`measure`: the machine's cards, and what an in-process (transformers)
   load took, for telemetry.
-
-``residency`` is not imported here because that would create an import cycle:
-the local backends import this package, and ``residency`` imports the
-backends. Import it explicitly::
-
-    from redact.llms.resources import residency
 """
 
 from . import estimate, measure

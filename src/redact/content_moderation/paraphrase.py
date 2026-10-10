@@ -264,7 +264,7 @@ def run_paraphrase_target(
 
     unload_between = False
     if len(groups) > 1:
-        from redact.llms.resources import residency
+        from redact import residency
 
         plan = residency.plan_residency(list(groups))
         unload_between = plan.sequential

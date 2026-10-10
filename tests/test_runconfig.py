@@ -228,7 +228,7 @@ def test_run_pipeline_reports_residency_before_running(tmp_path, monkeypatch, ca
     }
     monkeypatch.setattr(redact, "generate_inputs", lambda **k: pd.DataFrame({"x": [1]}))
     try:
-        from redact.llms.resources import residency
+        from redact import residency
 
         with caplog.at_level(logging.INFO, logger=residency.logger.name):
             with patch("redact.llms.ModelClient.create"):
@@ -298,7 +298,7 @@ def _offline_plans():
     import redact.llms.backends.vllm as vllm_module
 
     with patch("redact.llms.resources.estimate._load_config", return_value=None), \
-         patch("redact.llms.resources.residency.preload", return_value=None):
+         patch("redact.residency.preload", return_value=None):
         yield
     vllm_module._planned_utilization.clear()
 
@@ -360,7 +360,7 @@ def test_a_paraphraser_pool_plans_every_model_in_it(local_models):
 def test_plan_and_preload_warms_the_first_needed_model(local_models):
     """Two local models that cannot share a card: the plan says so, and the
     one its stage needs first is the one preloaded."""
-    from redact.llms.resources import residency
+    from redact import residency
     from redact.runconfig import _plan_and_preload
 
     gen = local_models("_rc_zz_gen")              # sorts last by role and name
@@ -384,7 +384,7 @@ def test_plan_and_preload_warms_the_first_needed_model(local_models):
 def test_plan_and_preload_applies_the_plan_before_preloading(local_models):
     """Two models that share the card: each loads with its planned grant."""
     import redact.llms.backends.vllm as vllm_module
-    from redact.llms.resources import residency
+    from redact import residency
     from redact.runconfig import _plan_and_preload
 
     gen = local_models("_rc_share_gen")
@@ -417,7 +417,7 @@ def test_run_pipeline_puts_the_plan_in_the_summary(tmp_path, monkeypatch, caplog
     import logging
 
     import redact
-    from redact.llms.resources import residency
+    from redact import residency
 
     monkeypatch.setattr(redact, "build_dataset", lambda **k: pd.DataFrame({"x": [1]}))
     monkeypatch.setattr(redact, "generate_inputs", lambda **k: pd.DataFrame({"x": [1]}))
@@ -456,7 +456,7 @@ def test_a_planner_exception_does_not_abort_the_run(tmp_path, monkeypatch, caplo
     import logging
 
     import redact
-    from redact.llms.resources import residency
+    from redact import residency
 
     monkeypatch.setattr(redact, "build_dataset", lambda **k: pd.DataFrame({"x": [1]}))
     monkeypatch.setattr(redact, "generate_inputs", lambda **k: pd.DataFrame({"x": [1]}))

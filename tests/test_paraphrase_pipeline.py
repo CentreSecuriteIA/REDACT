@@ -220,7 +220,7 @@ def test_previous_paraphraser_is_unreferenced_before_unload(tmp_path, patched):
 
     import redact.llms.backends.vllm as vllm_module
     from redact.llms.model_config import MODEL_REGISTRY, VLLMConfig, register_model
-    from redact.llms.resources import residency
+    from redact import residency
 
     register_model("_para_second", backend_type="vllm", roles=["paraphraser"],
                    vllm=VLLMConfig(hf_model_id="org/second"))
@@ -277,7 +277,8 @@ def test_co_fitting_paraphrasers_load_with_planned_grants(tmp_path, patched):
     nothing is unloaded between them."""
     import redact.llms.backends.vllm as vllm_module
     from redact.llms.model_config import MODEL_REGISTRY, VLLMConfig, register_model
-    from redact.llms.resources import estimate, residency
+    from redact import residency
+    from redact.llms.resources import estimate
 
     register_model("_para_small", backend_type="vllm", roles=["paraphraser"],
                    vllm=VLLMConfig(hf_model_id="org/small", vram_gb=4.3))
@@ -317,7 +318,7 @@ def test_an_unload_between_paraphrasers_shuts_down_only_their_engine(
 
     import redact.llms.backends.vllm as vllm_module
     from redact.llms.model_config import MODEL_REGISTRY, VLLMConfig, register_model
-    from redact.llms.resources import residency
+    from redact import residency
 
     shutdowns, engines = [], {}
 

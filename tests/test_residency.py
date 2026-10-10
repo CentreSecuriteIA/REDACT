@@ -24,9 +24,10 @@ from redact.llms.model_config import (
     VLLMConfig,
     register_model,
 )
-from redact.llms.resources import estimate, measure, residency
-from redact.llms.resources.residency.footprint import _engine_id
-from redact.llms.resources.residency.placement import _Cards, _exceeds_its_cards
+from redact import residency
+from redact.llms.resources import estimate, measure
+from redact.residency.footprint import _engine_id
+from redact.residency.placement import _Cards, _exceeds_its_cards
 
 GIB = 1024 ** 3
 #: Fixture card size and the TP factor the suggestions land on.

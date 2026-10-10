@@ -167,10 +167,10 @@ def _plan_and_preload(
     not fit, a failed preload and a planning error are only logged.
 
     Returns:
-        The :class:`~redact.llms.resources.residency.ResidencyPlan`, or
+        The :class:`~redact.residency.ResidencyPlan`, or
         ``None`` when the stages call no model or planning failed.
     """
-    from .llms.resources import residency
+    from . import residency
 
     try:
         wanted = _stage_models(models, stages, augmentations or {})

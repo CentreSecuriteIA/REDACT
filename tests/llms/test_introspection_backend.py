@@ -456,7 +456,7 @@ class TestEagerAttention:
 
         import redact.llms.backends.introspection as intro_module
         from redact.llms.backends import TransformersIntrospectionBackend
-        from redact.llms.resources.residency.footprint import _engine_id
+        from redact.residency.footprint import _engine_id
 
         monkeypatch.setitem(sys.modules, "torch", types.SimpleNamespace())
         loads = []
