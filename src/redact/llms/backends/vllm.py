@@ -35,7 +35,7 @@ _DEFAULT_TEMPERATURE = 0.7
 _engines: dict[tuple, object] = {}
 # Held during a load, so two threads cannot load one checkpoint twice.
 _engines_lock = threading.Lock()
-# Load time of each engine. Engine lifetime is timed per checkpoint, not per
+# When each engine's load started. Lifetime is timed per checkpoint, not per
 # backend instance: the GPU is held for as long as the engine exists.
 _engine_loaded_at: dict[tuple, float] = {}
 # gpu_memory_utilization per engine key, set by the residency plan. Applied
@@ -110,7 +110,9 @@ def _engine(hf_model_id: str, quantization: str | None, vllm_kwargs: dict):
         # Not measured: vLLM preallocates its memory grant in a separate
         # process, so a measurement would restate the setting.
         _engines[key] = LLM(model=hf_model_id, quantization=quantization, **kwargs)
-        _engine_loaded_at[key] = time.perf_counter()
+        # Held from the start of the load; set after it, so a failed load
+        # leaves no timer.
+        _engine_loaded_at[key] = started
         if not _exit_hook_registered:
             # After the first load, so it runs before every exit hook registered
             # until then (atexit runs them last-registered first): among them
@@ -127,7 +129,7 @@ def _engine(hf_model_id: str, quantization: str | None, vllm_kwargs: dict):
             "quantization": quantization,
             "tensor_parallel_size": kwargs.get("tensor_parallel_size", 1),
             "gpu_memory_utilization": kwargs.get("gpu_memory_utilization"),
-            "load_ms": round((_engine_loaded_at[key] - started) * 1000, 1),
+            "load_ms": round((time.perf_counter() - started) * 1000, 1),
         })
         return _engines[key]
 

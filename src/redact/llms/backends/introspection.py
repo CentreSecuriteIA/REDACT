@@ -48,7 +48,7 @@ _models: dict[tuple, tuple] = {}
 # checkpoint twice.
 _models_lock = threading.Lock()
 
-# Load time of each checkpoint. Lifetime is timed per checkpoint, not per
+# When each checkpoint's load started. Lifetime is timed per checkpoint, not per
 # backend instance, and reported as a "local" release event.
 _models_loaded_at: dict[tuple, float] = {}
 
@@ -130,7 +130,7 @@ def _load_locked(key, hf_model_id: str, device_map: str, torch_dtype: str, hf_kw
     # The load runs in this process with no preallocated pool, so the measured
     # figures describe the model itself. They are used for telemetry only.
     _models[key] = (tokenizer, model)
-    _models_loaded_at[key] = time.perf_counter()
+    _models_loaded_at[key] = started      # held from the start of the load
     observe.record({
         "ev": "local",
         "phase": "load",
@@ -138,7 +138,7 @@ def _load_locked(key, hf_model_id: str, device_map: str, torch_dtype: str, hf_kw
         "hf_model_id": hf_model_id,
         "device_map": device_map,
         "torch_dtype": torch_dtype,
-        "load_ms": round((_models_loaded_at[key] - started) * 1000, 1),
+        "load_ms": round((time.perf_counter() - started) * 1000, 1),
         "claimed_gib": measured.claimed_gib,
         "weights_gib": measured.weights_gib,
     })

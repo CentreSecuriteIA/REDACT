@@ -1280,6 +1280,49 @@ class TestRelease:
             assert telemetry.summary()["local_s"] == {"org/sd": 60.0, "org/sk": 100.0}
             assert runtime.vllm.held_seconds() == {}
 
+    def test_held_time_starts_when_the_load_starts(self, runtime, registered):
+        """The card is rented through the load: held_s and load_ms share a start."""
+        registered("_rel_load", hf_model_id="org/load")
+        now = [100.0]
+        load = runtime.LLM.__init__
+
+        def slow_load(self, **kw):
+            now[0] = 160.0                      # the load takes 60 s
+            load(self, **kw)
+
+        runtime.LLM.__init__ = slow_load
+        with patch("time.perf_counter", lambda: now[0]):
+            self._backend("_rel_load")
+            now[0] = 200.0
+            residency.unload_local()
+        events = {e["phase"]: e for e in runtime.log.events if e.get("ev") == "local"}
+        assert events["load"]["load_ms"] == 60000.0
+        assert events["release"]["held_s"] == 100.0        # not 40
+
+    def test_a_transformers_load_is_held_from_its_start(self, runtime):
+        """Same for the in-process backend: a fake transformers, no torch."""
+        intro = runtime.intro
+        now = [100.0]
+
+        class _Auto:
+            @staticmethod
+            def from_pretrained(hf_model_id, **kw):
+                now[0] = 160.0                  # the load takes 60 s
+                return SimpleNamespace(eval=lambda: None)
+
+        fake = SimpleNamespace(AutoTokenizer=_Auto, AutoModelForCausalLM=_Auto,
+                               __version__="5.0.0")
+        with patch.dict("sys.modules", {"transformers": fake}), \
+             patch.object(measure, "_torch", return_value=None), \
+             patch("time.perf_counter", lambda: now[0]):
+            intro._load("org/tf-load", "auto", "auto", {})
+            now[0] = 200.0
+            intro.TransformersIntrospectionBackend.clear_cache()
+        events = {e["phase"]: e for e in runtime.log.events
+                  if e.get("backend") == "introspect"}
+        assert events["load"]["load_ms"] == 60000.0
+        assert events["release"]["held_s"] == 100.0
+
 
 class TestPlannedUtilization:
     """The plan's computed gpu_memory_utilization reaches ``vllm.LLM``."""
