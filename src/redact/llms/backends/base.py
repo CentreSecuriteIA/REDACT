@@ -269,6 +269,19 @@ class LLMBackend(ABC):
             event["finish_reason"] = finish_reason
         observe.record(event)
 
+    def _warn_cut(self, n_cut: int, n_items: int, max_tokens: int) -> None:
+        """Warn once per transport call about replies cut at the token limit.
+
+        A cut reply is returned as it is; each backend counts its own.
+        """
+        if n_cut:
+            logger.warning(
+                "%s: %d of %d replies were cut at the token limit (max_tokens=%d) "
+                "and are incomplete; raise max_tokens or the context length "
+                "(max_model_len), or ask for shorter replies.",
+                self.model, n_cut, n_items, max_tokens,
+            )
+
     def _resolve(
         self, max_tokens: int | None, temperature: float | None
     ) -> tuple[int, float | None]:

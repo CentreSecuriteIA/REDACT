@@ -168,6 +168,11 @@ class AnthropicBackend(LLMBackend):
             if not text:
                 logger.warning("%s returned an empty reply (stop_reason=%s).",
                                self.model, stop_reason)
+            # Two stop reasons cut a reply: the requested cap and the context window.
+            self._warn_cut(
+                int(stop_reason in ("max_tokens", "model_context_window_exceeded")),
+                1, max_tok,
+            )
             results.append(text)
         return results
 

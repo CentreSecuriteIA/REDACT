@@ -179,6 +179,7 @@ class OpenAIBackend(LLMBackend):
             if not content:
                 logger.warning("%s returned an empty reply (finish_reason=%s).",
                                self.model, finish_reason)
+            self._warn_cut(int(finish_reason == "length"), 1, max_tok)
             results.append(content)
         return results
 

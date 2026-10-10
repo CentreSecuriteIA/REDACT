@@ -198,3 +198,20 @@ class TestAnthropicEmptyReply:
             assert anthropic_backend.generate(self.HI) == ["ok"]
         assert caplog.records == []
         assert events[0]["finish_reason"] == "end_turn"
+
+
+class TestAnthropicCutReply:
+    """A reply cut at max_tokens or the context window is returned as it is,
+    with one warning."""
+
+    @pytest.mark.parametrize("stop_reason", ["max_tokens", "model_context_window_exceeded"])
+    def test_a_cut_reply_warns_once(self, anthropic_backend, caplog, stop_reason):
+        anthropic_backend._client.messages.create.return_value = MagicMock(
+            content=[MagicMock(text="partial")], stop_reason=stop_reason, usage=None)
+        with caplog.at_level(logging.WARNING, logger="redact.llms.backends"):
+            assert anthropic_backend.generate(
+                [[{"role": "user", "content": "hi"}]], max_tokens=50) == ["partial"]
+        assert [r.getMessage() for r in caplog.records] == [
+            "claude-opus-4-6: 1 of 1 replies were cut at the token limit "
+            "(max_tokens=50) and are incomplete; raise max_tokens or the context length (max_model_len), or ask for shorter replies."
+        ]

@@ -198,7 +198,7 @@ class TestOpenAIEmptyReply:
 
     @pytest.mark.parametrize("response, reason", [
         (_response(None, "content_filter"), "content_filter"),
-        (_response("", "length"), "length"),
+        (_response("", "stop"), "stop"),
         (MagicMock(choices=[], usage=None), None),
         (MagicMock(choices=None, usage=None), None),
     ], ids=["no-content", "empty-content", "no-choices", "choices-none"])
@@ -222,3 +222,24 @@ class TestOpenAIEmptyReply:
             assert openai_backend.generate(_HI) == ["ok"]
         assert caplog.records == []
         assert events[0]["finish_reason"] == "stop"
+
+
+class TestOpenAICutReply:
+    """A reply cut at max_tokens is returned as it is, with one warning."""
+
+    CUT = ("venice-uncensored: 1 of 1 replies were cut at the token limit "
+           "(max_tokens=50) and are incomplete; raise max_tokens or the context length (max_model_len), or ask for shorter replies.")
+
+    def test_a_cut_reply_warns_once(self, openai_backend, mock_openai_client, caplog):
+        mock_openai_client.chat.completions.create.return_value = _response("partial", "length")
+        with caplog.at_level(logging.WARNING, logger="redact.llms.backends"):
+            assert openai_backend.generate(_HI, max_tokens=50) == ["partial"]
+        assert [r.getMessage() for r in caplog.records] == [self.CUT]
+
+    def test_an_empty_cut_reply_warns_about_both(self, openai_backend, mock_openai_client, caplog):
+        mock_openai_client.chat.completions.create.return_value = _response("", "length")
+        with caplog.at_level(logging.WARNING, logger="redact.llms.backends"):
+            assert openai_backend.generate(_HI, max_tokens=50) == [""]
+        assert [r.getMessage() for r in caplog.records] == [
+            "venice-uncensored returned an empty reply (finish_reason=length).", self.CUT,
+        ]
