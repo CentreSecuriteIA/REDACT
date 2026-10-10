@@ -14,6 +14,7 @@ The recipe's ``params_file`` is used unless ``--params`` overrides it, and
 import argparse
 import json
 import logging
+import signal
 import sys
 
 from redact import run_pipeline, load_recipe
@@ -37,6 +38,10 @@ def main(argv=None) -> int:
     else:
         level = logging.INFO
     logging.basicConfig(level=level, format="%(message)s")
+
+    # kill <pid> then releases the models and exits, as Ctrl-C does. The default
+    # action would leave the engine process holding the card.
+    signal.signal(signal.SIGTERM, lambda signum, frame: sys.exit(128 + signum))
 
     recipe = load_recipe(args.recipe)
     if args.data_dir:
