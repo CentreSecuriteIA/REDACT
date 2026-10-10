@@ -25,6 +25,8 @@ from redact.llms.model_config import (
     register_model,
 )
 from redact.llms.resources import estimate, measure, residency
+from redact.llms.resources.residency.footprint import _engine_id
+from redact.llms.resources.residency.placement import _Cards, _exceeds_its_cards
 
 GIB = 1024 ** 3
 #: Fixture card size and the TP factor the suggestions land on.
@@ -930,7 +932,7 @@ def test_planner_engine_id_matches_the_vllm_cache_key():
 
     cfg = VLLMConfig(hf_model_id="org/m", quantization="awq", min_gpus=2,
                      vllm_kwargs={"max_model_len": 4096})
-    assert residency._engine_id(cfg, "vllm")[1:] == vllm_module._engine_key(
+    assert _engine_id(cfg, "vllm")[1:] == vllm_module._engine_key(
         cfg.hf_model_id, cfg.quantization, cfg.engine_kwargs)
 
 
@@ -1704,14 +1706,14 @@ class TestPlannerHoles:
         unknown = registered("_ph_zero_u", hf_model_id="org/phzu")
         for name in (m, unknown):
             fp = residency.footprint(name)
-            cards = residency._Cards(1, 48.0)
+            cards = _Cards(1, 48.0)
             cards.free[0] = 2.0                     # under the 4.8 kept back
             cards.shared[0].append(fp)
             fp.devices = (0,)
             cards.settle()
             assert fp.planned_utilization is None
             assert fp.reserved_gb == 0.0
-            assert residency._exceeds_its_cards(fp, 48.0, 1)
+            assert _exceeds_its_cards(fp, 48.0, 1)
             plan = residency.ResidencyPlan(groups=[[fp]], gpus_required=1,
                                            gpus_available=1, per_gpu_gb=48.0,
                                            oversized=[fp])

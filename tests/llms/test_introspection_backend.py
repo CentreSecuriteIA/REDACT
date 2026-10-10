@@ -456,7 +456,7 @@ class TestEagerAttention:
 
         import redact.llms.backends.introspection as intro_module
         from redact.llms.backends import TransformersIntrospectionBackend
-        from redact.llms.resources import residency
+        from redact.llms.resources.residency.footprint import _engine_id
 
         monkeypatch.setitem(sys.modules, "torch", types.SimpleNamespace())
         loads = []
@@ -466,6 +466,6 @@ class TestEagerAttention:
 
         backend = TransformersIntrospectionBackend.from_config(config)
 
-        assert backend._key == residency._engine_id(config.introspect, "introspect")[1:]
+        assert backend._key == _engine_id(config.introspect, "introspect")[1:]
         assert backend._key == intro_module._model_key(*loads[0])
         assert ("attn_implementation" in backend._key[-1]) is bool(capture)
