@@ -24,7 +24,10 @@ of the run, not a guarantee against running out of memory.
 #   - Confirm on a GPU that unload_local() returns a vLLM engine's memory.
 #   - Replicas of one model across cards for throughput.
 #   - Join or cancel the preload thread at exit.
-#   - Paraphrase: plan its check model and the engines already resident.
+#   - Paraphraser pool: teach plan_phases that a pool's models run one at a
+#     time, so the paraphrase stage needs no plan of its own. Its plan covers
+#     only the pool and ignores what other stages hold. Only matters with
+#     more than one paraphraser.
 #   - Free memory per card and CUDA_VISIBLE_DEVICES; mixed card sizes.
 #   - Bill local cost on the union of engine lifetimes.
 #   - A plan does not see engines already loaded, by this process or another.
