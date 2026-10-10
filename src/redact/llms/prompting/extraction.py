@@ -13,9 +13,8 @@ Also provides sample cleaning (:func:`clean_sample`).
 # the callers still treat as "the model returned nothing". To move into the
 # driver, together with the retry helpers:
 #   - Retry a rejected reply a bounded number of times before giving up.
-#   - Constitution inputs (content_moderation/generation.py): a rejected entry
-#     is acked as "no_samples" and never retried on resume. Leave it un-acked
-#     or record a separate status that resume does not skip.
+#     Done for constitution inputs (llm_pipeline.extracted); the call sites
+#     below still treat a rejected reply as an empty one.
 #   - Standalone inputs (standalone_generation.py): one rejected reply stops
 #     the whole category. Stop only on an empty reply or repeated failures.
 #   - Benign Q&A (jailbreak/manipulation/benign.py): a rejected half gets no

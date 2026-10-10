@@ -6,6 +6,9 @@ a completed ``(sample_description, entry_type, style)`` unit is acked to
 clears it. Fully offline (MockBackend).
 """
 
+import json
+import logging
+
 import pandas as pd
 
 from redact.content_moderation.generation import (
@@ -110,3 +113,34 @@ def test_resume_falls_back_to_csv_when_ledger_absent(tmp_path):
                                     style="long", verbose=False)
     assert r.total_entries_processed == 0
     assert pipe2.gen.backend.calls == []
+
+
+def _one_entry_pipeline(tmp_path, gen_replies):
+    gen = MockBackend(gen_replies)
+    pipe = InputPipeline(
+        gen=make_client(gen, "m"), check=make_client(MockBackend("Yes"), "m"),
+        dataset_dir=tmp_path,
+    )
+    return gen, pipe
+
+
+def test_a_rejected_reply_is_regenerated(tmp_path):
+    gen, pipe = _one_entry_pipeline(
+        tmp_path, ["sorry, nothing here", "1. alpha sample\n2. beta sample"])
+    r = pipe.run_from_constitution(
+        _const_df().iloc[:1], _PROMPT, samples_per_entry=2, verbose=False)
+    assert len(gen.calls) == 2
+    assert r.skipped_entries == 0 and r.total_entries_processed == 1
+
+
+def test_an_entry_rejected_every_time_is_acked_as_rejected(tmp_path, caplog):
+    gen, pipe = _one_entry_pipeline(tmp_path, "sorry, nothing here")
+    with caplog.at_level(logging.WARNING):
+        r = pipe.run_from_constitution(
+            _const_df().iloc[:1], _PROMPT, samples_per_entry=2, max_attempts=2,
+            verbose=False)
+    assert len(gen.calls) == 2 and r.skipped_entries == 1
+    ledger = _constitution_inputs_ledger(tmp_path)
+    ack = json.loads(ledger.path.read_text(encoding="utf-8").splitlines()[-1])
+    assert (ack["status"], ack["attempts"]) == ("rejected", 2)
+    assert "1 entries rejected after 2 attempt(s)" in caplog.text

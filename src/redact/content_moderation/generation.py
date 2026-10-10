@@ -59,6 +59,7 @@ from ..llms.client import ModelClient
 from ..llms.prompting import extract_and_clean
 from ..llms.prompting import build_messages, load_prompt
 from ..llm_pipeline import checked, drive_generators, is_accepted
+from ..llm_pipeline import extracted as extracted_unit
 from ..llms.router import assert_single_sample_per_call, batch_generate_samples
 from .checker import build_output_quality_checker, build_quality_checker
 from .results import CategoryResult, ConstitutionInputResult, SampleResult, TurnResult
@@ -235,6 +236,7 @@ class InputPipeline(_StandaloneGenerationMixin):
         batch_size: int = 32,
         fresh: bool = False,
         style: str = "",
+        max_attempts: int = 3,
     ) -> ConstitutionInputResult:
         """Run constitution-seeded input generation, batched across entries.
 
@@ -247,10 +249,11 @@ class InputPipeline(_StandaloneGenerationMixin):
         does per-sample feedback-driven regeneration, hand-rolled rather
         than built on a shared retry primitive).
 
-        Each batch of ``batch_size`` entries triggers exactly one
-        ``batch_generate`` call (one vLLM engine pass) followed by one
-        checker batch_generate. CSV append happens per batch, so a crash
-        mid-run loses at most ``batch_size`` entries' worth of work.
+        Each batch of ``batch_size`` entries triggers one generation batch
+        (one vLLM engine pass), a further one per round for the entries
+        whose reply was rejected, then one checker batch. CSV append
+        happens per batch, so a crash mid-run loses at most ``batch_size``
+        entries' worth of work.
 
         Args:
             constitution_df: DataFrame with columns ``source_category``,
@@ -270,6 +273,10 @@ class InputPipeline(_StandaloneGenerationMixin):
                 styles' saved rows/ledger entries are left alone).
             style: Template style under ``from_constitution/{style}`` — also
                 used as part of the ledger key and saved as a CSV column.
+            max_attempts: Generations per entry. A reply with the wrong
+                number of samples is rejected whole and regenerated; an
+                entry still rejected after the last attempt is acked as
+                ``rejected`` and skipped on resume.
 
         Returns:
             ConstitutionInputResult with generation statistics.
@@ -402,16 +409,15 @@ class InputPipeline(_StandaloneGenerationMixin):
             logger.info("Constitution-seeded generation: %d entries, batch_size=%d, "
                         "samples_per_entry=%d%s", total, batch_size, samples_per_entry, style_label)
 
+        rejected_entries = 0
         for batch_start in range(0, total, batch_size):
             batch = entries[batch_start : batch_start + batch_size]
             batch_idx = batch_start // batch_size + 1
 
-            # 1. Build per-entry generation messages
-            messages_list = []
-            entry_ids = []  # pre-call identity (composite of the ledger's own key
-                             # fields) — samples don't exist yet, so this entry is
-                             # the only thing capturable internals can be rooted at.
-            for _, entry in batch:
+            # 1. One generation unit per entry. A reply with any other number of
+            # samples is rejected whole and regenerated, up to max_attempts.
+            units = {}
+            for j, (_, entry) in enumerate(batch):
                 seed_kwargs = {
                     "Category": str(entry.get("source_category", "")),
                     "sample_description": str(entry.get("sample_description", "")),
@@ -420,39 +426,48 @@ class InputPipeline(_StandaloneGenerationMixin):
                     ),
                     "entry_type": str(entry.get("entry_type", "harmful")),
                 }
-                messages_list.append(
-                    self._build_generation_messages(
+                # Pre-call identity (the ledger's own key fields): the samples
+                # do not exist yet, so captured internals are rooted here.
+                eid = _hash_text(
+                    f"{seed_kwargs['sample_description']}:{seed_kwargs['entry_type']}:{style}"
+                )
+                units[j] = extracted_unit(
+                    self.gen,
+                    # seed_kwargs=...: a bare closure would see the last entry's.
+                    lambda seed_kwargs=seed_kwargs: self._build_generation_messages(
                         prompt_config,
                         samples_per_request=samples_per_entry,
                         prohibited=prohibited,
                         **seed_kwargs,
-                    )
+                    ),
+                    lambda raw: extract_and_clean(
+                        raw, style=self.extraction_style,
+                        expected_count=samples_per_entry,
+                    ),
+                    internals_id=(
+                        (f"{eid}/input_{style}" if style else f"{eid}/input")
+                        if capture_input else None
+                    ),
+                    max_attempts=max_attempts,
                 )
-                entry_ids.append(_hash_text(
-                    f"{seed_kwargs['sample_description']}:{seed_kwargs['entry_type']}:{style}"
-                ))
 
-            # 2. Single batched generation for the whole chunk (rate-limited,
-            #    capability-aware) — routed through the shared router entry
-            #    point, not a hand-rolled BatchCaller.
-            raw_outputs = batch_generate_samples(
-                self.gen, messages_list,
-                batch_size=len(messages_list) or 1,
+            # 2. Generation rounds: one batch for the chunk, then one per round
+            # for the entries whose reply was rejected.
+            results = drive_generators(
+                units,
+                finalize=lambda _key, value: value,
                 progress=f"gen batch {batch_idx}/{n_chunks}" if verbose else None,
-                internals_ids=(
-                    [f"{eid}/input_{style}" if style else f"{eid}/input" for eid in entry_ids]
-                    if capture_input else None
-                ),
             )
 
-            # 3. Extract per entry
+            # 3. Per entry: its samples, and whether every attempt was rejected.
             per_entry_extracted: list[list[str]] = []
-            for (_, entry), raw_output in zip(batch, raw_outputs):
-                # A reply with any other number of samples is rejected whole.
-                extracted = extract_and_clean(
-                    raw_output, style=self.extraction_style,
-                    expected_count=samples_per_entry,
-                )
+            per_entry_attempts: list[int] = []
+            per_entry_rejected: list[bool] = []
+            for j in range(len(batch)):
+                extracted, attempts = results[j]
+                per_entry_attempts.append(attempts)
+                per_entry_rejected.append(not extracted)
+                # Outside the unit: a duplicate is not a reason to regenerate.
                 if prohibited:
                     extracted = [s for s in extracted if s not in prohibited]
                 per_entry_extracted.append(extracted)
@@ -526,6 +541,8 @@ class InputPipeline(_StandaloneGenerationMixin):
 
                 if not extracted:
                     result.skipped_entries += 1
+                    rejected = per_entry_rejected[entry_idx]
+                    rejected_entries += rejected
                     # Ack it anyway: the entry produced no rows, so the CSV
                     # fallback can never cover it, and leaving it un-acked means
                     # re-generating (and re-paying for) it on every resume.
@@ -534,7 +551,8 @@ class InputPipeline(_StandaloneGenerationMixin):
                             "sample_description": sample_desc,
                             "entry_type": entry_type,
                             "style": style,
-                            "status": "no_samples",
+                            "status": "rejected" if rejected else "no_samples",
+                            "attempts": per_entry_attempts[entry_idx],
                         }])
                     if verbose:
                         logger.debug("-> no samples extracted")
@@ -600,6 +618,13 @@ class InputPipeline(_StandaloneGenerationMixin):
                 if verbose:
                     logger.debug("-> %d accepted, %d rejected", accepted_count, rejected_count)
 
+        if rejected_entries:
+            logger.warning(
+                "%d entries rejected after %d attempt(s) each. They are acked "
+                "and skipped on resume; run with fresh=True, or delete their "
+                "'rejected' lines from the ledger, to try them again.",
+                rejected_entries, max_attempts,
+            )
         if verbose:
             style_label = f" | style='{style}'" if style else ""
             logger.info("Constitution-seeded run complete%s: %d/%d accepted (%.0f%%)",

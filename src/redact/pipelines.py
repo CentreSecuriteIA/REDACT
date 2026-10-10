@@ -303,6 +303,7 @@ def generate_inputs(
     samples_per_entry: int = 3,
     entry_types: list[str] | None = None,
     batch_size: int = 32,
+    max_attempts: int = 3,
 ) -> pd.DataFrame:
     """Generate content moderation input samples (standalone or constitution-seeded).
 
@@ -354,6 +355,8 @@ def generate_inputs(
         entry_types: Filter constitution entries to these types
             (e.g. ``["harmful", "benign"]``). None = all.
         batch_size: Entries per LLM engine pass (constitution mode).
+        max_attempts: Generations per entry before a reply with the wrong
+            number of samples is given up on (constitution mode).
 
     Returns:
         Merged DataFrame of accepted samples.
@@ -403,6 +406,7 @@ def generate_inputs(
             batch_size=batch_size,
             fresh=not resume,
             style=style,
+            max_attempts=max_attempts,
         )
 
         result = merge_all(ds_dir, accepted_only=True)
