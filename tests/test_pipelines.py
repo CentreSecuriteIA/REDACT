@@ -290,3 +290,46 @@ class TestGenerateOutputsSampleId:
         for _, row in df.iterrows():
             assert row["sample_id"] == _hash_text(row["output_response"])
             assert row["sample_id"] != row["input_id"]
+
+
+class TestGenerateOutputsRetry:
+    """max_attempts: a rejected response is regenerated with the verdict."""
+
+    def _run(self, tmp_path, monkeypatch, gen_replies, check_replies, **kwargs):
+        import redact.pipelines as P
+        from redact import generate_outputs
+        from tests.conftest import MockBackend, make_client
+
+        gen, check = MockBackend(gen_replies), MockBackend(check_replies)
+        backends = {"gen-model": gen, "check-model": check}
+        monkeypatch.setattr(P.ModelClient, "create", lambda m: make_client(backends[m], m))
+        inputs = pd.DataFrame({
+            "sample": ["p one"], "category": ["Cyber"], "entry_type": ["harmful"],
+        })
+        df = generate_outputs(
+            data_dir=tmp_path, inputs=inputs, model="gen-model",
+            check_model="check-model", verbose=False, **kwargs,
+        )
+        return gen, df.iloc[0]
+
+    def test_a_rejected_response_is_regenerated_with_the_verdict(self, tmp_path, monkeypatch):
+        gen, row = self._run(tmp_path, monkeypatch, ["first answer", "second answer"],
+                             ["No: too vague", "Yes"], max_attempts=2)
+        assert len(gen.calls) == 2
+        assert "No: too vague" not in gen.calls[0]["messages"][-1]["content"]
+        assert "No: too vague" in gen.calls[1]["messages"][-1]["content"]
+        assert row["output_response"] == "second answer" and bool(row["accepted"])
+
+    def test_one_attempt_keeps_the_rejected_response(self, tmp_path, monkeypatch):
+        gen, row = self._run(tmp_path, monkeypatch, ["first answer"], ["No: too vague"])
+        assert len(gen.calls) == 1
+        assert not bool(row["accepted"])
+        assert row["rejection_reason"] == "No: too vague"
+
+    def test_every_attempt_rejected_keeps_the_last_one(self, tmp_path, monkeypatch):
+        gen, row = self._run(tmp_path, monkeypatch, ["first answer", "second answer"],
+                             ["No: one", "No: two"], max_attempts=2)
+        assert row["output_response"] == "second answer"
+        assert not bool(row["accepted"]) and row["rejection_reason"] == "No: two"
+        # The feedback is not stacked: the second prompt carries one verdict.
+        assert gen.calls[1]["messages"][-1]["content"].count("[FEEDBACK") == 1

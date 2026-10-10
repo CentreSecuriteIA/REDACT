@@ -58,7 +58,7 @@ from ..dataset.merge import merge_all
 from ..llms.client import ModelClient
 from ..llms.prompting import extract_and_clean
 from ..llms.prompting import build_messages, load_prompt
-from ..llm_pipeline import is_accepted
+from ..llm_pipeline import checked, drive_generators, is_accepted
 from ..llms.router import assert_single_sample_per_call, batch_generate_samples
 from .checker import build_output_quality_checker, build_quality_checker
 from .results import CategoryResult, ConstitutionInputResult, SampleResult, TurnResult
@@ -83,6 +83,25 @@ logger = logging.getLogger(__name__)
 _PROHIBITED_PREVIEW_LIMIT = 20
 # Truncation length for the sample_description preview in verbose progress lines.
 _DESC_PREVIEW_LEN = 60
+
+
+def _append_feedback(messages: list[dict], feedback: str) -> list[dict]:
+    """``messages`` with rejection feedback appended to the last user turn.
+
+    Returns a new list; ``messages`` itself for an empty ``feedback``.
+    """
+    if not feedback:
+        return messages
+    feedback_msg = (
+        "\n\n[FEEDBACK FROM PREVIOUS ATTEMPT]\n"
+        "Some previously generated samples were rejected for these "
+        f"reasons:\n{feedback}\n"
+        "Please avoid similar issues in your new samples."
+    )
+    if messages and messages[-1]["role"] == "user":
+        last = {**messages[-1], "content": messages[-1]["content"] + feedback_msg}
+        return [*messages[:-1], last]
+    return [*messages, {"role": "user", "content": feedback_msg}]
 
 
 def _constitution_inputs_ledger(dataset_dir: str | Path) -> Ledger:
@@ -199,20 +218,7 @@ class InputPipeline(_StandaloneGenerationMixin):
             else:
                 messages.append({"role": "user", "content": prohibited_msg})
 
-        # Append rejection feedback from prior turn
-        if feedback:
-            feedback_msg = (
-                "\n\n[FEEDBACK FROM PREVIOUS ATTEMPT]\n"
-                "Some previously generated samples were rejected for these "
-                f"reasons:\n{feedback}\n"
-                "Please avoid similar issues in your new samples."
-            )
-            if messages and messages[-1]["role"] == "user":
-                messages[-1]["content"] += feedback_msg
-            else:
-                messages.append({"role": "user", "content": feedback_msg})
-
-        return messages
+        return _append_feedback(messages, feedback)
 
     # ------------------------------------------------------------------
     # Constitution-seeded mode
@@ -635,21 +641,18 @@ def run_output_generation(
     prompt_dir: str | Path | None = None,
     resume: bool = True,
     verbose: bool = True,
+    max_attempts: int = 1,
 ) -> pd.DataFrame:
     """Generate model responses for input samples, batched and quality-checked.
 
     Pipeline per ``batch_size`` chunk:
-      1. Build all messages upfront.
-      2. ``batch_generate_samples(...)`` — single vLLM engine pass (or
-         thread-pool / sequential per backend capability). One rate-limit
-         slot per batch.
-      3. Each (input, output) pair checked with its own row's entry-type-aware
-         output checker (``build_output_quality_checker`` keyed by category/
-         entry_type — not ``batch_check_samples``, since a chunk can mix
-         several checkers) via another ``batch_generate_samples`` pass.
-         Refusals on harmful inputs are rejected; refusals on benign inputs
-         are evaluated normally.
-      4. Incremental append to the output CSV per batch — crash-resilient.
+      1. One generate-check unit per row (``llm_pipeline.checked``), with the
+         row's own entry-type-aware output checker. Refusals on harmful
+         inputs are rejected; refusals on benign inputs are evaluated normally.
+      2. ``drive_generators`` runs the units round by round: one generation
+         batch, then one check batch. With ``max_attempts > 1`` rejected rows
+         go round again, regenerated with the checker's verdict as feedback.
+      3. Incremental append to the output CSV per batch — crash-resilient.
 
     Resume: each input gets a stable content-hash id (its ``id``/``sample_id``
     column when present, else ``_hash_text(prompt)``). Completed ids are
@@ -671,6 +674,9 @@ def run_output_generation(
         resume: When True (default), skip inputs already recorded in the sidecar
             state ledger. When False, clear the output CSV and ledger first.
         verbose: Print per-batch progress.
+        max_attempts: Generations per input. With more than 1, a rejected
+            response is regenerated with the checker's verdict as feedback
+            and the row holds the last attempt.
 
     Returns:
         DataFrame of all rows in the output CSV (the full dataset, including
@@ -752,6 +758,7 @@ def run_output_generation(
             out_path, mode="a", header=not out_path.exists(), index=False
         )
 
+    use_checker = check_outputs and check is not None
     all_rows: list[dict] = []
     n_chunks = ceil(len(inputs) / batch_size) if batch_size else 1
 
@@ -759,24 +766,34 @@ def run_output_generation(
         chunk = inputs.iloc[batch_start : batch_start + batch_size]
         chunk_idx = batch_start // batch_size + 1
 
-        # 1. Build all messages for this chunk
-        messages_list = []
+        # 1. One generate-check unit per row.
         chunk_rows = []
-        for _, row in chunk.iterrows():
+        units = {}
+        for i, (_, row) in enumerate(chunk.iterrows()):
             input_text = row[text_col]
             category = str(row.get("category", "unknown"))
             entry_type = str(row.get("entry_type", "harmful"))
             subcategory = str(row.get("subcategory", ""))
+            input_id = str(row["_state_id"])
 
-            messages_list.append(
-                build_messages(
-                    prompt_config,
-                    input_prompt=input_text,
-                    Category=category,
-                )
+            base = build_messages(
+                prompt_config, input_prompt=input_text, Category=category
+            )
+            units[i] = checked(
+                client,
+                # base=base: a bare closure would see the last row's messages.
+                lambda feedback, base=base: _append_feedback(base, feedback),
+                check if use_checker else None,
+                _checker_for(category, entry_type) if use_checker else None,
+                original=input_text,
+                internals_ids=(
+                    f"{input_id}/output" if capture_internals_gen else None,
+                    f"{input_id}/val_out" if capture_internals_check else None,
+                ),
+                max_attempts=max_attempts,
             )
             chunk_rows.append({
-                "input_id": str(row["_state_id"]),
+                "input_id": input_id,
                 "input_prompt": input_text,
                 "category": category,
                 "subcategory": subcategory,
@@ -785,47 +802,18 @@ def run_output_generation(
                 "source": str(row.get("source", "")),
             })
 
-        # 2. Single batched generation
-        responses = batch_generate_samples(
-            client, messages_list,
-            batch_size=len(messages_list) or 1,
-            progress=f"gen chunk {chunk_idx}/{n_chunks}" if verbose else None,
-            internals_ids=(
-                [f'{r["input_id"]}/output' for r in chunk_rows]
-                if capture_internals_gen else None
-            ),
+        # 2. Generation and check rounds, one batch per model per round.
+        results = drive_generators(
+            units,
+            finalize=lambda _key, value: value,
+            progress=f"outputs chunk {chunk_idx}/{n_chunks}" if verbose else None,
         )
 
-        # 3. Batched output checking (per-row checker, flat batch). Not
-        # batch_check_samples: each row's checker is keyed by its own
-        # (category, entry_type), so there's no single build_check_messages
-        # for the whole chunk — messages are built per-row below instead.
-        if check_outputs and check is not None:
-            check_msgs_list: list[list[dict]] = []
-            for r, resp in zip(chunk_rows, responses):
-                check_msgs_list.append(
-                    _checker_for(r["category"], r["entry_type"])(r["input_prompt"], resp)
-                )
-            check_responses = batch_generate_samples(
-                check, check_msgs_list,
-                batch_size=len(check_msgs_list) or 1,
-                progress=f"check chunk {chunk_idx}/{n_chunks}" if verbose else None,
-                internals_ids=(
-                    [f'{r["input_id"]}/val_out' for r in chunk_rows]
-                    if capture_internals_check else None
-                ),
-            )
-            check_results = []
-            for cr in check_responses:
-                accepted = is_accepted(cr)
-                check_results.append((accepted, "" if accepted else cr))
-        else:
-            check_results = [(True, "")] * len(chunk_rows)
-
-        # 4. Assemble + incremental append. sample_id is this row's own content-hash
+        # 3. Assemble + incremental append. sample_id is this row's own content-hash
         # identity (distinct from input_id, which points back to the origin sample) —
         # only knowable once the response text exists.
-        for r, resp, (accepted, reasoning) in zip(chunk_rows, responses, check_results):
+        for i, r in enumerate(chunk_rows):
+            resp, accepted, reasoning = results[i]
             r["sample_id"] = _hash_text(resp)
             r["output_response"] = resp
             r["accepted"] = accepted

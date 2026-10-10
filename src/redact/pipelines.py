@@ -504,20 +504,17 @@ def generate_outputs(
     prompt_dir: str | Path | None = None,
     resume: bool = True,
     verbose: bool = True,
+    max_attempts: int = 1,
 ) -> pd.DataFrame:
     """Generate model responses for input samples, batched and quality-checked.
 
     Pipeline per ``batch_size`` chunk:
-      1. Build all messages upfront.
-      2. ``batch_generate_samples(...)`` — single vLLM engine pass (or
-         thread-pool / sequential per backend capability). One rate-limit
-         slot per batch.
-      3. Each (input, output) pair checked with its own row's entry-type-aware
-         output checker via another ``batch_generate_samples`` pass (not
-         ``batch_check_samples`` — a chunk can mix several categories/entry
-         types, each with its own checker). Refusals on harmful inputs are
-         rejected; refusals on benign inputs are evaluated normally.
-      4. Incremental append to the output CSV per batch — crash-resilient.
+      1. One generation batch for the chunk.
+      2. One check batch, each row with its own entry-type-aware output
+         checker. Refusals on harmful inputs are rejected; refusals on benign
+         inputs are evaluated normally. With ``max_attempts > 1`` rejected
+         rows are regenerated with the checker's verdict as feedback.
+      3. Incremental append to the output CSV per batch — crash-resilient.
 
     Resume: each input gets a stable content-hash id (its ``id`` column when
     present, else ``_hash_text(prompt)``). Completed ids are recorded in a
@@ -553,6 +550,8 @@ def generate_outputs(
         resume: When True (default), skip inputs already recorded in the sidecar
             state ledger. When False, clear the output CSV and ledger first.
         verbose: Print per-batch progress.
+        max_attempts: Generations per input; more than 1 retries a rejected
+            response with the checker's verdict as feedback.
 
     Returns:
         DataFrame of all rows in the output CSV (the full dataset, including
@@ -593,7 +592,7 @@ def generate_outputs(
         inputs=inputs, client=client,
         check_outputs=check_outputs, check=check_client,
         batch_size=batch_size, out_path=out_path, prompt_dir=prompt_dir,
-        resume=resume, verbose=verbose,
+        resume=resume, verbose=verbose, max_attempts=max_attempts,
     )
 
 
