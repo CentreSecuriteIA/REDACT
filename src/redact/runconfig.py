@@ -441,9 +441,11 @@ def run_pipeline(
         try:
             if phases:
                 from . import residency
+                from .llms.backends import vllm
 
                 warm.clear()        # emptied first: the preloader skips the rest
                 residency.unload_local()
+                vllm.set_planned_utilization({})      # the shares were this run's
             # Roll up tokens, engine time and cost. Also logged at INFO, so
             # run.py's existing --quiet/--debug control whether it is shown.
             summary["telemetry"] = telemetry.summary()

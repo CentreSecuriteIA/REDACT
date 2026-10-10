@@ -43,6 +43,15 @@ def _api_keys(monkeypatch):
             monkeypatch.setenv(config.api.api_key_env, "test-key")
 
 
+@pytest.fixture(autouse=True)
+def _no_planned_shares():
+    """A planned share belongs to one run: a test's plan must not reach the next."""
+    yield
+    from redact.llms.backends import vllm
+
+    vllm.set_planned_utilization({})
+
+
 # ---------------------------------------------------------------------------
 # Mock LLM backend
 # ---------------------------------------------------------------------------
