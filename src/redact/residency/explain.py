@@ -180,12 +180,15 @@ def _tensor_parallel_suggestion(
     )
 
 
-def report(plan: "ResidencyPlan", verbose: bool = True) -> None:
+def report(
+    plan: "ResidencyPlan", verbose: bool = True, stages: list[str] | None = None,
+) -> None:
     """Log the plan and emit it as a telemetry event.
 
     A plan that does not fit is logged at ERROR, one with warnings at
-    WARNING. Neither raises.
+    WARNING. Neither raises. ``stages`` names the stages the plan is for.
     """
+    label = f"stages {', '.join(stages)}: " if stages else ""
     if verbose:
         if not plan.fits:
             log = logger.error
@@ -193,5 +196,8 @@ def report(plan: "ResidencyPlan", verbose: bool = True) -> None:
             log = logger.warning
         else:
             log = logger.info
-        log("[residency] %s", plan.explain())
-    observe.record({"ev": "residency", **plan.as_dict()})
+        log("[residency] %s%s", label, plan.explain())
+    event = {"ev": "residency", **plan.as_dict()}
+    if stages:
+        event["stages"] = list(stages)
+    observe.record(event)
