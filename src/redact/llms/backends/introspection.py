@@ -511,13 +511,15 @@ class TransformersIntrospectionBackend(LLMBackend):
                 )
                 raise
 
+            out_tok = int(outputs.sequences[0].shape[0]) - prompt_len
             # One telemetry event per forward pass.
             self._record_call(
-                n_items=1, started=started,
-                in_tok=prompt_len,
-                out_tok=int(outputs.sequences[0].shape[0]) - prompt_len,
+                n_items=1, started=started, in_tok=prompt_len, out_tok=out_tok,
                 max_tokens=max_tok, temperature=temp,
             )
+            # No stop reason from transformers: a reply that fills
+            # max_new_tokens was cut (or ended on EOS exactly there).
+            self._warn_cut(int(out_tok >= max_tok), 1, max_tok)
 
             text = tokenizer.decode(
                 outputs.sequences[0][prompt_len:], skip_special_tokens=True,

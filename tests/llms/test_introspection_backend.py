@@ -394,6 +394,22 @@ class TestGenerate:
         with pytest.raises(RuntimeError, match="was released"):
             b.generate(_MSG)
 
+    def test_a_reply_that_fills_max_tokens_warns(self, tmp_path, caplog):
+        # _FakeModel returns 5 ids over a 3-token prompt: 2 generated tokens.
+        b = _generate_backend(tmp_path)
+        with caplog.at_level(logging.WARNING, logger="redact.llms.backends"):
+            assert b.generate(_MSG, max_tokens=2) == ["reply"]
+        assert [r.getMessage() for r in caplog.records] == [
+            "test-model: 1 of 1 replies were cut at the token limit (max_tokens=2) and "
+            "are incomplete; raise max_tokens or the context length (max_model_len), or ask for shorter replies."
+        ]
+
+    def test_a_reply_under_max_tokens_does_not_warn(self, tmp_path, caplog):
+        b = _generate_backend(tmp_path)
+        with caplog.at_level(logging.WARNING, logger="redact.llms.backends"):
+            assert b.generate(_MSG, max_tokens=3) == ["reply"]
+        assert caplog.records == []
+
 
 def _introspect(**kwargs):
     return IntrospectConfig(hf_model_id="org/model", log_dir="/tmp/x", **kwargs)
