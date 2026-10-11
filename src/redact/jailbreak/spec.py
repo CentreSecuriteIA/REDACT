@@ -34,9 +34,15 @@ def tag_all_functions(funcs: list[Callable]) -> None:
         fn.layer             str         — "hacking" | "manipulation" | "obfuscation" | "requests"
         fn.within_layer_order int        — sort key within the obfuscation layer (0 = N/A)
         fn.encode_weight     str | None  — "light" | "heavy" | None (encode family only)
+        fn.max_tokens        int | None  — reply limit of its LLM calls (None = default)
 
     Functions not found in the spec are skipped silently (no attributes set).
     Call once at jailbreak package import time.
+
+    Raises:
+        ValueError: A technique's ``max_tokens`` is not a whole number of at
+            least 1. Checked here, so a bad spec fails at import instead of
+            as an error row per sample.
     """
     spec = load_spec()
     families_spec = spec["families"]
@@ -62,6 +68,14 @@ def tag_all_functions(funcs: list[Callable]) -> None:
         # strictly no-LLM (pure_only) run.
         fn.requires_benign = t.get("requires_benign", False)
         fn.encode_weight = t.get("encode_weight", None)
+        # Reply limit for the technique's LLM calls; None keeps the model's
+        # default. chain._run_chain puts it on each request.
+        limit = t.get("max_tokens")
+        if limit is not None and (not isinstance(limit, int) or limit < 1):
+            raise ValueError(
+                f"Technique {name!r}: max_tokens must be a whole number of at "
+                f"least 1, got {limit!r}.")
+        fn.max_tokens = limit
 
         # Derive layer and within_layer_order from the first family
         primary_family = fn.families[0] if fn.families else None

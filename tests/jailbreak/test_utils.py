@@ -2,6 +2,8 @@
 
 import random
 
+import pytest
+
 from redact.jailbreak.chain import order_by_hierarchy
 from redact.jailbreak.protocol import LLMRequest
 from redact.jailbreak.utils import (
@@ -179,6 +181,34 @@ class TestCombineTechniquesEarlyExit:
         result, info = combined("start")
         assert result == "start_modified"  # state before tech2 ran
         assert info.startswith("DISCARDED")
+
+
+class TestTagMaxTokens:
+    @staticmethod
+    def _spec(**techniques):
+        return {"families": {"f": {"layer": "obfuscation"}},
+                "techniques": {n: {"families": ["f"], **t} for n, t in techniques.items()}}
+
+    def test_spec_max_tokens_is_tagged_and_absent_means_none(self, monkeypatch):
+        import redact.jailbreak.spec as spec_module
+
+        monkeypatch.setattr(spec_module, "load_spec",
+                            lambda: self._spec(capped={"max_tokens": 64}, plain={}))
+
+        def capped(text): return text, ""
+        def plain(text): return text, ""
+        spec_module.tag_all_functions([capped, plain])
+        assert (capped.max_tokens, plain.max_tokens) == (64, None)
+
+    @pytest.mark.parametrize("bad", [0, -5, "64", 2.5], ids=["zero", "negative", "str", "float"])
+    def test_a_bad_spec_limit_fails_at_tagging(self, monkeypatch, bad):
+        import redact.jailbreak.spec as spec_module
+
+        monkeypatch.setattr(spec_module, "load_spec", lambda: self._spec(capped={"max_tokens": bad}))
+
+        def capped(text): return text, ""
+        with pytest.raises(ValueError, match="'capped': max_tokens"):
+            spec_module.tag_all_functions([capped])
 
 
 class TestApplyCombination:

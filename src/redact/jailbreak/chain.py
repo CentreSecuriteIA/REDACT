@@ -92,6 +92,25 @@ def _tag_yields(gen: TechniqueGen, root: str) -> TechniqueGen:
             return stop.value
 
 
+def _cap_yields(gen: TechniqueGen, max_tokens: int) -> TechniqueGen:
+    """Put a reply limit on every request one technique's generator yields.
+
+    A request that already carries its own limit keeps it.
+    """
+    try:
+        request = gen.send(None)
+    except StopIteration as stop:
+        return stop.value
+    while True:
+        if request.max_tokens is None:
+            request = dataclasses.replace(request, max_tokens=max_tokens)
+        reply = yield request
+        try:
+            request = gen.send(reply)
+        except StopIteration as stop:
+            return stop.value
+
+
 def _run_chain(techniques: list[Callable], text: str, internals_root: str | None = None, **kwargs) -> TechniqueGen:
     """Generator that chains techniques, threading text through.
 
@@ -99,9 +118,11 @@ def _run_chain(techniques: list[Callable], text: str, internals_root: str | None
     generators are delegated to via ``yield from`` so their :class:`LLMRequest`
     yields propagate up to the batched engine (or to ``run_sync`` for the
     single-sample path) — tagged with ``internals_id`` (see :func:`_tag_yields`)
-    when ``internals_root`` is given. Early-exits with a ``DISCARDED`` info
-    string the moment any step rejects, returning the pre-failure text.
-    Returns ``(text, info)``.
+    when ``internals_root`` is given. A technique tagged with ``max_tokens``
+    (from combination_spec.json via ``spec.tag_all_functions``) has that limit
+    put on each of its requests (see :func:`_cap_yields`). Early-exits with a
+    ``DISCARDED`` info string the moment any step rejects, returning the
+    pre-failure text. Returns ``(text, info)``.
     """
     # gen-model techniques tag their requests with `gen_model`; accept the
     # legacy `model` kwarg as the source when gen_model isn't given explicitly.
@@ -114,6 +135,9 @@ def _run_chain(techniques: list[Callable], text: str, internals_root: str | None
         tech_kwargs = _select_kwargs(technique, kwargs)
         if inspect.isgeneratorfunction(technique):
             tech_gen = technique(result, **tech_kwargs)
+            limit = getattr(technique, "max_tokens", None)
+            if limit is not None:
+                tech_gen = _cap_yields(tech_gen, limit)
             if internals_root:
                 tech_gen = _tag_yields(tech_gen, f"{internals_root}/{technique.__name__}")
             output = yield from tech_gen

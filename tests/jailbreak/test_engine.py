@@ -26,12 +26,14 @@ class FakeRouter:
         self.calls = []  # list of (model, batch_size)
         self.progress_labels = []  # progress= kwarg seen per call (None if absent)
         self.internals_ids_seen = []  # internals_ids kwarg per call (None if absent)
+        self.limits = []  # max_tokens kwarg per call (None if absent)
         self.check_reply = check_reply
 
     def batch_generate(self, model, messages_list, **kwargs):
         self.calls.append((model, len(messages_list)))
         self.progress_labels.append(kwargs.get("progress"))
         self.internals_ids_seen.append(kwargs.get("internals_ids"))
+        self.limits.append(kwargs.get("max_tokens"))
         out = []
         for msgs in messages_list:
             system = msgs[0]["content"].lower()
@@ -161,6 +163,32 @@ class TestBatchApplyCombinations:
         assert results[0]["accepted"] is False
         assert "DISCARDED" in results[0]["reasoning"]
         assert "Swahili" in results[0]["reasoning"]
+
+    def test_a_technique_tagged_with_max_tokens_caps_its_requests(self):
+        def capped(text, *, gen_model=None, **kwargs):
+            reply = yield LLMRequest(gen_model, [{"role": "user", "content": "step1 " + text}])
+            return reply, "capped"
+        capped.max_tokens = 40
+
+        router = FakeRouter()
+        batch_apply_combinations([_sample(0, "a", capped), _sample(1, "b", two_step)],
+                                 gen_model=GEN_MODEL, resolve=as_resolver(router))
+        # Round 1: the capped request and the uncapped one are two calls.
+        assert sorted(router.limits, key=str) == [40, None, None]
+        assert len(router.calls) == 3
+
+    def test_a_requests_own_limit_wins_over_the_techniques(self):
+        def own(text, *, gen_model=None, **kwargs):
+            a = yield LLMRequest(gen_model, [{"role": "user", "content": "step1 " + text}],
+                                 max_tokens=5)                    # its own limit: kept
+            b = yield LLMRequest(gen_model, [{"role": "user", "content": "step2 " + a}])
+            return b, "own"                                       # none: the technique's
+        own.max_tokens = 40
+
+        router = FakeRouter()
+        batch_apply_combinations([_sample(0, "a", own)], gen_model=GEN_MODEL,
+                                 resolve=as_resolver(router))
+        assert router.limits == [5, 40]
 
     def test_verbose_passes_round_progress_labels(self):
         # The engine delegates printing to the router/BatchCaller; its job is to
