@@ -487,6 +487,23 @@ class TestVLLMAgenerate:
         assert engine.sent["hi"].request_id in str(raised.value)
         assert [event["error"] for event in events] == [f"RuntimeError: {raised.value}"]
 
+    def test_a_request_the_engine_aborted_fails_with_no_reply(self, monkeypatch, events):
+        """An engine released with a request in flight ends it with the text it
+        had so far. Part of a reply must never pass as the reply."""
+        backend, engine = _vllm_backend(
+            monkeypatch, {"hi": _reply("partial", finish_reason="abort")})
+        with pytest.raises(RuntimeError) as raised:
+            aio.run(backend.agenerate(_ask("hi")))
+        assert str(raised.value) == (
+            f"The vLLM engine of 'm' aborted request {engine.sent['hi'].request_id}: "
+            "the engine was released or shut down while the request was in flight.")
+        (event,) = events
+        del event["ms"]
+        assert event == {
+            "ev": "call", "stage": None, "model": "m", "backend": "vllm", "n_items": 1,
+            "in_tok": None, "out_tok": None, "out_tok_max": None, "max_tokens": 8,
+            "temperature": 0.7, "error": f"RuntimeError: {raised.value}"}
+
     def test_internals_id_is_ignored(self, monkeypatch):
         backend, engine = _vllm_backend(monkeypatch, {"hi": _reply("ok")})
         assert aio.run(backend.agenerate(_ask("hi"), internals_id="root/0")) == "ok"
@@ -560,6 +577,14 @@ class TestVLLMGenerateBatch:
         script.wait_until("cancel", "b")
         assert script.log[:2] == [("start", "a"), ("start", "b")]
         assert sorted(script.log[2:]) == [("cancel", "a"), ("cancel", "b")]
+
+    def test_a_request_the_engine_aborted_fails_the_batch(self, monkeypatch, events):
+        backend, _ = _vllm_backend(monkeypatch, {
+            "a": _reply("A"), "b": _reply("partial", finish_reason="abort")})
+        with pytest.raises(RuntimeError, match="'m' aborted request"):
+            backend.generate([_ask("a"), _ask("b")])
+        assert [(event.get("finish_reason"), "error" in event) for event in events] == [
+            ("stop", False), (None, True)]
 
     def test_an_empty_batch_returns_without_the_loop(self, monkeypatch):
         import redact.llms.backends.vllm as vllm_module

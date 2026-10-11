@@ -434,7 +434,8 @@ class VLLMBackend(LLMBackend):
             ``max_tokens`` and ``max_model_len``.
 
         Raises:
-            RuntimeError: The engine was released, or sent no output.
+            RuntimeError: The engine was released, sent no output, or
+                aborted the request and sent only part of a reply.
         """
         from vllm import SamplingParams
         from vllm.sampling_params import RequestOutputKind
@@ -470,6 +471,14 @@ class VLLMBackend(LLMBackend):
                 raise RuntimeError(
                     f"The vLLM engine of {self.model!r} sent no output for "
                     f"request {request_id}."
+                )
+            # An engine released with the request in flight does not raise:
+            # it ends the request with the text it had so far.
+            if final.outputs[0].finish_reason == "abort":
+                raise RuntimeError(
+                    f"The vLLM engine of {self.model!r} aborted request "
+                    f"{request_id}: the engine was released or shut down "
+                    f"while the request was in flight."
                 )
         except Exception as exc:
             self._record_call(
