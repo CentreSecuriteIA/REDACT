@@ -2,6 +2,7 @@
 
 import json
 import os
+import re
 from unittest.mock import MagicMock, patch
 
 import pandas as pd
@@ -12,6 +13,7 @@ from redact.pipelines import (
     _get_client,
     create_taxonomy,
 )
+from tests.conftest import MockBackend
 
 
 class TestCreateTaxonomy:
@@ -351,3 +353,175 @@ class TestGenerateOutputsRetry:
         generate_outputs(data_dir=tmp_path, inputs=inputs, model="gen-model",
                          check_model="check-model", batch_size=3, verbose=False)
         assert (gen.generate_call_count, check.generate_call_count) == (1, 1)
+
+
+class _TokenBackend(MockBackend):
+    """Native-batching fake: ``reply(token, text)`` answers each request, where
+    ``token`` is the ``zqN`` in its prompt and ``text`` all its content.
+
+    Replies depend only on the request, never on call order, so rows can be
+    compared across runs whose units finish in different orders. ``batches``
+    holds one list per ``generate()`` call: the token of each request, with
+    ``*`` for a request carrying the checker's feedback.
+    """
+
+    def __init__(self, reply, model):
+        super().__init__(model=model)
+        self._reply = reply
+        self.batches: list[list[str]] = []
+
+    @property
+    def compute_config(self) -> ComputeConfig:
+        return ComputeConfig(supports_native_batching=True)
+
+    def generate(self, messages_list, **kwargs):
+        super().generate(messages_list, **kwargs)
+        batch, replies = [], []
+        for messages in messages_list:
+            text = " ".join(m["content"] for m in messages)
+            token = re.search(r"zq\d+", text).group()
+            batch.append(token + "*" * ("[FEEDBACK" in text))
+            replies.append(self._reply(token, text))
+        self.batches.append(batch)
+        return replies
+
+
+class TestGenerateOutputsPool:
+    """Outputs run through drive_units: full calls, rows as units finish."""
+
+    def _clients(self, monkeypatch, gen, check):
+        import redact.pipelines as P
+        from tests.conftest import make_client
+
+        backends = {"gen-model": gen, "check-model": check}
+        monkeypatch.setattr(P.ModelClient, "create", lambda m: make_client(backends[m], m))
+
+    def test_a_run_without_retries_writes_the_same_rows(self, tmp_path, monkeypatch):
+        from redact import generate_outputs, paths
+        from redact.dataset.io import _hash_text
+
+        gen = _TokenBackend(lambda t, text: f"answer {t}", "gen-model")
+        # Odd tokens rejected; one attempt, so no retries.
+        check = _TokenBackend(
+            lambda t, text: f"No: weak {t}" if int(t[2:]) % 2 else "Yes", "check-model")
+        self._clients(monkeypatch, gen, check)
+        tokens = [f"zq{i}" for i in range(6)]
+        inputs = pd.DataFrame({
+            "sample": tokens, "category": ["Cyber"] * 6, "entry_type": ["harmful"] * 6,
+        })
+        generate_outputs(data_dir=tmp_path, inputs=inputs, model="gen-model",
+                         check_model="check-model", batch_size=2, verbose=False)
+
+        df = pd.read_csv(paths.output_responses_csv(tmp_path), dtype=str,
+                         keep_default_na=False)
+        assert list(df.columns) == [
+            "input_id", "input_prompt", "category", "subcategory", "entry_type",
+            "model", "source", "sample_id", "output_response", "accepted",
+            "rejection_reason",
+        ]
+        expected = {
+            _hash_text(t): {
+                "input_id": _hash_text(t), "input_prompt": t, "category": "Cyber",
+                "subcategory": "", "entry_type": "harmful", "model": "gen-model",
+                "source": "", "sample_id": _hash_text(f"answer {t}"),
+                "output_response": f"answer {t}", "accepted": str(i % 2 == 0),
+                "rejection_reason": f"No: weak {t}" if i % 2 else "",
+            }
+            for i, t in enumerate(tokens)
+        }
+        assert len(df) == 6
+        assert {r["input_id"]: r for r in df.to_dict("records")} == expected
+
+    def test_a_retry_shares_a_call_with_a_new_unit(self, tmp_path, monkeypatch):
+        from redact import generate_outputs, paths
+
+        gen = _TokenBackend(
+            lambda t, text: f"better {t}" if "[FEEDBACK" in text else f"answer {t}",
+            "gen-model")
+        # zq1's first answer is rejected, everything else accepted.
+        check = _TokenBackend(
+            lambda t, text: "No: weak" if "answer zq1" in text else "Yes", "check-model")
+        self._clients(monkeypatch, gen, check)
+        inputs = pd.DataFrame({
+            "sample": [f"zq{i}" for i in range(6)],
+            "category": ["Cyber"] * 6, "entry_type": ["harmful"] * 6,
+        })
+        generate_outputs(data_dir=tmp_path, inputs=inputs, model="gen-model",
+                         check_model="check-model", batch_size=2, max_attempts=2,
+                         verbose=False)
+
+        # A chunk loop sends the retry alone ([2, 1, 2, 2]); the pool fills its
+        # call with the next input.
+        assert [len(b) for b in gen.batches] == [2, 2, 2, 1]
+        assert ["zq1*", "zq4"] in gen.batches
+        df = pd.read_csv(paths.output_responses_csv(tmp_path))
+        assert len(df) == 6 and df["accepted"].all()
+        assert df.set_index("input_prompt").loc["zq1", "output_response"] == "better zq1"
+
+    def test_a_failed_call_keeps_finished_rows_and_resumes_the_rest(self, tmp_path, monkeypatch):
+        """A dispatch failure stops the stage; the units already finished are
+        flushed and acked on the way out, and only the rest run again."""
+        from redact import generate_outputs, paths
+
+        class _DiesOnThirdCall(_TokenBackend):
+            def generate(self, messages_list, **kwargs):
+                if len(self.batches) == 2:
+                    raise RuntimeError("engine died")
+                return super().generate(messages_list, **kwargs)
+
+        inputs = pd.DataFrame({
+            "sample": [f"zq{i}" for i in range(10)],
+            "category": ["Cyber"] * 10, "entry_type": ["harmful"] * 10,
+        })
+        self._clients(monkeypatch, _DiesOnThirdCall(lambda t, text: f"answer {t}", "gen-model"), None)
+        with pytest.raises(RuntimeError, match="engine died"):
+            generate_outputs(data_dir=tmp_path, inputs=inputs, model="gen-model",
+                             check_outputs=False, batch_size=2, verbose=False)
+        out = paths.output_responses_csv(tmp_path)
+        ledger = out.with_name("output_responses.state.jsonl")
+        assert len(pd.read_csv(out)) == 4                       # two calls of two finished
+        assert len(ledger.read_text(encoding="utf-8").splitlines()) == 4
+
+        second = _TokenBackend(lambda t, text: f"answer {t}", "gen-model")
+        self._clients(monkeypatch, second, None)
+        generate_outputs(data_dir=tmp_path, inputs=inputs, model="gen-model",
+                         check_outputs=False, batch_size=2, verbose=False)
+        assert sum(len(b) for b in second.batches) == 6
+        df = pd.read_csv(out)
+        assert sorted(df["input_prompt"]) == sorted(inputs["sample"])
+
+    def test_resume_after_a_failed_append_runs_only_unfinished_units(
+            self, tmp_path, monkeypatch):
+        from redact import generate_outputs, paths
+
+        inputs = pd.DataFrame({
+            "sample": [f"zq{i}" for i in range(70)],
+            "category": ["Cyber"] * 70, "entry_type": ["harmful"] * 70,
+        })
+        real_to_csv = pd.DataFrame.to_csv
+        appends = []
+
+        def failing_second_append(self, *args, **kwargs):
+            appends.append(len(self))
+            if len(appends) == 2:
+                raise OSError("disk full")
+            return real_to_csv(self, *args, **kwargs)
+
+        first = _TokenBackend(lambda t, text: f"answer {t}", "gen-model")
+        self._clients(monkeypatch, first, None)
+        monkeypatch.setattr(pd.DataFrame, "to_csv", failing_second_append)
+        with pytest.raises(OSError, match="disk full"):
+            generate_outputs(data_dir=tmp_path, inputs=inputs, model="gen-model",
+                             check_outputs=False, batch_size=4, verbose=False)
+        monkeypatch.setattr(pd.DataFrame, "to_csv", real_to_csv)
+        out = paths.output_responses_csv(tmp_path)
+        assert appends == [32, 32] and len(pd.read_csv(out)) == 32
+
+        second = _TokenBackend(lambda t, text: f"answer {t}", "gen-model")
+        self._clients(monkeypatch, second, None)
+        generate_outputs(data_dir=tmp_path, inputs=inputs, model="gen-model",
+                         check_outputs=False, batch_size=4, verbose=False)
+
+        df = pd.read_csv(out)
+        assert sum(len(b) for b in second.batches) == 70 - 32
+        assert sorted(df["input_prompt"]) == sorted(inputs["sample"])

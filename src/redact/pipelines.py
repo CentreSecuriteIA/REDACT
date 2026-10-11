@@ -512,19 +512,20 @@ def generate_outputs(
 ) -> pd.DataFrame:
     """Generate model responses for input samples, batched and quality-checked.
 
-    Pipeline per ``batch_size`` chunk:
-      1. One generation batch for the chunk.
-      2. One check batch, each row with its own entry-type-aware output
+    Pipeline, in calls of up to ``batch_size`` rows:
+      1. Generation calls.
+      2. Check calls, each row with its own entry-type-aware output
          checker. Refusals on harmful inputs are rejected; refusals on benign
          inputs are evaluated normally. With ``max_attempts > 1`` rejected
          rows are regenerated with the checker's verdict as feedback.
-      3. Incremental append to the output CSV per batch — crash-resilient.
+      3. Incremental append to the output CSV as rows finish — crash-resilient.
 
     Resume: each input gets a stable content-hash id (its ``id`` column when
     present, else ``_hash_text(prompt)``). Completed ids are recorded in a
     sidecar ``*.state.jsonl`` ledger beside the output CSV. On a re-run
     (``resume=True``) inputs already in the ledger are skipped, so a crash loses
-    at most one chunk. ``resume=False`` clears both the CSV and the ledger first.
+    only the rows still in progress. ``resume=False`` clears both the CSV and
+    the ledger first.
 
     Args:
         inputs: Input samples DataFrame. If None, loads accepted samples

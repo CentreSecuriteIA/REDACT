@@ -45,7 +45,6 @@ role and the dataset path from ``data_dir`` for you.
 
 import logging
 from collections.abc import Callable
-from math import ceil
 from pathlib import Path
 
 import pandas as pd
@@ -53,12 +52,12 @@ import pandas as pd
 from ..dataset.io import _default_dataset_dir, _hash_text, append_samples
 from ..dataset.ledger import Ledger
 from ..dataset.manifest import Manifest
-from ..dataset.resume import commit, resume_state
+from ..dataset.resume import CommitBuffer, resume_state
 from ..dataset.merge import merge_all
 from ..llms.client import ModelClient
 from ..llms.prompting import extract_and_clean
 from ..llms.prompting import build_messages, load_prompt
-from ..llm_pipeline import checked, drive_generators, is_accepted
+from ..llm_pipeline import checked, drive_generators, drive_units, is_accepted
 from ..llm_pipeline import extracted as extracted_unit
 from ..llms.router import assert_single_sample_per_call, batch_generate_samples
 from .checker import build_output_quality_checker, build_quality_checker
@@ -675,20 +674,22 @@ def run_output_generation(
 ) -> pd.DataFrame:
     """Generate model responses for input samples, batched and quality-checked.
 
-    Pipeline per ``batch_size`` chunk:
+    Pipeline:
       1. One generate-check unit per row (``llm_pipeline.checked``), with the
          row's own entry-type-aware output checker. Refusals on harmful
          inputs are rejected; refusals on benign inputs are evaluated normally.
-      2. ``drive_generators`` runs the units round by round: one generation
-         batch, then one check batch. With ``max_attempts > 1`` rejected rows
-         go round again, regenerated with the checker's verdict as feedback.
-      3. Incremental append to the output CSV per batch — crash-resilient.
+      2. ``drive_units`` keeps ``2 * batch_size`` units live and sends calls
+         of up to ``batch_size``. With ``max_attempts > 1`` rejected rows go
+         round again, regenerated with the checker's verdict as feedback, in
+         the same calls as new rows.
+      3. Finished rows are appended to the output CSV every 32 units, in the
+         order they finish — crash-resilient.
 
     Resume: each input gets a stable content-hash id (its ``id``/``sample_id``
     column when present, else ``_hash_text(prompt)``). Completed ids are
     recorded in a sidecar ``*.state.jsonl`` ledger beside ``out_path``. On a
     re-run (``resume=True``) inputs already in the ledger are skipped, so a
-    crash loses at most one chunk. ``resume=False`` clears both the CSV and
+    crash loses only the live units. ``resume=False`` clears both the CSV and
     the ledger first.
 
     Args:
@@ -783,87 +784,83 @@ def run_output_generation(
             )
         return checker_cache[key]
 
-    def _append_chunk(rows: list[dict]) -> None:
+    written = 0
+
+    def _append_rows(rows: list[dict]) -> None:
+        nonlocal written
         pd.DataFrame(rows).to_csv(
             out_path, mode="a", header=not out_path.exists(), index=False
         )
+        written += len(rows)
+        if verbose:
+            accepted_count = sum(1 for r in rows if r["accepted"])
+            logger.info("[%d/%d] %d/%d accepted -> appended to %s",
+                        written, len(inputs), accepted_count, len(rows), out_path.name)
 
     use_checker = check_outputs and check is not None
-    all_rows: list[dict] = []
-    n_chunks = ceil(len(inputs) / batch_size) if batch_size else 1
+    live_rows: dict[int, dict] = {}   # rows of live units, by position in inputs
 
-    for batch_start in range(0, len(inputs), batch_size):
-        chunk = inputs.iloc[batch_start : batch_start + batch_size]
-        chunk_idx = batch_start // batch_size + 1
+    # One generate-check unit per row, keyed by position, so two rows with one
+    # input_id stay two units.
+    def _unit(i, row):
+        input_text = row[text_col]
+        category = str(row.get("category", "unknown"))
+        entry_type = str(row.get("entry_type", "harmful"))
+        subcategory = str(row.get("subcategory", ""))
+        input_id = str(row["_state_id"])
 
-        # 1. One generate-check unit per row.
-        chunk_rows = []
-        units = {}
-        for i, (_, row) in enumerate(chunk.iterrows()):
-            input_text = row[text_col]
-            category = str(row.get("category", "unknown"))
-            entry_type = str(row.get("entry_type", "harmful"))
-            subcategory = str(row.get("subcategory", ""))
-            input_id = str(row["_state_id"])
-
-            base = build_messages(
-                prompt_config, input_prompt=input_text, Category=category
-            )
-            units[i] = checked(
-                client,
-                # base=base: a bare closure would see the last row's messages.
-                lambda feedback, base=base: _append_feedback(
-                    base, feedback, _OUTPUT_FEEDBACK),
-                check if use_checker else None,
-                _checker_for(category, entry_type) if use_checker else None,
-                original=input_text,
-                internals_ids=(
-                    f"{input_id}/output" if capture_internals_gen else None,
-                    f"{input_id}/val_out" if capture_internals_check else None,
-                ),
-                max_attempts=max_attempts,
-            )
-            chunk_rows.append({
-                "input_id": input_id,
-                "input_prompt": input_text,
-                "category": category,
-                "subcategory": subcategory,
-                "entry_type": entry_type,
-                "model": client.model,
-                "source": str(row.get("source", "")),
-            })
-
-        # 2. Generation and check rounds, one batch per model per round.
-        results = drive_generators(
-            units,
-            finalize=lambda _key, value: value,
-            progress=f"outputs chunk {chunk_idx}/{n_chunks}" if verbose else None,
+        base = build_messages(
+            prompt_config, input_prompt=input_text, Category=category
+        )
+        live_rows[i] = {
+            "input_id": input_id,
+            "input_prompt": input_text,
+            "category": category,
+            "subcategory": subcategory,
+            "entry_type": entry_type,
+            "model": client.model,
+            "source": str(row.get("source", "")),
+        }
+        return i, checked(
+            client,
+            lambda feedback: _append_feedback(base, feedback, _OUTPUT_FEEDBACK),
+            check if use_checker else None,
+            _checker_for(category, entry_type) if use_checker else None,
+            original=input_text,
+            internals_ids=(
+                f"{input_id}/output" if capture_internals_gen else None,
+                f"{input_id}/val_out" if capture_internals_check else None,
+            ),
+            max_attempts=max_attempts,
         )
 
-        # 3. Assemble + incremental append. sample_id is this row's own content-hash
-        # identity (distinct from input_id, which points back to the origin sample) —
-        # only knowable once the response text exists.
-        for i, r in enumerate(chunk_rows):
-            resp, accepted, reasoning = results[i]
-            r["sample_id"] = _hash_text(resp)
-            r["output_response"] = resp
-            r["accepted"] = accepted
-            r["rejection_reason"] = reasoning
-        all_rows.extend(chunk_rows)
+    # A finished unit's row. sample_id is this row's own content-hash identity
+    # (distinct from input_id, which points back to the origin sample) — only
+    # knowable once the response text exists.
+    def _on_done(i, value):
+        resp, accepted, reasoning = value
+        r = live_rows.pop(i)
+        r["sample_id"] = _hash_text(resp)
+        r["output_response"] = resp
+        r["accepted"] = accepted
+        r["rejection_reason"] = reasoning
+        buf.add([r], {"input_id": r["input_id"]})
 
-        # append-then-ack, see dataset/resume.py: a crash between the two
-        # leaves these ids un-acked so they re-run rather than being lost.
-        commit(chunk_rows, append=_append_chunk, ledger=ledger)
-
-        if verbose:
-            accepted_count = sum(1 for r in chunk_rows if r["accepted"])
-            logger.info("[%d/%d] %d/%d accepted -> appended to %s",
-                        batch_start + len(chunk_rows), len(inputs),
-                        accepted_count, len(chunk_rows), out_path.name)
+    # Generation and check calls, topped up from the source as units finish.
+    # The buffer appends finished rows, then acks them (see dataset/resume.py),
+    # every 32 units and on any exit.
+    with CommitBuffer(append=_append_rows, ledger=ledger) as buf:
+        drive_units(
+            (_unit(i, row) for i, (_, row) in enumerate(inputs.iterrows())),
+            on_done=_on_done,
+            pool_size=2 * batch_size,
+            cap=batch_size,
+            progress="outputs" if verbose else None,
+        )
 
     # Return the full dataset on disk (includes rows from prior resumed runs),
     # not just this run's newly-written delta.
-    output_df = pd.read_csv(out_path) if out_path.exists() else pd.DataFrame(all_rows)
+    output_df = pd.read_csv(out_path) if out_path.exists() else pd.DataFrame()
     if verbose:
         accepted_total = (
             int(output_df["accepted"].sum())
