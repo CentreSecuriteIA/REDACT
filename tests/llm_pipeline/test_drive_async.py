@@ -8,7 +8,9 @@ instead of hanging the suite.
 
 import asyncio
 import logging
+import queue
 import threading
+from collections import deque
 from types import SimpleNamespace
 from unittest.mock import MagicMock, patch
 
@@ -31,8 +33,9 @@ class _Script:
 
     A request is named by the content of its last message. It ends when every
     name before it in ``order`` has ended, however early it started. A name
-    missing from ``order`` never ends; ``order=None`` ends every request at
-    once. With ``closed=True`` nothing ends before :meth:`open`.
+    missing from ``order`` ends only on :meth:`release`; ``order=None`` ends
+    every request at once. With ``closed=True`` nothing ends before
+    :meth:`open`.
     """
 
     def __init__(self, order=None, *, fail=(), closed=False):
@@ -46,11 +49,15 @@ class _Script:
             self._turn[order[0]].set()
 
     def open(self):
-        """Let the first request end. Safe to call from any thread."""
-        async def _open():
-            self._turn[self.order[0]].set()
+        """Let the first request end. Not for the loop's thread."""
+        self.release(self.order[0])
 
-        aio.run(_open())
+    def release(self, name):
+        """Let ``name`` end, whatever the order. Not for the loop's thread."""
+        async def _release():
+            self._turn.setdefault(name, asyncio.Event()).set()
+
+        aio.run(_release())
 
     def wait_until(self, *entry):
         """Block the caller until ``entry`` is in the log. Not for the loop's thread."""
@@ -70,13 +77,13 @@ class _Script:
         self._note("start", name)
         self.sent[name] = (max_tokens, internals_id)
         if self.order is not None:
-            turn = self._turn.get(name) or asyncio.Event()
+            turn = self._turn.setdefault(name, asyncio.Event())
             try:
                 await asyncio.wait_for(turn.wait(), _PATIENCE)
             except asyncio.CancelledError:
                 self._note("cancel", name)
                 raise
-            following = self.order[self.order.index(name) + 1:]
+            following = self.order[self.order.index(name) + 1:] if name in self.order else ()
             if following:
                 self._turn[following[0]].set()
         self._note("end", name)
@@ -329,7 +336,7 @@ def test_a_run_mixing_synchronous_and_async_clients_finishes_every_unit():
     assert len(sync_backend.calls) == len(units)
 
 
-def test_a_synchronous_call_does_not_wait_for_a_request_in_flight():
+def test_a_full_synchronous_call_does_not_wait_for_a_request_in_flight():
     """The async request cannot end until the synchronous call has been made."""
     script = _Script(["x1"], closed=True)
     lane = _lane_client(script)
@@ -340,8 +347,91 @@ def test_a_synchronous_call_does_not_wait_for_a_request_in_flight():
             return super().generate(messages_list, **kwargs)
 
     sync = make_client(_OpensTheScript("ok"), "lane-sync")
-    _, done, _ = _drive([("x", _unit(lane, "x")), ("y", _unit(sync, "y"))], pool_size=2)
+    units = [("x", _unit(lane, "x")), ("y", _unit(sync, "y"))]
+    _, done, _ = _drive(units, pool_size=2, cap=1)
     assert done == ["y", "x"]
+
+
+class _HeldLane:
+    """A lane whose replies are held, beside a synchronous client that records.
+
+    A lane reply ends only when the driver starts to wait for one with none
+    arrived: the oldest is then released. So whatever the driver decides
+    between two replies, it decides with the others still in flight.
+
+    Attributes:
+        batches: One ``(size, lane requests in flight)`` per synchronous call.
+        labels: The progress label of each synchronous call.
+    """
+
+    def __init__(self, monkeypatch):
+        self.batches, self.labels = [], []
+        self._script = _Script([])
+        self._client = _lane_client(self._script)
+        self._in_flight = in_flight = deque()
+        release = self._script.release
+
+        class _DriverQueue(queue.Queue):
+            def get(self, block=True, timeout=None):
+                if block and self.empty() and in_flight:
+                    release(in_flight.popleft())
+                return super().get(block, timeout)
+
+        monkeypatch.setattr(
+            drive_module, "queue", SimpleNamespace(Queue=_DriverQueue, Empty=queue.Empty))
+
+    def lane(self, name):
+        """A request on the lane."""
+        self._in_flight.append(name)
+        return LLMRequest.for_client(self._client, [{"role": "user", "content": name}])
+
+    def sync(self, name):
+        """A request to the synchronous model, by name."""
+        return LLMRequest("sync", [{"role": "user", "content": name}])
+
+    def resolve(self, model):
+        """The synchronous client: ``drive_units``' ``resolve``."""
+        return self
+
+    def generate(self, messages_list, progress=None, **kwargs):
+        self.batches.append((len(messages_list), len(self._in_flight)))
+        self.labels.append(progress)
+        return ["ok"] * len(messages_list)
+
+
+def test_only_full_synchronous_calls_go_out_while_requests_are_in_flight(monkeypatch):
+    """A group below ``cap`` waits for the lane's replies, which may fill it,
+    and goes as it is once the lane is empty."""
+    held = _HeldLane(monkeypatch)
+
+    def sync_then_lane(name):
+        yield held.sync(name)
+        yield held.lane(name)
+
+    def lane_then_sync(name):
+        yield held.lane(name)
+        yield held.sync(name)
+
+    units = [(f"u{i}", (lane_then_sync if i % 2 else sync_then_lane)(f"u{i}"))
+             for i in range(7)]
+    n, done, _ = _drive(units, pool_size=7, cap=2, resolve=held.resolve, progress="p")
+    # u5's request waits alone through the last four lane replies.
+    assert held.batches == [(2, 3), (2, 5), (2, 5), (1, 0)]
+    assert held.labels == [f"p round {i} (sync)" for i in (1, 2, 3, 4)]
+    assert n == len(units) and done[-1] == "u5"
+
+
+def test_a_group_that_never_fills_goes_once_nothing_is_in_flight(monkeypatch):
+    held = _HeldLane(monkeypatch)
+
+    def one(request):
+        yield request
+
+    units = [("s", one(held.sync("s"))), ("x", one(held.lane("x"))),
+             ("y", one(held.lane("y")))]
+    n, done, _ = _drive(units, pool_size=3, cap=2, resolve=held.resolve)
+    assert held.batches == [(1, 0)]
+    assert n == len(units) and done == ["x", "y", "s"]
 
 
 def test_a_run_without_async_clients_never_touches_the_event_loop(monkeypatch):

@@ -218,9 +218,10 @@ def drive_units(
     grouped. It is sent on the shared event loop the moment its unit yields
     it, and its reply is handed back the moment it arrives, so its slot never
     waits for a longer reply. One model has at most ``backend.max_workers``
-    such requests in flight. Replies that have arrived are handed back before
-    a round's calls go out, and those calls never wait for a request in
-    flight.
+    such requests in flight. A reply that has arrived is handed back before a
+    round's calls go out. While any is in flight only full calls go out: a
+    smaller group waits for the next reply, which may fill it, and the
+    largest group goes once none is in flight.
 
     Args:
         source: ``(key, generator)`` pairs, pulled only as slots free up.
@@ -371,13 +372,10 @@ def drive_units(
     try:
         while True:
             admit()
-            # A reply that has arrived goes back before a call that blocks, and
-            # is waited for only when no synchronous request is pending.
             if land(wait=not pending):
                 continue                           # a slot may be free: admit first
             if not pending:
                 return finished
-            round_idx += 1
             groups: dict[Hashable, list] = defaultdict(list)
             for key, req in pending.items():
                 groups[_group_key(req)].append(key)
@@ -385,6 +383,9 @@ def drive_units(
             # When none is full the largest goes (the oldest on a tie), so a
             # trickle of requests still drains and the run ends.
             full = [keys for keys in groups.values() if len(keys) >= cap]
+            if not full and land(wait=True):       # a reply in flight may fill one
+                continue
+            round_idx += 1
             for keys in full or [max(groups.values(), key=len)]:
                 keys = keys[:cap]                      # the rest stay pending, ahead of later yields
                 requests = [pending.pop(k) for k in keys]
