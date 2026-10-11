@@ -277,6 +277,32 @@ class TestOpenAIAsync:
         assert async_event == sync_event
         assert (async_event["in_tok"], async_event["out_tok"]) == (812, 40)
 
+    def test_defaults_and_system_prompt_policy_apply_as_in_generate(self, events):
+        """No overrides, on a model without a system role: both paths fold the
+        system prompt into the user message and record the default limit."""
+        response = _response("ok", "stop")
+        with patch("redact.llms.backends.openai.openai.OpenAI"):
+            OpenAIBackend.clear_cache()
+            backend = OpenAIBackend(
+                "no-system-role", api_key="k", base_url="https://one.api/v1",
+                default_max_tokens=123, supports_system_prompt=False)
+        backend._client.chat.completions.create.return_value = response
+        backend._async_client = sdk = _async_sdk(response)
+        messages = [{"role": "system", "content": "Sys."},
+                    {"role": "user", "content": "hi"}]
+
+        assert backend.generate([messages]) == ["ok"]
+        assert aio.run(backend.agenerate(messages)) == "ok"
+
+        sent = backend._client.chat.completions.create.call_args
+        assert sdk.chat.completions.create.await_args == sent
+        assert [m["role"] for m in sent.kwargs["messages"]] == ["user"]
+        sync_event, async_event = events
+        del sync_event["ms"], async_event["ms"]
+        assert async_event == sync_event
+        assert async_event["max_tokens"] == backend.default_max_tokens
+        OpenAIBackend.clear_cache()
+
     def test_an_empty_cut_reply_warns_as_generate_does(self, openai_backend, caplog):
         openai_backend._async_client = _async_sdk(_response("", "length"))
         with caplog.at_level(logging.WARNING, logger="redact.llms.backends"):
