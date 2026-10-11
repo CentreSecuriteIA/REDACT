@@ -225,6 +225,18 @@ class TestOpenAIEmptyReply:
         assert caplog.records == []
         assert events[0]["finish_reason"] == "stop"
 
+    def test_a_reply_stopped_by_the_content_filter_is_returned_and_warned_about(
+        self, openai_backend, mock_openai_client, events, caplog
+    ):
+        create = mock_openai_client.chat.completions.create
+        create.return_value = _response("part", "content_filter")
+        with caplog.at_level(logging.WARNING, logger="redact.llms.backends.openai"):
+            assert openai_backend.generate(_HI) == ["part"]
+        assert [r.getMessage() for r in caplog.records] == [
+            "venice-uncensored: the provider's content filter stopped a reply; it is incomplete."
+        ]
+        assert events[0]["finish_reason"] == "content_filter"
+
 
 class TestOpenAICutReply:
     """A reply cut at max_tokens is returned as it is, with one warning."""

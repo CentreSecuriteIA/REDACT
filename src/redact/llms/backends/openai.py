@@ -253,6 +253,9 @@ class OpenAIBackend(LLMBackend):
         if not content:
             logger.warning("%s returned an empty reply (finish_reason=%s).",
                            self.model, finish_reason)
+        elif finish_reason == "content_filter":
+            logger.warning("%s: the provider's content filter stopped a reply; "
+                           "it is incomplete.", self.model)
         self._warn_cut(int(finish_reason == "length"), 1, max_tok)
         return content
 
