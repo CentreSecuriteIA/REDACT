@@ -11,7 +11,7 @@ from .check import (
     extracted,
     is_accepted,
 )
-from .drive import drive_generators, drive_sync
+from .drive import drive_generators, drive_sync, drive_units
 from .request import LLMRequest
 
 __all__ = [
@@ -21,6 +21,7 @@ __all__ = [
     "checked",
     "drive_generators",
     "drive_sync",
+    "drive_units",
     "extracted",
     "is_accepted",
 ]

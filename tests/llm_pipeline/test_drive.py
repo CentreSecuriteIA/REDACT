@@ -1,12 +1,13 @@
 """Tests for the request driver (llm_pipeline/drive.py).
 
-Covers drive_generators' batching + error-isolation paths and drive_sync, with
-hand-built generators and a fake router (no network).
+Covers drive_generators' batching + error-isolation paths, drive_sync, and
+drive_units' admission, cap and failure paths, with hand-built generators and
+a fake router (no network).
 """
 
 import pytest
 
-from redact.llm_pipeline import LLMRequest, drive_generators, drive_sync
+from redact.llm_pipeline import LLMRequest, drive_generators, drive_sync, drive_units
 from tests.conftest import as_resolver
 
 
@@ -257,3 +258,298 @@ def test_for_client_sets_model_and_replace_keeps_client():
     tagged = dataclasses.replace(req, internals_id="x/1")
     assert tagged.client is client and tagged.internals_id == "x/1"
     assert LLMRequest("m", []).client is None
+
+
+# --- drive_units ---------------------------------------------------------------
+
+class _Recorder:
+    """Fake router recording the last user content of every request per call."""
+
+    def __init__(self, fail_on_call=None):
+        self.batches: list[list[str]] = []
+        self.fail_on_call = fail_on_call
+
+    def batch_generate(self, model, messages_list, **kw):
+        if self.fail_on_call == len(self.batches) + 1:
+            raise RuntimeError("batch boom")
+        self.batches.append([m[-1]["content"] for m in messages_list])
+        return [f"{model}:{m[-1]['content']}" for m in messages_list]
+
+
+def _rounds(tag, n, model="m"):
+    """A unit making ``n`` calls to ``model`` in sequence, then returning ``tag``."""
+    for i in range(1, n + 1):
+        yield LLMRequest(model, [{"role": "user", "content": f"{tag}{i}"}])
+    return tag
+
+
+def _drive(units, recorder, **kw):
+    done, failed = [], []
+    n = drive_units(
+        units, resolve=as_resolver(recorder),
+        on_done=lambda k, v: done.append(k),
+        on_error=kw.pop("on_error", lambda k, e: failed.append((k, type(e).__name__))),
+        **kw,
+    )
+    return n, done, failed
+
+
+def test_drive_units_refills_freed_slots():
+    rec = _Recorder()
+    units = [("a", _rounds("a", 2)), ("b", _rounds("b", 2)),
+             ("c", _rounds("c", 1)), ("d", _rounds("d", 1)), ("e", _rounds("e", 1))]
+    n, done, failed = _drive(iter(units), rec, pool_size=3)
+    assert rec.batches == [["a1", "b1", "c1"], ["a2", "b2", "d1"], ["e1"]]
+    assert done == ["c", "a", "b", "d", "e"] and failed == []
+    assert n == 5
+
+
+def test_drive_units_cap_splits_a_round():
+    rec = _Recorder()
+    units = [(t, _rounds(t, 1)) for t in "abcd"]
+    _drive(iter(units), rec, pool_size=4, cap=2)
+    assert rec.batches == [["a1", "b1"], ["c1", "d1"]]
+
+
+def test_drive_units_deferred_requests_go_before_later_yields():
+    rec = _Recorder()
+    units = [("a", _rounds("a", 2)), ("b", _rounds("b", 2))] + [(t, _rounds(t, 1)) for t in "cdef"]
+    _drive(iter(units), rec, pool_size=6, cap=3)
+    assert rec.batches == [["a1", "b1", "c1"], ["d1", "e1", "f1"], ["a2", "b2"]]
+
+
+def test_drive_units_deferred_unit_keeps_its_slot():
+    """A request waiting on the cap still occupies a slot: the source is not
+    pulled past ``pool_size`` live units, and the deferred request goes first."""
+    rec = _Recorder()
+    pulled = []
+
+    def source():
+        for t in "abc":
+            pulled.append(t)
+            yield t, _rounds(t, 1)
+
+    _drive(source(), rec, pool_size=2, cap=1)
+    assert rec.batches == [["a1"], ["b1"], ["c1"]]
+    assert pulled == ["a", "b", "c"]
+
+
+def test_drive_units_cap_is_per_group():
+    """Each group is capped on its own: two models send two capped calls per
+    round rather than sharing one cap."""
+    rec = _Recorder()
+    units = [(f"a{i}", _rounds(f"a{i}", 1, "ma")) for i in range(4)] + \
+            [(f"b{i}", _rounds(f"b{i}", 1, "mb")) for i in range(4)]
+    _drive(iter(units), rec, pool_size=8, cap=2)
+    assert rec.batches == [["a01", "a11"], ["b01", "b11"], ["a21", "a31"], ["b21", "b31"]]
+
+
+def test_drive_units_full_groups_go_first_and_a_partial_group_waits():
+    rec = _Recorder()
+    units = [("b", _rounds("b", 1, "mb")), ("a0", _rounds("a0", 1, "ma")), ("a1", _rounds("a1", 1, "ma"))]
+    _drive(iter(units), rec, pool_size=3, cap=2)
+    assert rec.batches == [["a01", "a11"], ["b1"]]
+
+
+def test_drive_units_largest_partial_group_goes_when_none_is_full():
+    rec = _Recorder()
+    units = [("b", _rounds("b", 1, "mb")), ("a0", _rounds("a0", 1, "ma")), ("a1", _rounds("a1", 1, "ma"))]
+    _drive(iter(units), rec, pool_size=3, cap=4)
+    assert rec.batches == [["a01", "a11"], ["b1"]]
+
+
+def test_drive_units_a_tie_between_partial_groups_goes_to_the_oldest_request():
+    labels = []
+
+    class _R:
+        def batch_generate(self, model, messages_list, progress=None, **kw):
+            labels.append(progress)
+            return ["r"] * len(messages_list)
+
+    units = [("b", _rounds("b", 1, "mb")), ("a", _rounds("a", 1, "ma"))]
+    drive_units(iter(units), resolve=as_resolver(_R()), pool_size=2, cap=2,
+                on_done=lambda k, v: None, progress="p")
+    assert labels == ["p round 1 (mb)", "p round 2 (ma)"]
+
+
+def test_drive_units_a_waiting_group_is_sent_once_nothing_is_full():
+    """A partial group waits while another keeps filling calls, and the run
+    still ends with every unit done."""
+    rec = _Recorder()
+    units = [("b", _rounds("b", 1, "mb"))] + [(f"a{i}", _rounds(f"a{i}", 1, "ma")) for i in range(6)]
+    n, done, _ = _drive(iter(units), rec, pool_size=4, cap=2)
+    assert rec.batches == [["a01", "a11"], ["a21", "a31"], ["a41", "a51"], ["b1"]]
+    assert n == 7 and done[-1] == "b"
+
+
+def test_drive_units_two_clients_for_one_model_and_setup_share_a_call():
+    """Two client objects for the same model and setup (today's gen and check
+    clients) are one group: one call, answered by the first request's client."""
+    from tests.conftest import make_client
+    from tests.llms.test_router import _CountingBackend
+
+    a, b = _CountingBackend(["A1", "A2"], native=True), _CountingBackend(["B1"], native=True)
+    units = [("x", _one_round(make_client(a, "m"), "x")), ("y", _one_round(make_client(b, "m"), "y"))]
+    results = {}
+    drive_units(iter(units), pool_size=2, on_done=results.__setitem__)
+    assert results == {"x": "A1", "y": "A2"}
+    assert (a.generate_call_count, b.generate_call_count) == (1, 0)
+
+
+def test_drive_units_different_models_or_setups_do_not_share_a_call():
+    from tests.conftest import make_client
+    from tests.llms.test_router import _CountingBackend
+
+    class _OtherSetup(_CountingBackend):
+        @property
+        def backend_name(self):
+            return "other"
+
+    a, b, c = (_CountingBackend(["A"], native=True), _OtherSetup(["B"], native=True),
+               _CountingBackend(["C"], native=True))
+    units = [("x", _one_round(make_client(a, "m"), "x")),
+             ("y", _one_round(make_client(b, "m"), "y")),    # same name, another setup
+             ("z", _one_round(make_client(c, "n"), "z"))]    # another model
+    results = {}
+    drive_units(iter(units), pool_size=3, on_done=results.__setitem__)
+    assert results == {"x": "A", "y": "B", "z": "C"}
+    assert [a.generate_call_count, b.generate_call_count, c.generate_call_count] == [1, 1, 1]
+
+
+def test_drive_units_unit_finishing_at_prime_takes_no_slot():
+    rec = _Recorder()
+    units = [("x", _immediate("x")), ("y", _immediate("y")),
+             ("a", _rounds("a", 1)), ("b", _rounds("b", 1))]
+    _, done, _ = _drive(iter(units), rec, pool_size=2)
+    assert rec.batches == [["a1", "b1"]]
+    assert done == ["x", "y", "a", "b"]
+
+
+def test_drive_units_all_pure_units_make_no_call():
+    """A source of pure transforms finishes inside admission: zero rounds."""
+    rec = _Recorder()
+    n, done, _ = _drive(iter([(t, _immediate(t)) for t in "xyz"]), rec, pool_size=2)
+    assert rec.batches == [] and done == ["x", "y", "z"] and n == 3
+
+
+def test_drive_units_empty_source_returns_zero():
+    rec = _Recorder()
+    assert _drive(iter([]), rec, pool_size=4) == (0, [], [])
+    assert rec.batches == []
+
+
+def test_drive_units_consumes_the_source_lazily():
+    pulled, snapshot = [], []
+
+    class _Snap(_Recorder):
+        def batch_generate(self, model, messages_list, **kw):
+            if not snapshot:
+                snapshot.extend(pulled)
+            return super().batch_generate(model, messages_list, **kw)
+
+    def source():
+        for t in "abcde":
+            pulled.append(t)
+            yield t, _rounds(t, 2)
+
+    _drive(source(), _Snap(), pool_size=2)
+    assert snapshot == ["a", "b"]           # no read-ahead past the free slots
+    assert pulled == list("abcde")
+
+
+def test_drive_units_source_exception_propagates():
+    """The source failing is not a unit failing: it propagates past ``on_error``,
+    and units already finished stay reported."""
+    rec = _Recorder()
+
+    def source():
+        yield "x", _immediate("x")
+        raise OSError("source boom")
+
+    done, failed = [], []
+    with pytest.raises(OSError, match="source boom"):
+        drive_units(source(), resolve=as_resolver(rec), pool_size=2,
+                    on_done=lambda k, v: done.append(k),
+                    on_error=lambda k, e: failed.append(k))
+    assert done == ["x"] and failed == [] and rec.batches == []
+
+
+def test_drive_units_dispatch_failure_propagates_and_reports_nothing_in_flight():
+    rec = _Recorder(fail_on_call=2)
+    units = [("a", _rounds("a", 2)), ("b", _rounds("b", 1)), ("c", _rounds("c", 1))]
+    done, failed = [], []
+    with pytest.raises(RuntimeError, match="batch boom"):
+        drive_units(iter(units), resolve=as_resolver(rec), pool_size=2,
+                    on_done=lambda k, v: done.append(k),
+                    on_error=lambda k, e: failed.append(k))
+    assert done == ["b"] and failed == []
+
+
+def test_drive_units_reply_count_mismatch_raises():
+    class _Short:
+        def batch_generate(self, model, messages_list, **kw):
+            return ["only one"]
+
+    with pytest.raises(RuntimeError, match="returned 1 replies for 2 requests"):
+        _drive(iter([("a", _rounds("a", 1)), ("b", _rounds("b", 1))]), _Short(), pool_size=2)
+
+
+def test_drive_units_unit_error_goes_to_on_error():
+    rec = _Recorder()
+    n, done, failed = _drive(iter([("ok", _rounds("ok", 2)), ("bad", _raises())]), rec, pool_size=2)
+    assert done == ["ok"] and failed == [("bad", "ValueError")]
+    assert n == 2
+
+
+def test_drive_units_unit_error_at_prime_takes_no_slot():
+    rec = _Recorder()
+    units = [("bad", _yields_no_request(None)), ("a", _rounds("a", 1)), ("b", _rounds("b", 1))]
+    _, done, failed = _drive(iter(units), rec, pool_size=2)
+    assert failed == [("bad", "TypeError")] and done == ["a", "b"]
+    assert rec.batches == [["a1", "b1"]]
+
+
+def test_drive_units_unit_error_propagates_without_on_error():
+    with pytest.raises(ValueError, match="bad gen"):
+        _drive(iter([("ok", _rounds("ok", 2)), ("bad", _raises())]), _Recorder(),
+               pool_size=2, on_error=None)
+
+
+def test_drive_units_on_done_exception_propagates_unchained():
+    """on_done failing is not the unit failing: on_error never sees it."""
+    def on_done(key, value):
+        raise KeyError("done boom")
+
+    with pytest.raises(KeyError, match="done boom") as raised:
+        drive_units(iter([("x", _immediate("x"))]), resolve=as_resolver(_Recorder()),
+                    pool_size=1, on_done=on_done, on_error=lambda k, e: None)
+    assert raised.value.__context__ is None
+
+
+def test_drive_units_rejects_a_duplicate_live_key():
+    with pytest.raises(ValueError, match="already live"):
+        _drive(iter([("a", _rounds("a", 1)), ("a", _rounds("a", 1))]), _Recorder(), pool_size=2)
+
+
+@pytest.mark.parametrize("kw", [{"pool_size": 0}, {"pool_size": 1, "cap": 0}], ids=["pool", "cap"])
+def test_drive_units_rejects_pool_size_or_cap_below_one(kw):
+    with pytest.raises(ValueError):
+        _drive(iter([]), _Recorder(), **kw)
+
+
+def test_drive_units_progress_label_and_internals_ids():
+    labels, ids = [], []
+
+    class _R:
+        def batch_generate(self, model, messages_list, **kw):
+            labels.append(kw.get("progress"))
+            ids.append(kw.get("internals_ids"))
+            return ["r"] * len(messages_list)
+
+    units = [("a", (lambda: (yield LLMRequest("m", [], internals_id="root/0")))()),
+             ("b", (lambda: (yield LLMRequest("m", [])))())]
+    drive_units(iter(units), resolve=as_resolver(_R()), pool_size=2, on_done=lambda k, v: None)
+    drive_units(iter([("c", _rounds("c", 1))]), resolve=as_resolver(_R()), pool_size=1,
+                on_done=lambda k, v: None, progress="lbl")
+    assert labels == [None, "lbl round 1 (m)"]
+    assert ids == [["root/0", None], None]   # omitted entirely when no request wants capture
