@@ -239,6 +239,7 @@ class LLMBackend(ABC):
         started: float,
         in_tok: int | None = None,
         out_tok: int | None = None,
+        out_tok_max: int | None = None,
         max_tokens: int | None = None,
         temperature: float | None = None,
         error: str | None = None,
@@ -249,8 +250,11 @@ class LLMBackend(ABC):
         One event per call, not per item: a native pass over N prompts emits
         a single event with ``n_items=N``, and a per-item loop emits one
         event per iteration. ``started`` is ``time.perf_counter()`` taken
-        just before the call. ``finish_reason`` is the provider's reason the
-        reply ended, when it reports one.
+        just before the call. ``out_tok_max`` is the longest reply of the
+        call, in tokens: ``out_tok`` itself for a one-item call, and for a
+        native batch how long the engine ran for its slowest item.
+        ``finish_reason`` is the provider's reason the reply ended, when it
+        reports one.
         """
         event = {
             "ev": "call",
@@ -260,6 +264,7 @@ class LLMBackend(ABC):
             "ms": round((time.perf_counter() - started) * 1000, 1),
             "in_tok": in_tok,
             "out_tok": out_tok,
+            "out_tok_max": out_tok_max,
             "max_tokens": max_tokens,
             "temperature": temperature,
         }

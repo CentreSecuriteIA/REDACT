@@ -108,7 +108,7 @@ class TestUsageCapture:
         observe.set_emitter(seen.append)
         usage = MagicMock(prompt_tokens=812, completion_tokens=1904)
         self._backend(usage).generate([[{"role": "user", "content": "hi"}]])
-        assert (seen[0]["in_tok"], seen[0]["out_tok"]) == (812, 1904)
+        assert (seen[0]["in_tok"], seen[0]["out_tok"], seen[0]["out_tok_max"]) == (812, 1904, 1904)
 
     def test_missing_usage_records_nulls_rather_than_raising(self):
         # usage is optional in the OpenAI-compatible spec; plenty of endpoints
@@ -119,6 +119,7 @@ class TestUsageCapture:
         result = self._backend(None).generate([[{"role": "user", "content": "hi"}]])
         assert result == ["hi"]
         assert seen[0]["in_tok"] is None and seen[0]["out_tok"] is None
+        assert seen[0]["out_tok_max"] is None
 
     def test_a_failed_call_is_recorded_then_re_raised(self):
         telemetry.install(sink="off")

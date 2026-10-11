@@ -371,6 +371,17 @@ class TestGenerate:
             ("call", "test-model", 1, 5, "RuntimeError: CUDA out of memory"),
         ]
 
+    def test_the_call_event_counts_the_generated_tokens(self, tmp_path):
+        from redact.llms import observe
+
+        events = []
+        observe.set_emitter(events.append)
+        try:
+            _generate_backend(tmp_path).generate(_MSG)
+        finally:
+            observe.set_emitter(None)
+        assert (events[0]["out_tok"], events[0]["out_tok_max"]) == (2, 2)
+
     def test_a_short_internals_ids_list_costs_no_forward_pass(self, tmp_path):
         b = _generate_backend(tmp_path)
         with pytest.raises(ValueError, match=r"same length as messages_list \(1 != 2\)"):

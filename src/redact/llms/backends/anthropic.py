@@ -157,10 +157,11 @@ class AnthropicBackend(LLMBackend):
                 raise
             usage = getattr(response, "usage", None)
             stop_reason = getattr(response, "stop_reason", None)
+            out_tok = getattr(usage, "output_tokens", None)
             self._record_call(
                 n_items=1, started=started,
                 in_tok=getattr(usage, "input_tokens", None),
-                out_tok=getattr(usage, "output_tokens", None),
+                out_tok=out_tok, out_tok_max=out_tok,
                 max_tokens=max_tok, temperature=temp, finish_reason=stop_reason,
             )
             # A response with no content blocks counts as an empty reply.

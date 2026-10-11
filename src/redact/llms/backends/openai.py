@@ -170,10 +170,11 @@ class OpenAIBackend(LLMBackend):
             finish_reason = getattr(choice, "finish_reason", None)
             # Some OpenAI-compatible endpoints omit usage.
             usage = getattr(response, "usage", None)
+            out_tok = getattr(usage, "completion_tokens", None)
             self._record_call(
                 n_items=1, started=started,
                 in_tok=getattr(usage, "prompt_tokens", None),
-                out_tok=getattr(usage, "completion_tokens", None),
+                out_tok=out_tok, out_tok_max=out_tok,
                 max_tokens=max_tok, temperature=temp, finish_reason=finish_reason,
             )
             if not content:

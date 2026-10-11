@@ -306,7 +306,7 @@ def _output(text, **attrs):
     """One vLLM RequestOutput as generate() reads it; attrs land on the CompletionOutput."""
     return types.SimpleNamespace(
         prompt_token_ids=[1, 2],
-        outputs=[types.SimpleNamespace(text=text, token_ids=[3, 4], **attrs)],
+        outputs=[types.SimpleNamespace(**{"text": text, "token_ids": [3, 4], **attrs})],
     )
 
 
@@ -354,6 +354,20 @@ class TestVLLMCutReplies:
         with caplog.at_level(logging.WARNING, logger="redact.llms.backends"):
             assert b.generate([_HI] * 2) == ["a", "b"]
         assert caplog.records == []
+
+
+class TestVLLMCallEvent:
+    def test_the_event_carries_the_longest_reply(self, monkeypatch):
+        from redact.llms import observe
+
+        b = _vllm_backend(monkeypatch, [_output("a", token_ids=[1, 2, 3]), _output("b", token_ids=[1])])
+        seen = []
+        observe.set_emitter(seen.append)
+        try:
+            b.generate([_HI] * 2)
+        finally:
+            observe.set_emitter(None)
+        assert (seen[0]["n_items"], seen[0]["out_tok"], seen[0]["out_tok_max"]) == (2, 4, 3)
 
 
 class MockBackend(LLMBackend):

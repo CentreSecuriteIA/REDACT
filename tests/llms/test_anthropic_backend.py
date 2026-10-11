@@ -199,6 +199,13 @@ class TestAnthropicEmptyReply:
         assert caplog.records == []
         assert events[0]["finish_reason"] == "end_turn"
 
+    def test_usage_is_recorded_for_the_one_item(self, anthropic_backend, events):
+        anthropic_backend._client.messages.create.return_value = MagicMock(
+            content=[MagicMock(text="ok")], stop_reason="end_turn",
+            usage=MagicMock(input_tokens=5, output_tokens=7))
+        anthropic_backend.generate(self.HI)
+        assert (events[0]["in_tok"], events[0]["out_tok"], events[0]["out_tok_max"]) == (5, 7, 7)
+
 
 class TestAnthropicCutReply:
     """A reply cut at max_tokens or the context window is returned as it is,

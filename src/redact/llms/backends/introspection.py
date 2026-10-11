@@ -514,7 +514,8 @@ class TransformersIntrospectionBackend(LLMBackend):
             out_tok = int(outputs.sequences[0].shape[0]) - prompt_len
             # One telemetry event per forward pass.
             self._record_call(
-                n_items=1, started=started, in_tok=prompt_len, out_tok=out_tok,
+                n_items=1, started=started, in_tok=prompt_len,
+                out_tok=out_tok, out_tok_max=out_tok,
                 max_tokens=max_tok, temperature=temp,
             )
             # No stop reason from transformers: a reply that fills

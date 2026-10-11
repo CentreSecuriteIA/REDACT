@@ -371,10 +371,11 @@ class VLLMBackend(LLMBackend):
                 temperature=temp, error=f"{type(exc).__name__}: {exc}",
             )
             raise
+        lens = [len(getattr(o.outputs[0], "token_ids", None) or ()) for o in outputs]
         self._record_call(
             n_items=len(messages_list), started=started,
             in_tok=sum(len(getattr(o, "prompt_token_ids", None) or ()) for o in outputs),
-            out_tok=sum(len(getattr(o.outputs[0], "token_ids", None) or ()) for o in outputs),
+            out_tok=sum(lens), out_tok_max=max(lens, default=None),
             max_tokens=max_tok, temperature=temp,
         )
         # vLLM says "length" for both caps, max_tokens and max_model_len.
