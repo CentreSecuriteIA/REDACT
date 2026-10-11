@@ -200,7 +200,7 @@ def combine_techniques(*techniques: Callable, sort_by_hierarchy: bool = True) ->
                 # A chain can mix models (e.g. gen vs translate); resolve the
                 # client for whichever model this request actually targets.
                 c = ModelClient.create(request.model)
-            return generate_sample(c, request.messages)
+            return generate_sample(c, request.messages, max_tokens=request.max_tokens)
 
         return run_sync(gen, call)
 

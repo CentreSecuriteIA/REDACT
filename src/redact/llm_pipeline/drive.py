@@ -20,7 +20,8 @@ def drive_sync(gen: Generator, call: Callable[[LLMRequest], str]):
 
     Args:
         gen: Generator yielding :class:`LLMRequest`s.
-        call: Blocking function that turns one request into a reply string.
+        call: Blocking function that turns one request into a reply string;
+            it is handed the whole request, limit included.
 
     Returns:
         The generator's return value.
@@ -46,8 +47,8 @@ def drive_generators(
 
     Each generator yields :class:`LLMRequest`s and is resumed with the reply.
     Every round, the pending requests are grouped by ``request.client`` (by
-    ``request.model`` when none is attached) and sent as one ``generate()``
-    call per group.
+    ``request.model`` when none is attached) and ``request.max_tokens``, and
+    sent as one ``generate()`` call per group.
 
     Args:
         gens: ``{key: generator}``. Keys are returned unchanged.
@@ -105,7 +106,8 @@ def drive_generators(
         round_idx += 1
         groups: dict[Hashable, list] = defaultdict(list)
         for key, req in pending.items():
-            groups[req.client if req.client is not None else req.model].append(key)
+            groups[(req.client if req.client is not None else req.model,
+                    req.max_tokens)].append(key)
 
         round_requests = dict(pending)
         pending.clear()
@@ -115,10 +117,9 @@ def drive_generators(
             model = first.model
             client = first.client if first.client is not None else resolve(model)
             messages_list = [round_requests[k].messages for k in keys]
-            kw = (
-                {"progress": f"{progress} round {round_idx} ({model})"}
-                if progress else {}
-            )
+            kw = {"progress": _label(progress, round_idx, first)} if progress else {}
+            if first.max_tokens is not None:
+                kw["max_tokens"] = first.max_tokens
             # Pass internals_ids only when a request in this batch wants
             # capture. A client whose backend cannot capture rejects any
             # list, even one that is all None.
@@ -140,18 +141,25 @@ def drive_generators(
     return results
 
 
+def _label(progress: str, round_idx: int, first: LLMRequest) -> str:
+    """Progress label of one call; names the limit when the group has one."""
+    limit = f", max_tokens={first.max_tokens}" if first.max_tokens is not None else ""
+    return f"{progress} round {round_idx} ({first.model}{limit})"
+
+
 def _group_key(request: LLMRequest) -> Hashable:
     """The requests that may share one ``generate()`` call.
 
-    A call carries one set of settings and requests carry none, so the
-    model's defaults apply to every request in it: the same registry name
-    on the same setup is enough, whichever client object made the request.
-    A request without a client is keyed by name and resolved at dispatch.
+    A call carries one set of settings, so requests share one only when they
+    agree on the reply limit (``None`` meaning the model's default); beyond
+    that the same registry name on the same setup is enough, whichever client
+    object made the request. A request without a client is keyed by name and
+    resolved at dispatch.
     """
     client = request.client
     if client is None:
-        return request.model
-    return client.model, client.backend.backend_name
+        return request.model, request.max_tokens
+    return client.model, client.backend.backend_name, request.max_tokens
 
 
 def drive_units(
@@ -168,12 +176,14 @@ def drive_units(
 
     A unit is ``(key, generator)``; the generator yields :class:`LLMRequest`s
     and is resumed with each reply. Each round admits units from ``source``
-    into free slots, groups every live unit's pending request by model and
-    setup (by ``request.model`` alone when no client is attached), sends
-    every group that fills a call — ``cap`` requests, oldest first, one
-    ``generate()`` each — or the largest group when none does, and hands the
-    replies back. A unit that finishes is reported at once, so the caller
-    can save it without waiting for the others.
+    into free slots, groups every live unit's pending request by model, setup
+    and reply limit (by ``request.model`` and limit alone when no client is
+    attached), sends every group that fills a call — ``cap`` requests, oldest
+    first, one ``generate()`` each — or the largest group when none does, and
+    hands the replies back. A unit that finishes is reported at once, so the
+    caller can save it without waiting for the others. Each distinct limit on
+    one model is another group: at ``pool_size = 2 * cap`` up to three keep
+    the calls full, more leave them part-full.
 
     Args:
         source: ``(key, generator)`` pairs, pulled only as slots free up.
@@ -269,7 +279,9 @@ def drive_units(
             requests = [pending.pop(k) for k in keys]
             first = requests[0]
             client = first.client if first.client is not None else resolve(first.model)
-            kw = {"progress": f"{progress} round {round_idx} ({first.model})"} if progress else {}
+            kw = {"progress": _label(progress, round_idx, first)} if progress else {}
+            if first.max_tokens is not None:
+                kw["max_tokens"] = first.max_tokens
             ids = [r.internals_id for r in requests]
             if any(i is not None for i in ids):    # a non-capturing client rejects any list
                 kw["internals_ids"] = ids

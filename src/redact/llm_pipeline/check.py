@@ -122,6 +122,7 @@ def checked(
     *,
     original: str = "",
     internals_ids: tuple[str | None, str | None] = (None, None),
+    max_tokens: tuple[int | None, int | None] = (None, None),
     max_attempts: int = 1,
 ) -> Generator[LLMRequest, str, tuple[str, bool, str]]:
     """Generate, check, and regenerate a rejected reply with the verdict.
@@ -134,6 +135,8 @@ def checked(
         build_check_messages: ``(original, text) -> messages``.
         original: Text the reply is compared against.
         internals_ids: The first attempt's (generation, check) capture ids.
+        max_tokens: Reply limits for the (generation, check) requests.
+            ``None`` keeps the model's default.
         max_attempts: Generations before giving up, at least 1.
 
     Returns:
@@ -145,17 +148,18 @@ def checked(
     if check is not None and build_check_messages is None:
         raise ValueError("A check client needs build_check_messages.")
     gen_id, check_id = internals_ids
+    gen_max, check_max = max_tokens
     feedback = ""
     for attempt in range(1, max_attempts + 1):
         text = yield LLMRequest.for_client(
             gen, build_gen_messages(feedback),
-            internals_id=_attempt_id(gen_id, attempt),
+            internals_id=_attempt_id(gen_id, attempt), max_tokens=gen_max,
         )
         if check is None:
             return text, True, ""
         verdict = yield LLMRequest.for_client(
             check, build_check_messages(original, text),
-            internals_id=_attempt_id(check_id, attempt),
+            internals_id=_attempt_id(check_id, attempt), max_tokens=check_max,
         )
         if is_accepted(verdict):
             return text, True, ""
@@ -169,6 +173,7 @@ def extracted(
     extract: Callable[[str], list[str]],
     *,
     internals_id: str | None = None,
+    max_tokens: int | None = None,
     max_attempts: int = 3,
 ) -> Generator[LLMRequest, str, tuple[list[str], int]]:
     """Generate until ``extract(reply)`` returns samples.
@@ -178,6 +183,8 @@ def extracted(
         build_gen_messages: Builds the messages; called once per attempt.
         extract: ``reply -> samples``; ``[]`` for a reply rejected whole.
         internals_id: The first attempt's capture id.
+        max_tokens: Reply limit for each generation. ``None`` keeps the
+            model's default.
         max_attempts: Generations before giving up, at least 1.
 
     Returns:
@@ -189,6 +196,7 @@ def extracted(
     for attempt in range(1, max_attempts + 1):
         raw = yield LLMRequest.for_client(
             gen, build_gen_messages(), internals_id=_attempt_id(internals_id, attempt),
+            max_tokens=max_tokens,
         )
         samples = extract(raw)
         if samples:

@@ -129,6 +129,11 @@ class TestChecked:
         assert drive_sync(checked(GEN, _gen_messages), call) == ("t1", True, "")
         assert len(call.seen) == 1
 
+    def test_limits_go_to_their_requests(self):
+        call = _call({GEN: ["t1"], CHECK: ["Yes"]})
+        drive_sync(checked(GEN, _gen_messages, CHECK, _check_messages, max_tokens=(400, 64)), call)
+        assert [(r.client, r.max_tokens) for r in call.seen] == [(GEN, 400), (CHECK, 64)]
+
     @pytest.mark.parametrize("kwargs", [
         {"max_attempts": 0}, {"check": CHECK},
     ], ids=["no-attempts", "check-without-builder"])
@@ -156,6 +161,12 @@ class TestExtracted:
         call = _call({GEN: ["bad"] * 3})
         assert drive_sync(extracted(GEN, lambda: [], lambda raw: []), call) == ([], 3)
         assert len(call.seen) == 3
+
+    def test_limit_goes_to_every_attempt(self):
+        call = _call({GEN: ["bad", "good"]})
+        drive_sync(extracted(GEN, lambda: [], lambda raw: [] if raw == "bad" else [raw],
+                             max_tokens=300), call)
+        assert [r.max_tokens for r in call.seen] == [300, 300]
 
     def test_zero_attempts_raises(self):
         with pytest.raises(ValueError):

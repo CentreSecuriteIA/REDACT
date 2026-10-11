@@ -253,11 +253,34 @@ def test_for_client_sets_model_and_replace_keeps_client():
     from tests.conftest import MockBackend, make_client
 
     client = make_client(MockBackend("A"), "m")
-    req = LLMRequest.for_client(client, [], internals_id="x/0")
-    assert (req.model, req.client, req.internals_id) == ("m", client, "x/0")
+    req = LLMRequest.for_client(client, [], internals_id="x/0", max_tokens=7)
+    assert (req.model, req.client, req.internals_id, req.max_tokens) == ("m", client, "x/0", 7)
     tagged = dataclasses.replace(req, internals_id="x/1")
-    assert tagged.client is client and tagged.internals_id == "x/1"
-    assert LLMRequest("m", []).client is None
+    assert tagged.client is client and tagged.internals_id == "x/1" and tagged.max_tokens == 7
+    assert LLMRequest("m", []).client is None and LLMRequest("m", []).max_tokens is None
+
+
+def test_a_limit_below_one_is_rejected():
+    with pytest.raises(ValueError, match="at least 1"):
+        LLMRequest("m", [], max_tokens=0)
+
+
+def _capped(tag, limit, model="m"):
+    yield LLMRequest(model, [{"role": "user", "content": f"{tag}1"}], max_tokens=limit)
+    return tag
+
+
+def test_drive_generators_groups_by_limit_and_forwards_it():
+    calls = []
+
+    class _R:
+        def batch_generate(self, model, messages_list, **kw):
+            calls.append((len(messages_list), kw.get("max_tokens")))
+            return ["r"] * len(messages_list)
+
+    gens = {"a": _capped("a", 20), "b": _capped("b", 20), "c": _rounds("c", 1)}
+    drive_generators(gens, resolve=as_resolver(_R()), finalize=lambda k, v: v)
+    assert sorted(calls, key=str) == [(1, None), (2, 20)]
 
 
 # --- drive_units ---------------------------------------------------------------
@@ -267,12 +290,14 @@ class _Recorder:
 
     def __init__(self, fail_on_call=None):
         self.batches: list[list[str]] = []
+        self.limits: list = []
         self.fail_on_call = fail_on_call
 
     def batch_generate(self, model, messages_list, **kw):
         if self.fail_on_call == len(self.batches) + 1:
             raise RuntimeError("batch boom")
         self.batches.append([m[-1]["content"] for m in messages_list])
+        self.limits.append(kw.get("max_tokens"))
         return [f"{model}:{m[-1]['content']}" for m in messages_list]
 
 
@@ -414,6 +439,28 @@ def test_drive_units_different_models_or_setups_do_not_share_a_call():
     drive_units(iter(units), pool_size=3, on_done=results.__setitem__)
     assert results == {"x": "A", "y": "B", "z": "C"}
     assert [a.generate_call_count, b.generate_call_count, c.generate_call_count] == [1, 1, 1]
+
+
+def test_drive_units_requests_with_different_limits_do_not_share_a_call():
+    rec = _Recorder()
+    units = [("a", _capped("a", 50)), ("b", _capped("b", 50)), ("c", _rounds("c", 1))]
+    _drive(iter(units), rec, pool_size=3, cap=3)
+    assert rec.batches == [["a1", "b1"], ["c1"]]      # the larger group goes first
+    assert rec.limits == [50, None]                     # forwarded only when set
+
+
+def test_drive_units_progress_label_names_the_limit():
+    labels = []
+
+    class _R:
+        def batch_generate(self, model, messages_list, **kw):
+            labels.append(kw.get("progress"))
+            return ["r"] * len(messages_list)
+
+    units = [("a", _capped("a", 50)), ("b", _rounds("b", 1))]
+    drive_units(iter(units), resolve=as_resolver(_R()), pool_size=2, cap=1,
+                on_done=lambda k, v: None, progress="p")
+    assert labels == ["p round 1 (m, max_tokens=50)", "p round 1 (m)"]   # two groups, one round
 
 
 def test_drive_units_unit_finishing_at_prime_takes_no_slot():

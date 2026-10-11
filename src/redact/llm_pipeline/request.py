@@ -19,12 +19,19 @@ class LLMRequest:
             captures nothing.
         client: The client to call. Requests with the same client object go
             out as one batch; ``None`` resolves ``model`` by name.
+        max_tokens: Reply limit for this call. ``None`` leaves the model's
+            default. Requests share a call only when their limits agree.
     """
 
     model: str
     messages: list[dict]
     internals_id: str | None = None
     client: ModelClient | None = field(default=None, kw_only=True)
+    max_tokens: int | None = field(default=None, kw_only=True)
+
+    def __post_init__(self):
+        if self.max_tokens is not None and self.max_tokens < 1:
+            raise ValueError(f"max_tokens must be at least 1, got {self.max_tokens}.")
 
     @classmethod
     def for_client(
@@ -33,6 +40,8 @@ class LLMRequest:
         messages: list[dict],
         *,
         internals_id: str | None = None,
+        max_tokens: int | None = None,
     ) -> LLMRequest:
         """A request bound to ``client``, with ``model`` set from it."""
-        return cls(client.model, messages, internals_id=internals_id, client=client)
+        return cls(client.model, messages, internals_id=internals_id, client=client,
+                   max_tokens=max_tokens)

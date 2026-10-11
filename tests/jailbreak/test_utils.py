@@ -3,6 +3,7 @@
 import random
 
 from redact.jailbreak.chain import order_by_hierarchy
+from redact.jailbreak.protocol import LLMRequest
 from redact.jailbreak.utils import (
     _parse_rejection_info,
     apply_combination,
@@ -181,6 +182,17 @@ class TestCombineTechniquesEarlyExit:
 
 
 class TestApplyCombination:
+    def test_a_requests_limit_reaches_the_client(self):
+        from tests.conftest import MockBackend, make_client
+
+        def capped(text, *, gen_model=None, **kwargs):
+            reply = yield LLMRequest(gen_model, [{"role": "user", "content": text}], max_tokens=12)
+            return reply, "capped"
+
+        backend = MockBackend("r")
+        apply_combination(combine_techniques(capped), "hi", client=make_client(backend, "m"))
+        assert backend.calls[0]["max_tokens"] == 12
+
     def test_returns_four_tuple_on_success(self):
         def pure_tech(text):
             return text.upper(), "upper"
