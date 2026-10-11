@@ -30,7 +30,7 @@ class _InternalsBackend(MockBackend):
 def _pipeline(tmp_path, gen_backend=None, check_backend=None):
     return InputPipeline(
         gen=make_client(gen_backend or MockBackend("1. alpha sample"), "m"),
-        check=make_client(check_backend or MockBackend("Yes"), "m"),
+        check=make_client(check_backend or MockBackend("Yes"), "m-check"),
         dataset_dir=tmp_path,
     )
 

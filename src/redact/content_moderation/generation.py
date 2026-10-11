@@ -45,6 +45,7 @@ role and the dataset path from ``data_dir`` for you.
 
 import logging
 from collections.abc import Callable
+from contextlib import nullcontext
 from pathlib import Path
 
 import pandas as pd
@@ -57,9 +58,9 @@ from ..dataset.merge import merge_all
 from ..llms.client import ModelClient
 from ..llms.prompting import extract_and_clean
 from ..llms.prompting import build_messages, load_prompt
-from ..llm_pipeline import checked, drive_generators, drive_units, is_accepted
+from ..llm_pipeline import LLMRequest, checked, drive_units, is_accepted
 from ..llm_pipeline import extracted as extracted_unit
-from ..llms.router import assert_single_sample_per_call, batch_generate_samples
+from ..llms.router import assert_single_sample_per_call
 from .checker import build_output_quality_checker, build_quality_checker
 from .results import CategoryResult, ConstitutionInputResult, SampleResult, TurnResult
 from .standalone_generation import _StandaloneGenerationMixin
@@ -253,11 +254,12 @@ class InputPipeline(_StandaloneGenerationMixin):
         Samples the checker rejects are saved with their rejection reason
         and not regenerated.
 
-        Each batch of ``batch_size`` entries triggers one generation batch
-        (one vLLM engine pass), a further one per round for the entries
-        whose reply was rejected, then one checker batch. CSV append
-        happens per batch, so a crash mid-run loses at most ``batch_size``
-        entries' worth of work.
+        Each entry is one unit: a generation call (again for a reply that is
+        rejected whole), then one check call per sample. ``drive_units``
+        keeps ``2 * batch_size`` entries live and sends calls of up to
+        ``batch_size`` requests, so a retry or a check shares its call with
+        other entries' requests. Finished entries are appended every 32
+        entries, so a crash mid-run loses only the live entries' work.
 
         Args:
             constitution_df: DataFrame with columns ``source_category``,
@@ -268,10 +270,10 @@ class InputPipeline(_StandaloneGenerationMixin):
                 ``prompts/input/generation/from_constitution/{style}/``.
             samples_per_entry: Prompts to generate per constitution entry.
             use_checker: Whether to run the entry-type-aware quality checker.
-            save: Whether to append rows to CSV per batch.
+            save: Whether to append rows to CSV as entries finish.
             verbose: Log per-entry progress (INFO for stage milestones, DEBUG
                 for per-entry detail).
-            batch_size: Entries per LLM engine pass.
+            batch_size: Requests per model call; twice as many entries are live.
             fresh: When True, clears this style's rows from the per-category
                 CSVs and the ledger before generating (style-aware — other
                 styles' saved rows/ledger entries are left alone).
@@ -297,9 +299,9 @@ class InputPipeline(_StandaloneGenerationMixin):
         # actually supports internals, in which case it raises if not.
         assert_single_sample_per_call(self.gen, samples_per_entry)
         capture_input = self.gen.compute_config.supports_internals
-        # The checker dispatches one call per already-extracted sample (a flat
-        # batch), so it's always attributable regardless of samples_per_entry —
-        # no gate needed here.
+        # The checker sends one request per already-extracted sample, so it's
+        # always attributable regardless of samples_per_entry — no gate needed
+        # here.
         capture_val_in = use_checker and self.check.compute_config.supports_internals
 
         result = ConstitutionInputResult()
@@ -307,7 +309,7 @@ class InputPipeline(_StandaloneGenerationMixin):
         # Sidecar resume-ledger, keyed on one constitution entry
         # (sample_description, entry_type, style) — the same crash-safe pattern
         # as the constitution / output / paraphrase stages. A unit is acked only
-        # after its rows are saved, so a crash loses at most one entry.
+        # after its rows are saved, so a crash loses only unsaved entries.
         ledger = (
             _constitution_inputs_ledger(self.dataset_dir)
             if (save and self.dataset_dir is not None)
@@ -404,9 +406,7 @@ class InputPipeline(_StandaloneGenerationMixin):
         prohibited: set[str] = set()
         checker_cache: dict[tuple[str, str, str], Callable[[str, str], list[dict]]] = {}
 
-        entries = list(constitution_df.iterrows())
-        total = len(entries)
-        n_chunks = (total + batch_size - 1) // batch_size if batch_size else 1
+        total = len(constitution_df)
 
         if verbose:
             style_label = f" | style='{style}'" if style else ""
@@ -414,169 +414,156 @@ class InputPipeline(_StandaloneGenerationMixin):
                         "samples_per_entry=%d%s", total, batch_size, samples_per_entry, style_label)
 
         rejected_entries = 0
-        for batch_start in range(0, total, batch_size):
-            batch = entries[batch_start : batch_start + batch_size]
-            batch_idx = batch_start // batch_size + 1
+        finished = 0   # entries finished so far
 
-            # 1. One generation unit per entry. A reply with any other number of
-            # samples is rejected whole and regenerated, up to max_attempts.
-            units = {}
-            for j, (_, entry) in enumerate(batch):
-                seed_kwargs = {
-                    "Category": str(entry.get("source_category", "")),
-                    "sample_description": str(entry.get("sample_description", "")),
-                    "constitution_subcategory": str(
-                        entry.get("constitution_subcategory", "")
-                    ),
-                    "entry_type": str(entry.get("entry_type", "harmful")),
-                }
-                # Pre-call identity (the ledger's own key fields): the samples
-                # do not exist yet, so captured internals are rooted here.
-                eid = _hash_text(
-                    f"{seed_kwargs['sample_description']}:{seed_kwargs['entry_type']}:{style}"
+        def _append(rows: list[dict]) -> None:
+            # One append_samples per category: each call rewrites that CSV.
+            by_category: dict[str, list[dict]] = {}
+            for r in rows:
+                by_category.setdefault(r["category"], []).append(r)
+            for category, rs in by_category.items():
+                append_samples(
+                    [r["text"] for r in rs],
+                    category=category,
+                    turn=0,
+                    accepted=[r["accepted"] for r in rs],
+                    source="constitution",
+                    extra_columns=[r["extra"] for r in rs],
+                    dataset_dir=self.dataset_dir,
                 )
-                units[j] = extracted_unit(
-                    self.gen,
-                    # seed_kwargs=...: a bare closure would see the last entry's.
-                    lambda seed_kwargs=seed_kwargs: self._build_generation_messages(
-                        prompt_config,
-                        samples_per_request=samples_per_entry,
-                        prohibited=prohibited,
-                        **seed_kwargs,
-                    ),
-                    lambda raw: extract_and_clean(
-                        raw, style=self.extraction_style,
-                        expected_count=samples_per_entry,
-                    ),
-                    internals_id=(
-                        (f"{eid}/input_{style}" if style else f"{eid}/input")
-                        if capture_input else None
-                    ),
-                    max_attempts=max_attempts,
-                )
+            if verbose:
+                n_acc = sum(1 for r in rows if r["accepted"])
+                logger.info("[%d/%d] %d/%d samples accepted -> appended",
+                            finished, total, n_acc, len(rows))
 
-            # 2. Generation rounds: one batch for the chunk, then one per round
-            # for the entries whose reply was rejected.
-            results = drive_generators(
-                units,
-                finalize=lambda _key, value: value,
-                progress=f"gen batch {batch_idx}/{n_chunks}" if verbose else None,
+        def _entry_unit(entry):
+            """Generate an entry's samples, drop those already seen, check each."""
+            seed_kwargs = {
+                "Category": str(entry.get("source_category", "")),
+                "sample_description": str(entry.get("sample_description", "")),
+                "constitution_subcategory": str(
+                    entry.get("constitution_subcategory", "")
+                ),
+                "entry_type": str(entry.get("entry_type", "harmful")),
+            }
+            # Pre-call identity (the ledger's own key fields): the samples
+            # do not exist yet, so captured internals are rooted here.
+            eid = _hash_text(
+                f"{seed_kwargs['sample_description']}:{seed_kwargs['entry_type']}:{style}"
             )
+            # A reply with any other number of samples is rejected whole and
+            # regenerated, up to max_attempts.
+            extracted, attempts = yield from extracted_unit(
+                self.gen,
+                lambda: self._build_generation_messages(
+                    prompt_config,
+                    samples_per_request=samples_per_entry,
+                    prohibited=prohibited,
+                    **seed_kwargs,
+                ),
+                lambda raw: extract_and_clean(
+                    raw, style=self.extraction_style,
+                    expected_count=samples_per_entry,
+                ),
+                internals_id=(
+                    (f"{eid}/input_{style}" if style else f"{eid}/input")
+                    if capture_input else None
+                ),
+                max_attempts=max_attempts,
+            )
+            rejected = not extracted
+            # Outside the extraction: a duplicate is not a reason to regenerate.
+            if prohibited:
+                extracted = [s for s in extracted if s not in prohibited]
 
-            # 3. Per entry: its samples, and whether every attempt was rejected.
-            per_entry_extracted: list[list[str]] = []
-            per_entry_attempts: list[int] = []
-            per_entry_rejected: list[bool] = []
-            for j in range(len(batch)):
-                extracted, attempts = results[j]
-                per_entry_attempts.append(attempts)
-                per_entry_rejected.append(not extracted)
-                # Outside the unit: a duplicate is not a reason to regenerate.
-                if prohibited:
-                    extracted = [s for s in extracted if s not in prohibited]
-                per_entry_extracted.append(extracted)
-
-            # 4. Build flat checker list + single batch_generate for checks
-            flat_samples: list[str] = []
-            flat_check_msgs: list[list[dict]] = []
-            # sample_id per extracted sample — its own eventual CSV identity
-            # (append_samples() computes the same hash), known pre-checker-call
-            # since the sample text already exists by this point.
-            flat_internals_ids: list[str] = []
-            entry_ranges: list[tuple[int, int]] = []
-            for (_, entry), extracted in zip(batch, per_entry_extracted):
-                start = len(flat_samples)
-                flat_samples.extend(extracted)
-                entry_ranges.append((start, len(flat_samples)))
-
-                if use_checker and extracted:
-                    category = str(entry.get("source_category", "unknown"))
-                    entry_type = str(entry.get("entry_type", "harmful"))
-                    subcategory = str(entry.get("constitution_subcategory", ""))
-                    cache_key = (category, entry_type, subcategory)
-                    if cache_key not in checker_cache:
-                        checker_cache[cache_key] = build_quality_checker(
-                            category=category,
-                            entry_type=entry_type,
-                            subcategory=subcategory,
-                        )
-                    checker = checker_cache[cache_key]
-                    flat_check_msgs.extend(checker("", s) for s in extracted)
-                    if capture_val_in:
-                        suffix = f"val_in_{style}" if style else "val_in"
-                        flat_internals_ids.extend(f"{_hash_text(s)}/{suffix}" for s in extracted)
-
-            flat_check_results: list[tuple[bool, str]]
-            if use_checker and flat_check_msgs:
-                # Not batch_check_samples: each entry in this chunk can carry a
-                # different (category, entry_type, subcategory) checker, so
-                # there's no single build_check_messages describing the whole
-                # flat batch — messages are already built per-entry above.
-                responses = batch_generate_samples(
-                    self.check, flat_check_msgs,
-                    batch_size=batch_size,
-                    progress=f"check batch {batch_idx}/{n_chunks}" if verbose else None,
-                    internals_ids=flat_internals_ids if capture_val_in else None,
-                )
-                flat_check_results = []
-                for response in responses:
-                    accepted = is_accepted(response)
-                    flat_check_results.append((accepted, "" if accepted else response))
-            else:
-                flat_check_results = [(True, "") for _ in flat_samples]
-
-            # 5. Per-entry save (incremental) and stats
-            for entry_idx, (_, entry) in enumerate(batch):
-                global_idx = batch_start + entry_idx
-                start, end = entry_ranges[entry_idx]
-                extracted = per_entry_extracted[entry_idx]
-
+            verdicts = [(True, "")] * len(extracted)
+            if use_checker and extracted:
                 category = str(entry.get("source_category", "unknown"))
                 entry_type = str(entry.get("entry_type", "harmful"))
                 subcategory = str(entry.get("constitution_subcategory", ""))
-                sample_desc = str(entry.get("sample_description", ""))
+                cache_key = (category, entry_type, subcategory)
+                if cache_key not in checker_cache:
+                    checker_cache[cache_key] = build_quality_checker(
+                        category=category,
+                        entry_type=entry_type,
+                        subcategory=subcategory,
+                    )
+                checker = checker_cache[cache_key]
+                suffix = f"val_in_{style}" if style else "val_in"
+                verdicts = []
+                for s in extracted:
+                    # The sample's own content hash is its eventual sample_id
+                    # (append_samples() computes the same hash).
+                    response = yield LLMRequest.for_client(
+                        self.check, checker("", s),
+                        internals_id=(
+                            f"{_hash_text(s)}/{suffix}" if capture_val_in else None
+                        ),
+                    )
+                    accepted = is_accepted(response)
+                    verdicts.append((accepted, "" if accepted else response))
+            return extracted, verdicts, attempts, rejected
 
+        live: dict[int, pd.Series] = {}   # entries of live units, by position
+
+        def _units():
+            for j, (_, entry) in enumerate(constitution_df.iterrows()):
+                live[j] = entry
+                yield j, _entry_unit(entry)
+
+        def _on_done(j, value):
+            nonlocal rejected_entries, finished
+            entry = live.pop(j)
+            extracted, verdicts, attempts, rejected = value
+            finished += 1
+
+            category = str(entry.get("source_category", "unknown"))
+            entry_type = str(entry.get("entry_type", "harmful"))
+            subcategory = str(entry.get("constitution_subcategory", ""))
+            sample_desc = str(entry.get("sample_description", ""))
+
+            if verbose:
+                desc_preview = sample_desc[:_DESC_PREVIEW_LEN]
+                if len(sample_desc) > _DESC_PREVIEW_LEN:
+                    desc_preview += "..."
+                logger.debug("[%d/%d] %s | %s | %s",
+                             finished, total, category, entry_type, desc_preview)
+
+            if not extracted:
+                result.skipped_entries += 1
+                rejected_entries += rejected
+                # Ack it anyway: the entry produced no rows, so the CSV
+                # fallback can never cover it, and leaving it un-acked means
+                # re-generating (and re-paying for) it on every resume.
+                if buf is not None:
+                    buf.add([], {
+                        "sample_description": sample_desc,
+                        "entry_type": entry_type,
+                        "style": style,
+                        "status": "rejected" if rejected else "no_samples",
+                        "attempts": attempts,
+                    })
                 if verbose:
-                    desc_preview = sample_desc[:_DESC_PREVIEW_LEN]
-                    if len(sample_desc) > _DESC_PREVIEW_LEN:
-                        desc_preview += "..."
-                    logger.debug("[%d/%d] %s | %s | %s",
-                                 global_idx + 1, total, category, entry_type, desc_preview)
+                    logger.debug("-> no samples extracted")
+                return
 
-                if not extracted:
-                    result.skipped_entries += 1
-                    rejected = per_entry_rejected[entry_idx]
-                    rejected_entries += rejected
-                    # Ack it anyway: the entry produced no rows, so the CSV
-                    # fallback can never cover it, and leaving it un-acked means
-                    # re-generating (and re-paying for) it on every resume.
-                    if save and ledger is not None:
-                        ledger.record([{
-                            "sample_description": sample_desc,
-                            "entry_type": entry_type,
-                            "style": style,
-                            "status": "rejected" if rejected else "no_samples",
-                            "attempts": per_entry_attempts[entry_idx],
-                        }])
-                    if verbose:
-                        logger.debug("-> no samples extracted")
-                    continue
+            sample_results = [
+                SampleResult(
+                    text=text,
+                    accepted=accepted,
+                    reasoning=reasoning,
+                    turn=0,
+                )
+                for text, (accepted, reasoning) in zip(extracted, verdicts)
+            ]
 
-                sample_results = [
-                    SampleResult(
-                        text=text,
-                        accepted=accepted,
-                        reasoning=reasoning,
-                        turn=0,
-                    )
-                    for text, (accepted, reasoning) in zip(
-                        extracted, flat_check_results[start:end]
-                    )
-                ]
-
-                if save:
-                    extra = [
-                        {
+            if save:
+                rows = [
+                    {
+                        "category": category,
+                        "text": sr.text,
+                        "accepted": sr.accepted,
+                        "extra": {
                             "entry_type": entry_type,
                             "subcategory": subcategory,
                             "source_sample_description": sample_desc,
@@ -588,39 +575,48 @@ class InputPipeline(_StandaloneGenerationMixin):
                             ),
                             "template_style": style,
                             "rejection_reason": sr.reasoning,
-                        }
-                        for sr in sample_results
-                    ]
-                    append_samples(
-                        [sr.text for sr in sample_results],
-                        category=category,
-                        turn=0,
-                        accepted=[sr.accepted for sr in sample_results],
-                        source="constitution",
-                        extra_columns=extra,
-                        dataset_dir=self.dataset_dir,
-                    )
-                    # Ack this entry only after its rows are on disk (crash-safe).
-                    if ledger is not None:
-                        ledger.record([{
-                            "sample_description": sample_desc,
-                            "entry_type": entry_type,
-                            "style": style,
-                        }])
+                        },
+                    }
+                    for sr in sample_results
+                ]
+                record = {
+                    "sample_description": sample_desc,
+                    "entry_type": entry_type,
+                    "style": style,
+                }
+                if buf is not None:
+                    buf.add(rows, record)
+                else:
+                    _append(rows)   # no ledger to ack into
 
-                accepted_count = sum(1 for sr in sample_results if sr.accepted)
-                rejected_count = len(sample_results) - accepted_count
+            accepted_count = sum(1 for sr in sample_results if sr.accepted)
+            rejected_count = len(sample_results) - accepted_count
 
-                result.total_entries_processed += 1
-                result.total_prompts_generated += len(sample_results)
-                result.total_prompts_accepted += accepted_count
-                result.total_prompts_rejected += rejected_count
+            result.total_entries_processed += 1
+            result.total_prompts_generated += len(sample_results)
+            result.total_prompts_accepted += accepted_count
+            result.total_prompts_rejected += rejected_count
 
-                for sr in sample_results:
-                    prohibited.add(sr.text)
+            for sr in sample_results:
+                prohibited.add(sr.text)
 
-                if verbose:
-                    logger.debug("-> %d accepted, %d rejected", accepted_count, rejected_count)
+            if verbose:
+                logger.debug("-> %d accepted, %d rejected", accepted_count, rejected_count)
+
+        # Generation and check calls, topped up from the entries as units
+        # finish. The buffer appends finished entries' rows, then acks them
+        # (see dataset/resume.py), every 32 entries and on any exit.
+        with (
+            CommitBuffer(append=_append, ledger=ledger) if ledger is not None
+            else nullcontext()
+        ) as buf:
+            drive_units(
+                _units(),
+                on_done=_on_done,
+                pool_size=2 * batch_size,
+                cap=batch_size,
+                progress="inputs" if verbose else None,
+            )
 
         if rejected_entries:
             logger.warning(
