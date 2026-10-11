@@ -81,6 +81,8 @@ class _Script:
             try:
                 await asyncio.wait_for(turn.wait(), _PATIENCE)
             except asyncio.CancelledError:
+                for _ in range(3):      # a real abort takes turns of the loop to finish
+                    await asyncio.sleep(0)
                 self._note("cancel", name)
                 raise
             following = self.order[self.order.index(name) + 1:] if name in self.order else ()

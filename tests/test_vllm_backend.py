@@ -523,14 +523,28 @@ class TestVLLMGenerateBatch:
 
     def test_a_failed_request_raises_and_cancels_the_others(self, monkeypatch, events):
         """The failing request is the last to start, so the other two are in
-        flight when it fails."""
+        flight when it fails, and they have stopped when the batch ends. The
+        log is read on the loop at that moment: read by the caller, it would
+        also hold what the loop did before the caller woke."""
+        import redact.llms.backends.vllm as vllm_module
+
         script = _Script(["bad"], fail={"bad"})
         backend, _ = _vllm_backend(monkeypatch, {}, script)
+        logged = []
+
+        async def then_read_the_log(batch):
+            try:
+                return await batch
+            finally:
+                logged.extend(script.log)
+
+        monkeypatch.setattr(vllm_module, "aio", types.SimpleNamespace(
+            run=lambda batch: aio.run(then_read_the_log(batch))))
         with pytest.raises(RuntimeError, match="bad boom"):
             backend.generate([_ask("a"), _ask("b"), _ask("bad")])
-        assert script.log[:4] == [("start", "a"), ("start", "b"), ("start", "bad"),
-                                  ("end", "bad")]
-        assert sorted(script.log[4:]) == [("cancel", "a"), ("cancel", "b")]
+        assert logged[:4] == [("start", "a"), ("start", "b"), ("start", "bad"),
+                              ("end", "bad")]
+        assert sorted(logged[4:]) == [("cancel", "a"), ("cancel", "b")]
         assert [event.get("error") for event in events] == ["RuntimeError: bad boom"]
 
     def test_an_interrupted_call_cancels_its_requests(self, monkeypatch):
