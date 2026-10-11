@@ -53,6 +53,7 @@ class _Cards:
         devices, reserve = self._claim(fp)
         vllm = fp.setup == "vllm"
         fits = self.free is None or all(
+            # The card must exist on this machine. Check for tensor-parallel engines.
             d < len(self.free)
             # vLLM grants sharing a card stay under the ceiling together.
             and self._room(d, vllm) + _EPS >= reserve[d]

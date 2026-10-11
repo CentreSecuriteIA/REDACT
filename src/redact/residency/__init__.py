@@ -32,6 +32,12 @@ of the run, not a guarantee against running out of memory.
 #   - Bill local cost on the union of engine lifetimes.
 #   - A plan does not see engines already loaded, by this process or another.
 #     The runner should own this; one process (container) per run is a candidate.
+#   - Placement is greedy: models are placed in the order given and never
+#     moved, so a set that could fit, mostly across several cards, can be
+#     reported as not fitting. Needs a search over arrangements.
+#   - An engine stays resident from its first stage to its last, so a stage
+#     can fail to fit only because of an engine kept for a later stage.
+#     Releasing and reloading it would fit, at the cost of a second load.
 
 import logging
 
