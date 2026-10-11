@@ -412,6 +412,24 @@ def test_an_exception_from_the_source_stops_the_lane():
     assert script.log == [("start", "a1"), ("cancel", "a1")]
 
 
+def test_a_request_that_cannot_be_sent_is_not_the_units_error():
+    """A name that does not resolve fails the run, as a failed call does:
+    the unit is not handed to on_error, and the request in flight is cancelled."""
+    script = _Script([])
+    client = _lane_client(script)
+
+    def resolve(name):
+        raise KeyError(f"unknown model {name}")
+
+    failed = []
+    units = [("a", _unit(client, "a")), ("b", _unit_by_name("ghost", "b"))]
+    with pytest.raises(KeyError, match="ghost"):
+        drive_units(iter(units), pool_size=2, resolve=resolve,
+                    on_done=lambda k, v: None, on_error=lambda k, e: failed.append(k))
+    assert failed == []
+    assert script.log == [("start", "a1"), ("cancel", "a1")]
+
+
 def test_cancel_returns_only_when_every_request_has_stopped():
     """A cancelled request needs further turns of the loop to stop; the
     driver's teardown must outlast them."""
