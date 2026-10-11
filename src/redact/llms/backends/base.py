@@ -41,11 +41,14 @@ class ComputeConfig:
             contention).
         supports_internals: The backend can save hidden states, attention
             and logprobs under caller-supplied ``internals_ids``.
+        supports_async_calls: The backend has ``agenerate()``, a coroutine
+            for one item that runs on the shared loop (``llms/aio.py``).
     """
 
     supports_native_batching: bool = False
     supports_parallel_calls: bool = True
     supports_internals: bool = False
+    supports_async_calls: bool = False
 
 
 # ---------------------------------------------------------------------------
@@ -129,6 +132,7 @@ class LLMBackend(ABC):
         supports_native_batching=False,
         supports_parallel_calls=True,
         supports_internals=False,
+        supports_async_calls=False,
     )
     """Capability flags of this backend class.
 

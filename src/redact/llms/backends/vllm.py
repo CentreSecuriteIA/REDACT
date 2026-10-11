@@ -214,6 +214,7 @@ class VLLMBackend(LLMBackend):
         supports_native_batching=True,
         supports_parallel_calls=False,
         supports_internals=False,
+        supports_async_calls=False,
     )
 
     def __init__(

@@ -194,6 +194,7 @@ class TransformersIntrospectionBackend(LLMBackend):
         supports_native_batching=False,
         supports_parallel_calls=False,
         supports_internals=True,
+        supports_async_calls=False,
     )
 
     def __init__(

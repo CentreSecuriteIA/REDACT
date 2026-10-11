@@ -2,11 +2,11 @@
 
 import logging
 import os
-from unittest.mock import MagicMock, patch
+from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 
-from redact.llms import observe
+from redact.llms import aio, observe
 from redact.llms.backends import OpenAIBackend
 from redact.llms.model_config import get_model_config
 
@@ -186,15 +186,16 @@ def _response(content, finish_reason):
     return MagicMock(choices=[choice], usage=None)
 
 
+@pytest.fixture()
+def events():
+    seen = []
+    observe.set_emitter(seen.append)
+    yield seen
+    observe.set_emitter(None)
+
+
 class TestOpenAIEmptyReply:
     """An empty reply is returned as "" with its finish reason on record."""
-
-    @pytest.fixture()
-    def events(self):
-        seen = []
-        observe.set_emitter(seen.append)
-        yield seen
-        observe.set_emitter(None)
 
     @pytest.mark.parametrize("response, reason", [
         (_response(None, "content_filter"), "content_filter"),
@@ -243,3 +244,80 @@ class TestOpenAICutReply:
         assert [r.getMessage() for r in caplog.records] == [
             "venice-uncensored returned an empty reply (finish_reason=length).", self.CUT,
         ]
+
+
+def _async_sdk(response=None, error=None):
+    """A stand-in for ``openai.AsyncOpenAI`` whose call answers at once."""
+    client = MagicMock()
+    client.chat.completions.create = AsyncMock(return_value=response, side_effect=error)
+    return client
+
+
+class TestOpenAIAsync:
+    """agenerate() is generate() for one item, on the async SDK client."""
+
+    def test_same_request_text_and_event_as_generate(
+        self, openai_backend, mock_openai_client, events
+    ):
+        response = _response("ok", "stop")
+        response.usage = MagicMock(prompt_tokens=812, completion_tokens=40)
+        mock_openai_client.chat.completions.create.return_value = response
+        openai_backend._async_client = sdk = _async_sdk(response)
+        messages = [{"role": "system", "content": "Sys."},
+                    {"role": "user", "content": "hi"}]
+
+        assert openai_backend.generate([messages], max_tokens=50, top_p=0.9) == ["ok"]
+        assert aio.run(
+            openai_backend.agenerate(messages, max_tokens=50, top_p=0.9)) == "ok"
+
+        sent = mock_openai_client.chat.completions.create.call_args
+        assert sdk.chat.completions.create.await_args == sent
+        sync_event, async_event = events          # one event per call
+        del sync_event["ms"], async_event["ms"]
+        assert async_event == sync_event
+        assert (async_event["in_tok"], async_event["out_tok"]) == (812, 40)
+
+    def test_an_empty_cut_reply_warns_as_generate_does(self, openai_backend, caplog):
+        openai_backend._async_client = _async_sdk(_response("", "length"))
+        with caplog.at_level(logging.WARNING, logger="redact.llms.backends"):
+            assert aio.run(openai_backend.agenerate(_HI[0], max_tokens=50)) == ""
+        assert [r.getMessage() for r in caplog.records] == [
+            "venice-uncensored returned an empty reply (finish_reason=length).",
+            TestOpenAICutReply.CUT,
+        ]
+
+    def test_a_failed_call_is_recorded_then_re_raised(self, openai_backend, events):
+        openai_backend._async_client = _async_sdk(error=RuntimeError("502"))
+        with pytest.raises(RuntimeError, match="502"):
+            aio.run(openai_backend.agenerate(_HI[0]))
+        (event,) = events
+        assert event["error"] == "RuntimeError: 502" and event["n_items"] == 1
+
+    def test_the_async_sdk_client_is_cached_per_endpoint(self):
+        """Built by the first agenerate(), shared by the backends on one
+        endpoint, and dropped by clear_cache()."""
+        built = []
+
+        def build(**kwargs):
+            built.append(kwargs)
+            return _async_sdk(_response("ok", "stop"))
+
+        OpenAIBackend.clear_cache()
+        with patch("redact.llms.backends.openai.openai.OpenAI"), \
+             patch("redact.llms.backends.openai.openai.AsyncOpenAI", side_effect=build):
+            a = OpenAIBackend("model-a", api_key="k", base_url="https://one.api/v1")
+            b = OpenAIBackend("model-b", api_key="k", base_url="https://one.api/v1")
+            other = OpenAIBackend("model-c", api_key="k", base_url="https://two.api/v1")
+            assert built == []
+            for backend in (a, b, other):
+                assert aio.run(backend.agenerate(_HI[0])) == "ok"
+            assert a._async_client is b._async_client
+            assert other._async_client is not a._async_client
+            assert built == [{"api_key": "k", "base_url": "https://one.api/v1"},
+                             {"api_key": "k", "base_url": "https://two.api/v1"}]
+
+            OpenAIBackend.clear_cache()
+            again = OpenAIBackend("model-a", api_key="k", base_url="https://one.api/v1")
+            aio.run(again.agenerate(_HI[0]))
+            assert again._async_client is not a._async_client
+        OpenAIBackend.clear_cache()

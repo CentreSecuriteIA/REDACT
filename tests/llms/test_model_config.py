@@ -283,15 +283,22 @@ class TestBackendCapabilities:
         for backend_type, cls in BACKEND_TYPES.items():
             assert compute_config_for(backend_type) is cls.compute_config
 
-    def test_every_backend_declares_all_three_flags_explicitly(self):
+    def test_every_backend_declares_every_flag_explicitly(self):
         # No silent inheritance: reading one class tells you its whole profile.
         import inspect
         for cls in BACKEND_TYPES.values():
             src = inspect.getsource(cls)
             assert "compute_config: ClassVar[ComputeConfig]" in src, cls.__name__
             for flag in ("supports_native_batching", "supports_parallel_calls",
-                         "supports_internals"):
+                         "supports_internals", "supports_async_calls"):
                 assert flag in src, f"{cls.__name__} leaves {flag} implicit"
+
+    def test_only_the_openai_backend_has_async_calls(self):
+        # The flag sends a backend's requests down drive_units' async lane.
+        async_types = {t for t, cls in BACKEND_TYPES.items()
+                       if cls.compute_config.supports_async_calls}
+        assert async_types == {"openai"}
+        assert all(hasattr(BACKEND_TYPES[t], "agenerate") for t in async_types)
 
     def test_setup_types_are_named_after_their_config_field(self):
         """The convention that removes the need for a lookup table.
