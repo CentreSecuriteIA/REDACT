@@ -3,6 +3,7 @@
 import os
 import threading
 import time
+from types import SimpleNamespace
 from unittest.mock import patch
 
 import pytest
@@ -348,6 +349,32 @@ class TestRateLimiter:
             limiter.wait_if_needed(backend)
 
         assert len(slept) == 1, "a clock jump let a request through a full window"
+
+    def test_reserve_records_a_request_or_returns_the_wait(self):
+        """reserve() never blocks: a full window costs the caller a wait and
+        records nothing, so asking again later is safe."""
+        backend = make_client(model="rl-reserve").backend
+        backend.rpm = 2
+        limiter = RateLimiter()
+
+        # Only this module's clock: time.monotonic itself also serves other threads.
+        clock = iter([100.0, 110.0, 130.0, 160.5])
+        fake_time = SimpleNamespace(monotonic=lambda: next(clock))
+        with patch.object(wrappers, "time", fake_time):
+            assert limiter.reserve(backend) == 0
+            assert limiter.reserve(backend) == 0
+            # Full: the oldest request leaves the window 30s from now.
+            assert limiter.reserve(backend) == pytest.approx(30.1)
+            assert limiter._timestamps == [100.0, 110.0]
+            assert limiter.reserve(backend) == 0
+        assert limiter._timestamps == [110.0, 160.5]
+
+    def test_reserve_without_a_budget_records_nothing(self):
+        backend = make_client(model="rl-reserve-local").backend
+        backend.rpm = None
+        limiter = RateLimiter()
+        assert limiter.reserve(backend) == 0
+        assert limiter._timestamps == []
 
 
 class TestBatchCaller:

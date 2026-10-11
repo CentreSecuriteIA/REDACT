@@ -40,6 +40,38 @@ class RateLimiter:
         self._timestamps: list[float] = []
         self._lock = threading.Lock()
 
+    def reserve(self, backend: "LLMBackend") -> float:
+        """Record a request if it fits in the window, without blocking.
+
+        Args:
+            backend: The model whose ``rpm`` to enforce.
+
+        Returns:
+            0 when the request was recorded and may go now, which is always
+            the case when ``backend.rpm`` is ``None``. Otherwise the seconds
+            to wait before asking again; nothing was recorded.
+        """
+        rpm = backend.rpm
+        if rpm is None:
+            return 0.0
+
+        with self._lock:
+            # Monotonic: a wall-clock change must not empty or freeze the window.
+            now = time.monotonic()
+            self._timestamps[:] = [
+                t for t in self._timestamps
+                if now - t < _RATE_LIMIT_WINDOW_SECONDS
+            ]
+            if len(self._timestamps) < rpm:
+                self._timestamps.append(now)
+                return 0.0
+            wait = _RATE_LIMIT_WINDOW_SECONDS - (now - self._timestamps[0]) + 0.1
+
+        # Reported here: every caller pauses for this long next.
+        logger.info("[rate-limit] %s: pausing %.1fs (%d RPM)",
+                    backend.model, wait, rpm)
+        return wait
+
     def wait_if_needed(self, backend: "LLMBackend") -> None:
         """Block until a request against this backend fits in the window.
 
@@ -47,39 +79,10 @@ class RateLimiter:
             backend: The model whose ``rpm`` to enforce. Returns immediately
                 when its ``rpm`` is ``None``.
         """
-        rpm = backend.rpm
-        if rpm is None:
-            return
-
-        with self._lock:
-            # Loop and re-check: the lock is released while sleeping, so
-            # several workers can wake together. Each must prune and test
-            # again before appending, or they would all pass at once and
-            # exceed the limit.
-            while True:
-                # Monotonic: a wall-clock change must not empty or freeze the window.
-                now = time.monotonic()
-                self._timestamps[:] = [
-                    t for t in self._timestamps
-                    if now - t < _RATE_LIMIT_WINDOW_SECONDS
-                ]
-                if len(self._timestamps) < rpm:
-                    break
-
-                sleep_for = (
-                    _RATE_LIMIT_WINDOW_SECONDS - (now - self._timestamps[0]) + 0.1
-                )
-                logger.info("[rate-limit] %s: pausing %.1fs (%d RPM)",
-                            backend.model, sleep_for, rpm)
-                # Sleep without the lock so other workers are not blocked
-                # behind this one.
-                self._lock.release()
-                try:
-                    time.sleep(sleep_for)
-                finally:
-                    self._lock.acquire()
-
-            self._timestamps.append(time.monotonic())
+        # Ask again after every sleep: several workers can wake together, and
+        # one that went without asking would exceed the limit.
+        while (wait := self.reserve(backend)) > 0:
+            time.sleep(wait)
 
 
 # One limiter per window key, kept here so that windows outlive clients.
