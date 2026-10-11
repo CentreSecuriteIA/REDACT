@@ -341,10 +341,15 @@ def drive_units(
         nonlocal reported
         if not flying:
             return False
-        try:
-            key = arrived.get(block=wait)
-        except queue.Empty:
-            return False
+        while True:
+            try:
+                # Wake every second: on Windows a blocked get() does not see
+                # Ctrl-C.
+                key = arrived.get(block=wait, timeout=1.0)
+                break
+            except queue.Empty:
+                if not wait:
+                    return False
         # The result follows its key within a turn of the loop. A failed
         # request raises here: it is the transport failing, as a failed
         # generate() is, so it propagates.

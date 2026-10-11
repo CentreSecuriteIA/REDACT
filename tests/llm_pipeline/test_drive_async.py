@@ -434,6 +434,26 @@ def test_a_group_that_never_fills_goes_once_nothing_is_in_flight(monkeypatch):
     assert n == len(units) and done == ["x", "y", "s"]
 
 
+def test_a_wait_that_wakes_with_nothing_arrived_goes_on_waiting(monkeypatch):
+    """The driver's wait has a timeout, so that an interrupt gets through;
+    waking on it is not the end of the run."""
+    timeouts = []
+
+    class _DriverQueue(queue.Queue):
+        def get(self, block=True, timeout=None):
+            if block and not timeouts:
+                timeouts.append(timeout)
+                raise queue.Empty        # the timeout passed with no reply
+            return super().get(block, timeout)
+
+    monkeypatch.setattr(
+        drive_module, "queue", SimpleNamespace(Queue=_DriverQueue, Empty=queue.Empty))
+    client = _lane_client(_Script())
+    n, done, _ = _drive([("a", _unit(client, "a"))], pool_size=1)
+    assert (n, done) == (1, ["a"])
+    assert timeouts == [1.0]
+
+
 def test_a_run_without_async_clients_never_touches_the_event_loop(monkeypatch):
     monkeypatch.setattr(drive_module, "aio", None)
     client = make_client(MockBackend("ok"), "lane-sync")
