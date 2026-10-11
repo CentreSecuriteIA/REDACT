@@ -89,6 +89,30 @@ def _finalize_error(sample: dict, exc: Exception, gen_model: str, resolve=None) 
     }
 
 
+def _sample_gen(
+    sample: dict,
+    *,
+    gen_model: str,
+    translate_model: str | None = None,
+    benign_data: dict | None = None,
+    capture_internals: bool = False,
+):
+    """One sample's technique-chain generator.
+
+    With ``capture_internals`` it also sets ``sample["_internals_root"]``, the
+    provisional capture root :func:`_finalize` relabels.
+    """
+    internals_root = None
+    if capture_internals:
+        internals_root = f"{sample.get('id', '')}/jailbreak/attempt_{sample.get('iteration', 0)}"
+        sample["_internals_root"] = internals_root  # read back in _finalize for the rename
+    return make_combination_gen(
+        sample["combination"], sample["prompt"],
+        gen_model=gen_model, translate_model=translate_model,
+        benign_data=benign_data, internals_root=internals_root,
+    )
+
+
 def batch_apply_combinations(
     samples: list[dict],
     *,
@@ -135,17 +159,13 @@ def batch_apply_combinations(
 
     # Build one chain generator per sample; the generic round-driver
     # (llm_pipeline.drive_generators) pools LLM calls by model per round.
-    gens = {}
-    for i, s in enumerate(samples):
-        internals_root = None
-        if capture_internals:
-            internals_root = f"{s.get('id', '')}/jailbreak/attempt_{s.get('iteration', 0)}"
-            s["_internals_root"] = internals_root  # read back in _finalize for the rename
-        gens[i] = make_combination_gen(
-            s["combination"], s["prompt"],
-            gen_model=gen_model, translate_model=translate_model,
-            benign_data=benign_data, internals_root=internals_root,
+    gens = {
+        i: _sample_gen(
+            s, gen_model=gen_model, translate_model=translate_model,
+            benign_data=benign_data, capture_internals=capture_internals,
         )
+        for i, s in enumerate(samples)
+    }
     results = drive_generators(
         gens,
         resolve=resolve,

@@ -2,8 +2,9 @@
 
 Uses ``pure_only=True`` with only the obfuscation layer so no technique needs an
 LLM — the engine completes every sample at prime time and the router is never
-called. This exercises planning, chunked execution, manifest, the prompt-content
-id, and resume without any network access.
+called. This exercises planning, execution, manifest, the prompt-content
+id, and resume without any network access. The ``pool`` tests at the end run
+LLM-backed fake techniques over a hand-written plan against a fake backend.
 """
 
 
@@ -11,7 +12,10 @@ import pandas as pd
 import pytest
 
 from redact.jailbreak.manifest import compute_sample_id, load_plan
+from redact.jailbreak.protocol import LLMRequest
+from redact.llms.backends import ComputeConfig
 from redact.pipelines import generate_jailbreaks
+from tests.conftest import MockBackend, make_client
 
 PURE_KW = dict(
     pure_only=True,
@@ -186,3 +190,143 @@ def test_include_translation_filter_removes_translation_family():
     assert len(pool) - len(filtered) == sum(
         1 for f in pool if "translation" in getattr(f, "families", [])
     )
+
+
+# --- refill pool: LLM techniques over a hand-written plan -------------------
+
+GEN = "jb-gen"
+
+
+def one_step(text, *, gen_model=None, **kwargs):
+    """LLM technique: one call."""
+    reply = yield LLMRequest(gen_model, [{"role": "user", "content": "step1 " + text}])
+    return reply, "one_step"
+
+
+def two_step(text, *, gen_model=None, **kwargs):
+    """LLM technique: two calls in sequence."""
+    a = yield LLMRequest(gen_model, [{"role": "user", "content": "step1 " + text}])
+    b = yield LLMRequest(gen_model, [{"role": "user", "content": "step2 " + a}])
+    return b, "two_step"
+
+
+def broken(text, *, gen_model=None, **kwargs):
+    """LLM technique whose chain raises after its call."""
+    yield LLMRequest(gen_model, [{"role": "user", "content": "step1 " + text}])
+    raise ValueError("chain failed")
+
+
+class _StepBackend(MockBackend):
+    """Native-batching fake: ``step1 x`` -> ``S1:x``, ``step2 x`` -> ``S2:x``.
+
+    ``batches`` holds the request contents of each ``generate()`` call.
+    """
+
+    def __init__(self):
+        super().__init__(model=GEN)
+        self.batches: list[list[str]] = []
+
+    @property
+    def compute_config(self) -> ComputeConfig:
+        return ComputeConfig(supports_native_batching=True)
+
+    def generate(self, messages_list, **kwargs):
+        super().generate(messages_list, **kwargs)
+        contents = [m[-1]["content"] for m in messages_list]
+        self.batches.append(contents)
+        return [c.replace("step1 ", "S1:").replace("step2 ", "S2:") for c in contents]
+
+
+def _llm_run(tmp_path, monkeypatch, plan, backend, **kwargs):
+    """Run the stage on ``plan``, ``[(prompt, technique), ...]``, written as its manifest."""
+    import redact.pipelines as P
+    from redact.dataset import Manifest
+
+    monkeypatch.setattr(P, "get_all_obfuscation_functions", lambda: [one_step, two_step, broken])
+    for name in ("get_all_hacking_functions", "get_all_manipulation_functions",
+                 "get_all_request_functions"):
+        monkeypatch.setattr(P, name, lambda: [])
+    monkeypatch.setattr(P.ModelClient, "create", lambda m: make_client(backend, m))
+
+    out = tmp_path / "jb.csv"
+    Manifest(out.with_name("jb.manifest.jsonl")).write(
+        {"sample_id": compute_sample_id(p), "iteration": 0, "combination": [t.__name__],
+         "settings": {}, "status": "planned"}
+        for p, t in plan
+    )
+    prompts = [p for p, _ in plan]
+    inputs = pd.DataFrame({"prompt": prompts, "category": ["Cyber"] * len(prompts),
+                           "entry_type": ["harmful"] * len(prompts)})
+    generate_jailbreaks(inputs=inputs, output_path=out, model=GEN, resume=True,
+                        verbose=False, **kwargs)
+    return out
+
+
+def test_pool_run_without_retries_writes_the_same_rows(tmp_path, monkeypatch):
+    from redact.dataset.io import _hash_text
+    from redact.jailbreak import load_spec
+
+    techniques = [two_step, one_step, broken, one_step, one_step, one_step]
+    plan = [(f"zq{i}", t) for i, t in enumerate(techniques)]
+    out = _llm_run(tmp_path, monkeypatch, plan, _StepBackend(), batch_size=2)
+
+    df = pd.read_csv(out, dtype=str, keep_default_na=False)
+    assert list(df.columns) == [
+        "prompt", "category", "entry_type", "sample_id", "input_id", "jailbreak",
+        "technique", "technique_info", "complexity", "num_techniques", "is_noop",
+        "accepted", "reasoning", "iteration", "combination_spec_version",
+    ]
+
+    def row(prompt, technique, text, info, accepted, reasoning):
+        return {
+            "prompt": prompt, "category": "Cyber", "entry_type": "harmful",
+            "sample_id": _hash_text(text), "input_id": compute_sample_id(prompt),
+            "jailbreak": text, "technique": technique, "technique_info": info,
+            "complexity": "0", "num_techniques": "1", "is_noop": str(text == prompt),
+            "accepted": str(accepted), "reasoning": reasoning, "iteration": "0",
+            "combination_spec_version": str(load_spec().get("version", "")),
+        }
+
+    expected = [
+        row("zq0", "two_step", "S2:S1:zq0", "two_step", True, ""),
+        row("zq2", "broken", "zq2", "ERROR: chain failed", False, "chain failed"),
+    ] + [row(f"zq{i}", "one_step", f"S1:zq{i}", "one_step", True, "") for i in (1, 3, 4, 5)]
+    assert {(r["input_id"], r["iteration"]): r for r in df.to_dict("records")} == {
+        (r["input_id"], r["iteration"]): r for r in expected
+    }
+    assert len(df) == 6
+
+
+def test_pool_fills_a_call_with_a_later_step_and_a_new_unit(tmp_path, monkeypatch):
+    backend = _StepBackend()
+    plan = [("zq0", two_step)] + [(f"zq{i}", one_step) for i in range(1, 6)]
+    _llm_run(tmp_path, monkeypatch, plan, backend, batch_size=2)
+
+    # A chunk loop sends zq0's second step alone ([2, 1, 2, 2]).
+    assert [len(b) for b in backend.batches] == [2, 2, 2, 1]
+    assert backend.batches[2] == ["step2 S1:zq0", "step1 zq4"]
+
+
+def test_pool_resume_after_a_failed_append_runs_only_unfinished_units(tmp_path, monkeypatch):
+    plan = [(f"zq{i}", one_step) for i in range(70)]
+    real_to_csv = pd.DataFrame.to_csv
+    appends = []
+
+    def failing_second_append(self, *args, **kwargs):
+        appends.append(len(self))
+        if len(appends) == 2:
+            raise OSError("disk full")
+        return real_to_csv(self, *args, **kwargs)
+
+    monkeypatch.setattr(pd.DataFrame, "to_csv", failing_second_append)
+    with pytest.raises(OSError, match="disk full"):
+        _llm_run(tmp_path, monkeypatch, plan, _StepBackend(), batch_size=4)
+    monkeypatch.setattr(pd.DataFrame, "to_csv", real_to_csv)
+    out = tmp_path / "jb.csv"
+    assert appends == [32, 32] and len(pd.read_csv(out)) == 32
+
+    second = _StepBackend()
+    _llm_run(tmp_path, monkeypatch, plan, second, batch_size=4)
+    df = pd.read_csv(out)
+    assert sum(len(b) for b in second.batches) == 70 - 32
+    assert sorted(df["prompt"]) == sorted(p for p, _ in plan)

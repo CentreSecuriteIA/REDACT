@@ -27,7 +27,6 @@ skips constitution generation, so it's the cheaper "quick eval" option)::
 import json
 import logging
 import warnings
-from math import ceil
 from pathlib import Path
 
 import pandas as pd
@@ -42,8 +41,8 @@ from redact.content_moderation.paraphrase import (
     run_paraphrase_target,
 )
 from redact.dataset import (
+    CommitBuffer,
     Ledger,
-    commit,
     iter_categories,
     load_seeds,
     load_taxonomy,
@@ -56,7 +55,6 @@ from redact.dataset.merge import (
     merge_content_mod_csvs,
 )
 from redact.jailbreak import (
-    batch_apply_combinations,
     build_combination,
     build_function_registry,
     completed_from_output,
@@ -70,7 +68,9 @@ from redact.jailbreak import (
     load_spec,
     plan_run,
 )
+from redact.jailbreak.engine import _finalize, _finalize_error, _sample_gen
 from redact.jailbreak.manipulation import get_or_generate_benign_data
+from redact.llm_pipeline import drive_units
 from redact.llms import ModelClient, load_prompt
 from redact.llms.model_config import default_model_for_role
 
@@ -636,12 +636,12 @@ def generate_jailbreaks(
        deterministically assigned combination (seeded on the prompt-content id,
        deduped per sample) written to a JSONL manifest beside the output CSV.
        Skipped when ``resume=True`` and a manifest already exists.
-    2. **Execute** — the manifest is streamed in ``batch_size`` chunks; each
-       chunk is run through the batched engine
-       (:func:`redact.jailbreak.batch_apply_combinations`), which pools LLM calls
-       per model per round via each model's client (vLLM native batch / API multi-worker).
-       Output rows are appended to the CSV per chunk, so a crash loses at most
-       one chunk and a re-run resumes from the output (its
+    2. **Execute** — the pending units of the manifest run through
+       :func:`redact.llm_pipeline.drive_units`, ``2 * batch_size`` at a time,
+       which pools LLM calls per model, up to ``batch_size`` per call, via each
+       model's client (vLLM native batch / API multi-worker). Output rows are
+       appended to the CSV as units finish, every 32 units, so a crash loses
+       only the live units and a re-run resumes from the output (its
        ``(input_id, iteration)`` pairs are the source of truth).
 
     Args:
@@ -677,7 +677,7 @@ def generate_jailbreaks(
             uses the ``translation`` role (DeepSeek). Translation always routes to
             its own model independently of ``model``.
         auto_generate_benign: Pre-load/generate benign data for FSH/DAP.
-        batch_size: Manifest units per engine batch.
+        batch_size: Requests per model call; twice as many units are live.
         iterations: Combinations to assign per sample (1 = single-round). Ignored when
             ``settings_per_iteration`` is given (its length wins).
         settings_per_iteration: Per-round sampler kwargs for a multi-round
@@ -737,7 +737,7 @@ def generate_jailbreaks(
     model = model or default_model_for_role("uncensored_gen")
     client = _get_client(model)
     # Internals capture (opt-in, non-interfering — no CSV column). Gated on the
-    # gen model's transport; batch_apply_combinations/_tag_yields separately check
+    # gen model's transport; _sample_gen/_tag_yields separately check
     # each individual request's own target model, so a chain that also routes to
     # translate_model only captures the calls whose model actually supports it.
     capture_jailbreak = client.compute_config.supports_internals
@@ -806,7 +806,7 @@ def generate_jailbreaks(
 
     if verbose:
         logger.info("Generate Jailbreaks (plan + batched execute)")
-        logger.info("Pool: %d techniques | Samples: %d | Iterations: %d | Model: %s | Chunk: %d",
+        logger.info("Pool: %d techniques | Samples: %d | Iterations: %d | Model: %s | Batch: %d",
                     len(pool), len(inputs), iterations, model, batch_size)
 
     # ------------------------------------------------------------------
@@ -842,7 +842,7 @@ def generate_jailbreaks(
     )
 
     # ------------------------------------------------------------------
-    # Phase 2 — Execute (stream manifest in chunks through the engine)
+    # Phase 2 — Execute (stream the manifest through the refill pool)
     # ------------------------------------------------------------------
     has_manipulation = any(
         "fsh" in getattr(f, "families", []) or "dap" in getattr(f, "families", [])
@@ -871,57 +871,67 @@ def generate_jailbreaks(
     out.parent.mkdir(parents=True, exist_ok=True)
     total = len(pending)
     written = 0
-    n_chunks = ceil(total / batch_size) if (total and batch_size) else 0
 
     if verbose and total:
-        logger.info("Executing %d units in %d chunk(s)...", total, n_chunks)
+        logger.info("Executing %d units...", total)
 
-    for start in range(0, total, batch_size):
-        chunk = pending[start : start + batch_size]
+    def _append(rows: list[dict]) -> None:
+        nonlocal written
+        pd.DataFrame(rows).to_csv(out, mode="a", header=not out.exists(), index=False)
+        written += len(rows)
         if verbose:
-            logger.info("chunk %d/%d: %d units", start // batch_size + 1, n_chunks, len(chunk))
-        samples = [
-            {
+            n_acc = sum(1 for x in rows if x.get("accepted"))
+            logger.info("[%d/%d] %d accepted -> appended to %s",
+                        written, total, n_acc, out.name)
+
+    # Plan row and engine sample of each live unit, by position in ``pending``,
+    # so two plan rows with one (input_id, iteration) stay two units.
+    live: dict[int, tuple[dict, dict]] = {}
+
+    def _units():
+        for i, r in enumerate(pending):
+            sample = {
                 "id": str(r["sample_id"]),
                 "prompt": prompt_map[str(r["sample_id"])],
                 "combination": build_combination(r["combination"], registry),
                 "iteration": int(r["iteration"]),
             }
-            for r in chunk
-        ]
-        results = batch_apply_combinations(
-            samples, gen_model=model, translate_model=translation_model,
-            benign_data=benign_data, verbose=verbose,
-            capture_internals=capture_jailbreak,
+            live[i] = (r, sample)
+            yield i, _sample_gen(
+                sample, gen_model=model, translate_model=translation_model,
+                benign_data=benign_data, capture_internals=capture_jailbreak,
+            )
+
+    def _add(plan_row: dict, res: dict) -> None:
+        row = dict(meta_map.get(res["input_id"], {}))
+        row.update(res)
+        row["iteration"] = plan_row["iteration"]
+        row["combination_spec_version"] = spec_version
+        # Records are explicit so the on-disk key types stay str/int whatever
+        # the rows happen to carry.
+        buf.add([row], {"input_id": str(row["input_id"]),
+                        "iteration": int(row["iteration"])})
+
+    def _on_done(i, value):
+        plan_row, sample = live.pop(i)
+        _add(plan_row, _finalize(sample, value, model))
+
+    def _on_error(i, exc):
+        plan_row, sample = live.pop(i)
+        _add(plan_row, _finalize_error(sample, exc, model))
+
+    # A unit whose chain raises gets an error row and is acked. The buffer
+    # appends, then acks (see dataset/resume.py), every 32 units and on any
+    # exit.
+    with CommitBuffer(append=_append, ledger=jb_ledger) as buf:
+        drive_units(
+            _units(),
+            on_done=_on_done,
+            on_error=_on_error,
+            pool_size=2 * batch_size,
+            cap=batch_size,
+            progress="jailbreak" if verbose else None,
         )
-
-        rows = []
-        for plan_row, res in zip(chunk, results):
-            row = dict(meta_map.get(res["input_id"], {}))
-            row.update(res)
-            row["iteration"] = plan_row["iteration"]
-            row["combination_spec_version"] = spec_version
-            rows.append(row)
-
-        # append-then-ack, see dataset/resume.py. Records are explicit so the
-        # on-disk key types stay str/int whatever the rows happen to carry.
-        commit(
-            rows,
-            append=lambda rs: pd.DataFrame(rs).to_csv(
-                out, mode="a", header=not out.exists(), index=False
-            ),
-            ledger=jb_ledger,
-            records=[
-                {"input_id": str(x["input_id"]), "iteration": int(x["iteration"])}
-                for x in rows
-            ],
-        )
-        written += len(rows)
-
-        if verbose:
-            n_acc = sum(1 for x in rows if x.get("accepted"))
-            logger.info("[%d/%d] %d accepted -> appended to %s",
-                        start + len(rows), total, n_acc, out.name)
 
     jailbreaks = pd.read_csv(out) if out.exists() else pd.DataFrame()
 
