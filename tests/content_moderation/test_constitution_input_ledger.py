@@ -16,6 +16,7 @@ from redact.content_moderation.generation import (
     _constitution_inputs_ledger,
     _constitution_inputs_manifest,
 )
+from redact.llms.backends import ComputeConfig
 from tests.conftest import MockBackend, make_client
 
 _PROMPT = {"system_prompt": "sys", "template": "Generate items about {sample_description}"}
@@ -77,6 +78,36 @@ def test_fresh_clears_ledger_and_regenerates(tmp_path):
                                     fresh=True, verbose=False)
     assert r.total_entries_processed == 2          # regenerated despite prior ledger
     assert pipe2.gen.backend.calls != []
+
+
+class _WidthBackend(MockBackend):
+    """Native batching, so one ``generate()`` per call; records each call's width."""
+
+    def __init__(self, *args, **kwargs):
+        super().__init__(*args, **kwargs)
+        self.widths: list[int] = []
+
+    @property
+    def compute_config(self) -> ComputeConfig:
+        return ComputeConfig(supports_native_batching=True)
+
+    def generate(self, messages_list, **kwargs):
+        self.widths.append(len(messages_list))
+        return super().generate(messages_list, **kwargs)
+
+
+def test_check_calls_are_no_wider_than_batch_size(tmp_path):
+    """A chunk's checks go out in calls of at most ``batch_size``, like every
+    other call of the stage: 2 entries x 2 samples = 4 checks at batch_size=3."""
+    check = _WidthBackend("Yes")
+    pipe = InputPipeline(
+        gen=make_client(MockBackend("1. alpha sample\n2. beta sample"), "m"),
+        check=make_client(check, "m"),
+        dataset_dir=tmp_path,
+    )
+    pipe.run_from_constitution(_const_df(), _PROMPT, samples_per_entry=2,
+                               batch_size=3, verbose=False)
+    assert check.widths == [3, 1]
 
 
 def test_entry_with_no_extracted_samples_is_acked(tmp_path):

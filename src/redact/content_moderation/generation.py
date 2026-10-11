@@ -515,7 +515,7 @@ class InputPipeline(_StandaloneGenerationMixin):
                 # flat batch — messages are already built per-entry above.
                 responses = batch_generate_samples(
                     self.check, flat_check_msgs,
-                    batch_size=len(flat_check_msgs),
+                    batch_size=batch_size,
                     progress=f"check batch {batch_idx}/{n_chunks}" if verbose else None,
                     internals_ids=flat_internals_ids if capture_val_in else None,
                 )
