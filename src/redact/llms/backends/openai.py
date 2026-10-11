@@ -6,6 +6,7 @@ shared between the backends that use it: ``openai.OpenAI`` for ``generate()``
 and ``openai.AsyncOpenAI`` for ``agenerate()``.
 """
 
+import asyncio
 import logging
 import threading
 import time
@@ -83,8 +84,7 @@ class OpenAIBackend(LLMBackend):
         # on. Requests use the provider's identifier.
         self._api_model_id = api_model_id or model
         self._client = _sdk_client(api_key, base_url)
-        # Built by the first agenerate(): an SDK client is slow to construct,
-        # and a backend that never makes an async call needs none.
+        # Built on first use: an SDK client is slow to construct.
         self._async_client: openai.AsyncOpenAI | None = None
         self._endpoint = (api_key, base_url)
         self._base_url = base_url
@@ -194,7 +194,8 @@ class OpenAIBackend(LLMBackend):
         started = time.perf_counter()
         try:
             response = await create(**call_kwargs)
-        except Exception as exc:
+        # A cancelled request was sent all the same, and may be billed.
+        except (Exception, asyncio.CancelledError) as exc:
             self._record_failure(exc, started, max_tok, temp)
             raise
         return self._reply(response, started, max_tok, temp)
@@ -226,7 +227,7 @@ class OpenAIBackend(LLMBackend):
         return call_kwargs
 
     def _record_failure(
-        self, exc: Exception, started: float, max_tok: int, temp: float | None
+        self, exc: BaseException, started: float, max_tok: int, temp: float | None
     ) -> None:
         """Record the ``call`` event of a call that raised."""
         self._record_call(

@@ -1,5 +1,6 @@
 """Tests for OpenAIBackend with mocked OpenAI client."""
 
+import asyncio
 import logging
 import os
 from unittest.mock import AsyncMock, MagicMock, patch
@@ -318,6 +319,28 @@ class TestOpenAIAsync:
             aio.run(openai_backend.agenerate(_HI[0]))
         (event,) = events
         assert event["error"] == "RuntimeError: 502" and event["n_items"] == 1
+
+    def test_a_cancelled_call_is_recorded_then_re_raised(self, openai_backend, events):
+        """The request was sent, so the trace has to show it."""
+        sent = asyncio.Event()
+
+        async def never_answered(**kwargs):
+            sent.set()
+            await asyncio.Event().wait()
+
+        async def cancel_in_flight():
+            task = asyncio.ensure_future(openai_backend.agenerate(_HI[0], max_tokens=50))
+            await sent.wait()
+            task.cancel()
+            with pytest.raises(asyncio.CancelledError):
+                await task
+
+        openai_backend._async_client = MagicMock()
+        openai_backend._async_client.chat.completions.create = never_answered
+        aio.run(cancel_in_flight())
+        (event,) = events
+        assert event["error"] == "CancelledError: "
+        assert (event["n_items"], event["max_tokens"]) == (1, 50)
 
     def test_the_async_sdk_client_is_cached_per_endpoint(self):
         """Built by the first agenerate(), shared by the backends on one
