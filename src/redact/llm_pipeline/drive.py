@@ -4,12 +4,19 @@ many round by round, or a pool of them topped up from a lazy source.
 
 from __future__ import annotations
 
+import asyncio
+import logging
+import queue
 from collections import defaultdict
 from collections.abc import Callable, Generator, Hashable, Iterable
+from concurrent.futures import Future
 
+from redact.llms import aio
 from redact.llms.client import ModelClient
 
 from .request import LLMRequest
+
+logger = logging.getLogger(__name__)
 
 
 def drive_sync(gen: Generator, call: Callable[[LLMRequest], str]):
@@ -162,10 +169,26 @@ def _group_key(request: LLMRequest) -> Hashable:
     return client.model, client.backend.backend_name, request.max_tokens
 
 
+def _has_async_calls(client) -> bool:
+    """Whether ``client``'s requests go on the async lane.
+
+    A client that declares no flags makes synchronous calls.
+    """
+    config = getattr(client, "compute_config", None)
+    return getattr(config, "supports_async_calls", False)
+
+
+async def _cancel(tasks: set[asyncio.Task]) -> None:
+    """Cancel the requests still on the loop and wait until each has stopped."""
+    for task in tasks:
+        task.cancel()
+    await asyncio.gather(*tasks, return_exceptions=True)
+
+
 #TODO(pool): what drive_units does not do yet:
-#   - Refill inside a call. A call lasts as long as its longest reply, and
-#     the slots of shorter replies idle until it returns. Needs vLLM's
-#     async engine.
+#   - Refill inside a synchronous call. Such a call lasts as long as its
+#     longest reply, and the slots of shorter replies idle until it returns.
+#     For the in-process engine this needs vLLM's async engine.
 #   - Reject a prompt longer than the model's context as that unit's error.
 #     Prompt length is not checked before a call.
 def drive_units(
@@ -191,6 +214,14 @@ def drive_units(
     one model is another group: at ``pool_size = 2 * cap`` up to three keep
     the calls full, more leave them part-full.
 
+    A request whose client has async calls (``supports_async_calls``) is not
+    grouped. It is sent on the shared event loop the moment its unit yields
+    it, and its reply is handed back the moment it arrives, so its slot never
+    waits for a longer reply. One model has at most ``backend.max_workers``
+    such requests in flight. Replies that have arrived are handed back before
+    a round's calls go out, and those calls never wait for a request in
+    flight.
+
     Args:
         source: ``(key, generator)`` pairs, pulled only as slots free up.
             Keys must be unique among live units.
@@ -198,16 +229,18 @@ def drive_units(
             exception from it propagates.
         on_error: ``(key, exc)``, called when a unit raises or yields
             something other than an :class:`LLMRequest`. ``None`` lets the
-            exception propagate. A failed ``generate()`` always propagates
-            and never goes through ``on_error``.
+            exception propagate. A failed ``generate()`` or async request
+            always propagates and never goes through ``on_error``.
         pool_size: Units live at once, at least 1. About twice ``cap``, so
             one group can fill while another drains.
         cap: Requests per ``generate()`` call, at least 1. Defaults to
             ``pool_size``. Requests above it, and a group below it while
-            another is full, wait for a later round.
+            another is full, wait for a later round. Async requests are not
+            counted against it.
         resolve: ``model_name -> ModelClient`` for requests without a
             client. Defaults to :meth:`ModelClient.create`.
         progress: Label prefix for progress logging. ``None`` logs nothing.
+            Async requests log one line every ``cap`` finished units.
 
     Returns:
         The number of units that finished or failed.
@@ -232,6 +265,44 @@ def drive_units(
     pending: dict[Hashable, LLMRequest] = {}  # awaiting dispatch, oldest first
     finished = 0
 
+    flying: dict[Hashable, Future] = {}       # async requests in flight
+    arrived: queue.Queue = queue.Queue()      # their keys, as each one ends
+    gates: dict[Hashable, asyncio.Semaphore] = {}
+    tasks: set[asyncio.Task] = set()          # touched on the event loop only
+    by_name: dict[str, ModelClient] = {}
+    reported = 0
+
+    async def fly(key, client, request, gate) -> str:
+        """Make one request on the event loop, under its model's ``gate``."""
+        task = asyncio.current_task()
+        tasks.add(task)
+        try:
+            async with gate:
+                return await client.agenerate(
+                    request.messages,
+                    max_tokens=request.max_tokens, internals_id=request.internals_id,
+                )
+        finally:
+            tasks.discard(task)
+            # From the loop, as the last step: the driver then sees the ends
+            # in the order they happened.
+            arrived.put(key)
+
+    def launch(key, request) -> bool:
+        """Send ``request`` on the async lane, if its client has one."""
+        client = request.client
+        if client is None:
+            if request.model not in by_name:
+                by_name[request.model] = resolve(request.model)
+            client = by_name[request.model]
+        if not _has_async_calls(client):
+            return False
+        gate_key = client.model, client.backend.backend_name
+        if gate_key not in gates:
+            gates[gate_key] = asyncio.Semaphore(client.backend.max_workers)
+        flying[key] = aio.submit(fly(key, client, request, gates[gate_key]))
+        return True
+
     def advance(key, reply):
         nonlocal finished
         try:
@@ -239,8 +310,6 @@ def drive_units(
             if not isinstance(request, LLMRequest):
                 raise TypeError(
                     f"generator yielded {type(request).__name__}, not an LLMRequest")
-            pending[key] = request
-            return
         except StopIteration as stop:
             value = stop.value
         except Exception as exc:  # noqa: BLE001 — isolate one unit
@@ -250,9 +319,40 @@ def drive_units(
                 raise
             on_error(key, exc)
             return
+        else:
+            # Outside the try: failing to send a request is not the unit's error.
+            if not launch(key, request):
+                pending[key] = request
+            return
         del live[key]
         finished += 1
         on_done(key, value)          # outside the try: its exception propagates unchained
+
+    def land(wait: bool) -> bool:
+        """Hand back the async reply that arrived first, if one has.
+
+        Args:
+            wait: Block until one arrives.
+
+        Returns:
+            Whether a unit was advanced.
+        """
+        nonlocal reported
+        if not flying:
+            return False
+        try:
+            key = arrived.get(block=wait)
+        except queue.Empty:
+            return False
+        # The result follows its key within a turn of the loop. A failed
+        # request raises here: it is the transport failing, as a failed
+        # generate() is, so it propagates.
+        advance(key, flying.pop(key).result())
+        if progress and finished - reported >= cap:
+            reported = finished
+            logger.info("%s: %d units done, %d in flight",
+                        progress, finished, len(flying))
+        return True
 
     def admit():
         nonlocal exhausted
@@ -268,33 +368,43 @@ def drive_units(
             advance(key, None)       # sending None starts it; finishing here frees the slot at once
 
     round_idx = 0
-    while True:
-        admit()
-        if not pending:
-            return finished
-        round_idx += 1
-        groups: dict[Hashable, list] = defaultdict(list)
-        for key, req in pending.items():
-            groups[_group_key(req)].append(key)
-        # Full calls first; a smaller group waits for the others to fill it.
-        # When none is full the largest goes (the oldest on a tie), so a
-        # trickle of requests still drains and the run ends.
-        full = [keys for keys in groups.values() if len(keys) >= cap]
-        for keys in full or [max(groups.values(), key=len)]:
-            keys = keys[:cap]                      # the rest stay pending, ahead of later yields
-            requests = [pending.pop(k) for k in keys]
-            first = requests[0]
-            client = first.client if first.client is not None else resolve(first.model)
-            kw = {"progress": _label(progress, round_idx, first)} if progress else {}
-            if first.max_tokens is not None:
-                kw["max_tokens"] = first.max_tokens
-            ids = [r.internals_id for r in requests]
-            if any(i is not None for i in ids):    # a non-capturing client rejects any list
-                kw["internals_ids"] = ids
-            responses = client.generate([r.messages for r in requests], **kw)
-            if len(responses) != len(keys):
-                raise RuntimeError(
-                    f"Model {first.model!r} returned {len(responses)} replies for "
-                    f"{len(keys)} requests.")
-            for k, resp in zip(keys, responses):
-                advance(k, resp)
+    try:
+        while True:
+            admit()
+            # A reply that has arrived goes back before a call that blocks, and
+            # is waited for only when no synchronous request is pending.
+            if land(wait=not pending):
+                continue                           # a slot may be free: admit first
+            if not pending:
+                return finished
+            round_idx += 1
+            groups: dict[Hashable, list] = defaultdict(list)
+            for key, req in pending.items():
+                groups[_group_key(req)].append(key)
+            # Full calls first; a smaller group waits for the others to fill it.
+            # When none is full the largest goes (the oldest on a tie), so a
+            # trickle of requests still drains and the run ends.
+            full = [keys for keys in groups.values() if len(keys) >= cap]
+            for keys in full or [max(groups.values(), key=len)]:
+                keys = keys[:cap]                      # the rest stay pending, ahead of later yields
+                requests = [pending.pop(k) for k in keys]
+                first = requests[0]
+                client = first.client if first.client is not None else resolve(first.model)
+                kw = {"progress": _label(progress, round_idx, first)} if progress else {}
+                if first.max_tokens is not None:
+                    kw["max_tokens"] = first.max_tokens
+                ids = [r.internals_id for r in requests]
+                if any(i is not None for i in ids):    # a non-capturing client rejects any list
+                    kw["internals_ids"] = ids
+                responses = client.generate([r.messages for r in requests], **kw)
+                if len(responses) != len(keys):
+                    raise RuntimeError(
+                        f"Model {first.model!r} returned {len(responses)} replies for "
+                        f"{len(keys)} requests.")
+                for k, resp in zip(keys, responses):
+                    advance(k, resp)
+    finally:
+        # On any exit with requests in flight (a failed request, an exception
+        # from on_done or the source, Ctrl-C): none may outlive the call.
+        if flying:
+            aio.run(_cancel(tasks))
