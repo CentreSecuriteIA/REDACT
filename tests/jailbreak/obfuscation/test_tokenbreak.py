@@ -111,3 +111,14 @@ class TestGetTokenbreakFunctions:
         assert "to_tokenbreak_prepend" in names
         assert "to_tokenbreak_split" in names
         assert "to_tokenbreak_delimiter" in names
+
+
+class TestSensitiveEncodeFinish:
+    def test_an_encoded_word_with_backslashes_is_inserted_as_it_is(self):
+        """A unicode-escaped word used to fail in re.sub: "bad escape \\u"."""
+        from redact.jailbreak.obfuscation.tokenbreak import _sensitive_encode_finish
+
+        result, info = _sensitive_encode_finish(
+            "say apple now", lambda w: ("\\u0061pple", ""), "unicode", ["apple"])
+        assert result == "say \\u0061pple now"
+        assert info == "encoding=unicode;detected_words=apple"

@@ -258,7 +258,10 @@ def _sensitive_encode_finish(
     result = prompt
     for word in harmful_words:
         encoded_word, _ = encode_fn(word)
-        result = re.sub(re.escape(word), encoded_word, result, flags=re.IGNORECASE)
+        # A function, so re does not read escapes (\u, \1) in the encoded word.
+        result = re.sub(
+            re.escape(word), lambda _m, e=encoded_word: e, result, flags=re.IGNORECASE
+        )
     return result, f"encoding={encode_name};detected_words={' '.join(harmful_words)}"
 
 
