@@ -199,8 +199,8 @@ class ModelClient:
         )
 
         if self._native:
-            # One engine pass handles the whole list. A limiter, if there is
-            # one, is charged once per batch.
+            # The backend takes the whole list and has its items in flight
+            # together. A limiter, if there is one, is charged once per batch.
             if self._rate_limiter is not None:
                 self._rate_limiter.wait_if_needed(self._backend)
             results = self._backend.generate(

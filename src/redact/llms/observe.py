@@ -4,8 +4,9 @@
 none is installed. ``redact.telemetry`` installs the emitter and owns the
 sinks, so nothing here imports from above ``llms/``.
 
-A ``call`` event is one transport call, not one batch item: a native vLLM pass
-over 32 prompts is a single event with ``n_items=32``.
+A ``call`` event is one transport call, with ``n_items`` the items it carried.
+The vLLM engine takes each prompt as its own request, so a batch of 32 is 32
+events there as well.
 """
 
 import logging

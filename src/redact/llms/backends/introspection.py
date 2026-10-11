@@ -184,10 +184,9 @@ class TransformersIntrospectionBackend(LLMBackend):
     """One model on local HF ``transformers``, with internals capture."""
 
     # supports_native_batching stays False even though generate() loops over
-    # a list. Each item is its own forward pass and emits its own `call`
-    # telemetry event, where a native batch emits one event for the whole
-    # list. ModelClient's native path also reports progress only after the
-    # whole call returns, so it would jump from 0 to 100%.
+    # a list. Each item is its own forward pass, one after the other, and
+    # ModelClient's native path reports progress only after the whole call
+    # returns, so it would jump from 0 to 100%.
     # Concurrent generate() calls would compete for GPU memory, so parallel
     # calls are off.
     compute_config: ClassVar[ComputeConfig] = ComputeConfig(

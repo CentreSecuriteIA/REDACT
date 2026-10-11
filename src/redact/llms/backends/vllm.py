@@ -3,8 +3,12 @@
 The first backend built for a checkpoint loads its weights onto the GPU. The
 engine is cached per checkpoint (``hf_model_id``, quantization and engine
 kwargs), so two registry entries that agree on all three share one load.
-``generate()`` runs the whole batch in a single engine pass, and prompts go
-through vLLM's chat template (``llm.chat()``).
+
+The engine is vLLM's ``AsyncLLM``. Every item is its own request, awaited on
+the shared event loop (``llms/aio.py``), and the engine batches whatever is
+in flight: ``agenerate()`` makes one request, ``generate()`` one per item,
+blocking until all have answered. Prompts go through the chat template of
+the engine's tokenizer.
 """
 
 import asyncio
@@ -237,7 +241,8 @@ class VLLMBackend(LLMBackend):
             model: Registry name of the model.
             hf_model_id: HuggingFace model ID or local path to load.
             quantization: Quantization method (e.g. "gptq", "awq").
-            vllm_kwargs: Passed to ``vllm.LLM()`` (e.g. ``max_model_len``,
+            vllm_kwargs: Engine arguments, the fields of vLLM's
+                ``AsyncEngineArgs`` (e.g. ``max_model_len``,
                 ``tokenizer_mode``).
             sampling: ``SamplingParams`` defaults for this model (``top_p``,
                 ``top_k``, ...), merged over :data:`_DEFAULT_SAMPLING`.

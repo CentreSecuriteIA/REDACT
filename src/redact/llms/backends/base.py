@@ -34,11 +34,12 @@ class ComputeConfig:
     defaults describe a plain API backend.
 
     Attributes:
-        supports_native_batching: ``generate()`` handles the whole batch in
-            one engine pass (vLLM). When False, the caller fans the batch out.
+        supports_native_batching: ``generate()`` takes the whole batch and
+            has its items in flight together (vLLM). When False, the caller
+            fans the batch out.
         supports_parallel_calls: ``generate()`` may be called concurrently.
-            False for Anthropic (rate limits) and for local backends (GPU
-            contention).
+            False for Anthropic (rate limits) and for the introspection
+            backend (GPU contention).
         supports_internals: The backend can save hidden states, attention
             and logprobs under caller-supplied ``internals_ids``.
         supports_async_calls: The backend has ``agenerate()``, a coroutine
@@ -251,14 +252,13 @@ class LLMBackend(ABC):
     ) -> None:
         """Emit one ``call`` telemetry event for one transport call.
 
-        One event per call, not per item: a native pass over N prompts emits
-        a single event with ``n_items=N``, and a per-item loop emits one
-        event per iteration. ``started`` is ``time.perf_counter()`` taken
-        just before the call. ``out_tok_max`` is the longest reply of the
-        call, in tokens: ``out_tok`` itself for a one-item call, and for a
-        native batch how long the engine ran for its slowest item.
-        ``finish_reason`` is the provider's reason the reply ended, when it
-        reports one.
+        One event per call, with ``n_items`` the items it carried. Every
+        backend makes one call per item: a per-item loop emits one event per
+        iteration, and the vLLM engine takes each item as its own request.
+        ``started`` is ``time.perf_counter()`` taken just before the call.
+        ``out_tok_max`` is the longest reply of the call, in tokens:
+        ``out_tok`` itself for a one-item call. ``finish_reason`` is the
+        provider's reason the reply ended, when it reports one.
         """
         event = {
             "ev": "call",
@@ -312,8 +312,8 @@ class LLMBackend(ABC):
     ) -> list[str]:
         """Generate one reply per message list.
 
-        Always batch-shaped: a single sample is a batch of one. vLLM runs one
-        engine pass over all items; the other backends loop over them.
+        Always batch-shaped: a single sample is a batch of one. vLLM has all
+        items in flight together; the other backends loop over them.
 
         Args:
             messages_list: One chat message list per item.

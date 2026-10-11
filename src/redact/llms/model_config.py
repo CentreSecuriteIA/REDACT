@@ -164,9 +164,9 @@ class VLLMConfig:
     Attributes:
         hf_model_id: HuggingFace model ID or local path.
         quantization: Quantization method, e.g. "gptq", "awq".
-        vllm_kwargs: Extra kwargs for ``vllm.LLM()`` (e.g. ``max_model_len``,
-            ``tokenizer_mode``). ``gpu_memory_utilization`` is rejected: the
-            planner computes it.
+        vllm_kwargs: Extra engine arguments, fields of vLLM's
+            ``AsyncEngineArgs`` (e.g. ``max_model_len``, ``tokenizer_mode``).
+            ``gpu_memory_utilization`` is rejected: the planner computes it.
         sampling: Default ``SamplingParams`` values for this model
             (``top_p``, ``top_k``, ...).
         vram_gb: The weights in GiB, total across the model's cards, when
@@ -209,7 +209,7 @@ class VLLMConfig:
 
     @property
     def engine_kwargs(self) -> dict:
-        """The kwargs ``vllm.LLM()`` is built with, ``min_gpus`` included."""
+        """The kwargs the engine is built with, ``min_gpus`` included."""
         kwargs = dict(self.vllm_kwargs or {})
         if kwargs.get("tensor_parallel_size", 0) is None:
             del kwargs["tensor_parallel_size"]

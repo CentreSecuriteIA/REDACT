@@ -186,9 +186,11 @@ async def _cancel(tasks: set[asyncio.Task]) -> None:
 
 
 #TODO(pool): what drive_units does not do yet:
-#   - Refill inside a synchronous call. Such a call lasts as long as its
-#     longest reply, and the slots of shorter replies idle until it returns.
-#     For the in-process engine this needs vLLM's async engine.
+#   - Fill a model's async lane. A model has at most pool_size requests in
+#     flight, one per live unit, and the stages size pool_size for
+#     synchronous calls (2 * batch_size): fewer than the in-process vLLM
+#     engine runs at once (backend.max_workers). Raising it for a client
+#     with async calls is the stages' change.
 #   - Reject a prompt longer than the model's context as that unit's error.
 #     Prompt length is not checked before a call.
 def drive_units(
