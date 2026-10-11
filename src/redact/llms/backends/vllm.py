@@ -224,13 +224,14 @@ def held_seconds() -> dict[str, float]:
 class VLLMBackend(LLMBackend):
     """One model served by a locally-loaded vLLM engine."""
 
-    # generate() runs one engine pass over the whole list. Concurrent calls
-    # would compete for GPU memory, so parallel calls are off.
+    # generate() takes the whole list, so the client hands it over undivided.
+    # Every item is its own request to one engine on one loop, which makes
+    # concurrent calls safe: the engine batches whatever is in flight.
     compute_config: ClassVar[ComputeConfig] = ComputeConfig(
         supports_native_batching=True,
-        supports_parallel_calls=False,
+        supports_parallel_calls=True,
         supports_internals=False,
-        supports_async_calls=False,
+        supports_async_calls=True,
     )
 
     def __init__(
@@ -254,7 +255,13 @@ class VLLMBackend(LLMBackend):
             sampling: ``SamplingParams`` defaults for this model (``top_p``,
                 ``top_k``, ...), merged over :data:`_DEFAULT_SAMPLING`.
             **identity: Forwarded to :meth:`LLMBackend.__init__`.
+                ``max_workers`` defaults to the number of sequences the
+                engine runs at once.
         """
+        engine = _engine(hf_model_id, quantization, vllm_kwargs or {})
+        # What the async lane keeps in flight for this model. The engine
+        # queues anything above its own limit, so more would only wait there.
+        identity.setdefault("max_workers", engine.scheduler_config.max_num_seqs)
         super().__init__(model, **identity)
         # SamplingParams needs a number, so fill in a default when the model
         # has none.
@@ -263,7 +270,6 @@ class VLLMBackend(LLMBackend):
         self.hf_model_id = hf_model_id
         self._sampling = {**_DEFAULT_SAMPLING, **(sampling or {})}
         self._key = _engine_key(hf_model_id, quantization, vllm_kwargs or {})
-        _engine(hf_model_id, quantization, vllm_kwargs or {})
 
     @property
     def _llm(self):

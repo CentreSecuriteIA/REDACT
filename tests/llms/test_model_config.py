@@ -262,9 +262,9 @@ class TestValidateConcurrency:
         with pytest.raises(ValueError, match="anthropic"):
             validate_concurrency("claude-like", "anthropic", recommended_max_workers=2)
 
-    def test_raises_for_native_batching_backend_type(self):
-        with pytest.raises(ValueError, match="vllm"):
-            validate_concurrency("local-model", "vllm", recommended_max_workers=2)
+    def test_raises_for_a_local_series_only_backend_type(self):
+        with pytest.raises(ValueError, match="introspect"):
+            validate_concurrency("local-model", "introspect", recommended_max_workers=2)
 
     def test_allows_parallel_backend_type(self):
         validate_concurrency("api-model", "openai", recommended_max_workers=5)  # no raise
@@ -293,11 +293,11 @@ class TestBackendCapabilities:
                          "supports_internals", "supports_async_calls"):
                 assert flag in src, f"{cls.__name__} leaves {flag} implicit"
 
-    def test_only_the_openai_backend_has_async_calls(self):
+    def test_which_backends_have_async_calls(self):
         # The flag sends a backend's requests down drive_units' async lane.
         async_types = {t for t, cls in BACKEND_TYPES.items()
                        if cls.compute_config.supports_async_calls}
-        assert async_types == {"openai"}
+        assert async_types == {"openai", "vllm"}
         assert all(hasattr(BACKEND_TYPES[t], "agenerate") for t in async_types)
 
     def test_setup_types_are_named_after_their_config_field(self):

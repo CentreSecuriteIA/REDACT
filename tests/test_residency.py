@@ -1066,6 +1066,7 @@ class TestRelease:
 
         class _LLM:
             hook = True     # False: an engine with no shutdown()
+            scheduler_config = SimpleNamespace(max_num_seqs=256)
 
             def __init__(self, **kw):
                 model = kw["model"]
@@ -1336,6 +1337,8 @@ class TestPlannedUtilization:
         calls = []
 
         class _LLM:
+            scheduler_config = SimpleNamespace(max_num_seqs=256)
+
             def __init__(self, **kw):
                 time.sleep(0.05)
                 calls.append(kw)

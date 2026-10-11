@@ -323,6 +323,8 @@ def test_an_unload_between_paraphrasers_shuts_down_only_their_engine(
     shutdowns, engines = [], {}
 
     class _LLM:
+        scheduler_config = SimpleNamespace(max_num_seqs=256)
+
         def __init__(self, **kw):
             model = kw["model"]
             engines[model] = weakref.ref(self)

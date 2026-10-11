@@ -2,6 +2,7 @@
 
 import os
 import sys
+from types import SimpleNamespace
 from unittest.mock import MagicMock, patch
 
 import pytest
@@ -211,6 +212,8 @@ class TestEngineCacheIsPerBackendClass:
         loads = []
 
         class _FakeLLM:
+            scheduler_config = SimpleNamespace(max_num_seqs=256)
+
             def __init__(self, **kw):
                 loads.append(kw["model"])
 
@@ -246,6 +249,8 @@ class TestSetupReachesTheBackend:
         seen = []
 
         class _StubLLM:
+            scheduler_config = SimpleNamespace(max_num_seqs=256)
+
             def __init__(self, **kw):
                 seen.append(kw)
 

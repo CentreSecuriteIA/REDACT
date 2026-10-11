@@ -26,7 +26,7 @@ import types
 
 import pytest
 
-from redact.llms import aio, observe
+from redact.llms import ModelClient, aio, observe
 from redact.llms.backends import (
     ComputeConfig,
     LLMBackend,
@@ -41,9 +41,9 @@ from redact.llms.model_config import (
     get_model_config,
     register_model,
 )
-from redact.llm_pipeline import batch_check_samples
+from redact.llm_pipeline import batch_check_samples, drive_units
 from tests.conftest import fake_vllm_modules, make_client
-from tests.llm_pipeline.test_drive_async import _Script
+from tests.llm_pipeline.test_drive_async import _Script, _unit
 
 # ---------------------------------------------------------------------------
 # Helpers
@@ -367,6 +367,8 @@ class _FakeAsyncLLM:
             ``chat`` the messages its token ids stand for.
     """
 
+    scheduler_config = types.SimpleNamespace(max_num_seqs=48)
+
     def __init__(self, replies, script=None):
         self.replies = replies
         self.script = script or _Script()
@@ -581,6 +583,41 @@ class TestVLLMCallEvent:
         backend.generate([_ask("a", system="Sys."), _ask("b")])
         assert [(e["n_items"], e["in_tok"], e["out_tok"], e["out_tok_max"], e["finish_reason"])
                 for e in events] == [(1, 2, 3, 3, "length"), (1, 1, 1, 1, "stop")]
+
+
+class TestVLLMFlags:
+    """What sends a vLLM model's requests down drive_units' async lane."""
+
+    def test_the_class_declares_native_batching_parallel_and_async_calls(self):
+        from redact.llms.backends import VLLMBackend
+
+        assert VLLMBackend.compute_config == ComputeConfig(
+            supports_native_batching=True, supports_parallel_calls=True,
+            supports_internals=False, supports_async_calls=True)
+
+    def test_max_workers_is_what_the_engine_runs_at_once(self, monkeypatch):
+        from redact.llms.backends import VLLMBackend
+
+        backend, engine = _vllm_backend(monkeypatch, {})
+        assert backend.max_workers == engine.scheduler_config.max_num_seqs == 48
+        assert VLLMBackend("m", "org/x", max_workers=4).max_workers == 4
+
+    def test_the_client_hands_generate_the_whole_list(self, monkeypatch):
+        backend, _ = _vllm_backend(monkeypatch, {})
+        assert ModelClient(backend)._caller is None
+
+    def test_drive_units_has_both_requests_in_flight_before_either_ends(self, monkeypatch):
+        """One unit per prompt. The first request cannot end before the second
+        has, so a driver that waited for it would never send the second."""
+        script = _Script(["b1", "a1"])
+        backend, _ = _vllm_backend(
+            monkeypatch, {"a1": _reply("A"), "b1": _reply("B")}, script)
+        client = ModelClient(backend)
+        results = {}
+        n = drive_units(iter([(k, _unit(client, k)) for k in "ab"]),
+                        pool_size=2, on_done=results.__setitem__)
+        assert script.log == [("start", "a1"), ("start", "b1"), ("end", "b1"), ("end", "a1")]
+        assert n == 2 and results == {"b": ["B"], "a": ["A"]}
 
 
 class MockBackend(LLMBackend):
