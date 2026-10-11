@@ -41,7 +41,7 @@ from redact.llms.model_config import (
     register_model,
 )
 from redact.llm_pipeline import batch_check_samples
-from tests.conftest import make_client
+from tests.conftest import fake_vllm_modules, make_client
 
 # ---------------------------------------------------------------------------
 # Helpers
@@ -173,7 +173,8 @@ class TestEngineDownloadDir:
             def __init__(self, **kw):
                 seen.update(kw)
 
-        monkeypatch.setitem(sys.modules, "vllm", type("m", (), {"LLM": _StubLLM}))
+        for name, module in fake_vllm_modules(_StubLLM).items():
+            monkeypatch.setitem(sys.modules, name, module)
         monkeypatch.setattr(vllm_module, "_prepare_environment", lambda: None)
         # The load reads the HF config for the default context length.
         monkeypatch.setattr(
@@ -233,11 +234,15 @@ class TestExitHook:
     """A process that ends with an engine loaded shuts it down first, or
     multiprocessing's exit hook waits for the engine's child process forever."""
 
+    # The scripts import tests.conftest, so they run from the repository root.
+    ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+
     def test_exit_shuts_down_a_loaded_engine(self):
         code = textwrap.dedent("""
-            import multiprocessing, sys, time, types
+            import multiprocessing, sys, time
             import redact.llms.backends.vllm as vllm_module
             import redact.llms.resources.estimate as estimate
+            from tests.conftest import fake_vllm_modules
 
             class _LLM:
                 def __init__(self, **kw):
@@ -250,13 +255,13 @@ class TestExitHook:
                     self.proc.join()
                     print("shut down", flush=True)
 
-            sys.modules["vllm"] = types.SimpleNamespace(LLM=_LLM)
+            sys.modules.update(fake_vllm_modules(_LLM))
             vllm_module._prepare_environment = lambda: None
             estimate._load_config = lambda _id: None
             vllm_module._engine("org/x", None, {})
         """)
         result = subprocess.run([sys.executable, "-c", code], capture_output=True,
-                                text=True, timeout=60)
+                                text=True, timeout=60, cwd=self.ROOT)
         assert result.returncode == 0, result.stderr
         assert "shut down" in result.stdout
 
@@ -267,9 +272,10 @@ class TestExitHook:
         instead, the hook never exists and multiprocessing's exit hook joins the
         engine's child process for as long as it lives."""
         code = textwrap.dedent("""
-            import multiprocessing, sys, threading, time, types
+            import multiprocessing, sys, threading, time
             import redact.llms.backends.vllm as vllm_module
             import redact.llms.resources.estimate as estimate
+            from tests.conftest import fake_vllm_modules
 
             started = threading.Event()
 
@@ -286,7 +292,7 @@ class TestExitHook:
                     self.proc.join()
                     print("shut down", flush=True)
 
-            sys.modules["vllm"] = types.SimpleNamespace(LLM=_LLM)
+            sys.modules.update(fake_vllm_modules(_LLM))
             vllm_module._prepare_environment = lambda: None
             estimate._load_config = lambda _id: None
             threading.Thread(target=vllm_module._engine, args=("org/x", None, {}),
@@ -294,7 +300,7 @@ class TestExitHook:
             started.wait()                   # exit mid-load, as a script does after preload()
         """)
         result = subprocess.run([sys.executable, "-c", code], capture_output=True,
-                                text=True, timeout=30)
+                                text=True, timeout=30, cwd=self.ROOT)
         assert result.returncode == 0, result.stderr
         assert "shut down" in result.stdout
 
@@ -326,7 +332,8 @@ def _vllm_backend(monkeypatch, outputs):
     import redact.llms.backends.vllm as vllm_module
     from redact.llms.backends import VLLMBackend
 
-    monkeypatch.setitem(sys.modules, "vllm", types.SimpleNamespace(SamplingParams=lambda **kw: kw))
+    for name, module in fake_vllm_modules(_FakeEngine).items():
+        monkeypatch.setitem(sys.modules, name, module)
     # _engine() returns a cached engine before it imports vllm.
     vllm_module._engines[vllm_module._engine_key("org/x", None, {})] = _FakeEngine(outputs)
     return VLLMBackend("m", "org/x", default_max_tokens=8)

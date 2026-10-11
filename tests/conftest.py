@@ -2,6 +2,7 @@
 
 import multiprocessing
 import time
+from types import SimpleNamespace
 
 import pandas as pd
 import pytest
@@ -174,6 +175,36 @@ def _bind(backend, config, setup: str) -> None:
         max_workers=api.recommended_max_workers if api else 1,
         **LLMBackend._identity(config),
     )
+
+
+def fake_vllm_modules(engine_cls, SamplingParams=lambda **kw: kw) -> dict[str, object]:
+    """The ``sys.modules`` entries ``backends/vllm.py`` imports, with a fake engine.
+
+    vLLM is not installed where the suite runs. Install the entries with
+    ``patch.dict("sys.modules", fake_vllm_modules(cls))`` or one
+    ``monkeypatch.setitem`` each.
+
+    Args:
+        engine_cls: Called with the engine arguments as keywords; what it
+            returns is the loaded engine.
+        SamplingParams: Stand-in for ``vllm.SamplingParams``. The default
+            returns its keywords as a dict.
+    """
+    return {
+        "vllm": SimpleNamespace(LLM=engine_cls, SamplingParams=SamplingParams),
+        "vllm.engine": SimpleNamespace(),
+        "vllm.engine.arg_utils": SimpleNamespace(AsyncEngineArgs=lambda **kw: kw),
+        "vllm.sampling_params": SimpleNamespace(
+            RequestOutputKind=SimpleNamespace(FINAL_ONLY="FINAL_ONLY"),
+            SamplingParams=SamplingParams),
+        "vllm.usage": SimpleNamespace(),
+        "vllm.usage.usage_lib": SimpleNamespace(
+            UsageContext=SimpleNamespace(LLM_CLASS="LLM_CLASS")),
+        "vllm.v1": SimpleNamespace(),
+        "vllm.v1.engine": SimpleNamespace(),
+        "vllm.v1.engine.async_llm": SimpleNamespace(AsyncLLM=SimpleNamespace(
+            from_engine_args=lambda args, usage_context: engine_cls(**args))),
+    }
 
 
 @pytest.fixture()

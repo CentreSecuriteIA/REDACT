@@ -28,6 +28,7 @@ from redact import residency
 from redact.llms.resources import estimate, measure
 from redact.residency.footprint import _engine_id
 from redact.residency.placement import _Cards, _exceeds_its_cards
+from tests.conftest import fake_vllm_modules
 
 GIB = 1024 ** 3
 #: Fixture card size and the TP factor the suggestions land on.
@@ -701,8 +702,7 @@ class TestLoadLocks:
                 time.sleep(0.15)
                 loads.append(kw["model"])
 
-        fake_vllm = type("m", (), {"LLM": _SlowLLM})
-        with patch.dict("sys.modules", {"vllm": fake_vllm}):
+        with patch.dict("sys.modules", fake_vllm_modules(_SlowLLM)):
             with patch.object(vllm_module, "_prepare_environment"):
                 results = []
                 threads = [
@@ -1081,11 +1081,10 @@ class TestRelease:
 
         torch = SimpleNamespace(cuda=SimpleNamespace(
             is_initialized=lambda: True, empty_cache=lambda: log.emptied.append(1)))
-        fake_vllm = SimpleNamespace(LLM=_LLM, SamplingParams=lambda **kw: kw)
         vllm_module.VLLMBackend.clear_cache()
         intro.TransformersIntrospectionBackend.clear_cache()
         observe.set_emitter(log.events.append)
-        with patch.dict("sys.modules", {"vllm": fake_vllm, "torch": torch}), \
+        with patch.dict("sys.modules", {**fake_vllm_modules(_LLM), "torch": torch}), \
              patch.object(vllm_module, "_prepare_environment"):
             yield SimpleNamespace(vllm=vllm_module, intro=intro, LLM=_LLM, log=log)
             vllm_module.VLLMBackend.clear_cache()
@@ -1340,7 +1339,7 @@ class TestPlannedUtilization:
                 calls.append(kw)
 
         vllm_module.VLLMBackend.clear_cache()
-        with patch.dict("sys.modules", {"vllm": type("m", (), {"LLM": _LLM})}), \
+        with patch.dict("sys.modules", fake_vllm_modules(_LLM)), \
              patch.object(vllm_module, "_prepare_environment"):
             yield vllm_module, calls
         vllm_module.VLLMBackend.clear_cache()
@@ -1584,8 +1583,8 @@ class TestDefaultContextLength:
 
         calls = []
         vllm_module.VLLMBackend.clear_cache()
-        fake = type("m", (), {"LLM": lambda **kw: calls.append(kw) or object()})
-        with patch.dict("sys.modules", {"vllm": fake}), \
+        fake = fake_vllm_modules(lambda **kw: calls.append(kw) or object())
+        with patch.dict("sys.modules", fake), \
              patch.object(vllm_module, "_prepare_environment"):
             yield vllm_module, calls
         vllm_module.VLLMBackend.clear_cache()

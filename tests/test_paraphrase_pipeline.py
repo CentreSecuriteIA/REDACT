@@ -11,7 +11,7 @@ import pytest
 import redact.content_moderation.paraphrase as CP
 from redact import generate_paraphrases, paths
 from redact.dataset.io import append_samples
-from tests.conftest import MockBackend, make_client
+from tests.conftest import MockBackend, fake_vllm_modules, make_client
 
 
 @pytest.fixture()
@@ -329,7 +329,8 @@ def test_an_unload_between_paraphrasers_shuts_down_only_their_engine(
             self.llm_engine = SimpleNamespace(engine_core=SimpleNamespace(
                 shutdown=lambda: shutdowns.append(model)))
 
-    monkeypatch.setitem(sys.modules, "vllm", SimpleNamespace(LLM=_LLM))
+    for name, module in fake_vllm_modules(_LLM).items():
+        monkeypatch.setitem(sys.modules, name, module)
     monkeypatch.setattr(vllm_module, "_prepare_environment", lambda: None)
     monkeypatch.setattr("redact.llms.resources.estimate._load_config", lambda _id: None)
     monkeypatch.setattr(

@@ -19,6 +19,7 @@ from redact.llms.model_config import (
     VLLMConfig,
     register_model,
 )
+from tests.conftest import fake_vllm_modules
 
 
 class TestResolveSetup:
@@ -213,11 +214,9 @@ class TestEngineCacheIsPerBackendClass:
             def __init__(self, **kw):
                 loads.append(kw["model"])
 
-        fake_vllm = MagicMock()
-        fake_vllm.LLM = _FakeLLM
         # The load reads the HF config for the default context length.
         with patch("redact.llms.backends.vllm._prepare_environment"),              patch("redact.llms.resources.estimate._load_config", return_value=None):
-            with patch.dict(sys.modules, {"vllm": fake_vllm}):
+            with patch.dict(sys.modules, fake_vllm_modules(_FakeLLM)):
                 a = backend_for(MODEL_REGISTRY["venice-uncensored"], "vllm")
                 b = backend_for(MODEL_REGISTRY["venice-paraphraser"], "vllm")
 
@@ -252,7 +251,7 @@ class TestSetupReachesTheBackend:
 
         clear_transport_caches()
         try:
-            with patch.dict(sys.modules, {"vllm": type("m", (), {"LLM": _StubLLM})}), \
+            with patch.dict(sys.modules, fake_vllm_modules(_StubLLM)), \
                  patch.object(vllm_module, "_prepare_environment"),                  patch("redact.llms.resources.estimate._load_config", return_value=None):
                 backend_for(ModelConfig(name="m", backend_type="vllm", vllm=VLLMConfig(
                     hf_model_id="org/big", min_gpus=2)))
