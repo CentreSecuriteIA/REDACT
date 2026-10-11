@@ -123,6 +123,8 @@ def get_existing_samples(
     return set(df["sample"].dropna().tolist())
 
 
+#TODO(dataset): append_samples reads and rewrites the whole category CSV on
+# every save, so a save slows down as the file grows. Append the new rows only.
 def append_samples(
     samples: list[str],
     category: str,

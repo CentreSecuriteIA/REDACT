@@ -162,6 +162,12 @@ def _group_key(request: LLMRequest) -> Hashable:
     return client.model, client.backend.backend_name, request.max_tokens
 
 
+#TODO(pool): what drive_units does not do yet:
+#   - Refill inside a call. A call lasts as long as its longest reply, and
+#     the slots of shorter replies idle until it returns. Needs vLLM's
+#     async engine.
+#   - Reject a prompt longer than the model's context as that unit's error.
+#     Prompt length is not checked before a call.
 def drive_units(
     source: Iterable[tuple[Hashable, Generator]],
     *,

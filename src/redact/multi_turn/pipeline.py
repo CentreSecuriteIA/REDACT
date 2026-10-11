@@ -30,6 +30,9 @@ from .core import Setting, conversation_gen
 
 logger = logging.getLogger(__name__)
 
+#TODO(pool): move onto llm_pipeline.drive_units and dataset.CommitBuffer, like
+# outputs and jailbreaks. This stage still drives fixed chunks.
+
 
 def _seed_text_col(df: pd.DataFrame) -> str:
     for c in ("seed", "sample", "prompt", "text"):

@@ -40,6 +40,9 @@ from .checker import build_paraphrase_checker
 
 logger = logging.getLogger(__name__)
 
+#TODO(later): move this stage onto llm_pipeline.drive_units, like outputs and
+# jailbreaks. Waits for a trained paraphraser; a stand-in model runs it today.
+
 _PROMPT_DIR = None  # Uses load_prompt() default (package-relative)
 
 

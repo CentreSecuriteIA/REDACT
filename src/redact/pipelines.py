@@ -24,6 +24,12 @@ skips constitution generation, so it's the cheaper "quick eval" option)::
 #TODO(driver script): the generate_* functions should not be called on their
 # own; only the pipeline entry point should call them. Fix them to that later.
 
+#TODO(dataset): what the stages do not do yet for a large run (around 1M rows):
+#   - A stage holds its inputs and its whole plan in memory, and reads the
+#     full output CSV back to return it.
+#   - Resume reads whole output CSVs to find the finished units.
+#   - Nothing locks the output files against a second process.
+
 import json
 import logging
 import warnings
