@@ -11,6 +11,7 @@ Usage::
     replies = client.generate(messages_list)
 """
 
+import asyncio
 
 from .backends import ComputeConfig, LLMBackend, backend_for, resolve_setup
 from .model_config import get_model_config
@@ -216,6 +217,56 @@ class ModelClient:
             messages_list, on_complete=on_complete,
             max_tokens=max_tokens, temperature=temperature,
             internals_ids=internals_ids, **kwargs,
+        )
+
+    async def agenerate(
+        self,
+        messages: list[dict],
+        *,
+        max_tokens: int | None = None,
+        temperature: float | None = None,
+        internals_id: str | None = None,
+        **kwargs,
+    ) -> str:
+        """Send one message list and return its reply, without blocking the loop.
+
+        Runs on the shared loop (``llms/aio.py``). Each call counts once
+        against the rate limiter.
+
+        Args:
+            messages: Chat messages of the one item.
+            max_tokens: Overrides the model's default.
+            temperature: Overrides the model's default.
+            internals_id: Capture id of the item. Only valid on a backend
+                that supports internals capture.
+            **kwargs: Backend-specific extras.
+
+        Returns:
+            The generated text.
+
+        Raises:
+            ValueError: The backend has no async calls, or ``internals_id``
+                is passed to a backend that cannot capture.
+        """
+        if not self.compute_config.supports_async_calls:
+            raise ValueError(
+                f"{type(self._backend).__name__} has no async calls "
+                f"(supports_async_calls=False); use generate()."
+            )
+        if internals_id is not None and not self.compute_config.supports_internals:
+            raise ValueError(
+                f"{type(self._backend).__name__} does not support internals "
+                f"capture (supports_internals=False); remove internals_ids/"
+                f"internals_id or use an internals-capable backend."
+            )
+
+        if self._rate_limiter is not None:
+            while (wait := self._rate_limiter.reserve(self._backend)) > 0:
+                await asyncio.sleep(wait)
+        return await self._backend.agenerate(
+            messages,
+            max_tokens=max_tokens, temperature=temperature,
+            internals_id=internals_id, **kwargs,
         )
 
     def rename_capture(self, old_internals_id: str, new_internals_id: str) -> None:

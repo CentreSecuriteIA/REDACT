@@ -4,16 +4,19 @@ executes them — dispatch strategy and chunking.
 
 import logging
 import os
+import time
+from types import SimpleNamespace
 from unittest.mock import patch
 
 import pytest
 
-from redact.llms import ModelClient
+from redact.llms import ModelClient, aio, wrappers
+from redact.llms import client as client_module
 from redact.llms.backends import ComputeConfig, backend_for, clear_transport_caches
 from redact.llms.client import clear_client_cache
 from redact.llms.model_config import get_model_config
 from redact.llms.router import batch_generate_samples, generate_sample
-from redact.llms.wrappers import BatchCaller
+from redact.llms.wrappers import BatchCaller, RateLimiter
 from tests.conftest import MockBackend, make_client
 
 
@@ -215,6 +218,78 @@ class TestClientIsTheExecutor:
         params = inspect.signature(ModelClient.generate).parameters
         assert "rate_limiter" not in params
         assert "backend" not in params
+
+
+class _AsyncBackend(MockBackend):
+    """MockBackend with ``agenerate()``: one item, answered at once."""
+
+    compute_config = ComputeConfig(supports_async_calls=True)
+
+    async def agenerate(self, messages, *, internals_id=None, **kwargs):
+        ids = None if internals_id is None else [internals_id]
+        return self.generate([messages], internals_ids=ids, **kwargs)[0]
+
+
+class TestClientAgenerate:
+    """agenerate() is one item on the event loop: the same checks and the
+    same rate limit as generate(), without a blocking sleep."""
+
+    _HI = [{"role": "user", "content": "hi"}]
+
+    def test_returns_the_reply_and_forwards_the_overrides(self):
+        backend = _AsyncBackend("A")
+        client = make_client(backend, "agen-model")
+        reply = aio.run(client.agenerate(self._HI, max_tokens=7, temperature=0.5, top_p=0.9))
+        assert reply == "A"
+        (call,) = backend.calls
+        assert (call["max_tokens"], call["temperature"], call["top_p"]) == (7, 0.5, 0.9)
+        assert call["model"] == "agen-model" and "internals_id" not in call
+
+    def test_a_backend_without_async_calls_is_rejected(self):
+        backend = MockBackend("ok")  # supports_async_calls=False (base default)
+        with pytest.raises(ValueError, match="has no async calls"):
+            aio.run(make_client(backend).agenerate(self._HI))
+        assert backend.calls == []
+
+    def test_internals_id_raises_when_backend_does_not_support_it(self):
+        backend = _AsyncBackend("ok")
+        with pytest.raises(ValueError, match="does not support internals"):
+            aio.run(make_client(backend).agenerate(self._HI, internals_id="id-0"))
+        assert backend.calls == []
+
+    def test_internals_id_reaches_a_capturing_backend(self):
+        class _Capturing(_AsyncBackend):
+            compute_config = ComputeConfig(
+                supports_internals=True, supports_async_calls=True
+            )
+
+        backend = _Capturing("ok")
+        aio.run(make_client(backend).agenerate(self._HI, internals_id="id-0"))
+        assert backend.calls[0]["internals_id"] == "id-0"
+
+    def test_waits_for_the_rate_limiter_on_the_loop(self):
+        """A full window is waited out with asyncio.sleep, asking again after
+        each wait, so the loop stays free and the cap holds."""
+        rpm = 2
+        backend = make_client(_AsyncBackend("A"), "agen-rate-limited").backend
+        backend.rpm = rpm
+        limiter = RateLimiter()
+        client = ModelClient(backend, limiter)
+        slept = []
+
+        async def _sleep(seconds):
+            slept.append(seconds)
+            if len(slept) == 2:        # only the SECOND sleep frees a slot
+                limiter._timestamps[0] -= 120.0
+
+        # No blocking sleep to fall back on: the fake clock has none.
+        with patch.object(client_module, "asyncio", SimpleNamespace(sleep=_sleep)), \
+             patch.object(wrappers, "time", SimpleNamespace(monotonic=time.monotonic)):
+            replies = [aio.run(client.agenerate(self._HI)) for _ in range(rpm + 1)]
+
+        assert replies == ["A"] * (rpm + 1)
+        assert len(slept) == 2 and min(slept) > 0, "woke to a full window and went anyway"
+        assert len(limiter._timestamps) == rpm, "cap exceeded"
 
 
 class TestCreateFactory:
