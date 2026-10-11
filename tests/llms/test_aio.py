@@ -1,0 +1,101 @@
+"""Tests for the shared event-loop thread (llms/aio.py)."""
+
+import asyncio
+import threading
+
+import pytest
+
+from redact.llms import aio
+
+
+async def _where():
+    return asyncio.get_running_loop(), threading.current_thread()
+
+
+def test_run_returns_the_result_and_raises_the_exception():
+    async def ok():
+        return "ok"
+
+    async def boom():
+        raise ValueError("boom")
+
+    assert aio.run(ok()) == "ok"
+    with pytest.raises(ValueError, match="boom"):
+        aio.run(boom())
+
+
+def test_every_coroutine_runs_on_the_same_daemon_thread():
+    loop_a, thread_a = aio.run(_where())
+    loop_b, thread_b = aio.submit(_where()).result()
+    assert loop_a is loop_b and thread_a is thread_b
+    assert thread_a is not threading.current_thread()
+    assert thread_a.daemon, "a non-daemon loop thread would block interpreter exit"
+
+
+def test_submit_returns_while_the_coroutine_is_still_running():
+    async def new_event():
+        return asyncio.Event()
+
+    release = aio.run(new_event())
+
+    async def wait():
+        await release.wait()
+        return "released"
+
+    async def let_go():
+        release.set()
+
+    waiting = aio.submit(wait())
+    assert not waiting.done()
+    aio.run(let_go())
+    assert waiting.result(timeout=10) == "released"
+
+
+def test_run_on_the_loop_thread_raises_instead_of_deadlocking():
+    async def inner():
+        return 1
+
+    async def outer():
+        return aio.run(inner())
+
+    with pytest.raises(RuntimeError, match="event loop's thread"):
+        aio.run(outer())
+
+
+def test_concurrent_first_use_starts_one_loop(monkeypatch):
+    """Two loops would split one SDK client's connections between them."""
+    process_thread = aio._thread
+    monkeypatch.setattr(aio, "_loop", None)
+    monkeypatch.setattr(aio, "_thread", None)
+    built = []
+    new_event_loop = asyncio.new_event_loop
+
+    def counting():
+        built.append(new_event_loop())
+        return built[-1]
+
+    monkeypatch.setattr(aio.asyncio, "new_event_loop", counting)
+    barrier = threading.Barrier(4)
+    seen = []
+
+    def first_use():
+        barrier.wait()
+        seen.append(aio._get_loop())
+
+    threads = [threading.Thread(target=first_use) for _ in range(4)]
+    for t in threads:
+        t.start()
+    for t in threads:
+        t.join()
+    try:
+        assert len(built) == 1
+        assert seen == built * 4
+    finally:
+        # This test's loop is not the process's: stop it before it is forgotten.
+        for loop in built:
+            loop.call_soon_threadsafe(loop.stop)
+        for thread in threading.enumerate():
+            if thread.name == "redact-aio" and thread is not process_thread:
+                thread.join()
+        for loop in built:
+            loop.close()
