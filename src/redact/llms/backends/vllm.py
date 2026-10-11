@@ -7,16 +7,18 @@ kwargs), so two registry entries that agree on all three share one load.
 through vLLM's chat template (``llm.chat()``).
 """
 
+import asyncio
 import atexit
 import contextlib
+import itertools
 import logging
 import os
 import threading
 import time
-from collections.abc import Collection
+from collections.abc import Collection, Mapping
 from typing import TYPE_CHECKING, ClassVar
 
-from .. import observe
+from .. import aio, observe
 from ..resources import estimate
 from .base import ComputeConfig, LLMBackend, free_memory
 
@@ -43,6 +45,8 @@ _engine_loaded_at: dict[tuple, float] = {}
 _planned_utilization: dict[tuple, float] = {}
 # Set once the exit hook is registered, at the start of the first load (see _engine).
 _exit_hook_registered = False
+# Numbers the requests: an engine needs each id unique in the process.
+_request_ids = itertools.count()
 
 
 def set_planned_utilization(planned: dict[tuple, float], replace: bool = True) -> None:
@@ -89,7 +93,10 @@ def _engine(hf_model_id: str, quantization: str | None, vllm_kwargs: dict):
 
         _prepare_environment()
         try:
-            from vllm import LLM  # lazy: vllm is heavy and optional
+            # lazy: vllm is heavy and optional
+            from vllm.engine.arg_utils import AsyncEngineArgs
+            from vllm.usage.usage_lib import UsageContext
+            from vllm.v1.engine.async_llm import AsyncLLM
         except ImportError:
             raise ImportError(
                 "The 'vllm' package is required for VLLMBackend. "
@@ -102,8 +109,9 @@ def _engine(hf_model_id: str, quantization: str | None, vllm_kwargs: dict):
             # atexit runs hooks last-registered first, and multiprocessing's,
             # registered when multiprocessing.util is first imported, joins
             # the engine's child process and never returns while the engine
-            # runs. Import it here so ours is registered after it; vllm
-            # imports it too, but only inside LLM(), after this point.
+            # runs. Import it here so ours is registered after it: left to
+            # vllm, it may first be imported while the engine is built, after
+            # this point.
             import multiprocessing.util  # noqa: F401
             atexit.register(VLLMBackend.clear_cache)
             _exit_hook_registered = True
@@ -117,11 +125,19 @@ def _engine(hf_model_id: str, quantization: str | None, vllm_kwargs: dict):
         # After the key is built, so the default never splits a shared engine.
         if not kwargs.get("max_model_len"):
             kwargs["max_model_len"] = estimate.effective_max_model_len(hf_model_id)
+        # vllm.LLM's default. Left unset, the engine logs a stats line every
+        # 10 seconds.
+        kwargs.setdefault("disable_log_stats", True)
 
         started = time.perf_counter()
         # Not measured: vLLM preallocates its memory grant in a separate
         # process, so a measurement would restate the setting.
-        _engines[key] = LLM(model=hf_model_id, quantization=quantization, **kwargs)
+        _engines[key] = AsyncLLM.from_engine_args(
+            AsyncEngineArgs(model=hf_model_id, quantization=quantization, **kwargs),
+            # vllm.LLM's context: vLLM's defaults for running sequences and
+            # batched tokens depend on it, and the engine's own has lower ones.
+            usage_context=UsageContext.LLM_CLASS,
+        )
         # Held from the start of the load; set after it, so a failed load
         # leaves no timer.
         _engine_loaded_at[key] = started
@@ -330,7 +346,11 @@ class VLLMBackend(LLMBackend):
         internals_ids: list[str | None] | None = None,
         **kwargs,
     ) -> list[str]:
-        """Generate replies for the whole batch in a single vLLM pass.
+        """Generate replies for the whole batch, one engine request per item.
+
+        Blocks until every reply is in. The requests run on the shared loop
+        (``llms/aio.py``), and the engine batches them with whatever else it
+        has in flight. When one fails, the others are cancelled.
 
         Args:
             messages_list: One chat message list per item.
@@ -346,45 +366,127 @@ class VLLMBackend(LLMBackend):
         """
         if not messages_list:
             return []
-        llm = self._llm  # raises before any work if the engine was released
-        prompts, resolved = self._prepare(messages_list)
         max_tok, temp = self._resolve(max_tokens, temperature)
+        replies = aio.run(self._many(messages_list, max_tok, temp, kwargs))
+        self._warn_cut(
+            sum(reason == "length" for _, reason in replies),
+            len(messages_list), max_tok,
+        )
+        return [text for text, _ in replies]
 
+    async def agenerate(
+        self,
+        messages: list[dict],
+        *,
+        max_tokens: int | None = None,
+        temperature: float | None = None,
+        internals_id: str | None = None,
+        **kwargs,
+    ) -> str:
+        """Generate one reply with one engine request, without blocking the loop.
+
+        Runs on the shared loop (``llms/aio.py``).
+
+        Args:
+            messages: Chat messages of the one item.
+            max_tokens: Overrides the model's default.
+            temperature: Overrides the model's default.
+            internals_id: Ignored. This backend does not capture internals.
+            **kwargs: ``SamplingParams`` overrides for this call, merged over
+                the model's sampling defaults.
+
+        Returns:
+            The generated text.
+        """
+        max_tok, temp = self._resolve(max_tokens, temperature)
+        text, reason = await self._one(messages, max_tok, temp, kwargs)
+        self._warn_cut(int(reason == "length"), 1, max_tok)
+        return text
+
+    async def _many(
+        self, messages_list: list[list[dict]], max_tok: int, temp: float, extra: dict
+    ) -> list[tuple[str, str | None]]:
+        """Send each item as its own request and await them all.
+
+        Returns:
+            One :meth:`_one` result per item, in the order of ``messages_list``.
+        """
+        tasks = [asyncio.ensure_future(self._one(messages, max_tok, temp, extra))
+                 for messages in messages_list]
+        try:
+            return await asyncio.gather(*tasks)
+        except BaseException:
+            # A failed batch must not keep the engine working: a cancelled
+            # request is aborted there.
+            for task in tasks:
+                task.cancel()
+            await asyncio.gather(*tasks, return_exceptions=True)
+            raise
+
+    async def _one(
+        self, messages: list[dict], max_tok: int, temp: float, extra: dict
+    ) -> tuple[str, str | None]:
+        """Send one request to the engine and await its reply.
+
+        Runs on the shared loop, as every await on an engine must: an engine
+        hands its outputs to the loop of its first request.
+
+        Returns:
+            ``(text, finish_reason)``. vLLM says ``"length"`` for both caps,
+            ``max_tokens`` and ``max_model_len``.
+
+        Raises:
+            RuntimeError: The engine was released, or sent no output.
+        """
         from vllm import SamplingParams
+        from vllm.sampling_params import RequestOutputKind
 
-        sampling_params = SamplingParams(
+        engine = self._llm  # raises before any work if the engine was released
+        (system_prompt,), (chat,) = self._prepare([messages])
+        if system_prompt:
+            chat = [{"role": "system", "content": system_prompt}, *chat]
+        # The engine takes token ids, so the chat template is applied here.
+        ids = engine.get_tokenizer().apply_chat_template(
+            chat, add_generation_prompt=True, tokenize=True)
+        # Some tokenizers return the ids, some a mapping that holds them.
+        if isinstance(ids, Mapping):
+            ids = ids["input_ids"]
+        params = SamplingParams(
             max_tokens=max_tok,
             temperature=temp,
-            **{**self._sampling, **kwargs},
+            # One output per request, once the reply is complete.
+            output_kind=RequestOutputKind.FINAL_ONLY,
+            **{**self._sampling, **extra},
         )
+        request_id = f"redact-{next(_request_ids)}"
 
-        chat_inputs = [
-            [{"role": "system", "content": sp}, *m] if sp else m
-            for m, sp in zip(resolved, prompts)
-        ]
-        # One telemetry event for the whole pass, with n_items = batch size.
+        # One telemetry event per request: the engine batches continuously,
+        # so the request is the transport call.
         started = time.perf_counter()
         try:
-            outputs = llm.chat(chat_inputs, sampling_params)
+            final = None
+            async for output in engine.generate(
+                    {"prompt_token_ids": ids}, params, request_id):
+                final = output
+            if final is None:
+                raise RuntimeError(
+                    f"The vLLM engine of {self.model!r} sent no output for "
+                    f"request {request_id}."
+                )
         except Exception as exc:
             self._record_call(
-                n_items=len(messages_list), started=started, max_tokens=max_tok,
+                n_items=1, started=started, max_tokens=max_tok,
                 temperature=temp, error=f"{type(exc).__name__}: {exc}",
             )
             raise
-        lens = [len(getattr(o.outputs[0], "token_ids", None) or ()) for o in outputs]
+        reply = final.outputs[0]
+        out_tok = len(reply.token_ids)
         self._record_call(
-            n_items=len(messages_list), started=started,
-            in_tok=sum(len(getattr(o, "prompt_token_ids", None) or ()) for o in outputs),
-            out_tok=sum(lens), out_tok_max=max(lens, default=None),
-            max_tokens=max_tok, temperature=temp,
+            n_items=1, started=started,
+            in_tok=len(final.prompt_token_ids), out_tok=out_tok, out_tok_max=out_tok,
+            max_tokens=max_tok, temperature=temp, finish_reason=reply.finish_reason,
         )
-        # vLLM says "length" for both caps, max_tokens and max_model_len.
-        self._warn_cut(
-            sum(getattr(o.outputs[0], "finish_reason", None) == "length" for o in outputs),
-            len(messages_list), max_tok,
-        )
-        return [self._clean_output(out.outputs[0].text) for out in outputs]
+        return self._clean_output(reply.text), reply.finish_reason
 
     @property
     def backend_name(self) -> str:

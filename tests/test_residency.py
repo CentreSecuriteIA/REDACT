@@ -1065,19 +1065,21 @@ class TestRelease:
         log = SimpleNamespace(loads=[], shutdowns=[], emptied=[], events=[])
 
         class _LLM:
-            hook = True     # False: a vLLM version with no shutdown hook
+            hook = True     # False: an engine with no shutdown()
 
             def __init__(self, **kw):
                 model = kw["model"]
                 log.loads.append(model)
                 if self.hook:
-                    # vLLM's V1 layout: the hook is on the engine core.
-                    self.llm_engine = SimpleNamespace(engine_core=SimpleNamespace(
-                        shutdown=lambda: log.shutdowns.append(model)))
+                    self.shutdown = lambda: log.shutdowns.append(model)
 
-            def chat(self, chat_inputs, sampling_params):
-                return [SimpleNamespace(prompt_token_ids=[1], outputs=[
-                    SimpleNamespace(text="ok", token_ids=[1])]) for _ in chat_inputs]
+            def get_tokenizer(self):
+                return SimpleNamespace(
+                    apply_chat_template=lambda messages, **kw: [1] * len(messages))
+
+            async def generate(self, prompt, params, request_id):
+                yield SimpleNamespace(prompt_token_ids=prompt["prompt_token_ids"], outputs=[
+                    SimpleNamespace(text="ok", token_ids=[1], finish_reason="stop")])
 
         torch = SimpleNamespace(cuda=SimpleNamespace(
             is_initialized=lambda: True, empty_cache=lambda: log.emptied.append(1)))
@@ -1324,11 +1326,11 @@ class TestRelease:
 
 
 class TestPlannedUtilization:
-    """The plan's computed gpu_memory_utilization reaches ``vllm.LLM``."""
+    """The plan's computed gpu_memory_utilization reaches the engine."""
 
     @pytest.fixture()
     def engine(self):
-        """Load through a fake ``vllm.LLM``; yields ``(module, constructor calls)``."""
+        """Load through a fake engine; yields ``(module, constructor calls)``."""
         import redact.llms.backends.vllm as vllm_module
 
         calls = []
@@ -1360,7 +1362,8 @@ class TestPlannedUtilization:
         vllm_module, calls = engine
         vllm_module._engine("org/noplan", None, {"max_model_len": 512})
         assert calls == [{"model": "org/noplan", "quantization": None,
-                          "max_model_len": 512, "gpu_memory_utilization": 0.9}]
+                          "max_model_len": 512, "gpu_memory_utilization": 0.9,
+                          "disable_log_stats": True}]
 
     def test_a_plan_is_swapped_in_whole(self, engine):
         """A load must never read a cleared, half-filled plan."""
@@ -1382,7 +1385,8 @@ class TestPlannedUtilization:
         residency.apply_plan(_plan([m], 48.0, 1))
         vllm_module.VLLMBackend.from_config(get_model_config(m))
         assert calls == [{"model": "org/pur", "quantization": None,
-                          "max_model_len": 512, "gpu_memory_utilization": 0.9}]
+                          "max_model_len": 512, "gpu_memory_utilization": 0.9,
+                          "disable_log_stats": True}]
 
     def test_a_directly_built_engine_keeps_its_own_value(self, engine):
         """Outside the registry: no plan is keyed on these kwargs."""
@@ -1610,7 +1614,8 @@ class TestDefaultContextLength:
         with _config(MISTRAL_24B):
             vllm_module._engine("org/dc-noplan", None, {})
         assert calls == [{"model": "org/dc-noplan", "quantization": None,
-                          "max_model_len": 10_000, "gpu_memory_utilization": 0.9}]
+                          "max_model_len": 10_000, "gpu_memory_utilization": 0.9,
+                          "disable_log_stats": True}]
 
     def test_the_default_reaches_the_engine_with_a_plan(self, registered, engine):
         vllm_module, calls = engine

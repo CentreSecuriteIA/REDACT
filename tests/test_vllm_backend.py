@@ -26,6 +26,7 @@ import types
 
 import pytest
 
+from redact.llms import aio, observe
 from redact.llms.backends import (
     ComputeConfig,
     LLMBackend,
@@ -42,6 +43,7 @@ from redact.llms.model_config import (
 )
 from redact.llm_pipeline import batch_check_samples
 from tests.conftest import fake_vllm_modules, make_client
+from tests.llm_pipeline.test_drive_async import _Script
 
 # ---------------------------------------------------------------------------
 # Helpers
@@ -49,7 +51,7 @@ from tests.conftest import fake_vllm_modules, make_client
 
 TEST_MODEL_NAME = "test-gemma-2b"
 
-# Which real checkpoint the GPU tests load, and the vllm.LLM() kwargs used to
+# Which real checkpoint the GPU tests load, and the engine kwargs used to
 # fit it on the available card. Both overridable — see the module docstring.
 TEST_HF_ID = os.environ.get(
     "REDACT_TEST_VLLM_MODEL", "VibeStudio/Nidum-Gemma-2B-Uncensored"
@@ -164,7 +166,8 @@ class TestEngineDownloadDir:
 
     @staticmethod
     def _load(monkeypatch, vllm_kwargs):
-        """Run the load path against a stub engine; return the kwargs it saw."""
+        """Run the load path against a stub engine; return what vLLM was
+        handed: the engine arguments, and the usage context under its name."""
         import redact.llms.backends.vllm as vllm_module
 
         seen = {}
@@ -173,7 +176,12 @@ class TestEngineDownloadDir:
             def __init__(self, **kw):
                 seen.update(kw)
 
-        for name, module in fake_vllm_modules(_StubLLM).items():
+        modules = fake_vllm_modules(_StubLLM)
+        async_llm = modules["vllm.v1.engine.async_llm"].AsyncLLM
+        build = async_llm.from_engine_args
+        async_llm.from_engine_args = (
+            lambda args, **context: seen.update(context) or build(args, **context))
+        for name, module in modules.items():
             monkeypatch.setitem(sys.modules, name, module)
         monkeypatch.setattr(vllm_module, "_prepare_environment", lambda: None)
         # The load reads the HF config for the default context length.
@@ -208,6 +216,21 @@ class TestEngineDownloadDir:
         original = {"gpu_memory_utilization": 0.9}
         self._load(monkeypatch, original)
         assert original == {"gpu_memory_utilization": 0.9}
+
+
+class TestEngineArguments:
+    """What a load hands vLLM beyond the registry's kwargs, as ``vllm.LLM`` did."""
+
+    def test_stats_logging_is_off_unless_the_kwargs_turn_it_on(self, monkeypatch):
+        load = TestEngineDownloadDir._load
+        assert load(monkeypatch, {})["disable_log_stats"] is True
+        assert load(monkeypatch, {"disable_log_stats": False})["disable_log_stats"] is False
+
+    def test_the_engine_is_built_in_the_usage_context_of_vllm_llm(self, monkeypatch):
+        """vLLM's defaults for running sequences and batched tokens depend on
+        the context, and the engine's own has lower ones."""
+        seen = TestEngineDownloadDir._load(monkeypatch, {})
+        assert seen["usage_context"] == "LLM_CLASS"    # the fake's UsageContext.LLM_CLASS
 
 
 class TestWorkerStartMethod:
@@ -267,7 +290,7 @@ class TestExitHook:
 
     def test_exit_during_a_load_waits_for_it_then_shuts_down(self):
         """The hook is registered when a load starts. A script that exits while
-        a background load is inside vllm.LLM() blocks on the engine lock until
+        a background load is building the engine blocks on the engine lock until
         the load is done, then shuts the engine down. Registered after the load
         instead, the hook never exists and multiprocessing's exit hook joins the
         engine's child process for as long as it lives."""
@@ -305,76 +328,259 @@ class TestExitHook:
         assert "shut down" in result.stdout
 
 
-_HI = [{"role": "user", "content": "hi"}]
+def _ask(name, system=None):
+    """A chat whose request the fake engine names ``name``."""
+    chat = [{"role": "user", "content": name}]
+    return [{"role": "system", "content": system}, *chat] if system else chat
 
 
-def _output(text, **attrs):
-    """One vLLM RequestOutput as generate() reads it; attrs land on the CompletionOutput."""
+def _reply(text, token_ids=(3, 4), finish_reason="stop"):
+    """One vLLM CompletionOutput as the backend reads it."""
     return types.SimpleNamespace(
-        prompt_token_ids=[1, 2],
-        outputs=[types.SimpleNamespace(**{"text": text, "token_ids": [3, 4], **attrs})],
-    )
+        text=text, token_ids=list(token_ids), finish_reason=finish_reason)
 
 
-class _FakeEngine:
-    def __init__(self, outputs):
-        self._outputs = outputs
+class _FakeTokenizer:
+    """A chat template that makes one token id of each message."""
 
-    def chat(self, chat_inputs, sampling_params):
-        return self._outputs
+    def __init__(self):
+        self.messages = []       # token id -> the message it stands for
+        self.options = []        # (add_generation_prompt, tokenize) of each call
+        self.as_mapping = False  # True: return the ids inside a mapping
+
+    def apply_chat_template(self, messages, add_generation_prompt, tokenize):
+        self.options.append((add_generation_prompt, tokenize))
+        ids = list(range(len(self.messages), len(self.messages) + len(messages)))
+        self.messages.extend(messages)
+        return {"input_ids": ids} if self.as_mapping else ids
+
+
+class _FakeAsyncLLM:
+    """A vLLM ``AsyncLLM`` whose requests follow a :class:`_Script`.
+
+    A request is named by the content of its last message. Once the script
+    lets it end it answers with ``replies[name]``, or with no output when the
+    name has no reply.
+
+    Attributes:
+        sent: name -> what the engine was handed for that request, with
+            ``chat`` the messages its token ids stand for.
+    """
+
+    def __init__(self, replies, script=None):
+        self.replies = replies
+        self.script = script or _Script()
+        self.tokenizer = _FakeTokenizer()
+        self.sent = {}
+
+    def get_tokenizer(self):
+        return self.tokenizer
+
+    async def generate(self, prompt, params, request_id):
+        ids = prompt["prompt_token_ids"]
+        chat = [self.tokenizer.messages[i] for i in ids]
+        name = chat[-1]["content"]
+        self.sent[name] = types.SimpleNamespace(
+            chat=chat, prompt=prompt, params=params, request_id=request_id)
+        await self.script.play(name, None, None)
+        if name in self.replies:
+            yield types.SimpleNamespace(prompt_token_ids=ids, outputs=[self.replies[name]])
 
     def shutdown(self):
         """So clear_cache() at teardown finds a hook and stays quiet."""
 
 
-def _vllm_backend(monkeypatch, outputs):
-    """A VLLMBackend on a fake engine. vllm is not installed, so SamplingParams is faked too."""
+def _vllm_backend(monkeypatch, replies, script=None, **settings):
+    """A VLLMBackend on a fake engine; returns ``(backend, engine)``."""
     import redact.llms.backends.vllm as vllm_module
     from redact.llms.backends import VLLMBackend
 
-    for name, module in fake_vllm_modules(_FakeEngine).items():
+    for name, module in fake_vllm_modules(_FakeAsyncLLM).items():
         monkeypatch.setitem(sys.modules, name, module)
     # _engine() returns a cached engine before it imports vllm.
-    vllm_module._engines[vllm_module._engine_key("org/x", None, {})] = _FakeEngine(outputs)
-    return VLLMBackend("m", "org/x", default_max_tokens=8)
+    engine = _FakeAsyncLLM(replies, script)
+    vllm_module._engines[vllm_module._engine_key("org/x", None, {})] = engine
+    return VLLMBackend("m", "org/x", **{"default_max_tokens": 8, **settings}), engine
+
+
+@pytest.fixture()
+def events():
+    seen = []
+    observe.set_emitter(seen.append)
+    yield seen
+    observe.set_emitter(None)
+
+
+# SamplingParams of a request with no overrides, as the fake module builds them.
+_DEFAULT_PARAMS = {"max_tokens": 8, "temperature": 0.7, "output_kind": "FINAL_ONLY",
+                   "top_p": 0.85}
+
+
+class TestVLLMAgenerate:
+    """agenerate() is one request to the engine, awaited on the shared loop."""
+
+    def test_the_prompt_is_the_chat_template_of_the_engines_tokenizer(self, monkeypatch):
+        backend, engine = _vllm_backend(monkeypatch, {"hi": _reply("ok")})
+        messages = [{"role": "system", "content": "A"}, {"role": "system", "content": "B"},
+                    {"role": "user", "content": "hi"}]
+        assert aio.run(backend.agenerate(messages)) == "ok"
+        assert engine.sent["hi"].chat == _ask("hi", system="A\n\nB")
+        assert engine.sent["hi"].prompt == {"prompt_token_ids": [0, 1]}
+        assert engine.tokenizer.options == [(True, True)]
+
+    def test_a_model_without_a_system_role_gets_it_folded_into_the_user_message(
+            self, monkeypatch):
+        backend, engine = _vllm_backend(
+            monkeypatch, {"Sys.\n\nhi": _reply("ok")}, supports_system_prompt=False)
+        assert aio.run(backend.agenerate(_ask("hi", system="Sys."))) == "ok"
+        (sent,) = engine.sent.values()
+        assert sent.chat == _ask("Sys.\n\nhi")
+        assert sent.prompt == {"prompt_token_ids": [0]}
+
+    def test_a_tokenizer_that_returns_a_mapping_is_read_for_its_ids(self, monkeypatch):
+        backend, engine = _vllm_backend(monkeypatch, {"hi": _reply("ok")})
+        engine.tokenizer.as_mapping = True
+        assert aio.run(backend.agenerate(_ask("hi", system="Sys."))) == "ok"
+        assert engine.sent["hi"].prompt == {"prompt_token_ids": [0, 1]}
+
+    def test_sampling_params_are_the_models_defaults_under_the_calls_overrides(
+            self, monkeypatch):
+        backend, engine = _vllm_backend(
+            monkeypatch, {"plain": _reply("ok"), "tuned": _reply("ok")},
+            sampling={"top_k": 20})
+        aio.run(backend.agenerate(_ask("plain")))
+        aio.run(backend.agenerate(_ask("tuned"), max_tokens=50, temperature=0.0, top_p=0.5))
+        assert engine.sent["plain"].params == {**_DEFAULT_PARAMS, "top_k": 20}
+        assert engine.sent["tuned"].params == {
+            "max_tokens": 50, "temperature": 0.0, "output_kind": "FINAL_ONLY",
+            "top_p": 0.5, "top_k": 20}
+
+    def test_the_reply_loses_its_whitespace_and_the_tokenizer_artifact(self, monkeypatch):
+        backend, _ = _vllm_backend(monkeypatch, {"hi": _reply(" |> hello \n")})
+        assert aio.run(backend.agenerate(_ask("hi"))) == "hello"
+
+    def test_a_request_records_one_call_event(self, monkeypatch, events):
+        backend, _ = _vllm_backend(
+            monkeypatch, {"hi": _reply("ok", token_ids=[5, 6, 7], finish_reason="length")})
+        aio.run(backend.agenerate(_ask("hi", system="Sys."), max_tokens=3))
+        (event,) = events
+        del event["ms"]
+        assert event == {
+            "ev": "call", "stage": None, "model": "m", "backend": "vllm", "n_items": 1,
+            "in_tok": 2, "out_tok": 3, "out_tok_max": 3, "max_tokens": 3,
+            "temperature": 0.7, "finish_reason": "length"}
+
+    def test_a_failed_request_is_recorded_then_re_raised(self, monkeypatch, events):
+        backend, _ = _vllm_backend(monkeypatch, {}, _Script(["hi"], fail={"hi"}))
+        with pytest.raises(RuntimeError, match="hi boom"):
+            aio.run(backend.agenerate(_ask("hi")))
+        (event,) = events
+        assert (event["error"], event["n_items"], event["max_tokens"]) == (
+            "RuntimeError: hi boom", 1, 8)
+
+    def test_a_request_the_engine_sends_no_output_for_fails(self, monkeypatch, events):
+        backend, engine = _vllm_backend(monkeypatch, {})
+        with pytest.raises(RuntimeError, match="sent no output for request") as raised:
+            aio.run(backend.agenerate(_ask("hi")))
+        assert engine.sent["hi"].request_id in str(raised.value)
+        assert [event["error"] for event in events] == [f"RuntimeError: {raised.value}"]
+
+    def test_internals_id_is_ignored(self, monkeypatch):
+        backend, engine = _vllm_backend(monkeypatch, {"hi": _reply("ok")})
+        assert aio.run(backend.agenerate(_ask("hi"), internals_id="root/0")) == "ok"
+        assert engine.sent["hi"].params == _DEFAULT_PARAMS
+
+
+class TestVLLMGenerateBatch:
+    """generate() sends each item as its own request and blocks for them all."""
+
+    def test_replies_are_in_input_order_whatever_order_they_end_in(self, monkeypatch):
+        script = _Script(["c", "b", "a"])
+        backend, _ = _vllm_backend(monkeypatch, {n: _reply(n.upper()) for n in "abc"}, script)
+        assert backend.generate([_ask(n) for n in "abc"]) == ["A", "B", "C"]
+        assert script.log == [("start", "a"), ("start", "b"), ("start", "c"),
+                              ("end", "c"), ("end", "b"), ("end", "a")]
+
+    def test_a_batch_is_one_call_to_the_shared_loop(self, monkeypatch):
+        import redact.llms.backends.vllm as vllm_module
+
+        backend, _ = _vllm_backend(monkeypatch, {n: _reply(n.upper()) for n in "abc"})
+        runs = []
+        monkeypatch.setattr(vllm_module, "aio", types.SimpleNamespace(
+            run=lambda coro: runs.append(coro) or aio.run(coro)))
+        assert backend.generate([_ask(n) for n in "abc"]) == ["A", "B", "C"]
+        assert len(runs) == 1
+
+    def test_every_request_carries_the_calls_overrides_and_its_own_id(self, monkeypatch):
+        backend, engine = _vllm_backend(monkeypatch, {"a": _reply("A"), "b": _reply("B")})
+        backend.generate([_ask("a"), _ask("b")], max_tokens=50, top_k=5,
+                         internals_ids=[None, None])
+        params = {**_DEFAULT_PARAMS, "max_tokens": 50, "top_k": 5}
+        assert [engine.sent[n].params for n in "ab"] == [params, params]
+        assert engine.sent["a"].request_id != engine.sent["b"].request_id
+
+    def test_a_failed_request_raises_and_cancels_the_others(self, monkeypatch, events):
+        """The failing request is the last to start, so the other two are in
+        flight when it fails."""
+        script = _Script(["bad"], fail={"bad"})
+        backend, _ = _vllm_backend(monkeypatch, {}, script)
+        with pytest.raises(RuntimeError, match="bad boom"):
+            backend.generate([_ask("a"), _ask("b"), _ask("bad")])
+        assert script.log[:4] == [("start", "a"), ("start", "b"), ("start", "bad"),
+                                  ("end", "bad")]
+        assert sorted(script.log[4:]) == [("cancel", "a"), ("cancel", "b")]
+        assert [event.get("error") for event in events] == ["RuntimeError: bad boom"]
+
+    def test_an_empty_batch_returns_without_the_loop(self, monkeypatch):
+        import redact.llms.backends.vllm as vllm_module
+
+        backend, _ = _vllm_backend(monkeypatch, {})
+        monkeypatch.setattr(vllm_module, "aio", None)
+        assert backend.generate([]) == []
 
 
 class TestVLLMCutReplies:
-    """One warning per engine pass, counting the replies vLLM ended with "length"."""
+    """One warning per generate() or agenerate(), counting the replies vLLM
+    ended with "length"."""
 
-    def test_cut_replies_warn_once_per_pass(self, monkeypatch, caplog):
-        b = _vllm_backend(monkeypatch, [
-            _output("a", finish_reason="length"),
-            _output("b", finish_reason="stop"),
-            _output("c", finish_reason="length"),
-        ])
-        with caplog.at_level(logging.WARNING, logger="redact.llms.backends"):
-            assert b.generate([_HI] * 3) == ["a", "b", "c"]
-        assert [r.getMessage() for r in caplog.records] == [
-            "m: 2 of 3 replies were cut at the token limit (max_tokens=8) and are "
-            "incomplete; raise max_tokens or the context length (max_model_len), or ask for shorter replies."
-        ]
+    CUT = ("m: {} of {} replies were cut at the token limit (max_tokens=8) and are "
+           "incomplete; raise max_tokens or the context length (max_model_len), or ask for shorter replies.")
 
-    @pytest.mark.parametrize("attrs", [{"finish_reason": "stop"}, {}], ids=["stop", "no-attribute"])
-    def test_complete_replies_do_not_warn(self, monkeypatch, caplog, attrs):
-        b = _vllm_backend(monkeypatch, [_output("a", **attrs), _output("b", **attrs)])
+    def test_cut_replies_warn_once_per_generate(self, monkeypatch, caplog):
+        backend, _ = _vllm_backend(monkeypatch, {
+            "a": _reply("A", finish_reason="length"),
+            "b": _reply("B"),
+            "c": _reply("C", finish_reason="length"),
+        })
         with caplog.at_level(logging.WARNING, logger="redact.llms.backends"):
-            assert b.generate([_HI] * 2) == ["a", "b"]
+            assert backend.generate([_ask(n) for n in "abc"]) == ["A", "B", "C"]
+        assert [r.getMessage() for r in caplog.records] == [self.CUT.format(2, 3)]
+
+    def test_a_cut_reply_warns_from_agenerate(self, monkeypatch, caplog):
+        backend, _ = _vllm_backend(monkeypatch, {"a": _reply("A", finish_reason="length")})
+        with caplog.at_level(logging.WARNING, logger="redact.llms.backends"):
+            assert aio.run(backend.agenerate(_ask("a"))) == "A"
+        assert [r.getMessage() for r in caplog.records] == [self.CUT.format(1, 1)]
+
+    @pytest.mark.parametrize("reason", ["stop", None])
+    def test_complete_replies_do_not_warn(self, monkeypatch, caplog, reason):
+        backend, _ = _vllm_backend(monkeypatch, {
+            n: _reply(n.upper(), finish_reason=reason) for n in "ab"})
+        with caplog.at_level(logging.WARNING, logger="redact.llms.backends"):
+            assert backend.generate([_ask("a"), _ask("b")]) == ["A", "B"]
+            assert aio.run(backend.agenerate(_ask("a"))) == "A"
         assert caplog.records == []
 
 
 class TestVLLMCallEvent:
-    def test_the_event_carries_the_longest_reply(self, monkeypatch):
-        from redact.llms import observe
-
-        b = _vllm_backend(monkeypatch, [_output("a", token_ids=[1, 2, 3]), _output("b", token_ids=[1])])
-        seen = []
-        observe.set_emitter(seen.append)
-        try:
-            b.generate([_HI] * 2)
-        finally:
-            observe.set_emitter(None)
-        assert (seen[0]["n_items"], seen[0]["out_tok"], seen[0]["out_tok_max"]) == (2, 4, 3)
+    def test_each_request_of_a_batch_records_its_own_event(self, monkeypatch, events):
+        backend, _ = _vllm_backend(monkeypatch, {
+            "a": _reply("A", token_ids=[1, 2, 3], finish_reason="length"),
+            "b": _reply("B", token_ids=[1]),
+        })
+        backend.generate([_ask("a", system="Sys."), _ask("b")])
+        assert [(e["n_items"], e["in_tok"], e["out_tok"], e["out_tok_max"], e["finish_reason"])
+                for e in events] == [(1, 2, 3, 3, "length"), (1, 1, 1, 1, "stop")]
 
 
 class MockBackend(LLMBackend):
@@ -554,6 +760,11 @@ class TestVLLMBackendGPU:
     def test_batch_generate_empty_list(self, backend):
         results = backend.generate([])
         assert results == []
+
+    def test_agenerate_matches_generate_at_temperature_0(self, backend):
+        messages = [{"role": "user", "content": "Reply with only the number 7."}]
+        (reply,) = backend.generate([messages], max_tokens=16, temperature=0.0)
+        assert aio.run(backend.agenerate(messages, max_tokens=16, temperature=0.0)) == reply
 
     def test_a_cut_reply_warns(self, backend, caplog):
         with caplog.at_level(logging.WARNING, logger="redact.llms.backends"):

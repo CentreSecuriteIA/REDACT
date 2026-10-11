@@ -191,7 +191,7 @@ def fake_vllm_modules(engine_cls, SamplingParams=lambda **kw: kw) -> dict[str, o
             returns its keywords as a dict.
     """
     return {
-        "vllm": SimpleNamespace(LLM=engine_cls, SamplingParams=SamplingParams),
+        "vllm": SimpleNamespace(SamplingParams=SamplingParams),
         "vllm.engine": SimpleNamespace(),
         "vllm.engine.arg_utils": SimpleNamespace(AsyncEngineArgs=lambda **kw: kw),
         "vllm.sampling_params": SimpleNamespace(
