@@ -323,3 +323,15 @@ def test_pool_resume_after_a_failed_append_runs_only_unfinished_entries(
     assert sum(len(b) for b in second.batches) == 70 - 32
     df = _rows(tmp_path)
     assert sorted(df["sample"]) == sorted(f"sample zq{i}" for i in range(70))
+def test_csv_rows_cover_an_entry_whose_ack_was_lost(tmp_path):
+    """A crash between the append and the ack leaves rows with no ledger
+    record; the CSV union still counts the entry done. Also for the default
+    style ``""``: its empty cell reads back as NaN, not as ``""``."""
+    pipe = _pipeline(tmp_path)
+    pipe.run_from_constitution(_const_df(), _PROMPT, samples_per_entry=2, verbose=False)
+    _constitution_inputs_ledger(tmp_path).path.unlink()   # the acks never made it to disk
+
+    pipe2 = _pipeline(tmp_path)
+    r = pipe2.run_from_constitution(_const_df(), _PROMPT, samples_per_entry=2, verbose=False)
+    assert r.total_entries_processed == 0
+    assert pipe2.gen.backend.calls == []

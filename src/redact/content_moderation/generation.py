@@ -378,7 +378,7 @@ class InputPipeline(_StandaloneGenerationMixin):
             )
             if not existing.empty and desc_col:
                 style_vals = (
-                    existing["template_style"]
+                    existing["template_style"].fillna("")   # an empty style is an empty cell
                     if "template_style" in existing.columns
                     else pd.Series([""] * len(existing), index=existing.index)
                 )
