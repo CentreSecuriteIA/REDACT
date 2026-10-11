@@ -336,6 +336,20 @@ class TestGenerateOutputsRetry:
         # The feedback is not stacked: the second prompt carries one verdict.
         assert gen.calls[1]["messages"][-1]["content"].count("[FEEDBACK") == 1
 
+    def test_check_calls_carry_the_limit_and_generation_keeps_the_default(self, tmp_path, monkeypatch):
+        import redact.pipelines as P
+        from redact import generate_outputs
+        from tests.conftest import MockBackend, make_client
+
+        gen, check = MockBackend("an answer"), MockBackend("Yes")
+        backends = {"gen-model": gen, "check-model": check}
+        monkeypatch.setattr(P.ModelClient, "create", lambda m: make_client(backends[m], m))
+        inputs = pd.DataFrame({"sample": ["p one"], "category": ["Cyber"], "entry_type": ["harmful"]})
+        generate_outputs(data_dir=tmp_path, inputs=inputs, model="gen-model",
+                         check_model="check-model", verbose=False, check_max_tokens=64)
+        assert check.calls[0]["max_tokens"] == 64
+        assert gen.calls[0]["max_tokens"] == gen.default_max_tokens
+
     def test_a_chunk_is_one_generation_call_and_one_check_call(self, tmp_path, monkeypatch):
         import redact.pipelines as P
         from redact import generate_outputs

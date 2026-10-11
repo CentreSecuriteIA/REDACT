@@ -304,6 +304,7 @@ def generate_inputs(
     entry_types: list[str] | None = None,
     batch_size: int = 32,
     max_attempts: int = 3,
+    check_max_tokens: int | None = None,
 ) -> pd.DataFrame:
     """Generate content moderation input samples (standalone or constitution-seeded).
 
@@ -357,6 +358,8 @@ def generate_inputs(
         batch_size: Entries per LLM engine pass (constitution mode).
         max_attempts: Generations per entry before a reply with the wrong
             number of samples is given up on (constitution mode).
+        check_max_tokens: Reply limit for the check calls (constitution
+            mode). ``None`` keeps the checker model's default.
 
     Returns:
         Merged DataFrame of accepted samples.
@@ -407,6 +410,7 @@ def generate_inputs(
             fresh=not resume,
             style=style,
             max_attempts=max_attempts,
+            check_max_tokens=check_max_tokens,
         )
 
         result = merge_all(ds_dir, accepted_only=True)
@@ -509,6 +513,7 @@ def generate_outputs(
     resume: bool = True,
     verbose: bool = True,
     max_attempts: int = 1,
+    check_max_tokens: int | None = None,
 ) -> pd.DataFrame:
     """Generate model responses for input samples, batched and quality-checked.
 
@@ -557,6 +562,8 @@ def generate_outputs(
         verbose: Print per-batch progress.
         max_attempts: Generations per input; more than 1 retries a rejected
             response with the checker's verdict as feedback.
+        check_max_tokens: Reply limit for the check calls; a verdict needs
+            few tokens. ``None`` keeps the checker model's default.
 
     Returns:
         DataFrame of all rows in the output CSV (the full dataset, including
@@ -598,6 +605,7 @@ def generate_outputs(
         check_outputs=check_outputs, check=check_client,
         batch_size=batch_size, out_path=out_path, prompt_dir=prompt_dir,
         resume=resume, verbose=verbose, max_attempts=max_attempts,
+        check_max_tokens=check_max_tokens,
     )
 
 

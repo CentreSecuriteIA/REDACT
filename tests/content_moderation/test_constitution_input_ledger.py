@@ -59,6 +59,16 @@ def test_ledger_written_and_resume_skips(tmp_path):
     assert pipe2.gen.backend.calls == []
 
 
+def test_check_calls_carry_the_limit(tmp_path):
+    gen, check = MockBackend("1. alpha sample\n2. beta sample"), MockBackend("Yes")
+    pipe = InputPipeline(gen=make_client(gen, "m"), check=make_client(check, "m-check"),
+                         dataset_dir=tmp_path)
+    pipe.run_from_constitution(_const_df(), _PROMPT, samples_per_entry=2, verbose=False,
+                               check_max_tokens=32)
+    assert check.calls and all(c["max_tokens"] == 32 for c in check.calls)
+    assert gen.calls[0]["max_tokens"] == gen.default_max_tokens
+
+
 def test_manifest_written_before_generation(tmp_path):
     pipe = _pipeline(tmp_path)
     pipe.run_from_constitution(_const_df(), _PROMPT, samples_per_entry=2,

@@ -247,6 +247,7 @@ class InputPipeline(_StandaloneGenerationMixin):
         fresh: bool = False,
         style: str = "",
         max_attempts: int = 3,
+        check_max_tokens: int | None = None,
     ) -> ConstitutionInputResult:
         """Run constitution-seeded input generation, batched across entries.
 
@@ -283,6 +284,8 @@ class InputPipeline(_StandaloneGenerationMixin):
                 number of samples is rejected whole and regenerated; an
                 entry still rejected after the last attempt is acked as
                 ``rejected`` and skipped on resume.
+            check_max_tokens: Reply limit for the check calls; a verdict
+                needs few tokens. ``None`` keeps the checker model's default.
 
         Returns:
             ConstitutionInputResult with generation statistics.
@@ -499,6 +502,7 @@ class InputPipeline(_StandaloneGenerationMixin):
                         internals_id=(
                             f"{_hash_text(s)}/{suffix}" if capture_val_in else None
                         ),
+                        max_tokens=check_max_tokens,
                     )
                     accepted = is_accepted(response)
                     verdicts.append((accepted, "" if accepted else response))
@@ -667,6 +671,7 @@ def run_output_generation(
     resume: bool = True,
     verbose: bool = True,
     max_attempts: int = 1,
+    check_max_tokens: int | None = None,
 ) -> pd.DataFrame:
     """Generate model responses for input samples, batched and quality-checked.
 
@@ -704,6 +709,8 @@ def run_output_generation(
         max_attempts: Generations per input. With more than 1, a rejected
             response is regenerated with the checker's verdict as feedback
             and the row holds the last attempt.
+        check_max_tokens: Reply limit for the check calls; a verdict needs
+            few tokens. ``None`` keeps the checker model's default.
 
     Returns:
         DataFrame of all rows in the output CSV (the full dataset, including
@@ -827,6 +834,7 @@ def run_output_generation(
                 f"{input_id}/output" if capture_internals_gen else None,
                 f"{input_id}/val_out" if capture_internals_check else None,
             ),
+            max_tokens=(None, check_max_tokens),
             max_attempts=max_attempts,
         )
 
