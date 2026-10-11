@@ -260,6 +260,44 @@ class TestExitHook:
         assert result.returncode == 0, result.stderr
         assert "shut down" in result.stdout
 
+    def test_exit_during_a_load_waits_for_it_then_shuts_down(self):
+        """The hook is registered when a load starts. A script that exits while
+        a background load is inside vllm.LLM() blocks on the engine lock until
+        the load is done, then shuts the engine down. Registered after the load
+        instead, the hook never exists and multiprocessing's exit hook joins the
+        engine's child process for as long as it lives."""
+        code = textwrap.dedent("""
+            import multiprocessing, sys, threading, time, types
+            import redact.llms.backends.vllm as vllm_module
+            import redact.llms.resources.estimate as estimate
+
+            started = threading.Event()
+
+            class _LLM:
+                def __init__(self, **kw):
+                    self.proc = multiprocessing.get_context("spawn").Process(
+                        target=time.sleep, args=(60,))
+                    self.proc.start()        # the engine's child process exists...
+                    started.set()
+                    time.sleep(1)            # ...while the load goes on
+
+                def shutdown(self):
+                    self.proc.terminate()
+                    self.proc.join()
+                    print("shut down", flush=True)
+
+            sys.modules["vllm"] = types.SimpleNamespace(LLM=_LLM)
+            vllm_module._prepare_environment = lambda: None
+            estimate._load_config = lambda _id: None
+            threading.Thread(target=vllm_module._engine, args=("org/x", None, {}),
+                             daemon=True).start()
+            started.wait()                   # exit mid-load, as a script does after preload()
+        """)
+        result = subprocess.run([sys.executable, "-c", code], capture_output=True,
+                                text=True, timeout=30)
+        assert result.returncode == 0, result.stderr
+        assert "shut down" in result.stdout
+
 
 _HI = [{"role": "user", "content": "hi"}]
 

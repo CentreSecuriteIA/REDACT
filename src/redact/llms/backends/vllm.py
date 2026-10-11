@@ -41,7 +41,7 @@ _engine_loaded_at: dict[tuple, float] = {}
 # gpu_memory_utilization per engine key, set by the residency plan. Applied
 # at load and kept out of the key, so it never splits a shared engine.
 _planned_utilization: dict[tuple, float] = {}
-# Set once the exit hook is registered, at the first load (see _engine).
+# Set once the exit hook is registered, at the start of the first load (see _engine).
 _exit_hook_registered = False
 
 
@@ -96,6 +96,18 @@ def _engine(hf_model_id: str, quantization: str | None, vllm_kwargs: dict):
                 "Install it with: pip install redact[vllm]"
             )
 
+        if not _exit_hook_registered:
+            # Before the load, under the lock: an exit during a load then waits
+            # on the lock until the load is done and shuts the engine down.
+            # atexit runs hooks last-registered first, and multiprocessing's,
+            # registered when multiprocessing.util is first imported, joins
+            # the engine's child process and never returns while the engine
+            # runs. Import it here so ours is registered after it; vllm
+            # imports it too, but only inside LLM(), after this point.
+            import multiprocessing.util  # noqa: F401
+            atexit.register(VLLMBackend.clear_cache)
+            _exit_hook_registered = True
+
         # No download_dir is passed: the hub cache is $HF_HOME/hub, so HF_HOME would download again.
         kwargs = dict(vllm_kwargs)
         # The plan's share, else the planner's whole-card one: vLLM's own
@@ -113,13 +125,6 @@ def _engine(hf_model_id: str, quantization: str | None, vllm_kwargs: dict):
         # Held from the start of the load; set after it, so a failed load
         # leaves no timer.
         _engine_loaded_at[key] = started
-        if not _exit_hook_registered:
-            # After the first load, so it runs before every exit hook registered
-            # until then (atexit runs them last-registered first): among them
-            # multiprocessing's, which joins the engine's child process and
-            # never returns while the engine runs.
-            atexit.register(VLLMBackend.clear_cache)
-            _exit_hook_registered = True
 
         observe.record({
             "ev": "local",
@@ -287,8 +292,9 @@ class VLLMBackend(LLMBackend):
         stays, so a reload gets the same share. A backend built on a released
         engine raises on ``generate()`` until the checkpoint is loaded again.
         A call in flight on a released engine is not waited for.
-        Also the exit hook: an engine's child process would otherwise keep
-        the interpreter from exiting.
+        Also the exit hook, registered when the first load starts: an exit
+        during a load waits for it here (the load holds the lock), and an
+        engine's child process would otherwise keep the interpreter from exiting.
 
         Args:
             keep: Engine keys (:func:`_engine_key`) to leave loaded and timed.
