@@ -328,8 +328,7 @@ def test_an_unload_between_paraphrasers_shuts_down_only_their_engine(
         def __init__(self, **kw):
             model = kw["model"]
             engines[model] = weakref.ref(self)
-            self.llm_engine = SimpleNamespace(engine_core=SimpleNamespace(
-                shutdown=lambda: shutdowns.append(model)))
+            self.shutdown = lambda: shutdowns.append(model)
 
     for name, module in fake_vllm_modules(_LLM).items():
         monkeypatch.setitem(sys.modules, name, module)

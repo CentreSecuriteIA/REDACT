@@ -1130,29 +1130,24 @@ class TestRelease:
         assert runtime.log.shutdowns == [] and runtime.log.emptied == [1]
         assert "_LLM has no shutdown hook" in caplog.text
 
-    def test_shutdown_calls_the_outermost_hook_and_falls_back_when_it_fails(
-            self, runtime):
+    def test_shutdown_calls_the_hook_and_never_raises(self, runtime, caplog):
         called = []
 
-        def hook(name, fail=False):
-            def _hook():
-                called.append(name)
-                if fail:
-                    raise RuntimeError("already stopped")
-            return _hook
+        def fails():
+            called.append("fails")
+            raise RuntimeError("already stopped")
 
-        engine = SimpleNamespace(
-            shutdown=hook("engine", fail=True),
-            engine_core=SimpleNamespace(shutdown=hook("core")),
-            model_executor=SimpleNamespace(shutdown=hook("executor")),
-        )
-        runtime.vllm._shut_down(SimpleNamespace(llm_engine=engine))
-        assert called == ["engine", "core"]
-        called.clear()
-        runtime.vllm._shut_down(
-            SimpleNamespace(shutdown=hook("llm"), llm_engine=engine))
-        assert called == ["llm"]
-        runtime.vllm._shut_down(object())       # no hook: nothing raised
+        with caplog.at_level(logging.DEBUG, logger=runtime.vllm.logger.name):
+            runtime.vllm._shut_down(SimpleNamespace(shutdown=lambda: called.append("ok")))
+            runtime.vllm._shut_down(SimpleNamespace(shutdown=fails))
+            runtime.vllm._shut_down(SimpleNamespace())
+        assert called == ["ok", "fails"]
+        assert [(r.levelname, r.getMessage()) for r in caplog.records] == [
+            ("DEBUG", "[vllm] engine shut down"),
+            ("DEBUG", "[vllm] shutdown() failed (RuntimeError: already stopped)"),
+            ("WARNING", "[vllm] SimpleNamespace has no shutdown hook; "
+                        "left to garbage collection"),
+        ]
 
     def test_a_kept_engine_is_untouched(self, runtime, registered):
         kept = self._backend(registered("_rel_keep", hf_model_id="org/keep"))

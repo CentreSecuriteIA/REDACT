@@ -135,9 +135,7 @@ def unload_local(keep: list[str] | None = None, engines: dict | None = None) -> 
     A released engine is shut down and its memory freed, and its lifetime
     meter stops. Its planned grant stays, so a reload gets the same share. A
     client built on it raises until the checkpoint is loaded again, and a
-    call in flight on it is not waited for. A vLLM version without a shutdown
-    hook returns the card only when the engine is collected, or at process
-    exit.
+    call in flight on it is not waited for.
 
     Args:
         keep: Model names still in use. Their engines stay cached and timed,

@@ -155,39 +155,26 @@ def _engine(hf_model_id: str, quantization: str | None, vllm_kwargs: dict):
         return _engines[key]
 
 
-# Where a vllm.LLM keeps its shutdown hook, outermost first. The place
-# differs between vLLM versions, and some have none.
-_SHUTDOWN_HOOKS = (
-    "shutdown",
-    "llm_engine.shutdown",
-    "llm_engine.engine_core.shutdown",
-    "llm_engine.model_executor.shutdown",
-)
-
-
 def _shut_down(engine) -> None:
-    """Call the engine's shutdown hook, if its vLLM version has one.
+    """Call the engine's ``shutdown()``.
 
-    Never raises. Without a hook the engine's memory comes back only when
-    the object is collected.
+    On the caller's thread, not the shared loop: the call is synchronous and
+    safe from any thread. Never raises. An engine without the hook gives its
+    memory back only when the object is collected.
     """
-    for path in _SHUTDOWN_HOOKS:
-        try:
-            hook = engine
-            for name in path.split("."):
-                hook = getattr(hook, name, None)
-            if not callable(hook):
-                continue
-            hook()
-        except Exception as exc:  # noqa: BLE001 — try the next, inner hook
-            logger.debug("[vllm] %s() failed (%s: %s)", path, type(exc).__name__, exc)
-            continue
-        logger.debug("[vllm] engine shut down through %s()", path)
+    hook = getattr(engine, "shutdown", None)
+    if not callable(hook):
+        logger.warning(
+            "[vllm] %s has no shutdown hook; left to garbage collection",
+            type(engine).__name__,
+        )
         return
-    logger.warning(
-        "[vllm] %s has no shutdown hook (tried %s); left to garbage collection",
-        type(engine).__name__, ", ".join(_SHUTDOWN_HOOKS),
-    )
+    try:
+        hook()
+    except Exception as exc:  # noqa: BLE001 — a release must not fail
+        logger.debug("[vllm] shutdown() failed (%s: %s)", type(exc).__name__, exc)
+        return
+    logger.debug("[vllm] engine shut down")
 
 
 def _release_engines(keep: Collection[tuple] = ()) -> None:
