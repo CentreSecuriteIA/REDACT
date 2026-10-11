@@ -120,6 +120,26 @@
     },
     "notes": "default_max_tokens=300 is a fallback for hypothetical other uses — the one real caller (constitution generation) always passes max_tokens=10000 explicitly. Anthropic's limits are tight (typically 5 RPM on the free tier) and the transport is series-only, so recommended_max_workers must stay 1. Anthropic list price as of 2026-08-30: $5/$25 per 1M in/out (cache write $6.25, cache read $0.50 — not modelled, the library sends no cache_control). rate_limit_scope='endpoint' because Anthropic meters the account, not the model: any second Anthropic entry must declare this same rpm and will share one window with this one, rather than receiving its own full budget."
   },
+  "claude-opus-5-5": {
+    "backend_type": "api",
+    "roles": [
+      "constitution_gen"
+    ],
+    "is_uncensored": false,
+    "supports_system_prompt": true,
+    "default_max_tokens": 2000,
+    "api": {
+      "backend_type": "openai",
+      "api_key_env": "OPENROUTER_API_KEY",
+      "base_url": "https://openrouter.ai/api/v1",
+      "api_model_id": "anthropic/claude-opus-5.5",
+      "rpm": 600,
+      "recommended_max_workers": 8,
+      "price_per_1m_input": 4.0,
+      "price_per_1m_output": 20.0
+    },
+    "notes": "Claude Opus 5.5 through OpenRouter (OpenAI-compatible endpoint). OpenRouter states no rate limit, so rpm=600 is only a ceiling: the limiter needs a number. Prices are Anthropic's list price ($4/$20 per 1M in/out, 2026-10); check them against OpenRouter. Leave default_temperature unset: this model rejects sampling settings. It is not the constitution_gen default while claude-opus-4-6 is listed before it: name it in the recipe, or move this entry above that one."
+  },
   "venice-paraphraser": {
     "backend_type": "vllm",
     "roles": [
