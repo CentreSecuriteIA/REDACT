@@ -10,7 +10,9 @@
     "NVIDIA H100 PCIe": 2.09,
     "NVIDIA L40S": 0.86,
     "NVIDIA GeForce RTX 4090": 0.44,
-    "NVIDIA RTX A6000": 0.49
+    "NVIDIA RTX A6000": 0.49,
+    "NVIDIA RTX PRO 4500 Blackwell": 0.72,
+    "NVIDIA RTX PRO 6000 Blackwell Workstation Edition": 2.59
   },
   "lambda": {
     "NVIDIA A100-SXM4-80GB": 1.29,
