@@ -42,7 +42,7 @@ from redact.llms.model_config import (
     register_model,
 )
 from redact.llm_pipeline import batch_check_samples, drive_units
-from tests.conftest import fake_vllm_modules, make_client
+from tests.conftest import fake_vllm_modules, interrupt_next_run, make_client
 from tests.llm_pipeline.test_drive_async import _Script, _unit
 
 # ---------------------------------------------------------------------------
@@ -532,6 +532,20 @@ class TestVLLMGenerateBatch:
                                   ("end", "bad")]
         assert sorted(script.log[4:]) == [("cancel", "a"), ("cancel", "b")]
         assert [event.get("error") for event in events] == ["RuntimeError: bad boom"]
+
+    def test_an_interrupted_call_cancels_its_requests(self, monkeypatch):
+        """Ctrl-C reaches the caller blocked in generate(). The engine must not
+        go on generating a batch that nobody waits for."""
+        script = _Script([])                    # no request ends by itself
+        backend, _ = _vllm_backend(monkeypatch, {}, script)
+        # The interrupt finds both requests in flight.
+        interrupt_next_run(monkeypatch, when=lambda: script.wait_until("start", "b"))
+        with pytest.raises(KeyboardInterrupt):
+            backend.generate([_ask("a"), _ask("b")])
+        script.wait_until("cancel", "a")
+        script.wait_until("cancel", "b")
+        assert script.log[:2] == [("start", "a"), ("start", "b")]
+        assert sorted(script.log[2:]) == [("cancel", "a"), ("cancel", "b")]
 
     def test_an_empty_batch_returns_without_the_loop(self, monkeypatch):
         import redact.llms.backends.vllm as vllm_module

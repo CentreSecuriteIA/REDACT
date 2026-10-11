@@ -6,6 +6,7 @@ import threading
 import pytest
 
 from redact.llms import aio
+from tests.conftest import interrupt_next_run
 
 
 async def _where():
@@ -60,6 +61,26 @@ def test_run_on_the_loop_thread_raises_instead_of_deadlocking():
 
     with pytest.raises(RuntimeError, match="event loop's thread"):
         aio.run(outer())
+
+
+def test_an_interrupted_run_cancels_its_coroutine(monkeypatch):
+    """Ctrl-C reaches the caller blocked in run(). The coroutine it waited for
+    must not run on without it."""
+    started, cancelled = threading.Event(), threading.Event()
+
+    async def never_returns():
+        started.set()
+        try:
+            await asyncio.Event().wait()
+        except asyncio.CancelledError:
+            cancelled.set()
+            raise
+
+    # The interrupt finds the coroutine running.
+    interrupt_next_run(monkeypatch, when=lambda: started.wait(10))
+    with pytest.raises(KeyboardInterrupt):
+        aio.run(never_returns())
+    assert cancelled.wait(10)
 
 
 def test_concurrent_first_use_starts_one_loop(monkeypatch):

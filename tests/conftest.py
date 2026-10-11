@@ -207,6 +207,34 @@ def fake_vllm_modules(engine_cls, SamplingParams=lambda **kw: kw) -> dict[str, o
     }
 
 
+def interrupt_next_run(monkeypatch, when) -> None:
+    """Make the next ``aio.run()`` raise ``KeyboardInterrupt`` from its wait.
+
+    As Ctrl-C does to a caller blocked for a result. The coroutine is
+    submitted for real; only the wait is interrupted, and only this once.
+
+    Args:
+        when: Called from the wait, just before it raises; block in it until
+            the coroutine is where the interrupt should find it.
+    """
+    from redact.llms import aio
+
+    submit = aio.submit
+
+    def interrupted_submit(coro):
+        monkeypatch.setattr(aio, "submit", submit)
+
+        def result(timeout=None):
+            when()
+            raise KeyboardInterrupt
+
+        future = submit(coro)
+        future.result = result
+        return future
+
+    monkeypatch.setattr(aio, "submit", interrupted_submit)
+
+
 @pytest.fixture()
 def mock_backend():
     """Return a MockBackend that always returns 'mock response'."""

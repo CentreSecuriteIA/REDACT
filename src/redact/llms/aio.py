@@ -69,7 +69,9 @@ def run(coro: Coroutine[Any, Any, _T]) -> _T:
         coro: The coroutine to run.
 
     Returns:
-        What the coroutine returns. Its exception propagates.
+        What the coroutine returns. Its exception propagates. When the wait
+        itself is interrupted (Ctrl-C, an exit from a signal handler), the
+        coroutine is cancelled and the interrupt propagates.
 
     Raises:
         RuntimeError: Called from the loop's own thread, where blocking for
@@ -81,4 +83,11 @@ def run(coro: Coroutine[Any, Any, _T]) -> _T:
             "aio.run() was called on the event loop's thread; await the "
             "coroutine there instead."
         )
-    return submit(coro).result()
+    future = submit(coro)
+    try:
+        return future.result()
+    except BaseException:
+        # The caller is gone: the coroutine must not run on without it. This
+        # does nothing when the exception is the coroutine's own.
+        future.cancel()
+        raise
