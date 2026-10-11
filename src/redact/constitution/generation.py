@@ -275,6 +275,10 @@ class ConstitutionPipeline:
                     max_tokens=10000,
                 )
 
+                #TODO: a truncated reply is kept and its unit marked done, with
+                # fewer entries than asked for (seen: 17 of 90 when a provider's
+                # content filter stopped the reply). Decide whether to reject it,
+                # as a reply with a wrong count is rejected elsewhere.
                 # Strip [END] marker and check completeness
                 clean_output, was_complete = _strip_end_marker(raw_output)
                 if not was_complete:
