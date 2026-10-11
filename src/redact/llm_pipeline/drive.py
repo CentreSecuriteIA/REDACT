@@ -241,7 +241,8 @@ def drive_units(
         resolve: ``model_name -> ModelClient`` for requests without a
             client. Defaults to :meth:`ModelClient.create`.
         progress: Label prefix for progress logging. ``None`` logs nothing.
-            Async requests log one line every ``cap`` finished units.
+            Async requests log one line when a model's first one goes out,
+            and one every ``cap`` finished units.
 
     Returns:
         The number of units that finished or failed.
@@ -301,6 +302,9 @@ def drive_units(
         gate_key = client.model, client.backend.backend_name
         if gate_key not in gates:
             gates[gate_key] = asyncio.Semaphore(client.backend.max_workers)
+            if progress:
+                logger.info("%s: %s on the async lane, at most %d in flight",
+                            progress, client.model, client.backend.max_workers)
         flying[key] = aio.submit(fly(key, client, request, gates[gate_key]))
         return True
 

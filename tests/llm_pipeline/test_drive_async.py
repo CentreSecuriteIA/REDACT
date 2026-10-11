@@ -466,6 +466,7 @@ def test_progress_logs_one_line_every_cap_finished_units(caplog):
     with caplog.at_level(logging.INFO, logger="redact.llm_pipeline.drive"):
         _drive([(k, _unit(client, k)) for k in "abcd"], pool_size=4, cap=2, progress="p")
     assert [r.getMessage() for r in caplog.records] == [
+        "p: lane-m on the async lane, at most 8 in flight",
         "p: 2 units done, 2 in flight", "p: 4 units done, 0 in flight"]
 
     caplog.clear()
@@ -473,6 +474,19 @@ def test_progress_logs_one_line_every_cap_finished_units(caplog):
     with caplog.at_level(logging.INFO, logger="redact.llm_pipeline.drive"):
         _drive([(k, _unit(client, k)) for k in "abcd"], pool_size=4, cap=2)
     assert caplog.records == []
+
+
+def test_progress_announces_each_model_on_the_lane_once_with_its_limit(caplog):
+    """A run shorter than ``cap`` units is not silent."""
+    script = _Script()
+    x = _lane_client(script, "lane-x", workers=2)
+    y = _lane_client(script, "lane-y", workers=5)
+    units = [("a", _unit(x, "a", 2)), ("b", _unit(y, "b")), ("c", _unit(x, "c"))]
+    with caplog.at_level(logging.INFO, logger="redact.llm_pipeline.drive"):
+        _drive(units, pool_size=3, cap=8, progress="p")
+    assert [r.getMessage() for r in caplog.records] == [
+        "p: lane-x on the async lane, at most 2 in flight",
+        "p: lane-y on the async lane, at most 5 in flight"]
 
 
 # --- Failures and teardown -------------------------------------------------------
