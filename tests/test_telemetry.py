@@ -236,6 +236,29 @@ class TestCost:
         finally:
             MODEL_REGISTRY.pop(name, None)
 
+    def test_a_model_only_served_locally_has_no_token_cost(self, tmp_path):
+        from redact.llms.model_config import (
+            MODEL_REGISTRY, APIConfig, VLLMConfig, register_model,
+        )
+
+        name = "_test_two_setups_local"
+        try:
+            register_model(
+                name, backend_type="api",
+                api=APIConfig(backend_type="openai", api_key_env="TEST_API_KEY",
+                              base_url="https://t/v1", rpm=100,
+                              price_per_1m_input=3.0, price_per_1m_output=15.0),
+                vllm=VLLMConfig(hf_model_id="org/x"),
+            )
+            telemetry.install(data_dir=tmp_path)
+            observe.record({"ev": "call", "model": name, "backend": "vllm",
+                            "n_items": 1, "in_tok": 1_000_000, "out_tok": 0, "ms": 10})
+            s = telemetry.summary()
+            assert "cost_usd" not in s["models"][name]
+            assert s["api_cost_usd"] == 0.0
+        finally:
+            MODEL_REGISTRY.pop(name, None)
+
     def test_unpriced_model_reports_tokens_but_no_dollars(self, tmp_path):
         """Registers its own unpriced model rather than borrowing a shipped one.
 

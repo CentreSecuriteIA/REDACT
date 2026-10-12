@@ -265,14 +265,16 @@ class Collector:
                 api = getattr(cfg, "api", None) if cfg else None
                 pin = getattr(api, "price_per_1m_input", None) if api else None
                 pout = getattr(api, "price_per_1m_output", None) if api else None
-                if pin is not None or pout is not None:
-                    priced = self.priced[model]
-                    cost = ((priced["in"] / 1e6) * (pin or 0.0)
-                            + (priced["out"] / 1e6) * (pout or 0.0))
+                # A model with no hosted call has no row in self.priced.
+                if model in self.priced and (pin is not None or pout is not None):
+                    hosted = self.priced[model]
+                    cost = ((hosted["in"] / 1e6) * (pin or 0.0)
+                            + (hosted["out"] / 1e6) * (pout or 0.0))
                     row["cost_usd"] = round(cost, 4)
                     api_cost += cost
                     priced = True
                 per_model[model] = row
+            all_local = bool(self.tokens) and not self.priced
             local_s = dict(self.local_s)
             spans = list(self.local_spans)
             n_errors = len(self.errors)
@@ -302,7 +304,8 @@ class Collector:
             "local_s": {k: round(v, 1) for k, v in local_s.items()},
             "local_billed_s": round(billed_s, 1),
             "gpu": {"name": name, "rented": rented, "hourly_rate_usd": rate},
-            "api_cost_usd": round(api_cost, 4) if priced else None,
+            # 0.0 when every call was local. None: no priced model was called.
+            "api_cost_usd": round(api_cost, 4) if priced or all_local else None,
             "local_cost_usd": local_cost,
             "errors": n_errors,
         }
