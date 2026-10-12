@@ -194,7 +194,12 @@ def _engine(hf_model_id: str, quantization: str | None, vllm_kwargs: dict):
         kwargs.setdefault("disable_log_stats", True)
         # The plan's cards. Without a plan the engine takes the first visible
         # card(s), and the environment is left alone.
-        ids = _physical_ids(_planned_devices.get(key, ()))
+        devices = _planned_devices.get(key, ())
+        # More cards than one copy spans are further copies, one engine still.
+        copies = len(devices) // (kwargs.get("tensor_parallel_size") or 1)
+        if copies > 1:
+            kwargs.setdefault("data_parallel_size", copies)
+        ids = _physical_ids(devices)
 
         started = time.perf_counter()
         # Not measured: vLLM preallocates its memory grant in a separate
@@ -218,6 +223,7 @@ def _engine(hf_model_id: str, quantization: str | None, vllm_kwargs: dict):
             "hf_model_id": hf_model_id,
             "quantization": quantization,
             "tensor_parallel_size": kwargs.get("tensor_parallel_size", 1),
+            "data_parallel_size": kwargs.get("data_parallel_size", 1),
             "gpu_memory_utilization": kwargs.get("gpu_memory_utilization"),
             # As handed to the engine's processes; empty when none were.
             "devices": ids,
@@ -320,12 +326,16 @@ class VLLMBackend(LLMBackend):
                 ``top_k``, ...), merged over :data:`_DEFAULT_SAMPLING`.
             **identity: Forwarded to :meth:`LLMBackend.__init__`.
                 ``max_workers`` defaults to the number of sequences the
-                engine runs at once.
+                engine runs at once, over all its copies.
         """
         engine = _engine(hf_model_id, quantization, vllm_kwargs or {})
         # What the async lane keeps in flight for this model. The engine
         # queues anything above its own limit, so more would only wait there.
-        identity.setdefault("max_workers", engine.scheduler_config.max_num_seqs)
+        # The limit is per copy: each has a scheduler of its own.
+        parallel = getattr(
+            getattr(engine, "vllm_config", None), "parallel_config", None)
+        identity.setdefault("max_workers", engine.scheduler_config.max_num_seqs
+                            * getattr(parallel, "data_parallel_size", 1))
         super().__init__(model, **identity)
         # SamplingParams needs a number, so fill in a default when the model
         # has none.

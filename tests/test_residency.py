@@ -1823,6 +1823,67 @@ class TestPlannedDevices:
         vllm_module._engine("org/pdrb", None, {})
         assert [visible for visible, _ in builds] == ["1", "1"]
 
+    @staticmethod
+    def _load(vllm_module, model):
+        from redact.llms.model_config import get_model_config
+
+        return vllm_module.VLLMBackend.from_config(get_model_config(model))
+
+    def test_two_planned_cards_on_one_card_engine_become_two_copies(
+            self, registered, engine):
+        vllm_module, builds = engine
+        m = registered("_pd_dp", hf_model_id="org/pdd", vram_gb=10.0,
+                       vllm_kwargs={"max_model_len": 512})
+        residency.apply_plan(_plan([m], 24.0, 2))
+        self._load(vllm_module, m)
+        assert builds == [("0,1", {
+            "model": "org/pdd", "quantization": None, "max_model_len": 512,
+            "gpu_memory_utilization": 0.9, "disable_log_stats": True,
+            "data_parallel_size": 2})]
+        assert "CUDA_VISIBLE_DEVICES" not in os.environ
+
+    def test_a_tensor_parallel_plan_adds_no_copies(self, registered, engine):
+        vllm_module, builds = engine
+        m = registered("_pd_tp", hf_model_id="org/pdtp", vram_gb=40.0, min_gpus=2)
+        residency.apply_plan(_plan([m], 48.0, 2))
+        self._load(vllm_module, m)
+        (visible, kwargs), = builds
+        assert visible == "0,1" and kwargs["tensor_parallel_size"] == 2
+        assert "data_parallel_size" not in kwargs
+
+    def test_copies_of_a_tensor_parallel_engine_reach_it_as_both_arguments(
+            self, registered, engine):
+        vllm_module, builds = engine
+        m = registered("_pd_tp_dp", hf_model_id="org/pdtd", vram_gb=40.0, min_gpus=2)
+        residency.apply_plan(_plan([m], 48.0, 4, copies={m: 2}))
+        self._load(vllm_module, m)
+        (visible, kwargs), = builds
+        assert visible == "0,1,2,3"
+        assert (kwargs["tensor_parallel_size"], kwargs["data_parallel_size"]) == (2, 2)
+
+    def test_a_directly_built_engine_keeps_its_own_copies(self, engine):
+        """Outside the registry, which rejects the argument."""
+        vllm_module, builds = engine
+        kw = {"data_parallel_size": 2}
+        vllm_module.set_planned_devices(
+            {vllm_module._engine_key("org/pdk", None, kw): (0, 1, 2)})
+        vllm_module._engine("org/pdk", None, kw)
+        assert builds[0][1]["data_parallel_size"] == 2
+
+    def test_the_load_event_counts_the_copies(self, engine):
+        vllm_module, _ = engine
+        vllm_module.set_planned_devices(
+            {vllm_module._engine_key("org/pdc", None, {}): (0, 1)})
+        events = []
+        observe.set_emitter(events.append)
+        try:
+            vllm_module._engine("org/pdc", None, {})
+            vllm_module._engine("org/pdc-noplan", None, {})
+        finally:
+            observe.set_emitter(None)
+        assert [(e["devices"], e["data_parallel_size"]) for e in events] == [
+            (["0", "1"], 2), ([], 1)]
+
 
 class TestPaddedGrant:
     """A vLLM engine claims, is granted and is checked against its need with

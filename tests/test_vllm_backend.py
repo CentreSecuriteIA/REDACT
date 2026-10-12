@@ -157,6 +157,15 @@ class TestModelConfigVLLMFields:
         finally:
             MODEL_REGISTRY.pop(name, None)
 
+    @pytest.mark.parametrize("copies", [1, 2, None])
+    def test_data_parallel_size_is_not_a_setting(self, copies):
+        """Whatever the value: the planner decides it from the cards."""
+        with pytest.raises(ValueError, match=(
+                r"data_parallel_size'\] is not a setting: the planner decides "
+                r"it from the cards; set copies in the recipe")):
+            VLLMConfig(hf_model_id="org/model",
+                       vllm_kwargs={"data_parallel_size": copies})
+
 
 class TestEngineDownloadDir:
     """The HF cache is shared by both local runtimes — don't fork it.
@@ -683,6 +692,16 @@ class TestVLLMFlags:
 
         backend, engine = _vllm_backend(monkeypatch, {})
         assert backend.max_workers == engine.scheduler_config.max_num_seqs == 48
+        assert VLLMBackend("m", "org/x", max_workers=4).max_workers == 4
+
+    def test_max_workers_counts_every_copy(self, monkeypatch):
+        """Each copy of an engine runs ``max_num_seqs`` sequences of its own."""
+        from redact.llms.backends import VLLMBackend
+
+        _, engine = _vllm_backend(monkeypatch, {})
+        engine.vllm_config = types.SimpleNamespace(
+            parallel_config=types.SimpleNamespace(data_parallel_size=2))
+        assert VLLMBackend("m", "org/x").max_workers == 96
         assert VLLMBackend("m", "org/x", max_workers=4).max_workers == 4
 
     def test_the_client_hands_generate_the_whole_list(self, monkeypatch):

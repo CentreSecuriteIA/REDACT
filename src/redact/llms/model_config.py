@@ -166,7 +166,8 @@ class VLLMConfig:
         quantization: Quantization method, e.g. "gptq", "awq".
         vllm_kwargs: Extra engine arguments, fields of vLLM's
             ``AsyncEngineArgs`` (e.g. ``max_model_len``, ``tokenizer_mode``).
-            ``gpu_memory_utilization`` is rejected: the planner computes it.
+            ``gpu_memory_utilization`` and ``data_parallel_size`` are
+            rejected: the planner decides them.
         sampling: Default ``SamplingParams`` values for this model
             (``top_p``, ``top_k``, ...).
         vram_gb: The weights in GiB, total across the model's cards, when
@@ -196,6 +197,12 @@ class VLLMConfig:
             "VLLMConfig.vllm_kwargs['gpu_memory_utilization'] is not a "
             "setting: the planner computes it from vram_gb (or the estimate) "
             "and the card. Remove it from vllm_kwargs.",
+        )
+        _require(
+            "data_parallel_size" not in (self.vllm_kwargs or {}),
+            "VLLMConfig.vllm_kwargs['data_parallel_size'] is not a setting: "
+            "the planner decides it from the cards; set copies in the recipe. "
+            "Remove it from vllm_kwargs.",
         )
         # The planner places the model on min_gpus cards and the engine
         # splits it across tensor_parallel_size, so the two must agree.
