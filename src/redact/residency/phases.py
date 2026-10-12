@@ -4,7 +4,7 @@ import logging
 from dataclasses import dataclass
 
 from .footprint import _engine_id, _local_setup
-from .placement import _gpus_required, plan_residency
+from .placement import _arrange, _gpus_required, _Stage, _survey
 from .plan import ResidencyPlan
 
 logger = logging.getLogger(__name__)
@@ -76,35 +76,23 @@ def plan_phases(
                 engine_of[name] = _engine_id(getattr(config, setup), setup)
             span.setdefault(engine_of[name], [i, i])[1] = i
 
-    plans: dict[tuple, ResidencyPlan] = {}
-    # The cards each resident vLLM engine loaded on, kept until its release.
-    held: dict[tuple, tuple[int, ...]] = {}
-    counted = {engine_of[name] for name in copies or () if name in engine_of}
+    # The same models again are the same engines, resident since: no
+    # lifetime has a gap, so one plan holds for every stage they share.
+    surveyed: dict[tuple, _Stage] = {}
     phases = []
     for i, stage in enumerate(stages):
         resident = [name for name, engine in engine_of.items()
                     if span[engine][0] <= i <= span[engine][1]]
-        engines = {engine_of[name] for name in resident}
-        held = {engine: cards for engine, cards in held.items() if engine in engines}
-        # The same models again are the same engines, resident since: no
-        # lifetime has a gap, so the plan made for them still holds.
         key = tuple(resident)
-        if key not in plans:
-            plans[key] = plan_residency(
-                resident, backend_types, gpus=gpus, gib_per_gpu=gib_per_gpu,
-                copies=copies, pinned=held)
-        for fp in plans[key].footprints:
-            if fp.setup == "vllm" and fp.devices:
-                # A copy on an idle card is decided stage by stage, so only
-                # the cards the engine was placed on are kept for the next.
-                placed = (fp.devices if fp.engine in counted
-                          else fp.devices[:fp.min_gpus])
-                held.setdefault(fp.engine, placed)
-        phases.append(Phase(stage, resident, plans[key]))
+        if key not in surveyed:
+            surveyed[key] = _survey(resident, backend_types, gpus, gib_per_gpu, copies)
+        phases.append(Phase(stage, resident, surveyed[key].plan))
+    _arrange([s for s in surveyed.values() if s.footprints])
+    plans = [s.plan for s in surveyed.values()]
 
     # One share per engine for its whole lifetime: the smallest planned.
     smallest: dict[tuple, tuple[float, float | None]] = {}
-    footprints = [fp for plan in plans.values() for fp in plan.footprints]
+    footprints = [fp for plan in plans for fp in plan.footprints]
     for fp in footprints:
         if fp.planned_utilization is None:
             continue
@@ -159,6 +147,6 @@ def plan_phases(
                 "transformers model stays where its device_map put it when "
                 "it loaded, so that stage's plan may hand out memory it holds.",
                 fp.model)
-    for plan in plans.values():
+    for plan in plans:
         plan.gpus_required = _gpus_required(plan.footprints)
     return phases

@@ -1,21 +1,25 @@
 """Residency per stage: lifetimes, resident sets and the one share per engine."""
 
+import random
 from unittest.mock import patch
 
 import pytest
 
 from redact.llms.model_config import MODEL_REGISTRY, VLLMConfig, register_model
+from redact.llms.resources import estimate
 from redact.residency import plan_phases
+from tests.test_residency import assert_no_card_is_overfull, fit_exists, packed_sizes
 
 
 @pytest.fixture
 def local_model():
-    """Register 5 GiB vLLM models; planning reads no HF config."""
+    """Register vLLM models, of 5 GiB unless a size is given; planning reads
+    no HF config."""
     made = []
 
-    def _make(name):
+    def _make(name, gb=5.0):
         register_model(name, backend_type="vllm",
-                       vllm=VLLMConfig(hf_model_id=f"org/{name}", vram_gb=5.0))
+                       vllm=VLLMConfig(hf_model_id=f"org/{name}", vram_gb=gb))
         made.append(name)
         return name
 
@@ -283,6 +287,117 @@ def test_a_transformers_model_guessed_elsewhere_later_is_warned_about(
         f"[residency] {t} is planned on other cards in a later stage. A "
         "transformers model stays where its device_map put it when it loaded, "
         "so that stage's plan may hand out memory it holds.")]
+
+
+def test_an_early_stage_leaves_a_later_one_its_card(local_model, caplog):
+    """A 24 GiB card grants 21.6 GiB; x and y need 6.1 each and z 17.1,
+    which fits beside neither. Placed for stage a alone, x and y take a
+    card each and stage b has none for z. On one card they fit both."""
+    import logging
+
+    x, y = local_model("_ph_se_x"), local_model("_ph_se_y")
+    z = local_model("_ph_se_z", 15.0)
+    with caplog.at_level(logging.INFO, logger="redact.residency"):
+        first, second = plan_phases(
+            {"a": [x, y], "b": [x, y, z]}, gpus=2, gib_per_gpu=24.0)
+    assert first.plan.fits and second.plan.fits
+    assert len(first.plan.groups) == len(second.plan.groups) == 1
+    for phase in (first, second):
+        assert _cards(phase, x) == _cards(phase, y) == ((0,), 1)
+        assert _share(phase, x) == _share(phase, y) == 0.45
+    assert (_cards(second, z), _share(second, z)) == (((1,), 1), 0.9)
+    assert [r.getMessage() for r in caplog.records] == [
+        "[residency] placed in another arrangement than the order given: "
+        f"{x} -> card 0, {y} -> card 0, {z} -> card 1"]
+    assert (f"  note: card 1 is idle: {x} shares its card, and a copy needs the "
+            "card to itself") in first.plan.explain()
+
+
+def test_cards_that_fit_one_stage_but_not_the_next_are_not_taken(local_model, caplog):
+    """Stage a fits with x and y on one card, which leaves the other to z.
+    Stage b fits with them apart, each beside an engine of 15.45 GiB. No
+    cards fit both, so both are planned in the order given."""
+    import logging
+
+    x, y = local_model("_ph_no_x"), local_model("_ph_no_y")
+    z = local_model("_ph_no_z", 15.0)
+    u, w = local_model("_ph_no_u", 13.5), local_model("_ph_no_w", 13.5)
+    with caplog.at_level(logging.INFO, logger="redact.residency.placement"):
+        first, second = plan_phases(
+            {"a": [x, y, z], "b": [x, y, u, w]}, gpus=2, gib_per_gpu=24.0)
+    assert first.plan.as_dict()["groups"] == [[x, y], [z]]
+    assert not first.plan.fits and second.plan.fits
+    assert [_cards(first, m) for m in (x, y, z)] == [((0,), 1), ((1,), 1), ((0,), 1)]
+    assert [_cards(second, m) for m in (x, y, u, w)] == [
+        ((0,), 1), ((1,), 1), ((0,), 1), ((1,), 1)]
+    assert caplog.records == []
+
+
+def test_a_rearranged_engine_gets_no_copy_on_a_card_a_later_stage_fills(
+        local_model, caplog):
+    """Alone in stage a, x would have a copy on card 1. Stage b fits only
+    with y beside x and z on card 1, and x loads once."""
+    import logging
+
+    x, y = local_model("_ph_cs_x"), local_model("_ph_cs_y")
+    z = local_model("_ph_cs_z", 15.0)
+    with caplog.at_level(logging.INFO, logger="redact.residency"):
+        alone, shared = plan_phases(
+            {"a": [x], "b": [x, y, z]}, gpus=2, gib_per_gpu=24.0)
+    assert alone.plan.fits and shared.plan.fits
+    assert _cards(alone, x) == _cards(shared, x) == _cards(shared, y) == ((0,), 1)
+    assert _cards(shared, z) == ((1,), 1)
+    assert _share(alone, x) == _share(shared, x) == 0.45
+    assert [r.getMessage() for r in caplog.records] == [
+        "[residency] placed in another arrangement than the order given: "
+        f"{x} -> card 0, {y} -> card 0, {z} -> card 1",
+        f"[residency] {x} loads once, with gpu_memory_utilization=0.45: its "
+        "share in the stage where its card is most crowded.",
+        f"[residency] {x} loads once, with 1 copy: on the cards it holds in "
+        "every stage."]
+
+
+def test_a_run_fits_exactly_when_one_set_of_cards_fits_every_stage(local_model, caplog):
+    """300 seeded runs of 2 to 4 stages over 3 to 5 engines, on 2 to 4
+    cards: every stage fits exactly when trying every assignment finds one
+    set of cards that fits them all."""
+    import logging
+
+    rng = random.Random(20261012)
+    card = 24.0
+    pool = estimate.DEFAULT_GPU_MEMORY_UTILIZATION * card
+    unfit = 0
+    with caplog.at_level(logging.INFO, logger="redact.residency.placement"):
+        for i in range(300):
+            cards = rng.randint(2, 4)
+            names = [local_model(f"_ph_or{i}_{j}", gb) for j, gb in enumerate(
+                packed_sizes(rng, cards, pool, range(3, 6)))]
+            called = [rng.sample(names, rng.randint(1, len(names)))
+                      for _ in range(rng.randint(2, 4))]
+            phases = plan_phases(
+                {f"s{k}": stage for k, stage in enumerate(called)},
+                gpus=cards, gib_per_gpu=card)
+            # An engine is resident from the first stage that calls it to
+            # the last.
+            resident = [
+                [m for m in names if any(m in stage for stage in called[:k + 1])
+                 and any(m in stage for stage in called[k:])]
+                for k in range(len(called))]
+            needs = {fp.model: fp.padded_gb
+                     for phase in phases for fp in phase.plan.footprints}
+            exists = fit_exists(needs, resident, cards, pool)
+            assert all(phase.plan.fits for phase in phases) is exists, (
+                i, cards, called)
+            held = {}
+            for phase in phases:
+                if exists:
+                    assert_no_card_is_overfull(phase.plan, pool)
+                for fp in phase.plan.footprints:
+                    assert held.setdefault(fp.model, fp.devices) == fp.devices
+            unfit += not exists
+    # Of the 300, the runs that fit only on other cards than the order
+    # given takes, and those that fit on none.
+    assert (len(caplog.records), unfit) == (68, 53)
 
 
 def test_preload_skips_a_model_no_longer_wanted(local_model):
