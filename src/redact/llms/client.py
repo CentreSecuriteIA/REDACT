@@ -122,7 +122,8 @@ class ModelClient:
         Args:
             model: Registered model name.
             backend_type: Which setup to bind ("api", "vllm" or "introspect")
-                when the entry has more than one. Defaults to the entry's own.
+                when the entry has more than one. Defaults to what
+                :func:`~redact.llms.backends.resolve_setup` picks.
 
         Raises:
             KeyError: Unknown model, or its API-key env var is not set.

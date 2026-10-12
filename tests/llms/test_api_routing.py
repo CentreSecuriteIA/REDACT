@@ -9,17 +9,21 @@ import pytest
 
 from redact.llms.backends import (
     backend_for,
+    capabilities,
     clear_transport_caches,
     resolve_setup,
     transport_for,
 )
+from redact.llms.client import ModelClient
 from redact.llms.model_config import (
     MODEL_REGISTRY,
     APIConfig,
     ModelConfig,
     VLLMConfig,
+    model_compute_config,
     register_model,
 )
+from redact.residency import footprint
 from tests.conftest import fake_vllm_modules
 
 
@@ -285,3 +289,83 @@ class TestSetupReachesTheBackend:
         with patch.dict(os.environ, {"_REDACT_TEST_EMPTY_KEY": ""}):
             with pytest.raises(KeyError, match="_REDACT_TEST_EMPTY_KEY"):
                 backend_for(config)
+
+
+class TestRunServing:
+    """A run's choice for a model is read wherever no setup is asked for."""
+
+    @pytest.fixture()
+    def dual(self):
+        """A model with a hosted and a local setup, the hosted one its default.
+
+        Nothing is loaded and nothing is read from the network: the SDK
+        client, the engine and the HF config are stubbed.
+        """
+        name = "test-routing-run-serving"
+        MODEL_REGISTRY[name] = ModelConfig(
+            name=name, backend_type="api",
+            api=APIConfig(backend_type="openai", api_key_env="TEST_API_KEY",
+                          base_url="https://test.example/v1", rpm=10,
+                          recommended_max_workers=3),
+            vllm=VLLMConfig(hf_model_id="org/local-weights", vram_gb=5.0),
+        )
+        engine = SimpleNamespace(scheduler_config=SimpleNamespace(max_num_seqs=256))
+        with patch.dict(os.environ, {"TEST_API_KEY": "test-key"}), \
+             patch("redact.llms.backends.openai.openai.OpenAI"), \
+             patch("redact.llms.backends.vllm._engine", return_value=engine), \
+             patch("redact.llms.resources.estimate._load_config", return_value=None):
+            yield name
+        MODEL_REGISTRY.pop(name, None)
+        clear_transport_caches()
+
+    def test_the_runs_setup_is_picked_until_the_run_ends(self, dual):
+        config = MODEL_REGISTRY[dual]
+        capabilities.set_run_serving({dual: {"backend_type": "vllm"}})
+        assert resolve_setup(config) == "vllm"
+        assert transport_for(config) == "vllm"
+        assert model_compute_config(dual).supports_native_batching is True
+        assert footprint(dual).setup == "vllm"
+        local = ModelClient.create(dual).backend
+        assert (local.backend_name, local.hf_model_id, local.rpm) == (
+            "vllm", "org/local-weights", None)
+
+        capabilities.set_run_serving({})
+        assert resolve_setup(config) == "api"
+        assert transport_for(config) == "openai"
+        assert model_compute_config(dual).supports_native_batching is False
+        assert footprint(dual) is None
+        hosted = ModelClient.create(dual).backend
+        assert (hosted.backend_name, hosted.rpm) == ("openai", 10)
+
+    def test_an_explicit_backend_type_wins_over_the_run(self, dual):
+        capabilities.set_run_serving({dual: {"backend_type": "vllm"}})
+        assert resolve_setup(MODEL_REGISTRY[dual], "api") == "api"
+        assert model_compute_config(dual, "api").supports_native_batching is False
+        assert footprint(dual, "api") is None
+        hosted = ModelClient.create(dual, backend_type="api").backend
+        assert hosted.backend_name == "openai"
+
+    def test_a_model_the_run_does_not_name_keeps_its_default(self, dual):
+        capabilities.set_run_serving({"another-model": {"backend_type": "vllm"}})
+        assert resolve_setup(MODEL_REGISTRY[dual]) == "api"
+
+    def test_the_runs_workers_replace_the_registrys_on_an_api_backend(self, dual):
+        capabilities.set_run_serving({dual: {"workers": 2}})
+        assert backend_for(MODEL_REGISTRY[dual]).max_workers == 2
+        assert ModelClient.create(dual).backend.max_workers == 2
+        # The registry entry is not edited.
+        assert MODEL_REGISTRY[dual].api.recommended_max_workers == 3
+
+        capabilities.set_run_serving({})
+        assert ModelClient.create(dual).backend.max_workers == 3
+
+    def test_the_runs_workers_do_not_reach_a_local_backend(self, dual):
+        """A local model's requests at once stay the engine's."""
+        capabilities.set_run_serving({dual: {"workers": 2}})
+        assert ModelClient.create(dual, backend_type="vllm").backend.max_workers == 256
+
+    def test_workers_a_series_only_provider_cannot_use_are_refused(self):
+        """Raised, not clamped to 1 without a word."""
+        capabilities.set_run_serving({"claude-opus-4-6": {"workers": 2}})
+        with pytest.raises(ValueError, match="doesn't support parallel calls"):
+            backend_for(MODEL_REGISTRY["claude-opus-4-6"])

@@ -21,7 +21,7 @@ from redact.llm_pipeline import LLMRequest, drive_units
 from redact.llm_pipeline import drive as drive_module
 from redact.llms import ModelClient, aio, observe
 from redact.llms import client as client_module
-from redact.llms.backends import ComputeConfig, OpenAIBackend
+from redact.llms.backends import ComputeConfig, OpenAIBackend, capabilities
 from redact.llms.model_config import MODEL_REGISTRY, APIConfig, register_model
 from redact.llms.wrappers import RateLimiter
 from tests.conftest import MockBackend, make_client
@@ -287,6 +287,40 @@ def test_a_registered_openai_compatible_model_takes_the_lane(monkeypatch):
     built.assert_called_once_with(api_key="k", base_url="http://127.0.0.1:8000/v1")
     assert [(e["ev"], e["model"], e["backend"], e["n_items"]) for e in events] == [
         ("call", "lane-served", "openai", 1)] * len(results)
+
+
+def test_the_lane_holds_a_hosted_model_to_the_runs_workers(monkeypatch):
+    """The registry allows four requests at once and the run two: the third
+    waits for the first reply."""
+    script = _Script(["b1", "c1", "d1", "a1"], closed=True)
+
+    async def create(**kwargs):
+        await script.play(kwargs["messages"][-1]["content"], None, None)
+        choice = MagicMock(finish_reason="stop")
+        choice.message.content = "ok"
+        return MagicMock(choices=[choice], usage=None)
+
+    sdk = MagicMock()
+    sdk.chat.completions.create = create
+    monkeypatch.setenv("LANE_TEST_KEY", "k")
+    register_model("lane-run", backend_type="api", api=APIConfig(
+        backend_type="openai", api_key_env="LANE_TEST_KEY",
+        base_url="http://127.0.0.1:8000/v1", rpm=6000, recommended_max_workers=4))
+    OpenAIBackend.clear_cache()
+    capabilities.set_run_serving({"lane-run": {"workers": 2}})
+    try:
+        with patch("redact.llms.backends.openai.openai.OpenAI"), \
+             patch("redact.llms.backends.openai.openai.AsyncOpenAI", return_value=sdk):
+            units = [(k, _unit_by_name("lane-run", k)) for k in "abcd"]
+            _, done, _ = _drive(_then_open(units, script), pool_size=5)
+    finally:
+        OpenAIBackend.clear_cache()
+        del MODEL_REGISTRY["lane-run"]
+
+    assert script.log == [("start", "a1"), ("start", "b1"), ("end", "b1"),
+                          ("start", "c1"), ("end", "c1"),
+                          ("start", "d1"), ("end", "d1"), ("end", "a1")]
+    assert done == ["b", "c", "d", "a"]
 
 
 def test_the_lane_waits_for_the_rate_limiter(monkeypatch):

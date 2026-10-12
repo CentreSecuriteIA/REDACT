@@ -6,6 +6,7 @@
 (which for a local one would load model weights).
 """
 
+from dataclasses import replace
 from typing import TYPE_CHECKING
 
 from .anthropic import AnthropicBackend
@@ -34,6 +35,22 @@ API_BACKEND_TYPES = frozenset({"openai", "anthropic"})
 #: Setup names a ``ModelConfig`` can default to. Each is also the name of the
 #: field holding that setup. "api" covers every API provider.
 SETUP_TYPES = frozenset({"api", "vllm", "introspect"})
+
+# How the current run serves its models (set_run_serving). Empty outside a run.
+_run_serving: dict[str, dict] = {}
+
+
+def set_run_serving(serving: dict[str, dict]) -> None:
+    """Set how the current run serves its models, until it is set again.
+
+    Args:
+        serving: Per model name, either or both of ``backend_type``, the
+            setup :func:`resolve_setup` picks where none is requested, and
+            ``workers``, the ``max_workers`` :func:`backend_for` gives the
+            model's API backend. ``{}`` ends the run's choices.
+    """
+    global _run_serving
+    _run_serving = dict(serving)
 
 
 def compute_config_for(backend_type: str | None) -> ComputeConfig | None:
@@ -87,7 +104,8 @@ def validate_concurrency(
 def resolve_setup(config: "ModelConfig", requested: str | None = None) -> str:
     """Pick which setup of a registry entry to use.
 
-    An explicit request wins, then the entry's ``backend_type``, then the
+    An explicit request wins, then the run's choice for the model
+    (:func:`set_run_serving`), then the entry's ``backend_type``, then the
     only populated setup.
 
     Args:
@@ -101,7 +119,9 @@ def resolve_setup(config: "ModelConfig", requested: str | None = None) -> str:
         ValueError: The name is not a known setup, the entry lacks that
             setup, it has no setup, or it has several and no default.
     """
-    setup = requested or config.backend_type
+    setup = (requested
+             or _run_serving.get(config.name, {}).get("backend_type")
+             or config.backend_type)
     if setup is None:
         present = [s for s in sorted(SETUP_TYPES) if getattr(config, s) is not None]
         if not present:
@@ -157,17 +177,27 @@ def transport_for(config: "ModelConfig", setup: str | None = None) -> str:
 def backend_for(config: "ModelConfig", setup: str | None = None) -> LLMBackend:
     """Build the backend for one model on one of its setups.
 
+    An API backend gets the run's ``workers`` for the model
+    (:func:`set_run_serving`) in place of its ``recommended_max_workers``.
+
     Args:
         config: The model's ``ModelConfig``.
         setup: Which setup to use when the entry has more than one, e.g.
-            ``"vllm"``. Defaults to the entry's own.
+            ``"vllm"``. Defaults to what :func:`resolve_setup` picks.
 
     Raises:
         ValueError: The setup cannot be resolved, or names no known backend
             type.
         KeyError: The setup's API-key env var is not set.
     """
-    return BACKEND_TYPES[transport_for(config, setup)].from_config(config)
+    transport = transport_for(config, setup)
+    workers = _run_serving.get(config.name, {}).get("workers")
+    if workers is not None and transport in API_BACKEND_TYPES:
+        # from_config() reads the count from the api setup. The registry
+        # entry is left as it is.
+        config = replace(
+            config, api=replace(config.api, recommended_max_workers=workers))
+    return BACKEND_TYPES[transport].from_config(config)
 
 
 def clear_transport_caches() -> None:

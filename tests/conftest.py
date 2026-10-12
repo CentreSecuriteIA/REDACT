@@ -46,13 +46,14 @@ def _api_keys(monkeypatch):
 
 @pytest.fixture(autouse=True)
 def _no_planned_shares():
-    """A planned share and card belong to one run: a test's plan must not
-    reach the next."""
+    """A planned share and card belong to one run, as does the way it serves
+    its models: a test's must not reach the next."""
     yield
-    from redact.llms.backends import vllm
+    from redact.llms.backends import capabilities, vllm
 
     vllm.set_planned_utilization({})
     vllm.set_planned_devices({})
+    capabilities.set_run_serving({})
 
 
 # ---------------------------------------------------------------------------
