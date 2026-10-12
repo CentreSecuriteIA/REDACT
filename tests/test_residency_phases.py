@@ -229,6 +229,34 @@ def test_a_twin_is_kept_through_its_engine(local_model):
     assert _cards(second, z) == ((0,), 1)
 
 
+def test_a_kept_engine_on_whole_cards_does_not_join_a_shared_card(local_model):
+    """Stage a does not fit: big, with two copies, opens a group of its own
+    on cards 0 and 1, and gen is on card 0 in the first. Kept there in stage
+    b, the two cannot be resident together either: a card held whole is no
+    card to share, and gen keeps its full share."""
+    from redact.llms.model_config import IntrospectConfig
+
+    gen = local_model("_ph_whole_gen")
+    big, spanning = "_ph_whole_big", "_ph_whole_tf"
+    register_model(big, backend_type="vllm",
+                   vllm=VLLMConfig(hf_model_id=f"org/{big}", vram_gb=10.0))
+    register_model(spanning, backend_type="introspect", introspect=IntrospectConfig(
+        hf_model_id=f"org/{spanning}", log_dir="x", vram_gb=18.0))
+    try:
+        first, second = plan_phases(
+            {"a": [gen, big, spanning], "b": [gen, big]},
+            gpus=2, gib_per_gpu=24.0, copies={big: 2})
+    finally:
+        MODEL_REGISTRY.pop(big, None)
+        MODEL_REGISTRY.pop(spanning, None)
+    assert first.plan.as_dict()["groups"] == [[gen], [big], [spanning]]
+    assert second.plan.as_dict()["groups"] == [[gen], [big]]
+    assert not first.plan.fits and not second.plan.fits
+    assert (_cards(second, gen), _cards(second, big)) == (((0,), 1), ((0, 1), 2))
+    assert _share(first, gen) == _share(second, gen) == 0.9
+    assert _share(second, big) == 0.9
+
+
 def test_a_transformers_model_guessed_elsewhere_later_is_warned_about(
         local_model, caplog):
     """The plan does not place a transformers model. Beside w, 18 GiB of

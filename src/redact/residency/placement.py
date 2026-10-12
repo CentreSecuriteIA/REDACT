@@ -61,6 +61,10 @@ class _Cards:
             d < len(self.free)
             # vLLM grants sharing a card stay under the ceiling together.
             and self._room(d, vllm) + _EPS >= reserve[d]
+            # A card held whole must be untouched: pick() chooses such
+            # cards, but a pinned engine comes with its own.
+            and not (vllm and len(devices) > 1
+                     and (self.shared[d] or self.free[d] < self.per))
             for d in devices
         )
         if not (fits or force):
