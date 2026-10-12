@@ -702,6 +702,74 @@ def test_the_next_stage_loads_during_a_stage_without_local_models(local_models):
     assert calls == [("preload", [gen])]
 
 
+def _loader():
+    """What the vLLM loader holds, per model name: ``(share, cards)``."""
+    import redact.llms.backends.vllm as vllm_module
+
+    assert set(vllm_module._planned_utilization) == set(vllm_module._planned_devices)
+    return {key[0].removeprefix("org/"): (share, vllm_module._planned_devices[key])
+            for key, share in vllm_module._planned_utilization.items()}
+
+
+def test_entering_a_stage_hands_the_loader_the_stages_plan(local_models):
+    """The loader holds the shares and cards of the stage entered, and of the
+    next one when its models load ahead, before any of them is preloaded."""
+    from redact import residency
+    from redact.runconfig import _enter_phase, _plan_phases
+
+    gen = local_models("_rc_hand_gen")
+    paraphraser = local_models("_rc_hand_para")
+    check = local_models("_rc_hand_check")
+    models = _models(gen=gen, paraphraser=paraphraser, paraphrase_check=check)
+    alone, shared = (0.9, (0,)), (0.45, (0,))
+    handed, entered, warm = [], [], set()
+    card = _one_card(24.0)
+    try:
+        with card[0], card[1], patch.object(residency, "unload_local"), \
+             patch.object(residency, "preload",
+                          side_effect=lambda names, **kw: handed.append((names, _loader()))):
+            phases = _plan_phases(
+                models, ["constitution", "inputs", "paraphrase"], verbose=False)
+            planned = _loader()
+            for i in range(3):
+                _enter_phase(phases, i, warm, verbose=False)
+                entered.append(_loader())
+    finally:
+        telemetry.uninstall()
+    assert [p.resident for p in phases] == [[], [gen], [paraphraser, check]]
+    assert planned == {gen: alone, paraphraser: shared, check: shared}
+    # gen loads during the constitution stage, and a load still under way
+    # when the inputs stage is entered finds the same share and card.
+    assert entered == [{gen: alone}, {gen: alone},
+                       {paraphraser: shared, check: shared}]
+    assert handed == [([gen], {gen: alone}),
+                      ([paraphraser, check], {paraphraser: shared, check: shared})]
+
+
+def test_a_model_loaded_again_loads_under_the_plan_of_its_stage(local_models):
+    """Stage b does not hold x. Alone in stage a it has both cards and the
+    full share; in stage c it shares card 0, and its second load takes that."""
+    from redact import residency
+    from redact.runconfig import _enter_phase
+
+    w, x, y, z = (local_models(f"_rc_again_{n}") for n in "wxyz")
+    plans = [residency.plan_residency(resident, gpus=2, gib_per_gpu=24.0)
+             for resident in ([x], [y], [z, w, x])]
+    phases = [residency.Phase(stage, [fp.model for fp in plan.footprints], plan)
+              for stage, plan in zip("abc", plans)]
+    handed, warm = [], set()
+    with patch.object(residency, "unload_local"), \
+         patch.object(residency, "preload",
+                      side_effect=lambda names, **kw: handed.append((names, _loader()))):
+        for i in range(3):
+            _enter_phase(phases, i, warm, verbose=False)
+    assert handed == [
+        ([x], {x: (0.9, (0, 1))}),
+        ([y], {y: (0.9, (0, 1))}),
+        ([z, w, x], {z: (0.45, (0,)), w: (0.9, (1,)), x: (0.45, (0,))}),
+    ]
+
+
 def test_plan_phases_returns_nothing_without_local_models():
     from redact.runconfig import _plan_phases
 

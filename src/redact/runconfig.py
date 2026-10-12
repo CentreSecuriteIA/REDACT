@@ -329,9 +329,10 @@ def _plan_phases(
 def _enter_phase(phases: list, i: int, warm: set[str], verbose: bool = True) -> None:
     """Make stage ``i``'s local models the resident ones.
 
-    Unloads the engines no stage from ``i`` on calls, then starts loading
-    this stage's models in the background, and the next stage's too when
-    they fit beside them without an unload. Nothing here aborts the run.
+    Unloads the engines the stage's plan leaves out, hands the loader the
+    plan's shares and cards, then starts loading this stage's models in the
+    background, and the next stage's too when they fit beside them without
+    an unload. Nothing here aborts the run.
 
     Args:
         phases: The run's phases, as :func:`_plan_phases` returns them.
@@ -352,12 +353,17 @@ def _enter_phase(phases: list, i: int, warm: set[str], verbose: bool = True) -> 
                 logger.info("[residency] stage %s: unloading %s",
                             phase.stage, ", ".join(sorted(dropped)))
             residency.unload_local(keep=phase.resident)
+        # What loads from here on loads under this stage's plan.
+        residency.apply_plan(phase.plan)
         ahead = list(phase.loadable)
         if i + 1 < len(phases):
             following = phases[i + 1]
             if (following.plan.co_resident
                     and set(phase.resident) <= set(following.resident)):
                 ahead += following.loadable
+                # An engine both stages hold has the same share and cards
+                # in both plans.
+                residency.apply_plan(following.plan, replace=False)
         todo = [m for m in dict.fromkeys(ahead) if m not in warm]
         if todo:
             warm |= set(todo)
