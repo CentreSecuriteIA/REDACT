@@ -14,6 +14,7 @@ from typing import TYPE_CHECKING, ClassVar
 
 import openai
 
+from ...exceptions import PromptTooLongError
 from .base import ComputeConfig, LLMBackend
 
 if TYPE_CHECKING:
@@ -43,6 +44,18 @@ def _sdk_client(api_key: str, base_url: str, *, async_calls: bool = False):
             client = sdk_class(api_key=api_key, base_url=base_url)
             cache[key] = client
         return client
+
+
+def _is_prompt_too_long(exc: BaseException) -> bool:
+    """Whether the endpoint rejected a prompt as over the model's context.
+
+    Named by the error's code, or only in its message (a vLLM server). A
+    server may count the reply limit in, and reject a prompt that alone fits.
+    """
+    return isinstance(exc, openai.BadRequestError) and (
+        exc.code == "context_length_exceeded"
+        or "maximum context length" in str(exc)
+    )
 
 
 class OpenAIBackend(LLMBackend):
@@ -142,6 +155,10 @@ class OpenAIBackend(LLMBackend):
 
         Returns:
             Generated text, one per item, in the order of ``messages_list``.
+
+        Raises:
+            PromptTooLongError: The endpoint rejected an item's prompt as
+                over the model's context.
         """
         prompts, resolved = self._prepare(messages_list)
         max_tok, temp = self._resolve(max_tokens, temperature)
@@ -156,6 +173,8 @@ class OpenAIBackend(LLMBackend):
                 response = self._client.chat.completions.create(**call_kwargs)
             except Exception as exc:
                 self._record_failure(exc, started, max_tok, temp)
+                if _is_prompt_too_long(exc):
+                    raise PromptTooLongError(str(exc)) from exc
                 raise
             results.append(self._reply(response, started, max_tok, temp))
         return results
@@ -183,6 +202,10 @@ class OpenAIBackend(LLMBackend):
 
         Returns:
             The generated text.
+
+        Raises:
+            PromptTooLongError: The endpoint rejected the prompt as over the
+                model's context.
         """
         (system_prompt,), (messages,) = self._prepare([messages])
         max_tok, temp = self._resolve(max_tokens, temperature)
@@ -197,6 +220,8 @@ class OpenAIBackend(LLMBackend):
         # A cancelled request was sent all the same, and may be billed.
         except (Exception, asyncio.CancelledError) as exc:
             self._record_failure(exc, started, max_tok, temp)
+            if _is_prompt_too_long(exc):
+                raise PromptTooLongError(str(exc)) from exc
             raise
         return self._reply(response, started, max_tok, temp)
 

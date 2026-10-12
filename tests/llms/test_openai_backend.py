@@ -5,8 +5,11 @@ import logging
 import os
 from unittest.mock import AsyncMock, MagicMock, patch
 
+import httpx
+import openai
 import pytest
 
+from redact.exceptions import PromptTooLongError
 from redact.llms import aio, observe
 from redact.llms.backends import OpenAIBackend
 from redact.llms.model_config import get_model_config
@@ -382,3 +385,50 @@ class TestOpenAIAsync:
             aio.run(again.agenerate(_HI[0]))
             assert again._async_client is not a._async_client
         OpenAIBackend.clear_cache()
+
+
+def _bad_request(message, code=None):
+    """An HTTP 400 as the SDK raises it, with the endpoint's error ``code``."""
+    request = httpx.Request("POST", "https://test.api/chat/completions")
+    return openai.BadRequestError(
+        message, response=httpx.Response(400, request=request),
+        body={"message": message, "code": code})
+
+
+class TestOpenAIPromptTooLong:
+    """A prompt the endpoint rejects as over the model's context raises
+    PromptTooLongError, from generate() and from agenerate()."""
+
+    def _both(self, backend, sdk, error, expected):
+        """Fail a call on each path with ``error``; return what each raised."""
+        sdk.chat.completions.create.side_effect = error
+        backend._async_client = _async_sdk(error=error)
+        with pytest.raises(expected) as blocking:
+            backend.generate(_HI)
+        with pytest.raises(expected) as on_the_loop:
+            aio.run(backend.agenerate(_HI[0]))
+        return blocking.value, on_the_loop.value
+
+    @pytest.mark.parametrize("error", [
+        _bad_request("The input is too long.", code="context_length_exceeded"),
+        _bad_request("This model's maximum context length is 8192 tokens. However, "
+                     "you requested 0 output tokens and your prompt contains at "
+                     "least 10036 input tokens"),
+    ], ids=["by-code", "by-message"])
+    def test_both_spellings_raise_prompt_too_long(
+        self, openai_backend, mock_openai_client, events, error
+    ):
+        for raised in self._both(openai_backend, mock_openai_client, error,
+                                 PromptTooLongError):
+            assert str(raised) == str(error) and raised.__cause__ is error
+        assert [event["error"] for event in events] == [f"BadRequestError: {error}"] * 2
+
+    def test_another_bad_request_stays_as_it_is(
+        self, openai_backend, mock_openai_client, events
+    ):
+        error = _bad_request("Unsupported parameter: top_k.",
+                             code="unsupported_parameter")
+        blocking, on_the_loop = self._both(
+            openai_backend, mock_openai_client, error, openai.BadRequestError)
+        assert blocking is error and on_the_loop is error
+        assert [event["error"] for event in events] == [f"BadRequestError: {error}"] * 2
