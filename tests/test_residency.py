@@ -6,9 +6,11 @@ fake ``mem_get_info``. Real load-time measurement against a live engine is a
 GPU-session job.
 """
 
+import itertools
 import json
 import logging
 import os
+import random
 import threading
 import time
 import weakref
@@ -27,6 +29,7 @@ from redact.llms.model_config import (
 )
 from redact import residency
 from redact.llms.resources import estimate, measure
+from redact.residency import placement
 from redact.residency.footprint import _engine_id
 from redact.residency.placement import _Cards, _exceeds_its_cards
 from tests.conftest import fake_vllm_modules
@@ -2344,3 +2347,333 @@ class TestWhatThePlanCannotTell:
                        vram_gb=40.0, device_map="cpu")
         plan = _plan([m], 24.0, 1)
         assert plan.fits and plan.oversized == []
+
+
+def packed_sizes(rng, cards, pool, count):
+    """Weights in GiB of engines that are hard to place: a set that fills
+    ``cards`` cards of ``pool`` GiB closely, shuffled, and half the time one
+    engine more than that. ``count`` is the range of set sizes wanted."""
+    while True:
+        needs = []
+        for _ in range(cards):
+            cuts = sorted(rng.uniform(0.2, 0.8) for _ in range(rng.randint(0, 2)))
+            full = rng.uniform(0.8, 1.0) * pool
+            needs += [(b - a) * full for a, b in zip([0.0, *cuts], [*cuts, 1.0])]
+        if rng.random() < 0.5:
+            needs.append(rng.uniform(0.1, 0.6) * pool)
+        if len(needs) in count and min(needs) > 1.5:
+            break
+    rng.shuffle(needs)
+    # The weights under a need, rounded down so that the set still fills
+    # its cards.
+    return [int((need - estimate.DEFAULT_CUDA_CONTEXT_GIB)
+                / estimate.DEFAULT_FRAGMENTATION * 10) / 10 for need in needs]
+
+
+def fit_exists(needs, stages, cards, pool):
+    """Whether one card per engine keeps every card within ``pool`` GiB in
+    every stage, found by trying every assignment.
+
+    Args:
+        needs: Each engine's need with overhead, by name.
+        stages: The engines resident in each stage.
+    """
+    names = list(needs)
+    # Cards are alike, so the first engine is on card 0.
+    for rest in itertools.product(range(cards), repeat=len(names) - 1):
+        card_of = dict(zip(names, (0, *rest)))
+        for stage in stages:
+            load = [0.0] * cards
+            for name in stage:
+                load[card_of[name]] += needs[name]
+            if max(load) > pool + 1e-6:
+                break
+        else:
+            return True
+    return False
+
+
+def assert_no_card_is_overfull(plan, pool):
+    for card in range(plan.gpus_available):
+        on = [fp for fp in plan.footprints if card in fp.devices]
+        assert sum(fp.padded_gb for fp in on) <= pool + 1e-6
+        # A copy has its card to itself.
+        assert len(on) <= 1 or all(fp.copies == 1 for fp in on)
+
+
+class TestSearch:
+    """Models that do not fit in the order given are placed in an
+    arrangement that fits, when there is one."""
+
+    #: 24 GiB cards grant 21.6 GiB. With overhead 3, 5, 7, 9, 11, 15 and
+    #: 18 GiB of weights need 3.9, 6.1, 8.3, 10.5, 12.7, 17.1 and 20.4.
+    CARD = 24.0
+
+    def _engines(self, registered, tag, weights):
+        return [registered(f"_se_{tag}_{i}", hf_model_id=f"org/se{tag}{i}", vram_gb=gb)
+                for i, gb in enumerate(weights)]
+
+    def test_models_that_fit_in_another_arrangement_are_placed_in_it(
+            self, registered, caplog):
+        """Two 32 GiB cards grant 28.8 GiB each; 16 and 8 GiB of weights
+        need 18.2 and 9.4. In the order given the two small engines share
+        card 1, and the last engine fits on neither card."""
+        names = self._engines(registered, "one", (16.0, 8.0, 8.0, 16.0))
+        with caplog.at_level(logging.INFO, logger=residency.logger.name):
+            plan = _plan(names, 32.0, 2)
+        assert plan.fits and [[fp.model for fp in g] for g in plan.groups] == [names]
+        assert [fp.devices for fp in plan.footprints] == [(0,), (1,), (0,), (1,)]
+        assert [fp.planned_utilization for fp in plan.footprints] == [
+            0.5875, 0.3125, 0.3125, 0.5875]
+        assert [r.getMessage() for r in caplog.records] == [
+            "[residency] placed in another arrangement than the order given: "
+            "_se_one_0 -> card 0, _se_one_1 -> card 1, _se_one_2 -> card 0, "
+            "_se_one_3 -> card 1"]
+
+    def test_a_fit_is_found_whenever_one_exists(self, registered, caplog):
+        """300 seeded sets of 2 to 6 engines on 2 to 4 cards: the plan fits
+        exactly when trying every assignment finds one that does."""
+        rng = random.Random(20261012)
+        unfit = 0
+        with caplog.at_level(logging.INFO, logger=placement.logger.name):
+            for i in range(300):
+                cards, card = rng.randint(2, 4), rng.choice((16.0, 24.0, 48.0))
+                pool = estimate.DEFAULT_GPU_MEMORY_UTILIZATION * card
+                names = self._engines(
+                    registered, f"or{i}", packed_sizes(rng, cards, pool, range(2, 7)))
+                plan = residency.plan_residency(names, gpus=cards, gib_per_gpu=card)
+                needs = {fp.model: fp.padded_gb for fp in plan.footprints}
+                exists = fit_exists(needs, [names], cards, pool)
+                assert plan.fits is exists, (i, cards, card, needs)
+                if exists:
+                    assert len(plan.groups) == 1
+                    assert_no_card_is_overfull(plan, pool)
+                unfit += not exists
+        # Of the 300, the sets that fit only in another arrangement than the
+        # order given, and those that fit in none.
+        assert (len(caplog.records), unfit) == (134, 82)
+
+    @pytest.mark.parametrize("weights,card,fits", [
+        ((16.0, 8.0, 8.0, 16.0), 32.0, True),           # two pairs of 27.6
+        ((11.0, 9.0, 7.0, 5.0, 3.0), 24.0, True),       # 21.0 and 20.5
+        ((11.0, 9.0, 7.0, 5.0, 5.0), 24.0, False),      # 43.7 for two cards
+    ])
+    def test_the_order_given_does_not_decide_whether_a_plan_fits(
+            self, registered, weights, card, fits):
+        names = self._engines(registered, "ord", weights)
+        for order in itertools.permutations(names):
+            plan = residency.plan_residency(list(order), gpus=2, gib_per_gpu=card)
+            assert plan.fits is fits, order
+
+    def test_no_arrangement_is_looked_for_where_the_order_given_fits(self, registered):
+        """Cards, shares and text of plans that fit in the order given, as
+        the planner made them before it looked for another arrangement."""
+        a = registered("_sm_a", hf_model_id="org/sma", vram_gb=10.0)
+        b = registered("_sm_b", hf_model_id="org/smb", vram_gb=5.0)
+        c = registered("_sm_c", hf_model_id="org/smc", vram_gb=10.0)
+        tp = registered("_sm_tp", hf_model_id="org/smtp", vram_gb=40.0, min_gpus=2)
+        ts = registered("_sm_ts", setup="introspect", hf_model_id="org/smts",
+                        vram_gb=13.0)
+
+        def plan(models, gpus, gib, **kwargs):
+            return residency.plan_residency(
+                models, gpus=gpus, gib_per_gpu=gib, **kwargs)
+
+        with _kv(0.0), patch.object(placement, "_Search", side_effect=AssertionError):
+            plans = [
+                plan([a, b, c], 2, 24.0),
+                plan([a, c], 3, 24.0),
+                plan([b, tp], 3, 48.0),
+                plan([a, ts, b], 2, 24.0),
+                plan([b, a], 3, 24.0, copies={b: 2}),
+                plan([a, c], 2, 24.0, pinned={residency.footprint(c).engine: (0,)}),
+                *(phase.plan for phase in residency.plan_phases(
+                    {"x": [a], "y": [a, b]}, gpus=3, gib_per_gpu=24.0)),
+            ]
+        assert [[(fp.devices, fp.planned_utilization) for fp in plan.footprints]
+                for plan in plans] == [cards for cards, _ in self.AS_BEFORE]
+        assert [plan.explain() for plan in plans] == [
+            "\n".join(text) for _, text in self.AS_BEFORE]
+
+    _A = "    _sm_a[vllm]  ~12.0GiB  (declared: 10.0 weights + 0.00 KV, x1.1 +0.6)  -> "
+    _B = "    _sm_b[vllm]  ~6.5GiB  (declared: 5.0 weights + 0.00 KV, x1.1 +0.6)  -> "
+    _C = "    _sm_c[vllm]  ~12.0GiB  (declared: 10.0 weights + 0.00 KV, x1.1 +0.6)  -> "
+    _FULL = "vLLM gets 21.6GiB (gpu_memory_utilization=0.90)"
+    _FULL_EACH = "vLLM gets 21.6GiB each (gpu_memory_utilization=0.90)"
+    #: Recorded at commit 155e6e1, per plan: ``(devices, share)`` per model
+    #: and the lines of ``explain()``.
+    AS_BEFORE = [
+        ([((0,), 0.9), ((1,), 0.3354), ((1,), 0.5645)], (
+            "plan needs 2 GPU(s); planning for 2 GPU(s), 24.0GiB each",
+            "  group 1:",
+            _A + "card 0, " + _FULL,
+            _B + "card 1, vLLM gets 8.1GiB (gpu_memory_utilization=0.34)",
+            _C + "card 1, vLLM gets 13.6GiB (gpu_memory_utilization=0.56)")),
+        ([((0, 2), 0.9), ((1,), 0.9)], (
+            "plan needs 3 GPU(s); planning for 3 GPU(s), 24.0GiB each",
+            "  group 1:",
+            _A + "cards 0,2, " + _FULL_EACH,
+            "      -> x2 copies (data_parallel_size=2), one per card, ~12.0GiB each",
+            _C + "card 1, " + _FULL)),
+        ([((0,), 0.9), ((1, 2), 0.9)], (
+            "plan needs 3 GPU(s); planning for 3 GPU(s), 48.0GiB each",
+            "  group 1:",
+            _B + "card 0, vLLM gets 43.2GiB (gpu_memory_utilization=0.90)",
+            "    _sm_tp[vllm]  ~46.0GiB  (declared: 20.0 weights + 0.00 KV, x1.1 +0.6, "
+            "per GPU of 2)  -> cards 1-2, vLLM gets 43.2GiB each "
+            "(gpu_memory_utilization=0.90)",
+            "      -> 2 GPUs (tensor_parallel_size=2), ~23.0GiB each")),
+        ([((0,), 0.4834), ((0, 1), None), ((1,), 0.6916)], (
+            "plan needs 2 GPU(s); planning for 2 GPU(s), 24.0GiB each",
+            "  group 1:",
+            _A + "card 0, vLLM gets 11.6GiB (gpu_memory_utilization=0.48)",
+            "    _sm_ts[introspect]  ~15.0GiB  (declared: 13.0 weights, x1.1 +0.6)  "
+            "-> cards 0-1",
+            _B + "card 1, vLLM gets 16.6GiB (gpu_memory_utilization=0.69)")),
+        ([((0, 1), 0.9), ((2,), 0.9)], (
+            "plan needs 3 GPU(s); planning for 3 GPU(s), 24.0GiB each",
+            "  group 1:",
+            _B + "cards 0-1, " + _FULL_EACH,
+            "      -> x2 copies (data_parallel_size=2), one per card, ~6.5GiB each",
+            _A + "card 2, " + _FULL)),
+        ([((0,), 0.9), ((1,), 0.9)], (
+            "plan needs 2 GPU(s); planning for 2 GPU(s), 24.0GiB each",
+            "  group 1:",
+            _C + "card 0, " + _FULL,
+            _A + "card 1, " + _FULL)),
+        ([((0, 2), 0.9)], (
+            "plan needs 3 GPU(s); planning for 3 GPU(s), 24.0GiB each",
+            "  group 1:",
+            _A + "cards 0,2, " + _FULL_EACH,
+            "      -> x2 copies (data_parallel_size=2), one per card, ~12.0GiB each",
+            "  note: card 1 is idle: _sm_a is limited to 2 copies")),
+        ([((0, 2), 0.9), ((1,), 0.9)], (
+            "plan needs 3 GPU(s); planning for 3 GPU(s), 24.0GiB each",
+            "  group 1:",
+            _A + "cards 0,2, " + _FULL_EACH,
+            "      -> x2 copies (data_parallel_size=2), one per card, ~12.0GiB each",
+            _B + "card 1, " + _FULL)),
+    ]
+
+    def test_what_fits_in_no_arrangement_is_planned_in_the_order_given(
+            self, registered, caplog):
+        """Three engines of 17.1 GiB on two cards: no two share one."""
+        names = self._engines(registered, "none", (15.0, 15.0, 15.0))
+        with caplog.at_level(logging.INFO, logger=residency.logger.name):
+            plan = _plan(names, self.CARD, 2)
+        assert [[fp.model for fp in g] for g in plan.groups] == [names[:2], names[2:]]
+        assert [fp.devices for fp in plan.footprints] == [(0,), (1,), (0,)]
+        assert not plan.fits and caplog.records == []
+
+    def test_fewer_shared_cards_come_before_larger_shares(self, registered):
+        """Three cards and an engine of 17.1 GiB that shares with none of
+        the 6.1 GiB ones. Three of those are two on one card, at 0.45, and
+        not three, at 0.3. Four are three on one card and one alone: two
+        pairs would share two cards."""
+        names = self._engines(registered, "pref", (5.0, 5.0, 5.0, 5.0, 15.0))
+        three = _plan([*names[:3], names[4]], self.CARD, 3)
+        assert three.fits
+        assert [(fp.devices, fp.planned_utilization) for fp in three.footprints] == [
+            ((0,), 0.45), ((1,), 0.9), ((0,), 0.45), ((2,), 0.9)]
+        four = _plan(names, self.CARD, 3)
+        assert four.fits
+        assert [(fp.devices, fp.planned_utilization) for fp in four.footprints] == [
+            ((0,), 0.3), ((1,), 0.9), ((0,), 0.3), ((0,), 0.3), ((2,), 0.9)]
+
+    def test_idle_cards_go_to_the_first_engine_and_a_transformers_model_stays(
+            self, registered):
+        """A transformers model of 17.5 GiB on card 0 leaves no room beside
+        the engine the order given puts there. Found: the engines on cards
+        1 and 2, and the first of them takes the idle card 3 as well."""
+        a, b = self._engines(registered, "tf", (5.0, 5.0))
+        fixed = registered("_se_tf_fixed", setup="introspect", hf_model_id="org/setf",
+                           vram_gb=15.0, device_map="cuda:0")
+        plan = _plan([a, b, fixed], self.CARD, 4)
+        assert plan.fits and len(plan.groups) == 1
+        assert [(fp.devices, fp.copies) for fp in plan.footprints] == [
+            ((1, 3), 2), ((2,), 1), ((0,), 1)]
+
+    @pytest.mark.parametrize("whole,copies", [
+        ({"vram_gb": 30.0, "min_gpus": 2}, None),      # tensor parallel
+        ({"vram_gb": 10.0}, 2),                        # two copies given
+    ])
+    def test_an_engine_on_whole_cards_keeps_them(self, registered, whole, copies):
+        """In the order given each small engine takes a card and one is
+        left. Found: the small engines on one card, and two untouched."""
+        a, b = self._engines(registered, "whole", (5.0, 5.0))
+        big = registered("_se_whole_big", hf_model_id="org/sewb", **whole)
+        plan = _plan([a, b, big], self.CARD, 3, copies=copies and {big: copies})
+        assert plan.fits and len(plan.groups) == 1
+        assert [(fp.devices, fp.planned_utilization) for fp in plan.footprints] == [
+            ((0,), 0.45), ((0,), 0.45), ((1, 2), 0.9)]
+        assert plan.footprints[2].copies == (copies or 1)
+
+    def test_a_loaded_engine_stays_on_its_card(self, registered):
+        """The engine loaded on card 1 is joined there, which leaves card 0
+        to the engine that shares with neither."""
+        loaded, small, big = self._engines(registered, "pin", (5.0, 5.0, 15.0))
+        pinned = {residency.footprint(loaded).engine: (1,)}
+        plan = _plan([loaded, small, big], self.CARD, 2, pinned=pinned)
+        assert plan.fits and len(plan.groups) == 1
+        assert [fp.devices for fp in plan.footprints] == [(1,), (1,), (0,)]
+
+    def test_eight_engines_are_searched_and_nine_are_not(self, registered):
+        """Five engines fit two cards only as 12.7 + 8.3 and 10.5 + 6.1 +
+        3.9, and the other cards go to engines that share with none. The
+        order given spreads the five over more cards, and so does largest
+        first."""
+        five = self._engines(registered, "lim", (11.0, 9.0, 7.0, 5.0, 3.0))
+        alone = self._engines(registered, "lim_alone", (18.0,) * 4)
+        eight = _plan([*five, *alone[:3]], self.CARD, 5)
+        assert eight.fits
+        assert [fp.devices for fp in eight.footprints] == [
+            (0,), (1,), (0,), (1,), (1,), (2,), (3,), (4,)]
+        nine = _plan([*five, *alone], self.CARD, 6)
+        assert not nine.fits
+        assert [[fp.model for fp in g] for g in nine.groups] == [
+            [*five, alone[0]], alone[1:]]
+        assert [fp.devices for fp in nine.footprints] == [
+            (0,), (1,), (2,), (3,), (4,), (5,), (0,), (1,), (2,)]
+
+    def test_nine_engines_are_placed_largest_first(self, registered, caplog):
+        """Three cards of 32 GiB, each filled by 18.2 + 9.4 + 1.15 GiB. In
+        the order given a card gets two of the 9.4 and the last 18.2 has
+        none. Largest first, every card gets one of each size."""
+        big, mid, tiny = (self._engines(registered, tag, (gb,) * 3)
+                          for tag, gb in (("big", 16.0), ("mid", 8.0), ("tiny", 0.5)))
+        names = [big[0], mid[0], mid[1], big[1], mid[2], big[2], *tiny]
+        with caplog.at_level(logging.INFO, logger=placement.logger.name):
+            plan = _plan(names, 32.0, 3)
+        assert plan.fits and len(plan.groups) == 1
+        assert [fp.devices for fp in plan.footprints] == [
+            (0,), (0,), (1,), (1,), (2,), (2,), (0,), (1,), (2,)]
+        assert len(caplog.records) == 1
+
+    def test_cards_found_largest_first_must_fit_the_order_given(
+            self, registered, caplog):
+        """Largest first, the 17.1 GiB engine is on card 0 before the
+        transformers model, which then takes 4.5 GiB there and 10.5 on
+        card 1, beside the eight small engines. In the order given a small
+        engine comes first, the transformers model takes 15 GiB of card 0,
+        and those cards do not fit."""
+        tiny = self._engines(registered, "lf_tiny", (0.7,) * 8)
+        big = registered("_se_lf_big", hf_model_id="org/selfb", vram_gb=15.0)
+        fixed = registered("_se_lf_tf", setup="introspect", hf_model_id="org/selft",
+                           vram_gb=13.0)
+        names = [tiny[0], fixed, big, *tiny[1:]]
+        with caplog.at_level(logging.INFO, logger=placement.logger.name):
+            plan = _plan(names, self.CARD, 2)
+        assert [[fp.model for fp in g] for g in plan.groups] == [names[:-1], names[-1:]]
+        assert [fp.devices for fp in plan.footprints[:4]] == [(0,), (0,), (1,), (0,)]
+        assert not plan.fits and caplog.records == []
+
+    def test_a_search_stops_after_its_steps(self, registered):
+        """The first arrangement that fits is the seventh card tried."""
+        names = self._engines(registered, "steps", (16.0, 8.0, 8.0, 16.0))
+        with patch.object(placement, "_SEARCH_STEPS", 6):
+            stopped = _plan(names, 32.0, 2)
+        with patch.object(placement, "_SEARCH_STEPS", 7):
+            found = _plan(names, 32.0, 2)
+        assert len(stopped.groups) == 2 and not stopped.fits
+        assert [fp.devices for fp in stopped.footprints] == [(0,), (1,), (1,), (0,)]
+        assert found.fits
