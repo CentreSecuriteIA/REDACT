@@ -27,9 +27,11 @@ _EPS = 1e-6
 _SEARCH_LIMIT = 8
 
 #: Cards a search tries before it stops with the best arrangement so far.
-#: Eight engines take 5,295 at most where untouched cards are alike. An
-#: engine loaded already or a transformers model tells cards apart, and
-#: then the count grows with the cards.
+#: Eight engines on empty cards take 5,295 at most, since untouched cards
+#: are alike. A card an engine is loaded on already is one more to try:
+#: 26,441 at most with one such card, whatever the machine's size. A
+#: transformers model tells all cards apart, and then the count grows with
+#: the cards.
 _SEARCH_STEPS = 20_000
 
 
