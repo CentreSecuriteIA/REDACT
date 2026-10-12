@@ -35,6 +35,23 @@ def _inputs():
                          "entry_type": ["harmful"] * 5})
 
 
+def test_the_stage_drives_with_the_pool_its_model_allows(tmp_path, monkeypatch):
+    import redact.pipelines as P
+
+    seen = {}
+
+    def stop(source, **kwargs):
+        seen.update(kwargs)
+        raise KeyboardInterrupt
+
+    monkeypatch.setattr(P, "drive_units", stop)
+    monkeypatch.setattr(P, "_pool_size", lambda batch_size, *clients: 7 * batch_size)
+    with pytest.raises(KeyboardInterrupt):
+        generate_jailbreaks(inputs=_inputs(), output_path=tmp_path / "jailbreaks.csv",
+                            seed=7, batch_size=4, **PURE_KW)
+    assert (seen["pool_size"], seen["cap"]) == (28, 4)
+
+
 def test_plan_then_execute(tmp_path):
     out = tmp_path / "jailbreaks.csv"
     df = generate_jailbreaks(inputs=_inputs(), output_path=out, seed=7, **PURE_KW)

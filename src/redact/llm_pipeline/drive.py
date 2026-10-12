@@ -186,11 +186,6 @@ async def _cancel(tasks: set[asyncio.Task]) -> None:
     await asyncio.gather(*tasks, return_exceptions=True)
 
 
-#TODO(pool): what drive_units does not do yet:
-#   - Fill a model's async lane in the jailbreak stage. A model has at most
-#     pool_size requests in flight, one per live unit. Outputs and seeded
-#     inputs size pool_size from their models' lanes; the jailbreak stage
-#     still passes 2 * batch_size, since it holds no client to read.
 def drive_units(
     source: Iterable[tuple[Hashable, Generator]],
     *,

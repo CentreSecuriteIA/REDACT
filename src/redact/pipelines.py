@@ -42,6 +42,7 @@ from redact.content_moderation import (
     InputPipeline,
     run_output_generation,
 )
+from redact.content_moderation.generation import _pool_size
 from redact.content_moderation.paraphrase import (
     paraphrase_pool,
     run_paraphrase_target,
@@ -651,7 +652,8 @@ def generate_jailbreaks(
        deduped per sample) written to a JSONL manifest beside the output CSV.
        Skipped when ``resume=True`` and a manifest already exists.
     2. **Execute** — the pending units of the manifest run through
-       :func:`redact.llm_pipeline.drive_units`, ``2 * batch_size`` at a time,
+       :func:`redact.llm_pipeline.drive_units`, ``2 * batch_size`` at a time
+       or as many as the generation model's async lane holds if that is more,
        which pools LLM calls per model, up to ``batch_size`` per call, via each
        model's client (vLLM native batch / API multi-worker). Output rows are
        appended to the CSV as units finish, every 32 units, so a crash loses
@@ -942,7 +944,7 @@ def generate_jailbreaks(
             _units(),
             on_done=_on_done,
             on_error=_on_error,
-            pool_size=2 * batch_size,
+            pool_size=_pool_size(batch_size, client),
             cap=batch_size,
             progress="jailbreak" if verbose else None,
         )
