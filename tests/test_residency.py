@@ -2393,12 +2393,43 @@ def fit_exists(needs, stages, cards, pool):
     return False
 
 
+def fit_exists_around(needs, whole, fixed, cards, card):
+    """Whether cards exist for an engine on whole cards and for single-card
+    engines, beside a transformers model on a fixed card, found by trying
+    every assignment.
+
+    Args:
+        needs: Each single-card engine's need with overhead.
+        whole: The other engine's need per card, and how many cards it takes.
+        fixed: The transformers model's card, and the GiB it claims there.
+        card: GiB of one card.
+    """
+    pool = estimate.DEFAULT_GPU_MEMORY_UTILIZATION * card
+    (need, count), (at, claim) = whole, fixed
+    if need > pool + 1e-6 or claim > card + 1e-6:
+        return False
+    for taken in itertools.combinations(range(cards), count):
+        # A card held whole has nothing else on it.
+        if at in taken:
+            continue
+        rest = [d for d in range(cards) if d not in taken]
+        for where in itertools.product(rest, repeat=len(needs)):
+            load = dict.fromkeys(where, 0.0)
+            for one, d in zip(needs, where):
+                load[d] += one
+            if all(gib + claim * (d == at) <= pool + 1e-6 for d, gib in load.items()):
+                return True
+    return False
+
+
 def assert_no_card_is_overfull(plan, pool):
     for card in range(plan.gpus_available):
         on = [fp for fp in plan.footprints if card in fp.devices]
-        assert sum(fp.padded_gb for fp in on) <= pool + 1e-6
-        # A copy has its card to itself.
-        assert len(on) <= 1 or all(fp.copies == 1 for fp in on)
+        # A transformers model claims its size rounded up.
+        assert sum(fp.padded_gb if fp.setup == "vllm" else fp.gb
+                   for fp in on) <= pool + 1e-6
+        # An engine on several cards has each to itself.
+        assert len(on) <= 1 or all(len(fp.devices) == 1 for fp in on)
 
 
 class TestSearch:
@@ -2607,6 +2638,73 @@ class TestSearch:
         assert [(fp.devices, fp.planned_utilization) for fp in plan.footprints] == [
             ((0,), 0.45), ((0,), 0.45), ((1, 2), 0.9)]
         assert plan.footprints[2].copies == (copies or 1)
+
+    @pytest.mark.parametrize("whole,copies", [
+        ({"vram_gb": 30.0, "min_gpus": 2}, None),      # tensor parallel
+        ({"vram_gb": 10.0}, 2),                        # two copies given
+    ])
+    def test_an_engine_on_whole_cards_leaves_a_transformers_model_its_card(
+            self, registered, caplog, whole, copies):
+        """The first untouched cards are 0 and 1, and the transformers model
+        is fixed on card 0. Of three cards the engine takes 1 and 2. Two
+        cards leave it no other pair."""
+        big = registered("_se_apart_big", hf_model_id="org/seab", **whole)
+        fixed = registered("_se_apart_tf", setup="introspect", hf_model_id="org/seat",
+                           vram_gb=10.0, device_map="cuda:0")
+        given = copies and {big: copies}
+        with caplog.at_level(logging.INFO, logger=placement.logger.name):
+            three = _plan([big, fixed], self.CARD, 3, copies=given)
+            two = _plan([big, fixed], self.CARD, 2, copies=given)
+        assert three.fits and len(three.groups) == 1
+        assert [fp.devices for fp in three.footprints] == [(1, 2), (0,)]
+        assert not two.fits
+        assert [[fp.model for fp in g] for g in two.groups] == [[big], [fixed]]
+        assert [fp.devices for fp in two.footprints] == [(0, 1), (0,)]
+        assert [r.getMessage() for r in caplog.records] == [
+            "[residency] placed in another arrangement than the order given: "
+            "_se_apart_big -> cards 1,2"]
+
+    def test_a_fit_is_found_around_whole_cards_and_a_fixed_transformers_model(
+            self, registered, caplog):
+        """300 seeded sets on 3 or 4 cards, in a random order: an engine on
+        two whole cards (tensor parallel, or two copies given), 1 to 3
+        single-card engines and a transformers model fixed on one card. The
+        plan fits exactly when trying every assignment finds one that does."""
+        rng = random.Random(20261012)
+        pool = estimate.DEFAULT_GPU_MEMORY_UTILIZATION * self.CARD
+        unfit = 0
+        with caplog.at_level(logging.INFO, logger=placement.logger.name):
+            for i in range(300):
+                cards = rng.randint(3, 4)
+                singles = self._engines(registered, f"wh{i}", [
+                    round(rng.uniform(2.0, 16.0), 1) for _ in range(rng.randint(1, 3))])
+                per_card, split = round(rng.uniform(3.0, 17.0), 1), rng.random() < 0.5
+                big = registered(
+                    f"_se_wh{i}_big", hf_model_id=f"org/sewh{i}b",
+                    **({"vram_gb": 2 * per_card, "min_gpus": 2} if split
+                       else {"vram_gb": per_card}))
+                fixed = registered(
+                    f"_se_wh{i}_tf", setup="introspect", hf_model_id=f"org/sewh{i}t",
+                    vram_gb=round(rng.uniform(3.0, 15.0), 1),
+                    device_map=f"cuda:{rng.randrange(cards)}")
+                names = [*singles, big, fixed]
+                rng.shuffle(names)
+                plan = residency.plan_residency(
+                    names, gpus=cards, gib_per_gpu=self.CARD,
+                    copies=None if split else {big: 2})
+                by_name = {fp.model: fp for fp in plan.footprints}
+                exists = fit_exists_around(
+                    [by_name[m].padded_gb for m in singles],
+                    (by_name[big].padded_gb, 2),
+                    (by_name[fixed].devices[0], by_name[fixed].gb), cards, self.CARD)
+                assert plan.fits is exists, (i, cards, names)
+                if exists:
+                    assert len(plan.groups) == 1
+                    assert_no_card_is_overfull(plan, pool)
+                unfit += not exists
+        # Of the 300, the sets that fit only in another arrangement than the
+        # order given, and those that fit in none.
+        assert (len(caplog.records), unfit) == (82, 150)
 
     def test_a_loaded_engine_stays_on_its_card(self, registered):
         """The engine loaded on card 1 is joined there, which leaves card 0

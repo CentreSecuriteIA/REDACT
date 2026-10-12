@@ -1,6 +1,7 @@
 """Place a run's local models on the machine's cards."""
 
 import copy
+import itertools
 import logging
 import math
 import re
@@ -21,8 +22,8 @@ _UNKNOWN_GB = 0.0
 #: Slack for comparing GiB sums.
 _EPS = 1e-6
 
-#: vLLM engines a search tries on every card. With more, the engines are
-#: placed once more, largest first, and no other arrangement is tried.
+#: Single-card vLLM engines a search tries on every card. With more, they
+#: are placed once more, largest first, and no other arrangement is tried.
 _SEARCH_LIMIT = 8
 
 #: Cards a search tries before it stops with the best arrangement so far.
@@ -222,11 +223,11 @@ def plan_residency(
 
     Models are placed in the order given: a vLLM engine on the cards with
     the most room, a transformers model where its ``device_map`` puts it.
-    When they do not all fit like that, the single-GPU vLLM engines are
-    tried on other cards, and the models are placed in an arrangement that
-    fits if :class:`_Search` finds one. Otherwise the order given stands:
-    a model that does not fit beside those placed before it starts a new
-    group, and more than one group means the run does not fit
+    When they do not all fit like that, the vLLM engines are tried on
+    other cards, and the models are placed in an arrangement that fits if
+    one is found. Otherwise the order given stands: a model that does not
+    fit beside those placed before it starts a new group, and more than
+    one group means the run does not fit
     (:attr:`ResidencyPlan.fits`). Cards are numbered over the visible ones:
     card 0 is the first that ``CUDA_VISIBLE_DEVICES`` leaves this process.
 
@@ -344,8 +345,8 @@ def _arrange(
 
     The stages are placed in the order given. Where that leaves a stage in
     more than one group, :class:`_Search` looks for other cards for the
-    single-card vLLM engines, and the stages are placed again on the cards
-    it finds. Unless every stage then fits, the first result stands.
+    vLLM engines, and the stages are placed again on the cards it finds.
+    Unless every stage then fits, the first result stands.
     """
     _place_all(stages, pinned)
     # One card, or cards of unknown size, leave nothing to choose.
@@ -366,8 +367,10 @@ def _arrange(
         return
     logger.info(
         "[residency] placed in another arrangement than the order given: %s",
-        ", ".join(f"{model} -> card {chosen[engine][0]}"
-                  for engine, model in search.movable.items()))
+        ", ".join(
+            f"{model} -> card{'s' if len(chosen[engine]) > 1 else ''} "
+            f"{','.join(map(str, chosen[engine]))}"
+            for engine, model in search.engines.items()))
 
 
 def _place_all(
@@ -459,25 +462,21 @@ def _place(
     ]
 
 
-def _movable(fp: ModelFootprint) -> bool:
-    """Whether a search may choose the model's card: a vLLM engine on one."""
-    return fp.setup == "vllm" and fp.copies * fp.min_gpus == 1
-
-
 class _Search:
-    """One card for each single-card vLLM engine, so that every stage is
-    one group.
+    """Cards for the vLLM engines, so that every stage is one group.
 
-    The stages are placed as :func:`_place_all` places them, except that
-    such an engine is tried on every card instead of taking the one with
-    the most room. Of the arrangements that fit, the one kept has the
-    fewest cards that hold more than one vLLM engine in a stage, then the
-    largest smallest share. A tie goes to the one met first: cards are
-    tried most room first, so it departs from the order given as late as
-    it can.
+    The stages are placed as :func:`_place_all` places them, except that a
+    single-card engine is tried on every card instead of taking the one
+    with the most room, and an engine on whole cards on every set of
+    untouched ones instead of the first. Of the arrangements that fit, the
+    one kept has the fewest cards that hold more than one vLLM engine in a
+    stage, then the largest smallest share. A tie goes to the one met
+    first: cards are tried most room first, so it departs from the order
+    given as late as it can.
 
-    With more than :data:`_SEARCH_LIMIT` such engines nothing is tried:
-    the stages are placed once, the engines of each taken largest first.
+    With more than :data:`_SEARCH_LIMIT` single-card engines nothing is
+    tried: the stages are placed once, those engines of each taken largest
+    first.
     """
 
     def __init__(self, stages: list[_Stage], pinned: dict[tuple, tuple[int, ...]]):
@@ -485,18 +484,22 @@ class _Search:
         #: Per stage, its models, one per engine. Copies: placing a model
         #: writes on its footprint.
         self.stages: list[tuple[_Stage, list[ModelFootprint]]] = []
-        #: The engines to find a card for, and the first model on each.
-        self.movable: dict[tuple, str] = {}
+        #: The engines to find cards for, and the first model on each.
+        self.engines: dict[tuple, str] = {}
+        #: Those of them on one card.
+        self.movable: set[tuple] = set()
         for stage in stages:
-            engines: dict[tuple, ModelFootprint] = {}
+            models: dict[tuple, ModelFootprint] = {}
             for fp in stage.footprints:
-                if fp.engine not in engines:
-                    engines[fp.engine] = replace(
+                if fp.engine not in models:
+                    models[fp.engine] = replace(
                         fp, copies=stage.counts.get(fp.engine, 1))
-            self.stages.append((stage, list(engines.values())))
-            for fp in engines.values():
-                if _movable(fp) and fp.engine not in pinned:
-                    self.movable.setdefault(fp.engine, fp.model)
+            self.stages.append((stage, list(models.values())))
+            for fp in models.values():
+                if fp.setup == "vllm" and fp.engine not in pinned:
+                    self.engines.setdefault(fp.engine, fp.model)
+                    if fp.copies * fp.min_gpus == 1:
+                        self.movable.add(fp.engine)
         self.largest_first = len(self.movable) > _SEARCH_LIMIT
         #: Whether a transformers model is placed in a stage or after it.
         #: It takes its cards by index, so until the last is placed no two
@@ -546,22 +549,22 @@ class _Search:
         the stages after it."""
         for j in range(start, len(order)):
             fp = order[j]
-            if fp.engine in self.movable and fp.engine not in where:
-                alike = not (self.indexed[s + 1]
-                             or any(m.setup != "vllm" for m in order[j + 1:]))
-                for card in self._cards_for(fp, cards, alike):
-                    if not self.steps:
-                        return
-                    self.steps -= 1
-                    branch = cards.fork({**where, fp.engine: (card,)})
-                    if branch.place(fp):
-                        self._models(s, order, j + 1, branch, branch.pinned,
-                                     crowded, share)
-                return
-            if not cards.place(fp):
-                return
-            if fp.setup == "vllm":
-                where[fp.engine] = fp.devices
+            tried = self._cards_for(s, order, j, cards, where)
+            if tried is None:
+                if not cards.place(fp):
+                    return
+                if fp.setup == "vllm":
+                    where[fp.engine] = fp.devices
+                continue
+            for devices in tried:
+                if not self.steps:
+                    return
+                self.steps -= 1
+                branch = cards.fork({**where, fp.engine: devices})
+                if branch.place(fp):
+                    self._models(s, order, j + 1, branch, branch.pinned,
+                                 crowded, share)
+            return
         cards.settle()
         crowded = crowded | {
             d for d, engines in enumerate(cards.shared) if len(engines) > 1}
@@ -571,17 +574,31 @@ class _Search:
         if self.best is None or (len(crowded), -share) < self.best:
             self._stage(s + 1, where, crowded, share)
 
-    def _cards_for(self, fp: ModelFootprint, cards: _Cards, alike: bool) -> list[int]:
-        """The cards to try an engine on, in order."""
+    def _cards_for(self, s: int, order: list[ModelFootprint], j: int,
+                   cards: _Cards, where: dict) -> list[tuple[int, ...]] | None:
+        """The cards to try ``order[j]`` of stage ``s`` on, in order, or
+        ``None`` for a model that takes its cards as the pass gives them."""
+        fp = order[j]
+        if fp.engine not in self.engines or fp.engine in where:
+            return None
+        single = fp.engine in self.movable
         if self.largest_first:
-            return list(cards.pick(fp))
+            return [cards.pick(fp)] if single else None
+        alike = not (self.indexed[s + 1]
+                     or any(m.setup != "vllm" for m in order[j + 1:]))
+        if not single:
+            # Where cards are alike the first untouched ones stand for any.
+            if alike:
+                return None
+            return list(itertools.combinations(
+                cards._untouched(), fp.copies * fp.min_gpus))
         tried = sorted((d for d in range(len(cards.free)) if d not in cards.whole),
                        key=lambda d: -cards._room(d, True))
         if alike:
             # One untouched card stands for all of them.
             rest = cards._untouched()[1:]
             tried = [d for d in tried if d not in rest]
-        return tried
+        return [(d,) for d in tried]
 
 
 def _gpus_required(footprints: list[ModelFootprint]) -> int:

@@ -11,8 +11,8 @@ The plan describes what a run does:
   resident keeps the cards it loaded on.
 - A vLLM engine loads on the cards the plan chose: a single-GPU engine on
   the card with the most room, a tensor-parallel one on untouched cards.
-  When the models do not all fit like that, the single-GPU engines are
-  placed on other cards on which they do, if there are any. Cards are
+  When the models do not all fit like that, the engines are placed on
+  other cards on which they do, if there are any. Cards are
   numbered over those ``CUDA_VISIBLE_DEVICES`` leaves visible. A
   transformers model goes where its ``device_map`` puts it.
 - Cards left idle take copies of the plan's first single-GPU vLLM engine,
