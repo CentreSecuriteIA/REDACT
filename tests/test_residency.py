@@ -2667,6 +2667,23 @@ class TestSearch:
         assert [fp.devices for fp in plan.footprints[:4]] == [(0,), (0,), (1,), (0,)]
         assert not plan.fits and caplog.records == []
 
+    def test_an_engine_of_unknown_size_is_not_crowded_into_one_group(
+            self, registered, caplog):
+        """A plan with an engine of unknown size beside others fits in no
+        arrangement. The four sized engines fit in pairs, but that would
+        leave the fifth 0.4 GiB beside one of them. The order given stands,
+        and it keeps a card's whole share in the second group."""
+        names = self._engines(registered, "unk", (16.0, 8.0, 8.0, 16.0))
+        unsized = registered("_se_unk_unsized", hf_model_id="org/seunk")
+        with caplog.at_level(logging.INFO, logger=residency.logger.name):
+            plan = _plan([*names, unsized], 32.0, 2)
+        assert [[fp.model for fp in g] for g in plan.groups] == [
+            names[:3], [names[3], unsized]]
+        assert [fp.devices for fp in plan.footprints] == [
+            (0,), (1,), (1,), (0,), (1,)]
+        assert plan.footprints[-1].planned_utilization == 0.9
+        assert not plan.fits and caplog.records == []
+
     def test_a_search_stops_after_its_steps(self, registered):
         """The first arrangement that fits is the seventh card tried."""
         names = self._engines(registered, "steps", (16.0, 8.0, 8.0, 16.0))

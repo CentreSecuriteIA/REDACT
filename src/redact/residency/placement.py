@@ -345,7 +345,7 @@ def _arrange(
     The stages are placed in the order given. Where that leaves a stage in
     more than one group, :class:`_Search` looks for other cards for the
     single-card vLLM engines, and the stages are placed again on the cards
-    it finds. When it finds none, the first result stands.
+    it finds. Unless every stage then fits, the first result stands.
     """
     _place_all(stages, pinned)
     # One card, or cards of unknown size, leave nothing to choose.
@@ -357,9 +357,11 @@ def _arrange(
     if chosen is None:
         return
     _place_all(stages, pinned, chosen)
-    if any(len(stage.plan.groups) > 1 for stage in stages):
-        # Cards found with the engines taken largest first need not fit in
-        # the order given: a transformers model then finds other room.
+    if not all(stage.plan.fits for stage in stages):
+        # One group is not yet a plan that fits. After a largest-first pass
+        # a transformers model finds other room in the order given. A twin
+        # larger than the model its engine was placed by is left short. An
+        # engine of unknown size fits no plan beside others.
         _place_all(stages, pinned)
         return
     logger.info(

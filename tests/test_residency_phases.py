@@ -357,6 +357,33 @@ def test_a_rearranged_engine_gets_no_copy_on_a_card_a_later_stage_fills(
         "every stage."]
 
 
+def test_twins_of_different_sizes_are_not_crowded_into_one_group(local_model, caplog):
+    """small and big are two names on one checkpoint, and the engine is
+    placed by small's 6.1 GiB. Beside a (14.9 GiB), with b alone, stage y
+    would be one group, but big needs 17.1 GiB and would be granted 6.4. So
+    the order given stands, and stage x keeps the engine's whole share."""
+    import logging
+
+    small = local_model("_ph_tw_small")
+    a, b = local_model("_ph_tw_a", 13.0), local_model("_ph_tw_b", 15.0)
+    big = "_ph_tw_big"
+    register_model(big, backend_type="vllm",
+                   vllm=VLLMConfig(hf_model_id=f"org/{small}", vram_gb=15.0))
+    try:
+        with caplog.at_level(logging.INFO, logger="redact.residency.placement"):
+            first, second = plan_phases(
+                {"x": [small, big], "y": [small, big, a, b]}, gpus=2, gib_per_gpu=24.0)
+    finally:
+        MODEL_REGISTRY.pop(big, None)
+    assert first.plan.fits and not second.plan.fits
+    assert _share(first, small) == _share(first, big) == 0.9
+    assert second.plan.as_dict()["groups"] == [[small, big, a], [b]]
+    assert second.plan.oversized == []
+    assert [_cards(second, m) for m in (small, big, a, b)] == [
+        ((0,), 1), ((0,), 1), ((1,), 1), ((0,), 1)]
+    assert caplog.records == []
+
+
 def test_a_run_fits_exactly_when_one_set_of_cards_fits_every_stage(local_model, caplog):
     """300 seeded runs of 2 to 4 stages over 3 to 5 engines, on 2 to 4
     cards: every stage fits exactly when trying every assignment finds one
