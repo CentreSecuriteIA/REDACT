@@ -272,8 +272,32 @@ class TestLiveEngineTime:
         assert s["local_s"] == {"org/live": 600.0, "org/tf": 100.0}
         with patch("redact.llms.resources.measure.detect_gpus", return_value=("FakeGPU", 2)), \
              patch("redact.telemetry.gpu_hourly_rate", return_value=3.0):
-            # 700 s on 2 rented cards at $3/h.
-            assert telemetry.summary()["local_cost_usd"] == pytest.approx(1.1667)
+            # The two overlap, so 600 s are billed: on 2 rented cards at $3/h.
+            s = telemetry.summary()
+        assert s["local_billed_s"] == 600.0
+        assert s["local_cost_usd"] == pytest.approx(1.0)
+
+    def test_a_released_engine_and_a_live_one_that_overlapped_are_billed_once(
+        self, tmp_path, clock
+    ):
+        vllm_module, _, _ = clock
+        telemetry.install(data_dir=tmp_path)
+        observe.record({"ev": "local", "phase": "release",     # held 400..1000
+                        "hf_model_id": "org/a", "held_s": 600.0})
+        vllm_module._engine_loaded_at[("org/b", None, "[]")] = 700.0
+        s = telemetry.summary()
+        assert s["local_s"] == {"org/a": 600.0, "org/b": 300.0}
+        assert s["local_billed_s"] == 600.0
+
+    def test_engines_held_one_after_the_other_add_up(self, tmp_path, clock):
+        _, _, now = clock
+        telemetry.install(data_dir=tmp_path)
+        observe.record({"ev": "local", "phase": "release",     # held 700..1000
+                        "hf_model_id": "org/a", "held_s": 300.0})
+        now[0] = 1500.0
+        observe.record({"ev": "local", "phase": "release",     # held 1100..1500
+                        "hf_model_id": "org/b", "held_s": 400.0})
+        assert telemetry.summary()["local_billed_s"] == 700.0
 
     def test_a_later_release_is_not_counted_twice(self, tmp_path, clock):
         vllm_module, _, now = clock

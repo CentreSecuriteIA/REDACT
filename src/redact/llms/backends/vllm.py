@@ -203,6 +203,11 @@ def _release_engines(keep: Collection[tuple] = ()) -> None:
         })
 
 
+def loaded_since() -> list[float]:
+    """``time.perf_counter()`` at the start of each loaded engine's load."""
+    return list(_engine_loaded_at.values())
+
+
 def held_seconds() -> dict[str, float]:
     """Seconds each loaded engine has been held so far, per ``hf_model_id``."""
     now = time.perf_counter()

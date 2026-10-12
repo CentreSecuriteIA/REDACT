@@ -31,7 +31,6 @@ of the run, not a guarantee against running out of memory.
 #     only the pool and ignores what other stages hold. Only matters with
 #     more than one paraphraser, and none is trained yet, so later.
 #   - Free memory per card and CUDA_VISIBLE_DEVICES; mixed card sizes.
-#   - Bill local cost on the union of engine lifetimes.
 #   - A plan does not see engines already loaded, by this process or another.
 #     The runner should own this; one process (container) per run is a candidate.
 #   - Placement is greedy: models are placed in the order given and never

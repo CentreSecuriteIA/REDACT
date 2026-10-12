@@ -208,6 +208,8 @@ class Collector:
             lambda: {"in": 0, "out": 0, "calls": 0, "items": 0, "ms": 0.0}
         )
         self.local_s: dict[str, float] = defaultdict(float)
+        # When each released engine was held, on time.perf_counter().
+        self.local_spans: list[tuple[float, float]] = []
         self.errors: list[dict] = []
 
     def __call__(self, event: dict) -> None:
@@ -225,7 +227,10 @@ class Collector:
                 if event.get("error"):
                     self.errors.append(event)
             elif event.get("ev") == "local" and event.get("phase") == "release":
-                self.local_s[event.get("hf_model_id", "?")] += event.get("held_s") or 0.0
+                held = event.get("held_s") or 0.0
+                self.local_s[event.get("hf_model_id", "?")] += held
+                end = time.perf_counter()
+                self.local_spans.append((end - held, end))
         for sink in self._sinks:
             try:
                 sink(event)
@@ -253,16 +258,22 @@ class Collector:
                     priced = True
                 per_model[model] = row
             local_s = dict(self.local_s)
+            spans = list(self.local_spans)
             n_errors = len(self.errors)
         # Engines still loaded have sent no release event yet.
         from .llms.backends import introspection, vllm
+        now = time.perf_counter()
         for backend in (vllm, introspection):
             for hf_id, held in backend.held_seconds().items():
                 local_s[hf_id] = local_s.get(hf_id, 0.0) + held
+            spans += [(since, now) for since in backend.loaded_since()]
 
         name, rented = measure.detect_gpus()
         rate = gpu_hourly_rate(name)
-        held_h = sum(local_s.values()) / 3600.0
+        # The pod is leased once, however many engines are loaded: time
+        # two of them share is billed once.
+        billed_s = _union_seconds(spans)
+        held_h = billed_s / 3600.0
         _warn_if_unpriced_by_default(rented, held_h, rate)
         # Billed on GPUs *rented*, not the one an engine occupies: you rent the
         # whole pod. Reporting both is what makes idle capacity visible.
@@ -273,6 +284,7 @@ class Collector:
         out = {
             "models": per_model,
             "local_s": {k: round(v, 1) for k, v in local_s.items()},
+            "local_billed_s": round(billed_s, 1),
             "gpu": {"name": name, "rented": rented, "hourly_rate_usd": rate},
             "api_cost_usd": round(api_cost, 4) if priced else None,
             "local_cost_usd": local_cost,
@@ -280,6 +292,16 @@ class Collector:
         }
         _log_summary(out)
         return out
+
+
+def _union_seconds(spans: list[tuple[float, float]]) -> float:
+    """Total time covered by ``(start, end)`` spans, overlaps counted once."""
+    total, covered_to = 0.0, float("-inf")
+    for start, end in sorted(spans):
+        if end > covered_to:
+            total += end - max(start, covered_to)
+            covered_to = end
+    return total
 
 
 def _log_summary(s: dict) -> None:
@@ -293,6 +315,8 @@ def _log_summary(s: dict) -> None:
         )
     for hf_id, secs in s["local_s"].items():
         logger.info("[telemetry] local %s held %.1fs", hf_id, secs)
+    if len(s["local_s"]) > 1:
+        logger.info("[telemetry] local time billed %.1fs", s["local_billed_s"])
     gpu = s["gpu"]
     if gpu["rented"]:
         rate = (

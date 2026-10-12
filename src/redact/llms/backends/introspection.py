@@ -171,6 +171,11 @@ def _release_models(keep: Collection[tuple] = ()) -> None:
 atexit.register(_release_models)
 
 
+def loaded_since() -> list[float]:
+    """``time.perf_counter()`` at the start of each loaded checkpoint's load."""
+    return list(_models_loaded_at.values())
+
+
 def held_seconds() -> dict[str, float]:
     """Seconds each loaded checkpoint has been held so far, per ``hf_model_id``."""
     now = time.perf_counter()
