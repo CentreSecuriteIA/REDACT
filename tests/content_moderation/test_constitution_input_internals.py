@@ -35,6 +35,24 @@ def _pipeline(tmp_path, gen_backend=None, check_backend=None):
     )
 
 
+def test_the_stage_drives_with_the_pool_its_lanes_allow(tmp_path, monkeypatch):
+    import redact.content_moderation.generation as G
+
+    seen = {}
+
+    def stop(source, **kwargs):
+        seen.update(kwargs)
+        raise KeyboardInterrupt
+
+    monkeypatch.setattr(G, "drive_units", stop)
+    monkeypatch.setattr(G, "_pool_size", lambda batch_size, *clients: 7 * batch_size)
+    pipe = _pipeline(tmp_path)
+    with pytest.raises(KeyboardInterrupt):
+        pipe.run_from_constitution(_const_df(), _PROMPT, samples_per_entry=1,
+                                   batch_size=4, verbose=False)
+    assert (seen["pool_size"], seen["cap"]) == (28, 4)
+
+
 def test_no_internals_kwarg_for_default_backends(tmp_path):
     pipe = _pipeline(tmp_path)
     pipe.run_from_constitution(_const_df(), _PROMPT, samples_per_entry=2, verbose=False)

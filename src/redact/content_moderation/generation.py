@@ -116,6 +116,18 @@ def _append_feedback(
     return [*messages, {"role": "user", "content": feedback_msg}]
 
 
+def _pool_size(batch_size: int, *clients: ModelClient | None) -> int:
+    """Units a stage keeps live: two calls' worth, or its widest async lane.
+
+    A local engine runs hundreds of requests at once, far more than a
+    synchronous call holds, and each live unit has one request in flight.
+    A hosted model's lane is narrow and changes nothing.
+    """
+    lanes = [client.backend.max_workers for client in clients
+             if client is not None and client.compute_config.supports_async_calls]
+    return max([2 * batch_size, *lanes])
+
+
 def _constitution_inputs_ledger(dataset_dir: str | Path) -> Ledger:
     """Shared resume-ledger for constitution-seeded input generation.
 
@@ -258,8 +270,9 @@ class InputPipeline(_StandaloneGenerationMixin):
 
         Each entry is one unit: a generation call (again for a reply that is
         rejected whole), then one check call per sample. ``drive_units``
-        keeps ``2 * batch_size`` entries live and sends calls of up to
-        ``batch_size`` requests, so a retry or a check shares its call with
+        keeps ``2 * batch_size`` entries live, or as many as the widest async
+        lane of the two models holds when that is more, and sends calls of up
+        to ``batch_size`` requests, so a retry or a check shares its call with
         other entries' requests. Finished entries are appended every 32
         entries, so a crash mid-run loses only the live entries' work.
 
@@ -637,7 +650,7 @@ class InputPipeline(_StandaloneGenerationMixin):
                 _units(),
                 on_done=_on_done,
                 on_error=_on_error,
-                pool_size=2 * batch_size,
+                pool_size=_pool_size(batch_size, self.gen, self.check),
                 cap=batch_size,
                 progress="inputs" if verbose else None,
             )
@@ -699,10 +712,11 @@ def run_output_generation(
       1. One generate-check unit per row (``llm_pipeline.checked``), with the
          row's own entry-type-aware output checker. Refusals on harmful
          inputs are rejected; refusals on benign inputs are evaluated normally.
-      2. ``drive_units`` keeps ``2 * batch_size`` units live and sends calls
-         of up to ``batch_size``. With ``max_attempts > 1`` rejected rows go
-         round again, regenerated with the checker's verdict as feedback, in
-         the same calls as new rows.
+      2. ``drive_units`` keeps ``2 * batch_size`` units live, or as many as
+         the widest async lane of the two models holds when that is more,
+         and sends calls of up to ``batch_size``. With ``max_attempts > 1``
+         rejected rows go round again, regenerated with the checker's
+         verdict as feedback, in the same calls as new rows.
       3. Finished rows are appended to the output CSV every 32 units, in the
          order they finish — crash-resilient.
 
@@ -893,7 +907,7 @@ def run_output_generation(
             (_unit(i, row) for i, (_, row) in enumerate(inputs.iterrows())),
             on_done=_on_done,
             on_error=_on_error,
-            pool_size=2 * batch_size,
+            pool_size=_pool_size(batch_size, client, check),
             cap=batch_size,
             progress="outputs" if verbose else None,
         )
