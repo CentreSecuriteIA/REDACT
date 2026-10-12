@@ -750,44 +750,48 @@ def test_run_pipeline_puts_the_plan_in_the_summary(tmp_path, monkeypatch, caplog
     assert "residency" not in api_only
 
 
-def _planned_copies(models, copies):
-    """The copies ``_plan_phases`` hands the planner for a recipe's ``copies``."""
+def _planned_copies(tmp_path, monkeypatch, models):
+    """The copies ``run_pipeline`` hands the planner for a recipe's ``models``."""
+    import redact
     from redact import residency
-    from redact.runconfig import _plan_phases
 
     seen = []
-    with patch.object(residency, "plan_phases",
-                      side_effect=lambda stage_models, **kw: seen.append(kw) or []):
-        _plan_phases(models, ["inputs", "paraphrase"], verbose=False, copies=copies)
+    monkeypatch.setattr(redact, "generate_inputs", lambda **k: pd.DataFrame({"x": [1]}))
+    recipe = {"dataset_type": "eval", "data_dir": str(tmp_path), "stages": ["inputs"],
+              "models": models}
+    try:
+        with patch.object(residency, "plan_phases",
+                          side_effect=lambda stage_models, **kw: seen.append(kw) or []):
+            run_pipeline(recipe, params={"inputs": {}}, verbose=False)
+    finally:
+        telemetry.uninstall()
     (kwargs,) = seen
     return kwargs["copies"]
 
 
-def test_recipe_copies_reach_the_planner_by_model_name(local_models):
+def test_recipe_copies_reach_the_planner_by_model_name(
+        tmp_path, monkeypatch, local_models):
     """A recipe counts copies per role; the planner counts them per model."""
     gen = local_models("_rc_copies_gen")
-    assert _planned_copies(_models(gen=gen), {"gen": 2}) == {gen: 2}
-    assert _planned_copies(_models(gen=gen), None) == {}
+    counted = {"gen": {"name": gen, "copies": 2}}
+    assert _planned_copies(tmp_path, monkeypatch, counted) == {gen: 2}
+    assert _planned_copies(tmp_path, monkeypatch, {"gen": gen}) == {}
 
 
-def test_recipe_copies_for_a_pool_reach_every_model_in_it(local_models):
-    extra = local_models("_rc_copies_para", roles=["paraphraser"])
-    models = _models(paraphraser="distribution")
-    assert _planned_copies(models, {"paraphraser": 2}) == {
-        "venice-paraphraser": 2, extra: 2}
+def test_recipe_copies_reach_the_planner_for_a_roles_default_model(
+        tmp_path, monkeypatch):
+    models = {"gen": {"backend_type": "vllm", "copies": 2},
+              "translation": {"workers": 1}}
+    assert _planned_copies(tmp_path, monkeypatch, models) == {"venice-uncensored": 2}
 
 
-def test_a_model_of_two_roles_takes_the_count_named_first(local_models):
-    """check is unset, so it resolves to the generation model."""
-    gen = local_models("_rc_copies_both")
-    models = _models(gen=gen)
-    assert _planned_copies(models, {"gen": 2, "check": 1}) == {gen: 2}
-    assert _planned_copies(models, {"check": 1, "gen": 2}) == {gen: 1}
-
-
-@pytest.mark.parametrize("gen,planned", [("llama-3.2-3b-debug", 2)])
+@pytest.mark.parametrize("gen,planned", [
+    ("llama-3.2-3b-debug", 2),
+    ({"name": "llama-3.2-3b-debug", "copies": 2}, 2),
+    ({"name": "llama-3.2-3b-debug", "copies": 1}, 1),
+])
 def test_run_pipeline_summary_carries_copies(tmp_path, monkeypatch, gen, planned):
-    """Two cards and one local model: a copy per card."""
+    """Two cards and one local model: a copy per card unless the recipe says one."""
     import redact
     import redact.llms.backends.vllm as vllm_module
 
@@ -809,6 +813,165 @@ def test_run_pipeline_summary_carries_copies(tmp_path, monkeypatch, gen, planned
     model = summary["residency"]["phases"][0]["models"][0]
     assert (model["copies"], model["devices"]) == (planned, list(range(planned)))
     assert seen == [[tuple(range(planned))]]           # what the loader was handed
+    # Also for a count left to the plan.
+    served = {"name": "llama-3.2-3b-debug", "backend_type": "vllm", "copies": planned}
+    assert summary["serving"] == {"gen": served, "check": served}
+
+
+@pytest.fixture()
+def hosted_and_local():
+    """Register a model whose default setup is hosted and that has local
+    weights too; clean up after."""
+    from redact.llms.model_config import (
+        MODEL_REGISTRY,
+        APIConfig,
+        VLLMConfig,
+        register_model,
+    )
+
+    name = "_rc_hosted_and_local"
+    register_model(
+        name, backend_type="api",
+        api=APIConfig(backend_type="openai", api_key_env="TEST_API_KEY",
+                      base_url="https://test.example/v1", rpm=10),
+        vllm=VLLMConfig(hf_model_id=f"org/{name}", vram_gb=5.0))
+    yield name
+    MODEL_REGISTRY.pop(name, None)
+
+
+def test_a_run_serves_a_hosted_model_locally_when_the_recipe_says_so(
+        tmp_path, monkeypatch, hosted_and_local):
+    """The stage's client, the plan and the records follow the recipe, and
+    none of it outlasts the run."""
+    from types import SimpleNamespace
+
+    import redact
+    from redact.llms import ModelClient
+    from redact.llms.backends import capabilities
+    from redact.llms.model_config import model_compute_config
+
+    name = hosted_and_local
+    built = []
+
+    def generate_inputs(**k):
+        backend = ModelClient.create(k["model"]).backend
+        built.append((k["model"], backend.backend_name, backend.hf_model_id))
+        return pd.DataFrame({"x": [1]})
+
+    monkeypatch.setattr(redact, "generate_inputs", generate_inputs)
+    recipe = {"dataset_type": "eval", "data_dir": str(tmp_path), "stages": ["inputs"],
+              "models": {"gen": {"name": name, "backend_type": "vllm"}}}
+    engine = SimpleNamespace(scheduler_config=SimpleNamespace(max_num_seqs=256))
+    card = _one_card(10.0)
+    try:
+        with card[0], card[1], \
+             patch("redact.llms.backends.vllm._engine", return_value=engine):
+            summary = run_pipeline(recipe, params={"inputs": {}}, verbose=False)
+    finally:
+        telemetry.uninstall()
+    assert built == [(name, "vllm", f"org/{name}")]
+    (planned,) = summary["residency"]["phases"][0]["models"]
+    assert (planned["model"], planned["setup"]) == (name, "vllm")
+    served = {"name": name, "backend_type": "vllm", "copies": 1}
+    assert summary["serving"] == {"gen": served, "check": served}
+    record = read_manifest("inputs", tmp_path)
+    assert (record["serving"], record["models"]["gen"]) == (summary["serving"], name)
+    # Hosted again once the run is over.
+    assert capabilities._run_serving == {}
+    assert model_compute_config(name).supports_native_batching is False
+
+
+@pytest.mark.parametrize("fails,error", [
+    ("the plan", KeyboardInterrupt), ("a stage", RuntimeError)])
+def test_a_run_that_fails_leaves_no_serving_behind(
+        tmp_path, monkeypatch, hosted_and_local, fails, error):
+    import redact
+    from redact import residency
+    from redact.llms.backends import capabilities
+
+    seen = []
+
+    def fail(*args, **kwargs):
+        seen.append(dict(capabilities._run_serving))
+        raise error("boom")
+
+    if fails == "the plan":
+        monkeypatch.setattr(residency, "plan_phases", fail)
+    monkeypatch.setattr(redact, "generate_inputs", fail)
+    recipe = {"dataset_type": "eval", "data_dir": str(tmp_path), "stages": ["inputs"],
+              "models": {"gen": {"name": hosted_and_local, "backend_type": "vllm"}}}
+    card = _one_card(10.0)
+    try:
+        with card[0], card[1], pytest.raises(error, match="boom"):
+            run_pipeline(recipe, params={"inputs": {}}, verbose=False)
+    finally:
+        telemetry.uninstall()
+    assert seen == [{hosted_and_local: {"backend_type": "vllm"}}]   # set when it failed
+    assert capabilities._run_serving == {}
+
+
+def test_a_run_gives_a_hosted_model_the_recipes_workers(tmp_path, monkeypatch):
+    """Two requests at once in the registry, one in this run."""
+    import redact
+    from redact.llms import ModelClient
+
+    seen = []
+    monkeypatch.setattr(
+        redact, "generate_inputs",
+        lambda **k: seen.append(ModelClient.create(k["model"]).backend.max_workers)
+        or pd.DataFrame({"x": [1]}))
+    recipe = {"dataset_type": "eval", "data_dir": str(tmp_path), "stages": ["inputs"],
+              "models": {"gen": {"name": "deepseek-v3.2", "workers": 1}}}
+    try:
+        summary = run_pipeline(recipe, params={"inputs": {}}, verbose=False)
+    finally:
+        telemetry.uninstall()
+    assert seen == [1]
+    assert ModelClient.create("deepseek-v3.2").backend.max_workers == 2
+    served = {"name": "deepseek-v3.2", "backend_type": "api", "workers": 1}
+    assert summary["serving"] == {"gen": served, "check": served}
+
+
+def test_a_recipe_of_names_and_nulls_is_recorded_with_how_it_was_served(
+        tmp_path, monkeypatch):
+    """The registry's defaults are named, per stage for the roles it calls,
+    and the record's ``models`` are as they were."""
+    import redact
+    from redact.runconfig import _DEFAULT_MODELS
+
+    monkeypatch.setattr(redact, "generate_inputs", lambda **k: pd.DataFrame({"x": [1]}))
+    monkeypatch.setattr(redact, "build_dataset", lambda **k: pd.DataFrame({"x": [1]}))
+    recipe = {"dataset_type": "eval", "data_dir": str(tmp_path),
+              "stages": ["inputs", "build"]}
+    try:
+        summary = run_pipeline(recipe, params={"inputs": {}, "build": {}}, verbose=False)
+    finally:
+        telemetry.uninstall()
+    venice = {"name": "venice-uncensored", "backend_type": "api", "workers": 3}
+    assert summary["serving"] == {"gen": venice, "check": venice}
+    inputs, build = read_manifest("inputs", tmp_path), read_manifest("build", tmp_path)
+    assert (inputs["serving"], build["serving"]) == (summary["serving"], {})
+    assert inputs["models"] == build["models"] == _DEFAULT_MODELS
+
+
+def test_served_lists_a_pool_and_names_no_model_for_a_role_no_stage_calls(
+        local_models):
+    from redact.runconfig import _served
+
+    extra = local_models("_rc_served_para", roles=["paraphraser"])
+    models = _models(gen="no-such-model", paraphraser="distribution")
+    served = _served(models, ["paraphrase", "jailbreaks"],
+                     {"include_translation": False}, {extra: {"copies": 2}}, [])
+    assert served == {
+        "paraphraser": [
+            # No plan: the recipe's count, or none for one left to the plan.
+            {"name": "venice-paraphraser", "backend_type": "vllm", "copies": None},
+            {"name": extra, "backend_type": "vllm", "copies": 2}],
+        "paraphrase_check": {
+            "name": "venice-uncensored", "backend_type": "api", "workers": 3},
+        "gen": {"name": "no-such-model"},          # its stage reports it
+        "translation": None,
+    }
 
 
 def test_a_planner_exception_does_not_abort_the_run(tmp_path, monkeypatch, caplog):

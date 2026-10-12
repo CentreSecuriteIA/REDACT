@@ -12,9 +12,9 @@ Two authored files + one generated per stage:
 - **Input-params** (tunables, *how much / how hard*): per-stage numeric knobs
   (``inputs`` / ``outputs`` / ``jailbreaks`` / ``constitution``).
 - **Run-manifest** (generated): each stage writes ``{stage}.run.json`` under
-  ``{data_dir}/Datasets/`` recording the resolved params, models, row counts,
-  spec version, timestamp, and source file(s) — so the next stage or a human can
-  see how to continue.
+  ``{data_dir}/Datasets/`` recording the resolved params, models, how the
+  stage's models were served, row counts, spec version, timestamp, and source
+  file(s) — so the next stage or a human can see how to continue.
 
 Usage::
 
@@ -290,7 +290,7 @@ def _plan_phases(
     Runs before the stage loop, so a stage that does not fit says so before
     any stage spends its budget. Nothing here aborts the run: a plan that
     does not fit and a planning error are only logged. ``copies`` is the
-    recipe's: a number of copies per model role.
+    recipe's: a number of copies per model name.
 
     Returns:
         One :class:`~redact.residency.Phase` per stage, or ``[]`` when no
@@ -300,20 +300,9 @@ def _plan_phases(
 
     try:
         aug = augmentations or {}
-        # The planner counts copies per model. A model two roles resolve to
-        # takes the count of the role the recipe names first.
-        per_model: dict[str, int] = {}
-        for role, count in (copies or {}).items():
-            try:
-                names = _resolve_role(models, role, aug)
-            except (KeyError, ValueError):
-                # No model registered for the role, so none to count for.
-                continue
-            for name in names:
-                per_model.setdefault(name, count)
         phases = residency.plan_phases(
             {stage: _stage_models(models, [stage], aug) for stage in stages},
-            copies=per_model)
+            copies=copies or {})
         if not any(phase.resident for phase in phases):
             return []
         # One report per plan, naming the stages it covers.
@@ -445,6 +434,56 @@ _ROLE_TO_REGISTRY_ROLE = {
 }
 
 
+def _served(
+    models: dict, stages: list[str], augmentations: dict, serving: dict, phases: list,
+) -> dict:
+    """How the run serves the models its stages call, per role.
+
+    For the summary and the run records. Called once the run's serving is
+    set, so each setup is the one the run's clients get.
+
+    Args:
+        serving: The recipe's, as :func:`_serving` returns it.
+        phases: The run's plan, as :func:`_plan_phases` returns it.
+
+    Returns:
+        Per role, ``{"name", "backend_type"}`` with ``copies`` for a model
+        served by vLLM (the plan's count, else the recipe's, else ``None``)
+        or ``workers`` for a hosted one. A pool of several models is a list
+        of these, and a role the run calls no model for is ``None``.
+    """
+    from .llms.backends import resolve_setup
+    from .llms.model_config import get_model_config
+
+    planned = {fp.model: fp.copies for phase in phases for fp in phase.plan.footprints}
+    served: dict = {}
+    roles = dict.fromkeys(
+        role for stage in stages for role in STAGE_ROLES.get(stage, ()))
+    for role in roles:
+        try:
+            names = _resolve_role(models, role, augmentations)
+        except (KeyError, ValueError):
+            names = []      # no model registered for the role; the stage reports it
+        entries = []
+        for name in names:
+            entry = {"name": name}
+            entries.append(entry)
+            try:
+                config = get_model_config(name)
+                setup = resolve_setup(config)
+            except (KeyError, TypeError, ValueError):
+                continue    # not a registered model; the stage reports it
+            entry["backend_type"] = setup
+            given = serving.get(name, {})
+            if setup == "vllm":
+                entry["copies"] = planned.get(name, given.get("copies"))
+            elif setup == "api":
+                entry["workers"] = given.get(
+                    "workers", config.api.recommended_max_workers)
+        served[role] = entries[0] if len(entries) == 1 else entries or None
+    return served
+
+
 def run_pipeline(
     recipe: str | Path | dict,
     params: str | Path | dict | None = None,
@@ -454,8 +493,10 @@ def run_pipeline(
 
     ``eval`` recipes run the standalone path; ``training`` recipes run the
     constitution stage first and thread its DataFrame into ``generate_inputs``.
-    Returns a summary dict ``{"stages": {stage: {counts, manifest}}}``.
-    Local models the run planned are released when it returns or raises.
+    Returns a summary dict ``{"stages": {stage: {counts, manifest}}}``, with
+    how each role's model was served under ``"serving"`` (:func:`_served`).
+    Local models the run planned are released when it returns or raises, and
+    the way the recipe serves its models holds only until then.
     """
     from redact import (
         build_dataset,
@@ -466,6 +507,7 @@ def run_pipeline(
         generate_paraphrases,
     )
     from redact.jailbreak import load_spec
+    from redact.llms.backends import capabilities
 
     recipe = load_recipe(recipe)
     base_dir = recipe.get("_base_dir")
@@ -477,6 +519,7 @@ def run_pipeline(
     data_dir = recipe.get("data_dir")
     dataset_type = recipe["dataset_type"]
     models = {**_DEFAULT_MODELS, **_role_names(recipe.get("models") or {})}
+    serving = _serving(recipe.get("models") or {})
     taxonomy = recipe.get("taxonomy", "content_moderation_categories")
     taxonomy_dir = recipe.get("taxonomy_dir")
     prompt_dir = recipe.get("prompt_dir")
@@ -498,19 +541,28 @@ def run_pipeline(
         # "which prompt ran?" stops being obvious, and an override that
         # silently matches nothing is invisible without this.
         report_prompt_sources(prompt_dir)
-    phases = _plan_phases(models, stages, verbose=verbose, augmentations=aug)
 
     summary: dict = {"dataset_type": dataset_type, "data_dir": str(data_dir), "stages": {}}
-    if phases:
-        summary["residency"] = {
-            "fits": all(phase.plan.fits for phase in phases),
-            "phases": [{"stage": phase.stage, "resident": phase.resident,
-                        **phase.plan.as_dict()} for phase in phases],
-        }
     constitution_df = None
-
+    phases: list = []
     warm: set[str] = set()
     try:
+        # Before the plan, which reads it as every client the run builds does.
+        capabilities.set_run_serving(
+            {name: {key: how[key] for key in ("backend_type", "workers") if key in how}
+             for name, how in serving.items()})
+        phases = _plan_phases(
+            models, stages, verbose=verbose, augmentations=aug,
+            copies={name: how["copies"] for name, how in serving.items()
+                    if "copies" in how})
+        if phases:
+            summary["residency"] = {
+                "fits": all(phase.plan.fits for phase in phases),
+                "phases": [{"stage": phase.stage, "resident": phase.resident,
+                            **phase.plan.as_dict()} for phase in phases],
+            }
+        served = summary["serving"] = _served(models, stages, aug, serving, phases)
+
         for i, stage in enumerate(stages):
             _enter_phase(phases, i, warm, verbose=verbose)
             with telemetry.stage(stage):
@@ -572,11 +624,15 @@ def run_pipeline(
                 mpath = write_manifest(
                     stage, data_dir=data_dir, params=stage_params, models=models,
                     counts=_counts(df), spec_version=spec,
+                    extra={"serving": {role: served[role]
+                                       for role in STAGE_ROLES.get(stage, ())}},
                 )
                 summary["stages"][stage] = {"counts": _counts(df), "manifest": str(mpath)}
                 if verbose:
                     logger.info("[%s] %s -> manifest %s", stage, _counts(df), mpath.name)
     finally:
+        # The serving was this run's: a call made after it must not get it.
+        capabilities.set_run_serving({})
         # The run's end is a transition too: release what the last stage held
         # and roll up, also after a failed stage. Nothing here may mask the
         # stage's own error.
