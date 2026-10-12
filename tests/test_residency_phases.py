@@ -419,10 +419,23 @@ def test_twins_of_different_sizes_are_not_crowded_into_one_group(local_model, ca
     assert caplog.records == []
 
 
+def loads_of(called):
+    """Per stage, its models as loads, should every engine be unloaded
+    wherever no stage calls it: each a model and the stage it has been
+    called since without a stage in between that does not."""
+    def since(model, k):
+        while k and model in called[k - 1]:
+            k -= 1
+        return k
+
+    return [[(m, since(m, k)) for m in stage] for k, stage in enumerate(called)]
+
+
 def test_a_run_fits_exactly_when_one_set_of_cards_fits_every_stage(local_model, caplog):
     """300 seeded runs of 2 to 4 stages over 3 to 5 engines, on 2 to 4
     cards: every stage fits exactly when trying every assignment finds one
-    set of cards that fits them all."""
+    set of cards that fits them all, with every engine loaded once or with
+    engines unloaded where no stage calls them."""
     import logging
 
     rng = random.Random(20261012)
@@ -439,27 +452,483 @@ def test_a_run_fits_exactly_when_one_set_of_cards_fits_every_stage(local_model, 
             phases = plan_phases(
                 {f"s{k}": stage for k, stage in enumerate(called)},
                 gpus=cards, gib_per_gpu=card)
-            # An engine is resident from the first stage that calls it to
-            # the last.
+            # Loaded once, an engine is resident from the first stage that
+            # calls it to the last.
             resident = [
                 [m for m in names if any(m in stage for stage in called[:k + 1])
                  and any(m in stage for stage in called[k:])]
                 for k in range(len(called))]
             needs = {fp.model: fp.padded_gb
                      for phase in phases for fp in phase.plan.footprints}
-            exists = fit_exists(needs, resident, cards, pool)
+            loads = loads_of(called)
+            exists = fit_exists(needs, resident, cards, pool) or fit_exists(
+                {load: needs[load[0]] for stage in loads for load in stage},
+                loads, cards, pool)
             assert all(phase.plan.fits for phase in phases) is exists, (
                 i, cards, called)
-            held = {}
+            # One set of cards for as long as an engine stays loaded.
+            held, before = {}, []
             for phase in phases:
                 if exists:
                     assert_no_card_is_overfull(phase.plan, pool)
                 for fp in phase.plan.footprints:
-                    assert held.setdefault(fp.model, fp.devices) == fp.devices
+                    if fp.model not in before:
+                        held[fp.model] = fp.devices
+                    assert held[fp.model] == fp.devices
+                before = phase.resident
             unfit += not exists
     # Of the 300, the runs that fit only on other cards than the order
-    # given takes, and those that fit on none.
-    assert (len(caplog.records), unfit) == (68, 53)
+    # given takes, and those that fit on none. Two more fit with an engine
+    # unloaded, one of them on such other cards.
+    assert (len(caplog.records), unfit) == (69, 51)
+
+
+def _unloaded(model, during, again, so_that=None):
+    """The line that says a model is unloaded between two stages that call it."""
+    return (f"[residency] {model} is unloaded for stage {during} and loaded again "
+            f"for stage {again}, so that {so_that or during} fits. This costs one "
+            "more load.")
+
+
+def _messages(caplog):
+    return [r.getMessage() for r in caplog.records]
+
+
+def test_an_engine_is_unloaded_for_a_stage_that_does_not_fit_beside_it(
+        local_model, caplog):
+    """An 8 GiB card holds one 5 GiB engine. Stage b does not call x and
+    stage c does, so x is unloaded for b and loaded again for c."""
+    import logging
+
+    x, y = local_model("_ph_gap_x"), local_model("_ph_gap_y")
+    with caplog.at_level(logging.INFO, logger="redact.residency"):
+        a, b, c = _plan({"a": [x], "b": [y], "c": [x]}, gib=8.0)
+    assert [p.resident for p in (a, b, c)] == [[x], [y], [x]]
+    assert a.plan.fits and b.plan.fits and c.plan.fits
+    # Two loads of x are two plans, though the same model is resident.
+    assert a.plan is not c.plan
+    assert _share(a, x) == _share(b, y) == _share(c, x) == 0.9
+    assert _messages(caplog) == [_unloaded(x, "b", "c")]
+
+
+def test_no_engine_is_unloaded_where_another_card_holds_it(local_model, caplog):
+    """The same run on two such cards: y takes the other card, and x stays
+    loaded through stage b."""
+    import logging
+
+    x, y = local_model("_ph_two_x"), local_model("_ph_two_y")
+    with caplog.at_level(logging.INFO, logger="redact.residency"):
+        a, b, c = plan_phases(
+            {"a": [x], "b": [y], "c": [x]}, gpus=2, gib_per_gpu=8.0)
+    assert [p.resident for p in (a, b, c)] == [[x], [x, y], [x]]
+    assert a.plan.fits and b.plan.fits and a.plan is c.plan
+    assert (_cards(a, x), _cards(b, x), _cards(b, y)) == (
+        ((0,), 1), ((0,), 1), ((1,), 1))
+    assert _messages(caplog) == [
+        f"[residency] {x} loads once, with 1 copy: on the cards it holds in "
+        "every stage."]
+
+
+def test_a_run_that_fits_with_every_engine_loaded_once_is_planned_as_before(
+        local_model, caplog):
+    """Runs in which a stage holds an engine it does not call, and fits:
+    resident models, the stages that share a plan, cards, copies, shares,
+    text and log lines as the planner made them before it unloaded any."""
+    import logging
+
+    from redact.residency import placement
+    from tests.test_residency import _kv
+
+    w, x, y = (local_model(f"_ph_as_{n}") for n in "wxy")
+    z = local_model("_ph_as_z", 15.0)
+    runs = [({"a": [x], "b": [y], "c": [x], "d": []}, 1),
+            ({"a": [w, x], "b": [y], "c": [x]}, 2),
+            ({"a": [x, y], "b": [z], "c": [x, y]}, 2),
+            ({"a": [x], "b": [y], "c": [x]}, 3)]
+    made = []
+    with _kv(0.0), caplog.at_level(logging.INFO, logger="redact.residency"), \
+         patch.object(placement._Stage, "only", side_effect=AssertionError):
+        for stage_models, cards in runs:
+            caplog.clear()
+            phases = plan_phases(stage_models, gpus=cards, gib_per_gpu=24.0)
+            plans = list({id(p.plan): p.plan for p in phases}.values())
+            made.append((
+                [p.resident for p in phases],
+                [next(n for n, plan in enumerate(plans) if plan is p.plan)
+                 for p in phases],
+                [[(fp.model, fp.devices, fp.copies, fp.planned_utilization)
+                  for fp in plan.footprints] for plan in plans],
+                [plan.explain() for plan in plans],
+                _messages(caplog)))
+    assert made == [(resident, shared, placed, ["\n".join(text) for text in texts], log)
+                    for resident, shared, placed, texts, log in _AS_BEFORE]
+
+
+def _line(model, where, grant, size="6.5", weights="5.0"):
+    share = {"21.6GiB": "0.90", "10.8GiB": "0.45", "21.6GiB each": "0.90"}[grant]
+    return (f"    _ph_as_{model}[vllm]  ~{size}GiB  (declared: {weights} weights + "
+            f"0.00 KV, x1.1 +0.6)  -> {where}, vLLM gets {grant} "
+            f"(gpu_memory_utilization={share})")
+
+
+_ONE, _TWO, _THREE = (
+    f"plan needs {n} GPU(s); planning for {n} GPU(s), 24.0GiB each" for n in (1, 2, 3))
+_COPIES = "      -> x2 copies (data_parallel_size=2), one per card, ~6.5GiB each"
+#: Recorded at commit 125a000, per run: the resident models of each stage,
+#: the plan each stage has, and per plan ``(model, cards, copies, share)``
+#: of each model and the lines of ``explain()``; then the log lines.
+_AS_BEFORE = [
+    ([["_ph_as_x"], ["_ph_as_x", "_ph_as_y"], ["_ph_as_x"], []],
+     [0, 1, 0, 2],
+     [[("_ph_as_x", (0,), 1, 0.45)],
+      [("_ph_as_x", (0,), 1, 0.45), ("_ph_as_y", (0,), 1, 0.45)],
+      []],
+     [(_ONE, "  group 1:", _line("x", "card 0", "10.8GiB")),
+      (_ONE, "  group 1:", _line("x", "card 0", "10.8GiB"),
+       _line("y", "card 0", "10.8GiB")),
+      ("plan needs 0 GPU(s); planning for 1 GPU(s), 24.0GiB each",)],
+     ["[residency] _ph_as_x loads once, with gpu_memory_utilization=0.45: its "
+      "share in the stage where its card is most crowded."]),
+    ([["_ph_as_w", "_ph_as_x"], ["_ph_as_x", "_ph_as_y"], ["_ph_as_x"]],
+     [0, 1, 2],
+     [[("_ph_as_w", (0,), 1, 0.9), ("_ph_as_x", (1,), 1, 0.9)],
+      [("_ph_as_x", (1,), 1, 0.9), ("_ph_as_y", (0,), 1, 0.9)],
+      [("_ph_as_x", (1,), 1, 0.9)]],
+     [(_TWO, "  group 1:", _line("w", "card 0", "21.6GiB"),
+       _line("x", "card 1", "21.6GiB")),
+      (_TWO, "  group 1:", _line("x", "card 1", "21.6GiB"),
+       _line("y", "card 0", "21.6GiB")),
+      (_TWO, "  group 1:", _line("x", "card 1", "21.6GiB"),
+       "  note: card 0 is idle: _ph_as_x is limited to 1 copy")],
+     ["[residency] _ph_as_x loads once, with 1 copy: on the cards it holds in "
+      "every stage."]),
+    ([["_ph_as_x", "_ph_as_y"], ["_ph_as_x", "_ph_as_y", "_ph_as_z"],
+      ["_ph_as_x", "_ph_as_y"]],
+     [0, 1, 0],
+     [[("_ph_as_x", (0,), 1, 0.45), ("_ph_as_y", (0,), 1, 0.45)],
+      [("_ph_as_x", (0,), 1, 0.45), ("_ph_as_y", (0,), 1, 0.45),
+       ("_ph_as_z", (1,), 1, 0.9)]],
+     [("plan needs 1 GPU(s); planning for 2 GPU(s), 24.0GiB each", "  group 1:",
+       _line("x", "card 0", "10.8GiB"), _line("y", "card 0", "10.8GiB"),
+       "  note: card 1 is idle: _ph_as_x shares its card, and a copy needs the "
+       "card to itself"),
+      (_TWO, "  group 1:", _line("x", "card 0", "10.8GiB"),
+       _line("y", "card 0", "10.8GiB"),
+       _line("z", "card 1", "21.6GiB", size="17.5", weights="15.0"))],
+     ["[residency] placed in another arrangement than the order given: "
+      "_ph_as_x -> card 0, _ph_as_y -> card 0, _ph_as_z -> card 1"]),
+    ([["_ph_as_x"], ["_ph_as_x", "_ph_as_y"], ["_ph_as_x"]],
+     [0, 1, 0],
+     [[("_ph_as_x", (0, 2), 2, 0.9)],
+      [("_ph_as_x", (0, 2), 2, 0.9), ("_ph_as_y", (1,), 1, 0.9)]],
+     [(_THREE, "  group 1:", _line("x", "cards 0,2", "21.6GiB each"), _COPIES,
+       "  note: card 1 is idle: _ph_as_x is limited to 2 copies"),
+      (_THREE, "  group 1:", _line("x", "cards 0,2", "21.6GiB each"), _COPIES,
+       _line("y", "card 1", "21.6GiB"))],
+     ["[residency] _ph_as_x loads once, with 2 copies: on the cards it holds "
+      "in every stage."]),
+]
+
+
+def test_the_release_a_run_fits_without_is_given_back(local_model, caplog):
+    """A 24 GiB card grants 21.6 GiB. Stage b's engine needs 9.4 and does
+    not fit beside small (6.1) and large (11.6) together, but beside
+    either. large is kept: its load is the longer one to repeat."""
+    import logging
+
+    small, large = local_model("_ph_back_small"), local_model("_ph_back_large", 10.0)
+    mid = local_model("_ph_back_mid", 8.0)
+    with caplog.at_level(logging.INFO, logger="redact.residency"):
+        a, b, c = _plan({"a": [small, large], "b": [mid], "c": [small, large]})
+    assert [p.resident for p in (a, b, c)] == [
+        [small, large], [large, mid], [small, large]]
+    assert a.plan.fits and b.plan.fits and c.plan.fits
+    # large has one share from stage a to stage c: stage b's.
+    assert [_share(p, large) for p in (a, b, c)] == [0.4958] * 3
+    assert (_share(a, small), _share(b, mid), _share(c, small)) == (
+        0.3354, 0.4041, 0.3354)
+    assert _messages(caplog) == [
+        _unloaded(small, "b", "c"),
+        f"[residency] {large} loads once, with gpu_memory_utilization=0.50: its "
+        "share in the stage where its card is most crowded."]
+
+
+def test_engines_unloaded_for_different_stages_are_said_in_stage_order(
+        local_model, caplog):
+    """One 24 GiB card holds x, y (6.1 each) and big (14.9) two at a time.
+    Each is unloaded for the stage that calls the other two, and has one
+    share for every time it is loaded."""
+    import logging
+
+    x, y = local_model("_ph_turn_x"), local_model("_ph_turn_y")
+    big = local_model("_ph_turn_big", 13.0)
+    with caplog.at_level(logging.INFO, logger="redact.residency"):
+        phases = _plan({"a": [x], "b": [x, y], "c": [x, big], "d": [x, y],
+                        "e": [y, big], "f": [x]})
+    assert [p.resident for p in phases] == [
+        [x], [x, y], [x, big], [x, y], [y, big], [x]]
+    assert all(p.plan.fits for p in phases)
+    assert [_share(p, x) for p in (*phases[:4], phases[5])] == [0.2666] * 4 + [0.9]
+    assert [_share(phases[k], y) for k in (1, 3, 4)] == [0.45, 0.2666, 0.2666]
+    assert _messages(caplog) == [
+        _unloaded(y, "c", "d"), _unloaded(big, "d", "e"), _unloaded(x, "e", "f"),
+        f"[residency] {x} loads for stage a, with gpu_memory_utilization=0.27: its "
+        "share in the stage where its card is most crowded.",
+        f"[residency] {y} loads for stage d, with gpu_memory_utilization=0.27: its "
+        "share in the stage where its card is most crowded."]
+
+
+def test_every_engine_a_stage_has_no_room_for_is_unloaded(local_model, caplog):
+    """Stage b's engine needs 17.1 of the 21.6 GiB, beside which neither
+    small nor large fits."""
+    import logging
+
+    small, large = local_model("_ph_all_small"), local_model("_ph_all_large", 10.0)
+    big = local_model("_ph_all_big", 15.0)
+    with caplog.at_level(logging.INFO, logger="redact.residency"):
+        a, b, c = _plan({"a": [small, large], "b": [big], "c": [small, large]})
+    assert [p.resident for p in (a, b, c)] == [[small, large], [big], [small, large]]
+    assert a.plan.fits and b.plan.fits and c.plan.fits
+    assert _messages(caplog) == [_unloaded(small, "b", "c"), _unloaded(large, "b", "c")]
+
+
+def test_no_engine_is_unloaded_for_a_stage_that_does_not_fit_without_it_either(
+        local_model, caplog):
+    """Stage b's own two engines do not fit one 8 GiB card, with x or
+    without it: x stays loaded, and stages a and c share their plan."""
+    import logging
+
+    x, y, z = (local_model(f"_ph_stuck_{n}") for n in "xyz")
+    with caplog.at_level(logging.INFO, logger="redact.residency"):
+        a, b, c = _plan({"a": [x], "b": [y, z], "c": [x]}, gib=8.0)
+    assert [p.resident for p in (a, b, c)] == [[x], [x, y, z], [x]]
+    assert b.plan.as_dict()["groups"] == [[x], [y], [z]]
+    assert a.plan.fits and not b.plan.fits and a.plan is c.plan
+    assert caplog.records == []
+
+
+def test_no_engine_is_unloaded_unless_every_stage_then_fits(local_model, caplog):
+    """Unloading x for stage b and y for stage c would make both fit, but
+    stage d calls y and z, which no 8 GiB card holds together."""
+    import logging
+
+    x, y, z = (local_model(f"_ph_half_{n}") for n in "xyz")
+    with caplog.at_level(logging.INFO, logger="redact.residency"):
+        phases = _plan({"a": [x], "b": [y], "c": [x], "d": [y, z]}, gib=8.0)
+    assert [p.resident for p in phases] == [[x], [x, y], [x, y], [y, z]]
+    assert [p.plan.fits for p in phases] == [True, False, False, False]
+    assert caplog.records == []
+
+
+def test_no_engine_is_unloaded_for_a_stage_with_a_problem_it_does_not_cause(
+        local_model, caplog):
+    """Without x, stage b's models are one group on the 8 GiB card, but
+    one of them has no known size, and such a plan does not fit."""
+    import logging
+
+    x, y = local_model("_ph_prob_x"), local_model("_ph_prob_y")
+    unsized = local_model("_ph_prob_unsized", None)
+    with caplog.at_level(logging.INFO, logger="redact.residency.phases"):
+        a, b, c = _plan({"a": [x], "b": [unsized, y], "c": [x]}, gib=8.0)
+    assert [p.resident for p in (a, b, c)] == [[x], [x, unsized, y], [x]]
+    assert a.plan.fits and not b.plan.fits and a.plan is c.plan
+    assert _messages(caplog) == [
+        f"[residency] {x} loads once, with gpu_memory_utilization=0.83: its "
+        "share in the stage where its card is most crowded."]
+
+
+def test_no_engine_is_unloaded_only_to_move_it(local_model, caplog):
+    """Two 24 GiB cards grant 21.6 GiB each. Stage a fits only with x and y
+    on one card (18.8), beside p (20.4), and stage c only with them apart,
+    each beside an engine of 11.6. x could change cards while stage b does
+    not call it, but stage b fits with it, and stage c calls every engine
+    it holds."""
+    import logging
+
+    p, x, y = (local_model(f"_ph_move_{n}", gb)
+               for n, gb in (("p", 18.0), ("x", 8.0), ("y", 8.0)))
+    r, s = local_model("_ph_move_r", 10.0), local_model("_ph_move_s", 10.0)
+    with caplog.at_level(logging.INFO, logger="redact.residency"):
+        phases = plan_phases(
+            {"a": [p, x, y], "b": [y], "c": [r, s, x, y]}, gpus=2, gib_per_gpu=24.0)
+    assert [ph.resident for ph in phases] == [[p, x, y], [x, y], [x, y, r, s]]
+    assert [ph.plan.fits for ph in phases] == [True, True, False]
+    assert caplog.records == []
+
+
+def test_an_engine_is_unloaded_for_every_stage_between_two_calls(local_model, caplog):
+    """Stage b calls no local model and would fit with x, stage c does not.
+    x is unloaded when stage a is over, and stage b holds nothing."""
+    import logging
+
+    x, y = local_model("_ph_long_x"), local_model("_ph_long_y")
+    with caplog.at_level(logging.INFO, logger="redact.residency"):
+        a, b, c, d = _plan({"a": [x], "b": [], "c": [y], "d": [x]}, gib=8.0)
+    assert [p.resident for p in (a, b, c, d)] == [[x], [], [y], [x]]
+    assert all(p.plan.fits for p in (a, b, c, d))
+    assert (b.plan.footprints, b.plan.gpus_required) == ([], 0)
+    assert _messages(caplog) == [_unloaded(x, "b", "d", so_that="c")]
+
+
+def test_two_models_on_one_engine_are_unloaded_together(local_model, caplog):
+    import logging
+
+    x, y = local_model("_ph_pair_x"), local_model("_ph_pair_y")
+    twin = "_ph_pair_x_twin"
+    register_model(twin, backend_type="vllm",
+                   vllm=VLLMConfig(hf_model_id=f"org/{x}", vram_gb=5.0))
+    try:
+        with caplog.at_level(logging.INFO, logger="redact.residency"):
+            a, b, c = _plan({"a": [x], "b": [y], "c": [twin]}, gib=8.0)
+    finally:
+        MODEL_REGISTRY.pop(twin, None)
+    assert [p.resident for p in (a, b, c)] == [[x, twin], [y], [x, twin]]
+    assert a.plan.fits and b.plan.fits and c.plan.fits
+    assert _messages(caplog) == [_unloaded(x, "b", "c")]
+
+
+def test_an_engine_loaded_again_has_cards_copies_and_a_share_of_its_own(
+        local_model, caplog):
+    """Two 24 GiB cards. Alone in stage a, x has a copy on each. Stage b's
+    engines need a card each (17.1 GiB), so x is unloaded for it. Loaded
+    again for stage c, x finds g on card 0 and takes card 1. It stays there
+    in stage d, where placed afresh it would take card 0, and shares it
+    with q: one copy at half the card, in both stages."""
+    import logging
+
+    x, q = local_model("_ph_life_x"), local_model("_ph_life_q")
+    g, c, big = (local_model(f"_ph_life_{n}", 15.0) for n in ("g", "c", "big"))
+    with caplog.at_level(logging.INFO, logger="redact.residency"):
+        first, between, third, fourth = plan_phases(
+            {"a": [x], "b": [g, c], "c": [x, g], "d": [x, big, q]},
+            gpus=2, gib_per_gpu=24.0)
+    assert [ph.resident for ph in (first, between, third, fourth)] == [
+        [x], [g, c], [x, g], [x, big, q]]
+    assert all(ph.plan.fits for ph in (first, between, third, fourth))
+    assert (_cards(first, x), _share(first, x)) == (((0, 1), 2), 0.9)
+    for phase in (third, fourth):
+        assert (_cards(phase, x), _share(phase, x)) == (((1,), 1), 0.45)
+    assert (_cards(third, g), _cards(fourth, big)) == (((0,), 1), ((0,), 1))
+    assert (_cards(fourth, q), _share(fourth, q)) == (((1,), 1), 0.45)
+    assert _messages(caplog) == [
+        _unloaded(x, "b", "c"),
+        f"[residency] {x} loads for stage c, with gpu_memory_utilization=0.45: "
+        "its share in the stage where its card is most crowded."]
+
+
+def test_an_engine_loaded_again_keeps_the_copies_its_later_stages_have_a_card_for(
+        local_model, caplog):
+    """Two 8 GiB cards, one 5 GiB engine each. x has a copy on both in
+    stage a, is unloaded for stage b, and alone in stage c would have both
+    again. Stage d plans p on card 1, so its second load is one copy."""
+    import logging
+
+    x, y, z, p = (local_model(f"_ph_cut_{n}") for n in "xyzp")
+    with caplog.at_level(logging.INFO, logger="redact.residency"):
+        a, b, c, d = plan_phases(
+            {"a": [x], "b": [y, z], "c": [x], "d": [x, p]}, gpus=2, gib_per_gpu=8.0)
+    assert [ph.resident for ph in (a, b, c, d)] == [[x], [y, z], [x], [x, p]]
+    assert _cards(a, x) == ((0, 1), 2)
+    assert _cards(c, x) == _cards(d, x) == ((0,), 1)
+    assert _messages(caplog) == [
+        _unloaded(x, "b", "c"),
+        f"[residency] {x} loads for stage c, with 1 copy: on the cards it holds "
+        "in every stage."]
+
+
+def assert_shares_stay_under_the_ceiling(plan):
+    """The shares on a card sum to 0.9 at most, up to the step each is
+    rounded by, and each covers its engine's need."""
+    for card in range(plan.gpus_available):
+        on = [fp for fp in plan.footprints if card in fp.devices]
+        assert sum(fp.planned_utilization for fp in on) <= (
+            estimate.DEFAULT_GPU_MEMORY_UTILIZATION + 1e-4 * len(on) + 1e-9)
+        for fp in on:
+            assert fp.planned_utilization * plan.per_gpu_gb >= fp.padded_gb - 1e-6
+
+
+def test_engines_are_unloaded_only_where_a_run_does_not_fit_with_them(
+        local_model, caplog):
+    """600 seeded runs of 3 to 6 stages, each calling one or two of 3 to 5
+    engines, on 1 to 3 cards. Trying every assignment says what must hold:
+
+    - A run with cards for every engine loaded once is planned so.
+    - Any other fits exactly when it has cards with engines unloaded where
+      no stage calls them, and then with no engine unloaded that could
+      have stayed.
+    - An engine is resident in every stage that calls it and unloaded only
+      between two of them. For as long as it stays loaded it has one set
+      of cards and one share, and no card of a stage that fits is over its
+      size.
+    """
+    import logging
+
+    rng = random.Random(20261013)
+    card = 24.0
+    pool = estimate.DEFAULT_GPU_MEMORY_UTILIZATION * card
+    once = again = never = reloaded = 0
+    for i in range(600):
+        cards = rng.randint(1, 3)
+        names = [local_model(f"_ph_un{i}_{j}", gb) for j, gb in enumerate(
+            packed_sizes(rng, cards, pool, range(3, 6)))]
+        called = [rng.sample(names, rng.randint(1, 2))
+                  for _ in range(rng.randint(3, 6))]
+        names = [m for m in names if any(m in stage for stage in called)]
+        with caplog.at_level(logging.INFO, logger="redact.residency.phases"):
+            caplog.clear()
+            phases = plan_phases(
+                {f"s{k}": stage for k, stage in enumerate(called)},
+                gpus=cards, gib_per_gpu=card)
+        unloaded = [m for m in _messages(caplog) if "is unloaded for stage" in m]
+        fits = all(phase.plan.fits for phase in phases)
+        needs = {fp.model: fp.padded_gb
+                 for phase in phases for fp in phase.plan.footprints}
+        kept = [[m for m in names if any(m in stage for stage in called[:k + 1])
+                 and any(m in stage for stage in called[k:])]
+                for k in range(len(called))]
+        resident = [set(phase.resident) for phase in phases]
+
+        def has_cards(stages):
+            """Whether cards exist for the models of each stage, a model
+            being one load for as long as it stays."""
+            loads = loads_of([sorted(stage) for stage in stages])
+            return fit_exists({load: needs[load[0]] for stage in loads
+                               for load in stage}, loads, cards, pool)
+
+        if fit_exists(needs, kept, cards, pool):
+            once += 1
+            assert fits and not unloaded and resident == [set(k) for k in kept], i
+        else:
+            assert fits is has_cards(called), (i, cards, called)
+            again += fits
+            never += not fits
+        reloads = 0
+        for model in names:
+            at = [k for k, stage in enumerate(resident) if model in stage]
+            for before, after in zip(at, at[1:]):
+                if after - before > 1:
+                    reloads += 1
+                    stays = [stage | {model} if before < k < after else stage
+                             for k, stage in enumerate(resident)]
+                    assert not has_cards(stays), (i, model, before, after)
+        assert len(unloaded) == reloads and (fits or not reloads), i
+        reloaded += reloads
+        held, earlier = {}, set()
+        for k, phase in enumerate(phases):
+            assert set(called[k]) <= resident[k] <= set(kept[k]), (i, k)
+            if fits:
+                assert_no_card_is_overfull(phase.plan, pool)
+                assert_shares_stay_under_the_ceiling(phase.plan)
+            for fp in phase.plan.footprints:
+                now = (fp.devices, fp.copies, fp.planned_utilization)
+                if fp.model not in earlier:
+                    held[fp.model] = now
+                assert held[fp.model] == now, (i, k, fp.model)
+            earlier = resident[k]
+    # Of the 600: the runs that fit with every engine loaded once, those
+    # that fit only with engines unloaded, those that fit neither way, and
+    # the times an engine is loaded again.
+    assert (once, again, never, reloaded) == (532, 50, 18, 70)
 
 
 def test_preload_skips_a_model_no_longer_wanted(local_model):

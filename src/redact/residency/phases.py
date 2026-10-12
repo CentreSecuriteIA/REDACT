@@ -63,9 +63,9 @@ def plan_phases(
     backend_types = backend_types or {}
     stages = list(stage_models)
 
-    # Each engine's first and last stage.
+    # The stages that call each engine.
     engine_of: dict[str, tuple] = {}
-    span: dict[tuple, list[int]] = {}
+    calls: dict[tuple, list[int]] = {}
     for i, stage in enumerate(stages):
         for name in stage_models[stage]:
             if name not in engine_of:
@@ -77,74 +77,148 @@ def plan_phases(
                     continue
                 config, setup = found
                 engine_of[name] = _engine_id(getattr(config, setup), setup)
-            span.setdefault(engine_of[name], [i, i])[1] = i
+            calls.setdefault(engine_of[name], []).append(i)
 
-    # The same models again are the same engines, resident since: no
-    # lifetime has a gap, so one plan holds for every stage they share.
-    surveyed: dict[tuple, _Stage] = {}
-    phases = []
-    for i, stage in enumerate(stages):
-        resident = [name for name, engine in engine_of.items()
-                    if span[engine][0] <= i <= span[engine][1]]
-        key = tuple(resident)
-        if key not in surveyed:
-            surveyed[key] = _survey(resident, backend_types, gpus, gib_per_gpu, copies)
-        phases.append(Phase(stage, resident, surveyed[key].plan))
-    _arrange([s for s in surveyed.values() if s.footprints])
-    plans = [s.plan for s in surveyed.values()]
+    def place(released, survey, quiet=False):
+        """Plan every stage, with each engine unloaded over its gaps in
+        ``released``.
 
-    # One share per engine for its whole lifetime: the smallest planned.
+        Args:
+            released: Gaps, each as an engine, the stage that calls it
+                before the gap and the one that calls it after.
+            survey: Makes a stage's :class:`_Stage` from the stage's index,
+                its resident models and the lifetimes of their engines.
+
+        Returns:
+            The phases, and the :class:`_Stage` of each.
+        """
+        spans = {
+            engine: _lifetimes(at, [gap[1:] for gap in released if gap[0] == engine])
+            for engine, at in calls.items()}
+        surveyed: dict[tuple, _Stage] = {}
+        phases, staged = [], []
+        for i, stage in enumerate(stages):
+            resident, lifetimes = [], {}
+            for name, engine in engine_of.items():
+                first = next((a for a, b in spans[engine] if a <= i <= b), None)
+                if first is None:
+                    continue
+                resident.append(name)
+                if len(spans[engine]) > 1:
+                    # Told apart by the stage it is loaded for.
+                    lifetimes[engine] = (*engine, stages[first])
+            # The same models again in the same lifetimes are resident
+            # since, so one plan holds for every stage they share.
+            key = (tuple(resident), tuple(lifetimes.values()))
+            if key not in surveyed:
+                surveyed[key] = survey(i, resident, lifetimes)
+            phases.append(Phase(stage, resident, surveyed[key].plan))
+            staged.append(surveyed[key])
+        _arrange([s for s in surveyed.values() if s.footprints], quiet=quiet)
+        return phases, staged
+
+    phases, staged = place((), lambda i, resident, lifetimes: _survey(
+        resident, backend_types, gpus, gib_per_gpu, copies))
+
+    # A stage that does not fit may hold engines it does not call, kept for
+    # a later stage. Each is unloaded over that gap if every stage then
+    # fits. Of those gaps, the ones the run fits without are given back,
+    # the largest engine's first: its load is the longest to repeat.
+    unfit = [i for i, phase in enumerate(phases) if not phase.plan.fits]
+    gaps = [(engine, before, after)
+            for engine, at in calls.items() for before, after in zip(at, at[1:])
+            if any(before < i < after for i in unfit)]
+    once = staged       # the stages as surveyed, every engine loaded once
+
+    def without(released, quiet=True):
+        """The run planned with ``released`` unloaded, from the models as
+        sized already: ``None`` unless every stage then fits."""
+        found = place(released, lambda i, resident, lifetimes: once[i].only(
+            resident, lifetimes), quiet)
+        return found if all(phase.plan.fits for phase in found[0]) else None
+
+    if gaps and without(gaps):
+        size: dict[tuple, float] = {}
+        for stage in once:
+            for fp in stage.footprints:
+                size.setdefault(fp.engine, fp.gb or 0.0)
+        released = list(gaps)
+        for gap in sorted(gaps, key=lambda g: -size[g[0]]):
+            rest = [other for other in released if other != gap]
+            if without(rest):
+                released = rest
+        # Planned once more, to log the cards if a search chose them.
+        phases, staged = without(released, quiet=False)
+        for engine, before, after in sorted(released, key=lambda g: g[1]):
+            logger.info(
+                "[residency] %s is unloaded for stage %s and loaded again for "
+                "stage %s, so that %s fits. This costs one more load.",
+                next(name for name, e in engine_of.items() if e == engine),
+                stages[before + 1], stages[after],
+                stages[next(i for i in unfit if before < i < after)])
+
+    placed = list({id(stage): stage for stage in staged}.values())
+    plans = [stage.plan for stage in placed]
+    # Each footprint under what its engine has one share and one set of
+    # cards for: the engine, or a lifetime of it.
+    footprints = [(stage.lifetime(fp), fp)
+                  for stage in placed for fp in stage.plan.footprints]
+
+    def loads(key, fp):
+        return "loads once" if key == fp.engine else f"loads for stage {key[-1]}"
+
+    # One share per engine for a whole lifetime: the smallest planned.
     smallest: dict[tuple, tuple[float, float | None]] = {}
-    footprints = [fp for plan in plans for fp in plan.footprints]
-    for fp in footprints:
+    for key, fp in footprints:
         if fp.planned_utilization is None:
             continue
         share = (fp.planned_utilization, fp.reserved_gb)
-        if fp.engine not in smallest or share[0] < smallest[fp.engine][0]:
-            smallest[fp.engine] = share
+        if key not in smallest or share[0] < smallest[key][0]:
+            smallest[key] = share
     lowered = set()
-    for fp in footprints:
+    for key, fp in footprints:
         if fp.planned_utilization is None:
             continue
-        share, reserved = smallest[fp.engine]
-        if share < fp.planned_utilization and fp.engine not in lowered:
-            lowered.add(fp.engine)
+        share, reserved = smallest[key]
+        if share < fp.planned_utilization and key not in lowered:
+            lowered.add(key)
             logger.info(
-                "[residency] %s loads once, with gpu_memory_utilization=%.2f: "
+                "[residency] %s %s, with gpu_memory_utilization=%.2f: "
                 "its share in the stage where its card is most crowded.",
-                fp.model, share)
+                fp.model, loads(key, fp), share)
         fp.planned_utilization, fp.reserved_gb = share, reserved
 
     # One set of cards per engine too: those it holds in every stage, so a
     # copy stays only where no stage plans another model. The cards an
     # engine was placed on are in every stage's set, being kept.
     common: dict[tuple, tuple[int, ...]] = {}
-    for fp in footprints:
+    for key, fp in footprints:
         if fp.setup == "vllm":
-            so_far = common.get(fp.engine, fp.devices)
-            common[fp.engine] = tuple(d for d in so_far if d in fp.devices)
+            so_far = common.get(key, fp.devices)
+            common[key] = tuple(d for d in so_far if d in fp.devices)
     told = set()
-    for fp in footprints:
-        cards = common.get(fp.engine, fp.devices)
+    for key, fp in footprints:
+        cards = common.get(key, fp.devices)
         if len(cards) == len(fp.devices):
             continue
         fp.devices, fp.copies = cards, len(cards) // fp.min_gpus
-        if fp.engine not in told:
-            told.add(fp.engine)
+        if key not in told:
+            told.add(key)
             logger.info(
-                "[residency] %s loads once, with %d %s: on the cards it "
+                "[residency] %s %s, with %d %s: on the cards it "
                 "holds in every stage.",
-                fp.model, fp.copies, "copy" if fp.copies == 1 else "copies")
+                fp.model, loads(key, fp), fp.copies,
+                "copy" if fp.copies == 1 else "copies")
 
     # A transformers model is not placed by the plan: its device_map placed
     # it, when it loaded. A later stage only guesses again.
     guessed: dict[tuple, tuple[int, ...]] = {}
-    for fp in footprints:
+    for key, fp in footprints:
         if fp.setup == "vllm":
             continue
-        first = guessed.setdefault(fp.engine, fp.devices)
-        if fp.devices != first and fp.engine not in told:
-            told.add(fp.engine)
+        first = guessed.setdefault(key, fp.devices)
+        if fp.devices != first and key not in told:
+            told.add(key)
             logger.warning(
                 "[residency] %s is planned on other cards in a later stage. A "
                 "transformers model stays where its device_map put it when "
@@ -153,3 +227,21 @@ def plan_phases(
     for plan in plans:
         plan.gpus_required = _gpus_required(plan.footprints)
     return phases
+
+
+def _lifetimes(
+    calls: list[int], released: list[tuple[int, int]],
+) -> list[tuple[int, int]]:
+    """The first and last stage of each time an engine is loaded.
+
+    Args:
+        calls: The stages that call the engine, in order.
+        released: The gaps it is unloaded over, each as the call before the
+            gap and the call after.
+    """
+    spans, first = [], calls[0]
+    for before, after in zip(calls, calls[1:]):
+        if (before, after) in released:
+            spans.append((first, before))
+            first = after
+    return [*spans, (first, calls[-1])]

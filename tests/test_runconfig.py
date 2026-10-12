@@ -510,14 +510,15 @@ def test_empty_stages_list_is_not_the_default_pipeline(tmp_path):
 
 @pytest.fixture()
 def local_models():
-    """Register throwaway local vLLM models; clean up after."""
+    """Register throwaway local vLLM models, of 5 GiB unless a size is
+    given; clean up after."""
     from redact.llms.model_config import MODEL_REGISTRY, VLLMConfig, register_model
 
     made = []
 
-    def _make(name, roles=None, **kwargs):
+    def _make(name, roles=None, gb=5.0, **kwargs):
         register_model(name, backend_type="vllm", roles=roles,
-                       vllm=VLLMConfig(hf_model_id=f"org/{name}", vram_gb=5.0, **kwargs))
+                       vllm=VLLMConfig(hf_model_id=f"org/{name}", vram_gb=gb, **kwargs))
         made.append(name)
         return name
 
@@ -726,8 +727,8 @@ def test_entering_a_stage_hands_the_loader_the_stages_plan(local_models):
     card = _one_card(24.0)
     try:
         with card[0], card[1], patch.object(residency, "unload_local"), \
-             patch.object(residency, "preload",
-                          side_effect=lambda names, **kw: handed.append((names, _loader()))):
+             patch.object(residency, "preload", side_effect=lambda names, **kw:
+                          handed.append((names, _loader()))):
             phases = _plan_phases(
                 models, ["constitution", "inputs", "paraphrase"], verbose=False)
             planned = _loader()
@@ -759,8 +760,8 @@ def test_a_model_loaded_again_loads_under_the_plan_of_its_stage(local_models):
               for stage, plan in zip("abc", plans)]
     handed, warm = [], set()
     with patch.object(residency, "unload_local"), \
-         patch.object(residency, "preload",
-                      side_effect=lambda names, **kw: handed.append((names, _loader()))):
+         patch.object(residency, "preload", side_effect=lambda names, **kw:
+                      handed.append((names, _loader()))):
         for i in range(3):
             _enter_phase(phases, i, warm, verbose=False)
     assert handed == [
@@ -1169,6 +1170,88 @@ def test_a_run_leaves_no_planned_card_behind(tmp_path, monkeypatch):
         telemetry.uninstall()
     assert seen == [[(0,)]]                                # applied while the stage ran
     assert vllm_module._planned_devices == {}              # gone with the run
+
+
+def test_a_run_unloads_a_model_for_a_stage_and_loads_it_again(
+        tmp_path, monkeypatch, local_models, caplog):
+    """Two 24 GiB cards. The inputs stage's two engines need a card each, so
+    x, which the constitution and paraphrase stages call, is unloaded for
+    it. Its second load takes that lifetime's card, copies and share, and
+    the run leaves nothing loaded or planned."""
+    import logging
+    import os
+    from types import SimpleNamespace
+
+    import redact
+    import redact.llms.backends.vllm as vllm_module
+    from redact.llms import ModelClient
+    from tests.conftest import fake_vllm_modules
+
+    x, p = local_models("_rc_twice_x"), local_models("_rc_twice_p")
+    g, c = local_models("_rc_twice_g", gb=15.0), local_models("_rc_twice_c", gb=15.0)
+    events = []
+
+    class _LLM:
+        scheduler_config = SimpleNamespace(max_num_seqs=256)
+
+        def __init__(self, **kw):
+            self.model = kw["model"].removeprefix("org/")
+            events.append(("load", self.model, kw["gpu_memory_utilization"],
+                           os.environ.get("CUDA_VISIBLE_DEVICES"),
+                           kw.get("data_parallel_size", 1)))
+
+        def shutdown(self):
+            events.append(("unload", self.model))
+
+    def stage(name, *roles, result=None):
+        def run(**k):
+            events.append(name)
+            for role in roles:
+                ModelClient.create(k[role])
+            return pd.DataFrame({"x": [1]}) if result is None else result
+
+        monkeypatch.setattr(redact, f"generate_{name}", run)
+
+    stage("constitution", "model")
+    stage("inputs", "model", "check_model")
+    stage("paraphrases", "paraphraser", "check_model", result={})
+    stage("jailbreaks", "model")
+    recipe = {"dataset_type": "training", "data_dir": str(tmp_path),
+              "stages": ["constitution", "inputs", "paraphrase", "jailbreaks"],
+              "models": {"constitution": x, "gen": g, "check": c,
+                         "paraphraser": p, "paraphrase_check": x}}
+    monkeypatch.delenv("CUDA_VISIBLE_DEVICES", raising=False)
+    vllm_module.VLLMBackend.clear_cache()
+    try:
+        with patch("redact.llms.resources.measure.detect_gpus",
+                   return_value=("FakeGPU", 2)), \
+             patch("redact.llms.resources.measure.detect_gpu_memory_gib",
+                   return_value=24.0), \
+             patch.dict("sys.modules", fake_vllm_modules(_LLM)), \
+             patch.object(vllm_module, "_prepare_environment"), \
+             caplog.at_level(logging.INFO, logger="redact.residency.phases"):
+            summary = run_pipeline(recipe, params={}, verbose=False)
+    finally:
+        telemetry.uninstall()
+        vllm_module.VLLMBackend.clear_cache()
+    assert summary["residency"]["fits"] is True
+    assert [phase["resident"] for phase in summary["residency"]["phases"]] == [
+        [x], [g, c], [x, g, p], [g]]
+    assert f"{x} is unloaded for stage inputs and loaded again for stage " \
+           "paraphrase, so that inputs fits." in caplog.text
+    assert events == [
+        "constitution", ("load", x, 0.9, "0,1", 2),
+        ("unload", x),
+        "inputs", ("load", g, 0.9, "0", 1), ("load", c, 0.9, "1", 1),
+        ("unload", c),
+        "paraphrases", ("load", p, 0.45, "1", 1), ("load", x, 0.45, "1", 1),
+        ("unload", p), ("unload", x),
+        "jailbreaks",
+        ("unload", g),
+    ]
+    assert vllm_module._engines == {} and vllm_module.held_seconds() == {}
+    assert vllm_module._planned_utilization == {} == vllm_module._planned_devices
+    assert "CUDA_VISIBLE_DEVICES" not in os.environ
 
 
 def test_load_recipe_rejects_a_repeated_stage():

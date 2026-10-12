@@ -316,8 +316,9 @@ def _plan_phases(
                 reported.add(id(phase.plan))
                 residency.report(
                     phase.plan, verbose=verbose, stages=stages_of[id(phase.plan)])
-            # Every plan carries the same share per engine; the first replaces
-            # what an earlier run left.
+            # The first replaces what an earlier run left. An engine loaded
+            # a second time has other values in a later plan, which it gets
+            # when that stage is entered (_enter_phase).
             residency.apply_plan(phase.plan, replace=(i == 0))
     except Exception as exc:  # noqa: BLE001 — a planning bug must not abort a run
         logger.error("[residency] planning failed (%s: %s); the run continues "

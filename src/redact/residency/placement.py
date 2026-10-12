@@ -5,7 +5,7 @@ import itertools
 import logging
 import math
 import re
-from dataclasses import dataclass, replace
+from dataclasses import dataclass, field, replace
 
 from redact.llms.resources import measure
 
@@ -275,6 +275,31 @@ class _Stage:
     count: int
     #: Copies given, per engine.
     counts: dict[tuple, int]
+    #: Per engine that a run unloads and loads again, the lifetime the
+    #: stage is in. Each is placed like an engine of its own.
+    lifetimes: dict[tuple, tuple] = field(default_factory=dict)
+
+    def lifetime(self, fp: ModelFootprint) -> tuple:
+        """What a model's engine keeps its cards under from stage to stage:
+        its lifetime, or the engine when the run loads it once."""
+        return self.lifetimes.get(fp.engine, fp.engine)
+
+    def own(self, cards: dict[tuple, tuple[int, ...]]) -> dict[tuple, tuple[int, ...]]:
+        """Of cards kept per lifetime, those of this stage's engines, per
+        engine."""
+        return {fp.engine: cards[self.lifetime(fp)] for fp in self.footprints
+                if self.lifetime(fp) in cards}
+
+    def only(self, models: list[str], lifetimes: dict[tuple, tuple]) -> "_Stage":
+        """The stage with ``models`` alone to place, sized as they were
+        surveyed, on the same machine."""
+        footprints = [replace(fp) for fp in self.footprints if fp.model in models]
+        engines = {fp.engine for fp in footprints}
+        return _Stage(
+            replace(self.plan, groups=[], gpus_required=0, oversized=[]),
+            footprints, self.count,
+            {engine: n for engine, n in self.counts.items() if engine in engines},
+            lifetimes)
 
 
 def _survey(
@@ -342,13 +367,15 @@ def _survey(
 
 def _arrange(
     stages: list[_Stage], pinned: dict[tuple, tuple[int, ...]] | None = None,
+    quiet: bool = False,
 ) -> None:
     """Place the models of every stage and fill in the stages' plans.
 
     The stages are placed in the order given. Where that leaves a stage in
     more than one group, :class:`_Search` looks for other cards for the
     vLLM engines, and the stages are placed again on the cards it finds.
-    Unless every stage then fits, the first result stands.
+    Unless every stage then fits, the first result stands. ``quiet`` leaves
+    out the log line, for a result the caller may not keep.
     """
     _place_all(stages, pinned)
     # One card, or cards of unknown size, leave nothing to choose.
@@ -367,6 +394,8 @@ def _arrange(
         # engine of unknown size fits no plan beside others.
         _place_all(stages, pinned)
         return
+    if quiet:
+        return
     logger.info(
         "[residency] placed in another arrangement than the order given: %s",
         ", ".join(
@@ -380,18 +409,18 @@ def _place_all(
     pinned: dict[tuple, tuple[int, ...]] | None,
     chosen: dict[tuple, tuple[int, ...]] | None = None,
 ) -> None:
-    """Place the stages in turn. A vLLM engine keeps the cards of its first
-    stage: each later stage places it first, on them."""
+    """Place the stages in turn. A vLLM engine keeps the cards of the first
+    stage of a lifetime: each later one places it first, on them."""
     held = dict(pinned or {})
     for stage in stages:
-        _place(stage, held, chosen)
+        _place(stage, stage.own(held), stage.own(chosen or {}))
         for fp in stage.footprints:
             if fp.setup == "vllm" and fp.devices:
                 # A copy on an idle card is decided stage by stage, so only
                 # the cards the engine was placed on are kept for the next.
                 placed = (fp.devices if fp.engine in stage.counts
                           else fp.devices[:fp.min_gpus])
-                held.setdefault(fp.engine, placed)
+                held.setdefault(stage.lifetime(fp), placed)
 
 
 def _place(
@@ -484,7 +513,8 @@ class _Search:
     def __init__(self, stages: list[_Stage], pinned: dict[tuple, tuple[int, ...]]):
         self.pinned = pinned
         #: Per stage, its models, one per engine. Copies: placing a model
-        #: writes on its footprint.
+        #: writes on its footprint. Each has its lifetime for an engine, so
+        #: that one loaded again is found cards of its own.
         self.stages: list[tuple[_Stage, list[ModelFootprint]]] = []
         #: The engines to find cards for, and the first model on each.
         self.engines: dict[tuple, str] = {}
@@ -495,7 +525,8 @@ class _Search:
             for fp in stage.footprints:
                 if fp.engine not in models:
                     models[fp.engine] = replace(
-                        fp, copies=stage.counts.get(fp.engine, 1))
+                        fp, copies=stage.counts.get(fp.engine, 1),
+                        engine=stage.lifetime(fp))
             self.stages.append((stage, list(models.values())))
             for fp in models.values():
                 if fp.setup == "vllm" and fp.engine not in pinned:
