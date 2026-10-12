@@ -41,9 +41,12 @@ def plan_phases(
     is granted the smallest share any of its stages plans for it, so the
     share it loads with holds for as long as it is resident. It also stays
     on the cards it loaded on: a stage places the engines it inherits first,
-    on their cards, and its other models around them. Of its copies it
-    keeps those on cards every one of its stages leaves it, so it gives up
-    the ones a more crowded stage has no card for.
+    on their cards, and its other models around them. When a stage does not
+    fit like that, other cards are looked for as :func:`plan_residency`
+    does, for the run as a whole: an engine has the same cards in all its
+    stages, and they are taken only when every stage fits on them. Of its
+    copies an engine keeps those on cards every one of its stages leaves
+    it, so it gives up the ones a more crowded stage has no card for.
 
     Args:
         stage_models: The models each stage calls. Unregistered and non-local

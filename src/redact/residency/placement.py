@@ -222,8 +222,11 @@ def plan_residency(
 
     Models are placed in the order given: a vLLM engine on the cards with
     the most room, a transformers model where its ``device_map`` puts it.
-    One that does not fit beside those already placed starts a new group,
-    and more than one group means the run does not fit
+    When they do not all fit like that, the single-GPU vLLM engines are
+    tried on other cards, and the models are placed in an arrangement that
+    fits if :class:`_Search` finds one. Otherwise the order given stands:
+    a model that does not fit beside those placed before it starts a new
+    group, and more than one group means the run does not fit
     (:attr:`ResidencyPlan.fits`). Cards are numbered over the visible ones:
     card 0 is the first that ``CUDA_VISIBLE_DEVICES`` leaves this process.
 

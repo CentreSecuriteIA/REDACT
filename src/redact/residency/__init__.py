@@ -11,7 +11,9 @@ The plan describes what a run does:
   resident keeps the cards it loaded on.
 - A vLLM engine loads on the cards the plan chose: a single-GPU engine on
   the card with the most room, a tensor-parallel one on untouched cards.
-  Cards are numbered over those ``CUDA_VISIBLE_DEVICES`` leaves visible. A
+  When the models do not all fit like that, the single-GPU engines are
+  placed on other cards on which they do, if there are any. Cards are
+  numbered over those ``CUDA_VISIBLE_DEVICES`` leaves visible. A
   transformers model goes where its ``device_map`` puts it.
 - Cards left idle take copies of the plan's first single-GPU vLLM engine,
   one per card (vLLM's ``data_parallel_size``), unless a count is given
@@ -34,9 +36,6 @@ of the run, not a guarantee against running out of memory.
 #   - Free memory per card. One card size per plan: the smallest.
 #   - A plan does not see engines already loaded, by this process or another.
 #     The runner should own this; one process (container) per run is a candidate.
-#   - Placement is greedy: models are placed in the order given and never
-#     moved, so a set that could fit, mostly across several cards, can be
-#     reported as not fitting. Needs a search over arrangements.
 #   - An engine stays resident from its first stage to its last, so a stage
 #     can fail to fit only because of an engine kept for a later stage.
 #     Releasing and reloading it would fit, at the cost of a second load.
