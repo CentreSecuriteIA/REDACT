@@ -12,7 +12,8 @@
     "NVIDIA GeForce RTX 4090": 0.44,
     "NVIDIA RTX A6000": 0.49,
     "NVIDIA RTX PRO 4500 Blackwell": 0.72,
-    "NVIDIA RTX PRO 6000 Blackwell Workstation Edition": 2.59
+    "NVIDIA RTX PRO 6000 Blackwell Workstation Edition": 2.59,
+    "NVIDIA RTX PRO 6000 Blackwell Server Edition": 2.49
   },
   "lambda": {
     "NVIDIA A100-SXM4-80GB": 1.29,
