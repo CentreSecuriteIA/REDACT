@@ -192,8 +192,6 @@ async def _cancel(tasks: set[asyncio.Task]) -> None:
 #     synchronous calls (2 * batch_size): fewer than the in-process vLLM
 #     engine runs at once (backend.max_workers). Raising it for a client
 #     with async calls is the stages' change.
-#   - Reject a prompt longer than the model's context as that unit's error.
-#     Prompt length is not checked before a call.
 def drive_units(
     source: Iterable[tuple[Hashable, Generator]],
     *,
