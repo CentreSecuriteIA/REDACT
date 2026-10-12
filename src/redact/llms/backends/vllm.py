@@ -445,7 +445,6 @@ class VLLMBackend(LLMBackend):
                 aborted the request and sent only part of a reply.
         """
         from vllm import SamplingParams
-        from vllm.exceptions import VLLMValidationError
         from vllm.sampling_params import RequestOutputKind
 
         engine = self._llm  # raises before any work if the engine was released
@@ -494,7 +493,9 @@ class VLLMBackend(LLMBackend):
                 temperature=temp, error=f"{type(exc).__name__}: {exc}",
             )
             # The engine fails this one request and goes on with the others.
-            if isinstance(exc, VLLMValidationError) and exc.parameter == "input_tokens":
+            # Read off the error itself: vLLM's validation error names the
+            # parameter it rejected, and older versions have no such class.
+            if getattr(exc, "parameter", None) == "input_tokens":
                 raise PromptTooLongError(str(exc)) from exc
             raise
         reply = final.outputs[0]
