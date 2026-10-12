@@ -28,7 +28,6 @@ of the run, not a guarantee against running out of memory.
 
 #TODO(driver script): what residency per stage (plan_phases, run_pipeline)
 # does not do yet:
-#   - Confirm on a GPU that unload_local() returns a vLLM engine's memory.
 #   - Join or cancel the preload thread at exit.
 #   - Paraphraser pool: teach plan_phases that a pool's models run one at a
 #     time, so the paraphrase stage needs no plan of its own. Its plan covers
