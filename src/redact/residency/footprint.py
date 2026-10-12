@@ -34,8 +34,9 @@ class ModelFootprint:
     parts: dict = field(default_factory=dict)
     #: The load this model uses. Models with the same value share one engine.
     engine: tuple = ()
-    #: Cards the plan places the model on. Advisory: nothing applies it at
-    #: load time.
+    #: Cards the plan places the model on, numbered over the visible cards.
+    #: A vLLM engine loads on them; a transformers model follows its
+    #: ``device_map``, which the plan only reads.
     devices: tuple[int, ...] = ()
     #: GiB reserved per card: a vLLM engine's grant, or a transformers
     #: model's largest claim on one card. ``None`` when the card size is

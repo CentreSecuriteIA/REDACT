@@ -623,6 +623,28 @@ def test_a_run_leaves_no_planned_share_behind(tmp_path, monkeypatch):
     assert vllm_module._planned_utilization == {}          # gone with the run
 
 
+def test_a_run_leaves_no_planned_card_behind(tmp_path, monkeypatch):
+    """The cards are the run's own too."""
+    import redact
+    import redact.llms.backends.vllm as vllm_module
+
+    seen = []
+    monkeypatch.setattr(
+        redact, "generate_inputs",
+        lambda **k: seen.append(list(vllm_module._planned_devices.values()))
+        or pd.DataFrame({"x": [1]}))
+    recipe = {"dataset_type": "eval", "data_dir": str(tmp_path), "stages": ["inputs"],
+              "models": {"gen": "llama-3.2-3b-debug"}}
+    card = _one_card(10.0)
+    try:
+        with card[0], card[1]:
+            run_pipeline(recipe, params={"inputs": {}}, verbose=False)
+    finally:
+        telemetry.uninstall()
+    assert seen == [[(0,)]]                                # applied while the stage ran
+    assert vllm_module._planned_devices == {}              # gone with the run
+
+
 def test_load_recipe_rejects_a_repeated_stage():
     from redact.runconfig import load_recipe
 

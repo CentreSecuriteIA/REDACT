@@ -16,7 +16,8 @@ logger = logging.getLogger(__name__)
 
 
 def apply_plan(plan: "ResidencyPlan", replace: bool = True) -> None:
-    """Hand the plan's ``gpu_memory_utilization`` values to the vLLM loader.
+    """Hand the plan's ``gpu_memory_utilization`` values and cards to the
+    vLLM loader.
 
     Args:
         plan: The plan to load under.
@@ -29,6 +30,10 @@ def apply_plan(plan: "ResidencyPlan", replace: bool = True) -> None:
     vllm.set_planned_utilization(
         {fp.engine[1:]: fp.planned_utilization for fp in plan.footprints
          if fp.setup == "vllm" and fp.planned_utilization is not None},
+        replace=replace)
+    vllm.set_planned_devices(
+        {fp.engine[1:]: fp.devices for fp in plan.footprints
+         if fp.setup == "vllm" and fp.devices},
         replace=replace)
 
 
@@ -133,7 +138,7 @@ def unload_local(keep: list[str] | None = None, engines: dict | None = None) -> 
     """Release the cached local engines, except those the kept models use.
 
     A released engine is shut down and its memory freed, and its lifetime
-    meter stops. Its planned grant stays, so a reload gets the same share. A
+    meter stops. Its planned grant and cards stay, so a reload gets the same. A
     client built on it raises until the checkpoint is loaded again, and a
     call in flight on it is not waited for.
 

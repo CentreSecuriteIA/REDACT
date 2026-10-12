@@ -24,7 +24,7 @@ from typing import TYPE_CHECKING, ClassVar
 
 from ...exceptions import PromptTooLongError
 from .. import aio, observe
-from ..resources import estimate
+from ..resources import estimate, measure
 from .base import ComputeConfig, LLMBackend, free_memory
 
 if TYPE_CHECKING:
@@ -48,6 +48,9 @@ _engine_loaded_at: dict[tuple, float] = {}
 # gpu_memory_utilization per engine key, set by the residency plan. Applied
 # at load and kept out of the key, so it never splits a shared engine.
 _planned_utilization: dict[tuple, float] = {}
+# The cards per engine key, set by the residency plan and kept out of the
+# key like the share. Indices over the cards this process can see.
+_planned_devices: dict[tuple, tuple[int, ...]] = {}
 # Set once the exit hook is registered, at the start of the first load (see _engine).
 _exit_hook_registered = False
 # Numbers the requests: an engine needs each id unique in the process.
@@ -62,6 +65,62 @@ def set_planned_utilization(planned: dict[tuple, float], replace: bool = True) -
     global _planned_utilization
     # One assignment, so a load never reads a half-filled plan.
     _planned_utilization = {**planned, **({} if replace else _planned_utilization)}
+
+
+def set_planned_devices(
+    planned: dict[tuple, tuple[int, ...]], replace: bool = True
+) -> None:
+    """Set the cards each engine key loads on, as indices over the visible cards.
+
+    ``replace=False`` keeps the values already set.
+    """
+    global _planned_devices
+    _planned_devices = {**planned, **({} if replace else _planned_devices)}
+
+
+def _physical_ids(devices: tuple[int, ...]) -> list[str]:
+    """The planned cards as ``CUDA_VISIBLE_DEVICES`` names them.
+
+    The plan counts over the visible cards, so with the variable set a
+    planned index is a position in it. ``[]`` when the plan names a card
+    past the visible ones: such a plan does not fit, and the engine is left
+    the cards it can see already, where vLLM fails for want of the rest.
+    """
+    visible = measure.visible_gpu_ids()
+    if visible is None:
+        return [str(d) for d in devices]
+    if max(devices, default=-1) >= len(visible):
+        return []
+    return [visible[d] for d in devices]
+
+
+@contextlib.contextmanager
+def _visible_devices(ids: list[str]):
+    """Make ``ids`` the only cards an engine built inside can see.
+
+    The engine's processes are spawned and read ``CUDA_VISIBLE_DEVICES`` as
+    they start, so the variable is set for the build and put back after it,
+    also when the build fails. Without ``ids`` it is left alone. Enter under
+    ``_engines_lock`` only: the variable is the whole process's, so two
+    builds must not overlap.
+
+    Not covered: what else reads the variable while a build is under way on
+    another thread. A plan made then counts only these cards, and a
+    transformers load that initialises CUDA in this process then sees only
+    them from then on.
+    """
+    if not ids:
+        yield
+        return
+    before = os.environ.get("CUDA_VISIBLE_DEVICES")
+    os.environ["CUDA_VISIBLE_DEVICES"] = ",".join(ids)
+    try:
+        yield
+    finally:
+        if before is None:
+            os.environ.pop("CUDA_VISIBLE_DEVICES", None)
+        else:
+            os.environ["CUDA_VISIBLE_DEVICES"] = before
 
 
 def _engine_key(hf_model_id: str, quantization: str | None, vllm_kwargs: dict) -> tuple:
@@ -133,16 +192,21 @@ def _engine(hf_model_id: str, quantization: str | None, vllm_kwargs: dict):
         # vllm.LLM's default. Left unset, the engine logs a stats line every
         # 10 seconds.
         kwargs.setdefault("disable_log_stats", True)
+        # The plan's cards. Without a plan the engine takes the first visible
+        # card(s), and the environment is left alone.
+        ids = _physical_ids(_planned_devices.get(key, ()))
 
         started = time.perf_counter()
         # Not measured: vLLM preallocates its memory grant in a separate
         # process, so a measurement would restate the setting.
-        _engines[key] = AsyncLLM.from_engine_args(
-            AsyncEngineArgs(model=hf_model_id, quantization=quantization, **kwargs),
-            # vllm.LLM's context: vLLM's defaults for running sequences and
-            # batched tokens depend on it, and the engine's own has lower ones.
-            usage_context=UsageContext.LLM_CLASS,
-        )
+        with _visible_devices(ids):
+            _engines[key] = AsyncLLM.from_engine_args(
+                AsyncEngineArgs(
+                    model=hf_model_id, quantization=quantization, **kwargs),
+                # vllm.LLM's context: vLLM's defaults for running sequences and
+                # batched tokens depend on it, and the engine's own has lower ones.
+                usage_context=UsageContext.LLM_CLASS,
+            )
         # Held from the start of the load; set after it, so a failed load
         # leaves no timer.
         _engine_loaded_at[key] = started
@@ -155,6 +219,8 @@ def _engine(hf_model_id: str, quantization: str | None, vllm_kwargs: dict):
             "quantization": quantization,
             "tensor_parallel_size": kwargs.get("tensor_parallel_size", 1),
             "gpu_memory_utilization": kwargs.get("gpu_memory_utilization"),
+            # As handed to the engine's processes; empty when none were.
+            "devices": ids,
             "load_ms": round((time.perf_counter() - started) * 1000, 1),
         })
         return _engines[key]
@@ -310,7 +376,7 @@ class VLLMBackend(LLMBackend):
         """Release the loaded engines and free their memory.
 
         Each is shut down and its hold time reported. Its planned utilization
-        stays, so a reload gets the same share. A backend built on a released
+        and cards stay, so a reload gets the same. A backend built on a released
         engine raises on ``generate()`` until the checkpoint is loaded again.
         A call in flight on a released engine is not waited for.
         Also the exit hook, registered when the first load starts: an exit

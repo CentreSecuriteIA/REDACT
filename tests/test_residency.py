@@ -8,6 +8,7 @@ GPU-session job.
 
 import json
 import logging
+import os
 import threading
 import time
 import weakref
@@ -1518,6 +1519,165 @@ class TestPlannedUtilization:
              patch("redact.llms.resources.measure.detect_gpu_memory_gib", return_value=None):
             residency.apply_plan(residency.plan_residency([m]))
         assert vllm_module._planned_utilization == {}
+
+
+class TestPlannedDevices:
+    """The plan's cards reach the engine: while it is built, only they are
+    visible."""
+
+    @pytest.fixture()
+    def engine(self, monkeypatch):
+        """Load through a fake engine, with ``CUDA_VISIBLE_DEVICES`` unset.
+
+        Yields ``(module, builds)``: per engine built, the variable as its
+        constructor saw it and the constructor's arguments. Setting
+        ``builds.fail`` makes a build raise.
+        """
+        import redact.llms.backends.vllm as vllm_module
+
+        class _Builds(list):
+            fail = False
+
+        builds = _Builds()
+
+        class _LLM:
+            scheduler_config = SimpleNamespace(max_num_seqs=256)
+
+            def __init__(self, **kw):
+                builds.append((os.environ.get("CUDA_VISIBLE_DEVICES"), kw))
+                if builds.fail:
+                    raise RuntimeError("CUDA out of memory")
+
+        monkeypatch.delenv("CUDA_VISIBLE_DEVICES", raising=False)
+        vllm_module.VLLMBackend.clear_cache()
+        with patch.dict("sys.modules", fake_vllm_modules(_LLM)), \
+             patch.object(vllm_module, "_prepare_environment"):
+            yield vllm_module, builds
+        vllm_module.VLLMBackend.clear_cache()
+
+    def test_the_planned_card_is_visible_only_during_the_build(self, registered, engine):
+        vllm_module, builds = engine
+        a = registered("_pd_a", hf_model_id="org/pda", vram_gb=10.0)
+        b = registered("_pd_b", hf_model_id="org/pdb", vram_gb=10.0)
+        residency.apply_plan(_plan([a, b], 24.0, 2))
+        vllm_module._engine("org/pda", None, {})
+        vllm_module._engine("org/pdb", None, {})
+        assert [visible for visible, _ in builds] == ["0", "1"]
+        assert "CUDA_VISIBLE_DEVICES" not in os.environ
+
+    def test_a_parent_variable_is_restored_and_translated(self, engine, monkeypatch):
+        """The plan counts over the visible cards: its card 1 is the second
+        card the parent's variable names."""
+        vllm_module, builds = engine
+        monkeypatch.setenv("CUDA_VISIBLE_DEVICES", "2,3")
+        vllm_module.set_planned_devices(
+            {vllm_module._engine_key("org/pdt", None, {}): (1,)})
+        vllm_module._engine("org/pdt", None, {})
+        assert [visible for visible, _ in builds] == ["3"]
+        assert os.environ["CUDA_VISIBLE_DEVICES"] == "2,3"
+
+    @pytest.mark.parametrize("before,during", [(None, "1"), ("2,3", "3")])
+    def test_a_failed_build_restores_the_variable(
+            self, engine, monkeypatch, before, during):
+        vllm_module, builds = engine
+        if before is not None:
+            monkeypatch.setenv("CUDA_VISIBLE_DEVICES", before)
+        vllm_module.set_planned_devices(
+            {vllm_module._engine_key("org/pdf", None, {}): (1,)})
+        builds.fail = True
+        with pytest.raises(RuntimeError, match="CUDA out of memory"):
+            vllm_module._engine("org/pdf", None, {})
+        assert [visible for visible, _ in builds] == [during]
+        assert os.environ.get("CUDA_VISIBLE_DEVICES") == before
+        assert vllm_module._engines == {} and vllm_module.held_seconds() == {}
+
+    @pytest.mark.parametrize("before", [None, "1"])
+    def test_no_plan_leaves_the_environment_alone(self, engine, monkeypatch, before):
+        """An engine built without a plan is built as it always was."""
+        vllm_module, builds = engine
+        if before is not None:
+            monkeypatch.setenv("CUDA_VISIBLE_DEVICES", before)
+        environment = dict(os.environ)
+        vllm_module._engine("org/pdn", None, {"max_model_len": 512})
+        assert builds == [(before, {
+            "model": "org/pdn", "quantization": None, "max_model_len": 512,
+            "gpu_memory_utilization": 0.9, "disable_log_stats": True})]
+        assert dict(os.environ) == environment
+
+    def test_a_one_card_plan_builds_the_engine_as_without_a_plan(self, registered, engine):
+        """One card: the same arguments, and the only card is the one shown."""
+        vllm_module, builds = engine
+        m = registered("_pd_one", hf_model_id="org/pdo", vram_gb=10.0,
+                       vllm_kwargs={"max_model_len": 512})
+        environment = dict(os.environ)
+        residency.apply_plan(_plan([m], 24.0, 1))
+        vllm_module._engine("org/pdo", None, {"max_model_len": 512})
+        assert builds == [("0", {
+            "model": "org/pdo", "quantization": None, "max_model_len": 512,
+            "gpu_memory_utilization": 0.9, "disable_log_stats": True})]
+        assert dict(os.environ) == environment
+
+    @pytest.mark.parametrize("visible,planned", [("", (0,)), ("1", (0, 1))])
+    def test_a_planned_card_that_is_not_visible_changes_nothing(
+            self, engine, monkeypatch, visible, planned):
+        """Such a plan does not fit. The engine is left what it can see, as
+        without a plan: an empty variable goes on hiding every card."""
+        vllm_module, builds = engine
+        monkeypatch.setenv("CUDA_VISIBLE_DEVICES", visible)
+        vllm_module.set_planned_devices(
+            {vllm_module._engine_key("org/pdx", None, {}): planned})
+        vllm_module._engine("org/pdx", None, {})
+        assert [seen for seen, _ in builds] == [visible]
+        assert os.environ["CUDA_VISIBLE_DEVICES"] == visible
+
+    def test_the_load_event_names_the_devices(self, engine, monkeypatch):
+        """As the engine's processes were handed them; none when none were."""
+        vllm_module, _ = engine
+        monkeypatch.setenv("CUDA_VISIBLE_DEVICES", "2,3")
+        vllm_module.set_planned_devices({
+            vllm_module._engine_key("org/pde", None, {}): (1, 0),
+            vllm_module._engine_key("org/pde-past", None, {}): (2,),
+        })
+        events = []
+        observe.set_emitter(events.append)
+        try:
+            for hf_model_id in ("org/pde", "org/pde-past", "org/pde-noplan"):
+                vllm_module._engine(hf_model_id, None, {})
+        finally:
+            observe.set_emitter(None)
+        assert [(e["hf_model_id"], e["devices"]) for e in events] == [
+            ("org/pde", ["3", "2"]), ("org/pde-past", []), ("org/pde-noplan", [])]
+
+    def test_apply_plan_hands_one_devices_entry_per_engine(self, registered, engine):
+        vllm_module, _ = engine
+        a = registered("_pd_tw_a", hf_model_id="org/pdtw", vram_gb=10.0)
+        b = registered("_pd_tw_b", hf_model_id="org/pdtx", vram_gb=10.0)
+        twin = registered("_pd_tw_c", hf_model_id="org/pdtw", vram_gb=10.0)
+        residency.apply_plan(_plan([a, b, twin], 24.0, 2))
+        assert vllm_module._planned_devices == {
+            vllm_module._engine_key("org/pdtw", None, {}): (0,),
+            vllm_module._engine_key("org/pdtx", None, {}): (1,),
+        }
+
+    def test_a_plan_is_swapped_in_whole_and_replace_false_keeps_what_is_set(self, engine):
+        vllm_module, _ = engine
+        vllm_module.set_planned_devices({("a",): (0,)})
+        before = vllm_module._planned_devices
+        vllm_module.set_planned_devices({("b",): (1,)})
+        assert before == {("a",): (0,)}                     # not cleared in place
+        assert vllm_module._planned_devices == {("b",): (1,)}
+        vllm_module.set_planned_devices({("b",): (0,), ("c",): (0,)}, replace=False)
+        assert vllm_module._planned_devices == {("b",): (1,), ("c",): (0,)}
+
+    def test_a_released_engine_reloads_on_its_planned_card(self, registered, engine):
+        vllm_module, builds = engine
+        a = registered("_pd_rel_a", hf_model_id="org/pdra", vram_gb=10.0)
+        b = registered("_pd_rel_b", hf_model_id="org/pdrb", vram_gb=10.0)
+        residency.apply_plan(_plan([a, b], 24.0, 2))
+        vllm_module._engine("org/pdrb", None, {})
+        residency.unload_local()
+        vllm_module._engine("org/pdrb", None, {})
+        assert [visible for visible, _ in builds] == ["1", "1"]
 
 
 class TestPaddedGrant:

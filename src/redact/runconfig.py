@@ -446,6 +446,7 @@ def run_pipeline(
                 warm.clear()        # emptied first: the preloader skips the rest
                 residency.unload_local()
                 vllm.set_planned_utilization({})      # the shares were this run's
+                vllm.set_planned_devices({})          # and so were the cards
             # Roll up tokens, engine time and cost. Also logged at INFO, so
             # run.py's existing --quiet/--debug control whether it is shown.
             summary["telemetry"] = telemetry.summary()
