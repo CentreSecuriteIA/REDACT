@@ -1917,6 +1917,43 @@ class TestPlannedDevices:
         vllm_module._engine("org/pdk", None, kw)
         assert builds[0][1]["data_parallel_size"] == 2
 
+    @pytest.mark.parametrize("planned,kwargs,copies", [
+        ((0, 1), {}, "2 copies, one per card (data_parallel_size=2)"),
+        ((0, 1, 2, 3), {"tensor_parallel_size": 2},
+         "2 copies, each on 2 cards (data_parallel_size=2)"),
+    ])
+    def test_a_failed_build_with_copies_says_how_to_load_one(
+            self, engine, planned, kwargs, copies):
+        vllm_module, builds = engine
+        vllm_module.set_planned_devices(
+            {vllm_module._engine_key("org/pdh", None, kwargs): planned})
+        builds.fail = True
+        with pytest.raises(RuntimeError) as raised:
+            vllm_module._engine("org/pdh", None, kwargs)
+        assert str(raised.value) == (
+            f"The vLLM engine of org/pdh was being built with {copies}, and the "
+            "build failed (RuntimeError: CUDA out of memory). To load one copy, "
+            'set "copies": {"<role>": 1} in the recipe, or copies={model: 1} on '
+            "the planner.")
+        cause = raised.value.__cause__
+        assert type(cause) is RuntimeError and str(cause) == "CUDA out of memory"
+        assert len(builds) == 1                         # not tried with one copy
+        assert "CUDA_VISIBLE_DEVICES" not in os.environ
+        assert vllm_module._engines == {} and vllm_module.held_seconds() == {}
+
+    @pytest.mark.parametrize("planned,kwargs", [
+        ((), {}), ((0,), {}), ((0, 1), {"tensor_parallel_size": 2})])
+    def test_a_failed_build_of_one_copy_raises_the_error_as_it_is(
+            self, engine, planned, kwargs):
+        vllm_module, builds = engine
+        vllm_module.set_planned_devices(
+            {vllm_module._engine_key("org/pdo1", None, kwargs): planned})
+        builds.fail = True
+        with pytest.raises(RuntimeError) as raised:
+            vllm_module._engine("org/pdo1", None, kwargs)
+        assert str(raised.value) == "CUDA out of memory"
+        assert raised.value.__cause__ is None
+
     def test_the_load_event_counts_the_copies(self, engine):
         vllm_module, _ = engine
         vllm_module.set_planned_devices(

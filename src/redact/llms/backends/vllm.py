@@ -196,7 +196,8 @@ def _engine(hf_model_id: str, quantization: str | None, vllm_kwargs: dict):
         # card(s), and the environment is left alone.
         devices = _planned_devices.get(key, ())
         # More cards than one copy spans are further copies, one engine still.
-        copies = len(devices) // (kwargs.get("tensor_parallel_size") or 1)
+        span = kwargs.get("tensor_parallel_size") or 1
+        copies = len(devices) // span
         if copies > 1:
             kwargs.setdefault("data_parallel_size", copies)
         ids = _physical_ids(devices)
@@ -204,14 +205,30 @@ def _engine(hf_model_id: str, quantization: str | None, vllm_kwargs: dict):
         started = time.perf_counter()
         # Not measured: vLLM preallocates its memory grant in a separate
         # process, so a measurement would restate the setting.
-        with _visible_devices(ids):
-            _engines[key] = AsyncLLM.from_engine_args(
-                AsyncEngineArgs(
-                    model=hf_model_id, quantization=quantization, **kwargs),
-                # vllm.LLM's context: vLLM's defaults for running sequences and
-                # batched tokens depend on it, and the engine's own has lower ones.
-                usage_context=UsageContext.LLM_CLASS,
-            )
+        try:
+            with _visible_devices(ids):
+                _engines[key] = AsyncLLM.from_engine_args(
+                    AsyncEngineArgs(
+                        model=hf_model_id, quantization=quantization, **kwargs),
+                    # vllm.LLM's context: vLLM's defaults for running sequences
+                    # and batched tokens depend on it, and the engine's own has
+                    # lower ones.
+                    usage_context=UsageContext.LLM_CLASS,
+                )
+        except Exception as exc:
+            if copies <= 1:
+                raise
+            # The copies come from the plan, so the error names them and the
+            # way to one. One copy is not tried here: the plan stands.
+            n = kwargs["data_parallel_size"]
+            each = "one per card" if span == 1 else f"each on {span} cards"
+            raise RuntimeError(
+                f"The vLLM engine of {hf_model_id} was being built with {n} "
+                f"copies, {each} (data_parallel_size={n}), and the build "
+                f"failed ({type(exc).__name__}: {exc}). To load one copy, set "
+                f'"copies": {{"<role>": 1}} in the recipe, or '
+                f"copies={{model: 1}} on the planner."
+            ) from exc
         # Held from the start of the load; set after it, so a failed load
         # leaves no timer.
         _engine_loaded_at[key] = started
