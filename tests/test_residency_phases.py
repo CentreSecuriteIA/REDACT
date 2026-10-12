@@ -138,21 +138,123 @@ def test_a_given_count_reaches_every_stage(local_model, caplog):
     assert caplog.records == []
 
 
-def test_an_engine_planned_on_different_cards_is_warned_about(local_model, caplog):
-    """y loads beside x on card 1. Stage b plans it afresh, on card 0, with z
-    on the card y is really on."""
+def test_an_engine_keeps_the_card_it_loaded_on(local_model, caplog):
+    """y loads beside x, on card 1. When x is released y stays there and z
+    takes card 0. Placed afresh, y would be on card 0 and z on top of where
+    it really is."""
     import logging
 
-    x, y, z = (local_model(f"_ph_move_{n}") for n in "xyz")
-    with caplog.at_level(logging.INFO, logger="redact.residency.phases"):
+    x, y, z = (local_model(f"_ph_stay_{n}") for n in "xyz")
+    with caplog.at_level(logging.INFO, logger="redact.residency"):
         first, second = plan_phases({"a": [x, y], "b": [y, z]}, gpus=2, gib_per_gpu=24.0)
-    assert (_cards(first, y), _cards(second, y)) == (((1,), 1), ((0,), 1))
+    assert (_cards(first, x), _cards(first, y)) == (((0,), 1), ((1,), 1))
+    assert (_cards(second, y), _cards(second, z)) == (((1,), 1), ((0,), 1))
+    assert first.plan.fits and second.plan.fits
+    assert _share(first, y) == _share(second, y) == _share(second, z) == 0.9
+    assert caplog.records == []
+
+
+def test_a_kept_engine_gets_no_copy_it_did_not_load_with(local_model, caplog):
+    """Three cards. In stage a x has the copy on card 2 and y is on card 1.
+    In stage b y stays on card 1 and z takes card 0. Card 2 is idle then,
+    but y loaded with one copy."""
+    import logging
+
+    x, y, z = (local_model(f"_ph_three_{n}") for n in "xyz")
+    with caplog.at_level(logging.INFO, logger="redact.residency"):
+        first, second = plan_phases({"a": [x, y], "b": [y, z]}, gpus=3, gib_per_gpu=24.0)
+    assert (_cards(first, x), _cards(first, y)) == (((0, 2), 2), ((1,), 1))
+    assert (_cards(second, y), _cards(second, z)) == (((1,), 1), ((0,), 1))
+    assert (first.plan.gpus_required, second.plan.gpus_required) == (3, 2)
+    assert [(r.levelname, r.getMessage()) for r in caplog.records] == [(
+        "INFO", f"[residency] {y} loads once, with 1 copy: on the cards it holds "
+                "in every stage.")]
+    assert f"  note: card 2 is idle: {y} is limited to 1 copy" in second.plan.explain()
+
+
+def test_a_kept_engine_with_a_given_count_keeps_all_its_cards(local_model):
+    """Four cards: y has two copies, on cards 1 and 2, in both stages."""
+    x, y, z = (local_model(f"_ph_count_{n}") for n in "xyz")
+    first, second = plan_phases(
+        {"a": [x, y], "b": [y, z]}, gpus=4, gib_per_gpu=24.0, copies={y: 2})
+    assert (_cards(first, x), _cards(first, y)) == (((0, 3), 2), ((1, 2), 2))
+    assert (_cards(second, y), _cards(second, z)) == (((1, 2), 2), ((0,), 1))
+    assert first.plan.fits and second.plan.fits
+    assert f"  note: card 3 is idle: {y} is limited to 2 copies" in second.plan.explain()
+
+
+def test_an_engine_needed_again_stays_on_its_card_in_between(local_model):
+    """Stage b does not call x, but stage c does, so x is not released: it
+    stays on card 1 while w leaves and y comes. No lifetime has a gap, so no
+    engine is released and placed again."""
+    w, x, y = (local_model(f"_ph_again_{n}") for n in "wxy")
+    a, b, c = plan_phases({"a": [w, x], "b": [y], "c": [x]}, gpus=2, gib_per_gpu=24.0)
+    assert [p.resident for p in (a, b, c)] == [[w, x], [x, y], [x]]
+    assert _cards(a, x) == _cards(b, x) == _cards(c, x) == ((1,), 1)
+    assert (_cards(a, w), _cards(b, y)) == (((0,), 1), ((0,), 1))
+    assert a.plan.fits and b.plan.fits and c.plan.fits
+
+
+def test_a_newcomer_that_does_not_fit_beside_kept_engines_opens_a_group(local_model):
+    """An 8 GiB card holds one 5 GiB engine. y stays on card 1, the first
+    newcomer takes card 0 and the second has no card left."""
+    w, y, n1, n2 = (local_model(f"_ph_full_{n}") for n in ("w", "y", "n1", "n2"))
+    first, second = plan_phases({"a": [w, y], "b": [y, n1, n2]}, gpus=2, gib_per_gpu=8.0)
+    assert _cards(first, y) == _cards(second, y) == ((1,), 1)
+    assert second.plan.as_dict()["groups"] == [[y, n1], [n2]]
+    assert (_cards(second, n1), _cards(second, n2)) == (((0,), 1), ((0,), 1))
+    assert first.plan.fits and not second.plan.fits
+    assert second.loadable == [y, n1]
+    assert second.plan.problems[0].startswith(
+        "these groups cannot be resident together, so a later group would load "
+        "on top of the earlier ones.")
+
+
+def test_a_twin_is_kept_through_its_engine(local_model):
+    """x and its twin are two names on one checkpoint. Stage b calls only the
+    twin, and the engine stays on card 1 when w leaves."""
+    w, x, z = (local_model(f"_ph_twin_{n}") for n in "wxz")
+    twin = "_ph_twin_x_twin"
+    register_model(twin, backend_type="vllm",
+                   vllm=VLLMConfig(hf_model_id=f"org/{x}", vram_gb=5.0))
+    try:
+        first, second = plan_phases(
+            {"a": [w, x], "b": [twin, z]}, gpus=2, gib_per_gpu=24.0)
+    finally:
+        MODEL_REGISTRY.pop(twin, None)
+    assert [p.resident for p in (first, second)] == [[w, x, twin], [x, twin, z]]
+    assert _cards(first, w) == ((0,), 1)
+    for phase in (first, second):
+        assert _cards(phase, x) == _cards(phase, twin) == ((1,), 1)
+    assert _cards(second, z) == ((0,), 1)
+
+
+def test_a_transformers_model_guessed_elsewhere_later_is_warned_about(
+        local_model, caplog):
+    """The plan does not place a transformers model. Beside w, 18 GiB of
+    weights (20.5 with overhead) spill onto card 1. With w released the plan
+    counts all of it on card 0 and hands card 1 to z."""
+    import logging
+
+    from redact.llms.model_config import IntrospectConfig
+
+    w, z = local_model("_ph_tf_w"), local_model("_ph_tf_z")
+    t = "_ph_tf_spanning"
+    register_model(t, backend_type="introspect", introspect=IntrospectConfig(
+        hf_model_id=f"org/{t}", log_dir="x", vram_gb=18.0))
+    try:
+        with caplog.at_level(logging.INFO, logger="redact.residency"):
+            first, second = plan_phases(
+                {"a": [w, t], "b": [t, z]}, gpus=2, gib_per_gpu=24.0)
+    finally:
+        MODEL_REGISTRY.pop(t, None)
+    assert (_cards(first, t), _cards(second, t)) == (((0, 1), 1), ((0,), 1))
     assert _cards(second, z) == ((1,), 1)
     assert [(r.levelname, r.getMessage()) for r in caplog.records] == [(
         "WARNING",
-        f"[residency] {y} is planned on different cards in different stages. "
-        "It loads once and stays on the cards it loaded on, so a later "
-        "stage's plan may put another model there.")]
+        f"[residency] {t} is planned on other cards in a later stage. A "
+        "transformers model stays where its device_map put it when it loaded, "
+        "so that stage's plan may hand out memory it holds.")]
 
 
 def test_preload_skips_a_model_no_longer_wanted(local_model):

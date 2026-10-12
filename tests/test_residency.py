@@ -569,6 +569,53 @@ class TestPlanResidency:
             plan = residency.plan_residency([m])
         assert seen == [True] and plan.gpus_available == 1
 
+    def test_an_engine_loaded_already_is_placed_first_on_its_cards(self, registered):
+        new = registered("_res_pin_new", hf_model_id="org/pnn", vram_gb=10.0)
+        loaded = registered("_res_pin_old", hf_model_id="org/pno", vram_gb=10.0)
+        afresh = _plan([new, loaded], 24.0, 2)
+        assert [(fp.model, fp.devices) for fp in afresh.footprints] == [
+            (new, (0,)), (loaded, (1,))]
+        plan = _plan([new, loaded], 24.0, 2,
+                     pinned={residency.footprint(loaded).engine: (0,)})
+        assert [(fp.model, fp.devices) for fp in plan.footprints] == [
+            (loaded, (0,)), (new, (1,))]
+        assert plan.fits and len(plan.groups) == 1
+
+    def test_a_loaded_engine_is_placed_before_a_model_that_would_fill_its_card(
+            self, registered):
+        """Placed first, a 20 GiB transformers model takes all of card 0 and
+        the engine that is on it has no room. Around the engine it takes the
+        10 GiB left beside it and the rest on card 1."""
+        spanning = registered("_res_pin_tf", setup="introspect", hf_model_id="org/pnt",
+                              vram_gb=20.0)
+        loaded = registered("_res_pin_eng", hf_model_id="org/pne", vram_gb=10.0)
+        engine = residency.footprint(loaded).engine
+        plan = _plan([spanning, loaded], 24.0, 2, pinned={engine: (0,)})
+        assert plan.fits and [[fp.model for fp in g] for g in plan.groups] == [
+            [loaded, spanning]]
+        assert [fp.devices for fp in plan.footprints] == [(0,), (0, 1)]
+
+    def test_a_loaded_engine_that_no_longer_fits_stays_on_its_cards(self, registered):
+        """Two 15 GiB engines pinned on one 24 GiB card: the second opens a
+        group, on the card it is on, and the plan does not fit."""
+        a = registered("_res_pin_a", hf_model_id="org/pna", vram_gb=15.0)
+        b = registered("_res_pin_b", hf_model_id="org/pnb", vram_gb=15.0)
+        pinned = {residency.footprint(m).engine: (1,) for m in (a, b)}
+        plan = _plan([a, b], 24.0, 2, pinned=pinned)
+        assert [[fp.model for fp in g] for g in plan.groups] == [[a], [b]]
+        assert [fp.devices for fp in plan.footprints] == [(1,), (1,)]
+        assert not plan.fits
+
+    def test_one_card_leaves_nothing_to_pin(self, registered):
+        spanning = registered("_res_pin1_tf", setup="introspect", hf_model_id="org/p1t",
+                              vram_gb=5.0)
+        loaded = registered("_res_pin1_eng", hf_model_id="org/p1e", vram_gb=10.0)
+        engine = residency.footprint(loaded).engine
+        plan = _plan([spanning, loaded], 24.0, 1, pinned={engine: (0,)})
+        assert plan.as_dict() == _plan([spanning, loaded], 24.0, 1).as_dict()
+        assert plan.explain() == _plan([spanning, loaded], 24.0, 1).explain()
+        assert [fp.model for fp in plan.footprints] == [spanning, loaded]
+
     def test_transformers_models_are_packed_per_card(self, registered):
         """device_map='auto' may split a model, so three 15 GiB models fit
         2 x 24 GiB and a fourth does not."""

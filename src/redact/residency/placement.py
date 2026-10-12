@@ -23,8 +23,11 @@ _EPS = 1e-6
 class _Cards:
     """Memory per card while one group of models is placed."""
 
-    def __init__(self, count: int, per_gpu_gb: float | None):
+    def __init__(self, count: int, per_gpu_gb: float | None,
+                 pinned: dict[tuple, tuple[int, ...]] | None = None):
         self.per = per_gpu_gb
+        #: The cards of the vLLM engines that are loaded already, per engine.
+        self.pinned = pinned or {}
         #: GiB per card not held by transformers models, whose claims are
         #: fixed. ``None`` when the card size is unknown.
         self.free = [per_gpu_gb] * count if per_gpu_gb else None
@@ -128,12 +131,15 @@ class _Cards:
     def pick(self, fp: ModelFootprint) -> tuple[int, ...]:
         """The cards a vLLM engine would load on.
 
-        A single-GPU engine takes the card with the most room, the lowest
+        An engine that is loaded already stays on its cards. Otherwise a
+        single-GPU engine takes the card with the most room, the lowest
         index on a tie, so engines spread over the cards before they share
         one. A tensor-parallel engine and one with copies take the first
         untouched cards, ``min_gpus`` per copy. Where too few are left, the
         rest are indices past the last card, which no claim fits.
         """
+        if fp.engine in self.pinned:
+            return self.pinned[fp.engine]
         wanted = fp.copies * fp.min_gpus
         if not self.free:
             # No card to choose between: none exists, or their size is unknown.
@@ -183,6 +189,7 @@ def plan_residency(
     gpus: int | None = None,
     gib_per_gpu: float | None = None,
     copies: dict[str, int] | None = None,
+    pinned: dict[tuple, tuple[int, ...]] | None = None,
 ) -> ResidencyPlan:
     """Place a run's local models on the machine's cards.
 
@@ -209,6 +216,10 @@ def plan_residency(
             ``data_parallel_size``). An engine with ``n`` copies holds
             ``n x min_gpus`` cards whole. An engine named here gets no
             copies on idle cards, so ``1`` turns those off.
+        pinned: The cards of vLLM engines that are loaded already, per
+            engine (:attr:`ModelFootprint.engine`). Each stays on them and
+            is placed first, the other models around it.
+            :func:`plan_phases` passes the engines a stage inherits.
 
     Returns:
         A :class:`ResidencyPlan`. A plan that does not fit is returned, not
@@ -272,7 +283,11 @@ def plan_residency(
     count = gpus_available if gpus is not None else max(gpus_available, 1)
     if per_gpu_gb and gpus is None:
         plan.gpus_available = count
-    cards = _Cards(count, per_gpu_gb)
+    # The engines loaded already go first, so the rest is placed around
+    # them. One card leaves nothing to keep an engine on or to place around.
+    pinned = (pinned or {}) if count > 1 else {}
+    footprints.sort(key=lambda fp: fp.engine not in pinned)
+    cards = _Cards(count, per_gpu_gb, pinned)
     for fp in footprints:
         # Two models on the same engine share one load, in the engine's group.
         if fp.engine in placed:
@@ -285,7 +300,7 @@ def plan_residency(
                 cards.settle()
                 groups.append(current)
                 current = []
-                cards = _Cards(count, per_gpu_gb)
+                cards = _Cards(count, per_gpu_gb, pinned)
             cards.place(fp, force=True)
         current.append(fp)
         placed[fp.engine] = (fp, current)

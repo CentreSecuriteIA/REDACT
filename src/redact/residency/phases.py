@@ -39,9 +39,11 @@ def plan_phases(
     An engine is resident from the first stage that calls it to the last, so
     it loads once. Each resident set is planned on its own, and a vLLM engine
     is granted the smallest share any of its stages plans for it, so the
-    share it loads with holds for as long as it is resident. Likewise it
-    holds only the cards every one of its stages plans for it, so it gives
-    up the copies a more crowded stage has no card for.
+    share it loads with holds for as long as it is resident. It also stays
+    on the cards it loaded on: a stage places the engines it inherits first,
+    on their cards, and its other models around them. Of its copies it
+    keeps those on cards every one of its stages leaves it, so it gives up
+    the ones a more crowded stage has no card for.
 
     Args:
         stage_models: The models each stage calls. Unregistered and non-local
@@ -75,15 +77,29 @@ def plan_phases(
             span.setdefault(engine_of[name], [i, i])[1] = i
 
     plans: dict[tuple, ResidencyPlan] = {}
+    # The cards each resident vLLM engine loaded on, kept until its release.
+    held: dict[tuple, tuple[int, ...]] = {}
+    counted = {engine_of[name] for name in copies or () if name in engine_of}
     phases = []
     for i, stage in enumerate(stages):
         resident = [name for name, engine in engine_of.items()
                     if span[engine][0] <= i <= span[engine][1]]
+        engines = {engine_of[name] for name in resident}
+        held = {engine: cards for engine, cards in held.items() if engine in engines}
+        # The same models again are the same engines, resident since: no
+        # lifetime has a gap, so the plan made for them still holds.
         key = tuple(resident)
         if key not in plans:
             plans[key] = plan_residency(
                 resident, backend_types, gpus=gpus, gib_per_gpu=gib_per_gpu,
-                copies=copies)
+                copies=copies, pinned=held)
+        for fp in plans[key].footprints:
+            if fp.setup == "vllm" and fp.devices:
+                # A copy on an idle card is decided stage by stage, so only
+                # the cards the engine was placed on are kept for the next.
+                placed = (fp.devices if fp.engine in counted
+                          else fp.devices[:fp.min_gpus])
+                held.setdefault(fp.engine, placed)
         phases.append(Phase(stage, resident, plans[key]))
 
     # One share per engine for its whole lifetime: the smallest planned.
@@ -109,36 +125,40 @@ def plan_phases(
         fp.planned_utilization, fp.reserved_gb = share, reserved
 
     # One set of cards per engine too: those it holds in every stage, so a
-    # copy stays only where no stage plans another model.
+    # copy stays only where no stage plans another model. The cards an
+    # engine was placed on are in every stage's set, being kept.
     common: dict[tuple, tuple[int, ...]] = {}
     for fp in footprints:
         if fp.setup == "vllm":
-            held = common.get(fp.engine, fp.devices)
-            common[fp.engine] = tuple(d for d in held if d in fp.devices)
+            so_far = common.get(fp.engine, fp.devices)
+            common[fp.engine] = tuple(d for d in so_far if d in fp.devices)
     told = set()
     for fp in footprints:
         cards = common.get(fp.engine, fp.devices)
         if len(cards) == len(fp.devices):
             continue
-        # Too few shared cards for one copy: the stages disagree on where
-        # the engine is, and no choice of cards here settles that.
-        moved = not cards or len(cards) % fp.min_gpus != 0
+        fp.devices, fp.copies = cards, len(cards) // fp.min_gpus
         if fp.engine not in told:
             told.add(fp.engine)
-            if moved:
-                logger.warning(
-                    "[residency] %s is planned on different cards in "
-                    "different stages. It loads once and stays on the cards "
-                    "it loaded on, so a later stage's plan may put another "
-                    "model there.", fp.model)
-            else:
-                n = len(cards) // fp.min_gpus
-                logger.info(
-                    "[residency] %s loads once, with %d %s: on the cards it "
-                    "holds in every stage.",
-                    fp.model, n, "copy" if n == 1 else "copies")
-        if not moved:
-            fp.devices, fp.copies = cards, len(cards) // fp.min_gpus
+            logger.info(
+                "[residency] %s loads once, with %d %s: on the cards it "
+                "holds in every stage.",
+                fp.model, fp.copies, "copy" if fp.copies == 1 else "copies")
+
+    # A transformers model is not placed by the plan: its device_map placed
+    # it, when it loaded. A later stage only guesses again.
+    guessed: dict[tuple, tuple[int, ...]] = {}
+    for fp in footprints:
+        if fp.setup == "vllm":
+            continue
+        first = guessed.setdefault(fp.engine, fp.devices)
+        if fp.devices != first and fp.engine not in told:
+            told.add(fp.engine)
+            logger.warning(
+                "[residency] %s is planned on other cards in a later stage. A "
+                "transformers model stays where its device_map put it when "
+                "it loaded, so that stage's plan may hand out memory it holds.",
+                fp.model)
     for plan in plans.values():
         plan.gpus_required = _gpus_required(plan.footprints)
     return phases
