@@ -420,6 +420,13 @@ class VLLMBackend(LLMBackend):
         # must wait until this memory is back.
         with _engines_lock:
             released = [k for k in _engines if k not in keep]
+            if released:
+                # vLLM stops an engine before its own output task, which
+                # then reports the dead engine as an error.
+                logger.info(
+                    "[vllm] shutting down %d engine(s). vLLM may log 'AsyncLLM "
+                    "output_handler failed' with an EngineDeadError here: that is "
+                    "this shutdown, not a failed call.", len(released))
             for key in released:
                 _shut_down(_engines.pop(key))
             if released:

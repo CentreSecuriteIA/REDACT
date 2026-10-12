@@ -343,6 +343,25 @@ class TestExitHook:
         assert "shut down" in result.stdout
 
 
+class TestReleaseNote:
+    NOTE = ("[vllm] shutting down 1 engine(s). vLLM may log 'AsyncLLM "
+            "output_handler failed' with an EngineDeadError here: that is "
+            "this shutdown, not a failed call.")
+
+    def test_a_release_says_that_vllm_may_log_an_error(self, monkeypatch, caplog):
+        import redact.llms.backends.vllm as vllm_module
+
+        class _Engine:
+            def shutdown(self):
+                pass
+
+        monkeypatch.setattr(vllm_module, "_engines", {("org/x", None, ()): _Engine()})
+        with caplog.at_level(logging.INFO, logger="redact.llms.backends.vllm"):
+            vllm_module.VLLMBackend.clear_cache()
+            vllm_module.VLLMBackend.clear_cache()      # nothing loaded: no line
+        assert [r.getMessage() for r in caplog.records] == [self.NOTE]
+
+
 def _ask(name, system=None):
     """A chat whose request the fake engine names ``name``."""
     chat = [{"role": "user", "content": name}]
