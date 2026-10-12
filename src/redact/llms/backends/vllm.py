@@ -176,6 +176,9 @@ def _engine(hf_model_id: str, quantization: str | None, vllm_kwargs: dict):
             # runs. Import it here so ours is registered after it: left to
             # vllm, it may first be imported while the engine is built, after
             # this point.
+            #TODO(exit): a load that never returns keeps the exit waiting on
+            #   the lock, and only SIGKILL ends the process. Seen with tensor
+            #   parallel on RTX PRO 6000 Server Edition cards. Bound the wait.
             import multiprocessing.util  # noqa: F401
             atexit.register(VLLMBackend.clear_cache)
             _exit_hook_registered = True
