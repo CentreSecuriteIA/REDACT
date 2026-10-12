@@ -188,6 +188,11 @@ def gpu_hourly_rate(name: str | None, provider: str | None = None) -> float | No
 # ---------------------------------------------------------------------------
 
 
+#: Backends that run a model on this machine. Their calls are paid for as
+#: engine time, so their tokens are counted and not priced.
+_LOCAL_BACKENDS = frozenset({"vllm", "introspect"})
+
+
 class Collector:
     """Accumulates events, writes the trace, and rolls up cost.
 
@@ -207,6 +212,11 @@ class Collector:
         self.tokens: dict[str, dict[str, int]] = defaultdict(
             lambda: {"in": 0, "out": 0, "calls": 0, "items": 0, "ms": 0.0}
         )
+        # Tokens of the calls a hosted backend made, per model: these are
+        # the ones the model's price applies to.
+        self.priced: dict[str, dict[str, int]] = defaultdict(
+            lambda: {"in": 0, "out": 0}
+        )
         self.local_s: dict[str, float] = defaultdict(float)
         # When each released engine was held, on time.perf_counter().
         self.local_spans: list[tuple[float, float]] = []
@@ -224,6 +234,10 @@ class Collector:
                 acc["calls"] += 1
                 acc["items"] += event.get("n_items") or 0
                 acc["ms"] += event.get("ms") or 0.0
+                if event.get("backend") not in _LOCAL_BACKENDS:
+                    priced = self.priced[event.get("model", "?")]
+                    priced["in"] += event.get("in_tok") or 0
+                    priced["out"] += event.get("out_tok") or 0
                 if event.get("error"):
                     self.errors.append(event)
             elif event.get("ev") == "local" and event.get("phase") == "release":
@@ -252,7 +266,9 @@ class Collector:
                 pin = getattr(api, "price_per_1m_input", None) if api else None
                 pout = getattr(api, "price_per_1m_output", None) if api else None
                 if pin is not None or pout is not None:
-                    cost = (acc["in"] / 1e6) * (pin or 0.0) + (acc["out"] / 1e6) * (pout or 0.0)
+                    priced = self.priced[model]
+                    cost = ((priced["in"] / 1e6) * (pin or 0.0)
+                            + (priced["out"] / 1e6) * (pout or 0.0))
                     row["cost_usd"] = round(cost, 4)
                     api_cost += cost
                     priced = True
