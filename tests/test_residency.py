@@ -1936,8 +1936,8 @@ class TestPlannedDevices:
         assert str(raised.value) == (
             f"The vLLM engine of org/pdh was being built with {copies}, and the "
             "build failed (RuntimeError: CUDA out of memory). To load one copy, "
-            'set "copies": {"<role>": 1} in the recipe, or copies={model: 1} on '
-            "the planner.")
+            'set "copies": 1 in the model\'s entry under "models" in the recipe, '
+            "or copies={model: 1} on the planner.")
         cause = raised.value.__cause__
         assert type(cause) is RuntimeError and str(cause) == "CUDA out of memory"
         assert len(builds) == 1                         # not tried with one copy

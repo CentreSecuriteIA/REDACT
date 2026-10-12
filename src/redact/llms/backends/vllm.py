@@ -226,8 +226,8 @@ def _engine(hf_model_id: str, quantization: str | None, vllm_kwargs: dict):
                 f"The vLLM engine of {hf_model_id} was being built with {n} "
                 f"copies, {each} (data_parallel_size={n}), and the build "
                 f"failed ({type(exc).__name__}: {exc}). To load one copy, set "
-                f'"copies": {{"<role>": 1}} in the recipe, or '
-                f"copies={{model: 1}} on the planner."
+                f'"copies": 1 in the model\'s entry under "models" in the '
+                f"recipe, or copies={{model: 1}} on the planner."
             ) from exc
         # Held from the start of the load; set after it, so a failed load
         # leaves no timer.

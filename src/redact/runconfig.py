@@ -4,11 +4,11 @@ Two authored files + one generated per stage:
 
 - **Recipe** (structural, *what to run*): ``dataset_type`` (``"eval"`` = no
   constitution, ``"training"`` = constitution-seeded), ``data_dir``, ``models``
-  per role, ``copies`` per role (how many copies of a local vLLM model to
-  load, each on cards of its own; unset, the generation model gets one per
-  idle card), ``taxonomy``/``taxonomy_dir``/``prompt_dir``, an ordered ``stages``
-  list, ``augmentations`` (the jailbreak ``include_*`` / ``pure_only`` toggles),
-  a ``params_file`` pointer, and ``resume``.
+  per role (a registry name, or an object that also says how the model is
+  served in this run: ``{"name", "backend_type", "copies", "workers"}``, see
+  :func:`_serving`), ``taxonomy``/``taxonomy_dir``/``prompt_dir``, an ordered
+  ``stages`` list, ``augmentations`` (the jailbreak ``include_*`` /
+  ``pure_only`` toggles), a ``params_file`` pointer, and ``resume``.
 - **Input-params** (tunables, *how much / how hard*): per-stage numeric knobs
   (``inputs`` / ``outputs`` / ``jailbreaks`` / ``constitution``).
 - **Run-manifest** (generated): each stage writes ``{stage}.run.json`` under
@@ -41,6 +41,9 @@ _DEFAULT_MODELS = {
     "gen": None, "check": None, "translation": None, "constitution": None,
     "paraphraser": None, "paraphrase_check": None,
 }
+
+# The keys of a role's object under ``models`` that say how its model is served.
+_SERVING_KEYS = ("backend_type", "copies", "workers")
 
 
 # ---------------------------------------------------------------------------
@@ -125,18 +128,13 @@ def load_recipe(recipe: str | Path | dict) -> dict:
         raise ValueError(f"A stage is listed more than once in {stages}.")
     if dtype == "eval" and "constitution" in stages:
         raise ValueError("dataset_type 'eval' cannot include the 'constitution' stage.")
-    copies = data.get("copies")
-    if copies is not None:
-        if not isinstance(copies, dict):
-            raise ValueError(
-                f"copies must map a model role to a number of copies, got {copies!r}")
-        unknown = [role for role in copies if role not in _DEFAULT_MODELS]
-        if unknown:
-            raise ValueError(
-                f"Unknown role(s) {unknown} in copies; valid: {list(_DEFAULT_MODELS)}")
-        bad = {role: n for role, n in copies.items() if type(n) is not int or n < 1}
-        if bad:
-            raise ValueError(f"copies must be whole numbers of at least 1, got {bad}")
+    if data.get("copies") is not None:
+        raise ValueError(
+            'The top-level "copies" key is no longer read; write each count in '
+            'its role\'s entry under "models" instead, e.g. '
+            '"gen": {"name": "llama-3.2-3b-debug", "copies": 2}.')
+    # For its errors. The entries stay as written, and a run reads them again.
+    _serving(data.get("models") or {})
     data["stages"] = stages
     data["dataset_type"] = dtype
     return data
@@ -154,6 +152,116 @@ def load_params(params: str | Path | dict | None, base_dir: str | Path | None = 
         p = Path(base_dir) / p
     with p.open(encoding="utf-8") as fh:
         return json.load(fh)
+
+
+def _role_names(models: dict) -> dict:
+    """A recipe's ``models`` with each object reduced to its model name."""
+    return {role: entry.get("name") if isinstance(entry, dict) else entry
+            for role, entry in models.items()}
+
+
+def _serving(models: dict) -> dict[str, dict]:
+    """How a recipe's ``models`` say its models are served, per model name.
+
+    A role's entry may be an object in place of a name:
+
+    - ``name``: the model's registry name. Left out, the role's default
+      model, as for ``null``.
+    - ``backend_type``: the setup of the registry entry that serves it:
+      ``"api"``, ``"vllm"`` or ``"introspect"``. Left out, the entry's default.
+    - ``copies``: copies of a local vLLM model, one per card. Left out, a
+      copy on each idle card; ``1`` turns that off.
+    - ``workers``: requests a hosted model gets at once. Left out, the
+      entry's ``recommended_max_workers``.
+
+    One model is served one way in a run. A role that gives none of the last
+    three keys takes what another role gives its model, so a ``check`` left
+    out is served as the generation model is.
+
+    Returns:
+        The keys given, per model name. A model no role gives a key for is
+        left out.
+
+    Raises:
+        ValueError: An object breaks a rule. The message names the role and
+            says what to write instead.
+    """
+    from .llms.backends import SETUP_TYPES, resolve_setup, validate_concurrency
+    from .llms.model_config import get_model_config
+
+    names = {**_DEFAULT_MODELS, **_role_names(models)}
+    serving: dict[str, dict] = {}
+    said_by: dict[str, str] = {}
+    for role, entry in models.items():
+        if not isinstance(entry, dict):
+            continue
+        where = f"models[{role!r}]"
+        if role not in _DEFAULT_MODELS:
+            raise ValueError(
+                f"{where} is not a model role; write one of {list(_DEFAULT_MODELS)}.")
+        unknown = [key for key in entry if key not in ("name", *_SERVING_KEYS)]
+        if unknown:
+            raise ValueError(
+                f"{where} has unknown key(s) {unknown}; write only "
+                f"{['name', *_SERVING_KEYS]}.")
+        if role == "paraphraser" and entry.get("name") == "distribution":
+            raise ValueError(
+                f"{where} names the pool of all paraphrasers, which takes no "
+                f'object; write "distribution", or the name of one paraphraser.')
+        # A null says what leaving the key out says.
+        given = {key: entry[key] for key in _SERVING_KEYS
+                 if entry.get(key) is not None}
+        for key in ("copies", "workers"):
+            if key in given and (type(given[key]) is not int or given[key] < 1):
+                raise ValueError(
+                    f"{where}: {key} must be a whole number of at least 1, got "
+                    f"{given[key]!r}; write one, or leave {key} out.")
+        if not given:
+            continue
+
+        # The rules below need the registry entry of the role's model.
+        try:
+            (name,) = _resolve_role(names, role, {})
+            config = get_model_config(name)
+        except (KeyError, TypeError, ValueError):
+            asked = repr(names[role]) if names[role] else "the role's default model"
+            raise ValueError(
+                f"{where}: {asked} is not a registered model, so how it is "
+                f'served cannot be set; write a registered "name".') from None
+        present = [s for s in sorted(SETUP_TYPES) if getattr(config, s) is not None]
+        try:
+            setup = resolve_setup(config, given.get("backend_type"))
+        except (TypeError, ValueError):
+            raise ValueError(
+                f"{where}: backend_type {given.get('backend_type')!r} is not a "
+                f"setup of {name!r}; write one of {present}.") from None
+        if "copies" in given and setup != "vllm":
+            raise ValueError(
+                f"{where}: copies are for a model served by vLLM, and {name!r} is "
+                f"served by its {setup} setup; leave copies out"
+                + (', or write "backend_type": "vllm".' if "vllm" in present else "."))
+        if "workers" in given and setup != "api":
+            raise ValueError(
+                f"{where}: workers are for a hosted model, and {name!r} is served "
+                f"by its {setup} setup, where requests at once are automatic; "
+                f"leave workers out"
+                + (', or write "backend_type": "api".' if "api" in present else "."))
+        if "workers" in given:
+            try:
+                validate_concurrency(name, config.api.backend_type, given["workers"])
+            except ValueError:
+                raise ValueError(
+                    f"{where}: {name!r} takes one request at a time (its "
+                    f"{config.api.backend_type} backend makes no parallel calls); "
+                    f'write "workers": 1, or leave workers out.') from None
+        if serving.setdefault(name, given) != given:
+            raise ValueError(
+                f"models[{said_by[name]!r}] and {where} both resolve to {name!r} "
+                f"but serve it differently ({serving[name]} and {given}); one "
+                f"model is served one way in a run, so write the same keys in "
+                f"both, or in one of them only.")
+        said_by.setdefault(name, role)
+    return serving
 
 
 # ---------------------------------------------------------------------------
@@ -368,7 +476,7 @@ def run_pipeline(
 
     data_dir = recipe.get("data_dir")
     dataset_type = recipe["dataset_type"]
-    models = {**_DEFAULT_MODELS, **(recipe.get("models") or {})}
+    models = {**_DEFAULT_MODELS, **_role_names(recipe.get("models") or {})}
     taxonomy = recipe.get("taxonomy", "content_moderation_categories")
     taxonomy_dir = recipe.get("taxonomy_dir")
     prompt_dir = recipe.get("prompt_dir")
@@ -390,8 +498,7 @@ def run_pipeline(
         # "which prompt ran?" stops being obvious, and an override that
         # silently matches nothing is invisible without this.
         report_prompt_sources(prompt_dir)
-    phases = _plan_phases(models, stages, verbose=verbose, augmentations=aug,
-                          copies=recipe.get("copies"))
+    phases = _plan_phases(models, stages, verbose=verbose, augmentations=aug)
 
     summary: dict = {"dataset_type": dataset_type, "data_dir": str(data_dir), "stages": {}}
     if phases:

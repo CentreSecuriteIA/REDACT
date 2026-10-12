@@ -99,6 +99,240 @@ def test_load_params_resolves_relative_to_base_dir(tmp_path):
     assert load_params(None) == {}
 
 
+# --- models per role: a name, or an object that says how it is served ----------
+
+def _serving_of(models):
+    """How a recipe with these ``models`` serves each model, once loaded."""
+    from redact.runconfig import _serving
+
+    return _serving(load_recipe({"dataset_type": "eval", "models": models})["models"])
+
+
+def _models_error(models):
+    """What load_recipe says against a recipe's ``models``."""
+    with pytest.raises(ValueError) as raised:
+        load_recipe({"dataset_type": "eval", "models": models})
+    return str(raised.value)
+
+
+def test_names_and_nulls_load_as_written():
+    from redact.runconfig import _role_names
+
+    models = {"gen": "venice-uncensored", "check": None,
+              "paraphraser": "distribution", "generator": "not-a-role"}
+    recipe = load_recipe({"dataset_type": "eval", "models": models})
+    assert recipe["models"] == models
+    assert _role_names(recipe["models"]) == models
+    assert _serving_of(models) == {}
+
+
+@pytest.mark.parametrize("name", ["eval_example.json", "training_example.json"])
+def test_the_example_recipes_load(name):
+    recipe = load_recipe(paths.configs_dir() / "runs" / name)
+    assert set(recipe["models"].values()) == {None}
+    assert _serving_of(recipe["models"]) == {}
+
+
+def test_the_object_form_is_read_per_model():
+    from redact.runconfig import _role_names
+
+    models = {
+        "gen": {"name": "venice-uncensored", "backend_type": "vllm", "copies": 2},
+        "check": "llama-3.2-3b-debug",
+        "translation": {"name": "deepseek-v3.2", "workers": 4},
+    }
+    recipe = load_recipe({"dataset_type": "eval", "models": models})
+    assert recipe["models"] == models             # kept as written
+    assert load_recipe(recipe) == recipe          # so it loads again, as run.py does
+    assert _role_names(recipe["models"]) == {
+        "gen": "venice-uncensored", "check": "llama-3.2-3b-debug",
+        "translation": "deepseek-v3.2"}
+    assert _serving_of(models) == {
+        "venice-uncensored": {"backend_type": "vllm", "copies": 2},
+        "deepseek-v3.2": {"workers": 4}}
+
+
+@pytest.mark.parametrize("models,serving", [
+    ({"gen": {"backend_type": "vllm"}},
+     {"venice-uncensored": {"backend_type": "vllm"}}),
+    ({"translation": {"workers": 1}}, {"deepseek-v3.2": {"workers": 1}}),
+    ({"paraphraser": {"copies": 1}}, {"venice-paraphraser": {"copies": 1}}),
+    # check without a name is the generation model.
+    ({"gen": "llama-3.2-3b-debug", "check": {"copies": 1}},
+     {"llama-3.2-3b-debug": {"copies": 1}}),
+])
+def test_an_object_without_a_name_is_the_roles_default_model(models, serving):
+    from redact.runconfig import _role_names
+
+    assert _serving_of(models) == serving
+    assert _role_names(models)[list(models)[-1]] is None
+
+
+@pytest.mark.parametrize("entry", [
+    {}, {"name": None}, {"name": "no-such-model"},
+    {"name": "venice-uncensored", "backend_type": None, "copies": None,
+     "workers": None},
+])
+def test_an_object_that_gives_no_serving_is_a_name(entry):
+    """Nothing is looked up for it, and a null is a key left out."""
+    assert _serving_of({"gen": entry}) == {}
+
+
+def test_an_unknown_key_is_rejected():
+    assert _models_error({"gen": {"name": "venice-uncensored", "backend": "vllm"}}) == (
+        "models['gen'] has unknown key(s) ['backend']; write only "
+        "['name', 'backend_type', 'copies', 'workers'].")
+
+
+@pytest.mark.parametrize("key", ["copies", "workers"])
+@pytest.mark.parametrize("count", [0, -1, 1.5, "2", True])
+def test_copies_and_workers_must_be_whole_numbers_of_at_least_one(key, count):
+    assert _models_error({"gen": {"name": "venice-uncensored", key: count}}) == (
+        f"models['gen']: {key} must be a whole number of at least 1, got "
+        f"{count!r}; write one, or leave {key} out.")
+
+
+@pytest.mark.parametrize("backend_type", ["api", "telepathy", ["vllm"]])
+def test_a_backend_type_the_model_has_no_setup_for_is_rejected(backend_type):
+    entry = {"name": "llama-3.2-3b-debug", "backend_type": backend_type}
+    assert _models_error({"gen": entry}) == (
+        f"models['gen']: backend_type {backend_type!r} is not a setup of "
+        "'llama-3.2-3b-debug'; write one of ['vllm'].")
+
+
+def test_a_model_with_two_setups_and_no_default_needs_a_backend_type():
+    from redact.llms.model_config import (
+        MODEL_REGISTRY,
+        APIConfig,
+        VLLMConfig,
+        register_model,
+    )
+
+    name = "_rc_no_default"
+    register_model(
+        name, vllm=VLLMConfig(hf_model_id=f"org/{name}"),
+        api=APIConfig(backend_type="openai", api_key_env="TEST_API_KEY",
+                      base_url="https://test.example/v1", rpm=10))
+    try:
+        assert _models_error({"gen": {"name": name, "copies": 2}}) == (
+            f"models['gen']: backend_type None is not a setup of {name!r}; "
+            "write one of ['api', 'vllm'].")
+        local = {"name": name, "backend_type": "vllm", "copies": 2}
+        assert _serving_of({"gen": local}) == {name: {"backend_type": "vllm", "copies": 2}}
+    finally:
+        MODEL_REGISTRY.pop(name, None)
+
+
+@pytest.mark.parametrize("name,advice", [
+    ("venice-uncensored", 'leave copies out, or write "backend_type": "vllm".'),
+    ("deepseek-v3.2", "leave copies out."),
+])
+def test_copies_are_rejected_for_a_model_not_served_by_vllm(name, advice):
+    assert _models_error({"gen": {"name": name, "copies": 2}}) == (
+        f"models['gen']: copies are for a model served by vLLM, and {name!r} is "
+        f"served by its api setup; {advice}")
+
+
+@pytest.mark.parametrize("entry,advice", [
+    ({"name": "venice-uncensored", "backend_type": "vllm", "workers": 4},
+     'leave workers out, or write "backend_type": "api".'),
+    ({"name": "llama-3.2-3b-debug", "workers": 4}, "leave workers out."),
+])
+def test_workers_are_rejected_for_a_model_not_served_by_an_api(entry, advice):
+    assert _models_error({"gen": entry}) == (
+        f"models['gen']: workers are for a hosted model, and {entry['name']!r} is "
+        f"served by its vllm setup, where requests at once are automatic; {advice}")
+
+
+def test_workers_above_one_are_rejected_for_a_series_only_backend():
+    opus = {"name": "claude-opus-4-6", "workers": 2}
+    assert _models_error({"constitution": opus}) == (
+        "models['constitution']: 'claude-opus-4-6' takes one request at a time "
+        "(its anthropic backend makes no parallel calls); write \"workers\": 1, "
+        "or leave workers out.")
+    assert _serving_of({"constitution": {**opus, "workers": 1}}) == {
+        "claude-opus-4-6": {"workers": 1}}
+
+
+def test_a_model_in_two_roles_with_the_same_serving_is_accepted():
+    """A role that gives a name alone takes the serving another role gives."""
+    local = {"name": "venice-uncensored", "backend_type": "vllm", "copies": 2}
+    models = {"gen": local, "paraphrase_check": dict(local),
+              "check": "venice-uncensored"}
+    assert _serving_of(models) == {
+        "venice-uncensored": {"backend_type": "vllm", "copies": 2}}
+
+
+def test_a_model_in_two_roles_with_different_serving_is_rejected():
+    models = {
+        "gen": {"name": "venice-uncensored", "backend_type": "vllm", "copies": 2},
+        "paraphrase_check": {"name": "venice-uncensored", "backend_type": "vllm"},
+    }
+    assert _models_error(models) == (
+        "models['gen'] and models['paraphrase_check'] both resolve to "
+        "'venice-uncensored' but serve it differently ({'backend_type': 'vllm', "
+        "'copies': 2} and {'backend_type': 'vllm'}); one model is served one way "
+        "in a run, so write the same keys in both, or in one of them only.")
+
+
+def test_the_paraphraser_pool_takes_no_object():
+    for entry in ({"name": "distribution"}, {"name": "distribution", "copies": 1}):
+        assert _models_error({"paraphraser": entry}) == (
+            "models['paraphraser'] names the pool of all paraphrasers, which takes "
+            "no object; write \"distribution\", or the name of one paraphraser.")
+    one = {"name": "venice-paraphraser", "copies": 1}
+    assert _serving_of({"paraphraser": one}) == {"venice-paraphraser": {"copies": 1}}
+
+
+def test_an_object_under_an_unknown_role_is_rejected():
+    assert _models_error({"generator": {"name": "venice-uncensored"}}) == (
+        "models['generator'] is not a model role; write one of ['gen', 'check', "
+        "'translation', 'constitution', 'paraphraser', 'paraphrase_check'].")
+
+
+def test_serving_is_rejected_for_a_model_that_is_not_registered():
+    entry = {"name": "no-such-model", "backend_type": "vllm"}
+    assert _models_error({"gen": entry}) == (
+        "models['gen']: 'no-such-model' is not a registered model, so how it is "
+        "served cannot be set; write a registered \"name\".")
+    with patch("redact.llms.model_config.default_model_for_role",
+               side_effect=KeyError("uncensored_gen")):
+        assert _models_error({"gen": {"copies": 2}}) == (
+            "models['gen']: the role's default model is not a registered model, "
+            "so how it is served cannot be set; write a registered \"name\".")
+
+
+def test_the_top_level_copies_key_is_rejected_with_the_new_form():
+    with pytest.raises(ValueError) as raised:
+        load_recipe({"dataset_type": "eval", "copies": {"gen": 2}})
+    assert str(raised.value) == (
+        'The top-level "copies" key is no longer read; write each count in its '
+        'role\'s entry under "models" instead, e.g. '
+        '"gen": {"name": "llama-3.2-3b-debug", "copies": 2}.')
+    load_recipe({"dataset_type": "eval", "copies": None})     # a null says nothing
+
+
+def test_a_stage_is_handed_a_model_name_per_role(tmp_path, monkeypatch):
+    """Whatever form the recipe writes a role in."""
+    import redact
+
+    handed = {}
+    monkeypatch.setattr(
+        redact, "generate_inputs",
+        lambda **k: handed.update(model=k["model"], check_model=k["check_model"])
+        or pd.DataFrame({"x": [1]}))
+    recipe = {"dataset_type": "eval", "data_dir": str(tmp_path), "stages": ["inputs"],
+              "models": {"gen": {"name": "deepseek-v3.2", "workers": 1}, "check": {}}}
+    try:
+        run_pipeline(recipe, params={"inputs": {}}, verbose=False)
+    finally:
+        telemetry.uninstall()
+    assert handed == {"model": "deepseek-v3.2", "check_model": None}
+    assert read_manifest("inputs", tmp_path)["models"] == {
+        "gen": "deepseek-v3.2", "check": None, "translation": None,
+        "constitution": None, "paraphraser": None, "paraphrase_check": None}
+
+
 # --- end-to-end driver (offline) --------------------------------------------
 
 def _seed_inputs(data_dir):
@@ -551,32 +785,9 @@ def test_a_model_of_two_roles_takes_the_count_named_first(local_models):
     assert _planned_copies(models, {"check": 1, "gen": 2}) == {gen: 1}
 
 
-def test_load_recipe_rejects_copies_for_an_unknown_role():
-    with pytest.raises(ValueError, match=r"Unknown role\(s\) \['generator'\] in copies"):
-        load_recipe({"dataset_type": "eval", "copies": {"generator": 2}})
-
-
-@pytest.mark.parametrize("copies", [
-    {"gen": 0}, {"gen": -1}, {"gen": 1.5}, {"gen": "2"}, {"gen": True}, {"gen": None}])
-def test_load_recipe_rejects_copies_that_are_not_counts(copies):
-    with pytest.raises(ValueError, match="copies must be whole numbers of at least 1"):
-        load_recipe({"dataset_type": "eval", "copies": copies})
-
-
-def test_load_recipe_rejects_copies_that_are_not_a_mapping():
-    with pytest.raises(ValueError, match="copies must map a model role"):
-        load_recipe({"dataset_type": "eval", "copies": 2})
-
-
-def test_load_recipe_accepts_copies_per_role():
-    recipe = {"dataset_type": "eval", "copies": {"gen": 2, "check": 1}}
-    assert load_recipe(recipe)["copies"] == {"gen": 2, "check": 1}
-    assert "copies" not in load_recipe({"dataset_type": "eval"})
-
-
-@pytest.mark.parametrize("copies,planned", [(None, 2), ({"gen": 2}, 2), ({"gen": 1}, 1)])
-def test_run_pipeline_summary_carries_copies(tmp_path, monkeypatch, copies, planned):
-    """Two cards and one local model: a copy per card unless the recipe says one."""
+@pytest.mark.parametrize("gen,planned", [("llama-3.2-3b-debug", 2)])
+def test_run_pipeline_summary_carries_copies(tmp_path, monkeypatch, gen, planned):
+    """Two cards and one local model: a copy per card."""
     import redact
     import redact.llms.backends.vllm as vllm_module
 
@@ -586,9 +797,7 @@ def test_run_pipeline_summary_carries_copies(tmp_path, monkeypatch, copies, plan
         lambda **k: seen.append(list(vllm_module._planned_devices.values()))
         or pd.DataFrame({"x": [1]}))
     recipe = {"dataset_type": "eval", "data_dir": str(tmp_path), "stages": ["inputs"],
-              "models": {"gen": "llama-3.2-3b-debug"}}
-    if copies is not None:
-        recipe["copies"] = copies
+              "models": {"gen": gen}}
     try:
         with patch("redact.llms.resources.measure.detect_gpus",
                    return_value=("FakeGPU", 2)), \
