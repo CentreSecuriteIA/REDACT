@@ -138,9 +138,9 @@ def unload_local(keep: list[str] | None = None, engines: dict | None = None) -> 
     """Release the cached local engines, except those the kept models use.
 
     A released engine is shut down and its memory freed, and its lifetime
-    meter stops. Its planned grant and cards stay, so a reload gets the same. A
-    client built on it raises until the checkpoint is loaded again, and a
-    call in flight on it is not waited for.
+    meter stops. Its planned grant and cards stay until a plan is applied
+    again. A client built on it raises until the checkpoint is loaded again,
+    and a call in flight on it is not waited for.
 
     Args:
         keep: Model names still in use. Their engines stay cached and timed,

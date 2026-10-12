@@ -35,6 +35,9 @@ of the run, not a guarantee against running out of memory.
 #     only the pool and ignores what other stages hold. Only matters with
 #     more than one paraphraser, and none is trained yet, so later.
 #   - Free memory per card. One card size per plan: the smallest.
+#   - Unloading for a stage is tried with every candidate unloaded at once.
+#     With more lifetimes than the search places exactly (_SEARCH_LIMIT),
+#     that attempt can miss, and a run one unload would fit stays unfit.
 #   - A plan does not see engines already loaded, by this process or another.
 #     The runner should own this; one process (container) per run is a candidate.
 #   - Copies: one that shares its card with another model, a fallback to one

@@ -403,7 +403,7 @@ class VLLMBackend(LLMBackend):
         """Release the loaded engines and free their memory.
 
         Each is shut down and its hold time reported. Its planned utilization
-        and cards stay, so a reload gets the same. A backend built on a released
+        and cards stay until a plan is set again. A backend built on a released
         engine raises on ``generate()`` until the checkpoint is loaded again.
         A call in flight on a released engine is not waited for.
         Also the exit hook, registered when the first load starts: an exit
