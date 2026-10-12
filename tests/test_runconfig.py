@@ -516,6 +516,92 @@ def test_run_pipeline_puts_the_plan_in_the_summary(tmp_path, monkeypatch, caplog
     assert "residency" not in api_only
 
 
+def _planned_copies(models, copies):
+    """The copies ``_plan_phases`` hands the planner for a recipe's ``copies``."""
+    from redact import residency
+    from redact.runconfig import _plan_phases
+
+    seen = []
+    with patch.object(residency, "plan_phases",
+                      side_effect=lambda stage_models, **kw: seen.append(kw) or []):
+        _plan_phases(models, ["inputs", "paraphrase"], verbose=False, copies=copies)
+    (kwargs,) = seen
+    return kwargs["copies"]
+
+
+def test_recipe_copies_reach_the_planner_by_model_name(local_models):
+    """A recipe counts copies per role; the planner counts them per model."""
+    gen = local_models("_rc_copies_gen")
+    assert _planned_copies(_models(gen=gen), {"gen": 2}) == {gen: 2}
+    assert _planned_copies(_models(gen=gen), None) == {}
+
+
+def test_recipe_copies_for_a_pool_reach_every_model_in_it(local_models):
+    extra = local_models("_rc_copies_para", roles=["paraphraser"])
+    models = _models(paraphraser="distribution")
+    assert _planned_copies(models, {"paraphraser": 2}) == {
+        "venice-paraphraser": 2, extra: 2}
+
+
+def test_a_model_of_two_roles_takes_the_count_named_first(local_models):
+    """check is unset, so it resolves to the generation model."""
+    gen = local_models("_rc_copies_both")
+    models = _models(gen=gen)
+    assert _planned_copies(models, {"gen": 2, "check": 1}) == {gen: 2}
+    assert _planned_copies(models, {"check": 1, "gen": 2}) == {gen: 1}
+
+
+def test_load_recipe_rejects_copies_for_an_unknown_role():
+    with pytest.raises(ValueError, match=r"Unknown role\(s\) \['generator'\] in copies"):
+        load_recipe({"dataset_type": "eval", "copies": {"generator": 2}})
+
+
+@pytest.mark.parametrize("copies", [
+    {"gen": 0}, {"gen": -1}, {"gen": 1.5}, {"gen": "2"}, {"gen": True}, {"gen": None}])
+def test_load_recipe_rejects_copies_that_are_not_counts(copies):
+    with pytest.raises(ValueError, match="copies must be whole numbers of at least 1"):
+        load_recipe({"dataset_type": "eval", "copies": copies})
+
+
+def test_load_recipe_rejects_copies_that_are_not_a_mapping():
+    with pytest.raises(ValueError, match="copies must map a model role"):
+        load_recipe({"dataset_type": "eval", "copies": 2})
+
+
+def test_load_recipe_accepts_copies_per_role():
+    recipe = {"dataset_type": "eval", "copies": {"gen": 2, "check": 1}}
+    assert load_recipe(recipe)["copies"] == {"gen": 2, "check": 1}
+    assert "copies" not in load_recipe({"dataset_type": "eval"})
+
+
+@pytest.mark.parametrize("copies,planned", [(None, 2), ({"gen": 2}, 2), ({"gen": 1}, 1)])
+def test_run_pipeline_summary_carries_copies(tmp_path, monkeypatch, copies, planned):
+    """Two cards and one local model: a copy per card unless the recipe says one."""
+    import redact
+    import redact.llms.backends.vllm as vllm_module
+
+    seen = []
+    monkeypatch.setattr(
+        redact, "generate_inputs",
+        lambda **k: seen.append(list(vllm_module._planned_devices.values()))
+        or pd.DataFrame({"x": [1]}))
+    recipe = {"dataset_type": "eval", "data_dir": str(tmp_path), "stages": ["inputs"],
+              "models": {"gen": "llama-3.2-3b-debug"}}
+    if copies is not None:
+        recipe["copies"] = copies
+    try:
+        with patch("redact.llms.resources.measure.detect_gpus",
+                   return_value=("FakeGPU", 2)), \
+             patch("redact.llms.resources.measure.detect_gpu_memory_gib",
+                   return_value=10.0):
+            summary = run_pipeline(recipe, params={"inputs": {}}, verbose=False)
+    finally:
+        telemetry.uninstall()
+    model = summary["residency"]["phases"][0]["models"][0]
+    assert (model["copies"], model["devices"]) == (planned, list(range(planned)))
+    assert seen == [[tuple(range(planned))]]           # what the loader was handed
+
+
 def test_a_planner_exception_does_not_abort_the_run(tmp_path, monkeypatch, caplog):
     import logging
 

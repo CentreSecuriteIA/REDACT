@@ -4,7 +4,9 @@ Two authored files + one generated per stage:
 
 - **Recipe** (structural, *what to run*): ``dataset_type`` (``"eval"`` = no
   constitution, ``"training"`` = constitution-seeded), ``data_dir``, ``models``
-  per role, ``taxonomy``/``taxonomy_dir``/``prompt_dir``, an ordered ``stages``
+  per role, ``copies`` per role (how many copies of a local vLLM model to
+  load, each on cards of its own; unset, the generation model gets one per
+  idle card), ``taxonomy``/``taxonomy_dir``/``prompt_dir``, an ordered ``stages``
   list, ``augmentations`` (the jailbreak ``include_*`` / ``pure_only`` toggles),
   a ``params_file`` pointer, and ``resume``.
 - **Input-params** (tunables, *how much / how hard*): per-stage numeric knobs
@@ -123,6 +125,18 @@ def load_recipe(recipe: str | Path | dict) -> dict:
         raise ValueError(f"A stage is listed more than once in {stages}.")
     if dtype == "eval" and "constitution" in stages:
         raise ValueError("dataset_type 'eval' cannot include the 'constitution' stage.")
+    copies = data.get("copies")
+    if copies is not None:
+        if not isinstance(copies, dict):
+            raise ValueError(
+                f"copies must map a model role to a number of copies, got {copies!r}")
+        unknown = [role for role in copies if role not in _DEFAULT_MODELS]
+        if unknown:
+            raise ValueError(
+                f"Unknown role(s) {unknown} in copies; valid: {list(_DEFAULT_MODELS)}")
+        bad = {role: n for role, n in copies.items() if type(n) is not int or n < 1}
+        if bad:
+            raise ValueError(f"copies must be whole numbers of at least 1, got {bad}")
     data["stages"] = stages
     data["dataset_type"] = dtype
     return data
@@ -161,12 +175,14 @@ def _plan_phases(
     stages: list[str],
     verbose: bool = True,
     augmentations: dict | None = None,
+    copies: dict | None = None,
 ) -> list:
     """Plan each stage's local models, report the plans and apply the grants.
 
     Runs before the stage loop, so a stage that does not fit says so before
     any stage spends its budget. Nothing here aborts the run: a plan that
-    does not fit and a planning error are only logged.
+    does not fit and a planning error are only logged. ``copies`` is the
+    recipe's: a number of copies per model role.
 
     Returns:
         One :class:`~redact.residency.Phase` per stage, or ``[]`` when no
@@ -176,8 +192,20 @@ def _plan_phases(
 
     try:
         aug = augmentations or {}
+        # The planner counts copies per model. A model two roles resolve to
+        # takes the count of the role the recipe names first.
+        per_model: dict[str, int] = {}
+        for role, count in (copies or {}).items():
+            try:
+                names = _resolve_role(models, role, aug)
+            except (KeyError, ValueError):
+                # No model registered for the role, so none to count for.
+                continue
+            for name in names:
+                per_model.setdefault(name, count)
         phases = residency.plan_phases(
-            {stage: _stage_models(models, [stage], aug) for stage in stages})
+            {stage: _stage_models(models, [stage], aug) for stage in stages},
+            copies=per_model)
         if not any(phase.resident for phase in phases):
             return []
         # One report per plan, naming the stages it covers.
@@ -248,30 +276,36 @@ def _stage_models(models: dict, stages: list[str], augmentations: dict) -> list[
     Each role resolves the way its stage resolves it, so the plan covers the
     models that will actually load.
     """
-    from .content_moderation.paraphrase import paraphrase_pool
-    from .llms.model_config import default_model_for_role
-
-    def resolve(role: str) -> list[str]:
-        name = models.get(role)
-        if role == "paraphraser":
-            # One model, or every paraphraser for the "distribution" pool.
-            return paraphrase_pool(name)
-        if role == "check":
-            # The stages check with the generation model unless told otherwise.
-            return [name] if name else resolve("gen")
-        if role == "translation" and not _uses_translation(augmentations):
-            return []
-        return [name or default_model_for_role(_ROLE_TO_REGISTRY_ROLE.get(role, role))]
-
     wanted: list[str] = []
     for stage in stages:
         for role in STAGE_ROLES.get(stage, ()):
             try:
-                wanted.extend(resolve(role))
+                wanted.extend(_resolve_role(models, role, augmentations))
             except (KeyError, ValueError):
                 # No model registered for the role; the stage reports it.
                 continue
     return list(dict.fromkeys(wanted))
+
+
+def _resolve_role(models: dict, role: str, augmentations: dict) -> list[str]:
+    """The models a recipe role stands for, resolved as its stage resolves it.
+
+    Raises:
+        KeyError, ValueError: No model is registered for the role.
+    """
+    from .content_moderation.paraphrase import paraphrase_pool
+    from .llms.model_config import default_model_for_role
+
+    name = models.get(role)
+    if role == "paraphraser":
+        # One model, or every paraphraser for the "distribution" pool.
+        return paraphrase_pool(name)
+    if role == "check":
+        # The stages check with the generation model unless told otherwise.
+        return [name] if name else _resolve_role(models, "gen", augmentations)
+    if role == "translation" and not _uses_translation(augmentations):
+        return []
+    return [name or default_model_for_role(_ROLE_TO_REGISTRY_ROLE.get(role, role))]
 
 
 def _uses_translation(augmentations: dict) -> bool:
@@ -356,7 +390,8 @@ def run_pipeline(
         # "which prompt ran?" stops being obvious, and an override that
         # silently matches nothing is invisible without this.
         report_prompt_sources(prompt_dir)
-    phases = _plan_phases(models, stages, verbose=verbose, augmentations=aug)
+    phases = _plan_phases(models, stages, verbose=verbose, augmentations=aug,
+                          copies=recipe.get("copies"))
 
     summary: dict = {"dataset_type": dataset_type, "data_dir": str(data_dir), "stages": {}}
     if phases:
