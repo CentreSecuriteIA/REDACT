@@ -17,9 +17,9 @@ def local_model():
     no HF config."""
     made = []
 
-    def _make(name, gb=5.0):
-        register_model(name, backend_type="vllm",
-                       vllm=VLLMConfig(hf_model_id=f"org/{name}", vram_gb=gb))
+    def _make(name, gb=5.0, **setup):
+        register_model(name, backend_type="vllm", vllm=VLLMConfig(
+            hf_model_id=f"org/{name}", vram_gb=gb, **setup))
         made.append(name)
         return name
 
@@ -355,6 +355,41 @@ def test_a_rearranged_engine_gets_no_copy_on_a_card_a_later_stage_fills(
         "share in the stage where its card is most crowded.",
         f"[residency] {x} loads once, with 1 copy: on the cards it holds in "
         "every stage."]
+
+
+def test_an_engine_leaves_the_card_of_a_later_transformers_model(local_model):
+    """Alone in stage a, x would take card 0. Stage b brings a transformers
+    model fixed on card 0, with 12 GiB that do not fit beside x's 17.1. So
+    the two cards are not alike in stage a either, and x takes card 1."""
+    from redact.llms.model_config import IntrospectConfig
+
+    x = local_model("_ph_lt_x", 15.0)
+    t = "_ph_lt_fixed"
+    register_model(t, backend_type="introspect", introspect=IntrospectConfig(
+        hf_model_id=f"org/{t}", log_dir="x", vram_gb=10.0, device_map="cuda:0"))
+    try:
+        first, second = plan_phases({"a": [x], "b": [x, t]}, gpus=2, gib_per_gpu=24.0)
+    finally:
+        MODEL_REGISTRY.pop(t, None)
+    assert first.plan.fits and second.plan.fits
+    assert _cards(first, x) == _cards(second, x) == ((1,), 1)
+    assert _cards(second, t) == ((0,), 1)
+
+
+def test_an_engine_on_whole_cards_keeps_them_in_a_rearranged_run(local_model):
+    """Stage a fits four cards only with x and y on one, z on the next and
+    the tensor-parallel engine on cards 2 and 3. It keeps those in stage b,
+    and the engine that comes there is placed around it."""
+    x, y = local_model("_ph_wk_x"), local_model("_ph_wk_y")
+    z, new = local_model("_ph_wk_z", 15.0), local_model("_ph_wk_new", 8.0)
+    split = local_model("_ph_wk_split", 30.0, min_gpus=2)
+    first, second = plan_phases(
+        {"a": [x, y, z, split], "b": [split, new]}, gpus=4, gib_per_gpu=24.0)
+    assert first.plan.fits and second.plan.fits
+    assert [_cards(first, m) for m in (x, y, z, split)] == [
+        ((0,), 1), ((0,), 1), ((1,), 1), ((2, 3), 1)]
+    # Cards 0 and 1 are idle in stage b: the new engine gets a copy on each.
+    assert [_cards(second, m) for m in (split, new)] == [((2, 3), 1), ((0, 1), 2)]
 
 
 def test_twins_of_different_sizes_are_not_crowded_into_one_group(local_model, caplog):
