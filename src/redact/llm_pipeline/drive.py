@@ -11,6 +11,7 @@ from collections import defaultdict
 from collections.abc import Callable, Generator, Hashable, Iterable
 from concurrent.futures import Future
 
+from redact.exceptions import PromptTooLongError
 from redact.llms import aio
 from redact.llms.client import ModelClient
 
@@ -225,6 +226,12 @@ def drive_units(
     smaller group waits for the next reply, which may fill it, and the
     largest group goes once none is in flight.
 
+    An async request that fails with
+    :class:`~redact.exceptions.PromptTooLongError` is raised inside its unit,
+    at the ``yield`` that made it: the unit may catch it and go on, and the
+    other requests stay in flight. A ``generate()`` that fails with it fails
+    the run, as with any error: which of its items was too long is not known.
+
     Args:
         source: ``(key, generator)`` pairs, pulled only as slots free up.
             Keys must be unique among live units.
@@ -233,7 +240,8 @@ def drive_units(
         on_error: ``(key, exc)``, called when a unit raises or yields
             something other than an :class:`LLMRequest`. ``None`` lets the
             exception propagate. A failed ``generate()`` or async request
-            always propagates and never goes through ``on_error``.
+            always propagates and never goes through ``on_error``, unless it
+            was raised inside its unit.
         pool_size: Units live at once, at least 1. About twice ``cap``, so
             one group can fill while another drains.
         cap: Requests per ``generate()`` call, at least 1. Defaults to
@@ -310,10 +318,12 @@ def drive_units(
         flying[key] = aio.submit(fly(key, client, request, gates[gate_key]))
         return True
 
-    def advance(key, reply):
+    def advance(key, reply, error=None):
+        """Resume a unit with ``reply``, or with ``error`` raised at its ``yield``."""
         nonlocal finished
         try:
-            request = live[key].send(reply)
+            unit = live[key]
+            request = unit.send(reply) if error is None else unit.throw(error)
             if not isinstance(request, LLMRequest):
                 raise TypeError(
                     f"generator yielded {type(request).__name__}, not an LLMRequest")
@@ -358,8 +368,13 @@ def drive_units(
                     return False
         # The result follows its key within a turn of the loop. A failed
         # request raises here: it is the transport failing, as a failed
-        # generate() is, so it propagates.
-        advance(key, flying.pop(key).result())
+        # generate() is, so it propagates. A prompt too long for the model
+        # fails that one request and nothing else, so it goes to its unit.
+        try:
+            reply, error = flying.pop(key).result(), None
+        except PromptTooLongError as exc:
+            reply, error = None, exc
+        advance(key, reply, error)
         if progress and finished - reported >= cap:
             reported = finished
             logger.info("%s: %d units done, %d in flight",

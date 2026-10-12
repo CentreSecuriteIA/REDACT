@@ -16,6 +16,7 @@ from unittest.mock import MagicMock, patch
 
 import pytest
 
+from redact.exceptions import GenerationError, PromptTooLongError
 from redact.llm_pipeline import LLMRequest, drive_units
 from redact.llm_pipeline import drive as drive_module
 from redact.llms import ModelClient, aio, observe
@@ -510,6 +511,77 @@ def test_a_failed_request_propagates_and_cancels_those_in_flight():
     assert script.log[:4] == [("start", "slow1"), ("start", "bad1"), ("end", "bad1"),
                               ("start", "late1")]
     assert sorted(script.log[4:]) == [("cancel", "late1"), ("cancel", "slow1")]
+
+
+def test_a_request_failing_with_another_generation_error_still_propagates():
+    """Only a prompt that is too long is its unit's failure."""
+    error = GenerationError("out of retries")
+    script = _Script(["bad1"], fail={"bad1": error})
+    client = _lane_client(script)
+    failed = []
+    units = [("a", _unit(client, "slow")), ("b", _unit(client, "bad"))]
+    with pytest.raises(GenerationError) as raised:
+        drive_units(iter(units), pool_size=2, on_done=lambda k, v: None,
+                    on_error=lambda k, e: failed.append(k))
+    assert raised.value is error and failed == []
+    assert script.log == [("start", "slow1"), ("start", "bad1"), ("end", "bad1"),
+                          ("cancel", "slow1")]
+
+
+def test_a_prompt_too_long_fails_its_unit_and_the_others_finish():
+    """The error is raised inside its unit, which lets it pass. b's request is
+    in flight when that happens and ends as scripted, and a's second request
+    goes out afterwards."""
+    error = PromptTooLongError("10036 input tokens, context 8192")
+    script = _Script(["long1", "a1", "a2", "b1"], fail={"long1": error}, closed=True)
+    client = _lane_client(script)
+    done, failed = {}, []
+    units = [("a", _unit(client, "a", 2)), ("long", _unit(client, "long", 2)),
+             ("b", _unit(client, "b"))]
+    n = drive_units(_then_open(units, script), pool_size=4, on_done=done.__setitem__,
+                    on_error=lambda k, e: failed.append((k, e)))
+    assert failed == [("long", error)]
+    assert done == {"a": ["lane-m:a1", "lane-m:a2"], "b": ["lane-m:b1"]}
+    assert n == len(units)
+    assert script.log == [("start", "a1"), ("start", "long1"), ("start", "b1"),
+                          ("end", "long1"), ("end", "a1"), ("start", "a2"),
+                          ("end", "a2"), ("end", "b1")]
+
+
+def _asks_again_shorter(client, name):
+    """A unit that catches a prompt too long and asks again; returns both."""
+    def ask(text):
+        return LLMRequest.for_client(client, [{"role": "user", "content": text}])
+
+    try:
+        return (yield ask(f"{name}-long"))
+    except PromptTooLongError as exc:
+        return exc, (yield ask(f"{name}-short"))
+
+
+def test_a_unit_that_catches_a_prompt_too_long_goes_on():
+    error = PromptTooLongError("10036 input tokens, context 8192")
+    script = _Script(["a-long", "a-short"], fail={"a-long": error})
+    client = _lane_client(script)
+    done, failed = {}, []
+    n = drive_units(iter([("a", _asks_again_shorter(client, "a"))]), pool_size=1,
+                    on_done=done.__setitem__, on_error=lambda k, e: failed.append(k))
+    assert done == {"a": (error, "lane-m:a-short")} and failed == []
+    assert n == 1
+    assert script.log == [("start", "a-long"), ("end", "a-long"),
+                          ("start", "a-short"), ("end", "a-short")]
+
+
+def test_a_prompt_too_long_propagates_without_on_error_and_stops_the_lane():
+    error = PromptTooLongError("10036 input tokens, context 8192")
+    script = _Script(["long1"], fail={"long1": error})
+    client = _lane_client(script)
+    units = [("a", _unit(client, "slow")), ("long", _unit(client, "long"))]
+    with pytest.raises(PromptTooLongError) as raised:
+        drive_units(iter(units), pool_size=2, on_done=lambda k, v: None)
+    assert raised.value is error
+    assert script.log == [("start", "slow1"), ("start", "long1"), ("end", "long1"),
+                          ("cancel", "slow1")]
 
 
 @pytest.mark.parametrize("error", [KeyError, KeyboardInterrupt])
