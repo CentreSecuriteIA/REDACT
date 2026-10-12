@@ -12,6 +12,7 @@ All sizes are GiB (bytes / 1024**3).
 """
 
 import logging
+import os
 import shutil
 import subprocess
 
@@ -50,8 +51,27 @@ def free_total_gib() -> tuple[float, float] | None:
     return free / _BYTES_PER_GIB, total / _BYTES_PER_GIB
 
 
-def detect_gpus() -> tuple[str | None, int]:
+def visible_gpu_ids() -> list[str] | None:
+    """The cards ``CUDA_VISIBLE_DEVICES`` leaves this process, as it names them.
+
+    Returns:
+        The variable's entries in its order (indices or UUIDs), ``[]`` when
+        it is set and empty, or ``None`` when it is unset.
+    """
+    value = os.environ.get("CUDA_VISIBLE_DEVICES")
+    if value is None:
+        return None
+    return [entry.strip() for entry in value.split(",") if entry.strip()]
+
+
+def detect_gpus(visible: bool = False) -> tuple[str | None, int]:
     """Which GPU this machine has, and how many, via ``nvidia-smi``.
+
+    Args:
+        visible: Count the cards ``CUDA_VISIBLE_DEVICES`` leaves this
+            process, when it is set, instead of the machine's. The planner
+            counts those; the bill counts the machine's, since the pod is
+            rented whole.
 
     Returns:
         ``(name, count)`` — one line per device from
@@ -72,7 +92,8 @@ def detect_gpus() -> tuple[str | None, int]:
         logger.debug("nvidia-smi failed (%s: %s); reporting no GPUs", type(exc).__name__, exc)
         return None, 0
     names = [ln.strip() for ln in out.splitlines() if ln.strip()]
-    return (names[0] if names else None), len(names)
+    ids = visible_gpu_ids() if visible else None
+    return (names[0] if names else None), len(names if ids is None else ids)
 
 
 def detect_gpu_memory_gib() -> float | None:
@@ -84,9 +105,10 @@ def detect_gpu_memory_gib() -> float | None:
     known wherever a GPU is, not only where the full stack is.
 
     Returns:
-        Per-device total in **GiB** (the first device; mixed-card machines
-        are not modelled), or ``None`` when ``nvidia-smi`` is absent or
-        unparseable.
+        Per-device total in **GiB**, or ``None`` when ``nvidia-smi`` is
+        absent or unparseable. On a machine with mixed cards it is the
+        smallest: a plan has one card size, and a grant computed on the
+        smallest card is safe on every card.
     """
     exe = shutil.which("nvidia-smi")
     if exe is None:
@@ -99,17 +121,14 @@ def detect_gpu_memory_gib() -> float | None:
     except (subprocess.SubprocessError, OSError) as exc:
         logger.debug("nvidia-smi memory query failed (%s)", exc)
         return None
-    for line in out.splitlines():
-        line = line.strip()
-        if line:
-            try:
-                # MiB -> GiB. 1024-based, matching resources/estimate.py:
-                # mixing this with a decimal-GB divisor there is what made
-                # the same card read 48.0 or 44.7 depending on the path.
-                return round(int(line) / 1024, 1)
-            except ValueError:
-                return None
-    return None
+    try:
+        sizes = [int(line) for line in out.splitlines() if line.strip()]
+    except ValueError:
+        return None
+    # MiB -> GiB. 1024-based, matching resources/estimate.py: mixing this
+    # with a decimal-GB divisor there is what made the same card read 48.0
+    # or 44.7 depending on the path.
+    return round(min(sizes) / 1024, 1) if sizes else None
 
 
 def _devices(cuda) -> list:

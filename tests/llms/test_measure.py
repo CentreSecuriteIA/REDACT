@@ -1,4 +1,5 @@
-"""Load measurement, against a fake ``torch``. No GPU and no real torch needed."""
+"""Load measurement against a fake ``torch``, card detection against a fake
+``nvidia-smi``. No GPU and no real torch needed."""
 
 import builtins
 from types import SimpleNamespace
@@ -184,3 +185,52 @@ class TestMeasurement:
             cuda.load(0, 3)
             cuda.load(1, 3)
         assert m.claimed_gib == 3.0
+
+
+def _nvidia_smi(monkeypatch, out):
+    """Make ``nvidia-smi`` answer every query with ``out``."""
+    monkeypatch.setattr(measure.shutil, "which", lambda _: "/usr/bin/nvidia-smi")
+    monkeypatch.setattr(measure.subprocess, "run",
+                        lambda *args, **kwargs: SimpleNamespace(stdout=out))
+
+
+class TestCards:
+    """The machine's cards, and the ones ``CUDA_VISIBLE_DEVICES`` leaves visible."""
+
+    TWO = "NVIDIA RTX A5000\nNVIDIA RTX A5000\n"
+
+    def test_visible_count_follows_cuda_visible_devices(self, monkeypatch):
+        _nvidia_smi(monkeypatch, self.TWO)
+        monkeypatch.setenv("CUDA_VISIBLE_DEVICES", "1")
+        assert measure.detect_gpus(visible=True) == ("NVIDIA RTX A5000", 1)
+        monkeypatch.setenv("CUDA_VISIBLE_DEVICES", "")
+        assert measure.detect_gpus(visible=True) == ("NVIDIA RTX A5000", 0)
+        monkeypatch.delenv("CUDA_VISIBLE_DEVICES")
+        assert measure.detect_gpus(visible=True) == ("NVIDIA RTX A5000", 2)
+
+    def test_billing_count_ignores_cuda_visible_devices(self, monkeypatch):
+        _nvidia_smi(monkeypatch, self.TWO)
+        monkeypatch.setenv("CUDA_VISIBLE_DEVICES", "1")
+        assert measure.detect_gpus() == ("NVIDIA RTX A5000", 2)
+
+    def test_no_nvidia_smi_is_no_card_whatever_is_visible(self, monkeypatch):
+        monkeypatch.setattr(measure.shutil, "which", lambda _: None)
+        monkeypatch.setenv("CUDA_VISIBLE_DEVICES", "0,1")
+        assert measure.detect_gpus(visible=True) == (None, 0)
+
+    def test_visible_ids_are_the_variable_split_or_none(self, monkeypatch):
+        monkeypatch.delenv("CUDA_VISIBLE_DEVICES", raising=False)
+        assert measure.visible_gpu_ids() is None
+        for value, ids in (("", []), ("1", ["1"]), ("2, 0", ["2", "0"]),
+                           ("GPU-8bce,GPU-0182", ["GPU-8bce", "GPU-0182"])):
+            monkeypatch.setenv("CUDA_VISIBLE_DEVICES", value)
+            assert measure.visible_gpu_ids() == ids
+
+    def test_memory_is_the_smallest_card(self, monkeypatch):
+        _nvidia_smi(monkeypatch, "32768\n24576\n")
+        assert measure.detect_gpu_memory_gib() == 24.0
+
+    @pytest.mark.parametrize("out", ["24576\n[N/A]\n", ""])
+    def test_memory_that_cannot_be_read_is_none(self, monkeypatch, out):
+        _nvidia_smi(monkeypatch, out)
+        assert measure.detect_gpu_memory_gib() is None
