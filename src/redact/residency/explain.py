@@ -58,14 +58,6 @@ def explain(plan: "ResidencyPlan") -> str:
     lines.extend(f"  PROBLEM: {problem}" for problem in plan.problems)
     lines.extend(f"  {warning}" for warning in plan.warnings)
 
-    on_card_0 = [fp for fp in plan.footprints
-                 if fp.setup == "vllm" and fp.min_gpus == 1]
-    if on_card_0 and plan.gpus_available > 1:
-        lines.append(
-            "  note: single-GPU vLLM engines all load on card 0, since "
-            "nothing assigns a device at load time; the other card(s) "
-            "do not add room for them"
-        )
     seen = set()
     for fp in plan.footprints:
         kv, length = fp.parts.get("kv_gib"), fp.parts.get("max_model_len")
@@ -91,8 +83,14 @@ def _placement(plan: "ResidencyPlan", fp: ModelFootprint) -> str:
     """Where a model is planned and what it reserves there."""
     if not fp.devices or fp.reserved_gb is None:
         return ""
-    cards = (f"card {fp.devices[0]}" if len(fp.devices) == 1
-             else f"cards {fp.devices[0]}-{fp.devices[-1]}")
+    first, last = fp.devices[0], fp.devices[-1]
+    if len(fp.devices) == 1:
+        cards = f"card {first}"
+    elif fp.devices == tuple(range(first, last + 1)):
+        cards = f"cards {first}-{last}"
+    else:
+        # The cards need not be neighbours: a busy one may lie between them.
+        cards = "cards " + ",".join(map(str, fp.devices))
     if fp.planned_utilization:
         each = " each" if len(fp.devices) > 1 else ""
         return (f"  -> {cards}, vLLM gets {fp.reserved_gb:.1f}GiB{each} "
@@ -109,7 +107,7 @@ def co_residency_problem(plan: "ResidencyPlan") -> str:
                if fp.setup == "vllm" and fp.min_gpus == 1}
     if len(engines) > 1:
         text += (
-            " vLLM engines share card 0 only when their needs with "
+            " vLLM engines share a card only when their needs with "
             f"overhead sum to at most {_CARD_CEILING} of it."
         )
     return text

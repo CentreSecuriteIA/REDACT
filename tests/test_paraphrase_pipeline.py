@@ -283,7 +283,8 @@ def test_co_fitting_paraphrasers_load_with_planned_grants(tmp_path, patched):
     register_model("_para_small", backend_type="vllm", roles=["paraphraser"],
                    vllm=VLLMConfig(hf_model_id="org/small", vram_gb=4.3))
     patched.setattr(estimate, "estimate_kv_gib", lambda *a, **k: 0.0)
-    patched.setattr("redact.llms.resources.measure.detect_gpus", lambda: ("FakeGPU", 1))
+    patched.setattr("redact.llms.resources.measure.detect_gpus",
+                    lambda visible=False: ("FakeGPU", 1))
     patched.setattr("redact.llms.resources.measure.detect_gpu_memory_gib", lambda: 80.0)
     patched.setattr(residency, "unload_local",
                     lambda keep=None, engines=None: pytest.fail("unloaded"))

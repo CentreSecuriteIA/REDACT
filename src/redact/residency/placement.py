@@ -57,9 +57,6 @@ class _Cards:
             d < len(self.free)
             # vLLM grants sharing a card stay under the ceiling together.
             and self._room(d, vllm) + _EPS >= reserve[d]
-            # A tensor-parallel engine takes untouched cards only.
-            and not (vllm and fp.min_gpus > 1
-                     and (self.shared[d] or self.free[d] < self.per))
             for d in devices
         )
         if not (fits or force):
@@ -105,11 +102,34 @@ class _Cards:
                 # vLLM rejects a fraction that is not positive.
                 fp.planned_utilization = fraction if fraction > 0 else None
 
+    def _untouched(self) -> list[int]:
+        """The cards nothing is placed on."""
+        return [d for d in range(len(self.free))
+                if d not in self.whole and not self.shared[d]
+                and self.free[d] >= self.per]
+
+    def pick(self, fp: ModelFootprint) -> tuple[int, ...]:
+        """The cards a vLLM engine would load on.
+
+        A single-GPU engine takes the card with the most room, the lowest
+        index on a tie, so engines spread over the cards before they share
+        one. A tensor-parallel engine takes the first untouched cards. Where
+        too few are left, the rest are indices past the last card, which no
+        claim fits.
+        """
+        if not self.free:
+            # No card to choose between: none exists, or their size is unknown.
+            return tuple(range(fp.min_gpus))
+        if fp.min_gpus == 1:
+            return (max(range(len(self.free)), key=lambda d: self._room(d, True)),)
+        untouched = self._untouched()[:fp.min_gpus]
+        missing = fp.min_gpus - len(untouched)
+        return (*untouched, *range(len(self.free), len(self.free) + missing))
+
     def _claim(self, fp: ModelFootprint) -> tuple[tuple[int, ...], dict[int, float]]:
         """The cards a model would take and the GiB it claims on each."""
         if fp.setup == "vllm":
-            # No device is chosen at load time, so vLLM takes the first cards.
-            devices = tuple(range(fp.min_gpus))
+            devices = self.pick(fp)
             return devices, dict.fromkeys(devices, fp.padded_gb or 0.0)
 
         need = fp.gb or _UNKNOWN_GB
@@ -147,10 +167,12 @@ def plan_residency(
 ) -> ResidencyPlan:
     """Place a run's local models on the machine's cards.
 
-    Models are placed in the order given, each on the first cards its
-    runtime would use. One that does not fit beside those already placed
-    starts a new group, and more than one group means the run does not fit
-    (:attr:`ResidencyPlan.fits`).
+    Models are placed in the order given: a vLLM engine on the cards with
+    the most room, a transformers model where its ``device_map`` puts it.
+    One that does not fit beside those already placed starts a new group,
+    and more than one group means the run does not fit
+    (:attr:`ResidencyPlan.fits`). Cards are numbered over the visible ones:
+    card 0 is the first that ``CUDA_VISIBLE_DEVICES`` leaves this process.
 
     Args:
         models: Model names. Unregistered and non-local ones are ignored.
@@ -177,7 +199,7 @@ def plan_residency(
 
     given = gpus is not None or gib_per_gpu is not None
     gpu_name, gpus_available = (
-        (None, gpus) if gpus is not None else measure.detect_gpus())
+        (None, gpus) if gpus is not None else measure.detect_gpus(visible=True))
     plan = ResidencyPlan(
         gpus_available=gpus_available, gpu_name=gpu_name, machine_given=given,
         per_gpu_gb=gib_per_gpu,

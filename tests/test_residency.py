@@ -505,20 +505,68 @@ class TestPlanResidency:
         assert "separate run_pipeline invocations" in out
         assert "process exit frees the card" in out
 
-    def test_single_gpu_vllm_engines_never_spread_across_cards(self, registered):
-        """Nothing assigns a device at load time, so a second card adds no
-        room: three 15 GiB engines on 2 x 24 GiB do not fit."""
+    def test_single_gpu_vllm_engines_spread_across_cards(self, registered):
+        """Three 15 GiB engines on 2 x 24 GiB: each of the first two takes a
+        card, and the 4.5 GiB left beside either is too little for the third."""
         names = [registered(f"_res_c0_{i}", hf_model_id=f"org/c0{i}", vram_gb=15.0)
                  for i in range(3)]
         plan = _plan(names, 24.0, 2)
-        assert len(plan.groups) == 3 and not plan.fits
-        assert [fp.devices for fp in plan.footprints] == [(0,)] * 3
-        assert plan.gpus_required == 1
-        assert "single-GPU vLLM engines all load on card 0" in plan.explain()
+        assert [[fp.model for fp in g] for g in plan.groups] == [names[:2], names[2:]]
+        assert not plan.fits
+        assert [fp.devices for fp in plan.footprints] == [(0,), (1,), (0,)]
+        assert plan.gpus_required == 2
+        assert "all load on card 0" not in plan.explain()
+        assert "vLLM engines share a card only when their needs" in plan.explain()
 
-    def test_a_single_card_plan_does_not_mention_other_cards(self, registered):
-        m = registered("_res_one_card", hf_model_id="org/oc", vram_gb=10.0)
-        assert "card 0, since" not in _plan([m], 24.0, 1).explain()
+    def test_two_engines_take_two_cards_and_the_full_share(self, registered):
+        a = registered("_res_two_a", hf_model_id="org/twa", vram_gb=10.0)
+        b = registered("_res_two_b", hf_model_id="org/twb", vram_gb=10.0)
+        plan = _plan([a, b], 24.0, 2)
+        assert plan.fits and len(plan.groups) == 1 and plan.gpus_required == 2
+        assert [fp.devices for fp in plan.footprints] == [(0,), (1,)]
+        assert [fp.planned_utilization for fp in plan.footprints] == [0.9, 0.9]
+        assert [fp.reserved_gb for fp in plan.footprints] == [pytest.approx(21.6)] * 2
+
+    def test_a_third_engine_joins_the_card_with_most_room(self, registered):
+        """10 + 5 + 10 GiB on 2 x 24 GiB: the 5 GiB engine leaves 15.5 GiB
+        beside it, the first 10 GiB engine 10.0."""
+        names = [registered(f"_res_room_{i}", hf_model_id=f"org/rm{i}", vram_gb=gb)
+                 for i, gb in enumerate((10.0, 5.0, 10.0))]
+        plan = _plan(names, 24.0, 2)
+        assert plan.fits and len(plan.groups) == 1
+        assert [fp.devices for fp in plan.footprints] == [(0,), (1,), (1,)]
+
+    def test_a_tensor_parallel_engine_takes_the_first_untouched_cards(self, registered):
+        small = registered("_res_tp_beside", hf_model_id="org/tpb", vram_gb=5.0)
+        big = registered("_res_tp_free", hf_model_id="org/tpf", vram_gb=40.0,
+                         min_gpus=2)
+        plan = _plan([small, big], 48.0, 3)
+        assert plan.fits and plan.gpus_required == 3
+        assert [fp.devices for fp in plan.footprints] == [(0,), (1, 2)]
+        assert "-> cards 1-2, vLLM gets 43.2GiB each" in plan.explain()
+
+    def test_tensor_parallel_cards_need_not_be_neighbours(self, registered):
+        pinned = registered("_res_tp_pin", setup="introspect", hf_model_id="org/tpp",
+                            vram_gb=5.0, device_map="cuda:1")
+        big = registered("_res_tp_gap", hf_model_id="org/tpg", vram_gb=40.0,
+                         min_gpus=2)
+        plan = _plan([pinned, big], 48.0, 3)
+        assert plan.fits and plan.footprints[1].devices == (0, 2)
+        assert "-> cards 0,2, vLLM gets 43.2GiB each" in plan.explain()
+
+    def test_the_planner_counts_visible_cards_only(self, registered):
+        m = registered("_res_visible", hf_model_id="org/vis", vram_gb=10.0)
+        seen = []
+
+        def detect(visible=False):
+            seen.append(visible)
+            return "FakeGPU", 1
+
+        with patch("redact.llms.resources.measure.detect_gpus", detect), \
+             patch("redact.llms.resources.measure.detect_gpu_memory_gib",
+                   return_value=24.0):
+            plan = residency.plan_residency([m])
+        assert seen == [True] and plan.gpus_available == 1
 
     def test_transformers_models_are_packed_per_card(self, registered):
         """device_map='auto' may split a model, so three 15 GiB models fit
