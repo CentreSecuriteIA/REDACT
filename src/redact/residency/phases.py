@@ -15,8 +15,9 @@ class Phase:
     """The local models resident while one stage runs, and their plan."""
 
     stage: str
-    #: The stage's own models and those an earlier stage loaded that a later
-    #: one still calls, in the order they are first needed.
+    #: The stage's own models, and those an earlier stage loaded that a
+    #: later one still calls unless they are unloaded for this one, in the
+    #: order they are first needed.
     resident: list[str]
     plan: ResidencyPlan
 
@@ -36,8 +37,9 @@ def plan_phases(
 ) -> list[Phase]:
     """Plan residency stage by stage, in the order of ``stage_models``.
 
-    An engine is resident from the first stage that calls it to the last, so
-    it loads once. Each resident set is planned on its own, and a vLLM engine
+    An engine is resident from the first stage that calls it to the last,
+    which loads it once, unless a stage in between has no room for it
+    (below). Each resident set is planned on its own, and a vLLM engine
     is granted the smallest share any of its stages plans for it, so the
     share it loads with holds for as long as it is resident. It also stays
     on the cards it loaded on: a stage places the engines it inherits first,
@@ -47,6 +49,14 @@ def plan_phases(
     stages, and they are taken only when every stage fits on them. Of its
     copies an engine keeps those on cards every one of its stages leaves
     it, so it gives up the ones a more crowded stage has no card for.
+
+    A stage that still does not fit may hold engines it does not call. Each
+    is unloaded for the stages between the two that call it, and loaded
+    again for the second, if every stage of the run then fits. Otherwise
+    none is. Of those releases, each one the run fits without is given back,
+    the largest engine's first, so none is left that could be. Every time
+    an engine is loaded is a lifetime of its own: what is said above of an
+    engine's stages, its share, its cards and its copies holds within one.
 
     Args:
         stage_models: The models each stage calls. Unregistered and non-local
@@ -58,7 +68,7 @@ def plan_phases(
 
     Returns:
         One :class:`Phase` per stage. Stages with the same resident models
-        share one plan object.
+        in the same lifetimes share one plan object.
     """
     backend_types = backend_types or {}
     stages = list(stage_models)

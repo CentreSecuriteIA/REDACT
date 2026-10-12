@@ -8,7 +8,8 @@ The plan describes what a run does:
 - A plan covers models that are resident together; those that cannot be
   do not fit. :func:`plan_phases` makes one plan per stage, for a run that
   unloads between stages what no later stage calls. An engine that stays
-  resident keeps the cards it loaded on.
+  resident keeps the cards it loaded on. One kept for a later stage is
+  unloaded for the stages that do not fit with it, and loaded again.
 - A vLLM engine loads on the cards the plan chose: a single-GPU engine on
   the card with the most room, a tensor-parallel one on untouched cards.
   When the models do not all fit like that, the engines are placed on
@@ -36,9 +37,6 @@ of the run, not a guarantee against running out of memory.
 #   - Free memory per card. One card size per plan: the smallest.
 #   - A plan does not see engines already loaded, by this process or another.
 #     The runner should own this; one process (container) per run is a candidate.
-#   - An engine stays resident from its first stage to its last, so a stage
-#     can fail to fit only because of an engine kept for a later stage.
-#     Releasing and reloading it would fit, at the cost of a second load.
 #   - Copies: one that shares its card with another model, a fallback to one
 #     copy when the build fails, and copies of a tensor-parallel engine
 #     without a count given.
