@@ -94,6 +94,67 @@ def test_a_share_lowered_for_a_crowded_stage_is_logged(local_model, caplog):
     assert y not in caplog.text
 
 
+def _cards(phase, name):
+    """``(devices, copies)`` a stage plans for a model."""
+    return next((fp.devices, fp.copies) for fp in phase.plan.footprints
+                if fp.model == name)
+
+
+def test_an_engine_gets_its_smallest_copies_in_every_stage(local_model, caplog):
+    import logging
+
+    x, y = local_model("_ph_cp_x"), local_model("_ph_cp_y")
+    with caplog.at_level(logging.INFO, logger="redact.residency.phases"):
+        alone, shared = plan_phases({"a": [x], "b": [x, y]}, gpus=2, gib_per_gpu=24.0)
+    # Alone, x would have a copy on card 1. Stage b plans y there, and x
+    # loads only once, so it has one copy in both stages.
+    assert _cards(alone, x) == _cards(shared, x) == ((0,), 1)
+    assert _cards(shared, y) == ((1,), 1)
+    assert (alone.plan.gpus_required, shared.plan.gpus_required) == (1, 2)
+    assert _share(alone, x) == _share(shared, x) == 0.9
+    assert [r.getMessage() for r in caplog.records] == [
+        f"[residency] {x} loads once, with 1 copy: on the cards it holds in "
+        "every stage."]
+    assert "card 1 is idle" in alone.plan.explain()
+
+
+def test_an_engine_keeps_the_copies_every_stage_has_a_card_for(local_model):
+    x, y = local_model("_ph_keep_x"), local_model("_ph_keep_y")
+    alone, shared = plan_phases({"a": [x], "b": [x, y]}, gpus=3, gib_per_gpu=24.0)
+    # Stage b plans y on card 1, so x keeps its copy on card 2 only.
+    assert _cards(alone, x) == _cards(shared, x) == ((0, 2), 2)
+    assert _cards(shared, y) == ((1,), 1)
+    assert alone.plan.gpus_required == shared.plan.gpus_required == 3
+
+
+def test_a_given_count_reaches_every_stage(local_model, caplog):
+    import logging
+
+    x, y = local_model("_ph_given_x"), local_model("_ph_given_y")
+    with caplog.at_level(logging.INFO, logger="redact.residency.phases"):
+        alone, shared = plan_phases(
+            {"a": [x], "b": [x, y]}, gpus=3, gib_per_gpu=24.0, copies={x: 1})
+    assert _cards(alone, x) == _cards(shared, x) == ((0,), 1)
+    assert caplog.records == []
+
+
+def test_an_engine_planned_on_different_cards_is_warned_about(local_model, caplog):
+    """y loads beside x on card 1. Stage b plans it afresh, on card 0, with z
+    on the card y is really on."""
+    import logging
+
+    x, y, z = (local_model(f"_ph_move_{n}") for n in "xyz")
+    with caplog.at_level(logging.INFO, logger="redact.residency.phases"):
+        first, second = plan_phases({"a": [x, y], "b": [y, z]}, gpus=2, gib_per_gpu=24.0)
+    assert (_cards(first, y), _cards(second, y)) == (((1,), 1), ((0,), 1))
+    assert _cards(second, z) == ((1,), 1)
+    assert [(r.levelname, r.getMessage()) for r in caplog.records] == [(
+        "WARNING",
+        f"[residency] {y} is planned on different cards in different stages. "
+        "It loads once and stays on the cards it loaded on, so a later "
+        "stage's plan may put another model there.")]
+
+
 def test_preload_skips_a_model_no_longer_wanted(local_model):
     from redact import residency
 

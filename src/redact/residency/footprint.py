@@ -46,6 +46,9 @@ class ModelFootprint:
     #: a transformers model, when the card size is unknown, or when the
     #: engine is left no memory.
     planned_utilization: float | None = None
+    #: Copies of a vLLM engine (vLLM's ``data_parallel_size``), each on
+    #: ``min_gpus`` cards of its own. The sizes above describe one copy.
+    copies: int = 1
 
     def __post_init__(self) -> None:
         if not self.engine:
@@ -92,6 +95,7 @@ class ModelFootprint:
             "source": self.source,
             "derivation": self.breakdown(),
             "min_gpus": self.min_gpus,
+            "copies": self.copies,
             "devices": list(self.devices),
             "reserved_gib_per_device": self.reserved_gb,
             "need_gib_per_device": self.need_gb,

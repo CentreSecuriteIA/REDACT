@@ -670,6 +670,150 @@ class TestPlanResidency:
         assert "card size is unknown" in plan.explain()
 
 
+class TestCopies:
+    """Copies of one vLLM engine, each on cards of its own: the count given
+    for a model, or one per idle card for the plan's first single-GPU engine."""
+
+    def test_a_lone_engine_gets_a_copy_per_idle_card(self, registered):
+        m = registered("_cp_lone", hf_model_id="org/cpl", vram_gb=10.0)
+        plan = _plan([m], 24.0, 2)
+        fp = plan.footprints[0]
+        assert (fp.devices, fp.copies) == ((0, 1), 2)
+        assert fp.planned_utilization == 0.9 and fp.reserved_gb == pytest.approx(21.6)
+        assert plan.fits and plan.gpus_required == 2
+        out = plan.explain()
+        assert "-> cards 0-1, vLLM gets 21.6GiB each (gpu_memory_utilization=0.90)" in out
+        # 10 x 1.1 + 0.6 = 11.6, up to 12.0: the size of one copy.
+        assert "-> x2 copies (data_parallel_size=2), one per card, ~12.0GiB each" in out
+        assert "idle" not in out
+        assert plan.as_dict()["models"][0]["copies"] == 2
+
+    def test_an_engine_that_does_not_fit_its_card_gets_no_copies(self, registered):
+        """A copy needs what the engine needs. 20 x 1.1 + 0.6 = 22.6 GiB is
+        over the 21.6 a card grants; 19 GiB pads to 21.5 and fits."""
+        big = registered("_cp_big", hf_model_id="org/cpb", vram_gb=20.0)
+        fits = registered("_cp_fits", hf_model_id="org/cpi", vram_gb=19.0)
+        plan = _plan([big], 24.0, 2)
+        assert (plan.footprints[0].devices, plan.footprints[0].copies) == ((0,), 1)
+        assert not plan.fits and plan.gpus_required == 1
+        assert ("  note: card 1 is idle: _cp_big does not fit its card, so a copy "
+                "would not either") in plan.explain()
+        assert _plan([fits], 24.0, 2).footprints[0].devices == (0, 1)
+
+    def test_one_card_has_no_copies_and_no_note(self, registered):
+        m = registered("_cp_one", hf_model_id="org/cpo", vram_gb=10.0)
+        plan = _plan([m], 24.0, 1)
+        assert (plan.footprints[0].devices, plan.footprints[0].copies) == ((0,), 1)
+        assert "copies" not in plan.explain() and "idle" not in plan.explain()
+
+    def test_no_copies_when_every_card_has_an_engine(self, registered):
+        a = registered("_cp_full_a", hf_model_id="org/cfa", vram_gb=10.0)
+        b = registered("_cp_full_b", hf_model_id="org/cfb", vram_gb=10.0)
+        plan = _plan([a, b], 24.0, 2)
+        assert [(fp.devices, fp.copies) for fp in plan.footprints] == [
+            ((0,), 1), ((1,), 1)]
+        assert "copies" not in plan.explain() and "idle" not in plan.explain()
+
+    def test_copies_one_turns_the_default_off(self, registered):
+        m = registered("_cp_off", hf_model_id="org/cpf", vram_gb=10.0)
+        plan = _plan([m], 24.0, 2, copies={m: 1})
+        assert (plan.footprints[0].devices, plan.footprints[0].copies) == ((0,), 1)
+        assert plan.fits and plan.gpus_required == 1
+        assert "  note: card 1 is idle: _cp_off is limited to 1 copy" in plan.explain()
+
+    def test_explicit_copies_claim_whole_cards(self, registered):
+        a = registered("_cp_whole_a", hf_model_id="org/cwa", vram_gb=5.0)
+        b = registered("_cp_whole_b", hf_model_id="org/cwb", vram_gb=5.0)
+        plan = _plan([a, b], 24.0, 2, copies={a: 2})
+        assert [[fp.model for fp in g] for g in plan.groups] == [[a], [b]]
+        assert not plan.fits
+        assert (plan.footprints[0].devices, plan.footprints[0].copies) == ((0, 1), 2)
+        assert plan.footprints[0].planned_utilization == 0.9
+
+    def test_too_many_copies_is_the_gpu_count_problem(self, registered):
+        m = registered("_cp_many", hf_model_id="org/cpm", vram_gb=5.0)
+        plan = _plan([m], 24.0, 2, copies={m: 3})
+        assert not plan.fits and plan.gpus_required == 3
+        assert plan.problems == ["the plan needs 3 GPUs but 2 are available."]
+
+    def test_auto_copies_go_to_the_first_engine_only(self, registered):
+        a = registered("_cp_first_a", hf_model_id="org/cfa1", vram_gb=10.0)
+        b = registered("_cp_first_b", hf_model_id="org/cfb1", vram_gb=10.0)
+        plan = _plan([a, b], 24.0, 3)
+        assert [(fp.devices, fp.copies) for fp in plan.footprints] == [
+            ((0, 2), 2), ((1,), 1)]
+        assert plan.fits and plan.gpus_required == 3
+        assert [fp.planned_utilization for fp in plan.footprints] == [0.9, 0.9]
+        assert "-> cards 0,2, vLLM gets 21.6GiB each" in plan.explain()
+
+    def test_a_given_count_for_the_first_engine_leaves_the_card_idle(self, registered):
+        """The idle card does not pass to the next engine."""
+        a = registered("_cp_given_a", hf_model_id="org/cga", vram_gb=10.0)
+        b = registered("_cp_given_b", hf_model_id="org/cgb", vram_gb=10.0)
+        plan = _plan([a, b], 24.0, 3, copies={a: 1})
+        assert [fp.devices for fp in plan.footprints] == [(0,), (1,)]
+        assert "  note: card 2 is idle: _cp_given_a is limited to 1 copy" in plan.explain()
+
+    def test_an_idle_card_beside_a_shared_home_card_is_noted(self, registered):
+        m = registered("_cp_shared", hf_model_id="org/cps", vram_gb=10.0)
+        fixed = registered("_cp_shared_tf", setup="introspect", hf_model_id="org/cpt",
+                           vram_gb=5.0, device_map="cuda:0")
+        plan = _plan([m, fixed], 24.0, 2)
+        assert (plan.footprints[0].devices, plan.footprints[0].copies) == ((0,), 1)
+        assert plan.fits
+        assert ("  note: card 1 is idle: _cp_shared shares its card, and a copy "
+                "needs the card to itself") in plan.explain()
+
+    def test_a_twin_shares_the_copies(self, registered):
+        import redact.llms.backends.vllm as vllm_module
+
+        a = registered("_cp_twin_a", hf_model_id="org/cpw", vram_gb=10.0)
+        twin = registered("_cp_twin_b", hf_model_id="org/cpw", vram_gb=10.0)
+        plan = _plan([a, twin], 24.0, 2)
+        assert [(fp.devices, fp.copies) for fp in plan.footprints] == [((0, 1), 2)] * 2
+        residency.apply_plan(plan)
+        assert vllm_module._planned_devices == {
+            vllm_module._engine_key("org/cpw", None, {}): (0, 1)}
+
+    def test_a_count_given_for_a_twin_is_the_engines(self, registered):
+        a = registered("_cp_named_a", hf_model_id="org/cpn", vram_gb=10.0)
+        twin = registered("_cp_named_b", hf_model_id="org/cpn", vram_gb=10.0)
+        plan = _plan([a, twin], 24.0, 2, copies={twin: 1})
+        assert [(fp.devices, fp.copies) for fp in plan.footprints] == [((0,), 1)] * 2
+
+    def test_a_tensor_parallel_engine_gets_no_auto_copies(self, registered):
+        big = registered("_cp_tp", hf_model_id="org/cptp", vram_gb=40.0, min_gpus=2)
+        plan = _plan([big], 48.0, 4)
+        assert (plan.footprints[0].devices, plan.footprints[0].copies) == ((0, 1), 1)
+        assert plan.fits and plan.gpus_required == 2
+        assert ("  note: cards 2,3 are idle: only a single-GPU vLLM engine gets "
+                "copies") in plan.explain()
+
+    def test_given_copies_of_a_tensor_parallel_engine_take_its_cards_each(
+            self, registered):
+        big = registered("_cp_tp_x2", hf_model_id="org/cptx", vram_gb=40.0, min_gpus=2)
+        plan = _plan([big], 48.0, 4, copies={big: 2})
+        fp = plan.footprints[0]
+        assert (fp.devices, fp.copies, fp.planned_utilization) == ((0, 1, 2, 3), 2, 0.9)
+        assert plan.fits and plan.gpus_required == 4
+        assert "-> x2 copies (data_parallel_size=2), each on 2 cards" in plan.explain()
+
+    def test_a_plan_in_two_groups_gets_no_copies(self, registered):
+        """The third engine opens a group of its own, with a card idle beside it."""
+        names = [registered(f"_cp_grp_{i}", hf_model_id=f"org/cpg{i}", vram_gb=15.0)
+                 for i in range(3)]
+        plan = _plan(names, 24.0, 2)
+        assert len(plan.groups) == 2
+        assert [(fp.devices, fp.copies) for fp in plan.footprints] == [
+            ((0,), 1), ((1,), 1), ((0,), 1)]
+        assert "idle" not in plan.explain()
+
+    def test_a_plan_without_a_vllm_engine_has_no_idle_note(self, registered):
+        m = registered("_cp_tf_only", setup="introspect", hf_model_id="org/cpto",
+                       vram_gb=5.0, device_map="cuda:0")
+        assert "idle" not in _plan([m], 24.0, 2).explain()
+
+
 class TestPlanForAGivenMachine:
     def test_plans_for_the_machine_given_without_detecting(self, registered):
         m = registered("_res_given", hf_model_id="org/gv", vram_gb=50.0)
@@ -709,7 +853,7 @@ class TestAsDict:
             "model": ok, "setup": "vllm", "hf_model_id": "org/do", "gib": 13.0,
             "source": "declared",
             "derivation": "declared: 10.0 weights + 1.00 KV, x1.1 +0.6",
-            "min_gpus": 1, "devices": [0],
+            "min_gpus": 1, "copies": 1, "devices": [0],
             "reserved_gib_per_device": pytest.approx(43.2),
             "need_gib_per_device": 11.0,
             "padded_gib_per_device": pytest.approx(12.7),

@@ -54,10 +54,22 @@ def explain(plan: "ResidencyPlan") -> str:
                     f"(tensor_parallel_size={fp.min_gpus}), "
                     f"~{fp.per_gpu_gb:.1f}GiB each"
                 )
+            if fp.copies > 1:
+                per = ("one per card" if fp.min_gpus == 1
+                       else f"each on {fp.min_gpus} cards")
+                size = (f", ~{fp.per_gpu_gb:.1f}GiB each"
+                        if fp.known and fp.min_gpus == 1 else "")
+                lines.append(
+                    f"      -> x{fp.copies} copies "
+                    f"(data_parallel_size={fp.copies}), {per}{size}"
+                )
 
     lines.extend(f"  PROBLEM: {problem}" for problem in plan.problems)
     lines.extend(f"  {warning}" for warning in plan.warnings)
 
+    idle = _idle_note(plan)
+    if idle:
+        lines.append(idle)
     seen = set()
     for fp in plan.footprints:
         kv, length = fp.parts.get("kv_gib"), fp.parts.get("max_model_len")
@@ -96,6 +108,31 @@ def _placement(plan: "ResidencyPlan", fp: ModelFootprint) -> str:
         return (f"  -> {cards}, vLLM gets {fp.reserved_gb:.1f}GiB{each} "
                 f"(gpu_memory_utilization={fp.planned_utilization:.2f})")
     return f"  -> {cards}"
+
+def _idle_note(plan: "ResidencyPlan") -> str | None:
+    """Which cards a plan with a vLLM engine leaves idle, and why no copy
+    of an engine takes them. ``None`` when no card is idle."""
+    engines = [fp for fp in plan.footprints if fp.setup == "vllm"]
+    if not (engines and plan.per_gpu_gb and plan.co_resident):
+        return None
+    used = {d for fp in plan.footprints for d in fp.devices}
+    idle = [str(d) for d in range(plan.gpus_available) if d not in used]
+    if not idle:
+        return None
+    first = next((fp for fp in engines if fp.min_gpus == 1), None)
+    if first is None:
+        why = "only a single-GPU vLLM engine gets copies"
+    elif any(d in fp.devices for fp in plan.footprints
+             if fp.engine != first.engine for d in first.devices[:1]):
+        why = (f"{first.model} shares its card, and a copy needs the card "
+               "to itself")
+    elif any(fp is first for fp in plan.oversized):
+        why = f"{first.model} does not fit its card, so a copy would not either"
+    else:
+        why = (f"{first.model} is limited to {first.copies} "
+               f"{'copy' if first.copies == 1 else 'copies'}")
+    cards = f"card {idle[0]} is" if len(idle) == 1 else f"cards {','.join(idle)} are"
+    return f"  note: {cards} idle: {why}"
 
 def co_residency_problem(plan: "ResidencyPlan") -> str:
     """Why several groups do not fit a run, and what to do instead."""
