@@ -26,6 +26,7 @@ import types
 
 import pytest
 
+from redact.exceptions import PromptTooLongError
 from redact.llms import ModelClient, aio, observe
 from redact.llms.backends import (
     ComputeConfig,
@@ -42,7 +43,12 @@ from redact.llms.model_config import (
     register_model,
 )
 from redact.llm_pipeline import batch_check_samples, drive_units
-from tests.conftest import fake_vllm_modules, interrupt_next_run, make_client
+from tests.conftest import (
+    VLLMValidationError,
+    fake_vllm_modules,
+    interrupt_next_run,
+    make_client,
+)
 from tests.llm_pipeline.test_drive_async import _Script, _unit
 
 # ---------------------------------------------------------------------------
@@ -503,6 +509,30 @@ class TestVLLMAgenerate:
             "ev": "call", "stage": None, "model": "m", "backend": "vllm", "n_items": 1,
             "in_tok": None, "out_tok": None, "out_tok_max": None, "max_tokens": 8,
             "temperature": 0.7, "error": f"RuntimeError: {raised.value}"}
+
+    def test_a_prompt_longer_than_the_context_raises_prompt_too_long(
+            self, monkeypatch, events):
+        """The engine fails that one request with a validation error on
+        ``input_tokens``."""
+        error = VLLMValidationError(
+            "This model's maximum context length is 8192 tokens. However, you "
+            "requested 0 output tokens and your prompt contains at least 10036 "
+            "input tokens", parameter="input_tokens", value=10036)
+        backend, _ = _vllm_backend(monkeypatch, {}, _Script(["hi"], fail={"hi": error}))
+        with pytest.raises(PromptTooLongError) as raised:
+            aio.run(backend.agenerate(_ask("hi")))
+        assert str(raised.value) == str(error) and raised.value.__cause__ is error
+        assert [event["error"] for event in events] == [f"VLLMValidationError: {error}"]
+
+    def test_a_validation_error_on_another_parameter_stays_as_it_is(
+            self, monkeypatch, events):
+        error = VLLMValidationError(
+            "max_tokens must be at least 1, got 0.", parameter="max_tokens", value=0)
+        backend, _ = _vllm_backend(monkeypatch, {}, _Script(["hi"], fail={"hi": error}))
+        with pytest.raises(VLLMValidationError) as raised:
+            aio.run(backend.agenerate(_ask("hi")))
+        assert raised.value is error
+        assert [event["error"] for event in events] == [f"VLLMValidationError: {error}"]
 
     def test_internals_id_is_ignored(self, monkeypatch):
         backend, engine = _vllm_backend(monkeypatch, {"hi": _reply("ok")})

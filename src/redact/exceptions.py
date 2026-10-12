@@ -19,3 +19,7 @@ class PromptNotFoundError(RedactError):
 
 class GenerationError(RedactError):
     """Raised when sample generation fails after exhausting retries."""
+
+
+class PromptTooLongError(GenerationError):
+    """Raised when a prompt is longer than the model's context."""

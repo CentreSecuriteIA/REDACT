@@ -22,6 +22,7 @@ import time
 from collections.abc import Collection, Mapping
 from typing import TYPE_CHECKING, ClassVar
 
+from ...exceptions import PromptTooLongError
 from .. import aio, observe
 from ..resources import estimate
 from .base import ComputeConfig, LLMBackend, free_memory
@@ -439,10 +440,12 @@ class VLLMBackend(LLMBackend):
             ``max_tokens`` and ``max_model_len``.
 
         Raises:
+            PromptTooLongError: The prompt is longer than the model's context.
             RuntimeError: The engine was released, sent no output, or
                 aborted the request and sent only part of a reply.
         """
         from vllm import SamplingParams
+        from vllm.exceptions import VLLMValidationError
         from vllm.sampling_params import RequestOutputKind
 
         engine = self._llm  # raises before any work if the engine was released
@@ -490,6 +493,9 @@ class VLLMBackend(LLMBackend):
                 n_items=1, started=started, max_tokens=max_tok,
                 temperature=temp, error=f"{type(exc).__name__}: {exc}",
             )
+            # The engine fails this one request and goes on with the others.
+            if isinstance(exc, VLLMValidationError) and exc.parameter == "input_tokens":
+                raise PromptTooLongError(str(exc)) from exc
             raise
         reply = final.outputs[0]
         out_tok = len(reply.token_ids)

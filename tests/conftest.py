@@ -177,6 +177,15 @@ def _bind(backend, config, setup: str) -> None:
     )
 
 
+class VLLMValidationError(ValueError):
+    """Stand-in for ``vllm.exceptions.VLLMValidationError``."""
+
+    def __init__(self, message, *, parameter=None, value=None):
+        super().__init__(message)
+        self.parameter = parameter
+        self.value = value
+
+
 def fake_vllm_modules(engine_cls, SamplingParams=lambda **kw: kw) -> dict[str, object]:
     """The ``sys.modules`` entries ``backends/vllm.py`` imports, with a fake engine.
 
@@ -194,6 +203,7 @@ def fake_vllm_modules(engine_cls, SamplingParams=lambda **kw: kw) -> dict[str, o
         "vllm": SimpleNamespace(SamplingParams=SamplingParams),
         "vllm.engine": SimpleNamespace(),
         "vllm.engine.arg_utils": SimpleNamespace(AsyncEngineArgs=lambda **kw: kw),
+        "vllm.exceptions": SimpleNamespace(VLLMValidationError=VLLMValidationError),
         "vllm.sampling_params": SimpleNamespace(
             RequestOutputKind=SimpleNamespace(FINAL_ONLY="FINAL_ONLY"),
             SamplingParams=SamplingParams),

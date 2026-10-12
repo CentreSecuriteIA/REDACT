@@ -35,12 +35,14 @@ class _Script:
     name before it in ``order`` has ended, however early it started. A name
     missing from ``order`` ends only on :meth:`release`; ``order=None`` ends
     every request at once. With ``closed=True`` nothing ends before
-    :meth:`open`.
+    :meth:`open`. A name in ``fail`` ends by raising: the exception ``fail``
+    maps it to, or ``RuntimeError("<name> boom")`` when ``fail`` is only names.
     """
 
     def __init__(self, order=None, *, fail=(), closed=False):
         self.order = order
-        self.fail = set(fail)
+        self.fail = fail if isinstance(fail, dict) else {
+            name: RuntimeError(f"{name} boom") for name in fail}
         self.log = []    # ("start" | "end" | "cancel", name), in loop order
         self.sent = {}   # name -> (max_tokens, internals_id)
         self._turn = {name: asyncio.Event() for name in order or ()}
@@ -90,7 +92,7 @@ class _Script:
                 self._turn[following[0]].set()
         self._note("end", name)
         if name in self.fail:
-            raise RuntimeError(f"{name} boom")
+            raise self.fail[name]
 
 
 class _Scripted(MockBackend):

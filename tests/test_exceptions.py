@@ -4,6 +4,7 @@ from redact.exceptions import (
     ConfigError,
     GenerationError,
     PromptNotFoundError,
+    PromptTooLongError,
     RedactError,
 )
 
@@ -15,6 +16,9 @@ class TestExceptionHierarchy:
 
     def test_redact_error_is_exception(self):
         assert issubclass(RedactError, Exception)
+
+    def test_prompt_too_long_is_a_generation_error(self):
+        assert issubclass(PromptTooLongError, GenerationError)
 
     def test_catchable_as_base(self):
         for exc_cls in [ConfigError, PromptNotFoundError, GenerationError]:
