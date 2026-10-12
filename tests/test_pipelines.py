@@ -1,6 +1,7 @@
 """Tests for high-level pipeline functions."""
 
 import json
+import logging
 import os
 import re
 from unittest.mock import MagicMock, patch
@@ -8,6 +9,7 @@ from unittest.mock import MagicMock, patch
 import pandas as pd
 import pytest
 
+from redact.exceptions import PromptTooLongError
 from redact.llms.backends import ComputeConfig
 from redact.pipelines import (
     _get_client,
@@ -400,6 +402,29 @@ class _TokenBackend(MockBackend):
         return replies
 
 
+class _LaneBackend(MockBackend):
+    """Async fake: answers ``answer <token>``, the ``zqN`` in the prompt, and
+    rejects a prompt whose token is in ``too_long`` as over the context.
+
+    ``sent`` holds the token of every request.
+    """
+
+    compute_config = ComputeConfig(supports_async_calls=True)
+
+    def __init__(self, model, too_long=()):
+        super().__init__(model=model)
+        self.too_long = set(too_long)
+        self.sent: list[str] = []
+
+    async def agenerate(self, messages, *, max_tokens=None, internals_id=None,
+                        **kwargs):
+        token = re.search(r"zq\d+", " ".join(m["content"] for m in messages)).group()
+        self.sent.append(token)
+        if token in self.too_long:
+            raise PromptTooLongError(f"{token} is over the context")
+        return f"answer {token}"
+
+
 class TestGenerateOutputsPool:
     """Outputs run through drive_units: full calls, rows as units finish."""
 
@@ -539,3 +564,77 @@ class TestGenerateOutputsPool:
         df = pd.read_csv(out)
         assert sum(len(b) for b in second.batches) == 70 - 32
         assert sorted(df["input_prompt"]) == sorted(inputs["sample"])
+
+    def test_a_prompt_too_long_is_a_rejected_row_and_is_not_sent_again(
+            self, tmp_path, monkeypatch, caplog):
+        from redact import generate_outputs, paths
+        from redact.dataset import Ledger
+        from redact.dataset.io import _hash_text
+
+        tokens = ["zq0", "zq1", "zq2"]
+        inputs = pd.DataFrame({
+            "sample": tokens, "category": ["Cyber"] * 3, "entry_type": ["harmful"] * 3,
+        })
+
+        def run():
+            gen = _LaneBackend("gen-model", too_long={"zq1"})
+            self._clients(monkeypatch, gen, None)
+            generate_outputs(data_dir=tmp_path, inputs=inputs, model="gen-model",
+                             check_outputs=False, verbose=False)
+            return gen
+
+        with caplog.at_level(logging.WARNING):
+            first = run()
+        assert sorted(first.sent) == tokens
+        assert [r.getMessage() for r in caplog.records] == [
+            f"Input {_hash_text('zq1')} rejected, its prompt is too long: "
+            "zq1 is over the context"]
+
+        out = paths.output_responses_csv(tmp_path)
+        df = pd.read_csv(out, dtype=str, keep_default_na=False)
+        rows = {r["input_prompt"]: r for r in df.to_dict("records")}
+        assert rows["zq1"] == {
+            "input_id": _hash_text("zq1"), "input_prompt": "zq1", "category": "Cyber",
+            "subcategory": "", "entry_type": "harmful", "model": "gen-model",
+            "source": "", "sample_id": _hash_text(""), "output_response": "",
+            "accepted": "False",
+            "rejection_reason": "prompt too long: zq1 is over the context",
+        }
+        assert len(df) == len(tokens)
+        assert {t: (rows[t]["output_response"], rows[t]["accepted"])
+                for t in ("zq0", "zq2")} == {
+            "zq0": ("answer zq0", "True"), "zq2": ("answer zq2", "True")}
+        ledger = Ledger.sidecar(out, key_fields=("input_id",),
+                                casters={"input_id": str})
+        assert ledger.completed() == {_hash_text(t) for t in tokens}
+
+        assert run().sent == []
+        assert len(pd.read_csv(out)) == len(tokens)
+
+    def test_another_unit_error_still_stops_the_stage(self, tmp_path, monkeypatch):
+        """Only a prompt that is too long becomes a row. This unit fails
+        building its check, after its response arrived."""
+        import redact.content_moderation.generation as G
+        from redact import generate_outputs, paths
+        from redact.dataset import Ledger
+
+        def no_checker(**kwargs):
+            def build(original, text):
+                raise KeyError("no checker")
+            return build
+
+        monkeypatch.setattr(G, "build_output_quality_checker", no_checker)
+        gen = _LaneBackend("gen-model")
+        self._clients(monkeypatch, gen, MockBackend("Yes"))
+        inputs = pd.DataFrame({
+            "sample": ["zq0"], "category": ["Cyber"], "entry_type": ["harmful"],
+        })
+        with pytest.raises(KeyError, match="no checker"):
+            generate_outputs(data_dir=tmp_path, inputs=inputs, model="gen-model",
+                             check_model="check-model", verbose=False)
+        assert gen.sent == ["zq0"]
+        out = paths.output_responses_csv(tmp_path)
+        assert not out.exists()
+        ledger = Ledger.sidecar(out, key_fields=("input_id",),
+                                casters={"input_id": str})
+        assert ledger.completed() == set()

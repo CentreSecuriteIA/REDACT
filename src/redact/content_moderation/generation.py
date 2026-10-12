@@ -55,6 +55,7 @@ from ..dataset.ledger import Ledger
 from ..dataset.manifest import Manifest
 from ..dataset.resume import CommitBuffer, resume_state
 from ..dataset.merge import merge_all
+from ..exceptions import PromptTooLongError
 from ..llms.client import ModelClient
 from ..llms.prompting import extract_and_clean
 from ..llms.prompting import build_messages, load_prompt
@@ -261,6 +262,10 @@ class InputPipeline(_StandaloneGenerationMixin):
         ``batch_size`` requests, so a retry or a check shares its call with
         other entries' requests. Finished entries are appended every 32
         entries, so a crash mid-run loses only the live entries' work.
+
+        An entry whose prompt is longer than the model's context (a
+        ``PromptTooLongError`` from a request on the async lane) is acked as
+        ``rejected`` at once, with no rows, and skipped on resume.
 
         Args:
             constitution_df: DataFrame with columns ``source_category``,
@@ -607,6 +612,20 @@ class InputPipeline(_StandaloneGenerationMixin):
             if verbose:
                 logger.debug("-> %d accepted, %d rejected", accepted_count, rejected_count)
 
+        # An entry whose prompt is too long ends as one whose every reply was
+        # rejected: no rows, acked as rejected. How many generations it made
+        # is not known here; the ack says 1. Any other unit error stops the
+        # stage.
+        def _on_error(j, exc):
+            if not isinstance(exc, PromptTooLongError):
+                raise exc
+            logger.warning(
+                "Entry %r (%s) rejected, its prompt is too long: %s",
+                str(live[j].get("sample_description", "")),
+                str(live[j].get("entry_type", "harmful")), exc,
+            )
+            _on_done(j, ([], [], 1, True))
+
         # Generation and check calls, topped up from the entries as units
         # finish. The buffer appends finished entries' rows, then acks them
         # (see dataset/resume.py), every 32 entries and on any exit.
@@ -617,6 +636,7 @@ class InputPipeline(_StandaloneGenerationMixin):
             drive_units(
                 _units(),
                 on_done=_on_done,
+                on_error=_on_error,
                 pool_size=2 * batch_size,
                 cap=batch_size,
                 progress="inputs" if verbose else None,
@@ -685,6 +705,11 @@ def run_output_generation(
          the same calls as new rows.
       3. Finished rows are appended to the output CSV every 32 units, in the
          order they finish — crash-resilient.
+
+    An input whose prompt is longer than the model's context (a
+    ``PromptTooLongError`` from a request on the async lane) gets a rejected
+    row with an empty response and the ``rejection_reason``
+    ``"prompt too long: <message>"``.
 
     Resume: each input gets a stable content-hash id (its ``id``/``sample_id``
     column when present, else ``_hash_text(prompt)``). Completed ids are
@@ -850,6 +875,16 @@ def run_output_generation(
         r["rejection_reason"] = reasoning
         buf.add([r], {"input_id": r["input_id"]})
 
+    # The row of a prompt that is too long is acked like any other: sent
+    # again, the prompt would be too long again. Any other unit error stops
+    # the stage.
+    def _on_error(i, exc):
+        if not isinstance(exc, PromptTooLongError):
+            raise exc
+        logger.warning("Input %s rejected, its prompt is too long: %s",
+                       live_rows[i]["input_id"], exc)
+        _on_done(i, ("", False, f"prompt too long: {exc}"))
+
     # Generation and check calls, topped up from the source as units finish.
     # The buffer appends finished rows, then acks them (see dataset/resume.py),
     # every 32 units and on any exit.
@@ -857,6 +892,7 @@ def run_output_generation(
         drive_units(
             (_unit(i, row) for i, (_, row) in enumerate(inputs.iterrows())),
             on_done=_on_done,
+            on_error=_on_error,
             pool_size=2 * batch_size,
             cap=batch_size,
             progress="outputs" if verbose else None,

@@ -18,6 +18,7 @@ from redact.content_moderation.generation import (
     _constitution_inputs_ledger,
     _constitution_inputs_manifest,
 )
+from redact.exceptions import PromptTooLongError
 from redact.llms.backends import ComputeConfig
 from tests.conftest import MockBackend, make_client
 
@@ -345,3 +346,73 @@ def test_csv_rows_cover_an_entry_whose_ack_was_lost(tmp_path):
     r = pipe2.run_from_constitution(_const_df(), _PROMPT, samples_per_entry=2, verbose=False)
     assert r.total_entries_processed == 0
     assert pipe2.gen.backend.calls == []
+
+
+class _LaneGen(MockBackend):
+    """Async fake generator: ``1. sample <token>`` for the ``zqN`` in the
+    prompt, and a prompt whose token is in ``too_long`` is over the context.
+
+    ``sent`` holds the token of every request.
+    """
+
+    compute_config = ComputeConfig(supports_async_calls=True)
+
+    def __init__(self, too_long=()):
+        super().__init__()
+        self.too_long = set(too_long)
+        self.sent: list[str] = []
+
+    async def agenerate(self, messages, *, max_tokens=None, internals_id=None,
+                        **kwargs):
+        token = re.search(r"zq\d+", " ".join(m["content"] for m in messages)).group()
+        self.sent.append(token)
+        if token in self.too_long:
+            raise PromptTooLongError(f"{token} is over the context")
+        return f"1. sample {token}"
+
+
+def test_an_entry_whose_prompt_is_too_long_is_acked_as_rejected(tmp_path, caplog):
+    def run():
+        gen = _LaneGen(too_long={"zq1"})
+        pipe = _token_pipeline(tmp_path, gen, _TokenBackend(lambda t, n: "Yes"))
+        return gen, pipe.run_from_constitution(
+            _token_df(3), _PROMPT, samples_per_entry=1, verbose=False)
+
+    with caplog.at_level(logging.WARNING):
+        gen, r = run()
+    assert sorted(gen.sent) == ["zq0", "zq1", "zq2"]    # zq1 is not generated again
+    assert (r.total_entries_processed, r.skipped_entries) == (2, 1)
+    assert sorted(_rows(tmp_path)["sample"]) == ["sample zq0", "sample zq2"]
+    ledger = _constitution_inputs_ledger(tmp_path)
+    acks = [json.loads(line)
+            for line in ledger.path.read_text(encoding="utf-8").splitlines()]
+    assert [a for a in acks if a["sample_description"] == "desc zq1"] == [{
+        "sample_description": "desc zq1", "entry_type": "harmful", "style": "",
+        "status": "rejected", "attempts": 1}]
+    assert ledger.completed() == {(f"desc zq{i}", "harmful", "") for i in range(3)}
+    too_long, summary = [record.getMessage() for record in caplog.records]
+    assert too_long == ("Entry 'desc zq1' (harmful) rejected, its prompt is too "
+                        "long: zq1 is over the context")
+    assert summary.startswith("1 entries rejected")
+
+    again, r = run()
+    assert again.sent == [] and r.skipped_entries == 0
+
+
+def test_another_unit_error_still_stops_the_stage(tmp_path, monkeypatch):
+    """Only a prompt that is too long is acked as rejected. This entry fails
+    building its check, after its samples arrived."""
+    import redact.content_moderation.generation as G
+
+    def no_checker(**kwargs):
+        raise KeyError("no checker")
+
+    monkeypatch.setattr(G, "build_quality_checker", no_checker)
+    gen = _LaneGen()
+    pipe = _token_pipeline(tmp_path, gen, _TokenBackend(lambda t, n: "Yes"))
+    with pytest.raises(KeyError, match="no checker"):
+        pipe.run_from_constitution(_token_df(1), _PROMPT, samples_per_entry=1,
+                                   verbose=False)
+    assert gen.sent == ["zq0"]
+    assert _constitution_inputs_ledger(tmp_path).completed() == set()
+    assert list(tmp_path.glob("*/samples.csv")) == []
