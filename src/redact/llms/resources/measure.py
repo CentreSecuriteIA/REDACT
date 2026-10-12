@@ -108,7 +108,9 @@ def detect_gpu_memory_gib() -> float | None:
         Per-device total in **GiB**, or ``None`` when ``nvidia-smi`` is
         absent or unparseable. On a machine with mixed cards it is the
         smallest: a plan has one card size, and a grant computed on the
-        smallest card is safe on every card.
+        smallest card is safe on every card. Only the cards
+        ``CUDA_VISIBLE_DEVICES`` leaves visible count, where it names them
+        by index.
     """
     exe = shutil.which("nvidia-smi")
     if exe is None:
@@ -125,6 +127,11 @@ def detect_gpu_memory_gib() -> float | None:
         sizes = [int(line) for line in out.splitlines() if line.strip()]
     except ValueError:
         return None
+    # The planner counts the visible cards, so a hidden one must not set
+    # the size. nvidia-smi lists the cards by index, not by UUID.
+    ids = visible_gpu_ids()
+    if ids and all(entry.isdigit() for entry in ids):
+        sizes = [sizes[int(entry)] for entry in ids if int(entry) < len(sizes)]
     # MiB -> GiB. 1024-based, matching resources/estimate.py: mixing this
     # with a decimal-GB divisor there is what made the same card read 48.0
     # or 44.7 depending on the path.

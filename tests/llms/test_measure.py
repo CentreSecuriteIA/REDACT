@@ -228,7 +228,21 @@ class TestCards:
 
     def test_memory_is_the_smallest_card(self, monkeypatch):
         _nvidia_smi(monkeypatch, "32768\n24576\n")
+        monkeypatch.delenv("CUDA_VISIBLE_DEVICES", raising=False)
         assert measure.detect_gpu_memory_gib() == 24.0
+
+    @pytest.mark.parametrize("visible,gib", [
+        ("0", 24.0), ("1", 12.0), ("1,0", 12.0),
+        # Nothing to narrow to: no card, or cards nvidia-smi's list cannot name.
+        ("", 12.0), ("GPU-8bce", 12.0),
+        ("5", None),
+    ])
+    def test_memory_is_the_smallest_visible_card(self, monkeypatch, visible, gib):
+        """The planner counts the visible cards: a hidden 12 GiB card must
+        not size the 24 GiB one."""
+        _nvidia_smi(monkeypatch, "24576\n12288\n")
+        monkeypatch.setenv("CUDA_VISIBLE_DEVICES", visible)
+        assert measure.detect_gpu_memory_gib() == gib
 
     @pytest.mark.parametrize("out", ["24576\n[N/A]\n", ""])
     def test_memory_that_cannot_be_read_is_none(self, monkeypatch, out):
