@@ -252,7 +252,7 @@ def test_previous_paraphraser_is_unreferenced_before_unload(tmp_path, patched):
 
     plan = SimpleNamespace(sequential=True)
     patched.setattr(CP.ModelClient, "create", create)
-    patched.setattr(residency, "plan_residency", lambda models: plan)
+    patched.setattr(residency, "plan_residency", lambda models, copies=None: plan)
     patched.setattr(residency, "unload_local", unload_local)
     patched.setattr(residency, "apply_plan",
                     lambda p, replace=True: events.append((p is plan, replace)))
@@ -308,6 +308,48 @@ def test_co_fitting_paraphrasers_load_with_planned_grants(tmp_path, patched):
         vllm_module.set_planned_utilization({})     # a release keeps the plan
 
 
+@pytest.mark.parametrize("cards", [2, 3])
+def test_the_pool_is_planned_with_one_copy_of_each_paraphraser(tmp_path, patched, cards):
+    """The pool runs one paraphraser at a time, and a direct call has no
+    way to turn copies off. With two cards each paraphraser has one; with
+    three, the idle card is not handed to the first as a copy."""
+    import redact.llms.backends.vllm as vllm_module
+    from redact.llms.model_config import MODEL_REGISTRY, VLLMConfig, register_model
+    from redact import residency
+    from redact.llms.resources import estimate
+
+    register_model("_para_small", backend_type="vllm", roles=["paraphraser"],
+                   vllm=VLLMConfig(hf_model_id="org/small", vram_gb=4.3))
+    patched.setattr(estimate, "estimate_kv_gib", lambda *a, **k: 0.0)
+    patched.setattr("redact.llms.resources.measure.detect_gpus",
+                    lambda visible=False: ("FakeGPU", cards))
+    patched.setattr("redact.llms.resources.measure.detect_gpu_memory_gib", lambda: 80.0)
+    plan_residency, plans = residency.plan_residency, []
+
+    def planned(models, **kwargs):
+        plans.append((kwargs, plan_residency(models, **kwargs)))
+        return plans[-1][1]
+
+    patched.setattr(residency, "plan_residency", planned)
+    _seed_inputs(tmp_path)
+    try:
+        generate_paraphrases(
+            data_dir=tmp_path, target="inputs", paraphraser="distribution",
+            paraphrases_per_sample=2, verbose=False,
+        )
+        (asked, plan), = plans
+        assert asked == {"copies": {"venice-paraphraser": 1, "_para_small": 1}}
+        assert [(fp.model, fp.devices, fp.copies) for fp in plan.footprints] == [
+            ("_para_small", (0,), 1), ("venice-paraphraser", (1,), 1)]
+        assert vllm_module._planned_devices == {
+            vllm_module._engine_key("org/small", None, {}): (0,),
+            vllm_module._engine_key(
+                "dphn/Dolphin-Mistral-24B-Venice-Edition", None, {}): (1,),
+        }
+    finally:
+        MODEL_REGISTRY.pop("_para_small", None)
+
+
 def test_an_unload_between_paraphrasers_shuts_down_only_their_engine(
         tmp_path, monkeypatch):
     """With paraphrasers that do not co-fit, the engine of the one that ran
@@ -342,7 +384,8 @@ def test_an_unload_between_paraphrasers_shuts_down_only_their_engine(
         CP, "batch_check_samples",
         lambda cc, payloads, checker, **kw: [(True, "") for _ in payloads])
     monkeypatch.setattr(
-        residency, "plan_residency", lambda models: SimpleNamespace(sequential=True))
+        residency, "plan_residency",
+        lambda models, copies=None: SimpleNamespace(sequential=True))
     monkeypatch.setattr(residency, "apply_plan", lambda plan, replace=True: None)
 
     register_model("_para_second", backend_type="vllm", roles=["paraphraser"],

@@ -270,7 +270,9 @@ def run_paraphrase_target(
     if len(groups) > 1:
         from redact import residency
 
-        plan = residency.plan_residency(list(groups))
+        # One copy each: a copy of one paraphraser on an idle card would only
+        # hold what the next one may need.
+        plan = residency.plan_residency(list(groups), copies=dict.fromkeys(groups, 1))
         unload_between = plan.sequential
         # replace=False: a run's own plan, when applied, covers the pool.
         residency.apply_plan(plan, replace=False)
