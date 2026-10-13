@@ -1,14 +1,18 @@
 """Dataset handling utilities — CSV I/O, merging, deduplication, splitting, loading, taxonomy."""
 
-from .dedup import exact_dedup, normalized_dedup
-from .identity import content_id, row_id
-from .io import (
+from .categories import (
     SAMPLE_COLUMNS,
     append_samples,
+    discover_categories,
     get_existing_samples,
+    merge_all,
+    merge_category_csvs,
     read_category_csv,
+    take_per_group,
     write_category_csv,
 )
+from .dedup import exact_dedup, normalized_dedup
+from .identity import content_id, row_id
 from .loading import filter_dataset, load_from_config, load_hf_dataset
 from .merge import (
     CONSTITUTION_INPUT_COLUMN_MAP,
@@ -18,9 +22,6 @@ from .merge import (
     JAILBREAK_COLUMN_MAP,
     JAILBREAK_KEEP_COLUMNS,
     TYPE_COLUMN_MAP,
-    discover_categories,
-    merge_all,
-    merge_category_csvs,
     merge_constitution_input_csvs,
     merge_content_mod_csvs,
     merge_csvs_from_dirs,
@@ -37,7 +38,6 @@ from .split import (
     normalize_origin,
     split_by_column,
     split_by_functions,
-    take_per_group,
 )
 from .taxonomy import (
     filter_by_group,

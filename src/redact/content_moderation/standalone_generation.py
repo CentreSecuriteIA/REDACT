@@ -21,7 +21,7 @@ import warnings
 from collections.abc import Callable
 from math import ceil
 
-from ..dataset.io import append_samples, get_existing_samples
+from ..dataset import append_samples, get_existing_samples
 from ..dataset.taxonomy import get_seed_prompts
 from ..llms.prompting import extract_and_clean
 from ..llm_pipeline import batch_check_samples

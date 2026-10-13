@@ -50,17 +50,18 @@ from pathlib import Path
 
 import pandas as pd
 
+from .. import paths
 from ..dataset import (
     Ledger,
     Manifest,
     append_rows,
+    append_samples,
     content_id,
+    merge_all,
     read_rows,
     row_id,
 )
-from ..dataset.io import _default_dataset_dir, append_samples
 from ..dataset.resume import CommitBuffer, resume_state
-from ..dataset.merge import merge_all
 from ..exceptions import PromptTooLongError
 from ..llms.client import ModelClient
 from ..llms.prompting import extract_and_clean
@@ -195,7 +196,7 @@ class InputPipeline(_StandaloneGenerationMixin):
         self.gen = gen
         self.check = check
         self.extraction_style = extraction_style
-        self.dataset_dir = dataset_dir if dataset_dir is not None else _default_dataset_dir()
+        self.dataset_dir = dataset_dir if dataset_dir is not None else paths.datasets()
 
     def _build_generation_messages(
         self,

@@ -52,6 +52,7 @@ from redact.dataset import (
     Ledger,
     Manifest,
     append_rows,
+    discover_categories,
     iter_categories,
     load_seeds,
     load_taxonomy,
@@ -61,10 +62,7 @@ from redact.dataset import (
     row_id,
     take_per_group,
 )
-from redact.dataset.merge import (
-    discover_categories,
-    merge_content_mod_csvs,
-)
+from redact.dataset.merge import merge_content_mod_csvs
 from redact.jailbreak import (
     build_combination,
     build_function_registry,

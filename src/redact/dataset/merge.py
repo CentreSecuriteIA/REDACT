@@ -1,91 +1,12 @@
-"""Merge per-category CSVs into a single unified dataset.
-
-Each category stores its samples separately in Datasets/{category}/samples.csv.
-This module provides functions to combine them on demand.
-
-Also provides general-purpose CSV normalization and directory-based merging,
-with presets for jailbreak technique pipelines and content moderation output.
+"""General-purpose CSV normalization and directory-based merging, with presets
+for jailbreak technique pipelines and content moderation output.
 """
 
 from pathlib import Path
 
 import pandas as pd
 
-from redact import paths
-
 from .identity import content_id
-from .io import _default_dataset_dir, read_category_csv
-
-
-def merge_category_csvs(
-    categories: list[str],
-    dataset_dir: str | Path | None = None,
-    filename: str = paths.SAMPLES_FILENAME,
-    accepted_only: bool = True,
-) -> pd.DataFrame:
-    """Merge multiple category CSVs into a single DataFrame.
-
-    Args:
-        categories: List of category names to merge.
-        dataset_dir: Root dataset directory.
-        filename: CSV filename within each category directory.
-        accepted_only: If True, only include accepted samples.
-
-    Returns:
-        Combined DataFrame with all categories.
-    """
-    frames: list[pd.DataFrame] = []
-    for category in categories:
-        df = read_category_csv(category, dataset_dir, filename)
-        if not df.empty:
-            if accepted_only and "accepted" in df.columns:
-                df = df[df["accepted"] == True]  # noqa: E712
-            frames.append(df)
-
-    if not frames:
-        return pd.DataFrame()
-
-    return pd.concat(frames, ignore_index=True)
-
-
-def discover_categories(dataset_dir: str | Path | None = None) -> list[str]:
-    """Discover all category subdirectories in the dataset directory.
-
-    Args:
-        dataset_dir: Root dataset directory.
-
-    Returns:
-        Sorted list of category directory names.
-    """
-    base = Path(dataset_dir) if dataset_dir is not None else _default_dataset_dir()
-    if not base.is_dir():
-        return []
-    return sorted(
-        d.name for d in base.iterdir()
-        if d.is_dir() and (d / paths.SAMPLES_FILENAME).exists()
-    )
-
-
-def merge_all(
-    dataset_dir: str | Path | None = None,
-    accepted_only: bool = True,
-) -> pd.DataFrame:
-    """Discover all categories and merge into one DataFrame.
-
-    Args:
-        dataset_dir: Root dataset directory.
-        accepted_only: If True, only include accepted samples.
-
-    Returns:
-        Combined DataFrame.
-    """
-    categories = discover_categories(dataset_dir)
-    return merge_category_csvs(categories, dataset_dir, accepted_only=accepted_only)
-
-
-# ---------------------------------------------------------------------------
-# General-purpose CSV normalization and directory-based merging
-# ---------------------------------------------------------------------------
 
 
 def normalize_csv(

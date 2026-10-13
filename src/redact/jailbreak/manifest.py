@@ -7,8 +7,8 @@ iterations don't draw the same combination), and writes one JSON line per unit
 via :class:`redact.dataset.Manifest`. Generation then streams the manifest in
 chunks.
 
-Identity is the **prompt-content MD5** (the same ``sample_id`` ``dataset/io.py``
-writes for input samples), so the manifest, the assignment seed, and every output
+Identity is the **prompt-content MD5** (the same ``sample_id`` the input
+samples carry), so the manifest, the assignment seed, and every output
 row are all keyed to the exact prompt — stable across re-runs and content-based.
 
 Resume is driven by the sidecar ``jailbreaks.state.jsonl`` **ledger**

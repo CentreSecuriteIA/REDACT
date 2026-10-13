@@ -10,8 +10,7 @@ import pytest
 
 import redact.content_moderation.paraphrase as P
 from redact import generate_paraphrases, paths
-from redact.dataset import content_id
-from redact.dataset.io import append_samples
+from redact.dataset import append_samples, content_id
 from redact.llms.backends import ComputeConfig
 from tests.conftest import MockBackend, make_client
 

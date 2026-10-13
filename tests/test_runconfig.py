@@ -13,7 +13,7 @@ import pandas as pd
 import pytest
 
 from redact import paths, telemetry
-from redact.dataset.io import append_samples
+from redact.dataset import append_samples
 from redact.runconfig import (
     load_params,
     load_recipe,
