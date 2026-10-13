@@ -53,7 +53,6 @@ from redact.dataset import (
     Manifest,
     append_rows,
     iter_categories,
-    keys_in,
     load_seeds,
     load_taxonomy,
     merge_all,
@@ -847,9 +846,6 @@ def generate_jailbreaks(
         jb_ledger,
         resume=resume,
         artifact=out,
-        extra=(
-            keys_in(out, jb_ledger.key_fields, jb_ledger.casters) if resume else None
-        ),
     )
 
     # ------------------------------------------------------------------

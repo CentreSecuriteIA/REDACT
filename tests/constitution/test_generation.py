@@ -8,14 +8,21 @@ from redact.constitution.generation import (
     ConstitutionPipeline,
     ConstitutionResult,
     EntryType,
-    _append_state,
-    _read_state,
     _save_entries_csv,
-    _state_path,
     _strip_end_marker,
     _unit_key,
 )
+from redact.dataset import Ledger
 from tests.conftest import MockBackend, make_client
+
+
+def _ledger(output_dir):
+    """The constitution ledger of the run that writes to ``output_dir``."""
+    return Ledger.sidecar(
+        output_dir / "merged.csv", ("unit",), {"unit": str},
+        name="constitution.state.jsonl",
+    )
+
 
 # Valid 3-layer markdown that parse_constitution can parse
 _VALID_CONSTITUTION_OUTPUT = """\
@@ -230,7 +237,7 @@ class TestStateLedger:
     """Sidecar resume-state ledger for constitution generation."""
 
     def test_state_path_is_sidecar(self, tmp_path):
-        sp = _state_path(tmp_path / "constitution")
+        sp = _ledger(tmp_path / "constitution").path
         assert sp.name == "constitution.state.jsonl"
         assert sp.parent == tmp_path / "constitution"
 
@@ -238,21 +245,21 @@ class TestStateLedger:
         assert _unit_key("Violence", "harmful") == "Violence::harmful"
 
     def test_read_missing_returns_empty(self, tmp_path):
-        assert _read_state(tmp_path / "nope.state.jsonl") == set()
+        assert _ledger(tmp_path / "nope").completed() == set()
 
     def test_append_then_read_roundtrip(self, tmp_path):
-        sp = tmp_path / "s.state.jsonl"
-        _append_state(sp, ["A::harmful", "A::benign"])
-        _append_state(sp, ["B::harmful"])
-        assert _read_state(sp) == {"A::harmful", "A::benign", "B::harmful"}
+        ledger = _ledger(tmp_path)
+        ledger.record([{"unit": "A::harmful"}, {"unit": "A::benign"}])
+        ledger.record([{"unit": "B::harmful"}])
+        assert ledger.completed() == {"A::harmful", "A::benign", "B::harmful"}
 
     def test_read_ignores_malformed_lines(self, tmp_path):
-        sp = tmp_path / "s.state.jsonl"
-        sp.write_text(
+        ledger = _ledger(tmp_path)
+        ledger.path.write_text(
             '{"unit": "x"}\nnot json\n{"no_unit": 1}\n{"unit": "y"}\n',
             encoding="utf-8",
         )
-        assert _read_state(sp) == {"x", "y"}
+        assert ledger.completed() == {"x", "y"}
 
 
 class TestRunResume:
@@ -278,7 +285,7 @@ class TestRunResume:
             entry_types=[EntryType.HARMFUL, EntryType.BENIGN],
             num_categories=2, save=True, verbose=False,
         )
-        units = _read_state(_state_path(tmp_path / "constitution"))
+        units = _ledger(tmp_path / "constitution").completed()
         assert units == {
             "CatA::harmful", "CatA::benign",
             "CatB::harmful", "CatB::benign",
@@ -327,7 +334,7 @@ class TestRunResume:
         out_dir = tmp_path / "constitution"
 
         # Pre-seed the ledger as if CatA was already completed.
-        _append_state(_state_path(out_dir), ["CatA::harmful"])
+        _ledger(out_dir).record([{"unit": "CatA::harmful"}])
 
         pipeline = self._make_pipeline(backend, tmp_path)
         pipeline.run(
@@ -336,7 +343,7 @@ class TestRunResume:
         )
         # Only CatB should have been generated (CatA skipped).
         assert len(backend.calls) == 1
-        assert _read_state(_state_path(out_dir)) == {"CatA::harmful", "CatB::harmful"}
+        assert _ledger(out_dir).completed() == {"CatA::harmful", "CatB::harmful"}
 
     def test_resume_false_wipes_csvs_and_ledger(self, tmp_path):
         backend = MockBackend(_VALID_CONSTITUTION_OUTPUT)
@@ -378,4 +385,4 @@ class TestRunResume:
         )
         assert len(result.entries) > 0
         assert not (out_dir / "merged.csv").exists()
-        assert not _state_path(out_dir).exists()
+        assert not _ledger(out_dir).exists()

@@ -55,7 +55,6 @@ from ..dataset import (
     Manifest,
     append_rows,
     content_id,
-    keys_in,
     read_rows,
     row_id,
 )
@@ -784,12 +783,7 @@ def run_output_generation(
     # union the jailbreak and constitution-input stages use): a crash between
     # the append and the ack would otherwise re-generate those inputs and append
     # a second row for each, which nothing downstream dedups.
-    completed = resume_state(
-        ledger, resume=resume, artifact=out_path,
-        extra=(
-            keys_in(out_path, ledger.key_fields, ledger.casters) if resume else None
-        ),
-    )
+    completed = resume_state(ledger, resume=resume, artifact=out_path)
     if completed:
         before = len(inputs)
         inputs = inputs[~inputs["_state_id"].isin(completed)].reset_index(drop=True)

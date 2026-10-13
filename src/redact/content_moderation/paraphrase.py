@@ -34,7 +34,6 @@ from ..dataset import (
     Manifest,
     append_rows,
     content_id,
-    keys_in,
     merge_all,
     read_rows,
     resume_state,
@@ -215,19 +214,14 @@ def run_paraphrase_target(
     # content dedup (seen_texts), but completion is the ledger's job.
     state_path = _paraphrase_state_path(out_path)
     manifest = Manifest.sidecar(out_path)
-    if not resume:
-        manifest.reset()
     # Read the artifact before resume_state, which deletes it on a fresh run.
     prev = pd.read_csv(out_path) if (resume and out_path.exists()) else pd.DataFrame()
     # Units already in the CSV are unioned into the completed set (as the
     # jailbreak stage does): a crash between the append and the ack would
     # otherwise re-paraphrase them and append a second row each.
-    state = _paraphrase_ledger(state_path)
-    csv_units: set[tuple[str, int]] = (
-        keys_in(out_path, state.key_fields, state.casters) if resume else set()
-    )
     completed: set[tuple[str, int]] = resume_state(
-        state, resume=resume, artifact=out_path, extra=csv_units or None,
+        _paraphrase_ledger(state_path), resume=resume, artifact=out_path,
+        manifest=manifest,
     )
     seen_texts: set[str] = (
         set(prev["sample"].astype(str))

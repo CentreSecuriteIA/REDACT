@@ -9,7 +9,14 @@ import json
 
 import pytest
 
-from redact.dataset import CommitBuffer, Ledger, commit, resume_state
+from redact.dataset import (
+    CommitBuffer,
+    Ledger,
+    Manifest,
+    append_rows,
+    commit,
+    resume_state,
+)
 from redact.llm_pipeline import LLMRequest, drive_units
 from tests.conftest import as_resolver
 
@@ -56,6 +63,39 @@ class TestResumeState:
         )
         led.record([{"input_id": "a", "iteration": 0}])
         assert resume_state(led, resume=True) == {("a", 0)}
+
+    def test_fresh_clears_the_manifest(self, tmp_path):
+        led = _ledger(tmp_path)
+        manifest = Manifest(tmp_path / "a.manifest.jsonl")
+        manifest.write([{"input_id": "a"}])
+
+        assert resume_state(led, resume=False, manifest=manifest) == set()
+        assert not manifest.exists()
+
+    def test_resume_keeps_the_manifest(self, tmp_path):
+        led = _ledger(tmp_path)
+        manifest = Manifest(tmp_path / "a.manifest.jsonl")
+        manifest.write([{"input_id": "a"}])
+
+        resume_state(led, resume=True, manifest=manifest)
+        assert manifest.load() == [{"input_id": "a"}]
+
+    def test_resume_adds_the_keys_of_the_rows_in_the_artifact(self, tmp_path):
+        """A crash between the append and the ack leaves rows with no ack."""
+        led = _ledger(
+            tmp_path, ("input_id", "iteration"), {"input_id": str, "iteration": int}
+        )
+        led.record([{"input_id": "a", "iteration": 0}])
+        artifact = tmp_path / "out.csv"
+        append_rows(artifact, [{"input_id": "a", "iteration": 0, "sample": "x"},
+                               {"input_id": "b", "iteration": 1, "sample": "y"}])
+
+        assert resume_state(led, resume=True, artifact=artifact) == {("a", 0), ("b", 1)}
+
+    def test_resume_tolerates_a_missing_artifact(self, tmp_path):
+        led = _ledger(tmp_path)
+        led.record([{"input_id": "a"}])
+        assert resume_state(led, resume=True, artifact=tmp_path / "nope.csv") == {"a"}
 
 
 class TestCommit:

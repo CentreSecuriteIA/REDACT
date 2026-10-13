@@ -26,7 +26,7 @@ from pathlib import Path
 
 import pandas as pd
 
-from ..dataset import Ledger, Manifest, content_id
+from ..dataset import Ledger, Manifest, content_id, resume_state
 from ..dataset.taxonomy import iter_categories
 from ..llms.client import ModelClient
 from .parse import parse_constitution as _parse_raw
@@ -160,29 +160,9 @@ def _save_entries_csv(
 # jailbreak manifest in jailbreak/manifest.py.
 
 
-def _state_path(output_dir: Path) -> Path:
-    """Sidecar resume-state path beside the constitution CSVs."""
-    return Path(output_dir) / "constitution.state.jsonl"
-
-
 def _unit_key(source_category: str, entry_type: str) -> str:
     """Composite key identifying one (source_category, entry_type) LLM call."""
     return f"{source_category}::{entry_type}"
-
-
-def _ledger(path: Path) -> Ledger:
-    """The shared resume-ledger for constitution units (key field ``unit``)."""
-    return Ledger(path, key_fields=("unit",), casters={"unit": str})
-
-
-def _read_state(path: Path) -> set[str]:
-    """Return the set of completed unit keys (delegates to the shared Ledger)."""
-    return _ledger(path).completed()
-
-
-def _append_state(path: Path, units: list[str]) -> None:
-    """Append completed unit keys to the resume-state file (shared Ledger)."""
-    _ledger(path).record([{"unit": u} for u in units])
 
 
 # ---------------------------------------------------------------------------
@@ -552,8 +532,12 @@ class ConstitutionPipeline:
         if num_taxonomy_categories is not None:
             categories = categories[:num_taxonomy_categories]
 
-        state_path = _state_path(self.output_dir)
+        merged = self.output_dir / "merged.csv"
+        ledger = Ledger.sidecar(
+            merged, ("unit",), {"unit": str}, name="constitution.state.jsonl"
+        )
 
+        completed: set[str] = set()
         if save:
             self.output_dir.mkdir(parents=True, exist_ok=True)
             # resume=False regenerates from scratch: wipe prior CSVs + ledger so
@@ -561,10 +545,7 @@ class ConstitutionPipeline:
             if not resume:
                 for f in self.output_dir.glob("*.csv"):
                     f.unlink()
-                if state_path.exists():
-                    state_path.unlink()
-
-        completed = _read_state(state_path) if (save and resume) else set()
+            completed = resume_state(ledger, resume=resume)
 
         # Plan the full run → manifest (one row per (source_category, entry_type)
         # unit, keyed like the ledger, plus the standalone-benign unit), written
@@ -580,7 +561,9 @@ class ConstitutionPipeline:
                     {"source_category": "general", "entry_type": "general_benign",
                      "status": "planned"}
                 )
-            Manifest(self.output_dir / "constitution.manifest.jsonl").write(manifest_rows)
+            Manifest.sidecar(merged, name="constitution.manifest.jsonl").write(
+                manifest_rows
+            )
 
         if verbose:
             logger.info("Constitution Generation")
@@ -647,9 +630,8 @@ class ConstitutionPipeline:
                 # (types that failed all retries stay un-acked → retried later).
                 self._save_category_entries(cat_result)
                 produced_types = {e.entry_type for e in cat_result.entries}
-                _append_state(
-                    state_path,
-                    [_unit_key(cat_name, t) for t in produced_types],
+                ledger.record(
+                    [{"unit": _unit_key(cat_name, t)} for t in produced_types]
                 )
             else:
                 in_memory.entries.extend(cat_result.entries)
@@ -687,7 +669,7 @@ class ConstitutionPipeline:
                         self.model,
                         append=True,
                     )
-                    _append_state(state_path, [benign_unit])
+                    ledger.record([{"unit": benign_unit}])
                 else:
                     in_memory.entries.extend(entries)
                     in_memory.raw_outputs["general_benign"] = raw
