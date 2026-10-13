@@ -62,7 +62,7 @@ from ..dataset import (
     row_ids,
     sample_row,
 )
-from ..dataset.commit import CommitBuffer
+from ..dataset.save import CommitBuffer
 from ..dataset.drop import drop_units
 from ..dataset.resume import release_lock, resume_state
 from ..exceptions import PromptTooLongError
@@ -663,7 +663,7 @@ class InputPipeline(_StandaloneGenerationMixin):
 
         # Generation and check calls, topped up from the entries as units
         # finish. The buffer appends finished entries' rows, then acks them
-        # (see dataset/commit.py), every 32 entries and on any exit.
+        # (see dataset/save.py), every 32 entries and on any exit.
         with (
             CommitBuffer(append=_append, ledger=ledger) if ledger is not None
             else nullcontext()
@@ -900,7 +900,7 @@ def run_output_generation(
         _on_done(i, ("", False, f"prompt too long: {exc}"))
 
     # Generation and check calls, topped up from the source as units finish.
-    # The buffer appends finished rows, then acks them (see dataset/commit.py),
+    # The buffer appends finished rows, then acks them (see dataset/save.py),
     # every 32 units and on any exit.
     with CommitBuffer(append=_append_rows, ledger=ledger) as buf:
         drive_units(
