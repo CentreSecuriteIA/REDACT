@@ -42,6 +42,35 @@ def _header(path: Path) -> list[str] | None:
         return next(csv.reader(fh), None)
 
 
+def _header_for(path: Path, columns: Iterable[str]) -> list[str] | None:
+    """The header of the CSV at ``path``, once it is seen to hold ``columns``.
+
+    Raises:
+        ValueError: The header lacks one of the columns.
+    """
+    header = _header(path)
+    if header is not None:
+        unknown = [repr(c) for c in columns if c not in header]
+        if unknown:
+            raise ValueError(
+                f"Cannot append to {path}: its header has no column "
+                f"{', '.join(unknown)}."
+            )
+    return header
+
+
+def check_columns(path: str | Path, rows: Sequence[Mapping[str, Any]]) -> None:
+    """Raise as :func:`append_rows` would on rows the CSV at ``path`` cannot take.
+
+    For a save over several files: each file's rows are checked before the
+    first file is written.
+
+    Raises:
+        ValueError: A row has a column the file's header lacks.
+    """
+    _header_for(Path(path), dict.fromkeys(column for row in rows for column in row))
+
+
 def append_rows(path: str | Path, rows: Sequence[Mapping[str, Any]]) -> dict[Path, int]:
     """Append ``rows`` to the CSV at ``path`` in one write, synced to disk.
 
@@ -59,16 +88,9 @@ def append_rows(path: str | Path, rows: Sequence[Mapping[str, Any]]) -> dict[Pat
     """
     path = Path(path)
     frame = pd.DataFrame(rows)
-    header = _header(path)
-    if header is not None:
-        unknown = [repr(c) for c in frame.columns if c not in header]
-        if unknown:
-            raise ValueError(
-                f"Cannot append to {path}: its header has no column "
-                f"{', '.join(unknown)}."
-            )
-        if list(frame.columns) != header:
-            frame = frame.reindex(columns=header)
+    header = _header_for(path, frame.columns)
+    if header is not None and list(frame.columns) != header:
+        frame = frame.reindex(columns=header)
     # The bytes to_csv writes to a path, line endings included.
     data = frame.to_csv(None, header=header is None, index=False).encode("utf-8")
     with _retry_held(lambda: path.open("ab")) as fh:

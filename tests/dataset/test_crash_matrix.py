@@ -18,6 +18,7 @@ Then the run is taken to its end, and each unit must have its rows once.
 
 import csv
 import io
+import json
 import os
 import subprocess
 import sys
@@ -34,6 +35,7 @@ from redact.dataset import (
     CommitBuffer,
     Ledger,
     append_rows,
+    drop_units,
     release_lock,
     resume_state,
 )
@@ -367,3 +369,298 @@ def test_a_second_process_is_refused_while_the_first_holds_the_lock(tmp_path):
     assert {path.name: path.read_bytes()
             for path in (out, led.path, manifest)} == before
     assert not out.with_name("out.csv.cut").exists()
+
+
+# --- a stage of several files, which writes a text once ----------------------
+
+_TREE = "*/s.csv"
+
+# Each unit's category and the texts of its rows. A text is written once, by
+# the first unit that gives it, so t2 writes no row and t5 one. Category C
+# first appears in the last save.
+_TREE_UNITS = {
+    "t0": ("A", ["plain"]),
+    "t1": ("B", ['a comma, and a "quote"', "two\nlines"]),
+    "t2": ("A", ["plain"]),
+    "t3": ("B", ["café 中文"]),
+    "t4": ("A", ["x"]),
+    "t5": ("C", ["two\nlines", "last"]),
+}
+_IDS = {text: f"i{n}" for n, text in enumerate(dict.fromkeys(
+    text for _category, texts in _TREE_UNITS.values() for text in texts))}
+_LAST_SAVE = len(_TREE_UNITS) // _EVERY - 1
+
+
+def _tree_ledger(folder):
+    return Ledger(folder / "tree.state.jsonl", key_fields=("key",),
+                  casters={"key": str})
+
+
+def _tree_run(folder, *, attempt, every=_EVERY, on_write=lambda: None,
+              on_resume=lambda done, seen: None):
+    """Resume, then save every unit that is not finished, a text whose id a
+    row already has left out."""
+    led = _tree_ledger(folder)
+    done = resume_state(led, resume=True, artifact=folder, pattern=_TREE)
+    seen = set(led.ids)
+    on_resume(done, set(seen))
+
+    def append(rows):
+        sizes = {}
+        for category in dict.fromkeys(row["category"] for row in rows):
+            path = folder / category / "s.csv"
+            path.parent.mkdir(exist_ok=True)
+            sizes.update(append_rows(
+                path, [row for row in rows if row["category"] == category]))
+            on_write()
+        return sizes
+
+    with CommitBuffer(append=append, ledger=led, every=every) as buf:
+        for key, (category, texts) in _TREE_UNITS.items():
+            if key in done:
+                continue
+            new = [text for text in texts if _IDS[text] not in seen]
+            seen.update(_IDS[text] for text in new)
+            buf.add([{"key": key, "category": category, "text": text,
+                      "id": _IDS[text], "attempt": attempt} for text in new],
+                    {"key": key, "ids": [_IDS[text] for text in new]})
+
+
+def _tree_files(folder):
+    """The bytes of each file under the folder, by its path from there."""
+    return {path.relative_to(folder).as_posix(): path.read_bytes()
+            for path in sorted(folder.rglob("*"))
+            if path.is_file() and path.suffix != ".lock"}
+
+
+def _put_tree(folder, files):
+    """Leave the folder holding these files and nothing else."""
+    for path in sorted(folder.rglob("*"), reverse=True):
+        path.rmdir() if path.is_dir() else path.unlink()
+    for name, data in files.items():
+        (folder / name).parent.mkdir(exist_ok=True)
+        (folder / name).write_bytes(data)
+
+
+def _acks(ledger):
+    """Each unit a whole ledger acks, with the ids it records."""
+    lines = [json.loads(line) for line in (ledger or b"").splitlines()]
+    return {line["key"]: line["ids"] for line in lines if "key" in line}
+
+
+def _tree_check(folder, finished):
+    """Hold the tree against the guarantees; the rows found, by unit."""
+    led = _tree_ledger(folder)
+    done, saved, end = led.read()
+    assert done == finished                                         # 1 and 3
+    files = {name: data for name, data in _tree_files(folder).items()
+             if name.endswith("/s.csv")}
+    assert (saved or {}) == {                                       # 4
+        name: [len(data), f"{zlib.crc32(data[-4096:]):08x}"]
+        for name, data in files.items()}
+    assert not led.exists() or led.path.stat().st_size == end
+    rows = {}
+    for name, data in files.items():
+        text = data.decode("utf-8")
+        assert text.endswith("\n")
+        header, *found = csv.reader(io.StringIO(text, newline=""))
+        assert header == ["key", "category", "text", "id", "attempt"]
+        for row in found:
+            assert len(row) == len(header) and name == f"{row[1]}/s.csv"
+            rows.setdefault(row[0], []).append((row[2], row[3], int(row[4])))
+    # 1 and 2: the rows on disk are the ones the finished units recorded.
+    acks = _acks(led.path.read_bytes() if led.exists() else b"")
+    assert {key: [row[1] for row in found] for key, found in rows.items()} == {
+        key: ids for key, ids in acks.items() if ids}
+    assert led.ids == {row[1] for found in rows.values() for row in found}
+    return rows
+
+
+def _tree_recover(folder, monkeypatch, finished):
+    """Resume the tree and take the run to its end, as one run does. The
+    tree is checked once it is resumed, and again at the end."""
+    before = {}
+
+    def resumed(done, seen):
+        assert done == finished
+        before.update(_tree_check(folder, finished))
+        # The ids the run goes on with are the ids of the rows on disk.
+        assert seen == {row[1] for found in before.values() for row in found}
+
+    with monkeypatch.context() as patch:
+        patch.setattr(resume_module, "keys_in", _no_read)           # 5
+        patch.setattr(pd, "read_csv", _no_read)
+        _tree_run(folder, attempt=1, every=len(_TREE_UNITS), on_resume=resumed)
+    after = _tree_check(folder, set(_TREE_UNITS))
+    # Every text is on disk once, under the first unit that gives it.
+    assert sorted(row[0] for found in after.values() for row in found) == sorted(_IDS)
+    for key, found in after.items():
+        # Rows acked before the crash are the same rows; the others ran again.
+        assert found == before.get(key, [(text, id_, 1) for text, id_, _ in found])
+
+
+def _tree_clean_run(folder, monkeypatch):
+    """The folder after each write of one run, and the save the write is of."""
+    states = [({}, -1)]
+    saves = 0
+
+    def snapshot():
+        states.append((_tree_files(folder), saves))
+
+    def record(self, records, saved=None):
+        nonlocal saves
+        recorded(self, records, saved)
+        if records:
+            saves += 1
+        states.append((_tree_files(folder), saves - 1))
+
+    recorded = Ledger.record
+    with monkeypatch.context() as patch:
+        patch.setattr(Ledger, "record", record)
+        _tree_run(folder, attempt=0, on_write=snapshot)
+    return states
+
+
+def _tree_crashes(states, every_byte_of):
+    """Every folder a crash of the run leaves, with its finished units.
+
+    One file grows in each write. It is left holding a prefix of the bytes
+    added, and a new file may be there empty.
+    """
+    for (before, _), (after, save) in zip(states, states[1:]):
+        (name,) = (name for name in after if after[name] != before.get(name))
+        old, new = before.get(name), after[name]
+        assert new.startswith(old or b"")
+        sizes = _cuts(len(old or b""), len(new), save == every_byte_of)
+        for prefix in dict.fromkeys([old, *(new[:size] for size in sizes)]):
+            folder = {**before, name: prefix}
+            if prefix is None:
+                del folder[name]
+            yield folder, set(_acks(before.get("tree.state.jsonl")))
+    yield states[-1][0], set(_TREE_UNITS)
+
+
+def test_a_crash_at_any_byte_of_a_save_over_several_files_keeps_the_guarantees(
+        tmp_path, monkeypatch, no_sync):
+    """The last save is cut at every byte: it adds a row to a file the
+    ledger records, writes a file for the first time, and acks both."""
+    states = _tree_clean_run(tmp_path, monkeypatch)
+    assert [name for name in states[-1][0] if name not in states[-4][0]] == ["C/s.csv"]
+    points = 0
+    for files, finished in _tree_crashes(states, every_byte_of=_LAST_SAVE):
+        _put_tree(tmp_path, files)
+        _tree_recover(tmp_path, monkeypatch, finished)
+        points += 1
+    print(f"{points} crash points in a run over several files")
+    before, after = (sum(map(len, files.values())) for files, _ in states[-4::3])
+    assert points > after - before
+
+
+# The syncs of a resume that has the most to do: its save died inside its acks.
+_TREE_RESUME_STEPS = ("the tail of A into .cut", "the cut of A",
+                      "all of C into .cut", "the cut of the ledger")
+
+
+def _tree_dies_at_sync(folder, monkeypatch, number):
+    """Resume the tree, and die at the ``number``-th sync. False when the
+    resume ended first."""
+    syncs = 0
+
+    def fsync(fd):
+        nonlocal syncs
+        syncs += 1
+        if syncs == number:
+            raise _Crash
+
+    led = _tree_ledger(folder)
+    with monkeypatch.context() as patch:
+        patch.setattr(os, "fsync", fsync)
+        try:
+            resume_state(led, resume=True, artifact=folder, pattern=_TREE)
+        except _Crash:
+            return True
+    release_lock(led)
+    return False
+
+
+def test_a_crash_at_any_step_of_a_resume_over_several_files_keeps_the_guarantees(
+        tmp_path, monkeypatch, no_sync):
+    """A file moved aside whole is copied, then removed: dead in between,
+    the resume is made again."""
+    states = _tree_clean_run(tmp_path, monkeypatch)
+    points, most_steps = 0, 0
+    for files, finished in _tree_crashes(states, every_byte_of=None):
+        step = 1
+        while True:
+            _put_tree(tmp_path, files)
+            if not _tree_dies_at_sync(tmp_path, monkeypatch, step):
+                break
+            _tree_recover(tmp_path, monkeypatch, finished)
+            points, step = points + 1, step + 1
+        most_steps = max(most_steps, step - 1)
+    print(f"{points} crash points in a resume over several files")
+    assert most_steps == len(_TREE_RESUME_STEPS)
+
+
+_DROP_STEPS = ("A replaced", "B replaced", "C removed", "the ledger replaced")
+
+
+def _drop(folder):
+    """Start t1, t4 and t5 over: a row out of A, two out of B, all of C."""
+    led = _tree_ledger(folder)
+    over = {"t1", "t4", "t5"}
+    drop_units(led, artifact=folder, pattern=_TREE,
+               rows=lambda row: row["key"] in over,
+               acks=lambda ack: ack.get("key") in over)
+    release_lock(led)
+
+
+def test_a_fresh_run_of_some_units_that_died_at_any_step_is_finished_by_another(
+        tmp_path, monkeypatch, no_sync):
+    """Each file is replaced or removed in turn, then the ledger. Until the
+    ledger is, a resume stops; the same call, made again, ends where an
+    uninterrupted one does."""
+    _tree_run(tmp_path, attempt=0)
+    steps = []      # the folder as each step finds it, its temporary file whole
+
+    def noted(step):
+        def stepping(path, *args, **kwargs):
+            # A removed temporary file or lock is no step of the run.
+            if step is replace or not str(path).endswith((".tmp", ".lock")):
+                steps.append(_tree_files(tmp_path))
+            return step(path, *args, **kwargs)
+        return stepping
+
+    replace = os.replace
+    with monkeypatch.context() as patch:
+        patch.setattr(os, "replace", noted(os.replace))
+        patch.setattr(Path, "unlink", noted(Path.unlink))
+        _drop(tmp_path)
+    done = _tree_files(tmp_path)
+    assert set(done) == {"A/s.csv", "B/s.csv", "tree.state.jsonl"}
+    assert len(steps) == len(_DROP_STEPS)
+
+    points = 0
+    for made, files in enumerate(steps):
+        (temporary,) = (name for name in files if name.endswith(".tmp"))
+        whole = files[temporary]
+        # Dead before the step, the temporary file whole, half written or not begun.
+        for written in (whole, whole[:len(whole) // 2], None):
+            left = {**files, temporary: written}
+            if written is None:
+                del left[temporary]
+            _put_tree(tmp_path, left)
+            led = _tree_ledger(tmp_path)
+            if made:
+                with pytest.raises(RuntimeError, match="resume=False"):
+                    resume_state(led, resume=True, artifact=tmp_path, pattern=_TREE)
+                assert _tree_files(tmp_path) == left
+            else:       # no file was replaced yet: the run is as it was
+                assert resume_state(led, resume=True, artifact=tmp_path,
+                                    pattern=_TREE) == set(_TREE_UNITS)
+                release_lock(led)
+            _drop(tmp_path)
+            assert _tree_files(tmp_path) == done
+            points += 1
+    print(f"{points} crash points in a fresh run of some units")
+    _tree_recover(tmp_path, monkeypatch, {"t0", "t2", "t3"})

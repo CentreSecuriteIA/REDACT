@@ -5,7 +5,9 @@ A category CSV may hold columns beyond ``SAMPLE_COLUMNS`` (reasoning,
 technique, language, ...); they are kept on read and write.
 """
 
+from collections.abc import Mapping
 from pathlib import Path
+from typing import Any
 
 import pandas as pd
 
@@ -126,6 +128,33 @@ def append_samples(
         return combined
 
     return existing
+
+
+def sample_row(
+    text: str,
+    category: str,
+    turn: int,
+    accepted: bool = True,
+    source: str = "generated",
+    extra: Mapping[str, Any] | None = None,
+) -> dict[str, Any]:
+    """One input sample row: ``SAMPLE_COLUMNS`` first, the columns of ``extra`` after.
+
+    A new category CSV that takes its columns from such rows has the header
+    :func:`append_samples` gives one. ``sample_id`` is the content id of
+    ``text``; a ``SAMPLE_COLUMNS`` value that nothing gives is ``""``.
+    """
+    given = {
+        "sample_id": content_id(text),
+        "sample": text,
+        "category": category,
+        "turn": turn,
+        "accepted": accepted,
+        "source": source,
+        **(extra or {}),
+    }
+    row = {column: given.pop(column, "") for column in SAMPLE_COLUMNS}
+    return {**row, **given}
 
 
 def discover_categories(dataset_dir: str | Path | None = None) -> list[str]:

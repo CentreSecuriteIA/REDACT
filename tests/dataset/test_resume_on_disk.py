@@ -14,7 +14,7 @@ from pathlib import Path
 
 import pandas as pd
 import pytest
-from filelock import FileLock
+from filelock import FileLock, Timeout
 
 import redact.dataset.resume as resume_module
 import redact.dataset.rows as rows_module
@@ -23,6 +23,7 @@ from redact.dataset import (
     Ledger,
     Manifest,
     append_rows,
+    drop_units,
     release_lock,
     resume_state,
 )
@@ -572,3 +573,510 @@ class TestAStageThatNamesNoArtifact:
             return done
 
         assert [run(), run(), run()] == [{"A"}, set("ABC"), set("ABC")]
+
+
+_TREE = "*/samples.csv"
+
+
+def _file(folder, category):
+    return folder / category / "samples.csv"
+
+
+def _tree_rows(units):
+    """One row per unit: its key, the category whose file it goes to, its style."""
+    return [{"input_id": key, "category": category, "style": style,
+             "text": f'text of "{key}", two\nlines', "id": f"id-{key}"}
+            for key, category, style in units]
+
+
+def _tree_buffer(led, folder, every=32):
+    def append(rows):
+        by_file = {}
+        for row in rows:
+            by_file.setdefault(_file(folder, row["category"]), []).append(row)
+        sizes = {}
+        for path, its_rows in by_file.items():
+            path.parent.mkdir(exist_ok=True)
+            sizes.update(append_rows(path, its_rows))
+        return sizes
+
+    return CommitBuffer(append=append, ledger=led, every=every)
+
+
+def _tree_run(folder, units, *, every=2):
+    """Save one row for each unit that is not finished, in its category's file."""
+    led = _ledger(folder)
+    done = resume_state(led, resume=True, artifact=folder, pattern=_TREE)
+    with _tree_buffer(led, folder, every) as buf:
+        for row in _tree_rows(units):
+            if row["input_id"] not in done:
+                buf.add([row], {"input_id": row["input_id"], "style": row["style"],
+                                "ids": [row["id"]]})
+    return led
+
+
+def _tree_resume(folder, **kwargs):
+    led = _ledger(folder)
+    done = resume_state(led, resume=True, artifact=folder, pattern=_TREE, **kwargs)
+    release_lock(led)
+    return done, led
+
+
+def _tree_files(folder):
+    """Each file by its path from the folder, so two categories do not collide."""
+    return {path.relative_to(folder).as_posix(): path.read_bytes()
+            for path in sorted(folder.rglob("*"))
+            if path.is_file() and path.suffix != ".lock"}
+
+
+# Units as (key, category, style): three files, the third first written last.
+_UNITS = [("a", "Cyber", "long"), ("b", "Fraud", "long"), ("c", "Cyber", "short"),
+          ("d", "Fraud", "short"), ("e", "Privacy", "long"), ("f", "Cyber", "long")]
+
+
+class TestAStageOfSeveralFiles:
+    """The stage is told its folder and the pattern of its files under it."""
+
+    def test_every_file_is_recorded_by_its_path_from_the_ledger(self, tmp_path):
+        led = _tree_run(tmp_path, _UNITS)
+        assert led.saved == {
+            f"{category}/samples.csv": [
+                _file(tmp_path, category).stat().st_size,
+                _crc(_file(tmp_path, category).read_bytes())]
+            for category in ("Cyber", "Fraud", "Privacy")}
+
+    def test_a_resume_reads_no_row_and_changes_no_file(self, tmp_path, no_reading):
+        _tree_run(tmp_path, _UNITS)
+        before = _tree_files(tmp_path)
+        done, led = _tree_resume(tmp_path)
+        assert done == set("abcdef") and _tree_files(tmp_path) == before
+        assert led.ids == {f"id-{key}" for key in "abcdef"}
+
+    def test_each_recorded_file_is_cut_back_to_its_last_finished_save(
+            self, tmp_path, no_reading):
+        _tree_run(tmp_path, _UNITS)
+        before = _tree_files(tmp_path)
+        tails = {"Cyber": b"a tail\r\n", "Privacy": b"another\r\n"}
+        for category, tail in tails.items():
+            with _file(tmp_path, category).open("ab") as fh:
+                fh.write(tail)
+
+        done, _led = _tree_resume(tmp_path)
+        after = _tree_files(tmp_path)
+        assert done == set("abcdef")
+        for category, tail in tails.items():
+            assert after.pop(f"{category}/samples.csv.cut") == tail
+        assert after == before
+
+    def test_a_file_no_save_recorded_is_moved_aside_whole(self, tmp_path, no_reading):
+        """Its first save did not finish: every row in it is a tail."""
+        _tree_run(tmp_path, _UNITS[:4])
+        before = _tree_files(tmp_path)
+        unfinished = _file(tmp_path, "Privacy")
+        unfinished.parent.mkdir()
+        append_rows(unfinished, _tree_rows(_UNITS[4:5]))
+        landed = unfinished.read_bytes()
+
+        done, _led = _tree_resume(tmp_path)
+        assert done == set("abcd") and not unfinished.exists()
+        after = _tree_files(tmp_path)
+        assert after.pop("Privacy/samples.csv.cut") == landed and after == before
+
+        led = _tree_run(tmp_path, _UNITS)       # the next save writes its header
+        assert _keys_on_disk(unfinished) == ["e"] and led.completed() == set("abcdef")
+
+    def test_a_file_the_last_save_did_not_write_is_left_alone(
+            self, tmp_path, no_reading):
+        _tree_run(tmp_path, _UNITS[:5])         # the last save wrote Privacy alone
+        led = _ledger(tmp_path)
+        resume_state(led, resume=True, artifact=tmp_path, pattern=_TREE)
+        with _tree_buffer(led, tmp_path) as buf:    # and one more wrote no row
+            buf.add([], {"input_id": "dropped"})
+        before = _tree_files(tmp_path)
+
+        done, _led = _tree_resume(tmp_path)
+        assert done == {*"abcde", "dropped"} and _tree_files(tmp_path) == before
+
+    def test_a_file_the_pattern_does_not_match_is_not_the_stages(self, tmp_path):
+        _tree_run(tmp_path, _UNITS)
+        others = [tmp_path / "samples.csv", tmp_path / "Cyber" / "notes.csv",
+                  tmp_path / "Cyber" / "deeper" / "samples.csv"]
+        for other in others:
+            other.parent.mkdir(exist_ok=True)
+            other.write_bytes(b"not a file of the stage\n")
+
+        _tree_resume(tmp_path)
+        led = _ledger(tmp_path)
+        resume_state(led, resume=False, artifact=tmp_path, pattern=_TREE)
+        assert sorted(_tree_files(tmp_path)) == sorted(
+            other.relative_to(tmp_path).as_posix() for other in others)
+
+    def test_a_file_that_cannot_be_vouched_for_stops_the_resume_before_any_cut(
+            self, tmp_path):
+        _tree_run(tmp_path, _UNITS)
+        with _file(tmp_path, "Cyber").open("ab") as fh:
+            fh.write(b"a tail\n")
+        _change_a_byte(_file(tmp_path, "Privacy"))
+        before = _tree_files(tmp_path)
+
+        with pytest.raises(RuntimeError, match="Privacy"):
+            _tree_resume(tmp_path)
+        assert _tree_files(tmp_path) == before
+
+    def test_a_category_under_another_spelling_is_the_file_the_ledger_records(
+            self, tmp_path, no_reading):
+        """On Windows a folder that is there as ``Cyber`` takes the rows of a
+        category spelled ``cyber``. The glob then finds the file under one
+        name and the ledger records it under the other."""
+        (tmp_path / "Cyber").mkdir()
+        if not (tmp_path / "cyber").exists():
+            pytest.skip("this file system tells Cyber and cyber apart")
+        led = _tree_run(tmp_path, [("a", "cyber", "long"), ("b", "Fraud", "long")])
+        assert set(led.saved) == {"cyber/samples.csv", "Fraud/samples.csv"}
+        before = _tree_files(tmp_path)
+        assert set(before) == {
+            "Cyber/samples.csv", "Fraud/samples.csv", "out.state.jsonl"}
+
+        done, _led = _tree_resume(tmp_path)
+        assert done == set("ab") and _tree_files(tmp_path) == before
+
+        led = _tree_run(tmp_path, [("c", "CYBER", "long")])     # and the next save
+        assert set(led.saved) == {"cyber/samples.csv", "Fraud/samples.csv"}
+        assert _keys_on_disk(_file(tmp_path, "Cyber")) == ["a", "c"]
+
+    def test_a_fresh_run_removes_the_tree_its_cut_files_the_ledger_and_the_manifest(
+            self, tmp_path):
+        _tree_run(tmp_path, _UNITS[:4])
+        with _file(tmp_path, "Cyber").open("ab") as fh:
+            fh.write(b"a tail\n")
+        unfinished = _file(tmp_path, "Privacy")
+        unfinished.parent.mkdir()
+        unfinished.write_bytes(b"input_")
+        _tree_resume(tmp_path)      # leaves a .cut beside Cyber, and one with no file
+        manifest = Manifest(tmp_path / "out.manifest.jsonl")
+        manifest.write([{"input_id": "a"}])
+        assert set(_tree_files(tmp_path)) == {
+            "Cyber/samples.csv", "Cyber/samples.csv.cut", "Fraud/samples.csv",
+            "Privacy/samples.csv.cut", "out.state.jsonl", "out.manifest.jsonl"}
+
+        led = _ledger(tmp_path)
+        assert resume_state(led, resume=False, artifact=tmp_path, pattern=_TREE,
+                            manifest=manifest) == set()
+        assert _tree_files(tmp_path) == {}
+
+        release_lock(led)
+        led = _tree_run(tmp_path, _UNITS[:1])
+        assert _ledger_lines(led)[0] == {"_saved": {}} and led.completed() == {"a"}
+
+
+def _old_tree(folder, acked, units):
+    """A tree as the library wrote it before the ledger recorded sizes."""
+    for row in _tree_rows(units):
+        _file(folder, row["category"]).parent.mkdir(exist_ok=True)
+        append_rows(_file(folder, row["category"]), [row])
+    led = _ledger(folder)
+    if acked:
+        led.path.write_bytes(b"".join(
+            json.dumps({"input_id": key}).encode() + b"\r\n" for key in acked))
+    return led
+
+
+def _units_in(path):
+    """Each unit in a file of the tree, with the ids of its rows."""
+    found = {}
+    for row in pd.read_csv(path, dtype=str).to_dict("records"):
+        found.setdefault(row["input_id"], []).append(row["id"])
+    return found
+
+
+class TestATreeWrittenBeforeSizesWereRecorded:
+    def test_one_read_and_one_ledger_write_take_it_over(self, tmp_path, monkeypatch):
+        led = _old_tree(tmp_path, acked="ab", units=_UNITS[:4])
+        old_lines = led.path.read_bytes()
+        read, records = [], []
+        record = Ledger.record
+        monkeypatch.setattr(Ledger, "record", lambda self, *args, **kwargs: (
+            records.append(args), record(self, *args, **kwargs))[1])
+
+        def units_in(path):
+            read.append(path.relative_to(tmp_path).as_posix())
+            return _units_in(path)
+
+        done, led = _tree_resume(tmp_path, units_in=units_in)
+        assert done == set("abcd")
+        assert read == ["Cyber/samples.csv", "Fraud/samples.csv"]   # each file once
+        assert len(records) == 1
+        assert led.path.read_bytes().startswith(old_lines)
+        # Every unit with rows records their ids, the acked ones too.
+        *acks, last = _ledger_lines(led)[2:]
+        assert sorted(acks + [{k: v for k, v in last.items() if k != "_saved"}],
+                      key=lambda ack: ack["input_id"]) == [
+            {"input_id": key, "ids": [f"id-{key}"]} for key in "abcd"]
+        assert last["_saved"] == {
+            f"{category}/samples.csv": [
+                _file(tmp_path, category).stat().st_size,
+                _crc(_file(tmp_path, category).read_bytes())]
+            for category in ("Cyber", "Fraud")}
+        assert led.ids == {f"id-{key}" for key in "abcd"}
+
+        monkeypatch.setattr(pd, "read_csv", _no_read)
+        done, led = _tree_resume(tmp_path, units_in=_no_read)
+        assert done == set("abcd") and led.ids == {f"id-{key}" for key in "abcd"}
+
+    def test_without_a_reader_the_key_columns_are_read_and_no_id_is_recorded(
+            self, tmp_path):
+        led = _old_tree(tmp_path, acked="ab", units=_UNITS[:4])
+        done, led = _tree_resume(tmp_path)
+        assert done == set("abcd") and led.ids == set()
+        assert [line["input_id"] for line in _ledger_lines(led)] == list("abcd")
+
+    def test_a_file_that_ends_inside_a_row_stops_the_takeover(self, tmp_path):
+        _old_tree(tmp_path, acked="ab", units=_UNITS[:4])
+        torn = _file(tmp_path, "Fraud")
+        torn.write_bytes(torn.read_bytes()[:-3])
+        before = _tree_files(tmp_path)
+        with pytest.raises(RuntimeError, match="line break") as stopped:
+            _tree_resume(tmp_path, units_in=_units_in)
+        assert str(torn) in str(stopped.value) and _tree_files(tmp_path) == before
+
+    def test_an_empty_file_is_taken_over_as_no_file(self, tmp_path):
+        _old_tree(tmp_path, acked="a", units=_UNITS[:1])
+        empty = _file(tmp_path, "Fraud")
+        empty.parent.mkdir()
+        empty.touch()
+        done, led = _tree_resume(tmp_path, units_in=_units_in)
+        assert done == {"a"} and not empty.exists()
+        assert list(led.saved) == ["Cyber/samples.csv"]
+
+
+_SHORT = set("cdgh")     # the units of style short, among those the tests save
+
+
+def _drop_short(folder, **kwargs):
+    """Start the units of style ``short`` over, as a fresh run of that style.
+
+    Their acks are picked by key: an old ledger's lines carry no style.
+    """
+    led = _ledger(folder)
+    drop_units(led, artifact=folder, pattern=_TREE,
+               rows=lambda row: row["style"] == "short",
+               acks=lambda ack: ack.get("input_id") in _SHORT, **kwargs)
+    return led
+
+
+def _rows_of(data):
+    """A CSV's rows as the bytes they are in the file, its header first."""
+    text = data.decode("utf-8")
+    rows, start, quoted = [], 0, False
+    for at, char in enumerate(text):
+        quoted ^= char == '"'
+        if char == "\n" and not quoted:
+            rows.append(text[start:at + 1].encode("utf-8"))
+            start = at + 1
+    assert start == len(text)
+    return rows
+
+
+def _stage_files(folder):
+    """``_tree_files`` without the copy a test keeps under ``whole/``."""
+    return {name: data for name, data in _tree_files(folder).items()
+            if not name.startswith("whole/")}
+
+
+class TestStartingSomeUnitsOver:
+    """``drop_units``: a fresh run of part of a stage."""
+
+    def test_their_rows_and_acks_go_and_the_rest_stands_byte_for_byte(
+            self, tmp_path, monkeypatch):
+        # Cyber and Fraud hold both styles, Privacy long alone, Theft short alone.
+        led = _tree_run(tmp_path, _UNITS)
+        only_short = _file(tmp_path, "Theft")
+        resume_state(led, resume=True, artifact=tmp_path, pattern=_TREE)
+        with _tree_buffer(led, tmp_path) as buf:
+            buf.add(_tree_rows([("g", "Theft", "short")]),
+                    {"input_id": "g", "style": "short", "ids": ["id-g"]})
+            buf.add([], {"input_id": "h", "style": "short", "status": "rejected"})
+        before = _tree_files(tmp_path)
+        old_lines = led.path.read_bytes().split(b"\n")
+        replaced, replace = [], os.replace
+        monkeypatch.setattr(os, "replace", lambda source, target: (
+            replaced.append(Path(target).relative_to(tmp_path).as_posix()),
+            replace(source, target))[1])
+
+        release_lock(_drop_short(tmp_path))
+        after = _tree_files(tmp_path)
+        # A file with no row of the style is not written again.
+        assert replaced == ["Cyber/samples.csv", "Fraud/samples.csv", "out.state.jsonl"]
+        cyber = _rows_of(before["Cyber/samples.csv"])
+        fraud = _rows_of(before["Fraud/samples.csv"])
+        assert after["Cyber/samples.csv"] == cyber[0] + cyber[1] + cyber[3]    # a, f
+        assert after["Fraud/samples.csv"] == fraud[0] + fraud[1]                # b
+        assert after["Privacy/samples.csv"] == before["Privacy/samples.csv"]
+        assert not only_short.exists()              # no row left: no file
+        assert set(after) == {"Cyber/samples.csv", "Fraud/samples.csv",
+                              "Privacy/samples.csv", "out.state.jsonl"}
+
+        # The acks that stay are the lines they were; one last line has the sizes.
+        *kept, last, end = after["out.state.jsonl"].split(b"\n")
+        assert end == b"" and kept == [
+            line for line in old_lines if b'"short"' not in line and line]
+        assert json.loads(last) == {"_saved": {
+            name: [len(data), _crc(data)] for name, data in after.items()
+            if name.endswith(".csv")}}
+
+    def test_the_resume_that_follows_knows_only_what_stayed(self, tmp_path, no_reading):
+        _tree_run(tmp_path, _UNITS)
+        led = _drop_short(tmp_path)
+        before = _tree_files(tmp_path)
+        assert resume_state(led, resume=True, artifact=tmp_path,
+                            pattern=_TREE) == set("abef")
+        assert led.ids == {f"id-{key}" for key in "abef"}   # no id of a removed row
+        release_lock(led)
+        assert _tree_files(tmp_path) == before
+
+        led = _tree_run(tmp_path, _UNITS)                   # and the units run again
+        assert led.completed() == set("abcdef")
+        assert sorted(_keys_on_disk(_file(tmp_path, "Cyber"))) == ["a", "c", "f"]
+
+    def test_rows_written_elsewhere_keep_their_line_ends(self, tmp_path):
+        """A tree copied from a pod ends its rows in a bare newline."""
+        led = _tree_run(tmp_path, _UNITS)
+        cyber = _file(tmp_path, "Cyber")
+        cyber.write_bytes(cyber.read_bytes().replace(b"\r\n", b"\n"))
+        led.path.unlink()                   # so the copy is taken over as it is
+        rows = _rows_of(cyber.read_bytes())
+
+        release_lock(_drop_short(tmp_path, units_in=_units_in))
+        assert cyber.read_bytes() == rows[0] + rows[1] + rows[3]
+
+    def test_it_makes_this_process_the_writer_until_the_stage_ends(self, tmp_path):
+        _tree_run(tmp_path, _UNITS)
+        led = _drop_short(tmp_path)
+        lock = FileLock(led.path.with_name("out.state.jsonl.lock"), timeout=0)
+        with pytest.raises(Timeout):
+            lock.acquire()
+        release_lock(led)
+        lock.acquire()
+        lock.release()
+
+    def test_rows_of_a_save_that_did_not_finish_are_cut_off_first(self, tmp_path):
+        """Left in the file, they would be recorded as saved with no unit."""
+        _tree_run(tmp_path, _UNITS)
+        before = _tree_files(tmp_path)
+        tail = _rows_of(before["Cyber/samples.csv"])[1]     # a row of style long
+        with _file(tmp_path, "Cyber").open("ab") as fh:
+            fh.write(tail)
+        unfinished = _file(tmp_path, "Theft")
+        unfinished.parent.mkdir()
+        unfinished.write_bytes(b"input_id,category,style,text,id\r\n")
+
+        release_lock(_drop_short(tmp_path))
+        cyber = _rows_of(before["Cyber/samples.csv"])
+        assert _file(tmp_path, "Cyber").read_bytes() == cyber[0] + cyber[1] + cyber[3]
+        assert (tmp_path / "Cyber" / "samples.csv.cut").read_bytes() == tail
+        assert not unfinished.exists()
+
+    @pytest.mark.parametrize("damage", ["a changed byte", "saved again, larger"])
+    def test_a_file_that_holds_other_bytes_stops_it_and_no_file_is_changed(
+            self, tmp_path, damage):
+        led = _tree_run(tmp_path, _UNITS)
+        _DAMAGE[damage](_file(tmp_path, "Privacy"))
+        before = _tree_files(tmp_path)
+        with pytest.raises(RuntimeError, match="Privacy"):
+            _drop_short(tmp_path)
+        assert _tree_files(tmp_path) == before
+        lock = FileLock(led.path.with_name("out.state.jsonl.lock"), timeout=0)
+        lock.acquire()                          # a stop holds no lock
+        lock.release()
+
+    def test_stopped_before_the_ledger_it_is_finished_by_being_made_again(
+            self, tmp_path, monkeypatch):
+        """In between, the files are shorter than the ledger records."""
+        _tree_run(tmp_path, _UNITS)
+        whole = tmp_path / "whole"              # the same folder, started over whole
+        for name, data in _tree_files(tmp_path).items():
+            (whole / name).parent.mkdir(parents=True, exist_ok=True)
+            (whole / name).write_bytes(data)
+        release_lock(_drop_short(whole))
+
+        with monkeypatch.context() as patch:
+            patch.setattr(Ledger, "rewrite", lambda self, drop, saved: 1 / 0)
+            with pytest.raises(ZeroDivisionError):
+                _drop_short(tmp_path)
+        stopped = _stage_files(tmp_path)
+        with pytest.raises(RuntimeError, match="resume=False"):     # a resume stops
+            _tree_resume(tmp_path)
+        assert _stage_files(tmp_path) == stopped
+
+        release_lock(_drop_short(tmp_path))
+        assert _stage_files(tmp_path) == _tree_files(whole)
+
+    def test_a_shorter_file_that_ends_inside_a_row_stops_it(self, tmp_path):
+        """Shorter than recorded is what this call leaves when it stops half
+        way, and such a file ends with a whole row."""
+        _tree_run(tmp_path, _UNITS)
+        torn = _file(tmp_path, "Fraud")
+        torn.write_bytes(torn.read_bytes()[:-9])
+        before = _tree_files(tmp_path)
+        with pytest.raises(RuntimeError, match="copied incompletely") as stopped:
+            _drop_short(tmp_path)
+        assert str(torn) in str(stopped.value) and _tree_files(tmp_path) == before
+
+    def test_a_shorter_file_that_ends_inside_a_quoted_cell_stops_it(self, tmp_path):
+        """Its last byte is a line break, the one inside the cell."""
+        led = _tree_run(tmp_path, _UNITS)
+        ledger = led.path.read_bytes()
+        torn = _file(tmp_path, "Fraud")
+        data = torn.read_bytes()
+        torn.write_bytes(data[:data.rindex(b"lines")])
+        with pytest.raises(RuntimeError, match="unexpected end of data") as stopped:
+            _drop_short(tmp_path)
+        assert str(torn) in str(stopped.value)
+        assert led.path.read_bytes() == ledger      # and a resume still stops
+        with pytest.raises(RuntimeError, match="recorded"):
+            _tree_resume(tmp_path)
+
+    def test_a_file_is_whole_on_disk_before_it_replaces_the_old_one(
+            self, tmp_path, monkeypatch):
+        _tree_run(tmp_path, _UNITS)
+        before = _tree_files(tmp_path)
+        synced = []
+
+        def fsync(fd):
+            files = _tree_files(tmp_path)
+            (temporary,) = (name for name in files if name.endswith(".tmp"))
+            name = temporary.removesuffix(".tmp")
+            synced.append((name, files[name] == before[name]))
+
+        monkeypatch.setattr(os, "fsync", fsync)
+        release_lock(_drop_short(tmp_path))
+        assert synced == [(name, True) for name in (
+            "Cyber/samples.csv", "Fraud/samples.csv", "out.state.jsonl")]
+
+    def test_an_old_tree_is_taken_over_first(self, tmp_path):
+        """Its rows without acks would otherwise be recorded as saved, with
+        no unit to own them."""
+        _old_tree(tmp_path, acked="ac", units=_UNITS[:4])
+        led = _drop_short(tmp_path, units_in=_units_in)
+        assert resume_state(led, resume=True, artifact=tmp_path,
+                            pattern=_TREE) == set("ab")
+        assert led.ids == {"id-a", "id-b"}
+        assert _keys_on_disk(_file(tmp_path, "Cyber")) == ["a"]
+        assert _keys_on_disk(_file(tmp_path, "Fraud")) == ["b"]
+
+    def test_a_folder_that_holds_nothing_is_left_empty(self, tmp_path):
+        release_lock(_drop_short(tmp_path))
+        assert _tree_files(tmp_path) == {}
+
+    def test_a_stage_of_one_file_starts_some_units_over_too(self, tmp_path):
+        led, out = _ledger(tmp_path), tmp_path / "out.csv"
+        resume_state(led, resume=True, artifact=out)
+        with _buffer(led, out) as buf:
+            for key in "abc":
+                buf.add(_rows([key]), {"input_id": key})
+        drop_units(led, artifact=out, rows=lambda row: row["input_id"] == "b",
+                   acks=lambda ack: ack.get("input_id") == "b")
+        assert resume_state(led, resume=True, artifact=out) == set("ac")
+        release_lock(led)
+        assert _keys_on_disk(out) == ["a", "c"]
+        assert led.saved == {"out.csv": [out.stat().st_size, _crc(out.read_bytes())]}

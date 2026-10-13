@@ -14,6 +14,9 @@ with an empty ``_saved``, written before the first rows::
     {"_saved": {}}
     {"input_id": "3f2a", "iteration": 0}
     {"input_id": "91bc", "iteration": 1, "_saved": {"out.csv": [5284, "5d41402a"]}}
+
+A stage that drops repeated texts puts the content ids of a unit's rows on
+its record, as ``ids``, and gets those of every finished unit back as one set.
 """
 
 from __future__ import annotations
@@ -161,7 +164,7 @@ class Ledger(JsonlSidecar):
         if not self.key_fields:
             raise ValueError("Ledger needs at least one key field.")
         self.casters: dict[str, Callable[[Any], Any]] = dict(casters or {})
-        self._saved = _UNREAD
+        self._saved = self._ids = _UNREAD
 
     @classmethod
     def sidecar(
@@ -188,10 +191,13 @@ class Ledger(JsonlSidecar):
         A line counts only if it ends with a newline: a write that was cut
         off is not a line. Lines after the last one that carries ``_saved``
         belong to a save that did not finish, so their units are not
-        finished. A ledger with no ``_saved`` line counts every line.
+        finished and their ``ids`` do not count. A ledger with no ``_saved``
+        line counts every line.
         """
         done: set = set()
-        pending: set = set()    # units since the last ``_saved`` line
+        ids: set = set()
+        pending: set = set()        # units since the last ``_saved`` line
+        pending_ids: set = set()    # and the ids on their lines
         saved, end, offset = None, 0, 0
         if self.path.exists():
             with self.path.open("rb") as fh:
@@ -205,13 +211,17 @@ class Ledger(JsonlSidecar):
                     # A line without the key fields holds no unit.
                     with suppress(KeyError, TypeError, ValueError):
                         pending.add(self._key(record))
+                    with suppress(TypeError):   # not a list of ids
+                        pending_ids.update(record.get("ids") or ())
                     if "_saved" in record:
                         saved, end = record["_saved"], offset
                         done |= pending
+                        ids |= pending_ids
                         pending.clear()
+                        pending_ids.clear()
         if saved is None:
-            done, end = pending, offset
-        self._saved = saved
+            done, ids, end = pending, pending_ids, offset
+        self._saved, self._ids = saved, ids
         return LedgerState(done, saved, end)
 
     def completed(self) -> set:
@@ -229,6 +239,18 @@ class Ledger(JsonlSidecar):
         if self._saved is _UNREAD:
             self.read()
         return self._saved
+
+    @property
+    def ids(self) -> set[str]:
+        """The content ids on the records of the finished units, as one set.
+
+        Kept as :attr:`saved` is: what the last :meth:`read` found and what
+        :meth:`record` added since. It is the ledger's own set; copy it
+        before adding to it.
+        """
+        if self._ids is _UNREAD:
+            self.read()
+        return self._ids
 
     def record(
         self,
@@ -265,6 +287,46 @@ class Ledger(JsonlSidecar):
         ))
         if saved is not None:
             self._saved = dict(saved)
+        if self._ids is not _UNREAD:
+            for record in records:
+                self._ids.update(record.get("ids") or ())
+
+    def rewrite(
+        self,
+        drop: Callable[[Mapping[str, Any]], bool],
+        saved: Mapping[str, Any],
+    ) -> None:
+        """Replace the file with its finished records, less those ``drop`` picks.
+
+        The lines that stay are the bytes they were, and one last line
+        records ``saved``. The new file is written beside the old one,
+        synced, and renamed onto it, so the ledger is the old one or the new
+        one.
+        """
+        end = self.read().end
+        ids: set = set()
+        last = json.dumps({"_saved": dict(saved)}, ensure_ascii=False)
+        temporary = self.path.with_name(self.path.name + ".tmp")
+        try:
+            with self.path.open("rb") as old, temporary.open("wb") as new:
+                for line in old:
+                    end -= len(line)
+                    if end < 0:     # what follows belongs to no finished save
+                        break
+                    record = _parse(line) or {}
+                    if drop(record):
+                        continue
+                    new.write(line)
+                    with suppress(TypeError):
+                        ids.update(record.get("ids") or ())
+                new.write(last.encode("utf-8") + b"\n")
+                new.flush()
+                os.fsync(new.fileno())
+            _replace(temporary, self.path)
+        finally:
+            # Still there only when the write or the rename failed.
+            temporary.unlink(missing_ok=True)
+        self._saved, self._ids = dict(saved), ids
 
     def _append(self, data: bytes) -> None:
         """Add ``data`` to the end of the file in one write, synced to disk.
@@ -286,7 +348,7 @@ class Ledger(JsonlSidecar):
     def reset(self) -> None:
         """Delete the file if it exists, and forget what it recorded."""
         super().reset()
-        self._saved = None
+        self._saved, self._ids = None, set()
 
 
 def _identity(x: Any) -> Any:

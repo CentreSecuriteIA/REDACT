@@ -374,3 +374,112 @@ class TestLedgerRead:
                       {"input_id": str, "iteration": int})
         led.record([{"input_id": 7, "iteration": "0"}], saved={})
         assert led.read().done == {("7", 0)}
+
+
+class TestLedgerIds:
+    """``ids``: the content ids of the rows the finished units wrote."""
+
+    def test_the_ids_of_every_finished_unit_are_one_set(self, tmp_path):
+        led = _ledger(tmp_path)
+        led.record([{"id": "1", "ids": ["a", "b"]}, {"id": "2"}], saved={})
+        led.record([{"id": "3", "ids": ["c"]}, {"id": "4", "ids": []}], saved={})
+        assert _ledger(tmp_path).ids == {"a", "b", "c"}
+
+    def test_ids_after_the_last_saved_do_not_count(self, tmp_path):
+        """Their rows are cut off the output, and may be written again."""
+        led = _ledger(tmp_path)
+        led.record([{"id": "1", "ids": ["a"]}], saved={})
+        with led.path.open("ab") as fh:     # a save that lost its last line
+            fh.write(b'{"id": "2", "ids": ["b"]}\n')
+        assert _ledger(tmp_path).ids == {"a"}
+
+    def test_a_ledger_without_saved_counts_the_ids_of_every_line(self, tmp_path):
+        led = _ledger(tmp_path)
+        led.record([{"id": "1", "ids": ["a"]}, {"id": "2", "ids": ["b"]}])
+        assert _ledger(tmp_path).ids == {"a", "b"}
+
+    def test_the_ledger_knows_the_ids_it_recorded(self, tmp_path):
+        led = _ledger(tmp_path)
+        assert led.ids == set()
+        led.record([{"id": "1", "ids": ["a"]}], saved={})
+        assert led.ids == {"a"}
+
+    def test_a_line_that_is_no_unit_gives_its_ids_too(self, tmp_path):
+        led = _ledger(tmp_path)
+        led.path.write_bytes(b'{"ids": ["a"]}\n{"id": "1", "ids": 7}\n')
+        assert (led.completed(), led.ids) == ({"1"}, {"a"})
+
+    def test_a_reset_forgets_the_ids(self, tmp_path):
+        led = _ledger(tmp_path)
+        led.record([{"id": "1", "ids": ["a"]}], saved={})
+        led.reset()
+        assert led.ids == set()
+
+
+class TestLedgerRewrite:
+    """A ledger written again without some of its records."""
+
+    def _three_saves(self, tmp_path):
+        led = _ledger(tmp_path)
+        led.record([], saved={})
+        led.record([{"id": "1", "style": "a", "ids": ["x"]},
+                    {"id": "2", "style": "b", "ids": ["y"]}], saved=_SAVED)
+        led.record([{"id": "3", "style": "b"}], saved=_SAVED)
+        led.record([{"id": "4", "style": "a", "ids": ["z"]}], saved=_SAVED)
+        return led
+
+    def test_the_records_picked_are_left_out_and_one_line_records_saved(self, tmp_path):
+        led = self._three_saves(tmp_path)
+        opening, first, _second, _third, last, _end = led.path.read_bytes().split(b"\n")
+        newer = {"out.csv": [60, "ffffffff"]}
+
+        led.rewrite(lambda record: record.get("style") == "b", newer)
+        # The lines that stay are the bytes they were.
+        assert led.path.read_bytes() == b"\n".join(
+            [opening, first, last, json.dumps({"_saved": newer}).encode(), b""])
+        assert _names(tmp_path) == ["run.state.jsonl"]
+        # The object knows the new state without reading the file again.
+        assert (led.saved, led.ids) == (newer, {"x", "z"})
+        fresh = _ledger(tmp_path)
+        assert (fresh.completed(), fresh.saved, fresh.ids) == (
+            {"1", "4"}, newer, {"x", "z"})
+
+    def test_the_records_of_a_save_that_did_not_finish_are_left_out(self, tmp_path):
+        led = self._three_saves(tmp_path)
+        with led.path.open("ab") as fh:
+            fh.write(b'{"id": "5", "style": "a"}\n{"id": "6", "sty')
+        led.rewrite(lambda record: False, {})
+        assert [r.get("id") for r in _records(led)] == [None, "1", "2", "3", "4", None]
+        assert led.completed() == {"1", "2", "3", "4"}
+
+    def test_lines_that_end_in_a_carriage_return_stay_as_they_are(self, tmp_path):
+        led = _ledger(tmp_path)
+        led.path.write_bytes(b'{"id": "1"}\r\n{"id": "2"}\r\n{"_saved": {}}\n')
+        led.rewrite(lambda record: record.get("id") == "2", {})
+        assert led.path.read_bytes() == (
+            b'{"id": "1"}\r\n{"_saved": {}}\n{"_saved": {}}\n')
+
+    def test_the_ledger_is_the_old_one_until_the_new_one_is_whole_on_disk(
+            self, tmp_path, monkeypatch):
+        led = self._three_saves(tmp_path)
+        old = led.path.read_bytes()
+        seen = []
+        monkeypatch.setattr(sidecar.os, "fsync", lambda fd: seen.append(
+            (led.path.read_bytes() == old,
+             led.path.with_name("run.state.jsonl.tmp").read_bytes().count(b"\n"))))
+        led.rewrite(lambda record: record.get("style") == "b", {})
+        assert seen == [(True, 4)]          # synced whole, the old one still in place
+        assert led.path.read_bytes() != old
+
+    def test_a_rename_that_fails_leaves_the_old_ledger(self, tmp_path, monkeypatch):
+        led = self._three_saves(tmp_path)
+        old = led.path.read_bytes()
+
+        def refuse(source, target):
+            raise PermissionError("held by another program")
+
+        monkeypatch.setattr(sidecar, "_replace", refuse)
+        with pytest.raises(PermissionError):
+            led.rewrite(lambda record: True, {})
+        assert led.path.read_bytes() == old
+        assert _names(tmp_path) == ["run.state.jsonl"]

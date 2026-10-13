@@ -3,6 +3,7 @@
 import pandas as pd
 
 from redact import paths
+from redact.dataset import append_rows, content_id
 from redact.dataset.categories import (
     SAMPLE_COLUMNS,
     append_samples,
@@ -12,6 +13,7 @@ from redact.dataset.categories import (
     merge_category_csvs,
     merge_inputs,
     read_category_csv,
+    sample_row,
     take_per_group,
     write_category_csv,
 )
@@ -94,6 +96,44 @@ class TestAppendSamples:
         )
         for col in SAMPLE_COLUMNS:
             assert col in result.columns
+
+
+class TestSampleRow:
+    _EXTRA = {"entry_type": "harmful", "subcategory": "Sub", "reasoning": "fine",
+              "template_style": "long", "rejection_reason": ""}
+
+    def test_the_sample_columns_come_first_then_the_extra_ones(self):
+        row = sample_row("a text", "Cyber", turn=2, accepted=False,
+                         source="constitution", extra=self._EXTRA)
+        assert list(row) == [*SAMPLE_COLUMNS, "reasoning", "template_style"]
+        assert row == {
+            "sample_id": content_id("a text"), "sample": "a text", "category": "Cyber",
+            "subcategory": "Sub", "entry_type": "harmful", "turn": 2, "accepted": False,
+            "rejection_reason": "", "source": "constitution", "reasoning": "fine",
+            "template_style": "long"}
+
+    def test_a_sample_column_nothing_gives_is_empty(self):
+        row = sample_row("a text", "Cyber", turn=0)
+        assert list(row) == SAMPLE_COLUMNS
+        assert (row["subcategory"], row["entry_type"], row["rejection_reason"]) == (
+            "", "", "")
+        assert (row["accepted"], row["source"]) == (True, "generated")
+
+    def test_a_new_file_of_such_rows_is_the_one_append_samples_writes(
+            self, tmp_dataset_dir):
+        """Header and cells, so the two ways to write a category file agree."""
+        texts = ["first, with a comma", 'second "quoted"']
+        append_samples(texts, category="old", turn=1, accepted=[True, False],
+                       source="constitution", extra_columns=[self._EXTRA] * 2,
+                       dataset_dir=tmp_dataset_dir)
+        new = paths.category_csv("new", base=tmp_dataset_dir)
+        new.parent.mkdir()
+        append_rows(new, [
+            sample_row(text, "old", turn=1, accepted=accepted, source="constitution",
+                       extra=self._EXTRA)
+            for text, accepted in zip(texts, (True, False))])
+        old = paths.category_csv("old", base=tmp_dataset_dir)
+        assert new.read_bytes() == old.read_bytes()
 
 
 class TestGetExistingSamples:

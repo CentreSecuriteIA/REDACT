@@ -13,8 +13,14 @@ output, except once in a folder written before the ledger recorded sizes. A
 stage that names no output keeps a plain ledger: no lock, no sizes, nothing
 cut.
 
+A stage of several output files names their folder and the pattern they
+match. A file that matches and that no finished save recorded was first
+written by a save that did not finish, and is moved aside whole.
+
 A fresh run clears the artifact together with its ledger: acks left behind
-would make the next run skip every unit and write nothing.
+would make the next run skip every unit and write nothing. A fresh run of
+part of a stage removes that part's rows and acks alone
+(:func:`drop_units`).
 
 Known limits:
 
@@ -29,11 +35,12 @@ Known limits:
 
 from __future__ import annotations
 
+import csv
 import logging
 import os
 import shutil
 import zlib
-from collections.abc import Callable, Iterable, Mapping, Sequence
+from collections.abc import Callable, Iterable, Iterator, Mapping, Sequence
 from contextlib import suppress
 from pathlib import Path
 from typing import Any
@@ -42,9 +49,12 @@ from weakref import WeakKeyDictionary
 from filelock import FileLock, Timeout
 
 from .rows import _retry_held, keys_in
-from .sidecar import Ledger, LedgerState, Manifest
+from .sidecar import Ledger, LedgerState, Manifest, _replace
 
 logger = logging.getLogger(__name__)
+
+# The ``units_in`` of :func:`resume_state`.
+_UnitsIn = Callable[[Path], Mapping[Any, Iterable[str]]]
 
 # A checksum covers this many bytes at the end of what a save left in a file.
 _CHECKSUM_BYTES = 4096
@@ -61,26 +71,36 @@ def resume_state(
     *,
     resume: bool,
     artifact: str | Path | None = None,
+    pattern: str | None = None,
     manifest: Manifest | None = None,
     extra: Iterable[Any] | None = None,
+    units_in: _UnitsIn | None = None,
 ) -> set[Any]:
     """The unit keys this run skips; a fresh run clears what an earlier one left.
 
     With ``artifact`` the call also makes this process the one writer of the
     stage, until the stage's ``CommitBuffer`` exits or :func:`release_lock`
-    is called, and a resumed run puts the artifact and the ledger back at
-    the last finished save. Call it before the stage writes anything in the
-    folder.
+    is called, and a resumed run puts the stage's output and the ledger back
+    at the last finished save. Call it before the stage writes anything in
+    the folder.
 
     Args:
         ledger: The stage's ledger.
-        resume: False starts over: the artifact, its ``.cut`` file, the
+        resume: False starts over: the output, its ``.cut`` files, the
             ledger and the manifest are removed and the result is empty.
-        artifact: The stage's output CSV. ``None`` for a stage that clears
-            and reads its own output: its ledger is read as it is, nothing
-            is locked and nothing is written.
+        artifact: The stage's output CSV, or with ``pattern`` the folder its
+            output files are under. ``None`` for a stage that clears and
+            reads its own output: its ledger is read as it is, nothing is
+            locked and nothing is written.
+        pattern: For a stage of several output files, the glob of those
+            files under ``artifact``, such as ``*/samples.csv``.
         manifest: The stage's manifest, removed on a fresh run.
         extra: More finished keys to add on a resumed run.
+        units_in: Reads one output file when a folder written before the
+            ledger recorded sizes is taken over: each unit key in the file,
+            as the ledger casts it, with the content ids of its rows. The
+            default takes the ledger's key fields as columns and gives no
+            ids.
 
     Returns:
         The keys as ``Ledger.completed()`` shapes them: one value for a
@@ -103,9 +123,10 @@ def resume_state(
         _lock(ledger)
         try:
             if not resume:
-                _clear(ledger, manifest, path, _cut_file(path))
+                _clear(ledger, manifest, *_outputs(path, pattern),
+                       *_outputs(path, pattern, ".cut"))
                 return set()
-            done = _restore(ledger, path)
+            done = _restore(ledger, _outputs(path, pattern), units_in)
         except BaseException:
             release_lock(ledger)    # a resume that stops holds nothing
             raise
@@ -178,24 +199,56 @@ def _clear(ledger: Ledger, manifest: Manifest | None, *files: Path) -> None:
         manifest.reset()
 
 
-def _restore(ledger: Ledger, artifact: Path) -> set[Any]:
-    """Put the stage's files back at its last finished save; the finished units.
+def _outputs(artifact: Path, pattern: str | None, suffix: str = "") -> list[Path]:
+    """The stage's output files, or with ``suffix`` the files kept beside them.
 
-    Every file is checked before any is cut, so a resume that stops on one
-    file has changed none.
+    The artifact itself, or the files under it that match ``pattern``. The
+    files beside them are looked for by name, so the ``.cut`` file of an
+    output that is gone is found too.
     """
+    if pattern is None:
+        return [artifact.with_name(artifact.name + suffix)]
+    return sorted(artifact.glob(pattern + suffix))
+
+
+def _restore(
+    ledger: Ledger, outputs: Sequence[Path], units_in: _UnitsIn | None
+) -> set[Any]:
+    """Put the stage's files back at its last finished save; the finished units."""
     state = ledger.read()
     if state.saved is None:
-        return _adopt(ledger, state, artifact)
-    folder = ledger.path.parent
-    for name, (size, checksum) in state.saved.items():
-        _verify(ledger, folder / name, size, checksum)
-    for name, (size, _) in state.saved.items():
-        _cut_back(folder / name, size)
-    if _name(ledger, artifact) not in state.saved:
-        _cut_back(artifact, 0)    # no save of it finished: all of it is a tail
+        return _adopt(ledger, state, outputs, units_in)
+    _put_back(ledger, state.saved, outputs)
     _truncate(ledger.path, state.end)
     return state.done
+
+
+def _put_back(
+    ledger: Ledger,
+    saved: Mapping[str, Sequence],
+    outputs: Iterable[Path],
+    shorter_ok: bool = False,
+) -> None:
+    """Cut the stage's output back to what its last finished save left.
+
+    Every file is checked before any is cut, so a resume that stops on one
+    file has changed none. An output that no save recorded was first written
+    by a save that did not finish: all of it is a tail.
+
+    ``shorter_ok`` leaves a recorded file alone that :func:`drop_units`
+    left shorter, or removed.
+    """
+    recorded = {ledger.path.parent / name: entry for name, entry in saved.items()}
+    if shorter_ok:
+        recorded = {path: entry for path, entry in recorded.items()
+                    if not _left_shorter(path, entry[0])}
+    for path, (size, checksum) in recorded.items():
+        _verify(ledger, path, size, checksum)
+    for path, (size, _) in recorded.items():
+        _cut_back(path, size)
+    for output in outputs:
+        if _name(ledger, output) not in saved:
+            _cut_back(output, 0)
 
 
 def _verify(ledger: Ledger, path: Path, size: int, checksum: str) -> None:
@@ -292,52 +345,222 @@ def _retry_cut(path: Path, cut: Callable[[], None]) -> None:
         ) from error
 
 
-def _adopt(ledger: Ledger, state: LedgerState, artifact: Path) -> set[Any]:
+def _adopt(
+    ledger: Ledger,
+    state: LedgerState,
+    outputs: Iterable[Path],
+    units_in: _UnitsIn | None,
+) -> set[Any]:
     """Take over a folder whose ledger records no sizes; the finished units.
 
-    The output is read once for its unit keys. One ledger write then acks
-    the keys found only in the output and records the file's size, so the
-    next resume reads the ledger alone. A folder that holds neither rows nor
-    acks is left as it is.
+    Each output file is read once for its unit keys and the ids of their
+    rows. One ledger write then acks the keys found only in the output,
+    records the ids with the unit they belong to, and records each file's
+    size, so the next resume reads the ledger alone. A folder that holds
+    neither rows nor acks is left as it is.
     """
-    if artifact.exists() and not artifact.stat().st_size:
-        # A first save that died before its first byte: no row to take over.
-        _cut_back(artifact, 0)
-    found = _row_keys(ledger, artifact) if artifact.exists() else set()
+    found: dict[Any, list[str]] = {}
+    sizes: dict[Path, int] = {}
+    for output in outputs:
+        if output.exists() and not output.stat().st_size:
+            # A first save that died before its first byte: no row to take over.
+            _cut_back(output, 0)
+        if output.exists():
+            for key, ids in _read_units(ledger, output, units_in).items():
+                found.setdefault(key, []).extend(ids)
+            sizes[output] = output.stat().st_size
     if ledger.exists():
         # A last line cut off mid-write would run into the next one.
         _truncate(ledger.path, state.end)
-    if artifact.exists() or state.end:
+    if sizes or state.end:
         fields = ledger.key_fields
-        only_in_output = [
-            dict(zip(fields, key if len(fields) > 1 else (key,)))
-            for key in found - state.done
+        # A unit with ids is acked again: its old ack does not carry them.
+        acks = [
+            {**dict(zip(fields, key if len(fields) > 1 else (key,))),
+             **({"ids": ids} if ids else {})}
+            for key, ids in found.items() if ids or key not in state.done
         ]
-        sizes = {artifact: artifact.stat().st_size} if artifact.exists() else {}
-        ledger.record(only_in_output, saved=_saved(ledger, sizes))
-    return state.done | found
+        ledger.record(acks, saved=_saved(ledger, sizes))
+    return state.done | set(found)
 
 
-def _row_keys(ledger: Ledger, artifact: Path) -> set[Any]:
-    """The unit keys of the rows in ``artifact``, for a folder being taken over.
+def _read_units(
+    ledger: Ledger, output: Path, units_in: _UnitsIn | None
+) -> Mapping[Any, Iterable[str]]:
+    """The unit keys in an output being taken over, each with its rows' ids.
 
     Raises:
         RuntimeError: The file ends inside a row or does not parse. Nothing
             recorded says where its whole rows end.
     """
     try:
-        with artifact.open("rb") as fh:
-            fh.seek(max(artifact.stat().st_size - 1, 0))
-            # pandas reads a last row that lost its end as a short row.
-            if fh.read() != b"\n":
-                raise ValueError("it does not end with a line break")
-        return keys_in(artifact, ledger.key_fields, ledger.casters)
+        # pandas reads a last row that lost its end as a short row.
+        if not _ends_with_a_row(output):
+            raise ValueError("it does not end with a line break")
+        if units_in is not None:
+            return units_in(output)
+        return dict.fromkeys(keys_in(output, ledger.key_fields, ledger.casters), ())
     except ValueError as error:    # pandas' parser errors are ValueErrors too
         raise RuntimeError(
-            f"Cannot resume {artifact}: {error}. The file was written before "
+            f"Cannot resume {output}: {error}. The file was written before "
             "the ledger recorded sizes, so nothing says where its whole rows "
             "end. Repair the file, or start over with resume=False."
         ) from error
+
+
+def _ends_with_a_row(path: Path) -> bool:
+    """Whether the CSV at ``path`` ends with a line break, as a whole row does."""
+    with path.open("rb") as fh:
+        fh.seek(max(path.stat().st_size - 1, 0))
+        return fh.read() == b"\n"
+
+
+def drop_units(
+    ledger: Ledger,
+    *,
+    artifact: str | Path,
+    rows: Callable[[Mapping[str, str]], bool],
+    acks: Callable[[Mapping[str, Any]], bool],
+    pattern: str | None = None,
+    units_in: _UnitsIn | None = None,
+) -> None:
+    """Take some units out of a stage: their rows and their acks.
+
+    For a fresh run of part of a stage: what is not picked keeps its rows
+    and its acks. The call makes this process the one writer of the stage,
+    as :func:`resume_state` does, and the resume that follows keeps the
+    lock.
+
+    What a save that did not finish left is cut off first, as on a resume.
+    Each output file is then written again without the rows, and last the
+    ledger without the acks, ending in one line that records the new sizes.
+    Each goes through a temporary file and a rename. Stopped in between, the
+    call leaves files shorter than the ledger records: a resume stops on
+    them, and the call, made again, finishes the job. So a file that is
+    gone, or shorter than recorded and whole to its last row, is taken here
+    as it is.
+
+    Args:
+        ledger: The stage's ledger.
+        artifact: The stage's output, as for :func:`resume_state`.
+        rows: Picks the rows to remove, given a row's cells by column name.
+        acks: Picks the ledger records to remove.
+        pattern: As for :func:`resume_state`.
+        units_in: As for :func:`resume_state`: a folder written before the
+            ledger recorded sizes is taken over first.
+
+    Raises:
+        RuntimeError: As for :func:`resume_state`, or an output file does
+            not parse as CSV.
+        PermissionError: Another program holds a file that has to be
+            replaced.
+    """
+    outputs = _outputs(Path(artifact), pattern)
+    _lock(ledger)
+    try:
+        state = ledger.read()
+        if state.saved is None:
+            _adopt(ledger, state, outputs, units_in)
+        else:
+            _put_back(ledger, state.saved, outputs, shorter_ok=True)
+        for name in ledger.saved or {}:
+            _rewrite_without(ledger.path.parent / name, rows)
+        if ledger.exists():
+            ledger.rewrite(acks, _measured(ledger))
+    except BaseException:
+        release_lock(ledger)    # a call that stops holds nothing
+        raise
+
+
+def _left_shorter(path: Path, size: int) -> bool:
+    """Whether ``path`` is gone, or shorter than ``size`` and whole to its last row.
+
+    That is how :func:`drop_units` leaves a file when it stops half way.
+    """
+    if not path.is_file():
+        return True
+    return path.stat().st_size < size and _ends_with_a_row(path)
+
+
+def _rewrite_without(path: Path, drop: Callable[[Mapping[str, str]], bool]) -> None:
+    """Write the CSV at ``path`` again without the rows ``drop`` picks.
+
+    The rows that stay are the bytes they were. They are written to a file
+    beside ``path``, which is synced and renamed onto it, so the file holds
+    its old rows or the ones that stay. A file with no such row is left
+    alone, as is one that is gone. A file left with no row is removed, so
+    the next save writes its header.
+
+    Raises:
+        RuntimeError: The file does not parse as CSV.
+    """
+    if not path.is_file():
+        return
+    temporary = path.with_name(path.name + ".tmp")
+    dropped = kept = 0
+    try:
+        with (
+            path.open(encoding="utf-8", newline="") as old,
+            temporary.open("w", encoding="utf-8", newline="") as new,
+        ):
+            records = _records(old)
+            text, header = next(records, ("", []))
+            new.write(text)
+            # A spreadsheet saves the file with a byte-order mark.
+            columns = [name.lstrip("\ufeff") for name in header]
+            for text, cells in records:
+                if drop(dict(zip(columns, cells))):
+                    dropped += 1
+                else:
+                    new.write(text)
+                    kept += 1
+            if dropped and kept:    # it is going to be the file
+                new.flush()
+                os.fsync(new.fileno())
+        if dropped and kept:
+            _replace(temporary, path)
+        elif dropped:
+            _retry_cut(path, path.unlink)
+    except (csv.Error, UnicodeError) as error:
+        raise RuntimeError(
+            f"Cannot write {path} again without some of its rows: {error}. "
+            "Repair the file, or start the whole stage over."
+        ) from error
+    finally:
+        # Still there unless it was renamed onto the file.
+        temporary.unlink(missing_ok=True)
+
+
+def _records(lines: Iterable[str]) -> Iterator[tuple[str, list[str]]]:
+    """Each record of a CSV read line by line: its text in the file, its cells.
+
+    A record is several lines when a cell holds a line break.
+    """
+    taken: list[str] = []
+
+    def take() -> Iterator[str]:
+        for line in lines:
+            taken.append(line)
+            yield line
+
+    # strict: a file that ends inside a quoted cell raises, not a short record.
+    for cells in csv.reader(take(), strict=True):
+        yield "".join(taken), cells
+        taken.clear()
+
+
+def _measured(ledger: Ledger) -> dict[str, list]:
+    """The ``_saved`` of the files the ledger records, as they are on disk now.
+
+    A file that is gone is left out.
+    """
+    saved = {}
+    for name in ledger.saved or {}:
+        path = ledger.path.parent / name
+        if path.is_file():
+            size = path.stat().st_size
+            saved[name] = [size, _checksum(path, size)]
+    return saved
 
 
 def commit(

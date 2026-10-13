@@ -10,6 +10,7 @@ import redact.dataset.rows as rows_module
 from redact.dataset import (
     Ledger,
     append_rows,
+    check_columns,
     count_rows,
     iter_rows,
     keys_in,
@@ -310,3 +311,30 @@ class TestKeysIn:
         )
         with pytest.raises(pd.errors.ParserError):
             keys_in(path, _UNIT, _UNIT_CASTERS)
+
+
+class TestCheckColumns:
+    """What ``append_rows`` checks, for a save that writes several files."""
+
+    def test_a_column_the_header_lacks_raises_as_the_append_would(self, tmp_path):
+        path = tmp_path / "out.csv"
+        append_rows(path, [{"input_id": "a", "sample": "x"}])
+        rows = [{"input_id": "b", "sample": "y"},
+                {"input_id": "c", "sample": "z", "note": "new", "more": 1}]
+        with pytest.raises(ValueError) as checked:
+            check_columns(path, rows)
+        with pytest.raises(ValueError) as appended:
+            append_rows(path, rows)
+        assert str(checked.value) == str(appended.value)
+        assert "'note', 'more'" in str(checked.value)
+
+    def test_rows_the_file_can_take_pass_and_write_nothing(self, tmp_path):
+        path = tmp_path / "out.csv"
+        append_rows(path, [{"input_id": "a", "sample": "x", "model": "m"}])
+        before = path.read_bytes()
+        check_columns(path, [{"sample": "y", "input_id": "b"}])     # fewer, reordered
+        assert path.read_bytes() == before
+
+    def test_a_file_with_no_header_takes_any_columns(self, tmp_path):
+        check_columns(tmp_path / "new.csv", [{"anything": 1}])
+        assert list(tmp_path.iterdir()) == []
