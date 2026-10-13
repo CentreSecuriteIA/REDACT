@@ -56,6 +56,18 @@ def _no_planned_shares():
     capabilities.set_run_serving({})
 
 
+@pytest.fixture(autouse=True)
+def _no_held_locks():
+    """A stage's lock outlives a ``resume_state`` that no ``CommitBuffer``
+    followed: a test's must not reach the next."""
+    yield
+    from redact.dataset import resume
+
+    for lock in resume._locks.values():
+        lock.release()
+    resume._locks.clear()
+
+
 # ---------------------------------------------------------------------------
 # Mock LLM backend
 # ---------------------------------------------------------------------------
@@ -246,6 +258,43 @@ def interrupt_next_run(monkeypatch, when) -> None:
         return future
 
     monkeypatch.setattr(aio, "submit", interrupted_submit)
+
+
+class Killed(BaseException):
+    """Stands for the death of the process, where ``kill_after_rows`` puts it."""
+
+
+def kill_after_rows(monkeypatch, module, on_call: int) -> None:
+    """Kill a stage between the rows of a save and their acks.
+
+    The ``on_call``-th ``append_rows`` call made through ``module`` writes
+    its rows and then raises :class:`Killed`; the appends after it are the
+    real ones again.
+    """
+    append, calls = module.append_rows, []
+
+    def dying(path, rows):
+        calls.append(path)
+        sizes = append(path, rows)
+        if len(calls) == on_call:
+            monkeypatch.setattr(module, "append_rows", append)
+            raise Killed
+        return sizes
+
+    monkeypatch.setattr(module, "append_rows", dying)
+
+
+def lock_is_free(ledger_path) -> bool:
+    """Whether another run could take the lock of the stage with this ledger."""
+    from filelock import FileLock, Timeout
+
+    lock = FileLock(str(ledger_path) + ".lock", timeout=0)
+    try:
+        lock.acquire()
+    except Timeout:
+        return False
+    lock.release()
+    return True
 
 
 @pytest.fixture()

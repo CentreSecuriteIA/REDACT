@@ -16,7 +16,13 @@ from redact.exceptions import PromptTooLongError
 from redact.jailbreak.protocol import LLMRequest
 from redact.llms.backends import ComputeConfig
 from redact.pipelines import generate_jailbreaks
-from tests.conftest import MockBackend, make_client
+from tests.conftest import (
+    Killed,
+    MockBackend,
+    kill_after_rows,
+    lock_is_free,
+    make_client,
+)
 
 PURE_KW = dict(
     pure_only=True,
@@ -119,7 +125,7 @@ def test_resume_skips_completed(tmp_path):
     assert len(pd.read_csv(out)) == 5
 
 
-def test_completion_ledger_written_and_drives_resume(tmp_path):
+def test_completion_ledger_written_and_drives_resume(tmp_path, monkeypatch):
     out = tmp_path / "jb.csv"
     generate_jailbreaks(inputs=_inputs(), output_path=out, seed=1, **PURE_KW)
 
@@ -129,12 +135,64 @@ def test_completion_ledger_written_and_drives_resume(tmp_path):
                          casters={"input_id": str, "iteration": int})
     assert len(led.completed()) == 5
 
-    # Ledger alone drives resume: delete the output CSV, keep the ledger. A
-    # resume run must still skip everything (nothing regenerated, no new rows).
-    out.unlink()
+    # Ledger alone drives resume: with no way to read the output's keys, a
+    # resume run still skips everything (nothing regenerated, no new rows).
+    import redact.dataset.resume as resume_module
+
+    monkeypatch.setattr(resume_module, "keys_in", None)
+    before = out.read_bytes()
     again = generate_jailbreaks(inputs=_inputs(), output_path=out, seed=1,
                                 resume=True, **PURE_KW)
-    assert len(again) == 0  # all units already acked in the ledger -> no output
+    assert len(again) == len(_inputs()) and out.read_bytes() == before
+
+    # The ledger recorded how much of the output its units cover, so a resume
+    # does not carry on without it: the run stops, and says how to go on.
+    out.unlink()
+    with pytest.raises(RuntimeError, match="jb.csv") as stopped:
+        generate_jailbreaks(inputs=_inputs(), output_path=out, seed=1,
+                            resume=True, **PURE_KW)
+    assert "resume=False" in str(stopped.value)
+    assert len(led.completed()) == len(_inputs()) and not out.exists()
+
+
+def test_a_run_killed_between_rows_and_acks_leaves_each_unit_once(
+        tmp_path, monkeypatch):
+    import redact.pipelines as P
+    from redact.dataset import Ledger
+
+    out, ids = tmp_path / "jb.csv", sorted(content_id(p) for p in _inputs()["prompt"])
+    kill_after_rows(monkeypatch, P, on_call=1)
+    with pytest.raises(Killed):
+        generate_jailbreaks(inputs=_inputs(), output_path=out, seed=1, **PURE_KW)
+    landed = out.read_bytes()
+    state = out.with_name("jb.state.jsonl")
+    assert sorted(pd.read_csv(out)["input_id"]) == ids      # the rows landed
+    assert state.read_bytes() == b'{"_saved": {}}\n'        # their acks did not
+    assert lock_is_free(state)
+
+    df = generate_jailbreaks(inputs=_inputs(), output_path=out, seed=1, **PURE_KW)
+    assert sorted(df["input_id"]) == ids
+    assert out.with_name("jb.csv.cut").read_bytes() == landed
+    ledger = Ledger.sidecar(out, ("input_id", "iteration"))
+    assert sorted(key for key, _ in ledger.completed()) == ids
+    assert lock_is_free(state)
+
+
+def test_a_second_run_is_refused_before_it_plans(tmp_path):
+    from filelock import FileLock
+
+    def files():
+        return {p.name: p.read_bytes() for p in tmp_path.iterdir()
+                if p.suffix != ".lock"}
+
+    out = tmp_path / "jb.csv"
+    generate_jailbreaks(inputs=_inputs(), output_path=out, seed=1, **PURE_KW)
+    before = files()
+    with FileLock(str(out.with_name("jb.state.jsonl")) + ".lock"), pytest.raises(
+            RuntimeError, match="locked"):
+        generate_jailbreaks(inputs=_inputs(), output_path=out, seed=2,
+                            resume=False, **PURE_KW)
+    assert files() == before    # the output, the ledger and the plan of seed 1
 
 
 def test_the_ledger_records_how_much_of_the_output_is_saved(tmp_path):

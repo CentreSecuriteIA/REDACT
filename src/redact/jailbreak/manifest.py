@@ -13,8 +13,9 @@ row are all keyed to the exact prompt — stable across re-runs and content-base
 
 Resume is driven by the sidecar ``jailbreaks.state.jsonl`` **ledger**
 (``redact.dataset.Ledger``, keyed ``(input_id, iteration)``, acked per chunk
-after the CSV append) **unioned** with the output CSV so pre-ledger runs still
-resume — see :func:`redact.pipelines.generate_jailbreaks`. The manifest itself
+after the CSV append) alone. The output CSV is read only once, to take over a
+run written before the ledger recorded sizes — see
+:func:`redact.pipelines.generate_jailbreaks`. The manifest itself
 is immutable after planning,
 so a chunk crash never corrupts the plan.
 

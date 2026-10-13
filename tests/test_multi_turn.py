@@ -484,9 +484,92 @@ def test_failed_conversation_append_acks_none_of_its_chunk(tmp_path, monkeypatch
     assert list(pd.read_csv(out)["input_id"]) == ["s1", "s2"]
 
 
+def test_conversations_killed_between_rows_and_acks_are_each_on_disk_once(
+        tmp_path, monkeypatch):
+    import pandas as pd
+
+    import redact.multi_turn.pipeline as MP
+    from redact import generate_conversations, paths
+    from tests.conftest import Killed, kill_after_rows, lock_is_free
+
+    out = paths.conversations_csv(tmp_path)
+    state = out.with_name("conversations.state.jsonl")
+
+    def run():
+        return generate_conversations(
+            _three_seeds(), _simple_setting, data_dir=tmp_path, batch_size=2,
+            resolve=_FakeResolver(_echo), verbose=False)
+
+    kill_after_rows(monkeypatch, MP, on_call=2)
+    with pytest.raises(Killed):
+        run()
+    # The second chunk's row landed; its ack did not.
+    assert list(pd.read_csv(out)["input_id"]) == ["s1", "s2", "s3"]
+    assert [ack["input_id"] for ack in _acks(state)] == ["s1", "s2"]
+    assert lock_is_free(state)
+
+    assert list(run()["input_id"]) == ["s1", "s2", "s3"]
+    assert out.with_name("conversations.csv.cut").exists()
+    assert [ack["input_id"] for ack in _acks(state)] == ["s1", "s2", "s3"]
+    assert lock_is_free(state)
+
+    run()                       # nothing to do: no buffer, and no lock kept
+    assert lock_is_free(state)
+
+
+def test_an_old_conversations_folder_is_taken_over_by_its_rows(tmp_path):
+    """Rows whose acks were lost used to be generated a second time."""
+    import pandas as pd
+
+    from redact import generate_conversations, paths
+
+    def run(seeds):
+        return generate_conversations(
+            seeds, _simple_setting, data_dir=tmp_path,
+            resolve=_FakeResolver(_echo), verbose=False)
+
+    run(_three_seeds().iloc[:2])
+    out = paths.conversations_csv(tmp_path)
+    out.with_name("conversations.state.jsonl").unlink()
+    assert list(run(_three_seeds())["input_id"]) == ["s1", "s2", "s3"]
+    assert list(pd.read_csv(out)["input_id"]) == ["s1", "s2", "s3"]
+
+
 def _three_conversations():
     import pandas as pd
     return pd.DataFrame({"sample_id": ["a", "b", "c"], "transcript": ["[]"] * 3})
+
+
+def test_scores_killed_between_rows_and_acks_are_each_on_disk_once(
+        tmp_path, monkeypatch):
+    import pandas as pd
+
+    import redact.multi_turn.evaluate as ME
+    from redact import evaluate_conversations, paths
+    from tests.conftest import Killed, kill_after_rows, lock_is_free
+
+    scored = paths.conversations_csv(tmp_path).with_name("conversations_scored.csv")
+    state = scored.with_name("conversations_scored.state.jsonl")
+
+    def run():
+        return evaluate_conversations(
+            conversations=_three_conversations(), data_dir=tmp_path, judge_model="j",
+            batch_size=2, verbose=False, resolve=_JudgeResolver(MockBackend("Yes ok")))
+
+    kill_after_rows(monkeypatch, ME, on_call=2)
+    with pytest.raises(Killed):
+        run()
+    assert list(pd.read_csv(scored)["sample_id"]) == ["a", "b", "c"]
+    assert _acks(state) == [{"sample_id": "a"}, {"sample_id": "b"}]
+    assert lock_is_free(state)
+
+    assert list(run()["sample_id"]) == ["a", "b", "c"]
+    assert scored.with_name("conversations_scored.csv.cut").exists()
+    assert _acks(state) == [{"sample_id": "a"}, {"sample_id": "b"}, {"sample_id": "c"}]
+    assert lock_is_free(state)
+
+    run()                       # nothing to do: no buffer, and no lock kept
+    assert lock_is_free(state)
 
 
 def test_scoring_chunk_is_one_append_then_its_acks(tmp_path, monkeypatch):

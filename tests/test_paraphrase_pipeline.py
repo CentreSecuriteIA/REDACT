@@ -13,7 +13,14 @@ import pytest
 import redact.content_moderation.paraphrase as CP
 from redact import generate_paraphrases, paths
 from redact.dataset import append_samples, content_id
-from tests.conftest import MockBackend, fake_vllm_modules, make_client
+from tests.conftest import (
+    Killed,
+    MockBackend,
+    fake_vllm_modules,
+    kill_after_rows,
+    lock_is_free,
+    make_client,
+)
 
 
 @pytest.fixture()
@@ -480,6 +487,42 @@ def test_a_chunk_is_one_append_followed_by_its_acks(tmp_path, patched):
          "paraphrase_model": "venice-paraphraser", "status": status}
         for text, status in zip(_FOUR, statuses)
     ]
+
+
+def test_a_run_killed_between_rows_and_acks_leaves_each_unit_once(tmp_path, patched):
+    patched.setattr(CP, "paraphrase_batch", _seed_four_inputs(tmp_path))
+    out = paths.paraphrases_inputs_csv(tmp_path)
+    state = out.with_name("paraphrases_inputs.state.jsonl")
+
+    kill_after_rows(patched, CP, on_call=2)
+    with pytest.raises(Killed):
+        generate_paraphrases(
+            data_dir=tmp_path, target="inputs", batch_size=2, verbose=False)
+    # The second chunk's row landed; its acks did not.
+    assert list(pd.read_csv(out)["sample"]) == [
+        "PARA::alpha prompt", "PARA::beta prompt", "PARA::delta prompt"]
+    assert [ack["input_id"] for ack in _acks(tmp_path)] == [
+        content_id(text) for text in _FOUR[:2]]
+    assert lock_is_free(state)
+
+    df = generate_paraphrases(
+        data_dir=tmp_path, target="inputs", batch_size=2, verbose=False)["inputs"]
+    assert list(df["sample"]) == [
+        "PARA::alpha prompt", "PARA::beta prompt", "PARA::delta prompt"]
+    cut = out.with_name("paraphrases_inputs.csv.cut")
+    assert b"PARA::delta prompt" in cut.read_bytes()
+    statuses = ["accepted", "accepted", "dropped_dedup", "accepted"]
+    assert [ack["status"] for ack in _acks(tmp_path)] == statuses
+    assert lock_is_free(state)
+
+
+def test_a_run_with_nothing_to_do_gives_the_lock_back(tmp_path, patched):
+    _seed_inputs(tmp_path)
+    state = paths.paraphrases_inputs_csv(tmp_path).with_name(
+        "paraphrases_inputs.state.jsonl")
+    for _run in range(2):       # the second finds every unit done
+        generate_paraphrases(data_dir=tmp_path, target="inputs", verbose=False)
+        assert lock_is_free(state)
 
 
 def test_a_failed_append_acks_none_of_its_chunk(tmp_path, patched):

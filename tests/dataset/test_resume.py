@@ -10,6 +10,7 @@ import os
 import zlib
 
 import pytest
+from filelock import FileLock, Timeout
 
 from redact.dataset import (
     CommitBuffer,
@@ -17,6 +18,7 @@ from redact.dataset import (
     Manifest,
     append_rows,
     commit,
+    release_lock,
     resume_state,
 )
 from redact.llm_pipeline import LLMRequest, drive_units
@@ -163,6 +165,14 @@ def _crc(data: bytes) -> str:
     return f"{zlib.crc32(data[-_CHECKSUM_BYTES:]):08x}"
 
 
+def _opened(tmp_path, name="out.csv"):
+    """A ledger that ``resume_state`` opened on its artifact, and the artifact."""
+    led, out = _ledger(tmp_path), tmp_path / name
+    out.parent.mkdir(exist_ok=True)
+    resume_state(led, resume=True, artifact=out)
+    return led, out
+
+
 def _save(out, led, key, text="t"):
     """One save of one unit with one row, through ``append_rows``."""
     commit([{"input_id": key, "text": text}],
@@ -173,17 +183,18 @@ class TestCommitRecordsSizes:
     """The last ledger line of a save says how much of each file is saved."""
 
     def test_the_last_line_carries_the_size_and_a_checksum(self, tmp_path):
-        led, out = _ledger(tmp_path), tmp_path / "out.csv"
+        led, out = _opened(tmp_path)
         commit([{"input_id": "a", "text": "x"}, {"input_id": "b", "text": "y"}],
                append=lambda rows: append_rows(out, rows), ledger=led)
         data = out.read_bytes()
         assert _lines(led) == [
+            {"_saved": {}},
             {"input_id": "a"},
             {"input_id": "b", "_saved": {"out.csv": [len(data), _crc(data)]}},
         ]
 
     def test_the_checksum_covers_the_last_4096_bytes_before_the_size(self, tmp_path):
-        led, out = _ledger(tmp_path), tmp_path / "out.csv"
+        led, out = _opened(tmp_path)
         _save(out, led, "a", "x" * 5000)
         data = out.read_bytes()
         assert len(data) > _CHECKSUM_BYTES
@@ -191,20 +202,18 @@ class TestCommitRecordsSizes:
         assert _crc(data) != f"{zlib.crc32(data):08x}"
 
     def test_the_size_is_the_files_size_in_bytes(self, tmp_path):
-        led, out = _ledger(tmp_path), tmp_path / "out.csv"
+        led, out = _opened(tmp_path)
         _save(out, led, "a", "café 中文\nsecond line\r\nthird")
         assert led.saved["out.csv"][0] == os.path.getsize(out)
 
     def test_a_file_is_named_by_its_path_from_the_ledgers_folder(self, tmp_path):
-        led = _ledger(tmp_path)
-        out = tmp_path / "Cyber Crime" / "samples.csv"
-        out.parent.mkdir()
+        led, out = _opened(tmp_path, "Cyber Crime/samples.csv")
         _save(out, led, "a")
         assert list(led.saved) == ["Cyber Crime/samples.csv"]
 
     def test_every_saved_line_carries_every_file(self, tmp_path):
-        led = _ledger(tmp_path)
-        first, second = tmp_path / "a.csv", tmp_path / "b.csv"
+        led, first = _opened(tmp_path, "a.csv")
+        second = tmp_path / "b.csv"
         _save(first, led, "a")
         recorded = led.saved["a.csv"]
         _save(second, led, "b")
@@ -214,13 +223,45 @@ class TestCommitRecordsSizes:
         }
 
     def test_a_save_with_no_rows_repeats_what_was_recorded(self, tmp_path):
-        led, out = _ledger(tmp_path), tmp_path / "out.csv"
+        led, out = _opened(tmp_path)
         _save(out, led, "a")
         recorded = dict(led.saved)
         commit([], append=lambda rows: append_rows(out, rows), ledger=led,
                records=[{"input_id": "dropped"}])
         assert _lines(led)[-1] == {"input_id": "dropped", "_saved": recorded}
         assert led.completed() == {"a", "dropped"}
+
+    def test_the_opening_line_is_synced_before_the_first_rows(
+            self, tmp_path, monkeypatch):
+        """Rows on disk with no ledger would read as a folder to adopt."""
+        led, out = _opened(tmp_path)
+        assert not led.exists()               # a resume alone writes nothing
+        synced, at_append = [], []
+        fsync = os.fsync
+        monkeypatch.setattr(os, "fsync", lambda fd: (synced.append(
+            led.path.read_bytes() if led.exists() else None), fsync(fd))[1])
+
+        def append(rows):
+            at_append.append((list(synced), led.path.read_bytes()))
+            return append_rows(out, rows)
+
+        commit([{"input_id": "a", "text": "x"}], append=append, ledger=led)
+        opening = b'{"_saved": {}}\n'
+        assert at_append == [([opening], opening)]
+
+    def test_a_first_save_with_no_rows_writes_the_opening_line_too(self, tmp_path):
+        led, out = _opened(tmp_path)
+        commit([], append=lambda rows: append_rows(out, rows), ledger=led,
+               records=[{"input_id": "dropped"}])
+        assert _lines(led) == [{"_saved": {}}, {"input_id": "dropped", "_saved": {}}]
+
+    def test_rows_whose_append_reports_no_size_are_not_acked(self, tmp_path):
+        """The ledger would record a size that leaves the rows out, and the
+        next resume would cut them off acked units."""
+        led, out = _opened(tmp_path)
+        with pytest.raises(RuntimeError, match="size"):
+            commit([{"input_id": "a"}], append=lambda rows: None, ledger=led)
+        assert led.completed() == set()
 
 
 def _row(key):
@@ -362,3 +403,153 @@ class TestCommitBuffer:
                 drive_units(iter(units), resolve=as_resolver(_FailsSecondCall()), pool_size=2,
                             on_done=lambda k, v: buf.add([_row(k)], {"input_id": k}))
         assert appends == [[_row("b")]] and led.completed() == {"b"}
+
+
+def _lock_file(led):
+    return led.path.with_name(led.path.name + ".lock")
+
+
+def _another_run(led):
+    """Hold the stage's lock as a second run would: through a lock of its own."""
+    lock = FileLock(_lock_file(led), timeout=0)
+    lock.acquire()
+    return lock
+
+
+def _is_free(led):
+    """Whether a second run could take the stage's lock now."""
+    try:
+        _another_run(led).release()
+    except Timeout:
+        return False
+    return True
+
+
+def _buffer(led, out):
+    return CommitBuffer(append=lambda rows: append_rows(out, rows), ledger=led)
+
+
+class TestOneWriter:
+    """One process writes a stage's output at a time."""
+
+    def test_a_resume_with_an_artifact_takes_the_lock_beside_the_ledger(self, tmp_path):
+        led, _out = _opened(tmp_path)
+        assert _lock_file(led).name == "a.state.jsonl.lock"
+        assert not _is_free(led)
+
+    def test_a_resume_without_an_artifact_takes_no_lock(self, tmp_path):
+        led = _ledger(tmp_path)
+        resume_state(led, resume=True)
+        assert list(tmp_path.iterdir()) == [] and _is_free(led)
+
+    @pytest.mark.parametrize("resume", [True, False])
+    def test_a_second_run_is_refused_before_it_touches_a_file(self, tmp_path, resume):
+        led, out = _opened(tmp_path)
+        with _buffer(led, out) as buf:
+            buf.add([_row("a")], {"input_id": "a"})
+        manifest = Manifest(tmp_path / "a.manifest.jsonl")
+        manifest.write([{"input_id": "a"}])
+        with out.open("ab") as fh:              # a save between its two writes
+            fh.write(b"b,t-b\n")
+        before = {p.name: p.read_bytes() for p in (out, led.path, manifest.path)}
+
+        holder = _another_run(led)
+        try:
+            with pytest.raises(RuntimeError) as refused:
+                resume_state(_ledger(tmp_path), resume=resume, artifact=out,
+                             manifest=manifest)
+        finally:
+            holder.release()
+        assert str(_lock_file(led)) in str(refused.value)
+        assert "another run" in str(refused.value)
+        assert "this same process" in str(refused.value)
+        assert {p.name: p.read_bytes()
+                for p in (out, led.path, manifest.path)} == before
+        assert not out.with_name("out.csv.cut").exists()
+
+    def test_the_lock_is_free_after_the_buffer_exits(self, tmp_path):
+        led, out = _opened(tmp_path)
+        with _buffer(led, out) as buf:
+            buf.add([_row("a")], {"input_id": "a"})
+            assert not _is_free(led)
+        assert _is_free(led)
+
+    def test_the_lock_is_free_after_the_block_raises(self, tmp_path):
+        led, out = _opened(tmp_path)
+        with pytest.raises(RuntimeError, match="boom"), _buffer(led, out):
+            raise RuntimeError("boom")
+        assert _is_free(led)
+
+    def test_the_lock_is_free_after_the_exit_flush_raises(self, tmp_path):
+        led, _out = _opened(tmp_path)
+
+        def append(rows):
+            raise OSError("disk full")
+
+        with pytest.raises(OSError, match="disk full"), CommitBuffer(
+                append=append, ledger=led) as buf:
+            buf.add([_row("a")], {"input_id": "a"})
+        assert _is_free(led)
+
+    def test_a_stage_that_stopped_before_its_buffer_can_be_called_again(self, tmp_path):
+        """An interrupted notebook cell leaves the lock with this process."""
+        led, out = _opened(tmp_path)
+        again = _ledger(tmp_path)
+        assert resume_state(again, resume=True, artifact=out) == set()
+        with _buffer(again, out) as buf:
+            buf.add([_row("a")], {"input_id": "a"})
+        assert again.completed() == {"a"} and _is_free(led)
+
+    def test_release_lock_frees_a_stage_that_opens_no_buffer(self, tmp_path):
+        led, _out = _opened(tmp_path)
+        release_lock(led)
+        assert _is_free(led)
+        release_lock(led)                       # nothing held: nothing to do
+
+    def test_a_buffer_refuses_a_ledger_that_resume_state_did_not_open(self, tmp_path):
+        """Without the resume, what an unfinished save left would stay in the
+        file and be saved over."""
+        led, out = _opened(tmp_path)
+        with _buffer(led, out) as buf:
+            buf.add([_row("a")], {"input_id": "a"})
+        before = (out.read_bytes(), led.path.read_bytes())
+
+        for unopened in (led, _ledger(tmp_path)):   # after its buffer; a new object
+            with pytest.raises(RuntimeError, match="resume_state"), _buffer(
+                    unopened, out) as buf:
+                buf.add([_row("b")], {"input_id": "b"})
+        assert (out.read_bytes(), led.path.read_bytes()) == before
+
+    def test_a_ledger_opened_without_an_artifact_saves_as_before(self, tmp_path):
+        led = _ledger(tmp_path)
+        resume_state(led, resume=True)
+        appends = []
+        with CommitBuffer(append=appends.append, ledger=led) as buf:
+            buf.add([_row("a")], {"input_id": "a"})
+        assert appends == [[_row("a")]] and _lines(led) == [{"input_id": "a"}]
+
+    @pytest.mark.parametrize("change", ["grew", "shrank", "gone"])
+    def test_a_file_changed_behind_the_writer_stops_the_next_save(
+            self, tmp_path, change):
+        led, out = _opened(tmp_path)
+        appends = []
+
+        def append(rows):
+            appends.append(rows)
+            return append_rows(out, rows)
+
+        with pytest.raises(RuntimeError, match="out.csv") as stopped, CommitBuffer(
+                append=append, ledger=led, every=1) as buf:
+            buf.add([_row("a")], {"input_id": "a"})
+            if change == "grew":
+                with out.open("ab") as fh:
+                    fh.write(b"x,another writer\n")
+            elif change == "shrank":
+                out.write_bytes(out.read_bytes()[:-3])
+            else:
+                out.unlink()
+            ledger_before = led.path.read_bytes()
+            buf.add([_row("b")], {"input_id": "b"})
+        assert "recorded" in str(stopped.value)
+        assert len(appends) == 1                # the second save wrote no row
+        assert led.path.read_bytes() == ledger_before

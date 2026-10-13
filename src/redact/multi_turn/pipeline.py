@@ -28,6 +28,8 @@ from redact.dataset import (
     append_rows,
     content_id,
     read_rows,
+    release_lock,
+    resume_state,
     row_id,
 )
 from redact.llm_pipeline import drive_generators
@@ -99,12 +101,9 @@ def generate_conversations(
 
     make_setting = setting if callable(setting) else (lambda: copy.deepcopy(setting))
 
-    if not resume:
-        ledger.reset()
-        manifest.reset()
-        if out.exists():
-            out.unlink()
-    completed = ledger.completed() if resume else set()
+    # Before the manifest is written: the resume takes the stage's lock, and
+    # cuts off the rows of a save whose acks did not land.
+    completed = resume_state(ledger, resume=resume, artifact=out, manifest=manifest)
 
     # Plan the full run → manifest (every (input_id, iteration) unit).
     units: list[tuple] = []  # (input_id, iteration, seed_text, meta)
@@ -121,6 +120,7 @@ def generate_conversations(
         logger.info("Seeds: %d | iterations: %d | units: %d | pending: %d",
                     len(seeds), iterations, len(units), len(pending))
     if not pending:
+        release_lock(ledger)    # no CommitBuffer will
         return read_rows(out)
 
     n = len(pending)

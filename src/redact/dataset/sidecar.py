@@ -8,8 +8,10 @@ the ledger only after that unit's rows are on disk.
 
 The last ledger line of a save carries ``_saved``: the size and a checksum of
 each file of the stage after that save. A save whose ``_saved`` line is not
-on disk did not finish, and its units are not finished::
+on disk did not finish, and its units are not finished. Such a ledger opens
+with an empty ``_saved``, written before the first rows::
 
+    {"_saved": {}}
     {"input_id": "3f2a", "iteration": 0}
     {"input_id": "91bc", "iteration": 1, "_saved": {"out.csv": [5284, "5d41402a"]}}
 """

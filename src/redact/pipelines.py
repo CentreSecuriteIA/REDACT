@@ -815,6 +815,22 @@ def generate_jailbreaks(
         logger.info("Pool: %d techniques | Samples: %d | Iterations: %d | Model: %s | Batch: %d",
                     len(pool), len(inputs), iterations, model, batch_size)
 
+    # Sidecar completion ledger (same crash-safe pattern as every other stage),
+    # keyed on the planned unit ``(input_id, iteration)``.
+    jb_ledger = Ledger.sidecar(
+        out, key_fields=("input_id", "iteration"),
+        casters={"input_id": str, "iteration": int},
+    )
+
+    # Before the plan is written: the resume takes the stage's lock. A fresh
+    # (non-resume) run clears prior output + ledger; a resume keeps + skips
+    # what the ledger records, and cuts off what an unfinished save left.
+    completed = resume_state(
+        jb_ledger,
+        resume=resume,
+        artifact=out,
+    )
+
     # ------------------------------------------------------------------
     # Phase 1 — Plan (lay out every unit before generation)
     # ------------------------------------------------------------------
@@ -829,22 +845,6 @@ def generate_jailbreaks(
         )
 
     plan_rows = Manifest(man_path).load()
-
-    # Sidecar completion ledger (same crash-safe pattern as every other stage),
-    # keyed on the planned unit ``(input_id, iteration)``.
-    jb_ledger = Ledger.sidecar(
-        out, key_fields=("input_id", "iteration"),
-        casters={"input_id": str, "iteration": int},
-    )
-
-    # Fresh (non-resume) run overwrites prior output + ledger; resume keeps + skips.
-    # Resume source of truth is the ledger, unioned with the output CSV so a run
-    # created before the ledger existed still resumes (back-compat).
-    completed = resume_state(
-        jb_ledger,
-        resume=resume,
-        artifact=out,
-    )
 
     # ------------------------------------------------------------------
     # Phase 2 — Execute (stream the manifest through the refill pool)

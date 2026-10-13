@@ -773,18 +773,18 @@ def run_output_generation(
     inputs = inputs.copy()
     inputs["_state_id"] = [row_id(row, text_col) for _, row in inputs.iterrows()]
 
+    # Before the manifest is written: the resume takes the stage's lock. A
+    # non-resume run wipes prior output + ledger; a resume skips the ids the
+    # ledger records, and cuts off the rows of a save whose acks did not land:
+    # their inputs run again, and no input ends with two rows.
+    completed = resume_state(ledger, resume=resume, artifact=out_path)
+
     # Plan → manifest: one row per input_id, written before the batch loop so the
     # run's full intended scope is inspectable up front (keyed like the ledger).
     Manifest.sidecar(out_path).write(
         {"input_id": sid, "status": "planned"} for sid in inputs["_state_id"]
     )
 
-    # Non-resume run wipes prior output + ledger; resume skips already-done ids.
-    # The ledger is unioned with the ids already in the CSV (same back-compat
-    # union the jailbreak and constitution-input stages use): a crash between
-    # the append and the ack would otherwise re-generate those inputs and append
-    # a second row for each, which nothing downstream dedups.
-    completed = resume_state(ledger, resume=resume, artifact=out_path)
     if completed:
         before = len(inputs)
         inputs = inputs[~inputs["_state_id"].isin(completed)].reset_index(drop=True)

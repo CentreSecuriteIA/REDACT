@@ -29,7 +29,7 @@ from .merge import (
     normalize_csv,
     normalize_technique_csv,
 )
-from .resume import CommitBuffer, commit, resume_state
+from .resume import CommitBuffer, commit, release_lock, resume_state
 from .rows import append_rows, count_rows, iter_rows, keys_in, read_rows
 from .sidecar import JsonlSidecar, Ledger, Manifest
 from .split import (

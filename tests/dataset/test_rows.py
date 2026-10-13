@@ -1,6 +1,7 @@
 """Tests for dataset rows in one CSV."""
 
 import os
+from pathlib import Path
 
 import pandas as pd
 import pytest
@@ -56,6 +57,30 @@ def _to_csv_append(path, rows):
 def two_row_chunks(monkeypatch):
     """Read two rows at a time, so a small file spans several chunks."""
     monkeypatch.setattr(rows_module, "_CHUNK_ROWS", 2)
+
+
+@pytest.fixture()
+def held_for_append(monkeypatch):
+    """Refuse opens for append as Windows does while another program, such
+    as a spreadsheet, holds the file. Returns the attempts made."""
+
+    def hold(refusals):
+        attempts = []
+        opened = Path.open
+
+        def open_(path, mode="r", *args, **kwargs):
+            if mode != "ab":
+                return opened(path, mode, *args, **kwargs)
+            attempts.append(path.name)
+            if len(attempts) <= refusals:
+                raise PermissionError("held by another program")
+            return opened(path, mode, *args, **kwargs)
+
+        monkeypatch.setattr(Path, "open", open_)
+        monkeypatch.setattr(rows_module.time, "sleep", lambda seconds: None)
+        return attempts
+
+    return hold
 
 
 class TestAppendRows:
@@ -136,6 +161,25 @@ class TestAppendRows:
         path.touch()
         append_rows(path, [{"input_id": "a", "sample": "x"}])
         assert _lines(path) == ["input_id,sample", "a,x"]
+
+    def test_a_file_another_program_holds_is_opened_again(
+            self, tmp_path, held_for_append):
+        path = tmp_path / "out.csv"
+        append_rows(path, [{"input_id": "a", "sample": "x"}])
+        attempts = held_for_append(refusals=2)
+        append_rows(path, [{"input_id": "b", "sample": "y"}])
+        assert len(attempts) == 2 + 1
+        assert _lines(path) == ["input_id,sample", "a,x", "b,y"]
+
+    def test_a_file_that_stays_held_raises_and_gets_no_byte(
+            self, tmp_path, held_for_append):
+        path = tmp_path / "out.csv"
+        append_rows(path, [{"input_id": "a", "sample": "x"}])
+        before = path.read_bytes()
+        attempts = held_for_append(refusals=10**6)
+        with pytest.raises(PermissionError):
+            append_rows(path, [{"input_id": "b", "sample": "y"}])
+        assert len(attempts) > 1 and path.read_bytes() == before
 
     def test_a_header_behind_a_byte_order_mark_is_read(self, tmp_path):
         """A spreadsheet saves a CSV with the mark in front of the header."""

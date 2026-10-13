@@ -2,14 +2,35 @@
 
 import csv
 import os
+import time
 from collections.abc import Callable, Iterable, Iterator, Mapping, Sequence
 from pathlib import Path
-from typing import Any
+from typing import Any, TypeVar
 
 import pandas as pd
 
 # Rows per read of a file that is not read whole.
 _CHUNK_ROWS = 50_000
+
+_HELD_ATTEMPTS = 20
+_HELD_WAIT_SECONDS = 0.1
+
+_T = TypeVar("_T")
+
+
+def _retry_held(action: Callable[[], _T]) -> _T:
+    """Call ``action``, again for a few seconds while it raises ``PermissionError``.
+
+    On Windows a file that another program holds, such as a virus scanner, a
+    sync client or a spreadsheet, cannot be opened for writing, cut or
+    removed until that program lets go. The last failure is raised.
+    """
+    for _ in range(_HELD_ATTEMPTS - 1):
+        try:
+            return action()
+        except PermissionError:
+            time.sleep(_HELD_WAIT_SECONDS)
+    return action()
 
 
 def _header(path: Path) -> list[str] | None:
@@ -26,7 +47,8 @@ def append_rows(path: str | Path, rows: Sequence[Mapping[str, Any]]) -> dict[Pat
 
     A file without a header takes the rows' column order and gets the header.
     Otherwise each row is written in the order of the file's header, with an
-    empty cell for a column the row lacks.
+    empty cell for a column the row lacks. A file that another program holds
+    is opened again for a few seconds before any byte is written.
 
     Returns:
         The size of the file after the append, by its path.
@@ -49,7 +71,7 @@ def append_rows(path: str | Path, rows: Sequence[Mapping[str, Any]]) -> dict[Pat
             frame = frame.reindex(columns=header)
     # The bytes to_csv writes to a path, line endings included.
     data = frame.to_csv(None, header=header is None, index=False).encode("utf-8")
-    with path.open("ab") as fh:
+    with _retry_held(lambda: path.open("ab")) as fh:
         fh.write(data)
         fh.flush()
         os.fsync(fh.fileno())

@@ -537,6 +537,63 @@ class TestGenerateOutputsPool:
         size, _checksum = Ledger.sidecar(out).saved["output_responses.csv"]
         assert size == out.stat().st_size
 
+    def _six_inputs(self):
+        return pd.DataFrame({
+            "sample": [f"zq{i}" for i in range(6)],
+            "category": ["Cyber"] * 6, "entry_type": ["harmful"] * 6,
+        })
+
+    def test_a_run_killed_between_rows_and_acks_leaves_each_input_once(
+            self, tmp_path, monkeypatch):
+        import redact.content_moderation.generation as G
+        from redact import generate_outputs, paths
+        from redact.dataset import Ledger, content_id
+        from tests.conftest import Killed, kill_after_rows, lock_is_free
+
+        inputs = self._six_inputs()
+
+        def run():
+            gen = _TokenBackend(lambda t, text: f"answer {t}", "gen-model")
+            self._clients(monkeypatch, gen, None)
+            generate_outputs(data_dir=tmp_path, inputs=inputs, model="gen-model",
+                             check_outputs=False, batch_size=2, verbose=False)
+            return gen
+
+        out, prompts = paths.output_responses_csv(tmp_path), list(inputs["sample"])
+        state = out.with_name("output_responses.state.jsonl")
+        kill_after_rows(monkeypatch, G, on_call=1)
+        with pytest.raises(Killed):
+            run()
+        landed = out.read_bytes()
+        assert sorted(pd.read_csv(out)["input_prompt"]) == prompts  # the rows landed
+        assert state.read_bytes() == b'{"_saved": {}}\n'            # their acks did not
+        assert lock_is_free(state)
+
+        second = run()
+        assert sorted(sum(second.batches, [])) == prompts   # every input ran again
+        assert sorted(pd.read_csv(out)["input_prompt"]) == prompts
+        assert out.with_name("output_responses.csv.cut").read_bytes() == landed
+        assert Ledger.sidecar(out, ("input_id",)).completed() == {
+            content_id(prompt) for prompt in prompts}
+        assert lock_is_free(state)
+
+    def test_a_second_run_is_refused_before_it_writes_its_manifest(
+            self, tmp_path, monkeypatch):
+        from filelock import FileLock
+
+        from redact import generate_outputs, paths
+
+        gen = _TokenBackend(lambda t, text: f"answer {t}", "gen-model")
+        self._clients(monkeypatch, gen, None)
+        out = paths.output_responses_csv(tmp_path)
+        out.parent.mkdir(parents=True)
+        lock = str(out.with_name("output_responses.state.jsonl")) + ".lock"
+        with FileLock(lock), pytest.raises(RuntimeError, match="locked"):
+            generate_outputs(data_dir=tmp_path, inputs=self._six_inputs(),
+                             model="gen-model", check_outputs=False, verbose=False)
+        assert gen.batches == []
+        assert [p for p in out.parent.iterdir() if p.suffix != ".lock"] == []
+
     def test_a_retry_shares_a_call_with_a_new_unit(self, tmp_path, monkeypatch):
         from redact import generate_outputs, paths
 
@@ -585,7 +642,8 @@ class TestGenerateOutputsPool:
         out = paths.output_responses_csv(tmp_path)
         ledger = out.with_name("output_responses.state.jsonl")
         assert len(pd.read_csv(out)) == 4                       # two calls of two finished
-        assert len(ledger.read_text(encoding="utf-8").splitlines()) == 4
+        opening, *acks = ledger.read_text(encoding="utf-8").splitlines()
+        assert json.loads(opening) == {"_saved": {}} and len(acks) == 4
 
         second = _TokenBackend(lambda t, text: f"answer {t}", "gen-model")
         self._clients(monkeypatch, second, None)

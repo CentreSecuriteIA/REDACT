@@ -26,7 +26,14 @@ from pathlib import Path
 import pandas as pd
 
 from redact import paths
-from redact.dataset import CommitBuffer, Ledger, append_rows, read_rows
+from redact.dataset import (
+    CommitBuffer,
+    Ledger,
+    append_rows,
+    read_rows,
+    release_lock,
+    resume_state,
+)
 from redact.llms import ModelClient
 from redact.llm_pipeline import batch_check_samples
 
@@ -118,11 +125,9 @@ def evaluate_conversations(
     scored_path = _scored_path(conv_path)
     scored_path.parent.mkdir(parents=True, exist_ok=True)
     ledger = _ledger(scored_path)
-    if not resume:
-        ledger.reset()
-        if scored_path.exists():
-            scored_path.unlink()
-    done = ledger.completed() if resume else set()
+    # The resume takes the stage's lock, and cuts off the rows of a save
+    # whose acks did not land.
+    done = resume_state(ledger, resume=resume, artifact=scored_path)
 
     pending = conversations[~conversations["sample_id"].astype(str).isin(done)].reset_index(drop=True)
     if verbose:
@@ -130,6 +135,7 @@ def evaluate_conversations(
         logger.info("Judge: %s | total: %d | pending: %d",
                     judge_model, len(conversations), len(pending))
     if pending.empty:
+        release_lock(ledger)    # no CommitBuffer will
         return read_rows(scored_path)
 
     def _build_check(goal: str, sample: str) -> list[dict]:

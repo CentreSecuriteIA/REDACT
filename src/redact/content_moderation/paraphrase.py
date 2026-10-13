@@ -37,6 +37,7 @@ from ..dataset import (
     content_id,
     merge_all,
     read_rows,
+    release_lock,
     resume_state,
     row_id,
 )
@@ -210,15 +211,14 @@ def run_paraphrase_target(
     # content dedup (seen_texts), but completion is the ledger's job.
     state_path = _paraphrase_state_path(out_path)
     manifest = Manifest.sidecar(out_path)
-    # Read the artifact before resume_state, which deletes it on a fresh run.
-    prev = pd.read_csv(out_path) if (resume and out_path.exists()) else pd.DataFrame()
-    # Units already in the CSV are unioned into the completed set (as the
-    # jailbreak stage does): a crash between the append and the ack would
-    # otherwise re-paraphrase them and append a second row each.
     ledger = _paraphrase_ledger(state_path)
+    # A resume cuts off the rows of a save whose acks did not land: those
+    # units are paraphrased again, and none ends with two rows.
     completed: set[tuple[str, int]] = resume_state(
         ledger, resume=resume, artifact=out_path, manifest=manifest,
     )
+    # Read after the resume, which leaves only whole rows in the artifact.
+    prev = read_rows(out_path)
     seen_texts: set[str] = (
         set(prev["sample"].astype(str))
         if not prev.empty and "sample" in prev.columns
@@ -246,6 +246,7 @@ def run_paraphrase_target(
     if not units:
         if verbose:
             logger.info("[paraphrase:%s] nothing to do (all %d units done).", tgt, len(all_units))
+        release_lock(ledger)    # no CommitBuffer will
         return read_rows(out_path)
 
     # ---- Execute grouped by model ------------------------------------------
