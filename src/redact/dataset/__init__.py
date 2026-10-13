@@ -19,13 +19,6 @@ from .loading import filter_dataset, load_from_config, load_hf_dataset
 from .resume import CommitBuffer, commit, drop_units, release_lock, resume_state
 from .rows import append_rows, check_columns, count_rows, iter_rows, keys_in, read_rows
 from .sidecar import JsonlSidecar, Ledger, Manifest
-from .split import (
-    balanced_counts,
-    deterministic_balanced_assign,
-    normalize_origin,
-    split_by_column,
-    split_by_functions,
-)
 from .taxonomy import (
     filter_by_group,
     get_categories,
