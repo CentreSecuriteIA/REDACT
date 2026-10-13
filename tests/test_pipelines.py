@@ -141,6 +141,24 @@ class TestGenerateOutputsManifest:
         assert len(Manifest.sidecar(out).load()) == 3   # full plan (all 3 units)
         assert len(pd.read_csv(out)) == 2               # only the 2 pending generated
 
+    def test_the_callers_frame_is_left_as_it_was(self, tmp_path, monkeypatch):
+        """The stage adds its id column to a frame of its own."""
+        import redact.pipelines as P
+        from redact import generate_outputs
+        from tests.conftest import MockBackend, make_client
+
+        monkeypatch.setattr(
+            P.ModelClient, "create", lambda m: make_client(MockBackend("ans"), m))
+        inputs = pd.DataFrame({
+            "sample": ["p one", "p two", "p three"],
+            "category": ["Cyber"] * 3, "entry_type": ["harmful"] * 3,
+        }, index=[7, 3, 5])
+        before = inputs.copy()
+        df = generate_outputs(data_dir=tmp_path, inputs=inputs, check_outputs=False,
+                              verbose=False)
+        pd.testing.assert_frame_equal(inputs, before)
+        assert list(df["input_prompt"]) == list(inputs["sample"])
+
 
 class TestGenerateOutputsResume:
     def test_rows_already_in_the_csv_are_not_regenerated(self, tmp_path, monkeypatch):

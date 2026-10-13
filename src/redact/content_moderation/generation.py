@@ -59,7 +59,7 @@ from ..dataset import (
     content_id,
     merge_all,
     read_rows,
-    row_id,
+    row_ids,
 )
 from ..dataset.resume import CommitBuffer, resume_state
 from ..exceptions import PromptTooLongError
@@ -770,8 +770,8 @@ def run_output_generation(
     ledger = Ledger.sidecar(out_path, key_fields=("input_id",), casters={"input_id": str})
 
     # Stable per-input id (content-hash) for resume — matches the jailbreak id.
-    inputs = inputs.copy()
-    inputs["_state_id"] = [row_id(row, text_col) for _, row in inputs.iterrows()]
+    # The reset above gave this stage its own frame, so the column stays here.
+    inputs["_state_id"] = row_ids(inputs, text_col)
 
     # Before the manifest is written: the resume takes the stage's lock. A
     # non-resume run wipes prior output + ledger; a resume skips the ids the

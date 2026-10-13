@@ -24,6 +24,7 @@ from ``pipelines.py`` so that file stays a thin dispatcher; ``pipelines.py``'s
 """
 
 import logging
+from itertools import islice, repeat
 from pathlib import Path
 
 import pandas as pd
@@ -39,7 +40,7 @@ from ..dataset import (
     read_rows,
     release_lock,
     resume_state,
-    row_id,
+    row_ids,
 )
 from ..llms.client import ModelClient
 from ..llms.model_config import default_model_for_role, get_models_by_role
@@ -180,13 +181,12 @@ def run_paraphrase_target(
     # ---- Load source rows (base_id, text, category, entry_type) --------------
     if tgt == "inputs":
         src = source if source is not None else merge_all(paths.datasets(data_dir), accepted_only=True)
-        src = src.copy()
         text_col = "sample" if "sample" in src.columns else "prompt"
         id_col = "sample_id"
         out_path = Path(out_path_override) if out_path_override else paths.paraphrases_inputs_csv(data_dir)
     else:  # outputs
         if source is not None:
-            src = source.copy()
+            src = source
         else:
             rp = paths.output_responses_csv(data_dir)
             src = pd.read_csv(rp) if rp.exists() else pd.DataFrame()
@@ -226,26 +226,39 @@ def run_paraphrase_target(
     )
 
     # ---- Plan the FULL run -> manifest = the whole (base_id, k -> model) mapping
-    all_units: list[tuple] = []  # (base_id, k, model, original_text, category, entry_type)
-    for _, row in src.iterrows():
-        bid = row_id(row, text_col, id_col)
-        otext = str(row[text_col])
-        cat, et = str(row.get("category", "")), str(row.get("entry_type", ""))
-        for k in range(K):
-            all_units.append((bid, k, _assign_paraphraser(bid, k, pool, seed), otext, cat, et))
+    ids = row_ids(src, text_col, id_col)
+
+    def _units():
+        """Yield the run's units in plan order, built anew on every call.
+
+        A unit is ``(base_id, k, model, original_text, category, entry_type)``.
+        No list of them is held: a pass over the units costs time, not memory.
+        """
+        blank = repeat("")      # for a source without the column
+        categories = src.get("category", blank)
+        entry_types = src.get("entry_type", blank)
+        for bid, otext, cat, et in zip(ids, src[text_col], categories, entry_types):
+            for k in range(K):
+                yield (bid, k, _assign_paraphraser(bid, k, pool, seed),
+                       str(otext), str(cat), str(et))
 
     manifest.write(
         {
             "input_id": bid, "iteration": k, "paraphrase_model": m,
             "category": cat, "entry_type": et, "status": "planned",
         }
-        for bid, k, m, _o, cat, et in all_units
+        for bid, k, m, _o, cat, et in _units()
     )
 
-    units = [u for u in all_units if (u[0], u[1]) not in completed]
-    if not units:
+    # The units left for each paraphraser, in the order its first one comes up.
+    planned, groups = 0, {}
+    for bid, k, m, *_ in _units():
+        planned += 1
+        if (bid, k) not in completed:
+            groups[m] = groups.get(m, 0) + 1
+    if not groups:
         if verbose:
-            logger.info("[paraphrase:%s] nothing to do (all %d units done).", tgt, len(all_units))
+            logger.info("[paraphrase:%s] nothing to do (all %d units done).", tgt, planned)
         release_lock(ledger)    # no CommitBuffer will
         return read_rows(out_path)
 
@@ -253,11 +266,6 @@ def run_paraphrase_target(
     # One paraphraser runs at a time. The residency plan decides whether the
     # pool's engines are unloaded between groups: they stay loaded when the
     # whole pool can be resident together and are all dropped otherwise.
-    from collections import defaultdict
-    groups: dict[str, list[tuple]] = defaultdict(list)
-    for u in units:
-        groups[u[2]].append(u)
-
     unload_between = False
     if len(groups) > 1:
         from redact import residency
@@ -284,8 +292,8 @@ def run_paraphrase_target(
         return sizes
 
     # One save per chunk, at the flush below: ``every`` is not reached before it.
-    with CommitBuffer(append=_append, ledger=ledger, every=len(units)) as buf:
-        for group_i, (model, gunits) in enumerate(groups.items()):
+    with CommitBuffer(append=_append, ledger=ledger, every=sum(groups.values())) as buf:
+        for group_i, (model, n_units) in enumerate(groups.items()):
             if group_i and unload_between:
                 # The previous client's engine is released next; the check
                 # model's is kept.
@@ -300,8 +308,9 @@ def run_paraphrase_target(
             # before it — capture under a pre-call-known provisional id (bid/k, always
             # unique) and relabel to the real sample_id once it's computed below.
             capture_paraphrase = client.compute_config.supports_internals
-            for start in range(0, len(gunits), batch_size):
-                chunk = gunits[start : start + batch_size]
+            gunits = (u for u in _units() if u[2] == model and u[:2] not in completed)
+            for _ in range(0, n_units, batch_size):
+                chunk = list(islice(gunits, batch_size))
                 texts = [u[3] for u in chunk]
                 provisional_ids = [
                     f"{bid}/paraphrase/attempt_{k}" for bid, k, *_ in chunk

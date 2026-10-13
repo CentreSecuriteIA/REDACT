@@ -15,6 +15,7 @@ from __future__ import annotations
 import copy
 import json
 import logging
+from itertools import islice, repeat
 from math import ceil
 from pathlib import Path
 
@@ -30,7 +31,7 @@ from redact.dataset import (
     read_rows,
     release_lock,
     resume_state,
-    row_id,
+    row_ids,
 )
 from redact.llm_pipeline import drive_generators
 
@@ -105,25 +106,39 @@ def generate_conversations(
     # cuts off the rows of a save whose acks did not land.
     completed = resume_state(ledger, resume=resume, artifact=out, manifest=manifest)
 
-    # Plan the full run → manifest (every (input_id, iteration) unit).
-    units: list[tuple] = []  # (input_id, iteration, seed_text, meta)
-    for _, row in seeds.iterrows():
-        iid, stext = row_id(row, tcol), str(row[tcol])
-        meta = {"category": str(row.get("category", "")), "entry_type": str(row.get("entry_type", ""))}
-        for it in range(iterations):
-            units.append((iid, it, stext, meta))
-    manifest.write({"input_id": iid, "iteration": it, **meta} for iid, it, _t, meta in units)
+    ids = row_ids(seeds, tcol)
 
-    pending = [u for u in units if (u[0], u[1]) not in completed]
+    def _units():
+        """Yield the run's units in plan order, built anew on every call.
+
+        A unit is ``(input_id, iteration, seed_text, meta)``. No list of them
+        is held: a pass over the units costs time, not memory.
+        """
+        blank = repeat("")      # for seeds without the column
+        categories = seeds.get("category", blank)
+        entry_types = seeds.get("entry_type", blank)
+        for iid, stext, cat, et in zip(ids, seeds[tcol], categories, entry_types):
+            meta = {"category": str(cat), "entry_type": str(et)}
+            for it in range(iterations):
+                yield iid, it, str(stext), meta
+
+    # Plan the full run → manifest (every (input_id, iteration) unit).
+    manifest.write(
+        {"input_id": iid, "iteration": it, **meta} for iid, it, _t, meta in _units())
+
+    planned = n = 0     # units of the run, and those not finished
+    for iid, it, *_ in _units():
+        planned += 1
+        n += (iid, it) not in completed
     if verbose:
         logger.info("Generate Conversations")
         logger.info("Seeds: %d | iterations: %d | units: %d | pending: %d",
-                    len(seeds), iterations, len(units), len(pending))
-    if not pending:
+                    len(seeds), iterations, planned, n)
+    if not n:
         release_lock(ledger)    # no CommitBuffer will
         return read_rows(out)
 
-    n = len(pending)
+    pending = (u for u in _units() if u[:2] not in completed)
     n_chunks = ceil(n / batch_size) if batch_size else 1
 
     def _row(key, *, setting_name, turns, stop, transcript_json, meta):
@@ -140,7 +155,7 @@ def generate_conversations(
         append=lambda rows: append_rows(out, rows), ledger=ledger, every=n
     ) as buf:
         for start in range(0, n, batch_size):
-            chunk = pending[start : start + batch_size]
+            chunk = list(islice(pending, batch_size))
             gens, keymeta = {}, {}
             for iid, it, stext, meta in chunk:
                 key = (iid, it)

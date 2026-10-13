@@ -130,6 +130,23 @@ def test_paraphrase_outputs_accepted_only(tmp_path, patched):
     assert list(df["input_id"]) == ["id1"]
 
 
+def test_the_callers_frames_are_left_as_they_were(tmp_path, patched):
+    inputs = pd.DataFrame({
+        "sample": ["alpha prompt", "beta prompt"], "category": ["Cyber", "Fraud"],
+    }, index=[5, 2])
+    outputs = pd.DataFrame({
+        "input_id": ["id1", "id2"], "output_response": ["an answer", "a refusal"],
+        "accepted": [True, False],
+    }, index=[9, 4])
+    kept = inputs.copy(), outputs.copy()
+    res = generate_paraphrases(
+        data_dir=tmp_path, inputs=inputs, outputs=outputs, verbose=False)
+    pd.testing.assert_frame_equal(inputs, kept[0])
+    pd.testing.assert_frame_equal(outputs, kept[1])
+    assert list(res["inputs"]["sample"]) == ["PARA::alpha prompt", "PARA::beta prompt"]
+    assert list(res["outputs"]["sample"]) == ["PARA::an answer"]
+
+
 def test_ledger_prevents_reattempt_of_dropped_units(tmp_path, monkeypatch):
     _seed_inputs(tmp_path)
     calls = {"n": 0}
