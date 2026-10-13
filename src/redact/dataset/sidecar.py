@@ -10,9 +10,32 @@ the ledger only after that unit's rows are on disk.
 from __future__ import annotations
 
 import json
+import os
+import time
 from collections.abc import Callable, Iterable, Iterator, Mapping
+from itertools import chain, islice
 from pathlib import Path
 from typing import Any
+
+_REPLACE_ATTEMPTS = 5
+_REPLACE_WAIT_SECONDS = 0.2
+
+
+def _replace(source: Path, target: Path) -> None:
+    """Rename ``source`` onto ``target``, replacing it.
+
+    On Windows the rename raises ``PermissionError`` while another process,
+    such as a sync client, has ``target`` open. It is tried again a few times
+    and the last failure is raised.
+    """
+    for attempt in range(1, _REPLACE_ATTEMPTS + 1):
+        try:
+            os.replace(source, target)
+            return
+        except PermissionError:
+            if attempt == _REPLACE_ATTEMPTS:
+                raise
+            time.sleep(_REPLACE_WAIT_SECONDS)
 
 
 class JsonlSidecar:
@@ -61,19 +84,34 @@ class JsonlSidecar:
         """Write ``rows`` as JSON lines.
 
         ``mode`` is ``"a"`` (append, for the ledger) or ``"w"`` (overwrite, for
-        the manifest). An empty ``rows`` is a no-op — no file is created or
-        truncated — so both ``.record([])`` and ``.write([])`` leave the disk
-        untouched.
+        the manifest). An overwrite takes ``rows`` one at a time into a
+        temporary file beside the target and renames it onto the target, so
+        the file holds its old rows or all the new ones. An empty ``rows`` is
+        a no-op — no file is created or truncated — so both ``.record([])``
+        and ``.write([])`` leave the disk untouched.
         """
-        rows = list(rows)
-        if not rows:
+        rows = iter(rows)
+        first = list(islice(rows, 1))
+        if not first:
             return
         self.path.parent.mkdir(parents=True, exist_ok=True)
-        with self.path.open(mode, encoding="utf-8") as fh:
-            for r in rows:
-                # ensure_ascii=False keeps unicode readable in the sidecar file;
-                # the file is always opened as utf-8 and read back via json.loads.
-                fh.write(json.dumps(r, ensure_ascii=False) + "\n")
+        # ensure_ascii=False keeps unicode readable in the sidecar file;
+        # the file is always opened as utf-8 and read back via json.loads.
+        lines = (json.dumps(r, ensure_ascii=False) + "\n" for r in chain(first, rows))
+        if mode == "a":
+            # Built before the file is opened: rows that raise append nothing.
+            text = "".join(lines)
+            with self.path.open("a", encoding="utf-8") as fh:
+                fh.write(text)
+            return
+        temporary = self.path.with_name(self.path.name + ".tmp")
+        try:
+            with temporary.open("w", encoding="utf-8") as fh:
+                fh.writelines(lines)
+            _replace(temporary, self.path)
+        finally:
+            # Still there only when the write or the rename failed.
+            temporary.unlink(missing_ok=True)
 
 
 class Ledger(JsonlSidecar):
@@ -157,6 +195,10 @@ class Manifest(JsonlSidecar):
         An empty ``rows`` is a no-op (leaves any existing file untouched).
         """
         self._write(rows, mode="w")
+
+    def __iter__(self) -> Iterator[dict]:
+        """Yield the planned rows one at a time (bad lines skipped)."""
+        return self._iter_records()
 
     def load(self) -> list[dict]:
         """Read every planned row back (one dict per line, bad lines skipped)."""
