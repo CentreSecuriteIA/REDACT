@@ -26,9 +26,7 @@ from pathlib import Path
 
 import pandas as pd
 
-from ..dataset import content_id
-from ..dataset.ledger import Ledger
-from ..dataset.manifest import Manifest
+from ..dataset import Ledger, Manifest, content_id
 from ..dataset.taxonomy import iter_categories
 from ..llms.client import ModelClient
 from .parse import parse_constitution as _parse_raw

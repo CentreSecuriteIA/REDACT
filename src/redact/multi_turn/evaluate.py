@@ -26,7 +26,7 @@ from pathlib import Path
 import pandas as pd
 
 from redact import paths
-from redact.dataset.ledger import Ledger
+from redact.dataset import Ledger
 from redact.llms import ModelClient
 from redact.llm_pipeline import batch_check_samples
 

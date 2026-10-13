@@ -50,10 +50,8 @@ from pathlib import Path
 
 import pandas as pd
 
-from ..dataset import content_id, row_id
+from ..dataset import Ledger, Manifest, content_id, row_id
 from ..dataset.io import _default_dataset_dir, append_samples
-from ..dataset.ledger import Ledger
-from ..dataset.manifest import Manifest
 from ..dataset.resume import CommitBuffer, resume_state
 from ..dataset.merge import merge_all
 from ..exceptions import PromptTooLongError

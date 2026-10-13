@@ -37,8 +37,7 @@ from pathlib import Path
 
 import pandas as pd
 
-from redact.dataset import row_id
-from redact.dataset.manifest import Manifest
+from redact.dataset import Manifest, row_id
 
 from .utils import assign_combination
 

@@ -28,7 +28,7 @@ from collections.abc import Callable, Iterable, Mapping, Sequence
 from pathlib import Path
 from typing import Any
 
-from .ledger import Ledger
+from .sidecar import Ledger
 
 
 def resume_state(

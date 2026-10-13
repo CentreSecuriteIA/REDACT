@@ -1,24 +1,16 @@
-"""Shared foundation for sidecar JSONL files (resume ledger + run manifest).
+"""The two JSONL files beside a stage's artifact: the ledger of finished units
+and the manifest of planned ones.
 
-A resume **ledger** and a run **manifest** are the same primitive — a JSONL file
-sitting beside a stage's output artifact, one JSON object per line, created on
-write and robust to a half-written/corrupt line on read. This base owns that
-primitive so the two concrete types don't duplicate it; each adds only its own
-semantics:
-
-- :class:`redact.dataset.ledger.Ledger` — resume *state*: keyed, append-only,
-  ``.completed()`` returns the set of finished unit keys.
-- :class:`redact.dataset.manifest.Manifest` — the plan written *ahead* of
-  generation: an idempotent overwrite, ``.load()`` returns every planned row.
-
-Subclasses set ``_SUFFIX`` (``.state.jsonl`` / ``.manifest.jsonl``); everything
-about paths, directory creation, deletion, and bad-line-robust reading lives here.
+Both hold one JSON object per line and share :class:`JsonlSidecar`: the path
+beside the artifact, the reset, and a read that skips a line it cannot parse.
+A stage writes the manifest whole before it generates, and appends a unit to
+the ledger only after that unit's rows are on disk.
 """
 
 from __future__ import annotations
 
 import json
-from collections.abc import Iterable, Iterator, Mapping
+from collections.abc import Callable, Iterable, Iterator, Mapping
 from pathlib import Path
 from typing import Any
 
@@ -82,3 +74,90 @@ class JsonlSidecar:
                 # ensure_ascii=False keeps unicode readable in the sidecar file;
                 # the file is always opened as utf-8 and read back via json.loads.
                 fh.write(json.dumps(r, ensure_ascii=False) + "\n")
+
+
+class Ledger(JsonlSidecar):
+    """The finished units of a stage, one record each, in ``*.state.jsonl``.
+
+    A unit's key is the value of its one key field, or a tuple of the values
+    of several. ``casters`` convert key values on read, so they compare equal
+    to the keys the stage builds. A record may carry fields beyond the key;
+    they are written as given and ignored on read.
+    """
+
+    _SUFFIX = ".state.jsonl"
+
+    def __init__(
+        self,
+        path: str | Path,
+        key_fields: Iterable[str] = ("id",),
+        casters: Mapping[str, Callable[[Any], Any]] | None = None,
+    ) -> None:
+        super().__init__(path)
+        self.key_fields: tuple[str, ...] = tuple(key_fields)
+        if not self.key_fields:
+            raise ValueError("Ledger needs at least one key field.")
+        self.casters: dict[str, Callable[[Any], Any]] = dict(casters or {})
+
+    @classmethod
+    def sidecar(
+        cls,
+        artifact_path: str | Path,
+        key_fields: Iterable[str] = ("id",),
+        casters: Mapping[str, Callable[[Any], Any]] | None = None,
+        *,
+        name: str | None = None,
+    ) -> Ledger:
+        """The ledger beside ``artifact_path``; ``name`` replaces its file name."""
+        return cls(cls._sidecar_path(artifact_path, name), key_fields, casters)
+
+    def _key(self, record: Mapping[str, Any]) -> Any:
+        """The record's key: one cast value, or a tuple of them."""
+        vals = tuple(
+            self.casters.get(f, _identity)(record[f]) for f in self.key_fields
+        )
+        return vals[0] if len(self.key_fields) == 1 else vals
+
+    def completed(self) -> set:
+        """Return the set of unit keys already recorded (empty if no file)."""
+        done: set = set()
+        for rec in self._iter_records():
+            try:
+                done.add(self._key(rec))
+            except (KeyError, TypeError, ValueError):
+                continue
+        return done
+
+    def record(self, records: Iterable[Mapping[str, Any]]) -> None:
+        """Append completed-unit records (each must contain the key fields)."""
+        self._write(records, mode="a")
+
+
+def _identity(x: Any) -> Any:
+    return x
+
+
+class Manifest(JsonlSidecar):
+    """The planned units of a run, one row each, in ``*.manifest.jsonl``.
+
+    Rows carry whatever fields the stage needs; the manifest does not key or
+    interpret them.
+    """
+
+    _SUFFIX = ".manifest.jsonl"
+
+    @classmethod
+    def sidecar(cls, artifact_path: str | Path, *, name: str | None = None) -> Manifest:
+        """The manifest beside ``artifact_path``; ``name`` replaces its file name."""
+        return cls(cls._sidecar_path(artifact_path, name))
+
+    def write(self, rows: Iterable[Mapping[str, Any]]) -> None:
+        """Write the full plan, overwriting any existing manifest (idempotent).
+
+        An empty ``rows`` is a no-op (leaves any existing file untouched).
+        """
+        self._write(rows, mode="w")
+
+    def load(self) -> list[dict]:
+        """Read every planned row back (one dict per line, bad lines skipped)."""
+        return list(self._iter_records())
