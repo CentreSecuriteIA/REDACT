@@ -330,7 +330,9 @@ class InputPipeline(_StandaloneGenerationMixin):
         The folder is this stage's alone. On a resume, a category's
         ``samples.csv`` that the ledger does not record is moved aside, and
         rows another writer added to one it records are cut off: both read
-        as what a save that did not finish left.
+        as what a save that did not finish left. A category name with a
+        ``/`` in it makes a nested folder, which no resume looks into and
+        ``discover_categories`` does not find.
 
         Args:
             constitution_df: DataFrame with columns ``source_category``,
@@ -349,7 +351,9 @@ class InputPipeline(_StandaloneGenerationMixin):
             batch_size: Requests per model call; twice as many entries are live.
             fresh: When True, starts this style over: its rows and its acks
                 are removed before generating, and those of other styles
-                stay. Without a style the whole folder is cleared.
+                stay. A fresh run that stopped while it removed them has to
+                be made again before any other run in the folder. Without a
+                style the whole folder is cleared.
             style: Template style under ``from_constitution/{style}`` — also
                 used as part of the ledger key and saved as a CSV column.
             max_attempts: Generations per entry. A reply with the wrong
@@ -399,6 +403,7 @@ class InputPipeline(_StandaloneGenerationMixin):
                 # The other styles keep their rows and their acks.
                 drop_units(
                     ledger,
+                    name=style,
                     rows=lambda row: row.get("template_style") == style,
                     acks=lambda ack: ack.get("style") == style,
                     **tree,

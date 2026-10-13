@@ -295,7 +295,7 @@ class TestAFileTheLedgerCannotVouchFor:
         # The three ways out.
         assert "Restore" in message
         assert "delete the ledger" in message
-        assert "resume=False" in message
+        assert "start the whole stage over" in message
 
     def test_a_resume_that_stops_holds_no_lock(self, tmp_path):
         led, out = _run(tmp_path, "ab")
@@ -512,7 +512,8 @@ class TestAFolderWrittenBeforeSizesWereRecorded:
         before = _files(tmp_path)
         with pytest.raises(RuntimeError) as stopped:
             _resume(tmp_path)
-        assert str(out) in str(stopped.value) and "resume=False" in str(stopped.value)
+        assert str(out) in str(stopped.value)
+        assert "start the whole stage over" in str(stopped.value)
         assert _files(tmp_path) == before
 
     def test_an_output_that_ends_inside_a_row_stops_the_resume(self, tmp_path):
@@ -849,19 +850,24 @@ class TestATreeWrittenBeforeSizesWereRecorded:
         assert list(led.saved) == ["Cyber/samples.csv"]
 
 
-_SHORT = set("cdgh")     # the units of style short, among those the tests save
+# The style of each unit the tests save: an old ledger's lines do not carry it.
+_STYLE_OF = {**{key: style for key, _category, style in _UNITS},
+             "g": "short", "h": "short"}
 
 
-def _drop_short(folder, **kwargs):
-    """Start the units of style ``short`` over, as a fresh run of that style.
-
-    Their acks are picked by key: an old ledger's lines carry no style.
-    """
+def _drop_style(folder, style="short", **kwargs):
+    """Start the units of one style over, as a fresh run of that style does."""
     led = _ledger(folder)
-    drop_units(led, artifact=folder, pattern=_TREE,
-               rows=lambda row: row["style"] == "short",
-               acks=lambda ack: ack.get("input_id") in _SHORT, **kwargs)
+    drop_units(led, artifact=folder, pattern=_TREE, name=style,
+               rows=lambda row: row["style"] == style,
+               acks=lambda ack: _STYLE_OF.get(ack.get("input_id")) == style,
+               **kwargs)
     return led
+
+
+def _marker(folder):
+    """Where a fresh run of some units leaves its name until it is finished."""
+    return folder / "out.state.jsonl.dropping"
 
 
 def _rows_of(data):
@@ -903,7 +909,7 @@ class TestStartingSomeUnitsOver:
             replaced.append(Path(target).relative_to(tmp_path).as_posix()),
             replace(source, target))[1])
 
-        release_lock(_drop_short(tmp_path))
+        release_lock(_drop_style(tmp_path))
         after = _tree_files(tmp_path)
         # A file with no row of the style is not written again.
         assert replaced == ["Cyber/samples.csv", "Fraud/samples.csv", "out.state.jsonl"]
@@ -919,14 +925,15 @@ class TestStartingSomeUnitsOver:
         # The acks that stay are the lines they were; one last line has the sizes.
         *kept, last, end = after["out.state.jsonl"].split(b"\n")
         assert end == b"" and kept == [
-            line for line in old_lines if b'"short"' not in line and line]
+            line for line in old_lines
+            if line and b'"short"' not in line and line != b'{"_saved": {}}']
         assert json.loads(last) == {"_saved": {
             name: [len(data), _crc(data)] for name, data in after.items()
             if name.endswith(".csv")}}
 
     def test_the_resume_that_follows_knows_only_what_stayed(self, tmp_path, no_reading):
         _tree_run(tmp_path, _UNITS)
-        led = _drop_short(tmp_path)
+        led = _drop_style(tmp_path)
         before = _tree_files(tmp_path)
         assert resume_state(led, resume=True, artifact=tmp_path,
                             pattern=_TREE) == set("abef")
@@ -946,12 +953,12 @@ class TestStartingSomeUnitsOver:
         led.path.unlink()                   # so the copy is taken over as it is
         rows = _rows_of(cyber.read_bytes())
 
-        release_lock(_drop_short(tmp_path, units_in=_units_in))
+        release_lock(_drop_style(tmp_path, units_in=_units_in))
         assert cyber.read_bytes() == rows[0] + rows[1] + rows[3]
 
     def test_it_makes_this_process_the_writer_until_the_stage_ends(self, tmp_path):
         _tree_run(tmp_path, _UNITS)
-        led = _drop_short(tmp_path)
+        led = _drop_style(tmp_path)
         lock = FileLock(led.path.with_name("out.state.jsonl.lock"), timeout=0)
         with pytest.raises(Timeout):
             lock.acquire()
@@ -970,71 +977,32 @@ class TestStartingSomeUnitsOver:
         unfinished.parent.mkdir()
         unfinished.write_bytes(b"input_id,category,style,text,id\r\n")
 
-        release_lock(_drop_short(tmp_path))
+        release_lock(_drop_style(tmp_path))
         cyber = _rows_of(before["Cyber/samples.csv"])
         assert _file(tmp_path, "Cyber").read_bytes() == cyber[0] + cyber[1] + cyber[3]
         assert (tmp_path / "Cyber" / "samples.csv.cut").read_bytes() == tail
         assert not unfinished.exists()
 
-    @pytest.mark.parametrize("damage", ["a changed byte", "saved again, larger"])
-    def test_a_file_that_holds_other_bytes_stops_it_and_no_file_is_changed(
+    @pytest.mark.parametrize("damage", [
+        "a changed byte", "saved again, larger", "a row short", "deleted"])
+    def test_a_file_the_ledger_does_not_match_stops_it_and_no_file_is_changed(
             self, tmp_path, damage):
+        """Also a file that lost whole rows: with no run of this kind
+        unfinished, nothing but damage makes a file shorter."""
+        def lose_the_last_row(path):
+            path.write_bytes(b"".join(_rows_of(path.read_bytes())[:-1]))
+
         led = _tree_run(tmp_path, _UNITS)
-        _DAMAGE[damage](_file(tmp_path, "Privacy"))
+        damaged = _file(tmp_path, "Fraud")
+        {**_DAMAGE, "a row short": lose_the_last_row}[damage](damaged)
         before = _tree_files(tmp_path)
-        with pytest.raises(RuntimeError, match="Privacy"):
-            _drop_short(tmp_path)
+        with pytest.raises(RuntimeError, match="copied incompletely") as stopped:
+            _drop_style(tmp_path)
+        assert str(damaged) in str(stopped.value)
         assert _tree_files(tmp_path) == before
         lock = FileLock(led.path.with_name("out.state.jsonl.lock"), timeout=0)
         lock.acquire()                          # a stop holds no lock
         lock.release()
-
-    def test_stopped_before_the_ledger_it_is_finished_by_being_made_again(
-            self, tmp_path, monkeypatch):
-        """In between, the files are shorter than the ledger records."""
-        _tree_run(tmp_path, _UNITS)
-        whole = tmp_path / "whole"              # the same folder, started over whole
-        for name, data in _tree_files(tmp_path).items():
-            (whole / name).parent.mkdir(parents=True, exist_ok=True)
-            (whole / name).write_bytes(data)
-        release_lock(_drop_short(whole))
-
-        with monkeypatch.context() as patch:
-            patch.setattr(Ledger, "rewrite", lambda self, drop, saved: 1 / 0)
-            with pytest.raises(ZeroDivisionError):
-                _drop_short(tmp_path)
-        stopped = _stage_files(tmp_path)
-        with pytest.raises(RuntimeError, match="resume=False"):     # a resume stops
-            _tree_resume(tmp_path)
-        assert _stage_files(tmp_path) == stopped
-
-        release_lock(_drop_short(tmp_path))
-        assert _stage_files(tmp_path) == _tree_files(whole)
-
-    def test_a_shorter_file_that_ends_inside_a_row_stops_it(self, tmp_path):
-        """Shorter than recorded is what this call leaves when it stops half
-        way, and such a file ends with a whole row."""
-        _tree_run(tmp_path, _UNITS)
-        torn = _file(tmp_path, "Fraud")
-        torn.write_bytes(torn.read_bytes()[:-9])
-        before = _tree_files(tmp_path)
-        with pytest.raises(RuntimeError, match="copied incompletely") as stopped:
-            _drop_short(tmp_path)
-        assert str(torn) in str(stopped.value) and _tree_files(tmp_path) == before
-
-    def test_a_shorter_file_that_ends_inside_a_quoted_cell_stops_it(self, tmp_path):
-        """Its last byte is a line break, the one inside the cell."""
-        led = _tree_run(tmp_path, _UNITS)
-        ledger = led.path.read_bytes()
-        torn = _file(tmp_path, "Fraud")
-        data = torn.read_bytes()
-        torn.write_bytes(data[:data.rindex(b"lines")])
-        with pytest.raises(RuntimeError, match="unexpected end of data") as stopped:
-            _drop_short(tmp_path)
-        assert str(torn) in str(stopped.value)
-        assert led.path.read_bytes() == ledger      # and a resume still stops
-        with pytest.raises(RuntimeError, match="recorded"):
-            _tree_resume(tmp_path)
 
     def test_a_file_is_whole_on_disk_before_it_replaces_the_old_one(
             self, tmp_path, monkeypatch):
@@ -1044,12 +1012,12 @@ class TestStartingSomeUnitsOver:
 
         def fsync(fd):
             files = _tree_files(tmp_path)
-            (temporary,) = (name for name in files if name.endswith(".tmp"))
-            name = temporary.removesuffix(".tmp")
-            synced.append((name, files[name] == before[name]))
+            for temporary in (name for name in files if name.endswith(".tmp")):
+                name = temporary.removesuffix(".tmp")
+                synced.append((name, files[name] == before[name]))
 
         monkeypatch.setattr(os, "fsync", fsync)
-        release_lock(_drop_short(tmp_path))
+        release_lock(_drop_style(tmp_path))
         assert synced == [(name, True) for name in (
             "Cyber/samples.csv", "Fraud/samples.csv", "out.state.jsonl")]
 
@@ -1057,7 +1025,7 @@ class TestStartingSomeUnitsOver:
         """Its rows without acks would otherwise be recorded as saved, with
         no unit to own them."""
         _old_tree(tmp_path, acked="ac", units=_UNITS[:4])
-        led = _drop_short(tmp_path, units_in=_units_in)
+        led = _drop_style(tmp_path, units_in=_units_in)
         assert resume_state(led, resume=True, artifact=tmp_path,
                             pattern=_TREE) == set("ab")
         assert led.ids == {"id-a", "id-b"}
@@ -1065,7 +1033,7 @@ class TestStartingSomeUnitsOver:
         assert _keys_on_disk(_file(tmp_path, "Fraud")) == ["b"]
 
     def test_a_folder_that_holds_nothing_is_left_empty(self, tmp_path):
-        release_lock(_drop_short(tmp_path))
+        release_lock(_drop_style(tmp_path))
         assert _tree_files(tmp_path) == {}
 
     def test_a_stage_of_one_file_starts_some_units_over_too(self, tmp_path):
@@ -1074,9 +1042,134 @@ class TestStartingSomeUnitsOver:
         with _buffer(led, out) as buf:
             for key in "abc":
                 buf.add(_rows([key]), {"input_id": key})
-        drop_units(led, artifact=out, rows=lambda row: row["input_id"] == "b",
+        drop_units(led, artifact=out, name="b",
+                   rows=lambda row: row["input_id"] == "b",
                    acks=lambda ack: ack.get("input_id") == "b")
         assert resume_state(led, resume=True, artifact=out) == set("ac")
         release_lock(led)
         assert _keys_on_disk(out) == ["a", "c"]
         assert led.saved == {"out.csv": [out.stat().st_size, _crc(out.read_bytes())]}
+
+
+def _stopped_half_way(folder, monkeypatch):
+    """Start the style short over and die once the files are written again,
+    before the ledger is; the folder as that leaves it."""
+    with monkeypatch.context() as patch:
+        patch.setattr(Ledger, "rewrite", lambda self, drop, saved: 1 / 0)
+        with pytest.raises(ZeroDivisionError):
+            _drop_style(folder)
+    return _stage_files(folder)
+
+
+class TestAFreshRunOfSomeUnitsThatDidNotFinish:
+    """Its name stays beside the ledger until the ledger is written again.
+    Until then its rows are partly gone and its acks are not."""
+
+    def test_its_name_is_on_disk_before_the_first_file_is_replaced(
+            self, tmp_path, monkeypatch):
+        _tree_run(tmp_path, _UNITS)
+        seen = []
+
+        def noting(step):
+            def noted(*args, **kwargs):
+                marker = _marker(tmp_path)
+                seen.append((
+                    step.__name__, marker.read_bytes() if marker.exists() else None,
+                    [name for name in _tree_files(tmp_path) if name.endswith(".tmp")]))
+                return step(*args, **kwargs)
+            return noted
+
+        monkeypatch.setattr(os, "fsync", noting(os.fsync))
+        monkeypatch.setattr(os, "replace", noting(os.replace))
+        release_lock(_drop_style(tmp_path))
+        # Synced whole before any file is written again, there at every
+        # replace, the ledger's too, and gone at the end.
+        assert seen[0] == ("fsync", b"short\n", [])
+        assert [name for step, name, _ in seen if step == "replace"] == [b"short\n"] * 3
+        assert not _marker(tmp_path).exists()
+
+    def test_it_is_finished_by_being_made_again(self, tmp_path, monkeypatch):
+        _tree_run(tmp_path, _UNITS)
+        whole = tmp_path / "whole"              # the same folder, started over whole
+        for name, data in _tree_files(tmp_path).items():
+            (whole / name).parent.mkdir(parents=True, exist_ok=True)
+            (whole / name).write_bytes(data)
+        release_lock(_drop_style(whole))
+
+        left = _stopped_half_way(tmp_path, monkeypatch)
+        assert left["out.state.jsonl.dropping"] == b"short\n"
+        release_lock(_drop_style(tmp_path))
+        assert _stage_files(tmp_path) == _tree_files(whole)
+
+    def test_a_resume_stops_on_it_before_it_checks_or_cuts_anything(
+            self, tmp_path, monkeypatch):
+        _tree_run(tmp_path, _UNITS)
+        _stopped_half_way(tmp_path, monkeypatch)
+        with _file(tmp_path, "Privacy").open("ab") as fh:
+            fh.write(b"a tail a resume would cut off\n")
+        left = _tree_files(tmp_path)
+
+        with pytest.raises(RuntimeError, match="did not finish") as stopped:
+            _tree_resume(tmp_path)
+        assert "'short'" in str(stopped.value) and "again" in str(stopped.value)
+        assert _tree_files(tmp_path) == left
+
+    def test_a_fresh_run_of_other_units_stops_on_it_too(self, tmp_path, monkeypatch):
+        """It would write a ledger that matches the files, and the acks of
+        the rows that are gone would stay."""
+        led = _tree_run(tmp_path, _UNITS)
+        left = _stopped_half_way(tmp_path, monkeypatch)
+
+        with pytest.raises(RuntimeError, match="did not finish") as stopped:
+            _drop_style(tmp_path, "long")
+        assert "'short'" in str(stopped.value) and _stage_files(tmp_path) == left
+        lock = FileLock(led.path.with_name("out.state.jsonl.lock"), timeout=0)
+        lock.acquire()                          # a stop holds no lock
+        lock.release()
+
+        release_lock(_drop_style(tmp_path))             # the same one finishes it
+        assert _tree_resume(tmp_path)[0] == set("abef")
+        release_lock(_drop_style(tmp_path, "long"))     # and then the other runs
+        assert _tree_resume(tmp_path)[0] == set()
+        assert set(_tree_files(tmp_path)) == {"out.state.jsonl"}
+
+    def test_a_file_it_left_shorter_is_taken_as_it_is_only_if_it_ends_with_a_row(
+            self, tmp_path, monkeypatch):
+        _tree_run(tmp_path, _UNITS)
+        _stopped_half_way(tmp_path, monkeypatch)
+        torn = _file(tmp_path, "Fraud")
+        torn.write_bytes(torn.read_bytes()[:-9])
+        left = _tree_files(tmp_path)
+        with pytest.raises(RuntimeError, match="copied incompletely") as stopped:
+            _drop_style(tmp_path)
+        assert str(torn) in str(stopped.value) and _tree_files(tmp_path) == left
+
+    def test_a_file_it_left_shorter_that_ends_inside_a_quoted_cell_stops_it(
+            self, tmp_path, monkeypatch):
+        """Its last byte is a line break, the one inside the cell."""
+        led = _tree_run(tmp_path, _UNITS)
+        _stopped_half_way(tmp_path, monkeypatch)
+        ledger = led.path.read_bytes()
+        torn = _file(tmp_path, "Fraud")
+        data = torn.read_bytes()
+        torn.write_bytes(data[:data.rindex(b"lines")])
+        with pytest.raises(RuntimeError, match="unexpected end of data") as stopped:
+            _drop_style(tmp_path)
+        assert str(torn) in str(stopped.value)
+        assert led.path.read_bytes() == ledger and _marker(tmp_path).exists()
+
+    def test_a_name_cut_off_as_it_was_written_names_nothing(self, tmp_path):
+        """No file is replaced before the name is whole on disk."""
+        _tree_run(tmp_path, _UNITS)
+        _marker(tmp_path).write_bytes(b"sho")
+        assert _tree_resume(tmp_path)[0] == set("abcdef")
+        release_lock(_drop_style(tmp_path, "long"))
+        assert not _marker(tmp_path).exists()
+        assert _tree_resume(tmp_path)[0] == set("cd")
+
+    def test_a_fresh_run_of_the_whole_stage_removes_its_name(
+            self, tmp_path, monkeypatch):
+        _tree_run(tmp_path, _UNITS)
+        _stopped_half_way(tmp_path, monkeypatch)
+        resume_state(_ledger(tmp_path), resume=False, artifact=tmp_path, pattern=_TREE)
+        assert _tree_files(tmp_path) == {}

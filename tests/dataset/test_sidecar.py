@@ -430,13 +430,14 @@ class TestLedgerRewrite:
 
     def test_the_records_picked_are_left_out_and_one_line_records_saved(self, tmp_path):
         led = self._three_saves(tmp_path)
-        opening, first, _second, _third, last, _end = led.path.read_bytes().split(b"\n")
+        lines = led.path.read_bytes().split(b"\n")
+        _opening, first, _second, _third, last, _end = lines
         newer = {"out.csv": [60, "ffffffff"]}
 
         led.rewrite(lambda record: record.get("style") == "b", newer)
         # The lines that stay are the bytes they were.
         assert led.path.read_bytes() == b"\n".join(
-            [opening, first, last, json.dumps({"_saved": newer}).encode(), b""])
+            [first, last, json.dumps({"_saved": newer}).encode(), b""])
         assert _names(tmp_path) == ["run.state.jsonl"]
         # The object knows the new state without reading the file again.
         assert (led.saved, led.ids) == (newer, {"x", "z"})
@@ -449,15 +450,24 @@ class TestLedgerRewrite:
         with led.path.open("ab") as fh:
             fh.write(b'{"id": "5", "style": "a"}\n{"id": "6", "sty')
         led.rewrite(lambda record: False, {})
-        assert [r.get("id") for r in _records(led)] == [None, "1", "2", "3", "4", None]
+        assert [r.get("id") for r in _records(led)] == ["1", "2", "3", "4", None]
         assert led.completed() == {"1", "2", "3", "4"}
+
+    def test_a_line_that_only_records_sizes_is_left_out(self, tmp_path):
+        """The last line records them, so writing the ledger again and again
+        leaves the same bytes."""
+        led = self._three_saves(tmp_path)
+        led.rewrite(lambda record: record.get("style") == "b", _SAVED)
+        once = led.path.read_bytes()
+        assert once.count(b'{"_saved"') == 1
+        led.rewrite(lambda record: record.get("style") == "b", _SAVED)
+        assert led.path.read_bytes() == once
 
     def test_lines_that_end_in_a_carriage_return_stay_as_they_are(self, tmp_path):
         led = _ledger(tmp_path)
         led.path.write_bytes(b'{"id": "1"}\r\n{"id": "2"}\r\n{"_saved": {}}\n')
         led.rewrite(lambda record: record.get("id") == "2", {})
-        assert led.path.read_bytes() == (
-            b'{"id": "1"}\r\n{"_saved": {}}\n{"_saved": {}}\n')
+        assert led.path.read_bytes() == b'{"id": "1"}\r\n{"_saved": {}}\n'
 
     def test_the_ledger_is_the_old_one_until_the_new_one_is_whole_on_disk(
             self, tmp_path, monkeypatch):
@@ -468,7 +478,7 @@ class TestLedgerRewrite:
             (led.path.read_bytes() == old,
              led.path.with_name("run.state.jsonl.tmp").read_bytes().count(b"\n"))))
         led.rewrite(lambda record: record.get("style") == "b", {})
-        assert seen == [(True, 4)]          # synced whole, the old one still in place
+        assert seen == [(True, 3)]          # synced whole, the old one still in place
         assert led.path.read_bytes() != old
 
     def test_a_rename_that_fails_leaves_the_old_ledger(self, tmp_path, monkeypatch):

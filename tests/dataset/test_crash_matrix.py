@@ -602,14 +602,16 @@ def test_a_crash_at_any_step_of_a_resume_over_several_files_keeps_the_guarantees
     assert most_steps == len(_TREE_RESUME_STEPS)
 
 
-_DROP_STEPS = ("A replaced", "B replaced", "C removed", "the ledger replaced")
+_DROP_STEPS = ("A replaced", "B replaced", "C removed", "the ledger replaced",
+               "the name removed")
+_DROP_NAME = "tree.state.jsonl.dropping"
 
 
-def _drop(folder):
+def _drop(folder, name="some"):
     """Start t1, t4 and t5 over: a row out of A, two out of B, all of C."""
     led = _tree_ledger(folder)
     over = {"t1", "t4", "t5"}
-    drop_units(led, artifact=folder, pattern=_TREE,
+    drop_units(led, artifact=folder, pattern=_TREE, name=name,
                rows=lambda row: row["key"] in over,
                acks=lambda ack: ack.get("key") in over)
     release_lock(led)
@@ -617,10 +619,12 @@ def _drop(folder):
 
 def test_a_fresh_run_of_some_units_that_died_at_any_step_is_finished_by_another(
         tmp_path, monkeypatch, no_sync):
-    """Each file is replaced or removed in turn, then the ledger. Until the
-    ledger is, a resume stops; the same call, made again, ends where an
-    uninterrupted one does."""
+    """It leaves its name beside the ledger, replaces or removes each file in
+    turn, then the ledger, and removes its name. While the name is there a
+    resume stops, and so does a fresh run under another name; the same call,
+    made again, ends where an uninterrupted one does."""
     _tree_run(tmp_path, attempt=0)
+    start = _tree_files(tmp_path)
     steps = []      # the folder as each step finds it, its temporary file whole
 
     def noted(step):
@@ -641,24 +645,36 @@ def test_a_fresh_run_of_some_units_that_died_at_any_step_is_finished_by_another(
     assert len(steps) == len(_DROP_STEPS)
 
     points = 0
-    for made, files in enumerate(steps):
-        (temporary,) = (name for name in files if name.endswith(".tmp"))
-        whole = files[temporary]
-        # Dead before the step, the temporary file whole, half written or not begun.
-        for written in (whole, whole[:len(whole) // 2], None):
-            left = {**files, temporary: written}
-            if written is None:
-                del left[temporary]
+    # Dead before its name was whole on disk: no file is replaced, and the
+    # run is as it was.
+    for left in (start, {**start, _DROP_NAME: b"so"}):
+        _put_tree(tmp_path, left)
+        led = _tree_ledger(tmp_path)
+        assert resume_state(
+            led, resume=True, artifact=tmp_path, pattern=_TREE) == set(_TREE_UNITS)
+        release_lock(led)
+        _drop(tmp_path)
+        assert _tree_files(tmp_path) == done
+        points += 1
+
+    for files in steps:
+        assert files[_DROP_NAME] == b"some\n"
+        # Dead before the step, its temporary file whole, half written or
+        # not begun.
+        lefts = [files]
+        for temporary in (name for name in files if name.endswith(".tmp")):
+            half = files[temporary][:len(files[temporary]) // 2]
+            lefts.append({**files, temporary: half})
+            lefts.append({name: data for name, data in files.items()
+                          if name != temporary})
+        for left in lefts:
             _put_tree(tmp_path, left)
-            led = _tree_ledger(tmp_path)
-            if made:
-                with pytest.raises(RuntimeError, match="resume=False"):
-                    resume_state(led, resume=True, artifact=tmp_path, pattern=_TREE)
-                assert _tree_files(tmp_path) == left
-            else:       # no file was replaced yet: the run is as it was
-                assert resume_state(led, resume=True, artifact=tmp_path,
-                                    pattern=_TREE) == set(_TREE_UNITS)
-                release_lock(led)
+            with pytest.raises(RuntimeError, match="'some' did not finish"):
+                resume_state(_tree_ledger(tmp_path), resume=True,
+                             artifact=tmp_path, pattern=_TREE)
+            with pytest.raises(RuntimeError, match="'some' did not finish"):
+                _drop(tmp_path, name="others")
+            assert _tree_files(tmp_path) == left
             _drop(tmp_path)
             assert _tree_files(tmp_path) == done
             points += 1

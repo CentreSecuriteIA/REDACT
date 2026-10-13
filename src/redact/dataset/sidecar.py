@@ -299,9 +299,10 @@ class Ledger(JsonlSidecar):
         """Replace the file with its finished records, less those ``drop`` picks.
 
         The lines that stay are the bytes they were, and one last line
-        records ``saved``. The new file is written beside the old one,
-        synced, and renamed onto it, so the ledger is the old one or the new
-        one.
+        records ``saved``. A line that only recorded sizes is left out, so
+        doing it again leaves the same file. The new file is written beside
+        the old one, synced, and renamed onto it, so the ledger is the old
+        one or the new one.
         """
         end = self.read().end
         ids: set = set()
@@ -314,7 +315,7 @@ class Ledger(JsonlSidecar):
                     if end < 0:     # what follows belongs to no finished save
                         break
                     record = _parse(line) or {}
-                    if drop(record):
+                    if drop(record) or set(record) == {"_saved"}:
                         continue
                     new.write(line)
                     with suppress(TypeError):

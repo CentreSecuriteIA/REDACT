@@ -151,7 +151,7 @@ def test_completion_ledger_written_and_drives_resume(tmp_path, monkeypatch):
     with pytest.raises(RuntimeError, match="jb.csv") as stopped:
         generate_jailbreaks(inputs=_inputs(), output_path=out, seed=1,
                             resume=True, **PURE_KW)
-    assert "resume=False" in str(stopped.value)
+    assert "start the whole stage over" in str(stopped.value)
     assert len(led.completed()) == len(_inputs()) and not out.exists()
 
 

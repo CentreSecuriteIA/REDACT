@@ -460,17 +460,22 @@ class TestAFreshRun:
             "first sample zq66", 'second "quoted" sample, café zq66']
         assert _constitution_inputs_ledger(tmp_path).ids == set(_ids_on_disk(tmp_path))
 
-    def test_of_one_style_that_stopped_before_the_ledger_is_finished_by_another(
-            self, tmp_path, monkeypatch):
-        """In between, a resume stops: the files are shorter than recorded."""
-        self._two_styles(tmp_path)
+    def _dies_before_the_ledger(self, folder, monkeypatch, style):
+        """A fresh run of ``style`` that wrote the files again and not the
+        ledger; the folder as it leaves it."""
         with monkeypatch.context() as patch:
             patch.setattr(Ledger, "rewrite", lambda self, drop, saved: 1 / 0)
             with pytest.raises(ZeroDivisionError):
-                _run(tmp_path, _entries(4), style="short", fresh=True)
-        stopped = _files(tmp_path)
+                _run(folder, _entries(4), style=style, fresh=True)
+        return _files(folder)
 
-        with pytest.raises(RuntimeError, match="recorded"):
+    def test_of_one_style_that_stopped_before_the_ledger_is_finished_by_another(
+            self, tmp_path, monkeypatch):
+        """In between, a resume stops: rows are gone whose acks are not."""
+        self._two_styles(tmp_path)
+        stopped = self._dies_before_the_ledger(tmp_path, monkeypatch, "short")
+
+        with pytest.raises(RuntimeError, match="'short' did not finish"):
             _run(tmp_path, _entries(4), style="short")
         assert _files(tmp_path) == stopped
 
@@ -481,6 +486,57 @@ class TestAFreshRun:
         assert ledger.completed() == {
             *(_key(i, "long") for i in (0, 1, 2)), _key(4, "short")}
         assert ledger.ids == set(_ids_on_disk(tmp_path))
+
+    def test_of_another_style_stops_on_one_that_did_not_finish(
+            self, tmp_path, monkeypatch):
+        """It would leave a ledger that matches the files, with the acks of
+        the first style in it and its rows gone: a resume of that style
+        would then generate nothing."""
+        self._two_styles(tmp_path)
+        stopped = self._dies_before_the_ledger(tmp_path, monkeypatch, "short")
+
+        with pytest.raises(RuntimeError, match="'short' did not finish"):
+            _run(tmp_path, _entries(0, 1, 2), write=_again, style="long", fresh=True)
+        assert _files(tmp_path) == stopped
+        assert lock_is_free(_constitution_inputs_ledger(tmp_path).path)
+
+        # The first is made again and finishes; then the second runs.
+        short = _entries(4, 5, 66, _NO_SAMPLES)
+        _result, gen = _run(tmp_path, short, style="short", fresh=True)
+        again = {token.rstrip("*") for batch in gen.batches for token in batch}
+        assert again == {"zq4", "zq5", "zq66", "zq30"}
+        _run(tmp_path, _entries(0, 1, 2), write=_again, style="long", fresh=True)
+        assert _texts(tmp_path) == {
+            "Violence": ["first sample zq4", 'second "quoted" sample, café zq4',
+                         "first sample again zq0", "second sample again zq0",
+                         "first sample again zq2", "second sample again zq2"],
+            "Privacy": ["first sample zq5", 'second "quoted" sample, café zq5',
+                        "first sample again zq1", "second sample again zq1"],
+            "Fraud": ["first sample zq66", 'second "quoted" sample, café zq66'],
+        }
+        ledger = _constitution_inputs_ledger(tmp_path)
+        assert ledger.completed() == {
+            *(_key(i, "long") for i in (0, 1, 2)),
+            *(_key(i, "short") for i in (4, 5, 66, _NO_SAMPLES))}
+        assert ledger.ids == set(_ids_on_disk(tmp_path))
+
+    def test_of_one_style_stops_on_a_file_that_lost_its_last_rows(self, tmp_path):
+        """Cut short at the end of a row, the file is whole to look at. The
+        ledger recorded more of it, and no fresh run is unfinished."""
+        self._two_styles(tmp_path)
+        violence = tmp_path / "Violence" / "samples.csv"
+        data = violence.read_bytes()
+        # Its last two rows are zq4's, and a row starts with its id.
+        first_of_zq4 = content_id("first sample zq4").encode()
+        violence.write_bytes(data[:data.index(first_of_zq4)])
+        assert violence.read_bytes().endswith(b"\n")
+        before = _files(tmp_path)
+
+        with pytest.raises(RuntimeError, match="copied incompletely") as stopped:
+            _run(tmp_path, _entries(4), style="short", fresh=True)
+        assert str(violence) in str(stopped.value)
+        assert "start the whole stage over" in str(stopped.value)
+        assert _files(tmp_path) == before
 
     def test_of_one_style_leaves_a_file_without_a_style_column_alone(self, tmp_path):
         """Its rows are of no style, as a resume reads them."""

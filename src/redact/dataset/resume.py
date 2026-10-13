@@ -20,7 +20,9 @@ written by a save that did not finish, and is moved aside whole.
 A fresh run clears the artifact together with its ledger: acks left behind
 would make the next run skip every unit and write nothing. A fresh run of
 part of a stage removes that part's rows and acks alone
-(:func:`drop_units`).
+(:func:`drop_units`), and leaves its name beside the ledger until it is
+done: no other run goes on in a folder where rows are gone and their acks
+are not.
 
 Known limits:
 
@@ -108,8 +110,8 @@ def resume_state(
 
     Raises:
         RuntimeError: Another run holds the stage's lock, a file is not what
-            the ledger recorded, or another program holds a file that has to
-            be cut back.
+            the ledger recorded, another program holds a file that has to be
+            cut back, or a :func:`drop_units` did not finish.
         PermissionError: Another program holds a file that a fresh run has
             to remove.
     """
@@ -124,8 +126,9 @@ def resume_state(
         try:
             if not resume:
                 _clear(ledger, manifest, *_outputs(path, pattern),
-                       *_outputs(path, pattern, ".cut"))
+                       *_outputs(path, pattern, ".cut"), _drop_marker(ledger))
                 return set()
+            _stop_on_unfinished_drop(ledger)    # before a file is checked or cut
             done = _restore(ledger, _outputs(path, pattern), units_in)
         except BaseException:
             release_lock(ledger)    # a resume that stops holds nothing
@@ -271,7 +274,7 @@ def _verify(ledger: Ledger, path: Path, size: int, checksum: str) -> None:
         f"and the file {found}. It was replaced, edited or copied incompletely. "
         "Restore the file. Or delete the ledger: the next resume then takes "
         "over the rows the file holds, and units without rows run again. Or "
-        "start over with resume=False."
+        "start the whole stage over."
     )
 
 
@@ -404,7 +407,7 @@ def _read_units(
         raise RuntimeError(
             f"Cannot resume {output}: {error}. The file was written before "
             "the ledger recorded sizes, so nothing says where its whole rows "
-            "end. Repair the file, or start over with resume=False."
+            "end. Repair the file, or start the whole stage over."
         ) from error
 
 
@@ -419,6 +422,7 @@ def drop_units(
     ledger: Ledger,
     *,
     artifact: str | Path,
+    name: str,
     rows: Callable[[Mapping[str, str]], bool],
     acks: Callable[[Mapping[str, Any]], bool],
     pattern: str | None = None,
@@ -431,18 +435,23 @@ def drop_units(
     as :func:`resume_state` does, and the resume that follows keeps the
     lock.
 
-    What a save that did not finish left is cut off first, as on a resume.
-    Each output file is then written again without the rows, and last the
-    ledger without the acks, ending in one line that records the new sizes.
-    Each goes through a temporary file and a rename. Stopped in between, the
-    call leaves files shorter than the ledger records: a resume stops on
-    them, and the call, made again, finishes the job. So a file that is
-    gone, or shorter than recorded and whole to its last row, is taken here
-    as it is.
+    The stage's files are first put back at the last finished save, as on a
+    resume. Each output file is then written again without the rows, and
+    last the ledger without the acks, ending in one line that records the
+    new sizes. Each goes through a temporary file and a rename.
+
+    In between, rows are gone whose acks are not. So before the first file
+    is replaced the call leaves its ``name`` beside the ledger, and removes
+    it once the ledger is written. While the name is there a resume stops,
+    and so does a call under another name. The same call, made again,
+    finishes the job: it alone takes a file as it is that is gone, or
+    shorter than recorded and whole to its last row.
 
     Args:
         ledger: The stage's ledger.
         artifact: The stage's output, as for :func:`resume_state`.
+        name: What is started over, in words a later run can be told to
+            repeat. The call that finishes this one gives the same name.
         rows: Picks the rows to remove, given a row's cells by column name.
         acks: Picks the ledger records to remove.
         pattern: As for :func:`resume_state`.
@@ -458,18 +467,58 @@ def drop_units(
     outputs = _outputs(Path(artifact), pattern)
     _lock(ledger)
     try:
+        continued = _stop_on_unfinished_drop(ledger, unless=name)
         state = ledger.read()
         if state.saved is None:
             _adopt(ledger, state, outputs, units_in)
         else:
-            _put_back(ledger, state.saved, outputs, shorter_ok=True)
-        for name in ledger.saved or {}:
-            _rewrite_without(ledger.path.parent / name, rows)
+            _put_back(ledger, state.saved, outputs, shorter_ok=continued)
         if ledger.exists():
+            if not continued:
+                _mark_drop(ledger, name)
+            for recorded in ledger.saved or {}:
+                _rewrite_without(ledger.path.parent / recorded, rows)
             ledger.rewrite(acks, _measured(ledger))
+        _retry_held(lambda: _drop_marker(ledger).unlink(missing_ok=True))
     except BaseException:
         release_lock(ledger)    # a call that stops holds nothing
         raise
+
+
+def _drop_marker(ledger: Ledger) -> Path:
+    """Where a :func:`drop_units` under way has its name: ``<ledger>.dropping``."""
+    return ledger.path.with_name(ledger.path.name + ".dropping")
+
+
+def _mark_drop(ledger: Ledger, name: str) -> None:
+    """Leave ``name`` beside the ledger, synced, as a :func:`drop_units` under way."""
+    with _drop_marker(ledger).open("wb") as fh:
+        fh.write(name.encode("utf-8") + b"\n")
+        fh.flush()
+        os.fsync(fh.fileno())
+
+
+def _stop_on_unfinished_drop(ledger: Ledger, unless: str | None = None) -> bool:
+    """Stop if a :func:`drop_units` did not finish, unless it is the one named.
+
+    A name without its line break was cut off as it was written, before any
+    file was replaced: it names nothing.
+
+    Returns:
+        Whether the one named ``unless`` did not finish.
+    """
+    marker = _drop_marker(ledger)
+    left = marker.read_bytes() if marker.exists() else b""
+    if not left.endswith(b"\n"):
+        return False
+    name = left[:-1].decode("utf-8")
+    if name == unless:
+        return True
+    raise RuntimeError(
+        f"A fresh run of {name!r} did not finish in {marker.parent}: rows of "
+        f"it may be gone whose acks are still in {ledger.path.name}. Run it "
+        f"again first. ({marker.name} holds its name.)"
+    )
 
 
 def _left_shorter(path: Path, size: int) -> bool:
