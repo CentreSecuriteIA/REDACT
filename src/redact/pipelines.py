@@ -33,6 +33,7 @@ skips constitution generation, so it's the cheaper "quick eval" option)::
 import json
 import logging
 import warnings
+from contextlib import closing
 from pathlib import Path
 
 import pandas as pd
@@ -59,7 +60,7 @@ from redact.dataset import (
     merge_all,
     read_rows,
     resume_state,
-    row_id,
+    row_ids,
     take_per_group,
 )
 from redact.dataset.merge import merge_content_mod_csvs
@@ -736,7 +737,7 @@ def generate_jailbreaks(
     if entry_types:
         inputs = inputs[inputs["entry_type"].isin(entry_types)].reset_index(drop=True)
 
-    inputs["sample_id"] = [row_id(row, "prompt") for _, row in inputs.iterrows()]
+    inputs["sample_id"] = row_ids(inputs, "prompt")
 
     # Generation model defaults to the uncensored_gen role; translation defaults
     # to the translation role (DeepSeek). Backend auto-resolved from the name.
@@ -827,11 +828,12 @@ def generate_jailbreaks(
     # stopped while it plans does not leave the old plan to be reused; a
     # resume keeps + skips what the ledger records, and cuts off what an
     # unfinished save left.
+    manifest = Manifest(man_path)
     completed = resume_state(
         jb_ledger,
         resume=resume,
         artifact=out,
-        manifest=Manifest(man_path),
+        manifest=manifest,
     )
 
     # ------------------------------------------------------------------
@@ -846,8 +848,6 @@ def generate_jailbreaks(
             iterations=iterations, settings_per_iteration=settings_per_iteration,
             sample_kwargs=sample_kwargs, verbose=verbose,
         )
-
-    plan_rows = Manifest(man_path).load()
 
     # ------------------------------------------------------------------
     # Phase 2 — Execute (stream the manifest through the refill pool)
@@ -864,21 +864,23 @@ def generate_jailbreaks(
             verbose=verbose,
         )
 
-    prompt_map = dict(zip(inputs["sample_id"], inputs["prompt"]))
-    # meta_map's records carry the CM input's own "sample_id" (this row's origin
-    # identity) — _finalize()'s result overwrites it with the jailbreak's own
-    # sample_id via row.update(res) below, since res is applied after this seed.
-    meta_map = {r["sample_id"]: r for r in inputs.to_dict("records")}
+    # Where each input is in the frame, by its id; of two inputs with one id
+    # the later one. A unit's prompt and its row's input columns are read
+    # there when needed, so no copy of every input is held.
+    position = dict(zip(inputs["sample_id"], range(len(inputs))))
+    prompts = inputs["prompt"]
 
-    pending = [
-        r for r in plan_rows
-        if str(r["sample_id"]) in prompt_map
-        and (str(r["sample_id"]), int(r["iteration"])) not in completed
-    ]
+    def _pending(plan_row: dict) -> bool:
+        """Whether a planned unit is of these inputs and not finished."""
+        sid = str(plan_row["sample_id"])
+        return sid in position and (sid, int(plan_row["iteration"])) not in completed
 
     out.parent.mkdir(parents=True, exist_ok=True)
-    total = len(pending)
-    written = 0
+    planned = total = written = 0
+    if verbose:     # one pass over the plan, for the numbers in the log lines
+        for plan_row in manifest:
+            planned += 1
+            total += _pending(plan_row)
 
     if verbose and total:
         logger.info("Executing %d units...", total)
@@ -893,26 +895,33 @@ def generate_jailbreaks(
                         written, total, n_acc, out.name)
         return sizes
 
-    # Plan row and engine sample of each live unit, by position in ``pending``,
-    # so two plan rows with one (input_id, iteration) stay two units.
+    # Plan row and engine sample of each live unit, by its place among the
+    # pending units, so two plan rows with one (input_id, iteration) stay two
+    # units.
     live: dict[int, tuple[dict, dict]] = {}
 
     def _units():
-        for i, r in enumerate(pending):
-            sample = {
-                "id": str(r["sample_id"]),
-                "prompt": prompt_map[str(r["sample_id"])],
-                "combination": build_combination(r["combination"], registry),
-                "iteration": int(r["iteration"]),
-            }
-            live[i] = (r, sample)
-            yield i, _sample_gen(
-                sample, gen_model=model, translate_model=translation_model,
-                benign_data=benign_data, capture_internals=capture_jailbreak,
-            )
+        # The plan is read one row at a time, as the driver takes units.
+        # Closed with this generator: Windows does not replace an open file.
+        with closing(iter(manifest)) as plan:
+            for i, r in enumerate(filter(_pending, plan)):
+                sid = str(r["sample_id"])
+                sample = {
+                    "id": sid,
+                    "prompt": prompts.iat[position[sid]],
+                    "combination": build_combination(r["combination"], registry),
+                    "iteration": int(r["iteration"]),
+                }
+                live[i] = (r, sample)
+                yield i, _sample_gen(
+                    sample, gen_model=model, translate_model=translation_model,
+                    benign_data=benign_data, capture_internals=capture_jailbreak,
+                )
 
     def _add(plan_row: dict, res: dict) -> None:
-        row = dict(meta_map.get(res["input_id"], {}))
+        # The input's columns seed the row, its own "sample_id" among them,
+        # which the jailbreak's replaces in the update below.
+        row = inputs.iloc[position[res["input_id"]]].to_dict()
         row.update(res)
         row["iteration"] = plan_row["iteration"]
         row["combination_spec_version"] = spec_version
@@ -932,9 +941,12 @@ def generate_jailbreaks(
     # A unit whose chain raises gets an error row and is acked. The buffer
     # appends, then acks (see dataset/resume.py), every 32 units and on any
     # exit.
-    with CommitBuffer(append=_append, ledger=jb_ledger) as buf:
+    with (
+        closing(_units()) as units,
+        CommitBuffer(append=_append, ledger=jb_ledger) as buf,
+    ):
         drive_units(
-            _units(),
+            units,
             on_done=_on_done,
             on_error=_on_error,
             pool_size=_pool_size(batch_size, client),
@@ -946,7 +958,7 @@ def generate_jailbreaks(
 
     if verbose:
         logger.info("Jailbreak Summary")
-        logger.info("Planned units: %d | Newly written: %d", len(plan_rows), written)
+        logger.info("Planned units: %d | Newly written: %d", planned, written)
         logger.info("Total rows in %s: %d", out.name, len(jailbreaks))
         if not jailbreaks.empty and "accepted" in jailbreaks.columns:
             n_accepted = int(jailbreaks["accepted"].sum())

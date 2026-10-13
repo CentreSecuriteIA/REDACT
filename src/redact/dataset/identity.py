@@ -1,6 +1,7 @@
 """A row's id: the content hash of its text."""
 
 import hashlib
+from itertools import repeat
 
 import pandas as pd
 
@@ -22,3 +23,15 @@ def row_id(row, text_col: str, id_col: str = "sample_id") -> str:
     if existing and existing.lower() != "nan":
         return existing
     return content_id(str(row[text_col]))
+
+
+def row_ids(frame: pd.DataFrame, text_col: str, id_col: str = "sample_id") -> list[str]:
+    """:func:`row_id` of every row of ``frame``, in order.
+
+    Reads the two columns, without building a row for each id.
+    """
+    given = frame[id_col] if id_col in frame.columns else repeat(None)
+    return [
+        row_id({id_col: value, text_col: text}, text_col, id_col)
+        for value, text in zip(given, frame[text_col])
+    ]

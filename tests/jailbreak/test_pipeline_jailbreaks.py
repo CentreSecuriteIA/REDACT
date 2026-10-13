@@ -277,6 +277,123 @@ def test_settings_per_iteration_empty_raises(tmp_path):
                             settings_per_iteration=[], **PURE_KW)
 
 
+# --- the plan as a stream ------------------------------------------------------
+
+
+def test_plan_run_hands_the_manifest_each_row_as_it_is_made(tmp_path, monkeypatch):
+    import redact.jailbreak.manifest as JM
+
+    assigned, seen = [], []
+    monkeypatch.setattr(
+        JM, "assign_combination",
+        lambda sid, pool, **kwargs: assigned.append(sid) or ["a_technique"])
+    # Per row the manifest takes: the assignments made by then.
+    monkeypatch.setattr(
+        Manifest, "write", lambda self, rows: seen.extend(len(assigned) for _ in rows))
+    JM.plan_run(_inputs(), [], manifest_path=tmp_path / "jb.manifest.jsonl",
+                iterations=2, verbose=False)
+    assert seen == list(range(1, 11))
+
+
+@pytest.mark.parametrize("verbose", [False, True])
+def test_a_run_never_loads_its_whole_plan(tmp_path, monkeypatch, verbose):
+    def load(self):
+        raise AssertionError("the whole plan was loaded")
+
+    monkeypatch.setattr(Manifest, "load", load)
+    out, kwargs = tmp_path / "jb.csv", {**PURE_KW, "verbose": verbose}
+    first = generate_jailbreaks(inputs=_inputs(), output_path=out, seed=7, **kwargs)
+    again = generate_jailbreaks(inputs=_inputs(), output_path=out, seed=7, **kwargs)
+    assert len(first) == len(again) == len(_inputs())
+
+
+def _plan_rows_read(monkeypatch, units_taken):
+    """Stop the stage once the driver took ``units_taken`` units; the plan rows read."""
+    import redact.pipelines as P
+
+    rows, read = Manifest.__iter__, []
+
+    def counted(self):
+        for row in rows(self):
+            read.append(row)
+            yield row
+
+    def take(source, **kwargs):
+        units = iter(source)
+        for _ in range(units_taken):
+            next(units)
+        raise KeyboardInterrupt
+
+    monkeypatch.setattr(Manifest, "__iter__", counted)
+    monkeypatch.setattr(P, "drive_units", take)
+    return read
+
+
+def test_a_unit_is_built_when_the_driver_takes_it(tmp_path, monkeypatch):
+    taken = 2       # of the five planned
+    read = _plan_rows_read(monkeypatch, units_taken=taken)
+    with pytest.raises(KeyboardInterrupt):
+        generate_jailbreaks(inputs=_inputs(), output_path=tmp_path / "jb.csv",
+                            seed=7, **PURE_KW)
+    assert len(read) == taken
+
+
+def test_finished_units_are_skipped_as_the_plan_is_read(tmp_path, monkeypatch):
+    out, finished = tmp_path / "jb.csv", 3
+    generate_jailbreaks(inputs=_inputs().iloc[:finished], output_path=out, seed=7,
+                        **PURE_KW)
+    Manifest.sidecar(out).reset()       # the next run plans all five inputs
+    read = _plan_rows_read(monkeypatch, units_taken=1)
+    with pytest.raises(KeyboardInterrupt):
+        generate_jailbreaks(inputs=_inputs(), output_path=out, seed=7, **PURE_KW)
+    assert len(read) == finished + 1    # the finished units, then the one taken
+
+
+def test_a_stopped_run_lets_go_of_its_plan(tmp_path, monkeypatch):
+    """On Windows a plan still held open could not be replaced by the next run."""
+    import redact.pipelines as P
+
+    rows, drive_units, let_go = Manifest.__iter__, P.drive_units, []
+
+    def watched(self):
+        try:
+            yield from rows(self)
+        finally:
+            let_go.append(self.path.name)
+
+    def take_one(source, **kwargs):
+        next(iter(source))
+        raise KeyboardInterrupt
+
+    out = tmp_path / "jb.csv"
+    monkeypatch.setattr(Manifest, "__iter__", watched)
+    monkeypatch.setattr(P, "drive_units", take_one)
+    # ``stopped`` keeps the traceback, and with it every frame of the run.
+    with pytest.raises(KeyboardInterrupt) as stopped:  # noqa: F841
+        generate_jailbreaks(inputs=_inputs(), output_path=out, seed=7, **PURE_KW)
+    assert let_go == ["jb.manifest.jsonl"]
+
+    monkeypatch.setattr(P, "drive_units", drive_units)
+    fresh = generate_jailbreaks(inputs=_inputs(), output_path=out, seed=8,
+                                resume=False, **PURE_KW)
+    assert len(fresh) == len(_inputs())
+
+
+def test_an_input_becomes_a_dict_only_for_the_row_of_a_finished_unit(
+        tmp_path, monkeypatch):
+    def every_row(self, *args, **kwargs):
+        raise AssertionError("every input was turned into a dict")
+
+    inputs = _inputs().assign(turn=range(5))
+    with monkeypatch.context() as patch:
+        patch.setattr(pd.DataFrame, "to_dict", every_row)
+        df = generate_jailbreaks(inputs=inputs, output_path=tmp_path / "jb.csv",
+                                 seed=7, **PURE_KW)
+    # Each row still carries the columns of its own input.
+    turn_of = dict(zip(inputs["prompt"], inputs["turn"]))
+    assert dict(zip(df["prompt"], df["turn"])) == turn_of
+
+
 def test_include_translation_filter_removes_translation_family():
     """The include_translation=False filter drops exactly the translation family.
 

@@ -3,7 +3,7 @@
 import pandas as pd
 import pytest
 
-from redact.dataset import content_id, row_id
+from redact.dataset import content_id, row_id, row_ids
 
 _TEXT = "the prompt"
 
@@ -54,3 +54,40 @@ class TestRowId:
         row = _row("origin", id_col="input_id")
         assert row_id(row, "prompt", id_col="input_id") == "origin"
         assert row_id(row, "prompt") == content_id(_TEXT)
+
+
+class TestRowIds:
+    def _frame(self, id_col="sample_id"):
+        ids = ["abc", None, " padded ", float("nan"), "nan", "", 123, pd.NA, "abc"]
+        return pd.DataFrame({
+            id_col: pd.Series(ids, dtype=object),
+            "prompt": [f"prompt {n}" for n in range(len(ids))],
+            "turn": range(len(ids)),
+        })
+
+    def test_is_the_row_id_of_every_row_in_order(self):
+        frame = self._frame()
+        ids = row_ids(frame, "prompt")
+        assert ids == [row_id(row, "prompt") for _, row in frame.iterrows()]
+        assert ids == ["abc", content_id("prompt 1"), "padded", content_id("prompt 3"),
+                       content_id("prompt 4"), content_id("prompt 5"), "123",
+                       content_id("prompt 7"), "abc"]
+
+    def test_a_frame_without_the_id_column_gives_content_ids(self):
+        frame = pd.DataFrame({"prompt": ["one", "two"]})
+        assert row_ids(frame, "prompt") == [content_id("one"), content_id("two")]
+
+    def test_id_col_names_the_column_the_ids_are_read_from(self):
+        frame = self._frame(id_col="input_id")
+        assert row_ids(frame, "prompt", id_col="input_id")[:3] == [
+            "abc", content_id("prompt 1"), "padded"]
+        assert row_ids(frame, "prompt")[0] == content_id("prompt 0")
+
+    def test_a_frame_without_rows_gives_no_ids(self):
+        assert row_ids(pd.DataFrame({"prompt": []}), "prompt") == []
+
+    def test_the_index_of_the_frame_plays_no_part(self):
+        frame = self._frame().iloc[::-1]
+        assert row_ids(frame, "prompt")[0] == "abc"
+        assert row_ids(frame, "prompt")[-1] == "abc"
+        assert row_ids(frame, "prompt")[2] == "123"

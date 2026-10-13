@@ -81,37 +81,41 @@ def plan_run(
     """
     sample_kwargs = sample_kwargs or {}
     manifest_path = Path(manifest_path)
+    planned = 0
 
-    recs: list[dict] = []
-    for _, row in inputs.iterrows():
-        sid = row_id(row, text_col, id_col)
+    # Yielded to the manifest one at a time: the plan is never held whole.
+    def units():
+        nonlocal planned
+        for _, row in inputs.iterrows():
+            sid = row_id(row, text_col, id_col)
 
-        used: list[tuple] = []
-        for it in range(iterations):
-            settings = (
-                settings_per_iteration[it]
-                if settings_per_iteration is not None
-                else sample_kwargs
-            )
-            names = assign_combination(
-                sid, pool, seed=seed, iteration=it, used=used, **settings
-            )
-            used.append(tuple(names))
-            recs.append({
-                "sample_id": sid,
-                "iteration": it,
-                "combination": names,
-                "settings": {**settings, "seed": seed},
-                "category": str(row.get("category", "")),
-                "entry_type": str(row.get("entry_type", "")),
-                "status": "planned",
-            })
+            used: list[tuple] = []
+            for it in range(iterations):
+                settings = (
+                    settings_per_iteration[it]
+                    if settings_per_iteration is not None
+                    else sample_kwargs
+                )
+                names = assign_combination(
+                    sid, pool, seed=seed, iteration=it, used=used, **settings
+                )
+                used.append(tuple(names))
+                planned += 1
+                yield {
+                    "sample_id": sid,
+                    "iteration": it,
+                    "combination": names,
+                    "settings": {**settings, "seed": seed},
+                    "category": str(row.get("category", "")),
+                    "entry_type": str(row.get("entry_type", "")),
+                    "status": "planned",
+                }
 
-    Manifest(manifest_path).write(recs)
+    Manifest(manifest_path).write(units())
 
     if verbose:
         logger.info("Planned %d units (%d samples x %d) -> %s",
-                    len(recs), len(inputs), iterations, manifest_path)
+                    planned, len(inputs), iterations, manifest_path)
     return manifest_path
 
 

@@ -12,7 +12,7 @@ from .categories import (
     write_category_csv,
 )
 from .dedup import exact_dedup, normalized_dedup
-from .identity import content_id, row_id
+from .identity import content_id, row_id, row_ids
 from .loading import filter_dataset, load_from_config, load_hf_dataset
 from .merge import (
     CONSTITUTION_INPUT_COLUMN_MAP,
