@@ -67,7 +67,6 @@ from redact.dataset import (
     row_ids,
     take_per_group,
 )
-from redact.dataset.merge import merge_content_mod_csvs
 from redact.dataset.sidecar import _replace
 from redact.jailbreak import (
     build_combination,
@@ -1233,7 +1232,8 @@ def build_dataset(
     ``output_responses.csv``), or per-category ``{category}/samples.csv``
     folders (standalone generation). Pass ``inputs_path`` / ``responses_path``
     to pick the exact files; otherwise they are auto-detected, preferring an
-    explicit merged CSV, then the per-category scan.
+    explicit merged CSV, then the category files of the run
+    (:func:`redact.dataset.merge_inputs`).
 
     Args:
         data_dir: Working root. Inputs are discovered under
@@ -1247,7 +1247,7 @@ def build_dataset(
             ``Datasets/complete_dataset.csv``.
         inputs_path: Explicit merged-inputs CSV (e.g.
             ``Datasets/constitution_inputs_merged.csv``). If omitted, a merged
-            CSV is auto-detected, falling back to the per-category scan.
+            CSV is auto-detected, falling back to the run's category files.
         responses_path: Explicit output-responses CSV (e.g.
             ``Datasets/constitution_output_responses.csv``). If omitted, a
             responses CSV is auto-detected.
@@ -1282,7 +1282,7 @@ def build_dataset(
 
     # Content moderation inputs.
     # Prefer an explicit/auto-detected merged handoff CSV (constitution or
-    # content-moderation), then fall back to the per-category samples.csv scan.
+    # content-moderation), then fall back to the run's category files.
     if include_inputs:
         in_path = Path(inputs_path) if inputs_path else None
         if in_path is None:
@@ -1295,12 +1295,12 @@ def build_dataset(
             parts.append(_Part(in_path, "content_moderation_input",
                                label=f"Inputs from {in_path.name}"))
         else:
-            categories = discover_categories(ds_dir)
-            if categories:
-                # The one part read whole: the standalone inputs are few.
-                cm_df = merge_content_mod_csvs(ds_dir, accepted_only=True)
+            # The one part read whole. Without a row in any category file it
+            # has no column.
+            cm_df = merge_inputs(data_dir)
+            if len(cm_df.columns):
                 parts.append(_Part(cm_df, "content_moderation_input",
-                                   label=f"Inputs from {len(categories)} categories"))
+                                   label="Inputs from the category files"))
             elif verbose:
                 logger.info("Inputs: none found")
 

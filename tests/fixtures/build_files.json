@@ -33,11 +33,8 @@
   "standalone tree": {
    "complete_dataset.csv": [
     ["sample_id", "sample", "category", "turn", "accepted", "source", "dataset_type", "prompt", "subcategory", "entry_type", "template_style", "input_id", "jailbreak", "technique", "technique_info", "complexity", "num_techniques", "is_noop", "reasoning", "iteration", "combination_spec_version", "input_prompt", "model", "output_response", "rejection_reason"],
-    ["3270d8944d22e087", "first input, with a comma", "Cyber", "0.0", "True", "constitution", "content_moderation_input", "", "", "", "", "", "", "", "", "", "", "", "", "", "", "", "", "", ""],
-    ["691d630c6d2f1a7c", "third \"quoted\" input, é", "Fraud", "2.0", "True", "constitution", "content_moderation_input", "", "", "", "", "", "", "", "", "", "", "", "", "", "", "", "", "", ""],
-    ["e2f032d0f73c0fa4", "a first input, reworded", "Cyber", "", "True", "paraphrase_inputs", "content_moderation_input", "", "", "", "", "", "", "", "", "", "", "", "", "", "", "", "", "", ""],
-    ["dbacfcaa0391879b", "a third input", "Fraud", "", "True", "paraphrase_inputs", "content_moderation_input", "", "", "", "", "", "", "", "", "", "", "", "", "", "", "", "", "", ""],
-    ["c9ef1424256b622a", "another answer", "Fraud", "", "True", "paraphrase_outputs", "content_moderation_input", "", "", "", "", "", "", "", "", "", "", "", "", "", "", "", "", "", ""],
+    ["in-1", "first input, with a comma", "Cyber", "0.0", "True", "constitution", "content_moderation_input", "", "", "", "", "", "", "", "", "", "", "", "", "", "", "", "", "", ""],
+    ["in-3", "third \"quoted\" input, é", "Fraud", "2.0", "True", "constitution", "content_moderation_input", "", "", "", "", "", "", "", "", "", "", "", "", "", "", "", "", "", ""],
     ["jb-1", "", "Cyber", "0.0", "True", "constitution", "jailbreak", "first input, with a comma", "phishing", "harmful", "long", "in-1", "FIRST INPUT, WITH A COMMA", "to_upper", "to_upper", "1.0", "1.0", "False", "", "0.0", "1.0", "", "", "", ""],
     ["jb-2", "", "Cyber", "1.0", "True", "constitution", "jailbreak", "second input\nof two lines", "", "benign", "long", "in-2", "tupni dnoces", "to_reversed", "to_reversed", "3.0", "1.0", "False", "", "0.0", "1.0", "", "", "", ""],
     ["jb-3", "", "Fraud", "2.0", "False", "constitution", "jailbreak", "third \"quoted\" input, é", "cards", "harmful", "short", "in-3", "third \"quoted\" input, é", "to_broken", "ERROR: chain failed", "0.0", "1.0", "True", "chain failed", "0.0", "1.0", "", "", "", ""],
@@ -74,7 +71,7 @@
  },
  "runs": {
   "eval": {
-   "counts": {"build": {"accepted": 23, "rows": 24}, "inputs": {"accepted": 5, "rows": 5}, "jailbreaks": {"accepted": 5, "rows": 5}, "outputs": {"accepted": 4, "rows": 5}, "paraphrase": {"accepted": 9, "rows": 9}}
+   "counts": {"build": {"accepted": 14, "rows": 15}, "inputs": {"accepted": 5, "rows": 5}, "jailbreaks": {"accepted": 5, "rows": 5}, "outputs": {"accepted": 4, "rows": 5}, "paraphrase": {"accepted": 9, "rows": 9}}
   },
   "training": {
    "constitution_inputs_merged.csv": [

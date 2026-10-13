@@ -9,6 +9,10 @@ training and an eval run. A CSV is compared by its cells as text.
 One difference is meant: ``turn``, ``complexity``, ``num_techniques`` and
 ``iteration`` used to print as ``0.0`` where a part of the build lacks the
 column, and print as integers now.
+
+One case of the fixture is not that commit's: without a merged inputs file
+(the ``standalone tree`` build, and the build count of the eval run) the
+build takes its inputs from the category files alone, with the ids they hold.
 """
 
 import json
@@ -292,6 +296,50 @@ def test_a_paraphrase_that_a_spreadsheet_marked_true_is_kept(tmp_path):
     build_dataset(data_dir=tmp_path, verbose=False)
     ids = [row[0] for row in _complete(tmp_path)]
     assert "po-2" in ids and "po-1" not in ids
+
+
+# --- a build without a merged inputs file -------------------------------------
+
+def _input_rows(data_dir: Path) -> pd.DataFrame:
+    """The input rows of the complete dataset under ``data_dir``."""
+    built = pd.read_csv(paths.complete_dataset_csv(data_dir))
+    return built[built["dataset_type"] == "content_moderation_input"]
+
+
+def test_a_build_takes_its_inputs_from_the_category_files_alone(tmp_path):
+    """Not from the paraphrase files, nor from the dataset an earlier build left."""
+    from redact import build_dataset
+
+    _write_stage_files(tmp_path, inputs="tree")
+    assert paths.paraphrases_inputs_csv(tmp_path).exists()
+    for _ in range(2):      # the second build finds the first one's dataset
+        build_dataset(data_dir=tmp_path, mode="eval", verbose=False)
+        assert list(_input_rows(tmp_path)["sample_id"]) == ["in-1", "in-3"]
+
+
+def test_a_build_keeps_every_column_and_every_row_of_the_category_files(tmp_path):
+    """Also a text that two categories hold."""
+    from redact import build_dataset
+
+    for category, entry_type in (("Cyber", "harmful"), ("Fraud", "benign")):
+        append_samples(["the same text"], category=category, turn=0,
+                       extra_columns=[{"entry_type": entry_type}],
+                       dataset_dir=paths.datasets(tmp_path))
+    build_dataset(data_dir=tmp_path, verbose=False)
+    inputs = _input_rows(tmp_path)
+    assert list(inputs["category"]) == ["Cyber", "Fraud"]
+    assert list(inputs["entry_type"]) == ["harmful", "benign"]
+
+
+def test_a_build_takes_the_seeded_inputs_that_were_not_merged(tmp_path):
+    from redact import build_dataset
+
+    append_samples(["a seeded input"], category="Cyber", turn=0,
+                   dataset_dir=paths.constitution_inputs_dir(tmp_path))
+    append_samples(["a standalone input"], category="Fraud", turn=0,
+                   dataset_dir=paths.datasets(tmp_path))
+    build_dataset(data_dir=tmp_path, verbose=False)
+    assert list(_input_rows(tmp_path)["sample"]) == ["a seeded input"]
 
 
 # --- a run from the first stage to the build ----------------------------------
