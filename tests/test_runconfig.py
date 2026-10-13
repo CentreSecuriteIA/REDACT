@@ -376,6 +376,46 @@ def test_run_pipeline_eval_jailbreaks_and_build(tmp_path):
     assert summary["stages"]["build"]["counts"]["rows"] >= 3
 
 
+def test_a_training_run_reads_the_inputs_it_seeded(tmp_path, monkeypatch):
+    """The stages after ``inputs`` used to look only at the standalone tree,
+    and a training run stopped at the first of them with no inputs found."""
+    import redact.content_moderation.paraphrase as CP
+    from redact.llms import ModelClient
+    from tests.conftest import MockBackend, make_client
+
+    answers = MockBackend(["answer one", "answer two", "answer three"])
+    monkeypatch.setattr(ModelClient, "create", lambda m: make_client(answers, m))
+    monkeypatch.setattr(
+        CP, "paraphrase_batch",
+        lambda client, texts, **kw: [f"PARA::{t}" for t in texts])
+    monkeypatch.setattr(
+        CP, "batch_check_samples",
+        lambda client, texts, checker, **kw: [(True, "") for _ in texts])
+    monkeypatch.setattr("redact.llms.resources.estimate._load_config", lambda _id: None)
+    append_samples(
+        [f"prompt number {i} about a topic" for i in range(3)],
+        category="Cyber", turn=0, dataset_dir=paths.constitution_inputs_dir(tmp_path),
+    )
+    recipe = {
+        "dataset_type": "training",
+        "data_dir": str(tmp_path),
+        "stages": ["outputs", "paraphrase", "jailbreaks"],
+        "augmentations": {
+            "pure_only": True, "include_hacking": False, "include_manipulation": False,
+            "include_requests": False, "auto_generate_benign": False,
+        },
+    }
+    try:
+        summary = run_pipeline(
+            recipe, params={"outputs": {"check_outputs": False}}, verbose=False)
+    finally:
+        telemetry.uninstall()
+    rows = {stage: done["counts"]["rows"] for stage, done in summary["stages"].items()}
+    # Three inputs: a response each, a paraphrase of each input and response,
+    # a jailbreak each.
+    assert rows == {"outputs": 3, "paraphrase": 6, "jailbreaks": 3}
+
+
 def test_run_pipeline_all_stages_mocked(tmp_path, monkeypatch):
     """Cover every stage dispatch (incl. constitution/inputs/outputs/paraphrase) by
     mocking the generate_* functions."""

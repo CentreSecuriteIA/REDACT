@@ -7,6 +7,7 @@ from .categories import (
     get_existing_samples,
     merge_all,
     merge_category_csvs,
+    merge_inputs,
     read_category_csv,
     take_per_group,
     write_category_csv,

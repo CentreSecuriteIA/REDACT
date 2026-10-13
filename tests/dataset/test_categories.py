@@ -2,6 +2,7 @@
 
 import pandas as pd
 
+from redact import paths
 from redact.dataset.categories import (
     SAMPLE_COLUMNS,
     append_samples,
@@ -9,6 +10,7 @@ from redact.dataset.categories import (
     get_existing_samples,
     merge_all,
     merge_category_csvs,
+    merge_inputs,
     read_category_csv,
     take_per_group,
     write_category_csv,
@@ -165,6 +167,44 @@ class TestMergeAll:
         _write_test_csv(tmp_dataset_dir, "b", ["y"])
         result = merge_all(dataset_dir=tmp_dataset_dir)
         assert len(result) == 2
+
+
+class TestMergeInputs:
+    """A run's inputs: the seeded tree when it holds a category, else the
+    categories directly under ``Datasets/``."""
+
+    def test_the_seeded_inputs_are_read_when_their_tree_holds_one(self, tmp_path):
+        _write_test_csv(paths.constitution_inputs_dir(tmp_path), "Cyber", ["seeded"])
+        _write_test_csv(paths.datasets(tmp_path), "Fraud", ["standalone"])
+        assert list(merge_inputs(tmp_path)["sample"]) == ["seeded"]
+
+    def test_the_standalone_inputs_are_read_without_a_seeded_tree(self, tmp_path):
+        _write_test_csv(paths.datasets(tmp_path), "Cyber", ["a", "b"])
+        _write_test_csv(paths.datasets(tmp_path), "Fraud", ["c"])
+        result = merge_inputs(tmp_path)
+        pd.testing.assert_frame_equal(result, merge_all(paths.datasets(tmp_path)))
+        assert list(result["sample"]) == ["a", "b", "c"]
+
+    def test_a_seeded_folder_without_a_category_csv_is_no_seeded_tree(self, tmp_path):
+        seeded = paths.constitution_inputs_dir(tmp_path)
+        (seeded / "Cyber").mkdir(parents=True)
+        (seeded / "constitution_inputs.state.jsonl").write_text("{}")
+        _write_test_csv(paths.datasets(tmp_path), "Fraud", ["standalone"])
+        assert list(merge_inputs(tmp_path)["sample"]) == ["standalone"]
+
+    def test_only_accepted_rows_are_returned(self, tmp_path):
+        _write_test_csv(paths.constitution_inputs_dir(tmp_path), "Cyber",
+                        ["kept", "rejected"], [True, False])
+        assert list(merge_inputs(tmp_path)["sample"]) == ["kept"]
+
+    def test_a_seeded_tree_of_rejected_rows_is_still_the_run_s_inputs(self, tmp_path):
+        _write_test_csv(paths.constitution_inputs_dir(tmp_path), "Cyber",
+                        ["rejected"], [False])
+        _write_test_csv(paths.datasets(tmp_path), "Fraud", ["standalone"])
+        assert merge_inputs(tmp_path).empty
+
+    def test_no_tree_gives_an_empty_frame(self, tmp_path):
+        assert merge_inputs(tmp_path).empty
 
 
 class TestTakePerGroup:

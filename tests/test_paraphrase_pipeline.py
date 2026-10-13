@@ -76,6 +76,17 @@ def test_paraphrase_inputs_dedup_and_manifest(tmp_path, patched):
         assert row["sample_id"] != row["input_id"]
 
 
+@pytest.mark.parametrize("seeded", [True, False], ids=["seeded", "standalone"])
+def test_without_inputs_the_inputs_of_the_run_are_found(tmp_path, patched, seeded):
+    from tests.test_pipelines import _seed_input_tree
+
+    text = _seed_input_tree(tmp_path, seeded)
+    res = generate_paraphrases(data_dir=tmp_path, target="inputs", verbose=False)
+    df = res["inputs"]
+    assert list(df["sample"]) == [f"PARA::{text}"]
+    assert list(df["input_id"]) == [content_id(text)]
+
+
 def test_paraphrase_resume_is_idempotent(tmp_path, patched):
     _seed_inputs(tmp_path)
     generate_paraphrases(data_dir=tmp_path, target="inputs", verbose=False)

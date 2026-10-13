@@ -36,7 +36,7 @@ from ..dataset import (
     Manifest,
     append_rows,
     content_id,
-    merge_all,
+    merge_inputs,
     read_rows,
     release_lock,
     resume_state,
@@ -180,7 +180,7 @@ def run_paraphrase_target(
     """Paraphrase one target (``"inputs"`` or ``"outputs"``) → its artifact CSV."""
     # ---- Load source rows (base_id, text, category, entry_type) --------------
     if tgt == "inputs":
-        src = source if source is not None else merge_all(paths.datasets(data_dir), accepted_only=True)
+        src = source if source is not None else merge_inputs(data_dir)
         text_col = "sample" if "sample" in src.columns else "prompt"
         id_col = "sample_id"
         out_path = Path(out_path_override) if out_path_override else paths.paraphrases_inputs_csv(data_dir)

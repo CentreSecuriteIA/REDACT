@@ -173,6 +173,19 @@ def merge_all(
     return merge_category_csvs(categories, dataset_dir, accepted_only=accepted_only)
 
 
+def merge_inputs(data_dir: str | Path | None = None) -> pd.DataFrame:
+    """The accepted input samples of the run under ``data_dir``, in one frame.
+
+    A training run seeds its inputs from a constitution and keeps them in
+    ``Datasets/constitution_inputs/``. They are the run's inputs when that
+    tree holds a category CSV; otherwise the categories directly under
+    ``Datasets/`` are.
+    """
+    seeded = paths.constitution_inputs_dir(data_dir)
+    tree = seeded if discover_categories(seeded) else paths.datasets(data_dir)
+    return merge_all(tree, accepted_only=True)
+
+
 def take_per_group(
     df: pd.DataFrame,
     n: int | None,

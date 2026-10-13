@@ -160,6 +160,46 @@ class TestGenerateOutputsManifest:
         assert list(df["input_prompt"]) == list(inputs["sample"])
 
 
+def _seed_input_tree(data_dir, seeded: bool):
+    """One accepted input row: in the seeded tree of a training run, or in
+    the standalone tree. Returns the row's text."""
+    from redact import paths
+    from redact.dataset import append_samples
+
+    tree = paths.constitution_inputs_dir if seeded else paths.datasets
+    append_samples(
+        ["zq0 the one input"], category="Cyber", turn=0, source="constitution",
+        extra_columns=[{"subcategory": "phishing", "entry_type": "benign"}],
+        dataset_dir=tree(data_dir),
+    )
+    return "zq0 the one input"
+
+
+class TestGenerateOutputsFindsItsInputs:
+    """Called without ``inputs=``, the stage reads the inputs of its run."""
+
+    @pytest.mark.parametrize("seeded", [True, False], ids=["seeded", "standalone"])
+    def test_the_inputs_of_the_run_are_found(self, tmp_path, monkeypatch, seeded):
+        import redact.pipelines as P
+        from redact import generate_outputs
+        from redact.dataset import content_id
+        from tests.conftest import MockBackend, make_client
+
+        monkeypatch.setattr(
+            P.ModelClient, "create", lambda m: make_client(MockBackend("ans"), m))
+        text = _seed_input_tree(tmp_path, seeded)
+        df = generate_outputs(data_dir=tmp_path, check_outputs=False, verbose=False)
+        assert list(df["input_prompt"]) == [text]
+        assert list(df["input_id"]) == [content_id(text)]
+        assert list(df["entry_type"]) == ["benign"]
+
+    def test_no_inputs_in_either_tree_raises(self, tmp_path):
+        from redact import generate_outputs
+
+        with pytest.raises(ValueError, match="No input samples found"):
+            generate_outputs(data_dir=tmp_path, check_outputs=False, verbose=False)
+
+
 class TestGenerateOutputsResume:
     def test_rows_already_in_the_csv_are_not_regenerated(self, tmp_path, monkeypatch):
         """A crash between the CSV append and the ledger ack leaves a row with no

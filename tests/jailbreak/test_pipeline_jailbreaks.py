@@ -277,6 +277,24 @@ def test_settings_per_iteration_empty_raises(tmp_path):
                             settings_per_iteration=[], **PURE_KW)
 
 
+# --- the inputs of the run ------------------------------------------------------
+
+
+@pytest.mark.parametrize("seeded", [True, False], ids=["seeded", "standalone"])
+def test_without_inputs_the_inputs_of_the_run_are_found(tmp_path, seeded):
+    from tests.test_pipelines import _seed_input_tree
+
+    text = _seed_input_tree(tmp_path, seeded)
+    df = generate_jailbreaks(data_dir=tmp_path, seed=7, **PURE_KW)
+    assert list(df["prompt"]) == [text]
+    assert list(df["input_id"]) == [content_id(text)]
+
+
+def test_without_inputs_in_either_tree_the_run_raises(tmp_path):
+    with pytest.raises(ValueError, match="No input samples found"):
+        generate_jailbreaks(data_dir=tmp_path, seed=7, **PURE_KW)
+
+
 # --- the plan as a stream ------------------------------------------------------
 
 

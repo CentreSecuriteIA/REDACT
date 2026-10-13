@@ -58,6 +58,7 @@ from redact.dataset import (
     load_seeds,
     load_taxonomy,
     merge_all,
+    merge_inputs,
     read_rows,
     resume_state,
     row_ids,
@@ -539,8 +540,8 @@ def generate_outputs(
     the ledger first.
 
     Args:
-        inputs: Input samples DataFrame. If None, loads accepted samples
-            from ``{data_dir}/Datasets/`` via :func:`merge_all`.
+        inputs: Input samples DataFrame. If None, the accepted inputs of the
+            run under ``data_dir`` (:func:`redact.dataset.merge_inputs`).
         model: Generation model. ``None`` (default) resolves to the
             ``uncensored_gen`` role. Backend is auto-selected from the name.
         check_outputs: Run the entry-type-aware output quality checker.
@@ -555,10 +556,10 @@ def generate_outputs(
             ``max_samples`` this keeps every category and severity level
             represented instead of skewing to the first categories in the
             (category-ordered) merged frame. None = no per-group cap.
-        data_dir: Working root. Inputs are read from ``{data_dir}/Datasets/``
-            (when ``inputs`` is None) and the responses CSV defaults to
-            ``{data_dir}/Datasets/output_responses.csv``. Defaults to the project
-            root (``get_output_dir()``).
+        data_dir: Working root. Inputs are read from under
+            ``{data_dir}/Datasets/`` (when ``inputs`` is None) and the responses
+            CSV defaults to ``{data_dir}/Datasets/output_responses.csv``.
+            Defaults to the project root (``get_output_dir()``).
         output_path: Explicit override for the output CSV path. Takes precedence
             over ``data_dir``.
         prompt_dir: Root prompt directory for the generation **and** output-check
@@ -580,10 +581,8 @@ def generate_outputs(
         row's own content-hash identity (``content_id(output_response)``),
         distinct from ``input_id`` (the origin sample it responds to).
     """
-    ds_dir = paths.datasets(data_dir)
-
     if inputs is None:
-        inputs = merge_all(ds_dir, accepted_only=True)
+        inputs = merge_inputs(data_dir)
         if inputs.empty:
             raise ValueError("No input samples found. Run generate_inputs() first.")
 
@@ -660,9 +659,9 @@ def generate_jailbreaks(
        ``(input_id, iteration)`` pairs are the source of truth).
 
     Args:
-        inputs: Input prompts DataFrame. If None, loads accepted samples from
-            ``Datasets/`` via :func:`merge_all`.
-        data_dir: Working root. Inputs are read from ``{data_dir}/Datasets/``
+        inputs: Input prompts DataFrame. If None, the accepted inputs of the
+            run under ``data_dir`` (:func:`redact.dataset.merge_inputs`).
+        data_dir: Working root. Inputs are read from under ``{data_dir}/Datasets/``
             (when ``inputs`` is None), the jailbreaks CSV defaults to
             ``{data_dir}/Datasets/jailbreaks.csv``, and the benign cache to
             ``{data_dir}/Data_cache/benign/``. Defaults to the project root
@@ -725,7 +724,7 @@ def generate_jailbreaks(
     # Load + normalize inputs (ensure a prompt column and a content-hash id)
     # ------------------------------------------------------------------
     if inputs is None:
-        inputs = merge_all(paths.datasets(data_dir), accepted_only=True)
+        inputs = merge_inputs(data_dir)
         if inputs.empty:
             raise ValueError("No input samples found. Run generate_inputs() first.")
 
@@ -1013,8 +1012,9 @@ def generate_paraphrases(
     silently retried), mirroring the constitution / output-response ledgers.
 
     Args:
-        inputs: Base inputs DataFrame; if None loads accepted base inputs from
-            ``data_dir``. (target ``"inputs"``/``"both"``.)
+        inputs: Base inputs DataFrame; if None the accepted inputs of the run
+            under ``data_dir`` (:func:`redact.dataset.merge_inputs`). (target
+            ``"inputs"``/``"both"``.)
         outputs: Base outputs DataFrame; if None loads ``output_responses.csv`` and
             keeps accepted rows. (target ``"outputs"``/``"both"``.)
         data_dir: Working root.
