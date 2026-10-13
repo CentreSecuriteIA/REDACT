@@ -295,6 +295,23 @@ def test_without_inputs_in_either_tree_the_run_raises(tmp_path):
         generate_jailbreaks(data_dir=tmp_path, seed=7, **PURE_KW)
 
 
+@pytest.mark.parametrize("verbose", [False, True])
+def test_without_read_back_the_output_is_written_and_not_read(
+        tmp_path, monkeypatch, verbose):
+    import redact.pipelines as P
+
+    def read_rows(path):
+        raise AssertionError("the output was read back")
+
+    monkeypatch.setattr(P, "read_rows", read_rows)
+    out = tmp_path / "jb.csv"
+    returned = generate_jailbreaks(
+        inputs=_inputs(), output_path=out, seed=7, read_back=False,
+        **{**PURE_KW, "verbose": verbose})
+    assert returned.empty and len(returned.columns) == 0
+    assert len(pd.read_csv(out)) == len(_inputs())
+
+
 # --- the plan as a stream ------------------------------------------------------
 
 

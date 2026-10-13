@@ -54,6 +54,139 @@ def test_counts_none_is_empty():
     assert _counts(None) == {}
 
 
+class TestFileCounts:
+    """The counts of a stage's files are those of its rows read into one frame."""
+
+    def _write(self, path, accepted, **columns):
+        frame = pd.DataFrame({"sample": [f"s{n}" for n in range(len(accepted))],
+                              "accepted": accepted, **columns})
+        frame.to_csv(path, index=False)
+        return frame
+
+    def test_rows_and_accepted_rows_of_several_files(self, tmp_path):
+        from redact.runconfig import _counts, _file_counts
+
+        files = [tmp_path / "a.csv", tmp_path / "b.csv"]
+        frames = [self._write(files[0], [True, False, True]),
+                  self._write(files[1], [False, True])]
+        assert _file_counts(files) == {"rows": 5, "accepted": 3}
+        assert _file_counts(files) == _counts(pd.concat(frames))
+
+    def test_a_file_is_read_in_chunks(self, tmp_path, monkeypatch):
+        import redact.dataset.rows as rows
+        from redact.runconfig import _file_counts
+
+        monkeypatch.setattr(rows, "_CHUNK_ROWS", 2)
+        self._write(tmp_path / "a.csv", [True, False, True, True, False])
+        assert _file_counts([tmp_path / "a.csv"]) == {"rows": 5, "accepted": 3}
+
+    def test_a_cell_without_a_verdict_is_a_row_that_is_not_accepted(self, tmp_path):
+        from redact.runconfig import _counts, _file_counts
+
+        frame = self._write(tmp_path / "a.csv", [True, None, False, True])
+        assert _file_counts([tmp_path / "a.csv"]) == {"rows": 4, "accepted": 2}
+        assert _file_counts([tmp_path / "a.csv"]) == _counts(frame)
+
+    def test_files_without_an_accepted_column_give_rows_only(self, tmp_path):
+        from redact.runconfig import _file_counts
+
+        pd.DataFrame({"x": [1, 2, 3]}).to_csv(tmp_path / "a.csv", index=False)
+        assert _file_counts([tmp_path / "a.csv"]) == {"rows": 3}
+
+    def test_a_missing_file_has_no_rows(self, tmp_path):
+        from redact.runconfig import _file_counts
+
+        assert _file_counts([tmp_path / "none.csv"]) == {"rows": 0}
+        assert _file_counts([]) == {"rows": 0}
+
+    def test_keep_limits_the_count_to_rows_with_those_values(self, tmp_path):
+        from redact.runconfig import _file_counts
+
+        self._write(tmp_path / "a.csv", [True, True, False, True],
+                    template_style=["long", "short", "long", "long"])
+        keep = {"accepted": True, "template_style": "long"}
+        assert _file_counts([tmp_path / "a.csv"], keep) == {"rows": 2, "accepted": 2}
+
+    def test_keep_does_not_limit_a_file_without_the_column(self, tmp_path):
+        from redact.runconfig import _file_counts
+
+        self._write(tmp_path / "a.csv", [True, False, True])
+        keep = {"accepted": True, "template_style": "long"}
+        assert _file_counts([tmp_path / "a.csv"], keep) == {"rows": 2, "accepted": 2}
+
+    def test_rows_that_are_all_dropped_still_report_the_accepted_count(self, tmp_path):
+        from redact.runconfig import _file_counts
+
+        self._write(tmp_path / "a.csv", [False, False])
+        assert _file_counts([tmp_path / "a.csv"], {"accepted": True}) == {
+            "rows": 0, "accepted": 0}
+
+
+def test_run_pipeline_asks_no_stage_to_read_its_rows_back(tmp_path, monkeypatch):
+    """Only the constitution's rows are used: the inputs stage is seeded from them."""
+    import redact
+
+    asked = {}
+
+    def stage(name, result):
+        def run(**kwargs):
+            asked[name] = kwargs.get("read_back")
+            return result
+        monkeypatch.setattr(redact, name, run)
+
+    stage("generate_constitution", pd.DataFrame({"entry_type": ["harmful"]}))
+    for name in ("generate_inputs", "generate_outputs", "generate_jailbreaks",
+                 "build_dataset"):
+        stage(name, pd.DataFrame())
+    stage("generate_paraphrases", {})
+    try:
+        summary = run_pipeline(
+            {"dataset_type": "training", "data_dir": str(tmp_path),
+             "stages": ["constitution", "inputs", "outputs", "paraphrase", "jailbreaks",
+                        "build"],
+             "augmentations": {"include_translation": False}},
+            params={}, verbose=False)
+    finally:
+        telemetry.uninstall()
+    assert asked == {
+        "generate_constitution": None, "generate_inputs": False,
+        "generate_outputs": False, "generate_paraphrases": False,
+        "generate_jailbreaks": False, "build_dataset": False}
+    assert summary["stages"]["constitution"]["counts"] == {"rows": 1}
+
+
+def test_run_pipeline_counts_the_files_a_recipe_names(tmp_path, monkeypatch):
+    """A stage whose output path the params override is counted there."""
+    import redact
+
+    def writes(key, rows):
+        def run(**kwargs):
+            pd.DataFrame({"accepted": [True] * rows}).to_csv(kwargs[key], index=False)
+            return pd.DataFrame()
+        return run
+
+    monkeypatch.setattr(redact, "generate_outputs", writes("output_path", 2))
+    monkeypatch.setattr(redact, "generate_jailbreaks", writes("output_path", 3))
+    monkeypatch.setattr(redact, "build_dataset", writes("output_path", 4))
+    monkeypatch.setattr(redact, "generate_paraphrases", writes("outputs_path", 5))
+    params = {
+        "outputs": {"output_path": str(tmp_path / "o.csv")},
+        "jailbreaks": {"output_path": str(tmp_path / "j.csv")},
+        "build": {"output_path": str(tmp_path / "b.csv")},
+        "paraphrase": {"outputs_path": str(tmp_path / "p.csv"), "target": "outputs"},
+    }
+    try:
+        summary = run_pipeline(
+            {"dataset_type": "eval", "data_dir": str(tmp_path),
+             "stages": ["outputs", "paraphrase", "jailbreaks", "build"],
+             "augmentations": {"include_translation": False}},
+            params=params, verbose=False)
+    finally:
+        telemetry.uninstall()
+    rows = {stage: done["counts"]["rows"] for stage, done in summary["stages"].items()}
+    assert rows == {"outputs": 2, "paraphrase": 5, "jailbreaks": 3, "build": 4}
+
+
 def test_run_pipeline_loads_params_file(tmp_path, monkeypatch):
     import redact
     monkeypatch.setattr(redact, "build_dataset", lambda **k: pd.DataFrame({"x": [1]}))
@@ -433,7 +566,15 @@ def test_run_pipeline_all_stages_mocked(tmp_path, monkeypatch):
     monkeypatch.setattr(redact, "generate_constitution", mk("constitution", const_df))
     monkeypatch.setattr(redact, "generate_inputs", mk("inputs", pd.DataFrame({"sample": ["s"], "accepted": [True]})))
     monkeypatch.setattr(redact, "generate_outputs", mk("outputs", pd.DataFrame({"output_response": ["o"], "accepted": [True]})))
-    monkeypatch.setattr(redact, "generate_paraphrases", mk("paraphrase", {"inputs": pd.DataFrame({"sample": ["p"]}), "outputs": pd.DataFrame()}))
+    def paraphrase(*a, **k):
+        # As the stage does: its rows go to the target's file, which is counted.
+        calls.append("paraphrase")
+        out = paths.paraphrases_inputs_csv(tmp_path)
+        out.parent.mkdir(parents=True, exist_ok=True)
+        pd.DataFrame({"sample": ["p"]}).to_csv(out, index=False)
+        return {"inputs": pd.DataFrame(), "outputs": pd.DataFrame()}
+
+    monkeypatch.setattr(redact, "generate_paraphrases", paraphrase)
     monkeypatch.setattr(redact, "generate_jailbreaks", mk("jailbreaks", pd.DataFrame({"jailbreak": ["j"], "accepted": [True]})))
     monkeypatch.setattr(redact, "build_dataset", mk("build", pd.DataFrame({"x": [1, 2]})))
 
@@ -447,7 +588,8 @@ def test_run_pipeline_all_stages_mocked(tmp_path, monkeypatch):
     )
     assert calls == ["constitution", "inputs", "outputs", "paraphrase", "jailbreaks", "build"]
     assert set(summary["stages"]) == {"constitution", "inputs", "outputs", "paraphrase", "jailbreaks", "build"}
-    assert summary["stages"]["paraphrase"]["counts"]["rows"] == 1  # concat of the non-empty frame
+    # The rows of the target's file.
+    assert summary["stages"]["paraphrase"]["counts"]["rows"] == 1
 
 
 def test_training_inputs_without_constitution_stage_raises(tmp_path):

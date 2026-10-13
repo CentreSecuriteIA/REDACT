@@ -33,8 +33,11 @@ skips constitution generation, so it's the cheaper "quick eval" option)::
 import json
 import logging
 import warnings
+from collections import Counter
+from collections.abc import Iterator, Sequence
 from contextlib import closing
 from pathlib import Path
+from typing import NamedTuple
 
 import pandas as pd
 
@@ -65,6 +68,7 @@ from redact.dataset import (
     take_per_group,
 )
 from redact.dataset.merge import merge_content_mod_csvs
+from redact.dataset.sidecar import _replace
 from redact.jailbreak import (
     build_combination,
     build_function_registry,
@@ -127,6 +131,112 @@ def _ensure_benign_data(
         cache_path=benign_path or _default_benign_path(),
         verbose=verbose,
     )
+
+
+# Rows per read of a CSV that is copied into another.
+_COPY_CHUNK_ROWS = 50_000
+
+# The cells pandas reads as true when it reads a column of verdicts whole.
+_TRUE_CELLS = ("True", "TRUE", "true")
+
+
+class _Part(NamedTuple):
+    """Rows to copy into a merged CSV.
+
+    Attributes:
+        source: A CSV file, or a frame already in memory.
+        dataset_type: The value of the rows' ``dataset_type`` column. ``None``
+            adds no such column.
+        accepted_only: Copy only the rows of a file whose ``accepted`` cell
+            reads true. A file without the column is copied whole.
+        label: What the log calls the part.
+    """
+
+    source: Path | pd.DataFrame
+    dataset_type: str | None = None
+    accepted_only: bool = False
+    label: str = ""
+
+
+def _has_rows(path: Path) -> bool:
+    """Whether the CSV at ``path`` holds a row below its header."""
+    return not pd.read_csv(path, nrows=1, dtype=str).empty
+
+
+def _part_columns(part: _Part) -> list[str]:
+    """The columns a part's rows are written with."""
+    if isinstance(part.source, pd.DataFrame):
+        columns = list(part.source.columns)
+    else:
+        columns = list(pd.read_csv(part.source, nrows=0).columns)
+    if part.dataset_type is not None and "dataset_type" not in columns:
+        columns.append("dataset_type")
+    return columns
+
+
+def _part_chunks(part: _Part) -> Iterator[pd.DataFrame]:
+    """Yield a part's rows, a file's ``_COPY_CHUNK_ROWS`` at a time.
+
+    The cells of a file are read as text, so a whole number is written as
+    it stands, also where the rows of another part leave its column empty.
+    A cell pandas reads as a missing value (``nan``, ``N/A``, ...) is
+    written empty, as it is when the file is read whole.
+    """
+    tag = {} if part.dataset_type is None else {"dataset_type": part.dataset_type}
+    if isinstance(part.source, pd.DataFrame):
+        frame = part.source
+        # A column of whole numbers that a merge left gaps in is float. As
+        # integers it prints 1 and not 1.0, as the cells of a file do.
+        whole = [name for name in frame.columns
+                 if pd.api.types.is_float_dtype(frame[name])
+                 and (frame[name].dropna() % 1 == 0).all()]
+        yield frame.astype(dict.fromkeys(whole, "Int64")).assign(**tag)
+        return
+    with pd.read_csv(part.source, dtype=str, chunksize=_COPY_CHUNK_ROWS) as chunks:
+        for chunk in chunks:
+            if part.accepted_only and "accepted" in chunk.columns:
+                chunk = chunk[chunk["accepted"].isin(_TRUE_CELLS)]
+            yield chunk.assign(**tag)
+
+
+def _write_parts(
+    target: Path, parts: Sequence[_Part], *, keep_empty: bool = True,
+) -> list[int]:
+    """Write the rows of ``parts``, one part after another, as the CSV at ``target``.
+
+    The columns are those of every part in the order they first appear, and
+    a row is empty in the columns its part lacks: the file ``pd.concat`` of
+    the parts would give, without the parts in memory. The rows go to a
+    temporary file beside ``target`` that then replaces it, so ``target``
+    holds its old rows or all the new ones.
+
+    Args:
+        keep_empty: False leaves ``target`` as it is when no part has a row.
+
+    Returns:
+        The number of rows written of each part.
+    """
+    columns = list(dict.fromkeys(c for part in parts for c in _part_columns(part)))
+    target.parent.mkdir(parents=True, exist_ok=True)
+    temporary = target.with_name(target.name + ".tmp")
+    written = []
+    try:
+        # newline="": to_csv ends each row itself, as it does writing to a path.
+        with temporary.open("w", encoding="utf-8", newline="") as fh:
+            pd.DataFrame(columns=columns).to_csv(fh, index=False)
+            for part in parts:
+                rows = 0
+                for chunk in _part_chunks(part):
+                    chunk = chunk.reindex(columns=columns, fill_value="")
+                    chunk.to_csv(fh, header=False, index=False)
+                    rows += len(chunk)
+                written.append(rows)
+        if keep_empty or any(written):
+            _replace(temporary, target)
+    finally:
+        # Still there only when it did not replace the target.
+        temporary.unlink(missing_ok=True)
+    return written
 
 
 
@@ -312,6 +422,7 @@ def generate_inputs(
     batch_size: int = 32,
     max_attempts: int = 3,
     check_max_tokens: int | None = None,
+    read_back: bool = True,
 ) -> pd.DataFrame:
     """Generate content moderation input samples (standalone or constitution-seeded).
 
@@ -367,6 +478,7 @@ def generate_inputs(
             number of samples is given up on (constitution mode).
         check_max_tokens: Reply limit for the check calls (constitution
             mode). ``None`` keeps the checker model's default.
+        read_back: False returns an empty DataFrame and reads no sample back.
 
     Returns:
         Merged DataFrame of accepted samples.
@@ -420,7 +532,6 @@ def generate_inputs(
             check_max_tokens=check_max_tokens,
         )
 
-        result = merge_all(ds_dir, accepted_only=True)
         # Write the root-level handoff CSV build_dataset() actually looks for
         # (paths.datasets(data_dir) / "constitution_inputs_merged.csv") —
         # without this, build_dataset() silently drops every constitution-
@@ -429,10 +540,18 @@ def generate_inputs(
         # Datasets/constitution_inputs/{category}/samples.csv layout.
         # Unfiltered by style so build_dataset() sees every style generated
         # under this data_dir, not just whichever style this call used.
-        if not result.empty:
-            root_dir = paths.datasets(data_dir)
-            root_dir.mkdir(parents=True, exist_ok=True)
-            result.to_csv(root_dir / "constitution_inputs_merged.csv", index=False)
+        # Copied from the category files in chunks; left as it is when no
+        # sample is accepted.
+        files = (paths.category_csv(c, base=ds_dir)
+                 for c in discover_categories(ds_dir))
+        _write_parts(
+            paths.datasets(data_dir) / "constitution_inputs_merged.csv",
+            [_Part(f, accepted_only=True) for f in files if _has_rows(f)],
+            keep_empty=False,
+        )
+        if not read_back:
+            return pd.DataFrame()
+        result = merge_all(ds_dir, accepted_only=True)
         if style and not result.empty and "template_style" in result.columns:
             result = result[result["template_style"] == style].reset_index(drop=True)
         return result
@@ -503,7 +622,7 @@ def generate_inputs(
         verbose=verbose,
     )
 
-    return merge_all(ds_dir, accepted_only=True)
+    return merge_all(ds_dir, accepted_only=True) if read_back else pd.DataFrame()
 
 
 def generate_outputs(
@@ -521,6 +640,7 @@ def generate_outputs(
     verbose: bool = True,
     max_attempts: int = 1,
     check_max_tokens: int | None = None,
+    read_back: bool = True,
 ) -> pd.DataFrame:
     """Generate model responses for input samples, batched and quality-checked.
 
@@ -571,6 +691,8 @@ def generate_outputs(
             response with the checker's verdict as feedback.
         check_max_tokens: Reply limit for the check calls; a verdict needs
             few tokens. ``None`` keeps the checker model's default.
+        read_back: False returns an empty DataFrame and does not read the
+            output CSV.
 
     Returns:
         DataFrame of all rows in the output CSV (the full dataset, including
@@ -610,7 +732,7 @@ def generate_outputs(
         check_outputs=check_outputs, check=check_client,
         batch_size=batch_size, out_path=out_path, prompt_dir=prompt_dir,
         resume=resume, verbose=verbose, max_attempts=max_attempts,
-        check_max_tokens=check_max_tokens,
+        check_max_tokens=check_max_tokens, read_back=read_back,
     )
 
 
@@ -639,6 +761,7 @@ def generate_jailbreaks(
     resume: bool = True,
     manifest_path: str | Path | None = None,
     verbose: bool = True,
+    read_back: bool = True,
 ) -> pd.DataFrame:
     """Augment input prompts with jailbreak technique combinations (batched).
 
@@ -707,6 +830,8 @@ def generate_jailbreaks(
         resume: Reuse an existing manifest and skip already-written output rows.
         manifest_path: Override manifest location.
         verbose: Log progress.
+        read_back: False returns an empty DataFrame and does not read the
+            output CSV.
 
     Returns:
         DataFrame of all jailbreak rows from the output CSV (one per planned
@@ -953,12 +1078,13 @@ def generate_jailbreaks(
             progress="jailbreak" if verbose else None,
         )
 
-    jailbreaks = read_rows(out)
+    jailbreaks = read_rows(out) if read_back else pd.DataFrame()
 
     if verbose:
         logger.info("Jailbreak Summary")
         logger.info("Planned units: %d | Newly written: %d", planned, written)
-        logger.info("Total rows in %s: %d", out.name, len(jailbreaks))
+        if read_back:
+            logger.info("Total rows in %s: %d", out.name, len(jailbreaks))
         if not jailbreaks.empty and "accepted" in jailbreaks.columns:
             n_accepted = int(jailbreaks["accepted"].sum())
             n_noop = int(jailbreaks["is_noop"].sum()) if "is_noop" in jailbreaks.columns else 0
@@ -996,6 +1122,7 @@ def generate_paraphrases(
     inputs_path: str | Path | None = None,
     outputs_path: str | Path | None = None,
     verbose: bool = True,
+    read_back: bool = True,
 ) -> dict[str, pd.DataFrame]:
     """Paraphrase base inputs and/or accepted base outputs into additive artifacts.
 
@@ -1032,6 +1159,8 @@ def generate_paraphrases(
             prompts. ``None`` (default) falls back to the bundled ``prompts/``.
         inputs_path / outputs_path: Artifact path overrides.
         verbose: Log progress.
+        read_back: False returns empty DataFrames and does not read the
+            artifacts back.
 
     Returns:
         ``{"inputs": df, "outputs": df}`` for whichever targets ran.
@@ -1069,6 +1198,7 @@ def generate_paraphrases(
         results[tgt] = run_paraphrase_target(
             tgt, source, data_dir, pool, check, check_model, paraphrases_per_sample,
             resume, batch_size, seed, prompt_dir, override, verbose,
+            read_back=read_back,
         )
     return results
 
@@ -1087,11 +1217,14 @@ def build_dataset(
     include_outputs: bool = True,
     include_paraphrases: bool = True,
     verbose: bool = True,
+    read_back: bool = True,
 ) -> pd.DataFrame:
     """Merge all generated data into a single dataset.
 
     Combines content moderation inputs, jailbreak variants, and output
-    responses from their saved CSVs on disk.
+    responses from their saved CSVs on disk. Each CSV is copied in chunks
+    into a temporary file that then replaces the merged one; a column that
+    only some of them have is empty in the rows of the others.
 
     Inputs and output responses each have two on-disk shapes depending on the
     upstream pipeline: a single merged handoff CSV (the constitution and
@@ -1129,9 +1262,11 @@ def build_dataset(
         include_outputs: Include output response samples.
         include_paraphrases: Include paraphrase artifacts (per ``mode``).
         verbose: Log progress.
+        read_back: False returns an empty DataFrame and does not read the
+            merged CSV.
 
     Returns:
-        Complete merged DataFrame (the base+jailbreak+output set, plus paraphrases
+        The rows of the merged CSV (the base+jailbreak+output set, plus paraphrases
         when ``mode="training"``).
     """
     if mode not in ("training", "eval"):
@@ -1140,7 +1275,7 @@ def build_dataset(
     jb_path = Path(jailbreak_path) if jailbreak_path else paths.jailbreaks_csv(data_dir)
     out_path = Path(output_path) if output_path else (ds_dir / paths.COMPLETE_DATASET_FILENAME)
 
-    parts = []
+    parts: list[_Part] = []     # in the order their rows are written
 
     if verbose:
         logger.info("Build Complete Dataset")
@@ -1157,30 +1292,22 @@ def build_dataset(
                     break
 
         if in_path is not None and in_path.exists():
-            cm_df = pd.read_csv(in_path)
-            cm_df["dataset_type"] = "content_moderation_input"
-            parts.append(cm_df)
-            if verbose:
-                logger.info("Inputs: %d samples from %s", len(cm_df), in_path.name)
+            parts.append(_Part(in_path, "content_moderation_input",
+                               label=f"Inputs from {in_path.name}"))
         else:
             categories = discover_categories(ds_dir)
             if categories:
+                # The one part read whole: the standalone inputs are few.
                 cm_df = merge_content_mod_csvs(ds_dir, accepted_only=True)
-                cm_df["dataset_type"] = "content_moderation_input"
-                parts.append(cm_df)
-                if verbose:
-                    logger.info("Inputs: %d samples from %d categories", len(cm_df), len(categories))
+                parts.append(_Part(cm_df, "content_moderation_input",
+                                   label=f"Inputs from {len(categories)} categories"))
             elif verbose:
                 logger.info("Inputs: none found")
 
-    # Jailbreaks
+    # Jailbreaks. A file without a row adds no column to the merged CSV.
     if include_jailbreaks and jb_path.exists():
-        jb_df = pd.read_csv(jb_path)
-        if not jb_df.empty:
-            jb_df["dataset_type"] = "jailbreak"
-            parts.append(jb_df)
-            if verbose:
-                logger.info("Jailbreaks: %d samples", len(jb_df))
+        if _has_rows(jb_path):
+            parts.append(_Part(jb_path, "jailbreak", label="Jailbreaks"))
         elif verbose:
             logger.info("Jailbreaks: none found")
     elif verbose and include_jailbreaks:
@@ -1196,11 +1323,8 @@ def build_dataset(
                     break
 
         if resp_path is not None and resp_path.exists():
-            out_df = pd.read_csv(resp_path)
-            out_df["dataset_type"] = "content_moderation_output"
-            parts.append(out_df)
-            if verbose:
-                logger.info("Outputs: %d samples from %s", len(out_df), resp_path.name)
+            parts.append(_Part(resp_path, "content_moderation_output",
+                               label=f"Outputs from {resp_path.name}"))
         elif verbose:
             logger.info("Outputs: none found")
 
@@ -1210,28 +1334,19 @@ def build_dataset(
     if include_paraphrases:
         pi_path = Path(paraphrase_inputs_path) if paraphrase_inputs_path else paths.paraphrases_inputs_csv(data_dir)
         po_path = Path(paraphrase_outputs_path) if paraphrase_outputs_path else paths.paraphrases_outputs_csv(data_dir)
-        para_parts = []
-        for p in (pi_path, po_path):
-            if p.exists():
-                pdf = pd.read_csv(p)
-                if not pdf.empty:
-                    if "accepted" in pdf.columns:
-                        pdf = pdf[pdf["accepted"] == True]  # noqa: E712
-                    pdf["dataset_type"] = "content_moderation_paraphrase"
-                    para_parts.append(pdf)
-        if para_parts:
-            para_df = pd.concat(para_parts, ignore_index=True)
-            if mode == "eval":
-                para_out = ds_dir / paths.PARAPHRASED_FILENAME
-                para_out.parent.mkdir(parents=True, exist_ok=True)
-                para_df.to_csv(para_out, index=False)
-                if verbose:
-                    logger.info("Paraphrases: %d -> separate %s (eval mode)",
-                                len(para_df), para_out.name)
-            else:  # training — merge in
-                parts.append(para_df)
-                if verbose:
-                    logger.info("Paraphrases: %d merged (training mode)", len(para_df))
+        para_parts = [
+            _Part(p, "content_moderation_paraphrase", accepted_only=True,
+                  label=f"Paraphrases from {p.name}")
+            for p in (pi_path, po_path) if p.exists() and _has_rows(p)
+        ]
+        if para_parts and mode == "eval":
+            para_out = ds_dir / paths.PARAPHRASED_FILENAME
+            separate = sum(_write_parts(para_out, para_parts))
+            if verbose:
+                logger.info("Paraphrases: %d -> separate %s (eval mode)",
+                            separate, para_out.name)
+        elif para_parts:  # training — merge in
+            parts += para_parts
         elif verbose:
             logger.info("Paraphrases: none found")
 
@@ -1240,16 +1355,20 @@ def build_dataset(
             logger.info("No data found. Run generate_inputs/jailbreaks/outputs first.")
         return pd.DataFrame()
 
-    merged = pd.concat(parts, ignore_index=True)
-
-    out_path.parent.mkdir(parents=True, exist_ok=True)
-    merged.to_csv(out_path, index=False)
+    written = _write_parts(out_path, parts)
 
     if verbose:
-        logger.info("Total: %d samples", len(merged))
-        if "dataset_type" in merged.columns:
-            for dtype, count in merged["dataset_type"].value_counts().items():
-                logger.info("%s: %d", dtype, count)
+        by_type: Counter = Counter()
+        for part, rows in zip(parts, written):
+            logger.info("%s: %d samples", part.label, rows)
+            by_type[part.dataset_type] += rows
+        logger.info("Total: %d samples", sum(written))
+        for dtype, count in by_type.most_common():
+            logger.info("%s: %d", dtype, count)
         logger.info("Saved to: %s", out_path)
 
-    return merged
+    if not read_back:
+        return pd.DataFrame()
+    # low_memory=False: a column that only some parts have would otherwise be
+    # typed piece by piece, with a warning about its mixed types.
+    return pd.read_csv(out_path, low_memory=False)

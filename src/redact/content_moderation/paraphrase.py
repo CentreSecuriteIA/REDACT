@@ -36,6 +36,7 @@ from ..dataset import (
     Manifest,
     append_rows,
     content_id,
+    count_rows,
     merge_inputs,
     read_rows,
     release_lock,
@@ -175,9 +176,13 @@ def _assign_paraphraser(base_id: str, k: int, pool: list[str], seed: int) -> str
 
 def run_paraphrase_target(
     tgt, source, data_dir, pool, check, check_model, K, resume, batch_size,
-    seed, prompt_dir, out_path_override, verbose,
+    seed, prompt_dir, out_path_override, verbose, read_back=True,
 ) -> pd.DataFrame:
-    """Paraphrase one target (``"inputs"`` or ``"outputs"``) → its artifact CSV."""
+    """Paraphrase one target (``"inputs"`` or ``"outputs"``) → its artifact CSV.
+
+    Returns the artifact's rows, or with ``read_back=False`` an empty frame
+    without reading them.
+    """
     # ---- Load source rows (base_id, text, category, entry_type) --------------
     if tgt == "inputs":
         src = source if source is not None else merge_inputs(data_dir)
@@ -260,7 +265,7 @@ def run_paraphrase_target(
         if verbose:
             logger.info("[paraphrase:%s] nothing to do (all %d units done).", tgt, planned)
         release_lock(ledger)    # no CommitBuffer will
-        return read_rows(out_path)
+        return read_rows(out_path) if read_back else pd.DataFrame()
 
     # ---- Execute grouped by model ------------------------------------------
     # One paraphraser runs at a time. The residency plan decides whether the
@@ -364,6 +369,6 @@ def run_paraphrase_target(
                 buf.flush()
 
     if verbose:
-        n = len(pd.read_csv(out_path)) if out_path.exists() else 0
-        logger.info("[paraphrase:%s] +%d rows (artifact now %d) -> %s", tgt, written, n, out_path.name)
-    return read_rows(out_path)
+        logger.info("[paraphrase:%s] +%d rows (artifact now %d) -> %s",
+                    tgt, written, count_rows(out_path), out_path.name)
+    return read_rows(out_path) if read_back else pd.DataFrame()

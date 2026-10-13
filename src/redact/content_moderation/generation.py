@@ -697,6 +697,7 @@ def run_output_generation(
     verbose: bool = True,
     max_attempts: int = 1,
     check_max_tokens: int | None = None,
+    read_back: bool = True,
 ) -> pd.DataFrame:
     """Generate model responses for input samples, batched and quality-checked.
 
@@ -742,6 +743,8 @@ def run_output_generation(
             and the row holds the last attempt.
         check_max_tokens: Reply limit for the check calls; a verdict needs
             few tokens. ``None`` keeps the checker model's default.
+        read_back: False returns an empty DataFrame and does not read the
+            output CSV.
 
     Returns:
         DataFrame of all rows in the output CSV (the full dataset, including
@@ -893,6 +896,9 @@ def run_output_generation(
             cap=batch_size,
             progress="outputs" if verbose else None,
         )
+
+    if not read_back:
+        return pd.DataFrame()
 
     # Return the full dataset on disk (includes rows from prior resumed runs),
     # not just this run's newly-written delta.

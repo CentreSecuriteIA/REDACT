@@ -25,11 +25,14 @@ Usage::
 import json
 import logging
 import time
+from collections.abc import Iterable, Mapping
 from pathlib import Path
+from typing import Any
 
 import pandas as pd
 
 from redact import paths, telemetry
+from redact.dataset import count_rows, discover_categories, iter_rows
 from redact.llms.prompting import report_prompt_sources
 
 logger = logging.getLogger(__name__)
@@ -278,6 +281,69 @@ def _counts(df) -> dict:
     return out
 
 
+def _file_counts(
+    files: Iterable[str | Path], keep: Mapping[str, Any] | None = None,
+) -> dict:
+    """Row counts of a stage's CSVs, read in chunks.
+
+    What :func:`_counts` gives for the rows of ``files`` in one frame, without
+    the frame. A file that does not exist has no rows.
+
+    Args:
+        keep: Count only the rows that hold these values in these columns.
+            A file without one of the columns is not limited by it.
+    """
+    keep = keep or {}
+    rows = accepted = 0
+    verdicts = False        # whether any file has an ``accepted`` column
+    for path in map(Path, files):
+        if not path.exists():
+            continue
+        header = set(pd.read_csv(path, nrows=0).columns)
+        columns = [c for c in dict.fromkeys(("accepted", *keep)) if c in header]
+        verdicts |= "accepted" in header
+        if not columns:
+            rows += count_rows(path)
+            continue
+        for row in iter_rows(path, columns=columns):
+            if all(row[c] == value for c, value in keep.items() if c in row):
+                rows += 1
+                accepted += row.get("accepted") is True
+    return {"rows": rows, "accepted": accepted} if verdicts else {"rows": rows}
+
+
+def _stage_files(
+    stage: str, data_dir: str | Path | None, dataset_type: str, params: dict,
+) -> tuple[list[str | Path], dict]:
+    """The CSVs that hold a stage's rows, and what limits the rows to count.
+
+    For :func:`_file_counts`: together they are the rows the stage returns
+    when it reads them back. ``params`` are the recipe's for the stage; a
+    path, a paraphrase target or a style left out is the stage's default.
+    """
+    if stage == "inputs":
+        seeded = dataset_type == "training"
+        tree = (paths.constitution_inputs_dir if seeded else paths.datasets)(data_dir)
+        files = [paths.category_csv(c, base=tree) for c in discover_categories(tree)]
+        keep = {"accepted": True}
+        # Seeded inputs of another style may share the tree.
+        if seeded and params.get("style", "long"):
+            keep["template_style"] = params.get("style", "long")
+        return files, keep
+    if stage == "paraphrase":
+        target = params.get("target", "both")
+        default = {"inputs": paths.paraphrases_inputs_csv,
+                   "outputs": paths.paraphrases_outputs_csv}
+        return [params.get(f"{name}_path") or default[name](data_dir)
+                for name in default if target in (name, "both")], {}
+    default = {
+        "outputs": paths.output_responses_csv,
+        "jailbreaks": paths.jailbreaks_csv,
+        "build": paths.complete_dataset_csv,
+    }[stage]
+    return [params.get("output_path") or default(data_dir)], {}
+
+
 def _plan_phases(
     models: dict,
     stages: list[str],
@@ -500,6 +566,7 @@ def run_pipeline(
 
     ``eval`` recipes run the standalone path; ``training`` recipes run the
     constitution stage first and thread its DataFrame into ``generate_inputs``.
+    No other stage reads its rows back: their counts are taken from the files.
     Returns a summary dict ``{"stages": {stage: {counts, manifest}}}``, with
     how each role's model was served under ``"serving"`` (:func:`_served`).
     Local models the run planned are released when it returns or raises, and
@@ -579,7 +646,6 @@ def run_pipeline(
                         model=models["constitution"], data_dir=data_dir,
                         resume=resume, verbose=verbose, **P("constitution"),
                     )
-                    df = constitution_df
 
                 elif stage == "inputs":
                     kw = dict(
@@ -594,49 +660,58 @@ def run_pipeline(
                                 "(so its entries can seed input generation)."
                             )
                         kw["constitution_df"] = constitution_df
-                    df = generate_inputs(**kw)
+                    generate_inputs(read_back=False, **kw)
 
                 elif stage == "outputs":
-                    df = generate_outputs(
+                    generate_outputs(
                         data_dir=data_dir, model=models["gen"], check_model=models["check"],
-                        prompt_dir=prompt_dir, resume=resume, verbose=verbose, **P("outputs"),
+                        prompt_dir=prompt_dir, resume=resume, verbose=verbose,
+                        read_back=False, **P("outputs"),
                     )
 
                 elif stage == "paraphrase":
-                    res = generate_paraphrases(
+                    generate_paraphrases(
                         data_dir=data_dir, paraphraser=models["paraphraser"],
                         check_model=models["paraphrase_check"], prompt_dir=prompt_dir,
-                        resume=resume, verbose=verbose, **P("paraphrase"),
+                        resume=resume, verbose=verbose, read_back=False,
+                        **P("paraphrase"),
                     )
-                    frames = [v for v in res.values() if v is not None and not v.empty]
-                    df = pd.concat(frames, ignore_index=True) if frames else pd.DataFrame()
 
                 elif stage == "jailbreaks":
-                    df = generate_jailbreaks(
+                    generate_jailbreaks(
                         data_dir=data_dir, model=models["gen"],
                         translation_model=models["translation"],
-                        resume=resume, verbose=verbose, **aug, **P("jailbreaks"),
+                        resume=resume, verbose=verbose, read_back=False,
+                        **aug, **P("jailbreaks"),
                     )
 
                 elif stage == "build":
-                    df = build_dataset(
-                        data_dir=data_dir, mode=dataset_type, verbose=verbose, **P("build"),
+                    build_dataset(
+                        data_dir=data_dir, mode=dataset_type, verbose=verbose,
+                        read_back=False, **P("build"),
                     )
 
                 else:  # pragma: no cover — load_recipe already validated
                     raise ValueError(f"Unknown stage {stage!r}")
 
+                # The constitution is in memory, for the inputs stage. Every
+                # other stage's rows are counted in its files.
+                if stage == "constitution":
+                    counts = _counts(constitution_df)
+                else:
+                    counts = _file_counts(
+                        *_stage_files(stage, data_dir, dataset_type, P(stage)))
                 stage_params = {**(aug if stage == "jailbreaks" else {}), **P(stage)}
                 spec = load_spec().get("version", "") if stage == "jailbreaks" else None
                 mpath = write_manifest(
                     stage, data_dir=data_dir, params=stage_params, models=models,
-                    counts=_counts(df), spec_version=spec,
+                    counts=counts, spec_version=spec,
                     extra={"serving": {role: served[role]
                                        for role in STAGE_ROLES.get(stage, ())}},
                 )
-                summary["stages"][stage] = {"counts": _counts(df), "manifest": str(mpath)}
+                summary["stages"][stage] = {"counts": counts, "manifest": str(mpath)}
                 if verbose:
-                    logger.info("[%s] %s -> manifest %s", stage, _counts(df), mpath.name)
+                    logger.info("[%s] %s -> manifest %s", stage, counts, mpath.name)
     finally:
         # The serving was this run's: a call made after it must not get it.
         capabilities.set_run_serving({})

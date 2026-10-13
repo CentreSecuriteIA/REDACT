@@ -1,0 +1,102 @@
+{
+ "builds": {
+  "eval": {
+   "complete_dataset.csv": [
+    ["sample_id", "sample", "category", "turn", "accepted", "source", "subcategory", "entry_type", "template_style", "dataset_type", "prompt", "input_id", "jailbreak", "technique", "technique_info", "complexity", "num_techniques", "is_noop", "reasoning", "iteration", "combination_spec_version", "input_prompt", "model", "output_response", "rejection_reason"],
+    ["in-1", "first input, with a comma", "Cyber", "0.0", "True", "constitution", "phishing", "harmful", "long", "content_moderation_input", "", "", "", "", "", "", "", "", "", "", "", "", "", "", ""],
+    ["in-2", "second input\nof two lines", "Cyber", "1.0", "True", "constitution", "", "benign", "long", "content_moderation_input", "", "", "", "", "", "", "", "", "", "", "", "", "", "", ""],
+    ["in-3", "third \"quoted\" input, é", "Fraud", "2.0", "True", "constitution", "cards", "harmful", "short", "content_moderation_input", "", "", "", "", "", "", "", "", "", "", "", "", "", "", ""],
+    ["jb-1", "", "Cyber", "0.0", "True", "constitution", "phishing", "harmful", "long", "jailbreak", "first input, with a comma", "in-1", "FIRST INPUT, WITH A COMMA", "to_upper", "to_upper", "1.0", "1.0", "False", "", "0.0", "1.0", "", "", "", ""],
+    ["jb-2", "", "Cyber", "1.0", "True", "constitution", "", "benign", "long", "jailbreak", "second input\nof two lines", "in-2", "tupni dnoces", "to_reversed", "to_reversed", "3.0", "1.0", "False", "", "0.0", "1.0", "", "", "", ""],
+    ["jb-3", "", "Fraud", "2.0", "False", "constitution", "cards", "harmful", "short", "jailbreak", "third \"quoted\" input, é", "in-3", "third \"quoted\" input, é", "to_broken", "ERROR: chain failed", "0.0", "1.0", "True", "chain failed", "0.0", "1.0", "", "", "", ""],
+    ["jb-4", "", "Cyber", "0.0", "True", "constitution", "phishing", "harmful", "long", "jailbreak", "first input, with a comma", "in-1", "First input?\nAnswer in a list.", "to_upper+ask_for_a_list", "two", "2.0", "2.0", "False", "", "1.0", "1.0", "", "", "", ""],
+    ["out-1", "", "Cyber", "", "True", "constitution", "phishing", "harmful", "", "content_moderation_output", "", "in-1", "", "", "", "", "", "", "", "", "", "first input, with a comma", "gen-model", "an answer", ""],
+    ["out-2", "", "Cyber", "", "False", "constitution", "", "benign", "", "content_moderation_output", "", "in-2", "", "", "", "", "", "", "", "", "", "second input\nof two lines", "gen-model", "a refusal, politely", "No: a refusal"],
+    ["out-3", "", "Fraud", "", "True", "constitution", "cards", "harmful", "", "content_moderation_output", "", "in-3", "", "", "", "", "", "", "", "", "", "third \"quoted\" input, é", "gen-model", "an answer\nof two lines", ""]
+   ],
+   "paraphrased.csv": [
+    ["sample_id", "input_id", "iteration", "sample", "category", "entry_type", "paraphrase_model", "accepted", "reasoning", "source", "dataset_type"],
+    ["pi-1", "in-1", "0", "a first input, reworded", "Cyber", "harmful", "para-a", "True", "", "paraphrase_inputs", "content_moderation_paraphrase"],
+    ["pi-3", "in-3", "1", "a third input", "Fraud", "harmful", "para-a", "True", "", "paraphrase_inputs", "content_moderation_paraphrase"],
+    ["po-2", "in-3", "0", "another answer", "Fraud", "harmful", "para-a", "True", "", "paraphrase_outputs", "content_moderation_paraphrase"]
+   ]
+  },
+  "parts without rows": {
+   "complete_dataset.csv": [
+    ["sample_id", "sample", "category", "turn", "accepted", "source", "subcategory", "entry_type", "template_style", "dataset_type", "input_id", "input_prompt", "model", "output_response", "rejection_reason", "iteration", "paraphrase_model", "reasoning"],
+    ["in-1", "first input, with a comma", "Cyber", "0.0", "True", "constitution", "phishing", "harmful", "long", "content_moderation_input", "", "", "", "", "", "", "", ""],
+    ["in-2", "second input\nof two lines", "Cyber", "1.0", "True", "constitution", "", "benign", "long", "content_moderation_input", "", "", "", "", "", "", "", ""],
+    ["in-3", "third \"quoted\" input, é", "Fraud", "2.0", "True", "constitution", "cards", "harmful", "short", "content_moderation_input", "", "", "", "", "", "", "", ""],
+    ["po-2", "another answer", "Fraud", "", "True", "paraphrase_outputs", "", "harmful", "", "content_moderation_paraphrase", "in-3", "", "", "", "", "0.0", "para-a", ""]
+   ]
+  },
+  "standalone tree": {
+   "complete_dataset.csv": [
+    ["sample_id", "sample", "category", "turn", "accepted", "source", "dataset_type", "prompt", "subcategory", "entry_type", "template_style", "input_id", "jailbreak", "technique", "technique_info", "complexity", "num_techniques", "is_noop", "reasoning", "iteration", "combination_spec_version", "input_prompt", "model", "output_response", "rejection_reason"],
+    ["3270d8944d22e087", "first input, with a comma", "Cyber", "0.0", "True", "constitution", "content_moderation_input", "", "", "", "", "", "", "", "", "", "", "", "", "", "", "", "", "", ""],
+    ["691d630c6d2f1a7c", "third \"quoted\" input, é", "Fraud", "2.0", "True", "constitution", "content_moderation_input", "", "", "", "", "", "", "", "", "", "", "", "", "", "", "", "", "", ""],
+    ["e2f032d0f73c0fa4", "a first input, reworded", "Cyber", "", "True", "paraphrase_inputs", "content_moderation_input", "", "", "", "", "", "", "", "", "", "", "", "", "", "", "", "", "", ""],
+    ["dbacfcaa0391879b", "a third input", "Fraud", "", "True", "paraphrase_inputs", "content_moderation_input", "", "", "", "", "", "", "", "", "", "", "", "", "", "", "", "", "", ""],
+    ["c9ef1424256b622a", "another answer", "Fraud", "", "True", "paraphrase_outputs", "content_moderation_input", "", "", "", "", "", "", "", "", "", "", "", "", "", "", "", "", "", ""],
+    ["jb-1", "", "Cyber", "0.0", "True", "constitution", "jailbreak", "first input, with a comma", "phishing", "harmful", "long", "in-1", "FIRST INPUT, WITH A COMMA", "to_upper", "to_upper", "1.0", "1.0", "False", "", "0.0", "1.0", "", "", "", ""],
+    ["jb-2", "", "Cyber", "1.0", "True", "constitution", "jailbreak", "second input\nof two lines", "", "benign", "long", "in-2", "tupni dnoces", "to_reversed", "to_reversed", "3.0", "1.0", "False", "", "0.0", "1.0", "", "", "", ""],
+    ["jb-3", "", "Fraud", "2.0", "False", "constitution", "jailbreak", "third \"quoted\" input, é", "cards", "harmful", "short", "in-3", "third \"quoted\" input, é", "to_broken", "ERROR: chain failed", "0.0", "1.0", "True", "chain failed", "0.0", "1.0", "", "", "", ""],
+    ["jb-4", "", "Cyber", "0.0", "True", "constitution", "jailbreak", "first input, with a comma", "phishing", "harmful", "long", "in-1", "First input?\nAnswer in a list.", "to_upper+ask_for_a_list", "two", "2.0", "2.0", "False", "", "1.0", "1.0", "", "", "", ""],
+    ["out-1", "", "Cyber", "", "True", "constitution", "content_moderation_output", "", "phishing", "harmful", "", "in-1", "", "", "", "", "", "", "", "", "", "first input, with a comma", "gen-model", "an answer", ""],
+    ["out-2", "", "Cyber", "", "False", "constitution", "content_moderation_output", "", "", "benign", "", "in-2", "", "", "", "", "", "", "", "", "", "second input\nof two lines", "gen-model", "a refusal, politely", "No: a refusal"],
+    ["out-3", "", "Fraud", "", "True", "constitution", "content_moderation_output", "", "cards", "harmful", "", "in-3", "", "", "", "", "", "", "", "", "", "third \"quoted\" input, é", "gen-model", "an answer\nof two lines", ""]
+   ],
+   "paraphrased.csv": [
+    ["sample_id", "input_id", "iteration", "sample", "category", "entry_type", "paraphrase_model", "accepted", "reasoning", "source", "dataset_type"],
+    ["pi-1", "in-1", "0", "a first input, reworded", "Cyber", "harmful", "para-a", "True", "", "paraphrase_inputs", "content_moderation_paraphrase"],
+    ["pi-3", "in-3", "1", "a third input", "Fraud", "harmful", "para-a", "True", "", "paraphrase_inputs", "content_moderation_paraphrase"],
+    ["po-2", "in-3", "0", "another answer", "Fraud", "harmful", "para-a", "True", "", "paraphrase_outputs", "content_moderation_paraphrase"]
+   ]
+  },
+  "training": {
+   "complete_dataset.csv": [
+    ["sample_id", "sample", "category", "turn", "accepted", "source", "subcategory", "entry_type", "template_style", "dataset_type", "prompt", "input_id", "jailbreak", "technique", "technique_info", "complexity", "num_techniques", "is_noop", "reasoning", "iteration", "combination_spec_version", "input_prompt", "model", "output_response", "rejection_reason", "paraphrase_model"],
+    ["in-1", "first input, with a comma", "Cyber", "0.0", "True", "constitution", "phishing", "harmful", "long", "content_moderation_input", "", "", "", "", "", "", "", "", "", "", "", "", "", "", "", ""],
+    ["in-2", "second input\nof two lines", "Cyber", "1.0", "True", "constitution", "", "benign", "long", "content_moderation_input", "", "", "", "", "", "", "", "", "", "", "", "", "", "", "", ""],
+    ["in-3", "third \"quoted\" input, é", "Fraud", "2.0", "True", "constitution", "cards", "harmful", "short", "content_moderation_input", "", "", "", "", "", "", "", "", "", "", "", "", "", "", "", ""],
+    ["jb-1", "", "Cyber", "0.0", "True", "constitution", "phishing", "harmful", "long", "jailbreak", "first input, with a comma", "in-1", "FIRST INPUT, WITH A COMMA", "to_upper", "to_upper", "1.0", "1.0", "False", "", "0.0", "1.0", "", "", "", "", ""],
+    ["jb-2", "", "Cyber", "1.0", "True", "constitution", "", "benign", "long", "jailbreak", "second input\nof two lines", "in-2", "tupni dnoces", "to_reversed", "to_reversed", "3.0", "1.0", "False", "", "0.0", "1.0", "", "", "", "", ""],
+    ["jb-3", "", "Fraud", "2.0", "False", "constitution", "cards", "harmful", "short", "jailbreak", "third \"quoted\" input, é", "in-3", "third \"quoted\" input, é", "to_broken", "ERROR: chain failed", "0.0", "1.0", "True", "chain failed", "0.0", "1.0", "", "", "", "", ""],
+    ["jb-4", "", "Cyber", "0.0", "True", "constitution", "phishing", "harmful", "long", "jailbreak", "first input, with a comma", "in-1", "First input?\nAnswer in a list.", "to_upper+ask_for_a_list", "two", "2.0", "2.0", "False", "", "1.0", "1.0", "", "", "", "", ""],
+    ["out-1", "", "Cyber", "", "True", "constitution", "phishing", "harmful", "", "content_moderation_output", "", "in-1", "", "", "", "", "", "", "", "", "", "first input, with a comma", "gen-model", "an answer", "", ""],
+    ["out-2", "", "Cyber", "", "False", "constitution", "", "benign", "", "content_moderation_output", "", "in-2", "", "", "", "", "", "", "", "", "", "second input\nof two lines", "gen-model", "a refusal, politely", "No: a refusal", ""],
+    ["out-3", "", "Fraud", "", "True", "constitution", "cards", "harmful", "", "content_moderation_output", "", "in-3", "", "", "", "", "", "", "", "", "", "third \"quoted\" input, é", "gen-model", "an answer\nof two lines", "", ""],
+    ["pi-1", "a first input, reworded", "Cyber", "", "True", "paraphrase_inputs", "", "harmful", "", "content_moderation_paraphrase", "", "in-1", "", "", "", "", "", "", "", "0.0", "", "", "", "", "", "para-a"],
+    ["pi-3", "a third input", "Fraud", "", "True", "paraphrase_inputs", "", "harmful", "", "content_moderation_paraphrase", "", "in-3", "", "", "", "", "", "", "", "1.0", "", "", "", "", "", "para-a"],
+    ["po-2", "another answer", "Fraud", "", "True", "paraphrase_outputs", "", "harmful", "", "content_moderation_paraphrase", "", "in-3", "", "", "", "", "", "", "", "0.0", "", "", "", "", "", "para-a"]
+   ]
+  }
+ },
+ "runs": {
+  "eval": {
+   "counts": {"build": {"accepted": 23, "rows": 24}, "inputs": {"accepted": 5, "rows": 5}, "jailbreaks": {"accepted": 5, "rows": 5}, "outputs": {"accepted": 4, "rows": 5}, "paraphrase": {"accepted": 9, "rows": 9}}
+  },
+  "training": {
+   "constitution_inputs_merged.csv": [
+    ["sample_id", "sample", "category", "subcategory", "entry_type", "turn", "accepted", "rejection_reason", "source", "source_sample_description", "constitution_category", "source_group_tag", "template_style"],
+    ["138ad266812230bf", "short first zq0 sample", "Cyber", "Sub", "harmful", "0", "True", "", "constitution", "what zq0 is about", "", "", "short"],
+    ["ef12fef2e3ea2cbb", "short second zq0 sample", "Cyber", "Sub", "harmful", "0", "True", "", "constitution", "what zq0 is about", "", "", "short"],
+    ["e8d79b974eb3b02d", "short third zq0 sample", "Cyber", "Sub", "harmful", "0", "True", "", "constitution", "what zq0 is about", "", "", "short"],
+    ["e53b968adbf929ed", "short first zq1 sample", "Cyber", "Sub", "benign", "0", "True", "", "constitution", "what zq1 is about", "", "", "short"],
+    ["f2a41a260a237f36", "short second zq1 sample", "Cyber", "Sub", "benign", "0", "True", "", "constitution", "what zq1 is about", "", "", "short"],
+    ["e471930187f4f1be", "long first zq0 sample", "Cyber", "Sub", "harmful", "0", "True", "", "constitution", "what zq0 is about", "", "", "long"],
+    ["c6d6c38c9483b9b9", "long second zq0 sample", "Cyber", "Sub", "harmful", "0", "True", "", "constitution", "what zq0 is about", "", "", "long"],
+    ["2014365ca9e94b03", "long third zq0 sample", "Cyber", "Sub", "harmful", "0", "True", "", "constitution", "what zq0 is about", "", "", "long"],
+    ["92d00a44d3fe2247", "long first zq1 sample", "Cyber", "Sub", "benign", "0", "True", "", "constitution", "what zq1 is about", "", "", "long"],
+    ["3daa58d0c2d14f1b", "long second zq1 sample", "Cyber", "Sub", "benign", "0", "True", "", "constitution", "what zq1 is about", "", "", "long"],
+    ["3fc3d82a3a6e4b43", "long first zq2 sample", "Fraud", "Sub", "harmful", "0", "True", "", "constitution", "what zq2 is about", "", "", "long"],
+    ["584f94a338d8be9c", "long second zq2 sample", "Fraud", "Sub", "harmful", "0", "True", "", "constitution", "what zq2 is about", "", "", "long"],
+    ["e1c289b9023f3769", "long third zq2 sample", "Fraud", "Sub", "harmful", "0", "True", "", "constitution", "what zq2 is about", "", "", "long"],
+    ["c9b0b45c496903e0", "long first zq3 sample", "Fraud", "Sub", "dual_use_benign", "0", "True", "", "constitution", "what zq3 is about", "", "", "long"],
+    ["9bf7fbc33e653c59", "long second zq3 sample", "Fraud", "Sub", "dual_use_benign", "0", "True", "", "constitution", "what zq3 is about", "", "", "long"],
+    ["eca2f5cdd2743dc6", "long third zq3 sample", "Fraud", "Sub", "dual_use_benign", "0", "True", "", "constitution", "what zq3 is about", "", "", "long"]
+   ],
+   "counts": {"build": {"accepted": 74, "rows": 76}, "constitution": {"rows": 4}, "inputs": {"accepted": 11, "rows": 11}, "jailbreaks": {"accepted": 16, "rows": 16}, "outputs": {"accepted": 14, "rows": 16}, "paraphrase": {"accepted": 28, "rows": 30}}
+  }
+ }
+}

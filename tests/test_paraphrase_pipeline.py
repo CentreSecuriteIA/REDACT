@@ -158,6 +158,38 @@ def test_the_callers_frames_are_left_as_they_were(tmp_path, patched):
     assert list(res["outputs"]["sample"]) == ["PARA::an answer"]
 
 
+@pytest.mark.parametrize("verbose", [False, True])
+def test_without_read_back_no_artifact_is_read_after_its_last_save(
+        tmp_path, patched, verbose):
+    """A run that finds the artifact reads it once before it starts, for the
+    texts it already holds."""
+    _seed_inputs(tmp_path)
+    artifact = paths.paraphrases_inputs_csv(tmp_path)
+    events, append_rows, read_csv = [], CP.append_rows, pd.read_csv
+
+    def saving(path, rows):
+        events.append("save")
+        return append_rows(path, rows)
+
+    def reading(path, *args, **kwargs):
+        whole = kwargs.get("chunksize") is None and kwargs.get("nrows") is None
+        if whole and path == artifact:
+            events.append("read")
+        return read_csv(path, *args, **kwargs)
+
+    patched.setattr(CP, "append_rows", saving)
+    for run, expected in (("first", ["save"]), ("nothing left to do", ["read"])):
+        del events[:]
+        with patched.context() as patch:
+            patch.setattr(pd, "read_csv", reading)
+            res = generate_paraphrases(
+                data_dir=tmp_path, target="inputs", verbose=verbose, read_back=False)
+        assert res["inputs"].empty and len(res["inputs"].columns) == 0, run
+        assert events == expected, run
+    assert list(pd.read_csv(artifact)["sample"]) == [
+        "PARA::alpha prompt", "PARA::beta prompt"]
+
+
 def test_ledger_prevents_reattempt_of_dropped_units(tmp_path, monkeypatch):
     _seed_inputs(tmp_path)
     calls = {"n": 0}

@@ -200,6 +200,31 @@ class TestGenerateOutputsFindsItsInputs:
             generate_outputs(data_dir=tmp_path, check_outputs=False, verbose=False)
 
 
+class TestGenerateOutputsReadBack:
+    def test_without_read_back_the_output_is_written_and_not_read(
+            self, tmp_path, monkeypatch):
+        import redact.content_moderation.generation as G
+        import redact.pipelines as P
+        from redact import generate_outputs, paths
+        from tests.conftest import MockBackend, make_client
+
+        def read_rows(path):
+            raise AssertionError("the output was read back")
+
+        monkeypatch.setattr(
+            P.ModelClient, "create", lambda m: make_client(MockBackend("ans"), m))
+        monkeypatch.setattr(G, "read_rows", read_rows)
+        inputs = pd.DataFrame({
+            "sample": ["p one", "p two"], "category": ["Cyber"] * 2,
+            "entry_type": ["harmful"] * 2,
+        })
+        returned = generate_outputs(
+            data_dir=tmp_path, inputs=inputs, check_outputs=False, read_back=False)
+        assert returned.empty and len(returned.columns) == 0
+        written = pd.read_csv(paths.output_responses_csv(tmp_path))
+        assert sorted(written["input_prompt"]) == ["p one", "p two"]
+
+
 class TestGenerateOutputsResume:
     def test_rows_already_in_the_csv_are_not_regenerated(self, tmp_path, monkeypatch):
         """A crash between the CSV append and the ledger ack leaves a row with no
