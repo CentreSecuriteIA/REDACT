@@ -137,6 +137,15 @@ def test_completion_ledger_written_and_drives_resume(tmp_path):
     assert len(again) == 0  # all units already acked in the ledger -> no output
 
 
+def test_the_ledger_records_how_much_of_the_output_is_saved(tmp_path):
+    from redact.dataset import Ledger
+
+    out = tmp_path / "jb.csv"
+    generate_jailbreaks(inputs=_inputs(), output_path=out, seed=1, **PURE_KW)
+    size, _checksum = Ledger.sidecar(out).saved["jb.csv"]
+    assert size == out.stat().st_size
+
+
 def test_fresh_run_clears_ledger(tmp_path):
     out = tmp_path / "jb.csv"
     generate_jailbreaks(inputs=_inputs(), output_path=out, seed=1, **PURE_KW)

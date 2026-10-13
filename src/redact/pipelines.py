@@ -880,14 +880,15 @@ def generate_jailbreaks(
     if verbose and total:
         logger.info("Executing %d units...", total)
 
-    def _append(rows: list[dict]) -> None:
+    def _append(rows: list[dict]) -> dict[Path, int]:
         nonlocal written
-        append_rows(out, rows)
+        sizes = append_rows(out, rows)
         written += len(rows)
         if verbose:
             n_acc = sum(1 for x in rows if x.get("accepted"))
             logger.info("[%d/%d] %d accepted -> appended to %s",
                         written, total, n_acc, out.name)
+        return sizes
 
     # Plan row and engine sample of each live unit, by position in ``pending``,
     # so two plan rows with one (input_id, iteration) stay two units.

@@ -6,6 +6,8 @@ pin the failure ordering.
 """
 
 import json
+import os
+import zlib
 
 import pytest
 
@@ -136,6 +138,90 @@ class TestCommit:
         assert calls == []                      # nothing written
         assert led.completed() == {"dropped"}   # but acked
 
+    def test_rows_with_no_records_are_refused_before_they_are_written(self, tmp_path):
+        """Rows on disk that no unit owns could never be told from a torn save."""
+        led = _ledger(tmp_path)
+        calls = []
+        with pytest.raises(ValueError, match="no record"):
+            commit([{"input_id": "a"}], append=calls.append, ledger=led, records=[])
+        assert calls == [] and not led.exists()
+
+    def test_an_append_that_reports_no_sizes_leaves_plain_lines(self, tmp_path):
+        led = _ledger(tmp_path)
+        commit([{"input_id": "a"}], append=lambda rows: None, ledger=led)
+        assert _lines(led) == [{"input_id": "a"}]
+
+
+def _lines(led):
+    return [json.loads(line) for line in led.path.read_bytes().split(b"\n") if line]
+
+
+_CHECKSUM_BYTES = 4096
+
+
+def _crc(data: bytes) -> str:
+    return f"{zlib.crc32(data[-_CHECKSUM_BYTES:]):08x}"
+
+
+def _save(out, led, key, text="t"):
+    """One save of one unit with one row, through ``append_rows``."""
+    commit([{"input_id": key, "text": text}],
+           append=lambda rows: append_rows(out, rows), ledger=led)
+
+
+class TestCommitRecordsSizes:
+    """The last ledger line of a save says how much of each file is saved."""
+
+    def test_the_last_line_carries_the_size_and_a_checksum(self, tmp_path):
+        led, out = _ledger(tmp_path), tmp_path / "out.csv"
+        commit([{"input_id": "a", "text": "x"}, {"input_id": "b", "text": "y"}],
+               append=lambda rows: append_rows(out, rows), ledger=led)
+        data = out.read_bytes()
+        assert _lines(led) == [
+            {"input_id": "a"},
+            {"input_id": "b", "_saved": {"out.csv": [len(data), _crc(data)]}},
+        ]
+
+    def test_the_checksum_covers_the_last_4096_bytes_before_the_size(self, tmp_path):
+        led, out = _ledger(tmp_path), tmp_path / "out.csv"
+        _save(out, led, "a", "x" * 5000)
+        data = out.read_bytes()
+        assert len(data) > _CHECKSUM_BYTES
+        assert led.saved == {"out.csv": [len(data), _crc(data)]}
+        assert _crc(data) != f"{zlib.crc32(data):08x}"
+
+    def test_the_size_is_the_files_size_in_bytes(self, tmp_path):
+        led, out = _ledger(tmp_path), tmp_path / "out.csv"
+        _save(out, led, "a", "café 中文\nsecond line\r\nthird")
+        assert led.saved["out.csv"][0] == os.path.getsize(out)
+
+    def test_a_file_is_named_by_its_path_from_the_ledgers_folder(self, tmp_path):
+        led = _ledger(tmp_path)
+        out = tmp_path / "Cyber Crime" / "samples.csv"
+        out.parent.mkdir()
+        _save(out, led, "a")
+        assert list(led.saved) == ["Cyber Crime/samples.csv"]
+
+    def test_every_saved_line_carries_every_file(self, tmp_path):
+        led = _ledger(tmp_path)
+        first, second = tmp_path / "a.csv", tmp_path / "b.csv"
+        _save(first, led, "a")
+        recorded = led.saved["a.csv"]
+        _save(second, led, "b")
+        assert _lines(led)[-1]["_saved"] == {
+            "a.csv": recorded,
+            "b.csv": [second.stat().st_size, _crc(second.read_bytes())],
+        }
+
+    def test_a_save_with_no_rows_repeats_what_was_recorded(self, tmp_path):
+        led, out = _ledger(tmp_path), tmp_path / "out.csv"
+        _save(out, led, "a")
+        recorded = dict(led.saved)
+        commit([], append=lambda rows: append_rows(out, rows), ledger=led,
+               records=[{"input_id": "dropped"}])
+        assert _lines(led)[-1] == {"input_id": "dropped", "_saved": recorded}
+        assert led.completed() == {"a", "dropped"}
+
 
 def _row(key):
     return {"input_id": key, "text": f"t-{key}"}
@@ -228,6 +314,22 @@ class TestCommitBuffer:
                 raise RuntimeError("boom")
         assert isinstance(raised.value.__context__, RuntimeError)
         assert led.completed() == set()
+
+    def test_a_unit_is_queued_whole_or_not_at_all(self, tmp_path):
+        """An interrupt while a unit is being queued must not leave its rows
+        in a save that does not ack it."""
+        led = _ledger(tmp_path)
+        appends = []
+
+        def interrupted():
+            yield _row("b")
+            raise KeyboardInterrupt
+
+        with pytest.raises(KeyboardInterrupt), CommitBuffer(
+                append=appends.append, ledger=led) as buf:
+            buf.add([_row("a")], {"input_id": "a"})
+            buf.add(interrupted(), {"input_id": "b"})
+        assert appends == [[_row("a")]] and led.completed() == {"a"}
 
     def test_every_must_be_positive(self, tmp_path):
         with pytest.raises(ValueError):

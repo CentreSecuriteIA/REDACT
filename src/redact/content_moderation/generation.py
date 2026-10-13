@@ -811,14 +811,15 @@ def run_output_generation(
 
     written = 0
 
-    def _append_rows(rows: list[dict]) -> None:
+    def _append_rows(rows: list[dict]) -> dict[Path, int]:
         nonlocal written
-        append_rows(out_path, rows)
+        sizes = append_rows(out_path, rows)
         written += len(rows)
         if verbose:
             accepted_count = sum(1 for r in rows if r["accepted"])
             logger.info("[%d/%d] %d/%d accepted -> appended to %s",
                         written, len(inputs), accepted_count, len(rows), out_path.name)
+        return sizes
 
     use_checker = check_outputs and check is not None
     live_rows: dict[int, dict] = {}   # rows of live units, by position in inputs

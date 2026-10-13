@@ -5,6 +5,13 @@ Both hold one JSON object per line and share :class:`JsonlSidecar`: the path
 beside the artifact, the reset, and a read that skips a line it cannot parse.
 A stage writes the manifest whole before it generates, and appends a unit to
 the ledger only after that unit's rows are on disk.
+
+The last ledger line of a save carries ``_saved``: the size and a checksum of
+each file of the stage after that save. A save whose ``_saved`` line is not
+on disk did not finish, and its units are not finished::
+
+    {"input_id": "3f2a", "iteration": 0}
+    {"input_id": "91bc", "iteration": 1, "_saved": {"out.csv": [5284, "5d41402a"]}}
 """
 
 from __future__ import annotations
@@ -13,12 +20,16 @@ import json
 import os
 import time
 from collections.abc import Callable, Iterable, Iterator, Mapping
+from contextlib import suppress
 from itertools import chain, islice
 from pathlib import Path
-from typing import Any
+from typing import Any, NamedTuple
 
 _REPLACE_ATTEMPTS = 5
 _REPLACE_WAIT_SECONDS = 0.2
+
+# Stands for what a ledger's file records until the file is read.
+_UNREAD: Any = object()
 
 
 def _replace(source: Path, target: Path) -> None:
@@ -80,15 +91,13 @@ class JsonlSidecar:
                 except json.JSONDecodeError:
                     continue
 
-    def _write(self, rows: Iterable[Mapping[str, Any]], *, mode: str) -> None:
-        """Write ``rows`` as JSON lines.
+    def _write(self, rows: Iterable[Mapping[str, Any]]) -> None:
+        """Replace the file with ``rows`` as JSON lines.
 
-        ``mode`` is ``"a"`` (append, for the ledger) or ``"w"`` (overwrite, for
-        the manifest). An overwrite takes ``rows`` one at a time into a
-        temporary file beside the target and renames it onto the target, so
-        the file holds its old rows or all the new ones. An empty ``rows`` is
-        a no-op — no file is created or truncated — so both ``.record([])``
-        and ``.write([])`` leave the disk untouched.
+        ``rows`` are taken one at a time into a temporary file beside the
+        target, which is then renamed onto the target, so the file holds its
+        old rows or all the new ones. An empty ``rows`` is a no-op: no file
+        is created or truncated.
         """
         rows = iter(rows)
         first = list(islice(rows, 1))
@@ -98,12 +107,6 @@ class JsonlSidecar:
         # ensure_ascii=False keeps unicode readable in the sidecar file;
         # the file is always opened as utf-8 and read back via json.loads.
         lines = (json.dumps(r, ensure_ascii=False) + "\n" for r in chain(first, rows))
-        if mode == "a":
-            # Built before the file is opened: rows that raise append nothing.
-            text = "".join(lines)
-            with self.path.open("a", encoding="utf-8") as fh:
-                fh.write(text)
-            return
         temporary = self.path.with_name(self.path.name + ".tmp")
         try:
             with temporary.open("w", encoding="utf-8") as fh:
@@ -114,6 +117,21 @@ class JsonlSidecar:
             temporary.unlink(missing_ok=True)
 
 
+class LedgerState(NamedTuple):
+    """What a ledger file holds, as :meth:`Ledger.read` gives it.
+
+    Attributes:
+        done: The keys of the finished units.
+        saved: Each file's ``[size, checksum]`` on the last ``_saved`` line,
+            by the file's name. ``None`` when no line carries one.
+        end: The byte offset where the lines that count end.
+    """
+
+    done: set
+    saved: dict[str, Any] | None
+    end: int
+
+
 class Ledger(JsonlSidecar):
     """The finished units of a stage, one record each, in ``*.state.jsonl``.
 
@@ -121,6 +139,9 @@ class Ledger(JsonlSidecar):
     of several. ``casters`` convert key values on read, so they compare equal
     to the keys the stage builds. A record may carry fields beyond the key;
     they are written as given and ignored on read.
+
+    The file is read and written as bytes, each line ending in ``\\n`` on
+    every platform, so an offset into it means the same wherever it is read.
     """
 
     _SUFFIX = ".state.jsonl"
@@ -136,6 +157,7 @@ class Ledger(JsonlSidecar):
         if not self.key_fields:
             raise ValueError("Ledger needs at least one key field.")
         self.casters: dict[str, Callable[[Any], Any]] = dict(casters or {})
+        self._saved = _UNREAD
 
     @classmethod
     def sidecar(
@@ -156,23 +178,112 @@ class Ledger(JsonlSidecar):
         )
         return vals[0] if len(self.key_fields) == 1 else vals
 
-    def completed(self) -> set:
-        """Return the set of unit keys already recorded (empty if no file)."""
-        done: set = set()
-        for rec in self._iter_records():
-            try:
-                done.add(self._key(rec))
-            except (KeyError, TypeError, ValueError):
-                continue
-        return done
+    def read(self) -> LedgerState:
+        """The finished units and what the last save recorded, in one pass.
 
-    def record(self, records: Iterable[Mapping[str, Any]]) -> None:
-        """Append completed-unit records (each must contain the key fields)."""
-        self._write(records, mode="a")
+        A line counts only if it ends with a newline: a write that was cut
+        off is not a line. Lines after the last one that carries ``_saved``
+        belong to a save that did not finish, so their units are not
+        finished. A ledger with no ``_saved`` line counts every line.
+        """
+        done: set = set()
+        pending: set = set()    # units since the last ``_saved`` line
+        saved, end, offset = None, 0, 0
+        if self.path.exists():
+            with self.path.open("rb") as fh:
+                for line in fh:
+                    if not line.endswith(b"\n"):
+                        break
+                    offset += len(line)
+                    record = _parse(line)
+                    if record is None:
+                        continue
+                    # A line without the key fields holds no unit.
+                    with suppress(KeyError, TypeError, ValueError):
+                        pending.add(self._key(record))
+                    if "_saved" in record:
+                        saved, end = record["_saved"], offset
+                        done |= pending
+                        pending.clear()
+        if saved is None:
+            done, end = pending, offset
+        self._saved = saved
+        return LedgerState(done, saved, end)
+
+    def completed(self) -> set:
+        """The keys of the finished units, as :meth:`read` counts them."""
+        return self.read().done
+
+    @property
+    def saved(self) -> dict[str, Any] | None:
+        """Each file's ``[size, checksum]`` as the last save recorded them.
+
+        ``None`` for a ledger with no ``_saved`` line. It is what the last
+        :meth:`read` or :meth:`record` saw; the file is read when neither
+        has run.
+        """
+        if self._saved is _UNREAD:
+            self.read()
+        return self._saved
+
+    def record(
+        self,
+        records: Iterable[Mapping[str, Any]],
+        saved: Mapping[str, Any] | None = None,
+    ) -> None:
+        """Append the records of finished units in one write, synced to disk.
+
+        Each record must contain the key fields. ``saved`` is each file's
+        ``[size, checksum]`` after the save these units belong to. It goes
+        on a copy of the last record as ``_saved``, or on a line of its own
+        when there are no records, and marks the save as finished. No
+        records and no ``saved`` write nothing.
+
+        Raises:
+            ValueError: ``saved`` is missing and the ledger holds a
+                ``_saved`` line: the records would come after it, where no
+                reader counts them.
+        """
+        # A list before the file is opened: records that raise append nothing.
+        records = list(records)
+        if saved is not None:
+            records[-1:] = [{**(records[-1] if records else {}), "_saved": dict(saved)}]
+        if not records:
+            return
+        if saved is None and self.saved is not None:
+            raise ValueError(
+                f"{self.path} records the size of each file with every save "
+                "(_saved); records without it would not count."
+            )
+        # ensure_ascii=False keeps unicode readable; the lines are utf-8.
+        data = b"".join(
+            json.dumps(r, ensure_ascii=False).encode("utf-8") + b"\n" for r in records
+        )
+        self.path.parent.mkdir(parents=True, exist_ok=True)
+        with self.path.open("ab") as fh:
+            fh.write(data)
+            fh.flush()
+            os.fsync(fh.fileno())
+        if saved is not None:
+            self._saved = dict(saved)
+
+    def reset(self) -> None:
+        """Delete the file if it exists, and forget what it recorded."""
+        super().reset()
+        self._saved = None
 
 
 def _identity(x: Any) -> Any:
     return x
+
+
+def _parse(line: bytes) -> dict | None:
+    """The JSON object on a ledger line, ``None`` when the line holds none."""
+    try:
+        record = json.loads(line)
+    except ValueError:    # not JSON, or not utf-8
+        return None
+    return record if isinstance(record, dict) else None
 
 
 class Manifest(JsonlSidecar):
@@ -194,7 +305,7 @@ class Manifest(JsonlSidecar):
 
         An empty ``rows`` is a no-op (leaves any existing file untouched).
         """
-        self._write(rows, mode="w")
+        self._write(rows)
 
     def __iter__(self) -> Iterator[dict]:
         """Yield the planned rows one at a time (bad lines skipped)."""

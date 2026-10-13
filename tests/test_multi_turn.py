@@ -384,10 +384,27 @@ def test_evaluate_transcript_scope_renders_and_fresh(tmp_path):
 # --- how a chunk is saved ----------------------------------------------------
 
 def _acks(state):
+    """The ledger's unit lines, without what they record of the file's size."""
     import json
     if not state.exists():
         return []
-    return [json.loads(line) for line in state.read_text(encoding="utf-8").splitlines()]
+    lines = map(json.loads, state.read_text(encoding="utf-8").splitlines())
+    acks = [{k: v for k, v in line.items() if k != "_saved"} for line in lines]
+    return [ack for ack in acks if ack]
+
+
+def test_both_ledgers_record_how_much_of_their_output_is_saved(tmp_path):
+    from redact import evaluate_conversations, generate_conversations, paths
+    from redact.dataset import Ledger
+
+    generate_conversations(_three_seeds(), _simple_setting, data_dir=tmp_path,
+                           resolve=_FakeResolver(_echo), verbose=False)
+    evaluate_conversations(data_dir=tmp_path, judge_model="j", verbose=False,
+                           resolve=_JudgeResolver(MockBackend("Yes ok")))
+    out = paths.conversations_csv(tmp_path)
+    for artifact in (out, out.with_name("conversations_scored.csv")):
+        size, _checksum = Ledger.sidecar(artifact).saved[artifact.name]
+        assert size == artifact.stat().st_size
 
 
 def _three_seeds():

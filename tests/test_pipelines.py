@@ -520,6 +520,23 @@ class TestGenerateOutputsPool:
         assert len(df) == 6
         assert {r["input_id"]: r for r in df.to_dict("records")} == expected
 
+    def test_the_ledger_records_how_much_of_the_output_is_saved(
+            self, tmp_path, monkeypatch):
+        from redact import generate_outputs, paths
+        from redact.dataset import Ledger
+
+        gen = _TokenBackend(lambda t, text: f"answer {t}", "gen-model")
+        self._clients(monkeypatch, gen, None)
+        inputs = pd.DataFrame({
+            "sample": [f"zq{i}" for i in range(3)],
+            "category": ["Cyber"] * 3, "entry_type": ["harmful"] * 3,
+        })
+        generate_outputs(data_dir=tmp_path, inputs=inputs, model="gen-model",
+                         check_outputs=False, verbose=False)
+        out = paths.output_responses_csv(tmp_path)
+        size, _checksum = Ledger.sidecar(out).saved["output_responses.csv"]
+        assert size == out.stat().st_size
+
     def test_a_retry_shares_a_call_with_a_new_unit(self, tmp_path, monkeypatch):
         from redact import generate_outputs, paths
 

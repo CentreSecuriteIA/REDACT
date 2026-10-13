@@ -432,11 +432,29 @@ def _seed_four_inputs(tmp_path):
 
 
 def _acks(tmp_path):
+    """The ledger's unit lines, without what they record of the file's size."""
     state = paths.paraphrases_inputs_csv(tmp_path).with_name(
         "paraphrases_inputs.state.jsonl")
     if not state.exists():
         return []
-    return [json.loads(line) for line in state.read_text(encoding="utf-8").splitlines()]
+    lines = map(json.loads, state.read_text(encoding="utf-8").splitlines())
+    acks = [{k: v for k, v in line.items() if k != "_saved"} for line in lines]
+    return [ack for ack in acks if ack]
+
+
+@pytest.mark.parametrize("target", ["inputs", "outputs"])
+def test_the_ledger_records_how_much_of_the_output_is_saved(tmp_path, patched, target):
+    from redact.dataset import Ledger
+
+    _seed_inputs(tmp_path)
+    pd.DataFrame({
+        "input_id": ["id1"], "output_response": ["a real answer"], "accepted": [True],
+        "category": ["Cyber"], "entry_type": ["harmful"],
+    }).to_csv(paths.output_responses_csv(tmp_path), index=False)
+    generate_paraphrases(data_dir=tmp_path, target=target, verbose=False)
+    out = getattr(paths, f"paraphrases_{target}_csv")(tmp_path)
+    size, _checksum = Ledger.sidecar(out).saved[out.name]
+    assert size == out.stat().st_size
 
 
 def test_a_chunk_is_one_append_followed_by_its_acks(tmp_path, patched):

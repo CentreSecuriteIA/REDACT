@@ -276,10 +276,11 @@ def run_paraphrase_target(
     check_client = ModelClient.create(check_model) if check else None
     written = 0
 
-    def _append(rows: list[dict]) -> None:
+    def _append(rows: list[dict]) -> dict[Path, int]:
         nonlocal written
-        append_rows(out_path, rows)
+        sizes = append_rows(out_path, rows)
         written += len(rows)
+        return sizes
 
     # One save per chunk, at the flush below: ``every`` is not reached before it.
     with CommitBuffer(append=_append, ledger=ledger, every=len(units)) as buf:
