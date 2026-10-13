@@ -30,6 +30,7 @@ import pandas as pd
 
 from .. import paths
 from ..dataset import (
+    CommitBuffer,
     Ledger,
     Manifest,
     append_rows,
@@ -141,11 +142,6 @@ def _paraphrase_ledger(state_path: Path) -> Ledger:
                   casters={"input_id": str, "iteration": int})
 
 
-def _append_paraphrase_state(state_path: Path, records: list[dict]) -> None:
-    """Append attempted-unit records (``input_id``/``iteration``/``paraphrase_model``/``status``)."""
-    _paraphrase_ledger(state_path).record(records)
-
-
 def paraphrase_pool(paraphraser: str | None) -> list[str]:
     """Resolve the paraphraser model pool.
 
@@ -219,9 +215,9 @@ def run_paraphrase_target(
     # Units already in the CSV are unioned into the completed set (as the
     # jailbreak stage does): a crash between the append and the ack would
     # otherwise re-paraphrase them and append a second row each.
+    ledger = _paraphrase_ledger(state_path)
     completed: set[tuple[str, int]] = resume_state(
-        _paraphrase_ledger(state_path), resume=resume, artifact=out_path,
-        manifest=manifest,
+        ledger, resume=resume, artifact=out_path, manifest=manifest,
     )
     seen_texts: set[str] = (
         set(prev["sample"].astype(str))
@@ -279,69 +275,82 @@ def run_paraphrase_target(
 
     check_client = ModelClient.create(check_model) if check else None
     written = 0
-    for group_i, (model, gunits) in enumerate(groups.items()):
-        if group_i and unload_between:
-            # The previous client's engine is released next; the check model's is kept.
-            client = None
-            # Engines of other stages, read now so one loaded meanwhile is kept too.
-            resident = residency.loaded_engines(exclude=list(groups))
-            residency.unload_local(keep=[check_model] if check else None,
-                                   engines=resident)
-        client = ModelClient.create(model)
-        # Internals capture: paraphrase's own output text (its eventual sample_id)
-        # isn't known until the call returns, but internals_id has to be supplied
-        # before it — capture under a pre-call-known provisional id (bid/k, always
-        # unique) and relabel to the real sample_id once it's computed below.
-        capture_paraphrase = client.compute_config.supports_internals
-        for start in range(0, len(gunits), batch_size):
-            chunk = gunits[start : start + batch_size]
-            texts = [u[3] for u in chunk]
-            provisional_ids = [f"{bid}/paraphrase/attempt_{k}" for bid, k, *_ in chunk]
-            paraphrased = paraphrase_batch(
-                client, texts,
-                prompt_dir=prompt_dir,
-                progress=f"paraphrase:{tgt} ({model})" if verbose else None,
-                internals_ids=provisional_ids if capture_paraphrase else None,
-            )
-            if check:
-                originals = [u[3] for u in chunk]
-                checks = batch_check_samples(
-                    check_client, paraphrased,
-                    build_paraphrase_checker(prompt_dir=prompt_dir),
-                    originals=originals,
-                    batch_size=batch_size,
-                    progress=f"paraphrase-check:{tgt}" if verbose else None,
-                )
-            else:
-                checks = [(True, "")] * len(chunk)
 
-            rows, ledger = [], []
-            for (bid, k, m, otext, cat, et), ptext, (acc, reason), prov_id in zip(
-                chunk, paraphrased, checks, provisional_ids
-            ):
-                pt = str(ptext).strip()
-                if not pt or pt == otext or pt in seen_texts:
-                    ledger.append({"input_id": bid, "iteration": k,
-                                   "paraphrase_model": m, "status": "dropped_dedup"})
-                    continue  # dedup: drop no-op / duplicate paraphrases
-                seen_texts.add(pt)
-                sample_id = content_id(pt)
-                if capture_paraphrase:
-                    client.rename_capture(prov_id, f"{bid}/paraphrase/{sample_id}")
-                rows.append({
-                    "sample_id": sample_id, "input_id": bid, "iteration": k,
-                    "sample": pt, "category": cat, "entry_type": et,
-                    "paraphrase_model": m, "accepted": bool(acc),
-                    "reasoning": reason, "source": f"paraphrase_{tgt}",
-                })
-                ledger.append({"input_id": bid, "iteration": k, "paraphrase_model": m,
-                               "status": "accepted" if acc else "rejected"})
-            if rows:
-                append_rows(out_path, rows)
-                written += len(rows)
-            # Record every attempted unit only after the CSV append — a crash mid-chunk
-            # leaves those units un-acked so they re-run next time (never duplicated).
-            _append_paraphrase_state(state_path, ledger)
+    def _append(rows: list[dict]) -> None:
+        nonlocal written
+        append_rows(out_path, rows)
+        written += len(rows)
+
+    # One save per chunk, at the flush below: ``every`` is not reached before it.
+    with CommitBuffer(append=_append, ledger=ledger, every=len(units)) as buf:
+        for group_i, (model, gunits) in enumerate(groups.items()):
+            if group_i and unload_between:
+                # The previous client's engine is released next; the check
+                # model's is kept.
+                client = None
+                # Engines of other stages, read now so one loaded meanwhile is kept too.
+                resident = residency.loaded_engines(exclude=list(groups))
+                residency.unload_local(keep=[check_model] if check else None,
+                                       engines=resident)
+            client = ModelClient.create(model)
+            # Internals capture: paraphrase's own output text (its eventual sample_id)
+            # isn't known until the call returns, but internals_id has to be supplied
+            # before it — capture under a pre-call-known provisional id (bid/k, always
+            # unique) and relabel to the real sample_id once it's computed below.
+            capture_paraphrase = client.compute_config.supports_internals
+            for start in range(0, len(gunits), batch_size):
+                chunk = gunits[start : start + batch_size]
+                texts = [u[3] for u in chunk]
+                provisional_ids = [
+                    f"{bid}/paraphrase/attempt_{k}" for bid, k, *_ in chunk
+                ]
+                paraphrased = paraphrase_batch(
+                    client, texts,
+                    prompt_dir=prompt_dir,
+                    progress=f"paraphrase:{tgt} ({model})" if verbose else None,
+                    internals_ids=provisional_ids if capture_paraphrase else None,
+                )
+                if check:
+                    originals = [u[3] for u in chunk]
+                    checks = batch_check_samples(
+                        check_client, paraphrased,
+                        build_paraphrase_checker(prompt_dir=prompt_dir),
+                        originals=originals,
+                        batch_size=batch_size,
+                        progress=f"paraphrase-check:{tgt}" if verbose else None,
+                    )
+                else:
+                    checks = [(True, "")] * len(chunk)
+
+                attempted = []  # (rows, ack) of each unit of the chunk
+                for (bid, k, m, otext, cat, et), ptext, (acc, reason), prov_id in zip(
+                    chunk, paraphrased, checks, provisional_ids
+                ):
+                    pt = str(ptext).strip()
+                    if not pt or pt == otext or pt in seen_texts:
+                        attempted.append(([], {
+                            "input_id": bid, "iteration": k,
+                            "paraphrase_model": m, "status": "dropped_dedup"}))
+                        continue  # dedup: drop no-op / duplicate paraphrases
+                    seen_texts.add(pt)
+                    sample_id = content_id(pt)
+                    if capture_paraphrase:
+                        client.rename_capture(prov_id, f"{bid}/paraphrase/{sample_id}")
+                    row = {
+                        "sample_id": sample_id, "input_id": bid, "iteration": k,
+                        "sample": pt, "category": cat, "entry_type": et,
+                        "paraphrase_model": m, "accepted": bool(acc),
+                        "reasoning": reason, "source": f"paraphrase_{tgt}",
+                    }
+                    attempted.append(([row], {
+                        "input_id": bid, "iteration": k, "paraphrase_model": m,
+                        "status": "accepted" if acc else "rejected"}))
+                # Queued once the whole chunk is built: a chunk that fails part-way
+                # saves none of its units. The flush appends the rows, then acks
+                # every attempted unit, so a dropped one is not attempted again.
+                for unit_rows, ack in attempted:
+                    buf.add(unit_rows, ack)
+                buf.flush()
 
     if verbose:
         n = len(pd.read_csv(out_path)) if out_path.exists() else 0

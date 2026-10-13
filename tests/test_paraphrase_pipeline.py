@@ -5,12 +5,14 @@ so this exercises planning, model-grouped execution, dedup, resume, and both
 targets without any network access.
 """
 
+import json
+
 import pandas as pd
 import pytest
 
 import redact.content_moderation.paraphrase as CP
 from redact import generate_paraphrases, paths
-from redact.dataset import append_samples
+from redact.dataset import append_samples, content_id
 from tests.conftest import MockBackend, fake_vllm_modules, make_client
 
 
@@ -411,3 +413,73 @@ def test_an_unload_between_paraphrasers_shuts_down_only_their_engine(
         MODEL_REGISTRY.pop("_para_second", None)
         MODEL_REGISTRY.pop("_para_check", None)
         vllm_module.VLLMBackend.clear_cache()
+
+
+# --- how a chunk is saved ----------------------------------------------------
+
+_FOUR = ["alpha prompt", "beta prompt", "gamma prompt", "delta prompt"]
+
+
+def _seed_four_inputs(tmp_path):
+    append_samples(
+        _FOUR, category="Cyber", turn=0, accepted=[True] * len(_FOUR),
+        dataset_dir=paths.datasets(tmp_path),
+    )
+    # gamma comes back unchanged, so its unit is dropped.
+    return lambda client, texts, **kw: [
+        t if t.startswith("gamma") else f"PARA::{t}" for t in texts
+    ]
+
+
+def _acks(tmp_path):
+    state = paths.paraphrases_inputs_csv(tmp_path).with_name(
+        "paraphrases_inputs.state.jsonl")
+    if not state.exists():
+        return []
+    return [json.loads(line) for line in state.read_text(encoding="utf-8").splitlines()]
+
+
+def test_a_chunk_is_one_append_followed_by_its_acks(tmp_path, patched):
+    patched.setattr(CP, "paraphrase_batch", _seed_four_inputs(tmp_path))
+    saves, append = [], CP.append_rows
+
+    def spy(path, rows):
+        saves.append(([r["sample"] for r in rows], len(_acks(tmp_path))))
+        return append(path, rows)
+
+    patched.setattr(CP, "append_rows", spy)
+    df = generate_paraphrases(
+        data_dir=tmp_path, target="inputs", batch_size=2, verbose=False)["inputs"]
+
+    # Per append: its rows, and the acks on disk when it was made.
+    assert saves == [
+        (["PARA::alpha prompt", "PARA::beta prompt"], 0), (["PARA::delta prompt"], 2)]
+    assert list(df["sample"]) == [
+        "PARA::alpha prompt", "PARA::beta prompt", "PARA::delta prompt"]
+    statuses = ["accepted", "accepted", "dropped_dedup", "accepted"]
+    assert _acks(tmp_path) == [
+        {"input_id": content_id(text), "iteration": 0,
+         "paraphrase_model": "venice-paraphraser", "status": status}
+        for text, status in zip(_FOUR, statuses)
+    ]
+
+
+def test_a_failed_append_acks_none_of_its_chunk(tmp_path, patched):
+    patched.setattr(CP, "paraphrase_batch", _seed_four_inputs(tmp_path))
+    outcomes, append = iter([None, OSError("disk full")]), CP.append_rows
+
+    def failing(path, rows):
+        error = next(outcomes)
+        if error:
+            raise error
+        return append(path, rows)
+
+    patched.setattr(CP, "append_rows", failing)
+    with pytest.raises(OSError, match="disk full"):
+        generate_paraphrases(
+            data_dir=tmp_path, target="inputs", batch_size=2, verbose=False)
+
+    assert [ack["input_id"] for ack in _acks(tmp_path)] == [
+        content_id(text) for text in _FOUR[:2]]
+    saved = pd.read_csv(paths.paraphrases_inputs_csv(tmp_path))
+    assert list(saved["sample"]) == ["PARA::alpha prompt", "PARA::beta prompt"]

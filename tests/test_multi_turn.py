@@ -379,3 +379,142 @@ def test_evaluate_transcript_scope_renders_and_fresh(tmp_path):
                                     scope="transcript", resume=False, verbose=False,
                                     resolve=_JudgeResolver(MockBackend("Yes")))
     assert list(scored["success"]) == [True]
+
+
+# --- how a chunk is saved ----------------------------------------------------
+
+def _acks(state):
+    import json
+    if not state.exists():
+        return []
+    return [json.loads(line) for line in state.read_text(encoding="utf-8").splitlines()]
+
+
+def _three_seeds():
+    import pandas as pd
+    return pd.DataFrame({"sample_id": ["s1", "s2", "s3"], "seed": ["q1", "q2", "q3"]})
+
+
+def test_conversation_chunk_is_one_append_then_its_acks(tmp_path, monkeypatch):
+    import redact.multi_turn.pipeline as MP
+    from redact import generate_conversations, paths
+
+    state = paths.conversations_csv(tmp_path).with_name("conversations.state.jsonl")
+    saves, append = [], MP.append_rows
+
+    def spy(path, rows):
+        saves.append(([r["input_id"] for r in rows], len(_acks(state))))
+        return append(path, rows)
+
+    monkeypatch.setattr(MP, "append_rows", spy)
+    df = generate_conversations(
+        _three_seeds(), _simple_setting, data_dir=tmp_path, batch_size=2,
+        resolve=_FakeResolver(_echo), verbose=False)
+
+    # Per append: its rows, and the acks on disk when it was made.
+    assert saves == [(["s1", "s2"], 0), (["s3"], 2)]
+    assert list(df["input_id"]) == ["s1", "s2", "s3"]
+    assert _acks(state) == [
+        {"input_id": sid, "iteration": 0, "stop_reason": "max_turns"}
+        for sid in ("s1", "s2", "s3")
+    ]
+
+
+def test_conversation_chunk_of_any_size_is_one_append(tmp_path, monkeypatch):
+    import pandas as pd
+
+    import redact.multi_turn.pipeline as MP
+    from redact import generate_conversations
+
+    ids = [f"s{n}" for n in range(41)]
+    seeds = pd.DataFrame({"sample_id": ids, "seed": ["q"] * len(ids)})
+    saves, append = [], MP.append_rows
+
+    def spy(path, rows):
+        saves.append([r["input_id"] for r in rows])
+        return append(path, rows)
+
+    monkeypatch.setattr(MP, "append_rows", spy)
+    generate_conversations(
+        seeds, _simple_setting, data_dir=tmp_path, batch_size=40,
+        resolve=_FakeResolver(_echo), verbose=False)
+    assert saves == [ids[:40], ids[40:]]
+
+
+def test_failed_conversation_append_acks_none_of_its_chunk(tmp_path, monkeypatch):
+    import pandas as pd
+
+    import redact.multi_turn.pipeline as MP
+    from redact import generate_conversations, paths
+
+    out = paths.conversations_csv(tmp_path)
+    outcomes, append = iter([None, OSError("disk full")]), MP.append_rows
+
+    def failing(path, rows):
+        error = next(outcomes)
+        if error:
+            raise error
+        return append(path, rows)
+
+    monkeypatch.setattr(MP, "append_rows", failing)
+    with pytest.raises(OSError, match="disk full"):
+        generate_conversations(
+            _three_seeds(), _simple_setting, data_dir=tmp_path, batch_size=2,
+            resolve=_FakeResolver(_echo), verbose=False)
+
+    acks = _acks(out.with_name("conversations.state.jsonl"))
+    assert [ack["input_id"] for ack in acks] == ["s1", "s2"]
+    assert list(pd.read_csv(out)["input_id"]) == ["s1", "s2"]
+
+
+def _three_conversations():
+    import pandas as pd
+    return pd.DataFrame({"sample_id": ["a", "b", "c"], "transcript": ["[]"] * 3})
+
+
+def test_scoring_chunk_is_one_append_then_its_acks(tmp_path, monkeypatch):
+    import redact.multi_turn.evaluate as ME
+    from redact import evaluate_conversations, paths
+
+    state = paths.conversations_csv(tmp_path).with_name(
+        "conversations_scored.state.jsonl")
+    saves, append = [], ME.append_rows
+
+    def spy(path, rows):
+        saves.append(([r["sample_id"] for r in rows], len(_acks(state))))
+        return append(path, rows)
+
+    monkeypatch.setattr(ME, "append_rows", spy)
+    scored = evaluate_conversations(
+        conversations=_three_conversations(), data_dir=tmp_path, judge_model="j",
+        batch_size=2, verbose=False, resolve=_JudgeResolver(MockBackend("Yes ok")))
+
+    assert saves == [(["a", "b"], 0), (["c"], 2)]
+    assert list(scored["sample_id"]) == ["a", "b", "c"]
+    assert _acks(state) == [{"sample_id": "a"}, {"sample_id": "b"}, {"sample_id": "c"}]
+
+
+def test_failed_scoring_append_acks_none_of_its_chunk(tmp_path, monkeypatch):
+    import pandas as pd
+
+    import redact.multi_turn.evaluate as ME
+    from redact import evaluate_conversations, paths
+
+    scored = paths.conversations_csv(tmp_path).with_name("conversations_scored.csv")
+    outcomes, append = iter([None, OSError("disk full")]), ME.append_rows
+
+    def failing(path, rows):
+        error = next(outcomes)
+        if error:
+            raise error
+        return append(path, rows)
+
+    monkeypatch.setattr(ME, "append_rows", failing)
+    with pytest.raises(OSError, match="disk full"):
+        evaluate_conversations(
+            conversations=_three_conversations(), data_dir=tmp_path, judge_model="j",
+            batch_size=2, verbose=False, resolve=_JudgeResolver(MockBackend("Yes ok")))
+
+    acks = _acks(scored.with_name("conversations_scored.state.jsonl"))
+    assert acks == [{"sample_id": "a"}, {"sample_id": "b"}]
+    assert list(pd.read_csv(scored)["sample_id"]) == ["a", "b"]

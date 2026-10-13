@@ -22,6 +22,7 @@ import pandas as pd
 
 from redact import paths
 from redact.dataset import (
+    CommitBuffer,
     Ledger,
     Manifest,
     append_rows,
@@ -35,8 +36,8 @@ from .core import Setting, conversation_gen
 
 logger = logging.getLogger(__name__)
 
-#TODO(pool): move onto llm_pipeline.drive_units and dataset.CommitBuffer, like
-# outputs and jailbreaks. This stage still drives fixed chunks.
+#TODO(pool): move onto llm_pipeline.drive_units, like outputs and jailbreaks.
+# This stage still drives fixed chunks.
 
 
 def _seed_text_col(df: pd.DataFrame) -> str:
@@ -134,36 +135,40 @@ def generate_conversations(
             "source": "conversation",
         }
 
-    for start in range(0, n, batch_size):
-        chunk = pending[start : start + batch_size]
-        gens, keymeta = {}, {}
-        for iid, it, stext, meta in chunk:
-            key = (iid, it)
-            gens[key] = conversation_gen(make_setting(), stext, input_id=iid)
-            keymeta[key] = meta
+    # One save per chunk, at the flush below: ``every`` is not reached before it.
+    with CommitBuffer(
+        append=lambda rows: append_rows(out, rows), ledger=ledger, every=n
+    ) as buf:
+        for start in range(0, n, batch_size):
+            chunk = pending[start : start + batch_size]
+            gens, keymeta = {}, {}
+            for iid, it, stext, meta in chunk:
+                key = (iid, it)
+                gens[key] = conversation_gen(make_setting(), stext, input_id=iid)
+                keymeta[key] = meta
 
-        def finalize(key, traj):
-            return _row(key, setting_name=traj.setting, turns=traj.turns_used,
-                        stop=traj.stop_reason,
-                        transcript_json=json.dumps(traj.transcript.to_records(), ensure_ascii=False),
-                        meta=keymeta[key])
+            def finalize(key, traj):
+                return _row(key, setting_name=traj.setting, turns=traj.turns_used,
+                            stop=traj.stop_reason,
+                            transcript_json=json.dumps(traj.transcript.to_records(), ensure_ascii=False),
+                            meta=keymeta[key])
 
-        def on_error(key, exc):
-            return _row(key, setting_name="", turns=0, stop=f"ERROR: {exc}",
-                        transcript_json="[]", meta=keymeta[key])
+            def on_error(key, exc):
+                return _row(key, setting_name="", turns=0, stop=f"ERROR: {exc}",
+                            transcript_json="[]", meta=keymeta[key])
 
-        results = drive_generators(
-            gens, resolve=resolve, finalize=finalize, on_error=on_error,
-            progress=f"conversations {start // batch_size + 1}/{n_chunks}" if verbose else None,
-        )
-        rows = [results[(iid, it)] for iid, it, _t, _m in chunk]
-        append_rows(out, rows)
-        # Ack only after the CSV append (crash-safe), carrying stop_reason for context.
-        ledger.record([
-            {"input_id": r["input_id"], "iteration": r["iteration"], "stop_reason": r["stop_reason"]}
-            for r in rows
-        ])
-        if verbose:
-            logger.info("[%d/%d] wrote %d conversations", start + len(rows), n, len(rows))
+            results = drive_generators(
+                gens, resolve=resolve, finalize=finalize, on_error=on_error,
+                progress=f"conversations {start // batch_size + 1}/{n_chunks}" if verbose else None,
+            )
+            rows = [results[(iid, it)] for iid, it, _t, _m in chunk]
+            # The flush appends the chunk's rows, then acks them (crash-safe),
+            # carrying stop_reason for context.
+            for r in rows:
+                buf.add([r], {"input_id": r["input_id"], "iteration": r["iteration"],
+                              "stop_reason": r["stop_reason"]})
+            buf.flush()
+            if verbose:
+                logger.info("[%d/%d] wrote %d conversations", start + len(rows), n, len(rows))
 
     return read_rows(out)

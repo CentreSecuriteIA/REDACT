@@ -26,7 +26,7 @@ from pathlib import Path
 import pandas as pd
 
 from redact import paths
-from redact.dataset import Ledger, append_rows, read_rows
+from redact.dataset import CommitBuffer, Ledger, append_rows, read_rows
 from redact.llms import ModelClient
 from redact.llm_pipeline import batch_check_samples
 
@@ -142,31 +142,39 @@ def evaluate_conversations(
     n = len(pending)
     n_chunks = ceil(n / batch_size) if batch_size else 1
 
-    for start in range(0, n, batch_size):
-        chunk = pending.iloc[start : start + batch_size]
-        goals, samples = [], []
-        for _, row in chunk.iterrows():
-            seed, final = _seed_and_final(str(row.get("transcript", "")))
-            goals.append(seed)
-            if scope == "last_reply":
-                samples.append(final)
-            else:
-                samples.append(_render_transcript(str(row.get("transcript", ""))))
-        checks = batch_check_samples(
-            judge, samples, _build_check,
-            originals=goals,
-            batch_size=batch_size,
-            progress=f"judge {start // batch_size + 1}/{n_chunks}" if verbose else None,
-        )
-        rows = [
-            {"sample_id": str(row["sample_id"]), "success": bool(acc), "judge_reasoning": reason,
-             "judge_model": judge_model, "scope": scope}
-            for (_, row), (acc, reason) in zip(chunk.iterrows(), checks)
-        ]
-        append_rows(scored_path, rows)
-        ledger.record([{"sample_id": r["sample_id"]} for r in rows])
-        if verbose:
-            logger.info("[%d/%d] scored (%d success)",
-                        start + len(rows), n, sum(r["success"] for r in rows))
+    # One save per chunk, at the flush below: ``every`` is not reached before it.
+    with CommitBuffer(
+        append=lambda rows: append_rows(scored_path, rows), ledger=ledger, every=n
+    ) as buf:
+        for start in range(0, n, batch_size):
+            chunk = pending.iloc[start : start + batch_size]
+            goals, samples = [], []
+            for _, row in chunk.iterrows():
+                seed, final = _seed_and_final(str(row.get("transcript", "")))
+                goals.append(seed)
+                if scope == "last_reply":
+                    samples.append(final)
+                else:
+                    samples.append(_render_transcript(str(row.get("transcript", ""))))
+            checks = batch_check_samples(
+                judge, samples, _build_check,
+                originals=goals,
+                batch_size=batch_size,
+                progress=(
+                    f"judge {start // batch_size + 1}/{n_chunks}" if verbose else None
+                ),
+            )
+            rows = [
+                {"sample_id": str(row["sample_id"]), "success": bool(acc), "judge_reasoning": reason,
+                 "judge_model": judge_model, "scope": scope}
+                for (_, row), (acc, reason) in zip(chunk.iterrows(), checks)
+            ]
+            # The flush appends the chunk's rows, then acks them.
+            for r in rows:
+                buf.add([r], {"sample_id": r["sample_id"]})
+            buf.flush()
+            if verbose:
+                logger.info("[%d/%d] scored (%d success)",
+                            start + len(rows), n, sum(r["success"] for r in rows))
 
     return read_rows(scored_path)
