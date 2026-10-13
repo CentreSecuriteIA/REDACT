@@ -1,9 +1,4 @@
-"""Resume and commit: what a run skips, and rows before acks.
-
-A save is two synced appends: the rows of the finished units, then their
-acks, the last of which records the size and a checksum of every file of the
-stage (the ledger's ``_saved``). A unit is acked only once its rows are on
-disk, and a save counts only once its ``_saved`` line is.
+"""What a run skips, and what a resume puts back on disk.
 
 A stage that names its output to :func:`resume_state` resumes from the
 ledger alone. The resume takes the stage's lock, checks each file against
@@ -18,11 +13,7 @@ match. A file that matches and that no finished save recorded was first
 written by a save that did not finish, and is moved aside whole.
 
 A fresh run clears the artifact together with its ledger: acks left behind
-would make the next run skip every unit and write nothing. A fresh run of
-part of a stage removes that part's rows and acks alone
-(:func:`drop_units`), and leaves its name beside the ledger until it is
-done: no other run goes on in a folder where rows are gone and their acks
-are not.
+would make the next run skip every unit and write nothing.
 
 Known limits:
 
@@ -37,12 +28,11 @@ Known limits:
 
 from __future__ import annotations
 
-import csv
 import logging
 import os
 import shutil
 import zlib
-from collections.abc import Callable, Iterable, Iterator, Mapping, Sequence
+from collections.abc import Callable, Iterable, Mapping, Sequence
 from contextlib import suppress
 from pathlib import Path
 from typing import Any
@@ -51,7 +41,7 @@ from weakref import WeakKeyDictionary
 from filelock import FileLock, Timeout
 
 from .rows import _retry_held, keys_in
-from .sidecar import Ledger, LedgerState, Manifest, _replace
+from .sidecar import Ledger, LedgerState, Manifest
 
 logger = logging.getLogger(__name__)
 
@@ -418,84 +408,9 @@ def _ends_with_a_row(path: Path) -> bool:
         return fh.read() == b"\n"
 
 
-def drop_units(
-    ledger: Ledger,
-    *,
-    artifact: str | Path,
-    name: str,
-    rows: Callable[[Mapping[str, str]], bool],
-    acks: Callable[[Mapping[str, Any]], bool],
-    pattern: str | None = None,
-    units_in: _UnitsIn | None = None,
-) -> None:
-    """Take some units out of a stage: their rows and their acks.
-
-    For a fresh run of part of a stage: what is not picked keeps its rows
-    and its acks. The call makes this process the one writer of the stage,
-    as :func:`resume_state` does, and the resume that follows keeps the
-    lock.
-
-    The stage's files are first put back at the last finished save, as on a
-    resume. Each output file is then written again without the rows, and
-    last the ledger without the acks, ending in one line that records the
-    new sizes. Each goes through a temporary file and a rename.
-
-    In between, rows are gone whose acks are not. So before the first file
-    is replaced the call leaves its ``name`` beside the ledger, and removes
-    it once the ledger is written. While the name is there a resume stops,
-    and so does a call under another name. The same call, made again,
-    finishes the job: it alone takes a file as it is that is gone, or
-    shorter than recorded and whole to its last row.
-
-    Args:
-        ledger: The stage's ledger.
-        artifact: The stage's output, as for :func:`resume_state`.
-        name: What is started over, in words a later run can be told to
-            repeat. The call that finishes this one gives the same name.
-        rows: Picks the rows to remove, given a row's cells by column name.
-        acks: Picks the ledger records to remove.
-        pattern: As for :func:`resume_state`.
-        units_in: As for :func:`resume_state`: a folder written before the
-            ledger recorded sizes is taken over first.
-
-    Raises:
-        RuntimeError: As for :func:`resume_state`, or an output file does
-            not parse as CSV.
-        PermissionError: Another program holds a file that has to be
-            replaced.
-    """
-    outputs = _outputs(Path(artifact), pattern)
-    _lock(ledger)
-    try:
-        continued = _stop_on_unfinished_drop(ledger, unless=name)
-        state = ledger.read()
-        if state.saved is None:
-            _adopt(ledger, state, outputs, units_in)
-        else:
-            _put_back(ledger, state.saved, outputs, shorter_ok=continued)
-        if ledger.exists():
-            if not continued:
-                _mark_drop(ledger, name)
-            for recorded in ledger.saved or {}:
-                _rewrite_without(ledger.path.parent / recorded, rows)
-            ledger.rewrite(acks, _measured(ledger))
-        _retry_held(lambda: _drop_marker(ledger).unlink(missing_ok=True))
-    except BaseException:
-        release_lock(ledger)    # a call that stops holds nothing
-        raise
-
-
 def _drop_marker(ledger: Ledger) -> Path:
     """Where a :func:`drop_units` under way has its name: ``<ledger>.dropping``."""
     return ledger.path.with_name(ledger.path.name + ".dropping")
-
-
-def _mark_drop(ledger: Ledger, name: str) -> None:
-    """Leave ``name`` beside the ledger, synced, as a :func:`drop_units` under way."""
-    with _drop_marker(ledger).open("wb") as fh:
-        fh.write(name.encode("utf-8") + b"\n")
-        fh.flush()
-        os.fsync(fh.fileno())
 
 
 def _stop_on_unfinished_drop(ledger: Ledger, unless: str | None = None) -> bool:
@@ -529,173 +444,6 @@ def _left_shorter(path: Path, size: int) -> bool:
     if not path.is_file():
         return True
     return path.stat().st_size < size and _ends_with_a_row(path)
-
-
-def _rewrite_without(path: Path, drop: Callable[[Mapping[str, str]], bool]) -> None:
-    """Write the CSV at ``path`` again without the rows ``drop`` picks.
-
-    The rows that stay are the bytes they were. They are written to a file
-    beside ``path``, which is synced and renamed onto it, so the file holds
-    its old rows or the ones that stay. A file with no such row is left
-    alone, as is one that is gone. A file left with no row is removed, so
-    the next save writes its header.
-
-    Raises:
-        RuntimeError: The file does not parse as CSV.
-    """
-    if not path.is_file():
-        return
-    temporary = path.with_name(path.name + ".tmp")
-    dropped = kept = 0
-    try:
-        with (
-            path.open(encoding="utf-8", newline="") as old,
-            temporary.open("w", encoding="utf-8", newline="") as new,
-        ):
-            records = _records(old)
-            text, header = next(records, ("", []))
-            new.write(text)
-            # A spreadsheet saves the file with a byte-order mark.
-            columns = [name.lstrip("\ufeff") for name in header]
-            for text, cells in records:
-                if drop(dict(zip(columns, cells))):
-                    dropped += 1
-                else:
-                    new.write(text)
-                    kept += 1
-            if dropped and kept:    # it is going to be the file
-                new.flush()
-                os.fsync(new.fileno())
-        if dropped and kept:
-            _replace(temporary, path)
-        elif dropped:
-            _retry_cut(path, path.unlink)
-    except (csv.Error, UnicodeError) as error:
-        raise RuntimeError(
-            f"Cannot write {path} again without some of its rows: {error}. "
-            "Repair the file, or start the whole stage over."
-        ) from error
-    finally:
-        # Still there unless it was renamed onto the file.
-        temporary.unlink(missing_ok=True)
-
-
-def _records(lines: Iterable[str]) -> Iterator[tuple[str, list[str]]]:
-    """Each record of a CSV read line by line: its text in the file, its cells.
-
-    A record is several lines when a cell holds a line break.
-    """
-    taken: list[str] = []
-
-    def take() -> Iterator[str]:
-        for line in lines:
-            taken.append(line)
-            yield line
-
-    # strict: a file that ends inside a quoted cell raises, not a short record.
-    for cells in csv.reader(take(), strict=True):
-        yield "".join(taken), cells
-        taken.clear()
-
-
-def _measured(ledger: Ledger) -> dict[str, list]:
-    """The ``_saved`` of the files the ledger records, as they are on disk now.
-
-    A file that is gone is left out.
-    """
-    saved = {}
-    for name in ledger.saved or {}:
-        path = ledger.path.parent / name
-        if path.is_file():
-            size = path.stat().st_size
-            saved[name] = [size, _checksum(path, size)]
-    return saved
-
-
-def commit(
-    rows: Sequence[Mapping[str, Any]],
-    *,
-    append: Callable[[Sequence[Mapping[str, Any]]], Mapping[Path, int] | None],
-    ledger: Ledger,
-    records: Iterable[Mapping[str, Any]] | None = None,
-) -> None:
-    """Write rows, then ack their units, never the other way round.
-
-    Args:
-        rows: Output rows for this unit or chunk. Empty skips the append: a
-            unit that produced no rows is still acked, or it would be
-            retried forever.
-        append: Writes the rows. If it raises, nothing is acked and the
-            units run again. On a ledger that :func:`resume_state` opened
-            with its artifact it returns the size of each file it wrote, by
-            path, as ``append_rows`` does.
-        ledger: The stage's ledger.
-        records: The ack records. Defaults to the ledger's key fields taken
-            from each row; pass them when a unit has no row or its record
-            carries more than the key.
-
-    Raises:
-        ValueError: Rows are given with no record; nothing is written, since
-            rows on disk that no unit owns would be acked by the next save.
-            Or the ledger holds ``_saved`` and no resume opened it: the rows
-            are appended, their acks are refused, and the next resume cuts
-            the rows off.
-        RuntimeError: On an opened ledger, a file changed since the last
-            save, or the append reported no size. Nothing is acked.
-    """
-    if records is None:
-        records = [{k: r[k] for k in ledger.key_fields} for r in rows]
-    records = list(records)
-    if not records:
-        if rows:
-            raise ValueError(f"{len(rows)} rows to commit and no record to ack them.")
-        return
-    if _opened(ledger):
-        _save(rows, records, append, ledger)
-    else:
-        if rows:
-            append(rows)
-        ledger.record(records)
-
-
-def _save(rows, records, append, ledger: Ledger) -> None:
-    """One save on a ledger that :func:`resume_state` opened with its artifact.
-
-    Each file must still have the size the ledger last recorded. A new
-    ledger gets its opening line, synced, before the first rows: rows on
-    disk beside no ledger would read as a folder to take over. The last ack
-    carries the size and a checksum of every file of the stage.
-    """
-    _check_sizes(ledger)
-    if ledger.saved is None:
-        ledger.record([], saved={})
-    sizes = append(rows) if rows else {}
-    if rows and not sizes:
-        # Acked without their size, the rows would be cut off by the next resume.
-        raise RuntimeError(
-            f"The append of {len(rows)} rows reported no file size, so "
-            f"{ledger.path} cannot record them. Return what append_rows returns."
-        )
-    ledger.record(records, saved=_saved(ledger, sizes))
-
-
-def _check_sizes(ledger: Ledger) -> None:
-    """Stop a save unless each file still has the size the ledger recorded.
-
-    A file that changed since the last save has another writer. The check
-    asks nothing of the storage, so it also holds on a volume that ignores
-    the lock.
-    """
-    for name, (size, _) in (ledger.saved or {}).items():
-        path = ledger.path.parent / name
-        actual = path.stat().st_size if path.is_file() else None
-        if actual != size:
-            now = "missing" if actual is None else f"{actual} bytes"
-            raise RuntimeError(
-                f"{path} is {now} and {ledger.path.name} recorded {size} bytes "
-                "after the last save: something else changed the file. Nothing "
-                "was saved. Stop the other writer, then resume."
-            )
 
 
 def _saved(ledger: Ledger, sizes: Mapping[Path, int]) -> dict[str, list]:
@@ -738,83 +486,3 @@ def _checksum(path: str | Path, size: int) -> str:
     with open(path, "rb") as fh:
         fh.seek(start)
         return f"{zlib.crc32(fh.read(size - start)):08x}"
-
-
-class CommitBuffer:
-    """Commit finished units in batches: their rows first, their acks after.
-
-    ``add()`` queues one unit. Every ``every`` units, and on leaving the
-    ``with`` block, the queued rows are appended and the queued records
-    acked through :func:`commit`. The exit flush runs whatever ended the
-    block: a finished unit is complete, so a crash loses only the live ones.
-    Leaving the block also gives back the lock :func:`resume_state` took.
-
-    Usage::
-
-        done = resume_state(ledger, resume=True, artifact=out)
-        with CommitBuffer(append=write_rows, ledger=ledger) as buf:
-            drive_units(source, pool_size=32,
-                        on_done=lambda key, value: buf.add(rows_of(value), {"input_id": key}))
-    """
-
-    def __init__(self, *, append, ledger: Ledger, every: int = 32):
-        """Set up a buffer that commits through ``append`` and ``ledger``.
-
-        Args:
-            append: Writes a batch of rows, as for :func:`commit`.
-            ledger: The stage's ledger.
-            every: Units per flush, at least 1.
-        """
-        if every < 1:
-            raise ValueError(f"every must be at least 1, got {every}.")
-        self._append, self._ledger, self.every = append, ledger, every
-        self._units: list[tuple[list, Mapping[str, Any]]] = []   # (rows, record)
-        self.committed = 0   # units committed so far
-
-    def add(self, rows: Iterable[Any], record: Mapping[str, Any]) -> None:
-        """Queue one finished unit: its rows (possibly none) and its ack record.
-
-        The two are queued as one object, so an interrupt cannot leave a
-        unit's rows in a save that does not ack it.
-        """
-        self._units.append((list(rows), record))
-        if len(self._units) >= self.every:
-            self.flush()
-
-    def flush(self) -> None:
-        """Commit everything queued.
-
-        The queue is emptied before the write, so a failed append leaves
-        its units un-acked and never re-appended.
-        """
-        if not self._units:
-            return
-        units, self._units = self._units, []
-        commit(
-            [row for rows, _ in units for row in rows],
-            append=self._append,
-            ledger=self._ledger,
-            records=[record for _, record in units],
-        )
-        self.committed += len(units)
-
-    def __enter__(self):
-        """Refuse a ledger that records sizes and that no resume opened.
-
-        Saving onto it would leave what an unfinished save left in the file.
-        """
-        if self._ledger.saved is not None and not _opened(self._ledger):
-            raise RuntimeError(
-                f"{self._ledger.path} records the size of each file, and "
-                "resume_state has not opened it in this process. Call "
-                "resume_state(ledger, resume=..., artifact=...) before the "
-                "CommitBuffer."
-            )
-        return self
-
-    def __exit__(self, exc_type, exc, tb):
-        try:
-            self.flush()
-        finally:
-            release_lock(self._ledger)
-        return False

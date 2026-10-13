@@ -223,7 +223,9 @@ src/redact/
 │   ├── identity.py                # content_id (content hash of a text), row_id / row_ids
 │   ├── rows.py                    # The rows of one CSV: append_rows, read_rows, iter_rows, count_rows
 │   ├── sidecar.py                 # JsonlSidecar, Ledger (*.state.jsonl), Manifest (*.manifest.jsonl)
-│   ├── resume.py                  # resume_state, drop_units, commit / CommitBuffer (rows, then acks)
+│   ├── resume.py                  # resume_state (lock, check, cut back), release_lock
+│   ├── commit.py                  # commit / CommitBuffer: a save (rows, then acks)
+│   ├── drop.py                    # drop_units: a fresh run of part of a stage
 │   ├── categories.py              # The per-category tree: append_samples, merge_all, merge_inputs
 │   ├── loading.py                 # HuggingFace dataset loading
 │   └── taxonomy.py                # Taxonomy and seed file loading, category iteration

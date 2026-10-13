@@ -38,14 +38,20 @@ from .categories import (
     take_per_group,
 )
 
+# Rows before acks
+from .commit import CommitBuffer, commit
+
+# Starting part of a stage over
+from .drop import drop_units
+
 # Row identity
 from .identity import content_id, row_id, row_ids
 
 # Published datasets
 from .loading import load_from_config, load_hf_dataset
 
-# Resume and commit
-from .resume import CommitBuffer, commit, drop_units, release_lock, resume_state
+# What a run skips
+from .resume import release_lock, resume_state
 
 # Rows in one CSV
 from .rows import append_rows, check_columns, count_rows, iter_rows, keys_in, read_rows

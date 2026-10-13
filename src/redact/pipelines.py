@@ -1065,7 +1065,7 @@ def generate_jailbreaks(
         _add(plan_row, _finalize_error(sample, exc, model))
 
     # A unit whose chain raises gets an error row and is acked. The buffer
-    # appends, then acks (see dataset/resume.py), every 32 units and on any
+    # appends, then acks (see dataset/commit.py), every 32 units and on any
     # exit.
     with (
         closing(_units()) as units,
