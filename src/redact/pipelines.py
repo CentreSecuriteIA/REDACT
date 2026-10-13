@@ -50,6 +50,7 @@ from redact.content_moderation.paraphrase import (
 from redact.dataset import (
     CommitBuffer,
     Ledger,
+    content_id,
     iter_categories,
     load_seeds,
     load_taxonomy,
@@ -65,7 +66,6 @@ from redact.jailbreak import (
     build_combination,
     build_function_registry,
     completed_from_output,
-    compute_sample_id,
     default_manifest_path,
     get_all_hacking_functions,
     get_all_manipulation_functions,
@@ -533,7 +533,7 @@ def generate_outputs(
       3. Incremental append to the output CSV as rows finish — crash-resilient.
 
     Resume: each input gets a stable content-hash id (its ``id`` column when
-    present, else ``_hash_text(prompt)``). Completed ids are recorded in a
+    present, else ``content_id(prompt)``). Completed ids are recorded in a
     sidecar ``*.state.jsonl`` ledger beside the output CSV. On a re-run
     (``resume=True``) inputs already in the ledger are skipped, so a crash loses
     only the rows still in progress. ``resume=False`` clears both the CSV and
@@ -578,7 +578,7 @@ def generate_outputs(
         ``input_id``, ``sample_id``, ``input_prompt``, ``category``,
         ``subcategory``, ``entry_type``, ``output_response``, ``accepted``,
         ``rejection_reason``, ``model``, ``source``. ``sample_id`` is this
-        row's own content-hash identity (``_hash_text(output_response)``),
+        row's own content-hash identity (``content_id(output_response)``),
         distinct from ``input_id`` (the origin sample it responds to).
     """
     ds_dir = paths.datasets(data_dir)
@@ -716,7 +716,7 @@ def generate_jailbreaks(
         ``technique``, ``technique_info``, ``complexity``, ``num_techniques``,
         ``is_noop``, ``accepted``, ``reasoning``, ``iteration``,
         ``combination_spec_version``. ``sample_id`` is this row's own
-        content-hash identity (``_hash_text(jailbreak_text)``), distinct from
+        content-hash identity (``content_id(jailbreak_text)``), distinct from
         ``input_id`` (the origin sample it was derived from).
     """
     out = Path(output_path) if output_path else paths.jailbreaks_csv(data_dir)
@@ -739,12 +739,12 @@ def generate_jailbreaks(
         inputs = inputs[inputs["entry_type"].isin(entry_types)].reset_index(drop=True)
 
     if "sample_id" not in inputs.columns:
-        inputs["sample_id"] = inputs["prompt"].map(lambda p: compute_sample_id(str(p)))
+        inputs["sample_id"] = inputs["prompt"].map(lambda p: content_id(str(p)))
     else:
         missing = inputs["sample_id"].isna() | (inputs["sample_id"].astype(str).isin(["", "nan"]))
         if missing.any():
             inputs.loc[missing, "sample_id"] = inputs.loc[missing, "prompt"].map(
-                lambda p: compute_sample_id(str(p))
+                lambda p: content_id(str(p))
             )
     inputs["sample_id"] = inputs["sample_id"].astype(str)
 

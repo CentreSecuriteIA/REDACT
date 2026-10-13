@@ -60,10 +60,10 @@ def test_paraphrase_inputs_dedup_and_manifest(tmp_path, patched):
     assert out.with_name("paraphrases_inputs.manifest.jsonl").exists()
     # sample_id is this row's own content-hash identity, distinct from input_id
     # (which points back to the origin sample).
-    from redact.dataset.io import _hash_text
+    from redact.dataset import content_id
     assert "sample_id" in df.columns
     for _, row in df.iterrows():
-        assert row["sample_id"] == _hash_text(row["sample"])
+        assert row["sample_id"] == content_id(row["sample"])
         assert row["sample_id"] != row["input_id"]
 
 

@@ -8,7 +8,6 @@ Extra metadata columns (reasoning, technique, language, etc.) are
 preserved — the standard columns are a minimum, not a fixed schema.
 """
 
-import hashlib
 from pathlib import Path
 
 import pandas as pd
@@ -16,6 +15,8 @@ import pandas as pd
 # Default dataset directory + per-category layout come from the single-source
 # path module so this and the pipelines never drift.
 from redact import paths
+
+from .identity import content_id
 
 
 def _default_dataset_dir() -> Path:
@@ -37,11 +38,6 @@ SAMPLE_COLUMNS: list[str] = [
     "rejection_reason",  # Checker reasoning on reject; "" on accept
     "source",            # metaprompt / constitution / handcrafted / generated
 ]
-
-
-def _hash_text(text: str) -> str:
-    """MD5 hash of sample text, truncated to 16 hex chars."""
-    return hashlib.md5(text.encode("utf-8")).hexdigest()[:16]
 
 
 def _resolve_path(
@@ -165,7 +161,7 @@ def append_samples(
 
     new_rows: list[dict] = []
     for i, (text, acc) in enumerate(zip(samples, accepted)):
-        sample_id = _hash_text(text)
+        sample_id = content_id(text)
         if sample_id not in existing_ids:
             row = {
                 "sample_id": sample_id,

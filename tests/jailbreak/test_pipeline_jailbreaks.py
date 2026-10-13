@@ -11,8 +11,9 @@ LLM-backed fake techniques over a hand-written plan against a fake backend.
 import pandas as pd
 import pytest
 
+from redact.dataset import content_id
 from redact.exceptions import PromptTooLongError
-from redact.jailbreak.manifest import compute_sample_id, load_plan
+from redact.jailbreak.manifest import load_plan
 from redact.jailbreak.protocol import LLMRequest
 from redact.llms.backends import ComputeConfig
 from redact.pipelines import generate_jailbreaks
@@ -65,7 +66,7 @@ def test_plan_then_execute(tmp_path):
 
     # One output row per sample, linked by prompt-content id.
     assert len(df) == 5
-    ids = {compute_sample_id(p) for p in _inputs()["prompt"]}
+    ids = {content_id(p) for p in _inputs()["prompt"]}
     assert set(df["input_id"].astype(str)) == ids
     assert "jailbreak" in df.columns and "combination_spec_version" in df.columns
 
@@ -268,7 +269,7 @@ def _llm_run(tmp_path, monkeypatch, plan, backend, **kwargs):
 
     out = tmp_path / "jb.csv"
     Manifest(out.with_name("jb.manifest.jsonl")).write(
-        {"sample_id": compute_sample_id(p), "iteration": 0, "combination": [t.__name__],
+        {"sample_id": content_id(p), "iteration": 0, "combination": [t.__name__],
          "settings": {}, "status": "planned"}
         for p, t in plan
     )
@@ -281,7 +282,6 @@ def _llm_run(tmp_path, monkeypatch, plan, backend, **kwargs):
 
 
 def test_pool_run_without_retries_writes_the_same_rows(tmp_path, monkeypatch):
-    from redact.dataset.io import _hash_text
     from redact.jailbreak import load_spec
 
     techniques = [two_step, one_step, broken, one_step, one_step, one_step]
@@ -298,7 +298,7 @@ def test_pool_run_without_retries_writes_the_same_rows(tmp_path, monkeypatch):
     def row(prompt, technique, text, info, accepted, reasoning):
         return {
             "prompt": prompt, "category": "Cyber", "entry_type": "harmful",
-            "sample_id": _hash_text(text), "input_id": compute_sample_id(prompt),
+            "sample_id": content_id(text), "input_id": content_id(prompt),
             "jailbreak": text, "technique": technique, "technique_info": info,
             "complexity": "0", "num_techniques": "1", "is_noop": str(text == prompt),
             "accepted": str(accepted), "reasoning": reasoning, "iteration": "0",
@@ -372,7 +372,6 @@ def test_pool_a_prompt_too_long_lands_in_the_units_error_row(tmp_path, monkeypat
     """The stage's on_error makes an error row of whatever a unit raises. The
     unit is acked and the others finish."""
     from redact.dataset import Ledger
-    from redact.dataset.io import _hash_text
 
     plan = [("zq0", one_step), ("zq1", two_step), ("zq2", one_step)]
     backend = _LaneStepBackend(too_long={"step2 S1:zq1"})
@@ -384,7 +383,7 @@ def test_pool_a_prompt_too_long_lands_in_the_units_error_row(tmp_path, monkeypat
     assert {k: rows["zq1"][k] for k in (
         "sample_id", "jailbreak", "technique", "technique_info", "is_noop",
         "accepted", "reasoning")} == {
-        "sample_id": _hash_text("zq1"), "jailbreak": "zq1", "technique": "two_step",
+        "sample_id": content_id("zq1"), "jailbreak": "zq1", "technique": "two_step",
         "technique_info": f"ERROR: {message}", "is_noop": "True",
         "accepted": "False", "reasoning": message}
     assert {p: (rows[p]["jailbreak"], rows[p]["accepted"]) for p in ("zq0", "zq2")} == {
@@ -392,4 +391,4 @@ def test_pool_a_prompt_too_long_lands_in_the_units_error_row(tmp_path, monkeypat
     assert len(df) == len(plan)
     ledger = Ledger.sidecar(out, key_fields=("input_id", "iteration"),
                             casters={"input_id": str, "iteration": int})
-    assert ledger.completed() == {(compute_sample_id(p), 0) for p, _ in plan}
+    assert ledger.completed() == {(content_id(p), 0) for p, _ in plan}

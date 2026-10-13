@@ -37,17 +37,12 @@ from pathlib import Path
 
 import pandas as pd
 
-from redact.dataset.io import _hash_text
+from redact.dataset import content_id
 from redact.dataset.manifest import Manifest
 
 from .utils import assign_combination
 
 logger = logging.getLogger(__name__)
-
-
-def compute_sample_id(prompt: str) -> str:
-    """Prompt-content id — matches ``dataset.io._hash_text`` (MD5, 16 hex)."""
-    return _hash_text(prompt)
 
 
 def default_manifest_path(output_path) -> Path:
@@ -99,7 +94,7 @@ def plan_run(
         if has_id and pd.notna(row.get(id_col)) and str(row.get(id_col)):
             sid = str(row[id_col])
         else:
-            sid = compute_sample_id(str(row[text_col]))
+            sid = content_id(str(row[text_col]))
 
         used: list[tuple] = []
         for it in range(iterations):

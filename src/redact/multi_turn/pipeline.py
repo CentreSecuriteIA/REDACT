@@ -21,7 +21,7 @@ from pathlib import Path
 import pandas as pd
 
 from redact import paths
-from redact.dataset.io import _hash_text
+from redact.dataset import content_id
 from redact.dataset.ledger import Ledger
 from redact.dataset.manifest import Manifest
 from redact.llm_pipeline import drive_generators
@@ -95,7 +95,7 @@ def generate_conversations(
 
     def _input_id(row) -> str:
         existing = str(row.get("sample_id", "")).strip()
-        return existing if existing and existing.lower() != "nan" else _hash_text(str(row[tcol]))
+        return existing if existing and existing.lower() != "nan" else content_id(str(row[tcol]))
 
     if not resume:
         ledger.reset()
@@ -126,7 +126,7 @@ def generate_conversations(
 
     def _row(key, *, setting_name, turns, stop, transcript_json, meta):
         return {
-            "sample_id": _hash_text(f"{key[0]}:{key[1]}"),
+            "sample_id": content_id(f"{key[0]}:{key[1]}"),
             "input_id": key[0], "iteration": key[1], "setting": setting_name,
             "turns_used": turns, "stop_reason": stop, "transcript": transcript_json,
             "category": meta["category"], "entry_type": meta["entry_type"],

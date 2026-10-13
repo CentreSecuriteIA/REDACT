@@ -99,7 +99,7 @@ class TestBatchApplyCombinations:
         # Regression test: sample_id used to be silently inherited from the input
         # row (== input_id) for every technique/iteration variant of the same
         # input. It must now be a hash of the jailbroken text itself.
-        from redact.dataset.io import _hash_text
+        from redact.dataset import content_id
 
         samples = [
             _sample(0, "alpha", upper),
@@ -112,7 +112,7 @@ class TestBatchApplyCombinations:
         sample_ids = {r["sample_id"] for r in results}
         assert len(sample_ids) == 2  # distinct per row, not both == "id0"
         for r in results:
-            assert r["sample_id"] == _hash_text(r["jailbreak"])
+            assert r["sample_id"] == content_id(r["jailbreak"])
             assert r["sample_id"] != r["input_id"]
 
     def test_one_batch_call_per_model_per_round(self):

@@ -23,7 +23,7 @@ runs the same chains synchronously via ``protocol.run_sync``.
 
 from __future__ import annotations
 
-from redact.dataset.io import _hash_text
+from redact.dataset import content_id
 from redact.llm_pipeline import drive_generators
 
 from .utils import _parse_rejection_info, is_noop, make_combination_gen
@@ -53,7 +53,7 @@ def _finalize(sample: dict, value, gen_model: str, resolve=None) -> dict:
     accepted, reasoning = _parse_rejection_info(info)
     fn = sample["combination"]
     techniques = list(getattr(fn, "techniques", []))
-    sample_id = _hash_text(text)
+    sample_id = content_id(text)
     _rename_capture(sample, gen_model, sample_id, resolve=resolve)
     return {
         "input_id": sample.get("id", ""),
@@ -73,7 +73,7 @@ def _finalize_error(sample: dict, exc: Exception, gen_model: str, resolve=None) 
     """Build the output row for a sample whose chain raised — original kept."""
     fn = sample["combination"]
     techniques = list(getattr(fn, "techniques", []))
-    sample_id = _hash_text(sample["prompt"])
+    sample_id = content_id(sample["prompt"])
     _rename_capture(sample, gen_model, sample_id, resolve=resolve)
     return {
         "input_id": sample.get("id", ""),

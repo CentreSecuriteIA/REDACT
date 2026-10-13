@@ -50,7 +50,8 @@ from pathlib import Path
 
 import pandas as pd
 
-from ..dataset.io import _default_dataset_dir, _hash_text, append_samples
+from ..dataset import content_id
+from ..dataset.io import _default_dataset_dir, append_samples
 from ..dataset.ledger import Ledger
 from ..dataset.manifest import Manifest
 from ..dataset.resume import CommitBuffer, resume_state
@@ -469,7 +470,7 @@ class InputPipeline(_StandaloneGenerationMixin):
             }
             # Pre-call identity (the ledger's own key fields): the samples
             # do not exist yet, so captured internals are rooted here.
-            eid = _hash_text(
+            eid = content_id(
                 f"{seed_kwargs['sample_description']}:{seed_kwargs['entry_type']}:{style}"
             )
             # A reply with any other number of samples is rejected whole and
@@ -518,7 +519,7 @@ class InputPipeline(_StandaloneGenerationMixin):
                     response = yield LLMRequest.for_client(
                         self.check, checker("", s),
                         internals_id=(
-                            f"{_hash_text(s)}/{suffix}" if capture_val_in else None
+                            f"{content_id(s)}/{suffix}" if capture_val_in else None
                         ),
                         max_tokens=check_max_tokens,
                     )
@@ -726,7 +727,7 @@ def run_output_generation(
     ``"prompt too long: <message>"``.
 
     Resume: each input gets a stable content-hash id (its ``id``/``sample_id``
-    column when present, else ``_hash_text(prompt)``). Completed ids are
+    column when present, else ``content_id(prompt)``). Completed ids are
     recorded in a sidecar ``*.state.jsonl`` ledger beside ``out_path``. On a
     re-run (``resume=True``) inputs already in the ledger are skipped, so a
     crash loses only the live units. ``resume=False`` clears both the CSV and
@@ -757,7 +758,7 @@ def run_output_generation(
         ``input_id``, ``sample_id``, ``input_prompt``, ``category``,
         ``subcategory``, ``entry_type``, ``output_response``, ``accepted``,
         ``rejection_reason``, ``model``, ``source``. ``sample_id`` is this
-        row's own content-hash identity (``_hash_text(output_response)``),
+        row's own content-hash identity (``content_id(output_response)``),
         distinct from ``input_id`` (the origin sample it responds to).
     """
     # Internals capture (opt-in): only true for an introspection-capable
@@ -782,7 +783,7 @@ def run_output_generation(
         existing = str(row.get("sample_id", "")).strip()
         if existing and existing.lower() != "nan":
             return existing
-        return _hash_text(str(row[text_col]))
+        return content_id(str(row[text_col]))
 
     inputs = inputs.copy()
     inputs["_state_id"] = [_input_id(row) for _, row in inputs.iterrows()]
@@ -883,7 +884,7 @@ def run_output_generation(
     def _on_done(i, value):
         resp, accepted, reasoning = value
         r = live_rows.pop(i)
-        r["sample_id"] = _hash_text(resp)
+        r["sample_id"] = content_id(resp)
         r["output_response"] = resp
         r["accepted"] = accepted
         r["rejection_reason"] = reasoning

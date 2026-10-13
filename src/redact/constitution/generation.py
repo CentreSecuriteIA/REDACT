@@ -26,7 +26,7 @@ from pathlib import Path
 
 import pandas as pd
 
-from ..dataset.io import _hash_text
+from ..dataset import content_id
 from ..dataset.ledger import Ledger
 from ..dataset.manifest import Manifest
 from ..dataset.taxonomy import iter_categories
@@ -57,7 +57,7 @@ class ConstitutionEntry:
     sample_id: str = field(init=False, default="")  # this entry's own content-hash identity
 
     def __post_init__(self) -> None:
-        self.sample_id = _hash_text(self.sample)
+        self.sample_id = content_id(self.sample)
 
 
 @dataclass

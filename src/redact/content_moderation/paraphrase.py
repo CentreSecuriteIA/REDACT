@@ -29,8 +29,7 @@ from pathlib import Path
 import pandas as pd
 
 from .. import paths
-from ..dataset import Ledger, Manifest, merge_all, resume_state
-from ..dataset.io import _hash_text
+from ..dataset import Ledger, Manifest, content_id, merge_all, resume_state
 from ..llms.client import ModelClient
 from ..llms.model_config import default_model_for_role, get_models_by_role
 from ..llms.prompting import build_messages, load_prompt
@@ -203,7 +202,7 @@ def run_paraphrase_target(
         existing = str(row.get(id_col, "")).strip()
         if existing and existing.lower() != "nan":
             return existing
-        return _hash_text(str(row[text_col]))
+        return content_id(str(row[text_col]))
 
     # ---- Resume via a sidecar STATE LEDGER (like constitution/output) ---------
     # The ledger records every *attempted* (base_id, iteration) unit + its model +
@@ -330,7 +329,7 @@ def run_paraphrase_target(
                                    "paraphrase_model": m, "status": "dropped_dedup"})
                     continue  # dedup: drop no-op / duplicate paraphrases
                 seen_texts.add(pt)
-                sample_id = _hash_text(pt)
+                sample_id = content_id(pt)
                 if capture_paraphrase:
                     client.rename_capture(prov_id, f"{bid}/paraphrase/{sample_id}")
                 rows.append({

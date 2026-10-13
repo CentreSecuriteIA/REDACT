@@ -121,8 +121,7 @@ class TestGenerateOutputsManifest:
         # records every planned unit in the manifest.
         import redact.pipelines as P
         from redact import generate_outputs, paths
-        from redact.dataset import Ledger, Manifest
-        from redact.dataset.io import _hash_text
+        from redact.dataset import Ledger, Manifest, content_id
         from tests.conftest import MockBackend, make_client
 
         monkeypatch.setattr(P.ModelClient, "create", lambda m: make_client(MockBackend("ans"), m))
@@ -133,7 +132,7 @@ class TestGenerateOutputsManifest:
         out = paths.output_responses_csv(tmp_path)
         # Pre-seed the ledger as if "p one" was already completed.
         Ledger.sidecar(out, key_fields=("input_id",), casters={"input_id": str}).record(
-            [{"input_id": _hash_text("p one")}]
+            [{"input_id": content_id("p one")}]
         )
 
         generate_outputs(data_dir=tmp_path, inputs=inputs, check_outputs=False,
@@ -150,14 +149,14 @@ class TestGenerateOutputsResume:
         *second* row for it — two rows, two sample_ids, no dedup downstream."""
         import redact.pipelines as P
         from redact import generate_outputs, paths
-        from redact.dataset.io import _hash_text
+        from redact.dataset import content_id
         from tests.conftest import MockBackend, make_client
 
         out = paths.output_responses_csv(tmp_path)
         out.parent.mkdir(parents=True, exist_ok=True)
         # Same column order the stage appends in, since the append is headerless.
         pd.DataFrame([{
-            "input_id": _hash_text("p one"), "input_prompt": "p one",
+            "input_id": content_id("p one"), "input_prompt": "p one",
             "category": "Cyber", "subcategory": "", "entry_type": "harmful",
             "model": "mock-model", "source": "", "sample_id": "prior",
             "output_response": "written before the crash",
@@ -175,7 +174,7 @@ class TestGenerateOutputsResume:
 
         assert len(backend.calls) == 1                      # only "p two" generated
         assert len(df) == 2                                 # prior row kept, one added
-        assert list(df["input_id"]).count(_hash_text("p one")) == 1
+        assert list(df["input_id"]).count(content_id("p one")) == 1
 
 
 class TestGenerateOutputsInternals:
@@ -281,7 +280,7 @@ class TestGenerateOutputsSampleId:
     def test_sample_id_matches_hash_of_output_response(self, tmp_path, monkeypatch):
         import redact.pipelines as P
         from redact import generate_outputs
-        from redact.dataset.io import _hash_text
+        from redact.dataset import content_id
         from tests.conftest import MockBackend, make_client
 
         monkeypatch.setattr(P.ModelClient, "create", lambda m: make_client(MockBackend("a plain answer"), m))
@@ -292,7 +291,7 @@ class TestGenerateOutputsSampleId:
 
         assert "sample_id" in df.columns
         for _, row in df.iterrows():
-            assert row["sample_id"] == _hash_text(row["output_response"])
+            assert row["sample_id"] == content_id(row["output_response"])
             assert row["sample_id"] != row["input_id"]
 
 
@@ -487,7 +486,7 @@ class TestGenerateOutputsPool:
 
     def test_a_run_without_retries_writes_the_same_rows(self, tmp_path, monkeypatch):
         from redact import generate_outputs, paths
-        from redact.dataset.io import _hash_text
+        from redact.dataset import content_id
 
         gen = _TokenBackend(lambda t, text: f"answer {t}", "gen-model")
         # Odd tokens rejected; one attempt, so no retries.
@@ -509,10 +508,10 @@ class TestGenerateOutputsPool:
             "rejection_reason",
         ]
         expected = {
-            _hash_text(t): {
-                "input_id": _hash_text(t), "input_prompt": t, "category": "Cyber",
+            content_id(t): {
+                "input_id": content_id(t), "input_prompt": t, "category": "Cyber",
                 "subcategory": "", "entry_type": "harmful", "model": "gen-model",
-                "source": "", "sample_id": _hash_text(f"answer {t}"),
+                "source": "", "sample_id": content_id(f"answer {t}"),
                 "output_response": f"answer {t}", "accepted": str(i % 2 == 0),
                 "rejection_reason": f"No: weak {t}" if i % 2 else "",
             }
@@ -618,8 +617,7 @@ class TestGenerateOutputsPool:
     def test_a_prompt_too_long_is_a_rejected_row_and_is_not_sent_again(
             self, tmp_path, monkeypatch, caplog):
         from redact import generate_outputs, paths
-        from redact.dataset import Ledger
-        from redact.dataset.io import _hash_text
+        from redact.dataset import Ledger, content_id
 
         tokens = ["zq0", "zq1", "zq2"]
         inputs = pd.DataFrame({
@@ -637,16 +635,16 @@ class TestGenerateOutputsPool:
             first = run()
         assert sorted(first.sent) == tokens
         assert [r.getMessage() for r in caplog.records] == [
-            f"Input {_hash_text('zq1')} rejected, its prompt is too long: "
+            f"Input {content_id('zq1')} rejected, its prompt is too long: "
             "zq1 is over the context"]
 
         out = paths.output_responses_csv(tmp_path)
         df = pd.read_csv(out, dtype=str, keep_default_na=False)
         rows = {r["input_prompt"]: r for r in df.to_dict("records")}
         assert rows["zq1"] == {
-            "input_id": _hash_text("zq1"), "input_prompt": "zq1", "category": "Cyber",
+            "input_id": content_id("zq1"), "input_prompt": "zq1", "category": "Cyber",
             "subcategory": "", "entry_type": "harmful", "model": "gen-model",
-            "source": "", "sample_id": _hash_text(""), "output_response": "",
+            "source": "", "sample_id": content_id(""), "output_response": "",
             "accepted": "False",
             "rejection_reason": "prompt too long: zq1 is over the context",
         }
@@ -656,7 +654,7 @@ class TestGenerateOutputsPool:
             "zq0": ("answer zq0", "True"), "zq2": ("answer zq2", "True")}
         ledger = Ledger.sidecar(out, key_fields=("input_id",),
                                 casters={"input_id": str})
-        assert ledger.completed() == {_hash_text(t) for t in tokens}
+        assert ledger.completed() == {content_id(t) for t in tokens}
 
         assert run().sent == []
         assert len(pd.read_csv(out)) == len(tokens)

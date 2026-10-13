@@ -250,7 +250,7 @@ def _rows(tmp_path):
 
 
 def test_pool_run_without_retries_writes_the_same_rows(tmp_path):
-    from redact.dataset.io import _hash_text
+    from redact.dataset import content_id
 
     gen = _TokenBackend(lambda t, n: f"1. first sample {t}\n2. second sample {t}")
     # Every second sample of an odd entry is rejected.
@@ -262,7 +262,7 @@ def test_pool_run_without_retries_writes_the_same_rows(tmp_path):
         text = f"{which} sample zq{i}"
         category = ("Violence", "Privacy")[i % 2]
         return {
-            "sample_id": _hash_text(text), "sample": text, "category": category,
+            "sample_id": content_id(text), "sample": text, "category": category,
             "turn": "0", "accepted": str(accepted), "source": "constitution",
             "entry_type": "harmful", "subcategory": "Sub",
             "source_sample_description": f"desc zq{i}", "constitution_category": "",

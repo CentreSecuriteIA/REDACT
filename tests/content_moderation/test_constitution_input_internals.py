@@ -13,7 +13,7 @@ import pytest
 
 import tests.content_moderation.test_constitution_input_ledger as ledger_mod
 from redact.content_moderation.generation import InputPipeline
-from redact.dataset.io import _hash_text
+from redact.dataset import content_id
 from redact.llms.backends import ComputeConfig
 from tests.conftest import MockBackend, make_client
 
@@ -74,8 +74,8 @@ def test_gen_internals_id_is_entry_hash_slash_input(tmp_path):
 
     seen = {c["internals_id"] for c in gen.calls}
     expected = {
-        f'{_hash_text("desc one:harmful:")}/input',
-        f'{_hash_text("desc two:benign:")}/input',
+        f'{content_id("desc one:harmful:")}/input',
+        f'{content_id("desc two:benign:")}/input',
     }
     assert seen == expected
 
@@ -88,8 +88,8 @@ def test_gen_internals_id_includes_style_suffix(tmp_path):
 
     seen = {c["internals_id"] for c in gen.calls}
     expected = {
-        f'{_hash_text("desc one:harmful:long")}/input_long',
-        f'{_hash_text("desc two:benign:long")}/input_long',
+        f'{content_id("desc one:harmful:long")}/input_long',
+        f'{content_id("desc two:benign:long")}/input_long',
     }
     assert seen == expected
 
@@ -105,8 +105,8 @@ def test_val_in_internals_id_is_sample_hash_slash_val_in(tmp_path):
 
     seen = {c["internals_id"] for c in check.calls}
     expected = {
-        f'{_hash_text("alpha sample")}/val_in',
-        f'{_hash_text("beta sample")}/val_in',
+        f'{content_id("alpha sample")}/val_in',
+        f'{content_id("beta sample")}/val_in',
     }
     assert seen == expected
 

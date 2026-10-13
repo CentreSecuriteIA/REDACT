@@ -31,7 +31,6 @@ from .hacking import (
 # Run planning + resumable manifest ledger
 from .manifest import (
     completed_from_output,
-    compute_sample_id,
     default_manifest_path,
     load_plan,
     plan_index,

@@ -13,7 +13,8 @@ import pandas as pd
 
 from redact import paths
 
-from .io import _default_dataset_dir, _hash_text, read_category_csv
+from .identity import content_id
+from .io import _default_dataset_dir, read_category_csv
 
 
 def merge_category_csvs(
@@ -145,11 +146,11 @@ def normalize_csv(
     df = df.copy()
 
     # Recompute deterministic IDs — shares the same hash + truncation as
-    # dataset.io._hash_text so ids agree with those computed at write time
+    # content_id so ids agree with those computed at write time
     # (append_samples etc.); a separate/shorter hash here would silently
     # break joins against ids computed via the other path.
     if recompute_ids:
-        df[id_column] = df[text_column].apply(lambda t: _hash_text(str(t)))
+        df[id_column] = df[text_column].apply(lambda t: content_id(str(t)))
 
     return df.reset_index(drop=True)
 

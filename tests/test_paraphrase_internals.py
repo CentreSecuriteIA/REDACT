@@ -10,7 +10,8 @@ import pytest
 
 import redact.content_moderation.paraphrase as P
 from redact import generate_paraphrases, paths
-from redact.dataset.io import _hash_text, append_samples
+from redact.dataset import content_id
+from redact.dataset.io import append_samples
 from redact.llms.backends import ComputeConfig
 from tests.conftest import MockBackend, make_client
 
@@ -63,7 +64,7 @@ def test_provisional_id_then_renamed_to_sample_id(tmp_path, monkeypatch, accept_
 
     base_id = df.iloc[0]["input_id"]
     sample_id = df.iloc[0]["sample_id"]
-    assert sample_id == _hash_text(df.iloc[0]["sample"])
+    assert sample_id == content_id(df.iloc[0]["sample"])
 
     # generate() was called with the pre-call-known provisional id (bid/k)
     assert backend.calls[0]["internals_id"] == f"{base_id}/paraphrase/attempt_0"
