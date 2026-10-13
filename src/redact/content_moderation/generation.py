@@ -44,8 +44,9 @@ role and the dataset path from ``data_dir`` for you.
 """
 
 import logging
-from collections.abc import Callable
+from collections.abc import Callable, Collection
 from contextlib import nullcontext
+from itertools import repeat
 from pathlib import Path
 
 import pandas as pd
@@ -55,13 +56,13 @@ from ..dataset import (
     Ledger,
     Manifest,
     append_rows,
-    append_samples,
+    check_columns,
     content_id,
-    merge_all,
     read_rows,
     row_ids,
+    sample_row,
 )
-from ..dataset.resume import CommitBuffer, resume_state
+from ..dataset.resume import CommitBuffer, drop_units, release_lock, resume_state
 from ..exceptions import PromptTooLongError
 from ..llms.client import ModelClient
 from ..llms.prompting import extract_and_clean
@@ -92,6 +93,8 @@ logger = logging.getLogger(__name__)
 _PROHIBITED_PREVIEW_LIMIT = 20
 # Truncation length for the sample_description preview in verbose progress lines.
 _DESC_PREVIEW_LEN = 60
+# The category files of constitution-seeded inputs, under the stage's folder.
+_CATEGORY_FILES = f"*/{paths.SAMPLES_FILENAME}"
 
 
 _INPUT_FEEDBACK = (
@@ -158,6 +161,34 @@ def _constitution_inputs_manifest(dataset_dir: str | Path) -> Manifest:
     return Manifest(Path(dataset_dir) / "constitution_inputs.manifest.jsonl")
 
 
+def _entries_in(path: Path) -> dict[tuple[str, str, str], list[str]]:
+    """Each entry with rows in a category file, by its ledger key, with their ids.
+
+    Read once, when a folder written before the ledger recorded sizes and
+    ids is taken over. A file of that time may name the description
+    ``sample_description`` and have no style column: its rows are of the
+    style ``""``. A file without a description, an entry type or an id
+    column gives no entry.
+    """
+    entries: dict[tuple[str, str, str], list[str]] = {}
+    # Every cell as the text it is: an id of digits is not a number.
+    with pd.read_csv(
+            path, dtype=str, keep_default_na=False, chunksize=50_000) as chunks:
+        for chunk in chunks:
+            columns = set(chunk.columns)
+            described = next(
+                (name for name in ("source_sample_description", "sample_description")
+                 if name in columns), None)
+            if described is None or not {"entry_type", "sample_id"} <= columns:
+                return {}
+            styles = chunk.get("template_style", repeat(""))
+            for description, entry_type, style, sample_id in zip(
+                    chunk[described], chunk["entry_type"], styles, chunk["sample_id"]):
+                key = str(description), str(entry_type), str(style)
+                entries.setdefault(key, []).append(str(sample_id))
+    return entries
+
+
 # ---------------------------------------------------------------------------
 # Pipeline
 # ---------------------------------------------------------------------------
@@ -203,7 +234,8 @@ class InputPipeline(_StandaloneGenerationMixin):
         prompt_config: dict,
         samples_per_request: int,
         feedback: str = "",
-        prohibited: set[str] | None = None,
+        prohibited: Collection[str] | None = None,
+        more: int = 0,
         **seed_kwargs: str,
     ) -> list[dict]:
         """Build the generation message list with format instruction.
@@ -212,7 +244,9 @@ class InputPipeline(_StandaloneGenerationMixin):
             prompt_config: Loaded prompt JSON config.
             samples_per_request: Number of samples to request per LLM call.
             feedback: Rejection feedback from a previous turn (optional).
-            prohibited: Set of existing sample texts to avoid repeating.
+            prohibited: Existing sample texts to avoid repeating. The first
+                20 are shown, the rest counted.
+            more: How many such texts exist beyond ``prohibited``.
             **seed_kwargs: Template variables (Category, SeedPrompts, etc.).
 
         Returns:
@@ -239,9 +273,10 @@ class InputPipeline(_StandaloneGenerationMixin):
                 f"dataset. Do NOT generate anything similar to these:\n"
                 f"{prohibited_text}"
             )
-            if len(prohibited) > _PROHIBITED_PREVIEW_LIMIT:
+            more += len(prohibited) - len(sample_list)
+            if more:
                 prohibited_msg += (
-                    f"\n(... and {len(prohibited) - _PROHIBITED_PREVIEW_LIMIT} more. "
+                    f"\n(... and {more} more. "
                     f"Ensure all your outputs are novel.)"
                 )
             if messages and messages[-1]["role"] == "user":
@@ -287,6 +322,16 @@ class InputPipeline(_StandaloneGenerationMixin):
         ``PromptTooLongError`` from a request on the async lane) is acked as
         ``rejected`` at once, with no rows, and skipped on resume.
 
+        A text is written once in the whole folder, whatever its category
+        and style: one that a row already holds is dropped, and the entry
+        that gave it is finished with the rows it has left. Which texts the
+        rows hold is recorded in the ledger, so a resume reads no row.
+
+        The folder is this stage's alone. On a resume, a category's
+        ``samples.csv`` that the ledger does not record is moved aside, and
+        rows another writer added to one it records are cut off: both read
+        as what a save that did not finish left.
+
         Args:
             constitution_df: DataFrame with columns ``source_category``,
                 ``sample_description``, ``constitution_subcategory``,
@@ -296,13 +341,15 @@ class InputPipeline(_StandaloneGenerationMixin):
                 ``prompts/input/generation/from_constitution/{style}/``.
             samples_per_entry: Prompts to generate per constitution entry.
             use_checker: Whether to run the entry-type-aware quality checker.
-            save: Whether to append rows to CSV as entries finish.
+            save: Whether to append rows to CSV as entries finish. False
+                leaves the folder alone: nothing in it is resumed from,
+                cleared or written.
             verbose: Log per-entry progress (INFO for stage milestones, DEBUG
                 for per-entry detail).
             batch_size: Requests per model call; twice as many entries are live.
-            fresh: When True, clears this style's rows from the per-category
-                CSVs and the ledger before generating (style-aware — other
-                styles' saved rows/ledger entries are left alone).
+            fresh: When True, starts this style over: its rows and its acks
+                are removed before generating, and those of other styles
+                stay. Without a style the whole folder is cleared.
             style: Template style under ``from_constitution/{style}`` — also
                 used as part of the ledger key and saved as a CSV column.
             max_attempts: Generations per entry. A reply with the wrong
@@ -334,20 +381,38 @@ class InputPipeline(_StandaloneGenerationMixin):
 
         result = ConstitutionInputResult()
 
-        # Sidecar resume-ledger, keyed on one constitution entry
-        # (sample_description, entry_type, style) — the same crash-safe pattern
-        # as the constitution / output / paraphrase stages. A unit is acked only
-        # after its rows are saved, so a crash loses only unsaved entries.
-        ledger = (
-            _constitution_inputs_ledger(self.dataset_dir)
-            if (save and self.dataset_dir is not None)
-            else None
-        )
+        # The stage's ledger, keyed on one constitution entry
+        # (sample_description, entry_type, style). A unit is acked only after
+        # its rows are saved, so a crash loses only unsaved entries.
+        saves = save and self.dataset_dir is not None
+        folder = Path(self.dataset_dir) if saves else None
+        ledger = _constitution_inputs_ledger(folder) if saves else None
 
-        # Plan → manifest: one row per constitution entry (full set for this
-        # style), keyed like the ledger, written before the batch loop.
-        if save and self.dataset_dir is not None:
-            _constitution_inputs_manifest(self.dataset_dir).write(
+        seen: set[str] = set()      # the content ids of the rows of every style
+        preview: list[str] = []     # the first texts this run generated
+        unshown = 0                 # how many it generated after those
+        if ledger is not None:
+            tree = {"artifact": folder, "pattern": _CATEGORY_FILES,
+                    "units_in": _entries_in}
+            manifest = _constitution_inputs_manifest(folder)
+            if fresh and style:
+                # The other styles keep their rows and their acks.
+                drop_units(
+                    ledger,
+                    rows=lambda row: row.get("template_style") == style,
+                    acks=lambda ack: ack.get("style") == style,
+                    **tree,
+                )
+            # Before anything is written in the folder: the resume takes the
+            # stage's lock. It cuts off what a save that did not finish left,
+            # and a fresh run of every style clears the folder.
+            processed = resume_state(
+                ledger, resume=bool(style) or not fresh, manifest=manifest, **tree)
+            seen = set(ledger.ids)
+
+            # Plan → manifest: one row per constitution entry of this style,
+            # keyed like the ledger.
+            manifest.write(
                 {
                     "sample_description": str(entry.get("sample_description", "")),
                     "entry_type": str(entry.get("entry_type", "harmful")),
@@ -357,63 +422,6 @@ class InputPipeline(_StandaloneGenerationMixin):
                 for _, entry in constitution_df.iterrows()
             )
 
-        if fresh and self.dataset_dir is not None:
-            # Whole-dir fresh wipes every unit's acks; style-aware fresh keeps
-            # other styles' acks (they aren't being regenerated).
-            if ledger is not None and not style:
-                ledger.reset()
-            for csv_path in Path(self.dataset_dir).glob("*/samples.csv"):
-                if style:
-                    # Style-aware fresh: only remove rows for this style so
-                    # data from other styles in the same dir is preserved.
-                    try:
-                        df_existing = pd.read_csv(csv_path)
-                        if "template_style" in df_existing.columns:
-                            df_existing = df_existing[
-                                df_existing["template_style"] != style
-                            ].reset_index(drop=True)
-                            if df_existing.empty:
-                                csv_path.unlink()
-                            else:
-                                df_existing.to_csv(csv_path, index=False)
-                        else:
-                            csv_path.unlink()
-                    except Exception as exc:
-                        logger.warning(
-                            "Style-aware fresh could not read %s (%s: %s); "
-                            "deleting it instead of filtering by style.",
-                            csv_path, type(exc).__name__, exc,
-                        )
-                        csv_path.unlink()
-                else:
-                    csv_path.unlink()
-                if verbose:
-                    logger.info("Cleared %s", csv_path)
-        elif not fresh and self.dataset_dir is not None:
-            # Resume source of truth is the sidecar ledger; we also union the
-            # existing-CSV set so runs created before the ledger existed still
-            # resume (back-compat). Keys are stringified on both sides to match.
-            processed: set[tuple[str, str, str]] = (
-                set(ledger.completed()) if ledger is not None else set()
-            )
-            existing = merge_all(self.dataset_dir, accepted_only=False)
-            # Handle both old column name (sample_description) and new
-            # (source_sample_description) so resume works across both formats.
-            desc_col = (
-                "source_sample_description" if "source_sample_description" in existing.columns
-                else "sample_description" if "sample_description" in existing.columns
-                else None
-            )
-            if not existing.empty and desc_col:
-                style_vals = (
-                    existing["template_style"].fillna("")   # an empty style is an empty cell
-                    if "template_style" in existing.columns
-                    else pd.Series([""] * len(existing), index=existing.index)
-                )
-                processed |= {
-                    (str(d), str(t), str(s))
-                    for d, t, s in zip(existing[desc_col], existing["entry_type"], style_vals)
-                }
             if processed:
                 original_count = len(constitution_df)
                 constitution_df = constitution_df[
@@ -430,8 +438,8 @@ class InputPipeline(_StandaloneGenerationMixin):
                 if constitution_df.empty:
                     if verbose:
                         logger.info("All entries already processed — nothing to do.")
+                    release_lock(ledger)    # no CommitBuffer will
                     return result
-        prohibited: set[str] = set()
         checker_cache: dict[tuple[str, str, str], Callable[[str, str], list[dict]]] = {}
 
         total = len(constitution_df)
@@ -444,25 +452,25 @@ class InputPipeline(_StandaloneGenerationMixin):
         rejected_entries = 0
         finished = 0   # entries finished so far
 
-        def _append(rows: list[dict]) -> None:
-            # One append_samples per category: each call rewrites that CSV.
-            by_category: dict[str, list[dict]] = {}
+        def _append(rows: list[dict]) -> dict[Path, int]:
+            """Append a save's rows, each to its category's file."""
+            by_file: dict[Path, list[dict]] = {}
             for r in rows:
-                by_category.setdefault(r["category"], []).append(r)
-            for category, rs in by_category.items():
-                append_samples(
-                    [r["text"] for r in rs],
-                    category=category,
-                    turn=0,
-                    accepted=[r["accepted"] for r in rs],
-                    source="constitution",
-                    extra_columns=[r["extra"] for r in rs],
-                    dataset_dir=self.dataset_dir,
-                )
+                by_file.setdefault(
+                    paths.category_csv(r["category"], base=folder), []).append(r)
+            # Before the first file is written: a save that stopped on a later
+            # file would leave the earlier ones to be cut back.
+            for path, its_rows in by_file.items():
+                check_columns(path, its_rows)
+            sizes: dict[Path, int] = {}
+            for path, its_rows in by_file.items():
+                path.parent.mkdir(parents=True, exist_ok=True)
+                sizes.update(append_rows(path, its_rows))
             if verbose:
                 n_acc = sum(1 for r in rows if r["accepted"])
                 logger.info("[%d/%d] %d/%d samples accepted -> appended",
                             finished, total, n_acc, len(rows))
+            return sizes
 
         def _entry_unit(entry):
             """Generate an entry's samples, drop those already seen, check each."""
@@ -486,7 +494,8 @@ class InputPipeline(_StandaloneGenerationMixin):
                 lambda: self._build_generation_messages(
                     prompt_config,
                     samples_per_request=samples_per_entry,
-                    prohibited=prohibited,
+                    prohibited=preview,
+                    more=unshown,
                     **seed_kwargs,
                 ),
                 lambda raw: extract_and_clean(
@@ -500,9 +509,8 @@ class InputPipeline(_StandaloneGenerationMixin):
                 max_attempts=max_attempts,
             )
             rejected = not extracted
-            # Outside the extraction: a duplicate is not a reason to regenerate.
-            if prohibited:
-                extracted = [s for s in extracted if s not in prohibited]
+            # Outside the extraction: a repeat is not a reason to regenerate.
+            extracted = [s for s in extracted if content_id(s) not in seen]
 
             verdicts = [(True, "")] * len(extracted)
             if use_checker and extracted:
@@ -521,7 +529,7 @@ class InputPipeline(_StandaloneGenerationMixin):
                 verdicts = []
                 for s in extracted:
                     # The sample's own content hash is its eventual sample_id
-                    # (append_samples() computes the same hash).
+                    # (sample_row() computes the same hash).
                     response = yield LLMRequest.for_client(
                         self.check, checker("", s),
                         internals_id=(
@@ -541,7 +549,7 @@ class InputPipeline(_StandaloneGenerationMixin):
                 yield j, _entry_unit(entry)
 
         def _on_done(j, value):
-            nonlocal rejected_entries, finished
+            nonlocal rejected_entries, finished, unshown
             entry = live.pop(j)
             extracted, verdicts, attempts, rejected = value
             finished += 1
@@ -561,9 +569,8 @@ class InputPipeline(_StandaloneGenerationMixin):
             if not extracted:
                 result.skipped_entries += 1
                 rejected_entries += rejected
-                # Ack it anyway: the entry produced no rows, so the CSV
-                # fallback can never cover it, and leaving it un-acked means
-                # re-generating (and re-paying for) it on every resume.
+                # Ack it anyway: un-acked, it would be generated, and paid
+                # for, again on every resume.
                 if buf is not None:
                     buf.add([], {
                         "sample_description": sample_desc,
@@ -586,37 +593,41 @@ class InputPipeline(_StandaloneGenerationMixin):
                 for text, (accepted, reasoning) in zip(extracted, verdicts)
             ]
 
-            if save:
-                rows = [
-                    {
-                        "category": category,
-                        "text": sr.text,
-                        "accepted": sr.accepted,
-                        "extra": {
-                            "entry_type": entry_type,
-                            "subcategory": subcategory,
-                            "source_sample_description": sample_desc,
-                            "constitution_category": str(
-                                entry.get("constitution_category", "")
-                            ),
-                            "source_group_tag": str(
-                                entry.get("source_group_tag", "")
-                            ),
-                            "template_style": style,
-                            "rejection_reason": sr.reasoning,
-                        },
-                    }
-                    for sr in sample_results
-                ]
-                record = {
+            # Again here: an entry that was live with this one may have given
+            # one of its texts, and both passed the check when generated.
+            rows = []
+            for sr in sample_results:
+                row = sample_row(
+                    sr.text, category, turn=0, accepted=sr.accepted,
+                    source="constitution",
+                    extra={
+                        "entry_type": entry_type,
+                        "subcategory": subcategory,
+                        "source_sample_description": sample_desc,
+                        "constitution_category": str(
+                            entry.get("constitution_category", "")
+                        ),
+                        "source_group_tag": str(entry.get("source_group_tag", "")),
+                        "template_style": style,
+                        "rejection_reason": sr.reasoning,
+                    },
+                )
+                if row["sample_id"] in seen:
+                    continue
+                seen.add(row["sample_id"])
+                rows.append(row)
+                if len(preview) < _PROHIBITED_PREVIEW_LIMIT:
+                    preview.append(sr.text)
+                else:
+                    unshown += 1
+            if buf is not None:
+                # The ids of the rows it wrote: what a resume knows them by.
+                buf.add(rows, {
                     "sample_description": sample_desc,
                     "entry_type": entry_type,
                     "style": style,
-                }
-                if buf is not None:
-                    buf.add(rows, record)
-                else:
-                    _append(rows)   # no ledger to ack into
+                    "ids": [row["sample_id"] for row in rows],
+                })
 
             accepted_count = sum(1 for sr in sample_results if sr.accepted)
             rejected_count = len(sample_results) - accepted_count
@@ -625,9 +636,6 @@ class InputPipeline(_StandaloneGenerationMixin):
             result.total_prompts_generated += len(sample_results)
             result.total_prompts_accepted += accepted_count
             result.total_prompts_rejected += rejected_count
-
-            for sr in sample_results:
-                prohibited.add(sr.text)
 
             if verbose:
                 logger.debug("-> %d accepted, %d rejected", accepted_count, rejected_count)

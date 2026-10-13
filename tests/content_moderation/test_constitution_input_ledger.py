@@ -27,9 +27,12 @@ _PROMPT = {"system_prompt": "sys", "template": "Generate items about {sample_des
 
 def _pipeline(tmp_path):
     # Two registry names: one name and setup is one call group, answered by
-    # the first request's backend.
+    # the first request's backend. Each of the two entries gets its own
+    # texts: a text the other entry wrote is dropped, and an entry left with
+    # no row cannot be found in the files once the ledger is gone.
+    replies = ["1. alpha sample\n2. beta sample", "1. gamma sample\n2. delta sample"]
     return InputPipeline(
-        gen=make_client(MockBackend("1. alpha sample\n2. beta sample"), "m"),
+        gen=make_client(MockBackend(replies), "m"),
         check=make_client(MockBackend("Yes"), "m-check"),
         dataset_dir=tmp_path,
     )
@@ -149,7 +152,7 @@ def test_entry_with_no_extracted_samples_is_acked(tmp_path):
 
 def test_resume_falls_back_to_csv_when_ledger_absent(tmp_path):
     # Simulate a pre-ledger run: generate under a named style, then delete the
-    # ledger. Resume must still skip via the existing-CSV set (back-compat).
+    # ledger. Resume must still skip: the folder is taken over by its rows.
     pipe = _pipeline(tmp_path)
     pipe.run_from_constitution(_const_df(), _PROMPT, samples_per_entry=2,
                                style="long", verbose=False)
@@ -306,14 +309,14 @@ def test_pool_resume_after_a_failed_append_runs_only_unfinished_entries(
         tmp_path, monkeypatch):
     import redact.content_moderation.generation as G
 
-    real_append = G.append_samples
+    real_append = G.append_rows
     appends = []
 
-    def failing_second_append(samples, **kwargs):
-        appends.append(len(samples))
+    def failing_second_append(path, rows):
+        appends.append(len(rows))
         if len(appends) == 2:
             raise OSError("disk full")
-        return real_append(samples, **kwargs)
+        return real_append(path, rows)
 
     def run(gen):
         pipe = _token_pipeline(tmp_path, gen, _TokenBackend(lambda t, n: "Yes"))
@@ -323,10 +326,10 @@ def test_pool_resume_after_a_failed_append_runs_only_unfinished_entries(
     def reply(t, n):
         return f"1. sample {t}"
 
-    monkeypatch.setattr(G, "append_samples", failing_second_append)
+    monkeypatch.setattr(G, "append_rows", failing_second_append)
     with pytest.raises(OSError, match="disk full"):
         run(_TokenBackend(reply))
-    monkeypatch.setattr(G, "append_samples", real_append)
+    monkeypatch.setattr(G, "append_rows", real_append)
     assert appends == [32, 32] and len(_rows(tmp_path)) == 32
 
     second = _TokenBackend(reply)
@@ -335,12 +338,12 @@ def test_pool_resume_after_a_failed_append_runs_only_unfinished_entries(
     df = _rows(tmp_path)
     assert sorted(df["sample"]) == sorted(f"sample zq{i}" for i in range(70))
 def test_csv_rows_cover_an_entry_whose_ack_was_lost(tmp_path):
-    """A crash between the append and the ack leaves rows with no ledger
-    record; the CSV union still counts the entry done. Also for the default
-    style ``""``: its empty cell reads back as NaN, not as ``""``."""
+    """Rows with no ledger beside them are a folder to take over: its entries
+    count as done by their rows. Also for the default style ``""``, which is
+    an empty cell in the file."""
     pipe = _pipeline(tmp_path)
     pipe.run_from_constitution(_const_df(), _PROMPT, samples_per_entry=2, verbose=False)
-    _constitution_inputs_ledger(tmp_path).path.unlink()   # the acks never made it to disk
+    _constitution_inputs_ledger(tmp_path).path.unlink()   # as before there was a ledger
 
     pipe2 = _pipeline(tmp_path)
     r = pipe2.run_from_constitution(_const_df(), _PROMPT, samples_per_entry=2, verbose=False)
@@ -384,9 +387,10 @@ def test_an_entry_whose_prompt_is_too_long_is_acked_as_rejected(tmp_path, caplog
     assert (r.total_entries_processed, r.skipped_entries) == (2, 1)
     assert sorted(_rows(tmp_path)["sample"]) == ["sample zq0", "sample zq2"]
     ledger = _constitution_inputs_ledger(tmp_path)
-    acks = [json.loads(line)
+    # Without the sizes a save records, on its opening and on its last line.
+    acks = [{k: v for k, v in json.loads(line).items() if k != "_saved"}
             for line in ledger.path.read_text(encoding="utf-8").splitlines()]
-    assert [a for a in acks if a["sample_description"] == "desc zq1"] == [{
+    assert [a for a in acks if a.get("sample_description") == "desc zq1"] == [{
         "sample_description": "desc zq1", "entry_type": "harmful", "style": "",
         "status": "rejected", "attempts": 1}]
     assert ledger.completed() == {(f"desc zq{i}", "harmful", "") for i in range(3)}
