@@ -29,7 +29,7 @@ from pathlib import Path
 import pandas as pd
 
 from .. import paths
-from ..dataset import Ledger, Manifest, content_id, merge_all, resume_state
+from ..dataset import Ledger, Manifest, content_id, merge_all, resume_state, row_id
 from ..llms.client import ModelClient
 from ..llms.model_config import default_model_for_role, get_models_by_role
 from ..llms.prompting import build_messages, load_prompt
@@ -198,12 +198,6 @@ def run_paraphrase_target(
     src = src.reset_index(drop=True)
     out_path.parent.mkdir(parents=True, exist_ok=True)
 
-    def _base_id(row) -> str:
-        existing = str(row.get(id_col, "")).strip()
-        if existing and existing.lower() != "nan":
-            return existing
-        return content_id(str(row[text_col]))
-
     # ---- Resume via a sidecar STATE LEDGER (like constitution/output) ---------
     # The ledger records every *attempted* (base_id, iteration) unit + its model +
     # outcome, so a re-run skips them all — including drops (deduped/rejected), which
@@ -236,7 +230,7 @@ def run_paraphrase_target(
     # ---- Plan the FULL run -> manifest = the whole (base_id, k -> model) mapping
     all_units: list[tuple] = []  # (base_id, k, model, original_text, category, entry_type)
     for _, row in src.iterrows():
-        bid = _base_id(row)
+        bid = row_id(row, text_col, id_col)
         otext = str(row[text_col])
         cat, et = str(row.get("category", "")), str(row.get("entry_type", ""))
         for k in range(K):

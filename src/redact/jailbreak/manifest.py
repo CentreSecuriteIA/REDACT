@@ -37,7 +37,7 @@ from pathlib import Path
 
 import pandas as pd
 
-from redact.dataset import content_id
+from redact.dataset import row_id
 from redact.dataset.manifest import Manifest
 
 from .utils import assign_combination
@@ -88,13 +88,9 @@ def plan_run(
     sample_kwargs = sample_kwargs or {}
     manifest_path = Path(manifest_path)
 
-    has_id = id_col in inputs.columns
     recs: list[dict] = []
     for _, row in inputs.iterrows():
-        if has_id and pd.notna(row.get(id_col)) and str(row.get(id_col)):
-            sid = str(row[id_col])
-        else:
-            sid = content_id(str(row[text_col]))
+        sid = row_id(row, text_col, id_col)
 
         used: list[tuple] = []
         for it in range(iterations):

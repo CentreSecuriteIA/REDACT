@@ -50,12 +50,12 @@ from redact.content_moderation.paraphrase import (
 from redact.dataset import (
     CommitBuffer,
     Ledger,
-    content_id,
     iter_categories,
     load_seeds,
     load_taxonomy,
     merge_all,
     resume_state,
+    row_id,
     take_per_group,
 )
 from redact.dataset.merge import (
@@ -738,15 +738,7 @@ def generate_jailbreaks(
     if entry_types:
         inputs = inputs[inputs["entry_type"].isin(entry_types)].reset_index(drop=True)
 
-    if "sample_id" not in inputs.columns:
-        inputs["sample_id"] = inputs["prompt"].map(lambda p: content_id(str(p)))
-    else:
-        missing = inputs["sample_id"].isna() | (inputs["sample_id"].astype(str).isin(["", "nan"]))
-        if missing.any():
-            inputs.loc[missing, "sample_id"] = inputs.loc[missing, "prompt"].map(
-                lambda p: content_id(str(p))
-            )
-    inputs["sample_id"] = inputs["sample_id"].astype(str)
+    inputs["sample_id"] = [row_id(row, "prompt") for _, row in inputs.iterrows()]
 
     # Generation model defaults to the uncensored_gen role; translation defaults
     # to the translation role (DeepSeek). Backend auto-resolved from the name.

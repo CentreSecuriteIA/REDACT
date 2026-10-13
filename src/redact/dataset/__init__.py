@@ -1,7 +1,7 @@
 """Dataset handling utilities — CSV I/O, merging, deduplication, splitting, loading, taxonomy."""
 
 from .dedup import exact_dedup, normalized_dedup
-from .identity import content_id
+from .identity import content_id, row_id
 from .io import (
     SAMPLE_COLUMNS,
     append_samples,

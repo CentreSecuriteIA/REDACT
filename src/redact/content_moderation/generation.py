@@ -50,7 +50,7 @@ from pathlib import Path
 
 import pandas as pd
 
-from ..dataset import content_id
+from ..dataset import content_id, row_id
 from ..dataset.io import _default_dataset_dir, append_samples
 from ..dataset.ledger import Ledger
 from ..dataset.manifest import Manifest
@@ -779,14 +779,8 @@ def run_output_generation(
     ledger = Ledger.sidecar(out_path, key_fields=("input_id",), casters={"input_id": str})
 
     # Stable per-input id (content-hash) for resume — matches the jailbreak id.
-    def _input_id(row) -> str:
-        existing = str(row.get("sample_id", "")).strip()
-        if existing and existing.lower() != "nan":
-            return existing
-        return content_id(str(row[text_col]))
-
     inputs = inputs.copy()
-    inputs["_state_id"] = [_input_id(row) for _, row in inputs.iterrows()]
+    inputs["_state_id"] = [row_id(row, text_col) for _, row in inputs.iterrows()]
 
     # Plan → manifest: one row per input_id, written before the batch loop so the
     # run's full intended scope is inspectable up front (keyed like the ledger).

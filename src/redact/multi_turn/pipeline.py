@@ -21,7 +21,7 @@ from pathlib import Path
 import pandas as pd
 
 from redact import paths
-from redact.dataset import content_id
+from redact.dataset import content_id, row_id
 from redact.dataset.ledger import Ledger
 from redact.dataset.manifest import Manifest
 from redact.llm_pipeline import drive_generators
@@ -93,10 +93,6 @@ def generate_conversations(
 
     make_setting = setting if callable(setting) else (lambda: copy.deepcopy(setting))
 
-    def _input_id(row) -> str:
-        existing = str(row.get("sample_id", "")).strip()
-        return existing if existing and existing.lower() != "nan" else content_id(str(row[tcol]))
-
     if not resume:
         ledger.reset()
         manifest.reset()
@@ -107,7 +103,7 @@ def generate_conversations(
     # Plan the full run → manifest (every (input_id, iteration) unit).
     units: list[tuple] = []  # (input_id, iteration, seed_text, meta)
     for _, row in seeds.iterrows():
-        iid, stext = _input_id(row), str(row[tcol])
+        iid, stext = row_id(row, tcol), str(row[tcol])
         meta = {"category": str(row.get("category", "")), "entry_type": str(row.get("entry_type", ""))}
         for it in range(iterations):
             units.append((iid, it, stext, meta))
