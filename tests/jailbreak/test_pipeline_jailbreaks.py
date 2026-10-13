@@ -11,9 +11,8 @@ LLM-backed fake techniques over a hand-written plan against a fake backend.
 import pandas as pd
 import pytest
 
-from redact.dataset import content_id
+from redact.dataset import Manifest, content_id
 from redact.exceptions import PromptTooLongError
-from redact.jailbreak.manifest import load_plan
 from redact.jailbreak.protocol import LLMRequest
 from redact.llms.backends import ComputeConfig
 from redact.pipelines import generate_jailbreaks
@@ -60,7 +59,7 @@ def test_plan_then_execute(tmp_path):
     # Manifest written before generation, one unit per sample.
     manifest = out.with_name(out.stem + ".manifest.jsonl")
     assert manifest.exists()
-    plan = load_plan(manifest)
+    plan = Manifest(manifest).load()
     assert len(plan) == 5
     assert all(set(r) >= {"sample_id", "iteration", "combination", "settings"} for r in plan)
 
@@ -78,9 +77,9 @@ def test_reproducible_assignment(tmp_path):
     generate_jailbreaks(inputs=_inputs(), output_path=out2, seed=42, **PURE_KW)
 
     p1 = {(r["sample_id"], r["iteration"]): r["combination"]
-          for r in load_plan(out1.with_name("jb.manifest.jsonl"))}
+          for r in Manifest(out1.with_name("jb.manifest.jsonl")).load()}
     p2 = {(r["sample_id"], r["iteration"]): r["combination"]
-          for r in load_plan(out2.with_name("jb.manifest.jsonl"))}
+          for r in Manifest(out2.with_name("jb.manifest.jsonl")).load()}
     assert p1 == p2  # same seed + same prompts -> identical combinations
 
 
@@ -88,7 +87,7 @@ def test_iterations_dedup(tmp_path):
     out = tmp_path / "jb.csv"
     df = generate_jailbreaks(inputs=_inputs(), output_path=out, seed=3,
                              iterations=3, max_obfuscations=1, **PURE_KW)
-    plan = load_plan(out.with_name("jb.manifest.jsonl"))
+    plan = Manifest(out.with_name("jb.manifest.jsonl")).load()
     assert len(plan) == 15  # 5 samples x 3 iterations
 
     # Per sample, the 3 assigned combinations are distinct (pool is large enough).
@@ -165,7 +164,7 @@ def test_settings_per_iteration_escalation(tmp_path):
                              settings_per_iteration=schedule, **PURE_KW)
 
     # iterations derived from schedule length: 5 samples x 4 rounds.
-    plan = load_plan(out.with_name("jb.manifest.jsonl"))
+    plan = Manifest(out.with_name("jb.manifest.jsonl")).load()
     assert len(plan) == 20
     assert sorted({r["iteration"] for r in plan}) == [0, 1, 2, 3]
 

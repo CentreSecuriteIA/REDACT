@@ -50,10 +50,14 @@ from redact.content_moderation.paraphrase import (
 from redact.dataset import (
     CommitBuffer,
     Ledger,
+    Manifest,
+    append_rows,
     iter_categories,
+    keys_in,
     load_seeds,
     load_taxonomy,
     merge_all,
+    read_rows,
     resume_state,
     row_id,
     take_per_group,
@@ -65,13 +69,10 @@ from redact.dataset.merge import (
 from redact.jailbreak import (
     build_combination,
     build_function_registry,
-    completed_from_output,
-    default_manifest_path,
     get_all_hacking_functions,
     get_all_manipulation_functions,
     get_all_obfuscation_functions,
     get_all_request_functions,
-    load_plan,
     load_spec,
     plan_run,
 )
@@ -720,7 +721,7 @@ def generate_jailbreaks(
         ``input_id`` (the origin sample it was derived from).
     """
     out = Path(output_path) if output_path else paths.jailbreaks_csv(data_dir)
-    man_path = Path(manifest_path) if manifest_path else default_manifest_path(out)
+    man_path = Path(manifest_path) if manifest_path else Manifest.sidecar(out).path
 
     # ------------------------------------------------------------------
     # Load + normalize inputs (ensure a prompt column and a content-hash id)
@@ -830,7 +831,7 @@ def generate_jailbreaks(
             sample_kwargs=sample_kwargs, verbose=verbose,
         )
 
-    plan_rows = load_plan(man_path)
+    plan_rows = Manifest(man_path).load()
 
     # Sidecar completion ledger (same crash-safe pattern as every other stage),
     # keyed on the planned unit ``(input_id, iteration)``.
@@ -846,7 +847,9 @@ def generate_jailbreaks(
         jb_ledger,
         resume=resume,
         artifact=out,
-        extra=completed_from_output(out) if resume else None,
+        extra=(
+            keys_in(out, jb_ledger.key_fields, jb_ledger.casters) if resume else None
+        ),
     )
 
     # ------------------------------------------------------------------
@@ -885,7 +888,7 @@ def generate_jailbreaks(
 
     def _append(rows: list[dict]) -> None:
         nonlocal written
-        pd.DataFrame(rows).to_csv(out, mode="a", header=not out.exists(), index=False)
+        append_rows(out, rows)
         written += len(rows)
         if verbose:
             n_acc = sum(1 for x in rows if x.get("accepted"))
@@ -941,7 +944,7 @@ def generate_jailbreaks(
             progress="jailbreak" if verbose else None,
         )
 
-    jailbreaks = pd.read_csv(out) if out.exists() else pd.DataFrame()
+    jailbreaks = read_rows(out)
 
     if verbose:
         logger.info("Jailbreak Summary")

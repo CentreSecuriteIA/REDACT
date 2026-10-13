@@ -5,7 +5,7 @@ A jailbreak run is **planned in full before any generation**:
 technique combination (deterministically, with per-sample dedup so repeated
 iterations don't draw the same combination), and writes one JSON line per unit
 via :class:`redact.dataset.Manifest`. Generation then streams the manifest in
-chunks (:func:`load_plan`).
+chunks.
 
 Identity is the **prompt-content MD5** (the same ``sample_id`` ``dataset/io.py``
 writes for input samples), so the manifest, the assignment seed, and every output
@@ -14,8 +14,8 @@ row are all keyed to the exact prompt — stable across re-runs and content-base
 Resume is driven by the sidecar ``jailbreaks.state.jsonl`` **ledger**
 (``redact.dataset.Ledger``, keyed ``(input_id, iteration)``, acked per chunk
 after the CSV append) **unioned** with the output CSV so pre-ledger runs still
-resume — see :func:`redact.pipelines.generate_jailbreaks` and
-:func:`completed_from_output`. The manifest itself is immutable after planning,
+resume — see :func:`redact.pipelines.generate_jailbreaks`. The manifest itself
+is immutable after planning,
 so a chunk crash never corrupts the plan.
 
 Manifest row schema (one JSON object per line)::
@@ -42,12 +42,6 @@ from redact.dataset import Manifest, row_id
 from .utils import assign_combination
 
 logger = logging.getLogger(__name__)
-
-
-def default_manifest_path(output_path) -> Path:
-    """Manifest path alongside the jailbreak output CSV (``*.manifest.jsonl``)."""
-    out = Path(output_path)
-    return out.with_name(out.stem + ".manifest.jsonl")
 
 
 def plan_run(
@@ -120,34 +114,9 @@ def plan_run(
     return manifest_path
 
 
-def load_plan(manifest_path) -> list[dict]:
-    """Read all plan rows from a manifest JSONL file."""
-    return Manifest(manifest_path).load()
-
-
 def plan_index(rows: list[dict]) -> dict[str, list[dict]]:
     """Group plan rows by ``sample_id`` (preserves iteration order per sample)."""
     index: dict[str, list[dict]] = {}
     for r in rows:
         index.setdefault(str(r["sample_id"]), []).append(r)
     return index
-
-
-def completed_from_output(output_path) -> set[tuple[str, int]]:
-    """Return ``(input_id, iteration)`` units already written to the output CSV.
-
-    Unioned with the sidecar ``jailbreaks.state.jsonl`` ledger by
-    :func:`redact.pipelines.generate_jailbreaks` to drive resume; reading the CSV
-    keeps runs created before the ledger existed resumable (back-compat).
-    """
-    p = Path(output_path)
-    if not p.exists():
-        return set()
-    df = pd.read_csv(p)
-    if df.empty or "input_id" not in df.columns:
-        return set()
-    iterations = (
-        df["iteration"] if "iteration" in df.columns
-        else pd.Series([0] * len(df))
-    )
-    return set(zip(df["input_id"].astype(str), iterations.astype(int)))

@@ -29,7 +29,17 @@ from pathlib import Path
 import pandas as pd
 
 from .. import paths
-from ..dataset import Ledger, Manifest, content_id, merge_all, resume_state, row_id
+from ..dataset import (
+    Ledger,
+    Manifest,
+    append_rows,
+    content_id,
+    keys_in,
+    merge_all,
+    read_rows,
+    resume_state,
+    row_id,
+)
 from ..llms.client import ModelClient
 from ..llms.model_config import default_model_for_role, get_models_by_role
 from ..llms.prompting import build_messages, load_prompt
@@ -212,14 +222,12 @@ def run_paraphrase_target(
     # Units already in the CSV are unioned into the completed set (as the
     # jailbreak stage does): a crash between the append and the ack would
     # otherwise re-paraphrase them and append a second row each.
+    state = _paraphrase_ledger(state_path)
     csv_units: set[tuple[str, int]] = (
-        {(str(i), int(k)) for i, k in zip(prev["input_id"], prev["iteration"])}
-        if not prev.empty and {"input_id", "iteration"} <= set(prev.columns)
-        else set()
+        keys_in(out_path, state.key_fields, state.casters) if resume else set()
     )
     completed: set[tuple[str, int]] = resume_state(
-        _paraphrase_ledger(state_path), resume=resume, artifact=out_path,
-        extra=csv_units or None,
+        state, resume=resume, artifact=out_path, extra=csv_units or None,
     )
     seen_texts: set[str] = (
         set(prev["sample"].astype(str))
@@ -248,7 +256,7 @@ def run_paraphrase_target(
     if not units:
         if verbose:
             logger.info("[paraphrase:%s] nothing to do (all %d units done).", tgt, len(all_units))
-        return pd.read_csv(out_path) if out_path.exists() else pd.DataFrame()
+        return read_rows(out_path)
 
     # ---- Execute grouped by model ------------------------------------------
     # One paraphraser runs at a time. The residency plan decides whether the
@@ -335,8 +343,7 @@ def run_paraphrase_target(
                 ledger.append({"input_id": bid, "iteration": k, "paraphrase_model": m,
                                "status": "accepted" if acc else "rejected"})
             if rows:
-                cdf = pd.DataFrame(rows)
-                cdf.to_csv(out_path, mode="a", header=not out_path.exists(), index=False)
+                append_rows(out_path, rows)
                 written += len(rows)
             # Record every attempted unit only after the CSV append — a crash mid-chunk
             # leaves those units un-acked so they re-run next time (never duplicated).
@@ -345,4 +352,4 @@ def run_paraphrase_target(
     if verbose:
         n = len(pd.read_csv(out_path)) if out_path.exists() else 0
         logger.info("[paraphrase:%s] +%d rows (artifact now %d) -> %s", tgt, written, n, out_path.name)
-    return pd.read_csv(out_path) if out_path.exists() else pd.DataFrame()
+    return read_rows(out_path)

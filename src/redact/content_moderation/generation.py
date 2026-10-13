@@ -50,7 +50,15 @@ from pathlib import Path
 
 import pandas as pd
 
-from ..dataset import Ledger, Manifest, content_id, row_id
+from ..dataset import (
+    Ledger,
+    Manifest,
+    append_rows,
+    content_id,
+    keys_in,
+    read_rows,
+    row_id,
+)
 from ..dataset.io import _default_dataset_dir, append_samples
 from ..dataset.resume import CommitBuffer, resume_state
 from ..dataset.merge import merge_all
@@ -677,21 +685,6 @@ class InputPipeline(_StandaloneGenerationMixin):
 # ---------------------------------------------------------------------------
 
 
-def _ids_in_output(out_path: Path) -> set[str]:
-    """``input_id``s already written to the output CSV.
-
-    Unioned into the resume set so a crash between the CSV append and the
-    ledger ack doesn't re-generate those inputs (which would append a second
-    row per input, with its own ``sample_id``, that no later dedup removes).
-    """
-    if not out_path.exists():
-        return set()
-    df = pd.read_csv(out_path)
-    if df.empty or "input_id" not in df.columns:
-        return set()
-    return set(df["input_id"].astype(str))
-
-
 def run_output_generation(
     inputs: pd.DataFrame,
     client: ModelClient,
@@ -793,7 +786,9 @@ def run_output_generation(
     # a second row for each, which nothing downstream dedups.
     completed = resume_state(
         ledger, resume=resume, artifact=out_path,
-        extra=_ids_in_output(out_path) if resume else None,
+        extra=(
+            keys_in(out_path, ledger.key_fields, ledger.casters) if resume else None
+        ),
     )
     if completed:
         before = len(inputs)
@@ -823,9 +818,7 @@ def run_output_generation(
 
     def _append_rows(rows: list[dict]) -> None:
         nonlocal written
-        pd.DataFrame(rows).to_csv(
-            out_path, mode="a", header=not out_path.exists(), index=False
-        )
+        append_rows(out_path, rows)
         written += len(rows)
         if verbose:
             accepted_count = sum(1 for r in rows if r["accepted"])
@@ -907,7 +900,7 @@ def run_output_generation(
 
     # Return the full dataset on disk (includes rows from prior resumed runs),
     # not just this run's newly-written delta.
-    output_df = pd.read_csv(out_path) if out_path.exists() else pd.DataFrame()
+    output_df = read_rows(out_path)
     if verbose:
         accepted_total = (
             int(output_df["accepted"].sum())

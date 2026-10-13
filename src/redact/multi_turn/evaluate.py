@@ -26,7 +26,7 @@ from pathlib import Path
 import pandas as pd
 
 from redact import paths
-from redact.dataset import Ledger
+from redact.dataset import Ledger, append_rows, read_rows
 from redact.llms import ModelClient
 from redact.llm_pipeline import batch_check_samples
 
@@ -130,7 +130,7 @@ def evaluate_conversations(
         logger.info("Judge: %s | total: %d | pending: %d",
                     judge_model, len(conversations), len(pending))
     if pending.empty:
-        return pd.read_csv(scored_path) if scored_path.exists() else pd.DataFrame()
+        return read_rows(scored_path)
 
     def _build_check(goal: str, sample: str) -> list[dict]:
         label = "RESPONSE" if scope == "last_reply" else "CONVERSATION"
@@ -163,10 +163,10 @@ def evaluate_conversations(
              "judge_model": judge_model, "scope": scope}
             for (_, row), (acc, reason) in zip(chunk.iterrows(), checks)
         ]
-        pd.DataFrame(rows).to_csv(scored_path, mode="a", header=not scored_path.exists(), index=False)
+        append_rows(scored_path, rows)
         ledger.record([{"sample_id": r["sample_id"]} for r in rows])
         if verbose:
             logger.info("[%d/%d] scored (%d success)",
                         start + len(rows), n, sum(r["success"] for r in rows))
 
-    return pd.read_csv(scored_path) if scored_path.exists() else pd.DataFrame()
+    return read_rows(scored_path)

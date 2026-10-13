@@ -21,7 +21,14 @@ from pathlib import Path
 import pandas as pd
 
 from redact import paths
-from redact.dataset import Ledger, Manifest, content_id, row_id
+from redact.dataset import (
+    Ledger,
+    Manifest,
+    append_rows,
+    content_id,
+    read_rows,
+    row_id,
+)
 from redact.llm_pipeline import drive_generators
 
 from .core import Setting, conversation_gen
@@ -113,7 +120,7 @@ def generate_conversations(
         logger.info("Seeds: %d | iterations: %d | units: %d | pending: %d",
                     len(seeds), iterations, len(units), len(pending))
     if not pending:
-        return pd.read_csv(out) if out.exists() else pd.DataFrame()
+        return read_rows(out)
 
     n = len(pending)
     n_chunks = ceil(n / batch_size) if batch_size else 1
@@ -150,7 +157,7 @@ def generate_conversations(
             progress=f"conversations {start // batch_size + 1}/{n_chunks}" if verbose else None,
         )
         rows = [results[(iid, it)] for iid, it, _t, _m in chunk]
-        pd.DataFrame(rows).to_csv(out, mode="a", header=not out.exists(), index=False)
+        append_rows(out, rows)
         # Ack only after the CSV append (crash-safe), carrying stop_reason for context.
         ledger.record([
             {"input_id": r["input_id"], "iteration": r["iteration"], "stop_reason": r["stop_reason"]}
@@ -159,4 +166,4 @@ def generate_conversations(
         if verbose:
             logger.info("[%d/%d] wrote %d conversations", start + len(rows), n, len(rows))
 
-    return pd.read_csv(out) if out.exists() else pd.DataFrame()
+    return read_rows(out)
