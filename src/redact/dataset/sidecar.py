@@ -27,6 +27,8 @@ from itertools import chain, islice
 from pathlib import Path
 from typing import Any, NamedTuple
 
+from .rows import _retry_held
+
 _REPLACE_ATTEMPTS = 5
 _REPLACE_WAIT_SECONDS = 0.2
 
@@ -258,16 +260,28 @@ class Ledger(JsonlSidecar):
                 "(_saved); records without it would not count."
             )
         # ensure_ascii=False keeps unicode readable; the lines are utf-8.
-        data = b"".join(
+        self._append(b"".join(
             json.dumps(r, ensure_ascii=False).encode("utf-8") + b"\n" for r in records
-        )
+        ))
+        if saved is not None:
+            self._saved = dict(saved)
+
+    def _append(self, data: bytes) -> None:
+        """Add ``data`` to the end of the file in one write, synced to disk.
+
+        The write starts on a new line: put onto a last line that lost its
+        newline, its first record would not parse. A file that another
+        program holds is opened again for a few seconds.
+        """
         self.path.parent.mkdir(parents=True, exist_ok=True)
-        with self.path.open("ab") as fh:
+        with _retry_held(lambda: self.path.open("a+b")) as fh:
+            if fh.seek(0, os.SEEK_END):
+                fh.seek(-1, os.SEEK_END)
+                if fh.read() != b"\n":
+                    data = b"\n" + data
             fh.write(data)
             fh.flush()
             os.fsync(fh.fileno())
-        if saved is not None:
-            self._saved = dict(saved)
 
     def reset(self) -> None:
         """Delete the file if it exists, and forget what it recorded."""

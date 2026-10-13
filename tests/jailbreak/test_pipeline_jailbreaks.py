@@ -178,6 +178,28 @@ def test_a_run_killed_between_rows_and_acks_leaves_each_unit_once(
     assert lock_is_free(state)
 
 
+def test_a_fresh_run_killed_before_it_plans_leaves_no_old_plan(tmp_path, monkeypatch):
+    """Left in place, the old plan would be taken for the new run's by the
+    next resume, and the settings just passed ignored."""
+    import redact.pipelines as P
+
+    def killed(*args, **kwargs):
+        raise Killed
+
+    out = tmp_path / "jb.csv"
+    manifest = Manifest.sidecar(out)
+    generate_jailbreaks(inputs=_inputs(), output_path=out, seed=1, **PURE_KW)
+    plan = manifest.load()
+    generate_jailbreaks(inputs=_inputs(), output_path=out, seed=1, **PURE_KW)
+    assert manifest.load() == plan                      # a resume reuses the plan
+
+    monkeypatch.setattr(P, "plan_run", killed)
+    with pytest.raises(Killed):
+        generate_jailbreaks(inputs=_inputs(), output_path=out, seed=2,
+                            resume=False, **PURE_KW)
+    assert [p.name for p in tmp_path.iterdir() if p.suffix != ".lock"] == []
+
+
 def test_a_second_run_is_refused_before_it_plans(tmp_path):
     from filelock import FileLock
 

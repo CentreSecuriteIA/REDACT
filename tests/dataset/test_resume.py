@@ -506,6 +506,23 @@ class TestOneWriter:
         assert _is_free(led)
         release_lock(led)                       # nothing held: nothing to do
 
+    @pytest.mark.parametrize("ends", ["a buffer", "release_lock"])
+    def test_a_change_of_directory_does_not_lose_the_lock(
+            self, tmp_path, monkeypatch, ends):
+        """A ledger under a relative path: its lock file is not looked for
+        again where the process stands when the stage ends."""
+        (tmp_path / "elsewhere").mkdir()
+        monkeypatch.chdir(tmp_path)
+        led = Ledger("a.state.jsonl", key_fields=("input_id",))
+        resume_state(led, resume=True, artifact="out.csv")
+        monkeypatch.chdir(tmp_path / "elsewhere")
+        if ends == "a buffer":
+            with CommitBuffer(append=lambda rows: None, ledger=led):
+                pass
+        else:
+            release_lock(led)
+        assert _is_free(_ledger(tmp_path))
+
     def test_a_buffer_refuses_a_ledger_that_resume_state_did_not_open(self, tmp_path):
         """Without the resume, what an unfinished save left would stay in the
         file and be saved over."""

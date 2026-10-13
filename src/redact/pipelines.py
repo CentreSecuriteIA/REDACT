@@ -823,12 +823,15 @@ def generate_jailbreaks(
     )
 
     # Before the plan is written: the resume takes the stage's lock. A fresh
-    # (non-resume) run clears prior output + ledger; a resume keeps + skips
-    # what the ledger records, and cuts off what an unfinished save left.
+    # (non-resume) run clears prior output + ledger + plan, so that a run
+    # stopped while it plans does not leave the old plan to be reused; a
+    # resume keeps + skips what the ledger records, and cuts off what an
+    # unfinished save left.
     completed = resume_state(
         jb_ledger,
         resume=resume,
         artifact=out,
+        manifest=Manifest(man_path),
     )
 
     # ------------------------------------------------------------------

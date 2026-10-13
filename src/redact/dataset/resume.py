@@ -34,8 +34,10 @@ import os
 import shutil
 import zlib
 from collections.abc import Callable, Iterable, Mapping, Sequence
+from contextlib import suppress
 from pathlib import Path
 from typing import Any
+from weakref import WeakKeyDictionary
 
 from filelock import FileLock, Timeout
 
@@ -49,6 +51,9 @@ _CHECKSUM_BYTES = 4096
 
 # The lock of each stage this process is the writer of, by its lock file.
 _locks: dict[Path, FileLock] = {}
+
+# The lock file of each ledger that was asked for it, as ``_lock_path`` says.
+_lock_paths: WeakKeyDictionary[Ledger, Path] = WeakKeyDictionary()
 
 
 def resume_state(
@@ -82,8 +87,11 @@ def resume_state(
         single key field, a tuple for several.
 
     Raises:
-        RuntimeError: Another run holds the stage's lock, or a file is not
-            what the ledger recorded.
+        RuntimeError: Another run holds the stage's lock, a file is not what
+            the ledger recorded, or another program holds a file that has to
+            be cut back.
+        PermissionError: Another program holds a file that a fresh run has
+            to remove.
     """
     if artifact is None:
         if not resume:
@@ -120,7 +128,10 @@ def _lock(ledger: Ledger) -> None:
 
     The operating system holds the lock, so a run that died holds nothing.
     A lock this process already holds is kept, so a stage that stopped
-    before its ``CommitBuffer`` exited can be called again.
+    before its ``CommitBuffer`` exited can be called again. Within one
+    process the lock therefore does not stop a second call of the same
+    stage while the first still runs; only the size check before each save
+    does.
     """
     path = _lock_path(ledger)
     if path in _locks:
@@ -140,8 +151,16 @@ def _lock(ledger: Ledger) -> None:
 
 
 def _lock_path(ledger: Ledger) -> Path:
-    """The lock file of the ledger's stage: ``<ledger name>.lock`` beside it."""
-    return Path(os.path.abspath(ledger.path.with_name(ledger.path.name + ".lock")))
+    """The lock file of the ledger's stage: ``<ledger name>.lock`` beside it.
+
+    Made absolute the first time it is asked for, and kept: worked out again
+    after a change of directory, a relative path would name another file and
+    the lock would never be given back.
+    """
+    if ledger not in _lock_paths:
+        name = ledger.path.with_name(ledger.path.name + ".lock")
+        _lock_paths[ledger] = Path(os.path.abspath(name))
+    return _lock_paths[ledger]
 
 
 def _opened(ledger: Ledger) -> bool:
@@ -228,7 +247,7 @@ def _cut_back(path: Path, size: int) -> None:
     if size:
         _truncate(path, size)
     else:
-        _retry_held(path.unlink)
+        _retry_cut(path, path.unlink)
 
 
 def _cut_file(path: Path) -> Path:
@@ -251,12 +270,26 @@ def _truncate(path: Path, size: int) -> None:
             fh.truncate(size)
             os.fsync(fh.fileno())
 
-    _retry_held(cut)
+    _retry_cut(path, cut)
     if path.stat().st_size != size:
         raise RuntimeError(
             f"{path} is {path.stat().st_size} bytes after being cut back to "
             f"{size}: another program holds it. Close that program and resume."
         )
+
+
+def _retry_cut(path: Path, cut: Callable[[], None]) -> None:
+    """Run ``cut``, which cuts or removes ``path``, again while the file is held.
+
+    A file that stays held stops the resume, with a message that says why.
+    """
+    try:
+        _retry_held(cut)
+    except PermissionError as error:
+        raise RuntimeError(
+            f"{path} could not be cut back: another program holds it. Close "
+            "that program and resume."
+        ) from error
 
 
 def _adopt(ledger: Ledger, state: LedgerState, artifact: Path) -> set[Any]:
@@ -267,6 +300,9 @@ def _adopt(ledger: Ledger, state: LedgerState, artifact: Path) -> set[Any]:
     next resume reads the ledger alone. A folder that holds neither rows nor
     acks is left as it is.
     """
+    if artifact.exists() and not artifact.stat().st_size:
+        # A first save that died before its first byte: no row to take over.
+        _cut_back(artifact, 0)
     found = _row_keys(ledger, artifact) if artifact.exists() else set()
     if ledger.exists():
         # A last line cut off mid-write would run into the next one.
@@ -327,8 +363,11 @@ def commit(
             carries more than the key.
 
     Raises:
-        ValueError: Rows are given with no record. Nothing is written: rows
-            on disk that no unit owns would be acked by the next save.
+        ValueError: Rows are given with no record; nothing is written, since
+            rows on disk that no unit owns would be acked by the next save.
+            Or the ledger holds ``_saved`` and no resume opened it: the rows
+            are appended, their acks are refused, and the next resume cuts
+            the rows off.
         RuntimeError: On an opened ledger, a file changed since the last
             save, or the append reported no size. Nothing is acked.
     """
@@ -403,9 +442,18 @@ def _name(ledger: Ledger, path: str | Path) -> str:
     """The name ``_saved`` gives a file: its path from the ledger's folder.
 
     Written with ``/`` on every platform, so a folder copied to another
-    machine resumes there.
+    machine resumes there. A file the ledger records under another spelling
+    keeps that one: on Windows ``OUT.csv`` and ``out.csv`` are one file.
     """
-    return Path(os.path.relpath(path, ledger.path.parent)).as_posix()
+    folder = ledger.path.parent
+    name = Path(os.path.relpath(path, folder)).as_posix()
+    recorded = ledger.saved or {}
+    if name not in recorded:
+        for known in recorded:
+            with suppress(OSError):     # one of the two is not on disk
+                if os.path.samefile(folder / known, path):
+                    return known
+    return name
 
 
 def _checksum(path: str | Path, size: int) -> str:

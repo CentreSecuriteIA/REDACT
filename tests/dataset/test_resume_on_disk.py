@@ -229,6 +229,26 @@ class TestResumeFromTheLedger:
         done, _led = _resume(tmp_path, out)
         assert done == set("ab") and out.read_bytes() == saved
 
+    def test_an_artifact_under_another_spelling_is_the_file_the_ledger_records(
+            self, tmp_path, no_reading):
+        """On Windows names differ in case only: ``OUT.csv`` is ``out.csv``,
+        and must not be moved aside as a file no save recorded."""
+        _led, out = _run(tmp_path, "abcd")
+        other = tmp_path / "OUT.csv"
+        if not other.exists():
+            pytest.skip("this file system tells out.csv and OUT.csv apart")
+        before = _files(tmp_path)
+
+        led = Ledger.sidecar(other, ("input_id",), {"input_id": str})
+        assert resume_state(led, resume=True, artifact=other) == set("abcd")
+        assert _files(tmp_path) == before               # nothing cut, nothing moved
+
+        with _buffer(led, other) as buf:                # and the next save goes on
+            buf.add(_rows("e"), {"input_id": "e"})
+        assert led.saved == {"out.csv": [out.stat().st_size, _crc(out.read_bytes())]}
+        assert _keys_on_disk(out) == list("abcde")
+        assert _resume(tmp_path)[0] == set("abcde")     # under the first spelling
+
     def test_a_resume_keeps_extra_keys(self, tmp_path):
         _run(tmp_path, "ab")
         led = _ledger(tmp_path)
@@ -363,9 +383,26 @@ class TestTheCut:
         held = out.read_bytes() + b"tail\n"
         out.write_bytes(held)
         attempts = self._held(monkeypatch, refusals=10**6)
-        with pytest.raises(PermissionError):
+        with pytest.raises(RuntimeError, match="another program holds") as stopped:
             _resume(tmp_path)
+        assert str(out) in str(stopped.value)
         assert len(attempts) > 1 and out.read_bytes() == held
+
+    def test_a_removal_that_stays_refused_stops_the_resume_the_same_way(
+            self, tmp_path, monkeypatch):
+        """A file no save recorded is removed, not cut."""
+        led, out = _ledger(tmp_path), tmp_path / "out.csv"
+        led.record([], saved={})
+        out.write_bytes(b"input_")
+
+        def unlink(path, missing_ok=False):
+            raise PermissionError("held by another program")
+
+        monkeypatch.setattr(Path, "unlink", unlink)
+        monkeypatch.setattr(rows_module.time, "sleep", lambda seconds: None)
+        with pytest.raises(RuntimeError, match="another program holds") as stopped:
+            _resume(tmp_path)
+        assert str(out) in str(stopped.value) and out.read_bytes() == b"input_"
 
     def test_a_cut_that_did_not_take_stops_the_resume(self, tmp_path, monkeypatch):
         _led, out = _run(tmp_path, "ab")
@@ -431,6 +468,17 @@ class TestAFolderWrittenBeforeSizesWereRecorded:
         assert done == set("ab")
         assert _ledger_lines(led) == [
             {"input_id": "a"}, {"input_id": "b"}, {"_saved": {}}]
+
+    @pytest.mark.parametrize("acked", ["ab", ""])
+    def test_an_empty_output_is_taken_over_as_no_file(self, tmp_path, acked):
+        """A first save that died before its first byte left the file."""
+        led, out = _old_folder(tmp_path, acked=acked, rows="")
+        out.touch()
+        done, led = _resume(tmp_path)
+        assert done == set(acked) and not out.exists()
+        assert not out.with_name("out.csv.cut").exists()
+        expected = [{"input_id": key} for key in acked] + [{"_saved": {}}] * bool(acked)
+        assert (_ledger_lines(led) if led.exists() else []) == expected
 
     def test_a_new_folder_is_left_empty(self, tmp_path):
         done, led = _resume(tmp_path)
@@ -509,3 +557,18 @@ class TestAStageThatNamesNoArtifact:
         assert found == [set(), {"A::harmful"}, {"A::harmful", "B::harmful"}]
         assert path.read_bytes() == b'{"unit": "A::harmful"}\n{"unit": "B::harmful"}\n'
         assert list(tmp_path.iterdir()) == [path]
+
+    def test_a_unit_whose_ack_lost_its_newline_runs_once_more_and_no_more(
+            self, tmp_path):
+        """Its next ack must not land on the torn line, where it would not
+        parse, and send the unit round again."""
+        path = tmp_path / "constitution.state.jsonl"
+        path.write_bytes(b'{"unit": "A"}\n{"unit": "B"}')
+
+        def run():
+            led = Ledger(path, ("unit",), {"unit": str})
+            done = resume_state(led, resume=True)
+            led.record([{"unit": unit} for unit in "ABC" if unit not in done])
+            return done
+
+        assert [run(), run(), run()] == [{"A"}, set("ABC"), set("ABC")]

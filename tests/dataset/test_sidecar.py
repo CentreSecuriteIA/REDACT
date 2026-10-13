@@ -7,6 +7,7 @@ file its units cover.
 
 import json
 import os
+from pathlib import Path
 
 import pytest
 
@@ -16,6 +17,30 @@ from redact.dataset import Ledger, Manifest
 
 def _names(folder):
     return sorted(p.name for p in folder.iterdir())
+
+
+@pytest.fixture()
+def held_ledger(monkeypatch):
+    """Refuse opens of a ledger for append as Windows does while another
+    program holds the file. Returns the attempts made."""
+
+    def hold(refusals):
+        attempts = []
+        opened = Path.open
+
+        def open_(path, mode="r", *args, **kwargs):
+            if not mode.startswith("a"):
+                return opened(path, mode, *args, **kwargs)
+            attempts.append(path.name)
+            if len(attempts) <= refusals:
+                raise PermissionError("held by another program")
+            return opened(path, mode, *args, **kwargs)
+
+        monkeypatch.setattr(Path, "open", open_)
+        monkeypatch.setattr(sidecar.time, "sleep", lambda seconds: None)
+        return attempts
+
+    return hold
 
 
 def _manifest(tmp_path, rows=()):
@@ -188,6 +213,44 @@ class TestLedgerAppend:
         led.record([{"id": "2"}, {"id": "3"}])
         # Every byte of the append was in the file when it was synced.
         assert synced == [b'{"id": "1"}\n{"id": "2"}\n{"id": "3"}\n']
+
+    @pytest.mark.parametrize("torn, counted", [
+        (b'{"id": "2"}', {"1", "2", "3"}),      # all of the line but its newline
+        (b'{"id": "2', {"1", "3"}),             # cut inside the line
+    ])
+    def test_an_append_after_a_torn_line_starts_on_a_new_line(
+            self, tmp_path, torn, counted):
+        """Written onto the torn line, the first new record would not parse."""
+        led = _ledger(tmp_path)
+        led.path.write_bytes(b'{"id": "1"}\n' + torn)
+        assert led.completed() == {"1"}
+        led.record([{"id": "3"}])
+        assert led.path.read_bytes() == b'{"id": "1"}\n' + torn + b'\n{"id": "3"}\n'
+        assert _ledger(tmp_path).completed() == counted
+
+    def test_an_append_to_an_empty_file_starts_at_its_first_byte(self, tmp_path):
+        led = _ledger(tmp_path)
+        led.path.touch()
+        led.record([{"id": "1"}])
+        assert led.path.read_bytes() == b'{"id": "1"}\n'
+
+    def test_a_ledger_another_program_holds_is_opened_again(
+            self, tmp_path, held_ledger):
+        led = _ledger(tmp_path)
+        led.record([{"id": "1"}])
+        attempts = held_ledger(refusals=2)
+        led.record([{"id": "2"}])
+        assert attempts == ["run.state.jsonl"] * 3
+        assert led.path.read_bytes() == b'{"id": "1"}\n{"id": "2"}\n'
+
+    def test_a_ledger_that_stays_held_raises_and_gets_no_byte(
+            self, tmp_path, held_ledger):
+        led = _ledger(tmp_path)
+        led.record([{"id": "1"}])
+        attempts = held_ledger(refusals=10**6)
+        with pytest.raises(PermissionError):
+            led.record([{"id": "2"}])
+        assert len(attempts) > 1 and led.path.read_bytes() == b'{"id": "1"}\n'
 
 
 _SAVED = {"out.csv": [120, "0a1b2c3d"]}
