@@ -1,6 +1,8 @@
 """Tests for the single-source path module (redact/paths.py)."""
 
 
+import pytest
+
 from redact import paths
 
 
@@ -31,6 +33,12 @@ def test_category_csv_default_and_explicit_base(tmp_path):
     assert paths.category_csv("Cyber", base=tmp_path) == tmp_path / "Cyber" / "samples.csv"
     assert paths.category_csv("Cyber", base=tmp_path, filename="x.csv") == tmp_path / "Cyber" / "x.csv"
     assert paths.category_csv("Cyber") == paths.datasets() / "Cyber" / paths.SAMPLES_FILENAME
+
+
+@pytest.mark.parametrize("name", ["Home/Garden", "Home\\Garden"])
+def test_a_category_name_with_a_path_separator_is_refused(tmp_path, name):
+    with pytest.raises(ValueError, match="one folder name"):
+        paths.category_csv(name, base=tmp_path)
 
 
 def test_taxonomy_dir_is_package_relative():

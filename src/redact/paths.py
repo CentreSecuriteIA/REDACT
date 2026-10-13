@@ -63,7 +63,17 @@ def category_csv(
     base: str | Path | None = None,
     filename: str = SAMPLES_FILENAME,
 ) -> Path:
-    """Per-category CSV path: ``{base or Datasets}/{category}/{filename}``."""
+    """Per-category CSV path: ``{base or Datasets}/{category}/{filename}``.
+
+    Raises:
+        ValueError: The category name holds a path separator. Its files
+            would land in a nested folder that nothing looks in.
+    """
+    if "/" in category or "\\" in category:
+        raise ValueError(
+            f"Category name {category!r} holds a path separator. A category is "
+            "stored under one folder name; rename it without '/' or '\\'."
+        )
     base_dir = Path(base) if base is not None else datasets()
     return base_dir / category / filename
 
