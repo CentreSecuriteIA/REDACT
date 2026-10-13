@@ -217,18 +217,16 @@ src/redact/
 │   ├── protocol.py                # LLMRequest + technique-generator contract, run_sync
 │   ├── engine.py                  # batch_apply_combinations — round-by-round batched engine
 │   ├── manifest.py                # plan_run / load_plan (jailbreak plan; built on dataset.Manifest)
-│   └── distribution.py            # Re-exports from dataset module
+│   └── distribution.py            # Balanced splitting across techniques
 │
-├── dataset/                       # Data handling utilities
-│   ├── io.py                      # CSV read/write per category folder
-│   ├── sidecar.py                 # JsonlSidecar — shared base for the ledger + manifest
-│   ├── ledger.py                  # Ledger — sidecar *.state.jsonl resume state (one impl for every stage)
-│   ├── manifest.py                # Manifest — sidecar *.manifest.jsonl run plan (one impl for every stage)
-│   ├── merge.py                   # Merge + normalize CSVs (general + presets)
-│   ├── split.py                   # Balanced splitting across techniques
-│   ├── dedup.py                   # Exact + normalized deduplication
+├── dataset/                       # Rows on disk: identity, sidecar files, resume, the per-category tree
+│   ├── identity.py                # content_id (content hash of a text), row_id / row_ids
+│   ├── rows.py                    # The rows of one CSV: append_rows, read_rows, iter_rows, count_rows
+│   ├── sidecar.py                 # JsonlSidecar, Ledger (*.state.jsonl), Manifest (*.manifest.jsonl)
+│   ├── resume.py                  # resume_state, drop_units, commit / CommitBuffer (rows, then acks)
+│   ├── categories.py              # The per-category tree: append_samples, merge_all, merge_inputs
 │   ├── loading.py                 # HuggingFace dataset loading
-│   └── taxonomy.py                # Taxonomy loading, filtering, iteration
+│   └── taxonomy.py                # Taxonomy and seed file loading, category iteration
 │
 ├── configs/                       # JSON configuration files (package data)
 │   ├── content_moderation_input.json
@@ -772,13 +770,15 @@ for e in entries:
 
 | Function | Purpose |
 |---|---|
-| `append_samples()` | Incremental CSV save with MD5 dedup |
-| `Ledger` | Sidecar `*.state.jsonl` resume state — `.completed()` / `.record()` / `.reset()` / `.sidecar()` (see [Resume model](#resume-model-one-modular-sidecar-system)) |
+| `content_id()` / `row_id()` | A row's id: the content hash of its text, or the id the row already carries |
+| `append_rows()` / `read_rows()` | Append rows to a stage's CSV in one synced write; read the CSV back |
+| `Ledger` | Sidecar `*.state.jsonl` of finished units — `.completed()` / `.record()` / `.reset()` / `.sidecar()` (see [Resume model](#resume-model-one-modular-sidecar-system)) |
 | `Manifest` | Sidecar `*.manifest.jsonl` run plan — `.write()` / `.load()` / `.sidecar()` |
-| `JsonlSidecar` | Shared base for `Ledger` + `Manifest` (path / mkdir / bad-line-robust JSONL) |
-| `merge_technique_csvs()` | Jailbreak preset — renames type columns, drops DISCARDED |
-| `merge_content_mod_csvs()` | Content mod preset — filters accepted, normalizes columns |
-| `deterministic_balanced_assign()` | Stratified splitting across N bins |
+| `JsonlSidecar` | Shared base for `Ledger` + `Manifest` (the path beside the artifact, reset, a read that skips bad lines) |
+| `resume_state()` | The units a run skips. Takes the stage's lock and puts its files back at the last finished save, or clears them for a fresh run |
+| `CommitBuffer` | Saves finished units in batches: their rows first, their acks in the ledger after |
+| `append_samples()` | Add samples to a category's `samples.csv`, skipping ids already in it |
+| `merge_all()` / `merge_inputs()` | Merge the accepted rows of the category files under a directory / of a run |
 | `load_taxonomy()` | Load taxonomy JSON |
 | `iter_categories()` | Iterate categories for generation loops |
 | `load_hf_dataset()` | Load from HuggingFace Hub with filtering |

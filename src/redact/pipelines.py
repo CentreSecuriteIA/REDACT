@@ -25,10 +25,13 @@ skips constitution generation, so it's the cheaper "quick eval" option)::
 # own; only the pipeline entry point should call them. Fix them to that later.
 
 #TODO(dataset): what the stages do not do yet for a large run (around 1M rows):
-#   - A stage holds its inputs and its whole plan in memory, and reads the
-#     full output CSV back to return it.
-#   - Resume reads whole output CSVs to find the finished units.
-#   - Nothing locks the output files against a second process.
+#   - A stage holds its inputs in memory, and unless called with
+#     read_back=False reads the full output CSV back to return it. The
+#     conversation stages and the constitution stage have no read_back.
+#   - The paraphrase stage reads its whole output CSV on every run, for the
+#     texts already in it.
+#   - Nothing locks the constitution's files or the standalone inputs against
+#     a second process.
 
 import json
 import logging

@@ -68,6 +68,7 @@ def get_existing_samples(
 
 #TODO(dataset): append_samples reads and rewrites the whole category CSV on
 # every save, so a save slows down as the file grows. Append the new rows only.
+# Only the standalone inputs are saved through it.
 def append_samples(
     samples: list[str],
     category: str,
