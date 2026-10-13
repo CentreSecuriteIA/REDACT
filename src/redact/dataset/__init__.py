@@ -13,21 +13,9 @@ from .categories import (
     take_per_group,
     write_category_csv,
 )
-from .dedup import exact_dedup, normalized_dedup
 from .identity import content_id, row_id, row_ids
-from .loading import filter_dataset, load_from_config, load_hf_dataset
+from .loading import load_from_config, load_hf_dataset
 from .resume import CommitBuffer, commit, drop_units, release_lock, resume_state
 from .rows import append_rows, check_columns, count_rows, iter_rows, keys_in, read_rows
 from .sidecar import JsonlSidecar, Ledger, Manifest
-from .taxonomy import (
-    filter_by_group,
-    get_categories,
-    get_category_descriptions,
-    get_group_categories,
-    get_seed_prompts,
-    get_subcategories,
-    iter_categories,
-    load_seeds,
-    load_taxonomy,
-    normalize_categories,
-)
+from .taxonomy import get_seed_prompts, iter_categories, load_seeds, load_taxonomy
