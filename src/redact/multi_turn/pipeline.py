@@ -1,13 +1,7 @@
-"""Batched generation of multi-turn conversation datasets.
+"""The conversation stage: plan, drive the units in chunks, save.
 
-Plays a :class:`~redact.multi_turn.core.Setting` on each seed (× ``iterations``)
-to a :class:`~redact.multi_turn.core.Trajectory`, driven at scale by
-:func:`redact.llm_pipeline.drive_generators` (one batch per model per round).
-Resumable via a sidecar ``*.state.jsonl`` **ledger** + a full-plan ``*.manifest.jsonl``,
-mirroring the paraphrase / output pipelines. The unit key ``(input_id, iteration)``
-and the ``source`` provenance label match the rest of the library, so conversation
-datasets join / dedup / resume exactly like inputs, jailbreaks, and paraphrases.
-Writes ``conversations.csv`` (flat metadata + the JSON step log per row).
+A unit is one ``(input_id, iteration)``: the Setting played once on one seed.
+Its row in ``conversations.csv`` holds the conversation's step log as JSON.
 """
 
 from __future__ import annotations
@@ -15,6 +9,7 @@ from __future__ import annotations
 import copy
 import json
 import logging
+from collections.abc import Callable
 from itertools import islice, repeat
 from math import ceil
 from pathlib import Path
@@ -51,14 +46,14 @@ def _seed_text_col(df: pd.DataFrame) -> str:
 
 
 def _ledger(out: Path) -> Ledger:
-    """Shared resume-ledger for conversation units, keyed ``(input_id, iteration)``."""
+    """The ledger of conversation units, keyed ``(input_id, iteration)``."""
     return Ledger.sidecar(out, key_fields=("input_id", "iteration"),
                           casters={"input_id": str, "iteration": int})
 
 
 def generate_conversations(
     seeds: pd.DataFrame,
-    setting: Setting | callable,
+    setting: Setting | Callable[[], Setting],
     data_dir: str | Path | None = None,
     iterations: int = 1,
     resume: bool = True,
@@ -67,29 +62,21 @@ def generate_conversations(
     verbose: bool = True,
     resolve=None,
 ) -> pd.DataFrame:
-    """Generate conversation trajectories from seeds under a Setting.
+    """Play ``setting`` on every seed ``iterations`` times and save the conversations.
 
     Args:
-        seeds: DataFrame of opening prompts/goals; the seed text comes from a
-            ``seed``/``sample``/``prompt``/``text`` column, the id from ``sample_id``
-            (else a content hash), plus optional ``category``/``entry_type`` metadata.
-        setting: a :class:`Setting` **template** (deep-copied per conversation so
-            stateful actors don't leak) **or a zero-arg factory** returning a fresh
-            Setting per conversation (preferred for stateful actors).
-        data_dir: working root; artifact defaults to ``{data_dir}/Datasets/conversations.csv``.
-        iterations: conversations generated per seed — the ``iteration`` axis (0-based),
-            named to match the jailbreak / paraphrase pipelines. These are independent
-            stochastic variants (not escalation rounds).
-        resume: skip ``(input_id, iteration)`` units already in the sidecar ledger.
-        batch_size: conversations per chunk (each chunk driven together, pooled by model).
-        output_path: artifact override.
-        resolve: ``model_name -> ModelClient`` override (defaults to
-            ``ModelClient.create``).
+        seeds: The opening messages, from a ``seed``, ``sample``, ``prompt`` or
+            ``text`` column. The id is ``sample_id`` when present, else the
+            content id of the text; ``category`` and ``entry_type`` are copied
+            to the rows.
+        setting: A Setting, deep-copied for each conversation, or a factory
+            that returns a new one; prefer the factory when an actor holds state.
+        iterations: Conversations per seed, numbered from 0.
+        batch_size: Conversations driven together per chunk.
+        resolve: ``model name -> ModelClient``; defaults to ``ModelClient.create``.
 
     Returns:
-        DataFrame of all rows in ``conversations.csv``: ``sample_id``, ``input_id``,
-        ``iteration``, ``setting``, ``turns_used``, ``stop_reason``, ``transcript``
-        (JSON step log), ``category``, ``entry_type``, ``source``.
+        Every row of ``conversations.csv``.
     """
     if seeds is None or len(seeds) == 0:
         raise ValueError("generate_conversations needs a non-empty `seeds` DataFrame.")
@@ -109,10 +96,9 @@ def generate_conversations(
     ids = row_ids(seeds, tcol)
 
     def _units():
-        """Yield the run's units in plan order, built anew on every call.
+        """The run's units in plan order, ``(input_id, iteration, seed_text, meta)``.
 
-        A unit is ``(input_id, iteration, seed_text, meta)``. No list of them
-        is held: a pass over the units costs time, not memory.
+        Built anew on every call, so no list of them is held.
         """
         blank = repeat("")      # for seeds without the column
         categories = seeds.get("category", blank)
@@ -122,7 +108,6 @@ def generate_conversations(
             for it in range(iterations):
                 yield iid, it, str(stext), meta
 
-    # Plan the full run → manifest (every (input_id, iteration) unit).
     manifest.write(
         {"input_id": iid, "iteration": it, **meta} for iid, it, _t, meta in _units())
 
@@ -177,8 +162,7 @@ def generate_conversations(
                 progress=f"conversations {start // batch_size + 1}/{n_chunks}" if verbose else None,
             )
             rows = [results[(iid, it)] for iid, it, _t, _m in chunk]
-            # The flush appends the chunk's rows, then acks them (crash-safe),
-            # carrying stop_reason for context.
+            # The flush appends the chunk's rows, then acks them.
             for r in rows:
                 buf.add([r], {"input_id": r["input_id"], "iteration": r["iteration"],
                               "stop_reason": r["stop_reason"]})

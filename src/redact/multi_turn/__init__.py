@@ -1,9 +1,19 @@
-"""General multi-turn conversation datasets.
+"""Conversation datasets: a Setting played on seeds, saved and scored.
 
-Define a :class:`Setting` (how a conversation is driven + participants) and play it
-on a seed to produce a :class:`Trajectory` (a typed step log). Use-case-agnostic;
-jailbreak multi-turn attacks (``multiturn_attacks/``) and optimization loops
-(``optimization/``) build on this. See ``.claude/theme4_multiturn_plan.md``.
+Usage::
+
+    from redact.multi_turn import (
+        ModelActor, ScriptedActor, Setting,
+        evaluate_conversations, generate_conversations,
+    )
+
+    def make_setting():
+        user = ScriptedActor("user", ["Go on."])
+        bot = ModelActor("bot", "venice-uncensored")
+        return Setting(participants=[user, bot], max_turns=4)
+
+    generate_conversations(seeds, make_setting, data_dir=DATA_DIR)
+    scored = evaluate_conversations(data_dir=DATA_DIR, judge_model="claude-opus-4-6")
 """
 
 from .core import (

@@ -1,14 +1,7 @@
-"""Multi-turn jailbreak *attack* strategies (propose generators for StrategyActor).
+"""Attacker strategies for StrategyActor.
 
-Each builder returns a ``propose(transcript, turn_index)`` generator usable by
-``multi_turn.StrategyActor`` — it constructs the attacker's next message and an
-optional strategy ``note`` (logged as provenance). Two seed families:
-
-- **crescendo** — a fixed escalation of template follow-ups (no attacker LLM),
-  optionally passing each through a jailbreak augmentation from ``jailbreak/``.
-- **PAIR-lite** — an attacker LLM rewrites the next turn from the transcript + goal.
-
-The *goal* is the seed = the first message in the transcript.
+Each builder returns a ``propose(transcript, turn_index)`` generator. The goal
+is the transcript's first message, the seed.
 """
 
 from __future__ import annotations
@@ -43,8 +36,11 @@ def crescendo_propose(
     followups: list[str] | None = None,
     jailbreak_technique: Callable[[str], tuple[str, str]] | None = None,
 ):
-    """Template escalation. ``jailbreak_technique`` is an optional **pure** transform
-    ``(str) -> (str, info)`` from ``jailbreak/`` applied to each follow-up."""
+    """Crescendo: the next of ``followups`` each turn; calls no model.
+
+    ``jailbreak_technique`` is an optional pure transform ``(str) -> (str, info)``
+    from ``jailbreak/``, applied to each follow-up.
+    """
     followups = followups or DEFAULT_CRESCENDO_FOLLOWUPS
 
     def propose(transcript, turn_index: int):
@@ -62,7 +58,8 @@ def crescendo_propose(
 
 
 def pair_propose(attacker_model: str, system: str | None = None):
-    """Attacker-LLM adaptive strategy: the attacker rewrites each next turn."""
+    """PAIR: ``attacker_model`` writes each next message, given the goal and the
+    conversation so far."""
     system = system or _PAIR_ATTACKER_SYSTEM
 
     def propose(transcript, turn_index: int):

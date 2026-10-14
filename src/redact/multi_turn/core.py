@@ -1,16 +1,7 @@
-"""General multi-turn conversation core: a ``Setting`` played to a ``Trajectory``.
+"""Actors, the Setting they take part in, and the runner that plays it to a Trajectory.
 
-Use-case-agnostic. Reuses ``llm_pipeline/`` (``LLMRequest``, ``drive_sync``) and
-the step log in ``transcript.py``; higher layers (``multiturn_attacks/``,
-``optimization/``) build on this. Dependency direction: ``multi_turn/`` →
-``llm_pipeline/`` → ``llms/``.
-
-An **actor**'s turn is a generator ``turn(transcript) -> yields LLMRequest, returns
-list[Step]`` (see :class:`Actor`). The runner plays actors in order (seed as the
-first message, then alternate), logging every step. This is the single-conversation
-(sync) path; a batched driver over many conversations comes later.
-
-Plan: `.claude/theme4_multiturn_plan.md`.
+An actor's turn is a generator: it yields model calls, is resumed with each
+reply, and returns the steps it adds to the transcript.
 """
 
 from __future__ import annotations
@@ -27,10 +18,6 @@ from .transcript import Step, Transcript
 ActorTurn = Generator[LLMRequest, str, "list[Step]"]
 
 
-# ---------------------------------------------------------------------------
-# Actors
-# ---------------------------------------------------------------------------
-
 class Actor:
     """Base actor. Subclasses implement :meth:`turn` as a generator."""
 
@@ -44,7 +31,7 @@ class Actor:
 
 
 class ScriptedActor(Actor):
-    """Emits pre-set messages in order (no LLM). Also seeds / replays a transcript."""
+    """Sends the given messages in order, then repeats the last; calls no model."""
 
     def __init__(self, name: str, messages: list[str], role: str = "user"):
         super().__init__(name, role)
@@ -61,7 +48,7 @@ class ScriptedActor(Actor):
 
 
 class ModelActor(Actor):
-    """A single LLM turn: renders the visible transcript and calls its model."""
+    """Replies with one call to its model on the visible transcript."""
 
     def __init__(self, name: str, model: str, role: str = "assistant",
                  system_prompt: str | None = None):
@@ -75,17 +62,12 @@ class ModelActor(Actor):
 
 
 class StrategyActor(Actor):
-    """An adaptive, multi-step actor driven by a ``propose`` generator.
+    """Sends the message a ``propose`` generator builds.
 
-    ``propose(transcript, turn_index) -> Generator[LLMRequest, str, message | (message, note)]``
-    builds this actor's next message — it may ``yield`` LLM requests (e.g. an attacker
-    model working out a strategy, or analyzing the last reply) before returning the
-    message (and an optional ``note`` logged as a ``strategy`` provenance step).
-
-    ``turn_index`` = how many messages this actor has already contributed (derived
-    from the transcript, so the actor is **stateless** — safe to deep-copy / reuse
-    across conversations via a Setting factory). This is the extension point for
-    crescendo / PAIR / prober behaviors (see ``multiturn_attacks/``).
+    ``propose(transcript, turn_index)`` may yield model calls, and returns the
+    message, or ``(message, note)`` to log the note as a ``strategy`` step.
+    ``turn_index`` counts this actor's earlier messages in the transcript, so
+    the actor holds no state between turns.
     """
 
     def __init__(self, name: str, propose, role: str = "user"):
@@ -105,19 +87,13 @@ class StrategyActor(Actor):
         return steps
 
 
-# ---------------------------------------------------------------------------
-# Setting + Trajectory
-# ---------------------------------------------------------------------------
-
 @dataclass
 class Setting:
-    """How a conversation is driven (the primary axis) + participants + limits.
+    """Who takes part in a conversation, and when it ends.
 
-    ``drive="conversation"`` (plain exchange) is the only mode implemented in this
-    START; ``"feedback"`` (adaptive strategize→analyze) and ``"optimize"`` (search,
-    in ``optimization/``) come later. ``participants`` are played in order with the
-    seed as the first message, then alternating. ``stop`` is an optional predicate
-    over the transcript for early termination.
+    The seed is the first participant's message; the participants then take
+    turns in order. ``stop`` ends the conversation early once it returns true
+    for the transcript.
     """
 
     participants: list[Actor]
@@ -129,12 +105,7 @@ class Setting:
 
 @dataclass
 class Trajectory:
-    """The logged result of playing a Setting on a seed.
-
-    ``input_id`` is the id of the source seed row — named to match the rest of
-    the library (jailbreak / output / paraphrase all reference their source row
-    as ``input_id``), so conversation datasets join to base inputs uniformly.
-    """
+    """A Setting played on a seed; ``input_id`` is the seed row's id."""
 
     input_id: str
     setting: str
@@ -144,18 +115,13 @@ class Trajectory:
     meta: dict = field(default_factory=dict)
 
 
-# ---------------------------------------------------------------------------
-# Runner (single conversation)
-# ---------------------------------------------------------------------------
-
 def conversation_gen(
     setting: Setting, seed: str, input_id: str = "0",
 ) -> Generator[LLMRequest, str, Trajectory]:
-    """Generator that plays ``setting`` on ``seed`` and returns a :class:`Trajectory`.
+    """Play ``setting`` on ``seed``, yielding each model call; return the Trajectory.
 
-    Turn 0 is the seed, logged as the first participant's message. Remaining
-    participants then alternate; each ``turn`` may yield LLM requests (advanced by
-    the driver). Stops at ``max_turns`` or when ``setting.stop`` fires.
+    Stops after ``max_turns`` turns, the seed being the first, or once
+    ``setting.stop`` is true.
     """
     if not setting.participants:
         raise ValueError("Setting needs at least one participant.")
@@ -184,5 +150,5 @@ def conversation_gen(
 def run_conversation(
     setting: Setting, seed: str, call: Callable[[LLMRequest], str], input_id: str = "0",
 ) -> Trajectory:
-    """Play one conversation to completion using a blocking ``call(LLMRequest) -> str``."""
+    """Play one conversation, answering each model call with ``call(request)``."""
     return drive_sync(conversation_gen(setting, seed, input_id), call)

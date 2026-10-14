@@ -191,7 +191,7 @@ def test_evaluate_conversations_offline(tmp_path):
     make = lambda: Setting(participants=[ScriptedActor("u", ["more"]), ModelActor("b", "m")], max_turns=2)
     generate_conversations(seeds, make, data_dir=tmp_path, resolve=_FakeResolver(_echo), verbose=False)
 
-    # Judge model mocked via a fake router: "Yes ..." for the first, "No ..." for the second.
+    # The judge says "Yes ..." to the first, "No ..." to the second.
     scored = evaluate_conversations(
         data_dir=tmp_path, judge_model="judge", judge_system="did it work?",
         scope="last_reply", verbose=False,
@@ -199,7 +199,7 @@ def test_evaluate_conversations_offline(tmp_path):
     )
     assert set(scored["success"]) == {True, False}
     assert set(scored["judge_model"]) == {"judge"}
-    # Resume: nothing re-judged (no router needed — nothing pending reaches the backend).
+    # Resume: nothing re-judged, so no resolver is needed.
     again = evaluate_conversations(data_dir=tmp_path, judge_model="judge", verbose=False)
     assert len(again) == 2
     # resume=False re-judges from scratch (unlinks the existing scored artifacts).

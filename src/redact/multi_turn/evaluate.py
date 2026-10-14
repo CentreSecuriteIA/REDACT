@@ -1,19 +1,7 @@
-"""Separable evaluation of conversation trajectories (optional judge layer).
+"""The scoring stage: a judge over saved conversations.
 
-Evaluation is a **separate pass** from generation: generate trajectories with
-:func:`generate_conversations`, then optionally score them here. Nothing about
-success is hardwired into the runner. The criterion is a user-supplied judge
-system prompt (use-case-specific — jailbreak success, fingerprint match, task
-completion, …); the judge model is chosen by the caller and must differ from any
-model being judged.
-
-Scope:
-- ``"last_reply"`` — judge the final assistant reply against the seed goal.
-- ``"transcript"`` — judge the whole conversation.
-
-Writes ``conversations_scored.csv`` (``sample_id``, ``success``, ``judge_reasoning``,
-``judge_model``, ``scope``), keyed by conversation ``sample_id``; resumable via a
-sidecar ``*.state.jsonl`` ledger.
+The criterion is the judge's system prompt, so one stage scores any use case.
+Writes ``conversations_scored.csv``, one row per conversation ``sample_id``.
 """
 
 from __future__ import annotations
@@ -50,7 +38,7 @@ def _scored_path(conversations_path: Path) -> Path:
 
 
 def _ledger(scored_path: Path) -> Ledger:
-    """Shared resume-ledger for scored conversations, keyed on conversation ``sample_id``."""
+    """The ledger of scored conversations, keyed on their ``sample_id``."""
     return Ledger.sidecar(scored_path, key_fields=("sample_id",), casters={"sample_id": str})
 
 
@@ -89,25 +77,24 @@ def evaluate_conversations(
     verbose: bool = True,
     resolve=None,
 ) -> pd.DataFrame:
-    """Score conversation trajectories with a judge model (optional, separable).
+    """Score saved conversations with a judge model.
 
     Args:
-        conversations: trajectories DataFrame; if None, reads ``conversations.csv``.
-        data_dir: working root (locates the artifacts).
-        judge_model: **required** — the scoring model (choose one independent of the
-            models being judged).
-        judge_system: judge criterion (system prompt). Defaults to a generic
-            goal-accomplished check; supply a use-case-specific one.
-        scope: ``"last_reply"`` or ``"transcript"``.
-        resume: skip conversation ids already scored (sidecar ledger).
-        batch_size: judgments per batch.
-        conversations_path: override for the input CSV path (defaults to
-            ``paths.conversations_csv(data_dir)``).
-        verbose: log progress per batch.
+        conversations: The conversations; read from ``conversations_path``
+            when not given.
+        judge_model: The scoring model, required; pick one that is not among
+            the models judged.
+        judge_system: The criterion, as the judge's system prompt. Defaults to
+            a generic check that the goal was reached.
+        scope: ``"last_reply"`` judges the final reply against the seed;
+            ``"transcript"`` judges the whole conversation.
+        batch_size: Judgments per chunk.
+        conversations_path: The conversations file; defaults to
+            ``paths.conversations_csv(data_dir)``. The scores are saved beside it.
+        resolve: ``model name -> ModelClient``; defaults to ``ModelClient.create``.
 
     Returns:
-        DataFrame of ``conversations_scored.csv``: ``sample_id, success,
-        judge_reasoning, judge_model, scope``.
+        Every row of ``conversations_scored.csv``.
     """
     if judge_model is None:
         raise ValueError("evaluate_conversations requires a judge_model.")

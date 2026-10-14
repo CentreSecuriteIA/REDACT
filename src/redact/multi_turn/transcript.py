@@ -1,4 +1,4 @@
-"""Typed step log for multi-turn conversations."""
+"""The step log of a conversation."""
 
 from __future__ import annotations
 
@@ -12,25 +12,23 @@ _VISIBLE = ("message", "reply")
 
 @dataclass
 class Step:
-    """One entry in a conversation's step log.
+    """One entry of the step log.
 
-    ``message`` and ``reply`` steps carry a chat ``role`` and are rendered
-    into the messages sent to a model. ``strategy``, ``analysis`` and
-    ``evaluation`` steps record the actor's ideas, analyses and scores, and
-    are never sent.
+    ``message`` and ``reply`` steps carry a chat ``role`` and are sent to
+    models; the other kinds are notes, only logged.
     """
 
     type: StepType
     actor: str
     content: str
-    role: str | None = None          # ChatMessage role for visible steps
+    role: str | None = None          # chat role of a message or reply
     model: str | None = None
     meta: dict = field(default_factory=dict)
 
 
 @dataclass
 class Transcript:
-    """Ordered step log of a conversation."""
+    """The steps of a conversation, in order."""
 
     steps: list[Step] = field(default_factory=list)
 
@@ -48,7 +46,7 @@ class Transcript:
 
     def note(self, type: StepType, actor: str, content: str,
              model: str | None = None, meta: dict | None = None) -> Step:
-        """Log a provenance event (strategy / analysis / evaluation)."""
+        """Log a note, which is never sent to a model."""
         return self.add(Step(type, actor, content, model=model, meta=meta or {}))
 
     def as_messages(self, system: str | None = None) -> list[dict]:
@@ -60,5 +58,5 @@ class Transcript:
         return msgs
 
     def to_records(self) -> list[dict]:
-        """The full step log as a list of dicts (copies), for JSON storage."""
+        """Every step as a dict (a copy), for JSON."""
         return [asdict(s) for s in self.steps]

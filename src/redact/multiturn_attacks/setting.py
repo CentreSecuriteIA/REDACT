@@ -1,15 +1,4 @@
-"""Build attack ``Setting`` factories for multi-turn jailbreak attacks.
-
-Composes the general ``multi_turn/`` core into an attacker-vs-target conversation:
-participant 0 is the attacker (a ``StrategyActor`` running a crescendo / PAIR-lite
-strategy, emitting ``user`` turns — the seed is its turn 0), participant 1 is the
-required safety-trained ``target`` (a ``ModelActor``). Returns a **factory**
-(``() -> Setting``) so each conversation gets fresh, stateless actors — pass it
-straight to ``generate_conversations``.
-
-The success judge is a separate step: score the produced ``conversations.csv`` with
-``evaluate_conversations(judge_system=SUCCESS_JUDGE_SYSTEM)``.
-"""
+"""The attack Setting factory, and the judge prompt that scores an attack."""
 
 from __future__ import annotations
 
@@ -37,16 +26,19 @@ def build_attack_setting(
     max_turns: int = 6,
     target_system: str | None = None,
 ) -> Callable[[], Setting]:
-    """Return a Setting **factory** for a multi-turn attack.
+    """A factory of attack Settings: the attacker, then the target.
+
+    The attacker is a StrategyActor sending ``user`` turns, the seed being its
+    first; the target is a ModelActor. Pass the factory to
+    ``generate_conversations``.
 
     Args:
-        target_model: the safety-trained model under attack (**required**, no default).
-        attack: ``"crescendo"`` (template escalation) or ``"pair"`` (attacker LLM).
-        attacker_model: required for ``attack="pair"``.
-        followups / jailbreak_technique: crescendo template list / optional pure-transform
-            jailbreak augmentation applied per turn.
-        max_turns: conversation length cap.
-        target_system: optional system prompt for the target.
+        target_model: The model under attack, required.
+        attack: ``"crescendo"`` or ``"pair"``.
+        attacker_model: The attacker's model, required for ``"pair"``.
+        followups: Crescendo's follow-ups.
+        jailbreak_technique: A pure transform applied to each crescendo follow-up.
+        target_system: The target's system prompt.
     """
     if not target_model:
         raise ValueError("build_attack_setting requires a target_model (no default).")

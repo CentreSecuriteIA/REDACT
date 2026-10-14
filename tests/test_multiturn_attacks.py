@@ -85,7 +85,7 @@ def test_pair_attack_uses_attacker_model(tmp_path):
     df = generate_attacks(seeds, target_model="target", data_dir=tmp_path, attack="pair",
                           attacker_model="attacker", max_turns=4, resolve=_FakeResolver(_echo), verbose=False)
     steps = json.loads(df.iloc[0]["transcript"])
-    # the attacker's follow-up came from the attacker model (router tags model name)
+    # the attacker's follow-up came from the attacker model (_echo tags the model name)
     atk_msgs = [s["content"] for s in steps if s["type"] == "message"][1:]
     assert any("[attacker]" in m for m in atk_msgs)
 

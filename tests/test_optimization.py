@@ -7,11 +7,7 @@ from tests.conftest import MockBackend, make_client
 
 
 class _FakeResolver:
-    """``model -> client``: target models echo, the judge uses a fixed backend.
-
-    Replaces the old fake ModelRouter — drive_generators and optimize() both
-    take a resolve callable now, so one object covers target and judge.
-    """
+    """``model -> client``: target models echo, the judge uses a fixed backend."""
 
     def __init__(self, judge_backend=None, judge_model="judge"):
         self._judge_backend = judge_backend or MockBackend("No")

@@ -1,12 +1,7 @@
-"""Multi-turn jailbreak attacks (built on ``multi_turn/``, its own top-level folder).
+"""Multi-turn jailbreak attacks: a Setting against a safety-trained target.
 
-Attacker-vs-target conversations that probe a safety-trained target over several turns
-(crescendo / PAIR-lite), optionally composing jailbreak augmentations from ``jailbreak/``
-into each turn. Generation reuses ``multi_turn.generate_conversations``; success scoring
-reuses ``multi_turn.evaluate_conversations`` with a jailbreak-success judge.
-
-Dependency direction: ``multiturn_attacks/`` → ``multi_turn/`` (+ ``jailbreak/`` for the
-technique transforms), never the reverse.
+An attacker (crescendo or PAIR) talks to the target over several turns, and a
+separate judge pass scores whether the target complied.
 """
 
 from __future__ import annotations
@@ -47,12 +42,11 @@ def generate_attacks(
     target_system: str | None = None,
     **kwargs,
 ) -> pd.DataFrame:
-    """Generate multi-turn attack conversations against ``target_model`` from harmful seeds.
+    """Play an attack against ``target_model`` on every seed and save the conversations.
 
-    Thin wrapper: builds an attack :class:`Setting` factory and runs
-    :func:`redact.multi_turn.generate_conversations`. Score afterwards with
-    :func:`score_attacks`. ``**kwargs`` forward to ``generate_conversations``
-    (``iterations``, ``resume``, ``batch_size``, ``router``, ``verbose``, …).
+    ``**kwargs`` go to :func:`redact.multi_turn.generate_conversations`
+    (``iterations``, ``resume``, ``batch_size``, ``resolve``, ``verbose``, ...).
+    Score the result with :func:`score_attacks`.
     """
     factory = build_attack_setting(
         target_model, attack, attacker_model=attacker_model, followups=followups,
@@ -62,10 +56,10 @@ def generate_attacks(
 
 
 def score_attacks(data_dir=None, judge_model: str | None = None, **kwargs) -> pd.DataFrame:
-    """Score attack conversations for jailbreak success (separable judge pass).
+    """Score saved attack conversations for jailbreak success.
 
-    Wraps :func:`redact.multi_turn.evaluate_conversations` with the jailbreak-success
-    criterion. ``judge_model`` should be independent of the target.
+    ``judge_model`` should not be the target. ``**kwargs`` go to
+    :func:`redact.multi_turn.evaluate_conversations`.
     """
     return evaluate_conversations(
         data_dir=data_dir, judge_model=judge_model,

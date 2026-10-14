@@ -1,21 +1,8 @@
-"""General optimize-toward-an-objective search over conversation moves (beam/tree).
+"""Beam search over conversation moves toward a judge's yes.
 
-The **search controller above** ``drive_generators`` (plan weak-point W1): at each
-depth it expands every frontier node into candidate next-turns **in parallel**
-(batched through the router), scores each with a **judge**, logs the whole tree,
-keeps the best ``beam`` nodes, and continues — with backtracking implicit in keeping
-multiple paths. Objective-general: the ``candidates`` proposer and the judge define
-the objective, so this works for jailbreak optimization (``multiturn_attacks``) or
-anything else with a scorer.
-
-Subsumes: beam=1 → linear refine (PAIR); beam>1 → tree search (TAP); candidates =
-technique-combinations over a base follow-up → optimized-crescendo (try combinations,
-keep the best, escalate).
-
-MVP: ``candidates(transcript, depth) -> list[(move_name, message)]`` returns concrete
-attacker messages (e.g. different jailbreak-technique combinations); scoring is via a
-judge model (binary success). An attacker-LLM-proposed candidate variant is a noted
-extension.
+At each depth every frontier node is extended by each move ``candidates``
+proposes, the target replies to all of them in one round, the judge scores the
+replies, and the ``beam`` best go on. Every node explored is kept as the tree.
 """
 
 from __future__ import annotations
@@ -32,7 +19,7 @@ from redact.multi_turn import Transcript
 
 @dataclass
 class Node:
-    """One node in the search tree = a conversation state + its score."""
+    """A conversation in the search tree, with the judge's verdict on it."""
 
     id: int
     parent: int | None
@@ -46,8 +33,7 @@ class Node:
 
 def _expand_gen(parent_transcript: Transcript, move_name: str, message: str,
                 target_model: str, depth: int):
-    """A one-turn expansion generator: append the candidate attacker message, call the
-    target, return the extended transcript."""
+    """A copy of the transcript with ``message`` added and the target's reply to it."""
     t = copy.deepcopy(parent_transcript)
     t.note("strategy", "attacker", f"{move_name} (d{depth})")
     t.message("attacker", message, role="user")
@@ -73,21 +59,20 @@ def optimize(
     verbose: bool = True,
     resolve=None,
 ) -> tuple[Node, list[Node]]:
-    """Beam/tree search for the highest-scoring conversation continuation.
+    """Search for the conversation the judge says yes to.
 
     Args:
-        seed: the goal / opening message (attacker turn 0).
-        target_model: the model under attack (**required**).
-        candidates: ``(transcript, depth) -> [(move_name, message), ...]`` — the branching.
-        judge_model / judge_system: scorer (binary success → score 1.0/0.0). Independent
-            of the target.
-        beam: nodes kept per depth. ``1`` = linear refine; ``>1`` = tree/beam.
-        depth: max search depth (turns of optimization).
-        stop_on_success: stop as soon as any candidate succeeds.
-        verbose: log per-round progress via ``drive_generators``.
+        seed: The goal, the attacker's first message.
+        target_model: The model under attack, required.
+        candidates: ``(transcript, depth) -> [(move_name, message), ...]``.
+        judge_model: The scoring model; pick one that is not the target.
+        judge_system: The criterion, as the judge's system prompt.
+        beam: Nodes kept per depth; ``1`` refines a single line.
+        depth: The most attacker turns added to the seed.
+        stop_on_success: Stop at the first depth where a node succeeds.
 
     Returns:
-        ``(best_node, tree)`` where ``tree`` is every node explored (the full trajectory).
+        ``(best_node, tree)``, the tree being every node explored.
     """
     if not target_model:
         raise ValueError("optimize requires a target_model.")
@@ -150,7 +135,7 @@ def optimize(
 
 
 def tree_to_records(tree: list[Node]) -> list[dict]:
-    """Flatten a search tree to serializable rows (nodes = move + score + parent)."""
+    """One dict per node of the tree, for JSON or a frame."""
     return [
         {"id": n.id, "parent": n.parent, "depth": n.depth, "move": n.move,
          "score": n.score, "success": n.success, "judge_reasoning": n.judge_reasoning,

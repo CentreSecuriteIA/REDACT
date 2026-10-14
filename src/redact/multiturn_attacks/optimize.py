@@ -1,10 +1,4 @@
-"""Jailbreak optimization = the general ``optimization`` search with jailbreak moves.
-
-``jailbreak_candidates`` proposes, at each depth, the plain escalation follow-up plus
-one candidate per jailbreak technique (each technique transforms the follow-up) — so
-the search "tries combinations of the jailbreak techniques and keeps the best,
-escalating that way." ``optimize_attack`` wires it to the success judge.
-"""
+"""Jailbreak moves for the search."""
 
 from __future__ import annotations
 
@@ -20,8 +14,10 @@ def jailbreak_candidates(
     techniques: list[Callable[[str], tuple[str, str]]],
     followups: list[str] | None = None,
 ):
-    """Build a ``candidates(transcript, depth)`` proposer: the plain escalation for this
-    depth + one variant per (pure-transform) jailbreak technique applied to it."""
+    """The moves at a depth: its follow-up, plain and through each technique.
+
+    Returns ``candidates(transcript, depth)`` for :func:`redact.optimization.optimize`.
+    """
     followups = followups or DEFAULT_CRESCENDO_FOLLOWUPS
 
     def candidates(transcript, depth: int) -> list[tuple[str, str]]:
@@ -47,10 +43,9 @@ def optimize_attack(
     verbose: bool = True,
     resolve=None,
 ):
-    """Search jailbreak technique-combinations against ``target_model`` toward success.
+    """Search ``techniques`` against ``target_model`` with the jailbreak-success judge.
 
-    Returns ``(best_node, tree)`` from :func:`redact.optimization.optimize` — the best
-    conversation found plus the full search tree (candidates + judge scores per depth).
+    Returns ``(best_node, tree)`` from :func:`redact.optimization.optimize`.
     """
     return optimize(
         seed, target_model, jailbreak_candidates(techniques, followups),
