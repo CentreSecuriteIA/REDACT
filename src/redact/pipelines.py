@@ -33,7 +33,6 @@ skips constitution generation, so it's the cheaper "quick eval" option)::
 #   - Nothing locks the constitution's files or the standalone inputs against
 #     a second process.
 
-import json
 import logging
 import warnings
 from collections import Counter
@@ -88,68 +87,6 @@ from redact.llms import ModelClient, load_prompt
 from redact.llms.model_config import default_model_for_role
 
 logger = logging.getLogger(__name__)
-
-_DEFAULT_TAXONOMY_DIR = paths.taxonomy_dir()
-
-
-# ---------------------------------------------------------------------------
-# Public functions
-# ---------------------------------------------------------------------------
-
-
-def create_taxonomy(
-    name: str,
-    categories: dict[str, str | dict],
-    description: str = "",
-    aliases: dict[str, str] | None = None,
-    groups: dict[str, list[str]] | None = None,
-    taxonomy_dir: str | Path | None = None,
-    verbose: bool = True,
-) -> dict:
-    """Create and save a taxonomy JSON file.
-
-    A small authoring helper: writes a taxonomy JSON (same shape as the bundled
-    ones in ``configs/taxonomy/``) so it can be loaded by name via
-    ``generate_inputs(taxonomy=name, taxonomy_dir=...)``.
-
-    Args:
-        name: Taxonomy name (used as filename).
-        categories: Category definitions. Values can be description strings
-            or full dicts with ``description``, ``subcategories``, etc.
-        description: Top-level taxonomy description.
-        aliases: Mapping of alternate names to canonical names.
-        groups: Named groups of categories.
-        taxonomy_dir: Directory to save the JSON file. Defaults to the bundled
-            ``configs/taxonomy/`` (same dir ``load_taxonomy`` reads by default).
-        verbose: Print the saved path.
-
-    Returns:
-        The taxonomy dict (usable directly in ``generate_inputs(taxonomy=...)``)
-    """
-    normalized = {}
-    for cat_name, cat_info in categories.items():
-        if isinstance(cat_info, str):
-            normalized[cat_name] = {"description": cat_info}
-        else:
-            normalized[cat_name] = cat_info
-
-    taxonomy = {
-        "name": name,
-        "description": description,
-        "categories": normalized,
-        "aliases": aliases or {},
-        "groups": groups or {},
-    }
-
-    save_dir = Path(taxonomy_dir or _DEFAULT_TAXONOMY_DIR)
-    save_dir.mkdir(parents=True, exist_ok=True)
-    path = save_dir / f"{name}.json"
-    with open(path, "w", encoding="utf-8") as f:
-        json.dump(taxonomy, f, indent=2, ensure_ascii=False)
-
-    if verbose:
-        logger.info("Taxonomy '%s' saved to %s", name, path)
-    return taxonomy
 
 
 # ---------------------------------------------------------------------------

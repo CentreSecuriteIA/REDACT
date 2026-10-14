@@ -70,7 +70,13 @@ from .rows import (
 from .sidecar import JsonlSidecar, Ledger, Manifest
 
 # Taxonomy and seed files
-from .taxonomy import get_seed_prompts, iter_categories, load_seeds, load_taxonomy
+from .taxonomy import (
+    create_taxonomy,
+    get_seed_prompts,
+    iter_categories,
+    load_seeds,
+    load_taxonomy,
+)
 
 __all__ = [
     "CommitBuffer",
@@ -84,6 +90,7 @@ __all__ = [
     "commit",
     "content_id",
     "count_rows",
+    "create_taxonomy",
     "discover_categories",
     "drop_units",
     "get_existing_samples",

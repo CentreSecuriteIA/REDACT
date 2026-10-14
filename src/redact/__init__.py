@@ -195,13 +195,15 @@ from .multi_turn import (  # noqa: E402, F401
 # ---------------------------------------------------------------------------
 from .pipelines import (  # noqa: E402
     build_dataset,
-    create_taxonomy,
     generate_constitution,
     generate_inputs,
     generate_jailbreaks,
     generate_outputs,
     generate_paraphrases,
 )
+
+# A taxonomy file of your own, loaded by name.
+from .dataset import create_taxonomy  # noqa: E402, F401
 
 # Config-driven runs (recipe + input-params + per-stage run records).
 from .recipe import load_params, load_recipe  # noqa: E402, F401
