@@ -1,0 +1,49 @@
+"""The attack stage: generate and score."""
+
+from __future__ import annotations
+
+from collections.abc import Callable
+
+import pandas as pd
+
+from redact.multi_turn import evaluate_conversations, generate_conversations
+
+from .setting import SUCCESS_JUDGE_SYSTEM, build_attack_setting
+
+
+def generate_attacks(
+    seeds: pd.DataFrame,
+    target_model: str,
+    data_dir=None,
+    attack: str = "crescendo",
+    *,
+    attacker_model: str | None = None,
+    followups: list[str] | None = None,
+    jailbreak_technique: Callable[[str], tuple[str, str]] | None = None,
+    max_turns: int = 6,
+    target_system: str | None = None,
+    **kwargs,
+) -> pd.DataFrame:
+    """Play an attack against ``target_model`` on every seed and save the conversations.
+
+    ``**kwargs`` go to :func:`redact.multi_turn.generate_conversations`
+    (``iterations``, ``resume``, ``batch_size``, ``resolve``, ``verbose``, ...).
+    Score the result with :func:`score_attacks`.
+    """
+    factory = build_attack_setting(
+        target_model, attack, attacker_model=attacker_model, followups=followups,
+        jailbreak_technique=jailbreak_technique, max_turns=max_turns, target_system=target_system,
+    )
+    return generate_conversations(seeds, factory, data_dir=data_dir, **kwargs)
+
+
+def score_attacks(data_dir=None, judge_model: str | None = None, **kwargs) -> pd.DataFrame:
+    """Score saved attack conversations for jailbreak success.
+
+    ``judge_model`` should not be the target. ``**kwargs`` go to
+    :func:`redact.multi_turn.evaluate_conversations`.
+    """
+    return evaluate_conversations(
+        data_dir=data_dir, judge_model=judge_model,
+        judge_system=SUCCESS_JUDGE_SYSTEM, scope="last_reply", **kwargs,
+    )
