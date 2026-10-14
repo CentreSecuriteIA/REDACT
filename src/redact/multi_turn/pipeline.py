@@ -30,7 +30,7 @@ from redact.dataset import (
 )
 from redact.llm_pipeline import drive_generators
 
-from .core import Setting, conversation_gen
+from .conversation import Setting, conversation_gen
 
 logger = logging.getLogger(__name__)
 

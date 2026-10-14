@@ -16,16 +16,8 @@ Usage::
     scored = evaluate_conversations(data_dir=DATA_DIR, judge_model="claude-opus-4-6")
 """
 
-from .core import (
-    Actor,
-    ModelActor,
-    ScriptedActor,
-    Setting,
-    StrategyActor,
-    Trajectory,
-    conversation_gen,
-    run_conversation,
-)
+from .actors import Actor, ModelActor, ScriptedActor, StrategyActor
+from .conversation import Setting, Trajectory, conversation_gen, run_conversation
 from .evaluate import evaluate_conversations
 from .pipeline import generate_conversations
 from .transcript import Step, StepType, Transcript
