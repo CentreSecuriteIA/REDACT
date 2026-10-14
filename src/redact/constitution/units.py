@@ -82,7 +82,9 @@ def plan_units(
     unit per entry type, asking for ``num_categories`` constitution
     categories; the general-benign unit, when included, comes last.
     """
-    entry_types = ALL_ENTRY_TYPES if entry_types is None else list(entry_types)
+    if entry_types is None:
+        entry_types = ALL_ENTRY_TYPES
+    entry_types = list(dict.fromkeys(entry_types))
     categories = list(iter_categories(taxonomy))[:num_taxonomy_categories]
     units = [
         Unit(name, entry_type.value, info.get("group_tag", _GENERAL),

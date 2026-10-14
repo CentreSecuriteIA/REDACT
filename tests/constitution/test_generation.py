@@ -87,7 +87,7 @@ class TestRowsOf:
 
     def test_a_reply_that_does_not_parse_gives_no_row(self):
         unit = Unit("Cat", "benign", "general")
-        assert rows_of(unit, "no parseable content here", "m") == []
+        assert rows_of(unit, "no parseable content here\n[END]", "m") == []
 
     def test_a_reply_without_its_end_marker_is_rejected_whole(self):
         unit = Unit("Cat", "benign", "general")
@@ -171,6 +171,11 @@ class TestConstitutionPipeline:
         assert len(backend.calls) == _ATTEMPTS
         assert result.empty
         assert _ledger(tmp_path / "constitution").completed() == {"Cat::benign"}
+
+    def test_a_repeated_entry_type_is_planned_once(self):
+        units = plan_units({"categories": {"Cat": {"description": ""}}},
+                           entry_types=[EntryType.HARMFUL, EntryType.HARMFUL])
+        assert [u.key for u in units] == ["Cat::harmful"]
 
     def test_a_truncated_reply_is_regenerated(self, tmp_path):
         backend = MockBackend([_TRUNCATED_OUTPUT, _VALID_CONSTITUTION_OUTPUT])
