@@ -73,6 +73,16 @@ def test_check_calls_carry_the_limit(tmp_path):
     assert gen.calls[0]["max_tokens"] == gen.default_max_tokens
 
 
+def test_an_entry_without_a_source_category_is_asked_and_saved_as_unknown(tmp_path):
+    pipe = _pipeline(tmp_path)
+    entry = _const_df().drop(columns="source_category").head(1)
+    pipe.run_from_constitution(
+        entry, {"system_prompt": "sys", "template": "{Category}: {sample_description}"},
+        samples_per_entry=2, verbose=False)
+    assert pipe.gen.backend.calls[0]["messages"][-1]["content"] == "unknown: desc one"
+    assert (tmp_path / "unknown" / "samples.csv").exists()
+
+
 def test_manifest_written_before_generation(tmp_path):
     pipe = _pipeline(tmp_path)
     pipe.run_from_constitution(_const_df(), _PROMPT, samples_per_entry=2,

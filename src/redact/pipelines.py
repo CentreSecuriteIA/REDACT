@@ -482,7 +482,6 @@ def generate_inputs(
             prompt_config=prompt_config,
             samples_per_entry=samples_per_entry,
             use_checker=True,
-            save=True,
             verbose=verbose,
             batch_size=batch_size,
             fresh=not resume,
