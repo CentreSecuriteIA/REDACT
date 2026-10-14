@@ -154,9 +154,9 @@
  },
  "combinations": [
   ["to_rewrite_with_typos_low", "to_markdown", "to_ask_for_details"],
-  ["to_authority_obedience", "to_sensitive_words_hyphen", "to_adversarial_suffix_emoji"],
+  ["to_authority_obedience", "to_tokenbreak_delimiter", "to_adversarial_suffix_emoji", "to_ask_answer_in_japanese"],
   ["to_swahili", "to_rot13"],
-  ["to_noble_goal", "to_tokenbreak_prepend", "to_adversarial_suffix_punctuation"],
-  ["to_avi", "to_russian", "to_separator", "to_summarize"]
+  ["to_noble_goal", "to_synonym_substitution", "to_adversarial_suffix_punctuation", "to_ask_for_details"],
+  ["to_avi", "to_thai", "to_rot13", "to_innocuous_question"]
  ]
 }

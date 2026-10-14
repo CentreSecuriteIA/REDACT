@@ -37,9 +37,9 @@ from .protocol import LLMRequest, run_sync
 
 # Requests registry
 from .requests import get_all_request_functions
+from .rules import compatible
 from .sampling import (
     default_escalation_schedule,
-    get_compatible_remaining,
     sample_combination,
     sample_exact_combination,
 )

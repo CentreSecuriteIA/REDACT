@@ -1,106 +1,11 @@
-"""Sampling technique combinations: the compatibility filter, and the two
-samplers built on it, by budget and by exact count.
-"""
+"""Draw one combination for a unit: by budget, or by exact count."""
 
 import random
 from collections.abc import Callable
 
 from .chain import combine_techniques, order_by_hierarchy
+from .rules import compatible, request_obfuscation_candidates
 from .technique import load_spec
-
-
-def get_compatible_remaining(
-    selected: list[Callable],
-    pool: list[Callable],
-    remaining_complexity: int | None = None,
-) -> list[Callable]:
-    """Return functions from pool that can still be added given the current selection.
-
-    Enforces:
-    - At most max_picks per family (currently 1 for all families)
-    - Family cross-incompatibilities declared in combination_spec.json
-    - Layer caps (1 hacking, 1 manipulation, 1 request)
-    - Manipulation blocking: when fsh/dap selected, blocks ascii_art, translation,
-      and encode-heavy functions (except sensitive_words_encode_* which only encode
-      specific words, leaving the Q&A structure readable)
-    - Complexity budget: removes functions that would exceed remaining_complexity
-
-    Args:
-        selected: Already-selected technique functions.
-        pool: Candidate pool to filter.
-        remaining_complexity: If provided, exclude functions with complexity > this value.
-
-    Returns:
-        Filtered list of compatible functions.
-    """
-    spec = load_spec()
-    families_spec = spec["families"]
-    layer_max_picks: dict[str, int] = spec.get("layer_max_picks", {})
-    manip_blocked = spec.get("manipulation_blocked_obfuscation", {})
-    manip_blocked_families: set[str] = set(manip_blocked.get("families", []))
-    manip_blocked_encode_weight: str | None = manip_blocked.get("encode_weight", None)
-
-    # Collect selected families and layer counts
-    selected_families: set[str] = set()
-    layer_counts: dict[str, int] = {}
-    for fn in selected:
-        for fam in getattr(fn, "families", []):
-            selected_families.add(fam)
-        layer = getattr(fn, "layer", None)
-        if layer:
-            layer_counts[layer] = layer_counts.get(layer, 0) + 1
-
-    # Build blocked-families set from cross-incompatibilities
-    blocked_families: set[str] = set(selected_families)  # can't re-pick same family
-    for sel_fam in selected_families:
-        if sel_fam in families_spec:
-            for incomp in families_spec[sel_fam].get("cross_incompatible_with", []):
-                blocked_families.add(incomp)
-
-    has_manipulation = bool(selected_families & {"fsh", "dap"})
-
-    result = []
-    for fn in pool:
-        fn_families: set[str] = set(getattr(fn, "families", []))
-        fn_layer: str | None = getattr(fn, "layer", None)
-        fn_complexity: int = getattr(fn, "complexity", 0)
-        fn_encode_weight: str | None = getattr(fn, "encode_weight", None)
-
-        # Block if any family overlaps with blocked set
-        if fn_families & blocked_families:
-            continue
-
-        # Block if layer cap already reached
-        if (
-            fn_layer and fn_layer in layer_max_picks
-            and layer_counts.get(fn_layer, 0) >= layer_max_picks[fn_layer]
-        ):
-            continue
-
-        # Manipulation-specific obfuscation restrictions
-        if has_manipulation:
-            # Block explicitly listed families (ascii_art, translation)
-            if fn_families & manip_blocked_families:
-                continue
-            # Block encode-heavy functions — but NOT if they also have sensitive_words
-            # (selective encoding of individual words is fine; only full-text heavy encoding
-            # makes the Q&A structure unreadable)
-            has_sw = "sensitive_words" in fn_families
-            is_heavy_encode = (
-                "encode" in fn_families
-                and not has_sw
-                and fn_encode_weight == manip_blocked_encode_weight
-            )
-            if is_heavy_encode:
-                continue
-
-        # Complexity budget
-        if remaining_complexity is not None and fn_complexity > remaining_complexity:
-            continue
-
-        result.append(fn)
-
-    return result
 
 
 def _pick_by_family(rng: random.Random, candidates: list[Callable]) -> Callable:
@@ -115,23 +20,6 @@ def _pick_by_family(rng: random.Random, candidates: list[Callable]) -> Callable:
         family_map.setdefault(fam, []).append(fn)
     chosen_family = rng.choice(list(family_map.keys()))
     return rng.choice(family_map[chosen_family])
-
-
-def _is_request_obfuscation_compatible(fn: Callable, spec: dict) -> bool:
-    """Return True if fn can be used as request-layer obfuscation.
-
-    Allowed: encode_light (encode family + encode_weight==light) and translation family.
-    """
-    allowed_families = set(spec.get("request_obfuscation_allowed_families", []))
-    fn_families = set(getattr(fn, "families", []))
-    fn_encode_weight = getattr(fn, "encode_weight", None)
-
-    if (
-        "encode_light" in allowed_families
-        and "encode" in fn_families and fn_encode_weight == "light"
-    ):
-        return True
-    return "translation" in allowed_families and "translation" in fn_families
 
 
 def sample_combination(
@@ -202,7 +90,7 @@ def sample_combination(
 
     def _update_pool() -> None:
         nonlocal current_pool
-        current_pool = get_compatible_remaining(selected, current_pool, remaining_complexity)
+        current_pool = compatible(selected, current_pool, remaining_complexity)
 
     def _pick_from_layer(layer: str) -> Callable | None:
         candidates = [f for f in current_pool if getattr(f, "layer", None) == layer]
@@ -250,10 +138,7 @@ def sample_combination(
     # it obfuscates the finished request, so it runs after the request template.
     request_obfuscation: Callable | None = None
     if allow_request_obfuscation and rng.random() < p_request_obfuscation:
-        req_obfusc_candidates = [
-            f for f in current_pool
-            if _is_request_obfuscation_compatible(f, spec)
-        ]
+        req_obfusc_candidates = request_obfuscation_candidates(current_pool)
         if req_obfusc_candidates:
             request_obfuscation = _pick_by_family(rng, req_obfusc_candidates)
 
@@ -285,7 +170,7 @@ def sample_exact_combination(
 
     Unlike :func:`sample_combination`, the **count is the only knob** — there is no
     complexity or obfuscation budget. Each pick is still validated through
-    :func:`get_compatible_remaining` (with ``remaining_complexity=None``, so complexity
+    :func:`redact.jailbreak.rules.compatible` (with ``remaining_complexity=None``, so complexity
     never filters anything) to enforce layer caps (1 hacking / 1 manipulation /
     1 request) and cross-incompatibilities. The obfuscation layer has no per-layer
     pick cap, so e.g. ``n=2`` may yield two obfuscation-family techniques — intended
@@ -322,7 +207,7 @@ def sample_exact_combination(
         pick = _pick_by_family(rng, current_pool)
         selected.append(pick)
         # remaining_complexity=None → no complexity filtering; only caps + incompat.
-        current_pool = get_compatible_remaining(selected, current_pool, None)
+        current_pool = compatible(selected, current_pool, None)
 
     if not selected:
         return combine_techniques()
