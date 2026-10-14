@@ -96,16 +96,20 @@ BENIGN_CATEGORIES: list[tuple[str, str]] = [
 ]
 
 
-_DEFAULT_PROMPT_DIR = paths.prompts_dir()
+_ANSWER_STYLES = {
+    "short": 'Keep the answers concise and to the point. Make the answer be only 1 sentence long.',
+    "long": 'Make the answers detailed and multi-sentence.',
+}
 
 
-def generate_short_benign(
+def generate_benign(
     category: tuple[str, str],
     client: ModelClient,
     num_samples: int = 8,
-    prompt_dir: str | Path = _DEFAULT_PROMPT_DIR,
+    answer_type: str = "short",
+    prompt_dir: str | Path | None = None,
 ) -> str:
-    """Generate short (1-sentence answer) benign prompts for a category.
+    """Generate benign prompts with ``answer_type`` ("short" or "long") answers.
 
     Returns raw LLM text in structured **Prompt N:** format.
     """
@@ -115,28 +119,7 @@ def generate_short_benign(
         sub_category=category[1],
         main_category=category[0],
         num_samples=str(num_samples),
-        answer_style="Keep the answers concise and to the point. Make the answer be only 1 sentence long.",
-    )
-    return generate_sample(client, messages)
-
-
-def generate_long_benign(
-    category: tuple[str, str],
-    client: ModelClient,
-    num_samples: int = 8,
-    prompt_dir: str | Path = _DEFAULT_PROMPT_DIR,
-) -> str:
-    """Generate long (multi-sentence answer) benign prompts for a category.
-
-    Returns raw LLM text in structured **Prompt N:** format.
-    """
-    config = load_prompt("jailbreak", "benign_generation", prompt_dir)
-    messages = build_messages(
-        config,
-        sub_category=category[1],
-        main_category=category[0],
-        num_samples=str(num_samples),
-        answer_style="Make the answers detailed and multi-sentence.",
+        answer_style=_ANSWER_STYLES[answer_type],
     )
     return generate_sample(client, messages)
 
@@ -145,7 +128,7 @@ def process_category(
     category: tuple[str, str],
     client: ModelClient,
     num_samples: int = 8,
-    prompt_dir: str | Path = _DEFAULT_PROMPT_DIR,
+    prompt_dir: str | Path | None = None,
 ) -> list[dict]:
     """Generate both short and long benign samples for one category.
 
@@ -154,15 +137,11 @@ def process_category(
     """
     main_cat, sub_cat = category
 
-    raw_short = generate_short_benign(
-        category, client, num_samples, prompt_dir
-    )
+    raw_short = generate_benign(category, client, num_samples, "short", prompt_dir)
     # A reply with any other number of pairs is rejected whole.
     pairs_short = extract_structured_qa(raw_short, expected_count=num_samples)
 
-    raw_long = generate_long_benign(
-        category, client, num_samples, prompt_dir
-    )
+    raw_long = generate_benign(category, client, num_samples, "long", prompt_dir)
     pairs_long = extract_structured_qa(raw_long, expected_count=num_samples)
 
     rows: list[dict] = []
@@ -185,10 +164,6 @@ def process_category(
     return rows
 
 
-def _default_benign_path() -> Path:
-    return paths.benign_csv()
-
-
 def get_or_generate_benign_data(
     client: "ModelClient | None" = None,
     cache_path=None,
@@ -202,7 +177,7 @@ def get_or_generate_benign_data(
     Raises:
         ValueError: If generation is needed but no client was provided.
     """
-    path = Path(cache_path) if cache_path else _default_benign_path()
+    path = Path(cache_path) if cache_path else paths.benign_csv()
 
     if path.exists():
         if verbose:
@@ -252,7 +227,7 @@ def load_benign_data(
     Raises:
         FileNotFoundError: If the CSV does not exist.
     """
-    path = Path(path) if path else _default_benign_path()
+    path = Path(path) if path else paths.benign_csv()
     if not path.exists():
         raise FileNotFoundError(
             f"Benign samples CSV not found at {path}. "
