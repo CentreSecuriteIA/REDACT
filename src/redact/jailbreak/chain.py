@@ -1,8 +1,5 @@
-"""Running one sample through a (possibly combined) technique chain.
-
-Normalizes a technique's return value, chains techniques into one callable
-(pure transforms and technique generators alike), drives a single sample end
-to end (``apply_combination``), and classifies the result.
+"""Run one input through its techniques: transforms inline, generators by
+yielding their calls.
 """
 
 import dataclasses
@@ -10,60 +7,32 @@ import inspect
 from collections.abc import Callable, Iterable
 
 from redact.llm_pipeline import LLMRequest, drive_sync
+from redact.llms.client import ModelClient
+from redact.llms.router import generate_sample
 
-from .technique import DISCARDED, TechniqueGen, is_discarded, load_spec
-
-
-def _normalize_output(output) -> tuple[str, str]:
-    """Coerce a technique return into ``(text, info)``.
-
-    Cognitive/persona techniques may return a 3-tuple ``(text, info, scenario)``
-    — the scenario is discarded in combined chains (callers needing it must run
-    the technique standalone).
-    """
-    if isinstance(output, tuple) and len(output) == 3:  # noqa: PLR2004 — fixed 3-tuple protocol shape, not a tunable value
-        text, info, _ = output
-        return text, info
-    return output
+from .manipulation import get_or_generate_benign_data
+from .technique import DISCARDED, TechniqueGen, TechniqueResult, is_discarded, load_spec
 
 
 def _select_kwargs(technique: Callable, kwargs: dict) -> dict:
-    """Filter ``kwargs`` to what ``technique`` accepts.
-
-    Pure transforms have ``(prompt: str)`` with no ``**kwargs`` — passing
-    unrecognised keys would raise TypeError. Techniques declaring ``**kwargs``
-    receive everything.
-    """
-    sig_params = inspect.signature(technique).parameters
-    has_var_kw = any(
-        p.kind == inspect.Parameter.VAR_KEYWORD for p in sig_params.values()
-    )
-    if has_var_kw:
+    """The part of ``kwargs`` that ``technique`` takes: all of it when it
+    takes ``**kwargs``."""
+    params = inspect.signature(technique).parameters
+    if any(p.kind == inspect.Parameter.VAR_KEYWORD for p in params.values()):
         return dict(kwargs)
-    return {k: v for k, v in kwargs.items() if k in sig_params}
+    return {k: v for k, v in kwargs.items() if k in params}
 
 
-def _tag_yields(gen: TechniqueGen, root: str) -> TechniqueGen:
-    """Wrap a technique generator's yields, tagging each with a sequential
-    ``internals_id`` rooted at ``root`` — ``{root}/0``, ``{root}/1``, ...
+def _wrap(gen: TechniqueGen, limit: int | None, root: str | None) -> TechniqueGen:
+    """``gen`` with each request capped at ``limit`` and, under ``root``,
+    tagged for internals capture.
 
-    Numbered generically per yield within *this one* technique's execution,
-    not distinguishing "a genuinely new step" (e.g. cognitive hacking's
-    scenario -> construction) from "a retry of the same step" (e.g.
-    translation's own translate -> check -> retry loop) — that distinction
-    isn't visible at this level without each technique explicitly
-    cooperating, which no technique currently does. Every LLM call still gets
-    its own distinct, capturable path either way.
-
-    Only tags a request when its *own* target model's backend actually
-    supports internals capture (checked per request, not assumed from the
-    caller) — so a chain that mixes an internals-capable ``gen_model`` with a
-    non-capable ``translate_model`` (or vice versa) tags exactly the calls
-    that can be captured, and never trips BatchCaller's guard on the other.
+    A request that carries its own limit keeps it. A request whose model can
+    capture internals gets the id ``{root}/{n}``, numbered in the order they
+    are yielded. That is read off the request's client, or else the model's
+    backend class, so no model is loaded to ask.
     """
-    from redact.llms.model_config import (
-        model_compute_config,  # lazy import — avoids import cycles
-    )
+    from redact.llms.model_config import model_compute_config  # avoids an import cycle
 
     n = 0
     try:
@@ -71,15 +40,14 @@ def _tag_yields(gen: TechniqueGen, root: str) -> TechniqueGen:
     except StopIteration as stop:
         return stop.value
     while True:
-        # Read off the backend *class*, never a constructed one: this asks the
-        # question for every model in the chain, including ones this sample
-        # never actually calls, and building a local transport to answer it
-        # would load model weights.
-        config = (request.client.compute_config if request.client is not None
-                  else model_compute_config(request.model))
-        if config.supports_internals:
-            request = dataclasses.replace(request, internals_id=f"{root}/{n}")
-            n += 1
+        if limit is not None and request.max_tokens is None:
+            request = dataclasses.replace(request, max_tokens=limit)
+        if root is not None:
+            config = (request.client.compute_config if request.client is not None
+                      else model_compute_config(request.model))
+            if config.supports_internals:
+                request = dataclasses.replace(request, internals_id=f"{root}/{n}")
+                n += 1
         reply = yield request
         try:
             request = gen.send(reply)
@@ -87,67 +55,44 @@ def _tag_yields(gen: TechniqueGen, root: str) -> TechniqueGen:
             return stop.value
 
 
-def _cap_yields(gen: TechniqueGen, max_tokens: int) -> TechniqueGen:
-    """Put a reply limit on every request one technique's generator yields.
+def run_chain(
+    techniques: list[Callable],
+    text: str,
+    *,
+    internals_root: str | None = None,
+    **kwargs,
+) -> TechniqueGen:
+    """Run ``text`` through ``techniques`` in order, yielding each model call.
 
-    A request that already carries its own limit keeps it.
+    A transform runs inline. A generator's requests are yielded up, capped at
+    the technique's ``max_tokens`` tag and, with ``internals_root``, tagged for
+    capture under ``{internals_root}/{technique}``. Each technique gets the
+    ``kwargs`` it takes (``gen_model``, ``translate_model``, ``benign_data``,
+    ``prompt_dir``).
+
+    Returns ``(text, info)``: the steps' infos joined by ``;``, a step that
+    left the text unchanged as ``noop=<name>``. The first rejection stops the
+    chain and returns the text before it, with an info naming the technique.
     """
-    try:
-        request = gen.send(None)
-    except StopIteration as stop:
-        return stop.value
-    while True:
-        if request.max_tokens is None:
-            request = dataclasses.replace(request, max_tokens=max_tokens)
-        reply = yield request
-        try:
-            request = gen.send(reply)
-        except StopIteration as stop:
-            return stop.value
-
-
-def _run_chain(techniques: list[Callable], text: str, internals_root: str | None = None, **kwargs) -> TechniqueGen:
-    """Generator that chains techniques, threading text through.
-
-    Pure transforms run inline (zero rounds); LLM-dependent technique
-    generators are delegated to via ``yield from`` so their :class:`LLMRequest`
-    yields propagate up to the batched engine (or to ``run_sync`` for the
-    single-sample path) — tagged with ``internals_id`` (see :func:`_tag_yields`)
-    when ``internals_root`` is given. A technique tagged with ``max_tokens``
-    (from combination_spec.json via ``technique.tag``) has that limit
-    put on each of its requests (see :func:`_cap_yields`). Early-exits with a
-    ``DISCARDED`` info string the moment any step rejects, returning the
-    pre-failure text. Returns ``(text, info)``.
-    """
-    # gen-model techniques tag their requests with `gen_model`; accept the
-    # legacy `model` kwarg as the source when gen_model isn't given explicitly.
-    if not kwargs.get("gen_model") and kwargs.get("model"):
-        kwargs = {**kwargs, "gen_model": kwargs["model"]}
-
     result = text
     info_parts: list[str] = []
     for technique in techniques:
         tech_kwargs = _select_kwargs(technique, kwargs)
         if inspect.isgeneratorfunction(technique):
-            tech_gen = technique(result, **tech_kwargs)
+            gen = technique(result, **tech_kwargs)
             limit = getattr(technique, "max_tokens", None)
-            if limit is not None:
-                tech_gen = _cap_yields(tech_gen, limit)
-            if internals_root:
-                tech_gen = _tag_yields(tech_gen, f"{internals_root}/{technique.__name__}")
-            output = yield from tech_gen
+            root = f"{internals_root}/{technique.__name__}" if internals_root else None
+            if limit is not None or root is not None:
+                gen = _wrap(gen, limit, root)
+            new_text, info = yield from gen
         else:
-            output = technique(result, **tech_kwargs)
-        new_text, info = _normalize_output(output)
+            new_text, info = technique(result, **tech_kwargs)
 
-        # Early exit on rejection — don't apply remaining techniques
         if is_discarded(info):
             return result, (
                 f"{DISCARDED}; technique={technique.__name__}; "
                 f"{info[len(f'{DISCARDED}; '):]}"
             )
-
-        # Track no-ops
         if new_text == result:
             info_parts.append(f"noop={technique.__name__}")
         elif info:
@@ -156,149 +101,89 @@ def _run_chain(techniques: list[Callable], text: str, internals_root: str | None
     return result, ";".join(info_parts)
 
 
-def order_by_hierarchy(techniques: Iterable[Callable]) -> list[Callable]:
-    """Sort techniques into application order: layer, then within-layer rank.
-
-    The one place the hierarchy is read, so a caller that needs the order
-    *plus* one deliberate exception (``sample_combination``'s request-layer
-    obfuscation, which must wrap the finished request) can sort the rest here
-    and append its own step, instead of handing everything to
-    :func:`combine_techniques` and having it sorted back into the obfuscation
-    slot.
-    """
+def in_layer_order(techniques: Iterable[Callable]) -> list[Callable]:
+    """``techniques`` in the order they apply: by the spec's layer order, then
+    by rank within the layer."""
     layer_order = load_spec()["layer_order"]
 
     def _sort_key(fn: Callable) -> tuple[int, int]:
         layer = getattr(fn, "layer", None)
-        layer_idx = layer_order.index(layer) if layer in layer_order else len(layer_order)
-        return (layer_idx, getattr(fn, "within_layer_order", 0))
+        rank = layer_order.index(layer) if layer in layer_order else len(layer_order)
+        return (rank, getattr(fn, "within_layer_order", 0))
 
     return sorted(techniques, key=_sort_key)
 
 
-def combine_techniques(*techniques: Callable, sort_by_hierarchy: bool = True) -> Callable:
-    """Chain multiple technique functions into one callable.
+def _call_with(client: ModelClient | None) -> Callable[[LLMRequest], str]:
+    """A blocking call for :func:`drive_sync`.
 
-    Each technique receives the output of the previous one; info strings are
-    joined with ';'. Mixes pure transforms and LLM-dependent technique
-    *generators* transparently (see ``protocol.py``).
-
-    If ``sort_by_hierarchy=True`` (default), techniques are reordered by
-    (layer_order_index, within_layer_order) before chaining — so callers can
-    pass techniques in any order and the correct semantic sequence is applied.
-
-    The returned ``combined`` callable runs **synchronously**: calling
-    ``combined(text, client=..., benign_data=...)``
-    drives the chain to completion (issuing real LLM calls for generator steps
-    via :func:`redact.llm_pipeline.drive_sync`) and returns ``(text, info)``.
-    This preserves the single-sample / test contract. The batched engine does
-    **not** call ``combined`` — it builds the chain generator directly via
-    :func:`make_combination_gen` and interleaves many samples.
-
-    ``combined.techniques`` exposes the ordered inner technique list (used by
-    the engine and the manifest); ``combined.__name__`` is the '+'-joined names
-    (or ``"identity"`` when empty).
-
-    Returns:
-        Combined callable: ``(str, **kwargs) -> (str, str)`` with
-        ``.techniques`` and ``.__name__`` attributes.
+    A request goes to its own client, else to ``client`` when that serves the
+    request's model, else to a client made for the model.
     """
-    ordered = order_by_hierarchy(techniques) if sort_by_hierarchy else list(techniques)
+    def call(request: LLMRequest) -> str:
+        c = request.client or client
+        if c is None or c.model != request.model:
+            c = ModelClient.create(request.model)
+        return generate_sample(c, request.messages, max_tokens=request.max_tokens)
 
-    def combined(text: str, **kwargs) -> tuple[str, str]:
-        gen = _run_chain(ordered, text, **kwargs)
-        client = kwargs.get("client")
+    return call
 
-        def call(request: LLMRequest) -> str:
-            # Lazy imports keep import time light and avoid any
-            # llms<->jailbreak import ordering surprises.
-            from redact.llms.client import ModelClient
-            from redact.llms.router import generate_sample
-            c = request.client or client
-            if c is None or c.model != request.model:
-                # A chain can mix models (e.g. gen vs translate); resolve the
-                # client for whichever model this request actually targets.
-                c = ModelClient.create(request.model)
-            return generate_sample(c, request.messages, max_tokens=request.max_tokens)
 
-        return drive_sync(gen, call)
+def combine_techniques(
+    *techniques: Callable, sort_by_hierarchy: bool = True,
+) -> Callable:
+    """``techniques`` as one technique, in layer order unless
+    ``sort_by_hierarchy`` is False.
+
+    ``combined(text, client=None, **kwargs)`` runs the chain to its end, one
+    blocking model call at a time, and returns ``(text, info)``.
+    ``combined.techniques`` is the ordered list and ``combined.__name__`` their
+    names joined by ``+``, ``"identity"`` when there are none.
+    """
+    ordered = in_layer_order(techniques) if sort_by_hierarchy else list(techniques)
+
+    def combined(
+        text: str, client: ModelClient | None = None, **kwargs,
+    ) -> TechniqueResult:
+        return drive_sync(run_chain(ordered, text, **kwargs), _call_with(client))
 
     combined.__name__ = "+".join(t.__name__ for t in ordered) or "identity"
-    combined.techniques = list(ordered)  # expose inner techniques for inspection
+    combined.techniques = list(ordered)
     return combined
-
-
-def make_combination_gen(fn: Callable, text: str, **kwargs) -> TechniqueGen:
-    """Build the chain *generator* for a combined technique, for the engine.
-
-    Reads ``fn.techniques`` (set by :func:`combine_techniques`) and returns a
-    generator that yields :class:`LLMRequest` per LLM step. The engine drives
-    many of these concurrently, pooling yields by model. ``kwargs`` should
-    carry ``gen_model`` and ``benign_data``.
-    """
-    techniques = getattr(fn, "techniques", None)
-    if techniques is None:
-        techniques = [fn]
-    return _run_chain(techniques, text, **kwargs)
 
 
 def apply_combination(
     fn: Callable,
     prompt: str,
-    client=None,
-    model: str | None = None,
+    client: ModelClient | None = None,
     benign_data: dict | None = None,
     auto_benign: bool = True,
     benign_cache_path=None,
+    prompt_dir=None,
 ) -> tuple[str, str, bool, str]:
-    """Apply a technique function (or combined function) to a prompt.
+    """Run one prompt through a technique or a combined one.
 
-    Handles benign_data auto-generation for manipulation techniques:
-    if the function (or any inner technique in a combined chain) requires
-    benign_data and none is provided, it is loaded from cache or generated.
-
-    Args:
-        fn: A technique function or the result of combine_techniques().
-        prompt: The input prompt string.
-        client: ModelClient (required for LLM-dependent techniques).
-        model: Model identifier used to tag gen-model requests; defaults to
-            ``client.model`` when a client is given.
-        benign_data: Pre-loaded benign data dict for FSH/DAP manipulation.
-        auto_benign: If True, auto-load or auto-generate benign data when needed.
-        benign_cache_path: Path to benign CSV cache. Uses default if None.
+    Requests carry ``client.model`` as the generation model. When a technique
+    is tagged ``requires_benign`` and no ``benign_data`` is given, it is loaded
+    from ``benign_cache_path`` or generated with ``client`` (``auto_benign``).
+    ``prompt_dir`` is the prompt overlay of the techniques that take it.
 
     Returns:
-        (result_text, additional_info, accepted: bool, reasoning: str)
-        - accepted: False if any step produced "DISCARDED; ..." output
-        - reasoning: Full rejection message if accepted=False, empty string otherwise
+        ``(text, info, accepted, reasoning)``: ``accepted`` is False when a
+        step rejected, and ``reasoning`` is then the info, else ``""``.
     """
-    # Check if benign_data is needed
-    inner_fns = getattr(fn, "techniques", [fn])
-    needs_benign = any("benign_data" in inspect.signature(f).parameters for f in inner_fns)
-
-    if needs_benign and benign_data is None and auto_benign:
-        from redact.jailbreak.manipulation.benign import get_or_generate_benign_data
+    techniques = getattr(fn, "techniques", [fn])
+    if (benign_data is None and auto_benign
+            and any(getattr(t, "requires_benign", False) for t in techniques)):
         benign_data = get_or_generate_benign_data(
-            client=client,
-            cache_path=benign_cache_path,
-        )
+            client=client, cache_path=benign_cache_path)
 
-    output = fn(
-        prompt,
-        client=client,
-        gen_model=model or (client.model if client is not None else None),
+    gen = run_chain(
+        techniques, prompt,
+        gen_model=client.model if client is not None else None,
         benign_data=benign_data,
+        prompt_dir=prompt_dir,
     )
-    text, info = _normalize_output(output)
-
+    text, info = drive_sync(gen, _call_with(client))
     accepted = not is_discarded(info)
     return text, info, accepted, "" if accepted else info
-
-
-def is_noop(original: str, result: str) -> bool:
-    """Return True if a technique produced no change to the text.
-
-    Used by pipeline code to discard samples where a transform (e.g.,
-    sensitive_words with no detectable harmful words) had no effect.
-    """
-    return original == result

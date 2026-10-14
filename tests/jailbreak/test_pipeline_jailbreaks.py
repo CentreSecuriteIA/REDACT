@@ -440,28 +440,6 @@ def test_an_input_becomes_a_dict_only_for_the_row_of_a_finished_unit(
     assert dict(zip(df["prompt"], df["turn"])) == turn_of
 
 
-def test_include_translation_filter_removes_translation_family():
-    """The include_translation=False filter drops exactly the translation family.
-
-    Translation techniques all require an LLM, so an end-to-end (executing) test
-    would hit the network. This checks the pool filter the pipeline applies, on the
-    real spec-tagged obfuscation pool, offline.
-    """
-    from redact.jailbreak.obfuscation import get_all_obfuscation_functions
-
-    pool = get_all_obfuscation_functions()
-    # Baseline: translation is part of the obfuscation pool.
-    assert any("translation" in getattr(f, "families", []) for f in pool)
-
-    # The exact predicate generate_jailbreaks uses when include_translation=False.
-    filtered = [f for f in pool if "translation" not in getattr(f, "families", [])]
-    assert not any("translation" in getattr(f, "families", []) for f in filtered)
-    # Nothing else is dropped.
-    assert len(pool) - len(filtered) == sum(
-        1 for f in pool if "translation" in getattr(f, "families", [])
-    )
-
-
 # --- refill pool: LLM techniques over a hand-written plan -------------------
 
 GEN = "jb-gen"
@@ -509,13 +487,11 @@ class _StepBackend(MockBackend):
 
 def _llm_run(tmp_path, monkeypatch, plan, backend, **kwargs):
     """Run the stage on ``plan``, ``[(prompt, technique), ...]``, written as its manifest."""
+    import redact.jailbreak.pool as JPool
     import redact.pipelines as P
     from redact.dataset import Manifest
 
-    monkeypatch.setattr(P, "get_all_obfuscation_functions", lambda: [one_step, two_step, broken])
-    for name in ("get_all_hacking_functions", "get_all_manipulation_functions",
-                 "get_all_request_functions"):
-        monkeypatch.setattr(P, name, lambda: [])
+    monkeypatch.setattr(JPool, "all_techniques", lambda: [one_step, two_step, broken])
     monkeypatch.setattr(P.ModelClient, "create", lambda m: make_client(backend, m))
 
     out = tmp_path / "jb.csv"

@@ -79,3 +79,24 @@ class TestAllStructural:
         for fn in get_structural_functions():
             result, _ = fn(SAMPLE)
             assert SAMPLE in result
+
+
+class TestTemplatesComeFromConfig:
+    def test_xml_renders_the_config_template(self, monkeypatch):
+        import redact.jailbreak.obfuscation.structural as S
+
+        cfg = S._TEMPLATES["to_xml"]
+        monkeypatch.setattr(S.random, "choice", lambda seq: seq[0])
+        result, info = to_xml(SAMPLE)
+        expected = cfg["template"].format_map(
+            {"policy_id": cfg["policy_ids"][0], "prompt": SAMPLE})
+        assert result == expected
+        assert info == f"policy_id={cfg['policy_ids'][0]}"
+
+    def test_markdown_renders_the_config_template(self):
+        import redact.jailbreak.obfuscation.structural as S
+
+        result, info = to_markdown(SAMPLE)
+        assert result == S._TEMPLATES["to_markdown"]["template"].format_map(
+            {"prompt": SAMPLE})
+        assert info == ""

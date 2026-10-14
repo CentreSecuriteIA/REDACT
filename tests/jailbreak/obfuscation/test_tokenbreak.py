@@ -113,12 +113,19 @@ class TestGetTokenbreakFunctions:
         assert "to_tokenbreak_delimiter" in names
 
 
-class TestSensitiveEncodeFinish:
-    def test_an_encoded_word_with_backslashes_is_inserted_as_it_is(self):
-        """A unicode-escaped word used to fail in re.sub: "bad escape \\u"."""
-        from redact.jailbreak.obfuscation.tokenbreak import _sensitive_encode_finish
+class TestParseHarmfulWords:
+    def test_a_short_word_list(self):
+        from redact.jailbreak.obfuscation.tokenbreak import _parse_harmful_words
 
-        result, info = _sensitive_encode_finish(
-            "say apple now", lambda w: ("\\u0061pple", ""), "unicode", ["apple"])
-        assert result == "say \\u0061pple now"
-        assert info == "encoding=unicode;detected_words=apple"
+        assert _parse_harmful_words("  apple pear \n") == ["apple", "pear"]
+
+    def test_none_and_a_rambling_reply_give_no_words(self):
+        from redact.jailbreak.obfuscation.tokenbreak import _parse_harmful_words
+
+        assert _parse_harmful_words("None") == []
+        assert _parse_harmful_words(" ".join(["word"] * 11)) == []
+
+    def test_placeholder_words_are_dropped(self):
+        from redact.jailbreak.obfuscation.tokenbreak import _parse_harmful_words
+
+        assert _parse_harmful_words("apple n/a pear") == ["apple", "pear"]

@@ -1,17 +1,4 @@
-"""Request-structure jailbreak techniques.
-
-Eight technique families that modify *how* a request is posed:
-- answer_format: output-format and response-conditioning directives (pure)
-- answer_language: ask for the response in a specific language (pure)
-- continuation: ask the model to continue interrupted content (pure)
-- indirect: embed harmful request inside a legitimate task (pure)
-- distractor: add noise before/after the prompt (pure)
-- impersonation: claim a trustworthy professional identity (pure)
-- temporal: reframe as a past/historical event (pure)
-- asking: innocuous framing and detail-maximising directives (pure)
-
-All functions: str -> tuple[str, str]. No LLM dependency.
-"""
+"""Request techniques, all of them pure transforms."""
 
 from collections.abc import Callable
 

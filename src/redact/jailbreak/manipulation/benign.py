@@ -96,12 +96,6 @@ BENIGN_CATEGORIES: list[tuple[str, str]] = [
 ]
 
 
-_ANSWER_STYLES = {
-    "short": 'Keep the answers concise and to the point. Make the answer be only 1 sentence long.',
-    "long": 'Make the answers detailed and multi-sentence.',
-}
-
-
 def generate_benign(
     category: tuple[str, str],
     client: ModelClient,
@@ -119,7 +113,7 @@ def generate_benign(
         sub_category=category[1],
         main_category=category[0],
         num_samples=str(num_samples),
-        answer_style=_ANSWER_STYLES[answer_type],
+        answer_style=config["answer_styles"][answer_type],
     )
     return generate_sample(client, messages)
 

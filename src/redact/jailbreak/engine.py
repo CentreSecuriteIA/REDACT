@@ -2,7 +2,7 @@
 
 Advances a chunk of samples through their technique chains **round by round**:
 
-1. Each sample's chain is a generator (``chain.make_combination_gen``). Pure
+1. Each sample's chain is a generator (``chain.run_chain``). Pure
    transforms run inline as the generator advances; the generator pauses only
    to ``yield`` an :class:`LLMRequest` for an LLM step.
 2. Each round, the engine collects every live sample's pending request, groups
@@ -18,7 +18,7 @@ Advances a chunk of samples through their technique chains **round by round**:
    blocking the others.
 
 This is the pipeline-scale path. The single-sample path (``apply_combination``)
-runs the same chains synchronously via ``protocol.run_sync``.
+runs the same chains synchronously via ``llm_pipeline.drive_sync``.
 """
 
 from __future__ import annotations
@@ -26,7 +26,7 @@ from __future__ import annotations
 from redact.dataset import content_id
 from redact.llm_pipeline import drive_generators
 
-from .chain import is_noop, make_combination_gen
+from .chain import run_chain
 from .technique import is_discarded
 
 
@@ -64,7 +64,7 @@ def _finalize(sample: dict, value, gen_model: str, resolve=None) -> dict:
         "technique_info": info,
         "complexity": sum(getattr(t, "complexity", 0) for t in techniques),
         "num_techniques": len(techniques),
-        "is_noop": is_noop(sample["prompt"], text),
+        "is_noop": text == sample["prompt"],
         "accepted": accepted,
         "reasoning": "" if accepted else info,
     }
@@ -107,8 +107,8 @@ def _sample_gen(
     if capture_internals:
         internals_root = f"{sample.get('id', '')}/jailbreak/attempt_{sample.get('iteration', 0)}"
         sample["_internals_root"] = internals_root  # read back in _finalize for the rename
-    return make_combination_gen(
-        sample["combination"], sample["prompt"],
+    return run_chain(
+        sample["combination"].techniques, sample["prompt"],
         gen_model=gen_model, translate_model=translate_model,
         benign_data=benign_data, internals_root=internals_root,
     )
@@ -144,7 +144,7 @@ def batch_apply_combinations(
         capture_internals: When True, each sample's LLM-backed technique calls
             get tagged for internals capture (per-request, only for whichever
             target model's backend actually supports it — see
-            ``chain._tag_yields``), under a provisional
+            ``chain.run_chain``), under a provisional
             ``{id}/jailbreak/attempt_{iteration}`` root; ``_finalize`` relabels
             it to ``{id}/jailbreak/{sample_id}`` once the final jailbroken
             text (and thus its real sample_id) is known — a pure side effect,

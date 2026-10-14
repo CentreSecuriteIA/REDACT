@@ -81,12 +81,13 @@ def run_random_manipulation(
 
 def run_selected_manipulation(
     prompt: str,
-    benign_data: dict,
     answer_type: str,
     build_prompt: Callable[[str, list[dict], int], tuple[str, dict]],
     *,
+    benign_data: dict | None = None,
     gen_model: str | None = None,
     prompt_dir=None,
+    **kwargs,
 ) -> TechniqueGen:
     """The body of a ``*_selected_{short,long}`` variant, subcategory by a model."""
     num_shots = random.randint(3, 7)

@@ -3,7 +3,7 @@
 import random
 from collections.abc import Callable
 
-from .chain import combine_techniques, order_by_hierarchy
+from .chain import combine_techniques, in_layer_order
 from .rules import compatible, request_obfuscation_candidates
 from .technique import load_spec
 
@@ -150,7 +150,7 @@ def sample_combination(
     # Order the regular picks here and chain in that exact order: passing the
     # request-layer obfuscation to combine_techniques() for sorting would move
     # it back into the obfuscation slot, i.e. before the request template.
-    ordered = order_by_hierarchy(selected)
+    ordered = in_layer_order(selected)
     if request_obfuscation is not None:
         ordered.append(request_obfuscation)
     return combine_techniques(*ordered, sort_by_hierarchy=False)

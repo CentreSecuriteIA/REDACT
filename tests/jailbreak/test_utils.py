@@ -7,7 +7,7 @@ import pytest
 from redact.jailbreak.chain import (
     apply_combination,
     combine_techniques,
-    order_by_hierarchy,
+    in_layer_order,
 )
 from redact.jailbreak.plan import default_escalation_schedule
 from redact.jailbreak.protocol import LLMRequest
@@ -243,6 +243,51 @@ class TestApplyCombination:
         assert "DISCARDED" in reasoning
         assert "_extra" not in result  # unused technique was skipped
 
+    def test_a_bare_generator_technique_runs(self):
+        from tests.conftest import MockBackend, make_client
+
+        def asks(text, *, gen_model=None, **kwargs):
+            reply = yield LLMRequest(gen_model, [{"role": "user", "content": text}])
+            return reply, "asked"
+
+        backend = MockBackend("r")
+        client = make_client(backend, "m")
+        text, info, accepted, _ = apply_combination(asks, "hi", client=client)
+        assert (text, info, accepted) == ("r", "asked", True)
+
+    def test_benign_data_is_loaded_for_a_technique_tagged_to_need_it(self, monkeypatch):
+        import redact.jailbreak.chain as chain_module
+
+        loads = []
+        monkeypatch.setattr(chain_module, "get_or_generate_benign_data",
+                            lambda **kwargs: loads.append(kwargs) or {"pairs": 1})
+
+        def tagged(text, **kwargs):
+            return text + str(kwargs.get("benign_data")), ""
+        tagged.requires_benign = True
+
+        def untagged(text, benign_data=None):
+            return text, ""
+
+        apply_combination(untagged, "a")
+        assert loads == []
+        text, _, _, _ = apply_combination(tagged, "a", benign_cache_path="b.csv")
+        assert text == "a{'pairs': 1}"
+        assert loads == [{"client": None, "cache_path": "b.csv"}]
+
+    def test_prompt_dir_reaches_the_techniques_that_take_it(self):
+        seen = {}
+
+        def takes(text, prompt_dir=None):
+            seen["takes"] = prompt_dir
+            return text, ""
+
+        def ignores(text):
+            return text, ""
+
+        apply_combination(combine_techniques(takes, ignores), "a", prompt_dir="overlay")
+        assert seen == {"takes": "overlay"}
+
 
 class TestSampleExactCombination:
     def _obfuscation_pool(self):
@@ -337,7 +382,7 @@ class TestRequestLayerObfuscation:
 
     def test_hierarchy_order_alone_would_put_it_first(self):
         _pool, request, light_encode = self._pool()
-        assert [t.__name__ for t in order_by_hierarchy([request, light_encode])] == [
+        assert [t.__name__ for t in in_layer_order([request, light_encode])] == [
             light_encode.__name__, request.__name__,
         ]
 

@@ -88,3 +88,10 @@ class TestLoadBenignData:
         assert "long" in data
         assert "all_subcategories" in data
         assert "S1" in data["all_subcategories"]
+
+
+def test_answer_styles_come_from_the_prompt_file():
+    from redact.llms.prompting import load_prompt
+
+    config = load_prompt("jailbreak", "benign_generation")
+    assert set(config["answer_styles"]) == {"short", "long"}
