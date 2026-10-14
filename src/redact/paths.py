@@ -1,27 +1,14 @@
-"""Single source of truth for on-disk layout.
+"""The on-disk layout: the working root and every file under it.
 
-Two independent families of paths live here:
-
-**Run outputs**, derived from a single working root — every default
-file/directory the pipelines read or write, so a caller can relocate an
-entire run by pointing one ``data_dir`` at a new folder (or setting
-``REDACT_OUTPUT_DIR``). These take an optional ``root``; when ``None`` they
-fall back to :func:`redact.get_output_dir` (env ``REDACT_OUTPUT_DIR`` →
-project marker → cwd).
-
-**Package resources** — :func:`package_dir`, :func:`prompts_dir`,
-:func:`configs_dir`, :func:`taxonomy_dir`, :func:`seeds_dir`,
-:func:`jailbreak_configs_dir`. These resolve relative to the installed
-package, independent of the working root, and take no ``root``.
+Run outputs derive from one working root, so a run moves by pointing one
+``data_dir`` (or ``REDACT_OUTPUT_DIR``) at another folder; their functions
+take ``root``, and ``None`` means :func:`get_output_dir`. Package resources
+(:func:`package_dir`, :func:`prompts_dir`, :func:`configs_dir`, ...) resolve
+relative to the installed package and take no root.
 """
 
+import os
 from pathlib import Path
-
-from redact import get_output_dir
-
-# ---------------------------------------------------------------------------
-# Layout constants — the library-defined folder/file names live in one place.
-# ---------------------------------------------------------------------------
 
 DATASETS_DIRNAME = "Datasets"
 DATA_CACHE_DIRNAME = "Data_cache"
@@ -33,16 +20,44 @@ COMPLETE_DATASET_FILENAME = "complete_dataset.csv"
 PARAPHRASES_INPUTS_FILENAME = "paraphrases_inputs.csv"
 PARAPHRASES_OUTPUTS_FILENAME = "paraphrases_outputs.csv"
 PARAPHRASED_FILENAME = "paraphrased.csv"
+CONVERSATIONS_FILENAME = "conversations.csv"
+CONSTITUTION_INPUTS_DIRNAME = "constitution_inputs"
+CONSTITUTION_INPUTS_MERGED_FILENAME = "constitution_inputs_merged.csv"
+
+CONSTITUTION_DIRNAME = "constitution"
+CONSTITUTION_MERGED_FILENAME = "merged.csv"
+BENIGN_DIRNAME = "benign"
+BENIGN_FILENAME = "benign_samples.csv"
+
+
+def get_output_dir() -> Path:
+    """The default working root.
+
+    ``REDACT_OUTPUT_DIR`` if set; else the first folder above this package
+    that holds a ``pyproject.toml`` or ``.git``; else the current directory
+    (an installed wheel has no source tree).
+    """
+    env = os.environ.get("REDACT_OUTPUT_DIR")
+    if env:
+        return Path(env).resolve()
+
+    markers = {"pyproject.toml", ".git"}
+    current = Path(__file__).resolve().parent
+    while True:
+        if any((current / m).exists() for m in markers):
+            return current
+        parent = current.parent
+        if parent == current:
+            break
+        current = parent
+
+    return Path.cwd()
 
 
 def _root(root: str | Path | None = None) -> Path:
     """Resolve the working root — explicit ``root`` or ``get_output_dir()``."""
     return Path(root) if root is not None else get_output_dir()
 
-
-# ---------------------------------------------------------------------------
-# Base directories
-# ---------------------------------------------------------------------------
 
 def datasets(root: str | Path | None = None) -> Path:
     """The ``Datasets/`` root (per-category CSVs + merged handoff files)."""
@@ -54,16 +69,14 @@ def data_cache(root: str | Path | None = None) -> Path:
     return _root(root) / DATA_CACHE_DIRNAME
 
 
-# ---------------------------------------------------------------------------
-# Per-artifact paths
-# ---------------------------------------------------------------------------
-
 def category_csv(
     category: str,
-    base: str | Path | None = None,
+    root: str | Path | None = None,
     filename: str = SAMPLES_FILENAME,
 ) -> Path:
-    """Per-category CSV path: ``{base or Datasets}/{category}/{filename}``.
+    """Per-category CSV path: ``{root or Datasets}/{category}/{filename}``.
+
+    ``root`` is the folder that holds the category folders.
 
     Raises:
         ValueError: The category name holds a path separator. Its files
@@ -74,7 +87,7 @@ def category_csv(
             f"Category name {category!r} holds a path separator. A category is "
             "stored under one folder name; rename it without '/' or '\\'."
         )
-    base_dir = Path(base) if base is not None else datasets()
+    base_dir = Path(root) if root is not None else datasets()
     return base_dir / category / filename
 
 
@@ -103,37 +116,34 @@ def paraphrased_csv(root: str | Path | None = None) -> Path:
     return datasets(root) / PARAPHRASED_FILENAME
 
 
-CONVERSATIONS_FILENAME = "conversations.csv"
-
-
 def conversations_csv(root: str | Path | None = None) -> Path:
     return datasets(root) / CONVERSATIONS_FILENAME
 
 
+def constitution_inputs_dir(root: str | Path | None = None) -> Path:
+    return datasets(root) / CONSTITUTION_INPUTS_DIRNAME
+
+
+def constitution_inputs_merged_csv(root: str | Path | None = None) -> Path:
+    """The accepted seeded inputs of every style, in one file for ``build_dataset``."""
+    return datasets(root) / CONSTITUTION_INPUTS_MERGED_FILENAME
+
+
 def benign_csv(root: str | Path | None = None) -> Path:
-    return data_cache(root) / "benign" / "benign_samples.csv"
+    return data_cache(root) / BENIGN_DIRNAME / BENIGN_FILENAME
 
 
 def constitution_dir(root: str | Path | None = None) -> Path:
-    return data_cache(root) / "constitution"
+    return data_cache(root) / CONSTITUTION_DIRNAME
 
 
-def constitution_inputs_dir(root: str | Path | None = None) -> Path:
-    return datasets(root) / "constitution_inputs"
+def constitution_merged_csv(root: str | Path | None = None) -> Path:
+    """Every constitution entry, of every entry type, in one file."""
+    return constitution_dir(root) / CONSTITUTION_MERGED_FILENAME
 
 
 def package_dir() -> Path:
-    """Root of the installed ``redact`` package (``src/redact/``).
-
-    Package data, not run output — resolved relative to this file,
-    independent of the working root. Single source of truth for the
-    package-root-relative lookup previously recomputed independently (with
-    inconsistent ``.resolve()`` usage and per-file-tuned ``.parent`` depth)
-    in ``constitution/input_generation.py``, ``dataset/loading.py``,
-    ``dataset/taxonomy.py``, ``llms/prompts.py``,
-    ``jailbreak/manipulation/benign.py``, ``jailbreak/directives.py``,
-    ``jailbreak/spec.py``, and ``jailbreak/requests/continuation.py``.
-    """
+    """Root of the installed ``redact`` package (``src/redact/``)."""
     return Path(__file__).resolve().parent
 
 

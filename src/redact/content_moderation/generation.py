@@ -464,7 +464,7 @@ class InputPipeline(_StandaloneGenerationMixin):
             by_file: dict[Path, list[dict]] = {}
             for r in rows:
                 by_file.setdefault(
-                    paths.category_csv(r["category"], base=folder), []).append(r)
+                    paths.category_csv(r["category"], root=folder), []).append(r)
             # Before the first file is written: a save that stopped on a later
             # file would leave the earlier ones to be cut back.
             for path, its_rows in by_file.items():

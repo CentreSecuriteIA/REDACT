@@ -18,7 +18,8 @@ On import, this module:
 import logging
 import os
 import random
-from pathlib import Path
+
+from .paths import get_output_dir
 
 __version__ = "0.1.0"
 
@@ -29,39 +30,6 @@ __version__ = "0.1.0"
 # configure it yourself, e.g. logging.basicConfig(level=logging.INFO), or use
 # scripts/run.py, which already does this (--quiet -> WARNING, --debug -> DEBUG).
 logging.getLogger(__name__).addHandler(logging.NullHandler())
-
-# ---------------------------------------------------------------------------
-# Output directory resolution
-# ---------------------------------------------------------------------------
-
-def get_output_dir() -> Path:
-    """Return the base directory for generated data (Datasets/, Data_cache/).
-
-    Resolution order:
-      1. ``REDACT_OUTPUT_DIR`` env var (if set)
-      2. Walk upward from the redact package source directory until a
-         ``pyproject.toml`` or ``.git`` marker is found — stable regardless
-         of the caller's cwd (same approach used by pytest, ruff, black).
-      3. ``Path.cwd()`` — fallback for installed wheels with no source tree.
-
-    Override by passing explicit paths to pipeline functions, or set
-    the ``REDACT_OUTPUT_DIR`` environment variable.
-    """
-    env = os.environ.get("REDACT_OUTPUT_DIR")
-    if env:
-        return Path(env).resolve()
-
-    markers = {"pyproject.toml", ".git"}
-    current = Path(__file__).resolve().parent
-    while True:
-        if any((current / m).exists() for m in markers):
-            return current
-        parent = current.parent
-        if parent == current:
-            break
-        current = parent
-
-    return Path.cwd()
 
 
 # ---------------------------------------------------------------------------

@@ -492,7 +492,7 @@ def generate_inputs(
         )
 
         # Write the root-level handoff CSV build_dataset() actually looks for
-        # (paths.datasets(data_dir) / "constitution_inputs_merged.csv") —
+        # (paths.constitution_inputs_merged_csv) —
         # without this, build_dataset() silently drops every constitution-
         # seeded input row, since its own category-folder discovery scans
         # Datasets/ directly and never finds the one-level-deeper
@@ -501,10 +501,10 @@ def generate_inputs(
         # under this data_dir, not just whichever style this call used.
         # Copied from the category files in chunks; left as it is when no
         # sample is accepted.
-        files = (paths.category_csv(c, base=ds_dir)
+        files = (paths.category_csv(c, root=ds_dir)
                  for c in discover_categories(ds_dir))
         _write_parts(
-            paths.datasets(data_dir) / "constitution_inputs_merged.csv",
+            paths.constitution_inputs_merged_csv(data_dir),
             [_Part(f, accepted_only=True) for f in files if _has_rows(f)],
             keep_empty=False,
         )
@@ -556,7 +556,7 @@ def generate_inputs(
     # Clear existing data when not resuming
     if not resume:
         for cat_name, _ in categories:
-            csv_path = paths.category_csv(cat_name, base=ds_dir)
+            csv_path = paths.category_csv(cat_name, root=ds_dir)
             if csv_path.exists():
                 csv_path.unlink()
                 if verbose:
@@ -1236,7 +1236,7 @@ def build_dataset(
 
     if include_inputs:
         in_path = (Path(inputs_path) if inputs_path
-                   else ds_dir / "constitution_inputs_merged.csv")
+                   else paths.constitution_inputs_merged_csv(data_dir))
         if in_path.exists():
             parts.append(_Part(in_path, "content_moderation_input",
                                label=f"Inputs from {in_path.name}"))
