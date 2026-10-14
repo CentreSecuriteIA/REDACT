@@ -219,12 +219,12 @@ def test_a_build_returns_the_rows_of_its_file_by_default(tmp_path):
 
 @pytest.mark.parametrize("mode", ["training", "eval"])
 def test_the_size_of_a_chunk_does_not_change_a_byte(tmp_path, monkeypatch, mode):
-    import redact.pipelines as P
+    import redact.dataset.rows as rows
     from redact import build_dataset
 
     for data_dir, chunk_rows in ((tmp_path / "one", None), (tmp_path / "many", 2)):
         if chunk_rows:
-            monkeypatch.setattr(P, "_COPY_CHUNK_ROWS", chunk_rows)
+            monkeypatch.setattr(rows, "_CHUNK_ROWS", chunk_rows)
         _write_stage_files(data_dir)
         build_dataset(data_dir=data_dir, mode=mode, verbose=False)
     one, many = (paths.datasets(tmp_path / name) for name in ("one", "many"))

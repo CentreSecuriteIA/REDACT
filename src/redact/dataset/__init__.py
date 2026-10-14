@@ -54,7 +54,17 @@ from .loading import load_from_config, load_hf_dataset
 from .resume import release_lock, resume_state
 
 # Rows in one CSV
-from .rows import append_rows, check_columns, count_rows, iter_rows, keys_in, read_rows
+from .rows import (
+    Part,
+    append_rows,
+    check_columns,
+    count_rows,
+    has_rows,
+    iter_rows,
+    keys_in,
+    read_rows,
+    write_concat,
+)
 
 # The ledger and the manifest
 from .sidecar import JsonlSidecar, Ledger, Manifest
@@ -67,6 +77,7 @@ __all__ = [
     "JsonlSidecar",
     "Ledger",
     "Manifest",
+    "Part",
     "append_rows",
     "append_samples",
     "check_columns",
@@ -77,6 +88,7 @@ __all__ = [
     "drop_units",
     "get_existing_samples",
     "get_seed_prompts",
+    "has_rows",
     "iter_categories",
     "iter_rows",
     "keys_in",
@@ -93,4 +105,5 @@ __all__ = [
     "row_ids",
     "sample_row",
     "take_per_group",
+    "write_concat",
 ]

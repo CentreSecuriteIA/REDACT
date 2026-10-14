@@ -37,10 +37,8 @@ import json
 import logging
 import warnings
 from collections import Counter
-from collections.abc import Iterator, Sequence
 from contextlib import closing
 from pathlib import Path
-from typing import NamedTuple
 
 import pandas as pd
 
@@ -58,8 +56,10 @@ from redact.dataset import (
     CommitBuffer,
     Ledger,
     Manifest,
+    Part,
     append_rows,
     discover_categories,
+    has_rows,
     iter_categories,
     load_seeds,
     load_taxonomy,
@@ -69,8 +69,8 @@ from redact.dataset import (
     resume_state,
     row_ids,
     take_per_group,
+    write_concat,
 )
-from redact.dataset.sidecar import _replace
 from redact.jailbreak import (
     build_combination,
     build_function_registry,
@@ -90,113 +90,6 @@ from redact.llms.model_config import default_model_for_role
 logger = logging.getLogger(__name__)
 
 _DEFAULT_TAXONOMY_DIR = paths.taxonomy_dir()
-
-
-# Rows per read of a CSV that is copied into another.
-_COPY_CHUNK_ROWS = 50_000
-
-# The cells pandas reads as true when it reads a column of verdicts whole.
-_TRUE_CELLS = ("True", "TRUE", "true")
-
-
-class _Part(NamedTuple):
-    """Rows to copy into a merged CSV.
-
-    Attributes:
-        source: A CSV file, or a frame already in memory.
-        dataset_type: The value of the rows' ``dataset_type`` column. ``None``
-            adds no such column.
-        accepted_only: Copy only the rows of a file whose ``accepted`` cell
-            reads true. A file without the column is copied whole.
-        label: What the log calls the part.
-    """
-
-    source: Path | pd.DataFrame
-    dataset_type: str | None = None
-    accepted_only: bool = False
-    label: str = ""
-
-
-def _has_rows(path: Path) -> bool:
-    """Whether the CSV at ``path`` holds a row below its header."""
-    return not pd.read_csv(path, nrows=1, dtype=str).empty
-
-
-def _part_columns(part: _Part) -> list[str]:
-    """The columns a part's rows are written with."""
-    if isinstance(part.source, pd.DataFrame):
-        columns = list(part.source.columns)
-    else:
-        columns = list(pd.read_csv(part.source, nrows=0).columns)
-    if part.dataset_type is not None and "dataset_type" not in columns:
-        columns.append("dataset_type")
-    return columns
-
-
-def _part_chunks(part: _Part) -> Iterator[pd.DataFrame]:
-    """Yield a part's rows, a file's ``_COPY_CHUNK_ROWS`` at a time.
-
-    The cells of a file are read as text, so a whole number is written as
-    it stands, also where the rows of another part leave its column empty.
-    A cell pandas reads as a missing value (``nan``, ``N/A``, ...) is
-    written empty, as it is when the file is read whole.
-    """
-    tag = {} if part.dataset_type is None else {"dataset_type": part.dataset_type}
-    if isinstance(part.source, pd.DataFrame):
-        frame = part.source
-        # A column of whole numbers that a merge left gaps in is float. As
-        # integers it prints 1 and not 1.0, as the cells of a file do.
-        whole = [name for name in frame.columns
-                 if pd.api.types.is_float_dtype(frame[name])
-                 and (frame[name].dropna() % 1 == 0).all()]
-        yield frame.astype(dict.fromkeys(whole, "Int64")).assign(**tag)
-        return
-    with pd.read_csv(part.source, dtype=str, chunksize=_COPY_CHUNK_ROWS) as chunks:
-        for chunk in chunks:
-            if part.accepted_only and "accepted" in chunk.columns:
-                chunk = chunk[chunk["accepted"].isin(_TRUE_CELLS)]
-            yield chunk.assign(**tag)
-
-
-def _write_parts(
-    target: Path, parts: Sequence[_Part], *, keep_empty: bool = True,
-) -> list[int]:
-    """Write the rows of ``parts``, one part after another, as the CSV at ``target``.
-
-    The columns are those of every part in the order they first appear, and
-    a row is empty in the columns its part lacks: the file ``pd.concat`` of
-    the parts would give, without the parts in memory. The rows go to a
-    temporary file beside ``target`` that then replaces it, so ``target``
-    holds its old rows or all the new ones.
-
-    Args:
-        keep_empty: False leaves ``target`` as it is when no part has a row.
-
-    Returns:
-        The number of rows written of each part.
-    """
-    columns = list(dict.fromkeys(c for part in parts for c in _part_columns(part)))
-    target.parent.mkdir(parents=True, exist_ok=True)
-    temporary = target.with_name(target.name + ".tmp")
-    written = []
-    try:
-        # newline="": to_csv ends each row itself, as it does writing to a path.
-        with temporary.open("w", encoding="utf-8", newline="") as fh:
-            pd.DataFrame(columns=columns).to_csv(fh, index=False)
-            for part in parts:
-                rows = 0
-                for chunk in _part_chunks(part):
-                    chunk = chunk.reindex(columns=columns, fill_value="")
-                    chunk.to_csv(fh, header=False, index=False)
-                    rows += len(chunk)
-                written.append(rows)
-        if keep_empty or any(written):
-            _replace(temporary, target)
-    finally:
-        # Still there only when it did not replace the target.
-        temporary.unlink(missing_ok=True)
-    return written
-
 
 
 # ---------------------------------------------------------------------------
@@ -503,9 +396,9 @@ def generate_inputs(
         # sample is accepted.
         files = (paths.category_csv(c, root=ds_dir)
                  for c in discover_categories(ds_dir))
-        _write_parts(
+        write_concat(
             paths.constitution_inputs_merged_csv(data_dir),
-            [_Part(f, accepted_only=True) for f in files if _has_rows(f)],
+            [Part(f, accepted_only=True) for f in files if has_rows(f)],
             keep_empty=False,
         )
         if not read_back:
@@ -1229,7 +1122,7 @@ def build_dataset(
     jb_path = Path(jailbreak_path) if jailbreak_path else paths.jailbreaks_csv(data_dir)
     out_path = Path(output_path) if output_path else (ds_dir / paths.COMPLETE_DATASET_FILENAME)
 
-    parts: list[_Part] = []     # in the order their rows are written
+    parts: list[Part] = []     # in the order their rows are written
 
     if verbose:
         logger.info("Build Complete Dataset")
@@ -1238,22 +1131,22 @@ def build_dataset(
         in_path = (Path(inputs_path) if inputs_path
                    else paths.constitution_inputs_merged_csv(data_dir))
         if in_path.exists():
-            parts.append(_Part(in_path, "content_moderation_input",
-                               label=f"Inputs from {in_path.name}"))
+            parts.append(Part(in_path, "content_moderation_input",
+                              label=f"Inputs from {in_path.name}"))
         else:
             # The one part read whole. Without a row in any category file it
             # has no column.
             cm_df = merge_inputs(data_dir)
             if len(cm_df.columns):
-                parts.append(_Part(cm_df, "content_moderation_input",
-                                   label="Inputs from the category files"))
+                parts.append(Part(cm_df, "content_moderation_input",
+                                  label="Inputs from the category files"))
             elif verbose:
                 logger.info("Inputs: none found")
 
     # Jailbreaks. A file without a row adds no column to the merged CSV.
     if include_jailbreaks and jb_path.exists():
-        if _has_rows(jb_path):
-            parts.append(_Part(jb_path, "jailbreak", label="Jailbreaks"))
+        if has_rows(jb_path):
+            parts.append(Part(jb_path, "jailbreak", label="Jailbreaks"))
         elif verbose:
             logger.info("Jailbreaks: none found")
     elif verbose and include_jailbreaks:
@@ -1263,8 +1156,8 @@ def build_dataset(
         resp_path = (Path(responses_path) if responses_path
                      else paths.output_responses_csv(data_dir))
         if resp_path.exists():
-            parts.append(_Part(resp_path, "content_moderation_output",
-                               label=f"Outputs from {resp_path.name}"))
+            parts.append(Part(resp_path, "content_moderation_output",
+                              label=f"Outputs from {resp_path.name}"))
         elif verbose:
             logger.info("Outputs: none found")
 
@@ -1275,13 +1168,13 @@ def build_dataset(
         pi_path = Path(paraphrase_inputs_path) if paraphrase_inputs_path else paths.paraphrases_inputs_csv(data_dir)
         po_path = Path(paraphrase_outputs_path) if paraphrase_outputs_path else paths.paraphrases_outputs_csv(data_dir)
         para_parts = [
-            _Part(p, "content_moderation_paraphrase", accepted_only=True,
-                  label=f"Paraphrases from {p.name}")
-            for p in (pi_path, po_path) if p.exists() and _has_rows(p)
+            Part(p, "content_moderation_paraphrase", accepted_only=True,
+                 label=f"Paraphrases from {p.name}")
+            for p in (pi_path, po_path) if has_rows(p)
         ]
         if para_parts and mode == "eval":
             para_out = ds_dir / paths.PARAPHRASED_FILENAME
-            separate = sum(_write_parts(para_out, para_parts))
+            separate = sum(write_concat(para_out, para_parts))
             if verbose:
                 logger.info("Paraphrases: %d -> separate %s (eval mode)",
                             separate, para_out.name)
@@ -1295,7 +1188,7 @@ def build_dataset(
             logger.info("No data found. Run generate_inputs/jailbreaks/outputs first.")
         return pd.DataFrame()
 
-    written = _write_parts(out_path, parts)
+    written = write_concat(out_path, parts)
 
     if verbose:
         by_type: Counter = Counter()

@@ -9,12 +9,15 @@ import pytest
 import redact.dataset.rows as rows_module
 from redact.dataset import (
     Ledger,
+    Part,
     append_rows,
     check_columns,
     count_rows,
+    has_rows,
     iter_rows,
     keys_in,
     read_rows,
+    write_concat,
 )
 
 _UNIT = ("input_id", "iteration")
@@ -244,6 +247,21 @@ class TestCountRows:
         assert count_rows(path) == 0
 
 
+class TestHasRows:
+    def test_a_row_below_the_header(self, tmp_path):
+        path = tmp_path / "out.csv"
+        append_rows(path, [{"input_id": "a", "sample": "x"}])
+        assert has_rows(path)
+
+    def test_a_file_with_only_a_header_has_none(self, tmp_path):
+        path = tmp_path / "out.csv"
+        path.write_text("input_id,sample\n", encoding="utf-8")
+        assert not has_rows(path)
+
+    def test_no_file_has_none(self, tmp_path):
+        assert not has_rows(tmp_path / "nope.csv")
+
+
 class TestKeysIn:
     def test_no_file_gives_no_keys(self, tmp_path):
         assert keys_in(tmp_path / "nope.csv", ("input_id",)) == set()
@@ -338,3 +356,78 @@ class TestCheckColumns:
     def test_a_file_with_no_header_takes_any_columns(self, tmp_path):
         check_columns(tmp_path / "new.csv", [{"anything": 1}])
         assert list(tmp_path.iterdir()) == []
+
+
+class TestWriteConcat:
+    def _parts(self, tmp_path):
+        """A file of three rows, one not accepted, and a frame with other columns."""
+        path = tmp_path / "a.csv"
+        append_rows(path, [{"sample_id": f"a{n}", "sample": text, "accepted": n != 1}
+                           for n, text in enumerate(_TEXTS[:3])])
+        frame = pd.DataFrame({"sample_id": ["b0"], "score": [1.0], "note": ["x"]})
+        return path, frame
+
+    def test_writes_what_concatenating_the_parts_gives(self, tmp_path):
+        path, frame = self._parts(tmp_path)
+        out = tmp_path / "out.csv"
+        assert write_concat(out, [Part(path), Part(frame)]) == [3, 1]
+        expected = pd.concat([read_rows(path), frame], ignore_index=True)
+        pd.testing.assert_frame_equal(read_rows(out), expected)
+
+    def test_a_dataset_type_tags_the_rows_of_its_part(self, tmp_path):
+        path, frame = self._parts(tmp_path)
+        out = tmp_path / "out.csv"
+        write_concat(out, [Part(path, "input"), Part(frame, "output")])
+        assert read_rows(out)["dataset_type"].tolist() == ["input"] * 3 + ["output"]
+
+    def test_accepted_only_keeps_the_rows_that_read_true(self, tmp_path):
+        path, _ = self._parts(tmp_path)
+        text = path.read_text(encoding="utf-8")
+        path.write_text(text.replace("True", "TRUE"), encoding="utf-8")
+        out = tmp_path / "out.csv"
+        assert write_concat(out, [Part(path, accepted_only=True)]) == [2]
+        assert read_rows(out)["sample_id"].tolist() == ["a0", "a2"]
+
+    def test_a_file_without_an_accepted_column_is_copied_whole(self, tmp_path):
+        _, frame = self._parts(tmp_path)
+        path = tmp_path / "b.csv"
+        frame.to_csv(path, index=False)
+        out = tmp_path / "out.csv"
+        assert write_concat(out, [Part(path, accepted_only=True)]) == [1]
+
+    def test_a_whole_number_is_written_as_it_stands(self, tmp_path):
+        """Also where another part leaves its column empty."""
+        out = tmp_path / "out.csv"
+        write_concat(out, [Part(pd.DataFrame({"turn": [0.0, None]})),
+                           Part(pd.DataFrame({"other": ["x"]}))])
+        assert _lines(out) == ["turn,other", "0,", ",", ",x"]
+
+    def test_the_size_of_a_chunk_does_not_change_a_byte(self, tmp_path, monkeypatch):
+        path, frame = self._parts(tmp_path)
+        parts = [Part(path, "input", accepted_only=True), Part(frame, "output")]
+        one, many = tmp_path / "one.csv", tmp_path / "many.csv"
+        write_concat(one, parts)
+        monkeypatch.setattr(rows_module, "_CHUNK_ROWS", 1)
+        write_concat(many, parts)
+        assert many.read_bytes() == one.read_bytes()
+
+    def test_keep_empty_false_leaves_the_target_when_no_part_has_a_row(self, tmp_path):
+        out = tmp_path / "out.csv"
+        out.write_text("old\n", encoding="utf-8")
+        empty = pd.DataFrame({"sample_id": []})
+        assert write_concat(out, [Part(empty)], keep_empty=False) == [0]
+        assert _lines(out) == ["old"]
+        write_concat(out, [Part(empty)])
+        assert _lines(out) == ["sample_id"]
+
+    def test_a_part_that_fails_leaves_the_target_as_it_was(self, tmp_path):
+        path, _ = self._parts(tmp_path)
+        out = tmp_path / "out.csv"
+        write_concat(out, [Part(path)])
+        before = out.read_bytes()
+        broken = tmp_path / "broken.csv"
+        broken.write_text('sample_id,sample\nb0,"a cell that never', encoding="utf-8")
+        with pytest.raises(pd.errors.ParserError):
+            write_concat(out, [Part(path), Part(broken)])
+        assert out.read_bytes() == before
+        assert not out.with_name("out.csv.tmp").exists()

@@ -1,16 +1,20 @@
-"""Dataset rows in one CSV: append, read back, and the unit keys already written."""
+"""Dataset rows in one CSV: append, read back, the unit keys already written, and
+one CSV written from the rows of several."""
 
 import csv
 import os
 import time
 from collections.abc import Callable, Iterable, Iterator, Mapping, Sequence
 from pathlib import Path
-from typing import Any, TypeVar
+from typing import Any, NamedTuple, TypeVar
 
 import pandas as pd
 
 # Rows per read of a file that is not read whole.
 _CHUNK_ROWS = 50_000
+
+# The cells pandas reads as true when it reads a column of verdicts whole.
+_TRUE_CELLS = ("True", "TRUE", "true")
 
 _HELD_ATTEMPTS = 20
 _HELD_WAIT_SECONDS = 0.1
@@ -136,6 +140,13 @@ def count_rows(path: str | Path) -> int:
         return sum(len(chunk) for chunk in chunks)
 
 
+def has_rows(path: str | Path) -> bool:
+    """Whether the CSV at ``path`` holds a row below its header, ``False`` when
+    there is no file."""
+    path = Path(path)
+    return path.exists() and not pd.read_csv(path, nrows=1, dtype=str).empty
+
+
 def keys_in(
     path: str | Path,
     key_fields: Iterable[str],
@@ -166,3 +177,101 @@ def keys_in(
                 columns.append([cast(v) if cast else v for v in chunk[field]])
             keys.update(columns[0] if len(key_fields) == 1 else zip(*columns))
     return keys
+
+
+class Part(NamedTuple):
+    """Rows that :func:`write_concat` writes.
+
+    Attributes:
+        source: A CSV file, or a frame already in memory.
+        dataset_type: The value of the rows' ``dataset_type`` column. ``None``
+            adds no such column.
+        accepted_only: Copy only the rows of a file whose ``accepted`` cell
+            reads true. A file without the column is copied whole.
+        label: What the log calls the part.
+    """
+
+    source: Path | pd.DataFrame
+    dataset_type: str | None = None
+    accepted_only: bool = False
+    label: str = ""
+
+
+def _part_columns(part: Part) -> list[str]:
+    """The columns a part's rows are written with."""
+    if isinstance(part.source, pd.DataFrame):
+        columns = list(part.source.columns)
+    else:
+        columns = list(pd.read_csv(part.source, nrows=0).columns)
+    if part.dataset_type is not None and "dataset_type" not in columns:
+        columns.append("dataset_type")
+    return columns
+
+
+def _part_chunks(part: Part) -> Iterator[pd.DataFrame]:
+    """Yield a part's rows, a file's ``_CHUNK_ROWS`` at a time.
+
+    The cells of a file are read as text, so a whole number is written as
+    it stands, also where the rows of another part leave its column empty.
+    A cell pandas reads as a missing value (``nan``, ``N/A``, ...) is
+    written empty, as it is when the file is read whole.
+    """
+    tag = {} if part.dataset_type is None else {"dataset_type": part.dataset_type}
+    if isinstance(part.source, pd.DataFrame):
+        frame = part.source
+        # A column of whole numbers that a merge left gaps in is float. As
+        # integers it prints 1 and not 1.0, as the cells of a file do.
+        whole = [name for name in frame.columns
+                 if pd.api.types.is_float_dtype(frame[name])
+                 and (frame[name].dropna() % 1 == 0).all()]
+        yield frame.astype(dict.fromkeys(whole, "Int64")).assign(**tag)
+        return
+    with pd.read_csv(part.source, dtype=str, chunksize=_CHUNK_ROWS) as chunks:
+        for chunk in chunks:
+            if part.accepted_only and "accepted" in chunk.columns:
+                chunk = chunk[chunk["accepted"].isin(_TRUE_CELLS)]
+            yield chunk.assign(**tag)
+
+
+def write_concat(
+    target: str | Path, parts: Sequence[Part], *, keep_empty: bool = True,
+) -> list[int]:
+    """Write the rows of ``parts``, one part after another, as the CSV at ``target``.
+
+    The columns are those of every part in the order they first appear, and
+    a row is empty in the columns its part lacks: the file ``pd.concat`` of
+    the parts would give, without the parts in memory. The rows go to a
+    temporary file beside ``target`` that then replaces it, so ``target``
+    holds its old rows or all the new ones.
+
+    Args:
+        keep_empty: False leaves ``target`` as it is when no part has a row.
+
+    Returns:
+        The number of rows written of each part.
+    """
+    # Imported here: the sidecar module imports this one.
+    from .sidecar import _replace
+
+    target = Path(target)
+    columns = list(dict.fromkeys(c for part in parts for c in _part_columns(part)))
+    target.parent.mkdir(parents=True, exist_ok=True)
+    temporary = target.with_name(target.name + ".tmp")
+    written = []
+    try:
+        # newline="": to_csv ends each row itself, as it does writing to a path.
+        with temporary.open("w", encoding="utf-8", newline="") as fh:
+            pd.DataFrame(columns=columns).to_csv(fh, index=False)
+            for part in parts:
+                rows = 0
+                for chunk in _part_chunks(part):
+                    chunk = chunk.reindex(columns=columns, fill_value="")
+                    chunk.to_csv(fh, header=False, index=False)
+                    rows += len(chunk)
+                written.append(rows)
+        if keep_empty or any(written):
+            _replace(temporary, target)
+    finally:
+        # Still there only when it did not replace the target.
+        temporary.unlink(missing_ok=True)
+    return written
