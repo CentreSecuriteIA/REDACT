@@ -1,14 +1,8 @@
 """Running one sample through a (possibly combined) technique chain.
 
-Split out of jailbreak/utils.py (see that module's docstring for the full
-7-concern breakdown this split resolved). This one owns: normalizing a
-technique's return value, chaining multiple techniques into one callable
-(mixing pure transforms and LLM-dependent technique *generators*
-transparently — see protocol.py), driving a single sample end-to-end
-(apply_combination), and classifying the result (is_noop, rejection parsing).
-
-Ported from reference utils.py combine_techniques (lines 24-49).
-Retry wrappers (with_retries, with_feedback_retries) live in LLMs/wrappers.py.
+Normalizes a technique's return value, chains techniques into one callable
+(pure transforms and technique generators alike), drives a single sample end
+to end (``apply_combination``), and classifies the result.
 """
 
 import dataclasses
@@ -215,7 +209,7 @@ def combine_techniques(*techniques: Callable, sort_by_hierarchy: bool = True) ->
         client = kwargs.get("client")
 
         def call(request: LLMRequest) -> str:
-            # Lazy imports keep utils import-time light and avoid any
+            # Lazy imports keep import time light and avoid any
             # llms<->jailbreak import ordering surprises.
             from redact.llms.client import ModelClient
             from redact.llms.router import generate_sample

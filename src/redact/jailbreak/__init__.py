@@ -15,6 +15,8 @@ Usage:
     from redact.jailbreak.obfuscation.encoding import to_base64
 """
 
+from .assignment import assign_combination, build_combination, build_function_registry
+from .chain import apply_combination, combine_techniques, is_noop, make_combination_gen
 from .engine import batch_apply_combinations
 
 # Hacking registry
@@ -35,23 +37,13 @@ from .protocol import LLMRequest, run_sync
 
 # Requests registry
 from .requests import get_all_request_functions
-
-# Utilities
-from .utils import (
-    apply_combination,
-    assign_combination,
-    build_combination,
-    build_function_registry,
-    combine_techniques,
+from .sampling import (
     default_escalation_schedule,
     get_compatible_remaining,
-    is_noop,
-    load_spec,
-    make_combination_gen,
     sample_combination,
     sample_exact_combination,
-    tag_all_functions,
 )
+from .spec import load_spec, tag_all_functions
 
 # ---------------------------------------------------------------------------
 # Tag all technique functions with compatibility metadata at import time

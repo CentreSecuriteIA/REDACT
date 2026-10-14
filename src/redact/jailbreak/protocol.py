@@ -16,11 +16,11 @@ Technique generator contract::
         return text, info                              # info "" ok / "DISCARDED; ..."
 
 Pure transforms stay plain ``(str, **kwargs) -> (str, str)`` functions; the
-combined chain in ``utils.combine_techniques`` runs them inline (zero rounds).
+combined chain in ``chain.combine_techniques`` runs them inline (zero rounds).
 
 :func:`run_sync` drives a technique generator to completion with a blocking
 call function. It is the single-sample / test path used by
-``utils.apply_combination`` — the engine never calls it (it interleaves many
+``chain.apply_combination`` — the engine never calls it (it interleaves many
 generators instead), but it guarantees the generator form behaves identically
 when run one sample at a time.
 """

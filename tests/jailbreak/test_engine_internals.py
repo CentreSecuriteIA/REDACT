@@ -11,9 +11,9 @@ registry-level capability lookup is monkeypatched to control per-model
 internals support.
 """
 
+from redact.jailbreak.chain import combine_techniques
 from redact.jailbreak.engine import batch_apply_combinations
 from redact.jailbreak.obfuscation.translation import to_swahili
-from redact.jailbreak.utils import combine_techniques
 from redact.llms.backends import ComputeConfig
 from tests.conftest import as_resolver
 from tests.jailbreak.test_engine import (

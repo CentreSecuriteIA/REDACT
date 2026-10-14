@@ -4,12 +4,14 @@ import random
 
 import pytest
 
-from redact.jailbreak.chain import order_by_hierarchy
-from redact.jailbreak.protocol import LLMRequest
-from redact.jailbreak.utils import (
+from redact.jailbreak.chain import (
     _parse_rejection_info,
     apply_combination,
     combine_techniques,
+    order_by_hierarchy,
+)
+from redact.jailbreak.protocol import LLMRequest
+from redact.jailbreak.sampling import (
     default_escalation_schedule,
     sample_combination,
     sample_exact_combination,

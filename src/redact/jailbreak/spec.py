@@ -1,9 +1,5 @@
-"""Loading and applying combination_spec.json — the technique compatibility spec.
-
-Split out of jailbreak/utils.py (which used to mix 7 unrelated concerns in
-one file — see that module's docstring for the full breakdown and why this
-split happened). This one owns: reading the spec JSON once, and tagging
-technique functions with the metadata it describes.
+"""Loading combination_spec.json, the technique compatibility spec, and tagging
+the technique functions with what it says of each.
 """
 
 import json

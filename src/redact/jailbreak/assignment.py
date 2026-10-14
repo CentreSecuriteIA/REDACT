@@ -1,11 +1,5 @@
-"""Deterministic combination assignment (manifest planning) + reconstruction.
-
-Split out of jailbreak/utils.py (see that module's docstring for the full
-7-concern breakdown this split resolved). This one owns the manifest-facing
-half: assigning a technique combination to a sample reproducibly
-(assign_combination, on top of sample_combination), and reconstructing a
-combined callable from the technique names a manifest recorded
-(build_combination / build_function_registry) — used by jailbreak/manifest.py.
+"""Deterministic combination assignment for the manifest, and a combination
+rebuilt from the technique names a manifest recorded.
 """
 
 import hashlib

@@ -40,7 +40,7 @@ import pandas as pd
 
 from redact.dataset import Manifest, row_id
 
-from .utils import assign_combination
+from .assignment import assign_combination
 
 logger = logging.getLogger(__name__)
 
