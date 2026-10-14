@@ -10,12 +10,11 @@ from ..dataset import Ledger, Manifest, append_rows, content_id, read_rows, row_
 from ..dataset.resume import resume_state
 from ..dataset.save import CommitBuffer
 from ..exceptions import PromptTooLongError
-from ..llm_pipeline import checked, drive_units
+from ..llm_pipeline import checked, drive_units, pool_size
 from ..llms.client import ModelClient
 from ..llms.prompting import build_messages, load_prompt
 from .checker import build_output_quality_checker
 from .feedback import with_feedback
-from .inputs import _pool_size
 
 logger = logging.getLogger(__name__)
 
@@ -186,7 +185,7 @@ def run_output_generation(
             (_unit(i, row) for i, (_, row) in enumerate(inputs.iterrows())),
             on_done=_on_done,
             on_error=_on_error,
-            pool_size=_pool_size(batch_size, client, check),
+            pool_size=pool_size(batch_size, client, check),
             cap=batch_size,
             progress="outputs" if verbose else None,
         )

@@ -45,7 +45,7 @@ def test_the_stage_drives_with_the_pool_its_lanes_allow(tmp_path, monkeypatch):
         raise KeyboardInterrupt
 
     monkeypatch.setattr(G, "drive_units", stop)
-    monkeypatch.setattr(G, "_pool_size", lambda batch_size, *clients: 7 * batch_size)
+    monkeypatch.setattr(G, "pool_size", lambda batch_size, *clients: 7 * batch_size)
     pipe = _pipeline(tmp_path)
     with pytest.raises(KeyboardInterrupt):
         pipe.run_from_constitution(_const_df(), _PROMPT, samples_per_entry=1,

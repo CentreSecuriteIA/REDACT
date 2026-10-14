@@ -43,7 +43,7 @@ from ..dataset.drop import drop_units
 from ..dataset.resume import release_lock, resume_state
 from ..dataset.save import CommitBuffer
 from ..exceptions import PromptTooLongError
-from ..llm_pipeline import LLMRequest, drive_units, is_accepted
+from ..llm_pipeline import LLMRequest, drive_units, is_accepted, pool_size
 from ..llm_pipeline import extracted as extracted_unit
 from ..llms.client import ModelClient
 from ..llms.prompting import build_messages, extract_and_clean
@@ -66,16 +66,8 @@ _DESC_PREVIEW_LEN = 60
 _CATEGORY_FILES = f"*/{paths.SAMPLES_FILENAME}"
 
 
-def _pool_size(batch_size: int, *clients: ModelClient | None) -> int:
-    """Units a stage keeps live: two calls' worth, or its widest async lane.
-
-    A local engine runs hundreds of requests at once, far more than a
-    synchronous call holds, and each live unit has one request in flight.
-    A hosted model's lane is narrow and changes nothing.
-    """
-    lanes = [client.backend.max_workers for client in clients
-             if client is not None and client.compute_config.supports_async_calls]
-    return max([2 * batch_size, *lanes])
+# The jailbreak stage in pipelines.py imports it under this name.
+_pool_size = pool_size
 
 
 def _constitution_inputs_ledger(dataset_dir: str | Path) -> Ledger:
@@ -441,7 +433,7 @@ class InputPipeline(_StandaloneGenerationMixin):
                 _units(),
                 on_done=_on_done,
                 on_error=_on_error,
-                pool_size=_pool_size(batch_size, self.gen, self.check),
+                pool_size=pool_size(batch_size, self.gen, self.check),
                 cap=batch_size,
                 progress="inputs" if verbose else None,
             )

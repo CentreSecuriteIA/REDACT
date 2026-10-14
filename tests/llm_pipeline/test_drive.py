@@ -7,7 +7,13 @@ a fake router (no network).
 
 import pytest
 
-from redact.llm_pipeline import LLMRequest, drive_generators, drive_sync, drive_units
+from redact.llm_pipeline import (
+    LLMRequest,
+    drive_generators,
+    drive_sync,
+    drive_units,
+    pool_size,
+)
 from tests.conftest import as_resolver
 
 
@@ -600,3 +606,29 @@ def test_drive_units_progress_label_and_internals_ids():
                 on_done=lambda k, v: None, progress="lbl")
     assert labels == [None, "lbl round 1 (m)"]
     assert ids == [["root/0", None], None]   # omitted entirely when no request wants capture
+
+
+class TestPoolSize:
+    """A stage keeps as many units live as its models' async lanes hold."""
+
+    @staticmethod
+    def _client(async_calls, max_workers):
+        from types import SimpleNamespace
+
+        return SimpleNamespace(
+            compute_config=SimpleNamespace(supports_async_calls=async_calls),
+            backend=SimpleNamespace(max_workers=max_workers))
+
+    def test_two_calls_worth_without_an_async_lane(self):
+        batch = 32
+        assert pool_size(batch, self._client(False, 500), None) == 2 * batch
+
+    def test_the_widest_lane_sets_the_pool(self):
+        widest = 512
+        lanes = self._client(True, 256), self._client(True, widest)
+        assert pool_size(32, *lanes) == widest
+
+    def test_a_lane_narrower_than_two_calls_changes_nothing(self):
+        batch = 32
+        lanes = self._client(True, 3), self._client(True, 8)
+        assert pool_size(batch, *lanes) == 2 * batch
