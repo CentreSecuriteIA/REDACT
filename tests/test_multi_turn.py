@@ -441,7 +441,7 @@ def _three_seeds():
     return pd.DataFrame({"sample_id": ["s1", "s2", "s3"], "seed": ["q1", "q2", "q3"]})
 
 
-def test_conversation_chunk_is_one_append_then_its_acks(tmp_path, monkeypatch):
+def test_conversations_are_saved_at_exit_rows_then_acks(tmp_path, monkeypatch):
     import redact.multi_turn.pipeline as MP
     from redact import generate_conversations, paths
 
@@ -458,7 +458,7 @@ def test_conversation_chunk_is_one_append_then_its_acks(tmp_path, monkeypatch):
         resolve=_FakeResolver(_echo), verbose=False)
 
     # Per append: its rows, and the acks on disk when it was made.
-    assert saves == [(["s1", "s2"], 0), (["s3"], 2)]
+    assert saves == [(["s1", "s2", "s3"], 0)]
     assert list(df["input_id"]) == ["s1", "s2", "s3"]
     assert _acks(state) == [
         {"input_id": sid, "iteration": 0, "stop_reason": "max_turns"}
@@ -466,14 +466,17 @@ def test_conversation_chunk_is_one_append_then_its_acks(tmp_path, monkeypatch):
     ]
 
 
-def test_conversation_chunk_of_any_size_is_one_append(tmp_path, monkeypatch):
+def _forty_one_seeds():
     import pandas as pd
+    ids = [f"s{n}" for n in range(41)]
+    return pd.DataFrame({"sample_id": ids, "seed": ["q"] * len(ids)})
 
+
+def test_conversations_are_saved_every_32_units_and_at_exit(tmp_path, monkeypatch):
     import redact.multi_turn.pipeline as MP
     from redact import generate_conversations
 
-    ids = [f"s{n}" for n in range(41)]
-    seeds = pd.DataFrame({"sample_id": ids, "seed": ["q"] * len(ids)})
+    seeds = _forty_one_seeds()
     saves, append = [], MP.append_rows
 
     def spy(path, rows):
@@ -484,16 +487,18 @@ def test_conversation_chunk_of_any_size_is_one_append(tmp_path, monkeypatch):
     generate_conversations(
         seeds, _simple_setting, data_dir=tmp_path, batch_size=40,
         resolve=_FakeResolver(_echo), verbose=False)
-    assert saves == [ids[:40], ids[40:]]
+    ids = list(seeds["sample_id"])
+    assert saves == [ids[:32], ids[32:]]
 
 
-def test_failed_conversation_append_acks_none_of_its_chunk(tmp_path, monkeypatch):
+def test_a_failed_conversation_save_acks_none_of_its_units(tmp_path, monkeypatch):
     import pandas as pd
 
     import redact.multi_turn.pipeline as MP
     from redact import generate_conversations, paths
 
     out = paths.conversations_csv(tmp_path)
+    seeds = _forty_one_seeds()
     outcomes, append = iter([None, OSError("disk full")]), MP.append_rows
 
     def failing(path, rows):
@@ -505,12 +510,13 @@ def test_failed_conversation_append_acks_none_of_its_chunk(tmp_path, monkeypatch
     monkeypatch.setattr(MP, "append_rows", failing)
     with pytest.raises(OSError, match="disk full"):
         generate_conversations(
-            _three_seeds(), _simple_setting, data_dir=tmp_path, batch_size=2,
+            seeds, _simple_setting, data_dir=tmp_path, batch_size=2,
             resolve=_FakeResolver(_echo), verbose=False)
 
+    first = list(seeds["sample_id"])[:32]
     acks = _acks(out.with_name("conversations.state.jsonl"))
-    assert [ack["input_id"] for ack in acks] == ["s1", "s2"]
-    assert list(pd.read_csv(out)["input_id"]) == ["s1", "s2"]
+    assert [ack["input_id"] for ack in acks] == first
+    assert list(pd.read_csv(out)["input_id"]) == first
 
 
 def test_conversations_killed_between_rows_and_acks_are_each_on_disk_once(
@@ -529,21 +535,43 @@ def test_conversations_killed_between_rows_and_acks_are_each_on_disk_once(
             _three_seeds(), _simple_setting, data_dir=tmp_path, batch_size=2,
             resolve=_FakeResolver(_echo), verbose=False)
 
-    kill_after_rows(monkeypatch, MP, on_call=2)
+    kill_after_rows(monkeypatch, MP, on_call=1)
     with pytest.raises(Killed):
         run()
-    # The second chunk's row landed; its ack did not.
+    # The rows landed; their acks did not.
+    landed = out.read_bytes()
     assert list(pd.read_csv(out)["input_id"]) == ["s1", "s2", "s3"]
-    assert [ack["input_id"] for ack in _acks(state)] == ["s1", "s2"]
+    assert _acks(state) == []
     assert lock_is_free(state)
 
     assert list(run()["input_id"]) == ["s1", "s2", "s3"]
-    assert out.with_name("conversations.csv.cut").exists()
+    assert out.with_name("conversations.csv.cut").read_bytes() == landed
     assert [ack["input_id"] for ack in _acks(state)] == ["s1", "s2", "s3"]
     assert lock_is_free(state)
 
-    run()                       # nothing to do: no buffer, and no lock kept
+    run()                       # nothing to do, and no lock kept
     assert lock_is_free(state)
+
+
+def test_the_conversation_pool_is_sized_by_the_models_that_reply(
+        tmp_path, monkeypatch):
+    import redact.multi_turn.pipeline as MP
+    from redact import generate_conversations
+
+    seen = {}
+
+    def stop(source, **kwargs):
+        seen.update(kwargs)
+        raise KeyboardInterrupt
+
+    monkeypatch.setattr(MP, "drive_units", stop)
+    monkeypatch.setattr(MP, "pool_size", lambda batch_size, *clients: (
+        batch_size, [c.model for c in clients]))
+    with pytest.raises(KeyboardInterrupt):
+        generate_conversations(
+            _three_seeds(), _simple_setting, data_dir=tmp_path, batch_size=2,
+            resolve=_FakeResolver(_echo), verbose=False)
+    assert (seen["pool_size"], seen["cap"]) == ((2, ["m"]), 2)
 
 
 def test_an_old_conversations_folder_is_taken_over_by_its_rows(tmp_path):
