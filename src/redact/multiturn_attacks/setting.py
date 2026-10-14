@@ -56,7 +56,6 @@ def build_attack_setting(
                 ModelActor("target", target_model, role="assistant", system_prompt=target_system),
             ],
             max_turns=max_turns,
-            drive="feedback" if attack == "pair" else "conversation",
             name=f"attack:{attack}",
         )
 

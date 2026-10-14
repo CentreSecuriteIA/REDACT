@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 from collections.abc import Callable, Generator
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 
 from redact.llm_pipeline import LLMRequest, drive_sync
 
@@ -22,7 +22,6 @@ class Setting:
 
     participants: list[Actor]
     max_turns: int = 6
-    drive: str = "conversation"
     stop: Callable[[Transcript], bool] | None = None
     name: str = "conversation"
 
@@ -36,7 +35,6 @@ class Trajectory:
     transcript: Transcript
     turns_used: int
     stop_reason: str
-    meta: dict = field(default_factory=dict)
 
 
 def conversation_gen(
