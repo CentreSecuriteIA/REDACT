@@ -203,12 +203,13 @@ from .pipelines import (  # noqa: E402
     generate_paraphrases,
 )
 
-# Config-driven runs (recipe + input-params + per-stage manifests).
-from .runconfig import (  # noqa: E402, F401
-    load_params,
-    load_recipe,
+# Config-driven runs (recipe + input-params + per-stage run records).
+from .recipe import load_params, load_recipe  # noqa: E402, F401
+from .driver import (  # noqa: E402, F401
     read_manifest,
+    read_record,
     run_pipeline,
     write_manifest,
+    write_record,
 )
 from .types import ALL_ENTRY_TYPES, EntryType  # noqa: E402, F401

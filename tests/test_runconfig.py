@@ -1,8 +1,8 @@
-"""Tests for the config-driven run layer (recipe/params/manifests + driver).
+"""Tests for the config-driven run layer (recipe/params/run records + driver).
 
 The end-to-end driver test uses the jailbreaks + build stages with
 ``pure_only`` augmentations, so no technique needs an LLM — it exercises stage
-dispatch, manifest writing, and cross-stage chaining fully offline.
+dispatch, record writing, and cross-stage chaining fully offline.
 """
 
 import json
@@ -14,23 +14,18 @@ import pytest
 
 from redact import paths, telemetry
 from redact.dataset import append_samples
-from redact.runconfig import (
-    load_params,
-    load_recipe,
-    read_manifest,
-    run_pipeline,
-    write_manifest,
-)
+from redact.driver import read_record, run_pipeline, write_record
+from redact.recipe import load_params, load_recipe
 
-# --- manifests ---------------------------------------------------------------
+# --- run records -------------------------------------------------------------
 
-def test_manifest_roundtrip(tmp_path):
-    write_manifest(
+def test_record_roundtrip(tmp_path):
+    write_record(
         "inputs", data_dir=tmp_path,
         params={"samples_per_category": 15}, models={"gen": None},
         counts={"rows": 42, "accepted": 30}, sources=["a.csv"],
     )
-    m = read_manifest("inputs", tmp_path)
+    m = read_record("inputs", tmp_path)
     assert m["stage"] == "inputs"
     assert m["counts"] == {"rows": 42, "accepted": 30}
     assert m["params"]["samples_per_category"] == 15
@@ -39,18 +34,36 @@ def test_manifest_roundtrip(tmp_path):
     assert (paths.datasets(tmp_path) / "inputs.run.json").exists()
 
 
-def test_read_missing_manifest_returns_none(tmp_path):
-    assert read_manifest("outputs", tmp_path) is None
+def test_read_missing_record_returns_none(tmp_path):
+    assert read_record("outputs", tmp_path) is None
 
 
-def test_write_manifest_with_extra_and_spec(tmp_path):
-    write_manifest("jailbreaks", data_dir=tmp_path, extra={"note": "hi"}, spec_version="1.0")
-    m = read_manifest("jailbreaks", tmp_path)
+def test_write_record_with_extra_and_spec(tmp_path):
+    write_record("jailbreaks", data_dir=tmp_path, extra={"note": "hi"}, spec_version="1.0")
+    m = read_record("jailbreaks", tmp_path)
     assert m["note"] == "hi" and m["spec_version"] == "1.0"
 
 
+def test_runconfig_and_the_former_record_names_still_resolve():
+    import redact
+    from redact import driver, recipe, runconfig
+
+    assert runconfig.run_pipeline is driver.run_pipeline
+    assert runconfig.STAGE_ROLES is driver.STAGE_ROLES
+    assert runconfig.load_recipe is recipe.load_recipe
+    assert runconfig.load_params is recipe.load_params
+    assert runconfig.STAGES is recipe.STAGES
+    for old, new in [("manifest_path", "record_path"),
+                     ("write_manifest", "write_record"),
+                     ("read_manifest", "read_record")]:
+        assert getattr(runconfig, old) is getattr(driver, new)
+        assert getattr(runconfig, new) is getattr(driver, new)
+    assert redact.write_manifest is redact.write_record is driver.write_record
+    assert redact.read_manifest is redact.read_record is driver.read_record
+
+
 def test_counts_none_is_empty():
-    from redact.runconfig import _counts
+    from redact.driver import _counts
     assert _counts(None) == {}
 
 
@@ -64,61 +77,61 @@ class TestFileCounts:
         return frame
 
     def test_rows_and_accepted_rows_of_several_files(self, tmp_path):
-        from redact.runconfig import _counts, _file_counts
+        from redact.driver import _counts, file_counts
 
         files = [tmp_path / "a.csv", tmp_path / "b.csv"]
         frames = [self._write(files[0], [True, False, True]),
                   self._write(files[1], [False, True])]
-        assert _file_counts(files) == {"rows": 5, "accepted": 3}
-        assert _file_counts(files) == _counts(pd.concat(frames))
+        assert file_counts(files) == {"rows": 5, "accepted": 3}
+        assert file_counts(files) == _counts(pd.concat(frames))
 
     def test_a_file_is_read_in_chunks(self, tmp_path, monkeypatch):
         import redact.dataset.rows as rows
-        from redact.runconfig import _file_counts
+        from redact.driver import file_counts
 
         monkeypatch.setattr(rows, "_CHUNK_ROWS", 2)
         self._write(tmp_path / "a.csv", [True, False, True, True, False])
-        assert _file_counts([tmp_path / "a.csv"]) == {"rows": 5, "accepted": 3}
+        assert file_counts([tmp_path / "a.csv"]) == {"rows": 5, "accepted": 3}
 
     def test_a_cell_without_a_verdict_is_a_row_that_is_not_accepted(self, tmp_path):
-        from redact.runconfig import _counts, _file_counts
+        from redact.driver import _counts, file_counts
 
         frame = self._write(tmp_path / "a.csv", [True, None, False, True])
-        assert _file_counts([tmp_path / "a.csv"]) == {"rows": 4, "accepted": 2}
-        assert _file_counts([tmp_path / "a.csv"]) == _counts(frame)
+        assert file_counts([tmp_path / "a.csv"]) == {"rows": 4, "accepted": 2}
+        assert file_counts([tmp_path / "a.csv"]) == _counts(frame)
 
     def test_files_without_an_accepted_column_give_rows_only(self, tmp_path):
-        from redact.runconfig import _file_counts
+        from redact.driver import file_counts
 
         pd.DataFrame({"x": [1, 2, 3]}).to_csv(tmp_path / "a.csv", index=False)
-        assert _file_counts([tmp_path / "a.csv"]) == {"rows": 3}
+        assert file_counts([tmp_path / "a.csv"]) == {"rows": 3}
 
     def test_a_missing_file_has_no_rows(self, tmp_path):
-        from redact.runconfig import _file_counts
+        from redact.driver import file_counts
 
-        assert _file_counts([tmp_path / "none.csv"]) == {"rows": 0}
-        assert _file_counts([]) == {"rows": 0}
+        assert file_counts([tmp_path / "none.csv"]) == {"rows": 0}
+        assert file_counts([]) == {"rows": 0}
 
     def test_keep_limits_the_count_to_rows_with_those_values(self, tmp_path):
-        from redact.runconfig import _file_counts
+        from redact.driver import file_counts
 
         self._write(tmp_path / "a.csv", [True, True, False, True],
                     template_style=["long", "short", "long", "long"])
         keep = {"accepted": True, "template_style": "long"}
-        assert _file_counts([tmp_path / "a.csv"], keep) == {"rows": 2, "accepted": 2}
+        assert file_counts([tmp_path / "a.csv"], keep) == {"rows": 2, "accepted": 2}
 
     def test_keep_does_not_limit_a_file_without_the_column(self, tmp_path):
-        from redact.runconfig import _file_counts
+        from redact.driver import file_counts
 
         self._write(tmp_path / "a.csv", [True, False, True])
         keep = {"accepted": True, "template_style": "long"}
-        assert _file_counts([tmp_path / "a.csv"], keep) == {"rows": 2, "accepted": 2}
+        assert file_counts([tmp_path / "a.csv"], keep) == {"rows": 2, "accepted": 2}
 
     def test_rows_that_are_all_dropped_still_report_the_accepted_count(self, tmp_path):
-        from redact.runconfig import _file_counts
+        from redact.driver import file_counts
 
         self._write(tmp_path / "a.csv", [False, False])
-        assert _file_counts([tmp_path / "a.csv"], {"accepted": True}) == {
+        assert file_counts([tmp_path / "a.csv"], {"accepted": True}) == {
             "rows": 0, "accepted": 0}
 
 
@@ -236,9 +249,9 @@ def test_load_params_resolves_relative_to_base_dir(tmp_path):
 
 def _serving_of(models):
     """How a recipe with these ``models`` serves each model, once loaded."""
-    from redact.runconfig import _serving
+    from redact.recipe import serving_of
 
-    return _serving(load_recipe({"dataset_type": "eval", "models": models})["models"])
+    return serving_of(load_recipe({"dataset_type": "eval", "models": models})["models"])
 
 
 def _models_error(models):
@@ -249,7 +262,7 @@ def _models_error(models):
 
 
 def test_names_and_nulls_load_as_written():
-    from redact.runconfig import _role_names
+    from redact.recipe import _role_names
 
     models = {"gen": "venice-uncensored", "check": None,
               "paraphraser": "distribution", "generator": "not-a-role"}
@@ -267,7 +280,7 @@ def test_the_example_recipes_load(name):
 
 
 def test_the_object_form_is_read_per_model():
-    from redact.runconfig import _role_names
+    from redact.recipe import _role_names
 
     models = {
         "gen": {"name": "venice-uncensored", "backend_type": "vllm", "copies": 2},
@@ -295,7 +308,7 @@ def test_the_object_form_is_read_per_model():
      {"llama-3.2-3b-debug": {"copies": 1}}),
 ])
 def test_an_object_without_a_name_is_the_roles_default_model(models, serving):
-    from redact.runconfig import _role_names
+    from redact.recipe import _role_names
 
     assert _serving_of(models) == serving
     assert _role_names(models)[list(models)[-1]] is None
@@ -461,7 +474,7 @@ def test_a_stage_is_handed_a_model_name_per_role(tmp_path, monkeypatch):
     finally:
         telemetry.uninstall()
     assert handed == {"model": "deepseek-v3.2", "check_model": None}
-    assert read_manifest("inputs", tmp_path)["models"] == {
+    assert read_record("inputs", tmp_path)["models"] == {
         "gen": "deepseek-v3.2", "check": None, "translation": None,
         "constitution": None, "paraphraser": None, "paraphrase_check": None}
 
@@ -498,14 +511,14 @@ def test_run_pipeline_eval_jailbreaks_and_build(tmp_path):
     # jailbreaks stage produced one row per seeded input + a manifest with spec version
     assert summary["stages"]["jailbreaks"]["counts"]["rows"] == 3
     assert paths.jailbreaks_csv(tmp_path).exists()
-    jb_manifest = read_manifest("jailbreaks", tmp_path)
+    jb_manifest = read_record("jailbreaks", tmp_path)
     assert jb_manifest["counts"]["rows"] == 3
     assert "spec_version" in jb_manifest
     assert jb_manifest["params"]["pure_only"] is True  # augmentation recorded
 
     # build stage merged inputs + jailbreaks into the complete dataset + manifest
     assert paths.complete_dataset_csv(tmp_path).exists()
-    assert read_manifest("build", tmp_path) is not None
+    assert read_record("build", tmp_path) is not None
     assert summary["stages"]["build"]["counts"]["rows"] >= 3
 
 
@@ -724,13 +737,13 @@ ALL_STAGES = ["constitution", "inputs", "outputs", "paraphrase", "jailbreaks", "
 
 
 def _models(**overrides):
-    from redact.runconfig import _DEFAULT_MODELS
+    from redact.recipe import _DEFAULT_MODELS
     return {**_DEFAULT_MODELS, **overrides}
 
 
 def test_stage_models_follow_the_order_the_stages_run():
     """Stage order, not role name: what loads first is planned first."""
-    from redact.runconfig import _stage_models
+    from redact.driver import _stage_models
 
     assert _stage_models(_models(), ALL_STAGES, {}) == [
         "claude-opus-4-6",        # constitution
@@ -745,7 +758,7 @@ def test_stage_models_follow_the_order_the_stages_run():
 
 
 def test_check_resolves_to_the_generation_model_like_the_stages(local_models):
-    from redact.runconfig import _stage_models
+    from redact.driver import _stage_models
 
     gen = local_models("_rc_gen")
     check = local_models("_rc_check")
@@ -759,7 +772,7 @@ def test_check_resolves_to_the_generation_model_like_the_stages(local_models):
     {"include_obfuscation": False},
 ])
 def test_translation_is_not_planned_when_the_recipe_excludes_it(augmentations):
-    from redact.runconfig import _stage_models
+    from redact.driver import _stage_models
 
     assert _stage_models(_models(), ["jailbreaks"], augmentations) == ["venice-uncensored"]
     assert "deepseek-v3.2" in _stage_models(
@@ -767,7 +780,7 @@ def test_translation_is_not_planned_when_the_recipe_excludes_it(augmentations):
 
 
 def test_a_paraphraser_pool_plans_every_model_in_it(local_models):
-    from redact.runconfig import _stage_models
+    from redact.driver import _stage_models
 
     extra = local_models("_rc_paraphraser", roles=["paraphraser"])
     wanted = _stage_models(_models(paraphraser="distribution"), ["paraphrase"], {})
@@ -794,7 +807,7 @@ def _recorded(calls):
 def test_phases_plan_each_stage_and_preload_what_fits(local_models):
     """Two local models that cannot share a card: the paraphrase stage's plan
     says so, and only the model that fits is loaded ahead."""
-    from redact.runconfig import _enter_phase, _plan_phases
+    from redact.driver import _enter_phase, _plan_phases
 
     gen = local_models("_rc_zz_gen")              # sorts last by role and name
     paraphraser = local_models("_rc_aa_paraphraser")
@@ -818,7 +831,7 @@ def test_phases_apply_one_share_per_engine_for_the_run(local_models):
     """gen is alone in the inputs stage and shares the card in the paraphrase
     stage: it loads once, with the smaller share."""
     import redact.llms.backends.vllm as vllm_module
-    from redact.runconfig import _plan_phases
+    from redact.driver import _plan_phases
 
     gen = local_models("_rc_share_gen")
     paraphraser = local_models("_rc_share_para")
@@ -840,7 +853,7 @@ def test_phases_apply_one_share_per_engine_for_the_run(local_models):
 def test_entering_a_stage_unloads_what_no_later_stage_calls(local_models):
     """gen is done after the inputs stage: it is released at the transition
     and the paraphrase stage's models are loaded."""
-    from redact.runconfig import _enter_phase, _plan_phases
+    from redact.driver import _enter_phase, _plan_phases
 
     gen = local_models("_rc_done_gen")
     paraphraser = local_models("_rc_done_para")
@@ -867,7 +880,7 @@ def test_entering_a_stage_unloads_what_no_later_stage_calls(local_models):
 def test_the_next_stage_loads_during_a_stage_without_local_models(local_models):
     """constitution calls an API model, so the inputs stage's model loads
     while it runs and is not loaded a second time."""
-    from redact.runconfig import _enter_phase, _plan_phases
+    from redact.driver import _enter_phase, _plan_phases
 
     gen = local_models("_rc_ahead_gen")
     calls, warm = [], set()
@@ -898,7 +911,7 @@ def test_entering_a_stage_hands_the_loader_the_stages_plan(local_models):
     """The loader holds the shares and cards of the stage entered, and of the
     next one when its models load ahead, before any of them is preloaded."""
     from redact import residency
-    from redact.runconfig import _enter_phase, _plan_phases
+    from redact.driver import _enter_phase, _plan_phases
 
     gen = local_models("_rc_hand_gen")
     paraphraser = local_models("_rc_hand_para")
@@ -933,7 +946,7 @@ def test_a_model_loaded_again_loads_under_the_plan_of_its_stage(local_models):
     """Stage b does not hold x. Alone in stage a it has both cards and the
     full share; in stage c it shares card 0, and its second load takes that."""
     from redact import residency
-    from redact.runconfig import _enter_phase
+    from redact.driver import _enter_phase
 
     w, x, y, z = (local_models(f"_rc_again_{n}") for n in "wxyz")
     plans = [residency.plan_residency(resident, gpus=2, gib_per_gpu=24.0)
@@ -954,7 +967,7 @@ def test_a_model_loaded_again_loads_under_the_plan_of_its_stage(local_models):
 
 
 def test_plan_phases_returns_nothing_without_local_models():
-    from redact.runconfig import _plan_phases
+    from redact.driver import _plan_phases
 
     assert _plan_phases(_models(), ["build"], verbose=False) == []
 
@@ -1125,7 +1138,7 @@ def test_a_run_serves_a_hosted_model_locally_when_the_recipe_says_so(
     assert (planned["model"], planned["setup"]) == (name, "vllm")
     served = {"name": name, "backend_type": "vllm", "copies": 1}
     assert summary["serving"] == {"gen": served, "check": served}
-    record = read_manifest("inputs", tmp_path)
+    record = read_record("inputs", tmp_path)
     assert (record["serving"], record["models"]["gen"]) == (summary["serving"], name)
     # Hosted again once the run is over.
     assert capabilities._run_serving == {}
@@ -1188,7 +1201,7 @@ def test_a_recipe_of_names_and_nulls_is_recorded_with_how_it_was_served(
     """The registry's defaults are named, per stage for the roles it calls,
     and the record's ``models`` are as they were."""
     import redact
-    from redact.runconfig import _DEFAULT_MODELS
+    from redact.recipe import _DEFAULT_MODELS
 
     monkeypatch.setattr(redact, "generate_inputs", lambda **k: pd.DataFrame({"x": [1]}))
     monkeypatch.setattr(redact, "build_dataset", lambda **k: pd.DataFrame({"x": [1]}))
@@ -1200,14 +1213,14 @@ def test_a_recipe_of_names_and_nulls_is_recorded_with_how_it_was_served(
         telemetry.uninstall()
     venice = {"name": "venice-uncensored", "backend_type": "api", "workers": 3}
     assert summary["serving"] == {"gen": venice, "check": venice}
-    inputs, build = read_manifest("inputs", tmp_path), read_manifest("build", tmp_path)
+    inputs, build = read_record("inputs", tmp_path), read_record("build", tmp_path)
     assert (inputs["serving"], build["serving"]) == (summary["serving"], {})
     assert inputs["models"] == build["models"] == _DEFAULT_MODELS
 
 
 def test_served_lists_a_pool_and_names_no_model_for_a_role_no_stage_calls(
         local_models):
-    from redact.runconfig import _served
+    from redact.driver import _served
 
     extra = local_models("_rc_served_para", roles=["paraphraser"])
     models = _models(gen="no-such-model", paraphraser="distribution")
@@ -1241,14 +1254,14 @@ def test_a_planner_exception_does_not_abort_the_run(tmp_path, monkeypatch, caplo
         "models": {"gen": "llama-3.2-3b-debug"},
     }
     try:
-        with caplog.at_level(logging.ERROR, logger="redact.runconfig"):
+        with caplog.at_level(logging.ERROR, logger="redact.driver"):
             summary = run_pipeline(recipe, params={"inputs": {}, "build": {}},
                                    verbose=False)
     finally:
         telemetry.uninstall()
     assert list(summary["stages"]) == ["inputs", "build"]
     assert "residency" not in summary
-    mine = [r for r in caplog.records if r.name == "redact.runconfig"]
+    mine = [r for r in caplog.records if r.name == "redact.driver"]
     assert [r.levelname for r in mine] == ["ERROR"]
     assert "planning failed (ZeroDivisionError" in caplog.text
     assert "continues without a plan" in caplog.text
@@ -1437,7 +1450,7 @@ def test_a_run_unloads_a_model_for_a_stage_and_loads_it_again(
 
 
 def test_load_recipe_rejects_a_repeated_stage():
-    from redact.runconfig import load_recipe
+    from redact.recipe import load_recipe
 
     with pytest.raises(ValueError, match="more than once"):
         load_recipe({"dataset_type": "eval", "stages": ["inputs", "inputs"]})
@@ -1447,14 +1460,14 @@ def test_a_failed_model_switch_does_not_abort_the_run(local_models, caplog):
     import logging
 
     from redact import residency
-    from redact.runconfig import _enter_phase, _plan_phases
+    from redact.driver import _enter_phase, _plan_phases
 
     gen = local_models("_rc_switch_gen")
     card = _one_card(24.0)
     try:
         with card[0], card[1], \
              patch.object(residency, "preload", side_effect=RuntimeError("boom")), \
-             caplog.at_level(logging.ERROR, logger="redact.runconfig"):
+             caplog.at_level(logging.ERROR, logger="redact.driver"):
             phases = _plan_phases(_models(gen=gen), ["inputs"], verbose=False)
             _enter_phase(phases, 0, set(), verbose=False)
     finally:

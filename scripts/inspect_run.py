@@ -10,7 +10,8 @@ stage should continue.
 import argparse
 import sys
 
-from redact.runconfig import STAGES, read_manifest
+from redact.driver import read_record
+from redact.recipe import STAGES
 
 
 def main(argv=None) -> int:
@@ -20,7 +21,7 @@ def main(argv=None) -> int:
 
     found = False
     for stage in STAGES:
-        m = read_manifest(stage, args.data_dir)
+        m = read_record(stage, args.data_dir)
         if m is None:
             continue
         found = True

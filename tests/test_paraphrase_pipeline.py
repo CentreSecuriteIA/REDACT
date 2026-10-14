@@ -269,7 +269,7 @@ def test_build_dataset_eval_separates_paraphrases(tmp_path):
 def test_run_pipeline_paraphrase_stage(tmp_path, patched):
     _seed_inputs(tmp_path)
     from redact import run_pipeline
-    from redact.runconfig import read_manifest
+    from redact.driver import read_record
     summary = run_pipeline(
         {"dataset_type": "training", "data_dir": str(tmp_path),
          "stages": ["paraphrase", "build"]},
@@ -277,7 +277,7 @@ def test_run_pipeline_paraphrase_stage(tmp_path, patched):
     )
     assert summary["stages"]["paraphrase"]["counts"]["rows"] >= 1
     assert paths.paraphrases_inputs_csv(tmp_path).exists()
-    assert read_manifest("paraphrase", tmp_path) is not None
+    assert read_record("paraphrase", tmp_path) is not None
 
 
 def test_previous_paraphraser_is_unreferenced_before_unload(tmp_path, patched):
