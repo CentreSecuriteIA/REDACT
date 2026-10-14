@@ -12,9 +12,6 @@ Usage::
 """
 
 from .chain import apply_combination, combine_techniques, in_layer_order, run_chain
-from .engine import batch_apply_combinations
-
-# Run planning
 from .plan import (
     assign_combination,
     combination_of,
@@ -22,17 +19,10 @@ from .plan import (
     plan_run,
 )
 from .pool import all_techniques, registry, technique_pool, uses_translation
-
-# Request protocol + batched engine
 from .protocol import LLMRequest, run_sync
 from .rules import compatible
-from .sampling import (
-    sample_combination,
-    sample_exact_combination,
-)
+from .sampling import sample_combination, sample_exact_combination
 from .technique import load_spec, tag
-
-build_combination = combination_of  # the name pipelines.py imports
 
 # Every registered technique carries its spec tags from import on.
 tag(all_techniques())
