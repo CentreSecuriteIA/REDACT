@@ -710,3 +710,41 @@ def test_a_judge_call_carries_up_to_batch_size_rows(tmp_path):
         conversations=_forty_one_conversations(), data_dir=tmp_path, judge_model="j",
         batch_size=16, verbose=False, resolve=JudgeResolver(judge))
     assert judge.batches == [16, 16, 9]
+
+
+def test_a_transcript_too_long_for_the_judge_is_scored_failed_and_acked(tmp_path):
+    import json
+    import re
+
+    import pandas as pd
+
+    from redact import evaluate_conversations, paths
+    from redact.dataset import Ledger
+    from redact.exceptions import PromptTooLongError
+    from redact.llms.backends import ComputeConfig
+
+    class LaneJudge(MockBackend):
+        compute_config = ComputeConfig(supports_async_calls=True)
+
+        async def agenerate(self, messages, **kwargs):
+            text = " ".join(m["content"] for m in messages)
+            token = re.search(r"zq\d+", text).group()
+            if token == "zq1":
+                raise PromptTooLongError(f"{token} is over the context")
+            return "Yes ok"
+
+    def record(token):
+        return json.dumps([{"type": "message", "actor": "attacker", "content": token,
+                            "role": "user", "model": None, "meta": {}}])
+
+    convs = pd.DataFrame({"sample_id": ["a", "b", "c"],
+                          "transcript": [record("zq0"), record("zq1"), record("zq2")]})
+    scored = evaluate_conversations(conversations=convs, data_dir=tmp_path,
+                                    judge_model="j", scope="transcript", verbose=False,
+                                    resolve=JudgeResolver(LaneJudge("unused")))
+    by_id = scored.set_index("sample_id")
+    assert list(by_id["success"].loc[["a", "b", "c"]]) == [True, False, True]
+    assert by_id.loc["b", "judge_reasoning"].startswith("prompt too long")
+    ledger = Ledger.sidecar(paths.conversations_scored_csv(tmp_path),
+                            key_fields=("sample_id",), casters={"sample_id": str})
+    assert ledger.completed() == {"a", "b", "c"}

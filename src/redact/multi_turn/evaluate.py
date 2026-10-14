@@ -21,6 +21,7 @@ from redact.dataset import (
     release_lock,
     resume_state,
 )
+from redact.exceptions import PromptTooLongError
 from redact.llm_pipeline import LLMRequest, drive_units, is_accepted, pool_size
 from redact.llms import ModelClient
 from redact.llms.prompting import PromptTemplate
@@ -148,6 +149,15 @@ def evaluate_conversations(
                "judge_model": judge_model, "scope": scope}
         buf.add([row], {"sample_id": sample_id})
 
+    # A transcript too long for the judge is scored failed and acked: sent
+    # again it would be too long again. Any other unit error stops the stage.
+    def _on_error(i, exc):
+        if not isinstance(exc, PromptTooLongError):
+            raise exc
+        logger.warning("Conversation %s not scored, too long for the judge: %s",
+                       live[i], exc)
+        _on_done(i, (False, f"prompt too long: {exc}"))
+
     def _append(rows: list[dict]) -> dict[Path, int]:
         nonlocal written
         sizes = append_rows(scored_path, rows)
@@ -163,6 +173,7 @@ def evaluate_conversations(
         drive_units(
             _units(),
             on_done=_on_done,
+            on_error=_on_error,
             pool_size=pool_size(batch_size, judge),
             cap=batch_size,
             progress="judge" if verbose else None,
