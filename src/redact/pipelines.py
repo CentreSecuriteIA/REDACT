@@ -45,6 +45,7 @@ from redact import dataset, paths
 from redact.content_moderation import (
     InputPipeline,
     run_output_generation,
+    run_standalone_inputs,
 )
 from redact.content_moderation.inputs import _pool_size
 from redact.content_moderation.paraphrase import (
@@ -60,7 +61,6 @@ from redact.dataset import (
     discover_categories,
     has_rows,
     iter_categories,
-    load_seeds,
     load_taxonomy,
     merge_all,
     merge_inputs,
@@ -354,61 +354,27 @@ def generate_inputs(
         DeprecationWarning,
         stacklevel=2,
     )
-    # Resolve taxonomy
     if isinstance(taxonomy, str):
         taxonomy = load_taxonomy(taxonomy, config_dir=taxonomy_dir)
-
     categories = list(iter_categories(taxonomy))
     if num_categories is not None:
         categories = categories[:num_categories]
 
-    # Backend (auto-resolved from the model name)
-    client = ModelClient.create(model)
-    check_model = check_model or model
-
-    # Pipeline
     ds_dir = paths.datasets(data_dir)
-    pipeline = InputPipeline(
-        gen=client,
-        check=ModelClient.create(check_model),
-        extraction_style="numbered",
-        dataset_dir=ds_dir,
-    )
-
-    prompt_config = load_prompt("input", "generation/standalone", prompt_dir=prompt_dir)
-
-    # Seeds (simple mode)
-    seeds_db = None
-    if not use_metaprompt:
-        seeds_db = load_seeds(seeds_name)
-
-    # Clear existing data when not resuming
-    if not resume:
-        for cat_name, _ in categories:
-            csv_path = paths.category_csv(cat_name, root=ds_dir)
-            if csv_path.exists():
-                csv_path.unlink()
-                if verbose:
-                    logger.info("Cleared existing %s", csv_path)
-
-    if verbose:
-        mode = "automated (LLM descriptions + seeds)" if use_metaprompt else "simple (taxonomy + hand-written seeds)"
-        logger.info("Generate Content Moderation Inputs")
-        logger.info("Mode: %s", mode)
-        logger.info("Categories: %d | Target: %d samples each (%d/request)",
-                    len(categories), samples_per_category, samples_per_request)
-
-    pipeline.run_standalone(
-        categories=categories,
-        prompt_config=prompt_config,
+    run_standalone_inputs(
+        categories,
+        ModelClient.create(model),
+        ModelClient.create(check_model or model),
+        ds_dir,
+        prompt_dir=prompt_dir,
         samples_per_category=samples_per_category,
         samples_per_request=samples_per_request,
         use_metaprompt=use_metaprompt,
+        seeds_name=seeds_name,
         num_seeds=num_seeds,
-        seeds_db=seeds_db,
+        resume=resume,
         verbose=verbose,
     )
-
     return merge_all(ds_dir, accepted_only=True) if read_back else pd.DataFrame()
 
 

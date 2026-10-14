@@ -23,3 +23,4 @@ from .results import (
     SampleResult,
     TurnResult,
 )
+from .standalone import run_standalone_inputs
