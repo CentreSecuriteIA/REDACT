@@ -314,7 +314,7 @@ def generate_inputs(
             use_checker=True,
             verbose=verbose,
             batch_size=batch_size,
-            fresh=not resume,
+            resume=resume,
             style=style,
             max_attempts=max_attempts,
             check_max_tokens=check_max_tokens,
