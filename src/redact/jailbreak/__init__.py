@@ -15,9 +15,6 @@ Usage:
     from redact.jailbreak.obfuscation.encoding import to_base64
 """
 
-# Obfuscation registry
-# Distribution
-from .distribution import deterministic_balanced_assign, split_by_technique_functions
 from .engine import batch_apply_combinations
 
 # Hacking registry
