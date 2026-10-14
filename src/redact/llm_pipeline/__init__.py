@@ -11,7 +11,7 @@ from .check import (
     extracted,
     is_accepted,
 )
-from .drive import drive_generators, drive_sync, drive_units
+from .drive import drive_generators, drive_sync, drive_units, pool_size
 from .request import LLMRequest
 
 __all__ = [
@@ -24,4 +24,5 @@ __all__ = [
     "drive_units",
     "extracted",
     "is_accepted",
+    "pool_size",
 ]

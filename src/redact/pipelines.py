@@ -106,6 +106,7 @@ def generate_constitution(
     taxonomy_dir: str | Path | None = None,
     resume: bool = True,
     verbose: bool = True,
+    read_back: bool = True,
 ) -> pd.DataFrame:
     """Generate a constitution (category hierarchy) for classifier training.
 
@@ -142,6 +143,7 @@ def generate_constitution(
             loses at most one unit's work). When False, clear the CSVs and the
             ledger first and regenerate from scratch.
         verbose: Log progress.
+        read_back: False returns an empty DataFrame and reads no entry back.
 
     Returns:
         DataFrame of all constitution entries, backed by the on-disk
@@ -169,19 +171,17 @@ def generate_constitution(
         output_dir=const_dir,
     )
 
-    result = pipeline.run(
+    return pipeline.run(
         taxonomy=taxonomy,
         entry_types=resolved_types,
         num_categories=num_categories,
         num_taxonomy_categories=num_taxonomy_categories,
         include_standalone_benign=include_standalone_benign,
         standalone_benign_categories=standalone_benign_categories,
-        save=True,
         resume=resume,
         verbose=verbose,
+        read_back=read_back,
     )
-
-    return result.to_dataframe()
 
 
 # ---------------------------------------------------------------------------
@@ -312,7 +312,6 @@ def generate_inputs(
             prompt_config=prompt_config,
             samples_per_entry=samples_per_entry,
             use_checker=True,
-            save=True,
             verbose=verbose,
             batch_size=batch_size,
             fresh=not resume,

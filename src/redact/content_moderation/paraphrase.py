@@ -1,28 +1,12 @@
-"""Paraphrasing / fingerprint removal.
+"""The paraphrase stage: K checked paraphrases per row, over a pool of paraphrasers.
 
-Batched paraphrase pass: rephrase generated samples to strip the stylistic
-fingerprints of the generating model while preserving meaning. The prompt is
-loaded from ``prompts/output/paraphrase/template.json`` (a 1:1 "rephrase
-this" instruction) — grouped under ``output/`` since paraphrasing is a
-post-generation transform, not its own pipeline.
-
-The real defingerprinting model is trained in a separate repository; here any
-capable model (the ``paraphraser`` role) drives the prompt. Whether a paraphrase
-actually preserved meaning is a *separate* concern — validated by a dedicated
-checker (:func:`redact.content_moderation.checker.build_paraphrase_checker`),
-never by the paraphraser itself.
-
-Dispatch goes through a capability-aware :class:`BatchCaller` (one vLLM engine
-pass / parallel API thread-pool / series-only sequential), so paraphrasing is
-rate-limited and batched like every other stage.
-
-Also owns the full ``generate_paraphrases`` pipeline orchestration (model-pool
-resolution, the plan/ledger/execute loop over inputs and outputs) — moved here
-from ``pipelines.py`` so that file stays a thin dispatcher; ``pipelines.py``'s
-``generate_paraphrases()`` just resolves the model pool and calls
-:func:`run_paraphrase_target` per target.
+Any capable model of the ``paraphraser`` role stands in for the trained
+defingerprinting model, which lives in another repository. A separate model
+checks that each paraphrase keeps the original's meaning
+(:func:`~redact.content_moderation.checker.build_paraphrase_checker`).
 """
 
+import hashlib
 import logging
 from itertools import islice, repeat
 from pathlib import Path
@@ -43,11 +27,11 @@ from ..dataset import (
     resume_state,
     row_ids,
 )
+from ..llm_pipeline import batch_check_samples
 from ..llms.client import ModelClient
 from ..llms.model_config import default_model_for_role, get_models_by_role
-from ..llms.prompting import build_messages, load_prompt
-from ..llm_pipeline import batch_check_samples
-from ..llms.router import batch_generate_samples, generate_sample
+from ..llms.prompting import PromptTemplate
+from ..llms.router import batch_generate_samples
 from .checker import build_paraphrase_checker
 
 logger = logging.getLogger(__name__)
@@ -55,94 +39,25 @@ logger = logging.getLogger(__name__)
 #TODO(later): move this stage onto llm_pipeline.drive_units, like outputs and
 # jailbreaks. Waits for a trained paraphraser; a stand-in model runs it today.
 
-_PROMPT_DIR = None  # Uses load_prompt() default (package-relative)
-
-
-def _load_paraphrase_prompt(prompt_dir: str | None = _PROMPT_DIR) -> dict:
-    """Load the paraphrase prompt config from JSON."""
-    return load_prompt("paraphrase", "generation", prompt_dir=prompt_dir)
-
 
 def paraphrase_batch(
     client: ModelClient,
     samples: list[str],
-    prompt_dir: str | None = _PROMPT_DIR,
+    prompt_dir: str | None = None,
     progress: str | None = None,
     **kwargs,
 ) -> list[str]:
-    """Paraphrase a batch of samples in one capability-aware dispatch.
+    """Paraphrase each sample, in order, in one batch of calls.
 
-    Args:
-        client: Paraphraser model, bound to its transport.
-        samples: Texts to paraphrase.
-        prompt_dir: Root prompt directory (defaults to the package prompts/).
-        progress: Optional progress label for the batch dispatch.
-        **kwargs: Passed to ``batch_generate_samples`` / the transport.
-
-    Returns:
-        Paraphrased texts, one per input, in order.
+    ``progress`` labels the batch; ``kwargs`` go to ``batch_generate_samples``.
     """
     if not samples:
         return []
-    prompt_config = _load_paraphrase_prompt(prompt_dir)
-    messages_list = [build_messages(prompt_config, sample=s) for s in samples]
+    template = PromptTemplate.load("paraphrase", "generation", prompt_dir=prompt_dir)
     return batch_generate_samples(
-        client, messages_list,
-        batch_size=len(messages_list), progress=progress, **kwargs,
+        client, [template(sample=s) for s in samples],
+        batch_size=len(samples), progress=progress, **kwargs,
     )
-
-
-def paraphrase_sample(
-    client: ModelClient,
-    sample: str,
-    system_prompt: str | None = None,
-    prompt_dir: str | None = _PROMPT_DIR,
-    **kwargs,
-) -> str:
-    """Paraphrase a single sample to remove stylistic fingerprints.
-
-    Thin wrapper over :func:`paraphrase_batch`. Pass ``system_prompt`` to override
-    the JSON template's system prompt for this call.
-
-    Args:
-        client: Paraphraser model, bound to its transport.
-        sample: Text to paraphrase.
-        system_prompt: Custom system prompt (overrides the JSON template).
-        prompt_dir: Root prompt directory.
-        **kwargs: Passed to the transport.
-
-    Returns:
-        Paraphrased text.
-    """
-    if system_prompt is not None:
-        messages = [
-            {"role": "system", "content": system_prompt},
-            {"role": "user", "content": sample},
-        ]
-        return generate_sample(client, messages, **kwargs)
-    return paraphrase_batch(
-        client, [sample],
-        prompt_dir=prompt_dir, **kwargs,
-    )[0]
-
-
-# ---------------------------------------------------------------------------
-# generate_paraphrases() pipeline orchestration — moved here from pipelines.py
-# so that module stays a thin path/model-resolution wrapper. pipelines.py's
-# generate_paraphrases() calls paraphrase_pool() and run_paraphrase_target()
-# below directly.
-# ---------------------------------------------------------------------------
-
-
-def _paraphrase_state_path(out_path: Path) -> Path:
-    """Sidecar state-ledger path beside a paraphrase artifact (``*.state.jsonl``)."""
-    return out_path.with_name(out_path.stem + ".state.jsonl")
-
-
-def _paraphrase_ledger(state_path: Path) -> Ledger:
-    """Shared resume-ledger for paraphrase units, keyed ``(input_id, iteration)``."""
-    return Ledger(state_path, key_fields=("input_id", "iteration"),
-                  casters={"input_id": str, "iteration": int})
 
 
 def paraphrase_pool(paraphraser: str | None) -> list[str]:
@@ -167,7 +82,6 @@ def paraphrase_pool(paraphraser: str | None) -> list[str]:
 
 def _assign_paraphraser(base_id: str, k: int, pool: list[str], seed: int) -> str:
     """Deterministic round-robin pick (content-hash of base_id + k + seed)."""
-    import hashlib
     if len(pool) == 1:
         return pool[0]
     h = hashlib.sha256(f"{seed}:{base_id}:{k}".encode()).hexdigest()
@@ -183,18 +97,14 @@ def run_paraphrase_target(
     Returns the artifact's rows, or with ``read_back=False`` an empty frame
     without reading them.
     """
-    # ---- Load source rows (base_id, text, category, entry_type) --------------
     if tgt == "inputs":
         src = source if source is not None else merge_inputs(data_dir)
         text_col = "sample" if "sample" in src.columns else "prompt"
         id_col = "sample_id"
         out_path = Path(out_path_override) if out_path_override else paths.paraphrases_inputs_csv(data_dir)
     else:  # outputs
-        if source is not None:
-            src = source
-        else:
-            rp = paths.output_responses_csv(data_dir)
-            src = pd.read_csv(rp) if rp.exists() else pd.DataFrame()
+        src = (source if source is not None
+               else read_rows(paths.output_responses_csv(data_dir)))
         if not src.empty and "accepted" in src.columns:
             src = src[src["accepted"] == True]  # noqa: E712 — accepted base outputs only
         text_col = "output_response" if "output_response" in getattr(src, "columns", []) else "sample"
@@ -209,14 +119,10 @@ def run_paraphrase_target(
     src = src.reset_index(drop=True)
     out_path.parent.mkdir(parents=True, exist_ok=True)
 
-    # ---- Resume via a sidecar STATE LEDGER (like constitution/output) ---------
-    # The ledger records every *attempted* (base_id, iteration) unit + its model +
-    # outcome, so a re-run skips them all — including drops (deduped/rejected), which
-    # the output CSV alone would silently re-attempt. The CSV is still read for
-    # content dedup (seen_texts), but completion is the ledger's job.
-    state_path = _paraphrase_state_path(out_path)
+    # Every attempted unit is acked, a dropped one too, so a resume skips it.
+    ledger = Ledger.sidecar(out_path, key_fields=("input_id", "iteration"),
+                            casters={"input_id": str, "iteration": int})
     manifest = Manifest.sidecar(out_path)
-    ledger = _paraphrase_ledger(state_path)
     # A resume cuts off the rows of a save whose acks did not land: those
     # units are paraphrased again, and none ends with two rows.
     completed: set[tuple[str, int]] = resume_state(
@@ -230,7 +136,7 @@ def run_paraphrase_target(
         else set()
     )
 
-    # ---- Plan the FULL run -> manifest = the whole (base_id, k -> model) mapping
+    # The plan: every (base_id, k) unit and the model it goes to.
     ids = row_ids(src, text_col, id_col)
 
     def _units():
@@ -267,7 +173,6 @@ def run_paraphrase_target(
         release_lock(ledger)    # no CommitBuffer will
         return read_rows(out_path) if read_back else pd.DataFrame()
 
-    # ---- Execute grouped by model ------------------------------------------
     # One paraphraser runs at a time. The residency plan decides whether the
     # pool's engines are unloaded between groups: they stay loaded when the
     # whole pool can be resident together and are all dropped otherwise.
@@ -308,10 +213,7 @@ def run_paraphrase_target(
                 residency.unload_local(keep=[check_model] if check else None,
                                        engines=resident)
             client = ModelClient.create(model)
-            # Internals capture: paraphrase's own output text (its eventual sample_id)
-            # isn't known until the call returns, but internals_id has to be supplied
-            # before it — capture under a pre-call-known provisional id (bid/k, always
-            # unique) and relabel to the real sample_id once it's computed below.
+            # Captured under bid/k, renamed to the paraphrase's sample_id below.
             capture_paraphrase = client.compute_config.supports_internals
             gunits = (u for u in _units() if u[2] == model and u[:2] not in completed)
             for _ in range(0, n_units, batch_size):

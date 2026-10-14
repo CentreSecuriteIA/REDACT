@@ -378,16 +378,6 @@ class TestAResume:
             another.release()
         assert _files(tmp_path) == before       # the manifest too
 
-    def test_a_run_that_does_not_save_leaves_the_folder_alone(self, tmp_path):
-        _run(tmp_path, _entries(0, 1))
-        before = _files(tmp_path)
-        _result, gen = _run(tmp_path, _entries(0, 1, 2), save=False, fresh=True)
-        # Nothing is resumed from: the two saved entries are generated too.
-        assert sorted(token for batch in gen.batches for token in batch) == [
-            "zq0", "zq1", "zq2"]
-        assert _files(tmp_path) == before
-        assert not list(tmp_path.glob("*.lock"))
-
 
 def _again(token: str, attempt: int) -> str:
     """What a second run writes: other texts, and none for the same entry."""

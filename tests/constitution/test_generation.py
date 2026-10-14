@@ -1,17 +1,18 @@
 """Tests for constitution generation pipeline."""
 
-import pandas as pd
+import json
 
-from redact.constitution.generation import (
+import pandas as pd
+import pytest
+
+from redact.constitution import (
     ALL_ENTRY_TYPES,
-    ConstitutionEntry,
     ConstitutionPipeline,
-    ConstitutionResult,
     EntryType,
-    _save_entries_csv,
-    _unit_key,
+    read_constitution,
 )
 from redact.constitution.parse import strip_end_marker
+from redact.constitution.units import Unit, _prompt_kwargs, plan_units, rows_of
 from redact.dataset import Ledger
 from tests.conftest import MockBackend, make_client
 
@@ -39,6 +40,11 @@ _VALID_CONSTITUTION_OUTPUT = """\
 
 [END]
 """
+# The same reply cut off before its end marker.
+_TRUNCATED_OUTPUT = _VALID_CONSTITUTION_OUTPUT.replace("[END]", "")
+# The samples in it, and the generations a unit makes before it is given up.
+_SAMPLES = 4
+_ATTEMPTS = 3
 
 
 class TestEntryType:
@@ -60,46 +66,49 @@ class TestEntryType:
         assert EntryType.HARMFUL == "harmful"
 
 
-class TestConstitutionEntry:
-    def test_fields(self):
-        entry = ConstitutionEntry(
-            category="Cat", subcategory="Sub", sample="Sample",
-            entry_type="harmful", source_category="Violence",
-            source_group_tag="general",
-        )
-        assert entry.category == "Cat"
-        assert entry.subcategory == "Sub"
-        assert entry.sample == "Sample"
-        assert entry.entry_type == "harmful"
-        assert entry.source_category == "Violence"
-        assert entry.source_group_tag == "general"
-
-
-class TestConstitutionResult:
-    def test_empty_to_dataframe(self):
-        result = ConstitutionResult()
-        df = result.to_dataframe()
-        assert df.empty
-        assert "constitution_category" in df.columns
-
-    def test_to_dataframe(self):
-        result = ConstitutionResult(entries=[
-            ConstitutionEntry("Cat", "Sub", "Sample", "harmful", "Violence", "general"),
-            ConstitutionEntry("Cat2", "Sub2", "Sample2", "benign", "Privacy", "group1"),
-        ])
-        df = result.to_dataframe()
-        assert len(df) == 2
-        assert list(df.columns) == [
-            "sample_id",
-            "constitution_category", "constitution_subcategory",
-            "sample_description", "entry_type",
-            "source_category", "source_group_tag",
+class TestRowsOf:
+    def test_a_reply_gives_one_row_per_sample_with_the_unit_tags(self):
+        unit = Unit("Violence", "harmful", "general")
+        rows = rows_of(unit, _VALID_CONSTITUTION_OUTPUT, "test-model")
+        assert len(rows) == _SAMPLES
+        assert list(rows[0]) == [
+            "sample_id", "constitution_category", "constitution_subcategory",
+            "sample_description", "entry_type", "source_category",
+            "source_group_tag", "model",
         ]
-        assert df.iloc[0]["constitution_category"] == "Cat"
-        assert df.iloc[1]["entry_type"] == "benign"
-        # sample_id is a content-hash of the entry's own text (own identity,
-        # distinct from source_category/group_tag which describe its origin).
-        assert df.iloc[0]["sample_id"] and df.iloc[0]["sample_id"] != df.iloc[1]["sample_id"]
+        assert rows[0]["constitution_category"] == "Category One"
+        assert rows[0]["constitution_subcategory"] == "Subcategory Alpha"
+        assert rows[0]["sample_description"] == "Sample description one"
+        assert {r["entry_type"] for r in rows} == {"harmful"}
+        assert {r["source_category"] for r in rows} == {"Violence"}
+        assert {r["model"] for r in rows} == {"test-model"}
+        # sample_id is a content-hash of the entry's own text.
+        assert rows[0]["sample_id"] and rows[0]["sample_id"] != rows[1]["sample_id"]
+
+    def test_a_reply_that_does_not_parse_gives_no_row(self):
+        unit = Unit("Cat", "benign", "general")
+        assert rows_of(unit, "no parseable content here", "m") == []
+
+    def test_a_reply_without_its_end_marker_is_rejected_whole(self):
+        unit = Unit("Cat", "benign", "general")
+        assert rows_of(unit, _TRUNCATED_OUTPUT, "m") == []
+
+
+class TestReadConstitution:
+    def test_no_file_gives_the_columns(self, tmp_path):
+        frame = read_constitution(tmp_path)
+        assert frame.empty
+        assert "constitution_category" in frame.columns
+
+    def test_an_empty_cell_is_text(self, tmp_path):
+        pd.DataFrame([{"sample_id": "0123", "constitution_category": "Cat",
+                       "constitution_subcategory": None, "sample_description": "s",
+                       "entry_type": "harmful", "source_category": "Src",
+                       "source_group_tag": None, "model": "m"}]
+                     ).to_csv(tmp_path / "merged.csv", index=False)
+        row = read_constitution(tmp_path).iloc[0]
+        assert row["sample_id"] == "0123"
+        assert row["constitution_subcategory"] == ""
 
 
 class TestStripEndMarker:
@@ -118,37 +127,14 @@ class TestStripEndMarker:
         assert complete is True
 
 
-class TestSaveEntriesCsv:
-    def test_creates_csv(self, tmp_path):
-        entries = [
-            ConstitutionEntry("Cat", "Sub", "Sample", "harmful", "Src", "tag"),
-        ]
-        path = tmp_path / "out" / "test.csv"
-        _save_entries_csv(entries, path, "test-model")
-        assert path.exists()
-        df = pd.read_csv(path)
-        assert len(df) == 1
-        assert df.iloc[0]["constitution_category"] == "Cat"
-        assert df.iloc[0]["model"] == "test-model"
-
-    def test_append_mode(self, tmp_path):
-        entries = [ConstitutionEntry("A", "B", "C", "harmful", "D", "E")]
-        path = tmp_path / "append.csv"
-        _save_entries_csv(entries, path, "m")
-        _save_entries_csv(entries, path, "m", append=True)
-        df = pd.read_csv(path)
-        assert len(df) == 2
-
-
 class TestConstitutionPipeline:
     def _make_pipeline(self, backend, tmp_path):
         return ConstitutionPipeline(client=make_client(backend, "test-model"),
             output_dir=tmp_path / "constitution",
         )
 
-    def test_format_category_info(self, tmp_path):
-        pipeline = self._make_pipeline(MockBackend(), tmp_path)
-        info = pipeline._format_category_info("Violence", {
+    def test_format_category_info(self):
+        info = _prompt_kwargs("Violence", {
             "description": "Physical harm",
             "subcategories": ["Assault", "Weapons"],
             "group_tag": "harmful",
@@ -158,48 +144,72 @@ class TestConstitutionPipeline:
         assert "Assault" in info["subcategories"]
         assert info["group_tag"] == "harmful"
 
-    def test_format_category_info_dict_subcats(self, tmp_path):
-        pipeline = self._make_pipeline(MockBackend(), tmp_path)
-        info = pipeline._format_category_info("Cat", {
+    def test_format_category_info_dict_subcats(self):
+        info = _prompt_kwargs("Cat", {
             "subcategories": {"Sub1": "desc1", "Sub2": "desc2"},
         })
         assert "Sub1" in info["subcategories"]
 
-    def test_generate_for_type(self, tmp_path):
+    def test_a_unit_is_one_call_tagged_with_its_category(self, tmp_path):
         backend = MockBackend(_VALID_CONSTITUTION_OUTPUT)
         pipeline = self._make_pipeline(backend, tmp_path)
-        entries, raw = pipeline.generate_for_type(
-            "Violence",
-            {"description": "Physical harm", "subcategories": [], "group_tag": "general"},
-            EntryType.HARMFUL,
-            num_categories=5,
+        result = pipeline.run(
+            {"categories": {"Violence": {"description": "Physical harm",
+                                         "subcategories": [], "group_tag": "general"}}},
+            entry_types=[EntryType.HARMFUL], num_categories=5, verbose=False,
         )
-        assert len(entries) > 0
-        assert all(e.entry_type == "harmful" for e in entries)
-        assert all(e.source_category == "Violence" for e in entries)
-        assert "[END]" in raw
+        assert len(backend.calls) == 1
+        assert len(result) > 0
+        assert set(result["entry_type"]) == {"harmful"}
+        assert set(result["source_category"]) == {"Violence"}
 
-    def test_generate_for_type_all_fail(self, tmp_path):
+    def test_a_unit_that_never_parses_is_acked_as_rejected(self, tmp_path):
         backend = MockBackend("no parseable content here")
         pipeline = self._make_pipeline(backend, tmp_path)
-        entries, raw = pipeline.generate_for_type(
-            "Cat", {"description": ""}, EntryType.BENIGN,
-        )
-        assert entries == []
-        assert raw == ""
+        result = pipeline.run({"categories": {"Cat": {"description": ""}}},
+                              entry_types=[EntryType.BENIGN], verbose=False)
+        assert len(backend.calls) == _ATTEMPTS
+        assert result.empty
+        assert _ledger(tmp_path / "constitution").completed() == {"Cat::benign"}
 
-    def test_generate_for_category(self, tmp_path):
+    def test_a_truncated_reply_is_regenerated(self, tmp_path):
+        backend = MockBackend([_TRUNCATED_OUTPUT, _VALID_CONSTITUTION_OUTPUT])
+        pipeline = self._make_pipeline(backend, tmp_path)
+        result = pipeline.run({"categories": {"Cat": {"description": ""}}},
+                              entry_types=[EntryType.HARMFUL], verbose=False)
+        assert len(backend.calls) == 2
+        assert len(result) == _SAMPLES
+        assert _ledger(tmp_path / "constitution").completed() == {"Cat::harmful"}
+
+    def test_a_unit_truncated_every_time_is_acked_rejected_and_skipped_on_resume(
+            self, tmp_path):
+        out_dir = tmp_path / "constitution"
+        taxonomy = {"categories": {"Cat": {"description": ""}}}
+        backend = MockBackend(_TRUNCATED_OUTPUT)
+        result = self._make_pipeline(backend, tmp_path).run(
+            taxonomy, entry_types=[EntryType.HARMFUL], verbose=False)
+        assert len(backend.calls) == _ATTEMPTS
+        assert result.empty
+        assert not (out_dir / "merged.csv").exists()
+        acks = [json.loads(line) for line in _ledger(out_dir).path.read_text(
+            encoding="utf-8").splitlines()]
+        assert acks == [{"unit": "Cat::harmful", "status": "rejected",
+                         "attempts": _ATTEMPTS}]
+
+        backend = MockBackend(_VALID_CONSTITUTION_OUTPUT)
+        self._make_pipeline(backend, tmp_path).run(
+            taxonomy, entry_types=[EntryType.HARMFUL], verbose=False)
+        assert backend.calls == []
+
+    def test_each_entry_type_is_a_unit(self, tmp_path):
         backend = MockBackend(_VALID_CONSTITUTION_OUTPUT)
         pipeline = self._make_pipeline(backend, tmp_path)
-        result = pipeline.generate_for_category(
-            "Violence",
-            {"description": "Physical harm", "subcategories": []},
-            entry_types=[EntryType.HARMFUL, EntryType.BENIGN],
+        result = pipeline.run(
+            {"categories": {"Violence": {"description": "Physical harm",
+                                         "subcategories": []}}},
+            entry_types=[EntryType.HARMFUL, EntryType.BENIGN], verbose=False,
         )
-        assert len(result.entries) > 0
-        types_present = set(e.entry_type for e in result.entries)
-        assert "harmful" in types_present
-        assert "benign" in types_present
+        assert set(result["entry_type"]) == {"harmful", "benign"}
 
     def test_run_saves_csvs(self, tmp_path):
         backend = MockBackend(_VALID_CONSTITUTION_OUTPUT)
@@ -216,21 +226,30 @@ class TestConstitutionPipeline:
             taxonomy=taxonomy,
             entry_types=[EntryType.HARMFUL],
             num_categories=3,
-            save=True,
             verbose=False,
         )
-        assert len(result.entries) > 0
+        assert len(result) > 0
         out_dir = tmp_path / "constitution"
         assert (out_dir / "harmful.csv").exists()
         assert (out_dir / "merged.csv").exists()
 
-    def test_generate_general_benign(self, tmp_path):
-        backend = MockBackend(_VALID_CONSTITUTION_OUTPUT)
-        pipeline = self._make_pipeline(backend, tmp_path)
-        entries, raw = pipeline.generate_general_benign(num_categories=3)
-        assert len(entries) > 0
-        assert all(e.entry_type == "general_benign" for e in entries)
-        assert all(e.source_category == "general" for e in entries)
+    def test_general_benign_is_the_last_unit(self):
+        units = plan_units({"categories": {"Cat": {}}}, [EntryType.HARMFUL],
+                           include_standalone_benign=True,
+                           standalone_benign_categories=3)
+        unit = units[-1]
+        assert unit.key == "general::general_benign"
+        assert unit.kwargs == {"num_categories": "3"}
+        rows = rows_of(unit, _VALID_CONSTITUTION_OUTPUT, "m")
+        assert {r["entry_type"] for r in rows} == {"general_benign"}
+        assert {r["source_category"] for r in rows} == {"general"}
+
+    def test_general_benign_is_saved_to_its_own_file(self, tmp_path):
+        pipeline = self._make_pipeline(MockBackend(_VALID_CONSTITUTION_OUTPUT), tmp_path)
+        pipeline.run({"categories": {}}, include_standalone_benign=True, verbose=False)
+        out_dir = tmp_path / "constitution"
+        assert len(pd.read_csv(out_dir / "general_benign.csv")) == _SAMPLES
+        assert _ledger(out_dir).completed() == {"general::general_benign"}
 
 
 class TestStateLedger:
@@ -242,7 +261,7 @@ class TestStateLedger:
         assert sp.parent == tmp_path / "constitution"
 
     def test_unit_key(self):
-        assert _unit_key("Violence", "harmful") == "Violence::harmful"
+        assert Unit("Violence", "harmful", "general").key == "Violence::harmful"
 
     def test_read_missing_returns_empty(self, tmp_path):
         assert _ledger(tmp_path / "nope").completed() == set()
@@ -260,6 +279,20 @@ class TestStateLedger:
             encoding="utf-8",
         )
         assert ledger.completed() == {"x", "y"}
+
+
+class _DiesAfter(MockBackend):
+    """Answers ``calls`` requests, then fails as a transport does."""
+
+    def __init__(self, calls):
+        super().__init__(_VALID_CONSTITUTION_OUTPUT)
+        self.left = calls
+
+    def generate(self, messages_list, **kwargs):
+        if self.left < len(messages_list):
+            raise ConnectionError("the endpoint is down")
+        self.left -= len(messages_list)
+        return super().generate(messages_list, **kwargs)
 
 
 class TestRunResume:
@@ -283,7 +316,7 @@ class TestRunResume:
         pipeline.run(
             taxonomy=self._TAXONOMY,
             entry_types=[EntryType.HARMFUL, EntryType.BENIGN],
-            num_categories=2, save=True, verbose=False,
+            num_categories=2, verbose=False,
         )
         units = _ledger(tmp_path / "constitution").completed()
         assert units == {
@@ -297,7 +330,7 @@ class TestRunResume:
         pipeline.run(
             taxonomy=self._TAXONOMY,
             entry_types=[EntryType.HARMFUL, EntryType.BENIGN],
-            num_categories=2, save=True, verbose=False,
+            num_categories=2, verbose=False,
         )
         from redact.dataset import Manifest
         rows = Manifest(tmp_path / "constitution" / "constitution.manifest.jsonl").load()
@@ -314,20 +347,20 @@ class TestRunResume:
 
         first = pipeline.run(
             taxonomy=self._TAXONOMY, entry_types=types,
-            num_categories=2, save=True, verbose=False,
+            num_categories=2, verbose=False,
         )
         calls_after_first = len(backend.calls)
-        rows_after_first = len(first.entries)
+        rows_after_first = len(first)
         assert calls_after_first == 4  # 2 categories x 2 types
 
         # Re-run: everything is already in the ledger -> no new LLM calls,
         # and the CSV-backed result does not double.
         second = pipeline.run(
             taxonomy=self._TAXONOMY, entry_types=types,
-            num_categories=2, save=True, resume=True, verbose=False,
+            num_categories=2, resume=True, verbose=False,
         )
         assert len(backend.calls) == calls_after_first  # no new calls
-        assert len(second.entries) == rows_after_first  # no duplicate rows
+        assert len(second) == rows_after_first  # no duplicate rows
 
     def test_resume_continues_after_partial(self, tmp_path):
         backend = MockBackend(_VALID_CONSTITUTION_OUTPUT)
@@ -339,9 +372,28 @@ class TestRunResume:
         pipeline = self._make_pipeline(backend, tmp_path)
         pipeline.run(
             taxonomy=self._TAXONOMY, entry_types=[EntryType.HARMFUL],
-            num_categories=2, save=True, resume=True, verbose=False,
+            num_categories=2, resume=True, verbose=False,
         )
         # Only CatB should have been generated (CatA skipped).
+        assert len(backend.calls) == 1
+        assert _ledger(out_dir).completed() == {"CatA::harmful", "CatB::harmful"}
+
+    def test_a_transport_error_stops_the_run_with_the_acked_units_kept(self, tmp_path):
+        out_dir = tmp_path / "constitution"
+        with pytest.raises(ConnectionError):
+            self._make_pipeline(_DiesAfter(1), tmp_path).run(
+                taxonomy=self._TAXONOMY, entry_types=[EntryType.HARMFUL],
+                num_categories=2, verbose=False,
+            )
+        assert _ledger(out_dir).completed() == {"CatA::harmful"}
+        assert set(pd.read_csv(out_dir / "merged.csv")["source_category"]) == {"CatA"}
+
+        # The resume makes the one call the error stopped.
+        backend = MockBackend(_VALID_CONSTITUTION_OUTPUT)
+        self._make_pipeline(backend, tmp_path).run(
+            taxonomy=self._TAXONOMY, entry_types=[EntryType.HARMFUL],
+            num_categories=2, verbose=False,
+        )
         assert len(backend.calls) == 1
         assert _ledger(out_dir).completed() == {"CatA::harmful", "CatB::harmful"}
 
@@ -352,17 +404,17 @@ class TestRunResume:
 
         pipeline.run(
             taxonomy=self._TAXONOMY, entry_types=[EntryType.HARMFUL],
-            num_categories=2, save=True, verbose=False,
+            num_categories=2, verbose=False,
         )
         rows_first = len(pd.read_csv(out_dir / "merged.csv"))
 
         # resume=False should wipe and regenerate, not append.
         result = pipeline.run(
             taxonomy=self._TAXONOMY, entry_types=[EntryType.HARMFUL],
-            num_categories=2, save=True, resume=False, verbose=False,
+            num_categories=2, resume=False, verbose=False,
         )
         assert len(pd.read_csv(out_dir / "merged.csv")) == rows_first
-        assert len(result.entries) == rows_first
+        assert len(result) == rows_first
 
     def test_result_is_csv_backed(self, tmp_path):
         backend = MockBackend(_VALID_CONSTITUTION_OUTPUT)
@@ -370,19 +422,18 @@ class TestRunResume:
         pipeline = self._make_pipeline(backend, tmp_path)
         result = pipeline.run(
             taxonomy=self._TAXONOMY, entry_types=[EntryType.HARMFUL],
-            num_categories=2, save=True, verbose=False,
+            num_categories=2, verbose=False,
         )
         merged = pd.read_csv(out_dir / "merged.csv")
-        assert len(result.entries) == len(merged)
+        assert len(result) == len(merged)
 
-    def test_save_false_keeps_in_memory_and_writes_nothing(self, tmp_path):
+    def test_read_back_false_returns_an_empty_frame_and_saves(self, tmp_path):
         backend = MockBackend(_VALID_CONSTITUTION_OUTPUT)
         out_dir = tmp_path / "constitution"
         pipeline = self._make_pipeline(backend, tmp_path)
         result = pipeline.run(
             taxonomy=self._TAXONOMY, entry_types=[EntryType.HARMFUL],
-            num_categories=2, save=False, verbose=False,
+            num_categories=2, verbose=False, read_back=False,
         )
-        assert len(result.entries) > 0
-        assert not (out_dir / "merged.csv").exists()
-        assert not _ledger(out_dir).exists()
+        assert result.empty
+        assert len(pd.read_csv(out_dir / "merged.csv")) > 0

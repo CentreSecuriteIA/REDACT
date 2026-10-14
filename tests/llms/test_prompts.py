@@ -831,7 +831,6 @@ class TestEmptyScaffoldRenders:
 
     def test_the_checker_builders_accept_it(self, scaffold):
         from redact.content_moderation.checker import (
-            build_category_checker,
             build_output_quality_checker,
             build_paraphrase_checker,
             build_quality_checker,
@@ -841,7 +840,6 @@ class TestEmptyScaffoldRenders:
             build_quality_checker("violence", prompt_dir=scaffold),
             build_output_quality_checker("violence", prompt_dir=scaffold),
             build_paraphrase_checker(prompt_dir=scaffold),
-            build_category_checker("violence", prompt_dir=scaffold),
         ]
         for checker in checkers:
             assert [m["role"] for m in checker("a", "b")] == ["system", "user"]

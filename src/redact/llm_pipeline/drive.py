@@ -186,6 +186,18 @@ async def _cancel(tasks: set[asyncio.Task]) -> None:
     await asyncio.gather(*tasks, return_exceptions=True)
 
 
+def pool_size(batch_size: int, *clients: ModelClient | None) -> int:
+    """Units a stage keeps live: two calls' worth, or its widest async lane.
+
+    A local engine runs hundreds of requests at once, far more than a
+    synchronous call holds, and each live unit has one request in flight.
+    A hosted model's lane is narrow and changes nothing.
+    """
+    lanes = [client.backend.max_workers for client in clients
+             if client is not None and _has_async_calls(client)]
+    return max([2 * batch_size, *lanes])
+
+
 def drive_units(
     source: Iterable[tuple[Hashable, Generator]],
     *,

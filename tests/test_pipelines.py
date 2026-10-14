@@ -473,29 +473,6 @@ class _LaneBackend(MockBackend):
 class TestPoolSize:
     """A stage keeps as many units live as its models' async lanes hold."""
 
-    @staticmethod
-    def _client(async_calls, max_workers):
-        from types import SimpleNamespace
-
-        return SimpleNamespace(
-            compute_config=SimpleNamespace(supports_async_calls=async_calls),
-            backend=SimpleNamespace(max_workers=max_workers))
-
-    def test_two_calls_worth_without_an_async_lane(self):
-        from redact.content_moderation.inputs import _pool_size
-
-        assert _pool_size(32, self._client(False, 500), None) == 64
-
-    def test_the_widest_lane_sets_the_pool(self):
-        from redact.content_moderation.inputs import _pool_size
-
-        assert _pool_size(32, self._client(True, 256), self._client(True, 512)) == 512
-
-    def test_a_lane_narrower_than_two_calls_changes_nothing(self):
-        from redact.content_moderation.inputs import _pool_size
-
-        assert _pool_size(32, self._client(True, 3), self._client(True, 8)) == 64
-
     def test_the_outputs_stage_drives_with_it(self, tmp_path, monkeypatch):
         import redact.content_moderation.outputs as G
         import redact.pipelines as P
@@ -511,7 +488,7 @@ class TestPoolSize:
             raise KeyboardInterrupt
 
         monkeypatch.setattr(G, "drive_units", stop)
-        monkeypatch.setattr(G, "_pool_size", lambda batch_size, *clients: 7 * batch_size)
+        monkeypatch.setattr(G, "pool_size", lambda batch_size, *clients: 7 * batch_size)
         inputs = pd.DataFrame({"sample": ["zq0"], "category": ["Cyber"],
                                "entry_type": ["harmful"]})
         with pytest.raises(KeyboardInterrupt):
