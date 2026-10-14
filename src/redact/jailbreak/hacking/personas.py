@@ -6,7 +6,6 @@
 from collections.abc import Callable
 
 from redact.dataset.taxonomy import load_taxonomy
-from redact.jailbreak.dynamic_functions import bind_functions
 from redact.jailbreak.protocol import LLMRequest, TechniqueGen
 from redact.llms.prompting import build_messages, load_prompt
 
@@ -79,11 +78,11 @@ def _make_persona_fn(persona_name: str):
     return fn
 
 
-# Bind one module-level generator per named persona.
-_PERSONA_FNS = {name: _make_persona_fn(name) for name in _NAMED_PERSONAS}
-bind_functions(globals(), list(_PERSONA_FNS.values()))
+# One technique per named persona, named to_<persona>_persona: to_alien_persona, ...
+_FNS = [_make_persona_fn(name) for name in _NAMED_PERSONAS]
+globals().update({fn.__name__: fn for fn in _FNS})
 
 
 def get_persona_functions() -> list[Callable]:
     """Return all persona jailbreak technique generators (1 invented + 14 named)."""
-    return [to_invented_persona] + [_PERSONA_FNS[name] for name in _NAMED_PERSONAS]
+    return [to_invented_persona, *_FNS]

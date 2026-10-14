@@ -6,7 +6,6 @@
 from collections.abc import Callable
 
 from ..directives import apply_template_directive, load_templates
-from ..dynamic_functions import bind_functions
 
 _CONFIG: dict = load_templates("requests", "answer_language_templates.json")
 _VARIANTS: list[dict] = _CONFIG["templates"]
@@ -27,11 +26,11 @@ def _make_language_fn(language: str):
     return fn
 
 
-_LANGUAGE_FUNCTIONS: list = bind_functions(
-    globals(), [_make_language_fn(lang) for lang in _LANGUAGES]
-)
+# One technique per language, named to_ask_answer_in_<language>: to_ask_answer_in_french
+_FNS = [_make_language_fn(language) for language in _LANGUAGES]
+globals().update({fn.__name__: fn for fn in _FNS})
 
 
 def get_answer_language_functions() -> list[Callable]:
     """Return all ask-answer-in-language technique functions."""
-    return list(_LANGUAGE_FUNCTIONS)
+    return list(_FNS)
