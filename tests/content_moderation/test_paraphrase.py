@@ -1,27 +1,7 @@
-"""Tests for the (real) paraphrase functions."""
+"""Tests for paraphrase_batch."""
 
-from redact.content_moderation.paraphrase import paraphrase_batch, paraphrase_sample
+from redact.content_moderation.paraphrase import paraphrase_batch
 from tests.conftest import MockBackend, make_client
-
-
-class TestParaphraseSample:
-    def test_calls_model_and_returns_output(self):
-        backend = MockBackend("PARAPHRASED")
-        result = paraphrase_sample(make_client(backend, "model"), "original text")
-        assert result == "PARAPHRASED"           # returns the model's output, not the input
-        assert len(backend.calls) == 1
-        # the sample is passed as the user message (template is "{sample}")
-        assert backend.calls[0]["messages"][-1]["content"] == "original text"
-
-    def test_system_prompt_override(self):
-        # generate_sample() extracts the system message upstream (via
-        # the backend's own _prepare) before the transport call, so it shows up
-        # under the separate "system_prompt" key, not in "messages".
-        backend = MockBackend("X")
-        paraphrase_sample(make_client(backend, "model"), "s", system_prompt="CUSTOM SYS")
-        call = backend.calls[0]
-        assert call["system_prompt"] == "CUSTOM SYS"
-        assert call["messages"] == [{"role": "user", "content": "s"}]
 
 
 class TestParaphraseBatch:

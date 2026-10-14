@@ -16,7 +16,7 @@ from .metaprompt import (
     generate_seeds,
 )
 from .outputs import run_output_generation
-from .paraphrase import paraphrase_batch, paraphrase_sample
+from .paraphrase import paraphrase_batch
 from .results import (
     CategoryResult,
     ConstitutionInputResult,
