@@ -4,14 +4,12 @@
 """
 
 from collections.abc import Callable
+from functools import partial
 
 from ..directives import apply_template_directive, load_templates
 
 _TEMPLATES: dict[str, list[dict]] = load_templates("requests", "distractor_templates.json")
-
-
-def _apply(directive: str, prompt: str) -> tuple[str, str]:
-    return apply_template_directive(_TEMPLATES, directive, prompt, info_key="type")
+_apply = partial(apply_template_directive, _TEMPLATES, info_key="type")
 
 
 def to_distractor_prefix_related(prompt: str) -> tuple[str, str]:

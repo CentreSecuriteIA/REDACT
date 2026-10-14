@@ -3,14 +3,12 @@
 ``info`` is ``style=<variant>``.
 """
 
-import json
 import random
 from collections.abc import Callable
 
-from ... import paths
+from ..directives import load_templates
 
-_TEMPLATES_PATH = paths.jailbreak_configs_dir() / "requests" / "continuation_templates.json"
-_TEMPLATES: dict[str, list[dict]] = json.loads(_TEMPLATES_PATH.read_text(encoding="utf-8"))
+_TEMPLATES: dict[str, list[dict]] = load_templates("requests", "continuation_templates.json")
 
 
 def _apply(directive: str, prompt: str) -> tuple[str, str]:

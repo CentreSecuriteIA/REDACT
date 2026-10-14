@@ -4,15 +4,12 @@
 """
 
 from collections.abc import Callable
+from functools import partial
 
 from ..directives import apply_template_directive, load_templates
 
 _TEMPLATES: dict[str, list[dict]] = load_templates("requests", "answer_templates.json")
-
-
-def _apply(directive: str, prompt: str) -> tuple[str, str]:
-    """Select a random variant for the directive and apply it to the prompt."""
-    return apply_template_directive(_TEMPLATES, directive, prompt, info_key="directive")
+_apply = partial(apply_template_directive, _TEMPLATES, info_key="directive")
 
 
 def to_refusal_then_comply(prompt: str) -> tuple[str, str]:
