@@ -9,9 +9,9 @@ from redact.jailbreak.chain import (
     combine_techniques,
     order_by_hierarchy,
 )
+from redact.jailbreak.plan import default_escalation_schedule
 from redact.jailbreak.protocol import LLMRequest
 from redact.jailbreak.sampling import (
-    default_escalation_schedule,
     sample_combination,
     sample_exact_combination,
 )

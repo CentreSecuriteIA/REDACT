@@ -129,7 +129,7 @@ def batch_apply_combinations(
     Args:
         samples: ``[{"id": str, "prompt": str, "combination": fn}, ...]`` where
             ``fn`` is a combined callable from ``chain.combine_techniques`` /
-            ``assignment.build_combination`` (carries ``.techniques`` + ``.__name__``).
+            ``plan.combination_of`` (carries ``.techniques`` + ``.__name__``).
             An optional ``"iteration"`` key seeds the provisional internals
             path when ``capture_internals`` is on (defaults to 0).
         gen_model: Model name that generation-layer techniques tag their

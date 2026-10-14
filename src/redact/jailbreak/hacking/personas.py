@@ -10,7 +10,7 @@ from redact.jailbreak.dynamic_functions import bind_functions
 from redact.jailbreak.protocol import LLMRequest, TechniqueGen
 from redact.llms.prompting import build_messages, load_prompt
 
-from .cognitive import _extract_scenario, cognitive_gen
+from .cognitive import _cognitive_gen, _construction_messages, _extract_scenario
 
 _PERSONA_TAXONOMY = load_taxonomy("personas")
 _PERSONAS: dict[str, dict] = _PERSONA_TAXONOMY["categories"]
@@ -36,19 +36,6 @@ def _persona_scenario_messages(
     )
 
 
-def _persona_construction_messages(
-    prompt: str, persona_description: str, scenario: str, prompt_dir=None
-) -> list[dict]:
-    config = load_prompt("jailbreak", "jailbreak_construction", prompt_dir)
-    return build_messages(
-        config,
-        jailbreak_type_name="Persona/Roleplay",
-        jailbreak_type_description=persona_description,
-        prompt=prompt,
-        scenario=scenario,
-    )
-
-
 def _persona_gen(
     prompt: str,
     persona_name: str,
@@ -68,14 +55,15 @@ def _persona_gen(
         scenario = _extract_scenario(raw)
     jailbreak = yield LLMRequest(
         gen_model,
-        _persona_construction_messages(prompt, persona_description, scenario, prompt_dir),
+        _construction_messages(
+            prompt, "Persona/Roleplay", persona_description, scenario, prompt_dir),
     )
     return jailbreak, f"category={persona_name}_persona"
 
 
 def to_invented_persona(prompt: str, **kwargs) -> TechniqueGen:
     """Persona jailbreak where the LLM freely invents the persona."""
-    jailbreak, _info = yield from cognitive_gen(prompt, 0, **kwargs)
+    jailbreak, _info = yield from _cognitive_gen(prompt, "persona_roleplay", **kwargs)
     return jailbreak, "category=invented_persona"
 
 

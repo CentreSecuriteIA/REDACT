@@ -15,35 +15,38 @@ Usage:
     from redact.jailbreak.obfuscation.encoding import to_base64
 """
 
-from .assignment import assign_combination, build_combination, build_function_registry
 from .chain import apply_combination, combine_techniques, is_noop, make_combination_gen
 from .engine import batch_apply_combinations
 
 # Hacking registry
 from .hacking import get_all_hacking_functions
 
-# Run planning + resumable manifest ledger
-from .manifest import (
-    plan_index,
-    plan_run,
-)
-
 # Manipulation registry
 from .manipulation import get_all_manipulation_functions
 from .obfuscation import get_all_obfuscation_functions
+
+# Run planning
+from .plan import (
+    assign_combination,
+    build_function_registry,
+    combination_of,
+    default_escalation_schedule,
+    plan_run,
+)
 
 # Request protocol + batched engine
 from .protocol import LLMRequest, run_sync
 
 # Requests registry
 from .requests import get_all_request_functions
+from .rules import compatible
 from .sampling import (
-    default_escalation_schedule,
-    get_compatible_remaining,
     sample_combination,
     sample_exact_combination,
 )
 from .technique import load_spec, tag
+
+build_combination = combination_of  # the name pipelines.py imports
 
 # ---------------------------------------------------------------------------
 # Tag all technique functions with compatibility metadata at import time

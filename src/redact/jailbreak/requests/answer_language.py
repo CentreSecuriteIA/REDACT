@@ -3,10 +3,9 @@
 ``info`` is ``language=<language>;variant=<variant>``.
 """
 
-import random
 from collections.abc import Callable
 
-from ..directives import load_templates
+from ..directives import apply_template_directive, load_templates
 from ..dynamic_functions import bind_functions
 
 _CONFIG: dict = load_templates("requests", "answer_language_templates.json")
@@ -17,11 +16,11 @@ _LANGUAGES: list[str] = _CONFIG["languages"]
 def _make_language_fn(language: str):
     """Create a pure-transform function that asks for a response in `language`."""
     slug = language.lower().replace(" ", "_")
+    templates, fields = {language: _VARIANTS}, {"language": language}
 
     def fn(prompt: str) -> tuple[str, str]:
-        t = random.choice(_VARIANTS)
-        result = t["template"].format_map({"prompt": prompt, "language": language})
-        return result, f"language={language};variant={t['name']}"
+        return apply_template_directive(
+            templates, language, prompt, info_key="language", extra=fields)
 
     fn.__name__ = f"to_ask_answer_in_{slug}"
     fn.__qualname__ = f"to_ask_answer_in_{slug}"

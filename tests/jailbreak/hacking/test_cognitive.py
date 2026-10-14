@@ -1,67 +1,60 @@
 """Tests for cognitive/psychological hacking techniques."""
 
+import pytest
+
 from redact.jailbreak.hacking.cognitive import (
-    CATEGORY_NAMES,
-    HACKING_CATEGORIES,
-    create_jailbreak,
-    get_hacking_functions,
-    get_situation,
+    _extract_scenario,
+    get_cognitive_functions,
+    to_persona_roleplay,
 )
-from tests.conftest import MockBackend, make_client
+from redact.llm_pipeline import drive_sync
 
 
-class TestConstants:
-    def test_five_categories(self):
-        assert len(HACKING_CATEGORIES) == 5
+def _drive(technique, replies: list[str], **kwargs):
+    """Run ``technique`` with ``replies`` in turn; return its result and requests."""
+    requests = []
 
-    def test_five_names(self):
-        assert len(CATEGORY_NAMES) == 5
-        assert "persona_roleplay" in CATEGORY_NAMES
-        assert "deep_inception" in CATEGORY_NAMES
+    def call(request):
+        requests.append(request)
+        return replies[len(requests) - 1]
 
-    def test_category_tuples(self):
-        for name, desc in HACKING_CATEGORIES:
-            assert isinstance(name, str)
-            assert len(desc) > 20
+    return drive_sync(technique("harmful prompt", gen_model="m", **kwargs), call), requests
 
 
-class TestGetSituation:
+class TestScenario:
     def test_extracts_scenario(self):
-        backend = MockBackend("Some preamble\n**Scenario Description**: A dark alley at midnight")
-        result = get_situation("test prompt", make_client(backend))
-        assert "dark alley" in result
+        reply = "Some preamble\n**Scenario Description**: A dark alley at midnight"
+        assert _extract_scenario(reply) == "A dark alley at midnight"
 
     def test_falls_back_to_full_text_on_no_match(self):
-        # _extract_scenario() now returns the whole reply (stripped) when no
-        # "Scenario Description" marker is present, rather than raising.
-        backend = MockBackend("No scenario here, just random text")
-        result = get_situation("test", make_client(backend))
-        assert result == "No scenario here, just random text"
+        reply = "No scenario here, just random text"
+        assert _extract_scenario(reply) == reply
+
+    def test_the_scenario_reaches_the_construction_request(self):
+        replies = ["**Scenario Description**: A dark alley at midnight", "jailbreak"]
+        result, requests = _drive(to_persona_roleplay, replies)
+        assert result == ("jailbreak", "category=persona_roleplay")
+        assert len(requests) == 2
+        assert "dark alley" in str(requests[1].messages)
 
 
-class TestCreateJailbreak:
-    def test_with_scenario(self):
-        backend = MockBackend("jailbreak output text")
-        jailbreak, info, scenario = create_jailbreak(
-            "harmful prompt", 0, make_client(backend), scenario="pre-gen scenario"
-        )
-        assert jailbreak == "jailbreak output text"
-        assert "persona_roleplay" in info
-        assert scenario == "pre-gen scenario"
+class TestConstruction:
+    def test_a_given_scenario_skips_the_scenario_request(self):
+        result, requests = _drive(
+            to_persona_roleplay, ["jailbreak output text"], scenario="pre-gen scenario")
+        assert result == ("jailbreak output text", "category=persona_roleplay")
+        assert len(requests) == 1
+        assert requests[0].model == "m"
 
-    def test_all_categories(self):
-        backend = MockBackend("output")
-        for i in range(5):
-            _, info, _ = create_jailbreak(
-                "prompt", i, make_client(backend), scenario="scenario"
-            )
-            assert CATEGORY_NAMES[i] in info
+    @pytest.mark.parametrize("technique", get_cognitive_functions())
+    def test_each_technique_names_its_category(self, technique):
+        (_, info), _ = _drive(technique, ["output"], scenario="scenario")
+        assert info == f"category={technique.__name__.removeprefix('to_')}"
 
 
-class TestGetHackingFunctions:
+class TestGetCognitiveFunctions:
     def test_returns_five(self):
-        funcs = get_hacking_functions()
-        assert len(funcs) == 5
-        names = [f.__name__ for f in funcs]
+        names = [f.__name__ for f in get_cognitive_functions()]
+        assert len(names) == 5
         assert "to_persona_roleplay" in names
         assert "to_deep_inception" in names

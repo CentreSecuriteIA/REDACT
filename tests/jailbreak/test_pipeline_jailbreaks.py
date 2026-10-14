@@ -271,6 +271,17 @@ def test_settings_per_iteration_escalation(tmp_path):
     assert (df[df["iteration"] == 1]["num_techniques"] == 2).all()
 
 
+def test_a_budget_round_inherits_the_top_level_max_complexity(tmp_path):
+    out = tmp_path / "jb.csv"
+    generate_jailbreaks(inputs=_inputs(), output_path=out, seed=11, max_complexity=1,
+                        settings_per_iteration=[{"max_obfuscations": 3}], **PURE_KW)
+    plan = Manifest(out.with_name("jb.manifest.jsonl")).load()
+    assert {r["settings"]["max_complexity"] for r in plan} == {1}
+    assert {r["settings"]["max_obfuscations"] for r in plan} == {3}
+    # No pure obfuscation costs 0, so a budget of 1 ends after the first pick.
+    assert all(len(r["combination"]) == 1 for r in plan)
+
+
 def test_settings_per_iteration_empty_raises(tmp_path):
     with pytest.raises(ValueError):
         generate_jailbreaks(inputs=_inputs(), output_path=tmp_path / "jb.csv",
@@ -316,16 +327,16 @@ def test_without_read_back_the_output_is_written_and_not_read(
 
 
 def test_plan_run_hands_the_manifest_each_row_as_it_is_made(tmp_path, monkeypatch):
-    import redact.jailbreak.manifest as JM
+    import redact.jailbreak.plan as JP
 
     assigned, seen = [], []
     monkeypatch.setattr(
-        JM, "assign_combination",
+        JP, "assign_combination",
         lambda sid, pool, **kwargs: assigned.append(sid) or ["a_technique"])
     # Per row the manifest takes: the assignments made by then.
     monkeypatch.setattr(
         Manifest, "write", lambda self, rows: seen.extend(len(assigned) for _ in rows))
-    JM.plan_run(_inputs(), [], manifest_path=tmp_path / "jb.manifest.jsonl",
+    JP.plan_run(_inputs(), [], manifest_path=tmp_path / "jb.manifest.jsonl",
                 iterations=2, verbose=False)
     assert seen == list(range(1, 11))
 

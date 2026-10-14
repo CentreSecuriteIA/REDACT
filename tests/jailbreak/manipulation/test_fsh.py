@@ -5,14 +5,15 @@ import random
 from redact.jailbreak.manipulation.fsh import (
     _build_fsh_prompt,
     get_fsh_functions,
-    select_best_subcategory,
     to_fsh_random_long,
     to_fsh_random_short,
     to_fsh_selected_long,
     to_fsh_selected_short,
 )
+from redact.jailbreak.manipulation.pairs import _select_subcategory_gen
 from redact.jailbreak.protocol import run_sync
-from tests.conftest import MockBackend, make_client
+from redact.llm_pipeline import drive_sync
+from tests.conftest import MockBackend
 
 
 def _make_benign_data():
@@ -29,28 +30,21 @@ def _make_benign_data():
     }
 
 
-class TestSelectBestSubcategory:
+def _select(reply: str) -> tuple[str, bool]:
+    """The subcategory a model picks with ``reply``, and whether it fell back."""
+    gen = _select_subcategory_gen("test", ["Cooking", "Gardening"], gen_model="m")
+    return drive_sync(gen, lambda request: reply)
+
+
+class TestSelectSubcategory:
     def test_exact_match(self):
-        backend = MockBackend("Cooking")
-        subcat, fallback = select_best_subcategory(
-            "test", ["Cooking", "Gardening"], make_client(backend)
-        )
-        assert subcat == "Cooking"
-        assert fallback is False
+        assert _select("Cooking") == ("Cooking", False)
 
     def test_fuzzy_match(self):
-        backend = MockBackend("I think Cooking & Baking is closest")
-        subcat, fallback = select_best_subcategory(
-            "test", ["Cooking", "Gardening"], make_client(backend)
-        )
-        assert subcat == "Cooking"
-        assert fallback is False
+        assert _select("I think Cooking & Baking is closest") == ("Cooking", False)
 
     def test_fallback_random(self):
-        backend = MockBackend("totally irrelevant response xyz")
-        subcat, fallback = select_best_subcategory(
-            "test", ["Cooking", "Gardening"], make_client(backend)
-        )
+        subcat, fallback = _select("totally irrelevant response xyz")
         assert subcat in ["Cooking", "Gardening"]
         assert fallback is True
 
@@ -58,14 +52,15 @@ class TestSelectBestSubcategory:
 class TestBuildFshPrompt:
     def test_structure(self):
         pairs = [{"prompt": "q1", "answer": "a1"}, {"prompt": "q2", "answer": "a2"}]
-        result = _build_fsh_prompt("harmful?", pairs, 2)
+        result, extra = _build_fsh_prompt("harmful?", pairs, 2)
+        assert extra == {}
         assert "Q1:" in result
         assert "Q3: harmful?" in result
         assert "A3:" in result
 
     def test_harmful_at_end(self):
         pairs = [{"prompt": f"q{i}", "answer": f"a{i}"} for i in range(5)]
-        result = _build_fsh_prompt("bad prompt", pairs, 3)
+        result, _ = _build_fsh_prompt("bad prompt", pairs, 3)
         lines = result.strip().split("\n")
         # Last non-empty line should be the answer placeholder
         last_lines = [l for l in lines if l.strip()]

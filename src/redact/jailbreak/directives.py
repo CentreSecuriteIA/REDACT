@@ -40,6 +40,7 @@ def apply_template_directive(
     directive: str,
     prompt: str,
     info_key: str = "directive",
+    extra: dict[str, str] | None = None,
 ) -> tuple[str, str]:
     """Select a random template variant for ``directive`` and apply it to ``prompt``.
 
@@ -53,11 +54,12 @@ def apply_template_directive(
             (e.g. ``"directive"``/``"type"``/``"task"``) — kept configurable
             per caller so each module's existing dataset/test contract for
             its ``additional_info`` format is unaffected by this refactor.
+        extra: Further placeholders of the template, besides ``{prompt}``.
 
     Returns:
         (modified_prompt, additional_info) where additional_info is
         ``f"{info_key}={directive};variant={variant_name}"``.
     """
     variant = random.choice(templates[directive])
-    result = variant["template"].format_map({"prompt": prompt})
+    result = variant["template"].format_map({**(extra or {}), "prompt": prompt})
     return result, f"{info_key}={directive};variant={variant['name']}"

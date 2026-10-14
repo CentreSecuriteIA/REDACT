@@ -32,14 +32,14 @@ class TestBuildDapPrompt:
     def test_harmful_in_middle(self):
         random.seed(42)
         pairs = [{"prompt": f"q{i}", "answer": f"a{i}"} for i in range(5)]
-        result, idx = _build_dap_prompt("harmful?", pairs, 4)
-        assert idx >= 2  # never first
+        result, extra = _build_dap_prompt("harmful?", pairs, 4)
+        assert extra["harmful_idx"] >= 2  # never first
         assert "harmful?" in result
 
     def test_harmful_has_empty_answer(self):
         random.seed(42)
         pairs = [{"prompt": f"q{i}", "answer": f"a{i}"} for i in range(5)]
-        result, idx = _build_dap_prompt("harmful?", pairs, 3)
+        result, _ = _build_dap_prompt("harmful?", pairs, 3)
         lines = result.split("\n")
         # Find the harmful Q line and check its answer is empty
         for i, line in enumerate(lines):
