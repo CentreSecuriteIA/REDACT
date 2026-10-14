@@ -70,16 +70,8 @@ from redact.dataset import (
     take_per_group,
     write_concat,
 )
-from redact.jailbreak import (
-    build_combination,
-    build_function_registry,
-    get_all_hacking_functions,
-    get_all_manipulation_functions,
-    get_all_obfuscation_functions,
-    get_all_request_functions,
-    load_spec,
-    plan_run,
-)
+from redact.jailbreak import build_combination, load_spec, plan_run
+from redact.jailbreak import pool as jailbreak_pool
 from redact.jailbreak.engine import _finalize, _finalize_error, _sample_gen
 from redact.jailbreak.manipulation import get_or_generate_benign_data
 from redact.llm_pipeline import drive_units
@@ -661,48 +653,17 @@ def generate_jailbreaks(
     # translate_model only captures the calls whose model actually supports it.
     capture_jailbreak = client.compute_config.supports_internals
 
-    # ------------------------------------------------------------------
-    # Build technique pool + assignment settings
-    # ------------------------------------------------------------------
-    # The registry maps every known technique name → callable for reconstructing
-    # a planned combination at execution time. It is built from the FULL technique
-    # set, independent of the include_* / pure_only / include_translation filters:
-    # those filters govern what new plans may *sample*, not what an existing
-    # manifest can *reconstruct*. Building it from the filtered pool would make a
-    # stale manifest (e.g. one planned with translation, now run with
-    # include_translation=False) raise KeyError in build_combination.
-    full_pool = (
-        get_all_obfuscation_functions()
-        + get_all_hacking_functions()
-        + get_all_manipulation_functions()
-        + get_all_request_functions()
+    # A fresh plan draws from the pool; the plan is read back through every
+    # registered technique, so a plan made with another pool still replays.
+    registry = jailbreak_pool.registry(jailbreak_pool.all_techniques())
+    pool = jailbreak_pool.technique_pool(
+        include_hacking=include_hacking,
+        include_manipulation=include_manipulation,
+        include_obfuscation=include_obfuscation,
+        include_requests=include_requests,
+        include_translation=include_translation,
+        pure_only=pure_only,
     )
-    registry = build_function_registry(full_pool)
-
-    # The sampling pool is the filtered subset — what a fresh plan may draw from.
-    pool = []
-    if include_obfuscation:
-        pool += get_all_obfuscation_functions()
-    if include_hacking:
-        pool += get_all_hacking_functions()
-    if include_manipulation:
-        pool += get_all_manipulation_functions()
-    if include_requests:
-        pool += get_all_request_functions()
-    if pure_only:
-        # Exclude both per-call LLM techniques and benign-data-dependent ones
-        # (FSH/DAP): the latter need a one-time LLM benign-data generation, so
-        # they aren't safe in a strictly no-LLM run.
-        pool = [
-            f for f in pool
-            if not getattr(f, "requires_llm", False)
-            and not getattr(f, "requires_benign", False)
-        ]
-    if not include_translation:
-        # Translation is the most expensive family per technique (each is a
-        # translate→check→retry loop = 2–8 LLM calls) and adds little to a first-pass
-        # dataset. Drop it from the pool so it is never sampled.
-        pool = [f for f in pool if "translation" not in getattr(f, "families", [])]
 
     sample_kwargs = {
         "max_complexity": max_complexity,

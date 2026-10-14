@@ -33,11 +33,6 @@ def _stable_seed(*parts) -> int:
     return int(digest.hexdigest()[:16], 16)
 
 
-def build_function_registry(pool: list[Callable]) -> dict[str, Callable]:
-    """Each technique of ``pool`` by its ``__name__``."""
-    return {getattr(fn, "__name__", ""): fn for fn in pool}
-
-
 def assign_combination(
     sample_id: str,
     pool: list[Callable],

@@ -63,6 +63,7 @@ def _dies_on_call(n: int, calls: list):
 
 def _jailbreaks(folder, monkeypatch) -> dict:
     import redact.jailbreak.plan as JP
+    import redact.jailbreak.pool as JPool
     import redact.pipelines as P
     from redact import generate_jailbreaks
     from tests.jailbreak.test_pipeline_jailbreaks import (
@@ -79,11 +80,7 @@ def _jailbreaks(folder, monkeypatch) -> dict:
         return [pool[pick % len(pool)].__name__]
 
     monkeypatch.setattr(JP, "assign_combination", assign)
-    monkeypatch.setattr(
-        P, "get_all_obfuscation_functions", lambda: [one_step, two_step, broken])
-    for name in ("get_all_hacking_functions", "get_all_manipulation_functions",
-                 "get_all_request_functions"):
-        monkeypatch.setattr(P, name, lambda: [])
+    monkeypatch.setattr(JPool, "all_techniques", lambda: [one_step, two_step, broken])
 
     inputs = pd.DataFrame({
         "sample_id": _IDS,
