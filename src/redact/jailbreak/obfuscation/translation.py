@@ -95,54 +95,22 @@ def _translate_gen(
     return last, f"DISCARDED; language={language}; feedback={feedback}"
 
 
-def _make_language_fn(language: str):
-    """Build a named technique generator for one target language."""
+def _make_language_fn(language: str) -> Callable:
+    """The technique that translates to ``language``."""
 
     def fn(prompt: str, **kwargs) -> TechniqueGen:
-        result = yield from _translate_gen(prompt, language, **kwargs)
-        return result
+        return (yield from _translate_gen(prompt, language, **kwargs))
 
-    fn.__name__ = "to_" + language.lower().replace(" ", "_")
-    fn.__qualname__ = fn.__name__
+    fn.__name__ = fn.__qualname__ = "to_" + language.lower().replace(" ", "_")
     fn.__doc__ = f"Translate to {language} (technique generator)."
     return fn
 
 
-# High-resource (complexity 0)
-to_french = _make_language_fn("French")
-to_japanese = _make_language_fn("Japanese")
-to_russian = _make_language_fn("Russian")
-to_spanish = _make_language_fn("Spanish")
-to_german = _make_language_fn("German")
-to_arabic = _make_language_fn("Arabic")
-
-# Mid-resource (complexity 1)
-to_turkish = _make_language_fn("Turkish")
-to_czech = _make_language_fn("Czech")
-to_vietnamese = _make_language_fn("Vietnamese")
-to_greek = _make_language_fn("Greek")
-to_croatian = _make_language_fn("Croatian")
-
-# Low-resource (complexity 2)
-to_swahili = _make_language_fn("Swahili")
-to_thai = _make_language_fn("Thai")
-to_khmer = _make_language_fn("Khmer")
-to_maori = _make_language_fn("Maori")
-to_nepali = _make_language_fn("Nepali")
-to_zulu = _make_language_fn("Zulu")
-to_scots_gaelic = _make_language_fn("Scots Gaelic")
-to_bengali = _make_language_fn("Bengali")
-to_javanese = _make_language_fn("Javanese")
+# One technique per language, named to_<language>: to_french, to_scots_gaelic, ...
+_FNS = [_make_language_fn(language) for language in LANGUAGES]
+globals().update({fn.__name__: fn for fn in _FNS})
 
 
 def get_translation_functions() -> list[Callable]:
     """Return all translation technique generators."""
-    return [
-        # High-resource
-        to_french, to_japanese, to_russian, to_spanish, to_german, to_arabic,
-        # Mid-resource
-        to_turkish, to_czech, to_vietnamese, to_greek, to_croatian,
-        # Low-resource
-        to_swahili, to_thai, to_khmer, to_maori, to_nepali,
-        to_zulu, to_scots_gaelic, to_bengali, to_javanese,
-    ]
+    return list(_FNS)
