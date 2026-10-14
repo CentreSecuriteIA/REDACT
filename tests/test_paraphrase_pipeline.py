@@ -87,6 +87,20 @@ def test_without_inputs_the_inputs_of_the_run_are_found(tmp_path, patched, seede
     assert list(df["input_id"]) == [content_id(text)]
 
 
+def test_the_stage_paraphrases_the_frame_it_is_given_into_the_file_it_is_given(
+        tmp_path, patched):
+    source = pd.DataFrame({"sample": ["alpha prompt"], "category": ["Cyber"],
+                           "entry_type": ["harmful"]})
+    out = tmp_path / "elsewhere" / "paraphrased.csv"
+    df = CP.run_paraphrase_target(
+        "inputs", source, out, pool=["venice-paraphraser"], check=None, k=1,
+        batch_size=8, seed=0, verbose=False,
+    )
+    assert list(df["sample"]) == ["PARA::alpha prompt"]
+    assert list(pd.read_csv(out)["input_id"]) == [content_id("alpha prompt")]
+    assert not paths.datasets(tmp_path).exists()
+
+
 def test_paraphrase_resume_is_idempotent(tmp_path, patched):
     _seed_inputs(tmp_path)
     generate_paraphrases(data_dir=tmp_path, target="inputs", verbose=False)

@@ -361,9 +361,9 @@ class TestAResume:
         assert _texts(tmp_path)["Privacy"] == [
             "first sample zq1", 'second "quoted" sample, café zq1']
 
-    @pytest.mark.parametrize("fresh", [False, True])
+    @pytest.mark.parametrize("resume", [True, False])
     def test_the_stage_touches_nothing_while_another_run_holds_the_lock(
-            self, tmp_path, fresh):
+            self, tmp_path, resume):
         from filelock import FileLock
 
         _run(tmp_path, _entries(0, 1), style="long")
@@ -373,7 +373,7 @@ class TestAResume:
         another.acquire()
         try:
             with pytest.raises(RuntimeError, match="is locked"):
-                _run(tmp_path, _entries(0, 1, 2), style="long", fresh=fresh)
+                _run(tmp_path, _entries(0, 1, 2), style="long", resume=resume)
         finally:
             another.release()
         assert _files(tmp_path) == before       # the manifest too
@@ -401,7 +401,7 @@ class TestAFreshRun:
                      for row in rows[1:] if row[_STYLE] == "short"}
 
         _result, gen = _run(tmp_path, _entries(4, 5, 66, _NO_SAMPLES), write=_again,
-                            style="short", fresh=True)
+                            style="short", resume=False)
         # Every entry of the style was generated again, three times for none.
         assert sorted(token for batch in gen.batches for token in batch) == sorted(
             ["zq4", "zq5", "zq66", "zq30", "zq30*", "zq30*"])
@@ -434,7 +434,7 @@ class TestAFreshRun:
 
         with pytest.raises(RuntimeError, match="engine died"):
             _run(tmp_path, _entries(4, 5, 66, _NO_SAMPLES), write=dies,
-                 style="short", fresh=True)
+                 style="short", resume=False)
         assert all(row[_STYLE] == "long"
                    for rows in _tree(tmp_path).values() for row in rows[1:])
         assert "Fraud/samples.csv" not in _tree(tmp_path)   # no row left: no file
@@ -454,7 +454,7 @@ class TestAFreshRun:
         with monkeypatch.context() as patch:
             patch.setattr(Ledger, "rewrite", lambda self, drop, saved: 1 / 0)
             with pytest.raises(ZeroDivisionError):
-                _run(folder, _entries(4), style=style, fresh=True)
+                _run(folder, _entries(4), style=style, resume=False)
         return _files(folder)
 
     def test_of_one_style_that_stopped_before_the_ledger_is_finished_by_another(
@@ -467,7 +467,7 @@ class TestAFreshRun:
             _run(tmp_path, _entries(4), style="short")
         assert _files(tmp_path) == stopped
 
-        _run(tmp_path, _entries(4), write=_again, style="short", fresh=True)
+        _run(tmp_path, _entries(4), write=_again, style="short", resume=False)
         assert _texts(tmp_path)["Violence"][-2:] == [
             "first sample again zq4", "second sample again zq4"]
         ledger = _constitution_inputs_ledger(tmp_path)
@@ -484,16 +484,16 @@ class TestAFreshRun:
         stopped = self._dies_before_the_ledger(tmp_path, monkeypatch, "short")
 
         with pytest.raises(RuntimeError, match="'short' did not finish"):
-            _run(tmp_path, _entries(0, 1, 2), write=_again, style="long", fresh=True)
+            _run(tmp_path, _entries(0, 1, 2), write=_again, style="long", resume=False)
         assert _files(tmp_path) == stopped
         assert lock_is_free(_constitution_inputs_ledger(tmp_path).path)
 
         # The first is made again and finishes; then the second runs.
         short = _entries(4, 5, 66, _NO_SAMPLES)
-        _result, gen = _run(tmp_path, short, style="short", fresh=True)
+        _result, gen = _run(tmp_path, short, style="short", resume=False)
         again = {token.rstrip("*") for batch in gen.batches for token in batch}
         assert again == {"zq4", "zq5", "zq66", "zq30"}
-        _run(tmp_path, _entries(0, 1, 2), write=_again, style="long", fresh=True)
+        _run(tmp_path, _entries(0, 1, 2), write=_again, style="long", resume=False)
         assert _texts(tmp_path) == {
             "Violence": ["first sample zq4", 'second "quoted" sample, café zq4',
                          "first sample again zq0", "second sample again zq0",
@@ -521,7 +521,7 @@ class TestAFreshRun:
         before = _files(tmp_path)
 
         with pytest.raises(RuntimeError, match="copied incompletely") as stopped:
-            _run(tmp_path, _entries(4), style="short", fresh=True)
+            _run(tmp_path, _entries(4), style="short", resume=False)
         assert str(violence) in str(stopped.value)
         assert "start the whole stage over" in str(stopped.value)
         assert _files(tmp_path) == before
@@ -531,7 +531,7 @@ class TestAFreshRun:
         append_samples(["an old sample"], category="Violence", turn=0,
                        source="constitution", dataset_dir=tmp_path)
         old = (tmp_path / "Violence" / "samples.csv").read_bytes()
-        _run(tmp_path, _entries(_NO_SAMPLES), style="long", fresh=True)
+        _run(tmp_path, _entries(_NO_SAMPLES), style="long", resume=False)
         assert (tmp_path / "Violence" / "samples.csv").read_bytes() == old
 
     def test_without_a_style_removes_the_tree_its_cut_files_and_the_ledger(
@@ -542,7 +542,7 @@ class TestAFreshRun:
         _run(tmp_path, _entries(0, 1))          # the resume keeps the tail in .cut
         assert (tmp_path / "Violence" / "samples.csv.cut").exists()
 
-        _result, gen = _run(tmp_path, _entries(1), fresh=True)
+        _result, gen = _run(tmp_path, _entries(1), resume=False)
         assert set(_files(tmp_path)) == {
             "Privacy/samples.csv", "constitution_inputs.state.jsonl",
             "constitution_inputs.manifest.jsonl"}
@@ -629,7 +629,7 @@ class TestAFolderWrittenBeforeSizesWereRecorded:
         """The acks of a ledger of that time are removed with the rows."""
         _old_folder(tmp_path, with_rows=(0, 1), acked=(0, 1, _NO_SAMPLES))
         result, gen = _run(tmp_path, _entries(0, 1, _NO_SAMPLES), write=_again,
-                           style="long", fresh=True)
+                           style="long", resume=False)
         assert (result.total_entries_processed, result.skipped_entries) == (2, 1)
         assert _texts(tmp_path) == {
             "Violence": ["first sample again zq0", "second sample again zq0"],

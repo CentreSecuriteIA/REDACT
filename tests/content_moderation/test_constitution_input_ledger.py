@@ -2,8 +2,8 @@
 
 Mirrors the ledger tests for the constitution / output / paraphrase stages:
 a completed ``(sample_description, entry_type, style)`` unit is acked to
-``constitution_inputs.state.jsonl`` and skipped on a resume re-run; ``fresh``
-clears it. Fully offline (MockBackend).
+``constitution_inputs.state.jsonl`` and skipped on a resume re-run;
+``resume=False`` clears it. Fully offline (MockBackend).
 """
 
 import json
@@ -103,7 +103,7 @@ def test_fresh_clears_ledger_and_regenerates(tmp_path):
 
     pipe2 = _pipeline(tmp_path)
     r = pipe2.run_from_constitution(_const_df(), _PROMPT, samples_per_entry=2,
-                                    fresh=True, verbose=False)
+                                    resume=False, verbose=False)
     assert r.total_entries_processed == 2          # regenerated despite prior ledger
     assert pipe2.gen.backend.calls != []
 

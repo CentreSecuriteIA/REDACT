@@ -114,3 +114,37 @@ class TestInputPipelineRunTurn:
         )
         assert isinstance(result, TurnResult)
         assert result.accepted_count >= 0
+
+
+class TestRunStandaloneInputs:
+    def test_a_fresh_run_clears_its_categories_then_runs_the_turn_loop(
+            self, tmp_path, monkeypatch):
+        from redact.content_moderation import run_standalone_inputs
+        from redact.dataset import append_samples
+
+        append_samples(["old cyber"], category="Cyber", turn=0, dataset_dir=tmp_path)
+        append_samples(["old fraud"], category="Fraud", turn=0, dataset_dir=tmp_path)
+        ran = []
+
+        def run_standalone(self, categories, **kwargs):
+            ran.append((self.gen, self.check, self.dataset_dir, categories,
+                        (tmp_path / "Cyber" / "samples.csv").exists(), kwargs))
+            return ["the results"]
+
+        monkeypatch.setattr(InputPipeline, "run_standalone", run_standalone)
+        gen = make_client(MockBackend(), "gen-model")
+        check = make_client(MockBackend(), "check-model")
+        returned = run_standalone_inputs(
+            [("Cyber", {})], gen, check, tmp_path,
+            samples_per_category=4, samples_per_request=2, use_metaprompt=True,
+            seeds_name="unused", num_seeds=3, resume=False, verbose=False,
+        )
+        assert returned == ["the results"]
+        (got_gen, got_check, folder, categories, cyber_left, kwargs), = ran
+        assert (got_gen, got_check, folder) == (gen, check, tmp_path)
+        assert categories == [("Cyber", {})] and not cyber_left
+        assert (tmp_path / "Fraud" / "samples.csv").exists()
+        forwarded = ("samples_per_category", "samples_per_request", "num_seeds")
+        assert {name: kwargs[name] for name in forwarded} == {
+            "samples_per_category": 4, "samples_per_request": 2, "num_seeds": 3}
+        assert kwargs["seeds_db"] is None

@@ -16,10 +16,13 @@ import logging
 import warnings
 from collections.abc import Callable
 from math import ceil
+from pathlib import Path
 
+from .. import paths
 from ..dataset import append_samples, get_existing_samples
-from ..dataset.taxonomy import get_seed_prompts
-from ..llms.prompting import extract_and_clean
+from ..dataset.taxonomy import get_seed_prompts, load_seeds
+from ..llms.client import ModelClient
+from ..llms.prompting import extract_and_clean, load_prompt
 from ..llm_pipeline import batch_check_samples
 from ..llms.router import generate_sample
 from ..types import EntryType
@@ -389,11 +392,10 @@ class _StandaloneGenerationMixin:
         generates-its-own-seeds) loop than :meth:`run_category`'s
         (fixed-``num_turns``, caller-supplied seeds) loop — evaluated merging
         them and deliberately kept separate; see :meth:`run_category`'s
-        docstring for the reasoning. Moved here from ``pipelines.py``
-        verbatim so that module stays a thin dispatcher; it is the
-        implementation behind the deprecated standalone ``generate_inputs()``
-        path and does not warn on its own, since its only caller already
-        does.
+        docstring for the reasoning. It is the implementation behind the
+        deprecated standalone ``generate_inputs()`` path, through
+        :func:`run_standalone_inputs`, and does not warn on its own, since
+        ``generate_inputs`` already does.
 
         Args:
             categories: ``(name, info)`` pairs, e.g. from ``iter_categories(taxonomy)``.
@@ -520,3 +522,73 @@ class _StandaloneGenerationMixin:
             logger.info("Total: %d accepted / %d extracted", total_accepted, total_extracted)
 
         return all_results
+
+
+def run_standalone_inputs(
+    categories: list[tuple[str, dict]],
+    client: ModelClient,
+    check: ModelClient,
+    dataset_dir: Path,
+    *,
+    prompt_dir: str | Path | None = None,
+    samples_per_category: int,
+    samples_per_request: int,
+    use_metaprompt: bool,
+    seeds_name: str,
+    num_seeds: int,
+    resume: bool = True,
+    verbose: bool = True,
+) -> list[CategoryResult]:
+    """Generate checked samples for each category into ``dataset_dir``'s tree.
+
+    Seeds are generated per category with ``use_metaprompt``, else read from
+    the seeds file ``seeds_name``. ``resume=False`` first removes the files
+    of these categories. Returns one :class:`CategoryResult` per category
+    that had seeds.
+    """
+    # inputs.py imports this module for the mixin.
+    from .inputs import InputPipeline
+
+    pipeline = InputPipeline(
+        gen=client,
+        check=check,
+        extraction_style="numbered",
+        dataset_dir=dataset_dir,
+    )
+
+    prompt_config = load_prompt("input", "generation/standalone", prompt_dir=prompt_dir)
+
+    # Seeds (simple mode)
+    seeds_db = None
+    if not use_metaprompt:
+        seeds_db = load_seeds(seeds_name)
+
+    # Clear existing data when not resuming
+    if not resume:
+        for cat_name, _ in categories:
+            csv_path = paths.category_csv(cat_name, root=dataset_dir)
+            if csv_path.exists():
+                csv_path.unlink()
+                if verbose:
+                    logger.info("Cleared existing %s", csv_path)
+
+    if verbose:
+        mode = (
+            "automated (LLM descriptions + seeds)" if use_metaprompt
+            else "simple (taxonomy + hand-written seeds)"
+        )
+        logger.info("Generate Content Moderation Inputs")
+        logger.info("Mode: %s", mode)
+        logger.info("Categories: %d | Target: %d samples each (%d/request)",
+                    len(categories), samples_per_category, samples_per_request)
+
+    return pipeline.run_standalone(
+        categories=categories,
+        prompt_config=prompt_config,
+        samples_per_category=samples_per_category,
+        samples_per_request=samples_per_request,
+        use_metaprompt=use_metaprompt,
+        num_seeds=num_seeds,
+        seeds_db=seeds_db,
+        verbose=verbose,
+    )

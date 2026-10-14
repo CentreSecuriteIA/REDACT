@@ -194,7 +194,7 @@ class InputPipeline(_StandaloneGenerationMixin):
         use_checker: bool = True,
         verbose: bool = True,
         batch_size: int = 32,
-        fresh: bool = False,
+        resume: bool = True,
         style: str = "",
         max_attempts: int = 3,
         check_max_tokens: int | None = None,
@@ -211,7 +211,7 @@ class InputPipeline(_StandaloneGenerationMixin):
         Rows go to ``{dataset_dir}/{category}/samples.csv``, and a text is
         written once in the folder, whatever its category and style. The
         ledger beside them is keyed on ``(sample_description, entry_type,
-        style)``, and a resume reads it alone. ``fresh=True`` starts this
+        style)``, and a resume reads it alone. ``resume=False`` starts this
         style over and keeps the rows and acks of the others; without a
         style it clears the folder.
 
@@ -233,7 +233,7 @@ class InputPipeline(_StandaloneGenerationMixin):
         ledger = _constitution_inputs_ledger(folder)
         manifest = _constitution_inputs_manifest(folder)
         tree = {"artifact": folder, "pattern": _CATEGORY_FILES, "units_in": _entries_in}
-        if fresh and style:
+        if not resume and style:
             # The other styles keep their rows and their acks.
             drop_units(
                 ledger,
@@ -244,7 +244,7 @@ class InputPipeline(_StandaloneGenerationMixin):
             )
         # Before anything is written in the folder: it takes the stage's lock.
         processed = resume_state(
-            ledger, resume=bool(style) or not fresh, manifest=manifest, **tree)
+            ledger, resume=resume or bool(style), manifest=manifest, **tree)
         seen = set(ledger.ids)      # the content ids of the rows of every style
         preview: list[str] = []     # the first texts this run generated
         unshown = 0                 # how many it generated after those
@@ -441,7 +441,7 @@ class InputPipeline(_StandaloneGenerationMixin):
         if rejected_entries:
             logger.warning(
                 "%d entries rejected after %d attempt(s) each. They are acked "
-                "and skipped on resume; run with fresh=True, or delete their "
+                "and skipped on resume; run with resume=False, or delete their "
                 "'rejected' lines from the ledger, to try them again.",
                 rejected_entries, max_attempts,
             )
