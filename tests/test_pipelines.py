@@ -119,6 +119,33 @@ class TestGenerateOutputsManifest:
         assert len(Manifest.sidecar(out).load()) == 3   # full plan (all 3 units)
         assert len(pd.read_csv(out)) == 2               # only the 2 pending generated
 
+    def test_a_fresh_run_stopped_before_it_plans_leaves_no_old_plan(
+            self, tmp_path, monkeypatch):
+        import redact.pipelines as P
+        from redact import generate_outputs, paths
+        from redact.dataset import Manifest
+        from tests.conftest import MockBackend, make_client
+
+        monkeypatch.setattr(
+            P.ModelClient, "create", lambda m: make_client(MockBackend("ans"), m))
+        inputs = pd.DataFrame({
+            "sample": ["p one", "p two"],
+            "category": ["Cyber"] * 2, "entry_type": ["harmful"] * 2,
+        })
+        generate_outputs(data_dir=tmp_path, inputs=inputs, check_outputs=False,
+                         verbose=False)
+        manifest = Manifest.sidecar(paths.output_responses_csv(tmp_path))
+        assert manifest.path.exists()
+
+        def stop(self, rows):
+            raise KeyboardInterrupt
+
+        monkeypatch.setattr(Manifest, "write", stop)
+        with pytest.raises(KeyboardInterrupt):
+            generate_outputs(data_dir=tmp_path, inputs=inputs, check_outputs=False,
+                             resume=False, verbose=False)
+        assert not manifest.path.exists()
+
     def test_the_callers_frame_is_left_as_it_was(self, tmp_path, monkeypatch):
         """The stage adds its id column to a frame of its own."""
         import redact.pipelines as P

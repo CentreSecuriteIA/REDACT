@@ -1,7 +1,7 @@
 """The outputs stage: one checked model response per input row."""
 
+import functools
 import logging
-from collections.abc import Callable
 from pathlib import Path
 
 import pandas as pd
@@ -34,61 +34,23 @@ def run_output_generation(
     check_max_tokens: int | None = None,
     read_back: bool = True,
 ) -> pd.DataFrame:
-    """Generate model responses for input samples, batched and quality-checked.
+    """Generate one checked response per input row, appended to ``out_path``.
 
-    Pipeline:
-      1. One generate-check unit per row (``llm_pipeline.checked``), with the
-         row's own entry-type-aware output checker. Refusals on harmful
-         inputs are rejected; refusals on benign inputs are evaluated normally.
-      2. ``drive_units`` keeps ``2 * batch_size`` units live, or as many as
-         the widest async lane of the two models holds when that is more,
-         and sends calls of up to ``batch_size``. With ``max_attempts > 1``
-         rejected rows go round again, regenerated with the checker's
-         verdict as feedback, in the same calls as new rows.
-      3. Finished rows are appended to the output CSV every 32 units, in the
-         order they finish — crash-resilient.
+    Each row is a ``llm_pipeline.checked`` unit with its own entry-type-aware
+    output checker: a refusal of a harmful input is rejected, one of a benign
+    input is judged as any reply. With ``max_attempts > 1`` a rejected
+    response is regenerated with the verdict as feedback, and the row holds
+    the last attempt. An input whose prompt is too long for the model gets a
+    rejected row with an empty response. A call carries up to ``batch_size``
+    requests; ``check_max_tokens`` limits a verdict's reply.
 
-    An input whose prompt is longer than the model's context (a
-    ``PromptTooLongError`` from a request on the async lane) gets a rejected
-    row with an empty response and the ``rejection_reason``
-    ``"prompt too long: <message>"``.
-
-    Resume: each input gets a stable content-hash id (its ``id``/``sample_id``
-    column when present, else ``content_id(prompt)``). Completed ids are
-    recorded in a sidecar ``*.state.jsonl`` ledger beside ``out_path``. On a
-    re-run (``resume=True``) inputs already in the ledger are skipped, so a
-    crash loses only the live units. ``resume=False`` clears both the CSV and
-    the ledger first.
-
-    Args:
-        inputs: Input samples DataFrame — already loaded/capped by the caller.
-        client: Generation model, bound to its transport.
-        check_outputs: Run the entry-type-aware output quality checker.
-            Set False to skip checking (accept everything).
-        check: Checker model, or None when ``check_outputs`` is False.
-        batch_size: Inputs per engine pass.
-        out_path: Resolved output CSV path.
-        prompt_dir: Root prompt directory for the generation **and**
-            output-check prompts. ``None`` falls back to the bundled ``prompts/``.
-        resume: When True (default), skip inputs already recorded in the sidecar
-            state ledger. When False, clear the output CSV and ledger first.
-        verbose: Print per-batch progress.
-        max_attempts: Generations per input. With more than 1, a rejected
-            response is regenerated with the checker's verdict as feedback
-            and the row holds the last attempt.
-        check_max_tokens: Reply limit for the check calls; a verdict needs
-            few tokens. ``None`` keeps the checker model's default.
-        read_back: False returns an empty DataFrame and does not read the
-            output CSV.
+    A row's ``input_id`` is its input's id (``row_ids``); its ``sample_id``
+    is ``content_id`` of the response. The ledger beside ``out_path`` is
+    keyed on ``input_id``; ``resume=False`` starts the stage over.
 
     Returns:
-        DataFrame of all rows in the output CSV (the full dataset, including
-        rows from prior resumed runs) with the unified output schema:
-        ``input_id``, ``sample_id``, ``input_prompt``, ``category``,
-        ``subcategory``, ``entry_type``, ``output_response``, ``accepted``,
-        ``rejection_reason``, ``model``, ``source``. ``sample_id`` is this
-        row's own content-hash identity (``content_id(output_response)``),
-        distinct from ``input_id`` (the origin sample it responds to).
+        The rows of ``out_path``, from this run and earlier ones, or an empty
+        frame when ``read_back`` is False.
     """
     # Internals capture (opt-in): only true for an introspection-capable
     # backend (e.g. TransformersIntrospectionBackend); a no-op for the default
@@ -112,14 +74,16 @@ def run_output_generation(
     inputs["_state_id"] = row_ids(inputs, text_col)
 
     # Before the manifest is written: the resume takes the stage's lock. A
-    # non-resume run wipes prior output + ledger; a resume skips the ids the
+    # non-resume run wipes prior output, ledger and plan; a resume skips the ids the
     # ledger records, and cuts off the rows of a save whose acks did not land:
     # their inputs run again, and no input ends with two rows.
-    completed = resume_state(ledger, resume=resume, artifact=out_path)
+    manifest = Manifest.sidecar(out_path)
+    completed = resume_state(
+        ledger, resume=resume, artifact=out_path, manifest=manifest)
 
     # Plan → manifest: one row per input_id, written before the batch loop so the
     # run's full intended scope is inspectable up front (keyed like the ledger).
-    Manifest.sidecar(out_path).write(
+    manifest.write(
         {"input_id": sid, "status": "planned"} for sid in inputs["_state_id"]
     )
 
@@ -136,16 +100,11 @@ def run_output_generation(
                     f"enabled ({check.model})" if check_outputs and check else "disabled",
                     batch_size)
 
-    # Per-(category, entry_type) checker cache so we build each prompt once.
-    checker_cache: dict[tuple[str, str], Callable[[str, str], list[dict]]] = {}
-
+    @functools.cache
     def _checker_for(category: str, entry_type: str):
-        key = (category, entry_type)
-        if key not in checker_cache:
-            checker_cache[key] = build_output_quality_checker(
-                category=category, entry_type=entry_type, prompt_dir=prompt_dir
-            )
-        return checker_cache[key]
+        return build_output_quality_checker(
+            category=category, entry_type=entry_type, prompt_dir=prompt_dir
+        )
 
     written = 0
 
