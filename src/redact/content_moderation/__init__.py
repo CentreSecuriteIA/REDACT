@@ -2,14 +2,10 @@
 
 Usage:
     from redact.content_moderation import InputPipeline
-    from redact.content_moderation.checker import (
-        build_quality_checker,
-        build_category_checker,
-    )
+    from redact.content_moderation.checker import build_quality_checker
 """
 
 from .checker import (
-    build_category_checker,
     build_output_quality_checker,
     build_paraphrase_checker,
     build_quality_checker,
