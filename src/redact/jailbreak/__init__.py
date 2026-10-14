@@ -11,9 +11,8 @@ Pure transforms (encoding, structural, suffixes, ascii_art, requests) need no LL
 
 Usage:
     from redact.jailbreak import combine_techniques, sample_combination
-    from redact.jailbreak.obfuscation import get_type_to_getter
+    from redact.jailbreak.obfuscation import get_all_obfuscation_functions
     from redact.jailbreak.obfuscation.encoding import to_base64
-    from redact.jailbreak.requests import get_request_type_to_getter
 """
 
 # Obfuscation registry
@@ -22,11 +21,7 @@ from .distribution import deterministic_balanced_assign, split_by_technique_func
 from .engine import batch_apply_combinations
 
 # Hacking registry
-from .hacking import (
-    get_all_hacking_functions,
-    get_hacking_type_to_getter,
-    get_hacking_types,
-)
+from .hacking import get_all_hacking_functions
 
 # Run planning + resumable manifest ledger
 from .manifest import (
@@ -35,26 +30,14 @@ from .manifest import (
 )
 
 # Manipulation registry
-from .manipulation import (
-    get_all_manipulation_functions,
-    get_manipulation_type_to_getter,
-    get_manipulation_types,
-)
-from .obfuscation import (
-    get_all_obfuscation_functions,
-    get_obfuscation_types,
-    get_type_to_getter,
-)
+from .manipulation import get_all_manipulation_functions
+from .obfuscation import get_all_obfuscation_functions
 
 # Request protocol + batched engine
 from .protocol import LLMRequest, run_sync
 
 # Requests registry
-from .requests import (
-    get_all_request_functions,
-    get_request_type_to_getter,
-    get_request_types,
-)
+from .requests import get_all_request_functions
 
 # Utilities
 from .utils import (

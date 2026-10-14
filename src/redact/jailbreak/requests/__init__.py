@@ -25,28 +25,15 @@ from .indirect import get_indirect_functions
 from .temporal import get_temporal_functions
 
 
-def get_request_types() -> list[str]:
-    """Return list of request technique type names."""
-    return list(get_request_type_to_getter().keys())
-
-
-def get_request_type_to_getter() -> dict:
-    """Return mapping of request type name to its getter function."""
-    return {
-        "answer_format": get_answer_functions,
-        "answer_language": get_answer_language_functions,
-        "continuation": get_continuation_functions,
-        "indirect": get_indirect_functions,
-        "distractor": get_distractor_functions,
-        "impersonation": get_impersonation_functions,
-        "temporal": get_temporal_functions,
-        "asking": get_asking_functions,
-    }
-
-
 def get_all_request_functions() -> list[Callable]:
     """Return flat list of all request technique functions."""
-    funcs = []
-    for getter in get_request_type_to_getter().values():
-        funcs.extend(getter())
-    return funcs
+    return (
+        get_answer_functions()
+        + get_answer_language_functions()
+        + get_continuation_functions()
+        + get_indirect_functions()
+        + get_distractor_functions()
+        + get_impersonation_functions()
+        + get_temporal_functions()
+        + get_asking_functions()
+    )

@@ -171,16 +171,6 @@ def extract_harmful(
     return result
 
 
-def _get_harmful_words(
-    prompt: str,
-    client: ModelClient,
-    prompt_dir: str | Path | None = None,
-) -> list[str]:
-    """Run extract_harmful and return a clean list of detected words (sync)."""
-    raw = extract_harmful(prompt, client, prompt_dir)
-    return [w for w in raw.split() if w.lower() not in _TOKENBREAK_EMPTY_RESPONSES]
-
-
 def _harmful_words_gen(
     prompt: str, *, gen_model: str | None = None, prompt_dir=None, **kwargs
 ) -> TechniqueGen:

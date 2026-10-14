@@ -8,7 +8,6 @@ from redact.jailbreak.obfuscation.encoding import (
     to_ascii_ordinal,
     to_base64,
     to_braille,
-    to_leetspeak,
     to_leetspeak_advanced,
     to_leetspeak_basic,
     to_leetspeak_intermediate,
@@ -90,18 +89,15 @@ class TestSeparator:
 
 class TestLeetspeak:
     def test_known_replacements(self):
-        result, _ = to_leetspeak("aeiost")
+        result, _ = to_leetspeak_basic("aeiost")
         assert result == "431057"
 
-    def test_basic_alias(self):
-        assert to_leetspeak("aeiost") == to_leetspeak_basic("aeiost")
-
     def test_preserves_unmapped(self):
-        result, _ = to_leetspeak("xyz")
+        result, _ = to_leetspeak_basic("xyz")
         assert result == "xyz"
 
     def test_preserves_length(self):
-        result, _ = to_leetspeak(SAMPLE)
+        result, _ = to_leetspeak_basic(SAMPLE)
         assert len(result) == len(SAMPLE)
 
     def test_intermediate_adds_substitutions(self):

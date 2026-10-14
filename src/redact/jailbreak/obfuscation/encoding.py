@@ -114,10 +114,6 @@ def to_leetspeak_advanced(prompt: str) -> tuple[str, str]:
     return "".join(LEET_MAP_ADVANCED.get(c, c) for c in prompt), ""
 
 
-# Keep original name as alias for backwards compatibility
-to_leetspeak = to_leetspeak_basic
-
-
 MORSE_MAP = {
     "A": ".-", "B": "-...", "C": "-.-.", "D": "-..", "E": ".", "F": "..-.",
     "G": "--.", "H": "....", "I": "..", "J": ".---", "K": "-.-", "L": ".-..",
