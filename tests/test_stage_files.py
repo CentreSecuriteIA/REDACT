@@ -64,7 +64,7 @@ def _dies_on_call(n: int, calls: list):
 def _jailbreaks(folder, monkeypatch) -> dict:
     import redact.jailbreak.plan as JP
     import redact.jailbreak.pool as JPool
-    import redact.pipelines as P
+    import redact.stages as P
     from redact import generate_jailbreaks
     from tests.jailbreak.test_pipeline_jailbreaks import (
         GEN,
@@ -114,7 +114,7 @@ def _jailbreaks(folder, monkeypatch) -> dict:
 
 
 def _outputs(folder, monkeypatch) -> dict:
-    import redact.pipelines as P
+    import redact.stages as P
     from redact import generate_outputs
     from tests.test_pipelines import _TokenBackend
 

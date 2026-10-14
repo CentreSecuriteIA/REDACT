@@ -15,7 +15,7 @@ from redact.dataset import Manifest, content_id
 from redact.exceptions import PromptTooLongError
 from redact.jailbreak.protocol import LLMRequest
 from redact.llms.backends import ComputeConfig
-from redact.pipelines import generate_jailbreaks
+from redact.stages import generate_jailbreaks
 from tests.conftest import (
     Killed,
     MockBackend,
@@ -488,7 +488,7 @@ class _StepBackend(MockBackend):
 def _llm_run(tmp_path, monkeypatch, plan, backend, **kwargs):
     """Run the stage on ``plan``, ``[(prompt, technique), ...]``, written as its manifest."""
     import redact.jailbreak.pool as JPool
-    import redact.pipelines as P
+    import redact.stages as P
     from redact.dataset import Manifest
 
     monkeypatch.setattr(JPool, "all_techniques", lambda: [one_step, two_step, broken])

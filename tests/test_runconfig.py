@@ -282,8 +282,8 @@ def test_the_run_script_hands_run_pipeline_the_recipe_unread(tmp_path, monkeypat
 
 
 def test_every_recipe_role_is_called_by_a_stage():
-    from redact.pipelines import STAGES
     from redact.recipe import _DEFAULT_MODELS
+    from redact.stages import STAGES
 
     called = {role for stage in STAGES.values() for role, _ in stage.roles}
     assert called == set(_DEFAULT_MODELS)

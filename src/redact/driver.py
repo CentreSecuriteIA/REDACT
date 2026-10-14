@@ -23,7 +23,6 @@ import pandas as pd
 from redact import paths, telemetry
 from redact.dataset import count_rows, iter_rows
 from redact.llms.prompting import report_prompt_sources
-from redact.pipelines import STAGES, RunContext
 from redact.recipe import (
     _DEFAULT_MODELS,
     _role_names,
@@ -32,6 +31,7 @@ from redact.recipe import (
     resolve_role,
     serving_of,
 )
+from redact.stages import STAGES, RunContext
 
 logger = logging.getLogger(__name__)
 

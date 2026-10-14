@@ -9,8 +9,8 @@ from redact.driver import (
     write_manifest,
     write_record,
 )
-from redact.pipelines import STAGES
 from redact.recipe import load_params, load_recipe
+from redact.stages import STAGES
 
 __all__ = [
     "STAGES",

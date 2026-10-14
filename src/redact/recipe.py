@@ -12,7 +12,7 @@ import inspect
 import json
 from pathlib import Path
 
-from redact.pipelines import STAGES
+from redact.stages import STAGES
 
 _DEFAULT_MODELS = {
     "gen": None, "check": None, "translation": None, "constitution": None,
