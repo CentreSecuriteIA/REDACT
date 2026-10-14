@@ -35,7 +35,6 @@ skips constitution generation, so it's the cheaper "quick eval" option)::
 import logging
 import warnings
 from collections import Counter
-from contextlib import closing
 from pathlib import Path
 
 import pandas as pd
@@ -46,34 +45,24 @@ from redact.content_moderation import (
     run_output_generation,
     run_standalone_inputs,
 )
-from redact.content_moderation.inputs import _pool_size
 from redact.content_moderation.paraphrase import (
     paraphrase_pool,
     run_paraphrase_target,
 )
 from redact.dataset import (
-    CommitBuffer,
-    Ledger,
-    Manifest,
     Part,
-    append_rows,
     discover_categories,
     has_rows,
     iter_categories,
     load_taxonomy,
     merge_all,
     merge_inputs,
-    read_rows,
-    resume_state,
     row_ids,
     take_per_group,
     write_concat,
 )
-from redact.jailbreak import build_combination, load_spec, plan_run
 from redact.jailbreak import pool as jailbreak_pool
-from redact.jailbreak.engine import _finalize, _finalize_error, _sample_gen
-from redact.jailbreak.manipulation import get_or_generate_benign_data
-from redact.llm_pipeline import drive_units
+from redact.jailbreak.pipeline import run_augmentation
 from redact.llms import ModelClient, load_prompt
 from redact.llms.model_config import default_model_for_role
 
@@ -502,6 +491,7 @@ def generate_jailbreaks(
     batch_size: int = 256,
     iterations: int = 1,
     settings_per_iteration: list[dict] | None = None,
+    prompt_dir: str | Path | None = None,
     resume: bool = True,
     manifest_path: str | Path | None = None,
     verbose: bool = True,
@@ -509,89 +499,54 @@ def generate_jailbreaks(
 ) -> pd.DataFrame:
     """Augment input prompts with jailbreak technique combinations (batched).
 
-    Two explicit phases:
-
-    1. **Plan** — :func:`redact.jailbreak.plan_run` lays out the full run before
-       any generation: every input sample × ``iterations`` gets a
-       deterministically assigned combination (seeded on the prompt-content id,
-       deduped per sample) written to a JSONL manifest beside the output CSV.
-       Skipped when ``resume=True`` and a manifest already exists.
-    2. **Execute** — the pending units of the manifest run through
-       :func:`redact.llm_pipeline.drive_units`, ``2 * batch_size`` at a time
-       or as many as the generation model's async lane holds if that is more,
-       which pools LLM calls per model, up to ``batch_size`` per call, via each
-       model's client (vLLM native batch / API multi-worker). Output rows are
-       appended to the CSV as units finish, every 32 units, so a crash loses
-       only the live units and a re-run resumes from the output (its
-       ``(input_id, iteration)`` pairs are the source of truth).
+    Resolves the inputs, the generation client, the technique pool and the
+    output path, then runs :func:`redact.jailbreak.pipeline.run_augmentation`,
+    which plans the run whole and streams its units through the batched driver.
 
     Args:
         inputs: Input prompts DataFrame. If None, the accepted inputs of the
             run under ``data_dir`` (:func:`redact.dataset.merge_inputs`).
-        data_dir: Working root. Inputs are read from under ``{data_dir}/Datasets/``
-            (when ``inputs`` is None), the jailbreaks CSV defaults to
-            ``{data_dir}/Datasets/jailbreaks.csv``, and the benign cache to
-            ``{data_dir}/Data_cache/benign/``. Defaults to the project root
-            (``get_output_dir()``).
-        output_path: Explicit override for the jailbreaks CSV. Defaults to the
-            ``data_dir``-derived path. The manifest defaults to
+        data_dir: Working root. Inputs are read from under
+            ``{data_dir}/Datasets/`` (when ``inputs`` is None), the jailbreaks
+            CSV defaults to ``{data_dir}/Datasets/jailbreaks.csv`` and the
+            benign cache to ``{data_dir}/Data_cache/benign/``.
+        output_path: Override for the jailbreaks CSV. The manifest defaults to
             ``<output>.manifest.jsonl``.
-        benign_path: Explicit override for the FSH/DAP benign-cache CSV. Defaults
-            to the ``data_dir``-derived path.
+        benign_path: Override for the FSH/DAP benign-cache CSV.
         max_complexity / max_obfuscations: Combination-sampler limits.
         seed: Global run seed (combined with each sample's id + iteration).
-        pure_only: Exclude LLM-dependent techniques (no LLM calls).
-        entry_types: If set, filter inputs to these entry_type values.
+        pure_only: Exclude techniques that call a model or need benign data.
+        entry_types: If set, keep only inputs with these ``entry_type`` values.
         include_hacking / include_manipulation / include_obfuscation /
             include_requests: Layer toggles for the pool.
-        include_translation: When False, drop the translation family from the pool
-            so it is never sampled. Translation is the most expensive technique
-            family (each is a translate→check→retry loop = 2–8 LLM calls on the
-            translation-role model) and adds little to a first-pass dataset.
-            Defaults to True.
-        sampling_probs: Override per-layer inclusion probabilities (see
-            combination_spec.json ``sampling_probs``).
-        model: Generation model for LLM-dependent techniques. ``None`` (default)
-            resolves to the ``uncensored_gen`` role. Backend auto-resolved from
-            the name; the engine resolves a client per model.
-        translation_model: Model for the translation family. ``None`` (default)
-            uses the ``translation`` role (DeepSeek). Translation always routes to
-            its own model independently of ``model``.
-        auto_generate_benign: Pre-load/generate benign data for FSH/DAP.
+        include_translation: When False, drop the translation family from the
+            pool so it is never sampled. Each translation is a
+            translate->check->retry loop (2-8 LLM calls), the costliest family.
+        sampling_probs: Override per-layer inclusion probabilities.
+        model: Generation model. ``None`` resolves to the ``uncensored_gen``
+            role; the backend is auto-selected from the name.
+        translation_model: Model for the translation family. ``None`` uses the
+            ``translation`` role, independently of ``model``.
+        auto_generate_benign: Pre-load or generate benign data for FSH/DAP.
         batch_size: Requests per model call; twice as many units are live.
-        iterations: Combinations to assign per sample (1 = single-round). Ignored when
+        iterations: Combinations per sample. Ignored when
             ``settings_per_iteration`` is given (its length wins).
         settings_per_iteration: Per-round sampler kwargs for a multi-round
-            increasing-complexity run — one dict per round, each merged into the
-            combination sampler for that iteration. When provided, ``iterations`` is
-            set to ``len(settings_per_iteration)`` and every sample is augmented once
-            per round (e.g. 4 rounds → 4 augmentations per sample). The technique
-            **pool** is still built once from the top-level ``include_*`` flags (the
-            full superset); per-round ``include_*`` / ``sampling_probs`` /
-            ``exact_techniques`` keys are *sampling* restrictions, not pool membership.
-            See :func:`redact.jailbreak.default_escalation_schedule` for the built-in
-            default. ``None`` (default) → single flat-settings run.
-        resume: Reuse an existing manifest and skip already-written output rows.
+            escalating run, each merged over the base. See
+            :func:`redact.jailbreak.default_escalation_schedule`.
+        prompt_dir: Prompt overlay forwarded to the LLM-dependent techniques.
+        resume: Reuse an existing manifest and skip finished units.
         manifest_path: Override manifest location.
         verbose: Log progress.
-        read_back: False returns an empty DataFrame and does not read the
-            output CSV.
+        read_back: False returns an empty DataFrame and does not read the CSV.
 
     Returns:
-        DataFrame of all jailbreak rows from the output CSV (one per planned
-        unit), with the input columns plus ``sample_id``, ``jailbreak``,
-        ``technique``, ``technique_info``, ``complexity``, ``num_techniques``,
-        ``is_noop``, ``accepted``, ``reasoning``, ``iteration``,
-        ``combination_spec_version``. ``sample_id`` is this row's own
-        content-hash identity (``content_id(jailbreak_text)``), distinct from
-        ``input_id`` (the origin sample it was derived from).
+        The rows of the jailbreaks CSV (input columns plus ``sample_id``,
+        ``jailbreak``, ``technique``, ``technique_info``, ``complexity``,
+        ``num_techniques``, ``is_noop``, ``accepted``, ``reasoning``,
+        ``iteration``, ``combination_spec_version``). ``sample_id`` is this
+        row's own content-hash identity, distinct from ``input_id``.
     """
-    out = Path(output_path) if output_path else paths.jailbreaks_csv(data_dir)
-    man_path = Path(manifest_path) if manifest_path else Manifest.sidecar(out).path
-
-    # ------------------------------------------------------------------
-    # Load + normalize inputs (ensure a prompt column and a content-hash id)
-    # ------------------------------------------------------------------
     if inputs is None:
         inputs = merge_inputs(data_dir)
         if inputs.empty:
@@ -604,22 +559,9 @@ def generate_jailbreaks(
         raise ValueError("inputs must contain a 'prompt' (or 'sample') column.")
     if entry_types:
         inputs = inputs[inputs["entry_type"].isin(entry_types)].reset_index(drop=True)
-
     inputs["sample_id"] = row_ids(inputs, "prompt")
 
-    # Generation model defaults to the uncensored_gen role; translation defaults
-    # to the translation role (DeepSeek). Backend auto-resolved from the name.
-    model = model or default_model_for_role("uncensored_gen")
-    client = ModelClient.create(model)
-    # Internals capture (opt-in, non-interfering — no CSV column). Gated on the
-    # gen model's transport; _sample_gen/_tag_yields separately check
-    # each individual request's own target model, so a chain that also routes to
-    # translate_model only captures the calls whose model actually supports it.
-    capture_jailbreak = client.compute_config.supports_internals
-
-    # A fresh plan draws from the pool; the plan is read back through every
-    # registered technique, so a plan made with another pool still replays.
-    registry = jailbreak_pool.registry(jailbreak_pool.all_techniques())
+    client = ModelClient.create(model or default_model_for_role("uncensored_gen"))
     pool = jailbreak_pool.technique_pool(
         include_hacking=include_hacking,
         include_manipulation=include_manipulation,
@@ -640,173 +582,16 @@ def generate_jailbreaks(
     if sampling_probs is not None:
         sample_kwargs["sampling_probs"] = sampling_probs
 
-    # Multi-round escalation: the per-iteration settings list drives the round count.
-    if settings_per_iteration is not None:
-        if not settings_per_iteration:
-            raise ValueError("settings_per_iteration must be a non-empty list of dicts.")
-        iterations = len(settings_per_iteration)
-
-    spec_version = load_spec().get("version", "")
-
-    if verbose:
-        logger.info("Generate Jailbreaks (plan + batched execute)")
-        logger.info("Pool: %d techniques | Samples: %d | Iterations: %d | Model: %s | Batch: %d",
-                    len(pool), len(inputs), iterations, model, batch_size)
-
-    # Sidecar completion ledger (same crash-safe pattern as every other stage),
-    # keyed on the planned unit ``(input_id, iteration)``.
-    jb_ledger = Ledger.sidecar(
-        out, key_fields=("input_id", "iteration"),
-        casters={"input_id": str, "iteration": int},
+    return run_augmentation(
+        inputs, pool, client=client, translation_model=translation_model,
+        out_path=Path(output_path) if output_path else paths.jailbreaks_csv(data_dir),
+        manifest_path=Path(manifest_path) if manifest_path else None,
+        benign_path=Path(benign_path) if benign_path else paths.benign_csv(data_dir),
+        prompt_dir=prompt_dir, seed=seed, iterations=iterations,
+        settings_per_iteration=settings_per_iteration, sample_kwargs=sample_kwargs,
+        auto_generate_benign=auto_generate_benign, batch_size=batch_size,
+        resume=resume, verbose=verbose, read_back=read_back,
     )
-
-    # Before the plan is written: the resume takes the stage's lock. A fresh
-    # (non-resume) run clears prior output + ledger + plan, so that a run
-    # stopped while it plans does not leave the old plan to be reused; a
-    # resume keeps + skips what the ledger records, and cuts off what an
-    # unfinished save left.
-    manifest = Manifest(man_path)
-    completed = resume_state(
-        jb_ledger,
-        resume=resume,
-        artifact=out,
-        manifest=manifest,
-    )
-
-    # ------------------------------------------------------------------
-    # Phase 1 — Plan (lay out every unit before generation)
-    # ------------------------------------------------------------------
-    if resume and man_path.exists():
-        if verbose:
-            logger.info("Reusing existing manifest: %s", man_path)
-    else:
-        plan_run(
-            inputs, pool, manifest_path=man_path, seed=seed,
-            iterations=iterations, settings_per_iteration=settings_per_iteration,
-            sample_kwargs=sample_kwargs, verbose=verbose,
-        )
-
-    # ------------------------------------------------------------------
-    # Phase 2 — Execute (stream the manifest through the refill pool)
-    # ------------------------------------------------------------------
-    has_manipulation = any(
-        "fsh" in getattr(f, "families", []) or "dap" in getattr(f, "families", [])
-        for f in pool
-    )
-    benign_data = None
-    if auto_generate_benign and has_manipulation:
-        benign_data = get_or_generate_benign_data(
-            client=client,
-            cache_path=benign_path or paths.benign_csv(data_dir),
-            verbose=verbose,
-        )
-
-    # Where each input is in the frame, by its id; of two inputs with one id
-    # the later one. A unit's prompt and its row's input columns are read
-    # there when needed, so no copy of every input is held.
-    position = dict(zip(inputs["sample_id"], range(len(inputs))))
-    prompts = inputs["prompt"]
-
-    def _pending(plan_row: dict) -> bool:
-        """Whether a planned unit is of these inputs and not finished."""
-        sid = str(plan_row["sample_id"])
-        return sid in position and (sid, int(plan_row["iteration"])) not in completed
-
-    out.parent.mkdir(parents=True, exist_ok=True)
-    planned = total = written = 0
-    if verbose:     # one pass over the plan, for the numbers in the log lines
-        for plan_row in manifest:
-            planned += 1
-            total += _pending(plan_row)
-
-    if verbose and total:
-        logger.info("Executing %d units...", total)
-
-    def _append(rows: list[dict]) -> dict[Path, int]:
-        nonlocal written
-        sizes = append_rows(out, rows)
-        written += len(rows)
-        if verbose:
-            n_acc = sum(1 for x in rows if x.get("accepted"))
-            logger.info("[%d/%d] %d accepted -> appended to %s",
-                        written, total, n_acc, out.name)
-        return sizes
-
-    # Plan row and engine sample of each live unit, by its place among the
-    # pending units, so two plan rows with one (input_id, iteration) stay two
-    # units.
-    live: dict[int, tuple[dict, dict]] = {}
-
-    def _units():
-        # The plan is read one row at a time, as the driver takes units.
-        # Closed with this generator: Windows does not replace an open file.
-        with closing(iter(manifest)) as plan:
-            for i, r in enumerate(filter(_pending, plan)):
-                sid = str(r["sample_id"])
-                sample = {
-                    "id": sid,
-                    "prompt": prompts.iat[position[sid]],
-                    "combination": build_combination(r["combination"], registry),
-                    "iteration": int(r["iteration"]),
-                }
-                live[i] = (r, sample)
-                yield i, _sample_gen(
-                    sample, gen_model=model, translate_model=translation_model,
-                    benign_data=benign_data, capture_internals=capture_jailbreak,
-                )
-
-    def _add(plan_row: dict, res: dict) -> None:
-        # The input's columns seed the row, its own "sample_id" among them,
-        # which the jailbreak's replaces in the update below.
-        row = inputs.iloc[position[res["input_id"]]].to_dict()
-        row.update(res)
-        row["iteration"] = plan_row["iteration"]
-        row["combination_spec_version"] = spec_version
-        # Records are explicit so the on-disk key types stay str/int whatever
-        # the rows happen to carry.
-        buf.add([row], {"input_id": str(row["input_id"]),
-                        "iteration": int(row["iteration"])})
-
-    def _on_done(i, value):
-        plan_row, sample = live.pop(i)
-        _add(plan_row, _finalize(sample, value, model))
-
-    def _on_error(i, exc):
-        plan_row, sample = live.pop(i)
-        _add(plan_row, _finalize_error(sample, exc, model))
-
-    # A unit whose chain raises gets an error row and is acked. The buffer
-    # appends, then acks (see dataset/save.py), every 32 units and on any
-    # exit.
-    with (
-        closing(_units()) as units,
-        CommitBuffer(append=_append, ledger=jb_ledger) as buf,
-    ):
-        drive_units(
-            units,
-            on_done=_on_done,
-            on_error=_on_error,
-            pool_size=_pool_size(batch_size, client),
-            cap=batch_size,
-            progress="jailbreak" if verbose else None,
-        )
-
-    jailbreaks = read_rows(out) if read_back else pd.DataFrame()
-
-    if verbose:
-        logger.info("Jailbreak Summary")
-        logger.info("Planned units: %d | Newly written: %d", planned, written)
-        if read_back:
-            logger.info("Total rows in %s: %d", out.name, len(jailbreaks))
-        if not jailbreaks.empty and "accepted" in jailbreaks.columns:
-            n_accepted = int(jailbreaks["accepted"].sum())
-            n_noop = int(jailbreaks["is_noop"].sum()) if "is_noop" in jailbreaks.columns else 0
-            logger.info("Accepted: %d | Rejected: %d", n_accepted, len(jailbreaks) - n_accepted)
-            logger.info("No-ops: %d", n_noop)
-        logger.info("Manifest: %s", man_path)
-        logger.info("Saved to: %s", out)
-
-    return jailbreaks
 
 
 # ---------------------------------------------------------------------------

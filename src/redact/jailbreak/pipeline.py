@@ -1,0 +1,202 @@
+"""The jailbreak stage's core: plan, drive the units on the pool, save.
+
+Called once per kind of the augmentation section (the adversarial kind to
+``jailbreaks.csv``, the natural kind to ``variations.csv``).
+"""
+
+from __future__ import annotations
+
+import logging
+from collections.abc import Callable
+from contextlib import closing
+from pathlib import Path
+
+import pandas as pd
+
+from redact.dataset import (
+    CommitBuffer,
+    Ledger,
+    Manifest,
+    append_rows,
+    read_rows,
+    resume_state,
+)
+from redact.llm_pipeline import drive_units, pool_size
+from redact.llms.client import ModelClient
+
+from . import pool as pool_module
+from .manipulation import get_or_generate_benign_data
+from .plan import plan_run
+from .technique import load_spec
+from .units import error_row_of, is_pending, pending_units, row_of
+
+logger = logging.getLogger(__name__)
+
+
+def run_augmentation(
+    inputs: pd.DataFrame,
+    pool: list[Callable],
+    *,
+    client: ModelClient,
+    translation_model: str | None = None,
+    out_path: Path,
+    manifest_path: Path | None = None,
+    benign_path: Path | None = None,
+    prompt_dir=None,
+    seed: int = 42,
+    iterations: int = 1,
+    settings_per_iteration: list[dict] | None = None,
+    sample_kwargs: dict | None = None,
+    auto_generate_benign: bool = True,
+    batch_size: int = 256,
+    resume: bool = True,
+    verbose: bool = True,
+    read_back: bool = True,
+    label: str = "jailbreak",
+) -> pd.DataFrame:
+    """Augment the inputs with ``pool``'s techniques, appended to ``out_path``.
+
+    The run is planned whole into a manifest beside ``out_path`` — one
+    combination per input and iteration, drawn from ``pool`` and frozen — then
+    its pending units run through :func:`drive_units`, up to ``batch_size`` per
+    call, their rows appended every 32 units. The combination is read back
+    through every registered technique, so a plan made with another pool still
+    replays. ``label`` is the progress label and the internals-capture root.
+
+    Resume: completion is a sidecar ``*.state.jsonl`` ledger keyed
+    ``(input_id, iteration)``; ``resume=True`` reuses the plan and skips its
+    finished units, ``resume=False`` clears the output, ledger and plan first.
+
+    Returns:
+        The rows of ``out_path``, or an empty frame when ``read_back`` is False.
+    """
+    out_path = Path(out_path)
+    man_path = Path(manifest_path) if manifest_path else Manifest.sidecar(out_path).path
+    sample_kwargs = sample_kwargs or {}
+
+    # The registry is every registered technique, not the (filtered) pool, so a
+    # plan made with another pool still reconstructs.
+    registry = pool_module.registry(pool_module.all_techniques())
+    capture = client.compute_config.supports_internals
+
+    if settings_per_iteration is not None:
+        if not settings_per_iteration:
+            raise ValueError(
+                "settings_per_iteration must be a non-empty list of dicts.")
+        iterations = len(settings_per_iteration)
+
+    spec_version = load_spec().get("version", "")
+
+    if verbose:
+        logger.info("%s (plan + batched execute)", label)
+        logger.info(
+            "Pool: %d techniques | Samples: %d | Iterations: %d | Model: %s | Batch:"
+            " %d", len(pool), len(inputs), iterations, client.model, batch_size)
+
+    ledger = Ledger.sidecar(
+        out_path, key_fields=("input_id", "iteration"),
+        casters={"input_id": str, "iteration": int},
+    )
+
+    # Before the plan is written: the resume takes the stage's lock. A fresh
+    # (non-resume) run clears prior output, ledger and plan, so a run stopped
+    # while it plans does not leave the old plan to be reused; a resume keeps
+    # and skips what the ledger records, and cuts off an unfinished save.
+    manifest = Manifest(man_path)
+    completed = resume_state(
+        ledger, resume=resume, artifact=out_path, manifest=manifest)
+
+    if resume and man_path.exists():
+        if verbose:
+            logger.info("Reusing existing manifest: %s", man_path)
+    else:
+        plan_run(
+            inputs, pool, manifest_path=man_path, seed=seed,
+            iterations=iterations, settings_per_iteration=settings_per_iteration,
+            sample_kwargs=sample_kwargs, verbose=verbose,
+        )
+
+    benign_data = None
+    if auto_generate_benign and any(getattr(f, "requires_benign", False) for f in pool):
+        benign_data = get_or_generate_benign_data(
+            client=client, cache_path=benign_path, verbose=verbose)
+
+    # Where each input is in the frame, by its id; of two inputs with one id
+    # the later one. A unit's prompt and its row's input columns are read there
+    # when needed, so no copy of every input is held.
+    position = dict(zip(inputs["sample_id"], range(len(inputs))))
+    prompts = inputs["prompt"]
+
+    out_path.parent.mkdir(parents=True, exist_ok=True)
+    planned = total = written = 0
+    if verbose:     # one pass over the plan, for the numbers in the log lines
+        for plan_row in manifest:
+            planned += 1
+            total += is_pending(plan_row, position, completed)
+        if total:
+            logger.info("Executing %d units...", total)
+
+    def _append(rows: list[dict]) -> dict[Path, int]:
+        nonlocal written
+        sizes = append_rows(out_path, rows)
+        written += len(rows)
+        if verbose:
+            n_acc = sum(1 for x in rows if x.get("accepted"))
+            logger.info("[%d/%d] %d accepted -> appended to %s",
+                        written, total, n_acc, out_path.name)
+        return sizes
+
+    live: dict[int, dict] = {}
+
+    def _row(unit: dict, make: Callable) -> None:
+        input_row = inputs.iloc[position[unit["id"]]].to_dict()
+        buf.add([make(unit, input_row)], {"input_id": str(unit["id"]),
+                                          "iteration": int(unit["iteration"])})
+
+    def _on_done(i, value):
+        _row(live.pop(i),
+             lambda u, r: row_of(u, value, r, spec_version, gen_model=client.model))
+
+    def _on_error(i, exc):
+        _row(live.pop(i),
+             lambda u, r: error_row_of(u, exc, r, spec_version, gen_model=client.model))
+
+    def _units():
+        # The plan is read one row at a time, as the driver takes units; closed
+        # with this generator, since Windows does not replace an open file.
+        with closing(iter(manifest)) as plan:
+            yield from pending_units(
+                plan, prompts, position, completed, registry, live,
+                gen_model=client.model, translate_model=translation_model,
+                benign_data=benign_data, prompt_dir=prompt_dir,
+                capture=capture, label=label,
+            )
+
+    # A unit whose chain raises gets an error row and is acked. The buffer
+    # appends, then acks (see dataset/save.py), every 32 units and on any exit.
+    with (
+        closing(_units()) as units,
+        CommitBuffer(append=_append, ledger=ledger) as buf,
+    ):
+        drive_units(
+            units, on_done=_on_done, on_error=_on_error,
+            pool_size=pool_size(batch_size, client), cap=batch_size,
+            progress=label if verbose else None,
+        )
+
+    rows = read_rows(out_path) if read_back else pd.DataFrame()
+
+    if verbose:
+        logger.info("%s summary", label)
+        logger.info("Planned units: %d | Newly written: %d", planned, written)
+        if read_back:
+            logger.info("Total rows in %s: %d", out_path.name, len(rows))
+        if not rows.empty and "accepted" in rows.columns:
+            n_accepted = int(rows["accepted"].sum())
+            n_noop = int(rows["is_noop"].sum()) if "is_noop" in rows.columns else 0
+            logger.info("Accepted: %d | Rejected: %d",
+                        n_accepted, len(rows) - n_accepted)
+            logger.info("No-ops: %d", n_noop)
+        logger.info("Manifest: %s | Saved to: %s", man_path, out_path)
+
+    return rows

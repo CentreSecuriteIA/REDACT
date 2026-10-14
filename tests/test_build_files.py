@@ -482,16 +482,17 @@ def test_a_run_reports_the_counts_it_reported_before(run, tmp_path, monkeypatch)
 def test_a_run_counts_its_rows_without_a_stage_reading_them_back(
         run, tmp_path, monkeypatch):
     import redact.content_moderation.outputs as G
+    import redact.jailbreak.pipeline as JPipe
     import redact.pipelines as P
 
     def read_back(*args, **kwargs):
         raise AssertionError("a stage read its rows back")
 
-    # What the stages return their rows with: the inputs and the jailbreaks
-    # in pipelines.py, the outputs in outputs.py.
+    # What the stages return their rows with: the inputs in pipelines.py, the
+    # jailbreaks in jailbreak/pipeline.py, the outputs in outputs.py.
     def from_the_run_on():
         monkeypatch.setattr(P, "merge_all", read_back)
-        monkeypatch.setattr(P, "read_rows", read_back)
+        monkeypatch.setattr(JPipe, "read_rows", read_back)
         monkeypatch.setattr(G, "read_rows", read_back)
 
     expected = json.loads(_FIXTURE.read_text(encoding="utf-8"))["runs"][run]
