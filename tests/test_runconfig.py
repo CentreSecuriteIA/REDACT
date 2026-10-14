@@ -49,7 +49,6 @@ def test_runconfig_and_the_former_record_names_still_resolve():
     from redact import driver, recipe, runconfig
 
     assert runconfig.run_pipeline is driver.run_pipeline
-    assert runconfig.STAGE_ROLES is driver.STAGE_ROLES
     assert runconfig.load_recipe is recipe.load_recipe
     assert runconfig.load_params is recipe.load_params
     assert runconfig.STAGES is recipe.STAGES
@@ -62,11 +61,6 @@ def test_runconfig_and_the_former_record_names_still_resolve():
     assert redact.read_manifest is redact.read_record is driver.read_record
 
 
-def test_counts_none_is_empty():
-    from redact.driver import _counts
-    assert _counts(None) == {}
-
-
 class TestFileCounts:
     """The counts of a stage's files are those of its rows read into one frame."""
 
@@ -77,13 +71,12 @@ class TestFileCounts:
         return frame
 
     def test_rows_and_accepted_rows_of_several_files(self, tmp_path):
-        from redact.driver import _counts, file_counts
+        from redact.driver import file_counts
 
         files = [tmp_path / "a.csv", tmp_path / "b.csv"]
-        frames = [self._write(files[0], [True, False, True]),
-                  self._write(files[1], [False, True])]
+        self._write(files[0], [True, False, True])
+        self._write(files[1], [False, True])
         assert file_counts(files) == {"rows": 5, "accepted": 3}
-        assert file_counts(files) == _counts(pd.concat(frames))
 
     def test_a_file_is_read_in_chunks(self, tmp_path, monkeypatch):
         import redact.dataset.rows as rows
@@ -94,11 +87,10 @@ class TestFileCounts:
         assert file_counts([tmp_path / "a.csv"]) == {"rows": 5, "accepted": 3}
 
     def test_a_cell_without_a_verdict_is_a_row_that_is_not_accepted(self, tmp_path):
-        from redact.driver import _counts, file_counts
+        from redact.driver import file_counts
 
-        frame = self._write(tmp_path / "a.csv", [True, None, False, True])
+        self._write(tmp_path / "a.csv", [True, None, False, True])
         assert file_counts([tmp_path / "a.csv"]) == {"rows": 4, "accepted": 2}
-        assert file_counts([tmp_path / "a.csv"]) == _counts(frame)
 
     def test_files_without_an_accepted_column_give_rows_only(self, tmp_path):
         from redact.driver import file_counts
@@ -135,23 +127,33 @@ class TestFileCounts:
             "rows": 0, "accepted": 0}
 
 
+def _saves_a_constitution(rows):
+    """A ``generate_constitution`` that saves ``rows`` as the stage does."""
+    def run(**kwargs):
+        merged = paths.constitution_merged_csv(kwargs["data_dir"])
+        merged.parent.mkdir(parents=True, exist_ok=True)
+        pd.DataFrame(rows).to_csv(merged, index=False)
+        return pd.DataFrame()
+    return run
+
+
 def test_run_pipeline_asks_no_stage_to_read_its_rows_back(tmp_path, monkeypatch):
-    """Only the constitution's rows are used: the inputs stage is seeded from them."""
+    """The inputs stage is seeded from the constitution's file, not its rows."""
     import redact
 
     asked = {}
 
-    def stage(name, result):
-        def run(**kwargs):
+    def stage(name, run):
+        def asking(**kwargs):
             asked[name] = kwargs.get("read_back")
-            return result
-        monkeypatch.setattr(redact, name, run)
+            return run(**kwargs)
+        monkeypatch.setattr(redact, name, asking)
 
-    stage("generate_constitution", pd.DataFrame({"entry_type": ["harmful"]}))
+    stage("generate_constitution", _saves_a_constitution({"entry_type": ["harmful"]}))
     for name in ("generate_inputs", "generate_outputs", "generate_jailbreaks",
                  "build_dataset"):
-        stage(name, pd.DataFrame())
-    stage("generate_paraphrases", {})
+        stage(name, lambda **kwargs: pd.DataFrame())
+    stage("generate_paraphrases", lambda **kwargs: {})
     try:
         summary = run_pipeline(
             {"dataset_type": "training", "data_dir": str(tmp_path),
@@ -162,10 +164,129 @@ def test_run_pipeline_asks_no_stage_to_read_its_rows_back(tmp_path, monkeypatch)
     finally:
         telemetry.uninstall()
     assert asked == {
-        "generate_constitution": None, "generate_inputs": False,
+        "generate_constitution": False, "generate_inputs": False,
         "generate_outputs": False, "generate_paraphrases": False,
         "generate_jailbreaks": False, "build_dataset": False}
     assert summary["stages"]["constitution"]["counts"] == {"rows": 1}
+
+
+def test_a_training_run_starts_at_inputs_from_the_saved_constitution(
+        tmp_path, monkeypatch):
+    """Read as ``read_constitution`` reads it: an empty cell is ``""``."""
+    import redact
+
+    _saves_a_constitution({"entry_type": ["harmful", "benign"],
+                           "sample_description": ["about zq0", None]})(
+        data_dir=tmp_path)
+    handed = []
+    monkeypatch.setattr(
+        redact, "generate_inputs",
+        lambda **k: handed.append(k["constitution_df"]) or pd.DataFrame())
+    try:
+        run_pipeline({"dataset_type": "training", "data_dir": str(tmp_path),
+                      "stages": ["inputs"]}, params={}, verbose=False)
+    finally:
+        telemetry.uninstall()
+    (constitution,) = handed
+    assert constitution.to_dict("list") == {
+        "entry_type": ["harmful", "benign"], "sample_description": ["about zq0", ""]}
+
+
+def test_a_wrong_params_key_fails_before_any_stage_runs(tmp_path, monkeypatch):
+    import redact
+
+    ran = []
+    monkeypatch.setattr(redact, "generate_outputs", lambda **k: ran.append("outputs"))
+    recipe = {"dataset_type": "eval", "data_dir": str(tmp_path),
+              "stages": ["outputs", "build"]}
+    try:
+        with pytest.raises(ValueError) as raised:
+            run_pipeline(recipe, params={"build": {"output_pth": "x.csv"}},
+                         verbose=False)
+    finally:
+        telemetry.uninstall()
+    assert str(raised.value) == (
+        "params['build'] names ['output_pth'], which build_dataset does not take; "
+        "write only its parameters.")
+    assert ran == []
+
+
+@pytest.mark.parametrize("stage,key", [("outputs", "model"), ("build", "read_back")])
+def test_a_params_key_the_run_sets_itself_is_refused(tmp_path, monkeypatch, stage, key):
+    import redact
+
+    monkeypatch.setattr(redact, "generate_outputs", lambda **k: pd.DataFrame())
+    monkeypatch.setattr(redact, "build_dataset", lambda **k: pd.DataFrame())
+    recipe = {"dataset_type": "eval", "data_dir": str(tmp_path), "stages": [stage]}
+    try:
+        with pytest.raises(ValueError) as raised:
+            run_pipeline(recipe, params={stage: {key: "x"}}, verbose=False)
+    finally:
+        telemetry.uninstall()
+    front = {"outputs": "generate_outputs", "build": "build_dataset"}[stage]
+    assert str(raised.value) == (
+        f"params[{stage!r}] sets [{key!r}], which the run passes {front} itself; "
+        "leave it out of the params.")
+
+
+def test_the_jailbreak_stage_gets_the_recipes_prompt_dir(tmp_path, monkeypatch):
+    import redact
+
+    handed = []
+    monkeypatch.setattr(redact, "generate_jailbreaks",
+                        lambda **k: handed.append(k["prompt_dir"]) or pd.DataFrame())
+    recipe = {"dataset_type": "eval", "data_dir": str(tmp_path),
+              "stages": ["jailbreaks"], "prompt_dir": str(tmp_path / "prompts"),
+              "augmentations": {"include_translation": False}}
+    try:
+        run_pipeline(recipe, params={}, verbose=False)
+    finally:
+        telemetry.uninstall()
+    assert handed == [str(tmp_path / "prompts")]
+
+
+def test_run_pipeline_takes_a_data_dir_over_the_recipes(tmp_path, monkeypatch):
+    import redact
+
+    monkeypatch.setattr(redact, "build_dataset", lambda **k: pd.DataFrame())
+    recipe = {"dataset_type": "eval", "data_dir": str(tmp_path / "recipe"),
+              "stages": ["build"]}
+    try:
+        summary = run_pipeline(recipe, params={}, verbose=False,
+                               data_dir=tmp_path / "given")
+    finally:
+        telemetry.uninstall()
+    assert summary["data_dir"] == str(tmp_path / "given")
+    assert read_record("build", tmp_path / "given") is not None
+    assert read_record("build", tmp_path / "recipe") is None
+
+
+def test_the_run_script_hands_run_pipeline_the_recipe_unread(tmp_path, monkeypatch):
+    """The recipe is loaded once, by ``run_pipeline``; ``--data-dir`` goes with it."""
+    import importlib.util
+    import logging
+    import signal
+
+    spec = importlib.util.spec_from_file_location(
+        "run_script", Path(__file__).parents[1] / "scripts" / "run.py")
+    script = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(script)
+    handed = []
+    monkeypatch.setattr(script, "run_pipeline",
+                        lambda recipe, **kw: handed.append((recipe, kw)) or {})
+    monkeypatch.setattr(logging, "basicConfig", lambda **kw: None)
+    monkeypatch.setattr(signal, "signal", lambda *args: None)
+    assert script.main(["recipe.json", "--data-dir", "elsewhere", "--quiet"]) == 0
+    assert handed == [("recipe.json",
+                       {"params": None, "verbose": False, "data_dir": "elsewhere"})]
+
+
+def test_every_recipe_role_is_called_by_a_stage():
+    from redact.recipe import _DEFAULT_MODELS
+    from redact.stages import STAGES
+
+    called = {role for stage in STAGES.values() for role, _ in stage.roles}
+    assert called == set(_DEFAULT_MODELS)
 
 
 def test_run_pipeline_counts_the_files_a_recipe_names(tmp_path, monkeypatch):
@@ -576,7 +697,13 @@ def test_run_pipeline_all_stages_mocked(tmp_path, monkeypatch):
         return f
 
     const_df = pd.DataFrame({"entry_type": ["harmful"], "source_category": ["c"]})
-    monkeypatch.setattr(redact, "generate_constitution", mk("constitution", const_df))
+    save = _saves_a_constitution(const_df)
+
+    def constitution(*a, **k):
+        calls.append("constitution")
+        return save(**k)
+
+    monkeypatch.setattr(redact, "generate_constitution", constitution)
     monkeypatch.setattr(redact, "generate_inputs", mk("inputs", pd.DataFrame({"sample": ["s"], "accepted": [True]})))
     monkeypatch.setattr(redact, "generate_outputs", mk("outputs", pd.DataFrame({"output_response": ["o"], "accepted": [True]})))
     def paraphrase(*a, **k):
@@ -1323,6 +1450,41 @@ def test_a_failed_stage_still_releases_the_models_and_logs_the_summary(
     assert "[telemetry] local org/left-loaded held" in caplog.text
 
 
+def test_a_run_waits_for_a_load_under_way_before_it_unloads(
+        tmp_path, monkeypatch, local_models):
+    """A model the preloader is still loading at the end is released too."""
+    import threading
+    import time
+
+    import redact
+    from redact import residency
+
+    events = []
+
+    def preload(names, **kw):
+        def load():
+            time.sleep(0.5)
+            events.append("loaded")
+        thread = threading.Thread(target=load, daemon=True)
+        thread.start()
+        return thread
+
+    monkeypatch.setattr(redact, "generate_inputs", lambda **k: pd.DataFrame())
+    gen = local_models("_rc_join_gen")
+    recipe = {"dataset_type": "eval", "data_dir": str(tmp_path), "stages": ["inputs"],
+              "models": {"gen": gen}}
+    card = _one_card(24.0)
+    try:
+        with card[0], card[1], \
+             patch.object(residency, "preload", side_effect=preload), \
+             patch.object(residency, "unload_local",
+                          side_effect=lambda keep=None, **kw: events.append("unload")):
+            run_pipeline(recipe, params={}, verbose=False)
+    finally:
+        telemetry.uninstall()
+    assert events == ["loaded", "unload"]
+
+
 def test_a_run_leaves_no_planned_share_behind(tmp_path, monkeypatch):
     """The plan is the run's own: a later direct call must not inherit its shares."""
     import redact
@@ -1403,6 +1565,8 @@ def test_a_run_unloads_a_model_for_a_stage_and_loads_it_again(
             events.append(name)
             for role in roles:
                 ModelClient.create(k[role])
+            if name == "constitution":
+                _saves_a_constitution({"entry_type": ["harmful"]})(**k)
             return pd.DataFrame({"x": [1]}) if result is None else result
 
         monkeypatch.setattr(redact, f"generate_{name}", run)

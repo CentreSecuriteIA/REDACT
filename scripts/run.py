@@ -17,7 +17,7 @@ import logging
 import signal
 import sys
 
-from redact import run_pipeline, load_recipe
+from redact import run_pipeline
 
 
 def main(argv=None) -> int:
@@ -43,11 +43,8 @@ def main(argv=None) -> int:
     # action would leave the engine process holding the card.
     signal.signal(signal.SIGTERM, lambda signum, frame: sys.exit(128 + signum))
 
-    recipe = load_recipe(args.recipe)
-    if args.data_dir:
-        recipe["data_dir"] = args.data_dir
-
-    summary = run_pipeline(recipe, params=args.params, verbose=not args.quiet)
+    summary = run_pipeline(args.recipe, params=args.params, verbose=not args.quiet,
+                           data_dir=args.data_dir)
     print("\n=== Run summary ===")
     print(json.dumps(summary, indent=2, default=str))
     return 0

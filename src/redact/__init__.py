@@ -193,7 +193,8 @@ from .multi_turn import (  # noqa: E402, F401
 # ---------------------------------------------------------------------------
 # High-level pipeline functions
 # ---------------------------------------------------------------------------
-from .pipelines import (  # noqa: E402
+from .stages import (  # noqa: E402
+    STAGES,
     build_dataset,
     generate_constitution,
     generate_inputs,

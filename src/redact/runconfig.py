@@ -1,7 +1,6 @@
-"""Re-exports of :mod:`redact.recipe` and :mod:`redact.driver`, kept for one release."""
+"""Re-exports of the recipe loaders, the driver and the stage table, for one release."""
 
 from redact.driver import (
-    STAGE_ROLES,
     manifest_path,
     read_manifest,
     read_record,
@@ -10,11 +9,11 @@ from redact.driver import (
     write_manifest,
     write_record,
 )
-from redact.recipe import STAGES, load_params, load_recipe
+from redact.recipe import load_params, load_recipe
+from redact.stages import STAGES
 
 __all__ = [
     "STAGES",
-    "STAGE_ROLES",
     "load_params",
     "load_recipe",
     "manifest_path",

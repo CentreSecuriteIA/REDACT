@@ -430,7 +430,15 @@ def _training_run(folder: Path, monkeypatch, before=None) -> dict:
             ("Fraud", "dual_use_benign")])
     ])
     _stub_models(monkeypatch)
-    monkeypatch.setattr(redact, "generate_constitution", lambda **kwargs: constitution)
+
+    def generate_constitution(**kwargs):
+        # As the stage does: the entries are saved, and seed the inputs from there.
+        merged = paths.constitution_merged_csv(kwargs["data_dir"])
+        merged.parent.mkdir(parents=True, exist_ok=True)
+        constitution.to_csv(merged, index=False)
+        return pd.DataFrame()
+
+    monkeypatch.setattr(redact, "generate_constitution", generate_constitution)
 
     generate_inputs(
         data_dir=folder, constitution_df=constitution.iloc[:2], style="short",
@@ -483,12 +491,12 @@ def test_a_run_counts_its_rows_without_a_stage_reading_them_back(
         run, tmp_path, monkeypatch):
     import redact.content_moderation.outputs as G
     import redact.jailbreak.pipeline as JPipe
-    import redact.pipelines as P
+    import redact.stages as P
 
     def read_back(*args, **kwargs):
         raise AssertionError("a stage read its rows back")
 
-    # What the stages return their rows with: the inputs in pipelines.py, the
+    # What the stages return their rows with: the inputs in stages.py, the
     # jailbreaks in jailbreak/pipeline.py, the outputs in outputs.py.
     def from_the_run_on():
         monkeypatch.setattr(P, "merge_all", read_back)
@@ -521,7 +529,7 @@ def test_inputs_that_are_all_rejected_leave_no_merged_file(tmp_path, monkeypatch
 
 def test_inputs_not_read_back_are_merged_on_disk_and_into_no_frame(
         tmp_path, monkeypatch):
-    import redact.pipelines as P
+    import redact.stages as P
     from redact import generate_inputs
     from redact.llms import ModelClient
 

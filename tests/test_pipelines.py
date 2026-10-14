@@ -12,9 +12,20 @@ from redact.llms.backends import ComputeConfig
 from tests.conftest import MockBackend
 
 
+def test_the_former_module_name_still_resolves():
+    from redact import pipelines, stages
+
+    for name in pipelines.__all__:
+        assert getattr(pipelines, name) is getattr(stages, name)
+    assert set(pipelines.__all__) == {
+        "STAGES", "RunContext", "Stage", "build_dataset", "generate_constitution",
+        "generate_inputs", "generate_jailbreaks", "generate_outputs",
+        "generate_paraphrases"}
+
+
 class TestStandaloneInputsDeprecation:
     def test_standalone_generate_inputs_emits_deprecation_warning(self, tmp_path, monkeypatch):
-        import redact.pipelines as P
+        import redact.stages as P
         from redact import generate_inputs
         from tests.conftest import MockBackend, make_client
 
@@ -31,7 +42,7 @@ class TestGenerateOutputsManifest:
     """generate_outputs writes a plan manifest before the batch loop (offline)."""
 
     def test_manifest_written_with_one_row_per_input(self, tmp_path, monkeypatch):
-        import redact.pipelines as P
+        import redact.stages as P
         from redact import generate_outputs, paths
         from redact.dataset import Manifest
         from tests.conftest import MockBackend, make_client
@@ -55,7 +66,7 @@ class TestGenerateOutputsManifest:
         # The manifest is the full intended scope, written before the resume
         # filter — so a resume run that only generates the pending units still
         # records every planned unit in the manifest.
-        import redact.pipelines as P
+        import redact.stages as P
         from redact import generate_outputs, paths
         from redact.dataset import Ledger, Manifest, content_id
         from tests.conftest import MockBackend, make_client
@@ -79,7 +90,7 @@ class TestGenerateOutputsManifest:
 
     def test_a_fresh_run_stopped_before_it_plans_leaves_no_old_plan(
             self, tmp_path, monkeypatch):
-        import redact.pipelines as P
+        import redact.stages as P
         from redact import generate_outputs, paths
         from redact.dataset import Manifest
         from tests.conftest import MockBackend, make_client
@@ -106,7 +117,7 @@ class TestGenerateOutputsManifest:
 
     def test_the_callers_frame_is_left_as_it_was(self, tmp_path, monkeypatch):
         """The stage adds its id column to a frame of its own."""
-        import redact.pipelines as P
+        import redact.stages as P
         from redact import generate_outputs
         from tests.conftest import MockBackend, make_client
 
@@ -143,7 +154,7 @@ class TestGenerateOutputsFindsItsInputs:
 
     @pytest.mark.parametrize("seeded", [True, False], ids=["seeded", "standalone"])
     def test_the_inputs_of_the_run_are_found(self, tmp_path, monkeypatch, seeded):
-        import redact.pipelines as P
+        import redact.stages as P
         from redact import generate_outputs
         from redact.dataset import content_id
         from tests.conftest import MockBackend, make_client
@@ -167,7 +178,7 @@ class TestGenerateOutputsReadBack:
     def test_without_read_back_the_output_is_written_and_not_read(
             self, tmp_path, monkeypatch):
         import redact.content_moderation.outputs as G
-        import redact.pipelines as P
+        import redact.stages as P
         from redact import generate_outputs, paths
         from tests.conftest import MockBackend, make_client
 
@@ -193,7 +204,7 @@ class TestGenerateOutputsResume:
         """A crash between the CSV append and the ledger ack leaves a row with no
         ack. Without the CSV union, resume regenerates that input and appends a
         *second* row for it — two rows, two sample_ids, no dedup downstream."""
-        import redact.pipelines as P
+        import redact.stages as P
         from redact import generate_outputs, paths
         from redact.dataset import content_id
         from tests.conftest import MockBackend, make_client
@@ -229,7 +240,7 @@ class TestGenerateOutputsInternals:
     """
 
     def test_no_internals_kwarg_for_default_backend(self, tmp_path, monkeypatch):
-        import redact.pipelines as P
+        import redact.stages as P
         from redact import generate_outputs
         from tests.conftest import MockBackend, make_client
 
@@ -243,7 +254,7 @@ class TestGenerateOutputsInternals:
         assert "internals_id" not in df.columns and "internals_ids" not in df.columns
 
     def test_gen_internals_id_is_input_id_slash_output(self, tmp_path, monkeypatch):
-        import redact.pipelines as P
+        import redact.stages as P
         from redact import generate_outputs
         from tests.conftest import MockBackend, make_client
 
@@ -266,7 +277,7 @@ class TestGenerateOutputsInternals:
         assert "internals_id" not in df.columns
 
     def test_check_internals_id_is_input_id_slash_val_out(self, tmp_path, monkeypatch):
-        import redact.pipelines as P
+        import redact.stages as P
         from redact import generate_outputs
         from tests.conftest import MockBackend, make_client
 
@@ -294,7 +305,7 @@ class TestGenerateOutputsInternals:
         assert gen_root == check_root
 
     def test_check_internals_not_requested_when_check_backend_lacks_support(self, tmp_path, monkeypatch):
-        import redact.pipelines as P
+        import redact.stages as P
         from redact import generate_outputs
         from tests.conftest import MockBackend, make_client
 
@@ -324,7 +335,7 @@ class TestGenerateOutputsSampleId:
     specific to internals logging."""
 
     def test_sample_id_matches_hash_of_output_response(self, tmp_path, monkeypatch):
-        import redact.pipelines as P
+        import redact.stages as P
         from redact import generate_outputs
         from redact.dataset import content_id
         from tests.conftest import MockBackend, make_client
@@ -345,7 +356,7 @@ class TestGenerateOutputsRetry:
     """max_attempts: a rejected response is regenerated with the verdict."""
 
     def _run(self, tmp_path, monkeypatch, gen_replies, check_replies, **kwargs):
-        import redact.pipelines as P
+        import redact.stages as P
         from redact import generate_outputs
         from tests.conftest import MockBackend, make_client
 
@@ -384,7 +395,7 @@ class TestGenerateOutputsRetry:
         assert gen.calls[1]["messages"][-1]["content"].count("[FEEDBACK") == 1
 
     def test_check_calls_carry_the_limit_and_generation_keeps_the_default(self, tmp_path, monkeypatch):
-        import redact.pipelines as P
+        import redact.stages as P
         from redact import generate_outputs
         from tests.conftest import MockBackend, make_client
 
@@ -398,7 +409,7 @@ class TestGenerateOutputsRetry:
         assert gen.calls[0]["max_tokens"] == gen.default_max_tokens
 
     def test_a_chunk_is_one_generation_call_and_one_check_call(self, tmp_path, monkeypatch):
-        import redact.pipelines as P
+        import redact.stages as P
         from redact import generate_outputs
         from tests.conftest import make_client
         from tests.llms.test_router import _CountingBackend
@@ -475,7 +486,7 @@ class TestPoolSize:
 
     def test_the_outputs_stage_drives_with_it(self, tmp_path, monkeypatch):
         import redact.content_moderation.outputs as G
-        import redact.pipelines as P
+        import redact.stages as P
         from redact import generate_outputs
         from tests.conftest import make_client
 
@@ -501,7 +512,7 @@ class TestGenerateOutputsPool:
     """Outputs run through drive_units: full calls, rows as units finish."""
 
     def _clients(self, monkeypatch, gen, check):
-        import redact.pipelines as P
+        import redact.stages as P
         from tests.conftest import make_client
 
         backends = {"gen-model": gen, "check-model": check}
