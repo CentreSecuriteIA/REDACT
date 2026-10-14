@@ -122,3 +122,21 @@ class TestSensitiveEncodeFinish:
             "say apple now", lambda w: ("\\u0061pple", ""), "unicode", ["apple"])
         assert result == "say \\u0061pple now"
         assert info == "encoding=unicode;detected_words=apple"
+
+
+class TestParseHarmfulWords:
+    def test_a_short_word_list(self):
+        from redact.jailbreak.obfuscation.tokenbreak import _parse_harmful_words
+
+        assert _parse_harmful_words("  apple pear \n") == ["apple", "pear"]
+
+    def test_none_and_a_rambling_reply_give_no_words(self):
+        from redact.jailbreak.obfuscation.tokenbreak import _parse_harmful_words
+
+        assert _parse_harmful_words("None") == []
+        assert _parse_harmful_words(" ".join(["word"] * 11)) == []
+
+    def test_placeholder_words_are_dropped(self):
+        from redact.jailbreak.obfuscation.tokenbreak import _parse_harmful_words
+
+        assert _parse_harmful_words("apple n/a pear") == ["apple", "pear"]

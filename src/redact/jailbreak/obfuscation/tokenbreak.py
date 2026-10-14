@@ -7,9 +7,8 @@ substitutions applied to them.
 import random
 import re
 from collections.abc import Callable
-from pathlib import Path
+from functools import partial
 
-from redact.jailbreak.dynamic_functions import bind_functions
 from redact.jailbreak.obfuscation.encoding import (
     SEPARATORS,
     to_ascii_ordinal,
@@ -23,9 +22,7 @@ from redact.jailbreak.obfuscation.encoding import (
     to_unicode_escape,
 )
 from redact.jailbreak.protocol import LLMRequest, TechniqueGen
-from redact.llms.client import ModelClient
 from redact.llms.prompting import build_messages, load_prompt
-from redact.llms.router import generate_sample
 
 
 def match_case(original: str, replacement: str) -> str:
@@ -120,16 +117,18 @@ def tokenbreak_delimiter(word: str) -> tuple[str, str]:
         return delimiter.join(list(word)), delimiter
 
 
+_ATTACKS = {
+    "prepend": tokenbreak_prepend,
+    "split": tokenbreak_split,
+    "delimiter": tokenbreak_delimiter,
+}
+
+
 def tokenbreak_obfuscate_word(word: str, attack: str) -> tuple[str, str]:
     """Obfuscate a single word using specified attack type."""
-    if attack == "prepend":
-        return tokenbreak_prepend(word)
-    elif attack == "split":
-        return tokenbreak_split(word)
-    elif attack == "delimiter":
-        return tokenbreak_delimiter(word)
-    else:
+    if attack not in _ATTACKS:
         raise ValueError(f"Unknown attack type: {attack}")
+    return _ATTACKS[attack](word)
 
 
 _TOKENBREAK_EMPTY_RESPONSES = {"none", "n/a", "no harmful words", ""}
@@ -138,25 +137,13 @@ _TOKENBREAK_EMPTY_RESPONSES = {"none", "n/a", "no harmful words", ""}
 _MAX_HARMFUL_WORDS_RESPONSE_LEN = 10
 
 
-def extract_harmful(
-    prompt: str,
-    client: ModelClient,
-    prompt_dir: str | Path | None = None,
-) -> str:
-    """Extract harmful words from prompt using LLM.
-
-    Returns:
-        Space-separated harmful words, or "" if none detected.
-    """
-    config = load_prompt("jailbreak", "extract_harmful", prompt_dir)
-    messages = build_messages(config, prompt=prompt)
-    result = generate_sample(client, messages)
-    result = result.strip()
-    if result.lower() == "none":
-        return ""
-    if len(result.split()) > _MAX_HARMFUL_WORDS_RESPONSE_LEN:
-        return ""
-    return result
+def _parse_harmful_words(reply: str) -> list[str]:
+    """The words of an extraction reply: none for ``none``, or for a reply
+    longer than a short word list."""
+    raw = reply.strip()
+    if raw.lower() == "none" or len(raw.split()) > _MAX_HARMFUL_WORDS_RESPONSE_LEN:
+        return []
+    return [w for w in raw.split() if w.lower() not in _TOKENBREAK_EMPTY_RESPONSES]
 
 
 def _harmful_words_gen(
@@ -168,10 +155,7 @@ def _harmful_words_gen(
     """
     config = load_prompt("jailbreak", "extract_harmful", prompt_dir)
     messages = build_messages(config, prompt=prompt)
-    raw = (yield LLMRequest(gen_model, messages)).strip()
-    if raw.lower() == "none" or len(raw.split()) > _MAX_HARMFUL_WORDS_RESPONSE_LEN:
-        return []
-    return [w for w in raw.split() if w.lower() not in _TOKENBREAK_EMPTY_RESPONSES]
+    return _parse_harmful_words((yield LLMRequest(gen_model, messages)))
 
 
 def _tokenbreak_finish(prompt: str, attack: str, harmful_words: list[str]) -> tuple[str, str]:
@@ -282,20 +266,24 @@ _ENCODE_SPECS = [
 ]
 
 
-def _make_encode_fn(fname: str, encode_fn, encode_name: str, doc: str):
+def _make_word_fn(name: str, finish: Callable, doc: str) -> Callable:
+    """The technique that finds the prompt's words, then applies ``finish``."""
+
     def fn(prompt: str, **kwargs) -> TechniqueGen:
         words = yield from _harmful_words_gen(prompt, **kwargs)
-        return _sensitive_encode_finish(prompt, encode_fn, encode_name, words)
-    fn.__name__ = fname
-    fn.__qualname__ = fname
+        return finish(prompt, harmful_words=words)
+
+    fn.__name__ = fn.__qualname__ = name
     fn.__doc__ = doc
     return fn
 
 
-bind_functions(globals(), [
-    _make_encode_fn(_fname, _encode_fn, _encode_name, _doc)
-    for _fname, _encode_fn, _encode_name, _doc in _ENCODE_SPECS
-])
+# One technique per encoding, named to_sensitive_words_encode_<encoding>.
+_ENCODED = [
+    _make_word_fn(name, partial(_sensitive_encode_finish, encode_fn=encode_fn,
+                                encode_name=encode_name), doc)
+    for name, encode_fn, encode_name, doc in _ENCODE_SPECS
+]
 
 
 def to_sensitive_words_encode_separator(prompt: str, **kwargs) -> TechniqueGen:
@@ -312,20 +300,13 @@ _CHAR_SPECS = [
 ]
 
 
-def _make_char_fn(fname: str, separator: str, sep_name: str, doc: str):
-    def fn(prompt: str, **kwargs) -> TechniqueGen:
-        words = yield from _harmful_words_gen(prompt, **kwargs)
-        return _sensitive_char_finish(prompt, separator, sep_name, words)
-    fn.__name__ = fname
-    fn.__qualname__ = fname
-    fn.__doc__ = doc
-    return fn
-
-
-bind_functions(globals(), [
-    _make_char_fn(_fname, _sep, _sep_name, _doc)
-    for _fname, _sep, _sep_name, _doc in _CHAR_SPECS
-])
+# One technique per separator, named to_sensitive_words_<separator name>.
+_SEPARATED = [
+    _make_word_fn(name, partial(_sensitive_char_finish, separator=separator,
+                                sep_name=sep_name), doc)
+    for name, separator, sep_name, doc in _CHAR_SPECS
+]
+globals().update({fn.__name__: fn for fn in _ENCODED + _SEPARATED})
 
 
 def to_sensitive_words_variables(prompt: str, **kwargs) -> TechniqueGen:
@@ -376,21 +357,13 @@ def get_tokenbreak_functions() -> list[Callable]:
 
 def get_sensitive_words_functions() -> list[Callable]:
     """Return the sensitive-word technique functions."""
+    # The separator encoding sits between the six encodings and the three
+    # leetspeak levels.
     return [
-        to_sensitive_words_encode_base64,
-        to_sensitive_words_encode_rot13,
-        to_sensitive_words_encode_rot18,
-        to_sensitive_words_encode_rot47,
-        to_sensitive_words_encode_unicode,
-        to_sensitive_words_encode_ascii,
+        *_ENCODED[:6],
         to_sensitive_words_encode_separator,
-        to_sensitive_words_encode_leetspeak_basic,
-        to_sensitive_words_encode_leetspeak_intermediate,
-        to_sensitive_words_encode_leetspeak_advanced,
-        to_sensitive_words_split,
-        to_sensitive_words_star,
-        to_sensitive_words_hyphen,
-        to_sensitive_words_underscore,
+        *_ENCODED[6:],
+        *_SEPARATED,
         to_sensitive_words_variables,
         to_synonym_substitution,
     ]
