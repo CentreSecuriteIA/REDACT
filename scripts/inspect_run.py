@@ -10,8 +10,7 @@ stage should continue.
 import argparse
 import sys
 
-from redact.driver import read_record
-from redact.recipe import STAGES
+from redact import STAGES, read_record
 
 
 def main(argv=None) -> int:

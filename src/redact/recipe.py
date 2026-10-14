@@ -8,16 +8,20 @@ registry name, or an object that also says how the model is served, see
 params file holds each stage's tunables under the stage's name.
 """
 
+import inspect
 import json
 from pathlib import Path
 
-# Ordered canonical stage names. A recipe's ``stages`` is any subset, in order.
-STAGES = ("constitution", "inputs", "outputs", "paraphrase", "jailbreaks", "build")
+from redact.pipelines import STAGES
 
 _DEFAULT_MODELS = {
     "gen": None, "check": None, "translation": None, "constitution": None,
     "paraphraser": None, "paraphrase_check": None,
 }
+
+# Recipe role -> the registry role of its default model.
+_REGISTRY_ROLES = {role: registry
+                   for stage in STAGES.values() for role, registry in stage.roles}
 
 # The keys of a role's object under ``models`` that say how its model is served.
 _SERVING_KEYS = ("backend_type", "copies", "workers")
@@ -85,6 +89,38 @@ def _role_names(models: dict) -> dict:
             for role, entry in models.items()}
 
 
+def resolve_role(
+    models: dict, role: str, augmentations: dict | None = None,
+) -> list[str]:
+    """The models a recipe role stands for, resolved as its stage resolves it.
+
+    ``paraphraser`` may name the pool of every paraphraser, ``check`` left
+    out is the ``gen`` model, and ``translation`` is no model when the
+    jailbreak stage's pool, built from ``augmentations``, has no translation
+    technique.
+
+    Raises:
+        KeyError, ValueError: No model is registered for the role.
+    """
+    from .content_moderation.paraphrase import paraphrase_pool
+    from .jailbreak.pool import technique_pool, uses_translation
+    from .llms.model_config import default_model_for_role
+
+    name = models.get(role)
+    if role == "paraphraser":
+        return paraphrase_pool(name)
+    if role == "check":
+        return [name] if name else resolve_role(models, "gen", augmentations)
+    if role == "translation":
+        settings = augmentations or {}
+        flags = {key: settings[key]
+                 for key in inspect.signature(technique_pool).parameters
+                 if key in settings}
+        if not uses_translation(technique_pool(**flags)):
+            return []
+    return [name or default_model_for_role(_REGISTRY_ROLES[role])]
+
+
 def serving_of(models: dict) -> dict[str, dict]:
     """How a recipe's ``models`` say its models are served, per model name.
 
@@ -111,7 +147,6 @@ def serving_of(models: dict) -> dict[str, dict]:
         ValueError: An object breaks a rule. The message names the role and
             says what to write instead.
     """
-    from .driver import _resolve_role
     from .llms.backends import SETUP_TYPES, resolve_setup, validate_concurrency
     from .llms.model_config import get_model_config
 
@@ -147,7 +182,7 @@ def serving_of(models: dict) -> dict[str, dict]:
 
         # The rules below need the registry entry of the role's model.
         try:
-            (name,) = _resolve_role(names, role, {})
+            (name,) = resolve_role(names, role)
             config = get_model_config(name)
         except (KeyError, TypeError, ValueError):
             asked = repr(names[role]) if names[role] else "the role's default model"

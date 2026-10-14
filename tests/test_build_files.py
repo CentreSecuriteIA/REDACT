@@ -430,7 +430,15 @@ def _training_run(folder: Path, monkeypatch, before=None) -> dict:
             ("Fraud", "dual_use_benign")])
     ])
     _stub_models(monkeypatch)
-    monkeypatch.setattr(redact, "generate_constitution", lambda **kwargs: constitution)
+
+    def generate_constitution(**kwargs):
+        # As the stage does: the entries are saved, and seed the inputs from there.
+        merged = paths.constitution_merged_csv(kwargs["data_dir"])
+        merged.parent.mkdir(parents=True, exist_ok=True)
+        constitution.to_csv(merged, index=False)
+        return pd.DataFrame()
+
+    monkeypatch.setattr(redact, "generate_constitution", generate_constitution)
 
     generate_inputs(
         data_dir=folder, constitution_df=constitution.iloc[:2], style="short",

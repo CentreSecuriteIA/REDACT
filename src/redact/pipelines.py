@@ -21,9 +21,6 @@ skips constitution generation, so it's the cheaper "quick eval" option)::
     inputs = generate_inputs(samples_per_category=15, num_categories=3)
 """
 
-#TODO(driver script): the generate_* functions should not be called on their
-# own; only the pipeline entry point should call them. Fix them to that later.
-
 #TODO(dataset): what the stages do not do yet for a large run (around 1M rows):
 #   - A stage holds its inputs in memory, and unless called with
 #     read_back=False reads the full output CSV back to return it.
@@ -32,14 +29,18 @@ skips constitution generation, so it's the cheaper "quick eval" option)::
 #   - Nothing locks the constitution's files or the standalone inputs against
 #     a second process.
 
+import inspect
 import logging
 import warnings
 from collections import Counter
+from collections.abc import Callable
+from dataclasses import dataclass
 from pathlib import Path
 
 import pandas as pd
 
 from redact import dataset, paths
+from redact.constitution import read_constitution
 from redact.content_moderation import (
     InputPipeline,
     run_output_generation,
@@ -863,3 +864,204 @@ def build_dataset(
     # low_memory=False: a column that only some parts have would otherwise be
     # typed piece by piece, with a warning about its mixed types.
     return pd.read_csv(out_path, low_memory=False)
+
+
+@dataclass(frozen=True)
+class RunContext:
+    """What one run of a recipe hands its stages."""
+
+    data_dir: str | Path | None
+    dataset_type: str
+    models: dict                # recipe role -> model name, None for its default
+    prompt_dir: str | Path | None
+    taxonomy: dict | str
+    taxonomy_dir: str | Path | None
+    params: dict                # the params file: stage name -> the front's kwargs
+    augmentations: dict
+    resume: bool
+    verbose: bool
+
+
+@dataclass(frozen=True)
+class Stage:
+    """A stage a recipe can name: its front, the roles it calls, the files it writes.
+
+    ``roles`` pairs each recipe role the stage calls with the registry role
+    of its default model. ``recipe_kwargs`` is what the run passes the front
+    from the recipe. ``files`` is the CSVs that hold the stage's rows and
+    the values a row holds to be counted, for
+    :func:`redact.driver.file_counts`.
+    """
+
+    name: str
+    front: str
+    roles: tuple[tuple[str, str], ...]
+    files: Callable[[RunContext], tuple[list[Path], dict]]
+    recipe_kwargs: Callable[[RunContext], dict]
+
+    @property
+    def run(self) -> Callable[..., object]:
+        """The front, as :mod:`redact` exports it when the stage runs."""
+        import redact
+
+        return getattr(redact, self.front)
+
+    def params(self, ctx: RunContext) -> dict:
+        """The params file's kwargs for the stage.
+
+        Raises:
+            ValueError: A key that is not a parameter of the front.
+        """
+        given = _params(ctx, self.name)
+        taken = inspect.signature(self.run).parameters
+        if any(p.kind is p.VAR_KEYWORD for p in taken.values()):
+            return given
+        unknown = [key for key in given if key not in taken]
+        if unknown:
+            raise ValueError(
+                f"params[{self.name!r}] names {unknown}, which {self.front} does "
+                "not take; write only its parameters.")
+        return given
+
+    def kwargs(self, ctx: RunContext) -> dict:
+        """The front's kwargs: the recipe's, then the params file's.
+
+        Raises:
+            ValueError: A params key that is not a parameter of the front, or
+                one the run passes it itself.
+        """
+        given = self.params(ctx)
+        recipe = self.recipe_kwargs(ctx)
+        clash = sorted(set(given) & {*recipe, "read_back"})
+        if clash:
+            raise ValueError(
+                f"params[{self.name!r}] sets {clash}, which the run passes "
+                f"{self.front} itself; leave {'it' if len(clash) == 1 else 'them'} "
+                "out of the params.")
+        return {**recipe, **given}
+
+
+def _params(ctx: RunContext, stage: str) -> dict:
+    """The params file's entry for ``stage``."""
+    return dict(ctx.params.get(stage) or {})
+
+
+def _one_file(stage: str, default: Callable) -> Callable:
+    """``files`` of a stage writing one CSV, which its ``output_path`` moves."""
+    def files(ctx: RunContext) -> tuple[list[Path], dict]:
+        return [_params(ctx, stage).get("output_path") or default(ctx.data_dir)], {}
+    return files
+
+
+def _constitution_kwargs(ctx: RunContext) -> dict:
+    return dict(
+        taxonomy=ctx.taxonomy, taxonomy_dir=ctx.taxonomy_dir,
+        model=ctx.models["constitution"], data_dir=ctx.data_dir,
+        resume=ctx.resume, verbose=ctx.verbose,
+    )
+
+
+def _constitution_files(ctx: RunContext) -> tuple[list[Path], dict]:
+    return [paths.constitution_merged_csv(ctx.data_dir)], {}
+
+
+def _inputs_kwargs(ctx: RunContext) -> dict:
+    kwargs = dict(
+        data_dir=ctx.data_dir, taxonomy=ctx.taxonomy, taxonomy_dir=ctx.taxonomy_dir,
+        prompt_dir=ctx.prompt_dir, model=ctx.models["gen"],
+        check_model=ctx.models["check"], resume=ctx.resume, verbose=ctx.verbose,
+    )
+    if ctx.dataset_type == "training":
+        kwargs["constitution_df"] = _saved_constitution(ctx.data_dir)
+    return kwargs
+
+
+def _saved_constitution(data_dir: str | Path | None) -> pd.DataFrame:
+    """The constitution saved under ``data_dir``, which seeds a training run's inputs.
+
+    Raises:
+        ValueError: No constitution is saved there.
+    """
+    merged = paths.constitution_merged_csv(data_dir)
+    if not merged.exists():
+        raise ValueError(
+            f"training run: no constitution at {merged}. Its entries seed the "
+            "inputs, so run the 'constitution' stage before 'inputs', in this "
+            "recipe or in an earlier run on the same data_dir.")
+    return read_constitution(paths.constitution_dir(data_dir))
+
+
+def _inputs_files(ctx: RunContext) -> tuple[list[Path], dict]:
+    seeded = ctx.dataset_type == "training"
+    tree = (paths.constitution_inputs_dir if seeded else paths.datasets)(ctx.data_dir)
+    files = [paths.category_csv(c, root=tree) for c in discover_categories(tree)]
+    keep = {"accepted": True}
+    # Seeded inputs of another style may share the tree.
+    style = _params(ctx, "inputs").get("style", "long")
+    if seeded and style:
+        keep["template_style"] = style
+    return files, keep
+
+
+def _outputs_kwargs(ctx: RunContext) -> dict:
+    return dict(
+        data_dir=ctx.data_dir, model=ctx.models["gen"],
+        check_model=ctx.models["check"], prompt_dir=ctx.prompt_dir,
+        resume=ctx.resume, verbose=ctx.verbose,
+    )
+
+
+def _paraphrase_kwargs(ctx: RunContext) -> dict:
+    return dict(
+        data_dir=ctx.data_dir, paraphraser=ctx.models["paraphraser"],
+        check_model=ctx.models["paraphrase_check"], prompt_dir=ctx.prompt_dir,
+        resume=ctx.resume, verbose=ctx.verbose,
+    )
+
+
+def _paraphrase_files(ctx: RunContext) -> tuple[list[Path], dict]:
+    given = _params(ctx, "paraphrase")
+    target = given.get("target", "both")
+    default = {"inputs": paths.paraphrases_inputs_csv,
+               "outputs": paths.paraphrases_outputs_csv}
+    return [given.get(f"{name}_path") or default[name](ctx.data_dir)
+            for name in default if target in (name, "both")], {}
+
+
+def _jailbreaks_kwargs(ctx: RunContext) -> dict:
+    return dict(
+        data_dir=ctx.data_dir, model=ctx.models["gen"],
+        translation_model=ctx.models["translation"], prompt_dir=ctx.prompt_dir,
+        resume=ctx.resume, verbose=ctx.verbose, **ctx.augmentations,
+    )
+
+
+def _build_kwargs(ctx: RunContext) -> dict:
+    return dict(data_dir=ctx.data_dir, mode=ctx.dataset_type, verbose=ctx.verbose)
+
+
+_GEN = ("gen", "uncensored_gen")
+_CHECK = ("check", "uncensored_gen")
+
+#: The stages a recipe can name, in the order a run takes them.
+STAGES: dict[str, Stage] = {stage.name: stage for stage in (
+    Stage("constitution", "generate_constitution",
+          roles=(("constitution", "constitution_gen"),),
+          files=_constitution_files, recipe_kwargs=_constitution_kwargs),
+    Stage("inputs", "generate_inputs", roles=(_GEN, _CHECK),
+          files=_inputs_files, recipe_kwargs=_inputs_kwargs),
+    Stage("outputs", "generate_outputs", roles=(_GEN, _CHECK),
+          files=_one_file("outputs", paths.output_responses_csv),
+          recipe_kwargs=_outputs_kwargs),
+    Stage("paraphrase", "generate_paraphrases",
+          roles=(("paraphraser", "paraphraser"),
+                 ("paraphrase_check", "uncensored_gen")),
+          files=_paraphrase_files, recipe_kwargs=_paraphrase_kwargs),
+    Stage("jailbreaks", "generate_jailbreaks",
+          roles=(_GEN, ("translation", "translation")),
+          files=_one_file("jailbreaks", paths.jailbreaks_csv),
+          recipe_kwargs=_jailbreaks_kwargs),
+    Stage("build", "build_dataset", roles=(),
+          files=_one_file("build", paths.complete_dataset_csv),
+          recipe_kwargs=_build_kwargs),
+)}
