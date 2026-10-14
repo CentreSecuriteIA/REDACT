@@ -432,7 +432,7 @@ def test_evaluate_transcript_scope_renders_and_fresh(tmp_path):
     assert list(scored["success"]) == [True]
 
 
-# --- how a chunk is saved ----------------------------------------------------
+# --- how a save is made -----------------------------------------------------
 
 def _acks(state):
     """The ledger's unit lines, without what they record of the file's size."""
@@ -627,7 +627,7 @@ def test_scores_killed_between_rows_and_acks_are_each_on_disk_once(
     from redact import evaluate_conversations, paths
     from tests.conftest import Killed, kill_after_rows, lock_is_free
 
-    scored = paths.conversations_csv(tmp_path).with_name("conversations_scored.csv")
+    scored = paths.conversations_scored_csv(tmp_path)
     state = scored.with_name("conversations_scored.state.jsonl")
 
     def run():
@@ -635,15 +635,17 @@ def test_scores_killed_between_rows_and_acks_are_each_on_disk_once(
             conversations=_three_conversations(), data_dir=tmp_path, judge_model="j",
             batch_size=2, verbose=False, resolve=_JudgeResolver(MockBackend("Yes ok")))
 
-    kill_after_rows(monkeypatch, ME, on_call=2)
+    kill_after_rows(monkeypatch, ME, on_call=1)
     with pytest.raises(Killed):
         run()
+    # The rows landed; their acks did not.
+    landed = scored.read_bytes()
     assert list(pd.read_csv(scored)["sample_id"]) == ["a", "b", "c"]
-    assert _acks(state) == [{"sample_id": "a"}, {"sample_id": "b"}]
+    assert _acks(state) == []
     assert lock_is_free(state)
 
     assert list(run()["sample_id"]) == ["a", "b", "c"]
-    assert scored.with_name("conversations_scored.csv.cut").exists()
+    assert scored.with_name("conversations_scored.csv.cut").read_bytes() == landed
     assert _acks(state) == [{"sample_id": "a"}, {"sample_id": "b"}, {"sample_id": "c"}]
     assert lock_is_free(state)
 
@@ -651,11 +653,11 @@ def test_scores_killed_between_rows_and_acks_are_each_on_disk_once(
     assert lock_is_free(state)
 
 
-def test_scoring_chunk_is_one_append_then_its_acks(tmp_path, monkeypatch):
+def test_scores_are_saved_at_exit_rows_then_acks(tmp_path, monkeypatch):
     import redact.multi_turn.evaluate as ME
     from redact import evaluate_conversations, paths
 
-    state = paths.conversations_csv(tmp_path).with_name(
+    state = paths.conversations_scored_csv(tmp_path).with_name(
         "conversations_scored.state.jsonl")
     saves, append = [], ME.append_rows
 
@@ -668,18 +670,44 @@ def test_scoring_chunk_is_one_append_then_its_acks(tmp_path, monkeypatch):
         conversations=_three_conversations(), data_dir=tmp_path, judge_model="j",
         batch_size=2, verbose=False, resolve=_JudgeResolver(MockBackend("Yes ok")))
 
-    assert saves == [(["a", "b"], 0), (["c"], 2)]
+    assert saves == [(["a", "b", "c"], 0)]
     assert list(scored["sample_id"]) == ["a", "b", "c"]
     assert _acks(state) == [{"sample_id": "a"}, {"sample_id": "b"}, {"sample_id": "c"}]
 
 
-def test_failed_scoring_append_acks_none_of_its_chunk(tmp_path, monkeypatch):
+def _forty_one_conversations():
+    import pandas as pd
+    return pd.DataFrame({"sample_id": [f"c{n}" for n in range(41)],
+                         "transcript": ["[]"] * 41})
+
+
+def test_scores_are_saved_every_32_units_and_at_exit(tmp_path, monkeypatch):
+    import redact.multi_turn.evaluate as ME
+    from redact import evaluate_conversations
+
+    convs = _forty_one_conversations()
+    saves, append = [], ME.append_rows
+
+    def spy(path, rows):
+        saves.append([r["sample_id"] for r in rows])
+        return append(path, rows)
+
+    monkeypatch.setattr(ME, "append_rows", spy)
+    evaluate_conversations(
+        conversations=convs, data_dir=tmp_path, judge_model="j", batch_size=40,
+        verbose=False, resolve=_JudgeResolver(MockBackend("Yes ok")))
+    ids = list(convs["sample_id"])
+    assert saves == [ids[:32], ids[32:]]
+
+
+def test_a_failed_scoring_save_acks_none_of_its_units(tmp_path, monkeypatch):
     import pandas as pd
 
     import redact.multi_turn.evaluate as ME
     from redact import evaluate_conversations, paths
 
-    scored = paths.conversations_csv(tmp_path).with_name("conversations_scored.csv")
+    scored = paths.conversations_scored_csv(tmp_path)
+    convs = _forty_one_conversations()
     outcomes, append = iter([None, OSError("disk full")]), ME.append_rows
 
     def failing(path, rows):
@@ -691,9 +719,32 @@ def test_failed_scoring_append_acks_none_of_its_chunk(tmp_path, monkeypatch):
     monkeypatch.setattr(ME, "append_rows", failing)
     with pytest.raises(OSError, match="disk full"):
         evaluate_conversations(
-            conversations=_three_conversations(), data_dir=tmp_path, judge_model="j",
+            conversations=convs, data_dir=tmp_path, judge_model="j",
             batch_size=2, verbose=False, resolve=_JudgeResolver(MockBackend("Yes ok")))
 
+    first = list(convs["sample_id"])[:32]
     acks = _acks(scored.with_name("conversations_scored.state.jsonl"))
-    assert acks == [{"sample_id": "a"}, {"sample_id": "b"}]
-    assert list(pd.read_csv(scored)["sample_id"]) == ["a", "b"]
+    assert [ack["sample_id"] for ack in acks] == first
+    assert list(pd.read_csv(scored)["sample_id"]) == first
+
+
+def test_a_judge_call_carries_up_to_batch_size_rows(tmp_path):
+    from redact import evaluate_conversations
+    from redact.llms.backends import ComputeConfig
+
+    class Judge(MockBackend):
+        compute_config = ComputeConfig(supports_native_batching=True)
+
+        def __init__(self):
+            super().__init__("Yes ok")
+            self.batches = []
+
+        def generate(self, messages_list, **kwargs):
+            self.batches.append(len(messages_list))
+            return super().generate(messages_list, **kwargs)
+
+    judge = Judge()
+    evaluate_conversations(
+        conversations=_forty_one_conversations(), data_dir=tmp_path, judge_model="j",
+        batch_size=16, verbose=False, resolve=_JudgeResolver(judge))
+    assert judge.batches == [16, 16, 9]

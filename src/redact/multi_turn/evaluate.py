@@ -8,7 +8,6 @@ from __future__ import annotations
 
 import json
 import logging
-from math import ceil
 from pathlib import Path
 
 import pandas as pd
@@ -22,8 +21,8 @@ from redact.dataset import (
     release_lock,
     resume_state,
 )
+from redact.llm_pipeline import LLMRequest, drive_units, is_accepted, pool_size
 from redact.llms import ModelClient
-from redact.llm_pipeline import batch_check_samples
 
 from .transcript import Transcript
 
@@ -67,7 +66,7 @@ def evaluate_conversations(
             a generic check that the goal was reached.
         scope: ``"last_reply"`` judges the final reply against the seed;
             ``"transcript"`` judges the whole conversation.
-        batch_size: Judgments per chunk.
+        batch_size: Judgments per model call.
         conversations_path: The conversations file; defaults to
             ``paths.conversations_csv(data_dir)``. The scores are saved beside it.
         resolve: ``model name -> ModelClient``; defaults to ``ModelClient.create``.
@@ -117,42 +116,49 @@ def evaluate_conversations(
 
     resolve = resolve or ModelClient.create
     judge = resolve(judge_model)
-    n = len(pending)
-    n_chunks = ceil(n / batch_size) if batch_size else 1
+    n, written = len(pending), 0
 
-    # One save per chunk, at the flush below: ``every`` is not reached before it.
-    with CommitBuffer(
-        append=lambda rows: append_rows(scored_path, rows), ledger=ledger, every=n
-    ) as buf:
-        for start in range(0, n, batch_size):
-            chunk = pending.iloc[start : start + batch_size]
-            goals, samples = [], []
-            for _, row in chunk.iterrows():
-                transcript = _transcript(str(row.get("transcript", "")))
-                goals.append(transcript.first_message())
-                if scope == "last_reply":
-                    samples.append(transcript.last_reply())
-                else:
-                    samples.append(transcript.render())
-            checks = batch_check_samples(
-                judge, samples, _build_check,
-                originals=goals,
-                batch_size=batch_size,
-                progress=(
-                    f"judge {start // batch_size + 1}/{n_chunks}" if verbose else None
-                ),
-            )
-            rows = [
-                {"sample_id": str(row["sample_id"]), "success": bool(acc), "judge_reasoning": reason,
-                 "judge_model": judge_model, "scope": scope}
-                for (_, row), (acc, reason) in zip(chunk.iterrows(), checks)
-            ]
-            # The flush appends the chunk's rows, then acks them.
-            for r in rows:
-                buf.add([r], {"sample_id": r["sample_id"]})
-            buf.flush()
-            if verbose:
-                logger.info("[%d/%d] scored (%d success)",
-                            start + len(rows), n, sum(r["success"] for r in rows))
+    def _judgment(messages: list[dict]):
+        """One judge call: ``(True, "")`` on a yes, else ``(False, reply)``."""
+        reply = yield LLMRequest.for_client(judge, messages)
+        return (True, "") if is_accepted(reply) else (False, reply)
+
+    # The sample_id of each live unit, by its row in ``pending``.
+    live: dict[int, str] = {}
+
+    def _units():
+        for i, (_, row) in enumerate(pending.iterrows()):
+            transcript = _transcript(str(row.get("transcript", "")))
+            sample = (transcript.last_reply() if scope == "last_reply"
+                      else transcript.render())
+            live[i] = str(row["sample_id"])
+            yield i, _judgment(_build_check(transcript.first_message(), sample))
+
+    def _on_done(i, verdict):
+        success, reasoning = verdict
+        sample_id = live.pop(i)
+        row = {"sample_id": sample_id, "success": success, "judge_reasoning": reasoning,
+               "judge_model": judge_model, "scope": scope}
+        buf.add([row], {"sample_id": sample_id})
+
+    def _append(rows: list[dict]) -> dict[Path, int]:
+        nonlocal written
+        sizes = append_rows(scored_path, rows)
+        written += len(rows)
+        if verbose:
+            logger.info("[%d/%d] scored (%d success)",
+                        written, n, sum(r["success"] for r in rows))
+        return sizes
+
+    # The buffer appends finished rows, then acks them, every 32 units and on
+    # any exit.
+    with CommitBuffer(append=_append, ledger=ledger) as buf:
+        drive_units(
+            _units(),
+            on_done=_on_done,
+            pool_size=pool_size(batch_size, judge),
+            cap=batch_size,
+            progress="judge" if verbose else None,
+        )
 
     return read_rows(scored_path) if read_back else pd.DataFrame()
