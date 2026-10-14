@@ -170,12 +170,6 @@ def test_drive_generators_isolates_a_generator_that_yields_no_request(first):
     assert results["bad"] == ("ERR", "TypeError")
 
 
-def test_run_sync_is_drive_sync():
-    from redact.jailbreak.protocol import run_sync
-
-    assert run_sync is drive_sync
-
-
 class _CapturingRouter:
     """Records the internals_ids kwarg seen per batch_generate call (or its
     absence), so tests can assert exactly what drive_generators forwards."""

@@ -31,12 +31,6 @@ def _echo_call(req: LLMRequest) -> str:
     return f"ANSWER to: {last_user}"
 
 
-def test_llmrequest_is_shared_with_jailbreak():
-    # The re-export must be the *same* class so the engine keeps working.
-    from redact.jailbreak.protocol import LLMRequest as JBRequest
-    assert JBRequest is LLMRequest
-
-
 def test_transcript_renders_only_visible_steps():
     t = Transcript()
     t.message("driver", "hi", role="user")
