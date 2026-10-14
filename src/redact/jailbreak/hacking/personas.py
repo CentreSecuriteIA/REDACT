@@ -1,18 +1,9 @@
-"""Named persona jailbreak functions (technique generators).
+"""Persona techniques: an invented persona or one of the 14 in the personas taxonomy.
 
-Two tiers:
-  - ``to_invented_persona()`` — the LLM freely invents the persona (delegates to
-    the generic Persona/Roleplay cognitive technique).
-  - ``to_<name>_persona()``   — 14 named archetypes loaded from
-    configs/taxonomy/personas.json. Each generates a persona-grounded scenario,
-    then constructs the jailbreak.
-
-Each ``to_*`` is a two-round **technique generator** (see
-``jailbreak/protocol.py``): it yields a persona-scenario request, then a
-construction request, returning ``(jailbreak, "category=<name>_persona")``. The
-scenario is no longer returned (combined chains discarded it anyway); cached
-scenarios can still be injected via the ``scenario`` kwarg.
+``info`` is ``category=<name>_persona``.
 """
+
+from collections.abc import Callable
 
 from redact.dataset.taxonomy import load_taxonomy
 from redact.jailbreak.dynamic_functions import bind_functions
@@ -20,10 +11,6 @@ from redact.jailbreak.protocol import LLMRequest, TechniqueGen
 from redact.llms.prompting import build_messages, load_prompt
 
 from .cognitive import _extract_scenario, cognitive_gen
-
-# ---------------------------------------------------------------------------
-# Load persona taxonomy at module level
-# ---------------------------------------------------------------------------
 
 _PERSONA_TAXONOMY = load_taxonomy("personas")
 _PERSONAS: dict[str, dict] = _PERSONA_TAXONOMY["categories"]
@@ -35,11 +22,6 @@ _NAMED_PERSONAS = [
     "deformed_scientist", "politician", "deformed_professor",
     "religious_figure", "actor", "someone_from_the_future",
 ]
-
-
-# ---------------------------------------------------------------------------
-# Shared message builders
-# ---------------------------------------------------------------------------
 
 
 def _persona_scenario_messages(
@@ -91,20 +73,10 @@ def _persona_gen(
     return jailbreak, f"category={persona_name}_persona"
 
 
-# ---------------------------------------------------------------------------
-# Tier 1: invented persona (delegates to the generic cognitive technique)
-# ---------------------------------------------------------------------------
-
-
 def to_invented_persona(prompt: str, **kwargs) -> TechniqueGen:
     """Persona jailbreak where the LLM freely invents the persona."""
     jailbreak, _info = yield from cognitive_gen(prompt, 0, **kwargs)
     return jailbreak, "category=invented_persona"
-
-
-# ---------------------------------------------------------------------------
-# Tier 2: named persona generators (built from taxonomy)
-# ---------------------------------------------------------------------------
 
 
 def _make_persona_fn(persona_name: str):
@@ -124,11 +96,6 @@ _PERSONA_FNS = {name: _make_persona_fn(name) for name in _NAMED_PERSONAS}
 bind_functions(globals(), list(_PERSONA_FNS.values()))
 
 
-# ---------------------------------------------------------------------------
-# Registry
-# ---------------------------------------------------------------------------
-
-
-def get_persona_functions() -> list:
+def get_persona_functions() -> list[Callable]:
     """Return all persona jailbreak technique generators (1 invented + 14 named)."""
     return [to_invented_persona] + [_PERSONA_FNS[name] for name in _NAMED_PERSONAS]

@@ -2,7 +2,7 @@
 
 Eight technique families, each in its own module:
 - encoding: base64, rot13/18/47, leetspeak, unicode, ordinal, separator, morse, braille (pure, no LLM)
-- translation: 20 languages across resource tiers (delegates to LLMs/translator.py)
+- translation: 20 languages across resource tiers (translation-role model)
 - structural: json, xml, markdown wrapping (pure, no LLM)
 - ascii_art: pyfiglet-based text art (pure, no LLM)
 - tokenbreak: prepend, split, delimiter (needs LLM for extract_harmful)
@@ -10,6 +10,8 @@ Eight technique families, each in its own module:
 - typos: LLM-rewritten prompts with 4 typo density levels
 - suffixes: punctuation, fragments, unicode, emoji (pure, no LLM)
 """
+
+from collections.abc import Callable
 
 from .ascii_art import get_ascii_art_functions
 from .encoding import get_encoding_functions
@@ -39,7 +41,7 @@ def get_type_to_getter() -> dict[str, callable]:
     }
 
 
-def get_all_obfuscation_functions() -> list:
+def get_all_obfuscation_functions() -> list[Callable]:
     """Return flat list of all obfuscation technique functions."""
     funcs = []
     for getter in get_type_to_getter().values():

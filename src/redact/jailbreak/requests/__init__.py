@@ -1,7 +1,7 @@
 """Request-structure jailbreak techniques.
 
 Eight technique families that modify *how* a request is posed:
-- format: output-format and response-conditioning directives (pure)
+- answer_format: output-format and response-conditioning directives (pure)
 - answer_language: ask for the response in a specific language (pure)
 - continuation: ask the model to continue interrupted content (pure)
 - indirect: embed harmful request inside a legitimate task (pure)
@@ -12,6 +12,8 @@ Eight technique families that modify *how* a request is posed:
 
 All functions: str -> tuple[str, str]. No LLM dependency.
 """
+
+from collections.abc import Callable
 
 from .answer import get_answer_functions
 from .answer_language import get_answer_language_functions
@@ -42,7 +44,7 @@ def get_request_type_to_getter() -> dict:
     }
 
 
-def get_all_request_functions() -> list:
+def get_all_request_functions() -> list[Callable]:
     """Return flat list of all request technique functions."""
     funcs = []
     for getter in get_request_type_to_getter().values():

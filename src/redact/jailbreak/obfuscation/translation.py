@@ -1,29 +1,16 @@
-"""Low-resource language translation obfuscation.
+"""Translation techniques: the prompt translated to one of 20 languages.
 
-Each per-language function is a **technique generator** (see
-``jailbreak/protocol.py``): it yields an :class:`LLMRequest` for the
-translation, then one for the quality check, and resumes with each response.
-On a failed check it retries (up to ``num_retries``) with the checker's
-feedback. This lets the batched engine advance every sample's translation
-round-by-round — all translate requests for a round go out as one batch, then
-all check requests — instead of blocking one prompt at a time.
-
-Translation always routes to the translation-role model (DeepSeek by default),
-independent of the generation model passed by the pipeline, because that model
-has stronger multilingual coverage. The single-sample / test path drives these
-generators via ``utils.apply_combination`` → ``protocol.run_sync``.
-
-Languages are grouped by resource level (safety training coverage):
-  - High-resource  (complexity 0): French, Japanese, Russian, Spanish, German, Arabic
-  - Mid-resource   (complexity 1): Turkish, Czech, Vietnamese, Greek, Croatian
-  - Low-resource   (complexity 2): Swahili, Thai, Khmer, Maori, Nepali,
-                                   Zulu, Scots Gaelic, Bengali, Javanese
+The translation-role model translates and checks, retrying with the check's
+feedback; ``info`` is the language, or ``DISCARDED; language=...; feedback=...``
+when every attempt is rejected.
 """
 
+from collections.abc import Callable
+
 from redact.jailbreak.protocol import LLMRequest, TechniqueGen
+from redact.llm_pipeline import is_accepted
 from redact.llms.model_config import default_model_for_role
 from redact.llms.prompting import build_messages, load_prompt
-from redact.llm_pipeline import is_accepted
 
 LANGUAGES = [
     # High-resource
@@ -148,7 +135,7 @@ to_bengali = _make_language_fn("Bengali")
 to_javanese = _make_language_fn("Javanese")
 
 
-def get_translation_functions() -> list:
+def get_translation_functions() -> list[Callable]:
     """Return all translation technique generators."""
     return [
         # High-resource

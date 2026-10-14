@@ -1,10 +1,10 @@
-"""Adversarial suffix generation: punctuation, fragments, unicode, emoji.
+"""Suffix techniques: a random suffix of punctuation, fragments, symbols or emoji.
 
-All functions are pure transforms: str -> (str, str). No LLM dependency.
-Ported from reference obfuscation.py lines 850-941.
+``info`` is the suffix.
 """
 
 import random
+from collections.abc import Callable
 
 
 def to_adversarial_suffix_punctuation(prompt: str) -> tuple[str, str]:
@@ -73,7 +73,7 @@ def to_adversarial_suffix_emoji(prompt: str) -> tuple[str, str]:
     return prompt + " " + suffix, suffix
 
 
-def get_suffix_functions() -> list:
+def get_suffix_functions() -> list[Callable]:
     """Return all adversarial suffix technique functions."""
     return [
         to_adversarial_suffix_punctuation,

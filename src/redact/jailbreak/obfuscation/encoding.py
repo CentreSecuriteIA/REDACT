@@ -1,12 +1,11 @@
-"""Encoding/cyphering obfuscation: base64, rot13/18/47, leetspeak, morse, braille,
-unicode escape, ascii ordinal, separator.
+"""Encoding techniques: the prompt as a cipher, a character code, Morse or Braille.
 
-All functions are pure transforms: str -> (str, str). No LLM dependency.
-Ported from reference obfuscation.py lines 388-436.
+``info`` is empty, except ``sep=<separator>`` from ``to_separator``.
 """
 
 import codecs
 import random
+from collections.abc import Callable
 
 # ROT47 operates on the printable-ASCII range '!' (33) through '~' (126).
 _ROT47_PRINTABLE_MIN = 33
@@ -66,10 +65,6 @@ def to_separator(prompt: str) -> tuple[str, str]:
     sep = random.choice(_SEPARATORS)
     return sep.join(prompt), f"sep={sep}"
 
-
-# ---------------------------------------------------------------------------
-# Leetspeak — three levels of substitution depth
-# ---------------------------------------------------------------------------
 
 LEET_MAP_BASIC = {
     "a": "4", "A": "4",
@@ -157,7 +152,7 @@ def to_braille(prompt: str) -> tuple[str, str]:
     return "".join(BRAILLE_MAP.get(c.lower(), c) for c in prompt), ""
 
 
-def get_encoding_functions() -> list:
+def get_encoding_functions() -> list[Callable]:
     """Return all encoding/cyphering technique functions."""
     return [
         to_base64,

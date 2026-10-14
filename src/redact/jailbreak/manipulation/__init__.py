@@ -4,6 +4,8 @@
 - DAP (Distract and Persuade): harmful question hidden among benign pairs
 """
 
+from collections.abc import Callable
+
 from .benign import (
     BENIGN_CATEGORIES,
     get_or_generate_benign_data,
@@ -27,6 +29,6 @@ def get_manipulation_type_to_getter() -> dict[str, callable]:
     }
 
 
-def get_all_manipulation_functions() -> list:
+def get_all_manipulation_functions() -> list[Callable]:
     """Return flat list of all manipulation technique functions."""
     return get_fsh_functions() + get_dap_functions()

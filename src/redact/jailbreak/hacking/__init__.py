@@ -4,6 +4,8 @@ Five cognitive techniques plus 15 named persona variants,
 all using a two-step scenario -> meta-prompt pipeline.
 """
 
+from collections.abc import Callable
+
 from .cognitive import (
     CATEGORY_NAMES,
     HACKING_CATEGORIES,
@@ -29,6 +31,6 @@ def get_hacking_type_to_getter() -> dict[str, callable]:
     }
 
 
-def get_all_hacking_functions() -> list:
+def get_all_hacking_functions() -> list[Callable]:
     """Return flat list of all hacking technique functions."""
     return get_hacking_functions() + get_persona_functions() + get_framing_functions()

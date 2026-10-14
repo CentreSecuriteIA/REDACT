@@ -1,39 +1,17 @@
-"""Question-framing jailbreak techniques.
+"""Asking techniques: an innocuous-question framing, or a request for details.
 
-Pure string transforms: str -> tuple[str, str]. No LLM dependency.
-
-- innocuous_question: adds framing that makes the request sound casual or
-  academic, reducing the apparent intent.
-- ask_for_details: appends a directive requesting maximum specificity,
-  pushing the model toward detailed harmful output.
-
-Templates are stored in configs/asking_templates.json. One variant is
-selected per call using the globally seeded random module.
-
-additional_info format: "type={type_name};variant={variant_name}"
+``info`` is ``type=<name>;variant=<variant>``.
 """
 
-from ..directives import apply_template_directive, load_templates
+from collections.abc import Callable
 
-# ---------------------------------------------------------------------------
-# Template loading
-# ---------------------------------------------------------------------------
+from ..directives import apply_template_directive, load_templates
 
 _TEMPLATES: dict[str, list[dict]] = load_templates("requests", "asking_templates.json")
 
 
-# ---------------------------------------------------------------------------
-# Shared helper
-# ---------------------------------------------------------------------------
-
-
 def _apply(directive: str, prompt: str) -> tuple[str, str]:
     return apply_template_directive(_TEMPLATES, directive, prompt, info_key="type")
-
-
-# ---------------------------------------------------------------------------
-# Public functions
-# ---------------------------------------------------------------------------
 
 
 def to_innocuous_question(prompt: str) -> tuple[str, str]:
@@ -46,12 +24,7 @@ def to_ask_for_details(prompt: str) -> tuple[str, str]:
     return _apply("ask_for_details", prompt)
 
 
-# ---------------------------------------------------------------------------
-# Registry
-# ---------------------------------------------------------------------------
-
-
-def get_asking_functions() -> list:
+def get_asking_functions() -> list[Callable]:
     """Return all question-framing technique functions."""
     return [
         to_innocuous_question,

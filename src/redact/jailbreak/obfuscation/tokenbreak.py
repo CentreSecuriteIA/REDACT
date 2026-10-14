@@ -1,28 +1,12 @@
-"""TokenBreak obfuscation: prepend, split, delimiter, sensitive-word encoding.
+"""Tokenbreak and sensitive-word techniques over the words a model marks harmful.
 
-Two tiers:
-
-  Tier 1 — Structural tokenbreak (existing):
-    to_tokenbreak_prepend, to_tokenbreak_split, to_tokenbreak_delimiter
-    Extract harmful words via LLM, then apply structural word-level obfuscation
-    with randomly selected tokens/delimiters (choice recorded in additional_info).
-
-  Tier 2 — Sensitive-word encoding and character obfuscation:
-    to_sensitive_words_encode_*  (10 variants, one per encoding from encoding.py)
-    to_sensitive_words_split/star/hyphen/underscore/variables  (5 char-level variants)
-    Same LLM extraction step; each function applies a fixed named transform so
-    no random selection is needed at the function level.
-
-    Note: sensitive_words_hyphen and sensitive_words_underscore are the fixed-
-    separator counterparts of tokenbreak_delimiter's random separator mode.
-    sensitive_words_split (space) and sensitive_words_star (*) have no
-    equivalent in Tier 1.
-
-Ported from reference obfuscation.py lines 600-843.
+``info`` lists the detected words with the token, encoding, separator or
+substitutions applied to them.
 """
 
 import random
 import re
+from collections.abc import Callable
 from pathlib import Path
 
 from redact.jailbreak.dynamic_functions import bind_functions
@@ -42,10 +26,6 @@ from redact.jailbreak.protocol import LLMRequest, TechniqueGen
 from redact.llms.client import ModelClient
 from redact.llms.prompting import build_messages, load_prompt
 from redact.llms.router import generate_sample
-
-# ---------------------------------------------------------------------------
-# Pure word-level transforms (no LLM) — Tier 1 helpers
-# ---------------------------------------------------------------------------
 
 
 def match_case(original: str, replacement: str) -> str:
@@ -164,10 +144,6 @@ def tokenbreak_obfuscate_word(word: str, attack: str) -> tuple[str, str]:
         raise ValueError(f"Unknown attack type: {attack}")
 
 
-# ---------------------------------------------------------------------------
-# LLM extraction — shared by both tiers
-# ---------------------------------------------------------------------------
-
 _TOKENBREAK_EMPTY_RESPONSES = {"none", "n/a", "no harmful words", ""}
 # Above this many words, treat the extraction response as a non-answer
 # (the model rambled instead of returning a short word list).
@@ -180,8 +156,6 @@ def extract_harmful(
     prompt_dir: str | Path | None = None,
 ) -> str:
     """Extract harmful words from prompt using LLM.
-
-    Loads prompt from Prompts/Jailbreak/extract_harmful/template.json.
 
     Returns:
         Space-separated harmful words, or "" if none detected.
@@ -220,11 +194,6 @@ def _harmful_words_gen(
     if raw.lower() == "none" or len(raw.split()) > _MAX_HARMFUL_WORDS_RESPONSE_LEN:
         return []
     return [w for w in raw.split() if w.lower() not in _TOKENBREAK_EMPTY_RESPONSES]
-
-
-# ---------------------------------------------------------------------------
-# Pure finishers — apply a transform given the already-detected harmful words
-# ---------------------------------------------------------------------------
 
 
 def _tokenbreak_finish(prompt: str, attack: str, harmful_words: list[str]) -> tuple[str, str]:
@@ -303,11 +272,6 @@ def _sensitive_variables_finish(prompt: str, harmful_words: list[str]) -> tuple[
     return result, f"char_sep=variables;detected_words={' '.join(harmful_words)}"
 
 
-# ---------------------------------------------------------------------------
-# Tier 1 — Structural tokenbreak (technique generators)
-# ---------------------------------------------------------------------------
-
-
 def to_tokenbreak_prepend(prompt: str, **kwargs) -> TechniqueGen:
     """TokenBreak: prepend a random token before each harmful word."""
     words = yield from _harmful_words_gen(prompt, **kwargs)
@@ -326,12 +290,7 @@ def to_tokenbreak_delimiter(prompt: str, **kwargs) -> TechniqueGen:
     return _tokenbreak_finish(prompt, "delimiter", words)
 
 
-# ---------------------------------------------------------------------------
-# Tier 2a — Sensitive-word encoding (technique generators, fixed encoding each)
-# ---------------------------------------------------------------------------
-
-# (function name, encode_fn, encode_name, docstring) — encode_fn is None for
-# the special separator variant handled by _sensitive_separator_finish.
+# (function name, encode_fn, encode_name, docstring)
 _ENCODE_SPECS = [
     ("to_sensitive_words_encode_base64", to_base64, "base64", "Encode each harmful word with Base64."),
     ("to_sensitive_words_encode_rot13", to_rot13, "rot13", "Encode each harmful word with ROT13."),
@@ -367,10 +326,6 @@ def to_sensitive_words_encode_separator(prompt: str, **kwargs) -> TechniqueGen:
     return _sensitive_separator_finish(prompt, words)
 
 
-# ---------------------------------------------------------------------------
-# Tier 2b — Sensitive-word character-level obfuscation (technique generators)
-# ---------------------------------------------------------------------------
-
 _CHAR_SPECS = [
     ("to_sensitive_words_split", " ", "split", "Separate harmful-word chars with spaces: bomb -> b o m b."),
     ("to_sensitive_words_star", "*", "star", "Separate harmful-word chars with stars: bomb -> b*o*m*b."),
@@ -400,10 +355,6 @@ def to_sensitive_words_variables(prompt: str, **kwargs) -> TechniqueGen:
     words = yield from _harmful_words_gen(prompt, **kwargs)
     return _sensitive_variables_finish(prompt, words)
 
-
-# ---------------------------------------------------------------------------
-# Tier 2c — Synonym substitution (extract round + one synonym round per word)
-# ---------------------------------------------------------------------------
 
 # A "synonym" longer than this many words is treated as a non-answer (the
 # original word is kept instead) — a single creative synonym, not a phrase.
@@ -440,18 +391,13 @@ def to_synonym_substitution(prompt: str, *, prompt_dir=None, **kwargs) -> Techni
     return result, f"substitutions={';'.join(substitution_pairs)}"
 
 
-# ---------------------------------------------------------------------------
-# Registries
-# ---------------------------------------------------------------------------
-
-
-def get_tokenbreak_functions() -> list:
-    """Return Tier 1 structural tokenbreak functions."""
+def get_tokenbreak_functions() -> list[Callable]:
+    """Return the tokenbreak technique functions."""
     return [to_tokenbreak_prepend, to_tokenbreak_split, to_tokenbreak_delimiter]
 
 
-def get_sensitive_words_functions() -> list:
-    """Return all Tier 2 sensitive-word encoding, obfuscation, and synonym functions."""
+def get_sensitive_words_functions() -> list[Callable]:
+    """Return the sensitive-word technique functions."""
     return [
         to_sensitive_words_encode_base64,
         to_sensitive_words_encode_rot13,
