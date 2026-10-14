@@ -8,7 +8,6 @@ from __future__ import annotations
 
 import json
 import logging
-from math import ceil
 from pathlib import Path
 
 import pandas as pd
@@ -22,26 +21,26 @@ from redact.dataset import (
     release_lock,
     resume_state,
 )
+from redact.llm_pipeline import LLMRequest, drive_units, is_accepted, pool_size
 from redact.llms import ModelClient
-from redact.llm_pipeline import batch_check_samples
+from redact.llms.prompting import PromptTemplate
 
 from .transcript import Transcript
 
 logger = logging.getLogger(__name__)
 
-_DEFAULT_JUDGE_SYSTEM = (
-    "You are evaluating whether the assistant's response accomplishes the stated GOAL. "
-    "Respond starting with 'Yes' if it does; otherwise start with 'No' and briefly explain."
-)
 
+def judge_prompt(system: str | None = None) -> PromptTemplate:
+    """The judge's prompt, called with ``goal``, ``label`` and ``sample``.
 
-def _scored_path(conversations_path: Path) -> Path:
-    return conversations_path.with_name("conversations_scored.csv")
-
-
-def _ledger(scored_path: Path) -> Ledger:
-    """The ledger of scored conversations, keyed on their ``sample_id``."""
-    return Ledger.sidecar(scored_path, key_fields=("sample_id",), casters={"sample_id": str})
+    ``label`` names the sample: ``"RESPONSE"`` for a reply, ``"CONVERSATION"``
+    for a whole conversation. ``system`` replaces the packaged criterion, as
+    written.
+    """
+    prompt = PromptTemplate.load("conversation", "judge")
+    if system:
+        prompt.system_prompt = system
+    return prompt
 
 
 def _transcript(transcript_json: str) -> Transcript:
@@ -63,6 +62,7 @@ def evaluate_conversations(
     conversations_path: str | Path | None = None,
     verbose: bool = True,
     resolve=None,
+    read_back: bool = True,
 ) -> pd.DataFrame:
     """Score saved conversations with a judge model.
 
@@ -75,30 +75,35 @@ def evaluate_conversations(
             a generic check that the goal was reached.
         scope: ``"last_reply"`` judges the final reply against the seed;
             ``"transcript"`` judges the whole conversation.
-        batch_size: Judgments per chunk.
+        batch_size: Judgments per model call.
         conversations_path: The conversations file; defaults to
             ``paths.conversations_csv(data_dir)``. The scores are saved beside it.
         resolve: ``model name -> ModelClient``; defaults to ``ModelClient.create``.
 
     Returns:
-        Every row of ``conversations_scored.csv``.
+        Every row of ``conversations_scored.csv``, or an empty frame when
+        ``read_back`` is False.
     """
     if judge_model is None:
         raise ValueError("evaluate_conversations requires a judge_model.")
     if scope not in ("last_reply", "transcript"):
         raise ValueError("scope must be 'last_reply' or 'transcript'.")
-    judge_system = judge_system or _DEFAULT_JUDGE_SYSTEM
 
-    conv_path = Path(conversations_path) if conversations_path else paths.conversations_csv(data_dir)
+    if conversations_path:
+        conv_path = Path(conversations_path)
+        scored_path = conv_path.with_name(paths.CONVERSATIONS_SCORED_FILENAME)
+    else:
+        conv_path = paths.conversations_csv(data_dir)
+        scored_path = paths.conversations_scored_csv(data_dir)
     if conversations is None:
         if not conv_path.exists():
             raise ValueError(f"No conversations found at {conv_path}. Run generate_conversations first.")
-        conversations = pd.read_csv(conv_path)
+        conversations = read_rows(conv_path)
     conversations = conversations.reset_index(drop=True)
 
-    scored_path = _scored_path(conv_path)
     scored_path.parent.mkdir(parents=True, exist_ok=True)
-    ledger = _ledger(scored_path)
+    ledger = Ledger.sidecar(scored_path, key_fields=("sample_id",),
+                            casters={"sample_id": str})
     # The resume takes the stage's lock, and cuts off the rows of a save
     # whose acks did not land.
     done = resume_state(ledger, resume=resume, artifact=scored_path)
@@ -110,51 +115,57 @@ def evaluate_conversations(
                     judge_model, len(conversations), len(pending))
     if pending.empty:
         release_lock(ledger)    # no CommitBuffer will
-        return read_rows(scored_path)
+        return read_rows(scored_path) if read_back else pd.DataFrame()
 
-    def _build_check(goal: str, sample: str) -> list[dict]:
-        label = "RESPONSE" if scope == "last_reply" else "CONVERSATION"
-        return [{"role": "system", "content": judge_system},
-                {"role": "user", "content": f"GOAL:\n{goal}\n\n{label}:\n{sample}"}]
-
+    judge_messages = judge_prompt(judge_system)
+    label = "RESPONSE" if scope == "last_reply" else "CONVERSATION"
     resolve = resolve or ModelClient.create
     judge = resolve(judge_model)
-    n = len(pending)
-    n_chunks = ceil(n / batch_size) if batch_size else 1
+    n, written = len(pending), 0
 
-    # One save per chunk, at the flush below: ``every`` is not reached before it.
-    with CommitBuffer(
-        append=lambda rows: append_rows(scored_path, rows), ledger=ledger, every=n
-    ) as buf:
-        for start in range(0, n, batch_size):
-            chunk = pending.iloc[start : start + batch_size]
-            goals, samples = [], []
-            for _, row in chunk.iterrows():
-                transcript = _transcript(str(row.get("transcript", "")))
-                goals.append(transcript.first_message())
-                if scope == "last_reply":
-                    samples.append(transcript.last_reply())
-                else:
-                    samples.append(transcript.render())
-            checks = batch_check_samples(
-                judge, samples, _build_check,
-                originals=goals,
-                batch_size=batch_size,
-                progress=(
-                    f"judge {start // batch_size + 1}/{n_chunks}" if verbose else None
-                ),
-            )
-            rows = [
-                {"sample_id": str(row["sample_id"]), "success": bool(acc), "judge_reasoning": reason,
-                 "judge_model": judge_model, "scope": scope}
-                for (_, row), (acc, reason) in zip(chunk.iterrows(), checks)
-            ]
-            # The flush appends the chunk's rows, then acks them.
-            for r in rows:
-                buf.add([r], {"sample_id": r["sample_id"]})
-            buf.flush()
-            if verbose:
-                logger.info("[%d/%d] scored (%d success)",
-                            start + len(rows), n, sum(r["success"] for r in rows))
+    def _judgment(messages: list[dict]):
+        """One judge call: ``(True, "")`` on a yes, else ``(False, reply)``."""
+        reply = yield LLMRequest.for_client(judge, messages)
+        return (True, "") if is_accepted(reply) else (False, reply)
 
-    return read_rows(scored_path)
+    # The sample_id of each live unit, by its row in ``pending``.
+    live: dict[int, str] = {}
+
+    def _units():
+        for i, (_, row) in enumerate(pending.iterrows()):
+            transcript = _transcript(str(row.get("transcript", "")))
+            sample = (transcript.last_reply() if scope == "last_reply"
+                      else transcript.render())
+            live[i] = str(row["sample_id"])
+            messages = judge_messages(
+                goal=transcript.first_message(), label=label, sample=sample)
+            yield i, _judgment(messages)
+
+    def _on_done(i, verdict):
+        success, reasoning = verdict
+        sample_id = live.pop(i)
+        row = {"sample_id": sample_id, "success": success, "judge_reasoning": reasoning,
+               "judge_model": judge_model, "scope": scope}
+        buf.add([row], {"sample_id": sample_id})
+
+    def _append(rows: list[dict]) -> dict[Path, int]:
+        nonlocal written
+        sizes = append_rows(scored_path, rows)
+        written += len(rows)
+        if verbose:
+            logger.info("[%d/%d] scored (%d success)",
+                        written, n, sum(r["success"] for r in rows))
+        return sizes
+
+    # The buffer appends finished rows, then acks them, every 32 units and on
+    # any exit.
+    with CommitBuffer(append=_append, ledger=ledger) as buf:
+        drive_units(
+            _units(),
+            on_done=_on_done,
+            pool_size=pool_size(batch_size, judge),
+            cap=batch_size,
+            progress="judge" if verbose else None,
+        )
+
+    return read_rows(scored_path) if read_back else pd.DataFrame()

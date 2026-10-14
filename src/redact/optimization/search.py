@@ -15,6 +15,7 @@ from dataclasses import dataclass
 from redact.llm_pipeline import LLMRequest, batch_check_samples, drive_generators
 from redact.llms import ModelClient
 from redact.multi_turn import Transcript
+from redact.multi_turn.evaluate import judge_prompt
 
 
 @dataclass
@@ -74,6 +75,7 @@ def optimize(
         raise ValueError("optimize requires a target_model.")
     resolve = resolve or ModelClient.create
     judge = resolve(judge_model)
+    judge_messages = judge_prompt(judge_system)
     ids = itertools.count()
 
     root_t = Transcript()
@@ -105,10 +107,8 @@ def optimize(
         replies = [expanded[k].last_reply() for k in keys]
         checks = batch_check_samples(
             judge, replies,
-            lambda goal, reply: [
-                {"role": "system", "content": judge_system},
-                {"role": "user", "content": f"GOAL:\n{goal}\n\nRESPONSE:\n{reply}"},
-            ],
+            lambda goal, reply: judge_messages(
+                goal=goal, label="RESPONSE", sample=reply),
             originals=[seed] * len(keys),
         )
 

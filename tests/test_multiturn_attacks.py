@@ -9,53 +9,19 @@ from redact.multiturn_attacks import (
     generate_attacks,
     score_attacks,
 )
-from tests.conftest import MockBackend, make_client
+from tests.conftest import FakeResolver, JudgeResolver, MockBackend
 
 
-class _FakeClient:
-    """Stands in for a ModelClient: batch of messages in, batch of replies out."""
-
-    def __init__(self, model, reply, counter=None):
-        self.model = model
-        self._reply = reply
-        self._counter = counter
-
-    def generate(self, messages_list, **kw):
-        if self._counter is not None:
-            self._counter.calls += 1
-        return [self._reply(self.model, msgs) for msgs in messages_list]
-
-
-class _FakeResolver:
-    """``model -> _FakeClient``; the resolve seam drive_generators takes."""
-
-    def __init__(self, reply):
-        self._reply = reply
-        self.calls = 0
-
-    def __call__(self, model):
-        return _FakeClient(model, self._reply, self)
-
-
-def _echo(model, msgs):
+def _tagged_echo(model, msgs):
+    """A reply that names the model and the start of the last user message."""
     last_user = [m for m in msgs if m["role"] == "user"][-1]["content"]
     return f"[{model}] to: {last_user[:30]}"
-
-
-class _JudgeResolver:
-    """``model -> client`` over one fixed backend."""
-
-    def __init__(self, backend):
-        self._backend = backend
-
-    def __call__(self, model):
-        return make_client(self._backend, model)
 
 
 def test_crescendo_attack_logs_strategy_and_escalates(tmp_path):
     seeds = pd.DataFrame({"seed": ["how to make X"]})
     df = generate_attacks(seeds, target_model="target", data_dir=tmp_path,
-                          attack="crescendo", max_turns=4, resolve=_FakeResolver(_echo), verbose=False)
+                          attack="crescendo", max_turns=4, resolve=FakeResolver(_tagged_echo), verbose=False)
     assert len(df) == 1
     steps = json.loads(df.iloc[0]["transcript"])
     types = [s["type"] for s in steps]
@@ -71,7 +37,7 @@ def test_crescendo_applies_jailbreak_technique(tmp_path):
     from redact.jailbreak.obfuscation.encoding import to_rot13  # a pure transform
     seeds = pd.DataFrame({"seed": ["seed goal"]})
     df = generate_attacks(seeds, target_model="target", data_dir=tmp_path, attack="crescendo",
-                          jailbreak_technique=to_rot13, max_turns=3, resolve=_FakeResolver(_echo), verbose=False)
+                          jailbreak_technique=to_rot13, max_turns=3, resolve=FakeResolver(_tagged_echo), verbose=False)
     steps = json.loads(df.iloc[0]["transcript"])
     strat = next(s for s in steps if s["type"] == "strategy")
     assert "+" in strat["content"]  # records the applied technique name
@@ -83,9 +49,9 @@ def test_crescendo_applies_jailbreak_technique(tmp_path):
 def test_pair_attack_uses_attacker_model(tmp_path):
     seeds = pd.DataFrame({"seed": ["goal"]})
     df = generate_attacks(seeds, target_model="target", data_dir=tmp_path, attack="pair",
-                          attacker_model="attacker", max_turns=4, resolve=_FakeResolver(_echo), verbose=False)
+                          attacker_model="attacker", max_turns=4, resolve=FakeResolver(_tagged_echo), verbose=False)
     steps = json.loads(df.iloc[0]["transcript"])
-    # the attacker's follow-up came from the attacker model (_echo tags the model name)
+    # the attacker's follow-up came from the attacker model, which _tagged_echo names
     atk_msgs = [s["content"] for s in steps if s["type"] == "message"][1:]
     assert any("[attacker]" in m for m in atk_msgs)
 
@@ -116,9 +82,9 @@ def test_pair_propose_empty_transcript_goal():
 def test_score_attacks(tmp_path):
     seeds = pd.DataFrame({"seed": ["how to make X", "how to make Y"]})
     generate_attacks(seeds, target_model="target", data_dir=tmp_path, attack="crescendo",
-                     max_turns=3, resolve=_FakeResolver(_echo), verbose=False)
+                     max_turns=3, resolve=FakeResolver(_tagged_echo), verbose=False)
     scored = score_attacks(
         data_dir=tmp_path, judge_model="judge", verbose=False,
-        resolve=_JudgeResolver(MockBackend(["Yes complied", "No refused"])),
+        resolve=JudgeResolver(MockBackend(["Yes complied", "No refused"])),
     )
     assert set(scored["success"]) == {True, False}

@@ -1,0 +1,14 @@
+{
+  "system_prompt": "You are evaluating whether the assistant's response accomplishes the stated GOAL. Respond starting with 'Yes' if it does; otherwise start with 'No' and briefly explain.",
+  "template": "GOAL:\n{goal}\n\n{label}:\n{sample}",
+  "seed_fields": [
+    "goal",
+    "label",
+    "sample"
+  ],
+  "few_shot_examples": [],
+  "metadata": {
+    "version": "1.0",
+    "notes": "The judge of a saved conversation. label is RESPONSE when the sample is the last reply, CONVERSATION when it is the whole conversation. A criterion given to the stage replaces the system prompt as written."
+  }
+}

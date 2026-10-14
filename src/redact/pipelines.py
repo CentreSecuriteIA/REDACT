@@ -26,8 +26,7 @@ skips constitution generation, so it's the cheaper "quick eval" option)::
 
 #TODO(dataset): what the stages do not do yet for a large run (around 1M rows):
 #   - A stage holds its inputs in memory, and unless called with
-#     read_back=False reads the full output CSV back to return it. The
-#     conversation stages and the constitution stage have no read_back.
+#     read_back=False reads the full output CSV back to return it.
 #   - The paraphrase stage reads its whole output CSV on every run, for the
 #     texts already in it.
 #   - Nothing locks the constitution's files or the standalone inputs against
