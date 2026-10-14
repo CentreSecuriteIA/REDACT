@@ -35,15 +35,6 @@ _DEFAULT_JUDGE_SYSTEM = (
 )
 
 
-def _scored_path(conversations_path: Path) -> Path:
-    return conversations_path.with_name("conversations_scored.csv")
-
-
-def _ledger(scored_path: Path) -> Ledger:
-    """The ledger of scored conversations, keyed on their ``sample_id``."""
-    return Ledger.sidecar(scored_path, key_fields=("sample_id",), casters={"sample_id": str})
-
-
 def _transcript(transcript_json: str) -> Transcript:
     """The transcript a row saved; empty when it cannot be read."""
     try:
@@ -63,6 +54,7 @@ def evaluate_conversations(
     conversations_path: str | Path | None = None,
     verbose: bool = True,
     resolve=None,
+    read_back: bool = True,
 ) -> pd.DataFrame:
     """Score saved conversations with a judge model.
 
@@ -81,7 +73,8 @@ def evaluate_conversations(
         resolve: ``model name -> ModelClient``; defaults to ``ModelClient.create``.
 
     Returns:
-        Every row of ``conversations_scored.csv``.
+        Every row of ``conversations_scored.csv``, or an empty frame when
+        ``read_back`` is False.
     """
     if judge_model is None:
         raise ValueError("evaluate_conversations requires a judge_model.")
@@ -89,16 +82,21 @@ def evaluate_conversations(
         raise ValueError("scope must be 'last_reply' or 'transcript'.")
     judge_system = judge_system or _DEFAULT_JUDGE_SYSTEM
 
-    conv_path = Path(conversations_path) if conversations_path else paths.conversations_csv(data_dir)
+    if conversations_path:
+        conv_path = Path(conversations_path)
+        scored_path = conv_path.with_name(paths.CONVERSATIONS_SCORED_FILENAME)
+    else:
+        conv_path = paths.conversations_csv(data_dir)
+        scored_path = paths.conversations_scored_csv(data_dir)
     if conversations is None:
         if not conv_path.exists():
             raise ValueError(f"No conversations found at {conv_path}. Run generate_conversations first.")
-        conversations = pd.read_csv(conv_path)
+        conversations = read_rows(conv_path)
     conversations = conversations.reset_index(drop=True)
 
-    scored_path = _scored_path(conv_path)
     scored_path.parent.mkdir(parents=True, exist_ok=True)
-    ledger = _ledger(scored_path)
+    ledger = Ledger.sidecar(scored_path, key_fields=("sample_id",),
+                            casters={"sample_id": str})
     # The resume takes the stage's lock, and cuts off the rows of a save
     # whose acks did not land.
     done = resume_state(ledger, resume=resume, artifact=scored_path)
@@ -110,7 +108,7 @@ def evaluate_conversations(
                     judge_model, len(conversations), len(pending))
     if pending.empty:
         release_lock(ledger)    # no CommitBuffer will
-        return read_rows(scored_path)
+        return read_rows(scored_path) if read_back else pd.DataFrame()
 
     def _build_check(goal: str, sample: str) -> list[dict]:
         label = "RESPONSE" if scope == "last_reply" else "CONVERSATION"
@@ -157,4 +155,4 @@ def evaluate_conversations(
                 logger.info("[%d/%d] scored (%d success)",
                             start + len(rows), n, sum(r["success"] for r in rows))
 
-    return read_rows(scored_path)
+    return read_rows(scored_path) if read_back else pd.DataFrame()

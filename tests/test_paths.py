@@ -29,6 +29,7 @@ def test_all_artifact_resolvers(tmp_path):
     assert paths.paraphrases_outputs_csv(tmp_path) == ds / "paraphrases_outputs.csv"
     assert paths.paraphrased_csv(tmp_path) == ds / "paraphrased.csv"
     assert paths.conversations_csv(tmp_path) == ds / "conversations.csv"
+    assert paths.conversations_scored_csv(tmp_path) == ds / "conversations_scored.csv"
 
 
 def test_category_csv_default_and_explicit_root(tmp_path):

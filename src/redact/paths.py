@@ -21,6 +21,7 @@ PARAPHRASES_INPUTS_FILENAME = "paraphrases_inputs.csv"
 PARAPHRASES_OUTPUTS_FILENAME = "paraphrases_outputs.csv"
 PARAPHRASED_FILENAME = "paraphrased.csv"
 CONVERSATIONS_FILENAME = "conversations.csv"
+CONVERSATIONS_SCORED_FILENAME = "conversations_scored.csv"
 CONSTITUTION_INPUTS_DIRNAME = "constitution_inputs"
 CONSTITUTION_INPUTS_MERGED_FILENAME = "constitution_inputs_merged.csv"
 
@@ -118,6 +119,10 @@ def paraphrased_csv(root: str | Path | None = None) -> Path:
 
 def conversations_csv(root: str | Path | None = None) -> Path:
     return datasets(root) / CONVERSATIONS_FILENAME
+
+
+def conversations_scored_csv(root: str | Path | None = None) -> Path:
+    return datasets(root) / CONVERSATIONS_SCORED_FILENAME
 
 
 def constitution_inputs_dir(root: str | Path | None = None) -> Path:

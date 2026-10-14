@@ -42,12 +42,6 @@ def _seed_text_col(df: pd.DataFrame) -> str:
     raise ValueError("seeds must have a 'seed' / 'sample' / 'prompt' / 'text' column.")
 
 
-def _ledger(out: Path) -> Ledger:
-    """The ledger of conversation units, keyed ``(input_id, iteration)``."""
-    return Ledger.sidecar(out, key_fields=("input_id", "iteration"),
-                          casters={"input_id": str, "iteration": int})
-
-
 def generate_conversations(
     seeds: pd.DataFrame,
     setting: Setting | Callable[[], Setting],
@@ -58,6 +52,7 @@ def generate_conversations(
     output_path: str | Path | None = None,
     verbose: bool = True,
     resolve=None,
+    read_back: bool = True,
 ) -> pd.DataFrame:
     """Play ``setting`` on every seed ``iterations`` times and save the conversations.
 
@@ -73,7 +68,8 @@ def generate_conversations(
         resolve: ``model name -> ModelClient``; defaults to ``ModelClient.create``.
 
     Returns:
-        Every row of ``conversations.csv``.
+        Every row of ``conversations.csv``, or an empty frame when
+        ``read_back`` is False.
     """
     if seeds is None or len(seeds) == 0:
         raise ValueError("generate_conversations needs a non-empty `seeds` DataFrame.")
@@ -82,7 +78,9 @@ def generate_conversations(
 
     out = Path(output_path) if output_path else paths.conversations_csv(data_dir)
     out.parent.mkdir(parents=True, exist_ok=True)
-    ledger, manifest = _ledger(out), Manifest.sidecar(out)
+    ledger = Ledger.sidecar(out, key_fields=("input_id", "iteration"),
+                            casters={"input_id": str, "iteration": int})
+    manifest = Manifest.sidecar(out)
 
     make_setting = setting if callable(setting) else (lambda: copy.deepcopy(setting))
     # The clients of the models that reply, which size the pool; building one
@@ -173,4 +171,4 @@ def generate_conversations(
             progress="conversations" if verbose else None,
         )
 
-    return read_rows(out)
+    return read_rows(out) if read_back else pd.DataFrame()

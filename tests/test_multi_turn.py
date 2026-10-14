@@ -361,15 +361,18 @@ def test_evaluate_transcript_scope_and_bad_json(tmp_path):
 
 def test_pipeline_ledger_keys_on_input_id_iteration(tmp_path):
     # the conversation ledger keys on (input_id, iteration), skipping bad lines
-    from redact.multi_turn.pipeline import _ledger
-    led = _ledger(tmp_path / "conversations.csv")
+    from redact.dataset import Ledger
+    led = Ledger.sidecar(tmp_path / "conversations.csv",
+                         key_fields=("input_id", "iteration"),
+                         casters={"input_id": str, "iteration": int})
     led.path.write_text('\n{"input_id":"a","iteration":0}\nnot json\n{"iteration":1}\n', encoding="utf-8")
     assert led.completed() == {("a", 0)}  # blank + bad-json + missing-key all skipped
 
 
 def test_evaluate_ledger_keys_on_id(tmp_path):
-    from redact.multi_turn.evaluate import _ledger
-    led = _ledger(tmp_path / "conversations_scored.csv")
+    from redact.dataset import Ledger
+    led = Ledger.sidecar(tmp_path / "conversations_scored.csv",
+                         key_fields=("sample_id",), casters={"sample_id": str})
     led.path.write_text('{"sample_id":"a"}\nbad\n{}\n', encoding="utf-8")
     assert led.completed() == {"a"}
 
@@ -386,9 +389,28 @@ def test_generate_conversations_verbose_and_fresh(tmp_path):
     assert len(df2) == 1
 
 
+def test_both_stages_return_no_rows_without_read_back(tmp_path):
+    import pandas as pd
+
+    from redact import evaluate_conversations, generate_conversations, paths
+
+    df = generate_conversations(_three_seeds(), _simple_setting, data_dir=tmp_path,
+                                resolve=_FakeResolver(_echo), verbose=False,
+                                read_back=False)
+    scored = evaluate_conversations(data_dir=tmp_path, judge_model="j", verbose=False,
+                                    resolve=_JudgeResolver(MockBackend("Yes ok")),
+                                    read_back=False)
+    assert df.empty and scored.empty
+    convs = pd.read_csv(paths.conversations_csv(tmp_path))
+    assert list(convs["input_id"]) == ["s1", "s2", "s3"]
+    scored_ids = pd.read_csv(paths.conversations_scored_csv(tmp_path))["sample_id"]
+    assert sorted(scored_ids) == sorted(convs["sample_id"])
+
+
 def test_pipeline_ledger_empty_record_is_noop(tmp_path):
-    from redact.multi_turn.pipeline import _ledger
-    led = _ledger(tmp_path / "conversations.csv")
+    from redact.dataset import Ledger
+    led = Ledger.sidecar(tmp_path / "conversations.csv",
+                         key_fields=("input_id", "iteration"))
     led.record([])
     assert not led.exists()
 
