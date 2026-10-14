@@ -8,6 +8,7 @@ conditions without any network.
 import pytest
 
 from redact.llm_pipeline import LLMRequest, drive_sync
+from redact.llms.backends import ComputeConfig
 from redact.multi_turn import (
     Actor,
     ModelActor,
@@ -684,26 +685,115 @@ def test_a_failed_scoring_save_acks_none_of_its_units(tmp_path, monkeypatch):
     assert list(pd.read_csv(scored)["sample_id"]) == first
 
 
+class _WholeCalls(MockBackend):
+    """A model that takes each call whole and records its size.
+
+    Its call numbered ``fail_on`` raises, as a transport that went down.
+    """
+
+    compute_config = ComputeConfig(supports_native_batching=True)
+
+    def __init__(self, reply, fail_on=None):
+        super().__init__(reply)
+        self.batches = []
+        self._fail_on = fail_on
+
+    def generate(self, messages_list, **kwargs):
+        self.batches.append(len(messages_list))
+        if len(self.batches) == self._fail_on:
+            raise ConnectionError("the endpoint is down")
+        return super().generate(messages_list, **kwargs)
+
+
 def test_a_judge_call_carries_up_to_batch_size_rows(tmp_path):
     from redact import evaluate_conversations
-    from redact.llms.backends import ComputeConfig
 
-    class Judge(MockBackend):
-        compute_config = ComputeConfig(supports_native_batching=True)
-
-        def __init__(self):
-            super().__init__("Yes ok")
-            self.batches = []
-
-        def generate(self, messages_list, **kwargs):
-            self.batches.append(len(messages_list))
-            return super().generate(messages_list, **kwargs)
-
-    judge = Judge()
+    judge = _WholeCalls("Yes ok")
     evaluate_conversations(
         conversations=_forty_one_conversations(), data_dir=tmp_path, judge_model="j",
         batch_size=16, verbose=False, resolve=JudgeResolver(judge))
     assert judge.batches == [16, 16, 9]
+
+
+def test_a_conversation_call_carries_up_to_batch_size_requests(tmp_path):
+    from redact import generate_conversations
+
+    model = _WholeCalls("reply")
+    generate_conversations(
+        _forty_one_seeds(), simple_setting, data_dir=tmp_path, batch_size=16,
+        resolve=JudgeResolver(model), verbose=False)
+    assert model.batches == [16, 16, 9]
+
+
+def test_two_seeds_with_one_text_stay_two_conversations(tmp_path):
+    import json
+
+    import pandas as pd
+
+    from redact import generate_conversations
+    from redact.dataset import content_id
+
+    seeds = pd.DataFrame({"seed": ["same", "same", "other"]})
+    df = generate_conversations(seeds, simple_setting, data_dir=tmp_path,
+                                resolve=FakeResolver(echo), verbose=False)
+    assert list(df["input_id"]) == [content_id(t) for t in ("same", "same", "other")]
+    assert [json.loads(t)[0]["content"] for t in df["transcript"]] == [
+        "same", "same", "other"]
+
+
+def test_a_failed_conversation_call_propagates_and_a_resume_runs_its_units_once(
+        tmp_path):
+    import pandas as pd
+
+    from redact import generate_conversations, paths
+    from tests.conftest import lock_is_free
+
+    out = paths.conversations_csv(tmp_path)
+    state = out.with_name("conversations.state.jsonl")
+
+    def run(model):
+        return generate_conversations(
+            _three_seeds(), simple_setting, data_dir=tmp_path, batch_size=2,
+            resolve=JudgeResolver(model), verbose=False)
+
+    # The first call carries s1 and s2, the second s3, and fails.
+    with pytest.raises(ConnectionError, match="down"):
+        run(_WholeCalls("reply", fail_on=2))
+    assert [ack["input_id"] for ack in _acks(state)] == ["s1", "s2"]
+    assert list(pd.read_csv(out)["input_id"]) == ["s1", "s2"]
+    assert lock_is_free(state)
+
+    model = _WholeCalls("reply")
+    assert list(run(model)["input_id"]) == ["s1", "s2", "s3"]
+    assert model.batches == [1]
+    assert [ack["input_id"] for ack in _acks(state)] == ["s1", "s2", "s3"]
+
+
+def test_a_failed_judge_call_propagates_and_a_resume_scores_its_rows_once(tmp_path):
+    import pandas as pd
+
+    from redact import evaluate_conversations, paths
+    from tests.conftest import lock_is_free
+
+    scored = paths.conversations_scored_csv(tmp_path)
+    state = scored.with_name("conversations_scored.state.jsonl")
+
+    def run(judge):
+        return evaluate_conversations(
+            conversations=_three_conversations(), data_dir=tmp_path, judge_model="j",
+            batch_size=2, verbose=False, resolve=JudgeResolver(judge))
+
+    # The first call carries a and b, the second c, and fails.
+    with pytest.raises(ConnectionError, match="down"):
+        run(_WholeCalls("Yes ok", fail_on=2))
+    assert _acks(state) == [{"sample_id": "a"}, {"sample_id": "b"}]
+    assert list(pd.read_csv(scored)["sample_id"]) == ["a", "b"]
+    assert lock_is_free(state)
+
+    judge = _WholeCalls("Yes ok")
+    assert list(run(judge)["sample_id"]) == ["a", "b", "c"]
+    assert judge.batches == [1]
+    assert _acks(state) == [{"sample_id": "a"}, {"sample_id": "b"}, {"sample_id": "c"}]
 
 
 def test_a_transcript_too_long_for_the_judge_is_scored_failed_and_acked(tmp_path):
@@ -715,7 +805,6 @@ def test_a_transcript_too_long_for_the_judge_is_scored_failed_and_acked(tmp_path
     from redact import evaluate_conversations, paths
     from redact.dataset import Ledger
     from redact.exceptions import PromptTooLongError
-    from redact.llms.backends import ComputeConfig
 
     class LaneJudge(MockBackend):
         compute_config = ComputeConfig(supports_async_calls=True)

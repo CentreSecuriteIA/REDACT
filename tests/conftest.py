@@ -22,7 +22,7 @@ def pytest_configure(config):
     except RuntimeError:
         pass
 
-from redact.llms.backends import LLMBackend, resolve_setup
+from redact.llms.backends import ComputeConfig, LLMBackend, resolve_setup
 from redact.llms.client import ModelClient
 from redact.llms.model_config import (
     MODEL_REGISTRY,
@@ -409,7 +409,12 @@ def as_resolver(fake, backends=None):
 # ---------------------------------------------------------------------------
 
 class FakeClient:
-    """Stands in for a ModelClient: ``reply(model, messages)`` answers each request."""
+    """Stands in for a ModelClient: ``reply(model, messages)`` answers each request.
+
+    Its calls are synchronous, as its ``compute_config`` says.
+    """
+
+    compute_config = ComputeConfig(supports_async_calls=False)
 
     def __init__(self, model, reply):
         self.model = model
