@@ -48,46 +48,21 @@ from ..llms.client import ModelClient
 from ..llms.prompting import build_messages, extract_and_clean
 from ..llms.router import assert_single_sample_per_call
 from .checker import build_quality_checker
+from .feedback import (
+    PROHIBITED_SHOWN,
+    append_to_user,
+    prohibited_note,
+    with_feedback,
+)
 from .results import ConstitutionInputResult, SampleResult
 from .standalone import _StandaloneGenerationMixin
 
 logger = logging.getLogger(__name__)
 
-# Cap on existing samples shown in the "don't repeat these" prompt section.
-_PROHIBITED_PREVIEW_LIMIT = 20
 # Truncation length for the sample_description preview in verbose progress lines.
 _DESC_PREVIEW_LEN = 60
 # The category files of constitution-seeded inputs, under the stage's folder.
 _CATEGORY_FILES = f"*/{paths.SAMPLES_FILENAME}"
-
-
-_INPUT_FEEDBACK = (
-    "\n\n[FEEDBACK FROM PREVIOUS ATTEMPT]\n"
-    "Some previously generated samples were rejected for these "
-    "reasons:\n{feedback}\n"
-    "Please avoid similar issues in your new samples."
-)
-_OUTPUT_FEEDBACK = (
-    "\n\n[FEEDBACK FROM PREVIOUS ATTEMPT]\n"
-    "Your previous response was rejected for this reason:\n{feedback}\n"
-    "Please avoid this issue in your new response."
-)
-
-
-def _append_feedback(
-    messages: list[dict], feedback: str, template: str = _INPUT_FEEDBACK,
-) -> list[dict]:
-    """``messages`` with rejection feedback appended to the last user turn.
-
-    Returns a new list; ``messages`` itself for an empty ``feedback``.
-    """
-    if not feedback:
-        return messages
-    feedback_msg = template.format(feedback=feedback)
-    if messages and messages[-1]["role"] == "user":
-        last = {**messages[-1], "content": messages[-1]["content"] + feedback_msg}
-        return [*messages[:-1], last]
-    return [*messages, {"role": "user", "content": feedback_msg}]
 
 
 def _pool_size(batch_size: int, *clients: ModelClient | None) -> int:
@@ -229,26 +204,9 @@ class InputPipeline(_StandaloneGenerationMixin):
 
         # Append prohibited outputs so the LLM avoids repeating them
         if prohibited:
-            # Show a sample of existing outputs (cap to avoid prompt bloat)
-            sample_list = list(prohibited)[:_PROHIBITED_PREVIEW_LIMIT]
-            prohibited_text = "\n".join(f"- {s}" for s in sample_list)
-            prohibited_msg = (
-                f"\n\nIMPORTANT: The following samples already exist in the "
-                f"dataset. Do NOT generate anything similar to these:\n"
-                f"{prohibited_text}"
-            )
-            more += len(prohibited) - len(sample_list)
-            if more:
-                prohibited_msg += (
-                    f"\n(... and {more} more. "
-                    f"Ensure all your outputs are novel.)"
-                )
-            if messages and messages[-1]["role"] == "user":
-                messages[-1]["content"] += prohibited_msg
-            else:
-                messages.append({"role": "user", "content": prohibited_msg})
+            messages = append_to_user(messages, prohibited_note(prohibited, more))
 
-        return _append_feedback(messages, feedback)
+        return with_feedback(messages, feedback)
 
     # ------------------------------------------------------------------
     # Constitution-seeded mode
@@ -585,7 +543,7 @@ class InputPipeline(_StandaloneGenerationMixin):
                     continue
                 seen.add(row["sample_id"])
                 rows.append(row)
-                if len(preview) < _PROHIBITED_PREVIEW_LIMIT:
+                if len(preview) < PROHIBITED_SHOWN:
                     preview.append(sr.text)
                 else:
                     unshown += 1

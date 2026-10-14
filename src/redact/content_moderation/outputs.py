@@ -14,7 +14,8 @@ from ..llm_pipeline import checked, drive_units
 from ..llms.client import ModelClient
 from ..llms.prompting import build_messages, load_prompt
 from .checker import build_output_quality_checker
-from .inputs import _OUTPUT_FEEDBACK, _append_feedback, _pool_size
+from .feedback import with_feedback
+from .inputs import _pool_size
 
 logger = logging.getLogger(__name__)
 
@@ -184,7 +185,7 @@ def run_output_generation(
         }
         return i, checked(
             client,
-            lambda feedback: _append_feedback(base, feedback, _OUTPUT_FEEDBACK),
+            lambda feedback: with_feedback(base, feedback, "output"),
             check if use_checker else None,
             _checker_for(category, entry_type) if use_checker else None,
             original=input_text,

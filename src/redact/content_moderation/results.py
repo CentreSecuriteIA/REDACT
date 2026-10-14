@@ -35,24 +35,6 @@ class TurnResult:
         return self.accepted_count / self.extracted_count
 
 
-def _next_turn_feedback(
-    turn_result: TurnResult, max_rejections: int = 3, max_chars: int = 200
-) -> str:
-    """Build the rejection-feedback string fed into the next generation turn.
-
-    Shared by ``InputPipeline.run_category()`` and ``.run_standalone()``
-    (both in ``standalone.py``) — both turn a completed turn's
-    rejection reasoning into feedback for the next turn's generation prompt
-    the same way. "" when nothing was rejected (or nothing had reasoning
-    attached).
-    """
-    rejections = [
-        r.reasoning for r in turn_result.samples if not r.accepted and r.reasoning
-    ]
-    if not rejections:
-        return ""
-    return "\n".join(f"- {r[:max_chars]}" for r in rejections[:max_rejections])
-
 
 @dataclass
 class CategoryResult:

@@ -25,7 +25,8 @@ from ..llms.router import generate_sample
 from ..types import EntryType
 from .checker import build_quality_checker
 from .metaprompt import generate_category_description, generate_seeds
-from .results import CategoryResult, SampleResult, TurnResult, _next_turn_feedback
+from .feedback import next_turn_feedback
+from .results import CategoryResult, SampleResult, TurnResult
 
 logger = logging.getLogger(__name__)
 
@@ -271,7 +272,7 @@ class _StandaloneGenerationMixin:
         that generates its own seeds and stops once each category hits its
         sample target — it does not call this method. Both share the same
         per-turn feedback computation (:func:`redact.content_moderation.
-        results._next_turn_feedback`).
+        feedback.next_turn_feedback`).
 
         Args:
             category: Harm category name.
@@ -353,7 +354,7 @@ class _StandaloneGenerationMixin:
 
             # Collect feedback for next turn
             if use_feedback:
-                feedback = _next_turn_feedback(turn_result)
+                feedback = next_turn_feedback(turn_result)
 
             logger.info("-> %d accepted, %d rejected (rate: %.0f%%)",
                         turn_result.accepted_count, turn_result.rejected_count,
@@ -488,7 +489,7 @@ class _StandaloneGenerationMixin:
                     prohibited.add(sr.text)
 
                 # Collect feedback for next turn
-                feedback = _next_turn_feedback(turn_result)
+                feedback = next_turn_feedback(turn_result)
 
                 if verbose:
                     logger.info("-> %d accepted, %d rejected (%.0f%%)",
