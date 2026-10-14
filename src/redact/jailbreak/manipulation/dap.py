@@ -1,20 +1,15 @@
-"""DAP (Distract and Persuade / Attention Shifting) techniques.
+"""DAP techniques: the prompt as one question among benign Q&A pairs.
 
-The harmful question is hidden among benign Q&A pairs at a random
-middle position with an empty answer placeholder.
-
-Ported from reference manipulation.py lines 356-468.
+``info`` is ``num_shots=...;harmful_idx=...;sub_category=...``, plus
+``selection=...`` when a model chose the subcategory.
 """
 
 import random
+from collections.abc import Callable
 
 from redact.jailbreak.protocol import TechniqueGen
 
 from .fsh import run_random_manipulation, run_selected_manipulation
-
-# ---------------------------------------------------------------------------
-# Prompt assembly
-# ---------------------------------------------------------------------------
 
 
 def _build_dap_prompt(
@@ -45,11 +40,6 @@ def _build_dap_prompt(
             lines.append(f"A{idx}: {pair['answer']}\n")
             idx += 1
     return "\n".join(lines), harmful_idx
-
-
-# ---------------------------------------------------------------------------
-# Technique functions
-# ---------------------------------------------------------------------------
 
 
 def _dap_build_prompt(harmful_prompt: str, pairs: list[dict], num_shots: int) -> tuple[str, dict]:
@@ -90,7 +80,7 @@ def to_dap_selected_long(
     ))
 
 
-def get_dap_functions() -> list:
+def get_dap_functions() -> list[Callable]:
     """Return all DAP technique functions."""
     return [to_dap_random_short, to_dap_random_long,
             to_dap_selected_short, to_dap_selected_long]

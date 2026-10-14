@@ -1,19 +1,11 @@
-"""Cognitive/psychological hacking techniques.
+"""Cognitive techniques: a model writes a scenario, then the prompt built on it.
 
-Two-step generation: scenario -> jailbreak construction (two LLM rounds).
-
-The public ``to_*`` functions are **technique generators** (see
-``jailbreak/protocol.py``): they yield a scenario request, then a construction
-request, so the batched engine advances both rounds across many samples at
-once. The sync helpers ``get_situation`` / ``create_jailbreak`` are retained
-for standalone/single-call use; both paths share the message builders and
-scenario extractor below.
-
-Technique definitions are loaded from configs/taxonomy/cognitive_techniques.json
-so they can be edited without touching code.
+The five techniques are the categories of the ``cognitive_techniques``
+taxonomy; ``info`` is ``category=<key>``.
 """
 
 import re
+from collections.abc import Callable
 from pathlib import Path
 
 from redact.dataset.taxonomy import load_taxonomy
@@ -21,10 +13,6 @@ from redact.jailbreak.protocol import LLMRequest, TechniqueGen
 from redact.llms.client import ModelClient
 from redact.llms.prompting import build_messages, load_prompt
 from redact.llms.router import generate_sample
-
-# ---------------------------------------------------------------------------
-# Category definitions — loaded from taxonomy JSON
-# ---------------------------------------------------------------------------
 
 _COGNITIVE_TAXONOMY = load_taxonomy("cognitive_techniques")
 _TECHNIQUES = list(_COGNITIVE_TAXONOMY["categories"].items())
@@ -38,10 +26,6 @@ HACKING_CATEGORIES: list[tuple[str, str]] = [
 # Snake-case names for additional_info
 CATEGORY_NAMES: list[str] = [k for k, _ in _TECHNIQUES]
 
-
-# ---------------------------------------------------------------------------
-# Shared builders (used by both the sync helpers and the technique generators)
-# ---------------------------------------------------------------------------
 
 _SCENARIO_RE = re.compile(
     r"\*{0,2}scenario description\*{0,2}[:\s]*[\s\*\n]*(.*)",
@@ -72,11 +56,6 @@ def _construction_messages(
         prompt=prompt,
         scenario=scenario,
     )
-
-
-# ---------------------------------------------------------------------------
-# Sync helpers (single-call use; retained for tests and standalone callers)
-# ---------------------------------------------------------------------------
 
 
 def get_situation(
@@ -110,11 +89,6 @@ def create_jailbreak(
     return jailbreak, f"category={snake_name}", scenario
 
 
-# ---------------------------------------------------------------------------
-# Technique generator (batched path)
-# ---------------------------------------------------------------------------
-
-
 def cognitive_gen(
     prompt: str,
     category_index: int,
@@ -135,11 +109,6 @@ def cognitive_gen(
         gen_model, _construction_messages(prompt, category_index, scenario, prompt_dir)
     )
     return jailbreak, f"category={CATEGORY_NAMES[category_index]}"
-
-
-# ---------------------------------------------------------------------------
-# Per-technique public functions (technique generators)
-# ---------------------------------------------------------------------------
 
 
 def to_persona_roleplay(prompt: str, **kwargs) -> TechniqueGen:
@@ -167,7 +136,7 @@ def to_deep_inception(prompt: str, **kwargs) -> TechniqueGen:
     return (yield from cognitive_gen(prompt, 4, **kwargs))
 
 
-def get_hacking_functions() -> list:
+def get_hacking_functions() -> list[Callable]:
     """Return all hacking technique functions."""
     return [
         to_persona_roleplay,

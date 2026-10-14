@@ -1,43 +1,9 @@
-"""Request protocol and generator contract for the batched jailbreak engine.
-
-The batched engine ([engine.py]) advances every sample through its technique
-chain layer-by-layer: pure transforms run inline, LLM steps are pooled per
-model and dispatched in one batch call. To make multi-round LLM techniques
-(translation's translate→check→retry loop, cognitive's scenario→construction)
-participate in that round-by-round scheme uniformly, each LLM technique is a
-**generator**: it ``yield``s an :class:`LLMRequest` and resumes (via
-``.send(response)``) with the model's reply.
-
-Technique generator contract::
-
-    def to_x(prompt, *, gen_model=None, ...) -> TechniqueGen:
-        response = yield LLMRequest(model, messages)   # hand request to engine
-        ...                                            # may yield again (N rounds)
-        return text, info                              # info "" ok / "DISCARDED; ..."
-
-Pure transforms stay plain ``(str, **kwargs) -> (str, str)`` functions; the
-combined chain in ``utils.combine_techniques`` runs them inline (zero rounds).
-
-:func:`run_sync` drives a technique generator to completion with a blocking
-call function. It is the single-sample / test path used by
-``utils.apply_combination`` — the engine never calls it (it interleaves many
-generators instead), but it guarantees the generator form behaves identically
-when run one sample at a time.
+"""Aliases of ``TechniqueGen``, ``LLMRequest`` and ``drive_sync`` (as ``run_sync``)
+for the imports that still name this module; their homes are
+:mod:`redact.jailbreak.technique` and :mod:`redact.llm_pipeline`.
 """
 
-from __future__ import annotations
+from redact.llm_pipeline import LLMRequest  # noqa: F401
+from redact.llm_pipeline import drive_sync as run_sync  # noqa: F401
 
-from collections.abc import Generator
-
-# Re-exported so `from .protocol import LLMRequest` keeps working.
-from redact.llm_pipeline import LLMRequest, drive_sync  # noqa: F401
-
-# A technique generator yields LLMRequests, is resumed with the response
-# string, and returns the (text, info) result. info is "" on success or
-# starts with "DISCARDED; " on rejection.
-TechniqueResult = tuple[str, str]
-TechniqueGen = Generator[LLMRequest, str, TechniqueResult]
-
-#: ``run_sync(gen, call)``: drive one technique generator to completion with
-#: a blocking ``call(LLMRequest) -> str`` and return its ``(text, info)``.
-run_sync = drive_sync
+from .technique import TechniqueGen  # noqa: F401

@@ -1,10 +1,4 @@
-"""Benign sample generation and loading for FSH/DAP manipulation.
-
-Generated samples are saved in Data_cache/benign/.
-Loading is lazy (explicit function call, not module-level import).
-
-Ported from reference manipulation.py lines 40-289.
-"""
+"""Benign Q&A pairs for the FSH and DAP techniques, generated once and cached."""
 
 import logging
 from pathlib import Path
@@ -13,16 +7,11 @@ import pandas as pd
 
 from redact import paths
 from redact.llms.client import ModelClient
-from redact.llms.prompting import extract_structured_qa
-from redact.llms.prompting import build_messages, load_prompt
+from redact.llms.prompting import build_messages, extract_structured_qa, load_prompt
 from redact.llms.router import generate_sample
 
 logger = logging.getLogger(__name__)
 
-
-# ---------------------------------------------------------------------------
-# Category definitions (52 categories from reference)
-# ---------------------------------------------------------------------------
 
 BENIGN_CATEGORIES: list[tuple[str, str]] = [
     # Home & Daily Life
@@ -106,10 +95,6 @@ BENIGN_CATEGORIES: list[tuple[str, str]] = [
     ("Technology & Tips", "Productivity Tools"),
 ]
 
-
-# ---------------------------------------------------------------------------
-# Generation
-# ---------------------------------------------------------------------------
 
 _DEFAULT_PROMPT_DIR = paths.prompts_dir()
 
@@ -200,10 +185,6 @@ def process_category(
     return rows
 
 
-# ---------------------------------------------------------------------------
-# Loading
-# ---------------------------------------------------------------------------
-
 def _default_benign_path() -> Path:
     return paths.benign_csv()
 
@@ -213,18 +194,10 @@ def get_or_generate_benign_data(
     cache_path=None,
     verbose: bool = True,
 ) -> dict:
-    """Load benign data from cache, or generate and cache it if missing.
+    """Load the benign data from ``cache_path``, or generate it with ``client``.
 
-    Used by apply_combination() to auto-provision benign data for FSH/DAP
-    manipulation techniques without requiring the caller to pre-generate it.
-
-    Args:
-        client: The model to call, bound to its transport.
-        cache_path: Path to benign CSV. Uses default Data_cache/benign/ if None.
-        verbose: Log progress during generation.
-
-    Returns:
-        Benign data dict (same format as load_benign_data).
+    Generated data is saved to ``cache_path``, which defaults to
+    ``paths.benign_csv()``. Returns what :func:`load_benign_data` returns.
 
     Raises:
         ValueError: If generation is needed but no client was provided.

@@ -2,7 +2,7 @@
 
 Translation techniques are now technique generators (they yield LLMRequests).
 These tests drive them via ``protocol.run_sync``, routing each yielded request
-to a MockBackend — the same way ``utils.apply_combination`` runs a single
+to a MockBackend — the same way ``chain.apply_combination`` runs a single
 sample.
 """
 

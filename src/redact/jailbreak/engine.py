@@ -2,7 +2,7 @@
 
 Advances a chunk of samples through their technique chains **round by round**:
 
-1. Each sample's chain is a generator (``utils.make_combination_gen``). Pure
+1. Each sample's chain is a generator (``chain.make_combination_gen``). Pure
    transforms run inline as the generator advances; the generator pauses only
    to ``yield`` an :class:`LLMRequest` for an LLM step.
 2. Each round, the engine collects every live sample's pending request, groups
@@ -26,7 +26,8 @@ from __future__ import annotations
 from redact.dataset import content_id
 from redact.llm_pipeline import drive_generators
 
-from .utils import _parse_rejection_info, is_noop, make_combination_gen
+from .chain import is_noop, make_combination_gen
+from .technique import is_discarded
 
 
 def _rename_capture(sample: dict, gen_model: str, final_sample_id: str, resolve=None) -> None:
@@ -50,7 +51,7 @@ def _rename_capture(sample: dict, gen_model: str, final_sample_id: str, resolve=
 def _finalize(sample: dict, value, gen_model: str, resolve=None) -> dict:
     """Build the output row for a completed sample from its ``(text, info)``."""
     text, info = value
-    accepted, reasoning = _parse_rejection_info(info)
+    accepted = not is_discarded(info)
     fn = sample["combination"]
     techniques = list(getattr(fn, "techniques", []))
     sample_id = content_id(text)
@@ -65,7 +66,7 @@ def _finalize(sample: dict, value, gen_model: str, resolve=None) -> dict:
         "num_techniques": len(techniques),
         "is_noop": is_noop(sample["prompt"], text),
         "accepted": accepted,
-        "reasoning": reasoning,
+        "reasoning": "" if accepted else info,
     }
 
 
@@ -127,8 +128,8 @@ def batch_apply_combinations(
 
     Args:
         samples: ``[{"id": str, "prompt": str, "combination": fn}, ...]`` where
-            ``fn`` is a combined callable from ``utils.combine_techniques`` /
-            ``utils.build_combination`` (carries ``.techniques`` + ``.__name__``).
+            ``fn`` is a combined callable from ``chain.combine_techniques`` /
+            ``assignment.build_combination`` (carries ``.techniques`` + ``.__name__``).
             An optional ``"iteration"`` key seeds the provisional internals
             path when ``capture_internals`` is on (defaults to 0).
         gen_model: Model name that generation-layer techniques tag their
@@ -143,7 +144,7 @@ def batch_apply_combinations(
         capture_internals: When True, each sample's LLM-backed technique calls
             get tagged for internals capture (per-request, only for whichever
             target model's backend actually supports it — see
-            ``utils._tag_yields``), under a provisional
+            ``chain._tag_yields``), under a provisional
             ``{id}/jailbreak/attempt_{iteration}`` root; ``_finalize`` relabels
             it to ``{id}/jailbreak/{sample_id}`` once the final jailbroken
             text (and thus its real sample_id) is known — a pure side effect,

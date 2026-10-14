@@ -1,9 +1,7 @@
-"""Few-Shot Hacking (FSH) manipulation techniques.
+"""Few-shot (FSH) techniques: benign Q&A pairs, then the prompt as the last question.
 
-FSH places N benign Q&A pairs before the harmful question, priming
-the model to continue the helpful pattern.
-
-Ported from reference manipulation.py lines 340-426.
+``info`` is ``num_shots=...;sub_category=...``, plus ``selection=...`` when a
+model chose the subcategory.
 """
 
 import random
@@ -14,10 +12,6 @@ from redact.jailbreak.protocol import LLMRequest, TechniqueGen
 from redact.llms.client import ModelClient
 from redact.llms.prompting import build_messages, load_prompt
 from redact.llms.router import generate_sample
-
-# ---------------------------------------------------------------------------
-# LLM-based category selection (shared with dap.py)
-# ---------------------------------------------------------------------------
 
 
 def _build_subcategory_messages(
@@ -72,11 +66,6 @@ def _select_subcategory_gen(
     return _parse_subcategory(chosen, all_subcategories)
 
 
-# ---------------------------------------------------------------------------
-# Prompt assembly
-# ---------------------------------------------------------------------------
-
-
 def _build_fsh_prompt(
     harmful_prompt: str,
     benign_pairs: list[dict],
@@ -93,15 +82,8 @@ def _build_fsh_prompt(
     return "\n".join(lines)
 
 
-# ---------------------------------------------------------------------------
-# Shared random/selected × short/long runner (also used by dap.py)
-# ---------------------------------------------------------------------------
-#
-# FSH and DAP differ only in (a) how the prompt is assembled (a plain string
-# vs. a string + a harmful_idx position) and (b) whether that extra field
-# appears in additional_info. build_prompt normalizes both shapes to
-# (jailbreak_text, extra_info_fields) so this runner covers every
-# random/selected × short/long variant for both technique families.
+# FSH and DAP differ only in how the prompt is assembled: ``build_prompt``
+# returns ``(text, extra info fields)``, so one runner serves every variant.
 
 
 def _pick_pairs(benign_data: dict, answer_type: str, subcat: str) -> list[dict]:
@@ -155,11 +137,6 @@ def run_selected_manipulation(
     return jailbreak, _format_manipulation_info(num_shots, extra, subcat, selection)
 
 
-# ---------------------------------------------------------------------------
-# Technique functions
-# ---------------------------------------------------------------------------
-
-
 def _fsh_build_prompt(harmful_prompt: str, pairs: list[dict], num_shots: int) -> tuple[str, dict]:
     """Adapt _build_fsh_prompt's (str) return to the shared runner's (str, extra) shape."""
     return _build_fsh_prompt(harmful_prompt, pairs, num_shots), {}
@@ -197,7 +174,7 @@ def to_fsh_selected_long(
     ))
 
 
-def get_fsh_functions() -> list:
+def get_fsh_functions() -> list[Callable]:
     """Return all FSH technique functions."""
     return [to_fsh_random_short, to_fsh_random_long,
             to_fsh_selected_short, to_fsh_selected_long]

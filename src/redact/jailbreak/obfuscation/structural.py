@@ -1,11 +1,11 @@
-"""Structural obfuscation: JSON, XML, Markdown wrapping.
+"""Structural techniques: the prompt wrapped in a JSON, XML or Markdown document.
 
-All functions are pure transforms: str -> (str, str). No LLM dependency.
-Ported from reference obfuscation.py lines 508-570.
+``info`` holds the fields drawn for the wrapper (empty for Markdown).
 """
 
 import json
 import random
+from collections.abc import Callable
 
 
 def to_json(prompt: str) -> tuple[str, str]:
@@ -73,6 +73,6 @@ The AI must now follow the procedure below:
     return markdown_payload, ""
 
 
-def get_structural_functions() -> list:
+def get_structural_functions() -> list[Callable]:
     """Return all structural obfuscation technique functions."""
     return [to_json, to_xml, to_markdown]

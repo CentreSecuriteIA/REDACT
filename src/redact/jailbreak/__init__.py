@@ -11,22 +11,16 @@ Pure transforms (encoding, structural, suffixes, ascii_art, requests) need no LL
 
 Usage:
     from redact.jailbreak import combine_techniques, sample_combination
-    from redact.jailbreak.obfuscation import get_type_to_getter
+    from redact.jailbreak.obfuscation import get_all_obfuscation_functions
     from redact.jailbreak.obfuscation.encoding import to_base64
-    from redact.jailbreak.requests import get_request_type_to_getter
 """
 
-# Obfuscation registry
-# Distribution
-from .distribution import deterministic_balanced_assign, split_by_technique_functions
+from .assignment import assign_combination, build_combination, build_function_registry
+from .chain import apply_combination, combine_techniques, is_noop, make_combination_gen
 from .engine import batch_apply_combinations
 
 # Hacking registry
-from .hacking import (
-    get_all_hacking_functions,
-    get_hacking_type_to_getter,
-    get_hacking_types,
-)
+from .hacking import get_all_hacking_functions
 
 # Run planning + resumable manifest ledger
 from .manifest import (
@@ -35,49 +29,27 @@ from .manifest import (
 )
 
 # Manipulation registry
-from .manipulation import (
-    get_all_manipulation_functions,
-    get_manipulation_type_to_getter,
-    get_manipulation_types,
-)
-from .obfuscation import (
-    get_all_obfuscation_functions,
-    get_obfuscation_types,
-    get_type_to_getter,
-)
+from .manipulation import get_all_manipulation_functions
+from .obfuscation import get_all_obfuscation_functions
 
 # Request protocol + batched engine
 from .protocol import LLMRequest, run_sync
 
 # Requests registry
-from .requests import (
-    get_all_request_functions,
-    get_request_type_to_getter,
-    get_request_types,
-)
-
-# Utilities
-from .utils import (
-    apply_combination,
-    assign_combination,
-    build_combination,
-    build_function_registry,
-    combine_techniques,
+from .requests import get_all_request_functions
+from .sampling import (
     default_escalation_schedule,
     get_compatible_remaining,
-    is_noop,
-    load_spec,
-    make_combination_gen,
     sample_combination,
     sample_exact_combination,
-    tag_all_functions,
 )
+from .technique import load_spec, tag
 
 # ---------------------------------------------------------------------------
 # Tag all technique functions with compatibility metadata at import time
 # ---------------------------------------------------------------------------
 
-tag_all_functions(
+tag(
     get_all_obfuscation_functions()
     + get_all_hacking_functions()
     + get_all_manipulation_functions()

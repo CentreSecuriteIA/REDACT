@@ -2,13 +2,13 @@
 
 from collections import Counter
 
+from redact.jailbreak.chain import combine_techniques
 from redact.jailbreak.engine import batch_apply_combinations
 from redact.jailbreak.obfuscation.translation import (
     _resolve_translate_model,
     to_swahili,
 )
 from redact.jailbreak.protocol import LLMRequest
-from redact.jailbreak.utils import combine_techniques
 from tests.conftest import as_resolver
 
 GEN_MODEL = "test-gen"

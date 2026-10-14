@@ -1,50 +1,18 @@
-"""Scenario-modifying framing jailbreak techniques.
+"""Framing techniques: the prompt in a random variant of a framing template.
 
-Pure string transforms: str -> tuple[str, str]. No LLM dependency.
-
-These directives modify the *context or scenario* around the request —
-fictional worlds, intent framing, urgency, and constraint removal.
-Answer-format and output-conditioning directives live in requests/answer.py.
-
-Each directive has multiple template variants stored in
-configs/framing_templates.json. One variant is selected per call using the
-globally seeded random module (seeded in redact/__init__.py). The chosen
-variant name is returned in additional_info for dataset traceability,
-following the same pattern as structural.py.
-
-additional_info format: "directive={name};variant={variant_name}"
+``info`` is ``directive=<name>;variant=<variant>``.
 """
 
-from ..directives import apply_template_directive, load_templates
+from collections.abc import Callable
 
-# ---------------------------------------------------------------------------
-# Template loading
-# ---------------------------------------------------------------------------
+from ..directives import apply_template_directive, load_templates
 
 _TEMPLATES: dict[str, list[dict]] = load_templates("hacking", "framing_templates.json")
 
 
-# ---------------------------------------------------------------------------
-# Shared helper
-# ---------------------------------------------------------------------------
-
-
 def _apply(directive: str, prompt: str) -> tuple[str, str]:
-    """Select a random variant for the directive and apply it to the prompt.
-
-    Args:
-        directive: Key into _TEMPLATES (e.g. "noble_goal").
-        prompt: The original prompt string.
-
-    Returns:
-        (modified_prompt, additional_info)
-    """
+    """Select a random variant for the directive and apply it to the prompt."""
     return apply_template_directive(_TEMPLATES, directive, prompt, info_key="directive")
-
-
-# ---------------------------------------------------------------------------
-# Public directive functions — scenario/context modifiers
-# ---------------------------------------------------------------------------
 
 
 def to_fictional_world(prompt: str) -> tuple[str, str]:
@@ -72,12 +40,7 @@ def to_no_moral_constraints(prompt: str) -> tuple[str, str]:
     return _apply("no_moral_constraints", prompt)
 
 
-# ---------------------------------------------------------------------------
-# Registry
-# ---------------------------------------------------------------------------
-
-
-def get_framing_functions() -> list:
+def get_framing_functions() -> list[Callable]:
     """Return scenario-modifying framing directive functions."""
     return [
         to_fictional_world,

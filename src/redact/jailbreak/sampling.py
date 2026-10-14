@@ -1,17 +1,12 @@
-"""Sampling technique combinations — compatibility filtering + the two
-sampling strategies (budget-driven and count-driven) built on top of it.
-
-Split out of jailbreak/utils.py (see that module's docstring for the full
-7-concern breakdown this split resolved). Everything here is used
-exclusively by sample_combination() / sample_exact_combination() — the
-compatibility filter and the family-first picker have no other callers.
+"""Sampling technique combinations: the compatibility filter, and the two
+samplers built on it, by budget and by exact count.
 """
 
 import random
 from collections.abc import Callable
 
 from .chain import combine_techniques, order_by_hierarchy
-from .spec import load_spec
+from .technique import load_spec
 
 
 def get_compatible_remaining(

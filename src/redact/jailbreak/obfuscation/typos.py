@@ -1,21 +1,12 @@
-"""Typo-rewriting obfuscation via LLM.
+"""Typo techniques: a model rewrites the prompt with typos at one of four densities.
 
-Four density levels (low → insane). Each function asks the LLM to reintroduce
-character-level typos into the prompt while preserving meaning and word choice.
-This is an LLM-dependent technique — the model is better than rule-based
-approaches at producing natural-looking typos that don't distort meaning.
-
-Each function is a single-round **technique generator** (see
-``jailbreak/protocol.py``): it yields one :class:`LLMRequest` and returns
-``(rewritten_prompt, "level=<level>")``.
+``info`` is ``level=<level>``.
 """
+
+from collections.abc import Callable
 
 from redact.jailbreak.protocol import LLMRequest, TechniqueGen
 from redact.llms.prompting import build_messages, load_prompt
-
-# ---------------------------------------------------------------------------
-# Level descriptions injected into the prompt template
-# ---------------------------------------------------------------------------
 
 _LEVEL_DESCRIPTIONS = {
     "low":    "a small number of minor typos (roughly 1 per sentence) — occasional single-character swaps or missing letters, text remains easily readable",
@@ -23,11 +14,6 @@ _LEVEL_DESCRIPTIONS = {
     "high":   "a high density of typos (most sentences have multiple errors) — many words misspelled, text is effortful to read but meaning recoverable",
     "insane": "an extreme density of typos throughout every word — heavy character substitutions, missing and doubled letters everywhere, barely legible",
 }
-
-
-# ---------------------------------------------------------------------------
-# Shared helper
-# ---------------------------------------------------------------------------
 
 
 def _apply_typos_gen(
@@ -47,11 +33,6 @@ def _apply_typos_gen(
     )
     result = yield LLMRequest(gen_model, messages)
     return result.strip(), f"level={level}"
-
-
-# ---------------------------------------------------------------------------
-# Public functions (technique generators)
-# ---------------------------------------------------------------------------
 
 
 def to_rewrite_with_typos_low(prompt: str, **kwargs) -> TechniqueGen:
@@ -74,12 +55,7 @@ def to_rewrite_with_typos_insane(prompt: str, **kwargs) -> TechniqueGen:
     return (yield from _apply_typos_gen(prompt, "insane", **kwargs))
 
 
-# ---------------------------------------------------------------------------
-# Registry
-# ---------------------------------------------------------------------------
-
-
-def get_typos_functions() -> list:
+def get_typos_functions() -> list[Callable]:
     """Return all typo-rewriting technique functions."""
     return [
         to_rewrite_with_typos_low,

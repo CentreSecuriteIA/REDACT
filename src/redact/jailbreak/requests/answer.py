@@ -1,41 +1,18 @@
-"""Answer-format and output-conditioning jailbreak techniques.
+"""Answer-format techniques: a random variant of an answer-format template.
 
-Pure string transforms: str -> tuple[str, str]. No LLM dependency.
-
-These directives condition *how* the model answers — output format, response
-structure, and behavior constraints. Scenario/context modifiers live in
-hacking/framing.py.
-
-Each directive has multiple template variants stored in
-configs/answer_templates.json. One variant is selected per call using the
-globally seeded random module (seeded in redact/__init__.py). The chosen
-variant name is returned in additional_info for dataset traceability.
-
-additional_info format: "directive={name};variant={variant_name}"
+``info`` is ``directive=<name>;variant=<variant>``.
 """
+
+from collections.abc import Callable
 
 from ..directives import apply_template_directive, load_templates
 
-# ---------------------------------------------------------------------------
-# Template loading
-# ---------------------------------------------------------------------------
-
 _TEMPLATES: dict[str, list[dict]] = load_templates("requests", "answer_templates.json")
-
-
-# ---------------------------------------------------------------------------
-# Shared helper
-# ---------------------------------------------------------------------------
 
 
 def _apply(directive: str, prompt: str) -> tuple[str, str]:
     """Select a random variant for the directive and apply it to the prompt."""
     return apply_template_directive(_TEMPLATES, directive, prompt, info_key="directive")
-
-
-# ---------------------------------------------------------------------------
-# Output-conditioning directives
-# ---------------------------------------------------------------------------
 
 
 def to_refusal_then_comply(prompt: str) -> tuple[str, str]:
@@ -51,11 +28,6 @@ def to_apology_prevention(prompt: str) -> tuple[str, str]:
 def to_prefix_injection(prompt: str) -> tuple[str, str]:
     """Instruct the model to begin its response with a compliance prefix."""
     return _apply("prefix_injection", prompt)
-
-
-# ---------------------------------------------------------------------------
-# Output-format directives
-# ---------------------------------------------------------------------------
 
 
 def to_answer_in_markdown(prompt: str) -> tuple[str, str]:
@@ -88,12 +60,7 @@ def to_answer_as_structured_data(prompt: str) -> tuple[str, str]:
     return _apply("answer_as_structured_data", prompt)
 
 
-# ---------------------------------------------------------------------------
-# Registry
-# ---------------------------------------------------------------------------
-
-
-def get_answer_functions() -> list:
+def get_answer_functions() -> list[Callable]:
     """Return all answer-format and output-conditioning directive functions."""
     return [
         to_refusal_then_comply,

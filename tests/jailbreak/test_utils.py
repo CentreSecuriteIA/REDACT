@@ -4,20 +4,22 @@ import random
 
 import pytest
 
-from redact.jailbreak.chain import order_by_hierarchy
-from redact.jailbreak.protocol import LLMRequest
-from redact.jailbreak.utils import (
-    _parse_rejection_info,
+from redact.jailbreak.chain import (
     apply_combination,
     combine_techniques,
+    order_by_hierarchy,
+)
+from redact.jailbreak.protocol import LLMRequest
+from redact.jailbreak.sampling import (
     default_escalation_schedule,
     sample_combination,
     sample_exact_combination,
 )
+from redact.jailbreak.technique import is_discarded
 
 
 def _tech(name, layer, families, complexity=1, encode_weight=None):
-    """Build a fake tagged technique function (mirrors tag_all_functions output)."""
+    """Build a fake tagged technique function (mirrors what technique.tag sets)."""
     def fn(text, **kwargs):
         return text, name
     fn.__name__ = name
@@ -101,38 +103,18 @@ class TestCombineTechniques:
         assert info == "a;b;c"
 
 
-class TestParseRejectionInfo:
-    def test_accepted_empty_info(self):
-        accepted, reasoning = _parse_rejection_info("")
-        assert accepted is True
-        assert reasoning == ""
+class TestIsDiscarded:
+    @pytest.mark.parametrize("info", ["", "language=Swahili", "noop=to_rot13"])
+    def test_an_accepted_info(self, info):
+        assert not is_discarded(info)
 
-    def test_accepted_normal_info(self):
-        accepted, reasoning = _parse_rejection_info("language=Swahili")
-        assert accepted is True
-        assert reasoning == ""
-
-    def test_accepted_noop_info(self):
-        accepted, reasoning = _parse_rejection_info("noop=to_rot13")
-        assert accepted is True
-        assert reasoning == ""
-
-    def test_rejected_bare_discarded(self):
-        accepted, reasoning = _parse_rejection_info("DISCARDED")
-        assert accepted is False
-        assert reasoning == "DISCARDED"
-
-    def test_rejected_with_feedback(self):
-        info = "DISCARDED; language=Scots Gaelic; feedback=translation refused"
-        accepted, reasoning = _parse_rejection_info(info)
-        assert accepted is False
-        assert reasoning == info
-
-    def test_rejected_with_technique_prefix(self):
-        info = "DISCARDED; technique=to_scots_gaelic; feedback=refused"
-        accepted, reasoning = _parse_rejection_info(info)
-        assert accepted is False
-        assert reasoning == info
+    @pytest.mark.parametrize("info", [
+        "DISCARDED",
+        "DISCARDED; language=Scots Gaelic; feedback=translation refused",
+        "DISCARDED; technique=to_scots_gaelic; feedback=refused",
+    ])
+    def test_a_rejected_info(self, info):
+        assert is_discarded(info)
 
 
 class TestCombineTechniquesEarlyExit:
@@ -190,25 +172,26 @@ class TestTagMaxTokens:
                 "techniques": {n: {"families": ["f"], **t} for n, t in techniques.items()}}
 
     def test_spec_max_tokens_is_tagged_and_absent_means_none(self, monkeypatch):
-        import redact.jailbreak.spec as spec_module
+        import redact.jailbreak.technique as technique_module
 
-        monkeypatch.setattr(spec_module, "load_spec",
+        monkeypatch.setattr(technique_module, "load_spec",
                             lambda: self._spec(capped={"max_tokens": 64}, plain={}))
 
         def capped(text): return text, ""
         def plain(text): return text, ""
-        spec_module.tag_all_functions([capped, plain])
+        technique_module.tag([capped, plain])
         assert (capped.max_tokens, plain.max_tokens) == (64, None)
 
     @pytest.mark.parametrize("bad", [0, -5, "64", 2.5], ids=["zero", "negative", "str", "float"])
     def test_a_bad_spec_limit_fails_at_tagging(self, monkeypatch, bad):
-        import redact.jailbreak.spec as spec_module
+        import redact.jailbreak.technique as technique_module
 
-        monkeypatch.setattr(spec_module, "load_spec", lambda: self._spec(capped={"max_tokens": bad}))
+        monkeypatch.setattr(technique_module, "load_spec",
+                            lambda: self._spec(capped={"max_tokens": bad}))
 
         def capped(text): return text, ""
         with pytest.raises(ValueError, match="'capped': max_tokens"):
-            spec_module.tag_all_functions([capped])
+            technique_module.tag([capped])
 
 
 class TestApplyCombination:

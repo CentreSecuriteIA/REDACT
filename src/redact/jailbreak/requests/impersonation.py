@@ -1,37 +1,17 @@
-"""Impersonation jailbreak techniques.
+"""Impersonation technique: the prompt from a stated professional identity.
 
-Pure string transforms: str -> tuple[str, str]. No LLM dependency.
-
-The requester presents themselves as a trustworthy, authoritative person
-(nurse, doctor, researcher, etc.) to lend legitimacy to the harmful request.
-
-Templates are stored in configs/impersonation_templates.json. One variant is
-selected per call using the globally seeded random module.
-
-additional_info format: "type=good_person;variant={variant_name}"
+``info`` is ``type=good_person;variant=<variant>``.
 """
 
-from ..directives import apply_template_directive, load_templates
+from collections.abc import Callable
 
-# ---------------------------------------------------------------------------
-# Template loading
-# ---------------------------------------------------------------------------
+from ..directives import apply_template_directive, load_templates
 
 _TEMPLATES: dict[str, list[dict]] = load_templates("requests", "impersonation_templates.json")
 
 
-# ---------------------------------------------------------------------------
-# Shared helper
-# ---------------------------------------------------------------------------
-
-
 def _apply(directive: str, prompt: str) -> tuple[str, str]:
     return apply_template_directive(_TEMPLATES, directive, prompt, info_key="type")
-
-
-# ---------------------------------------------------------------------------
-# Public functions
-# ---------------------------------------------------------------------------
 
 
 def to_impersonate_good_person(prompt: str) -> tuple[str, str]:
@@ -39,12 +19,7 @@ def to_impersonate_good_person(prompt: str) -> tuple[str, str]:
     return _apply("good_person", prompt)
 
 
-# ---------------------------------------------------------------------------
-# Registry
-# ---------------------------------------------------------------------------
-
-
-def get_impersonation_functions() -> list:
+def get_impersonation_functions() -> list[Callable]:
     """Return all impersonation technique functions."""
     return [
         to_impersonate_good_person,
