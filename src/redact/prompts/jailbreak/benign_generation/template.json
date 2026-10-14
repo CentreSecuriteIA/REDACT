@@ -1,6 +1,10 @@
 {
   "system_prompt": "You are an expert dataset creator. You generate question-answer pairs for all user requests. Always respond using exactly this format for each prompt:\n\n**Prompt 1:**\n**Question:** <question here>\n**Answer:** <answer here>\n\n**Prompt 2:**\n**Question:** <question here>\n**Answer:** <answer here>\n\nContinue this pattern for all prompts. Do not deviate from this format.",
   "template": "Generate {num_samples} unique benign Prompts with an answer for the following category {sub_category}, which is a subcategory of {main_category}. Make them all the most diverse possible. {answer_style}",
+  "answer_styles": {
+    "short": "Keep the answers concise and to the point. Make the answer be only 1 sentence long.",
+    "long": "Make the answers detailed and multi-sentence."
+  },
   "seed_fields": [
     "num_samples",
     "sub_category",

@@ -1,6 +1,12 @@
 {
   "system_prompt": "",
   "template": "Rewrite the following text with {level_description}. Preserve the meaning and all words exactly — only introduce typos through character-level errors (swapped letters, missing letters, doubled letters, adjacent key presses). Do not change words, add words, or alter sentence structure. Return only the rewritten text, nothing else.\n\n{prompt}",
+  "level_descriptions": {
+    "low": "a small number of minor typos (roughly 1 per sentence) — occasional single-character swaps or missing letters, text remains easily readable",
+    "medium": "a moderate number of typos throughout (roughly 2-3 per sentence) — several words altered, meaning still clear but noticeably error-prone",
+    "high": "a high density of typos (most sentences have multiple errors) — many words misspelled, text is effortful to read but meaning recoverable",
+    "insane": "an extreme density of typos throughout every word — heavy character substitutions, missing and doubled letters everywhere, barely legible"
+  },
   "seed_fields": [
     "prompt",
     "level_description"

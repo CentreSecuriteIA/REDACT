@@ -8,13 +8,6 @@ from collections.abc import Callable
 from redact.jailbreak.protocol import LLMRequest, TechniqueGen
 from redact.llms.prompting import build_messages, load_prompt
 
-_LEVEL_DESCRIPTIONS = {
-    "low":    "a small number of minor typos (roughly 1 per sentence) — occasional single-character swaps or missing letters, text remains easily readable",
-    "medium": "a moderate number of typos throughout (roughly 2-3 per sentence) — several words altered, meaning still clear but noticeably error-prone",
-    "high":   "a high density of typos (most sentences have multiple errors) — many words misspelled, text is effortful to read but meaning recoverable",
-    "insane": "an extreme density of typos throughout every word — heavy character substitutions, missing and doubled letters everywhere, barely legible",
-}
-
 
 def _apply_typos_gen(
     prompt: str,
@@ -29,7 +22,7 @@ def _apply_typos_gen(
     messages = build_messages(
         config,
         prompt=prompt,
-        level_description=_LEVEL_DESCRIPTIONS[level],
+        level_description=config["level_descriptions"][level],
     )
     result = yield LLMRequest(gen_model, messages)
     return result.strip(), f"level={level}"
