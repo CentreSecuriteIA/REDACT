@@ -25,13 +25,6 @@ _PAIR_ATTACKER_SYSTEM = (
 )
 
 
-def _goal(transcript) -> str:
-    for s in transcript.steps:
-        if s.type == "message":
-            return s.content
-    return ""
-
-
 def crescendo_propose(
     followups: list[str] | None = None,
     jailbreak_technique: Callable[[str], tuple[str, str]] | None = None,
@@ -63,9 +56,8 @@ def pair_propose(attacker_model: str, system: str | None = None):
     system = system or _PAIR_ATTACKER_SYSTEM
 
     def propose(transcript, turn_index: int):
-        goal = _goal(transcript)
-        convo = transcript.as_messages()  # visible turns so far
-        rendered = "\n".join(f"{m['role']}: {m['content']}" for m in convo)
+        goal = transcript.first_message()
+        rendered = transcript.render()
         prompt = [
             {"role": "system", "content": system},
             {"role": "user", "content": f"GOAL:\n{goal}\n\nCONVERSATION:\n{rendered}\n\nNext user message:"},

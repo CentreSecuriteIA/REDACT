@@ -93,6 +93,35 @@ def test_records_are_copies_of_the_steps():
     assert t.steps[0].meta == {"turn": 1}
 
 
+def _two_turns():
+    t = Transcript()
+    t.message("u", "goal", role="user")
+    t.reply("b", "first", role="assistant", model="m")
+    t.note("strategy", "u", "push")
+    t.message("u", "more", role="user")
+    t.reply("b", "second", role="assistant", model="m")
+    return t
+
+
+def test_transcript_first_message_and_last_reply():
+    t, empty = _two_turns(), Transcript()
+    assert (t.first_message(), t.last_reply()) == ("goal", "second")
+    assert (empty.first_message(), empty.last_reply()) == ("", "")
+
+
+def test_transcript_render_lists_the_visible_turns():
+    assert _two_turns().render() == (
+        "user: goal\nassistant: first\nuser: more\nassistant: second")
+    assert Transcript().render() == ""
+
+
+def test_transcript_from_records_reads_back_to_records():
+    t = _two_turns()
+    back = Transcript.from_records(t.to_records())
+    assert back == t
+    assert back.to_records() == t.to_records()
+
+
 class _FakeClient:
     """Stands in for a ModelClient: batch of messages in, batch of replies out."""
 

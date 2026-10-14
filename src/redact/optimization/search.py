@@ -42,10 +42,6 @@ def _expand_gen(parent_transcript: Transcript, move_name: str, message: str,
     return t
 
 
-def _final_reply(transcript: Transcript) -> str:
-    return next((s.content for s in reversed(transcript.steps) if s.type == "reply"), "")
-
-
 def optimize(
     seed: str,
     target_model: str,
@@ -106,7 +102,7 @@ def optimize(
         if not keys:
             break
 
-        replies = [_final_reply(expanded[k]) for k in keys]
+        replies = [expanded[k].last_reply() for k in keys]
         checks = batch_check_samples(
             judge, replies,
             lambda goal, reply: [
@@ -139,6 +135,6 @@ def tree_to_records(tree: list[Node]) -> list[dict]:
     return [
         {"id": n.id, "parent": n.parent, "depth": n.depth, "move": n.move,
          "score": n.score, "success": n.success, "judge_reasoning": n.judge_reasoning,
-         "final_reply": _final_reply(n.transcript)}
+         "final_reply": n.transcript.last_reply()}
         for n in tree
     ]

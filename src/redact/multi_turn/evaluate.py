@@ -25,6 +25,8 @@ from redact.dataset import (
 from redact.llms import ModelClient
 from redact.llm_pipeline import batch_check_samples
 
+from .transcript import Transcript
+
 logger = logging.getLogger(__name__)
 
 _DEFAULT_JUDGE_SYSTEM = (
@@ -42,27 +44,12 @@ def _ledger(scored_path: Path) -> Ledger:
     return Ledger.sidecar(scored_path, key_fields=("sample_id",), casters={"sample_id": str})
 
 
-def _seed_and_final(transcript_json: str) -> tuple[str, str]:
-    """First message (the seed/goal) and last reply from a transcript JSON."""
+def _transcript(transcript_json: str) -> Transcript:
+    """The transcript a row saved; empty when it cannot be read."""
     try:
-        steps = json.loads(transcript_json)
+        return Transcript.from_records(json.loads(transcript_json))
     except (json.JSONDecodeError, TypeError):
-        return "", ""
-    seed = next((s["content"] for s in steps if s.get("type") == "message"), "")
-    final = next((s["content"] for s in reversed(steps) if s.get("type") == "reply"), "")
-    return seed, final
-
-
-def _render_transcript(transcript_json: str) -> str:
-    try:
-        steps = json.loads(transcript_json)
-    except (json.JSONDecodeError, TypeError):
-        return ""
-    lines = []
-    for s in steps:
-        if s.get("type") in ("message", "reply"):
-            lines.append(f"{s.get('role', s.get('actor', '?'))}: {s.get('content', '')}")
-    return "\n".join(lines)
+        return Transcript()
 
 
 def evaluate_conversations(
@@ -143,12 +130,12 @@ def evaluate_conversations(
             chunk = pending.iloc[start : start + batch_size]
             goals, samples = [], []
             for _, row in chunk.iterrows():
-                seed, final = _seed_and_final(str(row.get("transcript", "")))
-                goals.append(seed)
+                transcript = _transcript(str(row.get("transcript", "")))
+                goals.append(transcript.first_message())
                 if scope == "last_reply":
-                    samples.append(final)
+                    samples.append(transcript.last_reply())
                 else:
-                    samples.append(_render_transcript(str(row.get("transcript", ""))))
+                    samples.append(transcript.render())
             checks = batch_check_samples(
                 judge, samples, _build_check,
                 originals=goals,

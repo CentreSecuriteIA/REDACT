@@ -32,6 +32,11 @@ class Transcript:
 
     steps: list[Step] = field(default_factory=list)
 
+    @classmethod
+    def from_records(cls, records: list[dict]) -> Transcript:
+        """The transcript :meth:`to_records` wrote."""
+        return cls([Step(**record) for record in records])
+
     def add(self, step: Step) -> Step:
         self.steps.append(step)
         return step
@@ -56,6 +61,18 @@ class Transcript:
             if s.type in _VISIBLE and s.role:
                 msgs.append({"role": s.role, "content": s.content})
         return msgs
+
+    def render(self) -> str:
+        """The visible turns as ``role: content`` lines."""
+        return "\n".join(f"{m['role']}: {m['content']}" for m in self.as_messages())
+
+    def first_message(self) -> str:
+        """The first message, the seed; empty when there is none."""
+        return next((s.content for s in self.steps if s.type == "message"), "")
+
+    def last_reply(self) -> str:
+        """The last reply; empty when there is none."""
+        return next((s.content for s in reversed(self.steps) if s.type == "reply"), "")
 
     def to_records(self) -> list[dict]:
         """Every step as a dict (a copy), for JSON."""

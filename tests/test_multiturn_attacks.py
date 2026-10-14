@@ -105,7 +105,7 @@ def test_build_attack_setting_unknown_attack():
 
 
 def test_pair_propose_empty_transcript_goal():
-    # _goal returns "" when there's no message step yet; the attacker still runs.
+    # The goal is "" when there is no message step yet; the attacker still runs.
     from redact.llm_pipeline import drive_sync
     from redact.multi_turn import Transcript
     from redact.multiturn_attacks import pair_propose
