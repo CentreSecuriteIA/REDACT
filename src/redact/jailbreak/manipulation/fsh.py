@@ -38,26 +38,16 @@ def to_fsh_random_long(prompt: str, benign_data: dict) -> tuple[str, str]:
     return run_random_manipulation(prompt, benign_data, "long", _build_fsh_prompt)
 
 
-def to_fsh_selected_short(
-    prompt: str, benign_data: dict | None = None, *,
-    gen_model: str | None = None, prompt_dir=None, **kwargs,
-) -> TechniqueGen:
+def to_fsh_selected_short(prompt: str, **kwargs) -> TechniqueGen:
     """FSH with LLM-selected category, short answers (technique generator)."""
     return (yield from run_selected_manipulation(
-        prompt, benign_data, "short", _build_fsh_prompt,
-        gen_model=gen_model, prompt_dir=prompt_dir,
-    ))
+        prompt, "short", _build_fsh_prompt, **kwargs))
 
 
-def to_fsh_selected_long(
-    prompt: str, benign_data: dict | None = None, *,
-    gen_model: str | None = None, prompt_dir=None, **kwargs,
-) -> TechniqueGen:
+def to_fsh_selected_long(prompt: str, **kwargs) -> TechniqueGen:
     """FSH with LLM-selected category, long answers (technique generator)."""
     return (yield from run_selected_manipulation(
-        prompt, benign_data, "long", _build_fsh_prompt,
-        gen_model=gen_model, prompt_dir=prompt_dir,
-    ))
+        prompt, "long", _build_fsh_prompt, **kwargs))
 
 
 def get_fsh_functions() -> list[Callable]:

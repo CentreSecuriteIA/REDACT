@@ -112,5 +112,13 @@ def test_the_spec_and_the_registry_name_the_same_techniques():
     assert set(registered) == in_spec
 
 
+def test_every_generator_takes_the_prompt_and_keywords():
+    generators = [fn for fns in _layers().values() for fn in fns
+                  if inspect.isgeneratorfunction(fn)]
+    assert generators
+    assert {fn.__name__: _signature(fn) for fn in generators} == {
+        fn.__name__: "(prompt, **kwargs)" for fn in generators}
+
+
 if __name__ == "__main__":
     _FIXTURE.write_text(_dumps(snapshot()), encoding="utf-8")

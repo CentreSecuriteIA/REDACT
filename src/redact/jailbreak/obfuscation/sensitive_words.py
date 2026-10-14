@@ -233,7 +233,7 @@ def to_sensitive_words_variables(prompt: str, **kwargs) -> TechniqueGen:
 _MAX_SYNONYM_WORDS = 4
 
 
-def to_synonym_substitution(prompt: str, *, prompt_dir=None, **kwargs) -> TechniqueGen:
+def to_synonym_substitution(prompt: str, **kwargs) -> TechniqueGen:
     """Replace each harmful word with a creative LLM-generated benign synonym.
 
     Yields the harmful-word extraction request, then one synonym request per
@@ -241,7 +241,8 @@ def to_synonym_substitution(prompt: str, *, prompt_dir=None, **kwargs) -> Techni
     kept). Returns ``(modified_prompt, "substitutions=w1->s1;...")``.
     """
     gen_model = kwargs.get("gen_model")
-    words = yield from harmful_words_gen(prompt, prompt_dir=prompt_dir, **kwargs)
+    prompt_dir = kwargs.get("prompt_dir")
+    words = yield from harmful_words_gen(prompt, **kwargs)
     if not words:
         return prompt, "substitutions="
 

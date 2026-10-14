@@ -52,26 +52,16 @@ def to_dap_random_long(prompt: str, benign_data: dict) -> tuple[str, str]:
     return run_random_manipulation(prompt, benign_data, "long", _build_dap_prompt)
 
 
-def to_dap_selected_short(
-    prompt: str, benign_data: dict | None = None, *,
-    gen_model: str | None = None, prompt_dir=None, **kwargs,
-) -> TechniqueGen:
+def to_dap_selected_short(prompt: str, **kwargs) -> TechniqueGen:
     """DAP with LLM-selected category, short answers (technique generator)."""
     return (yield from run_selected_manipulation(
-        prompt, benign_data, "short", _build_dap_prompt,
-        gen_model=gen_model, prompt_dir=prompt_dir,
-    ))
+        prompt, "short", _build_dap_prompt, **kwargs))
 
 
-def to_dap_selected_long(
-    prompt: str, benign_data: dict | None = None, *,
-    gen_model: str | None = None, prompt_dir=None, **kwargs,
-) -> TechniqueGen:
+def to_dap_selected_long(prompt: str, **kwargs) -> TechniqueGen:
     """DAP with LLM-selected category, long answers (technique generator)."""
     return (yield from run_selected_manipulation(
-        prompt, benign_data, "long", _build_dap_prompt,
-        gen_model=gen_model, prompt_dir=prompt_dir,
-    ))
+        prompt, "long", _build_dap_prompt, **kwargs))
 
 
 def get_dap_functions() -> list[Callable]:
