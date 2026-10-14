@@ -70,7 +70,7 @@ def tag(funcs: list[Callable]) -> None:
         fn.requires_benign = t.get("requires_benign", False)
         fn.encode_weight = t.get("encode_weight", None)
         # Reply limit for the technique's LLM calls; None keeps the model's
-        # default. chain._run_chain puts it on each request.
+        # default. chain.run_chain puts it on each request.
         limit = t.get("max_tokens")
         if limit is not None and (not isinstance(limit, int) or limit < 1):
             raise ValueError(

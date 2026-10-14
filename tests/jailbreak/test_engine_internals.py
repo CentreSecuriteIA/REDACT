@@ -46,9 +46,9 @@ class _FakeBackend:
 
 
 def _patch_internals_support(monkeypatch, support_by_model: dict[str, bool]):
-    """Control per-model internals support for _tag_yields/_rename_capture.
+    """Control per-model internals support for the chain's tagging and _rename_capture.
 
-    ``_tag_yields`` asks the *registry* (model_config.model_compute_config),
+    ``chain._wrap`` asks the *registry* (model_config.model_compute_config),
     not a constructed transport — patching that is what decides tagging. The
     returned fakes still stand in as the per-model backends ``as_resolver``
     routes ``rename_capture`` to.

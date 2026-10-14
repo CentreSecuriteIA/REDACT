@@ -15,7 +15,7 @@ Usage:
     from redact.jailbreak.obfuscation.encoding import to_base64
 """
 
-from .chain import apply_combination, combine_techniques, is_noop, make_combination_gen
+from .chain import apply_combination, combine_techniques, in_layer_order, run_chain
 from .engine import batch_apply_combinations
 
 # Run planning
