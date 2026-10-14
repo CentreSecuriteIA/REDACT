@@ -6,7 +6,7 @@ import random
 from collections.abc import Callable
 
 from .chain import combine_techniques, order_by_hierarchy
-from .spec import load_spec
+from .technique import load_spec
 
 
 def get_compatible_remaining(

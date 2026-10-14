@@ -9,8 +9,9 @@ import dataclasses
 import inspect
 from collections.abc import Callable, Iterable
 
-from .protocol import LLMRequest, TechniqueGen, run_sync
-from .spec import load_spec
+from redact.llm_pipeline import LLMRequest, drive_sync
+
+from .technique import DISCARDED, TechniqueGen, is_discarded, load_spec
 
 
 def _normalize_output(output) -> tuple[str, str]:
@@ -113,7 +114,7 @@ def _run_chain(techniques: list[Callable], text: str, internals_root: str | None
     yields propagate up to the batched engine (or to ``run_sync`` for the
     single-sample path) — tagged with ``internals_id`` (see :func:`_tag_yields`)
     when ``internals_root`` is given. A technique tagged with ``max_tokens``
-    (from combination_spec.json via ``spec.tag_all_functions``) has that limit
+    (from combination_spec.json via ``technique.tag``) has that limit
     put on each of its requests (see :func:`_cap_yields`). Early-exits with a
     ``DISCARDED`` info string the moment any step rejects, returning the
     pre-failure text. Returns ``(text, info)``.
@@ -140,10 +141,10 @@ def _run_chain(techniques: list[Callable], text: str, internals_root: str | None
         new_text, info = _normalize_output(output)
 
         # Early exit on rejection — don't apply remaining techniques
-        if info.startswith("DISCARDED"):
+        if is_discarded(info):
             return result, (
-                f"DISCARDED; technique={technique.__name__}; "
-                f"{info[len('DISCARDED; '):]}"
+                f"{DISCARDED}; technique={technique.__name__}; "
+                f"{info[len(f'{DISCARDED}; '):]}"
             )
 
         # Track no-ops
@@ -189,9 +190,9 @@ def combine_techniques(*techniques: Callable, sort_by_hierarchy: bool = True) ->
     The returned ``combined`` callable runs **synchronously**: calling
     ``combined(text, client=..., benign_data=...)``
     drives the chain to completion (issuing real LLM calls for generator steps
-    via :func:`protocol.run_sync`) and returns ``(text, info)``. This preserves
-    the single-sample / test contract. The batched engine does **not** call
-    ``combined`` — it builds the chain generator directly via
+    via :func:`redact.llm_pipeline.drive_sync`) and returns ``(text, info)``.
+    This preserves the single-sample / test contract. The batched engine does
+    **not** call ``combined`` — it builds the chain generator directly via
     :func:`make_combination_gen` and interleaves many samples.
 
     ``combined.techniques`` exposes the ordered inner technique list (used by
@@ -220,7 +221,7 @@ def combine_techniques(*techniques: Callable, sort_by_hierarchy: bool = True) ->
                 c = ModelClient.create(request.model)
             return generate_sample(c, request.messages, max_tokens=request.max_tokens)
 
-        return run_sync(gen, call)
+        return drive_sync(gen, call)
 
     combined.__name__ = "+".join(t.__name__ for t in ordered) or "identity"
     combined.techniques = list(ordered)  # expose inner techniques for inspection
@@ -239,21 +240,6 @@ def make_combination_gen(fn: Callable, text: str, **kwargs) -> TechniqueGen:
     if techniques is None:
         techniques = [fn]
     return _run_chain(techniques, text, **kwargs)
-
-
-def _parse_rejection_info(info_str: str) -> tuple[bool, str]:
-    """Parse technique info string to extract acceptance status and reason.
-
-    Returns (accepted: bool, reasoning: str):
-    - If info_str starts with "DISCARDED": accepted=False, reasoning=full info string
-    - Otherwise: accepted=True, reasoning="" (empty)
-
-    The "DISCARDED" prefix is a sentinel set by with_feedback_retries() when
-    checks are exhausted, so checking it reliably identifies rejections.
-    """
-    if info_str.startswith("DISCARDED"):
-        return False, info_str
-    return True, ""
 
 
 def apply_combination(
@@ -305,9 +291,8 @@ def apply_combination(
     )
     text, info = _normalize_output(output)
 
-    # Parse rejection status from info string
-    accepted, reasoning = _parse_rejection_info(info)
-    return text, info, accepted, reasoning
+    accepted = not is_discarded(info)
+    return text, info, accepted, "" if accepted else info
 
 
 def is_noop(original: str, result: str) -> bool:

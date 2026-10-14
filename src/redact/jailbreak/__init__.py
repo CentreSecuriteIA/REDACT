@@ -43,13 +43,13 @@ from .sampling import (
     sample_combination,
     sample_exact_combination,
 )
-from .spec import load_spec, tag_all_functions
+from .technique import load_spec, tag
 
 # ---------------------------------------------------------------------------
 # Tag all technique functions with compatibility metadata at import time
 # ---------------------------------------------------------------------------
 
-tag_all_functions(
+tag(
     get_all_obfuscation_functions()
     + get_all_hacking_functions()
     + get_all_manipulation_functions()

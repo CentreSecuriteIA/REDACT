@@ -26,7 +26,8 @@ from __future__ import annotations
 from redact.dataset import content_id
 from redact.llm_pipeline import drive_generators
 
-from .chain import _parse_rejection_info, is_noop, make_combination_gen
+from .chain import is_noop, make_combination_gen
+from .technique import is_discarded
 
 
 def _rename_capture(sample: dict, gen_model: str, final_sample_id: str, resolve=None) -> None:
@@ -50,7 +51,7 @@ def _rename_capture(sample: dict, gen_model: str, final_sample_id: str, resolve=
 def _finalize(sample: dict, value, gen_model: str, resolve=None) -> dict:
     """Build the output row for a completed sample from its ``(text, info)``."""
     text, info = value
-    accepted, reasoning = _parse_rejection_info(info)
+    accepted = not is_discarded(info)
     fn = sample["combination"]
     techniques = list(getattr(fn, "techniques", []))
     sample_id = content_id(text)
@@ -65,7 +66,7 @@ def _finalize(sample: dict, value, gen_model: str, resolve=None) -> dict:
         "num_techniques": len(techniques),
         "is_noop": is_noop(sample["prompt"], text),
         "accepted": accepted,
-        "reasoning": reasoning,
+        "reasoning": "" if accepted else info,
     }
 
 

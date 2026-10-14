@@ -21,7 +21,7 @@ from redact.jailbreak.manipulation import get_all_manipulation_functions
 from redact.jailbreak.obfuscation import get_all_obfuscation_functions
 from redact.jailbreak.requests import get_all_request_functions
 from redact.jailbreak.sampling import sample_combination
-from redact.jailbreak.spec import load_spec
+from redact.jailbreak.technique import load_spec
 
 _FIXTURE = Path(__file__).parents[1] / "fixtures" / "technique_registry.json"
 
