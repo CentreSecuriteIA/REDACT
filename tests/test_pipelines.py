@@ -181,7 +181,7 @@ class TestGenerateOutputsFindsItsInputs:
 class TestGenerateOutputsReadBack:
     def test_without_read_back_the_output_is_written_and_not_read(
             self, tmp_path, monkeypatch):
-        import redact.content_moderation.generation as G
+        import redact.content_moderation.outputs as G
         import redact.pipelines as P
         from redact import generate_outputs, paths
         from tests.conftest import MockBackend, make_client
@@ -497,22 +497,22 @@ class TestPoolSize:
             backend=SimpleNamespace(max_workers=max_workers))
 
     def test_two_calls_worth_without_an_async_lane(self):
-        from redact.content_moderation.generation import _pool_size
+        from redact.content_moderation.inputs import _pool_size
 
         assert _pool_size(32, self._client(False, 500), None) == 64
 
     def test_the_widest_lane_sets_the_pool(self):
-        from redact.content_moderation.generation import _pool_size
+        from redact.content_moderation.inputs import _pool_size
 
         assert _pool_size(32, self._client(True, 256), self._client(True, 512)) == 512
 
     def test_a_lane_narrower_than_two_calls_changes_nothing(self):
-        from redact.content_moderation.generation import _pool_size
+        from redact.content_moderation.inputs import _pool_size
 
         assert _pool_size(32, self._client(True, 3), self._client(True, 8)) == 64
 
     def test_the_outputs_stage_drives_with_it(self, tmp_path, monkeypatch):
-        import redact.content_moderation.generation as G
+        import redact.content_moderation.outputs as G
         import redact.pipelines as P
         from redact import generate_outputs
         from tests.conftest import make_client
@@ -606,7 +606,7 @@ class TestGenerateOutputsPool:
 
     def test_a_run_killed_between_rows_and_acks_leaves_each_input_once(
             self, tmp_path, monkeypatch):
-        import redact.content_moderation.generation as G
+        import redact.content_moderation.outputs as G
         from redact import generate_outputs, paths
         from redact.dataset import Ledger, content_id
         from tests.conftest import Killed, kill_after_rows, lock_is_free
@@ -798,7 +798,7 @@ class TestGenerateOutputsPool:
     def test_another_unit_error_still_stops_the_stage(self, tmp_path, monkeypatch):
         """Only a prompt that is too long becomes a row. This unit fails
         building its check, after its response arrived."""
-        import redact.content_moderation.generation as G
+        import redact.content_moderation.outputs as G
         from redact import generate_outputs, paths
         from redact.dataset import Ledger
 

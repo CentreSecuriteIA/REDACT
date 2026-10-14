@@ -49,7 +49,7 @@ from redact.content_moderation import (
     InputPipeline,
     run_output_generation,
 )
-from redact.content_moderation.generation import _pool_size
+from redact.content_moderation.inputs import _pool_size
 from redact.content_moderation.paraphrase import (
     paraphrase_pool,
     run_paraphrase_target,

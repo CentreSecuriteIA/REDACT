@@ -1,13 +1,9 @@
 """Standalone (meta-prompt) content moderation input generation — DEPRECATED.
 
-Split out of content_moderation/generation.py, which used to fuse this
-deprecated path into the same module/class as the active constitution-seeded
-path (``run_from_constitution``, still in ``generation.py``). Both paths
-share the ``InputPipeline`` class — ``InputPipeline`` in ``generation.py``
+``InputPipeline`` (in ``inputs.py``, beside the constitution-seeded path)
 inherits from :class:`_StandaloneGenerationMixin` below, so
 ``pipeline.run_category(...)`` / ``pipeline.run_standalone(...)`` /
-``pipeline.run_turn(...)`` etc. all still work exactly as before; only the
-on-disk file layout changed.
+``pipeline.run_turn(...)`` are its methods.
 
 Meta-prompt seeds drive per-category multi-turn generation with the
 entry-type-aware quality checker. **Deprecated** (``run_category`` and the
@@ -41,7 +37,7 @@ class _StandaloneGenerationMixin:
     ``check``,
     ``extraction_style``, ``dataset_dir``) and the
     ``_build_generation_messages`` method defined on the base class in
-    ``generation.py`` — a standard mixin, not meant to be instantiated on its
+    ``inputs.py`` — a standard mixin, not meant to be instantiated on its
     own.
     """
 

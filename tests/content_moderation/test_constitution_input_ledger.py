@@ -13,7 +13,7 @@ import re
 import pandas as pd
 import pytest
 
-from redact.content_moderation.generation import (
+from redact.content_moderation.inputs import (
     InputPipeline,
     _constitution_inputs_ledger,
     _constitution_inputs_manifest,
@@ -307,7 +307,7 @@ def test_pool_fills_a_call_with_a_retry_and_a_new_entry(tmp_path):
 
 def test_pool_resume_after_a_failed_append_runs_only_unfinished_entries(
         tmp_path, monkeypatch):
-    import redact.content_moderation.generation as G
+    import redact.content_moderation.inputs as G
 
     real_append = G.append_rows
     appends = []
@@ -406,7 +406,7 @@ def test_an_entry_whose_prompt_is_too_long_is_acked_as_rejected(tmp_path, caplog
 def test_another_unit_error_still_stops_the_stage(tmp_path, monkeypatch):
     """Only a prompt that is too long is acked as rejected. This entry fails
     building its check, after its samples arrived."""
-    import redact.content_moderation.generation as G
+    import redact.content_moderation.inputs as G
 
     def no_checker(**kwargs):
         raise KeyError("no checker")

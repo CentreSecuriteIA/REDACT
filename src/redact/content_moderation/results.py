@@ -1,10 +1,7 @@
 """Result data classes for content moderation input generation.
 
-Split out of content_moderation/generation.py so both the active
-constitution-seeded path (``generation.py``) and the deprecated standalone
-path (``standalone_generation.py``) can depend on these without either one
-importing the other — mirrors ``redact/types.py``'s "keep it dependency-free"
-role, just scoped to this subpackage.
+Shared by the seeded path (``inputs.py``) and the deprecated standalone path
+(``standalone.py``).
 """
 
 from dataclasses import dataclass, field
@@ -44,7 +41,7 @@ def _next_turn_feedback(
     """Build the rejection-feedback string fed into the next generation turn.
 
     Shared by ``InputPipeline.run_category()`` and ``.run_standalone()``
-    (both in ``standalone_generation.py``) — both turn a completed turn's
+    (both in ``standalone.py``) — both turn a completed turn's
     rejection reasoning into feedback for the next turn's generation prompt
     the same way. "" when nothing was rejected (or nothing had reasoning
     attached).
