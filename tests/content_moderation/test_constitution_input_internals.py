@@ -12,7 +12,7 @@ sample's own content-hash (its eventual sample_id) for the checker.
 import pytest
 
 import tests.content_moderation.test_constitution_input_ledger as ledger_mod
-from redact.content_moderation.generation import InputPipeline
+from redact.content_moderation.inputs import InputPipeline
 from redact.dataset import content_id
 from redact.llms.backends import ComputeConfig
 from tests.conftest import MockBackend, make_client
@@ -36,7 +36,7 @@ def _pipeline(tmp_path, gen_backend=None, check_backend=None):
 
 
 def test_the_stage_drives_with_the_pool_its_lanes_allow(tmp_path, monkeypatch):
-    import redact.content_moderation.generation as G
+    import redact.content_moderation.inputs as G
 
     seen = {}
 

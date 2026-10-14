@@ -126,13 +126,13 @@ class TestSampleRow:
         append_samples(texts, category="old", turn=1, accepted=[True, False],
                        source="constitution", extra_columns=[self._EXTRA] * 2,
                        dataset_dir=tmp_dataset_dir)
-        new = paths.category_csv("new", base=tmp_dataset_dir)
+        new = paths.category_csv("new", root=tmp_dataset_dir)
         new.parent.mkdir()
         append_rows(new, [
             sample_row(text, "old", turn=1, accepted=accepted, source="constitution",
                        extra=self._EXTRA)
             for text, accepted in zip(texts, (True, False))])
-        old = paths.category_csv("old", base=tmp_dataset_dir)
+        old = paths.category_csv("old", root=tmp_dataset_dir)
         assert new.read_bytes() == old.read_bytes()
 
 

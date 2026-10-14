@@ -2,9 +2,9 @@
 
 import pytest
 
-from redact.content_moderation.generation import (
+from redact.content_moderation.inputs import InputPipeline
+from redact.content_moderation.results import (
     CategoryResult,
-    InputPipeline,
     SampleResult,
     TurnResult,
 )

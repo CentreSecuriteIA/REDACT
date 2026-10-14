@@ -2,19 +2,14 @@
 
 import json
 import logging
-import os
 import re
-from unittest.mock import MagicMock, patch
 
 import pandas as pd
 import pytest
 
 from redact.exceptions import PromptTooLongError
 from redact.llms.backends import ComputeConfig
-from redact.pipelines import (
-    _get_client,
-    create_taxonomy,
-)
+from redact.pipelines import create_taxonomy
 from tests.conftest import MockBackend
 
 
@@ -57,23 +52,6 @@ class TestCreateTaxonomy:
         result = create_taxonomy("ret_test", {"X": "Y"}, taxonomy_dir=tmp_path)
         assert isinstance(result, dict)
         assert result["name"] == "ret_test"
-
-
-class TestGetClientHelper:
-    def test_returns_ready_client(self):
-        with patch.dict(os.environ, {"VENICE_API_KEY": "test"}):
-            client = _get_client(model="venice-uncensored")
-        assert client.model == "venice-uncensored"
-        # Fully wired: the budget is bound to the backend, and the limiter
-        # lives inside the client rather than alongside it.
-        assert client.backend.rpm == 75
-
-    def test_resolves_via_get_client(self):
-        with patch.dict(os.environ, {"VENICE_API_KEY": "test"}):
-            with patch("redact.pipelines.ModelClient.create") as mock_get:
-                mock_get.return_value = MagicMock()
-                _get_client(model="venice-uncensored")
-                mock_get.assert_called_once_with("venice-uncensored")
 
 
 class TestStandaloneInputsDeprecation:
@@ -141,6 +119,33 @@ class TestGenerateOutputsManifest:
         assert len(Manifest.sidecar(out).load()) == 3   # full plan (all 3 units)
         assert len(pd.read_csv(out)) == 2               # only the 2 pending generated
 
+    def test_a_fresh_run_stopped_before_it_plans_leaves_no_old_plan(
+            self, tmp_path, monkeypatch):
+        import redact.pipelines as P
+        from redact import generate_outputs, paths
+        from redact.dataset import Manifest
+        from tests.conftest import MockBackend, make_client
+
+        monkeypatch.setattr(
+            P.ModelClient, "create", lambda m: make_client(MockBackend("ans"), m))
+        inputs = pd.DataFrame({
+            "sample": ["p one", "p two"],
+            "category": ["Cyber"] * 2, "entry_type": ["harmful"] * 2,
+        })
+        generate_outputs(data_dir=tmp_path, inputs=inputs, check_outputs=False,
+                         verbose=False)
+        manifest = Manifest.sidecar(paths.output_responses_csv(tmp_path))
+        assert manifest.path.exists()
+
+        def stop(self, rows):
+            raise KeyboardInterrupt
+
+        monkeypatch.setattr(Manifest, "write", stop)
+        with pytest.raises(KeyboardInterrupt):
+            generate_outputs(data_dir=tmp_path, inputs=inputs, check_outputs=False,
+                             resume=False, verbose=False)
+        assert not manifest.path.exists()
+
     def test_the_callers_frame_is_left_as_it_was(self, tmp_path, monkeypatch):
         """The stage adds its id column to a frame of its own."""
         import redact.pipelines as P
@@ -203,7 +208,7 @@ class TestGenerateOutputsFindsItsInputs:
 class TestGenerateOutputsReadBack:
     def test_without_read_back_the_output_is_written_and_not_read(
             self, tmp_path, monkeypatch):
-        import redact.content_moderation.generation as G
+        import redact.content_moderation.outputs as G
         import redact.pipelines as P
         from redact import generate_outputs, paths
         from tests.conftest import MockBackend, make_client
@@ -519,22 +524,22 @@ class TestPoolSize:
             backend=SimpleNamespace(max_workers=max_workers))
 
     def test_two_calls_worth_without_an_async_lane(self):
-        from redact.content_moderation.generation import _pool_size
+        from redact.content_moderation.inputs import _pool_size
 
         assert _pool_size(32, self._client(False, 500), None) == 64
 
     def test_the_widest_lane_sets_the_pool(self):
-        from redact.content_moderation.generation import _pool_size
+        from redact.content_moderation.inputs import _pool_size
 
         assert _pool_size(32, self._client(True, 256), self._client(True, 512)) == 512
 
     def test_a_lane_narrower_than_two_calls_changes_nothing(self):
-        from redact.content_moderation.generation import _pool_size
+        from redact.content_moderation.inputs import _pool_size
 
         assert _pool_size(32, self._client(True, 3), self._client(True, 8)) == 64
 
     def test_the_outputs_stage_drives_with_it(self, tmp_path, monkeypatch):
-        import redact.content_moderation.generation as G
+        import redact.content_moderation.outputs as G
         import redact.pipelines as P
         from redact import generate_outputs
         from tests.conftest import make_client
@@ -628,7 +633,7 @@ class TestGenerateOutputsPool:
 
     def test_a_run_killed_between_rows_and_acks_leaves_each_input_once(
             self, tmp_path, monkeypatch):
-        import redact.content_moderation.generation as G
+        import redact.content_moderation.outputs as G
         from redact import generate_outputs, paths
         from redact.dataset import Ledger, content_id
         from tests.conftest import Killed, kill_after_rows, lock_is_free
@@ -820,7 +825,7 @@ class TestGenerateOutputsPool:
     def test_another_unit_error_still_stops_the_stage(self, tmp_path, monkeypatch):
         """Only a prompt that is too long becomes a row. This unit fails
         building its check, after its response arrived."""
-        import redact.content_moderation.generation as G
+        import redact.content_moderation.outputs as G
         from redact import generate_outputs, paths
         from redact.dataset import Ledger
 

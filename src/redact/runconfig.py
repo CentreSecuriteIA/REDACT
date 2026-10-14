@@ -324,7 +324,7 @@ def _stage_files(
     if stage == "inputs":
         seeded = dataset_type == "training"
         tree = (paths.constitution_inputs_dir if seeded else paths.datasets)(data_dir)
-        files = [paths.category_csv(c, base=tree) for c in discover_categories(tree)]
+        files = [paths.category_csv(c, root=tree) for c in discover_categories(tree)]
         keep = {"accepted": True}
         # Seeded inputs of another style may share the tree.
         if seeded and params.get("style", "long"):

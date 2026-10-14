@@ -14,16 +14,16 @@ from .checker import (
     build_paraphrase_checker,
     build_quality_checker,
 )
-from .generation import (
-    CategoryResult,
-    ConstitutionInputResult,
-    InputPipeline,
-    SampleResult,
-    TurnResult,
-    run_output_generation,
-)
+from .inputs import InputPipeline
 from .metaprompt import (
     generate_category_description,
     generate_seeds,
 )
+from .outputs import run_output_generation
 from .paraphrase import paraphrase_batch, paraphrase_sample
+from .results import (
+    CategoryResult,
+    ConstitutionInputResult,
+    SampleResult,
+    TurnResult,
+)

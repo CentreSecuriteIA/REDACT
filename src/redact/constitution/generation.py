@@ -20,7 +20,6 @@ Usage:
 
 import csv
 import logging
-import re
 from dataclasses import dataclass, field
 from pathlib import Path
 
@@ -30,6 +29,7 @@ from ..dataset import Ledger, Manifest, content_id, resume_state
 from ..dataset.taxonomy import iter_categories
 from ..llms.client import ModelClient
 from .parse import parse_constitution as _parse_raw
+from .parse import strip_end_marker
 from ..llms.prompting import build_messages, load_prompt
 from ..llms.router import generate_sample
 from ..types import ALL_ENTRY_TYPES, EntryType
@@ -83,25 +83,6 @@ class ConstitutionResult:
                 for e in self.entries
             ]
         )
-
-
-# ---------------------------------------------------------------------------
-# [END] marker handling
-# ---------------------------------------------------------------------------
-
-_END_MARKER = re.compile(r"\n?\[END\]\s*$")
-
-
-def _strip_end_marker(text: str) -> tuple[str, bool]:
-    """Strip [END] marker from LLM output.
-
-    Returns:
-        (clean_text, was_complete): was_complete is True if [END] was found,
-        meaning the model finished normally rather than hitting the token limit.
-    """
-    if _END_MARKER.search(text):
-        return _END_MARKER.sub("", text), True
-    return text, False
 
 
 # ---------------------------------------------------------------------------
@@ -258,7 +239,7 @@ class ConstitutionPipeline:
                 # content filter stopped the reply). Decide whether to reject it,
                 # as a reply with a wrong count is rejected elsewhere.
                 # Strip [END] marker and check completeness
-                clean_output, was_complete = _strip_end_marker(raw_output)
+                clean_output, was_complete = strip_end_marker(raw_output)
                 if not was_complete:
                     logger.warning(
                         "Constitution output for %s/%s may be truncated "
@@ -376,7 +357,7 @@ class ConstitutionPipeline:
                     max_tokens=10000,
                 )
 
-                clean_output, was_complete = _strip_end_marker(raw_output)
+                clean_output, was_complete = strip_end_marker(raw_output)
                 if not was_complete:
                     logger.warning(
                         "General benign output may be truncated (no [END] marker)."

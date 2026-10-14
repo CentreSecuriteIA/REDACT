@@ -9,9 +9,9 @@ from redact.constitution.generation import (
     ConstitutionResult,
     EntryType,
     _save_entries_csv,
-    _strip_end_marker,
     _unit_key,
 )
+from redact.constitution.parse import strip_end_marker
 from redact.dataset import Ledger
 from tests.conftest import MockBackend, make_client
 
@@ -104,17 +104,17 @@ class TestConstitutionResult:
 
 class TestStripEndMarker:
     def test_found(self):
-        text, complete = _strip_end_marker("some content\n[END]")
+        text, complete = strip_end_marker("some content\n[END]")
         assert complete is True
         assert "[END]" not in text
 
     def test_missing(self):
-        text, complete = _strip_end_marker("some content without marker")
+        text, complete = strip_end_marker("some content without marker")
         assert complete is False
         assert text == "some content without marker"
 
     def test_with_trailing_whitespace(self):
-        text, complete = _strip_end_marker("content\n[END]  ")
+        text, complete = strip_end_marker("content\n[END]  ")
         assert complete is True
 
 

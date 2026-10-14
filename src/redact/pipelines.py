@@ -49,7 +49,7 @@ from redact.content_moderation import (
     InputPipeline,
     run_output_generation,
 )
-from redact.content_moderation.generation import _pool_size
+from redact.content_moderation.inputs import _pool_size
 from redact.content_moderation.paraphrase import (
     paraphrase_pool,
     run_paraphrase_target,
@@ -90,49 +90,6 @@ from redact.llms.model_config import default_model_for_role
 logger = logging.getLogger(__name__)
 
 _DEFAULT_TAXONOMY_DIR = paths.taxonomy_dir()
-
-
-# Thin delegators to the single-source path module (redact/paths.py). Kept as
-# local names so existing call sites read unchanged; all resolution lives in
-# one place now.
-def _default_dataset_dir() -> Path:
-    return paths.datasets()
-
-
-def _default_jailbreak_path() -> Path:
-    return paths.jailbreaks_csv()
-
-
-def _default_benign_path() -> Path:
-    return paths.benign_csv()
-
-
-# ---------------------------------------------------------------------------
-# Internal helpers
-# ---------------------------------------------------------------------------
-
-
-def _get_client(model: str = "venice-uncensored") -> ModelClient:
-    """Resolve a model name to its ready-to-call client.
-
-    Thin alias for :meth:`ModelClient.create` — kept so pipeline code reads
-    consistently and has one place to change if resolution ever needs a
-    pipeline-specific default.
-    """
-    return ModelClient.create(model)
-
-
-def _ensure_benign_data(
-    client: ModelClient,
-    benign_path: Path | None = None,
-    verbose: bool = True,
-) -> dict:
-    """Load benign data, generating if it doesn't exist."""
-    return get_or_generate_benign_data(
-        client=client,
-        cache_path=benign_path or _default_benign_path(),
-        verbose=verbose,
-    )
 
 
 # Rows per read of a CSV that is copied into another.
@@ -492,7 +449,7 @@ def generate_inputs(
     # Constitution-seeded mode (delegates to InputPipeline.run_from_constitution)
     # ------------------------------------------------------------------
     if constitution_df is not None:
-        client = _get_client(model)
+        client = ModelClient.create(model)
         check_model = check_model or model
         check_client = ModelClient.create(check_model)
 
@@ -535,7 +492,7 @@ def generate_inputs(
         )
 
         # Write the root-level handoff CSV build_dataset() actually looks for
-        # (paths.datasets(data_dir) / "constitution_inputs_merged.csv") —
+        # (paths.constitution_inputs_merged_csv) —
         # without this, build_dataset() silently drops every constitution-
         # seeded input row, since its own category-folder discovery scans
         # Datasets/ directly and never finds the one-level-deeper
@@ -544,10 +501,10 @@ def generate_inputs(
         # under this data_dir, not just whichever style this call used.
         # Copied from the category files in chunks; left as it is when no
         # sample is accepted.
-        files = (paths.category_csv(c, base=ds_dir)
+        files = (paths.category_csv(c, root=ds_dir)
                  for c in discover_categories(ds_dir))
         _write_parts(
-            paths.datasets(data_dir) / "constitution_inputs_merged.csv",
+            paths.constitution_inputs_merged_csv(data_dir),
             [_Part(f, accepted_only=True) for f in files if _has_rows(f)],
             keep_empty=False,
         )
@@ -577,7 +534,7 @@ def generate_inputs(
         categories = categories[:num_categories]
 
     # Backend (auto-resolved from the model name)
-    client = _get_client(model)
+    client = ModelClient.create(model)
     check_model = check_model or model
 
     # Pipeline
@@ -598,9 +555,8 @@ def generate_inputs(
 
     # Clear existing data when not resuming
     if not resume:
-        actual_dir = Path(ds_dir) if ds_dir else _default_dataset_dir()
         for cat_name, _ in categories:
-            csv_path = paths.category_csv(cat_name, base=actual_dir)
+            csv_path = paths.category_csv(cat_name, root=ds_dir)
             if csv_path.exists():
                 csv_path.unlink()
                 if verbose:
@@ -720,7 +676,7 @@ def generate_outputs(
         inputs = inputs.head(max_samples)
 
     model = model or default_model_for_role("uncensored_gen")
-    client = _get_client(model)
+    client = ModelClient.create(model)
     check_model = check_model or model
     check_client = ModelClient.create(check_model) if check_outputs else None
 
@@ -868,7 +824,7 @@ def generate_jailbreaks(
     # Generation model defaults to the uncensored_gen role; translation defaults
     # to the translation role (DeepSeek). Backend auto-resolved from the name.
     model = model or default_model_for_role("uncensored_gen")
-    client = _get_client(model)
+    client = ModelClient.create(model)
     # Internals capture (opt-in, non-interfering — no CSV column). Gated on the
     # gen model's transport; _sample_gen/_tag_yields separately check
     # each individual request's own target model, so a chain that also routes to
@@ -984,9 +940,9 @@ def generate_jailbreaks(
     )
     benign_data = None
     if auto_generate_benign and has_manipulation:
-        benign_data = _ensure_benign_data(
-            client,
-            benign_path=benign_path or paths.benign_csv(data_dir),
+        benign_data = get_or_generate_benign_data(
+            client=client,
+            cache_path=benign_path or paths.benign_csv(data_dir),
             verbose=verbose,
         )
 
@@ -1228,15 +1184,11 @@ def build_dataset(
     into a temporary file that then replaces the merged one; a column that
     only some of them have is empty in the rows of the others.
 
-    Inputs and output responses each have two on-disk shapes depending on the
-    upstream pipeline: a single merged handoff CSV (the constitution and
-    content-moderation notebooks write ``constitution_inputs_merged.csv`` /
-    ``cm_inputs_merged.csv`` and ``constitution_output_responses.csv`` /
-    ``output_responses.csv``), or per-category ``{category}/samples.csv``
-    folders (standalone generation). Pass ``inputs_path`` / ``responses_path``
-    to pick the exact files; otherwise they are auto-detected, preferring an
-    explicit merged CSV, then the category files of the run
-    (:func:`redact.dataset.merge_inputs`).
+    The inputs are read from ``constitution_inputs_merged.csv``, which the
+    seeded inputs stage writes, or else from the run's per-category
+    ``{category}/samples.csv`` files (:func:`redact.dataset.merge_inputs`);
+    the outputs from ``output_responses.csv``. ``inputs_path`` /
+    ``responses_path`` pick other files.
 
     Args:
         data_dir: Working root. Inputs are discovered under
@@ -1248,12 +1200,11 @@ def build_dataset(
             ``Datasets/jailbreaks.csv``.
         output_path: Where to save merged CSV. Defaults to
             ``Datasets/complete_dataset.csv``.
-        inputs_path: Explicit merged-inputs CSV (e.g.
-            ``Datasets/constitution_inputs_merged.csv``). If omitted, a merged
-            CSV is auto-detected, falling back to the run's category files.
-        responses_path: Explicit output-responses CSV (e.g.
-            ``Datasets/constitution_output_responses.csv``). If omitted, a
-            responses CSV is auto-detected.
+        inputs_path: Merged-inputs CSV. Defaults to
+            ``Datasets/constitution_inputs_merged.csv``, falling back to the
+            run's category files when it does not exist.
+        responses_path: Output-responses CSV. Defaults to
+            ``Datasets/output_responses.csv``.
         paraphrase_inputs_path / paraphrase_outputs_path: Explicit paraphrase
             artifact CSVs. Default to ``Datasets/paraphrases_{inputs,outputs}.csv``.
         mode: ``"training"`` merges paraphrases into ``complete_dataset.csv``;
@@ -1283,18 +1234,10 @@ def build_dataset(
     if verbose:
         logger.info("Build Complete Dataset")
 
-    # Content moderation inputs.
-    # Prefer an explicit/auto-detected merged handoff CSV (constitution or
-    # content-moderation), then fall back to the run's category files.
     if include_inputs:
-        in_path = Path(inputs_path) if inputs_path else None
-        if in_path is None:
-            for candidate in ("constitution_inputs_merged.csv", "cm_inputs_merged.csv"):
-                if (ds_dir / candidate).exists():
-                    in_path = ds_dir / candidate
-                    break
-
-        if in_path is not None and in_path.exists():
+        in_path = (Path(inputs_path) if inputs_path
+                   else paths.constitution_inputs_merged_csv(data_dir))
+        if in_path.exists():
             parts.append(_Part(in_path, "content_moderation_input",
                                label=f"Inputs from {in_path.name}"))
         else:
@@ -1316,16 +1259,10 @@ def build_dataset(
     elif verbose and include_jailbreaks:
         logger.info("Jailbreaks: file not found (%s)", jb_path)
 
-    # Output responses (explicit/auto-detected: constitution or content-moderation).
     if include_outputs:
-        resp_path = Path(responses_path) if responses_path else None
-        if resp_path is None:
-            for candidate in ("constitution_output_responses.csv", "output_responses.csv"):
-                if (ds_dir / candidate).exists():
-                    resp_path = ds_dir / candidate
-                    break
-
-        if resp_path is not None and resp_path.exists():
+        resp_path = (Path(responses_path) if responses_path
+                     else paths.output_responses_csv(data_dir))
+        if resp_path.exists():
             parts.append(_Part(resp_path, "content_moderation_output",
                                label=f"Outputs from {resp_path.name}"))
         elif verbose:

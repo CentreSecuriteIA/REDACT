@@ -1,4 +1,4 @@
-"""Parse a constitution reply (3-layer markdown hierarchy) into entries."""
+"""Read a constitution reply: its end marker, and its markdown hierarchy as entries."""
 
 import logging
 import re
@@ -17,11 +17,25 @@ _CONSTITUTION_SAMPLE_RE = re.compile(
     r"^[-*]\s+\(([^()]*(?:\([^()]*\)[^()]*)*)\)$"
 )
 
+# A complete reply ends with this marker.
+_END_MARKER = re.compile(r"\n?\[END\]\s*$")
+
 
 def _header_name(pattern: re.Pattern[str], line: str) -> str:
     """The name in a header line, or "" if ``line`` is not that header."""
     match = pattern.match(line)
     return match.group(1).strip(" \t*_:") if match else ""
+
+
+def strip_end_marker(text: str) -> tuple[str, bool]:
+    """``text`` without its ``[END]`` marker, and whether it had one.
+
+    A reply without the marker stopped early, at the token limit or a
+    provider's filter.
+    """
+    if _END_MARKER.search(text):
+        return _END_MARKER.sub("", text), True
+    return text, False
 
 
 @dataclass

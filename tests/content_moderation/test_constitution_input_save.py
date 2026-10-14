@@ -15,8 +15,8 @@ from pathlib import Path
 import pandas as pd
 import pytest
 
-import redact.content_moderation.generation as G
-from redact.content_moderation.generation import (
+import redact.content_moderation.inputs as G
+from redact.content_moderation.inputs import (
     _constitution_inputs_ledger,
     _constitution_inputs_manifest,
 )
@@ -242,7 +242,6 @@ class TestRepeatedTexts:
         """The ids come from the ledger: no row is read to know them."""
         _run(tmp_path, _entries(4))
         monkeypatch.setattr(pd, "read_csv", _no_read)
-        monkeypatch.setattr(G, "read_rows", _no_read)
         _run(tmp_path, _entries(4, 41))         # zq41 gives zq4's first sample
         assert _texts(tmp_path) == {
             "Violence": ["first sample zq4", 'second "quoted" sample, café zq4'],
@@ -322,7 +321,6 @@ class TestAResume:
         _run(tmp_path, _entries(*range(6)))
         before = _files(tmp_path)
         monkeypatch.setattr(pd, "read_csv", _no_read)
-        monkeypatch.setattr(G, "read_rows", _no_read)
         result, gen = _run(tmp_path, _entries(*range(6)))
         assert gen.calls == [] and result.total_entries_processed == 0
         assert _files(tmp_path) == before

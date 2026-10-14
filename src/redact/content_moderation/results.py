@@ -1,10 +1,7 @@
 """Result data classes for content moderation input generation.
 
-Split out of content_moderation/generation.py so both the active
-constitution-seeded path (``generation.py``) and the deprecated standalone
-path (``standalone_generation.py``) can depend on these without either one
-importing the other — mirrors ``redact/types.py``'s "keep it dependency-free"
-role, just scoped to this subpackage.
+Shared by the seeded path (``inputs.py``) and the deprecated standalone path
+(``standalone.py``).
 """
 
 from dataclasses import dataclass, field
@@ -37,24 +34,6 @@ class TurnResult:
             return 0.0
         return self.accepted_count / self.extracted_count
 
-
-def _next_turn_feedback(
-    turn_result: TurnResult, max_rejections: int = 3, max_chars: int = 200
-) -> str:
-    """Build the rejection-feedback string fed into the next generation turn.
-
-    Shared by ``InputPipeline.run_category()`` and ``.run_standalone()``
-    (both in ``standalone_generation.py``) — both turn a completed turn's
-    rejection reasoning into feedback for the next turn's generation prompt
-    the same way. "" when nothing was rejected (or nothing had reasoning
-    attached).
-    """
-    rejections = [
-        r.reasoning for r in turn_result.samples if not r.accepted and r.reasoning
-    ]
-    if not rejections:
-        return ""
-    return "\n".join(f"- {r[:max_chars]}" for r in rejections[:max_rejections])
 
 
 @dataclass

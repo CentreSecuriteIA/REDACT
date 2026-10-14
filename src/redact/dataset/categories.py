@@ -35,7 +35,7 @@ def read_category_csv(
     filename: str = paths.SAMPLES_FILENAME,
 ) -> pd.DataFrame:
     """Read a category's CSV; an empty ``SAMPLE_COLUMNS`` frame when there is none."""
-    path = paths.category_csv(category, base=dataset_dir, filename=filename)
+    path = paths.category_csv(category, root=dataset_dir, filename=filename)
     if path.exists():
         return pd.read_csv(path)
     return pd.DataFrame(columns=SAMPLE_COLUMNS)
@@ -48,7 +48,7 @@ def write_category_csv(
     filename: str = paths.SAMPLES_FILENAME,
 ) -> Path:
     """Write ``df`` as a category's CSV, replacing the file, and return its path."""
-    path = paths.category_csv(category, base=dataset_dir, filename=filename)
+    path = paths.category_csv(category, root=dataset_dir, filename=filename)
     path.parent.mkdir(parents=True, exist_ok=True)
     df.to_csv(path, index=False)
     return path
