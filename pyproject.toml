@@ -75,14 +75,6 @@ select = ["E", "F", "I", "UP", "SIM", "PLR2004"]
 # (see cleanup.md) before deciding this pattern was safe to blanket-ignore
 # only here.
 "__init__.py" = ["F401"]
-# tokenbreak.py binds several technique functions into its own module
-# namespace at runtime via dynamic_functions.bind_functions(globals(), ...)
-# (mirrors answer_language.py / personas.py) — get_sensitive_words_functions()
-# then references those names directly. Ruff can't trace a `globals()`
-# mutation, so it reports them as undefined even though they exist by the
-# time that function is ever called. Verified via the full test suite, not
-# just asserted.
-"src/redact/jailbreak/obfuscation/tokenbreak.py" = ["F821"]
 
 [tool.mypy]
 strict = true
