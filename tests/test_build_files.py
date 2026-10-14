@@ -250,10 +250,10 @@ def test_a_build_that_fails_keeps_the_dataset_it_would_replace(tmp_path):
 
 def test_a_refused_rename_of_the_dataset_is_tried_again(tmp_path, monkeypatch):
     """On Windows a sync client that holds the old file refuses the rename."""
-    import redact.dataset.sidecar as sidecar
+    import redact.dataset.rows as rows
     from redact import build_dataset
 
-    replace, refused = sidecar.os.replace, []
+    replace, refused = rows.os.replace, []
 
     def refuse_once(source, target):
         if not refused:
@@ -261,8 +261,8 @@ def test_a_refused_rename_of_the_dataset_is_tried_again(tmp_path, monkeypatch):
             raise PermissionError("held by another program")
         return replace(source, target)
 
-    monkeypatch.setattr(sidecar.os, "replace", refuse_once)
-    monkeypatch.setattr(sidecar.time, "sleep", lambda seconds: None)
+    monkeypatch.setattr(rows.os, "replace", refuse_once)
+    monkeypatch.setattr(rows.time, "sleep", lambda seconds: None)
     _write_stage_files(tmp_path)
     build_dataset(data_dir=tmp_path, verbose=False)
     assert refused == ["complete_dataset.csv"]

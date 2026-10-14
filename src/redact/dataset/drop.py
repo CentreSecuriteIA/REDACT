@@ -26,8 +26,8 @@ from .resume import (
     _UnitsIn,
     release_lock,
 )
-from .rows import _retry_held
-from .sidecar import Ledger, _replace
+from .rows import _replace, _retry_held
+from .sidecar import Ledger
 
 
 def drop_units(

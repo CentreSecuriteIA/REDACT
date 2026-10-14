@@ -18,6 +18,8 @@ _TRUE_CELLS = ("True", "TRUE", "true")
 
 _HELD_ATTEMPTS = 20
 _HELD_WAIT_SECONDS = 0.1
+_REPLACE_ATTEMPTS = 5
+_REPLACE_WAIT_SECONDS = 0.2
 
 _T = TypeVar("_T")
 
@@ -35,6 +37,23 @@ def _retry_held(action: Callable[[], _T]) -> _T:
         except PermissionError:
             time.sleep(_HELD_WAIT_SECONDS)
     return action()
+
+
+def _replace(source: Path, target: Path) -> None:
+    """Rename ``source`` onto ``target``, replacing it.
+
+    On Windows the rename raises ``PermissionError`` while another process,
+    such as a sync client, has ``target`` open. It is tried again a few times
+    and the last failure is raised.
+    """
+    for attempt in range(1, _REPLACE_ATTEMPTS + 1):
+        try:
+            os.replace(source, target)
+            return
+        except PermissionError:
+            if attempt == _REPLACE_ATTEMPTS:
+                raise
+            time.sleep(_REPLACE_WAIT_SECONDS)
 
 
 def _header(path: Path) -> list[str] | None:
@@ -250,9 +269,6 @@ def write_concat(
     Returns:
         The number of rows written of each part.
     """
-    # Imported here: the sidecar module imports this one.
-    from .sidecar import _replace
-
     target = Path(target)
     columns = list(dict.fromkeys(c for part in parts for c in _part_columns(part)))
     target.parent.mkdir(parents=True, exist_ok=True)

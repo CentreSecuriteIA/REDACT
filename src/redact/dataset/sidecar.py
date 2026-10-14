@@ -23,37 +23,16 @@ from __future__ import annotations
 
 import json
 import os
-import time
 from collections.abc import Callable, Iterable, Iterator, Mapping
 from contextlib import suppress
 from itertools import chain, islice
 from pathlib import Path
 from typing import Any, NamedTuple
 
-from .rows import _retry_held
-
-_REPLACE_ATTEMPTS = 5
-_REPLACE_WAIT_SECONDS = 0.2
+from .rows import _replace, _retry_held
 
 # Stands for what a ledger's file records until the file is read.
 _UNREAD: Any = object()
-
-
-def _replace(source: Path, target: Path) -> None:
-    """Rename ``source`` onto ``target``, replacing it.
-
-    On Windows the rename raises ``PermissionError`` while another process,
-    such as a sync client, has ``target`` open. It is tried again a few times
-    and the last failure is raised.
-    """
-    for attempt in range(1, _REPLACE_ATTEMPTS + 1):
-        try:
-            os.replace(source, target)
-            return
-        except PermissionError:
-            if attempt == _REPLACE_ATTEMPTS:
-                raise
-            time.sleep(_REPLACE_WAIT_SECONDS)
 
 
 class JsonlSidecar:

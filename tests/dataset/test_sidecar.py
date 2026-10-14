@@ -11,6 +11,7 @@ from pathlib import Path
 
 import pytest
 
+import redact.dataset.rows as rows
 import redact.dataset.sidecar as sidecar
 from redact.dataset import Ledger, Manifest
 
@@ -37,7 +38,7 @@ def held_ledger(monkeypatch):
             return opened(path, mode, *args, **kwargs)
 
         monkeypatch.setattr(Path, "open", open_)
-        monkeypatch.setattr(sidecar.time, "sleep", lambda seconds: None)
+        monkeypatch.setattr(rows.time, "sleep", lambda seconds: None)
         return attempts
 
     return hold
@@ -109,8 +110,8 @@ class TestManifestWrite:
                 raise PermissionError("held by another process")
             rename(source, target)
 
-        monkeypatch.setattr(sidecar.os, "replace", replace)
-        monkeypatch.setattr(sidecar.time, "sleep", lambda seconds: None)
+        monkeypatch.setattr(rows.os, "replace", replace)
+        monkeypatch.setattr(rows.time, "sleep", lambda seconds: None)
         man.write([{"id": "2"}])
         assert len(attempts) == refused + 1
         assert man.load() == [{"id": "2"}]
@@ -126,8 +127,8 @@ class TestManifestWrite:
             attempts.append(source)
             raise PermissionError("held by another process")
 
-        monkeypatch.setattr(sidecar.os, "replace", replace)
-        monkeypatch.setattr(sidecar.time, "sleep", lambda seconds: None)
+        monkeypatch.setattr(rows.os, "replace", replace)
+        monkeypatch.setattr(rows.time, "sleep", lambda seconds: None)
         with pytest.raises(PermissionError):
             man.write([{"id": "2"}])
         assert len(attempts) > 1
