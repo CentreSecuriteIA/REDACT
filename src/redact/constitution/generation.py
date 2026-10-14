@@ -58,7 +58,7 @@ class ConstitutionPipeline:
             output_dir if output_dir is not None else paths.constitution_dir())
 
     def _unit(self, unit: Unit):
-        """The unit's call, made again for a reply no row parses from.
+        """The unit's call, made again for a reply that is rejected whole.
 
         The generator returns ``(rows, attempts)``, ``rows`` empty when
         every attempt was rejected.
@@ -101,8 +101,11 @@ class ConstitutionPipeline:
         category, saved to ``general_benign.csv``. ``resume=False`` removes
         the CSVs, the ledger and the plan first.
 
-        The units run one at a time, in plan order. A failed call stops the
-        run; the units saved before it stay acked.
+        The units run one at a time, in plan order. A reply without its
+        ``[END]`` marker, or with no entry that parses, is rejected and the
+        call made again, up to three times; a unit rejected every time is
+        acked ``rejected`` with no rows and skipped on resume. A failed call
+        stops the run; the units saved before it stay acked.
 
         Returns:
             The saved constitution (:func:`read_constitution`), rows of earlier
@@ -133,7 +136,7 @@ class ConstitutionPipeline:
                             len(units) - len(pending))
 
         written = finished = 0
-        failed: list[str] = []
+        rejected: list[str] = []
 
         def _on_done(key: str, value: tuple[list[dict], int]) -> None:
             nonlocal written, finished
@@ -143,9 +146,10 @@ class ConstitutionPipeline:
                 logger.info("[%d/%d] %s -> %d entries",
                             finished, len(pending), key, len(rows))
             if not rows:
-                # Not acked: the next run tries it again.
-                logger.error("All %d attempts failed for %s. Skipping.", attempts, key)
-                failed.append(key)
+                # Acked: un-acked, it would be generated, and paid for, again
+                # on every resume.
+                buf.add([], {"unit": key, "status": "rejected", "attempts": attempts})
+                rejected.append(key)
                 return
             buf.add(rows, {"unit": key})
             written += len(rows)
@@ -158,10 +162,15 @@ class ConstitutionPipeline:
                 progress="constitution" if verbose else None,
             )
 
+        if rejected:
+            logger.warning(
+                "%d units rejected after %d attempt(s) each: %s. They are acked "
+                "and skipped on resume; run with resume=False, or delete their "
+                "lines from %s, to try them again.",
+                len(rejected), _ATTEMPTS, ", ".join(rejected), ledger.path.name,
+            )
         if verbose:
             logger.info("Generated this run: %d entries, saved to %s",
                         written, self.output_dir)
-            if failed:
-                logger.info("Skipped (failed after retries): %s", ", ".join(failed))
 
         return read_constitution(self.output_dir) if read_back else pd.DataFrame()

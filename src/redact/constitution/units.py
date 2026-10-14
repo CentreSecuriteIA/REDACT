@@ -102,11 +102,15 @@ def messages_of(unit: Unit) -> list[dict]:
 
 
 def rows_of(unit: Unit, reply: str, model: str) -> list[dict]:
-    """The rows of a reply, in ``_COLUMNS`` order; ``[]`` when none parses."""
+    """The rows of a reply, in ``_COLUMNS`` order.
+
+    ``[]`` rejects the reply whole: one without its ``[END]`` marker, which
+    stopped early, or one with no entry that parses.
+    """
     text, complete = strip_end_marker(reply)
     if not complete:
-        logger.warning("Constitution reply for %s may be truncated (no [END] marker).",
-                       unit.key)
+        logger.warning("Constitution reply for %s rejected: no [END] marker.", unit.key)
+        return []
     rows = [
         {
             "sample_id": content_id(entry.sample),

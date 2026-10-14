@@ -1,5 +1,7 @@
 """Tests for constitution generation pipeline."""
 
+import json
+
 import pandas as pd
 import pytest
 
@@ -38,6 +40,8 @@ _VALID_CONSTITUTION_OUTPUT = """\
 
 [END]
 """
+# The same reply cut off before its end marker.
+_TRUNCATED_OUTPUT = _VALID_CONSTITUTION_OUTPUT.replace("[END]", "")
 # The samples in it, and the generations a unit makes before it is given up.
 _SAMPLES = 4
 _ATTEMPTS = 3
@@ -84,6 +88,10 @@ class TestRowsOf:
     def test_a_reply_that_does_not_parse_gives_no_row(self):
         unit = Unit("Cat", "benign", "general")
         assert rows_of(unit, "no parseable content here", "m") == []
+
+    def test_a_reply_without_its_end_marker_is_rejected_whole(self):
+        unit = Unit("Cat", "benign", "general")
+        assert rows_of(unit, _TRUNCATED_OUTPUT, "m") == []
 
 
 class TestReadConstitution:
@@ -155,14 +163,43 @@ class TestConstitutionPipeline:
         assert set(result["entry_type"]) == {"harmful"}
         assert set(result["source_category"]) == {"Violence"}
 
-    def test_a_unit_that_never_parses_is_skipped(self, tmp_path):
+    def test_a_unit_that_never_parses_is_acked_as_rejected(self, tmp_path):
         backend = MockBackend("no parseable content here")
         pipeline = self._make_pipeline(backend, tmp_path)
         result = pipeline.run({"categories": {"Cat": {"description": ""}}},
                               entry_types=[EntryType.BENIGN], verbose=False)
         assert len(backend.calls) == _ATTEMPTS
         assert result.empty
-        assert _ledger(tmp_path / "constitution").completed() == set()
+        assert _ledger(tmp_path / "constitution").completed() == {"Cat::benign"}
+
+    def test_a_truncated_reply_is_regenerated(self, tmp_path):
+        backend = MockBackend([_TRUNCATED_OUTPUT, _VALID_CONSTITUTION_OUTPUT])
+        pipeline = self._make_pipeline(backend, tmp_path)
+        result = pipeline.run({"categories": {"Cat": {"description": ""}}},
+                              entry_types=[EntryType.HARMFUL], verbose=False)
+        assert len(backend.calls) == 2
+        assert len(result) == _SAMPLES
+        assert _ledger(tmp_path / "constitution").completed() == {"Cat::harmful"}
+
+    def test_a_unit_truncated_every_time_is_acked_rejected_and_skipped_on_resume(
+            self, tmp_path):
+        out_dir = tmp_path / "constitution"
+        taxonomy = {"categories": {"Cat": {"description": ""}}}
+        backend = MockBackend(_TRUNCATED_OUTPUT)
+        result = self._make_pipeline(backend, tmp_path).run(
+            taxonomy, entry_types=[EntryType.HARMFUL], verbose=False)
+        assert len(backend.calls) == _ATTEMPTS
+        assert result.empty
+        assert not (out_dir / "merged.csv").exists()
+        acks = [json.loads(line) for line in _ledger(out_dir).path.read_text(
+            encoding="utf-8").splitlines()]
+        assert acks == [{"unit": "Cat::harmful", "status": "rejected",
+                         "attempts": _ATTEMPTS}]
+
+        backend = MockBackend(_VALID_CONSTITUTION_OUTPUT)
+        self._make_pipeline(backend, tmp_path).run(
+            taxonomy, entry_types=[EntryType.HARMFUL], verbose=False)
+        assert backend.calls == []
 
     def test_each_entry_type_is_a_unit(self, tmp_path):
         backend = MockBackend(_VALID_CONSTITUTION_OUTPUT)
