@@ -57,16 +57,16 @@ def to_ascii_ordinal(prompt: str) -> tuple[str, str]:
     return " ".join(str(ord(c)) for c in prompt), ""
 
 
-_SEPARATORS = ["-", "_", ".", "|", "/", "*", "~"]
+SEPARATORS = ["-", "_", ".", "|", "/", "*", "~"]
 
 
 def to_separator(prompt: str) -> tuple[str, str]:
     """Insert a random separator character between every character."""
-    sep = random.choice(_SEPARATORS)
+    sep = random.choice(SEPARATORS)
     return sep.join(prompt), f"sep={sep}"
 
 
-LEET_MAP_BASIC = {
+_LEET_MAP_BASIC = {
     "a": "4", "A": "4",
     "e": "3", "E": "3",
     "i": "1", "I": "1",
@@ -75,8 +75,8 @@ LEET_MAP_BASIC = {
     "t": "7", "T": "7",
 }
 
-LEET_MAP_INTERMEDIATE = {
-    **LEET_MAP_BASIC,
+_LEET_MAP_INTERMEDIATE = {
+    **_LEET_MAP_BASIC,
     "b": "8", "B": "8",
     "g": "9", "G": "9",
     "l": "|", "L": "|",
@@ -85,8 +85,8 @@ LEET_MAP_INTERMEDIATE = {
     "r": "|2", "R": "|2",
 }
 
-LEET_MAP_ADVANCED = {
-    **LEET_MAP_INTERMEDIATE,
+_LEET_MAP_ADVANCED = {
+    **_LEET_MAP_INTERMEDIATE,
     "h": "|-|", "H": "|-|",
     "n": "|\\|", "N": "|\\|",
     "u": "|_|", "U": "|_|",
@@ -101,20 +101,20 @@ LEET_MAP_ADVANCED = {
 
 def to_leetspeak_basic(prompt: str) -> tuple[str, str]:
     """Leetspeak with 6-character substitution map (vowels + s/t)."""
-    return "".join(LEET_MAP_BASIC.get(c, c) for c in prompt), ""
+    return "".join(_LEET_MAP_BASIC.get(c, c) for c in prompt), ""
 
 
 def to_leetspeak_intermediate(prompt: str) -> tuple[str, str]:
     """Leetspeak with extended map adding b, g, l, z, c, r substitutions."""
-    return "".join(LEET_MAP_INTERMEDIATE.get(c, c) for c in prompt), ""
+    return "".join(_LEET_MAP_INTERMEDIATE.get(c, c) for c in prompt), ""
 
 
 def to_leetspeak_advanced(prompt: str) -> tuple[str, str]:
     """Leetspeak with full map including multi-character substitutions."""
-    return "".join(LEET_MAP_ADVANCED.get(c, c) for c in prompt), ""
+    return "".join(_LEET_MAP_ADVANCED.get(c, c) for c in prompt), ""
 
 
-MORSE_MAP = {
+_MORSE_MAP = {
     "A": ".-", "B": "-...", "C": "-.-.", "D": "-..", "E": ".", "F": "..-.",
     "G": "--.", "H": "....", "I": "..", "J": ".---", "K": "-.-", "L": ".-..",
     "M": "--", "N": "-.", "O": "---", "P": ".--.", "Q": "--.-", "R": ".-.",
@@ -128,10 +128,10 @@ MORSE_MAP = {
 
 def to_morse(prompt: str) -> tuple[str, str]:
     """Convert string to Morse code."""
-    return " ".join(MORSE_MAP.get(c.upper(), c) for c in prompt), ""
+    return " ".join(_MORSE_MAP.get(c.upper(), c) for c in prompt), ""
 
 
-BRAILLE_MAP = {
+_BRAILLE_MAP = {
     "a": "\u2801", "b": "\u2803", "c": "\u2809", "d": "\u2819",
     "e": "\u2811", "f": "\u280b", "g": "\u281b", "h": "\u2813",
     "i": "\u280a", "j": "\u281a", "k": "\u2805", "l": "\u2807",
@@ -145,7 +145,7 @@ BRAILLE_MAP = {
 
 def to_braille(prompt: str) -> tuple[str, str]:
     """Convert string to Braille."""
-    return "".join(BRAILLE_MAP.get(c.lower(), c) for c in prompt), ""
+    return "".join(_BRAILLE_MAP.get(c.lower(), c) for c in prompt), ""
 
 
 def get_encoding_functions() -> list[Callable]:

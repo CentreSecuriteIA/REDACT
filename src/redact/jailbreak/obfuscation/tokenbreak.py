@@ -11,7 +11,7 @@ from pathlib import Path
 
 from redact.jailbreak.dynamic_functions import bind_functions
 from redact.jailbreak.obfuscation.encoding import (
-    _SEPARATORS,
+    SEPARATORS,
     to_ascii_ordinal,
     to_base64,
     to_leetspeak_advanced,
@@ -42,7 +42,7 @@ def match_case(original: str, replacement: str) -> str:
         return replacement
 
 
-_PREPEND_TOKENS = [
+_CHAR_TOKENS = [
     "q", "z", "x", "v", "Q", "Z", "X", "V",
     "0", "1", "2", "3", "4", "5", "6", "7", "8", "9",
     "!", "@", "#", "_", "~",
@@ -51,10 +51,11 @@ _PREPEND_TOKENS = [
 
 def tokenbreak_prepend(word: str) -> tuple[str, str]:
     """Prepend a random token to the word."""
-    token = random.choice(_PREPEND_TOKENS)
+    token = random.choice(_CHAR_TOKENS)
     return token + word, token
 
 
+# Zero-width space, non-joiner, joiner, word joiner, byte order mark.
 _INVISIBLE_CHAR_NAMES = {
     "\u200B": "ZWSP",
     "\u200C": "ZWNJ",
@@ -62,20 +63,7 @@ _INVISIBLE_CHAR_NAMES = {
     "\u2060": "WJ",
     "\uFEFF": "BOM",
 }
-
-_CHAR_TOKENS = [
-    "q", "z", "x", "v", "Q", "Z", "X", "V",
-    "0", "1", "2", "3", "4", "5", "6", "7", "8", "9",
-    "!", "@", "#", "_", "~",
-]
-
-_INVISIBLE_CHARS = [
-    "\u200B",  # Zero-Width Space
-    "\u200C",  # Zero-Width Non-Joiner (ZWNJ)
-    "\u200D",  # Zero-Width Joiner (ZWJ)
-    "\u2060",  # Word Joiner
-    "\uFEFF",  # Byte Order Mark (BOM)
-]
+_INVISIBLE_CHARS = list(_INVISIBLE_CHAR_NAMES)
 
 _VARIATION_SELECTORS = [
     "\uFE00", "\uFE01", "\uFE02", "\uFE03", "\uFE04", "\uFE05",
@@ -226,7 +214,7 @@ def _sensitive_encode_finish(
 
 def _sensitive_separator_finish(prompt: str, harmful_words: list[str]) -> tuple[str, str]:
     """Split each harmful word's characters with one randomly chosen separator."""
-    sep = random.choice(_SEPARATORS)
+    sep = random.choice(SEPARATORS)
     if not harmful_words:
         return sep.join(prompt), f"encoding=separator;sep={sep};detected_words="
     result = prompt
