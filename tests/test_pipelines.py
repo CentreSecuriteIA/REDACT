@@ -12,6 +12,17 @@ from redact.llms.backends import ComputeConfig
 from tests.conftest import MockBackend
 
 
+def test_the_former_module_name_still_resolves():
+    from redact import pipelines, stages
+
+    for name in pipelines.__all__:
+        assert getattr(pipelines, name) is getattr(stages, name)
+    assert set(pipelines.__all__) == {
+        "STAGES", "RunContext", "Stage", "build_dataset", "generate_constitution",
+        "generate_inputs", "generate_jailbreaks", "generate_outputs",
+        "generate_paraphrases"}
+
+
 class TestStandaloneInputsDeprecation:
     def test_standalone_generate_inputs_emits_deprecation_warning(self, tmp_path, monkeypatch):
         import redact.stages as P
