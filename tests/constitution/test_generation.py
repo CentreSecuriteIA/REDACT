@@ -1,6 +1,7 @@
 """Tests for constitution generation pipeline."""
 
 import pandas as pd
+import pytest
 
 from redact.constitution import (
     ALL_ENTRY_TYPES,
@@ -243,6 +244,20 @@ class TestStateLedger:
         assert ledger.completed() == {"x", "y"}
 
 
+class _DiesAfter(MockBackend):
+    """Answers ``calls`` requests, then fails as a transport does."""
+
+    def __init__(self, calls):
+        super().__init__(_VALID_CONSTITUTION_OUTPUT)
+        self.left = calls
+
+    def generate(self, messages_list, **kwargs):
+        if self.left < len(messages_list):
+            raise ConnectionError("the endpoint is down")
+        self.left -= len(messages_list)
+        return super().generate(messages_list, **kwargs)
+
+
 class TestRunResume:
     """run() resume behaviour + incremental save + CSV-backed result."""
 
@@ -323,6 +338,25 @@ class TestRunResume:
             num_categories=2, resume=True, verbose=False,
         )
         # Only CatB should have been generated (CatA skipped).
+        assert len(backend.calls) == 1
+        assert _ledger(out_dir).completed() == {"CatA::harmful", "CatB::harmful"}
+
+    def test_a_transport_error_stops_the_run_with_the_acked_units_kept(self, tmp_path):
+        out_dir = tmp_path / "constitution"
+        with pytest.raises(ConnectionError):
+            self._make_pipeline(_DiesAfter(1), tmp_path).run(
+                taxonomy=self._TAXONOMY, entry_types=[EntryType.HARMFUL],
+                num_categories=2, verbose=False,
+            )
+        assert _ledger(out_dir).completed() == {"CatA::harmful"}
+        assert set(pd.read_csv(out_dir / "merged.csv")["source_category"]) == {"CatA"}
+
+        # The resume makes the one call the error stopped.
+        backend = MockBackend(_VALID_CONSTITUTION_OUTPUT)
+        self._make_pipeline(backend, tmp_path).run(
+            taxonomy=self._TAXONOMY, entry_types=[EntryType.HARMFUL],
+            num_categories=2, verbose=False,
+        )
         assert len(backend.calls) == 1
         assert _ledger(out_dir).completed() == {"CatA::harmful", "CatB::harmful"}
 

@@ -16,13 +16,18 @@ from pathlib import Path
 import pandas as pd
 
 from .. import paths
-from ..dataset import Ledger, Manifest, append_rows, resume_state
+from ..dataset import CommitBuffer, Ledger, Manifest, append_rows, resume_state
+from ..llm_pipeline import drive_units, extracted
 from ..llms.client import ModelClient
-from ..llms.router import generate_sample
 from ..types import EntryType
 from .units import _COLUMNS, Unit, messages_of, plan_units, rows_of
 
 logger = logging.getLogger(__name__)
+
+# The reply limit of a call: a prompt asks for up to about 90 entries.
+_REPLY_TOKENS = 10000
+# Generations of a unit before it is given up.
+_ATTEMPTS = 3
 
 
 def read_constitution(output_dir: str | Path) -> pd.DataFrame:
@@ -52,26 +57,18 @@ class ConstitutionPipeline:
         self.output_dir = Path(
             output_dir if output_dir is not None else paths.constitution_dir())
 
-    def _rows(self, unit: Unit) -> list[dict]:
-        """Generate the unit's rows, up to three times; ``[]`` if each attempt fails."""
+    def _unit(self, unit: Unit):
+        """The unit's call, made again for a reply no row parses from.
+
+        The generator returns ``(rows, attempts)``, ``rows`` empty when
+        every attempt was rejected.
+        """
         messages = messages_of(unit)
-        max_attempts = 3
-        for attempt in range(1, max_attempts + 1):
-            try:
-                reply = generate_sample(self.client, messages, max_tokens=10000)
-                rows = rows_of(unit, reply, self.model)
-                if not rows:
-                    raise ValueError(
-                        f"No entries parsed (raw length: {len(reply)} chars)")
-                return rows
-            except Exception as e:
-                if attempt < max_attempts:
-                    logger.warning("Attempt %d/%d failed for %s: %s. Retrying...",
-                                   attempt, max_attempts, unit.key, e)
-                else:
-                    logger.error("All %d attempts failed for %s: %s. Skipping.",
-                                 max_attempts, unit.key, e)
-        return []
+        return extracted(
+            self.client, lambda: messages,
+            lambda reply: rows_of(unit, reply, self.model),
+            max_tokens=_REPLY_TOKENS, max_attempts=_ATTEMPTS,
+        )
 
     def _append(self, rows: list[dict]) -> None:
         """Append the rows to their entry type's CSV, then to ``merged.csv``."""
@@ -104,6 +101,9 @@ class ConstitutionPipeline:
         category, saved to ``general_benign.csv``. ``resume=False`` removes
         the CSVs, the ledger and the plan first.
 
+        The units run one at a time, in plan order. A failed call stops the
+        run; the units saved before it stay acked.
+
         Returns:
             The saved constitution (:func:`read_constitution`), rows of earlier
             runs included, or an empty frame when ``read_back`` is False.
@@ -132,19 +132,31 @@ class ConstitutionPipeline:
                 logger.info("Resume: %d units already completed",
                             len(units) - len(pending))
 
-        written = 0
+        written = finished = 0
         failed: list[str] = []
-        for i, unit in enumerate(pending, 1):
-            rows = self._rows(unit)
+
+        def _on_done(key: str, value: tuple[list[dict], int]) -> None:
+            nonlocal written, finished
+            rows, attempts = value
+            finished += 1
             if verbose:
                 logger.info("[%d/%d] %s -> %d entries",
-                            i, len(pending), unit.key, len(rows))
+                            finished, len(pending), key, len(rows))
             if not rows:
-                failed.append(unit.key)
-                continue
-            self._append(rows)
-            ledger.record([{"unit": unit.key}])
+                # Not acked: the next run tries it again.
+                logger.error("All %d attempts failed for %s. Skipping.", attempts, key)
+                failed.append(key)
+                return
+            buf.add(rows, {"unit": key})
             written += len(rows)
+
+        with CommitBuffer(append=self._append, ledger=ledger, every=1) as buf:
+            drive_units(
+                ((unit.key, self._unit(unit)) for unit in pending),
+                on_done=_on_done,
+                pool_size=1,
+                progress="constitution" if verbose else None,
+            )
 
         if verbose:
             logger.info("Generated this run: %d entries, saved to %s",

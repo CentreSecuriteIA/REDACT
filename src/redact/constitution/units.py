@@ -107,7 +107,7 @@ def rows_of(unit: Unit, reply: str, model: str) -> list[dict]:
     if not complete:
         logger.warning("Constitution reply for %s may be truncated (no [END] marker).",
                        unit.key)
-    return [
+    rows = [
         {
             "sample_id": content_id(entry.sample),
             "constitution_category": entry.category,
@@ -120,3 +120,7 @@ def rows_of(unit: Unit, reply: str, model: str) -> list[dict]:
         }
         for entry in parse_constitution(text)
     ]
+    if not rows:
+        logger.warning("No entries parsed for %s (reply of %d chars).",
+                       unit.key, len(reply))
+    return rows
