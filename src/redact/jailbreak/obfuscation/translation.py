@@ -7,8 +7,8 @@ when every attempt is rejected.
 
 from collections.abc import Callable
 
-from redact.jailbreak.protocol import LLMRequest, TechniqueGen
-from redact.llm_pipeline import is_accepted
+from redact.jailbreak.technique import DISCARDED, TechniqueGen
+from redact.llm_pipeline import LLMRequest, is_accepted
 from redact.llms.model_config import default_model_for_role
 from redact.llms.prompting import build_messages, load_prompt
 
@@ -92,7 +92,7 @@ def _translate_gen(
             return translation, language
         feedback = verdict
         last = translation
-    return last, f"DISCARDED; language={language}; feedback={feedback}"
+    return last, f"{DISCARDED}; language={language}; feedback={feedback}"
 
 
 def _make_language_fn(language: str) -> Callable:

@@ -11,7 +11,6 @@ from redact.jailbreak.manipulation.fsh import (
     to_fsh_selected_short,
 )
 from redact.jailbreak.manipulation.pairs import _select_subcategory_gen
-from redact.jailbreak.protocol import run_sync
 from redact.llm_pipeline import drive_sync
 from tests.conftest import MockBackend
 
@@ -88,7 +87,7 @@ def _run(fn, prompt, backend, **kwargs):
     """Drive a technique generator to completion against a MockBackend."""
     def call(request):
         return backend.generate([request.messages])[0]
-    return run_sync(fn(prompt, **kwargs), call)
+    return drive_sync(fn(prompt, **kwargs), call)
 
 
 class TestFshSelected:

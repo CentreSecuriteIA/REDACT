@@ -8,7 +8,8 @@ import re
 from collections.abc import Callable
 
 from redact.dataset.taxonomy import load_taxonomy
-from redact.jailbreak.protocol import LLMRequest, TechniqueGen
+from redact.jailbreak.technique import TechniqueGen
+from redact.llm_pipeline import LLMRequest
 from redact.llms.prompting import build_messages, load_prompt
 
 _TECHNIQUES: dict[str, dict] = load_taxonomy("cognitive_techniques")["categories"]

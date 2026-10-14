@@ -13,7 +13,6 @@ from redact.jailbreak.obfuscation.translation import (
     _resolve_translate_model,
     to_swahili,
 )
-from redact.jailbreak.protocol import LLMRequest
 from redact.jailbreak.units import (
     error_row_of,
     is_pending,
@@ -21,7 +20,7 @@ from redact.jailbreak.units import (
     row_of,
     unit_gen,
 )
-from redact.llm_pipeline import drive_units
+from redact.llm_pipeline import LLMRequest, drive_units
 from redact.llms.backends import ComputeConfig
 from tests.conftest import make_client
 

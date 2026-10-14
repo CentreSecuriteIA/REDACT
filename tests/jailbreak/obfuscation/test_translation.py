@@ -1,9 +1,9 @@
 """Tests for translation obfuscation generators with a mock backend.
 
 Translation techniques are now technique generators (they yield LLMRequests).
-These tests drive them via ``protocol.run_sync``, routing each yielded request
-to a MockBackend — the same way ``chain.apply_combination`` runs a single
-sample.
+These tests drive them via ``redact.llm_pipeline.drive_sync``, routing each
+yielded request to a MockBackend — the same way ``chain.apply_combination``
+runs a single sample.
 """
 
 from redact.jailbreak.obfuscation.translation import (
@@ -16,7 +16,7 @@ from redact.jailbreak.obfuscation.translation import (
     to_thai,
     to_zulu,
 )
-from redact.jailbreak.protocol import run_sync
+from redact.llm_pipeline import drive_sync
 from tests.conftest import MockBackend
 
 
@@ -24,7 +24,7 @@ def _run(fn, prompt, backend):
     """Drive a translation generator to completion against a MockBackend."""
     def call(request):
         return backend.generate([request.messages])[0]
-    return run_sync(fn(prompt), call)
+    return drive_sync(fn(prompt), call)
 
 
 class TestLanguages:

@@ -5,7 +5,8 @@
 
 from collections.abc import Callable
 
-from redact.jailbreak.protocol import LLMRequest, TechniqueGen
+from redact.jailbreak.technique import TechniqueGen
+from redact.llm_pipeline import LLMRequest
 from redact.llms.prompting import build_messages, load_prompt
 
 

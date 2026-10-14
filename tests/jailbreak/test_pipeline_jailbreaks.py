@@ -13,7 +13,7 @@ import pytest
 
 from redact.dataset import Manifest, content_id
 from redact.exceptions import PromptTooLongError
-from redact.jailbreak.protocol import LLMRequest
+from redact.llm_pipeline import LLMRequest
 from redact.llms.backends import ComputeConfig
 from redact.pipelines import generate_jailbreaks
 from tests.conftest import (

@@ -10,12 +10,12 @@ from redact.jailbreak.chain import (
     in_layer_order,
 )
 from redact.jailbreak.plan import default_escalation_schedule
-from redact.jailbreak.protocol import LLMRequest
 from redact.jailbreak.sampling import (
     sample_combination,
     sample_exact_combination,
 )
 from redact.jailbreak.technique import is_discarded
+from redact.llm_pipeline import LLMRequest
 
 
 def _tech(name, layer, families, complexity=1, encode_weight=None):

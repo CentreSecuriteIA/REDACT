@@ -7,7 +7,7 @@ model chose the subcategory.
 import random
 from collections.abc import Callable
 
-from redact.jailbreak.protocol import TechniqueGen
+from redact.jailbreak.technique import TechniqueGen
 
 from .pairs import run_random_manipulation, run_selected_manipulation
 
