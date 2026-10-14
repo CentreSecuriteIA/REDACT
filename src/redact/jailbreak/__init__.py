@@ -1,17 +1,13 @@
-"""Jailbreak dataset generation pipeline.
+"""Jailbreak techniques, and the chain, sampler and plan that combine them.
 
-Technique modules are organized by attack family:
-- obfuscation/ — text transformation attacks (encoding, translation, etc.)
-- hacking/ — cognitive/psychological prompt hacking
-- manipulation/ — few-shot hacking (FSH) and attention shifting (DAP)
-- requests/ — request-structure attacks (answer format, continuation, indirect)
+The techniques live in one subpackage per layer of the spec: ``hacking/``,
+``manipulation/``, ``obfuscation/`` and ``requests/``. A transform is
+``(prompt) -> (text, info)``; a technique that calls a model is a generator
+(:mod:`redact.jailbreak.technique`).
 
-All LLM-dependent functions accept (backend, model) as params.
-Pure transforms (encoding, structural, suffixes, ascii_art, requests) need no LLM.
+Usage::
 
-Usage:
-    from redact.jailbreak import combine_techniques, sample_combination
-    from redact.jailbreak.obfuscation import get_all_obfuscation_functions
+    from redact.jailbreak import apply_combination, combine_techniques
     from redact.jailbreak.obfuscation.encoding import to_base64
 """
 

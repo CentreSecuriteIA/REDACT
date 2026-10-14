@@ -1,8 +1,4 @@
-"""Cognitive/psychological hacking jailbreak techniques.
-
-Five cognitive techniques plus 15 named persona variants,
-all using a two-step scenario -> meta-prompt pipeline.
-"""
+"""Hacking techniques, one module per spec family: cognitive, persona and framing."""
 
 from collections.abc import Callable
 

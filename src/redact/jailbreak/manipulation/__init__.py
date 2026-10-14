@@ -1,8 +1,5 @@
-"""Manipulation-based jailbreak techniques: FSH and DAP.
-
-- FSH (Few-Shot Hacking): benign Q&A pairs before harmful question
-- DAP (Distract and Persuade): harmful question hidden among benign pairs
-"""
+"""Manipulation techniques (fsh and dap, sharing ``pairs.py``) and the benign
+Q&A data they draw from (``benign.py``)."""
 
 from collections.abc import Callable
 
