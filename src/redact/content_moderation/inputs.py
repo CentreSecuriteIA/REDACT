@@ -66,10 +66,6 @@ _DESC_PREVIEW_LEN = 60
 _CATEGORY_FILES = f"*/{paths.SAMPLES_FILENAME}"
 
 
-# The jailbreak stage in pipelines.py imports it under this name.
-_pool_size = pool_size
-
-
 def _constitution_inputs_ledger(dataset_dir: str | Path) -> Ledger:
     """The stage's ledger: one ack per entry, keyed like the manifest."""
     return Ledger(
