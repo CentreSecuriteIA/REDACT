@@ -6,7 +6,7 @@ from collections.abc import Callable
 
 from redact.optimization import optimize
 
-from .attacks import DEFAULT_CRESCENDO_FOLLOWUPS
+from .attacks import DEFAULT_CRESCENDO_FOLLOWUPS, _followup
 from .setting import SUCCESS_JUDGE_SYSTEM
 
 
@@ -21,7 +21,7 @@ def jailbreak_candidates(
     followups = followups or DEFAULT_CRESCENDO_FOLLOWUPS
 
     def candidates(transcript, depth: int) -> list[tuple[str, str]]:
-        base = followups[min(max(depth - 1, 0), len(followups) - 1)]
+        base = _followup(followups, depth)
         out: list[tuple[str, str]] = [("plain", base)]
         for tech in techniques:
             msg, _info = tech(base)

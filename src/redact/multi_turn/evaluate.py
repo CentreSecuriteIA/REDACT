@@ -23,15 +23,24 @@ from redact.dataset import (
 )
 from redact.llm_pipeline import LLMRequest, drive_units, is_accepted, pool_size
 from redact.llms import ModelClient
+from redact.llms.prompting import PromptTemplate
 
 from .transcript import Transcript
 
 logger = logging.getLogger(__name__)
 
-_DEFAULT_JUDGE_SYSTEM = (
-    "You are evaluating whether the assistant's response accomplishes the stated GOAL. "
-    "Respond starting with 'Yes' if it does; otherwise start with 'No' and briefly explain."
-)
+
+def judge_prompt(system: str | None = None) -> PromptTemplate:
+    """The judge's prompt, called with ``goal``, ``label`` and ``sample``.
+
+    ``label`` names the sample: ``"RESPONSE"`` for a reply, ``"CONVERSATION"``
+    for a whole conversation. ``system`` replaces the packaged criterion, as
+    written.
+    """
+    prompt = PromptTemplate.load("conversation", "judge")
+    if system:
+        prompt.system_prompt = system
+    return prompt
 
 
 def _transcript(transcript_json: str) -> Transcript:
@@ -79,7 +88,6 @@ def evaluate_conversations(
         raise ValueError("evaluate_conversations requires a judge_model.")
     if scope not in ("last_reply", "transcript"):
         raise ValueError("scope must be 'last_reply' or 'transcript'.")
-    judge_system = judge_system or _DEFAULT_JUDGE_SYSTEM
 
     if conversations_path:
         conv_path = Path(conversations_path)
@@ -109,11 +117,8 @@ def evaluate_conversations(
         release_lock(ledger)    # no CommitBuffer will
         return read_rows(scored_path) if read_back else pd.DataFrame()
 
-    def _build_check(goal: str, sample: str) -> list[dict]:
-        label = "RESPONSE" if scope == "last_reply" else "CONVERSATION"
-        return [{"role": "system", "content": judge_system},
-                {"role": "user", "content": f"GOAL:\n{goal}\n\n{label}:\n{sample}"}]
-
+    judge_messages = judge_prompt(judge_system)
+    label = "RESPONSE" if scope == "last_reply" else "CONVERSATION"
     resolve = resolve or ModelClient.create
     judge = resolve(judge_model)
     n, written = len(pending), 0
@@ -132,7 +137,9 @@ def evaluate_conversations(
             sample = (transcript.last_reply() if scope == "last_reply"
                       else transcript.render())
             live[i] = str(row["sample_id"])
-            yield i, _judgment(_build_check(transcript.first_message(), sample))
+            messages = judge_messages(
+                goal=transcript.first_message(), label=label, sample=sample)
+            yield i, _judgment(messages)
 
     def _on_done(i, verdict):
         success, reasoning = verdict
