@@ -41,7 +41,7 @@ from pathlib import Path
 
 import pandas as pd
 
-from redact import paths
+from redact import dataset, paths
 from redact.content_moderation import (
     InputPipeline,
     run_output_generation,
@@ -886,10 +886,10 @@ def generate_jailbreaks(
 # ---------------------------------------------------------------------------
 # Paraphrase / fingerprint removal
 #
-# The plan/ledger/execute orchestration (model-pool resolution +
-# run_paraphrase_target's plan->execute loop) lives in
-# content_moderation/paraphrase.py — generate_paraphrases() below just
-# validates args and dispatches per target.
+# The plan/ledger/execute orchestration (run_paraphrase_target's
+# plan->execute loop) lives in content_moderation/paraphrase.py —
+# generate_paraphrases() below resolves each target's rows and file and
+# dispatches per target.
 # ---------------------------------------------------------------------------
 
 
@@ -977,15 +977,26 @@ def generate_paraphrases(
     targets = ["inputs", "outputs"] if target == "both" else [target]
     if not set(targets) <= {"inputs", "outputs"}:
         raise ValueError("target must be 'inputs', 'outputs', or 'both'.")
+    check_client = ModelClient.create(check_model) if check else None
 
     results: dict[str, pd.DataFrame] = {}
     for tgt in targets:
-        source = inputs if tgt == "inputs" else outputs
-        override = inputs_path if tgt == "inputs" else outputs_path
+        if tgt == "inputs":
+            source = inputs if inputs is not None else merge_inputs(data_dir)
+            out_path = (Path(inputs_path) if inputs_path
+                        else paths.paraphrases_inputs_csv(data_dir))
+        else:
+            source = (outputs if outputs is not None
+                      else dataset.read_rows(paths.output_responses_csv(data_dir)))
+            if "accepted" in source.columns:
+                source = source[source["accepted"] == True]  # noqa: E712
+            out_path = (Path(outputs_path) if outputs_path
+                        else paths.paraphrases_outputs_csv(data_dir))
         results[tgt] = run_paraphrase_target(
-            tgt, source, data_dir, pool, check, check_model, paraphrases_per_sample,
-            resume, batch_size, seed, prompt_dir, override, verbose,
-            read_back=read_back,
+            tgt, source, out_path,
+            pool=pool, check=check_client, k=paraphrases_per_sample,
+            resume=resume, batch_size=batch_size, seed=seed, prompt_dir=prompt_dir,
+            verbose=verbose, read_back=read_back,
         )
     return results
 

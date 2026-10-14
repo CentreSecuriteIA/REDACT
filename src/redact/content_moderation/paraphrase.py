@@ -13,7 +13,6 @@ from pathlib import Path
 
 import pandas as pd
 
-from .. import paths
 from ..dataset import (
     CommitBuffer,
     Ledger,
@@ -21,7 +20,6 @@ from ..dataset import (
     append_rows,
     content_id,
     count_rows,
-    merge_inputs,
     read_rows,
     release_lock,
     resume_state,
@@ -89,34 +87,41 @@ def _assign_paraphraser(base_id: str, k: int, pool: list[str], seed: int) -> str
 
 
 def run_paraphrase_target(
-    tgt, source, data_dir, pool, check, check_model, K, resume, batch_size,
-    seed, prompt_dir, out_path_override, verbose, read_back=True,
+    target: str,
+    source: pd.DataFrame,
+    out_path: Path,
+    *,
+    pool: list[str],
+    check: ModelClient | None,
+    k: int,
+    resume: bool = True,
+    batch_size: int,
+    seed: int,
+    prompt_dir: str | Path | None = None,
+    verbose: bool = True,
+    read_back: bool = True,
 ) -> pd.DataFrame:
-    """Paraphrase one target (``"inputs"`` or ``"outputs"``) → its artifact CSV.
+    """Paraphrase each row of ``source`` ``k`` times into ``out_path``.
 
-    Returns the artifact's rows, or with ``read_back=False`` an empty frame
-    without reading them.
+    ``target`` (``"inputs"`` or ``"outputs"``) says which columns hold a
+    row's text and id. Each unit goes to a paraphraser of ``pool``;
+    ``check``, when given, judges that a paraphrase keeps its original's
+    meaning. Returns the artifact's rows, or with ``read_back=False`` an
+    empty frame without reading them.
     """
-    if tgt == "inputs":
-        src = source if source is not None else merge_inputs(data_dir)
-        text_col = "sample" if "sample" in src.columns else "prompt"
-        id_col = "sample_id"
-        out_path = Path(out_path_override) if out_path_override else paths.paraphrases_inputs_csv(data_dir)
-    else:  # outputs
-        src = (source if source is not None
-               else read_rows(paths.output_responses_csv(data_dir)))
-        if not src.empty and "accepted" in src.columns:
-            src = src[src["accepted"] == True]  # noqa: E712 — accepted base outputs only
-        text_col = "output_response" if "output_response" in getattr(src, "columns", []) else "sample"
-        id_col = "input_id"
-        out_path = Path(out_path_override) if out_path_override else paths.paraphrases_outputs_csv(data_dir)
-
-    if src is None or src.empty:
+    if source.empty:
         if verbose:
-            logger.info("[paraphrase:%s] no source rows; skipping.", tgt)
+            logger.info("[paraphrase:%s] no source rows; skipping.", target)
         return pd.DataFrame()
+    if target == "inputs":
+        text_col = "sample" if "sample" in source.columns else "prompt"
+        id_col = "sample_id"
+    else:
+        text_col = ("output_response" if "output_response" in source.columns
+                    else "sample")
+        id_col = "input_id"
 
-    src = src.reset_index(drop=True)
+    src = source.reset_index(drop=True)
     out_path.parent.mkdir(parents=True, exist_ok=True)
 
     # Every attempted unit is acked, a dropped one too, so a resume skips it.
@@ -136,40 +141,42 @@ def run_paraphrase_target(
         else set()
     )
 
-    # The plan: every (base_id, k) unit and the model it goes to.
+    # The plan: every (base_id, iteration) unit and the model it goes to.
     ids = row_ids(src, text_col, id_col)
 
     def _units():
         """Yield the run's units in plan order, built anew on every call.
 
-        A unit is ``(base_id, k, model, original_text, category, entry_type)``.
+        A unit is ``(base_id, iteration, model, original_text, category,
+        entry_type)``.
         No list of them is held: a pass over the units costs time, not memory.
         """
         blank = repeat("")      # for a source without the column
         categories = src.get("category", blank)
         entry_types = src.get("entry_type", blank)
         for bid, otext, cat, et in zip(ids, src[text_col], categories, entry_types):
-            for k in range(K):
-                yield (bid, k, _assign_paraphraser(bid, k, pool, seed),
+            for iteration in range(k):
+                yield (bid, iteration, _assign_paraphraser(bid, iteration, pool, seed),
                        str(otext), str(cat), str(et))
 
     manifest.write(
         {
-            "input_id": bid, "iteration": k, "paraphrase_model": m,
+            "input_id": bid, "iteration": iteration, "paraphrase_model": m,
             "category": cat, "entry_type": et, "status": "planned",
         }
-        for bid, k, m, _o, cat, et in _units()
+        for bid, iteration, m, _o, cat, et in _units()
     )
 
     # The units left for each paraphraser, in the order its first one comes up.
     planned, groups = 0, {}
-    for bid, k, m, *_ in _units():
+    for bid, iteration, m, *_ in _units():
         planned += 1
-        if (bid, k) not in completed:
+        if (bid, iteration) not in completed:
             groups[m] = groups.get(m, 0) + 1
     if not groups:
         if verbose:
-            logger.info("[paraphrase:%s] nothing to do (all %d units done).", tgt, planned)
+            logger.info("[paraphrase:%s] nothing to do (all %d units done).",
+                        target, planned)
         release_lock(ledger)    # no CommitBuffer will
         return read_rows(out_path) if read_back else pd.DataFrame()
 
@@ -189,10 +196,9 @@ def run_paraphrase_target(
         if verbose and unload_between:
             logger.info(
                 "[paraphrase:%s] %d paraphrasers do not co-fit; unloading between groups.",
-                tgt, len(groups),
+                target, len(groups),
             )
 
-    check_client = ModelClient.create(check_model) if check else None
     written = 0
 
     def _append(rows: list[dict]) -> dict[Path, int]:
@@ -210,44 +216,47 @@ def run_paraphrase_target(
                 client = None
                 # Engines of other stages, read now so one loaded meanwhile is kept too.
                 resident = residency.loaded_engines(exclude=list(groups))
-                residency.unload_local(keep=[check_model] if check else None,
-                                       engines=resident)
+                residency.unload_local(
+                    keep=[check.model] if check is not None else None,
+                    engines=resident)
             client = ModelClient.create(model)
-            # Captured under bid/k, renamed to the paraphrase's sample_id below.
+            # Captured under the unit, renamed to the paraphrase's sample_id below.
             capture_paraphrase = client.compute_config.supports_internals
             gunits = (u for u in _units() if u[2] == model and u[:2] not in completed)
             for _ in range(0, n_units, batch_size):
                 chunk = list(islice(gunits, batch_size))
                 texts = [u[3] for u in chunk]
                 provisional_ids = [
-                    f"{bid}/paraphrase/attempt_{k}" for bid, k, *_ in chunk
+                    f"{bid}/paraphrase/attempt_{iteration}"
+                    for bid, iteration, *_ in chunk
                 ]
                 paraphrased = paraphrase_batch(
                     client, texts,
                     prompt_dir=prompt_dir,
-                    progress=f"paraphrase:{tgt} ({model})" if verbose else None,
+                    progress=f"paraphrase:{target} ({model})" if verbose else None,
                     internals_ids=provisional_ids if capture_paraphrase else None,
                 )
-                if check:
+                if check is not None:
                     originals = [u[3] for u in chunk]
                     checks = batch_check_samples(
-                        check_client, paraphrased,
+                        check, paraphrased,
                         build_paraphrase_checker(prompt_dir=prompt_dir),
                         originals=originals,
                         batch_size=batch_size,
-                        progress=f"paraphrase-check:{tgt}" if verbose else None,
+                        progress=f"paraphrase-check:{target}" if verbose else None,
                     )
                 else:
                     checks = [(True, "")] * len(chunk)
 
                 attempted = []  # (rows, ack) of each unit of the chunk
-                for (bid, k, m, otext, cat, et), ptext, (acc, reason), prov_id in zip(
+                for unit, ptext, (acc, reason), prov_id in zip(
                     chunk, paraphrased, checks, provisional_ids
                 ):
+                    bid, iteration, m, otext, cat, et = unit
                     pt = str(ptext).strip()
                     if not pt or pt == otext or pt in seen_texts:
                         attempted.append(([], {
-                            "input_id": bid, "iteration": k,
+                            "input_id": bid, "iteration": iteration,
                             "paraphrase_model": m, "status": "dropped_dedup"}))
                         continue  # dedup: drop no-op / duplicate paraphrases
                     seen_texts.add(pt)
@@ -255,13 +264,14 @@ def run_paraphrase_target(
                     if capture_paraphrase:
                         client.rename_capture(prov_id, f"{bid}/paraphrase/{sample_id}")
                     row = {
-                        "sample_id": sample_id, "input_id": bid, "iteration": k,
-                        "sample": pt, "category": cat, "entry_type": et,
+                        "sample_id": sample_id, "input_id": bid,
+                        "iteration": iteration, "sample": pt,
+                        "category": cat, "entry_type": et,
                         "paraphrase_model": m, "accepted": bool(acc),
-                        "reasoning": reason, "source": f"paraphrase_{tgt}",
+                        "reasoning": reason, "source": f"paraphrase_{target}",
                     }
                     attempted.append(([row], {
-                        "input_id": bid, "iteration": k, "paraphrase_model": m,
+                        "input_id": bid, "iteration": iteration, "paraphrase_model": m,
                         "status": "accepted" if acc else "rejected"}))
                 # Queued once the whole chunk is built: a chunk that fails part-way
                 # saves none of its units. The flush appends the rows, then acks
@@ -272,5 +282,5 @@ def run_paraphrase_target(
 
     if verbose:
         logger.info("[paraphrase:%s] +%d rows (artifact now %d) -> %s",
-                    tgt, written, count_rows(out_path), out_path.name)
+                    target, written, count_rows(out_path), out_path.name)
     return read_rows(out_path) if read_back else pd.DataFrame()
