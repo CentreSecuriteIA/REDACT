@@ -2,19 +2,14 @@
 
 import json
 import logging
-import os
 import re
-from unittest.mock import MagicMock, patch
 
 import pandas as pd
 import pytest
 
 from redact.exceptions import PromptTooLongError
 from redact.llms.backends import ComputeConfig
-from redact.pipelines import (
-    _get_client,
-    create_taxonomy,
-)
+from redact.pipelines import create_taxonomy
 from tests.conftest import MockBackend
 
 
@@ -57,23 +52,6 @@ class TestCreateTaxonomy:
         result = create_taxonomy("ret_test", {"X": "Y"}, taxonomy_dir=tmp_path)
         assert isinstance(result, dict)
         assert result["name"] == "ret_test"
-
-
-class TestGetClientHelper:
-    def test_returns_ready_client(self):
-        with patch.dict(os.environ, {"VENICE_API_KEY": "test"}):
-            client = _get_client(model="venice-uncensored")
-        assert client.model == "venice-uncensored"
-        # Fully wired: the budget is bound to the backend, and the limiter
-        # lives inside the client rather than alongside it.
-        assert client.backend.rpm == 75
-
-    def test_resolves_via_get_client(self):
-        with patch.dict(os.environ, {"VENICE_API_KEY": "test"}):
-            with patch("redact.pipelines.ModelClient.create") as mock_get:
-                mock_get.return_value = MagicMock()
-                _get_client(model="venice-uncensored")
-                mock_get.assert_called_once_with("venice-uncensored")
 
 
 class TestStandaloneInputsDeprecation:

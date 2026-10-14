@@ -88,7 +88,7 @@ def _load_env() -> bool:
     return False
 
 
-_env_loaded = _load_env()
+_load_env()
 
 
 # ---------------------------------------------------------------------------
