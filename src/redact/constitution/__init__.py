@@ -9,20 +9,15 @@ Usage::
     from redact.llms import ModelClient
 
     pipeline = ConstitutionPipeline(ModelClient.create("claude-opus-4-6"))
-    result = pipeline.run(taxonomy, num_categories=10)
+    constitution = pipeline.run(taxonomy, num_categories=10)
 """
 
 from ..types import ALL_ENTRY_TYPES, EntryType
-from .generation import (
-    ConstitutionEntry,
-    ConstitutionPipeline,
-    ConstitutionResult,
-)
+from .generation import ConstitutionPipeline, read_constitution
 
 __all__ = [
-    "EntryType",
     "ALL_ENTRY_TYPES",
-    "ConstitutionEntry",
-    "ConstitutionResult",
     "ConstitutionPipeline",
+    "EntryType",
+    "read_constitution",
 ]
