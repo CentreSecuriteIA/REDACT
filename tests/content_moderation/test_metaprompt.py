@@ -23,6 +23,13 @@ class TestGenerateCategoryDescription:
         result = generate_category_description(make_client(backend, "model"), "Fallback", max_retries=2)
         assert result == "Fallback"
 
+    def test_it_stops_after_max_retries_generations(self):
+        backend, retries = MockBackend(["", "", "too late"]), 2
+        result = generate_category_description(
+            make_client(backend, "model"), "Fallback", max_retries=retries)
+        assert result == "Fallback"
+        assert len(backend.calls) == retries
+
 
 class TestGenerateSeeds:
     def test_returns_numbered_list(self):
@@ -44,6 +51,12 @@ class TestGenerateSeeds:
         backend = MockBackend(["1. only one", "1. first\n2. second"])
         result = generate_seeds(make_client(backend, "model"), "Test", "desc", num_seeds=2)
         assert result == "1. first\n2. second"
+
+    def test_each_retry_is_one_generation(self):
+        backend, retries = MockBackend("No numbered items at all"), 3
+        generate_seeds(make_client(backend, "model"), "Test", "desc",
+                       max_retries=retries)
+        assert len(backend.calls) == retries
 
     def test_fallback_to_empty(self):
         backend = MockBackend("No numbered items at all")
