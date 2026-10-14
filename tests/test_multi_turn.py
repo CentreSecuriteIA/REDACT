@@ -16,7 +16,13 @@ from redact.multi_turn import (
     Transcript,
     run_conversation,
 )
-from tests.conftest import MockBackend, make_client
+from tests.conftest import (
+    FakeResolver,
+    JudgeResolver,
+    MockBackend,
+    echo,
+    simple_setting,
+)
 
 
 def _echo_call(req: LLMRequest) -> str:
@@ -122,46 +128,6 @@ def test_transcript_from_records_reads_back_to_records():
     assert back.to_records() == t.to_records()
 
 
-class _FakeClient:
-    """Stands in for a ModelClient: batch of messages in, batch of replies out."""
-
-    def __init__(self, model, reply, counter=None):
-        self.model = model
-        self._reply = reply
-        self._counter = counter
-
-    def generate(self, messages_list, **kw):
-        if self._counter is not None:
-            self._counter.calls += 1
-        return [self._reply(self.model, msgs) for msgs in messages_list]
-
-
-class _FakeResolver:
-    """``model -> _FakeClient``; the resolve seam drive_generators takes."""
-
-    def __init__(self, reply):
-        self._reply = reply
-        self.calls = 0
-
-    def __call__(self, model):
-        return _FakeClient(model, self._reply, self)
-
-
-def _echo(model, msgs):
-    last_user = [m for m in msgs if m["role"] == "user"][-1]["content"]
-    return f"ANSWER to: {last_user}"
-
-
-class _JudgeResolver:
-    """``model -> client`` over one fixed backend."""
-
-    def __init__(self, backend):
-        self._backend = backend
-
-    def __call__(self, model):
-        return make_client(self._backend, model)
-
-
 def test_generate_conversations_offline(tmp_path):
     import json
 
@@ -181,7 +147,7 @@ def test_generate_conversations_offline(tmp_path):
             max_turns=4, name="chat",
         )
 
-    df = generate_conversations(seeds, make, data_dir=tmp_path, resolve=_FakeResolver(_echo), verbose=False)
+    df = generate_conversations(seeds, make, data_dir=tmp_path, resolve=FakeResolver(echo), verbose=False)
     assert len(df) == 2
     steps = json.loads(df.iloc[0]["transcript"])
     assert [s["type"] for s in steps] == ["message", "reply", "message", "reply"]
@@ -193,7 +159,7 @@ def test_generate_conversations_offline(tmp_path):
     assert out.with_name("conversations.state.jsonl").exists()
 
     # Resume: nothing new (both units in the ledger).
-    df2 = generate_conversations(seeds, make, data_dir=tmp_path, resolve=_FakeResolver(_echo), verbose=False)
+    df2 = generate_conversations(seeds, make, data_dir=tmp_path, resolve=FakeResolver(echo), verbose=False)
     assert len(df2) == 2
 
 
@@ -206,7 +172,7 @@ def test_generate_conversations_variants(tmp_path):
     seeds = pd.DataFrame({"seed": ["q"]})
     make = lambda: Setting(participants=[ScriptedActor("u", ["f"]), ModelActor("b", "m")], max_turns=3)
     df = generate_conversations(seeds, make, data_dir=tmp_path, iterations=3,
-                                resolve=_FakeResolver(_echo), verbose=False)
+                                resolve=FakeResolver(echo), verbose=False)
     assert len(df) == 3 and set(df["iteration"]) == {0, 1, 2}
 
 
@@ -218,13 +184,13 @@ def test_evaluate_conversations_offline(tmp_path):
 
     seeds = pd.DataFrame({"seed": ["how to X", "how to Y"]})
     make = lambda: Setting(participants=[ScriptedActor("u", ["more"]), ModelActor("b", "m")], max_turns=2)
-    generate_conversations(seeds, make, data_dir=tmp_path, resolve=_FakeResolver(_echo), verbose=False)
+    generate_conversations(seeds, make, data_dir=tmp_path, resolve=FakeResolver(echo), verbose=False)
 
     # The judge says "Yes ..." to the first, "No ..." to the second.
     scored = evaluate_conversations(
         data_dir=tmp_path, judge_model="judge", judge_system="did it work?",
         scope="last_reply", verbose=False,
-        resolve=_JudgeResolver(MockBackend(["Yes ok", "No refused"])),
+        resolve=JudgeResolver(MockBackend(["Yes ok", "No refused"])),
     )
     assert set(scored["success"]) == {True, False}
     assert set(scored["judge_model"]) == {"judge"}
@@ -234,7 +200,7 @@ def test_evaluate_conversations_offline(tmp_path):
     # resume=False re-judges from scratch (unlinks the existing scored artifacts).
     fresh = evaluate_conversations(
         data_dir=tmp_path, judge_model="judge", resume=False, verbose=False,
-        resolve=_JudgeResolver(MockBackend(["Yes ok", "No refused"])),
+        resolve=JudgeResolver(MockBackend(["Yes ok", "No refused"])),
     )
     assert len(fresh) == 2
 
@@ -274,17 +240,13 @@ def test_conversation_gen_requires_participants():
 
 # --- pipeline edge cases -----------------------------------------------------
 
-def _simple_setting():
-    return Setting(participants=[ScriptedActor("u", ["f"]), ModelActor("b", "m")], max_turns=2)
-
-
 def test_generate_conversations_missing_text_column(tmp_path):
     import pandas as pd
 
     from redact import generate_conversations
     with pytest.raises(ValueError):
-        generate_conversations(pd.DataFrame({"foo": ["x"]}), _simple_setting,
-                               data_dir=tmp_path, resolve=_FakeResolver(_echo), verbose=False)
+        generate_conversations(pd.DataFrame({"foo": ["x"]}), simple_setting,
+                               data_dir=tmp_path, resolve=FakeResolver(echo), verbose=False)
 
 
 def test_generate_conversations_empty_seeds(tmp_path):
@@ -292,7 +254,7 @@ def test_generate_conversations_empty_seeds(tmp_path):
 
     from redact import generate_conversations
     with pytest.raises(ValueError):
-        generate_conversations(pd.DataFrame({"seed": []}), _simple_setting,
+        generate_conversations(pd.DataFrame({"seed": []}), simple_setting,
                                data_dir=tmp_path, verbose=False)
 
 
@@ -301,8 +263,8 @@ def test_generate_conversations_uses_id_column(tmp_path):
 
     from redact import generate_conversations
     seeds = pd.DataFrame({"sample_id": ["myid"], "seed": ["q"]})
-    df = generate_conversations(seeds, _simple_setting, data_dir=tmp_path,
-                                resolve=_FakeResolver(_echo), verbose=False)
+    df = generate_conversations(seeds, simple_setting, data_dir=tmp_path,
+                                resolve=FakeResolver(echo), verbose=False)
     assert df.iloc[0]["input_id"] == "myid"
 
 
@@ -319,7 +281,7 @@ def test_generate_conversations_actor_error_isolated(tmp_path):
     from redact import generate_conversations
     seeds = pd.DataFrame({"seed": ["q"]})
     make = lambda: Setting(participants=[ScriptedActor("u", ["q"]), _BoomActor("boom")], max_turns=3)
-    df = generate_conversations(seeds, make, data_dir=tmp_path, resolve=_FakeResolver(_echo), verbose=False)
+    df = generate_conversations(seeds, make, data_dir=tmp_path, resolve=FakeResolver(echo), verbose=False)
     assert df.iloc[0]["stop_reason"].startswith("ERROR")
 
 
@@ -330,7 +292,7 @@ def test_generate_conversations_deepcopy_template(tmp_path):
     from redact import generate_conversations
     seeds = pd.DataFrame({"seed": ["a", "b"]})
     tmpl = Setting(participants=[ScriptedActor("u", ["f"]), ModelActor("b", "m")], max_turns=2)
-    df = generate_conversations(seeds, tmpl, data_dir=tmp_path, resolve=_FakeResolver(_echo), verbose=False)
+    df = generate_conversations(seeds, tmpl, data_dir=tmp_path, resolve=FakeResolver(echo), verbose=False)
     assert len(df) == 2  # ScriptedActor state didn't leak across the two conversations
 
 
@@ -353,7 +315,7 @@ def test_evaluate_transcript_scope_and_bad_json(tmp_path):
     convs = pd.DataFrame({"sample_id": ["a", "b"], "transcript": ["not json", "[]"]})
     scored = evaluate_conversations(conversations=convs, data_dir=tmp_path,
                                     judge_model="j", scope="transcript", verbose=True,
-                                    resolve=_JudgeResolver(MockBackend("Yes ok")))
+                                    resolve=JudgeResolver(MockBackend("Yes ok")))
     assert len(scored) == 2 and set(scored["success"]) == {True}
 
 
@@ -382,10 +344,10 @@ def test_generate_conversations_verbose_and_fresh(tmp_path):
 
     from redact import generate_conversations
     seeds = pd.DataFrame({"seed": ["q"]})
-    generate_conversations(seeds, _simple_setting, data_dir=tmp_path, resolve=_FakeResolver(_echo), verbose=True)
+    generate_conversations(seeds, simple_setting, data_dir=tmp_path, resolve=FakeResolver(echo), verbose=True)
     # resume=False wipes the artifacts + re-runs.
-    df2 = generate_conversations(seeds, _simple_setting, data_dir=tmp_path,
-                                 resolve=_FakeResolver(_echo), resume=False, verbose=True)
+    df2 = generate_conversations(seeds, simple_setting, data_dir=tmp_path,
+                                 resolve=FakeResolver(echo), resume=False, verbose=True)
     assert len(df2) == 1
 
 
@@ -394,11 +356,11 @@ def test_both_stages_return_no_rows_without_read_back(tmp_path):
 
     from redact import evaluate_conversations, generate_conversations, paths
 
-    df = generate_conversations(_three_seeds(), _simple_setting, data_dir=tmp_path,
-                                resolve=_FakeResolver(_echo), verbose=False,
+    df = generate_conversations(_three_seeds(), simple_setting, data_dir=tmp_path,
+                                resolve=FakeResolver(echo), verbose=False,
                                 read_back=False)
     scored = evaluate_conversations(data_dir=tmp_path, judge_model="j", verbose=False,
-                                    resolve=_JudgeResolver(MockBackend("Yes ok")),
+                                    resolve=JudgeResolver(MockBackend("Yes ok")),
                                     read_back=False)
     assert df.empty and scored.empty
     convs = pd.read_csv(paths.conversations_csv(tmp_path))
@@ -428,7 +390,7 @@ def test_evaluate_transcript_scope_renders_and_fresh(tmp_path):
     convs = pd.DataFrame({"sample_id": ["a"], "transcript": [transcript]})
     scored = evaluate_conversations(conversations=convs, data_dir=tmp_path, judge_model="j",
                                     scope="transcript", resume=False, verbose=False,
-                                    resolve=_JudgeResolver(MockBackend("Yes")))
+                                    resolve=JudgeResolver(MockBackend("Yes")))
     assert list(scored["success"]) == [True]
 
 
@@ -448,10 +410,10 @@ def test_both_ledgers_record_how_much_of_their_output_is_saved(tmp_path):
     from redact import evaluate_conversations, generate_conversations, paths
     from redact.dataset import Ledger
 
-    generate_conversations(_three_seeds(), _simple_setting, data_dir=tmp_path,
-                           resolve=_FakeResolver(_echo), verbose=False)
+    generate_conversations(_three_seeds(), simple_setting, data_dir=tmp_path,
+                           resolve=FakeResolver(echo), verbose=False)
     evaluate_conversations(data_dir=tmp_path, judge_model="j", verbose=False,
-                           resolve=_JudgeResolver(MockBackend("Yes ok")))
+                           resolve=JudgeResolver(MockBackend("Yes ok")))
     out = paths.conversations_csv(tmp_path)
     for artifact in (out, out.with_name("conversations_scored.csv")):
         size, _checksum = Ledger.sidecar(artifact).saved[artifact.name]
@@ -476,8 +438,8 @@ def test_conversations_are_saved_at_exit_rows_then_acks(tmp_path, monkeypatch):
 
     monkeypatch.setattr(MP, "append_rows", spy)
     df = generate_conversations(
-        _three_seeds(), _simple_setting, data_dir=tmp_path, batch_size=2,
-        resolve=_FakeResolver(_echo), verbose=False)
+        _three_seeds(), simple_setting, data_dir=tmp_path, batch_size=2,
+        resolve=FakeResolver(echo), verbose=False)
 
     # Per append: its rows, and the acks on disk when it was made.
     assert saves == [(["s1", "s2", "s3"], 0)]
@@ -507,8 +469,8 @@ def test_conversations_are_saved_every_32_units_and_at_exit(tmp_path, monkeypatc
 
     monkeypatch.setattr(MP, "append_rows", spy)
     generate_conversations(
-        seeds, _simple_setting, data_dir=tmp_path, batch_size=40,
-        resolve=_FakeResolver(_echo), verbose=False)
+        seeds, simple_setting, data_dir=tmp_path, batch_size=40,
+        resolve=FakeResolver(echo), verbose=False)
     ids = list(seeds["sample_id"])
     assert saves == [ids[:32], ids[32:]]
 
@@ -532,8 +494,8 @@ def test_a_failed_conversation_save_acks_none_of_its_units(tmp_path, monkeypatch
     monkeypatch.setattr(MP, "append_rows", failing)
     with pytest.raises(OSError, match="disk full"):
         generate_conversations(
-            seeds, _simple_setting, data_dir=tmp_path, batch_size=2,
-            resolve=_FakeResolver(_echo), verbose=False)
+            seeds, simple_setting, data_dir=tmp_path, batch_size=2,
+            resolve=FakeResolver(echo), verbose=False)
 
     first = list(seeds["sample_id"])[:32]
     acks = _acks(out.with_name("conversations.state.jsonl"))
@@ -554,8 +516,8 @@ def test_conversations_killed_between_rows_and_acks_are_each_on_disk_once(
 
     def run():
         return generate_conversations(
-            _three_seeds(), _simple_setting, data_dir=tmp_path, batch_size=2,
-            resolve=_FakeResolver(_echo), verbose=False)
+            _three_seeds(), simple_setting, data_dir=tmp_path, batch_size=2,
+            resolve=FakeResolver(echo), verbose=False)
 
     kill_after_rows(monkeypatch, MP, on_call=1)
     with pytest.raises(Killed):
@@ -591,8 +553,8 @@ def test_the_conversation_pool_is_sized_by_the_models_that_reply(
         batch_size, [c.model for c in clients]))
     with pytest.raises(KeyboardInterrupt):
         generate_conversations(
-            _three_seeds(), _simple_setting, data_dir=tmp_path, batch_size=2,
-            resolve=_FakeResolver(_echo), verbose=False)
+            _three_seeds(), simple_setting, data_dir=tmp_path, batch_size=2,
+            resolve=FakeResolver(echo), verbose=False)
     assert (seen["pool_size"], seen["cap"]) == ((2, ["m"]), 2)
 
 
@@ -604,8 +566,8 @@ def test_an_old_conversations_folder_is_taken_over_by_its_rows(tmp_path):
 
     def run(seeds):
         return generate_conversations(
-            seeds, _simple_setting, data_dir=tmp_path,
-            resolve=_FakeResolver(_echo), verbose=False)
+            seeds, simple_setting, data_dir=tmp_path,
+            resolve=FakeResolver(echo), verbose=False)
 
     run(_three_seeds().iloc[:2])
     out = paths.conversations_csv(tmp_path)
@@ -633,7 +595,7 @@ def test_scores_killed_between_rows_and_acks_are_each_on_disk_once(
     def run():
         return evaluate_conversations(
             conversations=_three_conversations(), data_dir=tmp_path, judge_model="j",
-            batch_size=2, verbose=False, resolve=_JudgeResolver(MockBackend("Yes ok")))
+            batch_size=2, verbose=False, resolve=JudgeResolver(MockBackend("Yes ok")))
 
     kill_after_rows(monkeypatch, ME, on_call=1)
     with pytest.raises(Killed):
@@ -668,7 +630,7 @@ def test_scores_are_saved_at_exit_rows_then_acks(tmp_path, monkeypatch):
     monkeypatch.setattr(ME, "append_rows", spy)
     scored = evaluate_conversations(
         conversations=_three_conversations(), data_dir=tmp_path, judge_model="j",
-        batch_size=2, verbose=False, resolve=_JudgeResolver(MockBackend("Yes ok")))
+        batch_size=2, verbose=False, resolve=JudgeResolver(MockBackend("Yes ok")))
 
     assert saves == [(["a", "b", "c"], 0)]
     assert list(scored["sample_id"]) == ["a", "b", "c"]
@@ -695,7 +657,7 @@ def test_scores_are_saved_every_32_units_and_at_exit(tmp_path, monkeypatch):
     monkeypatch.setattr(ME, "append_rows", spy)
     evaluate_conversations(
         conversations=convs, data_dir=tmp_path, judge_model="j", batch_size=40,
-        verbose=False, resolve=_JudgeResolver(MockBackend("Yes ok")))
+        verbose=False, resolve=JudgeResolver(MockBackend("Yes ok")))
     ids = list(convs["sample_id"])
     assert saves == [ids[:32], ids[32:]]
 
@@ -720,7 +682,7 @@ def test_a_failed_scoring_save_acks_none_of_its_units(tmp_path, monkeypatch):
     with pytest.raises(OSError, match="disk full"):
         evaluate_conversations(
             conversations=convs, data_dir=tmp_path, judge_model="j",
-            batch_size=2, verbose=False, resolve=_JudgeResolver(MockBackend("Yes ok")))
+            batch_size=2, verbose=False, resolve=JudgeResolver(MockBackend("Yes ok")))
 
     first = list(convs["sample_id"])[:32]
     acks = _acks(scored.with_name("conversations_scored.state.jsonl"))
@@ -746,5 +708,5 @@ def test_a_judge_call_carries_up_to_batch_size_rows(tmp_path):
     judge = Judge()
     evaluate_conversations(
         conversations=_forty_one_conversations(), data_dir=tmp_path, judge_model="j",
-        batch_size=16, verbose=False, resolve=_JudgeResolver(judge))
+        batch_size=16, verbose=False, resolve=JudgeResolver(judge))
     assert judge.batches == [16, 16, 9]

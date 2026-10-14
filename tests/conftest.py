@@ -402,3 +402,52 @@ def as_resolver(fake, backends=None):
                 recorder(old_id, new_id)
 
     return _Bound
+
+
+# ---------------------------------------------------------------------------
+# Multi-turn doubles
+# ---------------------------------------------------------------------------
+
+class FakeClient:
+    """Stands in for a ModelClient: ``reply(model, messages)`` answers each request."""
+
+    def __init__(self, model, reply):
+        self.model = model
+        self._reply = reply
+
+    def generate(self, messages_list, **kw):
+        return [self._reply(self.model, msgs) for msgs in messages_list]
+
+
+class FakeResolver:
+    """``model -> FakeClient`` answering with ``reply``."""
+
+    def __init__(self, reply):
+        self._reply = reply
+
+    def __call__(self, model):
+        return FakeClient(model, self._reply)
+
+
+class JudgeResolver:
+    """``model -> client`` over one fixed backend."""
+
+    def __init__(self, backend):
+        self._backend = backend
+
+    def __call__(self, model):
+        return make_client(self._backend, model)
+
+
+def echo(model, messages):
+    """A reply that names the last user message."""
+    last_user = [m for m in messages if m["role"] == "user"][-1]["content"]
+    return f"ANSWER to: {last_user}"
+
+
+def simple_setting():
+    """A scripted user, then one model reply: one call per conversation."""
+    from redact.multi_turn import ModelActor, ScriptedActor, Setting
+
+    return Setting(participants=[ScriptedActor("u", ["f"]), ModelActor("b", "m")],
+                   max_turns=2)

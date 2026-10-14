@@ -22,7 +22,7 @@ from redact.multiturn_attacks import (
     score_attacks,
 )
 from redact.optimization import optimize
-from tests.conftest import MockBackend, make_client
+from tests.conftest import FakeClient, JudgeResolver, MockBackend, make_client
 
 _PINNED = {
     "candidates":
@@ -76,22 +76,16 @@ def _judged(tmp_path, stage, **kwargs) -> list:
     """What the judge was sent when ``stage`` scored the one conversation."""
     judge = MockBackend("Yes")
     stage(conversations=_conversations(), data_dir=tmp_path, judge_model="j",
-          verbose=False, resolve=lambda model: make_client(judge, model), **kwargs)
+          verbose=False, resolve=JudgeResolver(judge), **kwargs)
     return _sent(judge)
 
 
 def _searched(tmp_path) -> list:
     judge = MockBackend("No")
-
-    class Target:
-        model = "target"
-
-        def generate(self, messages_list, **kw):
-            return ["reply"] * len(messages_list)
-
+    target = FakeClient("target", lambda model, messages: "reply")
     optimize("the goal", "target", lambda t, d: [("plain", f"move {d}")], "judge",
              "my criterion", depth=1, verbose=False,
-             resolve=lambda m: make_client(judge, m) if m == "judge" else Target())
+             resolve=lambda m: make_client(judge, m) if m == "judge" else target)
     return _sent(judge)
 
 

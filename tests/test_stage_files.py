@@ -214,7 +214,7 @@ def _paraphrases(folder, monkeypatch) -> dict:
 
 def _conversations(folder, monkeypatch) -> dict:
     from redact import generate_conversations
-    from tests.test_multi_turn import _echo, _FakeResolver, _simple_setting
+    from tests.conftest import FakeResolver, echo, simple_setting
 
     # No entry_type column: a row's entry_type is then empty.
     seeds = pd.DataFrame({
@@ -229,12 +229,12 @@ def _conversations(folder, monkeypatch) -> dict:
         def reply(model, messages):
             if fails:
                 _dies_on_call(7, calls)     # in the third chunk of four
-            return _echo(model, messages)
+            return echo(model, messages)
 
         generate_conversations(
-            seeds, _simple_setting, iterations=2, batch_size=3,
+            seeds, simple_setting, iterations=2, batch_size=3,
             output_path=folder / "conversations.csv",
-            resolve=_FakeResolver(reply), verbose=False)
+            resolve=FakeResolver(reply), verbose=False)
 
     return _stopped_then_resumed(folder, run)
 
