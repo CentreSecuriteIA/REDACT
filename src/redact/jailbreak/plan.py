@@ -8,7 +8,6 @@ apply, ``settings`` what the sampler was given, with the run's ``seed``.
 
 from __future__ import annotations
 
-import hashlib
 import logging
 import random
 from collections.abc import Callable
@@ -18,19 +17,10 @@ import pandas as pd
 
 from redact.dataset import Manifest, row_id
 
-from .chain import combine_techniques
+from .chain import _stable_seed, combine_techniques
 from .sampling import sample_combination
 
 logger = logging.getLogger(__name__)
-
-
-def _stable_seed(*parts) -> int:
-    """A seed from ``parts`` that is the same in every process.
-
-    SHA-256, not the builtin ``hash``, which is salted per process.
-    """
-    digest = hashlib.sha256("::".join(str(p) for p in parts).encode("utf-8"))
-    return int(digest.hexdigest()[:16], 16)
 
 
 def assign_combination(

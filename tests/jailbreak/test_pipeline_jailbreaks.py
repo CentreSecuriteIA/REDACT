@@ -89,6 +89,36 @@ def test_reproducible_assignment(tmp_path):
     assert p1 == p2  # same seed + same prompts -> identical combinations
 
 
+def test_a_replayed_plan_writes_the_same_text(tmp_path, monkeypatch):
+    """One manifest run twice gives byte-identical rows from techniques that
+    choose at random, whatever the global random and the run's seed are: the
+    techniques draw from the seed the manifest froze."""
+    import random
+    import shutil
+
+    import redact.jailbreak.pool as JPool
+    from redact.jailbreak.obfuscation.encoding import to_separator
+    from redact.jailbreak.obfuscation.structural import to_json
+    from redact.jailbreak.obfuscation.suffixes import to_adversarial_suffix_fragments
+
+    choosing = [to_separator, to_json, to_adversarial_suffix_fragments]
+    monkeypatch.setattr(JPool, "all_techniques", lambda: choosing)
+    first, second = tmp_path / "a" / "jb.csv", tmp_path / "b" / "jb.csv"
+
+    random.seed(1)
+    generate_jailbreaks(inputs=_inputs(), output_path=first, seed=9, iterations=2,
+                        max_obfuscations=2, **PURE_KW)
+    second.parent.mkdir()
+    manifest = "jb.manifest.jsonl"
+    shutil.copy(first.with_name(manifest), second.with_name(manifest))
+    random.seed(2)
+    generate_jailbreaks(inputs=_inputs(), output_path=second, seed=10, iterations=2,
+                        max_obfuscations=2, **PURE_KW)
+
+    assert len(pd.read_csv(first)) == 2 * len(_inputs())
+    assert first.read_bytes() == second.read_bytes()
+
+
 def test_iterations_dedup(tmp_path):
     out = tmp_path / "jb.csv"
     df = generate_jailbreaks(inputs=_inputs(), output_path=out, seed=3,
