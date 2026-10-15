@@ -5,8 +5,8 @@
 
   "layer_order": ["hacking", "manipulation", "obfuscation", "requests"],
 
-  "sampling_probs": {
-    "_comment": "Per-layer inclusion probabilities used by sample_combination(). Overridable per-call via the sampling_probs argument.",
+  "layer_rates": {
+    "_comment": "Per-layer target rates: the planner deals each layer at its rate over a group, and a direct sample_combination() call reads them as per-unit inclusion probabilities. Overridable per-call via the sampling_probs argument.",
     "hacking": 0.5,
     "manipulation": 0.33,
     "requests": 0.7,

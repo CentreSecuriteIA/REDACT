@@ -415,14 +415,23 @@ def test_a_unit_is_built_when_the_driver_takes_it(tmp_path, monkeypatch):
 
 
 def test_finished_units_are_skipped_as_the_plan_is_read(tmp_path, monkeypatch):
+    from redact.dataset import Ledger
+
     out, finished = tmp_path / "jb.csv", 3
     generate_jailbreaks(inputs=_inputs().iloc[:finished], output_path=out, seed=7,
                         **PURE_KW)
+    casters = {"input_id": str, "iteration": int}
+    done = set(Ledger.sidecar(out, ("input_id", "iteration"), casters).completed())
+    assert len(done) == finished
     Manifest.sidecar(out).reset()       # the next run plans all five inputs
     read = _plan_rows_read(monkeypatch, units_taken=1)
     with pytest.raises(KeyboardInterrupt):
         generate_jailbreaks(inputs=_inputs(), output_path=out, seed=7, **PURE_KW)
-    assert len(read) == finished + 1    # the finished units, then the one taken
+    # The plan is read until one pending unit is taken; every row read before it
+    # was a finished unit, skipped (the manifest order is group + sample_id).
+    taken = (str(read[-1]["sample_id"]), int(read[-1]["iteration"]))
+    assert taken not in done
+    assert all((str(r["sample_id"]), int(r["iteration"])) in done for r in read[:-1])
 
 
 def test_a_stopped_run_lets_go_of_its_plan(tmp_path, monkeypatch):

@@ -75,7 +75,7 @@ def _jailbreaks(folder, monkeypatch) -> dict:
     )
 
     # What a unit is assigned depends on all that plan_run hands the sampler.
-    def assign(sid, pool, *, seed, iteration, used, **settings):
+    def assign(sid, pool, *, seed, iteration, used, dealer=None, **settings):
         pick = sum(map(ord, sid)) + seed + iteration + len(used) + len(settings)
         return [pool[pick % len(pool)].__name__]
 
