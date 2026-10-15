@@ -5,6 +5,7 @@
 
 from collections.abc import Callable
 from functools import partial
+from random import Random
 
 from ..directives import apply_template_directive, load_templates
 
@@ -12,9 +13,11 @@ _TEMPLATES: dict[str, list[dict]] = load_templates("requests", "impersonation_te
 _apply = partial(apply_template_directive, _TEMPLATES, info_key="type")
 
 
-def to_impersonate_good_person(prompt: str) -> tuple[str, str]:
+def to_impersonate_good_person(
+    prompt: str, *, rng: Random | None = None,
+) -> tuple[str, str]:
     """Prepend a trustworthy professional identity claim to the prompt."""
-    return _apply("good_person", prompt)
+    return _apply("good_person", prompt, rng=rng)
 
 
 def get_impersonation_functions() -> list[Callable]:

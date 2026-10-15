@@ -16,15 +16,17 @@ def _build_dap_prompt(
     harmful_prompt: str,
     benign_pairs: list[dict],
     num_shots: int,
+    rng: random.Random | None = None,
 ) -> tuple[str, dict]:
     """Assemble DAP prompt with harmful question at random middle position.
 
     Returns:
         (jailbreak_prompt, {"harmful_idx": harmful_idx}), harmful_idx 1-based.
     """
-    shots = random.sample(benign_pairs, min(num_shots, len(benign_pairs)))
+    rng = rng or random
+    shots = rng.sample(benign_pairs, min(num_shots, len(benign_pairs)))
     # Insert in the middle: never first (1), never last (len+1)
-    harmful_idx = random.randint(2, max(2, len(shots)))
+    harmful_idx = rng.randint(2, max(2, len(shots)))
 
     lines: list[str] = []
     idx = 1
@@ -42,14 +44,20 @@ def _build_dap_prompt(
     return "\n".join(lines), {"harmful_idx": harmful_idx}
 
 
-def to_dap_random_short(prompt: str, benign_data: dict) -> tuple[str, str]:
+def to_dap_random_short(
+    prompt: str, benign_data: dict, *, rng: random.Random | None = None,
+) -> tuple[str, str]:
     """DAP with randomly chosen category, short answers. No LLM needed."""
-    return run_random_manipulation(prompt, benign_data, "short", _build_dap_prompt)
+    return run_random_manipulation(
+        prompt, benign_data, "short", _build_dap_prompt, rng)
 
 
-def to_dap_random_long(prompt: str, benign_data: dict) -> tuple[str, str]:
+def to_dap_random_long(
+    prompt: str, benign_data: dict, *, rng: random.Random | None = None,
+) -> tuple[str, str]:
     """DAP with randomly chosen category, long answers. No LLM needed."""
-    return run_random_manipulation(prompt, benign_data, "long", _build_dap_prompt)
+    return run_random_manipulation(
+        prompt, benign_data, "long", _build_dap_prompt, rng)
 
 
 def to_dap_selected_short(prompt: str, **kwargs) -> TechniqueGen:

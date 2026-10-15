@@ -5,6 +5,7 @@
 
 from collections.abc import Callable
 from functools import partial
+from random import Random
 
 from ..directives import apply_template_directive, load_templates
 
@@ -12,24 +13,32 @@ _TEMPLATES: dict[str, list[dict]] = load_templates("requests", "distractor_templ
 _apply = partial(apply_template_directive, _TEMPLATES, info_key="type")
 
 
-def to_distractor_prefix_related(prompt: str) -> tuple[str, str]:
+def to_distractor_prefix_related(
+    prompt: str, *, rng: Random | None = None,
+) -> tuple[str, str]:
     """Prepend a topically adjacent distractor sentence before the prompt."""
-    return _apply("prefix_related", prompt)
+    return _apply("prefix_related", prompt, rng=rng)
 
 
-def to_distractor_prefix_unrelated(prompt: str) -> tuple[str, str]:
+def to_distractor_prefix_unrelated(
+    prompt: str, *, rng: Random | None = None,
+) -> tuple[str, str]:
     """Prepend an off-topic distractor sentence before the prompt."""
-    return _apply("prefix_unrelated", prompt)
+    return _apply("prefix_unrelated", prompt, rng=rng)
 
 
-def to_distractor_suffix_related(prompt: str) -> tuple[str, str]:
+def to_distractor_suffix_related(
+    prompt: str, *, rng: Random | None = None,
+) -> tuple[str, str]:
     """Append a topically adjacent distractor sentence after the prompt."""
-    return _apply("suffix_related", prompt)
+    return _apply("suffix_related", prompt, rng=rng)
 
 
-def to_distractor_suffix_unrelated(prompt: str) -> tuple[str, str]:
+def to_distractor_suffix_unrelated(
+    prompt: str, *, rng: Random | None = None,
+) -> tuple[str, str]:
     """Append an off-topic distractor sentence after the prompt."""
-    return _apply("suffix_unrelated", prompt)
+    return _apply("suffix_unrelated", prompt, rng=rng)
 
 
 def get_distractor_functions() -> list[Callable]:

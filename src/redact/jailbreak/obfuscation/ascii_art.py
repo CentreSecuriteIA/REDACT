@@ -19,9 +19,9 @@ ASCII_FONTS = [
 ]
 
 
-def to_ascii_art(prompt: str) -> tuple[str, str]:
+def to_ascii_art(prompt: str, *, rng: random.Random | None = None) -> tuple[str, str]:
     """Convert text to ASCII art using a random font."""
-    font = random.choice(ASCII_FONTS)
+    font = (rng or random).choice(ASCII_FONTS)
     return pyfiglet.figlet_format(prompt, font=font), f"font={font}"
 
 

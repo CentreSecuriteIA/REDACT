@@ -16,9 +16,10 @@ def _build_fsh_prompt(
     harmful_prompt: str,
     benign_pairs: list[dict],
     num_shots: int,
+    rng: random.Random | None = None,
 ) -> tuple[str, dict]:
     """Assemble FSH prompt: N benign Q&A then harmful question; no extra info."""
-    shots = random.sample(benign_pairs, min(num_shots, len(benign_pairs)))
+    shots = (rng or random).sample(benign_pairs, min(num_shots, len(benign_pairs)))
     lines: list[str] = []
     for i, pair in enumerate(shots, 1):
         lines.append(f"Q{i}: {pair['prompt']}")
@@ -28,14 +29,20 @@ def _build_fsh_prompt(
     return "\n".join(lines), {}
 
 
-def to_fsh_random_short(prompt: str, benign_data: dict) -> tuple[str, str]:
+def to_fsh_random_short(
+    prompt: str, benign_data: dict, *, rng: random.Random | None = None,
+) -> tuple[str, str]:
     """FSH with randomly chosen category, short answers. No LLM needed."""
-    return run_random_manipulation(prompt, benign_data, "short", _build_fsh_prompt)
+    return run_random_manipulation(
+        prompt, benign_data, "short", _build_fsh_prompt, rng)
 
 
-def to_fsh_random_long(prompt: str, benign_data: dict) -> tuple[str, str]:
+def to_fsh_random_long(
+    prompt: str, benign_data: dict, *, rng: random.Random | None = None,
+) -> tuple[str, str]:
     """FSH with randomly chosen category, long answers. No LLM needed."""
-    return run_random_manipulation(prompt, benign_data, "long", _build_fsh_prompt)
+    return run_random_manipulation(
+        prompt, benign_data, "long", _build_fsh_prompt, rng)
 
 
 def to_fsh_selected_short(prompt: str, **kwargs) -> TechniqueGen:

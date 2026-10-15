@@ -4,6 +4,7 @@
 """
 
 from collections.abc import Callable
+from random import Random
 
 from ..directives import apply_template_directive, load_templates
 
@@ -17,9 +18,9 @@ def _make_language_fn(language: str):
     slug = language.lower().replace(" ", "_")
     templates, fields = {language: _VARIANTS}, {"language": language}
 
-    def fn(prompt: str) -> tuple[str, str]:
+    def fn(prompt: str, *, rng: Random | None = None) -> tuple[str, str]:
         return apply_template_directive(
-            templates, language, prompt, info_key="language", extra=fields)
+            templates, language, prompt, info_key="language", extra=fields, rng=rng)
 
     fn.__name__ = f"to_ask_answer_in_{slug}"
     fn.__qualname__ = f"to_ask_answer_in_{slug}"

@@ -5,6 +5,7 @@
 
 from collections.abc import Callable
 from functools import partial
+from random import Random
 
 from ..directives import apply_template_directive, load_templates
 
@@ -12,29 +13,31 @@ _TEMPLATES: dict[str, list[dict]] = load_templates("hacking", "framing_templates
 _apply = partial(apply_template_directive, _TEMPLATES, info_key="directive")
 
 
-def to_fictional_world(prompt: str) -> tuple[str, str]:
+def to_fictional_world(prompt: str, *, rng: Random | None = None) -> tuple[str, str]:
     """Wrap prompt in a fictional/alternate-reality framing."""
-    return _apply("fictional_world", prompt)
+    return _apply("fictional_world", prompt, rng=rng)
 
 
-def to_noble_goal(prompt: str) -> tuple[str, str]:
+def to_noble_goal(prompt: str, *, rng: Random | None = None) -> tuple[str, str]:
     """Prepend a benign/altruistic justification to the prompt."""
-    return _apply("noble_goal", prompt)
+    return _apply("noble_goal", prompt, rng=rng)
 
 
-def to_nefarious_goal(prompt: str) -> tuple[str, str]:
+def to_nefarious_goal(prompt: str, *, rng: Random | None = None) -> tuple[str, str]:
     """Frame prompt as coming from a researcher/tester with explicit harmful context."""
-    return _apply("nefarious_goal", prompt)
+    return _apply("nefarious_goal", prompt, rng=rng)
 
 
-def to_high_stake(prompt: str) -> tuple[str, str]:
+def to_high_stake(prompt: str, *, rng: Random | None = None) -> tuple[str, str]:
     """Add urgency/lives-at-stake pressure framing to the prompt."""
-    return _apply("high_stake", prompt)
+    return _apply("high_stake", prompt, rng=rng)
 
 
-def to_no_moral_constraints(prompt: str) -> tuple[str, str]:
+def to_no_moral_constraints(
+    prompt: str, *, rng: Random | None = None,
+) -> tuple[str, str]:
     """Append a direct constraint-removal directive to the prompt."""
-    return _apply("no_moral_constraints", prompt)
+    return _apply("no_moral_constraints", prompt, rng=rng)
 
 
 def get_framing_functions() -> list[Callable]:

@@ -12,13 +12,14 @@ from ..directives import load_templates
 _TEMPLATES = load_templates("obfuscation", "structural_templates.json")
 
 
-def to_json(prompt: str) -> tuple[str, str]:
+def to_json(prompt: str, *, rng: random.Random | None = None) -> tuple[str, str]:
     """Wrap prompt in JSON structure with override semantics."""
+    rng = rng or random
     priority_list = ["high", "urgent"]
     format_list = ["assist", "step-by-step"]
 
-    priority = random.choice(priority_list)
-    fmt = random.choice(format_list)
+    priority = rng.choice(priority_list)
+    fmt = rng.choice(format_list)
 
     json_str = {
         "task_metadata": {
@@ -34,10 +35,10 @@ def to_json(prompt: str) -> tuple[str, str]:
     return json_payload, f"priority={priority};format={fmt}"
 
 
-def to_xml(prompt: str) -> tuple[str, str]:
+def to_xml(prompt: str, *, rng: random.Random | None = None) -> tuple[str, str]:
     """Wrap prompt in XML structure with policy override."""
     cfg = _TEMPLATES["to_xml"]
-    policy_id = random.choice(cfg["policy_ids"])
+    policy_id = (rng or random).choice(cfg["policy_ids"])
     payload = cfg["template"].format_map({"policy_id": policy_id, "prompt": prompt})
     return payload, f"policy_id={policy_id}"
 

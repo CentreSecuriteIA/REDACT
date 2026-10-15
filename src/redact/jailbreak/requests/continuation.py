@@ -11,31 +11,41 @@ from ..directives import load_templates
 _TEMPLATES: dict[str, list[dict]] = load_templates("requests", "continuation_templates.json")
 
 
-def _apply(directive: str, prompt: str) -> tuple[str, str]:
+def _apply(
+    directive: str, prompt: str, rng: random.Random | None = None,
+) -> tuple[str, str]:
     """Select a random variant and wrap the prompt with its prefix/suffix."""
-    t = random.choice(_TEMPLATES[directive])
+    t = (rng or random).choice(_TEMPLATES[directive])
     result = t["prefix"] + prompt + t["suffix"]
     return result, f"style={t['name']}"
 
 
-def to_continue_passage(prompt: str) -> tuple[str, str]:
+def to_continue_passage(
+    prompt: str, *, rng: random.Random | None = None,
+) -> tuple[str, str]:
     """Frame the prompt as an interrupted passage the model must continue."""
-    return _apply("continue_passage", prompt)
+    return _apply("continue_passage", prompt, rng=rng)
 
 
-def to_complete_story(prompt: str) -> tuple[str, str]:
+def to_complete_story(
+    prompt: str, *, rng: random.Random | None = None,
+) -> tuple[str, str]:
     """Embed the prompt in a story that the model must complete in full detail."""
-    return _apply("complete_story", prompt)
+    return _apply("complete_story", prompt, rng=rng)
 
 
-def to_fill_in_blank(prompt: str) -> tuple[str, str]:
+def to_fill_in_blank(
+    prompt: str, *, rng: random.Random | None = None,
+) -> tuple[str, str]:
     """Append a fill-in-the-blank directive after the prompt."""
-    return _apply("fill_in_blank", prompt)
+    return _apply("fill_in_blank", prompt, rng=rng)
 
 
-def to_continue_instructions(prompt: str) -> tuple[str, str]:
+def to_continue_instructions(
+    prompt: str, *, rng: random.Random | None = None,
+) -> tuple[str, str]:
     """Frame the prompt as cut-off numbered instructions the model must finish."""
-    return _apply("continue_instructions", prompt)
+    return _apply("continue_instructions", prompt, rng=rng)
 
 
 def get_continuation_functions() -> list[Callable]:

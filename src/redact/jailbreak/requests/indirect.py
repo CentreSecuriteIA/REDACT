@@ -5,6 +5,7 @@
 
 from collections.abc import Callable
 from functools import partial
+from random import Random
 
 from ..directives import apply_template_directive, load_templates
 
@@ -12,34 +13,34 @@ _TEMPLATES: dict[str, list[dict]] = load_templates("requests", "indirect_templat
 _apply = partial(apply_template_directive, _TEMPLATES, info_key="task")
 
 
-def to_summarize(prompt: str) -> tuple[str, str]:
+def to_summarize(prompt: str, *, rng: Random | None = None) -> tuple[str, str]:
     """Embed prompt in a summarization task."""
-    return _apply("summarize", prompt)
+    return _apply("summarize", prompt, rng=rng)
 
 
-def to_proofread(prompt: str) -> tuple[str, str]:
+def to_proofread(prompt: str, *, rng: Random | None = None) -> tuple[str, str]:
     """Embed prompt in a proofreading/editing task."""
-    return _apply("proofread", prompt)
+    return _apply("proofread", prompt, rng=rng)
 
 
-def to_critique(prompt: str) -> tuple[str, str]:
+def to_critique(prompt: str, *, rng: Random | None = None) -> tuple[str, str]:
     """Embed prompt in a critical analysis or fact-checking task."""
-    return _apply("critique", prompt)
+    return _apply("critique", prompt, rng=rng)
 
 
-def to_translate_task(prompt: str) -> tuple[str, str]:
+def to_translate_task(prompt: str, *, rng: Random | None = None) -> tuple[str, str]:
     """Embed prompt in a translation or rephrasing task."""
-    return _apply("translate_task", prompt)
+    return _apply("translate_task", prompt, rng=rng)
 
 
-def to_explain_to_child(prompt: str) -> tuple[str, str]:
+def to_explain_to_child(prompt: str, *, rng: Random | None = None) -> tuple[str, str]:
     """Embed prompt in a 'explain simply' pedagogical task."""
-    return _apply("explain_to_child", prompt)
+    return _apply("explain_to_child", prompt, rng=rng)
 
 
-def to_rewrite(prompt: str) -> tuple[str, str]:
+def to_rewrite(prompt: str, *, rng: Random | None = None) -> tuple[str, str]:
     """Embed prompt in a rewriting task."""
-    return _apply("rewrite", prompt)
+    return _apply("rewrite", prompt, rng=rng)
 
 
 def get_indirect_functions() -> list[Callable]:

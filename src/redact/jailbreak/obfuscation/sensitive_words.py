@@ -46,10 +46,10 @@ def _sensitive_encode_finish(
 
 
 def _sensitive_separator_finish(
-    prompt: str, harmful_words: list[str]
+    prompt: str, harmful_words: list[str], rng: random.Random | None = None,
 ) -> tuple[str, str]:
     """Split each harmful word's characters with one randomly chosen separator."""
-    sep = random.choice(SEPARATORS)
+    sep = (rng or random).choice(SEPARATORS)
     if not harmful_words:
         return sep.join(prompt), f"encoding=separator;sep={sep};detected_words="
     result = prompt
@@ -177,7 +177,7 @@ _ENCODED = [
 def to_sensitive_words_encode_separator(prompt: str, **kwargs) -> TechniqueGen:
     """Separate each character of harmful words with a randomly chosen separator."""
     words = yield from harmful_words_gen(prompt, **kwargs)
-    return _sensitive_separator_finish(prompt, words)
+    return _sensitive_separator_finish(prompt, words, kwargs.get("rng"))
 
 
 _CHAR_SPECS = [
