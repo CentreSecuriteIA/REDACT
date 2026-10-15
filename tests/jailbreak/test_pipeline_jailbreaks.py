@@ -89,6 +89,36 @@ def test_reproducible_assignment(tmp_path):
     assert p1 == p2  # same seed + same prompts -> identical combinations
 
 
+def test_a_replayed_plan_writes_the_same_text(tmp_path, monkeypatch):
+    """One manifest run twice gives byte-identical rows from techniques that
+    choose at random, whatever the global random and the run's seed are: the
+    techniques draw from the seed the manifest froze."""
+    import random
+    import shutil
+
+    import redact.jailbreak.pool as JPool
+    from redact.jailbreak.obfuscation.encoding import to_separator
+    from redact.jailbreak.obfuscation.structural import to_json
+    from redact.jailbreak.obfuscation.suffixes import to_adversarial_suffix_fragments
+
+    choosing = [to_separator, to_json, to_adversarial_suffix_fragments]
+    monkeypatch.setattr(JPool, "all_techniques", lambda: choosing)
+    first, second = tmp_path / "a" / "jb.csv", tmp_path / "b" / "jb.csv"
+
+    random.seed(1)
+    generate_jailbreaks(inputs=_inputs(), output_path=first, seed=9, iterations=2,
+                        max_obfuscations=2, **PURE_KW)
+    second.parent.mkdir()
+    manifest = "jb.manifest.jsonl"
+    shutil.copy(first.with_name(manifest), second.with_name(manifest))
+    random.seed(2)
+    generate_jailbreaks(inputs=_inputs(), output_path=second, seed=10, iterations=2,
+                        max_obfuscations=2, **PURE_KW)
+
+    assert len(pd.read_csv(first)) == 2 * len(_inputs())
+    assert first.read_bytes() == second.read_bytes()
+
+
 def test_iterations_dedup(tmp_path):
     out = tmp_path / "jb.csv"
     df = generate_jailbreaks(inputs=_inputs(), output_path=out, seed=3,
@@ -385,14 +415,23 @@ def test_a_unit_is_built_when_the_driver_takes_it(tmp_path, monkeypatch):
 
 
 def test_finished_units_are_skipped_as_the_plan_is_read(tmp_path, monkeypatch):
+    from redact.dataset import Ledger
+
     out, finished = tmp_path / "jb.csv", 3
     generate_jailbreaks(inputs=_inputs().iloc[:finished], output_path=out, seed=7,
                         **PURE_KW)
+    casters = {"input_id": str, "iteration": int}
+    done = set(Ledger.sidecar(out, ("input_id", "iteration"), casters).completed())
+    assert len(done) == finished
     Manifest.sidecar(out).reset()       # the next run plans all five inputs
     read = _plan_rows_read(monkeypatch, units_taken=1)
     with pytest.raises(KeyboardInterrupt):
         generate_jailbreaks(inputs=_inputs(), output_path=out, seed=7, **PURE_KW)
-    assert len(read) == finished + 1    # the finished units, then the one taken
+    # The plan is read until one pending unit is taken; every row read before it
+    # was a finished unit, skipped (the manifest order is group + sample_id).
+    taken = (str(read[-1]["sample_id"]), int(read[-1]["iteration"]))
+    assert taken not in done
+    assert all((str(r["sample_id"]), int(r["iteration"])) in done for r in read[:-1])
 
 
 def test_a_stopped_run_lets_go_of_its_plan(tmp_path, monkeypatch):

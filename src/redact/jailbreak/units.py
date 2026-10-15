@@ -31,9 +31,13 @@ def unit_gen(
 ) -> Iterator:
     """The chain generator of one unit.
 
-    With ``capture`` the unit's LLM calls are tagged for internals capture
-    under a provisional ``{id}/{label}/attempt_{iteration}`` root, which
-    :func:`row_of` relabels to the final ``sample_id`` once it is known.
+    Each technique draws its random choices from an ``rng`` seeded by the
+    plan's seed, the unit's id and iteration, and the technique's name, so a
+    replayed plan gives the same text; a unit with no seed leaves them to the
+    global ``random``. With ``capture`` the unit's LLM calls are tagged for
+    internals capture under a provisional ``{id}/{label}/attempt_{iteration}``
+    root, which :func:`row_of` relabels to the final ``sample_id`` once it is
+    known.
     """
     root = None
     if capture:
@@ -45,6 +49,10 @@ def unit_gen(
         unit["combination"].techniques, unit["prompt"],
         gen_model=gen_model, translate_model=translate_model,
         benign_data=benign_data, prompt_dir=prompt_dir, internals_root=root,
+        rng_seed=(
+            None if unit.get("seed") is None
+            else (unit["seed"], unit["id"], unit["iteration"])
+        ),
     )
 
 
@@ -62,7 +70,8 @@ def pending_units(
     Each unit is keyed by its place among the pending units, so two plan rows
     with one ``(input_id, iteration)`` stay two units, and is recorded in
     ``live`` for :func:`row_of` to read when it finishes. A unit is built only
-    as the driver takes it. ``gen_kwargs`` go to :func:`unit_gen`.
+    as the driver takes it, and carries the seed its plan row was drawn with.
+    ``gen_kwargs`` go to :func:`unit_gen`.
     """
     pending = (r for r in plan if is_pending(r, position, completed))
     for i, r in enumerate(pending):
@@ -72,6 +81,7 @@ def pending_units(
             "prompt": prompts.iat[position[sid]],
             "combination": combination_of(r["combination"], registry),
             "iteration": int(r["iteration"]),
+            "seed": (r.get("settings") or {}).get("seed"),
         }
         live[i] = unit
         yield i, unit_gen(unit, **gen_kwargs)

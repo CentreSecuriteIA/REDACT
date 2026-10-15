@@ -1,8 +1,8 @@
 """The benign pairs both manipulation families build on: a subcategory, picked at
 random or by a model, its pairs, and the info string.
 
-A family supplies ``build_prompt(prompt, pairs, num_shots) -> (text, extra)``,
-where ``extra`` holds its own info fields.
+A family supplies ``build_prompt(prompt, pairs, num_shots, rng) -> (text,
+extra)``, where ``extra`` holds its own info fields.
 """
 
 import random
@@ -12,6 +12,8 @@ from redact.llm_pipeline import LLMRequest
 from redact.llms.prompting import build_messages, load_prompt
 
 from ..technique import TechniqueGen
+
+BuildPrompt = Callable[[str, list[dict], int, random.Random], tuple[str, dict]]
 
 
 def _build_subcategory_messages(
@@ -24,7 +26,9 @@ def _build_subcategory_messages(
     )
 
 
-def _parse_subcategory(chosen: str, all_subcategories: list[str]) -> tuple[str, bool]:
+def _parse_subcategory(
+    chosen: str, all_subcategories: list[str], rng: random.Random | None = None,
+) -> tuple[str, bool]:
     """Map an LLM reply to a known subcategory, falling back to random."""
     chosen = chosen.strip()
     if chosen in all_subcategories:
@@ -32,7 +36,7 @@ def _parse_subcategory(chosen: str, all_subcategories: list[str]) -> tuple[str, 
     for sc in all_subcategories:
         if sc.lower() in chosen.lower():
             return sc, False
-    return random.choice(all_subcategories), True
+    return (rng or random).choice(all_subcategories), True
 
 
 def _select_subcategory_gen(
@@ -41,11 +45,12 @@ def _select_subcategory_gen(
     *,
     gen_model: str | None = None,
     prompt_dir=None,
+    rng: random.Random | None = None,
 ) -> TechniqueGen:
     """Yield one category-selection request; return ``(subcategory, was_fallback)``."""
     chosen = yield LLMRequest(gen_model, _build_subcategory_messages(
         harmful_prompt, all_subcategories, prompt_dir))
-    return _parse_subcategory(chosen, all_subcategories)
+    return _parse_subcategory(chosen, all_subcategories, rng)
 
 
 def _pick_pairs(benign_data: dict, answer_type: str, subcat: str) -> list[dict]:
@@ -69,33 +74,37 @@ def run_random_manipulation(
     prompt: str,
     benign_data: dict,
     answer_type: str,
-    build_prompt: Callable[[str, list[dict], int], tuple[str, dict]],
+    build_prompt: BuildPrompt,
+    rng: random.Random | None = None,
 ) -> tuple[str, str]:
     """The body of a ``*_random_{short,long}`` variant; no model call."""
-    num_shots = random.randint(3, 7)
-    subcat = random.choice(benign_data["all_subcategories"])
+    rng = rng or random
+    num_shots = rng.randint(3, 7)
+    subcat = rng.choice(benign_data["all_subcategories"])
     pairs = _pick_pairs(benign_data, answer_type, subcat)
-    jailbreak, extra = build_prompt(prompt, pairs, num_shots)
+    jailbreak, extra = build_prompt(prompt, pairs, num_shots, rng)
     return jailbreak, _format_manipulation_info(num_shots, extra, subcat)
 
 
 def run_selected_manipulation(
     prompt: str,
     answer_type: str,
-    build_prompt: Callable[[str, list[dict], int], tuple[str, dict]],
+    build_prompt: BuildPrompt,
     *,
     benign_data: dict | None = None,
     gen_model: str | None = None,
     prompt_dir=None,
+    rng: random.Random | None = None,
     **kwargs,
 ) -> TechniqueGen:
     """The body of a ``*_selected_{short,long}`` variant, subcategory by a model."""
-    num_shots = random.randint(3, 7)
+    rng = rng or random
+    num_shots = rng.randint(3, 7)
     subcat, was_fallback = yield from _select_subcategory_gen(
         prompt, benign_data["all_subcategories"],
-        gen_model=gen_model, prompt_dir=prompt_dir,
+        gen_model=gen_model, prompt_dir=prompt_dir, rng=rng,
     )
     pairs = _pick_pairs(benign_data, answer_type, subcat)
-    jailbreak, extra = build_prompt(prompt, pairs, num_shots)
+    jailbreak, extra = build_prompt(prompt, pairs, num_shots, rng)
     selection = "fallback_random" if was_fallback else "selected"
     return jailbreak, _format_manipulation_info(num_shots, extra, subcat, selection)

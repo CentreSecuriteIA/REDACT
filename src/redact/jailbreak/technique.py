@@ -4,7 +4,9 @@ and the tags the spec gives it.
 A transform is ``(prompt) -> (text, info)``. A generator yields
 :class:`~redact.llm_pipeline.LLMRequest` objects, is resumed with each reply,
 and returns ``(text, info)``. ``info`` is ``""`` or ``key=value;...``; a
-rejection's starts with :data:`DISCARDED`.
+rejection's starts with :data:`DISCARDED`. A technique that makes a random
+choice draws it from the ``rng`` keyword (a ``random.Random``), else from the
+global ``random``.
 """
 
 import json

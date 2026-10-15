@@ -8,17 +8,26 @@ from .rules import compatible, request_obfuscation_candidates
 from .technique import load_spec
 
 
-def _pick_by_family(rng: random.Random, candidates: list[Callable]) -> Callable:
-    """Pick uniformly by family first, then uniformly within the chosen family.
+def _pick_by_family(
+    rng: random.Random, candidates: list[Callable], dealer=None,
+) -> Callable:
+    """Pick a family, then a technique within it.
 
-    Prevents over-sized families (e.g. 20 translation languages) from dominating
-    over smaller families that have fewer individual functions.
+    Without a ``dealer`` the family is uniform. With one, it is the eligible
+    family with the lowest count-over-weight so far in the group (ties broken by
+    ``rng``), so a group's families come out even. The technique within the
+    family is uniform either way.
     """
     family_map: dict[str, list[Callable]] = {}
     for fn in candidates:
         fam = (getattr(fn, "families", None) or [""])[0]
         family_map.setdefault(fam, []).append(fn)
-    chosen_family = rng.choice(list(family_map.keys()))
+    families = list(family_map)
+    if dealer is None:
+        chosen_family = rng.choice(families)
+    else:
+        best = min(dealer.score(fam) for fam in families)
+        chosen_family = rng.choice([f for f in families if dealer.score(f) == best])
     return rng.choice(family_map[chosen_family])
 
 
@@ -34,6 +43,7 @@ def sample_combination(
     allow_request_obfuscation: bool = False,
     sampling_probs: dict | None = None,
     exact_techniques: int | None = None,
+    dealer=None,
 ) -> Callable:
     """Sample a random valid technique combination from pool.
 
@@ -74,10 +84,11 @@ def sample_combination(
             include_manipulation=include_manipulation,
             include_obfuscation=include_obfuscation,
             include_requests=include_requests,
+            dealer=dealer,
         )
 
     spec = load_spec()
-    probs = dict(spec.get("sampling_probs", {}))
+    probs = dict(spec.get("layer_rates", {}))
     if sampling_probs:
         probs.update(sampling_probs)
     p_hacking = probs.get("hacking", 0.5)
@@ -96,7 +107,7 @@ def sample_combination(
         candidates = [f for f in current_pool if getattr(f, "layer", None) == layer]
         if not candidates:
             return None
-        return _pick_by_family(rng, candidates)
+        return _pick_by_family(rng, candidates, dealer)
 
     def _commit(fn: Callable) -> None:
         selected.append(fn)
@@ -104,14 +115,24 @@ def sample_combination(
         remaining_complexity -= getattr(fn, "complexity", 0)
         _update_pool()
 
+    def _include(layer: str, prob: float) -> bool:
+        """Whether this unit takes a pick in ``layer``.
+
+        A dealer includes the layer while its share of the group is below
+        ``prob``; without one it is a per-unit Bernoulli draw.
+        """
+        if dealer is None:
+            return rng.random() < prob
+        return dealer.include(layer, prob)
+
     # Phase 1: Hacking
-    if include_hacking and rng.random() < p_hacking:
+    if include_hacking and _include("hacking", p_hacking):
         pick = _pick_from_layer("hacking")
         if pick is not None:
             _commit(pick)
 
     # Phase 2: Manipulation
-    if include_manipulation and rng.random() < p_manipulation:
+    if include_manipulation and _include("manipulation", p_manipulation):
         pick = _pick_from_layer("manipulation")
         if pick is not None:
             _commit(pick)
@@ -123,12 +144,12 @@ def sample_combination(
             candidates = [f for f in current_pool if getattr(f, "layer", None) == "obfuscation"]
             if not candidates:
                 break
-            pick = _pick_by_family(rng, candidates)
+            pick = _pick_by_family(rng, candidates, dealer)
             _commit(pick)
             obfusc_count += 1
 
     # Phase 4: Requests
-    if include_requests and rng.random() < p_requests:
+    if include_requests and _include("requests", p_requests):
         pick = _pick_from_layer("requests")
         if pick is not None:
             _commit(pick)
@@ -140,7 +161,7 @@ def sample_combination(
     if allow_request_obfuscation and rng.random() < p_request_obfuscation:
         req_obfusc_candidates = request_obfuscation_candidates(current_pool)
         if req_obfusc_candidates:
-            request_obfuscation = _pick_by_family(rng, req_obfusc_candidates)
+            request_obfuscation = _pick_by_family(rng, req_obfusc_candidates, dealer)
 
     if not selected and request_obfuscation is None:
         # combine_techniques() with no techniques returns a no-op combined
@@ -165,6 +186,7 @@ def sample_exact_combination(
     include_manipulation: bool = True,
     include_obfuscation: bool = True,
     include_requests: bool = True,
+    dealer=None,
 ) -> Callable:
     """Pick exactly ``n`` compatible techniques (count-driven, not budget-driven).
 
@@ -204,7 +226,7 @@ def sample_exact_combination(
     for _ in range(max(0, n)):
         if not current_pool:
             break
-        pick = _pick_by_family(rng, current_pool)
+        pick = _pick_by_family(rng, current_pool, dealer)
         selected.append(pick)
         # remaining_complexity=None → no complexity filtering; only caps + incompat.
         current_pool = compatible(selected, current_pool, None)

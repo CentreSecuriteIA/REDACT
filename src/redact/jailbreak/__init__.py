@@ -25,6 +25,8 @@ from .pipeline import run_augmentation
 from .plan import (
     assign_combination,
     combination_of,
+    coverage,
+    coverage_path,
     default_escalation_schedule,
     plan_run,
 )
@@ -49,6 +51,8 @@ __all__ = [
     "combination_of",
     "combine_techniques",
     "compatible",
+    "coverage",
+    "coverage_path",
     "default_escalation_schedule",
     "in_layer_order",
     "load_spec",

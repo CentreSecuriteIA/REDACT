@@ -33,9 +33,9 @@ _CHAR_TOKENS = [
 ]
 
 
-def tokenbreak_prepend(word: str) -> tuple[str, str]:
+def tokenbreak_prepend(word: str, rng: random.Random | None = None) -> tuple[str, str]:
     """Prepend a random token to the word."""
-    token = random.choice(_CHAR_TOKENS)
+    token = (rng or random).choice(_CHAR_TOKENS)
     return token + word, token
 
 
@@ -56,23 +56,24 @@ _VARIATION_SELECTORS = [
 ]
 
 
-def tokenbreak_split(word: str) -> tuple[str, str]:
+def tokenbreak_split(word: str, rng: random.Random | None = None) -> tuple[str, str]:
     """Split word with a random token in the middle."""
-    token_type = random.choice(["char", "invisible_char", "variation_selector"])
+    rng = rng or random
+    token_type = rng.choice(["char", "invisible_char", "variation_selector"])
 
     if token_type == "char":
-        token = random.choice(_CHAR_TOKENS)
+        token = rng.choice(_CHAR_TOKENS)
         token_repr = token
     elif token_type == "invisible_char":
-        token = random.choice(_INVISIBLE_CHARS)
+        token = rng.choice(_INVISIBLE_CHARS)
         token_repr = _INVISIBLE_CHAR_NAMES.get(token, "invis")
     else:
-        token = random.choice(_VARIATION_SELECTORS)
+        token = rng.choice(_VARIATION_SELECTORS)
         token_repr = f"VS{ord(token) - 0xFE00:02d}"
 
     if len(word) <= 1:
         return word + token, token_repr
-    position = random.randint(1, len(word) - 1)
+    position = rng.randint(1, len(word) - 1)
     obfuscated_word = word[:position] + token + word[position:]
     return obfuscated_word, token_repr
 
@@ -85,22 +86,25 @@ _STRUCTURAL_DELIMITERS = [
 _SEPARATOR_DELIMITERS = [".", "-", "_", "~", "/", "\\", "|"]
 
 
-def tokenbreak_delimiter(word: str) -> tuple[str, str]:
+def tokenbreak_delimiter(
+    word: str, rng: random.Random | None = None,
+) -> tuple[str, str]:
     """Wrap or split word with delimiters."""
-    delimiter_type = random.choice(["standard", "structural", "separator"])
+    rng = rng or random
+    delimiter_type = rng.choice(["standard", "structural", "separator"])
 
     if delimiter_type == "standard":
-        delimiter = random.choice(_STANDARD_DELIMITERS)
+        delimiter = rng.choice(_STANDARD_DELIMITERS)
         if delimiter == "bracket":
             brackets = [("(", ")"), ("[", "]"), ("{", "}"), ("<", ">")]
-            open_b, close_b = random.choice(brackets)
+            open_b, close_b = rng.choice(brackets)
             return open_b + word + close_b, f"{open_b}{close_b}"
         return delimiter + word + delimiter, delimiter
     elif delimiter_type == "structural":
-        delimiter = random.choice(_STRUCTURAL_DELIMITERS)
+        delimiter = rng.choice(_STRUCTURAL_DELIMITERS)
         return delimiter + word + delimiter, delimiter
     else:
-        delimiter = random.choice(_SEPARATOR_DELIMITERS)
+        delimiter = rng.choice(_SEPARATOR_DELIMITERS)
         return delimiter.join(list(word)), delimiter
 
 
@@ -111,11 +115,13 @@ _ATTACKS = {
 }
 
 
-def tokenbreak_obfuscate_word(word: str, attack: str) -> tuple[str, str]:
+def tokenbreak_obfuscate_word(
+    word: str, attack: str, rng: random.Random | None = None,
+) -> tuple[str, str]:
     """Obfuscate a single word using specified attack type."""
     if attack not in _ATTACKS:
         raise ValueError(f"Unknown attack type: {attack}")
-    return _ATTACKS[attack](word)
+    return _ATTACKS[attack](word, rng)
 
 
 _TOKENBREAK_EMPTY_RESPONSES = {"none", "n/a", "no harmful words", ""}
@@ -145,17 +151,19 @@ def harmful_words_gen(
     return _parse_harmful_words((yield LLMRequest(gen_model, messages)))
 
 
-def _tokenbreak_finish(prompt: str, attack: str, harmful_words: list[str]) -> tuple[str, str]:
+def _tokenbreak_finish(
+    prompt: str, attack: str, harmful_words: list[str], rng: random.Random | None,
+) -> tuple[str, str]:
     """Structural tokenbreak applied to each harmful word (or every word)."""
     if not harmful_words:
         def _obfuscate_token(m: re.Match) -> str:
-            return tokenbreak_obfuscate_word(m.group(), attack)[0]
+            return tokenbreak_obfuscate_word(m.group(), attack, rng)[0]
         return re.sub(r"\S+", _obfuscate_token, prompt), "detected_words="
 
     token_infos: list[str] = []
     result = prompt
     for word in harmful_words:
-        obfuscated_word, token_repr = tokenbreak_obfuscate_word(word, attack)
+        obfuscated_word, token_repr = tokenbreak_obfuscate_word(word, attack, rng)
         token_infos.append(token_repr)
         result = re.sub(
             re.escape(word),
@@ -166,22 +174,27 @@ def _tokenbreak_finish(prompt: str, attack: str, harmful_words: list[str]) -> tu
     return result, f"detected_words={' '.join(harmful_words)};tokens={','.join(token_infos)}"
 
 
+def _tokenbreak_gen(
+    prompt: str, attack: str, *, rng: random.Random | None = None, **kwargs,
+) -> TechniqueGen:
+    """Find the prompt's harmful words, then apply ``attack`` to each."""
+    words = yield from harmful_words_gen(prompt, **kwargs)
+    return _tokenbreak_finish(prompt, attack, words, rng)
+
+
 def to_tokenbreak_prepend(prompt: str, **kwargs) -> TechniqueGen:
     """TokenBreak: prepend a random token before each harmful word."""
-    words = yield from harmful_words_gen(prompt, **kwargs)
-    return _tokenbreak_finish(prompt, "prepend", words)
+    return (yield from _tokenbreak_gen(prompt, "prepend", **kwargs))
 
 
 def to_tokenbreak_split(prompt: str, **kwargs) -> TechniqueGen:
     """TokenBreak: insert a random character inside each harmful word."""
-    words = yield from harmful_words_gen(prompt, **kwargs)
-    return _tokenbreak_finish(prompt, "split", words)
+    return (yield from _tokenbreak_gen(prompt, "split", **kwargs))
 
 
 def to_tokenbreak_delimiter(prompt: str, **kwargs) -> TechniqueGen:
     """TokenBreak: wrap each harmful word with randomly chosen delimiters."""
-    words = yield from harmful_words_gen(prompt, **kwargs)
-    return _tokenbreak_finish(prompt, "delimiter", words)
+    return (yield from _tokenbreak_gen(prompt, "delimiter", **kwargs))
 
 
 def get_tokenbreak_functions() -> list[Callable]:

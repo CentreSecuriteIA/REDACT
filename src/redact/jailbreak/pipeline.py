@@ -26,7 +26,7 @@ from redact.llms.client import ModelClient
 
 from . import pool as pool_module
 from .manipulation import get_or_generate_benign_data
-from .plan import plan_run
+from .plan import coverage_path, plan_run
 from .technique import load_spec
 from .units import error_row_of, is_pending, pending_units, row_of
 
@@ -47,6 +47,8 @@ def run_augmentation(
     iterations: int = 1,
     settings_per_iteration: list[dict] | None = None,
     sample_kwargs: dict | None = None,
+    family_weights: dict | None = None,
+    layer_rates: dict | None = None,
     auto_generate_benign: bool = True,
     batch_size: int = 256,
     resume: bool = True,
@@ -110,10 +112,12 @@ def run_augmentation(
         if verbose:
             logger.info("Reusing existing manifest: %s", man_path)
     else:
+        coverage_path(man_path).unlink(missing_ok=True)
         plan_run(
             inputs, pool, manifest_path=man_path, seed=seed,
             iterations=iterations, settings_per_iteration=settings_per_iteration,
-            sample_kwargs=sample_kwargs, verbose=verbose,
+            sample_kwargs=sample_kwargs, family_weights=family_weights,
+            layer_rates=layer_rates, verbose=verbose,
         )
 
     benign_data = None

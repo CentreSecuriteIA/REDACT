@@ -60,9 +60,9 @@ def to_ascii_ordinal(prompt: str) -> tuple[str, str]:
 SEPARATORS = ["-", "_", ".", "|", "/", "*", "~"]
 
 
-def to_separator(prompt: str) -> tuple[str, str]:
+def to_separator(prompt: str, *, rng: random.Random | None = None) -> tuple[str, str]:
     """Insert a random separator character between every character."""
-    sep = random.choice(SEPARATORS)
+    sep = (rng or random).choice(SEPARATORS)
     return sep.join(prompt), f"sep={sep}"
 
 
