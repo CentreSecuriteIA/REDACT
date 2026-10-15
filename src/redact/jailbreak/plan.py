@@ -10,6 +10,7 @@ from __future__ import annotations
 
 import json
 import logging
+import math
 import random
 from collections import Counter, defaultdict
 from collections.abc import Callable
@@ -31,20 +32,31 @@ class _Dealer:
 
     ``weights`` sets a family's share within its layer (1 by default). The
     planner sets ``position`` to the units dealt so far, including the current,
-    and calls ``observe`` with the techniques each unit was given.
+    and calls ``observe`` with the techniques each unit was given. ``key``
+    names the group; it seeds where in the group each layer's picks fall.
     """
 
-    def __init__(self, weights: dict | None = None) -> None:
+    def __init__(self, weights: dict | None = None, key: tuple = ()) -> None:
         self.weights = dict(weights or {})
+        self.key = key
         self.position = 0
         self.family_counts: Counter = Counter()
         self.layer_counts: Counter = Counter()
+        self._offsets: dict[str, float] = {}
 
     def score(self, family: str) -> float:
         return self.family_counts[family] / self.weights.get(family, 1.0)
 
     def include(self, layer: str, rate: float) -> bool:
-        return self.layer_counts[layer] < rate * self.position
+        """Whether this unit takes ``layer``: the picks so far are below
+        ``rate * position`` shifted by the group's seeded offset in [0, 1), so
+        a group gets ``rate * size`` picks rounded down or up, and a group of
+        one takes the layer with probability ``rate``."""
+        if layer not in self._offsets:
+            seeded = random.Random(_stable_seed(*self.key, layer))
+            self._offsets[layer] = seeded.random()
+        return self.layer_counts[layer] < math.floor(
+            rate * self.position + self._offsets[layer])
 
     def observe(self, techniques) -> None:
         for fn in techniques:
@@ -162,7 +174,7 @@ def plan_run(
             )
             for key in sorted(subgroups):
                 category, entry_type = key
-                dealer = _Dealer(family_weights)
+                dealer = _Dealer(family_weights, key=(seed, category, entry_type, it))
                 for sid, idx in subgroups[key]:
                     dealer.position += 1
                     names = assign_combination(

@@ -60,6 +60,23 @@ def test_a_lower_rate_deals_fewer_picks(tmp_path):
     assert cov[("layer", "hacking")] == round(0.25 * _GROUP)
 
 
+def test_groups_of_one_are_dealt_at_the_rate_not_every_time(tmp_path):
+    # 200 categories of one input each: each group holds a single unit, so
+    # the rate must hold across groups, not round up to a pick in every one.
+    hacking = get_all_hacking_functions()
+    n = 200
+    inputs = pd.DataFrame({
+        "prompt": [f"prompt number {i} about a topic" for i in range(n)],
+        "category": [f"cat{i}" for i in range(n)],
+        "entry_type": ["harmful"] * n,
+    })
+    plan_run(inputs, hacking, manifest_path=tmp_path / "jb.manifest.jsonl",
+             seed=3, layer_rates={"hacking": 0.5}, verbose=False)
+    picks = sum(int(r["count"]) for r in _read_coverage(tmp_path / "jb.coverage.csv")
+                if (r["level"], r["name"]) == ("layer", "hacking"))
+    assert 0.35 * n <= picks <= 0.65 * n
+
+
 def test_coverage_lists_every_pool_technique_including_zeros(tmp_path):
     hacking = get_all_hacking_functions()
     manifest = tmp_path / "jb.manifest.jsonl"
