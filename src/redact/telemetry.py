@@ -1,34 +1,9 @@
 """Run telemetry: what was called, how long it took, and what it cost.
 
-``llms/`` emits facts and knows nothing about where they go (see
-``llms/observe.py``). This module is the other half: it owns configuration,
-aggregation, cost, and the sinks. Keeping the split that way is what lets
-``llms/`` import nothing upward and carry no optional dependency.
-
-**Relationship to ``logging``** — the library's contract (see
-``redact/__init__.py``) is that every module logs through
-``getLogger(__name__)`` under the ``redact`` root, and that the *application*
-configures handlers and level. This module honours that exactly:
-
-- The JSONL sink is a plain file writer, **never a ``logging.Handler``**.
-  Attaching one to the ``redact`` root would hijack the caller's configuration
-  and make the trace depend on their log level.
-- Human-readable summaries *do* go through ``logging`` at INFO (cost roll-up,
-  preload status, residency plan) and DEBUG (per-call detail), so
-  ``scripts/run.py``'s existing ``--quiet``/``--debug`` already control them.
-- Nothing here ever calls ``basicConfig()`` or ``setLevel()``.
-
-Two channels, complementary: ``logging`` for a human reading a run, JSONL (or
-W&B) for the machine-readable record.
-
-Usage::
-
-    from redact import telemetry
-
-    telemetry.install(data_dir="./runs/training")
-    with telemetry.stage("inputs"):
-        ...                       # every call event is labelled "inputs"
-    telemetry.summary()           # -> dict, also logged at INFO
+``llms/observe.py`` emits the events; this module collects, prices and sinks
+them. The JSONL sink is a plain file writer, never a ``logging.Handler``, and
+nothing here configures logging: the roll-up goes to this module's logger at
+INFO, so the application's log level decides whether it shows.
 """
 
 import json
@@ -47,39 +22,26 @@ from .llms.resources import measure
 
 logger = logging.getLogger(__name__)
 
-#: Sink chosen by ``REDACT_TRACE``. "jsonl" is the default: it needs no
-#: account, works offline, and means the trace is already there when a run goes
-#: wrong rather than only when someone remembered to switch it on.
+# The values of ``REDACT_TRACE``. JSONL is the default: it needs no account, so
+# the trace is there when a run goes wrong.
 _VALID_SINKS = ("jsonl", "wandb", "off")
-DEFAULT_SINK = "jsonl"
-
-
-# ---------------------------------------------------------------------------
-# GPU rates
-# ---------------------------------------------------------------------------
+_DEFAULT_SINK = "jsonl"
 
 _warned_default_provider = False
 
-#: Rate set by :func:`set_gpu_rate`, overriding the pricing table entirely.
+# Set by set_gpu_rate; wins over the pricing table.
 _gpu_rate_override: float | None = None
 
 
 def set_gpu_rate(usd_per_hour: float | None) -> None:
-    """Price this machine's GPUs directly, without editing the pricing table.
+    """Price this machine's GPUs, over ``REDACT_GPU_PROVIDER`` and the pricing table.
 
-    ``configs/llm/gpu_pricing.json`` ships inside the package, so editing it to
-    say what your own card costs means editing an installed file — fine for a
-    provider's published rates, wrong for a number only you know (your
-    electricity, your amortization, your lab's internal chargeback).
-
-    Wins over both ``REDACT_GPU_PROVIDER`` and the table, and applies to
-    whatever GPU is detected. Setting it also silences the unset-provider
-    warning: a rate you chose is an answer, including ``0.0``.
+    A rate set here, ``0.0`` included, also silences the unset-provider
+    warning.
 
     Args:
-        usd_per_hour: Hourly USD per **single** GPU — the same unit the table
-            uses, since billing multiplies by the number of GPUs rented.
-            ``None`` clears the override and restores table lookup.
+        usd_per_hour: Hourly USD per single GPU, the table's unit. ``None``
+            clears the override.
 
     Raises:
         ValueError: If negative.
@@ -93,11 +55,7 @@ def set_gpu_rate(usd_per_hour: float | None) -> None:
 
 
 def _env_gpu_rate() -> float | None:
-    """``REDACT_GPU_HOURLY_USD``, for setting a rate without importing anything.
-
-    Ignores an unparseable value rather than failing a run over a typo in an
-    env var — the rate is reporting, not correctness.
-    """
+    """``REDACT_GPU_HOURLY_USD``, or ``None`` when it is unset or not a number."""
     raw = os.environ.get("REDACT_GPU_HOURLY_USD")
     if not raw:
         return None
@@ -111,21 +69,15 @@ def _env_gpu_rate() -> float | None:
 def _warn_if_unpriced_by_default(
     rented: int, held_h: float, rate: float | None
 ) -> None:
-    """Warn once when a $0 GPU bill is the default talking, not a measurement.
+    """Warn once when a $0 GPU bill comes from the default provider.
 
-    Every other unpriced case degrades to ``None`` — "time only, no guess".
-    This one doesn't: ``REDACT_GPU_PROVIDER`` is *declared*, not detected, and
-    defaults to ``local``, whose ``"*"`` entry is a real rate of 0.0. So
-    forgetting the variable on a rented pod produces a confident
-    ``local_cost_usd: 0.0`` — the one wrong number the cost model can emit,
-    reached by the likeliest mistake. Nothing is changed here; the zero is
-    just made legible.
+    ``REDACT_GPU_PROVIDER`` defaults to ``local``, priced at 0.0, so a rented
+    pod with no provider set would report ``local_cost_usd: 0.0``.
     """
     global _warned_default_provider
     if _warned_default_provider or rate != 0.0:
         return
-    # A rate the caller chose is an answer, 0.0 included — only the default
-    # talking is worth a warning.
+    # A rate the caller set, 0.0 included, is an answer.
     if _gpu_rate_override is not None or _env_gpu_rate() is not None:
         return
     if not (rented and held_h > 0) or os.environ.get("REDACT_GPU_PROVIDER"):
@@ -142,22 +94,16 @@ def _warn_if_unpriced_by_default(
 
 
 def gpu_hourly_rate(name: str | None, provider: str | None = None) -> float | None:
-    """Hourly rate for one GPU of this model, from ``configs/llm/gpu_pricing.json``.
+    """Hourly USD for one GPU of this model, or ``None`` to report time only.
+
+    Checked in order: :func:`set_gpu_rate`, ``REDACT_GPU_HOURLY_USD``, then
+    ``configs/llm/gpu_pricing.json``. A provider or GPU missing from the table
+    gives ``None``, never a guess.
 
     Args:
         name: GPU model as ``nvidia-smi`` reports it.
-        provider: Key into the pricing table; defaults to ``REDACT_GPU_PROVIDER``,
-            then ``"local"`` (rate 0 — running on your own machine reports
-            GPU-seconds without inventing a dollar figure).
-
-    Checked in order: :func:`set_gpu_rate`, ``REDACT_GPU_HOURLY_USD``, then
-    the table — so a machine-specific rate never requires editing a file that
-    ships inside the package.
-
-    Returns:
-        The rate, or ``None`` when the provider or GPU isn't in the table.
-        ``None`` means *report time only* — a missing entry must never be
-        guessed at, since a wrong rate is worse than no rate.
+        provider: Key into the pricing table; defaults to
+            ``REDACT_GPU_PROVIDER``, then ``"local"`` (rate 0).
     """
     if _gpu_rate_override is not None:
         return _gpu_rate_override
@@ -183,21 +129,15 @@ def gpu_hourly_rate(name: str | None, provider: str | None = None) -> float | No
     return None
 
 
-# ---------------------------------------------------------------------------
-# Collector
-# ---------------------------------------------------------------------------
-
-
-#: Backends that run a model on this machine. Their calls are paid for as
-#: engine time, so their tokens are counted and not priced.
+# Backends that run a model on this machine: paid for as engine time, so their
+# tokens are counted and not priced.
 _LOCAL_BACKENDS = frozenset({"vllm", "introspect"})
 
 
 class Collector:
-    """Accumulates events, writes the trace, and rolls up cost.
+    """Accumulates events, writes them to the sinks, and rolls up cost.
 
-    Thread-safe by the same reasoning as :class:`~redact.llms.progress.ProgressReporter`:
-    ``BatchCaller`` dispatches from a thread pool, so events arrive concurrently.
+    Thread-safe: events arrive from worker threads.
     """
 
     def __init__(self, trace_path: Path | None, sinks: list):
@@ -205,18 +145,15 @@ class Collector:
         self._sinks = sinks
         self._lock = threading.Lock()
         self.events: list[dict] = []
-        # Per-model usage (every backend, local ones included), and
-        # per-checkpoint local hold time. Two meters because two different
-        # things are being bought: tokens from an endpoint, wall-clock from a
-        # leased card.
+        # Per-model usage, local backends included.
         self.tokens: dict[str, dict[str, int]] = defaultdict(
             lambda: {"in": 0, "out": 0, "calls": 0, "items": 0, "ms": 0.0}
         )
-        # Tokens of the calls a hosted backend made, per model: these are
-        # the ones the model's price applies to.
+        # Per-model tokens of hosted calls: the ones a price applies to.
         self.priced: dict[str, dict[str, int]] = defaultdict(
             lambda: {"in": 0, "out": 0}
         )
+        # Per-checkpoint seconds a released engine was held.
         self.local_s: dict[str, float] = defaultdict(float)
         # When each released engine was held, on time.perf_counter().
         self.local_spans: list[tuple[float, float]] = []
@@ -288,13 +225,11 @@ class Collector:
 
         name, rented = measure.detect_gpus()
         rate = gpu_hourly_rate(name)
-        # The pod is leased once, however many engines are loaded: time
-        # two of them share is billed once.
+        # Time two engines share is billed once.
         billed_s = _union_seconds(spans)
         held_h = billed_s / 3600.0
         _warn_if_unpriced_by_default(rented, held_h, rate)
-        # Billed on GPUs *rented*, not the one an engine occupies: you rent the
-        # whole pod. Reporting both is what makes idle capacity visible.
+        # Billed on every GPU rented: the whole pod is leased.
         local_cost = (
             round(rate * rented * held_h, 4) if (rate is not None and rented) else None
         )
@@ -353,18 +288,8 @@ def _log_summary(s: dict) -> None:
         logger.info("[telemetry] %d failed call(s) recorded in the trace", s["errors"])
 
 
-# ---------------------------------------------------------------------------
-# Sinks
-# ---------------------------------------------------------------------------
-
-
 def _jsonl_sink(path: Path):
-    """Append events to a JSONL trace beside the other sidecars.
-
-    Deliberately a plain file writer, not a ``logging.Handler`` — see the
-    module docstring. Serialization failures are swallowed: a trace is a
-    convenience, never a reason for a generation run to die.
-    """
+    """Return a sink that appends each event to ``path`` as one JSON line."""
     path.parent.mkdir(parents=True, exist_ok=True)
     lock = threading.Lock()
 
@@ -376,12 +301,10 @@ def _jsonl_sink(path: Path):
 
 
 def _wandb_sink():
-    """Stream events to Weights & Biases. Imports the SDK lazily.
+    """Return a sink that logs each event to Weights & Biases.
 
-    A thin replay of the same events the JSONL sink gets — no separate
-    instrumentation, so the two can never disagree. Returns ``None`` (and logs)
-    when ``wandb`` isn't installed, so ``REDACT_TRACE=wandb`` degrades to the
-    local trace rather than failing the run.
+    Returns ``None``, with a warning, when ``wandb`` is not installed; the JSONL
+    trace is still written.
     """
     try:
         import wandb
@@ -400,10 +323,6 @@ def _wandb_sink():
     return write
 
 
-# ---------------------------------------------------------------------------
-# Install / stage
-# ---------------------------------------------------------------------------
-
 _collector: Collector | None = None
 
 
@@ -412,9 +331,8 @@ def install(data_dir: str | Path | None = None, sink: str | None = None) -> Coll
 
     Args:
         data_dir: Working root; the trace lands in
-            ``<data_dir>/Datasets/<run_id>.trace.jsonl``. ``None`` falls back to
-            :func:`redact.get_output_dir`, which is what direct API callers who
-            never went through ``run_pipeline`` get.
+            ``<data_dir>/Datasets/<run_id>.trace.jsonl``. ``None`` uses
+            :func:`redact.get_output_dir`.
         sink: ``"jsonl"`` / ``"wandb"`` / ``"off"``. ``None`` reads
             ``REDACT_TRACE``, defaulting to ``"jsonl"``.
 
@@ -423,13 +341,13 @@ def install(data_dir: str | Path | None = None, sink: str | None = None) -> Coll
     """
     global _collector
 
-    sink = (sink or os.environ.get("REDACT_TRACE") or DEFAULT_SINK).lower()
+    sink = (sink or os.environ.get("REDACT_TRACE") or _DEFAULT_SINK).lower()
     if sink not in _VALID_SINKS:
         logger.warning(
             "REDACT_TRACE=%r is not one of %s; using %r",
-            sink, ", ".join(_VALID_SINKS), DEFAULT_SINK,
+            sink, ", ".join(_VALID_SINKS), _DEFAULT_SINK,
         )
-        sink = DEFAULT_SINK
+        sink = _DEFAULT_SINK
 
     if sink == "off":
         observe.set_emitter(None)
