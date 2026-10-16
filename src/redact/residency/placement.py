@@ -31,7 +31,8 @@ _SEARCH_LIMIT = 8
 #: are alike. A card an engine is loaded on already is one more to try:
 #: 26,441 at most with one such card, whatever the machine's size. A
 #: transformers model tells all cards apart, and then the count grows with
-#: the cards.
+#: the cards. An engine with copies given tries each set of cards with room
+#: for them, as many untouched ones standing for the rest as it has copies.
 _SEARCH_STEPS = 20_000
 
 
@@ -49,8 +50,7 @@ class _Cards:
         self.free = [per_gpu_gb] * count if per_gpu_gb else None
         #: The vLLM engines on each card.
         self.shared: list[list[ModelFootprint]] = [[] for _ in self.free or ()]
-        #: Cards one engine holds whole: a tensor-parallel one, or one with
-        #: copies.
+        #: Cards a tensor-parallel engine holds whole.
         self.whole: set[int] = set()
 
     def fork(self, pinned: dict[tuple, tuple[int, ...]]) -> "_Cards":
@@ -81,6 +81,9 @@ class _Cards:
         """
         devices, reserve = self._claim(fp)
         vllm = fp.setup == "vllm"
+        # A tensor-parallel engine holds its cards whole. A single-GPU
+        # engine's copies share theirs like the engine does.
+        whole = vllm and fp.min_gpus > 1
         fits = self.free is None or all(
             # The card must exist on this machine. Check for tensor-parallel engines.
             d < len(self.free)
@@ -88,8 +91,7 @@ class _Cards:
             and self._room(d, vllm) + _EPS >= reserve[d]
             # A card held whole must be untouched: pick() chooses such
             # cards, but a pinned engine comes with its own.
-            and not (vllm and len(devices) > 1
-                     and (self.shared[d] or self.free[d] < self.per))
+            and not (whole and (self.shared[d] or self.free[d] < self.per))
             for d in devices
         )
         if not (fits or force):
@@ -105,25 +107,32 @@ class _Cards:
                     self.shared[d].append(fp)
                 else:
                     self.free[d] -= reserve[d]
-                if vllm and len(devices) > 1:
+                if whole:
                     self.whole.add(d)
         return True
 
-    def spread(self, fp: ModelFootprint) -> None:
-        """Give a single-GPU vLLM engine a copy on every untouched card.
+    def spread(self, fp: ModelFootprint, among: tuple[int, ...] | None = None) -> None:
+        """Give a single-GPU vLLM engine a copy on every other card with
+        room for one, of those in ``among`` when it is given.
 
-        Only an engine alone on its card gets them: a copy shares its card
-        with nothing, so the engine's own card counts as whole from here on.
-        One that does not fit its card gets none: a copy needs as much.
+        A copy is placed like the engine: under the ceiling beside what is
+        on the card already. An engine whose size is unknown gets copies on
+        untouched cards only, and one that does not fit its card gets none:
+        a copy needs as much.
         """
         home = fp.devices[0]
-        alone = len(self.shared[home]) == 1 and self.free[home] >= self.per
-        idle = self._untouched()
-        if not (idle and alone and self._room(home, True) + _EPS >= 0):
+        if self._room(home, True) + _EPS < 0:
             return
-        fp.devices += tuple(idle)
+        need = fp.padded_gb or 0.0
+        untouched = self._untouched()
+        cards = [d for d in range(len(self.free))
+                 if d != home and (among is None or d in among)
+                 and (d in untouched if not fp.known
+                      else self._room(d, True) + _EPS >= need)]
+        for d in cards:
+            self.shared[d].append(fp)
+        fp.devices += tuple(cards)
         fp.copies = len(fp.devices)
-        self.whole.update(fp.devices)
 
     def settle(self) -> None:
         """Grant each vLLM engine its padded need plus an equal share of
@@ -131,8 +140,11 @@ class _Cards:
 
         Per card: ``pool = 0.9 x card - fixed claims`` and
         ``grant = padded need + (pool - sum of padded needs) / engines``,
-        never below 0. A grant below its padded need makes the model oversized.
+        never below 0. A grant below its padded need makes the model
+        oversized. An engine on several cards loads with one
+        ``gpu_memory_utilization``: the smallest any of its cards grants it.
         """
+        grants: dict[int, tuple[ModelFootprint, float | None, float]] = {}
         for card, engines in enumerate(self.shared):
             if not engines:
                 continue
@@ -140,16 +152,20 @@ class _Cards:
             spare = pool - sum(fp.padded_gb or 0.0 for fp in engines)
             for fp in engines:
                 padded = fp.padded_gb or 0.0
-                fp.reserved_gb = max(0.0, padded + spare / len(engines))
+                reserved = max(0.0, padded + spare / len(engines))
                 # Rounded down, to keep a card's fractions under the ceiling.
-                fraction = math.floor(fp.reserved_gb / self.per * 1e4 + 1e-6) / 1e4
-                if fp.reserved_gb + _EPS >= padded:
+                fraction = math.floor(reserved / self.per * 1e4 + 1e-6) / 1e4
+                if reserved + _EPS >= padded:
                     # Rounded up to cover the need, even where that takes
                     # the card's fractions a rounding step over the ceiling.
                     fraction = max(
                         fraction, math.ceil(padded / self.per * 1e4 - 1e-6) / 1e4)
                 # vLLM rejects a fraction that is not positive.
-                fp.planned_utilization = fraction if fraction > 0 else None
+                grant = (fp, fraction if fraction > 0 else None, reserved)
+                if id(fp) not in grants or (grant[1] or 0) < (grants[id(fp)][1] or 0):
+                    grants[id(fp)] = grant
+        for fp, fraction, reserved in grants.values():
+            fp.planned_utilization, fp.reserved_gb = fraction, reserved
 
     def _untouched(self) -> list[int]:
         """The cards nothing is placed on."""
@@ -164,9 +180,10 @@ class _Cards:
         search found cards for takes those. Otherwise a
         single-GPU engine takes the card with the most room, the lowest
         index on a tie, so engines spread over the cards before they share
-        one. A tensor-parallel engine and one with copies take the first
-        untouched cards, ``min_gpus`` per copy. Where too few are left, the
-        rest are indices past the last card, which no claim fits.
+        one; with copies, as many such cards with room for one as it has
+        copies. A tensor-parallel engine takes the first untouched cards,
+        ``min_gpus`` per copy. Where too few are left, the rest are indices
+        past the last card, which no claim fits.
         """
         if fp.engine in self.pinned:
             return self.pinned[fp.engine]
@@ -176,9 +193,15 @@ class _Cards:
             return tuple(range(wanted))
         if wanted == 1:
             return (max(range(len(self.free)), key=lambda d: self._room(d, True)),)
-        untouched = self._untouched()[:wanted]
-        missing = wanted - len(untouched)
-        return (*untouched, *range(len(self.free), len(self.free) + missing))
+        if fp.min_gpus == 1:
+            need = fp.padded_gb or 0.0
+            cards = [d for d in sorted(range(len(self.free)),
+                                       key=lambda d: -self._room(d, True))
+                     if self._room(d, True) + _EPS >= need][:wanted]
+        else:
+            cards = self._untouched()[:wanted]
+        missing = wanted - len(cards)
+        return (*cards, *range(len(self.free), len(self.free) + missing))
 
     def _claim(self, fp: ModelFootprint) -> tuple[tuple[int, ...], dict[int, float]]:
         """The cards a model would take and the GiB it claims on each."""
@@ -233,10 +256,9 @@ def plan_residency(
     (:attr:`ResidencyPlan.fits`). Cards are numbered over the visible ones:
     card 0 is the first that ``CUDA_VISIBLE_DEVICES`` leaves this process.
 
-    The machine is paid for whole, so when every model is resident together
-    and cards are left idle, the first single-GPU vLLM engine in the order
-    given gets a copy on each of them, provided it is alone on its card
-    and fits it.
+    The machine is paid for whole, so when every model is resident
+    together, the first single-GPU vLLM engine in the order given gets a
+    copy on each other card with room for one, provided it fits its own.
 
     Args:
         models: Model names. Unregistered and non-local ones are ignored.
@@ -246,9 +268,10 @@ def plan_residency(
         gib_per_gpu: Plan for cards of this size instead of the detected
             one. Give both to plan for another machine, e.g. a rented pod.
         copies: Copies per model name, for vLLM engines (vLLM's
-            ``data_parallel_size``). An engine with ``n`` copies holds
-            ``n x min_gpus`` cards whole. An engine named here gets no
-            copies on idle cards, so ``1`` turns those off.
+            ``data_parallel_size``). An engine with ``n`` copies takes ``n``
+            cards it shares like one copy, or ``n x min_gpus`` cards whole
+            when tensor parallel. An engine named here gets no other copies,
+            so ``1`` turns them off.
         pinned: The cards of vLLM engines that are loaded already, per
             engine (:attr:`ModelFootprint.engine`). Each stays on them and
             is placed first, the other models around it.
@@ -278,6 +301,9 @@ class _Stage:
     #: Per engine that a run unloads and loads again, the lifetime the
     #: stage is in. Each is placed like an engine of its own.
     lifetimes: dict[tuple, tuple] = field(default_factory=dict)
+    #: The lifetimes whose copies are limited to the cards another stage
+    #: of the lifetime gives them (:func:`_place_all`).
+    cut: set[tuple] = field(default_factory=set)
 
     def lifetime(self, fp: ModelFootprint) -> tuple:
         """What a model's engine keeps its cards under from stage to stage:
@@ -411,25 +437,49 @@ def _place_all(
     stages: list[_Stage],
     pinned: dict[tuple, tuple[int, ...]] | None,
     chosen: dict[tuple, tuple[int, ...]] | None = None,
+    among: dict[tuple, tuple[int, ...]] | None = None,
 ) -> None:
     """Place the stages in turn. A vLLM engine keeps the cards of the first
-    stage of a lifetime: each later one places it first, on them."""
+    stage of a lifetime: each later one places it first, on them.
+
+    Copies not given are decided stage by stage. An engine loads with those
+    on the cards every stage of its lifetime gives it, so where the stages
+    differ they are placed once more with the copies on those cards only:
+    a copy that does not load would leave the models beside it a smaller
+    share. ``among`` is those cards, per lifetime.
+    """
     held = dict(pinned or {})
     for stage in stages:
-        _place(stage, stage.own(held), stage.own(chosen or {}))
+        _place(stage, stage.own(held), stage.own(chosen or {}), stage.own(among or {}))
         for fp in stage.footprints:
             if fp.setup == "vllm" and fp.devices:
-                # A copy on an idle card is decided stage by stage, so only
-                # the cards the engine was placed on are kept for the next.
+                # Only the cards the engine was placed on are kept for the
+                # next stage, and the copies given.
                 placed = (fp.devices if fp.engine in stage.counts
                           else fp.devices[:fp.min_gpus])
                 held.setdefault(stage.lifetime(fp), placed)
+    if among is not None:
+        return
+    common: dict[tuple, tuple[int, ...]] = {}
+    for stage in stages:
+        for fp in stage.footprints:
+            if fp.setup == "vllm" and fp.devices:
+                so_far = common.get(stage.lifetime(fp), fp.devices)
+                common[stage.lifetime(fp)] = tuple(d for d in so_far if d in fp.devices)
+    cut = {stage.lifetime(fp) for stage in stages for fp in stage.footprints
+           if fp.setup == "vllm" and fp.devices
+           and fp.devices != common[stage.lifetime(fp)]}
+    for stage in stages:
+        stage.cut = {stage.lifetime(fp) for fp in stage.footprints} & cut
+    if cut:
+        _place_all(stages, pinned, chosen, common)
 
 
 def _place(
     stage: _Stage,
     pinned: dict[tuple, tuple[int, ...]],
     chosen: dict[tuple, tuple[int, ...]] | None = None,
+    among: dict[tuple, tuple[int, ...]] | None = None,
 ) -> None:
     """Place a stage's models in the order given and fill in its plan.
 
@@ -441,6 +491,8 @@ def _place(
             placed first.
         chosen: The cards a search found for the vLLM engines. Each takes
             its cards when its turn comes.
+        among: The only cards an engine's copies not given may take, per
+            engine.
     """
     plan, count, per_gpu_gb = stage.plan, stage.count, stage.plan.per_gpu_gb
     # A stage is placed again when a search chose other cards.
@@ -476,12 +528,12 @@ def _place(
         current.append(fp)
         placed[fp.engine] = (fp, current)
     if not groups and cards.free:
-        # Every model is resident together: idle cards go to the first
-        # single-GPU vLLM engine, unless its count is given.
+        # Every model is resident together: cards with room go to copies of
+        # the first single-GPU vLLM engine, unless its count is given.
         first = next((fp for fp in current
                       if fp.setup == "vllm" and fp.min_gpus == 1), None)
         if first is not None and first.engine not in stage.counts:
-            cards.spread(first)
+            cards.spread(first, (among or {}).get(first.engine))
     cards.settle()
     groups.append(current)
     for fp, twin in twins:
@@ -501,8 +553,9 @@ class _Search:
 
     The stages are placed as :func:`_place_all` places them, except that a
     single-card engine is tried on every card instead of taking the one
-    with the most room, and an engine on whole cards on every set of
-    untouched ones instead of the first. Of the arrangements that fit, the
+    with the most room, one with copies given on every set of cards with
+    room for them, and an engine on whole cards on every set of untouched
+    ones instead of the first. Of the arrangements that fit, the
     one kept has the fewest cards that hold more than one vLLM engine in a
     stage, then the largest smallest share. A tie goes to the one met
     first: cards are tried most room first, so it departs from the order
@@ -622,19 +675,23 @@ class _Search:
             return [cards.pick(fp)] if single else None
         alike = not (self.indexed[s + 1]
                      or any(m.setup != "vllm" for m in order[j + 1:]))
-        if not single:
+        if not single and fp.min_gpus > 1:
             # Where cards are alike the first untouched ones stand for any.
             if alike:
                 return None
             return list(itertools.combinations(
                 cards._untouched(), fp.copies * fp.min_gpus))
-        tried = sorted((d for d in range(len(cards.free)) if d not in cards.whole),
+        # One copy or several, each on a card with room for it.
+        need = 0.0 if single else fp.padded_gb or 0.0
+        tried = sorted((d for d in range(len(cards.free))
+                        if d not in cards.whole
+                        and (single or cards._room(d, True) + _EPS >= need)),
                        key=lambda d: -cards._room(d, True))
         if alike:
-            # One untouched card stands for all of them.
-            rest = cards._untouched()[1:]
+            # As many untouched cards as copies stand for all of them.
+            rest = cards._untouched()[fp.copies:]
             tried = [d for d in tried if d not in rest]
-        return [(d,) for d in tried]
+        return list(itertools.combinations(tried, fp.copies))
 
 
 def _gpus_required(footprints: list[ModelFootprint]) -> int:

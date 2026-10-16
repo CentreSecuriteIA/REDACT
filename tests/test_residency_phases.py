@@ -107,11 +107,12 @@ def _cards(phase, name):
 def test_an_engine_gets_its_smallest_copies_in_every_stage(local_model, caplog):
     import logging
 
-    x, y = local_model("_ph_cp_x"), local_model("_ph_cp_y")
+    x, y = local_model("_ph_cp_x"), local_model("_ph_cp_y", 15.0)
     with caplog.at_level(logging.INFO, logger="redact.residency.phases"):
         alone, shared = plan_phases({"a": [x], "b": [x, y]}, gpus=2, gib_per_gpu=24.0)
-    # Alone, x would have a copy on card 1. Stage b plans y there, and x
-    # loads only once, so it has one copy in both stages.
+    # Alone, x would have a copy on card 1. Stage b plans y there, with no
+    # room left beside it, and x loads only once, so it has one copy in
+    # both stages.
     assert _cards(alone, x) == _cards(shared, x) == ((0,), 1)
     assert _cards(shared, y) == ((1,), 1)
     assert (alone.plan.gpus_required, shared.plan.gpus_required) == (1, 2)
@@ -122,10 +123,27 @@ def test_an_engine_gets_its_smallest_copies_in_every_stage(local_model, caplog):
     assert "card 1 is idle" in alone.plan.explain()
 
 
+def test_an_engine_keeps_a_copy_beside_a_later_stages_model(local_model, caplog):
+    """Stage b plans y on card 1, where x's copy fits beside it. x keeps both
+    copies, with the share card 1 grants it."""
+    import logging
+
+    x, y = local_model("_ph_beside_x"), local_model("_ph_beside_y")
+    with caplog.at_level(logging.INFO, logger="redact.residency.phases"):
+        alone, shared = plan_phases({"a": [x], "b": [x, y]}, gpus=2, gib_per_gpu=24.0)
+    assert _cards(alone, x) == _cards(shared, x) == ((0, 1), 2)
+    assert _cards(shared, y) == ((1,), 1)
+    assert [_share(alone, x), _share(shared, x), _share(shared, y)] == [0.45] * 3
+    assert [r.getMessage() for r in caplog.records] == [
+        f"[residency] {x} loads once, with gpu_memory_utilization=0.45: its share "
+        "in the stage where its card is most crowded."]
+
+
 def test_an_engine_keeps_the_copies_every_stage_has_a_card_for(local_model):
-    x, y = local_model("_ph_keep_x"), local_model("_ph_keep_y")
+    x, y = local_model("_ph_keep_x"), local_model("_ph_keep_y", 15.0)
     alone, shared = plan_phases({"a": [x], "b": [x, y]}, gpus=3, gib_per_gpu=24.0)
-    # Stage b plans y on card 1, so x keeps its copy on card 2 only.
+    # Stage b plans y on card 1, with no room left for a copy of x beside
+    # it, so x keeps its copy on card 2 only.
     assert _cards(alone, x) == _cards(shared, x) == ((0, 2), 2)
     assert _cards(shared, y) == ((1,), 1)
     assert alone.plan.gpus_required == shared.plan.gpus_required == 3
@@ -143,45 +161,54 @@ def test_a_given_count_reaches_every_stage(local_model, caplog):
 
 
 def test_an_engine_keeps_the_card_it_loaded_on(local_model, caplog):
-    """y loads beside x, on card 1. When x is released y stays there and z
-    takes card 0. Placed afresh, y would be on card 0 and z on top of where
-    it really is."""
+    """y loads beside x, on card 1, where x has a copy. When x is released
+    y stays there and z takes card 0. Placed afresh, y would be on card 0
+    and z on top of where it really is. y has one copy in both stages: the
+    first has none for it."""
     import logging
 
     x, y, z = (local_model(f"_ph_stay_{n}") for n in "xyz")
     with caplog.at_level(logging.INFO, logger="redact.residency"):
         first, second = plan_phases({"a": [x, y], "b": [y, z]}, gpus=2, gib_per_gpu=24.0)
-    assert (_cards(first, x), _cards(first, y)) == (((0,), 1), ((1,), 1))
+    assert (_cards(first, x), _cards(first, y)) == (((0, 1), 2), ((1,), 1))
     assert (_cards(second, y), _cards(second, z)) == (((1,), 1), ((0,), 1))
     assert first.plan.fits and second.plan.fits
-    assert _share(first, y) == _share(second, y) == _share(second, z) == 0.9
-    assert caplog.records == []
+    assert [_share(first, y), _share(second, y), _share(second, z)] == [
+        0.45, 0.45, 0.9]
+    assert [r.getMessage() for r in caplog.records] == [
+        f"[residency] {y} loads once, with gpu_memory_utilization=0.45: its share "
+        "in the stage where its card is most crowded.",
+        f"[residency] {y} loads once, with 1 copy: on the cards it holds in every "
+        "stage."]
 
 
 def test_a_kept_engine_gets_no_copy_it_did_not_load_with(local_model, caplog):
-    """Three cards. In stage a x has the copy on card 2 and y is on card 1.
-    In stage b y stays on card 1 and z takes card 0. Card 2 is idle then,
-    but y loaded with one copy."""
+    """Three cards. In stage a x has copies on cards 1 and 2, and y is on
+    card 1. In stage b y stays on card 1 and z takes card 0. Card 2 is idle
+    then, but y loaded with one copy."""
     import logging
 
     x, y, z = (local_model(f"_ph_three_{n}") for n in "xyz")
     with caplog.at_level(logging.INFO, logger="redact.residency"):
         first, second = plan_phases({"a": [x, y], "b": [y, z]}, gpus=3, gib_per_gpu=24.0)
-    assert (_cards(first, x), _cards(first, y)) == (((0, 2), 2), ((1,), 1))
+    assert (_cards(first, x), _cards(first, y)) == (((0, 1, 2), 3), ((1,), 1))
     assert (_cards(second, y), _cards(second, z)) == (((1,), 1), ((0,), 1))
     assert (first.plan.gpus_required, second.plan.gpus_required) == (3, 2)
-    assert [(r.levelname, r.getMessage()) for r in caplog.records] == [(
-        "INFO", f"[residency] {y} loads once, with 1 copy: on the cards it holds "
-                "in every stage.")]
+    assert [(r.levelname, r.getMessage()) for r in caplog.records] == [
+        ("INFO", f"[residency] {y} loads once, with gpu_memory_utilization=0.45: "
+                 "its share in the stage where its card is most crowded."),
+        ("INFO", f"[residency] {y} loads once, with 1 copy: on the cards it holds "
+                 "in every stage.")]
     assert f"  note: card 2 is idle: {y} is limited to 1 copy" in second.plan.explain()
 
 
 def test_a_kept_engine_with_a_given_count_keeps_all_its_cards(local_model):
-    """Four cards: y has two copies, on cards 1 and 2, in both stages."""
+    """Four cards: y has two copies, on cards 1 and 2, in both stages. x
+    has a copy on every card."""
     x, y, z = (local_model(f"_ph_count_{n}") for n in "xyz")
     first, second = plan_phases(
         {"a": [x, y], "b": [y, z]}, gpus=4, gib_per_gpu=24.0, copies={y: 2})
-    assert (_cards(first, x), _cards(first, y)) == (((0, 3), 2), ((1, 2), 2))
+    assert (_cards(first, x), _cards(first, y)) == (((0, 1, 2, 3), 4), ((1, 2), 2))
     assert (_cards(second, y), _cards(second, z)) == (((1, 2), 2), ((0,), 1))
     assert first.plan.fits and second.plan.fits
     assert f"  note: card 3 is idle: {y} is limited to 2 copies" in second.plan.explain()
@@ -190,12 +217,12 @@ def test_a_kept_engine_with_a_given_count_keeps_all_its_cards(local_model):
 def test_an_engine_needed_again_stays_on_its_card_in_between(local_model):
     """Stage b does not call x, but stage c does, so x is not released: it
     stays on card 1 while w leaves and y comes. No lifetime has a gap, so no
-    engine is released and placed again."""
+    engine is released and placed again. w has a copy beside x."""
     w, x, y = (local_model(f"_ph_again_{n}") for n in "wxy")
     a, b, c = plan_phases({"a": [w, x], "b": [y], "c": [x]}, gpus=2, gib_per_gpu=24.0)
     assert [p.resident for p in (a, b, c)] == [[w, x], [x, y], [x]]
     assert _cards(a, x) == _cards(b, x) == _cards(c, x) == ((1,), 1)
-    assert (_cards(a, w), _cards(b, y)) == (((0,), 1), ((0,), 1))
+    assert (_cards(a, w), _cards(b, y)) == (((0, 1), 2), ((0,), 1))
     assert a.plan.fits and b.plan.fits and c.plan.fits
 
 
@@ -227,14 +254,14 @@ def test_a_twin_is_kept_through_its_engine(local_model):
     finally:
         MODEL_REGISTRY.pop(twin, None)
     assert [p.resident for p in (first, second)] == [[w, x, twin], [x, twin, z]]
-    assert _cards(first, w) == ((0,), 1)
+    assert _cards(first, w) == ((0, 1), 2)
     for phase in (first, second):
         assert _cards(phase, x) == _cards(phase, twin) == ((1,), 1)
     assert _cards(second, z) == ((0,), 1)
 
 
 def test_a_kept_engine_on_whole_cards_does_not_join_a_shared_card(local_model):
-    """Stage a does not fit: big, with two copies, opens a group of its own
+    """Stage a does not fit: big, tensor parallel, opens a group of its own
     on cards 0 and 1, and gen is on card 0 in the first. Kept there in stage
     b, the two cannot be resident together either: a card held whole is no
     card to share, and gen keeps its full share."""
@@ -243,20 +270,19 @@ def test_a_kept_engine_on_whole_cards_does_not_join_a_shared_card(local_model):
     gen = local_model("_ph_whole_gen")
     big, spanning = "_ph_whole_big", "_ph_whole_tf"
     register_model(big, backend_type="vllm",
-                   vllm=VLLMConfig(hf_model_id=f"org/{big}", vram_gb=10.0))
+                   vllm=VLLMConfig(hf_model_id=f"org/{big}", vram_gb=20.0, min_gpus=2))
     register_model(spanning, backend_type="introspect", introspect=IntrospectConfig(
         hf_model_id=f"org/{spanning}", log_dir="x", vram_gb=18.0))
     try:
         first, second = plan_phases(
-            {"a": [gen, big, spanning], "b": [gen, big]},
-            gpus=2, gib_per_gpu=24.0, copies={big: 2})
+            {"a": [gen, big, spanning], "b": [gen, big]}, gpus=2, gib_per_gpu=24.0)
     finally:
         MODEL_REGISTRY.pop(big, None)
         MODEL_REGISTRY.pop(spanning, None)
     assert first.plan.as_dict()["groups"] == [[gen], [big], [spanning]]
     assert second.plan.as_dict()["groups"] == [[gen], [big]]
     assert not first.plan.fits and not second.plan.fits
-    assert (_cards(second, gen), _cards(second, big)) == (((0,), 1), ((0, 1), 2))
+    assert (_cards(second, gen), _cards(second, big)) == (((0,), 1), ((0, 1), 1))
     assert _share(first, gen) == _share(second, gen) == 0.9
     assert _share(second, big) == 0.9
 
@@ -308,9 +334,10 @@ def test_an_early_stage_leaves_a_later_one_its_card(local_model, caplog):
     assert (_cards(second, z), _share(second, z)) == (((1,), 1), 0.9)
     assert [r.getMessage() for r in caplog.records] == [
         "[residency] placed in another arrangement than the order given: "
-        f"{x} -> card 0, {y} -> card 0, {z} -> card 1"]
-    assert (f"  note: card 1 is idle: {x} shares its card, and a copy needs the "
-            "card to itself") in first.plan.explain()
+        f"{x} -> card 0, {y} -> card 0, {z} -> card 1",
+        f"[residency] {x} loads once, with 1 copy: on the cards it holds in every "
+        "stage."]
+    assert f"  note: card 1 is idle: {x} is limited to 1 copy" in first.plan.explain()
 
 
 def test_cards_that_fit_one_stage_but_not_the_next_are_not_taken(local_model, caplog):
@@ -565,7 +592,8 @@ def test_a_run_that_fits_with_every_engine_loaded_once_is_planned_as_before(
 
 
 def _line(model, where, grant, size="6.5", weights="5.0"):
-    share = {"21.6GiB": "0.90", "10.8GiB": "0.45", "21.6GiB each": "0.90"}[grant]
+    share = {"21.6GiB": "0.90", "10.8GiB": "0.45", "21.6GiB each": "0.90",
+             "10.8GiB each": "0.45"}[grant]
     return (f"    _ph_as_{model}[vllm]  ~{size}GiB  (declared: {weights} weights + "
             f"0.00 KV, x1.1 +0.6)  -> {where}, vLLM gets {grant} "
             f"(gpu_memory_utilization={share})")
@@ -573,10 +601,12 @@ def _line(model, where, grant, size="6.5", weights="5.0"):
 
 _ONE, _TWO, _THREE = (
     f"plan needs {n} GPU(s); planning for {n} GPU(s), 24.0GiB each" for n in (1, 2, 3))
-_COPIES = "      -> x2 copies (data_parallel_size=2), one per card, ~6.5GiB each"
+_COPIES = "      -> x{} copies (data_parallel_size={}), one per card, ~6.5GiB each"
 #: Recorded at commit 125a000, per run: the resident models of each stage,
 #: the plan each stage has, and per plan ``(model, cards, copies, share)``
-#: of each model and the lines of ``explain()``; then the log lines.
+#: of each model and the lines of ``explain()``; then the log lines. Since
+#: copies share cards, the first engine of a stage has a copy beside the
+#: others where they leave room, which the last three runs show.
 _AS_BEFORE = [
     ([["_ph_as_x"], ["_ph_as_x", "_ph_as_y"], ["_ph_as_x"], []],
      [0, 1, 0, 2],
@@ -591,16 +621,18 @@ _AS_BEFORE = [
       "share in the stage where its card is most crowded."]),
     ([["_ph_as_w", "_ph_as_x"], ["_ph_as_x", "_ph_as_y"], ["_ph_as_x"]],
      [0, 1, 2],
-     [[("_ph_as_w", (0,), 1, 0.9), ("_ph_as_x", (1,), 1, 0.9)],
-      [("_ph_as_x", (1,), 1, 0.9), ("_ph_as_y", (0,), 1, 0.9)],
-      [("_ph_as_x", (1,), 1, 0.9)]],
-     [(_TWO, "  group 1:", _line("w", "card 0", "21.6GiB"),
-       _line("x", "card 1", "21.6GiB")),
-      (_TWO, "  group 1:", _line("x", "card 1", "21.6GiB"),
+     [[("_ph_as_w", (0, 1), 2, 0.45), ("_ph_as_x", (1,), 1, 0.45)],
+      [("_ph_as_x", (1,), 1, 0.45), ("_ph_as_y", (0,), 1, 0.9)],
+      [("_ph_as_x", (1,), 1, 0.45)]],
+     [(_TWO, "  group 1:", _line("w", "cards 0-1", "10.8GiB each"),
+       _COPIES.format(2, 2), _line("x", "card 1", "10.8GiB")),
+      (_TWO, "  group 1:", _line("x", "card 1", "10.8GiB"),
        _line("y", "card 0", "21.6GiB")),
-      (_TWO, "  group 1:", _line("x", "card 1", "21.6GiB"),
+      (_TWO, "  group 1:", _line("x", "card 1", "10.8GiB"),
        "  note: card 0 is idle: _ph_as_x is limited to 1 copy")],
-     ["[residency] _ph_as_x loads once, with 1 copy: on the cards it holds in "
+     ["[residency] _ph_as_x loads once, with gpu_memory_utilization=0.45: its "
+      "share in the stage where its card is most crowded.",
+      "[residency] _ph_as_x loads once, with 1 copy: on the cards it holds in "
       "every stage."]),
     ([["_ph_as_x", "_ph_as_y"], ["_ph_as_x", "_ph_as_y", "_ph_as_z"],
       ["_ph_as_x", "_ph_as_y"]],
@@ -610,23 +642,24 @@ _AS_BEFORE = [
        ("_ph_as_z", (1,), 1, 0.9)]],
      [("plan needs 1 GPU(s); planning for 2 GPU(s), 24.0GiB each", "  group 1:",
        _line("x", "card 0", "10.8GiB"), _line("y", "card 0", "10.8GiB"),
-       "  note: card 1 is idle: _ph_as_x shares its card, and a copy needs the "
-       "card to itself"),
+       "  note: card 1 is idle: _ph_as_x is limited to 1 copy"),
       (_TWO, "  group 1:", _line("x", "card 0", "10.8GiB"),
        _line("y", "card 0", "10.8GiB"),
        _line("z", "card 1", "21.6GiB", size="17.5", weights="15.0"))],
      ["[residency] placed in another arrangement than the order given: "
-      "_ph_as_x -> card 0, _ph_as_y -> card 0, _ph_as_z -> card 1"]),
+      "_ph_as_x -> card 0, _ph_as_y -> card 0, _ph_as_z -> card 1",
+      "[residency] _ph_as_x loads once, with 1 copy: on the cards it holds in "
+      "every stage."]),
     ([["_ph_as_x"], ["_ph_as_x", "_ph_as_y"], ["_ph_as_x"]],
      [0, 1, 0],
-     [[("_ph_as_x", (0, 2), 2, 0.9)],
-      [("_ph_as_x", (0, 2), 2, 0.9), ("_ph_as_y", (1,), 1, 0.9)]],
-     [(_THREE, "  group 1:", _line("x", "cards 0,2", "21.6GiB each"), _COPIES,
-       "  note: card 1 is idle: _ph_as_x is limited to 2 copies"),
-      (_THREE, "  group 1:", _line("x", "cards 0,2", "21.6GiB each"), _COPIES,
-       _line("y", "card 1", "21.6GiB"))],
-     ["[residency] _ph_as_x loads once, with 2 copies: on the cards it holds "
-      "in every stage."]),
+     [[("_ph_as_x", (0, 1, 2), 3, 0.45)],
+      [("_ph_as_x", (0, 1, 2), 3, 0.45), ("_ph_as_y", (1,), 1, 0.45)]],
+     [(_THREE, "  group 1:", _line("x", "cards 0-2", "10.8GiB each"),
+       _COPIES.format(3, 3)),
+      (_THREE, "  group 1:", _line("x", "cards 0-2", "10.8GiB each"),
+       _COPIES.format(3, 3), _line("y", "card 1", "10.8GiB"))],
+     ["[residency] _ph_as_x loads once, with gpu_memory_utilization=0.45: its "
+      "share in the stage where its card is most crowded."]),
 ]
 
 
@@ -753,7 +786,10 @@ def test_no_engine_is_unloaded_only_to_move_it(local_model, caplog):
             {"a": [p, x, y], "b": [y], "c": [r, s, x, y]}, gpus=2, gib_per_gpu=24.0)
     assert [ph.resident for ph in phases] == [[p, x, y], [x, y], [x, y, r, s]]
     assert [ph.plan.fits for ph in phases] == [True, True, False]
-    assert caplog.records == []
+    # Alone on two cards in stage b, x would have a copy on card 0.
+    assert [r.getMessage() for r in caplog.records] == [
+        f"[residency] {x} loads once, with 1 copy: on the cards it holds in every "
+        "stage."]
 
 
 def test_an_engine_is_unloaded_for_every_stage_between_two_calls(local_model, caplog):

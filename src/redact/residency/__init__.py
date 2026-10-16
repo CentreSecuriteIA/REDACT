@@ -16,9 +16,10 @@ The plan describes what a run does:
   other cards on which they do, if there are any. Cards are
   numbered over those ``CUDA_VISIBLE_DEVICES`` leaves visible. A
   transformers model goes where its ``device_map`` puts it.
-- Cards left idle take copies of the plan's first single-GPU vLLM engine,
+- Cards with room take copies of the plan's first single-GPU vLLM engine,
   one per card (vLLM's ``data_parallel_size``), unless a count is given
-  for it.
+  for it. A copy shares its card like the engine does, and the engine
+  loads with the smallest share any of its cards grants it.
 - A vLLM engine is granted its padded need plus a share of its card's spare
   memory, and loads with that grant as its ``gpu_memory_utilization``.
 
@@ -38,9 +39,7 @@ of the run, not a guarantee against running out of memory.
 #     that attempt can miss, and a run one unload would fit stays unfit.
 #   - A plan does not see engines already loaded, by this process or another.
 #     The runner should own this; one process (container) per run is a candidate.
-#   - Copies: one that shares its card with another model, a fallback to one
-#     copy when the build fails, and copies of a tensor-parallel engine
-#     without a count given.
+#   - Copies of a tensor-parallel engine without a count given.
 
 import logging
 

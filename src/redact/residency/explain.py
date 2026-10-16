@@ -122,10 +122,6 @@ def _idle_note(plan: "ResidencyPlan") -> str | None:
     first = next((fp for fp in engines if fp.min_gpus == 1), None)
     if first is None:
         why = "only a single-GPU vLLM engine gets copies"
-    elif any(d in fp.devices for fp in plan.footprints
-             if fp.engine != first.engine for d in first.devices[:1]):
-        why = (f"{first.model} shares its card, and a copy needs the card "
-               "to itself")
     elif any(fp is first for fp in plan.oversized):
         why = f"{first.model} does not fit its card, so a copy would not either"
     else:

@@ -721,8 +721,9 @@ class TestPlanResidency:
 
 
 class TestCopies:
-    """Copies of one vLLM engine, each on cards of its own: the count given
-    for a model, or one per idle card for the plan's first single-GPU engine."""
+    """Copies of one vLLM engine, each on a card of its own: the count given
+    for a model, or one per card with room for the plan's first single-GPU
+    engine. A copy shares its card like the engine does."""
 
     def test_a_lone_engine_gets_a_copy_per_idle_card(self, registered):
         m = registered("_cp_lone", hf_model_id="org/cpl", vram_gb=10.0)
@@ -771,14 +772,48 @@ class TestCopies:
         assert plan.fits and plan.gpus_required == 1
         assert "  note: card 1 is idle: _cp_off is limited to 1 copy" in plan.explain()
 
-    def test_explicit_copies_claim_whole_cards(self, registered):
+    def test_explicit_copies_share_a_card_with_room(self, registered):
+        """Card 0 holds a copy of a (6.1 GiB) and b (6.1): 0.45 each. a has
+        one share, the smallest of its cards."""
         a = registered("_cp_whole_a", hf_model_id="org/cwa", vram_gb=5.0)
         b = registered("_cp_whole_b", hf_model_id="org/cwb", vram_gb=5.0)
         plan = _plan([a, b], 24.0, 2, copies={a: 2})
-        assert [[fp.model for fp in g] for g in plan.groups] == [[a], [b]]
-        assert not plan.fits
-        assert (plan.footprints[0].devices, plan.footprints[0].copies) == ((0, 1), 2)
-        assert plan.footprints[0].planned_utilization == 0.9
+        assert [[fp.model for fp in g] for g in plan.groups] == [[a, b]]
+        assert plan.fits
+        assert [(fp.devices, fp.copies, fp.planned_utilization)
+                for fp in plan.footprints] == [((0, 1), 2, 0.45), ((0,), 1, 0.45)]
+
+    def test_given_copies_take_the_cards_with_the_most_room(self, registered):
+        """a and b take a card each; big's two copies take the idle card
+        and, of the two with room left, the first. Its share is that of the
+        card it shares with a."""
+        a = registered("_cp_most_a", hf_model_id="org/cma", vram_gb=5.0)
+        b = registered("_cp_most_b", hf_model_id="org/cmb", vram_gb=5.0)
+        big = registered("_cp_most_big", hf_model_id="org/cmg", vram_gb=10.0)
+        plan = _plan([a, b, big], 24.0, 3, copies={big: 2, a: 1})
+        assert plan.fits and len(plan.groups) == 1
+        assert [(fp.devices, fp.planned_utilization) for fp in plan.footprints] == [
+            ((0,), 0.3354), ((1,), 0.9), ((2, 0), 0.5645)]
+
+    def test_a_copy_shares_a_card_with_another_model(self, registered):
+        """Two 24 GiB cards: a (11.6 GiB) on card 0, b (6.1) on card 1, and
+        a copy of a beside b. Card 1 grants 13.55 to a, which loads with
+        that share on both cards."""
+        a = registered("_cp_beside_a", hf_model_id="org/cba", vram_gb=10.0)
+        b = registered("_cp_beside_b", hf_model_id="org/cbb", vram_gb=5.0)
+        plan = _plan([a, b], 24.0, 2)
+        assert [(fp.devices, fp.copies, fp.planned_utilization)
+                for fp in plan.footprints] == [((0, 1), 2, 0.5645), ((1,), 1, 0.3354)]
+        assert plan.footprints[0].reserved_gb == pytest.approx(13.55)
+        out = plan.explain()
+        assert ("-> cards 0-1, vLLM gets 13.6GiB each "
+                "(gpu_memory_utilization=0.56)") in out
+        assert "-> x2 copies (data_parallel_size=2), one per card, ~12.0GiB each" in out
+        assert "idle" not in out
+        off = _plan([a, b], 24.0, 2, copies={a: 1})
+        assert [(fp.devices, fp.planned_utilization) for fp in off.footprints] == [
+            ((0,), 0.9), ((1,), 0.9)]
+        assert "idle" not in off.explain()
 
     def test_too_many_copies_is_the_gpu_count_problem(self, registered):
         m = registered("_cp_many", hf_model_id="org/cpm", vram_gb=5.0)
@@ -804,15 +839,18 @@ class TestCopies:
         assert [fp.devices for fp in plan.footprints] == [(0,), (1,)]
         assert "  note: card 2 is idle: _cp_given_a is limited to 1 copy" in plan.explain()
 
-    def test_an_idle_card_beside_a_shared_home_card_is_noted(self, registered):
+    def test_idle_cards_take_copies_of_an_engine_whose_card_is_shared(
+            self, registered):
+        """The transformers model's 6.5 GiB on card 0 leave m 15.1 there, so
+        m loads with that share on all three cards."""
         m = registered("_cp_shared", hf_model_id="org/cps", vram_gb=10.0)
         fixed = registered("_cp_shared_tf", setup="introspect", hf_model_id="org/cpt",
                            vram_gb=5.0, device_map="cuda:0")
-        plan = _plan([m, fixed], 24.0, 2)
-        assert (plan.footprints[0].devices, plan.footprints[0].copies) == ((0,), 1)
+        plan = _plan([m, fixed], 24.0, 3)
         assert plan.fits
-        assert ("  note: card 1 is idle: _cp_shared shares its card, and a copy "
-                "needs the card to itself") in plan.explain()
+        assert [(fp.devices, fp.copies, fp.planned_utilization)
+                for fp in plan.footprints] == [((0, 1, 2), 3, 0.6291), ((0,), 1, None)]
+        assert "idle" not in plan.explain()
 
     def test_a_twin_shares_the_copies(self, registered):
         import redact.llms.backends.vllm as vllm_module
@@ -2936,16 +2974,18 @@ def fit_exists(needs, stages, cards, pool):
     return False
 
 
-def fit_exists_around(needs, whole, fixed, cards, card):
-    """Whether cards exist for an engine on whole cards and for single-card
-    engines, beside a transformers model on a fixed card, found by trying
-    every assignment.
+def fit_exists_around(needs, whole, fixed, cards, card, shared=False):
+    """Whether cards exist for an engine on several cards and for
+    single-card engines, beside a transformers model on a fixed card, found
+    by trying every assignment.
 
     Args:
         needs: Each single-card engine's need with overhead.
         whole: The other engine's need per card, and how many cards it takes.
         fixed: The transformers model's card, and the GiB it claims there.
         card: GiB of one card.
+        shared: The other engine's cards may hold other models: it is a
+            single-card engine with copies, not a tensor-parallel one.
     """
     pool = estimate.DEFAULT_GPU_MEMORY_UTILIZATION * card
     (need, count), (at, claim) = whole, fixed
@@ -2953,11 +2993,13 @@ def fit_exists_around(needs, whole, fixed, cards, card):
         return False
     for taken in itertools.combinations(range(cards), count):
         # A card held whole has nothing else on it.
-        if at in taken:
+        if at in taken and not shared:
             continue
-        rest = [d for d in range(cards) if d not in taken]
+        rest = [d for d in range(cards) if shared or d not in taken]
         for where in itertools.product(rest, repeat=len(needs)):
             load = dict.fromkeys(where, 0.0)
+            for d in taken if shared else ():
+                load[d] = need
             for one, d in zip(needs, where):
                 load[d] += one
             if all(gib + claim * (d == at) <= pool + 1e-6 for d, gib in load.items()):
@@ -2966,13 +3008,24 @@ def fit_exists_around(needs, whole, fixed, cards, card):
 
 
 def assert_no_card_is_overfull(plan, pool):
+    """Per card: the needs placed on it fit, the vLLM engines' fractions
+    stay under the ceiling and each covers its engine's need, and a card a
+    tensor-parallel engine holds holds nothing else."""
+    ceiling = estimate.DEFAULT_GPU_MEMORY_UTILIZATION
     for card in range(plan.gpus_available):
-        on = [fp for fp in plan.footprints if card in fp.devices]
+        on = list({fp.engine: fp for fp in plan.footprints
+                   if card in fp.devices}.values())
         # A transformers model claims its size rounded up.
         assert sum(fp.padded_gb if fp.setup == "vllm" else fp.gb
                    for fp in on) <= pool + 1e-6
-        # An engine on several cards has each to itself.
-        assert len(on) <= 1 or all(len(fp.devices) == 1 for fp in on)
+        engines = [fp for fp in on if fp.setup == "vllm"]
+        # A fraction may be rounded up a step to cover its need.
+        assert sum(fp.planned_utilization or 0.0 for fp in engines) \
+            <= ceiling + 1e-4 * len(engines) + 1e-9
+        for fp in engines:
+            if fp.known and fp.planned_utilization:
+                assert fp.planned_utilization * pool / ceiling + 1e-6 >= fp.padded_gb
+        assert len(on) <= 1 or all(fp.min_gpus == 1 for fp in engines)
 
 
 class TestSearch:
@@ -3075,7 +3128,8 @@ class TestSearch:
     _FULL = "vLLM gets 21.6GiB (gpu_memory_utilization=0.90)"
     _FULL_EACH = "vLLM gets 21.6GiB each (gpu_memory_utilization=0.90)"
     #: Recorded at commit 155e6e1, per plan: ``(devices, share)`` per model
-    #: and the lines of ``explain()``.
+    #: and the lines of ``explain()``. The last two have the copy beside
+    #: _sm_b that a card with room takes since copies share cards.
     AS_BEFORE = [
         ([((0,), 0.9), ((1,), 0.3354), ((1,), 0.5645)], (
             "plan needs 2 GPU(s); planning for 2 GPU(s), 24.0GiB each",
@@ -3115,18 +3169,17 @@ class TestSearch:
             "  group 1:",
             _C + "card 0, " + _FULL,
             _A + "card 1, " + _FULL)),
-        ([((0, 2), 0.9)], (
+        ([((0, 1, 2), 0.5645)], (
             "plan needs 3 GPU(s); planning for 3 GPU(s), 24.0GiB each",
             "  group 1:",
-            _A + "cards 0,2, " + _FULL_EACH,
-            "      -> x2 copies (data_parallel_size=2), one per card, ~12.0GiB each",
-            "  note: card 1 is idle: _sm_a is limited to 2 copies")),
-        ([((0, 2), 0.9), ((1,), 0.9)], (
+            _A + "cards 0-2, vLLM gets 13.6GiB each (gpu_memory_utilization=0.56)",
+            "      -> x3 copies (data_parallel_size=3), one per card, ~12.0GiB each")),
+        ([((0, 1, 2), 0.5645), ((1,), 0.3354)], (
             "plan needs 3 GPU(s); planning for 3 GPU(s), 24.0GiB each",
             "  group 1:",
-            _A + "cards 0,2, " + _FULL_EACH,
-            "      -> x2 copies (data_parallel_size=2), one per card, ~12.0GiB each",
-            _B + "card 1, " + _FULL)),
+            _A + "cards 0-2, vLLM gets 13.6GiB each (gpu_memory_utilization=0.56)",
+            "      -> x3 copies (data_parallel_size=3), one per card, ~12.0GiB each",
+            _B + "card 1, vLLM gets 8.1GiB (gpu_memory_utilization=0.34)")),
     ]
 
     def test_what_fits_in_no_arrangement_is_planned_in_the_order_given(
@@ -3143,13 +3196,15 @@ class TestSearch:
         """Three cards and an engine of 17.1 GiB that shares with none of
         the 6.1 GiB ones. Three of those are two on one card, at 0.45, and
         not three, at 0.3. Four are three on one card and one alone: two
-        pairs would share two cards."""
+        pairs would share two cards. The first has no copies, to show the
+        arrangement alone."""
         names = self._engines(registered, "pref", (5.0, 5.0, 5.0, 5.0, 15.0))
-        three = _plan([*names[:3], names[4]], self.CARD, 3)
+        one = {names[0]: 1}
+        three = _plan([*names[:3], names[4]], self.CARD, 3, copies=one)
         assert three.fits
         assert [(fp.devices, fp.planned_utilization) for fp in three.footprints] == [
             ((0,), 0.45), ((1,), 0.9), ((0,), 0.45), ((2,), 0.9)]
-        four = _plan(names, self.CARD, 3)
+        four = _plan(names, self.CARD, 3, copies=one)
         assert four.fits
         assert [(fp.devices, fp.planned_utilization) for fp in four.footprints] == [
             ((0,), 0.3), ((1,), 0.9), ((0,), 0.3), ((0,), 0.3), ((2,), 0.9)]
@@ -3158,29 +3213,28 @@ class TestSearch:
             self, registered):
         """A transformers model of 17.5 GiB on card 0 leaves no room beside
         the engine the order given puts there. Found: the engines on cards
-        1 and 2, and the first of them takes the idle card 3 as well."""
+        1 and 2, and the first of them takes a copy beside the second and
+        on the idle card 3, but none beside the transformers model."""
         a, b = self._engines(registered, "tf", (5.0, 5.0))
         fixed = registered("_se_tf_fixed", setup="introspect", hf_model_id="org/setf",
                            vram_gb=15.0, device_map="cuda:0")
         plan = _plan([a, b, fixed], self.CARD, 4)
         assert plan.fits and len(plan.groups) == 1
         assert [(fp.devices, fp.copies) for fp in plan.footprints] == [
-            ((1, 3), 2), ((2,), 1), ((0,), 1)]
+            ((1, 2, 3), 3), ((2,), 1), ((0,), 1)]
 
-    @pytest.mark.parametrize("whole,copies", [
-        ({"vram_gb": 30.0, "min_gpus": 2}, None),      # tensor parallel
-        ({"vram_gb": 10.0}, 2),                        # two copies given
-    ])
-    def test_an_engine_on_whole_cards_keeps_them(self, registered, whole, copies):
+    def test_an_engine_on_whole_cards_keeps_them(self, registered):
         """In the order given each small engine takes a card and one is
-        left. Found: the small engines on one card, and two untouched."""
+        left for the tensor-parallel engine. Found: the small engines on one
+        card, and two untouched."""
         a, b = self._engines(registered, "whole", (5.0, 5.0))
-        big = registered("_se_whole_big", hf_model_id="org/sewb", **whole)
-        plan = _plan([a, b, big], self.CARD, 3, copies=copies and {big: copies})
+        big = registered("_se_whole_big", hf_model_id="org/sewb", vram_gb=30.0,
+                         min_gpus=2)
+        plan = _plan([a, b, big], self.CARD, 3)
         assert plan.fits and len(plan.groups) == 1
         assert [(fp.devices, fp.planned_utilization) for fp in plan.footprints] == [
             ((0,), 0.45), ((0,), 0.45), ((1, 2), 0.9)]
-        assert plan.footprints[2].copies == (copies or 1)
+        assert plan.footprints[2].copies == 1
 
     @pytest.mark.parametrize("whole,copies", [
         ({"vram_gb": 30.0, "min_gpus": 2}, None),      # tensor parallel
@@ -3239,15 +3293,34 @@ class TestSearch:
                 exists = fit_exists_around(
                     [by_name[m].padded_gb for m in singles],
                     (by_name[big].padded_gb, 2),
-                    (by_name[fixed].devices[0], by_name[fixed].gb), cards, self.CARD)
+                    (by_name[fixed].devices[0], by_name[fixed].gb), cards, self.CARD,
+                    shared=not split)
                 assert plan.fits is exists, (i, cards, names)
                 if exists:
                     assert len(plan.groups) == 1
                     assert_no_card_is_overfull(plan, pool)
                 unfit += not exists
         # Of the 300, the sets that fit only in another arrangement than the
-        # order given, and those that fit in none.
-        assert (len(caplog.records), unfit) == (82, 150)
+        # order given, and those that fit in none. Of the 152 with two copies
+        # given, 29 and 47; as tensor parallel, 38 and 78.
+        assert (len(caplog.records), unfit) == (67, 125)
+
+    def test_copies_given_are_tried_on_as_many_untouched_cards(
+            self, registered, caplog):
+        """In the order given m and n take a card each, and big's two copies
+        of 17.1 GiB find one card with room. Found: m and n on one card,
+        big on the two untouched ones, which one untouched card standing for
+        the others would never try."""
+        m, n = self._engines(registered, "rep", (8.0, 8.0))
+        big = registered("_se_rep_big", hf_model_id="org/serb", vram_gb=15.0)
+        with caplog.at_level(logging.INFO, logger=placement.logger.name):
+            plan = _plan([m, n, big], self.CARD, 3, copies={big: 2})
+        assert plan.fits and len(plan.groups) == 1
+        assert [(fp.devices, fp.planned_utilization) for fp in plan.footprints] == [
+            ((0,), 0.45), ((0,), 0.45), ((1, 2), 0.9)]
+        assert [r.getMessage() for r in caplog.records] == [
+            "[residency] placed in another arrangement than the order given: "
+            f"{m} -> card 0, {n} -> card 0, {big} -> cards 1,2"]
 
     def test_a_loaded_engine_stays_on_its_card(self, registered):
         """The engine loaded on card 1 is joined there, which leaves card 0

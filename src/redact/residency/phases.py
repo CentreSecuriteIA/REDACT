@@ -47,8 +47,8 @@ def plan_phases(
     fit like that, other cards are looked for as :func:`plan_residency`
     does, for the run as a whole: an engine has the same cards in all its
     stages, and they are taken only when every stage fits on them. Of its
-    copies an engine keeps those on cards every one of its stages leaves
-    it, so it gives up the ones a more crowded stage has no card for.
+    copies an engine keeps those on cards every one of its stages has room
+    for, so it gives up the ones a more crowded stage has no room for.
 
     A stage that still does not fit may hold engines it does not call. Each
     is unloaded for the stages between the two that call it, and loaded
@@ -198,21 +198,12 @@ def plan_phases(
                 fp.model, loads(key, fp), share)
         fp.planned_utilization, fp.reserved_gb = share, reserved
 
-    # One set of cards per engine too: those it holds in every stage, so a
-    # copy stays only where no stage plans another model. The cards an
-    # engine was placed on are in every stage's set, being kept.
-    common: dict[tuple, tuple[int, ...]] = {}
-    for key, fp in footprints:
-        if fp.setup == "vllm":
-            so_far = common.get(key, fp.devices)
-            common[key] = tuple(d for d in so_far if d in fp.devices)
+    # One set of cards per engine too: placement gave its copies only the
+    # cards every stage of the lifetime has room for.
+    cut = set().union(*(stage.cut for stage in placed))
     told = set()
     for key, fp in footprints:
-        cards = common.get(key, fp.devices)
-        if len(cards) == len(fp.devices):
-            continue
-        fp.devices, fp.copies = cards, len(cards) // fp.min_gpus
-        if key not in told:
+        if key in cut and key not in told:
             told.add(key)
             logger.info(
                 "[residency] %s %s, with %d %s: on the cards it "

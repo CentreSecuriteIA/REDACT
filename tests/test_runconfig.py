@@ -1598,7 +1598,8 @@ def test_entering_a_stage_hands_the_loader_the_stages_plan(local_models):
 
 def test_a_model_loaded_again_loads_under_the_plan_of_its_stage(local_models):
     """Stage b does not hold x. Alone in stage a it has both cards and the
-    full share; in stage c it shares card 0, and its second load takes that."""
+    full share; in stage c it shares card 0, and its second load takes that.
+    There z has a copy beside w."""
     from redact import residency
     from redact.driver import _enter_phase
 
@@ -1616,7 +1617,7 @@ def test_a_model_loaded_again_loads_under_the_plan_of_its_stage(local_models):
     assert handed == [
         ([x], {x: (0.9, (0, 1))}),
         ([y], {y: (0.9, (0, 1))}),
-        ([z, w, x], {z: (0.45, (0,)), w: (0.9, (1,)), x: (0.45, (0,))}),
+        ([z, w, x], {z: (0.45, (0, 1)), w: (0.45, (1,)), x: (0.45, (0,))}),
     ]
 
 
