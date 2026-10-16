@@ -3,8 +3,9 @@
 A recipe says what to run: ``dataset_type`` (``"eval"``, no constitution, or
 ``"training"``, constitution-seeded), ``data_dir``, ``models`` per role (a
 registry name, or an object that also says how the model is served, see
-:func:`serving_of`), ``taxonomy``/``taxonomy_dir``/``prompt_dir``, an ordered
-``stages`` list, ``augmentations`` (the augmentation section, see
+:func:`serving_of`), ``taxonomy``/``taxonomy_dir``/``prompt_dir``,
+``benign_taxonomy`` (see :func:`benign_taxonomy_of`), an ordered ``stages``
+list, ``augmentations`` (the augmentation section, see
 :func:`augmentations_of`), a ``params_file`` and ``resume``. Its params file
 holds each stage's tunables under the stage's name.
 """
@@ -29,7 +30,8 @@ _SERVING_KEYS = ("backend_type", "copies", "workers")
 
 # The keys a recipe may hold, beside comments ("_" first).
 _RECIPE_KEYS = ("dataset_type", "data_dir", "models", "taxonomy", "taxonomy_dir",
-                "prompt_dir", "stages", "augmentations", "params_file", "resume")
+                "benign_taxonomy", "prompt_dir", "stages", "augmentations",
+                "params_file", "resume")
 
 
 def load_recipe(recipe: str | Path | dict) -> dict:
@@ -75,6 +77,7 @@ def load_recipe(recipe: str | Path | dict) -> dict:
     # For their errors. The entries stay as written, and a run reads them again.
     serving_of(data.get("models") or {})
     data["augmentations"] = augmentations_of(data)
+    data["benign_taxonomy"] = benign_taxonomy_of(data, stages)
     data["stages"] = stages
     data["dataset_type"] = dtype
     return data
@@ -125,6 +128,54 @@ def _check_jailbreak_params(params: dict) -> None:
             "now holds; write them under the recipe's augmentations.adversarial. "
             "They are read as before for this release.",
             DeprecationWarning, stacklevel=3)
+
+
+def benign_taxonomy_of(recipe: dict, stages: list[str]) -> dict | str:
+    """The recipe's ``benign_taxonomy``: the taxonomy file, under ``taxonomy_dir``,
+    whose subcategories the benign Q&A pairs of the fsh and dap techniques are
+    generated for; ``"benign"``, the packaged one, when left out or null.
+
+    The file is read when the recipe runs the jailbreak stage and a kind of
+    its ``augmentations`` (resolved) draws a technique that needs benign data.
+
+    Raises:
+        ValueError: The key is not a name or an object, or the taxonomy it
+            names is missing, does not parse or has no category.
+    """
+    from .dataset.taxonomy import load_taxonomy
+    from .jailbreak.manipulation.benign import DEFAULT_TAXONOMY, benign_categories
+    from .jailbreak.pool import technique_pool
+
+    taxonomy = recipe.get("benign_taxonomy")
+    if taxonomy is None:
+        taxonomy = DEFAULT_TAXONOMY
+    if not isinstance(taxonomy, dict) and not (
+            isinstance(taxonomy, str) and taxonomy.strip()):
+        raise ValueError(
+            f"benign_taxonomy must name a taxonomy file, got {taxonomy!r}; write "
+            f'a name such as "{DEFAULT_TAXONOMY}", or leave it out.')
+    kinds = [kind for kind in recipe["augmentations"].values() if kind is not None]
+    if "jailbreaks" not in stages or not any(
+            getattr(fn, "requires_benign", False)
+            for kind in kinds for fn in technique_pool(kind)):
+        return taxonomy
+    where = repr(taxonomy) if isinstance(taxonomy, str) else "(an object)"
+    try:
+        loaded = (load_taxonomy(taxonomy, config_dir=recipe.get("taxonomy_dir"))
+                  if isinstance(taxonomy, str) else taxonomy)
+        categories = benign_categories(loaded)
+    except (OSError, ValueError, AttributeError, TypeError) as error:
+        raise ValueError(
+            f"benign_taxonomy {where} cannot be read: {error}. The jailbreak "
+            "stage generates the benign Q&A pairs of its fsh and dap techniques "
+            "for its subcategories; name a taxonomy file in taxonomy_dir (the "
+            "packaged configs/taxonomy when it is left out, which holds "
+            "benign.json).") from None
+    if not categories:
+        raise ValueError(
+            f"benign_taxonomy {where} has no category; write its categories, "
+            "each with its subcategories.")
+    return taxonomy
 
 
 def augmentations_of(recipe: dict, jailbreak_params: dict | None = None) -> dict:

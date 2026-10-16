@@ -455,6 +455,8 @@ def generate_jailbreaks(
     data_dir: str | Path | None = None,
     output_path: str | Path | None = None,
     benign_path: str | Path | None = None,
+    benign_taxonomy: dict | str = "benign",
+    taxonomy_dir: str | Path | None = None,
     max_complexity: int | None = None,
     max_obfuscations: int | None = None,
     seed: int = 42,
@@ -505,6 +507,11 @@ def generate_jailbreaks(
             ``variations.csv`` beside ``output_path`` when it is given, else
             ``{data_dir}/Datasets/variations.csv``.
         benign_path: Override for the FSH/DAP benign-cache CSV.
+        benign_taxonomy: The benign taxonomy, whose subcategories the FSH/DAP
+            benign Q&A pairs are generated for: a taxonomy file's name, or a
+            loaded taxonomy. Defaults to the packaged ``benign``.
+        taxonomy_dir: Directory to load ``benign_taxonomy`` from (when it is
+            a name). Defaults to the bundled ``configs/taxonomy/``.
         seed: Global run seed (combined with each sample's id + iteration).
         model: Generation model. ``None`` resolves to the ``uncensored_gen``
             role.
@@ -583,7 +590,8 @@ def generate_jailbreaks(
             _of_entry_types(inputs, kind["entry_types"]),
             jailbreak_pool.technique_pool(kind),
             client=client, translation_model=translation_model, out_path=out_path,
-            benign_path=benign, prompt_dir=prompt_dir, seed=seed,
+            benign_path=benign, benign_taxonomy=benign_taxonomy,
+            taxonomy_dir=taxonomy_dir, prompt_dir=prompt_dir, seed=seed,
             rounds=augmentation_kinds.rounds_of(kind),
             family_weights=kind["family_weights"] or None,
             auto_generate_benign=auto_generate_benign, batch_size=batch_size,
@@ -988,6 +996,7 @@ class RunContext:
     augmentations: dict         # the section the jailbreak stage runs, resolved
     resume: bool
     verbose: bool
+    benign_taxonomy: dict | str = "benign"     # the categories of fsh/dap's pairs
 
 
 @dataclass(frozen=True)
@@ -1163,6 +1172,7 @@ def _jailbreaks_kwargs(ctx: RunContext) -> dict:
     return dict(
         data_dir=ctx.data_dir, model=ctx.models["gen"],
         translation_model=ctx.models["translation"], prompt_dir=ctx.prompt_dir,
+        benign_taxonomy=ctx.benign_taxonomy, taxonomy_dir=ctx.taxonomy_dir,
         resume=ctx.resume, verbose=ctx.verbose, augmentation=ctx.augmentations,
     )
 

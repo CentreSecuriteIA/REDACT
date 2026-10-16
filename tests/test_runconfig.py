@@ -432,9 +432,88 @@ def test_load_recipe_rejects_an_unknown_key_naming_the_valid_ones():
     assert str(raised.value) == (
         "The recipe has unknown key(s) ['augmentation']; write only "
         "['dataset_type', 'data_dir', 'models', 'taxonomy', 'taxonomy_dir', "
-        "'prompt_dir', 'stages', 'augmentations', 'params_file', 'resume'].")
+        "'benign_taxonomy', 'prompt_dir', 'stages', 'augmentations', "
+        "'params_file', 'resume'].")
     # A key starting with "_" is a comment.
     load_recipe({"dataset_type": "eval", "_comment": "a note"})
+
+
+def test_the_benign_taxonomy_left_out_or_null_is_the_packaged_one():
+    assert load_recipe({"dataset_type": "eval"})["benign_taxonomy"] == "benign"
+    assert load_recipe({"dataset_type": "eval", "stages": ["jailbreaks"],
+                        "benign_taxonomy": None})["benign_taxonomy"] == "benign"
+
+
+@pytest.mark.parametrize("given", [3, "", " ", ["benign"]])
+def test_a_benign_taxonomy_that_is_not_a_name_is_refused(given):
+    with pytest.raises(ValueError, match="benign_taxonomy must name a taxonomy file"):
+        load_recipe({"dataset_type": "eval", "benign_taxonomy": given})
+
+
+def _benign_file(directory: Path, name: str, categories: dict) -> None:
+    from redact.dataset import create_taxonomy
+
+    create_taxonomy(name, categories, taxonomy_dir=directory, verbose=False)
+
+
+def test_a_benign_taxonomy_is_read_from_taxonomy_dir_at_load(tmp_path):
+    _benign_file(tmp_path, "mine", {"Cooking": {"subcategories": ["Bread"]}})
+    recipe = load_recipe({"dataset_type": "eval", "stages": ["jailbreaks"],
+                          "taxonomy_dir": str(tmp_path), "benign_taxonomy": "mine"})
+    assert recipe["benign_taxonomy"] == "mine"
+
+    # The packaged default is not looked for elsewhere.
+    with pytest.raises(ValueError) as raised:
+        load_recipe({"dataset_type": "eval", "stages": ["jailbreaks"],
+                     "taxonomy_dir": str(tmp_path)})
+    assert str(raised.value).startswith("benign_taxonomy 'benign' cannot be read")
+    assert str(tmp_path / "benign.json") in str(raised.value)
+
+
+def test_a_benign_taxonomy_without_a_category_is_refused_at_load(tmp_path):
+    _benign_file(tmp_path, "empty", {})
+    with pytest.raises(ValueError, match="benign_taxonomy 'empty' has no category"):
+        load_recipe({"dataset_type": "eval", "stages": ["jailbreaks"],
+                     "taxonomy_dir": str(tmp_path), "benign_taxonomy": "empty"})
+
+
+@pytest.mark.parametrize("recipe", [
+    {"stages": ["inputs", "outputs"]},
+    {"stages": ["jailbreaks"],
+     "augmentations": {"adversarial": {"layers": {"deny": ["manipulation"]}}}},
+])
+def test_a_benign_taxonomy_no_stage_draws_from_is_not_read(recipe):
+    loaded = load_recipe({"dataset_type": "eval", "benign_taxonomy": "missing",
+                          **recipe})
+    assert loaded["benign_taxonomy"] == "missing"
+
+
+def test_the_jailbreak_stage_gets_the_recipes_benign_taxonomy(tmp_path, monkeypatch):
+    import redact
+
+    handed = []
+    monkeypatch.setattr(redact, "generate_jailbreaks",
+                        lambda **k: handed.append(k) or pd.DataFrame())
+    _benign_file(tmp_path, "mine", {"Cooking": {"subcategories": ["Bread"]}})
+    recipe = {"dataset_type": "eval", "data_dir": str(tmp_path),
+              "stages": ["jailbreaks"], "taxonomy_dir": str(tmp_path),
+              "benign_taxonomy": "mine"}
+    try:
+        run_pipeline(recipe, params={}, verbose=False)
+    finally:
+        telemetry.uninstall()
+    (kwargs,) = handed
+    assert kwargs["benign_taxonomy"] == "mine"
+    assert kwargs["taxonomy_dir"] == str(tmp_path)
+
+
+def test_a_benign_taxonomy_in_the_params_is_refused(tmp_path, monkeypatch):
+    raised = _fails_before_any_stage_or_model(
+        monkeypatch, tmp_path, {"stages": ["outputs", "jailbreaks"]},
+        {"jailbreaks": {"benign_taxonomy": "mine"}})
+    assert raised == (
+        "params['jailbreaks'] sets ['benign_taxonomy'], which the run passes "
+        "generate_jailbreaks itself; leave it out of the params.")
 
 
 def test_eval_cannot_include_constitution_stage():

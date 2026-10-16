@@ -459,9 +459,29 @@ def test_a_pool_with_a_technique_that_needs_benign_data_loads_it(tmp_path, monke
             "rounds": [{"exact_techniques": 1}]}, "natural": None},
         verbose=False)
     assert [load["cache_path"] for load in loads] == [benign]
+    assert {key: loads[0][key] for key in ("taxonomy", "taxonomy_dir")} == {
+        "taxonomy": "benign", "taxonomy_dir": None}
     # Each unit ran its technique on the loaded set.
     assert set(df["technique"]) == {"to_fsh_random_short"}
     assert df["accepted"].all() and df["jailbreak"].str.contains("bq").all()
+
+
+def test_the_benign_data_is_made_with_the_stages_taxonomy_overlay_and_batch(
+        tmp_path, monkeypatch):
+    loads = _benign_loads(monkeypatch)
+    generate_jailbreaks(
+        inputs=_inputs(), output_path=tmp_path / "jb.csv", seed=7, batch_size=4,
+        benign_taxonomy="mine", taxonomy_dir=tmp_path / "taxonomy",
+        prompt_dir=tmp_path / "prompts",
+        augmentation={"adversarial": {
+            "techniques": {"allow": ["to_fsh_random_short"]},
+            "rounds": [{"exact_techniques": 1}]}, "natural": None},
+        verbose=False)
+    (load,) = loads
+    assert {key: load[key] for key in (
+        "taxonomy", "taxonomy_dir", "prompt_dir", "batch_size")} == {
+        "taxonomy": "mine", "taxonomy_dir": tmp_path / "taxonomy",
+        "prompt_dir": tmp_path / "prompts", "batch_size": 4}
 
 
 def test_a_resume_loads_the_benign_data_its_plan_needs_whatever_its_pool(

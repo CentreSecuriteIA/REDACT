@@ -331,6 +331,7 @@ def run_pipeline(
         prompt_dir=recipe.get("prompt_dir"),
         taxonomy=recipe.get("taxonomy", "content_moderation_categories"),
         taxonomy_dir=recipe.get("taxonomy_dir"),
+        benign_taxonomy=recipe["benign_taxonomy"],
         params=params,
         augmentations=augmentations_of(
             recipe, params.get("jailbreaks") if "jailbreaks" in stages else None),
