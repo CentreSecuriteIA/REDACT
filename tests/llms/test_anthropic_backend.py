@@ -221,3 +221,52 @@ class TestAnthropicCutReply:
                 [[{"role": "user", "content": "hi"}]], max_tokens=50) == ["partial"]
         assert [r.getMessage() for r in caplog.records] == [
             first_cut_warning("claude-opus-4-6", 50)]
+
+
+class _BadRequest(Exception):
+    """What the SDK raises for a 400: its message holds the response body."""
+
+    status_code = 400
+
+    def __init__(self, message: str):
+        super().__init__(
+            "Error code: 400 - {'type': 'error', 'error': {'type': "
+            f"'invalid_request_error', 'message': '{message}'}}}}")
+
+
+class TestAnthropicPromptTooLong:
+    """A prompt the API rejects as over the model's context raises
+    PromptTooLongError; any other rejection is raised as it is."""
+
+    HI = [[{"role": "user", "content": "hi"}]]
+
+    @pytest.fixture()
+    def events(self):
+        seen = []
+        observe.set_emitter(seen.append)
+        yield seen
+        observe.set_emitter(None)
+
+    @pytest.mark.parametrize("message", [
+        "prompt is too long: 210000 tokens > 200000 maximum",
+        "input length and `max_tokens` exceed context limit: 190000 + 20000 > "
+        "200000, decrease input length or `max_tokens` and try again",
+    ], ids=["prompt", "prompt-and-reply"])
+    def test_a_context_rejection_raises_prompt_too_long(
+        self, anthropic_backend, events, message
+    ):
+        from redact.exceptions import PromptTooLongError
+
+        error = _BadRequest(message)
+        anthropic_backend._client.messages.create.side_effect = error
+        with pytest.raises(PromptTooLongError) as raised:
+            anthropic_backend.generate(self.HI)
+        assert str(raised.value) == str(error) and raised.value.__cause__ is error
+        assert [event["error"] for event in events] == [f"_BadRequest: {error}"]
+
+    def test_another_bad_request_stays_as_it_is(self, anthropic_backend):
+        error = _BadRequest("messages: roles must alternate")
+        anthropic_backend._client.messages.create.side_effect = error
+        with pytest.raises(_BadRequest) as raised:
+            anthropic_backend.generate(self.HI)
+        assert raised.value is error

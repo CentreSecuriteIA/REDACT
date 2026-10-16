@@ -13,6 +13,7 @@ import threading
 import time
 from typing import TYPE_CHECKING, ClassVar
 
+from ...exceptions import PromptTooLongError
 from .base import ComputeConfig, LLMBackend
 
 if TYPE_CHECKING:
@@ -45,6 +46,22 @@ def _sdk_client(api_key: str):
             client = anthropic.Anthropic(api_key=api_key)
             _sdk_clients[api_key] = client
         return client
+
+
+# The status of the SDK's BadRequestError.
+_BAD_REQUEST = 400
+
+
+def _is_prompt_too_long(exc: BaseException) -> bool:
+    """Whether the API rejected a prompt as over the model's context window.
+
+    A 400 (``BadRequestError``) whose message says the prompt is too long, or
+    that the prompt and ``max_tokens`` together exceed the context. Read off
+    the status code, so the SDK need not be imported.
+    """
+    message = str(exc)
+    return getattr(exc, "status_code", None) == _BAD_REQUEST and (
+        "prompt is too long" in message or "exceed context limit" in message)
 
 
 class AnthropicBackend(LLMBackend):
@@ -127,6 +144,10 @@ class AnthropicBackend(LLMBackend):
 
         Returns:
             Generated text, one per item, in the order of ``messages_list``.
+
+        Raises:
+            PromptTooLongError: The API rejected an item's prompt as over
+                the model's context.
         """
         prompts, resolved = self._prepare(messages_list)
         max_tok, temp = self._resolve(max_tokens, temperature)
@@ -155,6 +176,8 @@ class AnthropicBackend(LLMBackend):
                     n_items=1, started=started, max_tokens=max_tok,
                     temperature=temp, error=f"{type(exc).__name__}: {exc}",
                 )
+                if _is_prompt_too_long(exc):
+                    raise PromptTooLongError(str(exc)) from exc
                 raise
             usage = getattr(response, "usage", None)
             stop_reason = getattr(response, "stop_reason", None)

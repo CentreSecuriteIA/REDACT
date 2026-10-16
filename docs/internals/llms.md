@@ -132,7 +132,9 @@ its memory freed, and a client built on it raises on its next call.
   `PromptTooLongError`. It warns on an empty reply and on a reply stopped by
   the provider's content filter.
 - `AnthropicBackend` sends the system prompt as Anthropic's `system`
-  parameter, and runs one call at a time.
+  parameter, runs one call at a time, and maps a 400 that says the prompt
+  is too long (or that it and `max_tokens` exceed the context) to
+  `PromptTooLongError`.
 
 ### TransformersIntrospectionBackend
 
