@@ -568,6 +568,22 @@ def test_a_variation_that_changes_nothing_is_not_accepted_nor_built(tmp_path):
     assert list(built["jailbreak"]) == ["some capitals."]
 
 
+def test_the_variations_of_a_given_output_path_go_beside_it(tmp_path):
+    from redact import paths
+
+    for name, inputs in (("a", _inputs().iloc[:2]), ("b", _inputs())):
+        generate_jailbreaks(
+            inputs=inputs, data_dir=tmp_path, output_path=tmp_path / name / "jb.csv",
+            seed=1, augmentation={"adversarial": _PURE_KIND,
+                                  "natural": {"pure_only": True}},
+            auto_generate_benign=False, verbose=False)
+    for name, planned in (("a", 2), ("b", 5)):
+        variations = tmp_path / name / "variations.csv"
+        assert len(Manifest.sidecar(variations).load()) == planned
+        assert len(pd.read_csv(variations)) == planned
+    assert not paths.variations_csv(tmp_path).exists()
+
+
 def test_a_fresh_run_of_one_kind_leaves_the_others_files(tmp_path):
     jailbreaks, variations = _both(tmp_path)
     before = variations.read_bytes()

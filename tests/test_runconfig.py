@@ -496,6 +496,27 @@ def test_the_jailbreak_stage_is_handed_the_resolved_section_and_records_it(
     assert summary["stages"]["jailbreaks"]["counts"] == {"rows": 2, "accepted": 2}
 
 
+def test_the_jailbreak_stage_counts_the_variations_beside_its_output_path(tmp_path):
+    from redact.stages import STAGES, RunContext
+
+    def files(params, augmentations=None):
+        ctx = RunContext(
+            data_dir=tmp_path, dataset_type="eval", models={}, prompt_dir=None,
+            taxonomy="t", taxonomy_dir=None, params={"jailbreaks": params},
+            augmentations=_section(augmentations), resume=True, verbose=False)
+        return [Path(p) for p in STAGES["jailbreaks"].files(ctx)[0]]
+
+    given = tmp_path / "given"
+    assert files({}) == [paths.jailbreaks_csv(tmp_path), paths.variations_csv(tmp_path)]
+    assert files({"output_path": str(given / "j.csv")}) == [
+        given / "j.csv", given / "variations.csv"]
+    assert files({"output_path": str(given / "j.csv"),
+                  "variations_path": str(tmp_path / "v.csv")}) == [
+        given / "j.csv", tmp_path / "v.csv"]
+    assert files({"output_path": str(given / "j.csv")}, {"adversarial": None}) == [
+        given / "variations.csv"]
+
+
 def test_a_params_key_of_the_flat_form_warns_and_is_read_as_before():
     with pytest.warns(DeprecationWarning, match=r"\['max_complexity'\]"):
         params = load_params({"jailbreaks": {"max_complexity": 4, "seed": 1}})

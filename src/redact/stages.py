@@ -521,6 +521,7 @@ def generate_jailbreaks(
         output_path: Override for the jailbreaks CSV. The manifest defaults to
             ``<output>.manifest.jsonl``.
         variations_path: Override for the variations CSV, by default
+            ``variations.csv`` beside ``output_path`` when it is given, else
             ``{data_dir}/Datasets/variations.csv``.
         benign_path: Override for the FSH/DAP benign-cache CSV.
         seed: Global run seed (combined with each sample's id + iteration).
@@ -556,8 +557,9 @@ def generate_jailbreaks(
         ``iteration``, ``combination_spec_version``), or an empty frame when
         the adversarial kind is off. ``sample_id`` is this row's own
         content-hash identity, distinct from ``input_id``. The variations
-        CSV has the same columns, its rows keeping their input's
-        ``entry_type``; read it with ``read_rows(paths.variations_csv(data_dir))``.
+        CSV (see ``variations_path``) has the same columns, its rows keeping
+        their input's ``entry_type``; a variation that leaves its input
+        unchanged is not accepted.
     """
     flat = {name: value for name, value in (
         ("include_hacking", include_hacking),
@@ -613,9 +615,19 @@ def generate_jailbreaks(
             layer_rates=adversarial["layer_rates"] or None,
             read_back=read_back, label="jailbreak")
     if natural is not None:
-        run(natural, Path(variations_path or paths.variations_csv(data_dir)),
+        run(natural, _variations_csv(data_dir, output_path, variations_path),
             read_back=False, label="variation", accept_noop=False)
     return rows
+
+
+def _variations_csv(data_dir, output_path, variations_path) -> Path:
+    """``variations_path``; else ``variations.csv`` beside ``output_path``, or
+    the run's when no ``output_path`` is given."""
+    if variations_path:
+        return Path(variations_path)
+    if output_path:
+        return Path(output_path).with_name(paths.VARIATIONS_FILENAME)
+    return paths.variations_csv(data_dir)
 
 
 def _augmentation_section(augmentation: dict | None, flat: dict) -> dict:
@@ -1107,10 +1119,12 @@ def _jailbreaks_files(ctx: RunContext) -> tuple[list[Path], dict]:
     """The file of each kind that is on: a kind left out is on, one given as
     None is off."""
     given = _params(ctx, "jailbreaks")
-    default = {"adversarial": ("output_path", paths.jailbreaks_csv),
-               "natural": ("variations_path", paths.variations_csv)}
-    return [given.get(key) or path(ctx.data_dir)
-            for kind, (key, path) in default.items()
+    output, variations = given.get("output_path"), given.get("variations_path")
+    files = {
+        "adversarial": Path(output) if output else paths.jailbreaks_csv(ctx.data_dir),
+        "natural": _variations_csv(ctx.data_dir, output, variations),
+    }
+    return [path for kind, path in files.items()
             if ctx.augmentations.get(kind, {}) is not None], {}
 
 
