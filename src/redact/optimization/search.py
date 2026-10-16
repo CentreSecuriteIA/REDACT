@@ -55,6 +55,7 @@ def optimize(
     stop_on_success: bool = True,
     verbose: bool = True,
     resolve=None,
+    prompt_dir=None,
 ) -> tuple[Node, list[Node]]:
     """Search for the conversation the judge says yes to.
 
@@ -67,6 +68,7 @@ def optimize(
         beam: Nodes kept per depth; ``1`` refines a single line.
         depth: The most attacker turns added to the seed.
         stop_on_success: Stop at the first depth where a node succeeds.
+        prompt_dir: The prompt overlay the judge's prompt is read through.
 
     Returns:
         ``(best_node, tree)``, the tree being every node explored.
@@ -75,7 +77,7 @@ def optimize(
         raise ValueError("optimize requires a target_model.")
     resolve = resolve or ModelClient.create
     judge = resolve(judge_model)
-    judge_messages = judge_prompt(judge_system)
+    judge_messages = judge_prompt(judge_system, prompt_dir)
     ids = itertools.count()
 
     root_t = Transcript()

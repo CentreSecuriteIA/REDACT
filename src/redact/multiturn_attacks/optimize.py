@@ -7,7 +7,7 @@ from collections.abc import Callable
 from redact.optimization import optimize
 
 from .attacks import DEFAULT_CRESCENDO_FOLLOWUPS, _followup
-from .setting import SUCCESS_JUDGE_SYSTEM
+from .setting import success_judge_system
 
 
 def jailbreak_candidates(
@@ -42,13 +42,15 @@ def optimize_attack(
     followups: list[str] | None = None,
     verbose: bool = True,
     resolve=None,
+    prompt_dir=None,
 ):
     """Search ``techniques`` against ``target_model`` with the jailbreak-success judge.
 
-    Returns ``(best_node, tree)`` from :func:`redact.optimization.optimize`.
+    The judge's prompts are read through the overlay ``prompt_dir``. Returns
+    ``(best_node, tree)`` from :func:`redact.optimization.optimize`.
     """
     return optimize(
         seed, target_model, jailbreak_candidates(techniques, followups),
-        judge_model, SUCCESS_JUDGE_SYSTEM, beam=beam, depth=depth,
-        verbose=verbose, resolve=resolve,
+        judge_model, success_judge_system(prompt_dir), beam=beam, depth=depth,
+        verbose=verbose, resolve=resolve, prompt_dir=prompt_dir,
     )

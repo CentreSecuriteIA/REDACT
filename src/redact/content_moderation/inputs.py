@@ -46,7 +46,7 @@ from ..exceptions import PromptTooLongError
 from ..llm_pipeline import LLMRequest, drive_units, is_accepted, pool_size
 from ..llm_pipeline import extracted as extracted_unit
 from ..llms.client import ModelClient
-from ..llms.prompting import build_messages, extract_and_clean
+from ..llms.prompting import PromptTemplate, extract_and_clean
 from ..llms.router import assert_single_sample_per_call
 from .checker import build_quality_checker
 from .feedback import (
@@ -132,7 +132,8 @@ def _entry_fields(entry: pd.Series) -> _Entry:
 
 
 class InputPipeline(_StandaloneGenerationMixin):
-    """What the input stages share: two clients, a reply format and a folder.
+    """What the input stages share: two clients, a reply format, a folder and
+    a prompt overlay.
 
     ``run_from_constitution`` is the seeded stage; the deprecated standalone
     methods come from ``_StandaloneGenerationMixin``.
@@ -144,12 +145,18 @@ class InputPipeline(_StandaloneGenerationMixin):
         check: ModelClient,
         extraction_style: str = "numbered",
         dataset_dir: str | Path | None = None,
+        prompt_dir: str | Path | None = None,
     ):
-        """Bind the clients; ``dataset_dir`` defaults to ``paths.datasets()``."""
+        """Bind the clients; ``dataset_dir`` defaults to ``paths.datasets()``.
+
+        ``prompt_dir`` is the overlay the format instruction, the checks and
+        the standalone description and seed calls read their prompts through.
+        """
         self.gen = gen
         self.check = check
         self.extraction_style = extraction_style
         self.dataset_dir = dataset_dir if dataset_dir is not None else paths.datasets()
+        self.prompt_dir = prompt_dir
 
     def _build_generation_messages(
         self,
@@ -172,12 +179,11 @@ class InputPipeline(_StandaloneGenerationMixin):
             **seed_kwargs: Template variables (Category, SeedPrompts, etc.).
         """
         # The format instruction matches the style the reply is extracted with.
-        messages = build_messages(
-            prompt_config,
-            format_style=self.extraction_style,
-            num_samples=str(samples_per_request),
-            **seed_kwargs,
-        )
+        kwargs = {"num_samples": str(samples_per_request), **seed_kwargs}
+        messages = PromptTemplate(
+            prompt_config, format_style=self.extraction_style,
+            prompt_dir=self.prompt_dir, **kwargs,
+        )(**kwargs)
         if prohibited:
             messages = append_to_user(messages, prohibited_note(prohibited, more))
         return with_feedback(messages, feedback)
@@ -273,7 +279,8 @@ class InputPipeline(_StandaloneGenerationMixin):
         @functools.cache
         def _checker(category: str, entry_type: str, subcategory: str):
             return build_quality_checker(
-                category=category, entry_type=entry_type, subcategory=subcategory)
+                category=category, entry_type=entry_type, subcategory=subcategory,
+                prompt_dir=self.prompt_dir)
 
         rejected_entries = 0
         finished = 0

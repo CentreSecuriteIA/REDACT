@@ -31,14 +31,14 @@ from .transcript import Transcript
 logger = logging.getLogger(__name__)
 
 
-def judge_prompt(system: str | None = None) -> PromptTemplate:
+def judge_prompt(system: str | None = None, prompt_dir=None) -> PromptTemplate:
     """The judge's prompt, called with ``goal``, ``label`` and ``sample``.
 
     ``label`` names the sample: ``"RESPONSE"`` for a reply, ``"CONVERSATION"``
-    for a whole conversation. ``system`` replaces the packaged criterion, as
-    written.
+    for a whole conversation. ``system`` replaces the criterion, as written;
+    the prompt is read through the overlay ``prompt_dir``.
     """
-    prompt = PromptTemplate.load("conversation", "judge")
+    prompt = PromptTemplate.load("conversation", "judge", prompt_dir=prompt_dir)
     if system:
         prompt.system_prompt = system
     return prompt
@@ -64,6 +64,7 @@ def evaluate_conversations(
     verbose: bool = True,
     resolve=None,
     read_back: bool = True,
+    prompt_dir: str | Path | None = None,
 ) -> pd.DataFrame:
     """Score saved conversations with a judge model.
 
@@ -80,6 +81,7 @@ def evaluate_conversations(
         conversations_path: The conversations file; defaults to
             ``paths.conversations_csv(data_dir)``. The scores are saved beside it.
         resolve: ``model name -> ModelClient``; defaults to ``ModelClient.create``.
+        prompt_dir: The prompt overlay the judge's prompt is read through.
 
     Returns:
         Every row of ``conversations_scored.csv``, or an empty frame when
@@ -118,7 +120,7 @@ def evaluate_conversations(
         release_lock(ledger)    # no CommitBuffer will
         return read_rows(scored_path) if read_back else pd.DataFrame()
 
-    judge_messages = judge_prompt(judge_system)
+    judge_messages = judge_prompt(judge_system, prompt_dir)
     label = "RESPONSE" if scope == "last_reply" else "CONVERSATION"
     resolve = resolve or ModelClient.create
     judge = resolve(judge_model)

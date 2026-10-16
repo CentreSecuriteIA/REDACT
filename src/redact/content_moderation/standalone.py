@@ -296,13 +296,14 @@ class _StandaloneGenerationMixin:
             if use_metaprompt:
                 if verbose:
                     logger.debug("Generating description...")
-                description = generate_category_description(self.gen, category_name)
+                description = generate_category_description(
+                    self.gen, category_name, prompt_dir=self.prompt_dir)
                 if verbose:
                     logger.debug("Description: %d chars", len(description))
                     logger.debug("Generating seeds...")
                 seed_text = generate_seeds(
                     self.gen, category_name, description,
-                    num_seeds=num_seeds,
+                    num_seeds=num_seeds, prompt_dir=self.prompt_dir,
                 )
                 if verbose:
                     logger.debug("Seeds: %d generated", seed_text.count(chr(10)) + 1)
@@ -322,7 +323,7 @@ class _StandaloneGenerationMixin:
             }
 
             # Run turns until target is reached or max_turns exceeded
-            checker = build_quality_checker(category_name)
+            checker = build_quality_checker(category_name, prompt_dir=self.prompt_dir)
             result = CategoryResult(category=category_name)
             feedback = ""
             prohibited = get_existing_samples(category_name, self.dataset_dir)
@@ -417,6 +418,7 @@ def run_standalone_inputs(
         check=check,
         extraction_style="numbered",
         dataset_dir=dataset_dir,
+        prompt_dir=prompt_dir,
     )
 
     prompt_config = load_prompt("input", "generation/standalone", prompt_dir=prompt_dir)

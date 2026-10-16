@@ -37,7 +37,9 @@ def _resolve_translate_model() -> str:
         return "deepseek-v3.2"
 
 
-def _build_translate_messages(text: str, language: str, feedback: str = "") -> list[dict]:
+def _build_translate_messages(
+    text: str, language: str, feedback: str = "", prompt_dir=None,
+) -> list[dict]:
     """Build the chat messages for a translation request (pure, no LLM call).
 
     Loads ``translate`` (first attempt) or ``translate_retry`` (feedback
@@ -46,13 +48,15 @@ def _build_translate_messages(text: str, language: str, feedback: str = "") -> l
     has no conditionals.
     """
     category = "translate_retry" if feedback else "translate"
-    config = load_prompt("jailbreak", category)
+    config = load_prompt("jailbreak", category, prompt_dir)
     return build_messages(config, language=language, text=text, feedback=feedback)
 
 
-def _build_check_messages(original: str, translation: str, language: str) -> list[dict]:
+def _build_check_messages(
+    original: str, translation: str, language: str, prompt_dir=None,
+) -> list[dict]:
     """Build the chat messages for a translation-quality check (pure)."""
-    config = load_prompt("jailbreak", "translate_check")
+    config = load_prompt("jailbreak", "translate_check", prompt_dir)
     return build_messages(config, original=original, translation=translation, language=language)
 
 
@@ -63,6 +67,7 @@ def _translate_gen(
     translate_model: str | None = None,
     check_model: str | None = None,
     num_retries: int = 4,
+    prompt_dir=None,
     **kwargs,
 ) -> TechniqueGen:
     """Translate ``prompt`` to ``language`` with checked, feedback-aware retry.
@@ -72,7 +77,8 @@ def _translate_gen(
     ``(last_attempt, "DISCARDED; language=...; feedback=...")`` on exhaustion.
 
     ``translate_model`` makes both calls, the translation role's model when
-    None; ``check_model`` replaces it for the check. ``**kwargs`` swallows
+    None; ``check_model`` replaces it for the check. ``prompt_dir`` is the
+    overlay the three prompts are read through. ``**kwargs`` swallows
     engine-supplied keys (``gen_model``, ``benign_data``) that translation
     does not use.
     """
@@ -85,10 +91,10 @@ def _translate_gen(
     last = prompt
     for _ in range(num_retries):
         translation = yield LLMRequest(
-            gen_model, _build_translate_messages(prompt, language, feedback)
+            gen_model, _build_translate_messages(prompt, language, feedback, prompt_dir)
         )
         verdict = yield LLMRequest(
-            chk_model, _build_check_messages(prompt, translation, language)
+            chk_model, _build_check_messages(prompt, translation, language, prompt_dir)
         )
         if is_accepted(verdict):
             return translation, language

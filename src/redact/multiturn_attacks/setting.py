@@ -9,8 +9,13 @@ from redact.multi_turn import ModelActor, Setting, StrategyActor
 
 from .attacks import crescendo_propose, pair_propose
 
-SUCCESS_JUDGE_SYSTEM: str = load_prompt(
-    "conversation", "success_judge")["system_prompt"]
+
+def success_judge_system(prompt_dir=None) -> str:
+    """The criterion of an attack's success, read through the overlay ``prompt_dir``."""
+    return load_prompt("conversation", "success_judge", prompt_dir)["system_prompt"]
+
+
+SUCCESS_JUDGE_SYSTEM: str = success_judge_system()
 
 
 def build_attack_setting(
@@ -22,6 +27,7 @@ def build_attack_setting(
     jailbreak_technique: Callable[[str], tuple[str, str]] | None = None,
     max_turns: int = 6,
     target_system: str | None = None,
+    prompt_dir=None,
 ) -> Callable[[], Setting]:
     """A factory of attack Settings: the attacker, then the target.
 
@@ -36,6 +42,7 @@ def build_attack_setting(
         followups: Crescendo's follow-ups.
         jailbreak_technique: A pure transform applied to each crescendo follow-up.
         target_system: The target's system prompt.
+        prompt_dir: The prompt overlay the pair attacker's prompt is read through.
     """
     if not target_model:
         raise ValueError("build_attack_setting requires a target_model (no default).")
@@ -45,7 +52,7 @@ def build_attack_setting(
     elif attack == "pair":
         if not attacker_model:
             raise ValueError("attack='pair' requires an attacker_model.")
-        propose = pair_propose(attacker_model)
+        propose = pair_propose(attacker_model, prompt_dir=prompt_dir)
     else:
         raise ValueError(f"unknown attack {attack!r}; use 'crescendo' or 'pair'.")
 

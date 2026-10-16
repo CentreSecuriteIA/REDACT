@@ -32,9 +32,9 @@ checked against its category, entry type and subcategory.
 - Columns read per entry: `sample_description`, `entry_type`,
   `source_category`, `constitution_subcategory`, `constitution_category`,
   `source_group_tag`. `entry_types` keeps only some entry types.
-- The prompt `prompts/input/generation/from_constitution/<style>/` (read
-  through the overlay) with the `numbered` format instruction, and the check
-  prompt `prompts/input/quality_check/` (packaged copy only).
+- The prompt `prompts/input/generation/from_constitution/<style>/` with the
+  `numbered` format instruction, and the check prompt
+  `prompts/input/quality_check/`, each read through the overlay.
 
 ### Models
 

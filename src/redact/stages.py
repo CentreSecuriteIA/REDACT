@@ -71,6 +71,7 @@ def generate_constitution(
     standalone_benign_categories: int = 10,
     data_dir: str | Path | None = None,
     taxonomy_dir: str | Path | None = None,
+    prompt_dir: str | Path | None = None,
     resume: bool = True,
     verbose: bool = True,
     read_back: bool = True,
@@ -104,6 +105,8 @@ def generate_constitution(
             (``get_output_dir()``).
         taxonomy_dir: Directory to load the taxonomy from (when ``taxonomy`` is a
             name). Defaults to the bundled ``configs/taxonomy/``.
+        prompt_dir: Root prompt directory for the constitution prompts.
+            ``None`` (default) falls back to the bundled ``prompts/``.
         resume: When True (default), skip ``(source_category, entry_type)``
             units already recorded in the sidecar ``constitution.state.jsonl``
             ledger beside the CSVs and append to the existing CSVs (a crash
@@ -134,6 +137,7 @@ def generate_constitution(
     pipeline = ConstitutionPipeline(
         client=client,
         output_dir=const_dir,
+        prompt_dir=prompt_dir,
     )
 
     return pipeline.run(
@@ -207,9 +211,9 @@ def generate_inputs(
             Defaults to the project root (``get_output_dir()``).
         taxonomy_dir: Directory to load the taxonomy from (name mode).
             Defaults to the bundled ``configs/taxonomy/``.
-        prompt_dir: Root prompt directory for the generation prompt. Defaults to
-            the bundled ``prompts/``. (Checker prompts still use the default;
-            deeper threading is a follow-up.)
+        prompt_dir: Root prompt directory for the generation, format and
+            check prompts, and the standalone description and seed prompts.
+            ``None`` (default) falls back to the bundled ``prompts/``.
         resume: When True (default), keep and extend existing per-category CSVs
             (standalone dedups against them; constitution mode skips entries
             already present). When False, clear the relevant CSVs first and
@@ -248,6 +252,7 @@ def generate_inputs(
             check=check_client,
             extraction_style="numbered",
             dataset_dir=ds_dir,
+            prompt_dir=prompt_dir,
         )
 
         if entry_types is not None:
@@ -1101,7 +1106,7 @@ def _constitution_kwargs(ctx: RunContext) -> dict:
     return dict(
         taxonomy=ctx.taxonomy, taxonomy_dir=ctx.taxonomy_dir,
         model=ctx.models["constitution"], data_dir=ctx.data_dir,
-        resume=ctx.resume, verbose=ctx.verbose,
+        prompt_dir=ctx.prompt_dir, resume=ctx.resume, verbose=ctx.verbose,
     )
 
 

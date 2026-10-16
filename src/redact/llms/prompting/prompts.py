@@ -497,13 +497,6 @@ class PromptTemplate:
 #   - Passes no prompt_dir, so a format-instruction override is ignored.
 #     PromptTemplate.load fixes both.
 #   - Passes every kwarg to both stages, hence the reserved placeholder names.
-#   - Callers that pass no prompt_dir, so their overrides are never read:
-#     constitution/units.py, jailbreak/obfuscation/translation.py, the benign
-#     Q&A prompt (jailbreak/manipulation/benign.py, reached through
-#     get_or_generate_benign_data), the input quality checker
-#     (content_moderation/inputs.py and standalone.py), the description and
-#     seed calls (standalone.py), and the conversation prompts
-#     (multi_turn/evaluate.py, multiturn_attacks/).
 def build_messages(
     prompt_config: dict,
     few_shot: bool = True,

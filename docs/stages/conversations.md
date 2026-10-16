@@ -108,7 +108,10 @@ call stops the stage.
   `Datasets/conversations.csv`.
 - `judge_model`, required. Pick a model that is not among those judged.
 - `judge_system`: the criterion, as the judge's system prompt. Default: the
-  packaged `prompts/conversation/judge/` criterion.
+  `prompts/conversation/judge/` criterion.
+- `prompt_dir`: the prompt overlay the judge's prompt is read through. The
+  attack functions (`generate_attacks`, `score_attacks`, `optimize_attack`)
+  take it too, for the pair attacker and the success criterion.
 - `scope`: `last_reply` judges the final reply against the seed;
   `transcript` judges the whole conversation.
 

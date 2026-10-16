@@ -36,7 +36,7 @@ Every front takes, where they apply:
 - its inputs, as a frame or `None` for the run's own (`dataset.merge_inputs`);
 - `data_dir`, the working root;
 - one model name per role, `None` meaning the registry role's default;
-- `prompt_dir` where its prompts honour the overlay;
+- `prompt_dir`, the prompt overlay;
 - its tunables, which are the params keys;
 - `resume=True`, `verbose=True` and `read_back=True` (`False` returns an
   empty frame and reads nothing back);

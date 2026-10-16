@@ -98,9 +98,10 @@ def plan_units(
     return units
 
 
-def messages_of(unit: Unit) -> list[dict]:
-    """The messages of the unit's call."""
-    return build_messages(load_prompt("constitution", unit.entry_type), **unit.kwargs)
+def messages_of(unit: Unit, prompt_dir=None) -> list[dict]:
+    """The messages of the unit's call, its prompt read through ``prompt_dir``."""
+    return build_messages(
+        load_prompt("constitution", unit.entry_type, prompt_dir), **unit.kwargs)
 
 
 def rows_of(unit: Unit, reply: str, model: str) -> list[dict]:

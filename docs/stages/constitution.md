@@ -18,7 +18,7 @@ the four entry types: `harmful`, `dual_use_harmful`, `dual_use_benign`,
   first `num_taxonomy_categories` categories are used. Each category's
   `description`, `subcategories` and `group_tag` fill the prompt.
 - The prompts `prompts/constitution/<entry_type>/`, plus `general_benign`.
-  This stage reads the packaged prompts only; `prompt_dir` does not reach it.
+  The recipe's `prompt_dir` overlays them.
 
 ## Models
 

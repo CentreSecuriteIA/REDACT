@@ -273,7 +273,7 @@ class TestApplyCombination:
         assert loads == []
         text, _, _, _ = apply_combination(tagged, "a", benign_cache_path="b.csv")
         assert text == "a{'pairs': 1}"
-        assert loads == [{"client": None, "cache_path": "b.csv"}]
+        assert loads == [{"client": None, "cache_path": "b.csv", "prompt_dir": None}]
 
     def test_prompt_dir_reaches_the_techniques_that_take_it(self):
         seen = {}

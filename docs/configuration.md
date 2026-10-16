@@ -421,15 +421,14 @@ many prompts are overridden, and warns about a folder that matches no
 packaged prompt (a misspelt name) or that has several `.json` files and no
 `template.json`.
 
-A prompt is read from the overlay only where the stage passes `prompt_dir`
-to the loader:
-
-| Reads the overlay | Packaged copy only |
-|---|---|
-| `input/generation/...` (seeded and standalone); `output/generation`, `output/quality_check`; `paraphrase/generation`, `paraphrase/check`; the technique prompts `jailbreak/scenario_generation`, `persona_scenario_generation`, `jailbreak_construction`, `category_selection`, `extract_harmful`, `synonym_substitution`, `rewrite_with_typos` | `constitution/*`; `input/quality_check`, `input/category_description`, `input/seed_generation`; `jailbreak/translate`, `translate_retry`, `translate_check`, `benign_generation`; `conversation/*`; a format instruction added through `build_messages` |
-
-`report_prompt_sources` counts files present in the overlay, including those
-of prompts in the right-hand column.
+Every stage passes `prompt_dir` to the loader, so each prompt a model call
+is built from is read from the overlay when the overlay has it: the
+constitution, the inputs (generation, format instruction, check, and the
+standalone description and seed calls), the outputs, the paraphrases, every
+technique of the jailbreak stage (translation included) and its benign data.
+The conversation functions, which no recipe runs (`evaluate_conversations`,
+`generate_attacks`, `score_attacks`, `optimize_attack`, `optimize`), take
+`prompt_dir` as a keyword.
 
 ### Prompt files
 

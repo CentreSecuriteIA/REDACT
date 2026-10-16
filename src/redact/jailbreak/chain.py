@@ -181,7 +181,8 @@ def apply_combination(
     Requests carry ``client.model`` as the generation model. When a technique
     is tagged ``requires_benign`` and no ``benign_data`` is given, it is loaded
     from ``benign_cache_path`` or generated with ``client`` (``auto_benign``).
-    ``prompt_dir`` is the prompt overlay of the techniques that take it.
+    ``prompt_dir`` is the prompt overlay of the techniques that take it and of
+    the benign data.
 
     Returns:
         ``(text, info, accepted, reasoning)``: ``accepted`` is False when a
@@ -191,7 +192,7 @@ def apply_combination(
     if (benign_data is None and auto_benign
             and any(getattr(t, "requires_benign", False) for t in techniques)):
         benign_data = get_or_generate_benign_data(
-            client=client, cache_path=benign_cache_path)
+            client=client, cache_path=benign_cache_path, prompt_dir=prompt_dir)
 
     gen = run_chain(
         techniques, prompt,

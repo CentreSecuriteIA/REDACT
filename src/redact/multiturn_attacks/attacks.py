@@ -45,11 +45,11 @@ def crescendo_propose(
     return propose
 
 
-def pair_propose(attacker_model: str, system: str | None = None):
+def pair_propose(attacker_model: str, system: str | None = None, prompt_dir=None):
     """PAIR: ``attacker_model`` writes each next message, given the goal and the
-    conversation so far. ``system`` replaces the packaged attacker prompt, as
-    written."""
-    prompt = PromptTemplate.load("conversation", "pair_attacker")
+    conversation so far. ``system`` replaces the attacker prompt, as written;
+    the prompt is read through the overlay ``prompt_dir``."""
+    prompt = PromptTemplate.load("conversation", "pair_attacker", prompt_dir=prompt_dir)
     if system:
         prompt.system_prompt = system
 

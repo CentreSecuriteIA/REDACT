@@ -40,12 +40,19 @@ class ConstitutionPipeline:
     and the next run appends its rows to the type's file again.
     """
 
-    def __init__(self, client: ModelClient, output_dir: str | Path | None = None):
-        """``output_dir`` defaults to ``paths.constitution_dir()``."""
+    def __init__(
+        self,
+        client: ModelClient,
+        output_dir: str | Path | None = None,
+        prompt_dir: str | Path | None = None,
+    ):
+        """``output_dir`` defaults to ``paths.constitution_dir()``; ``prompt_dir``
+        is the prompt overlay, the packaged prompts when None."""
         self.client = client
         self.model = client.model
         self.output_dir = Path(
             output_dir if output_dir is not None else paths.constitution_dir())
+        self.prompt_dir = prompt_dir
 
     def _unit(self, unit: Unit):
         """The unit's call, made again for a reply that is rejected whole.
@@ -53,7 +60,7 @@ class ConstitutionPipeline:
         The generator returns ``(rows, attempts)``, ``rows`` empty when
         every attempt was rejected.
         """
-        messages = messages_of(unit)
+        messages = messages_of(unit, self.prompt_dir)
         return extracted(
             self.client, lambda: messages,
             lambda reply: rows_of(unit, reply, self.model),
