@@ -261,7 +261,7 @@ def _check_cards(phases: list) -> None:
 
 def _enter_phase(
     phases: list, i: int, warm: set[str], verbose: bool = True,
-) -> threading.Thread | None:
+) -> tuple[threading.Thread, list[str]] | None:
     """Make stage ``i``'s local models the resident ones.
 
     Unloads the engines the stage's plan leaves out, hands the loader the
@@ -276,7 +276,7 @@ def _enter_phase(
             in place. A running preload skips a model that leaves it.
 
     Returns:
-        The preload thread it started, if any.
+        The preload thread it started and the models handed to it, if any.
     """
     if not phases:
         return None
@@ -305,7 +305,8 @@ def _enter_phase(
         todo = [m for m in dict.fromkeys(ahead) if m not in warm]
         if todo:
             warm |= set(todo)
-            return residency.preload(todo, verbose=verbose, wanted=warm)
+            thread = residency.preload(todo, verbose=verbose, wanted=warm)
+            return (thread, todo) if thread is not None else None
     except Exception as exc:  # noqa: BLE001 — residency must not abort a run
         logger.error("[residency] stage %d: could not switch models (%s: %s); "
                      "the run continues.", i + 1, type(exc).__name__, exc)
@@ -399,7 +400,9 @@ def run_pipeline(
     run planned are released when it returns or raises, and the way the
     recipe serves its models holds only until then. Before any of them
     loads, the run stops if another process holds memory on a card the
-    plan puts one on (:func:`_check_cards`).
+    plan puts one on (:func:`_check_cards`). At the end a preload still
+    loading is waited for at most ``EXIT_WAIT_S`` (60 s), then its load is
+    ended.
 
     Returns:
         ``dataset_type``, ``data_dir``, ``stages`` (per stage, its
@@ -449,7 +452,7 @@ def run_pipeline(
         "dataset_type": ctx.dataset_type, "data_dir": str(ctx.data_dir), "stages": {}}
     phases: list = []
     warm: set[str] = set()
-    preloads: list[threading.Thread] = []
+    preloads: list[tuple[threading.Thread, list[str]]] = []
     try:
         # Before the plan, which reads it as every client the run builds does.
         capabilities.set_run_serving(
@@ -471,9 +474,9 @@ def run_pipeline(
 
         for i, name in enumerate(stages):
             stage = STAGES[name]
-            thread = _enter_phase(phases, i, warm, verbose=verbose)
-            if thread is not None:
-                preloads.append(thread)
+            preload = _enter_phase(phases, i, warm, verbose=verbose)
+            if preload is not None:
+                preloads.append(preload)
             with telemetry.stage(name):
                 stage.run(read_back=False, **stage.kwargs(ctx))
                 counts = file_counts(*stage.files(ctx))
@@ -501,13 +504,21 @@ def run_pipeline(
                 from .llms.backends import vllm
 
                 warm.clear()        # emptied first: the preloader skips the rest
-                for thread in preloads:
-                    # A model still loading is released below, once it is loaded.
+                # A model still loading is released below, once it is loaded.
+                # Not waited for longer than an exit waits: a load that does
+                # not return by then is ended by the release.
+                deadline = time.monotonic() + vllm.EXIT_WAIT_S
+                for thread, names in preloads:
                     if thread.is_alive() and verbose:
                         logger.info("[residency] waiting for a model being "
                                     "preloaded, to release it")
-                    thread.join()
-                residency.unload_local()
+                    thread.join(max(0.0, deadline - time.monotonic()))
+                    if thread.is_alive():
+                        logger.error(
+                            "[residency] the preload of %s has not finished "
+                            "%g s after the run's end; ending its load to "
+                            "release the cards.", ", ".join(names), vllm.EXIT_WAIT_S)
+                residency.unload_local(wait=vllm._GRACE_S)
                 vllm.set_planned_utilization({})      # the shares were this run's
                 vllm.set_planned_devices({})          # and so were the cards
             # Roll up tokens, engine time and cost. Also logged at INFO, so

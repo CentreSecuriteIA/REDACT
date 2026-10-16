@@ -52,7 +52,9 @@ def preload(
 
     A failed load does not stop the run. It is logged at ERROR and recorded
     as a ``preload_failed`` event, and the stage that needs the model fails
-    when it tries to use it.
+    when it tries to use it. A load the way out ended
+    (:class:`~redact.llms.backends.vllm.EngineLoadEnded`) is logged at INFO,
+    recorded with ``"cause": "exit"``, and ends the preload.
 
     Args:
         models: Model names to load. Unregistered and non-local ones are
@@ -64,6 +66,7 @@ def preload(
     Returns:
         The daemon thread, or ``None`` when there is nothing local to load.
     """
+    from redact.llms.backends.vllm import EngineLoadEnded
     from redact.llms.client import ModelClient
 
     backend_types = backend_types or {}
@@ -87,6 +90,15 @@ def preload(
                 ModelClient.create(name, backend_type=backend_types.get(name))
                 if verbose:
                     logger.info("[preload] %s ready", name)
+            except EngineLoadEnded as exc:
+                logger.info("[preload] %s: %s", name, exc)
+                observe.record({
+                    "ev": "preload_failed",
+                    "model": name,
+                    "error": f"{type(exc).__name__}: {exc}",
+                    "cause": "exit",
+                })
+                return
             except Exception as exc:  # noqa: BLE001 — must not kill the run
                 logger.error(
                     "[preload] %s failed to load (%s: %s). The run continues; "

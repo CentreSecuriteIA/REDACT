@@ -2012,6 +2012,53 @@ def test_a_run_waits_for_a_load_under_way_before_it_unloads(
     assert events == ["loaded", "unload"]
 
 
+def test_a_run_waits_at_most_exit_wait_s_for_a_load_then_ends_it(
+        tmp_path, monkeypatch, local_models, caplog):
+    """A load that has not finished is ended by the release, which is given
+    a wait; the run returns with its summary."""
+    import logging
+    import threading
+    import time
+
+    import redact
+    import redact.llms.backends.vllm as vllm_module
+    from redact import residency
+
+    hung, unloads = threading.Event(), []
+    monkeypatch.setattr(vllm_module, "EXIT_WAIT_S", 0.2)
+
+    def preload(names, **kw):
+        thread = threading.Thread(target=hung.wait, args=(10,), daemon=True)
+        thread.start()
+        return thread
+
+    monkeypatch.setattr(redact, "generate_inputs", lambda **k: pd.DataFrame())
+    gen = local_models("_rc_hung_gen")
+    recipe = {"dataset_type": "eval", "data_dir": str(tmp_path), "stages": ["inputs"],
+              "models": {"gen": gen}}
+    card = _one_card(24.0)
+    started = time.monotonic()
+    try:
+        with card[0], card[1], \
+             patch.object(residency, "preload", side_effect=preload), \
+             patch.object(residency, "unload_local",
+                          side_effect=lambda keep=None, **kw: unloads.append(kw)), \
+             caplog.at_level(logging.ERROR, logger="redact.driver"):
+            summary = run_pipeline(recipe, params={}, verbose=False)
+    finally:
+        hung.set()
+        telemetry.uninstall()
+    assert time.monotonic() - started < _PROMPT_S
+    assert unloads == [{"wait": vllm_module._GRACE_S}]
+    assert f"the preload of {gen} has not finished" in caplog.text
+    assert summary["stages"]["inputs"]["counts"] == {"rows": 0}
+
+
+#: Seconds within which a run whose last load hangs returns, once its wait
+#: (patched to 0.2 s) is over.
+_PROMPT_S = 5.0
+
+
 def test_a_run_leaves_no_planned_share_behind(tmp_path, monkeypatch):
     """The plan is the run's own: a later direct call must not inherit its shares."""
     import redact

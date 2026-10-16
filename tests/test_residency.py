@@ -1143,6 +1143,46 @@ class TestPreload:
         assert events["ev"] == "preload_failed" and events["model"] == m
 
 
+class TestPreloadAtTheEnd:
+    """A load that the way out ended is not a failed load."""
+
+    def test_a_load_ended_on_the_way_out_is_not_an_error_and_ends_the_preload(
+            self, registered, tmp_path, caplog):
+        import redact.llms.backends.vllm as vllm_module
+
+        first = registered("_pre_end_a", hf_model_id="org/pea", vram_gb=1.0)
+        second = registered("_pre_end_b", hf_model_id="org/peb", vram_gb=1.0)
+        tried = []
+
+        def create(name, **kw):
+            tried.append(name)
+            raise vllm_module.EngineLoadEnded("The load of org/pea was ended")
+
+        telemetry.install(data_dir=tmp_path)
+        with patch("redact.llms.ModelClient.create", side_effect=create), \
+             caplog.at_level(logging.INFO, logger=residency.logger.name):
+            residency.preload([first, second]).join(timeout=5)
+        assert tried == [first]                 # the process is on its way out
+        assert [r.levelname for r in caplog.records] == ["INFO", "INFO"]
+        assert "was ended" in caplog.text and "fail" not in caplog.text
+        event = json.loads(telemetry.collector().trace_path.read_text().splitlines()[0])
+        assert (event["ev"], event["model"], event["cause"]) == (
+            "preload_failed", first, "exit")
+
+    def test_no_load_starts_once_the_exit_hook_ran(self, monkeypatch):
+        import redact.llms.backends.vllm as vllm_module
+
+        built = []
+        monkeypatch.setattr(vllm_module.VLLMBackend, "clear_cache",
+                            lambda **kw: None)
+        monkeypatch.setattr(vllm_module, "_exiting", False)
+        with patch.dict("sys.modules", fake_vllm_modules(lambda **kw: built.append(1))):
+            vllm_module._exit()
+            with pytest.raises(vllm_module.EngineLoadEnded, match="not started"):
+                vllm_module._engine("org/late", None, {})
+        assert built == []
+
+
 class TestOversizedModels:
     """One model bigger than its cards is a config problem, not a packing result."""
 
@@ -1624,6 +1664,7 @@ class TestBoundedRelease:
         monkeypatch.setattr(vllm_module.VLLMBackend, "clear_cache",
                             lambda **kw: seen.append(kw))
         monkeypatch.setattr(vllm_module, "EXIT_WAIT_S", 7.0)
+        monkeypatch.setattr(vllm_module, "_exiting", False)
         vllm_module._exit()
         assert seen == [{"wait": 7.0}]
 

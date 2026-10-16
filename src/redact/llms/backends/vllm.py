@@ -65,6 +65,8 @@ _loading: tuple | None = None
 _building: tuple[tuple, frozenset[int]] | None = None
 # Engine keys whose build a release on the way out ended (_end_load).
 _ended: set[tuple] = set()
+# Set by the exit hook: no load starts after it.
+_exiting = False
 # The child processes of builds that failed, which no engine holds.
 _stray: list = []
 # Seconds an engine process gets to end after SIGTERM, and again after SIGKILL.
@@ -261,6 +263,10 @@ def _engine(hf_model_id: str, quantization: str | None, vllm_kwargs: dict):
         # Re-check: another thread may have finished the load while we waited.
         if key in _engines:
             return _engines[key]
+        if _exiting:
+            # Its engine processes would keep the interpreter from exiting.
+            raise EngineLoadEnded(
+                f"The load of {hf_model_id} was not started: the process is exiting.")
 
         _prepare_environment()
         try:
@@ -410,7 +416,9 @@ def _end_load(waited: float) -> bool:
 
 def _exit() -> None:
     """The exit hook: release every engine, waiting for a load in progress
-    at most :data:`EXIT_WAIT_S`."""
+    at most :data:`EXIT_WAIT_S`. No load starts after it."""
+    global _exiting
+    _exiting = True
     VLLMBackend.clear_cache(wait=EXIT_WAIT_S)
 
 
