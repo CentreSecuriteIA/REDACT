@@ -57,6 +57,15 @@ def _no_planned_shares():
 
 
 @pytest.fixture(autouse=True)
+def _no_busy_cards(monkeypatch):
+    """A run reads what the machine's cards hold before it loads a model: a
+    test's run sees no card, also on a machine with a busy one."""
+    from redact.llms.resources import measure
+
+    monkeypatch.setattr(measure, "card_use", lambda: None)
+
+
+@pytest.fixture(autouse=True)
 def _no_held_locks():
     """A stage's lock outlives a ``resume_state`` that no ``CommitBuffer``
     followed: a test's must not reach the next."""

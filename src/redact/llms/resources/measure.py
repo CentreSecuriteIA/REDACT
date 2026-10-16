@@ -1,8 +1,9 @@
 """Probe the machine's GPUs, and measure what an in-process load took on them.
 
 :func:`detect_gpus` and :func:`detect_gpu_memory_gib` ask ``nvidia-smi`` for
-the cards, for the planner and the cost roll-up. :func:`free_total_gib` is
-the planner's fallback for the card size.
+the cards, for the planner and the cost roll-up, and :func:`card_use` for
+what each card holds, for the run's check before it loads a model.
+:func:`free_total_gib` is the planner's fallback for the card size.
 
 Only the transformers backend measures its loads (:class:`Measurement`), for
 telemetry. vLLM loads are not measured, and planning uses
@@ -15,6 +16,7 @@ import logging
 import os
 import shutil
 import subprocess
+from dataclasses import dataclass
 
 logger = logging.getLogger(__name__)
 
@@ -136,6 +138,74 @@ def detect_gpu_memory_gib() -> float | None:
     # with a decimal-GB divisor there is what made the same card read 48.0
     # or 44.7 depending on the path.
     return round(min(sizes) / 1024, 1) if sizes else None
+
+
+@dataclass(frozen=True)
+class CardUse:
+    """What one card holds, as ``nvidia-smi`` reports it."""
+
+    #: The card's index as ``nvidia-smi`` numbers it.
+    index: int
+    uuid: str
+    used_gib: float
+    total_gib: float
+    #: ``(pid, name, GiB)`` of each compute process on the card. The GiB is
+    #: ``None`` where ``nvidia-smi`` cannot say.
+    processes: tuple[tuple[int, str, float | None], ...] = ()
+
+
+def _query(query: str) -> list[str] | None:
+    """The lines of ``nvidia-smi`` answering ``query``, in CSV without header
+    or units, or ``None`` when it is absent or fails."""
+    exe = shutil.which("nvidia-smi")
+    if exe is None:
+        return None
+    try:
+        out = subprocess.run(
+            [exe, query, "--format=csv,noheader,nounits"],
+            capture_output=True, text=True, timeout=10, check=True,
+        ).stdout
+    except (subprocess.SubprocessError, OSError) as exc:
+        logger.debug("nvidia-smi %s failed (%s: %s)", query, type(exc).__name__, exc)
+        return None
+    return [line for line in out.splitlines() if line.strip()]
+
+
+def _gib(mib: str) -> float | None:
+    """A MiB figure of ``nvidia-smi`` in GiB, ``None`` for ``[N/A]``."""
+    return None if mib.strip().startswith("[") else round(int(mib) / 1024, 1)
+
+
+def card_use() -> list[CardUse] | None:
+    """Each card's memory in use and the compute processes holding it.
+
+    Two ``nvidia-smi`` queries: the cards, and the compute processes.
+
+    Returns:
+        One entry per card, in ``nvidia-smi``'s order, or ``None`` when
+        ``nvidia-smi`` is absent, fails, lists no card or answers in a form
+        not read here.
+    """
+    cards = _query("--query-gpu=index,uuid,memory.used,memory.total")
+    apps = _query("--query-compute-apps=pid,used_memory,gpu_uuid,process_name")
+    if not cards or apps is None:
+        return None
+    held: dict[str, list] = {}
+    try:
+        for line in apps:
+            pid, used, uuid, name = (part.strip() for part in line.split(",", 3))
+            held.setdefault(uuid, []).append((int(pid), name, _gib(used)))
+        use = []
+        for line in cards:
+            index, uuid, used, total = (part.strip() for part in line.split(","))
+            used_gib, total_gib = _gib(used), _gib(total)
+            if used_gib is None or total_gib is None:
+                return None
+            use.append(CardUse(int(index), uuid, used_gib, total_gib,
+                               tuple(held.get(uuid, ()))))
+    except ValueError:
+        return None
+    return use
 
 
 def _devices(cuda) -> list:

@@ -248,3 +248,53 @@ class TestCards:
     def test_memory_that_cannot_be_read_is_none(self, monkeypatch, out):
         _nvidia_smi(monkeypatch, out)
         assert measure.detect_gpu_memory_gib() is None
+
+
+# The suite's runs see no card (conftest); these tests read the real probe.
+_card_use = measure.card_use
+
+
+def _nvidia_smi_answers(monkeypatch, cards, apps):
+    """Make ``nvidia-smi`` answer the card query with ``cards`` and the
+    compute-process query with ``apps``; ``None`` makes that query fail."""
+    def run(args, **kwargs):
+        out = apps if any("compute-apps" in a for a in args) else cards
+        if out is None:
+            raise measure.subprocess.CalledProcessError(9, args)
+        return SimpleNamespace(stdout=out)
+
+    monkeypatch.setattr(measure.shutil, "which", lambda _: "/usr/bin/nvidia-smi")
+    monkeypatch.setattr(measure.subprocess, "run", run)
+
+
+class TestCardUse:
+    """What each card holds, and which processes hold it."""
+
+    CARDS = ("0, GPU-aaaa, 29070, 49140\n"
+             "1, GPU-bbbb, 2, 49140\n")
+
+    def test_each_card_with_the_processes_on_it(self, monkeypatch):
+        _nvidia_smi_answers(monkeypatch, self.CARDS,
+                            "21131, 29068, GPU-aaaa, VLLM::EngineCore\n")
+        assert _card_use() == [
+            measure.CardUse(index=0, uuid="GPU-aaaa", used_gib=28.4, total_gib=48.0,
+                            processes=((21131, "VLLM::EngineCore", 28.4),)),
+            measure.CardUse(index=1, uuid="GPU-bbbb", used_gib=0.0, total_gib=48.0),
+        ]
+
+    def test_a_process_without_a_memory_figure_is_still_listed(self, monkeypatch):
+        """Where nvidia-smi cannot say what a process holds, it says [N/A]."""
+        _nvidia_smi_answers(monkeypatch, self.CARDS,
+                            "4242, [N/A], GPU-bbbb, /usr/bin/python3, with a comma\n")
+        (_, second) = _card_use()
+        assert second.processes == ((4242, "/usr/bin/python3, with a comma", None),)
+
+    @pytest.mark.parametrize("cards,apps", [
+        (None, ""), (CARDS, None), ("0, GPU-aaaa, [N/A], 49140\n", ""), ("", "")])
+    def test_an_answer_that_cannot_be_read_is_none(self, monkeypatch, cards, apps):
+        _nvidia_smi_answers(monkeypatch, cards, apps)
+        assert _card_use() is None
+
+    def test_no_nvidia_smi_is_none(self, monkeypatch):
+        monkeypatch.setattr(measure.shutil, "which", lambda _: None)
+        assert _card_use() is None

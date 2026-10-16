@@ -11,8 +11,10 @@ Usage::
     summary = run_pipeline("configs/runs/eval_example.json")
 """
 
+import contextlib
 import json
 import logging
+import os
 import threading
 import time
 from collections.abc import Iterable, Mapping
@@ -24,6 +26,7 @@ import pandas as pd
 from redact import paths, telemetry
 from redact.dataset import count_rows, iter_rows
 from redact.llms.prompting import report_prompt_sources
+from redact.llms.resources import measure
 from redact.recipe import (
     _DEFAULT_MODELS,
     _role_names,
@@ -171,6 +174,91 @@ def _plan_phases(
     return phases
 
 
+#: Memory an idle card may show in use: the driver's own and a display's.
+_IDLE_GIB = 1.0
+
+
+def _own_pids() -> set[int]:
+    """This process and its children, such as the engine processes of a
+    vLLM model it loaded. The children are found with psutil, which vLLM
+    installs; without it only this process counts."""
+    pids = {os.getpid()}
+    try:
+        import psutil
+    except ImportError:
+        return pids
+    with contextlib.suppress(psutil.Error):
+        pids.update(child.pid for child in psutil.Process().children(recursive=True))
+    return pids
+
+
+def _planned_card(
+    cards: list[measure.CardUse], device: int,
+) -> measure.CardUse | None:
+    """The card the plan numbers ``device``, counting over the cards
+    ``CUDA_VISIBLE_DEVICES`` leaves visible, or ``None``."""
+    visible = measure.visible_gpu_ids()
+    if visible is None:
+        return next((card for card in cards if card.index == device), None)
+    if device >= len(visible):
+        return None
+    # The variable names a card by its index or by its UUID, or a prefix of it.
+    name = visible[device]
+    return next((card for card in cards if name == str(card.index)
+                 or (name.startswith("GPU-") and card.uuid.startswith(name))), None)
+
+
+def _check_cards(phases: list) -> None:
+    """Stop the run when another process holds memory on a card the plan uses.
+
+    Reads ``nvidia-smi`` once, before any model loads. A process on a card
+    the plan leaves free, and memory in use on a planned card with no other
+    process listed, are warnings. Without ``nvidia-smi`` it does nothing.
+
+    Raises:
+        RuntimeError: Naming each planned card held and its processes, and
+            how to free them.
+    """
+    cards = measure.card_use()
+    if not cards:
+        return
+    devices = {d for phase in phases
+               for fp in phase.plan.footprints for d in fp.devices}
+    planned = {card.index for card in (_planned_card(cards, d) for d in devices)
+               if card is not None}
+    own = _own_pids()
+    held, pids = [], []
+    for card in cards:
+        others = [proc for proc in card.processes if proc[0] not in own]
+        names = ", ".join(
+            f"{pid} ({name}, {gib} GiB)" if gib is not None else f"{pid} ({name})"
+            for pid, name, gib in others)
+        if card.index not in planned:
+            if others:
+                logger.warning("[residency] GPU %d is in use by another process, "
+                               "%s; the run does not plan a model on it.",
+                               card.index, names)
+        elif others:
+            held.append(f"  GPU {card.index}: {names}")
+            pids += [str(pid) for pid, _, _ in others]
+        elif not card.processes and card.used_gib >= _IDLE_GIB:
+            logger.warning(
+                "[residency] GPU %d has %.1f of %.1f GiB in use, by no process "
+                "nvidia-smi lists here; the plan counts it empty, so a model "
+                "planned on it may not load.",
+                card.index, card.used_gib, card.total_gib)
+    if held:
+        lines, pids = "\n".join(held), " ".join(pids)
+        raise RuntimeError(
+            f"The run plans a model on a card another process holds memory on, "
+            f"so the model would fail to load there:\n{lines}\n"
+            f"An earlier run killed with kill -9 leaves its vLLM engine "
+            f"processes behind. If these are such, end them with "
+            f"`kill -9 {pids}` and check that nvidia-smi shows the card "
+            f"empty; otherwise run on other cards (CUDA_VISIBLE_DEVICES). "
+            f"Nothing has run yet.")
+
+
 def _enter_phase(
     phases: list, i: int, warm: set[str], verbose: bool = True,
 ) -> threading.Thread | None:
@@ -308,7 +396,9 @@ def run_pipeline(
     are taken from each stage's files, and a training run's inputs are
     seeded from the constitution saved under ``data_dir``. Local models the
     run planned are released when it returns or raises, and the way the
-    recipe serves its models holds only until then.
+    recipe serves its models holds only until then. Before any of them
+    loads, the run stops if another process holds memory on a card the
+    plan puts one on (:func:`_check_cards`).
 
     Returns:
         ``dataset_type``, ``data_dir``, ``stages`` (per stage, its
@@ -367,6 +457,7 @@ def run_pipeline(
             copies={name: how["copies"] for name, how in serving.items()
                     if "copies" in how})
         if phases:
+            _check_cards(phases)    # before any model loads
             summary["residency"] = {
                 "fits": all(phase.plan.fits for phase in phases),
                 "phases": [{"stage": phase.stage, "resident": phase.resident,
