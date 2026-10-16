@@ -22,7 +22,6 @@ logger = logging.getLogger(__name__)
 
 _BYTES_PER_GIB = 1024 ** 3
 
-#TODO: Implementation of a separate measure capability which loads only one model and then saves the value, nothing more. Discuss first if even useful.
 
 def _torch():
     """Return ``torch`` if it is importable and CUDA is usable, else ``None``."""
