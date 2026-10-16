@@ -352,6 +352,50 @@ def test_the_run_script_hands_run_pipeline_the_recipe_unread(tmp_path, monkeypat
                        {"params": None, "verbose": False, "data_dir": "elsewhere"})]
 
 
+@pytest.mark.parametrize("first,exit_type", [
+    ("SIGINT", KeyboardInterrupt), ("SIGTERM", SystemExit)])
+def test_a_second_interrupt_exits_the_run_script_at_once(
+        monkeypatch, capfd, first, exit_type):
+    """The first Ctrl-C or kill exits through the run's ``finally``, which
+    releases the models; a second one exits at once, as a hung release
+    would otherwise keep the process up."""
+    import importlib.util
+    import logging
+    import os
+    import signal
+
+    spec = importlib.util.spec_from_file_location(
+        "run_script", Path(__file__).parents[1] / "scripts" / "run.py")
+    script = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(script)
+    class Exited(BaseException):
+        """Stands for the end of the process."""
+
+    def hard_exit(code):
+        exits.append(code)
+        raise Exited
+
+    handlers, exits = {}, []
+    monkeypatch.setattr(script, "run_pipeline", lambda recipe, **kw: {})
+    monkeypatch.setattr(logging, "basicConfig", lambda **kw: None)
+    monkeypatch.setattr(signal, "signal",
+                        lambda signum, fn: handlers.update({signum: fn}))
+    monkeypatch.setattr(os, "_exit", hard_exit)
+    script.main(["recipe.json"])
+    capfd.readouterr()
+
+    signum = getattr(signal, first)
+    with pytest.raises(exit_type) as raised:
+        handlers[signum](signum, None)
+    if exit_type is SystemExit:
+        assert raised.value.code == 128 + signum
+    assert "again" in capfd.readouterr().err and exits == []
+    with pytest.raises(Exited):
+        handlers[signal.SIGINT](signal.SIGINT, None)
+    assert exits == [128 + signal.SIGINT]
+    assert "at once" in capfd.readouterr().err
+
+
 def test_every_recipe_role_is_called_by_a_stage():
     from redact.recipe import _DEFAULT_MODELS
     from redact.stages import STAGES
