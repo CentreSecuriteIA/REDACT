@@ -144,17 +144,22 @@ def row_of(
     *,
     gen_model: str,
     resolve=None,
+    accept_noop: bool = True,
 ) -> dict:
     """The output row of a finished unit, from its ``(text, info)``.
 
     ``sample_id`` is this row's own content-hash identity (of the jailbroken
-    text), distinct from ``input_id`` (its origin sample).
+    text), distinct from ``input_id`` (its origin sample). With
+    ``accept_noop`` False, a text that is the unit's prompt is rejected.
     """
     text, info = value
     sample_id = content_id(text)
     _rename_capture(unit, gen_model, sample_id, resolve)
     accepted = not is_discarded(info)
-    fields = _fields(unit, sample_id, text, info, accepted, "" if accepted else info)
+    reasoning = "" if accepted else info
+    if accepted and not accept_noop and text == unit["prompt"]:
+        accepted, reasoning = False, "unchanged: the text is its input's"
+    fields = _fields(unit, sample_id, text, info, accepted, reasoning)
     return _row(unit, input_row, spec_version, fields)
 
 

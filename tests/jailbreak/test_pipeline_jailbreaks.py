@@ -536,6 +536,38 @@ def test_the_natural_kind_takes_its_entry_types_and_iterations(tmp_path):
     assert sorted(rows["iteration"]) == [0, 0, 1, 1]
 
 
+def test_a_variation_that_changes_nothing_is_not_accepted_nor_built(tmp_path):
+    from redact import build_dataset, paths
+    from redact.jailbreak.obfuscation.casual_writing import (
+        get_casual_writing_functions,
+    )
+
+    inputs = pd.DataFrame({"prompt": ["all lower case.", "Some Capitals."],
+                           "category": ["Cyber"] * 2, "entry_type": ["benign"] * 2})
+    others = [fn.__name__ for fn in get_casual_writing_functions()
+              if fn.__name__ != "to_lowercase"]
+    generate_jailbreaks(
+        inputs=inputs, data_dir=tmp_path, seed=1, verbose=False, augmentation={
+            "adversarial": {"families": {"allow": ["casual_writing"]},
+                            "techniques": {"deny": others},
+                            "rounds": [{"exact_techniques": 1}]},
+            "natural": {"families": {"allow": None},
+                        "techniques": {"allow": ["to_lowercase"], "deny": []}}})
+    variations = pd.read_csv(paths.variations_csv(tmp_path), keep_default_na=False)
+    assert [(r["jailbreak"], r["is_noop"], r["accepted"], r["reasoning"])
+            for r in variations.to_dict("records")] == [
+        ("all lower case.", True, False, "unchanged: the text is its input's"),
+        ("some capitals.", False, True, "")]
+    # A jailbreak that changes nothing is kept, as before.
+    jailbreaks = pd.read_csv(paths.jailbreaks_csv(tmp_path))
+    assert jailbreaks["accepted"].all() and jailbreaks["is_noop"].any()
+
+    build_dataset(data_dir=tmp_path, verbose=False)
+    built = pd.read_csv(paths.complete_dataset_csv(tmp_path))
+    built = built[built["dataset_type"] == "natural_variation"]
+    assert list(built["jailbreak"]) == ["some capitals."]
+
+
 def test_a_fresh_run_of_one_kind_leaves_the_others_files(tmp_path):
     jailbreaks, variations = _both(tmp_path)
     before = variations.read_bytes()

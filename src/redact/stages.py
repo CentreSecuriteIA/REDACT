@@ -614,7 +614,7 @@ def generate_jailbreaks(
             read_back=read_back, label="jailbreak")
     if natural is not None:
         run(natural, Path(variations_path or paths.variations_csv(data_dir)),
-            read_back=False, label="variation")
+            read_back=False, label="variation", accept_noop=False)
     return rows
 
 
@@ -772,12 +772,14 @@ def build_dataset(
     jailbreak_path: str | Path | None = None,
     output_path: str | Path | None = None,
     inputs_path: str | Path | None = None,
+    variations_path: str | Path | None = None,
     responses_path: str | Path | None = None,
     paraphrase_inputs_path: str | Path | None = None,
     paraphrase_outputs_path: str | Path | None = None,
     mode: str = "training",
     include_inputs: bool = True,
     include_jailbreaks: bool = True,
+    include_variations: bool = True,
     include_outputs: bool = True,
     include_paraphrases: bool = True,
     verbose: bool = True,
@@ -805,6 +807,8 @@ def build_dataset(
             root (``get_output_dir()``).
         jailbreak_path: Path to the jailbreaks CSV. Defaults to
             ``Datasets/jailbreaks.csv``.
+        variations_path: Path to the variations CSV. Defaults to
+            ``Datasets/variations.csv``.
         output_path: Where to save merged CSV. Defaults to
             ``Datasets/complete_dataset.csv``.
         inputs_path: Merged-inputs CSV. Defaults to
@@ -820,6 +824,7 @@ def build_dataset(
             ``dataset_type``.)
         include_inputs: Include content moderation input samples.
         include_jailbreaks: Include jailbreak samples.
+        include_variations: Include the accepted natural variations.
         include_outputs: Include output response samples.
         include_paraphrases: Include paraphrase artifacts (per ``mode``).
         verbose: Log progress.
@@ -867,8 +872,10 @@ def build_dataset(
         logger.info("Jailbreaks: file not found (%s)", jb_path)
 
     # The natural variations the jailbreak stage writes beside its jailbreaks.
-    if has_rows(paths.variations_csv(data_dir)):
-        parts.append(Part(paths.variations_csv(data_dir), "natural_variation",
+    var_path = (Path(variations_path) if variations_path
+                else paths.variations_csv(data_dir))
+    if include_variations and has_rows(var_path):
+        parts.append(Part(var_path, "natural_variation", accepted_only=True,
                           label="Variations"))
 
     if include_outputs:

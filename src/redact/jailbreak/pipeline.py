@@ -54,6 +54,7 @@ def run_augmentation(
     verbose: bool = True,
     read_back: bool = True,
     label: str = "jailbreak",
+    accept_noop: bool = True,
 ) -> pd.DataFrame:
     """Augment the inputs with ``pool``'s techniques, appended to ``out_path``.
 
@@ -66,7 +67,8 @@ def run_augmentation(
     :func:`redact.jailbreak.augmentation.rounds_of` gives them (one round of
     the sampler's defaults when None); ``family_weights`` and ``layer_rates``
     go to the dealing of :func:`plan_run`. ``label`` is the progress label and
-    the internals-capture root.
+    the internals-capture root. With ``accept_noop`` False, a row whose text
+    is its input's is not accepted.
 
     Resume: completion is a sidecar ``*.state.jsonl`` ledger keyed
     ``(input_id, iteration)``; ``resume=True`` reuses the plan and skips its
@@ -164,7 +166,8 @@ def run_augmentation(
 
     def _on_done(i, value):
         _row(live.pop(i),
-             lambda u, r: row_of(u, value, r, spec_version, gen_model=client.model))
+             lambda u, r: row_of(u, value, r, spec_version, gen_model=client.model,
+                                 accept_noop=accept_noop))
 
     def _on_error(i, exc):
         _row(live.pop(i),
