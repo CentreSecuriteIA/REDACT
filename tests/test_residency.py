@@ -992,6 +992,113 @@ class TestLoadLocks:
         intro._models.clear()
 
 
+class TestCudaLock:
+    """A build narrows CUDA_VISIBLE_DEVICES for the whole process. What else
+    reads it meanwhile reads the value from before, and what starts CUDA in
+    this process waits for the build or does without."""
+
+    @pytest.fixture()
+    def build(self, monkeypatch):
+        """``build(outer)`` sets the parent's variable to ``outer``, then holds
+        ``visible_only(["1"])`` on another thread until the event it returns
+        is set, or the test ends."""
+        done, threads = threading.Event(), []
+
+        def start(outer=None):
+            if outer is None:
+                monkeypatch.delenv("CUDA_VISIBLE_DEVICES", raising=False)
+            else:
+                monkeypatch.setenv("CUDA_VISIBLE_DEVICES", outer)
+            inside = threading.Event()
+
+            def hold():
+                with measure.visible_only(["1"]):
+                    inside.set()
+                    done.wait(5)
+
+            threads.append(threading.Thread(target=hold))
+            threads[-1].start()
+            assert inside.wait(5)
+            return done
+
+        yield start
+        done.set()
+        for thread in threads:
+            thread.join(5)
+
+    @pytest.mark.parametrize("outer", [None, "2,3"])
+    def test_the_variable_reads_as_before_while_a_build_narrows_it(
+            self, monkeypatch, outer):
+        if outer is None:
+            monkeypatch.delenv("CUDA_VISIBLE_DEVICES", raising=False)
+        else:
+            monkeypatch.setenv("CUDA_VISIBLE_DEVICES", outer)
+        with measure.visible_only(["GPU-x"]):
+            assert os.environ["CUDA_VISIBLE_DEVICES"] == "GPU-x"
+            assert measure.visible_gpu_ids() == (outer.split(",") if outer else None)
+        assert os.environ.get("CUDA_VISIBLE_DEVICES") == outer
+
+    def test_a_plan_made_during_a_build_counts_the_parents_cards(
+            self, monkeypatch, build):
+        build("0,2")
+        monkeypatch.setattr(measure.shutil, "which", lambda _: "/usr/bin/nvidia-smi")
+        monkeypatch.setattr(measure.subprocess, "run", lambda *a, **k: SimpleNamespace(
+            stdout="NVIDIA A\nNVIDIA A\nNVIDIA A\n"))
+        assert measure.detect_gpus(visible=True) == ("NVIDIA A", 2)
+
+    def test_without_cards_to_name_nothing_changes_and_no_lock_is_taken(
+            self, monkeypatch):
+        monkeypatch.setenv("CUDA_VISIBLE_DEVICES", "1")
+        with measure.cuda_lock, measure.visible_only([]):
+            assert os.environ["CUDA_VISIBLE_DEVICES"] == "1"
+
+    def test_a_failed_build_puts_the_variable_back(self, monkeypatch):
+        monkeypatch.setenv("CUDA_VISIBLE_DEVICES", "2,3")
+        with pytest.raises(RuntimeError), measure.visible_only(["3"]):
+            raise RuntimeError
+        assert os.environ["CUDA_VISIBLE_DEVICES"] == "2,3"
+        assert measure.visible_gpu_ids() == ["2", "3"]
+        assert not measure.cuda_lock.locked()
+
+    def test_the_torch_probe_does_without_during_a_build(self, build, caplog):
+        """Asking torch then would start CUDA on the build's cards only."""
+        build()
+        with patch.object(measure, "_torch", side_effect=AssertionError("asked")), \
+             caplog.at_level(logging.INFO, logger=measure.logger.name):
+            assert measure.free_total_gib() is None
+        assert "being built" in caplog.text
+
+    def test_a_transformers_load_waits_for_a_build_and_sees_the_parents_cards(
+            self, monkeypatch, build):
+        import sys
+
+        import redact.llms.backends.introspection as intro
+
+        seen = []
+
+        class _Model:
+            @staticmethod
+            def from_pretrained(*args, **kwargs):
+                seen.append(os.environ.get("CUDA_VISIBLE_DEVICES"))
+                return SimpleNamespace(eval=lambda: None)
+
+        monkeypatch.setitem(sys.modules, "transformers", SimpleNamespace(
+            __version__="5.0", AutoModelForCausalLM=_Model,
+            AutoTokenizer=SimpleNamespace(from_pretrained=lambda *a, **k: "tok")))
+        monkeypatch.setattr(measure, "_torch", lambda: None)
+        monkeypatch.setattr(intro, "_models", {})
+        monkeypatch.setattr(intro, "_models_loaded_at", {})
+        done = build()
+        loading = threading.Thread(
+            target=intro._load, args=("org/tf", "auto", "auto", {}))
+        loading.start()
+        loading.join(0.2)
+        assert loading.is_alive() and seen == []        # waits for the build
+        done.set()
+        loading.join(5)
+        assert seen == [None]                           # the parent's cards
+
+
 class TestPreload:
     def test_returns_none_when_nothing_is_local(self):
         assert residency.preload(["claude-opus-4-6"]) is None
@@ -1776,6 +1883,8 @@ class TestPlannedDevices:
 
         class _Builds(list):
             fail = False
+            #: The cards visible_gpu_ids() reads during each build.
+            read: list = []
 
         builds = _Builds()
 
@@ -1784,6 +1893,7 @@ class TestPlannedDevices:
 
             def __init__(self, **kw):
                 builds.append((os.environ.get("CUDA_VISIBLE_DEVICES"), kw))
+                builds.read.append(measure.visible_gpu_ids())
                 if builds.fail:
                     raise RuntimeError("CUDA out of memory")
 
@@ -1793,6 +1903,16 @@ class TestPlannedDevices:
              patch.object(vllm_module, "_prepare_environment"):
             yield vllm_module, builds
         vllm_module.VLLMBackend.clear_cache()
+
+    def test_what_reads_the_variable_during_the_build_reads_the_parents(
+            self, engine, monkeypatch):
+        vllm_module, builds = engine
+        monkeypatch.setenv("CUDA_VISIBLE_DEVICES", "2,3")
+        vllm_module.set_planned_devices(
+            {vllm_module._engine_key("org/pdr", None, {}): (1,)})
+        vllm_module._engine("org/pdr", None, {})
+        assert [seen for seen, _ in builds] == ["3"]
+        assert builds.read == [["2", "3"]]
 
     def test_the_planned_card_is_visible_only_during_the_build(self, registered, engine):
         vllm_module, builds = engine

@@ -118,35 +118,6 @@ def _physical_ids(devices: tuple[int, ...]) -> list[str]:
     return [visible[d] for d in devices]
 
 
-@contextlib.contextmanager
-def _visible_devices(ids: list[str]):
-    """Make ``ids`` the only cards an engine built inside can see.
-
-    The engine's processes are spawned and read ``CUDA_VISIBLE_DEVICES`` as
-    they start, so the variable is set for the build and put back after it,
-    also when the build fails. Without ``ids`` it is left alone. Enter under
-    ``_engines_lock`` only: the variable is the whole process's, so two
-    builds must not overlap.
-
-    Not covered: what else reads the variable while a build is under way on
-    another thread. A plan made then counts only these cards, and a
-    transformers load that initialises CUDA in this process then sees only
-    them from then on.
-    """
-    if not ids:
-        yield
-        return
-    before = os.environ.get("CUDA_VISIBLE_DEVICES")
-    os.environ["CUDA_VISIBLE_DEVICES"] = ",".join(ids)
-    try:
-        yield
-    finally:
-        if before is None:
-            os.environ.pop("CUDA_VISIBLE_DEVICES", None)
-        else:
-            os.environ["CUDA_VISIBLE_DEVICES"] = before
-
-
 def _started_since(before: frozenset[int]) -> list:
     """The child processes alive now that were not in ``before`` (pids)."""
     return [p for p in multiprocessing.active_children() if p.pid not in before]
@@ -316,11 +287,12 @@ def _engine(hf_model_id: str, quantization: str | None, vllm_kwargs: dict):
 
         started = time.perf_counter()
         before = frozenset(p.pid for p in multiprocessing.active_children())
-        _building = (key, before)
         # Not measured: vLLM preallocates its memory grant in a separate
         # process, so a measurement would restate the setting.
         try:
-            with _visible_devices(ids):
+            # Waits for a transformers load that is starting CUDA.
+            with measure.visible_only(ids):
+                _building = (key, before)
                 engine = AsyncLLM.from_engine_args(
                     AsyncEngineArgs(
                         model=hf_model_id, quantization=quantization, **kwargs),

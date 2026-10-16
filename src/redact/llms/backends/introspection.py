@@ -121,7 +121,8 @@ def _load_locked(key, hf_model_id: str, device_map: str, torch_dtype: str, hf_kw
     dtype_kwarg = (
         "dtype" if int(transformers.__version__.split(".")[0]) >= 5 else "torch_dtype"
     )
-    with measure.Measurement() as measured:
+    # CUDA starts here, so not while a vLLM build has narrowed the cards.
+    with measure.cuda_lock, measure.Measurement() as measured:
         model = AutoModelForCausalLM.from_pretrained(
             hf_model_id, device_map=device_map, **{dtype_kwarg: torch_dtype}, **hf_kwargs,
         )

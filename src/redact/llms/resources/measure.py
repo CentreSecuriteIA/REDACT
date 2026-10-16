@@ -6,6 +6,10 @@ roll-up, and :func:`card_use` for what each card holds, for the run's check
 before it loads a model.
 :func:`free_total_gib` is the planner's fallback for the card size.
 
+A vLLM build narrows ``CUDA_VISIBLE_DEVICES`` for the whole process
+(:func:`visible_only`); :data:`cuda_lock` keeps what starts CUDA in this
+process from starting it meanwhile.
+
 Only the transformers backend measures its loads (:class:`Measurement`), for
 telemetry. vLLM loads are not measured, and planning uses
 :mod:`redact.llms.resources.estimate`.
@@ -13,16 +17,29 @@ telemetry. vLLM loads are not measured, and planning uses
 All sizes are GiB (bytes / 1024**3).
 """
 
+import contextlib
 import logging
 import os
 import shutil
 import subprocess
 import sys
+import threading
 from dataclasses import dataclass
 
 logger = logging.getLogger(__name__)
 
 _BYTES_PER_GIB = 1024 ** 3
+
+#: Held while a build has narrowed ``CUDA_VISIBLE_DEVICES``, and while a load
+#: starts CUDA in this process: CUDA reads the variable once, when it starts.
+#: Taken after a backend's own load lock, never before it.
+cuda_lock = threading.Lock()
+# Guards _outer and the variable while visible_only() changes them, so that
+# visible_gpu_ids() reads the two together.
+_env_lock = threading.Lock()
+# CUDA_VISIBLE_DEVICES as it was before visible_only() narrowed it, as a
+# one-tuple; None when it is not narrowed.
+_outer: tuple[str | None] | None = None
 
 
 def _torch():
@@ -42,29 +59,74 @@ def _torch():
 
 
 def free_total_gib() -> tuple[float, float] | None:
-    """``(free_gib, total_gib)`` of the current device, or ``None`` if unreadable."""
-    torch = _torch()
-    if torch is None:
+    """``(free_gib, total_gib)`` of the current device, or ``None`` if unreadable.
+
+    Also ``None`` while an engine is being built on narrowed cards: asking
+    torch then would start CUDA in this process on those cards only.
+    """
+    if not cuda_lock.acquire(blocking=False):
+        logger.info("[residency] an engine is being built, so torch is not "
+                    "asked for the card size now.")
         return None
     try:
-        free, total = torch.cuda.mem_get_info()
-    except Exception as exc:  # noqa: BLE001
-        logger.debug("mem_get_info failed (%s: %s)", type(exc).__name__, exc)
-        return None
-    return free / _BYTES_PER_GIB, total / _BYTES_PER_GIB
+        torch = _torch()
+        if torch is None:
+            return None
+        try:
+            free, total = torch.cuda.mem_get_info()
+        except Exception as exc:  # noqa: BLE001
+            logger.debug("mem_get_info failed (%s: %s)", type(exc).__name__, exc)
+            return None
+        return free / _BYTES_PER_GIB, total / _BYTES_PER_GIB
+    finally:
+        cuda_lock.release()
 
 
 def visible_gpu_ids() -> list[str] | None:
     """The cards ``CUDA_VISIBLE_DEVICES`` leaves this process, as it names them.
 
+    While a build has narrowed the variable (:func:`visible_only`), the
+    value from before.
+
     Returns:
         The variable's entries in its order (indices or UUIDs), ``[]`` when
         it is set and empty, or ``None`` when it is unset.
     """
-    value = os.environ.get("CUDA_VISIBLE_DEVICES")
+    with _env_lock:
+        value = os.environ.get("CUDA_VISIBLE_DEVICES") if _outer is None else _outer[0]
     if value is None:
         return None
     return [entry.strip() for entry in value.split(",") if entry.strip()]
+
+
+@contextlib.contextmanager
+def visible_only(ids: list[str]):
+    """Make ``ids`` the only cards a process started inside can see.
+
+    An engine's processes read ``CUDA_VISIBLE_DEVICES`` as they start, so
+    the variable is set for the build and put back after it, also when the
+    build fails. The variable is the whole process's: it is changed under
+    :data:`cuda_lock`, and :func:`visible_gpu_ids` reads the value from
+    before meanwhile. Without ``ids`` nothing is changed and no lock taken.
+    """
+    global _outer
+    if not ids:
+        yield
+        return
+    with cuda_lock:
+        with _env_lock:
+            before = os.environ.get("CUDA_VISIBLE_DEVICES")
+            _outer = (before,)
+            os.environ["CUDA_VISIBLE_DEVICES"] = ",".join(ids)
+        try:
+            yield
+        finally:
+            with _env_lock:
+                if before is None:
+                    os.environ.pop("CUDA_VISIBLE_DEVICES", None)
+                else:
+                    os.environ["CUDA_VISIBLE_DEVICES"] = before
+                _outer = None
 
 
 def bus_order() -> None:

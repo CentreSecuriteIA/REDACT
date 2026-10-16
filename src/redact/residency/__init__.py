@@ -41,8 +41,6 @@ of the run, not a guarantee against running out of memory.
 #   - Copies: one that shares its card with another model, a fallback to one
 #     copy when the build fails, and copies of a tensor-parallel engine
 #     without a count given.
-#   - A transformers load that initialises CUDA while a vLLM engine is being
-#     built sees only that engine's cards (backends/vllm.py: _visible_devices).
 
 import logging
 
