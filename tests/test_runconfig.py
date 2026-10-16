@@ -407,7 +407,8 @@ def test_names_and_nulls_load_as_written():
 
 @pytest.mark.parametrize("name", ["eval_example.json", "training_example.json"])
 def test_the_example_recipes_load(name):
-    recipe = load_recipe(paths.configs_dir() / "runs" / name)
+    with pytest.warns(DeprecationWarning, match="flat keys"):   # their flat form
+        recipe = load_recipe(paths.configs_dir() / "runs" / name)
     assert set(recipe["models"].values()) == {None}
     assert _serving_of(recipe["models"]) == {}
 
@@ -420,14 +421,51 @@ def _section(augmentations) -> dict:
 
 @pytest.mark.parametrize("name", ["eval_example.json", "training_example.json"])
 def test_the_example_recipes_flat_form_is_the_default_section(name):
-    recipe = load_recipe(paths.configs_dir() / "runs" / name)
+    with pytest.warns(DeprecationWarning):
+        recipe = load_recipe(paths.configs_dir() / "runs" / name)
     assert augmentations_of(recipe) == _section(None) == {
         kind: resolve(None, kind) for kind in ("adversarial", "natural")}
 
 
+def test_the_flat_form_warns_once_per_run_and_the_kinds_form_does_not():
+    import warnings
+
+    with pytest.warns(DeprecationWarning) as warned:
+        recipe = load_recipe({"dataset_type": "eval",
+                              "augmentations": {"pure_only": True}})
+    assert [str(w.message) for w in warned] == [
+        "augmentations holds the flat keys ['pure_only'], which are deprecated; "
+        "write them in augmentations.adversarial (include_* as a layers or "
+        "families deny, sampling_probs as layer_rates, settings_per_iteration as "
+        "rounds)."]
+    with warnings.catch_warnings():
+        warnings.simplefilter("error")
+        # The loaded recipe holds the section resolved, which a run reads again.
+        assert augmentations_of(recipe)["adversarial"]["pure_only"] is True
+        _section({"adversarial": {"pure_only": True}})
+
+
+@pytest.mark.parametrize(("augmentations", "error"), [
+    ({"iterations": 3, "settings_per_iteration": [{}, {}]},
+     "iterations is 3 and settings_per_iteration gives 2 rounds; the rounds set "
+     "the number, so leave iterations out."),
+    ({"iterations": 2, "settings_per_iteration": [{}, {}]}, None),
+])
+def test_flat_iterations_must_agree_with_the_flat_rounds(augmentations, error):
+    if error is None:
+        with pytest.warns(DeprecationWarning):
+            kind = _section(augmentations)["adversarial"]
+        assert kind["iterations"] == len(augmentations["settings_per_iteration"])
+        return
+    with pytest.warns(DeprecationWarning), pytest.raises(ValueError) as raised:
+        load_recipe({"dataset_type": "eval", "augmentations": augmentations})
+    assert str(raised.value) == error
+
+
 def test_the_flat_form_is_the_adversarial_kind_beside_the_default_natural_kind():
-    section = _section({"include_hacking": False, "pure_only": True,
-                        "include_translation": True})
+    with pytest.warns(DeprecationWarning):
+        section = _section({"include_hacking": False, "pure_only": True,
+                            "include_translation": True})
     assert section["adversarial"] == resolve({"adversarial": {
         "layers": {"deny": ["hacking"]}, "pure_only": True,
         "families": {"allow": None, "deny": ["casual_writing"]}}}, "adversarial")

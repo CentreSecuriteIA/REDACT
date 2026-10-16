@@ -74,7 +74,7 @@ def load_recipe(recipe: str | Path | dict) -> dict:
             f"{list(_RECIPE_KEYS)}.")
     # For their errors. The entries stay as written, and a run reads them again.
     serving_of(data.get("models") or {})
-    augmentations_of(data)
+    data["augmentations"] = augmentations_of(data)
     data["stages"] = stages
     data["dataset_type"] = dtype
     return data
@@ -134,7 +134,7 @@ def augmentations_of(recipe: dict) -> dict:
     (:func:`redact.jailbreak.augmentation.resolve`). Today's flat form, the
     keywords of ``generate_jailbreaks`` the section replaced written at the top
     of ``augmentations``, is read as the adversarial kind, the natural kind
-    then the default.
+    then the default, with a ``DeprecationWarning``.
 
     Returns:
         ``{"adversarial": kind or None, "natural": kind or None}``.
@@ -170,6 +170,11 @@ def augmentations_of(recipe: dict) -> dict:
                 "write a parameter of generate_jailbreaks under "
                 "params['jailbreaks'], and a key of the section inside its "
                 "adversarial or natural kind.")
+        warnings.warn(
+            f"augmentations holds the flat keys {list(flat)}, which are deprecated; "
+            "write them in augmentations.adversarial (include_* as a layers or "
+            "families deny, sampling_probs as layer_rates, settings_per_iteration "
+            "as rounds).", DeprecationWarning, stacklevel=3)
         section = {"adversarial": apply_flat_keywords(
             resolve(None, "adversarial"), flat)}
     return {kind: resolve(section, kind) for kind in KINDS}

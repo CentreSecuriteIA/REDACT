@@ -264,6 +264,17 @@ def test_the_flat_keywords_land_in_the_adversarial_kind():
     assert resolve({"adversarial": kind}, "adversarial") == kind
 
 
+def test_flat_iterations_that_differ_from_the_flat_rounds_raise():
+    rounds = [{"exact_techniques": 1}, {"exact_techniques": 2}]
+    with pytest.raises(ValueError, match="iterations is 3 and settings_per_iteration "
+                       "gives 2 rounds"):
+        apply_flat_keywords(resolve(None, "adversarial"),
+                            {"iterations": 3, "settings_per_iteration": rounds})
+    kind = apply_flat_keywords(resolve(None, "adversarial"), {
+        "iterations": len(rounds), "settings_per_iteration": rounds})
+    assert kind["iterations"] == len(rounds)
+
+
 def test_include_translation_false_denies_it_once():
     kind = apply_flat_keywords(resolve(None, "adversarial"),
                                {"include_translation": False, "include_hacking": True})

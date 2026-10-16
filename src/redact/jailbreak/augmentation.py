@@ -181,9 +181,20 @@ def apply_flat_keywords(kind: dict, keywords: dict) -> dict:
     the translation family; ``sampling_probs`` is ``layer_rates`` and
     ``settings_per_iteration`` is ``rounds``, each round's ``sampling_probs``
     its ``layer_rates``. A keyword that is ``None`` is not given.
+
+    Raises:
+        ValueError: ``iterations`` differs from the number of rounds of
+            ``settings_per_iteration``.
     """
     kind = copy.deepcopy(kind)
     given = {key: value for key, value in keywords.items() if value is not None}
+    rounds = given.get("settings_per_iteration")
+    if (isinstance(rounds, list) and "iterations" in given
+            and given["iterations"] != len(rounds)):
+        raise ValueError(
+            f"iterations is {given['iterations']} and settings_per_iteration gives "
+            f"{len(rounds)} rounds; the rounds set the number, so leave iterations "
+            "out.")
     for layer in _LAYERS:
         if f"include_{layer}" in given:
             kind["layers"]["deny"] = _toggled(
@@ -198,7 +209,6 @@ def apply_flat_keywords(kind: dict, keywords: dict) -> dict:
             kind[key] = given[key]
     if "sampling_probs" in given:
         kind["layer_rates"] = given["sampling_probs"]
-    rounds = given.get("settings_per_iteration")
     if isinstance(rounds, list):
         kind["rounds"] = [
             {("layer_rates" if key == "sampling_probs" else key): value
