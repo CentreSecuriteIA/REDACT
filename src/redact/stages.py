@@ -43,6 +43,7 @@ from redact.dataset import (
     Part,
     discover_categories,
     has_rows,
+    input_files,
     iter_categories,
     load_taxonomy,
     merge_all,
@@ -1010,14 +1011,17 @@ class RunContext:
 
 @dataclass(frozen=True)
 class Stage:
-    """A stage a recipe can name: its front, the roles it calls, the files it writes.
+    """A stage a recipe can name: its front, the roles it calls, the files it
+    reads and writes.
 
     ``roles`` pairs each recipe role the stage calls with the registry role
     of its default model. ``recipe_kwargs`` is what the run passes the front
     from the recipe; a value an earlier stage of the run saves is a
     :class:`Saved`. ``files`` is the CSVs that hold the stage's rows and
     the values a row holds to be counted, for
-    :func:`redact.driver.file_counts`. ``folded`` names the params keys the
+    :func:`redact.driver.file_counts`. ``sources`` is the files the stage
+    reads its inputs from; those that exist are its run record's
+    ``sources``. ``folded`` names the params keys the
     run applies to a kwarg it passes itself (the jailbreak stage's flat
     keywords, to its ``augmentation``), so the front does not get them again.
     """
@@ -1027,6 +1031,7 @@ class Stage:
     roles: tuple[tuple[str, str], ...]
     files: Callable[[RunContext], tuple[list[Path], dict]]
     recipe_kwargs: Callable[[RunContext], dict]
+    sources: Callable[[RunContext], list[Path]]
     folded: tuple[str, ...] = ()
 
     @property
@@ -1114,6 +1119,14 @@ def _constitution_files(ctx: RunContext) -> tuple[list[Path], dict]:
     return [paths.constitution_merged_csv(ctx.data_dir)], {}
 
 
+def _taxonomy_file(ctx: RunContext) -> list[Path]:
+    """The file of the run's taxonomy; none for one given as an object."""
+    if not isinstance(ctx.taxonomy, str):
+        return []
+    path = Path(ctx.taxonomy_dir or paths.taxonomy_dir()) / ctx.taxonomy
+    return [path if path.suffix else path.with_suffix(".json")]
+
+
 def _inputs_kwargs(ctx: RunContext) -> dict:
     kwargs = dict(
         data_dir=ctx.data_dir, taxonomy=ctx.taxonomy, taxonomy_dir=ctx.taxonomy_dir,
@@ -1149,6 +1162,22 @@ def _saved_constitution(data_dir: str | Path | None) -> pd.DataFrame:
     return read_constitution(paths.constitution_dir(data_dir))
 
 
+def _inputs_sources(ctx: RunContext) -> list[Path]:
+    """The saved constitution; for standalone inputs the taxonomy and, without
+    the metaprompt, the seeds file."""
+    if _seeded(ctx):
+        return [paths.constitution_merged_csv(ctx.data_dir)]
+    given = _params(ctx, "inputs")
+    if given.get("use_metaprompt", True):
+        return _taxonomy_file(ctx)
+    seeds = paths.seeds_dir() / given.get("seeds_name", "harmful")
+    return [*_taxonomy_file(ctx), seeds if seeds.suffix else seeds.with_suffix(".json")]
+
+
+def _run_inputs(ctx: RunContext) -> list[Path]:
+    return input_files(ctx.data_dir)
+
+
 def _inputs_files(ctx: RunContext) -> tuple[list[Path], dict]:
     seeded = _seeded(ctx)
     tree = (paths.constitution_inputs_dir if seeded else paths.datasets)(ctx.data_dir)
@@ -1175,6 +1204,14 @@ def _paraphrase_kwargs(ctx: RunContext) -> dict:
         check_model=ctx.models["paraphrase_check"], prompt_dir=ctx.prompt_dir,
         resume=ctx.resume, verbose=ctx.verbose,
     )
+
+
+def _paraphrase_sources(ctx: RunContext) -> list[Path]:
+    target = _params(ctx, "paraphrase").get("target", "both")
+    inputs = input_files(ctx.data_dir) if target in ("inputs", "both") else []
+    outputs = ([paths.output_responses_csv(ctx.data_dir)]
+               if target in ("outputs", "both") else [])
+    return [*inputs, *outputs]
 
 
 def _paraphrase_files(ctx: RunContext) -> tuple[list[Path], dict]:
@@ -1212,6 +1249,27 @@ def _build_kwargs(ctx: RunContext) -> dict:
     return dict(data_dir=ctx.data_dir, mode=ctx.dataset_type, verbose=ctx.verbose)
 
 
+def _build_sources(ctx: RunContext) -> list[Path]:
+    """The part files the build copies, in its order: each where its
+    ``*_path`` key puts it, and none of a part that ``include_*`` leaves out."""
+    given = _params(ctx, "build")
+
+    def at(key: str, default: Callable) -> Path:
+        return Path(given[key]) if given.get(key) else default(ctx.data_dir)
+
+    merged = at("inputs_path", paths.constitution_inputs_merged_csv)
+    parts = {
+        "inputs": [merged] if merged.exists() else input_files(ctx.data_dir),
+        "jailbreaks": [at("jailbreak_path", paths.jailbreaks_csv)],
+        "variations": [at("variations_path", paths.variations_csv)],
+        "outputs": [at("responses_path", paths.output_responses_csv)],
+        "paraphrases": [at("paraphrase_inputs_path", paths.paraphrases_inputs_csv),
+                        at("paraphrase_outputs_path", paths.paraphrases_outputs_csv)],
+    }
+    return [path for part, files in parts.items()
+            if given.get(f"include_{part}", True) for path in files]
+
+
 _GEN = ("gen", "uncensored_gen")
 _CHECK = ("check", "uncensored_gen")
 
@@ -1219,22 +1277,25 @@ _CHECK = ("check", "uncensored_gen")
 STAGES: dict[str, Stage] = {stage.name: stage for stage in (
     Stage("constitution", "generate_constitution",
           roles=(("constitution", "constitution_gen"),),
-          files=_constitution_files, recipe_kwargs=_constitution_kwargs),
+          files=_constitution_files, recipe_kwargs=_constitution_kwargs,
+          sources=_taxonomy_file),
     Stage("inputs", "generate_inputs", roles=(_GEN, _CHECK),
-          files=_inputs_files, recipe_kwargs=_inputs_kwargs),
+          files=_inputs_files, recipe_kwargs=_inputs_kwargs,
+          sources=_inputs_sources),
     Stage("outputs", "generate_outputs", roles=(_GEN, _CHECK),
           files=_one_file("outputs", paths.output_responses_csv),
-          recipe_kwargs=_outputs_kwargs),
+          recipe_kwargs=_outputs_kwargs, sources=_run_inputs),
     Stage("paraphrase", "generate_paraphrases",
           roles=(("paraphraser", "paraphraser"),
                  ("paraphrase_check", "uncensored_gen")),
-          files=_paraphrase_files, recipe_kwargs=_paraphrase_kwargs),
+          files=_paraphrase_files, recipe_kwargs=_paraphrase_kwargs,
+          sources=_paraphrase_sources),
     Stage("jailbreaks", "generate_jailbreaks",
           roles=(_GEN, ("translation", "translation")),
           files=_jailbreaks_files,
-          recipe_kwargs=_jailbreaks_kwargs,
+          recipe_kwargs=_jailbreaks_kwargs, sources=_run_inputs,
           folded=augmentation_kinds.FLAT_KEYWORDS),
     Stage("build", "build_dataset", roles=(),
           files=_one_file("build", paths.complete_dataset_csv),
-          recipe_kwargs=_build_kwargs),
+          recipe_kwargs=_build_kwargs, sources=_build_sources),
 )}

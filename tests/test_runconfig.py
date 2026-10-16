@@ -552,6 +552,75 @@ def test_run_pipeline_counts_the_files_a_recipe_names(tmp_path, monkeypatch):
     assert rows == {"outputs": 2, "paraphrase": 5, "jailbreaks": 3, "build": 4}
 
 
+def _stub_fronts(monkeypatch) -> None:
+    """Stub each front with one that writes its stage's file under ``data_dir``."""
+    import redact
+
+    def writes(path_of):
+        def run(**kwargs):
+            path = path_of(kwargs["data_dir"])
+            path.parent.mkdir(parents=True, exist_ok=True)
+            pd.DataFrame({"sample_id": ["x"], "accepted": [True]}).to_csv(
+                path, index=False)
+            return pd.DataFrame()
+        return run
+
+    def inputs(**kwargs):
+        append_samples(["an input"], category="Cyber", turn=0,
+                       dataset_dir=paths.constitution_inputs_dir(kwargs["data_dir"]))
+        return pd.DataFrame()
+
+    monkeypatch.setattr(redact, "generate_constitution",
+                        writes(paths.constitution_merged_csv))
+    monkeypatch.setattr(redact, "generate_inputs", inputs)
+    monkeypatch.setattr(redact, "generate_outputs", writes(paths.output_responses_csv))
+    monkeypatch.setattr(redact, "generate_jailbreaks", writes(paths.jailbreaks_csv))
+    monkeypatch.setattr(redact, "generate_paraphrases",
+                        writes(paths.paraphrases_outputs_csv))
+    monkeypatch.setattr(redact, "build_dataset", writes(paths.complete_dataset_csv))
+
+
+def test_a_run_record_names_the_files_its_stage_read(tmp_path, monkeypatch):
+    _stub_fronts(monkeypatch)
+    try:
+        run_pipeline({"dataset_type": "training", "data_dir": str(tmp_path),
+                      "stages": ["constitution", "inputs", "outputs", "paraphrase",
+                                 "jailbreaks", "build"]},
+                     params={}, verbose=False)
+    finally:
+        telemetry.uninstall()
+    inputs = [paths.category_csv("Cyber", root=paths.constitution_inputs_dir(tmp_path))]
+    outputs = paths.output_responses_csv(tmp_path)
+    expected = {
+        "constitution": [paths.taxonomy_dir() / "harmful.json"],
+        "inputs": [paths.constitution_merged_csv(tmp_path)],
+        "outputs": inputs,
+        "paraphrase": [*inputs, outputs],
+        "jailbreaks": inputs,
+        "build": [*inputs, paths.jailbreaks_csv(tmp_path), outputs,
+                  paths.paraphrases_outputs_csv(tmp_path)],
+    }
+    for stage, files in expected.items():
+        sources = read_record(stage, tmp_path)["sources"]
+        assert [Path(p) for p in sources] == files, stage
+
+
+def test_a_standalone_run_records_its_taxonomy_and_seeds(tmp_path, monkeypatch):
+    _stub_fronts(monkeypatch)
+    folder = tmp_path / "taxonomies"
+    folder.mkdir()
+    (folder / "mine.json").write_text('{"categories": {"A": "a"}}', encoding="utf-8")
+    try:
+        run_pipeline({"dataset_type": "eval", "data_dir": str(tmp_path),
+                      "taxonomy": "mine", "taxonomy_dir": str(folder),
+                      "stages": ["inputs"]},
+                     params={"inputs": {"use_metaprompt": False}}, verbose=False)
+    finally:
+        telemetry.uninstall()
+    assert [Path(p) for p in read_record("inputs", tmp_path)["sources"]] == [
+        folder / "mine.json", paths.seeds_dir() / "harmful.json"]
+
+
 def test_run_pipeline_loads_params_file(tmp_path, monkeypatch):
     import redact
     monkeypatch.setattr(redact, "build_dataset", lambda **k: pd.DataFrame({"x": [1]}))

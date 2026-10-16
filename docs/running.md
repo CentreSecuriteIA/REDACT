@@ -331,7 +331,11 @@ Other files you may see:
 A run record, `Datasets/<stage>.run.json`, holds `stage`, `timestamp`,
 `params` (the params file's entry), `models` (the recipe's role names),
 `counts` (`rows`, and `accepted` when the files have that column),
-`sources` (empty in a recipe run), `serving` (per role: name, setup, copies
+`sources` (the files the stage read its inputs from: the taxonomy file for
+the constitution and standalone inputs, plus the seeds file without the
+metaprompt; the saved constitution for seeded inputs; the input category
+files, and `output_responses.csv` for paraphrases of outputs; the part files
+of the build), `serving` (per role: name, setup, copies
 or workers), and for the jailbreak stage `spec_version` and the resolved
 `augmentation` section.
 

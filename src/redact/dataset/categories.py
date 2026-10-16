@@ -203,8 +203,8 @@ def merge_all(
     return merge_category_csvs(categories, dataset_dir, accepted_only=accepted_only)
 
 
-def merge_inputs(data_dir: str | Path | None = None) -> pd.DataFrame:
-    """The accepted input samples of the run under ``data_dir``, in one frame.
+def _input_tree(data_dir: str | Path | None) -> Path:
+    """The folder of the input samples of the run under ``data_dir``.
 
     A run with a constitution seeds its inputs from it and keeps them in
     ``Datasets/constitution_inputs/``. They are the run's inputs when that
@@ -212,8 +212,18 @@ def merge_inputs(data_dir: str | Path | None = None) -> pd.DataFrame:
     ``Datasets/`` are.
     """
     seeded = paths.constitution_inputs_dir(data_dir)
-    tree = seeded if discover_categories(seeded) else paths.datasets(data_dir)
-    return merge_all(tree, accepted_only=True)
+    return seeded if discover_categories(seeded) else paths.datasets(data_dir)
+
+
+def input_files(data_dir: str | Path | None = None) -> list[Path]:
+    """The category files of the input samples of the run under ``data_dir``."""
+    tree = _input_tree(data_dir)
+    return [paths.category_csv(c, root=tree) for c in discover_categories(tree)]
+
+
+def merge_inputs(data_dir: str | Path | None = None) -> pd.DataFrame:
+    """The accepted rows of :func:`input_files`, in one frame."""
+    return merge_all(_input_tree(data_dir), accepted_only=True)
 
 
 def take_per_group(

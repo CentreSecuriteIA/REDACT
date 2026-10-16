@@ -2,8 +2,9 @@
 
 Each stage writes ``{stage}.run.json`` under ``{data_dir}/Datasets/``: the
 resolved params, models, how the stage's models were served, row counts,
-spec version, timestamp and source files; the jailbreak stage's also holds
-the resolved augmentation section.
+spec version, timestamp and the files the stage read its inputs from
+(``sources``); the jailbreak stage's also holds the resolved augmentation
+section.
 
 Usage::
 
@@ -481,6 +482,7 @@ def run_pipeline(
                 path = write_record(
                     name, data_dir=ctx.data_dir, params=stage.params(ctx),
                     models=ctx.models, counts=counts,
+                    sources=[str(p) for p in stage.sources(ctx) if p.exists()],
                     spec_version=load_spec().get("version", "") if jailbreaks else None,
                     extra={"serving": {role: served[role] for role, _ in stage.roles},
                            **({"augmentation": ctx.augmentations} if jailbreaks

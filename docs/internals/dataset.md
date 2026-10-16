@@ -196,6 +196,7 @@ Input samples live in one `samples.csv` per category folder.
 | `discover_categories(dir)` | The category folders that hold a `samples.csv` |
 | `merge_all(dir, accepted_only=True)` | Every category's rows in one frame |
 | `merge_inputs(data_dir)` | The run's accepted inputs: the seeded tree when it has a category file, else the categories under `Datasets/` |
+| `input_files(data_dir)` | The category files `merge_inputs` reads |
 | `take_per_group(frame, n, group_by=("category", "entry_type"))` | The first `n` rows of each group |
 
 ## Taxonomy, seeds and published datasets
