@@ -246,13 +246,55 @@ def _prepare_environment() -> None:
             os.environ.setdefault("VLLM_USE_V2_MODEL_RUNNER", "0")
 
 
+def _build(key: tuple, ids: list[str], make) -> tuple[object, list]:
+    """Build an engine with ``make()``, with only the cards ``ids`` visible.
+
+    The child processes the build starts are recorded: returned with the
+    engine, or, when the build fails, kept as stray.
+
+    Returns:
+        The engine, and the child processes its build started.
+    """
+    global _building
+    before = frozenset(p.pid for p in multiprocessing.active_children())
+    try:
+        # Waits for a transformers load that is starting CUDA.
+        with measure.visible_only(ids):
+            _building = (key, before)
+            engine = make()
+    except BaseException:
+        _stray.extend(_started_since(before))
+        raise
+    finally:
+        _building = None
+    return engine, _started_since(before)
+
+
+def _end_stray() -> list[int]:
+    """End what failed builds left running; return the pids still alive."""
+    alive = terminate_engine_processes(_stray)
+    _stray[:] = [p for p in _stray if p.is_alive()]
+    return alive
+
+
+def _was_ended(key: tuple, hf_model_id: str) -> EngineLoadEnded | None:
+    """The error for a build a release on the way out ended, if it did."""
+    if key not in _ended:
+        return None
+    _ended.discard(key)
+    return EngineLoadEnded(
+        f"The load of {hf_model_id} was ended: the process is exiting, and "
+        f"the load had not returned in time.")
+
+
 def _engine(hf_model_id: str, quantization: str | None, vllm_kwargs: dict):
     """Get or load the vLLM engine for one checkpoint.
 
-    The child processes a build starts are recorded under the engine's key,
-    or, when the build fails, as stray.
+    The child processes a build starts are recorded under the engine's key.
+    A failed build's are ended. When a build with the plan's copies fails,
+    one copy on the engine's first cards is built instead, once.
     """
-    global _exit_hook_registered, _building
+    global _exit_hook_registered
     key = _engine_key(hf_model_id, quantization, vllm_kwargs)
     # One read: clear_cache() may drop the key between a test and a lookup.
     engine = _engines.get(key)
@@ -315,50 +357,71 @@ def _engine(hf_model_id: str, quantization: str | None, vllm_kwargs: dict):
             kwargs.setdefault("data_parallel_size", copies)
         ids = _physical_ids(devices)
 
+        def make(kwargs: dict):
+            return lambda: AsyncLLM.from_engine_args(
+                AsyncEngineArgs(model=hf_model_id, quantization=quantization, **kwargs),
+                # vllm.LLM's context: vLLM's defaults for running sequences
+                # and batched tokens depend on it, and the engine's own has
+                # lower ones.
+                usage_context=UsageContext.LLM_CLASS,
+            )
+
         started = time.perf_counter()
-        before = frozenset(p.pid for p in multiprocessing.active_children())
+        fallback = False
         # Not measured: vLLM preallocates its memory grant in a separate
         # process, so a measurement would restate the setting.
         try:
-            # Waits for a transformers load that is starting CUDA.
-            with measure.visible_only(ids):
-                _building = (key, before)
-                engine = AsyncLLM.from_engine_args(
-                    AsyncEngineArgs(
-                        model=hf_model_id, quantization=quantization, **kwargs),
-                    # vllm.LLM's context: vLLM's defaults for running sequences
-                    # and batched tokens depend on it, and the engine's own has
-                    # lower ones.
-                    usage_context=UsageContext.LLM_CLASS,
-                )
-        except BaseException as exc:
-            _stray.extend(_started_since(before))
-            if key in _ended and isinstance(exc, Exception):
-                _ended.discard(key)
-                raise EngineLoadEnded(
-                    f"The load of {hf_model_id} was ended: the process is "
-                    f"exiting, and the load had not returned in time."
-                ) from exc
-            if copies <= 1 or not isinstance(exc, Exception):
+            engine, procs = _build(key, ids, make(kwargs))
+        except Exception as exc:
+            ended = _was_ended(key, hf_model_id)
+            if ended is not None:
+                raise ended from exc
+            alive = _end_stray()
+            if copies <= 1:
                 raise
-            # The copies come from the plan, so the error names them and the
-            # way to one. One copy is not tried here: the plan stands.
+            # The copies come from the plan, so the error names them. One
+            # copy on the first cards is tried instead, unless the copies were
+            # handed to the engine directly, the process is exiting, or the
+            # failed build's processes live on to compete with a second one.
             n = kwargs["data_parallel_size"]
             each = "one per card" if span == 1 else f"each on {span} cards"
-            raise RuntimeError(
-                f"The vLLM engine of {hf_model_id} was being built with {n} "
-                f"copies, {each} (data_parallel_size={n}), and the build "
-                f"failed ({type(exc).__name__}: {exc}). To load one copy, set "
-                f'"copies": 1 in the model\'s entry under "models" in the '
-                f"recipe, or copies={{model: 1}} on the planner."
-            ) from exc
-        finally:
-            _building = None
+            failed = (f"The vLLM engine of {hf_model_id} was being built with {n} "
+                      f"copies, {each} (data_parallel_size={n}), and the build "
+                      f"failed ({type(exc).__name__}: {exc}).")
+            if "data_parallel_size" in vllm_kwargs or _exiting or alive:
+                raise RuntimeError(
+                    f'{failed} To load one copy, set "copies": 1 in the model\'s '
+                    f'entry under "models" in the recipe, or copies={{model: 1}} '
+                    f"on the planner."
+                    + (f" One copy was not tried: processes the build started "
+                       f"are still alive ({', '.join(map(str, alive))})."
+                       if alive else "")
+                ) from exc
+            kwargs = {k: v for k, v in kwargs.items() if k != "data_parallel_size"}
+            ids = ids[:span]
+            home = ",".join(ids) or "the cards it can see"
+            logger.warning(
+                "[vllm] The engine of %s failed to build with %d copies (%s: %s); "
+                "loading one copy on %s instead. To make this permanent, set "
+                '"copies": 1 in the model\'s entry under "models" in the recipe.',
+                hf_model_id, n, type(exc).__name__, exc, home)
+            try:
+                engine, procs = _build(key, ids, make(kwargs))
+            except Exception as retry:
+                ended = _was_ended(key, hf_model_id)
+                if ended is not None:
+                    raise ended from retry
+                _end_stray()
+                raise RuntimeError(
+                    f"{failed} One copy on {home} failed as well "
+                    f"({type(retry).__name__}: {retry})."
+                ) from retry
+            fallback = True
         # A build that returned as its processes were ended is shut down
         # as any other engine.
         _ended.discard(key)
         _engines[key] = engine
-        _engine_procs[key] = _started_since(before)
+        _engine_procs[key] = procs
         # Held from the start of the load; set after it, so a failed load
         # leaves no timer.
         _engine_loaded_at[key] = started
@@ -371,6 +434,9 @@ def _engine(hf_model_id: str, quantization: str | None, vllm_kwargs: dict):
             "quantization": quantization,
             "tensor_parallel_size": kwargs.get("tensor_parallel_size", 1),
             "data_parallel_size": kwargs.get("data_parallel_size", 1),
+            # The plan's copies, and whether one was built instead.
+            "planned_copies": max(copies, 1),
+            "fallback": fallback,
             "gpu_memory_utilization": kwargs.get("gpu_memory_utilization"),
             # As handed to the engine's processes; empty when none were.
             "devices": ids,

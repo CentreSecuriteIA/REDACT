@@ -471,7 +471,8 @@ class TestEngineProcesses:
 
     @pytest.fixture()
     def children(self, monkeypatch):
-        """``multiprocessing.active_children()`` as a list a test fills."""
+        """``multiprocessing.active_children()`` as a list a test fills. psutil
+        is a fake that knows no children: the pids here are made up."""
         import multiprocessing
 
         import redact.llms.backends.vllm as vllm_module
@@ -479,6 +480,7 @@ class TestEngineProcesses:
         listed = []
         monkeypatch.setattr(multiprocessing, "active_children",
                             lambda: [p for p in listed if p.is_alive()])
+        monkeypatch.setitem(sys.modules, "psutil", _fake_psutil({}, []))
         monkeypatch.setattr(vllm_module, "_engine_procs", {})
         monkeypatch.setattr(vllm_module, "_stray", [])
         monkeypatch.setattr(vllm_module, "_END_WAIT_S", 0.01)
@@ -513,12 +515,14 @@ class TestEngineProcesses:
         assert vllm_module._engine_procs == {key: [core, coordinator]}
         assert vllm_module._stray == []
 
-    def test_a_failed_build_leaves_its_processes_stray(self, children, monkeypatch):
+    def test_a_failed_build_ends_its_processes(self, children, monkeypatch):
+        """One that outlives SIGKILL is kept, to be tried again on the way out."""
         vllm_module, listed = children
-        core = _Proc(2)
+        ended, kept = _Proc(2), _Proc(3, stubborn=True, immortal=True)
         with pytest.raises(RuntimeError, match="engine core died"):
-            self._build(monkeypatch, listed, [core], fail=True)
-        assert vllm_module._engine_procs == {} and vllm_module._stray == [core]
+            self._build(monkeypatch, listed, [ended, kept], fail=True)
+        assert ("terminate", 2) in ended.done and not ended.alive
+        assert vllm_module._engine_procs == {} and vllm_module._stray == [kept]
 
     def test_terminate_then_kill_what_outlives_it(self, children, monkeypatch):
         vllm_module, _ = children

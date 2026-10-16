@@ -2187,6 +2187,58 @@ def test_a_run_unloads_a_model_for_a_stage_and_loads_it_again(
     assert "CUDA_VISIBLE_DEVICES" not in os.environ
 
 
+def test_a_run_whose_copies_fail_to_build_runs_on_one_copy(
+        tmp_path, monkeypatch, local_models, caplog):
+    """Two cards give the model two copies; their build fails, and the stage
+    runs on one copy on the first card."""
+    import logging
+    import os
+    from types import SimpleNamespace
+
+    import redact
+    import redact.llms.backends.vllm as vllm_module
+    from redact.llms import ModelClient
+    from tests.conftest import fake_vllm_modules
+
+    gen, builds = local_models("_rc_dp_gen"), []
+
+    class _LLM:
+        scheduler_config = SimpleNamespace(max_num_seqs=256)
+
+        def __init__(self, **kw):
+            copies = kw.get("data_parallel_size", 1)
+            builds.append((os.environ.get("CUDA_VISIBLE_DEVICES"), copies))
+            if copies > 1:
+                raise RuntimeError("CUDA out of memory")
+
+        def shutdown(self):
+            pass
+
+    def run(**k):
+        ModelClient.create(k["model"])
+        return pd.DataFrame({"x": [1]})
+
+    monkeypatch.setattr(redact, "generate_inputs", run)
+    monkeypatch.delenv("CUDA_VISIBLE_DEVICES", raising=False)
+    recipe = {"dataset_type": "eval", "data_dir": str(tmp_path), "stages": ["inputs"],
+              "models": {"gen": gen}}
+    try:
+        with patch("redact.llms.resources.measure.detect_gpus",
+                   return_value=("FakeGPU", 2)), \
+             patch("redact.llms.resources.measure.detect_gpu_memory_gib",
+                   return_value=24.0), \
+             patch.dict("sys.modules", fake_vllm_modules(_LLM)), \
+             patch.object(vllm_module, "_prepare_environment"), \
+             caplog.at_level(logging.WARNING, logger="redact.llms.backends.vllm"):
+            summary = run_pipeline(recipe, params={"inputs": {}}, verbose=False)
+    finally:
+        telemetry.uninstall()
+        vllm_module.VLLMBackend.clear_cache()
+    assert builds == [("0,1", 2), ("0", 1)]
+    assert "loading one copy on 0 instead" in caplog.text
+    assert summary["stages"]["inputs"]["counts"] == {"rows": 0}
+
+
 def test_load_recipe_rejects_a_repeated_stage():
     from redact.recipe import load_recipe
 

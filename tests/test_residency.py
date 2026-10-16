@@ -2114,12 +2114,13 @@ class TestPlannedDevices:
 
         Yields ``(module, builds)``: per engine built, the variable as its
         constructor saw it and the constructor's arguments. Setting
-        ``builds.fail`` makes a build raise.
+        ``builds.fail`` makes a build raise, ``builds.fail_first`` the first
+        build only.
         """
         import redact.llms.backends.vllm as vllm_module
 
         class _Builds(list):
-            fail = False
+            fail = fail_first = False
             #: The cards visible_gpu_ids() reads during each build.
             read: list = []
 
@@ -2131,7 +2132,7 @@ class TestPlannedDevices:
             def __init__(self, **kw):
                 builds.append((os.environ.get("CUDA_VISIBLE_DEVICES"), kw))
                 builds.read.append(measure.visible_gpu_ids())
-                if builds.fail:
+                if builds.fail or (builds.fail_first and len(builds) == 1):
                     raise RuntimeError("CUDA out of memory")
 
         monkeypatch.delenv("CUDA_VISIBLE_DEVICES", raising=False)
@@ -2348,13 +2349,45 @@ class TestPlannedDevices:
         vllm_module._engine("org/pdk", None, kw)
         assert builds[0][1]["data_parallel_size"] == 2
 
-    @pytest.mark.parametrize("planned,kwargs,copies", [
-        ((0, 1), {}, "2 copies, one per card (data_parallel_size=2)"),
+    COPIES = [
+        ((0, 1), {}, "2 copies, one per card (data_parallel_size=2)", "0"),
         ((0, 1, 2, 3), {"tensor_parallel_size": 2},
-         "2 copies, each on 2 cards (data_parallel_size=2)"),
-    ])
-    def test_a_failed_build_with_copies_says_how_to_load_one(
-            self, engine, planned, kwargs, copies):
+         "2 copies, each on 2 cards (data_parallel_size=2)", "0,1"),
+    ]
+
+    @pytest.mark.parametrize("planned,kwargs,copies,home", COPIES)
+    def test_a_failed_build_with_copies_loads_one_copy_instead(
+            self, engine, planned, kwargs, copies, home, caplog):
+        vllm_module, builds = engine
+        vllm_module.set_planned_devices(
+            {vllm_module._engine_key("org/pdf1", None, kwargs): planned})
+        builds.fail_first = True
+        events = []
+        observe.set_emitter(events.append)
+        try:
+            with caplog.at_level(logging.WARNING, logger=vllm_module.logger.name):
+                vllm_module._engine("org/pdf1", None, kwargs)
+        finally:
+            observe.set_emitter(None)
+        (first, kw_first), (second, kw_second) = builds
+        assert (first, second) == (",".join(map(str, planned)), home)
+        dp = len(planned) // len(home.split(","))
+        assert kw_first == {**kw_second, "data_parallel_size": dp}
+        (warning,) = [r.getMessage() for r in caplog.records]
+        assert warning == (
+            "[vllm] The engine of org/pdf1 failed to build with 2 copies "
+            f"(RuntimeError: CUDA out of memory); loading one copy on {home} instead. "
+            'To make this permanent, set "copies": 1 in the model\'s entry under '
+            '"models" in the recipe.')
+        (load,) = [e for e in events if e.get("phase") == "load"]
+        assert (load["data_parallel_size"], load["devices"], load["fallback"],
+                load["planned_copies"]) == (1, home.split(","), True, 2)
+        assert list(vllm_module._engines) == [
+            vllm_module._engine_key("org/pdf1", None, kwargs)]
+
+    @pytest.mark.parametrize("planned,kwargs,copies,home", COPIES)
+    def test_a_failed_fallback_names_both_failures(
+            self, engine, planned, kwargs, copies, home):
         vllm_module, builds = engine
         vllm_module.set_planned_devices(
             {vllm_module._engine_key("org/pdh", None, kwargs): planned})
@@ -2363,14 +2396,96 @@ class TestPlannedDevices:
             vllm_module._engine("org/pdh", None, kwargs)
         assert str(raised.value) == (
             f"The vLLM engine of org/pdh was being built with {copies}, and the "
-            "build failed (RuntimeError: CUDA out of memory). To load one copy, "
-            'set "copies": 1 in the model\'s entry under "models" in the recipe, '
-            "or copies={model: 1} on the planner.")
+            "build failed (RuntimeError: CUDA out of memory). One copy on "
+            f"{home} failed as well (RuntimeError: CUDA out of memory).")
         cause = raised.value.__cause__
         assert type(cause) is RuntimeError and str(cause) == "CUDA out of memory"
-        assert len(builds) == 1                         # not tried with one copy
+        assert [kw.get("data_parallel_size") for _, kw in builds] == [2, None]
         assert "CUDA_VISIBLE_DEVICES" not in os.environ
         assert vllm_module._engines == {} and vllm_module.held_seconds() == {}
+
+    @pytest.fixture()
+    def started(self, monkeypatch):
+        """The failed build starts process 31; what is ended is recorded, and
+        ``started.alive`` is what outlives it."""
+        import multiprocessing
+
+        import redact.llms.backends.vllm as vllm_module
+        from tests.test_vllm_backend import _Proc
+
+        record = SimpleNamespace(listed=[], ended=[], alive=[])
+        monkeypatch.setattr(multiprocessing, "active_children",
+                            lambda: [p for p in record.listed if p.is_alive()])
+        monkeypatch.setattr(vllm_module, "_stray", [])
+
+        def terminate(processes=(), **kw):
+            record.ended.append(sorted(p.pid for p in processes))
+            for p in processes:
+                p.alive = p.pid in record.alive
+            return [p.pid for p in processes if p.alive]
+
+        monkeypatch.setattr(vllm_module, "terminate_engine_processes", terminate)
+        record.proc = _Proc(31)
+        return record
+
+    def test_the_failed_builds_processes_end_before_one_copy_is_tried(
+            self, engine, started):
+        vllm_module, builds = engine
+        seen = []
+
+        class _Engine:
+            def __init__(self, **kw):
+                seen.append((list(started.ended), kw.get("data_parallel_size")))
+                if len(seen) == 1:
+                    started.listed.append(started.proc)
+                    raise RuntimeError("CUDA out of memory")
+
+        with patch.dict("sys.modules", fake_vllm_modules(_Engine)):
+            vllm_module.set_planned_devices(
+                {vllm_module._engine_key("org/pdk2", None, {}): (0, 1)})
+            vllm_module._engine("org/pdk2", None, {})
+        assert seen == [([], 2), ([[31]], None)]
+        assert vllm_module._stray == []
+
+    def test_one_copy_is_not_tried_while_the_failed_builds_processes_live(
+            self, engine, started):
+        vllm_module, builds = engine
+        started.alive = [31]
+
+        class _Engine:
+            def __init__(self, **kw):
+                builds.append(kw)
+                started.listed.append(started.proc)
+                raise RuntimeError("CUDA out of memory")
+
+        with patch.dict("sys.modules", fake_vllm_modules(_Engine)):
+            vllm_module.set_planned_devices(
+                {vllm_module._engine_key("org/pdk3", None, {}): (0, 1)})
+            with pytest.raises(RuntimeError) as raised:
+                vllm_module._engine("org/pdk3", None, {})
+        assert len(builds) == 1
+        assert str(raised.value).endswith(
+            'set "copies": 1 in the model\'s entry under "models" in the recipe, or '
+            "copies={model: 1} on the planner. One copy was not tried: processes "
+            "the build started are still alive (31).")
+        assert vllm_module._stray == [started.proc]       # ended on the way out
+
+    def test_one_copy_is_not_tried_on_the_way_out(self, engine, monkeypatch):
+        vllm_module, builds = engine
+        monkeypatch.setattr(vllm_module, "_exiting", False)
+
+        class _Engine:
+            def __init__(self, **kw):
+                builds.append(kw)
+                vllm_module._exiting = True
+                raise RuntimeError("CUDA out of memory")
+
+        with patch.dict("sys.modules", fake_vllm_modules(_Engine)):
+            vllm_module.set_planned_devices(
+                {vllm_module._engine_key("org/pdk4", None, {}): (0, 1)})
+            with pytest.raises(RuntimeError, match="To load one copy"):
+                vllm_module._engine("org/pdk4", None, {})
+        assert len(builds) == 1
 
     @pytest.mark.parametrize("planned,kwargs", [
         ((), {}), ((0,), {}), ((0, 1), {"tensor_parallel_size": 2})])
