@@ -7,6 +7,7 @@ from redact.jailbreak.augmentation import (
     KINDS,
     apply_flat_keywords,
     defaults,
+    natural_only_families,
     resolve,
     rounds_of,
 )
@@ -19,12 +20,13 @@ _BUDGET = {"max_complexity": 6, "max_obfuscations": 2, "include_hacking": True,
 
 def test_both_kinds_are_the_default_when_the_section_is_none():
     for kind in KINDS:
-        assert resolve(None, kind) == resolve({}, kind) == defaults()[kind]
+        assert resolve(None, kind) == resolve({}, kind) == resolve(defaults(), kind)
+    assert resolve(None, "natural") == defaults()["natural"]
 
 
 def test_a_kind_given_as_none_is_off():
     assert resolve({"natural": None}, "natural") is None
-    assert resolve({"natural": None}, "adversarial") == defaults()["adversarial"]
+    assert resolve({"natural": None}, "adversarial") == resolve(None, "adversarial")
 
 
 def _without(names: list, *left_out: str) -> list:
@@ -109,8 +111,11 @@ def test_a_resolved_section_resolves_to_itself():
 
 def test_the_packaged_defaults():
     adversarial, natural = defaults()["adversarial"], defaults()["natural"]
-    assert adversarial["families"] == {
+    assert adversarial["families"] == {"allow": None, "deny": ["translation"]}
+    assert natural_only_families() == ["casual_writing"]
+    assert resolve(None, "adversarial")["families"] == {
         "allow": None, "deny": ["translation", "casual_writing"]}
+    assert "casual_writing" in natural["families"]["allow"]
     assert adversarial["rounds"] is None and adversarial["layer_rates"] == {}
     assert "translation" not in natural["families"]["allow"]
     assert natural["exact_techniques"] == natural["iterations"] == 1

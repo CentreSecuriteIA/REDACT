@@ -37,22 +37,35 @@ def test_the_default_attack_pool_is_every_technique_but_translation_and_casual()
     assert technique_pool(_kind()) == [fn for fn in full if fn not in left_out]
 
 
-def test_allowing_translation_makes_the_pool_every_technique():
-    assert technique_pool(_kind(families={"deny": []})) == all_techniques()
+def _attacks(techniques: list) -> list:
+    """``techniques`` less the natural-only family, which no attack draws."""
+    return [fn for fn in techniques if "casual_writing" not in fn.families]
+
+
+def test_allowing_translation_makes_the_pool_every_attack_technique():
+    assert technique_pool(_kind(families={"deny": []})) == _attacks(all_techniques())
+
+
+def test_a_natural_only_family_is_drawn_by_the_attacks_only_when_allowed():
+    pool = technique_pool(_kind(families={"deny": ["translation", "ascii_art"]}))
+    assert pool and not _in("casual_writing", pool) and not _in("ascii_art", pool)
+    pool = technique_pool(_kind(families={"allow": ["casual_writing", "encode"]}))
+    assert _in("casual_writing", pool)
 
 
 def test_a_denied_layer_drops_that_layer_only():
     pool = technique_pool(_kind(layers={"deny": ["hacking", "requests"]},
                                 families={"deny": []}))
-    assert pool == get_all_obfuscation_functions() + get_all_manipulation_functions()
+    assert pool == _attacks(
+        get_all_obfuscation_functions() + get_all_manipulation_functions())
 
 
 def test_pure_only_drops_model_calls_and_benign_data():
     pool = technique_pool(_kind(pure_only=True, families={"deny": []}))
     assert pool
     assert not any(fn.requires_llm or fn.requires_benign for fn in pool)
-    assert pool == [fn for fn in all_techniques()
-                    if not fn.requires_llm and not fn.requires_benign]
+    assert pool == _attacks([fn for fn in all_techniques()
+                             if not fn.requires_llm and not fn.requires_benign])
 
 
 def test_allow_lists_admit_their_families_and_techniques_then_deny_removes():

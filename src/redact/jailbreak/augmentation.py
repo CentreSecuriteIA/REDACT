@@ -48,13 +48,18 @@ FLAT_KEYWORDS = (
 @lru_cache(maxsize=1)
 def _packaged() -> dict:
     path = paths.jailbreak_configs_dir() / "augmentations.json"
-    data = json.loads(path.read_text(encoding="utf-8"))
-    return {kind: data[kind] for kind in KINDS}
+    return json.loads(path.read_text(encoding="utf-8"))
 
 
 def defaults() -> dict:
     """The packaged section, both kinds, as a copy the caller may change."""
-    return copy.deepcopy(_packaged())
+    return copy.deepcopy({kind: _packaged()[kind] for kind in KINDS})
+
+
+def natural_only_families() -> list[str]:
+    """The families the adversarial kind draws only when its
+    ``families.allow`` names them."""
+    return list(_packaged()["natural_only_families"])
 
 
 def resolve(section: dict | None, kind: str) -> dict | None:
@@ -64,6 +69,8 @@ def resolve(section: dict | None, kind: str) -> dict | None:
     resolved, which comes back unchanged. ``layers``, ``families`` and
     ``techniques`` come back with both their lists (``allow`` ``None`` for
     all), and a kind with ``rounds`` with ``iterations`` set to their number.
+    The adversarial ``families.deny`` holds every family of
+    :func:`natural_only_families` its ``families.allow`` does not name.
 
     Returns:
         The full kind, or ``None`` when ``section`` switches it off.
@@ -110,6 +117,11 @@ def resolve(section: dict | None, kind: str) -> dict | None:
         raise ValueError(
             f"{where} needs an allow list: write families.allow or "
             "techniques.allow, as the natural kind draws only what they name.")
+    if kind == "adversarial":
+        families = resolved["families"]
+        families["deny"] += [name for name in natural_only_families()
+                             if name not in (families["allow"] or ())
+                             and name not in families["deny"]]
     _check_names(where, resolved)
     if type(resolved["pure_only"]) is not bool:
         raise ValueError(
