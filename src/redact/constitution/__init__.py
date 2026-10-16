@@ -1,15 +1,14 @@
-"""Constitution generation for constitutional classifiers.
-
-Generates structured category hierarchies across 4 severity levels
-(harmful, dual-use harmful, dual-use benign, benign).
+"""The constitution stage: per taxonomy category, a hierarchy of constitution
+categories and sample descriptions at four severities, which seeds the inputs.
 
 Usage::
 
     from redact.constitution import ConstitutionPipeline
+    from redact.dataset import load_taxonomy
     from redact.llms import ModelClient
 
     pipeline = ConstitutionPipeline(ModelClient.create("claude-opus-4-6"))
-    constitution = pipeline.run(taxonomy, num_categories=10)
+    constitution = pipeline.run(load_taxonomy("content_moderation_categories"))
 """
 
 from ..types import ALL_ENTRY_TYPES, EntryType

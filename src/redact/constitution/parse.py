@@ -58,14 +58,9 @@ def parse_constitution(text: str) -> list[ParsedEntry]:
         - (another sample)
 
     The constitution prompts (``prompts/constitution/{entry_type}/``) ask
-    the model for this format, so keep the two in sync. Samples under a
-    header that does not parse are dropped, up to the next main category.
-
-    Args:
-        text: Raw constitution markdown.
-
-    Returns:
-        One :class:`ParsedEntry` per sample line.
+    the model for this format, so keep the two in sync. One entry per sample
+    line; samples under a header that does not parse are dropped, up to the
+    next main category.
     """
     entries: list[ParsedEntry] = []
     current_main = ""

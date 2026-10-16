@@ -1,14 +1,4 @@
-"""The constitution stage: generate each unit, save its rows, then ack it.
-
-Usage::
-
-    from redact.constitution import ConstitutionPipeline
-    from redact.dataset import load_taxonomy
-    from redact.llms import ModelClient
-
-    pipeline = ConstitutionPipeline(ModelClient.create("claude-opus-4-6"))
-    constitution = pipeline.run(load_taxonomy("content_moderation_categories"))
-"""
+"""The constitution stage: generate each unit, save its rows, then ack it."""
 
 import logging
 from pathlib import Path

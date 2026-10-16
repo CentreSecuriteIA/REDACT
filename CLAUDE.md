@@ -76,8 +76,9 @@ REDACT/
 │       │   └── loading.py           # HuggingFace dataset loading
 │       │
 │       ├── constitution/            # Constitution generation for classifiers
-│       │   ├── generation.py        # ConstitutionPipeline (4 severity types) → Data_cache CSVs
-│       │   └── input_generation.py  # ConstitutionInputPipeline — wraps InputPipeline.run_from_constitution
+│       │   ├── generation.py        # ConstitutionPipeline.run (the stage), read_constitution
+│       │   ├── units.py             # Unit (one call), plan_units, messages_of, rows_of
+│       │   └── parse.py             # strip_end_marker ([END]), parse_constitution (3-layer markdown → ParsedEntry)
 │       │
 │       ├── jailbreak/               # Jailbreak dataset generation
 │       │   ├── utils.py             # Backward-compat re-export shim (was ~820 lines mixing 7 concerns; now re-exports from the 4 files below)
@@ -314,13 +315,9 @@ Generates structured category hierarchies for constitutional classifier training
 3. **Dual-use benign** — borderline, benign framing, could look harmful
 4. **Absolutely benign** — clearly safe, never flag (hard negatives)
 
-`ConstitutionPipeline` (in `generation.py`) generates entries per taxonomy category using Claude Opus. Uses `parse_constitution()` from `llms/prompting/extraction.py` to parse the 3-layer markdown output. Entries are saved to `Data_cache/constitution/` as per-type CSVs plus `merged.csv`. Each entry later seeds N input samples for classifier training.
+`ConstitutionPipeline(client, output_dir=None).run(taxonomy, ...)` (front: `generate_constitution`, model role `constitution_gen`, Claude Opus by default) makes one call per **unit**: a `(source_category, entry_type)` pair for each of the first `num_taxonomy_categories` taxonomy categories and each entry type (all four by default), asking for `num_categories` constitution categories, plus, with `include_standalone_benign`, one `general::general_benign` unit with no taxonomy category. `units.py` plans the units (`plan_units`), builds each call from `prompts/constitution/{entry_type}/` (`messages_of`) and turns a reply into rows (`rows_of`, via `parse.parse_constitution`). A reply without its `[END]` marker (stopped at the token limit or by a provider filter) or with no entry that parses is rejected whole and the call made again, up to 3 attempts (`llm_pipeline.extracted`); a unit rejected every time is acked `rejected` with no rows, skipped on resume and named in a warning. The units run one at a time through `drive_units(pool_size=1)`; a failed call stops the run and the units saved before it stay acked.
 
-**Resumable + incremental.** A `constitution.manifest.jsonl` plan (one row per `(source_category, entry_type)` unit + the standalone-benign unit) is written before the category loop. Each `(source_category, entry_type)` LLM call (plus the standalone-benign call, keyed `general::general_benign`) is one resumable unit. Entries are flushed to the per-type / `merged.csv` CSVs as each category completes — never held in memory for the whole run — and the unit is recorded in a sidecar `constitution.state.jsonl` ledger (`_state_path` / `_read_state` / `_append_state` in `generation.py`, thin adapters over the shared `dataset.Ledger`) only after its rows are saved. `resume=True` (default) skips ledger-recorded units and appends; a unit that fails all retries stays un-acked so it retries next run, so a crash loses at most one unit. `fresh=True` clears the CSVs and the ledger first. `run()` / `generate_constitution()` return the on-disk `merged.csv` (read back via `_load_saved_result()`), mirroring how `generate_outputs` returns `pd.read_csv(out_path)`. Same sidecar-ledger pattern as the content-moderation output pipeline.
-
-`ConstitutionInputPipeline` (in `input_generation.py`) expands constitution entries into full prompts. It is a thin wrapper that loads the constitution CSVs from disk and delegates to `InputPipeline.run_from_constitution()`; prefer the composable `generate_inputs(constitution_df=generate_constitution(...))` in new code.
-
-**Unified checker.** `build_quality_checker()` in `content_moderation/checker.py` is now entry-type-aware — it accepts `category`, `entry_type`, and `subcategory` and loads the shared template `prompts/input/quality_check/template.json`, so it evaluates harmful, benign, and dual-use samples correctly. `build_output_quality_checker()` is the output-side equivalent.
+Rows (`sample_id` = `content_id(sample_description)`, `constitution_category`, `constitution_subcategory`, `sample_description`, `entry_type`, `source_category`, `source_group_tag`, `model`) go to `{entry_type}.csv` and `merged.csv` under `Data_cache/constitution/`, saved per unit through `CommitBuffer(every=1)` before the unit's ack. The plan is `constitution.manifest.jsonl`, the ledger `constitution.state.jsonl`, keyed `source_category::entry_type`; it is a plain ledger (no lock, no recorded sizes), so a crash between a unit's two appends leaves it un-acked and the next run appends its rows again. `resume=False` removes the CSVs, the ledger and the plan first. `run()` returns `read_constitution(output_dir)`: `merged.csv` with every cell as text and an empty one as `""` (an empty frame with the columns when there is none), rows of earlier runs included; the driver reads the constitution the same way to seed a training run's inputs. Each entry later seeds `samples_per_entry` inputs (see `content_moderation/`).
 
 ---
 

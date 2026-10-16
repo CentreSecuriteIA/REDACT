@@ -194,8 +194,9 @@ src/redact/
 ├── residency/                     # Which local models fit, per stage; preload and unload
 │
 ├── constitution/                  # Constitution generation for classifiers
-│   ├── generation.py              # ConstitutionPipeline (4 severity types)
-│   └── input_generation.py        # ConstitutionInputPipeline (→ InputPipeline.run_from_constitution)
+│   ├── generation.py              # ConstitutionPipeline (4 severity types), read_constitution
+│   ├── units.py                   # One call per (taxonomy category, entry type): its messages and rows
+│   └── parse.py                   # The [END] marker and the 3-layer markdown parser
 │
 ├── content_moderation/            # Content moderation stages
 │   ├── inputs.py                  # InputPipeline.run_from_constitution — the seeded inputs stage
@@ -306,7 +307,6 @@ Everything above this layer calls a unified interface and is backend-agnostic.
 | `load_prompt()` | Load prompt JSON by pipeline/category |
 | `PromptTemplate` | Two-stage prompt render: system prompt built once, template rendered per call |
 | `extract_and_clean()` | Extract a numbered list from LLM output and clean each sample (Q&A pairs: `extract_structured_qa()`) |
-| `parse_constitution()` | Parse 3-layer markdown constitution into structured entries |
 
 **Backend auto-routing** — just pass a model name:
 
@@ -454,7 +454,7 @@ constitution = generate_constitution(
 print(f"{len(constitution)} constitution entries")
 ```
 
-Output saved to `Data_cache/constitution/` as 4 type-based CSVs + `merged.csv`. Each entry can later seed N input samples for classifier training.
+Output saved to `Data_cache/constitution/` as 4 type-based CSVs + `merged.csv` (`read_constitution(dir)` reads it back). A reply cut off before its `[END]` marker is generated again, up to 3 times. Each entry later seeds N input samples for classifier training.
 
 **Expanding constitution entries into input prompts** — pass the returned DataFrame to `generate_inputs()`:
 
@@ -466,14 +466,14 @@ inputs = generate_inputs(
     style="long",                   # "long" (2-5 sentences) or "short" (5-20 words)
     samples_per_entry=3,
     model="llama-3.2-3b-debug",
-    resume=True,                    # True = resume (skip already-processed entries);
-                                    # False = clear per-category CSVs and regenerate
+    resume=True,                    # True = skip entries already done;
+                                    # False = start this style over
 )
 ```
 
 Both `generate_constitution()` and `generate_inputs(constitution_df=...)` are **resumable by default**: re-running with `resume=True` (the default) skips work already saved to disk, so an interrupted run picks up where it left off. Set `resume=False` to clear previous output and regenerate from scratch.
 
-**Entry-type-aware checker** — `build_quality_checker(category, entry_type, subcategory)` in `content_moderation/checker.py` loads the unified template `prompts/input/quality_check/template.json` and injects all three fields, so benign and dual-use samples are evaluated correctly rather than rejected for "not belonging to the harm category." The same checker serves standalone content-moderation, constitution-seeded inputs, and (via `build_output_quality_checker`) output checking.
+**Entry-type-aware checker** — `build_quality_checker(category, entry_type, subcategory)` in `content_moderation/checker.py` loads `prompts/input/quality_check/` with all three fields, so benign and dual-use samples are evaluated correctly rather than rejected for "not belonging to the harm category." It serves both input paths; `build_output_quality_checker` is the output-side equivalent.
 
 ---
 
@@ -741,20 +741,20 @@ Everything above is **batched, resumable, and offline-testable** (drive it with 
 
 ### Extraction Utilities
 
-Multi-format extraction from LLM output, plus constitution parsing:
+Multi-format extraction from LLM output (`redact.llms`), plus constitution parsing (`redact.constitution.parse`):
 
 | Function | Purpose |
 |---|---|
 | `extract_numbered_list()` | `"1. sample"` / `"2) sample"` / `"3: sample"` |
 | `extract_structured_qa()` | `**Prompt N:** **Question:** ... **Answer:** ...` |
-| `parse_constitution()` | 3-layer markdown hierarchy -> `ConstitutionEntry` list |
+| `parse_constitution()` | 3-layer markdown hierarchy -> `ParsedEntry` list (`redact.constitution.parse`) |
 | `clean_sample()` | Strip markdown formatting and ChatML tokens (`<\|im_end\|>`) |
 | `get_format_instruction()` | Format instructions to append to system prompts — loaded from `prompts/format_instructions/{style}/`, one of `EXTRACTION_STYLES` |
 
 Constitution parsing example:
 
 ```python
-from redact.llms import parse_constitution
+from redact.constitution.parse import parse_constitution
 
 entries = parse_constitution("""
 ## 1. Violence
