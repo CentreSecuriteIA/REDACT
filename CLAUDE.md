@@ -52,7 +52,15 @@ REDACT/
 │       │
 │       ├── residency/               # GPU planning for local models: footprint, placement, plan, explain, lifecycle (preload/unload), phases (plan per stage)
 │       │
-│       ├── multi_turn/              # General multi-turn conversation datasets (Setting → Trajectory); Actors, runner
+│       ├── multi_turn/              # Conversation datasets: a Setting played on seeds, saved and scored
+│       │   ├── transcript.py        # Step, StepType, Transcript: the typed step log
+│       │   ├── actors.py            # Actor, ScriptedActor, ModelActor, StrategyActor
+│       │   ├── conversation.py      # Setting, Trajectory, conversation_gen, run_conversation
+│       │   ├── pipeline.py          # generate_conversations: the conversation stage
+│       │   └── evaluate.py          # evaluate_conversations: the judge pass; judge_prompt
+│       │
+│       ├── multiturn_attacks/       # Crescendo / PAIR attacks as Settings: build_attack_setting, generate_attacks, score_attacks, optimize_attack
+│       ├── optimization/            # optimize(): beam search over conversation moves toward a judge's yes
 │       │
 │       ├── content_moderation/      # Content moderation stages: inputs, outputs, paraphrases
 │       │   ├── inputs.py            # InputPipeline: run_from_constitution (the seeded inputs stage) + the shared message building
@@ -131,6 +139,8 @@ REDACT/
 │       │   │   │   └── framing_templates.json         # 5 scenario-modifying framing directives
 │       │   │   ├── obfuscation/
 │       │   │   │   └── structural_templates.json      # XML and Markdown wrappers
+│       │   │   ├── multi_turn/
+│       │   │   │   └── crescendo_followups.json       # The crescendo attack's follow-up messages
 │       │   │   └── requests/
 │       │   │       ├── answer_templates.json          # 9 output-format + conditioning directives
 │       │   │       ├── answer_language_templates.json # 20 languages + 4 template variants
@@ -153,6 +163,7 @@ REDACT/
 │           ├── paraphrase/          # generation/ + check/ (fingerprint removal)
 │           ├── jailbreak/           # Jailbreak prompt templates (per-technique)
 │           ├── constitution/        # Constitution prompts (4 severity types + general_benign)
+│           ├── conversation/        # judge, pair_attacker, success_judge (multi-turn)
 │           └── format_instructions/ # Multi-sample output format snippets (numbered/
 │                                     # structured_qa), paired with
 │                                     # llms/prompting/extraction.py's
@@ -233,11 +244,13 @@ Both follow the same rule as the rest of the LLM layer: **instrument where the d
 
 ### `multi_turn/` — General multi-turn conversation datasets
 
-Use-case-agnostic conversation generation: define a **`Setting`** (how it's *driven* — `conversation` (plain) vs `feedback` (adaptive) — plus participants, `max_turns`, optional `stop`) and play it on a seed to produce a **`Trajectory`** (the full typed step log). An **`Actor`**'s turn is a generator `turn(transcript) -> yields LLMRequest, returns list[Step]`: `ScriptedActor` (seed/replay, no LLM), `ModelActor` (one LLM turn), `StrategyActor` (strategize→ask→analyze, all logged). `run_conversation(setting, seed, call)` is the single-conversation path; `generate_conversations(seeds, setting, data_dir, iterations, resume, …)` is the batched, resumable pipeline (writes `conversations.csv`), and `evaluate_conversations(...)` is the separable judge pass (writes `conversations_scored.csv`).
+Use-case-agnostic. A **`Setting`** (`participants`, `max_turns`, optional `stop(transcript)`, `name`) played on a seed gives a **`Trajectory`** (`input_id`, `setting`, `transcript`, `turns_used`, `stop_reason`): the seed is the first participant's message, then the participants take turns in order until `max_turns` (the seed counts as one) or until `stop` is true. A **`Transcript`** is a typed step log: `message`/`reply` steps carry a chat role and are sent to models (`as_messages()`); `strategy`/`analysis`/`evaluation` steps are notes, only logged. An **`Actor`**'s turn is a generator `turn(transcript)` that yields `LLMRequest`s and returns its `Step`s: `ScriptedActor` (the given messages in order, the last repeated; no model), `ModelActor` (one call on the visible transcript), `StrategyActor` (sends what a `propose(transcript, turn_index)` generator builds, logging its note as a `strategy` step; it keeps no state between turns). `conversation_gen(setting, seed)` is the generator; `run_conversation(setting, seed, call)` drives one with a blocking call.
 
-**Library-consistent naming.** Conversation rows/units use the same vocabulary as every other stage — `input_id` (source seed row's id, mirroring jailbreak/output/paraphrase), `iteration` (0-based per-source index; independent stochastic variants, *not* escalation rounds — the `iterations` param sets the count), `source="conversation"`, and the `(input_id, iteration)` ledger key. `Trajectory.input_id` matches. So conversation datasets join / dedup / resume identically to inputs, jailbreaks, and paraphrases — the subsystem is a first-class part of the library, not an appendix.
+**The stages.** `generate_conversations(seeds, setting, data_dir, iterations=1, resume=True, batch_size=256, ...)` plays the setting (a factory, or a template deep-copied per conversation) on every seed (a `seed`/`sample`/`prompt`/`text` column) `iterations` times. A unit is `(input_id, iteration)`: planned whole in `conversations.manifest.jsonl`, driven through `drive_units` (pool sized by the `ModelActor`s' clients), saved to `conversations.csv` (`sample_id` = `content_id("{input_id}:{iteration}")`, `input_id`, `iteration`, `setting`, `turns_used`, `stop_reason`, `transcript` as JSON, `category`, `entry_type`, `source="conversation"`) and acked in the ledger keyed `(input_id, iteration)`; a unit that raises gets a row with `stop_reason="ERROR: ..."` and is acked. `iteration` numbers independent stochastic variants, not escalation rounds. `evaluate_conversations(data_dir=..., judge_model=..., judge_system=None, scope="last_reply" | "transcript")` is the separable judge pass: the criterion is the judge's system prompt (default `prompts/conversation/judge`), the goal is the seed. It writes `conversations_scored.csv` (`sample_id`, `success`, `judge_reasoning`, `judge_model`, `scope`), ledger keyed `sample_id`; a transcript too long for the judge is scored failed and acked, any other unit error stops the stage. Conversations are not a recipe stage: call the functions. Internals capture is not wired in yet.
 
-Dependency direction: `multi_turn/` → `llms/` only. The jailbreak multi-turn **attacks** and **optimization** loops live in their *own* top-level folders (`multiturn_attacks/`, `optimization/`) that build on `multi_turn/` — never inside it. Oriented toward Inspect (seed≈Sample, messages≈ChatMessage, step-log≈events, Setting.drive≈solver, judge≈scorer). Design/plan: `.claude/theme4_multiturn_plan.md`.
+**Applications**, each its own top-level folder building on `multi_turn/` (never inside it): `multiturn_attacks/` — `build_attack_setting(target_model, "crescendo" | "pair", ...)` returns a Setting factory, an attacker `StrategyActor` then the target `ModelActor`. Crescendo sends `DEFAULT_CRESCENDO_FOLLOWUPS` (`configs/jailbreak/multi_turn/crescendo_followups.json`), optionally through a pure jailbreak technique; PAIR has an attacker model write each message (`prompts/conversation/pair_attacker`). `generate_attacks` / `score_attacks` wrap the two stages, scoring with `SUCCESS_JUDGE_SYSTEM` (`prompts/conversation/success_judge`). The target must be safety-trained and has no default. `optimization/` — `optimize(seed, target_model, candidates, judge_model, judge_system, beam=2, depth=3)` extends every frontier node by each candidate move, has the target reply to all of them in one round, scores the replies with the judge, keeps the `beam` best, and returns `(best_node, tree)`; `multiturn_attacks.optimize_attack` feeds it jailbreak moves.
+
+Dependency direction: `multi_turn/` imports `llm_pipeline/`, `llms/` and `dataset/` only. Oriented toward Inspect (seed≈Sample, messages≈ChatMessage, step log≈events, Setting≈solver, judge≈scorer).
 
 ---
 

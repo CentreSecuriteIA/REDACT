@@ -248,6 +248,10 @@ src/redact/
 │   ├── augmentation.py            # The augmentation section (two kinds)
 │   └── directives.py              # Template files of the pure techniques
 │
+├── multi_turn/                    # Conversation datasets: Setting, actors, generate/evaluate_conversations
+├── multiturn_attacks/             # Crescendo / PAIR attacks against a safety-trained target
+├── optimization/                  # Beam search over conversation moves toward a judge's yes
+│
 ├── dataset/                       # Rows on disk: identity, sidecar files, resume, the per-category tree
 │   ├── identity.py                # content_id (content hash of a text), row_id / row_ids
 │   ├── rows.py                    # The rows of one CSV: append_rows, read_rows, iter_rows, count_rows
@@ -649,14 +653,14 @@ result, info = combo("some harmful prompt")
 
 ### Multi-turn Conversations
 
-A **use-case-agnostic** subsystem for generating multi-turn **conversation datasets**. Define a `Setting` (how the conversation is *driven* — plain `conversation` vs adaptive `feedback` — plus participants, `max_turns`, an optional stop) and play it on a seed to produce a `Trajectory` — a **typed step log** that captures every step, including an actor's *strategy*/*analysis* provenance alongside the visible turns (a multi-turn transcript/trace, not just a final answer).
+A **use-case-agnostic** subsystem for generating multi-turn **conversation datasets**. Define a `Setting` (its participants, `max_turns`, an optional `stop`) and play it on a seed to produce a `Trajectory` — a **typed step log** that captures every step, including an actor's *strategy* notes alongside the visible turns (a multi-turn transcript, not just a final answer). The seed is the first participant's message; the participants then take turns in order.
 
-Layering (dependency direction strictly downward): `llms/conversation.py` (shared primitives: `LLMRequest`, `Transcript`/`Step`, `drive_generators`) ← **`multi_turn/`** (the general core) ← **`multiturn_attacks/`** and **`optimization/`** (applications, each its own top-level folder). Design is Inspect-oriented (seed ≈ `Sample`, messages ≈ `ChatMessage`, `Setting.drive` ≈ solver, judge ≈ scorer, branching ≈ `fork`).
+Layering (dependency direction strictly downward): `llm_pipeline/` (`LLMRequest`, the drivers) ← **`multi_turn/`** (the general core) ← **`multiturn_attacks/`** and **`optimization/`** (applications, each its own top-level folder). Design is Inspect-oriented (seed ≈ `Sample`, messages ≈ `ChatMessage`, `Setting` ≈ solver, judge ≈ scorer).
 
 **Actors** — an actor's turn is a generator `turn(transcript) -> yields LLMRequest, returns list[Step]`:
 - `ScriptedActor` — fixed/templated turns or replay a given transcript (no LLM)
 - `ModelActor` — one LLM turn (renders the transcript, calls its model)
-- `StrategyActor` — an adaptive, multi-step turn: strategize → compose (optionally applying jailbreak augmentations) → send → analyze, with **every sub-step logged**
+- `StrategyActor` — sends what a `propose(transcript, turn_index)` generator builds (it may call a model, e.g. an attacker), logging its note as a `strategy` step
 
 **Generate conversations** (batched, resumable):
 
@@ -673,7 +677,7 @@ make_setting = lambda: Setting(
 )
 convos = generate_conversations(seeds, make_setting, data_dir="./runs/convo", iterations=1)
 # -> Datasets/conversations.csv (sample_id, input_id, iteration, setting, turns_used, stop_reason, transcript[JSON], …)
-# resumable via a full-plan *.manifest.jsonl + a sidecar *.state.jsonl ledger
+# resumable via a full-plan *.manifest.jsonl + a sidecar *.state.jsonl ledger; not a recipe stage
 ```
 
 **Evaluate — optional and separable** (generate → *then* judge; nothing about success is hardwired into generation):
@@ -707,7 +711,7 @@ scored = score_attacks(data_dir="./runs/attack", judge_model="venice-uncensored"
 
 #### Optimization / search (`optimization/`)
 
-A general **optimize-toward-an-objective** search (the controller above `drive_generators`): expand candidate next-turns in parallel, score each with a judge, **log the whole tree**, keep the best `beam`, continue with backtracking. Objective-general; subsumes PAIR (`beam=1`), TAP (`beam>1`), and optimized-crescendo (candidates = jailbreak technique combinations, keep the best, escalate).
+A general **optimize-toward-an-objective** beam search (`optimization.optimize`): extend every frontier node by each candidate move, have the target reply to all of them in one round, score the replies with a judge, **keep the whole tree**, and continue with the `beam` best. Objective-general; `beam=1` refines a single line (PAIR-like), `beam>1` explores (TAP-like), and `optimize_attack` uses jailbreak techniques as the moves.
 
 ```python
 from redact.multiturn_attacks import optimize_attack
