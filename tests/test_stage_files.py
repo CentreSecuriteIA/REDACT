@@ -63,6 +63,7 @@ def _dies_on_call(n: int, calls: list):
 
 
 def _jailbreaks(folder, monkeypatch) -> dict:
+    import redact.jailbreak.augmentation as JA
     import redact.jailbreak.plan as JP
     import redact.jailbreak.pool as JPool
     import redact.stages as P
@@ -82,6 +83,8 @@ def _jailbreaks(folder, monkeypatch) -> dict:
 
     monkeypatch.setattr(JP, "assign_combination", assign)
     monkeypatch.setattr(JPool, "all_techniques", lambda: [one_step, two_step, broken])
+    # The fake techniques are in no spec.
+    monkeypatch.setattr(JA, "_check_names", lambda where, resolved: None)
 
     inputs = pd.DataFrame({
         "sample_id": _IDS,
@@ -114,7 +117,8 @@ def _jailbreaks(folder, monkeypatch) -> dict:
                 "adversarial": {"rounds": [{"exact_techniques": 1},
                                            {"max_complexity": 4}]},
                 "natural": {"families": {"allow": None},
-                            "techniques": {"allow": None}},
+                            "techniques": {"allow": ["one_step", "two_step", "broken"],
+                                           "deny": []}},
             },
             batch_size=2, auto_generate_benign=False, verbose=False)
 

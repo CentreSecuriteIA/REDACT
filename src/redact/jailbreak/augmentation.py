@@ -3,8 +3,9 @@ section says.
 
 A section is ``{"adversarial": {...}, "natural": {...}}``. A kind given
 overlays its default from ``configs/jailbreak/augmentations.json`` key by key:
-a value given replaces the default's whole, list or object alike. A kind given
-as ``None`` is off; a kind left out is the default.
+a value given replaces the default's whole, except ``layers``, ``families``
+and ``techniques``, whose ``allow`` and ``deny`` lists replace the default's
+one by one. A kind given as ``None`` is off; a kind left out is the default.
 """
 
 import copy
@@ -94,11 +95,21 @@ def resolve(section: dict | None, kind: str) -> dict | None:
             f"{where} has unknown key(s) {unknown}; write only "
             f"{list(_KIND_KEYS[kind])}.")
 
-    resolved = {**defaults()[kind], **copy.deepcopy(given)}
+    default = defaults()[kind]
+    resolved = {**default, **copy.deepcopy(given)}
     _check_entry_types(where, resolved["entry_types"])
-    resolved["layers"] = _lists(where, "layers", resolved["layers"], ("deny",))
-    for level in ("families", "techniques"):
-        resolved[level] = _lists(where, level, resolved[level], ("allow", "deny"))
+    for level, keys in (("layers", ("deny",)), ("families", ("allow", "deny")),
+                        ("techniques", ("allow", "deny"))):
+        if level in given:
+            lists = _lists(where, level, given[level], keys)
+            resolved[level] = _overlay(
+                where, level, default[level],
+                {key: lists[key] for key in keys if key in given[level]})
+    if (kind == "natural" and resolved["families"]["allow"] is None
+            and resolved["techniques"]["allow"] is None):
+        raise ValueError(
+            f"{where} needs an allow list: write families.allow or "
+            "techniques.allow, as the natural kind draws only what they name.")
     _check_names(where, resolved)
     if type(resolved["pure_only"]) is not bool:
         raise ValueError(
@@ -235,6 +246,23 @@ def _lists(where: str, level: str, value, keys: tuple[str, ...]) -> dict:
             raise ValueError(
                 f"{where}.{level} names {both} under both allow and deny; write "
                 "each under one of them.")
+    return out
+
+
+def _overlay(where: str, level: str, default: dict, given: dict) -> dict:
+    """The lists ``given`` holds over ``default``'s, one by one.
+
+    A name given under one list leaves the default's other list, so a deny
+    given alone is the default's allow less those names.
+    """
+    out = {**default, **given}
+    for key, other in (("allow", "deny"), ("deny", "allow")):
+        if given.get(key) and other not in given and out.get(other):
+            out[other] = [name for name in out[other] if name not in given[key]]
+            if other == "allow" and not out[other]:
+                raise ValueError(
+                    f"{where}.{level}.deny leaves out every name of the default's "
+                    f"allow; write {level}.allow as well.")
     return out
 
 
