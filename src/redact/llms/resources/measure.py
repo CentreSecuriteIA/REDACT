@@ -1,8 +1,9 @@
 """Probe the machine's GPUs, and measure what an in-process load took on them.
 
-:func:`detect_gpus` and :func:`detect_gpu_memory_gib` ask ``nvidia-smi`` for
-the cards, for the planner and the cost roll-up, and :func:`card_use` for
-what each card holds, for the run's check before it loads a model.
+:func:`gpu_cards` asks ``nvidia-smi`` for each card, for the planner and the
+loader, :func:`detect_gpus` for the cards' name and count, for the cost
+roll-up, and :func:`card_use` for what each card holds, for the run's check
+before it loads a model.
 :func:`free_total_gib` is the planner's fallback for the card size.
 
 Only the transformers backend measures its loads (:class:`Measurement`), for
@@ -98,56 +99,36 @@ def detect_gpus(visible: bool = False) -> tuple[str | None, int]:
 
 
 def detect_gpu_memory_gib() -> float | None:
-    """Total VRAM per device, via ``nvidia-smi``.
+    """The size of the smallest card this process can see, in GiB.
 
-    The residency planner's other capacity source, ``torch.cuda.mem_get_info``,
-    needs torch installed *and* CUDA usable — neither is true on a machine that
-    merely has a card. ``nvidia-smi`` answers without either, so capacity is
-    known wherever a GPU is, not only where the full stack is.
+    ``nvidia-smi`` answers without torch or a usable CUDA, so the size is
+    known wherever a card is, not only where the full stack is.
 
     Returns:
-        Per-device total in **GiB**, or ``None`` when ``nvidia-smi`` is
-        absent or unparseable. On a machine with mixed cards it is the
-        smallest: a plan has one card size, and a grant computed on the
-        smallest card is safe on every card. Only the cards
-        ``CUDA_VISIBLE_DEVICES`` leaves visible count, where it names them
-        by index.
+        The smallest total over the cards :func:`gpu_cards` finds visible:
+        a plan has one card size. ``None`` when ``nvidia-smi`` is absent or
+        unparseable, or no card is visible.
     """
-    exe = shutil.which("nvidia-smi")
-    if exe is None:
-        return None
-    try:
-        out = subprocess.run(
-            [exe, "--query-gpu=memory.total", "--format=csv,noheader,nounits"],
-            capture_output=True, text=True, timeout=10, check=True,
-        ).stdout
-    except (subprocess.SubprocessError, OSError) as exc:
-        logger.debug("nvidia-smi memory query failed (%s)", exc)
-        return None
-    try:
-        sizes = [int(line) for line in out.splitlines() if line.strip()]
-    except ValueError:
-        return None
-    # The planner counts the visible cards, so a hidden one must not set
-    # the size. nvidia-smi lists the cards by index, not by UUID.
-    ids = visible_gpu_ids()
-    if ids and all(entry.isdigit() for entry in ids):
-        sizes = [sizes[int(entry)] for entry in ids if int(entry) < len(sizes)]
-    # MiB -> GiB. 1024-based, matching resources/estimate.py: mixing this
-    # with a decimal-GB divisor there is what made the same card read 48.0
-    # or 44.7 depending on the path.
-    return round(min(sizes) / 1024, 1) if sizes else None
+    cards = gpu_cards(visible=True)
+    return min(card.total_gib for card in cards) if cards else None
 
 
 @dataclass(frozen=True)
-class CardUse:
-    """What one card holds, as ``nvidia-smi`` reports it."""
+class Card:
+    """One card, as ``nvidia-smi`` reports it."""
 
-    #: The card's index as ``nvidia-smi`` numbers it.
+    #: The card's index as ``nvidia-smi`` numbers it, in PCI bus order.
     index: int
     uuid: str
     used_gib: float
     total_gib: float
+    name: str = ""
+
+
+@dataclass(frozen=True)
+class CardUse(Card):
+    """What one card holds, as ``nvidia-smi`` reports it."""
+
     #: ``(pid, name, GiB)`` of each compute process on the card. The GiB is
     #: ``None`` where ``nvidia-smi`` cannot say.
     processes: tuple[tuple[int, str, float | None], ...] = ()
@@ -175,17 +156,61 @@ def _gib(mib: str) -> float | None:
     return None if mib.strip().startswith("[") else round(int(mib) / 1024, 1)
 
 
+def gpu_cards(visible: bool = False) -> list[Card] | None:
+    """Each card's index, UUID, name and memory, from one ``nvidia-smi`` query.
+
+    Args:
+        visible: Only the cards ``CUDA_VISIBLE_DEVICES`` leaves this process,
+            in the variable's order, so that the k-th is the card the
+            planner and the loader number k. An entry names a card by its
+            index or by its UUID, or a prefix of it; as CUDA does, an entry
+            that names no card ends the list.
+
+    Returns:
+        One entry per card, in ``nvidia-smi``'s order unless ``visible``, or
+        ``None`` when ``nvidia-smi`` is absent, fails, lists no card or
+        answers in a form not read here.
+    """
+    lines = _query("--query-gpu=index,uuid,memory.used,memory.total,name")
+    if not lines:
+        return None
+    cards = []
+    try:
+        for line in lines:
+            index, uuid, used, total, name = (
+                part.strip() for part in line.split(",", 4))
+            used_gib, total_gib = _gib(used), _gib(total)
+            if used_gib is None or total_gib is None:
+                return None
+            cards.append(Card(int(index), uuid, used_gib, total_gib, name))
+    except ValueError:
+        return None
+    ids = visible_gpu_ids() if visible else None
+    if ids is None:
+        return cards
+    shown = []
+    for entry in ids:
+        by_uuid = entry.startswith("GPU-")
+        card = next((card for card in cards if entry == str(card.index)
+                     or (by_uuid and card.uuid.startswith(entry))), None)
+        if card is None:
+            break
+        shown.append(card)
+    return shown
+
+
 def card_use() -> list[CardUse] | None:
     """Each card's memory in use and the compute processes holding it.
 
-    Two ``nvidia-smi`` queries: the cards, and the compute processes.
+    Two ``nvidia-smi`` queries: the cards (:func:`gpu_cards`), and the
+    compute processes.
 
     Returns:
         One entry per card, in ``nvidia-smi``'s order, or ``None`` when
         ``nvidia-smi`` is absent, fails, lists no card or answers in a form
         not read here.
     """
-    cards = _query("--query-gpu=index,uuid,memory.used,memory.total")
+    cards = gpu_cards()
     apps = _query("--query-compute-apps=pid,used_memory,gpu_uuid,process_name")
     if not cards or apps is None:
         return None
@@ -194,17 +219,10 @@ def card_use() -> list[CardUse] | None:
         for line in apps:
             pid, used, uuid, name = (part.strip() for part in line.split(",", 3))
             held.setdefault(uuid, []).append((int(pid), name, _gib(used)))
-        use = []
-        for line in cards:
-            index, uuid, used, total = (part.strip() for part in line.split(","))
-            used_gib, total_gib = _gib(used), _gib(total)
-            if used_gib is None or total_gib is None:
-                return None
-            use.append(CardUse(int(index), uuid, used_gib, total_gib,
-                               tuple(held.get(uuid, ()))))
     except ValueError:
         return None
-    return use
+    return [CardUse(card.index, card.uuid, card.used_gib, card.total_gib, card.name,
+                    tuple(held.get(card.uuid, ()))) for card in cards]
 
 
 def _devices(cuda) -> list:
