@@ -16,7 +16,7 @@ from unittest.mock import MagicMock, patch
 
 import pytest
 
-from redact.exceptions import GenerationError, PromptTooLongError
+from redact.exceptions import PromptTooLongError, RedactError
 from redact.llm_pipeline import LLMRequest, drive_units
 from redact.llm_pipeline import drive as drive_module
 from redact.llms import ModelClient, aio, observe
@@ -547,14 +547,14 @@ def test_a_failed_request_propagates_and_cancels_those_in_flight():
     assert sorted(script.log[4:]) == [("cancel", "late1"), ("cancel", "slow1")]
 
 
-def test_a_request_failing_with_another_generation_error_still_propagates():
+def test_a_request_failing_with_another_library_error_still_propagates():
     """Only a prompt that is too long is its unit's failure."""
-    error = GenerationError("out of retries")
+    error = RedactError("out of retries")
     script = _Script(["bad1"], fail={"bad1": error})
     client = _lane_client(script)
     failed = []
     units = [("a", _unit(client, "slow")), ("b", _unit(client, "bad"))]
-    with pytest.raises(GenerationError) as raised:
+    with pytest.raises(RedactError) as raised:
         drive_units(iter(units), pool_size=2, on_done=lambda k, v: None,
                     on_error=lambda k, e: failed.append(k))
     assert raised.value is error and failed == []

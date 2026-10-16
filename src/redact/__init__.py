@@ -1,198 +1,74 @@
-"""REDACT — Red-team Dataset Automation & Construction Toolkit.
+"""REDACT: a taxonomy and a task in, a dataset out.
 
-A modular, extensible pipeline for automated red teaming dataset generation.
-Designed for content moderation and jailbreak dataset construction.
-
-Subpackages:
-    llms               — Model-agnostic LLM abstraction layer
-    content_moderation — Content moderation input/output generation
-    jailbreak          — Jailbreak technique library
-    dataset            — Data handling utilities (I/O, merge, split, taxonomy)
-
-On import, this module:
-    1. Attempts to load a .env file (via python-dotenv if available)
-    2. Sets the default random seed for reproducibility
-    3. Makes all subpackages importable
+Every module logs under the ``redact`` logger, which gets a ``NullHandler``
+and no level: configuring logging is the application's call
+(``scripts/run.py`` does it). On import the package loads ``.env`` from
+:func:`get_output_dir`, its values winning over the shell's.
 """
 
 import logging
-import os
 import random
 
 from .paths import get_output_dir
 
 __version__ = "0.1.0"
 
-# Every module logs via logging.getLogger(__name__) under this "redact" root —
-# never print(). As a library we attach no handler and set no level (that's the
-# application's call); NullHandler only silences the "no handlers found"
-# warning if the caller never configures logging at all. To see progress,
-# configure it yourself, e.g. logging.basicConfig(level=logging.INFO), or use
-# scripts/run.py, which already does this (--quiet -> WARNING, --debug -> DEBUG).
 logging.getLogger(__name__).addHandler(logging.NullHandler())
 
 
-# ---------------------------------------------------------------------------
-# Environment loading
-# ---------------------------------------------------------------------------
-
-def _load_env() -> bool:
-    """Load .env file from the project root returned by ``get_output_dir()``.
-
-    Uses ``override=True`` so .env values take precedence over any
-    pre-existing (potentially stale) shell environment variables.
-
-    Returns True if a .env file was loaded.
-    """
+def _load_env() -> None:
+    """Load ``.env`` from :func:`get_output_dir`, over the shell's values."""
     try:
         from dotenv import load_dotenv
     except ImportError:
-        return False
-
+        return
     candidate = get_output_dir() / ".env"
     if candidate.exists():
         load_dotenv(candidate, override=True)
-        return True
-    return False
 
 
 _load_env()
-
-
-# ---------------------------------------------------------------------------
-# Random seed
-# ---------------------------------------------------------------------------
 
 DEFAULT_SEED: int = 42
 
 
 def set_seed(seed: int = DEFAULT_SEED) -> None:
-    """Set the global random seed for reproducibility.
-
-    Sets seeds for the ``random`` module and, if available, ``numpy``.
-    Called automatically on library import with DEFAULT_SEED.
-
-    Args:
-        seed: Integer seed value.
-    """
+    """Seed the global ``random`` module and, if installed, ``numpy``."""
     random.seed(seed)
     try:
         import numpy as np
-        np.random.seed(seed)
     except ImportError:
-        pass
+        return
+    np.random.seed(seed)
 
 
-# Apply default seed on import
-set_seed(DEFAULT_SEED)
-
-
-# ---------------------------------------------------------------------------
-# Configuration helper
-# ---------------------------------------------------------------------------
-
-class Config:
-    """Library-wide configuration loaded from environment variables.
-
-    Keys are accessed via ``Config.get()`` or attribute-style constants.
-    Values reflect the current environment (including .env values).
-
-    Usage::
-
-        from redact import Config
-
-        Config.validate()  # raises if required keys are missing
-        client = ModelClient.create("venice-uncensored")  # resolves its backend
-    """
-
-    # Known environment variable names
-    VENICE_API_KEY = "VENICE_API_KEY"
-    ANTHROPIC_API_KEY = "ANTHROPIC_API_KEY"
-    HF_TOKEN = "HF_TOKEN"
-    REDACT_OUTPUT_DIR = "REDACT_OUTPUT_DIR"
-    # Telemetry sink: "jsonl" (default) | "wandb" | "off". See redact.telemetry.
-    REDACT_TRACE = "REDACT_TRACE"
-    # Key into configs/llm/gpu_pricing.json, e.g. "runpod". Default "local" (rate 0).
-    REDACT_GPU_PROVIDER = "REDACT_GPU_PROVIDER"
-
-    @classmethod
-    def get(cls, key: str, default: str | None = None) -> str | None:
-        """Get an environment variable value.
-
-        Args:
-            key: Environment variable name.
-            default: Fallback if not set.
-
-        Returns:
-            The value, or *default*.
-        """
-        return os.environ.get(key, default)
-
-    @classmethod
-    def validate(cls, require: list[str] | None = None) -> None:
-        """Validate that required environment variables are set.
-
-        Args:
-            require: List of env var names to check.
-                Defaults to ``["VENICE_API_KEY"]``.
-
-        Raises:
-            ValueError: If any required variable is missing.
-        """
-        if require is None:
-            require = ["VENICE_API_KEY"]
-
-        missing = [key for key in require if not os.environ.get(key)]
-        if missing:
-            raise ValueError(
-                f"Missing required environment variable(s): {', '.join(missing)}. "
-                f"Set them in your shell or in a .env file."
-            )
-
-    @classmethod
-    def is_configured(cls, *keys: str) -> bool:
-        """Check whether all given env vars are set (non-empty).
-
-        Args:
-            *keys: Environment variable names to check.
-
-        Returns:
-            True if all are set and non-empty.
-        """
-        return all(os.environ.get(k) for k in keys)
-
-
-# ---------------------------------------------------------------------------
-# Subpackage availability — lazy, no heavy imports on library load
-# ---------------------------------------------------------------------------
-
-# Deliberately one import per line (not merged into one `from . import (...)`
-# block): each line's own noqa suppression stays attached to the line ruff
-# actually reports E402 on — a merged block only lets the *opening* line
-# suppress E402, silently un-suppressing it for every other name inside it.
-from . import llms  # noqa: E402, F401, I001
-from . import llm_pipeline  # noqa: E402, F401
-from . import content_moderation  # noqa: E402, F401
-from . import jailbreak  # noqa: E402, F401
-from . import dataset  # noqa: E402, F401
-from . import constitution  # noqa: E402, F401
-from . import multi_turn  # noqa: E402, F401
-from . import optimization  # noqa: E402, F401
-from . import multiturn_attacks  # noqa: E402, F401
-
-# Convenience re-export: the built-in 4-round escalation schedule for
-# generate_jailbreaks(settings_per_iteration=...).
-from .jailbreak import default_escalation_schedule  # noqa: E402, F401
-
-# Multi-turn conversation datasets.
-from .multi_turn import (  # noqa: E402, F401
-    evaluate_conversations,
-    generate_conversations,
+# Imported after .env is loaded, so a library reading the environment at
+# import time sees its values.
+from . import (  # noqa: E402
+    constitution,
+    content_moderation,
+    dataset,
+    jailbreak,
+    llm_pipeline,
+    llms,
+    multi_turn,
+    multiturn_attacks,
+    optimization,
+    paths,
+    residency,
+    telemetry,
 )
-
-# ---------------------------------------------------------------------------
-# High-level pipeline functions
-# ---------------------------------------------------------------------------
+from .dataset import create_taxonomy  # noqa: E402
+from .driver import (  # noqa: E402
+    read_manifest,
+    read_record,
+    run_pipeline,
+    write_manifest,
+    write_record,
+)
+from .jailbreak import default_escalation_schedule  # noqa: E402
+from .multi_turn import evaluate_conversations, generate_conversations  # noqa: E402
+from .recipe import load_params, load_recipe  # noqa: E402
 from .stages import (  # noqa: E402
     STAGES,
     build_dataset,
@@ -202,17 +78,42 @@ from .stages import (  # noqa: E402
     generate_outputs,
     generate_paraphrases,
 )
+from .types import ALL_ENTRY_TYPES, EntryType  # noqa: E402
 
-# A taxonomy file of your own, loaded by name.
-from .dataset import create_taxonomy  # noqa: E402, F401
-
-# Config-driven runs (recipe + input-params + per-stage run records).
-from .recipe import load_params, load_recipe  # noqa: E402, F401
-from .driver import (  # noqa: E402, F401
-    read_manifest,
-    read_record,
-    run_pipeline,
-    write_manifest,
-    write_record,
-)
-from .types import ALL_ENTRY_TYPES, EntryType  # noqa: E402, F401
+__all__ = [
+    "ALL_ENTRY_TYPES",
+    "DEFAULT_SEED",
+    "STAGES",
+    "EntryType",
+    "build_dataset",
+    "constitution",
+    "content_moderation",
+    "create_taxonomy",
+    "dataset",
+    "default_escalation_schedule",
+    "evaluate_conversations",
+    "generate_constitution",
+    "generate_conversations",
+    "generate_inputs",
+    "generate_jailbreaks",
+    "generate_outputs",
+    "generate_paraphrases",
+    "get_output_dir",
+    "jailbreak",
+    "llm_pipeline",
+    "llms",
+    "load_params",
+    "load_recipe",
+    "multi_turn",
+    "multiturn_attacks",
+    "optimization",
+    "paths",
+    "read_manifest",
+    "read_record",
+    "residency",
+    "run_pipeline",
+    "set_seed",
+    "telemetry",
+    "write_manifest",
+    "write_record",
+]

@@ -1,24 +1,9 @@
-"""High-level pipeline functions for end-to-end dataset generation.
+"""The stages: resolve what each needs, call its core, return its rows.
 
-Thin wrappers over the existing building blocks (LLMs, content_moderation,
-jailbreak, dataset). Each function saves intermediate results to
-Datasets/ and returns a merged DataFrame.
-
-Usage — constitution-seeded (recommended; see ``generate_constitution``)::
-
-    from redact import (
-        generate_constitution, generate_inputs, generate_jailbreaks, build_dataset,
-    )
-
-    constitution = generate_constitution(num_taxonomy_categories=3)
-    inputs = generate_inputs(constitution_df=constitution, samples_per_entry=3)
-    jailbreaks = generate_jailbreaks(inputs=inputs)
-    dataset = build_dataset()
-
-Usage — standalone meta-prompt inputs (DEPRECATED path, still functional;
-skips constitution generation, so it's the cheaper "quick eval" option)::
-
-    inputs = generate_inputs(samples_per_category=15, num_categories=3)
+Each front (``generate_*``, ``build_dataset``) resolves its inputs, its models
+by role and its files under ``data_dir``, then calls the core in its
+subpackage. :data:`STAGES` describes the fronts to the driver: the roles each
+calls, the files it writes and the kwargs a recipe gives it.
 """
 
 #TODO(dataset): what the stages do not do yet for a large run (around 1M rows):
@@ -40,7 +25,7 @@ from pathlib import Path
 import pandas as pd
 
 from redact import dataset, paths
-from redact.constitution import read_constitution
+from redact.constitution import ConstitutionPipeline, read_constitution
 from redact.content_moderation import (
     InputPipeline,
     run_output_generation,
@@ -67,13 +52,9 @@ from redact.jailbreak import pool as jailbreak_pool
 from redact.jailbreak.pipeline import run_augmentation
 from redact.llms import ModelClient, load_prompt
 from redact.llms.model_config import default_model_for_role
+from redact.types import EntryType
 
 logger = logging.getLogger(__name__)
-
-
-# ---------------------------------------------------------------------------
-# Constitution generation
-# ---------------------------------------------------------------------------
 
 
 def generate_constitution(
@@ -132,8 +113,6 @@ def generate_constitution(
         ``merged.csv`` (the full dataset, including rows from prior resumed
         runs — not just this run's delta).
     """
-    from redact.constitution import ConstitutionPipeline, EntryType
-
     # Resolve taxonomy
     if isinstance(taxonomy, str):
         taxonomy = load_taxonomy(taxonomy, config_dir=taxonomy_dir)
@@ -164,11 +143,6 @@ def generate_constitution(
         verbose=verbose,
         read_back=read_back,
     )
-
-
-# ---------------------------------------------------------------------------
-# Content moderation input generation
-# ---------------------------------------------------------------------------
 
 
 def generate_inputs(
@@ -257,9 +231,6 @@ def generate_inputs(
     # Generation model defaults to the uncensored_gen role (both modes).
     model = model or default_model_for_role("uncensored_gen")
 
-    # ------------------------------------------------------------------
-    # Constitution-seeded mode (delegates to InputPipeline.run_from_constitution)
-    # ------------------------------------------------------------------
     if constitution_df is not None:
         client = ModelClient.create(model)
         check_model = check_model or model
@@ -326,9 +297,6 @@ def generate_inputs(
             result = result[result["template_style"] == style].reset_index(drop=True)
         return result
 
-    # ------------------------------------------------------------------
-    # Standalone (meta-prompt) mode
-    # ------------------------------------------------------------------
     warnings.warn(
         "Standalone meta-prompt input generation (generate_inputs without "
         "constitution_df) is deprecated in favour of constitution-seeded "
@@ -647,16 +615,6 @@ def _of_entry_types(inputs: pd.DataFrame, entry_types: list | None) -> pd.DataFr
     if not entry_types:
         return inputs
     return inputs[inputs["entry_type"].isin(entry_types)].reset_index(drop=True)
-
-
-# ---------------------------------------------------------------------------
-# Paraphrase / fingerprint removal
-#
-# The plan/ledger/execute orchestration (run_paraphrase_target's
-# plan->execute loop) lives in content_moderation/paraphrase.py —
-# generate_paraphrases() below resolves each target's rows and file and
-# dispatches per target.
-# ---------------------------------------------------------------------------
 
 
 def generate_paraphrases(

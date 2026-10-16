@@ -1,24 +1,10 @@
-"""Shared type definitions for REDACT.
-
-This module hosts types that are referenced by multiple subpackages.
-Keep it dependency-free — nothing in this file should import from any
-other ``redact.*`` module. Otherwise we reintroduce the circular-import
-risk that motivated splitting these out in the first place.
-"""
+"""The severity of a sample; imports nothing from the package."""
 
 from enum import Enum
 
 
-class EntryType(str, Enum):  # noqa: UP042 — used pervasively across subpackages; not migrating to enum.StrEnum without dedicated verification of every call site's repr()/serialization assumptions
-    """Severity level for a generated dataset sample.
-
-    Spectrum:
-        HARMFUL <-> DUAL_USE_HARMFUL <-> DUAL_USE_BENIGN <-> BENIGN
-
-    Originally introduced by the constitution pipeline; now shared with
-    content moderation so the same checker can evaluate samples across
-    the full severity spectrum.
-    """
+class EntryType(str, Enum):  # noqa: UP042
+    """From ``HARMFUL`` through the two dual-use levels to ``BENIGN``."""
 
     HARMFUL = "harmful"
     DUAL_USE_HARMFUL = "dual_use_harmful"

@@ -1,34 +1,15 @@
-"""Tests for the custom exception hierarchy."""
+"""Tests for the library's own errors."""
 
-from redact.exceptions import (
-    ConfigError,
-    GenerationError,
-    PromptNotFoundError,
-    PromptTooLongError,
-    RedactError,
-)
+from redact.exceptions import PromptTooLongError, RedactError
 
 
-class TestExceptionHierarchy:
-    def test_all_inherit_from_redact_error(self):
-        for exc_cls in [ConfigError, PromptNotFoundError, GenerationError]:
-            assert issubclass(exc_cls, RedactError)
+def test_redact_error_is_an_exception():
+    assert issubclass(RedactError, Exception)
 
-    def test_redact_error_is_exception(self):
-        assert issubclass(RedactError, Exception)
 
-    def test_prompt_too_long_is_a_generation_error(self):
-        assert issubclass(PromptTooLongError, GenerationError)
+def test_prompt_too_long_is_a_redact_error():
+    assert issubclass(PromptTooLongError, RedactError)
 
-    def test_catchable_as_base(self):
-        for exc_cls in [ConfigError, PromptNotFoundError, GenerationError]:
-            try:
-                raise exc_cls("test")
-            except RedactError:
-                pass  # expected
 
-    def test_message_preserved(self):
-        msg = "something went wrong"
-        for exc_cls in [RedactError, ConfigError, PromptNotFoundError, GenerationError]:
-            exc = exc_cls(msg)
-            assert str(exc) == msg
+def test_message_preserved():
+    assert str(PromptTooLongError("10036 input tokens")) == "10036 input tokens"
