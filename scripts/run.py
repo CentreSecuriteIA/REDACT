@@ -11,7 +11,8 @@ The recipe's ``params_file`` is used unless ``--params`` overrides it, and
 ``{stage}.run.json`` manifest under ``{data_dir}/Datasets/``.
 
 The first Ctrl-C (or ``kill <pid>``) releases the models and exits; a
-second one exits at once, leaving any engine process that still runs.
+second one ends the run's child processes, vLLM's engine among them, and
+exits at once.
 """
 
 import argparse
@@ -24,11 +25,38 @@ import sys
 
 from redact import run_pipeline
 
+try:
+    import psutil  # vLLM installs it
+except ImportError:
+    psutil = None
+
+#: Seconds the child processes get to end after SIGTERM, before SIGKILL.
+_CHILD_GRACE_S = 2.0
+
 
 def _say(line: str) -> None:
     """Write a line to stderr from a signal handler, where ``print`` may raise."""
     with contextlib.suppress(OSError):
         os.write(2, (line + "\n").encode())
+
+
+def _end_child_processes() -> None:
+    """SIGTERM this process's children, such as vLLM's engine and worker
+    processes, then SIGKILL those still alive after a short wait.
+
+    Best-effort: does nothing on Windows or without psutil.
+    """
+    if psutil is None or os.name == "nt":
+        return
+    with contextlib.suppress(psutil.Error):
+        children = psutil.Process().children(recursive=True)
+        for child in children:
+            with contextlib.suppress(psutil.Error):
+                child.terminate()
+        _, alive = psutil.wait_procs(children, timeout=_CHILD_GRACE_S)
+        for child in alive:
+            with contextlib.suppress(psutil.Error):
+                child.kill()
 
 
 def _exit_through_release() -> None:
@@ -44,8 +72,9 @@ def _exit_through_release() -> None:
     def handle(signum, frame):
         received.append(signum)
         if len(received) > 1:
-            _say("Interrupted again: exiting at once. An engine process may "
-                 "still hold the card; check nvidia-smi.")
+            _say("Interrupted again: ending the engine processes and exiting at "
+                 "once. Check with nvidia-smi that the card is free.")
+            _end_child_processes()
             os._exit(128 + signum)
         _say("Interrupted: releasing the models. Interrupt again to exit at once.")
         if signum == signal.SIGINT:

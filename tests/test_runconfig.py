@@ -332,16 +332,23 @@ def test_run_pipeline_takes_a_data_dir_over_the_recipes(tmp_path, monkeypatch):
     assert read_record("build", tmp_path / "recipe") is None
 
 
-def test_the_run_script_hands_run_pipeline_the_recipe_unread(tmp_path, monkeypatch):
-    """The recipe is loaded once, by ``run_pipeline``; ``--data-dir`` goes with it."""
+def _run_script():
+    """``scripts/run.py``, loaded as a module."""
     import importlib.util
-    import logging
-    import signal
 
     spec = importlib.util.spec_from_file_location(
         "run_script", Path(__file__).parents[1] / "scripts" / "run.py")
     script = importlib.util.module_from_spec(spec)
     spec.loader.exec_module(script)
+    return script
+
+
+def test_the_run_script_hands_run_pipeline_the_recipe_unread(tmp_path, monkeypatch):
+    """The recipe is loaded once, by ``run_pipeline``; ``--data-dir`` goes with it."""
+    import logging
+    import signal
+
+    script = _run_script()
     handed = []
     monkeypatch.setattr(script, "run_pipeline",
                         lambda recipe, **kw: handed.append((recipe, kw)) or {})
@@ -359,29 +366,10 @@ def test_a_second_interrupt_exits_the_run_script_at_once(
     """The first Ctrl-C or kill exits through the run's ``finally``, which
     releases the models; a second one exits at once, as a hung release
     would otherwise keep the process up."""
-    import importlib.util
-    import logging
-    import os
     import signal
 
-    spec = importlib.util.spec_from_file_location(
-        "run_script", Path(__file__).parents[1] / "scripts" / "run.py")
-    script = importlib.util.module_from_spec(spec)
-    spec.loader.exec_module(script)
-    class Exited(BaseException):
-        """Stands for the end of the process."""
-
-    def hard_exit(code):
-        exits.append(code)
-        raise Exited
-
-    handlers, exits = {}, []
-    monkeypatch.setattr(script, "run_pipeline", lambda recipe, **kw: {})
-    monkeypatch.setattr(logging, "basicConfig", lambda **kw: None)
-    monkeypatch.setattr(signal, "signal",
-                        lambda signum, fn: handlers.update({signum: fn}))
-    monkeypatch.setattr(os, "_exit", hard_exit)
-    script.main(["recipe.json"])
+    script, exits = _run_script(), []
+    handlers = _signal_handlers(monkeypatch, script, exits)
     capfd.readouterr()
 
     signum = getattr(signal, first)
@@ -390,10 +378,97 @@ def test_a_second_interrupt_exits_the_run_script_at_once(
     if exit_type is SystemExit:
         assert raised.value.code == 128 + signum
     assert "again" in capfd.readouterr().err and exits == []
-    with pytest.raises(Exited):
+    with pytest.raises(_Exited):
         handlers[signal.SIGINT](signal.SIGINT, None)
-    assert exits == [128 + signal.SIGINT]
+    assert exits == [("exit", 128 + signal.SIGINT)]
     assert "at once" in capfd.readouterr().err
+
+
+class _Exited(BaseException):
+    """Stands for the end of the process."""
+
+
+def _signal_handlers(monkeypatch, script, done, name="posix"):
+    """Run the script's ``main`` on a stub run and return the signal handlers
+    it installed. Its ``os`` is ``os`` on a platform called ``name``, whose
+    ``_exit`` appends ``("exit", code)`` to ``done`` and raises :class:`_Exited`."""
+    import logging
+    import os
+    import signal
+    from types import SimpleNamespace
+
+    def hard_exit(code):
+        done.append(("exit", code))
+        raise _Exited
+
+    handlers = {}
+    monkeypatch.setattr(script, "run_pipeline", lambda recipe, **kw: {})
+    monkeypatch.setattr(script, "os",
+                        SimpleNamespace(name=name, write=os.write, _exit=hard_exit))
+    monkeypatch.setattr(logging, "basicConfig", lambda **kw: None)
+    monkeypatch.setattr(signal, "signal",
+                        lambda signum, fn: handlers.update({signum: fn}))
+    script.main(["recipe.json"])
+    return handlers
+
+
+def _fake_psutil(children, done, survivors):
+    """A stand-in for psutil: this process has ``children`` (pids), and of
+    those the ones in ``survivors`` outlive the wait."""
+    from types import SimpleNamespace
+
+    class Child:
+        def __init__(self, pid):
+            self.pid = pid
+
+        def terminate(self):
+            done.append(("terminate", self.pid))
+
+        def kill(self):
+            done.append(("kill", self.pid))
+
+    procs = [Child(pid) for pid in children]
+
+    def wait_procs(waited, timeout):
+        done.append(("wait", timeout))
+        return ([c for c in waited if c.pid not in survivors],
+                [c for c in waited if c.pid in survivors])
+
+    return SimpleNamespace(
+        Error=Exception, wait_procs=wait_procs,
+        Process=lambda: SimpleNamespace(children=lambda recursive: procs))
+
+
+def test_a_forced_exit_ends_the_child_processes_first(monkeypatch):
+    """vLLM's engine and worker processes are this process's children: a
+    hard exit that left them would leave them holding the card."""
+    import signal
+
+    script, done = _run_script(), []
+    monkeypatch.setattr(script, "psutil", _fake_psutil([11, 12], done, {12}))
+    handlers = _signal_handlers(monkeypatch, script, done)
+    with pytest.raises(KeyboardInterrupt):
+        handlers[signal.SIGINT](signal.SIGINT, None)
+    with pytest.raises(_Exited):
+        handlers[signal.SIGINT](signal.SIGINT, None)
+    assert done == [("terminate", 11), ("terminate", 12), ("wait", 2.0),
+                    ("kill", 12), ("exit", 128 + signal.SIGINT)]
+
+
+@pytest.mark.parametrize("platform,children", [("nt", [11]), ("posix", None)])
+def test_a_forced_exit_on_windows_or_without_psutil_only_exits(
+        monkeypatch, platform, children):
+    import signal
+
+    script, done = _run_script(), []
+    fake = _fake_psutil(children, done, set()) if children else None
+    monkeypatch.setattr(script, "psutil", fake)
+    handlers = _signal_handlers(monkeypatch, script, done, name=platform)
+    with pytest.raises(KeyboardInterrupt):
+        handlers[signal.SIGINT](signal.SIGINT, None)
+    with pytest.raises(_Exited):
+        handlers[signal.SIGINT](signal.SIGINT, None)
+    assert done == [("exit", 128 + signal.SIGINT)]
 
 
 def test_every_recipe_role_is_called_by_a_stage():
