@@ -13,13 +13,10 @@ Also provides sample cleaning (:func:`clean_sample`).
 # the callers still treat as "the model returned nothing". To move into the
 # driver, together with the retry helpers:
 #   - Retry a rejected reply a bounded number of times before giving up.
-#     Done for constitution inputs (llm_pipeline.extracted); the call sites
-#     below still treat a rejected reply as an empty one.
+#     Done for constitution inputs and the benign Q&A (llm_pipeline.extracted);
+#     the call sites below still treat a rejected reply as an empty one.
 #   - Standalone inputs (content_moderation/standalone.py): one rejected reply stops
 #     the whole category. Stop only on an empty reply or repeated failures.
-#   - Benign Q&A (jailbreak/manipulation/benign.py): a rejected half gets no
-#     rows and the cache counts as complete; an all-rejected run writes an
-#     empty CSV that every later load fails on.
 #   - Seeds (metaprompt.py): after 3 failed attempts the category is skipped
 #     with only an INFO log.
 #   - Count rejections and report them: a run that lost entries still logs

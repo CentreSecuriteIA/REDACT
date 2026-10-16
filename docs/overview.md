@@ -19,7 +19,7 @@ A run is an ordered list of stages. Each stage has one public function, its
 | Stage | Front | What it does | Main output |
 |---|---|---|---|
 | `constitution` | `generate_constitution` | Per taxonomy category, a hierarchy of constitution categories and sample descriptions at four entry types | `Data_cache/constitution/merged.csv` |
-| `inputs` | `generate_inputs` | Checked input samples: seeded from the constitution (training), or from meta-prompts (eval, deprecated) | `Datasets/constitution_inputs/<category>/samples.csv` or `Datasets/<category>/samples.csv` |
+| `inputs` | `generate_inputs` | Checked input samples: seeded from the constitution (training, and eval with a constitution), or from meta-prompts (eval without one, deprecated) | `Datasets/constitution_inputs/<category>/samples.csv` or `Datasets/<category>/samples.csv` |
 | `outputs` | `generate_outputs` | One checked model response per accepted input | `Datasets/output_responses.csv` |
 | `paraphrase` | `generate_paraphrases` | Checked paraphrases of the inputs and of the accepted outputs | `Datasets/paraphrases_inputs.csv`, `Datasets/paraphrases_outputs.csv` |
 | `jailbreaks` | `generate_jailbreaks` | Jailbreak attacks (adversarial kind) and natural variations (natural kind) of the accepted inputs | `Datasets/jailbreaks.csv`, `Datasets/variations.csv` |
@@ -30,8 +30,9 @@ Two more fronts are outside the recipe: `generate_conversations` and
 ([stages/conversations.md](stages/conversations.md)).
 
 A recipe's `dataset_type` picks the input path. `training` seeds the inputs
-from the constitution. `eval` runs the standalone meta-prompt path and may
-not list the `constitution` stage.
+from the constitution. `eval` seeds them too when it lists the
+`constitution` stage or a constitution is saved under `data_dir`, and
+otherwise runs the standalone meta-prompt path.
 
 ## How the files flow
 
@@ -55,7 +56,7 @@ flowchart TD
     outputs --> resp[("Datasets/output_responses.csv")]
     resp --> paraphrase
     paraphrase --> para[("Datasets/paraphrases_inputs.csv<br/>Datasets/paraphrases_outputs.csv")]
-    jailbreaks -.->|"reads, or writes once"| benign[("Data_cache/benign/benign_samples.csv")]
+    jailbreaks -.->|"reads; adds the pairs it lacks"| benign[("Data_cache/benign/benign_samples.csv")]
     jailbreaks --> jb[("Datasets/jailbreaks.csv")]
     jailbreaks --> var[("Datasets/variations.csv")]
     merged --> build["build"]
@@ -88,12 +89,17 @@ summary = run_pipeline("src/redact/configs/runs/training_example.json")
 
 `recipe.load_recipe` reads the JSON and checks it before anything runs:
 
-- `dataset_type` is `eval` or `training`; `eval` may not list `constitution`.
+- `dataset_type` is `eval` or `training`.
 - Each name in `stages` is a key of `STAGES`, listed once.
 - No key outside the recipe keys (a key starting with `_` is a comment).
 - Each role object under `models` is valid (`recipe.serving_of`).
 - The `augmentations` section is resolved over the packaged default
   (`recipe.augmentations_of`), so a bad technique or family name fails here.
+- When the jailbreak stage runs a kind that draws a technique needing benign
+  data, the `benign_taxonomy` is read and must have a category
+  (`recipe.benign_taxonomy_of`).
+- A `taxonomy` of the former name `content_moderation_categories` is read as
+  `harmful`, with a `DeprecationWarning`.
 
 `recipe.load_params` reads the params file, resolved against the recipe's
 folder. It refuses a `jailbreaks` key that belongs in the augmentation
@@ -102,7 +108,8 @@ section.
 ### 2. The driver sets the run up
 
 `driver.run_pipeline` builds one `RunContext` (data root, models per role,
-prompt overlay, taxonomy, params, resolved augmentations, `resume`). Then:
+prompt overlay, taxonomy, benign taxonomy, params, resolved augmentations,
+`resume`). Then:
 
 1. `Stage.check` runs for every stage, so a params key that the front does
    not take fails before the first stage spends anything.
@@ -113,6 +120,8 @@ prompt overlay, taxonomy, params, resolved augmentations, `resume`). Then:
 5. `_plan_phases` plans the local models stage by stage, logs each plan and
    hands the planned memory shares and cards to the vLLM loader
    ([running.md](running.md#the-gpu-planner)).
+6. `_check_cards` reads `nvidia-smi` once and stops the run, before any
+   model loads, when another process holds memory on a card the plan uses.
 
 ### 3. Each stage runs
 
@@ -125,7 +134,11 @@ For each stage, in the recipe's order, the driver:
 3. calls the front with `read_back=False` and `Stage.kwargs(ctx)`: the
    recipe's values first, then the params file's;
 4. counts the rows of the stage's files (`file_counts`);
-5. writes `Datasets/<stage>.run.json`.
+5. writes `Datasets/<stage>.run.json`, with the files the stage read in
+   `sources`.
+
+Leaving the stage, telemetry logs per model how many replies were cut at the
+token limit in it.
 
 Each front resolves its models (`ModelClient.create`), its inputs and its
 paths, then calls one core. The core plans its units, skips the ones the
@@ -177,8 +190,8 @@ In a `finally` block the driver clears the run's serving choices, waits for
 any preload thread, unloads every local engine, clears the planned shares and
 cards, and rolls up telemetry (tokens, engine time, cost). `run_pipeline`
 returns a summary: `dataset_type`, `data_dir`, `stages` (counts and record
-path per stage), `serving`, `telemetry`, and `residency` and `trace` when
-present.
+path per stage), `serving`, `telemetry` (with `cut`, the replies cut at the
+token limit per stage and model), and `residency` and `trace` when present.
 
 ## The final dataset
 

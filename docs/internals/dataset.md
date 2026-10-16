@@ -221,6 +221,7 @@ taxonomy format.
 | outputs | `artifact=output_responses.csv` | `input_id` | |
 | paraphrase | `artifact=paraphrases_<target>.csv` | `input_id`, `iteration` | `paraphrase_model`, `status` |
 | jailbreaks, per kind | `artifact=jailbreaks.csv` or `variations.csv` | `input_id`, `iteration` | |
+| benign data (jailbreaks) | `artifact=benign_samples.csv`, always `resume=True` | `main_category`, `sub_category`, `answer_type` | `status`, `attempts` when rejected |
 | conversations | `artifact=conversations.csv` | `input_id`, `iteration` | `stop_reason` |
 | scoring | `artifact=conversations_scored.csv`, no manifest | `sample_id` | |
 

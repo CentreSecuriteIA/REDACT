@@ -25,7 +25,7 @@ the technique names are in [techniques.md](../techniques.md).
 | Module | Holds |
 |---|---|
 | `technique.py` | The technique contract, `load_spec`, `tag`, `DISCARDED` |
-| `hacking/`, `manipulation/`, `obfuscation/`, `requests/` | The techniques, one module per family; `get_all_<layer>_functions()` per subpackage. `manipulation/benign.py` makes the benign data |
+| `hacking/`, `manipulation/`, `obfuscation/`, `requests/` | The techniques, one module per family; `get_all_<layer>_functions()` per subpackage. `manipulation/benign.py` makes the benign data: one unit per subcategory of the benign taxonomy and answer type, keyed `(main_category, sub_category, answer_type)` |
 | `pool.py` | `all_techniques`, `technique_pool(kind)`, `registry`, `uses_translation` |
 | `augmentation.py` | `KINDS`, `defaults`, `resolve(section, kind)`, `rounds_of(kind)`, `apply_flat_keywords`, `FLAT_KEYWORDS` |
 | `rules.py` | `compatible(selected, pool, remaining_complexity)`, `request_obfuscation_candidates` |
@@ -93,8 +93,11 @@ core, called once per kind:
    manifest=manifest)`: the lock, the cut-back, the finished keys.
 3. **Plan.** On a resume with a manifest, reuse it. Otherwise `plan_run`
    writes one manifest row per input and round, then the coverage table.
-4. **One pass over the plan** to count the pending units and see whether any
-   needs benign data; if so, load or generate it.
+4. **One pass over the plan** to count the pending units, see whether any
+   needs benign data (if so, generate what the cache lacks for the benign
+   taxonomy's subcategories, on the pool with its own ledger, then load it),
+   and, on a resume, count the inputs the kept plan does not hold, logged as
+   a WARNING.
 5. **Drive.** `pending_units` streams the plan: for each planned row of an
    input in this frame and not in the ledger, it builds the combination
    (`combination_of`) and the unit's generator (`unit_gen`, over

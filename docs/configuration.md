@@ -11,11 +11,12 @@ that starts with `_` is a comment.
 
 | Key | Type | Default | Meaning |
 |---|---|---|---|
-| `dataset_type` | `"eval"` or `"training"` | `"eval"` | `training` seeds the inputs from the constitution saved under `data_dir`; `eval` runs the standalone inputs and may not list `constitution`. Also the build's `mode` |
+| `dataset_type` | `"eval"` or `"training"` | `"eval"` | `training` seeds the inputs from the constitution saved under `data_dir`; `eval` seeds them too when it lists `constitution` or a constitution is saved under `data_dir`, and otherwise runs the standalone inputs. Also the build's `mode` |
 | `data_dir` | path | the default working root | The run's root; `Datasets/` and `Data_cache/` go under it. Relative to the current directory. `run_pipeline(data_dir=...)` and `--data-dir` override it |
 | `models` | object | every role its default | A model per role; see [below](#the-models-object) |
 | `taxonomy` | name or object | `"harmful"` | The taxonomy of the constitution and the standalone inputs, by file name or as a loaded object. The former name `"content_moderation_categories"` loads `harmful` with a `DeprecationWarning`, for one release |
-| `taxonomy_dir` | path | `configs/taxonomy/` | Where a taxonomy name is looked up |
+| `taxonomy_dir` | path | `configs/taxonomy/` | Where a taxonomy name (`taxonomy`, `benign_taxonomy`) is looked up |
+| `benign_taxonomy` | name or object | `"benign"` | The taxonomy whose subcategories the benign Q&A pairs of the `fsh` and `dap` techniques are generated for. Read at load, and checked to have a category, when the recipe runs `jailbreaks` and a kind draws a technique that needs benign data |
 | `prompt_dir` | path | none | The prompt overlay; see [below](#the-prompt-overlay) |
 | `stages` | list of stage names | `["inputs", "outputs", "jailbreaks", "build"]` | The stages to run, in order, each once. `[]` runs nothing |
 | `augmentations` | object | the packaged default | The jailbreak stage's augmentation section; see [below](#the-augmentation-section) |
@@ -46,9 +47,9 @@ role's default), or an object:
 
 The params file maps a stage name to keyword arguments of its front. A key
 must be a parameter of the front and not one the run passes itself (the
-models, `data_dir`, `prompt_dir`, `taxonomy`, `taxonomy_dir`, `resume`,
-`verbose`, the jailbreak stage's `augmentation`, the build's `mode`,
-`read_back`). Parameters that take a DataFrame
+models, `data_dir`, `prompt_dir`, `taxonomy`, `taxonomy_dir`,
+`benign_taxonomy`, `resume`, `verbose`, the jailbreak stage's
+`augmentation`, the build's `mode`, `read_back`). Parameters that take a DataFrame
 (`inputs`, `outputs`, `constitution_df`) cannot be written in JSON.
 
 ### `constitution`
@@ -63,6 +64,9 @@ models, `data_dir`, `prompt_dir`, `taxonomy`, `taxonomy_dir`, `resume`,
 
 ### `inputs`, seeded (training)
 
+These keys hold for an eval run whose inputs are seeded too (its recipe
+lists `constitution`, or a constitution is saved under `data_dir`).
+
 | Key | Default | Meaning |
 |---|---|---|
 | `style` | `"long"` | The prompt under `prompts/input/generation/from_constitution/<style>/`: `long` or `short` |
@@ -73,6 +77,8 @@ models, `data_dir`, `prompt_dir`, `taxonomy`, `taxonomy_dir`, `resume`,
 | `check_max_tokens` | `null` | Reply limit of a check call; `null` for the checker's default |
 
 ### `inputs`, standalone (eval)
+
+These keys hold for an eval run without a constitution.
 
 | Key | Default | Meaning |
 |---|---|---|
@@ -112,11 +118,11 @@ models, `data_dir`, `prompt_dir`, `taxonomy`, `taxonomy_dir`, `resume`,
 |---|---|---|
 | `seed` | `42` | The run seed of the plan and of each technique's random choices |
 | `batch_size` | `256` | Requests per grouped call; at least twice as many units are live |
-| `auto_generate_benign` | `true` | Load or generate the benign data when a planned unit needs it |
+| `auto_generate_benign` | `true` | When a pending unit needs benign data, generate the pairs `benign_path` lacks for the benign taxonomy's subcategories, then load it |
 | `output_path` | `Datasets/jailbreaks.csv` | The adversarial kind's file |
 | `variations_path` | beside `output_path`, else `Datasets/variations.csv` | The natural kind's file |
 | `manifest_path` | `jailbreaks.manifest.jsonl` beside the output | The adversarial kind's plan |
-| `benign_path` | `Data_cache/benign/benign_samples.csv` | The benign data |
+| `benign_path` | `Data_cache/benign/benign_samples.csv` | The benign data, with its manifest and ledger beside it |
 
 The flat keywords (`include_hacking`, ..., `entry_types`) are also accepted
 here, with a `DeprecationWarning`, and applied over the adversarial kind (see

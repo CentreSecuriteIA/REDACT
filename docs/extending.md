@@ -235,5 +235,7 @@ recipe names as `taxonomy_dir`:
   `configs/seeds/`, and set `seeds_name`.
 
 The category reaches every later stage through its rows' `category` column.
-The benign categories of the `fsh` and `dap` data are a separate list,
-`BENIGN_CATEGORIES` in `jailbreak/manipulation/benign.py`.
+The benign categories of the `fsh` and `dap` data are a taxonomy of their
+own, `configs/taxonomy/benign.json`, in the same format: the pairs are
+generated per subcategory. Write another and name it as the recipe's
+`benign_taxonomy`.

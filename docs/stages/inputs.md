@@ -4,8 +4,8 @@ Front `generate_inputs` (`stages.py`). The stage has two paths:
 
 | Path | When | Core | Writes |
 |---|---|---|---|
-| Seeded | `constitution_df` given; a `training` run | `InputPipeline.run_from_constitution` (`content_moderation/inputs.py`) | `Datasets/constitution_inputs/<category>/samples.csv` |
-| Standalone | no `constitution_df`; an `eval` run | `run_standalone_inputs` (`content_moderation/standalone.py`) | `Datasets/<category>/samples.csv` |
+| Seeded | `constitution_df` given; a `training` run, or an `eval` run that lists `constitution` or has one saved under `data_dir` | `InputPipeline.run_from_constitution` (`content_moderation/inputs.py`) | `Datasets/constitution_inputs/<category>/samples.csv` |
+| Standalone | no `constitution_df`; an `eval` run without a constitution | `run_standalone_inputs` (`content_moderation/standalone.py`) | `Datasets/<category>/samples.csv` |
 
 The standalone path is deprecated: it warns with a `DeprecationWarning` and
 still works. The seeded path gives coverage you can steer through the
@@ -26,9 +26,9 @@ checked against its category, entry type and subcategory.
 ### Inputs
 
 - The constitution frame. In a recipe run the driver reads
-  `Data_cache/constitution/merged.csv` when the stage starts; a training run
-  without it stops with `training run: no constitution at ...`. Called
-  directly, pass `constitution_df=`.
+  `Data_cache/constitution/merged.csv` when the stage starts; a seeded run
+  without it stops with `No constitution at ...`. Called directly, pass
+  `constitution_df=`.
 - Columns read per entry: `sample_description`, `entry_type`,
   `source_category`, `constitution_subcategory`, `constitution_category`,
   `source_group_tag`. `entry_types` keeps only some entry types.
@@ -153,9 +153,10 @@ accepted samples.
   prompts (`prompts/input/seed_generation/`). With `false`, the taxonomy's
   description and the seeds file `configs/seeds/<seeds_name>.json`. A
   category without seeds is skipped.
-- Generation uses `prompts/input/generation/standalone/` (through the
-  overlay), the check `prompts/input/quality_check/` with entry type
-  `harmful`. Roles as for seeded inputs.
+- Generation uses `prompts/input/generation/standalone/`, the check
+  `prompts/input/quality_check/` with entry type `harmful`, each read
+  through the overlay as the description and seed prompts are. Roles as for
+  seeded inputs.
 
 ### How a category runs
 

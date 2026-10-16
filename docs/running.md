@@ -39,8 +39,10 @@ python scripts/run.py src/redact/configs/runs/training_example.json --data-dir .
 
 `--params` replaces the recipe's `params_file`, `--data-dir` its `data_dir`.
 `--quiet` logs warnings only and `--debug` logs per-item detail. The script
-prints the run summary as JSON. It turns `SIGTERM` into a normal exit, so
-`kill <pid>` releases the models as Ctrl-C does.
+prints the run summary as JSON. The first Ctrl-C, or `kill <pid>`, ends the
+run through its cleanup, which saves the finished units and releases the
+models. A second one ends the run's child processes (vLLM's engine among
+them: SIGTERM, then SIGKILL after 2 seconds) and exits at once.
 
 From Python:
 
@@ -98,7 +100,14 @@ under the stage's name.
   `build`.
 - A training run's `inputs` stage reads the constitution saved under
   `data_dir`. List `constitution` before it, or run it earlier on the same
-  `data_dir`.
+  `data_dir`. An eval run's inputs are seeded the same way when its recipe
+  lists `constitution` or a constitution is saved under `data_dir`; without
+  one they are standalone.
+- `taxonomy` names the taxonomy of the constitution and the standalone
+  inputs (default `harmful`); `benign_taxonomy` the one whose subcategories
+  the benign data of the `fsh` and `dap` techniques covers (default
+  `benign`). Both are file names under `taxonomy_dir`, the packaged
+  `configs/taxonomy/` by default.
 - `params_file` is relative to the recipe's folder. `data_dir`,
   `prompt_dir` and `taxonomy_dir` are relative to the current directory.
 - A params key must be a parameter of the stage's front, and not one the
@@ -230,6 +239,15 @@ say why and what to change: a lower `max_model_len`, a quantized checkpoint,
 calls on the same `data_dir`. `WARNING:` lines mark what the plan could not
 check, such as a model of unknown size or a machine without `nvidia-smi`.
 
+**Cards held by another process.** Before any model loads, the driver reads
+`nvidia-smi` once. When another process holds memory on a card the plan puts
+a model on, the run stops with a `RuntimeError` that names each such card,
+its processes and their memory, and says how to free them; nothing has run
+yet. These are most often the vLLM engine processes of an earlier run
+killed with `kill -9`. A process on a card the plan leaves free, and memory
+in use (1 GiB or more) on a planned card with no process listed, are only
+warnings. Without `nvidia-smi` the check does nothing.
+
 ## Resume, fresh runs, and a kill partway through
 
 **Resume is the default.** With `"resume": true` each stage skips the units
@@ -249,13 +267,16 @@ explains the mechanism.
 
 **Stopping a run.** Ctrl-C, or `kill <pid>` on `scripts/run.py`, ends the run
 cleanly: the finished units are saved, requests in flight are cancelled, and
-the local engines are released. Rerun the same command to go on.
+the local engines are released. Rerun the same command to go on. A second
+Ctrl-C (or `kill`) while that cleanup runs ends the run's child processes and
+exits at once; the next resume cuts off a save it left half done.
 
 `kill -9`, or a lost machine, may leave half a save. The next resume cuts it
 off and runs those units again. vLLM's engine processes outlive `kill -9` and
-keep their GPU memory; find them (`EngineCore`) and kill them by PID before
-the rerun. The next load may log "Failed to reload cubin file" warnings from
-torch's compile cache, and carries on.
+keep their GPU memory; the next run stops before any stage, naming them and
+their PIDs (see [the GPU planner](#the-gpu-planner)). Kill them and rerun.
+The next load may log "Failed to reload cubin file" warnings from torch's
+compile cache, and carries on.
 
 In the GPU check, a jailbreak run of 432 units, killed with 32 saved, resumed
 and ran the other 400. It ended with 432 rows, 433 ledger lines (the opening
@@ -270,8 +291,12 @@ then plans anew. The exceptions:
 - The standalone `inputs` stage removes the files of the categories it runs.
 - The `constitution` stage removes every CSV in `Data_cache/constitution/`.
 
-The benign cache (`Data_cache/benign/benign_samples.csv`) is never cleared.
-Delete it to have it generated again.
+The benign data (`Data_cache/benign/benign_samples.csv`) is never cleared:
+it always resumes from its ledger, generating only the units (one subcategory
+of the benign taxonomy and one answer type) it does not hold. A unit rejected
+on every attempt is acked and skipped; delete
+`benign_samples.state.jsonl` to try it again, or delete the CSV and its
+sidecars to generate everything again.
 
 To start one stage over and keep the others, run a recipe that lists only
 that stage, with `"resume": false`, on the same `data_dir`; or call its front
@@ -281,6 +306,7 @@ with `resume=False`.
 
 - The jailbreak stage reuses its plan. A changed augmentation section, a new
   seed or new inputs take effect only with `"resume": false` for that stage.
+  A resume logs a WARNING that counts the inputs its plan does not hold.
 - A rejected unit is acked and not retried: a constitution unit or a seeded
   entry rejected on every attempt, a rejected output, a dropped paraphrase.
   Start the stage over to try them again.
@@ -298,7 +324,8 @@ Data_cache/
     merged.csv                           # every entry
     constitution.manifest.jsonl  constitution.state.jsonl
   benign/
-    benign_samples.csv                   # benign Q&A data for fsh and dap
+    benign_samples.csv                   # benign Q&A pairs for fsh and dap
+    benign_samples.manifest.jsonl  benign_samples.state.jsonl
 Datasets/
   constitution_inputs/
     <category>/samples.csv               # one per category, accepted and rejected rows
@@ -315,9 +342,10 @@ Datasets/
   run-<YYYYMMDD-HHMMSS>.trace.jsonl      # one per run_pipeline call
 ```
 
-An eval run writes its inputs to `Datasets/<category>/samples.csv` (no
-sidecars) and, in place of merging the paraphrases, writes
-`Datasets/paraphrased.csv`.
+An eval run with no constitution writes its inputs to
+`Datasets/<category>/samples.csv` (no sidecars); with one, it writes them as
+a training run does. Either way an eval build writes the paraphrases to
+`Datasets/paraphrased.csv` in place of merging them.
 
 Other files you may see:
 
@@ -360,6 +388,7 @@ At the end of the run the driver logs a roll-up at INFO and returns it as
 | `api_cost_usd` | Hosted tokens x the model's price per million |
 | `local_cost_usd` | Billed time x rate x GPUs on the machine; `null` when the GPU is unpriced |
 | `errors` | Failed calls recorded in the trace |
+| `cut` | Per stage, per model: the replies cut at the token limit (`max_tokens` or the context), which are incomplete |
 
 Hosted cost is per model, from `price_per_1m_input` and
 `price_per_1m_output` in the registry. A model served locally is never priced
@@ -379,7 +408,10 @@ rate. [internals/telemetry.md](internals/telemetry.md) lists the events.
 | `ValueError: No input samples found. Run generate_inputs() first.` | A stage that reads inputs found no category file under `data_dir` | Run `inputs` first, or point `data_dir` at the run that has them |
 | WARNING `outputs skipped: no input sample was accepted ...` (or `paraphrase (...)`, `jailbreaks`) | No input is accepted; the stage writes nothing and records 0 rows. The run goes on | Read `rejection_reason` in the category files. A weak checker model rejects almost everything: in the GPU check a 3B checker accepted 2 of 144 seeded inputs, a 24B accepted 144 of 144 |
 | WARNING `inputs: only N of M generated samples were accepted (under half)` | The checker rejects most samples | As above |
-| `ValueError: training run: no constitution at ...` | A training run's inputs need the saved constitution | List `constitution` before `inputs` |
+| `ValueError: No constitution at ...` | A run whose inputs are seeded has no saved constitution | List `constitution` before `inputs` |
+| `RuntimeError: The run plans a model on a card another process holds memory on ...` | Before any stage: a card the plan uses is held, often by the engines of a run killed with `kill -9` | Kill the PIDs the message names and check `nvidia-smi` shows the card empty, or run on other cards (`CUDA_VISIBLE_DEVICES`) |
+| `ValueError: benign_taxonomy '...' cannot be read` / `has no category` | At recipe load: the benign taxonomy a run of the jailbreak stage needs is missing or empty | Name a file in `taxonomy_dir`, or leave the key out for the packaged `benign` |
+| `ValueError: No benign pairs at ...` | Every benign unit was rejected three times | Use a stronger `gen` model, then delete the ledger the message names |
 | `KeyError: Model 'x' needs an API key, but the environment variable ... is not set` | A hosted model without its key | Add the key to `.env`, or serve the model locally |
 | `KeyError: Model 'x' is not registered` | A name not in the registry | Fix the name, or add the model ([extending.md](extending.md#add-a-model)) |
 | `ValueError: params['outputs'] names [...], which generate_outputs does not take` | A params key that is not a parameter of the front | Use a key from [configuration.md](configuration.md#params-keys-per-stage) |
@@ -394,9 +426,11 @@ rate. [internals/telemetry.md](internals/telemetry.md) lists the events.
 | `RuntimeError: The vLLM engine of ... was being built with N copies ...` | The engine failed to build with copies | Set `"copies": 1` for that role |
 | vLLM logs `AsyncLLM output_handler failed` with `EngineDeadError` | An engine shutting down; logged at release and sometimes at exit | Nothing; REDACT logs a line saying so just before |
 | INFO `[rate-limit] <model>: pausing Ns (N RPM)` | A hosted model is at its rate limit | Expected; serve the model locally for speed |
-| WARNING `<model>: N of M replies were cut at the token limit` | Replies hit `max_tokens` or the context | Raise `default_max_tokens` or `max_model_len`, or ask for shorter replies |
+| WARNING `<model>: a reply was cut at the token limit (max_tokens=N) ...`, then `[<stage>] <model>: N replies were cut at the token limit and are incomplete.` | Replies hit `max_tokens` or the context: the first one per stage and model warns, the stage's end counts them, and `summary["telemetry"]["cut"]` holds the counts | Raise `default_max_tokens` or `max_model_len`, or ask for shorter replies |
 | WARNING `... rejected, its prompt is too long` | One prompt is longer than the model's context; that unit gets a rejected row or ack | Raise `max_model_len`, or shorten the input |
 | A stage stops on a provider error (for example 429, model overloaded) | A failed call is the transport failing, so it stops the stage; the SDK retries twice first | Resume: finished units are kept |
 | WARNING `GPU cost reported as $0` | Local GPUs held, and no GPU price set | Set a rate (see above) |
 | `DeprecationWarning` for flat augmentation keys | `include_*`, `sampling_probs` and the other flat keywords | Write them in the `adversarial` kind |
+| `DeprecationWarning` naming `content_moderation_categories` or `content_moderation_seeds` | The former names of `harmful.json` in `configs/taxonomy/` and `configs/seeds/`, read for one release | Write `"taxonomy": "harmful"`; rename a file of your own `harmful.json` |
+| WARNING `jailbreak: N of the M inputs are not in the plan ...` | A resume keeps the plan made before those inputs were accepted | Run the jailbreak stage with `"resume": false` to plan them |
 | `ValueError: combination_spec.json and the technique registries differ` at import | A technique is registered without a spec entry, or the reverse | See [extending.md](extending.md#add-a-jailbreak-technique) |

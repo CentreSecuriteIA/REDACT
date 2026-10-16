@@ -9,7 +9,8 @@ For each taxonomy category, ask a strong model for a hierarchy of
 constitution categories, subcategories and sample descriptions, at each of
 the four entry types: `harmful`, `dual_use_harmful`, `dual_use_benign`,
 `benign`. Each sample description later seeds input samples
-([inputs.md](inputs.md)). Only a `training` run lists this stage.
+([inputs.md](inputs.md)). A `training` run lists this stage; an `eval` run
+may, and its inputs are then seeded from it too.
 
 ## Inputs
 
@@ -77,8 +78,8 @@ Every CSV has the same columns:
 | `model` | The model that wrote the entry |
 
 `constitution.read_constitution(dir)` reads `merged.csv` back with every cell
-as text and an empty cell as `""`. The driver uses it to seed a training
-run's inputs.
+as text and an empty cell as `""`. The driver uses it to seed a run's
+inputs.
 
 ## How it resumes
 

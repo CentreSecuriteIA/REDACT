@@ -69,7 +69,7 @@ its own plan, ledger and coverage table.
 | `Datasets/jailbreaks.state.jsonl` | Its ledger |
 | `Datasets/jailbreaks.coverage.csv` | What its plan drew |
 | `Datasets/variations.csv` and its three sidecars | The same for the natural kind |
-| `Data_cache/benign/benign_samples.csv` | The benign data, shared by both kinds |
+| `Data_cache/benign/benign_samples.csv` | The benign data, shared by both kinds, with its `.manifest.jsonl` and `.state.jsonl` |
 
 `variations.csv` goes to `variations_path` when given, else beside
 `output_path` when that is given, else to `Datasets/variations.csv`.
@@ -104,17 +104,28 @@ short of its rate in a group.
 
 Techniques tagged `requires_benign` (the `fsh` and `dap` families) need
 benign question-and-answer pairs. When a pending unit's combination needs
-them and `auto_generate_benign` is on, the stage loads
-`Data_cache/benign/benign_samples.csv`, or generates it with the `gen` model
-when it is missing: 58 benign categories, two calls each (8 pairs with short
-answers, 8 with long), one category at a time, the file saved after each.
-Columns: `main_category`, `sub_category`, `prompt`, `answer`, `answer_type`.
+them and `auto_generate_benign` is on, the stage generates the pairs
+`Data_cache/benign/benign_samples.csv` lacks, with the `gen` model, then
+loads the file.
 
-In the GPU check the generation takes about 40 minutes on a 24B model, about
-35 seconds per category: most of the stage's time. The file counts as complete
-whenever it exists: a run stopped half way leaves a partial file that later
-runs load, and a reply with the wrong number of pairs adds no rows. Delete
-the file to generate it again. The generation reads the packaged prompt only.
+The pairs cover each subcategory of the recipe's `benign_taxonomy` (the
+packaged `configs/taxonomy/benign.json` by default: 11 categories, 58
+subcategories; a category without subcategories is its own). A unit is one
+`(main_category, sub_category, answer_type)`, the answer type `short` or
+`long`: one call asking for 8 pairs. The units run on the worker pool, as the
+stage's own units do. A reply with any other number of pairs is rejected and
+the call made again, up to three times; a unit rejected every time is acked
+`rejected` with no rows, and a WARNING names it. When no unit has a row, the
+stage stops with `No benign pairs at ...`. The prompt
+`prompts/jailbreak/benign_generation/` is read through the overlay.
+
+The benign data always resumes: its ledger `benign_samples.state.jsonl`,
+keyed `(main_category, sub_category, answer_type)`, records the finished
+units, so a stopped run, or a larger taxonomy, generates only the units
+missing. A file written before the ledger is taken over once. `resume:
+false` does not clear it; delete the ledger to retry the rejected units, or
+the CSV and its sidecars to generate everything again. Columns:
+`main_category`, `sub_category`, `prompt`, `answer`, `answer_type`.
 
 ## How it resumes
 
@@ -145,5 +156,6 @@ Every row, rejected or not, is acked, so a resume does not retry it.
 `jailbreak.apply_combination(fn, prompt, client=...)` runs one technique, or
 one `combine_techniques(...)` result, on one prompt with blocking calls, and
 returns `(text, info, accepted, reasoning)`. It loads the benign data when a
-technique needs it. `combine_techniques` sorts the techniques into layer
+technique needs it, generating what the cache lacks with `client`; its
+`prompt_dir` reaches the techniques and the benign data. `combine_techniques` sorts the techniques into layer
 order but does not check the compatibility rules.

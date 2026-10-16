@@ -29,7 +29,7 @@ describes the output from a user's side.
 
 | `ev` | Emitted by | Fields |
 |---|---|---|
-| `call` | every backend, once per transport call | `model`, `backend`, `n_items`, `ms`, `in_tok`, `out_tok`, `out_tok_max`, `max_tokens`, `temperature`; `error` when it failed, `finish_reason` when the provider gives one |
+| `call` | every backend, once per transport call | `model`, `backend`, `n_items`, `ms`, `in_tok`, `out_tok`, `out_tok_max`, `max_tokens`, `temperature`; `error` when it failed, `finish_reason` when the provider gives one, `cut: true` when the reply was cut at the token limit |
 | `local`, `phase: load` | `backends/vllm.py`, `backends/introspection.py` | `backend`, `hf_model_id`, `load_ms`; for vLLM `quantization`, `tensor_parallel_size`, `data_parallel_size`, `gpu_memory_utilization`, `devices`; for transformers `device_map`, `torch_dtype`, and the measured `claimed_gib` and `weights_gib` |
 | `local`, `phase: release` | the same, when an engine is released or at exit | `hf_model_id`, `held_s` |
 | `residency` | `residency.report` | the plan's `as_dict()`, and `stages` |
@@ -45,7 +45,7 @@ takes each item as its own engine request, so both give one event per item.
 | Function | Does |
 |---|---|
 | `install(data_dir=None, sink=None)` | Starts a `Collector` and installs it as the emitter. `sink` defaults to `REDACT_TRACE`, else `jsonl`. Writes `Datasets/run-<YYYYMMDD-HHMMSS>.trace.jsonl` under `data_dir` |
-| `stage(label)` | A context manager: labels every event inside it, and records a `stage` event with its duration on exit |
+| `stage(label)` | A context manager: labels every event inside it, and records a `stage` event with its duration on exit; then logs a WARNING per model that had replies cut at the token limit in the stage, with their count |
 | `summary()` | Rolls up the run and logs it; `{}` when telemetry is off |
 | `collector()` | The installed `Collector`, or `None` |
 | `uninstall()` | Stops collecting |
@@ -58,8 +58,13 @@ missing `wandb` package logs a warning and keeps the JSONL trace). With
 ## The roll-up
 
 `Collector.summary()` returns `models`, `local_s`, `local_billed_s`, `gpu`,
-`api_cost_usd`, `local_cost_usd` and `errors`
+`api_cost_usd`, `local_cost_usd`, `errors` and `cut`, the replies cut at the
+token limit per stage and model
 ([running.md](../running.md#telemetry-and-cost) gives each).
+`Collector.cut_in(stage)` gives one stage's counts.
+
+A backend marks a cut reply with `cut` on its `call` event and warns for the
+first cut reply of each model in each stage; later ones are only counted.
 
 Two meters, because two things are bought:
 

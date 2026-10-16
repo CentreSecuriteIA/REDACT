@@ -91,7 +91,8 @@ A recipe names:
 | `data_dir` | The working root (`--data-dir` or `run_pipeline(data_dir=...)` overrides it) |
 | `stages` | In order, from `constitution`, `inputs`, `outputs`, `paraphrase`, `jailbreaks`, `build`; default `["inputs", "outputs", "jailbreaks", "build"]` |
 | `models` | Per role (`gen`, `check`, `translation`, `constitution`, `paraphraser`, `paraphrase_check`): a registry name, `null` for the role's default, or `{"name": ..., "backend_type": ..., "copies": ..., "workers": ...}` to also say how it is served |
-| `taxonomy`, `taxonomy_dir`, `prompt_dir` | The taxonomy by name, and where to read taxonomies and prompt overrides from |
+| `taxonomy`, `taxonomy_dir`, `prompt_dir` | The taxonomy by name (default `"harmful"`, `configs/taxonomy/harmful.json`), and where to read taxonomies and prompt overrides from |
+| `benign_taxonomy` | The taxonomy whose subcategories the benign Q&A pairs of the `fsh` and `dap` techniques cover (default `"benign"`, `configs/taxonomy/benign.json`) |
 | `augmentations` | The jailbreak stage's [augmentation section](#the-augmentation-section): `{"adversarial": {...}, "natural": {...}}`, each kind overlaying its default, `null` to switch one off |
 | `params_file` | A JSON of each stage's own parameters under the stage's name (the keyword arguments of its `generate_*` function), relative to the recipe; `--params` overrides it |
 | `resume` | `true` (default) resumes every stage; `false` starts each over |
@@ -99,11 +100,14 @@ A recipe names:
 An unknown recipe key, a params key that is not a parameter of its stage, and a bad augmentation
 section all fail before any stage runs. Each stage writes a
 `{stage}.run.json` run record under `{data_dir}/Datasets/` (params, models, how they were served,
-row counts); `python scripts/inspect_run.py DATA_DIR` prints them. When the inputs stage accepted no
+row counts, the files the stage read); `python scripts/inspect_run.py DATA_DIR` prints them. When the inputs stage accepted no
 sample, the outputs, paraphrase and jailbreak stages each log a warning, write nothing and record 0
 rows, and the run goes on; the inputs stage itself warns, with the counts, when it accepts under half
 of what it generated. Local models are planned, loaded
-and unloaded stage by stage (see [Telemetry, cost, and GPU planning](#telemetry-cost-and-gpu-planning)).
+and unloaded stage by stage (see [Telemetry, cost, and GPU planning](#telemetry-cost-and-gpu-planning));
+before any loads, the run stops if another process holds memory on a card the plan uses (often the
+engines of a run killed with `kill -9`). In `scripts/run.py` the first Ctrl-C releases the models and
+exits; a second ends the run's child processes and exits at once.
 
 See `notebooks/eval_pipeline.ipynb` and `notebooks/training_pipeline.ipynb` for the full walkthroughs.
 
@@ -134,12 +138,15 @@ derived artifact joins, dedups, plans, and resumes identically:
 | Paraphrase | `paraphrases_*.manifest.jsonl` | `paraphrases_*.state.jsonl` | `(input_id, iteration)` |
 | Jailbreaks | `jailbreaks.manifest.jsonl` | `jailbreaks.state.jsonl` | `(input_id, iteration)` |
 | Natural variations | `variations.manifest.jsonl` | `variations.state.jsonl` | `(input_id, iteration)` |
+| Benign Q&A data (fsh/dap) | `benign_samples.manifest.jsonl` | `benign_samples.state.jsonl` | `(main_category, sub_category, answer_type)` |
 | Conversations | `conversations.manifest.jsonl` | `conversations.state.jsonl` | `(input_id, iteration)` |
 | Conversation scoring | — (scores existing rows) | `conversations_scored.state.jsonl` | `sample_id` |
 
 A resumed run reads the ledger alone: it checks each output file against the size and checksum
 the ledger recorded at its last save and cuts off what an unfinished save left behind. Plan-backed
-stages (jailbreaks, conversations) keep their manifest on a resume and stream their units from it.
+stages (jailbreaks, conversations) keep their manifest on a resume and stream their units from it;
+a resumed jailbreak stage warns with the count of inputs its kept plan does not hold, which only
+`resume=False` plans. The benign data always resumes, generating only the units it lacks.
 The one intentional exception is **standalone meta-prompt input generation** — it has no discrete
 idempotent units (it generates open-endedly toward a per-category sample count), so it gets
 neither a manifest nor a ledger and resumes by extending its CSVs. That path is now
@@ -242,7 +249,7 @@ src/redact/
 │   │   ├── personas.py            # 14 named persona archetypes + invented persona
 │   │   └── framing.py             # 5 scenario-modifying directives (pure transforms, multi-template)
 │   ├── manipulation/              # Context manipulation with benign examples
-│   │   ├── benign.py              # Benign sample generation + caching
+│   │   ├── benign.py              # Benign Q&A pairs per subcategory of the benign taxonomy, on the pool with a ledger
 │   │   ├── pairs.py               # Subcategory and pair selection both families share
 │   │   ├── fsh.py                 # Few-Shot Hacking (4 variants)
 │   │   └── dap.py                 # Distract and Persuade (4 variants)
@@ -617,7 +624,7 @@ A kind you give overlays its default from `configs/jailbreak/augmentations.json`
 
 **Overlay rules.** A value you give replaces the default's whole value, a list too. `layers`, `families` and `techniques` are overlaid list by list: an `allow` or `deny` you give replaces the default's list of that name and keeps the other, and a `deny` given alone also takes its names out of the default's `allow` (`"natural": {"families": {"deny": ["typos"]}}` is the natural default without typos). The families of `natural_only_families` (top of `augmentations.json`; `casual_writing` today) never enter the attacks unless the adversarial `families.allow` names them. An unknown key, a name the spec does not have, a name under both allow and deny, or a natural kind without an allow list raises when the recipe loads, naming the kind and the key.
 
-**Translation has its own switch**, `"translation"` in each kind, `false` in both by default: each translation costs 2–8 calls to the translation-role model, a hosted model today. `false` keeps the translation family out whatever the lists say, so no deny list of yours turns it on or off; an allow list that names `translation` or one of its languages while it is `false` raises. `true` puts it in: the attacks draw it as any other family, and the natural kind adds it to its allow list. The translation model is planned and loaded only when a kind has it on. Once a local translation model is registered, the packaged default can be flipped to `true` in one line of `augmentations.json`.
+**Translation has its own switch**, `"translation"` in each kind, `false` in both by default: each translation costs 2–8 calls (a translation and its check per round) to the run's translation model, the translation role's hosted model by default. `false` keeps the translation family out whatever the lists say, so no deny list of yours turns it on or off; an allow list that names `translation` or one of its languages while it is `false` raises. `true` puts it in: the attacks draw it as any other family, and the natural kind adds it to its allow list. The translation model is planned and loaded only when a kind has it on. Once a local translation model is registered, the packaged default can be flipped to `true` in one line of `augmentations.json`.
 
 **The variations file.** `variations.csv` has the same columns as `jailbreaks.csv` (rows keep their input's `entry_type`), with its own manifest, ledger and coverage table. It goes beside `output_path` when one is given, else to `{data_dir}/Datasets/variations.csv`; `variations_path=` overrides both. `build_dataset` adds its **accepted** rows as the `natural_variation` part; `include_variations=False` leaves them out and `variations_path=` reads another file.
 

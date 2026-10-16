@@ -58,6 +58,7 @@ takes them.
 | `roles` | `(recipe role, registry role)` pairs the stage calls |
 | `files` | `ctx -> (csv paths, keep)`: the files that hold the stage's rows, and the values a row must hold to be counted |
 | `recipe_kwargs` | `ctx -> kwargs` the run passes the front itself. A value an earlier stage saves is a `Saved`, read when the stage starts |
+| `sources` | `ctx -> paths`: the files the stage reads its inputs from; those that exist go in its run record |
 | `folded` | Params keys the run applies to a kwarg it passes itself (the jailbreak stage's flat keywords, folded into `augmentation`) |
 
 `Stage.params(ctx)` returns the params file's entry for the stage and raises
@@ -65,24 +66,26 @@ on a key that is not a parameter of the front. `Stage.check(ctx)` also
 raises on a key the run passes itself. `Stage.kwargs(ctx)` returns the
 recipe's kwargs updated with the params file's.
 
-| Stage | Roles | Files counted |
-|---|---|---|
-| `constitution` | `constitution` -> `constitution_gen` | `Data_cache/constitution/merged.csv` |
-| `inputs` | `gen`, `check` -> `uncensored_gen` | the category files of the run's tree; accepted rows of the current style |
-| `outputs` | `gen`, `check` -> `uncensored_gen` | `output_responses.csv`, or its `output_path` |
-| `paraphrase` | `paraphraser` -> `paraphraser`, `paraphrase_check` -> `uncensored_gen` | the files of the target(s) |
-| `jailbreaks` | `gen` -> `uncensored_gen`, `translation` -> `translation` | `jailbreaks.csv` and `variations.csv`, each when its kind is on |
-| `build` | none | `complete_dataset.csv`, or its `output_path` |
+| Stage | Roles | Files counted | Sources |
+|---|---|---|---|
+| `constitution` | `constitution` -> `constitution_gen` | `Data_cache/constitution/merged.csv` | the taxonomy file |
+| `inputs` | `gen`, `check` -> `uncensored_gen` | the category files of the run's tree; accepted rows of the current style | seeded: `merged.csv`; standalone: the taxonomy file, and the seeds file with `use_metaprompt: false` |
+| `outputs` | `gen`, `check` -> `uncensored_gen` | `output_responses.csv`, or its `output_path` | the input category files (`dataset.input_files`) |
+| `paraphrase` | `paraphraser` -> `paraphraser`, `paraphrase_check` -> `uncensored_gen` | the files of the target(s) | the input category files and `output_responses.csv`, per target |
+| `jailbreaks` | `gen` -> `uncensored_gen`, `translation` -> `translation` | `jailbreaks.csv` and `variations.csv`, each when its kind is on | the input category files |
+| `build` | none | `complete_dataset.csv`, or its `output_path` | the part files, where the params put them |
 
 `RunContext` is what one run hands the stages: `data_dir`, `dataset_type`,
 `models` (role to name or `None`), `prompt_dir`, `taxonomy`,
-`taxonomy_dir`, `params`, `augmentations` (resolved), `resume`, `verbose`.
+`taxonomy_dir`, `benign_taxonomy`, `params`, `augmentations` (resolved),
+`resume`, `verbose`, `stages` (the recipe's).
 
 ## recipe.py
 
 | Function | Does |
 |---|---|
-| `load_recipe(path or dict)` | Reads and checks a recipe ([running.md](../running.md#write-a-recipe)); resolves `augmentations` |
+| `load_recipe(path or dict)` | Reads and checks a recipe ([running.md](../running.md#write-a-recipe)); resolves `augmentations`; reads the former taxonomy name `content_moderation_categories` as `harmful`, with a `DeprecationWarning` |
+| `benign_taxonomy_of(recipe, stages)` | The recipe's `benign_taxonomy` (`"benign"` by default); read, and checked to have a category, when the jailbreak stage runs a kind that draws a technique needing benign data |
 | `load_params(path or dict, base_dir)` | Reads the params file; refuses a `jailbreaks` key that belongs in the augmentation section, warns for a flat keyword |
 | `augmentations_of(recipe, jailbreak_params)` | The section, both kinds resolved; reads the flat form; applies the params' flat keywords over the adversarial kind |
 | `serving_of(models)` | Checks the role objects; returns the keys given per model name |
@@ -106,14 +109,24 @@ translation technique.
    (`_stage_models` resolves them as the stages will), `residency.report` per
    distinct plan, `residency.apply_plan`. A planning error is logged, never
    raised.
-6. `_served`: per role, the name, setup, and copies or workers, for the
+6. `_check_cards`: one `nvidia-smi` read (`measure.card_use`) before any
+   model loads; a `RuntimeError` naming the cards, processes and PIDs when
+   another process holds memory on a card the plan uses. A process on an
+   unplanned card, or 1 GiB or more in use on a planned card with no process
+   listed, only warns.
+7. `_served`: per role, the name, setup, and copies or workers, for the
    summary and the records.
-7. Per stage: `_enter_phase` (unload, apply the stage's plan, preload this
+8. Per stage: `_enter_phase` (unload, apply the stage's plan, preload this
    stage's models and the next stage's when they fit), then inside
    `telemetry.stage(name)`: the front with `read_back=False`, `file_counts`,
-   `write_record`.
-8. `finally`: clear the run's serving, join the preload threads, unload every
+   `write_record` with `sources`. Leaving `telemetry.stage` logs the
+   stage's replies cut at the token limit, per model.
+9. `finally`: clear the run's serving, join the preload threads, unload every
    local engine, clear the planned shares and cards, `telemetry.summary()`.
+
+`scripts/run.py` makes the first Ctrl-C or SIGTERM exit through that
+`finally`; a second sends SIGTERM to the run's child processes (SIGKILL
+after 2 seconds) and leaves with `os._exit`.
 
 | Function | Does |
 |---|---|
@@ -144,7 +157,8 @@ else the current directory.
 
 Package folders take no root: `package_dir`, `prompts_dir`, `configs_dir`,
 `llm_configs_dir`, `models_json`, `roles_json`, `gpu_pricing_json`,
-`taxonomy_dir`, `seeds_dir`, `jailbreak_configs_dir`.
+`taxonomy_dir` (`harmful.json`, `benign.json`), `seeds_dir` (`harmful.json`),
+`dataset_configs_dir` (`configs/datasets/`), `jailbreak_configs_dir`.
 
 ## The seven steps of a stage
 
