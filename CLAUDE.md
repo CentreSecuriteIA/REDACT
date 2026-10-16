@@ -276,7 +276,7 @@ Rows on disk. A stage's output is a CSV under `Datasets/`: one file for most sta
 
 ### `jailbreak/` — Jailbreak Generation
 
-**152 single-turn techniques** in **4 layers → 22 families**, as `configs/jailbreak/combination_spec.json` names them. `pool.py` checks at import that the spec's `techniques` and the registries (`get_all_{obfuscation,hacking,manipulation,request}_functions()`: 72 + 25 + 8 + 47) name the same techniques, and raises otherwise; `technique.tag()` sets each function's spec tags when `redact.jailbreak` is imported: `families`, `layer` and `within_layer_order` (from its **first** family), `complexity` (0–3), `requires_llm`, `requires_benign`, `encode_weight`, `max_tokens`.
+**152 single-turn techniques** in **4 layers → 23 families**, as `configs/jailbreak/combination_spec.json` names them. `pool.py` checks at import that the spec's `techniques` and the registries (`get_all_{obfuscation,hacking,manipulation,request}_functions()`: 72 + 25 + 8 + 47) name the same techniques, and raises otherwise; `technique.tag()` sets each function's spec tags when `redact.jailbreak` is imported: `families`, `layer` and `within_layer_order` (from its **first** family), `complexity` (0–3), `requires_llm`, `requires_benign`, `encode_weight`, `max_tokens`.
 
 | Layer (apply order) | Families (count) — LLM? |
 |---|---|

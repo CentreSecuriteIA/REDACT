@@ -21,10 +21,11 @@ The library is **model-agnostic** (API or local vLLM), **prompt-agnostic** (all 
 ## Installation
 
 ```bash
-pip install -e .             # core (Venice API, pandas, openai)
-pip install -e ".[anthropic]"  # + Anthropic Claude support
-pip install -e ".[vllm]"       # + local vLLM inference
-pip install -e ".[dev]"        # + pytest, ruff, mypy
+pip install -e .                  # core: the OpenAI-compatible (Venice) and Anthropic backends
+pip install -e ".[vllm]"          # + local vLLM inference
+pip install -e ".[transformers]"  # + the introspection backend (torch, transformers)
+pip install -e ".[hf]"            # + HuggingFace dataset loading
+pip install -e ".[dev]"           # + pytest, ruff, mypy
 ```
 
 Requires Python 3.11+. See [pyproject.toml](pyproject.toml) for full dependency list.
@@ -540,7 +541,7 @@ output checker: a refusal of a harmful input is rejected, a benign input's reply
 
 ### Jailbreak — Technique Library
 
-152 single-turn jailbreak techniques, segmented into **4 layers** and **22 families** by `configs/jailbreak/combination_spec.json`. Technique definitions are taxonomy-driven where applicable — adding a new variant means adding a JSON entry, not a new function.
+152 single-turn jailbreak techniques, segmented into **4 layers** and **23 families** by `configs/jailbreak/combination_spec.json`. Technique definitions are taxonomy-driven where applicable — adding a new variant means adding a JSON entry, not a new function.
 
 #### Layers and families
 
@@ -1022,13 +1023,25 @@ This library is designed for **defensive AI safety research** — building datas
 - Python 3.11+
 - `pandas >= 2.0`
 - `openai >= 1.0` (Venice / OpenAI-compatible backends)
+- `anthropic >= 0.30` (Anthropic Claude backend)
 - `python-dotenv >= 1.0`
 - `pyfiglet >= 0.8` (ASCII art jailbreaks)
+- `filelock >= 3.11` (one writer per stage)
 
 Optional:
-- `anthropic >= 0.30` — Anthropic Claude backend (`pip install redact[anthropic]`)
 - `vllm >= 0.4` — local GPU inference (`pip install redact[vllm]`)
+- `torch`, `transformers`, `accelerate` — the introspection backend (`pip install redact[transformers]`)
 - `datasets >= 2.0` — HuggingFace loading (`pip install redact[hf]`)
+
+## Out of Scope
+
+Two parts of the work live in separate repositories:
+
+- **Defingerprinting**: the reverse-paraphraser training and the fingerprint
+  removal model. This library calls a paraphraser model (the `paraphraser`
+  role) but does not train one.
+- **Prompt optimization**: the automatic prompt finetuner, which reads and
+  writes prompt JSON files in this library's schema.
 
 ## License
 
