@@ -54,7 +54,18 @@ For a cheap eval set without a constitution, `generate_inputs(data_dir=DATA_DIR,
 runs the standalone meta-prompt path instead. It is **deprecated** (emits `DeprecationWarning`) but functional;
 constitution-seeded inputs give better and more adjustable coverage.
 
-<!-- TODO(augmentation docs): generate_jailbreaks(augmentation=...) examples (the two kinds, rounds "escalation", null to switch a kind off), pending the overlay-semantics change. -->
+`generate_jailbreaks` writes two kinds of augmentation: **attacks** (`jailbreaks.csv`) and **natural
+variations** (`variations.csv`), both on by default. One `augmentation=` section says what each draws;
+a kind you give overlays its packaged default, and `None` switches it off:
+
+```python
+jailbreaks = generate_jailbreaks(data_dir=DATA_DIR, inputs=inputs, augmentation={
+    "adversarial": {"entry_types": ["harmful"], "rounds": "escalation"},  # 4 rounds per input
+    "natural": None,                                                     # no variations
+})
+```
+
+See [The augmentation section](#the-augmentation-section) for every key.
 
 **Paraphrase / fingerprint removal** — `generate_paraphrases(data_dir=DATA_DIR, target="both")` adds reworded ("defingerprinted") copies of the base inputs and *accepted* base outputs as **additive rows** (`paraphrases_inputs.csv` / `paraphrases_outputs.csv`). A **separate** meaning-preservation checker drops paraphrases that don't preserve meaning (check→drop), duplicates are deduped, and each artifact gets a `*.manifest.jsonl` plan + `*.state.jsonl` resume ledger like every other stage (see [Resume model](#resume-model-one-modular-sidecar-system)). `build_dataset(mode="training")` merges the paraphrases into the dataset while `mode="eval"` writes a separate `paraphrased.csv`.
 
@@ -78,11 +89,12 @@ A recipe names:
 | `stages` | In order, from `constitution`, `inputs`, `outputs`, `paraphrase`, `jailbreaks`, `build`; default `["inputs", "outputs", "jailbreaks", "build"]` |
 | `models` | Per role (`gen`, `check`, `translation`, `constitution`, `paraphraser`, `paraphrase_check`): a registry name, `null` for the role's default, or `{"name": ..., "backend_type": ..., "copies": ..., "workers": ...}` to also say how it is served |
 | `taxonomy`, `taxonomy_dir`, `prompt_dir` | The taxonomy by name, and where to read taxonomies and prompt overrides from |
-| `augmentations` | The jailbreak stage's augmentation section <!-- TODO(augmentation docs): the two kinds, overlay rules, null to switch off --> |
+| `augmentations` | The jailbreak stage's [augmentation section](#the-augmentation-section): `{"adversarial": {...}, "natural": {...}}`, each kind overlaying its default, `null` to switch one off |
 | `params_file` | A JSON of each stage's own parameters under the stage's name (the keyword arguments of its `generate_*` function), relative to the recipe; `--params` overrides it |
 | `resume` | `true` (default) resumes every stage; `false` starts each over |
 
-A params key that is not a parameter of its stage fails before any stage runs. Each stage writes a
+An unknown recipe key, a params key that is not a parameter of its stage, and a bad augmentation
+section all fail before any stage runs. Each stage writes a
 `{stage}.run.json` run record under `{data_dir}/Datasets/` (params, models, how they were served,
 row counts); `python scripts/inspect_run.py DATA_DIR` prints them. Local models are planned, loaded
 and unloaded stage by stage (see [Telemetry, cost, and GPU planning](#telemetry-cost-and-gpu-planning)).
@@ -115,10 +127,9 @@ derived artifact joins, dedups, plans, and resumes identically:
 | Content-mod output | `output_responses.manifest.jsonl` | `output_responses.state.jsonl` | `input_id` |
 | Paraphrase | `paraphrases_*.manifest.jsonl` | `paraphrases_*.state.jsonl` | `(input_id, iteration)` |
 | Jailbreaks | `jailbreaks.manifest.jsonl` | `jailbreaks.state.jsonl` | `(input_id, iteration)` |
+| Natural variations | `variations.manifest.jsonl` | `variations.state.jsonl` | `(input_id, iteration)` |
 | Conversations | `conversations.manifest.jsonl` | `conversations.state.jsonl` | `(input_id, iteration)` |
 | Conversation scoring | — (scores existing rows) | `conversations_scored.state.jsonl` | `sample_id` |
-
-<!-- TODO(augmentation docs): the natural variations file's row (its manifest, ledger and coverage table). -->
 
 A resumed run reads the ledger alone: it checks each output file against the size and checksum
 the ledger recorded at its last save and cuts off what an unfinished save left behind. Plan-backed
@@ -555,16 +566,55 @@ Enforced by `compatible()` in `jailbreak/rules.py`; every rule binds both ways, 
 #### Sampling and the plan
 
 - **Family-first:** each pick chooses a family, then a technique within it, so the 20 translation languages count as one choice, not 20.
-- **Dealt evenly:** the whole run is planned before anything generates (`jailbreaks.manifest.jsonl`). Within each `(category, entry_type, iteration)` group, each layer joins at its rate (`layer_rates` in the spec: hacking 0.5, manipulation 0.33, requests 0.7) and families are dealt by count, so every group gets its share rather than a random draw. A `jailbreaks.coverage.csv` beside the manifest counts every layer, family and technique drawn per category, entry type and iteration.
+- **Dealt evenly:** the whole run is planned before anything generates (`jailbreaks.manifest.jsonl`). Within each `(category, entry_type, iteration)` group, each layer joins at its rate (`layer_rates`; the spec's are hacking 0.5, manipulation 0.33, requests 0.7) and families are dealt by count over their `family_weights` (1 each by default), so every group gets its share rather than a random draw. A `<out>.coverage.csv` beside each manifest (`jailbreaks.coverage.csv`, `variations.coverage.csv`) counts every layer, family and technique drawn per category, entry type and iteration, with a zero row for each pool technique never drawn. A layer that falls two or more picks short of its rate in a group (the pool or the rules left no fitting technique) is logged as a WARNING.
 - **Budget-driven** rounds pick hacking, manipulation and requests at their rates and up to `max_obfuscations` obfuscation families within `max_complexity`; with `allow_request_obfuscation`, one light encoding or translation may wrap the finished request.
 - **Count-driven** rounds (`exact_techniques=N`) pick exactly N compatible techniques and ignore the complexity budget.
 - **Reproducible:** each unit's draw is seeded by `(seed, sample_id, iteration)` and each technique's random choices by the unit and the technique, so a replayed plan gives the same text.
 
-<!-- TODO(augmentation docs): the augmentation section here: which techniques each kind draws from (deny/allow lists, pure_only, translation off by default), the rounds ("escalation" and custom lists), the natural variations kind and its file; pending the overlay-semantics change. -->
+#### The augmentation section
+
+`generate_jailbreaks(augmentation=...)` and a recipe's `augmentations` take the same section, with two **kinds**:
+
+- **`adversarial`**: the attacks, written to `jailbreaks.csv`. By default one round of combinations from every technique but translation, by the rules and budget above.
+- **`natural`**: natural variations, written to `variations.csv`. By default one technique per input (`exact_techniques: 1`) from the list of mild families and techniques in `augmentations.json`: typos, casual writing, structural wrapping, answer format and language, asking, indirect, temporal, continuation, basic leetspeak and two suffixes (three answer-format directives are denied). A variation that leaves its input unchanged is rejected.
+
+A kind you give overlays its default from `configs/jailbreak/augmentations.json`; a kind left out is the default, and a kind given as `null` is off. In a recipe:
+
+```json
+"augmentations": {
+  "adversarial": {
+    "entry_types": ["harmful", "dual_use_harmful"],
+    "families": {"deny": ["translation", "ascii_art"]},
+    "rounds": "escalation",
+    "family_weights": {"persona": 2}
+  },
+  "natural": null
+}
+```
+
+| Key | Kind | Meaning |
+|---|---|---|
+| `entry_types` | both | The inputs to augment, by entry type; `null` for all |
+| `layers.deny` | both | Layers to leave out |
+| `families.allow`, `families.deny`, `techniques.allow`, `techniques.deny` | both | With an allow list, the kind draws only the families and techniques it names; a deny list takes names out. The natural kind must have an allow list |
+| `pure_only` | both | Only techniques that call no model and need no benign data |
+| `family_weights` | both | A family's share within its layer when dealing, e.g. `{"persona": 2}` (1 each by default) |
+| `iterations` | both | Augmentations per input (with `rounds`, their number) |
+| `max_complexity`, `max_obfuscations`, `layer_rates`, `allow_request_obfuscation` | adversarial | The budget-driven settings above; `layer_rates` (`hacking`, `manipulation`, `requests`, `request_obfuscation`) override the spec's rates |
+| `rounds` | adversarial | `null` (every round the settings above), `"escalation"` (four rounds: exactly 1 technique, exactly 2, then two rising budgets), or a list of rounds, each merged over the kind's settings (`exact_techniques`, `max_complexity`, `max_obfuscations`, `layer_rates`, `allow_request_obfuscation`) |
+| `exact_techniques` | natural | Techniques per variation (default 1) |
+
+**Overlay rules.** A value you give replaces the default's whole value, a list too. `layers`, `families` and `techniques` are overlaid list by list: an `allow` or `deny` you give replaces the default's list of that name and keeps the other, and a `deny` given alone also takes its names out of the default's `allow` (`"natural": {"families": {"deny": ["typos"]}}` is the natural default without typos). A deny you write replaces the default's deny: the adversarial default denies `translation`, so keep it in a deny of your own to keep translation off. The families of `natural_only_families` (top of `augmentations.json`; `casual_writing` today) never enter the attacks unless the adversarial `families.allow` names them. An unknown key, a name the spec does not have, a name under both allow and deny, or a natural kind without an allow list raises when the recipe loads, naming the kind and the key.
+
+**Translation is off by default** in both kinds: each translation costs 2–8 calls to the translation-role model, a hosted model today. Turn it on by leaving `translation` out of the adversarial deny (`"families": {"deny": []}`) or by naming it in the natural allow; once a local translation model is registered, it can be on in the packaged default.
+
+**The variations file.** `variations.csv` has the same columns as `jailbreaks.csv` (rows keep their input's `entry_type`), with its own manifest, ledger and coverage table. It goes beside `output_path` when one is given, else to `{data_dir}/Datasets/variations.csv`; `variations_path=` overrides both. `build_dataset` adds its **accepted** rows as the `natural_variation` part; `include_variations=False` leaves them out and `variations_path=` reads another file.
+
+**Deprecated aliases.** The twelve flat keywords of `generate_jailbreaks` (`include_hacking`, `include_manipulation`, `include_obfuscation`, `include_requests`, `include_translation`, `pure_only`, `max_complexity`, `max_obfuscations`, `sampling_probs`, `iterations`, `settings_per_iteration`, `entry_types`) are read into the adversarial kind for one release, with a `DeprecationWarning`: `include_<layer>` is a `layers.deny`, `include_translation` a `families.deny`, `sampling_probs` is `layer_rates` and `settings_per_iteration` is `rounds`. The same keys are read, and warn, at the top of a recipe's `augmentations` (the flat form) and in `params["jailbreaks"]`; a key only the section holds (such as `family_weights`) in the params raises.
 
 **Known limitation:** the phase-5 request obfuscation isn't counted against `max_obfuscations`.
 
-**Execution model.** LLM-dependent techniques are **generators** that `yield` an `LLMRequest` and resume via `.send(response)` (`technique.py`); pure transforms are plain callables. `generate_jailbreaks()` plans the run, then drives every pending unit through one pool (`llm_pipeline.drive_units`): each call to a model carries up to `batch_size` pending requests for it, so a round's translations, checks and rewrites go out in batches, and finished units are appended every 32. It resumes from the sidecar `jailbreaks.state.jsonl` ledger, reusing the plan (see [Resume model](#resume-model-one-modular-sidecar-system)). A unit that fails gets an error row with its own `sample_id`. Each translation makes 2–8 calls to the translation-role model (translate, check, retry), which is why translation is off by default.
+**Execution model.** LLM-dependent techniques are **generators** that `yield` an `LLMRequest` and resume via `.send(response)` (`technique.py`); pure transforms are plain callables. `generate_jailbreaks()` plans the run, then drives every pending unit through one pool (`llm_pipeline.drive_units`): each call to a model carries up to `batch_size` pending requests for it, so a round's translations, checks and rewrites go out in batches, and finished units are appended every 32. It resumes from the sidecar `jailbreaks.state.jsonl` ledger, reusing the plan (see [Resume model](#resume-model-one-modular-sidecar-system)). A unit that fails gets an error row with its own `sample_id`. Benign Q&A data for FSH/DAP is loaded, or generated once and cached, when a planned unit needs it. Each translation makes 2–8 calls to the translation-role model (translate, check, retry), which is why translation is off by default. The natural kind runs the same way, to `variations.csv`.
 
 #### Obfuscation (72 functions)
 
