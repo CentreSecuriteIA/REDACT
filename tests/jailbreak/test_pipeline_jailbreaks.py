@@ -383,6 +383,94 @@ def test_entry_types_keep_the_inputs_of_those_types(tmp_path):
     assert list(df["entry_type"]) == ["benign", "benign"]
 
 
+# --- the pool against the plan ---------------------------------------------------
+
+
+def test_a_resume_with_a_narrower_pool_runs_the_planned_techniques(
+        tmp_path, monkeypatch):
+    """A pending unit rebuilds its combination from every registered technique,
+    so the techniques the resumed run's pool leaves out still run."""
+    import itertools
+
+    import redact.jailbreak.pipeline as JPipe
+    from redact.dataset import Ledger
+
+    whole = generate_jailbreaks(inputs=_inputs(), output_path=tmp_path / "w" / "jb.csv",
+                                seed=7, **PURE_KW)
+
+    out, finished, drive_units = tmp_path / "jb.csv", 2, JPipe.drive_units
+
+    def stop_after_two(source, **kwargs):
+        drive_units(itertools.islice(source, finished), **kwargs)
+        raise KeyboardInterrupt
+
+    with monkeypatch.context() as patch:
+        patch.setattr(JPipe, "drive_units", stop_after_two)
+        with pytest.raises(KeyboardInterrupt):
+            generate_jailbreaks(inputs=_inputs(), output_path=out, seed=7, **PURE_KW)
+    casters = {"input_id": str, "iteration": int}
+    done = Ledger.sidecar(out, ("input_id", "iteration"), casters).completed()
+    plan = Manifest.sidecar(out).load()
+    pending = [r for r in plan if (r["sample_id"], r["iteration"]) not in done]
+    assert len(done) == finished and len(pending) == len(_inputs()) - finished
+
+    # The resumed run's pool holds none of the techniques the pending units name.
+    off_pool = sorted({name for r in pending for name in r["combination"]})
+    narrower = _pure(techniques={"deny": off_pool})
+    pool = technique_pool(resolve(narrower["augmentation"], "adversarial"))
+    assert pool and not {fn.__name__ for fn in pool} & set(off_pool)
+
+    df = generate_jailbreaks(inputs=_inputs(), output_path=out, seed=7, **narrower)
+    assert Manifest.sidecar(out).load() == plan
+    technique_of = dict(zip(zip(df["input_id"], df["iteration"]), df["technique"]))
+    for unit in pending:
+        key = unit["sample_id"], unit["iteration"]
+        assert technique_of[key] == "+".join(unit["combination"])
+
+    def by_unit(rows):
+        return rows.sort_values(["input_id", "iteration"]).reset_index(drop=True)
+
+    pd.testing.assert_frame_equal(by_unit(df), by_unit(whole))
+
+
+_BENIGN = {"all_subcategories": ["sub"],
+           "by_subcat_short": {"sub": [{"prompt": "bq", "answer": "ba"}]},
+           "short": [{"prompt": "bq", "answer": "ba"}]}
+
+
+def _benign_loads(monkeypatch) -> list[dict]:
+    """Stand a fixed benign set in for the stage's load; the keywords of each load."""
+    import redact.jailbreak.pipeline as JPipe
+
+    loads: list[dict] = []
+    monkeypatch.setattr(JPipe, "get_or_generate_benign_data",
+                        lambda **kwargs: loads.append(kwargs) or _BENIGN)
+    return loads
+
+
+def test_a_pool_with_a_technique_that_needs_benign_data_loads_it(tmp_path, monkeypatch):
+    loads = _benign_loads(monkeypatch)
+    benign = tmp_path / "benign.csv"
+    df = generate_jailbreaks(
+        inputs=_inputs(), output_path=tmp_path / "jb.csv", benign_path=benign, seed=7,
+        augmentation={"adversarial": {
+            "layers": {"deny": []}, "pure_only": False,
+            "techniques": {"allow": ["to_fsh_random_short"]},
+            "rounds": [{"exact_techniques": 1}]}, "natural": None},
+        verbose=False)
+    assert [load["cache_path"] for load in loads] == [benign]
+    # Each unit ran its technique on the loaded set.
+    assert set(df["technique"]) == {"to_fsh_random_short"}
+    assert df["accepted"].all() and df["jailbreak"].str.contains("bq").all()
+
+
+def test_a_pool_without_one_loads_no_benign_data(tmp_path, monkeypatch):
+    loads = _benign_loads(monkeypatch)
+    df = generate_jailbreaks(inputs=_inputs(), output_path=tmp_path / "jb.csv", seed=7,
+                             **{**PURE_KW, "auto_generate_benign": True})
+    assert loads == [] and len(df) == len(_inputs())
+
+
 # --- the natural kind: variations beside the jailbreaks -------------------------
 
 
@@ -664,18 +752,24 @@ class _StepBackend(MockBackend):
         return [c.replace("step1 ", "S1:").replace("step2 ", "S2:") for c in contents]
 
 
-def _llm_run(tmp_path, monkeypatch, plan, backend, **kwargs):
-    """Run the stage on ``plan``, ``[(prompt, technique), ...]``, written as its manifest."""
+def _llm_run(tmp_path, monkeypatch, plan, backend,
+             techniques=(one_step, two_step, broken), **kwargs):
+    """Run the stage on ``plan``, ``[(prompt, technique), ...]``, written as its
+    manifest; a tuple of techniques is one unit's chain. ``techniques`` is the
+    registry."""
     import redact.jailbreak.pool as JPool
     import redact.stages as P
     from redact.dataset import Manifest
 
-    monkeypatch.setattr(JPool, "all_techniques", lambda: [one_step, two_step, broken])
+    def names(chain):
+        return [t.__name__ for t in (chain if isinstance(chain, tuple) else (chain,))]
+
+    monkeypatch.setattr(JPool, "all_techniques", lambda: list(techniques))
     monkeypatch.setattr(P.ModelClient, "create", lambda m: make_client(backend, m))
 
     out = tmp_path / "jb.csv"
     Manifest(out.with_name("jb.manifest.jsonl")).write(
-        {"sample_id": content_id(p), "iteration": 0, "combination": [t.__name__],
+        {"sample_id": content_id(p), "iteration": 0, "combination": names(t),
          "settings": {}, "status": "planned"}
         for p, t in plan
     )
@@ -802,3 +896,68 @@ def test_pool_a_prompt_too_long_lands_in_the_units_error_row(tmp_path, monkeypat
     ledger = Ledger.sidecar(out, key_fields=("input_id", "iteration"),
                             casters={"input_id": str, "iteration": int})
     assert ledger.completed() == {(content_id(p), 0) for p, _ in plan}
+
+
+# --- what reaches a technique's call -----------------------------------------
+
+
+def test_the_prompt_dir_reaches_a_techniques_call(tmp_path, monkeypatch):
+    seen = []
+
+    def takes_prompt_dir(text, *, gen_model=None, prompt_dir=None, **kwargs):
+        seen.append(prompt_dir)
+        msgs = [{"role": "user", "content": "step1 " + text}]
+        reply = yield LLMRequest(gen_model, msgs)
+        return reply, "takes_prompt_dir"
+
+    overlay = tmp_path / "my_prompts"
+    out = _llm_run(tmp_path, monkeypatch, [("zq0", takes_prompt_dir)], _StepBackend(),
+                   techniques=[takes_prompt_dir], prompt_dir=overlay)
+    assert seen == [overlay]
+    assert list(pd.read_csv(out)["jailbreak"]) == ["S1:zq0"]
+
+
+def upper(text, **kwargs):
+    """Pure technique."""
+    return text.upper(), "upper"
+
+
+def test_a_capturing_client_files_a_units_calls_under_its_sample_id(
+        tmp_path, monkeypatch):
+    """Each LLM call of a chain is captured under the unit's provisional root,
+    which the unit's row relabels to its sample_id; a pure chain captures
+    nothing and leaves nothing to relabel."""
+    import json
+
+    import redact.llms.backends.introspection as introspection
+    from redact.llms.model_config import MODEL_REGISTRY, IntrospectConfig, ModelConfig
+    from tests.llms.test_introspection_backend import _generate_backend
+
+    log_dir = tmp_path / "internals"
+    monkeypatch.setattr(introspection, "_models", {})
+    backend = _generate_backend(log_dir)            # replies "reply" to every request
+    # make_client binds the entry's identity onto the backend, temperature too.
+    monkeypatch.setitem(MODEL_REGISTRY, GEN, ModelConfig(
+        name=GEN, default_temperature=0.7,
+        introspect=IntrospectConfig(hf_model_id="org/model", log_dir=str(log_dir))))
+
+    plan = [("zq0", (one_step, two_step)), ("zq1", upper)]
+    out = _llm_run(tmp_path, monkeypatch, plan, backend,
+                   techniques=[one_step, two_step, upper])
+
+    df = pd.read_csv(out)
+    sample_id = dict(zip(df["prompt"], df["sample_id"]))
+    assert sample_id["zq0"] == content_id("reply")
+    root = f"{content_id('zq0')}/jailbreak"
+    asked = {
+        p.parent.relative_to(log_dir).as_posix():
+            json.loads(p.read_text("utf-8"))["messages"][-1]["content"]
+        for p in log_dir.rglob("meta.json")
+    }
+    assert asked == {
+        f"{root}/{sample_id['zq0']}/one_step/0": "step1 zq0",
+        f"{root}/{sample_id['zq0']}/two_step/0": "step1 reply",
+        f"{root}/{sample_id['zq0']}/two_step/1": "step2 reply",
+    }
+    assert not (log_dir / root / "attempt_0").exists()
+    assert not (log_dir / content_id("zq1")).exists()
