@@ -770,6 +770,123 @@ def test_no_engine_is_unloaded_for_a_stage_with_a_problem_it_does_not_cause(
         "share in the stage where its card is most crowded."]
 
 
+def test_an_engine_loaded_twice_counts_once_against_the_search_limit(
+        local_model, caplog):
+    """Five engines, each kept through stages that do not call it. With
+    every one unloaded where a stage does not fit, ten lifetimes are placed:
+    more than the search tries every card for when lifetimes count, so that
+    attempt failed and nothing was unloaded. Unloading e0 for s3 fits."""
+    import logging
+
+    from tests.test_residency import _kv
+
+    e = {n: local_model(f"_ph_lim_e{n}", gb)
+         for n, gb in enumerate((6.3, 5.3, 8.3, 9.3, 11.2))}
+    stages = {"s0": [2, 3], "s1": [2, 3, 4], "s2": [0], "s3": [1, 4], "s4": [0],
+              "s5": [2], "s6": [3]}
+    with _kv(0.0), caplog.at_level(logging.INFO, logger="redact.residency.phases"):
+        phases = plan_phases({s: [e[n] for n in ns] for s, ns in stages.items()},
+                             gpus=2, gib_per_gpu=24.0,
+                             copies=dict.fromkeys(e.values(), 1))
+    assert all(phase.plan.fits for phase in phases)
+    assert [r.getMessage() for r in caplog.records if "unloaded" in r.getMessage()] == [
+        f"[residency] {e[0]} is unloaded for stage s3 and loaded again for stage "
+        "s4, so that s3 fits. This costs one more load."]
+
+
+def lifetime_fit_exists(needs, calls, released, stages, cards, pool):
+    """Whether one card per lifetime keeps every card within ``pool`` in
+    every stage, with the engines unloaded over the ``released`` gaps,
+    found by trying cards one lifetime at a time.
+
+    Args:
+        needs: Each engine's need with overhead.
+        calls: The stages that call each engine, in order.
+        released: Gaps, each as an engine, the call before and the call after.
+    """
+    from redact.residency.phases import _lifetimes
+
+    resident = [[] for _ in range(stages)]
+    lifetimes = []
+    for engine, at in calls.items():
+        gaps = [(b, a) for e, b, a in released if e == engine]
+        for first, last in _lifetimes(at, gaps):
+            for i in range(first, last + 1):
+                resident[i].append(len(lifetimes))
+            lifetimes.append(needs[engine])
+    load = [[0.0] * cards for _ in range(stages)]
+    spans = [[i for i in range(stages) if n in resident[i]]
+             for n in range(len(lifetimes))]
+
+    def place(n):
+        if n == len(lifetimes):
+            return True
+        # Cards no lifetime is on yet are alike: try the first of them only.
+        used = {d for i in range(stages) for d in range(cards) if load[i][d] > 0}
+        tried = [d for d in range(cards) if d in used] + [
+            d for d in range(cards) if d not in used][:1]
+        for d in tried:
+            if all(load[i][d] + lifetimes[n] <= pool + 1e-6 for i in spans[n]):
+                for i in spans[n]:
+                    load[i][d] += lifetimes[n]
+                if place(n + 1):
+                    return True
+                for i in spans[n]:
+                    load[i][d] -= lifetimes[n]
+        return False
+
+    return place(0)
+
+
+def test_a_run_one_set_of_unloads_would_fit_is_planned_to_fit(local_model, caplog):
+    """300 seeded runs of 5 to 8 engines over 5 to 8 stages on 2 to 4 cards.
+    Where unloading the engines a stage that does not fit holds without
+    calling them gives a fit, found by trying every card for every
+    lifetime, the plan fits: unloading more never makes a fit harder, so
+    the planner's attempt with all of them unloaded finds one too. With
+    more engines than _SEARCH_LIMIT it may not: they are placed largest
+    first."""
+    import logging
+    import random
+
+    from tests.test_residency import _kv
+
+    rng = random.Random(20261016)
+    checked = released = 0
+    caplog.set_level(logging.INFO, logger="redact.residency.phases")
+    with _kv(0.0):
+        for run in range(300):
+            cards = rng.randint(2, 4)
+            names = [local_model(f"_ph_rel{run}_{n}", round(rng.uniform(4.0, 16.0), 1))
+                     for n in range(rng.randint(5, 8))]
+            count = rng.randint(5, 8)
+            stage_models = {f"s{i}": rng.sample(names, rng.randint(1, 1 + cards))
+                            for i in range(count)}
+            caplog.clear()
+            phases = plan_phases(stage_models, gpus=cards, gib_per_gpu=24.0,
+                                 copies=dict.fromkeys(names, 1))
+            released += any("unloaded" in r.getMessage() for r in caplog.records)
+            unfit = [i for i, phase in enumerate(phases) if not phase.plan.fits]
+            if not unfit:
+                continue
+            needs = {fp.model: fp.padded_gb for phase in phases
+                     for fp in phase.plan.footprints}
+            calls = {name: [i for i, models in enumerate(stage_models.values())
+                            if name in models] for name in names}
+            calls = {name: at for name, at in calls.items() if at}
+            gaps = [(name, before, after) for name, at in calls.items()
+                    for before, after in zip(at, at[1:])
+                    if any(before < i < after for i in unfit)]
+            if not gaps:
+                continue
+            checked += 1
+            assert not lifetime_fit_exists(
+                needs, calls, gaps, count, cards,
+                estimate.DEFAULT_GPU_MEMORY_UTILIZATION * 24.0), (run, stage_models)
+    # The runs checked, and those that fit by unloading.
+    assert (checked, released) == (72, 80)
+
+
 def test_no_engine_is_unloaded_only_to_move_it(local_model, caplog):
     """Two 24 GiB cards grant 21.6 GiB each. Stage a fits only with x and y
     on one card (18.8), beside p (20.4), and stage c only with them apart,

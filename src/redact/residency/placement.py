@@ -22,8 +22,9 @@ _UNKNOWN_GB = 0.0
 #: Slack for comparing GiB sums.
 _EPS = 1e-6
 
-#: Single-card vLLM engines a search tries on every card. With more, they
-#: are placed once more, largest first, and no other arrangement is tried.
+#: Single-card vLLM engines a search tries on every card, each counted once
+#: however many times a run loads it. With more, they are placed once
+#: more, largest first, and no other arrangement is tried.
 _SEARCH_LIMIT = 8
 
 #: Cards a search tries before it stops with the best arrangement so far.
@@ -651,7 +652,7 @@ class _Search:
 
     With more than :data:`_SEARCH_LIMIT` single-card engines nothing is
     tried: the stages are placed once, those engines of each taken largest
-    first.
+    first. So they are too when the steps run out with nothing found.
     """
 
     def __init__(self, stages: list[_Stage], pinned: dict[tuple, tuple[int, ...]]):
@@ -664,6 +665,8 @@ class _Search:
         self.engines: dict[tuple, str] = {}
         #: Those of them on one card.
         self.movable: set[tuple] = set()
+        # The engines those are lifetimes of.
+        loaded: set[tuple] = set()
         for stage in stages:
             models: dict[tuple, ModelFootprint] = {}
             for fp in stage.footprints:
@@ -672,12 +675,13 @@ class _Search:
                         fp, copies=stage.counts.get(fp.engine, 1),
                         engine=stage.lifetime(fp))
             self.stages.append((stage, list(models.values())))
-            for fp in models.values():
+            for engine, fp in models.items():
                 if fp.setup == "vllm" and fp.engine not in pinned:
                     self.engines.setdefault(fp.engine, fp.model)
                     if fp.copies * fp.min_gpus == 1:
                         self.movable.add(fp.engine)
-        self.largest_first = len(self.movable) > _SEARCH_LIMIT
+                        loaded.add(engine)
+        self.largest_first = len(loaded) > _SEARCH_LIMIT
         #: Whether a transformers model is placed in a stage or after it.
         #: It takes its cards by index, so until the last is placed no two
         #: cards are alike.
@@ -693,6 +697,9 @@ class _Search:
         """The cards found, per vLLM engine, or ``None`` when no arrangement
         fits."""
         self._stage(0, dict(self.pinned), frozenset(), 1.0)
+        if self.found is None and not self.steps and not self.largest_first:
+            self.largest_first, self.steps = True, _SEARCH_STEPS
+            self._stage(0, dict(self.pinned), frozenset(), 1.0)
         return self.found
 
     def _stage(self, s: int, where: dict, crowded: frozenset, share: float) -> None:

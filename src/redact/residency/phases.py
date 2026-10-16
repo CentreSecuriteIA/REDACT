@@ -133,7 +133,9 @@ def plan_phases(
     # A stage that does not fit may hold engines it does not call, kept for
     # a later stage. Each is unloaded over that gap if every stage then
     # fits. Of those gaps, the ones the run fits without are given back,
-    # the largest engine's first: its load is the longest to repeat.
+    # the largest engine's first: its load is the longest to repeat. The
+    # attempt with every gap unloaded is exact up to _SEARCH_LIMIT engines
+    # and _SEARCH_STEPS steps: unloading more never makes a fit harder.
     unfit = [i for i, phase in enumerate(phases) if not phase.plan.fits]
     gaps = [(engine, before, after)
             for engine, at in calls.items() for before, after in zip(at, at[1:])

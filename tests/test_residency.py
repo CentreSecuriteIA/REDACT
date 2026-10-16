@@ -3561,12 +3561,17 @@ class TestSearch:
         assert not plan.fits and caplog.records == []
 
     def test_a_search_stops_after_its_steps(self, registered):
-        """The first arrangement that fits is the seventh card tried."""
+        """The first arrangement that fits is the seventh card tried. With
+        fewer steps the engines are placed once more, largest first, which
+        takes four; with fewer still the order given stands."""
         names = self._engines(registered, "steps", (16.0, 8.0, 8.0, 16.0))
-        with patch.object(placement, "_SEARCH_STEPS", 6):
-            stopped = _plan(names, 32.0, 2)
-        with patch.object(placement, "_SEARCH_STEPS", 7):
-            found = _plan(names, 32.0, 2)
-        assert len(stopped.groups) == 2 and not stopped.fits
-        assert [fp.devices for fp in stopped.footprints] == [(0,), (1,), (1,), (0,)]
-        assert found.fits
+        plans = {}
+        for steps in (3, 6, 7):
+            with patch.object(placement, "_SEARCH_STEPS", steps):
+                plans[steps] = _plan(names, 32.0, 2)
+        assert len(plans[3].groups) == 2 and not plans[3].fits
+        assert [fp.devices for fp in plans[3].footprints] == [(0,), (1,), (1,), (0,)]
+        assert plans[6].fits
+        assert [fp.devices for fp in plans[6].footprints] == [(0,), (0,), (1,), (1,)]
+        assert plans[7].fits
+        assert [fp.devices for fp in plans[7].footprints] == [(0,), (1,), (0,), (1,)]
