@@ -495,15 +495,15 @@ class PromptTemplate:
 #   - Builds and discards a PromptTemplate on every call.
 #   - Passes no name/source, so a render error cannot name the prompt file.
 #   - Passes no prompt_dir, so a format-instruction override is ignored.
-#   - PromptTemplate.load, which fixes both, has no callers yet.
+#     PromptTemplate.load fixes both.
 #   - Passes every kwarg to both stages, hence the reserved placeholder names.
-#   - checker.py's four PromptTemplate(...) calls pass no name/source/prompt_dir.
 #   - Callers that pass no prompt_dir, so their overrides are never read:
-#     constitution/generation.py, constitution/input_generation.py,
-#     jailbreak/obfuscation/translation.py, generate_jailbreaks (no such
-#     parameter), and in content_moderation/ the input quality checker
-#     (generation.py, standalone_generation.py) and the description/seed
-#     calls (standalone_generation.py).
+#     constitution/units.py, jailbreak/obfuscation/translation.py, the benign
+#     Q&A prompt (jailbreak/manipulation/benign.py, reached through
+#     get_or_generate_benign_data), the input quality checker
+#     (content_moderation/inputs.py and standalone.py), the description and
+#     seed calls (standalone.py), and the conversation prompts
+#     (multi_turn/evaluate.py, multiturn_attacks/).
 def build_messages(
     prompt_config: dict,
     few_shot: bool = True,
