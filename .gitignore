@@ -40,3 +40,6 @@ llms_refactor_log.md
 
 # Backups
 old_data.zip
+
+# The documentation site (mkdocs build)
+site/

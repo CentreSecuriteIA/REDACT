@@ -38,6 +38,9 @@ vllm = ["vllm>=0.4", "hf_transfer>=0.1"]
 transformers = ["torch>=2.0", "transformers>=4.40", "accelerate>=0.26"]
 hf = ["datasets>=2.0"]
 dev = ["pytest>=7.0", "ruff>=0.4", "mypy>=1.0", "ipykernel>=7.0"]
+# The documentation site (mkdocs.yml): `mkdocs build --strict`. ruff formats
+# the API reference's signatures.
+docs = ["mkdocs-material", "mkdocstrings[python]", "ruff"]
 
 [project.urls]
 Homepage = "https://github.com/leonhamnett/REDACT"

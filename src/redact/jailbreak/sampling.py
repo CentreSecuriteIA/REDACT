@@ -206,8 +206,10 @@ def sample_exact_combination(
         rng: Random instance for reproducibility.
         pool: All available tagged technique functions.
         n: Exact number of techniques to select.
-        include_hacking / include_manipulation / include_obfuscation /
-            include_requests: Layer toggles applied to the initial candidate pool.
+        include_hacking: Layer toggle applied to the initial candidate pool.
+        include_manipulation: Layer toggle, as ``include_hacking``.
+        include_obfuscation: Layer toggle, as ``include_hacking``.
+        include_requests: Layer toggle, as ``include_hacking``.
 
     Returns:
         A combined technique function (``"identity"`` if ``n <= 0`` or nothing picked).

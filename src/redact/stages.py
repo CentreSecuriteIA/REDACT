@@ -538,15 +538,18 @@ def generate_jailbreaks(
             "natural": ...}``, each kind overlaying the packaged default
             (:mod:`redact.jailbreak.augmentation`); None is the default. A
             kind given as None is off.
-        max_complexity, max_obfuscations, pure_only, entry_types,
-            include_hacking, include_manipulation, include_obfuscation,
-            include_requests, include_translation, sampling_probs,
-            iterations, settings_per_iteration: Deprecated aliases into
-            ``augmentation["adversarial"]``, applied over it with a
-            ``DeprecationWarning``: ``include_<layer>`` denies or admits a
-            layer, ``include_translation`` is ``translation``,
-            ``sampling_probs`` is ``layer_rates`` and
-            ``settings_per_iteration`` is ``rounds``.
+
+    Deprecated aliases:
+        ``max_complexity``, ``max_obfuscations``, ``pure_only``,
+        ``entry_types``, ``include_hacking``, ``include_manipulation``,
+        ``include_obfuscation``, ``include_requests``,
+        ``include_translation``, ``sampling_probs``, ``iterations`` and
+        ``settings_per_iteration`` are read into
+        ``augmentation["adversarial"]``, applied over it with a
+        ``DeprecationWarning``: ``include_<layer>`` denies or admits a
+        layer, ``include_translation`` is ``translation``,
+        ``sampling_probs`` is ``layer_rates`` and
+        ``settings_per_iteration`` is ``rounds``.
 
     Returns:
         The rows of the jailbreaks CSV (input columns plus ``sample_id``,
@@ -761,7 +764,8 @@ def generate_paraphrases(
         seed: Round-robin assignment seed.
         prompt_dir: Root prompt directory for the paraphrase **and** paraphrase-check
             prompts. ``None`` (default) falls back to the bundled ``prompts/``.
-        inputs_path / outputs_path: Artifact path overrides.
+        inputs_path: Path override for the ``inputs`` target's artifact.
+        outputs_path: Path override for the ``outputs`` target's artifact.
         verbose: Log progress.
         read_back: False returns empty DataFrames and does not read the
             artifacts back.
@@ -875,8 +879,10 @@ def build_dataset(
             run's category files when it does not exist.
         responses_path: Output-responses CSV. Defaults to
             ``Datasets/output_responses.csv``.
-        paraphrase_inputs_path / paraphrase_outputs_path: Explicit paraphrase
-            artifact CSVs. Default to ``Datasets/paraphrases_{inputs,outputs}.csv``.
+        paraphrase_inputs_path: Explicit paraphrase-inputs CSV. Defaults to
+            ``Datasets/paraphrases_inputs.csv``.
+        paraphrase_outputs_path: Explicit paraphrase-outputs CSV. Defaults to
+            ``Datasets/paraphrases_outputs.csv``.
         mode: ``"training"`` merges paraphrases into ``complete_dataset.csv``;
             ``"eval"`` keeps them out of the complete dataset and writes them to a
             separate ``Datasets/paraphrased.csv``. (Maps from the recipe
