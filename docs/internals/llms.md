@@ -106,7 +106,11 @@ its memory freed, and a client built on it raises on its next call.
   engine request, awaited on the shared loop (`aio.py`); the engine batches
   whatever is in flight. `generate` sends one request per item and waits for
   all.
-- Prompts go through the chat template of the engine's tokenizer.
+- Prompts go through the chat template of the engine's tokenizer, so any
+  checkpoint whose tokenizer ships a usable `chat_template` works with no
+  extra setting. For one that does not (Mistral-3.x), pass vLLM's own
+  `vllm_kwargs={"tokenizer_mode": "mistral"}`; the library formats no
+  prompt by hand.
 - `max_workers` is the engine's `max_num_seqs` times its copies: what the
   async lane keeps in flight.
 - The load uses the residency plan's `gpu_memory_utilization` and cards
@@ -138,8 +142,28 @@ its memory freed, and a client built on it raises on its next call.
 
 ### TransformersIntrospectionBackend
 
-For research runs that need a model's internals. Each item is its own
-forward pass. An item with an `internals_id` is captured under
+For research runs that need a model's internals: hidden states, attention,
+logprobs. It is not a vLLM extension, since vLLM's continuous batching
+discards the intermediate activations; it runs the checkpoint through
+`transformers` instead, in place of vLLM for the run that needs the capture,
+not beside a live vLLM engine of the same weights.
+
+```python
+from redact import generate_outputs
+from redact.llms import IntrospectConfig, register_model
+
+register_model(
+    "my-model-introspect", backend_type="introspect",
+    introspect=IntrospectConfig(
+        hf_model_id="mistralai/Mistral-7B-v0.3",
+        log_dir="./runs/internals",
+        capture={"logprobs": True, "hidden_states": "last", "attention": False},
+    ),
+)
+generate_outputs(model="my-model-introspect")   # captures, since the backend can
+```
+
+Each item is its own forward pass. An item with an `internals_id` is captured under
 `<log_dir>/<internals_id>/`: always `meta.json` (settings, messages,
 output), and per `capture` setting `logprobs.pt`, `hidden_states.pt`,
 `attention.pt`. `rename_capture(old, new)` moves a capture once its final id
@@ -186,6 +210,28 @@ call. `generate` raises when `internals_ids` reach a backend that cannot
 capture. Clients are not cached: they are cheap, and what is expensive is
 cached below them.
 
+**A backend built by hand.** For an endpoint the registry does not describe,
+build the backend and wrap it. A backend is one configured model, so the
+model's name comes first:
+
+```python
+import os
+
+from redact.llms import AnthropicBackend, ModelClient, OpenAIBackend, VLLMBackend
+
+client = ModelClient(OpenAIBackend("my-model", api_key="...",
+                                   base_url="https://api.example.com/v1", rpm=60))
+client = ModelClient(AnthropicBackend("claude-opus-4-6",
+                                      api_key=os.environ["ANTHROPIC_API_KEY"]))
+client = ModelClient(VLLMBackend("my-local-model",
+                                 hf_model_id="mistralai/Mistral-7B-v0.3"))  # loads the weights
+```
+
+Anything left out takes `LLMBackend`'s default, including `rpm=None`: no
+rate limit at all. For a model you reuse, `register_model` it instead
+([extending.md](../extending.md#add-a-model)): the setup is validated, and
+`ModelClient.create(name)` wires it as it wires every shipped model.
+
 **Rate limits.** `RateLimiter` enforces `rpm` over a sliding 60-second
 window and is inert when the backend has no `rpm`, as every local setup has.
 `shared_limiter(key)` hands out one window per key, so two clients of one
@@ -214,7 +260,7 @@ the same `rpm`.
 | `build_messages(config, format_style=None, **kwargs)` | One-shot render, the same kwargs for both parts |
 | `get_format_instruction(style, num_samples)` | The `numbered` or `structured_qa` instruction |
 | `report_prompt_sources(prompt_dir)` | Logs overrides, and warns about override folders that match nothing |
-| `extract_numbered_list`, `extract_structured_qa`, `extract_and_clean` | Parse a reply. With `expected_count`, a reply with another count is rejected whole: the result is empty |
+| `extract_numbered_list`, `extract_structured_qa`, `extract_and_clean` | Parse a reply: a numbered list (`1. sample`, `2) sample`, `3: sample`), or `**Question:** ... **Answer:** ...` pairs, optionally headed `**Prompt N:**`. With `expected_count`, a reply with another count is rejected whole: the result is empty |
 | `clean_sample` | Strip markdown and stray chat tokens |
 | `scaffold_prompt_tree(target, mode=)` | Write a copy (`copy`) or skeletons (`empty`) of the prompt tree |
 
@@ -230,6 +276,10 @@ template comes from `PromptTemplate.load`.
   techniques do), which the driver resolves with `ModelClient.create`.
 - Prompts come from `load_prompt` or `PromptTemplate.load`; the checkers of
   `content_moderation/checker.py` are templates that build
-  `(original, sample) -> messages`.
+  `(original, sample) -> messages`. `build_quality_checker(category,
+  entry_type, subcategory)` judges an input against all three, so a benign
+  or dual-use sample is not rejected for falling outside a harm category;
+  `build_output_quality_checker` and `build_paraphrase_checker` are the
+  output and paraphrase checks.
 - The residency planner reads `MODEL_REGISTRY`, `resources/estimate.py` and
   `resources/measure.py`, and hands its grants to `backends/vllm.py`.

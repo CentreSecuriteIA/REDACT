@@ -143,3 +143,62 @@ scores rows that exist.
 Conversations the ledger records are skipped. A conversation too long for the
 judge is scored `success` false with `prompt too long: ...` and acked. Any
 other error stops the stage.
+
+## Attacks and search
+
+Two packages build on these functions. Neither is a recipe stage. The
+attacks are saved and resumed as any conversations are, and the search sends
+each round's calls as one batch; both run offline in the tests with a fake
+client and judge (`tests/test_multiturn_attacks.py`,
+`tests/test_optimization.py`).
+
+**Multi-turn attacks** (`multiturn_attacks/`) play an attacker against a
+safety-trained target over several turns: `crescendo` escalates through
+templated follow-ups, `pair` has an attacker model (`attacker_model`)
+write each turn. With `jailbreak_technique`, a pure transform is applied to
+each crescendo follow-up. An attack is a `Setting` (`build_attack_setting`)
+run through `generate_conversations`, and `score_attacks` scores it with a
+jailbreak-success judge through `evaluate_conversations`.
+
+```python
+import pandas as pd
+
+from redact.jailbreak.obfuscation.encoding import to_rot13
+from redact.multiturn_attacks import generate_attacks, score_attacks
+
+harmful_seeds = pd.DataFrame({"seed": ["<a harmful request>"]})
+attacks = generate_attacks(
+    harmful_seeds, target_model="claude-opus-4-6",   # required, no default
+    attack="crescendo", jailbreak_technique=to_rot13, max_turns=6,
+    data_dir="./runs/attack",
+)
+scored = score_attacks(data_dir="./runs/attack", judge_model="venice-uncensored")
+```
+
+The target must be a safety-trained model that resists a single-shot
+request. Attacking an uncensored model measures nothing: it complies on the
+first turn. There is no default target; pass it explicitly.
+
+**Search** (`optimization/`): `optimize` is a beam search toward a judge's
+yes. At each depth it extends every frontier conversation by each candidate
+move, has the target reply to all of them in one round, scores the replies
+with the judge, keeps the whole tree, and goes on with the `beam` best.
+`beam=1` refines a single line, as PAIR does; a wider beam explores, as TAP
+does. `optimize_attack` uses jailbreak techniques as the moves:
+
+```python
+from redact.jailbreak.obfuscation.encoding import to_base64, to_rot13
+from redact.multiturn_attacks import optimize_attack
+
+best, tree = optimize_attack(
+    "<a harmful request>", target_model="claude-opus-4-6",
+    techniques=[to_rot13, to_base64], judge_model="venice-uncensored",
+    beam=2, depth=3,
+)
+# best: the highest-scoring conversation found; tree: every node and its score
+```
+
+The design follows Inspect's vocabulary: a seed is a `Sample`, the messages
+are `ChatMessage`s, a `Setting` is a solver and the judge a scorer. The
+dependencies point one way: `llm_pipeline/` (`LLMRequest`, the drivers),
+then `multi_turn/`, then `multiturn_attacks/` and `optimization/`.

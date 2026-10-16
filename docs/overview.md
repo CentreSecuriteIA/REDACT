@@ -231,3 +231,23 @@ writes `Datasets/<category>/samples.csv` and warns with a
 | `multiturn_attacks/` | A `Setting` of an attacker and a target model (`generate_attacks`, `score_attacks`, `optimize_attack`), built on `multi_turn/` |
 | `optimization/` | A beam search over conversation moves scored by a judge (`optimize`) |
 | `dataset/loading.py` | Load a published dataset from the HuggingFace Hub (`load_hf_dataset`, `load_from_config`) |
+
+## Out of scope
+
+Two parts of the work live in separate repositories:
+
+- **Defingerprinting**: the reverse-paraphraser training and the fingerprint
+  removal model. This library calls a paraphraser model (the `paraphraser`
+  role) but does not train one.
+- **Prompt optimization**: the automatic prompt finetuner, which reads and
+  writes prompt JSON files in this library's schema.
+
+## Safety and ethics
+
+REDACT is built for defensive AI safety research: datasets to evaluate and
+improve content moderation and jailbreak detection.
+
+- Handle generated data responsibly. Clear `Datasets/` and `Data_cache/`
+  before sharing a working root.
+- The inputs, the outputs and the paraphrases are checked by a second model,
+  which rejects low-quality and off-category samples.

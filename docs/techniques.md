@@ -5,8 +5,8 @@ The jailbreak stage draws from 152 techniques in 4 layers and 23 families.
 a complexity from 0 to 3, and whether it calls a model (`requires_llm`) or
 needs the benign data (`requires_benign`). This page lists them by name, for
 the `allow` and `deny` lists of the
-[augmentation section](configuration.md#the-augmentation-section). It does not
-describe what a technique does.
+[augmentation section](configuration.md#the-augmentation-section), and says
+briefly what each family does.
 
 ## Layers
 
@@ -82,3 +82,81 @@ into layer order. [internals/jailbreak.md](internals/jailbreak.md) explains
 how a combination is drawn.
 
 Adding a technique: [extending.md](extending.md#add-a-jailbreak-technique).
+
+## What the families do
+
+A transform returns `(text, info)`; the info names what it drew, such as a
+template variant or a font, for traceability.
+
+**Hacking.**
+
+- `cognitive` and `persona` are two model calls each: a scenario, then the
+  jailbreak built on it. A named persona grounds the scenario in the
+  persona's character first. The definitions live in
+  `configs/jailbreak/hacking/cognitive_techniques.json` and `personas.json`,
+  editable without touching code.
+- `framing` directives are transforms that change the scenario or the
+  intent. Each has named template variants in
+  `configs/jailbreak/hacking/framing_templates.json`; one is drawn per call.
+
+**Manipulation.** Both families build on benign question-and-answer pairs
+of one subcategory of the benign taxonomy. The `random` variants pick the
+subcategory at random, the `selected` ones ask the model to choose one
+(prompt `jailbreak/category_selection`); `short` and `long` are the length of
+the answers.
+
+- `fsh` (few-shot hacking): the benign pairs prime a helpful pattern, and the
+  prompt comes last, as one more question.
+- `dap` (distract and persuade): the prompt is hidden among the benign pairs,
+  at a random position.
+
+**Obfuscation.**
+
+- `sensitive_words` and `tokenbreak` share one model call that marks the
+  harmful words of the prompt (prompt `jailbreak/extract_harmful`). The
+  encoding, splitting or substitution then applies to those words only, not
+  to the whole prompt.
+- `translation` covers 20 languages across resource tiers. Each is a
+  translate, check and retry loop on the `translation` model.
+- `typos` is one rewrite by the model, at one of four densities, with the
+  level's description in the prompt.
+- `casual_writing` is how a person typing quickly writes: casing, spacing,
+  punctuation, abbreviations, accents.
+- `suffixes` appends an adversarial suffix: punctuation, fragments, unicode
+  or emoji.
+- `encode` encodes the whole text: base64, rot13, rot18, rot47, unicode
+  escapes, ASCII ordinals, a separator, leetspeak at three levels, morse,
+  braille.
+- `structural` wraps the text in JSON, XML or markdown.
+- `ascii_art` draws the text in one of 16 pyfiglet fonts.
+
+**Requests.** These change how a request is posed, not its text, and call no
+model. Each technique picks one of its named template variants from a JSON
+file under `configs/jailbreak/requests/`. The `answer_language` techniques
+are generated from the language list in `answer_language_templates.json`, so
+a new language is one JSON entry. `to_impersonate_good_person` has eight
+profession variants (nurse, doctor, security researcher, teacher, ...) and
+`to_use_past_tense` four historical framings.
+
+## Reference list coverage
+
+The library is benchmarked against a reference set of 73 instruction
+primitives and 74 request primitives.
+
+| Status | Primitives |
+|---|---|
+| Covered | All encoding, sensitive-words and typo primitives; all 16 translation languages; all 14 named personas; every framing directive (`fictional_world`, `noble_goal`, `nefarious_goal`, `high_stake`, `no_moral_constraints`, `refusal_then_comply`, `prefix_injection`, `apology_prevention`, `answer_in_markdown`, `answer_as_tutorial`); every request primitive (`innocuous_question`, `impersonate_good_person`, the four distractors, `use_past_tense`, `ask_for_details`, `ask_answer_in` for 16 languages) |
+| Left out by design | `agent_context_additional_instr` (needs access to the system prompt), `fine_tuning` (out of scope), `use_highly_specialized_language` (no clear way to build it), `direct_question` (changes nothing) |
+
+Beyond the reference list, the library adds:
+
+- the encodings rot18, rot47, braille, morse and ASCII ordinals;
+- ASCII art in 16 pyfiglet fonts;
+- adversarial suffixes (punctuation, fragments, unicode, emoji);
+- structural wrapping (JSON, XML, markdown);
+- the five cognitive techniques (`persona_roleplay`, `hypothetical_framing`,
+  `authority_obedience`, `avi`, `deep_inception`);
+- the manipulation families, FSH and DAP, in eight variants;
+- the answer formats code, dialogue, story and structured data;
+- continuation attacks (4) and indirect task embedding (6);
+- the answer languages Zulu, Scots Gaelic, Bengali and Javanese.

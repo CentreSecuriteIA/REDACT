@@ -62,6 +62,10 @@ The library logs under the `redact` logger and configures nothing. In your
 own script, call `logging.basicConfig(level=logging.INFO)` to see progress.
 `python scripts/inspect_run.py <data_dir>` prints each stage's run record.
 
+The notebooks in `notebooks/` walk through a run step by step:
+`eval_pipeline`, `training_pipeline`, `content_moderation` and
+`jailbreak_augmentation`.
+
 ## Write a recipe
 
 A recipe says what to run. A params file holds each stage's own settings,

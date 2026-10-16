@@ -4,6 +4,31 @@
 into stages and run a recipe. This page also gives the shape every stage
 core follows: [the seven steps](#the-seven-steps-of-a-stage).
 
+## Package layout
+
+Under `src/redact/`:
+
+| Path | Holds |
+|---|---|
+| `llms/` | The model registry, one backend per provider, `ModelClient`, rate limits, prompt loading and reply parsing ([llms.md](llms.md)) |
+| `llm_pipeline/` | `LLMRequest`, the drivers of units of model calls, checks and retry steps ([llm_pipeline.md](llm_pipeline.md)) |
+| `residency/` | The GPU planner: which local models fit, per stage; preload and unload ([residency.md](residency.md)) |
+| `constitution/` | The constitution stage: `generation.py` (`ConstitutionPipeline`, `read_constitution`), `units.py` (one call per taxonomy category and entry type), `parse.py` (the `[END]` marker and the three-level markdown parser) |
+| `content_moderation/` | The inputs, outputs and paraphrase stages: `inputs.py` (`InputPipeline`), `standalone.py` (the deprecated standalone inputs), `outputs.py`, `paraphrase.py`, `checker.py` (the checkers), `feedback.py` (rejection feedback, the do-not-repeat note), `metaprompt.py` (category description and seeds), `results.py` (result classes) |
+| `jailbreak/` | The technique library, one subpackage per layer, and the augmentation engine ([jailbreak.md](jailbreak.md)) |
+| `multi_turn/` | Conversation datasets: settings, actors, `generate_conversations`, `evaluate_conversations` |
+| `multiturn_attacks/`, `optimization/` | Crescendo and PAIR attacks against a safety-trained target; a beam search over conversation moves ([conversations](../stages/conversations.md#attacks-and-search)) |
+| `dataset/` | Rows on disk: identity, the ledger and manifest, resume, the per-category tree ([dataset.md](dataset.md)) |
+| `configs/` | Package data: `llm/` (registry, roles, GPU prices), `jailbreak/` (the spec, the augmentation defaults, technique templates), `taxonomy/`, `seeds/`, `datasets/`, `runs/` (example recipes) |
+| `prompts/` | One prompt JSON per pipeline and step |
+| `stages.py`, `recipe.py`, `driver.py`, `paths.py` | This page |
+| `telemetry.py` | The run trace and the cost roll-up ([telemetry.md](telemetry.md)) |
+| `exceptions.py`, `types.py` | `RedactError`, `PromptTooLongError`; `EntryType` |
+
+Beside the package: `scripts/` (`run.py`, `inspect_run.py`,
+`scaffold_prompts.py`, `download_models.py`), `notebooks/` (walkthroughs) and
+`tests/`.
+
 ## Responsibilities and boundaries
 
 | Module | Responsible for | Must not |
@@ -45,6 +70,24 @@ Every front takes, where they apply:
 A front that reads the run's inputs raises when no category file exists
 (`No input samples found`), and warns and returns an empty frame when none
 is accepted (`<stage> skipped: ...`).
+
+A core can be called without its front, with clients and paths of your own.
+The seeded inputs, for example:
+
+```python
+from redact.content_moderation import InputPipeline
+from redact.llms import ModelClient, load_prompt
+
+client = ModelClient.create("venice-uncensored")
+pipeline = InputPipeline(gen=client, check=client,
+                         dataset_dir="./runs/eval/Datasets/constitution_inputs")
+result = pipeline.run_from_constitution(
+    constitution_df=constitution,                     # from generate_constitution()
+    prompt_config=load_prompt("input", "generation/from_constitution/long"),
+    samples_per_entry=3, style="long",
+)
+print(f"{result.total_prompts_accepted} accepted samples")
+```
 
 ## The stage table
 

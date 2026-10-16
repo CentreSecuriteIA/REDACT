@@ -403,7 +403,7 @@ role.
 | Variable | Read by | Meaning |
 |---|---|---|
 | `VENICE_API_KEY`, `ANTHROPIC_API_KEY`, `OPENROUTER_API_KEY` | the shipped API setups | API keys, named by `api_key_env` |
-| `HF_HOME` | vLLM, transformers | The HuggingFace cache for weights |
+| `HF_HOME` | vLLM, transformers | The HuggingFace cache for weights, `~/.cache/huggingface` when unset. Give it room: the local weights of `venice-uncensored` take about 48 GB |
 | `HF_TOKEN` | HuggingFace | Access to gated checkpoints and datasets |
 | `REDACT_OUTPUT_DIR` | `paths.get_output_dir` | The default working root, and where `.env` is read |
 | `REDACT_TRACE` | `telemetry.install` | `jsonl` (default), `wandb` or `off` |

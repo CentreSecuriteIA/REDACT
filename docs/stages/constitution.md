@@ -12,6 +12,16 @@ the four entry types: `harmful`, `dual_use_harmful`, `dual_use_benign`,
 ([inputs.md](inputs.md)). A `training` run lists this stage; an `eval` run
 may, and its inputs are then seeded from it too.
 
+The four entry types are the severities a classifier is trained to tell
+apart:
+
+| Entry type | Meaning | File |
+|---|---|---|
+| `harmful` | Absolutely harmful: always flag | `harmful.csv` |
+| `dual_use_harmful` | Borderline, with a harmful framing: debatable | `dual_use_harmful.csv` |
+| `dual_use_benign` | Borderline, with a benign framing: could look harmful | `dual_use_benign.csv` |
+| `benign` | Absolutely benign: never flag (hard negatives) | `benign.csv` |
+
 ## Inputs
 
 - The taxonomy: a file under `taxonomy_dir` (default
@@ -94,6 +104,26 @@ back. Each unit's rows are appended to its entry type's file and to
   unit un-acked. The next run generates it again and appends its rows again.
 
 ## Rejected and failed units
+
+A reply is a three-level markdown hierarchy: a constitution category, its
+subcategories, and a sample description per bullet.
+`constitution.parse.parse_constitution(text)` parses it into `ParsedEntry`
+objects (`category`, `subcategory`, `sample`):
+
+```python
+from redact.constitution.parse import parse_constitution
+
+entries = parse_constitution("""
+## 1. Violence
+### 1.1 Physical Violence
+- (A person punching another person)
+### 1.2 Verbal Threats
+- (Someone threatening to harm another)
+""")
+
+for e in entries:
+    print(f"{e.category} / {e.subcategory} / {e.sample}")
+```
 
 A reply is rejected whole when it does not end with the `[END]` marker (it
 stopped early) or when no entry parses from it. A rejected reply is generated

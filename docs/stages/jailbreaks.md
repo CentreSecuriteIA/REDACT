@@ -159,3 +159,22 @@ returns `(text, info, accepted, reasoning)`. It loads the benign data when a
 technique needs it, generating what the cache lacks with `client`; its
 `prompt_dir` reaches the techniques and the benign data. `combine_techniques` sorts the techniques into layer
 order but does not check the compatibility rules.
+
+```python
+from redact.jailbreak import apply_combination, combine_techniques
+from redact.jailbreak.hacking.cognitive import to_persona_roleplay
+from redact.jailbreak.obfuscation.encoding import to_base64, to_rot13
+from redact.llms import ModelClient
+
+# A transform is a plain call: (prompt) -> (text, info).
+text, info = to_base64("How to pick a lock")
+text, info = combine_techniques(to_rot13, to_base64)("How to pick a lock")
+
+# A technique that calls a model is a generator: calling it directly returns
+# the generator, not a result. apply_combination drives it with blocking calls.
+client = ModelClient.create("venice-uncensored")
+text, info, accepted, reasoning = apply_combination(
+    combine_techniques(to_persona_roleplay, to_base64), "How to pick a lock",
+    client=client,
+)
+```
