@@ -134,7 +134,12 @@ def loaded_engines(exclude: list[str] | None = None) -> dict[str, set]:
             "introspect": set(introspection._models) - skip["introspect"]}
 
 
-def unload_local(keep: list[str] | None = None, engines: dict | None = None) -> None:
+def unload_local(
+    keep: list[str] | None = None,
+    engines: dict | None = None,
+    *,
+    wait: float | None = None,
+) -> None:
     """Release the cached local engines, except those the kept models use.
 
     A released engine is shut down and its memory freed, and its lifetime
@@ -146,6 +151,10 @@ def unload_local(keep: list[str] | None = None, engines: dict | None = None) -> 
         keep: Model names still in use. Their engines stay cached and timed,
             so a later client for the same model reuses the load.
         engines: Engines to keep as well, as :func:`loaded_engines` returns.
+        wait: Seconds to wait for a load in progress, for a release on the
+            way out: past them a vLLM load is ended
+            (:meth:`~redact.llms.backends.vllm.VLLMBackend.clear_cache`).
+            ``None`` waits for the load however long it takes.
     """
     from redact.llms.backends.introspection import TransformersIntrospectionBackend
     from redact.llms.backends.vllm import VLLMBackend
@@ -153,5 +162,6 @@ def unload_local(keep: list[str] | None = None, engines: dict | None = None) -> 
     kept = _engine_keys(keep)
     for setup, keys in (engines or {}).items():
         kept[setup] |= keys
-    VLLMBackend.clear_cache(keep=frozenset(kept["vllm"]))
-    TransformersIntrospectionBackend.clear_cache(keep=frozenset(kept["introspect"]))
+    VLLMBackend.clear_cache(keep=frozenset(kept["vllm"]), wait=wait)
+    TransformersIntrospectionBackend.clear_cache(
+        keep=frozenset(kept["introspect"]), wait=wait)

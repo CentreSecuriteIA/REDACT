@@ -58,9 +58,13 @@ _planned_devices: dict[tuple, tuple[int, ...]] = {}
 # when they are ended (terminate_engine_processes). A child that another
 # thread starts during a build is counted as the build's.
 _engine_procs: dict[tuple, list] = {}
+# The engine key of the load that holds _engines_lock.
+_loading: tuple | None = None
 # The build in progress: its engine key, and the pids of the child processes
 # that existed when it started.
 _building: tuple[tuple, frozenset[int]] | None = None
+# Engine keys whose build a release on the way out ended (_end_load).
+_ended: set[tuple] = set()
 # The child processes of builds that failed, which no engine holds.
 _stray: list = []
 # Seconds an engine process gets to end after SIGTERM, and again after SIGKILL.
@@ -68,6 +72,13 @@ _END_WAIT_S = 5.0
 # How vLLM names its engine processes: EngineCore, EngineCore_DP<n> for a
 # copy, and VLLM_DP_Coordinator.
 _ENGINE_PROCESS_NAMES = ("EngineCore", "VLLM_DP_Coordinator")
+#: Seconds the exit waits for a load in progress before it ends the load's
+#: engine processes. A release mid-run waits for the load instead: a first
+#: load can take 15 minutes.
+EXIT_WAIT_S = 60.0
+# Seconds to wait for the engine lock again once a build's processes are
+# ended: the load then fails and lets go of it.
+_GRACE_S = 10.0
 # Set once the exit hook is registered, at the start of the first load (see _engine).
 _exit_hook_registered = False
 # Numbers the requests: an engine needs each id unique in the process.
@@ -116,6 +127,22 @@ def _physical_ids(devices: tuple[int, ...]) -> list[str]:
     if visible is None:
         return [str(d) for d in devices]
     return [visible[d] for d in devices]
+
+
+class EngineLoadEnded(RuntimeError):
+    """A load that a release on the way out ended, because it had not
+    returned within the release's wait."""
+
+
+@contextlib.contextmanager
+def _loading_of(key: tuple):
+    """Mark ``key`` as the load that holds the engine lock, inside."""
+    global _loading
+    _loading = key
+    try:
+        yield
+    finally:
+        _loading = None
 
 
 def _started_since(before: frozenset[int]) -> list:
@@ -230,7 +257,7 @@ def _engine(hf_model_id: str, quantization: str | None, vllm_kwargs: dict):
     if engine is not None:
         return engine
 
-    with _engines_lock:
+    with _engines_lock, _loading_of(key):
         # Re-check: another thread may have finished the load while we waited.
         if key in _engines:
             return _engines[key]
@@ -249,18 +276,15 @@ def _engine(hf_model_id: str, quantization: str | None, vllm_kwargs: dict):
 
         if not _exit_hook_registered:
             # Before the load, under the lock: an exit during a load then waits
-            # on the lock until the load is done and shuts the engine down.
-            # atexit runs hooks last-registered first, and multiprocessing's,
-            # registered when multiprocessing.util is first imported, joins
-            # the engine's child process and never returns while the engine
-            # runs. Import it here so ours is registered after it: left to
-            # vllm, it may first be imported while the engine is built, after
-            # this point.
-            #TODO(exit): a load that never returns keeps the exit waiting on
-            #   the lock, and only SIGKILL ends the process. Seen with tensor
-            #   parallel on RTX PRO 6000 Server Edition cards. Bound the wait.
+            # on the lock for the load, at most EXIT_WAIT_S, and shuts the
+            # engine down. atexit runs hooks last-registered first, and
+            # multiprocessing's, registered when multiprocessing.util is first
+            # imported, joins the engine's child process and never returns
+            # while the engine runs. Import it here so ours is registered
+            # after it: left to vllm, it may first be imported while the
+            # engine is built, after this point.
             import multiprocessing.util as _  # noqa: F401
-            atexit.register(VLLMBackend.clear_cache)
+            atexit.register(_exit)
             _exit_hook_registered = True
 
         # No download_dir is passed: the hub cache is $HF_HOME/hub, so HF_HOME would download again.
@@ -303,6 +327,12 @@ def _engine(hf_model_id: str, quantization: str | None, vllm_kwargs: dict):
                 )
         except BaseException as exc:
             _stray.extend(_started_since(before))
+            if key in _ended and isinstance(exc, Exception):
+                _ended.discard(key)
+                raise EngineLoadEnded(
+                    f"The load of {hf_model_id} was ended: the process is "
+                    f"exiting, and the load had not returned in time."
+                ) from exc
             if copies <= 1 or not isinstance(exc, Exception):
                 raise
             # The copies come from the plan, so the error names them and the
@@ -318,6 +348,9 @@ def _engine(hf_model_id: str, quantization: str | None, vllm_kwargs: dict):
             ) from exc
         finally:
             _building = None
+        # A build that returned as its processes were ended is shut down
+        # as any other engine.
+        _ended.discard(key)
         _engines[key] = engine
         _engine_procs[key] = _started_since(before)
         # Held from the start of the load; set after it, so a failed load
@@ -338,6 +371,47 @@ def _engine(hf_model_id: str, quantization: str | None, vllm_kwargs: dict):
             "load_ms": round((time.perf_counter() - started) * 1000, 1),
         })
         return _engines[key]
+
+
+def _end_load(waited: float) -> bool:
+    """Make a load that has held the engine lock for ``waited`` seconds let
+    go of it.
+
+    Ends the engine processes its build started, and those of failed
+    builds: vLLM's start-up wait fails as soon as an engine process exits.
+    A load that has not started its build has none to end. Logged at ERROR.
+
+    Returns:
+        Whether the caller holds the lock now.
+    """
+    loading, building = _loading, _building
+    if building is not None:
+        key, before = building
+        logger.error(
+            "[vllm] The load of %s has not returned in %g s. Ending the engine "
+            "processes its build started, so that the process can exit.",
+            key[0], waited)
+        _ended.add(key)
+        terminate_engine_processes(_started_since(before) + _stray)
+    elif loading is not None:
+        logger.error(
+            "[vllm] The load of %s has not started its build in %g s (it reads "
+            "its model's config, or waits for a transformers load to start "
+            "CUDA), so there is no engine process to end.", loading[0], waited)
+    else:
+        logger.error("[vllm] Another release has held the engine lock for %g s.",
+                     waited)
+    if _engines_lock.acquire(timeout=_GRACE_S):
+        return True
+    logger.error("[vllm] The engine lock is still held %g s later; the engines "
+                 "are left as they are.", _GRACE_S)
+    return False
+
+
+def _exit() -> None:
+    """The exit hook: release every engine, waiting for a load in progress
+    at most :data:`EXIT_WAIT_S`."""
+    VLLMBackend.clear_cache(wait=EXIT_WAIT_S)
 
 
 def _shut_down(engine) -> None:
@@ -490,26 +564,41 @@ class VLLMBackend(LLMBackend):
         )
 
     @classmethod
-    def clear_cache(cls, keep: Collection[tuple] = ()) -> None:
+    def clear_cache(
+        cls, keep: Collection[tuple] = (), *, wait: float | None = None,
+    ) -> None:
         """Release the loaded engines and free their memory.
 
-        Each is shut down and its hold time reported. Its planned utilization
+        Each is shut down, any of its processes the shutdown leaves running
+        is ended, and its hold time is reported. Its planned utilization
         and cards stay until a plan is set again. A backend built on a released
         engine raises on ``generate()`` until the checkpoint is loaded again.
         A call in flight on a released engine is not waited for.
-        Also the exit hook, registered when the first load starts: an exit
-        during a load waits for it here (the load holds the lock), and an
-        engine's child process would otherwise keep the interpreter from exiting.
+        Also the exit hook (:func:`_exit`), registered when the first load
+        starts: an engine's child process would otherwise keep the
+        interpreter from exiting.
 
         Args:
             keep: Engine keys (:func:`_engine_key`) to leave loaded and timed.
                 A collection of keys, not one key.
+            wait: Seconds to wait for a load in progress, for a release on
+                the way out. Past them the engine processes of its build are
+                ended, which makes the load fail and let go of the lock, and
+                the release ends what failed builds left running too. If the
+                load still holds the lock, the engines are left as they are
+                and only their hold time is reported. ``None`` waits for the
+                load however long it takes.
         """
         if any(not isinstance(key, tuple) for key in keep):
             raise TypeError(f"keep takes a collection of engine keys, got {keep!r}.")
         # Locked: a preload may be inserting an engine, and the next load
         # must wait until this memory is back.
-        with _engines_lock:
+        if wait is None:
+            _engines_lock.acquire()
+        elif not (_engines_lock.acquire(timeout=wait) or _end_load(wait)):
+            _release_engines(keep)
+            return
+        try:
             released = [k for k in _engines if k not in keep]
             if released:
                 # vLLM stops an engine before its own output task, which
@@ -522,8 +611,17 @@ class VLLMBackend(LLMBackend):
                 _shut_down(_engines.pop(key))
             if released:
                 free_memory()
+            left = [p for key in [k for k in _engine_procs if k not in keep]
+                    for p in _engine_procs.pop(key)]
+            if wait is not None:
+                left += _stray
+                _stray.clear()
+            if left:
+                terminate_engine_processes(left)
             # After the teardown, so held_s covers it.
             _release_engines(keep)
+        finally:
+            _engines_lock.release()
 
     def _clean_output(self, text: str) -> str:
         """Strip whitespace and a leading ``|>`` tokenizer artifact."""

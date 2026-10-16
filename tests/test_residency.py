@@ -1432,6 +1432,202 @@ class TestUnloadLocal:
             residency.unload_local()
 
 
+class TestBoundedRelease:
+    """A release given a wait waits that long for a load in progress, then
+    ends the engine processes of its build, which makes the load fail and
+    let go of the lock. Without a wait a release waits as before."""
+
+    #: Seconds within which a release given a short wait returns.
+    PROMPT_S = 2.0
+
+    @pytest.fixture()
+    def state(self, monkeypatch):
+        """Empty engine records, child processes as a list a test fills, and
+        the processes ended, as the lists handed to the helper."""
+        import multiprocessing
+
+        import redact.llms.backends.vllm as vllm_module
+
+        listed, ended, events = [], [], []
+        monkeypatch.setattr(multiprocessing, "active_children",
+                            lambda: [p for p in listed if p.is_alive()])
+        for name, value in (("_engines", {}), ("_engine_loaded_at", {}),
+                            ("_engine_procs", {}), ("_stray", []), ("_ended", set()),
+                            ("_GRACE_S", 0.3)):
+            monkeypatch.setattr(vllm_module, name, value)
+
+        def terminate(processes=(), **kw):
+            ended.append(sorted(p.pid for p in processes))
+            for p in processes:
+                p.alive = False
+            return []
+
+        monkeypatch.setattr(vllm_module, "terminate_engine_processes", terminate)
+        observe.set_emitter(events.append)
+        yield SimpleNamespace(
+            vllm=vllm_module, listed=listed, ended=ended, events=events)
+        observe.set_emitter(None)
+
+    @staticmethod
+    def _held(vllm_module, key, building, fails_when_ended=True):
+        """A thread holding the engine lock as a load does, its build started
+        or not. When it is, the load fails once the build's processes end,
+        as vLLM's start-up wait does. Returns the thread and an event that
+        ends it."""
+        holding, stop = threading.Event(), threading.Event()
+
+        def load():
+            with vllm_module._engines_lock, vllm_module._loading_of(key):
+                if building is not None:
+                    vllm_module._building = (key, frozenset())
+                holding.set()
+                while not stop.wait(0.01):
+                    if fails_when_ended and building and not building.alive:
+                        break
+                vllm_module._building = None
+
+        thread = threading.Thread(target=load)
+        thread.start()
+        assert holding.wait(5)
+        return thread, stop
+
+    @staticmethod
+    def _loaded(vllm_module, hf_model_id):
+        key = vllm_module._engine_key(hf_model_id, None, {})
+        vllm_module._engines[key] = SimpleNamespace(shutdown=lambda: None)
+        vllm_module._engine_loaded_at[key] = time.perf_counter()
+        return key
+
+    def test_a_wait_ends_the_build_in_progress_then_releases(self, state, caplog):
+        from tests.test_vllm_backend import _Proc
+
+        vllm_module = state.vllm
+        self._loaded(vllm_module, "org/loaded")
+        core = _Proc(7)
+        state.listed.append(core)
+        thread, stop = self._held(
+            vllm_module, vllm_module._engine_key("org/hung", None, {}), core)
+        try:
+            with caplog.at_level(logging.ERROR, logger=vllm_module.logger.name):
+                vllm_module.VLLMBackend.clear_cache(wait=0.05)
+        finally:
+            stop.set()
+            thread.join(5)
+        assert state.ended == [[7]]
+        assert "The load of org/hung has not returned" in caplog.text
+        assert "still held" not in caplog.text
+        assert vllm_module._engines == {}
+        assert [e["hf_model_id"] for e in state.events if e.get("phase") == "release"] \
+            == ["org/loaded"]
+        assert vllm_module._ended == {vllm_module._engine_key("org/hung", None, {})}
+
+    def test_a_load_that_has_not_started_its_build_has_nothing_to_end(
+            self, state, caplog):
+        """Such as one waiting for a transformers load to start CUDA."""
+        vllm_module = state.vllm
+        self._loaded(vllm_module, "org/loaded")
+        thread, stop = self._held(
+            vllm_module, vllm_module._engine_key("org/waiting", None, {}), None)
+        try:
+            with caplog.at_level(logging.ERROR, logger=vllm_module.logger.name):
+                vllm_module.VLLMBackend.clear_cache(wait=0.05)
+        finally:
+            stop.set()
+            thread.join(5)
+        assert state.ended == []
+        assert "org/waiting has not started its build" in caplog.text
+        assert "still held" in caplog.text
+        # The engines are left as they are, and their time is reported.
+        assert list(vllm_module._engines) == [
+            vllm_module._engine_key("org/loaded", None, {})]
+        assert [e["hf_model_id"] for e in state.events if e.get("phase") == "release"] \
+            == ["org/loaded"]
+
+    def test_a_build_that_does_not_fail_when_ended_leaves_the_engines(
+            self, state, caplog):
+        from tests.test_vllm_backend import _Proc
+
+        vllm_module = state.vllm
+        core = _Proc(7)
+        state.listed.append(core)
+        thread, stop = self._held(
+            vllm_module, vllm_module._engine_key("org/x", None, {}), core,
+            fails_when_ended=False)
+        try:
+            with caplog.at_level(logging.ERROR, logger=vllm_module.logger.name):
+                vllm_module.VLLMBackend.clear_cache(wait=0.05)
+        finally:
+            stop.set()
+            thread.join(5)
+        assert state.ended == [[7]] and "still held" in caplog.text
+
+    def test_processes_a_released_engine_leaves_are_ended_and_a_kept_ones_not(
+            self, state):
+        from tests.test_vllm_backend import _Proc
+
+        vllm_module = state.vllm
+        gone = self._loaded(vllm_module, "org/gone")
+        kept = self._loaded(vllm_module, "org/kept")
+        vllm_module._engine_procs.update({gone: [_Proc(1)], kept: [_Proc(2)]})
+        vllm_module._stray.append(_Proc(3))
+        vllm_module.VLLMBackend.clear_cache(keep={kept})
+        assert state.ended == [[1]]
+        assert list(vllm_module._engine_procs) == [kept]
+        # A failed build's processes are ended on the way out, given a wait.
+        vllm_module.VLLMBackend.clear_cache(wait=1.0)
+        assert state.ended == [[1], [2, 3]]
+        assert vllm_module._engine_procs == {} and vllm_module._stray == []
+
+    def test_a_load_whose_build_was_ended_says_so(self, state, monkeypatch):
+        """Not as a failed load: the exit ended it."""
+        vllm_module = state.vllm
+
+        class _LLM:
+            def __init__(self, **kw):
+                vllm_module._ended.add(vllm_module._engine_key("org/e", None, {}))
+                raise RuntimeError("Engine core initialization failed.")
+
+        for name, module in fake_vllm_modules(_LLM).items():
+            monkeypatch.setitem(__import__("sys").modules, name, module)
+        monkeypatch.setattr(vllm_module, "_prepare_environment", lambda: None)
+        with pytest.raises(vllm_module.EngineLoadEnded) as raised:
+            vllm_module._engine("org/e", None, {})
+        assert "ended" in str(raised.value)
+        assert isinstance(raised.value.__cause__, RuntimeError)
+        assert vllm_module._ended == set()
+
+    def test_a_transformers_load_past_the_wait_is_left_and_logged(self, caplog):
+        import redact.llms.backends.introspection as intro
+
+        with intro._models_lock, \
+             caplog.at_level(logging.ERROR, logger=intro.logger.name):
+            started = time.monotonic()
+            intro.TransformersIntrospectionBackend.clear_cache(wait=0.05)
+            took = time.monotonic() - started
+        assert took < self.PROMPT_S
+        assert "has not returned" in caplog.text
+
+    def test_unload_local_hands_the_wait_to_both_backends(self):
+        from redact.llms.backends.introspection import TransformersIntrospectionBackend
+        from redact.llms.backends.vllm import VLLMBackend
+
+        with patch.object(VLLMBackend, "clear_cache") as vllm_clear, \
+             patch.object(TransformersIntrospectionBackend, "clear_cache") as tf_clear:
+            residency.unload_local(wait=3.0)
+        assert [clear.call_args.kwargs["wait"] for clear in (vllm_clear, tf_clear)] \
+            == [3.0, 3.0]
+
+    def test_the_exit_hook_waits_at_most_exit_wait_s(self, monkeypatch):
+        import redact.llms.backends.vllm as vllm_module
+
+        seen = []
+        monkeypatch.setattr(vllm_module.VLLMBackend, "clear_cache",
+                            lambda **kw: seen.append(kw))
+        monkeypatch.setattr(vllm_module, "EXIT_WAIT_S", 7.0)
+        vllm_module._exit()
+        assert seen == [{"wait": 7.0}]
+
+
 def test_unload_local_keeps_rate_limit_windows():
     from redact.llms import wrappers
     from redact.llms.client import clear_client_cache

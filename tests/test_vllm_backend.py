@@ -271,7 +271,8 @@ class TestWorkerStartMethod:
 
 class TestExitHook:
     """A process that ends with an engine loaded shuts it down first, or
-    multiprocessing's exit hook waits for the engine's child process forever."""
+    multiprocessing's exit hook waits for the engine's child process forever.
+    A load in progress is waited for, at most ``EXIT_WAIT_S``."""
 
     # The scripts import tests.conftest, so they run from the repository root.
     ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
@@ -342,6 +343,67 @@ class TestExitHook:
                                 text=True, timeout=30, cwd=self.ROOT)
         assert result.returncode == 0, result.stderr
         assert "shut down" in result.stdout
+
+
+    #: Seconds within which a script whose load hangs has exited.
+    EXIT_BOUND_S = 30
+
+    # A script whose fake engine starts a child process, prints its pid and
+    # then does what the script's {WAIT} says; the exit waits 1 s for it.
+    HUNG = textwrap.dedent("""
+        import logging, multiprocessing, sys, threading, time
+        import redact.llms.backends.vllm as vllm_module
+        import redact.llms.resources.estimate as estimate
+        from tests.conftest import fake_vllm_modules
+
+        logging.basicConfig(level=logging.INFO)
+        started = threading.Event()
+
+        class _LLM:
+            def __init__(self, **kw):
+                proc = multiprocessing.get_context("spawn").Process(
+                    target=time.sleep, args=(60,), name="EngineCore")
+                proc.start()
+                print(proc.pid, flush=True)
+                started.set()
+                {WAIT}
+
+        sys.modules.update(fake_vllm_modules(_LLM))
+        vllm_module._prepare_environment = lambda: None
+        estimate._load_config = lambda _id: None
+        vllm_module.EXIT_WAIT_S, vllm_module._GRACE_S = 1.0, 0.5
+        threading.Thread(target=vllm_module._engine, args=("org/x", None, {{}}),
+                         daemon=True).start()
+        started.wait()
+    """)
+
+    def _run_hung(self, wait):
+        psutil = pytest.importorskip("psutil")
+        import time
+
+        code = self.HUNG.format(WAIT=wait)
+        started = time.monotonic()
+        result = subprocess.run([sys.executable, "-c", code], capture_output=True,
+                                text=True, timeout=60, cwd=self.ROOT)
+        took = time.monotonic() - started
+        assert result.returncode == 0, result.stderr
+        assert took < self.EXIT_BOUND_S, took
+        assert "The load of org/x has not returned" in result.stderr
+        # Never os.kill(pid, 0) to check: on Windows that ends the process.
+        assert not psutil.pid_exists(int(result.stdout.split()[0]))
+        return result
+
+    def test_a_load_that_fails_once_its_process_is_ended_lets_the_exit_finish(self):
+        """vLLM's start-up wait fails as soon as an engine process exits:
+        the load lets go of the lock and the exit releases as usual."""
+        result = self._run_hung(
+            "while proc.is_alive(): time.sleep(0.05)\n"
+            "        raise RuntimeError('Engine core initialization failed.')")
+        assert "still held" not in result.stderr
+
+    def test_a_load_that_never_returns_does_not_keep_the_process_up(self):
+        result = self._run_hung("threading.Event().wait()")
+        assert "still held" in result.stderr
 
 
 class _Proc:
