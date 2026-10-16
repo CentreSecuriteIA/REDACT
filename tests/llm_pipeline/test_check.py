@@ -20,15 +20,16 @@ class TestIsAccepted:
     @pytest.mark.parametrize("reply", [
         "Yes", "yes", "YES", "Yes.", "yes, because it fits", "Yes\nIt fits.",
         "**Yes**", "*yes*", "_Yes_", "# Yes", "> Yes", '"Yes"', "'ok'", "`PASS`",
-        "  \n**Accept** - on topic", "OK", "Pass: fine",
+        "  \n**Accept** - on topic", "OK", "Pass: fine", "Accepted", "Okay",
+        "Passed", "“Yes”", "‘ok’",
     ])
     def test_an_accept_word_first_accepts(self, reply):
         assert is_accepted(reply) is True
 
     @pytest.mark.parametrize("reply", [
-        "Yesterday it would have passed", "Acceptable? No.", "Accepted", "Okay",
-        "Passed", "No", "No, not yes", "I think yes", "Verdict: yes", "1. Yes",
-        "- Yes", "(Yes)", "“Yes”", "", "   ", "**", "Yes1",
+        "Yesterday it would have passed", "Acceptable? No.", "Okayish", "Passing",
+        "No", "No, not yes", "I think yes", "Verdict: yes", "1. Yes",
+        "- Yes", "(Yes)", "", "   ", "**", "Yes1",
     ])
     def test_anything_else_rejects(self, reply):
         assert is_accepted(reply) is False

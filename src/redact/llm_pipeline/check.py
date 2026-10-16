@@ -12,11 +12,11 @@ from redact.llms.router import batch_generate_samples, generate_sample
 
 from .request import LLMRequest
 
-_ACCEPT_WORDS = frozenset({"yes", "ok", "accept", "pass"})
+_ACCEPT_WORDS = frozenset({"yes", "ok", "okay", "accept", "accepted", "pass", "passed"})
 
-# Leading whitespace, markdown and quote marks, then the first word: its
-# letters and digits.
-_FIRST_WORD = re.compile(r"[\s*_#>\"'`]*([^\W_]+)")
+# Leading whitespace, markdown and quote marks (straight and curly), then the
+# first word: its letters and digits.
+_FIRST_WORD = re.compile(r"[\s*_#>\"'`“”‘’]*([^\W_]+)")
 
 
 def is_accepted(response: str) -> bool:
@@ -28,11 +28,12 @@ def is_accepted(response: str) -> bool:
         response: Raw reply text.
 
     Returns:
-        True when the reply's first word is "yes", "ok", "accept" or
-        "pass", in any case, after leading whitespace and leading ``*``,
-        ``_``, ``#``, ``>``, quotes and backticks. So "**Yes**", "Yes." and
-        "yes, because" accept, and "Yesterday", "Accepted" and "Verdict:
-        yes" reject, as does any other reply.
+        True when the reply's first word is "yes", "ok", "okay", "accept",
+        "accepted", "pass" or "passed", in any case, after leading
+        whitespace and leading ``*``, ``_``, ``#``, ``>``, quotes and
+        backticks. So "**Yes**", "Yes." and "yes, because" accept, and
+        "Yesterday", "Acceptable" and "Verdict: yes" reject, as does any
+        other reply.
     """
     first = _FIRST_WORD.match(response)
     return first is not None and first.group(1).lower() in _ACCEPT_WORDS
