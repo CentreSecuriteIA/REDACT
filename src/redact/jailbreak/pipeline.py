@@ -43,6 +43,8 @@ def run_augmentation(
     out_path: Path,
     manifest_path: Path | None = None,
     benign_path: Path | None = None,
+    benign_taxonomy: dict | str = "benign",
+    taxonomy_dir: str | Path | None = None,
     prompt_dir=None,
     seed: int = 42,
     rounds: list[dict] | None = None,
@@ -64,7 +66,9 @@ def run_augmentation(
     call, their rows appended every 32 units. The combination is read back
     through every registered technique, so a plan made with another pool still
     replays, and with ``auto_generate_benign`` the benign data is loaded when
-    a pending unit's techniques need it. ``rounds`` holds each round's
+    a pending unit's techniques need it, its pairs generated first for each
+    subcategory of ``benign_taxonomy`` (a file name under ``taxonomy_dir``, or
+    a loaded taxonomy) that ``benign_path`` lacks. ``rounds`` holds each round's
     sampler settings, as :func:`redact.jailbreak.augmentation.rounds_of`
     gives them (one round of the sampler's defaults when None);
     ``family_weights`` and ``layer_rates``
@@ -151,7 +155,9 @@ def run_augmentation(
     benign_data = None
     if auto_generate_benign and needs_benign:
         benign_data = get_or_generate_benign_data(
-            client=client, cache_path=benign_path, verbose=verbose)
+            client=client, cache_path=benign_path, verbose=verbose,
+            taxonomy=benign_taxonomy, taxonomy_dir=taxonomy_dir,
+            prompt_dir=prompt_dir, batch_size=batch_size)
 
     out_path.parent.mkdir(parents=True, exist_ok=True)
     if verbose and total:
