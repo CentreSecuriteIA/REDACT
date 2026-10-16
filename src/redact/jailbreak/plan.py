@@ -141,8 +141,9 @@ def plan_run(
     ``sample_id`` order from a shared :class:`_Dealer`, so each layer appears at
     its rate (``layer_rates`` over the spec's) and each family at its weight
     (``family_weights``, equal by default), evenly across the group and
-    independent of the input order. A coverage table is written beside the
-    manifest. Returns ``manifest_path``.
+    independent of the input order; a row's ``settings`` record the weights
+    when given. A coverage table is written beside the manifest. Returns
+    ``manifest_path``.
     """
     base_kwargs = dict(sample_kwargs or {})
     if layer_rates is not None:
@@ -162,6 +163,7 @@ def plan_run(
     for members in subgroups.values():
         members.sort()
     used_by_row: dict[int, list[tuple]] = defaultdict(list)
+    recorded = {"family_weights": dict(family_weights)} if family_weights else {}
 
     # Yielded to the manifest one at a time: the plan is never held whole.
     def units():
@@ -188,7 +190,7 @@ def plan_run(
                         "sample_id": sid,
                         "iteration": it,
                         "combination": names,
-                        "settings": {**settings, "seed": seed},
+                        "settings": {**settings, "seed": seed, **recorded},
                         "category": category,
                         "entry_type": entry_type,
                         "status": "planned",
@@ -280,9 +282,9 @@ def default_escalation_schedule() -> list[dict]:
     """The built-in four rounds, each one round's sampler settings.
 
     Rounds one and two draw exactly one and two techniques; rounds three and
-    four draw by budget, the fourth with the larger one. Pass it, or a list
-    like it, as ``settings_per_iteration``; each round is merged over the
-    run's base settings.
+    four draw by budget, the fourth with the larger one. It is what an
+    adversarial kind's ``"rounds": "escalation"`` names; each round is merged
+    over the kind's budget settings.
     """
     return [
         {"exact_techniques": 1},

@@ -1,5 +1,5 @@
-"""The techniques a run may draw from: every registered one, filtered by the
-run's flags.
+"""The techniques a run may draw from: every registered one, filtered by a
+kind of the run's augmentation section.
 
 A fresh plan draws from the filtered pool; a planned row is read back through
 the registry of every technique, so a plan made with another pool still
@@ -47,35 +47,34 @@ def _check_against_spec(techniques: list[Callable]) -> None:
             + "; ".join(problems))
 
 
-def technique_pool(
-    *,
-    include_hacking: bool = True,
-    include_manipulation: bool = True,
-    include_obfuscation: bool = True,
-    include_requests: bool = True,
-    include_translation: bool = True,
-    pure_only: bool = False,
-) -> list[Callable]:
-    """The techniques a fresh plan may draw from, in registry order.
+def technique_pool(resolved: dict) -> list[Callable]:
+    """The techniques one kind of the augmentation section draws from, in
+    registry order.
 
-    A layer whose flag is off is left out, ``include_translation=False`` leaves
-    out the translation family, and ``pure_only`` every technique that calls a
-    model or needs benign data.
+    ``resolved`` is a kind as :func:`redact.jailbreak.augmentation.resolve`
+    returns it. From every registered technique: less the layers of
+    ``layers.deny``; when either ``allow`` is a list, those of a family in
+    ``families.allow`` or named in ``techniques.allow``; less those of a
+    family in ``families.deny`` and those named in ``techniques.deny``; with
+    ``pure_only``, less every technique that calls a model or needs benign
+    data.
     """
-    layer_on = {
-        "hacking": include_hacking,
-        "manipulation": include_manipulation,
-        "obfuscation": include_obfuscation,
-        "requests": include_requests,
-    }
+    families, techniques = resolved["families"], resolved["techniques"]
+    denied_layers = set(resolved["layers"]["deny"])
     pool = [fn for fn in all_techniques()
-            if layer_on.get(getattr(fn, "layer", None), True)]
-    if pure_only:
+            if getattr(fn, "layer", None) not in denied_layers]
+    if families["allow"] is not None or techniques["allow"] is not None:
+        allowed = set(families["allow"] or ())
+        named = set(techniques["allow"] or ())
+        pool = [fn for fn in pool if fn.__name__ in named
+                or allowed.intersection(getattr(fn, "families", ()))]
+    denied = set(families["deny"])
+    pool = [fn for fn in pool if fn.__name__ not in techniques["deny"]
+            and not denied.intersection(getattr(fn, "families", ()))]
+    if resolved["pure_only"]:
         pool = [fn for fn in pool
                 if not getattr(fn, "requires_llm", False)
                 and not getattr(fn, "requires_benign", False)]
-    if not include_translation:
-        pool = [fn for fn in pool if "translation" not in getattr(fn, "families", ())]
     return pool
 
 

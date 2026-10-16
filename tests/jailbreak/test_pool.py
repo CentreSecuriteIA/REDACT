@@ -1,8 +1,9 @@
-"""The technique pool: every registered technique, the run's filters, the registry."""
+"""The technique pool: every registered technique, a kind's filters, the registry."""
 
 import pytest
 
 import redact.jailbreak.pool as JPool
+from redact.jailbreak.augmentation import resolve
 from redact.jailbreak.hacking import get_all_hacking_functions
 from redact.jailbreak.manipulation import get_all_manipulation_functions
 from redact.jailbreak.obfuscation import get_all_obfuscation_functions
@@ -26,29 +27,55 @@ def test_all_techniques_are_the_four_layers_in_registry_order():
         + get_all_manipulation_functions() + get_all_request_functions())
 
 
-def test_the_default_pool_is_every_technique():
-    assert technique_pool() == all_techniques()
+def _kind(**given) -> dict:
+    return resolve({"adversarial": given}, "adversarial")
 
 
-def test_include_translation_false_drops_exactly_the_translation_family():
-    full = technique_pool()
-    assert _in("translation", full)
-
-    pool = technique_pool(include_translation=False)
-    assert pool == [fn for fn in full if fn not in _in("translation", full)]
+def test_the_default_attack_pool_is_every_technique_but_translation():
+    full = all_techniques()
+    translation = _in("translation", full)
+    assert technique_pool(_kind()) == [fn for fn in full if fn not in translation]
 
 
-def test_a_layer_flag_drops_that_layer_only():
-    pool = technique_pool(include_hacking=False, include_requests=False)
+def test_allowing_translation_makes_the_pool_every_technique():
+    assert technique_pool(_kind(families={"deny": []})) == all_techniques()
+
+
+def test_a_denied_layer_drops_that_layer_only():
+    pool = technique_pool(_kind(layers={"deny": ["hacking", "requests"]},
+                                families={"deny": []}))
     assert pool == get_all_obfuscation_functions() + get_all_manipulation_functions()
 
 
 def test_pure_only_drops_model_calls_and_benign_data():
-    pool = technique_pool(pure_only=True)
+    pool = technique_pool(_kind(pure_only=True, families={"deny": []}))
     assert pool
     assert not any(fn.requires_llm or fn.requires_benign for fn in pool)
     assert pool == [fn for fn in all_techniques()
                     if not fn.requires_llm and not fn.requires_benign]
+
+
+def test_allow_lists_admit_their_families_and_techniques_then_deny_removes():
+    pool = technique_pool(_kind(
+        families={"allow": ["typos", "structural"], "deny": []},
+        techniques={"allow": ["to_base64"], "deny": ["to_xml"]}))
+    names = [fn.__name__ for fn in pool]
+    assert names == [fn.__name__ for fn in all_techniques()
+                     if fn.__name__ == "to_base64"
+                     or ({"typos", "structural"} & set(fn.families)
+                         and fn.__name__ != "to_xml")]
+    assert "to_json" in names and "to_rewrite_with_typos_low" in names
+
+
+def test_the_default_variation_pool_is_the_natural_list():
+    pool = technique_pool(resolve(None, "natural"))
+    families = {fn.families[0] for fn in pool}
+    assert {"typos", "structural", "answer_language", "asking"} <= families
+    attacks = {"translation", "framing", "persona", "fsh", "sensitive_words"}
+    assert not attacks & families
+    names = {fn.__name__ for fn in pool}
+    assert {"to_leetspeak_basic", "to_adversarial_suffix_emoji"} <= names
+    assert not {"to_refusal_then_comply", "to_prefix_injection", "to_base64"} & names
 
 
 def test_registry_names_every_technique_it_is_given():
@@ -59,9 +86,10 @@ def test_registry_names_every_technique_it_is_given():
 
 
 def test_uses_translation():
-    assert uses_translation(technique_pool())
-    assert not uses_translation(technique_pool(include_translation=False))
-    assert not uses_translation(technique_pool(include_obfuscation=False))
+    assert uses_translation(technique_pool(_kind(families={"deny": []})))
+    assert not uses_translation(technique_pool(_kind()))
+    assert not uses_translation(technique_pool(
+        _kind(families={"deny": []}, layers={"deny": ["obfuscation"]})))
 
 
 def test_the_registered_techniques_match_the_spec():

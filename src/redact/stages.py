@@ -62,6 +62,7 @@ from redact.dataset import (
     take_per_group,
     write_concat,
 )
+from redact.jailbreak import augmentation as augmentation_kinds
 from redact.jailbreak import pool as jailbreak_pool
 from redact.jailbreak.pipeline import run_augmentation
 from redact.llms import ModelClient, load_prompt
@@ -475,34 +476,36 @@ def generate_jailbreaks(
     data_dir: str | Path | None = None,
     output_path: str | Path | None = None,
     benign_path: str | Path | None = None,
-    max_complexity: int = 6,
-    max_obfuscations: int = 2,
+    max_complexity: int | None = None,
+    max_obfuscations: int | None = None,
     seed: int = 42,
-    pure_only: bool = False,
+    pure_only: bool | None = None,
     entry_types: list[str] | None = None,
-    include_hacking: bool = True,
-    include_manipulation: bool = True,
-    include_obfuscation: bool = True,
-    include_requests: bool = True,
-    include_translation: bool = True,
+    include_hacking: bool | None = None,
+    include_manipulation: bool | None = None,
+    include_obfuscation: bool | None = None,
+    include_requests: bool | None = None,
+    include_translation: bool | None = None,
     sampling_probs: dict | None = None,
     model: str | None = None,
     translation_model: str | None = None,
     auto_generate_benign: bool = True,
     batch_size: int = 256,
-    iterations: int = 1,
+    iterations: int | None = None,
     settings_per_iteration: list[dict] | None = None,
     prompt_dir: str | Path | None = None,
     resume: bool = True,
     manifest_path: str | Path | None = None,
     verbose: bool = True,
     read_back: bool = True,
+    augmentation: dict | None = None,
 ) -> pd.DataFrame:
     """Augment input prompts with jailbreak technique combinations (batched).
 
-    Resolves the inputs, the generation client, the technique pool and the
-    output path, then runs :func:`redact.jailbreak.pipeline.run_augmentation`,
-    which plans the run whole and streams its units through the batched driver.
+    Resolves the inputs, the generation client, the augmentation section's
+    adversarial kind and its pool, and the output path, then runs
+    :func:`redact.jailbreak.pipeline.run_augmentation`, which plans the run
+    whole and streams its units through the batched driver.
 
     Args:
         inputs: Input prompts DataFrame. If None, the accepted inputs of the
@@ -514,40 +517,56 @@ def generate_jailbreaks(
         output_path: Override for the jailbreaks CSV. The manifest defaults to
             ``<output>.manifest.jsonl``.
         benign_path: Override for the FSH/DAP benign-cache CSV.
-        max_complexity / max_obfuscations: Combination-sampler limits.
         seed: Global run seed (combined with each sample's id + iteration).
-        pure_only: Exclude techniques that call a model or need benign data.
-        entry_types: If set, keep only inputs with these ``entry_type`` values.
-        include_hacking / include_manipulation / include_obfuscation /
-            include_requests: Layer toggles for the pool.
-        include_translation: When False, drop the translation family from the
-            pool so it is never sampled. Each translation is a
-            translate->check->retry loop (2-8 LLM calls), the costliest family.
-        sampling_probs: Override per-layer inclusion probabilities.
         model: Generation model. ``None`` resolves to the ``uncensored_gen``
-            role; the backend is auto-selected from the name.
+            role.
         translation_model: Model for the translation family. ``None`` uses the
             ``translation`` role, independently of ``model``.
         auto_generate_benign: Pre-load or generate benign data for FSH/DAP.
         batch_size: Requests per model call; twice as many units are live.
-        iterations: Combinations per sample. Ignored when
-            ``settings_per_iteration`` is given (its length wins).
-        settings_per_iteration: Per-round sampler kwargs for a multi-round
-            escalating run, each merged over the base. See
-            :func:`redact.jailbreak.default_escalation_schedule`.
         prompt_dir: Prompt overlay forwarded to the LLM-dependent techniques.
         resume: Reuse an existing manifest and skip finished units.
         manifest_path: Override manifest location.
         verbose: Log progress.
         read_back: False returns an empty DataFrame and does not read the CSV.
+        augmentation: The augmentation section, ``{"adversarial": ...,
+            "natural": ...}``, each kind overlaying the packaged default
+            (:mod:`redact.jailbreak.augmentation`); None is the default. A
+            kind given as None is off.
+        max_complexity, max_obfuscations, pure_only, entry_types,
+            include_hacking, include_manipulation, include_obfuscation,
+            include_requests, include_translation, sampling_probs,
+            iterations, settings_per_iteration: Deprecated aliases into
+            ``augmentation["adversarial"]``, applied over it with a
+            ``DeprecationWarning``: ``include_*`` deny or admit a layer or the
+            translation family, ``sampling_probs`` is ``layer_rates`` and
+            ``settings_per_iteration`` is ``rounds``.
 
     Returns:
         The rows of the jailbreaks CSV (input columns plus ``sample_id``,
         ``jailbreak``, ``technique``, ``technique_info``, ``complexity``,
         ``num_techniques``, ``is_noop``, ``accepted``, ``reasoning``,
-        ``iteration``, ``combination_spec_version``). ``sample_id`` is this
-        row's own content-hash identity, distinct from ``input_id``.
+        ``iteration``, ``combination_spec_version``), or an empty frame when
+        the adversarial kind is off. ``sample_id`` is this row's own
+        content-hash identity, distinct from ``input_id``.
     """
+    flat = {name: value for name, value in (
+        ("include_hacking", include_hacking),
+        ("include_manipulation", include_manipulation),
+        ("include_obfuscation", include_obfuscation),
+        ("include_requests", include_requests),
+        ("include_translation", include_translation),
+        ("pure_only", pure_only), ("max_complexity", max_complexity),
+        ("max_obfuscations", max_obfuscations), ("sampling_probs", sampling_probs),
+        ("iterations", iterations),
+        ("settings_per_iteration", settings_per_iteration),
+        ("entry_types", entry_types),
+    ) if value is not None}
+    section = _augmentation_section(augmentation, flat)
+    adversarial = augmentation_kinds.resolve(section, "adversarial")
+    if adversarial is None:
+        return pd.DataFrame()
+
     if inputs is None:
         inputs = merge_inputs(data_dir)
         if inputs.empty:
@@ -558,41 +577,54 @@ def generate_jailbreaks(
         inputs = inputs.rename(columns={"sample": "prompt"})
     if "prompt" not in inputs.columns:
         raise ValueError("inputs must contain a 'prompt' (or 'sample') column.")
-    if entry_types:
-        inputs = inputs[inputs["entry_type"].isin(entry_types)].reset_index(drop=True)
     inputs["sample_id"] = row_ids(inputs, "prompt")
 
     client = ModelClient.create(model or default_model_for_role("uncensored_gen"))
-    pool = jailbreak_pool.technique_pool(
-        include_hacking=include_hacking,
-        include_manipulation=include_manipulation,
-        include_obfuscation=include_obfuscation,
-        include_requests=include_requests,
-        include_translation=include_translation,
-        pure_only=pure_only,
-    )
-
-    sample_kwargs = {
-        "max_complexity": max_complexity,
-        "max_obfuscations": max_obfuscations,
-        "include_hacking": include_hacking,
-        "include_manipulation": include_manipulation,
-        "include_obfuscation": include_obfuscation,
-        "include_requests": include_requests,
-    }
-    if sampling_probs is not None:
-        sample_kwargs["sampling_probs"] = sampling_probs
-
     return run_augmentation(
-        inputs, pool, client=client, translation_model=translation_model,
+        _of_entry_types(inputs, adversarial["entry_types"]),
+        jailbreak_pool.technique_pool(adversarial),
+        client=client, translation_model=translation_model,
         out_path=Path(output_path) if output_path else paths.jailbreaks_csv(data_dir),
         manifest_path=Path(manifest_path) if manifest_path else None,
         benign_path=Path(benign_path) if benign_path else paths.benign_csv(data_dir),
-        prompt_dir=prompt_dir, seed=seed, iterations=iterations,
-        settings_per_iteration=settings_per_iteration, sample_kwargs=sample_kwargs,
+        prompt_dir=prompt_dir, seed=seed,
+        rounds=augmentation_kinds.rounds_of(adversarial),
+        family_weights=adversarial["family_weights"] or None,
+        layer_rates=adversarial["layer_rates"] or None,
         auto_generate_benign=auto_generate_benign, batch_size=batch_size,
-        resume=resume, verbose=verbose, read_back=read_back,
+        resume=resume, verbose=verbose, read_back=read_back, label="jailbreak",
     )
+
+
+def _augmentation_section(augmentation: dict | None, flat: dict) -> dict:
+    """``augmentation`` with the deprecated flat keywords applied over its
+    adversarial kind.
+
+    Raises:
+        ValueError: A flat keyword is given while the adversarial kind is off.
+    """
+    section = dict(augmentation or {})
+    if not flat:
+        return section
+    warnings.warn(
+        f"generate_jailbreaks: {sorted(flat)} are deprecated; write them in "
+        "augmentation['adversarial'] (include_* as a layers or families deny, "
+        "sampling_probs as layer_rates, settings_per_iteration as rounds).",
+        DeprecationWarning, stacklevel=3)
+    kind = augmentation_kinds.resolve(section, "adversarial")
+    if kind is None:
+        raise ValueError(
+            f"augmentation['adversarial'] is null (off), and {sorted(flat)} set "
+            "it; leave them out, or switch the kind on.")
+    section["adversarial"] = augmentation_kinds.apply_flat_keywords(kind, flat)
+    return section
+
+
+def _of_entry_types(inputs: pd.DataFrame, entry_types: list | None) -> pd.DataFrame:
+    """The rows of ``inputs`` of ``entry_types``; all of them for None."""
+    if not entry_types:
+        return inputs
+    return inputs[inputs["entry_type"].isin(entry_types)].reset_index(drop=True)
 
 
 # ---------------------------------------------------------------------------

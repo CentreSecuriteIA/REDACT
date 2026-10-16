@@ -8,7 +8,6 @@ registry name, or an object that also says how the model is served, see
 params file holds each stage's tunables under the stage's name.
 """
 
-import inspect
 import json
 from pathlib import Path
 
@@ -96,13 +95,14 @@ def resolve_role(
 
     ``paraphraser`` may name the pool of every paraphraser, ``check`` left
     out is the ``gen`` model, and ``translation`` is no model when the
-    jailbreak stage's pool, built from ``augmentations``, has no translation
-    technique.
+    jailbreak stage's pool, built from the recipe's ``augmentations``, has no
+    translation technique (not asked when ``augmentations`` is None).
 
     Raises:
         KeyError, ValueError: No model is registered for the role.
     """
     from .content_moderation.paraphrase import paraphrase_pool
+    from .jailbreak.augmentation import FLAT_KEYWORDS, apply_flat_keywords, resolve
     from .jailbreak.pool import technique_pool, uses_translation
     from .llms.model_config import default_model_for_role
 
@@ -111,12 +111,12 @@ def resolve_role(
         return paraphrase_pool(name)
     if role == "check":
         return [name] if name else resolve_role(models, "gen", augmentations)
-    if role == "translation":
-        settings = augmentations or {}
-        flags = {key: settings[key]
-                 for key in inspect.signature(technique_pool).parameters
-                 if key in settings}
-        if not uses_translation(technique_pool(**flags)):
+    if role == "translation" and augmentations is not None:
+        flat = {key: value for key, value in augmentations.items()
+                if key in FLAT_KEYWORDS}
+        kind = resolve({"adversarial": apply_flat_keywords(
+            resolve(None, "adversarial"), flat)}, "adversarial")
+        if not uses_translation(technique_pool(kind)):
             return []
     return [name or default_model_for_role(_REGISTRY_ROLES[role])]
 

@@ -872,15 +872,18 @@ def test_stage_models_follow_the_order_the_stages_run():
     """Stage order, not role name: what loads first is planned first."""
     from redact.driver import _stage_models
 
-    assert _stage_models(_models(), ALL_STAGES, {}) == [
+    translating = {"include_translation": True}
+    assert _stage_models(_models(), ALL_STAGES, translating) == [
         "claude-opus-4-6",        # constitution
         "venice-uncensored",      # inputs: gen, and check falls back to it
         "venice-paraphraser",     # paraphrase
         "deepseek-v3.2",          # jailbreaks: translation
     ]
-    assert _stage_models(_models(), ["jailbreaks", "paraphrase"], {}) == [
+    assert _stage_models(_models(), ["jailbreaks", "paraphrase"], translating) == [
         "venice-uncensored", "deepseek-v3.2", "venice-paraphraser",
     ]
+    # Translation is off by default.
+    assert _stage_models(_models(), ["jailbreaks"], {}) == ["venice-uncensored"]
     assert _stage_models(_models(), ["build"], {}) == []
 
 

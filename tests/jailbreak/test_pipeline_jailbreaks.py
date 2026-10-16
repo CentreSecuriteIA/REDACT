@@ -1,8 +1,8 @@
 """Offline end-to-end tests for the jailbreak pipeline (plan + execute + resume).
 
-Uses ``pure_only=True`` with only the obfuscation layer so no technique needs an
-LLM — the engine completes every sample at prime time and the router is never
-called. This exercises planning, execution, manifest, the prompt-content
+Uses an adversarial kind of pure obfuscation techniques only, so no technique
+needs an LLM — the engine completes every sample at prime time and the router
+is never called. This exercises planning, execution, manifest, the prompt-content
 id, and resume without any network access. The ``pool`` tests at the end run
 LLM-backed fake techniques over a hand-written plan against a fake backend.
 """
@@ -24,15 +24,18 @@ from tests.conftest import (
     make_client,
 )
 
-PURE_KW = dict(
-    pure_only=True,
-    include_hacking=False,
-    include_manipulation=False,
-    include_obfuscation=True,
-    include_requests=False,
-    auto_generate_benign=False,
-    verbose=False,
-)
+_PURE_KIND = {"pure_only": True,
+              "layers": {"deny": ["hacking", "manipulation", "requests"]}}
+
+
+def _pure(**kind) -> dict:
+    """The keywords of a run of pure obfuscations, ``kind`` given over its
+    adversarial kind."""
+    return dict(augmentation={"adversarial": {**_PURE_KIND, **kind}},
+                auto_generate_benign=False, verbose=False)
+
+
+PURE_KW = _pure()
 
 
 def _inputs():
@@ -106,14 +109,14 @@ def test_a_replayed_plan_writes_the_same_text(tmp_path, monkeypatch):
     first, second = tmp_path / "a" / "jb.csv", tmp_path / "b" / "jb.csv"
 
     random.seed(1)
-    generate_jailbreaks(inputs=_inputs(), output_path=first, seed=9, iterations=2,
-                        max_obfuscations=2, **PURE_KW)
+    generate_jailbreaks(inputs=_inputs(), output_path=first, seed=9,
+                        **_pure(iterations=2, max_obfuscations=2))
     second.parent.mkdir()
     manifest = "jb.manifest.jsonl"
     shutil.copy(first.with_name(manifest), second.with_name(manifest))
     random.seed(2)
-    generate_jailbreaks(inputs=_inputs(), output_path=second, seed=10, iterations=2,
-                        max_obfuscations=2, **PURE_KW)
+    generate_jailbreaks(inputs=_inputs(), output_path=second, seed=10,
+                        **_pure(iterations=2, max_obfuscations=2))
 
     assert len(pd.read_csv(first)) == 2 * len(_inputs())
     assert first.read_bytes() == second.read_bytes()
@@ -122,7 +125,7 @@ def test_a_replayed_plan_writes_the_same_text(tmp_path, monkeypatch):
 def test_iterations_dedup(tmp_path):
     out = tmp_path / "jb.csv"
     df = generate_jailbreaks(inputs=_inputs(), output_path=out, seed=3,
-                             iterations=3, max_obfuscations=1, **PURE_KW)
+                             **_pure(iterations=3, max_obfuscations=1))
     plan = Manifest(out.with_name("jb.manifest.jsonl")).load()
     assert len(plan) == 15  # 5 samples x 3 iterations
 
@@ -270,7 +273,7 @@ def test_fresh_run_clears_ledger(tmp_path):
     assert len(pd.read_csv(out)) == 5  # not doubled
 
 
-def test_settings_per_iteration_escalation(tmp_path):
+def test_rounds_escalate(tmp_path):
     """Multi-round escalation: 4 rounds per sample, exact counts for rounds 0-1."""
     out = tmp_path / "jb.csv"
     schedule = [
@@ -280,9 +283,9 @@ def test_settings_per_iteration_escalation(tmp_path):
         {"max_complexity": 9, "max_obfuscations": 3},
     ]
     df = generate_jailbreaks(inputs=_inputs(), output_path=out, seed=11,
-                             settings_per_iteration=schedule, **PURE_KW)
+                             **_pure(rounds=schedule))
 
-    # iterations derived from schedule length: 5 samples x 4 rounds.
+    # iterations derived from the number of rounds: 5 samples x 4 rounds.
     plan = Manifest(out.with_name("jb.manifest.jsonl")).load()
     assert len(plan) == 20
     assert sorted({r["iteration"] for r in plan}) == [0, 1, 2, 3]
@@ -303,8 +306,8 @@ def test_settings_per_iteration_escalation(tmp_path):
 
 def test_a_budget_round_inherits_the_top_level_max_complexity(tmp_path):
     out = tmp_path / "jb.csv"
-    generate_jailbreaks(inputs=_inputs(), output_path=out, seed=11, max_complexity=1,
-                        settings_per_iteration=[{"max_obfuscations": 3}], **PURE_KW)
+    generate_jailbreaks(inputs=_inputs(), output_path=out, seed=11,
+                        **_pure(max_complexity=1, rounds=[{"max_obfuscations": 3}]))
     plan = Manifest(out.with_name("jb.manifest.jsonl")).load()
     assert {r["settings"]["max_complexity"] for r in plan} == {1}
     assert {r["settings"]["max_obfuscations"] for r in plan} == {3}
@@ -312,10 +315,69 @@ def test_a_budget_round_inherits_the_top_level_max_complexity(tmp_path):
     assert all(len(r["combination"]) == 1 for r in plan)
 
 
-def test_settings_per_iteration_empty_raises(tmp_path):
-    with pytest.raises(ValueError):
+def test_empty_rounds_raise(tmp_path):
+    with pytest.raises(ValueError, match="rounds must be null"):
         generate_jailbreaks(inputs=_inputs(), output_path=tmp_path / "jb.csv",
-                            settings_per_iteration=[], **PURE_KW)
+                            **_pure(rounds=[]))
+
+
+def test_escalation_names_the_built_in_schedule(tmp_path):
+    from redact.jailbreak import default_escalation_schedule
+
+    out = tmp_path / "jb.csv"
+    generate_jailbreaks(inputs=_inputs(), output_path=out, seed=11,
+                        **_pure(rounds="escalation"))
+    plan = Manifest(out.with_name("jb.manifest.jsonl")).load()
+    schedule = default_escalation_schedule()
+    assert len(plan) == len(schedule) * len(_inputs())
+    for r in plan:
+        assert r["settings"].items() >= schedule[r["iteration"]].items()
+
+
+def test_family_weights_and_layer_rates_reach_the_plan(tmp_path):
+    out = tmp_path / "jb.csv"
+    generate_jailbreaks(
+        inputs=_inputs(), output_path=out, seed=11,
+        **_pure(family_weights={"encode": 3}, layer_rates={"hacking": 0.2}))
+    plan = Manifest(out.with_name("jb.manifest.jsonl")).load()
+    assert all(r["settings"]["family_weights"] == {"encode": 3} for r in plan)
+    assert all(r["settings"]["sampling_probs"] == {"hacking": 0.2} for r in plan)
+
+
+def test_the_flat_keywords_plan_what_their_section_plans(tmp_path):
+    flat, section = tmp_path / "flat" / "jb.csv", tmp_path / "section" / "jb.csv"
+    with pytest.warns(DeprecationWarning, match="augmentation"):
+        generate_jailbreaks(
+            inputs=_inputs(), output_path=flat, seed=5, pure_only=True,
+            include_hacking=False, include_manipulation=False,
+            include_requests=False, max_complexity=4, iterations=2,
+            sampling_probs={"requests": 0.1}, auto_generate_benign=False,
+            verbose=False)
+    generate_jailbreaks(
+        inputs=_inputs(), output_path=section, seed=5, **_pure(
+            max_complexity=4, iterations=2, layer_rates={"requests": 0.1}))
+    assert (Manifest(flat.with_name("jb.manifest.jsonl")).load()
+            == Manifest(section.with_name("jb.manifest.jsonl")).load())
+
+
+def test_a_flat_keyword_for_an_adversarial_kind_switched_off_raises(tmp_path):
+    with pytest.warns(DeprecationWarning), pytest.raises(ValueError, match="null"):
+        generate_jailbreaks(inputs=_inputs(), output_path=tmp_path / "jb.csv",
+                            augmentation={"adversarial": None}, pure_only=True)
+
+
+def test_without_the_adversarial_kind_no_jailbreak_is_written(tmp_path):
+    out = tmp_path / "jb.csv"
+    returned = generate_jailbreaks(inputs=_inputs(), output_path=out,
+                                   augmentation={"adversarial": None}, verbose=False)
+    assert returned.empty and not out.exists()
+
+
+def test_entry_types_keep_the_inputs_of_those_types(tmp_path):
+    inputs = _inputs().assign(entry_type=["harmful", "benign"] * 2 + ["harmful"])
+    df = generate_jailbreaks(inputs=inputs, output_path=tmp_path / "jb.csv", seed=1,
+                             **_pure(entry_types=["benign"]))
+    assert list(df["entry_type"]) == ["benign", "benign"]
 
 
 # --- the inputs of the run ------------------------------------------------------

@@ -7,6 +7,7 @@ Called once per kind of the augmentation section (the adversarial kind to
 from __future__ import annotations
 
 import logging
+from collections import Counter
 from collections.abc import Callable
 from contextlib import closing
 from pathlib import Path
@@ -44,9 +45,7 @@ def run_augmentation(
     benign_path: Path | None = None,
     prompt_dir=None,
     seed: int = 42,
-    iterations: int = 1,
-    settings_per_iteration: list[dict] | None = None,
-    sample_kwargs: dict | None = None,
+    rounds: list[dict] | None = None,
     family_weights: dict | None = None,
     layer_rates: dict | None = None,
     auto_generate_benign: bool = True,
@@ -59,11 +58,15 @@ def run_augmentation(
     """Augment the inputs with ``pool``'s techniques, appended to ``out_path``.
 
     The run is planned whole into a manifest beside ``out_path`` — one
-    combination per input and iteration, drawn from ``pool`` and frozen — then
+    combination per input and round, drawn from ``pool`` and frozen — then
     its pending units run through :func:`drive_units`, up to ``batch_size`` per
     call, their rows appended every 32 units. The combination is read back
     through every registered technique, so a plan made with another pool still
-    replays. ``label`` is the progress label and the internals-capture root.
+    replays. ``rounds`` holds each round's sampler settings, as
+    :func:`redact.jailbreak.augmentation.rounds_of` gives them (one round of
+    the sampler's defaults when None); ``family_weights`` and ``layer_rates``
+    go to the dealing of :func:`plan_run`. ``label`` is the progress label and
+    the internals-capture root.
 
     Resume: completion is a sidecar ``*.state.jsonl`` ledger keyed
     ``(input_id, iteration)``; ``resume=True`` reuses the plan and skips its
@@ -74,26 +77,28 @@ def run_augmentation(
     """
     out_path = Path(out_path)
     man_path = Path(manifest_path) if manifest_path else Manifest.sidecar(out_path).path
-    sample_kwargs = sample_kwargs or {}
+    rounds = [{}] if rounds is None else list(rounds)
+    if not rounds:
+        raise ValueError("rounds must be a non-empty list of dicts.")
 
     # The registry is every registered technique, not the (filtered) pool, so a
     # plan made with another pool still reconstructs.
     registry = pool_module.registry(pool_module.all_techniques())
     capture = client.compute_config.supports_internals
 
-    if settings_per_iteration is not None:
-        if not settings_per_iteration:
-            raise ValueError(
-                "settings_per_iteration must be a non-empty list of dicts.")
-        iterations = len(settings_per_iteration)
-
     spec_version = load_spec().get("version", "")
 
     if verbose:
         logger.info("%s (plan + batched execute)", label)
+        per_layer = Counter(getattr(fn, "layer", None) for fn in pool)
         logger.info(
-            "Pool: %d techniques | Samples: %d | Iterations: %d | Model: %s | Batch:"
-            " %d", len(pool), len(inputs), iterations, client.model, batch_size)
+            "Pool: %d techniques (%s) | Samples: %d | Rounds: %d | Model: %s | "
+            "Batch: %d", len(pool),
+            ", ".join(f"{layer} {n}" for layer, n in per_layer.items()),
+            len(inputs), len(rounds), client.model, batch_size)
+        if layer_rates or family_weights:
+            logger.info("Layer rates: %s | Family weights: %s",
+                        layer_rates or "the spec's", family_weights or "equal")
 
     ledger = Ledger.sidecar(
         out_path, key_fields=("input_id", "iteration"),
@@ -115,8 +120,8 @@ def run_augmentation(
         coverage_path(man_path).unlink(missing_ok=True)
         plan_run(
             inputs, pool, manifest_path=man_path, seed=seed,
-            iterations=iterations, settings_per_iteration=settings_per_iteration,
-            sample_kwargs=sample_kwargs, family_weights=family_weights,
+            iterations=len(rounds), settings_per_iteration=rounds,
+            family_weights=family_weights,
             layer_rates=layer_rates, verbose=verbose,
         )
 
