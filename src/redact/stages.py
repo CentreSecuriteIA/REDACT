@@ -62,7 +62,7 @@ logger = logging.getLogger(__name__)
 
 
 def generate_constitution(
-    taxonomy: dict | str = "content_moderation_categories",
+    taxonomy: dict | str = "harmful",
     entry_types: list[str] | None = None,
     num_categories: int = 10,
     model: str | None = None,
@@ -150,10 +150,10 @@ def generate_constitution(
 
 
 def generate_inputs(
-    taxonomy: dict | str = "content_moderation_categories",
+    taxonomy: dict | str = "harmful",
     samples_per_category: int = 15,
     use_metaprompt: bool = True,
-    seeds_name: str = "content_moderation_seeds",
+    seeds_name: str = "harmful",
     samples_per_request: int = 5,
     num_seeds: int = 8,
     model: str | None = None,

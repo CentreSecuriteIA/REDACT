@@ -8,7 +8,7 @@ Usage::
     from redact.llms import ModelClient
 
     pipeline = ConstitutionPipeline(ModelClient.create("claude-opus-4-6"))
-    constitution = pipeline.run(load_taxonomy("content_moderation_categories"))
+    constitution = pipeline.run(load_taxonomy("harmful"))
 """
 
 from ..types import ALL_ENTRY_TYPES, EntryType

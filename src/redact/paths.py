@@ -202,6 +202,11 @@ def seeds_dir() -> Path:
     return configs_dir() / "seeds"
 
 
+def dataset_configs_dir() -> Path:
+    """Package-bundled HuggingFace dataset configs (``src/redact/configs/datasets``)."""
+    return configs_dir() / "datasets"
+
+
 def jailbreak_configs_dir() -> Path:
     """Package-bundled jailbreak technique configs (``src/redact/configs/jailbreak``)."""
     return configs_dir() / "jailbreak"

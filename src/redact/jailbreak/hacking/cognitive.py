@@ -1,18 +1,20 @@
 """Cognitive techniques: a model writes a scenario, then the prompt built on it.
 
-The five techniques are the categories of the ``cognitive_techniques``
-taxonomy; ``info`` is ``category=<key>``.
+The five techniques are the categories of
+``configs/jailbreak/hacking/cognitive_techniques.json``; ``info`` is
+``category=<key>``.
 """
 
 import re
 from collections.abc import Callable
 
-from redact.dataset.taxonomy import load_taxonomy
+from redact.jailbreak.directives import load_templates
 from redact.jailbreak.technique import TechniqueGen
 from redact.llm_pipeline import LLMRequest
 from redact.llms.prompting import build_messages, load_prompt
 
-_TECHNIQUES: dict[str, dict] = load_taxonomy("cognitive_techniques")["categories"]
+_TECHNIQUES: dict[str, dict] = load_templates(
+    "hacking", "cognitive_techniques.json")["categories"]
 
 
 _SCENARIO_RE = re.compile(

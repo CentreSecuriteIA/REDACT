@@ -281,11 +281,13 @@ src/redact/
 │   └── taxonomy.py                # create_taxonomy, taxonomy and seed file loading, category iteration
 │
 ├── configs/                       # JSON configuration files (package data)
-│   ├── content_moderation_input.json
+│   ├── datasets/                  # content_moderation_input.json (a HuggingFace dataset to load)
+│   ├── jailbreak/                 # combination_spec.json, augmentations.json, technique templates;
+│   │                              # hacking/ also holds cognitive_techniques.json and personas.json
 │   ├── llm/                       # models.json (the registry), roles.json, gpu_pricing.json
 │   ├── runs/                      # Example recipes + params file
-│   ├── seeds/                     # Hand-written seed prompts
-│   └── taxonomy/                  # Category/technique taxonomies
+│   ├── seeds/                     # harmful.json: hand-written seed prompts per category
+│   └── taxonomy/                  # harmful.json (the categories), benign.json (benign data)
 │
 ├── prompts/                       # Prompt JSON per pipeline/step (input, output, paraphrase, jailbreak, constitution, ...)
 │
@@ -476,7 +478,7 @@ from redact import generate_constitution
 
 # Generate constitution for all taxonomy categories
 constitution = generate_constitution(
-    taxonomy="content_moderation_categories",
+    taxonomy="harmful",
     num_categories=10,          # constitution categories per type per taxonomy category
     model="claude-opus-4-6",
     num_taxonomy_categories=3,  # limit to first 3 taxonomy categories (None = all)
@@ -648,7 +650,7 @@ Sensitive-words and TokenBreak functions share one LLM step that marks the harmf
 | Named Personas | `personas.py` | `to_invented_persona` + 14 named archetypes (psychopath, alien, cult_leader, very_advanced_ai, cartel_leader, artist, mentally_ill, deformed_scientist, politician, deformed_professor, religious_figure, radical_politician, actor, someone_from_the_future) | Yes |
 | Framing | `framing.py` | `to_fictional_world`, `to_noble_goal`, `to_nefarious_goal`, `to_high_stake`, `to_no_moral_constraints` | No |
 
-Cognitive and persona techniques are two-step LLM processes: **scenario generation → jailbreak construction**. Named personas use a persona-grounded scenario prompt that grounds the scenario in the persona's character before construction. Cognitive technique definitions are loaded from `configs/taxonomy/cognitive_techniques.json`; persona definitions from `configs/taxonomy/personas.json` — both are editable without touching code.
+Cognitive and persona techniques are two-step LLM processes: **scenario generation → jailbreak construction**. Named personas use a persona-grounded scenario prompt that grounds the scenario in the persona's character before construction. Cognitive technique definitions are loaded from `configs/jailbreak/hacking/cognitive_techniques.json`; persona definitions from `configs/jailbreak/hacking/personas.json` — both are editable without touching code.
 
 Framing directives are pure transforms covering scenario and intent modification. Each has 4 named template variants stored in `configs/jailbreak/hacking/framing_templates.json`; one is randomly selected per call with the variant name recorded in `additional_info`. Answer-format directives live in `requests/answer.py`.
 
@@ -842,7 +844,7 @@ for e in entries:
 
 ### Adding a New Harm Category
 
-1. Add to taxonomy — `configs/taxonomy/content_moderation_categories.json`
+1. Add to taxonomy — `configs/taxonomy/harmful.json`
 2. Create prompt template — `prompts/input/generation/template.json`
 3. Run the pipeline — the category appears automatically in `iter_categories()`
 

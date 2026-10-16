@@ -5,7 +5,7 @@
     "gen": null, "check": null, "translation": null, "constitution": null,
     "paraphraser": null, "paraphrase_check": null
   },
-  "taxonomy": "content_moderation_categories",
+  "taxonomy": "harmful",
   "taxonomy_dir": null,
   "benign_taxonomy": "benign",
   "prompt_dir": null,

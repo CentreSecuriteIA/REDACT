@@ -1,6 +1,7 @@
 """Tests for taxonomy writing and loading."""
 
 import json
+import warnings
 
 import pytest
 
@@ -8,13 +9,14 @@ from redact.dataset.taxonomy import (
     create_taxonomy,
     get_seed_prompts,
     iter_categories,
+    load_seeds,
     load_taxonomy,
 )
 
 
 class TestLoadTaxonomy:
     def test_loads_real_taxonomy(self):
-        tax = load_taxonomy("content_moderation_categories")
+        tax = load_taxonomy("harmful")
         assert "categories" in tax
         assert "aliases" in tax
         assert len(tax["categories"]) >= 10
@@ -24,9 +26,57 @@ class TestLoadTaxonomy:
             load_taxonomy("nonexistent_taxonomy_xyz")
 
     def test_extension_optional(self):
-        t1 = load_taxonomy("content_moderation_categories")
-        t2 = load_taxonomy("content_moderation_categories.json")
+        t1 = load_taxonomy("harmful")
+        t2 = load_taxonomy("harmful.json")
         assert t1 == t2
+
+
+class TestFormerNames:
+    """The names before the config layout, read for one release."""
+
+    def test_the_former_taxonomy_name_loads_harmful_with_a_warning(self):
+        with pytest.warns(DeprecationWarning, match="'harmful'"):
+            former = load_taxonomy("content_moderation_categories")
+        assert former == load_taxonomy("harmful")
+
+    def test_the_former_seeds_name_loads_harmful_with_a_warning(self):
+        with pytest.warns(DeprecationWarning, match="'harmful'"):
+            former = load_seeds("content_moderation_seeds.json")
+        assert former == load_seeds("harmful")
+
+    def test_a_folder_with_the_former_file_name_still_serves_harmful(self, tmp_path):
+        create_taxonomy("content_moderation_categories", {"A": "a"},
+                        taxonomy_dir=tmp_path, verbose=False)
+        with pytest.warns(DeprecationWarning, match="rename it harmful.json"):
+            tax = load_taxonomy("harmful", config_dir=tmp_path)
+        assert list(tax["categories"]) == ["A"]
+
+    def test_a_folder_reads_its_own_file_under_the_former_name(self, tmp_path):
+        create_taxonomy("content_moderation_categories", {"A": "a"},
+                        taxonomy_dir=tmp_path, verbose=False)
+        with warnings.catch_warnings():
+            warnings.simplefilter("error")
+            tax = load_taxonomy("content_moderation_categories", config_dir=tmp_path)
+        assert list(tax["categories"]) == ["A"]
+
+    def test_a_folder_with_neither_name_raises(self, tmp_path):
+        with pytest.raises(FileNotFoundError, match="harmful.json"):
+            load_taxonomy("harmful", config_dir=tmp_path)
+
+
+class TestPackagedLayout:
+    def test_each_config_file_is_where_its_loader_reads_it(self):
+        from redact import paths
+
+        assert (paths.taxonomy_dir() / "harmful.json").is_file()
+        assert (paths.taxonomy_dir() / "benign.json").is_file()
+        assert (paths.seeds_dir() / "harmful.json").is_file()
+        assert (paths.dataset_configs_dir() / "content_moderation_input.json").is_file()
+        hacking = paths.jailbreak_configs_dir() / "hacking"
+        assert {"cognitive_techniques.json", "personas.json"} <= {
+            p.name for p in hacking.iterdir()}
+        assert {p.name for p in paths.taxonomy_dir().iterdir()
+                if p.suffix == ".json"} == {"harmful.json", "benign.json"}
 
 
 class TestCreateTaxonomy:

@@ -723,6 +723,28 @@ def test_the_example_recipes_load(name):
         recipe = load_recipe(paths.configs_dir() / "runs" / name)
     assert set(recipe["models"].values()) == {None}
     assert _serving_of(recipe["models"]) == {}
+    assert recipe["taxonomy"] == "harmful"
+
+
+def test_a_recipe_naming_the_former_taxonomy_loads_harmful_with_a_warning():
+    with pytest.warns(DeprecationWarning, match='write "taxonomy": "harmful"'):
+        recipe = load_recipe({"taxonomy": "content_moderation_categories"})
+    assert recipe["taxonomy"] == "harmful"
+
+
+def test_a_recipe_naming_the_former_taxonomy_in_its_own_folder_keeps_the_name(
+        tmp_path):
+    from redact.dataset import create_taxonomy, load_taxonomy
+
+    create_taxonomy("content_moderation_categories", {"A": "a"},
+                    taxonomy_dir=tmp_path, verbose=False)
+    with pytest.warns(DeprecationWarning):
+        recipe = load_recipe({"taxonomy": "content_moderation_categories",
+                              "taxonomy_dir": str(tmp_path),
+                              "stages": ["constitution"]})
+    assert recipe["taxonomy"] == "content_moderation_categories"
+    taxonomy = load_taxonomy(recipe["taxonomy"], config_dir=recipe["taxonomy_dir"])
+    assert list(taxonomy["categories"]) == ["A"]
 
 
 # --- the augmentation section -------------------------------------------------

@@ -1,19 +1,19 @@
-"""Persona techniques: an invented persona or one of the 14 in the personas taxonomy.
+"""Persona techniques: an invented persona or one of the 14 in
+``configs/jailbreak/hacking/personas.json``.
 
 ``info`` is ``category=<name>_persona``.
 """
 
 from collections.abc import Callable
 
-from redact.dataset.taxonomy import load_taxonomy
+from redact.jailbreak.directives import load_templates
 from redact.jailbreak.technique import TechniqueGen
 from redact.llm_pipeline import LLMRequest
 from redact.llms.prompting import build_messages, load_prompt
 
 from .cognitive import _cognitive_gen, _construction_messages, _extract_scenario
 
-_PERSONA_TAXONOMY = load_taxonomy("personas")
-_PERSONAS: dict[str, dict] = _PERSONA_TAXONOMY["categories"]
+_PERSONAS: dict[str, dict] = load_templates("hacking", "personas.json")["categories"]
 
 # Order of named personas in the registry (matches combination_spec.json names).
 _NAMED_PERSONAS = [

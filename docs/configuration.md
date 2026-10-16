@@ -14,7 +14,7 @@ that starts with `_` is a comment.
 | `dataset_type` | `"eval"` or `"training"` | `"eval"` | `training` seeds the inputs from the constitution saved under `data_dir`; `eval` runs the standalone inputs and may not list `constitution`. Also the build's `mode` |
 | `data_dir` | path | the default working root | The run's root; `Datasets/` and `Data_cache/` go under it. Relative to the current directory. `run_pipeline(data_dir=...)` and `--data-dir` override it |
 | `models` | object | every role its default | A model per role; see [below](#the-models-object) |
-| `taxonomy` | name or object | `"content_moderation_categories"` | The taxonomy of the constitution and the standalone inputs, by file name or as a loaded object |
+| `taxonomy` | name or object | `"harmful"` | The taxonomy of the constitution and the standalone inputs, by file name or as a loaded object. The former name `"content_moderation_categories"` loads `harmful` with a `DeprecationWarning`, for one release |
 | `taxonomy_dir` | path | `configs/taxonomy/` | Where a taxonomy name is looked up |
 | `prompt_dir` | path | none | The prompt overlay; see [below](#the-prompt-overlay) |
 | `stages` | list of stage names | `["inputs", "outputs", "jailbreaks", "build"]` | The stages to run, in order, each once. `[]` runs nothing |
@@ -80,7 +80,7 @@ models, `data_dir`, `prompt_dir`, `taxonomy`, `taxonomy_dir`, `resume`,
 | `samples_per_request` | `5` | Samples asked for per call |
 | `num_categories` | `null` | Only the first N taxonomy categories |
 | `use_metaprompt` | `true` | Generate each category's description and seeds with the model; `false` reads the taxonomy description and a seeds file |
-| `seeds_name` | `"content_moderation_seeds"` | The seeds file under `configs/seeds/`, with `use_metaprompt: false` |
+| `seeds_name` | `"harmful"` | The seeds file under `configs/seeds/`, with `use_metaprompt: false`. The former name `"content_moderation_seeds"` loads `harmful` with a `DeprecationWarning`, for one release |
 | `num_seeds` | `8` | Seed prompts to generate per category |
 
 ### `outputs`
@@ -497,9 +497,13 @@ values. Delete every file you do not change, then set `prompt_dir`.
 | `configs/jailbreak/augmentations.json` | The two default kinds and `natural_only_families` | `jailbreak/augmentation.py` |
 | `configs/jailbreak/<layer>/*_templates.json` | Template variants of the pure techniques | `jailbreak/directives.py: load_templates` |
 | `configs/jailbreak/multi_turn/crescendo_followups.json` | Follow-ups of the crescendo attack | `multiturn_attacks/attacks.py` |
-| `configs/taxonomy/*.json` | Taxonomies: `content_moderation_categories` (the default), plus `cognitive_techniques` and `personas`, which the hacking techniques read | `dataset/taxonomy.py` |
-| `configs/seeds/content_moderation_seeds.json` | Hand-written seeds per category, for standalone inputs with `use_metaprompt: false` | `dataset/taxonomy.py: load_seeds` |
-| `configs/content_moderation_input.json` | A HuggingFace dataset id, split, columns and filters | `dataset/loading.py: load_from_config` |
+| `configs/jailbreak/hacking/cognitive_techniques.json`, `personas.json` | The definitions of the cognitive techniques and of the named personas | `jailbreak/hacking/cognitive.py`, `personas.py` |
+| `configs/taxonomy/harmful.json` | The harmful categories: the default `taxonomy` | `dataset/taxonomy.py: load_taxonomy` |
+| `configs/taxonomy/benign.json` | The categories and subcategories of the fsh and dap techniques' benign Q&A pairs: the default `benign_taxonomy` | `dataset/taxonomy.py: load_taxonomy` |
+| `configs/seeds/harmful.json` | Hand-written seeds per category, for standalone inputs with `use_metaprompt: false` | `dataset/taxonomy.py: load_seeds` |
+| `configs/datasets/content_moderation_input.json` | A HuggingFace dataset id, split, columns and filters | `dataset/loading.py: load_from_config` |
 | `configs/runs/*.json` | The example recipes and params file | you |
 
-`configs/taxonomy/jailbreak_techniques.json` is not read by any code.
+A `taxonomy_dir` of your own that still holds `content_moderation_categories.json`
+serves it for `harmful`, with a `DeprecationWarning`, for one release; rename
+the file `harmful.json`.

@@ -7,7 +7,7 @@ import pandas as pd
 
 from .. import paths
 
-_DEFAULT_CONFIG_DIR = paths.configs_dir()
+_DEFAULT_CONFIG_DIR = paths.dataset_configs_dir()
 
 
 def load_hf_dataset(
@@ -82,8 +82,8 @@ def load_from_config(
 
     The config gives ``dataset_id`` and optionally ``split``, ``columns``,
     ``filters``, ``exclude`` and ``drop_columns``, as :func:`load_hf_dataset`
-    takes them. ``config_dir`` defaults to the packaged ``configs/``, which
-    holds ``content_moderation_input.json``. The name is taken with or
+    takes them. ``config_dir`` defaults to the packaged ``configs/datasets``,
+    which holds ``content_moderation_input.json``. The name is taken with or
     without its ``.json``.
 
     Raises:

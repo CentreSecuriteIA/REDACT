@@ -1,5 +1,5 @@
 {
-    "name": "content_moderation_categories",
+    "name": "harmful",
     "description": "Harm categories for content moderation dataset generation. Used both to filter existing datasets and to drive generation loops over categories.",
     "categories": {
         "Physical Harm": {

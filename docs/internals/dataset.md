@@ -202,11 +202,11 @@ Input samples live in one `samples.csv` per category folder.
 
 | Function | Does |
 |---|---|
-| `load_taxonomy(name, config_dir=None)` | A taxonomy file, from `configs/taxonomy/` by default |
+| `load_taxonomy(name, config_dir=None)` | A taxonomy file, from `configs/taxonomy/` by default; the former name `content_moderation_categories` loads `harmful` with a `DeprecationWarning` |
 | `create_taxonomy(name, categories, ...)` | Writes a taxonomy file and returns it |
 | `iter_categories(taxonomy)` | `(name, info)` per category, a bare description as `{"description": ...}` |
-| `load_seeds(name)`, `get_seed_prompts(seeds, category)` | The seeds file, and one category's seeds as a numbered list |
-| `load_hf_dataset(dataset_id, split, columns, filters, exclude, ...)`, `load_from_config(name)` | A HuggingFace dataset, filtered; needs the `hf` extra |
+| `load_seeds(name)`, `get_seed_prompts(seeds, category)` | The seeds file (`configs/seeds/`; the former name `content_moderation_seeds` loads `harmful` with a warning), and one category's seeds as a numbered list |
+| `load_hf_dataset(dataset_id, split, columns, filters, exclude, ...)`, `load_from_config(name)` | A HuggingFace dataset, filtered, directly or from a config under `configs/datasets/`; needs the `hf` extra |
 
 [extending.md](../extending.md#add-a-category-or-a-taxonomy) shows the
 taxonomy format.

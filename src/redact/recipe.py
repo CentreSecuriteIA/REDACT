@@ -34,6 +34,9 @@ _RECIPE_KEYS = ("dataset_type", "data_dir", "models", "taxonomy", "taxonomy_dir"
                 "benign_taxonomy", "prompt_dir", "stages", "augmentations",
                 "params_file", "resume")
 
+# The former name of the packaged taxonomy "harmful", read for one release.
+_FORMER_TAXONOMY = "content_moderation_categories"
+
 
 def load_recipe(recipe: str | Path | dict) -> dict:
     """Load + validate a recipe (JSON path or already-parsed dict)."""
@@ -73,6 +76,13 @@ def load_recipe(recipe: str | Path | dict) -> dict:
         raise ValueError(
             f"The recipe has unknown key(s) {unknown}; write only "
             f"{list(_RECIPE_KEYS)}.")
+    if data.get("taxonomy") == _FORMER_TAXONOMY:
+        warnings.warn(
+            f'The recipe names the taxonomy "{_FORMER_TAXONOMY}", now "harmful"; '
+            'write "taxonomy": "harmful". The former name is read for this release.',
+            DeprecationWarning, stacklevel=2)
+        if data.get("taxonomy_dir") is None:
+            data["taxonomy"] = "harmful"
     # For their errors. The entries stay as written, and a run reads them again.
     serving_of(data.get("models") or {})
     data["augmentations"] = augmentations_of(data)

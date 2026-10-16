@@ -1,5 +1,5 @@
 {
-    "name": "content_moderation_seeds",
+    "name": "harmful",
     "description": "Seed prompts per harm category for content moderation input generation. Each category has 5-10 hand-written example prompts that serve as style/type inspiration for the generation model. Seeds are abstracted through the metaprompt -- the generation model never sees the raw seeds directly.",
     "seeds": {
         "Physical Harm": [

@@ -14,7 +14,7 @@ the four entry types: `harmful`, `dual_use_harmful`, `dual_use_benign`,
 ## Inputs
 
 - The taxonomy: a file under `taxonomy_dir` (default
-  `configs/taxonomy/content_moderation_categories.json`) or a dict. Only the
+  `configs/taxonomy/harmful.json`) or a dict. Only the
   first `num_taxonomy_categories` categories are used. Each category's
   `description`, `subcategories` and `group_tag` fill the prompt.
 - The prompts `prompts/constitution/<entry_type>/`, plus `general_benign`.

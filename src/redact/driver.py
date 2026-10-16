@@ -420,7 +420,7 @@ def run_pipeline(
         dataset_type=recipe["dataset_type"],
         models={**_DEFAULT_MODELS, **_role_names(recipe.get("models") or {})},
         prompt_dir=recipe.get("prompt_dir"),
-        taxonomy=recipe.get("taxonomy", "content_moderation_categories"),
+        taxonomy=recipe.get("taxonomy", "harmful"),
         taxonomy_dir=recipe.get("taxonomy_dir"),
         benign_taxonomy=recipe["benign_taxonomy"],
         params=params,

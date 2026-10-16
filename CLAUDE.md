@@ -112,8 +112,8 @@ REDACT/
 │       │   │   ├── casual_writing.py # Casing, spacing, punctuation, abbreviations, accents (9 pure functions)
 │       │   │   └── suffixes.py      # Adversarial suffix injection
 │       │   ├── hacking/             # Cognitive/psychological attacks
-│       │   │   ├── cognitive.py     # 5 techniques; definitions loaded from cognitive_techniques.json
-│       │   │   ├── personas.py      # 14 named persona archetypes + invented persona; loaded from personas.json
+│       │   │   ├── cognitive.py     # 5 techniques; definitions loaded from configs/jailbreak/hacking/cognitive_techniques.json
+│       │   │   ├── personas.py      # 14 named persona archetypes + invented persona; loaded from configs/jailbreak/hacking/personas.json
 │       │   │   └── framing.py       # 5 scenario-modifying directives (pure transforms); templates in framing_templates.json
 │       │   ├── manipulation/        # Few-shot manipulation
 │       │   │   ├── benign.py        # Benign Q&A pairs, generated once and cached in Data_cache/benign/
@@ -131,14 +131,17 @@ REDACT/
 │       │       └── asking.py          # 2 question-framing functions; asking_templates.json
 │       │
 │       ├── configs/                 # Configuration data (package data)
-│       │   ├── content_moderation_input.json
+│       │   ├── datasets/
+│       │   │   └── content_moderation_input.json  # A HuggingFace dataset to load (dataset/loading.py)
 │       │   ├── llm/                 # models.json (the registry), roles.json, gpu_pricing.json
 │       │   ├── runs/                # Example recipes (eval_example, training_example) + params_example.json
 │       │   ├── jailbreak/
 │       │   │   ├── combination_spec.json  # Layers, families, compatibility rules, layer_rates, per-technique tags (source of truth for sampling)
 │       │   │   ├── augmentations.json     # The packaged augmentation section: the adversarial and natural kinds
 │       │   │   ├── hacking/
-│       │   │   │   └── framing_templates.json         # 5 scenario-modifying framing directives
+│       │   │   │   ├── framing_templates.json         # 5 scenario-modifying framing directives
+│       │   │   │   ├── cognitive_techniques.json      # Cognitive hacking technique definitions (editable)
+│       │   │   │   └── personas.json                  # Named persona archetypes (editable)
 │       │   │   ├── obfuscation/
 │       │   │   │   └── structural_templates.json      # XML and Markdown wrappers
 │       │   │   ├── multi_turn/
@@ -152,12 +155,11 @@ REDACT/
 │       │   │       ├── impersonation_templates.json   # 8 good-person profession variants
 │       │   │       ├── temporal_templates.json        # 4 past-tense framing variants
 │       │   │       └── asking_templates.json          # innocuous_question + ask_for_details variants
-│       │   ├── seeds/               # Hand-written seed prompts
+│       │   ├── seeds/
+│       │   │   └── harmful.json     # Hand-written seed prompts per category (standalone inputs)
 │       │   └── taxonomy/            # Category taxonomy definitions
-│       │       ├── content_moderation_categories.json
-│       │       ├── jailbreak_techniques.json
-│       │       ├── cognitive_techniques.json  # Cognitive hacking technique definitions (editable)
-│       │       └── personas.json              # Named persona archetypes (editable)
+│       │       ├── harmful.json     # The harmful categories: the recipe's default "taxonomy"
+│       │       └── benign.json      # The benign data's categories: the recipe's default "benign_taxonomy"
 │       │
 │       └── prompts/                 # Prompt JSON per pipeline/category (ships with the library)
 │           ├── input/               # Content moderation input-side prompts
