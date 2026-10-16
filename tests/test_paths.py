@@ -17,6 +17,7 @@ def test_all_artifact_resolvers(tmp_path):
     ds = tmp_path / "Datasets"
     dc = tmp_path / "Data_cache"
     assert paths.jailbreaks_csv(tmp_path) == ds / "jailbreaks.csv"
+    assert paths.variations_csv(tmp_path) == ds / "variations.csv"
     assert paths.output_responses_csv(tmp_path) == ds / "output_responses.csv"
     assert paths.complete_dataset_csv(tmp_path) == ds / "complete_dataset.csv"
     assert paths.benign_csv(tmp_path) == dc / "benign" / "benign_samples.csv"

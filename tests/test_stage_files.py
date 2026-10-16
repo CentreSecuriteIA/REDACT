@@ -2,7 +2,8 @@
 
 ``fixtures/stage_files.json`` holds every file of one stopped and resumed run
 of each stage, as the code wrote them before the stages streamed their plans
-and units (commit e7106b1). Model calls are stubbed and depend only on the
+and units (commit e7106b1); the jailbreak stage's variations files were added
+when it gained them. Model calls are stubbed and depend only on the
 request, so a run writes the same files every time.
 
 A file is compared as data, not bytes, since a CSV's line ending and the
@@ -105,9 +106,16 @@ def _jailbreaks(folder, monkeypatch) -> dict:
         backend = Backend()
         monkeypatch.setattr(
             P.ModelClient, "create", lambda m: make_client(backend, m))
+        # The natural kind draws from the whole (fake) registry.
         generate_jailbreaks(
-            inputs=inputs, output_path=folder / "jailbreaks.csv", model=GEN, seed=5,
-            settings_per_iteration=[{"exact_techniques": 1}, {"max_complexity": 4}],
+            inputs=inputs, output_path=folder / "jailbreaks.csv",
+            variations_path=folder / "variations.csv", model=GEN, seed=5,
+            augmentation={
+                "adversarial": {"rounds": [{"exact_techniques": 1},
+                                           {"max_complexity": 4}]},
+                "natural": {"families": {"allow": None},
+                            "techniques": {"allow": None}},
+            },
             batch_size=2, auto_generate_benign=False, verbose=False)
 
     return _stopped_then_resumed(folder, run)

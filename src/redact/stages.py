@@ -499,13 +499,17 @@ def generate_jailbreaks(
     verbose: bool = True,
     read_back: bool = True,
     augmentation: dict | None = None,
+    variations_path: str | Path | None = None,
 ) -> pd.DataFrame:
-    """Augment input prompts with jailbreak technique combinations (batched).
+    """Augment input prompts with jailbreak technique combinations and natural
+    variations (batched).
 
-    Resolves the inputs, the generation client, the augmentation section's
-    adversarial kind and its pool, and the output path, then runs
-    :func:`redact.jailbreak.pipeline.run_augmentation`, which plans the run
-    whole and streams its units through the batched driver.
+    Resolves the inputs, the generation client and the two kinds of the
+    augmentation section, then runs
+    :func:`redact.jailbreak.pipeline.run_augmentation` once per kind that is
+    on: the adversarial kind to the jailbreaks CSV, then the natural kind to
+    the variations CSV. Each run plans whole into its own manifest, ledger and
+    coverage table and streams its units through the batched driver.
 
     Args:
         inputs: Input prompts DataFrame. If None, the accepted inputs of the
@@ -516,6 +520,8 @@ def generate_jailbreaks(
             benign cache to ``{data_dir}/Data_cache/benign/``.
         output_path: Override for the jailbreaks CSV. The manifest defaults to
             ``<output>.manifest.jsonl``.
+        variations_path: Override for the variations CSV, by default
+            ``{data_dir}/Datasets/variations.csv``.
         benign_path: Override for the FSH/DAP benign-cache CSV.
         seed: Global run seed (combined with each sample's id + iteration).
         model: Generation model. ``None`` resolves to the ``uncensored_gen``
@@ -525,8 +531,9 @@ def generate_jailbreaks(
         auto_generate_benign: Pre-load or generate benign data for FSH/DAP.
         batch_size: Requests per model call; twice as many units are live.
         prompt_dir: Prompt overlay forwarded to the LLM-dependent techniques.
-        resume: Reuse an existing manifest and skip finished units.
-        manifest_path: Override manifest location.
+        resume: Reuse each kind's existing manifest and skip its finished
+            units; False starts both kinds that are on over.
+        manifest_path: Override the jailbreaks manifest's location.
         verbose: Log progress.
         read_back: False returns an empty DataFrame and does not read the CSV.
         augmentation: The augmentation section, ``{"adversarial": ...,
@@ -548,7 +555,9 @@ def generate_jailbreaks(
         ``num_techniques``, ``is_noop``, ``accepted``, ``reasoning``,
         ``iteration``, ``combination_spec_version``), or an empty frame when
         the adversarial kind is off. ``sample_id`` is this row's own
-        content-hash identity, distinct from ``input_id``.
+        content-hash identity, distinct from ``input_id``. The variations
+        CSV has the same columns, its rows keeping their input's
+        ``entry_type``; read it with ``read_rows(paths.variations_csv(data_dir))``.
     """
     flat = {name: value for name, value in (
         ("include_hacking", include_hacking),
@@ -564,7 +573,8 @@ def generate_jailbreaks(
     ) if value is not None}
     section = _augmentation_section(augmentation, flat)
     adversarial = augmentation_kinds.resolve(section, "adversarial")
-    if adversarial is None:
+    natural = augmentation_kinds.resolve(section, "natural")
+    if adversarial is None and natural is None:
         return pd.DataFrame()
 
     if inputs is None:
@@ -580,20 +590,32 @@ def generate_jailbreaks(
     inputs["sample_id"] = row_ids(inputs, "prompt")
 
     client = ModelClient.create(model or default_model_for_role("uncensored_gen"))
-    return run_augmentation(
-        _of_entry_types(inputs, adversarial["entry_types"]),
-        jailbreak_pool.technique_pool(adversarial),
-        client=client, translation_model=translation_model,
-        out_path=Path(output_path) if output_path else paths.jailbreaks_csv(data_dir),
-        manifest_path=Path(manifest_path) if manifest_path else None,
-        benign_path=Path(benign_path) if benign_path else paths.benign_csv(data_dir),
-        prompt_dir=prompt_dir, seed=seed,
-        rounds=augmentation_kinds.rounds_of(adversarial),
-        family_weights=adversarial["family_weights"] or None,
-        layer_rates=adversarial["layer_rates"] or None,
-        auto_generate_benign=auto_generate_benign, batch_size=batch_size,
-        resume=resume, verbose=verbose, read_back=read_back, label="jailbreak",
-    )
+    benign = Path(benign_path) if benign_path else paths.benign_csv(data_dir)
+
+    def run(kind: dict, out_path: Path, **kwargs) -> pd.DataFrame:
+        return run_augmentation(
+            _of_entry_types(inputs, kind["entry_types"]),
+            jailbreak_pool.technique_pool(kind),
+            client=client, translation_model=translation_model, out_path=out_path,
+            benign_path=benign, prompt_dir=prompt_dir, seed=seed,
+            rounds=augmentation_kinds.rounds_of(kind),
+            family_weights=kind["family_weights"] or None,
+            auto_generate_benign=auto_generate_benign, batch_size=batch_size,
+            resume=resume, verbose=verbose, **kwargs,
+        )
+
+    rows = pd.DataFrame()
+    if adversarial is not None:
+        rows = run(
+            adversarial,
+            Path(output_path) if output_path else paths.jailbreaks_csv(data_dir),
+            manifest_path=Path(manifest_path) if manifest_path else None,
+            layer_rates=adversarial["layer_rates"] or None,
+            read_back=read_back, label="jailbreak")
+    if natural is not None:
+        run(natural, Path(variations_path or paths.variations_csv(data_dir)),
+            read_back=False, label="variation")
+    return rows
 
 
 def _augmentation_section(augmentation: dict | None, flat: dict) -> dict:
@@ -763,10 +785,11 @@ def build_dataset(
 ) -> pd.DataFrame:
     """Merge all generated data into a single dataset.
 
-    Combines content moderation inputs, jailbreak variants, and output
-    responses from their saved CSVs on disk. Each CSV is copied in chunks
-    into a temporary file that then replaces the merged one; a column that
-    only some of them have is empty in the rows of the others.
+    Combines content moderation inputs, jailbreak variants, natural
+    variations and output responses from their saved CSVs on disk. Each CSV
+    is copied in chunks into a temporary file that then replaces the merged
+    one; a column that only some of them have is empty in the rows of the
+    others.
 
     The inputs are read from ``constitution_inputs_merged.csv``, which the
     seeded inputs stage writes, or else from the run's per-category
@@ -842,6 +865,11 @@ def build_dataset(
             logger.info("Jailbreaks: none found")
     elif verbose and include_jailbreaks:
         logger.info("Jailbreaks: file not found (%s)", jb_path)
+
+    # The natural variations the jailbreak stage writes beside its jailbreaks.
+    if has_rows(paths.variations_csv(data_dir)):
+        parts.append(Part(paths.variations_csv(data_dir), "natural_variation",
+                          label="Variations"))
 
     if include_outputs:
         resp_path = (Path(responses_path) if responses_path
@@ -1068,6 +1096,12 @@ def _jailbreaks_kwargs(ctx: RunContext) -> dict:
     )
 
 
+def _jailbreaks_files(ctx: RunContext) -> tuple[list[Path], dict]:
+    given = _params(ctx, "jailbreaks")
+    return [given.get("output_path") or paths.jailbreaks_csv(ctx.data_dir),
+            given.get("variations_path") or paths.variations_csv(ctx.data_dir)], {}
+
+
 def _build_kwargs(ctx: RunContext) -> dict:
     return dict(data_dir=ctx.data_dir, mode=ctx.dataset_type, verbose=ctx.verbose)
 
@@ -1091,7 +1125,7 @@ STAGES: dict[str, Stage] = {stage.name: stage for stage in (
           files=_paraphrase_files, recipe_kwargs=_paraphrase_kwargs),
     Stage("jailbreaks", "generate_jailbreaks",
           roles=(_GEN, ("translation", "translation")),
-          files=_one_file("jailbreaks", paths.jailbreaks_csv),
+          files=_jailbreaks_files,
           recipe_kwargs=_jailbreaks_kwargs),
     Stage("build", "build_dataset", roles=(),
           files=_one_file("build", paths.complete_dataset_csv),

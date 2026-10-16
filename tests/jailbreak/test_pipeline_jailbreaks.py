@@ -13,6 +13,8 @@ import pytest
 
 from redact.dataset import Manifest, content_id
 from redact.exceptions import PromptTooLongError
+from redact.jailbreak.augmentation import resolve
+from redact.jailbreak.pool import technique_pool
 from redact.llm_pipeline import LLMRequest
 from redact.llms.backends import ComputeConfig
 from redact.stages import generate_jailbreaks
@@ -29,9 +31,9 @@ _PURE_KIND = {"pure_only": True,
 
 
 def _pure(**kind) -> dict:
-    """The keywords of a run of pure obfuscations, ``kind`` given over its
-    adversarial kind."""
-    return dict(augmentation={"adversarial": {**_PURE_KIND, **kind}},
+    """The keywords of a run of pure obfuscations and no variations, ``kind``
+    given over its adversarial kind."""
+    return dict(augmentation={"adversarial": {**_PURE_KIND, **kind}, "natural": None},
                 auto_generate_benign=False, verbose=False)
 
 
@@ -351,8 +353,8 @@ def test_the_flat_keywords_plan_what_their_section_plans(tmp_path):
             inputs=_inputs(), output_path=flat, seed=5, pure_only=True,
             include_hacking=False, include_manipulation=False,
             include_requests=False, max_complexity=4, iterations=2,
-            sampling_probs={"requests": 0.1}, auto_generate_benign=False,
-            verbose=False)
+            sampling_probs={"requests": 0.1}, augmentation={"natural": None},
+            auto_generate_benign=False, verbose=False)
     generate_jailbreaks(
         inputs=_inputs(), output_path=section, seed=5, **_pure(
             max_complexity=4, iterations=2, layer_rates={"requests": 0.1}))
@@ -366,11 +368,12 @@ def test_a_flat_keyword_for_an_adversarial_kind_switched_off_raises(tmp_path):
                             augmentation={"adversarial": None}, pure_only=True)
 
 
-def test_without_the_adversarial_kind_no_jailbreak_is_written(tmp_path):
-    out = tmp_path / "jb.csv"
-    returned = generate_jailbreaks(inputs=_inputs(), output_path=out,
-                                   augmentation={"adversarial": None}, verbose=False)
-    assert returned.empty and not out.exists()
+def test_with_both_kinds_off_nothing_is_written(tmp_path):
+    returned = generate_jailbreaks(
+        inputs=_inputs(), output_path=tmp_path / "jb.csv",
+        variations_path=tmp_path / "var.csv",
+        augmentation={"adversarial": None, "natural": None}, verbose=False)
+    assert returned.empty and list(tmp_path.iterdir()) == []
 
 
 def test_entry_types_keep_the_inputs_of_those_types(tmp_path):
@@ -378,6 +381,81 @@ def test_entry_types_keep_the_inputs_of_those_types(tmp_path):
     df = generate_jailbreaks(inputs=inputs, output_path=tmp_path / "jb.csv", seed=1,
                              **_pure(entry_types=["benign"]))
     assert list(df["entry_type"]) == ["benign", "benign"]
+
+
+# --- the natural kind: variations beside the jailbreaks -------------------------
+
+
+def _mixed_inputs():
+    return pd.DataFrame({
+        "sample_id": ["given-1", None, None, None],
+        "prompt": [f"prompt number {i} about a topic." for i in range(4)],
+        "category": ["Cyber", "Cyber", "Fraud", "Fraud"],
+        "entry_type": ["harmful", "benign", "dual_use_benign", "benign"],
+    })
+
+
+def _both(tmp_path, **section):
+    """Run both kinds, pure, into ``tmp_path``; the two output paths."""
+    jailbreaks, variations = tmp_path / "jb.csv", tmp_path / "var.csv"
+    generate_jailbreaks(
+        inputs=_mixed_inputs(), output_path=jailbreaks, variations_path=variations,
+        seed=3, augmentation={"adversarial": _PURE_KIND, "natural": {"pure_only": True},
+                              **section},
+        auto_generate_benign=False, verbose=False)
+    return jailbreaks, variations
+
+
+def test_a_run_writes_its_jailbreaks_and_its_variations_each_with_its_sidecars(
+        tmp_path):
+    jailbreaks, variations = _both(tmp_path)
+    for out, stem in ((jailbreaks, "jb"), (variations, "var")):
+        assert len(pd.read_csv(out)) == len(_mixed_inputs())
+        for sidecar in ("manifest.jsonl", "state.jsonl", "coverage.csv"):
+            assert out.with_name(f"{stem}.{sidecar}").exists()
+    plan = Manifest(variations.with_name("var.manifest.jsonl")).load()
+    assert all(len(r["combination"]) == 1 for r in plan)
+    assert all(r["settings"] == {"exact_techniques": 1, "seed": 3} for r in plan)
+
+
+def test_a_variation_row_keeps_its_inputs_labels(tmp_path):
+    _, variations = _both(tmp_path)
+    inputs = _mixed_inputs()
+    ids = ["given-1", *(content_id(p) for p in inputs["prompt"][1:])]
+    rows = pd.read_csv(variations, keep_default_na=False)
+    by_prompt = {r["prompt"]: r for r in rows.to_dict("records")}
+    assert [by_prompt[p]["input_id"] for p in inputs["prompt"]] == ids
+    assert ([by_prompt[p]["entry_type"] for p in inputs["prompt"]]
+            == list(inputs["entry_type"]))
+    assert list(rows["sample_id"]) == [content_id(t) for t in rows["jailbreak"]]
+    assert not (rows["sample_id"] == rows["input_id"]).any()
+    natural = {fn.__name__ for fn in technique_pool(resolve(
+        {"natural": {"pure_only": True}}, "natural"))}
+    assert set(rows["technique"]) <= natural
+
+
+def test_a_natural_only_run_writes_variations_and_no_jailbreak(tmp_path):
+    jailbreaks, variations = _both(tmp_path, adversarial=None)
+    assert not jailbreaks.exists()
+    assert len(pd.read_csv(variations)) == len(_mixed_inputs())
+
+
+def test_the_natural_kind_takes_its_entry_types_and_iterations(tmp_path):
+    _, variations = _both(tmp_path, natural={
+        "pure_only": True, "entry_types": ["benign"], "iterations": 2})
+    rows = pd.read_csv(variations)
+    assert list(rows["entry_type"]) == ["benign"] * 4
+    assert sorted(rows["iteration"]) == [0, 0, 1, 1]
+
+
+def test_a_fresh_run_of_one_kind_leaves_the_others_files(tmp_path):
+    jailbreaks, variations = _both(tmp_path)
+    before = variations.read_bytes()
+    generate_jailbreaks(
+        inputs=_mixed_inputs(), output_path=jailbreaks, seed=4, resume=False,
+        augmentation={"adversarial": _PURE_KIND, "natural": None},
+        auto_generate_benign=False, verbose=False)
+    assert variations.read_bytes() == before
 
 
 # --- the inputs of the run ------------------------------------------------------
@@ -605,7 +683,7 @@ def _llm_run(tmp_path, monkeypatch, plan, backend, **kwargs):
     inputs = pd.DataFrame({"prompt": prompts, "category": ["Cyber"] * len(prompts),
                            "entry_type": ["harmful"] * len(prompts)})
     generate_jailbreaks(inputs=inputs, output_path=out, model=GEN, resume=True,
-                        verbose=False, **kwargs)
+                        augmentation={"natural": None}, verbose=False, **kwargs)
     return out
 
 

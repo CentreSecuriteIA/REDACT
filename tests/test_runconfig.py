@@ -610,7 +610,13 @@ def _seed_inputs(data_dir):
     )
 
 
-def test_run_pipeline_eval_jailbreaks_and_build(tmp_path):
+def test_run_pipeline_eval_jailbreaks_and_build(tmp_path, monkeypatch):
+    from redact.llms import ModelClient
+    from tests.conftest import MockBackend, make_client
+
+    # The default natural kind may draw a technique that calls the model.
+    monkeypatch.setattr(ModelClient, "create",
+                        lambda m: make_client(MockBackend("a variation"), m))
     _seed_inputs(tmp_path)
     recipe = {
         "dataset_type": "eval",
@@ -629,18 +635,20 @@ def test_run_pipeline_eval_jailbreaks_and_build(tmp_path):
     params = {"jailbreaks": {"seed": 7}}
     summary = run_pipeline(recipe, params=params, verbose=False)
 
-    # jailbreaks stage produced one row per seeded input + a manifest with spec version
-    assert summary["stages"]["jailbreaks"]["counts"]["rows"] == 3
+    # jailbreaks stage produced a jailbreak and a variation per seeded input,
+    # counted together, + a manifest with spec version
+    assert summary["stages"]["jailbreaks"]["counts"]["rows"] == 6
     assert paths.jailbreaks_csv(tmp_path).exists()
+    assert paths.variations_csv(tmp_path).exists()
     jb_manifest = read_record("jailbreaks", tmp_path)
-    assert jb_manifest["counts"]["rows"] == 3
+    assert jb_manifest["counts"]["rows"] == 6
     assert "spec_version" in jb_manifest
     assert jb_manifest["params"]["pure_only"] is True  # augmentation recorded
 
     # build stage merged inputs + jailbreaks into the complete dataset + manifest
     assert paths.complete_dataset_csv(tmp_path).exists()
     assert read_record("build", tmp_path) is not None
-    assert summary["stages"]["build"]["counts"]["rows"] >= 3
+    assert summary["stages"]["build"]["counts"]["rows"] >= 9
 
 
 def test_a_training_run_reads_the_inputs_it_seeded(tmp_path, monkeypatch):
@@ -679,8 +687,8 @@ def test_a_training_run_reads_the_inputs_it_seeded(tmp_path, monkeypatch):
         telemetry.uninstall()
     rows = {stage: done["counts"]["rows"] for stage, done in summary["stages"].items()}
     # Three inputs: a response each, a paraphrase of each input and response,
-    # a jailbreak each.
-    assert rows == {"outputs": 3, "paraphrase": 6, "jailbreaks": 3}
+    # a jailbreak and a variation each.
+    assert rows == {"outputs": 3, "paraphrase": 6, "jailbreaks": 6}
 
 
 def test_run_pipeline_all_stages_mocked(tmp_path, monkeypatch):

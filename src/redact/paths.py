@@ -15,6 +15,7 @@ DATA_CACHE_DIRNAME = "Data_cache"
 SAMPLES_FILENAME = "samples.csv"
 
 JAILBREAKS_FILENAME = "jailbreaks.csv"
+VARIATIONS_FILENAME = "variations.csv"
 OUTPUT_RESPONSES_FILENAME = "output_responses.csv"
 COMPLETE_DATASET_FILENAME = "complete_dataset.csv"
 PARAPHRASES_INPUTS_FILENAME = "paraphrases_inputs.csv"
@@ -94,6 +95,11 @@ def category_csv(
 
 def jailbreaks_csv(root: str | Path | None = None) -> Path:
     return datasets(root) / JAILBREAKS_FILENAME
+
+
+def variations_csv(root: str | Path | None = None) -> Path:
+    """The natural variations of the inputs, which the jailbreak stage writes too."""
+    return datasets(root) / VARIATIONS_FILENAME
 
 
 def output_responses_csv(root: str | Path | None = None) -> Path:

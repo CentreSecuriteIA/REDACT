@@ -10,9 +10,11 @@ One difference is meant: ``turn``, ``complexity``, ``num_techniques`` and
 ``iteration`` used to print as ``0.0`` where a part of the build lacks the
 column, and print as integers now.
 
-One case of the fixture is not that commit's: without a merged inputs file
+Two cases of the fixture are not that commit's: without a merged inputs file
 (the ``standalone tree`` build, and the build count of the eval run) the
-build takes its inputs from the category files alone, with the ids they hold.
+build takes its inputs from the category files alone, with the ids they hold;
+and the rows of ``variations.csv``, which the jailbreak stage writes beside its
+jailbreaks, are a part of each build and are counted in each run.
 """
 
 import json
@@ -70,6 +72,29 @@ _JAILBREAKS = pd.DataFrame({
     "combination_spec_version": ["1.0"] * 4,
 })
 
+_VARIATIONS = pd.DataFrame({
+    "sample_id": ["var-1", "var-2", "var-3"],
+    "prompt": _TEXTS,
+    "category": ["Cyber", "Cyber", "Fraud"],
+    "turn": [0, 1, 2],
+    "accepted": [True, True, True],
+    "source": ["constitution"] * 3,
+    "subcategory": ["phishing", "", "cards"],
+    "entry_type": ["harmful", "benign", "harmful"],
+    "template_style": ["long", "long", "short"],
+    "input_id": ["in-1", "in-2", "in-3"],
+    "jailbreak": ["first input, with a comma!!", "SECOND INPUT\nOF TWO LINES",
+                  'Summarize: third "quoted" input, é'],
+    "technique": ["to_doubled_punctuation", "to_uppercase", "to_summarize"],
+    "technique_info": ["", "", ""],
+    "complexity": [0, 0, 0],
+    "num_techniques": [1, 1, 1],
+    "is_noop": [False, False, False],
+    "reasoning": ["", "", ""],
+    "iteration": [0, 0, 0],
+    "combination_spec_version": ["1.0"] * 3,
+})
+
 _OUTPUTS = pd.DataFrame({
     "input_id": ["in-1", "in-2", "in-3"],
     "input_prompt": _TEXTS,
@@ -118,8 +143,8 @@ def _write_stage_files(data_dir: Path, *, inputs: str = "merged", rows: bool = T
         inputs: ``"merged"`` writes the merged file of a training run,
             ``"tree"`` the category files of the standalone path, one of
             their rows rejected.
-        rows: False leaves the jailbreaks, the outputs and the paraphrased
-            inputs with a header and no row.
+        rows: False leaves the jailbreaks, the variations, the outputs and
+            the paraphrased inputs with a header and no row.
     """
     datasets = paths.datasets(data_dir)
     datasets.mkdir(parents=True)
@@ -133,6 +158,7 @@ def _write_stage_files(data_dir: Path, *, inputs: str = "merged", rows: bool = T
             part.to_csv(datasets / category / "samples.csv", index=False)
     keep = slice(None) if rows else slice(0)
     _JAILBREAKS.iloc[keep].to_csv(paths.jailbreaks_csv(data_dir), index=False)
+    _VARIATIONS.iloc[keep].to_csv(paths.variations_csv(data_dir), index=False)
     _OUTPUTS.iloc[keep].to_csv(paths.output_responses_csv(data_dir), index=False)
     paraphrased_inputs = _PARAPHRASED_INPUTS.iloc[keep]
     if not rows:
@@ -202,7 +228,7 @@ def test_a_build_reads_no_part_whole(tmp_path, monkeypatch):
     returned = build_dataset(data_dir=tmp_path, verbose=False, read_back=False)
     assert returned.empty and len(returned.columns) == 0
     assert len(_complete(tmp_path)) == 1 + len(_INPUTS) + len(_JAILBREAKS) + len(
-        _OUTPUTS) + 3      # the header, and three accepted paraphrases
+        _VARIATIONS) + len(_OUTPUTS) + 3    # the header, three accepted paraphrases
 
 
 def test_a_build_returns_the_rows_of_its_file_by_default(tmp_path):
@@ -213,8 +239,8 @@ def test_a_build_returns_the_rows_of_its_file_by_default(tmp_path):
     on_disk = pd.read_csv(paths.complete_dataset_csv(tmp_path))
     pd.testing.assert_frame_equal(returned, on_disk)
     assert set(returned["dataset_type"]) == {
-        "content_moderation_input", "jailbreak", "content_moderation_output",
-        "content_moderation_paraphrase"}
+        "content_moderation_input", "jailbreak", "natural_variation",
+        "content_moderation_output", "content_moderation_paraphrase"}
 
 
 @pytest.mark.parametrize("mode", ["training", "eval"])
