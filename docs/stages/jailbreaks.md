@@ -125,7 +125,9 @@ The plan is frozen. A resumed kind reuses its manifest and runs the planned
 units its ledger does not record. A changed augmentation section, a changed
 `seed`, and inputs added since the plan take effect only with
 `resume: false`, which removes that kind's CSV, `.cut` file, ledger, plan and
-coverage table, then plans again. A kind that is off is not touched.
+coverage table, then plans again. A resume whose plan lacks some of the
+inputs (accepted after the plan was made) logs a WARNING that counts them and
+names `resume=False`. A kind that is off is not touched.
 
 ## Rejected and failed units
 

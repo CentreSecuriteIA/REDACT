@@ -79,6 +79,8 @@ def run_augmentation(
     Resume: completion is a sidecar ``*.state.jsonl`` ledger keyed
     ``(input_id, iteration)``; ``resume=True`` reuses the plan and skips its
     finished units, ``resume=False`` clears the output, ledger and plan first.
+    A reused plan runs as it was made: an input it does not hold, accepted
+    after it was made, gets no unit, and a WARNING counts those inputs.
 
     Returns:
         The rows of ``out_path``, or an empty frame when ``read_back`` is False.
@@ -121,7 +123,8 @@ def run_augmentation(
     completed = resume_state(
         ledger, resume=resume, artifact=out_path, manifest=manifest)
 
-    if resume and man_path.exists():
+    reused = resume and man_path.exists()
+    if reused:
         if verbose:
             logger.info("Reusing existing manifest: %s", man_path)
     else:
@@ -139,19 +142,28 @@ def run_augmentation(
     position = dict(zip(inputs["sample_id"], range(len(inputs))))
     prompts = inputs["prompt"]
 
-    # One pass over the plan, for the numbers in the log lines and for whether
-    # a pending unit's techniques need benign data: read off the plan, not the
-    # pool, since a plan made with another pool still replays.
+    # One pass over the plan, for the numbers in the log lines, for whether
+    # a pending unit's techniques need benign data (read off the plan, not the
+    # pool, since a plan made with another pool still replays), and for the
+    # inputs a reused plan does not hold.
     planned = total = written = 0
     needs_benign = False
-    if verbose or auto_generate_benign:
+    unplanned = set(position) if reused else set()
+    if verbose or auto_generate_benign or reused:
         for plan_row in manifest:
             planned += 1
+            unplanned.discard(str(plan_row["sample_id"]))
             if is_pending(plan_row, position, completed):
                 total += 1
                 needs_benign = needs_benign or any(
                     getattr(registry.get(name), "requires_benign", False)
                     for name in plan_row["combination"])
+    if unplanned:
+        logger.warning(
+            "%s: %d of the %d inputs are not in the plan %s, which a resume "
+            "keeps as it was made; they were accepted after it, and get no "
+            "unit. Run with resume=False to plan every input again (the stage "
+            "starts over).", label, len(unplanned), len(position), man_path.name)
     benign_data = None
     if auto_generate_benign and needs_benign:
         benign_data = get_or_generate_benign_data(

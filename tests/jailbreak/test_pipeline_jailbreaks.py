@@ -1062,3 +1062,23 @@ def test_a_capturing_client_files_a_units_calls_under_its_sample_id(
     }
     assert not (log_dir / root / "attempt_0").exists()
     assert not (log_dir / content_id("zq1")).exists()
+
+
+def test_a_resume_warns_of_the_inputs_its_kept_plan_leaves_out(tmp_path, caplog):
+    out, first = tmp_path / "jb.csv", _inputs().head(3)
+    generate_jailbreaks(inputs=first, output_path=out, seed=1, **PURE_KW)
+    with caplog.at_level("WARNING", logger="redact.jailbreak.pipeline"):
+        again = generate_jailbreaks(inputs=_inputs(), output_path=out, seed=1,
+                                    resume=True, **PURE_KW)
+    assert len(again) == len(first)     # the kept plan: the new inputs are not run
+    (warning,) = [r.getMessage() for r in caplog.records]
+    assert "2 of the 5 inputs" in warning and "resume=False" in warning
+
+
+def test_a_resume_whose_plan_holds_every_input_does_not_warn(tmp_path, caplog):
+    out = tmp_path / "jb.csv"
+    generate_jailbreaks(inputs=_inputs(), output_path=out, seed=1, **PURE_KW)
+    with caplog.at_level("WARNING", logger="redact.jailbreak.pipeline"):
+        generate_jailbreaks(inputs=_inputs().head(3), output_path=out, seed=1,
+                            resume=True, **PURE_KW)
+    assert caplog.records == []
