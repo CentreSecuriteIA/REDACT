@@ -869,13 +869,41 @@ class TestCopies:
         plan = _plan([a, twin], 24.0, 2, copies={twin: 1})
         assert [(fp.devices, fp.copies) for fp in plan.footprints] == [((0,), 1)] * 2
 
-    def test_a_tensor_parallel_engine_gets_no_auto_copies(self, registered):
+    def test_a_tensor_parallel_engine_gets_a_copy_on_each_pair_of_idle_cards(
+            self, registered):
+        """Planned, not yet loaded end to end on a GPU."""
         big = registered("_cp_tp", hf_model_id="org/cptp", vram_gb=40.0, min_gpus=2)
         plan = _plan([big], 48.0, 4)
+        fp = plan.footprints[0]
+        assert (fp.devices, fp.copies, fp.planned_utilization) == ((0, 1, 2, 3), 2, 0.9)
+        assert (plan.fits, plan.gpus_required) == (True, 4)
+        assert "-> x2 copies (data_parallel_size=2), each on 2 cards" in plan.explain()
+        assert "idle" not in plan.explain()
+
+    def test_one_idle_card_is_no_copy_of_a_tensor_parallel_engine(self, registered):
+        big = registered("_cp_tp_odd", hf_model_id="org/cpto", vram_gb=40.0, min_gpus=2)
+        plan = _plan([big], 48.0, 3)
         assert (plan.footprints[0].devices, plan.footprints[0].copies) == ((0, 1), 1)
         assert plan.fits and plan.gpus_required == 2
-        assert ("  note: cards 2,3 are idle: only a single-GPU vLLM engine gets "
-                "copies") in plan.explain()
+        assert ("  note: card 2 is idle: a copy of _cp_tp_odd needs 2 idle cards"
+                in plan.explain())
+
+    def test_copies_a_tensor_parallel_engine_has_no_cards_for_go_to_the_next(
+            self, registered):
+        """The single-GPU engine takes card 2, the card with the most room,
+        and leaves the tensor-parallel engine one idle card: too few for a
+        copy, so the single-GPU engine has a copy there. With a third card
+        free the tensor-parallel engine has the copy."""
+        big = registered("_cp_tp_first", hf_model_id="org/cptf", vram_gb=40.0,
+                         min_gpus=2)
+        small = registered("_cp_tp_small", hf_model_id="org/cpts", vram_gb=5.0)
+        four = _plan([big, small], 48.0, 4)
+        assert [(fp.devices, fp.copies) for fp in four.footprints] == [
+            ((0, 1), 1), ((2, 3), 2)]
+        assert "idle" not in four.explain()
+        five = _plan([big, small], 48.0, 5)
+        assert [(fp.devices, fp.copies) for fp in five.footprints] == [
+            ((0, 1, 3, 4), 2), ((2,), 1)]
 
     def test_given_copies_of_a_tensor_parallel_engine_take_its_cards_each(
             self, registered):

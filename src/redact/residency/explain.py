@@ -119,11 +119,12 @@ def _idle_note(plan: "ResidencyPlan") -> str | None:
     idle = [str(d) for d in range(plan.gpus_available) if d not in used]
     if not idle:
         return None
-    first = next((fp for fp in engines if fp.min_gpus == 1), None)
-    if first is None:
-        why = "only a single-GPU vLLM engine gets copies"
-    elif any(fp is first for fp in plan.oversized):
-        why = f"{first.model} does not fit its card, so a copy would not either"
+    first = engines[0]
+    if any(fp is first for fp in plan.oversized):
+        cards = "cards" if first.min_gpus > 1 else "card"
+        why = f"{first.model} does not fit its {cards}, so a copy would not either"
+    elif len(idle) < first.min_gpus:
+        why = f"a copy of {first.model} needs {first.min_gpus} idle cards"
     else:
         why = (f"{first.model} is limited to {first.copies} "
                f"{'copy' if first.copies == 1 else 'copies'}")
