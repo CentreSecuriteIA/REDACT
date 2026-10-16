@@ -4,9 +4,9 @@
 
 A modular, extensible pipeline for automated red teaming dataset generation. Built from lessons learned across multiple BELLS-O dataset iterations (content moderation input/output, jailbreaks). Designed to be reusable beyond red teaming — applicable to any synthetic data generation task.
 
-The library generates, checks, filters, and stores samples across configurable harm categories. It is built to be model-agnostic (API or local vLLM), prompt-agnostic (prompts are external JSON files), and category-agnostic (new categories require only new prompt files and a runner script).
+The library generates, checks, filters, and stores samples across configurable harm categories. It is built to be model-agnostic (API or local vLLM), prompt-agnostic (prompts are external JSON files), and category-agnostic (a new category is a taxonomy entry). The product goal: a taxonomy and a task in, a dataset out, with defaults rather than settings.
 
-**Prompts are not bundled in public releases for safety reasons.** The `prompts/` directory will be redacted or replaced with documented placeholders before open-sourcing.
+Prompts and template files ship with the library. A `prompt_dir` overlays them file by file (`scripts/scaffold_prompts.py` writes an editable copy).
 
 ---
 
@@ -16,13 +16,15 @@ The library generates, checks, filters, and stores samples across configurable h
 REDACT/
 ├── src/
 │   └── redact/                      # Main package
-│       ├── __init__.py              # Config, seed, get_output_dir(), subpackage imports
-│       ├── types.py                 # Shared dependency-free types (EntryType) — avoids circular imports
-│       ├── paths.py                 # Single source of truth for on-disk layout (data_dir → all default paths)
+│       ├── __init__.py              # Logging contract, .env load, set_seed, re-exports with __all__
+│       ├── types.py                 # EntryType, ALL_ENTRY_TYPES; imports nothing from the package
+│       ├── paths.py                 # On-disk layout: get_output_dir(), every file under a data_dir, package resource dirs
+│       ├── stages.py                # The fronts (generate_*, build_dataset), RunContext, Stage, STAGES
+│       ├── recipe.py                # load_recipe, load_params, serving_of, augmentations_of, resolve_role
+│       ├── driver.py                # run_pipeline; run records (record_path/write_record/read_record); file_counts
 │       ├── telemetry.py             # Run trace + cost roll-up: JSONL sink (always on) / W&B, GPU rates, stage labels
-│       ├── pipelines.py             # High-level pipeline functions (one data_dir root, models by role)
-│       ├── runconfig.py             # Config-driven runs: recipe + input-params + per-stage run manifests
-│       ├── exceptions.py            # Custom exception hierarchy
+│       ├── pipelines.py, runconfig.py # Re-export shims of stages / recipe+driver, kept one release
+│       ├── exceptions.py            # RedactError, PromptTooLongError
 │       ├── py.typed                 # PEP 561 type marker
 │       │
 │       ├── llms/                    # LLM abstraction layer (model-agnostic)
@@ -38,12 +40,14 @@ REDACT/
 │       │   ├── router.py            # Plain calls over a client: generate_sample / batch_generate_samples, plus assert_single_sample_per_call
 │       │   ├── wrappers.py          # RateLimiter, BatchCaller (parallel/sequential fan-out) — both take a finished backend
 │       │   ├── observe.py           # The telemetry emit hook, and nothing else — keeps llms/ dependency-free
+│       │   ├── aio.py               # One event loop on a daemon thread for every async model call
+│       │   ├── progress.py          # ProgressReporter: throttled progress ticks for client.generate(progress=...)
 │       │   ├── prompting/           # Prompts in, samples out: prompts.py (load + overlay resolution + PromptTemplate + format instructions), extraction.py (parse replies), scaffold.py (write an editable tree)
 │       │   └── model_config.py      # Model registry (RPM, backend_type, capability flags, roles)
 │       │
 │       ├── llm_pipeline/            # Between the stages and llms/: reads replies to decide the next call
 │       │   ├── request.py           # LLMRequest — a pending call a generator yields; may carry its client
-│       │   ├── drive.py             # drive_sync, drive_generators — round loop, one batch per client per round
+│       │   ├── drive.py             # drive_sync (one generator), drive_generators (round loop), drive_units (a pool topped up from a lazy source), pool_size
 │       │   └── check.py             # is_accepted, check_sample, batch_check_samples, checked() and extracted() retry steps
 │       │
 │       ├── residency/               # GPU planning for local models: footprint, placement, plan, explain, lifecycle (preload/unload), phases (plan per stage)
@@ -60,13 +64,13 @@ REDACT/
 │       │
 │       ├── dataset/                 # Rows on disk: identity, the two sidecar files, resume, the per-category tree
 │       │   ├── identity.py          # content_id (the content hash of a text), row_id / row_ids (a row's id)
-│       │   ├── rows.py              # The rows of one CSV: append_rows (one synced write), read_rows, iter_rows, count_rows, keys_in
+│       │   ├── rows.py              # The rows of one CSV: append_rows (one synced write), read_rows, iter_rows, count_rows, has_rows, keys_in; write_concat over Parts (one CSV from several)
 │       │   ├── sidecar.py           # JsonlSidecar, Ledger (*.state.jsonl, the finished units), Manifest (*.manifest.jsonl, the planned units)
 │       │   ├── resume.py            # resume_state (lock, check, cut back, takeover), release_lock
 │       │   ├── save.py              # commit / CommitBuffer: a save (rows, then acks)
 │       │   ├── drop.py              # drop_units: a fresh run of part of a stage
 │       │   ├── categories.py        # The per-category tree {category}/samples.csv: append_samples, merge_all, merge_inputs, take_per_group
-│       │   ├── taxonomy.py          # Taxonomy and seed file loading, category iteration
+│       │   ├── taxonomy.py          # create_taxonomy, taxonomy and seed file loading, category iteration
 │       │   └── loading.py           # HuggingFace dataset loading
 │       │
 │       ├── constitution/            # Constitution generation for classifiers
@@ -113,6 +117,8 @@ REDACT/
 │       │
 │       ├── configs/                 # Configuration data (package data)
 │       │   ├── content_moderation_input.json
+│       │   ├── llm/                 # models.json (the registry), roles.json, gpu_pricing.json
+│       │   ├── runs/                # Example recipes (eval_example, training_example) + params_example.json
 │       │   ├── jailbreak/
 │       │   │   ├── combination_spec.json  # Layers, families, compatibility rules, per-technique complexity (source of truth for sampling)
 │       │   │   ├── hacking/
@@ -133,7 +139,7 @@ REDACT/
 │       │       ├── cognitive_techniques.json  # Cognitive hacking technique definitions (editable)
 │       │       └── personas.json              # Named persona archetypes (editable)
 │       │
-│       └── prompts/                 # [REDACTED IN PUBLIC RELEASE]
+│       └── prompts/                 # Prompt JSON per pipeline/category (ships with the library)
 │           ├── input/               # Content moderation input-side prompts
 │           ├── output/              # Output generation + its quality checker
 │           ├── paraphrase/          # generation/ + check/ (fingerprint removal)
@@ -145,8 +151,7 @@ REDACT/
 │
 ├── tests/                           # Test suite
 ├── notebooks/                       # Walkthroughs: eval_pipeline, training_pipeline, content_moderation, jailbreak_augmentation
-├── scripts/                         # run.py (recipe → pipeline), inspect_run.py (summarize manifests), scaffold_prompts.py (placeholder prompts/ tree for release)
-├── src/redact/configs/runs/         # Example recipe + input-params JSON
+├── scripts/                         # run.py (recipe → run_pipeline), inspect_run.py (print run records), scaffold_prompts.py (editable prompt overlay), download_models.py
 ├── Datasets/                        # Generated output (gitignored)
 ├── Data_cache/                      # Intermediate cache (gitignored)
 ├── pyproject.toml                   # Build config and dependencies
@@ -157,6 +162,20 @@ REDACT/
 ---
 
 ## Module Details
+
+### Top level — `stages.py`, `recipe.py`, `driver.py`
+
+A stage function (a **front**) may be called alone, from a notebook or a test; everything about a *run* (serving, residency, telemetry, run records, counting) lives in the driver, which reads what it needs about each stage from one table.
+
+**Fronts** (`stages.py`): `generate_constitution`, `generate_inputs`, `generate_outputs`, `generate_jailbreaks`, `generate_paraphrases`, `build_dataset`. Each takes `data_dir` (the working root; every path derives from it through `paths.py`), a model name per role (`None` is the registry role's default), `prompt_dir`, `resume` (default `True`), `verbose`, `read_back`, and its own tunables. A front resolves its inputs (the frame given, else `dataset.merge_inputs(data_dir)`), its clients (`ModelClient.create`) and its output path (`paths.*(data_dir)` unless an `*_path` override is given), then calls its core: `ConstitutionPipeline.run`, `InputPipeline.run_from_constitution` or `run_standalone_inputs`, `run_output_generation`, `jailbreak.pipeline.run_augmentation` (once per augmentation kind), `run_paraphrase_target`, `dataset.write_concat`. The core owns the manifest, the ledger, `resume_state` and `CommitBuffer`, and returns the artifact's rows, or an empty frame with `read_back=False`. Two fronts differ: `generate_inputs` reads the seeded tree back with `merge_all` and writes `constitution_inputs_merged.csv`, the hand-off `build_dataset` reads; `generate_paraphrases` returns `{"inputs": df, "outputs": df}`.
+
+**The `Stage` table**: `STAGES` maps each recipe stage name, in run order (`constitution`, `inputs`, `outputs`, `paraphrase`, `jailbreaks`, `build`), to a frozen `Stage(name, front, roles, files, recipe_kwargs)`: the front's name, looked up on `redact` when the stage runs (`Stage.run`); the `(recipe role, registry role)` pairs it calls; `files(ctx)`, the CSVs that hold its rows and the column values a counted row holds; and `recipe_kwargs(ctx)`, what the run passes the front from the recipe. `Stage.kwargs(ctx)` lays the params file's entry over those and raises for a key the front does not take or one the run passes itself; `run_pipeline` checks every listed stage's params before the first runs. `RunContext` is what one run hands its stages: `data_dir`, `dataset_type`, `models` (recipe role → name), `prompt_dir`, `taxonomy`, `taxonomy_dir`, `params`, `augmentations` (both kinds resolved), `resume`, `verbose`. A new stage is a front plus a row.
+
+**Recipe** (`recipe.py`): `load_recipe(path | dict)` reads and checks the keys: `dataset_type` (`"eval"`: standalone inputs, no constitution; `"training"`: inputs seeded from the constitution saved under `data_dir`, which must exist), `data_dir`, `stages` (default `["inputs", "outputs", "jailbreaks", "build"]`; `[]` runs nothing; an unknown or repeated name raises, so does `constitution` in an eval recipe), `models`, `taxonomy`/`taxonomy_dir`/`prompt_dir`, `augmentations` (`augmentations_of`, see the jailbreak section), `params_file` (relative to the recipe) and `resume`. A role of `models` (`gen`, `check`, `translation`, `constitution`, `paraphraser`, `paraphrase_check`) is a registry name, `null` for the role's default, or an object `{name, backend_type, copies, workers}` that also says how the model is served; `serving_of` checks it against the registry (`copies` only for a vLLM setup, `workers` only for an API one) and one model is served one way per run. `load_params` reads the params file: each front's kwargs under its stage's name. `resolve_role` gives the models a role stands for, as its stage resolves them: `check` left out is `gen`'s model, `paraphraser` may be `"distribution"` (every paraphraser), and `translation` is no model when no augmentation kind draws a translation technique.
+
+**Driver** (`driver.py`): `run_pipeline(recipe, params=None, verbose=True, data_dir=None)` builds the `RunContext`, checks the params, installs telemetry, logs the prompt overlay (`report_prompt_sources`), sets the run's serving (`capabilities.set_run_serving`) and plans residency per stage (`residency.plan_phases`; a plan that does not fit is logged, never fatal). Then, per stage: it enters the stage's phase (unloads the engines the stage's plan leaves out, preloads the stage's local models and the next stage's when they fit beside them), runs `stage.run(read_back=False, **stage.kwargs(ctx))` inside `telemetry.stage(name)`, counts rows from `stage.files(ctx)` (`file_counts`; no stage reads its rows back) and writes the run record `{data_dir}/Datasets/{stage}.run.json` (`write_record`: `stage`, `timestamp`, `params`, `models`, `counts`, `sources`, `serving`; the `jailbreaks` record adds `spec_version` and the resolved `augmentation`). Its `finally` clears the serving, joins the preload threads, unloads every local engine and rolls telemetry up, after a failed stage too, without masking the stage's error. It returns `{dataset_type, data_dir, stages: {name: {counts, manifest}}, serving, telemetry}`, plus `residency` and `trace` when present; `"manifest"` there is the record's path, a key kept by that name. `scripts/run.py RECIPE [--params P] [--data-dir D] [--quiet|--debug]` is the CLI (it configures logging; SIGTERM exits through the `finally`, so engines are released); `scripts/inspect_run.py DATA_DIR` prints each record. `redact.pipelines`, `redact.runconfig` and the names `manifest_path`/`write_manifest`/`read_manifest` are aliases kept for one release.
+
+**Package root**: `__init__.py` attaches a `NullHandler` to the `redact` logger and sets no level, loads `.env` from `get_output_dir()` (its values win over the shell's) before the subpackages import, and lists its re-exports in `__all__`. Importing seeds nothing; `set_seed(seed=42)` seeds `random` and `numpy` when the caller asks. `exceptions.py` holds `RedactError` and `PromptTooLongError(RedactError)`, which a backend raises for a prompt over the model's context (see `llm_pipeline/` below); elsewhere the library raises built-in errors.
 
 ### `llms/` — LLM Abstraction Layer
 
@@ -180,27 +199,27 @@ The core abstraction. Everything above this layer calls a unified interface and 
 
 **`prompting/`**: `load_prompt(pipeline, category, prompt_dir=None)` reads a prompt JSON, preferring a user override **per file** over the packaged copy. `PromptTemplate` renders it in two stages — `system_prompt`/few-shot fixed once at construction from build-time kwargs, `template` rendered fresh each call from call-time kwargs — so a checker validating many samples with the same system prompt builds one instance and calls it once per sample instead of re-rendering an identical system prompt every time (what `content_moderation/checker.py`'s four checker-builders used to hand-roll independently). `build_messages()` is the one-shot special case (construct and call together, same kwargs for both stages) that covers every other real caller. `format_style=` (one of `llms.prompting.EXTRACTION_STYLES`) appends the matching multi-sample output-format instruction (loaded from `prompts/format_instructions/{style}/`, not a hardcoded string) to `system_prompt` automatically.
 
-**`conversation.py`**: Model-layer conversation primitives, shared so `jailbreak/` and `multi_turn/` reuse them without a cross-dependency. `LLMRequest` (model + messages; the engine's routing key) is **defined here** and re-exported from `jailbreak/protocol.py` for back-compat. `Step`/`Transcript` are a **typed step log** — visible turns (`message`/`reply`, ChatMessage-like, rendered via `as_messages()`) plus provenance events (`strategy`/`analysis`/`evaluation`) that are logged but never sent to models. `drive_sync` drives one generator with a blocking call fn (single-conversation path; the batched engine drives many).
+**`llm_pipeline/`** sits between the stages and `llms/` and imports only `redact.llms`. `LLMRequest(model, messages, ...)` is a pending call a generator yields; it may carry its own `client`, `max_tokens` and `internals_id`. `drive_sync` drives one generator with a blocking call; `drive_generators` drives many round by round, one batch per client per round; `drive_units` drives a pool of `(key, generator)` units topped up from a lazy source (the planned units of a stage), calling `on_done`/`on_error` per unit, and `pool_size(batch_size, *clients)` sizes that pool. A unit's own exception goes to `on_error`; a failed `generate()` or async request propagates and fails the run, except an async request's `PromptTooLongError`, which is raised inside its unit at the `yield` (so a stage fails that unit alone). `check.py` holds the verdict rule (`is_accepted`), `check_sample`/`batch_check_samples`, and the per-unit retry steps `checked()` (generate, check, regenerate with the verdict) and `extracted()` (generate until a reply parses).
 
 ---
 
-### `telemetry.py` + `llms/resources/` — what a run cost, and what fits on the GPU
+### `telemetry.py`, `llms/resources/`, `residency/` — what a run cost, and what fits on the GPU
 
 Both follow the same rule as the rest of the LLM layer: **instrument where the data exists, decide where the policy belongs.** `llms/` emits facts and stays dependency-free; the top level owns configuration, aggregation and export. No vendor SDK is ever imported from `llms/`.
 
 **`llms/observe.py`** is the emit hook and nothing else — `record(event)`, `set_emitter(fn)`, `set_stage(label)`, defaulting to a no-op so a bare `import redact.llms` costs one dict lookup and pulls in nothing. It's a module function rather than a method on `LLMBackend` because `vllm._engine()` (a module function — the engine is cached per *checkpoint*, not per backend instance) has to emit too. `record()` never raises (the emitter's exception is logged at DEBUG): a broken sink must not take down a working generation run. **Granularity contract: a `call` event is one real transport call, not one batch item** — a native vLLM pass over 32 prompts is a single event with `n_items=32`. This is exactly why telemetry can't hang off `on_complete`, which fires per item and would count one shared engine pass 32 times.
 
-**`telemetry.py`** owns the other half. `install(data_dir)` registers the emitter; `stage(label)` is a context manager labelling everything inside it (a plain module global, not a `ContextVar` — `ThreadPoolExecutor` doesn't propagate context to workers, so a ContextVar would read empty for every call `BatchCaller` fans out). `REDACT_TRACE=jsonl|wandb|off` picks the sink, read through `Config` next to `REDACT_OUTPUT_DIR`. **JSONL is the default and always on**: `<data_dir>/Datasets/<run_id>.trace.jsonl`, the same vocabulary as the existing `.manifest.jsonl`/`.state.jsonl` sidecars, no account and no dependency, so the trace is already there when a run goes wrong. W&B is the only vendor adapter and only replays the same events, so the two can never disagree.
+**`telemetry.py`** owns the other half. `install(data_dir)` registers the emitter; `stage(label)` is a context manager labelling everything inside it (a plain module global, not a `ContextVar` — `ThreadPoolExecutor` doesn't propagate context to workers, so a ContextVar would read empty for every call `BatchCaller` fans out). `REDACT_TRACE=jsonl|wandb|off` picks the sink, read from the environment when `install()` runs. **JSONL is the default and always on**: `<data_dir>/Datasets/<run_id>.trace.jsonl`, the same vocabulary as the existing `.manifest.jsonl`/`.state.jsonl` sidecars, no account and no dependency, so the trace is already there when a run goes wrong. W&B is the only vendor adapter and only replays the same events, so the two can never disagree.
 
 **Logger compatibility is a hard constraint, not a nicety.** The library attaches only a `NullHandler` and sets no level — configuring logging is the *application's* call (`scripts/run.py` does `basicConfig` with `--quiet`/`--debug`). So the JSONL sink is a plain file writer, **never a `logging.Handler`**: attaching one to the `redact` root would hijack the caller's configuration and make the trace depend on their log level. Human-readable summaries *do* go through `getLogger("redact.telemetry")` at INFO, so the existing flags already control them. Nothing in `telemetry.py` calls `basicConfig()` or `setLevel()`, and a test asserts exactly that.
 
 **Two cost meters, because two different things are being bought.** API cost is tokens × price, per *model* (`price_per_1m_input`/`price_per_1m_output` on `APIConfig`). Local cost is engine **wall-clock lifetime** × GPU rate, per *checkpoint* — the GPU is leased whenever an engine is alive, so model load, CUDA-graph compile, KV preallocation and every gap for checker CPU work all count. That's why the lifetime timer lives with `_engine()` in `backends/vllm.py` (started on load, stopped in `clear_cache()`/`atexit`) and not on a backend instance: `venice-uncensored[vllm]` and `venice-paraphraser` share one load, so the cost centre is the engine cache key. Per-call duration is kept for *allocation* — distributing lifetime cost proportionally is what makes "is translation dominating this run?" answerable. Rates come from `configs/llm/gpu_pricing.json` (provider → GPU name → hourly USD), with the GPU detected via `nvidia-smi --query-gpu=name` (one line per device, so the name matches the table and the count is the device count); `REDACT_GPU_PROVIDER` selects the provider and defaults to `local` at rate 0. An unpriced GPU reports **time only** — a wrong rate is worse than no rate. Billing is on GPUs *rented*, since you rent the whole pod, with GPUs *used* reported alongside so idle capacity is visible.
 
-**`llms/resources/residency.py`** answers "does this fit?" before anything loads. `footprint(model)` resolves the **weights** as **declared → estimated → unknown**: the setup's `vram_gb` if set (weights only, total across its GPUs), otherwise `estimate.estimate()` from the checkpoint's HF config, otherwise unknown. The KV cache is always estimated on top (vLLM only), at the setup's `max_model_len` or else `estimate.DEFAULT_MAX_MODEL_LEN` (10,000 tokens, capped by the checkpoint's own maximum; the same value is passed to the engine at load), and the planning figure adds x1.1 + 0.6 GiB per GPU. `plan_residency(models, gpus=None, gib_per_gpu=None)` places each engine on a card and returns a `ResidencyPlan` (`groups`, `gpus_required`, `fits`, `problems`, `warnings`, `explain()`, `as_dict()`); pass `gpus`/`gib_per_gpu` to plan for a machine other than the detected one. What the placement models: models sharing a checkpoint are **one engine** and counted once; `gpu_memory_utilization` is an output: the vLLM engines on a card split 0.9 of it, each granted its need with overhead ((weights + KV) x1.1 + 0.6) plus an equal share of the spare, and `apply_plan()` hands that fraction to the load (`VLLMConfig` rejects one in `vllm_kwargs`), and a released engine keeps its share, which changes only through `apply_plan()`; a grant below that padded need is a problem and the plan does not fit; a model with `min_gpus > 1` (its `tensor_parallel_size`, which must match) claims whole devices; single-GPU vLLM engines are all planned on card 0, because nothing assigns a device at load time yet. **The plan describes what happens today: nothing is unloaded between stages, so every local model of a run is resident at once.** Models that cannot be resident together form further groups, and a plan with more than one group does not fit: it is logged at ERROR with the workaround (run those stages as separate `run_pipeline` invocations) and never aborts the run. The one place anything is unloaded is the paraphrase stage: when its paraphrasers cannot be resident together it releases their engines between them (keeping the check model and the engines other stages loaded): each is shut down through vLLM's shutdown hook where the installed version has one, then garbage-collected with `torch.cuda.empty_cache()`. That the card is actually returned is still to be confirmed on a GPU. The GPU count and card size come from `nvidia-smi` (torch is asked for the size only when `nvidia-smi` cannot give it, since asking torch starts CUDA in this process); with neither, the plan warns that placement was not checked. The plan is stored in the `residency` trace event and in `summary["residency"]`. Deferred to the driver script (the `TODO(driver script)` block at the top of the file): per-stage load and unload, applying the card assignment at load time, and replicas.
+**`residency/`** answers "does this fit?" before anything loads. `footprint(model)` resolves the **weights** as **declared → estimated → unknown**: the setup's `vram_gb` if set (weights only, total across its GPUs), otherwise `estimate.estimate()` from the checkpoint's HF config, otherwise unknown. The KV cache is always estimated on top (vLLM only), at the setup's `max_model_len` or else `estimate.DEFAULT_MAX_MODEL_LEN` (10,000 tokens, capped by the checkpoint's own maximum; the same value is passed to the engine at load), and the planning figure adds x1.1 + 0.6 GiB per GPU. `plan_residency(models, backend_types=None, *, gpus=None, gib_per_gpu=None, copies=None)` places the engines and returns a `ResidencyPlan` (`groups`, `gpus_required`, `fits`, `problems`, `warnings`, `explain()`, `as_dict()`); pass `gpus`/`gib_per_gpu` to plan for a machine other than the detected one. Models sharing a checkpoint are **one engine**. A single-GPU vLLM engine goes on the card with the most room, a tensor-parallel one (`min_gpus > 1`, matching its `tensor_parallel_size`) on untouched cards, numbered over those `CUDA_VISIBLE_DEVICES` leaves visible; idle cards take copies of the plan's first single-GPU vLLM engine (vLLM's `data_parallel_size`) unless the recipe gives `copies`. `gpu_memory_utilization` is an output: each engine is granted its padded need plus a share of its card's spare memory, and `apply_plan()` hands that grant and the cards to the load (`VLLMConfig` rejects one in `vllm_kwargs`); a grant below the padded need is a problem and the plan does not fit. **Per stage**: `plan_phases` makes one plan per stage (a `Phase`: its resident models and plan). An engine is resident from the first stage that calls it to the last; one kept for a later stage is unloaded for a stage it does not fit beside, and loaded again. The driver enters each phase in turn (see the top-level section): `unload_local(keep=...)` releases what the stage leaves out (through vLLM's shutdown hook where the installed version has one, else garbage collection), and everything is released when the run ends. The paraphrase stage also releases its paraphrasers' engines between them when they cannot be resident together. The GPU count and card size come from `nvidia-smi` (torch is asked for the size only when `nvidia-smi` cannot give it, since asking torch starts CUDA in this process); with neither, the plan warns that placement was not checked. The plans are stored in the `residency` trace event and in `summary["residency"]`. What is not done yet is the `TODO(driver script)` block in `residency/__init__.py`.
 
 **The KV-cache trap, and why estimation won.** vLLM preallocates `gpu_memory_utilization × total_VRAM` for weights *and* KV cache, so a naive `mem_get_info()` delta comes back as that fraction **regardless of model size** — measure the 3B debug model at `0.86` and you'd record "this 3B needs 86% of the card". Torch's own allocator would separate the weights out, but vLLM V1 runs its engine core in a separate process, so the parent never sees them. Since the number that mattered was either unusable or unobtainable — and is computable from config shapes anyway — the measure-and-cache loop was deleted in favour of `llms/resources/estimate.py`. `measure.py` still records `claimed_gib`/`weights_gib` for the introspection backend's load event (it loads in-process), and its `free_total_gib()` is the planner's fallback for the card size; no measurement feeds back into planning.
 
-**Preload.** `residency.preload()` warms local models on one background daemon thread (sequentially — concurrent loads compete for the same VRAM headroom) so a multi-minute 24B load overlaps with the constitution stage's Opus API calls instead of waiting behind it. `run_pipeline` calls it after reporting the plan, warming only the first group. **A failed preload logs at ERROR and records a `preload_failed` event, but never aborts the run**: an API-only stage is ledger-backed and its expensive output is saved as it goes, so finishing it beats killing it — the stage that actually needs the model fails on its own, at the point of use, with the cause already in the log. This is only safe because every transport cache uses **double-checked locking** (`vllm._engine`, `introspection._load`, both `_sdk_client`s): without it, a preload thread and the first real call missing together would each build an engine, putting two copies of a checkpoint on one card. A regression test spawns four threads and asserts the loader ran once.
+**Preload.** `residency.preload()` warms local models on one background daemon thread (sequentially — concurrent loads compete for the same VRAM headroom) so a multi-minute 24B load overlaps with the constitution stage's Opus API calls instead of waiting behind it. The driver calls it as it enters each stage, for that stage's models and the next stage's when they fit beside them. **A failed preload logs at ERROR and records a `preload_failed` event, but never aborts the run**: an API-only stage is ledger-backed and its expensive output is saved as it goes, so finishing it beats killing it — the stage that actually needs the model fails on its own, at the point of use, with the cause already in the log. This is only safe because every transport cache uses **double-checked locking** (`vllm._engine`, `introspection._load`, both `_sdk_client`s): without it, a preload thread and the first real call missing together would each build an engine, putting two copies of a checkpoint on one card. A regression test spawns four threads and asserts the loader ran once.
 
 ---
 
@@ -307,7 +326,7 @@ Generates structured category hierarchies for constitutional classifier training
 
 All prompts are stored as `.json` files in `src/redact/prompts/{pipeline}/{category}/`, loaded at runtime via `load_prompt(pipeline, category)` in `llms/prompting/prompts.py`. `load_prompt` resolves to the single `.json` in that directory, else `template.json`.
 
-**`prompt_dir` is an overlay, not a replacement.** Each prompt is read from the user's directory if present and from the packaged tree otherwise, so customizing one checker means copying one file — not forking all 33 and then silently missing every later improvement to the rest. `report_prompt_sources(prompt_dir)` logs the resulting picture once at startup (what is overridden, and any directory matching no packaged prompt — a typo that overrides nothing is otherwise invisible). `scripts/scaffold_prompts.py TARGET` writes an editable starting tree: real prompts by default, `--empty` for TODO skeletons whose key set mirrors each real file's. Pipeline names in use: `input` (e.g. `input/generation/standalone`, `input/generation/from_constitution/{style}`, `input/quality_check`, `input/category_check`), `output` (`output/generation`, `output/quality_check`), `paraphrase` (`paraphrase/generation`, `paraphrase/check`), `jailbreak` (per-technique: `scenario_generation`, `jailbreak_construction`, `extract_harmful`, `benign_generation`, `category_selection`, `rewrite_with_typos`, `synonym_substitution`, `translate`, `translate_retry`, `translate_check`, ...), `constitution` (one per entry type, flat), and `format_instructions` (`numbered`/`structured_qa` — not a chat prompt, a `{"instruction": "..."}` snippet `PromptTemplate`'s `format_style=` appends to another prompt's `system_prompt`).
+**`prompt_dir` is an overlay, not a replacement.** Each prompt is read from the user's directory if present and from the packaged tree otherwise, so customizing one checker means copying one file, and the rest keep the library's later improvements. `report_prompt_sources(prompt_dir)` logs the resulting picture once at startup (what is overridden, and any directory matching no packaged prompt — a typo that overrides nothing is otherwise invisible). `scripts/scaffold_prompts.py TARGET` writes an editable starting tree: real prompts by default, `--empty` for TODO skeletons whose key set mirrors each real file's. Pipeline names in use: `input` (e.g. `input/generation/standalone`, `input/generation/from_constitution/{style}`, `input/quality_check`, `input/category_check`), `output` (`output/generation`, `output/quality_check`), `paraphrase` (`paraphrase/generation`, `paraphrase/check`), `jailbreak` (per-technique: `scenario_generation`, `jailbreak_construction`, `extract_harmful`, `benign_generation`, `category_selection`, `rewrite_with_typos`, `synonym_substitution`, `translate`, `translate_retry`, `translate_check`, ...), `constitution` (one per entry type, flat), and `format_instructions` (`numbered`/`structured_qa` — not a chat prompt, a `{"instruction": "..."}` snippet `PromptTemplate`'s `format_style=` appends to another prompt's `system_prompt`).
 
 ```json
 {
@@ -322,12 +341,7 @@ All prompts are stored as `.json` files in `src/redact/prompts/{pipeline}/{categ
 }
 ```
 
-`category` and `pipeline` fields used to sit at the top of every file and were
-removed: nothing read them, `pipeline` restated the directory the file was
-already found in, and `category` had drifted into three conventions at once —
-16 files carried the literal string `"{Category}"`, a placeholder nothing ever
-rendered. The directory path *is* the identity; `load_prompt(pipeline,
-category)` is how it is addressed.
+A prompt file carries no `category` or `pipeline` field: its directory is its identity, addressed as `load_prompt(pipeline, category)`.
 
 `build_messages(config, **kwargs)` renders both `system_prompt` and `template` with the same kwargs (via `str.format_map`), so any placeholder works in either field. `seed_fields` is documentation only — render kwargs are whatever the caller passes.
 
@@ -343,58 +357,33 @@ pip install -e ".[vllm]"   # with vLLM support
 
 ## Usage
 
-Every public function takes one **`data_dir`** working root (all `Datasets/`/`Data_cache/` output
-derives from it via `paths.py`), a **role-defaulted `model`** (pass `None` → the registry role;
-constitution → Opus, generation → uncensored), and a single **`resume`** flag (default `True`).
-The public `backend` param was removed — a model name resolves to a ready-to-call `ModelClient` via `ModelClient.create()`.
+Every front takes one **`data_dir`** working root, a **role-defaulted model** per role (`None` is the registry role's default: constitution → `constitution_gen` (Claude Opus), generation and checking → `uncensored_gen`, translation → `translation`, paraphrase → `paraphraser`), `prompt_dir`, and **`resume`** (default `True`). A model name resolves through the registry (`llms/model_config.py`) to a `ModelClient`; for a custom endpoint, `register_model()` it.
 
 ```python
 from redact import (
     generate_constitution, generate_inputs, generate_outputs,
-    generate_jailbreaks, generate_paraphrases, build_dataset,
-    default_escalation_schedule,
+    generate_jailbreaks, generate_paraphrases, build_dataset, run_pipeline,
 )
 
 DATA_DIR = "./runs/training"
 
-# Training path: constitution-seeded inputs (Claude Opus → entries → prompts).
-# Constitution-seeded inputs auto-route to Datasets/constitution_inputs/.
+# Training: inputs seeded from a constitution; they land in Datasets/constitution_inputs/.
 constitution = generate_constitution(data_dir=DATA_DIR, num_taxonomy_categories=3)
 inputs = generate_inputs(data_dir=DATA_DIR, constitution_df=constitution, samples_per_entry=3)
 
-# Eval path: standalone meta-prompt inputs (DEPRECATED — emits DeprecationWarning, still
-# functional; prefer the constitution-seeded path above for better/adjustable coverage).
+# Eval: standalone meta-prompt inputs (deprecated, emits DeprecationWarning; the cheap path).
 inputs = generate_inputs(data_dir=DATA_DIR, samples_per_category=15, num_categories=3)
 
-jailbreaks = generate_jailbreaks(data_dir=DATA_DIR, inputs=inputs)   # plan → batched execute
+outputs = generate_outputs(data_dir=DATA_DIR, inputs=inputs)        # responses + output checker
+jailbreaks = generate_jailbreaks(data_dir=DATA_DIR, inputs=inputs)  # both augmentation kinds, defaults
+# TODO(augmentation docs): augmentation= examples, pending the overlay-semantics change.
+paraphrases = generate_paraphrases(data_dir=DATA_DIR, target="both")
+dataset = build_dataset(data_dir=DATA_DIR, mode="training")         # paraphrases merged in
 
-# Or escalate: each sample augmented 4× (1 technique → 2 → higher complexity → even higher)
-jailbreaks = generate_jailbreaks(
-    data_dir=DATA_DIR, inputs=inputs,
-    translation_model=None,                               # None → translation role (DeepSeek)
-    settings_per_iteration=default_escalation_schedule(),  # or a custom list[dict]
-)
-
-outputs = generate_outputs(data_dir=DATA_DIR, inputs=inputs)  # model responses + output checker
-
-# Paraphrase (fingerprint removal) — additive copies of base inputs + accepted base outputs.
-# K 1:1 calls round-robin over the `paraphraser` role; a SEPARATE meaning-preservation checker
-# (check→drop); deduped. Writes paraphrases_{inputs,outputs}.csv, resumable via a mapping file.
-paraphrases = generate_paraphrases(data_dir=DATA_DIR, target="both", paraphrases_per_sample=1)
-
-# Merge. mode="training" merges paraphrases into complete_dataset.csv; mode="eval" writes them
-# to a separate paraphrased.csv. Jailbreaks are only ever built from the base inputs.
-dataset = build_dataset(data_dir=DATA_DIR, mode="training")   # base + jailbreaks + outputs (+ paraphrases)
+summary = run_pipeline("src/redact/configs/runs/training_example.json")   # or scripts/run.py
 ```
 
-**Config-driven** — a whole run from a recipe (`dataset_type` `"eval"`/`"training"`) + input-params:
-
-```python
-from redact import run_pipeline
-summary = run_pipeline("src/redact/configs/runs/eval_example.json")   # or scripts/run.py
-```
-
-A model name resolves to a `ModelClient` via `ModelClient.create()`, and all model-name strings resolve through the registry in `llms/model_config.py`. Single-file `*_path` overrides (`output_path`, `jailbreak_path`, `benign_path`, `inputs_path`, `responses_path`, `manifest_path`) remain for power users; `taxonomy_dir`/`prompt_dir` relocate config/prompt inputs. For a genuinely custom endpoint, `register_model()` it (the backend resolves from the name) or construct a `VLLMBackend` and use it via the lower-level pipeline classes.
+`build_dataset(mode="eval")` writes the paraphrases to `paraphrased.csv` instead of merging them. The `*_path` overrides (`output_path`, `manifest_path`, `benign_path`, `inputs_path`, `outputs_path`, `jailbreak_path`, `responses_path`, ...) move one file; `taxonomy_dir`/`prompt_dir` relocate config and prompt inputs.
 
 ---
 
@@ -402,7 +391,7 @@ A model name resolves to a `ModelClient` via `ModelClient.create()`, and all mod
 
 - **Prompts are external** — No prompts hardcoded in library code. Adding a new category = adding a JSON file.
 - **Backends are swappable** — Switching from API to vLLM is a config change, not a code change.
-- **Data is per-category** — All output lands in `Datasets/{category}/` as CSV. Merging is explicit and on-demand.
+- **Inputs are per-category** — input samples land in `{category}/samples.csv` (seeded ones under `Datasets/constitution_inputs/`); every other stage writes one CSV under `Datasets/`. Merging is explicit (`build_dataset`).
 - **Checker reasoning feeds back to generator** — Rejection is not just a signal; the checker's reasoning is passed into the next generation call for directed improvement.
 - **`Data_cache/` is internal** — Intermediate artifacts (benign samples, partial batches) go here, never in `Datasets/`.
 - **Resume model — one modular sidecar system** — Every batched stage plans and resumes through the *same* two sidecar files, both built on `redact.dataset.JsonlSidecar`: a `<artifact>.manifest.jsonl` **plan** (`redact.dataset.Manifest`, one row per unit, written whole *before* generation) and a `<artifact>.state.jsonl` **ledger** (`redact.dataset.Ledger`, one record per *finished* unit). **A save is two synced appends** (`commit` / `CommitBuffer` in `dataset/save.py`): the rows of the finished units go to the output with `append_rows`, then their acks go to the ledger, and the last ack carries `_saved`, the size and a checksum of every file of the stage after that save. A unit is acked only once its rows are on disk, and a save counts only once its `_saved` line is. A new ledger opens with an empty `_saved` line, written before the first rows. **A resumed run reads the ledger alone.** `resume_state(ledger, resume=True, artifact=...)` takes the stage's lock, checks each output file against the size and checksum the ledger recorded, cuts off what a save that did not finish left behind, and returns the keys of the finished units. The bytes it cuts off are kept in `<file>.cut`, the ledger is cut back to its last `_saved` line, and the units of the unfinished save run again, so no unit ends with two sets of rows. It reads no row of the output. A file that is missing, shorter than recorded, or different in the last 4 kB before the recorded size stops the resume with a `RuntimeError` that names the remedies. A folder written before the ledger recorded sizes is taken over once: its output is read for the unit keys of its rows, and one ledger write acks them and records the sizes. **The lock** is `<ledger name>.lock` beside the ledger (`filelock`). It makes one process the writer of a stage from `resume_state` until the stage's `CommitBuffer` exits, or until `release_lock` for a run that finds nothing to save, and a second run on the same output is refused. Each save also checks that every file still has the size the ledger last recorded. `resume=False` starts over: the output, its `.cut` files and the ledger are removed, and the plan is written anew. A stage of several output files names their folder and the pattern they match (the seeded inputs: `artifact=folder, pattern="*/samples.csv"`), and a fresh run of one style of the seeded inputs removes that style's rows and acks alone (`drop_units`). The constitution stage names no output to `resume_state`, so its ledger is a plain one, with no lock, no sizes and nothing cut; it clears and reads its own CSVs. One rule about the model calls keeps an interrupted run honest as well: a failed batch **dispatch** propagates (it is the transport failing, not the units, so it must never be turned into acked rows — only a generator's own exception is isolated). Both files key on the *same* per-stage unit id: constitution `source_category::entry_type`; CM-input-from-constitution `(sample_description, entry_type, style)`; CM-output `input_id`; paraphrase / jailbreaks / conversations `(input_id, iteration)`; conversation-scoring `sample_id` (ledger only — it scores existing rows). The jailbreak stage keeps its manifest on a resumed run and streams its units from it, since its plan is sampled; the other stages write their manifest again from their inputs. **Only exception:** standalone meta-prompt input generation has no discrete idempotent units (open-ended toward a sample-count target) — no manifest, no ledger; it resumes by extending its CSVs and is now **deprecated** (emits `DeprecationWarning`) in favour of constitution-seeded generation, though still functional. When adding a stage, use `Manifest`, `Ledger`, `resume_state` and `CommitBuffer`, don't hand-roll `*.jsonl` read/write.
@@ -418,16 +407,9 @@ A model name resolves to a `ModelClient` via `ModelClient.create()`, and all mod
 
 ## Runner Scripts
 
-Each generation task has a runner script (see `jailbreak/` for examples). A runner:
+A run is a recipe (plus its params file) handed to `run_pipeline`, or to `scripts/run.py RECIPE`, which configures logging and prints the summary; `src/redact/configs/runs/` holds an eval and a training example. Each stage logs its acceptance counts and leaves a `{stage}.run.json` record; `scripts/inspect_run.py DATA_DIR` prints them.
 
-1. Selects backend and loads config
-2. Loads prompt JSON for the target category
-3. Runs generation loop with seed injection
-4. Calls checker on each sample
-5. Logs acceptance rate
-6. Saves accepted samples to `Datasets/{category}/samples.csv`
-
-Rejection rate is the primary quality signal. Sustained high rejection rate after N turns indicates either a bad prompt (improvable) or model capability ceiling (not improvable).
+Rejection rate is the primary quality signal. A sustained high rejection rate indicates either a bad prompt (improvable) or a model capability ceiling (not improvable).
 
 ---
 
@@ -463,12 +445,4 @@ Four reference projects informed this architecture. All located in `../reference
 
 ## Public Release Notes
 
-Before open-sourcing:
-- Redact or replace all files in `prompts/` with documented placeholders —
-  `scripts/scaffold_prompts.py TARGET_DIR` generates this starting tree
-  automatically (mirrors the real directory structure, redacts
-  system_prompt/template/instruction text, keeps category/pipeline/
-  seed_fields real so it round-trips through `build_messages()`); review its
-  output before publishing, it's a starting point, not a guarantee
-- Clear `Datasets/` and `Data_cache/`
-- Confirm no category-specific generation logic leaks harmful prompt content into code
+Prompts and template files ship with the library (`prompts/`, `configs/`); there is no redaction step. To change a prompt, overlay it: `scripts/scaffold_prompts.py TARGET_DIR` writes an editable copy of `prompts/` (`--empty` for TODO skeletons), and `prompt_dir=TARGET_DIR` reads each prompt from there when present. Before publishing a release, clear `Datasets/` and `Data_cache/`.

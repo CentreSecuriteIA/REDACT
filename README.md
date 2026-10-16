@@ -37,28 +37,30 @@ Requires Python 3.11+. See [pyproject.toml](pyproject.toml) for full dependency 
 (default `True`) makes every stage restartable.
 
 ```python
-from redact import generate_inputs, generate_jailbreaks, generate_outputs, generate_paraphrases, build_dataset
+from redact import (
+    generate_constitution, generate_inputs, generate_outputs,
+    generate_jailbreaks, build_dataset,
+)
 
-DATA_DIR = "./runs/eval"                           # one root for the whole run
-inputs = generate_inputs(data_dir=DATA_DIR, samples_per_category=15, num_categories=3)  # standalone*
-jailbreaks = generate_jailbreaks(data_dir=DATA_DIR, inputs=inputs)   # plan → batched execute
+DATA_DIR = "./runs/training"                       # one root for the whole run
+constitution = generate_constitution(data_dir=DATA_DIR, num_taxonomy_categories=3)
+inputs = generate_inputs(data_dir=DATA_DIR, constitution_df=constitution, samples_per_entry=3)
 outputs = generate_outputs(data_dir=DATA_DIR, inputs=inputs)         # responses + output checker
+jailbreaks = generate_jailbreaks(data_dir=DATA_DIR, inputs=inputs)   # jailbreaks + natural variations
 dataset = build_dataset(data_dir=DATA_DIR)                           # merge everything on disk
 ```
 
-> **\*Standalone input generation is deprecated** (still functional; emits `DeprecationWarning`).
-> Prefer **constitution-seeded** generation for better/more adjustable coverage:
-> `generate_inputs(data_dir=DATA_DIR, constitution_df=generate_constitution(data_dir=DATA_DIR, num_taxonomy_categories=3))`.
+For a cheap eval set without a constitution, `generate_inputs(data_dir=DATA_DIR, samples_per_category=15, num_categories=3)`
+runs the standalone meta-prompt path instead. It is **deprecated** (emits `DeprecationWarning`) but functional;
+constitution-seeded inputs give better and more adjustable coverage.
 
-`generate_jailbreaks(inputs, settings_per_iteration=default_escalation_schedule())` instead runs a multi-round escalation — each sample augmented 4× from a single technique up to high-complexity combinations (see the [Jailbreak section](#jailbreak--technique-library)).
+<!-- TODO(augmentation docs): generate_jailbreaks(augmentation=...) examples (the two kinds, rounds "escalation", null to switch a kind off), pending the overlay-semantics change. -->
 
-**Paraphrase / fingerprint removal** — `generate_paraphrases(data_dir=DATA_DIR, target="both")` adds reworded ("defingerprinted") copies of the base inputs and *accepted* base outputs as **additive rows** (`paraphrases_inputs.csv` / `paraphrases_outputs.csv`). A **separate** meaning-preservation checker drops paraphrases that don't preserve meaning (check→drop), duplicates are deduped, and each artifact gets a `*.manifest.jsonl` plan + `*.state.jsonl` resume ledger like every other stage (see [Resume model](#resume-model-one-modular-sidecar-system)). As a `paraphrase` stage, `build_dataset(mode="training")` merges the paraphrases into the dataset while `mode="eval"` writes a separate `paraphrased.csv`.
+**Paraphrase / fingerprint removal** — `generate_paraphrases(data_dir=DATA_DIR, target="both")` adds reworded ("defingerprinted") copies of the base inputs and *accepted* base outputs as **additive rows** (`paraphrases_inputs.csv` / `paraphrases_outputs.csv`). A **separate** meaning-preservation checker drops paraphrases that don't preserve meaning (check→drop), duplicates are deduped, and each artifact gets a `*.manifest.jsonl` plan + `*.state.jsonl` resume ledger like every other stage (see [Resume model](#resume-model-one-modular-sidecar-system)). `build_dataset(mode="training")` merges the paraphrases into the dataset while `mode="eval"` writes a separate `paraphrased.csv`.
 
 > **⚠️ Disclaimer — placeholder paraphraser.** The actual defingerprinting / paraphraser model is trained in a separate repository (see [Out of Scope](#out-of-scope)) and is **not shipped here**. The `paraphraser` role is a stand-in that loads the same Dolphin-Mistral-24B weights as `venice-uncensored`'s local setup; register your real paraphraser with `register_model(..., role="paraphraser")` for production fingerprint removal.
 
-**Config-driven runs** — define a whole run in a **recipe** JSON (`dataset_type` `"eval"` = no
-constitution / `"training"` = with) + a separate **input-params** file, and drive it with one call.
-Each stage writes a `{stage}.run.json` manifest under `{data_dir}/Datasets/`.
+**Config-driven runs** — define a whole run in a **recipe** JSON and drive it with one call:
 
 ```python
 from redact import run_pipeline
@@ -66,6 +68,24 @@ from redact import run_pipeline
 summary = run_pipeline("src/redact/configs/runs/eval_example.json")
 # or from the CLI:  python scripts/run.py src/redact/configs/runs/eval_example.json --data-dir ./runs/eval
 ```
+
+A recipe names:
+
+| Key | Meaning |
+|---|---|
+| `dataset_type` | `"eval"` (standalone inputs, no constitution) or `"training"` (inputs seeded from the constitution saved under `data_dir`) |
+| `data_dir` | The working root (`--data-dir` or `run_pipeline(data_dir=...)` overrides it) |
+| `stages` | In order, from `constitution`, `inputs`, `outputs`, `paraphrase`, `jailbreaks`, `build`; default `["inputs", "outputs", "jailbreaks", "build"]` |
+| `models` | Per role (`gen`, `check`, `translation`, `constitution`, `paraphraser`, `paraphrase_check`): a registry name, `null` for the role's default, or `{"name": ..., "backend_type": ..., "copies": ..., "workers": ...}` to also say how it is served |
+| `taxonomy`, `taxonomy_dir`, `prompt_dir` | The taxonomy by name, and where to read taxonomies and prompt overrides from |
+| `augmentations` | The jailbreak stage's augmentation section <!-- TODO(augmentation docs): the two kinds, overlay rules, null to switch off --> |
+| `params_file` | A JSON of each stage's own parameters under the stage's name (the keyword arguments of its `generate_*` function), relative to the recipe; `--params` overrides it |
+| `resume` | `true` (default) resumes every stage; `false` starts each over |
+
+A params key that is not a parameter of its stage fails before any stage runs. Each stage writes a
+`{stage}.run.json` run record under `{data_dir}/Datasets/` (params, models, how they were served,
+row counts); `python scripts/inspect_run.py DATA_DIR` prints them. Local models are planned, loaded
+and unloaded stage by stage (see [Telemetry, cost, and GPU planning](#telemetry-cost-and-gpu-planning)).
 
 See `notebooks/eval_pipeline.ipynb` and `notebooks/training_pipeline.ipynb` for the full walkthroughs.
 
@@ -98,9 +118,12 @@ derived artifact joins, dedups, plans, and resumes identically:
 | Conversations | `conversations.manifest.jsonl` | `conversations.state.jsonl` | `(input_id, iteration)` |
 | Conversation scoring | — (scores existing rows) | `conversations_scored.state.jsonl` | `sample_id` |
 
-Plan-backed stages (jailbreaks, conversations) additionally stream their manifest back to
-drive execution; the ledger unions with the output CSV so pre-ledger runs still resume. The
-one intentional exception is **standalone meta-prompt input generation** — it has no discrete
+<!-- TODO(augmentation docs): the natural variations file's row (its manifest, ledger and coverage table). -->
+
+A resumed run reads the ledger alone: it checks each output file against the size and checksum
+the ledger recorded at its last save and cuts off what an unfinished save left behind. Plan-backed
+stages (jailbreaks, conversations) keep their manifest on a resume and stream their units from it.
+The one intentional exception is **standalone meta-prompt input generation** — it has no discrete
 idempotent units (it generates open-endedly toward a per-category sample count), so it gets
 neither a manifest nor a ledger and resumes by extending its CSVs. That path is now
 **deprecated** (emits `DeprecationWarning`) in favour of constitution-seeded generation, but
@@ -152,7 +175,7 @@ text, info, accepted, reasoning = apply_combination(
 
 > LLM-dependent techniques (cognitive, personas, translation, typos, tokenbreak, FSH/DAP-selected) are **technique generators** — calling them directly returns a generator, not a result. Use `apply_combination()` for one sample, or let `generate_jailbreaks()` / the batched engine drive them. Pure transforms (encoding, structural, suffixes, ascii_art, framing, all `requests/`) are still plain callables.
 
-See [`full_pipeline.ipynb`](full_pipeline.ipynb) for a complete pipeline walkthrough.
+See [`notebooks/`](notebooks/) for walkthroughs: `eval_pipeline`, `training_pipeline`, `content_moderation`, `jailbreak_augmentation`.
 
 ---
 
@@ -170,12 +193,13 @@ src/redact/
 │   │   └── introspection.py       # Local transformers backend with internals capture
 │   ├── observe.py                 # Telemetry emit hook (no-op by default; keeps llms/ dep-free)
 │   ├── client.py                  # ModelClient: a configured backend + its dispatch strategy
-│   ├── router.py                  # generate_sample(), check_sample(), batch_* helpers, assert_single_sample_per_call()
+│   ├── router.py                  # generate_sample(), batch_generate_samples(), assert_single_sample_per_call()
 │   ├── wrappers.py                # RateLimiter + BatchCaller, both wired from a backend
-│   ├── prompts.py                 # JSON prompt loader + template renderer
-│   ├── extraction.py              # Multi-sample + constitution extraction
-│   ├── conversation.py            # LLMRequest, Step/Transcript, drive_sync
+│   ├── prompting/                 # load_prompt, PromptTemplate, reply extraction, scaffold_prompt_tree
 │   └── model_config.py            # Model registry (RPM, backend_type, capability flags, roles)
+│
+├── llm_pipeline/                  # LLMRequest; drive_sync / drive_generators / drive_units; checks and retries
+├── residency/                     # Which local models fit, per stage; preload and unload
 │
 ├── constitution/                  # Constitution generation for classifiers
 │   ├── generation.py              # ConstitutionPipeline (4 severity types)
@@ -232,22 +256,27 @@ src/redact/
 │
 ├── configs/                       # JSON configuration files (package data)
 │   ├── content_moderation_input.json
+│   ├── llm/                       # models.json (the registry), roles.json, gpu_pricing.json
+│   ├── runs/                      # Example recipes + params file
 │   ├── seeds/                     # Hand-written seed prompts
 │   └── taxonomy/                  # Category/technique taxonomies
 │
-├── prompts/                       # Prompt templates (redacted for safety)
-│   ├── content_moderation/        # Per-step prompt templates
-│   └── jailbreak/                 # Per-technique prompt templates
+├── prompts/                       # Prompt JSON per pipeline/step (input, output, paraphrase, jailbreak, constitution, ...)
 │
-├── exceptions.py                  # RedactError, ConfigError, etc.
-├── types.py                       # Shared dependency-free types (EntryType)
-├── pipelines.py                   # High-level pipeline functions
-├── __init__.py                    # Config, get_output_dir(), package exports
+├── stages.py                      # The stage functions (generate_*, build_dataset) and the STAGES table
+├── recipe.py                      # load_recipe, load_params: what a recipe and its params file say
+├── driver.py                      # run_pipeline and the per-stage run records
+├── paths.py                       # The on-disk layout under a data_dir
+├── telemetry.py                   # Run trace and cost roll-up
+├── exceptions.py                  # RedactError, PromptTooLongError
+├── types.py                       # EntryType
+├── __init__.py                    # Package exports
 └── py.typed                       # PEP 561 type marker
 
-Datasets/                          # Generated output (per-category CSVs)
-Data_cache/                        # Intermediate data (benign samples, etc.)
-full_pipeline.ipynb                # Complete pipeline walkthrough
+scripts/                           # run.py, inspect_run.py, scaffold_prompts.py, download_models.py
+notebooks/                         # Walkthroughs
+Datasets/                          # Generated output
+Data_cache/                        # Intermediate data (benign samples, constitution, etc.)
 ```
 
 ---
@@ -851,11 +880,11 @@ backend = VLLMBackend(model="mistralai/Mistral-7B-v0.3")
 | `ANTHROPIC_API_KEY` | Claude models | Anthropic API key |
 | `HF_TOKEN` | HuggingFace loading | HuggingFace access token |
 | `HF_HOME` | vLLM models | Directory where vLLM downloads and caches model weights. Defaults to `~/.cache/huggingface` if unset. Set this to a path with sufficient disk space (`venice-uncensored`'s local setup requires ~48 GB). |
-| `REDACT_OUTPUT_DIR` | Optional | Base directory for `Datasets/` and `Data_cache/` (defaults to script directory) |
+| `REDACT_OUTPUT_DIR` | Optional | Default working root for `Datasets/` and `Data_cache/` when no `data_dir` is given (else the source tree holding `pyproject.toml`, else the current directory) |
 | `REDACT_TRACE` | Optional | Telemetry sink: `jsonl` (default), `wandb`, or `off` |
 | `REDACT_GPU_PROVIDER` | Optional | Key into `configs/llm/gpu_pricing.json` (e.g. `runpod`) for costing local GPU time. Defaults to `local`, which prices at 0 |
 
-Place in a `.env` file in the project root. Loaded automatically via `python-dotenv`.
+Place in a `.env` file in the working root. It is loaded on `import redact` (via `python-dotenv`), its values winning over the shell's.
 
 ### Telemetry, cost, and GPU planning
 
@@ -899,12 +928,12 @@ headroom) without loading anything. Declare `vram_gb` on a `VLLMConfig` or
 top, at `max_model_len` or a default of 10,000 tokens), and `min_gpus` on a `VLLMConfig` for a model too large for one
 card. The vLLM engines on a card split 0.9 of it: each is granted its need with overhead ((weights + KV) x1.1 + 0.6 GiB)
 plus an equal share of the spare, and loads with that `gpu_memory_utilization`
-(it is not a `vllm_kwargs` setting). A grant below that padded need means the plan does not fit. Nothing is unloaded between stages: if a run's local models do not fit together,
-run those stages as separate `run_pipeline` calls.
+(it is not a `vllm_kwargs` setting). A grant below that padded need means the plan does not fit.
 
-Local models in the first group are then **preloaded on a background thread**, so a
-multi-minute 24B load overlaps with the API stages ahead of it instead of waiting behind
-them. A preload that fails logs the reason and lets the run continue — an API-only stage is
+`run_pipeline` plans **per stage**: as it enters a stage it unloads the local engines that stage
+does not keep, and **preloads** the stage's models (and the next stage's, when they fit beside
+them) on a background thread, so a multi-minute 24B load overlaps with API work instead of
+waiting behind it. Every local engine is released when the run ends. A preload that fails logs the reason and lets the run continue — an API-only stage is
 ledger-backed and its output is saved as it goes, so finishing it beats killing it.
 
 ### Prompt JSON Schema
@@ -942,9 +971,9 @@ ledger-backed and its output is saved as it goes, so finishing it beats killing 
 
 ## Key Design Decisions
 
-- **Prompts are external** — no prompts hardcoded in library code. Adding a category = adding a JSON file. Prompts are redacted in public releases for safety.
+- **Prompts are external** — prompt text lives in JSON files that ship with the library; a `prompt_dir` overrides any of them file by file (`scripts/scaffold_prompts.py` writes an editable copy).
 - **Backend auto-routing** — `ModelClient.create(model)` resolves the registry entry, picks the setup, and builds a fully-configured backend for it. Manual instantiation available for custom setups.
-- **Data is per-category** — all output lands in `Datasets/{category}/` as CSV. Merging is explicit.
+- **Inputs are per-category** — input samples land in `{category}/samples.csv`; every other stage writes one CSV under `Datasets/`. Merging is explicit (`build_dataset`).
 - **Checker feedback feeds back** — rejection reasoning is injected into the next generation call for directed improvement.
 - **Technique functions are pure** — most obfuscation functions take a string and return a string. No side effects, no hidden state.
 - **Registry pattern** — technique families expose `get_type_to_getter()` registries for uniform access and automatic dataset splitting.
@@ -956,7 +985,6 @@ ledger-backed and its output is saved as it goes, so finishing it beats killing 
 
 This library is designed for **defensive AI safety research** — building datasets to evaluate and improve content moderation systems.
 
-- **Prompts are redacted** in public releases. The `prompts/` directory contains placeholder templates.
 - **Generated data should be handled responsibly.** Clear `Datasets/` and `Data_cache/` before sharing.
 - All generation involves a **checker LLM** that validates sample quality and rejects low-quality or off-category outputs.
 
