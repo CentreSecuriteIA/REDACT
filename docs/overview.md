@@ -55,7 +55,7 @@ flowchart TD
     outputs --> resp[("Datasets/output_responses.csv")]
     resp --> paraphrase
     paraphrase --> para[("Datasets/paraphrases_inputs.csv<br/>Datasets/paraphrases_outputs.csv")]
-    jailbreaks <-.-> benign[("Data_cache/benign/benign_samples.csv")]
+    jailbreaks -.->|"reads, or writes once"| benign[("Data_cache/benign/benign_samples.csv")]
     jailbreaks --> jb[("Datasets/jailbreaks.csv")]
     jailbreaks --> var[("Datasets/variations.csv")]
     merged --> build["build"]

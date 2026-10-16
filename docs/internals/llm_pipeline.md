@@ -80,7 +80,8 @@ fails propagates whatever the unit.
 `pool_size(batch_size, *clients)` gives the units a stage keeps live: twice
 `batch_size`, or the widest async lane among the clients when that is larger.
 Every stage on the pool calls `drive_units` with
-`pool_size=pool_size(batch_size, ...)` and `cap=batch_size`.
+`pool_size=pool_size(batch_size, ...)` and `cap=batch_size`, except the
+constitution, which runs one unit at a time (`pool_size=1`).
 
 ## The async lane
 

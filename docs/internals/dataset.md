@@ -32,8 +32,10 @@ stored stays out of the resume logic.
 | `row_id(row, text_col, id_col="sample_id")` | The id a row carries in `id_col`, else the content id of its text. `None`, NaN, empty or `"nan"` count as missing |
 | `row_ids(frame, text_col)` | `row_id` of every row, reading two columns only |
 
-Every row a stage writes has a `sample_id`, the content id of its own text.
-A row derived from another has an `input_id`, that row's id.
+Every row a stage writes has a `sample_id`: the content id of its own text,
+or of its unit key where the row has no text of its own (a conversation, a
+jailbreak error row). A row derived from another has an `input_id`, that
+row's id.
 
 ## Rows
 
@@ -55,12 +57,14 @@ fails.
 Both are JSON Lines files beside the stage's output, built on
 `JsonlSidecar`, whose read skips a line it cannot parse.
 
-**The manifest**, `<output stem>.manifest.jsonl` (`Manifest`), is the plan:
+**The manifest**, by default `<output stem>.manifest.jsonl` (`Manifest`), is
+the plan:
 one row per unit, written whole before the units run. `write` goes through a
 temporary file and a rename; an empty plan writes nothing. Its rows carry
 whatever the stage needs.
 
-**The ledger**, `<output stem>.state.jsonl` (`Ledger`), records finished
+**The ledger**, by default `<output stem>.state.jsonl` (`Ledger`), records
+finished
 units, one record each. `Ledger(path, key_fields, casters)` names the fields
 that make a unit's key; `casters` convert them on read so they compare with
 the keys the stage builds. A record may carry more fields (a `status`, the
