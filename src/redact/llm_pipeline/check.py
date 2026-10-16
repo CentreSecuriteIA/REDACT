@@ -4,6 +4,7 @@ and batched check calls, and the retry steps a driver runs per unit.
 
 from __future__ import annotations
 
+import re
 from collections.abc import Callable, Generator
 
 from redact.llms.client import ModelClient
@@ -11,8 +12,11 @@ from redact.llms.router import batch_generate_samples, generate_sample
 
 from .request import LLMRequest
 
-#TODO: Decide how strict the accept probe should be (which phrase the checker prompts ask for, word boundary).
-_ACCEPT_PREFIXES = ("yes", "ok", "accept", "pass")
+_ACCEPT_WORDS = frozenset({"yes", "ok", "accept", "pass"})
+
+# Leading whitespace, markdown and quote marks, then the first word: its
+# letters and digits.
+_FIRST_WORD = re.compile(r"[\s*_#>\"'`]*([^\W_]+)")
 
 
 def is_accepted(response: str) -> bool:
@@ -24,10 +28,14 @@ def is_accepted(response: str) -> bool:
         response: Raw reply text.
 
     Returns:
-        True when the reply starts with "yes", "ok", "accept" or "pass"
-        (case-insensitive, surrounding whitespace ignored).
+        True when the reply's first word is "yes", "ok", "accept" or
+        "pass", in any case, after leading whitespace and leading ``*``,
+        ``_``, ``#``, ``>``, quotes and backticks. So "**Yes**", "Yes." and
+        "yes, because" accept, and "Yesterday", "Accepted" and "Verdict:
+        yes" reject, as does any other reply.
     """
-    return response.strip().lower().startswith(_ACCEPT_PREFIXES)
+    first = _FIRST_WORD.match(response)
+    return first is not None and first.group(1).lower() in _ACCEPT_WORDS
 
 
 def _verdict(response: str) -> tuple[bool, str]:
