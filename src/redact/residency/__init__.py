@@ -28,7 +28,6 @@ of the run, not a guarantee against running out of memory.
 
 #TODO(driver script): what residency per stage (plan_phases, run_pipeline)
 # does not do yet:
-#   - Join or cancel the preload thread at exit.
 #   - Paraphraser pool: teach plan_phases that a pool's models run one at a
 #     time, so the paraphrase stage needs no plan of its own. Its plan covers
 #     only the pool and ignores what other stages hold. Only matters with
