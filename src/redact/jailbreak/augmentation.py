@@ -188,8 +188,10 @@ def apply_flat_keywords(kind: dict, keywords: dict) -> dict:
 
 
 def _toggled(names: list, name: str, *, deny: bool) -> list:
-    names = [n for n in names if n != name]
-    return [*names, name] if deny else names
+    """``names`` with ``name`` in it when ``deny``, else without it."""
+    if deny:
+        return names if name in names else [*names, name]
+    return [n for n in names if n != name]
 
 
 def _check_entry_types(where: str, entry_types) -> None:

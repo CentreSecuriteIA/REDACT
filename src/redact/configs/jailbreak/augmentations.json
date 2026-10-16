@@ -4,7 +4,7 @@
   "adversarial": {
     "entry_types": null,
     "layers": {"deny": []},
-    "families": {"allow": null, "deny": ["translation"]},
+    "families": {"allow": null, "deny": ["translation", "casual_writing"]},
     "techniques": {"allow": null, "deny": []},
     "pure_only": false,
     "family_weights": {},
@@ -20,8 +20,8 @@
     "entry_types": null,
     "layers": {"deny": []},
     "families": {
-      "allow": ["typos", "structural", "answer_language", "answer_format", "asking",
-                "indirect", "temporal", "continuation"],
+      "allow": ["typos", "casual_writing", "structural", "answer_language",
+                "answer_format", "asking", "indirect", "temporal", "continuation"],
       "deny": []
     },
     "techniques": {

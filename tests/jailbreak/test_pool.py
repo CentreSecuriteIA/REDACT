@@ -31,10 +31,10 @@ def _kind(**given) -> dict:
     return resolve({"adversarial": given}, "adversarial")
 
 
-def test_the_default_attack_pool_is_every_technique_but_translation():
+def test_the_default_attack_pool_is_every_technique_but_translation_and_casual():
     full = all_techniques()
-    translation = _in("translation", full)
-    assert technique_pool(_kind()) == [fn for fn in full if fn not in translation]
+    left_out = _in("translation", full) + _in("casual_writing", full)
+    assert technique_pool(_kind()) == [fn for fn in full if fn not in left_out]
 
 
 def test_allowing_translation_makes_the_pool_every_technique():

@@ -76,6 +76,13 @@
       "max_picks": 1,
       "cross_incompatible_with": ["structural", "framing", "persona", "cognitive", "fsh", "dap"]
     },
+    "casual_writing": {
+      "description": "Casing, spacing, punctuation, abbreviations or accents as a person typing quickly writes them",
+      "layer": "obfuscation",
+      "within_layer_order": 4.5,
+      "max_picks": 1,
+      "cross_incompatible_with": []
+    },
     "framing": {
       "description": "Scenario/context modifiers: fictional world, noble/nefarious goal, urgency, constraint removal",
       "layer": "hacking",
@@ -257,6 +264,16 @@
     "to_adversarial_suffix_fragments":   { "families": ["suffixes"], "complexity": 1, "requires_llm": false },
     "to_adversarial_suffix_unicode":     { "families": ["suffixes"], "complexity": 1, "requires_llm": false },
     "to_adversarial_suffix_emoji":       { "families": ["suffixes"], "complexity": 1, "requires_llm": false },
+
+    "to_lowercase":            { "families": ["casual_writing"], "complexity": 0, "requires_llm": false },
+    "to_uppercase":            { "families": ["casual_writing"], "complexity": 0, "requires_llm": false },
+    "to_no_sentence_capitals": { "families": ["casual_writing"], "complexity": 0, "requires_llm": false },
+    "to_dropped_spaces":       { "families": ["casual_writing"], "complexity": 1, "requires_llm": false },
+    "to_doubled_spaces":       { "families": ["casual_writing"], "complexity": 0, "requires_llm": false },
+    "to_dropped_punctuation":  { "families": ["casual_writing"], "complexity": 0, "requires_llm": false },
+    "to_doubled_punctuation":  { "families": ["casual_writing"], "complexity": 0, "requires_llm": false },
+    "to_abbreviations":        { "families": ["casual_writing"], "complexity": 1, "requires_llm": false },
+    "to_stripped_accents":     { "families": ["casual_writing"], "complexity": 0, "requires_llm": false },
 
     "to_fictional_world":      { "families": ["framing"], "complexity": 2, "requires_llm": false },
     "to_noble_goal":           { "families": ["framing"], "complexity": 1, "requires_llm": false },

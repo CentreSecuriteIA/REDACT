@@ -42,7 +42,8 @@ def test_a_resolved_section_resolves_to_itself():
 
 def test_the_packaged_defaults():
     adversarial, natural = defaults()["adversarial"], defaults()["natural"]
-    assert adversarial["families"] == {"allow": None, "deny": ["translation"]}
+    assert adversarial["families"] == {
+        "allow": None, "deny": ["translation", "casual_writing"]}
     assert adversarial["rounds"] is None and adversarial["layer_rates"] == {}
     assert "translation" not in natural["families"]["allow"]
     assert natural["exact_techniques"] == natural["iterations"] == 1
@@ -180,7 +181,7 @@ def test_the_flat_keywords_land_in_the_adversarial_kind():
     assert kind == {
         **defaults()["adversarial"],
         "layers": {"deny": ["hacking"]},
-        "families": {"allow": None, "deny": []},
+        "families": {"allow": None, "deny": ["casual_writing"]},
         "pure_only": True, "layer_rates": {"hacking": 0.1},
         "entry_types": ["benign"], "iterations": 2,
         "rounds": [{"exact_techniques": 1}, {"layer_rates": {"requests": 0.3}}],
@@ -191,5 +192,5 @@ def test_the_flat_keywords_land_in_the_adversarial_kind():
 def test_include_translation_false_denies_it_once():
     kind = apply_flat_keywords(resolve(None, "adversarial"),
                                {"include_translation": False, "include_hacking": True})
-    assert kind["families"]["deny"] == ["translation"]
+    assert kind["families"]["deny"] == ["translation", "casual_writing"]
     assert kind["layers"]["deny"] == []
