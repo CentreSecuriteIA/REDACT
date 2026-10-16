@@ -261,7 +261,7 @@ def generate_inputs(
             logger.info("Entries: %d | Style: %s | Samples/entry: %d | Batch: %d",
                         len(constitution_df), style, samples_per_entry, batch_size)
 
-        pipeline.run_from_constitution(
+        result = pipeline.run_from_constitution(
             constitution_df=constitution_df,
             prompt_config=prompt_config,
             samples_per_entry=samples_per_entry,
@@ -273,6 +273,9 @@ def generate_inputs(
             max_attempts=max_attempts,
             check_max_tokens=check_max_tokens,
         )
+        if result.total_entries_processed:
+            _warn_on_low_acceptance(
+                result.total_prompts_accepted, result.total_prompts_generated)
 
         # Write the root-level handoff CSV build_dataset() actually looks for
         # (paths.constitution_inputs_merged_csv) —
@@ -312,7 +315,7 @@ def generate_inputs(
         categories = categories[:num_categories]
 
     ds_dir = paths.datasets(data_dir)
-    run_standalone_inputs(
+    results = run_standalone_inputs(
         categories,
         ModelClient.create(model),
         ModelClient.create(check_model or model),
@@ -326,6 +329,9 @@ def generate_inputs(
         resume=resume,
         verbose=verbose,
     )
+    if results:
+        _warn_on_low_acceptance(sum(r.total_accepted for r in results),
+                                sum(r.total_extracted for r in results))
     return merge_all(ds_dir, accepted_only=True) if read_back else pd.DataFrame()
 
 
@@ -366,6 +372,8 @@ def generate_outputs(
     Args:
         inputs: Input samples DataFrame. If None, the accepted inputs of the
             run under ``data_dir`` (:func:`redact.dataset.merge_inputs`).
+            With no row, the stage warns, writes nothing and returns an
+            empty frame.
         model: Generation model. ``None`` (default) resolves to the
             ``uncensored_gen`` role. Backend is auto-selected from the name.
         check_outputs: Run the entry-type-aware output quality checker.
@@ -406,11 +414,13 @@ def generate_outputs(
         ``rejection_reason``, ``model``, ``source``. ``sample_id`` is this
         row's own content-hash identity (``content_id(output_response)``),
         distinct from ``input_id`` (the origin sample it responds to).
+
+    Raises:
+        ValueError: ``inputs`` is None and the run has no input sample at all.
     """
-    if inputs is None:
-        inputs = merge_inputs(data_dir)
-        if inputs.empty:
-            raise ValueError("No input samples found. Run generate_inputs() first.")
+    inputs = _given_or_run_inputs(inputs, data_dir)
+    if inputs.empty:
+        return _skipped("outputs", "input sample")
 
     # Per-group cap first (keeps every category/severity represented), then the
     # global head as a final safety cap.
@@ -483,6 +493,8 @@ def generate_jailbreaks(
     Args:
         inputs: Input prompts DataFrame. If None, the accepted inputs of the
             run under ``data_dir`` (:func:`redact.dataset.merge_inputs`).
+            With no row, the stage warns, writes nothing and returns an
+            empty frame.
         data_dir: Working root. Inputs are read from under
             ``{data_dir}/Datasets/`` (when ``inputs`` is None), the jailbreaks
             CSV defaults to ``{data_dir}/Datasets/jailbreaks.csv`` and the
@@ -529,6 +541,9 @@ def generate_jailbreaks(
         CSV (see ``variations_path``) has the same columns, its rows keeping
         their input's ``entry_type``; a variation that leaves its input
         unchanged is not accepted.
+
+    Raises:
+        ValueError: ``inputs`` is None and the run has no input sample at all.
     """
     flat = {name: value for name, value in (
         ("include_hacking", include_hacking),
@@ -548,10 +563,9 @@ def generate_jailbreaks(
     if adversarial is None and natural is None:
         return pd.DataFrame()
 
-    if inputs is None:
-        inputs = merge_inputs(data_dir)
-        if inputs.empty:
-            raise ValueError("No input samples found. Run generate_inputs() first.")
+    inputs = _given_or_run_inputs(inputs, data_dir)
+    if inputs.empty:
+        return _skipped("jailbreaks", "input sample")
 
     inputs = inputs.copy()
     if "sample" in inputs.columns and "prompt" not in inputs.columns:
@@ -630,6 +644,51 @@ def _of_entry_types(inputs: pd.DataFrame, entry_types: list | None) -> pd.DataFr
     return inputs[inputs["entry_type"].isin(entry_types)].reset_index(drop=True)
 
 
+def _has_inputs(data_dir: str | Path | None) -> bool:
+    """Whether the run under ``data_dir`` has input samples, accepted or not."""
+    return bool(discover_categories(paths.constitution_inputs_dir(data_dir))
+                or discover_categories(paths.datasets(data_dir)))
+
+
+def _given_or_run_inputs(
+    inputs: pd.DataFrame | None, data_dir: str | Path | None
+) -> pd.DataFrame:
+    """``inputs``, or for None the accepted inputs of the run under ``data_dir``.
+
+    Raises:
+        ValueError: ``inputs`` is None and the run has no input sample at all.
+    """
+    if inputs is not None:
+        return inputs
+    if not _has_inputs(data_dir):
+        raise ValueError("No input samples found. Run generate_inputs() first.")
+    return merge_inputs(data_dir)
+
+
+def _skipped(stage: str, what: str) -> pd.DataFrame:
+    """Warn that ``stage`` has no accepted ``what`` and runs on nothing."""
+    logger.warning(
+        "%s skipped: no %s was accepted, so it has nothing to work on and "
+        "writes nothing. The rejection_reason column of the rejected rows says why.",
+        stage, what)
+    return pd.DataFrame()
+
+
+# The inputs stage warns when it accepts fewer than this share of its samples.
+_LOW_ACCEPTANCE = 0.5
+
+
+def _warn_on_low_acceptance(accepted: int, generated: int) -> None:
+    """Warn when the inputs stage accepted under half the samples it generated."""
+    if accepted and accepted >= _LOW_ACCEPTANCE * generated:
+        return
+    logger.warning(
+        "inputs: only %d of %d generated samples were accepted (under half). "
+        "The later stages work on accepted samples only; the rejection_reason "
+        "column of the category files says why each was rejected.",
+        accepted, generated)
+
+
 def generate_paraphrases(
     inputs: pd.DataFrame | None = None,
     outputs: pd.DataFrame | None = None,
@@ -667,7 +726,9 @@ def generate_paraphrases(
             under ``data_dir`` (:func:`redact.dataset.merge_inputs`). (target
             ``"inputs"``/``"both"``.)
         outputs: Base outputs DataFrame; if None loads ``output_responses.csv`` and
-            keeps accepted rows. (target ``"outputs"``/``"both"``.)
+            keeps accepted rows. (target ``"outputs"``/``"both"``.) A target
+            with rows but none accepted, or given an empty frame, is skipped
+            with a warning; one with no rows at all is skipped silently.
         data_dir: Working root.
         paraphraser: ``None`` → ``paraphraser`` role default; a model name; or
             ``"distribution"`` → round-robin over all ``paraphraser``-role models.
@@ -719,16 +780,23 @@ def generate_paraphrases(
     results: dict[str, pd.DataFrame] = {}
     for tgt in targets:
         if tgt == "inputs":
+            # Rows of any verdict; a target without any is skipped silently.
+            has_rows = inputs is not None or _has_inputs(data_dir)
             source = inputs if inputs is not None else merge_inputs(data_dir)
             out_path = (Path(inputs_path) if inputs_path
                         else paths.paraphrases_inputs_csv(data_dir))
         else:
             source = (outputs if outputs is not None
                       else dataset.read_rows(paths.output_responses_csv(data_dir)))
+            has_rows = outputs is not None or not source.empty
             if "accepted" in source.columns:
                 source = source[source["accepted"] == True]  # noqa: E712
             out_path = (Path(outputs_path) if outputs_path
                         else paths.paraphrases_outputs_csv(data_dir))
+        if has_rows and source.empty:
+            what = "input sample" if tgt == "inputs" else "output response"
+            results[tgt] = _skipped(f"paraphrase ({tgt})", what)
+            continue
         results[tgt] = run_paraphrase_target(
             tgt, source, out_path,
             pool=pool, check=check_client, k=paraphrases_per_sample,

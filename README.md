@@ -96,7 +96,10 @@ A recipe names:
 An unknown recipe key, a params key that is not a parameter of its stage, and a bad augmentation
 section all fail before any stage runs. Each stage writes a
 `{stage}.run.json` run record under `{data_dir}/Datasets/` (params, models, how they were served,
-row counts); `python scripts/inspect_run.py DATA_DIR` prints them. Local models are planned, loaded
+row counts); `python scripts/inspect_run.py DATA_DIR` prints them. When the inputs stage accepted no
+sample, the outputs, paraphrase and jailbreak stages each log a warning, write nothing and record 0
+rows, and the run goes on; the inputs stage itself warns, with the counts, when it accepts under half
+of what it generated. Local models are planned, loaded
 and unloaded stage by stage (see [Telemetry, cost, and GPU planning](#telemetry-cost-and-gpu-planning)).
 
 See `notebooks/eval_pipeline.ipynb` and `notebooks/training_pipeline.ipynb` for the full walkthroughs.

@@ -174,6 +174,163 @@ class TestGenerateOutputsFindsItsInputs:
             generate_outputs(data_dir=tmp_path, check_outputs=False, verbose=False)
 
 
+def _seed_rejected_tree(data_dir, seeded: bool):
+    """Two input rows, both rejected, in the seeded or the standalone tree."""
+    from redact import paths
+    from redact.dataset import append_samples
+
+    tree = paths.constitution_inputs_dir if seeded else paths.datasets
+    append_samples(
+        ["zq0 one input", "zq1 another input"], category="Cyber", turn=0,
+        accepted=[False, False], dataset_dir=tree(data_dir))
+
+
+def _no_model(monkeypatch):
+    """Fail any model the stage builds: a skipped stage needs none."""
+    import redact.stages as P
+
+    def create(*args, **kwargs):
+        raise AssertionError("a skipped stage built a model client")
+
+    monkeypatch.setattr(P.ModelClient, "create", create)
+
+
+def _skip_warnings(caplog) -> list[str]:
+    return [r.getMessage() for r in caplog.records
+            if r.levelno == logging.WARNING and "skipped" in r.getMessage()]
+
+
+class TestAStageWithNoAcceptedInput:
+    """Inputs that were all rejected skip a stage with a warning; no inputs at
+    all is the caller's mistake and raises."""
+
+    @pytest.mark.parametrize("seeded", [True, False], ids=["seeded", "standalone"])
+    def test_outputs_warn_and_write_nothing(
+            self, tmp_path, monkeypatch, caplog, seeded):
+        from redact import generate_outputs, paths
+
+        _seed_rejected_tree(tmp_path, seeded)
+        _no_model(monkeypatch)
+        with caplog.at_level(logging.WARNING, logger="redact"):
+            df = generate_outputs(data_dir=tmp_path, verbose=False)
+        assert df.empty
+        assert len(_skip_warnings(caplog)) == 1
+        out = paths.output_responses_csv(tmp_path)
+        assert not list(out.parent.glob(f"{out.stem}*"))
+
+    def test_an_empty_frame_given_is_skipped_the_same_way(
+            self, tmp_path, monkeypatch, caplog):
+        from redact import generate_outputs, paths
+
+        _no_model(monkeypatch)
+        with caplog.at_level(logging.WARNING, logger="redact"):
+            df = generate_outputs(inputs=pd.DataFrame(), data_dir=tmp_path,
+                                  verbose=False)
+        assert df.empty
+        assert len(_skip_warnings(caplog)) == 1
+        assert not paths.datasets(tmp_path).exists()
+
+    def test_jailbreaks_warn_and_write_nothing(self, tmp_path, monkeypatch, caplog):
+        from redact import generate_jailbreaks, paths
+
+        _seed_rejected_tree(tmp_path, seeded=False)
+        _no_model(monkeypatch)
+        with caplog.at_level(logging.WARNING, logger="redact"):
+            df = generate_jailbreaks(data_dir=tmp_path, verbose=False)
+        assert df.empty
+        assert len(_skip_warnings(caplog)) == 1
+        for out in (paths.jailbreaks_csv(tmp_path), paths.variations_csv(tmp_path)):
+            assert not list(out.parent.glob(f"{out.stem}*"))
+
+    def test_paraphrases_of_the_inputs_warn_and_write_nothing(
+            self, tmp_path, monkeypatch, caplog):
+        import redact.stages as P
+        from redact import generate_paraphrases, paths
+        from tests.conftest import make_client
+
+        _seed_rejected_tree(tmp_path, seeded=False)
+        backend = MockBackend("unused")
+        monkeypatch.setattr(P.ModelClient, "create",
+                            lambda m: make_client(backend, m))
+        with caplog.at_level(logging.WARNING, logger="redact"):
+            out = generate_paraphrases(data_dir=tmp_path, target="inputs",
+                                       verbose=False)
+        assert out["inputs"].empty
+        assert len(_skip_warnings(caplog)) == 1
+        assert backend.calls == []
+        para = paths.paraphrases_inputs_csv(tmp_path)
+        assert not list(para.parent.glob(f"{para.stem}*"))
+
+    def test_paraphrases_of_outputs_none_accepted_warn(
+            self, tmp_path, monkeypatch, caplog):
+        import redact.stages as P
+        from redact import generate_paraphrases, paths
+        from tests.conftest import make_client
+
+        out = paths.output_responses_csv(tmp_path)
+        out.parent.mkdir(parents=True)
+        pd.DataFrame({"input_id": ["a"], "output_response": ["r"],
+                      "accepted": [False]}).to_csv(out, index=False)
+        monkeypatch.setattr(P.ModelClient, "create",
+                            lambda m: make_client(MockBackend("unused"), m))
+        with caplog.at_level(logging.WARNING, logger="redact"):
+            generate_paraphrases(data_dir=tmp_path, target="outputs", verbose=False)
+        assert len(_skip_warnings(caplog)) == 1
+        assert not paths.paraphrases_outputs_csv(tmp_path).exists()
+
+    def test_jailbreaks_without_any_inputs_raise(self, tmp_path):
+        from redact import generate_jailbreaks
+
+        with pytest.raises(ValueError, match="No input samples found"):
+            generate_jailbreaks(data_dir=tmp_path, verbose=False)
+
+
+class _JudgeByText(MockBackend):
+    """Accepts a sample whose check request holds one of ``accept``."""
+
+    def __init__(self, accept):
+        super().__init__("No: weak")
+        self.accept = accept
+
+    def generate(self, messages_list, **kwargs):
+        return ["Yes" if any(w in m[-1]["content"] for w in self.accept)
+                else "No: weak" for m in messages_list]
+
+
+class TestInputsWarnOnLowAcceptance:
+    """The inputs stage warns, with the counts, when it accepts under half."""
+
+    @pytest.mark.parametrize("accept, warned", [
+        ((), "0 of 4"), (("zqa",), "1 of 4"), (("zqa", "zqc"), None),
+    ], ids=["none", "one", "half"])
+    def test_a_warning_under_half(self, tmp_path, monkeypatch, caplog, accept, warned):
+        import redact.stages as P
+        from redact import generate_inputs
+        from tests.conftest import make_client
+
+        backends = {
+            "gen-model": MockBackend(["1. zqa sample\n2. zqb sample",
+                                      "1. zqc sample\n2. zqd sample"]),
+            "check-model": _JudgeByText(accept),
+        }
+        monkeypatch.setattr(P.ModelClient, "create",
+                            lambda m: make_client(backends[m], m))
+        constitution = pd.DataFrame([
+            {"source_category": "Cyber", "constitution_subcategory": "Sub",
+             "sample_description": f"what zq{n} is about", "entry_type": "harmful"}
+            for n in range(2)])
+        with caplog.at_level(logging.WARNING, logger="redact"):
+            generate_inputs(data_dir=tmp_path, constitution_df=constitution,
+                            samples_per_entry=2, model="gen-model",
+                            check_model="check-model", verbose=False)
+        found = [r.getMessage() for r in caplog.records
+                 if r.levelno == logging.WARNING and "accepted" in r.getMessage()]
+        if warned is None:
+            assert found == []
+        else:
+            assert len(found) == 1 and warned in found[0]
+
+
 class TestGenerateOutputsReadBack:
     def test_without_read_back_the_output_is_written_and_not_read(
             self, tmp_path, monkeypatch):

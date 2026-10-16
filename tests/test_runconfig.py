@@ -962,6 +962,42 @@ def test_a_training_run_reads_the_inputs_it_seeded(tmp_path, monkeypatch):
     assert rows == {"outputs": 3, "paraphrase": 6, "jailbreaks": 6}
 
 
+def test_a_run_whose_inputs_were_all_rejected_warns_and_finishes(
+        tmp_path, monkeypatch, caplog):
+    """Each stage after the inputs warns and writes nothing; the build runs."""
+    import logging
+
+    from redact.llms import ModelClient
+    from tests.conftest import MockBackend, make_client
+
+    backend = MockBackend("unused")
+    monkeypatch.setattr(ModelClient, "create",
+                        lambda m, **kw: make_client(backend, m))
+    append_samples(
+        [f"prompt number {i} about a topic" for i in range(3)],
+        category="Cyber", turn=0, accepted=[False] * 3,
+        dataset_dir=paths.datasets(tmp_path),
+    )
+    recipe = {"dataset_type": "eval", "data_dir": str(tmp_path),
+              "stages": ["outputs", "paraphrase", "jailbreaks", "build"]}
+    try:
+        with caplog.at_level(logging.WARNING, logger="redact"):
+            summary = run_pipeline(recipe, verbose=False)
+    finally:
+        telemetry.uninstall()
+    rows = {stage: done["counts"]["rows"] for stage, done in summary["stages"].items()}
+    assert rows == {"outputs": 0, "paraphrase": 0, "jailbreaks": 0, "build": 0}
+    skipped = [r.getMessage() for r in caplog.records
+               if r.levelno == logging.WARNING and "skipped" in r.getMessage()]
+    assert [m.split(" skipped")[0] for m in skipped] == [
+        "outputs", "paraphrase (inputs)", "jailbreaks"]
+    assert backend.calls == []
+    assert read_record("build", tmp_path)["counts"]["rows"] == 0
+    for out in (paths.output_responses_csv(tmp_path), paths.jailbreaks_csv(tmp_path),
+                paths.variations_csv(tmp_path), paths.paraphrases_inputs_csv(tmp_path)):
+        assert not out.exists()
+
+
 def test_run_pipeline_all_stages_mocked(tmp_path, monkeypatch):
     """Cover every stage dispatch (incl. constitution/inputs/outputs/paraphrase) by
     mocking the generate_* functions."""
