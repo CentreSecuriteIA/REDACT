@@ -158,6 +158,9 @@ class Collector:
         # When each released engine was held, on time.perf_counter().
         self.local_spans: list[tuple[float, float]] = []
         self.errors: list[dict] = []
+        # Replies cut at the token limit, per stage and model.
+        self.cut: dict[str | None, dict[str, int]] = defaultdict(
+            lambda: defaultdict(int))
 
     def __call__(self, event: dict) -> None:
         """Receive one event from ``observe.record``."""
@@ -177,6 +180,8 @@ class Collector:
                     priced["out"] += event.get("out_tok") or 0
                 if event.get("error"):
                     self.errors.append(event)
+                if event.get("cut"):
+                    self.cut[event.get("stage")][event.get("model", "?")] += 1
             elif event.get("ev") == "local" and event.get("phase") == "release":
                 held = event.get("held_s") or 0.0
                 self.local_s[event.get("hf_model_id", "?")] += held
@@ -215,6 +220,7 @@ class Collector:
             local_s = dict(self.local_s)
             spans = list(self.local_spans)
             n_errors = len(self.errors)
+            cut = {stage: dict(models) for stage, models in self.cut.items()}
         # Engines still loaded have sent no release event yet.
         from .llms.backends import introspection, vllm
         now = time.perf_counter()
@@ -243,9 +249,16 @@ class Collector:
             "api_cost_usd": round(api_cost, 4) if priced or all_local else None,
             "local_cost_usd": local_cost,
             "errors": n_errors,
+            # Replies cut at the token limit, per stage and model.
+            "cut": cut,
         }
         _log_summary(out)
         return out
+
+    def cut_in(self, stage: str | None) -> dict[str, int]:
+        """The replies cut at the token limit in ``stage``, per model."""
+        with self._lock:
+            return dict(self.cut.get(stage, {}))
 
 
 def _union_seconds(spans: list[tuple[float, float]]) -> float:
@@ -391,7 +404,8 @@ def stage(label: str):
     """Label every event emitted inside this block with a pipeline stage.
 
     Also emits a ``stage`` event carrying the block's duration, so the trace
-    shows where wall-clock went even for stages that make no LLM calls.
+    shows where wall-clock went even for stages that make no LLM calls, and
+    logs how many replies of each model were cut at the token limit in it.
     """
     previous = observe.current_stage()
     observe.set_stage(label)
@@ -404,3 +418,8 @@ def stage(label: str):
             "duration_s": round(time.perf_counter() - started, 1),
         })
         observe.set_stage(previous)
+        cut = _collector.cut_in(label) if _collector is not None else {}
+        for model, n in cut.items():
+            replies = "1 reply was" if n == 1 else f"{n} replies were"
+            logger.warning("[%s] %s: %s cut at the token limit and %s incomplete.",
+                           label, model, replies, "is" if n == 1 else "are")

@@ -22,6 +22,7 @@ from redact.llms.model_config import (
     get_model_config,
     register_model,
 )
+from tests.conftest import first_cut_warning
 
 
 @pytest.fixture(autouse=True)
@@ -411,9 +412,7 @@ class TestGenerate:
         with caplog.at_level(logging.WARNING, logger="redact.llms.backends"):
             assert b.generate(_MSG, max_tokens=2) == ["reply"]
         assert [r.getMessage() for r in caplog.records] == [
-            "test-model: 1 of 1 replies were cut at the token limit (max_tokens=2) and "
-            "are incomplete; raise max_tokens or the context length (max_model_len), or ask for shorter replies."
-        ]
+            first_cut_warning("test-model", 2)]
 
     def test_a_reply_under_max_tokens_does_not_warn(self, tmp_path, caplog):
         b = _generate_backend(tmp_path)

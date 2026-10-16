@@ -13,6 +13,7 @@ import gc
 import logging
 import os
 import sys
+import threading
 import time
 from abc import ABC, abstractmethod
 from dataclasses import dataclass
@@ -24,6 +25,10 @@ if TYPE_CHECKING:
     from ..model_config import ModelConfig
 
 logger = logging.getLogger(__name__)
+
+# (stage, model) of each model whose first cut reply in a stage was warned about.
+_cut_warned: set[tuple[str | None, str]] = set()
+_cut_lock = threading.Lock()
 
 
 @dataclass(frozen=True)
@@ -249,6 +254,7 @@ class LLMBackend(ABC):
         temperature: float | None = None,
         error: str | None = None,
         finish_reason: str | None = None,
+        cut: bool = False,
     ) -> None:
         """Emit one ``call`` telemetry event for one transport call.
 
@@ -258,7 +264,11 @@ class LLMBackend(ABC):
         ``started`` is ``time.perf_counter()`` taken just before the call.
         ``out_tok_max`` is the longest reply of the call, in tokens:
         ``out_tok`` itself for a one-item call. ``finish_reason`` is the
-        provider's reason the reply ended, when it reports one.
+        provider's reason the reply ended, when it reports one. ``cut`` says
+        the reply stopped at the token limit, as each backend reads its
+        provider's reason: the event then carries ``cut``, which telemetry
+        counts per stage, and the model's first cut reply in a stage warns.
+        A cut reply is returned as it is.
         """
         event = {
             "ev": "call",
@@ -276,20 +286,22 @@ class LLMBackend(ABC):
             event["error"] = error
         if finish_reason is not None:
             event["finish_reason"] = finish_reason
+        if cut:
+            event["cut"] = True
         observe.record(event)
-
-    def _warn_cut(self, n_cut: int, n_items: int, max_tokens: int) -> None:
-        """Warn once per transport call about replies cut at the token limit.
-
-        A cut reply is returned as it is; each backend counts its own.
-        """
-        if n_cut:
-            logger.warning(
-                "%s: %d of %d replies were cut at the token limit (max_tokens=%d) "
-                "and are incomplete; raise max_tokens or the context length "
-                "(max_model_len), or ask for shorter replies.",
-                self.model, n_cut, n_items, max_tokens,
-            )
+        if cut:
+            key = (observe.current_stage(), self.model)
+            with _cut_lock:
+                first = key not in _cut_warned
+                _cut_warned.add(key)
+            if first:
+                logger.warning(
+                    "%s: a reply was cut at the token limit (max_tokens=%s) and "
+                    "is incomplete; raise max_tokens or the context length "
+                    "(max_model_len), or ask for shorter replies. Later ones are "
+                    "only counted: see the stage's end and the telemetry summary.",
+                    self.model, max_tokens,
+                )
 
     def _resolve(
         self, max_tokens: int | None, temperature: float | None

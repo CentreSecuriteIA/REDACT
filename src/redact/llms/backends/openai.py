@@ -274,6 +274,7 @@ class OpenAIBackend(LLMBackend):
             in_tok=getattr(usage, "prompt_tokens", None),
             out_tok=out_tok, out_tok_max=out_tok,
             max_tokens=max_tok, temperature=temp, finish_reason=finish_reason,
+            cut=finish_reason == "length",
         )
         if not content:
             logger.warning("%s returned an empty reply (finish_reason=%s).",
@@ -281,7 +282,6 @@ class OpenAIBackend(LLMBackend):
         elif finish_reason == "content_filter":
             logger.warning("%s: the provider's content filter stopped a reply; "
                            "it is incomplete.", self.model)
-        self._warn_cut(int(finish_reason == "length"), 1, max_tok)
         return content
 
     @property

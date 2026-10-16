@@ -46,6 +46,7 @@ from redact.llm_pipeline import batch_check_samples, drive_units
 from tests.conftest import (
     VLLMValidationError,
     fake_vllm_modules,
+    first_cut_warning,
     interrupt_next_run,
     make_client,
 )
@@ -504,7 +505,7 @@ class TestVLLMAgenerate:
         assert event == {
             "ev": "call", "stage": None, "model": "m", "backend": "vllm", "n_items": 1,
             "in_tok": 2, "out_tok": 3, "out_tok_max": 3, "max_tokens": 3,
-            "temperature": 0.7, "finish_reason": "length"}
+            "temperature": 0.7, "finish_reason": "length", "cut": True}
 
     def test_a_failed_request_is_recorded_then_re_raised(self, monkeypatch, events):
         backend, _ = _vllm_backend(monkeypatch, {}, _Script(["hi"], fail={"hi"}))
@@ -653,13 +654,12 @@ class TestVLLMGenerateBatch:
 
 
 class TestVLLMCutReplies:
-    """One warning per generate() or agenerate(), counting the replies vLLM
-    ended with "length"."""
+    """A reply vLLM ended with "length" is cut: its call event says so, and
+    the model's first one warns."""
 
-    CUT = ("m: {} of {} replies were cut at the token limit (max_tokens=8) and are "
-           "incomplete; raise max_tokens or the context length (max_model_len), or ask for shorter replies.")
+    CUT = first_cut_warning("m", 8)
 
-    def test_cut_replies_warn_once_per_generate(self, monkeypatch, caplog):
+    def test_only_the_first_cut_reply_warns(self, monkeypatch, caplog, events):
         backend, _ = _vllm_backend(monkeypatch, {
             "a": _reply("A", finish_reason="length"),
             "b": _reply("B"),
@@ -667,13 +667,15 @@ class TestVLLMCutReplies:
         })
         with caplog.at_level(logging.WARNING, logger="redact.llms.backends"):
             assert backend.generate([_ask(n) for n in "abc"]) == ["A", "B", "C"]
-        assert [r.getMessage() for r in caplog.records] == [self.CUT.format(2, 3)]
+            assert aio.run(backend.agenerate(_ask("a"))) == "A"
+        assert [r.getMessage() for r in caplog.records] == [self.CUT]
+        assert [e.get("cut") for e in events] == [True, None, True, True]
 
     def test_a_cut_reply_warns_from_agenerate(self, monkeypatch, caplog):
         backend, _ = _vllm_backend(monkeypatch, {"a": _reply("A", finish_reason="length")})
         with caplog.at_level(logging.WARNING, logger="redact.llms.backends"):
             assert aio.run(backend.agenerate(_ask("a"))) == "A"
-        assert [r.getMessage() for r in caplog.records] == [self.CUT.format(1, 1)]
+        assert [r.getMessage() for r in caplog.records] == [self.CUT]
 
     @pytest.mark.parametrize("reason", ["stop", None])
     def test_complete_replies_do_not_warn(self, monkeypatch, caplog, reason):
