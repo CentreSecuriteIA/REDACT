@@ -356,6 +356,17 @@ def test_load_recipe_rejects_unknown_stage():
         load_recipe({"dataset_type": "eval", "stages": ["inputs", "nope"]})
 
 
+def test_load_recipe_rejects_an_unknown_key_naming_the_valid_ones():
+    with pytest.raises(ValueError) as raised:
+        load_recipe({"dataset_type": "eval", "augmentation": {"natural": None}})
+    assert str(raised.value) == (
+        "The recipe has unknown key(s) ['augmentation']; write only "
+        "['dataset_type', 'data_dir', 'models', 'taxonomy', 'taxonomy_dir', "
+        "'prompt_dir', 'stages', 'augmentations', 'params_file', 'resume'].")
+    # A key starting with "_" is a comment.
+    load_recipe({"dataset_type": "eval", "_comment": "a note"})
+
+
 def test_eval_cannot_include_constitution_stage():
     with pytest.raises(ValueError):
         load_recipe({"dataset_type": "eval", "stages": ["constitution", "inputs"]})

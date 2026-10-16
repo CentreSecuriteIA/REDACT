@@ -27,6 +27,10 @@ _REGISTRY_ROLES = {role: registry
 # The keys of a role's object under ``models`` that say how its model is served.
 _SERVING_KEYS = ("backend_type", "copies", "workers")
 
+# The keys a recipe may hold, beside comments ("_" first).
+_RECIPE_KEYS = ("dataset_type", "data_dir", "models", "taxonomy", "taxonomy_dir",
+                "prompt_dir", "stages", "augmentations", "params_file", "resume")
+
 
 def load_recipe(recipe: str | Path | dict) -> dict:
     """Load + validate a recipe (JSON path or already-parsed dict)."""
@@ -61,6 +65,13 @@ def load_recipe(recipe: str | Path | dict) -> dict:
             'The top-level "copies" key is no longer read; write each count in '
             'its role\'s entry under "models" instead, e.g. '
             '"gen": {"name": "llama-3.2-3b-debug", "copies": 2}.')
+    # "copies" is no longer read; a null one says nothing.
+    unknown = [key for key in data
+               if key not in (*_RECIPE_KEYS, "copies") and not key.startswith("_")]
+    if unknown:
+        raise ValueError(
+            f"The recipe has unknown key(s) {unknown}; write only "
+            f"{list(_RECIPE_KEYS)}.")
     # For their errors. The entries stay as written, and a run reads them again.
     serving_of(data.get("models") or {})
     augmentations_of(data)
