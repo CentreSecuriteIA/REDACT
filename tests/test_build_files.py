@@ -370,9 +370,10 @@ def test_a_build_takes_the_seeded_inputs_that_were_not_merged(tmp_path):
 
 # --- a run from the first stage to the build ----------------------------------
 
+# Today's flat form, read as the adversarial kind; the natural kind is the default.
 _PURE = {
     "pure_only": True, "include_hacking": False, "include_manipulation": False,
-    "include_requests": False, "auto_generate_benign": False,
+    "include_requests": False,
 }
 _MODELS = {"gen": "gen-model", "check": "check-model", "paraphraser": "para-model",
            "paraphrase_check": "check-model"}

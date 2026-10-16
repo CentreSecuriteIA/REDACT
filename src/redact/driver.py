@@ -2,7 +2,8 @@
 
 Each stage writes ``{stage}.run.json`` under ``{data_dir}/Datasets/``: the
 resolved params, models, how the stage's models were served, row counts,
-spec version, timestamp and source files.
+spec version, timestamp and source files; the jailbreak stage's also holds
+the resolved augmentation section.
 
 Usage::
 
@@ -26,6 +27,7 @@ from redact.llms.prompting import report_prompt_sources
 from redact.recipe import (
     _DEFAULT_MODELS,
     _role_names,
+    augmentations_of,
     load_params,
     load_recipe,
     resolve_role,
@@ -326,7 +328,7 @@ def run_pipeline(
         taxonomy=recipe.get("taxonomy", "content_moderation_categories"),
         taxonomy_dir=recipe.get("taxonomy_dir"),
         params=params,
-        augmentations=dict(recipe.get("augmentations") or {}),
+        augmentations=augmentations_of(recipe),
         resume=recipe.get("resume", True),
         verbose=verbose,
     )
@@ -379,12 +381,12 @@ def run_pipeline(
                 counts = file_counts(*stage.files(ctx))
                 jailbreaks = name == "jailbreaks"
                 path = write_record(
-                    name, data_dir=ctx.data_dir,
-                    params={**(ctx.augmentations if jailbreaks else {}),
-                            **stage.params(ctx)},
+                    name, data_dir=ctx.data_dir, params=stage.params(ctx),
                     models=ctx.models, counts=counts,
                     spec_version=load_spec().get("version", "") if jailbreaks else None,
-                    extra={"serving": {role: served[role] for role, _ in stage.roles}},
+                    extra={"serving": {role: served[role] for role, _ in stage.roles},
+                           **({"augmentation": ctx.augmentations} if jailbreaks
+                              else {})},
                 )
                 summary["stages"][name] = {"counts": counts, "manifest": str(path)}
                 if verbose:

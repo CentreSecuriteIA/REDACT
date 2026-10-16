@@ -15,7 +15,8 @@ import pytest
 from redact import paths, telemetry
 from redact.dataset import append_samples
 from redact.driver import read_record, run_pipeline, write_record
-from redact.recipe import load_params, load_recipe
+from redact.jailbreak.augmentation import resolve
+from redact.recipe import augmentations_of, load_params, load_recipe
 
 # --- run records -------------------------------------------------------------
 
@@ -400,6 +401,125 @@ def test_the_example_recipes_load(name):
     assert _serving_of(recipe["models"]) == {}
 
 
+# --- the augmentation section -------------------------------------------------
+
+def _section(augmentations) -> dict:
+    return augmentations_of({"augmentations": augmentations})
+
+
+@pytest.mark.parametrize("name", ["eval_example.json", "training_example.json"])
+def test_the_example_recipes_flat_form_is_the_default_section(name):
+    recipe = load_recipe(paths.configs_dir() / "runs" / name)
+    assert augmentations_of(recipe) == _section(None) == {
+        kind: resolve(None, kind) for kind in ("adversarial", "natural")}
+
+
+def test_the_flat_form_is_the_adversarial_kind_beside_the_default_natural_kind():
+    section = _section({"include_hacking": False, "pure_only": True,
+                        "include_translation": True})
+    assert section["adversarial"] == resolve({"adversarial": {
+        "layers": {"deny": ["hacking"]}, "pure_only": True,
+        "families": {"allow": None, "deny": ["casual_writing"]}}}, "adversarial")
+    assert section["natural"] == resolve(None, "natural")
+
+
+def test_a_kind_given_as_null_is_off_and_a_kind_left_out_is_the_default():
+    assert _section({"natural": None}) == {
+        "adversarial": resolve(None, "adversarial"), "natural": None}
+    assert _section({"adversarial": None, "natural": None}) == {
+        "adversarial": None, "natural": None}
+
+
+@pytest.mark.parametrize(("augmentations", "message"), [
+    ({"natural": None, "pure_only": True},
+     "augmentations gives the kinds ['natural'] and the flat keys ['pure_only']; "
+     "write the flat keys inside the adversarial kind."),
+    ({"auto_generate_benign": False},
+     "augmentations names ['auto_generate_benign'], which are not augmentation keys"),
+    ({"natural": {"families": {"allow": ["tyops"]}}},
+     "augmentations.natural.families.allow names 'tyops', which is not a family"),
+    (["include_hacking"], "augmentations must be an object of"),
+])
+def test_a_section_that_breaks_a_rule_fails_at_load(augmentations, message):
+    with pytest.raises(ValueError) as raised:
+        load_recipe({"dataset_type": "eval", "augmentations": augmentations})
+    assert message in str(raised.value)
+
+
+def test_a_bad_technique_name_fails_before_any_stage_runs(tmp_path, monkeypatch):
+    import redact
+
+    ran = []
+    monkeypatch.setattr(redact, "generate_outputs", lambda **k: ran.append("outputs"))
+    recipe = {"dataset_type": "eval", "data_dir": str(tmp_path),
+              "stages": ["outputs", "jailbreaks"],
+              "augmentations": {"adversarial": {"techniques": {"deny": ["to_shout"]}}}}
+    with pytest.raises(ValueError, match="'to_shout', which combination_spec.json"):
+        run_pipeline(recipe, params={}, verbose=False)
+    assert ran == []
+
+
+def test_the_jailbreak_stage_is_handed_the_resolved_section_and_records_it(
+        tmp_path, monkeypatch):
+    import redact
+
+    handed = []
+
+    def jailbreaks(**kwargs):
+        handed.append(kwargs)
+        pd.DataFrame({"accepted": [True] * 2}).to_csv(
+            paths.jailbreaks_csv(tmp_path), index=False)
+        return pd.DataFrame()
+
+    paths.datasets(tmp_path).mkdir(parents=True)
+    # Left by an earlier run: the natural kind is off in this one.
+    pd.DataFrame({"accepted": [True] * 5}).to_csv(
+        paths.variations_csv(tmp_path), index=False)
+    monkeypatch.setattr(redact, "generate_jailbreaks", jailbreaks)
+    section = {"adversarial": {"rounds": "escalation"}, "natural": None}
+    try:
+        summary = run_pipeline(
+            {"dataset_type": "eval", "data_dir": str(tmp_path),
+             "stages": ["jailbreaks"], "augmentations": section},
+            params={"jailbreaks": {"seed": 3}}, verbose=False)
+    finally:
+        telemetry.uninstall()
+    (kwargs,) = handed
+    assert kwargs["augmentation"] == _section(section)
+    assert {key: kwargs[key] for key in ("seed", "data_dir")} == {
+        "seed": 3, "data_dir": str(tmp_path)}
+    assert "rounds" not in kwargs
+    record = read_record("jailbreaks", tmp_path)
+    assert record["augmentation"] == _section(section)
+    assert record["augmentation"]["natural"] is None
+    assert record["params"] == {"seed": 3}
+    assert summary["stages"]["jailbreaks"]["counts"] == {"rows": 2, "accepted": 2}
+
+
+def test_a_params_key_of_the_flat_form_warns_and_is_read_as_before():
+    with pytest.warns(DeprecationWarning, match=r"\['max_complexity'\]"):
+        params = load_params({"jailbreaks": {"max_complexity": 4, "seed": 1}})
+    assert params == {"jailbreaks": {"max_complexity": 4, "seed": 1}}
+
+
+def test_a_params_key_only_the_section_holds_is_refused():
+    with pytest.raises(ValueError) as raised:
+        load_params({"jailbreaks": {"rounds": "escalation", "layer_rates": {}}})
+    assert str(raised.value) == (
+        "params['jailbreaks'] sets ['rounds', 'layer_rates'], which the augmentation "
+        "section holds; write them under the recipe's augmentations, in its "
+        "adversarial or natural kind.")
+
+
+def test_translation_is_planned_when_a_kind_draws_it():
+    from redact.driver import _stage_models
+
+    natural = {"natural": {"families": {"allow": ["translation"]}}}
+    assert "deepseek-v3.2" in _stage_models(_models(), ["jailbreaks"], natural)
+    assert _stage_models(_models(), ["jailbreaks"], _section(None)) == [
+        "venice-uncensored"]
+
+
 def test_the_object_form_is_read_per_model():
     from redact.recipe import _role_names
 
@@ -628,7 +748,6 @@ def test_run_pipeline_eval_jailbreaks_and_build(tmp_path, monkeypatch):
             "include_manipulation": False,
             "include_obfuscation": True,
             "include_requests": False,
-            "auto_generate_benign": False,
         },
         "resume": True,
     }
@@ -643,7 +762,10 @@ def test_run_pipeline_eval_jailbreaks_and_build(tmp_path, monkeypatch):
     jb_manifest = read_record("jailbreaks", tmp_path)
     assert jb_manifest["counts"]["rows"] == 6
     assert "spec_version" in jb_manifest
-    assert jb_manifest["params"]["pure_only"] is True  # augmentation recorded
+    # The section recorded, the flat form read as the adversarial kind.
+    assert jb_manifest["params"] == {"seed": 7}
+    assert jb_manifest["augmentation"]["adversarial"]["pure_only"] is True
+    assert jb_manifest["augmentation"]["natural"] == augmentations_of({})["natural"]
 
     # build stage merged inputs + jailbreaks into the complete dataset + manifest
     assert paths.complete_dataset_csv(tmp_path).exists()
@@ -677,7 +799,7 @@ def test_a_training_run_reads_the_inputs_it_seeded(tmp_path, monkeypatch):
         "stages": ["outputs", "paraphrase", "jailbreaks"],
         "augmentations": {
             "pure_only": True, "include_hacking": False, "include_manipulation": False,
-            "include_requests": False, "auto_generate_benign": False,
+            "include_requests": False,
         },
     }
     try:

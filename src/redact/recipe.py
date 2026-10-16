@@ -4,11 +4,13 @@ A recipe says what to run: ``dataset_type`` (``"eval"``, no constitution, or
 ``"training"``, constitution-seeded), ``data_dir``, ``models`` per role (a
 registry name, or an object that also says how the model is served, see
 :func:`serving_of`), ``taxonomy``/``taxonomy_dir``/``prompt_dir``, an ordered
-``stages`` list, ``augmentations``, a ``params_file`` and ``resume``. Its
-params file holds each stage's tunables under the stage's name.
+``stages`` list, ``augmentations`` (the augmentation section, see
+:func:`augmentations_of`), a ``params_file`` and ``resume``. Its params file
+holds each stage's tunables under the stage's name.
 """
 
 import json
+import warnings
 from pathlib import Path
 
 from redact.stages import STAGES
@@ -59,8 +61,9 @@ def load_recipe(recipe: str | Path | dict) -> dict:
             'The top-level "copies" key is no longer read; write each count in '
             'its role\'s entry under "models" instead, e.g. '
             '"gen": {"name": "llama-3.2-3b-debug", "copies": 2}.')
-    # For its errors. The entries stay as written, and a run reads them again.
+    # For their errors. The entries stay as written, and a run reads them again.
     serving_of(data.get("models") or {})
+    augmentations_of(data)
     data["stages"] = stages
     data["dataset_type"] = dtype
     return data
@@ -74,12 +77,91 @@ def load_params(
     if params is None:
         return {}
     if isinstance(params, dict):
-        return dict(params)
-    p = Path(params)
-    if not p.is_absolute() and base_dir is not None:
-        p = Path(base_dir) / p
-    with p.open(encoding="utf-8") as fh:
-        return json.load(fh)
+        data = dict(params)
+    else:
+        p = Path(params)
+        if not p.is_absolute() and base_dir is not None:
+            p = Path(base_dir) / p
+        with p.open(encoding="utf-8") as fh:
+            data = json.load(fh)
+    _check_jailbreak_params(data)
+    return data
+
+
+def _check_jailbreak_params(params: dict) -> None:
+    """Refuse a key of ``params["jailbreaks"]`` that the augmentation section
+    holds, and warn for one of today's flat keywords, read as before for one
+    release.
+
+    Raises:
+        ValueError: A key only the section holds.
+    """
+    from .jailbreak.augmentation import FLAT_KEYWORDS, defaults
+
+    given = params.get("jailbreaks") or {}
+    section_keys = {key for kind in defaults().values() for key in kind}
+    only_section = [key for key in given
+                    if key in section_keys and key not in FLAT_KEYWORDS]
+    if only_section:
+        raise ValueError(
+            f"params['jailbreaks'] sets {only_section}, which the augmentation "
+            "section holds; write them under the recipe's augmentations, in its "
+            "adversarial or natural kind.")
+    flat = [key for key in given if key in FLAT_KEYWORDS]
+    if flat:
+        warnings.warn(
+            f"params['jailbreaks'] sets {flat}, which the augmentation section "
+            "now holds; write them under the recipe's augmentations.adversarial. "
+            "They are read as before for this release.",
+            DeprecationWarning, stacklevel=3)
+
+
+def augmentations_of(recipe: dict) -> dict:
+    """The recipe's augmentation section, each kind resolved over its default.
+
+    A kind given as null is off and a kind left out is the default
+    (:func:`redact.jailbreak.augmentation.resolve`). Today's flat form, the
+    keywords of ``generate_jailbreaks`` the section replaced written at the top
+    of ``augmentations``, is read as the adversarial kind, the natural kind
+    then the default.
+
+    Returns:
+        ``{"adversarial": kind or None, "natural": kind or None}``.
+
+    Raises:
+        ValueError: The section breaks a rule. The message names the kind and
+            the key and says what to write.
+    """
+    from .jailbreak.augmentation import (
+        FLAT_KEYWORDS,
+        KINDS,
+        apply_flat_keywords,
+        resolve,
+    )
+
+    section = recipe.get("augmentations")
+    section = {} if section is None else section
+    if not isinstance(section, dict):
+        raise ValueError(
+            f"augmentations must be an object of {list(KINDS)}, got {section!r}.")
+    flat = {key: value for key, value in section.items()
+            if key not in KINDS and not key.startswith("_")}
+    if flat:
+        kinds = [kind for kind in KINDS if kind in section]
+        if kinds:
+            raise ValueError(
+                f"augmentations gives the kinds {kinds} and the flat keys "
+                f"{list(flat)}; write the flat keys inside the adversarial kind.")
+        other = [key for key in flat if key not in FLAT_KEYWORDS]
+        if other:
+            raise ValueError(
+                f"augmentations names {other}, which are not augmentation keys; "
+                "write a parameter of generate_jailbreaks under "
+                "params['jailbreaks'], and a key of the section inside its "
+                "adversarial or natural kind.")
+        section = {"adversarial": apply_flat_keywords(
+            resolve(None, "adversarial"), flat)}
+    return {kind: resolve(section, kind) for kind in KINDS}
 
 
 def _role_names(models: dict) -> dict:
@@ -94,15 +176,15 @@ def resolve_role(
     """The models a recipe role stands for, resolved as its stage resolves it.
 
     ``paraphraser`` may name the pool of every paraphraser, ``check`` left
-    out is the ``gen`` model, and ``translation`` is no model when the
-    jailbreak stage's pool, built from the recipe's ``augmentations``, has no
-    translation technique (not asked when ``augmentations`` is None).
+    out is the ``gen`` model, and ``translation`` is no model when no kind of
+    ``augmentations`` (the recipe's section, in any form
+    :func:`augmentations_of` reads) draws a translation technique; not asked
+    when ``augmentations`` is None.
 
     Raises:
         KeyError, ValueError: No model is registered for the role.
     """
     from .content_moderation.paraphrase import paraphrase_pool
-    from .jailbreak.augmentation import FLAT_KEYWORDS, apply_flat_keywords, resolve
     from .jailbreak.pool import technique_pool, uses_translation
     from .llms.model_config import default_model_for_role
 
@@ -112,11 +194,9 @@ def resolve_role(
     if role == "check":
         return [name] if name else resolve_role(models, "gen", augmentations)
     if role == "translation" and augmentations is not None:
-        flat = {key: value for key, value in augmentations.items()
-                if key in FLAT_KEYWORDS}
-        kind = resolve({"adversarial": apply_flat_keywords(
-            resolve(None, "adversarial"), flat)}, "adversarial")
-        if not uses_translation(technique_pool(kind)):
+        kinds = augmentations_of({"augmentations": augmentations}).values()
+        if not any(uses_translation(technique_pool(kind))
+                   for kind in kinds if kind is not None):
             return []
     return [name or default_model_for_role(_REGISTRY_ROLES[role])]
 

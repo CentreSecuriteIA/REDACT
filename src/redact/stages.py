@@ -937,7 +937,7 @@ class RunContext:
     taxonomy: dict | str
     taxonomy_dir: str | Path | None
     params: dict                # the params file: stage name -> the front's kwargs
-    augmentations: dict
+    augmentations: dict         # the augmentation section, both kinds resolved
     resume: bool
     verbose: bool
 
@@ -1092,14 +1092,19 @@ def _jailbreaks_kwargs(ctx: RunContext) -> dict:
     return dict(
         data_dir=ctx.data_dir, model=ctx.models["gen"],
         translation_model=ctx.models["translation"], prompt_dir=ctx.prompt_dir,
-        resume=ctx.resume, verbose=ctx.verbose, **ctx.augmentations,
+        resume=ctx.resume, verbose=ctx.verbose, augmentation=ctx.augmentations,
     )
 
 
 def _jailbreaks_files(ctx: RunContext) -> tuple[list[Path], dict]:
+    """The file of each kind that is on: a kind left out is on, one given as
+    None is off."""
     given = _params(ctx, "jailbreaks")
-    return [given.get("output_path") or paths.jailbreaks_csv(ctx.data_dir),
-            given.get("variations_path") or paths.variations_csv(ctx.data_dir)], {}
+    default = {"adversarial": ("output_path", paths.jailbreaks_csv),
+               "natural": ("variations_path", paths.variations_csv)}
+    return [given.get(key) or path(ctx.data_dir)
+            for kind, (key, path) in default.items()
+            if ctx.augmentations.get(kind, {}) is not None], {}
 
 
 def _build_kwargs(ctx: RunContext) -> dict:
