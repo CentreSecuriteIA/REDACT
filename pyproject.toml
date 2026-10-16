@@ -31,7 +31,10 @@ dependencies = [
 ]
 
 [project.optional-dependencies]
-vllm = ["vllm>=0.4", "hf_transfer>=0.1"]
+# psutil: vLLM installs it, and redact imports it directly to end engine
+# processes and their workers (backends/vllm.py) and to tell this run's
+# engine processes from others on a card (driver.py, only with local models).
+vllm = ["vllm>=0.4", "hf_transfer>=0.1", "psutil>=5.9"]
 # accelerate is required, not optional: IntrospectConfig.device_map defaults
 # to "auto", and transformers raises without accelerate whenever device_map
 # is set — so every introspection backend construction needs it.
