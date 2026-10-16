@@ -464,6 +464,39 @@ def test_a_pool_with_a_technique_that_needs_benign_data_loads_it(tmp_path, monke
     assert df["accepted"].all() and df["jailbreak"].str.contains("bq").all()
 
 
+def test_a_resume_loads_the_benign_data_its_plan_needs_whatever_its_pool(
+        tmp_path, monkeypatch):
+    """Else the pending units of a technique that needs it would be acked as
+    error rows, never to run again."""
+    import itertools
+
+    import redact.jailbreak.pipeline as JPipe
+
+    loads = _benign_loads(monkeypatch)
+    out, finished, drive_units = tmp_path / "jb.csv", 2, JPipe.drive_units
+    fsh = {"adversarial": {"techniques": {"allow": ["to_fsh_random_short"]},
+                           "rounds": [{"exact_techniques": 1}]}, "natural": None}
+
+    def stop_after_two(source, **kwargs):
+        drive_units(itertools.islice(source, finished), **kwargs)
+        raise KeyboardInterrupt
+
+    with monkeypatch.context() as patch:
+        patch.setattr(JPipe, "drive_units", stop_after_two)
+        with pytest.raises(KeyboardInterrupt):
+            generate_jailbreaks(inputs=_inputs(), output_path=out, seed=7,
+                                augmentation=fsh, verbose=False)
+    assert len(pd.read_csv(out)) == finished
+    loaded = len(loads)
+
+    # The resumed run's pool of pure obfuscations needs no benign data.
+    df = generate_jailbreaks(inputs=_inputs(), output_path=out, seed=7,
+                             **{**PURE_KW, "auto_generate_benign": True})
+    assert len(loads) == loaded + 1
+    assert len(df) == len(_inputs()) and df["accepted"].all()
+    assert set(df["technique"]) == {"to_fsh_random_short"}
+
+
 def test_a_pool_without_one_loads_no_benign_data(tmp_path, monkeypatch):
     loads = _benign_loads(monkeypatch)
     df = generate_jailbreaks(inputs=_inputs(), output_path=tmp_path / "jb.csv", seed=7,
