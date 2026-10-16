@@ -192,9 +192,10 @@ src/redact/
 │   │   ├── capabilities.py        # BACKEND_TYPES + resolve_setup/transport_for/backend_for
 │   │   ├── openai.py              # Generic OpenAI-compatible API backend (Venice today)
 │   │   ├── anthropic.py           # Anthropic Claude backend (native SDK)
-│   │   ├── vllm.py                # Local vLLM backend for self-hosted inference
+│   │   ├── vllm.py                # Local vLLM backend: AsyncLLM in-process, one engine request per item
 │   │   └── introspection.py       # Local transformers backend with internals capture
 │   ├── observe.py                 # Telemetry emit hook (no-op by default; keeps llms/ dep-free)
+│   ├── aio.py                     # One event loop on a daemon thread for every async model call
 │   ├── client.py                  # ModelClient: a configured backend + its dispatch strategy
 │   ├── router.py                  # generate_sample(), batch_generate_samples(), assert_single_sample_per_call()
 │   ├── wrappers.py                # RateLimiter + BatchCaller, both wired from a backend
@@ -309,10 +310,10 @@ Everything above this layer calls a unified interface and is backend-agnostic.
 
 | Component | Purpose |
 |---|---|
-| `LLMBackend` | Abstract base class. A backend **is one configured model** — name, generation defaults, provider params, rpm and worker budget are bound at construction, so `generate(messages_list, *, max_tokens=..., temperature=...)` takes only what varies per call. Always batch-shaped (a single sample is a batch of one) |
+| `LLMBackend` | Abstract base class. A backend **is one configured model** — name, generation defaults, provider params, rpm and worker budget are bound at construction, so `generate(messages_list, *, max_tokens=..., temperature=...)` takes only what varies per call. Always batch-shaped (a single sample is a batch of one); a backend with async calls also has the coroutine `agenerate(messages)` for one item |
 | `OpenAIBackend` | Generic OpenAI-compatible API backend (Venice AI is the provider registered against it today) |
 | `AnthropicBackend` | Anthropic Claude (native SDK, separate system param) |
-| `VLLMBackend` | Local vLLM for self-hosted GPU inference |
+| `VLLMBackend` | Local vLLM for self-hosted GPU inference: vLLM's `AsyncLLM` in this process, one engine request per item |
 | `TransformersIntrospectionBackend` | Local raw-`transformers` inference with hidden-state/attention/logprob capture (research/interpretability) |
 | `ModelClient.create()` | Resolve a model name to a ready-to-call client (backend + limiter + batch strategy) |
 | `backend_for()` | Build the finished backend for one model on one of its setups |
@@ -323,7 +324,7 @@ Everything above this layer calls a unified interface and is backend-agnostic.
 | `batch_generate_samples()` | Generate multiple samples in chunks of `batch_size`, in input order |
 | `check_sample()` / `batch_check_samples()` | Validate one sample / many against a `(original, sample) -> messages` checker (`redact.llm_pipeline`) |
 | `checked()` / `extracted()` | A unit's retry steps: generate, check, regenerate with the verdict / generate until a reply parses (`redact.llm_pipeline`) |
-| `drive_units()` | Drive many such generators as a pool topped up from a lazy source, batching their calls per model (`redact.llm_pipeline`) |
+| `drive_units()` | Drive many such generators as a pool topped up from a lazy source, batching their calls per model; a request to a backend with async calls goes out alone on the async lane instead (`redact.llm_pipeline`) |
 | `telemetry.install()` | Start the run trace (JSONL by default) and cost roll-up |
 | `telemetry.stage()` | Label every event inside a block with its pipeline stage |
 | `residency.plan_residency()` | Which local models fit on this machine, and in what order |
@@ -374,13 +375,13 @@ generate_inputs(constitution_df=constitution, model="llama-3.2-3b-debug")
 
 When the `vllm` setup of `venice-uncensored` is requested, `ModelClient.create()` automatically creates a `VLLMBackend` for `dphn/Dolphin-Mistral-24B-Venice-Edition`. On first use vLLM downloads the model weights from HuggingFace and caches them at the path set by `HF_HOME` in your `.env`. Subsequent runs load directly from cache — no re-download.
 
-Prompts always go through vLLM's own chat template (`llm.chat()`), so any checkpoint whose tokenizer ships a usable `chat_template` — Dolphin, Hermes, and most instruct models — works with no extra flag. For one that doesn't (Mistral-3.x), pass vLLM's native `vllm_kwargs={"tokenizer_mode": "mistral"}`; there is no hand-rolled prompt formatting in this library.
+Prompts are tokenized with the chat template of the engine's tokenizer, so any checkpoint whose tokenizer ships a usable `chat_template` — Dolphin, Hermes, and most instruct models — works with no extra flag. For one that doesn't (Mistral-3.x), pass vLLM's native `vllm_kwargs={"tokenizer_mode": "mistral"}`; there is no hand-rolled prompt formatting in this library.
 
 The engine is cached per checkpoint, not per model name, so two registry rows naming the same `hf_model_id` (as `venice-uncensored`'s `.vllm` setup and `venice-paraphraser` do) share one load instead of filling GPU memory twice. That cache is private to `VLLMBackend`: the introspection backend loads the same weights through `transformers`, a different runtime, and keeps its own.
 
 There is deliberately **no separate `venice-uncensored-vllm` row**: the hosted endpoint and the local weights are the same model, so one entry carries both `.api` and `.vllm`, and `ModelClient.create("venice-uncensored", backend_type="vllm")` selects the local one. Which setup is bound also decides the budget: a backend built from the `.vllm` setup carries no rpm and no `extra_body`, so running locally never inherits the endpoint's rate limit or its provider params.
 
-Both generation and checker paths dispatch through a `ModelClient` (never the raw backend), so every batch is rate-limited and uses the right execution mode for its backend: one vLLM engine pass for native backends, a thread pool sized by the registry's `recommended_max_workers` for parallel-safe APIs, or sequential for series-only backends (Anthropic). That choice is made once, when the client is built. The `batch_size` parameter (default 32) controls how many entries are grouped per pass.
+Both generation and checker paths go through a `ModelClient` (never the raw backend), so every call is rate-limited. In the stages, a request to a backend with async calls (vLLM, OpenAI-compatible) goes on the **async lane** of `drive_units`: it is sent the moment its unit needs it, with up to the model's `max_workers` in flight (for vLLM, the sequences the engine runs at once, times its copies), and its reply is handed back the moment it is done, so no unit waits for a longer reply. Requests to the other backends are grouped into `generate()` calls of up to `batch_size`: a thread pool sized by the registry's `recommended_max_workers` for parallel-safe APIs, or sequential for series-only backends (Anthropic). Which path a model takes is read off its backend's capability flags, never per call.
 
 For a custom model, register it (or an existing HF id) so the backend auto-resolves from the name:
 
@@ -615,7 +616,7 @@ A kind you give overlays its default from `configs/jailbreak/augmentations.json`
 
 **Known limitation:** the phase-5 request obfuscation isn't counted against `max_obfuscations`.
 
-**Execution model.** LLM-dependent techniques are **generators** that `yield` an `LLMRequest` and resume via `.send(response)` (`technique.py`); pure transforms are plain callables. `generate_jailbreaks()` plans the run, then drives every pending unit through one pool (`llm_pipeline.drive_units`): each call to a model carries up to `batch_size` pending requests for it, so a round's translations, checks and rewrites go out in batches, and finished units are appended every 32. It resumes from the sidecar `jailbreaks.state.jsonl` ledger, reusing the plan (see [Resume model](#resume-model-one-modular-sidecar-system)). A unit that fails gets an error row with its own `sample_id`. Benign Q&A data for FSH/DAP is loaded, or generated once and cached, when a planned unit needs it. Each translation makes 2–8 calls to the translation-role model (translate, check, retry), which is why translation is off by default. The natural kind runs the same way, to `variations.csv`.
+**Execution model.** LLM-dependent techniques are **generators** that `yield` an `LLMRequest` and resume via `.send(response)` (`technique.py`); pure transforms are plain callables. `generate_jailbreaks()` plans the run, then drives every pending unit through one pool (`llm_pipeline.drive_units`): a request to a model with async calls (vLLM, OpenAI-compatible) goes out alone the moment its unit needs it, and the others are grouped per model into calls of up to `batch_size`. Finished units are appended every 32. It resumes from the sidecar `jailbreaks.state.jsonl` ledger, reusing the plan (see [Resume model](#resume-model-one-modular-sidecar-system)). A unit that fails gets an error row with its own `sample_id`. Benign Q&A data for FSH/DAP is loaded, or generated once and cached, when a planned unit needs it. Each translation makes 2–8 calls to the translation-role model (translate, check, retry), which is why translation is off by default. The natural kind runs the same way, to `variations.csv`.
 
 #### Obfuscation (72 functions)
 
@@ -916,8 +917,8 @@ Datasets/
   run-20260829-142211.trace.jsonl     <- what was called, and what it cost
 ```
 
-One event per **transport call** (a native vLLM pass over 32 prompts is one event with
-`n_items=32`, not 32 events), labelled with the pipeline stage it belongs to. Set
+One event per **transport call** (for vLLM, one per engine request, so a batch of 32 is
+32 events), labelled with the pipeline stage it belongs to. Set
 `REDACT_TRACE=wandb` to mirror the same events to Weights & Biases, or `off` for nothing.
 
 `run_pipeline` also logs a cost roll-up at the end. **Two meters, because two different
