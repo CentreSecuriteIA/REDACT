@@ -164,17 +164,15 @@ class AnthropicBackend(LLMBackend):
                 in_tok=getattr(usage, "input_tokens", None),
                 out_tok=out_tok, out_tok_max=out_tok,
                 max_tokens=max_tok, temperature=temp, finish_reason=stop_reason,
+                # Two stop reasons cut a reply: the requested cap and the
+                # context window.
+                cut=stop_reason in ("max_tokens", "model_context_window_exceeded"),
             )
             # A response with no content blocks counts as an empty reply.
             text = (response.content[0].text or "") if response.content else ""
             if not text:
                 logger.warning("%s returned an empty reply (stop_reason=%s).",
                                self.model, stop_reason)
-            # Two stop reasons cut a reply: the requested cap and the context window.
-            self._warn_cut(
-                int(stop_reason in ("max_tokens", "model_context_window_exceeded")),
-                1, max_tok,
-            )
             results.append(text)
         return results
 

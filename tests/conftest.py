@@ -57,6 +57,33 @@ def _no_planned_shares():
 
 
 @pytest.fixture(autouse=True)
+def _no_busy_cards(monkeypatch):
+    """A run reads what the machine's cards hold before it loads a model: a
+    test's run sees no card, also on a machine with a busy one."""
+    from redact.llms.resources import measure
+
+    monkeypatch.setattr(measure, "card_use", lambda: None)
+
+
+@pytest.fixture(autouse=True)
+def _no_cut_warned():
+    """A model's first cut reply in a stage warns once: a test's warning must
+    not silence the next test's."""
+    yield
+    from redact.llms.backends import base
+
+    base._cut_warned.clear()
+
+
+def first_cut_warning(model: str, max_tokens: int) -> str:
+    """The warning at a model's first reply cut at the token limit in a stage."""
+    return (f"{model}: a reply was cut at the token limit (max_tokens={max_tokens}) "
+            "and is incomplete; raise max_tokens or the context length "
+            "(max_model_len), or ask for shorter replies. Later ones are only "
+            "counted: see the stage's end and the telemetry summary.")
+
+
+@pytest.fixture(autouse=True)
 def _no_held_locks():
     """A stage's lock outlives a ``resume_state`` that no ``CommitBuffer``
     followed: a test's must not reach the next."""

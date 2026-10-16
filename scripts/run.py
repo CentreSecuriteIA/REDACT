@@ -9,15 +9,80 @@ Execute a whole REDACT run from a recipe JSON (eval or training)::
 The recipe's ``params_file`` is used unless ``--params`` overrides it, and
 ``--data-dir`` overrides the recipe's ``data_dir``. Each stage writes a
 ``{stage}.run.json`` manifest under ``{data_dir}/Datasets/``.
+
+The first Ctrl-C (or ``kill <pid>``) releases the models and exits; a
+second one ends the run's child processes, vLLM's engine among them, and
+exits at once.
 """
 
 import argparse
+import contextlib
 import json
 import logging
+import os
 import signal
 import sys
 
 from redact import run_pipeline
+
+try:
+    import psutil  # vLLM installs it
+except ImportError:
+    psutil = None
+
+#: Seconds the child processes get to end after SIGTERM, before SIGKILL.
+_CHILD_GRACE_S = 2.0
+
+
+def _say(line: str) -> None:
+    """Write a line to stderr from a signal handler, where ``print`` may raise."""
+    with contextlib.suppress(OSError):
+        os.write(2, (line + "\n").encode())
+
+
+def _end_child_processes() -> None:
+    """SIGTERM this process's children, such as vLLM's engine and worker
+    processes, then SIGKILL those still alive after a short wait.
+
+    Best-effort: does nothing on Windows or without psutil.
+    """
+    if psutil is None or os.name == "nt":
+        return
+    with contextlib.suppress(psutil.Error):
+        children = psutil.Process().children(recursive=True)
+        for child in children:
+            with contextlib.suppress(psutil.Error):
+                child.terminate()
+        _, alive = psutil.wait_procs(children, timeout=_CHILD_GRACE_S)
+        for child in alive:
+            with contextlib.suppress(psutil.Error):
+                child.kill()
+
+
+def _exit_through_release() -> None:
+    """Make Ctrl-C and SIGTERM exit through the run's ``finally``, which
+    releases the models, and a second one of either exit at once.
+
+    SIGTERM's default action would leave the engine process holding the
+    card. A release that hangs, such as a model load that never returns,
+    keeps the process up until the second signal.
+    """
+    received = []
+
+    def handle(signum, frame):
+        received.append(signum)
+        if len(received) > 1:
+            _say("Interrupted again: ending the engine processes and exiting at "
+                 "once. Check with nvidia-smi that the card is free.")
+            _end_child_processes()
+            os._exit(128 + signum)
+        _say("Interrupted: releasing the models. Interrupt again to exit at once.")
+        if signum == signal.SIGINT:
+            signal.default_int_handler(signum, frame)   # raises KeyboardInterrupt
+        sys.exit(128 + signum)
+
+    signal.signal(signal.SIGINT, handle)
+    signal.signal(signal.SIGTERM, handle)
 
 
 def main(argv=None) -> int:
@@ -39,9 +104,7 @@ def main(argv=None) -> int:
         level = logging.INFO
     logging.basicConfig(level=level, format="%(message)s")
 
-    # kill <pid> then releases the models and exits, as Ctrl-C does. The default
-    # action would leave the engine process holding the card.
-    signal.signal(signal.SIGTERM, lambda signum, frame: sys.exit(128 + signum))
+    _exit_through_release()
 
     summary = run_pipeline(args.recipe, params=args.params, verbose=not args.quiet,
                            data_dir=args.data_dir)

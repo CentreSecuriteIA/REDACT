@@ -193,6 +193,47 @@ def test_a_training_run_starts_at_inputs_from_the_saved_constitution(
         "entry_type": ["harmful", "benign"], "sample_description": ["about zq0", ""]}
 
 
+@pytest.mark.parametrize("constitution", ["in the recipe", "saved", "none"])
+def test_an_eval_run_seeds_its_inputs_when_it_has_a_constitution(
+        tmp_path, monkeypatch, constitution):
+    """A constitution stage in the recipe, or a constitution saved under
+    ``data_dir``, seeds the inputs; without either they are standalone. The
+    counts are taken from the tree the inputs went to."""
+    import redact
+
+    rows = {"entry_type": ["harmful"], "sample_description": ["about zq0"]}
+    monkeypatch.setattr(redact, "generate_constitution", _saves_a_constitution(rows))
+    if constitution == "saved":
+        _saves_a_constitution(rows)(data_dir=tmp_path)
+    handed = []
+
+    texts = ["prompt one", "prompt two"]
+
+    def inputs(**kwargs):
+        handed.append(kwargs)
+        seeded = "constitution_df" in kwargs
+        tree = (paths.constitution_inputs_dir if seeded else paths.datasets)(tmp_path)
+        append_samples(texts, category="Cyber", turn=0, dataset_dir=tree)
+        return pd.DataFrame()
+
+    monkeypatch.setattr(redact, "generate_inputs", inputs)
+    stages = ["inputs"]
+    if constitution == "in the recipe":
+        stages.insert(0, "constitution")
+    try:
+        summary = run_pipeline(
+            {"dataset_type": "eval", "data_dir": str(tmp_path), "stages": stages},
+            params={}, verbose=False)
+    finally:
+        telemetry.uninstall()
+    (kwargs,) = handed
+    if constitution == "none":
+        assert "constitution_df" not in kwargs
+    else:
+        assert kwargs["constitution_df"].to_dict("list") == rows
+    assert summary["stages"]["inputs"]["counts"]["rows"] == len(texts)
+
+
 def test_a_wrong_params_key_fails_before_any_stage_runs(tmp_path, monkeypatch):
     import redact
 
@@ -332,16 +373,23 @@ def test_run_pipeline_takes_a_data_dir_over_the_recipes(tmp_path, monkeypatch):
     assert read_record("build", tmp_path / "recipe") is None
 
 
-def test_the_run_script_hands_run_pipeline_the_recipe_unread(tmp_path, monkeypatch):
-    """The recipe is loaded once, by ``run_pipeline``; ``--data-dir`` goes with it."""
+def _run_script():
+    """``scripts/run.py``, loaded as a module."""
     import importlib.util
-    import logging
-    import signal
 
     spec = importlib.util.spec_from_file_location(
         "run_script", Path(__file__).parents[1] / "scripts" / "run.py")
     script = importlib.util.module_from_spec(spec)
     spec.loader.exec_module(script)
+    return script
+
+
+def test_the_run_script_hands_run_pipeline_the_recipe_unread(tmp_path, monkeypatch):
+    """The recipe is loaded once, by ``run_pipeline``; ``--data-dir`` goes with it."""
+    import logging
+    import signal
+
+    script = _run_script()
     handed = []
     monkeypatch.setattr(script, "run_pipeline",
                         lambda recipe, **kw: handed.append((recipe, kw)) or {})
@@ -350,6 +398,118 @@ def test_the_run_script_hands_run_pipeline_the_recipe_unread(tmp_path, monkeypat
     assert script.main(["recipe.json", "--data-dir", "elsewhere", "--quiet"]) == 0
     assert handed == [("recipe.json",
                        {"params": None, "verbose": False, "data_dir": "elsewhere"})]
+
+
+@pytest.mark.parametrize("first,exit_type", [
+    ("SIGINT", KeyboardInterrupt), ("SIGTERM", SystemExit)])
+def test_a_second_interrupt_exits_the_run_script_at_once(
+        monkeypatch, capfd, first, exit_type):
+    """The first Ctrl-C or kill exits through the run's ``finally``, which
+    releases the models; a second one exits at once, as a hung release
+    would otherwise keep the process up."""
+    import signal
+
+    script, exits = _run_script(), []
+    handlers = _signal_handlers(monkeypatch, script, exits)
+    capfd.readouterr()
+
+    signum = getattr(signal, first)
+    with pytest.raises(exit_type) as raised:
+        handlers[signum](signum, None)
+    if exit_type is SystemExit:
+        assert raised.value.code == 128 + signum
+    assert "again" in capfd.readouterr().err and exits == []
+    with pytest.raises(_Exited):
+        handlers[signal.SIGINT](signal.SIGINT, None)
+    assert exits == [("exit", 128 + signal.SIGINT)]
+    assert "at once" in capfd.readouterr().err
+
+
+class _Exited(BaseException):
+    """Stands for the end of the process."""
+
+
+def _signal_handlers(monkeypatch, script, done, name="posix"):
+    """Run the script's ``main`` on a stub run and return the signal handlers
+    it installed. Its ``os`` is ``os`` on a platform called ``name``, whose
+    ``_exit`` appends ``("exit", code)`` to ``done`` and raises :class:`_Exited`."""
+    import logging
+    import os
+    import signal
+    from types import SimpleNamespace
+
+    def hard_exit(code):
+        done.append(("exit", code))
+        raise _Exited
+
+    handlers = {}
+    monkeypatch.setattr(script, "run_pipeline", lambda recipe, **kw: {})
+    monkeypatch.setattr(script, "os",
+                        SimpleNamespace(name=name, write=os.write, _exit=hard_exit))
+    monkeypatch.setattr(logging, "basicConfig", lambda **kw: None)
+    monkeypatch.setattr(signal, "signal",
+                        lambda signum, fn: handlers.update({signum: fn}))
+    script.main(["recipe.json"])
+    return handlers
+
+
+def _fake_psutil(children, done, survivors):
+    """A stand-in for psutil: this process has ``children`` (pids), and of
+    those the ones in ``survivors`` outlive the wait."""
+    from types import SimpleNamespace
+
+    class Child:
+        def __init__(self, pid):
+            self.pid = pid
+
+        def terminate(self):
+            done.append(("terminate", self.pid))
+
+        def kill(self):
+            done.append(("kill", self.pid))
+
+    procs = [Child(pid) for pid in children]
+
+    def wait_procs(waited, timeout):
+        done.append(("wait", timeout))
+        return ([c for c in waited if c.pid not in survivors],
+                [c for c in waited if c.pid in survivors])
+
+    return SimpleNamespace(
+        Error=Exception, wait_procs=wait_procs,
+        Process=lambda: SimpleNamespace(children=lambda recursive: procs))
+
+
+def test_a_forced_exit_ends_the_child_processes_first(monkeypatch):
+    """vLLM's engine and worker processes are this process's children: a
+    hard exit that left them would leave them holding the card."""
+    import signal
+
+    script, done = _run_script(), []
+    monkeypatch.setattr(script, "psutil", _fake_psutil([11, 12], done, {12}))
+    handlers = _signal_handlers(monkeypatch, script, done)
+    with pytest.raises(KeyboardInterrupt):
+        handlers[signal.SIGINT](signal.SIGINT, None)
+    with pytest.raises(_Exited):
+        handlers[signal.SIGINT](signal.SIGINT, None)
+    assert done == [("terminate", 11), ("terminate", 12), ("wait", 2.0),
+                    ("kill", 12), ("exit", 128 + signal.SIGINT)]
+
+
+@pytest.mark.parametrize("platform,children", [("nt", [11]), ("posix", None)])
+def test_a_forced_exit_on_windows_or_without_psutil_only_exits(
+        monkeypatch, platform, children):
+    import signal
+
+    script, done = _run_script(), []
+    fake = _fake_psutil(children, done, set()) if children else None
+    monkeypatch.setattr(script, "psutil", fake)
+    handlers = _signal_handlers(monkeypatch, script, done, name=platform)
+    with pytest.raises(KeyboardInterrupt):
+        handlers[signal.SIGINT](signal.SIGINT, None)
+    with pytest.raises(_Exited):
+        handlers[signal.SIGINT](signal.SIGINT, None)
+    assert done == [("exit", 128 + signal.SIGINT)]
 
 
 def test_every_recipe_role_is_called_by_a_stage():
@@ -516,9 +676,9 @@ def test_a_benign_taxonomy_in_the_params_is_refused(tmp_path, monkeypatch):
         "generate_jailbreaks itself; leave it out of the params.")
 
 
-def test_eval_cannot_include_constitution_stage():
-    with pytest.raises(ValueError):
-        load_recipe({"dataset_type": "eval", "stages": ["constitution", "inputs"]})
+def test_an_eval_recipe_may_include_the_constitution_stage():
+    recipe = load_recipe({"dataset_type": "eval", "stages": ["constitution", "inputs"]})
+    assert recipe["stages"] == ["constitution", "inputs"]
 
 
 def test_load_params_resolves_relative_to_base_dir(tmp_path):

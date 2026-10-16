@@ -8,6 +8,7 @@ from unittest.mock import MagicMock, patch
 import pytest
 
 from redact.llms import observe
+from tests.conftest import first_cut_warning
 
 
 @pytest.fixture()
@@ -219,6 +220,4 @@ class TestAnthropicCutReply:
             assert anthropic_backend.generate(
                 [[{"role": "user", "content": "hi"}]], max_tokens=50) == ["partial"]
         assert [r.getMessage() for r in caplog.records] == [
-            "claude-opus-4-6: 1 of 1 replies were cut at the token limit "
-            "(max_tokens=50) and are incomplete; raise max_tokens or the context length (max_model_len), or ask for shorter replies."
-        ]
+            first_cut_warning("claude-opus-4-6", 50)]

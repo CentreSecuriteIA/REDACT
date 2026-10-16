@@ -1,11 +1,12 @@
 """What a recipe and its params file say.
 
-A recipe says what to run: ``dataset_type`` (``"eval"``, no constitution, or
-``"training"``, constitution-seeded), ``data_dir``, ``models`` per role (a
-registry name, or an object that also says how the model is served, see
+A recipe says what to run: ``dataset_type`` (``"eval"`` or ``"training"``;
+a training run's inputs are seeded from a constitution, an eval run's when
+it has one), ``data_dir``, ``models`` per role (a registry name, or an
+object that also says how the model is served, see
 :func:`serving_of`), ``taxonomy``/``taxonomy_dir``/``prompt_dir``,
-``benign_taxonomy`` (see :func:`benign_taxonomy_of`), an ordered ``stages``
-list, ``augmentations`` (the augmentation section, see
+``benign_taxonomy`` (see :func:`benign_taxonomy_of`), an ordered
+``stages`` list, ``augmentations`` (the augmentation section, see
 :func:`augmentations_of`), a ``params_file`` and ``resume``. Its params file
 holds each stage's tunables under the stage's name.
 """
@@ -60,8 +61,6 @@ def load_recipe(recipe: str | Path | dict) -> dict:
         raise ValueError(f"Unknown stage(s) {unknown}; valid: {list(STAGES)}")
     if len(set(stages)) != len(stages):
         raise ValueError(f"A stage is listed more than once in {stages}.")
-    if dtype == "eval" and "constitution" in stages:
-        raise ValueError("dataset_type 'eval' cannot include the 'constitution' stage.")
     if data.get("copies") is not None:
         raise ValueError(
             'The top-level "copies" key is no longer read; write each count in '

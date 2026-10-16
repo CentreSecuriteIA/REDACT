@@ -474,12 +474,7 @@ class VLLMBackend(LLMBackend):
         if not messages_list:
             return []
         max_tok, temp = self._resolve(max_tokens, temperature)
-        replies = aio.run(self._many(messages_list, max_tok, temp, kwargs))
-        self._warn_cut(
-            sum(reason == "length" for _, reason in replies),
-            len(messages_list), max_tok,
-        )
-        return [text for text, _ in replies]
+        return aio.run(self._many(messages_list, max_tok, temp, kwargs))
 
     async def agenerate(
         self,
@@ -506,17 +501,15 @@ class VLLMBackend(LLMBackend):
             The generated text.
         """
         max_tok, temp = self._resolve(max_tokens, temperature)
-        text, reason = await self._one(messages, max_tok, temp, kwargs)
-        self._warn_cut(int(reason == "length"), 1, max_tok)
-        return text
+        return await self._one(messages, max_tok, temp, kwargs)
 
     async def _many(
         self, messages_list: list[list[dict]], max_tok: int, temp: float, extra: dict
-    ) -> list[tuple[str, str | None]]:
+    ) -> list[str]:
         """Send each item as its own request and await them all.
 
         Returns:
-            One :meth:`_one` result per item, in the order of ``messages_list``.
+            One reply per item, in the order of ``messages_list``.
         """
         tasks = [asyncio.ensure_future(self._one(messages, max_tok, temp, extra))
                  for messages in messages_list]
@@ -532,15 +525,16 @@ class VLLMBackend(LLMBackend):
 
     async def _one(
         self, messages: list[dict], max_tok: int, temp: float, extra: dict
-    ) -> tuple[str, str | None]:
+    ) -> str:
         """Send one request to the engine and await its reply.
 
         Runs on the shared loop, as every await on an engine must: an engine
-        hands its outputs to the loop of its first request.
+        hands its outputs to the loop of its first request. A reply vLLM ends
+        with ``"length"``, its word for both caps (``max_tokens`` and
+        ``max_model_len``), is recorded as cut.
 
         Returns:
-            ``(text, finish_reason)``. vLLM says ``"length"`` for both caps,
-            ``max_tokens`` and ``max_model_len``.
+            The reply's text.
 
         Raises:
             PromptTooLongError: The prompt is longer than the model's context.
@@ -607,8 +601,9 @@ class VLLMBackend(LLMBackend):
             n_items=1, started=started,
             in_tok=len(final.prompt_token_ids), out_tok=out_tok, out_tok_max=out_tok,
             max_tokens=max_tok, temperature=temp, finish_reason=reply.finish_reason,
+            cut=reply.finish_reason == "length",
         )
-        return self._clean_output(reply.text), reply.finish_reason
+        return self._clean_output(reply.text)
 
     @property
     def backend_name(self) -> str:

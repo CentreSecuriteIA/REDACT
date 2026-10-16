@@ -206,7 +206,7 @@ def merge_all(
 def merge_inputs(data_dir: str | Path | None = None) -> pd.DataFrame:
     """The accepted input samples of the run under ``data_dir``, in one frame.
 
-    A training run seeds its inputs from a constitution and keeps them in
+    A run with a constitution seeds its inputs from it and keeps them in
     ``Datasets/constitution_inputs/``. They are the run's inputs when that
     tree holds a category CSV; otherwise the categories directly under
     ``Datasets/`` are.

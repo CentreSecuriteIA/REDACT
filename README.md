@@ -86,7 +86,7 @@ A recipe names:
 
 | Key | Meaning |
 |---|---|
-| `dataset_type` | `"eval"` (standalone inputs, no constitution) or `"training"` (inputs seeded from the constitution saved under `data_dir`) |
+| `dataset_type` | `"training"` (inputs seeded from the constitution saved under `data_dir`) or `"eval"` (inputs seeded the same way when the run has a constitution: the `constitution` stage in `stages`, or one saved under `data_dir`; standalone inputs otherwise). Paraphrases merge into a training dataset and stay in `paraphrased.csv` for an eval one |
 | `data_dir` | The working root (`--data-dir` or `run_pipeline(data_dir=...)` overrides it) |
 | `stages` | In order, from `constitution`, `inputs`, `outputs`, `paraphrase`, `jailbreaks`, `build`; default `["inputs", "outputs", "jailbreaks", "build"]` |
 | `models` | Per role (`gen`, `check`, `translation`, `constitution`, `paraphraser`, `paraphrase_check`): a registry name, `null` for the role's default, or `{"name": ..., "backend_type": ..., "copies": ..., "workers": ...}` to also say how it is served |

@@ -2,6 +2,7 @@
 
 import json
 import logging
+import time
 from unittest.mock import MagicMock, patch
 
 import pytest
@@ -10,7 +11,7 @@ from redact import telemetry
 from redact.llms import observe
 from redact.llms.backends import ComputeConfig
 from redact.llms.resources import measure
-from tests.conftest import MockBackend, make_client
+from tests.conftest import MockBackend, first_cut_warning, make_client
 
 
 @pytest.fixture(autouse=True)
@@ -418,3 +419,54 @@ class TestGpuPricing:
                 s = telemetry.summary()
         assert s["gpu"]["rented"] == 4
         assert s["local_cost_usd"] == pytest.approx(9.6)   # 1h x 4 cards x $2.40
+
+
+
+def _reply(backend, cut, max_tokens=64):
+    """Record one call of ``backend``, cut at the token limit or not."""
+    backend._record_call(n_items=1, started=time.perf_counter(),
+                         max_tokens=max_tokens, cut=cut)
+
+
+class TestCutReplies:
+    """A model's first cut reply in a stage warns; the stage's end logs how
+    many were cut, and the summary holds the count."""
+
+    def test_the_first_cut_warns_and_the_stage_end_counts(self, tmp_path, caplog):
+        telemetry.install(data_dir=tmp_path)
+        gen, check = MockBackend(model="gen"), MockBackend(model="check")
+        with caplog.at_level(logging.WARNING, logger="redact"):
+            with telemetry.stage("outputs"):
+                for cut in (True, False, True, True):
+                    _reply(gen, cut)
+                _reply(check, True, max_tokens=32)
+            with telemetry.stage("jailbreaks"):
+                _reply(gen, True)
+        assert [r.getMessage() for r in caplog.records] == [
+            first_cut_warning("gen", 64),
+            first_cut_warning("check", 32),
+            "[outputs] gen: 3 replies were cut at the token limit and are incomplete.",
+            "[outputs] check: 1 reply was cut at the token limit and is incomplete.",
+            first_cut_warning("gen", 64),
+            "[jailbreaks] gen: 1 reply was cut at the token limit and is incomplete.",
+        ]
+        assert telemetry.summary()["cut"] == {
+            "outputs": {"gen": 3, "check": 1}, "jailbreaks": {"gen": 1}}
+
+    def test_the_call_event_says_the_reply_was_cut(self):
+        seen = []
+        observe.set_emitter(seen.append)
+        gen = MockBackend(model="gen")
+        _reply(gen, True)
+        _reply(gen, False)
+        assert [e.get("cut") for e in seen] == [True, None]
+
+    def test_without_telemetry_the_first_cut_still_warns(self, caplog):
+        telemetry.install(sink="off")
+        gen = MockBackend(model="gen")
+        with caplog.at_level(logging.WARNING, logger="redact"):
+            _reply(gen, True)
+            _reply(gen, True)
+        assert [r.getMessage() for r in caplog.records] == [
+            first_cut_warning("gen", 64)]
+        assert telemetry.summary() == {}
