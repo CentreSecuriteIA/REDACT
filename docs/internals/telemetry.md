@@ -30,10 +30,10 @@ describes the output from a user's side.
 | `ev` | Emitted by | Fields |
 |---|---|---|
 | `call` | every backend, once per transport call | `model`, `backend`, `n_items`, `ms`, `in_tok`, `out_tok`, `out_tok_max`, `max_tokens`, `temperature`; `error` when it failed, `finish_reason` when the provider gives one |
-| `local`, `phase: load` | `backends/vllm.py`, `backends/introspection.py` | `backend`, `hf_model_id`, `load_ms`; for vLLM `quantization`, `tensor_parallel_size`, `data_parallel_size`, `gpu_memory_utilization`, `devices`; for transformers `device_map`, `torch_dtype`, and the measured `claimed_gib` and `weights_gib` |
+| `local`, `phase: load` | `backends/vllm.py`, `backends/introspection.py` | `backend`, `hf_model_id`, `load_ms`; for vLLM `quantization`, `tensor_parallel_size`, `data_parallel_size`, `planned_copies`, `fallback`, `gpu_memory_utilization`, `devices`; for transformers `device_map`, `torch_dtype`, and the measured `claimed_gib` and `weights_gib` |
 | `local`, `phase: release` | the same, when an engine is released or at exit | `hf_model_id`, `held_s` |
 | `residency` | `residency.report` | the plan's `as_dict()`, and `stages` |
-| `preload_failed` | `residency.preload` | `model`, `error` |
+| `preload_failed` | `residency.preload` | `model`, `error`; `cause: exit` for a load the way out ended |
 | `stage` | `telemetry.stage` on leaving a stage | `stage`, `duration_s` |
 
 Every event also carries `stage` and a UTC `ts`. A `call` is one transport

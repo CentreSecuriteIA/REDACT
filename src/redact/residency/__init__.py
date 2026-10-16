@@ -44,6 +44,8 @@ of the run, not a guarantee against running out of memory.
 #   - Unloading for a stage is tried with every candidate unloaded at once.
 #     With more engines than the search places exactly (_SEARCH_LIMIT),
 #     that attempt can miss, and a run one unload would fit stays unfit.
+#   - A load that hangs is ended only on the way out (vllm.EXIT_WAIT_S) or by
+#     a second signal; the run does not time a load out.
 
 import logging
 

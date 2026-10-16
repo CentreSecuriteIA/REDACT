@@ -113,15 +113,18 @@ its memory freed, and a client built on it raises on its next call.
   (`set_planned_utilization`, `set_planned_devices`), else 0.9 of the card.
   Without `max_model_len` the engine gets 10,000 tokens, capped at the
   checkpoint's maximum. Planned cards are set in `CUDA_VISIBLE_DEVICES` for
-  the build; more cards than one copy spans become copies
-  (`data_parallel_size`).
+  the build, by UUID where `nvidia-smi` gives one; more cards than one copy
+  spans become copies (`data_parallel_size`). A build with copies that
+  fails is tried once more with one copy.
 - Defaults: `temperature` 0.7 when the model sets none; `top_p` 0.85 unless
   `VLLMConfig.sampling` says otherwise.
 - A prompt longer than the context raises `PromptTooLongError` for that
   request only. A request aborted because its engine is released raises.
 - A release calls the engine's `shutdown()`, collects garbage and empties
   torch's CUDA cache. vLLM may then log an `EngineDeadError`; it is the
-  shutdown, not a failed call. An exit hook releases every engine.
+  shutdown, not a failed call. An exit hook releases every engine, waiting
+  for a load in progress at most 60 s before it ends the load's engine
+  processes ([residency.md](residency.md#lifecycle)).
 
 ### OpenAIBackend and AnthropicBackend
 

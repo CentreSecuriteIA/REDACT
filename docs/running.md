@@ -40,7 +40,8 @@ python scripts/run.py src/redact/configs/runs/training_example.json --data-dir .
 `--params` replaces the recipe's `params_file`, `--data-dir` its `data_dir`.
 `--quiet` logs warnings only and `--debug` logs per-item detail. The script
 prints the run summary as JSON. It turns `SIGTERM` into a normal exit, so
-`kill <pid>` releases the models as Ctrl-C does.
+`kill <pid>` releases the models as Ctrl-C does. A second Ctrl-C or kill
+ends vLLM's engine processes and exits at once.
 
 From Python:
 
@@ -139,7 +140,7 @@ the model is served:
 |---|---|
 | `name` | The registry name. Left out or `null`: the role's default |
 | `backend_type` | Which setup of the entry serves it: `api`, `vllm` or `introspect`. Left out: the entry's own default |
-| `copies` | vLLM only. Copies of the engine, one per card. Left out: a copy on each idle card; `1` turns copies off |
+| `copies` | vLLM only. Copies of the engine, one per card. Left out: a copy on each card with room; `1` turns copies off |
 | `workers` | Hosted only. Requests in flight at once. Left out: the entry's `recommended_max_workers` |
 
 One model is served one way in a run. Two roles that name the same model must
@@ -185,9 +186,10 @@ setup of `venice-uncensored` do).
 **Placement and grants.** The vLLM engines on a card split 0.9 of it: each
 gets its padded need plus an equal share of what is left, and loads with that
 fraction as its `gpu_memory_utilization`. A single-card engine goes to the
-card with the most room; one with `min_gpus` above 1 takes whole cards
-(`tensor_parallel_size`). When the models in the order given do not fit, the
-planner searches other arrangements of cards.
+emptiest card with room for it; one with `min_gpus` above 1 takes whole
+cards (`tensor_parallel_size`). Each card is planned at its own size. When
+the models in the order given do not fit, the planner searches other
+arrangements of cards.
 
 **Phases.** The plan is made stage by stage. A model is resident from the
 first stage that calls it to the last, so it loads once. Entering a stage,
@@ -209,10 +211,14 @@ for the later one, when every stage fits that way. It logs:
 `<model> is unloaded for stage <a> and loaded again for stage <b>, so that
 <c> fits. This costs one more load.`
 
-**Copies.** When all of a stage's models fit together and cards are left
-idle, the first single-card vLLM engine, when it is alone on its card, gets a
-copy on each idle card (vLLM's `data_parallel_size`). More copies mean more requests in flight. A copy
-lengthens the load, so for a short run set `"copies": 1`.
+**Copies.** When all of a stage's models fit together, the first vLLM
+engine gets a copy on every other card with room for one (vLLM's
+`data_parallel_size`), beside other models where they leave room, and not
+on a card smaller than its own. A copy beside another model lowers the
+engine's share on all its cards, and that model's share on that card. More
+copies mean more requests in flight. A copy lengthens the load, so for a
+short run set `"copies": 1`. When a build with copies fails, one copy is
+loaded instead, with a WARNING.
 
 **Reading the plan.** The log shows, per plan, the stages it covers, the
 cards found, and per model its size, how the size is derived, its card and
@@ -249,7 +255,9 @@ explains the mechanism.
 
 **Stopping a run.** Ctrl-C, or `kill <pid>` on `scripts/run.py`, ends the run
 cleanly: the finished units are saved, requests in flight are cancelled, and
-the local engines are released. Rerun the same command to go on.
+the local engines are released. A model still loading is waited for at most
+60 seconds, then its engine processes are ended. Rerun the same command to
+go on.
 
 `kill -9`, or a lost machine, may leave half a save. The next resume cuts it
 off and runs those units again. vLLM's engine processes outlive `kill -9` and
@@ -387,7 +395,9 @@ rate. [internals/telemetry.md](internals/telemetry.md) lists the events.
 | `RuntimeError: A fresh run of 'long' did not finish in ...` | A fresh run of one seeded-inputs style stopped half way | Run that style again with `resume: false` |
 | ERROR `[residency] ...` with `PROBLEM:` lines | The local models of a stage do not fit the cards | Follow the plan's advice; the run continues and may run out of memory at load |
 | ERROR `[preload] <model> failed to load` | A background load failed | The stage that needs the model fails when it calls it, with the cause in the log |
-| `RuntimeError: The vLLM engine of ... was being built with N copies ...` | The engine failed to build with copies | Set `"copies": 1` for that role |
+| WARNING `[vllm] The engine of ... failed to build with N copies ...; loading one copy on ... instead` | The engine failed to build with copies | The run goes on with one copy; set `"copies": 1` for that role to skip the attempt |
+| `RuntimeError: The vLLM engine of ... was being built with N copies ...` | The engine failed to build with copies, and one copy failed too or was not tried | The message says what failed; set `"copies": 1` for that role |
+| ERROR `[residency] the preload of ... has not finished ...` or `[vllm] The load of ... has not returned` | A model load hung, and the run is ending | Its engine processes are ended; check `nvidia-smi` |
 | vLLM logs `AsyncLLM output_handler failed` with `EngineDeadError` | An engine shutting down; logged at release and sometimes at exit | Nothing; REDACT logs a line saying so just before |
 | INFO `[rate-limit] <model>: pausing Ns (N RPM)` | A hosted model is at its rate limit | Expected; serve the model locally for speed |
 | WARNING `<model>: N of M replies were cut at the token limit` | Replies hit `max_tokens` or the context | Raise `default_max_tokens` or `max_model_len`, or ask for shorter replies |
