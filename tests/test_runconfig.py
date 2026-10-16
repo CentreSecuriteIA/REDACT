@@ -429,10 +429,10 @@ class _Exited(BaseException):
     """Stands for the end of the process."""
 
 
-def _signal_handlers(monkeypatch, script, done, name="posix"):
+def _signal_handlers(monkeypatch, script, done):
     """Run the script's ``main`` on a stub run and return the signal handlers
-    it installed. Its ``os`` is ``os`` on a platform called ``name``, whose
-    ``_exit`` appends ``("exit", code)`` to ``done`` and raises :class:`_Exited`."""
+    it installed. Its ``os._exit`` appends ``("exit", code)`` to ``done`` and
+    raises :class:`_Exited`, and no engine process is ended."""
     import logging
     import os
     import signal
@@ -444,8 +444,8 @@ def _signal_handlers(monkeypatch, script, done, name="posix"):
 
     handlers = {}
     monkeypatch.setattr(script, "run_pipeline", lambda recipe, **kw: {})
-    monkeypatch.setattr(script, "os",
-                        SimpleNamespace(name=name, write=os.write, _exit=hard_exit))
+    monkeypatch.setattr(script, "os", SimpleNamespace(write=os.write, _exit=hard_exit))
+    monkeypatch.setattr(script, "terminate_engine_processes", lambda **kw: [])
     monkeypatch.setattr(logging, "basicConfig", lambda **kw: None)
     monkeypatch.setattr(signal, "signal",
                         lambda signum, fn: handlers.update({signum: fn}))
@@ -453,63 +453,21 @@ def _signal_handlers(monkeypatch, script, done, name="posix"):
     return handlers
 
 
-def _fake_psutil(children, done, survivors):
-    """A stand-in for psutil: this process has ``children`` (pids), and of
-    those the ones in ``survivors`` outlive the wait."""
-    from types import SimpleNamespace
-
-    class Child:
-        def __init__(self, pid):
-            self.pid = pid
-
-        def terminate(self):
-            done.append(("terminate", self.pid))
-
-        def kill(self):
-            done.append(("kill", self.pid))
-
-    procs = [Child(pid) for pid in children]
-
-    def wait_procs(waited, timeout):
-        done.append(("wait", timeout))
-        return ([c for c in waited if c.pid not in survivors],
-                [c for c in waited if c.pid in survivors])
-
-    return SimpleNamespace(
-        Error=Exception, wait_procs=wait_procs,
-        Process=lambda: SimpleNamespace(children=lambda recursive: procs))
-
-
-def test_a_forced_exit_ends_the_child_processes_first(monkeypatch):
+def test_a_forced_exit_ends_the_engine_processes_first(monkeypatch):
     """vLLM's engine and worker processes are this process's children: a
     hard exit that left them would leave them holding the card."""
     import signal
 
     script, done = _run_script(), []
-    monkeypatch.setattr(script, "psutil", _fake_psutil([11, 12], done, {12}))
     handlers = _signal_handlers(monkeypatch, script, done)
+    monkeypatch.setattr(script, "terminate_engine_processes",
+                        lambda **kw: done.append(("end", kw)) or [])
     with pytest.raises(KeyboardInterrupt):
         handlers[signal.SIGINT](signal.SIGINT, None)
+    assert done == []
     with pytest.raises(_Exited):
         handlers[signal.SIGINT](signal.SIGINT, None)
-    assert done == [("terminate", 11), ("terminate", 12), ("wait", 2.0),
-                    ("kill", 12), ("exit", 128 + signal.SIGINT)]
-
-
-@pytest.mark.parametrize("platform,children", [("nt", [11]), ("posix", None)])
-def test_a_forced_exit_on_windows_or_without_psutil_only_exits(
-        monkeypatch, platform, children):
-    import signal
-
-    script, done = _run_script(), []
-    fake = _fake_psutil(children, done, set()) if children else None
-    monkeypatch.setattr(script, "psutil", fake)
-    handlers = _signal_handlers(monkeypatch, script, done, name=platform)
-    with pytest.raises(KeyboardInterrupt):
-        handlers[signal.SIGINT](signal.SIGINT, None)
-    with pytest.raises(_Exited):
-        handlers[signal.SIGINT](signal.SIGINT, None)
-    assert done == [("exit", 128 + signal.SIGINT)]
+    assert done == [("end", {"all": True}), ("exit", 128 + signal.SIGINT)]
 
 
 def test_every_recipe_role_is_called_by_a_stage():

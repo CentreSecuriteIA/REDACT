@@ -16,6 +16,7 @@ import atexit
 import contextlib
 import itertools
 import logging
+import multiprocessing
 import os
 import threading
 import time
@@ -51,6 +52,22 @@ _planned_utilization: dict[tuple, float] = {}
 # The cards per engine key, set by the residency plan and kept out of the
 # key like the share. Indices over the cards this process can see.
 _planned_devices: dict[tuple, tuple[int, ...]] = {}
+# The child processes each loaded engine's build started, per engine key:
+# its engine cores and, with copies, vLLM's coordinator, as multiprocessing
+# handles. Their own children, such as tensor-parallel workers, are found
+# when they are ended (terminate_engine_processes). A child that another
+# thread starts during a build is counted as the build's.
+_engine_procs: dict[tuple, list] = {}
+# The build in progress: its engine key, and the pids of the child processes
+# that existed when it started.
+_building: tuple[tuple, frozenset[int]] | None = None
+# The child processes of builds that failed, which no engine holds.
+_stray: list = []
+# Seconds an engine process gets to end after SIGTERM, and again after SIGKILL.
+_END_WAIT_S = 5.0
+# How vLLM names its engine processes: EngineCore, EngineCore_DP<n> for a
+# copy, and VLLM_DP_Coordinator.
+_ENGINE_PROCESS_NAMES = ("EngineCore", "VLLM_DP_Coordinator")
 # Set once the exit hook is registered, at the start of the first load (see _engine).
 _exit_hook_registered = False
 # Numbers the requests: an engine needs each id unique in the process.
@@ -130,6 +147,85 @@ def _visible_devices(ids: list[str]):
             os.environ["CUDA_VISIBLE_DEVICES"] = before
 
 
+def _started_since(before: frozenset[int]) -> list:
+    """The child processes alive now that were not in ``before`` (pids)."""
+    return [p for p in multiprocessing.active_children() if p.pid not in before]
+
+
+def terminate_engine_processes(processes=(), *, all: bool = False) -> list[int]:
+    """End engine processes this process started, and their children.
+
+    Each gets SIGTERM, and SIGKILL when it is alive :data:`_END_WAIT_S`
+    later: an engine hung in its start-up does not act on SIGTERM. Their
+    children, such as tensor-parallel workers, are listed before any is
+    signalled, since a worker may outlive its engine. Needs ``psutil``,
+    which vLLM installs. Logged; never raises.
+
+    Args:
+        processes: ``multiprocessing`` handles of engine processes, as a
+            build recorded them. Those that ended already are left alone.
+        all: End every engine process instead: those of every build,
+            loaded, in progress or failed, and every child process named as
+            vLLM names its engine processes. For a forced exit; no other
+            child of this process is touched.
+
+    Returns:
+        The pids still alive afterwards: empty when every one ended.
+    """
+    roots = list(processes)
+    if all:
+        building = _building
+        roots += [p for procs in list(_engine_procs.values()) for p in procs]
+        roots += _stray + (_started_since(building[1]) if building else [])
+        roots += [p for p in multiprocessing.active_children()
+                  if (p.name or "").startswith(_ENGINE_PROCESS_NAMES)]
+    roots = list({p.pid: p for p in roots if p.is_alive()}.values())
+    if not roots:
+        return []
+    try:
+        import psutil
+    except ImportError:
+        logger.error(
+            "[vllm] psutil is not installed (vLLM requires it), so the engine "
+            "processes %s are left running.", " ".join(str(p.pid) for p in roots))
+        return [p.pid for p in roots]
+    children: dict[int, object] = {}
+    for root in roots:
+        with contextlib.suppress(psutil.Error):
+            for child in psutil.Process(root.pid).children(recursive=True):
+                children.setdefault(child.pid, child)
+    logger.warning(
+        "[vllm] ending engine processes %s and their children %s",
+        ", ".join(f"{p.pid} ({p.name})" for p in roots),
+        " ".join(map(str, children)) or "(none)")
+
+    def wait(roots, children):
+        """Wait up to _END_WAIT_S for all; return those still alive."""
+        deadline = time.monotonic() + _END_WAIT_S
+        for root in roots:
+            root.join(max(0.0, deadline - time.monotonic()))
+        _, alive = psutil.wait_procs(
+            children, timeout=max(0.0, deadline - time.monotonic()))
+        return [p for p in roots if p.is_alive()], alive
+
+    # A root is a multiprocessing child: it is signalled, waited for and
+    # reaped through its handle, so that its pid stays its own until then.
+    for signal_name in ("terminate", "kill"):
+        for process in [*roots, *children.values()]:
+            with contextlib.suppress(psutil.Error, OSError):
+                getattr(process, signal_name)()
+        roots, alive = wait(roots, list(children.values()))
+        children = {p.pid: p for p in alive}
+        if not roots and not children:
+            return []
+    left = [p.pid for p in roots] + list(children)
+    logger.error(
+        "[vllm] engine processes %s are still alive after SIGKILL; end them "
+        "with kill -9 %s and check that nvidia-smi shows the cards free.",
+        left, " ".join(map(str, left)))
+    return left
+
+
 def _engine_key(hf_model_id: str, quantization: str | None, vllm_kwargs: dict) -> tuple:
     return (hf_model_id, quantization, repr(sorted(vllm_kwargs.items())))
 
@@ -151,8 +247,12 @@ def _prepare_environment() -> None:
 
 
 def _engine(hf_model_id: str, quantization: str | None, vllm_kwargs: dict):
-    """Get or load the vLLM engine for one checkpoint."""
-    global _exit_hook_registered
+    """Get or load the vLLM engine for one checkpoint.
+
+    The child processes a build starts are recorded under the engine's key,
+    or, when the build fails, as stray.
+    """
+    global _exit_hook_registered, _building
     key = _engine_key(hf_model_id, quantization, vllm_kwargs)
     # One read: clear_cache() may drop the key between a test and a lookup.
     engine = _engines.get(key)
@@ -188,7 +288,7 @@ def _engine(hf_model_id: str, quantization: str | None, vllm_kwargs: dict):
             #TODO(exit): a load that never returns keeps the exit waiting on
             #   the lock, and only SIGKILL ends the process. Seen with tensor
             #   parallel on RTX PRO 6000 Server Edition cards. Bound the wait.
-            import multiprocessing.util  # noqa: F401
+            import multiprocessing.util as _  # noqa: F401
             atexit.register(VLLMBackend.clear_cache)
             _exit_hook_registered = True
 
@@ -215,11 +315,13 @@ def _engine(hf_model_id: str, quantization: str | None, vllm_kwargs: dict):
         ids = _physical_ids(devices)
 
         started = time.perf_counter()
+        before = frozenset(p.pid for p in multiprocessing.active_children())
+        _building = (key, before)
         # Not measured: vLLM preallocates its memory grant in a separate
         # process, so a measurement would restate the setting.
         try:
             with _visible_devices(ids):
-                _engines[key] = AsyncLLM.from_engine_args(
+                engine = AsyncLLM.from_engine_args(
                     AsyncEngineArgs(
                         model=hf_model_id, quantization=quantization, **kwargs),
                     # vllm.LLM's context: vLLM's defaults for running sequences
@@ -227,8 +329,9 @@ def _engine(hf_model_id: str, quantization: str | None, vllm_kwargs: dict):
                     # lower ones.
                     usage_context=UsageContext.LLM_CLASS,
                 )
-        except Exception as exc:
-            if copies <= 1:
+        except BaseException as exc:
+            _stray.extend(_started_since(before))
+            if copies <= 1 or not isinstance(exc, Exception):
                 raise
             # The copies come from the plan, so the error names them and the
             # way to one. One copy is not tried here: the plan stands.
@@ -241,6 +344,10 @@ def _engine(hf_model_id: str, quantization: str | None, vllm_kwargs: dict):
                 f'"copies": 1 in the model\'s entry under "models" in the '
                 f"recipe, or copies={{model: 1}} on the planner."
             ) from exc
+        finally:
+            _building = None
+        _engines[key] = engine
+        _engine_procs[key] = _started_since(before)
         # Held from the start of the load; set after it, so a failed load
         # leaves no timer.
         _engine_loaded_at[key] = started
