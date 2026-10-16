@@ -1,0 +1,232 @@
+# llms/: models, backends, clients, prompts
+
+`llms/` is the layer every model call goes through. Above it, no code
+branches on which provider serves a model.
+
+## Responsibilities and boundaries
+
+`llms/` is responsible for:
+
+- the model registry: which models exist, how each can be served, and the
+  role each fills;
+- backends: one configured model on one provider, with its defaults, rate
+  budget and concurrency bound at construction;
+- clients: a backend plus the way its batches are dispatched and rate
+  limited;
+- prompts: loading prompt files, rendering them into messages, and parsing
+  replies into samples;
+- the local GPU facts the planner needs (`resources/`) and the telemetry
+  hook (`observe.py`).
+
+It must not:
+
+- loop over generate-check-regenerate, or decide what a verdict means for a
+  unit: that is `llm_pipeline/`;
+- know about a stage's files, ledgers or rows: that is `dataset/` and the
+  stage cores;
+- import anything above `llms/`. Telemetry leaves through `observe.record`,
+  a hook the top level installs;
+- branch on a backend's type. Callers read its capability flags.
+
+## Modules
+
+| Module | Holds |
+|---|---|
+| `model_config.py` | `ModelConfig`, `APIConfig`, `VLLMConfig`, `IntrospectConfig`; `MODEL_REGISTRY` (from `configs/llm/models.json`); `register_model`, `get_model_config`, `get_models_by_role`, `default_model_for_role`, `available_roles`, `model_compute_config` |
+| `backends/base.py` | `LLMBackend`, `ComputeConfig`, the system-prompt helpers |
+| `backends/capabilities.py` | `BACKEND_TYPES`, `API_BACKEND_TYPES`, `SETUP_TYPES`; `resolve_setup`, `transport_for`, `backend_for`, `validate_concurrency`, `set_run_serving`, `clear_transport_caches` |
+| `backends/openai.py` | `OpenAIBackend`: any OpenAI-compatible endpoint (Venice, OpenRouter) |
+| `backends/anthropic.py` | `AnthropicBackend`: the Anthropic Messages API |
+| `backends/vllm.py` | `VLLMBackend`: vLLM's `AsyncLLM` in this process |
+| `backends/introspection.py` | `TransformersIntrospectionBackend`: transformers, with internals capture |
+| `client.py` | `ModelClient` |
+| `wrappers.py` | `RateLimiter`, `shared_limiter`, `BatchCaller` |
+| `router.py` | `generate_sample`, `batch_generate_samples`, `assert_single_sample_per_call` |
+| `aio.py` | The one event loop that runs every async model call |
+| `observe.py` | The telemetry hook: `record`, `set_emitter`, `set_stage` |
+| `progress.py` | `ProgressReporter`: throttled progress lines |
+| `prompting/` | `prompts.py` (loading, overlay, rendering), `extraction.py` (parsing replies), `scaffold.py` (writing an editable prompt tree) |
+| `resources/` | `estimate.py` (a model's GPU need from its HF config), `measure.py` (`nvidia-smi` probes) |
+
+## The registry
+
+A `ModelConfig` is a model's identity (name, roles, defaults) plus one or
+more **setups**: `api`, `vllm`, `introspect`. Every config validates itself
+when it is built, so the registry holds only coherent entries.
+[configuration.md](../configuration.md#the-model-registry) lists every field.
+
+The registry name is the model's stable identity: it keys roles, rate-limit
+windows, telemetry and prices. `APIConfig.api_model_id` is what the provider
+receives when its own id differs (`venice-uncensored` is sent as
+`venice-uncensored-1-2`).
+
+## Backends
+
+A backend **is a configured model**. Everything fixed about one model on one
+setup (name, `default_max_tokens`, `default_temperature`, system-prompt
+policy, `rpm`, `max_workers`, provider parameters, sampling defaults) is
+bound in `from_config(config)`. The calls take only what varies:
+
+```python
+backend.generate(messages_list, *, max_tokens=None, temperature=None, internals_ids=None, **kwargs) -> list[str]
+await backend.agenerate(messages, *, max_tokens=None, temperature=None, internals_id=None, **kwargs) -> str
+```
+
+`generate` is batch-shaped: one sample is a batch of one. `agenerate` exists
+on backends with `supports_async_calls`. System-role messages are split out,
+or folded into the first user message when the model has
+`supports_system_prompt: false`. `max_workers` is clamped to 1 at
+construction when the class cannot take parallel calls.
+
+Each class declares its capabilities as a class attribute, so they are read
+without building a backend (which for a local one loads weights):
+
+| Backend | `supports_native_batching` | `supports_parallel_calls` | `supports_internals` | `supports_async_calls` |
+|---|---|---|---|---|
+| `OpenAIBackend` | no | yes | no | yes |
+| `AnthropicBackend` | no | no | no | no |
+| `VLLMBackend` | yes | yes | no | yes |
+| `TransformersIntrospectionBackend` | no | no | yes | no |
+
+**What each caches.** A backend is cheap; what it uses may not be, so each
+module caches that on its own key, with a lock against two loads at once:
+
+| Resource | Key |
+|---|---|
+| OpenAI and Anthropic SDK clients (connection pools) | the endpoint and key |
+| vLLM engines | `(hf_model_id, quantization, engine kwargs)`: two registry entries with the same three share one load |
+| transformers models | `(hf_model_id, device_map, torch_dtype, load kwargs)`; separate from vLLM's |
+
+`clear_transport_caches()` clears them all; a local engine is shut down and
+its memory freed, and a client built on it raises on its next call.
+
+### VLLMBackend
+
+- The engine is vLLM's `AsyncLLM`, in this process. Every item is its own
+  engine request, awaited on the shared loop (`aio.py`); the engine batches
+  whatever is in flight. `generate` sends one request per item and waits for
+  all.
+- Prompts go through the chat template of the engine's tokenizer.
+- `max_workers` is the engine's `max_num_seqs` times its copies: what the
+  async lane keeps in flight.
+- The load uses the residency plan's `gpu_memory_utilization` and cards
+  (`set_planned_utilization`, `set_planned_devices`), else 0.9 of the card.
+  Without `max_model_len` the engine gets 10,000 tokens, capped at the
+  checkpoint's maximum. Planned cards are set in `CUDA_VISIBLE_DEVICES` for
+  the build; more cards than one copy spans become copies
+  (`data_parallel_size`).
+- Defaults: `temperature` 0.7 when the model has none, `top_p` 0.85, both
+  over `VLLMConfig.sampling`.
+- A prompt longer than the context raises `PromptTooLongError` for that
+  request only. A request aborted because its engine is released raises.
+- A release calls the engine's `shutdown()`, collects garbage and empties
+  torch's CUDA cache. vLLM may then log an `EngineDeadError`; it is the
+  shutdown, not a failed call. An exit hook releases every engine.
+
+### OpenAIBackend and AnthropicBackend
+
+- One SDK call per item. The SDK retries a failed call twice on its own,
+  unseen by the rate limiter and the trace.
+- `OpenAIBackend` sends `default_extra_body` with each call that passes no
+  `extra_body` of its own, and maps a context-length error to
+  `PromptTooLongError`. It warns on an empty reply and on a reply stopped by
+  the provider's content filter.
+- `AnthropicBackend` sends the system prompt as Anthropic's `system`
+  parameter, and runs one call at a time.
+
+### TransformersIntrospectionBackend
+
+For research runs that need a model's internals. Each item is its own
+forward pass. An item with an `internals_id` is captured under
+`<log_dir>/<internals_id>/`: always `meta.json` (settings, messages,
+output), and per `capture` setting `logprobs.pt`, `hidden_states.pt`,
+`attention.pt`. `rename_capture(old, new)` moves a capture once its final id
+is known. Capture never adds a column or a row.
+
+| Stage | Capture ids |
+|---|---|
+| outputs | `<input_id>/output`, `<input_id>/val_out`; later attempts under `/attempt_<n>` |
+| seeded inputs | `<entry id>/input_<style>` (one sample per call required); `<sample_id>/val_in_<style>` |
+| paraphrase | `<input_id>/paraphrase/attempt_<iteration>`, renamed to `<input_id>/paraphrase/<sample_id>` |
+| jailbreaks | `<input_id>/<label>/attempt_<iteration>/<technique>/<n>`, the root renamed to `<input_id>/<label>/<sample_id>` |
+
+Conversations are not captured.
+
+## Choosing a setup and building a backend
+
+`resolve_setup(config, requested)` picks a setup, in order: the one
+requested, the run's choice for the model (`set_run_serving`, from the
+recipe), the entry's `backend_type`, the only setup present.
+`transport_for` maps it to a key of `BACKEND_TYPES` (`api` becomes the
+`APIConfig`'s own `backend_type`). `backend_for(config, setup)` builds the
+backend, with the run's `workers` in place of `recommended_max_workers`.
+`validate_concurrency` refuses, at registration, more workers than a
+series-only provider can use.
+
+## ModelClient
+
+```python
+client = ModelClient.create("venice-uncensored")                       # hosted
+client = ModelClient.create("venice-uncensored", backend_type="vllm")  # local weights
+replies = client.generate(messages_list)
+```
+
+A client is a backend plus its dispatch, decided once from the backend's
+flags:
+
+- a native-batching backend (vLLM) gets the whole list, and the rate
+  limiter, if any, is charged once per batch;
+- any other goes through a `BatchCaller`: one call per item, on a thread
+  pool of `max_workers`, or one after another when `max_workers` is 1.
+
+`client.agenerate(messages)` makes one async call, charging the limiter per
+call. `generate` raises when `internals_ids` reach a backend that cannot
+capture. Clients are not cached: they are cheap, and what is expensive is
+cached below them.
+
+**Rate limits.** `RateLimiter` enforces `rpm` over a sliding 60-second
+window and is inert when the backend has no `rpm`, as every local setup has.
+`shared_limiter(key)` hands out one window per key, so two clients of one
+model share it. The key is the model name, or under
+`rate_limit_scope: "endpoint"` the endpoint id (provider, URL, key
+variable), shared by every model on that endpoint; those models must declare
+the same `rpm`.
+
+## Helpers
+
+| Function | Does |
+|---|---|
+| `generate_sample(client, messages, **kw)` | One call, one reply |
+| `batch_generate_samples(client, messages_list, batch_size=32, ...)` | Many replies, in chunks, in order |
+| `assert_single_sample_per_call(client, n)` | Raises when internals capture meets several samples per call |
+| `aio.submit(coro)`, `aio.run(coro)` | Schedule on the shared loop; run and block. The loop lives on one daemon thread, started on first use |
+| `observe.record(event)` | Hand an event to the installed emitter; a no-op when none is; never raises |
+
+## prompting/
+
+| Function | Does |
+|---|---|
+| `resolve_prompt(pipeline, category, prompt_dir)` | The file a prompt resolves to, override first, and whether it is an override |
+| `load_prompt(pipeline, category, prompt_dir)` | The prompt as a dict |
+| `PromptTemplate.load(pipeline, category, prompt_dir=, format_style=, **build_kwargs)` | A template: the system prompt rendered once, the user template on each call. With `format_style` the format instruction is appended |
+| `build_messages(config, format_style=None, **kwargs)` | One-shot render, the same kwargs for both parts |
+| `get_format_instruction(style, num_samples)` | The `numbered` or `structured_qa` instruction |
+| `report_prompt_sources(prompt_dir)` | Logs overrides, and warns about override folders that match nothing |
+| `extract_numbered_list`, `extract_structured_qa`, `extract_and_clean` | Parse a reply. With `expected_count`, a reply with another count is rejected whole: the result is empty |
+| `clean_sample` | Strip markdown and stray chat tokens |
+| `scaffold_prompt_tree(target, mode=)` | Write a copy (`copy`) or skeletons (`empty`) of the prompt tree |
+
+A render error names the prompt file and the missing placeholder.
+
+## How the stages use it
+
+- Fronts build clients with `ModelClient.create(name)`, the name defaulting
+  to `default_model_for_role(role)`.
+- Cores hand clients to `llm_pipeline`: units yield `LLMRequest`s bound to a
+  client, or naming a model (`LLMRequest(model, messages)`, as the jailbreak
+  techniques do), which the driver resolves with `ModelClient.create`.
+- Prompts come from `load_prompt` or `PromptTemplate.load`; the checkers of
+  `content_moderation/checker.py` are templates that build
+  `(original, sample) -> messages`.
+- The residency planner reads `MODEL_REGISTRY`, `resources/estimate.py` and
+  `resources/measure.py`, and hands its grants to `backends/vllm.py`.
