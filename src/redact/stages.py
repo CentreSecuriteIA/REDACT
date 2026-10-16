@@ -6,13 +6,16 @@ subpackage. :data:`STAGES` describes the fronts to the driver: the roles each
 calls, the files it writes and the kwargs a recipe gives it.
 """
 
-#TODO(dataset): what the stages do not do yet for a large run (around 1M rows):
-#   - A stage holds its inputs in memory, and unless called with
-#     read_back=False reads the full output CSV back to return it.
-#   - The paraphrase stage reads its whole output CSV on every run, for the
-#     texts already in it.
-#   - Nothing locks the constitution's files or the standalone inputs against
-#     a second process.
+# Known limits for a large run (around 1M rows):
+#   - A stage holds its inputs in memory: about 1.1 GB per million input
+#     rows. Called with read_back=False, as a recipe run calls every stage,
+#     it reads none of its output back.
+#   - Nothing locks the constitution's files against a second process; the
+#     stage is tens of units. The deprecated standalone inputs have no lock
+#     either.
+#TODO(dataset): the paraphrase stage reads its whole output CSV on every run,
+#   for the texts already in it. This goes when the stage moves onto
+#   drive_units with its ids on the ledger.
 
 import inspect
 import logging
