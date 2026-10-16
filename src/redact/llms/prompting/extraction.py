@@ -15,7 +15,7 @@ Also provides sample cleaning (:func:`clean_sample`).
 #   - Retry a rejected reply a bounded number of times before giving up.
 #     Done for constitution inputs (llm_pipeline.extracted); the call sites
 #     below still treat a rejected reply as an empty one.
-#   - Standalone inputs (standalone_generation.py): one rejected reply stops
+#   - Standalone inputs (content_moderation/standalone.py): one rejected reply stops
 #     the whole category. Stop only on an empty reply or repeated failures.
 #   - Benign Q&A (jailbreak/manipulation/benign.py): a rejected half gets no
 #     rows and the cache counts as complete; an all-rejected run writes an

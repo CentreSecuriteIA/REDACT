@@ -1,19 +1,12 @@
-"""Standalone (meta-prompt) content moderation input generation — DEPRECATED.
+"""The deprecated standalone input path: per category, seed prompts, then turns
+of generate, check and save until a sample target is met.
 
-``InputPipeline`` (in ``inputs.py``, beside the constitution-seeded path)
-inherits from :class:`_StandaloneGenerationMixin` below, so
-``pipeline.run_category(...)`` / ``pipeline.run_standalone(...)`` /
-``pipeline.run_turn(...)`` are its methods.
-
-Meta-prompt seeds drive per-category multi-turn generation with the
-entry-type-aware quality checker. **Deprecated** (``run_category`` and the
-standalone ``generate_inputs()`` path both emit ``DeprecationWarning``) in
-favour of constitution-seeded generation, which gives better/more adjustable
-coverage — but kept fully functional as the cheap "quick eval" path.
+``InputPipeline`` (``inputs.py``) takes these methods from
+:class:`_StandaloneGenerationMixin`; ``generate_inputs`` without a
+constitution reaches them through :func:`run_standalone_inputs`, and warns.
 """
 
 import logging
-import warnings
 from collections.abc import Callable
 from math import ceil
 from pathlib import Path
@@ -245,130 +238,6 @@ class _StandaloneGenerationMixin:
             samples=sample_results,
         )
 
-    def run_category(
-        self,
-        category: str,
-        prompt_config: dict,
-        build_check_messages: Callable[[str, str], list[dict]],
-        num_turns: int = 10,
-        samples_per_request: int = 5,
-        use_feedback: bool = True,
-        use_prohibited: bool = True,
-        seed_kwargs_per_turn: list[dict[str, str]] | None = None,
-        save: bool = True,
-        entry_type: str | EntryType = "harmful",
-        subcategory: str = "",
-        source: str = "metaprompt",
-    ) -> CategoryResult:
-        """Run the full generation pipeline for a single category.
-
-        Executes num_turns generation turns, optionally passing rejection
-        feedback from each turn to the next and injecting existing samples
-        as prohibited outputs.
-
-        A lower-level, single-category primitive than :meth:`run_standalone`
-        — genuinely different, not accidentally overlapping: this method
-        runs a *fixed* ``num_turns`` (no early-stop-on-target logic) using
-        seed kwargs the *caller* already prepared per turn, and has no
-        per-category metaprompt (description/seed generation) step of its
-        own. ``run_standalone`` is a target-driven, multi-category driver
-        that generates its own seeds and stops once each category hits its
-        sample target — it does not call this method. Both share the same
-        per-turn feedback computation (:func:`redact.content_moderation.
-        feedback.next_turn_feedback`).
-
-        Args:
-            category: Harm category name.
-            prompt_config: Loaded prompt JSON config for this category.
-            build_check_messages: Function(original, sample_text) -> checker
-                messages (original is "" — no comparison text at this call site).
-            num_turns: Number of generation turns.
-            samples_per_request: Samples per LLM call per turn.
-            use_feedback: Whether to pass rejection reasoning to next turn.
-            use_prohibited: Whether to inject existing samples as "do not
-                repeat" in the generation prompt.
-            seed_kwargs_per_turn: Optional list of per-turn seed dictionaries.
-                If provided, must have length >= num_turns. Each dict is
-                unpacked as **kwargs into the prompt template.
-                If None, only Category=category is passed each turn.
-            save: Whether to save to CSV.
-            entry_type: Severity tag for every sample saved this run
-                (default ``"harmful"`` — preserves prior behaviour).
-            subcategory: Constitution subcategory tag, or ``""``.
-            source: ``"metaprompt"`` (standalone CM) or ``"constitution"``
-                (constitution-seeded). Written to the ``source`` CSV column.
-
-        Returns:
-            CategoryResult with all turn outcomes.
-
-        .. deprecated::
-            Standalone meta-prompt input generation is deprecated in favour of
-            constitution-seeded generation, which gives better/more adjustable
-            coverage — use ``run_from_constitution`` /
-            ``generate_inputs(constitution_df=...)``. This method remains fully
-            functional.
-        """
-        warnings.warn(
-            "InputPipeline.run_category (standalone meta-prompt input generation) is "
-            "deprecated in favour of constitution-seeded generation "
-            "(generate_inputs(constitution_df=...)); it remains functional.",
-            DeprecationWarning,
-            stacklevel=2,
-        )
-        result = CategoryResult(category=category)
-        feedback = ""
-
-        # Load existing samples for prohibited list + dedup
-        prohibited: set[str] | None = None
-        if use_prohibited:
-            prohibited = get_existing_samples(category, self.dataset_dir)
-
-        for turn_idx in range(num_turns):
-            # Determine seed kwargs for this turn
-            if seed_kwargs_per_turn and turn_idx < len(seed_kwargs_per_turn):
-                seed_kwargs = seed_kwargs_per_turn[turn_idx]
-            else:
-                seed_kwargs = {"Category": category}
-
-            logger.info("[Turn %d/%d] Category=%s, seeds=%s",
-                        turn_idx + 1, num_turns, category, list(seed_kwargs.keys()))
-
-            turn_result = self.run_turn(
-                prompt_config=prompt_config,
-                build_check_messages=build_check_messages,
-                turn_index=turn_idx,
-                samples_per_request=samples_per_request,
-                feedback=feedback if use_feedback else "",
-                category=category,
-                save=save,
-                prohibited=prohibited,
-                entry_type=entry_type,
-                subcategory=subcategory,
-                source=source,
-                **seed_kwargs,
-            )
-
-            result.turns.append(turn_result)
-
-            # Update prohibited set with newly generated samples
-            if prohibited is not None:
-                for sr in turn_result.samples:
-                    prohibited.add(sr.text)
-
-            # Collect feedback for next turn
-            if use_feedback:
-                feedback = next_turn_feedback(turn_result)
-
-            logger.info("-> %d accepted, %d rejected (rate: %.0f%%)",
-                        turn_result.accepted_count, turn_result.rejected_count,
-                        turn_result.acceptance_rate * 100)
-
-        logger.info("Category '%s' complete: %d/%d accepted (%.0f%%)",
-                    category, result.total_accepted, result.total_extracted,
-                    result.overall_acceptance_rate * 100)
-
-        return result
-
     def run_standalone(
         self,
         categories: list[tuple[str, dict]],
@@ -388,14 +257,8 @@ class _StandaloneGenerationMixin:
         ``samples_per_category`` accepted samples are reached or a
         safety-capped ``max_turns`` is exhausted.
 
-        This is a different (target-driven, break-on-empty-extraction,
-        generates-its-own-seeds) loop than :meth:`run_category`'s
-        (fixed-``num_turns``, caller-supplied seeds) loop — evaluated merging
-        them and deliberately kept separate; see :meth:`run_category`'s
-        docstring for the reasoning. It is the implementation behind the
-        deprecated standalone ``generate_inputs()`` path, through
-        :func:`run_standalone_inputs`, and does not warn on its own, since
-        ``generate_inputs`` already does.
+        It does not warn on its own: ``generate_inputs``, which reaches it
+        through :func:`run_standalone_inputs`, already does.
 
         Args:
             categories: ``(name, info)`` pairs, e.g. from ``iter_categories(taxonomy)``.

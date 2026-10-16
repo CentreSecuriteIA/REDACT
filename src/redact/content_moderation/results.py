@@ -1,8 +1,5 @@
-"""Result data classes for content moderation input generation.
-
-Shared by the seeded path (``inputs.py``) and the deprecated standalone path
-(``standalone.py``).
-"""
+"""What the input stages return: per sample, turn and category on the
+standalone path, and the seeded stage's totals."""
 
 from dataclasses import dataclass, field
 
@@ -64,11 +61,7 @@ class CategoryResult:
 
 @dataclass
 class ConstitutionInputResult:
-    """Aggregate result of constitution-seeded input generation.
-
-    Returned by ``InputPipeline.run_from_constitution()``. Tracks per-batch
-    statistics so callers can detect mode collapse or model degradation.
-    """
+    """The totals of one ``InputPipeline.run_from_constitution()`` run."""
 
     total_entries_processed: int = 0
     skipped_entries: int = 0

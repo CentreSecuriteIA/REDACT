@@ -77,11 +77,8 @@ def next_turn_feedback(
 ) -> str:
     """Build the rejection-feedback string fed into the next generation turn.
 
-    Shared by ``InputPipeline.run_category()`` and ``.run_standalone()``
-    (both in ``standalone.py``) — both turn a completed turn's
-    rejection reasoning into feedback for the next turn's generation prompt
-    the same way. "" when nothing was rejected (or nothing had reasoning
-    attached).
+    Up to ``max_rejections`` reasons of the turn's rejected samples, each cut
+    to ``max_chars``; "" when nothing was rejected with a reason.
     """
     rejections = [
         r.reasoning for r in turn_result.samples if not r.accepted and r.reasoning

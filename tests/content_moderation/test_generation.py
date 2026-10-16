@@ -1,7 +1,5 @@
 """Tests for content moderation InputPipeline with mock backend."""
 
-import pytest
-
 from redact.content_moderation.inputs import InputPipeline
 from redact.content_moderation.results import (
     CategoryResult,
@@ -9,22 +7,6 @@ from redact.content_moderation.results import (
     TurnResult,
 )
 from tests.conftest import MockBackend, make_client
-
-
-class TestRunCategoryDeprecation:
-    def test_run_category_emits_deprecation_warning(self, tmp_path):
-        pipeline = InputPipeline(
-            gen=make_client(MockBackend("1. a\n2. b"), "m"),
-            check=make_client(MockBackend("Yes"), "m"),
-            dataset_dir=tmp_path,
-        )
-        with pytest.warns(DeprecationWarning, match="constitution-seeded"):
-            pipeline.run_category(
-                category="Cyber",
-                prompt_config={"system_prompt": "s", "template": "gen {Category}"},
-                build_check_messages=lambda o, s: [{"role": "user", "content": s}],
-                num_turns=0, save=False,   # 0 turns: warning fires, no generation
-            )
 
 
 class TestDataclasses:

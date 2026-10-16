@@ -137,25 +137,17 @@ from redact.llms import ModelClient, load_prompt
 
 client = ModelClient.create("venice-uncensored")  # ready to call (via VENICE_API_KEY)
 
-# 2. Generate content moderation samples (via the deprecated standalone path —
-#    see the note above; run_from_constitution() is the recommended equivalent)
+# 2. Expand constitution entries into checked input samples
 from redact.content_moderation import InputPipeline
-from redact.content_moderation.checker import build_quality_checker
 
-pipeline = InputPipeline(
-    gen=client,
-    check=client,
-    rate_limiter=rate_limiter,
+pipeline = InputPipeline(gen=client, check=client,
+                         dataset_dir="./runs/eval/Datasets/constitution_inputs")
+result = pipeline.run_from_constitution(
+    constitution_df=constitution,                     # from generate_constitution()
+    prompt_config=load_prompt("input", "generation/from_constitution/long"),
+    samples_per_entry=3, style="long",
 )
-
-prompt_config = load_prompt("input", "generation/standalone")
-result = pipeline.run_category(
-    category="Physical Harm",
-    prompt_config=prompt_config,
-    build_check_messages=build_quality_checker("Physical Harm"),
-    num_turns=2, samples_per_request=5,
-)
-print(f"Generated {result.total_accepted} accepted samples")
+print(f"{result.total_prompts_accepted} accepted samples")
 
 # 3. Apply jailbreak techniques
 from redact.jailbreak.obfuscation.encoding import to_base64
@@ -205,11 +197,15 @@ src/redact/
 │   ├── generation.py              # ConstitutionPipeline (4 severity types)
 │   └── input_generation.py        # ConstitutionInputPipeline (→ InputPipeline.run_from_constitution)
 │
-├── content_moderation/            # Content moderation generation pipeline
-│   ├── generation.py              # InputPipeline — the main driver
-│   ├── checker.py                 # Quality + category validation checkers
-│   ├── metaprompt.py              # Automated description + seed generation
-│   └── paraphrase.py              # Fingerprint removal (placeholder)
+├── content_moderation/            # Content moderation stages
+│   ├── inputs.py                  # InputPipeline.run_from_constitution — the seeded inputs stage
+│   ├── standalone.py              # The deprecated standalone inputs path (run_standalone_inputs)
+│   ├── outputs.py                 # run_output_generation — one checked response per input
+│   ├── paraphrase.py              # Paraphrase stage (placeholder paraphraser)
+│   ├── checker.py                 # Input, output and paraphrase checkers
+│   ├── feedback.py                # Rejection feedback and the do-not-repeat note
+│   ├── metaprompt.py              # Category description + seed generation (standalone path)
+│   └── results.py                 # Result classes
 │
 ├── jailbreak/                     # Jailbreak technique library
 │   ├── obfuscation/               # Text transformation attacks
@@ -483,53 +479,30 @@ Both `generate_constitution()` and `generate_inputs(constitution_df=...)` are **
 
 ### Content Moderation — Input/Output Generation
 
-> **Note:** the two input-generation modes below (automated/simple) are the
-> **deprecated** standalone meta-prompt path (`DeprecationWarning`, still
-> fully functional) — see the note earlier in this README. Prefer
-> constitution-seeded generation (previous section,
-> `generate_inputs(constitution_df=...)`) for new work; this section covers
-> the cheaper Opus-free "quick eval" alternative and the output-generation
-> step, which both modes share.
+**Seeded inputs** (`generate_inputs(constitution_df=...)`, previous section) are the recommended path: each
+constitution entry asks for `samples_per_entry` samples, a reply with another count is generated again
+(up to `max_attempts`), and each sample is checked by the entry-type-aware checker. Rejected samples are
+saved with their reason, so the rejection rate per category is visible in the CSVs.
 
-The pipeline operates in two modes:
-
-**Automated mode (`USE_METAPROMPT=True`)** — three LLM steps per category:
+**Standalone inputs** (`generate_inputs(samples_per_category=..., num_categories=...)`) are **deprecated**
+(`DeprecationWarning`) but functional, and need no constitution. Per category:
 
 ```
-Step 1. generate_category_description()
-        category name -> LLM -> rich description (3-5 sentences)
-
-Step 2. generate_seeds()
-        category + description -> LLM -> numbered list of seed prompts
-
-Step 3. InputPipeline.run_category()
-        description + seeds -> LLM -> samples, checked per-sample
+1. generate_category_description()   category name -> LLM -> description
+   generate_seeds()                  category + description -> LLM -> seed prompts
+   (use_metaprompt=False: the taxonomy description and hand-written seeds from configs/seeds/)
+2. turns until samples_per_category are accepted:
+     generate N samples in one call -> extract -> drop texts the category already has
+     -> check each sample -> save all (accepted + rejected) -> rejection reasons feed the next turn
 ```
 
-**Simple mode (`USE_METAPROMPT=False`)** — no extra LLM calls:
+**Outputs** (`generate_outputs`) generate one response per input and check it with the entry-type-aware
+output checker: a refusal of a harmful input is rejected, a benign input's reply is judged as any answer.
+`max_attempts > 1` regenerates a rejected response with the checker's verdict as feedback;
+`max_per_category` caps the inputs per `(category, entry_type)`.
 
-```
-Description: short one-liner from taxonomy JSON
-Seeds:       hand-written list from configs/seeds/
-Step 3:      same InputPipeline.run_category()
-```
-
-The `InputPipeline` generation loop (Step 3 in both modes):
-
-```
-For each turn:
-  1. Build messages (prompt + format instruction + prohibited list + feedback)
-  2. Generate N samples in one LLM call
-  3. Extract individual samples via regex
-  4. Dedup against existing samples
-  5. Check each sample individually via checker LLM
-  6. Save all samples (accepted + rejected) to CSV
-  7. Collect rejection feedback for next turn
-```
-
-**Key classes:** `InputPipeline`, `SampleResult`, `TurnResult`, `CategoryResult` (plus `ConstitutionInputResult` for the constitution-seeded path above)
-
-**Feedback loop** — rejection reasoning from turn N is injected into turn N+1's prompt.
+**Key classes and functions:** `InputPipeline`, `run_standalone_inputs`, `run_output_generation`,
+`build_quality_checker`, `build_output_quality_checker`, `build_paraphrase_checker`, `ConstitutionInputResult`.
 
 ---
 
