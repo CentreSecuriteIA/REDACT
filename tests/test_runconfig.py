@@ -193,6 +193,47 @@ def test_a_training_run_starts_at_inputs_from_the_saved_constitution(
         "entry_type": ["harmful", "benign"], "sample_description": ["about zq0", ""]}
 
 
+@pytest.mark.parametrize("constitution", ["in the recipe", "saved", "none"])
+def test_an_eval_run_seeds_its_inputs_when_it_has_a_constitution(
+        tmp_path, monkeypatch, constitution):
+    """A constitution stage in the recipe, or a constitution saved under
+    ``data_dir``, seeds the inputs; without either they are standalone. The
+    counts are taken from the tree the inputs went to."""
+    import redact
+
+    rows = {"entry_type": ["harmful"], "sample_description": ["about zq0"]}
+    monkeypatch.setattr(redact, "generate_constitution", _saves_a_constitution(rows))
+    if constitution == "saved":
+        _saves_a_constitution(rows)(data_dir=tmp_path)
+    handed = []
+
+    texts = ["prompt one", "prompt two"]
+
+    def inputs(**kwargs):
+        handed.append(kwargs)
+        seeded = "constitution_df" in kwargs
+        tree = (paths.constitution_inputs_dir if seeded else paths.datasets)(tmp_path)
+        append_samples(texts, category="Cyber", turn=0, dataset_dir=tree)
+        return pd.DataFrame()
+
+    monkeypatch.setattr(redact, "generate_inputs", inputs)
+    stages = ["inputs"]
+    if constitution == "in the recipe":
+        stages.insert(0, "constitution")
+    try:
+        summary = run_pipeline(
+            {"dataset_type": "eval", "data_dir": str(tmp_path), "stages": stages},
+            params={}, verbose=False)
+    finally:
+        telemetry.uninstall()
+    (kwargs,) = handed
+    if constitution == "none":
+        assert "constitution_df" not in kwargs
+    else:
+        assert kwargs["constitution_df"].to_dict("list") == rows
+    assert summary["stages"]["inputs"]["counts"]["rows"] == len(texts)
+
+
 def test_a_wrong_params_key_fails_before_any_stage_runs(tmp_path, monkeypatch):
     import redact
 
@@ -556,9 +597,9 @@ def test_load_recipe_rejects_an_unknown_key_naming_the_valid_ones():
     load_recipe({"dataset_type": "eval", "_comment": "a note"})
 
 
-def test_eval_cannot_include_constitution_stage():
-    with pytest.raises(ValueError):
-        load_recipe({"dataset_type": "eval", "stages": ["constitution", "inputs"]})
+def test_an_eval_recipe_may_include_the_constitution_stage():
+    recipe = load_recipe({"dataset_type": "eval", "stages": ["constitution", "inputs"]})
+    assert recipe["stages"] == ["constitution", "inputs"]
 
 
 def test_load_params_resolves_relative_to_base_dir(tmp_path):

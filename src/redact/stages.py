@@ -988,6 +988,7 @@ class RunContext:
     augmentations: dict         # the section the jailbreak stage runs, resolved
     resume: bool
     verbose: bool
+    stages: tuple[str, ...] = ()    # the stages the recipe names
 
 
 @dataclass(frozen=True)
@@ -1102,13 +1103,22 @@ def _inputs_kwargs(ctx: RunContext) -> dict:
         prompt_dir=ctx.prompt_dir, model=ctx.models["gen"],
         check_model=ctx.models["check"], resume=ctx.resume, verbose=ctx.verbose,
     )
-    if ctx.dataset_type == "training":
+    if _seeded(ctx):
         kwargs["constitution_df"] = Saved(partial(_saved_constitution, ctx.data_dir))
     return kwargs
 
 
+def _seeded(ctx: RunContext) -> bool:
+    """Whether the run's inputs are seeded from a constitution: a training
+    run's always are, an eval run's when it has one (the stage is in its
+    recipe, or a constitution is saved under ``data_dir``). The others are
+    standalone."""
+    return (ctx.dataset_type == "training" or "constitution" in ctx.stages
+            or paths.constitution_merged_csv(ctx.data_dir).exists())
+
+
 def _saved_constitution(data_dir: str | Path | None) -> pd.DataFrame:
-    """The constitution saved under ``data_dir``, which seeds a training run's inputs.
+    """The constitution saved under ``data_dir``, which seeds the run's inputs.
 
     Raises:
         ValueError: No constitution is saved there.
@@ -1116,14 +1126,14 @@ def _saved_constitution(data_dir: str | Path | None) -> pd.DataFrame:
     merged = paths.constitution_merged_csv(data_dir)
     if not merged.exists():
         raise ValueError(
-            f"training run: no constitution at {merged}. Its entries seed the "
-            "inputs, so run the 'constitution' stage before 'inputs', in this "
-            "recipe or in an earlier run on the same data_dir.")
+            f"No constitution at {merged}. Its entries seed the inputs, so run "
+            "the 'constitution' stage before 'inputs', in this recipe or in an "
+            "earlier run on the same data_dir.")
     return read_constitution(paths.constitution_dir(data_dir))
 
 
 def _inputs_files(ctx: RunContext) -> tuple[list[Path], dict]:
-    seeded = ctx.dataset_type == "training"
+    seeded = _seeded(ctx)
     tree = (paths.constitution_inputs_dir if seeded else paths.datasets)(ctx.data_dir)
     files = [paths.category_csv(c, root=tree) for c in discover_categories(tree)]
     keep = {"accepted": True}

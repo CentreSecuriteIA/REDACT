@@ -393,8 +393,9 @@ def run_pipeline(
     does an augmentation section the params contradict; the jailbreak stage
     runs and records the section with the params' flat keywords applied
     over its adversarial kind. No stage reads its rows back: the counts
-    are taken from each stage's files, and a training run's inputs are
-    seeded from the constitution saved under ``data_dir``. Local models the
+    are taken from each stage's files, and the inputs are seeded from the
+    constitution saved under ``data_dir``, in a training run always and in
+    an eval run when it has one. Local models the
     run planned are released when it returns or raises, and the way the
     recipe serves its models holds only until then. Before any of them
     loads, the run stops if another process holds memory on a card the
@@ -426,6 +427,7 @@ def run_pipeline(
             recipe, params.get("jailbreaks") if "jailbreaks" in stages else None),
         resume=recipe.get("resume", True),
         verbose=verbose,
+        stages=tuple(stages),
     )
     for name in stages:
         STAGES[name].check(ctx)     # a bad params key fails before any stage runs
