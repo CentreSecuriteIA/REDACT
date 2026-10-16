@@ -35,7 +35,7 @@ in [techniques.md](../techniques.md).
 
 | Recipe role | Registry role | Default | Calls |
 |---|---|---|---|
-| `gen` | `uncensored_gen` | `venice-uncensored` | Every technique that calls a model, and the benign data |
+| `gen` | `uncensored_gen` | `venice-uncensored` | Every technique that calls a model, `translation` aside, and the benign data |
 | `translation` | `translation` | `deepseek-v3.2` | The `translation` family; resolved, planned and loaded only when a kind has `"translation": true` |
 
 Each translation is up to 4 rounds of two calls. The first call of each round
@@ -111,8 +111,8 @@ when it is missing: 58 benign categories, two calls each (8 pairs with short
 answers, 8 with long), one category at a time, the file saved after each.
 Columns: `main_category`, `sub_category`, `prompt`, `answer`, `answer_type`.
 
-In the GPU check this took about 40 minutes on a 24B model, about 35 seconds
-per category, and was most of the stage's time. The file counts as complete
+In the GPU check the generation takes about 40 minutes on a 24B model, about
+35 seconds per category: most of the stage's time. The file counts as complete
 whenever it exists: a run stopped half way leaves a partial file that later
 runs load, and a reply with the wrong number of pairs adds no rows. Delete
 the file to generate it again. The generation reads the packaged prompt only.

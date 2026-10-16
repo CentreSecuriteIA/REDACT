@@ -35,7 +35,8 @@ not list the `constitution` stage.
 
 ## How the files flow
 
-Each stage reads what an earlier stage left on disk, never what it returned.
+In a recipe run, each stage reads what an earlier stage left on disk, never
+what it returned.
 Solid arrows are reads and writes of the training path; dotted ones are
 optional.
 
@@ -117,8 +118,9 @@ prompt overlay, taxonomy, params, resolved augmentations, `resume`). Then:
 
 For each stage, in the recipe's order, the driver:
 
-1. enters the stage's phase: unloads local engines the stage does not keep,
-   and starts preloading the models it needs on a background thread;
+1. when the run has local models, enters the stage's phase: unloads the
+   engines the stage does not keep, and starts preloading the models it needs
+   on a background thread;
 2. labels all telemetry inside the stage with its name;
 3. calls the front with `read_back=False` and `Stage.kwargs(ctx)`: the
    recipe's values first, then the params file's;
@@ -202,8 +204,9 @@ table shows; [stages/build.md](stages/build.md) has the details.
 `eval_example.json` lists `inputs`, `outputs`, `paraphrase`, `jailbreaks`,
 `build`. The inputs stage runs the standalone path
 ([stages/inputs.md](stages/inputs.md#standalone-inputs)): per category it
-generates a description and seed prompts, then generates and checks samples
-in turns until each category has `samples_per_category` accepted samples. It
+generates a description and seed prompts (by default), then generates and
+checks samples in turns until the category has `samples_per_category`
+accepted samples or runs out of turns. It
 writes `Datasets/<category>/samples.csv` and warns with a
 `DeprecationWarning`. The build runs in `eval` mode: paraphrases go to
 `Datasets/paraphrased.csv` instead of the complete dataset.

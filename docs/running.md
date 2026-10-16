@@ -210,12 +210,12 @@ for the later one, when every stage fits that way. It logs:
 <c> fits. This costs one more load.`
 
 **Copies.** When all of a stage's models fit together and cards are left
-idle, the first single-card vLLM engine gets a copy on each idle card (vLLM's
-`data_parallel_size`). More copies mean more requests in flight. A copy
+idle, the first single-card vLLM engine, when it is alone on its card, gets a
+copy on each idle card (vLLM's `data_parallel_size`). More copies mean more requests in flight. A copy
 lengthens the load, so for a short run set `"copies": 1`.
 
 **Reading the plan.** The log shows, per plan, the stages it covers, the
-cards found, and per model its size, how the size was derived, its card and
+cards found, and per model its size, how the size is derived, its card and
 its grant:
 
 ```
@@ -240,10 +240,11 @@ its ledger records as finished. A resumed stage:
    at the last save;
 3. cuts off what a save that did not finish left at the end of a file, and
    keeps those bytes in `<file>.cut`;
-4. runs the units not yet finished, and saves them every 32 units.
+4. runs the units not yet finished, and saves them in batches (every 32
+   units in most stages).
 
 A unit is acked only after its rows are on disk, so a crash loses at most the
-units in flight. [internals/dataset.md](internals/dataset.md#the-save-and-resume-model)
+units finished since the last save, and those run again. [internals/dataset.md](internals/dataset.md#the-save-and-resume-model)
 explains the mechanism.
 
 **Stopping a run.** Ctrl-C, or `kill <pid>` on `scripts/run.py`, ends the run
@@ -262,10 +263,11 @@ and ran the other 400. It ended with 432 rows, 433 ledger lines (the opening
 
 **Starting over.** `"resume": false` starts every listed stage over: it
 removes the stage's output, its `.cut` files, its ledger and its manifest,
-then plans anew. Two exceptions:
+then plans anew. The exceptions:
 
 - The seeded `inputs` stage starts over only its current `style`. The rows
   and acks of other styles stay.
+- The standalone `inputs` stage removes the files of the categories it runs.
 - The `constitution` stage removes every CSV in `Data_cache/constitution/`.
 
 The benign cache (`Data_cache/benign/benign_samples.csv`) is never cleared.
@@ -330,8 +332,8 @@ A run record, `Datasets/<stage>.run.json`, holds `stage`, `timestamp`,
 `params` (the params file's entry), `models` (the recipe's role names),
 `counts` (`rows`, and `accepted` when the files have that column),
 `sources` (empty in a recipe run), `serving` (per role: name, setup, copies
-or workers), and for the
-jailbreak stage `spec_version` and the resolved `augmentation` section.
+or workers), and for the jailbreak stage `spec_version` and the resolved
+`augmentation` section.
 
 ## Telemetry and cost
 
@@ -348,8 +350,8 @@ At the end of the run the driver logs a roll-up at INFO and returns it as
 | Key | Meaning |
 |---|---|
 | `models` | Per model: `calls`, `items`, `in` and `out` tokens, `ms`, and `cost_usd` for hosted calls of a priced model |
-| `local_s` | Seconds each local checkpoint was held, load to release |
-| `local_billed_s` | The time any engine was held, overlaps counted once |
+| `local_s` | Seconds each local checkpoint is held, from load to release |
+| `local_billed_s` | The time any engine is held, overlaps counted once |
 | `gpu` | The GPU name, the number of GPUs on the machine, the hourly rate used |
 | `api_cost_usd` | Hosted tokens x the model's price per million |
 | `local_cost_usd` | Billed time x rate x GPUs on the machine; `null` when the GPU is unpriced |
@@ -371,7 +373,7 @@ rate. [internals/telemetry.md](internals/telemetry.md) lists the events.
 | What you see | What it means | What to do |
 |---|---|---|
 | `ValueError: No input samples found. Run generate_inputs() first.` | A stage that reads inputs found no category file under `data_dir` | Run `inputs` first, or point `data_dir` at the run that has them |
-| WARNING `outputs skipped: no input sample was accepted ...` (or `paraphrase (...)`, `jailbreaks`) | Every input was rejected; the stage writes nothing and records 0 rows. The run goes on | Read `rejection_reason` in the category files. A weak checker model rejects almost everything: in the GPU check a 3B checker accepted 2 of 144 seeded inputs, a 24B accepted 144 of 144 |
+| WARNING `outputs skipped: no input sample was accepted ...` (or `paraphrase (...)`, `jailbreaks`) | No input is accepted; the stage writes nothing and records 0 rows. The run goes on | Read `rejection_reason` in the category files. A weak checker model rejects almost everything: in the GPU check a 3B checker accepted 2 of 144 seeded inputs, a 24B accepted 144 of 144 |
 | WARNING `inputs: only N of M generated samples were accepted (under half)` | The checker rejects most samples | As above |
 | `ValueError: training run: no constitution at ...` | A training run's inputs need the saved constitution | List `constitution` before `inputs` |
 | `KeyError: Model 'x' needs an API key, but the environment variable ... is not set` | A hosted model without its key | Add the key to `.env`, or serve the model locally |
@@ -380,13 +382,13 @@ rate. [internals/telemetry.md](internals/telemetry.md) lists the events.
 | `ValueError: params['x'] sets [...], which the run passes ... itself` | The params file sets a key the recipe owns (`model`, `resume`, ...) | Set it in the recipe |
 | `ValueError: augmentations.<kind> ...` | A bad augmentation section; the message names the key and what to write | Fix the section ([configuration.md](configuration.md#the-augmentation-section)) |
 | `RuntimeError: ... is locked: another run, or this same process, is writing this stage's output` | Two runs on one output | Stop the other run, or use another `data_dir` |
-| `RuntimeError: Cannot resume <file>: <ledger> recorded N bytes of it and the file is missing / is M bytes / holds other bytes there` | The output was replaced, edited or copied incompletely after its last save | Restore the file; or delete the ledger, and the next resume takes over the rows in the file; or start the stage over |
+| `RuntimeError: Cannot resume <file>: <ledger> recorded N bytes of it and the file is missing / is M bytes / holds other bytes there` | The output has been replaced, edited or copied incompletely since its last save | Restore the file; or delete the ledger, and the next resume takes over the rows in the file; or start the stage over |
 | `RuntimeError: <file> is N bytes and <ledger> recorded M bytes after the last save: something else changed the file` | Another writer touched the output during the run | Stop the other writer, then resume |
 | `RuntimeError: A fresh run of 'long' did not finish in ...` | A fresh run of one seeded-inputs style stopped half way | Run that style again with `resume: false` |
 | ERROR `[residency] ...` with `PROBLEM:` lines | The local models of a stage do not fit the cards | Follow the plan's advice; the run continues and may run out of memory at load |
 | ERROR `[preload] <model> failed to load` | A background load failed | The stage that needs the model fails when it calls it, with the cause in the log |
 | `RuntimeError: The vLLM engine of ... was being built with N copies ...` | The engine failed to build with copies | Set `"copies": 1` for that role |
-| vLLM logs `AsyncLLM output_handler failed` with `EngineDeadError` | An engine shutting down; logged at release and sometimes at exit | Nothing; the driver logs a line before it |
+| vLLM logs `AsyncLLM output_handler failed` with `EngineDeadError` | An engine shutting down; logged at release and sometimes at exit | Nothing; REDACT logs a line saying so just before |
 | INFO `[rate-limit] <model>: pausing Ns (N RPM)` | A hosted model is at its rate limit | Expected; serve the model locally for speed |
 | WARNING `<model>: N of M replies were cut at the token limit` | Replies hit `max_tokens` or the context | Raise `default_max_tokens` or `max_model_len`, or ask for shorter replies |
 | WARNING `... rejected, its prompt is too long` | One prompt is longer than the model's context; that unit gets a rejected row or ack | Raise `max_model_len`, or shorten the input |

@@ -131,8 +131,8 @@ not retried forever. Leaving the block also releases the stage's lock.
 The units of the unfinished save run again, so no unit ends with two sets of
 rows. `tests/dataset/test_crash_matrix.py` crashes a save at every write and
 checks five guarantees: a unit is finished only if its rows are on disk; no
-row is on disk that a rerun would write again; what was acked stays
-finished; each file is exactly what the ledger records; the resume reads no
+row is on disk that a rerun would write again; what is acked before the
+crash stays finished; each file is exactly what the ledger records; the resume reads no
 row.
 
 A folder whose ledger records no sizes, such as one written before the

@@ -115,8 +115,8 @@ its memory freed, and a client built on it raises on its next call.
   checkpoint's maximum. Planned cards are set in `CUDA_VISIBLE_DEVICES` for
   the build; more cards than one copy spans become copies
   (`data_parallel_size`).
-- Defaults: `temperature` 0.7 when the model has none, `top_p` 0.85, both
-  over `VLLMConfig.sampling`.
+- Defaults: `temperature` 0.7 when the model sets none; `top_p` 0.85 unless
+  `VLLMConfig.sampling` says otherwise.
 - A prompt longer than the context raises `PromptTooLongError` for that
   request only. A request aborted because its engine is released raises.
 - A release calls the engine's `shutdown()`, collects garbage and empties
@@ -216,7 +216,8 @@ the same `rpm`.
 | `clean_sample` | Strip markdown and stray chat tokens |
 | `scaffold_prompt_tree(target, mode=)` | Write a copy (`copy`) or skeletons (`empty`) of the prompt tree |
 
-A render error names the prompt file and the missing placeholder.
+A render error names the missing placeholder, and the prompt file when the
+template comes from `PromptTemplate.load`.
 
 ## How the stages use it
 

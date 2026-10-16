@@ -11,7 +11,7 @@ core follows: [the seven steps](#the-seven-steps-of-a-stage).
 | `stages.py` | The fronts (`generate_*`, `build_dataset`) and the `STAGES` table | Touch a ledger, a manifest, `resume_state` or `CommitBuffer`: that is the core's job |
 | `recipe.py` | Reading and checking a recipe and its params file; how a role resolves; how a recipe serves its models | Run anything |
 | `driver.py` | One run: serving, residency, telemetry, the stages in order, a record each | Read a stage's rows back: counts come from the files |
-| `paths.py` | Every file and folder name under a working root, and the package's own folders | Hold any logic beyond joining paths |
+| `paths.py` | Every file and folder name under a working root, the default root, and the package's own folders | Hold stage logic: a stage asks it for a path and nothing else |
 
 The library attaches only a `NullHandler` to the `redact` logger and sets no
 level; the application configures logging (`scripts/run.py` does).
@@ -31,7 +31,7 @@ and calls one core, then returns what the core returns.
 | `build_dataset` | none; `dataset.write_concat` | the rows of the merged file |
 | `generate_conversations`, `evaluate_conversations` | themselves, in `multi_turn/` | their file's rows |
 
-Every front takes:
+Every front takes, where they apply:
 
 - its inputs, as a frame or `None` for the run's own (`dataset.merge_inputs`);
 - `data_dir`, the working root;

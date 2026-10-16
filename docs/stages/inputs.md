@@ -121,8 +121,8 @@ stops until the same fresh run is repeated.
 
 - A sample the checker rejects is saved with `accepted` false and the
   checker's reply in `rejection_reason`.
-- An entry whose replies were all rejected is acked `rejected`, with no rows.
-- An entry whose samples were all repeats is acked `no_samples`.
+- An entry with every reply rejected is acked `rejected`, with no rows.
+- An entry with only repeated samples is acked `no_samples`.
 - An entry whose prompt is too long for the model is acked `rejected` after
   one attempt.
 - These acked entries are skipped on resume; a warning at the end counts the

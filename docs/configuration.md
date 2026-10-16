@@ -102,7 +102,7 @@ models, `data_dir`, `prompt_dir`, `taxonomy`, `taxonomy_dir`, `resume`,
 | `target` | `"both"` | `inputs`, `outputs` or `both` |
 | `paraphrases_per_sample` | `1` | Paraphrase units per source row |
 | `check` | `true` | Check each paraphrase with the `paraphrase_check` model |
-| `batch_size` | `256` | Rows per paraphrase call and per check call |
+| `batch_size` | `256` | Units per paraphrase batch and per check batch |
 | `seed` | `42` | Seed of the assignment of units to paraphrasers |
 | `inputs_path`, `outputs_path` | `Datasets/paraphrases_inputs.csv`, `Datasets/paraphrases_outputs.csv` | Where the paraphrases go |
 
@@ -218,8 +218,8 @@ From every registered technique, in this order:
 - An `allow` list may not be empty: write `null` for all, or name what to
   leave out under `deny`. A name may not be under both.
 - The natural kind needs an allow list.
-- `natural_only_families`, at the top of `augmentations.json` (today
-  `casual_writing`), are added to the adversarial `families.deny` unless the
+- `natural_only_families`, at the top of `augmentations.json`
+  (`casual_writing` in the packaged file), are added to the adversarial `families.deny` unless the
   adversarial `families.allow` names them.
 
 ### The translation switch
@@ -230,9 +230,10 @@ adds it to its allow list. No deny or allow list changes this. An allow list
 that names `translation` or one of its techniques while the switch is
 `false` raises.
 
-Both kinds default to `false`. Each translation is a translate, check, retry
-loop on the `translation` model, up to 4 rounds, so 2 to 8 calls. The
-translation model is planned and loaded only when a kind has the switch on.
+Both kinds default to `false`. Each translation makes 2 to 8 calls, up to 4
+rounds of two ([stages/jailbreaks.md](stages/jailbreaks.md#models) says which
+model each goes to). The translation model is planned and loaded only when a
+kind has the switch on.
 Turning it on by default is one line per kind in `augmentations.json`.
 
 ### Rounds
@@ -425,7 +426,7 @@ to the loader:
 
 | Reads the overlay | Packaged copy only |
 |---|---|
-| seeded and standalone input generation; output generation and check; paraphrase generation and check; the jailbreak techniques that take `prompt_dir` (cognitive, persona, `fsh`/`dap` pair selection, synonym substitution, harmful-word extraction, typos) | the constitution prompts; the input quality check; the standalone description and seed calls; translation; benign Q&A generation; the conversation and attack prompts; a format instruction added through `build_messages` |
+| `input/generation/...` (seeded and standalone); `output/generation`, `output/quality_check`; `paraphrase/generation`, `paraphrase/check`; the technique prompts `jailbreak/scenario_generation`, `persona_scenario_generation`, `jailbreak_construction`, `category_selection`, `extract_harmful`, `synonym_substitution`, `rewrite_with_typos` | `constitution/*`; `input/quality_check`, `input/category_description`, `input/seed_generation`; `jailbreak/translate`, `translate_retry`, `translate_check`, `benign_generation`; `conversation/*`; a format instruction added through `build_messages` |
 
 `report_prompt_sources` counts files present in the overlay, including those
 of prompts in the right-hand column.
@@ -442,9 +443,11 @@ of prompts in the right-hand column.
 }
 ```
 
-- `system_prompt` is rendered once per template, `template` once per call;
-  both with `str.format_map`. A literal brace is doubled (`{{ }}`). A missing
-  placeholder raises and names the file.
+- `system_prompt` and `template` are rendered with `str.format_map`. A
+  `PromptTemplate` renders the system prompt once, when built, and the
+  template on each call. A literal brace is doubled (`{{ }}`). A missing
+  placeholder raises and names it, and the file when the prompt is loaded
+  with `PromptTemplate.load`.
 - `seed_fields` documents the placeholders; nothing reads it.
 - `few_shot_examples` are message objects passed through as they are.
 - A prompt built with a `format_style` (`numbered`, `structured_qa`) gets the
