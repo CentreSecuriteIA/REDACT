@@ -29,13 +29,19 @@ def explain(plan: "ResidencyPlan") -> str:
     Includes each model's derivation and grant, and the way out for a
     plan that does not fit.
     """
+    sizes = plan.gib_per_card or []
+    mixed = len(set(sizes)) > 1
     if plan.machine_given:
         gpu = f"planning for {plan.gpus_available} GPU(s)"
+    elif mixed:
+        gpu = f"detected {plan.gpus_available} GPUs of different sizes"
     elif plan.gpu_name:
         gpu = f"detected {plan.gpus_available} x {plan.gpu_name}"
     else:
         gpu = "no GPU detected"
-    if plan.per_gpu_gb:
+    if mixed:
+        gpu += ": " + ", ".join(f"card {d} {gib:.1f}GiB" for d, gib in enumerate(sizes))
+    elif plan.per_gpu_gb:
         gpu += f", {plan.per_gpu_gb:.1f}GiB each"
     lines = [f"plan needs {plan.gpus_required} GPU(s); {gpu}"]
 
@@ -109,6 +115,14 @@ def _placement(plan: "ResidencyPlan", fp: ModelFootprint) -> str:
                 f"(gpu_memory_utilization={fp.planned_utilization:.2f})")
     return f"  -> {cards}"
 
+def _card_size(plan: "ResidencyPlan", fp: ModelFootprint) -> float:
+    """The size of a model's smallest card, or of the plan's smallest card
+    when the model is on none."""
+    sizes = plan.gib_per_card or []
+    own = [sizes[d] for d in fp.devices if d < len(sizes)]
+    return min(own) if own else plan.per_gpu_gb or 0
+
+
 def _idle_note(plan: "ResidencyPlan") -> str | None:
     """Which cards a plan with a vLLM engine leaves idle, and why no copy
     of an engine takes them. ``None`` when no card is idle."""
@@ -119,15 +133,18 @@ def _idle_note(plan: "ResidencyPlan") -> str | None:
     idle = [str(d) for d in range(plan.gpus_available) if d not in used]
     if not idle:
         return None
-    first = next((fp for fp in engines if fp.min_gpus == 1), None)
-    if first is None:
-        why = "only a single-GPU vLLM engine gets copies"
-    elif any(d in fp.devices for fp in plan.footprints
-             if fp.engine != first.engine for d in first.devices[:1]):
-        why = (f"{first.model} shares its card, and a copy needs the card "
-               "to itself")
+    first = engines[0]
+    size = _card_size(plan, first)
+    sizes = plan.gib_per_card or []
+    if sizes and all(sizes[int(d)] < size for d in idle):
+        it = "it is" if len(idle) == 1 else "they are"
+        why = (f"{it} smaller than {first.model}'s card ({size:.1f}GiB), and a "
+               f"copy there would cut its share on every card")
     elif any(fp is first for fp in plan.oversized):
-        why = f"{first.model} does not fit its card, so a copy would not either"
+        cards = "cards" if first.min_gpus > 1 else "card"
+        why = f"{first.model} does not fit its {cards}, so a copy would not either"
+    elif len(idle) < first.min_gpus:
+        why = f"a copy of {first.model} needs {first.min_gpus} idle cards"
     else:
         why = (f"{first.model} is limited to {first.copies} "
                f"{'copy' if first.copies == 1 else 'copies'}")
@@ -154,14 +171,15 @@ def oversized_advice(plan: "ResidencyPlan", fp: ModelFootprint) -> list[str]:
 
     Lines after the first are indented for :func:`explain`.
     """
-    per = plan.per_gpu_gb or 0
+    per = _card_size(plan, fp)
     if fp.setup != "vllm":
         pinned = str(fp.parts.get("device_map", "auto")) not in _SPANNING_DEVICE_MAPS
-        cards = 1 if pinned else max(plan.gpus_available, 1)
+        have = per if pinned else (
+            sum(plan.gib_per_card or []) or per * max(plan.gpus_available, 1))
         return [
             f"{fp.model}[{fp.setup}] needs ~{fp.gb:.1f}GiB but "
             f"{'its card has' if pinned else 'the cards have'} "
-            f"{per * cards:.1f}GiB.",
+            f"{have:.1f}GiB.",
             "    alternatives: a 16-bit torch_dtype, a quantized "
             "checkpoint, or more GPU memory",
         ]

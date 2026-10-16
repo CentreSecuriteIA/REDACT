@@ -36,7 +36,7 @@ role's default), or an object:
 |---|---|---|
 | `name` | registry name | Left out or `null`: the role's default |
 | `backend_type` | `"api"`, `"vllm"`, `"introspect"` | The setup of the registry entry that serves the model |
-| `copies` | int >= 1 | vLLM setups only: copies of the engine, one per card. Left out: a copy on each idle card |
+| `copies` | int >= 1 | vLLM setups only: copies of the engine, one per card. Left out: a copy on each card with room |
 | `workers` | int >= 1 | API setups only: requests in flight. Left out: `recommended_max_workers`. Must be 1 on Anthropic |
 
 `paraphraser` may also be `"distribution"`, the pool of every model with the
@@ -410,7 +410,8 @@ role.
 | `WANDB_PROJECT` | the W&B sink | Project name, default `redact` |
 | `REDACT_GPU_PROVIDER` | the cost roll-up | Provider key in `gpu_pricing.json`; default `local`, priced at 0 |
 | `REDACT_GPU_HOURLY_USD` | the cost roll-up | Hourly price per GPU; wins over the table |
-| `CUDA_VISIBLE_DEVICES` | the planner, vLLM | The cards the run may use; the plan numbers cards over them |
+| `CUDA_VISIBLE_DEVICES` | the planner, vLLM | The cards the run may use, by index or UUID; the plan numbers cards over them |
+| `CUDA_DEVICE_ORDER` | CUDA | Set to `PCI_BUS_ID` by a plan or a load unless set, so CUDA counts the cards as `nvidia-smi` does |
 
 ## The prompt overlay
 

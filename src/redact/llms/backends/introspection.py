@@ -121,7 +121,8 @@ def _load_locked(key, hf_model_id: str, device_map: str, torch_dtype: str, hf_kw
     dtype_kwarg = (
         "dtype" if int(transformers.__version__.split(".")[0]) >= 5 else "torch_dtype"
     )
-    with measure.Measurement() as measured:
+    # CUDA starts here, so not while a vLLM build has narrowed the cards.
+    with measure.cuda_lock, measure.Measurement() as measured:
         model = AutoModelForCausalLM.from_pretrained(
             hf_model_id, device_map=device_map, **{dtype_kwarg: torch_dtype}, **hf_kwargs,
         )
@@ -302,7 +303,9 @@ class TransformersIntrospectionBackend(LLMBackend):
         )
 
     @classmethod
-    def clear_cache(cls, keep: Collection[tuple] = ()) -> None:
+    def clear_cache(
+        cls, keep: Collection[tuple] = (), *, wait: float | None = None,
+    ) -> None:
         """Release the loaded models and free their memory.
 
         The hold time of each is reported. A backend built on a released
@@ -312,12 +315,20 @@ class TransformersIntrospectionBackend(LLMBackend):
         Args:
             keep: Load keys (:func:`_model_key`) to leave loaded and timed.
                 A collection of keys, not one key.
+            wait: Seconds to wait for a load in progress, for a release on
+                the way out. Past them the models are left as they are: a
+                load in this process cannot be ended. ``None`` waits for the
+                load however long it takes.
         """
         if any(not isinstance(key, tuple) for key in keep):
             raise TypeError(f"keep takes a collection of load keys, got {keep!r}.")
         # Locked: a preload may be inserting a model, and the next load must
         # wait until this memory is back.
-        with _models_lock:
+        if not _models_lock.acquire(timeout=-1 if wait is None else wait):
+            logger.error("[introspect] A transformers load has not returned in "
+                         "%g s; the loaded models are left as they are.", wait)
+            return
+        try:
             released = [k for k in _models if k not in keep]
             for key in released:
                 del _models[key]
@@ -325,6 +336,8 @@ class TransformersIntrospectionBackend(LLMBackend):
                 free_memory()
             # After the memory is freed, so held_s covers it.
             _release_models(keep)
+        finally:
+            _models_lock.release()
 
     def _capture_path(self, internals_id: str) -> Path:
         """The folder of one capture, which must lie inside ``log_dir``."""

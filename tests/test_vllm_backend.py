@@ -271,7 +271,8 @@ class TestWorkerStartMethod:
 
 class TestExitHook:
     """A process that ends with an engine loaded shuts it down first, or
-    multiprocessing's exit hook waits for the engine's child process forever."""
+    multiprocessing's exit hook waits for the engine's child process forever.
+    A load in progress is waited for, at most ``EXIT_WAIT_S``."""
 
     # The scripts import tests.conftest, so they run from the repository root.
     ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
@@ -342,6 +343,275 @@ class TestExitHook:
                                 text=True, timeout=30, cwd=self.ROOT)
         assert result.returncode == 0, result.stderr
         assert "shut down" in result.stdout
+
+
+    #: Seconds within which a script whose load hangs has exited.
+    EXIT_BOUND_S = 30
+
+    # A script whose fake engine starts a child process, prints its pid and
+    # then does what the script's {WAIT} says; the exit waits 1 s for it.
+    HUNG = textwrap.dedent("""
+        import logging, multiprocessing, sys, threading, time
+        import redact.llms.backends.vllm as vllm_module
+        import redact.llms.resources.estimate as estimate
+        from tests.conftest import fake_vllm_modules
+
+        logging.basicConfig(level=logging.INFO)
+        started = threading.Event()
+
+        class _LLM:
+            def __init__(self, **kw):
+                proc = multiprocessing.get_context("spawn").Process(
+                    target=time.sleep, args=(60,), name="EngineCore")
+                proc.start()
+                print(proc.pid, flush=True)
+                started.set()
+                {WAIT}
+
+        sys.modules.update(fake_vllm_modules(_LLM))
+        vllm_module._prepare_environment = lambda: None
+        estimate._load_config = lambda _id: None
+        vllm_module.EXIT_WAIT_S, vllm_module._GRACE_S = 1.0, 0.5
+        threading.Thread(target=vllm_module._engine, args=("org/x", None, {{}}),
+                         daemon=True).start()
+        started.wait()
+    """)
+
+    def _run_hung(self, wait):
+        psutil = pytest.importorskip("psutil")
+        import time
+
+        code = self.HUNG.format(WAIT=wait)
+        started = time.monotonic()
+        result = subprocess.run([sys.executable, "-c", code], capture_output=True,
+                                text=True, timeout=60, cwd=self.ROOT)
+        took = time.monotonic() - started
+        assert result.returncode == 0, result.stderr
+        assert took < self.EXIT_BOUND_S, took
+        assert "The load of org/x has not returned" in result.stderr
+        # Never os.kill(pid, 0) to check: on Windows that ends the process.
+        assert not psutil.pid_exists(int(result.stdout.split()[0]))
+        return result
+
+    def test_a_load_that_fails_once_its_process_is_ended_lets_the_exit_finish(self):
+        """vLLM's start-up wait fails as soon as an engine process exits:
+        the load lets go of the lock and the exit releases as usual."""
+        result = self._run_hung(
+            "while proc.is_alive(): time.sleep(0.05)\n"
+            "        raise RuntimeError('Engine core initialization failed.')")
+        assert "still held" not in result.stderr
+
+    def test_a_load_that_never_returns_does_not_keep_the_process_up(self):
+        result = self._run_hung("threading.Event().wait()")
+        assert "still held" in result.stderr
+
+
+class _Proc:
+    """A ``multiprocessing`` handle of a child process. ``stubborn`` ones
+    outlive SIGTERM; ``immortal`` ones outlive SIGKILL too."""
+
+    def __init__(self, pid, name="EngineCore", done=None, stubborn=False,
+                 immortal=False):
+        self.pid, self.name = pid, name
+        self.done = done if done is not None else []
+        self.alive, self.stubborn, self.immortal = True, stubborn, immortal
+
+    def is_alive(self):
+        return self.alive
+
+    def terminate(self):
+        self.done.append(("terminate", self.pid))
+        self.alive = self.alive and self.stubborn
+
+    def kill(self):
+        self.done.append(("kill", self.pid))
+        self.alive = self.alive and self.immortal
+
+    def join(self, timeout=None):
+        self.done.append(("join", self.pid))
+
+
+def _fake_psutil(children, done, stubborn=(), immortal=()):
+    """A stand-in for psutil: ``children[pid]`` are the pids of a process's
+    descendants, which outlive SIGTERM when in ``stubborn`` and SIGKILL too
+    when in ``immortal``."""
+    alive = {pid for kids in children.values() for pid in kids}
+
+    class Process:
+        def __init__(self, pid):
+            self.pid = pid
+
+        def children(self, recursive=False):
+            assert recursive
+            return [Process(pid) for pid in children.get(self.pid, ())]
+
+        def terminate(self):
+            done.append(("terminate", self.pid))
+            if self.pid not in stubborn:
+                alive.discard(self.pid)
+
+        def kill(self):
+            done.append(("kill", self.pid))
+            if self.pid not in immortal:
+                alive.discard(self.pid)
+
+    def wait_procs(procs, timeout):
+        procs = list(procs)
+        done.append(("wait", sorted(p.pid for p in procs)))
+        return ([p for p in procs if p.pid not in alive],
+                [p for p in procs if p.pid in alive])
+
+    return types.SimpleNamespace(Process=Process, wait_procs=wait_procs, Error=OSError)
+
+
+class TestEngineProcesses:
+    """A build records the processes it started, and those are what is
+    ended when an engine has to be stopped: never another child of this
+    process."""
+
+    @pytest.fixture()
+    def children(self, monkeypatch):
+        """``multiprocessing.active_children()`` as a list a test fills. psutil
+        is a fake that knows no children: the pids here are made up."""
+        import multiprocessing
+
+        import redact.llms.backends.vllm as vllm_module
+
+        listed = []
+        monkeypatch.setattr(multiprocessing, "active_children",
+                            lambda: [p for p in listed if p.is_alive()])
+        monkeypatch.setitem(sys.modules, "psutil", _fake_psutil({}, []))
+        monkeypatch.setattr(vllm_module, "_engine_procs", {})
+        monkeypatch.setattr(vllm_module, "_stray", [])
+        monkeypatch.setattr(vllm_module, "_END_WAIT_S", 0.01)
+        return vllm_module, listed
+
+    @staticmethod
+    def _build(monkeypatch, listed, started, fail=False):
+        """Load ``org/p`` with a fake engine whose build starts ``started``."""
+        import redact.llms.backends.vllm as vllm_module
+
+        class _LLM:
+            scheduler_config = types.SimpleNamespace(max_num_seqs=8)
+
+            def __init__(self, **kw):
+                listed.extend(started)
+                if fail:
+                    raise RuntimeError("engine core died")
+
+        for name, module in fake_vllm_modules(_LLM).items():
+            monkeypatch.setitem(sys.modules, name, module)
+        monkeypatch.setattr(vllm_module, "_prepare_environment", lambda: None)
+        monkeypatch.setattr(
+            "redact.llms.resources.estimate._load_config", lambda _id: None)
+        return vllm_module._engine("org/p", None, {})
+
+    def test_a_build_records_the_processes_it_started(self, children, monkeypatch):
+        vllm_module, listed = children
+        listed.append(_Proc(1, name="Other"))
+        core, coordinator = _Proc(2), _Proc(3, name="VLLM_DP_Coordinator")
+        self._build(monkeypatch, listed, [core, coordinator])
+        key = vllm_module._engine_key("org/p", None, {})
+        assert vllm_module._engine_procs == {key: [core, coordinator]}
+        assert vllm_module._stray == []
+
+    def test_a_failed_build_ends_its_processes(self, children, monkeypatch):
+        """One that outlives SIGKILL is kept, to be tried again on the way out."""
+        vllm_module, listed = children
+        ended, kept = _Proc(2), _Proc(3, stubborn=True, immortal=True)
+        with pytest.raises(RuntimeError, match="engine core died"):
+            self._build(monkeypatch, listed, [ended, kept], fail=True)
+        assert ("terminate", 2) in ended.done and not ended.alive
+        assert vllm_module._engine_procs == {} and vllm_module._stray == [kept]
+
+    def test_terminate_then_kill_what_outlives_it(self, children, monkeypatch):
+        vllm_module, _ = children
+        done = []
+        monkeypatch.setitem(sys.modules, "psutil",
+                            _fake_psutil({2: [21, 22]}, done, stubborn={22}))
+        core, other = _Proc(2, done=done, stubborn=True), _Proc(5, done=done)
+        assert vllm_module.terminate_engine_processes([core, other]) == []
+        # The children are listed before their engine is signalled, then each
+        # gets SIGTERM, and SIGKILL if it is still alive after the wait.
+        assert done == [
+            ("terminate", 2), ("terminate", 5), ("terminate", 21), ("terminate", 22),
+            ("join", 2), ("join", 5), ("wait", [21, 22]),
+            ("kill", 2), ("kill", 22),
+            ("join", 2), ("wait", [22]),
+        ]
+
+    def test_what_outlives_sigkill_is_returned_and_logged(
+            self, children, monkeypatch, caplog):
+        vllm_module, _ = children
+        done = []
+        monkeypatch.setitem(sys.modules, "psutil", _fake_psutil(
+            {2: [21]}, done, stubborn={21}, immortal={21}))
+        core = _Proc(2, done=done, stubborn=True, immortal=True)
+        with caplog.at_level(logging.WARNING, logger=vllm_module.logger.name):
+            assert vllm_module.terminate_engine_processes([core]) == [2, 21]
+        assert "kill -9 2 21" in caplog.text
+
+    def test_a_process_that_ended_already_is_left_alone(self, children, monkeypatch):
+        vllm_module, _ = children
+        monkeypatch.setitem(sys.modules, "psutil", None)    # not even imported
+        ended = _Proc(2)
+        ended.alive = False
+        assert vllm_module.terminate_engine_processes([ended]) == []
+
+    def test_without_psutil_nothing_is_ended_and_all_is_returned(
+            self, children, monkeypatch, caplog):
+        vllm_module, _ = children
+        monkeypatch.setitem(sys.modules, "psutil", None)
+        done = []
+        with caplog.at_level(logging.ERROR, logger=vllm_module.logger.name):
+            assert vllm_module.terminate_engine_processes([_Proc(2, done=done)]) == [2]
+        assert done == [] and "psutil" in caplog.text
+
+    def test_all_ends_every_engine_process_and_no_other_child(
+            self, children, monkeypatch):
+        """For the forced exit of a second signal: the processes of every
+        build, and every child named as vLLM names its engine processes."""
+        vllm_module, listed = children
+        done = []
+        monkeypatch.setitem(sys.modules, "psutil", _fake_psutil({}, done))
+        loaded, stray = _Proc(2, name="x", done=done), _Proc(3, name="y", done=done)
+        unrecorded = [_Proc(4, "EngineCore_DP1", done),
+                      _Proc(6, "VLLM_DP_Coordinator", done)]
+        other = _Proc(5, name="SyncManager-1", done=done)
+        listed.extend([loaded, stray, *unrecorded, other])
+        vllm_module._engine_procs[("org/p", None, "[]")] = [loaded]
+        vllm_module._stray.append(stray)
+        vllm_module.terminate_engine_processes(all=True)
+        assert {pid for what, pid in done if what == "terminate"} == {2, 3, 4, 6}
+        assert other.alive
+
+    def test_a_real_engine_process_and_its_child_are_ended(self):
+        """Processes of this machine: a child of this process, and the
+        process it started, which the child's end does not end."""
+        import multiprocessing
+        import time
+
+        psutil = pytest.importorskip("psutil")
+        import redact.llms.backends.vllm as vllm_module
+
+        engine = multiprocessing.get_context("spawn").Process(
+            target=subprocess.call,
+            args=([sys.executable, "-c", "import time; time.sleep(60)"],),
+            name="EngineCore")
+        engine.start()
+        try:
+            deadline = time.monotonic() + 30
+            while not psutil.Process(engine.pid).children():
+                assert time.monotonic() < deadline, "the worker never started"
+                time.sleep(0.1)
+            (worker,) = psutil.Process(engine.pid).children()
+            assert vllm_module.terminate_engine_processes([engine]) == []
+            assert not engine.is_alive()
+            # Never os.kill(pid, 0) to check: on Windows that ends the process.
+            assert not worker.is_running()
+        finally:
+            if engine.is_alive():
+                engine.kill()
 
 
 class TestReleaseNote:

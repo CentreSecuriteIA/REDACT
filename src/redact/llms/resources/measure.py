@@ -1,9 +1,14 @@
 """Probe the machine's GPUs, and measure what an in-process load took on them.
 
-:func:`detect_gpus` and :func:`detect_gpu_memory_gib` ask ``nvidia-smi`` for
-the cards, for the planner and the cost roll-up, and :func:`card_use` for
-what each card holds, for the run's check before it loads a model.
+:func:`gpu_cards` asks ``nvidia-smi`` for each card, for the planner
+(:func:`card_sizes_gib`) and the loader, :func:`detect_gpus` for the cards'
+name and count, for the cost roll-up, and :func:`card_use` for what each
+card holds, for the run's check before it loads a model.
 :func:`free_total_gib` is the planner's fallback for the card size.
+
+A vLLM build narrows ``CUDA_VISIBLE_DEVICES`` for the whole process
+(:func:`visible_only`); :data:`cuda_lock` keeps what starts CUDA in this
+process from starting it meanwhile.
 
 Only the transformers backend measures its loads (:class:`Measurement`), for
 telemetry. vLLM loads are not measured, and planning uses
@@ -12,15 +17,29 @@ telemetry. vLLM loads are not measured, and planning uses
 All sizes are GiB (bytes / 1024**3).
 """
 
+import contextlib
 import logging
 import os
 import shutil
 import subprocess
+import sys
+import threading
 from dataclasses import dataclass
 
 logger = logging.getLogger(__name__)
 
 _BYTES_PER_GIB = 1024 ** 3
+
+#: Held while a build has narrowed ``CUDA_VISIBLE_DEVICES``, and while a load
+#: starts CUDA in this process: CUDA reads the variable once, when it starts.
+#: Taken after a backend's own load lock, never before it.
+cuda_lock = threading.Lock()
+# Guards _outer and the variable while visible_only() changes them, so that
+# visible_gpu_ids() reads the two together.
+_env_lock = threading.Lock()
+# CUDA_VISIBLE_DEVICES as it was before visible_only() narrowed it, as a
+# one-tuple; None when it is not narrowed.
+_outer: tuple[str | None] | None = None
 
 
 def _torch():
@@ -40,29 +59,102 @@ def _torch():
 
 
 def free_total_gib() -> tuple[float, float] | None:
-    """``(free_gib, total_gib)`` of the current device, or ``None`` if unreadable."""
-    torch = _torch()
-    if torch is None:
+    """``(free_gib, total_gib)`` of the current device, or ``None`` if unreadable.
+
+    Also ``None`` while an engine is being built on narrowed cards: asking
+    torch then would start CUDA in this process on those cards only.
+    """
+    if not cuda_lock.acquire(blocking=False):
+        logger.info("[residency] an engine is being built, so torch is not "
+                    "asked for the card size now.")
         return None
     try:
-        free, total = torch.cuda.mem_get_info()
-    except Exception as exc:  # noqa: BLE001
-        logger.debug("mem_get_info failed (%s: %s)", type(exc).__name__, exc)
-        return None
-    return free / _BYTES_PER_GIB, total / _BYTES_PER_GIB
+        torch = _torch()
+        if torch is None:
+            return None
+        try:
+            free, total = torch.cuda.mem_get_info()
+        except Exception as exc:  # noqa: BLE001
+            logger.debug("mem_get_info failed (%s: %s)", type(exc).__name__, exc)
+            return None
+        return free / _BYTES_PER_GIB, total / _BYTES_PER_GIB
+    finally:
+        cuda_lock.release()
 
 
 def visible_gpu_ids() -> list[str] | None:
     """The cards ``CUDA_VISIBLE_DEVICES`` leaves this process, as it names them.
 
+    While a build has narrowed the variable (:func:`visible_only`), the
+    value from before.
+
     Returns:
         The variable's entries in its order (indices or UUIDs), ``[]`` when
         it is set and empty, or ``None`` when it is unset.
     """
-    value = os.environ.get("CUDA_VISIBLE_DEVICES")
+    with _env_lock:
+        value = os.environ.get("CUDA_VISIBLE_DEVICES") if _outer is None else _outer[0]
     if value is None:
         return None
     return [entry.strip() for entry in value.split(",") if entry.strip()]
+
+
+@contextlib.contextmanager
+def visible_only(ids: list[str]):
+    """Make ``ids`` the only cards a process started inside can see.
+
+    An engine's processes read ``CUDA_VISIBLE_DEVICES`` as they start, so
+    the variable is set for the build and put back after it, also when the
+    build fails. The variable is the whole process's: it is changed under
+    :data:`cuda_lock`, and :func:`visible_gpu_ids` reads the value from
+    before meanwhile. Without ``ids`` nothing is changed and no lock taken.
+    """
+    global _outer
+    if not ids:
+        yield
+        return
+    with cuda_lock:
+        with _env_lock:
+            before = os.environ.get("CUDA_VISIBLE_DEVICES")
+            _outer = (before,)
+            os.environ["CUDA_VISIBLE_DEVICES"] = ",".join(ids)
+        try:
+            yield
+        finally:
+            with _env_lock:
+                if before is None:
+                    os.environ.pop("CUDA_VISIBLE_DEVICES", None)
+                else:
+                    os.environ["CUDA_VISIBLE_DEVICES"] = before
+                _outer = None
+
+
+def bus_order() -> None:
+    """Make CUDA count the cards in PCI bus order, as ``nvidia-smi`` does.
+
+    CUDA's own order puts the fastest card first, so on a machine of mixed
+    cards an index the plan takes from ``nvidia-smi`` could name another card
+    in a ``device_map`` or in ``CUDA_VISIBLE_DEVICES``. Sets
+    ``CUDA_DEVICE_ORDER`` unless it is set, for this process and the engine
+    processes it starts. CUDA reads it once, when it starts: a warning says
+    so when it has started in this process already.
+    """
+    if "CUDA_DEVICE_ORDER" in os.environ:
+        return
+    os.environ["CUDA_DEVICE_ORDER"] = "PCI_BUS_ID"
+    # Looked up, not imported: importing torch here would cost an API-only run.
+    torch = sys.modules.get("torch")
+    try:
+        started = torch is not None and torch.cuda.is_initialized()
+    except Exception:  # noqa: BLE001 — a broken CUDA install must not raise here
+        started = False
+    if started:
+        logger.warning(
+            "[residency] CUDA started in this process before CUDA_DEVICE_ORDER "
+            "was set, so it counts the cards fastest first, not as nvidia-smi "
+            "and the plan do: a transformers model's device_map may name another "
+            "card than the plan's. Set CUDA_DEVICE_ORDER=PCI_BUS_ID before CUDA "
+            "starts.")
 
 
 def detect_gpus(visible: bool = False) -> tuple[str | None, int]:
@@ -97,57 +189,44 @@ def detect_gpus(visible: bool = False) -> tuple[str | None, int]:
     return (names[0] if names else None), len(names if ids is None else ids)
 
 
-def detect_gpu_memory_gib() -> float | None:
-    """Total VRAM per device, via ``nvidia-smi``.
+def card_sizes_gib() -> list[float] | None:
+    """The size of each card this process can see, in GiB, in the order the
+    planner numbers them.
 
-    The residency planner's other capacity source, ``torch.cuda.mem_get_info``,
-    needs torch installed *and* CUDA usable — neither is true on a machine that
-    merely has a card. ``nvidia-smi`` answers without either, so capacity is
-    known wherever a GPU is, not only where the full stack is.
+    ``nvidia-smi`` answers without torch or a usable CUDA, so the sizes are
+    known wherever a card is, not only where the full stack is.
 
     Returns:
-        Per-device total in **GiB**, or ``None`` when ``nvidia-smi`` is
-        absent or unparseable. On a machine with mixed cards it is the
-        smallest: a plan has one card size, and a grant computed on the
-        smallest card is safe on every card. Only the cards
-        ``CUDA_VISIBLE_DEVICES`` leaves visible count, where it names them
-        by index.
+        The totals of the cards :func:`gpu_cards` finds visible, or ``None``
+        when ``nvidia-smi`` is absent or unparseable, or no card is visible.
     """
-    exe = shutil.which("nvidia-smi")
-    if exe is None:
-        return None
-    try:
-        out = subprocess.run(
-            [exe, "--query-gpu=memory.total", "--format=csv,noheader,nounits"],
-            capture_output=True, text=True, timeout=10, check=True,
-        ).stdout
-    except (subprocess.SubprocessError, OSError) as exc:
-        logger.debug("nvidia-smi memory query failed (%s)", exc)
-        return None
-    try:
-        sizes = [int(line) for line in out.splitlines() if line.strip()]
-    except ValueError:
-        return None
-    # The planner counts the visible cards, so a hidden one must not set
-    # the size. nvidia-smi lists the cards by index, not by UUID.
-    ids = visible_gpu_ids()
-    if ids and all(entry.isdigit() for entry in ids):
-        sizes = [sizes[int(entry)] for entry in ids if int(entry) < len(sizes)]
-    # MiB -> GiB. 1024-based, matching resources/estimate.py: mixing this
-    # with a decimal-GB divisor there is what made the same card read 48.0
-    # or 44.7 depending on the path.
-    return round(min(sizes) / 1024, 1) if sizes else None
+    cards = gpu_cards(visible=True)
+    return [card.total_gib for card in cards] if cards else None
+
+
+def detect_gpu_memory_gib() -> float | None:
+    """The size of the smallest card this process can see, in GiB, or
+    ``None`` (:func:`card_sizes_gib`)."""
+    sizes = card_sizes_gib()
+    return min(sizes) if sizes else None
 
 
 @dataclass(frozen=True)
-class CardUse:
-    """What one card holds, as ``nvidia-smi`` reports it."""
+class Card:
+    """One card, as ``nvidia-smi`` reports it."""
 
-    #: The card's index as ``nvidia-smi`` numbers it.
+    #: The card's index as ``nvidia-smi`` numbers it, in PCI bus order.
     index: int
     uuid: str
     used_gib: float
     total_gib: float
+    name: str = ""
+
+
+@dataclass(frozen=True)
+class CardUse(Card):
+    """What one card holds, as ``nvidia-smi`` reports it."""
+
     #: ``(pid, name, GiB)`` of each compute process on the card. The GiB is
     #: ``None`` where ``nvidia-smi`` cannot say.
     processes: tuple[tuple[int, str, float | None], ...] = ()
@@ -175,17 +254,61 @@ def _gib(mib: str) -> float | None:
     return None if mib.strip().startswith("[") else round(int(mib) / 1024, 1)
 
 
+def gpu_cards(visible: bool = False) -> list[Card] | None:
+    """Each card's index, UUID, name and memory, from one ``nvidia-smi`` query.
+
+    Args:
+        visible: Only the cards ``CUDA_VISIBLE_DEVICES`` leaves this process,
+            in the variable's order, so that the k-th is the card the
+            planner and the loader number k. An entry names a card by its
+            index or by its UUID, or a prefix of it; as CUDA does, an entry
+            that names no card ends the list.
+
+    Returns:
+        One entry per card, in ``nvidia-smi``'s order unless ``visible``, or
+        ``None`` when ``nvidia-smi`` is absent, fails, lists no card or
+        answers in a form not read here.
+    """
+    lines = _query("--query-gpu=index,uuid,memory.used,memory.total,name")
+    if not lines:
+        return None
+    cards = []
+    try:
+        for line in lines:
+            index, uuid, used, total, name = (
+                part.strip() for part in line.split(",", 4))
+            used_gib, total_gib = _gib(used), _gib(total)
+            if used_gib is None or total_gib is None:
+                return None
+            cards.append(Card(int(index), uuid, used_gib, total_gib, name))
+    except ValueError:
+        return None
+    ids = visible_gpu_ids() if visible else None
+    if ids is None:
+        return cards
+    shown = []
+    for entry in ids:
+        by_uuid = entry.startswith("GPU-")
+        card = next((card for card in cards if entry == str(card.index)
+                     or (by_uuid and card.uuid.startswith(entry))), None)
+        if card is None:
+            break
+        shown.append(card)
+    return shown
+
+
 def card_use() -> list[CardUse] | None:
     """Each card's memory in use and the compute processes holding it.
 
-    Two ``nvidia-smi`` queries: the cards, and the compute processes.
+    Two ``nvidia-smi`` queries: the cards (:func:`gpu_cards`), and the
+    compute processes.
 
     Returns:
         One entry per card, in ``nvidia-smi``'s order, or ``None`` when
         ``nvidia-smi`` is absent, fails, lists no card or answers in a form
         not read here.
     """
-    cards = _query("--query-gpu=index,uuid,memory.used,memory.total")
+    cards = gpu_cards()
     apps = _query("--query-compute-apps=pid,used_memory,gpu_uuid,process_name")
     if not cards or apps is None:
         return None
@@ -194,17 +317,10 @@ def card_use() -> list[CardUse] | None:
         for line in apps:
             pid, used, uuid, name = (part.strip() for part in line.split(",", 3))
             held.setdefault(uuid, []).append((int(pid), name, _gib(used)))
-        use = []
-        for line in cards:
-            index, uuid, used, total = (part.strip() for part in line.split(","))
-            used_gib, total_gib = _gib(used), _gib(total)
-            if used_gib is None or total_gib is None:
-                return None
-            use.append(CardUse(int(index), uuid, used_gib, total_gib,
-                               tuple(held.get(uuid, ()))))
     except ValueError:
         return None
-    return use
+    return [CardUse(card.index, card.uuid, card.used_gib, card.total_gib, card.name,
+                    tuple(held.get(card.uuid, ()))) for card in cards]
 
 
 def _devices(cuda) -> list:

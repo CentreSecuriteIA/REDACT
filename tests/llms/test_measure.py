@@ -11,6 +11,14 @@ from redact.llms.resources import measure
 
 GIB = 1024 ** 3
 
+# The suite's runs see no card (conftest); these tests read the real query.
+_gpu_cards = measure.gpu_cards
+
+
+@pytest.fixture(autouse=True)
+def _real_card_query(monkeypatch):
+    monkeypatch.setattr(measure, "gpu_cards", _gpu_cards)
+
 
 class _FakeCuda:
     """Per-device free memory and allocator counters, as ``torch.cuda`` reports them."""
@@ -226,28 +234,84 @@ class TestCards:
             monkeypatch.setenv("CUDA_VISIBLE_DEVICES", value)
             assert measure.visible_gpu_ids() == ids
 
+    def test_sizes_are_the_visible_cards_in_their_order(self, monkeypatch):
+        _nvidia_smi(monkeypatch, "0, GPU-aaaa, 0, 32768, A\n1, GPU-bbbb, 0, 24576, B\n")
+        monkeypatch.delenv("CUDA_VISIBLE_DEVICES", raising=False)
+        assert measure.card_sizes_gib() == [32.0, 24.0]
+        monkeypatch.setenv("CUDA_VISIBLE_DEVICES", "1,0")
+        assert measure.card_sizes_gib() == [24.0, 32.0]
+        monkeypatch.setenv("CUDA_VISIBLE_DEVICES", "")
+        assert measure.card_sizes_gib() is None
+
     def test_memory_is_the_smallest_card(self, monkeypatch):
-        _nvidia_smi(monkeypatch, "32768\n24576\n")
+        _nvidia_smi(monkeypatch, "0, GPU-aaaa, 0, 32768, A\n1, GPU-bbbb, 0, 24576, B\n")
         monkeypatch.delenv("CUDA_VISIBLE_DEVICES", raising=False)
         assert measure.detect_gpu_memory_gib() == 24.0
 
     @pytest.mark.parametrize("visible,gib", [
         ("0", 24.0), ("1", 12.0), ("1,0", 12.0),
-        # Nothing to narrow to: no card, or cards nvidia-smi's list cannot name.
-        ("", 12.0), ("GPU-8bce", 12.0),
-        ("5", None),
+        # By UUID, or a prefix of one, as CUDA reads the variable.
+        ("GPU-aaaa-1111", 24.0), ("GPU-bbbb", 12.0),
+        # No card is visible: an empty variable, or entries naming no card.
+        ("", None), ("GPU-8bce", None), ("5", None),
+        # CUDA ignores an entry naming no card and every entry after it.
+        ("0,5,1", 24.0),
     ])
     def test_memory_is_the_smallest_visible_card(self, monkeypatch, visible, gib):
         """The planner counts the visible cards: a hidden 12 GiB card must
         not size the 24 GiB one."""
-        _nvidia_smi(monkeypatch, "24576\n12288\n")
+        _nvidia_smi(monkeypatch, "0, GPU-aaaa-1111, 0, 24576, A\n"
+                                 "1, GPU-bbbb-2222, 0, 12288, B\n")
         monkeypatch.setenv("CUDA_VISIBLE_DEVICES", visible)
         assert measure.detect_gpu_memory_gib() == gib
 
-    @pytest.mark.parametrize("out", ["24576\n[N/A]\n", ""])
+    @pytest.mark.parametrize("out", [
+        "0, GPU-a, 0, 24576, A\n1, GPU-b, 0, [N/A], B\n", "24576\n", ""])
     def test_memory_that_cannot_be_read_is_none(self, monkeypatch, out):
         _nvidia_smi(monkeypatch, out)
         assert measure.detect_gpu_memory_gib() is None
+
+
+class TestGpuCards:
+    """Each card from one ``nvidia-smi`` query, for the planner, the loader
+    and the run's check of the cards."""
+
+    OUT = ("0, GPU-aaaa-1111, 2, 97887, NVIDIA RTX PRO 6000 Blackwell Server Edition\n"
+           "1, GPU-bbbb-2222, 29070, 24564, NVIDIA RTX A5000\n")
+
+    def test_one_card_per_line_in_nvidia_smis_order(self, monkeypatch):
+        _nvidia_smi(monkeypatch, self.OUT)
+        monkeypatch.delenv("CUDA_VISIBLE_DEVICES", raising=False)
+        assert measure.gpu_cards() == [
+            measure.Card(index=0, uuid="GPU-aaaa-1111", used_gib=0.0, total_gib=95.6,
+                         name="NVIDIA RTX PRO 6000 Blackwell Server Edition"),
+            measure.Card(index=1, uuid="GPU-bbbb-2222", used_gib=28.4, total_gib=24.0,
+                         name="NVIDIA RTX A5000"),
+        ]
+
+    @pytest.mark.parametrize("visible,indices", [
+        (None, [0, 1]), ("1", [1]), ("1,0", [1, 0]), ("GPU-bbbb,0", [1, 0]),
+        ("", []), ("2", []), ("0,2,1", [0])])
+    def test_visible_cards_are_those_the_variable_names_in_its_order(
+            self, monkeypatch, visible, indices):
+        """The planner's card k is the k-th card the variable names."""
+        _nvidia_smi(monkeypatch, self.OUT)
+        if visible is None:
+            monkeypatch.delenv("CUDA_VISIBLE_DEVICES", raising=False)
+        else:
+            monkeypatch.setenv("CUDA_VISIBLE_DEVICES", visible)
+        assert [card.index for card in measure.gpu_cards(visible=True)] == indices
+        assert [card.index for card in measure.gpu_cards()] == [0, 1]
+
+    @pytest.mark.parametrize("out", [
+        "0, GPU-a, [N/A], 24576, A\n", "0, GPU-a, 2\n", "x, GPU-a, 2, 24576, A\n", ""])
+    def test_an_answer_that_cannot_be_read_is_none(self, monkeypatch, out):
+        _nvidia_smi(monkeypatch, out)
+        assert measure.gpu_cards() is None
+
+    def test_no_nvidia_smi_is_none(self, monkeypatch):
+        monkeypatch.setattr(measure.shutil, "which", lambda _: None)
+        assert measure.gpu_cards() is None
 
 
 # The suite's runs see no card (conftest); these tests read the real probe.
@@ -270,17 +334,25 @@ def _nvidia_smi_answers(monkeypatch, cards, apps):
 class TestCardUse:
     """What each card holds, and which processes hold it."""
 
-    CARDS = ("0, GPU-aaaa, 29070, 49140\n"
-             "1, GPU-bbbb, 2, 49140\n")
+    CARDS = ("0, GPU-aaaa, 29070, 49140, NVIDIA RTX A6000\n"
+             "1, GPU-bbbb, 2, 49140, NVIDIA RTX A6000\n")
 
     def test_each_card_with_the_processes_on_it(self, monkeypatch):
         _nvidia_smi_answers(monkeypatch, self.CARDS,
                             "21131, 29068, GPU-aaaa, VLLM::EngineCore\n")
         assert _card_use() == [
             measure.CardUse(index=0, uuid="GPU-aaaa", used_gib=28.4, total_gib=48.0,
+                            name="NVIDIA RTX A6000",
                             processes=((21131, "VLLM::EngineCore", 28.4),)),
-            measure.CardUse(index=1, uuid="GPU-bbbb", used_gib=0.0, total_gib=48.0),
+            measure.CardUse(index=1, uuid="GPU-bbbb", used_gib=0.0, total_gib=48.0,
+                            name="NVIDIA RTX A6000"),
         ]
+
+    def test_every_card_is_listed_whatever_is_visible(self, monkeypatch):
+        """The check warns about a process on a card the run cannot see too."""
+        _nvidia_smi_answers(monkeypatch, self.CARDS, "")
+        monkeypatch.setenv("CUDA_VISIBLE_DEVICES", "1")
+        assert [card.index for card in _card_use()] == [0, 1]
 
     def test_a_process_without_a_memory_figure_is_still_listed(self, monkeypatch):
         """Where nvidia-smi cannot say what a process holds, it says [N/A]."""
@@ -290,7 +362,8 @@ class TestCardUse:
         assert second.processes == ((4242, "/usr/bin/python3, with a comma", None),)
 
     @pytest.mark.parametrize("cards,apps", [
-        (None, ""), (CARDS, None), ("0, GPU-aaaa, [N/A], 49140\n", ""), ("", "")])
+        (None, ""), (CARDS, None), ("0, GPU-aaaa, [N/A], 49140, A\n", ""), ("", ""),
+        (CARDS, "21131, 29068\n")])
     def test_an_answer_that_cannot_be_read_is_none(self, monkeypatch, cards, apps):
         _nvidia_smi_answers(monkeypatch, cards, apps)
         assert _card_use() is None

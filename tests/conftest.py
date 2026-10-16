@@ -58,11 +58,15 @@ def _no_planned_shares():
 
 @pytest.fixture(autouse=True)
 def _no_busy_cards(monkeypatch):
-    """A run reads what the machine's cards hold before it loads a model: a
-    test's run sees no card, also on a machine with a busy one."""
+    """A run reads what the machine's cards hold before it loads a model,
+    and a load names its cards as nvidia-smi does: a test's run sees no
+    card, also on a machine with a busy one. The order CUDA counts the
+    cards in, which a plan sets, is the test's own."""
     from redact.llms.resources import measure
 
     monkeypatch.setattr(measure, "card_use", lambda: None)
+    monkeypatch.setattr(measure, "gpu_cards", lambda visible=False: None)
+    monkeypatch.delenv("CUDA_DEVICE_ORDER", raising=False)
 
 
 @pytest.fixture(autouse=True)

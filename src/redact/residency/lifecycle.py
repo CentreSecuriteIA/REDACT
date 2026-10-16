@@ -52,7 +52,9 @@ def preload(
 
     A failed load does not stop the run. It is logged at ERROR and recorded
     as a ``preload_failed`` event, and the stage that needs the model fails
-    when it tries to use it.
+    when it tries to use it. A load the way out ended
+    (:class:`~redact.llms.backends.vllm.EngineLoadEnded`) is logged at INFO,
+    recorded with ``"cause": "exit"``, and ends the preload.
 
     Args:
         models: Model names to load. Unregistered and non-local ones are
@@ -64,6 +66,7 @@ def preload(
     Returns:
         The daemon thread, or ``None`` when there is nothing local to load.
     """
+    from redact.llms.backends.vllm import EngineLoadEnded
     from redact.llms.client import ModelClient
 
     backend_types = backend_types or {}
@@ -87,6 +90,15 @@ def preload(
                 ModelClient.create(name, backend_type=backend_types.get(name))
                 if verbose:
                     logger.info("[preload] %s ready", name)
+            except EngineLoadEnded as exc:
+                logger.info("[preload] %s: %s", name, exc)
+                observe.record({
+                    "ev": "preload_failed",
+                    "model": name,
+                    "error": f"{type(exc).__name__}: {exc}",
+                    "cause": "exit",
+                })
+                return
             except Exception as exc:  # noqa: BLE001 — must not kill the run
                 logger.error(
                     "[preload] %s failed to load (%s: %s). The run continues; "
@@ -134,7 +146,12 @@ def loaded_engines(exclude: list[str] | None = None) -> dict[str, set]:
             "introspect": set(introspection._models) - skip["introspect"]}
 
 
-def unload_local(keep: list[str] | None = None, engines: dict | None = None) -> None:
+def unload_local(
+    keep: list[str] | None = None,
+    engines: dict | None = None,
+    *,
+    wait: float | None = None,
+) -> None:
     """Release the cached local engines, except those the kept models use.
 
     A released engine is shut down and its memory freed, and its lifetime
@@ -146,6 +163,10 @@ def unload_local(keep: list[str] | None = None, engines: dict | None = None) -> 
         keep: Model names still in use. Their engines stay cached and timed,
             so a later client for the same model reuses the load.
         engines: Engines to keep as well, as :func:`loaded_engines` returns.
+        wait: Seconds to wait for a load in progress, for a release on the
+            way out: past them a vLLM load is ended
+            (:meth:`~redact.llms.backends.vllm.VLLMBackend.clear_cache`).
+            ``None`` waits for the load however long it takes.
     """
     from redact.llms.backends.introspection import TransformersIntrospectionBackend
     from redact.llms.backends.vllm import VLLMBackend
@@ -153,5 +174,6 @@ def unload_local(keep: list[str] | None = None, engines: dict | None = None) -> 
     kept = _engine_keys(keep)
     for setup, keys in (engines or {}).items():
         kept[setup] |= keys
-    VLLMBackend.clear_cache(keep=frozenset(kept["vllm"]))
-    TransformersIntrospectionBackend.clear_cache(keep=frozenset(kept["introspect"]))
+    VLLMBackend.clear_cache(keep=frozenset(kept["vllm"]), wait=wait)
+    TransformersIntrospectionBackend.clear_cache(
+        keep=frozenset(kept["introspect"]), wait=wait)

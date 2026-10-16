@@ -429,10 +429,10 @@ class _Exited(BaseException):
     """Stands for the end of the process."""
 
 
-def _signal_handlers(monkeypatch, script, done, name="posix"):
+def _signal_handlers(monkeypatch, script, done):
     """Run the script's ``main`` on a stub run and return the signal handlers
-    it installed. Its ``os`` is ``os`` on a platform called ``name``, whose
-    ``_exit`` appends ``("exit", code)`` to ``done`` and raises :class:`_Exited`."""
+    it installed. Its ``os._exit`` appends ``("exit", code)`` to ``done`` and
+    raises :class:`_Exited`, and no engine process is ended."""
     import logging
     import os
     import signal
@@ -444,8 +444,8 @@ def _signal_handlers(monkeypatch, script, done, name="posix"):
 
     handlers = {}
     monkeypatch.setattr(script, "run_pipeline", lambda recipe, **kw: {})
-    monkeypatch.setattr(script, "os",
-                        SimpleNamespace(name=name, write=os.write, _exit=hard_exit))
+    monkeypatch.setattr(script, "os", SimpleNamespace(write=os.write, _exit=hard_exit))
+    monkeypatch.setattr(script, "terminate_engine_processes", lambda **kw: [])
     monkeypatch.setattr(logging, "basicConfig", lambda **kw: None)
     monkeypatch.setattr(signal, "signal",
                         lambda signum, fn: handlers.update({signum: fn}))
@@ -453,63 +453,21 @@ def _signal_handlers(monkeypatch, script, done, name="posix"):
     return handlers
 
 
-def _fake_psutil(children, done, survivors):
-    """A stand-in for psutil: this process has ``children`` (pids), and of
-    those the ones in ``survivors`` outlive the wait."""
-    from types import SimpleNamespace
-
-    class Child:
-        def __init__(self, pid):
-            self.pid = pid
-
-        def terminate(self):
-            done.append(("terminate", self.pid))
-
-        def kill(self):
-            done.append(("kill", self.pid))
-
-    procs = [Child(pid) for pid in children]
-
-    def wait_procs(waited, timeout):
-        done.append(("wait", timeout))
-        return ([c for c in waited if c.pid not in survivors],
-                [c for c in waited if c.pid in survivors])
-
-    return SimpleNamespace(
-        Error=Exception, wait_procs=wait_procs,
-        Process=lambda: SimpleNamespace(children=lambda recursive: procs))
-
-
-def test_a_forced_exit_ends_the_child_processes_first(monkeypatch):
+def test_a_forced_exit_ends_the_engine_processes_first(monkeypatch):
     """vLLM's engine and worker processes are this process's children: a
     hard exit that left them would leave them holding the card."""
     import signal
 
     script, done = _run_script(), []
-    monkeypatch.setattr(script, "psutil", _fake_psutil([11, 12], done, {12}))
     handlers = _signal_handlers(monkeypatch, script, done)
+    monkeypatch.setattr(script, "terminate_engine_processes",
+                        lambda **kw: done.append(("end", kw)) or [])
     with pytest.raises(KeyboardInterrupt):
         handlers[signal.SIGINT](signal.SIGINT, None)
+    assert done == []
     with pytest.raises(_Exited):
         handlers[signal.SIGINT](signal.SIGINT, None)
-    assert done == [("terminate", 11), ("terminate", 12), ("wait", 2.0),
-                    ("kill", 12), ("exit", 128 + signal.SIGINT)]
-
-
-@pytest.mark.parametrize("platform,children", [("nt", [11]), ("posix", None)])
-def test_a_forced_exit_on_windows_or_without_psutil_only_exits(
-        monkeypatch, platform, children):
-    import signal
-
-    script, done = _run_script(), []
-    fake = _fake_psutil(children, done, set()) if children else None
-    monkeypatch.setattr(script, "psutil", fake)
-    handlers = _signal_handlers(monkeypatch, script, done, name=platform)
-    with pytest.raises(KeyboardInterrupt):
-        handlers[signal.SIGINT](signal.SIGINT, None)
-    with pytest.raises(_Exited):
-        handlers[signal.SIGINT](signal.SIGINT, None)
-    assert done == [("exit", 128 + signal.SIGINT)]
+    assert done == [("end", {"all": True}), ("exit", 128 + signal.SIGINT)]
 
 
 def test_every_recipe_role_is_called_by_a_stage():
@@ -1578,8 +1536,8 @@ def _one_card(gib):
     """Plan for one fake card of ``gib`` GiB."""
     return (patch("redact.llms.resources.measure.detect_gpus",
                   return_value=("FakeGPU", 1)),
-            patch("redact.llms.resources.measure.detect_gpu_memory_gib",
-                  return_value=gib))
+            patch("redact.llms.resources.measure.card_sizes_gib",
+                  return_value=[gib]))
 
 
 def _recorded(calls):
@@ -1731,7 +1689,8 @@ def test_entering_a_stage_hands_the_loader_the_stages_plan(local_models):
 
 def test_a_model_loaded_again_loads_under_the_plan_of_its_stage(local_models):
     """Stage b does not hold x. Alone in stage a it has both cards and the
-    full share; in stage c it shares card 0, and its second load takes that."""
+    full share; in stage c it shares card 0, and its second load takes that.
+    There z has a copy beside w."""
     from redact import residency
     from redact.driver import _enter_phase
 
@@ -1749,7 +1708,7 @@ def test_a_model_loaded_again_loads_under_the_plan_of_its_stage(local_models):
     assert handed == [
         ([x], {x: (0.9, (0, 1))}),
         ([y], {y: (0.9, (0, 1))}),
-        ([z, w, x], {z: (0.45, (0,)), w: (0.9, (1,)), x: (0.45, (0,))}),
+        ([z, w, x], {z: (0.45, (0, 1)), w: (0.45, (1,)), x: (0.45, (0,))}),
     ]
 
 
@@ -1775,7 +1734,7 @@ def test_run_pipeline_puts_the_plan_in_the_summary(tmp_path, monkeypatch, caplog
     try:
         with caplog.at_level(logging.INFO, logger=residency.logger.name), \
              patch("redact.llms.resources.measure.detect_gpus", return_value=("FakeGPU", 1)), \
-             patch("redact.llms.resources.measure.detect_gpu_memory_gib", return_value=10.0), \
+             patch("redact.llms.resources.measure.card_sizes_gib", return_value=[10.0]), \
              patch("redact.llms.resources.estimate.estimate_kv_gib",
                    return_value=0.04), \
              patch("redact.llms.ModelClient.create"):
@@ -1856,8 +1815,8 @@ def test_run_pipeline_summary_carries_copies(tmp_path, monkeypatch, gen, planned
     try:
         with patch("redact.llms.resources.measure.detect_gpus",
                    return_value=("FakeGPU", 2)), \
-             patch("redact.llms.resources.measure.detect_gpu_memory_gib",
-                   return_value=10.0):
+             patch("redact.llms.resources.measure.card_sizes_gib",
+                   return_value=[10.0]):
             summary = run_pipeline(recipe, params={"inputs": {}}, verbose=False)
     finally:
         telemetry.uninstall()
@@ -2145,6 +2104,53 @@ def test_a_run_waits_for_a_load_under_way_before_it_unloads(
     assert events == ["loaded", "unload"]
 
 
+def test_a_run_waits_at_most_exit_wait_s_for_a_load_then_ends_it(
+        tmp_path, monkeypatch, local_models, caplog):
+    """A load that has not finished is ended by the release, which is given
+    a wait; the run returns with its summary."""
+    import logging
+    import threading
+    import time
+
+    import redact
+    import redact.llms.backends.vllm as vllm_module
+    from redact import residency
+
+    hung, unloads = threading.Event(), []
+    monkeypatch.setattr(vllm_module, "EXIT_WAIT_S", 0.2)
+
+    def preload(names, **kw):
+        thread = threading.Thread(target=hung.wait, args=(10,), daemon=True)
+        thread.start()
+        return thread
+
+    monkeypatch.setattr(redact, "generate_inputs", lambda **k: pd.DataFrame())
+    gen = local_models("_rc_hung_gen")
+    recipe = {"dataset_type": "eval", "data_dir": str(tmp_path), "stages": ["inputs"],
+              "models": {"gen": gen}}
+    card = _one_card(24.0)
+    started = time.monotonic()
+    try:
+        with card[0], card[1], \
+             patch.object(residency, "preload", side_effect=preload), \
+             patch.object(residency, "unload_local",
+                          side_effect=lambda keep=None, **kw: unloads.append(kw)), \
+             caplog.at_level(logging.ERROR, logger="redact.driver"):
+            summary = run_pipeline(recipe, params={}, verbose=False)
+    finally:
+        hung.set()
+        telemetry.uninstall()
+    assert time.monotonic() - started < _PROMPT_S
+    assert unloads == [{"wait": vllm_module._GRACE_S}]
+    assert f"the preload of {gen} has not finished" in caplog.text
+    assert summary["stages"]["inputs"]["counts"] == {"rows": 0}
+
+
+#: Seconds within which a run whose last load hangs returns, once its wait
+#: (patched to 0.2 s) is over.
+_PROMPT_S = 5.0
+
+
 def test_a_run_leaves_no_planned_share_behind(tmp_path, monkeypatch):
     """The plan is the run's own: a later direct call must not inherit its shares."""
     import redact
@@ -2244,8 +2250,8 @@ def test_a_run_unloads_a_model_for_a_stage_and_loads_it_again(
     try:
         with patch("redact.llms.resources.measure.detect_gpus",
                    return_value=("FakeGPU", 2)), \
-             patch("redact.llms.resources.measure.detect_gpu_memory_gib",
-                   return_value=24.0), \
+             patch("redact.llms.resources.measure.card_sizes_gib",
+                   return_value=[24.0]), \
              patch.dict("sys.modules", fake_vllm_modules(_LLM)), \
              patch.object(vllm_module, "_prepare_environment"), \
              caplog.at_level(logging.INFO, logger="redact.residency.phases"):
@@ -2271,6 +2277,58 @@ def test_a_run_unloads_a_model_for_a_stage_and_loads_it_again(
     assert vllm_module._engines == {} and vllm_module.held_seconds() == {}
     assert vllm_module._planned_utilization == {} == vllm_module._planned_devices
     assert "CUDA_VISIBLE_DEVICES" not in os.environ
+
+
+def test_a_run_whose_copies_fail_to_build_runs_on_one_copy(
+        tmp_path, monkeypatch, local_models, caplog):
+    """Two cards give the model two copies; their build fails, and the stage
+    runs on one copy on the first card."""
+    import logging
+    import os
+    from types import SimpleNamespace
+
+    import redact
+    import redact.llms.backends.vllm as vllm_module
+    from redact.llms import ModelClient
+    from tests.conftest import fake_vllm_modules
+
+    gen, builds = local_models("_rc_dp_gen"), []
+
+    class _LLM:
+        scheduler_config = SimpleNamespace(max_num_seqs=256)
+
+        def __init__(self, **kw):
+            copies = kw.get("data_parallel_size", 1)
+            builds.append((os.environ.get("CUDA_VISIBLE_DEVICES"), copies))
+            if copies > 1:
+                raise RuntimeError("CUDA out of memory")
+
+        def shutdown(self):
+            pass
+
+    def run(**k):
+        ModelClient.create(k["model"])
+        return pd.DataFrame({"x": [1]})
+
+    monkeypatch.setattr(redact, "generate_inputs", run)
+    monkeypatch.delenv("CUDA_VISIBLE_DEVICES", raising=False)
+    recipe = {"dataset_type": "eval", "data_dir": str(tmp_path), "stages": ["inputs"],
+              "models": {"gen": gen}}
+    try:
+        with patch("redact.llms.resources.measure.detect_gpus",
+                   return_value=("FakeGPU", 2)), \
+             patch("redact.llms.resources.measure.card_sizes_gib",
+                   return_value=[24.0]), \
+             patch.dict("sys.modules", fake_vllm_modules(_LLM)), \
+             patch.object(vllm_module, "_prepare_environment"), \
+             caplog.at_level(logging.WARNING, logger="redact.llms.backends.vllm"):
+            summary = run_pipeline(recipe, params={"inputs": {}}, verbose=False)
+    finally:
+        telemetry.uninstall()
+        vllm_module.VLLMBackend.clear_cache()
+    assert builds == [("0,1", 2), ("0", 1)]
+    assert "loading one copy on 0 instead" in caplog.text
+    assert summary["stages"]["inputs"]["counts"] == {"rows": 0}
 
 
 def test_load_recipe_rejects_a_repeated_stage():

@@ -39,7 +39,7 @@ def run(tmp_path, monkeypatch):
         try:
             with patch.object(measure, "card_use", return_value=cards), \
                  patch.object(measure, "detect_gpus", return_value=("FakeGPU", 2)), \
-                 patch.object(measure, "detect_gpu_memory_gib", return_value=48.0), \
+                 patch.object(measure, "card_sizes_gib", return_value=[48.0]), \
                  patch("redact.llms.resources.estimate._load_config",
                        return_value=None), \
                  patch("redact.residency.preload", side_effect=preloaded), \
