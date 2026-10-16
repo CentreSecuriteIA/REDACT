@@ -20,6 +20,7 @@ import warnings
 from collections import Counter
 from collections.abc import Callable
 from dataclasses import dataclass
+from functools import partial
 from pathlib import Path
 
 import pandas as pd
@@ -489,6 +490,7 @@ def generate_jailbreaks(
         output_path: Override for the jailbreaks CSV. The manifest defaults to
             ``<output>.manifest.jsonl``.
         variations_path: Override for the variations CSV, by default
+            ``variations.csv`` beside ``output_path`` when it is given, else
             ``{data_dir}/Datasets/variations.csv``.
         benign_path: Override for the FSH/DAP benign-cache CSV.
         seed: Global run seed (combined with each sample's id + iteration).
@@ -524,8 +526,9 @@ def generate_jailbreaks(
         ``iteration``, ``combination_spec_version``), or an empty frame when
         the adversarial kind is off. ``sample_id`` is this row's own
         content-hash identity, distinct from ``input_id``. The variations
-        CSV has the same columns, its rows keeping their input's
-        ``entry_type``; read it with ``read_rows(paths.variations_csv(data_dir))``.
+        CSV (see ``variations_path``) has the same columns, its rows keeping
+        their input's ``entry_type``; a variation that leaves its input
+        unchanged is not accepted.
     """
     flat = {name: value for name, value in (
         ("include_hacking", include_hacking),
@@ -581,9 +584,19 @@ def generate_jailbreaks(
             layer_rates=adversarial["layer_rates"] or None,
             read_back=read_back, label="jailbreak")
     if natural is not None:
-        run(natural, Path(variations_path or paths.variations_csv(data_dir)),
-            read_back=False, label="variation")
+        run(natural, _variations_csv(data_dir, output_path, variations_path),
+            read_back=False, label="variation", accept_noop=False)
     return rows
+
+
+def _variations_csv(data_dir, output_path, variations_path) -> Path:
+    """``variations_path``; else ``variations.csv`` beside ``output_path``, or
+    the run's when no ``output_path`` is given."""
+    if variations_path:
+        return Path(variations_path)
+    if output_path:
+        return Path(output_path).with_name(paths.VARIATIONS_FILENAME)
+    return paths.variations_csv(data_dir)
 
 
 def _augmentation_section(augmentation: dict | None, flat: dict) -> dict:
@@ -730,12 +743,14 @@ def build_dataset(
     jailbreak_path: str | Path | None = None,
     output_path: str | Path | None = None,
     inputs_path: str | Path | None = None,
+    variations_path: str | Path | None = None,
     responses_path: str | Path | None = None,
     paraphrase_inputs_path: str | Path | None = None,
     paraphrase_outputs_path: str | Path | None = None,
     mode: str = "training",
     include_inputs: bool = True,
     include_jailbreaks: bool = True,
+    include_variations: bool = True,
     include_outputs: bool = True,
     include_paraphrases: bool = True,
     verbose: bool = True,
@@ -763,6 +778,8 @@ def build_dataset(
             root (``get_output_dir()``).
         jailbreak_path: Path to the jailbreaks CSV. Defaults to
             ``Datasets/jailbreaks.csv``.
+        variations_path: Path to the variations CSV. Defaults to
+            ``Datasets/variations.csv``.
         output_path: Where to save merged CSV. Defaults to
             ``Datasets/complete_dataset.csv``.
         inputs_path: Merged-inputs CSV. Defaults to
@@ -778,6 +795,7 @@ def build_dataset(
             ``dataset_type``.)
         include_inputs: Include content moderation input samples.
         include_jailbreaks: Include jailbreak samples.
+        include_variations: Include the accepted natural variations.
         include_outputs: Include output response samples.
         include_paraphrases: Include paraphrase artifacts (per ``mode``).
         verbose: Log progress.
@@ -825,8 +843,10 @@ def build_dataset(
         logger.info("Jailbreaks: file not found (%s)", jb_path)
 
     # The natural variations the jailbreak stage writes beside its jailbreaks.
-    if has_rows(paths.variations_csv(data_dir)):
-        parts.append(Part(paths.variations_csv(data_dir), "natural_variation",
+    var_path = (Path(variations_path) if variations_path
+                else paths.variations_csv(data_dir))
+    if include_variations and has_rows(var_path):
+        parts.append(Part(var_path, "natural_variation", accepted_only=True,
                           label="Variations"))
 
     if include_outputs:
@@ -895,7 +915,7 @@ class RunContext:
     taxonomy: dict | str
     taxonomy_dir: str | Path | None
     params: dict                # the params file: stage name -> the front's kwargs
-    augmentations: dict         # the augmentation section, both kinds resolved
+    augmentations: dict         # the section the jailbreak stage runs, resolved
     resume: bool
     verbose: bool
 
@@ -906,9 +926,12 @@ class Stage:
 
     ``roles`` pairs each recipe role the stage calls with the registry role
     of its default model. ``recipe_kwargs`` is what the run passes the front
-    from the recipe. ``files`` is the CSVs that hold the stage's rows and
+    from the recipe; a value an earlier stage of the run saves is a
+    :class:`Saved`. ``files`` is the CSVs that hold the stage's rows and
     the values a row holds to be counted, for
-    :func:`redact.driver.file_counts`.
+    :func:`redact.driver.file_counts`. ``folded`` names the params keys the
+    run applies to a kwarg it passes itself (the jailbreak stage's flat
+    keywords, to its ``augmentation``), so the front does not get them again.
     """
 
     name: str
@@ -916,6 +939,7 @@ class Stage:
     roles: tuple[tuple[str, str], ...]
     files: Callable[[RunContext], tuple[list[Path], dict]]
     recipe_kwargs: Callable[[RunContext], dict]
+    folded: tuple[str, ...] = ()
 
     @property
     def run(self) -> Callable[..., object]:
@@ -941,22 +965,41 @@ class Stage:
                 "not take; write only its parameters.")
         return given
 
-    def kwargs(self, ctx: RunContext) -> dict:
-        """The front's kwargs: the recipe's, then the params file's.
+    def check(self, ctx: RunContext) -> dict:
+        """The params file's kwargs the front gets, checked without reading
+        any file, so a run checks every stage before the first runs.
 
         Raises:
             ValueError: A params key that is not a parameter of the front, or
                 one the run passes it itself.
         """
         given = self.params(ctx)
-        recipe = self.recipe_kwargs(ctx)
-        clash = sorted(set(given) & {*recipe, "read_back"})
+        clash = sorted(set(given) & {*self.recipe_kwargs(ctx), "read_back"})
         if clash:
             raise ValueError(
                 f"params[{self.name!r}] sets {clash}, which the run passes "
                 f"{self.front} itself; leave {'it' if len(clash) == 1 else 'them'} "
                 "out of the params.")
+        return {key: value for key, value in given.items() if key not in self.folded}
+
+    def kwargs(self, ctx: RunContext) -> dict:
+        """The front's kwargs: the recipe's, then the params file's.
+
+        Raises:
+            ValueError: As :meth:`check`, or a saved value that is missing.
+        """
+        given = self.check(ctx)
+        recipe = {key: value.read() if isinstance(value, Saved) else value
+                  for key, value in self.recipe_kwargs(ctx).items()}
         return {**recipe, **given}
+
+
+@dataclass(frozen=True)
+class Saved:
+    """A kwarg the run reads when its stage starts, from what an earlier
+    stage saved."""
+
+    read: Callable[[], object]
 
 
 def _params(ctx: RunContext, stage: str) -> dict:
@@ -990,7 +1033,7 @@ def _inputs_kwargs(ctx: RunContext) -> dict:
         check_model=ctx.models["check"], resume=ctx.resume, verbose=ctx.verbose,
     )
     if ctx.dataset_type == "training":
-        kwargs["constitution_df"] = _saved_constitution(ctx.data_dir)
+        kwargs["constitution_df"] = Saved(partial(_saved_constitution, ctx.data_dir))
     return kwargs
 
 
@@ -1058,10 +1101,12 @@ def _jailbreaks_files(ctx: RunContext) -> tuple[list[Path], dict]:
     """The file of each kind that is on: a kind left out is on, one given as
     None is off."""
     given = _params(ctx, "jailbreaks")
-    default = {"adversarial": ("output_path", paths.jailbreaks_csv),
-               "natural": ("variations_path", paths.variations_csv)}
-    return [given.get(key) or path(ctx.data_dir)
-            for kind, (key, path) in default.items()
+    output, variations = given.get("output_path"), given.get("variations_path")
+    files = {
+        "adversarial": Path(output) if output else paths.jailbreaks_csv(ctx.data_dir),
+        "natural": _variations_csv(ctx.data_dir, output, variations),
+    }
+    return [path for kind, path in files.items()
             if ctx.augmentations.get(kind, {}) is not None], {}
 
 
@@ -1089,7 +1134,8 @@ STAGES: dict[str, Stage] = {stage.name: stage for stage in (
     Stage("jailbreaks", "generate_jailbreaks",
           roles=(_GEN, ("translation", "translation")),
           files=_jailbreaks_files,
-          recipe_kwargs=_jailbreaks_kwargs),
+          recipe_kwargs=_jailbreaks_kwargs,
+          folded=augmentation_kinds.FLAT_KEYWORDS),
     Stage("build", "build_dataset", roles=(),
           files=_one_file("build", paths.complete_dataset_csv),
           recipe_kwargs=_build_kwargs),

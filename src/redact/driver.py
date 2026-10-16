@@ -300,8 +300,11 @@ def run_pipeline(
     """Run the stages a recipe names, in order, writing a run record per stage.
 
     ``params`` replaces the recipe's ``params_file``, and ``data_dir`` its
-    ``data_dir``. A params key that is not a parameter of its stage's front
-    fails before any stage runs. No stage reads its rows back: the counts
+    ``data_dir``. A params key that is not a parameter of its stage's front,
+    or that the run passes the front itself, fails before any stage runs, as
+    does an augmentation section the params contradict; the jailbreak stage
+    runs and records the section with the params' flat keywords applied
+    over its adversarial kind. No stage reads its rows back: the counts
     are taken from each stage's files, and a training run's inputs are
     seeded from the constitution saved under ``data_dir``. Local models the
     run planned are released when it returns or raises, and the way the
@@ -320,6 +323,7 @@ def run_pipeline(
     params = load_params(recipe.get("params_file") if params is None else params,
                          base_dir=recipe.get("_base_dir"))
     serving = serving_of(recipe.get("models") or {})
+    stages = recipe["stages"]
     ctx = RunContext(
         data_dir=recipe.get("data_dir") if data_dir is None else data_dir,
         dataset_type=recipe["dataset_type"],
@@ -328,13 +332,13 @@ def run_pipeline(
         taxonomy=recipe.get("taxonomy", "content_moderation_categories"),
         taxonomy_dir=recipe.get("taxonomy_dir"),
         params=params,
-        augmentations=augmentations_of(recipe),
+        augmentations=augmentations_of(
+            recipe, params.get("jailbreaks") if "jailbreaks" in stages else None),
         resume=recipe.get("resume", True),
         verbose=verbose,
     )
-    stages = recipe["stages"]
     for name in stages:
-        STAGES[name].params(ctx)        # a wrong key fails before any stage runs
+        STAGES[name].check(ctx)     # a bad params key fails before any stage runs
 
     if verbose:
         logger.info("Run pipeline (%s) — stages: %s", ctx.dataset_type, stages)

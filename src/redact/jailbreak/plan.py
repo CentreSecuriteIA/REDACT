@@ -25,6 +25,9 @@ from .sampling import sample_combination
 
 logger = logging.getLogger(__name__)
 
+# A layer whose picks fall this far or further below its target is logged.
+_SHORT = 2
+
 
 class _Dealer:
     """Running family and layer counts of one ``(category, entry_type,
@@ -34,6 +37,7 @@ class _Dealer:
     planner sets ``position`` to the units dealt so far, including the current,
     and calls ``observe`` with the techniques each unit was given. ``key``
     names the group; it seeds where in the group each layer's picks fall.
+    ``targets`` holds each layer's picks due by the last unit asked.
     """
 
     def __init__(self, weights: dict | None = None, key: tuple = ()) -> None:
@@ -42,6 +46,7 @@ class _Dealer:
         self.position = 0
         self.family_counts: Counter = Counter()
         self.layer_counts: Counter = Counter()
+        self.targets: dict[str, int] = {}
         self._offsets: dict[str, float] = {}
 
     def score(self, family: str) -> float:
@@ -55,8 +60,8 @@ class _Dealer:
         if layer not in self._offsets:
             seeded = random.Random(_stable_seed(*self.key, layer))
             self._offsets[layer] = seeded.random()
-        return self.layer_counts[layer] < math.floor(
-            rate * self.position + self._offsets[layer])
+        self.targets[layer] = math.floor(rate * self.position + self._offsets[layer])
+        return self.layer_counts[layer] < self.targets[layer]
 
     def observe(self, techniques) -> None:
         for fn in techniques:
@@ -195,6 +200,7 @@ def plan_run(
                         "entry_type": entry_type,
                         "status": "planned",
                     }
+                _warn_short(dealer, it, manifest_path)
 
     Manifest(manifest_path).write(units())
     coverage(manifest_path, pool)
@@ -203,6 +209,19 @@ def plan_run(
         logger.info("Planned %d units (%d samples x %d) -> %s",
                     planned, len(inputs), iterations, manifest_path)
     return manifest_path
+
+
+def _warn_short(dealer: _Dealer, iteration: int, manifest_path: Path) -> None:
+    """Log each layer of a dealt group whose picks fell two or more short of
+    its target, as when no technique of the layer fits a unit's other picks."""
+    category, entry_type = dealer.key[1:3]
+    for layer, target in dealer.targets.items():
+        if target - dealer.layer_counts[layer] >= _SHORT:
+            logger.warning(
+                "Plan: group (%s, %s), iteration %d: the %s layer has %d of its "
+                "target %d; the pool or the compatibility rules left the rest no "
+                "pick (see %s).", category, entry_type, iteration, layer,
+                dealer.layer_counts[layer], target, coverage_path(manifest_path).name)
 
 
 def coverage_path(manifest_path) -> Path:

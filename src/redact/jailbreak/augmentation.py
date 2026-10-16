@@ -3,8 +3,9 @@ section says.
 
 A section is ``{"adversarial": {...}, "natural": {...}}``. A kind given
 overlays its default from ``configs/jailbreak/augmentations.json`` key by key:
-a value given replaces the default's whole, list or object alike. A kind given
-as ``None`` is off; a kind left out is the default.
+a value given replaces the default's whole, except ``layers``, ``families``
+and ``techniques``, whose ``allow`` and ``deny`` lists replace the default's
+one by one. A kind given as ``None`` is off; a kind left out is the default.
 """
 
 import copy
@@ -47,13 +48,18 @@ FLAT_KEYWORDS = (
 @lru_cache(maxsize=1)
 def _packaged() -> dict:
     path = paths.jailbreak_configs_dir() / "augmentations.json"
-    data = json.loads(path.read_text(encoding="utf-8"))
-    return {kind: data[kind] for kind in KINDS}
+    return json.loads(path.read_text(encoding="utf-8"))
 
 
 def defaults() -> dict:
     """The packaged section, both kinds, as a copy the caller may change."""
-    return copy.deepcopy(_packaged())
+    return copy.deepcopy({kind: _packaged()[kind] for kind in KINDS})
+
+
+def natural_only_families() -> list[str]:
+    """The families the adversarial kind draws only when its
+    ``families.allow`` names them."""
+    return list(_packaged()["natural_only_families"])
 
 
 def resolve(section: dict | None, kind: str) -> dict | None:
@@ -63,6 +69,8 @@ def resolve(section: dict | None, kind: str) -> dict | None:
     resolved, which comes back unchanged. ``layers``, ``families`` and
     ``techniques`` come back with both their lists (``allow`` ``None`` for
     all), and a kind with ``rounds`` with ``iterations`` set to their number.
+    The adversarial ``families.deny`` holds every family of
+    :func:`natural_only_families` its ``families.allow`` does not name.
 
     Returns:
         The full kind, or ``None`` when ``section`` switches it off.
@@ -94,11 +102,26 @@ def resolve(section: dict | None, kind: str) -> dict | None:
             f"{where} has unknown key(s) {unknown}; write only "
             f"{list(_KIND_KEYS[kind])}.")
 
-    resolved = {**defaults()[kind], **copy.deepcopy(given)}
+    default = defaults()[kind]
+    resolved = {**default, **copy.deepcopy(given)}
     _check_entry_types(where, resolved["entry_types"])
-    resolved["layers"] = _lists(where, "layers", resolved["layers"], ("deny",))
-    for level in ("families", "techniques"):
-        resolved[level] = _lists(where, level, resolved[level], ("allow", "deny"))
+    for level, keys in (("layers", ("deny",)), ("families", ("allow", "deny")),
+                        ("techniques", ("allow", "deny"))):
+        if level in given:
+            lists = _lists(where, level, given[level], keys)
+            resolved[level] = _overlay(
+                where, level, default[level],
+                {key: lists[key] for key in keys if key in given[level]})
+    if (kind == "natural" and resolved["families"]["allow"] is None
+            and resolved["techniques"]["allow"] is None):
+        raise ValueError(
+            f"{where} needs an allow list: write families.allow or "
+            "techniques.allow, as the natural kind draws only what they name.")
+    if kind == "adversarial":
+        families = resolved["families"]
+        families["deny"] += [name for name in natural_only_families()
+                             if name not in (families["allow"] or ())
+                             and name not in families["deny"]]
     _check_names(where, resolved)
     if type(resolved["pure_only"]) is not bool:
         raise ValueError(
@@ -158,9 +181,20 @@ def apply_flat_keywords(kind: dict, keywords: dict) -> dict:
     the translation family; ``sampling_probs`` is ``layer_rates`` and
     ``settings_per_iteration`` is ``rounds``, each round's ``sampling_probs``
     its ``layer_rates``. A keyword that is ``None`` is not given.
+
+    Raises:
+        ValueError: ``iterations`` differs from the number of rounds of
+            ``settings_per_iteration``.
     """
     kind = copy.deepcopy(kind)
     given = {key: value for key, value in keywords.items() if value is not None}
+    rounds = given.get("settings_per_iteration")
+    if (isinstance(rounds, list) and "iterations" in given
+            and given["iterations"] != len(rounds)):
+        raise ValueError(
+            f"iterations is {given['iterations']} and settings_per_iteration gives "
+            f"{len(rounds)} rounds; the rounds set the number, so leave iterations "
+            "out.")
     for layer in _LAYERS:
         if f"include_{layer}" in given:
             kind["layers"]["deny"] = _toggled(
@@ -175,7 +209,6 @@ def apply_flat_keywords(kind: dict, keywords: dict) -> dict:
             kind[key] = given[key]
     if "sampling_probs" in given:
         kind["layer_rates"] = given["sampling_probs"]
-    rounds = given.get("settings_per_iteration")
     if isinstance(rounds, list):
         kind["rounds"] = [
             {("layer_rates" if key == "sampling_probs" else key): value
@@ -235,6 +268,23 @@ def _lists(where: str, level: str, value, keys: tuple[str, ...]) -> dict:
             raise ValueError(
                 f"{where}.{level} names {both} under both allow and deny; write "
                 "each under one of them.")
+    return out
+
+
+def _overlay(where: str, level: str, default: dict, given: dict) -> dict:
+    """The lists ``given`` holds over ``default``'s, one by one.
+
+    A name given under one list leaves the default's other list, so a deny
+    given alone is the default's allow less those names.
+    """
+    out = {**default, **given}
+    for key, other in (("allow", "deny"), ("deny", "allow")):
+        if given.get(key) and other not in given and out.get(other):
+            out[other] = [name for name in out[other] if name not in given[key]]
+            if other == "allow" and not out[other]:
+                raise ValueError(
+                    f"{where}.{level}.deny leaves out every name of the default's "
+                    f"allow; write {level}.allow as well.")
     return out
 
 

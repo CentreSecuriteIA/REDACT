@@ -1,10 +1,12 @@
 {
-  "_comment": "The augmentation section's defaults: what the attacks draw (adversarial, to jailbreaks.csv) and what the variations draw (natural, to variations.csv). A recipe's augmentations overlays them key by key; a kind given as null is off. An empty layer_rates is the spec's rates. Read by jailbreak/augmentation.py.",
+  "_comment": "The augmentation section's defaults: what the attacks draw (adversarial, to jailbreaks.csv) and what the variations draw (natural, to variations.csv). A recipe's augmentations overlays them key by key (layers, families and techniques list by list); a kind given as null is off. An empty layer_rates is the spec's rates. The attacks never draw a family of natural_only_families unless their families.allow names it. Read by jailbreak/augmentation.py.",
+
+  "natural_only_families": ["casual_writing"],
 
   "adversarial": {
     "entry_types": null,
     "layers": {"deny": []},
-    "families": {"allow": null, "deny": ["translation", "casual_writing"]},
+    "families": {"allow": null, "deny": ["translation"]},
     "techniques": {"allow": null, "deny": []},
     "pure_only": false,
     "family_weights": {},

@@ -89,3 +89,18 @@ def test_coverage_lists_every_pool_technique_including_zeros(tmp_path):
 
 def test_coverage_returns_none_without_a_manifest(tmp_path):
     assert coverage(tmp_path / "missing.manifest.jsonl", []) is None
+
+
+def test_a_layer_left_two_or_more_short_of_its_target_is_logged(tmp_path, caplog):
+    import logging
+
+    # No request technique in the pool: no unit can take the requests layer.
+    with caplog.at_level(logging.WARNING, logger="redact.jailbreak.plan"):
+        plan_run(_one_group(_GROUP), get_all_hacking_functions(),
+                 manifest_path=tmp_path / "jb.manifest.jsonl", seed=3,
+                 layer_rates={"hacking": 0.5, "manipulation": 0.0, "requests": 0.5},
+                 verbose=False)
+    assert [r.getMessage() for r in caplog.records] == [
+        "Plan: group (Cyber, harmful), iteration 0: the requests layer has 0 of "
+        "its target 10; the pool or the compatibility rules left the rest no "
+        "pick (see jb.coverage.csv)."]

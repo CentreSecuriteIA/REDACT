@@ -7,9 +7,11 @@ from redact.jailbreak.augmentation import (
     KINDS,
     apply_flat_keywords,
     defaults,
+    natural_only_families,
     resolve,
     rounds_of,
 )
+from redact.jailbreak.pool import technique_pool
 
 _BUDGET = {"max_complexity": 6, "max_obfuscations": 2, "include_hacking": True,
            "include_manipulation": True, "include_obfuscation": True,
@@ -18,23 +20,90 @@ _BUDGET = {"max_complexity": 6, "max_obfuscations": 2, "include_hacking": True,
 
 def test_both_kinds_are_the_default_when_the_section_is_none():
     for kind in KINDS:
-        assert resolve(None, kind) == resolve({}, kind) == defaults()[kind]
+        assert resolve(None, kind) == resolve({}, kind) == resolve(defaults(), kind)
+    assert resolve(None, "natural") == defaults()["natural"]
 
 
 def test_a_kind_given_as_none_is_off():
     assert resolve({"natural": None}, "natural") is None
-    assert resolve({"natural": None}, "adversarial") == defaults()["adversarial"]
+    assert resolve({"natural": None}, "adversarial") == resolve(None, "adversarial")
 
 
-def test_a_key_given_replaces_the_defaults_whole():
-    kind = resolve({"natural": {"families": {"deny": ["typos"]}}}, "natural")
-    assert kind["families"] == {"allow": None, "deny": ["typos"]}
-    assert kind["techniques"] == defaults()["natural"]["techniques"]
+def _without(names: list, *left_out: str) -> list:
+    return [name for name in names if name not in left_out]
+
+
+def test_a_deny_given_alone_keeps_the_defaults_allow():
+    default = defaults()["natural"]
+    kind = resolve({"natural": {"families": {"deny": ["structural"]}}}, "natural")
+    assert kind["families"] == {
+        "allow": _without(default["families"]["allow"], "structural"),
+        "deny": ["structural"]}
+    assert kind["techniques"] == default["techniques"]
+    pool = technique_pool(kind)
+    families = {family for fn in pool for family in fn.families}
+    assert "structural" not in families and "typos" in families
+    assert not any(fn.layer == "hacking" for fn in pool)
+
+
+def test_a_deny_given_alone_on_families_and_techniques_keeps_both_allows():
+    default = defaults()["natural"]
+    kind = resolve({"natural": {"families": {"deny": ["structural"]},
+                                "techniques": {"deny": ["to_leetspeak_basic"]}}},
+                   "natural")
+    assert kind["families"]["allow"] == _without(
+        default["families"]["allow"], "structural")
+    # A list given replaces the default's whole: the answer_format three are back.
+    assert kind["techniques"] == {
+        "allow": _without(default["techniques"]["allow"], "to_leetspeak_basic"),
+        "deny": ["to_leetspeak_basic"]}
+    names = {fn.__name__ for fn in technique_pool(kind)}
+    assert "to_leetspeak_basic" not in names and "to_prefix_injection" in names
+
+
+def test_an_allow_given_alone_keeps_the_defaults_deny():
+    default = defaults()["natural"]
+    kind = resolve({"natural": {"techniques": {"allow": ["to_leetspeak_basic"]}}},
+                   "natural")
+    assert kind["techniques"] == {
+        "allow": ["to_leetspeak_basic"], "deny": default["techniques"]["deny"]}
+    assert kind["families"] == default["families"]
+    names = {fn.__name__ for fn in technique_pool(kind)}
+    assert not names & set(default["techniques"]["deny"])
+
+
+def test_a_name_the_run_allows_leaves_the_defaults_deny():
+    kind = resolve({"natural": {"techniques": {"allow": ["to_prefix_injection"]}}},
+                   "natural")
+    assert kind["techniques"] == {
+        "allow": ["to_prefix_injection"],
+        "deny": ["to_refusal_then_comply", "to_apology_prevention"]}
+    assert "to_prefix_injection" in {fn.__name__ for fn in technique_pool(kind)}
+
+
+def test_an_adversarial_deny_given_alone_keeps_allow_null():
+    kind = resolve({"adversarial": {"families": {"deny": ["ascii_art"]}}},
+                   "adversarial")
+    assert kind["families"]["allow"] is None
+    assert kind["layers"] == {"deny": []}
+
+
+def test_the_natural_kind_needs_an_allow_list():
+    with pytest.raises(ValueError) as raised:
+        resolve({"natural": {"families": {"allow": None},
+                             "techniques": {"allow": None}}}, "natural")
+    assert str(raised.value) == (
+        "augmentations.natural needs an allow list: write families.allow or "
+        "techniques.allow, as the natural kind draws only what they name.")
+    # The adversarial kind draws from every technique.
+    resolve({"adversarial": {"families": {"allow": None},
+                             "techniques": {"allow": None}}}, "adversarial")
 
 
 def test_a_resolved_section_resolves_to_itself():
     section = {"adversarial": {"rounds": "escalation", "family_weights": {"encode": 2}},
-               "natural": {"iterations": 2}}
+               "natural": {"iterations": 2, "families": {"deny": ["structural"]},
+                           "techniques": {"allow": ["to_prefix_injection"]}}}
     once = {kind: resolve(section, kind) for kind in KINDS}
     assert {kind: resolve(once, kind) for kind in KINDS} == once
     assert once["adversarial"]["iterations"] == len(default_escalation_schedule())
@@ -42,8 +111,11 @@ def test_a_resolved_section_resolves_to_itself():
 
 def test_the_packaged_defaults():
     adversarial, natural = defaults()["adversarial"], defaults()["natural"]
-    assert adversarial["families"] == {
+    assert adversarial["families"] == {"allow": None, "deny": ["translation"]}
+    assert natural_only_families() == ["casual_writing"]
+    assert resolve(None, "adversarial")["families"] == {
         "allow": None, "deny": ["translation", "casual_writing"]}
+    assert "casual_writing" in natural["families"]["allow"]
     assert adversarial["rounds"] is None and adversarial["layer_rates"] == {}
     assert "translation" not in natural["families"]["allow"]
     assert natural["exact_techniques"] == natural["iterations"] == 1
@@ -81,6 +153,9 @@ def test_the_packaged_defaults():
     ({"natural": {"families": {"allow": [], "deny": []}}}, "natural",
      "augmentations.natural.families.allow must be a non-empty list, got []; write "
      "null for all"),
+    ({"natural": {"families": {"deny": defaults()["natural"]["families"]["allow"]}}},
+     "natural", "augmentations.natural.families.deny leaves out every name of the "
+     "default's allow; write families.allow as well."),
     ({"adversarial": {"family_weights": {"typos": 0}}}, "adversarial",
      "augmentations.adversarial.family_weights['typos'] must be a number above 0"),
     ({"adversarial": {"family_weights": {"typos": True}}}, "adversarial",
@@ -187,6 +262,17 @@ def test_the_flat_keywords_land_in_the_adversarial_kind():
         "rounds": [{"exact_techniques": 1}, {"layer_rates": {"requests": 0.3}}],
     }
     assert resolve({"adversarial": kind}, "adversarial") == kind
+
+
+def test_flat_iterations_that_differ_from_the_flat_rounds_raise():
+    rounds = [{"exact_techniques": 1}, {"exact_techniques": 2}]
+    with pytest.raises(ValueError, match="iterations is 3 and settings_per_iteration "
+                       "gives 2 rounds"):
+        apply_flat_keywords(resolve(None, "adversarial"),
+                            {"iterations": 3, "settings_per_iteration": rounds})
+    kind = apply_flat_keywords(resolve(None, "adversarial"), {
+        "iterations": len(rounds), "settings_per_iteration": rounds})
+    assert kind["iterations"] == len(rounds)
 
 
 def test_include_translation_false_denies_it_once():

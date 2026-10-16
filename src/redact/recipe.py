@@ -27,6 +27,10 @@ _REGISTRY_ROLES = {role: registry
 # The keys of a role's object under ``models`` that say how its model is served.
 _SERVING_KEYS = ("backend_type", "copies", "workers")
 
+# The keys a recipe may hold, beside comments ("_" first).
+_RECIPE_KEYS = ("dataset_type", "data_dir", "models", "taxonomy", "taxonomy_dir",
+                "prompt_dir", "stages", "augmentations", "params_file", "resume")
+
 
 def load_recipe(recipe: str | Path | dict) -> dict:
     """Load + validate a recipe (JSON path or already-parsed dict)."""
@@ -61,9 +65,16 @@ def load_recipe(recipe: str | Path | dict) -> dict:
             'The top-level "copies" key is no longer read; write each count in '
             'its role\'s entry under "models" instead, e.g. '
             '"gen": {"name": "llama-3.2-3b-debug", "copies": 2}.')
+    # "copies" is no longer read; a null one says nothing.
+    unknown = [key for key in data
+               if key not in (*_RECIPE_KEYS, "copies") and not key.startswith("_")]
+    if unknown:
+        raise ValueError(
+            f"The recipe has unknown key(s) {unknown}; write only "
+            f"{list(_RECIPE_KEYS)}.")
     # For their errors. The entries stay as written, and a run reads them again.
     serving_of(data.get("models") or {})
-    augmentations_of(data)
+    data["augmentations"] = augmentations_of(data)
     data["stages"] = stages
     data["dataset_type"] = dtype
     return data
@@ -116,21 +127,25 @@ def _check_jailbreak_params(params: dict) -> None:
             DeprecationWarning, stacklevel=3)
 
 
-def augmentations_of(recipe: dict) -> dict:
+def augmentations_of(recipe: dict, jailbreak_params: dict | None = None) -> dict:
     """The recipe's augmentation section, each kind resolved over its default.
 
     A kind given as null is off and a kind left out is the default
     (:func:`redact.jailbreak.augmentation.resolve`). Today's flat form, the
     keywords of ``generate_jailbreaks`` the section replaced written at the top
     of ``augmentations``, is read as the adversarial kind, the natural kind
-    then the default.
+    then the default, with a ``DeprecationWarning``. Those keywords in
+    ``jailbreak_params``, the params file's entry for the jailbreak stage, are
+    applied over the adversarial kind, so the section is the one the stage
+    runs.
 
     Returns:
         ``{"adversarial": kind or None, "natural": kind or None}``.
 
     Raises:
-        ValueError: The section breaks a rule. The message names the kind and
-            the key and says what to write.
+        ValueError: The section breaks a rule, or ``jailbreak_params`` sets a
+            keyword of the adversarial kind the recipe switches off. The
+            message names the kind and the key and says what to write.
     """
     from .jailbreak.augmentation import (
         FLAT_KEYWORDS,
@@ -159,9 +174,26 @@ def augmentations_of(recipe: dict) -> dict:
                 "write a parameter of generate_jailbreaks under "
                 "params['jailbreaks'], and a key of the section inside its "
                 "adversarial or natural kind.")
+        warnings.warn(
+            f"augmentations holds the flat keys {list(flat)}, which are deprecated; "
+            "write them in augmentations.adversarial (include_* as a layers or "
+            "families deny, sampling_probs as layer_rates, settings_per_iteration "
+            "as rounds).", DeprecationWarning, stacklevel=3)
         section = {"adversarial": apply_flat_keywords(
             resolve(None, "adversarial"), flat)}
-    return {kind: resolve(section, kind) for kind in KINDS}
+    kinds = {kind: resolve(section, kind) for kind in KINDS}
+    params = {key: value for key, value in (jailbreak_params or {}).items()
+              if key in FLAT_KEYWORDS and value is not None}
+    if params and kinds["adversarial"] is None:
+        raise ValueError(
+            f"params['jailbreaks'] sets {list(params)}, which the adversarial kind "
+            "takes, and the recipe switches that kind off "
+            "(augmentations.adversarial is null); leave them out of the params, "
+            "or switch the kind on.")
+    if params:
+        kinds["adversarial"] = resolve({"adversarial": apply_flat_keywords(
+            kinds["adversarial"], params)}, "adversarial")
+    return kinds
 
 
 def _role_names(models: dict) -> dict:

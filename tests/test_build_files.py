@@ -310,6 +310,22 @@ def test_a_cell_that_reads_as_a_missing_value_is_written_empty(tmp_path):
     assert [row[at] for row in rows[: len(_INPUTS)]] == ["", "", ""]
 
 
+def test_the_variations_are_their_accepted_rows_from_the_path_given(tmp_path):
+    from redact import build_dataset
+
+    def variations() -> list[str]:
+        built = pd.read_csv(paths.complete_dataset_csv(tmp_path))
+        return list(built[built["dataset_type"] == "natural_variation"]["sample_id"])
+
+    _write_stage_files(tmp_path)
+    elsewhere = tmp_path / "elsewhere.csv"
+    _VARIATIONS.assign(accepted=[True, False, True]).to_csv(elsewhere, index=False)
+    build_dataset(data_dir=tmp_path, variations_path=elsewhere, verbose=False)
+    assert variations() == ["var-1", "var-3"]
+    build_dataset(data_dir=tmp_path, include_variations=False, verbose=False)
+    assert variations() == []
+
+
 def test_a_paraphrase_that_a_spreadsheet_marked_true_is_kept(tmp_path):
     """A spreadsheet saves ``True`` as ``TRUE``, which a whole read took too."""
     from redact import build_dataset

@@ -230,6 +230,76 @@ def test_a_params_key_the_run_sets_itself_is_refused(tmp_path, monkeypatch, stag
         "leave it out of the params.")
 
 
+def _fails_before_any_stage_or_model(monkeypatch, tmp_path, recipe, params) -> str:
+    """Run the recipe, its first stage ``outputs``; what it raised, having run
+    no stage and planned no model."""
+    import redact
+    import redact.driver as D
+
+    done = []
+    monkeypatch.setattr(redact, "generate_outputs", lambda **k: done.append("outputs"))
+    monkeypatch.setattr(D, "_plan_phases", lambda *a, **k: done.append("plan") or [])
+    recipe = {"dataset_type": "eval", "data_dir": str(tmp_path), **recipe}
+    try:
+        with pytest.raises(ValueError) as raised:
+            run_pipeline(recipe, params=params, verbose=False)
+    finally:
+        telemetry.uninstall()
+    assert done == []
+    return str(raised.value)
+
+
+def test_a_later_stages_params_clash_fails_before_any_stage_runs(tmp_path, monkeypatch):
+    raised = _fails_before_any_stage_or_model(
+        monkeypatch, tmp_path, {"stages": ["outputs", "jailbreaks"]},
+        {"jailbreaks": {"model": "x"}})
+    assert raised == (
+        "params['jailbreaks'] sets ['model'], which the run passes "
+        "generate_jailbreaks itself; leave it out of the params.")
+
+
+def test_a_flat_param_for_an_adversarial_kind_switched_off_fails_before_any_stage(
+        tmp_path, monkeypatch):
+    with pytest.warns(DeprecationWarning):
+        raised = _fails_before_any_stage_or_model(
+            monkeypatch, tmp_path, {"stages": ["outputs", "jailbreaks"],
+                                    "augmentations": {"adversarial": None}},
+            {"jailbreaks": {"max_complexity": 4}})
+    assert raised == (
+        "params['jailbreaks'] sets ['max_complexity'], which the adversarial kind "
+        "takes, and the recipe switches that kind off (augmentations.adversarial "
+        "is null); leave them out of the params, or switch the kind on.")
+
+
+def test_the_jailbreak_stage_runs_and_records_the_section_with_the_params_applied(
+        tmp_path, monkeypatch):
+    import redact
+
+    handed = []
+    monkeypatch.setattr(redact, "generate_jailbreaks",
+                        lambda **k: handed.append(k) or pd.DataFrame())
+    params = {"max_complexity": 4, "include_translation": True, "seed": 3}
+    try:
+        with pytest.warns(DeprecationWarning):
+            summary = run_pipeline(
+                {"dataset_type": "eval", "data_dir": str(tmp_path),
+                 "stages": ["jailbreaks"], "augmentations": {"natural": None}},
+                params={"jailbreaks": params}, verbose=False)
+    finally:
+        telemetry.uninstall()
+    (kwargs,) = handed
+    adversarial = kwargs["augmentation"]["adversarial"]
+    assert adversarial["max_complexity"] == params["max_complexity"]
+    assert "translation" not in adversarial["families"]["deny"]
+    assert kwargs["seed"] == params["seed"]
+    assert not {"max_complexity", "include_translation"} & set(kwargs)
+    record = read_record("jailbreaks", tmp_path)
+    assert record["augmentation"] == kwargs["augmentation"]
+    assert record["params"] == params
+    # The translation model the section draws is the run's too.
+    assert summary["serving"]["translation"] is not None
+
+
 def test_the_jailbreak_stage_gets_the_recipes_prompt_dir(tmp_path, monkeypatch):
     import redact
 
@@ -356,6 +426,17 @@ def test_load_recipe_rejects_unknown_stage():
         load_recipe({"dataset_type": "eval", "stages": ["inputs", "nope"]})
 
 
+def test_load_recipe_rejects_an_unknown_key_naming_the_valid_ones():
+    with pytest.raises(ValueError) as raised:
+        load_recipe({"dataset_type": "eval", "augmentation": {"natural": None}})
+    assert str(raised.value) == (
+        "The recipe has unknown key(s) ['augmentation']; write only "
+        "['dataset_type', 'data_dir', 'models', 'taxonomy', 'taxonomy_dir', "
+        "'prompt_dir', 'stages', 'augmentations', 'params_file', 'resume'].")
+    # A key starting with "_" is a comment.
+    load_recipe({"dataset_type": "eval", "_comment": "a note"})
+
+
 def test_eval_cannot_include_constitution_stage():
     with pytest.raises(ValueError):
         load_recipe({"dataset_type": "eval", "stages": ["constitution", "inputs"]})
@@ -396,7 +477,8 @@ def test_names_and_nulls_load_as_written():
 
 @pytest.mark.parametrize("name", ["eval_example.json", "training_example.json"])
 def test_the_example_recipes_load(name):
-    recipe = load_recipe(paths.configs_dir() / "runs" / name)
+    with pytest.warns(DeprecationWarning, match="flat keys"):   # their flat form
+        recipe = load_recipe(paths.configs_dir() / "runs" / name)
     assert set(recipe["models"].values()) == {None}
     assert _serving_of(recipe["models"]) == {}
 
@@ -409,14 +491,51 @@ def _section(augmentations) -> dict:
 
 @pytest.mark.parametrize("name", ["eval_example.json", "training_example.json"])
 def test_the_example_recipes_flat_form_is_the_default_section(name):
-    recipe = load_recipe(paths.configs_dir() / "runs" / name)
+    with pytest.warns(DeprecationWarning):
+        recipe = load_recipe(paths.configs_dir() / "runs" / name)
     assert augmentations_of(recipe) == _section(None) == {
         kind: resolve(None, kind) for kind in ("adversarial", "natural")}
 
 
+def test_the_flat_form_warns_once_per_run_and_the_kinds_form_does_not():
+    import warnings
+
+    with pytest.warns(DeprecationWarning) as warned:
+        recipe = load_recipe({"dataset_type": "eval",
+                              "augmentations": {"pure_only": True}})
+    assert [str(w.message) for w in warned] == [
+        "augmentations holds the flat keys ['pure_only'], which are deprecated; "
+        "write them in augmentations.adversarial (include_* as a layers or "
+        "families deny, sampling_probs as layer_rates, settings_per_iteration as "
+        "rounds)."]
+    with warnings.catch_warnings():
+        warnings.simplefilter("error")
+        # The loaded recipe holds the section resolved, which a run reads again.
+        assert augmentations_of(recipe)["adversarial"]["pure_only"] is True
+        _section({"adversarial": {"pure_only": True}})
+
+
+@pytest.mark.parametrize(("augmentations", "error"), [
+    ({"iterations": 3, "settings_per_iteration": [{}, {}]},
+     "iterations is 3 and settings_per_iteration gives 2 rounds; the rounds set "
+     "the number, so leave iterations out."),
+    ({"iterations": 2, "settings_per_iteration": [{}, {}]}, None),
+])
+def test_flat_iterations_must_agree_with_the_flat_rounds(augmentations, error):
+    if error is None:
+        with pytest.warns(DeprecationWarning):
+            kind = _section(augmentations)["adversarial"]
+        assert kind["iterations"] == len(augmentations["settings_per_iteration"])
+        return
+    with pytest.warns(DeprecationWarning), pytest.raises(ValueError) as raised:
+        load_recipe({"dataset_type": "eval", "augmentations": augmentations})
+    assert str(raised.value) == error
+
+
 def test_the_flat_form_is_the_adversarial_kind_beside_the_default_natural_kind():
-    section = _section({"include_hacking": False, "pure_only": True,
-                        "include_translation": True})
+    with pytest.warns(DeprecationWarning):
+        section = _section({"include_hacking": False, "pure_only": True,
+                            "include_translation": True})
     assert section["adversarial"] == resolve({"adversarial": {
         "layers": {"deny": ["hacking"]}, "pure_only": True,
         "families": {"allow": None, "deny": ["casual_writing"]}}}, "adversarial")
@@ -494,6 +613,27 @@ def test_the_jailbreak_stage_is_handed_the_resolved_section_and_records_it(
     assert record["augmentation"]["natural"] is None
     assert record["params"] == {"seed": 3}
     assert summary["stages"]["jailbreaks"]["counts"] == {"rows": 2, "accepted": 2}
+
+
+def test_the_jailbreak_stage_counts_the_variations_beside_its_output_path(tmp_path):
+    from redact.stages import STAGES, RunContext
+
+    def files(params, augmentations=None):
+        ctx = RunContext(
+            data_dir=tmp_path, dataset_type="eval", models={}, prompt_dir=None,
+            taxonomy="t", taxonomy_dir=None, params={"jailbreaks": params},
+            augmentations=_section(augmentations), resume=True, verbose=False)
+        return [Path(p) for p in STAGES["jailbreaks"].files(ctx)[0]]
+
+    given = tmp_path / "given"
+    assert files({}) == [paths.jailbreaks_csv(tmp_path), paths.variations_csv(tmp_path)]
+    assert files({"output_path": str(given / "j.csv")}) == [
+        given / "j.csv", given / "variations.csv"]
+    assert files({"output_path": str(given / "j.csv"),
+                  "variations_path": str(tmp_path / "v.csv")}) == [
+        given / "j.csv", tmp_path / "v.csv"]
+    assert files({"output_path": str(given / "j.csv")}, {"adversarial": None}) == [
+        given / "variations.csv"]
 
 
 def test_a_params_key_of_the_flat_form_warns_and_is_read_as_before():

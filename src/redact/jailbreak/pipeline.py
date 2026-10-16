@@ -54,6 +54,7 @@ def run_augmentation(
     verbose: bool = True,
     read_back: bool = True,
     label: str = "jailbreak",
+    accept_noop: bool = True,
 ) -> pd.DataFrame:
     """Augment the inputs with ``pool``'s techniques, appended to ``out_path``.
 
@@ -62,11 +63,14 @@ def run_augmentation(
     its pending units run through :func:`drive_units`, up to ``batch_size`` per
     call, their rows appended every 32 units. The combination is read back
     through every registered technique, so a plan made with another pool still
-    replays. ``rounds`` holds each round's sampler settings, as
-    :func:`redact.jailbreak.augmentation.rounds_of` gives them (one round of
-    the sampler's defaults when None); ``family_weights`` and ``layer_rates``
+    replays, and with ``auto_generate_benign`` the benign data is loaded when
+    a pending unit's techniques need it. ``rounds`` holds each round's
+    sampler settings, as :func:`redact.jailbreak.augmentation.rounds_of`
+    gives them (one round of the sampler's defaults when None);
+    ``family_weights`` and ``layer_rates``
     go to the dealing of :func:`plan_run`. ``label`` is the progress label and
-    the internals-capture root.
+    the internals-capture root. With ``accept_noop`` False, a row whose text
+    is its input's is not accepted.
 
     Resume: completion is a sidecar ``*.state.jsonl`` ledger keyed
     ``(input_id, iteration)``; ``resume=True`` reuses the plan and skips its
@@ -125,25 +129,33 @@ def run_augmentation(
             layer_rates=layer_rates, verbose=verbose,
         )
 
-    benign_data = None
-    if auto_generate_benign and any(getattr(f, "requires_benign", False) for f in pool):
-        benign_data = get_or_generate_benign_data(
-            client=client, cache_path=benign_path, verbose=verbose)
-
     # Where each input is in the frame, by its id; of two inputs with one id
     # the later one. A unit's prompt and its row's input columns are read there
     # when needed, so no copy of every input is held.
     position = dict(zip(inputs["sample_id"], range(len(inputs))))
     prompts = inputs["prompt"]
 
-    out_path.parent.mkdir(parents=True, exist_ok=True)
+    # One pass over the plan, for the numbers in the log lines and for whether
+    # a pending unit's techniques need benign data: read off the plan, not the
+    # pool, since a plan made with another pool still replays.
     planned = total = written = 0
-    if verbose:     # one pass over the plan, for the numbers in the log lines
+    needs_benign = False
+    if verbose or auto_generate_benign:
         for plan_row in manifest:
             planned += 1
-            total += is_pending(plan_row, position, completed)
-        if total:
-            logger.info("Executing %d units...", total)
+            if is_pending(plan_row, position, completed):
+                total += 1
+                needs_benign = needs_benign or any(
+                    getattr(registry.get(name), "requires_benign", False)
+                    for name in plan_row["combination"])
+    benign_data = None
+    if auto_generate_benign and needs_benign:
+        benign_data = get_or_generate_benign_data(
+            client=client, cache_path=benign_path, verbose=verbose)
+
+    out_path.parent.mkdir(parents=True, exist_ok=True)
+    if verbose and total:
+        logger.info("Executing %d units...", total)
 
     def _append(rows: list[dict]) -> dict[Path, int]:
         nonlocal written
@@ -164,7 +176,8 @@ def run_augmentation(
 
     def _on_done(i, value):
         _row(live.pop(i),
-             lambda u, r: row_of(u, value, r, spec_version, gen_model=client.model))
+             lambda u, r: row_of(u, value, r, spec_version, gen_model=client.model,
+                                 accept_noop=accept_noop))
 
     def _on_error(i, exc):
         _row(live.pop(i),
