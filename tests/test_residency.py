@@ -94,7 +94,7 @@ def _capacity(total_gb, n_gpus, name="FakeGPU"):
     """Pin every capacity source, so the real machine never leaks into a test."""
     # nvidia-smi is asked first, so pinning it keeps torch out as well.
     return (
-        patch("redact.llms.resources.measure.detect_gpu_memory_gib", return_value=total_gb),
+        patch("redact.llms.resources.measure.card_sizes_gib", return_value=[total_gb]),
         patch("redact.llms.resources.measure.detect_gpus", return_value=(name, n_gpus)),
     )
 
@@ -567,8 +567,8 @@ class TestPlanResidency:
             return "FakeGPU", 1
 
         with patch("redact.llms.resources.measure.detect_gpus", detect), \
-             patch("redact.llms.resources.measure.detect_gpu_memory_gib",
-                   return_value=24.0):
+             patch("redact.llms.resources.measure.card_sizes_gib",
+                   return_value=[24.0]):
             plan = residency.plan_residency([m])
         assert seen == [True] and plan.gpus_available == 1
 
@@ -673,7 +673,7 @@ class TestPlanResidency:
         # Both capacity sources blind: no torch, and no nvidia-smi either.
         with patch("redact.llms.resources.measure.free_total_gib", return_value=None):
             with patch("redact.llms.resources.measure.detect_gpus", return_value=(None, 0)):
-                with patch("redact.llms.resources.measure.detect_gpu_memory_gib", return_value=None):
+                with patch("redact.llms.resources.measure.card_sizes_gib", return_value=None):
                     plan = residency.plan_residency([a, b])
         assert len(plan.groups) == 1          # grouped, not falsely split
         assert not plan.sequential
@@ -714,7 +714,7 @@ class TestPlanResidency:
         a = registered("_res_nosize", hf_model_id="org/ns", vram_gb=40.0)
         with patch("redact.llms.resources.measure.free_total_gib", return_value=None):
             with patch("redact.llms.resources.measure.detect_gpus", return_value=("FakeGPU", 2)):
-                with patch("redact.llms.resources.measure.detect_gpu_memory_gib", return_value=None):
+                with patch("redact.llms.resources.measure.card_sizes_gib", return_value=None):
                     plan = residency.plan_residency([a])
         assert any("card size is unknown" in w for w in plan.warnings)
         assert "card size is unknown" in plan.explain()
@@ -928,6 +928,134 @@ class TestCopies:
         m = registered("_cp_tf_only", setup="introspect", hf_model_id="org/cpto",
                        vram_gb=5.0, device_map="cuda:0")
         assert "idle" not in _plan([m], 24.0, 2).explain()
+
+
+class TestCardsOfDifferentSizes:
+    """Each card is planned at its own size. A copy goes only to a card at
+    least as large as the engine's, and only where every engine keeps a
+    share that covers its need: one gpu_memory_utilization holds on all
+    an engine's cards."""
+
+    @staticmethod
+    def _plan(models, sizes, **kwargs):
+        with patch.object(measure, "card_sizes_gib", return_value=sizes), \
+             patch.object(measure, "detect_gpus", return_value=("FakeGPU", len(sizes))):
+            return residency.plan_residency(models, **kwargs)
+
+    def test_each_engine_is_granted_a_share_of_its_own_card(self, registered):
+        """55.6 GiB fits the 96 GiB card only. 7.2 fits both and takes the
+        emptier, the 32 GiB card, at 0.9 of it."""
+        big = registered("_sz_big", hf_model_id="org/szb", vram_gb=50.0)
+        small = registered("_sz_small", hf_model_id="org/szs", vram_gb=6.0)
+        plan = self._plan([big, small], [96.0, 32.0])
+        assert plan.fits and (plan.gib_per_card, plan.per_gpu_gb) == ([96.0, 32.0], 32.0)
+        assert [(fp.devices, fp.planned_utilization, fp.reserved_gb)
+                for fp in plan.footprints] == [
+            ((0,), 0.9, pytest.approx(86.4)), ((1,), 0.9, pytest.approx(28.8))]
+        out = plan.explain()
+        assert out.startswith("plan needs 2 GPU(s); detected 2 GPUs of different "
+                              "sizes: card 0 96.0GiB, card 1 32.0GiB\n")
+        assert plan.as_dict()["gib_per_card"] == [96.0, 32.0]
+
+    def test_a_smaller_card_takes_no_copy(self, registered):
+        big = registered("_sz_alone", hf_model_id="org/sza", vram_gb=20.0)
+        plan = self._plan([big], [96.0, 32.0, 96.0])
+        assert (plan.footprints[0].devices, plan.footprints[0].copies) == ((0, 2), 2)
+        assert ("  note: card 1 is idle: it is smaller than _sz_alone's card "
+                "(96.0GiB), and a copy there would cut its share on every card"
+                ) in plan.explain()
+
+    def test_no_copy_where_its_share_would_not_cover_the_engine(self, registered):
+        """x (22.6 GiB) is on the 32 GiB card. Beside y (61.1) the 96 GiB card
+        has room for a copy, but would grant it 24.0 of 96: 0.25, which on
+        the 32 GiB card is 8 GiB."""
+        x = registered("_sz_cov_x", hf_model_id="org/szx", vram_gb=20.0)
+        y = registered("_sz_cov_y", hf_model_id="org/szy", vram_gb=55.0)
+        plan = self._plan([x, y], [32.0, 96.0])
+        assert plan.fits
+        assert [(fp.devices, fp.planned_utilization) for fp in plan.footprints] == [
+            ((0,), 0.9), ((1,), 0.9)]
+
+    def test_a_tensor_parallel_engine_is_granted_what_its_smallest_card_holds(
+            self, registered):
+        """39.1 GiB per card: the 32 GiB card grants 28.8, so it does not
+        fit, and the advice is sized for that card."""
+        big = registered("_sz_tp", hf_model_id="org/sztp", vram_gb=70.0, min_gpus=2)
+        plan = self._plan([big], [96.0, 32.0])
+        fp = plan.footprints[0]
+        assert fp.devices == (0, 1) and fp.reserved_gb == pytest.approx(28.8)
+        assert plan.oversized == [fp] and not plan.fits
+        assert "suggested: min_gpus=4 (tensor_parallel_size=4)" in plan.explain()
+
+    def test_a_search_tries_one_untouched_card_of_each_size(self, registered, caplog):
+        """In the order given a takes card 0, where b (66.6 GiB) then has no
+        room. Found: a on a 32 GiB card, b on the 96 GiB one; a copy of a
+        on the other 32 GiB card."""
+        a = registered("_sz_se_a", hf_model_id="org/szsa", vram_gb=20.0)
+        b = registered("_sz_se_b", hf_model_id="org/szsb", vram_gb=60.0)
+        with caplog.at_level(logging.INFO, logger=placement.logger.name):
+            plan = self._plan([a, b], [96.0, 32.0, 32.0])
+        assert plan.fits
+        assert [(fp.devices, fp.planned_utilization) for fp in plan.footprints] == [
+            ((1, 2), 0.9), ((0,), 0.9)]
+        assert [r.getMessage() for r in caplog.records] == [
+            "[residency] placed in another arrangement than the order given: "
+            f"{a} -> card 1, {b} -> card 0"]
+
+    def test_copies_given_take_the_largest_cards_first(self, registered):
+        x = registered("_sz_large", hf_model_id="org/szl", vram_gb=6.0)
+        plan = self._plan([x], [16.0, 96.0, 96.0], copies={x: 2})
+        assert (plan.footprints[0].devices, plan.footprints[0].copies) == ((1, 2), 2)
+
+    def test_a_share_a_crowded_stage_lowers_is_checked_in_every_stage(
+            self, registered):
+        """x has two copies given, on a 96 and a 16 GiB card. Beside y in
+        stage a its 96 GiB card grants it 0.1979, which on the 16 GiB card is
+        3.2 GiB, short of its 7.2. x loads once, so stage b, where it is
+        alone, does not fit either."""
+        x = registered("_sz_low_x", hf_model_id="org/szlx", vram_gb=6.0)
+        y = registered("_sz_low_y", hf_model_id="org/szly", vram_gb=50.0)
+        with patch.object(measure, "card_sizes_gib", return_value=[96.0, 16.0]), \
+             patch.object(measure, "detect_gpus", return_value=("FakeGPU", 2)):
+            a, b = residency.plan_phases({"a": [x, y], "b": [x]}, copies={x: 2})
+        for phase in (a, b):
+            (fp,) = [fp for fp in phase.plan.footprints if fp.model == x]
+            assert (fp.devices, fp.planned_utilization) == ((0, 1), 0.1979)
+            assert fp in phase.plan.oversized and not phase.plan.fits
+
+    def test_a_count_given_for_other_cards_plans_every_card_at_the_smallest(
+            self, registered):
+        """Four cards asked of a machine whose two are 96 and 32 GiB."""
+        m = registered("_sz_count", hf_model_id="org/szc", vram_gb=5.0)
+        with patch.object(measure, "card_sizes_gib", return_value=[96.0, 32.0]):
+            plan = residency.plan_residency([m], gpus=4)
+        assert (plan.gib_per_card, plan.per_gpu_gb) == ([32.0] * 4, 32.0)
+
+    def test_a_fit_is_found_whenever_one_exists(self, registered, caplog):
+        """300 seeded sets of 2 to 6 engines on 2 to 4 cards of random sizes:
+        the plan fits exactly when trying every assignment finds one that
+        does."""
+        rng = random.Random(20261016)
+        unfit = 0
+        caplog.set_level(logging.INFO, logger=placement.logger.name)
+        for i in range(300):
+            cards = rng.randint(2, 4)
+            sizes = [rng.choice((16.0, 24.0, 32.0, 48.0)) for _ in range(cards)]
+            pools = [estimate.DEFAULT_GPU_MEMORY_UTILIZATION * size for size in sizes]
+            needs_of = packed_sizes(rng, cards, sum(pools) / cards, range(2, 7))
+            names = [registered(f"_sz_or{i}_{j}", hf_model_id=f"org/szor{i}{j}",
+                                vram_gb=gb) for j, gb in enumerate(needs_of)]
+            plan = self._plan(names, sizes)
+            needs = {fp.model: fp.padded_gb for fp in plan.footprints}
+            exists = fit_exists(needs, [names], cards, pools)
+            assert plan.fits is exists, (i, sizes, needs)
+            if exists:
+                assert len(plan.groups) == 1
+                assert_no_card_is_overfull(plan, pools)
+            unfit += not exists
+        # Of the 300, the sets that fit only in another arrangement than the
+        # order given, and those that fit in none.
+        assert (len(caplog.records), unfit) == (73, 177)
 
 
 class TestPlanForAGivenMachine:
@@ -1347,7 +1475,7 @@ class TestCapacityDetection:
         with patch("redact.llms.resources.measure.free_total_gib",
                    side_effect=AssertionError("torch probed")):
             with patch("redact.llms.resources.measure.detect_gpus", return_value=("FakeGPU", 1)):
-                with patch("redact.llms.resources.measure.detect_gpu_memory_gib", return_value=8.0):
+                with patch("redact.llms.resources.measure.card_sizes_gib", return_value=[8.0]):
                     plan = residency.plan_residency([m])
         assert plan.per_gpu_gb == 8.0
         assert not plan.fits          # 50GB on an 8GB card: correctly refused
@@ -1356,7 +1484,7 @@ class TestCapacityDetection:
         m = registered("_res_both", hf_model_id="org/both", vram_gb=1.0)
         with patch("redact.llms.resources.measure.free_total_gib", return_value=(20.0, 24.0)):
             with patch("redact.llms.resources.measure.detect_gpus", return_value=("FakeGPU", 1)):
-                with patch("redact.llms.resources.measure.detect_gpu_memory_gib", return_value=None):
+                with patch("redact.llms.resources.measure.card_sizes_gib", return_value=None):
                     plan = residency.plan_residency([m])
         assert plan.per_gpu_gb == 24.0
 
@@ -1364,7 +1492,7 @@ class TestCapacityDetection:
         """The torch probe imports torch; an API-only run must not pay for it."""
         with patch("redact.llms.resources.measure.free_total_gib",
                    side_effect=AssertionError("probed")), \
-             patch("redact.llms.resources.measure.detect_gpu_memory_gib",
+             patch("redact.llms.resources.measure.card_sizes_gib",
                    side_effect=AssertionError("probed")), \
              patch("redact.llms.resources.measure.detect_gpus", return_value=("FakeGPU", 1)):
             plan = residency.plan_residency(["claude-opus-4-6", "deepseek-v3.2"])
@@ -1401,7 +1529,7 @@ def test_estimated_tensor_parallel_footprint_is_a_total_like_a_declared_one():
         with patch("redact.llms.resources.estimate.estimate_weights_gib",
                    return_value=30.0), \
              patch("redact.llms.resources.estimate.estimate_kv_gib", return_value=0.0), \
-             patch("redact.llms.resources.measure.detect_gpu_memory_gib", return_value=36.0), \
+             patch("redact.llms.resources.measure.card_sizes_gib", return_value=[36.0]), \
              patch("redact.llms.resources.measure.detect_gpus", return_value=("FakeGPU", 2)):
             fp = residency.footprint(name)
             out = residency.plan_residency([name]).explain()
@@ -1420,7 +1548,7 @@ def test_same_checkpoint_with_different_engine_settings_is_two_loads():
         register_model(name, backend_type="vllm", vllm=VLLMConfig(
             hf_model_id="org/same", vram_gb=20.0, vllm_kwargs={"max_model_len": length}))
     try:
-        with patch("redact.llms.resources.measure.detect_gpu_memory_gib", return_value=24.0), \
+        with patch("redact.llms.resources.measure.card_sizes_gib", return_value=[24.0]), \
              patch("redact.llms.resources.measure.detect_gpus", return_value=("FakeGPU", 1)):
             plan = residency.plan_residency(list(names))
     finally:
@@ -2165,7 +2293,7 @@ class TestPlannedUtilization:
         m = registered("_pu_nosize", hf_model_id="org/pns", vram_gb=10.0)
         with patch("redact.llms.resources.measure.free_total_gib", return_value=None), \
              patch("redact.llms.resources.measure.detect_gpus", return_value=("FakeGPU", 1)), \
-             patch("redact.llms.resources.measure.detect_gpu_memory_gib", return_value=None):
+             patch("redact.llms.resources.measure.card_sizes_gib", return_value=None):
             residency.apply_plan(residency.plan_residency([m]))
         assert vllm_module._planned_utilization == {}
 
@@ -2861,14 +2989,14 @@ class TestPlannerHoles:
         unknown = registered("_ph_zero_u", hf_model_id="org/phzu")
         for name in (m, unknown):
             fp = residency.footprint(name)
-            cards = _Cards(1, 48.0)
+            cards = _Cards([48.0])
             cards.free[0] = 2.0                     # under the 4.8 kept back
             cards.shared[0].append(fp)
             fp.devices = (0,)
             cards.settle()
             assert fp.planned_utilization is None
             assert fp.reserved_gb == 0.0
-            assert _exceeds_its_cards(fp, 48.0, 1)
+            assert _exceeds_its_cards(fp, [48.0])
             plan = residency.ResidencyPlan(groups=[[fp]], gpus_required=1,
                                            gpus_available=1, per_gpu_gb=48.0,
                                            oversized=[fp])
@@ -2921,7 +3049,7 @@ class TestPlannerHoles:
         with patch("redact.llms.resources.measure.free_total_gib",
                    return_value=(20.0, 24.0)), _kv(0.0):
             with patch("redact.llms.resources.measure.detect_gpus", return_value=(None, 0)), \
-                 patch("redact.llms.resources.measure.detect_gpu_memory_gib", return_value=None):
+                 patch("redact.llms.resources.measure.card_sizes_gib", return_value=None):
                 plan = residency.plan_residency([m])
         assert plan.footprints[0].planned_utilization == 0.9
 
@@ -2945,7 +3073,7 @@ class TestWhatThePlanCannotTell:
         m = registered("_ct_torch", hf_model_id="org/ctt", vram_gb=5.0)
         with _kv(0.0), \
              patch("redact.llms.resources.measure.detect_gpus", return_value=(None, 0)), \
-             patch("redact.llms.resources.measure.detect_gpu_memory_gib", return_value=None), \
+             patch("redact.llms.resources.measure.card_sizes_gib", return_value=None), \
              patch("redact.llms.resources.measure.free_total_gib",
                    return_value=(24.0, 24.0)):
             plan = residency.plan_residency([m])
@@ -2980,22 +3108,25 @@ def packed_sizes(rng, cards, pool, count):
 
 
 def fit_exists(needs, stages, cards, pool):
-    """Whether one card per engine keeps every card within ``pool`` GiB in
+    """Whether one card per engine keeps every card within its pool in
     every stage, found by trying every assignment.
 
     Args:
         needs: Each engine's need with overhead, by name.
         stages: The engines resident in each stage.
+        pool: GiB a card grants, or per card.
     """
     names = list(needs)
-    # Cards are alike, so the first engine is on card 0.
-    for rest in itertools.product(range(cards), repeat=len(names) - 1):
-        card_of = dict(zip(names, (0, *rest)))
+    pools = pool if isinstance(pool, list) else [pool] * cards
+    # Where cards are alike, the first engine is on card 0.
+    first = range(1) if len(set(pools)) == 1 else range(cards)
+    for assigned in itertools.product(first, *[range(cards)] * (len(names) - 1)):
+        card_of = dict(zip(names, assigned))
         for stage in stages:
             load = [0.0] * cards
             for name in stage:
                 load[card_of[name]] += needs[name]
-            if max(load) > pool + 1e-6:
+            if any(gib > limit + 1e-6 for gib, limit in zip(load, pools)):
                 break
         else:
             return True
@@ -3038,21 +3169,24 @@ def fit_exists_around(needs, whole, fixed, cards, card, shared=False):
 def assert_no_card_is_overfull(plan, pool):
     """Per card: the needs placed on it fit, the vLLM engines' fractions
     stay under the ceiling and each covers its engine's need, and a card a
-    tensor-parallel engine holds holds nothing else."""
+    tensor-parallel engine holds holds nothing else. ``pool`` is the GiB a
+    card grants, or per card."""
     ceiling = estimate.DEFAULT_GPU_MEMORY_UTILIZATION
+    pools = pool if isinstance(pool, list) else [pool] * plan.gpus_available
     for card in range(plan.gpus_available):
         on = list({fp.engine: fp for fp in plan.footprints
                    if card in fp.devices}.values())
         # A transformers model claims its size rounded up.
         assert sum(fp.padded_gb if fp.setup == "vllm" else fp.gb
-                   for fp in on) <= pool + 1e-6
+                   for fp in on) <= pools[card] + 1e-6
         engines = [fp for fp in on if fp.setup == "vllm"]
         # A fraction may be rounded up a step to cover its need.
         assert sum(fp.planned_utilization or 0.0 for fp in engines) \
             <= ceiling + 1e-4 * len(engines) + 1e-9
         for fp in engines:
             if fp.known and fp.planned_utilization:
-                assert fp.planned_utilization * pool / ceiling + 1e-6 >= fp.padded_gb
+                assert (fp.planned_utilization * pools[card] / ceiling + 1e-6
+                        >= fp.padded_gb)
         assert len(on) <= 1 or all(fp.min_gpus == 1 for fp in engines)
 
 

@@ -4,7 +4,7 @@ import logging
 from dataclasses import dataclass
 
 from .footprint import _engine_id, _local_setup
-from .placement import _arrange, _gpus_required, _Stage, _survey
+from .placement import _arrange, _exceeds_its_cards, _gpus_required, _Stage, _survey
 from .plan import ResidencyPlan
 
 logger = logging.getLogger(__name__)
@@ -197,6 +197,13 @@ def plan_phases(
                 "its share in the stage where its card is most crowded.",
                 fp.model, loads(key, fp), share)
         fp.planned_utilization, fp.reserved_gb = share, reserved
+    # A share a more crowded stage lowered may not cover the need on an
+    # engine's smallest card.
+    for stage in placed:
+        stage.plan.oversized += [
+            fp for fp in stage.plan.footprints
+            if fp.setup == "vllm" and fp not in stage.plan.oversized
+            and _exceeds_its_cards(fp, stage.plan.gib_per_card or [])]
 
     # One set of cards per engine too: placement gave its copies only the
     # cards every stage of the lifetime has room for.

@@ -368,7 +368,7 @@ def test_co_fitting_paraphrasers_load_with_planned_grants(tmp_path, patched):
     patched.setattr(estimate, "estimate_kv_gib", lambda *a, **k: 0.0)
     patched.setattr("redact.llms.resources.measure.detect_gpus",
                     lambda visible=False: ("FakeGPU", 1))
-    patched.setattr("redact.llms.resources.measure.detect_gpu_memory_gib", lambda: 80.0)
+    patched.setattr("redact.llms.resources.measure.card_sizes_gib", lambda: [80.0])
     patched.setattr(residency, "unload_local",
                     lambda keep=None, engines=None: pytest.fail("unloaded"))
     vllm_module.VLLMBackend.clear_cache()
@@ -406,7 +406,7 @@ def test_the_pool_is_planned_with_one_copy_of_each_paraphraser(tmp_path, patched
     patched.setattr(estimate, "estimate_kv_gib", lambda *a, **k: 0.0)
     patched.setattr("redact.llms.resources.measure.detect_gpus",
                     lambda visible=False: ("FakeGPU", cards))
-    patched.setattr("redact.llms.resources.measure.detect_gpu_memory_gib", lambda: 80.0)
+    patched.setattr("redact.llms.resources.measure.card_sizes_gib", lambda: [80.0])
     plan_residency, plans = residency.plan_residency, []
 
     def planned(models, **kwargs):

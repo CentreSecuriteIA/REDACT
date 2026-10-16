@@ -17,7 +17,11 @@ class ResidencyPlan:
     gpus_required: int = 0
     gpus_available: int = 0
     gpu_name: str | None = None
+    #: The smallest card's size.
     per_gpu_gb: float | None = None
+    #: Each card's size, in the order the plan numbers them. ``None`` when
+    #: the card size is unknown.
+    gib_per_card: list[float] | None = None
     #: Models whose grant, or whose cards, do not cover their need.
     oversized: list[ModelFootprint] = field(default_factory=list)
     #: True when the caller gave the card count or the card size.
@@ -117,6 +121,7 @@ class ResidencyPlan:
             "gpus_available": self.gpus_available,
             "gpus_required": self.gpus_required,
             "per_gpu_gib": self.per_gpu_gb,
+            "gib_per_card": self.gib_per_card,
             "machine": "given" if self.machine_given else "detected",
             "groups": [[fp.model for fp in g] for g in self.groups],
             "models": [{**fp.as_dict(), "group": group_of[id(fp)]}

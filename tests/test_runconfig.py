@@ -1445,8 +1445,8 @@ def _one_card(gib):
     """Plan for one fake card of ``gib`` GiB."""
     return (patch("redact.llms.resources.measure.detect_gpus",
                   return_value=("FakeGPU", 1)),
-            patch("redact.llms.resources.measure.detect_gpu_memory_gib",
-                  return_value=gib))
+            patch("redact.llms.resources.measure.card_sizes_gib",
+                  return_value=[gib]))
 
 
 def _recorded(calls):
@@ -1643,7 +1643,7 @@ def test_run_pipeline_puts_the_plan_in_the_summary(tmp_path, monkeypatch, caplog
     try:
         with caplog.at_level(logging.INFO, logger=residency.logger.name), \
              patch("redact.llms.resources.measure.detect_gpus", return_value=("FakeGPU", 1)), \
-             patch("redact.llms.resources.measure.detect_gpu_memory_gib", return_value=10.0), \
+             patch("redact.llms.resources.measure.card_sizes_gib", return_value=[10.0]), \
              patch("redact.llms.resources.estimate.estimate_kv_gib",
                    return_value=0.04), \
              patch("redact.llms.ModelClient.create"):
@@ -1724,8 +1724,8 @@ def test_run_pipeline_summary_carries_copies(tmp_path, monkeypatch, gen, planned
     try:
         with patch("redact.llms.resources.measure.detect_gpus",
                    return_value=("FakeGPU", 2)), \
-             patch("redact.llms.resources.measure.detect_gpu_memory_gib",
-                   return_value=10.0):
+             patch("redact.llms.resources.measure.card_sizes_gib",
+                   return_value=[10.0]):
             summary = run_pipeline(recipe, params={"inputs": {}}, verbose=False)
     finally:
         telemetry.uninstall()
@@ -2159,8 +2159,8 @@ def test_a_run_unloads_a_model_for_a_stage_and_loads_it_again(
     try:
         with patch("redact.llms.resources.measure.detect_gpus",
                    return_value=("FakeGPU", 2)), \
-             patch("redact.llms.resources.measure.detect_gpu_memory_gib",
-                   return_value=24.0), \
+             patch("redact.llms.resources.measure.card_sizes_gib",
+                   return_value=[24.0]), \
              patch.dict("sys.modules", fake_vllm_modules(_LLM)), \
              patch.object(vllm_module, "_prepare_environment"), \
              caplog.at_level(logging.INFO, logger="redact.residency.phases"):
@@ -2226,8 +2226,8 @@ def test_a_run_whose_copies_fail_to_build_runs_on_one_copy(
     try:
         with patch("redact.llms.resources.measure.detect_gpus",
                    return_value=("FakeGPU", 2)), \
-             patch("redact.llms.resources.measure.detect_gpu_memory_gib",
-                   return_value=24.0), \
+             patch("redact.llms.resources.measure.card_sizes_gib",
+                   return_value=[24.0]), \
              patch.dict("sys.modules", fake_vllm_modules(_LLM)), \
              patch.object(vllm_module, "_prepare_environment"), \
              caplog.at_level(logging.WARNING, logger="redact.llms.backends.vllm"):

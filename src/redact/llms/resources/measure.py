@@ -1,9 +1,9 @@
 """Probe the machine's GPUs, and measure what an in-process load took on them.
 
-:func:`gpu_cards` asks ``nvidia-smi`` for each card, for the planner and the
-loader, :func:`detect_gpus` for the cards' name and count, for the cost
-roll-up, and :func:`card_use` for what each card holds, for the run's check
-before it loads a model.
+:func:`gpu_cards` asks ``nvidia-smi`` for each card, for the planner
+(:func:`card_sizes_gib`) and the loader, :func:`detect_gpus` for the cards'
+name and count, for the cost roll-up, and :func:`card_use` for what each
+card holds, for the run's check before it loads a model.
 :func:`free_total_gib` is the planner's fallback for the card size.
 
 A vLLM build narrows ``CUDA_VISIBLE_DEVICES`` for the whole process
@@ -189,19 +189,26 @@ def detect_gpus(visible: bool = False) -> tuple[str | None, int]:
     return (names[0] if names else None), len(names if ids is None else ids)
 
 
-def detect_gpu_memory_gib() -> float | None:
-    """The size of the smallest card this process can see, in GiB.
+def card_sizes_gib() -> list[float] | None:
+    """The size of each card this process can see, in GiB, in the order the
+    planner numbers them.
 
-    ``nvidia-smi`` answers without torch or a usable CUDA, so the size is
+    ``nvidia-smi`` answers without torch or a usable CUDA, so the sizes are
     known wherever a card is, not only where the full stack is.
 
     Returns:
-        The smallest total over the cards :func:`gpu_cards` finds visible:
-        a plan has one card size. ``None`` when ``nvidia-smi`` is absent or
-        unparseable, or no card is visible.
+        The totals of the cards :func:`gpu_cards` finds visible, or ``None``
+        when ``nvidia-smi`` is absent or unparseable, or no card is visible.
     """
     cards = gpu_cards(visible=True)
-    return min(card.total_gib for card in cards) if cards else None
+    return [card.total_gib for card in cards] if cards else None
+
+
+def detect_gpu_memory_gib() -> float | None:
+    """The size of the smallest card this process can see, in GiB, or
+    ``None`` (:func:`card_sizes_gib`)."""
+    sizes = card_sizes_gib()
+    return min(sizes) if sizes else None
 
 
 @dataclass(frozen=True)

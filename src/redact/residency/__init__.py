@@ -11,16 +11,18 @@ The plan describes what a run does:
   resident keeps the cards it loaded on. One kept for a later stage is
   unloaded for the stages that do not fit with it, and loaded again.
 - A vLLM engine loads on the cards the plan chose: a single-GPU engine on
-  the card with the most room, a tensor-parallel one on untouched cards.
-  When the models do not all fit like that, the engines are placed on
-  other cards on which they do, if there are any. Cards are
-  numbered over those ``CUDA_VISIBLE_DEVICES`` leaves visible. A
-  transformers model goes where its ``device_map`` puts it.
+  the emptiest card with room for it, a tensor-parallel one on untouched
+  cards. When the models do not all fit like that, the engines are placed
+  on other cards on which they do, if there are any. Cards are
+  numbered over those ``CUDA_VISIBLE_DEVICES`` leaves visible, in PCI bus
+  order, and each is planned at its own size. A transformers model goes
+  where its ``device_map`` puts it.
 - Cards with room take copies of the plan's first vLLM engine (vLLM's
   ``data_parallel_size``), unless a count is given for it. A copy is placed
   like the engine: one of a single-GPU engine shares its card, and the
   engine loads with the smallest share any of its cards grants it; one of a
-  tensor-parallel engine takes ``min_gpus`` untouched cards. Copies of a
+  tensor-parallel engine takes ``min_gpus`` untouched cards. No copy goes to
+  a card smaller than the engine's unless a count is given. Copies of a
   tensor-parallel engine are planned, not yet loaded end to end on a GPU.
 - A vLLM engine is granted its padded need plus a share of its card's spare
   memory, and loads with that grant as its ``gpu_memory_utilization``.
@@ -35,12 +37,13 @@ of the run, not a guarantee against running out of memory.
 #     time, so the paraphrase stage needs no plan of its own. Its plan covers
 #     only the pool and ignores what other stages hold. Only matters with
 #     more than one paraphraser, and none is trained yet, so later.
-#   - Free memory per card. One card size per plan: the smallest.
+#   - Used memory: the plan sizes each card by its total and assumes it
+#     empty; run_pipeline stops a run when another process holds a planned
+#     card (driver._check_cards). A plan asked for outside run_pipeline is
+#     not checked.
 #   - Unloading for a stage is tried with every candidate unloaded at once.
 #     With more lifetimes than the search places exactly (_SEARCH_LIMIT),
 #     that attempt can miss, and a run one unload would fit stays unfit.
-#   - A plan does not see engines already loaded, by this process or another.
-#     The runner should own this; one process (container) per run is a candidate.
 
 import logging
 

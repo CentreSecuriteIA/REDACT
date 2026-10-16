@@ -234,6 +234,15 @@ class TestCards:
             monkeypatch.setenv("CUDA_VISIBLE_DEVICES", value)
             assert measure.visible_gpu_ids() == ids
 
+    def test_sizes_are_the_visible_cards_in_their_order(self, monkeypatch):
+        _nvidia_smi(monkeypatch, "0, GPU-aaaa, 0, 32768, A\n1, GPU-bbbb, 0, 24576, B\n")
+        monkeypatch.delenv("CUDA_VISIBLE_DEVICES", raising=False)
+        assert measure.card_sizes_gib() == [32.0, 24.0]
+        monkeypatch.setenv("CUDA_VISIBLE_DEVICES", "1,0")
+        assert measure.card_sizes_gib() == [24.0, 32.0]
+        monkeypatch.setenv("CUDA_VISIBLE_DEVICES", "")
+        assert measure.card_sizes_gib() is None
+
     def test_memory_is_the_smallest_card(self, monkeypatch):
         _nvidia_smi(monkeypatch, "0, GPU-aaaa, 0, 32768, A\n1, GPU-bbbb, 0, 24576, B\n")
         monkeypatch.delenv("CUDA_VISIBLE_DEVICES", raising=False)
