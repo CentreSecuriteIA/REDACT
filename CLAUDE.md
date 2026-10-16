@@ -1,5 +1,7 @@
 # REDACT — Red-team Dataset Automation & Construction Toolkit
 
+> Developer documentation: [docs/](docs/README.md), one page per stage and per layer.
+
 ## Project Overview
 
 A modular, extensible pipeline for automated red teaming dataset generation. Built from lessons learned across multiple BELLS-O dataset iterations (content moderation input/output, jailbreaks). Designed to be reusable beyond red teaming — applicable to any synthetic data generation task.

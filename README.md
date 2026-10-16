@@ -1,5 +1,7 @@
 # REDACT — Red-team Dataset Automation & Construction Toolkit
 
+> Documentation: [docs/](docs/README.md) explains every part of the library and how a run goes from recipe to dataset.
+
 A modular Python library for generating, validating, and managing synthetic red-teaming datasets. Built for content moderation and jailbreak research, but designed to be extensible to any synthetic data generation task.
 
 ## Overview
