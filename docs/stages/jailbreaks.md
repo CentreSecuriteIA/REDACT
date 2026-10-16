@@ -38,9 +38,8 @@ in [techniques.md](../techniques.md).
 | `gen` | `uncensored_gen` | `venice-uncensored` | Every technique that calls a model, `translation` aside, and the benign data |
 | `translation` | `translation` | `deepseek-v3.2` | The `translation` family; resolved, planned and loaded only when a kind has `"translation": true` |
 
-Each translation is up to 4 rounds of two calls. The first call of each round
-goes to the `translation` model; the second always goes to the `translation`
-role's default model, whatever the recipe names.
+Each translation is up to 4 rounds of two calls, a translation and its check,
+both to the `translation` model.
 
 ## Settings
 

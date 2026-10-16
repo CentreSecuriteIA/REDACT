@@ -1,8 +1,8 @@
 """Translation techniques: the prompt translated to one of 20 languages.
 
-The translation-role model translates and checks, retrying with the check's
-feedback; ``info`` is the language, or ``DISCARDED; language=...; feedback=...``
-when every attempt is rejected.
+The run's translation model (the translation role's by default) translates
+and checks, retrying with the check's feedback; ``info`` is the language, or
+``DISCARDED; language=...; feedback=...`` when every attempt is rejected.
 """
 
 from collections.abc import Callable
@@ -71,14 +71,16 @@ def _translate_gen(
     ``(translation, language)`` on success or
     ``(last_attempt, "DISCARDED; language=...; feedback=...")`` on exhaustion.
 
-    ``**kwargs`` swallows engine-supplied keys (``gen_model``, ``benign_data``)
-    that translation does not use — it always uses the translation-role model.
+    ``translate_model`` makes both calls, the translation role's model when
+    None; ``check_model`` replaces it for the check. ``**kwargs`` swallows
+    engine-supplied keys (``gen_model``, ``benign_data``) that translation
+    does not use.
     """
     # Resolved fresh per call (not a frozen import-time constant) so a
     # runtime register_model(..., role="translation") takes effect
     # immediately, same as every other role default in the library.
     gen_model = translate_model or _resolve_translate_model()
-    chk_model = check_model or _resolve_translate_model()
+    chk_model = check_model or gen_model
     feedback = ""
     last = prompt
     for _ in range(num_retries):

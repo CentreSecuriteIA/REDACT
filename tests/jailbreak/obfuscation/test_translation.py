@@ -77,3 +77,26 @@ class TestTranslationFunctions:
         result, info = _run(to_swahili, "hello", backend)
         assert info.startswith("DISCARDED")
         assert "Swahili" in info
+
+
+class TestTranslationModel:
+    def _models(self, **kwargs) -> list[str]:
+        """The model of each request of one translation that is accepted."""
+        gen = to_swahili("hello", **kwargs)
+        models = [gen.send(None).model]
+        models.append(gen.send("jambo").model)
+        try:
+            gen.send("Yes")
+        except StopIteration:
+            return models
+        raise AssertionError("the translation made more than two calls")
+
+    def test_the_runs_translation_model_translates_and_checks(self):
+        assert self._models(translate_model="local-translator") == [
+            "local-translator", "local-translator"]
+
+    def test_without_one_both_calls_go_to_the_translation_role(self):
+        from redact.jailbreak.obfuscation.translation import _resolve_translate_model
+
+        role = _resolve_translate_model()
+        assert self._models() == [role, role]
