@@ -10,11 +10,12 @@
   "prompt_dir": null,
   "stages": ["constitution", "inputs", "outputs", "paraphrase", "jailbreaks", "build"],
   "augmentations": {
-    "include_hacking": true,
-    "include_obfuscation": true,
-    "include_manipulation": true,
-    "include_requests": true,
-    "include_translation": false
+    "adversarial": {
+      "families": {"deny": ["translation"]},
+      "max_complexity": 6,
+      "max_obfuscations": 2
+    },
+    "natural": {"exact_techniques": 1}
   },
   "params_file": "params_example.json",
   "resume": true

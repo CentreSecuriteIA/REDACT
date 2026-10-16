@@ -477,7 +477,10 @@ def test_names_and_nulls_load_as_written():
 
 @pytest.mark.parametrize("name", ["eval_example.json", "training_example.json"])
 def test_the_example_recipes_load(name):
-    with pytest.warns(DeprecationWarning, match="flat keys"):   # their flat form
+    import warnings
+
+    with warnings.catch_warnings():
+        warnings.simplefilter("error")      # their structured section warns for nothing
         recipe = load_recipe(paths.configs_dir() / "runs" / name)
     assert set(recipe["models"].values()) == {None}
     assert _serving_of(recipe["models"]) == {}
@@ -490,10 +493,16 @@ def _section(augmentations) -> dict:
 
 
 @pytest.mark.parametrize("name", ["eval_example.json", "training_example.json"])
-def test_the_example_recipes_flat_form_is_the_default_section(name):
-    with pytest.warns(DeprecationWarning):
+def test_the_example_recipes_run_the_default_section(name):
+    """Their section, with the params file's jailbreak keys, is the packaged
+    default, as their flat form was."""
+    import warnings
+
+    with warnings.catch_warnings():
+        warnings.simplefilter("error")
         recipe = load_recipe(paths.configs_dir() / "runs" / name)
-    assert augmentations_of(recipe) == _section(None) == {
+        params = load_params(recipe["params_file"], base_dir=recipe["_base_dir"])
+    assert augmentations_of(recipe, params["jailbreaks"]) == _section(None) == {
         kind: resolve(None, kind) for kind in ("adversarial", "natural")}
 
 
