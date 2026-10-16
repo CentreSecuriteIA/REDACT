@@ -3,12 +3,30 @@
 import pandas as pd
 import pytest
 
+from redact.dataset import load_taxonomy
 from redact.jailbreak.manipulation.benign import (
     BENIGN_CATEGORIES,
+    benign_categories,
     load_benign_data,
     process_category,
 )
 from tests.conftest import MockBackend, make_client
+
+
+class TestBenignTaxonomy:
+    def test_the_packaged_file_holds_the_categories_in_code(self):
+        assert benign_categories(load_taxonomy("benign")) == BENIGN_CATEGORIES
+
+    def test_subcategories_as_a_list_a_dict_or_none(self):
+        taxonomy = {"categories": {
+            "A": {"description": "", "subcategories": ["a1", "a2"]},
+            "B": {"description": "", "subcategories": {"b1": "", "b2": ""}},
+            "C": "a category given as its description",
+            "D": {"description": "", "subcategories": ["d1", "d1"]},
+        }}
+        assert benign_categories(taxonomy) == [
+            ("A", "a1"), ("A", "a2"), ("B", "b1"), ("B", "b2"), ("C", "C"),
+            ("D", "d1")]
 
 
 class TestBenignCategories:

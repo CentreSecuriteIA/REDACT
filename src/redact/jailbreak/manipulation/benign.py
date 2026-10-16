@@ -6,6 +6,7 @@ from pathlib import Path
 import pandas as pd
 
 from redact import paths
+from redact.dataset.taxonomy import iter_categories
 from redact.llms.client import ModelClient
 from redact.llms.prompting import build_messages, extract_structured_qa, load_prompt
 from redact.llms.router import generate_sample
@@ -94,6 +95,18 @@ BENIGN_CATEGORIES: list[tuple[str, str]] = [
     ("Technology & Tips", "Digital Organization"),
     ("Technology & Tips", "Productivity Tools"),
 ]
+
+
+def benign_categories(taxonomy: dict) -> list[tuple[str, str]]:
+    """The ``(main, sub)`` pairs of a benign taxonomy, in file order, each once.
+
+    A category's subcategories are a list, or a dict of which the keys are
+    read; a category without any is its own subcategory.
+    """
+    pairs = [(main, str(sub))
+             for main, info in iter_categories(taxonomy)
+             for sub in info.get("subcategories") or [main]]
+    return list(dict.fromkeys(pairs))
 
 
 def generate_benign(
