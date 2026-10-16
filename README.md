@@ -320,9 +320,10 @@ Everything above this layer calls a unified interface and is backend-agnostic.
 | `RateLimiter` | Per-model sliding-window RPM enforcement (thread-safe); inert when the backend carries no rpm |
 | `BatchCaller` | Parallel/sequential fan-out + rate limiting for backends without native batching. Native batching (vLLM) is dispatched by `ModelClient` straight to the engine, bypassing this class entirely |
 | `generate_sample()` | Single generation with rate limiting |
-| `check_sample()` | Validate a single sample against a `(original, sample) -> messages` checker |
-| `batch_check_samples()` | Validate multiple samples in batched engine passes |
-| `batch_generate_samples()` | Generate multiple samples in batched engine passes — the generation-side counterpart to `batch_check_samples()` |
+| `batch_generate_samples()` | Generate multiple samples in chunks of `batch_size`, in input order |
+| `check_sample()` / `batch_check_samples()` | Validate one sample / many against a `(original, sample) -> messages` checker (`redact.llm_pipeline`) |
+| `checked()` / `extracted()` | A unit's retry steps: generate, check, regenerate with the verdict / generate until a reply parses (`redact.llm_pipeline`) |
+| `drive_units()` | Drive many such generators as a pool topped up from a lazy source, batching their calls per model (`redact.llm_pipeline`) |
 | `telemetry.install()` | Start the run trace (JSONL by default) and cost roll-up |
 | `telemetry.stage()` | Label every event inside a block with its pipeline stage |
 | `residency.plan_residency()` | Which local models fit on this machine, and in what order |
@@ -866,22 +867,24 @@ Multi-round techniques (translate→check→retry, scenario→construction) simp
 ### Swapping Backends
 
 ```python
-from redact.llms import (
-    ModelClient, OpenAIBackend, VLLMBackend, get_model_config,
-)
+from redact.llms import ModelClient, OpenAIBackend, VLLMBackend
 
-# Auto-routing (recommended) — returns a ModelClient, model already bound
-client = ModelClient.create("venice-uncensored")   # Venice API
-client = ModelClient.create("claude-opus-4-6")     # Anthropic API
+# Auto-routing (recommended) — a registered name resolves to a ready client
+client = ModelClient.create("venice-uncensored")                       # Venice API
+client = ModelClient.create("claude-opus-4-6")                         # Anthropic API
+client = ModelClient.create("venice-uncensored", backend_type="vllm")  # same model, local weights
 
-# Direct instantiation, when the registry doesn't describe your endpoint
-backend = OpenAIBackend(api_key="...", base_url="https://api.example.com/v1")
-client = ModelClient(backend, "venice-uncensored",
-                     get_model_config("venice-uncensored"))
+# Direct instantiation, when the registry doesn't describe your endpoint. A backend
+# is one configured model, so the model name comes first.
+backend = OpenAIBackend("my-model", api_key="...",
+                        base_url="https://api.example.com/v1", rpm=60)
+client = ModelClient(backend)
 
-# Local vLLM transport built by hand
-backend = VLLMBackend(model="mistralai/Mistral-7B-v0.3")
+# A local vLLM engine built by hand (loads the weights on construction)
+client = ModelClient(VLLMBackend("my-local-model", hf_model_id="mistralai/Mistral-7B-v0.3"))
 ```
+
+For anything you'll reuse, `register_model()` it instead, so `ModelClient.create(name)` wires it like every shipped model.
 
 ---
 
