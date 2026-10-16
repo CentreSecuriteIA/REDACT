@@ -11,7 +11,7 @@
   "stages": ["inputs", "outputs", "paraphrase", "jailbreaks", "build"],
   "augmentations": {
     "adversarial": {
-      "families": {"deny": ["translation"]},
+      "translation": false,
       "max_complexity": 6,
       "max_obfuscations": 2
     },

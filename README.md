@@ -589,7 +589,7 @@ A kind you give overlays its default from `configs/jailbreak/augmentations.json`
 "augmentations": {
   "adversarial": {
     "entry_types": ["harmful", "dual_use_harmful"],
-    "families": {"deny": ["translation", "ascii_art"]},
+    "families": {"deny": ["ascii_art"]},
     "rounds": "escalation",
     "family_weights": {"persona": 2}
   },
@@ -600,6 +600,7 @@ A kind you give overlays its default from `configs/jailbreak/augmentations.json`
 | Key | Kind | Meaning |
 |---|---|---|
 | `entry_types` | both | The inputs to augment, by entry type; `null` for all |
+| `translation` | both | `true` draws the translation family, `false` (the default) keeps it out, whatever the lists below say |
 | `layers.deny` | both | Layers to leave out |
 | `families.allow`, `families.deny`, `techniques.allow`, `techniques.deny` | both | With an allow list, the kind draws only the families and techniques it names; a deny list takes names out. The natural kind must have an allow list |
 | `pure_only` | both | Only techniques that call no model and need no benign data |
@@ -609,13 +610,13 @@ A kind you give overlays its default from `configs/jailbreak/augmentations.json`
 | `rounds` | adversarial | `null` (every round the settings above), `"escalation"` (four rounds: exactly 1 technique, exactly 2, then two rising budgets), or a list of rounds, each merged over the kind's settings (`exact_techniques`, `max_complexity`, `max_obfuscations`, `layer_rates`, `allow_request_obfuscation`) |
 | `exact_techniques` | natural | Techniques per variation (default 1) |
 
-**Overlay rules.** A value you give replaces the default's whole value, a list too. `layers`, `families` and `techniques` are overlaid list by list: an `allow` or `deny` you give replaces the default's list of that name and keeps the other, and a `deny` given alone also takes its names out of the default's `allow` (`"natural": {"families": {"deny": ["typos"]}}` is the natural default without typos). A deny you write replaces the default's deny: the adversarial default denies `translation`, so keep it in a deny of your own to keep translation off. The families of `natural_only_families` (top of `augmentations.json`; `casual_writing` today) never enter the attacks unless the adversarial `families.allow` names them. An unknown key, a name the spec does not have, a name under both allow and deny, or a natural kind without an allow list raises when the recipe loads, naming the kind and the key.
+**Overlay rules.** A value you give replaces the default's whole value, a list too. `layers`, `families` and `techniques` are overlaid list by list: an `allow` or `deny` you give replaces the default's list of that name and keeps the other, and a `deny` given alone also takes its names out of the default's `allow` (`"natural": {"families": {"deny": ["typos"]}}` is the natural default without typos). The families of `natural_only_families` (top of `augmentations.json`; `casual_writing` today) never enter the attacks unless the adversarial `families.allow` names them. An unknown key, a name the spec does not have, a name under both allow and deny, or a natural kind without an allow list raises when the recipe loads, naming the kind and the key.
 
-**Translation is off by default** in both kinds: each translation costs 2–8 calls to the translation-role model, a hosted model today. Turn it on by leaving `translation` out of the adversarial deny (`"families": {"deny": []}`) or by naming it in the natural allow; once a local translation model is registered, it can be on in the packaged default.
+**Translation has its own switch**, `"translation"` in each kind, `false` in both by default: each translation costs 2–8 calls to the translation-role model, a hosted model today. `false` keeps the translation family out whatever the lists say, so no deny list of yours turns it on or off; an allow list that names `translation` or one of its languages while it is `false` raises. `true` puts it in: the attacks draw it as any other family, and the natural kind adds it to its allow list. The translation model is planned and loaded only when a kind has it on. Once a local translation model is registered, the packaged default can be flipped to `true` in one line of `augmentations.json`.
 
 **The variations file.** `variations.csv` has the same columns as `jailbreaks.csv` (rows keep their input's `entry_type`), with its own manifest, ledger and coverage table. It goes beside `output_path` when one is given, else to `{data_dir}/Datasets/variations.csv`; `variations_path=` overrides both. `build_dataset` adds its **accepted** rows as the `natural_variation` part; `include_variations=False` leaves them out and `variations_path=` reads another file.
 
-**Deprecated aliases.** The twelve flat keywords of `generate_jailbreaks` (`include_hacking`, `include_manipulation`, `include_obfuscation`, `include_requests`, `include_translation`, `pure_only`, `max_complexity`, `max_obfuscations`, `sampling_probs`, `iterations`, `settings_per_iteration`, `entry_types`) are read into the adversarial kind for one release, with a `DeprecationWarning`: `include_<layer>` is a `layers.deny`, `include_translation` a `families.deny`, `sampling_probs` is `layer_rates` and `settings_per_iteration` is `rounds`. The same keys are read, and warn, at the top of a recipe's `augmentations` (the flat form) and in `params["jailbreaks"]`; a key only the section holds (such as `family_weights`) in the params raises.
+**Deprecated aliases.** The twelve flat keywords of `generate_jailbreaks` (`include_hacking`, `include_manipulation`, `include_obfuscation`, `include_requests`, `include_translation`, `pure_only`, `max_complexity`, `max_obfuscations`, `sampling_probs`, `iterations`, `settings_per_iteration`, `entry_types`) are read into the adversarial kind for one release, with a `DeprecationWarning`: `include_<layer>` is a `layers.deny`, `include_translation` is `translation`, `sampling_probs` is `layer_rates` and `settings_per_iteration` is `rounds`. The same keys are read, and warn, at the top of a recipe's `augmentations` (the flat form) and in `params["jailbreaks"]`; a key only the section holds (such as `family_weights`) in the params raises.
 
 **Known limitation:** the phase-5 request obfuscation isn't counted against `max_obfuscations`.
 

@@ -111,10 +111,10 @@ def test_a_resolved_section_resolves_to_itself():
 
 def test_the_packaged_defaults():
     adversarial, natural = defaults()["adversarial"], defaults()["natural"]
-    assert adversarial["families"] == {"allow": None, "deny": ["translation"]}
+    assert adversarial["families"] == {"allow": None, "deny": []}
     assert natural_only_families() == ["casual_writing"]
     assert resolve(None, "adversarial")["families"] == {
-        "allow": None, "deny": ["translation", "casual_writing"]}
+        "allow": None, "deny": ["casual_writing"]}
     assert "casual_writing" in natural["families"]["allow"]
     assert adversarial["rounds"] is None and adversarial["layer_rates"] == {}
     assert "translation" not in natural["families"]["allow"]
@@ -257,7 +257,7 @@ def test_the_flat_keywords_land_in_the_adversarial_kind():
         **defaults()["adversarial"],
         "layers": {"deny": ["hacking"]},
         "families": {"allow": None, "deny": ["casual_writing"]},
-        "pure_only": True, "layer_rates": {"hacking": 0.1},
+        "translation": True, "pure_only": True, "layer_rates": {"hacking": 0.1},
         "entry_types": ["benign"], "iterations": 2,
         "rounds": [{"exact_techniques": 1}, {"layer_rates": {"requests": 0.3}}],
     }
@@ -275,8 +275,65 @@ def test_flat_iterations_that_differ_from_the_flat_rounds_raise():
     assert kind["iterations"] == len(rounds)
 
 
-def test_include_translation_false_denies_it_once():
+# --- the translation switch ----------------------------------------------------
+
+def _translates(section: dict, kind: str) -> bool:
+    from redact.jailbreak.pool import uses_translation
+
+    return uses_translation(technique_pool(resolve(section, kind)))
+
+
+def test_translation_is_off_in_both_default_kinds():
+    for kind in KINDS:
+        assert defaults()[kind]["translation"] is False
+        assert not _translates(None, kind)
+
+
+def test_a_deny_list_of_ones_own_keeps_translation_off():
+    assert not _translates({"adversarial": {"families": {"deny": ["ascii_art"]}}},
+                           "adversarial")
+    assert not _translates({"adversarial": {"families": {"deny": []}}}, "adversarial")
+
+
+@pytest.mark.parametrize("kind", KINDS)
+def test_the_switch_turns_translation_on(kind):
+    from redact.jailbreak.pool import all_techniques
+
+    pool = technique_pool(resolve({kind: {"translation": True}}, kind))
+    languages = [fn for fn in all_techniques() if "translation" in fn.families]
+    assert languages and all(fn in pool for fn in languages)
+    # The kind's other filters still apply.
+    assert set(pool) == set(technique_pool(resolve(None, kind))) | set(languages)
+
+
+def test_on_the_switch_wins_over_a_family_deny_and_a_technique_deny_still_applies():
+    pool = {fn.__name__ for fn in technique_pool(resolve({"adversarial": {
+        "translation": True, "families": {"deny": ["translation"]},
+        "techniques": {"deny": ["to_french"]}}}, "adversarial"))}
+    assert "to_japanese" in pool and "to_french" not in pool
+
+
+@pytest.mark.parametrize("given", [
+    {"natural": {"families": {"allow": ["typos", "translation"]}}},
+    {"natural": {"techniques": {"allow": ["to_french"]}}},
+    {"adversarial": {"families": {"allow": ["translation"]}}},
+])
+def test_allowing_translation_with_the_switch_off_raises(given):
+    (kind,) = given
+    with pytest.raises(ValueError, match='set "translation": true'):
+        resolve(given, kind)
+    assert _translates({kind: {**given[kind], "translation": True}}, kind)
+
+
+def test_the_switch_must_be_true_or_false():
+    with pytest.raises(ValueError, match="translation must be true or false"):
+        resolve({"natural": {"translation": "yes"}}, "natural")
+
+
+@pytest.mark.parametrize("value", [True, False])
+def test_include_translation_is_the_switch(value):
     kind = apply_flat_keywords(resolve(None, "adversarial"),
-                               {"include_translation": False, "include_hacking": True})
-    assert kind["families"]["deny"] == ["translation", "casual_writing"]
-    assert kind["layers"]["deny"] == []
+                               {"include_translation": value})
+    assert kind["translation"] is value
+    assert kind["families"] == resolve(None, "adversarial")["families"]
+    assert _translates({"adversarial": kind}, "adversarial") is value

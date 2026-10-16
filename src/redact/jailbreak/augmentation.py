@@ -6,6 +6,7 @@ overlays its default from ``configs/jailbreak/augmentations.json`` key by key:
 a value given replaces the default's whole, except ``layers``, ``families``
 and ``techniques``, whose ``allow`` and ``deny`` lists replace the default's
 one by one. A kind given as ``None`` is off; a kind left out is the default.
+``translation`` alone decides whether a kind draws the translation family.
 """
 
 import copy
@@ -17,13 +18,13 @@ from redact import paths
 from redact.types import ALL_ENTRY_TYPES
 
 from .plan import default_escalation_schedule
-from .pool import all_techniques, technique_pool
+from .pool import TRANSLATION, all_techniques, technique_pool
 from .technique import load_spec
 
 KINDS = ("adversarial", "natural")
 
-_COMMON_KEYS = ("entry_types", "layers", "families", "techniques", "pure_only",
-                "family_weights", "iterations")
+_COMMON_KEYS = ("entry_types", "translation", "layers", "families", "techniques",
+                "pure_only", "family_weights", "iterations")
 _KIND_KEYS = {
     "adversarial": (*_COMMON_KEYS, "rounds", "max_complexity", "max_obfuscations",
                     "layer_rates", "allow_request_obfuscation"),
@@ -71,6 +72,8 @@ def resolve(section: dict | None, kind: str) -> dict | None:
     all), and a kind with ``rounds`` with ``iterations`` set to their number.
     The adversarial ``families.deny`` holds every family of
     :func:`natural_only_families` its ``families.allow`` does not name.
+    ``translation`` is true or false, and an allow list names neither the
+    translation family nor one of its techniques while it is false.
 
     Returns:
         The full kind, or ``None`` when ``section`` switches it off.
@@ -123,6 +126,7 @@ def resolve(section: dict | None, kind: str) -> dict | None:
                              if name not in (families["allow"] or ())
                              and name not in families["deny"]]
     _check_names(where, resolved)
+    _check_translation(where, resolved)
     if type(resolved["pure_only"]) is not bool:
         raise ValueError(
             f"{where}.pure_only must be true or false, got {resolved['pure_only']!r}.")
@@ -178,7 +182,7 @@ def apply_flat_keywords(kind: dict, keywords: dict) -> dict:
     """``kind`` (adversarial, resolved) with today's flat keywords applied.
 
     ``include_<layer>`` denies or admits the layer, ``include_translation``
-    the translation family; ``sampling_probs`` is ``layer_rates`` and
+    is ``translation``; ``sampling_probs`` is ``layer_rates`` and
     ``settings_per_iteration`` is ``rounds``, each round's ``sampling_probs``
     its ``layer_rates``. A keyword that is ``None`` is not given.
 
@@ -200,9 +204,7 @@ def apply_flat_keywords(kind: dict, keywords: dict) -> dict:
             kind["layers"]["deny"] = _toggled(
                 kind["layers"]["deny"], layer, deny=not given[f"include_{layer}"])
     if "include_translation" in given:
-        kind["families"]["deny"] = _toggled(
-            kind["families"]["deny"], "translation",
-            deny=not given["include_translation"])
+        kind["translation"] = given["include_translation"]
     for key in ("pure_only", "max_complexity", "max_obfuscations", "iterations",
                 "entry_types"):
         if key in given:
@@ -316,6 +318,25 @@ def _check_names(where: str, resolved: dict) -> None:
                 raise ValueError(
                     f"{where}.techniques.{level} names {name!r}, which no "
                     "registered technique implements; write a registered one.")
+
+
+def _check_translation(where: str, resolved: dict) -> None:
+    """``translation`` is a bool, and with it false no allow list names translation."""
+    if type(resolved["translation"]) is not bool:
+        raise ValueError(
+            f"{where}.translation must be true or false, got "
+            f"{resolved['translation']!r}.")
+    if resolved["translation"]:
+        return
+    languages = {fn.__name__ for fn in all_techniques() if TRANSLATION in fn.families}
+    named = [name for name in resolved["families"]["allow"] or ()
+             if name == TRANSLATION]
+    named += [name for name in resolved["techniques"]["allow"] or ()
+              if name in languages]
+    if named:
+        raise ValueError(
+            f"{where} allows {named} and {where}.translation is false; set "
+            '"translation": true to draw translation.')
 
 
 def _check_count(where: str, key: str, value, *, least: int) -> None:

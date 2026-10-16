@@ -176,9 +176,10 @@ def augmentations_of(recipe: dict, jailbreak_params: dict | None = None) -> dict
                 "adversarial or natural kind.")
         warnings.warn(
             f"augmentations holds the flat keys {list(flat)}, which are deprecated; "
-            "write them in augmentations.adversarial (include_* as a layers or "
-            "families deny, sampling_probs as layer_rates, settings_per_iteration "
-            "as rounds).", DeprecationWarning, stacklevel=3)
+            "write them in augmentations.adversarial (include_<layer> as a layers "
+            "deny, include_translation as translation, sampling_probs as "
+            "layer_rates, settings_per_iteration as rounds).",
+            DeprecationWarning, stacklevel=3)
         section = {"adversarial": apply_flat_keywords(
             resolve(None, "adversarial"), flat)}
     kinds = {kind: resolve(section, kind) for kind in KINDS}

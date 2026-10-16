@@ -14,6 +14,9 @@ from .obfuscation import get_all_obfuscation_functions
 from .requests import get_all_request_functions
 from .technique import load_spec
 
+#: The family a kind's ``translation`` switch decides.
+TRANSLATION = "translation"
+
 
 def all_techniques() -> list[Callable]:
     """Every registered technique, one layer after another."""
@@ -57,7 +60,9 @@ def technique_pool(resolved: dict) -> list[Callable]:
     ``families.allow`` or named in ``techniques.allow``; less those of a
     family in ``families.deny`` and those named in ``techniques.deny``; with
     ``pure_only``, less every technique that calls a model or needs benign
-    data.
+    data. The translation family is in when ``translation`` is true, allowed
+    and not denied as a family, and out when it is false, whatever the
+    lists say.
     """
     families, techniques = resolved["families"], resolved["techniques"]
     denied_layers = set(resolved["layers"]["deny"])
@@ -65,10 +70,15 @@ def technique_pool(resolved: dict) -> list[Callable]:
             if getattr(fn, "layer", None) not in denied_layers]
     if families["allow"] is not None or techniques["allow"] is not None:
         allowed = set(families["allow"] or ())
+        if resolved["translation"]:
+            allowed.add(TRANSLATION)
         named = set(techniques["allow"] or ())
         pool = [fn for fn in pool if fn.__name__ in named
                 or allowed.intersection(getattr(fn, "families", ()))]
-    denied = set(families["deny"])
+    # The switch, not the lists, decides the translation family.
+    denied = set(families["deny"]) - {TRANSLATION}
+    if not resolved["translation"]:
+        denied.add(TRANSLATION)
     pool = [fn for fn in pool if fn.__name__ not in techniques["deny"]
             and not denied.intersection(getattr(fn, "families", ()))]
     if resolved["pure_only"]:
@@ -85,7 +95,7 @@ def registry(techniques: list[Callable]) -> dict[str, Callable]:
 
 def uses_translation(pool: list[Callable]) -> bool:
     """Whether ``pool`` holds a translation technique."""
-    return any("translation" in getattr(fn, "families", ()) for fn in pool)
+    return any(TRANSLATION in getattr(fn, "families", ()) for fn in pool)
 
 
 _check_against_spec(all_techniques())

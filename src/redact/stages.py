@@ -527,8 +527,9 @@ def generate_jailbreaks(
             include_requests, include_translation, sampling_probs,
             iterations, settings_per_iteration: Deprecated aliases into
             ``augmentation["adversarial"]``, applied over it with a
-            ``DeprecationWarning``: ``include_*`` deny or admit a layer or the
-            translation family, ``sampling_probs`` is ``layer_rates`` and
+            ``DeprecationWarning``: ``include_<layer>`` denies or admits a
+            layer, ``include_translation`` is ``translation``,
+            ``sampling_probs`` is ``layer_rates`` and
             ``settings_per_iteration`` is ``rounds``.
 
     Returns:
@@ -625,8 +626,9 @@ def _augmentation_section(augmentation: dict | None, flat: dict) -> dict:
         return section
     warnings.warn(
         f"generate_jailbreaks: {sorted(flat)} are deprecated; write them in "
-        "augmentation['adversarial'] (include_* as a layers or families deny, "
-        "sampling_probs as layer_rates, settings_per_iteration as rounds).",
+        "augmentation['adversarial'] (include_<layer> as a layers deny, "
+        "include_translation as translation, sampling_probs as layer_rates, "
+        "settings_per_iteration as rounds).",
         DeprecationWarning, stacklevel=3)
     kind = augmentation_kinds.resolve(section, "adversarial")
     if kind is None:

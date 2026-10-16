@@ -290,7 +290,7 @@ def test_the_jailbreak_stage_runs_and_records_the_section_with_the_params_applie
     (kwargs,) = handed
     adversarial = kwargs["augmentation"]["adversarial"]
     assert adversarial["max_complexity"] == params["max_complexity"]
-    assert "translation" not in adversarial["families"]["deny"]
+    assert adversarial["translation"] is True
     assert kwargs["seed"] == params["seed"]
     assert not {"max_complexity", "include_translation"} & set(kwargs)
     record = read_record("jailbreaks", tmp_path)
@@ -502,8 +502,10 @@ def test_the_example_recipes_run_the_default_section(name):
         warnings.simplefilter("error")
         recipe = load_recipe(paths.configs_dir() / "runs" / name)
         params = load_params(recipe["params_file"], base_dir=recipe["_base_dir"])
-    assert augmentations_of(recipe, params["jailbreaks"]) == _section(None) == {
+    section = augmentations_of(recipe, params["jailbreaks"])
+    assert section == _section(None) == {
         kind: resolve(None, kind) for kind in ("adversarial", "natural")}
+    assert not any(kind["translation"] for kind in section.values())
 
 
 def test_the_flat_form_warns_once_per_run_and_the_kinds_form_does_not():
@@ -514,9 +516,9 @@ def test_the_flat_form_warns_once_per_run_and_the_kinds_form_does_not():
                               "augmentations": {"pure_only": True}})
     assert [str(w.message) for w in warned] == [
         "augmentations holds the flat keys ['pure_only'], which are deprecated; "
-        "write them in augmentations.adversarial (include_* as a layers or "
-        "families deny, sampling_probs as layer_rates, settings_per_iteration as "
-        "rounds)."]
+        "write them in augmentations.adversarial (include_<layer> as a layers "
+        "deny, include_translation as translation, sampling_probs as layer_rates, "
+        "settings_per_iteration as rounds)."]
     with warnings.catch_warnings():
         warnings.simplefilter("error")
         # The loaded recipe holds the section resolved, which a run reads again.
@@ -546,8 +548,8 @@ def test_the_flat_form_is_the_adversarial_kind_beside_the_default_natural_kind()
         section = _section({"include_hacking": False, "pure_only": True,
                             "include_translation": True})
     assert section["adversarial"] == resolve({"adversarial": {
-        "layers": {"deny": ["hacking"]}, "pure_only": True,
-        "families": {"allow": None, "deny": ["casual_writing"]}}}, "adversarial")
+        "layers": {"deny": ["hacking"]}, "pure_only": True, "translation": True}},
+        "adversarial")
     assert section["natural"] == resolve(None, "natural")
 
 
@@ -660,13 +662,23 @@ def test_a_params_key_only_the_section_holds_is_refused():
         "adversarial or natural kind.")
 
 
-def test_translation_is_planned_when_a_kind_draws_it():
+@pytest.mark.parametrize("kind", ["adversarial", "natural"])
+def test_translation_is_planned_when_a_kind_switches_it_on(kind):
     from redact.driver import _stage_models
 
-    natural = {"natural": {"families": {"allow": ["translation"]}}}
-    assert "deepseek-v3.2" in _stage_models(_models(), ["jailbreaks"], natural)
+    on = {kind: {"translation": True}}
+    assert "deepseek-v3.2" in _stage_models(_models(), ["jailbreaks"], on)
     assert _stage_models(_models(), ["jailbreaks"], _section(None)) == [
         "venice-uncensored"]
+
+
+def test_a_deny_list_does_not_plan_translation():
+    from redact.driver import _stage_models
+
+    for deny in ([], ["ascii_art"]):
+        section = {"adversarial": {"families": {"deny": deny}}}
+        assert _stage_models(_models(), ["jailbreaks"], section) == [
+            "venice-uncensored"]
 
 
 def test_the_object_form_is_read_per_model():
