@@ -345,6 +345,9 @@ def _survey(
             "[residency] already loaded and not in this plan, so the plan "
             "hands their memory out again: %s", ", ".join(resident))
 
+    # Before anything starts CUDA: a transformers model's device_map counts
+    # the cards in this order.
+    measure.bus_order()
     if gib_per_gpu is None:
         # nvidia-smi first: asking torch starts CUDA in this process, before
         # vLLM launches its engine subprocess.

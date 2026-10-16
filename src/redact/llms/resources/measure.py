@@ -17,6 +17,7 @@ import logging
 import os
 import shutil
 import subprocess
+import sys
 from dataclasses import dataclass
 
 logger = logging.getLogger(__name__)
@@ -64,6 +65,34 @@ def visible_gpu_ids() -> list[str] | None:
     if value is None:
         return None
     return [entry.strip() for entry in value.split(",") if entry.strip()]
+
+
+def bus_order() -> None:
+    """Make CUDA count the cards in PCI bus order, as ``nvidia-smi`` does.
+
+    CUDA's own order puts the fastest card first, so on a machine of mixed
+    cards an index the plan takes from ``nvidia-smi`` could name another card
+    in a ``device_map`` or in ``CUDA_VISIBLE_DEVICES``. Sets
+    ``CUDA_DEVICE_ORDER`` unless it is set, for this process and the engine
+    processes it starts. CUDA reads it once, when it starts: a warning says
+    so when it has started in this process already.
+    """
+    if "CUDA_DEVICE_ORDER" in os.environ:
+        return
+    os.environ["CUDA_DEVICE_ORDER"] = "PCI_BUS_ID"
+    # Looked up, not imported: importing torch here would cost an API-only run.
+    torch = sys.modules.get("torch")
+    try:
+        started = torch is not None and torch.cuda.is_initialized()
+    except Exception:  # noqa: BLE001 — a broken CUDA install must not raise here
+        started = False
+    if started:
+        logger.warning(
+            "[residency] CUDA started in this process before CUDA_DEVICE_ORDER "
+            "was set, so it counts the cards fastest first, not as nvidia-smi "
+            "and the plan do: a transformers model's device_map may name another "
+            "card than the plan's. Set CUDA_DEVICE_ORDER=PCI_BUS_ID before CUDA "
+            "starts.")
 
 
 def detect_gpus(visible: bool = False) -> tuple[str | None, int]:

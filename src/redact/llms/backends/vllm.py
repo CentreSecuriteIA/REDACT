@@ -79,18 +79,25 @@ def set_planned_devices(
 
 
 def _physical_ids(devices: tuple[int, ...]) -> list[str]:
-    """The planned cards as ``CUDA_VISIBLE_DEVICES`` names them.
+    """The planned cards as the engine's processes are to see them.
 
     The plan counts over the visible cards, so with the variable set a
-    planned index is a position in it. ``[]`` when the plan names a card
-    past the visible ones: such a plan does not fit, and the engine is left
-    the cards it can see already, where vLLM fails for want of the rest.
+    planned index is a position in it. Each card is named by the UUID
+    ``nvidia-smi`` gives it, so the engine gets the card the plan sized
+    whatever order CUDA counts in; without one, as the variable names it,
+    or by its index. ``[]`` when the plan names a card past the visible
+    ones: such a plan does not fit, and the engine is left the cards it can
+    see already, where vLLM fails for want of the rest.
     """
     visible = measure.visible_gpu_ids()
+    last = max(devices, default=-1)
+    if visible is not None and last >= len(visible):
+        return []
+    cards = measure.gpu_cards(visible=True)
+    if cards is not None and last < len(cards):
+        return [cards[d].uuid for d in devices]
     if visible is None:
         return [str(d) for d in devices]
-    if max(devices, default=-1) >= len(visible):
-        return []
     return [visible[d] for d in devices]
 
 
@@ -131,6 +138,8 @@ def _prepare_environment() -> None:
     """Set up the process environment before vLLM is constructed."""
     # CUDA fails in a forked child when the parent already initialised it.
     os.environ.setdefault("VLLM_WORKER_MULTIPROC_METHOD", "spawn")
+    # The engine's processes count the cards as the plan does.
+    measure.bus_order()
 
     # WSL2 workaround: vLLM's V2 model runner fails every load there with
     # "UVA is not available" (vllm-project/vllm#47387, fix proposed in

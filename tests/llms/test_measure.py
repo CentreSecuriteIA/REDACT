@@ -11,6 +11,14 @@ from redact.llms.resources import measure
 
 GIB = 1024 ** 3
 
+# The suite's runs see no card (conftest); these tests read the real query.
+_gpu_cards = measure.gpu_cards
+
+
+@pytest.fixture(autouse=True)
+def _real_card_query(monkeypatch):
+    monkeypatch.setattr(measure, "gpu_cards", _gpu_cards)
+
 
 class _FakeCuda:
     """Per-device free memory and allocator counters, as ``torch.cuda`` reports them."""

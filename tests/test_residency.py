@@ -1082,6 +1082,51 @@ class TestOversizedModels:
         assert plan.oversized == [] and plan.fits
 
 
+class TestBusOrder:
+    """CUDA counts the cards in the order nvidia-smi lists them, which the
+    plan numbers them in: a load and a plan set it before CUDA starts."""
+
+    @pytest.fixture()
+    def torch_started(self, monkeypatch):
+        """A torch in ``sys.modules`` whose CUDA has started or not."""
+        def _set(started):
+            cuda = SimpleNamespace(is_initialized=lambda: started)
+            monkeypatch.setitem(__import__("sys").modules, "torch",
+                                SimpleNamespace(cuda=cuda))
+        return _set
+
+    def test_a_load_sets_it_unless_set(self, monkeypatch):
+        import redact.llms.backends.vllm as vllm_module
+
+        vllm_module._prepare_environment()
+        assert os.environ["CUDA_DEVICE_ORDER"] == "PCI_BUS_ID"
+        monkeypatch.setenv("CUDA_DEVICE_ORDER", "FASTEST_FIRST")
+        vllm_module._prepare_environment()
+        assert os.environ["CUDA_DEVICE_ORDER"] == "FASTEST_FIRST"
+
+    def test_a_plan_of_local_models_sets_it(self, registered):
+        m = registered("_bo_plan", hf_model_id="org/bo", vram_gb=1.0)
+        _plan(["claude-opus-4-6"], 24.0, 2)
+        assert "CUDA_DEVICE_ORDER" not in os.environ
+        _plan([m], 24.0, 2)
+        assert os.environ["CUDA_DEVICE_ORDER"] == "PCI_BUS_ID"
+
+    def test_cuda_started_before_it_was_set_is_a_warning(
+            self, torch_started, caplog):
+        torch_started(True)
+        with caplog.at_level(logging.WARNING, logger=measure.logger.name):
+            measure.bus_order()
+            measure.bus_order()
+        assert len(caplog.records) == 1
+        assert "CUDA_DEVICE_ORDER=PCI_BUS_ID" in caplog.text
+
+    def test_cuda_not_started_is_no_warning(self, torch_started, caplog):
+        torch_started(False)
+        with caplog.at_level(logging.WARNING, logger=measure.logger.name):
+            measure.bus_order()
+        assert caplog.records == []
+
+
 class TestCapacityDetection:
     def test_nvidia_smi_supplies_capacity_without_touching_torch(self, registered):
         """Asking torch would start CUDA in this process before vLLM loads."""
@@ -1803,8 +1848,8 @@ class TestPlannedDevices:
         vllm_module, builds = engine
         m = registered("_pd_one", hf_model_id="org/pdo", vram_gb=10.0,
                        vllm_kwargs={"max_model_len": 512})
-        environment = dict(os.environ)
         residency.apply_plan(_plan([m], 24.0, 1))
+        environment = dict(os.environ)
         vllm_module._engine("org/pdo", None, {"max_model_len": 512})
         assert builds == [("0", {
             "model": "org/pdo", "quantization": None, "max_model_len": 512,
@@ -1823,6 +1868,32 @@ class TestPlannedDevices:
         vllm_module._engine("org/pdx", None, {})
         assert [seen for seen, _ in builds] == [visible]
         assert os.environ["CUDA_VISIBLE_DEVICES"] == visible
+
+    CARDS = [measure.Card(i, f"GPU-{c * 4}-{i + 1}", 0.0, 24.0)
+             for i, c in enumerate("abc")]
+
+    @pytest.mark.parametrize("visible,planned,during", [
+        (None, (1, 0), "GPU-bbbb-2,GPU-aaaa-1"),
+        ("2,0", (0,), "GPU-cccc-3"),
+        # A card past those nvidia-smi lists is named as the variable names it.
+        (None, (3,), "3"),
+    ])
+    def test_the_planned_cards_are_named_by_their_uuid(
+            self, engine, monkeypatch, visible, planned, during):
+        """The plan sizes the cards nvidia-smi lists, so the engine gets the
+        same cards whatever order CUDA counts them in."""
+        vllm_module, builds = engine
+        cards = self.CARDS
+        if visible is not None:
+            monkeypatch.setenv("CUDA_VISIBLE_DEVICES", visible)
+            cards = [cards[int(i)] for i in visible.split(",")]
+        monkeypatch.setattr(measure, "gpu_cards",
+                            lambda visible=False: cards if visible else self.CARDS)
+        vllm_module.set_planned_devices(
+            {vllm_module._engine_key("org/pdu", None, {}): planned})
+        vllm_module._engine("org/pdu", None, {})
+        assert [seen for seen, _ in builds] == [during]
+        assert os.environ.get("CUDA_VISIBLE_DEVICES") == visible
 
     def test_the_load_event_names_the_devices(self, engine, monkeypatch):
         """As the engine's processes were handed them; none when none were."""
