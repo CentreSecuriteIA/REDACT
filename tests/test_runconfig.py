@@ -230,6 +230,76 @@ def test_a_params_key_the_run_sets_itself_is_refused(tmp_path, monkeypatch, stag
         "leave it out of the params.")
 
 
+def _fails_before_any_stage_or_model(monkeypatch, tmp_path, recipe, params) -> str:
+    """Run the recipe, its first stage ``outputs``; what it raised, having run
+    no stage and planned no model."""
+    import redact
+    import redact.driver as D
+
+    done = []
+    monkeypatch.setattr(redact, "generate_outputs", lambda **k: done.append("outputs"))
+    monkeypatch.setattr(D, "_plan_phases", lambda *a, **k: done.append("plan") or [])
+    recipe = {"dataset_type": "eval", "data_dir": str(tmp_path), **recipe}
+    try:
+        with pytest.raises(ValueError) as raised:
+            run_pipeline(recipe, params=params, verbose=False)
+    finally:
+        telemetry.uninstall()
+    assert done == []
+    return str(raised.value)
+
+
+def test_a_later_stages_params_clash_fails_before_any_stage_runs(tmp_path, monkeypatch):
+    raised = _fails_before_any_stage_or_model(
+        monkeypatch, tmp_path, {"stages": ["outputs", "jailbreaks"]},
+        {"jailbreaks": {"model": "x"}})
+    assert raised == (
+        "params['jailbreaks'] sets ['model'], which the run passes "
+        "generate_jailbreaks itself; leave it out of the params.")
+
+
+def test_a_flat_param_for_an_adversarial_kind_switched_off_fails_before_any_stage(
+        tmp_path, monkeypatch):
+    with pytest.warns(DeprecationWarning):
+        raised = _fails_before_any_stage_or_model(
+            monkeypatch, tmp_path, {"stages": ["outputs", "jailbreaks"],
+                                    "augmentations": {"adversarial": None}},
+            {"jailbreaks": {"max_complexity": 4}})
+    assert raised == (
+        "params['jailbreaks'] sets ['max_complexity'], which the adversarial kind "
+        "takes, and the recipe switches that kind off (augmentations.adversarial "
+        "is null); leave them out of the params, or switch the kind on.")
+
+
+def test_the_jailbreak_stage_runs_and_records_the_section_with_the_params_applied(
+        tmp_path, monkeypatch):
+    import redact
+
+    handed = []
+    monkeypatch.setattr(redact, "generate_jailbreaks",
+                        lambda **k: handed.append(k) or pd.DataFrame())
+    params = {"max_complexity": 4, "include_translation": True, "seed": 3}
+    try:
+        with pytest.warns(DeprecationWarning):
+            summary = run_pipeline(
+                {"dataset_type": "eval", "data_dir": str(tmp_path),
+                 "stages": ["jailbreaks"], "augmentations": {"natural": None}},
+                params={"jailbreaks": params}, verbose=False)
+    finally:
+        telemetry.uninstall()
+    (kwargs,) = handed
+    adversarial = kwargs["augmentation"]["adversarial"]
+    assert adversarial["max_complexity"] == params["max_complexity"]
+    assert "translation" not in adversarial["families"]["deny"]
+    assert kwargs["seed"] == params["seed"]
+    assert not {"max_complexity", "include_translation"} & set(kwargs)
+    record = read_record("jailbreaks", tmp_path)
+    assert record["augmentation"] == kwargs["augmentation"]
+    assert record["params"] == params
+    # The translation model the section draws is the run's too.
+    assert summary["serving"]["translation"] is not None
+
+
 def test_the_jailbreak_stage_gets_the_recipes_prompt_dir(tmp_path, monkeypatch):
     import redact
 

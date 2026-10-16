@@ -35,6 +35,7 @@ import warnings
 from collections import Counter
 from collections.abc import Callable
 from dataclasses import dataclass
+from functools import partial
 from pathlib import Path
 
 import pandas as pd
@@ -956,7 +957,7 @@ class RunContext:
     taxonomy: dict | str
     taxonomy_dir: str | Path | None
     params: dict                # the params file: stage name -> the front's kwargs
-    augmentations: dict         # the augmentation section, both kinds resolved
+    augmentations: dict         # the section the jailbreak stage runs, resolved
     resume: bool
     verbose: bool
 
@@ -967,9 +968,12 @@ class Stage:
 
     ``roles`` pairs each recipe role the stage calls with the registry role
     of its default model. ``recipe_kwargs`` is what the run passes the front
-    from the recipe. ``files`` is the CSVs that hold the stage's rows and
+    from the recipe; a value an earlier stage of the run saves is a
+    :class:`Saved`. ``files`` is the CSVs that hold the stage's rows and
     the values a row holds to be counted, for
-    :func:`redact.driver.file_counts`.
+    :func:`redact.driver.file_counts`. ``folded`` names the params keys the
+    run applies to a kwarg it passes itself (the jailbreak stage's flat
+    keywords, to its ``augmentation``), so the front does not get them again.
     """
 
     name: str
@@ -977,6 +981,7 @@ class Stage:
     roles: tuple[tuple[str, str], ...]
     files: Callable[[RunContext], tuple[list[Path], dict]]
     recipe_kwargs: Callable[[RunContext], dict]
+    folded: tuple[str, ...] = ()
 
     @property
     def run(self) -> Callable[..., object]:
@@ -1002,22 +1007,41 @@ class Stage:
                 "not take; write only its parameters.")
         return given
 
-    def kwargs(self, ctx: RunContext) -> dict:
-        """The front's kwargs: the recipe's, then the params file's.
+    def check(self, ctx: RunContext) -> dict:
+        """The params file's kwargs the front gets, checked without reading
+        any file, so a run checks every stage before the first runs.
 
         Raises:
             ValueError: A params key that is not a parameter of the front, or
                 one the run passes it itself.
         """
         given = self.params(ctx)
-        recipe = self.recipe_kwargs(ctx)
-        clash = sorted(set(given) & {*recipe, "read_back"})
+        clash = sorted(set(given) & {*self.recipe_kwargs(ctx), "read_back"})
         if clash:
             raise ValueError(
                 f"params[{self.name!r}] sets {clash}, which the run passes "
                 f"{self.front} itself; leave {'it' if len(clash) == 1 else 'them'} "
                 "out of the params.")
+        return {key: value for key, value in given.items() if key not in self.folded}
+
+    def kwargs(self, ctx: RunContext) -> dict:
+        """The front's kwargs: the recipe's, then the params file's.
+
+        Raises:
+            ValueError: As :meth:`check`, or a saved value that is missing.
+        """
+        given = self.check(ctx)
+        recipe = {key: value.read() if isinstance(value, Saved) else value
+                  for key, value in self.recipe_kwargs(ctx).items()}
         return {**recipe, **given}
+
+
+@dataclass(frozen=True)
+class Saved:
+    """A kwarg the run reads when its stage starts, from what an earlier
+    stage saved."""
+
+    read: Callable[[], object]
 
 
 def _params(ctx: RunContext, stage: str) -> dict:
@@ -1051,7 +1075,7 @@ def _inputs_kwargs(ctx: RunContext) -> dict:
         check_model=ctx.models["check"], resume=ctx.resume, verbose=ctx.verbose,
     )
     if ctx.dataset_type == "training":
-        kwargs["constitution_df"] = _saved_constitution(ctx.data_dir)
+        kwargs["constitution_df"] = Saved(partial(_saved_constitution, ctx.data_dir))
     return kwargs
 
 
@@ -1152,7 +1176,8 @@ STAGES: dict[str, Stage] = {stage.name: stage for stage in (
     Stage("jailbreaks", "generate_jailbreaks",
           roles=(_GEN, ("translation", "translation")),
           files=_jailbreaks_files,
-          recipe_kwargs=_jailbreaks_kwargs),
+          recipe_kwargs=_jailbreaks_kwargs,
+          folded=augmentation_kinds.FLAT_KEYWORDS),
     Stage("build", "build_dataset", roles=(),
           files=_one_file("build", paths.complete_dataset_csv),
           recipe_kwargs=_build_kwargs),
