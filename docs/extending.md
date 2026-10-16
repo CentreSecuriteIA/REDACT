@@ -191,8 +191,8 @@ A stage is a core, a front, and a row in the stage table.
    CSVs that hold its rows, for the counts), `recipe_kwargs` (what the run
    passes the front). A new recipe role also goes in `_DEFAULT_MODELS` in
    `recipe.py`.
-5. **The build**: add a `Part` in `build_dataset` when its rows belong in the
-   complete dataset.
+5. **The build**: add a `Part` in `build_dataset`, with `accepted_only=True`,
+   when its rows belong in the complete dataset.
 6. **Tests.** Cover a stopped and resumed run: no unit twice, no unit lost.
    `tests/test_stage_files.py` pins each stage's files after a stopped and a
    resumed run against `tests/fixtures/stage_files.json`; add the new stage

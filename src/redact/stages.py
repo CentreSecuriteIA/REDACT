@@ -849,7 +849,8 @@ def build_dataset(
     variations and output responses from their saved CSVs on disk. Each CSV
     is copied in chunks into a temporary file that then replaces the merged
     one; a column that only some of them have is empty in the rows of the
-    others.
+    others. Only the rows whose ``accepted`` is true are copied; a CSV
+    without that column is copied whole.
 
     The inputs are read from ``constitution_inputs_merged.csv``, which the
     seeded inputs stage writes, or else from the run's per-category
@@ -882,7 +883,7 @@ def build_dataset(
             ``dataset_type``.)
         include_inputs: Include content moderation input samples.
         include_jailbreaks: Include jailbreak samples.
-        include_variations: Include the accepted natural variations.
+        include_variations: Include natural variations.
         include_outputs: Include output response samples.
         include_paraphrases: Include paraphrase artifacts (per ``mode``).
         verbose: Log progress.
@@ -908,7 +909,7 @@ def build_dataset(
         in_path = (Path(inputs_path) if inputs_path
                    else paths.constitution_inputs_merged_csv(data_dir))
         if in_path.exists():
-            parts.append(Part(in_path, "content_moderation_input",
+            parts.append(Part(in_path, "content_moderation_input", accepted_only=True,
                               label=f"Inputs from {in_path.name}"))
         else:
             # The one part read whole. Without a row in any category file it
@@ -923,7 +924,8 @@ def build_dataset(
     # Jailbreaks. A file without a row adds no column to the merged CSV.
     if include_jailbreaks and jb_path.exists():
         if has_rows(jb_path):
-            parts.append(Part(jb_path, "jailbreak", label="Jailbreaks"))
+            parts.append(Part(jb_path, "jailbreak", accepted_only=True,
+                              label="Jailbreaks"))
         elif verbose:
             logger.info("Jailbreaks: none found")
     elif verbose and include_jailbreaks:
@@ -941,6 +943,7 @@ def build_dataset(
                      else paths.output_responses_csv(data_dir))
         if resp_path.exists():
             parts.append(Part(resp_path, "content_moderation_output",
+                              accepted_only=True,
                               label=f"Outputs from {resp_path.name}"))
         elif verbose:
             logger.info("Outputs: none found")

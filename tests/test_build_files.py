@@ -15,6 +15,11 @@ Two cases of the fixture are not that commit's: without a merged inputs file
 build takes its inputs from the category files alone, with the ids they hold;
 and the rows of ``variations.csv``, which the jailbreak stage writes beside its
 jailbreaks, are a part of each build and are counted in each run.
+
+The build now copies the accepted rows of every part. The rows of the
+rejected output ``out-2`` and the jailbreak error row ``jb-3`` are gone from
+each build that held them, and the build count of each run is its accepted
+rows: 19 of the eval run's 20, 90 of the training run's 92.
 """
 
 import json
@@ -227,8 +232,10 @@ def test_a_build_reads_no_part_whole(tmp_path, monkeypatch):
     monkeypatch.setattr(pd, "read_csv", in_pieces)
     returned = build_dataset(data_dir=tmp_path, verbose=False, read_back=False)
     assert returned.empty and len(returned.columns) == 0
-    assert len(_complete(tmp_path)) == 1 + len(_INPUTS) + len(_JAILBREAKS) + len(
-        _VARIATIONS) + len(_OUTPUTS) + 3    # the header, three accepted paraphrases
+    accepted = sum(int(part["accepted"].sum()) for part in (
+        _INPUTS, _JAILBREAKS, _VARIATIONS, _OUTPUTS, _PARAPHRASED_INPUTS,
+        _PARAPHRASED_OUTPUTS))
+    assert len(_complete(tmp_path)) == 1 + accepted     # the header, then the rows
 
 
 def test_a_build_returns_the_rows_of_its_file_by_default(tmp_path):
@@ -324,6 +331,37 @@ def test_the_variations_are_their_accepted_rows_from_the_path_given(tmp_path):
     assert variations() == ["var-1", "var-3"]
     build_dataset(data_dir=tmp_path, include_variations=False, verbose=False)
     assert variations() == []
+
+
+def test_every_part_adds_its_accepted_rows_only(tmp_path):
+    """A rejected or error row keeps its input's ``entry_type``, so in the
+    dataset it would carry the wrong label. It stays in its stage file."""
+    from redact import build_dataset
+
+    _write_stage_files(tmp_path)
+    inputs = tmp_path / "inputs.csv"
+    _INPUTS.assign(accepted=[True, False, True]).to_csv(inputs, index=False)
+    build_dataset(data_dir=tmp_path, inputs_path=inputs, verbose=False)
+    built = pd.read_csv(paths.complete_dataset_csv(tmp_path))
+    assert built["accepted"].all()
+    assert list(built["sample_id"]) == [
+        "in-1", "in-3", "jb-1", "jb-2", "jb-4", "var-1", "var-2", "var-3",
+        "out-1", "out-3", "pi-1", "pi-3", "po-2"]
+    for stage_file, rejected in ((paths.jailbreaks_csv, "jb-3"),
+                                 (paths.output_responses_csv, "out-2")):
+        assert rejected in set(pd.read_csv(stage_file(tmp_path))["sample_id"])
+
+
+def test_a_part_without_an_accepted_column_keeps_every_row(tmp_path):
+    from redact import build_dataset
+
+    _write_stage_files(tmp_path)
+    _OUTPUTS.drop(columns="accepted").to_csv(
+        paths.output_responses_csv(tmp_path), index=False)
+    build_dataset(data_dir=tmp_path, verbose=False)
+    built = pd.read_csv(paths.complete_dataset_csv(tmp_path))
+    outputs = built[built["dataset_type"] == "content_moderation_output"]
+    assert list(outputs["sample_id"]) == ["out-1", "out-2", "out-3"]
 
 
 def test_a_paraphrase_that_a_spreadsheet_marked_true_is_kept(tmp_path):

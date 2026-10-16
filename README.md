@@ -50,7 +50,7 @@ constitution = generate_constitution(data_dir=DATA_DIR, num_taxonomy_categories=
 inputs = generate_inputs(data_dir=DATA_DIR, constitution_df=constitution, samples_per_entry=3)
 outputs = generate_outputs(data_dir=DATA_DIR, inputs=inputs)         # responses + output checker
 jailbreaks = generate_jailbreaks(data_dir=DATA_DIR, inputs=inputs)   # jailbreaks + natural variations
-dataset = build_dataset(data_dir=DATA_DIR)                           # merge everything on disk
+dataset = build_dataset(data_dir=DATA_DIR)                           # merge the accepted rows on disk
 ```
 
 For a cheap eval set without a constitution, `generate_inputs(data_dir=DATA_DIR, samples_per_category=15, num_categories=3)`
@@ -626,7 +626,7 @@ A kind you give overlays its default from `configs/jailbreak/augmentations.json`
 
 **Translation has its own switch**, `"translation"` in each kind, `false` in both by default: each translation costs 2–8 calls (a translation and its check per round) to the run's translation model, the translation role's hosted model by default. `false` keeps the translation family out whatever the lists say, so no deny list of yours turns it on or off; an allow list that names `translation` or one of its languages while it is `false` raises. `true` puts it in: the attacks draw it as any other family, and the natural kind adds it to its allow list. The translation model is planned and loaded only when a kind has it on. Once a local translation model is registered, the packaged default can be flipped to `true` in one line of `augmentations.json`.
 
-**The variations file.** `variations.csv` has the same columns as `jailbreaks.csv` (rows keep their input's `entry_type`), with its own manifest, ledger and coverage table. It goes beside `output_path` when one is given, else to `{data_dir}/Datasets/variations.csv`; `variations_path=` overrides both. `build_dataset` adds its **accepted** rows as the `natural_variation` part; `include_variations=False` leaves them out and `variations_path=` reads another file.
+**The variations file.** `variations.csv` has the same columns as `jailbreaks.csv` (rows keep their input's `entry_type`), with its own manifest, ledger and coverage table. It goes beside `output_path` when one is given, else to `{data_dir}/Datasets/variations.csv`; `variations_path=` overrides both. `build_dataset` adds its accepted rows as the `natural_variation` part, as it takes only the accepted rows of every part; `include_variations=False` leaves them out and `variations_path=` reads another file.
 
 **Deprecated aliases.** The twelve flat keywords of `generate_jailbreaks` (`include_hacking`, `include_manipulation`, `include_obfuscation`, `include_requests`, `include_translation`, `pure_only`, `max_complexity`, `max_obfuscations`, `sampling_probs`, `iterations`, `settings_per_iteration`, `entry_types`) are read into the adversarial kind for one release, with a `DeprecationWarning`: `include_<layer>` is a `layers.deny`, `include_translation` is `translation`, `sampling_probs` is `layer_rates` and `settings_per_iteration` is `rounds`. The same keys are read, and warn, at the top of a recipe's `augmentations` (the flat form) and in `params["jailbreaks"]`; a key only the section holds (such as `family_weights`) in the params raises.
 
@@ -1008,7 +1008,7 @@ ledger-backed and its output is saved as it goes, so finishing it beats killing 
 
 - **Prompts are external** — prompt text lives in JSON files that ship with the library; a `prompt_dir` overrides any of them file by file (`scripts/scaffold_prompts.py` writes an editable copy).
 - **Backend auto-routing** — `ModelClient.create(model)` resolves the registry entry, picks the setup, and builds a fully-configured backend for it. Manual instantiation available for custom setups.
-- **Inputs are per-category** — input samples land in `{category}/samples.csv`; every other stage writes one CSV under `Datasets/`. Merging is explicit (`build_dataset`).
+- **Inputs are per-category** — input samples land in `{category}/samples.csv`; every other stage writes one CSV under `Datasets/`. Merging is explicit (`build_dataset`), and takes the accepted rows of every stage; rejected and error rows stay in the stage files.
 - **Checker feedback feeds back** — rejection reasoning is injected into the next generation call for directed improvement.
 - **Technique functions are pure** — most obfuscation functions take a string and return a string. No side effects, no hidden state.
 - **Spec-driven registry** — every technique is returned by its layer's getter and named in `combination_spec.json`, which holds its families, complexity and the combination rules; import fails when the two differ.

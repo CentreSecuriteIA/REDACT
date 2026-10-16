@@ -180,9 +180,9 @@ natural kind to `Datasets/variations.csv`. Each call plans every unit first
 (one technique combination per input and round, frozen in the manifest), then
 drives the units. [stages/jailbreaks.md](stages/jailbreaks.md)
 
-**build.** `build_dataset` copies the rows of every stage's file into
-`Datasets/complete_dataset.csv`, in chunks, with a `dataset_type` column per
-part. [stages/build.md](stages/build.md)
+**build.** `build_dataset` copies the accepted rows of every stage's file
+into `Datasets/complete_dataset.csv`, in chunks, with a `dataset_type` column
+per part. [stages/build.md](stages/build.md)
 
 ### 4. The run ends
 
@@ -195,21 +195,20 @@ token limit per stage and model), and `residency` and `trace` when present.
 
 ## The final dataset
 
-`complete_dataset.csv` holds the rows of each part, one after another, with
-the union of their columns. A row is empty in the columns its part lacks.
+`complete_dataset.csv` holds the accepted rows of each part, one after
+another, with the union of their columns. A row is empty in the columns its
+part lacks. Rejected and error rows stay in the stage files.
 
 | `dataset_type` | From | Rows taken | Text columns |
 |---|---|---|---|
 | `content_moderation_input` | `constitution_inputs_merged.csv`, else the category files | accepted | `sample` |
-| `jailbreak` | `jailbreaks.csv` | all | `prompt` (the input), `jailbreak` |
+| `jailbreak` | `jailbreaks.csv` | accepted | `prompt` (the input), `jailbreak` |
 | `natural_variation` | `variations.csv` | accepted | `prompt`, `jailbreak` |
-| `content_moderation_output` | `output_responses.csv` | all | `input_prompt`, `output_response` |
+| `content_moderation_output` | `output_responses.csv` | accepted | `input_prompt`, `output_response` |
 | `content_moderation_paraphrase` | `paraphrases_inputs.csv`, `paraphrases_outputs.csv` | accepted, training mode only | `sample` |
 
-Rows that keep their verdict carry it in `accepted`. Every row has a
-`sample_id`, the content id of its own text (a jailbreak error row: of its
-unit key), and every derived row has an `input_id`, the `sample_id` of the
-input it comes from. The text sits in a different column per part, as the
+Every row has a `sample_id`, the content id of its own text, and every
+derived row has an `input_id`, the `sample_id` of the input it comes from. The text sits in a different column per part, as the
 table shows; [stages/build.md](stages/build.md) has the details.
 
 ## An eval run
