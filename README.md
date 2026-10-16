@@ -254,14 +254,14 @@ src/redact/
 │
 ├── dataset/                       # Rows on disk: identity, sidecar files, resume, the per-category tree
 │   ├── identity.py                # content_id (content hash of a text), row_id / row_ids
-│   ├── rows.py                    # The rows of one CSV: append_rows, read_rows, iter_rows, count_rows
+│   ├── rows.py                    # The rows of one CSV: append_rows, read_rows, iter_rows, count_rows, has_rows; write_concat
 │   ├── sidecar.py                 # JsonlSidecar, Ledger (*.state.jsonl), Manifest (*.manifest.jsonl)
 │   ├── resume.py                  # resume_state (lock, check, cut back), release_lock
 │   ├── save.py                    # commit / CommitBuffer: a save (rows, then acks)
 │   ├── drop.py                    # drop_units: a fresh run of part of a stage
 │   ├── categories.py              # The per-category tree: append_samples, merge_all, merge_inputs
 │   ├── loading.py                 # HuggingFace dataset loading
-│   └── taxonomy.py                # Taxonomy and seed file loading, category iteration
+│   └── taxonomy.py                # create_taxonomy, taxonomy and seed file loading, category iteration
 │
 ├── configs/                       # JSON configuration files (package data)
 │   ├── content_moderation_input.json
@@ -773,7 +773,8 @@ for e in entries:
 | `CommitBuffer` | Saves finished units in batches: their rows first, their acks in the ledger after |
 | `append_samples()` | Add samples to a category's `samples.csv`, skipping ids already in it |
 | `merge_all()` / `merge_inputs()` | Merge the accepted rows of the category files under a directory / of a run |
-| `load_taxonomy()` | Load taxonomy JSON |
+| `write_concat()` | One CSV from the rows of several, copied in chunks (what `build_dataset` uses) |
+| `create_taxonomy()` / `load_taxonomy()` | Write a taxonomy JSON of your own / load one by name |
 | `iter_categories()` | Iterate categories for generation loops |
 | `load_hf_dataset()` | Load from HuggingFace Hub with filtering |
 
