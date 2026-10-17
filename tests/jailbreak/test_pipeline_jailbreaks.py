@@ -660,6 +660,26 @@ def test_without_inputs_the_inputs_of_the_run_are_found(tmp_path, seeded):
     assert list(df["input_id"]) == [content_id(text)]
 
 
+@pytest.mark.parametrize("given", [None, ["given", None, None]],
+                         ids=["no-column", "missing-ids"])
+def test_the_core_gives_each_input_its_id(tmp_path, given):
+    from redact.jailbreak.augmentation import rounds_of
+    from redact.jailbreak.pipeline import run_augmentation
+
+    inputs = _inputs().head(3)
+    if given is not None:
+        inputs = inputs.assign(sample_id=given)
+    kind = resolve({"adversarial": _PURE_KIND}, "adversarial")
+    df = run_augmentation(inputs, technique_pool(kind), client=make_client(),
+                          out_path=tmp_path / "jb.csv", rounds=rounds_of(kind),
+                          verbose=False)
+    prompts = list(inputs["prompt"])
+    expected = [content_id(p) for p in prompts]
+    if given is not None:
+        expected[0] = "given"
+    assert sorted(df["input_id"]) == sorted(expected)
+
+
 def test_without_inputs_in_either_tree_the_run_raises(tmp_path):
     with pytest.raises(ValueError, match="No input samples found"):
         generate_jailbreaks(data_dir=tmp_path, seed=7, **PURE_KW)

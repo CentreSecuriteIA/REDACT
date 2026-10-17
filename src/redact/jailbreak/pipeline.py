@@ -21,6 +21,7 @@ from redact.dataset import (
     append_rows,
     read_rows,
     resume_state,
+    row_ids,
 )
 from redact.llm_pipeline import drive_units, pool_size
 from redact.llms.client import ModelClient
@@ -76,6 +77,9 @@ def run_augmentation(
     the internals-capture root. With ``accept_noop`` False, a row whose text
     is its input's is not accepted.
 
+    Each input's id is its ``sample_id`` when it has one, else the content id
+    of its prompt.
+
     Resume: completion is a sidecar ``*.state.jsonl`` ledger keyed
     ``(input_id, iteration)``; ``resume=True`` reuses the plan and skips its
     finished units, ``resume=False`` clears the output, ledger and plan first.
@@ -85,6 +89,7 @@ def run_augmentation(
     Returns:
         The rows of ``out_path``, or an empty frame when ``read_back`` is False.
     """
+    inputs = inputs.assign(sample_id=row_ids(inputs, "prompt"))
     out_path = Path(out_path)
     man_path = Path(manifest_path) if manifest_path else Manifest.sidecar(out_path).path
     rounds = [{}] if rounds is None else list(rounds)
