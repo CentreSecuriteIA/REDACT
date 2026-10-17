@@ -57,7 +57,7 @@ from redact.dataset import (
 from redact.jailbreak import augmentation as augmentation_kinds
 from redact.jailbreak import pool as jailbreak_pool
 from redact.jailbreak.pipeline import run_augmentation
-from redact.jailbreak.plan import coverage_path
+from redact.jailbreak.plan import coverage_path, plan_path
 from redact.llms import ModelClient, load_prompt
 from redact.llms.model_config import default_model_for_role
 from redact.types import EntryType
@@ -674,10 +674,8 @@ def _kind_files(out_path: Path, manifest_path: Path | None) -> dict:
     """:func:`redact.dataset.clear_stage`'s kwargs for the files of one kind
     of the jailbreak stage: its CSV, manifest, coverage table and plan."""
     manifest = manifest_path or Manifest.sidecar(out_path).path
-    coverage = coverage_path(manifest)
-    stem = coverage.name.removesuffix(".coverage.csv")
-    plan = coverage.with_name(f"{stem}.plan.json")
-    return {"artifact": out_path, "manifest_path": manifest, "also": (coverage, plan)}
+    return {"artifact": out_path, "manifest_path": manifest,
+            "also": (coverage_path(manifest), plan_path(manifest))}
 
 
 def _variations_csv(data_dir, output_path, variations_path) -> Path:
