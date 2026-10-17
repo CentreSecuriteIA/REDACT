@@ -51,6 +51,22 @@ def test_ascii_art_refuses_what_leaves_a_character_no_font_draws(first, then):
     assert not _joins(first, then)
 
 
+def test_tokenbreak_split_and_ascii_art_are_never_planned_together():
+    """to_ascii_art rejects what to_tokenbreak_split gives, so the spec keeps
+    them apart, in either order and in either mode."""
+    from redact.jailbreak.plan import assign_combination
+
+    pair = {"to_tokenbreak_split", "to_ascii_art"}
+    assert not _joins("to_tokenbreak_split", "to_ascii_art")
+    assert not _joins("to_ascii_art", "to_tokenbreak_split")
+    pool = [BY_NAME[name] for name in sorted(pair)]
+    for seed in range(50):
+        for mode in ({"exact_techniques": 2},
+                     {"max_complexity": 9, "max_obfuscations": 2}):
+            names = assign_combination(f"unit{seed}", pool, seed=seed, **mode)
+            assert set(names) != pair, (seed, mode)
+
+
 @pytest.mark.parametrize("technique", [
     "to_adversarial_suffix_punctuation", "to_adversarial_suffix_fragments",
     "to_base64", "to_morse", "to_rot47"])

@@ -235,7 +235,7 @@
     "to_ascii_art":          { "families": ["ascii_art"], "complexity": 2, "requires_llm": false },
 
     "to_tokenbreak_prepend":   { "families": ["tokenbreak"], "complexity": 2, "requires_llm": true },
-    "to_tokenbreak_split":     { "families": ["tokenbreak"], "complexity": 2, "requires_llm": true },
+    "to_tokenbreak_split":     { "families": ["tokenbreak"], "complexity": 2, "requires_llm": true, "cross_incompatible_with": ["ascii_art"] },
     "to_tokenbreak_delimiter": { "families": ["tokenbreak"], "complexity": 2, "requires_llm": true },
 
     "to_sensitive_words_encode_base64":              { "families": ["sensitive_words", "encode"], "complexity": 3, "requires_llm": true, "encode_weight": "heavy" },

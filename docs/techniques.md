@@ -77,11 +77,11 @@ technique is picked first. A technique may not join a combination when:
   combination holds a hacking or a manipulation technique, never both;
 - one of its families is in the `cross_incompatible_with` of a taken
   technique's own spec entry, or a taken family is in its own. The spec keeps
-  `to_adversarial_suffix_emoji`, `to_adversarial_suffix_unicode` and
-  `to_braille` from `ascii_art`, since no font draws their characters; the
-  other suffixes and encodings may still join it. `to_ascii_art` itself
-  rejects a text with a character no font draws (any non-ASCII character),
-  such as one `to_tokenbreak_split` may produce;
+  `to_adversarial_suffix_emoji`, `to_adversarial_suffix_unicode`,
+  `to_braille` and `to_tokenbreak_split` from `ascii_art`, since no font
+  draws the characters they may leave; the other suffixes and encodings may
+  still join it. `to_ascii_art` itself rejects a text with a character no
+  font draws (any non-ASCII character);
 - it pairs `fsh` or `dap` with an obfuscation in
   `manipulation_blocked_obfuscation`: the `translation` and `ascii_art`
   families and the `heavy` `encode` techniques, except those also in
