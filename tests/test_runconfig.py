@@ -779,12 +779,18 @@ def test_a_recipe_names_its_dataset_type():
         "\"training\".")
 
 
-def test_a_dataset_type_without_a_file_is_refused():
+@pytest.mark.parametrize("given", ["bogus", "Eval", 3, ["eval"]])
+def test_a_dataset_type_other_than_eval_or_training_is_refused(given):
+    from redact.recipe import dataset_type_hash, load_dataset_type
+
+    message = f'dataset_type must be "eval" or "training", got {given!r}.'
     with pytest.raises(ValueError) as raised:
-        load_recipe({"dataset_type": "bogus"})
-    assert str(raised.value) == (
-        "dataset_type 'bogus' has no file in configs/dataset_types; write one of "
-        "['eval', 'training'].")
+        load_recipe({"dataset_type": given})
+    assert str(raised.value) == message
+    for read in (load_dataset_type, dataset_type_hash):
+        with pytest.raises(ValueError) as raised:
+            read(given)
+        assert str(raised.value) == message
 
 
 @pytest.mark.parametrize("name", ["eval", "training"])

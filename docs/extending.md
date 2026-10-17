@@ -1,7 +1,7 @@
 # Extending REDACT
 
 How to add a model, a prompt, a jailbreak technique, a stage, a category
-or taxonomy, or a dataset type. Each section names the files to touch and the tests that check
+or taxonomy, and how to change a dataset type. Each section names the files to touch and the tests that check
 the change. Run the tests with:
 
 ```bash
@@ -262,15 +262,15 @@ with its subcategories, and the jailbreak stage generates the `fsh` and
 `dap` benign pairs per subcategory. Write another and name it as the
 recipe's `benign_taxonomy`.
 
-## Add or change a dataset type
+## Change a dataset type
 
 A dataset type is a JSON file with exactly three keys besides `_` comments:
 `stages` (the default stage list), `params` (per stage, the front's defaults,
 checked as a params file's are) and `augmentations` (an overlay of the
 augmentation section, kind by kind). To change what `eval` or `training`
 means for your runs, copy its file into `<config_dir>/dataset_types/` and
-edit it; `scripts/scaffold_setup.py` writes both. A file of another name
-there is a new dataset type, which a recipe names as its `dataset_type`.
-The build knows only the `training` and `eval` modes, so a run of a new
-type stops when it reaches a listed `build` stage
+edit it; `scripts/scaffold_setup.py` writes both. There are only these two
+types, as the build has only these two modes: a recipe naming another
+`dataset_type` stops when it loads, and a file of another name in
+`<config_dir>/dataset_types/` is not read, with a warning
 ([configuration.md](configuration.md#dataset-types)).

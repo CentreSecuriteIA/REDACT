@@ -11,7 +11,7 @@ that starts with `_` is a comment.
 
 | Key | Type | Default | Meaning |
 |---|---|---|---|
-| `dataset_type` | `"eval"` or `"training"` | required | The [dataset type](#dataset-types): its file gives the run's default stages, params and augmentation section, and it is the build's `mode` (`training` merges every part into `complete_dataset.csv`, `eval` writes `eval_inputs.csv`, `eval_outputs.csv` and `eval_jailbreaks.csv`; see [build](stages/build.md)). Either way the inputs are seeded from the constitution, which the recipe's `constitution` stage writes or an earlier run saved under `data_dir`; without one the `inputs` stage stops |
+| `dataset_type` | `"eval"` or `"training"` | required | Any other value raises at load. The [dataset type](#dataset-types): its file gives the run's default stages, params and augmentation section, and it is the build's `mode` (`training` merges every part into `complete_dataset.csv`, `eval` writes `eval_inputs.csv`, `eval_outputs.csv` and `eval_jailbreaks.csv`; see [build](stages/build.md)). Either way the inputs are seeded from the constitution, which the recipe's `constitution` stage writes or an earlier run saved under `data_dir`; without one the `inputs` stage stops |
 | `data_dir` | path | the default working root | The run's root; `Datasets/` and `Data_cache/` go under it. Relative to the current directory. `run_pipeline(data_dir=...)` and `--data-dir` override it |
 | `models` | object | every role its default | A model per role; see [below](#the-models-object) |
 | `taxonomy` | name or object | `"harmful"` | The taxonomy of the constitution, by file name or as a loaded object. The former name `"content_moderation_categories"` loads `harmful` with a `DeprecationWarning`, for one release |
@@ -47,8 +47,9 @@ then overlays the packaged default. A type's params are checked as the params
 file's are, before the first stage runs, and each run record's `params`
 holds the merged values. Each record also holds `dataset_type` and
 `dataset_type_hash`, the content id of the type file as parsed. A recipe's
-[`config_dir`](#your-own-config-folder) may hold a type file of its own,
-read in place of the packaged one.
+[`config_dir`](#your-own-config-folder) may hold its own `eval.json` or
+`training.json`, read in place of the packaged one. There are no other
+types: a recipe naming one stops when it loads, before any stage runs.
 
 | | `training.json` | `eval.json` |
 |---|---|---|
@@ -500,7 +501,7 @@ and from the package otherwise:
 
 | File | Replaces |
 |---|---|
-| `<config_dir>/dataset_types/<type>.json` | the [dataset type](#dataset-types) file; a new name there is a dataset type of its own, for every stage but `build`, whose mode is `training` or `eval` only: a run of another type that lists `build` stops when the build starts (`mode must be 'training' or 'eval'`) |
+| `<config_dir>/dataset_types/eval.json`, `training.json` | the [dataset type](#dataset-types) file of that name. A file of another name there is no new type: it is not read, and the run warns about it as ignored |
 | `<config_dir>/taxonomy/<name>.json` | a taxonomy of that name (`taxonomy`, `benign_taxonomy`); a new name there is a taxonomy of your own. `taxonomy_dir`, when given, wins and is read alone |
 | `<config_dir>/jailbreak/augmentations.json` | the default [augmentation section](#the-augmentation-section), both kinds and `natural_only_families` |
 

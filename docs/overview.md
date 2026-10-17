@@ -91,8 +91,9 @@ summary = run_pipeline("src/redact/configs/runs/training_example.json")
 
 `recipe.load_recipe` reads the JSON and checks it before anything runs:
 
-- `dataset_type` is given and names a file under `configs/dataset_types/`
-  (`recipe.load_dataset_type`): `eval` or `training`. Its `stages` are the
+- `dataset_type` is given and is `eval` or `training`, whatever files the
+  `config_dir` holds; its file under `configs/dataset_types/`, or the
+  `config_dir`'s, is read (`recipe.load_dataset_type`). Its `stages` are the
   default, and its params are checked as the params file's are.
 - Each name in `stages` is a key of `STAGES`, listed once.
 - No key outside the recipe keys (a key starting with `_` is a comment).

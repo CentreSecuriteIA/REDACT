@@ -1,10 +1,11 @@
 """A user's config folder, overlaid file by file over the packaged ``configs/``.
 
-The folder mirrors ``configs/``: ``dataset_types/<type>.json``,
-``taxonomy/<name>.json`` and ``jailbreak/augmentations.json`` are each read
-from it when it has the file, else from the package. Nothing else is: the
-technique spec and templates under ``jailbreak/``, ``llm/`` and
-``datasets/`` are loaded at import or tied to code, and a file under them is
+The folder mirrors ``configs/``: ``dataset_types/eval.json`` and
+``training.json``, ``taxonomy/<name>.json`` and
+``jailbreak/augmentations.json`` are each read from it when it has the file,
+else from the package. Nothing else is: a dataset type of another name is
+none, the technique spec and templates under ``jailbreak/``, ``llm/`` and
+``datasets/`` are loaded at import or tied to code, and a file of theirs is
 warned about as ignored.
 """
 
@@ -15,6 +16,8 @@ from redact import paths
 
 logger = logging.getLogger(__name__)
 
+# The dataset types a recipe may name, each the name of its file.
+DATASET_TYPES = ("eval", "training")
 # The folders whose files a config folder may hold, each read one by one.
 _READ_FOLDERS = ("dataset_types", "taxonomy")
 _AUGMENTATIONS = "jailbreak/augmentations.json"
@@ -51,6 +54,8 @@ def taxonomy_folder(
 
 def _is_read(relative: str) -> bool:
     folder, _, name = relative.partition("/")
+    if folder == "dataset_types":
+        return name in {f"{dtype}.json" for dtype in DATASET_TYPES}
     return relative == _AUGMENTATIONS or (
         folder in _READ_FOLDERS and "/" not in name and name.endswith(".json"))
 
@@ -62,8 +67,9 @@ def config_sources(config_dir: str | Path) -> dict[str, list[str]]:
     Returns:
         ``overridden``: read in place of a packaged file; ``added``: read,
         with no packaged file of that name (a taxonomy of your own);
-        ``ignored``: under ``jailbreak/``, ``llm/`` or ``datasets/`` and not
-        read. Files elsewhere in the folder, such as recipes, are none.
+        ``ignored``: a dataset type other than ``eval`` and ``training``, or
+        under ``jailbreak/``, ``llm/`` or ``datasets/``, and not read. Files
+        elsewhere in the folder, such as recipes, are none.
     """
     root = Path(config_dir)
     files = sorted(
@@ -94,7 +100,8 @@ def report_config_sources(
     found = config_sources(config_dir)
     if found["ignored"]:
         logger.warning(
-            "configs: %s in %s ignored: the technique spec and templates, llm/ "
+            "configs: %s in %s ignored: of dataset_types/ only eval.json and "
+            "training.json are read, and the technique spec and templates, llm/ "
             "and datasets/ come from the library only.",
             ", ".join(found["ignored"]), config_dir)
     if verbose:

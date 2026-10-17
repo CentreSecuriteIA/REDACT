@@ -24,8 +24,7 @@ import warnings
 from functools import cache
 from pathlib import Path
 
-from redact import paths
-from redact.config_overlay import config_file, taxonomy_folder
+from redact.config_overlay import DATASET_TYPES, config_file, taxonomy_folder
 from redact.stages import STAGES, includes_general_benign
 
 _DEFAULT_MODELS = {
@@ -66,16 +65,9 @@ def _read_type_file(path: str, modified: int) -> dict:
 
 def _dataset_type_file(name: str, config_dir: str | Path | None) -> dict:
     """The type file, read again when it changes."""
+    if name not in DATASET_TYPES:
+        raise ValueError(f'dataset_type must be "eval" or "training", got {name!r}.')
     path = config_file(f"dataset_types/{name}.json", config_dir)
-    if not path.is_file():
-        folders = [paths.configs_dir() / "dataset_types"]
-        if config_dir is not None:
-            folders.append(Path(config_dir) / "dataset_types")
-        known = sorted({p.stem for folder in folders for p in folder.glob("*.json")})
-        where = ("configs/dataset_types" if config_dir is None
-                 else f"configs/dataset_types or {folders[1]}")
-        raise ValueError(
-            f"dataset_type {name!r} has no file in {where}; write one of {known}.")
     return _read_type_file(str(path), path.stat().st_mtime_ns)
 
 
@@ -86,8 +78,9 @@ def load_dataset_type(name: str, config_dir: str | Path | None = None) -> dict:
     the caller may change.
 
     Raises:
-        ValueError: No file has that name, the file does not hold exactly
-            those three keys, or :func:`load_params` refuses its params.
+        ValueError: ``name`` is not ``"eval"`` or ``"training"``, the file
+            does not hold exactly those three keys, or :func:`load_params`
+            refuses its params.
     """
     return copy.deepcopy(_dataset_type_file(name, config_dir))
 
@@ -140,8 +133,6 @@ def load_recipe(recipe: str | Path | dict) -> dict:
         raise ValueError(
             'The recipe names no dataset_type; write "dataset_type": "eval" or '
             '"training".')
-    if not isinstance(dtype, str):
-        raise ValueError(f'dataset_type must be "eval" or "training", got {dtype!r}.')
     data["config_dir"] = _config_dir(data)
     dataset_type = load_dataset_type(dtype, data["config_dir"])
 

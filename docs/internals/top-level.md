@@ -137,8 +137,8 @@ the params.
 
 | Function | Does |
 |---|---|
-| `load_recipe(path or dict)` | Reads and checks a recipe ([running.md](../running.md#write-a-recipe)); refuses a recipe without a `dataset_type`, a `resume` that is not a bool and a top-level `copies` other than null; takes `stages` from the dataset type when left out; resolves `augmentations`; reads the former taxonomy name `content_moderation_categories` as `harmful`, with a `DeprecationWarning` |
-| `load_dataset_type(name, config_dir=None)`, `dataset_type_hash(name, config_dir=None)` | The file `dataset_types/<name>.json` (`stages`, `params`, `augmentations`), the `config_dir`'s when it has one, else the packaged one, as a copy; read again when it changes. The content id of the file as parsed, which each run record holds ([configuration.md](../configuration.md#dataset-types)) |
+| `load_recipe(path or dict)` | Reads and checks a recipe ([running.md](../running.md#write-a-recipe)); refuses a recipe without a `dataset_type` or with one other than `eval` and `training`, a `resume` that is not a bool and a top-level `copies` other than null; takes `stages` from the dataset type when left out; resolves `augmentations`; reads the former taxonomy name `content_moderation_categories` as `harmful`, with a `DeprecationWarning` |
+| `load_dataset_type(name, config_dir=None)`, `dataset_type_hash(name, config_dir=None)` | The file `dataset_types/<name>.json` (`stages`, `params`, `augmentations`), the `config_dir`'s when it has one, else the packaged one, as a copy; read again when it changes. A `name` other than `eval` and `training` (`config_overlay.DATASET_TYPES`) raises. The content id of the file as parsed, which each run record holds ([configuration.md](../configuration.md#dataset-types)) |
 | `benign_taxonomy_of(recipe, stages)` | The recipe's `benign_taxonomy` (`"benign"` by default); read, and checked to have a category, when the constitution stage runs with its dataset type's `include_general_benign` on, or the jailbreak stage runs a kind that draws a technique needing benign data |
 | `load_params(path or dict, base_dir)` | Reads the params file; refuses a key that is not a stage name (a `_` key is a comment) and a `jailbreaks` key that belongs in the augmentation section, warns for a flat keyword |
 | `augmentations_of(recipe, jailbreak_params)` | The section, both kinds resolved over the recipe's dataset type's (`resolve(..., base=)`), itself over the packaged default or the `config_dir`'s `augmentations.json`; reads the flat form; applies the params' flat keywords over the adversarial kind |
@@ -159,10 +159,12 @@ translation technique.
 | `config_sources(config_dir)` | The folder's files under the folders of `configs/`: `overridden`, `added` (read, with no packaged file of that name) and `ignored` |
 | `report_config_sources(config_dir, verbose=True)` | Warns about the `ignored` files and, with `verbose`, logs the files read |
 
-Three kinds of file are read from the folder: `dataset_types/<type>.json`,
-`taxonomy/<name>.json` and `jailbreak/augmentations.json`. The technique
-spec and templates, `llm/` and `datasets/` are loaded at import or tied to
-code, so they come from the package only.
+Three kinds of file are read from the folder: `dataset_types/eval.json`
+and `training.json`, `taxonomy/<name>.json` and
+`jailbreak/augmentations.json`. A dataset type file of another name is
+`ignored`, as there are no other types. The technique spec and templates,
+`llm/` and `datasets/` are loaded at import or tied to code, so they come
+from the package only.
 
 ## driver.py
 

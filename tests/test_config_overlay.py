@@ -46,12 +46,18 @@ def test_a_dataset_type_file_in_the_folder_wins_and_the_others_stay_packaged(tmp
                         "config_dir": str(tmp_path)})["stages"] == _SIX
 
 
-def test_a_new_dataset_type_in_the_folder_is_named_in_the_error_list(tmp_path):
+def test_a_dataset_type_of_another_name_in_the_folder_is_refused_and_not_read(
+        tmp_path):
     _write(tmp_path / "dataset_types" / "mine.json",
            {"stages": [], "params": {}, "augmentations": {}})
-    with pytest.raises(ValueError,
-                       match=r"write one of \['eval', 'mine', 'training'\]"):
-        load_recipe({"dataset_type": "bogus", "config_dir": str(tmp_path)})
+    message = "dataset_type must be \"eval\" or \"training\", got 'mine'."
+    with pytest.raises(ValueError) as raised:
+        load_recipe({"dataset_type": "mine", "config_dir": str(tmp_path)})
+    assert str(raised.value) == message
+    with pytest.raises(ValueError) as raised:
+        load_dataset_type("mine", tmp_path)
+    assert str(raised.value) == message
+    assert config_sources(tmp_path)["ignored"] == ["dataset_types/mine.json"]
 
 
 def test_a_taxonomy_file_in_the_folder_wins_and_the_others_stay_packaged(
@@ -128,20 +134,24 @@ def test_the_jailbreak_front_resolves_over_the_folder(tmp_path, monkeypatch):
 
 def test_a_file_the_overlay_does_not_read_is_warned_about(tmp_path, caplog):
     for relative in ("llm/models.json", "jailbreak/combination_spec.json",
-                     "jailbreak/hacking/personas.json", "datasets/x.json"):
+                     "jailbreak/hacking/personas.json", "datasets/x.json",
+                     "dataset_types/eval.json", "dataset_types/mine.json"):
         _write(tmp_path / relative, {})
     _write(tmp_path / "taxonomy" / "harmful.json", {"categories": {}})
     _write(tmp_path / "taxonomy" / "mine.json", {"categories": {}})
     with caplog.at_level("WARNING", logger="redact.config_overlay"):
         found = report_config_sources(tmp_path, verbose=False)
     assert found == config_sources(tmp_path) == {
-        "overridden": ["taxonomy/harmful.json"],
+        "overridden": ["dataset_types/eval.json", "taxonomy/harmful.json"],
         "added": ["taxonomy/mine.json"],
-        "ignored": ["datasets/x.json", "jailbreak/combination_spec.json",
+        "ignored": ["dataset_types/mine.json", "datasets/x.json",
+                    "jailbreak/combination_spec.json",
                     "jailbreak/hacking/personas.json", "llm/models.json"]}
     (record,) = caplog.records
     assert record.levelname == "WARNING"
     assert "llm/models.json" in record.getMessage()
+    assert "dataset_types/mine.json" in record.getMessage()
+    assert "eval.json and training.json" in record.getMessage()
     assert "ignored" in record.getMessage()
 
 
