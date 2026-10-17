@@ -1384,11 +1384,9 @@ class Saved:
 
 def _params(ctx: RunContext, stage: str) -> dict:
     """The params of ``stage``: the dataset type file's, then the params file's."""
-    from redact.recipe import load_dataset_type
+    from redact.recipe import stage_params
 
-    typed = load_dataset_type(ctx.dataset_type, ctx.config_dir)["params"].get(stage)
-    typed = typed or {}
-    return {**typed, **(ctx.params.get(stage) or {})}
+    return stage_params(stage, ctx.dataset_type, ctx.params, ctx.config_dir)
 
 
 def _one_file(stage: str, default: Callable) -> Callable:

@@ -749,6 +749,69 @@ def test_a_benign_taxonomy_the_constitution_reads_is_checked_at_load(tmp_path):
                  "taxonomy_dir": str(tmp_path)})
 
 
+def _recipe_file(folder: Path, recipe: dict, params: dict) -> Path:
+    """A recipe in ``folder`` and its params file beside it."""
+    (folder / "params.json").write_text(json.dumps(params), encoding="utf-8")
+    path = folder / "recipe.json"
+    path.write_text(json.dumps({**recipe, "params_file": "params.json"}),
+                    encoding="utf-8")
+    return path
+
+
+@pytest.mark.parametrize("switch", ["include_general_benign",
+                                    "include_standalone_benign"])
+def test_a_params_file_that_turns_the_general_part_on_is_checked_at_load(
+        tmp_path, switch):
+    config = tmp_path / "cfg" / "dataset_types"
+    config.mkdir(parents=True)
+    (config / "training.json").write_text(json.dumps(
+        {"stages": ["constitution"], "params": {}, "augmentations": {}}),
+        encoding="utf-8")
+    recipe = {"dataset_type": "training", "config_dir": "cfg",
+              "taxonomy_dir": str(tmp_path)}
+    params = {"constitution": {switch: True}}
+    load_recipe(_recipe_file(tmp_path, recipe, {}))     # the type's: off
+    for loaded in (lambda: load_recipe(_recipe_file(tmp_path, recipe, params)),
+                   lambda: load_recipe(tmp_path / "recipe.json", params=params)):
+        with pytest.raises(ValueError) as raised:
+            loaded()
+        assert str(raised.value).startswith("benign_taxonomy 'benign' cannot be read")
+        assert "general-benign" in str(raised.value)
+
+
+@pytest.mark.parametrize("switch", ["include_general_benign",
+                                    "include_standalone_benign"])
+def test_a_params_file_that_turns_the_general_part_off_is_honoured_at_load(
+        tmp_path, switch):
+    recipe = {"dataset_type": "training", "stages": ["constitution"],
+              "taxonomy_dir": str(tmp_path)}
+    params = {"constitution": {switch: False}}
+    with pytest.raises(ValueError, match="benign_taxonomy 'benign' cannot be read"):
+        load_recipe(_recipe_file(tmp_path, recipe, {}))     # the type's: on
+    assert load_recipe(_recipe_file(tmp_path, recipe, params))[
+        "benign_taxonomy"] == "benign"
+    assert load_recipe(recipe, params=params)["benign_taxonomy"] == "benign"
+
+
+def test_a_runs_params_stand_in_for_its_params_file_in_the_benign_check(
+        tmp_path, monkeypatch):
+    import redact
+
+    handed = []
+    monkeypatch.setattr(redact, "generate_constitution",
+                        lambda **k: handed.append(k) or pd.DataFrame())
+    recipe = {"dataset_type": "training", "data_dir": str(tmp_path),
+              "stages": ["constitution"], "taxonomy_dir": str(tmp_path),
+              "params_file": "missing.json"}
+    try:
+        run_pipeline(recipe, verbose=False,
+                     params={"constitution": {"include_general_benign": False}})
+    finally:
+        telemetry.uninstall()
+    (kwargs,) = handed
+    assert kwargs["include_general_benign"] is False
+
+
 def test_a_benign_taxonomy_in_the_constitutions_params_is_refused(
         tmp_path, monkeypatch):
     raised = _fails_before_any_stage_or_model(

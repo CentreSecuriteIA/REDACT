@@ -103,9 +103,11 @@ summary = run_pipeline("src/redact/configs/runs/training_example.json")
 - The `augmentations` section is resolved over the dataset type's, itself
   over the packaged default (`recipe.augmentations_of`), so a bad technique
   or family name fails here.
-- When the constitution stage runs with its dataset type's general-benign
-  part on, or the jailbreak stage runs a kind that draws a technique needing
-  benign data, the `benign_taxonomy` is read and must have a category
+- When the constitution stage runs with the general-benign part on in its
+  params (the dataset type's, with the params file's over them, read as
+  written; `run_pipeline(params=...)` stands in for the file), or the
+  jailbreak stage runs a kind that draws a technique needing benign data,
+  the `benign_taxonomy` is read and must have a category
   (`recipe.benign_taxonomy_of`).
 - A `config_dir`, relative to the recipe, must be a folder.
 - A `taxonomy` of the former name `content_moderation_categories` is read as
