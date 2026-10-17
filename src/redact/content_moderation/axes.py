@@ -2,11 +2,12 @@
 look like, one spec per sample, dealt evenly per ``(category, entry_type)``.
 
 The packaged table is ``configs/generation_axes.json``, one section per stage
-(``inputs``, ``outputs``). An axis holds ``values``, each with the ``label``
-and ``hint`` the prompt shows, a ``weight`` (its share within the axis; 0
-leaves it out) and optionally ``not_with`` (values of other axes it is never
-dealt with); or it holds ``from``, a field of the unit shown as it is. A key
-starting with ``_`` is a comment.
+(``inputs``, ``outputs``). An axis holds a ``label``, its ``dimension`` (a
+generation tag of ``configs/dimensions.json``) and ``values``, each with the
+``label`` and ``hint`` the prompt shows, a ``weight`` (its share within the
+axis; 0 leaves it out) and optionally ``not_with`` (values of other axes it is
+never dealt with); or it holds ``from``, a field of the unit shown as it is.
+A key starting with ``_`` is a comment.
 """
 
 import copy
@@ -21,6 +22,7 @@ from pathlib import Path
 
 from .. import paths
 from ..dataset.dealing import Dealer, stable_seed
+from ..dimensions import check_tags
 
 #: The stages with axes, each a section of the table.
 STAGES = ("inputs", "outputs")
@@ -53,7 +55,8 @@ def _checked(where: str, section) -> dict:
     """``section`` without comments, each axis and value checked.
 
     Raises:
-        ValueError: A key, a name or a weight the table may not hold.
+        ValueError: A key, a name, a weight or a dimension the table may not
+            hold.
     """
     if not isinstance(section, dict) or not _items(section):
         raise ValueError(f"{where} must be an object of axis: axis.")
@@ -64,10 +67,11 @@ def _checked(where: str, section) -> dict:
             raise ValueError(f"{at} must be an object with a label.")
         entry = dict(_items(entry))
         if "from" in entry:
-            if entry["from"] not in _FIELDS or set(entry) != {"label", "from"}:
+            if entry["from"] not in _FIELDS or set(entry) - {"dimension"} != {
+                    "label", "from"}:
                 raise ValueError(
-                    f"{at}: an axis with from holds only label and from, one of "
-                    f"{list(_FIELDS)}.")
+                    f"{at}: an axis with from holds only label, dimension and "
+                    f"from, one of {list(_FIELDS)}.")
             axes[name] = entry
             continue
         values = entry.get("values")
@@ -94,6 +98,8 @@ def _checked(where: str, section) -> dict:
                         f"{where}.{name}.{value}.not_with: {other!r} must be another "
                         "axis with values, and its list must name them: "
                         f"{list(known)}.")
+    check_tags(where, {name: entry.get("dimension") for name, entry in axes.items()},
+               "generation")
     return axes
 
 

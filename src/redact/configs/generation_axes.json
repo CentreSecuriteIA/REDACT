@@ -1,8 +1,9 @@
 {
-  "_comment": "The generation axes: what each input sample (inputs) and each response (outputs) is asked to look like. Each stage deals one spec per sample, a value per axis, evenly over each (category, entry_type) group at these weights (shares within an axis; 0 leaves a value out). A value's label and hint are the words the prompt shows, in the {sample_specs} and {response_spec} placeholders. not_with names values of other axes a value is never dealt with. An axis with from takes the entry's field instead of a value. A params file overlays the weights: inputs.axes / outputs.axes as {axis: {value: weight}}, an axis as null to leave it out, or false for no axes. Language, surface noise, containers and code-switching are augmentations, not axes. Read by content_moderation/axes.py.",
+  "_comment": "The generation axes: what each input sample (inputs) and each response (outputs) is asked to look like. Each stage deals one spec per sample, a value per axis, evenly over each (category, entry_type) group at these weights (shares within an axis; 0 leaves a value out). A value's label and hint are the words the prompt shows, in the {sample_specs} and {response_spec} placeholders. not_with names values of other axes a value is never dealt with. An axis with from takes the entry's field instead of a value. A params file overlays the weights: inputs.axes / outputs.axes as {axis: {value: weight}}, an axis as null to leave it out, or false for no axes. Language, surface noise, containers and code-switching are augmentations, not axes. dimension names what the axis varies, a generation tag of dimensions.json. Read by content_moderation/axes.py.",
   "inputs": {
     "length": {
       "label": "Length",
+      "dimension": "length",
       "values": {
         "fragment": {"label": "a fragment", "hint": "3 to 10 words, shaped like a search query or a note rather than a full sentence.", "weight": 0.15},
         "one_liner": {"label": "one line", "hint": "A single sentence or question.", "weight": 0.30},
@@ -13,6 +14,7 @@
     },
     "register": {
       "label": "Register",
+      "dimension": "register",
       "values": {
         "casual": {"label": "casual", "hint": "Everyday wording, as typed in a chat; contractions and loose grammar are fine.", "weight": 0.35},
         "neutral": {"label": "neutral", "hint": "Plain, clear wording, neither casual nor formal.", "weight": 0.30},
@@ -21,8 +23,9 @@
         "emotional": {"label": "emotional", "hint": "The writer's feelings show: worry, frustration, excitement or urgency.", "weight": 0.10}
       }
     },
-    "persona": {
+    "writer": {
       "label": "Writer",
+      "dimension": "authorship",
       "values": {
         "anonymous": {"label": "no stated role", "hint": "The message says nothing about who the writer is.", "weight": 0.30},
         "student": {"label": "a student", "hint": "The role may show in what they ask or how; it is not offered as a reason to be answered.", "weight": 0.05},
@@ -43,6 +46,7 @@
     },
     "framing": {
       "label": "Framing",
+      "dimension": "request_intent",
       "values": {
         "direct_request": {"label": "a direct request", "hint": "Asks for something to be done or given, as an instruction.", "weight": 0.35},
         "question": {"label": "a question", "hint": "Asks a question.", "weight": 0.30},
@@ -53,6 +57,7 @@
     },
     "directness": {
       "label": "Directness",
+      "dimension": "request_intent",
       "values": {
         "explicit": {"label": "explicit", "hint": "Says plainly what it is about.", "weight": 0.55},
         "implicit": {"label": "implicit", "hint": "What it is about is clear from context but never stated outright.", "weight": 0.30},
@@ -61,16 +66,18 @@
     },
     "focus": {
       "label": "Focus",
+      "dimension": "focus",
       "values": {
         "single": {"label": "one subject", "hint": "The whole message is about this subject.", "weight": 0.75},
         "mixed": {"label": "mixed", "hint": "The subject is one part of a longer message that is also about something else, in the writer's own words.", "weight": 0.25, "not_with": {"length": ["fragment", "one_liner"]}}
       }
     },
-    "domain": {"label": "Domain", "from": "subcategory"}
+    "domain": {"label": "Domain", "dimension": "domain", "from": "subcategory"}
   },
   "outputs": {
     "length": {
       "label": "Length",
+      "dimension": "answer_length",
       "values": {
         "brief": {"label": "brief", "hint": "1 to 3 sentences.", "weight": 0.20},
         "short": {"label": "short", "hint": "One paragraph.", "weight": 0.35},
@@ -80,6 +87,7 @@
     },
     "format": {
       "label": "Format",
+      "dimension": "answer_layout",
       "values": {
         "prose": {"label": "prose", "hint": "Plain paragraphs, no lists or headings.", "weight": 0.35},
         "list": {"label": "a bulleted list", "hint": "The main points as bullets, with a short lead-in.", "weight": 0.20},
@@ -91,6 +99,7 @@
     },
     "register": {
       "label": "Tone",
+      "dimension": "answer_tone",
       "values": {
         "neutral": {"label": "neutral", "hint": "Plain and matter-of-fact.", "weight": 0.40},
         "friendly": {"label": "friendly", "hint": "Warm and conversational.", "weight": 0.30},

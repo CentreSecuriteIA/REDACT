@@ -35,13 +35,13 @@ class TestThePackagedTable:
 
     def test_the_input_axes_are_those_of_the_plan(self):
         assert list(A.resolve("inputs")) == [
-            "length", "register", "persona", "framing", "directness", "focus",
+            "length", "register", "writer", "framing", "directness", "focus",
             "domain"]
 
     def test_the_writer_is_anonymous_or_one_of_the_roles(self):
-        persona = A.resolve("inputs")["persona"]["values"]
-        assert persona["anonymous"]["weight"] == pytest.approx(0.30)
-        roles = [v for name, v in persona.items() if name != "anonymous"]
+        writer = A.resolve("inputs")["writer"]["values"]
+        assert writer["anonymous"]["weight"] == pytest.approx(0.30)
+        roles = [v for name, v in writer.items() if name != "anonymous"]
         assert sum(v["weight"] for v in roles) == pytest.approx(0.70)
 
     def test_the_response_axes_are_length_format_and_register(self):
@@ -62,7 +62,7 @@ class TestTheOverlay:
         assert axes["length"]["values"]["fragment"]["weight"] == pytest.approx(0.15)
 
     def test_an_axis_given_as_null_is_left_out(self):
-        assert "persona" not in A.resolve("inputs", {"persona": None})
+        assert "writer" not in A.resolve("inputs", {"writer": None})
 
     def test_comment_keys_are_skipped(self):
         assert A.resolve("inputs", {"_note": "x", "length": {"_why": "y"}}) == \
@@ -139,7 +139,7 @@ class TestTheDeal:
     def test_a_spec_names_every_dealt_axis_only(self):
         axes = A.resolve("inputs")
         (spec,), = A.deal(axes, _units(1), 1, salt="t")
-        assert list(spec) == ["length", "register", "persona", "framing",
+        assert list(spec) == ["length", "register", "writer", "framing",
                               "directness", "focus"]
 
 

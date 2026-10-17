@@ -1,4 +1,5 @@
-"""The dimensions table, and the tag each augmentation family carries."""
+"""The dimensions table, and the tag each augmentation family and each
+generation axis carries."""
 
 import json
 import re
@@ -7,6 +8,7 @@ import pytest
 
 import redact.jailbreak.pool as JPool
 from redact import dimensions, paths
+from redact.content_moderation import axes as A
 from redact.jailbreak.technique import load_spec
 
 _FAMILY_TAGS = {
@@ -19,6 +21,18 @@ _FAMILY_TAGS = {
                       "continuation", "asking", "temporal"],
     "answer_shape": ["answer_format"],
     "example_priming": ["fsh", "dap"],
+}
+
+_AXIS_TAGS = {
+    "authorship": ["inputs.writer"],
+    "request_intent": ["inputs.framing", "inputs.directness"],
+    "length": ["inputs.length"],
+    "register": ["inputs.register"],
+    "focus": ["inputs.focus"],
+    "domain": ["inputs.domain"],
+    "answer_length": ["outputs.length"],
+    "answer_layout": ["outputs.format"],
+    "answer_tone": ["outputs.register"],
 }
 
 
@@ -40,6 +54,9 @@ class TestTheTable:
 
     def test_the_augmentation_tags_are_the_eight_of_the_plan(self):
         assert dimensions.tags_of("augmentation") == list(_FAMILY_TAGS)
+
+    def test_the_generation_tags_are_the_nine_of_the_plan(self):
+        assert dimensions.tags_of("generation") == list(_AXIS_TAGS)
 
     @pytest.mark.parametrize(("entry", "message"), [
         ({"side": "both", "definition": "A thing."}, "side must be one of"),
@@ -66,6 +83,7 @@ class TestTheFamilies:
     @pytest.mark.parametrize(("tag", "named"), [
         (None, "fsh must carry"),
         ("example", "fsh ('example') must carry"),
+        ("authorship", "fsh ('authorship') must carry"),
     ])
     def test_a_family_without_an_augmentation_tag_raises(self, monkeypatch, tag, named):
         spec = load_spec()
@@ -76,3 +94,24 @@ class TestTheFamilies:
         monkeypatch.setattr(JPool, "load_spec", lambda: {**spec, "families": families})
         with pytest.raises(ValueError, match=rf"families: {re.escape(named)}"):
             JPool._check_dimensions()
+
+
+class TestTheAxes:
+    def test_each_axis_carries_the_tag_of_the_plan(self):
+        assert {f"{stage}.{name}": entry["dimension"] for stage in A.STAGES
+                for name, entry in A.resolve(stage).items()} == {
+            axis: tag for tag, axes in _AXIS_TAGS.items() for axis in axes}
+
+    @pytest.mark.parametrize(("tag", "named"), [
+        (None, "length must carry"),
+        ("encoding", "length ('encoding') must carry"),
+    ])
+    @pytest.mark.parametrize("axis", [
+        {"label": "Length",
+         "values": {"short": {"label": "s", "hint": "", "weight": 1}}},
+        {"label": "Length", "from": "subcategory"},
+    ], ids=["values", "from"])
+    def test_an_axis_without_a_generation_tag_raises(self, axis, tag, named):
+        section = {"length": {**axis, **({"dimension": tag} if tag else {})}}
+        with pytest.raises(ValueError, match=rf"x: {re.escape(named)}"):
+            A._checked("x", section)

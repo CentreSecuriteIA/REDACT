@@ -31,5 +31,41 @@
   "example_priming": {
     "side": "augmentation",
     "definition": "Example exchanges placed in the message before the request."
+  },
+  "authorship": {
+    "side": "generation",
+    "definition": "Who the writer is, as their role or situation shows in what they ask and how, never offered as a reason to be answered."
+  },
+  "request_intent": {
+    "side": "generation",
+    "definition": "The act the writer's own request performs (an instruction, a question, a request for advice, a statement, a request for an opinion) and how plainly it names its subject."
+  },
+  "length": {
+    "side": "generation",
+    "definition": "How long the message is, from a few words to a document."
+  },
+  "register": {
+    "side": "generation",
+    "definition": "The formality, expertise and feeling of the message's word choice and sentence construction."
+  },
+  "focus": {
+    "side": "generation",
+    "definition": "Whether the subject fills the whole message or is one part of a message also about other things."
+  },
+  "domain": {
+    "side": "generation",
+    "definition": "The subject area of the taxonomy that the message is about."
+  },
+  "answer_length": {
+    "side": "generation",
+    "definition": "How long the response is."
+  },
+  "answer_layout": {
+    "side": "generation",
+    "definition": "The visual structure of the response: prose, a list, numbered steps, headed sections, a table or a code block."
+  },
+  "answer_tone": {
+    "side": "generation",
+    "definition": "The formality, warmth and expertise of the response's wording."
   }
 }
