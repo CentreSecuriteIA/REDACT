@@ -83,8 +83,8 @@ def generate_conversations(
     manifest = Manifest.sidecar(out)
 
     make_setting = setting if callable(setting) else (lambda: copy.deepcopy(setting))
-    # The clients of the models that reply, which size the pool; building one
-    # loads nothing.
+    # The clients of the models that reply, which size the pool. A vLLM client
+    # loads its engine here, before the stage knows whether a unit is pending.
     resolve = resolve or ModelClient.create
     clients = [resolve(actor.model) for actor in make_setting().participants
                if isinstance(actor, ModelActor)]
