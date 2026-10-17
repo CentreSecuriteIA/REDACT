@@ -2,6 +2,7 @@
 ``scaffold_setup`` writes."""
 
 import json
+from collections.abc import Callable
 from pathlib import Path
 
 import pandas as pd
@@ -9,10 +10,12 @@ import pytest
 
 from redact import paths, telemetry
 from redact.config_overlay import config_sources, report_config_sources, taxonomy_folder
+from redact.content_moderation import axes as A
 from redact.driver import read_record, run_pipeline
 from redact.jailbreak.augmentation import resolve
-from redact.recipe import load_dataset_type, load_params, load_recipe
+from redact.recipe import check_dimensions, load_dataset_type, load_params, load_recipe
 from redact.stages import STAGES, RunContext
+from tests.conftest import MockBackend, make_client
 
 _SIX = ["constitution", "inputs", "outputs", "paraphrase", "jailbreaks", "build"]
 
@@ -189,6 +192,91 @@ def test_a_config_dir_that_is_no_folder_is_refused(tmp_path):
         load_recipe({"dataset_type": "eval", "config_dir": str(tmp_path / "none")})
 
 
+# --- the generation axes and the dimensions ------------------------------------
+
+def _overlaid(config: Path, name: str, change: Callable[[dict], object]) -> Path:
+    """Write the packaged ``configs/<name>`` into ``config``, changed by
+    ``change``."""
+    data = json.loads((paths.configs_dir() / name).read_text(encoding="utf-8"))
+    change(data)
+    return _write(config / name, data)
+
+
+def _very_long_only(axes: dict) -> None:
+    for value, entry in axes["inputs"]["length"]["values"].items():
+        entry["weight"] = 1 if value == "very_long" else 0
+
+
+def _training_augmentations() -> dict:
+    return load_recipe({"dataset_type": "training"})["augmentations"]
+
+
+def test_an_axes_file_in_the_folder_is_read_and_reported(tmp_path):
+    _overlaid(tmp_path, "generation_axes.json", _very_long_only)
+    mine = A.resolve("inputs", config_dir=tmp_path)
+    assert [value for value, entry in mine["length"]["values"].items()
+            if entry["weight"]] == ["very_long"]
+    assert A.resolve("inputs") != mine
+    assert config_sources(tmp_path)["overridden"] == ["generation_axes.json"]
+
+
+def test_a_dimensions_file_in_the_folder_is_what_the_check_reads(tmp_path):
+    """Here, focus decided apart from the families it was undecided against."""
+    _overlaid(tmp_path, "dimensions.json", lambda tags: tags["focus"].pop("undecided"))
+    mixed = {"inputs": {"axes": {"focus": {"mixed": 0.25}}}}
+    with pytest.raises(ValueError, match="inputs.focus"):
+        check_dimensions(mixed, _training_augmentations(), dataset_type="training")
+    check_dimensions(mixed, _training_augmentations(), dataset_type="training",
+                     config_dir=tmp_path)
+    assert config_sources(tmp_path)["overridden"] == ["dimensions.json"]
+
+
+def test_a_dimensions_file_without_a_tag_a_family_carries_is_refused(tmp_path):
+    _overlaid(tmp_path, "dimensions.json", lambda tags: tags.pop("answer_shape"))
+    with pytest.raises(ValueError, match=r"answer_format \('answer_shape'\)"):
+        check_dimensions({}, _training_augmentations(), dataset_type="training",
+                         config_dir=tmp_path)
+
+
+def test_an_axes_or_dimensions_file_elsewhere_in_the_folder_is_ignored(tmp_path):
+    _write(tmp_path / "jailbreak" / "generation_axes.json", {})
+    _write(tmp_path / "llm" / "dimensions.json", {})
+    _write(tmp_path / "notes.json", {})     # beside the recipes: none of configs/
+    assert config_sources(tmp_path) == {
+        "overridden": [], "added": [],
+        "ignored": ["jailbreak/generation_axes.json", "llm/dimensions.json"]}
+    assert A.resolve("inputs", config_dir=tmp_path) == A.resolve("inputs")
+
+
+def test_the_inputs_front_deals_the_axes_of_the_folder(tmp_path, monkeypatch):
+    from redact import generate_inputs
+    from redact.llms import ModelClient
+
+    config = tmp_path / "cfg"
+    _overlaid(config, "generation_axes.json", _very_long_only)
+    backends = {"gen-model": MockBackend(["1. one zq0 sample\n[END]",
+                                          "1. another zq0 sample\n[END]"]),
+                "check-model": MockBackend("Yes")}
+    monkeypatch.setattr(ModelClient, "create", lambda m: make_client(backends[m], m))
+    constitution = pd.DataFrame([{
+        "source_category": "Cyber", "constitution_subcategory": "Sub",
+        "sample_description": "what zq0 is about", "entry_type": "harmful"}])
+    rows = generate_inputs(
+        data_dir=tmp_path, constitution_df=constitution, samples_per_entry=2,
+        model="gen-model", check_model="check-model", config_dir=config,
+        verbose=False)
+    assert rows["length"].tolist() == ["very_long", "very_long"]
+
+
+def test_a_run_passes_the_inputs_front_its_config_dir(tmp_path):
+    ctx = RunContext(
+        data_dir=tmp_path, dataset_type="training", models={"gen": None,
+                                                            "check": None},
+        prompt_dir=None, taxonomy="harmful", taxonomy_dir=None, params={},
+        augmentations={}, resume=True, verbose=False, config_dir=tmp_path)
+    assert STAGES["inputs"].recipe_kwargs(ctx)["config_dir"] == tmp_path
+
+
 # --- scaffold_setup -------------------------------------------------------------
 
 _COPIES = {
@@ -197,6 +285,8 @@ _COPIES = {
     "taxonomy/harmful.json": "taxonomy/harmful.json",
     "taxonomy/benign.json": "taxonomy/benign.json",
     "jailbreak/augmentations.json": "jailbreak/augmentations.json",
+    "generation_axes.json": "generation_axes.json",
+    "dimensions.json": "dimensions.json",
     "eval_params.json": "runs/params_eval_example.json",
     "training_params.json": "runs/params_training_example.json",
 }

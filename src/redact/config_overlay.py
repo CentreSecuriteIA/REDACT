@@ -1,12 +1,12 @@
 """A user's config folder, overlaid file by file over the packaged ``configs/``.
 
 The folder mirrors ``configs/``: ``dataset_types/eval.json`` and
-``training.json``, ``taxonomy/<name>.json`` and
-``jailbreak/augmentations.json`` are each read from it when it has the file,
-else from the package. Nothing else is: a dataset type of another name is
-none, the technique spec and templates under ``jailbreak/``, ``llm/`` and
-``datasets/`` are loaded at import or tied to code, and a file of theirs is
-warned about as ignored.
+``training.json``, ``taxonomy/<name>.json``, ``jailbreak/augmentations.json``,
+``generation_axes.json`` and ``dimensions.json`` are each read from it when
+it has the file, else from the package. Nothing else is: a dataset type of
+another name is none, the technique spec and templates under ``jailbreak/``,
+``llm/`` and ``datasets/`` are loaded at import or tied to code, and a file
+of theirs is warned about as ignored.
 """
 
 import logging
@@ -20,6 +20,8 @@ logger = logging.getLogger(__name__)
 DATASET_TYPES = ("eval", "training")
 # The folders whose files a config folder may hold, each read one by one.
 _READ_FOLDERS = ("dataset_types", "taxonomy")
+# The files at the folder's top it may hold.
+_READ_FILES = ("generation_axes.json", "dimensions.json")
 _AUGMENTATIONS = "jailbreak/augmentations.json"
 # The folders read from the package only.
 _IGNORED_FOLDERS = ("jailbreak", "llm", "datasets")
@@ -56,26 +58,28 @@ def _is_read(relative: str) -> bool:
     folder, _, name = relative.partition("/")
     if folder == "dataset_types":
         return name in {f"{dtype}.json" for dtype in DATASET_TYPES}
-    return relative == _AUGMENTATIONS or (
+    return relative in (_AUGMENTATIONS, *_READ_FILES) or (
         folder in _READ_FOLDERS and "/" not in name and name.endswith(".json"))
 
 
 def config_sources(config_dir: str | Path) -> dict[str, list[str]]:
-    """The files of ``config_dir`` under the folders of ``configs/``, as
-    paths relative to it.
+    """The files of ``config_dir`` under the folders of ``configs/``, and
+    its ``generation_axes.json`` and ``dimensions.json``, as paths relative
+    to it.
 
     Returns:
         ``overridden``: read in place of a packaged file; ``added``: read,
         with no packaged file of that name (a taxonomy of your own);
         ``ignored``: a dataset type other than ``eval`` and ``training``, or
-        under ``jailbreak/``, ``llm/`` or ``datasets/``, and not read. Files
-        elsewhere in the folder, such as recipes, are none.
+        under ``jailbreak/``, ``llm/`` or ``datasets/``, and not read. Other
+        files at the folder's top, such as recipes, are none.
     """
     root = Path(config_dir)
     files = sorted(
-        path.relative_to(root).as_posix()
-        for folder in (*_READ_FOLDERS, *_IGNORED_FOLDERS)
-        for path in (root / folder).rglob("*") if path.is_file())
+        [path.relative_to(root).as_posix()
+         for folder in (*_READ_FOLDERS, *_IGNORED_FOLDERS)
+         for path in (root / folder).rglob("*") if path.is_file()]
+        + [name for name in _READ_FILES if (root / name).is_file()])
     read = [name for name in files if _is_read(name)]
     return {
         "overridden": [name for name in read

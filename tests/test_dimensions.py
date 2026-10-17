@@ -42,10 +42,8 @@ _AXIS_TAGS = {
 def table_at(tmp_path, monkeypatch):
     """Point the table at a file of the test's own."""
     monkeypatch.setattr(paths, "configs_dir", lambda: tmp_path)
-    dimensions.table.cache_clear()
-    yield lambda entries: (tmp_path / "dimensions.json").write_text(
+    return lambda entries: (tmp_path / "dimensions.json").write_text(
         json.dumps(entries), encoding="utf-8")
-    dimensions.table.cache_clear()
 
 
 class TestTheTable:

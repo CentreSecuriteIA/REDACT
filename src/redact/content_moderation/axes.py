@@ -1,16 +1,16 @@
 """The generation axes: what each input sample and each response is asked to
 look like, one spec per call, dealt evenly per ``(category, entry_type)``.
 
-The packaged table is ``configs/generation_axes.json``, one section per stage
-(``inputs``, ``outputs``). An axis holds a ``label``, its ``dimension`` (a
-generation tag of ``configs/dimensions.json``) and ``values``, each with the
-``label`` and ``hint`` the prompt shows, a ``weight`` (its share within the
-axis; 0 leaves it out) and optionally ``not_with`` (values of other axes it is
-never dealt with); or it holds ``from``, a field of the unit shown as it is.
-A key starting with ``_`` is a comment.
+The table is ``configs/generation_axes.json``, a config folder's when it has
+one, with one section per stage (``inputs``, ``outputs``). An axis holds a
+``label``, its ``dimension`` (a generation tag of ``configs/dimensions.json``)
+and ``values``, each with the ``label`` and ``hint`` the prompt shows, a
+``weight`` (its share within the axis; 0 leaves it out) and optionally
+``not_with`` (values of other axes it is never dealt with); or it holds
+``from``, a field of the unit shown as it is. A key starting with ``_`` is a
+comment.
 """
 
-import copy
 import csv
 import json
 import logging
@@ -19,11 +19,10 @@ import random
 import string
 from collections import Counter, defaultdict
 from collections.abc import Iterable, Sequence
-from functools import lru_cache
 from numbers import Real
 from pathlib import Path
 
-from .. import paths
+from ..config_overlay import config_file
 from ..dataset import Ledger, Manifest
 from ..dataset.dealing import Dealer, stable_seed
 from ..dataset.planfile import coverage_path
@@ -48,19 +47,18 @@ def _items(mapping: dict) -> list:
     return [(key, value) for key, value in mapping.items() if not key.startswith("_")]
 
 
-@lru_cache(maxsize=1)
-def _packaged() -> dict:
-    path = paths.configs_dir() / "generation_axes.json"
+def _table(config_dir: str | Path | None = None) -> dict:
+    """Each stage's section of the table, ``config_dir``'s when it has one,
+    checked against that folder's dimensions."""
+    path = config_file("generation_axes.json", config_dir)
     table = json.loads(path.read_text(encoding="utf-8"))
-    sections = {}
-    for stage in STAGES:
-        where = f"{path.name}: {stage}"
-        sections[stage] = _checked(where, table.get(stage))
-    return sections
+    return {stage: _checked(f"{path}: {stage}", table.get(stage), config_dir)
+            for stage in STAGES}
 
 
-def _checked(where: str, section) -> dict:
-    """``section`` without comments, each axis and value checked.
+def _checked(where: str, section, config_dir: str | Path | None = None) -> dict:
+    """``section`` without comments, each axis and value checked, the
+    dimensions against the table of ``config_dir``.
 
     Raises:
         ValueError: A key, a name, a weight or a dimension the table may not
@@ -107,7 +105,7 @@ def _checked(where: str, section) -> dict:
                         "axis with values, and its list must name them: "
                         f"{list(known)}.")
     check_tags(where, {name: entry.get("dimension") for name, entry in axes.items()},
-               "generation")
+               "generation", config_dir)
     return axes
 
 
@@ -124,10 +122,14 @@ def _check_positive(at: str, entry: dict) -> None:
             "or write the axis as null to leave it out.")
 
 
-def resolve(stage: str, given: dict | bool | None = None) -> dict | None:
-    """The axes ``stage`` deals: its packaged section with ``given`` over it.
+def resolve(
+    stage: str, given: dict | bool | None = None, *,
+    config_dir: str | Path | None = None,
+) -> dict | None:
+    """The axes ``stage`` deals: its section of the table (``config_dir``'s
+    when it has one) with ``given`` over it.
 
-    ``given`` is ``None`` or ``True`` for the packaged axes, ``False`` for
+    ``given`` is ``None`` or ``True`` for the table's axes, ``False`` for
     none, or ``{axis: {value: weight}}``, an axis as ``None`` to leave it out.
     A value not named keeps its weight.
 
@@ -144,7 +146,7 @@ def resolve(stage: str, given: dict | bool | None = None) -> dict | None:
             f"The stage {stage!r} has no generation axes; {list(STAGES)} do.")
     if given is False:
         return None
-    axes = copy.deepcopy(_packaged()[stage])
+    axes = _table(config_dir)[stage]
     where = f"{stage}.axes"
     if given is None or given is True:
         return axes

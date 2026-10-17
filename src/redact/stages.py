@@ -207,6 +207,7 @@ def generate_inputs(
     check_max_tokens: int | None = None,
     axes: dict | bool | None = None,
     seed: int = 42,
+    config_dir: str | Path | None = None,
     read_back: bool = True,
 ) -> pd.DataFrame:
     """Generate content moderation input samples seeded from a constitution.
@@ -248,6 +249,9 @@ def generate_inputs(
             length axis sets each sample's length; ``style`` picks the
             prompt only.
         seed: The seed of the deal.
+        config_dir: A config folder whose ``generation_axes.json`` and
+            ``dimensions.json`` are read in place of the packaged ones when
+            it has them. ``None``: the packaged ones.
         read_back: False returns an empty DataFrame and reads no sample back.
 
     Returns:
@@ -259,7 +263,7 @@ def generate_inputs(
             the folder or its plan file stops the stage
             (``InputPipeline.run_from_constitution``).
     """
-    axes = generation_axes.resolve("inputs", axes)
+    axes = generation_axes.resolve("inputs", axes, config_dir=config_dir)
     if constitution_df is None:
         constitution_df = _saved_constitution(data_dir)
     model = model or default_model_for_role("uncensored_gen")
@@ -1456,6 +1460,7 @@ def _inputs_kwargs(ctx: RunContext) -> dict:
         data_dir=ctx.data_dir, prompt_dir=ctx.prompt_dir, model=ctx.models["gen"],
         check_model=ctx.models["check"], resume=ctx.resume, verbose=ctx.verbose,
         constitution_df=Saved(partial(_saved_constitution, ctx.data_dir)),
+        config_dir=ctx.config_dir,
     )
 
 
