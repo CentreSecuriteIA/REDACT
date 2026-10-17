@@ -14,16 +14,17 @@ Under `src/redact/`:
 | `llm_pipeline/` | `LLMRequest`, the drivers of units of model calls, checks and retry steps ([llm_pipeline.md](llm_pipeline.md)) |
 | `residency/` | The GPU planner: which local models fit, per stage; preload and unload ([residency.md](residency.md)) |
 | `constitution/` | The constitution stage: `generation.py` (`ConstitutionPipeline`, `read_constitution`), `units.py` (one call per taxonomy category and entry type, and one per benign-taxonomy category for the general-benign part), `parse.py` (the `[END]` marker and the three-level markdown parser) |
-| `content_moderation/` | The inputs, outputs and paraphrase stages: `inputs.py` (`InputPipeline`), `outputs.py`, `paraphrase.py`, `checker.py` (the checkers), `feedback.py` (rejection feedback), `results.py` (the inputs stage's totals) |
+| `content_moderation/` | The inputs, outputs and paraphrase stages: `inputs.py` (`InputPipeline`), `outputs.py`, `axes.py` (the generation axes: resolve, deal, render, coverage), `paraphrase.py`, `checker.py` (the checkers), `feedback.py` (rejection feedback), `results.py` (the inputs stage's totals) |
 | `jailbreak/` | The technique library, one subpackage per layer, and the augmentation engine ([jailbreak.md](jailbreak.md)) |
 | `multi_turn/` | Conversation datasets: settings, actors, `generate_conversations`, `evaluate_conversations` |
 | `multiturn_attacks/`, `optimization/` | Crescendo and PAIR attacks against a safety-trained target; a beam search over conversation moves ([conversations](../stages/conversations.md#attacks-and-search)) |
 | `dataset/` | Rows on disk: identity, the ledger and manifest, resume, the per-category tree, what an eval build leaves out ([dataset.md](dataset.md)) |
-| `configs/` | Package data: `llm/` (registry, roles, GPU prices), `jailbreak/` (the spec, the augmentation defaults, technique templates), `dataset_types/` (what `training` and `eval` mean), `taxonomy/`, `datasets/`, `runs/` (example recipes and their params files) |
+| `configs/` | Package data: `llm/` (registry, roles, GPU prices), `jailbreak/` (the spec, the augmentation defaults, technique templates), `dataset_types/` (what `training` and `eval` mean), `taxonomy/`, `datasets/`, `runs/` (example recipes and their params files), `generation_axes.json` (the axes of the inputs and outputs), `dimensions.json` (what each family and axis varies) |
 | `prompts/` | One prompt JSON per pipeline and step |
 | `stages.py`, `recipe.py`, `driver.py`, `paths.py`, `config_overlay.py` | This page |
 | `telemetry.py` | The run trace and the cost roll-up ([telemetry.md](telemetry.md)) |
 | `exceptions.py`, `types.py` | `RedactError`, `PromptTooLongError`; `EntryType` |
+| `dimensions.py` | The dimensions table: `table`, `tags_of`, `check_tags`, `relation`, and `check`, which refuses a generation axis and an augmentation family of one dimension ([configuration.md](../configuration.md#dimensions-and-the-runs-check)) |
 
 Beside the package: `scripts/` (`run.py`, `inspect_run.py`,
 `scaffold_prompts.py`, `scaffold_setup.py`, `download_models.py`,
@@ -141,7 +142,8 @@ the params.
 | `load_dataset_type(name, config_dir=None)`, `dataset_type_hash(name, config_dir=None)` | The file `dataset_types/<name>.json` (`stages`, `params`, `augmentations`), the `config_dir`'s when it has one, else the packaged one, as a copy; read again when it changes. A `name` other than `eval` and `training` (`config_overlay.DATASET_TYPES`) raises. The content id of the file as parsed, which each run record holds ([configuration.md](../configuration.md#dataset-types)) |
 | `stage_params(stage, dataset_type, params=None, config_dir=None)` | A stage's params: the dataset type file's, with the params file's entry over them key by key; what `Stage.params` and `benign_taxonomy_of` read |
 | `benign_taxonomy_of(recipe, stages, params=None)` | The recipe's `benign_taxonomy` (`"benign"` by default); read, and checked to have a category, when the constitution stage runs with `include_general_benign` (or its former name `include_standalone_benign`) on in `stage_params` over `params`, or the jailbreak stage runs a kind that draws a technique needing benign data |
-| `load_params(path or dict, base_dir)` | Reads the params file; refuses a key that is not a stage name (a `_` key is a comment) and a `jailbreaks` key that belongs in the augmentation section, warns for a flat keyword |
+| `load_params(path or dict, base_dir, config_dir=None)` | Reads the params file; refuses a key that is not a stage name (a `_` key is a comment), a `jailbreaks` key that belongs in the augmentation section, and an `axes` entry or `seed` of `inputs` or `outputs` that `axes.resolve` (with `config_dir`'s table) or a whole number would not be; warns for a flat keyword |
+| `check_dimensions(params, augmentations, *, dataset_type, config_dir=None)` | Raises when an axis that varies, in each stage's params as `stage_params` gives them, shares a dimension with a family a kind draws (`dimensions.check`); the axes, dimensions and type files are the `config_dir`'s when it has them |
 | `augmentations_of(recipe, jailbreak_params)` | The section, both kinds resolved over the recipe's dataset type's (`resolve(..., base=)`), itself over the packaged default or the `config_dir`'s `augmentations.json`; reads the flat form; applies the params' flat keywords over the adversarial kind |
 | `serving_of(models)` | Refuses a key that is not a recipe role, whatever its value (a `_` key is a comment); checks the role objects; returns the keys given per model name |
 | `resolve_role(models, role, augmentations)` | The models a role stands for, as its stage resolves them |
@@ -160,9 +162,9 @@ translation technique.
 | `config_sources(config_dir)` | The folder's files under the folders of `configs/`: `overridden`, `added` (read, with no packaged file of that name) and `ignored` |
 | `report_config_sources(config_dir, verbose=True)` | Warns about the `ignored` files and, with `verbose`, logs the files read |
 
-Three kinds of file are read from the folder: `dataset_types/eval.json`
-and `training.json`, `taxonomy/<name>.json` and
-`jailbreak/augmentations.json`. A dataset type file of another name is
+These files are read from the folder: `dataset_types/eval.json` and
+`training.json`, `taxonomy/<name>.json`, `jailbreak/augmentations.json`,
+and at its top `generation_axes.json` and `dimensions.json`. A dataset type file of another name is
 `ignored`, as there are no other types. The technique spec and templates,
 `llm/` and `datasets/` are loaded at import or tied to code, so they come
 from the package only.
@@ -172,7 +174,8 @@ from the package only.
 `run_pipeline(recipe, params=None, verbose=True, data_dir=None)`:
 
 1. `load_recipe`, `load_params`, `serving_of`; build the `RunContext`.
-2. `Stage.check` for every stage.
+2. `Stage.check` for every stage, then `check_dimensions` over every
+   stage's axes.
 3. `telemetry.install(data_dir)`; with `verbose`,
    `report_prompt_sources(prompt_dir)`. `report_config_sources(config_dir)`
    warns about the files of the folder no run reads, and with `verbose` logs

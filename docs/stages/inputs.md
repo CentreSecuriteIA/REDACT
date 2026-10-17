@@ -15,10 +15,11 @@ only the accepted ones: outputs, paraphrase and jailbreaks through
 ## Purpose
 
 Turn each constitution entry into `samples_per_entry` input samples, each
-checked against its category, entry type and subcategory. An entry of the
-general-benign part is an input of its benign-taxonomy category: generated
-and checked with that category, entry type `benign` and its constitution
-subcategory.
+written to its own spec of the generation axes (length, register, writer,
+framing, directness, focus) and checked against its category, entry type and
+subcategory. An entry of the general-benign part is an input of its
+benign-taxonomy category: generated and checked with that category, entry
+type `benign` and its constitution subcategory.
 
 ## Inputs
 
@@ -34,13 +35,18 @@ subcategory.
   `entry_types` keeps only some entry types.
 - The prompt `prompts/input/generation/from_constitution/<style>/` with the
   `numbered` format instruction, and the check prompt
-  `prompts/input/quality_check/`, each read through the overlay.
+  `prompts/input/quality_check/`, each read through the overlay. The
+  template's `{sample_spec}` shows the unit's spec; a prompt without it is
+  warned about (`The prompt ... has no {sample_spec}`), and its units are
+  dealt and recorded a spec the model is not shown.
+- The `inputs` section of `generation_axes.json`, a recipe's `config_dir`'s
+  when it has one ([configuration.md](../configuration.md#the-generation-axes)).
 
 ## Models
 
 | Recipe role | Registry role | Default | Calls |
 |---|---|---|---|
-| `gen` | `uncensored_gen` | `venice-uncensored` | One generation per entry, again on a bad reply |
+| `gen` | `uncensored_gen` | `venice-uncensored` | One generation per unit, again on a bad reply |
 | `check` | `uncensored_gen` | the `gen` model | One check per sample |
 
 Pick a checker that can judge. In the GPU check, a 3B checker accepted 2 of
@@ -48,27 +54,63 @@ Pick a checker that can judge. In the GPU check, a 3B checker accepted 2 of
 
 ## Settings
 
-Params keys: `style`, `samples_per_entry`, `entry_types`, `batch_size`,
-`max_attempts`, `check_max_tokens`
-([configuration.md](../configuration.md#inputs)).
+Params keys: `style`, `samples_per_entry`, `entry_types`, `axes`, `seed`,
+`batch_size`, `max_attempts`, `check_max_tokens`
+([configuration.md](../configuration.md#inputs)). The `eval` type pins the
+`directness` axis at `explicit`.
 
 ## Unit and ledger key
 
-One unit is one constitution entry.
+Each entry is `samples_per_entry` units, one per `iteration` (0 to k - 1).
+Every unit is its own generator on the `drive_units` pool, so its generation
+and check requests take the async lane and units finish apart.
 
-1. One call asks for `samples_per_entry` samples as a numbered list. No
-   earlier sample is shown in the prompt.
-2. A reply with another number of samples is rejected whole and asked again,
-   up to `max_attempts` generations.
-3. Samples whose text is already in the folder (by content id, any category
-   and any style) are dropped.
-4. Each remaining sample gets one check call.
+1. One call asks for one sample written to the unit's spec. No earlier
+   sample is shown in the prompt, so a unit's prompt is a function of its
+   entry and its spec alone.
+2. A reply without its `[END]` marker at the end (cut at the token limit, or
+   written without it), or holding another number of samples than one, is
+   rejected whole and asked again, up to `max_attempts` generations. The
+   replies without the marker are counted in a WARNING at the end.
+3. A sample whose text is already in the folder (by content id, any category
+   and any style) is dropped.
+4. A sample left gets one check call.
 
 | | Value |
 |---|---|
-| Ledger key | `(sample_description, entry_type, style)` |
-| Ledger record | the key, and `ids`: the `sample_id`s of the rows it wrote. Or the key with `status` `rejected` or `no_samples` and `attempts` |
-| Manifest row | `sample_description`, `entry_type`, `style`, `status` |
+| Ledger key | `(sample_description, entry_type, style, iteration)` |
+| Ledger record | the key, `ids` (the `sample_id` of the row it wrote) and `accepted` (the verdict). Or the key with `status` `rejected` or `no_sample` and `attempts` |
+| Manifest row | `sample_description`, `entry_type`, `style`, `iteration`, `category`, `spec` (the dealt value of each axis; none without axes), `status` |
+
+## The generation axes
+
+Each unit is dealt one spec: a value of each axis of the `inputs` section,
+at the table's weights with the `axes` param over them. The `domain` axis is
+not dealt: it shows the entry's subcategory.
+
+- **Groups.** Units are dealt per `(source_category, entry_type)`, the
+  input tree's folders and the coverage table's columns. A group's units go
+  in `(sample_description, iteration)` order, so an entry's units are dealt
+  one after another, from one dealer (`dataset/dealing.py`, the jailbreak
+  plan's): each value goes to the unit when its count so far over its weight
+  is the lowest of the axis, ties broken by the unit's rng, seeded by
+  `(seed, category, entry_type, sample_description, iteration)`.
+- **Siblings.** An entry's units take a value at most `ceil(share x k)`
+  times, `share` its share of the axis's weight. So an entry's samples
+  differ on every axis none of whose values has more than 1/k of the weight
+  (every dealt axis at k = 3), and no prompt sentence asks for it.
+- **`not_with`.** A value is not dealt beside a value of another axis that
+  either names in `not_with` (`advice` and a `fragment`, for example).
+- **Shown.** `{sample_spec}` renders the spec as one line per axis in the
+  table's order: `Label: value label — hint`, then `Domain: <subcategory>`.
+  Without axes (`axes: false`), no spec is dealt or recorded and
+  `{sample_spec}` is empty.
+- **Deterministic.** The deal is a function of the seed, the weights, the
+  units of each group and `samples_per_entry`. It is made again on every
+  run, and the plan file stops a run that would deal another. Entries added
+  since (a regenerated constitution, a new category) are dealt into their
+  groups; units already done keep the specs their rows and acks record, and
+  the specs of units not done may move.
 
 ## Files
 
@@ -77,8 +119,10 @@ Under `Datasets/constitution_inputs/`:
 | File | Content |
 |---|---|
 | `<category>/samples.csv` | One per category (`source_category`): a harmful-taxonomy category, or a benign one for the general-benign part; a benign category named as a harmful one shares its file, its rows told apart by `entry_type` and `source_taxonomy`. Accepted and rejected rows |
-| `constitution_inputs.manifest.jsonl` | The plan of the current style |
+| `constitution_inputs.manifest.jsonl` | The plan of the current style, written again every run |
 | `constitution_inputs.state.jsonl` | The ledger, for every style |
+| `constitution_inputs.plan.json` | What the deal was made with: `seed`, `samples_per_entry`, and each dealt axis's weights (`null` without axes). Labels and hints are not in it: rewording them changes no deal |
+| `constitution_inputs.coverage.csv` | Per axis value and group: `axis`, `value`, `category`, `entry_type`, `planned` (from the manifest), `accepted` (from the acks of this style). Every value of the table has a row in every group seen, `0` when never dealt. Written when the stage ends, and when it has nothing to run; removed without axes |
 
 And `Datasets/constitution_inputs_merged.csv`: the rows of every category
 and every style whose `accepted` reads true (`dataset.accepted_mask`),
@@ -104,14 +148,29 @@ Columns of `samples.csv`:
 | `source_group_tag` | The entry's group tag |
 | `source_taxonomy` | `harmful` or `benign`, copied from the entry: `benign` marks the general-benign part. Only when the constitution has the column |
 | `template_style` | The `style` that generated it |
+| `iteration` | The unit's iteration: 0 for an entry's first sample |
+| `length`, `register`, `writer`, `framing`, `directness`, `focus` | The unit's dealt value of each axis. Only with axes |
 
 ## How it resumes
 
 The stage names its folder and the pattern `*/samples.csv` to the resume, so
 all category files are checked and cut back together
 ([internals/dataset.md](../internals/dataset.md#a-stage-with-several-files)).
-Entries the ledger records are skipped. The ids on the ledger records keep a
+Units the ledger records are skipped. The ids on the ledger records keep a
 text from being written twice.
+
+The deal is made again, and compared with `constitution_inputs.plan.json`:
+a resume whose `seed`, `samples_per_entry` or axes' weights differ raises
+`Inputs: this run's [...] differ from those the units in ... were dealt
+with`, naming the keys and `resume=False`. A folder with finished units and
+no plan file runs unchecked, with a WARNING.
+
+A folder written before units had an iteration stops before any call: a
+ledger that acks a unit without `iteration` (an entry was one call then), or
+a category file whose header lacks `iteration` or an axis column. The
+message names the remedies: start the style over (`resume: false`), run in
+a new `data_dir`, or, for a folder without the axis columns,
+`inputs.axes: false`.
 
 A category file written from a constitution without `source_taxonomy`
 cannot take rows that have it: the save raises `Cannot append to ...: its
@@ -128,15 +187,15 @@ stops until the same fresh run is repeated.
 
 - A sample the checker rejects is saved with `accepted` false and the
   checker's reply in `rejection_reason`.
-- An entry with every reply rejected is acked `rejected`, with no rows.
-- An entry with only repeated samples is acked `no_samples`.
-- On the async lane (an OpenAI-compatible endpoint or vLLM), an entry whose
+- A unit with every reply rejected is acked `rejected`, with no row.
+- A unit whose sample the folder holds already is acked `no_sample`.
+- On the async lane (an OpenAI-compatible endpoint or vLLM), a unit whose
   generation or check prompt is too long for its model is acked `rejected`
-  after one attempt, with no rows, and logged `Entry ... rejected, its
+  after one attempt, with no row, and logged `Entry ... rejected, its
   prompt is too long`. On an Anthropic or introspection binding the
   requests go out in grouped calls, and a prompt too long there fails the
   call and stops the stage.
-- These acked entries are skipped on resume; a warning at the end counts the
+- These acked units are skipped on resume; a warning at the end counts the
   rejected ones. Start the style over to try them again.
 - Any other error inside a unit, and any failed call, stops the stage. Saved
   units stay saved.
@@ -144,6 +203,7 @@ stops until the same fresh run is repeated.
 When under half of the generated samples are accepted, the front warns:
 `inputs: only N of M generated samples were accepted (under half)`.
 
-With a model that captures internals, the stage requires
-`samples_per_entry: 1`, since one call's internals cannot be split between
-samples.
+Every call asks for one sample, so a model that captures internals works at
+any `samples_per_entry`: a generation is captured under
+`<entry id>/<iteration>/input_<style>`, its check under
+`<sample_id>/val_in_<style>`.

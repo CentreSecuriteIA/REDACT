@@ -1,8 +1,8 @@
 # Configuration reference
 
 Every key a run reads: the recipe, its dataset type, the params file, the
-augmentation section, the model registry, the environment, your own config
-folder, and the prompt overlay. For how these fit together in a run, see [running.md](running.md).
+generation axes, the augmentation section, the model registry, the
+environment, your own config folder, and the prompt overlay. For how these fit together in a run, see [running.md](running.md).
 
 ## Recipe keys
 
@@ -21,7 +21,7 @@ that starts with `_` is a comment.
 | `stages` | list of stage names | the dataset type's: all six | The stages to run, in order, each once. `[]` runs nothing |
 | `augmentations` | object | the dataset type's | The jailbreak stage's augmentation section, over the dataset type's; see [below](#the-augmentation-section) |
 | `params_file` | path | none | The params file, relative to the recipe's folder. `--params` and `run_pipeline(params=...)` override it |
-| `config_dir` | path | none | [Your own config folder](#your-own-config-folder), relative to the recipe's folder: its dataset type, taxonomy and augmentation files are read in place of the packaged ones. Not a folder: raises at load |
+| `config_dir` | path | none | [Your own config folder](#your-own-config-folder), relative to the recipe's folder: its dataset type, taxonomy, augmentation, generation axes and dimensions files are read in place of the packaged ones. Not a folder: raises at load |
 | `resume` | bool | `true` | `false` starts every listed stage over ([running.md](running.md#resume-fresh-runs-and-a-kill-partway-through)). Any other value than `true` or `false`, the string `"false"` too, raises |
 
 A top-level `copies` key other than `null` raises: write the count in the
@@ -54,7 +54,7 @@ types: a recipe naming one stops when it loads, before any stage runs.
 | | `training.json` | `eval.json` |
 |---|---|---|
 | `stages` | `constitution`, `inputs`, `outputs`, `paraphrase`, `jailbreaks`, `build` | the same |
-| `params` | `constitution`: `include_general_benign` true, `general_benign_categories` 10 | the same, and `constitution.entry_types` and `inputs.entry_types` `["harmful", "benign"]`; `jailbreaks.seed` 43 |
+| `params` | `constitution`: `include_general_benign` true, `general_benign_categories` 10 | the same, and `constitution.entry_types` and `inputs.entry_types` `["harmful", "benign"]`; `inputs.axes` pins `directness` at `explicit`; `jailbreaks.seed` 43 |
 | `augmentations` | none: the packaged default | the adversarial kind below; `natural` off |
 
 The eval adversarial kind attacks the harmful inputs only, with a pool of
@@ -67,6 +67,13 @@ translations (`to_swahili`, `to_thai`, `to_khmer`, `to_maori`, `to_nepali`,
 `to_refusal_then_comply`. It runs two count-driven rounds, one technique
 then two (`rounds` `[{"exact_techniques": 1}, {"exact_techniques": 2}]`),
 with `allow_request_obfuscation` false.
+
+Every eval input is explicit (`inputs.axes`: `{"directness": {"explicit": 1,
+"implicit": 0, "euphemistic": 0}}`): an implicit or euphemistic request is
+borderline by construction, and eval keeps the clear ends. The other axes
+keep their packaged weights, so eval covers them as training does. A params
+file's `inputs.axes` replaces the type's whole entry, so to change another
+axis of an eval run, write the directness pin again beside it.
 
 A recipe changes one thing by giving it; the rest of the type stays. For
 example, an eval run with another stage list and a lighter translation share:
@@ -107,7 +114,10 @@ models, `data_dir`, `prompt_dir`, `taxonomy`, `taxonomy_dir`,
 `benign_taxonomy`, `config_dir`, `resume`, `verbose`, the inputs stage's
 `constitution_df`, the jailbreak stage's `augmentation`, the build's `mode`,
 `read_back`). Parameters that take a DataFrame (`inputs`, `outputs`) cannot
-be written in JSON.
+be written in JSON. The `axes` and `seed` of `inputs` and `outputs` are
+checked when the params load (a params file's and a dataset type's): an
+unknown axis or value, a weight below 0, or a seed that is not a whole
+number raises, read against the `config_dir`'s axes table when it has one.
 
 ### `constitution`
 
@@ -127,11 +137,13 @@ names of the last two, are read for this release with a
 
 | Key | Default | Meaning |
 |---|---|---|
-| `style` | `"long"` | The prompt under `prompts/input/generation/from_constitution/<style>/`: `long` or `short` |
-| `samples_per_entry` | `3` | Samples asked for per constitution entry |
+| `style` | `"long"` | The prompt under `prompts/input/generation/from_constitution/<style>/`: `long` or `short`. With axes, the length axis sets each sample's length |
+| `samples_per_entry` | `3` | Samples per constitution entry: that many units, one sample per call |
 | `entry_types` | `null` | Use only the constitution entries of these entry types |
+| `axes` | `null`: the table's | The [generation axes](#the-generation-axes) each unit is dealt a value of: `{axis: {value: weight}}` over the table's `inputs` section, an axis as `null` to leave it out; `false` for none. The `eval` type pins `directness` |
+| `seed` | `42` | The seed of the deal |
 | `batch_size` | `32` | Requests per grouped call; the stage keeps twice as many units live, or the widest async lane when larger |
-| `max_attempts` | `3` | Generations of an entry before a reply with the wrong number of samples is given up |
+| `max_attempts` | `3` | Generations of a unit before a reply without its `[END]` marker, or with another number of samples than one, is given up |
 | `check_max_tokens` | `null` | Reply limit of a check call; `null` for the checker's default |
 
 ### `outputs`
@@ -142,6 +154,8 @@ names of the last two, are read for this release with a
 | `max_attempts` | `1` | Generations per input; above 1 a rejected response is generated again with the verdict as feedback |
 | `max_per_category` | `null` | Keep the first N inputs per `(category, entry_type)` |
 | `max_samples` | `null` | Keep the first N inputs overall, after `max_per_category` |
+| `axes` | `null`: the table's | The response axes each input row is dealt a value of, over the table's `outputs` section, as for `inputs` |
+| `seed` | `42` | The seed of the deal |
 | `batch_size` | `32` | Requests per grouped call; units live as for `inputs` |
 | `check_max_tokens` | `null` | Reply limit of a check call |
 | `output_path` | `Datasets/output_responses.csv` | Where the responses go |
@@ -188,6 +202,74 @@ augmentation section has, such as `family_weights`, raises here.
 A path key moves one stage's file only. Later stages read the default paths
 unless given their own: the build has a path key per part, and the paraphrase
 stage reads `Datasets/output_responses.csv` from its default place.
+
+## The generation axes
+
+`configs/generation_axes.json` says what each input sample (`inputs`) and
+each response (`outputs`) is asked to look like. Each stage deals one spec
+per call, a value of each axis, evenly over each `(category, entry_type)`
+group at the table's weights ([inputs](stages/inputs.md#the-generation-axes),
+[outputs](stages/outputs.md#unit-and-ledger-key)); the prompt shows it in
+`{sample_spec}` or `{response_spec}`, and the row records it in a column per
+axis.
+
+| Stage | Axis | Values (weight) |
+|---|---|---|
+| inputs | `length` | `fragment` .15, `one_liner` .30, `short` .30, `long` .20, `very_long` .05 |
+| inputs | `register` | `casual` .35, `neutral` .30, `formal` .15, `technical` .10, `emotional` .10 |
+| inputs | `writer` | `anonymous` .30, then .05 each: `student`, `parent`, `teacher`, `hobbyist`, `developer`, `researcher`, `journalist`, `fiction_writer`, `caregiver`, `healthcare_worker`, `small_business_owner`, `office_worker`, `tradesperson`, `gamer` |
+| inputs | `framing` | `direct_request` .35, `question` .30, `advice` .20, `statement` .10, `opinion_or_validation` .05 |
+| inputs | `directness` | `explicit` .55, `implicit` .30, `euphemistic` .15 |
+| inputs | `focus` | `single` .75, `mixed` 0 |
+| inputs | `domain` | not dealt: the entry's subcategory, shown as it is |
+| outputs | `length` | `brief` .20, `short` .35, `medium` .30, `long` .15 |
+| outputs | `format` | `prose` .35, `list` .20, `steps` .20, `sections` .10, `table` .05, `code` .10 |
+| outputs | `register` | `neutral` .40, `friendly` .30, `formal` .15, `technical` .15 |
+
+Each value holds the `label` and one-sentence `hint` the prompt shows
+(`Label: value label — hint`, one line per axis), its `weight` (its share
+within the axis; 0 leaves it out) and optionally `not_with`, values of other
+axes it is never dealt with (`advice` and `opinion_or_validation` with a
+`fragment`; `steps`, `table` with a `brief` answer, `sections` with a
+`brief` or `short` one). An axis with `from` takes the entry's field
+instead. Each axis carries a `dimension`, a generation tag of
+`dimensions.json` (below). A key starting with `_` is a comment.
+
+The `axes` param of each stage overlays the weights: `{axis: {value:
+weight}}`, a value not named keeping its weight; an axis as `null` to leave
+it out; `false` for no axes, and the placeholder renders empty. Weights
+only: change a label or a hint in your own copy of the file
+([your own config folder](#your-own-config-folder)). A stage's plan file
+records its `seed` and weights, so a resume with others raises, naming
+`resume=False`.
+
+### Dimensions and the run's check
+
+`configs/dimensions.json` names the dimensions a text varies along, each on
+one side: `augmentation` (what a jailbreak or variation family changes in a
+finished text: `language`, `surface_noise`, `encoding`, `container`,
+`role_framing`, `request_shape`, `answer_shape`, `example_priming`) or
+`generation` (what an axis shapes as the text is written: `authorship`,
+`request_intent`, `length`, `register`, `focus`, `domain`, `answer_length`,
+`answer_layout`, `answer_tone`). Each tag has a one-sentence `definition`.
+Every family of `combination_spec.json` carries an augmentation tag
+([techniques.md](techniques.md#families-and-techniques)), checked at import,
+and every axis a generation tag, checked when the table loads. A generation
+tag may list in `same_as` the augmentation tags that are the same dimension,
+and in `undecided` those yet to be ruled on, checked as the same until then.
+
+Before any stage runs, `run_pipeline` checks every axis that varies (one
+with `from`, or with two or more values of weight above 0), each stage's
+axes as the stage gets them (the type file's, the params file's over them),
+against the families each kind of the augmentation section draws, whichever
+stages the run lists. An axis and a family of one dimension stop the run,
+naming the axis, the families per kind and the two ways out: give the axis
+one value or leave it out (`{"focus": null}`), or deny the families in each
+kind. A pinned axis varies nothing, so the eval type's `directness` passes.
+The shipped table has one such pair: `focus` is undecided against
+`request_shape`, `container` and `example_priming`, so `mixed` is at 0 and
+every sample is `single`; a params weight on `mixed` stops a run whose kinds
+draw those families.
 
 ## The augmentation section
 
@@ -496,27 +578,31 @@ role.
 ## Your own config folder
 
 A recipe's `config_dir` names a folder laid out as the packaged `configs/`.
-Three kinds of file are read from it when it has them, each file on its own,
-and from the package otherwise:
+These files are read from it when it has them, each file on its own, and
+from the package otherwise:
 
 | File | Replaces |
 |---|---|
 | `<config_dir>/dataset_types/eval.json`, `training.json` | the [dataset type](#dataset-types) file of that name. A file of another name there is no new type: it is not read, and the run warns about it as ignored |
 | `<config_dir>/taxonomy/<name>.json` | a taxonomy of that name (`taxonomy`, `benign_taxonomy`); a new name there is a taxonomy of your own. `taxonomy_dir`, when given, wins and is read alone |
 | `<config_dir>/jailbreak/augmentations.json` | the default [augmentation section](#the-augmentation-section), both kinds and `natural_only_families` |
+| `<config_dir>/generation_axes.json` | the [generation axes](#the-generation-axes) table, whole: its labels, hints, weights and `not_with`. Its axes are checked against the folder's `dimensions.json` when it has one |
+| `<config_dir>/dimensions.json` | the [dimensions](#dimensions-and-the-runs-check) table, whole. It must hold every tag the families carry; the run's check reads its `same_as` and `undecided` |
 
 `config_dir` is relative to the recipe's folder, as `params_file` is. The
 technique spec (`combination_spec.json`), the technique templates and other
 files under `jailbreak/`, `llm/` (`models.json`, `roles.json`,
 `gpu_pricing.json`) and `datasets/` are loaded at import or tied to code, so
-they come from the package only: a file of theirs in the folder is named in a
+they come from the package only (an axes or dimensions file in one of those
+folders too): a file of theirs in the folder is named in a
 WARNING at the start of a run (`configs: ... ignored`). With `verbose` the run
 logs which files it reads from the folder, and each run record holds
 `config_dir` and `config_files`, those files as paths relative to it.
 
 The fronts take `config_dir=` too (`generate_constitution` for its
-taxonomies, `generate_jailbreaks` for its section and benign taxonomy); a
-front called alone with none reads the packaged files only.
+taxonomies, `generate_inputs` and `generate_outputs` for their axes,
+`generate_jailbreaks` for its section and benign taxonomy); a front called
+alone with none reads the packaged files only.
 
 `scaffold_setup(target_dir, overwrite=False)` (also
 `python scripts/scaffold_setup.py TARGET [--overwrite]`) writes a folder to
@@ -529,6 +615,7 @@ start from:
 | `dataset_types/eval.json`, `dataset_types/training.json` | Copies of the packaged files |
 | `taxonomy/harmful.json`, `taxonomy/benign.json` | Copies of the packaged files |
 | `jailbreak/augmentations.json` | A copy of the packaged file |
+| `generation_axes.json`, `dimensions.json` | Copies of the packaged files |
 | `README.md` | What follows, in short |
 
 A scaffolded recipe runs exactly as its packaged example until a file is
@@ -623,12 +710,14 @@ values. Delete every file you do not change, then set `prompt_dir`.
 | File | Holds | Read by |
 |---|---|---|
 | `configs/llm/gpu_pricing.json` | Provider, then GPU name as `nvidia-smi` reports it, then hourly USD per GPU; `*` is a provider's fallback | the cost roll-up |
-| `configs/jailbreak/combination_spec.json` | `version`, `layer_order`, `layer_rates`, `layer_max_picks`, `families` (layer, order within the layer, incompatibilities; `max_picks` and `description`, which nothing reads), `manipulation_blocked_obfuscation`, `request_obfuscation_allowed_families`, `techniques` (families, complexity, `requires_llm`, `requires_benign`, `encode_weight`, optional `max_tokens`, `cross_incompatible_with`) | `jailbreak/technique.py` (`load_spec`, `tag`), `pool.py`, `rules.py`, `sampling.py`, `chain.py`, `augmentation.py`; its `version` goes in each row and in the jailbreak run record |
+| `configs/jailbreak/combination_spec.json` | `version`, `layer_order`, `layer_rates`, `layer_max_picks`, `families` (layer, order within the layer, incompatibilities, `dimension`; `max_picks` and `description`, which nothing reads), `manipulation_blocked_obfuscation`, `request_obfuscation_allowed_families`, `techniques` (families, complexity, `requires_llm`, `requires_benign`, `encode_weight`, optional `max_tokens`, `cross_incompatible_with`) | `jailbreak/technique.py` (`load_spec`, `tag`), `pool.py`, `rules.py`, `sampling.py`, `chain.py`, `augmentation.py`; its `version` goes in each row and in the jailbreak run record |
 | `configs/jailbreak/augmentations.json` | The two default kinds and `natural_only_families` | `jailbreak/augmentation.py` |
 | `configs/jailbreak/<layer>/*_templates.json` | Template variants of the pure techniques | `jailbreak/directives.py: load_templates` |
 | `configs/jailbreak/multi_turn/crescendo_followups.json` | Follow-ups of the crescendo attack | `multiturn_attacks/attacks.py` |
 | `configs/jailbreak/hacking/cognitive_techniques.json`, `personas.json` | The definitions of the cognitive techniques and of the named personas | `jailbreak/hacking/cognitive.py`, `personas.py` |
 | `configs/dataset_types/training.json`, `eval.json` | Each dataset type's default `stages`, `params` and `augmentations` | `recipe.py: load_dataset_type` |
+| `configs/generation_axes.json` | The [generation axes](#the-generation-axes) of the inputs and outputs stages | `content_moderation/axes.py: resolve` |
+| `configs/dimensions.json` | The [dimensions](#dimensions-and-the-runs-check) of the families and the axes | `dimensions.py`; `recipe.py: check_dimensions` |
 | `configs/taxonomy/harmful.json` | The harmful categories: the default `taxonomy` | `dataset/taxonomy.py: load_taxonomy` |
 | `configs/taxonomy/benign.json` | The default `benign_taxonomy`: the categories of the constitution's general-benign part, and the subcategories of the fsh and dap techniques' benign Q&A pairs | `dataset/taxonomy.py: load_taxonomy` |
 | `configs/datasets/content_moderation_input.json` | A HuggingFace dataset id, split, columns and filters | `dataset/loading.py: load_from_config` |

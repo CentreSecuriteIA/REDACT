@@ -192,7 +192,7 @@ is known. Capture never adds a column or a row.
 | Stage | Capture ids |
 |---|---|
 | outputs | `<input_id>/output`, `<input_id>/val_out`; later attempts under `/attempt_<n>` |
-| seeded inputs | `<entry id>/input_<style>` (one sample per call required); `<sample_id>/val_in_<style>` |
+| seeded inputs | `<entry id>/<iteration>/input_<style>`; `<sample_id>/val_in_<style>` |
 | paraphrase | `<input_id>/paraphrase/attempt_<iteration>`, renamed to `<input_id>/paraphrase/<sample_id>` |
 | jailbreaks | `<input_id>/<label>/attempt_<iteration>/<technique>/<n>`, the root renamed to `<input_id>/<label>/<sample_id>` |
 
@@ -267,7 +267,7 @@ the same `rpm`.
 |---|---|
 | `generate_sample(client, messages, **kw)` | One call, one reply |
 | `batch_generate_samples(client, messages_list, batch_size=32, ...)` | Many replies, in chunks, in order |
-| `assert_single_sample_per_call(client, n)` | Raises when internals capture meets several samples per call |
+| `assert_single_sample_per_call(client, n)` | Raises when internals capture meets several samples per call; no stage calls it, since every call of the inputs stage asks for one sample |
 | `aio.submit(coro)`, `aio.run(coro)` | Schedule on the shared loop; run and block. The loop lives on one daemon thread, started on first use |
 | `observe.record(event)` | Hand an event to the installed emitter; a no-op when none is; never raises |
 
@@ -284,7 +284,7 @@ the same `rpm`.
 | `extract_numbered_list`, `extract_structured_qa`, `extract_and_clean` | Parse a reply: a numbered list (`1. sample`, `2) sample`, `3- sample`, `4: sample`), or `**Question:** ... **Answer:** ...` pairs, optionally headed `**Prompt N:**`. `extract_numbered_list(text, strict=True)` rejects a reply that is not one clean list. With `expected_count`, `extract_structured_qa` and `extract_and_clean` reject a reply with another count whole: the result is empty |
 | `clean_sample` | Strip markdown and stray chat tokens |
 | `scaffold_prompt_tree(target_dir, source_dir=None, mode="copy")` | Write a copy (`copy`) or skeletons (`empty`) of the prompt tree |
-| `scaffold_setup(target_dir, *, overwrite=False)` | Write a setup folder: the two example recipes with `"config_dir": "."`, their params files, the dataset type, taxonomy and augmentation files a `config_dir` overlays, and a `README.md` ([configuration.md](../configuration.md#your-own-config-folder)) |
+| `scaffold_setup(target_dir, *, overwrite=False)` | Write a setup folder: the two example recipes with `"config_dir": "."`, their params files, the dataset type, taxonomy, augmentation, generation axes and dimensions files a `config_dir` overlays, and a `README.md` ([configuration.md](../configuration.md#your-own-config-folder)) |
 
 A render error names the missing placeholder, and the prompt file when the
 template comes from `PromptTemplate.load`.

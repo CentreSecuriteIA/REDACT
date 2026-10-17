@@ -30,7 +30,7 @@ the technique names are in [techniques.md](../techniques.md).
 | `augmentation.py` | `KINDS`, `defaults(config_dir)`, `resolve(section, kind, base=None, config_dir=None)`, `rounds_of(kind)`, `apply_flat_keywords`, `FLAT_KEYWORDS` |
 | `rules.py` | `compatible(selected, pool, remaining_complexity)`, `request_obfuscation_candidates` |
 | `sampling.py` | `sample_combination`, `sample_exact_combination`, `_pick_by_family` |
-| `plan.py` | `plan_run`, `assign_combination`, `combination_of`, `coverage`, `coverage_path`, `plan_path`, `plan_inputs`, `changed_plan_inputs` (the `<stem>.plan.json` beside the manifest), `default_escalation_schedule`; it deals from `dataset.dealing.Dealer` |
+| `plan.py` | `plan_run`, `assign_combination`, `combination_of`, `coverage`, `plan_inputs` (the record of the `<stem>.plan.json` beside the manifest, written and compared by `dataset/planfile.py`), `default_escalation_schedule`; it deals from `dataset.dealing.Dealer` |
 | `chain.py` | `run_chain`, `combine_techniques`, `in_layer_order`, `apply_combination` |
 | `units.py` | `pending_units`, `is_pending`, `unit_gen`, `row_of`, `error_row_of` |
 | `pipeline.py` | `run_augmentation`, the stage core |
@@ -96,9 +96,9 @@ core, called once per kind:
 2. **Ledger and resume.** `Ledger.sidecar(out_path, ("input_id",
    "iteration"))`, then `resume_state(..., artifact=out_path,
    manifest=manifest)`: the lock, the cut-back, the finished keys.
-3. **Plan.** On a resume with a manifest, reuse it: `changed_plan_inputs`
+3. **Plan.** On a resume with a manifest, reuse it: `planfile.changed_plan`
    compares the run's seed, rounds, pool, `family_weights` and `layer_rates`
-   with `<stem>.plan.json`; a difference raises a `ValueError` naming the
+   (`plan_inputs`) with `<stem>.plan.json`; a difference raises a `ValueError` naming the
    keys and `resume=False`, and a manifest without the file logs a WARNING
    and runs unchecked. Otherwise the old coverage and plan files are removed,
    and `plan_run` writes the plan file, one manifest row per input and round,

@@ -403,8 +403,9 @@ Datasets/
   constitution_inputs/
     <category>/samples.csv               # one per category, accepted and rejected rows
     constitution_inputs.manifest.jsonl  constitution_inputs.state.jsonl
+    constitution_inputs.plan.json  constitution_inputs.coverage.csv
   constitution_inputs_merged.csv         # the accepted inputs, for build
-  output_responses.csv                   # + .manifest.jsonl, .state.jsonl
+  output_responses.csv                   # + .manifest.jsonl, .state.jsonl, .coverage.csv, .plan.json
   paraphrases_inputs.csv                 # + .manifest.jsonl, .state.jsonl
   paraphrases_outputs.csv                # + .manifest.jsonl, .state.jsonl
   jailbreaks.csv                         # + .manifest.jsonl, .state.jsonl, .coverage.csv, .plan.json
@@ -429,6 +430,8 @@ Other files you may see:
 | `<output>.cut` | Bytes a resume cut off an output: the tail of a save that did not finish |
 | `<ledger>.dropping` | A fresh run of one seeded-inputs style that did not finish. Run it again |
 | `<kind>.plan.json` | What a jailbreak kind's plan was made with: `seed`, `rounds`, `pool`, `family_weights`, `layer_rates`. A resume compares them with the run's |
+| `constitution_inputs.plan.json`, `output_responses.plan.json` | What the deal of the generation axes was made with: `seed`, the axes' weights, and for the inputs `samples_per_entry`. A resume compares them with the run's |
+| `constitution_inputs.coverage.csv`, `output_responses.coverage.csv` | Per axis value, the specs planned and accepted per category and entry type |
 | `<kind>.coverage.csv` | Per layer, family and technique of a kind's plan, the count per category, entry type and iteration, with a zero row for each pool technique never drawn |
 | `*.tmp` | A file being replaced. It is gone once the write finishes; a kill can leave one, which the next write replaces, and `resume: false` removes the output's |
 
