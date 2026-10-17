@@ -62,6 +62,19 @@ The library logs under the `redact` logger and configures nothing. In your
 own script, call `logging.basicConfig(level=logging.INFO)` to see progress.
 `python scripts/inspect_run.py <data_dir>` prints each stage's run record.
 
+To start a setup of your own, write a folder of recipes and the configs
+they read:
+
+```bash
+python scripts/scaffold_setup.py ./my_setup
+python scripts/run.py ./my_setup/eval_recipe.json
+```
+
+Each recipe there has `"config_dir": "."`: the folder's dataset type,
+taxonomy and augmentation files are read in place of the library's, file by
+file ([configuration.md](configuration.md#your-own-config-folder)). Delete
+every file you do not change, so it keeps following the library.
+
 The notebooks in `notebooks/` walk through a run step by step:
 `eval_pipeline`, `training_pipeline`, `content_moderation` and
 `jailbreak_augmentation`.
@@ -122,8 +135,12 @@ the stage's name.
   general-benign part is built from and whose subcategories the benign data
   of the `fsh` and `dap` techniques covers (default `benign`). Both are file
   names under `taxonomy_dir`, the packaged `configs/taxonomy/` by default.
-- `params_file` is relative to the recipe's folder. `data_dir`,
-  `prompt_dir` and `taxonomy_dir` are relative to the current directory.
+- `params_file` and `config_dir` are relative to the recipe's folder.
+  `data_dir`, `prompt_dir` and `taxonomy_dir` are relative to the current
+  directory.
+- `config_dir` names a folder of your own configs: a dataset type,
+  taxonomy or `jailbreak/augmentations.json` file there is read in place of
+  the packaged one; `taxonomy_dir`, when given, still wins for taxonomies.
 - A params file holds one entry per stage, under the stage's name. Any
   other top-level key raises, except a comment key that starts with `_`.
   Inside a stage's entry every key must be a parameter of the stage's front,
@@ -420,7 +437,8 @@ and `copies` for a vLLM model or `workers` for a hosted one; `copies` is the
 count the plan made before any stage ran, and when a build with copies fails
 and one copy loads instead, the trace's `load` event says so with `fallback`
 and `planned_copies`), `dataset_type` and `dataset_type_hash` (the content
-id of the type file the run read), and for the jailbreak stage
+id of the type file the run read), with a `config_dir` that folder and
+`config_files` (the files read from it), and for the jailbreak stage
 `spec_version` and the resolved `augmentation` section.
 
 ## Telemetry and cost

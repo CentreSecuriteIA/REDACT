@@ -1,8 +1,8 @@
 # Configuration reference
 
 Every key a run reads: the recipe, its dataset type, the params file, the
-augmentation section, the model registry, the environment, and the prompt
-overlay. For how these fit together in a run, see [running.md](running.md).
+augmentation section, the model registry, the environment, your own config
+folder, and the prompt overlay. For how these fit together in a run, see [running.md](running.md).
 
 ## Recipe keys
 
@@ -15,12 +15,13 @@ that starts with `_` is a comment.
 | `data_dir` | path | the default working root | The run's root; `Datasets/` and `Data_cache/` go under it. Relative to the current directory. `run_pipeline(data_dir=...)` and `--data-dir` override it |
 | `models` | object | every role its default | A model per role; see [below](#the-models-object) |
 | `taxonomy` | name or object | `"harmful"` | The taxonomy of the constitution, by file name or as a loaded object. The former name `"content_moderation_categories"` loads `harmful` with a `DeprecationWarning`, for one release |
-| `taxonomy_dir` | path | `configs/taxonomy/` | Where a taxonomy name (`taxonomy`, `benign_taxonomy`) is looked up |
+| `taxonomy_dir` | path | `<config_dir>/taxonomy/` for a file it has, else `configs/taxonomy/` | Where a taxonomy name (`taxonomy`, `benign_taxonomy`) is looked up; given, it wins over `config_dir` |
 | `benign_taxonomy` | name or object | `"benign"` | The taxonomy whose categories the constitution's general-benign part is built from, and whose subcategories the benign Q&A pairs of the `fsh` and `dap` techniques are generated for. Read at load, and checked to have a category, when the recipe runs `constitution` and its dataset type switches the general-benign part on, or runs `jailbreaks` and a kind draws a technique that needs benign data |
 | `prompt_dir` | path | none | The prompt overlay; see [below](#the-prompt-overlay) |
 | `stages` | list of stage names | the dataset type's: all six | The stages to run, in order, each once. `[]` runs nothing |
 | `augmentations` | object | the dataset type's | The jailbreak stage's augmentation section, over the dataset type's; see [below](#the-augmentation-section) |
 | `params_file` | path | none | The params file, relative to the recipe's folder. `--params` and `run_pipeline(params=...)` override it |
+| `config_dir` | path | none | [Your own config folder](#your-own-config-folder), relative to the recipe's folder: its dataset type, taxonomy and augmentation files are read in place of the packaged ones. Not a folder: raises at load |
 | `resume` | bool | `true` | `false` starts every listed stage over ([running.md](running.md#resume-fresh-runs-and-a-kill-partway-through)). Any other value than `true` or `false`, the string `"false"` too, raises |
 
 A top-level `copies` key other than `null` raises: write the count in the
@@ -484,6 +485,51 @@ role.
 | `CUDA_DEVICE_ORDER` | CUDA | Set to `PCI_BUS_ID` by a plan or a load unless set, so CUDA counts the cards as `nvidia-smi` does |
 | `VLLM_WORKER_MULTIPROC_METHOD` | vLLM | Set to `spawn` before a load unless set |
 | `VLLM_PROCESS_NAME_PREFIX` | the card check | The title prefix of vLLM's engine processes, default `VLLM`, named in the `kill -9` advice |
+
+## Your own config folder
+
+A recipe's `config_dir` names a folder laid out as the packaged `configs/`.
+Three kinds of file are read from it when it has them, each file on its own,
+and from the package otherwise:
+
+| File | Replaces |
+|---|---|
+| `<config_dir>/dataset_types/<type>.json` | the [dataset type](#dataset-types) file; a new name there is a dataset type of its own |
+| `<config_dir>/taxonomy/<name>.json` | a taxonomy of that name (`taxonomy`, `benign_taxonomy`); a new name there is a taxonomy of your own. `taxonomy_dir`, when given, wins and is read alone |
+| `<config_dir>/jailbreak/augmentations.json` | the default [augmentation section](#the-augmentation-section), both kinds and `natural_only_families` |
+
+`config_dir` is relative to the recipe's folder, as `params_file` is. The
+technique spec (`combination_spec.json`), the technique templates and other
+files under `jailbreak/`, `llm/` (`models.json`, `roles.json`,
+`gpu_pricing.json`) and `datasets/` are loaded at import or tied to code, so
+they come from the package only: a file of theirs in the folder is named in a
+WARNING at the start of a run (`configs: ... ignored`). With `verbose` the run
+logs which files it reads from the folder, and each run record holds
+`config_dir` and `config_files`, those files as paths relative to it.
+
+The fronts take `config_dir=` too (`generate_constitution` for its
+taxonomies, `generate_jailbreaks` for its section and benign taxonomy); a
+front called alone with none reads the packaged files only.
+
+`scaffold_setup(target_dir, overwrite=False)` (also
+`python scripts/scaffold_setup.py TARGET [--overwrite]`) writes a folder to
+start from:
+
+| File | What it is |
+|---|---|
+| `eval_recipe.json`, `training_recipe.json` | The packaged example recipes, with `"config_dir": "."` and their params file beside them |
+| `eval_params.json`, `training_params.json` | The example params files, as they are |
+| `dataset_types/eval.json`, `dataset_types/training.json` | Copies of the packaged files |
+| `taxonomy/harmful.json`, `taxonomy/benign.json` | Copies of the packaged files |
+| `jailbreak/augmentations.json` | A copy of the packaged file |
+| `README.md` | What follows, in short |
+
+A scaffolded recipe runs exactly as its packaged example until a file is
+changed. Every file in the folder wins over the packaged copy, so delete each
+file you do not change to keep getting the library's updates to it. It
+refuses to overwrite a file the folder holds, naming them, unless asked to.
+Prompts are a separate tier: [the prompt overlay](#the-prompt-overlay) and
+`scripts/scaffold_prompts.py`.
 
 ## The prompt overlay
 

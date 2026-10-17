@@ -2,7 +2,8 @@
 section says.
 
 A section is ``{"adversarial": {...}, "natural": {...}}``. A kind given
-overlays its default from ``configs/jailbreak/augmentations.json`` key by key:
+overlays its default from ``configs/jailbreak/augmentations.json`` (a config
+folder's, given one, see :mod:`redact.config_overlay`) key by key:
 a value given replaces the default's whole, except ``layers``, ``families``
 and ``techniques``, whose ``allow`` and ``deny`` lists replace the default's
 one by one. A kind given as ``None`` is off; a kind left out is the default.
@@ -16,8 +17,9 @@ import json
 import logging
 from functools import lru_cache
 from numbers import Real
+from pathlib import Path
 
-from redact import paths
+from redact.config_overlay import config_file
 from redact.types import ALL_ENTRY_TYPES
 
 from .plan import default_escalation_schedule
@@ -51,25 +53,32 @@ FLAT_KEYWORDS = (
 )
 
 
-@lru_cache(maxsize=1)
-def _packaged() -> dict:
-    path = paths.jailbreak_configs_dir() / "augmentations.json"
-    return json.loads(path.read_text(encoding="utf-8"))
+@lru_cache(maxsize=8)
+def _read(path: str, modified: int) -> dict:
+    return json.loads(Path(path).read_text(encoding="utf-8"))
 
 
-def defaults() -> dict:
-    """The packaged section, both kinds, as a copy the caller may change."""
-    return copy.deepcopy({kind: _packaged()[kind] for kind in KINDS})
+def _section_file(config_dir: str | Path | None) -> dict:
+    """``augmentations.json``, read again when the file changes."""
+    path = config_file("jailbreak/augmentations.json", config_dir)
+    return _read(str(path), path.stat().st_mtime_ns)
 
 
-def natural_only_families() -> list[str]:
+def defaults(config_dir: str | Path | None = None) -> dict:
+    """The default section, both kinds, as a copy the caller may change: the
+    packaged one, or ``config_dir``'s when it has the file."""
+    return copy.deepcopy({kind: _section_file(config_dir)[kind] for kind in KINDS})
+
+
+def natural_only_families(config_dir: str | Path | None = None) -> list[str]:
     """The families the adversarial kind draws only when its
     ``families.allow`` names them."""
-    return list(_packaged()["natural_only_families"])
+    return list(_section_file(config_dir)["natural_only_families"])
 
 
 def resolve(
     section: dict | None, kind: str, base: dict | None = None,
+    config_dir: str | Path | None = None,
 ) -> dict | None:
     """One kind of ``section``, overlaid on its default and checked.
 
@@ -78,7 +87,8 @@ def resolve(
     or, with ``base``, ``base``'s kind resolved over it: a kind ``section``
     leaves out is then ``base``'s (off when ``base`` gives it as ``None``),
     and a kind it gives overlays ``base``'s, or the packaged one when
-    ``base`` switches it off. ``layers``, ``families`` and
+    ``base`` switches it off; ``config_dir``'s ``augmentations.json``
+    replaces the packaged one when it has the file. ``layers``, ``families`` and
     ``techniques`` come back with both their lists (``allow`` ``None`` for
     all), and a kind with ``rounds`` with ``iterations`` set to their number.
     The adversarial ``families.deny`` holds every family of
@@ -107,10 +117,11 @@ def resolve(
             "each an object or null.")
     if kind in section and section[kind] is None:
         return None
-    default = resolve(base, kind) if base is not None else None
+    default = (resolve(base, kind, config_dir=config_dir)
+               if base is not None else None)
     if base is not None and kind not in section:
         return default
-    default = default or defaults()[kind]
+    default = default or defaults(config_dir)[kind]
     given = section.get(kind, {})
     where = f"augmentations.{kind}"
     if not isinstance(given, dict):
@@ -138,7 +149,7 @@ def resolve(
             "techniques.allow, as the natural kind draws only what they name.")
     if kind == "adversarial":
         families = resolved["families"]
-        families["deny"] += [name for name in natural_only_families()
+        families["deny"] += [name for name in natural_only_families(config_dir)
                              if name not in (families["allow"] or ())
                              and name not in families["deny"]]
     _check_names(where, resolved)

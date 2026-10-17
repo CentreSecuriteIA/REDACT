@@ -628,7 +628,7 @@ def test_load_recipe_rejects_an_unknown_key_naming_the_valid_ones():
         "The recipe has unknown key(s) ['augmentation']; write only "
         "['dataset_type', 'data_dir', 'models', 'taxonomy', 'taxonomy_dir', "
         "'benign_taxonomy', 'prompt_dir', 'stages', 'augmentations', "
-        "'params_file', 'resume'].")
+        "'params_file', 'resume', 'config_dir'].")
     # A key starting with "_" is a comment.
     load_recipe({"dataset_type": "eval", "_comment": "a note"})
 
@@ -862,8 +862,9 @@ def test_a_type_param_the_front_does_not_take_is_refused(monkeypatch):
     from redact.stages import STAGES
 
     monkeypatch.setattr(recipe_module, "load_dataset_type",
-                        lambda name: {"stages": [], "augmentations": {},
-                                      "params": {"outputs": {"batch_sise": 2}}})
+                        lambda name, config_dir=None: {
+                            "stages": [], "augmentations": {},
+                            "params": {"outputs": {"batch_sise": 2}}})
     with pytest.raises(ValueError, match=r"names \['batch_sise'\], which "
                                          "generate_outputs does not take"):
         STAGES["outputs"].check(_context("eval", {}))

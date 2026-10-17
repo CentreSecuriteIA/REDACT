@@ -126,7 +126,8 @@ the params.
 `RunContext` is what one run hands the stages: `data_dir`, `dataset_type`,
 `models` (role to name or `None`), `prompt_dir`, `taxonomy`,
 `taxonomy_dir`, `benign_taxonomy`, `params`, `augmentations` (resolved),
-`resume`, `verbose`.
+`resume`, `verbose`, `config_dir` (the user's config folder, see
+[configuration.md](../configuration.md#your-own-config-folder)).
 
 ## recipe.py
 

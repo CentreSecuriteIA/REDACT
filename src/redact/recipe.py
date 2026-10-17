@@ -7,8 +7,10 @@ model is served, see :func:`serving_of`),
 ``taxonomy``/``taxonomy_dir``/``prompt_dir``,
 ``benign_taxonomy`` (see :func:`benign_taxonomy_of`), an ordered
 ``stages`` list, ``augmentations`` (the augmentation section, see
-:func:`augmentations_of`), a ``params_file`` and ``resume``. Its params file
-holds each stage's tunables under the stage's name.
+:func:`augmentations_of`), a ``params_file``, ``resume`` and a
+``config_dir`` (a folder of your own configs, read relative to the recipe,
+see :mod:`redact.config_overlay`). Its params file holds each stage's
+tunables under the stage's name.
 
 The dataset type's file gives the defaults the recipe leaves out: its
 ``stages`` (the recipe's replace them), its ``augmentations`` (the recipe's
@@ -23,6 +25,7 @@ from functools import cache
 from pathlib import Path
 
 from redact import paths
+from redact.config_overlay import config_file, taxonomy_folder
 from redact.stages import STAGES, includes_general_benign
 
 _DEFAULT_MODELS = {
@@ -40,7 +43,7 @@ _SERVING_KEYS = ("backend_type", "copies", "workers")
 # The keys a recipe may hold, beside comments ("_" first).
 _RECIPE_KEYS = ("dataset_type", "data_dir", "models", "taxonomy", "taxonomy_dir",
                 "benign_taxonomy", "prompt_dir", "stages", "augmentations",
-                "params_file", "resume")
+                "params_file", "resume", "config_dir")
 
 # The former name of the packaged taxonomy "harmful", read for one release.
 _FORMER_TAXONOMY = "content_moderation_categories"
@@ -49,19 +52,9 @@ _FORMER_TAXONOMY = "content_moderation_categories"
 _TYPE_KEYS = ("stages", "params", "augmentations")
 
 
-def _dataset_types_dir() -> Path:
-    return paths.configs_dir() / "dataset_types"
-
-
 @cache
-def _dataset_type_file(name: str) -> dict:
-    path = _dataset_types_dir() / f"{name}.json"
-    if not path.is_file():
-        known = sorted(p.stem for p in _dataset_types_dir().glob("*.json"))
-        raise ValueError(
-            f"dataset_type {name!r} has no file in configs/dataset_types; write "
-            f"one of {known}.")
-    with path.open(encoding="utf-8") as fh:
+def _read_type_file(path: str, modified: int) -> dict:
+    with Path(path).open(encoding="utf-8") as fh:
         data = json.load(fh)
     keys = [key for key in data if not key.startswith("_")]
     if sorted(keys) != sorted(_TYPE_KEYS):
@@ -71,24 +64,64 @@ def _dataset_type_file(name: str) -> dict:
     return data
 
 
-def load_dataset_type(name: str) -> dict:
-    """The packaged file ``configs/dataset_types/<name>.json``: the default
-    ``stages``, ``params`` per stage and ``augmentations`` overlay of a run
-    of that type, as a copy the caller may change.
+def _dataset_type_file(name: str, config_dir: str | Path | None) -> dict:
+    """The type file, read again when it changes."""
+    path = config_file(f"dataset_types/{name}.json", config_dir)
+    if not path.is_file():
+        folders = [paths.configs_dir() / "dataset_types"]
+        if config_dir is not None:
+            folders.append(Path(config_dir) / "dataset_types")
+        known = sorted({p.stem for folder in folders for p in folder.glob("*.json")})
+        where = ("configs/dataset_types" if config_dir is None
+                 else f"configs/dataset_types or {folders[1]}")
+        raise ValueError(
+            f"dataset_type {name!r} has no file in {where}; write one of {known}.")
+    return _read_type_file(str(path), path.stat().st_mtime_ns)
+
+
+def load_dataset_type(name: str, config_dir: str | Path | None = None) -> dict:
+    """The file ``configs/dataset_types/<name>.json``, ``config_dir``'s when
+    it has one, else the packaged one: the default ``stages``, ``params``
+    per stage and ``augmentations`` overlay of a run of that type, as a copy
+    the caller may change.
 
     Raises:
         ValueError: No file has that name, the file does not hold exactly
             those three keys, or :func:`load_params` refuses its params.
     """
-    return copy.deepcopy(_dataset_type_file(name))
+    return copy.deepcopy(_dataset_type_file(name, config_dir))
 
 
-def dataset_type_hash(name: str) -> str:
+def dataset_type_hash(name: str, config_dir: str | Path | None = None) -> str:
     """The content id of the dataset type's file, as parsed: what a run
     record names the defaults it ran with by."""
     from .dataset import content_id
 
-    return content_id(json.dumps(_dataset_type_file(name), sort_keys=True))
+    return content_id(
+        json.dumps(_dataset_type_file(name, config_dir), sort_keys=True))
+
+
+def _config_dir(data: dict) -> str | None:
+    """The recipe's ``config_dir``, relative to the recipe's folder.
+
+    Raises:
+        ValueError: It is not a folder.
+    """
+    given = data.get("config_dir")
+    if given is None:
+        return None
+    if not isinstance(given, str | Path):
+        raise ValueError(f"config_dir must be a folder's path, got {given!r}.")
+    folder = Path(given)
+    if not folder.is_absolute() and data["_base_dir"] is not None:
+        folder = Path(data["_base_dir"]) / folder
+    folder = folder.absolute()      # so a loaded recipe loads again the same
+    if not folder.is_dir():
+        raise ValueError(
+            f"config_dir {str(folder)!r} is not a folder; write the folder of "
+            "your dataset_types/, taxonomy/ and jailbreak/ files, relative to "
+            "the recipe.")
+    return str(folder)
 
 
 def load_recipe(recipe: str | Path | dict) -> dict:
@@ -109,7 +142,8 @@ def load_recipe(recipe: str | Path | dict) -> dict:
             '"training".')
     if not isinstance(dtype, str):
         raise ValueError(f'dataset_type must be "eval" or "training", got {dtype!r}.')
-    dataset_type = load_dataset_type(dtype)
+    data["config_dir"] = _config_dir(data)
+    dataset_type = load_dataset_type(dtype, data["config_dir"])
 
     # `is None`, not `or`: an explicit `stages: []` means "run nothing", and
     # `or` turned that into the full default pipeline — the opposite of what
@@ -239,7 +273,8 @@ def benign_taxonomy_of(recipe: dict, stages: list[str]) -> dict | str:
             f"benign_taxonomy must name a taxonomy file, got {taxonomy!r}; write "
             f'a name such as "{DEFAULT_TAXONOMY}", or leave it out.')
     uses = []
-    typed = (load_dataset_type(recipe["dataset_type"])["params"]
+    config_dir = recipe.get("config_dir")
+    typed = (load_dataset_type(recipe["dataset_type"], config_dir)["params"]
              if recipe.get("dataset_type") else {})
     if "constitution" in stages and includes_general_benign(
             typed.get("constitution") or {}):
@@ -255,15 +290,16 @@ def benign_taxonomy_of(recipe: dict, stages: list[str]) -> dict | str:
         return taxonomy
     where = repr(taxonomy) if isinstance(taxonomy, str) else "(an object)"
     try:
-        loaded = (load_taxonomy(taxonomy, config_dir=recipe.get("taxonomy_dir"))
+        folder = taxonomy_folder(taxonomy, recipe.get("taxonomy_dir"), config_dir)
+        loaded = (load_taxonomy(taxonomy, config_dir=folder)
                   if isinstance(taxonomy, str) else taxonomy)
         categories = benign_categories(loaded)
     except (OSError, ValueError, AttributeError, TypeError) as error:
         raise ValueError(
             f"benign_taxonomy {where} cannot be read: {error}. "
             f"{' and '.join(uses).capitalize()}; name a taxonomy file in "
-            "taxonomy_dir (the packaged configs/taxonomy when it is left out, "
-            "which holds benign.json).") from None
+            "taxonomy_dir (when it is left out, the config_dir's taxonomy/, "
+            "then the packaged configs/taxonomy, which holds benign.json).") from None
     if not categories:
         raise ValueError(
             f"benign_taxonomy {where} has no category; write its categories, "
@@ -275,7 +311,8 @@ def augmentations_of(recipe: dict, jailbreak_params: dict | None = None) -> dict
     """The recipe's augmentation section, each kind resolved over its default.
 
     The default is the recipe's dataset type's section over the packaged
-    one; with no ``dataset_type`` in ``recipe``, the packaged one. A kind
+    one; with no ``dataset_type`` in ``recipe``, the packaged one. Both are
+    read through the recipe's ``config_dir`` when it has one. A kind
     given as null is off and a kind left out is the default
     (:func:`redact.jailbreak.augmentation.resolve`). Today's flat form, the
     keywords of ``generate_jailbreaks`` the section replaced written at the top
@@ -300,7 +337,8 @@ def augmentations_of(recipe: dict, jailbreak_params: dict | None = None) -> dict
         resolve,
     )
 
-    base = (load_dataset_type(recipe["dataset_type"])["augmentations"]
+    config_dir = recipe.get("config_dir")
+    base = (load_dataset_type(recipe["dataset_type"], config_dir)["augmentations"]
             if recipe.get("dataset_type") else None)
     section = recipe.get("augmentations")
     section = {} if section is None else section
@@ -328,9 +366,11 @@ def augmentations_of(recipe: dict, jailbreak_params: dict | None = None) -> dict
             "deny, include_translation as translation, sampling_probs as "
             "layer_rates, settings_per_iteration as rounds).",
             DeprecationWarning, stacklevel=3)
-        section = {"adversarial": apply_flat_keywords(
-            resolve({"adversarial": {}}, "adversarial", base=base), flat)}
-    kinds = {kind: resolve(section, kind, base=base) for kind in KINDS}
+        section = {"adversarial": apply_flat_keywords(resolve(
+            {"adversarial": {}}, "adversarial", base=base, config_dir=config_dir),
+            flat)}
+    kinds = {kind: resolve(section, kind, base=base, config_dir=config_dir)
+             for kind in KINDS}
     params = {key: value for key, value in (jailbreak_params or {}).items()
               if key in FLAT_KEYWORDS and value is not None}
     if params and kinds["adversarial"] is None:
@@ -341,7 +381,7 @@ def augmentations_of(recipe: dict, jailbreak_params: dict | None = None) -> dict
             "or switch the kind on.")
     if params:
         kinds["adversarial"] = resolve({"adversarial": apply_flat_keywords(
-            kinds["adversarial"], params)}, "adversarial")
+            kinds["adversarial"], params)}, "adversarial", config_dir=config_dir)
     return kinds
 
 

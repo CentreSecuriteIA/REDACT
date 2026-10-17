@@ -28,6 +28,7 @@ from pathlib import Path
 import pandas as pd
 
 from redact import dataset, paths
+from redact.config_overlay import taxonomy_folder
 from redact.constitution import ConstitutionPipeline, read_constitution
 from redact.content_moderation import InputPipeline, run_output_generation
 from redact.content_moderation.paraphrase import (
@@ -74,6 +75,7 @@ def generate_constitution(
     resume: bool = True,
     verbose: bool = True,
     read_back: bool = True,
+    config_dir: str | Path | None = None,
     include_standalone_benign: bool | None = None,
     standalone_benign_categories: int | None = None,
 ) -> pd.DataFrame:
@@ -121,6 +123,9 @@ def generate_constitution(
             ledger first and regenerate from scratch.
         verbose: Log progress.
         read_back: False returns an empty DataFrame and reads no entry back.
+        config_dir: A config folder whose ``taxonomy/`` files are read in
+            place of the packaged ones, when ``taxonomy_dir`` is not given
+            (:mod:`redact.config_overlay`). ``None``: the packaged only.
         include_standalone_benign, standalone_benign_categories: The former
             names of ``include_general_benign`` and
             ``general_benign_categories``, read for this release with a
@@ -143,9 +148,11 @@ def generate_constitution(
             general_benign_categories = standalone_benign_categories
     # Resolve taxonomy
     if isinstance(taxonomy, str):
-        taxonomy = load_taxonomy(taxonomy, config_dir=taxonomy_dir)
+        taxonomy = load_taxonomy(
+            taxonomy, config_dir=taxonomy_folder(taxonomy, taxonomy_dir, config_dir))
     if include_general_benign and isinstance(benign_taxonomy, str):
-        benign_taxonomy = load_taxonomy(benign_taxonomy, config_dir=taxonomy_dir)
+        benign_taxonomy = load_taxonomy(benign_taxonomy, config_dir=taxonomy_folder(
+            benign_taxonomy, taxonomy_dir, config_dir))
 
     # Resolve entry types
     resolved_types: list[EntryType] | None = None
@@ -447,6 +454,7 @@ def generate_jailbreaks(
     read_back: bool = True,
     augmentation: dict | None = None,
     variations_path: str | Path | None = None,
+    config_dir: str | Path | None = None,
 ) -> pd.DataFrame:
     """Augment input prompts with jailbreak technique combinations and natural
     variations (batched).
@@ -495,6 +503,10 @@ def generate_jailbreaks(
             "natural": ...}``, each kind overlaying the packaged default
             (:mod:`redact.jailbreak.augmentation`); None is the default. A
             kind given as None is off.
+        config_dir: A config folder whose ``jailbreak/augmentations.json``
+            and ``taxonomy/`` files are read in place of the packaged ones
+            (``taxonomy_dir``, given, wins for the benign taxonomy;
+            :mod:`redact.config_overlay`). ``None``: the packaged only.
 
     Deprecated aliases:
         ``max_complexity``, ``max_obfuscations``, ``pure_only``,
@@ -534,9 +546,10 @@ def generate_jailbreaks(
         ("settings_per_iteration", settings_per_iteration),
         ("entry_types", entry_types),
     ) if value is not None}
-    section = _augmentation_section(augmentation, flat)
-    adversarial = augmentation_kinds.resolve(section, "adversarial")
-    natural = augmentation_kinds.resolve(section, "natural")
+    section = _augmentation_section(augmentation, flat, config_dir)
+    adversarial = augmentation_kinds.resolve(section, "adversarial",
+                                             config_dir=config_dir)
+    natural = augmentation_kinds.resolve(section, "natural", config_dir=config_dir)
     if adversarial is None and natural is None:
         return pd.DataFrame()
     # Each kind that is on, with its CSV and its manifest.
@@ -578,7 +591,8 @@ def generate_jailbreaks(
             jailbreak_pool.technique_pool(kind),
             client=client, translation_model=translation_model, out_path=out_path,
             benign_path=benign, benign_taxonomy=benign_taxonomy,
-            taxonomy_dir=taxonomy_dir, prompt_dir=prompt_dir, seed=seed,
+            taxonomy_dir=taxonomy_folder(benign_taxonomy, taxonomy_dir, config_dir),
+            prompt_dir=prompt_dir, seed=seed,
             rounds=augmentation_kinds.rounds_of(kind),
             family_weights=kind["family_weights"] or None,
             auto_generate_benign=auto_generate_benign, batch_size=batch_size,
@@ -615,7 +629,9 @@ def _variations_csv(data_dir, output_path, variations_path) -> Path:
     return paths.variations_csv(data_dir)
 
 
-def _augmentation_section(augmentation: dict | None, flat: dict) -> dict:
+def _augmentation_section(
+    augmentation: dict | None, flat: dict, config_dir: str | Path | None = None,
+) -> dict:
     """``augmentation`` with the deprecated flat keywords applied over its
     adversarial kind.
 
@@ -631,7 +647,7 @@ def _augmentation_section(augmentation: dict | None, flat: dict) -> dict:
         "include_translation as translation, sampling_probs as layer_rates, "
         "settings_per_iteration as rounds).",
         DeprecationWarning, stacklevel=3)
-    kind = augmentation_kinds.resolve(section, "adversarial")
+    kind = augmentation_kinds.resolve(section, "adversarial", config_dir=config_dir)
     if kind is None:
         raise ValueError(
             f"augmentation['adversarial'] is null (off), and {sorted(flat)} set "
@@ -1011,6 +1027,7 @@ class RunContext:
     resume: bool
     verbose: bool
     benign_taxonomy: dict | str = "benign"     # the categories of fsh/dap's pairs
+    config_dir: str | Path | None = None       # a folder overlaid on configs/
 
 
 @dataclass(frozen=True)
@@ -1104,7 +1121,8 @@ def _params(ctx: RunContext, stage: str) -> dict:
     """The params of ``stage``: the dataset type file's, then the params file's."""
     from redact.recipe import load_dataset_type
 
-    typed = load_dataset_type(ctx.dataset_type)["params"].get(stage) or {}
+    typed = load_dataset_type(ctx.dataset_type, ctx.config_dir)["params"].get(stage)
+    typed = typed or {}
     return {**typed, **(ctx.params.get(stage) or {})}
 
 
@@ -1118,7 +1136,7 @@ def _one_file(stage: str, default: Callable) -> Callable:
 def _constitution_kwargs(ctx: RunContext) -> dict:
     return dict(
         taxonomy=ctx.taxonomy, taxonomy_dir=ctx.taxonomy_dir,
-        benign_taxonomy=ctx.benign_taxonomy,
+        benign_taxonomy=ctx.benign_taxonomy, config_dir=ctx.config_dir,
         model=ctx.models["constitution"], data_dir=ctx.data_dir,
         prompt_dir=ctx.prompt_dir, resume=ctx.resume, verbose=ctx.verbose,
     )
@@ -1149,8 +1167,9 @@ def _taxonomy_files(ctx: RunContext) -> list[Path]:
     names = [ctx.taxonomy]
     if includes_general_benign(_params(ctx, "constitution")):
         names.append(ctx.benign_taxonomy)
-    folder = Path(ctx.taxonomy_dir or paths.taxonomy_dir())
-    return [_json_file(folder, name) for name in names if isinstance(name, str)]
+    return [_json_file(taxonomy_folder(name, ctx.taxonomy_dir, ctx.config_dir)
+                       or paths.taxonomy_dir(), name)
+            for name in names if isinstance(name, str)]
 
 
 def _inputs_kwargs(ctx: RunContext) -> dict:
@@ -1235,6 +1254,7 @@ def _jailbreaks_kwargs(ctx: RunContext) -> dict:
         translation_model=ctx.models["translation"], prompt_dir=ctx.prompt_dir,
         benign_taxonomy=ctx.benign_taxonomy, taxonomy_dir=ctx.taxonomy_dir,
         resume=ctx.resume, verbose=ctx.verbose, augmentation=ctx.augmentations,
+        config_dir=ctx.config_dir,
     )
 
 
