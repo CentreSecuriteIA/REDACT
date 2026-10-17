@@ -123,7 +123,7 @@ REDACT/
 │       ├── configs/                 # Package data
 │       │   ├── llm/                 # models.json (the registry), roles.json, gpu_pricing.json
 │       │   ├── dataset_types/       # training.json, eval.json: what each dataset_type means (stages, params, augmentations)
-│       │   ├── runs/                # eval_example.json, training_example.json, params_example.json, params_training_example.json
+│       │   ├── runs/                # eval_example.json, training_example.json, params_eval_example.json, params_training_example.json
 │       │   ├── datasets/            # content_moderation_input.json: a HuggingFace dataset to load
 │       │   ├── taxonomy/            # harmful.json (the default taxonomy), benign.json (the benign pairs' categories)
 │       │   └── jailbreak/

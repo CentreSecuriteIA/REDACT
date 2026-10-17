@@ -230,7 +230,7 @@ table shows; [stages/build.md](stages/build.md) has the details.
 
 `eval_example.json` names `"dataset_type": "eval"` and a small constitution
 (one taxonomy category and three constitution categories per entry type,
-`params_example.json`); the eval type file gives the rest. It runs the same
+`params_eval_example.json`); the eval type file gives the rest. It runs the same
 six stages as a training run, with these differences:
 
 - the constitution and the inputs take only the `harmful` and `benign` entry

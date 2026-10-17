@@ -150,9 +150,12 @@ the stage's name.
   raises when the recipe loads.
 
 The two example recipes under `src/redact/configs/runs/` each have a params
-file: `eval_example.json` runs a small constitution (`params_example.json`)
+file: `eval_example.json` runs a small constitution (`params_eval_example.json`)
 and leaves everything else to the eval type, `training_example.json` a
-larger one (`params_training_example.json`).
+larger one (`params_training_example.json`). The eval params file sets no
+`exclude_from`, since the training run it would name may not exist yet; its
+`_comment` says what to add under `build` once it does
+([build](stages/build.md#leaving-out-what-a-training-run-holds)).
 
 ## Choose models
 

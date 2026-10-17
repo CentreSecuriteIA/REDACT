@@ -9,6 +9,6 @@
   "taxonomy_dir": null,
   "benign_taxonomy": "benign",
   "prompt_dir": null,
-  "params_file": "params_example.json",
+  "params_file": "params_eval_example.json",
   "resume": true
 }

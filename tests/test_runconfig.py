@@ -960,6 +960,31 @@ def test_the_example_recipes_load(name):
     assert recipe["taxonomy"] == "harmful"
 
 
+def test_every_packaged_recipe_and_params_file_loads():
+    """And each params file is the params file of a recipe."""
+    import json
+    import warnings
+
+    folder = paths.configs_dir() / "runs"
+    files = sorted(folder.glob("*.json"))
+    recipes = [p for p in files
+               if "dataset_type" in json.loads(p.read_text(encoding="utf-8"))]
+    named = set()
+    with warnings.catch_warnings():
+        warnings.simplefilter("error")
+        for path in recipes:
+            recipe = load_recipe(path)
+            load_params(recipe["params_file"], base_dir=recipe["_base_dir"])
+            named.add(recipe["params_file"])
+        for path in files:
+            if path not in recipes:
+                load_params(path)
+    assert recipes
+    assert named == {p.name for p in files if p not in recipes}
+    assert json.loads((folder / "eval_example.json").read_text(
+        encoding="utf-8"))["params_file"] == "params_eval_example.json"
+
+
 def test_a_recipe_naming_the_former_taxonomy_loads_harmful_with_a_warning():
     with pytest.warns(DeprecationWarning, match='write "taxonomy": "harmful"'):
         recipe = load_recipe({"dataset_type": "training",

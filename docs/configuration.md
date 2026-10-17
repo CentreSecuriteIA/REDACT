@@ -627,7 +627,7 @@ values. Delete every file you do not change, then set `prompt_dir`.
 | `configs/taxonomy/harmful.json` | The harmful categories: the default `taxonomy` | `dataset/taxonomy.py: load_taxonomy` |
 | `configs/taxonomy/benign.json` | The categories and subcategories of the fsh and dap techniques' benign Q&A pairs: the default `benign_taxonomy` | `dataset/taxonomy.py: load_taxonomy` |
 | `configs/datasets/content_moderation_input.json` | A HuggingFace dataset id, split, columns and filters | `dataset/loading.py: load_from_config` |
-| `configs/runs/*.json` | The example recipes (`eval_example.json`, `training_example.json`) and their params files (`params_example.json`, `params_training_example.json`) | you |
+| `configs/runs/*.json` | The example recipes (`eval_example.json`, `training_example.json`) and their params files (`params_eval_example.json`, `params_training_example.json`) | you |
 
 A `taxonomy_dir` of your own that still holds `content_moderation_categories.json`
 serves it for `harmful`, with a `DeprecationWarning`, for one release; rename
