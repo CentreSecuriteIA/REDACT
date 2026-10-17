@@ -40,8 +40,10 @@ from redact.content_moderation.paraphrase import (
     run_paraphrase_target,
 )
 from redact.dataset import (
+    Manifest,
     Part,
     accepted_mask,
+    clear_stage,
     discover_categories,
     has_rows,
     input_files,
@@ -56,6 +58,7 @@ from redact.dataset import (
 from redact.jailbreak import augmentation as augmentation_kinds
 from redact.jailbreak import pool as jailbreak_pool
 from redact.jailbreak.pipeline import run_augmentation
+from redact.jailbreak.plan import coverage_path
 from redact.llms import ModelClient, load_prompt
 from redact.llms.model_config import default_model_for_role
 from redact.types import EntryType
@@ -431,9 +434,14 @@ def generate_outputs(
     Raises:
         ValueError: ``inputs`` is None and the run has no input sample at all.
     """
+    out_path = (
+        Path(output_path) if output_path
+        else paths.output_responses_csv(data_dir)
+    )
     inputs = _given_or_run_inputs(inputs, data_dir)
     if inputs.empty:
-        return _skipped("outputs", "input sample")
+        return _skipped("outputs", "input sample",
+                        clear=[] if resume else [{"artifact": out_path}])
 
     # Per-group cap first (keeps every category/severity represented), then the
     # global head as a final safety cap.
@@ -448,11 +456,6 @@ def generate_outputs(
     client = ModelClient.create(model)
     check_model = check_model or model
     check_client = ModelClient.create(check_model) if check_outputs else None
-
-    out_path = (
-        Path(output_path) if output_path
-        else paths.output_responses_csv(data_dir)
-    )
 
     return run_output_generation(
         inputs=inputs, client=client,
@@ -586,10 +589,19 @@ def generate_jailbreaks(
     natural = augmentation_kinds.resolve(section, "natural")
     if adversarial is None and natural is None:
         return pd.DataFrame()
+    # Each kind that is on, with its CSV and its manifest.
+    kinds = [(name, kind, out, man) for name, kind, out, man in (
+        ("adversarial", adversarial,
+         Path(output_path) if output_path else paths.jailbreaks_csv(data_dir),
+         Path(manifest_path) if manifest_path else None),
+        ("natural", natural, _variations_csv(data_dir, output_path, variations_path),
+         None),
+    ) if kind is not None]
 
     inputs = _given_or_run_inputs(inputs, data_dir)
     if inputs.empty:
-        return _skipped("jailbreaks", "input sample")
+        return _skipped("jailbreaks", "input sample", clear=[] if resume else [
+            _kind_files(out, man) for _name, _kind, out, man in kinds])
 
     inputs = inputs.copy()
     if "sample" in inputs.columns and "prompt" not in inputs.columns:
@@ -601,9 +613,19 @@ def generate_jailbreaks(
     client = ModelClient.create(model or default_model_for_role("uncensored_gen"))
     benign = Path(benign_path) if benign_path else paths.benign_csv(data_dir)
 
-    def run(kind: dict, out_path: Path, **kwargs) -> pd.DataFrame:
+    def run(name: str, kind: dict, out_path: Path, manifest_path: Path | None,
+            **kwargs) -> pd.DataFrame:
+        of_kind = _of_entry_types(inputs, kind["entry_types"])
+        if of_kind.empty:
+            logger.warning(
+                "%s kind skipped: entry_types %s match none of the inputs' (%s); "
+                "it writes nothing.", name, kind["entry_types"],
+                sorted(set(inputs["entry_type"].astype(str))))
+            if not resume:
+                clear_stage(**_kind_files(out_path, manifest_path))
+            return pd.DataFrame()
         return run_augmentation(
-            _of_entry_types(inputs, kind["entry_types"]),
+            of_kind,
             jailbreak_pool.technique_pool(kind),
             client=client, translation_model=translation_model, out_path=out_path,
             benign_path=benign, benign_taxonomy=benign_taxonomy,
@@ -611,21 +633,29 @@ def generate_jailbreaks(
             rounds=augmentation_kinds.rounds_of(kind),
             family_weights=kind["family_weights"] or None,
             auto_generate_benign=auto_generate_benign, batch_size=batch_size,
-            resume=resume, verbose=verbose, **kwargs,
+            resume=resume, verbose=verbose, manifest_path=manifest_path, **kwargs,
         )
 
     rows = pd.DataFrame()
-    if adversarial is not None:
-        rows = run(
-            adversarial,
-            Path(output_path) if output_path else paths.jailbreaks_csv(data_dir),
-            manifest_path=Path(manifest_path) if manifest_path else None,
-            layer_rates=adversarial["layer_rates"] or None,
-            read_back=read_back, label="jailbreak")
-    if natural is not None:
-        run(natural, _variations_csv(data_dir, output_path, variations_path),
-            read_back=False, label="variation", accept_noop=False)
+    for name, kind, out, man in kinds:
+        if name == "adversarial":
+            rows = run(name, kind, out, man,
+                       layer_rates=kind["layer_rates"] or None,
+                       read_back=read_back, label="jailbreak")
+        else:
+            run(name, kind, out, man,
+                read_back=False, label="variation", accept_noop=False)
     return rows
+
+
+def _kind_files(out_path: Path, manifest_path: Path | None) -> dict:
+    """:func:`redact.dataset.clear_stage`'s kwargs for the files of one kind
+    of the jailbreak stage: its CSV, manifest, coverage table and plan."""
+    manifest = manifest_path or Manifest.sidecar(out_path).path
+    coverage = coverage_path(manifest)
+    stem = coverage.name.removesuffix(".coverage.csv")
+    plan = coverage.with_name(f"{stem}.plan.json")
+    return {"artifact": out_path, "manifest_path": manifest, "also": (coverage, plan)}
 
 
 def _variations_csv(data_dir, output_path, variations_path) -> Path:
@@ -691,12 +721,19 @@ def _given_or_run_inputs(
     return merge_inputs(data_dir)
 
 
-def _skipped(stage: str, what: str) -> pd.DataFrame:
-    """Warn that ``stage`` has no accepted ``what`` and runs on nothing."""
+def _skipped(stage: str, what: str, *, clear=()) -> pd.DataFrame:
+    """Warn that ``stage`` has no accepted ``what`` and runs on nothing.
+
+    ``clear`` holds :func:`redact.dataset.clear_stage`'s kwargs for each
+    output a fresh run starts over, since the core that would clear it does
+    not run.
+    """
     logger.warning(
         "%s skipped: no %s was accepted, so it has nothing to work on and "
         "writes nothing. The rejection_reason column of the rejected rows says why.",
         stage, what)
+    for files in clear:
+        clear_stage(**files)
     return pd.DataFrame()
 
 
@@ -822,7 +859,8 @@ def generate_paraphrases(
                         else paths.paraphrases_outputs_csv(data_dir))
         if has_rows and source.empty:
             what = "input sample" if tgt == "inputs" else "output response"
-            results[tgt] = _skipped(f"paraphrase ({tgt})", what)
+            results[tgt] = _skipped(f"paraphrase ({tgt})", what, clear=[] if resume
+                                    else [{"artifact": out_path}])
             continue
         results[tgt] = run_paraphrase_target(
             tgt, source, out_path,

@@ -130,6 +130,32 @@ def resume_state(
     return done | set(extra) if extra else done
 
 
+def clear_stage(
+    artifact: str | Path,
+    *,
+    manifest_path: str | Path | None = None,
+    also: Iterable[str | Path] = (),
+) -> None:
+    """Remove what earlier runs of a stage left, as its fresh run does.
+
+    For a stage that starts over and has nothing to run: the output at
+    ``artifact``, its ``.cut`` and ``.tmp`` files, the ledger beside it, the
+    manifest (beside it unless ``manifest_path`` names it) and the files in
+    ``also``. The stage's lock is taken for the clear and given back.
+
+    Raises:
+        RuntimeError: Another run holds the stage's lock.
+    """
+    artifact = Path(artifact)
+    ledger = Ledger.sidecar(artifact, key_fields=("unit",))
+    manifest = (Manifest(manifest_path) if manifest_path
+                else Manifest.sidecar(artifact))
+    resume_state(ledger, resume=False, artifact=artifact, manifest=manifest)
+    release_lock(ledger)
+    for path in also:
+        Path(path).unlink(missing_ok=True)
+
+
 def release_lock(ledger: Ledger) -> None:
     """Give back the lock :func:`resume_state` took for the ledger's stage.
 

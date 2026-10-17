@@ -599,6 +599,21 @@ def test_a_run_with_nothing_to_do_gives_the_lock_back(tmp_path, patched):
         assert lock_is_free(state)
 
 
+def test_a_fresh_run_on_no_source_row_clears_what_an_earlier_run_left(tmp_path):
+    out = paths.paraphrases_inputs_csv(tmp_path)
+    out.parent.mkdir(parents=True)
+    names = ["paraphrases_inputs.csv", "paraphrases_inputs.csv.cut",
+             "paraphrases_inputs.state.jsonl", "paraphrases_inputs.manifest.jsonl"]
+    for name in names:
+        out.with_name(name).write_text("left by an earlier run\n", encoding="utf-8")
+    returned = CP.run_paraphrase_target(
+        "inputs", pd.DataFrame(), out, pool=["para-model"], check=None, k=1,
+        resume=False, batch_size=8, seed=0, verbose=False)
+    assert returned.empty
+    assert [name for name in names if out.with_name(name).exists()] == []
+    assert lock_is_free(out.with_name("paraphrases_inputs.state.jsonl"))
+
+
 def test_a_failed_append_acks_none_of_its_chunk(tmp_path, patched):
     patched.setattr(CP, "paraphrase_batch", _seed_four_inputs(tmp_path))
     outcomes, append = iter([None, OSError("disk full")]), CP.append_rows
