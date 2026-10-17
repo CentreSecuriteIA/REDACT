@@ -260,54 +260,20 @@ class TestRepeatedTexts:
         assert ledger.ids == set(_ids_on_disk(tmp_path))
 
 
-_SHOWN = 20     # the texts a request lists
-
-
-def _shown(prompt: str) -> tuple[list[str], str]:
-    """The texts a request lists as existing, and its last line."""
-    listed = prompt.split("Do NOT generate anything similar to these:\n")[1]
-    lines = listed.splitlines()
-    return [line[2:] for line in lines if line.startswith("- ")], lines[-1]
-
-
-class TestThePreviewOfEarlierTexts:
-    def _prompts(self, gen) -> dict[str, str]:
-        """The first request made for each entry, by its token."""
+class TestTheGenerationPrompt:
+    def _prompts(self, gen) -> dict[str, list[dict]]:
+        """The messages of the first request made for each entry, by its token."""
         prompts = {}
         for call in gen.calls:
             text = call["messages"][-1]["content"]
-            prompts.setdefault(re.search(r"zq\d+", text).group(), text)
+            prompts.setdefault(re.search(r"zq\d+", text).group(), call["messages"])
         return prompts
 
-    def test_a_request_lists_the_first_twenty_texts_of_the_run(self, tmp_path):
-        _result, gen = _run(tmp_path, _entries(*range(100, 140)))
-        prompts = self._prompts(gen)
-        assert "already exist" not in prompts["zq100"]
-
-        # The texts of the first ten entries, in the order they were finished.
-        ids = [sample_id for ack in _acks(tmp_path)[1:11] for sample_id in ack["ids"]]
-        text_of = {content_id(text): text
-                   for texts in _texts(tmp_path).values() for text in texts}
-        first_twenty = [text_of[sample_id] for sample_id in ids]
-        assert len(first_twenty) == _SHOWN
-        for late in ("zq132", "zq139"):
-            shown, _last = _shown(prompts[late])
-            assert shown == first_twenty
-
-    def test_a_request_says_how_many_more_there_are(self, tmp_path):
-        _result, gen = _run(tmp_path, _entries(*range(100, 140)))
-        shown, last = _shown(self._prompts(gen)["zq139"])
-        said = re.fullmatch(
-            r"\(\.\.\. and (\d+) more\. Ensure all your outputs are novel\.\)", last)
-        # The last four entries are generated once the first 32 are finished,
-        # with two texts each.
-        assert len(shown) == _SHOWN and int(said[1]) == 2 * 32 - _SHOWN
-
-    def test_after_a_resume_it_starts_empty(self, tmp_path, monkeypatch):
-        _run(tmp_path, _entries(*range(12)))
-        monkeypatch.setattr(pd, "read_csv", _no_read)
-        _result, gen = _run(tmp_path, _entries(*range(13)))
-        assert "already exist" not in self._prompts(gen)["zq12"]
+    def test_it_is_the_same_before_and_after_a_save(self, tmp_path):
+        """No text an earlier unit saved enters a later unit's prompt."""
+        _result, gen = _run(tmp_path / "many", _entries(*range(100, 140)))
+        _result, alone = _run(tmp_path / "alone", _entries(139))
+        assert self._prompts(gen)["zq139"] == self._prompts(alone)["zq139"]
 
 
 class TestAResume:

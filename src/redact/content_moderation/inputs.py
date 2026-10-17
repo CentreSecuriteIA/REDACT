@@ -20,7 +20,6 @@ Usage::
 
 import functools
 import logging
-from collections.abc import Collection
 from itertools import repeat
 from pathlib import Path
 from typing import NamedTuple
@@ -46,7 +45,6 @@ from ..llms.client import ModelClient
 from ..llms.prompting import PromptTemplate, extract_and_clean
 from ..llms.router import assert_single_sample_per_call
 from .checker import build_quality_checker
-from .feedback import PROHIBITED_SHOWN, append_to_user, prohibited_note
 from .results import ConstitutionInputResult
 
 logger = logging.getLogger(__name__)
@@ -154,8 +152,6 @@ class InputPipeline:
         self,
         prompt_config: dict,
         samples_per_request: int,
-        prohibited: Collection[str] | None = None,
-        more: int = 0,
         **seed_kwargs: str,
     ) -> list[dict]:
         """Build the generation messages, with the format instruction.
@@ -163,20 +159,14 @@ class InputPipeline:
         Args:
             prompt_config: Loaded prompt JSON config.
             samples_per_request: Number of samples to request per LLM call.
-            prohibited: Existing sample texts to avoid repeating. The first
-                20 are shown, the rest counted.
-            more: How many such texts exist beyond ``prohibited``.
             **seed_kwargs: Template variables (Category, sample_description, ...).
         """
         # The format instruction matches the style the reply is extracted with.
         kwargs = {"num_samples": str(samples_per_request), **seed_kwargs}
-        messages = PromptTemplate(
+        return PromptTemplate(
             prompt_config, format_style=self.extraction_style,
             prompt_dir=self.prompt_dir, **kwargs,
         )(**kwargs)
-        if prohibited:
-            messages = append_to_user(messages, prohibited_note(prohibited, more))
-        return messages
 
     def run_from_constitution(
         self,
@@ -242,8 +232,6 @@ class InputPipeline:
         processed = resume_state(
             ledger, resume=resume or bool(style), manifest=manifest, **tree)
         seen = set(ledger.ids)      # the content ids of the rows of every style
-        preview: list[str] = []     # the first texts this run generated
-        unshown = 0                 # how many it generated after those
 
         entries = [_entry_fields(entry) for _, entry in constitution_df.iterrows()]
         manifest.write(
@@ -308,8 +296,6 @@ class InputPipeline:
                 lambda: self._build_generation_messages(
                     prompt_config,
                     samples_per_request=samples_per_entry,
-                    prohibited=preview,
-                    more=unshown,
                     Category=e.category,
                     sample_description=e.description,
                     constitution_subcategory=e.subcategory,
@@ -355,7 +341,7 @@ class InputPipeline:
                 yield j, _entry_unit(e)
 
         def _on_done(j, value):
-            nonlocal rejected_entries, finished, unshown
+            nonlocal rejected_entries, finished
             e = live.pop(j)
             extracted, verdicts, attempts, rejected = value
             finished += 1
@@ -403,10 +389,6 @@ class InputPipeline:
                     continue
                 seen.add(row["sample_id"])
                 rows.append(row)
-                if len(preview) < PROHIBITED_SHOWN:
-                    preview.append(text)
-                else:
-                    unshown += 1
             # The ids of the rows it wrote: what a resume knows them by.
             buf.add(rows, {**key, "ids": [row["sample_id"] for row in rows]})
 

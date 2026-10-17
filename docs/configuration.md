@@ -604,9 +604,8 @@ The conversation functions, which no recipe runs (`evaluate_conversations`,
 The tree also holds `input/category_check`, `jailbreak/benign_check`,
 `jailbreak/scenario_check` and `jailbreak/typo_check`, which no code loads.
 
-Text the stages add at run time, the rejection feedback and the list of
-samples not to repeat, lives in `content_moderation/feedback.py`, not in a
-prompt file.
+Text the stages add at run time, the rejection feedback, lives in
+`content_moderation/feedback.py`, not in a prompt file.
 
 ### Scaffolding an overlay
 

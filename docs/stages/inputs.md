@@ -56,9 +56,8 @@ Params keys: `style`, `samples_per_entry`, `entry_types`, `batch_size`,
 
 One unit is one constitution entry.
 
-1. One call asks for `samples_per_entry` samples as a numbered list. The
-   prompt also shows the first 20 texts this run has saved, and counts the
-   rest, as samples not to repeat.
+1. One call asks for `samples_per_entry` samples as a numbered list. No
+   earlier sample is shown in the prompt.
 2. A reply with another number of samples is rejected whole and asked again,
    up to `max_attempts` generations.
 3. Samples whose text is already in the folder (by content id, any category
