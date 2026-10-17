@@ -398,13 +398,105 @@ def test_entry_types_keep_the_inputs_of_those_types(tmp_path):
     assert list(df["entry_type"]) == ["benign", "benign"]
 
 
+# --- a kept plan against the run's section --------------------------------------
+
+
+def _allow(name: str) -> dict:
+    return _pure(techniques={"allow": [name]}, rounds=[{"exact_techniques": 1}])
+
+
+def test_a_plan_records_what_it_was_made_with(tmp_path):
+    import json
+
+    out = tmp_path / "jb.csv"
+    generate_jailbreaks(inputs=_inputs(), output_path=out, seed=1,
+                        **_allow("to_base64"))
+    made_with = json.loads(out.with_name("jb.plan.json").read_text(encoding="utf-8"))
+    assert made_with == {
+        "seed": 1, "rounds": made_with["rounds"], "pool": ["to_base64"],
+        "family_weights": None, "layer_rates": None}
+    assert [r["exact_techniques"] for r in made_with["rounds"]] == [1]
+
+
+@pytest.mark.parametrize(("changed", "named"), [
+    ({"seed": 2, **_allow("to_base64")}, "seed"),
+    ({"seed": 1, **_allow("to_rot13")}, "pool"),
+], ids=["seed", "pool"])
+def test_a_resume_under_another_section_or_seed_raises(tmp_path, changed, named):
+    out = tmp_path / "jb.csv"
+    generate_jailbreaks(inputs=_inputs(), output_path=out, seed=1,
+                        **_allow("to_base64"))
+    before = out.read_bytes()
+    with pytest.raises(ValueError, match=rf"\[{named!r}\].*resume=False"):
+        generate_jailbreaks(inputs=_inputs(), output_path=out, **changed)
+    assert out.read_bytes() == before
+    assert lock_is_free(out.with_name("jb.state.jsonl"))
+
+
+def test_a_plan_made_with_translation_raises_when_resumed_without_it(
+        tmp_path, monkeypatch):
+    import redact.jailbreak.pipeline as JPipe
+
+    monkeypatch.setattr(JPipe, "drive_units", lambda units, **kwargs: None)
+    out = tmp_path / "jb.csv"
+
+    def run(translation):
+        generate_jailbreaks(
+            inputs=_inputs(), output_path=out, seed=1, verbose=False,
+            augmentation={"adversarial": {"translation": translation,
+                                          "layers": {"deny": ["manipulation"]}},
+                          "natural": None})
+
+    run(translation=True)
+    with pytest.raises(ValueError, match="pool"):
+        run(translation=False)
+
+
+def test_a_resume_under_the_same_section_and_seed_is_quiet(tmp_path, caplog):
+    out = tmp_path / "jb.csv"
+    generate_jailbreaks(inputs=_inputs(), output_path=out, seed=1,
+                        **_allow("to_base64"))
+    with caplog.at_level("WARNING", logger="redact"):
+        again = generate_jailbreaks(inputs=_inputs(), output_path=out, seed=1,
+                                    **_allow("to_base64"))
+    assert caplog.records == [] and len(again) == len(_inputs())
+
+
+def test_a_plan_without_its_plan_file_resumes_and_warns_it_is_unchecked(
+        tmp_path, caplog):
+    out = tmp_path / "jb.csv"
+    generate_jailbreaks(inputs=_inputs().head(2), output_path=out, seed=1,
+                        **_allow("to_base64"))
+    out.with_name("jb.plan.json").unlink()
+    with caplog.at_level("WARNING", logger="redact.jailbreak.pipeline"):
+        df = generate_jailbreaks(inputs=_inputs().head(2), output_path=out, seed=2,
+                                 **_allow("to_rot13"))
+    (warning,) = [r.getMessage() for r in caplog.records]
+    assert "jb.plan.json" in warning and "resume=False" in warning
+    assert set(df["technique"]) == {"to_base64"}
+
+
+def test_a_fresh_run_writes_its_plan_file_again(tmp_path):
+    import json
+
+    out = tmp_path / "jb.csv"
+    generate_jailbreaks(inputs=_inputs(), output_path=out, seed=1,
+                        **_allow("to_base64"))
+    generate_jailbreaks(inputs=_inputs(), output_path=out, seed=2, resume=False,
+                        **_allow("to_rot13"))
+    made_with = json.loads(out.with_name("jb.plan.json").read_text(encoding="utf-8"))
+    assert (made_with["seed"], made_with["pool"]) == (2, ["to_rot13"])
+
+
 # --- the pool against the plan ---------------------------------------------------
 
 
 def test_a_resume_with_a_narrower_pool_runs_the_planned_techniques(
         tmp_path, monkeypatch):
     """A pending unit rebuilds its combination from every registered technique,
-    so the techniques the resumed run's pool leaves out still run."""
+    so the techniques the resumed run's pool leaves out still run. The plan
+    file is removed, as a plan with none is run unchecked; with one, the
+    other pool raises."""
     import itertools
 
     import redact.jailbreak.pipeline as JPipe
@@ -435,6 +527,7 @@ def test_a_resume_with_a_narrower_pool_runs_the_planned_techniques(
     pool = technique_pool(resolve(narrower["augmentation"], "adversarial"))
     assert pool and not {fn.__name__ for fn in pool} & set(off_pool)
 
+    out.with_name("jb.plan.json").unlink()
     df = generate_jailbreaks(inputs=_inputs(), output_path=out, seed=7, **narrower)
     assert Manifest.sidecar(out).load() == plan
     technique_of = dict(zip(zip(df["input_id"], df["iteration"]), df["technique"]))
@@ -502,7 +595,8 @@ def test_the_benign_data_is_made_with_the_stages_taxonomy_overlay_and_batch(
 def test_a_resume_loads_the_benign_data_its_plan_needs_whatever_its_pool(
         tmp_path, monkeypatch):
     """Else the pending units of a technique that needs it would be acked as
-    error rows, never to run again."""
+    error rows, never to run again. The plan file is removed, as a plan with
+    none is run unchecked."""
     import itertools
 
     import redact.jailbreak.pipeline as JPipe
@@ -525,6 +619,7 @@ def test_a_resume_loads_the_benign_data_its_plan_needs_whatever_its_pool(
     loaded = len(loads)
 
     # The resumed run's pool of pure obfuscations needs no benign data.
+    out.with_name("jb.plan.json").unlink()
     df = generate_jailbreaks(inputs=_inputs(), output_path=out, seed=7,
                              **{**PURE_KW, "auto_generate_benign": True})
     assert len(loads) == loaded + 1

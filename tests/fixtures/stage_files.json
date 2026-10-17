@@ -108,6 +108,7 @@
     {"sample_id": "given-1", "iteration": 1, "combination": ["broken"], "settings": {"max_complexity": 4, "max_obfuscations": 2, "include_hacking": true, "include_manipulation": true, "include_obfuscation": true, "include_requests": true, "seed": 5}, "category": "Fraud", "entry_type": "harmful", "status": "planned"},
     {"sample_id": "padded", "iteration": 1, "combination": ["broken"], "settings": {"max_complexity": 4, "max_obfuscations": 2, "include_hacking": true, "include_manipulation": true, "include_obfuscation": true, "include_requests": true, "seed": 5}, "category": "Fraud", "entry_type": "harmful", "status": "planned"}
    ],
+   "jailbreaks.plan.json": "{\n \"seed\": 5,\n \"rounds\": [\n  {\n   \"max_complexity\": 6,\n   \"max_obfuscations\": 2,\n   \"include_hacking\": true,\n   \"include_manipulation\": true,\n   \"include_obfuscation\": true,\n   \"include_requests\": true,\n   \"exact_techniques\": 1\n  },\n  {\n   \"max_complexity\": 4,\n   \"max_obfuscations\": 2,\n   \"include_hacking\": true,\n   \"include_manipulation\": true,\n   \"include_obfuscation\": true,\n   \"include_requests\": true\n  }\n ],\n \"pool\": [\n  \"broken\",\n  \"one_step\",\n  \"two_step\"\n ],\n \"family_weights\": null,\n \"layer_rates\": null\n}\n",
    "jailbreaks.state.jsonl": [
     {},
     {"input_id": "77", "iteration": 0}
@@ -154,6 +155,7 @@
     {"sample_id": "given-1", "iteration": 1, "combination": ["broken"], "settings": {"max_complexity": 4, "max_obfuscations": 2, "include_hacking": true, "include_manipulation": true, "include_obfuscation": true, "include_requests": true, "seed": 5}, "category": "Fraud", "entry_type": "harmful", "status": "planned"},
     {"sample_id": "padded", "iteration": 1, "combination": ["broken"], "settings": {"max_complexity": 4, "max_obfuscations": 2, "include_hacking": true, "include_manipulation": true, "include_obfuscation": true, "include_requests": true, "seed": 5}, "category": "Fraud", "entry_type": "harmful", "status": "planned"}
    ],
+   "jailbreaks.plan.json": "{\n \"seed\": 5,\n \"rounds\": [\n  {\n   \"max_complexity\": 6,\n   \"max_obfuscations\": 2,\n   \"include_hacking\": true,\n   \"include_manipulation\": true,\n   \"include_obfuscation\": true,\n   \"include_requests\": true,\n   \"exact_techniques\": 1\n  },\n  {\n   \"max_complexity\": 4,\n   \"max_obfuscations\": 2,\n   \"include_hacking\": true,\n   \"include_manipulation\": true,\n   \"include_obfuscation\": true,\n   \"include_requests\": true\n  }\n ],\n \"pool\": [\n  \"broken\",\n  \"one_step\",\n  \"two_step\"\n ],\n \"family_weights\": null,\n \"layer_rates\": null\n}\n",
    "jailbreaks.state.jsonl": [
     {},
     {"input_id": "77", "iteration": 0},
@@ -194,6 +196,7 @@
     {"sample_id": "given-1", "iteration": 0, "combination": ["two_step"], "settings": {"exact_techniques": 1, "seed": 5}, "category": "Fraud", "entry_type": "harmful", "status": "planned"},
     {"sample_id": "padded", "iteration": 0, "combination": ["two_step"], "settings": {"exact_techniques": 1, "seed": 5}, "category": "Fraud", "entry_type": "harmful", "status": "planned"}
    ],
+   "variations.plan.json": "{\n \"seed\": 5,\n \"rounds\": [\n  {\n   \"exact_techniques\": 1\n  }\n ],\n \"pool\": [\n  \"broken\",\n  \"one_step\",\n  \"two_step\"\n ],\n \"family_weights\": null,\n \"layer_rates\": null\n}\n",
    "variations.state.jsonl": [
     {},
     {"input_id": "77", "iteration": 0},

@@ -20,6 +20,7 @@ from redact.dataset import (
     Manifest,
     append_rows,
     read_rows,
+    release_lock,
     resume_state,
     row_ids,
 )
@@ -28,7 +29,13 @@ from redact.llms.client import ModelClient
 
 from . import pool as pool_module
 from .manipulation import get_or_generate_benign_data
-from .plan import coverage_path, plan_run
+from .plan import (
+    changed_plan_inputs,
+    coverage_path,
+    plan_inputs,
+    plan_path,
+    plan_run,
+)
 from .technique import load_spec
 from .units import error_row_of, is_pending, pending_units, row_of
 
@@ -86,7 +93,10 @@ def run_augmentation(
     ``(input_id, iteration)``; ``resume=True`` reuses the plan and skips its
     finished units, ``resume=False`` clears the output, ledger and plan first.
     A reused plan runs as it was made: an input it does not hold, accepted
-    after it was made, gets no unit, and a WARNING counts those inputs.
+    after it was made, gets no unit, and a WARNING counts those inputs. A
+    reused plan made with another ``seed``, ``rounds``, pool, ``family_weights``
+    or ``layer_rates`` (its plan file says) raises a ``ValueError``; one with
+    no plan file is run unchecked, with a WARNING.
 
     Returns:
         The rows of ``out_path``, or an empty frame when ``read_back`` is False.
@@ -134,8 +144,27 @@ def run_augmentation(
     if reused:
         if verbose:
             logger.info("Reusing existing manifest: %s", man_path)
+        changed = changed_plan_inputs(man_path, plan_inputs(
+            pool, seed=seed, rounds=rounds, family_weights=family_weights,
+            layer_rates=layer_rates))
+        if changed is None:
+            logger.warning(
+                "%s: the plan %s has no %s beside it, so whether this run's "
+                "section and seed are the ones it was made with is not checked; "
+                "it runs as it was made. Run with resume=False to plan again "
+                "(the stage starts over).", label, man_path.name,
+                plan_path(man_path).name)
+        elif changed:
+            release_lock(ledger)
+            raise ValueError(
+                f"{label}: this run's {changed} differ from those the plan "
+                f"{man_path.name} was made with (see {plan_path(man_path).name}), "
+                "and a resume keeps the plan as it was made. Run with "
+                "resume=False to plan again (the stage starts over), or with "
+                "the section and seed the plan was made with.")
     else:
         coverage_path(man_path).unlink(missing_ok=True)
+        plan_path(man_path).unlink(missing_ok=True)
         plan_run(
             inputs, pool, manifest_path=man_path, seed=seed,
             iterations=len(rounds), settings_per_iteration=rounds,
