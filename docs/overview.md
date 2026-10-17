@@ -214,7 +214,7 @@ returns a summary: `dataset_type`, `data_dir`, `stages` (counts and record
 path per stage), `serving`, `telemetry` (with `cut`, the replies cut at the
 token limit per stage and model), and `residency` and `trace` when present.
 
-## The final dataset
+## The dataset of a training run
 
 `complete_dataset.csv` holds the accepted rows of each part, one after
 another, with the union of their columns. A row is empty in the columns its
@@ -237,7 +237,7 @@ table shows; [stages/build.md](stages/build.md) has the details.
 ## An eval run
 
 `eval_example.json` names `"dataset_type": "eval"` and a small constitution
-(one taxonomy category and three constitution categories per entry type,
+(one category of each taxonomy and three constitution categories per unit,
 `params_eval_example.json`); the eval type file gives the rest. It runs the same
 six stages as a training run, with these differences:
 
