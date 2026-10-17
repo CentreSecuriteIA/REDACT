@@ -118,7 +118,7 @@ _SETUP_COPIES = {
     "taxonomy/harmful.json": "taxonomy/harmful.json",
     "taxonomy/benign.json": "taxonomy/benign.json",
     "jailbreak/augmentations.json": "jailbreak/augmentations.json",
-    "eval_params.json": "runs/params_example.json",
+    "eval_params.json": "runs/params_eval_example.json",
     "training_params.json": "runs/params_training_example.json",
 }
 # Each recipe of a setup folder: the packaged example it is written from, and

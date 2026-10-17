@@ -284,6 +284,7 @@ the same `rpm`.
 | `extract_numbered_list`, `extract_structured_qa`, `extract_and_clean` | Parse a reply: a numbered list (`1. sample`, `2) sample`, `3- sample`, `4: sample`), or `**Question:** ... **Answer:** ...` pairs, optionally headed `**Prompt N:**`. `extract_numbered_list(text, strict=True)` rejects a reply that is not one clean list. With `expected_count`, `extract_structured_qa` and `extract_and_clean` reject a reply with another count whole: the result is empty |
 | `clean_sample` | Strip markdown and stray chat tokens |
 | `scaffold_prompt_tree(target_dir, source_dir=None, mode="copy")` | Write a copy (`copy`) or skeletons (`empty`) of the prompt tree |
+| `scaffold_setup(target_dir, *, overwrite=False)` | Write a setup folder: the two example recipes with `"config_dir": "."`, their params files, the dataset type, taxonomy and augmentation files a `config_dir` overlays, and a `README.md` ([configuration.md](../configuration.md#your-own-config-folder)) |
 
 A render error names the missing placeholder, and the prompt file when the
 template comes from `PromptTemplate.load`.

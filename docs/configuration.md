@@ -46,7 +46,9 @@ file gives as `null` is off unless the recipe gives it as an object, which
 then overlays the packaged default. A type's params are checked as the params
 file's are, before the first stage runs, and each run record's `params`
 holds the merged values. Each record also holds `dataset_type` and
-`dataset_type_hash`, the content id of the type file as parsed.
+`dataset_type_hash`, the content id of the type file as parsed. A recipe's
+[`config_dir`](#your-own-config-folder) may hold a type file of its own,
+read in place of the packaged one.
 
 | | `training.json` | `eval.json` |
 |---|---|---|
@@ -101,7 +103,7 @@ the [dataset type's](#dataset-types) params for that stage. A top-level key
 that is not a stage name raises, except a comment key that starts with `_`. Inside a stage's entry every key must be a parameter of the
 front (a `_` key there raises too), and not one the run passes itself (the
 models, `data_dir`, `prompt_dir`, `taxonomy`, `taxonomy_dir`,
-`benign_taxonomy`, `resume`, `verbose`, the inputs stage's
+`benign_taxonomy`, `config_dir`, `resume`, `verbose`, the inputs stage's
 `constitution_df`, the jailbreak stage's `augmentation`, the build's `mode`,
 `read_back`). Parameters that take a DataFrame (`inputs`, `outputs`) cannot
 be written in JSON.
@@ -213,7 +215,7 @@ Both kinds:
 | Key | Type | Default | Meaning |
 |---|---|---|---|
 | `entry_types` | list or `null` | `null` | Augment only inputs of these entry types; `null` for all. A kind whose entry types match no input logs a WARNING and writes nothing |
-| `translation` | bool | `false` | Whether the kind draws the `translation` family. The family lists do not change it; `layers.deny`, `techniques.deny` and `pure_only` still apply |
+| `translation` | bool | `false`; `true` in the eval type's adversarial kind | Whether the kind draws the `translation` family. The family lists do not change it; `layers.deny`, `techniques.deny` and `pure_only` still apply |
 | `layers` | `{"deny": [...]}` | `{"deny": []}` | Layers left out |
 | `families` | `{"allow": [...] or null, "deny": [...]}` | adversarial: `{"allow": null, "deny": []}`; natural: the natural families | Families admitted and removed |
 | `techniques` | `{"allow": [...] or null, "deny": [...]}` | adversarial: `{"allow": null, "deny": []}`; natural: three techniques allowed, three denied | Techniques admitted and removed |
@@ -297,11 +299,14 @@ type is a one-key override: its pool keeps the other 28 techniques. An allow
 list left empty by this is dropped when the other list still names
 something; when nothing but translation was allowed, the kind raises.
 
-Both kinds default to `false`. Each translation makes 2 to 8 calls, up to 4
-rounds of two ([stages/jailbreaks.md](stages/jailbreaks.md#models) says which
-model each goes to). The translation model is planned and loaded only when a
-kind has the switch on.
-Turning it on by default is one line per kind in `augmentations.json`.
+Both kinds of the packaged section default to `false`; the eval type turns
+it on for its attacks, with the nine low-resource languages, which run on
+the hosted `translation` model until a local one is registered. Each
+translation makes 2 to 8 calls, up to 4 rounds of two
+([stages/jailbreaks.md](stages/jailbreaks.md#models) says which model each
+goes to). The translation model is planned and loaded only when a kind's
+pool holds a translation technique. Turning it on by default is one line
+per kind in `augmentations.json`.
 
 ### Rounds
 
@@ -495,7 +500,7 @@ and from the package otherwise:
 
 | File | Replaces |
 |---|---|
-| `<config_dir>/dataset_types/<type>.json` | the [dataset type](#dataset-types) file; a new name there is a dataset type of its own |
+| `<config_dir>/dataset_types/<type>.json` | the [dataset type](#dataset-types) file; a new name there is a dataset type of its own, for every stage but `build`, whose mode is `training` or `eval` only: a run of another type that lists `build` stops when the build starts (`mode must be 'training' or 'eval'`) |
 | `<config_dir>/taxonomy/<name>.json` | a taxonomy of that name (`taxonomy`, `benign_taxonomy`); a new name there is a taxonomy of your own. `taxonomy_dir`, when given, wins and is read alone |
 | `<config_dir>/jailbreak/augmentations.json` | the default [augmentation section](#the-augmentation-section), both kinds and `natural_only_families` |
 
@@ -625,9 +630,9 @@ values. Delete every file you do not change, then set `prompt_dir`.
 | `configs/jailbreak/hacking/cognitive_techniques.json`, `personas.json` | The definitions of the cognitive techniques and of the named personas | `jailbreak/hacking/cognitive.py`, `personas.py` |
 | `configs/dataset_types/training.json`, `eval.json` | Each dataset type's default `stages`, `params` and `augmentations` | `recipe.py: load_dataset_type` |
 | `configs/taxonomy/harmful.json` | The harmful categories: the default `taxonomy` | `dataset/taxonomy.py: load_taxonomy` |
-| `configs/taxonomy/benign.json` | The categories and subcategories of the fsh and dap techniques' benign Q&A pairs: the default `benign_taxonomy` | `dataset/taxonomy.py: load_taxonomy` |
+| `configs/taxonomy/benign.json` | The default `benign_taxonomy`: the categories of the constitution's general-benign part, and the subcategories of the fsh and dap techniques' benign Q&A pairs | `dataset/taxonomy.py: load_taxonomy` |
 | `configs/datasets/content_moderation_input.json` | A HuggingFace dataset id, split, columns and filters | `dataset/loading.py: load_from_config` |
-| `configs/runs/*.json` | The example recipes (`eval_example.json`, `training_example.json`) and their params files (`params_example.json`, `params_training_example.json`) | you |
+| `configs/runs/*.json` | The example recipes (`eval_example.json`, `training_example.json`) and their params files (`params_eval_example.json`, `params_training_example.json`) | you |
 
 A `taxonomy_dir` of your own that still holds `content_moderation_categories.json`
 serves it for `harmful`, with a `DeprecationWarning`, for one release; rename

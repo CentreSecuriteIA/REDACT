@@ -2,8 +2,9 @@
 
 REDACT builds red-teaming datasets. You give it a taxonomy of categories and a
 recipe; it generates samples, checks them with a second model, augments them,
-and merges everything into one CSV. Every stage saves as it goes and resumes
-where it stopped.
+and merges the accepted rows into one CSV for training, or into three flat
+files for evaluation. Every stage saves as it goes and resumes where it
+stopped.
 
 These pages explain what each part of the library is for, and how a run goes
 from recipe to finished dataset. They are written for developers who use or
@@ -26,12 +27,13 @@ extend REDACT.
   on, and one training run end to end.
 - [running.md](running.md): writing a recipe, choosing models, the GPU
   planner, resume, the files on disk, telemetry and cost, common failures.
-- [configuration.md](configuration.md): every recipe key, the params keys per
-  stage, the augmentation section, the model registry, the prompt overlay.
+- [configuration.md](configuration.md): every recipe key, the dataset
+  types, the params keys per stage, the augmentation section, the model
+  registry, your own config folder, the prompt overlay.
 - [extending.md](extending.md): how to add a model, a prompt, a jailbreak
-  technique, a stage, or a taxonomy.
+  technique, a stage, a taxonomy or a dataset type.
 - [techniques.md](techniques.md): every jailbreak technique by layer and
-  family, for allow and deny lists.
+  family, for allow and deny lists, and the eval type's pool.
 
 ### Stages
 
@@ -55,7 +57,8 @@ One page per layer. Each says what the layer is responsible for, what it must
 not do, its main types and functions, and how the stages use it.
 
 - [internals/top-level.md](internals/top-level.md): `stages.py`,
-  `recipe.py`, `driver.py`, `paths.py`, and the seven steps of a stage
+  `recipe.py`, `driver.py`, `paths.py`, `config_overlay.py`, and the seven
+  steps of a stage
 - [internals/llms.md](internals/llms.md): the model registry, backends,
   clients and prompts
 - [internals/llm_pipeline.md](internals/llm_pipeline.md): generators of model
@@ -81,6 +84,7 @@ not do, its main types and functions, and how the stages use it.
 | Term | Meaning |
 |---|---|
 | Stage | One step of a run that a recipe can name: `constitution`, `inputs`, `outputs`, `paraphrase`, `jailbreaks`, `build` |
+| Dataset type | What a run makes, `training` or `eval`: a file of default stages, params and augmentations, and the build's mode |
 | Front | A stage's public function in `stages.py`, such as `generate_outputs`. It resolves models and paths, then calls the core |
 | Core | The function in the stage's package that does the work, such as `content_moderation.run_output_generation` |
 | Unit | The piece of work a stage saves and resumes by, such as one input row, or one `(input_id, iteration)` |

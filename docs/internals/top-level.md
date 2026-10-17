@@ -1,7 +1,7 @@
 # The top level: stages, recipe, driver, paths
 
-`stages.py`, `recipe.py`, `driver.py` and `paths.py` turn the layers below
-into stages and run a recipe. This page also gives the shape every stage
+`stages.py`, `recipe.py`, `driver.py`, `paths.py` and `config_overlay.py`
+turn the layers below into stages and run a recipe. This page also gives the shape every stage
 core follows: [the seven steps](#the-seven-steps-of-a-stage).
 
 ## Package layout
@@ -13,21 +13,21 @@ Under `src/redact/`:
 | `llms/` | The model registry, one backend per provider, `ModelClient`, rate limits, prompt loading and reply parsing ([llms.md](llms.md)) |
 | `llm_pipeline/` | `LLMRequest`, the drivers of units of model calls, checks and retry steps ([llm_pipeline.md](llm_pipeline.md)) |
 | `residency/` | The GPU planner: which local models fit, per stage; preload and unload ([residency.md](residency.md)) |
-| `constitution/` | The constitution stage: `generation.py` (`ConstitutionPipeline`, `read_constitution`), `units.py` (one call per taxonomy category and entry type), `parse.py` (the `[END]` marker and the three-level markdown parser) |
+| `constitution/` | The constitution stage: `generation.py` (`ConstitutionPipeline`, `read_constitution`), `units.py` (one call per taxonomy category and entry type, and one per benign-taxonomy category for the general-benign part), `parse.py` (the `[END]` marker and the three-level markdown parser) |
 | `content_moderation/` | The inputs, outputs and paraphrase stages: `inputs.py` (`InputPipeline`), `outputs.py`, `paraphrase.py`, `checker.py` (the checkers), `feedback.py` (rejection feedback, the do-not-repeat note), `results.py` (the inputs stage's totals) |
 | `jailbreak/` | The technique library, one subpackage per layer, and the augmentation engine ([jailbreak.md](jailbreak.md)) |
 | `multi_turn/` | Conversation datasets: settings, actors, `generate_conversations`, `evaluate_conversations` |
 | `multiturn_attacks/`, `optimization/` | Crescendo and PAIR attacks against a safety-trained target; a beam search over conversation moves ([conversations](../stages/conversations.md#attacks-and-search)) |
-| `dataset/` | Rows on disk: identity, the ledger and manifest, resume, the per-category tree ([dataset.md](dataset.md)) |
-| `configs/` | Package data: `llm/` (registry, roles, GPU prices), `jailbreak/` (the spec, the augmentation defaults, technique templates), `taxonomy/`, `datasets/`, `runs/` (example recipes and their params files) |
+| `dataset/` | Rows on disk: identity, the ledger and manifest, resume, the per-category tree, what an eval build leaves out ([dataset.md](dataset.md)) |
+| `configs/` | Package data: `llm/` (registry, roles, GPU prices), `jailbreak/` (the spec, the augmentation defaults, technique templates), `dataset_types/` (what `training` and `eval` mean), `taxonomy/`, `datasets/`, `runs/` (example recipes and their params files) |
 | `prompts/` | One prompt JSON per pipeline and step |
-| `stages.py`, `recipe.py`, `driver.py`, `paths.py` | This page |
+| `stages.py`, `recipe.py`, `driver.py`, `paths.py`, `config_overlay.py` | This page |
 | `telemetry.py` | The run trace and the cost roll-up ([telemetry.md](telemetry.md)) |
 | `exceptions.py`, `types.py` | `RedactError`, `PromptTooLongError`; `EntryType` |
 
 Beside the package: `scripts/` (`run.py`, `inspect_run.py`,
-`scaffold_prompts.py`, `download_models.py`, `gpu_check_residency.py`, the
-residency checks on a GPU pod), `notebooks/` (walkthroughs), `docs/` and
+`scaffold_prompts.py`, `scaffold_setup.py`, `download_models.py`,
+`gpu_check_residency.py`, the residency checks on a GPU pod), `notebooks/` (walkthroughs), `docs/` and
 `mkdocs.yml` (this site), and `tests/`.
 
 ## Responsibilities and boundaries
@@ -38,6 +38,7 @@ residency checks on a GPU pod), `notebooks/` (walkthroughs), `docs/` and
 | `recipe.py` | Reading and checking a recipe and its params file; how a role resolves; how a recipe serves its models | Run anything |
 | `driver.py` | One run: serving, residency, telemetry, the stages in order, a record each | Read a stage's rows back: counts come from the files |
 | `paths.py` | Every file and folder name under a working root, the default root, and the package's own folders | Hold stage logic: a stage asks it for a path and nothing else |
+| `config_overlay.py` | Which file of `configs/` a run reads: the user's `config_dir` copy or the packaged one | Parse a config: its readers do |
 
 The library attaches only a `NullHandler` to the `redact` logger and sets no
 level; the application configures logging (`scripts/run.py` does).
@@ -63,6 +64,8 @@ Every front takes, where they apply:
 - `data_dir`, the working root;
 - one model name per role, `None` meaning the registry role's default;
 - `prompt_dir`, the prompt overlay;
+- `config_dir`, the user's config folder (the constitution and jailbreak
+  fronts, for their taxonomies and the augmentation section);
 - its tunables, which are the params keys;
 - `resume=True`, `verbose=True` and `read_back=True` (`False` returns an
   empty frame and reads nothing back);
@@ -122,7 +125,7 @@ the params.
 | `outputs` | `gen`, `check` -> `uncensored_gen` | `output_responses.csv`, or its `output_path` | the input category files (`dataset.input_files`) |
 | `paraphrase` | `paraphraser` -> `paraphraser`, `paraphrase_check` -> `uncensored_gen` | the files of the target(s) | the input category files and `output_responses.csv`, per target |
 | `jailbreaks` | `gen` -> `uncensored_gen`, `translation` -> `translation` | `jailbreaks.csv` and `variations.csv`, each when its kind is on | the input category files |
-| `build` | none | `complete_dataset.csv`, or its `output_path`; in eval the three `eval_*.csv` files | the part files, where the params put them (no variations in eval) |
+| `build` | none | `complete_dataset.csv`, or its `output_path`; in eval the three `eval_*.csv` files, and `excluded` from `eval_excluded.json` (`extra_counts`) | the part files, where the params put them (no variations in eval), and the files `exclude_from` names |
 
 `RunContext` is what one run hands the stages: `data_dir`, `dataset_type`,
 `models` (role to name or `None`), `prompt_dir`, `taxonomy`,
@@ -135,10 +138,10 @@ the params.
 | Function | Does |
 |---|---|
 | `load_recipe(path or dict)` | Reads and checks a recipe ([running.md](../running.md#write-a-recipe)); refuses a recipe without a `dataset_type`, a `resume` that is not a bool and a top-level `copies` other than null; takes `stages` from the dataset type when left out; resolves `augmentations`; reads the former taxonomy name `content_moderation_categories` as `harmful`, with a `DeprecationWarning` |
-| `load_dataset_type(name)`, `dataset_type_hash(name)` | The packaged `configs/dataset_types/<name>.json` (`stages`, `params`, `augmentations`), as a copy; the content id of the file as parsed, which each run record holds ([configuration.md](../configuration.md#dataset-types)) |
+| `load_dataset_type(name, config_dir=None)`, `dataset_type_hash(name, config_dir=None)` | The file `dataset_types/<name>.json` (`stages`, `params`, `augmentations`), the `config_dir`'s when it has one, else the packaged one, as a copy; read again when it changes. The content id of the file as parsed, which each run record holds ([configuration.md](../configuration.md#dataset-types)) |
 | `benign_taxonomy_of(recipe, stages)` | The recipe's `benign_taxonomy` (`"benign"` by default); read, and checked to have a category, when the constitution stage runs with its dataset type's `include_general_benign` on, or the jailbreak stage runs a kind that draws a technique needing benign data |
 | `load_params(path or dict, base_dir)` | Reads the params file; refuses a key that is not a stage name (a `_` key is a comment) and a `jailbreaks` key that belongs in the augmentation section, warns for a flat keyword |
-| `augmentations_of(recipe, jailbreak_params)` | The section, both kinds resolved over the recipe's dataset type's (`resolve(..., base=)`); reads the flat form; applies the params' flat keywords over the adversarial kind |
+| `augmentations_of(recipe, jailbreak_params)` | The section, both kinds resolved over the recipe's dataset type's (`resolve(..., base=)`), itself over the packaged default or the `config_dir`'s `augmentations.json`; reads the flat form; applies the params' flat keywords over the adversarial kind |
 | `serving_of(models)` | Refuses a key that is not a recipe role, whatever its value (a `_` key is a comment); checks the role objects; returns the keys given per model name |
 | `resolve_role(models, role, augmentations)` | The models a role stands for, as its stage resolves them |
 
@@ -147,6 +150,20 @@ default": `paraphraser` may be a pool (`"distribution"`); `check` left out is
 the `gen` model; `translation` is no model when no kind's pool holds a
 translation technique.
 
+## config_overlay.py
+
+| Function | Does |
+|---|---|
+| `config_file(relative, config_dir)` | `configs/<relative>`: the `config_dir`'s file when it has one, else the packaged one |
+| `taxonomy_folder(name, taxonomy_dir, config_dir)` | The folder a taxonomy is read from: `taxonomy_dir` when given, else `<config_dir>/taxonomy` when it has the file, else `None` (the packaged one) |
+| `config_sources(config_dir)` | The folder's files under the folders of `configs/`: `overridden`, `added` (read, with no packaged file of that name) and `ignored` |
+| `report_config_sources(config_dir, verbose=True)` | Warns about the `ignored` files and, with `verbose`, logs the files read |
+
+Three kinds of file are read from the folder: `dataset_types/<type>.json`,
+`taxonomy/<name>.json` and `jailbreak/augmentations.json`. The technique
+spec and templates, `llm/` and `datasets/` are loaded at import or tied to
+code, so they come from the package only.
+
 ## driver.py
 
 `run_pipeline(recipe, params=None, verbose=True, data_dir=None)`:
@@ -154,7 +171,9 @@ translation technique.
 1. `load_recipe`, `load_params`, `serving_of`; build the `RunContext`.
 2. `Stage.check` for every stage.
 3. `telemetry.install(data_dir)`; with `verbose`,
-   `report_prompt_sources(prompt_dir)`.
+   `report_prompt_sources(prompt_dir)`. `report_config_sources(config_dir)`
+   warns about the files of the folder no run reads, and with `verbose` logs
+   those it reads.
 4. `residency.loaded_engines()`: the engines loaded before the run.
    `capabilities.set_run_serving(...)`: each model's `backend_type` and
    `workers` for every client built during the run.
@@ -176,8 +195,10 @@ translation technique.
    aside, so no unload between stages releases them.
 8. Per stage: `_enter_phase` (unload, apply the stage's plan, preload this
    stage's models and the next stage's when they fit), then inside
-   `telemetry.stage(name)`: the front with `read_back=False`, `file_counts`,
-   `write_record` with `sources`. Leaving `telemetry.stage` logs the
+   `telemetry.stage(name)`: the front with `read_back=False`, `file_counts`
+   and the stage's `extra_counts`, `write_record` with `sources`, the
+   `dataset_type` and its `dataset_type_hash`, and with a `config_dir` that
+   folder and `config_files`. Leaving `telemetry.stage` logs the
    stage's replies cut at the token limit, per model.
 9. `finally`: clear the run's serving. When the run has a plan: join the
    preload threads for at most `vllm.EXIT_WAIT_S` (60 s) in all, unload the

@@ -11,8 +11,9 @@ REDACT builds red-teaming datasets for content moderation and jailbreak
 research. Give it a taxonomy of harm categories and a recipe: it generates
 samples for every category, checks each one with a second model, generates
 model responses, augments the samples with jailbreak techniques and natural
-variations, and merges the accepted rows into one CSV. Every stage saves as
-it goes and resumes where it stopped. It is for AI safety researchers and
+variations, and merges the accepted rows into one CSV for training, or into
+three flat files for evaluation. Every stage saves as it goes and resumes
+where it stopped. It is for AI safety researchers and
 engineers who build or evaluate content-moderation filters and jailbreak
 guardrails, and is built for defensive research. It is developed by
 [CeSIA — Centre pour la Sécurité de l'IA](https://www.securite-ia.fr/), and
@@ -29,7 +30,8 @@ on its own:
 
 1. **constitution**: a strong model writes, per taxonomy category, sample
    descriptions at four severities: harmful, dual-use harmful, dual-use
-   benign, benign.
+   benign, benign (an eval run keeps the two clear ends); and benign ones
+   per category of a benign taxonomy.
 2. **inputs**: an uncensored model turns each description into prompts, and
    a checker model accepts or rejects every one.
 3. **outputs**: one checked model response per accepted input.
@@ -71,7 +73,10 @@ python scripts/run.py src/redact/configs/runs/training_example.json --data-dir .
 
 The merged dataset lands in `./runs/first/Datasets/complete_dataset.csv`.
 The `paraphrase` stage loads a 24B model on a local GPU; take it out of the
-recipe's `stages` to run on hosted models only.
+recipe's `stages` to run on hosted models only. `eval_example.json` makes a
+small eval set the same way, as `eval_inputs.csv`, `eval_outputs.csv` and
+`eval_jailbreaks.csv`. A recipe's `dataset_type`, `training` or `eval`, picks
+the defaults ([docs/configuration.md](docs/configuration.md#dataset-types)).
 
 Or call a stage from Python:
 

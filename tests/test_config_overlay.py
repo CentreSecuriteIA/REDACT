@@ -187,7 +187,7 @@ _COPIES = {
     "taxonomy/harmful.json": "taxonomy/harmful.json",
     "taxonomy/benign.json": "taxonomy/benign.json",
     "jailbreak/augmentations.json": "jailbreak/augmentations.json",
-    "eval_params.json": "runs/params_example.json",
+    "eval_params.json": "runs/params_eval_example.json",
     "training_params.json": "runs/params_training_example.json",
 }
 

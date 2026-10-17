@@ -131,10 +131,11 @@ def generate_constitution(
         config_dir: A config folder whose ``taxonomy/`` files are read in
             place of the packaged ones, when ``taxonomy_dir`` is not given
             (:mod:`redact.config_overlay`). ``None``: the packaged only.
-        include_standalone_benign, standalone_benign_categories: The former
-            names of ``include_general_benign`` and
-            ``general_benign_categories``, read for this release with a
-            ``DeprecationWarning``; given, they win.
+        include_standalone_benign: The former name of
+            ``include_general_benign``, read for this release with a
+            ``DeprecationWarning``; given, it wins.
+        standalone_benign_categories: The former name of
+            ``general_benign_categories``, read as the one above.
 
     Returns:
         DataFrame of all constitution entries, backed by the on-disk
