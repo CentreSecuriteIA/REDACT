@@ -884,7 +884,8 @@ class TestVLLMGenerateBatch:
         """The failing request is the last to start, so the other two are in
         flight when it fails, and they have stopped when the batch ends. The
         log is read on the loop at that moment: read by the caller, it would
-        also hold what the loop did before the caller woke."""
+        also hold what the loop did before the caller woke. A cancelled
+        request was sent all the same, so it records its call too."""
         import redact.llms.backends.vllm as vllm_module
 
         script = _Script(["bad"], fail={"bad"})
@@ -904,7 +905,8 @@ class TestVLLMGenerateBatch:
         assert logged[:4] == [("start", "a"), ("start", "b"), ("start", "bad"),
                               ("end", "bad")]
         assert sorted(logged[4:]) == [("cancel", "a"), ("cancel", "b")]
-        assert [event.get("error") for event in events] == ["RuntimeError: bad boom"]
+        assert [event.get("error") for event in events] == [
+            "RuntimeError: bad boom", "CancelledError: ", "CancelledError: "]
 
     def test_an_interrupted_call_cancels_its_requests(self, monkeypatch):
         """Ctrl-C reaches the caller blocked in generate(). The engine must not

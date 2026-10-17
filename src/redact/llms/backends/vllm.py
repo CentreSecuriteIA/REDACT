@@ -865,7 +865,8 @@ class VLLMBackend(LLMBackend):
                     f"{request_id}: the engine was released or shut down "
                     f"while the request was in flight."
                 )
-        except Exception as exc:
+        # A cancelled request was sent all the same.
+        except (Exception, asyncio.CancelledError) as exc:
             self._record_call(
                 n_items=1, started=started, max_tokens=max_tok,
                 temperature=temp, error=f"{type(exc).__name__}: {exc}",
