@@ -74,8 +74,9 @@ def run_augmentation(
     sampler settings, as :func:`redact.jailbreak.augmentation.rounds_of`
     gives them (one round of the sampler's defaults when None);
     ``family_weights`` and ``layer_rates``
-    go to the dealing of :func:`plan_run`. ``label`` is the progress label and
-    the internals-capture root. With ``accept_noop`` False, a row whose text
+    go to the dealing of :func:`plan_run`. ``label`` is the progress label, the
+    internals-capture root, and part of the techniques' random seed and of an
+    error row's id. With ``accept_noop`` False, a row whose text
     is its input's is not accepted.
 
     Each input's id is its ``sample_id`` when it has one, else the content id
@@ -207,7 +208,8 @@ def run_augmentation(
 
     def _on_error(i, exc):
         _row(live.pop(i),
-             lambda u, r: error_row_of(u, exc, r, spec_version, gen_model=client.model))
+             lambda u, r: error_row_of(u, exc, r, spec_version, gen_model=client.model,
+                                       label=label))
 
     def _units():
         # The plan is read one row at a time, as the driver takes units; closed

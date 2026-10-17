@@ -191,12 +191,19 @@ class TestRows:
         unit = _unit(0, "alpha", two_step, iteration=3)
         row = error_row_of(unit, ValueError("boom"), {}, "1.0", gen_model=GEN)
         assert row["input_id"] == "id0"
-        assert row["sample_id"] == content_id("id0:3")
+        assert row["sample_id"] == content_id("jailbreak:id0:3")
         assert row["sample_id"] != content_id("alpha")   # not the input's id
         assert row["jailbreak"] == "alpha"
         assert row["technique_info"] == "ERROR: boom"
         assert row["reasoning"] == "boom"
         assert row["is_noop"] is True and row["accepted"] is False
+
+    def test_the_two_kinds_error_rows_of_one_unit_have_two_ids(self):
+        unit = _unit(0, "alpha", two_step)
+        ids = {error_row_of(unit, ValueError("boom"), {}, "", gen_model=GEN,
+                            label=label)["sample_id"]
+               for label in ("jailbreak", "variation")}
+        assert len(ids) == len(("jailbreak", "variation"))
 
 
 # --- driving units -----------------------------------------------------------
@@ -252,7 +259,7 @@ class TestDrive:
 
         rows = _drive([_unit(0, "a", boom)], _backends())
         assert rows[0]["technique_info"] == "ERROR: chain failed"
-        assert rows[0]["sample_id"] == content_id("id0:0")
+        assert rows[0]["sample_id"] == content_id("jailbreak:id0:0")
 
     def test_a_technique_tagged_with_max_tokens_caps_its_requests(self):
         def capped(text, *, gen_model=None, **kwargs):
@@ -308,6 +315,21 @@ class TestCapture:
         rows = _drive([_unit(0, "alpha", to_swahili)], backends, capture=True)
         assert backends[TRANS].internals == [None, None]
         assert rows[0]["accepted"] is True
+
+
+def test_the_two_kinds_draw_their_own_random_choices():
+    """Else a technique both kinds draw for one input gives one text twice."""
+    from redact.llm_pipeline import drive_sync
+
+    def draws(text, *, rng=None, **kwargs):
+        return str(rng.random()), ""
+
+    texts = set()
+    for label in ("jailbreak", "variation"):
+        unit = {**_unit(0, "alpha", draws), "seed": 42}
+        texts.add(drive_sync(unit_gen(unit, gen_model=GEN, label=label),
+                             lambda request: "")[0])
+    assert len(texts) == len(("jailbreak", "variation"))
 
 
 def test_module_random_is_untouched():

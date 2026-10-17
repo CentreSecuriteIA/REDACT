@@ -983,7 +983,7 @@ def test_pool_run_without_retries_writes_the_same_rows(tmp_path, monkeypatch):
         {**row("zq2", "broken", "zq2", "ERROR: chain failed", False, "chain failed"),
          # An error row's sample_id is its own (content_id of its unit key), not
          # the input's.
-         "sample_id": content_id(f"{content_id('zq2')}:0")},
+         "sample_id": content_id(f"jailbreak:{content_id('zq2')}:0")},
     ] + [row(f"zq{i}", "one_step", f"S1:zq{i}", "one_step", True, "") for i in (1, 3, 4, 5)]
     assert {(r["input_id"], r["iteration"]): r for r in df.to_dict("records")} == {
         (r["input_id"], r["iteration"]): r for r in expected
@@ -1059,7 +1059,7 @@ def test_pool_a_prompt_too_long_lands_in_the_units_error_row(tmp_path, monkeypat
     assert {k: rows["zq1"][k] for k in (
         "sample_id", "jailbreak", "technique", "technique_info", "is_noop",
         "accepted", "reasoning")} == {
-        "sample_id": content_id(f"{content_id('zq1')}:0"), "jailbreak": "zq1",
+        "sample_id": content_id(f"jailbreak:{content_id('zq1')}:0"), "jailbreak": "zq1",
         "technique": "two_step",
         "technique_info": f"ERROR: {message}", "is_noop": "True",
         "accepted": "False", "reasoning": message}
