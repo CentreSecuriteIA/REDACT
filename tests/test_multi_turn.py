@@ -189,9 +189,11 @@ def test_evaluate_conversations_offline(tmp_path):
     )
     assert set(scored["success"]) == {True, False}
     assert set(scored["judge_model"]) == {"judge"}
-    # Resume: nothing re-judged, so no resolver is needed.
-    again = evaluate_conversations(data_dir=tmp_path, judge_model="judge", verbose=False)
-    assert len(again) == 2
+    # Resume: nothing re-judged.
+    idle = MockBackend("unused")
+    again = evaluate_conversations(data_dir=tmp_path, judge_model="judge", verbose=False,
+                                   resolve=JudgeResolver(idle))
+    assert len(again) == 2 and idle.calls == []
     # resume=False re-judges from scratch (unlinks the existing scored artifacts).
     fresh = evaluate_conversations(
         data_dir=tmp_path, judge_model="judge", resume=False, verbose=False,
@@ -831,3 +833,40 @@ def test_a_transcript_too_long_for_the_judge_is_scored_failed_and_acked(tmp_path
     ledger = Ledger.sidecar(paths.conversations_scored_csv(tmp_path),
                             key_fields=("sample_id",), casters={"sample_id": str})
     assert ledger.completed() == {"a", "b", "c"}
+
+
+def _scored_twice(tmp_path, **fresh):
+    """Score three conversations, then score them again fresh with ``fresh``."""
+    from redact import evaluate_conversations
+
+    evaluate_conversations(conversations=_three_conversations(), data_dir=tmp_path,
+                           judge_model="j", verbose=False,
+                           resolve=JudgeResolver(MockBackend("Yes ok")))
+    evaluate_conversations(conversations=_three_conversations(), data_dir=tmp_path,
+                           resume=False, verbose=False, **fresh)
+
+
+def test_a_fresh_scoring_run_with_an_unknown_judge_keeps_the_scores(tmp_path):
+    from redact import paths
+
+    scored = paths.conversations_scored_csv(tmp_path)
+    state = scored.with_name("conversations_scored.state.jsonl")
+    with pytest.raises(KeyError, match="no-such-judge"):
+        _scored_twice(tmp_path, judge_model="no-such-judge")
+    assert scored.exists() and _acks(state) == [
+        {"sample_id": "a"}, {"sample_id": "b"}, {"sample_id": "c"}]
+
+
+def test_a_fresh_scoring_run_with_a_broken_judge_prompt_keeps_the_scores(tmp_path):
+    import pandas as pd
+
+    from redact import paths
+
+    scored = paths.conversations_scored_csv(tmp_path)
+    broken = tmp_path / "overlay" / "conversation" / "judge"
+    broken.mkdir(parents=True)
+    (broken / "template.json").write_text("{not json", encoding="utf-8")
+    with pytest.raises(ValueError, match="not valid UTF-8 JSON"):
+        _scored_twice(tmp_path, judge_model="j", prompt_dir=tmp_path / "overlay",
+                      resolve=JudgeResolver(MockBackend("Yes ok")))
+    assert list(pd.read_csv(scored)["sample_id"]) == ["a", "b", "c"]

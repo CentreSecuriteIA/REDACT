@@ -104,6 +104,12 @@ def evaluate_conversations(
         conversations = read_rows(conv_path)
     conversations = conversations.reset_index(drop=True)
 
+    # Before the resume, so a bad judge or prompt fails a fresh run before it
+    # clears the scores.
+    judge_messages = judge_prompt(judge_system, prompt_dir)
+    resolve = resolve or ModelClient.create
+    judge = resolve(judge_model)
+
     scored_path.parent.mkdir(parents=True, exist_ok=True)
     ledger = Ledger.sidecar(scored_path, key_fields=("sample_id",),
                             casters={"sample_id": str})
@@ -120,10 +126,7 @@ def evaluate_conversations(
         release_lock(ledger)    # no CommitBuffer will
         return read_rows(scored_path) if read_back else pd.DataFrame()
 
-    judge_messages = judge_prompt(judge_system, prompt_dir)
     label = "RESPONSE" if scope == "last_reply" else "CONVERSATION"
-    resolve = resolve or ModelClient.create
-    judge = resolve(judge_model)
     n, written = len(pending), 0
 
     def _judgment(messages: list[dict]):
