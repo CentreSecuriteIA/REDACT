@@ -235,6 +235,21 @@ def test_a_fresh_run_killed_before_it_plans_leaves_no_old_plan(tmp_path, monkeyp
     assert [p.name for p in tmp_path.iterdir() if p.suffix != ".lock"] == []
 
 
+def test_a_plan_naming_a_technique_no_longer_registered_says_to_plan_again(tmp_path):
+    out = tmp_path / "jb.csv"
+    generate_jailbreaks(inputs=_inputs().head(2), output_path=out, seed=1, **PURE_KW)
+    manifest = Manifest.sidecar(out)
+    third = _inputs().iloc[2]
+    manifest.write([*manifest.load(), {
+        "sample_id": content_id(third["prompt"]), "iteration": 0,
+        "combination": ["to_renamed_away"], "settings": {"seed": 1},
+        "category": "Cyber", "entry_type": "harmful", "status": "planned"}])
+    with pytest.raises(ValueError, match="'to_renamed_away'.*resume=False"):
+        generate_jailbreaks(inputs=_inputs().head(3), output_path=out, seed=1,
+                            **PURE_KW)
+    assert lock_is_free(out.with_name("jb.state.jsonl"))
+
+
 def test_a_second_run_is_refused_before_it_plans(tmp_path):
     from filelock import FileLock
 

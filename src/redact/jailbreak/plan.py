@@ -114,10 +114,16 @@ def assign_combination(
 def combination_of(names: list[str], registry: dict[str, Callable]) -> Callable:
     """The combined technique a manifest row names, in the order it names them.
 
-    An unknown name raises ``KeyError``, so a stale manifest fails loudly.
+    Raises:
+        ValueError: A name no registered technique has, as in a plan made
+            before a technique was renamed or removed.
     """
-    fns = [registry[n] for n in names]
-    return combine_techniques(*fns, sort_by_hierarchy=False)
+    for name in names:
+        if name not in registry:
+            raise ValueError(
+                f"The plan names the technique {name!r}, which no registered "
+                "technique implements; run with resume=False to plan again.")
+    return combine_techniques(*(registry[n] for n in names), sort_by_hierarchy=False)
 
 
 def plan_run(
