@@ -145,8 +145,9 @@ contract.
 3. **Add its spec entry** under `techniques` in
    `configs/jailbreak/combination_spec.json`: `families` (the first sets the
    layer and the order), `complexity` (0 to 3), `requires_llm`,
-   `requires_benign`, `encode_weight` for an `encode` technique, and
-   `max_tokens` to cap its calls' replies. A new family also needs an entry
+   `requires_benign`, `encode_weight` for an `encode` technique,
+   `max_tokens` to cap its calls' replies, and `cross_incompatible_with` for
+   families this technique, not its whole family, may not join. A new family also needs an entry
    under `families`: `layer`, `within_layer_order`, `max_picks`,
    `cross_incompatible_with`, `description`. Importing `redact.jailbreak`
    raises while the spec and the registry name different techniques.

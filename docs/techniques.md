@@ -67,10 +67,15 @@ technique is picked first. A technique may not join a combination when:
 - its layer is at its cap (`layer_max_picks`: one `hacking`, one
   `manipulation`, one `requests`);
 - one of its families is in a taken family's `cross_incompatible_with`, or
-  the reverse. The spec pairs `structural` with `ascii_art`; `ascii_art` with
-  `framing`, `persona`, `cognitive`, `fsh`, `dap`; `fsh` and `dap` with
-  `continuation`, `indirect`, `framing`, `persona`, `cognitive`; and
-  `continuation` with `indirect`;
+  the reverse. The spec pairs `structural` and `translation` with
+  `ascii_art`; `ascii_art` with `framing`, `persona`, `cognitive`, `fsh`,
+  `dap`; `fsh` and `dap` with `continuation`, `indirect`, `framing`,
+  `persona`, `cognitive`; and `continuation` with `indirect`;
+- one of its families is in the `cross_incompatible_with` of a taken
+  technique's own spec entry, or a taken family is in its own. The spec keeps
+  `to_adversarial_suffix_emoji`, `to_adversarial_suffix_unicode` and
+  `to_braille` from `ascii_art`, since no font draws their characters; the
+  other suffixes and encodings may still join it;
 - it pairs `fsh` or `dap` with an obfuscation in
   `manipulation_blocked_obfuscation`: the `translation` and `ascii_art`
   families and the `heavy` `encode` techniques, except those also in

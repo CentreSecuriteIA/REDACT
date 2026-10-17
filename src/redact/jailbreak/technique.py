@@ -39,11 +39,13 @@ def tag(funcs: list[Callable]) -> None:
     """Set each function's spec tags as attributes of the function.
 
     ``families``, ``complexity`` (0-3), ``requires_llm``, ``requires_benign``,
-    ``encode_weight`` (``"light"``, ``"heavy"`` or None) and ``max_tokens``
-    (the reply limit of its model calls, None for the model's default) come
-    from the technique's entry; ``layer`` and ``within_layer_order`` from its
-    first family. A function the spec does not name is skipped. Called once,
-    when ``redact.jailbreak`` is imported.
+    ``encode_weight`` (``"light"``, ``"heavy"`` or None), ``max_tokens``
+    (the reply limit of its model calls, None for the model's default) and
+    ``cross_incompatible_with`` (the families the technique itself may not
+    join, beside its families' own) come from the technique's entry;
+    ``layer`` and ``within_layer_order`` from its first family. A function
+    the spec does not name is skipped. Called once, when ``redact.jailbreak``
+    is imported.
 
     Raises:
         ValueError: A technique's ``max_tokens`` is not a whole number of at
@@ -71,6 +73,7 @@ def tag(funcs: list[Callable]) -> None:
         # strictly no-LLM (pure_only) run.
         fn.requires_benign = t.get("requires_benign", False)
         fn.encode_weight = t.get("encode_weight", None)
+        fn.cross_incompatible_with = t.get("cross_incompatible_with", [])
         # Reply limit for the technique's LLM calls; None keeps the model's
         # default. chain.run_chain puts it on each request.
         limit = t.get("max_tokens")

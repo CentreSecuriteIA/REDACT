@@ -39,7 +39,7 @@
       "layer": "obfuscation",
       "within_layer_order": 3,
       "max_picks": 1,
-      "cross_incompatible_with": []
+      "cross_incompatible_with": ["ascii_art"]
     },
     "typos": {
       "description": "LLM-rewritten prompt with varying typo density",
@@ -74,7 +74,7 @@
       "layer": "obfuscation",
       "within_layer_order": 8,
       "max_picks": 1,
-      "cross_incompatible_with": ["structural", "framing", "persona", "cognitive", "fsh", "dap"]
+      "cross_incompatible_with": ["structural", "translation", "framing", "persona", "cognitive", "fsh", "dap"]
     },
     "casual_writing": {
       "description": "Casing, spacing, punctuation, abbreviations or accents as a person typing quickly writes them",
@@ -205,7 +205,7 @@
     "to_leetspeak_intermediate": { "families": ["encode"], "complexity": 2, "requires_llm": false, "encode_weight": "light" },
     "to_leetspeak_advanced": { "families": ["encode"], "complexity": 2, "requires_llm": false, "encode_weight": "light" },
     "to_morse":              { "families": ["encode"], "complexity": 3, "requires_llm": false, "encode_weight": "heavy" },
-    "to_braille":            { "families": ["encode"], "complexity": 3, "requires_llm": false, "encode_weight": "heavy" },
+    "to_braille":            { "families": ["encode"], "complexity": 3, "requires_llm": false, "encode_weight": "heavy", "cross_incompatible_with": ["ascii_art"] },
 
     "to_french":             { "families": ["translation"], "complexity": 0, "requires_llm": true },
     "to_japanese":           { "families": ["translation"], "complexity": 0, "requires_llm": true },
@@ -262,8 +262,8 @@
 
     "to_adversarial_suffix_punctuation": { "families": ["suffixes"], "complexity": 1, "requires_llm": false },
     "to_adversarial_suffix_fragments":   { "families": ["suffixes"], "complexity": 1, "requires_llm": false },
-    "to_adversarial_suffix_unicode":     { "families": ["suffixes"], "complexity": 1, "requires_llm": false },
-    "to_adversarial_suffix_emoji":       { "families": ["suffixes"], "complexity": 1, "requires_llm": false },
+    "to_adversarial_suffix_unicode":     { "families": ["suffixes"], "complexity": 1, "requires_llm": false, "cross_incompatible_with": ["ascii_art"] },
+    "to_adversarial_suffix_emoji":       { "families": ["suffixes"], "complexity": 1, "requires_llm": false, "cross_incompatible_with": ["ascii_art"] },
 
     "to_lowercase":            { "families": ["casual_writing"], "complexity": 0, "requires_llm": false },
     "to_uppercase":            { "families": ["casual_writing"], "complexity": 0, "requires_llm": false },

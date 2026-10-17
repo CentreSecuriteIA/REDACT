@@ -36,6 +36,54 @@ def test_a_cross_incompatibility_refuses_either_order(first, then):
 
 
 @pytest.mark.parametrize(("first", "then"), [
+    ("to_adversarial_suffix_emoji", "to_ascii_art"),
+    ("to_ascii_art", "to_adversarial_suffix_emoji"),
+    ("to_adversarial_suffix_unicode", "to_ascii_art"),
+    ("to_ascii_art", "to_adversarial_suffix_unicode"),
+    ("to_braille", "to_ascii_art"),
+    ("to_ascii_art", "to_braille"),
+    ("to_french", "to_ascii_art"),
+    ("to_ascii_art", "to_swahili"),
+])
+def test_ascii_art_refuses_what_leaves_a_character_no_font_draws(first, then):
+    """The emoji and unicode suffixes and braille, by the technique, and
+    every translation: no packaged font has their characters."""
+    assert not _joins(first, then)
+
+
+@pytest.mark.parametrize("technique", [
+    "to_adversarial_suffix_punctuation", "to_adversarial_suffix_fragments",
+    "to_base64", "to_morse", "to_rot47"])
+def test_ascii_art_keeps_the_rest_of_their_families(technique):
+    assert _joins(technique, "to_ascii_art") and _joins("to_ascii_art", technique)
+
+
+@pytest.mark.parametrize("technique", [
+    "to_adversarial_suffix_punctuation", "to_adversarial_suffix_fragments",
+    "to_base64", "to_morse", "to_rot47"])
+def test_ascii_art_draws_a_font_for_the_rest_of_their_families(technique):
+    from redact.jailbreak.obfuscation.ascii_art import to_ascii_art
+
+    for seed in range(20):
+        rng = random.Random(seed)
+        fn = BY_NAME[technique]
+        text, _ = (fn("plain words about the weather", rng=rng)
+                   if "rng" in fn.__code__.co_varnames else fn("plain words"))
+        _art, info = to_ascii_art(text, rng=rng)
+        assert info.startswith("font="), (technique, seed, info)
+
+
+def test_a_technique_names_only_families_it_is_incompatible_with():
+    from redact.jailbreak.technique import load_spec
+
+    spec = load_spec()
+    named = {family for name, entry in spec["techniques"].items()
+             if not name.startswith("_")
+             for family in entry.get("cross_incompatible_with", [])}
+    assert named and named <= set(spec["families"])
+
+
+@pytest.mark.parametrize(("first", "then"), [
     ("to_french", "to_fsh_random_short"),
     ("to_fsh_random_short", "to_french"),
     ("to_base64", "to_dap_random_long"),

@@ -14,6 +14,12 @@ def _families(fn: Callable) -> set[str]:
     return set(getattr(fn, "families", ()))
 
 
+def _own_incompatible(fn: Callable) -> set[str]:
+    """The families the spec keeps ``fn`` itself away from, beside its
+    families' rules."""
+    return set(getattr(fn, "cross_incompatible_with", ()))
+
+
 def _unfit_for_manipulation(fn: Callable, blocked: dict) -> bool:
     """Whether ``fn`` is an obfuscation the spec keeps away from fsh and dap.
 
@@ -36,7 +42,8 @@ def compatible(
 
     A candidate is refused when it shares a family with the selection, when
     its layer is at the spec's cap, when the spec declares one of its families
-    incompatible with one of the selection's (in either family's list), when it
+    incompatible with one of the selection's (in either family's list, or in
+    the list of a technique on either side), when it
     and the selection would pair a manipulation with an obfuscation the spec
     blocks for manipulation, or when its complexity exceeds
     ``remaining_complexity``.
@@ -52,7 +59,7 @@ def compatible(
         return set(families.get(family, {}).get("cross_incompatible_with", []))
 
     taken = set().union(*map(_families, selected))
-    refused = taken.union(*map(incompatible, taken))
+    refused = taken.union(*map(incompatible, taken), *map(_own_incompatible, selected))
     per_layer = Counter(getattr(fn, "layer", None) for fn in selected)
     has_manipulation = bool(taken & manipulation)
     has_unfit = any(_unfit_for_manipulation(fn, blocked_for_manipulation)
@@ -64,7 +71,7 @@ def compatible(
         layer = getattr(fn, "layer", None)
         if fn_families & refused:
             continue
-        if taken & set().union(*map(incompatible, fn_families)):
+        if taken & set().union(_own_incompatible(fn), *map(incompatible, fn_families)):
             continue
         if layer in layer_caps and per_layer[layer] >= layer_caps[layer]:
             continue

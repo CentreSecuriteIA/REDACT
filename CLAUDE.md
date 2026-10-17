@@ -290,7 +290,7 @@ Rows on disk. A stage's output is a CSV under `Datasets/`: one file for most sta
 **Compatibility rules** (`rules.compatible`), each binding both ways (a forbidden pair is refused whichever was picked first):
 - One technique per family; a multi-family technique blocks every family it belongs to. The spec's per-family `max_picks` is **not read**.
 - Layer caps from `layer_max_picks`: 1 hacking / 1 manipulation / 1 request — so e.g. framing⊥persona⊥cognitive, fsh⊥dap, distractor_prefix⊥distractor_suffix.
-- `cross_incompatible_with`, read from either family's list: fsh/dap ⊥ continuation, indirect, framing, persona, cognitive; continuation ⊥ indirect; structural ⊥ ascii_art; ascii_art ⊥ framing, persona, cognitive, fsh, dap.
+- `cross_incompatible_with`, read from either family's list: fsh/dap ⊥ continuation, indirect, framing, persona, cognitive; continuation ⊥ indirect; structural, translation ⊥ ascii_art; ascii_art ⊥ framing, persona, cognitive, fsh, dap. A technique's own entry may hold the key too, for families it alone may not join: `to_adversarial_suffix_emoji`, `to_adversarial_suffix_unicode` and `to_braille` ⊥ ascii_art (no font draws their characters; the other suffixes and encodings still join it).
 - `manipulation_blocked_obfuscation`: fsh/dap never sit with `translation`, `ascii_art` or heavy full-text `encode` (base64, unicode_escape, ascii_ordinal, morse, braille); `sensitive_words_encode_*` stays allowed (word-level encoding keeps the Q&A readable).
 - Complexity filters only in budget mode (`remaining_complexity`).
 

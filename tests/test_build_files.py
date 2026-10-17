@@ -18,19 +18,20 @@ counted in each run.
 
 The build now copies the accepted rows of every part. The rows of the
 rejected output ``out-2`` and the jailbreak error row ``jb-3`` are gone from
-each build that held them, and the build count of the training run is its
-accepted rows: 88 of its 92 (two of its jailbreaks draw the unicode or the
-emoji suffix then ASCII art, which no font draws whole, and are rejected).
+each build that held them, and the build count of each run is its accepted
+rows.
 
 The build leaves out a row whose ``sample_id`` an earlier part wrote. In the
 runs the stub model answers a natural typos rewrite with the text it answers
-that input's output request with, so those outputs are the variations' rows:
-the build count of the training run is 86.
+that input's output request with, so those outputs are the variations' rows.
+
+The plan pairs ASCII art with neither the emoji or unicode suffix, braille
+nor a translation, whose characters no font draws, so every jailbreak of
+the runs is accepted: the build count of the training run is 88.
 
 The eval run is not that commit's: its inputs are seeded from a small
-constitution of placeholder entries, as every run's are. One of its 10
-jailbreaks draws the unicode suffix then ASCII art and is rejected; its build
-count is 18.
+constitution of placeholder entries, as every run's are. Its build count is
+19.
 """
 
 import json
