@@ -79,10 +79,18 @@ def to_abbreviations(prompt: str) -> tuple[str, str]:
 
 
 def to_stripped_accents(prompt: str) -> tuple[str, str]:
-    """Write accented letters without their accents."""
-    decomposed = unicodedata.normalize("NFD", prompt)
-    stripped = "".join(c for c in decomposed if not unicodedata.combining(c))
-    return unicodedata.normalize("NFC", stripped), ""
+    """Write accented Latin letters without their accents; the marks of other
+    scripts, which change the letter, stay. A prompt with no accented Latin
+    letter is unchanged."""
+    kept: list[str] = []
+    base = ""
+    for c in unicodedata.normalize("NFD", prompt):
+        if not unicodedata.combining(c):
+            base = c
+        elif unicodedata.name(base, "").startswith("LATIN"):
+            continue
+        kept.append(c)
+    return unicodedata.normalize("NFC", "".join(kept)), ""
 
 
 def get_casual_writing_functions() -> list[Callable]:
