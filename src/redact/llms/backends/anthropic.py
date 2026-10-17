@@ -1,8 +1,8 @@
 """Backend for the Anthropic Messages API (Claude).
 
 Uses the native Anthropic SDK, which takes the system prompt as a separate
-parameter. The SDK client is cached per API key and shared between the
-backends that use it.
+parameter. The SDK client is cached per API key and retry settings, and
+shared between the backends that use it.
 
 Calls are made in series: this backend declares
 ``supports_parallel_calls=False``, so ``max_workers`` is always 1.
@@ -14,26 +14,27 @@ import time
 from typing import TYPE_CHECKING, ClassVar
 
 from ...exceptions import PromptTooLongError
-from .base import ComputeConfig, LLMBackend
+from .base import DEFAULT_MAX_RETRIES, ComputeConfig, LLMBackend, sdk_client_kwargs
 
 if TYPE_CHECKING:
     from ..model_config import ModelConfig
 
 logger = logging.getLogger(__name__)
 
-# SDK clients shared between backends, keyed by API key.
-_sdk_clients: dict[str, object] = {}
+# SDK clients shared between backends, keyed on (api_key, max_retries, timeout_s).
+_sdk_clients: dict[tuple, object] = {}
 _sdk_clients_lock = threading.Lock()
 
 
-def _sdk_client(api_key: str):
+def _sdk_client(api_key: str, *, max_retries: int, timeout_s: float | None):
+    key = (api_key, max_retries, timeout_s)
     # One read: clear_cache() may drop the key between a test and a lookup.
-    client = _sdk_clients.get(api_key)
+    client = _sdk_clients.get(key)
     if client is not None:
         return client
     with _sdk_clients_lock:
         # Re-check under the lock so each key gets one client.
-        client = _sdk_clients.get(api_key)
+        client = _sdk_clients.get(key)
         if client is None:
             try:
                 import anthropic
@@ -42,9 +43,10 @@ def _sdk_client(api_key: str):
                     "The 'anthropic' package could not be imported. It is a "
                     "required dependency: reinstall redact (pip install -e .)."
                 )
-            # The SDK retries a failed call itself (2 by default), unseen by the rate limiter and the trace.
-            client = anthropic.Anthropic(api_key=api_key)
-            _sdk_clients[api_key] = client
+            # The SDK retries a failed call itself, unseen by the rate limiter and the trace.
+            client = anthropic.Anthropic(
+                api_key=api_key, **sdk_client_kwargs(max_retries, timeout_s))
+            _sdk_clients[key] = client
         return client
 
 
@@ -77,7 +79,14 @@ class AnthropicBackend(LLMBackend):
     )
 
     def __init__(
-        self, model: str, api_key: str, *, api_model_id: str | None = None, **identity
+        self,
+        model: str,
+        api_key: str,
+        *,
+        api_model_id: str | None = None,
+        max_retries: int = DEFAULT_MAX_RETRIES,
+        timeout_s: float | None = None,
+        **identity,
     ):
         """Bind one Claude model to the Anthropic API.
 
@@ -86,13 +95,17 @@ class AnthropicBackend(LLMBackend):
             api_key: Anthropic API key.
             api_model_id: Model identifier sent to Anthropic. Defaults to
                 ``model``.
+            max_retries: Retries the SDK makes of a failed call.
+            timeout_s: Seconds before the SDK gives up on a call; ``None``
+                keeps the SDK's default.
             **identity: Forwarded to :meth:`LLMBackend.__init__`.
         """
         super().__init__(model, **identity)
         # self.model stays the registry name, which telemetry and pricing key
         # on. Requests use the provider's identifier.
         self._api_model_id = api_model_id or model
-        self._client = _sdk_client(api_key)
+        self._client = _sdk_client(
+            api_key, max_retries=max_retries, timeout_s=timeout_s)
 
     @classmethod
     def from_config(cls, config: "ModelConfig") -> "AnthropicBackend":
@@ -112,6 +125,8 @@ class AnthropicBackend(LLMBackend):
         return cls(
             api_key=cls._api_key(config),
             api_model_id=api.api_model_id,
+            max_retries=api.max_retries,
+            timeout_s=api.timeout_s,
             rpm=api.rpm,
             max_workers=api.recommended_max_workers,
             # Supplies model=config.name and the other shared identity fields.

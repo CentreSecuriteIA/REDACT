@@ -284,7 +284,8 @@ def test_a_registered_openai_compatible_model_takes_the_lane(monkeypatch):
         del MODEL_REGISTRY["lane-served"]
 
     assert n == len(results) and results == {k: f"re: {k}1" for k in "abc"}
-    built.assert_called_once_with(api_key="k", base_url="http://127.0.0.1:8000/v1")
+    built.assert_called_once_with(api_key="k", base_url="http://127.0.0.1:8000/v1",
+                                  max_retries=2)
     assert [(e["ev"], e["model"], e["backend"], e["n_items"]) for e in events] == [
         ("call", "lane-served", "openai", 1)] * len(results)
 

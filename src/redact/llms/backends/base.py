@@ -30,6 +30,21 @@ logger = logging.getLogger(__name__)
 _cut_warned: set[tuple[str | None, str]] = set()
 _cut_lock = threading.Lock()
 
+# Retries of a failed hosted call: the openai and anthropic SDKs' own default.
+DEFAULT_MAX_RETRIES = 2
+
+
+def sdk_client_kwargs(max_retries: int, timeout_s: float | None) -> dict:
+    """The retry and timeout kwargs of a hosted SDK client.
+
+    ``timeout`` is left out when ``timeout_s`` is None: both SDKs read
+    ``timeout=None`` as no timeout at all, not as their default.
+    """
+    kwargs: dict = {"max_retries": max_retries}
+    if timeout_s is not None:
+        kwargs["timeout"] = timeout_s
+    return kwargs
+
 
 @dataclass(frozen=True)
 class ComputeConfig:

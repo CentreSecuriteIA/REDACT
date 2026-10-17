@@ -27,6 +27,7 @@ from .backends import (
     transport_for,
     validate_concurrency,
 )
+from .backends.base import DEFAULT_MAX_RETRIES
 from .backends.introspection import validate_capture
 
 # Whose budget an APIConfig's rpm is: "model" for this model alone, "endpoint"
@@ -110,6 +111,11 @@ class APIConfig:
         price_per_1m_input: USD per 1M prompt tokens, for cost reporting.
             ``None`` means unpriced.
         price_per_1m_output: USD per 1M completion tokens.
+        max_retries: Retries the SDK makes of a failed call (a 429, a 5xx, a
+            lost connection), with its own backoff, unseen by the rate
+            limiter and the trace. A call that still fails stops the stage.
+        timeout_s: Seconds before the SDK gives up on a call. ``None`` keeps
+            the SDK's default (10 minutes).
     """
 
     backend_type: str
@@ -122,6 +128,8 @@ class APIConfig:
     default_extra_body: dict | None = None
     price_per_1m_input: float | None = None
     price_per_1m_output: float | None = None
+    max_retries: int = DEFAULT_MAX_RETRIES
+    timeout_s: float | None = None
 
     def __post_init__(self) -> None:
         _check_str("APIConfig.backend_type", self.backend_type)
@@ -146,6 +154,10 @@ class APIConfig:
         _check_dict("APIConfig.default_extra_body", self.default_extra_body)
         _check_number("APIConfig.price_per_1m_input", self.price_per_1m_input)
         _check_number("APIConfig.price_per_1m_output", self.price_per_1m_output)
+        _check_int("APIConfig.max_retries", self.max_retries, minimum=0)
+        _check_number("APIConfig.timeout_s", self.timeout_s)
+        _require(self.timeout_s is None or self.timeout_s > 0,
+                 f"APIConfig.timeout_s must be > 0 or None, got {self.timeout_s!r}")
 
     @property
     def endpoint_id(self) -> str:

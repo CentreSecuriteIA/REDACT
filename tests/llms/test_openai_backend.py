@@ -12,7 +12,7 @@ import pytest
 from redact.exceptions import PromptTooLongError
 from redact.llms import aio, observe
 from redact.llms.backends import OpenAIBackend
-from redact.llms.model_config import get_model_config
+from redact.llms.model_config import APIConfig, ModelConfig, get_model_config
 from tests.conftest import first_cut_warning
 
 
@@ -49,6 +49,7 @@ class TestOpenAIBackendInit:
                 mock_cls.assert_called_once_with(
                     api_key="test-key",
                     base_url="https://api.venice.ai/api/v1",
+                    max_retries=2,
                 )
         assert backend.rpm == config.api.rpm
         assert backend.max_workers == config.api.recommended_max_workers
@@ -76,9 +77,10 @@ class TestOpenAIBackendInit:
                 return found
 
         client = object()
-        cache = _ClearedAfterContains({("https://one.api/v1", "k"): client})
+        cache = _ClearedAfterContains({("https://one.api/v1", "k", 2, None): client})
         with patch.object(openai_module, "_sdk_clients", cache):
-            assert openai_module._sdk_client("k", "https://one.api/v1") is client
+            assert openai_module._sdk_client(
+                "k", "https://one.api/v1", max_retries=2, timeout_s=None) is client
 
     def test_from_config_missing_api_key_raises(self):
         config = get_model_config("venice-uncensored")
@@ -93,6 +95,66 @@ class TestOpenAIBackendInit:
 
     def test_repr(self, openai_backend):
         assert "test.api" in repr(openai_backend)
+
+
+def _config(**api):
+    """An entry on one OpenAI-compatible endpoint, with ``api`` on its setup."""
+    return ModelConfig(name="m", api=APIConfig(
+        backend_type="openai", api_key_env="TEST_API_KEY",
+        base_url="https://one.api/v1", rpm=10, **api))
+
+
+class TestOpenAISdkSettings:
+    """The setup's retries and timeout reach both SDK clients."""
+
+    def _built(self, monkeypatch, config):
+        """The kwargs each SDK class was built with, for one backend's calls."""
+        built = {"sync": [], "async": []}
+
+        def recorder(kind, response):
+            def build(**kwargs):
+                built[kind].append(kwargs)
+                client = MagicMock()
+                client.chat.completions.create = response
+                return client
+            return build
+
+        monkeypatch.setenv("TEST_API_KEY", "k")
+        OpenAIBackend.clear_cache()
+        answer = AsyncMock(return_value=_response("ok", "stop"))
+        with (
+            patch("redact.llms.backends.openai.openai.OpenAI",
+                  side_effect=recorder("sync", MagicMock())),
+            patch("redact.llms.backends.openai.openai.AsyncOpenAI",
+                  side_effect=recorder("async", answer)),
+        ):
+            backend = OpenAIBackend.from_config(config)
+            aio.run(backend.agenerate(_HI[0]))
+        OpenAIBackend.clear_cache()
+        return built
+
+    def test_the_setups_retries_and_timeout_reach_both_clients(self, monkeypatch):
+        built = self._built(monkeypatch, _config(max_retries=5, timeout_s=30))
+        expected = {"api_key": "k", "base_url": "https://one.api/v1",
+                    "max_retries": 5, "timeout": 30}
+        assert built == {"sync": [expected], "async": [expected]}
+
+    def test_the_default_setup_keeps_the_sdks_retries_and_timeout(self, monkeypatch):
+        built = self._built(monkeypatch, _config())
+        expected = {"api_key": "k", "base_url": "https://one.api/v1", "max_retries": 2}
+        assert built == {"sync": [expected], "async": [expected]}
+
+    def test_models_on_one_endpoint_share_a_client_only_with_one_setting(self):
+        with patch("redact.llms.backends.openai.openai.OpenAI",
+                   side_effect=lambda **kwargs: MagicMock()):
+            OpenAIBackend.clear_cache()
+            a = OpenAIBackend("model-a", api_key="k", base_url="https://one.api/v1")
+            b = OpenAIBackend("model-b", api_key="k", base_url="https://one.api/v1")
+            c = OpenAIBackend("model-c", api_key="k", base_url="https://one.api/v1",
+                              max_retries=5)
+            assert a._client is b._client
+            assert c._client is not a._client
+        OpenAIBackend.clear_cache()
 
 
 class TestOpenAIGenerate:
@@ -377,8 +439,10 @@ class TestOpenAIAsync:
                 assert aio.run(backend.agenerate(_HI[0])) == "ok"
             assert a._async_client is b._async_client
             assert other._async_client is not a._async_client
-            assert built == [{"api_key": "k", "base_url": "https://one.api/v1"},
-                             {"api_key": "k", "base_url": "https://two.api/v1"}]
+            assert built == [
+                {"api_key": "k", "base_url": "https://one.api/v1", "max_retries": 2},
+                {"api_key": "k", "base_url": "https://two.api/v1", "max_retries": 2},
+            ]
 
             OpenAIBackend.clear_cache()
             again = OpenAIBackend("model-a", api_key="k", base_url="https://one.api/v1")

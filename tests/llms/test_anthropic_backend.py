@@ -45,7 +45,8 @@ class TestAnthropicBackendInit:
         AnthropicBackend.clear_cache()
         with patch.dict(os.environ, {"ANTHROPIC_API_KEY": "test-key"}):
             backend = AnthropicBackend.from_config(config)
-            mock_anthropic_module.Anthropic.assert_called_with(api_key="test-key")
+            mock_anthropic_module.Anthropic.assert_called_with(
+                api_key="test-key", max_retries=2)
         assert backend.rpm == config.api.rpm
         assert backend.max_workers == config.api.recommended_max_workers
         AnthropicBackend.clear_cache()
@@ -73,15 +74,57 @@ class TestAnthropicBackendInit:
                 return found
 
         client = object()
-        cache = _ClearedAfterContains({"k": client})
+        cache = _ClearedAfterContains({("k", 2, None): client})
         with patch.object(anthropic_module, "_sdk_clients", cache):
-            assert anthropic_module._sdk_client("k") is client
+            assert anthropic_module._sdk_client(
+                "k", max_retries=2, timeout_s=None) is client
 
     def test_backend_name(self, anthropic_backend):
         assert anthropic_backend.backend_name == "anthropic"
 
     def test_repr(self, anthropic_backend):
         assert "AnthropicBackend" in repr(anthropic_backend)
+
+
+class TestAnthropicSdkSettings:
+    """The setup's retries and timeout reach the SDK client."""
+
+    def _built_with(self, mock_anthropic_module, monkeypatch, **api):
+        from redact.llms.backends import AnthropicBackend
+        from redact.llms.model_config import APIConfig, ModelConfig
+
+        monkeypatch.setenv("TEST_API_KEY", "k")
+        config = ModelConfig(name="m", api=APIConfig(
+            backend_type="anthropic", api_key_env="TEST_API_KEY", rpm=10, **api))
+        AnthropicBackend.clear_cache()
+        AnthropicBackend.from_config(config)
+        AnthropicBackend.clear_cache()
+        return mock_anthropic_module.Anthropic.call_args.kwargs
+
+    def test_the_setups_retries_and_timeout_reach_the_client(
+        self, mock_anthropic_module, monkeypatch
+    ):
+        assert self._built_with(mock_anthropic_module, monkeypatch,
+                                max_retries=5, timeout_s=30) == {
+            "api_key": "k", "max_retries": 5, "timeout": 30}
+
+    def test_the_default_setup_keeps_the_sdks_retries_and_timeout(
+        self, mock_anthropic_module, monkeypatch
+    ):
+        assert self._built_with(mock_anthropic_module, monkeypatch) == {
+            "api_key": "k", "max_retries": 2}
+
+    def test_models_share_a_client_only_with_one_setting(self, mock_anthropic_module):
+        from redact.llms.backends import AnthropicBackend
+
+        mock_anthropic_module.Anthropic.side_effect = lambda **kwargs: MagicMock()
+        AnthropicBackend.clear_cache()
+        a = AnthropicBackend("model-a", api_key="k")
+        b = AnthropicBackend("model-b", api_key="k")
+        c = AnthropicBackend("model-c", api_key="k", max_retries=5)
+        assert a._client is b._client
+        assert c._client is not a._client
+        AnthropicBackend.clear_cache()
 
 
 class TestAnthropicGenerate:

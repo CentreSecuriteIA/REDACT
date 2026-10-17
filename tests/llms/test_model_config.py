@@ -419,6 +419,39 @@ class TestAPIConfigValidatesItself:
         with pytest.raises(TypeError, match="default_extra_body"):
             APIConfig(backend_type="openai", api_key_env="TEST_API_KEY", base_url="https://test.example/v1", rpm=10, default_extra_body=["not", "a", "dict"])
 
+    def test_retries_and_timeout_default_to_the_sdks(self):
+        cfg = APIConfig(backend_type="openai", api_key_env="K",
+                        base_url="https://x/v1", rpm=10)
+        assert (cfg.max_retries, cfg.timeout_s) == (2, None)
+
+    @pytest.mark.parametrize("retries, timeout", [(0, 30), (5, 2.5)])
+    def test_accepts_retries_and_a_timeout(self, retries, timeout):
+        cfg = APIConfig(backend_type="anthropic", api_key_env="K", rpm=10,
+                        max_retries=retries, timeout_s=timeout)
+        assert (cfg.max_retries, cfg.timeout_s) == (retries, timeout)
+
+    @pytest.mark.parametrize("retries, exc", [
+        (-1, ValueError), ("2", TypeError), (1.5, TypeError), (True, TypeError)])
+    def test_rejects_a_bad_retry_count(self, retries, exc):
+        with pytest.raises(exc, match="max_retries"):
+            APIConfig(backend_type="openai", api_key_env="K",
+                      base_url="https://x/v1", rpm=10, max_retries=retries)
+
+    @pytest.mark.parametrize("timeout, exc", [
+        (0, ValueError), (-5, ValueError), ("30", TypeError), (True, TypeError)])
+    def test_rejects_a_bad_timeout(self, timeout, exc):
+        with pytest.raises(exc, match="timeout_s"):
+            APIConfig(backend_type="openai", api_key_env="K",
+                      base_url="https://x/v1", rpm=10, timeout_s=timeout)
+
+    def test_a_models_json_entry_sets_retries_and_timeout(self):
+        from redact.llms.model_config import _build_entry
+
+        cfg = _build_entry("m", {"api": {
+            "backend_type": "openai", "api_key_env": "K", "base_url": "https://x/v1",
+            "rpm": 10, "max_retries": 6, "timeout_s": 120}})
+        assert (cfg.api.max_retries, cfg.api.timeout_s) == (6, 120)
+
 
 class TestApiModelIdAndPricing:
     """The registry name is the stable identity; the slug is what goes upstream."""

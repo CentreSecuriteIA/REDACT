@@ -2,8 +2,8 @@
 
 Works with any compatible endpoint through ``base_url`` (e.g. Venice AI). An
 SDK client holds an HTTP connection pool, so it is cached per endpoint and
-shared between the backends that use it: ``openai.OpenAI`` for ``generate()``
-and ``openai.AsyncOpenAI`` for ``agenerate()``.
+retry settings, and shared between the backends that use it: ``openai.OpenAI``
+for ``generate()`` and ``openai.AsyncOpenAI`` for ``agenerate()``.
 """
 
 import asyncio
@@ -15,22 +15,30 @@ from typing import TYPE_CHECKING, ClassVar
 import openai
 
 from ...exceptions import PromptTooLongError
-from .base import ComputeConfig, LLMBackend
+from .base import DEFAULT_MAX_RETRIES, ComputeConfig, LLMBackend, sdk_client_kwargs
 
 if TYPE_CHECKING:
     from ..model_config import ModelConfig
 
 logger = logging.getLogger(__name__)
 
-# SDK clients shared between backends, keyed on (base_url, api_key).
-_sdk_clients: dict[tuple[str, str], "openai.OpenAI"] = {}
-_async_sdk_clients: dict[tuple[str, str], "openai.AsyncOpenAI"] = {}
+# SDK clients shared between backends, keyed on
+# (base_url, api_key, max_retries, timeout_s).
+_sdk_clients: dict[tuple, "openai.OpenAI"] = {}
+_async_sdk_clients: dict[tuple, "openai.AsyncOpenAI"] = {}
 _sdk_clients_lock = threading.Lock()
 
 
-def _sdk_client(api_key: str, base_url: str, *, async_calls: bool = False):
+def _sdk_client(
+    api_key: str,
+    base_url: str,
+    *,
+    max_retries: int,
+    timeout_s: float | None,
+    async_calls: bool = False,
+):
     cache = _async_sdk_clients if async_calls else _sdk_clients
-    key = (base_url, api_key)
+    key = (base_url, api_key, max_retries, timeout_s)
     # One read: clear_cache() may drop the key between a test and a lookup.
     client = cache.get(key)
     if client is not None:
@@ -40,8 +48,9 @@ def _sdk_client(api_key: str, base_url: str, *, async_calls: bool = False):
         client = cache.get(key)
         if client is None:
             sdk_class = openai.AsyncOpenAI if async_calls else openai.OpenAI
-            # The SDK retries a failed call itself (2 by default), unseen by the rate limiter and the trace.
-            client = sdk_class(api_key=api_key, base_url=base_url)
+            # The SDK retries a failed call itself, unseen by the rate limiter and the trace.
+            client = sdk_class(api_key=api_key, base_url=base_url,
+                               **sdk_client_kwargs(max_retries, timeout_s))
             cache[key] = client
         return client
 
@@ -77,6 +86,8 @@ class OpenAIBackend(LLMBackend):
         *,
         api_model_id: str | None = None,
         extra_body: dict | None = None,
+        max_retries: int = DEFAULT_MAX_RETRIES,
+        timeout_s: float | None = None,
         **identity,
     ):
         """Bind one model to an OpenAI-compatible endpoint.
@@ -89,6 +100,9 @@ class OpenAIBackend(LLMBackend):
                 ``model``.
             extra_body: Provider-specific parameters sent with each call. A
                 call that passes its own ``extra_body`` replaces them whole.
+            max_retries: Retries the SDK makes of a failed call.
+            timeout_s: Seconds before the SDK gives up on a call; ``None``
+                keeps the SDK's default.
             **identity: Forwarded to :meth:`LLMBackend.__init__` (generation
                 defaults, system-prompt policy, rpm, max_workers).
         """
@@ -96,10 +110,11 @@ class OpenAIBackend(LLMBackend):
         # self.model stays the registry name, which telemetry and pricing key
         # on. Requests use the provider's identifier.
         self._api_model_id = api_model_id or model
-        self._client = _sdk_client(api_key, base_url)
+        self._sdk_args = {"api_key": api_key, "base_url": base_url,
+                          "max_retries": max_retries, "timeout_s": timeout_s}
+        self._client = _sdk_client(**self._sdk_args)
         # Built on first use: an SDK client is slow to construct.
         self._async_client: openai.AsyncOpenAI | None = None
-        self._endpoint = (api_key, base_url)
         self._base_url = base_url
         self._extra_body = extra_body or None
 
@@ -123,6 +138,8 @@ class OpenAIBackend(LLMBackend):
             base_url=api.base_url,
             api_model_id=api.api_model_id,
             extra_body=api.default_extra_body,
+            max_retries=api.max_retries,
+            timeout_s=api.timeout_s,
             rpm=api.rpm,
             max_workers=api.recommended_max_workers,
             # Supplies model=config.name and the other shared identity fields.
@@ -211,7 +228,7 @@ class OpenAIBackend(LLMBackend):
         max_tok, temp = self._resolve(max_tokens, temperature)
         call_kwargs = self._call_kwargs(messages, system_prompt, max_tok, temp, kwargs)
         if self._async_client is None:
-            self._async_client = _sdk_client(*self._endpoint, async_calls=True)
+            self._async_client = _sdk_client(**self._sdk_args, async_calls=True)
         create = self._async_client.chat.completions.create
 
         started = time.perf_counter()
