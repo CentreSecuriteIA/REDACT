@@ -68,7 +68,7 @@ of attempts. The row holds the last attempt.
 | `category`, `subcategory`, `entry_type` | Copied from the input |
 | `model` | The generation model |
 | `source` | The input's `source` |
-| `sample_id` | Content id of `output_response` |
+| `sample_id` | Content id of `output_response`; for a prompt too long, of `{input_id}:prompt too long` |
 | `output_response` | The response |
 | `accepted` | The checker's verdict on the last attempt |
 | `rejection_reason` | The checker's reply when rejected, else empty |

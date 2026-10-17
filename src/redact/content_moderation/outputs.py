@@ -44,7 +44,8 @@ def run_output_generation(
     requests; ``check_max_tokens`` limits a verdict's reply.
 
     A row's ``input_id`` is its input's id (``row_ids``); its ``sample_id``
-    is ``content_id`` of the response. The ledger beside ``out_path`` is
+    is ``content_id`` of the response, or of ``"{input_id}:prompt too long"``
+    for a prompt too long, which has none. The ledger beside ``out_path`` is
     keyed on ``input_id``; ``resume=False`` starts the stage over.
 
     Returns:
@@ -158,10 +159,10 @@ def run_output_generation(
     # A finished unit's row. sample_id is this row's own content-hash identity
     # (distinct from input_id, which points back to the origin sample) — only
     # knowable once the response text exists.
-    def _on_done(i, value):
+    def _on_done(i, value, sample_id=None):
         resp, accepted, reasoning = value
         r = live_rows.pop(i)
-        r["sample_id"] = content_id(resp)
+        r["sample_id"] = sample_id or content_id(resp)
         r["output_response"] = resp
         r["accepted"] = accepted
         r["rejection_reason"] = reasoning
@@ -173,9 +174,13 @@ def run_output_generation(
     def _on_error(i, exc):
         if not isinstance(exc, PromptTooLongError):
             raise exc
+        input_id = live_rows[i]["input_id"]
         logger.warning("Input %s rejected, its prompt is too long: %s",
-                       live_rows[i]["input_id"], exc)
-        _on_done(i, ("", False, f"prompt too long: {exc}"))
+                       input_id, exc)
+        # No response to hash: the id comes from the input's, so two such
+        # rows never share one.
+        _on_done(i, ("", False, f"prompt too long: {exc}"),
+                 sample_id=content_id(f"{input_id}:prompt too long"))
 
     # Generation and check calls, topped up from the source as units finish.
     # The buffer appends finished rows, then acks them (see dataset/save.py),

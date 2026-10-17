@@ -1023,7 +1023,9 @@ class TestGenerateOutputsPool:
         assert rows["zq1"] == {
             "input_id": content_id("zq1"), "input_prompt": "zq1", "category": "Cyber",
             "subcategory": "", "entry_type": "harmful", "model": "gen-model",
-            "source": "", "sample_id": content_id(""), "output_response": "",
+            "source": "",
+            "sample_id": content_id(f"{content_id('zq1')}:prompt too long"),
+            "output_response": "",
             "accepted": "False",
             "rejection_reason": "prompt too long: zq1 is over the context",
         }
@@ -1037,6 +1039,30 @@ class TestGenerateOutputsPool:
 
         assert run().sent == []
         assert len(pd.read_csv(out)) == len(tokens)
+
+    def test_rows_of_prompts_too_long_each_have_their_own_stable_sample_id(
+            self, tmp_path, monkeypatch):
+        """No response to hash, so the id comes from the input's: the build,
+        which drops a row whose sample_id an earlier part wrote, keeps them all."""
+        from redact import generate_outputs, paths
+        from redact.dataset import content_id
+
+        tokens = ["zq0", "zq1"]
+        inputs = pd.DataFrame({
+            "sample": tokens, "category": ["Cyber"] * 2, "entry_type": ["harmful"] * 2,
+        })
+
+        def ids(data_dir):
+            self._clients(monkeypatch, _LaneBackend("gen-model", too_long=tokens), None)
+            generate_outputs(data_dir=data_dir, inputs=inputs, model="gen-model",
+                             check_outputs=False, verbose=False)
+            df = pd.read_csv(paths.output_responses_csv(data_dir), dtype=str)
+            return dict(zip(df["input_prompt"], df["sample_id"], strict=True))
+
+        first = ids(tmp_path / "a")
+        assert len(set(first.values())) == len(tokens)
+        assert not set(first.values()) & {content_id(""), *map(content_id, tokens)}
+        assert ids(tmp_path / "b") == first
 
     def test_another_unit_error_still_stops_the_stage(self, tmp_path, monkeypatch):
         """Only a prompt that is too long becomes a row. This unit fails
