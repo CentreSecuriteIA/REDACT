@@ -313,3 +313,9 @@ class TestTakePerGroup:
         df = self._frame()
         result = take_per_group(df, 100)
         assert len(result) == len(df)  # no padding, no error
+
+    def test_a_missing_group_value_is_a_group_of_its_own(self):
+        df = pd.DataFrame({"prompt": ["p0", "p1", "p2"],
+                           "category": ["Cyber", "Cyber", None],
+                           "entry_type": ["harmful", None, None]})
+        assert list(take_per_group(df, 5)["prompt"]) == ["p0", "p1", "p2"]

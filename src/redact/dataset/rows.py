@@ -110,7 +110,8 @@ def append_rows(path: str | Path, rows: Sequence[Mapping[str, Any]]) -> dict[Pat
     A file without a header takes the rows' column order and gets the header.
     Otherwise each row is written in the order of the file's header, with an
     empty cell for a column the row lacks. A file that another program holds
-    is opened again for a few seconds before any byte is written.
+    is opened again for a few seconds before any byte is written. No rows
+    write nothing, and create no file.
 
     Returns:
         The size of the file after the append, by its path.
@@ -120,6 +121,8 @@ def append_rows(path: str | Path, rows: Sequence[Mapping[str, Any]]) -> dict[Pat
             written.
     """
     path = Path(path)
+    if not rows:
+        return {path: path.stat().st_size if path.exists() else 0}
     frame = pd.DataFrame(rows)
     header = _header_for(path, frame.columns)
     if header is not None and list(frame.columns) != header:
@@ -286,7 +289,9 @@ def _part_chunks(part: Part) -> Iterator[pd.DataFrame]:
         # integers it prints 1 and not 1.0, as the cells of a file do.
         whole = [name for name in frame.columns
                  if pd.api.types.is_float_dtype(frame[name])
-                 and (frame[name].dropna() % 1 == 0).all()]
+                 and frame[name].isna().any()
+                 and (frame[name].dropna() % 1 == 0).all()
+                 and (frame[name].dropna().abs() < 2**63).all()]
         yield frame.astype(dict.fromkeys(whole, "Int64")).assign(**tag)
         return
     if not _has_bytes(part.source):
@@ -306,8 +311,8 @@ def write_concat(
     The columns are those of every part in the order they first appear, and
     a row is empty in the columns its part lacks: the file ``pd.concat`` of
     the parts would give, without the parts in memory. The rows go to a
-    temporary file beside ``target`` that then replaces it, so ``target``
-    holds its old rows or all the new ones.
+    temporary file beside ``target``, synced, that then replaces it, so
+    ``target`` holds its old rows or all the new ones.
 
     Args:
         keep_empty: False leaves ``target`` as it is when no part has a row.
@@ -331,6 +336,8 @@ def write_concat(
                     chunk.to_csv(fh, header=False, index=False)
                     rows += len(chunk)
                 written.append(rows)
+            fh.flush()
+            os.fsync(fh.fileno())
         if keep_empty or any(written):
             _replace(temporary, target)
     finally:

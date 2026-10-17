@@ -81,8 +81,8 @@ class JsonlSidecar:
         """Replace the file with ``rows`` as JSON lines.
 
         ``rows`` are taken one at a time into a temporary file beside the
-        target, which is then renamed onto the target, so the file holds its
-        old rows or all the new ones. An empty ``rows`` is a no-op: no file
+        target, which is synced and then renamed onto the target, so the file
+        holds its old rows or all the new ones. An empty ``rows`` is a no-op: no file
         is created or truncated.
         """
         rows = iter(rows)
@@ -97,6 +97,8 @@ class JsonlSidecar:
         try:
             with temporary.open("w", encoding="utf-8") as fh:
                 fh.writelines(lines)
+                fh.flush()
+                os.fsync(fh.fileno())
             _replace(temporary, self.path)
         finally:
             # Still there only when the write or the rename failed.

@@ -166,6 +166,17 @@ class TestAppendRows:
         (size,) = append_rows(path, _batch(0)).values()
         assert sizes_at_sync == [size]
 
+    def test_no_rows_write_nothing(self, tmp_path):
+        """A new file is not created, so the first rows give it its header."""
+        path = tmp_path / "out.csv"
+        assert append_rows(path, []) == {path: 0}
+        assert not path.exists()
+        append_rows(path, [{"input_id": "a", "sample": "x"}])
+        before = path.read_bytes()
+        assert append_rows(path, []) == {path: len(before)}
+        assert path.read_bytes() == before
+        assert _lines(path) == ["input_id,sample", "a,x"]
+
     def test_an_empty_file_is_given_a_header(self, tmp_path):
         path = tmp_path / "out.csv"
         path.touch()
@@ -502,6 +513,25 @@ class TestWriteConcat:
         write_concat(out, [Part(pd.DataFrame({"turn": [0.0, None]})),
                            Part(pd.DataFrame({"other": ["x"]}))])
         assert _lines(out) == ["turn,other", "0,", ",", ",x"]
+
+    def test_a_column_of_numbers_with_decimals_keeps_them(self, tmp_path):
+        """Only a whole column with a gap, which a merge left, is written as
+        integers; so is no value beyond what an integer holds."""
+        out = tmp_path / "out.csv"
+        write_concat(out, [Part(pd.DataFrame({"score": [1.0, 2.0, 3.0],
+                                              "turn": [1.0, None, 2.0],
+                                              "big": [1e20, None, 1.0]}))])
+        assert _lines(out) == ["score,turn,big", "1.0,1,1e+20", "2.0,,", "3.0,2,1.0"]
+
+    def test_the_rows_are_synced_before_they_replace_the_target(
+            self, tmp_path, monkeypatch):
+        path, _ = self._parts(tmp_path)
+        out = tmp_path / "out.csv"
+        synced = []
+        monkeypatch.setattr(rows_module.os, "fsync", lambda fd: synced.append(
+            (os.fstat(fd).st_size, out.exists())))
+        write_concat(out, [Part(path)])
+        assert synced == [(out.stat().st_size, False)]
 
     def test_the_size_of_a_chunk_does_not_change_a_byte(self, tmp_path, monkeypatch):
         path, frame = self._parts(tmp_path)

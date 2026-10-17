@@ -256,7 +256,7 @@ def take_per_group(
     if not valid:
         return df.head(n).reset_index(drop=True)
     return (
-        df.groupby(valid, sort=False, group_keys=False)
+        df.groupby(valid, sort=False, group_keys=False, dropna=False)
         .head(n)
         .reset_index(drop=True)
     )
