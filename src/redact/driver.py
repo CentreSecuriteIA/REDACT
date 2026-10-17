@@ -193,6 +193,33 @@ def _own_pids() -> set[int]:
     return pids
 
 
+def _engine_parents(pids: list[int], own: set[int]) -> list[int]:
+    """The vLLM engine processes above ``pids``, other than this process's.
+
+    ``nvidia-smi`` lists the workers that hold the memory; after a
+    ``kill -9`` their engine processes live on above them, orphaned. An
+    ancestor counts when its name or command line starts as vLLM titles its
+    processes (``VLLM::``, or ``$VLLM_PROCESS_NAME_PREFIX::``). Found with
+    psutil; without it, none.
+    """
+    try:
+        import psutil
+    except ImportError:
+        return []
+    title = os.environ.get("VLLM_PROCESS_NAME_PREFIX", "VLLM") + "::"
+    found: dict[int, None] = {}
+    for pid in pids:
+        with contextlib.suppress(psutil.Error):
+            for parent in psutil.Process(pid).parents():
+                if parent.pid == 1 or parent.pid in own or parent.pid in pids:
+                    continue
+                with contextlib.suppress(psutil.Error):
+                    if any(text.startswith(title)
+                           for text in (parent.name(), *parent.cmdline()[:1])):
+                        found.setdefault(parent.pid)
+    return list(found)
+
+
 def _planned_card(
     cards: list[measure.CardUse], device: int,
 ) -> measure.CardUse | None:
@@ -241,7 +268,7 @@ def _check_cards(phases: list) -> None:
                                card.index, names)
         elif others:
             held.append(f"  GPU {card.index}: {names}")
-            pids += [str(pid) for pid, _, _ in others]
+            pids += [pid for pid, _, _ in others]
         elif not card.processes and card.used_gib >= _IDLE_GIB:
             logger.warning(
                 "[residency] GPU %d has %.1f of %.1f GiB in use, by no process "
@@ -249,15 +276,17 @@ def _check_cards(phases: list) -> None:
                 "planned on it may not load.",
                 card.index, card.used_gib, card.total_gib)
     if held:
-        lines, pids = "\n".join(held), " ".join(pids)
+        parents = _engine_parents(pids, own)
+        lines = "\n".join(held)
+        them = "them and their parent engine processes" if parents else "them"
         raise RuntimeError(
             f"The run plans a model on a card another process holds memory on, "
             f"so the model would fail to load there:\n{lines}\n"
             f"An earlier run killed with kill -9 leaves its vLLM engine "
-            f"processes behind. If these are such, end them with "
-            f"`kill -9 {pids}` and check that nvidia-smi shows the card "
-            f"empty; otherwise run on other cards (CUDA_VISIBLE_DEVICES). "
-            f"Nothing has run yet.")
+            f"processes behind. If these are such, end {them} with "
+            f"`kill -9 {' '.join(map(str, pids + parents))}` and check that "
+            f"nvidia-smi shows the card empty; otherwise run on other cards "
+            f"(CUDA_VISIBLE_DEVICES). Nothing has run yet.")
 
 
 def _enter_phase(

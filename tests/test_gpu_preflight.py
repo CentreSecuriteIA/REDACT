@@ -104,3 +104,55 @@ def test_without_nvidia_smi_or_a_local_model_there_is_nothing_to_check(run):
     assert "inputs" in run(None)
     held = [_card(0, 28.4, [(21131, "VLLM::EngineCore", 28.4)])]
     assert "inputs" in run(held, models={"gen": "venice-uncensored"})
+
+
+class _FakePsutil:
+    """``psutil`` over a fixed process tree: pid -> (name, parent pid)."""
+
+    class Error(Exception):
+        pass
+
+    def __init__(self, tree):
+        self.tree = tree
+        psutil = self
+
+        class Process:
+            def __init__(self, pid=None):
+                self.pid = os.getpid() if pid is None else pid
+                if self.pid not in psutil.tree and pid is not None:
+                    raise psutil.Error(f"no process {pid}")
+
+            def name(self):
+                return psutil.tree[self.pid][0]
+
+            def cmdline(self):
+                return [self.name()]
+
+            def children(self, recursive=False):
+                return []
+
+            def parents(self):
+                out, pid = [], psutil.tree.get(self.pid, ("", None))[1]
+                while pid is not None:
+                    out.append(Process(pid))
+                    pid = psutil.tree[pid][1]
+                return out
+
+        self.Process = Process
+
+
+def test_the_advice_names_the_engine_processes_above_the_listed_workers(run):
+    """After a kill -9, nvidia-smi lists the workers that hold the memory;
+    their engine processes live on above them, orphaned. Ancestors vLLM
+    does not name, such as a shell, are not named."""
+    tree = {1: ("init", None), 900: ("bash", 1), 16806: ("VLLM::EngineCore_DP0", 1),
+            16807: ("VLLM::EngineCore_DP1", 1), 17329: ("VLLM::Worker", 16806),
+            17326: ("VLLM::Worker", 16807), 21140: ("python", 900)}
+    holders = [(17329, "VLLM::Worker", 30.0), (17326, "VLLM::Worker", 30.0),
+               (21140, "python", 1.0)]
+    with patch.dict("sys.modules", {"psutil": _FakePsutil(tree)}), \
+         pytest.raises(RuntimeError) as raised:
+        run([_card(0, 61.0, holders), _card(1)])
+    message = str(raised.value)
+    assert ("end them and their parent engine processes with "
+            "`kill -9 17329 17326 21140 16806 16807`") in message
