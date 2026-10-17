@@ -76,6 +76,10 @@ def load_recipe(recipe: str | Path | dict) -> dict:
         raise ValueError(
             f"The recipe has unknown key(s) {unknown}; write only "
             f"{list(_RECIPE_KEYS)}.")
+    # A string "false" would read as true.
+    resume = data.get("resume", True)
+    if type(resume) is not bool:
+        raise ValueError(f"resume must be true or false, got {resume!r}.")
     if data.get("taxonomy") == _FORMER_TAXONOMY:
         warnings.warn(
             f'The recipe names the taxonomy "{_FORMER_TAXONOMY}", now "harmful"; '
@@ -96,7 +100,12 @@ def load_params(
     params: str | Path | dict | None, base_dir: str | Path | None = None,
 ) -> dict:
     """Load an input-params file (JSON path or dict). ``base_dir`` resolves a
-    relative ``params_file`` from the recipe's directory."""
+    relative ``params_file`` from the recipe's directory.
+
+    Raises:
+        ValueError: A key is not a stage's name, nor a comment (``_`` first),
+            or ``params["jailbreaks"]`` sets a key of the augmentation section.
+    """
     if params is None:
         return {}
     if isinstance(params, dict):
@@ -108,6 +117,11 @@ def load_params(
         with p.open(encoding="utf-8") as fh:
             data = json.load(fh)
     _check_jailbreak_params(data)
+    unknown = [key for key in data if key not in STAGES and not key.startswith("_")]
+    if unknown:
+        raise ValueError(
+            f"The params file has key(s) {unknown}, which are not stages; write "
+            f"only {list(STAGES)}, or a comment key starting with _.")
     return data
 
 
@@ -317,8 +331,8 @@ def serving_of(models: dict) -> dict[str, dict]:
         left out.
 
     Raises:
-        ValueError: An object breaks a rule. The message names the role and
-            says what to write instead.
+        ValueError: A key is not a model role, or an object breaks a rule.
+            The message names the role and says what to write instead.
     """
     from .llms.backends import SETUP_TYPES, resolve_setup, validate_concurrency
     from .llms.model_config import get_model_config
@@ -327,12 +341,14 @@ def serving_of(models: dict) -> dict[str, dict]:
     serving: dict[str, dict] = {}
     said_by: dict[str, str] = {}
     for role, entry in models.items():
-        if not isinstance(entry, dict):
-            continue
         where = f"models[{role!r}]"
+        if role.startswith("_"):    # a comment
+            continue
         if role not in _DEFAULT_MODELS:
             raise ValueError(
                 f"{where} is not a model role; write one of {list(_DEFAULT_MODELS)}.")
+        if not isinstance(entry, dict):
+            continue
         unknown = [key for key in entry if key not in ("name", *_SERVING_KEYS)]
         if unknown:
             raise ValueError(

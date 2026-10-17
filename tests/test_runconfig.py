@@ -734,7 +734,7 @@ def test_names_and_nulls_load_as_written():
     from redact.recipe import _role_names
 
     models = {"gen": "venice-uncensored", "check": None,
-              "paraphraser": "distribution", "generator": "not-a-role"}
+              "paraphraser": "distribution", "_note": "a comment"}
     recipe = load_recipe({"dataset_type": "eval", "models": models})
     assert recipe["models"] == models
     assert _role_names(recipe["models"]) == models
@@ -941,6 +941,21 @@ def test_a_params_key_of_the_flat_form_warns_and_is_read_as_before():
     assert params == {"jailbreaks": {"max_complexity": 4, "seed": 1}}
 
 
+def test_a_params_key_that_is_no_stage_is_refused():
+    """A misspelt stage would drop its whole block without a word."""
+    with pytest.raises(ValueError) as raised:
+        load_params({"ouputs": {"batch_size": 1}, "outputs": {}, "_note": "kept"})
+    assert str(raised.value) == (
+        "The params file has key(s) ['ouputs'], which are not stages; write only "
+        "['constitution', 'inputs', 'outputs', 'paraphrase', 'jailbreaks', 'build'], "
+        "or a comment key starting with _.")
+
+
+def test_a_params_block_for_a_stage_the_recipe_does_not_run_loads():
+    assert load_params({"constitution": {"num_categories": 3}}) == {
+        "constitution": {"num_categories": 3}}
+
+
 def test_a_params_key_only_the_section_holds_is_refused():
     with pytest.raises(ValueError) as raised:
         load_params({"jailbreaks": {"rounds": "escalation", "layer_rates": {}}})
@@ -1124,6 +1139,27 @@ def test_an_object_under_an_unknown_role_is_rejected():
     assert _models_error({"generator": {"name": "venice-uncensored"}}) == (
         "models['generator'] is not a model role; write one of ['gen', 'check', "
         "'translation', 'constitution', 'paraphraser', 'paraphrase_check'].")
+
+
+@pytest.mark.parametrize("entry", ["venice-uncensored", None])
+def test_a_name_under_an_unknown_role_is_rejected(entry):
+    """Else the misspelt role is left at its default without a word."""
+    assert _models_error({"judge": entry}) == (
+        "models['judge'] is not a model role; write one of ['gen', 'check', "
+        "'translation', 'constitution', 'paraphraser', 'paraphrase_check'].")
+
+
+@pytest.mark.parametrize("resume", ["false", 0, None])
+def test_a_resume_that_is_not_true_or_false_is_rejected(resume):
+    """A JSON string "false" would read as true, and the run would resume."""
+    with pytest.raises(ValueError) as raised:
+        load_recipe({"dataset_type": "eval", "resume": resume})
+    assert str(raised.value) == f"resume must be true or false, got {resume!r}."
+
+
+@pytest.mark.parametrize("resume", [True, False])
+def test_resume_true_or_false_loads(resume):
+    assert load_recipe({"dataset_type": "eval", "resume": resume})["resume"] is resume
 
 
 def test_serving_is_rejected_for_a_model_that_is_not_registered():
