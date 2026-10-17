@@ -452,16 +452,15 @@ The conversation functions, which no recipe runs (`evaluate_conversations`,
 | Pipeline | Prompts |
 |---|---|
 | `constitution` | `harmful`, `dual_use_harmful`, `dual_use_benign`, `benign`, `general_benign` |
-| `input` | `generation/from_constitution/long`, `generation/from_constitution/short`, `generation/standalone`, `quality_check`, `category_description`, `seed_generation` |
+| `input` | `generation/from_constitution/long`, `generation/from_constitution/short`, `quality_check` |
 | `output` | `generation`, `quality_check` |
 | `paraphrase` | `generation`, `check` |
 | `jailbreak` | `scenario_generation`, `persona_scenario_generation`, `jailbreak_construction`, `category_selection`, `benign_generation`, `extract_harmful`, `synonym_substitution`, `rewrite_with_typos`, `translate`, `translate_retry`, `translate_check` |
 | `conversation` | `judge`, `success_judge`, `pair_attacker` |
 | `format_instructions` | `numbered`, `structured_qa` |
 
-The tree also holds `input/category_check`, `input/metaprompt`,
-`jailbreak/benign_check`, `jailbreak/scenario_check` and
-`jailbreak/typo_check`, which no code loads.
+The tree also holds `input/category_check`, `jailbreak/benign_check`,
+`jailbreak/scenario_check` and `jailbreak/typo_check`, which no code loads.
 
 Text the stages add at run time, the rejection feedback and the list of
 samples not to repeat, lives in `content_moderation/feedback.py`, not in a
