@@ -94,6 +94,30 @@ how a combination is drawn.
 
 Adding a technique: [extending.md](extending.md#add-a-jailbreak-technique).
 
+## The eval pool
+
+The `eval` dataset type's attacks draw from 37 techniques in 10 families:
+hard ones (complexity 2 or 3 but for `to_noble_goal`, and the low-resource
+languages) whose harmful content stays certain, since the technique carries
+the text unchanged or reversibly, or a check accepts the result:
+
+| Family | Techniques |
+|---|---|
+| `translation` | the nine low-resource languages, weighted 3 |
+| `encode` | the five `heavy` ones: `to_base64`, `to_unicode_escape`, `to_ascii_ordinal`, `to_morse`, `to_braille` |
+| `fsh`, `dap` | all eight |
+| `framing` | all five |
+| `structural` | `to_json`, `to_xml`, `to_markdown` |
+| `ascii_art` | `to_ascii_art` |
+| `continuation` | all four |
+| `temporal` | `to_use_past_tense` |
+| `answer_format` | `to_refusal_then_comply` |
+
+Model rewrites no check verifies (`cognitive`, `persona`, `typos`,
+`sensitive_words`, `tokenbreak`) are left out. With
+`"adversarial": {"translation": false}` the pool keeps the other 28.
+[configuration.md](configuration.md#dataset-types) gives the type file.
+
 ## What the families do
 
 A transform returns `(text, info)`; the info names what it drew, such as a
@@ -135,8 +159,13 @@ the answers.
   (every word for the fixed separators), and `to_sensitive_words_variables`
   and `to_synonym_substitution` leave it unchanged. `to_synonym_substitution`
   makes one more call per word; its info is `substitutions=a->b,c->d`.
-- `translation` covers 20 languages across resource tiers. Each is a
-  translate, check and retry loop on the `translation` model.
+- `translation` covers 20 languages in three resource tiers, which the
+  spec scores by complexity: high (`to_french`, `to_japanese`, `to_russian`,
+  `to_spanish`, `to_german`, `to_arabic`; 0), mid (`to_turkish`,
+  `to_czech`, `to_vietnamese`, `to_greek`, `to_croatian`; 1) and low
+  (`to_swahili`, `to_thai`, `to_khmer`, `to_maori`, `to_nepali`, `to_zulu`,
+  `to_scots_gaelic`, `to_bengali`, `to_javanese`; 2). Each is a translate,
+  check and retry loop on the `translation` model.
 - `typos` is one rewrite by the model, at one of four densities, with the
   level's description in the prompt.
 - `casual_writing` is how a person typing quickly writes: casing, spacing,

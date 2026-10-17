@@ -4,7 +4,8 @@ REDACT generates red-teaming datasets for content moderation and jailbreak
 research. A run takes a taxonomy of categories, generates samples for each
 category with an uncensored model, checks every sample with a checker model,
 generates model responses, augments the samples with jailbreak techniques and
-natural variations, and merges all of it into one CSV.
+natural variations, and merges the accepted rows into one CSV for training,
+or into three flat files for evaluation.
 
 The library is model-agnostic (hosted APIs or local vLLM engines),
 prompt-agnostic (prompts are JSON files under `prompts/`, overridable per
@@ -18,7 +19,7 @@ A run is an ordered list of stages. Each stage has one public function, its
 
 | Stage | Front | What it does | Main output |
 |---|---|---|---|
-| `constitution` | `generate_constitution` | Per taxonomy category, a hierarchy of constitution categories and sample descriptions at four entry types | `Data_cache/constitution/merged.csv` |
+| `constitution` | `generate_constitution` | Per taxonomy category, a hierarchy of constitution categories and sample descriptions at four entry types (two in an eval run), and benign ones per category of the benign taxonomy | `Data_cache/constitution/merged.csv` |
 | `inputs` | `generate_inputs` | Checked input samples, seeded from the constitution | `Datasets/constitution_inputs/<category>/samples.csv` |
 | `outputs` | `generate_outputs` | One checked model response per accepted input | `Datasets/output_responses.csv` |
 | `paraphrase` | `generate_paraphrases` | Checked paraphrases of the inputs and of the accepted outputs | `Datasets/paraphrases_inputs.csv`, `Datasets/paraphrases_outputs.csv` |
@@ -47,7 +48,7 @@ flowchart TD
     recipe[/"recipe.json + params file"/] --> driver["run_pipeline"]
     taxonomy[("configs/taxonomy/*.json")] --> constitution
     driver --> constitution["constitution"]
-    constitution --> const[("Data_cache/constitution/<br/>harmful.csv ... benign.csv<br/>merged.csv")]
+    constitution --> const[("Data_cache/constitution/<br/>harmful.csv ... general_benign.csv<br/>merged.csv")]
     const --> inputs["inputs"]
     inputs --> tree[("Datasets/constitution_inputs/<br/>one samples.csv per category")]
     inputs --> merged[("Datasets/constitution_inputs_merged.csv")]
@@ -101,9 +102,11 @@ summary = run_pipeline("src/redact/configs/runs/training_example.json")
 - The `augmentations` section is resolved over the dataset type's, itself
   over the packaged default (`recipe.augmentations_of`), so a bad technique
   or family name fails here.
-- When the jailbreak stage runs a kind that draws a technique needing benign
-  data, the `benign_taxonomy` is read and must have a category
+- When the constitution stage runs with its dataset type's general-benign
+  part on, or the jailbreak stage runs a kind that draws a technique needing
+  benign data, the `benign_taxonomy` is read and must have a category
   (`recipe.benign_taxonomy_of`).
+- A `config_dir`, relative to the recipe, must be a folder.
 - A `taxonomy` of the former name `content_moderation_categories` is read as
   `harmful`, with a `DeprecationWarning`.
 
@@ -114,14 +117,16 @@ section.
 
 ### 2. The driver sets the run up
 
-`driver.run_pipeline` builds one `RunContext` (data root, models per role,
-prompt overlay, taxonomy, benign taxonomy, params, resolved augmentations,
-`resume`). Then:
+`driver.run_pipeline` builds one `RunContext` (data root, dataset type,
+models per role, prompt overlay, config folder, taxonomy, benign taxonomy,
+params, resolved augmentations, `resume`). Then:
 
 1. `Stage.check` runs for every stage, so a params key that the front does
    not take fails before the first stage spends anything.
 2. `telemetry.install` opens the trace file.
-3. `report_prompt_sources` logs which prompts the overlay replaces.
+3. `report_prompt_sources` logs which prompts the overlay replaces, and
+   `report_config_sources` which config files the `config_dir` replaces,
+   warning about those it cannot.
 4. `capabilities.set_run_serving` makes every client of the run use the
    recipe's `backend_type` and `workers` for each model.
 5. `_plan_phases` plans the local models stage by stage, logs each plan and
@@ -139,10 +144,11 @@ For each stage, in the recipe's order, the driver:
    on a background thread;
 2. labels all telemetry inside the stage with its name;
 3. calls the front with `read_back=False` and `Stage.kwargs(ctx)`: the
-   recipe's values first, then the params file's;
+   recipe's values first, then the stage's params, the dataset type's with
+   the params file's over them;
 4. counts the rows of the stage's files (`file_counts`);
 5. writes `Datasets/<stage>.run.json`, with the files the stage read in
-   `sources`.
+   `sources`, and the dataset type and its file's hash.
 
 Leaving the stage, telemetry logs per model how many replies were cut at the
 token limit in it.
@@ -155,9 +161,11 @@ gives the seven steps every core follows.
 
 **constitution.** `generate_constitution` builds a client for the
 `constitution` role (default `claude-opus-4-6`) and calls
-`ConstitutionPipeline.run`. One unit per taxonomy category and entry type;
+`ConstitutionPipeline.run`. One unit per taxonomy category and entry type,
+and one per category of the benign taxonomy for the general-benign part;
 each is one call whose reply parses into entries. Rows go to
-`Data_cache/constitution/<entry_type>.csv` and `merged.csv`.
+`Data_cache/constitution/<entry_type>.csv` (`general_benign.csv` for the
+general-benign part) and `merged.csv`.
 [stages/constitution.md](stages/constitution.md)
 
 **inputs.** When the stage starts, the driver reads the constitution saved

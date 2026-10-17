@@ -12,9 +12,15 @@ Augment the accepted inputs with technique combinations, in two kinds:
 | `adversarial` | `Datasets/jailbreaks.csv`: jailbreak attacks | one round per input, by budget, from every technique but `translation` and `casual_writing` |
 | `natural` | `Datasets/variations.csv`: natural variations | one technique per input, from the natural allow lists |
 
-Both kinds are on by default. The recipe's `augmentations` section, or the
-front's `augmentation=` argument, says what each kind draws, and switches a
-kind off with `null` ([configuration.md](../configuration.md#the-augmentation-section)).
+These are the packaged defaults, which a `training` run takes: both kinds
+are on. An `eval` run's dataset type attacks the harmful inputs only, with
+37 hard techniques in two count-driven rounds, one technique then two, and
+switches the natural kind off
+([configuration.md](../configuration.md#dataset-types)). The recipe's
+`augmentations` section, over the dataset type's, or the front's
+`augmentation=` argument, over the packaged one, says what each kind draws,
+and switches a kind off with `null`
+([configuration.md](../configuration.md#the-augmentation-section)).
 The front returns the rows of `jailbreaks.csv`; read `variations.csv` with
 `dataset.read_rows`.
 
@@ -41,7 +47,7 @@ in [techniques.md](../techniques.md).
 | Recipe role | Registry role | Default | Calls |
 |---|---|---|---|
 | `gen` | `uncensored_gen` | `venice-uncensored` | Every technique that calls a model, `translation` aside, and the benign data |
-| `translation` | `translation` | `deepseek-v3.2` | The `translation` family; resolved, planned and loaded only when a kind has `"translation": true` |
+| `translation` | `translation` | `deepseek-v3.2` | The `translation` family; resolved, planned and loaded only when a kind's pool holds a translation technique (`"translation": true`, as in the eval type's attacks) |
 
 Each translation is up to 4 rounds of two calls, a translation and its check,
 both to the `translation` model.
@@ -51,7 +57,10 @@ both to the `translation` model.
 The augmentation section holds what each kind draws and how. The params
 file holds the execution settings: `seed`, `batch_size`,
 `auto_generate_benign`, `output_path`, `variations_path`, `manifest_path`,
-`benign_path` ([configuration.md](../configuration.md#jailbreaks)).
+`benign_path` ([configuration.md](../configuration.md#jailbreaks)). The
+`eval` type sets `seed` 43 against the default 42, so an input that is in a
+training run and an eval run does not get the same draws. The run passes
+`benign_taxonomy`, `taxonomy_dir` and `config_dir` from the recipe.
 
 ## Unit and ledger key
 

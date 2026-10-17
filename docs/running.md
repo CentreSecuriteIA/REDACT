@@ -167,7 +167,7 @@ that lists that role.
 |---|---|---|---|
 | `gen` | inputs, outputs, jailbreaks | `uncensored_gen` | `venice-uncensored`, hosted (Venice) |
 | `check` | inputs, outputs | `uncensored_gen` | the `gen` model |
-| `translation` | jailbreaks, only when a kind has `"translation": true` | `translation` | `deepseek-v3.2`, hosted (Venice) |
+| `translation` | jailbreaks, only when a kind's pool holds a translation technique (`"translation": true`; the eval type's attacks) | `translation` | `deepseek-v3.2`, hosted (Venice) |
 | `constitution` | constitution | `constitution_gen` | `claude-opus-4-6`, hosted (Anthropic) |
 | `paraphraser` | paraphrase | `paraphraser` | `venice-paraphraser`, local vLLM (24B weights) |
 | `paraphrase_check` | paraphrase | `uncensored_gen` | `venice-uncensored`, hosted |
@@ -434,11 +434,13 @@ Other files you may see:
 A run record, `Datasets/<stage>.run.json`, holds `stage`, `timestamp`,
 `params` (the stage's params: the dataset type's with the params file's
 entry over them), `models` (the recipe's role names),
-`counts` (`rows`, and `accepted` when the files have that column),
-`sources` (the files the stage read its inputs from: the taxonomy file for
-the constitution; the saved constitution for the inputs; the input category
-files, and `output_responses.csv` for paraphrases of outputs; the part files
-of the build), `serving` (per role the stage calls: `name`, `backend_type`,
+`counts` (`rows`, and `accepted` when the files have that column; for an
+eval build with `exclude_from`, `excluded`), `sources` (the files the stage
+read its inputs from: the taxonomy file for the constitution, and the benign
+taxonomy's with the general-benign part on; the saved constitution for the
+inputs; the input category files, and `output_responses.csv` for paraphrases
+of outputs; the part files of the build, and the files `exclude_from`
+names), `serving` (per role the stage calls: `name`, `backend_type`,
 and `copies` for a vLLM model or `workers` for a hosted one; `copies` is the
 count the plan made before any stage ran, and when a build with copies fails
 and one copy loads instead, the trace's `load` event says so with `fallback`
@@ -491,7 +493,9 @@ rate. [internals/telemetry.md](internals/telemetry.md) lists the events.
 | WARNING `inputs: only N of M generated samples were accepted (under half)` | The checker rejects most samples | As above |
 | `ValueError: No constitution at ...` | A run whose inputs are seeded has no saved constitution | List `constitution` before `inputs` |
 | `RuntimeError: The run plans a model on a card another process holds memory on ...` | Before any stage: a card the plan uses is held, often by the engines of a run killed with `kill -9` | Kill the PIDs the message names and check `nvidia-smi` shows the card empty, or run on other cards (`CUDA_VISIBLE_DEVICES`) |
-| `ValueError: benign_taxonomy '...' cannot be read` / `has no category` | At recipe load: the benign taxonomy a run of the jailbreak stage needs is missing or empty | Name a file in `taxonomy_dir`, or leave the key out for the packaged `benign` |
+| `ValueError: benign_taxonomy '...' cannot be read` / `has no category` | At recipe load: the benign taxonomy the constitution's general-benign part or the jailbreak stage's benign data needs is missing or empty | Name a file in `taxonomy_dir` or the `config_dir`'s `taxonomy/`, or leave the key out for the packaged `benign` |
+| `ValueError: The recipe names no dataset_type` / `dataset_type 'x' has no file in ...` | At recipe load: `dataset_type` is required and names a file of `configs/dataset_types/` (or of the `config_dir`'s) | Write `"dataset_type": "eval"` or `"training"` |
+| `FileNotFoundError: exclude_from names ...` | An eval build's `exclude_from` names a path that does not exist, or a folder with no `Datasets/*.csv` and no constitution; nothing is written | Name the training run's `data_dir` or one of its CSVs |
 | `ValueError: No benign pairs at ...` | Every benign unit was rejected three times | Use a stronger `gen` model, then delete the ledger the message names |
 | `KeyError: Model 'x' needs an API key, but the environment variable ... is not set` | A hosted model without its key | Add the key to `.env`, or serve the model locally |
 | `KeyError: Model 'x' is not registered` | A name not in the registry | Fix the name, or add the model ([extending.md](extending.md#add-a-model)) |

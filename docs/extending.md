@@ -1,7 +1,7 @@
 # Extending REDACT
 
-How to add a model, a prompt, a jailbreak technique, a stage, or a category
-or taxonomy. Each section names the files to touch and the tests that check
+How to add a model, a prompt, a jailbreak technique, a stage, a category
+or taxonomy, or a dataset type. Each section names the files to touch and the tests that check
 the change. Run the tests with:
 
 ```bash
@@ -226,8 +226,9 @@ A stage is a core, a front, and a row in the stage table.
 
 ## Add a category or a taxonomy
 
-A taxonomy is a JSON file under `configs/taxonomy/`, or under the folder a
-recipe names as `taxonomy_dir`:
+A taxonomy is a JSON file under `configs/taxonomy/`, under the `taxonomy/`
+folder of a recipe's `config_dir`, or under the folder a recipe names as
+`taxonomy_dir`:
 
 ```json
 {
@@ -254,7 +255,22 @@ recipe names as `taxonomy_dir`:
   a front as `taxonomy=` works too.
 
 The category reaches every later stage through its rows' `category` column.
-The benign categories of the `fsh` and `dap` data are a taxonomy of their
-own, `configs/taxonomy/benign.json`, in the same format: the pairs are
-generated per subcategory. Write another and name it as the recipe's
-`benign_taxonomy`.
+The benign categories are a taxonomy of their own,
+`configs/taxonomy/benign.json`, in the same format. Two stages read it: the
+constitution builds its general-benign part from it, one call per category
+with its subcategories, and the jailbreak stage generates the `fsh` and
+`dap` benign pairs per subcategory. Write another and name it as the
+recipe's `benign_taxonomy`.
+
+## Add or change a dataset type
+
+A dataset type is a JSON file with exactly three keys besides `_` comments:
+`stages` (the default stage list), `params` (per stage, the front's defaults,
+checked as a params file's are) and `augmentations` (an overlay of the
+augmentation section, kind by kind). To change what `eval` or `training`
+means for your runs, copy its file into `<config_dir>/dataset_types/` and
+edit it; `scripts/scaffold_setup.py` writes both. A file of another name
+there is a new dataset type, which a recipe names as its `dataset_type`.
+The build knows only the `training` and `eval` modes, so a run of a new
+type stops when it reaches a listed `build` stage
+([configuration.md](configuration.md#dataset-types)).
