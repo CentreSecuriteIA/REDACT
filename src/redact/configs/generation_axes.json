@@ -9,7 +9,7 @@
         "one_liner": {"label": "one line", "hint": "A single sentence or question.", "weight": 0.30},
         "short": {"label": "short", "hint": "2 to 4 sentences.", "weight": 0.30},
         "long": {"label": "long", "hint": "One or more paragraphs, with background or detail.", "weight": 0.20},
-        "very_long": {"label": "very long", "hint": "300 words or more, at the scale of a document or a pasted text.", "weight": 0.05}
+        "very_long": {"label": "very long", "hint": "300 words or more, at the scale of a document.", "weight": 0.05}
       }
     },
     "register": {
@@ -52,7 +52,7 @@
         "question": {"label": "a question", "hint": "Asks a question.", "weight": 0.30},
         "advice": {"label": "a request for advice", "hint": "Describes the writer's own situation and asks what to do.", "weight": 0.20, "not_with": {"length": ["fragment"]}},
         "statement": {"label": "a statement", "hint": "States a view, a story or a remark without asking for anything.", "weight": 0.10},
-        "opinion_or_validation": {"label": "a request for an opinion", "hint": "Shares a view, a plan or a piece of work and asks what the reader thinks of it.", "weight": 0.05, "not_with": {"length": ["fragment"]}}
+        "opinion_or_validation": {"label": "a request for an opinion", "hint": "Shares a view or a plan and asks what the reader thinks of it.", "weight": 0.05, "not_with": {"length": ["fragment"]}}
       }
     },
     "directness": {
@@ -67,9 +67,10 @@
     "focus": {
       "label": "Focus",
       "dimension": "focus",
+      "_comment": "mixed is at 0, so every sample is single: focus is undecided against request_shape, container and example_priming (dimensions.json), and a run that deals mixed beside a family of those stops.",
       "values": {
         "single": {"label": "one subject", "hint": "The whole message is about this subject.", "weight": 0.75},
-        "mixed": {"label": "mixed", "hint": "The subject is one part of a longer message that is also about something else, in the writer's own words.", "weight": 0.25, "not_with": {"length": ["fragment", "one_liner"]}}
+        "mixed": {"label": "mixed", "hint": "The subject is one part of a longer message that is also about something else, in the writer's own words.", "weight": 0, "not_with": {"length": ["fragment", "one_liner"]}}
       }
     },
     "domain": {"label": "Domain", "dimension": "domain", "from": "subcategory"}

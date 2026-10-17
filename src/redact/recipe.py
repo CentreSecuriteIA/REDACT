@@ -324,6 +324,45 @@ def benign_taxonomy_of(
     return taxonomy
 
 
+def check_dimensions(
+    params: dict | None, augmentations: dict, *, dataset_type: str,
+    config_dir: str | Path | None = None,
+) -> None:
+    """Raise when a generation axis and a family the augmentation section
+    draws vary the same dimension (:func:`redact.dimensions.check`).
+
+    The axes are each stage's packaged ones with the ``axes`` entry of its
+    params over them, read as the stage gets them (:func:`stage_params`: the
+    ``dataset_type`` file's, of ``config_dir`` when it has one, with
+    ``params``, the params file's, over them); the families are those of the
+    techniques each kind of ``augmentations`` (resolved) draws. Every stage
+    with axes is checked, whichever stages the run lists: the rows of one
+    ``data_dir`` are made over several runs.
+
+    Raises:
+        ValueError: Each axis and the families it shares a dimension with,
+            or an ``axes`` entry :func:`redact.content_moderation.axes.resolve`
+            refuses.
+    """
+    from .content_moderation import axes as generation_axes
+    from .dimensions import check
+    from .jailbreak.pool import technique_pool
+    from .jailbreak.technique import load_spec
+
+    varied = {}
+    for stage in generation_axes.STAGES:
+        given = stage_params(stage, dataset_type, params, config_dir).get("axes")
+        axes = generation_axes.resolve(stage, given)
+        varied.update({f"{stage}.{axis}": tag
+                       for axis, tag in generation_axes.varied(axes).items()})
+    tags = {name: family["dimension"]
+            for name, family in load_spec()["families"].items()}
+    drawn = {kind: {family: tags[family]
+                    for fn in technique_pool(resolved) for family in fn.families}
+             for kind, resolved in augmentations.items() if resolved is not None}
+    check(varied, drawn)
+
+
 def augmentations_of(recipe: dict, jailbreak_params: dict | None = None) -> dict:
     """The recipe's augmentation section, each kind resolved over its default.
 

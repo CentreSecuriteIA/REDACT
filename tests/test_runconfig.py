@@ -322,6 +322,62 @@ def test_a_later_stages_params_clash_fails_before_any_stage_runs(tmp_path, monke
         "generate_jailbreaks itself; leave it out of the params.")
 
 
+def test_an_axis_that_varies_a_family_s_dimension_fails_before_any_stage(
+        tmp_path, monkeypatch):
+    raised = _fails_before_any_stage_or_model(
+        monkeypatch, tmp_path, {"stages": ["outputs", "jailbreaks"]},
+        {"inputs": {"axes": {"focus": {"mixed": 0.25}}}})
+    assert raised.startswith(
+        "A generation axis and augmentation families vary the same dimension")
+    assert "the axis inputs.focus (focus) and the request_shape families" in raised
+
+
+def _typed_axes(config_dir: Path, axes: dict) -> Path:
+    """Write the packaged eval type file into ``config_dir`` with ``axes`` as
+    its inputs stage's axes."""
+    from redact.recipe import load_dataset_type
+
+    typed = load_dataset_type("eval")
+    typed["params"]["inputs"] = {**typed["params"].get("inputs", {}), "axes": axes}
+    path = config_dir / "dataset_types" / "eval.json"
+    path.parent.mkdir(parents=True)
+    path.write_text(json.dumps(typed), encoding="utf-8")
+    return config_dir
+
+
+def test_an_axis_the_dataset_type_file_varies_fails_before_any_stage(
+        tmp_path, monkeypatch):
+    """The check reads a stage's params as the stage gets them: the type
+    file's, of the config folder when it has one."""
+    config = _typed_axes(tmp_path / "cfg", {"focus": {"mixed": 0.25}})
+    raised = _fails_before_any_stage_or_model(
+        monkeypatch, tmp_path,
+        {"stages": ["outputs", "jailbreaks"], "config_dir": str(config)}, {})
+    assert "the axis inputs.focus (focus) and the request_shape families" in raised
+
+
+def test_the_dimension_check_reads_the_params_files_axes_over_the_type_files(
+        tmp_path):
+    from redact.recipe import check_dimensions
+
+    config = _typed_axes(tmp_path / "cfg", {"focus": {"mixed": 0.25}})
+    augmentations = load_recipe({"dataset_type": "eval"})["augmentations"]
+    with pytest.raises(ValueError, match="inputs.focus"):
+        check_dimensions({}, augmentations, dataset_type="eval", config_dir=config)
+    check_dimensions({"inputs": {"axes": {"focus": {"mixed": 0}}}}, augmentations,
+                     dataset_type="eval", config_dir=config)
+    check_dimensions({}, augmentations, dataset_type="eval")
+
+
+def test_an_axis_the_type_file_pins_passes_the_dimension_check(tmp_path):
+    """One value dealt varies nothing, whichever value it is."""
+    from redact.recipe import check_dimensions
+
+    config = _typed_axes(tmp_path / "cfg", {"focus": {"single": 0, "mixed": 1}})
+    augmentations = load_recipe({"dataset_type": "eval"})["augmentations"]
+    check_dimensions({}, augmentations, dataset_type="eval", config_dir=config)
+
+
 def test_a_flat_param_for_an_adversarial_kind_switched_off_fails_before_any_stage(
         tmp_path, monkeypatch):
     with pytest.warns(DeprecationWarning):

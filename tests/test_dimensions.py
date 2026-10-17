@@ -1,5 +1,5 @@
-"""The dimensions table, and the tag each augmentation family and each
-generation axis carries."""
+"""The dimensions table, the tag each augmentation family and each generation
+axis carries, and the check that no axis varies a family's dimension."""
 
 import json
 import re
@@ -10,6 +10,8 @@ import redact.jailbreak.pool as JPool
 from redact import dimensions, paths
 from redact.content_moderation import axes as A
 from redact.jailbreak.technique import load_spec
+from redact.recipe import augmentations_of
+from redact.recipe import check_dimensions as _check_dimensions
 
 _FAMILY_TAGS = {
     "language": ["translation", "answer_language"],
@@ -61,11 +63,20 @@ class TestTheTable:
     @pytest.mark.parametrize(("entry", "message"), [
         ({"side": "both", "definition": "A thing."}, "side must be one of"),
         ({"side": "generation", "definition": " "}, "must be a sentence"),
-        ({"side": "generation"}, "and nothing else"),
-        ({"side": "generation", "definition": "A thing.", "x": 1}, "and nothing else"),
+        ({"side": "generation"}, "nothing else"),
+        ({"side": "generation", "definition": "A thing.", "x": 1}, "nothing else"),
+        ({"side": "augmentation", "definition": "A thing.", "same_as": []},
+         "nothing else"),
+        ({"side": "generation", "definition": "A thing.", "same_as": ["tag"]},
+         "must each list augmentation tags"),
+        ({"side": "generation", "definition": "A thing.", "same_as": "noise"},
+         "must each list augmentation tags"),
+        ({"side": "generation", "definition": "A thing.", "same_as": ["noise"],
+          "undecided": ["noise"]}, "none in both"),
     ])
     def test_a_malformed_tag_raises(self, table_at, entry, message):
-        table_at({"_comment": "skipped", "tag": entry})
+        table_at({"_comment": "skipped", "tag": entry,
+                  "noise": {"side": "augmentation", "definition": "A thing."}})
         with pytest.raises(ValueError, match=message):
             dimensions.table()
 
@@ -115,3 +126,90 @@ class TestTheAxes:
         section = {"length": {**axis, **({"dimension": tag} if tag else {})}}
         with pytest.raises(ValueError, match=rf"x: {re.escape(named)}"):
             A._checked("x", section)
+
+
+# The families of request_shape, container and example_priming in each kind,
+# the dimensions the focus axis is undecided against.
+_FOCUS_FAMILIES = [*_FAMILY_TAGS["request_shape"], *_FAMILY_TAGS["container"],
+                   *_FAMILY_TAGS["example_priming"]]
+_MIXED = {"inputs": {"axes": {"focus": {"mixed": 0.25}}}}
+
+
+def check_dimensions(params: dict, augmentations: dict) -> None:
+    """The check of a training run whose params file is ``params``."""
+    _check_dimensions(params, augmentations, dataset_type="training")
+
+
+def _without_focus_families() -> dict:
+    deny = {"families": {"deny": _FOCUS_FAMILIES}}
+    return augmentations_of({"augmentations": {"adversarial": deny, "natural": deny}})
+
+
+class TestTheCheck:
+    def test_the_shipped_config_passes(self):
+        check_dimensions({}, augmentations_of({}))
+
+    def test_the_shipped_config_passes_with_translation_on(self):
+        on = {"translation": True}
+        check_dimensions({}, augmentations_of(
+            {"augmentations": {"adversarial": on, "natural": on}}))
+
+    def test_an_axis_that_varies_a_family_s_dimension_raises(self):
+        with pytest.raises(ValueError) as raised:
+            check_dimensions(_MIXED, augmentations_of({}))
+        message = str(raised.value)
+        assert "the axis inputs.focus (focus) and the request_shape families" in message
+        assert "adversarial: asking, continuation" in message
+        assert "natural: asking, continuation, indirect, temporal" in message
+        assert ("the container families (adversarial: structural; natural: "
+                "structural)") in message
+        assert "the example_priming families (adversarial: dap, fsh)" in message
+        assert message.count("undecided") == len(("request_shape", "container",
+                                                   "example_priming"))
+        assert 'params inputs.axes, as {"focus": null}' in message
+        assert "augmentations.<kind>.families.deny" in message
+
+    def test_denying_the_families_lets_the_axis_vary(self):
+        check_dimensions(_MIXED, _without_focus_families())
+
+    def test_a_kind_switched_off_draws_nothing(self):
+        kinds = _without_focus_families()
+        kinds["adversarial"] = None
+        check_dimensions(_MIXED, kinds)
+
+    def test_an_axis_left_out_varies_nothing(self):
+        check_dimensions({"inputs": {"axes": {"focus": None}}}, augmentations_of({}))
+        check_dimensions({"inputs": {"axes": False}}, augmentations_of({}))
+
+    def test_a_wrong_axes_entry_raises_as_the_stage_would(self):
+        with pytest.raises(ValueError, match="no axis 'fokus'"):
+            check_dimensions({"inputs": {"axes": {"fokus": None}}},
+                             augmentations_of({}))
+
+    def test_a_same_as_pair_raises_without_the_undecided_note(self, table_at):
+        table_at({"noise": {"side": "augmentation", "definition": "A thing."},
+                  "tone": {"side": "generation", "definition": "A thing.",
+                           "same_as": ["noise"]}})
+        with pytest.raises(ValueError) as raised:
+            dimensions.check({"inputs.register": "tone"},
+                             {"natural": {"typos": "noise"}})
+        assert ("the axis inputs.register (tone) and the noise families "
+                "(natural: typos).") in str(raised.value)
+        assert "undecided" not in str(raised.value)
+
+    def test_one_tag_on_both_sides_is_one_dimension(self, table_at):
+        table_at({"noise": {"side": "generation", "definition": "A thing."}})
+        assert dimensions.relation("noise", "noise") == "same"
+
+
+class TestWhatVaries:
+    def test_an_axis_dealt_one_value_varies_nothing(self):
+        assert "focus" not in A.varied(A.resolve("inputs", {"focus": {"mixed": 0}}))
+        mixed = A.resolve("inputs", _MIXED["inputs"]["axes"])
+        assert A.varied(mixed)["focus"] == "focus"
+
+    def test_an_axis_with_from_varies(self):
+        assert A.varied(A.resolve("inputs"))["domain"] == "domain"
+
+    def test_no_axes_vary_nothing(self):
+        assert A.varied(None) == {}

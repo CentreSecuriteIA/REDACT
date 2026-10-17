@@ -181,6 +181,15 @@ def resolve(stage: str, given: dict | bool | None = None) -> dict | None:
     return axes
 
 
+def varied(axes: dict | None) -> dict[str, str]:
+    """The dimension of each of ``axes`` that varies from sample to sample:
+    one with ``from``, or with two or more values of weight above 0. An axis
+    dealt one value fixes its dimension and varies nothing."""
+    return {name: entry["dimension"] for name, entry in (axes or {}).items()
+            if "from" in entry
+            or sum(value["weight"] > 0 for value in entry["values"].values()) > 1}
+
+
 def _clashes(axes: dict, spec: dict, axis: str, value: str) -> bool:
     """Whether ``value`` of ``axis`` and a value already in ``spec`` name each
     other in ``not_with``."""

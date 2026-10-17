@@ -55,6 +55,11 @@ class TestThePackagedTable:
         assert list(A.resolve("outputs")) == ["length", "format", "register"]
 
 
+    def test_focus_deals_one_subject_only(self):
+        values = A.resolve("inputs")["focus"]["values"]
+        assert [name for name, v in values.items() if v["weight"] > 0] == ["single"]
+
+
 class TestTheOverlay:
     def test_none_and_true_are_the_packaged_axes(self):
         packaged = A.resolve("inputs")
@@ -159,7 +164,7 @@ class TestTheDeal:
             A.deal_specs(axes, _units(_ENTRIES), seed=2)
 
     def test_a_value_is_never_dealt_with_one_it_names_in_not_with(self):
-        axes = A.resolve("inputs")
+        axes = A.resolve("inputs", {"focus": {"mixed": 0.25}})
         for spec in A.deal_specs(axes, _units(4 * _ENTRIES), seed=_SEED):
             if spec["focus"] == "mixed":
                 assert spec["length"] not in ("fragment", "one_liner")

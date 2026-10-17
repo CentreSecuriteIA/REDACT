@@ -1,5 +1,5 @@
 {
-  "_comment": "The dimensions a text varies along. Each tag belongs to one side: augmentation (a family of jailbreak/combination_spec.json, which transforms a finished text) or generation (an axis of generation_axes.json, which shapes a text as it is written). Each family and each axis carries one tag as dimension; the definition says what property of the text it varies. Read by redact/dimensions.py.",
+  "_comment": "The dimensions a text varies along. Each tag belongs to one side: augmentation (a family of jailbreak/combination_spec.json, which transforms a finished text) or generation (an axis of generation_axes.json, which shapes a text as it is written). Each family and each axis carries one tag as dimension; the definition says what property of the text it varies. A generation tag may list in same_as the augmentation tags that are the same dimension, and in undecided those the owner has yet to rule on, checked as the same until then. A run stops before any stage when an axis that varies (one with from, or with two or more values of weight above 0) and a family a kind draws share a dimension. Read by redact/dimensions.py.",
   "language": {
     "side": "augmentation",
     "definition": "The natural language the message is written in, or asks to be answered in."
@@ -50,7 +50,8 @@
   },
   "focus": {
     "side": "generation",
-    "definition": "Whether the subject fills the whole message or is one part of a message also about other things."
+    "definition": "Whether the subject fills the whole message or is one part of a message also about other things.",
+    "undecided": ["request_shape", "container", "example_priming"]
   },
   "domain": {
     "side": "generation",
