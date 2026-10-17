@@ -29,7 +29,7 @@ class TestReadCategoryCsv:
         path.touch()
         df = read_category_csv("empty", dataset_dir=tmp_dataset_dir)
         assert df.empty and list(df.columns) == SAMPLE_COLUMNS
-        assert discover_categories(tmp_dataset_dir) == ["empty"]
+        assert discover_categories(tmp_dataset_dir) == []
         assert merge_all(tmp_dataset_dir).empty
 
     def test_reads_existing(self, tmp_dataset_dir):

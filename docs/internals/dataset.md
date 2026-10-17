@@ -233,7 +233,7 @@ Input samples live in one `samples.csv` per category folder, under
 | `categories.SAMPLE_COLUMNS` | `sample_id`, `sample`, `category`, `subcategory`, `entry_type`, `turn`, `accepted`, `rejection_reason`, `source`; more columns are kept |
 | `sample_row(text, category, turn, accepted, source, extra)` | One input row in that column order |
 | `categories.read_category_csv(category, dataset_dir=None, filename="samples.csv")` | A category's file: ids as text, missing text as `""`; an empty `SAMPLE_COLUMNS` frame when there is no file or it has 0 bytes |
-| `discover_categories(dir=None)` | The sorted names of the category folders whose `samples.csv` exists |
+| `discover_categories(dir=None)` | The sorted names of the category folders whose `samples.csv` exists and has a byte |
 | `merge_all(dir=None, accepted_only=True)` | The rows of every category in one frame, the accepted ones only by default (`accepted_mask`); an empty frame when there are none |
 | `merge_inputs(data_dir)` | The run's accepted inputs, from `Datasets/constitution_inputs/` |
 | `input_files(data_dir)` | The category files `merge_inputs` reads |

@@ -76,7 +76,8 @@ def sample_row(
 def discover_categories(dataset_dir: str | Path | None = None) -> list[str]:
     """The sorted names of the category folders that hold a samples CSV.
 
-    ``dataset_dir`` defaults to ``paths.constitution_inputs_dir()``.
+    A CSV of 0 bytes, what a save killed before its first byte leaves, is
+    none. ``dataset_dir`` defaults to ``paths.constitution_inputs_dir()``.
     """
     base = (Path(dataset_dir) if dataset_dir is not None
             else paths.constitution_inputs_dir())
@@ -84,7 +85,7 @@ def discover_categories(dataset_dir: str | Path | None = None) -> list[str]:
         return []
     return sorted(
         d.name for d in base.iterdir()
-        if d.is_dir() and (d / paths.SAMPLES_FILENAME).exists()
+        if d.is_dir() and _has_bytes(d / paths.SAMPLES_FILENAME)
     )
 
 
