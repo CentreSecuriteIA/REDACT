@@ -62,3 +62,22 @@ class TestProjectFiles:
             "project"]["urls"]
         assert urls["Homepage"] == "https://github.com/CentreSecuriteIA/REDACT"
         assert urls["Issues"] == "https://github.com/CentreSecuriteIA/REDACT/issues"
+
+    def test_every_path_in_the_claude_md_tree_exists(self):
+        import re
+        text = (REPO / "CLAUDE.md").read_text(encoding="utf-8")
+        tree = text.split("## Architecture", 1)[1].split("```", 2)[1]
+        stack: list[str] = []
+        named = []
+        for line in tree.splitlines():
+            entry = re.match(r"^([│ ]*)[├└]── (.+?)(?:\s+#.*)?$", line)
+            if not entry:
+                continue
+            names = [name.strip() for name in entry.group(2).split(",")]
+            stack = stack[:len(entry.group(1)) // 4]
+            named += ["/".join([*stack, name]) for name in names]
+            stack.append(names[0].rstrip("/"))
+        ignored = {"Datasets/", "Data_cache/", ".env"}     # gitignored, made by runs
+        missing = [p for p in named if p not in ignored and not (REPO / p).exists()]
+        assert "src/redact/stages.py" in named      # the tree was parsed
+        assert missing == []
