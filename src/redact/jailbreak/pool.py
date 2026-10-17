@@ -8,6 +8,8 @@ replays.
 
 from collections.abc import Callable
 
+from redact.dimensions import check_tags
+
 from .hacking import get_all_hacking_functions
 from .manipulation import get_all_manipulation_functions
 from .obfuscation import get_all_obfuscation_functions
@@ -48,6 +50,17 @@ def _check_against_spec(techniques: list[Callable]) -> None:
         raise ValueError(
             "combination_spec.json and the technique registries differ; "
             + "; ".join(problems))
+
+
+def _check_dimensions() -> None:
+    """Raise unless every family of the spec carries an augmentation dimension.
+
+    Raises:
+        ValueError: The families without one (:func:`redact.dimensions.check_tags`).
+    """
+    families = {name: family.get("dimension")
+                for name, family in load_spec()["families"].items()}
+    check_tags("combination_spec.json: families", families, "augmentation")
 
 
 def technique_pool(resolved: dict) -> list[Callable]:
@@ -106,3 +119,4 @@ def uses_translation(pool: list[Callable]) -> bool:
 
 
 _check_against_spec(all_techniques())
+_check_dimensions()

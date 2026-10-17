@@ -1,0 +1,35 @@
+{
+  "_comment": "The dimensions a text varies along. Each tag belongs to one side: augmentation (a family of jailbreak/combination_spec.json, which transforms a finished text) or generation (an axis of generation_axes.json, which shapes a text as it is written). Each family and each axis carries one tag as dimension; the definition says what property of the text it varies. Read by redact/dimensions.py.",
+  "language": {
+    "side": "augmentation",
+    "definition": "The natural language the message is written in, or asks to be answered in."
+  },
+  "surface_noise": {
+    "side": "augmentation",
+    "definition": "Variation in spelling, casing, spacing, punctuation and added symbols that leaves the meaning of every word as it was."
+  },
+  "encoding": {
+    "side": "augmentation",
+    "definition": "The written form of some or all of the message's characters or words, when it is other than plain text in the message's own alphabet."
+  },
+  "container": {
+    "side": "augmentation",
+    "definition": "A data format, markup or document structure that the finished message is placed inside."
+  },
+  "role_framing": {
+    "side": "augmentation",
+    "definition": "A role, character or invented scenario set up in the message, for its writer or its reader, around the request."
+  },
+  "request_shape": {
+    "side": "augmentation",
+    "definition": "The frame a finished request is put in: its tense, a task or passage it is set within, and other text placed before or after it."
+  },
+  "answer_shape": {
+    "side": "augmentation",
+    "definition": "What the message asks of the answer's form: its format, layout or opening."
+  },
+  "example_priming": {
+    "side": "augmentation",
+    "definition": "Example exchanges placed in the message before the request."
+  }
+}
