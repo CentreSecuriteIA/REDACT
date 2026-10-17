@@ -291,7 +291,7 @@ class ModelConfig:
             :func:`default_model_for_role`.
         is_uncensored: True for uncensored generation models.
         supports_system_prompt: False if the model ignores system messages.
-            The backend then folds system content into the first non-system
+            The backend then folds system content into the first user
             message.
         default_max_tokens: Used when a caller passes no ``max_tokens``.
         default_temperature: Used when a caller passes no temperature.

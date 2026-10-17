@@ -84,7 +84,7 @@ def extract_system_prompt(messages: list[dict]) -> tuple[str | None, list[dict]]
 
 
 def fold_system_into_first_message(messages: list[dict]) -> list[dict]:
-    """Fold system-role content into the first non-system message.
+    """Fold system-role content into the first user message.
 
     For models registered with ``supports_system_prompt=False``.
 
@@ -95,21 +95,26 @@ def fold_system_into_first_message(messages: list[dict]) -> list[dict]:
         messages: Chat messages, possibly with system-role entries.
 
     Returns:
-        The messages with the system content prepended to the first
-        non-system message, separated by a blank line. If every message is a
-        system message, a single user message. ``messages`` itself when there
-        is no system content.
+        The non-system messages, with the system content prepended to the
+        first user message (the first message when none is the user's),
+        separated by a blank line. Empty system messages are dropped. If
+        every message is a system message, a single user message.
+        ``messages`` itself when there is no system message.
     """
-    system_parts = [m["content"] for m in messages if m.get("role") == "system"]
-    if not system_parts:
+    if not any(m.get("role") == "system" for m in messages):
         return messages
     rest = [m for m in messages if m.get("role") != "system"]
+    system_parts = [m["content"] for m in messages
+                    if m.get("role") == "system" and m["content"]]
+    if not system_parts:
+        return rest
     prefix = "\n\n".join(system_parts)
     if not rest:
         return [{"role": "user", "content": prefix}]
-    folded_first = dict(rest[0])
-    folded_first["content"] = f"{prefix}\n\n{folded_first['content']}"
-    return [folded_first] + rest[1:]
+    target = next((i for i, m in enumerate(rest) if m.get("role") == "user"), 0)
+    folded = dict(rest[target])
+    folded["content"] = f"{prefix}\n\n{folded['content']}"
+    return [*rest[:target], folded, *rest[target + 1:]]
 
 
 def free_memory() -> None:
@@ -166,7 +171,7 @@ class LLMBackend(ABC):
             default_temperature: Used when ``generate()`` gets no override.
                 ``None`` leaves it to the backend or provider.
             supports_system_prompt: False folds system content into the first
-                non-system message.
+                user message.
             rpm: Requests-per-minute budget, or ``None`` for no rate limiting.
             max_workers: Requested concurrency. Clamped to 1 when the class
                 has ``supports_parallel_calls=False``.
@@ -223,8 +228,8 @@ class LLMBackend(ABC):
         """Apply the model's system-prompt policy to a batch.
 
         The system-role messages of an item are returned separately when the
-        model supports a system role, and folded into the first non-system
-        message otherwise.
+        model supports a system role, and folded into the first user message
+        otherwise.
 
         Returns:
             ``(system_prompts, messages_list)``, both aligned with the input.

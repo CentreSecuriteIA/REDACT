@@ -84,6 +84,33 @@ class TestFoldSystemIntoFirstMessage:
         assert messages[1] is original_first
         assert messages[1]["content"] == "Q"
 
+    def test_an_empty_system_message_is_dropped(self):
+        messages = [
+            {"role": "system", "content": ""},
+            {"role": "user", "content": "hi"},
+        ]
+        assert fold_system_into_first_message(messages) == [
+            {"role": "user", "content": "hi"}]
+
+    def test_folds_into_the_user_turn_after_an_assistant_turn(self):
+        messages = [
+            {"role": "system", "content": "Sys."},
+            {"role": "assistant", "content": "Hello, how can I help?"},
+            {"role": "user", "content": "hi"},
+        ]
+        assert fold_system_into_first_message(messages) == [
+            {"role": "assistant", "content": "Hello, how can I help?"},
+            {"role": "user", "content": "Sys.\n\nhi"},
+        ]
+
+    def test_without_a_user_turn_folds_into_the_first_message(self):
+        messages = [
+            {"role": "system", "content": "Sys."},
+            {"role": "assistant", "content": "A"},
+        ]
+        assert fold_system_into_first_message(messages) == [
+            {"role": "assistant", "content": "Sys.\n\nA"}]
+
 
 class TestExtractSystemPrompt:
     """extract_system_prompt: the supports_system_prompt=True counterpart to
@@ -209,6 +236,25 @@ class TestBoundParamResolution:
             ]])
             assert "system_prompt" not in calls[0]
             assert calls[0]["messages"] == [{"role": "user", "content": "Sys.\n\nhi"}]
+        finally:
+            MODEL_REGISTRY.pop(name, None)
+
+    def test_empty_system_message_counts_as_none_when_folded(self):
+        name = "_test_no_system_prompt_model_empty"
+        try:
+            register_model(
+                name,
+                backend_type="api",
+                supports_system_prompt=False,
+                api=APIConfig(backend_type="openai", api_key_env="TEST_API_KEY",
+                              base_url="https://test.example/v1", rpm=5),
+            )
+            calls = self._call(name, [[
+                {"role": "system", "content": ""},
+                {"role": "user", "content": "hi"},
+            ]])
+            assert "system_prompt" not in calls[0]
+            assert calls[0]["messages"] == [{"role": "user", "content": "hi"}]
         finally:
             MODEL_REGISTRY.pop(name, None)
 
