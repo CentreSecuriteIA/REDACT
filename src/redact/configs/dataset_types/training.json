@@ -1,0 +1,6 @@
+{
+  "_comment": "What dataset_type training means: every entry type and the packaged augmentation section. A recipe's stages replace these, its augmentations overlay these kind by kind, and its params file overlays these params key by key per stage.",
+  "stages": ["constitution", "inputs", "outputs", "paraphrase", "jailbreaks", "build"],
+  "params": {},
+  "augmentations": {}
+}

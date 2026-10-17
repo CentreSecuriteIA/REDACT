@@ -109,6 +109,42 @@ def test_a_resolved_section_resolves_to_itself():
     assert once["adversarial"]["iterations"] == len(default_escalation_schedule())
 
 
+# --- a base section under the given one ----------------------------------------
+
+_BASE = {"adversarial": {"pure_only": True,
+                         "families": {"allow": ["encode", "framing"]}},
+         "natural": None}
+
+
+def test_a_kind_left_out_is_the_bases():
+    assert resolve(None, "adversarial", base=_BASE) == resolve(_BASE, "adversarial")
+    assert resolve({}, "natural", base=_BASE) is None
+
+
+def test_a_kind_given_overlays_the_bases_key_by_key():
+    kind = resolve({"adversarial": {"max_complexity": 4}}, "adversarial", base=_BASE)
+    assert kind == {**resolve(_BASE, "adversarial"), "max_complexity": 4}
+    # Its lists overlay the base's one by one.
+    kind = resolve({"adversarial": {"families": {"deny": ["framing"]}}},
+                   "adversarial", base=_BASE)
+    assert kind["families"] == {"allow": ["encode"],
+                                "deny": ["framing", "casual_writing"]}
+    assert kind["pure_only"] is True
+
+
+def test_a_kind_the_base_switches_off_comes_back_on_over_the_packaged_default():
+    given = {"natural": {"exact_techniques": 2}}
+    assert resolve(given, "natural", base=_BASE) == resolve(given, "natural")
+    assert resolve({"adversarial": None}, "adversarial", base=_BASE) is None
+
+
+def test_a_section_resolved_over_a_base_resolves_to_itself_over_it():
+    section = {"adversarial": {"rounds": [{"exact_techniques": 1}]}}
+    once = {kind: resolve(section, kind, base=_BASE) for kind in KINDS}
+    assert {kind: resolve(once, kind, base=_BASE) for kind in KINDS} == once
+    assert once["adversarial"]["iterations"] == 1
+
+
 @pytest.mark.parametrize("given", [{"adversarial": {"max_complexity": 3}},
                                    {"natural": {"iterations": 2}}], ids=KINDS)
 def test_a_comment_inside_a_kind_is_skipped(given):

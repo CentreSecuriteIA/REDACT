@@ -1,0 +1,33 @@
+{
+  "_comment": "What dataset_type eval means: the clear ends of the constitution (harmful and benign) and a hard, clear corner of the attacks, on the harmful inputs only. A recipe's stages replace these, its augmentations overlay these kind by kind, and its params file overlays these params key by key per stage.",
+  "stages": ["constitution", "inputs", "outputs", "paraphrase", "jailbreaks", "build"],
+  "params": {
+    "constitution": {"entry_types": ["harmful", "benign"]},
+    "inputs": {"entry_types": ["harmful", "benign"]},
+    "jailbreaks": {"seed": 43}
+  },
+  "augmentations": {
+    "adversarial": {
+      "entry_types": ["harmful"],
+      "translation": true,
+      "families": {
+        "allow": ["encode", "fsh", "dap", "framing", "structural", "ascii_art",
+                  "continuation", "temporal"],
+        "deny": ["sensitive_words"]
+      },
+      "techniques": {
+        "allow": ["to_swahili", "to_thai", "to_khmer", "to_maori", "to_nepali",
+                  "to_zulu", "to_scots_gaelic", "to_bengali", "to_javanese",
+                  "to_refusal_then_comply"],
+        "deny": ["to_rot13", "to_rot18", "to_rot47", "to_separator",
+                 "to_leetspeak_basic", "to_leetspeak_intermediate",
+                 "to_leetspeak_advanced"]
+      },
+      "pure_only": false,
+      "family_weights": {"translation": 3},
+      "rounds": [{"exact_techniques": 1}, {"exact_techniques": 2}],
+      "allow_request_obfuscation": false
+    },
+    "natural": null
+  }
+}

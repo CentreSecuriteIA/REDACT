@@ -370,7 +370,7 @@ def test_the_jailbreak_stage_gets_the_recipes_prompt_dir(tmp_path, monkeypatch):
     handed = []
     monkeypatch.setattr(redact, "generate_jailbreaks",
                         lambda **k: handed.append(k["prompt_dir"]) or pd.DataFrame())
-    recipe = {"dataset_type": "eval", "data_dir": str(tmp_path),
+    recipe = {"dataset_type": "training", "data_dir": str(tmp_path),
               "stages": ["jailbreaks"], "prompt_dir": str(tmp_path / "prompts"),
               "augmentations": {"include_translation": False}}
     try:
@@ -524,7 +524,7 @@ def test_run_pipeline_counts_the_files_a_recipe_names(tmp_path, monkeypatch):
     }
     try:
         summary = run_pipeline(
-            {"dataset_type": "eval", "data_dir": str(tmp_path),
+            {"dataset_type": "training", "data_dir": str(tmp_path),
              "stages": ["outputs", "paraphrase", "jailbreaks", "build"],
              "augmentations": {"include_translation": False}},
             params=params, verbose=False)
@@ -606,7 +606,7 @@ def test_load_recipe_defaults_and_base_dir(tmp_path):
     p = tmp_path / "recipe.json"
     p.write_text(json.dumps({"dataset_type": "eval", "data_dir": "x"}))
     r = load_recipe(p)
-    assert r["stages"] == ["inputs", "outputs", "jailbreaks", "build"]
+    assert r["stages"] == _SIX_STAGES
     assert r["_base_dir"] == str(tmp_path)
 
 
@@ -715,6 +715,154 @@ def test_an_eval_recipe_may_include_the_constitution_stage():
     assert recipe["stages"] == ["constitution", "inputs"]
 
 
+# --- dataset types: what "eval" and "training" mean -----------------------------
+
+_SIX_STAGES = ["constitution", "inputs", "outputs", "paraphrase", "jailbreaks", "build"]
+_EVAL_SEED = 43
+_BATCH = 4
+
+
+def test_a_recipe_names_its_dataset_type():
+    with pytest.raises(ValueError) as raised:
+        load_recipe({"data_dir": "x"})
+    assert str(raised.value) == (
+        "The recipe names no dataset_type; write \"dataset_type\": \"eval\" or "
+        "\"training\".")
+
+
+def test_a_dataset_type_without_a_file_is_refused():
+    with pytest.raises(ValueError) as raised:
+        load_recipe({"dataset_type": "bogus"})
+    assert str(raised.value) == (
+        "dataset_type 'bogus' has no file in configs/dataset_types; write one of "
+        "['eval', 'training'].")
+
+
+@pytest.mark.parametrize("name", ["eval", "training"])
+def test_each_dataset_type_file_holds_stages_params_and_augmentations(name):
+    from redact.recipe import load_dataset_type
+
+    loaded = load_dataset_type(name)
+    assert {key for key in loaded if not key.startswith("_")} == {
+        "stages", "params", "augmentations"}
+    assert loaded["stages"] == _SIX_STAGES
+    # A copy: the caller may change it.
+    loaded["stages"].clear()
+    assert load_dataset_type(name)["stages"] == _SIX_STAGES
+
+
+@pytest.mark.parametrize("name", ["eval", "training"])
+def test_the_types_stages_are_the_default_and_a_recipes_replace_them(name):
+    assert load_recipe({"dataset_type": name})["stages"] == _SIX_STAGES
+    assert load_recipe({"dataset_type": name, "stages": ["inputs"]})["stages"] == [
+        "inputs"]
+
+
+def test_a_training_run_takes_the_packaged_augmentation_section():
+    assert load_recipe({"dataset_type": "training"})["augmentations"] == _section(None)
+
+
+def test_an_eval_run_takes_the_eval_section_which_a_recipe_overlays():
+    from redact.recipe import load_dataset_type
+
+    section = load_recipe({"dataset_type": "eval"})["augmentations"]
+    assert section == {
+        "adversarial": resolve(load_dataset_type("eval")["augmentations"],
+                               "adversarial"),
+        "natural": None}
+    adversarial = section["adversarial"]
+    assert adversarial["entry_types"] == ["harmful"]
+    assert adversarial["rounds"] == [{"exact_techniques": 1}, {"exact_techniques": 2}]
+    assert adversarial["family_weights"] == {"translation": 3}
+
+    # The recipe's kind overlays the type's, key by key.
+    given = load_recipe({"dataset_type": "eval", "augmentations": {
+        "adversarial": {"family_weights": {"translation": 2}}}})["augmentations"]
+    assert given["adversarial"] == {**adversarial, "family_weights": {"translation": 2}}
+    # A kind the type switches off comes back on over the packaged default.
+    given = load_recipe({"dataset_type": "eval",
+                         "augmentations": {"natural": {}}})["augmentations"]
+    assert given["natural"] == resolve(None, "natural")
+
+
+def _context(dataset_type: str, params: dict, tmp_path=None):
+    from redact.stages import RunContext
+
+    return RunContext(
+        data_dir=tmp_path, dataset_type=dataset_type, models={}, prompt_dir=None,
+        taxonomy="harmful", taxonomy_dir=None, params=params,
+        augmentations=_section(None), resume=True, verbose=False)
+
+
+def test_the_types_params_lie_under_the_params_files():
+    from redact.stages import STAGES
+
+    ctx = _context("eval", {"jailbreaks": {"seed": 1},
+                            "inputs": {"samples_per_entry": 2}})
+    assert STAGES["jailbreaks"].params(ctx) == {"seed": 1}
+    assert STAGES["inputs"].params(ctx) == {
+        "entry_types": ["harmful", "benign"], "samples_per_entry": 2}
+    assert STAGES["constitution"].params(ctx)["entry_types"] == ["harmful", "benign"]
+    assert STAGES["outputs"].params(ctx) == {}
+    assert STAGES["jailbreaks"].params(_context("eval", {})) == {"seed": _EVAL_SEED}
+    assert STAGES["inputs"].params(_context("training", {})) == {}
+
+
+def test_a_type_param_the_front_does_not_take_is_refused(monkeypatch):
+    from redact import recipe as recipe_module
+    from redact.stages import STAGES
+
+    monkeypatch.setattr(recipe_module, "load_dataset_type",
+                        lambda name: {"stages": [], "augmentations": {},
+                                      "params": {"outputs": {"batch_sise": 2}}})
+    with pytest.raises(ValueError, match=r"names \['batch_sise'\], which "
+                                         "generate_outputs does not take"):
+        STAGES["outputs"].check(_context("eval", {}))
+
+
+def test_a_run_record_carries_the_dataset_type_its_file_hash_and_its_params(
+        tmp_path, monkeypatch):
+    import redact
+    from redact.dataset import content_id
+    from redact.recipe import dataset_type_hash
+
+    monkeypatch.setattr(redact, "generate_outputs", lambda **k: pd.DataFrame())
+    try:
+        run_pipeline({"dataset_type": "eval", "data_dir": str(tmp_path),
+                      "stages": ["outputs"]},
+                     params={"outputs": {"batch_size": _BATCH}}, verbose=False)
+    finally:
+        telemetry.uninstall()
+    record = read_record("outputs", tmp_path)
+    assert record["dataset_type"] == "eval"
+    assert record["dataset_type_hash"] == dataset_type_hash("eval")
+    assert len(dataset_type_hash("eval")) == len(content_id(""))
+    assert dataset_type_hash("eval") != dataset_type_hash("training")
+    assert record["params"] == {"batch_size": _BATCH}
+
+
+def test_an_eval_run_hands_each_front_the_types_params(tmp_path, monkeypatch):
+    import redact
+
+    handed = {}
+    for front in ("generate_inputs", "generate_jailbreaks"):
+        monkeypatch.setattr(
+            redact, front,
+            lambda front=front, **k: handed.setdefault(front, k) and pd.DataFrame())
+    save_constitution(tmp_path)
+    try:
+        run_pipeline({"dataset_type": "eval", "data_dir": str(tmp_path),
+                      "stages": ["inputs", "jailbreaks"]},
+                     params={"inputs": {"batch_size": _BATCH}}, verbose=False)
+    finally:
+        telemetry.uninstall()
+    assert handed["generate_inputs"]["entry_types"] == ["harmful", "benign"]
+    assert handed["generate_inputs"]["batch_size"] == _BATCH
+    assert handed["generate_jailbreaks"]["seed"] == _EVAL_SEED
+    assert read_record("inputs", tmp_path)["params"] == {
+        "entry_types": ["harmful", "benign"], "batch_size": _BATCH}
+
+
 def test_load_params_resolves_relative_to_base_dir(tmp_path):
     (tmp_path / "params.json").write_text(
         json.dumps({"inputs": {"samples_per_entry": 3}}))
@@ -764,7 +912,8 @@ def test_the_example_recipes_load(name):
 
 def test_a_recipe_naming_the_former_taxonomy_loads_harmful_with_a_warning():
     with pytest.warns(DeprecationWarning, match='write "taxonomy": "harmful"'):
-        recipe = load_recipe({"taxonomy": "content_moderation_categories"})
+        recipe = load_recipe({"dataset_type": "training",
+                              "taxonomy": "content_moderation_categories"})
     assert recipe["taxonomy"] == "harmful"
 
 
@@ -775,7 +924,8 @@ def test_a_recipe_naming_the_former_taxonomy_in_its_own_folder_keeps_the_name(
     create_taxonomy("content_moderation_categories", {"A": "a"},
                     taxonomy_dir=tmp_path, verbose=False)
     with pytest.warns(DeprecationWarning):
-        recipe = load_recipe({"taxonomy": "content_moderation_categories",
+        recipe = load_recipe({"dataset_type": "training",
+                              "taxonomy": "content_moderation_categories",
                               "taxonomy_dir": str(tmp_path),
                               "stages": ["constitution"]})
     assert recipe["taxonomy"] == "content_moderation_categories"
@@ -809,26 +959,31 @@ def _section(augmentations) -> dict:
 
 
 @pytest.mark.parametrize("name", ["eval_example.json", "training_example.json"])
-def test_the_example_recipes_run_the_default_section(name):
-    """Their section, with the params file's jailbreak keys, is the packaged
-    default, as their flat form was."""
+def test_the_example_recipes_run_their_types_section(name):
+    """Their section, with the params file's jailbreak keys, is their dataset
+    type's: the packaged default for training, the eval file's for eval."""
     import warnings
+
+    from redact.recipe import load_dataset_type
 
     with warnings.catch_warnings():
         warnings.simplefilter("error")
         recipe = load_recipe(paths.configs_dir() / "runs" / name)
         params = load_params(recipe["params_file"], base_dir=recipe["_base_dir"])
     section = augmentations_of(recipe, params["jailbreaks"])
-    assert section == _section(None) == {
-        kind: resolve(None, kind) for kind in ("adversarial", "natural")}
-    assert not any(kind["translation"] for kind in section.values())
+    base = load_dataset_type(recipe["dataset_type"])["augmentations"]
+    assert section == {kind: resolve(None, kind, base=base)
+                       for kind in ("adversarial", "natural")}
+    if recipe["dataset_type"] == "training":
+        assert section == _section(None)
+        assert not any(kind["translation"] for kind in section.values())
 
 
 def test_the_flat_form_warns_once_per_run_and_the_kinds_form_does_not():
     import warnings
 
     with pytest.warns(DeprecationWarning) as warned:
-        recipe = load_recipe({"dataset_type": "eval",
+        recipe = load_recipe({"dataset_type": "training",
                               "augmentations": {"pure_only": True}})
     assert [str(w.message) for w in warned] == [
         "augmentations holds the flat keys ['pure_only'], which are deprecated; "
@@ -925,7 +1080,7 @@ def test_the_jailbreak_stage_is_handed_the_resolved_section_and_records_it(
     section = {"adversarial": {"rounds": "escalation"}, "natural": None}
     try:
         summary = run_pipeline(
-            {"dataset_type": "eval", "data_dir": str(tmp_path),
+            {"dataset_type": "training", "data_dir": str(tmp_path),
              "stages": ["jailbreaks"], "augmentations": section},
             params={"jailbreaks": {"seed": 3}}, verbose=False)
     finally:
@@ -1253,13 +1408,15 @@ def test_run_pipeline_eval_jailbreaks_and_build(tmp_path, monkeypatch):
         "dataset_type": "eval",
         "data_dir": str(tmp_path),
         "stages": ["jailbreaks", "build"],
-        "augmentations": {
+        # The packaged section with the flat form over it, in place of the eval
+        # type's.
+        "augmentations": augmentations_of({"augmentations": {
             "pure_only": True,
             "include_hacking": False,
             "include_manipulation": False,
             "include_obfuscation": True,
             "include_requests": False,
-        },
+        }}),
         "resume": True,
     }
     params = {"jailbreaks": {"seed": 7}}
@@ -1275,6 +1432,7 @@ def test_run_pipeline_eval_jailbreaks_and_build(tmp_path, monkeypatch):
     assert "spec_version" in jb_manifest
     # The section recorded, the flat form read as the adversarial kind.
     assert jb_manifest["params"] == {"seed": 7}
+    assert jb_manifest["dataset_type"] == "eval"
     assert jb_manifest["augmentation"]["adversarial"]["pure_only"] is True
     assert jb_manifest["augmentation"]["natural"] == augmentations_of({})["natural"]
 

@@ -980,6 +980,7 @@ class RunContext:
     taxonomy: dict | str
     taxonomy_dir: str | Path | None
     params: dict                # the params file: stage name -> the front's kwargs
+                                # (over the dataset type's, see Stage.params)
     augmentations: dict         # the section the jailbreak stage runs, resolved
     resume: bool
     verbose: bool
@@ -1019,7 +1020,8 @@ class Stage:
         return getattr(redact, self.front)
 
     def params(self, ctx: RunContext) -> dict:
-        """The params file's kwargs for the stage.
+        """The stage's params: the dataset type's, overlaid key by key by the
+        params file's.
 
         Raises:
             ValueError: A key that is not a parameter of the front.
@@ -1036,8 +1038,8 @@ class Stage:
         return given
 
     def check(self, ctx: RunContext) -> dict:
-        """The params file's kwargs the front gets, checked without reading
-        any file, so a run checks every stage before the first runs.
+        """The params the front gets, checked without reading any stage
+        file, so a run checks every stage before the first runs.
 
         Raises:
             ValueError: A params key that is not a parameter of the front, or
@@ -1053,7 +1055,7 @@ class Stage:
         return {key: value for key, value in given.items() if key not in self.folded}
 
     def kwargs(self, ctx: RunContext) -> dict:
-        """The front's kwargs: the recipe's, then the params file's.
+        """The front's kwargs: the recipe's, then the params.
 
         Raises:
             ValueError: As :meth:`check`, or a saved value that is missing.
@@ -1073,8 +1075,11 @@ class Saved:
 
 
 def _params(ctx: RunContext, stage: str) -> dict:
-    """The params file's entry for ``stage``."""
-    return dict(ctx.params.get(stage) or {})
+    """The params of ``stage``: the dataset type file's, then the params file's."""
+    from redact.recipe import load_dataset_type
+
+    typed = load_dataset_type(ctx.dataset_type)["params"].get(stage) or {}
+    return {**typed, **(ctx.params.get(stage) or {})}
 
 
 def _one_file(stage: str, default: Callable) -> Callable:

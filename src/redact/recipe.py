@@ -1,7 +1,7 @@
 """What a recipe and its params file say.
 
-A recipe says what to run: ``dataset_type`` (``"eval"`` or ``"training"``;
-an eval build writes the paraphrases to a file of their own), ``data_dir``,
+A recipe says what to run: ``dataset_type`` (``"eval"`` or ``"training"``,
+required; see :func:`load_dataset_type`), ``data_dir``,
 ``models`` per role (a registry name, or an object that also says how the
 model is served, see :func:`serving_of`),
 ``taxonomy``/``taxonomy_dir``/``prompt_dir``,
@@ -9,12 +9,20 @@ model is served, see :func:`serving_of`),
 ``stages`` list, ``augmentations`` (the augmentation section, see
 :func:`augmentations_of`), a ``params_file`` and ``resume``. Its params file
 holds each stage's tunables under the stage's name.
+
+The dataset type's file gives the defaults the recipe leaves out: its
+``stages`` (the recipe's replace them), its ``augmentations`` (the recipe's
+overlay them kind by kind) and its ``params`` (the params file's overlay them
+key by key per stage).
 """
 
+import copy
 import json
 import warnings
+from functools import cache
 from pathlib import Path
 
+from redact import paths
 from redact.stages import STAGES
 
 _DEFAULT_MODELS = {
@@ -37,6 +45,51 @@ _RECIPE_KEYS = ("dataset_type", "data_dir", "models", "taxonomy", "taxonomy_dir"
 # The former name of the packaged taxonomy "harmful", read for one release.
 _FORMER_TAXONOMY = "content_moderation_categories"
 
+# The keys a dataset type file may hold, beside comments ("_" first).
+_TYPE_KEYS = ("stages", "params", "augmentations")
+
+
+def _dataset_types_dir() -> Path:
+    return paths.configs_dir() / "dataset_types"
+
+
+@cache
+def _dataset_type_file(name: str) -> dict:
+    path = _dataset_types_dir() / f"{name}.json"
+    if not path.is_file():
+        known = sorted(p.stem for p in _dataset_types_dir().glob("*.json"))
+        raise ValueError(
+            f"dataset_type {name!r} has no file in configs/dataset_types; write "
+            f"one of {known}.")
+    with path.open(encoding="utf-8") as fh:
+        data = json.load(fh)
+    keys = [key for key in data if not key.startswith("_")]
+    if sorted(keys) != sorted(_TYPE_KEYS):
+        raise ValueError(
+            f"{path} has the keys {keys}; write exactly {list(_TYPE_KEYS)}.")
+    load_params(data["params"])     # for its errors
+    return data
+
+
+def load_dataset_type(name: str) -> dict:
+    """The packaged file ``configs/dataset_types/<name>.json``: the default
+    ``stages``, ``params`` per stage and ``augmentations`` overlay of a run
+    of that type, as a copy the caller may change.
+
+    Raises:
+        ValueError: No file has that name, the file does not hold exactly
+            those three keys, or :func:`load_params` refuses its params.
+    """
+    return copy.deepcopy(_dataset_type_file(name))
+
+
+def dataset_type_hash(name: str) -> str:
+    """The content id of the dataset type's file, as parsed: what a run
+    record names the defaults it ran with by."""
+    from .dataset import content_id
+
+    return content_id(json.dumps(_dataset_type_file(name), sort_keys=True))
+
 
 def load_recipe(recipe: str | Path | dict) -> dict:
     """Load + validate a recipe (JSON path or already-parsed dict)."""
@@ -49,16 +102,21 @@ def load_recipe(recipe: str | Path | dict) -> dict:
             data = json.load(fh)
         data["_base_dir"] = str(path.parent)
 
-    dtype = data.get("dataset_type", "eval")
-    if dtype not in ("eval", "training"):
-        raise ValueError(f"dataset_type must be 'eval' or 'training', got {dtype!r}")
+    dtype = data.get("dataset_type")
+    if dtype is None:
+        raise ValueError(
+            'The recipe names no dataset_type; write "dataset_type": "eval" or '
+            '"training".')
+    if not isinstance(dtype, str):
+        raise ValueError(f'dataset_type must be "eval" or "training", got {dtype!r}.')
+    dataset_type = load_dataset_type(dtype)
 
     # `is None`, not `or`: an explicit `stages: []` means "run nothing", and
     # `or` turned that into the full default pipeline — the opposite of what
     # was asked for, with no error to notice.
     stages = data.get("stages")
     if stages is None:
-        stages = ["inputs", "outputs", "jailbreaks", "build"]
+        stages = dataset_type["stages"]
     unknown = [s for s in stages if s not in STAGES]
     if unknown:
         raise ValueError(f"Unknown stage(s) {unknown}; valid: {list(STAGES)}")
@@ -204,7 +262,9 @@ def benign_taxonomy_of(recipe: dict, stages: list[str]) -> dict | str:
 def augmentations_of(recipe: dict, jailbreak_params: dict | None = None) -> dict:
     """The recipe's augmentation section, each kind resolved over its default.
 
-    A kind given as null is off and a kind left out is the default
+    The default is the recipe's dataset type's section over the packaged
+    one; with no ``dataset_type`` in ``recipe``, the packaged one. A kind
+    given as null is off and a kind left out is the default
     (:func:`redact.jailbreak.augmentation.resolve`). Today's flat form, the
     keywords of ``generate_jailbreaks`` the section replaced written at the top
     of ``augmentations``, is read as the adversarial kind, the natural kind
@@ -228,6 +288,8 @@ def augmentations_of(recipe: dict, jailbreak_params: dict | None = None) -> dict
         resolve,
     )
 
+    base = (load_dataset_type(recipe["dataset_type"])["augmentations"]
+            if recipe.get("dataset_type") else None)
     section = recipe.get("augmentations")
     section = {} if section is None else section
     if not isinstance(section, dict):
@@ -255,8 +317,8 @@ def augmentations_of(recipe: dict, jailbreak_params: dict | None = None) -> dict
             "layer_rates, settings_per_iteration as rounds).",
             DeprecationWarning, stacklevel=3)
         section = {"adversarial": apply_flat_keywords(
-            resolve(None, "adversarial"), flat)}
-    kinds = {kind: resolve(section, kind) for kind in KINDS}
+            resolve({"adversarial": {}}, "adversarial", base=base), flat)}
+    kinds = {kind: resolve(section, kind, base=base) for kind in KINDS}
     params = {key: value for key, value in (jailbreak_params or {}).items()
               if key in FLAT_KEYWORDS and value is not None}
     if params and kinds["adversarial"] is None:

@@ -1,8 +1,8 @@
 # Configuration reference
 
-Every key a run reads: the recipe, the params file, the augmentation section,
-the model registry, the environment, and the prompt overlay. For how these
-fit together in a run, see [running.md](running.md).
+Every key a run reads: the recipe, its dataset type, the params file, the
+augmentation section, the model registry, the environment, and the prompt
+overlay. For how these fit together in a run, see [running.md](running.md).
 
 ## Recipe keys
 
@@ -11,20 +11,69 @@ that starts with `_` is a comment.
 
 | Key | Type | Default | Meaning |
 |---|---|---|---|
-| `dataset_type` | `"eval"` or `"training"` | `"eval"` | The build's `mode`: `eval` writes the paraphrases to `paraphrased.csv`, `training` merges them in. Either way the inputs are seeded from the constitution, which the recipe's `constitution` stage writes or an earlier run saved under `data_dir`; without one the `inputs` stage stops |
+| `dataset_type` | `"eval"` or `"training"` | required | The [dataset type](#dataset-types): its file gives the run's default stages, params and augmentation section, and it is the build's `mode` (`eval` writes the paraphrases to `paraphrased.csv`, `training` merges them in). Either way the inputs are seeded from the constitution, which the recipe's `constitution` stage writes or an earlier run saved under `data_dir`; without one the `inputs` stage stops |
 | `data_dir` | path | the default working root | The run's root; `Datasets/` and `Data_cache/` go under it. Relative to the current directory. `run_pipeline(data_dir=...)` and `--data-dir` override it |
 | `models` | object | every role its default | A model per role; see [below](#the-models-object) |
 | `taxonomy` | name or object | `"harmful"` | The taxonomy of the constitution, by file name or as a loaded object. The former name `"content_moderation_categories"` loads `harmful` with a `DeprecationWarning`, for one release |
 | `taxonomy_dir` | path | `configs/taxonomy/` | Where a taxonomy name (`taxonomy`, `benign_taxonomy`) is looked up |
 | `benign_taxonomy` | name or object | `"benign"` | The taxonomy whose subcategories the benign Q&A pairs of the `fsh` and `dap` techniques are generated for. Read at load, and checked to have a category, when the recipe runs `jailbreaks` and a kind draws a technique that needs benign data |
 | `prompt_dir` | path | none | The prompt overlay; see [below](#the-prompt-overlay) |
-| `stages` | list of stage names | `["inputs", "outputs", "jailbreaks", "build"]` | The stages to run, in order, each once. `[]` runs nothing |
-| `augmentations` | object | the packaged default | The jailbreak stage's augmentation section; see [below](#the-augmentation-section) |
+| `stages` | list of stage names | the dataset type's: all six | The stages to run, in order, each once. `[]` runs nothing |
+| `augmentations` | object | the dataset type's | The jailbreak stage's augmentation section, over the dataset type's; see [below](#the-augmentation-section) |
 | `params_file` | path | none | The params file, relative to the recipe's folder. `--params` and `run_pipeline(params=...)` override it |
 | `resume` | bool | `true` | `false` starts every listed stage over ([running.md](running.md#resume-fresh-runs-and-a-kill-partway-through)). Any other value than `true` or `false`, the string `"false"` too, raises |
 
 A top-level `copies` key other than `null` raises: write the count in the
 role's object instead.
+
+## Dataset types
+
+`dataset_type` names a packaged file, `configs/dataset_types/<type>.json`,
+that holds what the type means: the default `stages`, `params` per stage, and
+an `augmentations` overlay. Every key is resolved in layers, each overlaying
+the one before:
+
+| Key | 1. Packaged default | 2. Dataset type file | 3. Recipe | 4. Params file |
+|---|---|---|---|---|
+| `stages` | | the type's list | the recipe's list, whole | |
+| `params` | the front's defaults | per stage | | per stage, key by key |
+| `augmentations` | `configs/jailbreak/augmentations.json` | kind by kind | kind by kind | the deprecated flat keywords |
+
+A kind overlays the layer below it key by key, as a recipe's kind overlays
+the packaged default ([below](#the-augmentation-section)). A kind the type
+file gives as `null` is off unless the recipe gives it as an object, which
+then overlays the packaged default. A type's params are checked as the params
+file's are, before the first stage runs, and each run record's `params`
+holds the merged values. Each record also holds `dataset_type` and
+`dataset_type_hash`, the content id of the type file as parsed.
+
+| | `training.json` | `eval.json` |
+|---|---|---|
+| `stages` | `constitution`, `inputs`, `outputs`, `paraphrase`, `jailbreaks`, `build` | the same |
+| `params` | none | `constitution.entry_types` and `inputs.entry_types` `["harmful", "benign"]`; `jailbreaks.seed` 43 |
+| `augmentations` | none: the packaged default | the adversarial kind below; `natural` off |
+
+The eval adversarial kind attacks the harmful inputs only, with a pool of
+hard techniques whose label stays certain: the families `encode` (less the
+seven light encodings, and less `sensitive_words`), `fsh`, `dap`, `framing`,
+`structural`, `ascii_art`, `continuation`, `temporal`; the nine low-resource
+translations (`to_swahili`, `to_thai`, `to_khmer`, `to_maori`, `to_nepali`,
+`to_zulu`, `to_scots_gaelic`, `to_bengali`, `to_javanese`), with
+`"translation": true` and `family_weights` `{"translation": 3}`; and
+`to_refusal_then_comply`. It runs two count-driven rounds, one technique
+then two (`rounds` `[{"exact_techniques": 1}, {"exact_techniques": 2}]`),
+with `allow_request_obfuscation` false.
+
+A recipe changes one thing by giving it; the rest of the type stays. For
+example, an eval run with another stage list and a lighter translation share:
+
+```json
+{
+  "dataset_type": "eval",
+  "stages": ["constitution", "inputs", "jailbreaks", "build"],
+  "augmentations": {"adversarial": {"family_weights": {"translation": 1}}}
+}
+```
 
 ## The models object
 
@@ -46,9 +95,9 @@ a key that starts with `_` is a comment. A value is a registry name, `null`
 
 ## Params keys per stage
 
-The params file maps a stage name to keyword arguments of its front. A
-top-level key that is not a stage name raises, except a comment key that
-starts with `_`. Inside a stage's entry every key must be a parameter of the
+The params file maps a stage name to keyword arguments of its front, over
+the [dataset type's](#dataset-types) params for that stage. A top-level key
+that is not a stage name raises, except a comment key that starts with `_`. Inside a stage's entry every key must be a parameter of the
 front (a `_` key there raises too), and not one the run passes itself (the
 models, `data_dir`, `prompt_dir`, `taxonomy`, `taxonomy_dir`,
 `benign_taxonomy`, `resume`, `verbose`, the inputs stage's
@@ -139,8 +188,10 @@ The jailbreak stage runs two **kinds**:
 - `natural`: natural variations of the inputs, written to `variations.csv`.
 
 The section is `{"adversarial": {...}, "natural": {...}}`. Each kind given
-overlays its default from `configs/jailbreak/augmentations.json`. A kind left
-out is the default; a kind given as `null` is off. With both off the stage
+overlays its default: the packaged one from
+`configs/jailbreak/augmentations.json`, with the [dataset
+type's](#dataset-types) kind over it. A kind left out is the default; a kind
+given as `null` is off. With both off the stage
 writes nothing. A key starting with `_`, in the section or in a kind, is a
 comment. `recipe.load_recipe` resolves the section, so every error below
 stops a run before the first stage.
@@ -511,6 +562,7 @@ values. Delete every file you do not change, then set `prompt_dir`.
 | `configs/jailbreak/<layer>/*_templates.json` | Template variants of the pure techniques | `jailbreak/directives.py: load_templates` |
 | `configs/jailbreak/multi_turn/crescendo_followups.json` | Follow-ups of the crescendo attack | `multiturn_attacks/attacks.py` |
 | `configs/jailbreak/hacking/cognitive_techniques.json`, `personas.json` | The definitions of the cognitive techniques and of the named personas | `jailbreak/hacking/cognitive.py`, `personas.py` |
+| `configs/dataset_types/training.json`, `eval.json` | Each dataset type's default `stages`, `params` and `augmentations` | `recipe.py: load_dataset_type` |
 | `configs/taxonomy/harmful.json` | The harmful categories: the default `taxonomy` | `dataset/taxonomy.py: load_taxonomy` |
 | `configs/taxonomy/benign.json` | The categories and subcategories of the fsh and dap techniques' benign Q&A pairs: the default `benign_taxonomy` | `dataset/taxonomy.py: load_taxonomy` |
 | `configs/datasets/content_moderation_input.json` | A HuggingFace dataset id, split, columns and filters | `dataset/loading.py: load_from_config` |

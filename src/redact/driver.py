@@ -2,9 +2,9 @@
 
 Each stage writes ``{stage}.run.json`` under ``{data_dir}/Datasets/``: the
 resolved params, models, how the stage's models were served, row counts,
-spec version, timestamp and the files the stage read its inputs from
-(``sources``); the jailbreak stage's also holds the resolved augmentation
-section.
+spec version, timestamp, the files the stage read its inputs from
+(``sources``), and the dataset type with its file's hash; the jailbreak
+stage's also holds the resolved augmentation section.
 
 Usage::
 
@@ -32,6 +32,7 @@ from redact.recipe import (
     _DEFAULT_MODELS,
     _role_names,
     augmentations_of,
+    dataset_type_hash,
     load_params,
     load_recipe,
     resolve_role,
@@ -473,6 +474,8 @@ def run_pipeline(
     )
     for name in stages:
         STAGES[name].check(ctx)     # a bad params key fails before any stage runs
+    dataset_type = {"dataset_type": ctx.dataset_type,
+                    "dataset_type_hash": dataset_type_hash(ctx.dataset_type)}
 
     if verbose:
         logger.info("Run pipeline (%s) — stages: %s", ctx.dataset_type, stages)
@@ -531,6 +534,7 @@ def run_pipeline(
                     sources=[str(p) for p in stage.sources(ctx) if p.exists()],
                     spec_version=load_spec().get("version", "") if jailbreaks else None,
                     extra={"serving": {role: served[role] for role, _ in stage.roles},
+                           **dataset_type,
                            **({"augmentation": ctx.augmentations} if jailbreaks
                               else {})},
                 )

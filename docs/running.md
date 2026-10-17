@@ -68,8 +68,12 @@ The notebooks in `notebooks/` walk through a run step by step:
 
 ## Write a recipe
 
-A recipe says what to run. A params file holds each stage's own settings,
-under the stage's name.
+A recipe says what to run. Its `dataset_type`, `eval` or `training`, is
+required: it names the packaged file that gives the run's default stages,
+params and augmentation section
+([configuration.md](configuration.md#dataset-types)), and the recipe and the
+params file overlay it. A params file holds each stage's own settings, under
+the stage's name.
 
 ```json
 {
@@ -100,8 +104,13 @@ under the stage's name.
 
 - `stages` run in the order listed. Keep the order of the stage table in
   [overview.md](overview.md#the-stages): each stage reads what earlier ones
-  wrote. Without `stages` a run takes `inputs`, `outputs`, `jailbreaks`,
-  `build`.
+  wrote. Without `stages` a run takes its dataset type's: all six,
+  `constitution`, `inputs`, `outputs`, `paraphrase`, `jailbreaks`, `build`.
+- An `eval` run generates only the `harmful` and `benign` entries and inputs,
+  and its jailbreak stage attacks the harmful inputs with a small pool of hard
+  techniques, in two rounds, with no natural variations; a `training` run
+  takes every entry type and the packaged augmentation section. Anything the
+  recipe or the params file gives wins.
 - The `inputs` stage reads the constitution saved under `data_dir`, in an
   eval run as in a training one. List `constitution` before it, or run it
   earlier on the same `data_dir`; without either it stops with
@@ -121,8 +130,9 @@ under the stage's name.
   raises when the recipe loads.
 
 The two example recipes under `src/redact/configs/runs/` each have a params
-file: `eval_example.json` runs a small constitution (`params_example.json`),
-`training_example.json` a larger one (`params_training_example.json`).
+file: `eval_example.json` runs a small constitution (`params_example.json`)
+and leaves everything else to the eval type, `training_example.json` a
+larger one (`params_training_example.json`).
 
 ## Choose models
 
@@ -396,7 +406,8 @@ Other files you may see:
 | `*.tmp` | A file being replaced. It is gone once the write finishes; a kill can leave one, which the next write replaces, and `resume: false` removes the output's |
 
 A run record, `Datasets/<stage>.run.json`, holds `stage`, `timestamp`,
-`params` (the params file's entry), `models` (the recipe's role names),
+`params` (the stage's params: the dataset type's with the params file's
+entry over them), `models` (the recipe's role names),
 `counts` (`rows`, and `accepted` when the files have that column),
 `sources` (the files the stage read its inputs from: the taxonomy file for
 the constitution; the saved constitution for the inputs; the input category
@@ -405,8 +416,9 @@ of the build), `serving` (per role the stage calls: `name`, `backend_type`,
 and `copies` for a vLLM model or `workers` for a hosted one; `copies` is the
 count the plan made before any stage ran, and when a build with copies fails
 and one copy loads instead, the trace's `load` event says so with `fallback`
-and `planned_copies`), and for the jailbreak stage `spec_version` and the
-resolved `augmentation` section.
+and `planned_copies`), `dataset_type` and `dataset_type_hash` (the content
+id of the type file the run read), and for the jailbreak stage
+`spec_version` and the resolved `augmentation` section.
 
 ## Telemetry and cost
 

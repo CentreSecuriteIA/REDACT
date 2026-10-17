@@ -64,11 +64,17 @@ def natural_only_families() -> list[str]:
     return list(_packaged()["natural_only_families"])
 
 
-def resolve(section: dict | None, kind: str) -> dict | None:
+def resolve(
+    section: dict | None, kind: str, base: dict | None = None,
+) -> dict | None:
     """One kind of ``section``, overlaid on its default and checked.
 
     ``section`` may be ``None`` (both kinds the default) or a section already
-    resolved, which comes back unchanged. ``layers``, ``families`` and
+    resolved, which comes back unchanged. The default is the packaged kind,
+    or, with ``base``, ``base``'s kind resolved over it: a kind ``section``
+    leaves out is then ``base``'s (off when ``base`` gives it as ``None``),
+    and a kind it gives overlays ``base``'s, or the packaged one when
+    ``base`` switches it off. ``layers``, ``families`` and
     ``techniques`` come back with both their lists (``allow`` ``None`` for
     all), and a kind with ``rounds`` with ``iterations`` set to their number.
     The adversarial ``families.deny`` holds every family of
@@ -96,6 +102,10 @@ def resolve(section: dict | None, kind: str) -> dict | None:
             "each an object or null.")
     if kind in section and section[kind] is None:
         return None
+    default = resolve(base, kind) if base is not None else None
+    if base is not None and kind not in section:
+        return default
+    default = default or defaults()[kind]
     given = section.get(kind, {})
     where = f"augmentations.{kind}"
     if not isinstance(given, dict):
@@ -107,8 +117,7 @@ def resolve(section: dict | None, kind: str) -> dict | None:
             f"{where} has unknown key(s) {unknown}; write only "
             f"{list(_KIND_KEYS[kind])}.")
 
-    default = defaults()[kind]
-    resolved = {**default, **copy.deepcopy(given)}
+    resolved = {**copy.deepcopy(default), **copy.deepcopy(given)}
     _check_entry_types(where, resolved["entry_types"])
     for level, keys in (("layers", ("deny",)), ("families", ("allow", "deny")),
                         ("techniques", ("allow", "deny"))):
