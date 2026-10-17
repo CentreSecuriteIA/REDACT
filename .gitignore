@@ -26,6 +26,8 @@ venv/
 .idea/
 .claude/
 *.code-workspace
+.ruff_cache/
+.mypy_cache/
 
 # OS
 .DS_Store
