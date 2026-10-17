@@ -620,6 +620,33 @@ def test_inputs_that_are_all_rejected_leave_no_merged_file(tmp_path, monkeypatch
     assert not (paths.datasets(tmp_path) / "constitution_inputs_merged.csv").exists()
 
 
+def test_a_fresh_run_that_accepts_nothing_removes_the_last_merged_file(
+        tmp_path, monkeypatch):
+    """So the build does not take inputs that no category file holds now."""
+    from redact import build_dataset, generate_inputs
+    from redact.llms import ModelClient
+
+    backends = {"gen-model": MockBackend("1. one zq0 sample\n2. another zq0 sample"),
+                "check-model": MockBackend("Yes")}
+    monkeypatch.setattr(ModelClient, "create", lambda m: make_client(backends[m], m))
+    constitution = pd.DataFrame([{
+        "source_category": "Cyber", "constitution_subcategory": "Sub",
+        "sample_description": "what zq0 is about", "entry_type": "harmful"}])
+    run = dict(data_dir=tmp_path, constitution_df=constitution, samples_per_entry=2,
+               model="gen-model", check_model="check-model", verbose=False)
+    generate_inputs(**run)
+    merged = paths.constitution_inputs_merged_csv(tmp_path)
+    assert list(pd.read_csv(merged)["sample"]) == [
+        "one zq0 sample", "another zq0 sample"]
+
+    backends["gen-model"] = MockBackend("1. third zq0 sample\n2. fourth zq0 sample")
+    backends["check-model"] = MockBackend("No: off topic")
+    generate_inputs(**run, resume=False)
+    assert not merged.exists()
+    built = build_dataset(data_dir=tmp_path, verbose=False)
+    assert built.empty
+
+
 def test_inputs_not_read_back_are_merged_on_disk_and_into_no_frame(
         tmp_path, monkeypatch):
     import redact.stages as P

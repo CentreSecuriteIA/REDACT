@@ -295,15 +295,18 @@ def generate_inputs(
         # Datasets/constitution_inputs/{category}/samples.csv layout.
         # Unfiltered by style so build_dataset() sees every style generated
         # under this data_dir, not just whichever style this call used.
-        # Copied from the category files in chunks; left as it is when no
-        # sample is accepted.
+        # Copied from the category files in chunks; removed when no sample
+        # is accepted, so the build takes no row the files no longer hold.
         files = (paths.category_csv(c, root=ds_dir)
                  for c in discover_categories(ds_dir))
-        write_concat(
-            paths.constitution_inputs_merged_csv(data_dir),
+        merged = paths.constitution_inputs_merged_csv(data_dir)
+        written = write_concat(
+            merged,
             [Part(f, accepted_only=True) for f in files if has_rows(f)],
             keep_empty=False,
         )
+        if not any(written):
+            merged.unlink(missing_ok=True)
         if not read_back:
             return pd.DataFrame()
         result = merge_all(ds_dir, accepted_only=True)
