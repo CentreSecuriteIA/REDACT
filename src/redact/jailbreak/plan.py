@@ -20,6 +20,7 @@ import pandas as pd
 
 from redact.dataset import Manifest, row_id
 from redact.dataset.dealing import Dealer, stable_seed
+from redact.dataset.planfile import coverage_path, plan_record, write_plan
 
 from .chain import combine_techniques
 from .sampling import sample_combination
@@ -180,10 +181,9 @@ def plan_run(
     rounds = [{**(sample_kwargs or {}),
                **(settings_per_iteration[it] if settings_per_iteration else {})}
               for it in range(iterations)]
-    made_with = plan_inputs(pool, seed=seed, rounds=rounds,
-                            family_weights=family_weights, layer_rates=layer_rates)
-    plan_path(manifest_path).write_text(json.dumps(made_with, indent=1) + "\n",
-                                        encoding="utf-8")
+    write_plan(manifest_path, plan_inputs(
+        pool, seed=seed, rounds=rounds, family_weights=family_weights,
+        layer_rates=layer_rates))
     Manifest(manifest_path).write(units())
     coverage(manifest_path, pool)
 
@@ -206,26 +206,6 @@ def _warn_short(dealer: Dealer, iteration: int, manifest_path: Path) -> None:
                 dealer.included[layer], target, coverage_path(manifest_path).name)
 
 
-def _beside(manifest_path, suffix: str) -> Path:
-    """The file ``<stem><suffix>`` beside the manifest at ``manifest_path``."""
-    manifest_path = Path(manifest_path)
-    ending = ".manifest.jsonl"
-    stem = (manifest_path.name[:-len(ending)] if manifest_path.name.endswith(ending)
-            else manifest_path.stem)
-    return manifest_path.with_name(f"{stem}{suffix}")
-
-
-def coverage_path(manifest_path) -> Path:
-    """The coverage CSV beside the manifest at ``manifest_path``."""
-    return _beside(manifest_path, ".coverage.csv")
-
-
-def plan_path(manifest_path) -> Path:
-    """The plan file beside the manifest at ``manifest_path``: what the plan
-    was made with, as :func:`plan_inputs` gives it."""
-    return _beside(manifest_path, ".plan.json")
-
-
 def plan_inputs(
     pool: list[Callable],
     *,
@@ -234,25 +214,12 @@ def plan_inputs(
     family_weights: dict | None = None,
     layer_rates: dict | None = None,
 ) -> dict:
-    """What a plan is made with: ``seed``, ``rounds``, the ``pool``'s technique
-    names sorted, ``family_weights`` and ``layer_rates``, as JSON reads them
-    back."""
-    return json.loads(json.dumps({
-        "seed": seed, "rounds": rounds,
-        "pool": sorted(fn.__name__ for fn in pool),
-        "family_weights": family_weights, "layer_rates": layer_rates,
-    }))
-
-
-def changed_plan_inputs(manifest_path, current: dict) -> list[str] | None:
-    """The keys of ``current`` (:func:`plan_inputs`) whose values differ from
-    those the plan at ``manifest_path`` was made with; ``None`` when it has no
-    plan file to compare with."""
-    path = plan_path(manifest_path)
-    if not path.exists():
-        return None
-    made_with = json.loads(path.read_text(encoding="utf-8"))
-    return [key for key, value in current.items() if made_with.get(key) != value]
+    """What a plan is made with, its plan file's record: ``seed``, ``rounds``,
+    the ``pool``'s technique names sorted, ``family_weights`` and
+    ``layer_rates``."""
+    return plan_record(
+        seed=seed, rounds=rounds, pool=sorted(fn.__name__ for fn in pool),
+        family_weights=family_weights, layer_rates=layer_rates)
 
 
 def _manifest_rows(manifest_path: Path):

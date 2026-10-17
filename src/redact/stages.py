@@ -54,10 +54,10 @@ from redact.dataset import (
     take_per_group,
     write_concat,
 )
+from redact.dataset.planfile import coverage_path, plan_path
 from redact.jailbreak import augmentation as augmentation_kinds
 from redact.jailbreak import pool as jailbreak_pool
 from redact.jailbreak.pipeline import run_augmentation
-from redact.jailbreak.plan import coverage_path, plan_path
 from redact.llms import ModelClient, load_prompt
 from redact.llms.model_config import default_model_for_role
 from redact.types import EntryType

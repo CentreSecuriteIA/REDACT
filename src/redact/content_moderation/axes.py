@@ -1,5 +1,5 @@
 """The generation axes: what each input sample and each response is asked to
-look like, one spec per sample, dealt evenly per ``(category, entry_type)``.
+look like, one spec per call, dealt evenly per ``(category, entry_type)``.
 
 The packaged table is ``configs/generation_axes.json``, one section per stage
 (``inputs``, ``outputs``). An axis holds a ``label``, its ``dimension`` (a
@@ -13,16 +13,22 @@ A key starting with ``_`` is a comment.
 import copy
 import csv
 import json
+import logging
+import math
 import random
-from collections import Counter
+from collections import Counter, defaultdict
 from collections.abc import Iterable, Sequence
 from functools import lru_cache
 from numbers import Real
 from pathlib import Path
 
 from .. import paths
+from ..dataset import Ledger, Manifest
 from ..dataset.dealing import Dealer, stable_seed
+from ..dataset.planfile import coverage_path
 from ..dimensions import check_tags
+
+logger = logging.getLogger(__name__)
 
 #: The stages with axes, each a section of the table.
 STAGES = ("inputs", "outputs")
@@ -33,6 +39,7 @@ _FIELDS = ("subcategory",)
 _COVERAGE_COLUMNS = ("axis", "value", "category", "entry_type", "planned", "accepted")
 
 Group = tuple[str, str]     # (category, entry_type)
+Unit = tuple[Group, tuple[str, int]]    # (group, (entry, iteration))
 
 
 def _items(mapping: dict) -> list:
@@ -183,45 +190,70 @@ def _clashes(axes: dict, spec: dict, axis: str, value: str) -> bool:
                for other, picked in spec.items())
 
 
-def _one_spec(axes: dict, dealer: Dealer, rng: random.Random) -> dict:
-    """A value for each axis with values, in the table's order."""
+def _shares(entry: dict) -> dict[str, float]:
+    """Each value of an axis dealt at all, as its share of the axis's weight."""
+    weights = {value: v["weight"] for value, v in entry["values"].items()
+               if v["weight"] > 0}
+    total = sum(weights.values())
+    return {value: weight / total for value, weight in weights.items()}
+
+
+def _one_spec(
+    axes: dict, dealer: Dealer, rng: random.Random, taken: dict[str, Counter],
+    siblings: int,
+) -> dict:
+    """A value for each axis with values, in the table's order.
+
+    ``taken`` counts the values the unit's earlier siblings got; an entry of
+    ``siblings`` units takes a value at most ceil(share * siblings) times.
+    """
     spec: dict = {}
     for axis, entry in axes.items():
         if "values" not in entry:
             continue
-        dealt = [value for value, v in entry["values"].items() if v["weight"] > 0]
-        fitting = [value for value in dealt if not _clashes(axes, spec, axis, value)]
-        _, value = dealer.pick(rng, [(axis, value) for value in fitting or dealt])
+        shares = _shares(entry)
+        fitting = [value for value in shares
+                   if not _clashes(axes, spec, axis, value)] or list(shares)
+        room = [value for value in fitting
+                if taken[axis][value] < math.ceil(shares[value] * siblings - 1e-9)]
+        _, value = dealer.pick(rng, [(axis, value) for value in room or fitting])
         dealer.counts[(axis, value)] += 1
         spec[axis] = value
     return spec
 
 
-def deal(
-    axes: dict | None, units: Sequence[tuple[Group, str]], count: int, *, salt: str,
-) -> list[list[dict]]:
-    """``count`` specs for each unit, dealt per group.
+def deal_specs(axes: dict | None, units: Sequence[Unit], *, seed: int) -> list[dict]:
+    """One spec for each unit, dealt per group.
 
-    ``units`` are ``(group, name)`` pairs. The units of a group are dealt in
-    ``name`` order from one dealer: each value goes to the specs with the
-    lowest count over weight so far, ties broken by the unit's rng, seeded by
-    ``(salt, *group, name)``. So the plan does not depend on the units' order.
+    ``units`` are ``(group, (entry, iteration))`` pairs, an entry's units its
+    siblings. The units of a group are dealt in ``(entry, iteration)`` order
+    from one dealer: each value goes to the unit with the lowest count over
+    weight so far, ties broken by the unit's rng, seeded by ``(seed, *group,
+    entry, iteration)``, so the plan does not depend on the units' order. An
+    entry of k units takes a value at most ceil(share * k) times, so its
+    siblings differ on every axis none of whose values has more than 1/k of
+    the weight.
 
     Returns:
-        Each unit's specs, in the order of ``units``; empty lists without
+        Each unit's spec, in the order of ``units``; empty ones without
         ``axes``.
     """
     if not axes:
-        return [[] for _ in units]
+        return [{} for _ in units]
     weights = {(axis, value): v["weight"] for axis, entry in axes.items()
                for value, v in entry.get("values", {}).items()}
+    siblings = Counter((group, entry) for group, (entry, _) in units)
+    taken: dict[tuple, dict[str, Counter]] = defaultdict(lambda: defaultdict(Counter))
     dealers: dict[Group, Dealer] = {}
-    specs: list[list[dict]] = [[] for _ in units]
+    specs: list[dict] = [{} for _ in units]
     for i in sorted(range(len(units)), key=lambda i: units[i]):
-        group, name = units[i]
-        dealer = dealers.setdefault(group, Dealer(weights, key=group))
-        rng = random.Random(stable_seed(salt, *group, name))
-        specs[i] = [_one_spec(axes, dealer, rng) for _ in range(count)]
+        group, (entry, iteration) = units[i]
+        dealer = dealers.setdefault(group, Dealer(weights, key=(seed, *group)))
+        rng = random.Random(stable_seed(seed, *group, entry, iteration))
+        own = taken[(group, entry)]
+        specs[i] = _one_spec(axes, dealer, rng, own, siblings[(group, entry)])
+        for axis, value in specs[i].items():
+            own[axis][value] += 1
     return specs
 
 
@@ -244,18 +276,7 @@ def render_spec(axes: dict | None, spec: dict, fields: dict) -> str:
     return "\n".join(_lines(axes, spec, fields))
 
 
-def render_specs(axes: dict | None, specs: list[dict], fields: dict) -> str:
-    """The specs of one call as a numbered list, a spec's lines under its number."""
-    blocks = []
-    for n, spec in enumerate(specs, 1):
-        lines = _lines(axes, spec, fields)
-        if lines:
-            prefix = f"{n}. "
-            blocks.append(prefix + ("\n" + " " * len(prefix)).join(lines))
-    return "\n".join(blocks)
-
-
-def columns(axes: dict | None, spec: dict, *, prefix: str) -> dict:
+def spec_columns(axes: dict | None, spec: dict, *, prefix: str = "") -> dict:
     """A row's columns of ``spec``: one per axis with values, named
     ``prefix`` + the axis."""
     return {prefix + axis: spec.get(axis, "")
@@ -292,4 +313,33 @@ def write_coverage(
             key = ((category, entry_type), axis, value)
             writer.writerow([axis, value, category, entry_type,
                              counts["planned"][key], counts["accepted"][key]])
+    return path
+
+
+def _group(row: dict) -> Group:
+    return str(row.get("category", "")), str(row.get("entry_type", ""))
+
+
+def write_stage_coverage(
+    axes: dict | None, manifest: Manifest, ledger: Ledger,
+) -> Path | None:
+    """Write the coverage table beside ``manifest``: each row's ``spec``
+    planned, and accepted when the ack of its unit in ``ledger`` says
+    ``accepted``, by the row's ``category`` and ``entry_type``. No row of the
+    output is read.
+
+    Without ``axes`` the table is removed, so it never describes a plan the
+    manifest does not hold.
+    """
+    path = coverage_path(manifest.path)
+    if not axes:
+        path.unlink(missing_ok=True)
+        return None
+    accepted = {ledger.key(ack) for ack in ledger.records()
+                if ack.get("accepted") is True}
+    planned = [(_group(row), row["spec"], ledger.key(row))
+               for row in manifest if row.get("spec")]
+    write_coverage(path, axes, ((group, spec) for group, spec, _ in planned),
+                   ((group, spec) for group, spec, key in planned if key in accepted))
+    logger.info("Coverage of the generation axes -> %s", path)
     return path

@@ -1,5 +1,5 @@
-"""The generation axes: the packaged table, its overlay, the deal, the
-rendered specs, the columns and the coverage table."""
+"""The generation axes: the packaged table, its overlay, the deal of one spec
+per unit, the rendered spec, the columns and the coverage tables."""
 
 import csv
 from collections import Counter
@@ -7,19 +7,26 @@ from collections import Counter
 import pytest
 
 from redact.content_moderation import axes as A
+from redact.dataset import Ledger, Manifest
 
-_GROUP = 40         # units of one group in a deal
-_PER_UNIT = 3       # specs per unit
+_ENTRIES = 40       # entries of one group in a deal
+_K = 3              # units (siblings) per entry
+_SEED = 42
 _GIVEN = 0.5        # a weight a params file gives
 _LENGTHS = ("fragment", "one_liner", "short", "long", "very_long")
+# How far a value's share of a group of 54 may be from its weight: the
+# writer's 14 roles at .05 each take 3 of 54 rather than 2.7.
+_POINTS = 0.08
+_EXPLICIT_AT_MOST = 2   # ceil(.55 * 3)
 
 
-def _units(n: int, group=("Cyber", "harmful")) -> list[tuple[tuple[str, str], str]]:
-    return [(group, f"unit {i}") for i in range(n)]
+def _units(n: int, group=("Cyber", "harmful"), k: int = _K) -> list[A.Unit]:
+    """``n`` entries of ``group``, ``k`` units each, an entry's units in a row."""
+    return [(group, (f"entry {i}", it)) for i in range(n) for it in range(k)]
 
 
-def _spec_counts(specs: list[list[dict]], axis: str) -> Counter:
-    return Counter(spec[axis] for unit in specs for spec in unit)
+def _spec_counts(specs: list[dict], axis: str) -> Counter:
+    return Counter(spec[axis] for spec in specs)
 
 
 class TestThePackagedTable:
@@ -97,50 +104,81 @@ class TestTheDeal:
     def test_each_value_gets_its_share_of_a_group(self):
         axes = A.resolve("inputs", {"length": {"fragment": 1, "one_liner": 1,
                                                 "short": 2, "long": 0, "very_long": 0}})
-        counts = _spec_counts(A.deal(axes, _units(_GROUP), _PER_UNIT, salt="t"),
+        counts = _spec_counts(A.deal_specs(axes, _units(_ENTRIES), seed=_SEED),
                               "length")
-        total = _GROUP * _PER_UNIT
+        total = _ENTRIES * _K
         assert counts == {"fragment": total // 4, "one_liner": total // 4,
                           "short": total // 2}
 
+    def test_a_group_of_54_lands_within_a_few_points_of_the_weights(self):
+        axes = A.resolve("inputs")
+        specs = A.deal_specs(axes, _units(18), seed=_SEED)
+        for axis, entry in axes.items():
+            counts = _spec_counts(specs, axis) if "values" in entry else {}
+            weight = sum(v["weight"] for v in entry.get("values", {}).values())
+            for value, v in entry.get("values", {}).items():
+                share = counts.get(value, 0) / len(specs)
+                assert share == pytest.approx(v["weight"] / weight, abs=_POINTS)
+
+    def test_siblings_differ_on_an_axis_none_of_whose_values_has_over_a_kth(self):
+        """At k = 3: length and writer (no value above .30); register only
+        when its .35 value is brought down."""
+        axes = A.resolve("inputs", {"register": dict.fromkeys(
+            ("casual", "neutral", "formal", "technical", "emotional"), 1)})
+        specs = A.deal_specs(axes, _units(_ENTRIES), seed=_SEED)
+        for i in range(0, len(specs), _K):
+            siblings = specs[i:i + _K]
+            for axis in ("length", "writer", "register"):
+                assert len({spec[axis] for spec in siblings}) == _K
+
+    def test_an_entry_takes_a_value_at_most_its_share_of_k_rounded_up(self):
+        """Directness at k = 3: explicit (.55) twice at most, the others once."""
+        specs = A.deal_specs(A.resolve("inputs"), _units(_ENTRIES), seed=_SEED)
+        for i in range(0, len(specs), _K):
+            counts = _spec_counts(specs[i:i + _K], "directness")
+            assert counts["explicit"] <= _EXPLICIT_AT_MOST
+            assert counts["implicit"] <= 1 and counts["euphemistic"] <= 1
+
     def test_the_deal_is_the_same_whatever_the_order_of_the_units(self):
         axes = A.resolve("inputs")
-        units = _units(_GROUP)
-        dealt = dict(zip(units, A.deal(axes, units, _PER_UNIT, salt="t")))
+        units = _units(_ENTRIES)
+        dealt = dict(zip(units, map(str, A.deal_specs(axes, units, seed=_SEED))))
         backwards = list(reversed(units))
-        again = A.deal(axes, backwards, _PER_UNIT, salt="t")
-        assert dict(zip(backwards, again)) == dealt
+        again = A.deal_specs(axes, backwards, seed=_SEED)
+        assert dict(zip(backwards, map(str, again))) == dealt
 
     def test_groups_are_dealt_apart(self):
         axes = A.resolve("inputs")
-        one = A.deal(axes, _units(_GROUP), _PER_UNIT, salt="t")
-        mixed = _units(_GROUP) + _units(_GROUP, ("Fraud", "benign"))
-        assert A.deal(axes, mixed, _PER_UNIT, salt="t")[:_GROUP] == one
+        one = A.deal_specs(axes, _units(_ENTRIES), seed=_SEED)
+        mixed = _units(_ENTRIES) + _units(_ENTRIES, ("Fraud", "benign"))
+        assert A.deal_specs(axes, mixed, seed=_SEED)[:len(one)] == one
 
-    def test_another_salt_deals_another_plan(self):
+    def test_another_seed_deals_another_plan(self):
         axes = A.resolve("inputs")
-        assert A.deal(axes, _units(_GROUP), 1, salt="a") != \
-            A.deal(axes, _units(_GROUP), 1, salt="b")
+        assert A.deal_specs(axes, _units(_ENTRIES), seed=1) != \
+            A.deal_specs(axes, _units(_ENTRIES), seed=2)
 
     def test_a_value_is_never_dealt_with_one_it_names_in_not_with(self):
         axes = A.resolve("inputs")
-        for unit in A.deal(axes, _units(4 * _GROUP), _PER_UNIT, salt="t"):
-            for spec in unit:
-                if spec["focus"] == "mixed":
-                    assert spec["length"] not in ("fragment", "one_liner")
-                if spec["framing"] == "advice":
-                    assert spec["length"] != "fragment"
+        for spec in A.deal_specs(axes, _units(4 * _ENTRIES), seed=_SEED):
+            if spec["focus"] == "mixed":
+                assert spec["length"] not in ("fragment", "one_liner")
+            if spec["framing"] == "advice":
+                assert spec["length"] != "fragment"
 
     def test_a_value_of_weight_zero_is_never_dealt(self):
         axes = A.resolve("outputs", {"format": {"code": 0}})
-        counts = _spec_counts(A.deal(axes, _units(_GROUP), 1, salt="t"), "format")
-        assert "code" not in counts
+        specs = A.deal_specs(axes, _units(_ENTRIES, k=1), seed=_SEED)
+        assert "code" not in _spec_counts(specs, "format")
 
     def test_a_spec_names_every_dealt_axis_only(self):
         axes = A.resolve("inputs")
-        (spec,), = A.deal(axes, _units(1), 1, salt="t")
+        (spec,) = A.deal_specs(axes, _units(1, k=1), seed=_SEED)
         assert list(spec) == ["length", "register", "writer", "framing",
                               "directness", "focus"]
+
+    def test_no_axes_deal_empty_specs(self):
+        assert A.deal_specs(None, _units(2, k=2), seed=_SEED) == [{}] * 4
 
 
 class TestRendering:
@@ -163,22 +201,16 @@ class TestRendering:
                              {"subcategory": ""})
         assert text == "Length: short — 2 to 4 sentences.\nTone: dry"
 
-    def test_the_specs_of_a_call_are_numbered(self):
-        spec = {"length": "short", "tone": "dry"}
-        text = A.render_specs(self._AXES, [spec, spec], {"subcategory": ""})
-        assert text == (
-            "1. Length: short — 2 to 4 sentences.\n   Tone: dry\n"
-            "2. Length: short — 2 to 4 sentences.\n   Tone: dry")
-
     def test_no_axes_render_nothing(self):
-        assert A.render_specs(None, [{}, {}], {}) == ""
         assert A.render_spec(None, {}, {}) == ""
 
     def test_columns_are_the_dealt_axes_with_the_stage_prefix(self):
         spec = {"length": "short", "tone": "dry"}
-        assert A.columns(self._AXES, spec, prefix="response_") == {
+        assert A.spec_columns(self._AXES, spec, prefix="response_") == {
             "response_length": "short", "response_tone": "dry"}
-        assert A.columns(None, {}, prefix="") == {}
+        assert A.spec_columns(self._AXES, {"length": "short"}) == {
+            "length": "short", "tone": ""}
+        assert A.spec_columns(None, {}) == {}
 
 
 class TestCoverage:
@@ -216,3 +248,43 @@ class TestCoverage:
             rows = list(csv.DictReader(fh))
         assert rows[-1] == {"axis": "length", "value": "gone", "category": "Cyber",
                             "entry_type": "harmful", "planned": "0", "accepted": "1"}
+
+
+class TestTheStageCoverage:
+    _AXES = {"length": {"label": "Length", "values": {
+        "short": {"label": "s", "hint": "", "weight": 1},
+        "long": {"label": "l", "hint": "", "weight": 1}}}}
+
+    def _sidecars(self, tmp_path) -> tuple[Manifest, Ledger]:
+        manifest = Manifest(tmp_path / "x.manifest.jsonl")
+        ledger = Ledger(tmp_path / "x.state.jsonl",
+                        key_fields=("entry", "iteration"), casters={"iteration": int})
+        manifest.write(
+            {"entry": entry, "iteration": it, "category": "Cyber",
+             "entry_type": "harmful", "spec": {"length": length}, "status": "planned"}
+            for entry, it, length in (("a", 0, "short"), ("a", 1, "long"),
+                                      ("b", 0, "short"), ("b", 1, "long")))
+        ledger.record([], saved={})
+        ledger.record([
+            {"entry": "a", "iteration": 0, "ids": ["1"], "accepted": True},
+            {"entry": "a", "iteration": 1, "ids": ["2"], "accepted": False},
+            {"entry": "b", "iteration": 0, "status": "rejected"},
+            {"entry": "b", "iteration": "1", "ids": ["4"], "accepted": True},
+        ], saved={"f": [1, "x"]})
+        return manifest, ledger
+
+    def test_it_joins_the_planned_specs_to_the_acks_by_key(self, tmp_path):
+        manifest, ledger = self._sidecars(tmp_path)
+        path = A.write_stage_coverage(self._AXES, manifest, ledger)
+
+        assert path == tmp_path / "x.coverage.csv"
+        with path.open(encoding="utf-8", newline="") as fh:
+            rows = {row["value"]: (row["planned"], row["accepted"])
+                    for row in csv.DictReader(fh)}
+        assert rows == {"short": ("2", "1"), "long": ("2", "1")}
+
+    def test_without_axes_it_removes_the_table(self, tmp_path):
+        manifest, ledger = self._sidecars(tmp_path)
+        path = A.write_stage_coverage(self._AXES, manifest, ledger)
+        assert A.write_stage_coverage(None, manifest, ledger) is None
+        assert not path.exists()

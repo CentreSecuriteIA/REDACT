@@ -176,6 +176,29 @@ class TestManifestIter:
         assert list(Manifest(tmp_path / "nope.manifest.jsonl")) == []
 
 
+class TestLedgerRecords:
+    def test_each_unit_line_comes_in_the_order_written(self, tmp_path):
+        led = Ledger(tmp_path / "run.state.jsonl", key_fields=("id",))
+        led.record([], saved={})
+        led.record([{"id": "1", "extra": [1]}, {"id": "2"}], saved={"f": [1, "x"]})
+        with led.path.open("a", encoding="utf-8") as fh:
+            fh.write("not json\n" + json.dumps({"other": 1}) + "\n")
+        records = list(led.records())
+        assert [r["id"] for r in records] == ["1", "2"]
+        assert records[0]["extra"] == [1]
+
+    def test_no_file_gives_no_records(self, tmp_path):
+        led = Ledger(tmp_path / "x.state.jsonl", key_fields=("id",))
+        assert list(led.records()) == []
+
+    def test_the_key_of_a_record_is_cast_as_on_read(self, tmp_path):
+        led = Ledger(tmp_path / "x.state.jsonl", key_fields=("id", "n"),
+                     casters={"n": int})
+        assert led.key({"id": "a", "n": "3", "other": 1}) == ("a", 3)
+        with pytest.raises(KeyError):
+            led.key({"id": "a"})
+
+
 class TestLedgerAppend:
     def test_records_that_raise_half_way_append_nothing(self, tmp_path):
         led = Ledger(tmp_path / "run.state.jsonl", key_fields=("id",))
