@@ -20,11 +20,15 @@ defingerprinting model lives in another repository; register it with the
 | Target | Source rows | Text column | Id column |
 |---|---|---|---|
 | `inputs` | the accepted inputs of the run, or `inputs=` | `sample`, else `prompt` | `sample_id` |
-| `outputs` | the accepted rows of `Datasets/output_responses.csv`, or `outputs=` | `output_response`, else `sample` | `input_id` |
+| `outputs` | the rows of `Datasets/output_responses.csv`, or of `outputs=`, whose `accepted` reads true (`dataset.accepted_mask`); a frame without the column is taken whole | `output_response`, else `sample` | `input_id` |
 
 `target` is `inputs`, `outputs` or `both`. A target whose source has rows but
-none accepted is skipped with a warning; one with no rows at all is skipped
-without one.
+none accepted, or that is given an empty frame, is skipped with a warning
+(`paraphrase (<target>) skipped: ...`). A target with no rows at all goes to
+`run_paraphrase_target`, which takes the lock, clears the target on a fresh
+run, logs `[paraphrase:<target>] no source rows; skipping.` and returns an
+empty frame. Either way, with `resume: false` the target's files are removed
+as a fresh run removes them.
 
 The prompts are `prompts/paraphrase/generation/` and
 `prompts/paraphrase/check/`, both through the overlay.
@@ -98,8 +102,9 @@ mode ([build.md](build.md)).
 
 Every attempted unit is acked, whatever its outcome, so a resume runs only
 units no save recorded. A resume reads the whole artifact once for the texts
-already in it. `resume: false` removes the CSV, its `.cut` file, the ledger
-and the manifest of each target first. The lock and the cut-back work as in
+already in it. `resume: false` removes the CSV, its `.cut` and `.tmp`
+files, the ledger and the manifest of each target the run names, a skipped
+target too. The lock and the cut-back work as in
 [internals/dataset.md](../internals/dataset.md).
 
 ## Rejected and failed units
@@ -111,3 +116,6 @@ and the manifest of each target first. The lock and the cut-back work as in
 - Neither is tried again on resume.
 - A failed call stops the stage. A chunk that fails part way saves none of
   its units, so they run again on resume.
+- The stage does not use the async lane, so a prompt too long for the
+  paraphraser or the checker fails its batch call and stops the stage, on
+  every backend.

@@ -9,8 +9,11 @@ For each taxonomy category, ask a strong model for a hierarchy of
 constitution categories, subcategories and sample descriptions, at each of
 the four entry types: `harmful`, `dual_use_harmful`, `dual_use_benign`,
 `benign`. Each sample description later seeds input samples
-([inputs.md](inputs.md)). A `training` run lists this stage; an `eval` run
-may, and its inputs are then seeded from it too.
+([inputs.md](inputs.md)). Every run seeds its inputs from a constitution,
+in `eval` and `training` runs alike: list this stage in `stages`, as both
+example recipes do, or run on a `data_dir` where an earlier run saved
+`merged.csv`. The default `stages`, used when a recipe names none, does not
+list it.
 
 The four entry types are the severities a classifier is trained to tell
 apart:
@@ -60,7 +63,8 @@ taxonomy category; its source category is `general` and its entry type
 | Manifest row | `source_category`, `entry_type`, `status` (`planned`) |
 
 The units run one at a time, in plan order: taxonomy categories in file
-order, entry types in the order above, the general-benign unit last.
+order, entry types in the order above (or in the order `entry_types`
+gives them), the general-benign unit last.
 
 ## Files
 
@@ -132,7 +136,8 @@ no rows, skipped on resume, and named in a warning at the end of the stage.
 To try it again, start the stage over, or delete its line from the ledger.
 
 A failed call (a provider error after the SDK's own retries) stops the
-stage. The units saved before it stay acked.
+stage. The units saved before it stay acked. A prompt too long for the model
+stops the stage too, on every backend: the stage does not handle it.
 
 In the GPU check of this release, one taxonomy category gave four units and
 72 entries, 18 per entry type.

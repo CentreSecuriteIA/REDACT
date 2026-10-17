@@ -11,7 +11,7 @@ describes the output from a user's side.
   `llms/observe.py` imports nothing; `record()` is a no-op until an emitter
   is installed, and never raises.
 - `telemetry.py` owns the sinks, the stage label, the roll-up and the
-  prices. No vendor SDK is imported in `llms/`.
+  prices. No telemetry vendor SDK (W&B) is imported in `llms/`.
 - The JSONL sink is a plain file writer, never a `logging.Handler`. Nothing
   here configures logging: the roll-up goes to the `redact.telemetry` logger
   at INFO, and the application's level decides whether it shows.
@@ -24,14 +24,15 @@ describes the output from a user's side.
 | `observe.record(event)` | Hands an event to the emitter, filling `stage` |
 | `observe.set_emitter(fn)` | Installs the emitter; `telemetry.install` calls it |
 | `observe.set_stage(label)` | The stage later events carry; a module global, since thread pools do not pass context variables to their workers |
+| `observe.current_stage()` | The stage label set now |
 
 ## Events
 
 | `ev` | Emitted by | Fields |
 |---|---|---|
-| `call` | every backend, once per transport call | `model`, `backend`, `n_items`, `ms`, `in_tok`, `out_tok`, `out_tok_max`, `max_tokens`, `temperature`; `error` when it failed, `finish_reason` when the provider gives one, `cut: true` when the reply was cut at the token limit |
+| `call` | every backend, once per transport call | `model`, `backend`, `n_items`, `ms`, `in_tok`, `out_tok`, `out_tok_max`, `max_tokens`, `temperature`; `error` when it failed, `finish_reason` when the provider gives one, `cut: true` when the reply was cut at the token limit. A request cancelled in flight records one too, with `error` |
 | `local`, `phase: load` | `backends/vllm.py`, `backends/introspection.py` | `backend`, `hf_model_id`, `load_ms`; for vLLM `quantization`, `tensor_parallel_size`, `data_parallel_size`, `planned_copies`, `fallback`, `gpu_memory_utilization`, `devices`; for transformers `device_map`, `torch_dtype`, and the measured `claimed_gib` and `weights_gib` |
-| `local`, `phase: release` | the same, when an engine is released or at exit | `hf_model_id`, `held_s` |
+| `local`, `phase: release` | the same, when an engine is released or at exit | `backend`, `hf_model_id`, `held_s`; for vLLM `quantization` |
 | `residency` | `residency.report` | the plan's `as_dict()`, and `stages` |
 | `preload_failed` | `residency.preload` | `model`, `error`; `cause: exit` for a load the way out ended |
 | `stage` | `telemetry.stage` on leaving a stage | `stage`, `duration_s` |
@@ -44,7 +45,7 @@ takes each item as its own engine request, so both give one event per item.
 
 | Function | Does |
 |---|---|
-| `install(data_dir=None, sink=None)` | Starts a `Collector` and installs it as the emitter. `sink` defaults to `REDACT_TRACE`, else `jsonl`. Writes `Datasets/run-<YYYYMMDD-HHMMSS>.trace.jsonl` under `data_dir` |
+| `install(data_dir=None, sink=None)` | Starts a `Collector` and installs it as the emitter. `sink` defaults to `REDACT_TRACE`, else `jsonl`; an unknown value warns and uses `jsonl`. Writes `Datasets/run-<YYYYMMDD-HHMMSS>.trace.jsonl` (UTC) under `data_dir` (`get_output_dir()` for `None`), or `<run id>-2.trace.jsonl`, `-3`, ... when that name exists, so two runs in one second write two traces |
 | `stage(label)` | A context manager: labels every event inside it, and records a `stage` event with its duration on exit; then logs a WARNING per model that had replies cut at the token limit in the stage, with their count |
 | `summary()` | Rolls up the run and logs it; `{}` when telemetry is off |
 | `collector()` | The installed `Collector`, or `None` |

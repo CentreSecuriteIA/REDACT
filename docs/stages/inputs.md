@@ -7,7 +7,9 @@ run's inputs are seeded from a constitution, in an `eval` run as in a
 
 The stage saves every sample, accepted or not, with its verdict, to
 `Datasets/constitution_inputs/<category>/samples.csv`. The later stages read
-only the accepted ones, through `dataset.merge_inputs`.
+only the accepted ones: outputs, paraphrase and jailbreaks through
+`dataset.merge_inputs`, the build through
+`Datasets/constitution_inputs_merged.csv`.
 
 ## Purpose
 
@@ -50,8 +52,8 @@ Params keys: `style`, `samples_per_entry`, `entry_types`, `batch_size`,
 One unit is one constitution entry.
 
 1. One call asks for `samples_per_entry` samples as a numbered list. The
-   prompt also shows the first 20 texts this run has generated, and counts
-   the rest, as samples not to repeat.
+   prompt also shows the first 20 texts this run has saved, and counts the
+   rest, as samples not to repeat.
 2. A reply with another number of samples is rejected whole and asked again,
    up to `max_attempts` generations.
 3. Samples whose text is already in the folder (by content id, any category
@@ -74,9 +76,11 @@ Under `Datasets/constitution_inputs/`:
 | `constitution_inputs.manifest.jsonl` | The plan of the current style |
 | `constitution_inputs.state.jsonl` | The ledger, for every style |
 
-And `Datasets/constitution_inputs_merged.csv`: the accepted rows of every
-category and every style, copied by the front after the core returns. The
-build reads it. It is left as it is when no sample is accepted.
+And `Datasets/constitution_inputs_merged.csv`: the rows of every category
+and every style whose `accepted` reads true (`dataset.accepted_mask`),
+copied by the front after the core returns. The build reads it. It is
+removed when no category file holds an accepted row, so the build never
+reads rows the category files no longer hold.
 
 Columns of `samples.csv`:
 
@@ -116,8 +120,12 @@ stops until the same fresh run is repeated.
   checker's reply in `rejection_reason`.
 - An entry with every reply rejected is acked `rejected`, with no rows.
 - An entry with only repeated samples is acked `no_samples`.
-- An entry whose prompt is too long for the model is acked `rejected` after
-  one attempt.
+- On the async lane (an OpenAI-compatible endpoint or vLLM), an entry whose
+  generation or check prompt is too long for its model is acked `rejected`
+  after one attempt, with no rows, and logged `Entry ... rejected, its
+  prompt is too long`. On an Anthropic or introspection binding the
+  requests go out in grouped calls, and a prompt too long there fails the
+  call and stops the stage.
 - These acked entries are skipped on resume; a warning at the end counts the
   rejected ones. Start the style over to try them again.
 - Any other error inside a unit, and any failed call, stops the stage. Saved

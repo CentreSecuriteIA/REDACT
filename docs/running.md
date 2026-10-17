@@ -11,10 +11,11 @@ Python 3.11 or later.
 
 ```bash
 pip install -e .                   # core: pandas, openai, anthropic, python-dotenv, pyfiglet, filelock
-pip install -e ".[vllm]"           # local models through vLLM
+pip install -e ".[vllm]"           # local models through vLLM (vllm, hf_transfer, psutil)
 pip install -e ".[transformers]"   # the introspection backend (torch, transformers, accelerate)
 pip install -e ".[hf]"             # loading published datasets from the HuggingFace Hub
-pip install -e ".[dev]"            # pytest, ruff, mypy
+pip install -e ".[dev]"            # pytest, ruff, mypy, ipykernel
+pip install -e ".[docs]"           # the documentation site: mkdocs build --strict
 ```
 
 `requirements.lock` pins an environment that runs vLLM on a GPU pod. Its
@@ -22,8 +23,8 @@ torch build needs a host driver for CUDA 13; on an older driver vLLM stops at
 load with "The NVIDIA driver on your system is too old".
 
 Put API keys in a `.env` file. `import redact` loads `.env` from the default
-working root (`REDACT_OUTPUT_DIR`, else the source tree that holds
-`pyproject.toml`, else the current directory), and its values win over the
+working root (`REDACT_OUTPUT_DIR`, else the first folder above the package
+that holds `pyproject.toml` or `.git`, else the current directory), and its values win over the
 shell's. The keys the shipped models read are `VENICE_API_KEY`,
 `ANTHROPIC_API_KEY` and `OPENROUTER_API_KEY`. Local weights download to the
 HuggingFace cache (`HF_HOME`); `scripts/download_models.py` fetches every
@@ -111,9 +112,13 @@ under the stage's name.
   `configs/taxonomy/` by default.
 - `params_file` is relative to the recipe's folder. `data_dir`,
   `prompt_dir` and `taxonomy_dir` are relative to the current directory.
-- A params key must be a parameter of the stage's front, and not one the
-  recipe passes itself (`model`, `data_dir`, `resume`, ...). Both rules are
-  checked for every stage before the first runs.
+- A params file holds one entry per stage, under the stage's name. Any
+  other top-level key raises, except a comment key that starts with `_`.
+  Inside a stage's entry every key must be a parameter of the stage's front,
+  and not one the recipe passes itself (`model`, `data_dir`, `resume`, ...).
+  These rules are checked for every stage before the first runs.
+- `resume` is `true` or `false`. Any other value, the string `"false"` too,
+  raises when the recipe loads.
 
 The two example recipes under `src/redact/configs/runs/` each have a params
 file: `eval_example.json` runs a small constitution (`params_example.json`),
@@ -134,8 +139,9 @@ that lists that role.
 | `paraphraser` | paraphrase | `paraphraser` | `venice-paraphraser`, local vLLM (24B weights) |
 | `paraphrase_check` | paraphrase | `uncensored_gen` | `venice-uncensored`, hosted |
 
-A role's entry is a registry name, `null`, or an object that also says how
-the model is served:
+A key under `models` must be one of these six roles, whatever its value; a
+key that starts with `_` is a comment. A role's entry is a registry name,
+`null`, or an object that also says how the model is served:
 
 ```json
 "models": {
@@ -275,13 +281,18 @@ cleanly: the finished units are saved, requests in flight are cancelled, and
 the local engines are released. A model still loading is waited for at most
 60 seconds, then its engine processes are ended. Rerun the same command to
 go on. A second Ctrl-C (or `kill`) while that cleanup runs ends the engine
-processes and exits at once; the next resume cuts off a save it left half
-done.
+processes at once: SIGTERM to vLLM's engine processes and their children,
+then SIGKILL to those alive 5 seconds later; no other child process is
+touched. It writes to stderr without logging, prints a `kill -9` line for
+any process still alive, and exits. The next resume cuts off a save it left
+half done.
 
 `kill -9`, or a lost machine, may leave half a save. The next resume cuts it
 off and runs those units again. vLLM's engine processes outlive `kill -9` and
-keep their GPU memory; the next run stops before any stage, naming them and
-their PIDs (see [the GPU planner](#the-gpu-planner)). Kill them and rerun.
+keep their GPU memory; the next run stops before any stage. It names them,
+their PIDs and the vLLM engine processes above them (titled `VLLM::`), with
+one `kill -9` line for all of them (see [the GPU planner](#the-gpu-planner)).
+Kill them and rerun.
 The next load may log "Failed to reload cubin file" warnings from torch's
 compile cache, and carries on.
 
@@ -290,7 +301,8 @@ and ran the other 400. It ended with 432 rows, 433 ledger lines (the opening
 `_saved` line and 432 acks), no duplicate, and an unchanged manifest.
 
 **Starting over.** `"resume": false` starts every listed stage over: it
-removes the stage's output, its `.cut` files, its ledger and its manifest,
+removes the stage's output, its `.cut` and `.tmp` files, its ledger and its
+manifest (and for each jailbreak kind its `.coverage.csv` and `.plan.json`),
 then plans anew. The exceptions:
 
 - The `inputs` stage starts over only its current `style`. The rows and
@@ -302,17 +314,38 @@ it always resumes from its ledger, generating only the units (one subcategory
 of the benign taxonomy and one answer type) it does not hold. A unit rejected
 on every attempt is acked and skipped; delete
 `benign_samples.state.jsonl` to try it again, or delete the CSV and its
-sidecars to generate everything again.
+sidecars to generate everything again. With `"auto_generate_benign": false`
+in the jailbreak stage's params, the file is loaded as it is; without one,
+the stage stops before any unit runs.
 
 To start one stage over and keep the others, run a recipe that lists only
 that stage, with `"resume": false`, on the same `data_dir`; or call its front
 with `resume=False`.
 
+To plan one kind of the jailbreak stage again and keep the other, run a
+recipe that lists only `jailbreaks`, with the kept kind `null` in
+`augmentations` and `"resume": false`, then restore the section. A kind that
+is off is not touched, and a resume of it afterwards goes on from its own
+ledger and plan.
+
+A stage that is skipped because none of its inputs was accepted still
+starts over with `"resume": false`. Its earlier output, `.cut` and `.tmp`
+files, ledger and manifest are removed through `dataset.clear_stage`; for the
+jailbreak stage that is each kind that is on, with its `.coverage.csv` and
+`.plan.json`. So no stale rows reach the build. A jailbreak kind whose
+`entry_types` match none of the inputs is skipped with a WARNING and cleared
+the same way.
+
 **What a resume does not change.**
 
-- The jailbreak stage reuses its plan. A changed augmentation section, a new
-  seed or new inputs take effect only with `"resume": false` for that stage.
-  A resume logs a WARNING that counts the inputs its plan does not hold.
+- The jailbreak stage reuses each kind's plan. `<kind>.plan.json`, beside
+  the manifest, records what the plan was made with: `seed`, `rounds` (with
+  the budget keys and `iterations`), the pool's technique names,
+  `family_weights` and `layer_rates`. A resume whose values differ stops
+  with a `ValueError` that names the keys; run the stage with
+  `"resume": false` to plan again. A plan without that file resumes
+  unchecked, with a WARNING. Inputs accepted after the plan was made get no
+  unit, and a WARNING counts them.
 - A rejected unit is acked and not retried: a constitution unit or a seeded
   entry rejected on every attempt, a rejected output, a dropped paraphrase.
   Start the stage over to try them again.
@@ -340,12 +373,12 @@ Datasets/
   output_responses.csv                   # + .manifest.jsonl, .state.jsonl
   paraphrases_inputs.csv                 # + .manifest.jsonl, .state.jsonl
   paraphrases_outputs.csv                # + .manifest.jsonl, .state.jsonl
-  jailbreaks.csv                         # + .manifest.jsonl, .state.jsonl, .coverage.csv
-  variations.csv                         # + .manifest.jsonl, .state.jsonl, .coverage.csv
+  jailbreaks.csv                         # + .manifest.jsonl, .state.jsonl, .coverage.csv, .plan.json
+  variations.csv                         # + .manifest.jsonl, .state.jsonl, .coverage.csv, .plan.json
   complete_dataset.csv                   # the build
   constitution.run.json  inputs.run.json  outputs.run.json
   paraphrase.run.json  jailbreaks.run.json  build.run.json
-  run-<YYYYMMDD-HHMMSS>.trace.jsonl      # one per run_pipeline call
+  run-<YYYYMMDD-HHMMSS>.trace.jsonl      # one per run_pipeline call; -2, -3, ... when the name is taken
 ```
 
 An eval run writes the same files; its build writes the paraphrases to
@@ -358,7 +391,9 @@ Other files you may see:
 | `<ledger>.lock` | The stage's lock. The operating system holds it, so a run that died holds nothing; the file itself may stay |
 | `<output>.cut` | Bytes a resume cut off an output: the tail of a save that did not finish |
 | `<ledger>.dropping` | A fresh run of one seeded-inputs style that did not finish. Run it again |
-| `*.tmp` | A file being replaced. It is gone once the write finishes |
+| `<kind>.plan.json` | What a jailbreak kind's plan was made with: `seed`, `rounds`, `pool`, `family_weights`, `layer_rates`. A resume compares them with the run's |
+| `<kind>.coverage.csv` | Per layer, family and technique of a kind's plan, the count per category, entry type and iteration, with a zero row for each pool technique never drawn |
+| `*.tmp` | A file being replaced. It is gone once the write finishes; a kill can leave one, which the next write replaces, and `resume: false` removes the output's |
 
 A run record, `Datasets/<stage>.run.json`, holds `stage`, `timestamp`,
 `params` (the params file's entry), `models` (the recipe's role names),
@@ -366,14 +401,18 @@ A run record, `Datasets/<stage>.run.json`, holds `stage`, `timestamp`,
 `sources` (the files the stage read its inputs from: the taxonomy file for
 the constitution; the saved constitution for the inputs; the input category
 files, and `output_responses.csv` for paraphrases of outputs; the part files
-of the build), `serving` (per role: name, setup, copies
-or workers), and for the jailbreak stage `spec_version` and the resolved
-`augmentation` section.
+of the build), `serving` (per role the stage calls: `name`, `backend_type`,
+and `copies` for a vLLM model or `workers` for a hosted one; `copies` is the
+count the plan made before any stage ran, and when a build with copies fails
+and one copy loads instead, the trace's `load` event says so with `fallback`
+and `planned_copies`), and for the jailbreak stage `spec_version` and the
+resolved `augmentation` section.
 
 ## Telemetry and cost
 
 Every `run_pipeline` call writes a trace,
-`Datasets/run-<YYYYMMDD-HHMMSS>.trace.jsonl` (UTC), one JSON event per line:
+`Datasets/run-<YYYYMMDD-HHMMSS>.trace.jsonl` (UTC; `-2`, `-3`, ... after the
+time when two runs start in one second), one JSON event per line:
 each model call, each engine load and release, each residency plan, each
 stage's duration. `REDACT_TRACE=wandb` mirrors the events to Weights &
 Biases (project `WANDB_PROJECT`, default `redact`), and `REDACT_TRACE=off`
@@ -408,8 +447,8 @@ rate. [internals/telemetry.md](internals/telemetry.md) lists the events.
 
 | What you see | What it means | What to do |
 |---|---|---|
-| `ValueError: No input samples found. Run generate_inputs() first.` | A stage that reads inputs found no category file under `data_dir` | Run `inputs` first, or point `data_dir` at the run that has them |
-| WARNING `outputs skipped: no input sample was accepted ...` (or `paraphrase (...)`, `jailbreaks`) | No input is accepted; the stage writes nothing and records 0 rows. The run goes on | Read `rejection_reason` in the category files. A weak checker model rejects almost everything: in the GPU check a 3B checker accepted 2 of 144 seeded inputs, a 24B accepted 144 of 144 |
+| `ValueError: No input samples found. Run generate_inputs() first.` | `generate_outputs` or `generate_jailbreaks` found no category file under `<data_dir>/Datasets/constitution_inputs/` (`generate_paraphrases` skips the target at INFO instead) | Run `inputs` first, or point `data_dir` at the run that has them |
+| WARNING `outputs skipped: no input sample was accepted ...` (or `paraphrase (...)`, `jailbreaks`) | No input is accepted; the stage writes nothing, and the run goes on. With `"resume": false` it also removes what an earlier run of the stage left, so its record counts 0 rows; on a resume its earlier rows stay | Read `rejection_reason` in the category files. A weak checker model rejects almost everything: in the GPU check a 3B checker accepted 2 of 144 seeded inputs, a 24B accepted 144 of 144 |
 | WARNING `inputs: only N of M generated samples were accepted (under half)` | The checker rejects most samples | As above |
 | `ValueError: No constitution at ...` | A run whose inputs are seeded has no saved constitution | List `constitution` before `inputs` |
 | `RuntimeError: The run plans a model on a card another process holds memory on ...` | Before any stage: a card the plan uses is held, often by the engines of a run killed with `kill -9` | Kill the PIDs the message names and check `nvidia-smi` shows the card empty, or run on other cards (`CUDA_VISIBLE_DEVICES`) |
@@ -432,10 +471,19 @@ rate. [internals/telemetry.md](internals/telemetry.md) lists the events.
 | vLLM logs `AsyncLLM output_handler failed` with `EngineDeadError` | An engine shutting down; logged at release and sometimes at exit | Nothing; REDACT logs a line saying so just before |
 | INFO `[rate-limit] <model>: pausing Ns (N RPM)` | A hosted model is at its rate limit | Expected; serve the model locally for speed |
 | WARNING `<model>: a reply was cut at the token limit (max_tokens=N) ...`, then `[<stage>] <model>: N replies were cut at the token limit and are incomplete.` | Replies hit `max_tokens` or the context: the first one per stage and model warns, the stage's end counts them, and `summary["telemetry"]["cut"]` holds the counts | Raise `default_max_tokens` or `max_model_len`, or ask for shorter replies |
-| WARNING `... rejected, its prompt is too long` | One prompt is longer than the model's context; that unit gets a rejected row or ack | Raise `max_model_len`, or shorten the input |
-| A stage stops on a provider error (for example 429, model overloaded) | A failed call is the transport failing, so it stops the stage; the SDK retries twice first | Resume: finished units are kept |
+| WARNING `Entry ... rejected, its prompt is too long` (inputs) or `Input ... rejected, its prompt is too long` (outputs) | One prompt is longer than the model's context. On the async lane (an OpenAI-compatible endpoint or vLLM) the inputs stage acks the entry rejected and the outputs stage writes a rejected row; the jailbreak stage writes an error row for that unit | Raise `max_model_len`, or shorten the input |
+| `PromptTooLongError` stops a stage | A prompt longer than the context of an Anthropic or introspection model, in any stage (grouped calls; the failed `generate()` stops the stage). The paraphrase stage, the constitution stage and the benign data stop on any model, since they do not handle it per unit | Shorten the input, or serve that role on a model with a longer context |
+| A stage stops on a provider error (for example 429, model overloaded) | A failed call is the transport failing, so it stops the stage; the SDK retries it `max_retries` times first (2 by default) | Resume: finished units are kept; raise `max_retries` or `timeout_s` on the model's `api` setup |
 | WARNING `GPU cost reported as $0` | Local GPUs held, and no GPU price set | Set a rate (see above) |
 | `DeprecationWarning` for flat augmentation keys | `include_*`, `sampling_probs` and the other flat keywords | Write them in the `adversarial` kind |
 | `DeprecationWarning` naming `content_moderation_categories` | The former name of `harmful.json` in `configs/taxonomy/`, read for one release | Write `"taxonomy": "harmful"`; rename a file of your own `harmful.json` |
 | WARNING `jailbreak: N of the M inputs are not in the plan ...` | A resume keeps the plan made before those inputs were accepted | Run the jailbreak stage with `"resume": false` to plan them |
+| `ValueError: jailbreak: this run's [...] differ from those the plan jailbreaks.manifest.jsonl was made with (see jailbreaks.plan.json) ...` | A resume with another augmentation section or seed than the plan's | Run the jailbreak stage with `"resume": false`, or with the plan's section and seed |
+| WARNING `jailbreak: the plan ... has no jailbreaks.plan.json beside it ...` | A plan made before plan files were written; its section and seed are not checked | Nothing, or `"resume": false` to plan again |
+| `ValueError: The plan names the technique '...', which no registered technique implements` | A kept plan names a technique that was renamed or removed | Run the jailbreak stage with `"resume": false` |
+| `ValueError: Benign data not found and no client provided for generation ...` | `auto_generate_benign` is false and there is no benign file | Run once with it on, or set `benign_path` |
+| WARNING `adversarial kind skipped: entry_types [...] match none of the inputs' (...)` | No input of the kind's `entry_types` | Fix `entry_types` in the augmentation section |
+| `ValueError: The params file has key(s) [...], which are not stages ...` | A top-level params key that is not a stage name, such as a typo | Write only stage names, or a comment key starting with `_` |
+| `ValueError: resume must be true or false, got 'false'.` | `resume` is not a JSON bool | Write `true` or `false` |
+| `ValueError: models['x'] is not a model role; write one of [...]` | A key under `models` that is no recipe role | Use one of the six roles ([Choose models](#choose-models)) |
 | `ValueError: combination_spec.json and the technique registries differ` at import | A technique is registered without a spec entry, or the reverse | See [extending.md](extending.md#add-a-jailbreak-technique) |

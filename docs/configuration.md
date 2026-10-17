@@ -21,16 +21,17 @@ that starts with `_` is a comment.
 | `stages` | list of stage names | `["inputs", "outputs", "jailbreaks", "build"]` | The stages to run, in order, each once. `[]` runs nothing |
 | `augmentations` | object | the packaged default | The jailbreak stage's augmentation section; see [below](#the-augmentation-section) |
 | `params_file` | path | none | The params file, relative to the recipe's folder. `--params` and `run_pipeline(params=...)` override it |
-| `resume` | bool | `true` | `false` starts every listed stage over ([running.md](running.md#resume-fresh-runs-and-a-kill-partway-through)) |
+| `resume` | bool | `true` | `false` starts every listed stage over ([running.md](running.md#resume-fresh-runs-and-a-kill-partway-through)). Any other value than `true` or `false`, the string `"false"` too, raises |
 
-A top-level `copies` key raises: write the count in the role's object
-instead.
+A top-level `copies` key other than `null` raises: write the count in the
+role's object instead.
 
 ## The models object
 
 Keys are recipe roles: `gen`, `check`, `translation`, `constitution`,
-`paraphraser`, `paraphrase_check`. A value is a registry name, `null` (the
-role's default), or an object:
+`paraphraser`, `paraphrase_check`. Any other key raises, whatever its value;
+a key that starts with `_` is a comment. A value is a registry name, `null`
+(the role's default), or an object:
 
 | Key | Type | Meaning |
 |---|---|---|
@@ -45,12 +46,15 @@ role's default), or an object:
 
 ## Params keys per stage
 
-The params file maps a stage name to keyword arguments of its front. A key
-must be a parameter of the front and not one the run passes itself (the
+The params file maps a stage name to keyword arguments of its front. A
+top-level key that is not a stage name raises, except a comment key that
+starts with `_`. Inside a stage's entry every key must be a parameter of the
+front (a `_` key there raises too), and not one the run passes itself (the
 models, `data_dir`, `prompt_dir`, `taxonomy`, `taxonomy_dir`,
-`benign_taxonomy`, `resume`, `verbose`, the jailbreak stage's
-`augmentation`, the build's `mode`, `read_back`). Parameters that take a DataFrame
-(`inputs`, `outputs`, `constitution_df`) cannot be written in JSON.
+`benign_taxonomy`, `resume`, `verbose`, the inputs stage's
+`constitution_df`, the jailbreak stage's `augmentation`, the build's `mode`,
+`read_back`). Parameters that take a DataFrame (`inputs`, `outputs`) cannot
+be written in JSON.
 
 ### `constitution`
 
@@ -102,10 +106,10 @@ models, `data_dir`, `prompt_dir`, `taxonomy`, `taxonomy_dir`,
 |---|---|---|
 | `seed` | `42` | The run seed of the plan and of each technique's random choices |
 | `batch_size` | `256` | Requests per grouped call; at least twice as many units are live |
-| `auto_generate_benign` | `true` | When a pending unit needs benign data, generate the pairs `benign_path` lacks for the benign taxonomy's subcategories, then load it |
+| `auto_generate_benign` | `true` | When a pending unit needs benign data, generate the pairs `benign_path` lacks for the benign taxonomy's subcategories, then load it. `false`: load the file as it is; with none, the stage stops before any unit runs (`Benign data not found ...`) |
 | `output_path` | `Datasets/jailbreaks.csv` | The adversarial kind's file |
 | `variations_path` | beside `output_path`, else `Datasets/variations.csv` | The natural kind's file |
-| `manifest_path` | `jailbreaks.manifest.jsonl` beside the output | The adversarial kind's plan |
+| `manifest_path` | `jailbreaks.manifest.jsonl` beside the output | The adversarial kind's plan, with its plan file `<stem>.plan.json` and coverage table beside it |
 | `benign_path` | `Data_cache/benign/benign_samples.csv` | The benign data, with its manifest and ledger beside it |
 
 The flat keywords (`include_hacking`, ..., `entry_types`) are also accepted
@@ -137,8 +141,13 @@ The jailbreak stage runs two **kinds**:
 The section is `{"adversarial": {...}, "natural": {...}}`. Each kind given
 overlays its default from `configs/jailbreak/augmentations.json`. A kind left
 out is the default; a kind given as `null` is off. With both off the stage
-writes nothing. `recipe.load_recipe` resolves the section, so every error
-below stops a run before the first stage.
+writes nothing. A key starting with `_`, in the section or in a kind, is a
+comment. `recipe.load_recipe` resolves the section, so every error below
+stops a run before the first stage.
+
+A resumed run keeps each kind's plan: a changed pool, `rounds`,
+`family_weights`, `layer_rates` or `seed` raises an error that names them
+and `resume=False` ([stages/jailbreaks.md](stages/jailbreaks.md#how-it-resumes)).
 
 ### Keys
 
@@ -146,8 +155,8 @@ Both kinds:
 
 | Key | Type | Default | Meaning |
 |---|---|---|---|
-| `entry_types` | list or `null` | `null` | Augment only inputs of these entry types; `null` for all |
-| `translation` | bool | `false` | Whether the kind draws the `translation` family. Decides alone, whatever the lists say |
+| `entry_types` | list or `null` | `null` | Augment only inputs of these entry types; `null` for all. A kind whose entry types match no input logs a WARNING and writes nothing |
+| `translation` | bool | `false` | Whether the kind draws the `translation` family. The family lists do not change it; `layers.deny`, `techniques.deny` and `pure_only` still apply |
 | `layers` | `{"deny": [...]}` | `{"deny": []}` | Layers left out |
 | `families` | `{"allow": [...] or null, "deny": [...]}` | adversarial: `{"allow": null, "deny": []}`; natural: the natural families | Families admitted and removed |
 | `techniques` | `{"allow": [...] or null, "deny": [...]}` | adversarial: `{"allow": null, "deny": []}`; natural: three techniques allowed, three denied | Techniques admitted and removed |
@@ -163,7 +172,7 @@ Adversarial only:
 | `max_complexity` | int >= 0 | `6` | Budget mode: the most total complexity (each technique scores 0 to 3) |
 | `max_obfuscations` | int >= 0 | `2` | Budget mode: the most obfuscation families |
 | `layer_rates` | `{layer: 0..1}` | `{}`, the spec's rates | Target share of units that take a `hacking`, `manipulation` or `requests` technique, and the chance of `request_obfuscation` |
-| `allow_request_obfuscation` | bool | `false` | Allow one more technique after the request technique, at the `request_obfuscation` rate: a light `encode` technique, or a translation when the pool has one |
+| `allow_request_obfuscation` | bool | `false` | Allow one more technique after the request technique, at the `request_obfuscation` rate: a light `encode` technique (the light `to_sensitive_words_encode_*` among them), or a translation when the pool has one. It must fit the remaining complexity and is not counted against `max_obfuscations` |
 
 Natural only:
 
@@ -187,8 +196,8 @@ From every registered technique, in this order:
 2. when `families.allow` or `techniques.allow` is a list, keep only the
    techniques of an allowed family or with an allowed name (`translation`
    counts as allowed when the switch is on);
-3. remove the families in `families.deny`, and `translation` when the switch
-   is off;
+3. remove the families in `families.deny` (`translation` aside), and
+   `translation` when the switch is off;
 4. remove the techniques in `techniques.deny`;
 5. with `pure_only`, remove every technique tagged `requires_llm` or
    `requires_benign`.
@@ -216,9 +225,10 @@ From every registered technique, in this order:
 
 `"translation": false` keeps the `translation` family out of a kind, and
 `true` puts it in: the attacks draw it as any family, and the natural kind
-adds it to its allow list. No deny or allow list changes this. An allow list
-that names `translation` or one of its techniques while the switch is
-`false` raises.
+adds it to its allow list. No family list changes this; a
+`techniques.deny` still removes the languages it names. An allow list that
+names `translation` or one of its techniques while the switch is `false`
+raises.
 
 Both kinds default to `false`. Each translation makes 2 to 8 calls, up to 4
 rounds of two ([stages/jailbreaks.md](stages/jailbreaks.md#models) says which
@@ -229,7 +239,8 @@ Turning it on by default is one line per kind in `augmentations.json`.
 ### Rounds
 
 `rounds` sets the adversarial kind's units per input and each round's sampler
-settings. Each round is merged over the kind's budget keys.
+settings. Each round is merged over the kind's budget keys, key by key: a
+round's `layer_rates` replaces the kind's whole and is read over the spec's.
 
 | Value | Rounds |
 |---|---|
@@ -239,7 +250,8 @@ settings. Each round is merged over the kind's budget keys.
 
 With `rounds`, `iterations` is the number of rounds; giving both with
 different values raises. A round with `exact_techniques` picks exactly that
-many compatible techniques and ignores the complexity budget. A round
+many compatible techniques and ignores `max_complexity`,
+`max_obfuscations`, `layer_rates` and `allow_request_obfuscation`. A round
 without it picks by budget.
 
 The escalation schedule:
@@ -248,8 +260,11 @@ The escalation schedule:
 |---|---|
 | 1 | `exact_techniques: 1` |
 | 2 | `exact_techniques: 2` |
-| 3 | `max_complexity: 6`, `max_obfuscations: 2`, rates hacking 0.7, manipulation 0.5, requests 0.8, request_obfuscation 0.5, `allow_request_obfuscation: true` |
-| 4 | `max_complexity: 9`, `max_obfuscations: 3`, rates hacking 0.9, manipulation 0.7, requests 0.9, request_obfuscation 0.7, `allow_request_obfuscation: true` |
+| 3 | `max_complexity: 6`, `max_obfuscations: 2`, rates hacking 0.7, manipulation 0.3, requests 0.8, request_obfuscation 0.5, `allow_request_obfuscation: true` |
+| 4 | `max_complexity: 9`, `max_obfuscations: 3`, rates hacking 0.9, manipulation 0.1, requests 0.9, request_obfuscation 0.7, `allow_request_obfuscation: true` |
+
+A unit holds a hacking or a manipulation technique, never both, so the two
+rates of a round sum to 1.
 
 ### Rates and weights
 
@@ -262,6 +277,10 @@ count over `family_weights`, so `{"persona": 2}` gives `persona` twice the
 share of each other hacking family. `family_weights` may name only families
 the kind's pool draws. [internals/jailbreak.md](internals/jailbreak.md#balanced-dealing)
 explains the dealing.
+
+`hacking` and `manipulation` exclude each other, so their rates should sum to
+at most 1; beyond it, `manipulation` falls short of its rate and the plan
+logs a WARNING. `request_obfuscation` is a chance per unit, not dealt.
 
 ### Examples
 
@@ -319,7 +338,7 @@ process only.
 | `backend_type` | the only setup present | The default setup: `api`, `vllm` or `introspect`. Needed when there are several |
 | `roles` | `[]` | Registry roles the model fills. Each must be in `configs/llm/roles.json` |
 | `is_uncensored` | `false` | Marks an uncensored generation model |
-| `supports_system_prompt` | `true` | `false` folds system messages into the first user message |
+| `supports_system_prompt` | `true` | `false` folds system messages into the first user message (the first message when none is the user's); an empty system message is dropped |
 | `default_max_tokens` | `2000` | Reply limit when a call gives none |
 | `default_temperature` | `null` | 0.0 to 2.0; `null` leaves it to the backend (vLLM and introspection use 0.7) |
 | `api`, `vllm`, `introspect` | `null` | The setups; at least one |
@@ -331,13 +350,15 @@ process only.
 |---|---|---|
 | `backend_type` | required | `openai` (any OpenAI-compatible endpoint) or `anthropic` |
 | `api_key_env` | required | The environment variable holding the key |
-| `rpm` | required | Requests per minute, over a sliding 60-second window |
+| `rpm` | required | Requests per minute, over a sliding 60-second window; at least 1 |
 | `base_url` | required for `openai` | The endpoint URL |
 | `api_model_id` | the registry name | The model id sent to the provider |
 | `rate_limit_scope` | `"model"` | `model`: one window per model. `endpoint`: one window for every model with the same provider, URL and key variable; they must declare the same `rpm` |
-| `recommended_max_workers` | `1` | Requests in flight. Must be 1 for `anthropic` |
+| `recommended_max_workers` | `1` | Requests in flight. Must be 1 for `anthropic`. A run's `workers` in the recipe replaces it |
 | `default_extra_body` | `null` | Provider parameters sent with each call (OpenAI-compatible only) |
 | `price_per_1m_input`, `price_per_1m_output` | `null` | USD per million tokens, for the cost roll-up |
+| `max_retries` | `2` | Retries the SDK makes of a failed call (a 429, a 5xx, a lost connection), with its own backoff, unseen by the rate limiter and the trace. A call that still fails stops the stage |
+| `timeout_s` | `null` | Seconds before the SDK gives up on a call; `null` keeps the SDK's default (10 minutes). Above 0 |
 
 ### `vllm` (VLLMConfig)
 
@@ -345,7 +366,7 @@ process only.
 |---|---|---|
 | `hf_model_id` | required | HuggingFace id or local path |
 | `quantization` | `null` | vLLM quantization method, such as `awq`, `gptq`, `fp8` |
-| `vllm_kwargs` | `null` | Engine arguments (vLLM's `AsyncEngineArgs`), such as `max_model_len`, `enforce_eager`, `tokenizer_mode`. `gpu_memory_utilization` and `data_parallel_size` are refused: the planner sets them |
+| `vllm_kwargs` | `null` | Engine arguments (vLLM's `AsyncEngineArgs`), such as `max_model_len`, `enforce_eager`, `tokenizer_mode`. `gpu_memory_utilization` and `data_parallel_size` are refused: the planner sets them. A `tensor_parallel_size` must equal `min_gpus` |
 | `sampling` | `null` | Sampling defaults (`top_p`, `top_k`, ...) over the backend's `top_p` 0.85 |
 | `vram_gb` | `null` | The weights in GiB, total over the model's cards, when known better than the estimate |
 | `min_gpus` | `1` | Cards per copy; above 1 it is the `tensor_parallel_size` |
@@ -358,7 +379,7 @@ process only.
 | `log_dir` | required | Root folder of the captured internals |
 | `capture` | `logprobs: true`, `hidden_states: "last"`, `attention: false` | What to save per captured call; `hidden_states` is `false`, `"last"` or `"all"` |
 | `device_map`, `torch_dtype` | `"auto"` | Passed to `from_pretrained` |
-| `sampling` | `null` | Sampling defaults |
+| `sampling` | `null` | Sampling defaults over the backend's `top_p` 0.85 |
 | `vram_gb` | `null` | The weights in GiB |
 | `extra_kwargs` | `null` | More `from_pretrained` kwargs. Capturing attention loads with eager attention unless this names another |
 
@@ -394,8 +415,10 @@ role.
 | `WANDB_PROJECT` | the W&B sink | Project name, default `redact` |
 | `REDACT_GPU_PROVIDER` | the cost roll-up | Provider key in `gpu_pricing.json`; default `local`, priced at 0 |
 | `REDACT_GPU_HOURLY_USD` | the cost roll-up | Hourly price per GPU; wins over the table |
-| `CUDA_VISIBLE_DEVICES` | the planner, vLLM | The cards the run may use, by index or UUID; the plan numbers cards over them |
+| `CUDA_VISIBLE_DEVICES` | the planner, vLLM | The cards the run may use, by index, UUID or UUID prefix; the plan numbers cards over them. As in CUDA, an entry that names no card ends the list |
 | `CUDA_DEVICE_ORDER` | CUDA | Set to `PCI_BUS_ID` by a plan or a load unless set, so CUDA counts the cards as `nvidia-smi` does |
+| `VLLM_WORKER_MULTIPROC_METHOD` | vLLM | Set to `spawn` before a load unless set |
+| `VLLM_PROCESS_NAME_PREFIX` | the card check | The title prefix of vLLM's engine processes, default `VLLM`, named in the `kill -9` advice |
 
 ## The prompt overlay
 
@@ -407,7 +430,8 @@ loaded by `load_prompt(pipeline, category, prompt_dir)` or
 `prompt_dir` is an overlay. For each prompt, the loader looks in
 `<prompt_dir>/<pipeline>/<category>/` first and falls back to the packaged
 copy. A user folder holds only the prompts it changes, so the others stay
-current when the library's improve. At the start of a run the driver logs how
+current as the library's change. At the start of a run (with `verbose`) the
+driver logs how
 many prompts are overridden, and warns about a folder that matches no
 packaged prompt (a misspelt name) or that has several `.json` files and no
 `template.json`.
@@ -482,7 +506,7 @@ values. Delete every file you do not change, then set `prompt_dir`.
 | File | Holds | Read by |
 |---|---|---|
 | `configs/llm/gpu_pricing.json` | Provider, then GPU name as `nvidia-smi` reports it, then hourly USD per GPU; `*` is a provider's fallback | the cost roll-up |
-| `configs/jailbreak/combination_spec.json` | `version`, `layer_order`, `layer_rates`, `layer_max_picks`, `families` (layer, order within the layer, incompatibilities), `manipulation_blocked_obfuscation`, `request_obfuscation_allowed_families`, `techniques` (families, complexity, `requires_llm`, `requires_benign`, `encode_weight`, `max_tokens`, `cross_incompatible_with`) | `jailbreak/technique.py`, `rules.py`, `sampling.py`, `plan.py` |
+| `configs/jailbreak/combination_spec.json` | `version`, `layer_order`, `layer_rates`, `layer_max_picks`, `families` (layer, order within the layer, incompatibilities; `max_picks` and `description`, which nothing reads), `manipulation_blocked_obfuscation`, `request_obfuscation_allowed_families`, `techniques` (families, complexity, `requires_llm`, `requires_benign`, `encode_weight`, optional `max_tokens`, `cross_incompatible_with`) | `jailbreak/technique.py` (`load_spec`, `tag`), `pool.py`, `rules.py`, `sampling.py`, `chain.py`, `augmentation.py`; its `version` goes in each row and in the jailbreak run record |
 | `configs/jailbreak/augmentations.json` | The two default kinds and `natural_only_families` | `jailbreak/augmentation.py` |
 | `configs/jailbreak/<layer>/*_templates.json` | Template variants of the pure techniques | `jailbreak/directives.py: load_templates` |
 | `configs/jailbreak/multi_turn/crescendo_followups.json` | Follow-ups of the crescendo attack | `multiturn_attacks/attacks.py` |
@@ -490,7 +514,7 @@ values. Delete every file you do not change, then set `prompt_dir`.
 | `configs/taxonomy/harmful.json` | The harmful categories: the default `taxonomy` | `dataset/taxonomy.py: load_taxonomy` |
 | `configs/taxonomy/benign.json` | The categories and subcategories of the fsh and dap techniques' benign Q&A pairs: the default `benign_taxonomy` | `dataset/taxonomy.py: load_taxonomy` |
 | `configs/datasets/content_moderation_input.json` | A HuggingFace dataset id, split, columns and filters | `dataset/loading.py: load_from_config` |
-| `configs/runs/*.json` | The example recipes and params file | you |
+| `configs/runs/*.json` | The example recipes (`eval_example.json`, `training_example.json`) and their params files (`params_example.json`, `params_training_example.json`) | you |
 
 A `taxonomy_dir` of your own that still holds `content_moderation_categories.json`
 serves it for `harmful`, with a `DeprecationWarning`, for one release; rename

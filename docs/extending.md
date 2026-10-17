@@ -137,20 +137,28 @@ contract.
      `rng`) and yields `LLMRequest(gen_model, messages)`. Load its prompt from
      `prompts/jailbreak/<name>/` with `prompt_dir`.
    - A template-driven transform keeps its variants in
-     `configs/jailbreak/<layer>/<name>_templates.json` and applies one with
+     `configs/jailbreak/<layer>/<module>_templates.json`, reads it with
+     `directives.load_templates`, and applies one with
      `directives.apply_template_directive(..., rng=rng)`.
    - Return `(text, info)`, `info` being `""` or `key=value;...`.
-2. **Register it**: return it from the module's `get_<family>_functions()`,
-   which its layer's `get_all_<layer>_functions()` collects.
+2. **Register it**: return it from its module's getter
+   (`get_encoding_functions`, `get_framing_functions`, ...), which its
+   subpackage's `get_all_hacking_functions`, `get_all_manipulation_functions`,
+   `get_all_obfuscation_functions` or `get_all_request_functions` collects. A
+   new module's getter is added to that collector in the subpackage's
+   `__init__.py`.
 3. **Add its spec entry** under `techniques` in
    `configs/jailbreak/combination_spec.json`: `families` (the first sets the
    layer and the order), `complexity` (0 to 3), `requires_llm`,
    `requires_benign`, `encode_weight` for an `encode` technique,
    `max_tokens` to cap its calls' replies, and `cross_incompatible_with` for
-   families this technique, not its whole family, may not join. A new family also needs an entry
-   under `families`: `layer`, `within_layer_order`, `max_picks`,
-   `cross_incompatible_with`, `description`. Importing `redact.jailbreak`
-   raises while the spec and the registry name different techniques.
+   families this technique, not its whole family, may not join. A new
+   family also needs an entry under `families`: `layer`,
+   `within_layer_order` (its place in the obfuscation order; 0 elsewhere)
+   and `cross_incompatible_with`. The families also carry `max_picks` and
+   `description`, which nothing reads: a combination takes one technique per
+   family. Importing `redact.jailbreak` raises while the spec and the
+   registry name different techniques.
 4. **Decide which kinds draw it.** The adversarial kind draws every family
    unless denied. For variations, add the family to the natural kind's
    `families.allow`, or the name to its `techniques.allow`, in
@@ -161,7 +169,7 @@ contract.
    the registry with `tests/fixtures/technique_registry.json` (names, tags,
    signatures, and the combinations five seeds draw), so it fails on any new
    technique. Once the change is meant, regenerate the fixture from the
-   repository root with `py -m tests.jailbreak.test_registry`.
+   repository root with `PYTHONPATH=src python -m tests.jailbreak.test_registry`.
 
 ## Add a stage
 
@@ -175,9 +183,13 @@ A stage is a core, a front, and a row in the stage table.
    - A unit is a generator that yields `LLMRequest`s; build it from
      `llm_pipeline.checked` or `extracted` where they fit.
    - Drive the units with `drive_units(..., pool_size=pool_size(batch_size,
-     *clients), cap=batch_size)`. Isolate a unit's own errors in `on_error`
-     (a `PromptTooLongError` becomes a rejected row or ack); let any other
-     propagate.
+     *clients), cap=batch_size)`. Isolate a unit's own errors in `on_error`;
+     let any other propagate. On the async lane (a client with
+     `supports_async_calls`: OpenAI-compatible, vLLM) a `PromptTooLongError`
+     is raised inside the unit at its `yield`; handle it there or in
+     `on_error` as a rejected row or ack. On the grouped path (Anthropic,
+     introspection) it propagates from `generate()` and stops the stage, as
+     any failed call does.
    - Give every row a `sample_id`, the content id of its text, and an
      `input_id` when it derives from another row.
    - Take `resume`, `verbose` and `read_back`.
@@ -185,15 +197,24 @@ A stage is a core, a front, and a row in the stage table.
 3. **The front** in `stages.py`: resolve the inputs (a frame, or the run's
    own), one model per role (`None` for the registry role's default, through
    `ModelClient.create`), the output path, `prompt_dir`; call the core; return
-   what it returns. The front never touches a ledger. Export it from
-   `redact/__init__.py`: `Stage.run` looks the front up there.
+   what it returns. The front never touches a ledger. When the inputs hold
+   no accepted row, it warns, writes nothing, and with `resume=False` clears
+   the stage's files with `dataset.clear_stage` (the core that would clear
+   them does not run). Export it from `redact/__init__.py`: `Stage.run`
+   looks the front up there.
 4. **A `Stage` row** in `STAGES`, at its place in the run order: `name`,
-   `front`, `roles` (pairs of recipe role and registry role), `files` (the
-   CSVs that hold its rows, for the counts), `recipe_kwargs` (what the run
-   passes the front). A new recipe role also goes in `_DEFAULT_MODELS` in
-   `recipe.py`.
+   `front`, `roles` (pairs of recipe role and registry role), `files`
+   (`ctx -> (paths, values)`: the CSVs that hold its rows and the column
+   values a counted row holds), `recipe_kwargs` (`ctx -> dict`, what the run
+   passes the front; a value an earlier stage saves is a `Saved`), `sources` (`ctx -> list[Path]`, the files it reads its
+   inputs from, for its run record; `[]` when it reads none), and `folded`
+   when the run folds some params keys into a kwarg it passes itself. A new
+   recipe role also goes in `_DEFAULT_MODELS` in `recipe.py`.
 5. **The build**: add a `Part` in `build_dataset`, with `accepted_only=True`,
-   when its rows belong in the complete dataset.
+   when its rows belong in the complete dataset, with its `include_<part>`
+   and path keys, and list its file in `_build_sources`. A row whose
+   `sample_id` an earlier part wrote is left out. Update
+   `tests/fixtures/build_files.json`.
 6. **Tests.** Cover a stopped and resumed run: no unit twice, no unit lost.
    `tests/test_stage_files.py` pins each stage's files after a stopped and a
    resumed run against `tests/fixtures/stage_files.json`; add the new stage

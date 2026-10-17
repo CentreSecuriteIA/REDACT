@@ -19,15 +19,16 @@ Under `src/redact/`:
 | `multi_turn/` | Conversation datasets: settings, actors, `generate_conversations`, `evaluate_conversations` |
 | `multiturn_attacks/`, `optimization/` | Crescendo and PAIR attacks against a safety-trained target; a beam search over conversation moves ([conversations](../stages/conversations.md#attacks-and-search)) |
 | `dataset/` | Rows on disk: identity, the ledger and manifest, resume, the per-category tree ([dataset.md](dataset.md)) |
-| `configs/` | Package data: `llm/` (registry, roles, GPU prices), `jailbreak/` (the spec, the augmentation defaults, technique templates), `taxonomy/`, `datasets/`, `runs/` (example recipes) |
+| `configs/` | Package data: `llm/` (registry, roles, GPU prices), `jailbreak/` (the spec, the augmentation defaults, technique templates), `taxonomy/`, `datasets/`, `runs/` (example recipes and their params files) |
 | `prompts/` | One prompt JSON per pipeline and step |
 | `stages.py`, `recipe.py`, `driver.py`, `paths.py` | This page |
 | `telemetry.py` | The run trace and the cost roll-up ([telemetry.md](telemetry.md)) |
 | `exceptions.py`, `types.py` | `RedactError`, `PromptTooLongError`; `EntryType` |
 
 Beside the package: `scripts/` (`run.py`, `inspect_run.py`,
-`scaffold_prompts.py`, `download_models.py`), `notebooks/` (walkthroughs) and
-`tests/`.
+`scaffold_prompts.py`, `download_models.py`, `gpu_check_residency.py`, the
+residency checks on a GPU pod), `notebooks/` (walkthroughs), `docs/` and
+`mkdocs.yml` (this site), and `tests/`.
 
 ## Responsibilities and boundaries
 
@@ -67,9 +68,12 @@ Every front takes, where they apply:
   empty frame and reads nothing back);
 - path overrides (`output_path`, ...).
 
-A front that reads the run's inputs raises when no category file exists
-(`No input samples found`), and warns and returns an empty frame when none
-is accepted (`<stage> skipped: ...`).
+`generate_outputs` and `generate_jailbreaks` raise when no category file
+exists (`No input samples found`); `generate_paraphrases` skips a target
+with no rows at all, logged at INFO. All three warn and return an empty
+frame when no input is accepted (`<stage> skipped: ...`); with
+`resume=False` they also remove what an earlier run of the stage left
+(`dataset.clear_stage`).
 
 A core can be called without its front, with clients and paths of your own.
 The seeded inputs, for example:
@@ -127,11 +131,11 @@ recipe's kwargs updated with the params file's.
 
 | Function | Does |
 |---|---|
-| `load_recipe(path or dict)` | Reads and checks a recipe ([running.md](../running.md#write-a-recipe)); resolves `augmentations`; reads the former taxonomy name `content_moderation_categories` as `harmful`, with a `DeprecationWarning` |
+| `load_recipe(path or dict)` | Reads and checks a recipe ([running.md](../running.md#write-a-recipe)); refuses a `resume` that is not a bool and a top-level `copies` other than null; resolves `augmentations`; reads the former taxonomy name `content_moderation_categories` as `harmful`, with a `DeprecationWarning` |
 | `benign_taxonomy_of(recipe, stages)` | The recipe's `benign_taxonomy` (`"benign"` by default); read, and checked to have a category, when the jailbreak stage runs a kind that draws a technique needing benign data |
-| `load_params(path or dict, base_dir)` | Reads the params file; refuses a `jailbreaks` key that belongs in the augmentation section, warns for a flat keyword |
+| `load_params(path or dict, base_dir)` | Reads the params file; refuses a key that is not a stage name (a `_` key is a comment) and a `jailbreaks` key that belongs in the augmentation section, warns for a flat keyword |
 | `augmentations_of(recipe, jailbreak_params)` | The section, both kinds resolved; reads the flat form; applies the params' flat keywords over the adversarial kind |
-| `serving_of(models)` | Checks the role objects; returns the keys given per model name |
+| `serving_of(models)` | Refuses a key that is not a recipe role, whatever its value (a `_` key is a comment); checks the role objects; returns the keys given per model name |
 | `resolve_role(models, role, augmentations)` | The models a role stands for, as its stage resolves them |
 
 `resolve_role` has three rules beyond "the name, else the registry role's
@@ -145,8 +149,10 @@ translation technique.
 
 1. `load_recipe`, `load_params`, `serving_of`; build the `RunContext`.
 2. `Stage.check` for every stage.
-3. `telemetry.install(data_dir)`; `report_prompt_sources(prompt_dir)`.
-4. `capabilities.set_run_serving(...)`: each model's `backend_type` and
+3. `telemetry.install(data_dir)`; with `verbose`,
+   `report_prompt_sources(prompt_dir)`.
+4. `residency.loaded_engines()`: the engines loaded before the run.
+   `capabilities.set_run_serving(...)`: each model's `backend_type` and
    `workers` for every client built during the run.
 5. `_plan_phases`: `residency.plan_phases` over each stage's models
    (`_stage_models` resolves them as the stages will), `residency.report` per
@@ -154,22 +160,34 @@ translation technique.
    raised.
 6. `_check_cards`: one `nvidia-smi` read (`measure.card_use`) before any
    model loads; a `RuntimeError` naming the cards, processes and PIDs when
-   another process holds memory on a card the plan uses. A process on an
-   unplanned card, or 1 GiB or more in use on a planned card with no process
-   listed, only warns.
-7. `_served`: per role, the name, setup, and copies or workers, for the
-   summary and the records.
+   another process holds memory on a card the plan uses, with the vLLM
+   engine processes above them (titled `VLLM::`) in its `kill -9` line. A
+   process on an unplanned card, or 1 GiB or more in use on a planned card
+   with no process listed, only warns.
+7. `_served`: per role, `name`, `backend_type`, and `copies` (the count
+   planned before any stage runs, else the recipe's) or `workers`, for the
+   summary and the records. When one copy loads in place of the plan's
+   copies, the trace's `load` event says so (`fallback`, `planned_copies`).
+   The engines loaded before the run that no stage calls are then set
+   aside, so no unload between stages releases them.
 8. Per stage: `_enter_phase` (unload, apply the stage's plan, preload this
    stage's models and the next stage's when they fit), then inside
    `telemetry.stage(name)`: the front with `read_back=False`, `file_counts`,
    `write_record` with `sources`. Leaving `telemetry.stage` logs the
    stage's replies cut at the token limit, per model.
-9. `finally`: clear the run's serving, join the preload threads, unload every
-   local engine, clear the planned shares and cards, `telemetry.summary()`.
+9. `finally`: clear the run's serving. When the run has a plan: join the
+   preload threads for at most `vllm.EXIT_WAIT_S` (60 s) in all, unload the
+   engines the run loaded (`residency.unload_local(engines=before,
+   wait=vllm._GRACE_S)`, 10 s, which ends a load still running; engines
+   loaded before the run stay), and clear the planned shares and cards.
+   Then `telemetry.summary()`.
 
 `scripts/run.py` makes the first Ctrl-C or SIGTERM exit through that
-`finally`; a second sends SIGTERM to the run's child processes (SIGKILL
-after 2 seconds) and leaves with `os._exit`.
+`finally`. A second calls `terminate_engine_processes(all=True, quiet=True)`:
+SIGTERM to the engine processes of every build (loaded, in progress or
+failed) and their descendants, and SIGKILL to those alive 5 s later; no
+other child is touched. It writes to stderr without logging, names the pids
+still alive with a `kill -9` line, and leaves with `os._exit(128 + signum)`.
 
 | Function | Does |
 |---|---|
@@ -216,7 +234,7 @@ manifest = Manifest.sidecar(out)                                         # 2
 done = resume_state(ledger, resume=resume, artifact=out, manifest=manifest)  # 3
 manifest.write({"input_id": i, "status": "planned"} for i in ids)       # 4
 with CommitBuffer(append=lambda rows: append_rows(out, rows), ledger=ledger) as buf:
-    drive_units(units_not_in(done), on_done=lambda k, v: buf.add(rows_of(v), record_of(k)),
+    drive_units(units_not_in(done), on_done=lambda k, v: buf.add(unit_rows(v), unit_ack(k)),
                 on_error=..., pool_size=pool_size(batch_size, *clients),
                 cap=batch_size)                                          # 5, 6
 return read_rows(out) if read_back else pd.DataFrame()                   # 7
@@ -229,14 +247,17 @@ return read_rows(out) if read_back else pd.DataFrame()                   # 7
    takes the stage's lock, clears everything on a fresh run, or checks and
    cuts back the files on a resume, and returns the finished unit keys.
 4. **The plan.** The manifest is written whole, every run. The jailbreak
-   kinds keep an existing plan on resume, since theirs is sampled.
+   kinds keep an existing plan on resume, since theirs is sampled, and check
+   it against `<kind>.plan.json` beside the manifest.
 5. **The units.** Each pending unit is a generator of model calls, driven by
    `llm_pipeline.drive_units`. Its key in the driver is its position among
    the pending units, so two rows with one id stay two units; the ledger key
    goes in the record `on_done` adds.
 6. **The save.** `on_done` hands a unit's rows and ack record to the
    `CommitBuffer`, which appends rows and then acks every 32 units and on any
-   exit. A failed call propagates and is never turned into rows.
+   exit. A failed call propagates and is never turned into rows. Only a
+   `PromptTooLongError` on the async lane is raised inside its unit, and the
+   stage may turn it into a rejected or error row.
 7. **Read back.** Only when `read_back`. The driver passes `False`.
 
 A stage whose resume finds nothing pending opens no buffer, and calls

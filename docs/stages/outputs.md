@@ -16,8 +16,11 @@ a response to a benign input is judged as any answer.
   Each row's `category`, `subcategory` and `entry_type` are read when
   present (default `unknown`, empty, `harmful`).
 - With no input file at all the front raises `No input samples found`. With
-  files but no accepted row it warns `outputs skipped: ...`, writes nothing
-  and returns an empty frame.
+  files but no accepted row, or an empty `inputs=` frame, it warns
+  `outputs skipped: no input sample was accepted, ...`, writes nothing and
+  returns an empty frame. With `resume: false` it first removes what earlier
+  runs left, as a fresh run does: the CSV, its `.cut` and `.tmp` files, the
+  ledger and the manifest (`dataset.clear_stage`).
 - `max_per_category` keeps the first N rows of each `(category, entry_type)`,
   then `max_samples` the first N overall.
 - The prompts `prompts/output/generation/` and `prompts/output/quality_check/`,
@@ -74,16 +77,19 @@ of attempts. The row holds the last attempt.
 
 The ledger alone decides: inputs it records are skipped, the rest run.
 Inputs added since the last run are planned and run. Rows are saved every 32
-units. `resume: false` removes the CSV, its `.cut` file, the ledger and the
-manifest first. See [internals/dataset.md](../internals/dataset.md) for the
+units. `resume: false` removes the CSV, its `.cut` and `.tmp` files, the
+ledger and the manifest first, also when the stage is skipped. See [internals/dataset.md](../internals/dataset.md) for the
 lock and the cut-back.
 
 ## Rejected and failed units
 
 - A rejected response is saved with `accepted` false and the reason, and its
   input is acked: a resume does not try it again.
-- An input whose prompt is too long for the model gets a row with an empty
-  `output_response`, `accepted` false and `rejection_reason`
-  `prompt too long: ...`.
+- On the async lane (an OpenAI-compatible endpoint or vLLM), an input whose
+  generation or check prompt is too long for its model gets a row with an
+  empty `output_response`, `accepted` false and `rejection_reason`
+  `prompt too long: ...`, and is acked. On an Anthropic or introspection
+  binding the requests go out in grouped calls, and a prompt too long there
+  fails the call and stops the stage.
 - Any other error inside a unit, and any failed call, stops the stage. Saved
   units stay saved; resume to go on.

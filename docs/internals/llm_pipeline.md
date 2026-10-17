@@ -20,15 +20,17 @@ It must not:
 
 - read or write files, ledgers or rows. A finished unit is handed to the
   caller's `on_done`; saving is the caller's job;
-- turn a failed call into a result. A failed batch or async call propagates.
-  Only an exception raised inside a unit's own generator goes to `on_error`;
+- turn a failed call into a result. A failed batch or async call propagates,
+  except an async call's `PromptTooLongError`, which is raised inside its
+  unit. Only an exception raised inside a unit's own generator goes to
+  `on_error`;
 - import anything but `redact.llms` and `redact.exceptions`.
 
 ## LLMRequest
 
 ```python
 LLMRequest(model, messages, internals_id=None, *, client=None, max_tokens=None)
-LLMRequest.for_client(client, messages, internals_id=None, max_tokens=None)
+LLMRequest.for_client(client, messages, *, internals_id=None, max_tokens=None)
 ```
 
 A request names a model; with `client` it goes to that client, else the
@@ -39,7 +41,7 @@ by model name; the content moderation units bind theirs to a client.
 A unit is a generator:
 
 ```python
-def unit(...):
+def unit(gen, check, messages, check_messages):
     reply = yield LLMRequest.for_client(gen, messages)
     verdict = yield LLMRequest.for_client(check, check_messages(reply))
     return reply, is_accepted(verdict)
@@ -93,11 +95,15 @@ same batch.
 
 - Each model has at most `backend.max_workers` requests in flight, enforced
   by one semaphore per model and setup. For a local vLLM engine that is its
-  `max_num_seqs` times its copies; for a hosted model its `workers`.
+  `max_num_seqs` times its copies; for a hosted model its
+  `recommended_max_workers`, or the recipe's `workers` for the run.
 - A hosted model's rate limiter is charged per request.
 - A `PromptTooLongError` from an async request is raised inside its unit, at
-  the `yield` that made it. The unit may catch it; the stages turn it into a
-  rejected row or ack. The other requests stay in flight.
+  the `yield` that made it; the other requests stay in flight. The inputs
+  stage acks that entry rejected, outputs writes a rejected row, jailbreaks
+  and conversations an error row, and scoring scores it false. The
+  constitution and benign units take no `on_error`, so there it stops the
+  stage.
 - Any other failed async request propagates, as a failed `generate()` does.
 - On any exit, a failure, an exception from `on_done`, or Ctrl-C, the requests
   still in flight are cancelled before `drive_units` returns. The wait for
@@ -106,7 +112,12 @@ same batch.
   most N in flight`) and then a line every `cap` finished units.
 
 Models without async calls (Anthropic, the introspection backend) take the
-grouped path.
+grouped path. There a `PromptTooLongError` fails the whole `generate()`,
+which is not known to belong to one item, so it propagates and stops the
+stage, as any failed call does. A stage's handling of a too-long prompt (a
+rejected row, an ack, an error row) therefore applies on the async lane
+only. Paraphrase is not on the pool, so a too-long prompt stops it on any
+backend.
 
 ## The other drivers
 
@@ -122,20 +133,23 @@ grouped path.
 | `is_accepted(reply)` | The one accept rule: the reply's first word is `yes`, `ok`, `okay`, `accept`, `accepted`, `pass` or `passed`, in any case, after leading whitespace, markdown (`*`, `_`, `#`, `>`, backticks) and quotes, curly ones included. So `**Yes**`, `Yes.` and `yes, because` accept; `Yesterday`, `Acceptable` and `Verdict: yes` reject |
 | `check_sample(client, sample, build_check_messages, original="")` | One check call: `(accepted, reasoning)`, the reasoning being the full reply on rejection |
 | `batch_check_samples(client, samples, build_check_messages, originals=None, batch_size=32)` | Many check calls, in chunks, in order |
-| `checked(gen, build_gen_messages, check=None, build_check_messages=None, *, original, internals_ids, max_tokens, max_attempts=1)` | A unit step: generate, check, and generate again with the verdict as feedback, up to `max_attempts`. Returns `(text, accepted, reasoning)` |
-| `extracted(gen, build_gen_messages, extract, *, internals_id, max_tokens, max_attempts=3)` | A unit step: generate until `extract(reply)` gives samples, up to `max_attempts`. Returns `(samples, attempts)` |
+| `checked(gen, build_gen_messages, check=None, build_check_messages=None, *, original="", internals_ids=(None, None), max_tokens=(None, None), max_attempts=1)` | A unit step: generate, check, and generate again with the verdict as feedback, up to `max_attempts`. Returns `(text, accepted, reasoning)` |
+| `extracted(gen, build_gen_messages, extract, *, internals_id=None, max_tokens=None, max_attempts=3)` | A unit step: generate until `extract(reply)` gives samples, up to `max_attempts`. Returns `(samples, attempts)` |
 
 `build_check_messages` is `(original, sample) -> messages`, the shape the
 checkers of `content_moderation/checker.py` build.
 
 ## How the stages use it
 
-| Stage | Driver | Unit |
-|---|---|---|
-| constitution | `drive_units`, pool of 1 | `extracted` over one call |
-| inputs | `drive_units` | `extracted`, then one check request per sample |
-| outputs | `drive_units` | `checked` |
-| jailbreaks | `drive_units` | `jailbreak.chain.run_chain` over the unit's techniques |
-| conversations | `drive_units` | `multi_turn.conversation_gen` |
-| scoring | `drive_units` | one judge request |
-| paraphrase | none: chunked `batch_generate_samples` and `batch_check_samples` | |
+| Stage | Driver | `pool_size` | `cap` | Unit |
+|---|---|---|---|---|
+| constitution | `drive_units` | 1 | 1 | `extracted` over one call |
+| inputs | `drive_units` | `pool_size(batch_size, gen, check)` | `batch_size` | `extracted`, then one check request per sample |
+| outputs | `drive_units` | `pool_size(batch_size, client, check)` | `batch_size` | `checked` |
+| jailbreaks | `drive_units` | `pool_size(batch_size, client)` | `batch_size` | `jailbreak.chain.run_chain` over the unit's techniques |
+| benign data (`jailbreak/manipulation/benign.py`) | `drive_units` | `pool_size(batch_size, client)` | `batch_size` | `extracted` over one call: one subcategory and answer type, 3 attempts |
+| conversations | `drive_units` | `pool_size(batch_size, *clients)` | `batch_size` | `multi_turn.conversation_gen` |
+| scoring | `drive_units` | `pool_size(batch_size, judge)` | `batch_size` | one judge request |
+| paraphrase | none: chunked `batch_generate_samples` and `batch_check_samples` | | | |
+
+The benign data runs with the jailbreak stage's `batch_size`.

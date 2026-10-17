@@ -34,7 +34,7 @@ It must not:
 |---|---|
 | `model_config.py` | `ModelConfig`, `APIConfig`, `VLLMConfig`, `IntrospectConfig`; `MODEL_REGISTRY` (from `configs/llm/models.json`); `register_model`, `get_model_config`, `get_models_by_role`, `default_model_for_role`, `available_roles`, `model_compute_config` |
 | `backends/base.py` | `LLMBackend`, `ComputeConfig`, the system-prompt helpers |
-| `backends/capabilities.py` | `BACKEND_TYPES`, `API_BACKEND_TYPES`, `SETUP_TYPES`; `resolve_setup`, `transport_for`, `backend_for`, `validate_concurrency`, `set_run_serving`, `clear_transport_caches` |
+| `backends/capabilities.py` | `BACKEND_TYPES`, `API_BACKEND_TYPES`, `SETUP_TYPES`; `resolve_setup`, `transport_for`, `backend_for`, `validate_concurrency`, `compute_config_for`, `set_run_serving`, `clear_transport_caches` |
 | `backends/openai.py` | `OpenAIBackend`: any OpenAI-compatible endpoint (Venice, OpenRouter) |
 | `backends/anthropic.py` | `AnthropicBackend`: the Anthropic Messages API |
 | `backends/vllm.py` | `VLLMBackend`: vLLM's `AsyncLLM` in this process |
@@ -43,7 +43,7 @@ It must not:
 | `wrappers.py` | `RateLimiter`, `shared_limiter`, `BatchCaller` |
 | `router.py` | `generate_sample`, `batch_generate_samples`, `assert_single_sample_per_call` |
 | `aio.py` | The one event loop that runs every async model call |
-| `observe.py` | The telemetry hook: `record`, `set_emitter`, `set_stage` |
+| `observe.py` | The telemetry hook: `record`, `set_emitter`, `set_stage`, `current_stage` |
 | `progress.py` | `ProgressReporter`: throttled progress lines |
 | `prompting/` | `prompts.py` (loading, overlay, rendering), `extraction.py` (parsing replies), `scaffold.py` (writing an editable prompt tree) |
 | `resources/` | `estimate.py` (a model's GPU need from its HF config), `measure.py` (`nvidia-smi` probes) |
@@ -73,9 +73,11 @@ await backend.agenerate(messages, *, max_tokens=None, temperature=None, internal
 ```
 
 `generate` is batch-shaped: one sample is a batch of one. `agenerate` exists
-on backends with `supports_async_calls`. System-role messages are split out,
-or folded into the first user message when the model has
-`supports_system_prompt: false`. `max_workers` is clamped to 1 at
+on backends with `supports_async_calls`. System-role messages are split
+out; an empty system prompt counts as none. When the model has
+`supports_system_prompt: false` they are folded into the first user message
+(the first message when none is the user's), joined by a blank line, and an
+empty system message is dropped. `max_workers` is clamped to 1 at
 construction when the class cannot take parallel calls.
 
 Each class declares its capabilities as a class attribute, so they are read
@@ -93,12 +95,14 @@ module caches that on its own key, with a lock against two loads at once:
 
 | Resource | Key |
 |---|---|
-| OpenAI and Anthropic SDK clients (connection pools) | the endpoint and key |
+| OpenAI SDK clients, sync and async apart (connection pools) | `(base_url, api_key, max_retries, timeout_s)` |
+| Anthropic SDK client | `(api_key, max_retries, timeout_s)` |
 | vLLM engines | `(hf_model_id, quantization, engine kwargs)`: two registry entries with the same three share one load |
 | transformers models | `(hf_model_id, device_map, torch_dtype, load kwargs)`; separate from vLLM's |
 
-`clear_transport_caches()` clears them all; a local engine is shut down and
-its memory freed, and a client built on it raises on its next call.
+`clear_transport_caches()` clears them all. An SDK client is closed, and a
+backend built before keeps it, so its next call fails. A local engine is shut
+down and its memory freed, and a client built on it raises on its next call.
 
 ### VLLMBackend
 
@@ -115,15 +119,23 @@ its memory freed, and a client built on it raises on its next call.
   async lane keeps in flight.
 - The load uses the residency plan's `gpu_memory_utilization` and cards
   (`set_planned_utilization`, `set_planned_devices`), else 0.9 of the card.
-  Without `max_model_len` the engine gets 10,000 tokens, capped at the
-  checkpoint's maximum. Planned cards are set in `CUDA_VISIBLE_DEVICES` for
+  Without `max_model_len` the engine gets 10,000 tokens
+  (`estimate.effective_max_model_len`), capped at the checkpoint's longest
+  context: the HF config's `max_position_embeddings`, else the first context
+  field `config.json` sets (read from the checkpoint folder or the hub cache,
+  never downloaded); 10,000 when neither names one. Planned cards are set in `CUDA_VISIBLE_DEVICES` for
   the build, by UUID where `nvidia-smi` gives one; more cards than one copy
   spans become copies (`data_parallel_size`). A build with copies that
-  fails is tried once more with one copy.
+  fails is tried once more with one copy. Each engine records the share and
+  cards it was built with; `engine_grants()` gives them for the engines
+  loaded now.
 - Defaults: `temperature` 0.7 when the model sets none; `top_p` 0.85 unless
   `VLLMConfig.sampling` says otherwise.
 - A prompt longer than the context raises `PromptTooLongError` for that
   request only. A request aborted because its engine is released raises.
+- Every request records one `call` event, a failed or cancelled one too
+  (with `error`): when one request of a `generate()` fails, the others are
+  cancelled and each records its event.
 - A release calls the engine's `shutdown()`, collects garbage and empties
   torch's CUDA cache. vLLM may then log an `EngineDeadError`; it is the
   shutdown, not a failed call. An exit hook releases every engine, waiting
@@ -132,8 +144,13 @@ its memory freed, and a client built on it raises on its next call.
 
 ### OpenAIBackend and AnthropicBackend
 
-- One SDK call per item. The SDK retries a failed call twice on its own,
-  unseen by the rate limiter and the trace.
+- One SDK call per item. The SDK retries a failed call (a 429, a 5xx, a
+  lost connection) `APIConfig.max_retries` times, 2 by default, with its own
+  backoff, unseen by the rate limiter and the trace. `APIConfig.timeout_s`
+  sets the seconds before the SDK gives up on a call; `None` keeps the SDK's
+  default (10 minutes). A call that still fails stops the stage. Each call
+  records one `call` event; an async call cancelled in flight records one
+  too, with `error`.
 - `OpenAIBackend` sends `default_extra_body` with each call that passes no
   `extra_body` of its own, and maps a context-length error to
   `PromptTooLongError`. It warns on an empty reply and on a reply stopped by
@@ -141,7 +158,7 @@ its memory freed, and a client built on it raises on its next call.
 - `AnthropicBackend` sends the system prompt as Anthropic's `system`
   parameter, runs one call at a time, and maps a 400 that says the prompt
   is too long (or that it and `max_tokens` exceed the context) to
-  `PromptTooLongError`.
+  `PromptTooLongError`. It warns on an empty reply.
 
 ### TransformersIntrospectionBackend
 
@@ -188,7 +205,8 @@ requested, the run's choice for the model (`set_run_serving`, from the
 recipe), the entry's `backend_type`, the only setup present.
 `transport_for` maps it to a key of `BACKEND_TYPES` (`api` becomes the
 `APIConfig`'s own `backend_type`). `backend_for(config, setup)` builds the
-backend, with the run's `workers` in place of `recommended_max_workers`.
+backend, with the run's `workers` in place of `recommended_max_workers` when
+the setup is an API one.
 `validate_concurrency` refuses, at registration, more workers than a
 series-only provider can use.
 
@@ -259,13 +277,13 @@ the same `rpm`.
 |---|---|
 | `resolve_prompt(pipeline, category, prompt_dir)` | The file a prompt resolves to, override first, and whether it is an override |
 | `load_prompt(pipeline, category, prompt_dir)` | The prompt as a dict |
-| `PromptTemplate.load(pipeline, category, prompt_dir=, format_style=, **build_kwargs)` | A template: the system prompt rendered once, the user template on each call. With `format_style` the format instruction is appended |
-| `build_messages(config, format_style=None, **kwargs)` | One-shot render, the same kwargs for both parts |
-| `get_format_instruction(style, num_samples)` | The `numbered` or `structured_qa` instruction |
+| `PromptTemplate.load(pipeline, category, *, prompt_dir=None, few_shot=True, format_style=None, **build_kwargs)` | A template: the system prompt rendered once, the user template on each call. With `format_style` the format instruction is appended |
+| `build_messages(prompt_config, few_shot=True, format_style=None, **kwargs)` | One-shot render, the same kwargs for both parts |
+| `get_format_instruction(style, num_samples, prompt_dir=None)` | The `numbered` or `structured_qa` instruction |
 | `report_prompt_sources(prompt_dir)` | Logs overrides, and warns about override folders that match nothing |
-| `extract_numbered_list`, `extract_structured_qa`, `extract_and_clean` | Parse a reply: a numbered list (`1. sample`, `2) sample`, `3: sample`), or `**Question:** ... **Answer:** ...` pairs, optionally headed `**Prompt N:**`. With `expected_count`, a reply with another count is rejected whole: the result is empty |
+| `extract_numbered_list`, `extract_structured_qa`, `extract_and_clean` | Parse a reply: a numbered list (`1. sample`, `2) sample`, `3- sample`, `4: sample`), or `**Question:** ... **Answer:** ...` pairs, optionally headed `**Prompt N:**`. `extract_numbered_list(text, strict=True)` rejects a reply that is not one clean list. With `expected_count`, `extract_structured_qa` and `extract_and_clean` reject a reply with another count whole: the result is empty |
 | `clean_sample` | Strip markdown and stray chat tokens |
-| `scaffold_prompt_tree(target, mode=)` | Write a copy (`copy`) or skeletons (`empty`) of the prompt tree |
+| `scaffold_prompt_tree(target_dir, source_dir=None, mode="copy")` | Write a copy (`copy`) or skeletons (`empty`) of the prompt tree |
 
 A render error names the missing placeholder, and the prompt file when the
 template comes from `PromptTemplate.load`.

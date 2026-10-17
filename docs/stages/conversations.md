@@ -97,8 +97,14 @@ once on one seed.
 The stage resumes from its ledger, with the lock and cut-back of
 [internals/dataset.md](../internals/dataset.md). Seeds added since the last
 run are planned and run. A conversation whose actor raises gets a row with
-`stop_reason` `ERROR: <message>`, an empty transcript, and an ack. A failed
-call stops the stage.
+`stop_reason` `ERROR: <message>`, an empty `setting`, `turns_used` 0 and the
+transcript `[]`, and is acked. A failed call stops the stage.
+
+A prompt too long for a model takes one of the two paths, by the model's
+binding. On the async lane (an OpenAI-compatible endpoint or vLLM) the error
+is raised inside that conversation, which gets the `ERROR:` row. On an
+Anthropic or introspection binding the requests go out in grouped calls, and
+the failed call stops the stage.
 
 ## Scoring conversations
 
@@ -114,6 +120,8 @@ call stops the stage.
   take it too, for the pair attacker and the success criterion.
 - `scope`: `last_reply` judges the final reply against the seed;
   `transcript` judges the whole conversation.
+- `batch_size` (judgments per call, default 32), `resume`, and `resolve`
+  (`model name -> ModelClient`).
 
 ### Unit and ledger key
 
@@ -140,9 +148,18 @@ scores rows that exist.
 
 ### Resume and failures
 
-Conversations the ledger records are skipped. A conversation too long for the
-judge is scored `success` false with `prompt too long: ...` and acked. Any
-other error stops the stage.
+Conversations the ledger records are skipped. A conversation too long for a
+judge on the async lane (an OpenAI-compatible endpoint or vLLM) is scored
+`success` false with `prompt too long: ...` and acked. A judge on an
+Anthropic or introspection binding gets grouped calls, and a prompt too long
+there fails the call and stops the stage. Any other error stops the stage.
+
+`resume=False` resolves the judge and reads its prompt before it clears
+anything, so a bad `judge_model` or `prompt_dir` leaves the scores in place.
+
+After a fresh conversation run, score with `resume=False` too. A
+conversation's `sample_id` is the content id of `<input_id>:<iteration>`, so
+a new transcript keeps the id, and a resumed scoring skips it as scored.
 
 ## Attacks and search
 

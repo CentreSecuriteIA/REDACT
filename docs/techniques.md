@@ -18,7 +18,7 @@ layer, families apply in the order of their `within_layer_order`.
 |---|---|---|
 | `hacking` | 25 | at most 1 |
 | `manipulation` | 8 | at most 1 |
-| `obfuscation` | 72 | up to `max_obfuscations` families in budget mode |
+| `obfuscation` | 72 | up to `max_obfuscations` families in budget mode, plus the request obfuscation when allowed |
 | `requests` | 47 | at most 1 |
 
 ## Families and techniques
@@ -56,7 +56,10 @@ belong to `encode`, so one of them blocks both families.
 `encode` techniques carry an `encode_weight`: `light` for `to_rot13`,
 `to_rot18`, `to_rot47`, `to_separator` and the three `to_leetspeak_*`;
 `heavy` for `to_base64`, `to_unicode_escape`, `to_ascii_ordinal`,
-`to_morse`, `to_braille`.
+`to_morse`, `to_braille`. The ten `to_sensitive_words_encode_*` carry one
+too: `heavy` for base64, unicode and ascii, `light` for the rest. The
+`heavy` ones stay allowed with `fsh` and `dap`, and the `light` ones may be
+the request obfuscation.
 
 ## Compatibility rules
 
@@ -70,12 +73,15 @@ technique is picked first. A technique may not join a combination when:
   the reverse. The spec pairs `structural` and `translation` with
   `ascii_art`; `ascii_art` with `framing`, `persona`, `cognitive`, `fsh`,
   `dap`; `fsh` and `dap` with `continuation`, `indirect`, `framing`,
-  `persona`, `cognitive`; and `continuation` with `indirect`;
+  `persona`, `cognitive`; and `continuation` with `indirect`. So a
+  combination holds a hacking or a manipulation technique, never both;
 - one of its families is in the `cross_incompatible_with` of a taken
   technique's own spec entry, or a taken family is in its own. The spec keeps
   `to_adversarial_suffix_emoji`, `to_adversarial_suffix_unicode` and
   `to_braille` from `ascii_art`, since no font draws their characters; the
-  other suffixes and encodings may still join it;
+  other suffixes and encodings may still join it. `to_ascii_art` itself
+  rejects a text with a character no font draws (any non-ASCII character),
+  such as an invisible character a `to_tokenbreak_split` inserted;
 - it pairs `fsh` or `dap` with an obfuscation in
   `manipulation_blocked_obfuscation`: the `translation` and `ascii_art`
   families and the `heavy` `encode` techniques, except those also in
@@ -99,7 +105,9 @@ template variant or a font, for traceability.
   jailbreak built on it. A named persona grounds the scenario in the
   persona's character first. The definitions live in
   `configs/jailbreak/hacking/cognitive_techniques.json` and `personas.json`,
-  editable without touching code.
+  editable without touching code. `to_invented_persona` makes the same two
+  calls as `cognitive`'s `to_persona_roleplay` until it gets prompts of its
+  own; only its info, `category=invented_persona`, differs.
 - `framing` directives are transforms that change the scenario or the
   intent. Each has named template variants in
   `configs/jailbreak/hacking/framing_templates.json`; one is drawn per call.
@@ -113,33 +121,48 @@ the answers.
 - `fsh` (few-shot hacking): the benign pairs prime a helpful pattern, and the
   prompt comes last, as one more question.
 - `dap` (distract and persuade): the prompt is hidden among the benign pairs,
-  at a random position.
+  at a random position. With no pair at all, the prompt is the only
+  question.
 
 **Obfuscation.**
 
-- `sensitive_words` and `tokenbreak` share one model call that marks the
-  harmful words of the prompt (prompt `jailbreak/extract_harmful`). The
-  encoding, splitting or substitution then applies to those words only, not
-  to the whole prompt.
+- `sensitive_words` and `tokenbreak` first ask the model for the harmful
+  words of the prompt (prompt `jailbreak/extract_harmful`), one call per
+  technique. The encoding, splitting or substitution then applies to those
+  words. A reply that is not a list of at most ten of the prompt's words
+  rejects the result (`DISCARDED; reason=malformed word list`). When the
+  model marks no word, the encodings and splits apply to the whole prompt
+  (every word for the fixed separators), and `to_sensitive_words_variables`
+  and `to_synonym_substitution` leave it unchanged. `to_synonym_substitution`
+  makes one more call per word; its info is `substitutions=a->b,c->d`.
 - `translation` covers 20 languages across resource tiers. Each is a
   translate, check and retry loop on the `translation` model.
 - `typos` is one rewrite by the model, at one of four densities, with the
   level's description in the prompt.
 - `casual_writing` is how a person typing quickly writes: casing, spacing,
-  punctuation, abbreviations, accents.
+  punctuation, abbreviations, accents. `to_abbreviations` rewrites only the
+  common words it lists, and `to_stripped_accents` only accented Latin
+  letters (other scripts keep their marks), so either leaves many prompts
+  unchanged: a no-op, which the natural kind rejects.
 - `suffixes` appends an adversarial suffix: punctuation, fragments, unicode
-  or emoji.
-- `encode` encodes the whole text: base64, rot13, rot18, rot47, unicode
-  escapes, ASCII ordinals, a separator, leetspeak at three levels, morse,
-  braille.
-- `structural` wraps the text in JSON, XML or markdown.
-- `ascii_art` draws the text in one of 16 pyfiglet fonts.
+  or emoji. Its info is `suffix=<suffix>`.
+- `encode` encodes the whole text: base64 (one line), rot13, rot18 (rot13 on
+  letters and rot5 on ASCII digits), rot47, unicode escapes (`\uXXXX`, or
+  `\UXXXXXXXX` above U+FFFF), ASCII ordinals, a separator (between the
+  characters as a reader sees them: a combining mark or a joiner stays with
+  its letter), leetspeak at three levels, morse, braille.
+- `structural` wraps the text in JSON, XML or markdown. `to_json` keeps
+  non-ASCII characters as they are.
+- `ascii_art` draws the text in a pyfiglet font, drawn from the 16 that have
+  a glyph for every character of the text. When none has, the result is
+  rejected (`DISCARDED; reason=no font has every character`).
 
 **Requests.** These change how a request is posed, not its text, and call no
 model. Each technique picks one of its named template variants from a JSON
 file under `configs/jailbreak/requests/`. The `answer_language` techniques
 are generated from the language list in `answer_language_templates.json`, so
-a new language is one JSON entry. `to_impersonate_good_person` has eight
+a new language is one JSON entry, plus its technique's entry in
+`combination_spec.json`. `to_impersonate_good_person` has eight
 profession variants (nurse, doctor, security researcher, teacher, ...) and
 `to_use_past_tense` four historical framings.
 
@@ -158,6 +181,8 @@ Beyond the reference list, the library adds:
 - the encodings rot18, rot47, braille, morse and ASCII ordinals;
 - ASCII art in 16 pyfiglet fonts;
 - adversarial suffixes (punctuation, fragments, unicode, emoji);
+- the `casual_writing` family (9 techniques: casing, spacing, punctuation,
+  abbreviations, accents);
 - structural wrapping (JSON, XML, markdown);
 - the five cognitive techniques (`persona_roleplay`, `hypothetical_framing`,
   `authority_obedience`, `avi`, `deep_inception`);

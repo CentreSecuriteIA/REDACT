@@ -33,11 +33,11 @@ It must not:
 | `placement.py` | `plan_residency(models, ...)`; the card arithmetic and the search |
 | `plan.py` | `ResidencyPlan` |
 | `phases.py` | `Phase`, `plan_phases(stage_models, ...)` |
-| `lifecycle.py` | `apply_plan`, `preload`, `unload_local`, `loaded_engines` |
+| `lifecycle.py` | `apply_plan`, `preload`, `unload_local`, `loaded_engines`, `loaded_grants` |
 | `explain.py` | `report(plan)`, the plan as text, the advice |
 | `llms/resources/estimate.py` | Weights and KV cache from a checkpoint's HF config |
-| `llms/resources/measure.py` | `gpu_cards`, `card_sizes_gib`, `card_use`, `detect_gpus` (`nvidia-smi`), `free_total_gib` (torch), `bus_order`, `visible_only` and `cuda_lock` |
-| `llms/backends/vllm.py` | The loader: planned grants and cards, the engine processes each build starts, `terminate_engine_processes`, the exit hook |
+| `llms/resources/measure.py` | `gpu_cards`, `card_sizes_gib`, `card_use`, `detect_gpus` (`nvidia-smi`), `visible_gpu_ids`, `free_total_gib` (torch), `bus_order`, `visible_only` and `cuda_lock` |
+| `llms/backends/vllm.py` | The loader: planned grants and cards, the share and cards each engine loaded with (`engine_grants`), the engine processes each build starts, `terminate_engine_processes`, the exit hook |
 
 All sizes are GiB (bytes / 1024^3).
 
@@ -54,8 +54,10 @@ local (`vllm` or `introspect`).
   10,000 tokens capped at the checkpoint's own maximum.
 - **Padded need** per card: `(weights + KV) x 1.1 + 0.6`. The planning
   figure rounds it up to 0.5 GiB.
-- **Engine**: models whose setups share a backend cache key (checkpoint,
-  quantization, engine kwargs) share one engine and one footprint.
+- **Engine**: models whose setups share a backend cache key (vLLM:
+  checkpoint, quantization, engine kwargs; transformers: checkpoint,
+  `device_map`, `torch_dtype`, load kwargs) share one engine and one
+  footprint.
 
 A transformers model gets no KV term: it preallocates none.
 
@@ -64,8 +66,10 @@ A transformers model gets no KV term: it preallocates none.
 The card count and name come from `nvidia-smi --query-gpu=name`, each card's
 size from one `nvidia-smi --query-gpu=index,uuid,memory.used,memory.total,name`
 query (`gpu_cards`), else from torch. Only the cards `CUDA_VISIBLE_DEVICES`
-leaves count, named by index or UUID, and cards are numbered over them in
-the variable's order. Each card is planned at its own size. A card count
+leaves count, each named by index, UUID or a UUID prefix; as CUDA does, an
+entry that names no card ends the list. Cards are numbered over them in the
+variable's order, and the count is the visible cards `gpu_cards` finds, or
+the variable's entry count when `nvidia-smi` cannot tell. Each card is planned at its own size. A card count
 given without a size, or cards the size query does not name, plans every
 card at the smallest. `plan_residency(..., gpus=, gib_per_gpu=)` plans for
 another machine.
@@ -106,8 +110,9 @@ the spare, as a fraction of the card (rounded down to 4 decimals, but never
 below the need). An engine on several cards loads with one
 `gpu_memory_utilization`: the smallest fraction any of its cards gives it,
 written to `planned_utilization`, and its `reserved_gb` is what that holds
-on its smallest card. A grant below the padded need makes the model
-`oversized`, which is a problem.
+on its smallest card. A grant below the padded need makes the engine
+`oversized`, listed once by its first model however many models share it,
+which is a problem.
 
 **Search.** When the order given leaves more than one group, `_Search` tries
 other cards for the vLLM engines, and keeps an arrangement where everything
@@ -135,16 +140,26 @@ on a GPU.
 ## The plan
 
 `ResidencyPlan` holds `groups`, `gpus_required`, `gpus_available`,
-`gpu_name`, `per_gpu_gb` (the smallest card), `gib_per_card`, `oversized`
-and `machine_given`.
+`gpu_name`, `per_gpu_gb` (the smallest card), `gib_per_card`, `oversized`,
+`machine_given` and `loaded` (the planned vLLM engines loaded already, by
+the first model of each: the `gpu_memory_utilization` and cards each was
+built with, or `None`).
+
+**An engine loaded already.** When the plan is for the detected machine (no
+`gpus` or `gib_per_gpu` given), a planned vLLM engine that is loaded already
+is recorded in `loaded` (from `lifecycle.loaded_grants`) and named in a
+WARNING, also in `warnings`: the plan's share and cards for it apply only
+after it is released, so a model planned beside it may fail to load. A
+loaded engine that is not in the plan gets a WARNING too: the plan hands its
+memory out again.
 
 | Property | Meaning |
 |---|---|
 | `co_resident` | One group or none |
 | `sequential` | More than one group: the paraphrase stage reads it to unload between paraphrasers |
 | `fits` | No problem |
-| `problems` | More GPUs needed than present; several groups; an oversized model; a tensor-parallel size that does not divide the attention heads; a model of unknown size beside others; several vLLM engines on cards of unknown size |
-| `warnings` | A model of unknown size; an unknown card size; a KV cache that could not be estimated |
+| `problems` | More GPUs needed than present, or none available; several groups; an oversized engine; a tensor-parallel size that does not divide the attention heads; a vLLM model of unknown size beside another engine; several vLLM engines on cards of unknown size |
+| `warnings` | A model of unknown size; an unknown card size; a KV cache that could not be estimated; a planned vLLM engine loaded already, with the share and cards it loaded with |
 | `as_dict()` | The plan as data, for the trace and the run summary |
 | `explain()` | The plan as text, with each model's derivation, card and grant, the problems, and advice |
 
@@ -154,7 +169,7 @@ fit, at WARNING when it has warnings, else at INFO, and records a
 
 ## Phases
 
-`plan_phases(stage_models, *, gpus, gib_per_gpu, copies)` makes one `Phase`
+`plan_phases(stage_models, backend_types=None, *, gpus, gib_per_gpu, copies)` makes one `Phase`
 per stage: `stage`, `resident` (the models loaded while it runs), `plan`,
 and `loadable` (the plan's first group).
 
@@ -187,9 +202,10 @@ logged.
 | Function | Does |
 |---|---|
 | `apply_plan(plan, replace=True)` | Hands the plan's grants and cards to `backends/vllm.py` (`set_planned_utilization`, `set_planned_devices`), keyed by engine. `replace=False` keeps values already set |
-| `preload(models, wanted=None)` | Loads local models one after another on a daemon thread and returns it. A model no longer in `wanted` when its turn comes is skipped. A failed load is logged at ERROR and recorded as `preload_failed`; a load the way out ended is logged at INFO, recorded with `"cause": "exit"`, and ends the preload |
-| `unload_local(keep=None, engines=None, *, wait=None)` | Releases every cached local engine but those the kept models use. With `wait`, a load in progress is waited for that long, then its vLLM build is ended |
+| `preload(models, backend_types=None, verbose=True, wanted=None)` | Loads local models one after another on a daemon thread and returns it. A model no longer in `wanted` when its turn comes is skipped. A failed load is logged at ERROR and recorded as `preload_failed`; a load the way out ended is logged at INFO, recorded with `"cause": "exit"`, and ends the preload |
+| `unload_local(keep=None, engines=None, *, wait=None)` | Releases every cached local engine but those the kept models use and those in `engines` (engine keys per setup, as `loaded_engines` gives them). With `wait`, a load in progress is waited for that long, then its vLLM build is ended |
 | `loaded_engines(exclude=None)` | The engine keys loaded now, per setup |
+| `loaded_grants()` | The share and cards each loaded vLLM engine was built with |
 
 The backends lock their engine caches, so a preload and a stage that need the
 same engine load it once.
@@ -197,11 +213,14 @@ same engine load it once.
 **Engine processes.** Each vLLM build records the child processes it starts
 (its engine cores and, with copies, vLLM's coordinator). A release ends what
 an engine's shutdown leaves running, and a failed build's processes are
-ended at once. `terminate_engine_processes(processes, all=False)` sends
-SIGTERM, then SIGKILL to those alive 5 s later, and lists their children
-(tensor-parallel workers) with `psutil` before any is signalled; `all=True`
-ends every engine process this process started and no other child, for the
-forced exit of a second signal in `scripts/run.py`.
+ended at once. `terminate_engine_processes(processes=(), *, all=False,
+quiet=False)` sends SIGTERM, then SIGKILL to those alive 5 s later, lists
+their children (tensor-parallel workers) with `psutil` before any is
+signalled, and returns the pids still alive. `all=True` ends every engine
+process this process started and their descendants, and no other child, for
+the forced exit of a second signal in `scripts/run.py`. That call passes
+`quiet=True`, so nothing is logged from the signal handler: `run.py` writes
+its lines to stderr itself, with a `kill -9` line for a pid still alive.
 
 **A build that fails with copies.** When a build with the plan's copies
 fails, one copy on the engine's first cards is built instead, once, with a
@@ -222,18 +241,26 @@ a first load takes up to 15 minutes.
 
 The driver (`driver.py`):
 
-1. `_plan_phases`: before the first stage, `plan_phases` over each stage's
+1. At the start it notes the engines loaded already (`loaded_engines`),
+   such as a notebook's.
+2. `_plan_phases`: before the first stage, `plan_phases` over each stage's
    models; `report` per distinct plan; `apply_plan` per phase.
-2. `_enter_phase`, at each stage: unload the engines the previous phase held
-   and this one does not; `apply_plan(phase.plan)`; preload the phase's
-   loadable models, plus the next stage's when its plan is one group and
-   holds everything this one holds.
-3. Before any model loads: `_check_cards` stops the run when another
-   process holds memory on a planned card.
-4. At the end, also after a failure: wait for the preload threads, at most
+3. Right after planning, before any model loads: `_check_cards` stops the
+   run when another process holds memory on a planned card. The error names
+   each such process and, found with `psutil`, the vLLM engine processes
+   above them (titled `VLLM::`), all in one `kill -9` line. A process on an
+   unplanned card, or 1 GiB or more in use on a planned card with no process
+   listed, is a warning.
+4. `_enter_phase`, at each stage: unload the engines the previous phase held
+   and this one does not, keeping those loaded before the run that no stage
+   calls; `apply_plan(phase.plan)`; preload the phase's loadable models,
+   plus the next stage's when its plan is one group and holds everything
+   this one holds.
+5. At the end, also after a failure: wait for the preload threads, at most
    `EXIT_WAIT_S` together, naming at ERROR a preload still loading; unload
-   every engine with a 10 s wait, which ends that load; clear the planned
-   shares and cards.
+   every engine the run loaded, with a 10 s wait, which ends that load (the
+   engines loaded before the run stay, unless a stage unloaded them); clear
+   the planned shares and cards.
 
 The paraphrase stage plans its own pool of paraphrasers (`plan_residency`
 with one copy each). When they do not fit together it unloads each before

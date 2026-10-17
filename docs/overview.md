@@ -76,7 +76,7 @@ lists every file.
 ## One training run, end to end
 
 This walk follows `src/redact/configs/runs/training_example.json`, which
-lists all six stages, with its params file `params_example.json`.
+lists all six stages, with its params file `params_training_example.json`.
 
 ```python
 from redact import run_pipeline
@@ -91,7 +91,9 @@ summary = run_pipeline("src/redact/configs/runs/training_example.json")
 - `dataset_type` is `eval` or `training`.
 - Each name in `stages` is a key of `STAGES`, listed once.
 - No key outside the recipe keys (a key starting with `_` is a comment).
-- Each role object under `models` is valid (`recipe.serving_of`).
+- Each key under `models` is a recipe role (a key starting with `_` is a
+  comment), and each role object is valid (`recipe.serving_of`).
+- `resume` is `true` or `false`.
 - The `augmentations` section is resolved over the packaged default
   (`recipe.augmentations_of`), so a bad technique or family name fails here.
 - When the jailbreak stage runs a kind that draws a technique needing benign
@@ -101,7 +103,8 @@ summary = run_pipeline("src/redact/configs/runs/training_example.json")
   `harmful`, with a `DeprecationWarning`.
 
 `recipe.load_params` reads the params file, resolved against the recipe's
-folder. It refuses a `jailbreaks` key that belongs in the augmentation
+folder. It refuses a key that is not a stage name (a key starting with `_`
+is a comment), and a `jailbreaks` key that belongs in the augmentation
 section.
 
 ### 2. The driver sets the run up
@@ -152,9 +155,10 @@ each is one call whose reply parses into entries. Rows go to
 `Data_cache/constitution/<entry_type>.csv` and `merged.csv`.
 [stages/constitution.md](stages/constitution.md)
 
-**inputs.** In a training run the driver reads the saved constitution
-(`read_constitution`) when the stage starts and passes it as
-`constitution_df`. `generate_inputs` calls
+**inputs.** When the stage starts, the driver reads the constitution saved
+under `data_dir` (`read_constitution`) and passes it as `constitution_df`,
+in an eval run as in a training one; without one the stage stops with
+`No constitution at ...`. `generate_inputs` calls
 `InputPipeline.run_from_constitution`: one unit per constitution entry,
 asking for `samples_per_entry` samples, each checked by the `check` model.
 Rows, accepted and rejected, go to
@@ -176,18 +180,22 @@ each paraphrase with a separate model. [stages/paraphrase.md](stages/paraphrase.
 augmentation section and calls `jailbreak.pipeline.run_augmentation` once per
 kind that is on: the adversarial kind to `Datasets/jailbreaks.csv`, the
 natural kind to `Datasets/variations.csv`. Each call plans every unit first
-(one technique combination per input and round, frozen in the manifest), then
-drives the units. [stages/jailbreaks.md](stages/jailbreaks.md)
+(one technique combination per input and round, frozen in the manifest, with
+what the plan was made with in `<kind>.plan.json`, which a resume checks),
+then drives the units. [stages/jailbreaks.md](stages/jailbreaks.md)
 
 **build.** `build_dataset` copies the accepted rows of every stage's file
 into `Datasets/complete_dataset.csv`, in chunks, with a `dataset_type` column
-per part. [stages/build.md](stages/build.md)
+per part. A row whose `sample_id` an earlier part wrote is left out, and the
+count left out is logged. [stages/build.md](stages/build.md)
 
 ### 4. The run ends
 
-In a `finally` block the driver clears the run's serving choices, waits for
-any preload thread, unloads every local engine, clears the planned shares and
-cards, and rolls up telemetry (tokens, engine time, cost). `run_pipeline`
+In a `finally` block the driver clears the run's serving choices. When the
+run has local models it waits at most 60 seconds for a preload still
+running, unloads the engines the run loaded (those loaded before it, such as
+a notebook's, stay), and clears the planned shares and cards. It then rolls
+up telemetry (tokens, engine time, cost). `run_pipeline`
 returns a summary: `dataset_type`, `data_dir`, `stages` (counts and record
 path per stage), `serving`, `telemetry` (with `cut`, the replies cut at the
 token limit per stage and model), and `residency` and `trace` when present.
@@ -196,7 +204,9 @@ token limit per stage and model), and `residency` and `trace` when present.
 
 `complete_dataset.csv` holds the accepted rows of each part, one after
 another, with the union of their columns. A row is empty in the columns its
-part lacks. Rejected and error rows stay in the stage files.
+part lacks. Rejected and error rows stay in the stage files. A row whose
+`sample_id` an earlier part wrote is left out: an adversarial no-op is its
+input, and a variation can be a jailbreak's text.
 
 | `dataset_type` | From | Rows taken | Text columns |
 |---|---|---|---|
