@@ -81,7 +81,7 @@ technique is picked first. A technique may not join a combination when:
   `to_braille` from `ascii_art`, since no font draws their characters; the
   other suffixes and encodings may still join it. `to_ascii_art` itself
   rejects a text with a character no font draws (any non-ASCII character),
-  such as an invisible character a `to_tokenbreak_split` inserted;
+  such as one `to_tokenbreak_split` may produce;
 - it pairs `fsh` or `dap` with an obfuscation in
   `manipulation_blocked_obfuscation`: the `translation` and `ascii_art`
   families and the `heavy` `encode` techniques, except those also in
