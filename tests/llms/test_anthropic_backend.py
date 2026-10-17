@@ -127,6 +127,21 @@ class TestAnthropicSdkSettings:
         AnthropicBackend.clear_cache()
 
 
+def test_clear_cache_closes_the_sdk_clients(mock_anthropic_module):
+    from redact.llms.backends import AnthropicBackend
+
+    mock_anthropic_module.Anthropic.side_effect = lambda **kwargs: MagicMock()
+    AnthropicBackend.clear_cache()
+    a = AnthropicBackend("model-a", api_key="k")
+    b = AnthropicBackend("model-b", api_key="other")
+    a._client.close.side_effect = RuntimeError("already gone")
+    AnthropicBackend.clear_cache()
+    a._client.close.assert_called_once_with()
+    b._client.close.assert_called_once_with()
+    assert AnthropicBackend("model-a", api_key="k")._client is not a._client
+    AnthropicBackend.clear_cache()
+
+
 class TestAnthropicGenerate:
     """The backend is a configured model: the model name and max_tokens
     default come from construction, and only messages/system prompt/overrides

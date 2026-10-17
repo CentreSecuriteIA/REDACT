@@ -10,12 +10,20 @@ import asyncio
 import logging
 import threading
 import time
+from functools import partial
 from typing import TYPE_CHECKING, ClassVar
 
 import openai
 
 from ...exceptions import PromptTooLongError
-from .base import DEFAULT_MAX_RETRIES, ComputeConfig, LLMBackend, sdk_client_kwargs
+from .. import aio
+from .base import (
+    DEFAULT_MAX_RETRIES,
+    ComputeConfig,
+    LLMBackend,
+    close_quietly,
+    sdk_client_kwargs,
+)
 
 if TYPE_CHECKING:
     from ..model_config import ModelConfig
@@ -53,6 +61,11 @@ def _sdk_client(
                                **sdk_client_kwargs(max_retries, timeout_s))
             cache[key] = client
         return client
+
+
+def _aclose(client: "openai.AsyncOpenAI") -> None:
+    """Close an async SDK client on the loop its connections belong to."""
+    aio.run(client.aclose())
 
 
 def _is_prompt_too_long(exc: BaseException) -> bool:
@@ -148,9 +161,21 @@ class OpenAIBackend(LLMBackend):
 
     @classmethod
     def clear_cache(cls) -> None:
-        """Drop the shared SDK clients (for tests, or after env vars change)."""
-        _sdk_clients.clear()
-        _async_sdk_clients.clear()
+        """Close and drop the shared SDK clients (for tests, or after env vars change).
+
+        A backend built before keeps its client, closed, so its next call fails.
+        """
+        with _sdk_clients_lock:
+            clients = [*_sdk_clients.values()]
+            async_clients = [*_async_sdk_clients.values()]
+            _sdk_clients.clear()
+            _async_sdk_clients.clear()
+        for client in clients:
+            close_quietly(client.close)
+        # No loop means no async client was ever built.
+        if aio._loop is not None:
+            for client in async_clients:
+                close_quietly(partial(_aclose, client))
 
     def generate(
         self,

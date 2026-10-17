@@ -157,6 +157,44 @@ class TestOpenAISdkSettings:
         OpenAIBackend.clear_cache()
 
 
+class _Closing:
+    """An SDK client that records its close, or fails it."""
+
+    def __init__(self, closed, fails=False):
+        self._closed, self._fails = closed, fails
+
+    def close(self):
+        if self._fails:
+            raise RuntimeError("already gone")
+        self._closed.append(self)
+
+
+class TestOpenAIClearCache:
+    """clear_cache() closes the SDK clients it drops."""
+
+    def test_the_sync_clients_are_closed(self):
+        closed = []
+        with patch("redact.llms.backends.openai.openai.OpenAI",
+                   side_effect=lambda **kwargs: _Closing(closed)):
+            OpenAIBackend.clear_cache()
+            a = OpenAIBackend("model-a", api_key="k", base_url="https://one.api/v1")
+            b = OpenAIBackend("model-b", api_key="k", base_url="https://two.api/v1")
+            assert closed == []
+            OpenAIBackend.clear_cache()
+        assert closed == [a._client, b._client]
+
+    def test_a_client_that_fails_to_close_is_dropped_all_the_same(self):
+        closed = []
+        with patch("redact.llms.backends.openai.openai.OpenAI",
+                   side_effect=lambda **kwargs: _Closing(closed, fails=True)):
+            OpenAIBackend.clear_cache()
+            a = OpenAIBackend("model-a", api_key="k", base_url="https://one.api/v1")
+            OpenAIBackend.clear_cache()
+            b = OpenAIBackend("model-b", api_key="k", base_url="https://one.api/v1")
+        assert b._client is not a._client
+        OpenAIBackend.clear_cache()
+
+
 class TestOpenAIGenerate:
     """The backend is a configured model: the model name and extra_body come
     from construction, and only messages/system prompt/overrides are per call.

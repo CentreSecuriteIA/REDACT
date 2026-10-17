@@ -14,7 +14,13 @@ import time
 from typing import TYPE_CHECKING, ClassVar
 
 from ...exceptions import PromptTooLongError
-from .base import DEFAULT_MAX_RETRIES, ComputeConfig, LLMBackend, sdk_client_kwargs
+from .base import (
+    DEFAULT_MAX_RETRIES,
+    ComputeConfig,
+    LLMBackend,
+    close_quietly,
+    sdk_client_kwargs,
+)
 
 if TYPE_CHECKING:
     from ..model_config import ModelConfig
@@ -135,8 +141,15 @@ class AnthropicBackend(LLMBackend):
 
     @classmethod
     def clear_cache(cls) -> None:
-        """Drop the shared SDK clients (for tests, or after env vars change)."""
-        _sdk_clients.clear()
+        """Close and drop the shared SDK clients (for tests, or after env vars change).
+
+        A backend built before keeps its client, closed, so its next call fails.
+        """
+        with _sdk_clients_lock:
+            clients = [*_sdk_clients.values()]
+            _sdk_clients.clear()
+        for client in clients:
+            close_quietly(client.close)
 
     def generate(
         self,

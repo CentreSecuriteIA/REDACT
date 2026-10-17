@@ -16,6 +16,7 @@ import sys
 import threading
 import time
 from abc import ABC, abstractmethod
+from collections.abc import Callable
 from dataclasses import dataclass
 from typing import TYPE_CHECKING, ClassVar
 
@@ -44,6 +45,18 @@ def sdk_client_kwargs(max_retries: int, timeout_s: float | None) -> dict:
     if timeout_s is not None:
         kwargs["timeout"] = timeout_s
     return kwargs
+
+
+def close_quietly(close: Callable[[], object]) -> None:
+    """Call ``close``, logging a failure at DEBUG instead of raising.
+
+    A cache that drops a client closes it this way, so one client that fails
+    to close never keeps the cache from being cleared.
+    """
+    try:
+        close()
+    except Exception as exc:  # noqa: BLE001 — closing must not fail a clear
+        logger.debug("close failed (%s: %s)", type(exc).__name__, exc)
 
 
 @dataclass(frozen=True)

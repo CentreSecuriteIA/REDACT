@@ -120,3 +120,34 @@ def test_concurrent_first_use_starts_one_loop(monkeypatch):
                 thread.join()
         for loop in built:
             loop.close()
+
+
+def test_clearing_the_openai_cache_closes_its_async_clients_on_the_loop():
+    from unittest.mock import patch
+
+    import redact.llms.backends.openai as openai_module
+
+    closed_on = []
+
+    class _AsyncClient:
+        async def aclose(self):
+            closed_on.append(threading.current_thread())
+
+    _, loop_thread = aio.run(_where())
+    openai_module.OpenAIBackend.clear_cache()
+    with patch.object(openai_module.openai, "AsyncOpenAI",
+                      side_effect=lambda **kwargs: _AsyncClient()):
+        openai_module._sdk_client("k", "https://one.api/v1", max_retries=2,
+                                  timeout_s=None, async_calls=True)
+    openai_module.OpenAIBackend.clear_cache()
+    assert closed_on == [loop_thread]
+
+
+def test_clearing_the_openai_cache_starts_no_loop(monkeypatch):
+    import redact.llms.backends.openai as openai_module
+
+    monkeypatch.setattr(aio, "_loop", None)
+    monkeypatch.setattr(openai_module, "_async_sdk_clients",
+                        {("https://one.api/v1", "k", 2, None): object()})
+    openai_module.OpenAIBackend.clear_cache()
+    assert aio._loop is None and openai_module._async_sdk_clients == {}
