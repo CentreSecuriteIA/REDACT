@@ -162,9 +162,10 @@ def detect_gpus(visible: bool = False) -> tuple[str | None, int]:
 
     Args:
         visible: Count the cards ``CUDA_VISIBLE_DEVICES`` leaves this
-            process, when it is set, instead of the machine's. The planner
-            counts those; the bill counts the machine's, since the pod is
-            rented whole.
+            process, when it is set, instead of the machine's: those
+            :func:`gpu_cards` finds visible, or the variable's entries when
+            it cannot tell. The planner counts those; the bill counts the
+            machine's, since the pod is rented whole.
 
     Returns:
         ``(name, count)`` — one line per device from
@@ -186,7 +187,11 @@ def detect_gpus(visible: bool = False) -> tuple[str | None, int]:
         return None, 0
     names = [ln.strip() for ln in out.splitlines() if ln.strip()]
     ids = visible_gpu_ids() if visible else None
-    return (names[0] if names else None), len(names if ids is None else ids)
+    if ids is None:
+        return (names[0] if names else None), len(names)
+    # An entry naming no card ends the list, as CUDA reads the variable.
+    cards = gpu_cards(visible=True)
+    return (names[0] if names else None), len(ids if cards is None else cards)
 
 
 def card_sizes_gib() -> list[float] | None:
