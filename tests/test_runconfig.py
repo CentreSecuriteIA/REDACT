@@ -105,6 +105,16 @@ class TestFileCounts:
         assert file_counts([tmp_path / "none.csv"]) == {"rows": 0}
         assert file_counts([]) == {"rows": 0}
 
+    def test_an_empty_file_has_no_rows(self, tmp_path):
+        """What a save killed before its first byte leaves."""
+        from redact.driver import file_counts
+
+        (tmp_path / "empty.csv").touch()
+        self._write(tmp_path / "a.csv", [True, False])
+        assert file_counts([tmp_path / "empty.csv"]) == {"rows": 0}
+        assert file_counts([tmp_path / "empty.csv", tmp_path / "a.csv"]) == {
+            "rows": 2, "accepted": 1}
+
     def test_keep_limits_the_count_to_rows_with_those_values(self, tmp_path):
         from redact.driver import file_counts
 

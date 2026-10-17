@@ -101,7 +101,7 @@ def file_counts(
 
     ``rows``, and ``accepted`` when a file has an ``accepted`` column, as the
     rows of ``files`` read into one frame would give them. A file that does
-    not exist has no rows.
+    not exist, or has 0 bytes, has no rows.
 
     Args:
         keep: Count only the rows that hold these values in these columns.
@@ -111,7 +111,8 @@ def file_counts(
     rows = accepted = 0
     verdicts = False        # whether any file has an ``accepted`` column
     for path in map(Path, files):
-        if not path.exists():
+        # 0 bytes: a save killed before its first byte.
+        if not path.exists() or not path.stat().st_size:
             continue
         header = set(pd.read_csv(path, nrows=0).columns)
         columns = [c for c in dict.fromkeys(("accepted", *keep)) if c in header]
