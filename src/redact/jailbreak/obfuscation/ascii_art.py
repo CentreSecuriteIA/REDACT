@@ -1,11 +1,13 @@
 """ASCII-art technique: the prompt drawn in a random pyfiglet font.
 
-``info`` is ``font=<font>``. A prompt with a letter the font has no glyph for
-is discarded, since the font would leave it out.
+``info`` is ``font=<font>``. The font is drawn from those with a glyph for
+every character of the prompt, since a font leaves out a character it lacks;
+a prompt no font draws whole is discarded.
 """
 
 import random
 from collections.abc import Callable
+from functools import cache
 
 import pyfiglet
 
@@ -23,12 +25,19 @@ ASCII_FONTS = [
 
 
 def to_ascii_art(prompt: str, *, rng: random.Random | None = None) -> tuple[str, str]:
-    """Convert text to ASCII art using a random font."""
-    font = (rng or random).choice(ASCII_FONTS)
-    figlet = pyfiglet.Figlet(font=font)
-    if any(c.isalpha() and ord(c) not in figlet.Font.chars for c in prompt):
-        return prompt, f"{DISCARDED}; reason=letters the font {font} lacks"
-    return figlet.renderText(prompt), f"font={font}"
+    """Convert text to ASCII art in a random font that draws all of it."""
+    needed = {ord(c) for c in prompt} - {ord("\n")}     # a newline breaks the line
+    fonts = [font for font in ASCII_FONTS if needed <= _glyphs(font)]
+    if not fonts:
+        return prompt, f"{DISCARDED}; reason=no font has every character"
+    font = (rng or random).choice(fonts)
+    return pyfiglet.Figlet(font=font).renderText(prompt), f"font={font}"
+
+
+@cache
+def _glyphs(font: str) -> frozenset[int]:
+    """The code points ``font`` has a glyph for."""
+    return frozenset(pyfiglet.FigletFont(font).chars)
 
 
 def get_ascii_art_functions() -> list[Callable]:

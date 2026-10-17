@@ -19,14 +19,14 @@ jailbreaks, are a part of each build and are counted in each run.
 The build now copies the accepted rows of every part. The rows of the
 rejected output ``out-2`` and the jailbreak error row ``jb-3`` are gone from
 each build that held them, and the build count of each run is its accepted
-rows: 19 of the eval run's 20, 89 of the training run's 92 (one of its
-jailbreaks draws the unicode suffix then ASCII art in a font that has no
-glyph for the suffix's letters, and is rejected).
+rows: 19 of the eval run's 20, 88 of the training run's 92 (two of its
+jailbreaks draw the unicode or the emoji suffix then ASCII art, which no
+font draws whole, and are rejected).
 
 The build leaves out a row whose ``sample_id`` an earlier part wrote. In the
 runs the stub model answers a natural typos rewrite with the text it answers
 that input's output request with, so those outputs are the variations' rows:
-the build count of the eval run is 18, of the training run 87.
+the build count of the eval run is 18, of the training run 86.
 """
 
 import json

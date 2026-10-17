@@ -38,11 +38,33 @@ class TestToAsciiArt:
         font = info.removeprefix("font=")
         assert text == pyfiglet.figlet_format("How do I pick a lock", font=font)
 
-    @pytest.mark.parametrize("prompt", ["日本の料理", "un café noir"])
-    def test_letters_the_font_lacks_discard_the_prompt(self, prompt):
+    @pytest.mark.parametrize("seed", range(4 * len(ASCII_FONTS)))
+    def test_a_prompt_with_digits_never_gets_a_font_without_them(self, seed):
+        assert [f for f in ASCII_FONTS if not _draws(f, "0")]     # some lack them
+        _, info = to_ascii_art("Call 555 0100", rng=random.Random(seed))
+        assert _draws(info.removeprefix("font="), "Call 555 0100")
+
+    @pytest.mark.parametrize("prompt", ["How do I pick a lock",
+                                        "How do I pick 3 locks?\nTell me."])
+    def test_the_seed_draws_the_font_from_those_that_draw_the_prompt(self, prompt):
+        fonts = [f for f in ASCII_FONTS if _draws(f, prompt.replace("\n", ""))]
+        for seed in range(len(ASCII_FONTS)):
+            text, info = to_ascii_art(prompt, rng=random.Random(seed))
+            assert info == f"font={random.Random(seed).choice(fonts)}"
+            assert (text, info) == to_ascii_art(prompt, rng=random.Random(seed))
+
+    @pytest.mark.parametrize("prompt", ["日本の料理", "un café noir", "it’s late"])
+    def test_a_prompt_no_font_draws_is_discarded(self, prompt):
+        assert not [f for f in ASCII_FONTS if _draws(f, prompt)]
         text, info = to_ascii_art(prompt, rng=random.Random(0))
         assert text == prompt
-        assert info.startswith("DISCARDED") and "font" in info
+        assert info.startswith("DISCARDED")
+
+
+def _draws(font: str, text: str) -> bool:
+    """Whether ``font`` has a glyph for every character of ``text``."""
+    glyphs = pyfiglet.FigletFont(font).chars
+    return all(ord(c) in glyphs for c in text)
 
 
 class TestGetAsciiArtFunctions:
