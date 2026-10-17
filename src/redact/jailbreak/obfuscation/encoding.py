@@ -6,11 +6,20 @@
 import base64
 import codecs
 import random
+import unicodedata
 from collections.abc import Callable
 
 # ROT47 operates on the printable-ASCII range '!' (33) through '~' (126).
 _ROT47_PRINTABLE_MIN = 33
 _ROT47_PRINTABLE_MAX = 126
+
+# The last code point a four-digit escape can name.
+_BMP_MAX = 0xFFFF
+
+# Joined to the character before them: the zero-width joiner and the two
+# emoji variation selectors (as is every combining mark).
+_ZWJ = "\u200d"
+_JOINED = {_ZWJ, "\ufe0e", "\ufe0f"}
 
 
 def to_base64(prompt: str) -> tuple[str, str]:
@@ -49,8 +58,11 @@ def to_rot47(prompt: str) -> tuple[str, str]:
 
 
 def to_unicode_escape(prompt: str) -> tuple[str, str]:
-    """Encode each character as a Unicode escape sequence (\\uXXXX)."""
-    return "".join(f"\\u{ord(c):04x}" for c in prompt), ""
+    """Encode each character as a Unicode escape sequence (\\uXXXX, or
+    \\UXXXXXXXX above the Basic Multilingual Plane)."""
+    return "".join(
+        f"\\U{ord(c):08x}" if ord(c) > _BMP_MAX else f"\\u{ord(c):04x}"
+        for c in prompt), ""
 
 
 def to_ascii_ordinal(prompt: str) -> tuple[str, str]:
@@ -61,10 +73,25 @@ def to_ascii_ordinal(prompt: str) -> tuple[str, str]:
 SEPARATORS = ["-", "_", ".", "|", "/", "*", "~"]
 
 
+def _clusters(text: str) -> list[str]:
+    """``text`` cut into the characters a reader sees: a combining mark, a
+    zero-width joiner or a variation selector stays with the character before
+    it, and so does the character after a joiner."""
+    clusters: list[str] = []
+    for c in text:
+        joined = (unicodedata.category(c).startswith("M") or c in _JOINED
+                  or (clusters and clusters[-1].endswith(_ZWJ)))
+        if clusters and joined:
+            clusters[-1] += c
+        else:
+            clusters.append(c)
+    return clusters
+
+
 def to_separator(prompt: str, *, rng: random.Random | None = None) -> tuple[str, str]:
-    """Insert a random separator character between every character."""
+    """Insert a random separator character between every character a reader sees."""
     sep = (rng or random).choice(SEPARATORS)
-    return sep.join(prompt), f"sep={sep}"
+    return sep.join(_clusters(prompt)), f"sep={sep}"
 
 
 _LEET_MAP_BASIC = {

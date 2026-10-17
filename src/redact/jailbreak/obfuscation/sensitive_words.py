@@ -11,6 +11,7 @@ from functools import partial
 
 from redact.jailbreak.obfuscation.encoding import (
     SEPARATORS,
+    _clusters,
     to_ascii_ordinal,
     to_base64,
     to_leetspeak_advanced,
@@ -51,10 +52,12 @@ def _sensitive_separator_finish(
     """Split each harmful word's characters with one randomly chosen separator."""
     sep = (rng or random).choice(SEPARATORS)
     if not harmful_words:
-        return sep.join(prompt), f"encoding=separator;sep={sep};detected_words="
+        return (sep.join(_clusters(prompt)),
+                f"encoding=separator;sep={sep};detected_words=")
     result = prompt
     for word in harmful_words:
-        result = re.sub(re.escape(word), sep.join(word), result, flags=re.IGNORECASE)
+        result = re.sub(re.escape(word), sep.join(_clusters(word)), result,
+                        flags=re.IGNORECASE)
     return (
         result,
         f"encoding=separator;sep={sep};detected_words={' '.join(harmful_words)}",
@@ -66,13 +69,14 @@ def _sensitive_char_finish(
 ) -> tuple[str, str]:
     """Split each harmful word's characters with a fixed separator."""
     if not harmful_words:
-        obfuscated = re.sub(r"\S+", lambda m: separator.join(m.group()), prompt)
+        obfuscated = re.sub(r"\S+", lambda m: separator.join(_clusters(m.group())),
+                            prompt)
         return obfuscated, f"char_sep={sep_name};detected_words="
     result = prompt
     for word in harmful_words:
         result = re.sub(
-            re.escape(word), separator.join(word), result, flags=re.IGNORECASE
-        )
+            re.escape(word), separator.join(_clusters(word)), result,
+            flags=re.IGNORECASE)
     return result, f"char_sep={sep_name};detected_words={' '.join(harmful_words)}"
 
 

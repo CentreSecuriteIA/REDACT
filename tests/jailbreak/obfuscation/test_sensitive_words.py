@@ -2,7 +2,9 @@
 
 from redact.jailbreak.obfuscation.encoding import to_base64
 from redact.jailbreak.obfuscation.sensitive_words import (
+    _sensitive_char_finish,
     _sensitive_encode_finish,
+    _sensitive_separator_finish,
     to_synonym_substitution,
 )
 from redact.llm_pipeline import drive_sync
@@ -27,6 +29,23 @@ class TestSensitiveEncodeFinish:
         result, _ = _sensitive_encode_finish(
             "how to grow an apple at home", to_base64, "base64", ["apple"])
         assert result == "how to grow an YXBwbGU= at home"
+
+
+class TestSeparatorFinishes:
+    WORD = "cafe" + chr(0x301)      # the accent a combining mark
+
+    def test_a_fixed_separator_keeps_a_mark_with_its_letter(self):
+        result, _ = _sensitive_char_finish(
+            f"a {self.WORD} here", "-", "hyphen", [self.WORD])
+        assert result == "a c-a-f-" + "e" + chr(0x301) + " here"
+
+    def test_a_drawn_separator_keeps_a_mark_with_its_letter(self):
+        import random
+
+        result, info = _sensitive_separator_finish(
+            f"a {self.WORD} here", [self.WORD], random.Random(0))
+        sep = info.split(";")[1].removeprefix("sep=")
+        assert result == f"a {sep.join(['c', 'a', 'f', 'e' + chr(0x301)])} here"
 
 
 def test_the_substitutions_are_one_field():

@@ -2,6 +2,7 @@
 
 import base64
 import codecs
+import random
 
 from redact.jailbreak.obfuscation.encoding import (
     get_encoding_functions,
@@ -82,6 +83,12 @@ class TestUnicodeEscape:
         assert encoded == "\\u0041\\u0042"
 
 
+    def test_a_character_above_the_basic_plane_decodes_back(self):
+        encoded, _ = to_unicode_escape("a😀")
+        assert encoded.endswith("U0001f600")
+        assert codecs.decode(encoded, "unicode_escape") == "a😀"
+
+
 class TestAsciiOrdinal:
     def test_format(self):
         encoded, _ = to_ascii_ordinal("AB")
@@ -94,6 +101,13 @@ class TestSeparator:
         # one separator char between each character
         assert len(result) == 5
         assert info.startswith("sep=")
+
+
+    def test_a_mark_or_a_joined_sequence_stays_with_its_character(self):
+        accented = "e" + chr(0x301)     # e, then a combining acute accent
+        family = chr(0x1F468) + chr(0x200D) + chr(0x1F469)   # joined by a ZWJ
+        text, info = to_separator(f"{accented}{family}!", rng=random.Random(0))
+        assert text.split(info.removeprefix("sep=")) == [accented, family, "!"]
 
 
 class TestLeetspeak:
