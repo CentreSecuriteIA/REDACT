@@ -3,27 +3,18 @@ yielding their calls.
 """
 
 import dataclasses
-import hashlib
 import inspect
 import random
 from collections.abc import Callable, Iterable
 from pathlib import Path
 
+from redact.dataset.dealing import stable_seed
 from redact.llm_pipeline import LLMRequest, drive_sync
 from redact.llms.client import ModelClient
 from redact.llms.router import generate_sample
 
 from .manipulation import get_or_generate_benign_data
 from .technique import DISCARDED, TechniqueGen, TechniqueResult, is_discarded, load_spec
-
-
-def _stable_seed(*parts) -> int:
-    """A seed from ``parts`` that is the same in every process.
-
-    SHA-256, not the builtin ``hash``, which is salted per process.
-    """
-    digest = hashlib.sha256("::".join(str(p) for p in parts).encode("utf-8"))
-    return int(digest.hexdigest()[:16], 16)
 
 
 def _select_kwargs(technique: Callable, kwargs: dict) -> dict:
@@ -82,7 +73,7 @@ def run_chain(
     capture under ``{internals_root}/{technique}``. Each technique gets the
     ``kwargs`` it takes (``gen_model``, ``translate_model``, ``benign_data``,
     ``prompt_dir``) and, with ``rng_seed``, an ``rng`` of its own:
-    ``random.Random(_stable_seed(*rng_seed, technique.__name__))``.
+    ``random.Random(stable_seed(*rng_seed, technique.__name__))``.
 
     Returns ``(text, info)``: the steps' infos joined by ``;``, a step that
     left the text unchanged as ``noop=<name>``. The first rejection stops the
@@ -94,7 +85,7 @@ def run_chain(
     info_parts: list[str] = []
     for technique in techniques:
         if rng_seed is not None:
-            kwargs["rng"] = random.Random(_stable_seed(*rng_seed, technique.__name__))
+            kwargs["rng"] = random.Random(stable_seed(*rng_seed, technique.__name__))
         tech_kwargs = _select_kwargs(technique, kwargs)
         if inspect.isgeneratorfunction(technique):
             gen = technique(result, **tech_kwargs)

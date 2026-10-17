@@ -30,8 +30,8 @@ the technique names are in [techniques.md](../techniques.md).
 | `augmentation.py` | `KINDS`, `defaults(config_dir)`, `resolve(section, kind, base=None, config_dir=None)`, `rounds_of(kind)`, `apply_flat_keywords`, `FLAT_KEYWORDS` |
 | `rules.py` | `compatible(selected, pool, remaining_complexity)`, `request_obfuscation_candidates` |
 | `sampling.py` | `sample_combination`, `sample_exact_combination`, `_pick_by_family` |
-| `plan.py` | `plan_run`, `assign_combination`, `combination_of`, `coverage`, `coverage_path`, `plan_path`, `plan_inputs`, `changed_plan_inputs` (the `<stem>.plan.json` beside the manifest), `default_escalation_schedule`, the dealer |
-| `chain.py` | `run_chain`, `combine_techniques`, `in_layer_order`, `apply_combination`, `_stable_seed` |
+| `plan.py` | `plan_run`, `assign_combination`, `combination_of`, `coverage`, `coverage_path`, `plan_path`, `plan_inputs`, `changed_plan_inputs` (the `<stem>.plan.json` beside the manifest), `default_escalation_schedule`; it deals from `dataset.dealing.Dealer` |
+| `chain.py` | `run_chain`, `combine_techniques`, `in_layer_order`, `apply_combination` |
 | `units.py` | `pending_units`, `is_pending`, `unit_gen`, `row_of`, `error_row_of` |
 | `pipeline.py` | `run_augmentation`, the stage core |
 | `directives.py` | `load_templates`, `apply_template_directive`: template variants of the pure techniques |
@@ -74,7 +74,7 @@ def to_y(prompt: str, **kwargs) -> TechniqueGen:
 the order given. A transform runs inline; a generator's requests are yielded
 up, each capped at the technique's `max_tokens` tag and, under capture,
 tagged with an internals id. Each technique gets
-`rng = random.Random(_stable_seed(seed, label, input_id, iteration, name))`,
+`rng = random.Random(stable_seed(seed, label, input_id, iteration, name))`,
 the label being `jailbreak` or `variation`, so the two kinds draw apart. A
 step that leaves the text unchanged is noted `noop=<name>`. A step that
 leaves the text empty or blank is a rejection,
@@ -163,7 +163,8 @@ The rules are those of [techniques.md](../techniques.md#compatibility-rules).
 
 `plan_run` does not draw each unit alone. It groups the units by
 `(category, entry_type, iteration)`, sorts each group by input id, and deals
-the group from one dealer, so every group gets its share whatever the input
+the group from one dealer (`dataset/dealing.py`, shared with the inputs' and
+outputs' generation axes), so every group gets its share whatever the input
 order.
 
 - **Layers.** A layer joins a unit when the group's picks of that layer so
@@ -183,14 +184,14 @@ order.
 
 ## Seeds
 
-`_stable_seed(*parts)` is the first 16 hex digits of the SHA-256 of the parts
+`stable_seed(*parts)` (`dataset/dealing.py`) is the first 16 hex digits of the SHA-256 of the parts
 joined by `::`: the same in every process, unlike Python's `hash`.
 
 | Draw | Seed |
 |---|---|
-| A unit's combination | `_stable_seed(seed, input_id, iteration)`, plus the attempt number on a redraw |
-| A layer's offset in a group | `_stable_seed(seed, category, entry_type, iteration, layer)` |
-| A technique's random choices | `_stable_seed(seed, label, input_id, iteration, technique name)`, the label `jailbreak` or `variation` |
+| A unit's combination | `stable_seed(seed, input_id, iteration)`, plus the attempt number on a redraw |
+| A layer's offset in a group | `stable_seed(seed, category, entry_type, iteration, layer)` |
+| A technique's random choices | `stable_seed(seed, label, input_id, iteration, technique name)`, the label `jailbreak` or `variation` |
 
 So the plan does not depend on the order or the chunking of the inputs, and
 a replayed plan gives the same text. The manifest row records the round's
