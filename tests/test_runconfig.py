@@ -2355,3 +2355,16 @@ def test_a_failed_model_switch_does_not_abort_the_run(local_models, caplog):
     finally:
         telemetry.uninstall()
     assert "could not switch models (RuntimeError: boom)" in caplog.text
+
+
+def test_a_taxonomy_or_seeds_name_with_a_dot_names_its_json_file(tmp_path):
+    from redact.stages import STAGES, RunContext
+
+    ctx = RunContext(
+        data_dir=tmp_path, dataset_type="eval", models={}, prompt_dir=None,
+        taxonomy="my.tax", taxonomy_dir=tmp_path,
+        params={"inputs": {"use_metaprompt": False, "seeds_name": "my.seeds"}},
+        augmentations={}, resume=True, verbose=False)
+    assert STAGES["constitution"].sources(ctx) == [tmp_path / "my.tax.json"]
+    assert STAGES["inputs"].sources(ctx) == [
+        tmp_path / "my.tax.json", paths.seeds_dir() / "my.seeds.json"]

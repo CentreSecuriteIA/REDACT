@@ -92,8 +92,8 @@ def load_from_config(
     if config_dir is None:
         config_dir = _DEFAULT_CONFIG_DIR
     config_path = Path(config_dir) / config_name
-    if not config_path.suffix:
-        config_path = config_path.with_suffix(".json")
+    if config_path.suffix != ".json":
+        config_path = config_path.with_name(config_path.name + ".json")
 
     if not config_path.exists():
         raise FileNotFoundError(f"Config not found: {config_path}")

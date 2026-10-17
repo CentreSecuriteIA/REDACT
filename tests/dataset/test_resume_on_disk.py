@@ -353,13 +353,14 @@ class _HandleThatDoesNotCut:
 
 
 class TestTheCut:
-    def _held(self, monkeypatch, refusals, handle=None):
-        """Refuse the first ``refusals`` opens for a cut; count every attempt."""
+    def _held(self, monkeypatch, refusals, handle=None, mode_held="r+b"):
+        """Refuse the first ``refusals`` opens for a cut, or in ``mode_held``;
+        count every attempt."""
         attempts = []
         opened = Path.open
 
         def open_(path, mode="r", *args, **kwargs):
-            if mode != "r+b":
+            if mode != mode_held:
                 return opened(path, mode, *args, **kwargs)
             attempts.append(path.name)
             if len(attempts) <= refusals:
@@ -387,6 +388,25 @@ class TestTheCut:
         with pytest.raises(RuntimeError, match="another program holds") as stopped:
             _resume(tmp_path)
         assert str(out) in str(stopped.value)
+        assert len(attempts) > 1 and out.read_bytes() == held
+
+    def test_a_held_cut_file_is_opened_again(self, tmp_path, monkeypatch):
+        _led, out = _run(tmp_path, "ab")
+        saved = out.read_bytes()
+        out.write_bytes(saved + b"tail\n")
+        attempts = self._held(monkeypatch, refusals=2, mode_held="ab")
+        _resume(tmp_path)
+        assert attempts == ["out.csv.cut"] * 3 and out.read_bytes() == saved
+        assert out.with_name("out.csv.cut").read_bytes() == b"tail\n"
+
+    def test_a_cut_file_that_stays_held_stops_the_resume(self, tmp_path, monkeypatch):
+        _led, out = _run(tmp_path, "ab")
+        held = out.read_bytes() + b"tail\n"
+        out.write_bytes(held)
+        attempts = self._held(monkeypatch, refusals=10**6, mode_held="ab")
+        with pytest.raises(RuntimeError, match="another program holds") as stopped:
+            _resume(tmp_path)
+        assert "out.csv.cut" in str(stopped.value)
         assert len(attempts) > 1 and out.read_bytes() == held
 
     def test_a_removal_that_stays_refused_stops_the_resume_the_same_way(
@@ -756,9 +776,12 @@ class TestAStageOfSeveralFiles:
         _tree_resume(tmp_path)      # leaves a .cut beside Cyber, and one with no file
         manifest = Manifest(tmp_path / "out.manifest.jsonl")
         manifest.write([{"input_id": "a"}])
+        # What a rewrite killed before its rename leaves.
+        _file(tmp_path, "Fraud").with_name("samples.csv.tmp").write_bytes(b"half")
         assert set(_tree_files(tmp_path)) == {
             "Cyber/samples.csv", "Cyber/samples.csv.cut", "Fraud/samples.csv",
-            "Privacy/samples.csv.cut", "out.state.jsonl", "out.manifest.jsonl"}
+            "Fraud/samples.csv.tmp", "Privacy/samples.csv.cut", "out.state.jsonl",
+            "out.manifest.jsonl"}
 
         led = _ledger(tmp_path)
         assert resume_state(led, resume=False, artifact=tmp_path, pattern=_TREE,
@@ -944,6 +967,36 @@ class TestStartingSomeUnitsOver:
         led = _tree_run(tmp_path, _UNITS)                   # and the units run again
         assert led.completed() == set("abcdef")
         assert sorted(_keys_on_disk(_file(tmp_path, "Cyber"))) == ["a", "c", "f"]
+
+    def test_a_cell_longer_than_the_csv_module_takes_by_default(self, tmp_path):
+        """pandas writes and reads it, so the rewrite takes it too."""
+        long_text = "x" * 200_000
+        led = _ledger(tmp_path)
+        resume_state(led, resume=True, artifact=tmp_path, pattern=_TREE)
+        with _tree_buffer(led, tmp_path) as buf:
+            for row in _tree_rows(_UNITS[:3]):
+                buf.add([{**row, "text": long_text}],
+                        {"input_id": row["input_id"], "style": row["style"]})
+        release_lock(_drop_style(tmp_path))
+        kept = pd.read_csv(_file(tmp_path, "Cyber"))
+        assert list(kept["input_id"]) == ["a"] and list(kept["text"]) == [long_text]
+
+    def test_a_held_marker_is_written_again(self, tmp_path, monkeypatch):
+        _tree_run(tmp_path, _UNITS)
+        opened, attempts = Path.open, []
+
+        def open_(path, mode="r", *args, **kwargs):
+            if path.name.endswith(".dropping") and mode == "wb":
+                attempts.append(path.name)
+                if len(attempts) == 1:
+                    raise PermissionError("held by another program")
+            return opened(path, mode, *args, **kwargs)
+
+        monkeypatch.setattr(Path, "open", open_)
+        monkeypatch.setattr(rows_module.time, "sleep", lambda seconds: None)
+        release_lock(_drop_style(tmp_path))
+        assert attempts == ["out.state.jsonl.dropping"] * 2
+        assert not _marker(tmp_path).exists()
 
     def test_rows_written_elsewhere_keep_their_line_ends(self, tmp_path):
         """A tree copied from a pod ends its rows in a bare newline."""

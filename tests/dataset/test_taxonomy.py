@@ -30,6 +30,13 @@ class TestLoadTaxonomy:
         t2 = load_taxonomy("harmful.json")
         assert t1 == t2
 
+    def test_a_name_with_a_dot_is_taken_without_its_extension(self, tmp_path):
+        create_taxonomy("my.tax", {"A": "a"}, taxonomy_dir=tmp_path, verbose=False)
+        assert (tmp_path / "my.tax.json").exists()
+        assert list(load_taxonomy("my.tax", config_dir=tmp_path)["categories"]) == ["A"]
+        assert load_taxonomy("my.tax.json", config_dir=tmp_path) == load_taxonomy(
+            "my.tax", config_dir=tmp_path)
+
 
 class TestFormerNames:
     """The names before the config layout, read for one release."""
@@ -154,3 +161,15 @@ class TestGetSeedPrompts:
     def test_missing_category(self):
         seeds = {"seeds": {}}
         assert get_seed_prompts(seeds, "missing") == ""
+
+
+class TestLoadFromConfig:
+    def test_a_name_with_a_dot_is_taken_without_its_extension(
+            self, tmp_path, monkeypatch):
+        import redact.dataset.loading as loading
+
+        (tmp_path / "my.config.json").write_text(
+            json.dumps({"dataset_id": "org/set"}), encoding="utf-8")
+        monkeypatch.setattr(loading, "load_hf_dataset",
+                            lambda dataset_id, **kwargs: dataset_id)
+        assert loading.load_from_config("my.config", config_dir=tmp_path) == "org/set"

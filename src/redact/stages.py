@@ -1129,12 +1129,18 @@ def _constitution_files(ctx: RunContext) -> tuple[list[Path], dict]:
     return [paths.constitution_merged_csv(ctx.data_dir)], {}
 
 
+def _json_file(folder: Path, name: str) -> Path:
+    """The file a config ``name`` under ``folder`` is read from, with or
+    without its ``.json``."""
+    path = folder / name
+    return path if path.suffix == ".json" else path.with_name(path.name + ".json")
+
+
 def _taxonomy_file(ctx: RunContext) -> list[Path]:
     """The file of the run's taxonomy; none for one given as an object."""
     if not isinstance(ctx.taxonomy, str):
         return []
-    path = Path(ctx.taxonomy_dir or paths.taxonomy_dir()) / ctx.taxonomy
-    return [path if path.suffix else path.with_suffix(".json")]
+    return [_json_file(Path(ctx.taxonomy_dir or paths.taxonomy_dir()), ctx.taxonomy)]
 
 
 def _inputs_kwargs(ctx: RunContext) -> dict:
@@ -1180,8 +1186,8 @@ def _inputs_sources(ctx: RunContext) -> list[Path]:
     given = _params(ctx, "inputs")
     if given.get("use_metaprompt", True):
         return _taxonomy_file(ctx)
-    seeds = paths.seeds_dir() / given.get("seeds_name", "harmful")
-    return [*_taxonomy_file(ctx), seeds if seeds.suffix else seeds.with_suffix(".json")]
+    seeds = _json_file(paths.seeds_dir(), given.get("seeds_name", "harmful"))
+    return [*_taxonomy_file(ctx), seeds]
 
 
 def _run_inputs(ctx: RunContext) -> list[Path]:

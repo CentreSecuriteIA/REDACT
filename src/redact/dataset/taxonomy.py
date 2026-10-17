@@ -146,8 +146,8 @@ def _load_json(
     a ``DeprecationWarning``.
     """
     path = Path(directory) / name
-    if not path.suffix:
-        path = path.with_suffix(".json")
+    if path.suffix != ".json":
+        path = path.with_name(path.name + ".json")
 
     if not path.exists():
         path = _under_other_name(path, what, former)
