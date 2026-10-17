@@ -1,5 +1,6 @@
 """Tests for dataset rows in one CSV."""
 
+import logging
 import os
 from pathlib import Path
 
@@ -532,6 +533,29 @@ class TestWriteConcat:
             (os.fstat(fd).st_size, out.exists())))
         write_concat(out, [Part(path)])
         assert synced == [(out.stat().st_size, False)]
+
+    def test_unique_leaves_out_a_row_whose_id_an_earlier_part_wrote(
+            self, tmp_path, caplog):
+        """Two rows of one part keep their id, and a row without one stays."""
+        first = pd.DataFrame({"sample_id": ["a", "b", None], "n": [1, 2, 3]})
+        second = tmp_path / "second.csv"
+        append_rows(second, [{"sample_id": "b", "n": 4}, {"sample_id": "c", "n": 5},
+                             {"sample_id": "c", "n": 6}, {"sample_id": "", "n": 7}])
+        out = tmp_path / "out.csv"
+        with caplog.at_level(logging.INFO, logger="redact"):
+            written = write_concat(out, [Part(first, label="First"),
+                                         Part(second, label="Second")],
+                                   unique="sample_id")
+        assert written == [3, 3]
+        assert list(read_rows(out)["n"]) == [1, 2, 3, 5, 6, 7]
+        (logged,) = [r.getMessage() for r in caplog.records]
+        assert logged == (
+            "Second: left out 1 rows whose sample_id an earlier part wrote.")
+
+    def test_without_unique_every_row_is_written(self, tmp_path):
+        frame = pd.DataFrame({"sample_id": ["a", "a"]})
+        out = tmp_path / "out.csv"
+        assert write_concat(out, [Part(frame), Part(frame)]) == [2, 2]
 
     def test_the_size_of_a_chunk_does_not_change_a_byte(self, tmp_path, monkeypatch):
         path, frame = self._parts(tmp_path)

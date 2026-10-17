@@ -615,10 +615,12 @@ def test_a_variation_that_changes_nothing_is_not_accepted_nor_built(tmp_path):
     jailbreaks = pd.read_csv(paths.jailbreaks_csv(tmp_path))
     assert jailbreaks["accepted"].all() and jailbreaks["is_noop"].any()
 
+    # The variation that changes its input is the jailbreak's row, which the
+    # build holds once, as the jailbreak.
     build_dataset(data_dir=tmp_path, verbose=False)
     built = pd.read_csv(paths.complete_dataset_csv(tmp_path))
-    built = built[built["dataset_type"] == "natural_variation"]
-    assert list(built["jailbreak"]) == ["some capitals."]
+    assert list(zip(built["jailbreak"], built["dataset_type"])) == [
+        ("all lower case.", "jailbreak"), ("some capitals.", "jailbreak")]
 
 
 def test_the_variations_of_a_given_output_path_go_beside_it(tmp_path):

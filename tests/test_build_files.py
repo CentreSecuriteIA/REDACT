@@ -20,6 +20,11 @@ The build now copies the accepted rows of every part. The rows of the
 rejected output ``out-2`` and the jailbreak error row ``jb-3`` are gone from
 each build that held them, and the build count of each run is its accepted
 rows: 19 of the eval run's 20, 90 of the training run's 92.
+
+The build leaves out a row whose ``sample_id`` an earlier part wrote. In the
+runs the stub model answers a natural typos rewrite with the text it answers
+that input's output request with, so those outputs are the variations' rows:
+the build count of the eval run is 18, of the training run 88.
 """
 
 import json
@@ -327,6 +332,30 @@ def test_an_empty_stage_file_is_a_part_without_rows(tmp_path):
     built = build_dataset(data_dir=tmp_path, verbose=False)
     assert "jailbreak" not in set(built["dataset_type"])
     assert "content_moderation_output" not in set(built["dataset_type"])
+
+
+def test_a_row_whose_id_an_earlier_part_wrote_is_left_out(tmp_path, caplog):
+    """A variation with a jailbreak's text, and an adversarial no-op, whose
+    text is its input's: each is the same row as one written before it."""
+    import logging
+
+    from redact import build_dataset
+
+    _write_stage_files(tmp_path)
+    noop = _JAILBREAKS.iloc[[0]].assign(sample_id="in-1", jailbreak=_TEXTS[0],
+                                        is_noop=True)
+    pd.concat([_JAILBREAKS, noop]).to_csv(paths.jailbreaks_csv(tmp_path), index=False)
+    _VARIATIONS.assign(sample_id=["jb-1", "var-2", "var-3"]).to_csv(
+        paths.variations_csv(tmp_path), index=False)
+    with caplog.at_level(logging.INFO, logger="redact"):
+        built = build_dataset(data_dir=tmp_path)
+    assert built["sample_id"].is_unique
+    by_id = dict(zip(built["sample_id"], built["dataset_type"]))
+    assert (by_id["in-1"], by_id["jb-1"]) == ("content_moderation_input", "jailbreak")
+    left_out = [r.getMessage() for r in caplog.records if "left out" in r.getMessage()]
+    assert left_out == [
+        "Jailbreaks: left out 1 rows whose sample_id an earlier part wrote.",
+        "Variations: left out 1 rows whose sample_id an earlier part wrote."]
 
 
 def test_the_variations_are_their_accepted_rows_from_the_path_given(tmp_path):

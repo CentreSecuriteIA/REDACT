@@ -1009,7 +1009,7 @@ def build_dataset(
         ]
         if para_parts and mode == "eval":
             para_out = ds_dir / paths.PARAPHRASED_FILENAME
-            separate = sum(write_concat(para_out, para_parts))
+            separate = sum(write_concat(para_out, para_parts, unique="sample_id"))
             if verbose:
                 logger.info("Paraphrases: %d -> separate %s (eval mode)",
                             separate, para_out.name)
@@ -1023,7 +1023,9 @@ def build_dataset(
             logger.info("No data found. Run generate_inputs/jailbreaks/outputs first.")
         return pd.DataFrame()
 
-    written = write_concat(out_path, parts)
+    # A row whose id an earlier part wrote is left out: an adversarial no-op
+    # is its input, and a variation can be a jailbreak's text.
+    written = write_concat(out_path, parts, unique="sample_id")
 
     if verbose:
         by_type: Counter = Counter()

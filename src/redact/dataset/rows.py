@@ -2,6 +2,7 @@
 one CSV written from the rows of several."""
 
 import csv
+import logging
 import os
 import time
 from collections.abc import Callable, Iterable, Iterator, Mapping, Sequence
@@ -9,6 +10,8 @@ from pathlib import Path
 from typing import Any, NamedTuple, TypeVar
 
 import pandas as pd
+
+logger = logging.getLogger(__name__)
 
 # Rows per read of a file that is not read whole.
 _CHUNK_ROWS = 50_000
@@ -303,8 +306,20 @@ def _part_chunks(part: Part) -> Iterator[pd.DataFrame]:
             yield chunk.assign(**tag)
 
 
+def _new_rows(
+    chunk: pd.DataFrame, column: str, earlier: set[str], values: set[str],
+) -> pd.DataFrame:
+    """The rows of ``chunk`` whose ``column`` is not in ``earlier``; their
+    values are added to ``values``. A row without a value stays."""
+    cells = chunk[column].astype(str)
+    given = chunk[column].notna() & (cells != "")
+    values.update(cells[given])
+    return chunk[~given | ~cells.isin(earlier)]
+
+
 def write_concat(
     target: str | Path, parts: Sequence[Part], *, keep_empty: bool = True,
+    unique: str | None = None,
 ) -> list[int]:
     """Write the rows of ``parts``, one part after another, as the CSV at ``target``.
 
@@ -316,6 +331,9 @@ def write_concat(
 
     Args:
         keep_empty: False leaves ``target`` as it is when no part has a row.
+        unique: A column: a row whose value in it an earlier part wrote is
+            left out, and the count left out of each part is logged. The
+            values written are held in memory.
 
     Returns:
         The number of rows written of each part.
@@ -325,17 +343,27 @@ def write_concat(
     target.parent.mkdir(parents=True, exist_ok=True)
     temporary = target.with_name(target.name + ".tmp")
     written = []
+    earlier: set[str] = set()    # the values of ``unique`` the parts so far wrote
     try:
         # newline="": to_csv ends each row itself, as it does writing to a path.
         with temporary.open("w", encoding="utf-8", newline="") as fh:
             pd.DataFrame(columns=columns).to_csv(fh, index=False)
             for part in parts:
-                rows = 0
+                rows = left_out = 0
+                values: set[str] = set()
                 for chunk in _part_chunks(part):
+                    if unique in chunk.columns:
+                        kept = _new_rows(chunk, unique, earlier, values)
+                        left_out += len(chunk) - len(kept)
+                        chunk = kept
                     chunk = chunk.reindex(columns=columns, fill_value="")
                     chunk.to_csv(fh, header=False, index=False)
                     rows += len(chunk)
                 written.append(rows)
+                earlier |= values
+                if left_out:
+                    logger.info("%s: left out %d rows whose %s an earlier part wrote.",
+                                part.label or "A part", left_out, unique)
             fh.flush()
             os.fsync(fh.fileno())
         if keep_empty or any(written):

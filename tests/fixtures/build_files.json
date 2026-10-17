@@ -74,7 +74,7 @@
  },
  "runs": {
   "eval": {
-   "counts": {"build": {"accepted": 19, "rows": 19}, "inputs": {"accepted": 5, "rows": 5}, "jailbreaks": {"accepted": 10, "rows": 10}, "outputs": {"accepted": 4, "rows": 5}, "paraphrase": {"accepted": 9, "rows": 9}}
+   "counts": {"build": {"accepted": 18, "rows": 18}, "inputs": {"accepted": 5, "rows": 5}, "jailbreaks": {"accepted": 10, "rows": 10}, "outputs": {"accepted": 4, "rows": 5}, "paraphrase": {"accepted": 9, "rows": 9}}
   },
   "training": {
    "constitution_inputs_merged.csv": [
@@ -96,7 +96,7 @@
     ["9bf7fbc33e653c59", "long second zq3 sample", "Fraud", "Sub", "dual_use_benign", "0", "True", "", "constitution", "what zq3 is about", "", "", "long"],
     ["eca2f5cdd2743dc6", "long third zq3 sample", "Fraud", "Sub", "dual_use_benign", "0", "True", "", "constitution", "what zq3 is about", "", "", "long"]
    ],
-   "counts": {"build": {"accepted": 90, "rows": 90}, "constitution": {"rows": 4}, "inputs": {"accepted": 11, "rows": 11}, "jailbreaks": {"accepted": 32, "rows": 32}, "outputs": {"accepted": 14, "rows": 16}, "paraphrase": {"accepted": 28, "rows": 30}}
+   "counts": {"build": {"accepted": 88, "rows": 88}, "constitution": {"rows": 4}, "inputs": {"accepted": 11, "rows": 11}, "jailbreaks": {"accepted": 32, "rows": 32}, "outputs": {"accepted": 14, "rows": 16}, "paraphrase": {"accepted": 28, "rows": 30}}
   }
  }
 }
