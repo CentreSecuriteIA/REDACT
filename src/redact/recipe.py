@@ -52,14 +52,14 @@ _TYPE_KEYS = ("stages", "params", "augmentations")
 
 
 @cache
-def _read_type_file(path: str, modified: int) -> dict:
+def _read_type_file(path: str, modified: int, config_dir: str | None) -> dict:
     with Path(path).open(encoding="utf-8") as fh:
         data = json.load(fh)
     keys = [key for key in data if not key.startswith("_")]
     if sorted(keys) != sorted(_TYPE_KEYS):
         raise ValueError(
             f"{path} has the keys {keys}; write exactly {list(_TYPE_KEYS)}.")
-    load_params(data["params"])     # for its errors
+    load_params(data["params"], config_dir=config_dir)     # for its errors
     return data
 
 
@@ -68,7 +68,8 @@ def _dataset_type_file(name: str, config_dir: str | Path | None) -> dict:
     if name not in DATASET_TYPES:
         raise ValueError(f'dataset_type must be "eval" or "training", got {name!r}.')
     path = config_file(f"dataset_types/{name}.json", config_dir)
-    return _read_type_file(str(path), path.stat().st_mtime_ns)
+    return _read_type_file(str(path), path.stat().st_mtime_ns,
+                           None if config_dir is None else str(config_dir))
 
 
 def load_dataset_type(name: str, config_dir: str | Path | None = None) -> dict:
@@ -80,7 +81,8 @@ def load_dataset_type(name: str, config_dir: str | Path | None = None) -> dict:
     Raises:
         ValueError: ``name`` is not ``"eval"`` or ``"training"``, the file
             does not hold exactly those three keys, or :func:`load_params`
-            refuses its params.
+            refuses its params (the axes read against ``config_dir``'s
+            table).
     """
     return copy.deepcopy(_dataset_type_file(name, config_dir))
 
@@ -215,16 +217,22 @@ def _read_params(params: str | Path | dict | None,
 
 def load_params(
     params: str | Path | dict | None, base_dir: str | Path | None = None,
+    config_dir: str | Path | None = None,
 ) -> dict:
     """Load an input-params file (JSON path or dict). ``base_dir`` resolves a
     relative ``params_file`` from the recipe's directory.
 
     Raises:
         ValueError: A key is not a stage's name, nor a comment (``_`` first),
-            or ``params["jailbreaks"]`` sets a key of the augmentation section.
+            ``params["jailbreaks"]`` sets a key of the augmentation section,
+            or a stage with generation axes has an ``axes`` entry
+            :func:`redact.content_moderation.axes.resolve` refuses (read
+            against ``config_dir``'s ``generation_axes.json`` when it has
+            one) or a ``seed`` that is not a whole number.
     """
     data = _read_params(params, base_dir)
     _check_jailbreak_params(data)
+    _check_generation_params(data, config_dir)
     unknown = [key for key in data if key not in STAGES and not key.startswith("_")]
     if unknown:
         raise ValueError(
@@ -259,6 +267,26 @@ def _check_jailbreak_params(params: dict) -> None:
             "now holds; write them under the recipe's augmentations.adversarial. "
             "They are read as before for this release.",
             DeprecationWarning, stacklevel=3)
+
+
+def _check_generation_params(params: dict, config_dir: str | Path | None) -> None:
+    """Refuse an ``axes`` entry of a stage with generation axes that
+    :func:`redact.content_moderation.axes.resolve` refuses, and a ``seed``
+    of one that is not a whole number.
+
+    Raises:
+        ValueError: The stage and what is wrong.
+    """
+    from .content_moderation import axes as generation_axes
+
+    for stage in generation_axes.STAGES:
+        given = params.get(stage) or {}
+        if "axes" in given:
+            generation_axes.resolve(stage, given["axes"], config_dir=config_dir)
+        seed = given.get("seed")
+        if "seed" in given and (isinstance(seed, bool) or not isinstance(seed, int)):
+            raise ValueError(
+                f"params[{stage!r}].seed must be a whole number, got {seed!r}.")
 
 
 def benign_taxonomy_of(

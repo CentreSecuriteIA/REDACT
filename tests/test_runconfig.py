@@ -6,6 +6,7 @@ dispatch, record writing, and cross-stage chaining fully offline.
 """
 
 import json
+import re
 from pathlib import Path
 from unittest.mock import patch
 
@@ -1044,6 +1045,40 @@ def test_load_params_resolves_relative_to_base_dir(tmp_path):
     assert load_params("params.json", base_dir=tmp_path) == {
         "inputs": {"samples_per_entry": 3}}
     assert load_params(None) == {}
+
+
+@pytest.mark.parametrize(("params", "named"), [
+    ({"inputs": {"axes": {"lenght": None}}}, "inputs.axes names no axis 'lenght'"),
+    ({"outputs": {"axes": {"format": {"poem": 1}}}},
+     "outputs.axes.format names no value 'poem'"),
+    ({"inputs": {"axes": "all"}}, "inputs.axes must be an object"),
+    ({"inputs": {"seed": "42"}}, "params['inputs'].seed must be a whole number"),
+    ({"outputs": {"seed": True}}, "params['outputs'].seed must be a whole number"),
+])
+def test_a_wrong_axes_entry_or_seed_fails_at_load(params, named):
+    with pytest.raises(ValueError, match=re.escape(named)):
+        load_params(params)
+
+
+def test_the_axes_of_the_params_are_read_against_the_config_folders_table(tmp_path):
+    from redact import paths as P
+
+    table = json.loads((P.configs_dir() / "generation_axes.json").read_text(
+        encoding="utf-8"))
+    table["inputs"]["mood"] = {"label": "Mood", "dimension": "register", "values": {
+        "calm": {"label": "calm", "hint": "Calm.", "weight": 1}}}
+    (tmp_path / "generation_axes.json").write_text(json.dumps(table),
+                                                   encoding="utf-8")
+    mine = {"inputs": {"axes": {"mood": {"calm": 1}}, "seed": 7}}
+    assert load_params(mine, config_dir=tmp_path) == mine
+    with pytest.raises(ValueError, match="no axis 'mood'"):
+        load_params(mine)
+
+
+def test_a_dataset_type_file_with_a_wrong_axes_entry_fails_at_load(tmp_path):
+    config = _typed_axes(tmp_path / "cfg", {"lenght": None})
+    with pytest.raises(ValueError, match="no axis 'lenght'"):
+        load_recipe({"dataset_type": "eval", "config_dir": str(config)})
 
 
 # --- models per role: a name, or an object that says how it is served ----------
