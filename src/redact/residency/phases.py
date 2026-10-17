@@ -202,10 +202,12 @@ def plan_phases(
     # A share a more crowded stage lowered may not cover the need on an
     # engine's smallest card.
     for stage in placed:
-        stage.plan.oversized += [
-            fp for fp in stage.plan.footprints
-            if fp.setup == "vllm" and fp not in stage.plan.oversized
-            and _exceeds_its_cards(fp, stage.plan.gib_per_card or [])]
+        reported = {fp.engine for fp in stage.plan.oversized}
+        for fp in stage.plan.footprints:
+            if (fp.setup == "vllm" and fp.engine not in reported
+                    and _exceeds_its_cards(fp, stage.plan.gib_per_card or [])):
+                reported.add(fp.engine)
+                stage.plan.oversized.append(fp)
 
     # One set of cards per engine too: placement gave its copies only the
     # cards every stage of the lifetime has room for.

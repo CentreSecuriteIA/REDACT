@@ -301,9 +301,23 @@ def _log_summary(s: dict) -> None:
         logger.info("[telemetry] %d failed call(s) recorded in the trace", s["errors"])
 
 
+def _free_trace_path(directory: Path, run_id: str) -> Path:
+    """The first of ``<run_id>.trace.jsonl``, ``<run_id>-2.trace.jsonl``, ...
+    that does not exist, created empty so that no later run takes it."""
+    directory.mkdir(parents=True, exist_ok=True)
+    path, n = directory / f"{run_id}.trace.jsonl", 1
+    while True:
+        try:
+            path.open("x", encoding="utf-8").close()
+        except FileExistsError:
+            n += 1
+            path = directory / f"{run_id}-{n}.trace.jsonl"
+        else:
+            return path
+
+
 def _jsonl_sink(path: Path):
     """Return a sink that appends each event to ``path`` as one JSON line."""
-    path.parent.mkdir(parents=True, exist_ok=True)
     lock = threading.Lock()
 
     def write(event: dict) -> None:
@@ -344,8 +358,9 @@ def install(data_dir: str | Path | None = None, sink: str | None = None) -> Coll
 
     Args:
         data_dir: Working root; the trace lands in
-            ``<data_dir>/Datasets/<run_id>.trace.jsonl``. ``None`` uses
-            :func:`redact.get_output_dir`.
+            ``<data_dir>/Datasets/<run_id>.trace.jsonl``, with ``-2``,
+            ``-3``, ... after the run id when an earlier run of the same
+            second has that name. ``None`` uses :func:`redact.get_output_dir`.
         sink: ``"jsonl"`` / ``"wandb"`` / ``"off"``. ``None`` reads
             ``REDACT_TRACE``, defaulting to ``"jsonl"``.
 
@@ -368,7 +383,7 @@ def install(data_dir: str | Path | None = None, sink: str | None = None) -> Coll
         return Collector(None, [])
 
     run_id = datetime.now(timezone.utc).strftime("run-%Y%m%d-%H%M%S")
-    trace_path = paths.datasets(data_dir) / f"{run_id}.trace.jsonl"
+    trace_path = _free_trace_path(paths.datasets(data_dir), run_id)
     sinks = [_jsonl_sink(trace_path)]
     if sink == "wandb":
         wb = _wandb_sink()

@@ -216,6 +216,23 @@ class TestCards:
         monkeypatch.delenv("CUDA_VISIBLE_DEVICES")
         assert measure.detect_gpus(visible=True) == ("NVIDIA RTX A5000", 2)
 
+    @pytest.mark.parametrize("visible,count", [
+        ("0,7", 1), ("7,0", 0), ("1,0", 2), ("GPU-bbbb", 1)])
+    def test_visible_count_stops_at_an_entry_naming_no_card(
+            self, monkeypatch, visible, count):
+        """As CUDA does, and as the visible cards' sizes do: the planner must
+        not plan a card the engine cannot be handed."""
+        names, cards = "X\nX\n", "0, GPU-aaaa, 0, 98304, X\n1, GPU-bbbb, 0, 98304, X\n"
+
+        def nvidia_smi(cmd, **kwargs):
+            return SimpleNamespace(stdout=names if "--query-gpu=name" in cmd else cards)
+
+        monkeypatch.setattr(measure.shutil, "which", lambda _: "/usr/bin/nvidia-smi")
+        monkeypatch.setattr(measure.subprocess, "run", nvidia_smi)
+        monkeypatch.setenv("CUDA_VISIBLE_DEVICES", visible)
+        assert measure.detect_gpus(visible=True) == ("X", count)
+        assert len(measure.card_sizes_gib() or []) == count
+
     def test_billing_count_ignores_cuda_visible_devices(self, monkeypatch):
         _nvidia_smi(monkeypatch, self.TWO)
         monkeypatch.setenv("CUDA_VISIBLE_DEVICES", "1")

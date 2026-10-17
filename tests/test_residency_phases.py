@@ -1097,3 +1097,124 @@ def test_preload_skips_a_model_no_longer_wanted(local_model):
     with patch("redact.llms.client.ModelClient.create", side_effect=create):
         residency.preload([a, b], verbose=False, wanted=wanted).join()
     assert created == [a]
+
+
+class _Engine:
+    """A loaded engine that says when it is shut down."""
+
+    def __init__(self, name, log):
+        self.name, self.log = name, log
+
+    def shutdown(self):
+        self.log.append(self.name)
+
+
+@pytest.fixture
+def engines():
+    """vLLM's engine cache, emptied after the test. ``load(hf_id)`` puts a
+    fake engine in it; ``shut`` lists the engines shut down."""
+    import redact.llms.backends.vllm as vllm_module
+
+    shut = []
+
+    def load(hf_model_id):
+        key = vllm_module._engine_key(hf_model_id, None, {})
+        vllm_module._engines[key] = _Engine(hf_model_id, shut)
+        vllm_module._engine_loaded_at[key] = 0.0
+        return key
+
+    load.shut = shut
+    yield load
+    vllm_module._engines.clear()
+    vllm_module._engine_loaded_at.clear()
+
+
+def _run(tmp_path, monkeypatch, stages, models, **fronts):
+    """``run_pipeline`` on one 24 GiB card, nothing preloaded, with the
+    stages' fronts stubbed: by ``fronts``, else to do nothing."""
+    import pandas as pd
+
+    import redact
+    from redact import telemetry
+    from redact.driver import run_pipeline
+    from redact.llms.resources import measure
+
+    for front in ("generate_inputs", "generate_paraphrases"):
+        stub = fronts.get(front, lambda **kw: pd.DataFrame())
+        monkeypatch.setattr(redact, front, stub)
+    recipe = {"dataset_type": "eval", "data_dir": str(tmp_path), "stages": stages,
+              "models": models}
+    try:
+        with patch.object(measure, "detect_gpus", return_value=("FakeGPU", 1)), \
+             patch.object(measure, "card_sizes_gib", return_value=[24.0]), \
+             patch("redact.residency.preload", return_value=None):
+            run_pipeline(recipe, params={stage: {} for stage in stages}, verbose=False)
+    finally:
+        telemetry.uninstall()
+
+
+def test_a_run_keeps_the_engines_loaded_before_it(
+        local_model, engines, tmp_path, monkeypatch):
+    """A notebook's engines survive run_pipeline, planned by it or not; the
+    engines the run loaded are released at its end."""
+    import redact.llms.backends.vllm as vllm_module
+
+    gen, check = local_model("_ph_keep_gen"), local_model("_ph_keep_check")
+    users = engines("org/users-own-model")
+    planned = engines(f"org/{gen}")
+    _run(tmp_path, monkeypatch, ["inputs"], {"gen": gen, "check": check},
+         generate_inputs=lambda **kw: engines(f"org/{check}") and None)
+    assert set(vllm_module._engines) == {users, planned}
+    assert engines.shut == [f"org/{check}"]
+
+
+def test_a_stage_keeps_the_engines_loaded_before_the_run_that_no_stage_plans(
+        local_model, engines, tmp_path, monkeypatch):
+    """Entering the paraphrase stage releases gen, which no later stage
+    calls, and nothing a notebook loaded that the run does not plan."""
+    import redact.llms.backends.vllm as vllm_module
+
+    gen = local_model("_ph_keep2_gen")
+    para, check = local_model("_ph_keep2_para"), local_model("_ph_keep2_check")
+    users = engines("org/users-own-model")
+    engines(f"org/{gen}")
+    _run(tmp_path, monkeypatch, ["inputs", "paraphrase"],
+         {"gen": gen, "paraphraser": para, "paraphrase_check": check})
+    assert set(vllm_module._engines) == {users}
+    assert engines.shut == [f"org/{gen}"]
+
+
+def test_a_planned_engine_loaded_already_is_warned_about(
+        local_model, monkeypatch, caplog):
+    """A notebook loaded gen alone, so with 0.9 of the card. The plan gives
+    it 0.45 beside check, which gen's cached engine does not give back:
+    check may then fail to load, so the plan says so."""
+    import logging
+    import sys
+    from types import SimpleNamespace
+
+    import redact.llms.backends.vllm as vllm_module
+    from redact.llms.resources import measure
+    from tests.conftest import fake_vllm_modules
+
+    gen, check = local_model("_ph_nb_gen"), local_model("_ph_nb_check")
+    engine = SimpleNamespace(shutdown=lambda: None)
+    for name, module in fake_vllm_modules(lambda **kw: engine).items():
+        monkeypatch.setitem(sys.modules, name, module)
+    monkeypatch.setattr(vllm_module, "_prepare_environment", lambda: None)
+    try:
+        vllm_module._engine(f"org/{gen}", None, {})
+        with patch.object(measure, "detect_gpus", return_value=("FakeGPU", 1)), \
+             patch.object(measure, "card_sizes_gib", return_value=[24.0]), \
+             caplog.at_level(logging.WARNING, logger="redact.residency"):
+            (phase,) = plan_phases({"inputs": [gen, check]})
+    finally:
+        vllm_module.VLLMBackend.clear_cache()
+    said = (f"{gen}[vllm] is loaded already (gpu_memory_utilization=0.90 on "
+            f"card 0); the plan's share and cards for it apply only after it is "
+            f"released, so a model planned beside it may fail to load.")
+    assert [r.getMessage() for r in caplog.records] == [f"[residency] {said}"]
+    assert [w for w in phase.plan.warnings if "loaded already" in w] == [
+        f"WARNING: {said}"]
+    assert (_share(phase, gen), _share(phase, check)) == (0.45, 0.45)  # as before
+    assert vllm_module.engine_grants() == {}                      # gone with the engine

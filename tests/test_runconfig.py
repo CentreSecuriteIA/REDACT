@@ -467,7 +467,8 @@ def test_a_forced_exit_ends_the_engine_processes_first(monkeypatch):
     assert done == []
     with pytest.raises(_Exited):
         handlers[signal.SIGINT](signal.SIGINT, None)
-    assert done == [("end", {"all": True}), ("exit", 128 + signal.SIGINT)]
+    assert done == [("end", {"all": True, "quiet": True}),
+                    ("exit", 128 + signal.SIGINT)]
 
 
 def test_every_recipe_role_is_called_by_a_stage():
@@ -2141,7 +2142,8 @@ def test_a_run_waits_at_most_exit_wait_s_for_a_load_then_ends_it(
         hung.set()
         telemetry.uninstall()
     assert time.monotonic() - started < _PROMPT_S
-    assert unloads == [{"wait": vllm_module._GRACE_S}]
+    assert unloads == [{"engines": {"vllm": set(), "introspect": set()},
+                        "wait": vllm_module._GRACE_S}]
     assert f"the preload of {gen} has not finished" in caplog.text
     assert summary["stages"]["inputs"]["counts"] == {"rows": 0}
 

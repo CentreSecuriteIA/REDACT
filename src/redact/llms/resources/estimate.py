@@ -11,9 +11,11 @@ estimate that is too high costs a GPU, one that is too low ends in an OOM.
 All sizes are GiB (bytes / 1024**3).
 """
 
+import json
 import logging
 import math
 from dataclasses import dataclass
+from pathlib import Path
 
 logger = logging.getLogger(__name__)
 
@@ -53,6 +55,11 @@ DEFAULT_CUDA_CONTEXT_GIB = 0.6
 #TODO: make this a run-level setting, chosen at startup and capped per checkpoint.
 #: Context length of a vLLM engine whose setup sets no ``max_model_len``.
 DEFAULT_MAX_MODEL_LEN = 10_000
+
+#: Fields of ``config.json`` that name the checkpoint's longest context, in
+#: the order they are read.
+_CONTEXT_FIELDS = ("max_position_embeddings", "max_sequence_length", "seq_length",
+                   "n_positions", "model_max_length")
 
 #: ``gpu_memory_utilization`` of a vLLM engine loaded without a plan, and the
 #: share of a card the planner hands out. The rest is headroom: allocator
@@ -247,19 +254,61 @@ def estimate_weights_gib(
     return round(total / _BYTES_PER_GIB / max(1, tensor_parallel_size or 1), 2)
 
 
+def _config_json(hf_model_id: str) -> dict | None:
+    """The checkpoint's ``config.json`` as plain data, from its directory or
+    the hub cache: never downloaded, and no code of the checkpoint runs.
+    ``None`` when it is in neither or is not a JSON object."""
+    path = Path(hf_model_id) / "config.json"
+    if not path.is_file():
+        try:
+            from huggingface_hub import try_to_load_from_cache
+
+            cached = try_to_load_from_cache(hf_model_id, "config.json")
+        except Exception:  # noqa: BLE001 — not installed, or an id the hub rejects
+            return None
+        if not isinstance(cached, str):
+            return None
+        path = Path(cached)
+    try:
+        data = json.loads(path.read_text(encoding="utf-8"))
+    except (OSError, ValueError):
+        return None
+    return data if isinstance(data, dict) else None
+
+
+def _context_limit(hf_model_id: str, full) -> int | None:
+    """The longest context the checkpoint takes, or ``None`` when unknown.
+
+    The config's ``max_position_embeddings``, else the first of
+    :data:`_CONTEXT_FIELDS` that ``config.json`` sets, the language model's
+    (``text_config``) before the outer ones. The file is read for a config
+    that needs remote code, or that names its context otherwise.
+    """
+    limit = getattr(_language_config(full), "max_position_embeddings", None)
+    if limit:
+        return limit
+    data = _config_json(hf_model_id) or {}
+    for fields in (data.get("text_config"), data):
+        for key in _CONTEXT_FIELDS if isinstance(fields, dict) else ():
+            value = fields.get(key)
+            if isinstance(value, int) and not isinstance(value, bool) and value > 0:
+                return value
+    return None
+
+
 def effective_max_model_len(
     hf_model_id: str, max_model_len: int | None = None, config=_UNREAD
 ) -> int:
     """The context length a vLLM engine runs with.
 
     An explicit ``max_model_len`` wins. Otherwise it is
-    :data:`DEFAULT_MAX_MODEL_LEN`, capped at the config's
-    ``max_position_embeddings`` when that can be read.
+    :data:`DEFAULT_MAX_MODEL_LEN`, capped at the checkpoint's longest
+    context when that is known (:func:`_context_limit`).
     """
     if max_model_len:
         return max_model_len
     full = _load_config(hf_model_id) if config is _UNREAD else config
-    limit = getattr(_language_config(full), "max_position_embeddings", None)
+    limit = _context_limit(hf_model_id, full)
     return min(DEFAULT_MAX_MODEL_LEN, limit) if limit else DEFAULT_MAX_MODEL_LEN
 
 

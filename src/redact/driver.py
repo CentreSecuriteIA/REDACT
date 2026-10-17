@@ -193,6 +193,33 @@ def _own_pids() -> set[int]:
     return pids
 
 
+def _engine_parents(pids: list[int], own: set[int]) -> list[int]:
+    """The vLLM engine processes above ``pids``, other than this process's.
+
+    ``nvidia-smi`` lists the workers that hold the memory; after a
+    ``kill -9`` their engine processes live on above them, orphaned. An
+    ancestor counts when its name or command line starts as vLLM titles its
+    processes (``VLLM::``, or ``$VLLM_PROCESS_NAME_PREFIX::``). Found with
+    psutil; without it, none.
+    """
+    try:
+        import psutil
+    except ImportError:
+        return []
+    title = os.environ.get("VLLM_PROCESS_NAME_PREFIX", "VLLM") + "::"
+    found: dict[int, None] = {}
+    for pid in pids:
+        with contextlib.suppress(psutil.Error):
+            for parent in psutil.Process(pid).parents():
+                if parent.pid == 1 or parent.pid in own or parent.pid in pids:
+                    continue
+                with contextlib.suppress(psutil.Error):
+                    if any(text.startswith(title)
+                           for text in (parent.name(), *parent.cmdline()[:1])):
+                        found.setdefault(parent.pid)
+    return list(found)
+
+
 def _planned_card(
     cards: list[measure.CardUse], device: int,
 ) -> measure.CardUse | None:
@@ -241,7 +268,7 @@ def _check_cards(phases: list) -> None:
                                card.index, names)
         elif others:
             held.append(f"  GPU {card.index}: {names}")
-            pids += [str(pid) for pid, _, _ in others]
+            pids += [pid for pid, _, _ in others]
         elif not card.processes and card.used_gib >= _IDLE_GIB:
             logger.warning(
                 "[residency] GPU %d has %.1f of %.1f GiB in use, by no process "
@@ -249,19 +276,22 @@ def _check_cards(phases: list) -> None:
                 "planned on it may not load.",
                 card.index, card.used_gib, card.total_gib)
     if held:
-        lines, pids = "\n".join(held), " ".join(pids)
+        parents = _engine_parents(pids, own)
+        lines = "\n".join(held)
+        them = "them and their parent engine processes" if parents else "them"
         raise RuntimeError(
             f"The run plans a model on a card another process holds memory on, "
             f"so the model would fail to load there:\n{lines}\n"
             f"An earlier run killed with kill -9 leaves its vLLM engine "
-            f"processes behind. If these are such, end them with "
-            f"`kill -9 {pids}` and check that nvidia-smi shows the card "
-            f"empty; otherwise run on other cards (CUDA_VISIBLE_DEVICES). "
-            f"Nothing has run yet.")
+            f"processes behind. If these are such, end {them} with "
+            f"`kill -9 {' '.join(map(str, pids + parents))}` and check that "
+            f"nvidia-smi shows the card empty; otherwise run on other cards "
+            f"(CUDA_VISIBLE_DEVICES). Nothing has run yet.")
 
 
 def _enter_phase(
     phases: list, i: int, warm: set[str], verbose: bool = True,
+    kept: dict | None = None,
 ) -> tuple[threading.Thread, list[str]] | None:
     """Make stage ``i``'s local models the resident ones.
 
@@ -275,6 +305,8 @@ def _enter_phase(
         i: Index of the stage about to run.
         warm: Models handed to the preloader and still resident; updated
             in place. A running preload skips a model that leaves it.
+        kept: Engines no unload releases, as
+            :func:`~redact.residency.loaded_engines` returns them.
 
     Returns:
         The preload thread it started and the models handed to it, if any.
@@ -291,7 +323,7 @@ def _enter_phase(
             if verbose:
                 logger.info("[residency] stage %s: unloading %s",
                             phase.stage, ", ".join(sorted(dropped)))
-            residency.unload_local(keep=phase.resident)
+            residency.unload_local(keep=phase.resident, engines=kept)
         # What loads from here on loads under this stage's plan.
         residency.apply_plan(phase.plan)
         ahead = list(phase.loadable)
@@ -348,6 +380,9 @@ def _served(
         served by vLLM (the plan's count, else the recipe's, else ``None``)
         or ``workers`` for a hosted one. A pool of several models is a list
         of these, and a role the run calls no model for is ``None``.
+        ``copies`` is what was planned, read before any stage runs: when a
+        build with the plan's copies fails and one copy loads instead, the
+        trace's ``load`` event says so (``fallback``, ``planned_copies``).
     """
     from .llms.backends import resolve_setup
     from .llms.model_config import get_model_config
@@ -397,13 +432,14 @@ def run_pipeline(
     over its adversarial kind. No stage reads its rows back: the counts
     are taken from each stage's files, and the inputs are seeded from the
     constitution saved under ``data_dir``, in a training run always and in
-    an eval run when it has one. Local models the
-    run planned are released when it returns or raises, and the way the
-    recipe serves its models holds only until then. Before any of them
-    loads, the run stops if another process holds memory on a card the
-    plan puts one on (:func:`_check_cards`). At the end a preload still
-    loading is waited for at most ``EXIT_WAIT_S`` (60 s), then its load is
-    ended.
+    an eval run when it has one. The local engines the run loaded are
+    released when it returns or raises; those loaded before it, such as a
+    notebook's, stay loaded unless the run calls one and unloads it between
+    stages. The way the recipe serves its models holds only until then.
+    Before any of them loads, the run stops if another process holds memory
+    on a card the plan puts one on (:func:`_check_cards`). At the end a
+    preload still loading is waited for at most ``EXIT_WAIT_S`` (60 s), then
+    its load is ended.
 
     Returns:
         ``dataset_type``, ``data_dir``, ``stages`` (per stage, its
@@ -413,6 +449,8 @@ def run_pipeline(
     """
     from redact.jailbreak import load_spec
     from redact.llms.backends import capabilities
+
+    from . import residency
 
     recipe = load_recipe(recipe)
     params = load_params(recipe.get("params_file") if params is None else params,
@@ -454,7 +492,9 @@ def run_pipeline(
     phases: list = []
     warm: set[str] = set()
     preloads: list[tuple[threading.Thread, list[str]]] = []
+    before: dict = {}
     try:
+        before = residency.loaded_engines()
         # Before the plan, which reads it as every client the run builds does.
         capabilities.set_run_serving(
             {name: {key: how[key] for key in ("backend_type", "workers") if key in how}
@@ -472,10 +512,14 @@ def run_pipeline(
             }
         served = summary["serving"] = _served(
             ctx.models, stages, ctx.augmentations, serving, phases)
+        # Of the engines loaded before the run, those no stage calls stay
+        # through every stage.
+        unplanned = residency.loaded_engines(
+            exclude=[name for phase in phases for name in phase.resident])
 
         for i, name in enumerate(stages):
             stage = STAGES[name]
-            preload = _enter_phase(phases, i, warm, verbose=verbose)
+            preload = _enter_phase(phases, i, warm, verbose=verbose, kept=unplanned)
             if preload is not None:
                 preloads.append(preload)
             with telemetry.stage(name):
@@ -502,7 +546,6 @@ def run_pipeline(
         # stage's own error.
         try:
             if phases:
-                from . import residency
                 from .llms.backends import vllm
 
                 warm.clear()        # emptied first: the preloader skips the rest
@@ -520,7 +563,7 @@ def run_pipeline(
                             "[residency] the preload of %s has not finished "
                             "%g s after the run's end; ending its load to "
                             "release the cards.", ", ".join(names), vllm.EXIT_WAIT_S)
-                residency.unload_local(wait=vllm._GRACE_S)
+                residency.unload_local(engines=before, wait=vllm._GRACE_S)
                 vllm.set_planned_utilization({})      # the shares were this run's
                 vllm.set_planned_devices({})          # and so were the cards
             # Roll up tokens, engine time and cost. Also logged at INFO, so
