@@ -1,0 +1,102 @@
+{
+  "_comment": "The generation axes: what each input sample (inputs) and each response (outputs) is asked to look like. Each stage deals one spec per sample, a value per axis, evenly over each (category, entry_type) group at these weights (shares within an axis; 0 leaves a value out). A value's label and hint are the words the prompt shows, in the {sample_specs} and {response_spec} placeholders. not_with names values of other axes a value is never dealt with. An axis with from takes the entry's field instead of a value. A params file overlays the weights: inputs.axes / outputs.axes as {axis: {value: weight}}, an axis as null to leave it out, or false for no axes. Language, surface noise, containers and code-switching are augmentations, not axes. Read by content_moderation/axes.py.",
+  "inputs": {
+    "length": {
+      "label": "Length",
+      "values": {
+        "fragment": {"label": "a fragment", "hint": "3 to 10 words, shaped like a search query or a note rather than a full sentence.", "weight": 0.15},
+        "one_liner": {"label": "one line", "hint": "A single sentence or question.", "weight": 0.30},
+        "short": {"label": "short", "hint": "2 to 4 sentences.", "weight": 0.30},
+        "long": {"label": "long", "hint": "One or more paragraphs, with background or detail.", "weight": 0.20},
+        "very_long": {"label": "very long", "hint": "300 words or more, at the scale of a document or a pasted text.", "weight": 0.05}
+      }
+    },
+    "register": {
+      "label": "Register",
+      "values": {
+        "casual": {"label": "casual", "hint": "Everyday wording, as typed in a chat; contractions and loose grammar are fine.", "weight": 0.35},
+        "neutral": {"label": "neutral", "hint": "Plain, clear wording, neither casual nor formal.", "weight": 0.30},
+        "formal": {"label": "formal", "hint": "Careful, complete sentences, as in a work email or a letter.", "weight": 0.15},
+        "technical": {"label": "technical", "hint": "Uses the terms of the field and assumes some expertise.", "weight": 0.10},
+        "emotional": {"label": "emotional", "hint": "The writer's feelings show: worry, frustration, excitement or urgency.", "weight": 0.10}
+      }
+    },
+    "persona": {
+      "label": "Writer",
+      "values": {
+        "anonymous": {"label": "no stated role", "hint": "The message says nothing about who the writer is.", "weight": 0.30},
+        "student": {"label": "a student", "hint": "The role may show in what they ask or how; it is not offered as a reason to be answered.", "weight": 0.05},
+        "parent": {"label": "a parent", "hint": "The role may show in what they ask or how; it is not offered as a reason to be answered.", "weight": 0.05},
+        "teacher": {"label": "a teacher", "hint": "The role may show in what they ask or how; it is not offered as a reason to be answered.", "weight": 0.05},
+        "hobbyist": {"label": "a hobbyist", "hint": "Pursues the topic as a pastime; this may show in what they ask or how, and is not offered as a reason to be answered.", "weight": 0.05},
+        "developer": {"label": "a software developer", "hint": "The role may show in what they ask or how; it is not offered as a reason to be answered.", "weight": 0.05},
+        "researcher": {"label": "a researcher", "hint": "The role may show in what they ask or how; it is not offered as a reason to be answered.", "weight": 0.05},
+        "journalist": {"label": "a journalist", "hint": "The role may show in what they ask or how; it is not offered as a reason to be answered.", "weight": 0.05},
+        "fiction_writer": {"label": "a fiction writer", "hint": "The role may show in what they ask or how; it is not offered as a reason to be answered.", "weight": 0.05},
+        "caregiver": {"label": "a caregiver", "hint": "Looks after a relative, a patient or a client; this may show in what they ask or how, and is not offered as a reason to be answered.", "weight": 0.05},
+        "healthcare_worker": {"label": "a healthcare worker", "hint": "The role may show in what they ask or how; it is not offered as a reason to be answered.", "weight": 0.05},
+        "small_business_owner": {"label": "a small business owner", "hint": "The role may show in what they ask or how; it is not offered as a reason to be answered.", "weight": 0.05},
+        "office_worker": {"label": "an office worker", "hint": "The role may show in what they ask or how; it is not offered as a reason to be answered.", "weight": 0.05},
+        "tradesperson": {"label": "a tradesperson", "hint": "Works in a skilled trade such as plumbing, electrical work or construction; this may show in what they ask or how, and is not offered as a reason to be answered.", "weight": 0.05},
+        "gamer": {"label": "a gamer", "hint": "The role may show in what they ask or how; it is not offered as a reason to be answered.", "weight": 0.05}
+      }
+    },
+    "framing": {
+      "label": "Framing",
+      "values": {
+        "direct_request": {"label": "a direct request", "hint": "Asks for something to be done or given, as an instruction.", "weight": 0.35},
+        "question": {"label": "a question", "hint": "Asks a question.", "weight": 0.30},
+        "advice": {"label": "a request for advice", "hint": "Describes the writer's own situation and asks what to do.", "weight": 0.20, "not_with": {"length": ["fragment"]}},
+        "statement": {"label": "a statement", "hint": "States a view, a story or a remark without asking for anything.", "weight": 0.10},
+        "opinion_or_validation": {"label": "a request for an opinion", "hint": "Shares a view, a plan or a piece of work and asks what the reader thinks of it.", "weight": 0.05, "not_with": {"length": ["fragment"]}}
+      }
+    },
+    "directness": {
+      "label": "Directness",
+      "values": {
+        "explicit": {"label": "explicit", "hint": "Says plainly what it is about.", "weight": 0.55},
+        "implicit": {"label": "implicit", "hint": "What it is about is clear from context but never stated outright.", "weight": 0.30},
+        "euphemistic": {"label": "euphemistic", "hint": "Refers to the subject through softened or indirect words.", "weight": 0.15}
+      }
+    },
+    "focus": {
+      "label": "Focus",
+      "values": {
+        "single": {"label": "one subject", "hint": "The whole message is about this subject.", "weight": 0.75},
+        "mixed": {"label": "mixed", "hint": "The subject is one part of a longer message that is also about something else, in the writer's own words.", "weight": 0.25, "not_with": {"length": ["fragment", "one_liner"]}}
+      }
+    },
+    "domain": {"label": "Domain", "from": "subcategory"}
+  },
+  "outputs": {
+    "length": {
+      "label": "Length",
+      "values": {
+        "brief": {"label": "brief", "hint": "1 to 3 sentences.", "weight": 0.20},
+        "short": {"label": "short", "hint": "One paragraph.", "weight": 0.35},
+        "medium": {"label": "medium", "hint": "Several paragraphs or a list, about 150 to 400 words.", "weight": 0.30},
+        "long": {"label": "long", "hint": "A detailed answer of 400 words or more.", "weight": 0.15}
+      }
+    },
+    "format": {
+      "label": "Format",
+      "values": {
+        "prose": {"label": "prose", "hint": "Plain paragraphs, no lists or headings.", "weight": 0.35},
+        "list": {"label": "a bulleted list", "hint": "The main points as bullets, with a short lead-in.", "weight": 0.20},
+        "steps": {"label": "numbered steps", "hint": "An ordered sequence of steps.", "weight": 0.20, "not_with": {"length": ["brief"]}},
+        "sections": {"label": "headed sections", "hint": "Markdown headings, each over its own paragraphs or bullets.", "weight": 0.10, "not_with": {"length": ["brief", "short"]}},
+        "table": {"label": "a table", "hint": "A Markdown table holds the main content.", "weight": 0.05, "not_with": {"length": ["brief"]}},
+        "code": {"label": "code", "hint": "Centred on code, commands or a configuration in a code block, where the request allows it.", "weight": 0.10}
+      }
+    },
+    "register": {
+      "label": "Tone",
+      "values": {
+        "neutral": {"label": "neutral", "hint": "Plain and matter-of-fact.", "weight": 0.40},
+        "friendly": {"label": "friendly", "hint": "Warm and conversational.", "weight": 0.30},
+        "formal": {"label": "formal", "hint": "Careful and impersonal.", "weight": 0.15},
+        "technical": {"label": "technical", "hint": "Precise, in the terms of the field.", "weight": 0.15}
+      }
+    }
+  }
+}
