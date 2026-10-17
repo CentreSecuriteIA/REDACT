@@ -19,7 +19,9 @@ jailbreaks, are a part of each build and are counted in each run.
 The build now copies the accepted rows of every part. The rows of the
 rejected output ``out-2`` and the jailbreak error row ``jb-3`` are gone from
 each build that held them, and the build count of each run is its accepted
-rows: 19 of the eval run's 20, 90 of the training run's 92.
+rows: 19 of the eval run's 20, 89 of the training run's 92 (one of its
+jailbreaks draws the unicode suffix then ASCII art in a font that has no
+glyph for the suffix's letters, and is rejected).
 """
 
 import json

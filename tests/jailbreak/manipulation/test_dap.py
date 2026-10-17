@@ -49,6 +49,11 @@ class TestBuildDapPrompt:
                 break
 
 
+    def test_no_pairs_gives_the_question_alone(self):
+        result = _build_dap_prompt("harmful?", [], 4, random.Random(0))
+        assert result == ("Q1: harmful?\nA1:\n", {"harmful_idx": 1})
+
+
 class TestDapRandom:
     def test_short(self):
         random.seed(42)

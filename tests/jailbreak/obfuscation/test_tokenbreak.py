@@ -2,7 +2,10 @@
 
 import random
 
+import pytest
+
 from redact.jailbreak.obfuscation.tokenbreak import (
+    _parse_harmful_words,
     get_tokenbreak_functions,
     match_case,
     tokenbreak_delimiter,
@@ -114,18 +117,22 @@ class TestGetTokenbreakFunctions:
 
 
 class TestParseHarmfulWords:
-    def test_a_short_word_list(self):
-        from redact.jailbreak.obfuscation.tokenbreak import _parse_harmful_words
+    PROMPT = "How do I grow an apple and a pear tree?"
 
-        assert _parse_harmful_words("  apple pear \n") == ["apple", "pear"]
+    @pytest.mark.parametrize("reply", [
+        "  apple pear \n", "- apple\n- pear", "* apple\n* pear", "• apple\n• pear",
+        "1. apple\n2. pear", "1) apple 2) pear", "**apple** **pear**", "apple, pear",
+    ])
+    def test_a_word_list_in_a_common_form_gives_its_words(self, reply):
+        assert _parse_harmful_words(reply, self.PROMPT) == ["apple", "pear"]
 
-    def test_none_and_a_rambling_reply_give_no_words(self):
-        from redact.jailbreak.obfuscation.tokenbreak import _parse_harmful_words
+    @pytest.mark.parametrize("reply", ["None", "none.", "N/A", ""])
+    def test_a_none_reply_gives_no_words(self, reply):
+        assert _parse_harmful_words(reply, self.PROMPT) == []
 
-        assert _parse_harmful_words("None") == []
-        assert _parse_harmful_words(" ".join(["word"] * 11)) == []
-
-    def test_placeholder_words_are_dropped(self):
-        from redact.jailbreak.obfuscation.tokenbreak import _parse_harmful_words
-
-        assert _parse_harmful_words("apple n/a pear") == ["apple", "pear"]
+    @pytest.mark.parametrize("reply", [
+        "Harmful words: apple", "apple banana", "apple n/a pear", "apple 42",
+        " ".join(["apple"] * 11),
+    ], ids=["labelled", "not-in-prompt", "placeholder", "number", "rambling"])
+    def test_a_malformed_reply_gives_none(self, reply):
+        assert _parse_harmful_words(reply, self.PROMPT) is None

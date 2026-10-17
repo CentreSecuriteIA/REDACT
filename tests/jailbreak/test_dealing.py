@@ -14,6 +14,8 @@ from redact.jailbreak.hacking import get_all_hacking_functions
 from redact.jailbreak.plan import coverage, plan_run
 
 _GROUP = 20
+# Of 200 units, the fewest a request family may get (about 15 each is even).
+_LEAST_PER_FAMILY = 10
 
 
 def _one_group(n: int) -> pd.DataFrame:
@@ -104,3 +106,43 @@ def test_a_layer_left_two_or_more_short_of_its_target_is_logged(tmp_path, caplog
         "Plan: group (Cyber, harmful), iteration 0: the requests layer has 0 of "
         "its target 10; the pool or the compatibility rules left the rest no "
         "pick (see jb.coverage.csv)."]
+
+
+def _plan_kind(tmp_path, section: dict, n: int):
+    """Plan ``n`` inputs of one group under the adversarial ``section``; the
+    coverage rows."""
+    from redact.jailbreak.augmentation import resolve, rounds_of
+    from redact.jailbreak.pool import technique_pool
+
+    kind = resolve({"adversarial": section}, "adversarial")
+    rounds = rounds_of(kind)
+    manifest = tmp_path / "jb.manifest.jsonl"
+    plan_run(_one_group(n), technique_pool(kind), manifest_path=manifest, seed=42,
+             iterations=len(rounds), settings_per_iteration=rounds,
+             layer_rates=kind["layer_rates"] or None, verbose=False)
+    return _read_coverage(tmp_path / "jb.coverage.csv")
+
+
+def test_the_escalation_asks_rates_the_rules_can_meet(tmp_path, caplog):
+    """Hacking and manipulation exclude each other, so their rates in a round
+    sum to at most 1, and no group falls short of either."""
+    import logging
+
+    with caplog.at_level(logging.WARNING, logger="redact.jailbreak.plan"):
+        _plan_kind(tmp_path, {"rounds": "escalation"}, 40)
+    assert [r.getMessage() for r in caplog.records] == []
+
+
+def test_the_default_budget_deals_every_request_family(tmp_path):
+    """The requests layer is picked before the obfuscations, so the budget
+    they spend does not leave only the cheapest request families."""
+    from redact.jailbreak.technique import load_spec
+
+    families = load_spec()["families"]
+    requests = [name for name, family in families.items()
+                if family["layer"] == "requests"]
+    rows = _plan_kind(tmp_path, {}, 200)
+    drawn = {r["name"]: int(r["count"]) for r in rows if r["level"] == "family"}
+    short = {name: drawn.get(name, 0) for name in requests
+             if drawn.get(name, 0) < _LEAST_PER_FAMILY}
+    assert short == {}

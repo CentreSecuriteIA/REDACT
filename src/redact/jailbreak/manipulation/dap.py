@@ -25,6 +25,8 @@ def _build_dap_prompt(
     """
     rng = rng or random
     shots = rng.sample(benign_pairs, min(num_shots, len(benign_pairs)))
+    if not shots:
+        return f"Q1: {harmful_prompt}\nA1:\n", {"harmful_idx": 1}
     # Insert in the middle: never first (1), never last (len+1)
     harmful_idx = rng.randint(2, max(2, len(shots)))
 

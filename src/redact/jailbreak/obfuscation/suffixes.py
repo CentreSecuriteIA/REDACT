@@ -1,6 +1,6 @@
 """Suffix techniques: a random suffix of punctuation, fragments, symbols or emoji.
 
-``info`` is the suffix.
+``info`` is ``suffix=<suffix>``.
 """
 
 import random
@@ -37,7 +37,7 @@ def to_adversarial_suffix_punctuation(
             suffix += punct_type * repeat_count
             i += repeat_count
 
-    return prompt + " " + suffix, suffix
+    return prompt + " " + suffix, f"suffix={suffix}"
 
 
 def to_adversarial_suffix_fragments(
@@ -51,7 +51,7 @@ def to_adversarial_suffix_fragments(
     ]
     length = rng.randint(2, 10)
     suffix = " ".join(rng.choice(words) for _ in range(length))
-    return prompt + " " + suffix, suffix
+    return prompt + " " + suffix, f"suffix={suffix}"
 
 
 def to_adversarial_suffix_unicode(
@@ -62,7 +62,7 @@ def to_adversarial_suffix_unicode(
     symbols = ["\u2200", "\u2203", "\u2211", "\u21d2", "\u222b", "\u03bb", "\u03a9", "\u03b4"]
     length = rng.randint(3, 10)
     suffix = " ".join(rng.choice(symbols) for _ in range(length))
-    return prompt + " " + suffix, suffix
+    return prompt + " " + suffix, f"suffix={suffix}"
 
 
 def to_adversarial_suffix_emoji(
@@ -82,7 +82,7 @@ def to_adversarial_suffix_emoji(
         suffix += emoji * repeat_count
         i += repeat_count
 
-    return prompt + " " + suffix, suffix
+    return prompt + " " + suffix, f"suffix={suffix}"
 
 
 def get_suffix_functions() -> list[Callable]:

@@ -235,6 +235,21 @@ def test_a_fresh_run_killed_before_it_plans_leaves_no_old_plan(tmp_path, monkeyp
     assert [p.name for p in tmp_path.iterdir() if p.suffix != ".lock"] == []
 
 
+def test_a_plan_naming_a_technique_no_longer_registered_says_to_plan_again(tmp_path):
+    out = tmp_path / "jb.csv"
+    generate_jailbreaks(inputs=_inputs().head(2), output_path=out, seed=1, **PURE_KW)
+    manifest = Manifest.sidecar(out)
+    third = _inputs().iloc[2]
+    manifest.write([*manifest.load(), {
+        "sample_id": content_id(third["prompt"]), "iteration": 0,
+        "combination": ["to_renamed_away"], "settings": {"seed": 1},
+        "category": "Cyber", "entry_type": "harmful", "status": "planned"}])
+    with pytest.raises(ValueError, match="'to_renamed_away'.*resume=False"):
+        generate_jailbreaks(inputs=_inputs().head(3), output_path=out, seed=1,
+                            **PURE_KW)
+    assert lock_is_free(out.with_name("jb.state.jsonl"))
+
+
 def test_a_second_run_is_refused_before_it_plans(tmp_path):
     from filelock import FileLock
 
@@ -383,13 +398,105 @@ def test_entry_types_keep_the_inputs_of_those_types(tmp_path):
     assert list(df["entry_type"]) == ["benign", "benign"]
 
 
+# --- a kept plan against the run's section --------------------------------------
+
+
+def _allow(name: str) -> dict:
+    return _pure(techniques={"allow": [name]}, rounds=[{"exact_techniques": 1}])
+
+
+def test_a_plan_records_what_it_was_made_with(tmp_path):
+    import json
+
+    out = tmp_path / "jb.csv"
+    generate_jailbreaks(inputs=_inputs(), output_path=out, seed=1,
+                        **_allow("to_base64"))
+    made_with = json.loads(out.with_name("jb.plan.json").read_text(encoding="utf-8"))
+    assert made_with == {
+        "seed": 1, "rounds": made_with["rounds"], "pool": ["to_base64"],
+        "family_weights": None, "layer_rates": None}
+    assert [r["exact_techniques"] for r in made_with["rounds"]] == [1]
+
+
+@pytest.mark.parametrize(("changed", "named"), [
+    ({"seed": 2, **_allow("to_base64")}, "seed"),
+    ({"seed": 1, **_allow("to_rot13")}, "pool"),
+], ids=["seed", "pool"])
+def test_a_resume_under_another_section_or_seed_raises(tmp_path, changed, named):
+    out = tmp_path / "jb.csv"
+    generate_jailbreaks(inputs=_inputs(), output_path=out, seed=1,
+                        **_allow("to_base64"))
+    before = out.read_bytes()
+    with pytest.raises(ValueError, match=rf"\[{named!r}\].*resume=False"):
+        generate_jailbreaks(inputs=_inputs(), output_path=out, **changed)
+    assert out.read_bytes() == before
+    assert lock_is_free(out.with_name("jb.state.jsonl"))
+
+
+def test_a_plan_made_with_translation_raises_when_resumed_without_it(
+        tmp_path, monkeypatch):
+    import redact.jailbreak.pipeline as JPipe
+
+    monkeypatch.setattr(JPipe, "drive_units", lambda units, **kwargs: None)
+    out = tmp_path / "jb.csv"
+
+    def run(translation):
+        generate_jailbreaks(
+            inputs=_inputs(), output_path=out, seed=1, verbose=False,
+            augmentation={"adversarial": {"translation": translation,
+                                          "layers": {"deny": ["manipulation"]}},
+                          "natural": None})
+
+    run(translation=True)
+    with pytest.raises(ValueError, match="pool"):
+        run(translation=False)
+
+
+def test_a_resume_under_the_same_section_and_seed_is_quiet(tmp_path, caplog):
+    out = tmp_path / "jb.csv"
+    generate_jailbreaks(inputs=_inputs(), output_path=out, seed=1,
+                        **_allow("to_base64"))
+    with caplog.at_level("WARNING", logger="redact"):
+        again = generate_jailbreaks(inputs=_inputs(), output_path=out, seed=1,
+                                    **_allow("to_base64"))
+    assert caplog.records == [] and len(again) == len(_inputs())
+
+
+def test_a_plan_without_its_plan_file_resumes_and_warns_it_is_unchecked(
+        tmp_path, caplog):
+    out = tmp_path / "jb.csv"
+    generate_jailbreaks(inputs=_inputs().head(2), output_path=out, seed=1,
+                        **_allow("to_base64"))
+    out.with_name("jb.plan.json").unlink()
+    with caplog.at_level("WARNING", logger="redact.jailbreak.pipeline"):
+        df = generate_jailbreaks(inputs=_inputs().head(2), output_path=out, seed=2,
+                                 **_allow("to_rot13"))
+    (warning,) = [r.getMessage() for r in caplog.records]
+    assert "jb.plan.json" in warning and "resume=False" in warning
+    assert set(df["technique"]) == {"to_base64"}
+
+
+def test_a_fresh_run_writes_its_plan_file_again(tmp_path):
+    import json
+
+    out = tmp_path / "jb.csv"
+    generate_jailbreaks(inputs=_inputs(), output_path=out, seed=1,
+                        **_allow("to_base64"))
+    generate_jailbreaks(inputs=_inputs(), output_path=out, seed=2, resume=False,
+                        **_allow("to_rot13"))
+    made_with = json.loads(out.with_name("jb.plan.json").read_text(encoding="utf-8"))
+    assert (made_with["seed"], made_with["pool"]) == (2, ["to_rot13"])
+
+
 # --- the pool against the plan ---------------------------------------------------
 
 
 def test_a_resume_with_a_narrower_pool_runs_the_planned_techniques(
         tmp_path, monkeypatch):
     """A pending unit rebuilds its combination from every registered technique,
-    so the techniques the resumed run's pool leaves out still run."""
+    so the techniques the resumed run's pool leaves out still run. The plan
+    file is removed, as a plan with none is run unchecked; with one, the
+    other pool raises."""
     import itertools
 
     import redact.jailbreak.pipeline as JPipe
@@ -420,6 +527,7 @@ def test_a_resume_with_a_narrower_pool_runs_the_planned_techniques(
     pool = technique_pool(resolve(narrower["augmentation"], "adversarial"))
     assert pool and not {fn.__name__ for fn in pool} & set(off_pool)
 
+    out.with_name("jb.plan.json").unlink()
     df = generate_jailbreaks(inputs=_inputs(), output_path=out, seed=7, **narrower)
     assert Manifest.sidecar(out).load() == plan
     technique_of = dict(zip(zip(df["input_id"], df["iteration"]), df["technique"]))
@@ -487,7 +595,8 @@ def test_the_benign_data_is_made_with_the_stages_taxonomy_overlay_and_batch(
 def test_a_resume_loads_the_benign_data_its_plan_needs_whatever_its_pool(
         tmp_path, monkeypatch):
     """Else the pending units of a technique that needs it would be acked as
-    error rows, never to run again."""
+    error rows, never to run again. The plan file is removed, as a plan with
+    none is run unchecked."""
     import itertools
 
     import redact.jailbreak.pipeline as JPipe
@@ -510,11 +619,49 @@ def test_a_resume_loads_the_benign_data_its_plan_needs_whatever_its_pool(
     loaded = len(loads)
 
     # The resumed run's pool of pure obfuscations needs no benign data.
+    out.with_name("jb.plan.json").unlink()
     df = generate_jailbreaks(inputs=_inputs(), output_path=out, seed=7,
                              **{**PURE_KW, "auto_generate_benign": True})
     assert len(loads) == loaded + 1
     assert len(df) == len(_inputs()) and df["accepted"].all()
     assert set(df["technique"]) == {"to_fsh_random_short"}
+
+
+_FSH = {"adversarial": {"techniques": {"allow": ["to_fsh_random_short"]},
+                        "rounds": [{"exact_techniques": 1}]}, "natural": None}
+
+
+def test_without_auto_generate_benign_the_cache_is_loaded_as_it_is(
+        tmp_path, monkeypatch):
+    import redact.jailbreak.manipulation.benign as JBenign
+
+    def generate(*args, **kwargs):
+        raise AssertionError("benign data was generated")
+
+    monkeypatch.setattr(JBenign, "generate_benign_data", generate)
+    benign = tmp_path / "benign.csv"
+    pd.DataFrame([
+        {"main_category": "A", "sub_category": "s", "prompt": f"q{i}",
+         "answer": f"a{i}", "answer_type": answer_type}
+        for i in range(8) for answer_type in ("short", "long")
+    ]).to_csv(benign, index=False)
+    inputs = _inputs().head(3)
+    df = generate_jailbreaks(
+        inputs=inputs, output_path=tmp_path / "jb.csv", benign_path=benign,
+        seed=7, augmentation=_FSH, auto_generate_benign=False, verbose=False)
+    assert len(df) == len(inputs) and df["accepted"].all()
+    assert set(df["technique"]) == {"to_fsh_random_short"}
+
+
+def test_without_auto_generate_benign_or_a_cache_the_run_raises_before_a_row(
+        tmp_path):
+    out = tmp_path / "jb.csv"
+    with pytest.raises(ValueError, match="Benign data not found"):
+        generate_jailbreaks(
+            inputs=_inputs().head(3), output_path=out,
+            benign_path=tmp_path / "benign.csv", seed=7, augmentation=_FSH,
+            auto_generate_benign=False, verbose=False)
+    assert not out.exists()
 
 
 def test_a_pool_without_one_loads_no_benign_data(tmp_path, monkeypatch):
@@ -658,6 +805,26 @@ def test_without_inputs_the_inputs_of_the_run_are_found(tmp_path, seeded):
     df = generate_jailbreaks(data_dir=tmp_path, seed=7, **PURE_KW)
     assert list(df["prompt"]) == [text]
     assert list(df["input_id"]) == [content_id(text)]
+
+
+@pytest.mark.parametrize("given", [None, ["given", None, None]],
+                         ids=["no-column", "missing-ids"])
+def test_the_core_gives_each_input_its_id(tmp_path, given):
+    from redact.jailbreak.augmentation import rounds_of
+    from redact.jailbreak.pipeline import run_augmentation
+
+    inputs = _inputs().head(3)
+    if given is not None:
+        inputs = inputs.assign(sample_id=given)
+    kind = resolve({"adversarial": _PURE_KIND}, "adversarial")
+    df = run_augmentation(inputs, technique_pool(kind), client=make_client(),
+                          out_path=tmp_path / "jb.csv", rounds=rounds_of(kind),
+                          verbose=False)
+    prompts = list(inputs["prompt"])
+    expected = [content_id(p) for p in prompts]
+    if given is not None:
+        expected[0] = "given"
+    assert sorted(df["input_id"]) == sorted(expected)
 
 
 def test_without_inputs_in_either_tree_the_run_raises(tmp_path):
@@ -911,7 +1078,7 @@ def test_pool_run_without_retries_writes_the_same_rows(tmp_path, monkeypatch):
         {**row("zq2", "broken", "zq2", "ERROR: chain failed", False, "chain failed"),
          # An error row's sample_id is its own (content_id of its unit key), not
          # the input's.
-         "sample_id": content_id(f"{content_id('zq2')}:0")},
+         "sample_id": content_id(f"jailbreak:{content_id('zq2')}:0")},
     ] + [row(f"zq{i}", "one_step", f"S1:zq{i}", "one_step", True, "") for i in (1, 3, 4, 5)]
     assert {(r["input_id"], r["iteration"]): r for r in df.to_dict("records")} == {
         (r["input_id"], r["iteration"]): r for r in expected
@@ -987,7 +1154,7 @@ def test_pool_a_prompt_too_long_lands_in_the_units_error_row(tmp_path, monkeypat
     assert {k: rows["zq1"][k] for k in (
         "sample_id", "jailbreak", "technique", "technique_info", "is_noop",
         "accepted", "reasoning")} == {
-        "sample_id": content_id(f"{content_id('zq1')}:0"), "jailbreak": "zq1",
+        "sample_id": content_id(f"jailbreak:{content_id('zq1')}:0"), "jailbreak": "zq1",
         "technique": "two_step",
         "technique_info": f"ERROR: {message}", "is_noop": "True",
         "accepted": "False", "reasoning": message}

@@ -33,6 +33,11 @@ class TestToJson:
         assert "priority=" in info
         assert "format=" in info
 
+    def test_non_ascii_is_kept_as_it_is(self):
+        prompt = "don’t do it 😀"
+        result, _ = to_json(prompt, rng=random.Random(0))
+        assert prompt in result
+
 
 class TestToXml:
     def test_contains_prompt(self):

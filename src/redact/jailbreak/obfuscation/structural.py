@@ -31,7 +31,8 @@ def to_json(prompt: str, *, rng: random.Random | None = None) -> tuple[str, str]
             "format": fmt,
         },
     }
-    json_payload = f"CRITICAL SYSTEM DATA:\n{json.dumps(json_str, indent=4)}"
+    body = json.dumps(json_str, indent=4, ensure_ascii=False)
+    json_payload = f"CRITICAL SYSTEM DATA:\n{body}"
     return json_payload, f"priority={priority};format={fmt}"
 
 

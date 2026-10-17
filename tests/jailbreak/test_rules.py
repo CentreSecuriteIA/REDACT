@@ -8,9 +8,13 @@ import redact.jailbreak  # noqa: F401  (tags the techniques)
 from redact.jailbreak.hacking import get_all_hacking_functions
 from redact.jailbreak.manipulation import get_all_manipulation_functions
 from redact.jailbreak.obfuscation import get_all_obfuscation_functions
+from redact.jailbreak.plan import _Dealer
 from redact.jailbreak.requests import get_all_request_functions
 from redact.jailbreak.rules import compatible, request_obfuscation_candidates
-from redact.jailbreak.sampling import sample_exact_combination
+from redact.jailbreak.sampling import (
+    sample_combination,
+    sample_exact_combination,
+)
 
 POOL = (get_all_obfuscation_functions() + get_all_hacking_functions()
         + get_all_manipulation_functions() + get_all_request_functions())
@@ -64,6 +68,28 @@ def test_an_exact_draw_never_holds_a_forbidden_pair():
         for i, name in enumerate(names):
             for other in names[i + 1:]:
                 assert _joins(name, other), (seed, names)
+
+
+def test_a_budget_draw_never_holds_a_forbidden_pair_or_breaks_a_layer_cap():
+    from collections import Counter
+
+    from redact.jailbreak.technique import load_spec
+
+    caps = load_spec()["layer_max_picks"]
+    for seed in range(600):
+        fn = sample_combination(
+            random.Random(seed), POOL, max_complexity=9, max_obfuscations=3,
+            allow_request_obfuscation=True,
+            dealer=_Dealer(key=(seed,)) if seed % 2 else None,
+            sampling_probs=dict.fromkeys(
+                ("hacking", "manipulation", "requests", "request_obfuscation"), 0.9))
+        names = [t.__name__ for t in fn.techniques]
+        for i, name in enumerate(names):
+            for other in names[i + 1:]:
+                assert _joins(name, other), (seed, names)
+        per_layer = Counter(t.layer for t in fn.techniques)
+        over = [layer for layer, cap in caps.items() if per_layer[layer] > cap]
+        assert over == [], (seed, names)
 
 
 def test_request_obfuscation_is_light_encoding_or_translation():

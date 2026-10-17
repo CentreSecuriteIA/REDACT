@@ -32,12 +32,12 @@ def unit_gen(
     """The chain generator of one unit.
 
     Each technique draws its random choices from an ``rng`` seeded by the
-    plan's seed, the unit's id and iteration, and the technique's name, so a
-    replayed plan gives the same text; a unit with no seed leaves them to the
-    global ``random``. With ``capture`` the unit's LLM calls are tagged for
-    internals capture under a provisional ``{id}/{label}/attempt_{iteration}``
-    root, which :func:`row_of` relabels to the final ``sample_id`` once it is
-    known.
+    plan's seed, ``label``, the unit's id and iteration, and the technique's
+    name, so a replayed plan gives the same text and the two kinds draw apart;
+    a unit with no seed leaves them to the global ``random``. With ``capture``
+    the unit's LLM calls are tagged for internals capture under a provisional
+    ``{id}/{label}/attempt_{iteration}`` root, which :func:`row_of` relabels to
+    the final ``sample_id`` once it is known.
     """
     root = None
     if capture:
@@ -51,7 +51,7 @@ def unit_gen(
         benign_data=benign_data, prompt_dir=prompt_dir, internals_root=root,
         rng_seed=(
             None if unit.get("seed") is None
-            else (unit["seed"], unit["id"], unit["iteration"])
+            else (unit["seed"], label, unit["id"], unit["iteration"])
         ),
     )
 
@@ -171,13 +171,15 @@ def error_row_of(
     *,
     gen_model: str,
     resolve=None,
+    label: str = "jailbreak",
 ) -> dict:
     """The output row of a unit whose chain raised — the original kept.
 
-    ``sample_id`` is this row's own, ``content_id`` of its unit key, so an
-    error row never collides with its input row or any other row.
+    ``sample_id`` is this row's own, ``content_id`` of ``label`` and its unit
+    key, so an error row never collides with its input row, the other kind's
+    error row or any other row.
     """
-    sample_id = content_id(f"{unit['id']}:{unit['iteration']}")
+    sample_id = content_id(f"{label}:{unit['id']}:{unit['iteration']}")
     _rename_capture(unit, gen_model, sample_id, resolve)
     # text is the unchanged prompt, so _fields sets is_noop True.
     fields = _fields(unit, sample_id, unit["prompt"], f"ERROR: {exc}", False, str(exc))

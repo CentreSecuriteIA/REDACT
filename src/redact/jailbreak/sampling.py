@@ -50,7 +50,10 @@ def sample_combination(
     Two modes:
 
     - **Budget-driven** (default): probabilistic per-layer picking governed by
-        ``max_complexity``, ``max_obfuscations``, and ``sampling_probs``.
+        ``max_complexity``, ``max_obfuscations``, and ``sampling_probs``. The
+        hacking, manipulation and requests layers are picked first, at their
+        rates; the obfuscations then fill what the budget leaves, up to
+        ``max_obfuscations``.
     - **Count-driven** (``exact_techniques`` set): delegates to
         :func:`sample_exact_combination`, which picks exactly that many compatible
         techniques and ignores the complexity / obfuscation budget entirely. The
@@ -137,7 +140,14 @@ def sample_combination(
         if pick is not None:
             _commit(pick)
 
-    # Phase 3: Obfuscation (up to max_obfuscations families)
+    # Phase 3: Requests, before the obfuscations, so the rated layers take
+    # their picks from the budget first; the apply order is the layers'.
+    if include_requests and _include("requests", p_requests):
+        pick = _pick_from_layer("requests")
+        if pick is not None:
+            _commit(pick)
+
+    # Phase 4: Obfuscation (up to max_obfuscations families), what the budget leaves
     if include_obfuscation:
         obfusc_count = 0
         while obfusc_count < max_obfuscations:
@@ -147,12 +157,6 @@ def sample_combination(
             pick = _pick_by_family(rng, candidates, dealer)
             _commit(pick)
             obfusc_count += 1
-
-    # Phase 4: Requests
-    if include_requests and _include("requests", p_requests):
-        pick = _pick_from_layer("requests")
-        if pick is not None:
-            _commit(pick)
 
     # Phase 5: Request-layer obfuscation (optional, if enabled). Kept out of
     # `selected` because it is the one pick whose position is *not* its layer's:

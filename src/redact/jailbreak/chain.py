@@ -7,6 +7,7 @@ import hashlib
 import inspect
 import random
 from collections.abc import Callable, Iterable
+from pathlib import Path
 
 from redact.llm_pipeline import LLMRequest, drive_sync
 from redact.llms.client import ModelClient
@@ -85,7 +86,9 @@ def run_chain(
 
     Returns ``(text, info)``: the steps' infos joined by ``;``, a step that
     left the text unchanged as ``noop=<name>``. The first rejection stops the
-    chain and returns the text before it, with an info naming the technique.
+    chain and returns the text before it, with an info naming the technique;
+    a step that empties the text (an empty model reply, a render with nothing
+    drawn) is a rejection.
     """
     result = text
     info_parts: list[str] = []
@@ -110,6 +113,9 @@ def run_chain(
             )
         if new_text == result:
             info_parts.append(f"noop={technique.__name__}")
+        elif not new_text.strip():
+            return result, (
+                f"{DISCARDED}; technique={technique.__name__}; reason=empty text")
         elif info:
             info_parts.append(info)
         result = new_text
@@ -180,7 +186,9 @@ def apply_combination(
 
     Requests carry ``client.model`` as the generation model. When a technique
     is tagged ``requires_benign`` and no ``benign_data`` is given, it is loaded
-    from ``benign_cache_path`` or generated with ``client`` (``auto_benign``).
+    from ``benign_cache_path``, its missing pairs generated first with
+    ``client`` when ``auto_benign``; without ``auto_benign`` only a cache that
+    exists is loaded.
     ``prompt_dir`` is the prompt overlay of the techniques that take it and of
     the benign data.
 
@@ -189,10 +197,12 @@ def apply_combination(
         step rejected, and ``reasoning`` is then the info, else ``""``.
     """
     techniques = getattr(fn, "techniques", [fn])
-    if (benign_data is None and auto_benign
+    cached = benign_cache_path is not None and Path(benign_cache_path).exists()
+    if (benign_data is None and (auto_benign or cached)
             and any(getattr(t, "requires_benign", False) for t in techniques)):
         benign_data = get_or_generate_benign_data(
-            client=client, cache_path=benign_cache_path, prompt_dir=prompt_dir)
+            client=client if auto_benign else None, cache_path=benign_cache_path,
+            prompt_dir=prompt_dir)
 
     gen = run_chain(
         techniques, prompt,

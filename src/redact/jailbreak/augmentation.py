@@ -6,7 +6,8 @@ overlays its default from ``configs/jailbreak/augmentations.json`` key by key:
 a value given replaces the default's whole, except ``layers``, ``families``
 and ``techniques``, whose ``allow`` and ``deny`` lists replace the default's
 one by one. A kind given as ``None`` is off; a kind left out is the default.
-``translation`` alone decides whether a kind draws the translation family.
+A key starting with ``_``, in the section or in a kind, is a comment and is
+skipped. ``translation`` alone decides whether a kind draws the translation family.
 """
 
 import copy
@@ -99,6 +100,7 @@ def resolve(section: dict | None, kind: str) -> dict | None:
     where = f"augmentations.{kind}"
     if not isinstance(given, dict):
         raise ValueError(f"{where} must be an object or null, got {given!r}.")
+    given = {key: value for key, value in given.items() if not key.startswith("_")}
     unknown = [key for key in given if key not in _KIND_KEYS[kind]]
     if unknown:
         raise ValueError(

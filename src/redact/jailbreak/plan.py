@@ -3,7 +3,8 @@ manifest, and read back.
 
 A manifest row is ``{sample_id, iteration, combination, settings, category,
 entry_type, status}``: ``combination`` names the techniques in the order they
-apply, ``settings`` what the sampler was given, with the run's ``seed``.
+apply, ``settings`` what the sampler was given, with the run's ``seed``. The
+plan file beside the manifest holds what the whole plan was made with.
 """
 
 from __future__ import annotations
@@ -114,10 +115,16 @@ def assign_combination(
 def combination_of(names: list[str], registry: dict[str, Callable]) -> Callable:
     """The combined technique a manifest row names, in the order it names them.
 
-    An unknown name raises ``KeyError``, so a stale manifest fails loudly.
+    Raises:
+        ValueError: A name no registered technique has, as in a plan made
+            before a technique was renamed or removed.
     """
-    fns = [registry[n] for n in names]
-    return combine_techniques(*fns, sort_by_hierarchy=False)
+    for name in names:
+        if name not in registry:
+            raise ValueError(
+                f"The plan names the technique {name!r}, which no registered "
+                "technique implements; run with resume=False to plan again.")
+    return combine_techniques(*(registry[n] for n in names), sort_by_hierarchy=False)
 
 
 def plan_run(
@@ -147,8 +154,8 @@ def plan_run(
     its rate (``layer_rates`` over the spec's) and each family at its weight
     (``family_weights``, equal by default), evenly across the group and
     independent of the input order; a row's ``settings`` record the weights
-    when given. A coverage table is written beside the manifest. Returns
-    ``manifest_path``.
+    when given. The plan file (:func:`plan_inputs`) is written beside the
+    manifest first, and a coverage table after it. Returns ``manifest_path``.
     """
     base_kwargs = dict(sample_kwargs or {})
     if layer_rates is not None:
@@ -202,6 +209,13 @@ def plan_run(
                     }
                 _warn_short(dealer, it, manifest_path)
 
+    rounds = [{**(sample_kwargs or {}),
+               **(settings_per_iteration[it] if settings_per_iteration else {})}
+              for it in range(iterations)]
+    made_with = plan_inputs(pool, seed=seed, rounds=rounds,
+                            family_weights=family_weights, layer_rates=layer_rates)
+    plan_path(manifest_path).write_text(json.dumps(made_with, indent=1) + "\n",
+                                        encoding="utf-8")
     Manifest(manifest_path).write(units())
     coverage(manifest_path, pool)
 
@@ -224,13 +238,53 @@ def _warn_short(dealer: _Dealer, iteration: int, manifest_path: Path) -> None:
                 dealer.layer_counts[layer], target, coverage_path(manifest_path).name)
 
 
+def _beside(manifest_path, suffix: str) -> Path:
+    """The file ``<stem><suffix>`` beside the manifest at ``manifest_path``."""
+    manifest_path = Path(manifest_path)
+    ending = ".manifest.jsonl"
+    stem = (manifest_path.name[:-len(ending)] if manifest_path.name.endswith(ending)
+            else manifest_path.stem)
+    return manifest_path.with_name(f"{stem}{suffix}")
+
+
 def coverage_path(manifest_path) -> Path:
     """The coverage CSV beside the manifest at ``manifest_path``."""
-    manifest_path = Path(manifest_path)
-    suffix = ".manifest.jsonl"
-    stem = (manifest_path.name[:-len(suffix)] if manifest_path.name.endswith(suffix)
-            else manifest_path.stem)
-    return manifest_path.with_name(f"{stem}.coverage.csv")
+    return _beside(manifest_path, ".coverage.csv")
+
+
+def plan_path(manifest_path) -> Path:
+    """The plan file beside the manifest at ``manifest_path``: what the plan
+    was made with, as :func:`plan_inputs` gives it."""
+    return _beside(manifest_path, ".plan.json")
+
+
+def plan_inputs(
+    pool: list[Callable],
+    *,
+    seed: int,
+    rounds: list[dict],
+    family_weights: dict | None = None,
+    layer_rates: dict | None = None,
+) -> dict:
+    """What a plan is made with: ``seed``, ``rounds``, the ``pool``'s technique
+    names sorted, ``family_weights`` and ``layer_rates``, as JSON reads them
+    back."""
+    return json.loads(json.dumps({
+        "seed": seed, "rounds": rounds,
+        "pool": sorted(fn.__name__ for fn in pool),
+        "family_weights": family_weights, "layer_rates": layer_rates,
+    }))
+
+
+def changed_plan_inputs(manifest_path, current: dict) -> list[str] | None:
+    """The keys of ``current`` (:func:`plan_inputs`) whose values differ from
+    those the plan at ``manifest_path`` was made with; ``None`` when it has no
+    plan file to compare with."""
+    path = plan_path(manifest_path)
+    if not path.exists():
+        return None
+    made_with = json.loads(path.read_text(encoding="utf-8"))
+    return [key for key, value in current.items() if made_with.get(key) != value]
 
 
 def _manifest_rows(manifest_path: Path):
@@ -301,7 +355,9 @@ def default_escalation_schedule() -> list[dict]:
     """The built-in four rounds, each one round's sampler settings.
 
     Rounds one and two draw exactly one and two techniques; rounds three and
-    four draw by budget, the fourth with the larger one. It is what an
+    four draw by budget, the fourth with the larger one. A unit holds a
+    hacking or a manipulation technique, never both, so the two rates of a
+    round sum to at most 1. It is what an
     adversarial kind's ``"rounds": "escalation"`` names; each round is merged
     over the kind's budget settings.
     """
@@ -312,7 +368,7 @@ def default_escalation_schedule() -> list[dict]:
             "max_complexity": 6,
             "max_obfuscations": 2,
             "sampling_probs": {
-                "hacking": 0.7, "manipulation": 0.5,
+                "hacking": 0.7, "manipulation": 0.3,
                 "requests": 0.8, "request_obfuscation": 0.5,
             },
             "allow_request_obfuscation": True,
@@ -321,7 +377,7 @@ def default_escalation_schedule() -> list[dict]:
             "max_complexity": 9,
             "max_obfuscations": 3,
             "sampling_probs": {
-                "hacking": 0.9, "manipulation": 0.7,
+                "hacking": 0.9, "manipulation": 0.1,
                 "requests": 0.9, "request_obfuscation": 0.7,
             },
             "allow_request_obfuscation": True,

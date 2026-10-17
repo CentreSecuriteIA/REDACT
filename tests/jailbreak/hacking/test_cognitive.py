@@ -52,6 +52,14 @@ class TestConstruction:
         assert info == f"category={technique.__name__.removeprefix('to_')}"
 
 
+def test_an_empty_construction_is_rejected_naming_the_technique():
+    from tests.jailbreak.obfuscation.test_typos import row_of_replies
+
+    row = row_of_replies(to_persona_roleplay, ["scenario", ""])
+    assert (row["accepted"], row["jailbreak"]) == (False, "harmful prompt")
+    assert "technique=to_persona_roleplay" in row["reasoning"]
+
+
 class TestGetCognitiveFunctions:
     def test_returns_five(self):
         names = [f.__name__ for f in get_cognitive_functions()]

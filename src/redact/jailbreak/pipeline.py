@@ -20,14 +20,22 @@ from redact.dataset import (
     Manifest,
     append_rows,
     read_rows,
+    release_lock,
     resume_state,
+    row_ids,
 )
 from redact.llm_pipeline import drive_units, pool_size
 from redact.llms.client import ModelClient
 
 from . import pool as pool_module
 from .manipulation import get_or_generate_benign_data
-from .plan import coverage_path, plan_run
+from .plan import (
+    changed_plan_inputs,
+    coverage_path,
+    plan_inputs,
+    plan_path,
+    plan_run,
+)
 from .technique import load_spec
 from .units import error_row_of, is_pending, pending_units, row_of
 
@@ -65,26 +73,35 @@ def run_augmentation(
     its pending units run through :func:`drive_units`, up to ``batch_size`` per
     call, their rows appended every 32 units. The combination is read back
     through every registered technique, so a plan made with another pool still
-    replays, and with ``auto_generate_benign`` the benign data is loaded when
-    a pending unit's techniques need it, its pairs generated first for each
-    subcategory of ``benign_taxonomy`` (a file name under ``taxonomy_dir``, or
-    a loaded taxonomy) that ``benign_path`` lacks. ``rounds`` holds each round's
+    replays. The benign data at ``benign_path`` is loaded when a pending unit's
+    techniques need it: with ``auto_generate_benign`` its pairs are generated
+    first for each subcategory of ``benign_taxonomy`` (a file name under
+    ``taxonomy_dir``, or a loaded taxonomy) that the file lacks; without it a
+    missing file raises before any unit runs. ``rounds`` holds each round's
     sampler settings, as :func:`redact.jailbreak.augmentation.rounds_of`
     gives them (one round of the sampler's defaults when None);
     ``family_weights`` and ``layer_rates``
-    go to the dealing of :func:`plan_run`. ``label`` is the progress label and
-    the internals-capture root. With ``accept_noop`` False, a row whose text
+    go to the dealing of :func:`plan_run`. ``label`` is the progress label, the
+    internals-capture root, and part of the techniques' random seed and of an
+    error row's id. With ``accept_noop`` False, a row whose text
     is its input's is not accepted.
+
+    Each input's id is its ``sample_id`` when it has one, else the content id
+    of its prompt.
 
     Resume: completion is a sidecar ``*.state.jsonl`` ledger keyed
     ``(input_id, iteration)``; ``resume=True`` reuses the plan and skips its
     finished units, ``resume=False`` clears the output, ledger and plan first.
     A reused plan runs as it was made: an input it does not hold, accepted
-    after it was made, gets no unit, and a WARNING counts those inputs.
+    after it was made, gets no unit, and a WARNING counts those inputs. A
+    reused plan made with another ``seed``, ``rounds``, pool, ``family_weights``
+    or ``layer_rates`` (its plan file says) raises a ``ValueError``; one with
+    no plan file is run unchecked, with a WARNING.
 
     Returns:
         The rows of ``out_path``, or an empty frame when ``read_back`` is False.
     """
+    inputs = inputs.assign(sample_id=row_ids(inputs, "prompt"))
     out_path = Path(out_path)
     man_path = Path(manifest_path) if manifest_path else Manifest.sidecar(out_path).path
     rounds = [{}] if rounds is None else list(rounds)
@@ -127,8 +144,27 @@ def run_augmentation(
     if reused:
         if verbose:
             logger.info("Reusing existing manifest: %s", man_path)
+        changed = changed_plan_inputs(man_path, plan_inputs(
+            pool, seed=seed, rounds=rounds, family_weights=family_weights,
+            layer_rates=layer_rates))
+        if changed is None:
+            logger.warning(
+                "%s: the plan %s has no %s beside it, so whether this run's "
+                "section and seed are the ones it was made with is not checked; "
+                "it runs as it was made. Run with resume=False to plan again "
+                "(the stage starts over).", label, man_path.name,
+                plan_path(man_path).name)
+        elif changed:
+            release_lock(ledger)
+            raise ValueError(
+                f"{label}: this run's {changed} differ from those the plan "
+                f"{man_path.name} was made with (see {plan_path(man_path).name}), "
+                "and a resume keeps the plan as it was made. Run with "
+                "resume=False to plan again (the stage starts over), or with "
+                "the section and seed the plan was made with.")
     else:
         coverage_path(man_path).unlink(missing_ok=True)
+        plan_path(man_path).unlink(missing_ok=True)
         plan_run(
             inputs, pool, manifest_path=man_path, seed=seed,
             iterations=len(rounds), settings_per_iteration=rounds,
@@ -149,7 +185,8 @@ def run_augmentation(
     planned = total = written = 0
     needs_benign = False
     unplanned = set(position) if reused else set()
-    if verbose or auto_generate_benign or reused:
+    pool_needs_benign = any(getattr(fn, "requires_benign", False) for fn in pool)
+    if verbose or pool_needs_benign or reused:
         for plan_row in manifest:
             planned += 1
             unplanned.discard(str(plan_row["sample_id"]))
@@ -165,9 +202,10 @@ def run_augmentation(
             "unit. Run with resume=False to plan every input again (the stage "
             "starts over).", label, len(unplanned), len(position), man_path.name)
     benign_data = None
-    if auto_generate_benign and needs_benign:
+    if needs_benign:
         benign_data = get_or_generate_benign_data(
-            client=client, cache_path=benign_path, verbose=verbose,
+            client=client if auto_generate_benign else None,
+            cache_path=benign_path, verbose=verbose,
             taxonomy=benign_taxonomy, taxonomy_dir=taxonomy_dir,
             prompt_dir=prompt_dir, batch_size=batch_size)
 
@@ -199,7 +237,8 @@ def run_augmentation(
 
     def _on_error(i, exc):
         _row(live.pop(i),
-             lambda u, r: error_row_of(u, exc, r, spec_version, gen_model=client.model))
+             lambda u, r: error_row_of(u, exc, r, spec_version, gen_model=client.model,
+                                       label=label))
 
     def _units():
         # The plan is read one row at a time, as the driver takes units; closed

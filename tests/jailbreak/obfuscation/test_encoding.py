@@ -2,6 +2,7 @@
 
 import base64
 import codecs
+import random
 
 from redact.jailbreak.obfuscation.encoding import (
     get_encoding_functions,
@@ -32,6 +33,12 @@ class TestBase64:
         result = to_base64(SAMPLE)
         assert isinstance(result, tuple) and len(result) == 2
 
+    def test_a_long_prompt_encodes_to_one_line(self):
+        prompt = "a long prompt " * 15
+        encoded, _ = to_base64(prompt)
+        assert "\n" not in encoded
+        assert base64.b64decode(encoded).decode() == prompt
+
 
 class TestRot13:
     def test_roundtrip(self):
@@ -55,6 +62,9 @@ class TestRot18:
         decoded, _ = to_rot18(encoded)
         assert decoded == SAMPLE
 
+    def test_only_ascii_digits_rotate(self):
+        assert to_rot18("CO₂ in m² at ① and 5") == ("PB₂ va z² ng ① naq 0", "")
+
 
 class TestRot47:
     def test_roundtrip(self):
@@ -73,6 +83,12 @@ class TestUnicodeEscape:
         assert encoded == "\\u0041\\u0042"
 
 
+    def test_a_character_above_the_basic_plane_decodes_back(self):
+        encoded, _ = to_unicode_escape("a😀")
+        assert encoded.endswith("U0001f600")
+        assert codecs.decode(encoded, "unicode_escape") == "a😀"
+
+
 class TestAsciiOrdinal:
     def test_format(self):
         encoded, _ = to_ascii_ordinal("AB")
@@ -85,6 +101,13 @@ class TestSeparator:
         # one separator char between each character
         assert len(result) == 5
         assert info.startswith("sep=")
+
+
+    def test_a_mark_or_a_joined_sequence_stays_with_its_character(self):
+        accented = "e" + chr(0x301)     # e, then a combining acute accent
+        family = chr(0x1F468) + chr(0x200D) + chr(0x1F469)   # joined by a ZWJ
+        text, info = to_separator(f"{accented}{family}!", rng=random.Random(0))
+        assert text.split(info.removeprefix("sep=")) == [accented, family, "!"]
 
 
 class TestLeetspeak:

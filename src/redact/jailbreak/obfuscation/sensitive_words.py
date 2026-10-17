@@ -1,7 +1,8 @@
 """Sensitive-word techniques over the words a model marks harmful.
 
 ``info`` lists the detected words with the encoding, separator or
-substitutions applied to them.
+substitutions applied to them. A reply that is not a short list of the
+prompt's words discards the prompt.
 """
 
 import random
@@ -11,6 +12,7 @@ from functools import partial
 
 from redact.jailbreak.obfuscation.encoding import (
     SEPARATORS,
+    _clusters,
     to_ascii_ordinal,
     to_base64,
     to_leetspeak_advanced,
@@ -25,7 +27,7 @@ from redact.jailbreak.technique import TechniqueGen
 from redact.llm_pipeline import LLMRequest
 from redact.llms.prompting import build_messages, load_prompt
 
-from .tokenbreak import harmful_words_gen, match_case
+from .tokenbreak import MALFORMED_WORDS, harmful_words_gen, match_case
 
 
 def _sensitive_encode_finish(
@@ -51,10 +53,12 @@ def _sensitive_separator_finish(
     """Split each harmful word's characters with one randomly chosen separator."""
     sep = (rng or random).choice(SEPARATORS)
     if not harmful_words:
-        return sep.join(prompt), f"encoding=separator;sep={sep};detected_words="
+        return (sep.join(_clusters(prompt)),
+                f"encoding=separator;sep={sep};detected_words=")
     result = prompt
     for word in harmful_words:
-        result = re.sub(re.escape(word), sep.join(word), result, flags=re.IGNORECASE)
+        result = re.sub(re.escape(word), sep.join(_clusters(word)), result,
+                        flags=re.IGNORECASE)
     return (
         result,
         f"encoding=separator;sep={sep};detected_words={' '.join(harmful_words)}",
@@ -66,13 +70,14 @@ def _sensitive_char_finish(
 ) -> tuple[str, str]:
     """Split each harmful word's characters with a fixed separator."""
     if not harmful_words:
-        obfuscated = re.sub(r"\S+", lambda m: separator.join(m.group()), prompt)
+        obfuscated = re.sub(r"\S+", lambda m: separator.join(_clusters(m.group())),
+                            prompt)
         return obfuscated, f"char_sep={sep_name};detected_words="
     result = prompt
     for word in harmful_words:
         result = re.sub(
-            re.escape(word), separator.join(word), result, flags=re.IGNORECASE
-        )
+            re.escape(word), separator.join(_clusters(word)), result,
+            flags=re.IGNORECASE)
     return result, f"char_sep={sep_name};detected_words={' '.join(harmful_words)}"
 
 
@@ -156,6 +161,8 @@ def _make_word_fn(name: str, finish: Callable, doc: str) -> Callable:
 
     def fn(prompt: str, **kwargs) -> TechniqueGen:
         words = yield from harmful_words_gen(prompt, **kwargs)
+        if words is None:
+            return prompt, MALFORMED_WORDS
         return finish(prompt, harmful_words=words)
 
     fn.__name__ = fn.__qualname__ = name
@@ -177,6 +184,8 @@ _ENCODED = [
 def to_sensitive_words_encode_separator(prompt: str, **kwargs) -> TechniqueGen:
     """Separate each character of harmful words with a randomly chosen separator."""
     words = yield from harmful_words_gen(prompt, **kwargs)
+    if words is None:
+        return prompt, MALFORMED_WORDS
     return _sensitive_separator_finish(prompt, words, kwargs.get("rng"))
 
 
@@ -225,6 +234,8 @@ globals().update({fn.__name__: fn for fn in _ENCODED + _SEPARATED})
 def to_sensitive_words_variables(prompt: str, **kwargs) -> TechniqueGen:
     """Replace harmful words with VAR_n placeholders + a definitions clause."""
     words = yield from harmful_words_gen(prompt, **kwargs)
+    if words is None:
+        return prompt, MALFORMED_WORDS
     return _sensitive_variables_finish(prompt, words)
 
 
@@ -238,11 +249,13 @@ def to_synonym_substitution(prompt: str, **kwargs) -> TechniqueGen:
 
     Yields the harmful-word extraction request, then one synonym request per
     detected word. A multi-word (>4) synonym response is discarded (original
-    kept). Returns ``(modified_prompt, "substitutions=w1->s1;...")``.
+    kept). Returns ``(modified_prompt, "substitutions=w1->s1,...")``.
     """
     gen_model = kwargs.get("gen_model")
     prompt_dir = kwargs.get("prompt_dir")
     words = yield from harmful_words_gen(prompt, **kwargs)
+    if words is None:
+        return prompt, MALFORMED_WORDS
     if not words:
         return prompt, "substitutions="
 
@@ -261,7 +274,7 @@ def to_synonym_substitution(prompt: str, **kwargs) -> TechniqueGen:
             flags=re.IGNORECASE,
         )
         substitution_pairs.append(f"{word}->{synonym}")
-    return result, f"substitutions={';'.join(substitution_pairs)}"
+    return result, f"substitutions={','.join(substitution_pairs)}"
 
 
 def get_sensitive_words_functions() -> list[Callable]:

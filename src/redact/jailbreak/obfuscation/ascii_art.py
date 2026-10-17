@@ -1,12 +1,15 @@
 """ASCII-art technique: the prompt drawn in a random pyfiglet font.
 
-``info`` is ``font=<font>``.
+``info`` is ``font=<font>``. A prompt with a letter the font has no glyph for
+is discarded, since the font would leave it out.
 """
 
 import random
 from collections.abc import Callable
 
 import pyfiglet
+
+from redact.jailbreak.technique import DISCARDED
 
 ASCII_FONTS = [
     # Classic fonts
@@ -22,7 +25,10 @@ ASCII_FONTS = [
 def to_ascii_art(prompt: str, *, rng: random.Random | None = None) -> tuple[str, str]:
     """Convert text to ASCII art using a random font."""
     font = (rng or random).choice(ASCII_FONTS)
-    return pyfiglet.figlet_format(prompt, font=font), f"font={font}"
+    figlet = pyfiglet.Figlet(font=font)
+    if any(c.isalpha() and ord(c) not in figlet.Font.chars for c in prompt):
+        return prompt, f"{DISCARDED}; reason=letters the font {font} lacks"
+    return figlet.renderText(prompt), f"font={font}"
 
 
 def get_ascii_art_functions() -> list[Callable]:

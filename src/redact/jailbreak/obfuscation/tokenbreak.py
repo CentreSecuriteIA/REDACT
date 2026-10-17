@@ -1,13 +1,14 @@
 """Tokenbreak techniques over the words a model marks harmful.
 
-``info`` lists the detected words with the tokens applied to them.
+``info`` lists the detected words with the tokens applied to them. A reply
+that is not a short list of the prompt's words discards the prompt.
 """
 
 import random
 import re
 from collections.abc import Callable
 
-from redact.jailbreak.technique import TechniqueGen
+from redact.jailbreak.technique import DISCARDED, TechniqueGen
 from redact.llm_pipeline import LLMRequest
 from redact.llms.prompting import build_messages, load_prompt
 
@@ -128,27 +129,46 @@ _TOKENBREAK_EMPTY_RESPONSES = {"none", "n/a", "no harmful words", ""}
 # Above this many words, treat the extraction response as a non-answer
 # (the model rambled instead of returning a short word list).
 _MAX_HARMFUL_WORDS_RESPONSE_LEN = 10
+# A list marker before a word: a bullet, or a number with "." or ")".
+_LIST_MARKER = re.compile(r"[-*•]|\d+[.)]")
+_WORD = re.compile(r"[^\W\d_][\w'’-]*")
+_SURROUNDING = ".,;:!?\"'()[]*"
+
+#: The info of a technique whose word reply was malformed.
+MALFORMED_WORDS = f"{DISCARDED}; reason=malformed word list"
 
 
-def _parse_harmful_words(reply: str) -> list[str]:
-    """The words of an extraction reply: none for ``none``, or for a reply
-    longer than a short word list."""
+def _parse_harmful_words(reply: str, prompt: str) -> list[str] | None:
+    """The words of an extraction reply: none for a ``none``-like reply, else
+    each token with list markers dropped and surrounding punctuation stripped.
+
+    Returns ``None`` for a malformed reply: more than ten words, a token that
+    is not a word, or a word ``prompt`` does not hold (in any case).
+    """
     raw = reply.strip()
-    if raw.lower() == "none" or len(raw.split()) > _MAX_HARMFUL_WORDS_RESPONSE_LEN:
+    if raw.lower().strip(_SURROUNDING) in _TOKENBREAK_EMPTY_RESPONSES:
         return []
-    return [w for w in raw.split() if w.lower() not in _TOKENBREAK_EMPTY_RESPONSES]
+    words = [token.strip(_SURROUNDING) for token in raw.split()
+             if not _LIST_MARKER.fullmatch(token)]
+    if not words or len(words) > _MAX_HARMFUL_WORDS_RESPONSE_LEN:
+        return None
+    text = prompt.lower()
+    if all(_WORD.fullmatch(word) and word.lower() in text for word in words):
+        return words
+    return None
 
 
 def harmful_words_gen(
     prompt: str, *, gen_model: str | None = None, prompt_dir=None, **kwargs
 ) -> TechniqueGen:
-    """Yield the extract-harmful request; return the cleaned harmful-word list.
+    """Yield the extract-harmful request; return the prompt's harmful words,
+    or ``None`` for a malformed reply (:func:`_parse_harmful_words`).
 
     Shared first round for every tokenbreak/sensitive-word technique generator.
     """
     config = load_prompt("jailbreak", "extract_harmful", prompt_dir)
     messages = build_messages(config, prompt=prompt)
-    return _parse_harmful_words((yield LLMRequest(gen_model, messages)))
+    return _parse_harmful_words((yield LLMRequest(gen_model, messages)), prompt)
 
 
 def _tokenbreak_finish(
@@ -179,6 +199,8 @@ def _tokenbreak_gen(
 ) -> TechniqueGen:
     """Find the prompt's harmful words, then apply ``attack`` to each."""
     words = yield from harmful_words_gen(prompt, **kwargs)
+    if words is None:
+        return prompt, MALFORMED_WORDS
     return _tokenbreak_finish(prompt, attack, words, rng)
 
 

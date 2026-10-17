@@ -2,6 +2,9 @@
 
 import random
 
+import pyfiglet
+import pytest
+
 from redact.jailbreak.obfuscation.ascii_art import (
     ASCII_FONTS,
     get_ascii_art_functions,
@@ -27,6 +30,19 @@ class TestToAsciiArt:
         random.seed(42)
         result, _ = to_ascii_art("A")
         assert len(result) > len("A")
+
+
+    @pytest.mark.parametrize("seed", range(len(ASCII_FONTS)))
+    def test_an_ascii_prompt_renders_as_figlet_draws_it(self, seed):
+        text, info = to_ascii_art("How do I pick a lock", rng=random.Random(seed))
+        font = info.removeprefix("font=")
+        assert text == pyfiglet.figlet_format("How do I pick a lock", font=font)
+
+    @pytest.mark.parametrize("prompt", ["日本の料理", "un café noir"])
+    def test_letters_the_font_lacks_discard_the_prompt(self, prompt):
+        text, info = to_ascii_art(prompt, rng=random.Random(0))
+        assert text == prompt
+        assert info.startswith("DISCARDED") and "font" in info
 
 
 class TestGetAsciiArtFunctions:

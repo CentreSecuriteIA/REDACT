@@ -35,7 +35,7 @@ def to_uppercase(prompt: str) -> tuple[str, str]:
 
 def to_no_sentence_capitals(prompt: str) -> tuple[str, str]:
     """Start each sentence with a small letter."""
-    return re.sub(r"(^|[.!?]\s+)([A-Z])",
+    return re.sub(r"(^|[.!?]\s+)(\w)",
                   lambda m: m.group(1) + m.group(2).lower(), prompt), ""
 
 
@@ -63,8 +63,9 @@ def to_doubled_spaces(
 
 
 def to_dropped_punctuation(prompt: str) -> tuple[str, str]:
-    """Drop the punctuation and apostrophes, except a point inside a number."""
-    return re.sub(r"[.,;:!?']+(?!\d)", "", prompt), ""
+    """Drop the punctuation, apostrophes, quotes and dashes, except a point
+    inside a number."""
+    return re.sub(r"[.,;:!?'’‘“”«»—–]+(?!\d)", "", prompt), ""
 
 
 def to_doubled_punctuation(prompt: str) -> tuple[str, str]:
@@ -78,10 +79,18 @@ def to_abbreviations(prompt: str) -> tuple[str, str]:
 
 
 def to_stripped_accents(prompt: str) -> tuple[str, str]:
-    """Write accented letters without their accents."""
-    decomposed = unicodedata.normalize("NFD", prompt)
-    stripped = "".join(c for c in decomposed if not unicodedata.combining(c))
-    return unicodedata.normalize("NFC", stripped), ""
+    """Write accented Latin letters without their accents; the marks of other
+    scripts, which change the letter, stay. A prompt with no accented Latin
+    letter is unchanged."""
+    kept: list[str] = []
+    base = ""
+    for c in unicodedata.normalize("NFD", prompt):
+        if not unicodedata.combining(c):
+            base = c
+        elif unicodedata.name(base, "").startswith("LATIN"):
+            continue
+        kept.append(c)
+    return unicodedata.normalize("NFC", "".join(kept)), ""
 
 
 def get_casual_writing_functions() -> list[Callable]:
