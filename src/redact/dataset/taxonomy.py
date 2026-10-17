@@ -58,7 +58,8 @@ def create_taxonomy(
     """Write the taxonomy file ``name`` and return the taxonomy it holds.
 
     A category given as a bare description is written as
-    ``{"description": ...}``. ``taxonomy_dir`` defaults to the packaged
+    ``{"description": ...}``. The file is ``name`` with ``.json`` added
+    unless it ends in it. ``taxonomy_dir`` defaults to the packaged
     ``configs/taxonomy``, where :func:`load_taxonomy` reads by default.
     ``verbose`` logs the path written.
     """
@@ -72,7 +73,7 @@ def create_taxonomy(
     }
     directory = Path(taxonomy_dir or _DEFAULT_CONFIG_DIR)
     directory.mkdir(parents=True, exist_ok=True)
-    path = directory / f"{name}.json"
+    path = _json_path(directory, name)
     with open(path, "w", encoding="utf-8") as f:
         json.dump(taxonomy, f, indent=2, ensure_ascii=False)
     if verbose:
@@ -93,6 +94,14 @@ def iter_categories(taxonomy: dict) -> Iterator[tuple[str, dict]]:
             yield name, {"description": str(info)}
 
 
+def _json_path(directory: str | Path, name: str) -> Path:
+    """The file ``name`` under ``directory``, ``.json`` added unless it ends in it."""
+    path = Path(directory) / name
+    if path.suffix != ".json":
+        path = path.with_name(path.name + ".json")
+    return path
+
+
 def _load_json(
     directory: str | Path, name: str, what: str, former: dict[str, str],
 ) -> dict:
@@ -102,10 +111,7 @@ def _load_json(
     with (a former name with its current one, or the other way round), with
     a ``DeprecationWarning``.
     """
-    path = Path(directory) / name
-    if path.suffix != ".json":
-        path = path.with_name(path.name + ".json")
-
+    path = _json_path(directory, name)
     if not path.exists():
         path = _under_other_name(path, what, former)
 

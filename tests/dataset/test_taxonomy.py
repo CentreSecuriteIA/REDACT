@@ -30,6 +30,11 @@ class TestLoadTaxonomy:
         assert load_taxonomy("my.tax.json", config_dir=tmp_path) == load_taxonomy(
             "my.tax", config_dir=tmp_path)
 
+    def test_a_name_ending_in_json_is_written_under_it(self, tmp_path):
+        create_taxonomy("mine.json", {"A": "a"}, taxonomy_dir=tmp_path, verbose=False)
+        assert [p.name for p in tmp_path.iterdir()] == ["mine.json"]
+        assert list(load_taxonomy("mine", config_dir=tmp_path)["categories"]) == ["A"]
+
 
 class TestFormerNames:
     """The names before the config layout, read for one release."""

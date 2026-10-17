@@ -244,7 +244,7 @@ Input samples live in one `samples.csv` per category folder, under
 | Function | Does |
 |---|---|
 | `load_taxonomy(name, config_dir=None)` | A taxonomy file, from `configs/taxonomy/` by default. The name is taken with or without `.json`; a name with another suffix gets `.json` added (`harmful.v2` reads `harmful.v2.json`). A missing file raises `FileNotFoundError`. The former name `content_moderation_categories` loads `harmful`, and a folder holding only `content_moderation_categories.json` is read for `harmful`, each with a `DeprecationWarning` |
-| `create_taxonomy(name, categories, description="", taxonomy_dir=None, verbose=True)` | Writes `<name>.json` under `taxonomy_dir` (default the packaged `configs/taxonomy/`) and returns the taxonomy; a bare description is written as `{"description": ...}`. It always adds `.json`, so pass the name without it |
+| `create_taxonomy(name, categories, description="", taxonomy_dir=None, verbose=True)` | Writes `<name>.json` under `taxonomy_dir` (default the packaged `configs/taxonomy/`) and returns the taxonomy; a bare description is written as `{"description": ...}`. It adds `.json` unless the name ends in it |
 | `iter_categories(taxonomy)` | `(name, info)` per category, a bare description as `{"description": ...}` |
 | `load_hf_dataset(dataset_id, split, columns, filters, exclude, ...)`, `load_from_config(name)` | A HuggingFace dataset, filtered, directly or from a config under `configs/datasets/`; needs the `hf` extra |
 
