@@ -16,11 +16,13 @@ calls, the files it writes and the kwargs a recipe gives it.
 #   for the texts already in it. This goes when the stage moves onto
 #   drive_units with its ids on the ledger.
 
+import filecmp
 import inspect
+import json
 import logging
 import warnings
 from collections import Counter
-from collections.abc import Callable
+from collections.abc import Callable, Iterable
 from dataclasses import dataclass
 from functools import partial
 from pathlib import Path
@@ -35,11 +37,13 @@ from redact.content_moderation.paraphrase import (
     run_paraphrase_target,
 )
 from redact.dataset import (
+    Exclusion,
     Manifest,
     Part,
     accepted_mask,
     clear_stage,
     discover_categories,
+    exclusion_files,
     has_rows,
     input_files,
     iter_rows,
@@ -807,6 +811,7 @@ def build_dataset(
     include_variations: bool = True,
     include_outputs: bool = True,
     include_paraphrases: bool = True,
+    exclude_from: Iterable[str | Path] | str | Path | None = None,
     verbose: bool = True,
     read_back: bool = True,
 ) -> pd.DataFrame | dict[str, pd.DataFrame]:
@@ -821,7 +826,10 @@ def build_dataset(
     paraphrases, marked ``paraphrased``), ``eval_outputs.csv`` (the
     responses, then their paraphrases) and ``eval_jailbreaks.csv`` (the
     attacks that changed their input, ``is_jailbreak`` true, then the bare
-    benign inputs, false); the variations are in none of them.
+    benign inputs, false); the variations are in none of them. With
+    ``exclude_from``, an eval build leaves out the rows another run holds
+    (:class:`redact.dataset.Exclusion`): it counts them by reason in
+    ``Datasets/eval_excluded.json``, which the run record's counts take.
 
     Each file is copied in chunks into a temporary file that then replaces
     it. Only the rows whose ``accepted`` is true are copied; a CSV without
@@ -861,6 +869,10 @@ def build_dataset(
         include_variations: Include natural variations (training only).
         include_outputs: Include output response samples.
         include_paraphrases: Include paraphrases.
+        exclude_from: Eval only: the runs whose rows the eval files leave
+            out, each a run's folder (its ``Datasets/*.csv`` and its
+            constitution) or a CSV, such as a training run's
+            ``complete_dataset.csv``.
         verbose: Log progress.
         read_back: False returns empty frames and reads no file back.
 
@@ -870,13 +882,24 @@ def build_dataset(
         ``"jailbreaks"``.
 
     Raises:
-        ValueError: An unknown ``mode``, or an ``output_path`` in eval mode.
+        ValueError: An unknown ``mode``, an ``output_path`` in eval mode, or
+            an ``exclude_from`` in training mode.
+        FileNotFoundError: An ``exclude_from`` path that does not exist, or a
+            folder with no file to read. Nothing is written.
     """
     if mode not in ("training", "eval"):
         raise ValueError("mode must be 'training' or 'eval'.")
     if mode == "eval" and output_path:
         raise ValueError("output_path moves complete_dataset.csv, which an eval "
                          "build does not write; leave it out.")
+    held_by = _excluded_paths(exclude_from)
+    if held_by and mode != "eval":
+        raise ValueError("exclude_from leaves out of an eval build what another "
+                         "run holds; a training build takes none.")
+    held_files = _held_files(held_by)
+    if mode == "eval":
+        # Its counts are those of this build or of none.
+        paths.eval_excluded_json(data_dir).unlink(missing_ok=True)
     if verbose:
         logger.info("Build %s", "Complete Dataset" if mode == "training"
                     else "Eval Datasets")
@@ -894,7 +917,15 @@ def build_dataset(
             logger.info("No data found. Run generate_inputs/jailbreaks/outputs first.")
         return pd.DataFrame() if mode == "training" else {}
     if mode == "eval":
-        return _build_eval(data_dir, parts, verbose=verbose, read_back=read_back)
+        exclusion = None
+        if held_files:
+            _warn_on_shared_benign(data_dir, held_by)
+            exclusion = Exclusion(held_files)
+        built = _build_eval(data_dir, parts, exclusion, verbose=verbose,
+                            read_back=read_back)
+        if exclusion is not None:
+            _save_excluded(data_dir, held_files, exclusion.counts, verbose=verbose)
+        return built
 
     out_path = (Path(output_path) if output_path
                 else paths.complete_dataset_csv(data_dir))
@@ -1000,12 +1031,19 @@ _FROM_INPUT = ("subcategory", "source_taxonomy")
 
 
 def _build_eval(
-    data_dir: str | Path | None, parts: dict[str, Part], *, verbose: bool,
-    read_back: bool,
+    data_dir: str | Path | None, parts: dict[str, Part],
+    exclusion: Exclusion | None, *, verbose: bool, read_back: bool,
 ) -> dict[str, pd.DataFrame]:
-    """Write the three eval files from the stage ``parts``; their rows, by file."""
+    """Write the three eval files from the stage ``parts``, less the rows
+    ``exclusion`` leaves out; their rows, by file."""
+    files = _eval_parts(parts)
+    if exclusion is not None:
+        if "inputs" in parts:
+            exclusion.read_inputs(parts["inputs"].source)
+        files = {name: [_excluding(part, exclusion) for part in file_parts]
+                 for name, file_parts in files.items()}
     built = {}
-    for name, file_parts in _eval_parts(parts).items():
+    for name, file_parts in files.items():
         path = _EVAL_FILES[name](data_dir)
         written = write_concat(path, file_parts, unique="sample_id")
         if verbose:
@@ -1062,6 +1100,82 @@ def _eval_parts(parts: dict[str, Part]) -> dict[str, list[Part]]:
                        part("inputs", columns=negatives, where=_benign,
                             label="Benign inputs" if "inputs" in parts else "")],
     }
+
+
+def _excluding(part: Part, exclusion: Exclusion) -> Part:
+    """``part``, also leaving out the rows ``exclusion`` holds, of those its
+    own ``where`` keeps."""
+    origin = "input_id" if part.columns["input_id"] == "input_id" else "sample_id"
+    held = exclusion.keeps(part.columns["text"], origin)
+    if part.where is None:
+        return part._replace(where=held)
+    first = part.where
+
+    def where(chunk: pd.DataFrame) -> pd.Series:
+        kept = first(chunk).copy()
+        kept[kept] = held(chunk[kept])
+        return kept
+
+    return part._replace(where=where)
+
+
+def _excluded_paths(
+    exclude_from: Iterable[str | Path] | str | Path | None,
+) -> list[Path]:
+    """The paths ``exclude_from`` names: one, or each of several."""
+    if exclude_from is None:
+        return []
+    if isinstance(exclude_from, (str, Path)):
+        return [Path(exclude_from)]
+    return [Path(path) for path in exclude_from]
+
+
+def _held_files(held_by: list[Path]) -> list[Path]:
+    """The CSVs the paths of ``held_by`` name (:func:`dataset.exclusion_files`).
+
+    Raises:
+        FileNotFoundError: A path that does not exist, or a folder with no
+            file to read.
+    """
+    files = []
+    for path in held_by:
+        found = exclusion_files([path]) if path.exists() else []
+        if not found:
+            raise FileNotFoundError(
+                f"exclude_from names {path}, which is neither a CSV nor a run's "
+                "folder with a Datasets/*.csv or a constitution.")
+        files += found
+    return files
+
+
+def _warn_on_shared_benign(data_dir: str | Path | None, held_by: list[Path]) -> None:
+    """Warn when a run of ``held_by`` has the same benign pairs as this one.
+
+    The fsh and dap rows embed the pairs as they are.
+    """
+    own = paths.benign_csv(data_dir)
+    for folder in (path for path in held_by if path.is_dir()):
+        theirs = paths.benign_csv(folder)
+        if own.exists() and theirs.exists() and filecmp.cmp(own, theirs, shallow=False):
+            logger.warning(
+                "%s holds the same %s as this run: the fsh and dap rows of both "
+                "embed the same benign pairs. Generate them in each run's own "
+                "data_dir.", folder, paths.BENIGN_FILENAME)
+
+
+def _save_excluded(data_dir: str | Path | None, files: list[Path],
+                   counts: dict[str, int], *, verbose: bool) -> None:
+    """Save the counts of the rows an eval build left out, and log them."""
+    if verbose:
+        logger.info("Left out %d rows that %d other files hold: %s",
+                    sum(counts.values()), len(files), counts)
+    if counts["descriptions"]:
+        logger.warning(
+            "%d rows come from a constitution entry that another run's "
+            "constitution holds too; they were left out.", counts["descriptions"])
+    path = paths.eval_excluded_json(data_dir)
+    path.write_text(json.dumps({"sources": [str(f) for f in files],
+                                "excluded": counts}, indent=2), encoding="utf-8")
 
 
 def _changed(chunk: pd.DataFrame) -> pd.Series:
@@ -1145,6 +1259,8 @@ class Stage:
     ``sources``. ``folded`` names the params keys the
     run applies to a kwarg it passes itself (the jailbreak stage's flat
     keywords, to its ``augmentation``), so the front does not get them again.
+    ``extra_counts`` reads what the stage counts beyond its files' rows,
+    after it ran (the rows an eval build left out).
     """
 
     name: str
@@ -1154,6 +1270,7 @@ class Stage:
     recipe_kwargs: Callable[[RunContext], dict]
     sources: Callable[[RunContext], list[Path]]
     folded: tuple[str, ...] = ()
+    extra_counts: Callable[[RunContext], dict] | None = None
 
     @property
     def run(self) -> Callable[..., object]:
@@ -1356,6 +1473,14 @@ def _build_kwargs(ctx: RunContext) -> dict:
     return dict(data_dir=ctx.data_dir, mode=ctx.dataset_type, verbose=ctx.verbose)
 
 
+def _build_excluded(ctx: RunContext) -> dict:
+    """The rows an eval build left out because another run holds them."""
+    path = paths.eval_excluded_json(ctx.data_dir)
+    if ctx.dataset_type != "eval" or not path.exists():
+        return {}
+    return {"excluded": json.loads(path.read_text(encoding="utf-8"))["excluded"]}
+
+
 def _build_files(ctx: RunContext) -> tuple[list[Path], dict]:
     """The three eval files of an eval build, else the complete dataset."""
     if ctx.dataset_type == "eval":
@@ -1382,8 +1507,9 @@ def _build_sources(ctx: RunContext) -> list[Path]:
         "paraphrases": [at("paraphrase_inputs_path", paths.paraphrases_inputs_csv),
                         at("paraphrase_outputs_path", paths.paraphrases_outputs_csv)],
     }
-    return [path for part, files in parts.items()
-            if given.get(f"include_{part}", True) for path in files]
+    held = exclusion_files(_excluded_paths(given.get("exclude_from")))
+    return [*(path for part, files in parts.items()
+              if given.get(f"include_{part}", True) for path in files), *held]
 
 
 _GEN = ("gen", "uncensored_gen")
@@ -1412,5 +1538,6 @@ STAGES: dict[str, Stage] = {stage.name: stage for stage in (
           recipe_kwargs=_jailbreaks_kwargs, sources=_run_inputs,
           folded=augmentation_kinds.FLAT_KEYWORDS),
     Stage("build", "build_dataset", roles=(),
-          files=_build_files, recipe_kwargs=_build_kwargs, sources=_build_sources),
+          files=_build_files, recipe_kwargs=_build_kwargs, sources=_build_sources,
+          extra_counts=_build_excluded),
 )}

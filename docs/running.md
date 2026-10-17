@@ -377,6 +377,7 @@ Datasets/
   variations.csv                         # + .manifest.jsonl, .state.jsonl, .coverage.csv, .plan.json
   complete_dataset.csv                   # the build of a training run
   eval_inputs.csv  eval_outputs.csv  eval_jailbreaks.csv   # the build of an eval run
+  eval_excluded.json                     # with exclude_from: the rows it left out
   constitution.run.json  inputs.run.json  outputs.run.json
   paraphrase.run.json  jailbreaks.run.json  build.run.json
   run-<YYYYMMDD-HHMMSS>.trace.jsonl      # one per run_pipeline call; -2, -3, ... when the name is taken

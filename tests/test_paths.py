@@ -31,6 +31,7 @@ def test_all_artifact_resolvers(tmp_path):
     assert paths.eval_inputs_csv(tmp_path) == ds / "eval_inputs.csv"
     assert paths.eval_outputs_csv(tmp_path) == ds / "eval_outputs.csv"
     assert paths.eval_jailbreaks_csv(tmp_path) == ds / "eval_jailbreaks.csv"
+    assert paths.eval_excluded_json(tmp_path) == ds / "eval_excluded.json"
     assert paths.conversations_csv(tmp_path) == ds / "conversations.csv"
     assert paths.conversations_scored_csv(tmp_path) == ds / "conversations_scored.csv"
 

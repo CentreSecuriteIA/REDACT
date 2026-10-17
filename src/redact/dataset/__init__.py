@@ -43,8 +43,11 @@ from .save import CommitBuffer, commit
 # Starting part of a stage over
 from .drop import drop_units
 
+# What an eval build leaves out
+from .exclusion import Exclusion, exclusion_files
+
 # Row identity
-from .identity import content_id, row_id, row_ids
+from .identity import content_id, normalised_id, row_id, row_ids
 
 # Published datasets
 from .loading import load_from_config, load_hf_dataset
@@ -74,6 +77,7 @@ from .taxonomy import create_taxonomy, iter_categories, load_taxonomy
 
 __all__ = [
     "CommitBuffer",
+    "Exclusion",
     "JsonlSidecar",
     "Ledger",
     "Manifest",
@@ -88,6 +92,7 @@ __all__ = [
     "create_taxonomy",
     "discover_categories",
     "drop_units",
+    "exclusion_files",
     "has_rows",
     "input_files",
     "iter_categories",
@@ -98,6 +103,7 @@ __all__ = [
     "load_taxonomy",
     "merge_all",
     "merge_inputs",
+    "normalised_id",
     "read_rows",
     "release_lock",
     "resume_state",

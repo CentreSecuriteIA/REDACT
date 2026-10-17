@@ -137,12 +137,49 @@ the negatives of `eval_jailbreaks.csv`. When the build finds no part at all
 it writes nothing; otherwise each file is written, with its header when it
 has no row.
 
+### Leaving out what a training run holds
+
+A training run and an eval run are two runs on two `data_dir`s, with
+constitutions of their own. `exclude_from` (the `build` params key) names
+what the eval files must not share with: a run's folder (its
+`Datasets/*.csv` and `Data_cache/constitution/merged.csv`) or a CSV, such as
+a training run's `complete_dataset.csv`; a training build raises on it, and
+a path that does not exist, or a folder with none of those files, raises
+before anything is written. Of those files only the accepted rows count
+(those of a file without an `accepted` column, all), read in chunks into
+three sets of ids (`dataset.Exclusion`):
+
+| Reason | An eval row is left out when |
+|---|---|
+| `exact` | its `sample_id` is one of theirs |
+| `normalised` | its text is one of theirs up to case, spacing and punctuation (`dataset.normalised_id`, read from their `sample`, `jailbreak`, `output_response` and `text` columns) |
+| `descriptions` | its input's `source_sample_description` is an entry of theirs (`sample_description`, `source_sample_description`) |
+
+A row is checked for its own id and text first. A row derived from a
+left-out input (its paraphrases, its responses and theirs, its attacks) is
+left out too, for its input's reason, so every `input_id` of the eval files
+names a row of `eval_inputs.csv`. The build counts the rows left out of the
+three files by reason, logs them, warns when a row came from a shared
+constitution entry, and saves the counts with the files read in
+`Datasets/eval_excluded.json`; a build without `exclude_from` removes an
+earlier one. The run record's `counts` take them as `excluded`:
+
+```json
+{"rows": 2310, "excluded": {"exact": 4, "normalised": 11, "descriptions": 0}}
+```
+
+The build also warns when a folder of `exclude_from` has the same
+`Data_cache/benign/benign_samples.csv` as the eval run: the `fsh` and
+`dap` rows embed the benign pairs as they are, so both runs should generate
+their own. Near-duplicates in meaning are not looked for.
+
 ## Files
 
 A file's cells are copied as text, in chunks of 50,000 rows, so no part file
 is held in memory whole; only the fallback inputs part is read whole, and
 the `sample_id`s written are held in memory (an eval build also holds the
-inputs' `subcategory` and `source_taxonomy` by id). The rows go to
+inputs' `subcategory` and `source_taxonomy` by id, and with `exclude_from`
+the other run's ids). The rows go to
 `<target>.tmp`, synced to disk, which then replaces the target, so the
 target holds its old rows or all the new ones. With no part at all the
 build writes nothing and logs `No data found`.
@@ -156,4 +193,6 @@ empty frames.
 There is nothing to resume: every build writes its files again from the
 files on disk. The run record counts the rows of the files of the run's
 dataset type, and the accepted rows of a training build, which are the same
-number unless a part has no `accepted` column.
+number unless a part has no `accepted` column; an eval build with
+`exclude_from` adds `excluded`, and lists the files it read among its
+`sources`.

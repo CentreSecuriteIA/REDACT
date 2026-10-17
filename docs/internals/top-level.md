@@ -107,6 +107,7 @@ takes them.
 | `recipe_kwargs` | `ctx -> kwargs` the run passes the front itself. A value an earlier stage saves is a `Saved`, read when the stage starts |
 | `sources` | `ctx -> paths`: the files the stage reads its inputs from; those that exist go in its run record |
 | `folded` | Params keys the run applies to a kwarg it passes itself (the jailbreak stage's flat keywords, folded into `augmentation`) |
+| `extra_counts` | `ctx -> dict` or `None`: what the stage counts beyond its files' rows, read after it ran and added to its counts (the build's `excluded`) |
 
 `Stage.params(ctx)` returns the params file's entry for the stage and raises
 on a key that is not a parameter of the front. `Stage.check(ctx)` also
@@ -213,7 +214,7 @@ else the current directory.
 | `constitution_inputs_dir`, `constitution_inputs_merged_csv` | `Datasets/constitution_inputs/`, `Datasets/constitution_inputs_merged.csv` |
 | `output_responses_csv`, `jailbreaks_csv`, `variations_csv` | under `Datasets/` |
 | `paraphrases_inputs_csv`, `paraphrases_outputs_csv` | under `Datasets/` |
-| `eval_inputs_csv`, `eval_outputs_csv`, `eval_jailbreaks_csv` | under `Datasets/` |
+| `eval_inputs_csv`, `eval_outputs_csv`, `eval_jailbreaks_csv`, `eval_excluded_json` | under `Datasets/` |
 | `conversations_csv`, `conversations_scored_csv`, `complete_dataset_csv` | under `Datasets/` |
 | `benign_csv` | `Data_cache/benign/benign_samples.csv` |
 

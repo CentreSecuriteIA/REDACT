@@ -1,6 +1,7 @@
-"""A row's id: the content hash of its text."""
+"""A row's id: the content hash of its text, and of its text normalised."""
 
 import hashlib
+import re
 from itertools import repeat
 
 import pandas as pd
@@ -9,6 +10,17 @@ import pandas as pd
 def content_id(text: str) -> str:
     """The MD5 of ``text``, truncated to 16 hex characters."""
     return hashlib.md5(text.encode("utf-8")).hexdigest()[:16]
+
+
+# Neither a letter, a digit, an underscore nor a space, in any script.
+_PUNCTUATION = re.compile(r"[^\w\s]")
+
+
+def normalised_id(text: str) -> str:
+    """The content id of ``text`` in lower case, without punctuation, and with
+    each run of whitespace one space: two texts that differ only in those
+    have the same."""
+    return content_id(" ".join(_PUNCTUATION.sub("", text.lower()).split()))
 
 
 def row_id(row, text_col: str, id_col: str = "sample_id") -> str:

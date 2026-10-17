@@ -236,7 +236,9 @@ writes no complete dataset: it writes three files with one `text` and one
 | `eval_jailbreaks.csv` | the accepted attacks that changed their input (`is_jailbreak` true), then the bare benign inputs (`is_jailbreak` false) | the entry type |
 
 The variations are in none of them. Every row keeps its `sample_id`, and
-a derived row its `input_id`, as in a training run's files.
+a derived row its `input_id`, as in a training run's files. A training run
+and an eval run use two `data_dir`s; the eval build's `exclude_from` names
+the training run, and the rows it holds are left out and counted.
 
 ## Outside the recipe
 

@@ -16,6 +16,8 @@ It is responsible for:
 - what a run skips, and what a resume puts back (`resume.py`);
 - a fresh run of part of a stage (`drop.py`);
 - the per-category tree of inputs (`categories.py`);
+- what an eval build leaves out because another run holds it
+  (`exclusion.py`: `exclusion_files`, `Exclusion`);
 - writing and loading the taxonomy files (`taxonomy.py`) and published datasets
   (`loading.py`).
 
@@ -32,6 +34,7 @@ stored stays out of the resume logic.
 | `content_id(text)` | The MD5 of the text, cut to 16 hex characters |
 | `row_id(row, text_col, id_col="sample_id")` | The id a row carries in `id_col`, else the content id of its text. `None`, NaN, empty or `"nan"` count as missing |
 | `row_ids(frame, text_col, id_col="sample_id")` | `row_id` of every row, reading two columns only |
+| `normalised_id(text)` | The content id of the text in lower case, without punctuation, each run of whitespace one space |
 
 Every row a stage writes has a `sample_id`: the content id of its own text,
 or of its unit key where the row has no text of its own. A conversation uses

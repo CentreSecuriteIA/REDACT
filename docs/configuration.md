@@ -126,6 +126,7 @@ augmentation section has, such as `family_weights`, raises here.
 | `inputs_path` | `Datasets/constitution_inputs_merged.csv`, else the category files | The inputs part |
 | `jailbreak_path`, `variations_path`, `responses_path` | the stages' default files | The other parts |
 | `paraphrase_inputs_path`, `paraphrase_outputs_path` | the stage's default files | The paraphrase parts |
+| `exclude_from` | none | Eval only: a list of run folders or CSVs, such as a training run's; the eval files leave out every row they hold by id, by normalised text or by constitution entry, and the record counts them ([build](stages/build.md#leaving-out-what-a-training-run-holds)) |
 
 A path key moves one stage's file only. Later stages read the default paths
 unless given their own: the build has a path key per part, and the paraphrase

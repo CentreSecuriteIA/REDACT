@@ -23,6 +23,7 @@ PARAPHRASES_OUTPUTS_FILENAME = "paraphrases_outputs.csv"
 EVAL_INPUTS_FILENAME = "eval_inputs.csv"
 EVAL_OUTPUTS_FILENAME = "eval_outputs.csv"
 EVAL_JAILBREAKS_FILENAME = "eval_jailbreaks.csv"
+EVAL_EXCLUDED_FILENAME = "eval_excluded.json"
 CONVERSATIONS_FILENAME = "conversations.csv"
 CONVERSATIONS_SCORED_FILENAME = "conversations_scored.csv"
 CONSTITUTION_INPUTS_DIRNAME = "constitution_inputs"
@@ -134,6 +135,11 @@ def eval_outputs_csv(root: str | Path | None = None) -> Path:
 def eval_jailbreaks_csv(root: str | Path | None = None) -> Path:
     """An eval build's attacks, and the bare benign inputs beside them."""
     return datasets(root) / EVAL_JAILBREAKS_FILENAME
+
+
+def eval_excluded_json(root: str | Path | None = None) -> Path:
+    """What an eval build left out because another run holds it."""
+    return datasets(root) / EVAL_EXCLUDED_FILENAME
 
 
 def conversations_csv(root: str | Path | None = None) -> Path:

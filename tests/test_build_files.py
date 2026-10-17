@@ -644,6 +644,141 @@ def test_the_build_stage_counts_the_files_of_its_dataset_type(tmp_path, dataset_
     read = paths.variations_csv(tmp_path) in STAGES["build"].sources(ctx)
     assert read == (dataset_type == "training")
 
+# --- an eval build that leaves out what a training run holds -------------------
+
+def _training_folder(folder: Path, inputs: list[str], descriptions=()) -> Path:
+    """A training run's folder: its inputs, one rejected, and its constitution."""
+    rows = pd.DataFrame({"sample_id": [f"t-{n}" for n in range(len(inputs))],
+                         "sample": inputs, "accepted": True})
+    rejected = {"sample_id": "t-x", "sample": _TEXTS[2], "accepted": False}
+    rows = pd.concat([rows, pd.DataFrame([rejected])])
+    paths.datasets(folder).mkdir(parents=True)
+    rows.to_csv(paths.constitution_inputs_merged_csv(folder), index=False)
+    paths.constitution_dir(folder).mkdir(parents=True)
+    pd.DataFrame({"sample_description": ["an entry", *descriptions]}).to_csv(
+        paths.constitution_merged_csv(folder), index=False)
+    return folder
+
+
+def _described(data_dir: Path) -> None:
+    """Give the eval inputs a constitution description each."""
+    _INPUTS.assign(source_sample_description=["first", "second", "third"]).to_csv(
+        paths.constitution_inputs_merged_csv(data_dir), index=False)
+
+
+def test_an_eval_row_a_training_run_holds_is_left_out_with_its_descendants(
+        tmp_path):
+    """By id, by text up to case, spacing and punctuation, or by the
+    constitution entry its input came from."""
+    from redact import build_dataset
+
+    data_dir = tmp_path / "eval"
+    _write_stage_files(data_dir)
+    _described(data_dir)
+    training = _training_folder(tmp_path / "training", [
+        "SECOND input of two lines!!", "an unrelated input"], descriptions=["third"])
+    exact = paths.datasets(training) / "elsewhere.csv"
+    pd.DataFrame({"sample_id": ["po-2"], "sample": ["x"]}).to_csv(exact, index=False)
+
+    build_dataset(data_dir=data_dir, mode="eval", exclude_from=[training],
+                  verbose=False)
+    files = _eval_files(data_dir)
+    # in-2 by its text, in-3 by its description, and every row from in-3.
+    assert files["eval_inputs.csv"]["sample_id"].tolist() == ["in-1", "pi-1"]
+    assert files["eval_outputs.csv"]["sample_id"].tolist() == ["out-1"]
+    assert files["eval_jailbreaks.csv"]["sample_id"].tolist() == ["jb-1", "jb-4"]
+    assert json.loads(paths.eval_excluded_json(data_dir).read_text(
+        encoding="utf-8"))["excluded"] == {
+        "exact": 1, "normalised": 3, "descriptions": 3}
+
+
+def test_the_rows_of_a_training_dataset_file_are_left_out(tmp_path):
+    """A file is read for its ids, texts and descriptions; its rejected rows
+    are not training rows."""
+    from redact import build_dataset
+
+    _write_stage_files(tmp_path / "eval")
+    complete = tmp_path / "complete_dataset.csv"
+    pd.DataFrame({"sample_id": ["in-1", "x-2", "x-3"],
+                  "jailbreak": ["", "an answer", "a third input"],
+                  "accepted": [True, True, False]}).to_csv(complete, index=False)
+    build_dataset(data_dir=tmp_path / "eval", mode="eval", exclude_from=[complete],
+                  verbose=False)
+    files = _eval_files(tmp_path / "eval")
+    assert files["eval_inputs.csv"]["sample_id"].tolist() == ["in-2", "in-3", "pi-3"]
+    assert files["eval_outputs.csv"]["sample_id"].tolist() == ["out-3", "po-2"]
+
+
+def test_a_training_run_with_the_same_benign_pairs_is_warned_about(tmp_path, caplog):
+    import logging
+
+    from redact import build_dataset
+
+    _write_stage_files(tmp_path / "eval")
+    training = _training_folder(tmp_path / "training", ["an unrelated input"])
+    for folder in (tmp_path / "eval", training):
+        paths.benign_csv(folder).parent.mkdir(parents=True)
+        paths.benign_csv(folder).write_text("question,answer\nq,a\n", encoding="utf-8")
+    with caplog.at_level(logging.WARNING, logger="redact"):
+        build_dataset(data_dir=tmp_path / "eval", mode="eval",
+                      exclude_from=[training], verbose=False)
+    (warned,) = [r.getMessage() for r in caplog.records]
+    assert "benign_samples.csv" in warned and "same" in warned
+
+
+def test_a_missing_training_path_raises_before_any_file_is_written(tmp_path):
+    from redact import build_dataset
+
+    _write_stage_files(tmp_path)
+    with pytest.raises(FileNotFoundError, match="nowhere"):
+        build_dataset(data_dir=tmp_path, mode="eval",
+                      exclude_from=[tmp_path / "nowhere"], verbose=False)
+    assert not any(paths.datasets(tmp_path).glob("eval_*.csv"))
+
+
+def test_a_training_build_excludes_nothing(tmp_path):
+    from redact import build_dataset
+
+    _write_stage_files(tmp_path)
+    with pytest.raises(ValueError, match="exclude_from"):
+        build_dataset(data_dir=tmp_path, mode="training", exclude_from=[tmp_path])
+
+
+def test_an_eval_build_without_exclude_from_leaves_no_count_of_an_earlier_one(
+        tmp_path):
+    from redact import build_dataset
+
+    _write_stage_files(tmp_path / "eval")
+    training = _training_folder(tmp_path / "training", ["an unrelated input"])
+    build_dataset(data_dir=tmp_path / "eval", mode="eval", exclude_from=[training],
+                  verbose=False)
+    assert paths.eval_excluded_json(tmp_path / "eval").exists()
+    build_dataset(data_dir=tmp_path / "eval", mode="eval", verbose=False)
+    assert not paths.eval_excluded_json(tmp_path / "eval").exists()
+
+
+def test_a_run_records_what_its_eval_build_left_out(tmp_path, monkeypatch):
+    """In the build's counts, with the training files among its sources."""
+    from redact import run_pipeline
+    from redact.driver import read_record
+
+    _write_stage_files(tmp_path / "eval")
+    training = _training_folder(tmp_path / "training", ["FIRST input, with a comma"])
+    try:
+        summary = run_pipeline(
+            {"dataset_type": "eval", "data_dir": str(tmp_path / "eval"),
+             "stages": ["build"]},
+            params={"build": {"exclude_from": [str(training)]}}, verbose=False)
+    finally:
+        telemetry.uninstall()
+    excluded = {"exact": 0, "normalised": 5, "descriptions": 0}
+    assert summary["stages"]["build"]["counts"]["excluded"] == excluded
+    record = read_record("build", tmp_path / "eval")
+    assert record["counts"]["excluded"] == excluded
+    assert {str(paths.constitution_inputs_merged_csv(training)),
+            str(paths.constitution_merged_csv(training))} <= set(record["sources"])
+
+
 # --- a build without a merged inputs file -------------------------------------
 
 def _input_rows(data_dir: Path) -> pd.DataFrame:
