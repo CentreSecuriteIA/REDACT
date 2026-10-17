@@ -86,7 +86,9 @@ def run_chain(
 
     Returns ``(text, info)``: the steps' infos joined by ``;``, a step that
     left the text unchanged as ``noop=<name>``. The first rejection stops the
-    chain and returns the text before it, with an info naming the technique.
+    chain and returns the text before it, with an info naming the technique;
+    a step that empties the text (an empty model reply, a render with nothing
+    drawn) is a rejection.
     """
     result = text
     info_parts: list[str] = []
@@ -111,6 +113,9 @@ def run_chain(
             )
         if new_text == result:
             info_parts.append(f"noop={technique.__name__}")
+        elif not new_text.strip():
+            return result, (
+                f"{DISCARDED}; technique={technique.__name__}; reason=empty text")
         elif info:
             info_parts.append(info)
         result = new_text
