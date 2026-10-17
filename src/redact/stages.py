@@ -982,9 +982,14 @@ def build_dataset(
     # The natural variations the jailbreak stage writes beside its jailbreaks.
     var_path = (Path(variations_path) if variations_path
                 else paths.variations_csv(data_dir))
-    if include_variations and has_rows(var_path):
-        parts.append(Part(var_path, "natural_variation", accepted_only=True,
-                          label="Variations"))
+    if include_variations and var_path.exists():
+        if has_rows(var_path):
+            parts.append(Part(var_path, "natural_variation", accepted_only=True,
+                              label="Variations"))
+        elif verbose:
+            logger.info("Variations: none found")
+    elif verbose and include_variations:
+        logger.info("Variations: file not found (%s)", var_path)
 
     if include_outputs:
         resp_path = (Path(responses_path) if responses_path

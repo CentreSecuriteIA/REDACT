@@ -374,6 +374,27 @@ def test_the_variations_are_their_accepted_rows_from_the_path_given(tmp_path):
     assert variations() == []
 
 
+@pytest.mark.parametrize("left", ["missing", "empty"])
+def test_variations_left_out_are_logged_as_the_other_parts_are(
+        tmp_path, caplog, left):
+    import logging
+
+    from redact import build_dataset
+
+    _write_stage_files(tmp_path)
+    variations = paths.variations_csv(tmp_path)
+    if left == "missing":
+        variations.unlink()
+    else:
+        _VARIATIONS.iloc[:0].to_csv(variations, index=False)
+    with caplog.at_level(logging.INFO, logger="redact"):
+        build_dataset(data_dir=tmp_path)
+    logged = [r.getMessage() for r in caplog.records
+              if r.getMessage().startswith("Variations")]
+    assert logged == ([f"Variations: file not found ({variations})"]
+                      if left == "missing" else ["Variations: none found"])
+
+
 def test_every_part_adds_its_accepted_rows_only(tmp_path):
     """A rejected or error row keeps its input's ``entry_type``, so in the
     dataset it would carry the wrong label. It stays in its stage file."""
