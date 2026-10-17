@@ -35,7 +35,7 @@ def to_uppercase(prompt: str) -> tuple[str, str]:
 
 def to_no_sentence_capitals(prompt: str) -> tuple[str, str]:
     """Start each sentence with a small letter."""
-    return re.sub(r"(^|[.!?]\s+)([A-Z])",
+    return re.sub(r"(^|[.!?]\s+)(\w)",
                   lambda m: m.group(1) + m.group(2).lower(), prompt), ""
 
 
@@ -63,8 +63,9 @@ def to_doubled_spaces(
 
 
 def to_dropped_punctuation(prompt: str) -> tuple[str, str]:
-    """Drop the punctuation and apostrophes, except a point inside a number."""
-    return re.sub(r"[.,;:!?']+(?!\d)", "", prompt), ""
+    """Drop the punctuation, apostrophes, quotes and dashes, except a point
+    inside a number."""
+    return re.sub(r"[.,;:!?'’‘“”«»—–]+(?!\d)", "", prompt), ""
 
 
 def to_doubled_punctuation(prompt: str) -> tuple[str, str]:

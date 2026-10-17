@@ -3,6 +3,7 @@
 ``info`` is empty, except ``sep=<separator>`` from ``to_separator``.
 """
 
+import base64
 import codecs
 import random
 from collections.abc import Callable
@@ -14,7 +15,7 @@ _ROT47_PRINTABLE_MAX = 126
 
 def to_base64(prompt: str) -> tuple[str, str]:
     """Encode string to Base64."""
-    return codecs.encode(prompt.encode(), "base64").decode(), ""
+    return base64.b64encode(prompt.encode()).decode(), ""
 
 
 def to_rot13(prompt: str) -> tuple[str, str]:
@@ -23,12 +24,12 @@ def to_rot13(prompt: str) -> tuple[str, str]:
 
 
 def to_rot18(prompt: str) -> tuple[str, str]:
-    """Encode string using ROT18: ROT13 for letters + ROT5 for digits."""
+    """Encode string using ROT18: ROT13 for letters + ROT5 for ASCII digits."""
     result = []
     for c in prompt:
         if c.isalpha():
             result.append(codecs.encode(c, "rot_13"))
-        elif c.isdigit():
+        elif "0" <= c <= "9":
             result.append(str((int(c) + 5) % 10))
         else:
             result.append(c)

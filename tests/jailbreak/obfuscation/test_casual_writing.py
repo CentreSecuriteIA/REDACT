@@ -49,6 +49,18 @@ def test_a_share_of_the_spaces_changes_by_the_rng(fn, spaces):
     assert fn(TEXT, rng=random.Random(1)) == (text, info)
 
 
+def test_a_sentence_starting_with_an_accented_capital_is_lowered():
+    assert to_no_sentence_capitals("Élan vital. Über alles.") == (
+        "élan vital. über alles.", "")
+
+
+@pytest.mark.parametrize(("text", "expected"), [
+    ("don't", "dont"), ("don’t", "dont"), ("“Yes” – «no» — ‘ok’", "Yes  no  ok"),
+])
+def test_curly_quotes_and_dashes_are_dropped_as_the_straight_ones(text, expected):
+    assert to_dropped_punctuation(text) == (expected, "")
+
+
 def test_a_prompt_without_spaces_keeps_them():
     assert to_dropped_spaces("one", rng=random.Random(0)) == ("one", "")
 

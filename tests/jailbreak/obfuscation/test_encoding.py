@@ -32,6 +32,12 @@ class TestBase64:
         result = to_base64(SAMPLE)
         assert isinstance(result, tuple) and len(result) == 2
 
+    def test_a_long_prompt_encodes_to_one_line(self):
+        prompt = "a long prompt " * 15
+        encoded, _ = to_base64(prompt)
+        assert "\n" not in encoded
+        assert base64.b64decode(encoded).decode() == prompt
+
 
 class TestRot13:
     def test_roundtrip(self):
@@ -54,6 +60,9 @@ class TestRot18:
         encoded, _ = to_rot18(SAMPLE)
         decoded, _ = to_rot18(encoded)
         assert decoded == SAMPLE
+
+    def test_only_ascii_digits_rotate(self):
+        assert to_rot18("CO₂ in m² at ① and 5") == ("PB₂ va z² ng ① naq 0", "")
 
 
 class TestRot47:

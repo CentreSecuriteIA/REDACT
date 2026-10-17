@@ -238,7 +238,7 @@ def to_synonym_substitution(prompt: str, **kwargs) -> TechniqueGen:
 
     Yields the harmful-word extraction request, then one synonym request per
     detected word. A multi-word (>4) synonym response is discarded (original
-    kept). Returns ``(modified_prompt, "substitutions=w1->s1;...")``.
+    kept). Returns ``(modified_prompt, "substitutions=w1->s1,...")``.
     """
     gen_model = kwargs.get("gen_model")
     prompt_dir = kwargs.get("prompt_dir")
@@ -261,7 +261,7 @@ def to_synonym_substitution(prompt: str, **kwargs) -> TechniqueGen:
             flags=re.IGNORECASE,
         )
         substitution_pairs.append(f"{word}->{synonym}")
-    return result, f"substitutions={';'.join(substitution_pairs)}"
+    return result, f"substitutions={','.join(substitution_pairs)}"
 
 
 def get_sensitive_words_functions() -> list[Callable]:

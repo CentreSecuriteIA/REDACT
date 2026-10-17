@@ -36,6 +36,11 @@ class TestSuffixFunctions:
     def test_count(self):
         assert len(get_suffix_functions()) == 4
 
+    def test_info_names_the_suffix_as_a_field(self):
+        for fn in get_suffix_functions():
+            result, info = fn(SAMPLE, rng=random.Random(0))
+            assert info == f"suffix={result.removeprefix(SAMPLE + ' ')}"
+
     def test_deterministic_with_seed(self):
         for fn in get_suffix_functions():
             random.seed(123)
