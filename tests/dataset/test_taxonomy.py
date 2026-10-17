@@ -5,13 +5,7 @@ import warnings
 
 import pytest
 
-from redact.dataset.taxonomy import (
-    create_taxonomy,
-    get_seed_prompts,
-    iter_categories,
-    load_seeds,
-    load_taxonomy,
-)
+from redact.dataset.taxonomy import create_taxonomy, iter_categories, load_taxonomy
 
 
 class TestLoadTaxonomy:
@@ -46,11 +40,6 @@ class TestFormerNames:
             former = load_taxonomy("content_moderation_categories")
         assert former == load_taxonomy("harmful")
 
-    def test_the_former_seeds_name_loads_harmful_with_a_warning(self):
-        with pytest.warns(DeprecationWarning, match="'harmful'"):
-            former = load_seeds("content_moderation_seeds.json")
-        assert former == load_seeds("harmful")
-
     def test_a_folder_with_the_former_file_name_still_serves_harmful(self, tmp_path):
         create_taxonomy("content_moderation_categories", {"A": "a"},
                         taxonomy_dir=tmp_path, verbose=False)
@@ -77,7 +66,6 @@ class TestPackagedLayout:
 
         assert (paths.taxonomy_dir() / "harmful.json").is_file()
         assert (paths.taxonomy_dir() / "benign.json").is_file()
-        assert (paths.seeds_dir() / "harmful.json").is_file()
         assert (paths.dataset_configs_dir() / "content_moderation_input.json").is_file()
         hacking = paths.jailbreak_configs_dir() / "hacking"
         assert {"cognitive_techniques.json", "personas.json"} <= {
@@ -149,18 +137,6 @@ class TestIterCategories:
         for _, info in iter_categories(sample_taxonomy):
             assert isinstance(info, dict)
             assert "description" in info
-
-
-class TestGetSeedPrompts:
-    def test_returns_numbered_list(self):
-        seeds = {"seeds": {"violence": ["prompt1", "prompt2"]}}
-        result = get_seed_prompts(seeds, "violence")
-        assert "1. prompt1" in result
-        assert "2. prompt2" in result
-
-    def test_missing_category(self):
-        seeds = {"seeds": {}}
-        assert get_seed_prompts(seeds, "missing") == ""
 
 
 class TestLoadFromConfig:

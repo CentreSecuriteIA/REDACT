@@ -489,7 +489,6 @@ values. Delete every file you do not change, then set `prompt_dir`.
 | `configs/jailbreak/hacking/cognitive_techniques.json`, `personas.json` | The definitions of the cognitive techniques and of the named personas | `jailbreak/hacking/cognitive.py`, `personas.py` |
 | `configs/taxonomy/harmful.json` | The harmful categories: the default `taxonomy` | `dataset/taxonomy.py: load_taxonomy` |
 | `configs/taxonomy/benign.json` | The categories and subcategories of the fsh and dap techniques' benign Q&A pairs: the default `benign_taxonomy` | `dataset/taxonomy.py: load_taxonomy` |
-| `configs/seeds/harmful.json` | Hand-written seeds per category, for standalone inputs with `use_metaprompt: false` | `dataset/taxonomy.py: load_seeds` |
 | `configs/datasets/content_moderation_input.json` | A HuggingFace dataset id, split, columns and filters | `dataset/loading.py: load_from_config` |
 | `configs/runs/*.json` | The example recipes and params file | you |
 

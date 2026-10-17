@@ -198,11 +198,6 @@ def taxonomy_dir() -> Path:
     return configs_dir() / "taxonomy"
 
 
-def seeds_dir() -> Path:
-    """Package-bundled seed prompts (``src/redact/configs/seeds``)."""
-    return configs_dir() / "seeds"
-
-
 def dataset_configs_dir() -> Path:
     """Package-bundled HuggingFace dataset configs (``src/redact/configs/datasets``)."""
     return configs_dir() / "datasets"

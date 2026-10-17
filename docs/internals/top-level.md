@@ -19,7 +19,7 @@ Under `src/redact/`:
 | `multi_turn/` | Conversation datasets: settings, actors, `generate_conversations`, `evaluate_conversations` |
 | `multiturn_attacks/`, `optimization/` | Crescendo and PAIR attacks against a safety-trained target; a beam search over conversation moves ([conversations](../stages/conversations.md#attacks-and-search)) |
 | `dataset/` | Rows on disk: identity, the ledger and manifest, resume, the per-category tree ([dataset.md](dataset.md)) |
-| `configs/` | Package data: `llm/` (registry, roles, GPU prices), `jailbreak/` (the spec, the augmentation defaults, technique templates), `taxonomy/`, `seeds/`, `datasets/`, `runs/` (example recipes) |
+| `configs/` | Package data: `llm/` (registry, roles, GPU prices), `jailbreak/` (the spec, the augmentation defaults, technique templates), `taxonomy/`, `datasets/`, `runs/` (example recipes) |
 | `prompts/` | One prompt JSON per pipeline and step |
 | `stages.py`, `recipe.py`, `driver.py`, `paths.py` | This page |
 | `telemetry.py` | The run trace and the cost roll-up ([telemetry.md](telemetry.md)) |
@@ -200,8 +200,8 @@ else the current directory.
 
 Package folders take no root: `package_dir`, `prompts_dir`, `configs_dir`,
 `llm_configs_dir`, `models_json`, `roles_json`, `gpu_pricing_json`,
-`taxonomy_dir` (`harmful.json`, `benign.json`), `seeds_dir` (`harmful.json`),
-`dataset_configs_dir` (`configs/datasets/`), `jailbreak_configs_dir`.
+`taxonomy_dir` (`harmful.json`, `benign.json`), `dataset_configs_dir`
+(`configs/datasets/`), `jailbreak_configs_dir`.
 
 ## The seven steps of a stage
 

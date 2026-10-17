@@ -69,14 +69,8 @@ from .rows import (
 # The ledger and the manifest
 from .sidecar import JsonlSidecar, Ledger, Manifest
 
-# Taxonomy and seed files
-from .taxonomy import (
-    create_taxonomy,
-    get_seed_prompts,
-    iter_categories,
-    load_seeds,
-    load_taxonomy,
-)
+# Taxonomy files
+from .taxonomy import create_taxonomy, iter_categories, load_taxonomy
 
 __all__ = [
     "CommitBuffer",
@@ -94,7 +88,6 @@ __all__ = [
     "create_taxonomy",
     "discover_categories",
     "drop_units",
-    "get_seed_prompts",
     "has_rows",
     "input_files",
     "iter_categories",
@@ -102,7 +95,6 @@ __all__ = [
     "keys_in",
     "load_from_config",
     "load_hf_dataset",
-    "load_seeds",
     "load_taxonomy",
     "merge_all",
     "merge_inputs",

@@ -436,6 +436,6 @@ rate. [internals/telemetry.md](internals/telemetry.md) lists the events.
 | A stage stops on a provider error (for example 429, model overloaded) | A failed call is the transport failing, so it stops the stage; the SDK retries twice first | Resume: finished units are kept |
 | WARNING `GPU cost reported as $0` | Local GPUs held, and no GPU price set | Set a rate (see above) |
 | `DeprecationWarning` for flat augmentation keys | `include_*`, `sampling_probs` and the other flat keywords | Write them in the `adversarial` kind |
-| `DeprecationWarning` naming `content_moderation_categories` or `content_moderation_seeds` | The former names of `harmful.json` in `configs/taxonomy/` and `configs/seeds/`, read for one release | Write `"taxonomy": "harmful"`; rename a file of your own `harmful.json` |
+| `DeprecationWarning` naming `content_moderation_categories` | The former name of `harmful.json` in `configs/taxonomy/`, read for one release | Write `"taxonomy": "harmful"`; rename a file of your own `harmful.json` |
 | WARNING `jailbreak: N of the M inputs are not in the plan ...` | A resume keeps the plan made before those inputs were accepted | Run the jailbreak stage with `"resume": false` to plan them |
 | `ValueError: combination_spec.json and the technique registries differ` at import | A technique is registered without a spec entry, or the reverse | See [extending.md](extending.md#add-a-jailbreak-technique) |

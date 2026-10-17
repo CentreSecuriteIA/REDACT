@@ -80,7 +80,7 @@ REDACT/
 │       │   ├── save.py              # commit / CommitBuffer: a save (rows, then acks)
 │       │   ├── drop.py              # drop_units: a fresh run of part of a stage
 │       │   ├── categories.py        # The inputs tree constitution_inputs/{category}/samples.csv: sample_row, merge_all, merge_inputs, take_per_group
-│       │   ├── taxonomy.py          # create_taxonomy, taxonomy and seed file loading, category iteration
+│       │   ├── taxonomy.py          # create_taxonomy, taxonomy file loading, category iteration
 │       │   └── loading.py           # HuggingFace dataset loading
 │       │
 │       ├── constitution/            # Constitution generation for classifiers
@@ -153,8 +153,6 @@ REDACT/
 │       │   │       ├── impersonation_templates.json   # 8 good-person profession variants
 │       │   │       ├── temporal_templates.json        # 4 past-tense framing variants
 │       │   │       └── asking_templates.json          # innocuous_question + ask_for_details variants
-│       │   ├── seeds/
-│       │   │   └── harmful.json     # Hand-written seed prompts per category (standalone inputs)
 │       │   └── taxonomy/            # Category taxonomy definitions
 │       │       ├── harmful.json     # The harmful categories: the recipe's default "taxonomy"
 │       │       └── benign.json      # The benign data's categories: the recipe's default "benign_taxonomy"
@@ -271,7 +269,7 @@ Rows on disk. A stage's output is a CSV under `Datasets/`: one file for most sta
 - `save.py` — how a save is made. `commit` and `CommitBuffer` write the rows of finished units and then their acks.
 - `drop.py` — `drop_units` takes some units out of a stage for a fresh run of part of it.
 - `categories.py` — the per-category tree `Datasets/constitution_inputs/{category}/samples.csv` of input samples, the default folder of its functions. `sample_row` builds one input row in the tree's column order. `merge_all(dataset_dir)` merges the accepted rows of every category under a directory. `merge_inputs(data_dir)` gives the accepted inputs of a run, from that tree. The output, jailbreak and paraphrase stages read their inputs through it when they are given none, and so does `build_dataset` when it finds no merged inputs file. `take_per_group` caps a merged frame per `(category, entry_type)`.
-- `taxonomy.py` — `load_taxonomy` and `load_seeds` read the taxonomy and seed JSON files under `configs/`. `iter_categories` yields the categories of a taxonomy, and `get_seed_prompts` formats the seeds of a category for a prompt.
+- `taxonomy.py` — `load_taxonomy` reads a taxonomy file under `configs/taxonomy/`, `create_taxonomy` writes one, and `iter_categories` yields the categories of a taxonomy.
 - `loading.py` — `load_hf_dataset` loads a published dataset from the HuggingFace Hub with column and row filters, and `load_from_config` does so from a JSON config under `configs/`.
 
 ---

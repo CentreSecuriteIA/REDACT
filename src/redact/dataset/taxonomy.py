@@ -1,5 +1,5 @@
-"""The taxonomy and seed JSON files under ``configs/``: write a taxonomy, load
-them, and read what generation needs.
+"""The taxonomy files under ``configs/taxonomy/``: write one, load one, and
+read its categories.
 
 A taxonomy file::
 
@@ -13,8 +13,6 @@ A taxonomy file::
         "aliases": {"AltName": "CanonicalName", ...},
         "groups": {"group_name": ["Cat1", "Cat2"], ...}
     }
-
-A seeds file maps each category to its hand-written prompts under ``"seeds"``.
 """
 
 import json
@@ -28,11 +26,9 @@ from .. import paths
 logger = logging.getLogger(__name__)
 
 _DEFAULT_CONFIG_DIR = paths.taxonomy_dir()
-_DEFAULT_SEEDS_DIR = paths.seeds_dir()
 
 # Former file names, read for one release: former -> current.
 _FORMER_TAXONOMIES = {"content_moderation_categories": "harmful"}
-_FORMER_SEEDS = {"content_moderation_seeds": "harmful"}
 
 
 def load_taxonomy(
@@ -101,39 +97,6 @@ def iter_categories(taxonomy: dict) -> Iterator[tuple[str, dict]]:
             yield name, info
         else:
             yield name, {"description": str(info)}
-
-
-def load_seeds(
-    name: str,
-    seeds_dir: str | Path | None = None,
-) -> dict:
-    """Load the seeds file ``name``, with or without its ``.json``.
-
-    ``seeds_dir`` defaults to the packaged ``configs/seeds``. The former name
-    ``content_moderation_seeds`` loads ``harmful``, with a
-    ``DeprecationWarning``, for one release.
-
-    Raises:
-        FileNotFoundError: The directory holds no such file.
-    """
-    if seeds_dir is None:
-        seeds_dir = _DEFAULT_SEEDS_DIR
-    return _load_json(seeds_dir, name, "Seeds file", _FORMER_SEEDS)
-
-
-def get_seed_prompts(
-    seeds: dict,
-    category: str,
-) -> str:
-    """A category's seed prompts as a numbered list, one per line.
-
-    The text a generation template takes for ``{SeedPrompts}``. A category
-    without seeds gives ``""``.
-    """
-    prompts = seeds.get("seeds", {}).get(category, [])
-    if not prompts:
-        return ""
-    return "\n".join(f"{i+1}. {p}" for i, p in enumerate(prompts))
 
 
 def _load_json(
