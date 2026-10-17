@@ -1,169 +1,103 @@
-"""Cognitive/psychological hacking techniques.
+"""Cognitive techniques: a model writes a scenario, then the prompt built on it.
 
-Two-step generation: scenario -> jailbreak construction.
-Both steps use LLM calls via LLMs/calls.py.
-Scenarios are cached in Data_cache/scenarios/ by the runner, not by this module.
-
-Technique definitions are loaded from configs/taxonomy/cognitive_techniques.json
-so they can be edited without touching code.
-
-Ported from reference hacking.py.
+The five techniques are the categories of
+``configs/jailbreak/hacking/cognitive_techniques.json``; ``info`` is
+``category=<key>``.
 """
 
 import re
-from pathlib import Path
+from collections.abc import Callable
 
-from redact.dataset.taxonomy import load_taxonomy
-from redact.llms.base import LLMBackend
-from redact.llms.calls import generate_sample
-from redact.llms.wrappers import RateLimiter
-from redact.llms.prompts import load_prompt, build_messages
+from redact.jailbreak.directives import load_templates
+from redact.jailbreak.technique import TechniqueGen
+from redact.llm_pipeline import LLMRequest
+from redact.llms.prompting import build_messages, load_prompt
 
-
-# ---------------------------------------------------------------------------
-# Category definitions — loaded from taxonomy JSON
-# ---------------------------------------------------------------------------
-
-_COGNITIVE_TAXONOMY = load_taxonomy("cognitive_techniques")
-_TECHNIQUES = list(_COGNITIVE_TAXONOMY["categories"].items())
-# _TECHNIQUES[i] = (snake_name, {"display_name": ..., "description": ..., ...})
-
-# Display names and descriptions used in prompt construction
-HACKING_CATEGORIES: list[tuple[str, str]] = [
-    (v["display_name"], v["description"]) for _, v in _TECHNIQUES
-]
-
-# Snake-case names for additional_info
-CATEGORY_NAMES: list[str] = [k for k, _ in _TECHNIQUES]
+_TECHNIQUES: dict[str, dict] = load_templates(
+    "hacking", "cognitive_techniques.json")["categories"]
 
 
-# ---------------------------------------------------------------------------
-# Core functions
-# ---------------------------------------------------------------------------
+_SCENARIO_RE = re.compile(
+    r"\*{0,2}scenario description\*{0,2}[:\s]*[\s\*\n]*(.*)",
+    re.DOTALL | re.IGNORECASE,
+)
 
 
-def get_situation(
-    prompt: str,
-    backend: LLMBackend,
-    model: str,
-    rate_limiter: RateLimiter | None = None,
-    prompt_dir: str | Path | None = None,
-) -> str:
-    """Generate a plausible scenario for the given prompt.
+def _extract_scenario(text: str) -> str:
+    """Pull the 'Scenario Description' section from an LLM reply, else the whole text."""
+    match = _SCENARIO_RE.search(text)
+    return match.group(1).strip() if match else text.strip()
 
-    Loads prompt from Prompts/Jailbreak/scenario_generation/template.json.
-    Parses output for 'Scenario Description' section.
 
-    Returns:
-        Extracted scenario text.
-
-    Raises:
-        ValueError: If the LLM output cannot be parsed. Caller should
-                    wrap in a retry loop.
-    """
+def _scenario_messages(prompt: str, prompt_dir=None) -> list[dict]:
     config = load_prompt("jailbreak", "scenario_generation", prompt_dir)
-    messages = build_messages(config, prompt=prompt)
-    situation = generate_sample(backend, model, messages, rate_limiter)
-
-    match = re.search(
-        r"\*{0,2}scenario description\*{0,2}[:\s]*[\s\*\n]*(.*)",
-        situation, re.DOTALL | re.IGNORECASE,
-    )
-    if match:
-        return match.group(1).strip()
-    return situation.strip()
+    return build_messages(config, prompt=prompt)
 
 
-def create_jailbreak(
-    prompt: str,
-    category_index: int,
-    backend: LLMBackend,
-    model: str,
-    rate_limiter: RateLimiter | None = None,
-    prompt_dir: str | Path | None = None,
-    scenario: str | None = None,
-) -> tuple[str, str, str]:
-    """Two-step jailbreak: scenario generation then meta-prompt construction.
-
-    If scenario is provided, skip scenario generation (use cached/pre-generated).
-    If scenario is None, generate one (caller handles retry on ValueError).
-
-    Args:
-        prompt: The original harmful prompt.
-        category_index: Index into HACKING_CATEGORIES (0-4).
-        backend: LLM backend.
-        model: Model identifier.
-        rate_limiter: Optional rate limiter.
-        prompt_dir: Root prompt directory.
-        scenario: Optional pre-generated scenario to skip step 1.
-
-    Returns:
-        (jailbreak_prompt, additional_info, scenario)
-    """
-    if scenario is None:
-        scenario = get_situation(prompt, backend, model, rate_limiter, prompt_dir)
-
-    category_name, category_description = HACKING_CATEGORIES[category_index]
+def _construction_messages(
+    prompt: str, type_name: str, type_description: str, scenario: str, prompt_dir=None
+) -> list[dict]:
     config = load_prompt("jailbreak", "jailbreak_construction", prompt_dir)
-    messages = build_messages(
+    return build_messages(
         config,
-        jailbreak_type_name=category_name,
-        jailbreak_type_description=category_description,
+        jailbreak_type_name=type_name,
+        jailbreak_type_description=type_description,
         prompt=prompt,
         scenario=scenario,
     )
-    jailbreak = generate_sample(backend, model, messages, rate_limiter)
-    snake_name = CATEGORY_NAMES[category_index]
-    return jailbreak, f"category={snake_name}", scenario
 
 
-# ---------------------------------------------------------------------------
-# Per-technique public functions
-# ---------------------------------------------------------------------------
+def _cognitive_gen(
+    prompt: str,
+    key: str,
+    *,
+    gen_model: str | None = None,
+    scenario: str | None = None,
+    prompt_dir=None,
+    **kwargs,
+) -> TechniqueGen:
+    """Yield the scenario request, then the construction request for the
+    technique ``key`` of the taxonomy; return ``(jailbreak, info)``.
+
+    A given ``scenario`` skips the scenario request.
+    """
+    if scenario is None:
+        raw = yield LLMRequest(gen_model, _scenario_messages(prompt, prompt_dir))
+        scenario = _extract_scenario(raw)
+    technique = _TECHNIQUES[key]
+    jailbreak = yield LLMRequest(gen_model, _construction_messages(
+        prompt, technique["display_name"], technique["description"],
+        scenario, prompt_dir))
+    return jailbreak, f"category={key}"
 
 
-def to_persona_roleplay(
-    prompt: str, backend: LLMBackend, model: str,
-    rate_limiter: RateLimiter | None = None, scenario: str | None = None,
-) -> tuple[str, str, str]:
+def to_persona_roleplay(prompt: str, **kwargs) -> TechniqueGen:
     """Persona/Roleplay jailbreak."""
-    return create_jailbreak(prompt, 0, backend, model, rate_limiter, scenario=scenario)
+    return (yield from _cognitive_gen(prompt, "persona_roleplay", **kwargs))
 
 
-def to_hypothetical_framing(
-    prompt: str, backend: LLMBackend, model: str,
-    rate_limiter: RateLimiter | None = None, scenario: str | None = None,
-) -> tuple[str, str, str]:
+def to_hypothetical_framing(prompt: str, **kwargs) -> TechniqueGen:
     """Hypothetical Framing jailbreak."""
-    return create_jailbreak(prompt, 1, backend, model, rate_limiter, scenario=scenario)
+    return (yield from _cognitive_gen(prompt, "hypothetical_framing", **kwargs))
 
 
-def to_authority_obedience(
-    prompt: str, backend: LLMBackend, model: str,
-    rate_limiter: RateLimiter | None = None, scenario: str | None = None,
-) -> tuple[str, str, str]:
+def to_authority_obedience(prompt: str, **kwargs) -> TechniqueGen:
     """Authority & Obedience jailbreak."""
-    return create_jailbreak(prompt, 2, backend, model, rate_limiter, scenario=scenario)
+    return (yield from _cognitive_gen(prompt, "authority_obedience", **kwargs))
 
 
-def to_avi(
-    prompt: str, backend: LLMBackend, model: str,
-    rate_limiter: RateLimiter | None = None, scenario: str | None = None,
-) -> tuple[str, str, str]:
+def to_avi(prompt: str, **kwargs) -> TechniqueGen:
     """Anthropomorphic Vulnerability Inheritance (AVI) jailbreak."""
-    return create_jailbreak(prompt, 3, backend, model, rate_limiter, scenario=scenario)
+    return (yield from _cognitive_gen(prompt, "avi", **kwargs))
 
 
-def to_deep_inception(
-    prompt: str, backend: LLMBackend, model: str,
-    rate_limiter: RateLimiter | None = None, scenario: str | None = None,
-) -> tuple[str, str, str]:
+def to_deep_inception(prompt: str, **kwargs) -> TechniqueGen:
     """DeepInception jailbreak."""
-    return create_jailbreak(prompt, 4, backend, model, rate_limiter, scenario=scenario)
+    return (yield from _cognitive_gen(prompt, "deep_inception", **kwargs))
 
 
-def get_hacking_functions() -> list:
-    """Return all hacking technique functions."""
+def get_cognitive_functions() -> list[Callable]:
+    """Return all cognitive technique functions."""
     return [
         to_persona_roleplay,
         to_hypothetical_framing,

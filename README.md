@@ -1,590 +1,116 @@
 # REDACT — Red-team Dataset Automation & Construction Toolkit
 
-A modular Python library for generating, validating, and managing synthetic red-teaming datasets. Built for content moderation and jailbreak research, but designed to be extensible to any synthetic data generation task.
+[![Python](https://img.shields.io/badge/python-%E2%89%A53.11-blue.svg)](https://www.python.org/)
+[![Version](https://img.shields.io/badge/version-0.1.0-informational.svg)](pyproject.toml)
+[![License: MIT](https://img.shields.io/badge/license-MIT-lightgrey.svg)](LICENSE)
+[![Docs](https://img.shields.io/badge/docs-online-brightgreen.svg)](https://centresecuriteia.github.io/REDACT/)
+[![Datasets](https://img.shields.io/badge/🤗%20datasets-7-yellow.svg)](https://huggingface.co/centrepourlasecuriteia)
+[![Sister project: BELLS-O](https://img.shields.io/badge/sister%20project-BELLS--O-3f51b5.svg)](https://centresecuriteia.github.io/BELLS-O/)
 
-## Overview
+REDACT builds red-teaming datasets for content moderation and jailbreak
+research. Give it a taxonomy of harm categories and a recipe: it generates
+samples for every category, checks each one with a second model, generates
+model responses, augments the samples with jailbreak techniques and natural
+variations, and merges the accepted rows into one CSV. Every stage saves as
+it goes and resumes where it stopped. It is for AI safety researchers and
+engineers who build or evaluate content-moderation filters and jailbreak
+guardrails, and is built for defensive research. It is developed by
+[CeSIA — Centre pour la Sécurité de l'IA](https://www.securite-ia.fr/), and
+grew out of the datasets of its sister project
+[BELLS-O](https://centresecuriteia.github.io/BELLS-O/), a benchmark of AI
+supervision systems.
 
-REDACT automates the full lifecycle of red-teaming dataset construction:
+📖 **Full documentation:** <https://centresecuriteia.github.io/REDACT/>
 
-1. **Constitution** — generate structured category hierarchies (harmful, benign, dual-use) using Claude Opus
-2. **Generate** harmful content samples across configurable harm categories
-3. **Validate** each sample via a checker LLM with feedback-driven retry
-4. **Transform** inputs into jailbreak attacks using 100+ techniques
-5. **Split, merge, and manage** datasets with balanced distribution across techniques
+## How it works
 
-The library is **model-agnostic** (API or local vLLM), **prompt-agnostic** (all prompts are external JSON files), and **category-agnostic** (new categories require only a taxonomy entry and prompt file).
+A run is an ordered list of stages. Each is one function you can also call
+on its own:
 
----
+1. **constitution**: a strong model writes, per taxonomy category, sample
+   descriptions at four severities: harmful, dual-use harmful, dual-use
+   benign, benign.
+2. **inputs**: an uncensored model turns each description into prompts, and
+   a checker model accepts or rejects every one.
+3. **outputs**: one checked model response per accepted input.
+4. **paraphrase**: checked rewordings of the inputs and outputs, to remove the
+   generating model's fingerprint.
+5. **jailbreaks**: attacks drawn from 152 techniques in 23 families, dealt
+   evenly across categories, and natural variations of the inputs.
+6. **build**: the accepted rows of every stage, merged into
+   `complete_dataset.csv`.
 
-## Installation
+Models are hosted APIs or local vLLM engines, planned onto the GPUs stage by
+stage. Prompts are JSON files that a run can override one by one.
+[docs/overview.md](docs/overview.md) draws the files each stage reads and
+writes.
+
+## Install
+
+Python 3.11 or later.
 
 ```bash
-pip install -e .             # core (Venice API, pandas, openai)
-pip install -e ".[anthropic]"  # + Anthropic Claude support
-pip install -e ".[vllm]"       # + local vLLM inference
-pip install -e ".[dev]"        # + pytest, ruff, mypy
+git clone https://github.com/CentreSecuriteIA/REDACT.git
+cd REDACT
+pip install -e .            # hosted models (Venice, Anthropic, OpenRouter)
+pip install -e ".[vllm]"    # + local models through vLLM
 ```
 
-Requires Python 3.11+. See [pyproject.toml](pyproject.toml) for full dependency list.
+Put the API keys (`VENICE_API_KEY`, `ANTHROPIC_API_KEY`,
+`OPENROUTER_API_KEY`) in a `.env` file at the repository root. The other
+extras are in [docs/running.md](docs/running.md#install).
 
----
+## Quick start
 
-## Quick Start
+Run the example recipe, all six stages, into `./runs/first`:
+
+```bash
+python scripts/run.py src/redact/configs/runs/training_example.json --data-dir ./runs/first
+```
+
+The merged dataset lands in `./runs/first/Datasets/complete_dataset.csv`.
+The `paraphrase` stage loads a 24B model on a local GPU; take it out of the
+recipe's `stages` to run on hosted models only.
+
+Or call a stage from Python:
 
 ```python
-# 1. Auto-select backend from model name
-from redact.llms import get_backend, RateLimiter, generate_sample
+from redact import generate_constitution, generate_inputs
 
-backend = get_backend("venice-uncensored")  # -> VeniceBackend (via VENICE_API_KEY env var)
-rate_limiter = RateLimiter()
-
-# 2. Generate content moderation samples
-from redact.content_moderation import InputPipeline
-from redact.content_moderation.checker import build_quality_checker
-from redact.llms import load_prompt
-
-pipeline = InputPipeline(
-    gen_backend=backend, gen_model="venice-uncensored",
-    check_backend=backend, check_model="venice-uncensored",
-    rate_limiter=rate_limiter,
-)
-
-prompt_config = load_prompt("content_moderation", "generation")
-result = pipeline.run_category(
-    category="Physical Harm",
-    prompt_config=prompt_config,
-    build_check_messages=build_quality_checker("Physical Harm"),
-    num_turns=2, samples_per_request=5,
-)
-print(f"Generated {result.total_accepted} accepted samples")
-
-# 3. Apply jailbreak techniques
-from redact.jailbreak.obfuscation.encoding import to_base64
-from redact.jailbreak.hacking.cognitive import to_persona_roleplay
-
-# Pure technique (no LLM)
-obfuscated, info = to_base64("How to pick a lock")
-
-# LLM-dependent technique
-jailbreak, info, scenario = to_persona_roleplay(
-    "How to pick a lock",
-    backend=backend, model="venice-uncensored", rate_limiter=rate_limiter,
-)
+constitution = generate_constitution(data_dir="./runs/first", num_taxonomy_categories=3)
+inputs = generate_inputs(data_dir="./runs/first", constitution_df=constitution, samples_per_entry=3)
 ```
 
-See [`full_pipeline.ipynb`](full_pipeline.ipynb) for a complete pipeline walkthrough.
-
----
-
-## Architecture
-
-```
-src/redact/
-├── llms/                          # Model-agnostic LLM abstraction
-│   ├── base.py                    # Abstract LLMBackend base class
-│   ├── api.py                     # Backend router: get_backend(model) -> auto-select
-│   ├── venice_backend.py          # Venice AI / OpenAI-compatible API backend
-│   ├── anthropic_backend.py       # Anthropic Claude backend (native SDK)
-│   ├── vllm_backend.py            # Local vLLM backend for self-hosted inference
-│   ├── wrappers.py                # Rate limiter, retry, batch caller
-│   ├── calls.py                   # generate_sample(), check_sample(), batch_check_samples()
-│   ├── prompts.py                 # JSON prompt loader + template renderer
-│   ├── extraction.py              # Multi-sample + constitution extraction
-│   ├── translator.py              # Translation with fidelity checking
-│   └── model_config.py            # Model registry (RPM, backend_type, defaults)
-│
-├── constitution/                  # Constitution generation for classifiers
-│   └── pipeline.py               # ConstitutionPipeline (4 severity types)
-│
-├── content_moderation/            # Content moderation generation pipeline
-│   ├── generation.py              # InputPipeline — the main driver
-│   ├── checker.py                 # Quality + category validation checkers
-│   ├── metaprompt.py              # Automated description + seed generation
-│   └── paraphrase.py              # Fingerprint removal (placeholder)
-│
-├── jailbreak/                     # Jailbreak technique library
-│   ├── obfuscation/               # Text transformation attacks
-│   │   ├── encoding.py            # base64, rot13/18/47, unicode, ordinal, separator, leetspeak, morse, braille
-│   │   ├── structural.py          # JSON, XML, markdown wrapping
-│   │   ├── ascii_art.py           # pyfiglet-based text art (19 fonts)
-│   │   ├── suffixes.py            # Adversarial suffix generators
-│   │   ├── tokenbreak.py          # Token-breaking + sensitive-word encoding (LLM-dependent)
-│   │   ├── typos.py               # LLM-rewritten typos at 4 density levels
-│   │   └── translation.py         # 20 languages across resource tiers
-│   ├── hacking/                   # Cognitive/psychological manipulation
-│   │   ├── cognitive.py           # 5 techniques (persona, framing, AVI, authority, inception)
-│   │   ├── personas.py            # 14 named persona archetypes + invented persona
-│   │   └── framing.py             # 5 scenario-modifying directives (pure transforms, multi-template)
-│   ├── manipulation/              # Context manipulation with benign examples
-│   │   ├── benign.py              # Benign sample generation + caching
-│   │   ├── fsh.py                 # Few-Shot Hacking (4 variants)
-│   │   └── dap.py                 # Distract and Persuade (4 variants)
-│   ├── requests/                  # Request-structure attacks (all pure transforms)
-│   │   ├── answer.py              # 9 output-format + conditioning directives
-│   │   ├── answer_language.py     # 20 ask-answer-in-language functions (generated from JSON)
-│   │   ├── continuation.py        # 4 continuation-attack functions
-│   │   ├── indirect.py            # 6 task-embedding functions
-│   │   ├── distractor.py          # 4 distractor prefix/suffix functions
-│   │   ├── impersonation.py       # 1 good-person impersonation function
-│   │   ├── temporal.py            # 1 past-tense reframing function
-│   │   └── asking.py              # 2 question-framing functions
-│   ├── utils.py                   # combine_techniques() for chaining
-│   └── distribution.py            # Re-exports from dataset module
-│
-├── dataset/                       # Data handling utilities
-│   ├── io.py                      # CSV read/write per category folder
-│   ├── merge.py                   # Merge + normalize CSVs (general + presets)
-│   ├── split.py                   # Balanced splitting across techniques
-│   ├── dedup.py                   # Exact + normalized deduplication
-│   ├── loading.py                 # HuggingFace dataset loading
-│   └── taxonomy.py                # Taxonomy loading, filtering, iteration
-│
-├── configs/                       # JSON configuration files (package data)
-│   ├── content_moderation_input.json
-│   ├── seeds/                     # Hand-written seed prompts
-│   └── taxonomy/                  # Category/technique taxonomies
-│
-├── prompts/                       # Prompt templates (redacted for safety)
-│   ├── content_moderation/        # Per-step prompt templates
-│   └── jailbreak/                 # Per-technique prompt templates
-│
-├── exceptions.py                  # RedactError, ConfigError, etc.
-├── pipelines.py                   # High-level pipeline functions
-├── __init__.py                    # Config, PROJECT_ROOT, package exports
-└── py.typed                       # PEP 561 type marker
-
-Datasets/                          # Generated output (per-category CSVs)
-Data_cache/                        # Intermediate data (benign samples, etc.)
-full_pipeline.ipynb                # Complete pipeline walkthrough
-```
-
----
-
-## Module Reference
-
-### LLMs — Model-Agnostic Abstraction
-
-Everything above this layer calls a unified interface and is backend-agnostic.
-
-| Component | Purpose |
-|---|---|
-| `LLMBackend` | Abstract base class — `generate(messages, model)` |
-| `VeniceBackend` | Venice AI / OpenAI-compatible API backend |
-| `AnthropicBackend` | Anthropic Claude (native SDK, separate system param) |
-| `VLLMBackend` | Local vLLM for self-hosted GPU inference |
-| `get_backend()` | Auto-select backend from model name |
-| `RateLimiter` | Per-model sliding-window RPM enforcement (thread-safe) |
-| `BatchCaller` | Sequential or multithreaded batch dispatch |
-| `generate_sample()` | Single generation with rate limiting |
-| `check_sample()` | Validate a single sample (yes/no + reasoning) |
-| `batch_check_samples()` | Validate multiple samples in one `batch_generate()` pass — used automatically by all pipelines |
-| `generate_with_check()` | Full generate -> check -> feedback loop |
-| `load_prompt()` | Load prompt JSON by pipeline/category |
-| `extract_and_clean()` | Extract numbered lists / Q&A / delimited from LLM output |
-| `parse_constitution()` | Parse 3-layer markdown constitution into structured entries |
-| `extract_bold_prompt_answer()` | Extract bold-formatted prompt-answer pairs |
-| `translate_with_check()` | Translation with fidelity validation |
-
-**Backend auto-routing** — just pass a model name:
-
-```python
-from redact.llms import get_backend
-
-backend = get_backend("venice-uncensored")   # -> VeniceBackend
-backend = get_backend("claude-opus-4-6")      # -> AnthropicBackend
-```
-
-**Direct instantiation** (when you need custom config):
-
-```python
-from redact.llms import VeniceBackend, AnthropicBackend
-
-# Custom API endpoint
-backend = VeniceBackend(api_key="...", base_url="https://api.example.com/v1")
-
-# Anthropic
-backend = AnthropicBackend.from_env("ANTHROPIC_API_KEY")
-```
-
-**Local inference via vLLM** — use the pre-registered `venice-uncensored-vllm` model or any HuggingFace model ID:
-
-```python
-from redact import generate_inputs_from_constitution
-
-# Use the registered local model — backend is auto-initialized
-generate_inputs_from_constitution(model="venice-uncensored-vllm", ...)
-```
-
-When `venice-uncensored-vllm` is requested, `get_backend()` automatically creates a `VLLMBackend` for `dphn/Dolphin-Mistral-24B-Venice-Edition`. On first use vLLM downloads the model weights from HuggingFace and caches them at the path set by `HF_HOME` in your `.env`. Subsequent runs load directly from cache — no re-download.
-
-All pipelines use `batch_generate()` internally to send multiple prompts in a single vLLM engine pass. The `batch_size` parameter (default 32) controls how many entries are processed per pass — equivalent to `max_workers` for API backends. For API backends `batch_generate()` falls back to a sequential loop, so `max_workers` on `BatchCaller` is the relevant parallelism knob there.
-
-For a custom model, instantiate `VLLMBackend` directly and pass it to any pipeline:
-
-```python
-from redact.llms import VLLMBackend
-
-backend = VLLMBackend(model="mistralai/Mistral-7B-v0.3")
-generate_inputs(model="my-model", backend=backend)
-```
-
-**Registering a new model:**
-
-```python
-from redact.llms import register_model
-
-register_model("my-model", rpm=50, default_max_tokens=4000, backend_type="venice")
-```
-
-**Model registry** — pre-configured models with rate limits and backend routing:
-
-| Model | RPM | Backend | Notes |
-|---|---|---|---|
-| `venice-uncensored` | 75 | venice | Venice AI API |
-| `venice-uncensored-vllm` | 999 | vllm | Local self-hosted version of `venice-uncensored` (`dphn/Dolphin-Mistral-24B-Venice-Edition`) |
-| `deepseek-v3.2` | 20 | venice | Stronger multilingual (used for translation) |
-| `claude-opus-4-6` | 5 | anthropic | Set `max_workers=1` to avoid TPM limits |
-
----
-
-### Constitution — Category Hierarchy Generation
-
-Generates structured constitutions for constitutional classifier training. Each constitution spans 4 severity levels:
-
-| Entry Type | Description | CSV File |
-|---|---|---|
-| `harmful` | Absolutely harmful — always flag | `harmful.csv` |
-| `dual_use_harmful` | Borderline harmful framing — debatable | `dual_use_harmful.csv` |
-| `dual_use_benign` | Borderline benign framing — could look harmful | `dual_use_benign.csv` |
-| `benign` | Absolutely benign — never flag (hard negatives) | `benign.csv` |
-
-```python
-from redact import generate_constitution
-
-# Generate constitution for all taxonomy categories
-constitution = generate_constitution(
-    taxonomy="content_moderation_categories",
-    num_categories=10,          # constitution categories per type per taxonomy category
-    model="claude-opus-4-6",
-    num_taxonomy_categories=3,  # limit to first 3 taxonomy categories (None = all)
-)
-print(f"{len(constitution)} constitution entries")
-```
-
-Output saved to `Data_cache/constitution/` as 4 type-based CSVs + `merged.csv`. Each entry can later seed N input samples for classifier training.
-
-**Constitution-to-input checker** — `ConstitutionInputPipeline` uses a dedicated quality checker (`prompts/constitution/checker/template.json`) that injects `category`, `subcategory`, and `entry_type` into the evaluation prompt. This ensures benign and dual-use samples are evaluated correctly rather than rejected for "not belonging to the harm category."
-
-> **Note:** `content_moderation/checker.py` `build_quality_checker()` is currently harmful-only. Benign/dual-use generation in the content moderation pipeline will need the same `entry_type` extension.
-
----
-
-### Content Moderation — Input/Output Generation
-
-The pipeline operates in two modes:
-
-**Automated mode (`USE_METAPROMPT=True`)** — three LLM steps per category:
-
-```
-Step 1. generate_category_description()
-        category name -> LLM -> rich description (3-5 sentences)
-
-Step 2. generate_seeds()
-        category + description -> LLM -> numbered list of seed prompts
-
-Step 3. InputPipeline.run_category()
-        description + seeds -> LLM -> samples, checked per-sample
-```
-
-**Simple mode (`USE_METAPROMPT=False`)** — no extra LLM calls:
-
-```
-Description: short one-liner from taxonomy JSON
-Seeds:       hand-written list from configs/seeds/
-Step 3:      same InputPipeline.run_category()
-```
-
-The `InputPipeline` generation loop (Step 3 in both modes):
-
-```
-For each turn:
-  1. Build messages (prompt + format instruction + prohibited list + feedback)
-  2. Generate N samples in one LLM call
-  3. Extract individual samples via regex
-  4. Dedup against existing samples
-  5. Check each sample individually via checker LLM
-  6. Save all samples (accepted + rejected) to CSV
-  7. Collect rejection feedback for next turn
-```
-
-**Key classes:** `InputPipeline`, `SampleResult`, `TurnResult`, `CategoryResult`
-
-**Feedback loop** — rejection reasoning from turn N is injected into turn N+1's prompt.
-
----
-
-### Jailbreak — Technique Library
-
-140+ jailbreak techniques organized in four families. Technique definitions are taxonomy-driven where applicable — adding a new variant means adding a JSON entry, not a new function.
-
-#### Obfuscation
-
-| Type | Module | Functions | LLM Required |
-|---|---|---|---|
-| Encoding | `encoding.py` | `to_base64`, `to_rot13`, `to_rot18`, `to_rot47`, `to_unicode_escape`, `to_ascii_ordinal`, `to_separator`, `to_leetspeak_{basic,intermediate,advanced}`, `to_morse`, `to_braille` | No |
-| Structural | `structural.py` | `to_json`, `to_xml`, `to_markdown` | No |
-| ASCII Art | `ascii_art.py` | `to_ascii_art` (19 pyfiglet fonts) | No |
-| Suffixes | `suffixes.py` | `to_adversarial_suffix_{punctuation,fragments,unicode,emoji}` | No |
-| TokenBreak | `tokenbreak.py` | `to_tokenbreak_{prepend,split,delimiter}` | Yes |
-| Sensitive Words | `tokenbreak.py` | `to_sensitive_words_encode_{base64,rot13,rot18,rot47,unicode,ascii,separator,leetspeak_*}`, `to_sensitive_words_{split,star,hyphen,underscore,variables}`, `to_synonym_substitution` | Yes |
-| Typos | `typos.py` | `to_rewrite_with_typos_{low,medium,high,insane}` | Yes |
-| Translation | `translation.py` | 20 languages across resource tiers: French, Japanese, Russian, Spanish, German, Arabic, Turkish, Czech, Vietnamese, Greek, Croatian, Swahili, Thai, Khmer, Maori, Nepali, Zulu, Scots Gaelic, Bengali, Javanese | Yes |
-
-Sensitive-words functions share the `extract_harmful()` LLM detection step from TokenBreak — encoding is then applied only to the detected harmful words rather than the whole prompt. Typo rewriting uses a single LLM call with a level-description injected into the template.
-
-#### Hacking
-
-| Type | Module | Functions | LLM Required |
-|---|---|---|---|
-| Cognitive | `cognitive.py` | `to_persona_roleplay`, `to_hypothetical_framing`, `to_authority_obedience`, `to_avi`, `to_deep_inception` | Yes |
-| Named Personas | `personas.py` | `to_invented_persona` + 14 named archetypes (psychopath, alien, cult_leader, very_advanced_ai, cartel_leader, artist, mentally_ill, deformed_scientist, politician, deformed_professor, religious_figure, radical_politician, actor, someone_from_the_future) | Yes |
-| Framing | `framing.py` | `to_fictional_world`, `to_noble_goal`, `to_nefarious_goal`, `to_high_stake`, `to_no_moral_constraints` | No |
-
-Cognitive and persona techniques are two-step LLM processes: **scenario generation → jailbreak construction**. Named personas use a persona-grounded scenario prompt that grounds the scenario in the persona's character before construction. Cognitive technique definitions are loaded from `configs/taxonomy/cognitive_techniques.json`; persona definitions from `configs/taxonomy/personas.json` — both are editable without touching code.
-
-Framing directives are pure transforms covering scenario and intent modification. Each has 4 named template variants stored in `configs/framing_templates.json`; one is randomly selected per call with the variant name recorded in `additional_info`. Answer-format directives that were previously part of framing have moved to `requests/answer.py`.
-
-#### Manipulation (8 functions)
-
-| Technique | Variants | Description |
-|---|---|---|
-| FSH (Few-Shot Hacking) | random_short, random_long, selected_short, selected_long | Benign Q&A pairs prime helpful pattern before harmful query |
-| DAP (Distract & Persuade) | random_short, random_long, selected_short, selected_long | Harmful query hidden among benign pairs at random position |
-
-#### Requests (47 functions — all pure transforms)
-
-Modifies *how* a request is posed rather than obfuscating its text or attacking the model's mindset. All functions are pure transforms with no LLM dependency.
-
-| Type | Module | Functions |
-|---|---|---|
-| Answer format | `answer.py` | `to_refusal_then_comply`, `to_apology_prevention`, `to_prefix_injection`, `to_answer_in_markdown`, `to_answer_as_tutorial`, `to_answer_as_code`, `to_answer_as_dialogue`, `to_answer_as_story`, `to_answer_as_structured_data` (9) |
-| Answer language | `answer_language.py` | `to_ask_answer_in_{language}` for 20 languages — French, Japanese, Russian, Spanish, German, Arabic, Turkish, Czech, Vietnamese, Greek, Croatian, Thai, Swahili, Khmer, Maori, Nepali, Zulu, Scots Gaelic, Bengali, Javanese (20) |
-| Continuation | `continuation.py` | `to_continue_passage`, `to_complete_story`, `to_fill_in_blank`, `to_continue_instructions` (4) |
-| Indirect | `indirect.py` | `to_summarize`, `to_proofread`, `to_critique`, `to_translate_task`, `to_explain_to_child`, `to_rewrite` (6) |
-| Distractor | `distractor.py` | `to_distractor_prefix_related`, `to_distractor_prefix_unrelated`, `to_distractor_suffix_related`, `to_distractor_suffix_unrelated` (4) |
-| Impersonation | `impersonation.py` | `to_impersonate_good_person` — 8 profession variants (nurse, doctor, security researcher, teacher, etc.) (1) |
-| Temporal | `temporal.py` | `to_use_past_tense` — 4 historical/retrospective framings (1) |
-| Asking | `asking.py` | `to_innocuous_question`, `to_ask_for_details` (2) |
-
-Each function selects randomly from 4 named template variants stored in per-module JSON config files; the chosen variant is logged in `additional_info` for traceability. Answer language functions are generated dynamically from the language list in `answer_language_templates.json` — adding a new language requires only a JSON entry.
-
-#### Reference List Coverage
-
-The library is benchmarked against a reference set of **73 instruction primitives** and **74 request primitives**. Coverage:
-
-| Status | Primitives |
-|---|---|
-| Covered | All encoding/sensitive_words/typos, all 16 translation languages, all 14 named personas, all framing directives (fictional_world, noble/nefarious_goal, high_stake, no_moral_constraints, refusal_then_comply, prefix_injection, apology_prevention, answer_in_markdown, answer_as_tutorial), all request primitives (innocuous_question, impersonate_good_person, distractor ×4, use_past_tense, ask_for_details, ask_answer_in ×16) |
-| Excluded by design | `agent_context_additional_instr` (requires system-prompt access), `fine_tuning` (out of scope), `use_highly_specialized_language` (unclear implementation path), `direct_question` (no-op) |
-
-**Beyond the reference list** — techniques not in the reference set but included:
-- Extra encodings: rot18, rot47, braille, morse, ascii_ordinal
-- ASCII art obfuscation (19 pyfiglet fonts)
-- Adversarial suffixes (punctuation, fragments, unicode, emoji)
-- Structural wrapping (JSON, XML, markdown)
-- Cognitive hacking (5 two-step LLM techniques: persona_roleplay, hypothetical_framing, authority_obedience, AVI, deep_inception)
-- Manipulation (FSH + DAP, 8 variants using benign Q&A caching)
-- Extra answer formats: code, dialogue, story, structured data
-- Continuation attacks (4 variants)
-- Indirect task embedding (6 task types)
-- Extra answer languages: Zulu, Scots Gaelic, Bengali, Javanese
-
-**Technique chaining:**
-
-```python
-from redact.jailbreak import combine_techniques
-from redact.jailbreak.obfuscation.encoding import to_base64, to_rot13
-
-combo = combine_techniques(to_rot13, to_base64)
-result, info = combo("some harmful prompt")
-```
-
----
-
-### Extraction Utilities
-
-Multi-format extraction from LLM output, plus constitution parsing:
-
-| Function | Purpose |
-|---|---|
-| `extract_numbered_list()` | `"1. sample"` / `"2) sample"` / `"3: sample"` |
-| `extract_structured_qa()` | `**Prompt N:** **Question:** ... **Answer:** ...` |
-| `extract_delimited()` | Samples separated by `---`, `===`, blank lines |
-| `parse_constitution()` | 3-layer markdown hierarchy -> `ConstitutionEntry` list |
-| `extract_bold_prompt_answer()` | `**Prompt:** ... **Answer:** ...` pairs |
-| `clean_sample()` | Strip markdown formatting, meta-commentary, and ChatML tokens (`<\|im_end\|>`) |
-| `get_format_instruction()` | Format instructions to append to system prompts |
-
-Constitution parsing example:
-
-```python
-from redact.llms import parse_constitution
-
-entries = parse_constitution("""
-## 1. Violence
-### 1.1 Physical Violence
-- (A person punching another person)
-### 1.2 Verbal Threats
-- (Someone threatening to harm another)
-""")
-
-for e in entries:
-    print(f"{e.category} / {e.subcategory} / {e.sample}")
-```
-
----
-
-### Dataset Functions — Data Handling
-
-| Function | Purpose |
-|---|---|
-| `append_samples()` | Incremental CSV save with MD5 dedup |
-| `merge_technique_csvs()` | Jailbreak preset — renames type columns, drops DISCARDED |
-| `merge_content_mod_csvs()` | Content mod preset — filters accepted, normalizes columns |
-| `deterministic_balanced_assign()` | Stratified splitting across N bins |
-| `load_taxonomy()` | Load taxonomy JSON |
-| `iter_categories()` | Iterate categories for generation loops |
-| `load_hf_dataset()` | Load from HuggingFace Hub with filtering |
-
----
-
-## Extensibility Guide
-
-### Adding a New Harm Category
-
-1. Add to taxonomy — `configs/taxonomy/content_moderation_categories.json`
-2. Create prompt template — `prompts/content_moderation/generation/template.json`
-3. Run the pipeline — the category appears automatically in `iter_categories()`
-
-### Adding a Custom Jailbreak Technique
-
-Any function matching the signature works:
-
-```python
-def my_technique(prompt: str, **kwargs) -> tuple[str, str]:
-    """Transform prompt. Return (transformed, additional_info)."""
-    return f"[OVERRIDE] {prompt}", "my_technique_v1"
-```
-
-For LLM-dependent techniques, accept `backend`, `model`, `rate_limiter`:
-
-```python
-def my_llm_technique(prompt, backend=None, model=None, rate_limiter=None, **kwargs):
-    from redact.llms import generate_sample
-    messages = [{"role": "user", "content": f"Reframe: {prompt}"}]
-    result = generate_sample(backend, model, messages, rate_limiter)
-    return result, "llm_reframed"
-```
-
-### Swapping Backends
-
-```python
-from redact.llms import get_backend, VeniceBackend, VLLMBackend
-
-# Auto-routing (recommended)
-backend = get_backend("venice-uncensored")   # Venice API
-backend = get_backend("claude-opus-4-6")      # Anthropic API
-
-# Direct instantiation
-backend = VeniceBackend(api_key="...", base_url="https://api.example.com/v1")
-
-# Local vLLM (manual init, pass directly to pipelines)
-backend = VLLMBackend(model="mistralai/Mistral-7B-v0.3")
-```
-
----
-
-## Configuration
-
-### Environment Variables
-
-| Variable | Required For | Description |
-|---|---|---|
-| `VENICE_API_KEY` | Venice models | Venice AI API key |
-| `ANTHROPIC_API_KEY` | Claude models | Anthropic API key |
-| `HF_TOKEN` | HuggingFace loading | HuggingFace access token |
-| `HF_HOME` | vLLM models | Directory where vLLM downloads and caches model weights. Defaults to `~/.cache/huggingface` if unset. Set this to a path with sufficient disk space (the `venice-uncensored-vllm` model requires ~48 GB). |
-| `REDACT_OUTPUT_DIR` | Optional | Base directory for `Datasets/` and `Data_cache/` (defaults to script directory) |
-
-Place in a `.env` file in the project root. Loaded automatically via `python-dotenv`.
-
-### Prompt JSON Schema
-
-```json
-{
-    "system_prompt": "System instruction...",
-    "template": "User template with {variables}",
-    "seed_fields": ["variable1", "variable2"],
-    "few_shot_examples": [
-        {"role": "user", "content": "..."},
-        {"role": "assistant", "content": "..."}
-    ],
-    "metadata": {"version": "1.0"}
-}
-```
-
-### Taxonomy JSON Schema
-
-```json
-{
-    "name": "taxonomy_name",
-    "categories": {
-        "Category": {
-            "description": "Used in generation prompts",
-            "subcategories": ["Sub1", "Sub2"]
-        }
-    },
-    "aliases": {"Alternative Name": "Category"},
-    "groups": {"group_name": ["Category"]}
-}
-```
-
----
-
-## Key Design Decisions
-
-- **Prompts are external** — no prompts hardcoded in library code. Adding a category = adding a JSON file. Prompts are redacted in public releases for safety.
-- **Backend auto-routing** — `get_backend(model)` picks the right backend from model name. Manual instantiation available for custom setups. vLLM requires manual init (heavy GPU setup).
-- **Data is per-category** — all output lands in `Datasets/{category}/` as CSV. Merging is explicit.
-- **Checker feedback feeds back** — rejection reasoning is injected into the next generation call for directed improvement.
-- **Technique functions are pure** — most obfuscation functions take a string and return a string. No side effects, no hidden state.
-- **Registry pattern** — technique families expose `get_type_to_getter()` registries for uniform access and automatic dataset splitting.
-- **`Data_cache/` is internal** — intermediate artifacts (benign samples, scenarios) go here, never in `Datasets/`.
-
----
-
-## Safety & Ethics
-
-This library is designed for **defensive AI safety research** — building datasets to evaluate and improve content moderation systems.
-
-- **Prompts are redacted** in public releases. The `prompts/` directory contains placeholder templates.
-- **Generated data should be handled responsibly.** Clear `Datasets/` and `Data_cache/` before sharing.
-- All generation involves a **checker LLM** that validates sample quality and rejects low-quality or off-category outputs.
-
----
-
-## Requirements
-
-- Python 3.11+
-- `pandas >= 2.0`
-- `openai >= 1.0` (Venice / OpenAI-compatible backends)
-- `python-dotenv >= 1.0`
-- `pyfiglet >= 0.8` (ASCII art jailbreaks)
-
-Optional:
-- `anthropic >= 0.30` — Anthropic Claude backend (`pip install redact[anthropic]`)
-- `vllm >= 0.4` — local GPU inference (`pip install redact[vllm]`)
-- `datasets >= 2.0` — HuggingFace loading (`pip install redact[hf]`)
+## Documentation
+
+- [Documentation site](https://centresecuriteia.github.io/REDACT/), with the
+  [API reference](https://centresecuriteia.github.io/REDACT/api/)
+- [Overview](docs/overview.md): the stages, the files they pass on, one run
+  end to end
+- [Running a pipeline](docs/running.md): recipes, models, the GPU planner,
+  resume, cost, common failures
+- [Configuration](docs/configuration.md): every recipe key, params key and
+  registry field
+- [Jailbreak techniques](docs/techniques.md): every technique by layer and
+  family
+- [Extending](docs/extending.md): add a model, a prompt, a technique, a stage
+  or a taxonomy
+- [Stages](docs/README.md#stages) and [internals](docs/README.md#internals):
+  one page per stage and per layer
+
+## Published datasets
+
+Datasets REDACT has produced, on Hugging Face under
+[centrepourlasecuriteia](https://huggingface.co/centrepourlasecuriteia).
+Access is granted on request, on each dataset's page.
+
+- [content-moderation-input-dataset](https://huggingface.co/datasets/centrepourlasecuriteia/content-moderation-input-dataset)
+- [content-moderation-output-dataset](https://huggingface.co/datasets/centrepourlasecuriteia/content-moderation-output-dataset)
+- [jailbreak-dataset](https://huggingface.co/datasets/centrepourlasecuriteia/jailbreak-dataset)
+- [BET-jailbreak-dataset](https://huggingface.co/datasets/centrepourlasecuriteia/BET-jailbreak-dataset)
+- [constitution-dataset](https://huggingface.co/datasets/centrepourlasecuriteia/constitution-dataset)
+- [constitution-input-dataset](https://huggingface.co/datasets/centrepourlasecuriteia/constitution-input-dataset)
+- [constitution-input-augmented-dataset](https://huggingface.co/datasets/centrepourlasecuriteia/constitution-input-augmented-dataset)
 
 ## License
 

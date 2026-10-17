@@ -1,9 +1,12 @@
-"""Tests for package-level config, seed, and output directory."""
+"""Tests for the package root: the output directory and the seed."""
 
 import os
 import random
+import subprocess
+import sys
+from pathlib import Path
 
-import pytest
+import redact
 
 
 class TestGetOutputDir:
@@ -37,37 +40,13 @@ class TestSetSeed:
         b = random.random()
         assert a != b
 
-
-class TestConfig:
-    def test_get_returns_env(self, monkeypatch):
-        monkeypatch.setenv("TEST_VAR_XYZ", "hello")
-        from redact import Config
-        assert Config.get("TEST_VAR_XYZ") == "hello"
-
-    def test_get_default(self, monkeypatch):
-        monkeypatch.delenv("TEST_VAR_XYZ", raising=False)
-        from redact import Config
-        assert Config.get("TEST_VAR_XYZ", "fallback") == "fallback"
-
-    def test_validate_missing_raises(self, monkeypatch):
-        monkeypatch.delenv("VENICE_API_KEY", raising=False)
-        from redact import Config
-        with pytest.raises(ValueError, match="Missing required"):
-            Config.validate(require=["VENICE_API_KEY"])
-
-    def test_validate_present_passes(self, monkeypatch):
-        monkeypatch.setenv("VENICE_API_KEY", "test-key")
-        from redact import Config
-        Config.validate(require=["VENICE_API_KEY"])  # should not raise
-
-    def test_is_configured_true(self, monkeypatch):
-        monkeypatch.setenv("KEY_A", "val")
-        monkeypatch.setenv("KEY_B", "val")
-        from redact import Config
-        assert Config.is_configured("KEY_A", "KEY_B")
-
-    def test_is_configured_false(self, monkeypatch):
-        monkeypatch.delenv("KEY_A", raising=False)
-        monkeypatch.setenv("KEY_B", "val")
-        from redact import Config
-        assert not Config.is_configured("KEY_A", "KEY_B")
+    def test_importing_the_package_seeds_nothing(self):
+        """The global RNG is the application's: import calls no ``random.seed``."""
+        src = str(Path(redact.__file__).parents[1])
+        code = ("import random; calls = []; "
+                "random.seed = lambda *a, **k: calls.append(a); "
+                "import redact; print(calls)")
+        env = {**os.environ, "PYTHONPATH": src}
+        out = subprocess.run([sys.executable, "-c", code], capture_output=True,
+                             text=True, env=env, check=True)
+        assert out.stdout.strip() == "[]"

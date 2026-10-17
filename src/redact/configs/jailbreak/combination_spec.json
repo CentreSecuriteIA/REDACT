@@ -1,7 +1,17 @@
 {
-  "_comment": "Jailbreak technique compatibility specification. All rules enforced by get_compatible_remaining() in jailbreak/utils.py.",
+  "_comment": "Jailbreak technique compatibility specification. All rules enforced in jailbreak/rules.py.",
+
+  "version": "1.0",
 
   "layer_order": ["hacking", "manipulation", "obfuscation", "requests"],
+
+  "layer_rates": {
+    "_comment": "Per-layer target rates: the planner deals each layer at its rate over a group, and a direct sample_combination() call reads them as per-unit inclusion probabilities. Overridable per-call via the sampling_probs argument.",
+    "hacking": 0.5,
+    "manipulation": 0.33,
+    "requests": 0.7,
+    "request_obfuscation": 0.5
+  },
 
   "layer_max_picks": {
     "hacking": 1,
@@ -65,6 +75,13 @@
       "within_layer_order": 8,
       "max_picks": 1,
       "cross_incompatible_with": ["structural", "framing", "persona", "cognitive", "fsh", "dap"]
+    },
+    "casual_writing": {
+      "description": "Casing, spacing, punctuation, abbreviations or accents as a person typing quickly writes them",
+      "layer": "obfuscation",
+      "within_layer_order": 4.5,
+      "max_picks": 1,
+      "cross_incompatible_with": []
     },
     "framing": {
       "description": "Scenario/context modifiers: fictional world, noble/nefarious goal, urgency, constraint removal",
@@ -248,6 +265,16 @@
     "to_adversarial_suffix_unicode":     { "families": ["suffixes"], "complexity": 1, "requires_llm": false },
     "to_adversarial_suffix_emoji":       { "families": ["suffixes"], "complexity": 1, "requires_llm": false },
 
+    "to_lowercase":            { "families": ["casual_writing"], "complexity": 0, "requires_llm": false },
+    "to_uppercase":            { "families": ["casual_writing"], "complexity": 0, "requires_llm": false },
+    "to_no_sentence_capitals": { "families": ["casual_writing"], "complexity": 0, "requires_llm": false },
+    "to_dropped_spaces":       { "families": ["casual_writing"], "complexity": 1, "requires_llm": false },
+    "to_doubled_spaces":       { "families": ["casual_writing"], "complexity": 0, "requires_llm": false },
+    "to_dropped_punctuation":  { "families": ["casual_writing"], "complexity": 0, "requires_llm": false },
+    "to_doubled_punctuation":  { "families": ["casual_writing"], "complexity": 0, "requires_llm": false },
+    "to_abbreviations":        { "families": ["casual_writing"], "complexity": 1, "requires_llm": false },
+    "to_stripped_accents":     { "families": ["casual_writing"], "complexity": 0, "requires_llm": false },
+
     "to_fictional_world":      { "families": ["framing"], "complexity": 2, "requires_llm": false },
     "to_noble_goal":           { "families": ["framing"], "complexity": 1, "requires_llm": false },
     "to_nefarious_goal":       { "families": ["framing"], "complexity": 3, "requires_llm": false },
@@ -276,15 +303,15 @@
     "to_actor_persona":                 { "families": ["persona"], "complexity": 2, "requires_llm": true },
     "to_someone_from_the_future_persona": { "families": ["persona"], "complexity": 2, "requires_llm": true },
 
-    "to_fsh_random_short":   { "families": ["fsh"], "complexity": 2, "requires_llm": false },
-    "to_fsh_random_long":    { "families": ["fsh"], "complexity": 2, "requires_llm": false },
-    "to_fsh_selected_short": { "families": ["fsh"], "complexity": 3, "requires_llm": true },
-    "to_fsh_selected_long":  { "families": ["fsh"], "complexity": 3, "requires_llm": true },
+    "to_fsh_random_short":   { "families": ["fsh"], "complexity": 2, "requires_llm": false, "requires_benign": true },
+    "to_fsh_random_long":    { "families": ["fsh"], "complexity": 2, "requires_llm": false, "requires_benign": true },
+    "to_fsh_selected_short": { "families": ["fsh"], "complexity": 3, "requires_llm": true, "requires_benign": true },
+    "to_fsh_selected_long":  { "families": ["fsh"], "complexity": 3, "requires_llm": true, "requires_benign": true },
 
-    "to_dap_random_short":   { "families": ["dap"], "complexity": 2, "requires_llm": false },
-    "to_dap_random_long":    { "families": ["dap"], "complexity": 2, "requires_llm": false },
-    "to_dap_selected_short": { "families": ["dap"], "complexity": 3, "requires_llm": true },
-    "to_dap_selected_long":  { "families": ["dap"], "complexity": 3, "requires_llm": true },
+    "to_dap_random_short":   { "families": ["dap"], "complexity": 2, "requires_llm": false, "requires_benign": true },
+    "to_dap_random_long":    { "families": ["dap"], "complexity": 2, "requires_llm": false, "requires_benign": true },
+    "to_dap_selected_short": { "families": ["dap"], "complexity": 3, "requires_llm": true, "requires_benign": true },
+    "to_dap_selected_long":  { "families": ["dap"], "complexity": 3, "requires_llm": true, "requires_benign": true },
 
     "to_refusal_then_comply":     { "families": ["answer_format"], "complexity": 3, "requires_llm": false },
     "to_apology_prevention":      { "families": ["answer_format"], "complexity": 2, "requires_llm": false },

@@ -2,20 +2,19 @@
 
 import random
 
+from redact.jailbreak.requests.asking import (
+    get_asking_functions,
+    to_ask_for_details,
+    to_innocuous_question,
+)
 from redact.jailbreak.requests.impersonation import (
-    to_impersonate_good_person,
     get_impersonation_functions,
+    to_impersonate_good_person,
 )
 from redact.jailbreak.requests.temporal import (
-    to_use_past_tense,
     get_temporal_functions,
+    to_use_past_tense,
 )
-from redact.jailbreak.requests.asking import (
-    to_innocuous_question,
-    to_ask_for_details,
-    get_asking_functions,
-)
-
 
 SAMPLE = "How do I pick a lock?"
 

@@ -1,0 +1,3577 @@
+"""VRAM footprints, residency planning, the load locks, and background preload.
+
+None of this needs a GPU or the network: capacity detection, HF config reads
+and the loaders are stubbed, and the measurement path is exercised against a
+fake ``mem_get_info``. Real load-time measurement against a live engine is a
+GPU-session job.
+"""
+
+import itertools
+import json
+import logging
+import os
+import random
+import threading
+import time
+import weakref
+from types import SimpleNamespace
+from unittest.mock import patch
+
+import pytest
+
+from redact import telemetry
+from redact.llms import observe
+from redact.llms.model_config import (
+    MODEL_REGISTRY,
+    IntrospectConfig,
+    VLLMConfig,
+    register_model,
+)
+from redact import residency
+from redact.llms.resources import estimate, measure
+from redact.residency import placement
+from redact.residency.footprint import _engine_id
+from redact.residency.placement import _Cards, _exceeds_its_cards
+from tests.conftest import fake_vllm_modules
+
+GIB = 1024 ** 3
+#: Fixture card size and the TP factor the suggestions land on.
+CARD_GIB = 48.0
+EXPECTED_TP = 2
+
+# Real shapes: Mistral-Small-24B (32 heads) and Qwen2.5-7B (28 heads).
+MISTRAL_24B = SimpleNamespace(
+    num_hidden_layers=40, hidden_size=5120, intermediate_size=32768,
+    num_attention_heads=32, num_key_value_heads=8, head_dim=128,
+    vocab_size=131072, max_position_embeddings=32768,
+    tie_word_embeddings=False, torch_dtype="bfloat16", model_type="mistral",
+)
+QWEN_7B = SimpleNamespace(
+    num_hidden_layers=28, hidden_size=3584, intermediate_size=18944,
+    num_attention_heads=28, num_key_value_heads=4, vocab_size=152064,
+    max_position_embeddings=32768, tie_word_embeddings=False,
+    torch_dtype="bfloat16", model_type="qwen2",
+)
+
+
+@pytest.fixture(autouse=True)
+def _clean():
+    """No HF config is readable unless a test supplies one via ``_config``."""
+    with patch.object(estimate, "_load_config", return_value=None):
+        yield
+    telemetry.uninstall()
+
+
+def _config(cfg):
+    """Make every checkpoint's HF config read as ``cfg``."""
+    return patch.object(estimate, "_load_config", return_value=cfg)
+
+
+@pytest.fixture()
+def registered():
+    """Register throwaway local models; clean up after.
+
+    ``setup="introspect"`` registers a transformers model, anything else a
+    vLLM one.
+    """
+    made = []
+
+    def _make(name, setup="vllm", **kwargs):
+        if setup == "introspect":
+            register_model(name, backend_type="introspect",
+                           introspect=IntrospectConfig(log_dir="x", **kwargs))
+        else:
+            register_model(name, backend_type="vllm", vllm=VLLMConfig(**kwargs))
+        made.append(name)
+        return name
+
+    yield _make
+    for n in made:
+        MODEL_REGISTRY.pop(n, None)
+
+
+def _capacity(total_gb, n_gpus, name="FakeGPU"):
+    """Pin every capacity source, so the real machine never leaks into a test."""
+    # nvidia-smi is asked first, so pinning it keeps torch out as well.
+    return (
+        patch("redact.llms.resources.measure.card_sizes_gib", return_value=[total_gb]),
+        patch("redact.llms.resources.measure.detect_gpus", return_value=(name, n_gpus)),
+    )
+
+
+def _kv(gib):
+    """Make every KV estimate read as ``gib`` per GPU."""
+    return patch.object(estimate, "estimate_kv_gib", return_value=gib)
+
+
+def _plan(models, total_gb, n_gpus, **kwargs):
+    cap, gpus = _capacity(total_gb, n_gpus)
+    with cap, gpus:
+        return residency.plan_residency(models, **kwargs)
+
+
+class TestReporting:
+    """explain() is the pre-flight message — it has to be actionable, not just
+    true."""
+
+    def test_grant_check_applies_to_declared_weights(self, registered):
+        m = registered("_res_grant_decl", hf_model_id="org/gd", vram_gb=40.0)
+        with _kv(2.0):
+            plan = _plan([m], 48.0, 1)
+        # 40 declared + 2 KV, padded to 46.8, against the 43.2 GiB grant.
+        assert "needs 46.8GiB with overhead (42.0 weights + KV, x1.1 +0.6) but " \
+               "gpu_memory_utilization=0.90 grants 43.2GiB." in plan.problems[0]
+
+    def test_grant_check_uses_the_padded_need(self, registered):
+        """The grant has to cover (weights + KV) x 1.1 + 0.6, unrounded."""
+        m = registered("_res_grant_est", hf_model_id="org/ge")
+        with patch.object(estimate, "estimate_weights_gib", return_value=38.0), \
+             patch.object(estimate, "estimate_kv_gib", return_value=0.5):
+            fits_grant = _plan([m], 48.0, 1)          # 38.5 x 1.1 + 0.6 = 42.95 <= 43.2
+        with patch.object(estimate, "estimate_weights_gib", return_value=38.0), \
+             patch.object(estimate, "estimate_kv_gib", return_value=1.0):
+            over_grant = _plan([m], 48.0, 1)          # 39 x 1.1 + 0.6 = 43.5 > 43.2
+        fp = fits_grant.groups[0][0]
+        assert (fp.need_gb, fp.gb) == (38.5, 43.0)    # gb is 42.95 rounded up
+        assert fp.padded_gb == pytest.approx(42.95)
+        assert fits_grant.fits and fits_grant.problems == []
+        assert not over_grant.fits                    # the bare 39.0 would fit
+        assert "needs 43.5GiB with overhead (39.0 weights + KV, x1.1 +0.6) but " \
+               "gpu_memory_utilization=0.90 grants 43.2GiB." in over_grant.problems[0]
+
+    def test_a_padded_need_equal_to_the_grant_fits(self, registered):
+        """22 x 1.1 + 0.6 = 24.8 = 0.9 x 27.5556."""
+        planned = registered("_res_edge_p", hf_model_id="org/ep", vram_gb=22.0)
+        with _kv(0.0):
+            at_ceiling = _plan([planned], 24.8 / 0.9, 1)
+            over_ceiling = _plan([planned], 24.7 / 0.9, 1)
+        assert at_ceiling.fits and not over_ceiling.fits
+        assert at_ceiling.footprints[0].planned_utilization == 0.9
+
+    def test_a_lone_engine_is_checked_at_the_card_ceiling(self, registered):
+        m = registered("_res_grant_default", hf_model_id="org/gdf")
+        with patch.object(estimate, "estimate_weights_gib", return_value=81.5), \
+             patch.object(estimate, "estimate_kv_gib", return_value=0.0):
+            plan = _plan([m], 100.0, 1)               # 81.5 x 1.1 + 0.6 = 90.25
+        out = plan.explain()
+        assert not plan.fits
+        assert "gpu_memory_utilization=0.90 grants 90.0GiB" in out
+
+    @pytest.mark.parametrize("card,grant,fits", [
+        (8.0, 7.2, False), (24.0, 21.6, True), (80.0, 72.0, True)])
+    def test_shipped_debug_model_on_three_cards(self, card, grant, fits):
+        """6.0 GiB of weights + 0.04 GiB of KV at max_model_len=384 is 6.04;
+        with overhead 6.04 x 1.1 + 0.6 = 7.244, over the 7.2 an 8 GiB card
+        grants."""
+        with _kv(0.04):
+            plan = _plan(["llama-3.2-3b-debug"], card, 1)
+        fp = plan.footprints[0]
+        assert fp.need_gb == pytest.approx(6.04)
+        assert fp.padded_gb == pytest.approx(7.244)
+        assert fp.reserved_gb == pytest.approx(grant)
+        assert fp.planned_utilization == 0.9
+        assert plan.fits is fits and plan.warnings == []
+        assert f"vLLM gets {grant}GiB (gpu_memory_utilization=0.90)" in plan.explain()
+        assert "(declared: 6.0 weights + 0.04 KV, x1.1 +0.6)" in plan.explain()
+        if not fits:
+            assert "llama-3.2-3b-debug[vllm] needs 7.2GiB with overhead (6.0 " \
+                   "weights + KV, x1.1 +0.6) but gpu_memory_utilization=0.90 " \
+                   "grants 7.2GiB." in plan.problems[0]
+
+    def test_an_unsized_kv_cache_is_reported(self):
+        """No HF config: the need counts weights only, and the plan says so."""
+        plan = _plan(["llama-3.2-3b-debug"], 8.0, 1)
+        assert plan.footprints[0].need_gb == 6.0
+        assert "KV cache of llama-3.2-3b-debug could not be estimated" in plan.warnings[0]
+        assert "counts the weights only" in plan.explain()
+
+    def test_a_kv_cache_larger_than_the_weights_is_pointed_out(self, registered):
+        m = registered("_res_kv_big", hf_model_id="org/kb", vram_gb=6.0)
+        with _kv(14.0):
+            out = _plan([m], 48.0, 1).explain()
+        assert "the KV cache of _res_kv_big (14.0GiB at the default context " \
+               "of up to 10000 tokens) is larger than its weights (6.0GiB); " \
+               "lower max_model_len to shrink it" in out
+
+    def test_a_kv_cache_that_breaks_the_fit_is_named(self, registered):
+        m = registered("_res_kv_over", hf_model_id="org/ko", vram_gb=6.0)
+        with _kv(14.0):
+            plan = _plan([m], 16.0, 1)                # 20.0 against 14.4
+        assert not plan.fits
+        assert "the KV cache (14.0GiB) is what does not fit: lower " \
+               "max_model_len" in plan.problems[0]
+
+    def test_oversized_model_gets_a_concrete_configuration(self, registered):
+        m = registered("_res_suggest", hf_model_id="org/s", vram_gb=52.0)
+        out = _plan([m], 48.0, 2).explain()
+        assert "suggested: min_gpus=2 (tensor_parallel_size=2)" in out
+        # Weights and KV halve: 26 x 1.1 + 0.6.
+        assert "-> 29.2GiB per GPU with overhead" in out
+        assert "~3x smaller at awq/gptq" in out
+
+    def test_the_suggested_size_divides_the_need(self, registered):
+        m = registered("_res_suggest_est", hf_model_id="org/se")
+        with _config(MISTRAL_24B):
+            plan = _plan([m], 48.0, 2)
+            out = plan.explain()
+        assert plan.groups[0][0].gb == 51.0          # KV at the default 10000 tokens
+        # (43.91 + 1.53) / 2 x 1.1 + 0.6, against a 43.2 GiB grant per card.
+        assert "suggested: min_gpus=2 (tensor_parallel_size=2) -> 25.6GiB per GPU" in out
+
+    def test_suggested_size_divides_the_attention_heads(self, registered):
+        """Qwen2.5-7B has 28 heads: 8 is not a valid tensor-parallel size."""
+        m = registered("_res_suggest_heads", hf_model_id="org/sh")
+        with _config(QWEN_7B):
+            two_cards = _plan([m], 8.0, 4).explain()      # 2 too big, 4 fits
+            tiny_cards = _plan([m], 4.0, 8).explain()     # only 8 would fit
+        assert "suggested: min_gpus=4 (tensor_parallel_size=4)" in two_cards
+        assert "suggested" not in tiny_cards
+        assert "no tensor-parallel size up to 8 fits a 4.0GiB device" in tiny_cards
+
+    def test_no_size_is_invented_when_none_fits(self, registered):
+        m = registered("_res_huge", hf_model_id="org/h", vram_gb=500.0)
+        out = _plan([m], 48.0, 2).explain()
+        assert "no tensor-parallel size up to 8 fits a 48.0GiB device" in out
+        assert "tensor_parallel_size=11" not in out
+
+    def test_suggestion_skips_a_size_that_does_not_fit(self, registered):
+        m = registered("_res_suggest_skip", hf_model_id="org/ss", vram_gb=98.0)
+        out = _plan([m], 48.0, 2).explain()
+        # 49.0 GiB per card at 2 pads to 54.5, over the 43.2 GiB grant; at 4
+        # it is 24.5, padded to 27.55.
+        assert "suggested: min_gpus=4 (tensor_parallel_size=4) -> 27.6GiB " \
+               "per GPU with overhead  (more GPUs than detected)" in out
+
+
+
+    def test_tensor_parallel_split_is_shown(self, registered):
+        m = registered("_res_tp_report", hf_model_id="org/t", vram_gb=60.0,
+                       min_gpus=2)
+        plan = _plan([m], 48.0, 2)
+        out = plan.explain()
+        # 30 GiB of weights per card: 30 x 1.1 + 0.6 = 33.6, up to 34.0.
+        assert "-> 2 GPUs (tensor_parallel_size=2), ~34.0GiB each" in out
+        assert "-> cards 0-1, vLLM gets 43.2GiB each " \
+               "(gpu_memory_utilization=0.90)" in out
+        assert plan.fits and plan.footprints[0].planned_utilization == 0.9
+
+    def test_report_logs_by_severity(self, registered, caplog):
+        fine = registered("_res_log_ok", hf_model_id="org/lo", vram_gb=10.0)
+        big = registered("_res_log_err", hf_model_id="org/le", vram_gb=60.0)
+        # An unsized KV cache is the warning case.
+        for model, kv, level in ((fine, 1.0, "INFO"), (fine, None, "WARNING"),
+                                 (big, 1.0, "ERROR")):
+            caplog.clear()
+            with caplog.at_level(logging.INFO, logger=residency.logger.name), _kv(kv):
+                residency.report(_plan([model], 48.0, 1))
+            assert [r.levelname for r in caplog.records] == [level]
+
+
+class TestMeasurement:
+    """Post-hoc diagnostic only — nothing here feeds planning."""
+
+    def test_no_ops_without_cuda(self):
+        with patch("redact.llms.resources.measure._torch", return_value=None):
+            with measure.Measurement() as m:
+                pass
+        assert m.claimed_gib is None and m.weights_gib is None
+
+    def test_reports_claimed_and_weights_in_gib(self):
+        fake = _FakeTorch(free_before=20 * GIB, free_after=8 * GIB,
+                          peak=4 * GIB, total=24 * GIB)
+        with patch("redact.llms.resources.measure._torch", return_value=fake):
+            with measure.Measurement() as m:
+                pass
+        assert m.claimed_gib == pytest.approx(12.0)   # 20 -> 8 free
+        assert m.weights_gib == pytest.approx(4.0)    # torch allocator peak
+
+    def test_weights_exclude_what_was_already_resident(self):
+        """reset_peak_memory_stats() resets the peak to *currently allocated*,
+        not to zero — so with another checkpoint on the card the raw peak is
+        (resident + mine). preload() loads sequentially in one process, so this
+        is the normal case, not an edge one."""
+        fake = _FakeTorch(free_before=20 * GIB, free_after=16 * GIB,
+                          peak=10 * GIB, total=24 * GIB, already_allocated=6 * GIB)
+        with patch("redact.llms.resources.measure._torch", return_value=fake):
+            with measure.Measurement() as m:
+                pass
+        assert m.weights_gib == pytest.approx(4.0)   # 10 peak - 6 resident
+
+    def test_load_failure_is_not_swallowed(self):
+        fake = _FakeTorch(free_before=20 * GIB, free_after=20 * GIB,
+                          peak=0, total=24 * GIB)
+        with patch("redact.llms.resources.measure._torch", return_value=fake):
+            with pytest.raises(RuntimeError), measure.Measurement():
+                raise RuntimeError("load blew up")
+
+
+class _FakeTorch:
+    """Minimal stand-in for the torch surface Measurement touches."""
+
+    def __init__(self, free_before, free_after, peak, total, already_allocated=0):
+        self._free = [free_before, free_after]
+        self._peak = peak
+        self._total = total
+        self._allocated = already_allocated
+        self.cuda = self
+
+    def memory_allocated(self):
+        return self._allocated
+
+    def is_available(self):
+        return True
+
+    def mem_get_info(self):
+        return (self._free.pop(0) if len(self._free) > 1 else self._free[0]), self._total
+
+    def reset_peak_memory_stats(self):
+        pass
+
+    def max_memory_allocated(self):
+        return self._peak
+
+
+class TestFootprintResolution:
+    def test_declared_value_is_the_weights(self, registered):
+        m = registered("_res_declared", hf_model_id="org/a", vram_gb=20.0)
+        fp = residency.footprint(m)
+        # 20 x 1.1 + 0.6 = 22.6, up to 23.0.
+        assert (fp.gb, fp.source, fp.need_gb) == (23.0, "declared", 20.0)
+        assert fp.breakdown() == "declared: 20.0 weights, x1.1 +0.6"
+
+    def test_declared_weights_get_an_estimated_kv_cache(self, registered):
+        """vram_gb overrides the weights only; the KV term is still estimated."""
+        m = registered("_res_override", hf_model_id="org/b", vram_gb=20.0,
+                       vllm_kwargs={"max_model_len": 8192})
+        with _config(MISTRAL_24B), \
+             patch.object(estimate, "estimate_weights_gib", return_value=99.0):
+            fp = residency.footprint(m)
+        assert (fp.source, fp.parts["weights_gib"], fp.parts["kv_gib"]) == (
+            "declared", 20.0, 1.25)
+        assert fp.need_gb == 21.25
+        assert fp.gb == 24.0          # 21.25 x 1.1 + 0.6 = 23.98
+        assert fp.breakdown() == "declared: 20.0 weights + 1.25 KV, x1.1 +0.6"
+
+    def test_declared_weights_are_a_total_across_tensor_parallel_cards(self, registered):
+        m = registered("_res_decl_tp", hf_model_id="org/dt", vram_gb=40.0, min_gpus=2)
+        with _config(MISTRAL_24B):
+            fp = residency.footprint(m)
+        assert (fp.parts["weights_gib"], fp.parts["kv_gib"]) == (20.0, 0.76)
+        assert fp.gb == 47.0          # (20.76 x 1.1 + 0.6 = 23.44 -> 23.5) x 2
+
+    def test_a_pinned_transformers_model_is_not_split(self, registered):
+        """device_map decides the span: 60 GiB pinned to one 48 GiB card."""
+        m = registered("_res_intro_span", setup="introspect", hf_model_id="org/is",
+                       vram_gb=60.0, device_map="cuda:0")
+        plan = _plan([m], 48.0, 2)
+        fp = plan.footprints[0]
+        assert (fp.min_gpus, fp.per_gpu_gb, fp.devices) == (1, 67.0, (0,))
+        assert not plan.fits
+        out = plan.explain()
+        assert "needs ~67.0GiB but its card has 48.0GiB." in out
+        assert "max_model_len" not in out and ".api" not in out
+        assert "never splits" not in out
+
+    def test_estimated_when_nothing_is_declared(self, registered):
+        """A newly registered model must plan correctly with nothing
+        hand-derived."""
+        m = registered("_res_estimated", hf_model_id="org/c")
+        with patch("redact.llms.resources.estimate.estimate_weights_gib",
+                   return_value=12.0), \
+             patch("redact.llms.resources.estimate.estimate_kv_gib",
+                   return_value=1.0):
+            fp = residency.footprint(m)
+        assert fp.source == "estimated"
+        assert fp.gb == 15.0          # (12 + 1) x 1.1 + 0.6 = 14.9, up to 15.0
+        assert fp.need_gb == 13.0
+        assert fp.breakdown() == "estimated: 12.0 weights + 1.00 KV, x1.1 +0.6"
+
+    def test_estimate_names_what_drives_it(self, registered):
+        m = registered("_res_drivers", hf_model_id="org/dr", quantization="awq",
+                       vllm_kwargs={"max_model_len": 8192})
+        with _config(MISTRAL_24B):
+            fp = residency.footprint(m)
+        assert fp.breakdown() == (
+            "estimated: 14.2 weights + 1.25 KV, x1.1 +0.6 [bfloat16, awq 4-bit]")
+        assert fp.parts["attention_heads"] == 32
+
+    def test_introspect_estimate_has_no_kv_term(self, registered):
+        m = registered("_res_intro", setup="introspect", hf_model_id="org/in")
+        with _config(MISTRAL_24B):
+            fp = residency.footprint(m)
+        assert fp.parts["kv_gib"] is None
+        assert fp.gb == 49.0          # 43.91 x 1.1 + 0.6 = 48.9
+
+    def test_estimate_failure_is_unknown_not_zero(self, registered):
+        m = registered("_res_noconfig", hf_model_id="org/unreadable")
+        with patch("redact.llms.resources.estimate.estimate_weights_gib",
+                   return_value=None):
+            fp = residency.footprint(m)
+        assert fp.gb is None and fp.source == "unknown"
+
+    def test_api_only_model_has_no_footprint(self):
+        assert residency.footprint("claude-opus-4-6") is None
+
+    def test_unknown_when_neither_declared_nor_estimable(self, registered):
+        m = registered("_res_unknown", hf_model_id="org/d")
+        fp = residency.footprint(m)
+        assert fp.gb is None and fp.source == "unknown" and not fp.known
+        assert fp.breakdown() == "unknown"
+
+    def test_none_tensor_parallel_size_does_not_raise(self, registered):
+        m = registered("_res_tp_none", hf_model_id="org/tn",
+                       vllm_kwargs={"tensor_parallel_size": None})
+        with _config(MISTRAL_24B):
+            assert residency.footprint(m).gb == 51.0
+
+
+class TestPlanResidency:
+    def test_two_engines_share_a_card_when_their_grants_fit(self, registered):
+        a = registered("_res_small_a", hf_model_id="org/sa", vram_gb=2.5)
+        b = registered("_res_small_b", hf_model_id="org/sb", vram_gb=2.5)
+        plan = _plan([a, b], 8.0, 1)
+        assert len(plan.groups) == 1
+        assert plan.gpus_required == 1 and plan.fits
+        assert [fp.reserved_gb for fp in plan.footprints] == [pytest.approx(3.6)] * 2
+        assert "vLLM gets 3.6GiB (gpu_memory_utilization=0.45)" in plan.explain()
+
+    def test_a_lone_engine_gets_the_card_ceiling(self, registered):
+        a = registered("_res_one", hf_model_id="org/one", vram_gb=20.0)
+        with _kv(2.0):
+            fp = _plan([a], 48.0, 1).footprints[0]
+        assert fp.reserved_gb == pytest.approx(43.2)
+        assert fp.planned_utilization == 0.9
+
+    def test_two_engines_split_the_spare_equally(self, registered):
+        """Pool 43.2; padded needs 24.8 + 12.7 leave 5.7, so each gets 2.85
+        on top."""
+        a = registered("_res_dflt_a", hf_model_id="org/da", vram_gb=20.0)
+        b = registered("_res_dflt_b", hf_model_id="org/db", vram_gb=10.0)
+        with patch.object(estimate, "estimate_kv_gib", side_effect=[2.0, 1.0]):
+            plan = _plan([a, b], 48.0, 1)
+        assert len(plan.groups) == 1 and plan.fits
+        assert [fp.padded_gb for fp in plan.footprints] == [
+            pytest.approx(24.8), pytest.approx(12.7)]
+        assert [fp.reserved_gb for fp in plan.footprints] == [
+            pytest.approx(27.65), pytest.approx(15.55)]
+        assert [fp.planned_utilization for fp in plan.footprints] == [0.576, 0.3239]
+        assert "(gpu_memory_utilization=0.58)" in plan.explain()
+
+    def test_three_engines_split_the_spare_equally(self, registered):
+        """Pool 72; padded needs 13.8 + 11.6 + 6.1 leave 40.5, so each gets
+        13.5 on top."""
+        names = [registered(f"_res_three_{i}", hf_model_id=f"org/th{i}", vram_gb=gb)
+                 for i, gb in enumerate((12.0, 10.0, 5.0))]
+        with _kv(0.0):
+            plan = _plan(names, 80.0, 1)
+        assert plan.fits
+        assert [fp.reserved_gb for fp in plan.footprints] == [
+            pytest.approx(27.3), pytest.approx(25.1), pytest.approx(19.6)]
+        assert [fp.planned_utilization for fp in plan.footprints] == [
+            0.3412, 0.3137, 0.245]
+
+    def test_every_vllm_engine_gets_a_computed_fraction(self, registered):
+        """A transformers model holds 12 of the card; pool 31.2, padded needs
+        22.6 + 6.1 leave 2.5, so each engine gets 1.25 on top."""
+        fixed = registered("_res_mix_x", setup="introspect", hf_model_id="org/mx",
+                           vram_gb=10.0)
+        a = registered("_res_mix_a", hf_model_id="org/ma", vram_gb=20.0)
+        b = registered("_res_mix_b", hf_model_id="org/mb", vram_gb=5.0)
+        with _kv(0.0):
+            plan = _plan([fixed, a, b], 48.0, 1)
+        assert plan.fits and len(plan.groups) == 1
+        assert [fp.reserved_gb for fp in plan.footprints] == [
+            pytest.approx(12.0), pytest.approx(23.85), pytest.approx(7.35)]
+        assert [fp.planned_utilization for fp in plan.footprints] == [
+            None, 0.4968, 0.1531]
+        assert [m["gpu_memory_utilization"] for m in plan.as_dict()["models"]] == [
+            None, 0.4968, 0.1531]
+
+    def test_engines_whose_needs_exceed_the_ceiling_do_not_share(self, registered):
+        """22 + 22 is over 0.9 x 48, though under the card."""
+        a = registered("_res_over_a", hf_model_id="org/oa", vram_gb=22.0)
+        b = registered("_res_over_b", hf_model_id="org/ob", vram_gb=22.0)
+        plan = _plan([a, b], 48.0, 1)
+        assert len(plan.groups) == 2 and not plan.fits
+        assert "needs with overhead sum to at most 0.9 of it" in plan.explain()
+
+    def test_models_that_cannot_be_resident_together_do_not_fit(self, registered):
+        """Nothing is unloaded during a run, so a second group is not a
+        schedule: it would load on top of the first."""
+        a = registered("_res_big_a", hf_model_id="org/ba", vram_gb=20.0)
+        b = registered("_res_big_b", hf_model_id="org/bb", vram_gb=20.0)
+        plan = _plan([a, b], 24.0, 1)
+        out = plan.explain()
+        assert len(plan.groups) == 2
+        assert plan.sequential and not plan.co_resident and not plan.fits
+        assert "group 2:  -> cannot be resident with the above" in out
+        assert "unload between" not in out
+        assert "separate run_pipeline invocations" in out
+        assert "process exit frees the card" in out
+
+    def test_single_gpu_vllm_engines_spread_across_cards(self, registered):
+        """Three 15 GiB engines on 2 x 24 GiB: each of the first two takes a
+        card, and the 4.5 GiB left beside either is too little for the third."""
+        names = [registered(f"_res_c0_{i}", hf_model_id=f"org/c0{i}", vram_gb=15.0)
+                 for i in range(3)]
+        plan = _plan(names, 24.0, 2)
+        assert [[fp.model for fp in g] for g in plan.groups] == [names[:2], names[2:]]
+        assert not plan.fits
+        assert [fp.devices for fp in plan.footprints] == [(0,), (1,), (0,)]
+        assert plan.gpus_required == 2
+        assert "all load on card 0" not in plan.explain()
+        assert "vLLM engines share a card only when their needs" in plan.explain()
+
+    def test_two_engines_take_two_cards_and_the_full_share(self, registered):
+        a = registered("_res_two_a", hf_model_id="org/twa", vram_gb=10.0)
+        b = registered("_res_two_b", hf_model_id="org/twb", vram_gb=10.0)
+        plan = _plan([a, b], 24.0, 2)
+        assert plan.fits and len(plan.groups) == 1 and plan.gpus_required == 2
+        assert [fp.devices for fp in plan.footprints] == [(0,), (1,)]
+        assert [fp.planned_utilization for fp in plan.footprints] == [0.9, 0.9]
+        assert [fp.reserved_gb for fp in plan.footprints] == [pytest.approx(21.6)] * 2
+
+    def test_a_third_engine_joins_the_card_with_most_room(self, registered):
+        """10 + 5 + 10 GiB on 2 x 24 GiB: the 5 GiB engine leaves 15.5 GiB
+        beside it, the first 10 GiB engine 10.0."""
+        names = [registered(f"_res_room_{i}", hf_model_id=f"org/rm{i}", vram_gb=gb)
+                 for i, gb in enumerate((10.0, 5.0, 10.0))]
+        plan = _plan(names, 24.0, 2)
+        assert plan.fits and len(plan.groups) == 1
+        assert [fp.devices for fp in plan.footprints] == [(0,), (1,), (1,)]
+
+    def test_a_tensor_parallel_engine_takes_the_first_untouched_cards(self, registered):
+        small = registered("_res_tp_beside", hf_model_id="org/tpb", vram_gb=5.0)
+        big = registered("_res_tp_free", hf_model_id="org/tpf", vram_gb=40.0,
+                         min_gpus=2)
+        plan = _plan([small, big], 48.0, 3)
+        assert plan.fits and plan.gpus_required == 3
+        assert [fp.devices for fp in plan.footprints] == [(0,), (1, 2)]
+        assert "-> cards 1-2, vLLM gets 43.2GiB each" in plan.explain()
+
+    def test_tensor_parallel_cards_need_not_be_neighbours(self, registered):
+        pinned = registered("_res_tp_pin", setup="introspect", hf_model_id="org/tpp",
+                            vram_gb=5.0, device_map="cuda:1")
+        big = registered("_res_tp_gap", hf_model_id="org/tpg", vram_gb=40.0,
+                         min_gpus=2)
+        plan = _plan([pinned, big], 48.0, 3)
+        assert plan.fits and plan.footprints[1].devices == (0, 2)
+        assert "-> cards 0,2, vLLM gets 43.2GiB each" in plan.explain()
+
+    def test_the_planner_counts_visible_cards_only(self, registered):
+        m = registered("_res_visible", hf_model_id="org/vis", vram_gb=10.0)
+        seen = []
+
+        def detect(visible=False):
+            seen.append(visible)
+            return "FakeGPU", 1
+
+        with patch("redact.llms.resources.measure.detect_gpus", detect), \
+             patch("redact.llms.resources.measure.card_sizes_gib",
+                   return_value=[24.0]):
+            plan = residency.plan_residency([m])
+        assert seen == [True] and plan.gpus_available == 1
+
+    def test_an_engine_loaded_already_is_placed_first_on_its_cards(self, registered):
+        new = registered("_res_pin_new", hf_model_id="org/pnn", vram_gb=10.0)
+        loaded = registered("_res_pin_old", hf_model_id="org/pno", vram_gb=10.0)
+        afresh = _plan([new, loaded], 24.0, 2)
+        assert [(fp.model, fp.devices) for fp in afresh.footprints] == [
+            (new, (0,)), (loaded, (1,))]
+        plan = _plan([new, loaded], 24.0, 2,
+                     pinned={residency.footprint(loaded).engine: (0,)})
+        assert [(fp.model, fp.devices) for fp in plan.footprints] == [
+            (loaded, (0,)), (new, (1,))]
+        assert plan.fits and len(plan.groups) == 1
+
+    def test_a_loaded_engine_is_placed_before_a_model_that_would_fill_its_card(
+            self, registered):
+        """Placed first, a 20 GiB transformers model takes all of card 0 and
+        the engine that is on it has no room. Around the engine it takes the
+        10 GiB left beside it and the rest on card 1."""
+        spanning = registered("_res_pin_tf", setup="introspect", hf_model_id="org/pnt",
+                              vram_gb=20.0)
+        loaded = registered("_res_pin_eng", hf_model_id="org/pne", vram_gb=10.0)
+        engine = residency.footprint(loaded).engine
+        plan = _plan([spanning, loaded], 24.0, 2, pinned={engine: (0,)})
+        assert plan.fits and [[fp.model for fp in g] for g in plan.groups] == [
+            [loaded, spanning]]
+        assert [fp.devices for fp in plan.footprints] == [(0,), (0, 1)]
+
+    def test_a_loaded_engine_that_no_longer_fits_stays_on_its_cards(self, registered):
+        """Two 15 GiB engines pinned on one 24 GiB card: the second opens a
+        group, on the card it is on, and the plan does not fit."""
+        a = registered("_res_pin_a", hf_model_id="org/pna", vram_gb=15.0)
+        b = registered("_res_pin_b", hf_model_id="org/pnb", vram_gb=15.0)
+        pinned = {residency.footprint(m).engine: (1,) for m in (a, b)}
+        plan = _plan([a, b], 24.0, 2, pinned=pinned)
+        assert [[fp.model for fp in g] for g in plan.groups] == [[a], [b]]
+        assert [fp.devices for fp in plan.footprints] == [(1,), (1,)]
+        assert not plan.fits
+
+    def test_one_card_leaves_nothing_to_pin(self, registered):
+        spanning = registered("_res_pin1_tf", setup="introspect", hf_model_id="org/p1t",
+                              vram_gb=5.0)
+        loaded = registered("_res_pin1_eng", hf_model_id="org/p1e", vram_gb=10.0)
+        engine = residency.footprint(loaded).engine
+        plan = _plan([spanning, loaded], 24.0, 1, pinned={engine: (0,)})
+        assert plan.as_dict() == _plan([spanning, loaded], 24.0, 1).as_dict()
+        assert plan.explain() == _plan([spanning, loaded], 24.0, 1).explain()
+        assert [fp.model for fp in plan.footprints] == [spanning, loaded]
+
+    def test_transformers_models_are_packed_per_card(self, registered):
+        """device_map='auto' may split a model, so three 15 GiB models fit
+        2 x 24 GiB and a fourth does not."""
+        # 13 GiB of weights: 13 x 1.1 + 0.6 = 14.9, up to 15.0.
+        names = [registered(f"_res_tf_{i}", setup="introspect",
+                            hf_model_id=f"org/tf{i}", vram_gb=13.0)
+                 for i in range(4)]
+        three = _plan(names[:3], 24.0, 2)
+        assert len(three.groups) == 1 and three.fits and three.gpus_required == 2
+        assert [fp.devices for fp in three.footprints] == [(0,), (0, 1), (1,)]
+        four = _plan(names, 24.0, 2)
+        assert len(four.groups) == 2 and not four.fits
+
+    def test_a_pinned_transformers_model_stays_on_its_card(self, registered):
+        a = registered("_res_pin_a", setup="introspect", hf_model_id="org/pa",
+                       vram_gb=15.0, device_map="cuda:1")
+        b = registered("_res_pin_b", setup="introspect", hf_model_id="org/pb",
+                       vram_gb=15.0, device_map="cuda:1")
+        plan = _plan([a, b], 24.0, 2)
+        assert plan.footprints[0].devices == (1,)
+        assert len(plan.groups) == 2          # 30 GiB on one 24 GiB card
+
+    def test_models_sharing_a_checkpoint_are_one_load(self, registered):
+        # venice-uncensored[vllm] and venice-paraphraser do exactly this. Two
+        # rows, one engine — counting it twice would split a plan that fits.
+        a = registered("_res_shared_a", hf_model_id="org/same", vram_gb=18.0)
+        b = registered("_res_shared_b", hf_model_id="org/same", vram_gb=18.0)
+        plan = _plan([a, b], 24.0, 1)
+        assert len(plan.groups) == 1
+        assert plan.gpus_required == 1 and plan.fits
+        assert plan.footprints[1].devices == (0,)
+
+    def test_multi_gpu_model_claims_whole_devices(self, registered):
+        # The locally-served-translator case: too big for one card, so it takes
+        # two outright rather than sharing the leftover GB on card 0.
+        big = registered("_res_tp2", hf_model_id="org/huge", vram_gb=70.0, min_gpus=2)
+        plan = _plan([big], 80.0, 1)
+        assert plan.gpus_required == 2
+        assert not plan.fits
+        assert "needs 2 GPU(s)" in plan.explain()
+
+    def test_a_single_gpu_engine_cannot_join_a_tensor_parallel_one(self, registered):
+        """The tensor-parallel engine reserves card 0 too."""
+        big = registered("_res_tp_first", hf_model_id="org/tf", vram_gb=70.0, min_gpus=2)
+        small = registered("_res_tp_then", hf_model_id="org/tt", vram_gb=5.0)
+        plan = _plan([big, small], 80.0, 2)
+        assert len(plan.groups) == 2 and not plan.fits
+
+    def test_unknown_capacity_does_not_invent_a_sequential_plan(self, registered):
+        a = registered("_res_nocap_a", hf_model_id="org/na", vram_gb=20.0)
+        b = registered("_res_nocap_b", hf_model_id="org/nb", vram_gb=20.0)
+        # Both capacity sources blind: no torch, and no nvidia-smi either.
+        with patch("redact.llms.resources.measure.free_total_gib", return_value=None):
+            with patch("redact.llms.resources.measure.detect_gpus", return_value=(None, 0)):
+                with patch("redact.llms.resources.measure.card_sizes_gib", return_value=None):
+                    plan = residency.plan_residency([a, b])
+        assert len(plan.groups) == 1          # grouped, not falsely split
+        assert not plan.sequential
+
+    def test_unknown_footprints_are_flagged_in_the_explanation(self, registered):
+        a = registered("_res_noft", hf_model_id="org/nf")
+        assert "no footprint for" in _plan([a], 24.0, 1).explain()
+
+    def test_unknown_vllm_models_share_the_card_and_are_flagged(self, registered):
+        a = registered("_res_unk_a", hf_model_id="org/ua")
+        b = registered("_res_unk_b", hf_model_id="org/ub")
+        plan = _plan([a, b], 24.0, 1)
+        assert len(plan.groups) == 1
+        assert [fp.planned_utilization for fp in plan.footprints] == [0.45, 0.45]
+        assert "no footprint for _res_unk_a, _res_unk_b" in plan.explain()
+
+    def test_a_new_group_starts_with_empty_cards(self, registered):
+        a = registered("_res_grp_a", hf_model_id="org/ga", vram_gb=20.0)
+        b = registered("_res_grp_b", hf_model_id="org/gb", vram_gb=3.0)
+        c = registered("_res_grp_c", hf_model_id="org/gc", vram_gb=3.0)
+        plan = _plan([a, b, c], 24.0, 1)
+        assert [[fp.model for fp in g] for g in plan.groups] == [[a], [b, c]]
+
+    def test_too_few_gpus_is_a_named_problem(self, registered):
+        big = registered("_res_tp_short", hf_model_id="org/ts", vram_gb=70.0, min_gpus=2)
+        plan = _plan([big], 80.0, 1)
+        assert not plan.fits
+        assert any("needs 2 GPUs but 1 are available" in p for p in plan.problems)
+        assert "PROBLEM: the plan needs 2 GPUs" in plan.explain()
+
+    def test_no_gpu_is_a_named_problem(self, registered):
+        a = registered("_res_nogpu", hf_model_id="org/ng", vram_gb=5.0)
+        plan = residency.plan_residency([a], gpus=0, gib_per_gpu=24.0)
+        assert not plan.fits
+        assert any("no GPU is available" in p for p in plan.problems)
+
+    def test_unknown_card_size_is_flagged(self, registered):
+        a = registered("_res_nosize", hf_model_id="org/ns", vram_gb=40.0)
+        with patch("redact.llms.resources.measure.free_total_gib", return_value=None):
+            with patch("redact.llms.resources.measure.detect_gpus", return_value=("FakeGPU", 2)):
+                with patch("redact.llms.resources.measure.card_sizes_gib", return_value=None):
+                    plan = residency.plan_residency([a])
+        assert any("card size is unknown" in w for w in plan.warnings)
+        assert "card size is unknown" in plan.explain()
+
+
+class TestCopies:
+    """Copies of one vLLM engine, each on a card of its own: the count given
+    for a model, or one per card with room for the plan's first single-GPU
+    engine. A copy shares its card like the engine does."""
+
+    def test_a_lone_engine_gets_a_copy_per_idle_card(self, registered):
+        m = registered("_cp_lone", hf_model_id="org/cpl", vram_gb=10.0)
+        plan = _plan([m], 24.0, 2)
+        fp = plan.footprints[0]
+        assert (fp.devices, fp.copies) == ((0, 1), 2)
+        assert fp.planned_utilization == 0.9 and fp.reserved_gb == pytest.approx(21.6)
+        assert plan.fits and plan.gpus_required == 2
+        out = plan.explain()
+        assert "-> cards 0-1, vLLM gets 21.6GiB each (gpu_memory_utilization=0.90)" in out
+        # 10 x 1.1 + 0.6 = 11.6, up to 12.0: the size of one copy.
+        assert "-> x2 copies (data_parallel_size=2), one per card, ~12.0GiB each" in out
+        assert "idle" not in out
+        assert plan.as_dict()["models"][0]["copies"] == 2
+
+    def test_an_engine_that_does_not_fit_its_card_gets_no_copies(self, registered):
+        """A copy needs what the engine needs. 20 x 1.1 + 0.6 = 22.6 GiB is
+        over the 21.6 a card grants; 19 GiB pads to 21.5 and fits."""
+        big = registered("_cp_big", hf_model_id="org/cpb", vram_gb=20.0)
+        fits = registered("_cp_fits", hf_model_id="org/cpi", vram_gb=19.0)
+        plan = _plan([big], 24.0, 2)
+        assert (plan.footprints[0].devices, plan.footprints[0].copies) == ((0,), 1)
+        assert not plan.fits and plan.gpus_required == 1
+        assert ("  note: card 1 is idle: _cp_big does not fit its card, so a copy "
+                "would not either") in plan.explain()
+        assert _plan([fits], 24.0, 2).footprints[0].devices == (0, 1)
+
+    def test_one_card_has_no_copies_and_no_note(self, registered):
+        m = registered("_cp_one", hf_model_id="org/cpo", vram_gb=10.0)
+        plan = _plan([m], 24.0, 1)
+        assert (plan.footprints[0].devices, plan.footprints[0].copies) == ((0,), 1)
+        assert "copies" not in plan.explain() and "idle" not in plan.explain()
+
+    def test_no_copies_when_every_card_has_an_engine(self, registered):
+        a = registered("_cp_full_a", hf_model_id="org/cfa", vram_gb=10.0)
+        b = registered("_cp_full_b", hf_model_id="org/cfb", vram_gb=10.0)
+        plan = _plan([a, b], 24.0, 2)
+        assert [(fp.devices, fp.copies) for fp in plan.footprints] == [
+            ((0,), 1), ((1,), 1)]
+        assert "copies" not in plan.explain() and "idle" not in plan.explain()
+
+    def test_copies_one_turns_the_default_off(self, registered):
+        m = registered("_cp_off", hf_model_id="org/cpf", vram_gb=10.0)
+        plan = _plan([m], 24.0, 2, copies={m: 1})
+        assert (plan.footprints[0].devices, plan.footprints[0].copies) == ((0,), 1)
+        assert plan.fits and plan.gpus_required == 1
+        assert "  note: card 1 is idle: _cp_off is limited to 1 copy" in plan.explain()
+
+    def test_explicit_copies_share_a_card_with_room(self, registered):
+        """Card 0 holds a copy of a (6.1 GiB) and b (6.1): 0.45 each. a has
+        one share, the smallest of its cards."""
+        a = registered("_cp_whole_a", hf_model_id="org/cwa", vram_gb=5.0)
+        b = registered("_cp_whole_b", hf_model_id="org/cwb", vram_gb=5.0)
+        plan = _plan([a, b], 24.0, 2, copies={a: 2})
+        assert [[fp.model for fp in g] for g in plan.groups] == [[a, b]]
+        assert plan.fits
+        assert [(fp.devices, fp.copies, fp.planned_utilization)
+                for fp in plan.footprints] == [((0, 1), 2, 0.45), ((0,), 1, 0.45)]
+
+    def test_given_copies_take_the_cards_with_the_most_room(self, registered):
+        """a and b take a card each; big's two copies take the idle card
+        and, of the two with room left, the first. Its share is that of the
+        card it shares with a."""
+        a = registered("_cp_most_a", hf_model_id="org/cma", vram_gb=5.0)
+        b = registered("_cp_most_b", hf_model_id="org/cmb", vram_gb=5.0)
+        big = registered("_cp_most_big", hf_model_id="org/cmg", vram_gb=10.0)
+        plan = _plan([a, b, big], 24.0, 3, copies={big: 2, a: 1})
+        assert plan.fits and len(plan.groups) == 1
+        assert [(fp.devices, fp.planned_utilization) for fp in plan.footprints] == [
+            ((0,), 0.3354), ((1,), 0.9), ((2, 0), 0.5645)]
+
+    def test_a_copy_shares_a_card_with_another_model(self, registered):
+        """Two 24 GiB cards: a (11.6 GiB) on card 0, b (6.1) on card 1, and
+        a copy of a beside b. Card 1 grants 13.55 to a, which loads with
+        that share on both cards."""
+        a = registered("_cp_beside_a", hf_model_id="org/cba", vram_gb=10.0)
+        b = registered("_cp_beside_b", hf_model_id="org/cbb", vram_gb=5.0)
+        plan = _plan([a, b], 24.0, 2)
+        assert [(fp.devices, fp.copies, fp.planned_utilization)
+                for fp in plan.footprints] == [((0, 1), 2, 0.5645), ((1,), 1, 0.3354)]
+        assert plan.footprints[0].reserved_gb == pytest.approx(13.55)
+        out = plan.explain()
+        assert ("-> cards 0-1, vLLM gets 13.6GiB each "
+                "(gpu_memory_utilization=0.56)") in out
+        assert "-> x2 copies (data_parallel_size=2), one per card, ~12.0GiB each" in out
+        assert "idle" not in out
+        off = _plan([a, b], 24.0, 2, copies={a: 1})
+        assert [(fp.devices, fp.planned_utilization) for fp in off.footprints] == [
+            ((0,), 0.9), ((1,), 0.9)]
+        assert "idle" not in off.explain()
+
+    def test_too_many_copies_is_the_gpu_count_problem(self, registered):
+        m = registered("_cp_many", hf_model_id="org/cpm", vram_gb=5.0)
+        plan = _plan([m], 24.0, 2, copies={m: 3})
+        assert not plan.fits and plan.gpus_required == 3
+        assert plan.problems == ["the plan needs 3 GPUs but 2 are available."]
+
+    def test_auto_copies_go_to_the_first_engine_only(self, registered):
+        a = registered("_cp_first_a", hf_model_id="org/cfa1", vram_gb=10.0)
+        b = registered("_cp_first_b", hf_model_id="org/cfb1", vram_gb=10.0)
+        plan = _plan([a, b], 24.0, 3)
+        assert [(fp.devices, fp.copies) for fp in plan.footprints] == [
+            ((0, 2), 2), ((1,), 1)]
+        assert plan.fits and plan.gpus_required == 3
+        assert [fp.planned_utilization for fp in plan.footprints] == [0.9, 0.9]
+        assert "-> cards 0,2, vLLM gets 21.6GiB each" in plan.explain()
+
+    def test_a_given_count_for_the_first_engine_leaves_the_card_idle(self, registered):
+        """The idle card does not pass to the next engine."""
+        a = registered("_cp_given_a", hf_model_id="org/cga", vram_gb=10.0)
+        b = registered("_cp_given_b", hf_model_id="org/cgb", vram_gb=10.0)
+        plan = _plan([a, b], 24.0, 3, copies={a: 1})
+        assert [fp.devices for fp in plan.footprints] == [(0,), (1,)]
+        assert "  note: card 2 is idle: _cp_given_a is limited to 1 copy" in plan.explain()
+
+    def test_idle_cards_take_copies_of_an_engine_whose_card_is_shared(
+            self, registered):
+        """The transformers model's 6.5 GiB on card 0 leave m 15.1 there, so
+        m loads with that share on all three cards."""
+        m = registered("_cp_shared", hf_model_id="org/cps", vram_gb=10.0)
+        fixed = registered("_cp_shared_tf", setup="introspect", hf_model_id="org/cpt",
+                           vram_gb=5.0, device_map="cuda:0")
+        plan = _plan([m, fixed], 24.0, 3)
+        assert plan.fits
+        assert [(fp.devices, fp.copies, fp.planned_utilization)
+                for fp in plan.footprints] == [((0, 1, 2), 3, 0.6291), ((0,), 1, None)]
+        assert "idle" not in plan.explain()
+
+    def test_a_twin_shares_the_copies(self, registered):
+        import redact.llms.backends.vllm as vllm_module
+
+        a = registered("_cp_twin_a", hf_model_id="org/cpw", vram_gb=10.0)
+        twin = registered("_cp_twin_b", hf_model_id="org/cpw", vram_gb=10.0)
+        plan = _plan([a, twin], 24.0, 2)
+        assert [(fp.devices, fp.copies) for fp in plan.footprints] == [((0, 1), 2)] * 2
+        residency.apply_plan(plan)
+        assert vllm_module._planned_devices == {
+            vllm_module._engine_key("org/cpw", None, {}): (0, 1)}
+
+    def test_a_count_given_for_a_twin_is_the_engines(self, registered):
+        a = registered("_cp_named_a", hf_model_id="org/cpn", vram_gb=10.0)
+        twin = registered("_cp_named_b", hf_model_id="org/cpn", vram_gb=10.0)
+        plan = _plan([a, twin], 24.0, 2, copies={twin: 1})
+        assert [(fp.devices, fp.copies) for fp in plan.footprints] == [((0,), 1)] * 2
+
+    def test_a_tensor_parallel_engine_gets_a_copy_on_each_pair_of_idle_cards(
+            self, registered):
+        """Planned, not yet loaded end to end on a GPU."""
+        big = registered("_cp_tp", hf_model_id="org/cptp", vram_gb=40.0, min_gpus=2)
+        plan = _plan([big], 48.0, 4)
+        fp = plan.footprints[0]
+        assert (fp.devices, fp.copies, fp.planned_utilization) == ((0, 1, 2, 3), 2, 0.9)
+        assert (plan.fits, plan.gpus_required) == (True, 4)
+        assert "-> x2 copies (data_parallel_size=2), each on 2 cards" in plan.explain()
+        assert "idle" not in plan.explain()
+
+    def test_one_idle_card_is_no_copy_of_a_tensor_parallel_engine(self, registered):
+        big = registered("_cp_tp_odd", hf_model_id="org/cpto", vram_gb=40.0, min_gpus=2)
+        plan = _plan([big], 48.0, 3)
+        assert (plan.footprints[0].devices, plan.footprints[0].copies) == ((0, 1), 1)
+        assert plan.fits and plan.gpus_required == 2
+        assert ("  note: card 2 is idle: a copy of _cp_tp_odd needs 2 idle cards"
+                in plan.explain())
+
+    def test_copies_a_tensor_parallel_engine_has_no_cards_for_go_to_the_next(
+            self, registered):
+        """The single-GPU engine takes card 2, the card with the most room,
+        and leaves the tensor-parallel engine one idle card: too few for a
+        copy, so the single-GPU engine has a copy there. With a third card
+        free the tensor-parallel engine has the copy."""
+        big = registered("_cp_tp_first", hf_model_id="org/cptf", vram_gb=40.0,
+                         min_gpus=2)
+        small = registered("_cp_tp_small", hf_model_id="org/cpts", vram_gb=5.0)
+        four = _plan([big, small], 48.0, 4)
+        assert [(fp.devices, fp.copies) for fp in four.footprints] == [
+            ((0, 1), 1), ((2, 3), 2)]
+        assert "idle" not in four.explain()
+        five = _plan([big, small], 48.0, 5)
+        assert [(fp.devices, fp.copies) for fp in five.footprints] == [
+            ((0, 1, 3, 4), 2), ((2,), 1)]
+
+    def test_given_copies_of_a_tensor_parallel_engine_take_its_cards_each(
+            self, registered):
+        big = registered("_cp_tp_x2", hf_model_id="org/cptx", vram_gb=40.0, min_gpus=2)
+        plan = _plan([big], 48.0, 4, copies={big: 2})
+        fp = plan.footprints[0]
+        assert (fp.devices, fp.copies, fp.planned_utilization) == ((0, 1, 2, 3), 2, 0.9)
+        assert plan.fits and plan.gpus_required == 4
+        assert "-> x2 copies (data_parallel_size=2), each on 2 cards" in plan.explain()
+
+    def test_a_plan_in_two_groups_gets_no_copies(self, registered):
+        """The third engine opens a group of its own, with a card idle beside it."""
+        names = [registered(f"_cp_grp_{i}", hf_model_id=f"org/cpg{i}", vram_gb=15.0)
+                 for i in range(3)]
+        plan = _plan(names, 24.0, 2)
+        assert len(plan.groups) == 2
+        assert [(fp.devices, fp.copies) for fp in plan.footprints] == [
+            ((0,), 1), ((1,), 1), ((0,), 1)]
+        assert "idle" not in plan.explain()
+
+    def test_a_plan_without_a_vllm_engine_has_no_idle_note(self, registered):
+        m = registered("_cp_tf_only", setup="introspect", hf_model_id="org/cpto",
+                       vram_gb=5.0, device_map="cuda:0")
+        assert "idle" not in _plan([m], 24.0, 2).explain()
+
+
+class TestCardsOfDifferentSizes:
+    """Each card is planned at its own size. A copy goes only to a card at
+    least as large as the engine's, and only where every engine keeps a
+    share that covers its need: one gpu_memory_utilization holds on all
+    an engine's cards."""
+
+    @staticmethod
+    def _plan(models, sizes, **kwargs):
+        with patch.object(measure, "card_sizes_gib", return_value=sizes), \
+             patch.object(measure, "detect_gpus", return_value=("FakeGPU", len(sizes))):
+            return residency.plan_residency(models, **kwargs)
+
+    def test_each_engine_is_granted_a_share_of_its_own_card(self, registered):
+        """55.6 GiB fits the 96 GiB card only. 7.2 fits both and takes the
+        emptier, the 32 GiB card, at 0.9 of it."""
+        big = registered("_sz_big", hf_model_id="org/szb", vram_gb=50.0)
+        small = registered("_sz_small", hf_model_id="org/szs", vram_gb=6.0)
+        plan = self._plan([big, small], [96.0, 32.0])
+        assert plan.fits and (plan.gib_per_card, plan.per_gpu_gb) == ([96.0, 32.0], 32.0)
+        assert [(fp.devices, fp.planned_utilization, fp.reserved_gb)
+                for fp in plan.footprints] == [
+            ((0,), 0.9, pytest.approx(86.4)), ((1,), 0.9, pytest.approx(28.8))]
+        out = plan.explain()
+        assert out.startswith("plan needs 2 GPU(s); detected 2 GPUs of different "
+                              "sizes: card 0 96.0GiB, card 1 32.0GiB\n")
+        assert plan.as_dict()["gib_per_card"] == [96.0, 32.0]
+
+    def test_a_smaller_card_takes_no_copy(self, registered):
+        big = registered("_sz_alone", hf_model_id="org/sza", vram_gb=20.0)
+        plan = self._plan([big], [96.0, 32.0, 96.0])
+        assert (plan.footprints[0].devices, plan.footprints[0].copies) == ((0, 2), 2)
+        assert ("  note: card 1 is idle: it is smaller than _sz_alone's card "
+                "(96.0GiB), and a copy there would cut its share on every card"
+                ) in plan.explain()
+
+    def test_no_copy_where_its_share_would_not_cover_the_engine(self, registered):
+        """x (22.6 GiB) is on the 32 GiB card. Beside y (61.1) the 96 GiB card
+        has room for a copy, but would grant it 24.0 of 96: 0.25, which on
+        the 32 GiB card is 8 GiB."""
+        x = registered("_sz_cov_x", hf_model_id="org/szx", vram_gb=20.0)
+        y = registered("_sz_cov_y", hf_model_id="org/szy", vram_gb=55.0)
+        plan = self._plan([x, y], [32.0, 96.0])
+        assert plan.fits
+        assert [(fp.devices, fp.planned_utilization) for fp in plan.footprints] == [
+            ((0,), 0.9), ((1,), 0.9)]
+
+    def test_a_tensor_parallel_engine_is_granted_what_its_smallest_card_holds(
+            self, registered):
+        """39.1 GiB per card: the 32 GiB card grants 28.8, so it does not
+        fit, and the advice is sized for that card."""
+        big = registered("_sz_tp", hf_model_id="org/sztp", vram_gb=70.0, min_gpus=2)
+        plan = self._plan([big], [96.0, 32.0])
+        fp = plan.footprints[0]
+        assert fp.devices == (0, 1) and fp.reserved_gb == pytest.approx(28.8)
+        assert plan.oversized == [fp] and not plan.fits
+        assert "suggested: min_gpus=4 (tensor_parallel_size=4)" in plan.explain()
+
+    def test_a_search_tries_one_untouched_card_of_each_size(self, registered, caplog):
+        """In the order given a takes card 0, where b (66.6 GiB) then has no
+        room. Found: a on a 32 GiB card, b on the 96 GiB one; a copy of a
+        on the other 32 GiB card."""
+        a = registered("_sz_se_a", hf_model_id="org/szsa", vram_gb=20.0)
+        b = registered("_sz_se_b", hf_model_id="org/szsb", vram_gb=60.0)
+        with caplog.at_level(logging.INFO, logger=placement.logger.name):
+            plan = self._plan([a, b], [96.0, 32.0, 32.0])
+        assert plan.fits
+        assert [(fp.devices, fp.planned_utilization) for fp in plan.footprints] == [
+            ((1, 2), 0.9), ((0,), 0.9)]
+        assert [r.getMessage() for r in caplog.records] == [
+            "[residency] placed in another arrangement than the order given: "
+            f"{a} -> card 1, {b} -> card 0"]
+
+    def test_copies_given_take_the_largest_cards_first(self, registered):
+        x = registered("_sz_large", hf_model_id="org/szl", vram_gb=6.0)
+        plan = self._plan([x], [16.0, 96.0, 96.0], copies={x: 2})
+        assert (plan.footprints[0].devices, plan.footprints[0].copies) == ((1, 2), 2)
+
+    def test_a_share_a_crowded_stage_lowers_is_checked_in_every_stage(
+            self, registered):
+        """x has two copies given, on a 96 and a 16 GiB card. Beside y in
+        stage a its 96 GiB card grants it 0.1979, which on the 16 GiB card is
+        3.2 GiB, short of its 7.2. x loads once, so stage b, where it is
+        alone, does not fit either."""
+        x = registered("_sz_low_x", hf_model_id="org/szlx", vram_gb=6.0)
+        y = registered("_sz_low_y", hf_model_id="org/szly", vram_gb=50.0)
+        with patch.object(measure, "card_sizes_gib", return_value=[96.0, 16.0]), \
+             patch.object(measure, "detect_gpus", return_value=("FakeGPU", 2)):
+            a, b = residency.plan_phases({"a": [x, y], "b": [x]}, copies={x: 2})
+        for phase in (a, b):
+            (fp,) = [fp for fp in phase.plan.footprints if fp.model == x]
+            assert (fp.devices, fp.planned_utilization) == ((0, 1), 0.1979)
+            assert fp in phase.plan.oversized and not phase.plan.fits
+
+    def test_a_count_given_for_other_cards_plans_every_card_at_the_smallest(
+            self, registered):
+        """Four cards asked of a machine whose two are 96 and 32 GiB."""
+        m = registered("_sz_count", hf_model_id="org/szc", vram_gb=5.0)
+        with patch.object(measure, "card_sizes_gib", return_value=[96.0, 32.0]):
+            plan = residency.plan_residency([m], gpus=4)
+        assert (plan.gib_per_card, plan.per_gpu_gb) == ([32.0] * 4, 32.0)
+
+    def test_a_fit_is_found_whenever_one_exists(self, registered, caplog):
+        """300 seeded sets of 2 to 6 engines on 2 to 4 cards of random sizes:
+        the plan fits exactly when trying every assignment finds one that
+        does."""
+        rng = random.Random(20261016)
+        unfit = 0
+        caplog.set_level(logging.INFO, logger=placement.logger.name)
+        for i in range(300):
+            cards = rng.randint(2, 4)
+            sizes = [rng.choice((16.0, 24.0, 32.0, 48.0)) for _ in range(cards)]
+            pools = [estimate.DEFAULT_GPU_MEMORY_UTILIZATION * size for size in sizes]
+            needs_of = packed_sizes(rng, cards, sum(pools) / cards, range(2, 7))
+            names = [registered(f"_sz_or{i}_{j}", hf_model_id=f"org/szor{i}{j}",
+                                vram_gb=gb) for j, gb in enumerate(needs_of)]
+            plan = self._plan(names, sizes)
+            needs = {fp.model: fp.padded_gb for fp in plan.footprints}
+            exists = fit_exists(needs, [names], cards, pools)
+            assert plan.fits is exists, (i, sizes, needs)
+            if exists:
+                assert len(plan.groups) == 1
+                assert_no_card_is_overfull(plan, pools)
+            unfit += not exists
+        # Of the 300, the sets that fit only in another arrangement than the
+        # order given, and those that fit in none.
+        assert (len(caplog.records), unfit) == (73, 177)
+
+
+class TestPlanForAGivenMachine:
+    def test_plans_for_the_machine_given_without_detecting(self, registered):
+        m = registered("_res_given", hf_model_id="org/gv", vram_gb=50.0)
+        with patch("redact.llms.resources.measure.detect_gpus", side_effect=AssertionError), \
+             patch("redact.llms.resources.measure.free_total_gib",
+                   side_effect=AssertionError):
+            small = residency.plan_residency([m], gpus=1, gib_per_gpu=24.0)
+            pod = residency.plan_residency([m], gpus=1, gib_per_gpu=80.0)
+        assert not small.fits and pod.fits
+        assert pod.machine_given and pod.gpu_name is None
+        assert "planning for 1 GPU(s), 80.0GiB each" in pod.explain()
+
+    def test_card_size_alone_keeps_the_detected_count(self, registered):
+        m = registered("_res_given_size", hf_model_id="org/gs", vram_gb=50.0)
+        with patch("redact.llms.resources.measure.detect_gpus", return_value=("FakeGPU", 2)), \
+             patch("redact.llms.resources.measure.free_total_gib",
+                   side_effect=AssertionError):
+            plan = residency.plan_residency([m], gib_per_gpu=80.0)
+        assert (plan.gpus_available, plan.per_gpu_gb) == (2, 80.0)
+
+
+class TestAsDict:
+    def test_carries_what_the_explanation_does(self, registered):
+        ok = registered("_res_dict_ok", hf_model_id="org/do", vram_gb=10.0)
+        big = registered("_res_dict_big", hf_model_id="org/dbg", vram_gb=60.0)
+        with _kv(1.0):
+            plan = _plan([ok, big], 48.0, 1)
+        data = json.loads(json.dumps(plan.as_dict()))     # plain data
+        assert data["fits"] is False and data["co_resident"] is False
+        assert data["groups"] == [[ok], [big]]
+        assert data["oversized"] == [big]
+        assert (data["gpus_available"], data["per_gpu_gib"]) == (1, 48.0)
+        assert data["machine"] == "detected"
+        assert len(data["problems"]) == 2 and data["warnings"] == []
+        first, second = data["models"]
+        assert first == {
+            "model": ok, "setup": "vllm", "hf_model_id": "org/do", "gib": 13.0,
+            "source": "declared",
+            "derivation": "declared: 10.0 weights + 1.00 KV, x1.1 +0.6",
+            "min_gpus": 1, "copies": 1, "devices": [0],
+            "reserved_gib_per_device": pytest.approx(43.2),
+            "need_gib_per_device": 11.0,
+            "padded_gib_per_device": pytest.approx(12.7),
+            "gpu_memory_utilization": 0.9,
+            "group": 0,
+        }
+        assert second["group"] == 1
+        assert second["gpu_memory_utilization"] == 0.9
+
+    def test_the_residency_event_carries_the_plan(self, registered, tmp_path):
+        m = registered("_res_event", hf_model_id="org/ev", vram_gb=20.0)
+        telemetry.install(data_dir=tmp_path)
+        residency.report(_plan([m], 48.0, 1), verbose=False)
+        event = json.loads(telemetry.collector().trace_path.read_text().splitlines()[0])
+        assert event["ev"] == "residency" and event["fits"] is True
+        assert event["groups"] == [[m]]
+        assert event["models"][0]["devices"] == [0]
+
+
+class TestLoadLocks:
+    """Preload runs off-thread, so the caches must not be check-then-act.
+
+    Without the double-checked lock, two threads missing together both build an
+    engine — two copies of the same checkpoint on one card, OOM, and a
+    traceback that points nowhere useful.
+    """
+
+    def test_concurrent_engine_misses_load_exactly_once(self):
+        import redact.llms.backends.vllm as vllm_module
+
+        vllm_module._engines.clear()
+        vllm_module._engine_loaded_at.clear()
+        loads = []
+
+        class _SlowLLM:
+            def __init__(self, **kw):
+                # Wide enough that a second thread is certainly inside the
+                # window a naive check-then-act would leave open.
+                time.sleep(0.15)
+                loads.append(kw["model"])
+
+        with patch.dict("sys.modules", fake_vllm_modules(_SlowLLM)):
+            with patch.object(vllm_module, "_prepare_environment"):
+                results = []
+                threads = [
+                    threading.Thread(
+                        target=lambda: results.append(
+                            vllm_module._engine("org/same", None, {})
+                        )
+                    )
+                    for _ in range(4)
+                ]
+                for t in threads:
+                    t.start()
+                for t in threads:
+                    t.join()
+
+        assert loads == ["org/same"]                 # one load, not four
+        assert len({id(r) for r in results}) == 1    # everyone got the same engine
+        vllm_module._engines.clear()
+        vllm_module._engine_loaded_at.clear()
+
+    def test_concurrent_transformers_misses_load_exactly_once(self):
+        import redact.llms.backends.introspection as intro
+
+        intro._models.clear()
+        loads = []
+
+        def _slow_load(key, hf_model_id, device_map, torch_dtype, hf_kwargs):
+            time.sleep(0.15)
+            loads.append(hf_model_id)
+            intro._models[key] = ("tok", "model")
+            return intro._models[key]
+
+        with patch.object(intro, "_load_locked", _slow_load):
+            threads = [
+                threading.Thread(target=lambda: intro._load("org/x", "auto", "auto", {}))
+                for _ in range(4)
+            ]
+            for t in threads:
+                t.start()
+            for t in threads:
+                t.join()
+
+        assert loads == ["org/x"]
+        intro._models.clear()
+
+
+class TestCudaLock:
+    """A build narrows CUDA_VISIBLE_DEVICES for the whole process. What else
+    reads it meanwhile reads the value from before, and what starts CUDA in
+    this process waits for the build or does without."""
+
+    @pytest.fixture()
+    def build(self, monkeypatch):
+        """``build(outer)`` sets the parent's variable to ``outer``, then holds
+        ``visible_only(["1"])`` on another thread until the event it returns
+        is set, or the test ends."""
+        done, threads = threading.Event(), []
+
+        def start(outer=None):
+            if outer is None:
+                monkeypatch.delenv("CUDA_VISIBLE_DEVICES", raising=False)
+            else:
+                monkeypatch.setenv("CUDA_VISIBLE_DEVICES", outer)
+            inside = threading.Event()
+
+            def hold():
+                with measure.visible_only(["1"]):
+                    inside.set()
+                    done.wait(5)
+
+            threads.append(threading.Thread(target=hold))
+            threads[-1].start()
+            assert inside.wait(5)
+            return done
+
+        yield start
+        done.set()
+        for thread in threads:
+            thread.join(5)
+
+    @pytest.mark.parametrize("outer", [None, "2,3"])
+    def test_the_variable_reads_as_before_while_a_build_narrows_it(
+            self, monkeypatch, outer):
+        if outer is None:
+            monkeypatch.delenv("CUDA_VISIBLE_DEVICES", raising=False)
+        else:
+            monkeypatch.setenv("CUDA_VISIBLE_DEVICES", outer)
+        with measure.visible_only(["GPU-x"]):
+            assert os.environ["CUDA_VISIBLE_DEVICES"] == "GPU-x"
+            assert measure.visible_gpu_ids() == (outer.split(",") if outer else None)
+        assert os.environ.get("CUDA_VISIBLE_DEVICES") == outer
+
+    def test_a_plan_made_during_a_build_counts_the_parents_cards(
+            self, monkeypatch, build):
+        build("0,2")
+        monkeypatch.setattr(measure.shutil, "which", lambda _: "/usr/bin/nvidia-smi")
+        monkeypatch.setattr(measure.subprocess, "run", lambda *a, **k: SimpleNamespace(
+            stdout="NVIDIA A\nNVIDIA A\nNVIDIA A\n"))
+        assert measure.detect_gpus(visible=True) == ("NVIDIA A", 2)
+
+    def test_without_cards_to_name_nothing_changes_and_no_lock_is_taken(
+            self, monkeypatch):
+        monkeypatch.setenv("CUDA_VISIBLE_DEVICES", "1")
+        with measure.cuda_lock, measure.visible_only([]):
+            assert os.environ["CUDA_VISIBLE_DEVICES"] == "1"
+
+    def test_a_failed_build_puts_the_variable_back(self, monkeypatch):
+        monkeypatch.setenv("CUDA_VISIBLE_DEVICES", "2,3")
+        with pytest.raises(RuntimeError), measure.visible_only(["3"]):
+            raise RuntimeError
+        assert os.environ["CUDA_VISIBLE_DEVICES"] == "2,3"
+        assert measure.visible_gpu_ids() == ["2", "3"]
+        assert not measure.cuda_lock.locked()
+
+    def test_the_torch_probe_does_without_during_a_build(self, build, caplog):
+        """Asking torch then would start CUDA on the build's cards only."""
+        build()
+        with patch.object(measure, "_torch", side_effect=AssertionError("asked")), \
+             caplog.at_level(logging.INFO, logger=measure.logger.name):
+            assert measure.free_total_gib() is None
+        assert "being built" in caplog.text
+
+    def test_a_transformers_load_waits_for_a_build_and_sees_the_parents_cards(
+            self, monkeypatch, build):
+        import sys
+
+        import redact.llms.backends.introspection as intro
+
+        seen = []
+
+        class _Model:
+            @staticmethod
+            def from_pretrained(*args, **kwargs):
+                seen.append(os.environ.get("CUDA_VISIBLE_DEVICES"))
+                return SimpleNamespace(eval=lambda: None)
+
+        monkeypatch.setitem(sys.modules, "transformers", SimpleNamespace(
+            __version__="5.0", AutoModelForCausalLM=_Model,
+            AutoTokenizer=SimpleNamespace(from_pretrained=lambda *a, **k: "tok")))
+        monkeypatch.setattr(measure, "_torch", lambda: None)
+        monkeypatch.setattr(intro, "_models", {})
+        monkeypatch.setattr(intro, "_models_loaded_at", {})
+        done = build()
+        loading = threading.Thread(
+            target=intro._load, args=("org/tf", "auto", "auto", {}))
+        loading.start()
+        loading.join(0.2)
+        assert loading.is_alive() and seen == []        # waits for the build
+        done.set()
+        loading.join(5)
+        assert seen == [None]                           # the parent's cards
+
+
+class TestPreload:
+    def test_returns_none_when_nothing_is_local(self):
+        assert residency.preload(["claude-opus-4-6"]) is None
+
+    def test_warms_local_models_in_the_background(self, registered):
+        m = registered("_pre_ok", hf_model_id="org/warm", vram_gb=1.0)
+        seen = []
+        with patch("redact.llms.ModelClient.create", side_effect=lambda n, **kw: seen.append(n)):
+            thread = residency.preload([m])
+            thread.join(timeout=5)
+        assert seen == [m]
+
+    def test_loads_in_the_order_given_and_skips_api_models(self, registered):
+        a = registered("_pre_first", hf_model_id="org/p1")
+        b = registered("_pre_second", hf_model_id="org/p2")
+        seen = []
+        with patch("redact.llms.ModelClient.create", side_effect=lambda n, **kw: seen.append(n)):
+            residency.preload([b, "claude-opus-4-6", a, b]).join(timeout=5)
+        assert seen == [b, a]
+
+    def test_locality_is_decided_without_estimating(self, registered):
+        """Asking "is this local" must not read an HF config."""
+        m = registered("_pre_no_estimate", hf_model_id="org/pne")
+        with patch.object(estimate, "estimate", side_effect=AssertionError), \
+             patch("redact.llms.ModelClient.create"):
+            residency.preload([m]).join(timeout=5)
+
+    def test_a_failed_preload_never_aborts_the_run(self, registered, tmp_path, caplog):
+        # The whole point: constitution is ledger-backed and its Opus output is
+        # saved as it goes, so a GPU that won't load must not kill it. The stage
+        # that needs the model fails later, at the point of use.
+        m = registered("_pre_boom", hf_model_id="org/boom", vram_gb=1.0)
+        telemetry.install(data_dir=tmp_path)
+        with patch("redact.llms.ModelClient.create", side_effect=RuntimeError("no CUDA")):
+            with caplog.at_level(logging.ERROR, logger=residency.logger.name):
+                thread = residency.preload([m])
+                thread.join(timeout=5)          # returns normally, does not raise
+
+        assert "no CUDA" in caplog.text
+        assert "run continues" in caplog.text
+        events = json.loads(telemetry.collector().trace_path.read_text().splitlines()[0])
+        assert events["ev"] == "preload_failed" and events["model"] == m
+
+
+class TestPreloadAtTheEnd:
+    """A load that the way out ended is not a failed load."""
+
+    def test_a_load_ended_on_the_way_out_is_not_an_error_and_ends_the_preload(
+            self, registered, tmp_path, caplog):
+        import redact.llms.backends.vllm as vllm_module
+
+        first = registered("_pre_end_a", hf_model_id="org/pea", vram_gb=1.0)
+        second = registered("_pre_end_b", hf_model_id="org/peb", vram_gb=1.0)
+        tried = []
+
+        def create(name, **kw):
+            tried.append(name)
+            raise vllm_module.EngineLoadEnded("The load of org/pea was ended")
+
+        telemetry.install(data_dir=tmp_path)
+        with patch("redact.llms.ModelClient.create", side_effect=create), \
+             caplog.at_level(logging.INFO, logger=residency.logger.name):
+            residency.preload([first, second]).join(timeout=5)
+        assert tried == [first]                 # the process is on its way out
+        assert [r.levelname for r in caplog.records] == ["INFO", "INFO"]
+        assert "was ended" in caplog.text and "fail" not in caplog.text
+        event = json.loads(telemetry.collector().trace_path.read_text().splitlines()[0])
+        assert (event["ev"], event["model"], event["cause"]) == (
+            "preload_failed", first, "exit")
+
+    def test_no_load_starts_once_the_exit_hook_ran(self, monkeypatch):
+        import redact.llms.backends.vllm as vllm_module
+
+        built = []
+        monkeypatch.setattr(vllm_module.VLLMBackend, "clear_cache",
+                            lambda **kw: None)
+        monkeypatch.setattr(vllm_module, "_exiting", False)
+        with patch.dict("sys.modules", fake_vllm_modules(lambda **kw: built.append(1))):
+            vllm_module._exit()
+            with pytest.raises(vllm_module.EngineLoadEnded, match="not started"):
+                vllm_module._engine("org/late", None, {})
+        assert built == []
+
+
+class TestOversizedModels:
+    """One model bigger than its cards is a config problem, not a packing result."""
+
+    def test_model_larger_than_a_device_is_reported_as_unplaceable(self, registered):
+        big = registered("_res_oversized", hf_model_id="org/huge", vram_gb=50.0)
+        plan = _plan([big], 8.0, 1)
+        assert not plan.fits
+        assert [fp.model for fp in plan.oversized] == [big]
+        assert "needs 55.6GiB with overhead (50.0 weights + KV, x1.1 +0.6) but " \
+               "gpu_memory_utilization=0.90 grants 7.2GiB." in plan.explain()
+        # 6.25 per card at 8 pads to 7.475, over the 7.2 a card grants.
+        assert "no tensor-parallel size up to 8 fits a 8.0GiB device" in plan.explain()
+
+    def test_an_oversized_model_is_one_problem(self, registered):
+        big = registered("_res_oversized_once", hf_model_id="org/h1", vram_gb=50.0)
+        with _kv(1.0):
+            plan = _plan([big], 48.0, 1)
+        assert len(plan.problems) == 1 and plan.warnings == []
+
+    def test_declaring_min_gpus_clears_the_problem(self, registered):
+        big = registered("_res_tp_ok", hf_model_id="org/huge2", vram_gb=50.0, min_gpus=8)
+        plan = _plan([big], 10.0, 8)           # 6.25 pads to 7.475 of the 9.0
+        assert plan.oversized == []
+        assert plan.gpus_required == 8 and plan.fits
+
+    def test_tensor_parallel_model_larger_than_its_cards_is_flagged(self, registered):
+        """60 GiB on each of two 48 GiB cards does not fit either."""
+        big = registered("_res_tp_over", hf_model_id="org/tpo", vram_gb=120.0, min_gpus=2)
+        plan = _plan([big], 48.0, 2)
+        out = plan.explain()
+        assert not plan.fits and [fp.model for fp in plan.oversized] == [big]
+        assert "needs 66.6GiB per GPU with overhead (60.0 weights + KV, x1.1 " \
+               "+0.6) but gpu_memory_utilization=0.90 grants 43.2GiB." in out
+        assert "suggested: min_gpus=4 (tensor_parallel_size=4) -> 33.6GiB per GPU" in out
+
+    def test_a_spanning_transformers_model_may_exceed_one_card(self, registered):
+        m = registered("_res_span", setup="introspect", hf_model_id="org/sp", vram_gb=40.0)
+        assert _plan([m], 24.0, 2).fits
+        assert not _plan([m], 24.0, 1).fits
+
+    def test_a_model_that_fits_is_not_flagged(self, registered):
+        ok = registered("_res_fits", hf_model_id="org/small", vram_gb=5.0)
+        plan = _plan([ok], 8.0, 1)
+        assert plan.oversized == [] and plan.fits
+
+
+class TestBusOrder:
+    """CUDA counts the cards in the order nvidia-smi lists them, which the
+    plan numbers them in: a load and a plan set it before CUDA starts."""
+
+    @pytest.fixture()
+    def torch_started(self, monkeypatch):
+        """A torch in ``sys.modules`` whose CUDA has started or not."""
+        def _set(started):
+            cuda = SimpleNamespace(is_initialized=lambda: started)
+            monkeypatch.setitem(__import__("sys").modules, "torch",
+                                SimpleNamespace(cuda=cuda))
+        return _set
+
+    def test_a_load_sets_it_unless_set(self, monkeypatch):
+        import redact.llms.backends.vllm as vllm_module
+
+        vllm_module._prepare_environment()
+        assert os.environ["CUDA_DEVICE_ORDER"] == "PCI_BUS_ID"
+        monkeypatch.setenv("CUDA_DEVICE_ORDER", "FASTEST_FIRST")
+        vllm_module._prepare_environment()
+        assert os.environ["CUDA_DEVICE_ORDER"] == "FASTEST_FIRST"
+
+    def test_a_plan_of_local_models_sets_it(self, registered):
+        m = registered("_bo_plan", hf_model_id="org/bo", vram_gb=1.0)
+        _plan(["claude-opus-4-6"], 24.0, 2)
+        assert "CUDA_DEVICE_ORDER" not in os.environ
+        _plan([m], 24.0, 2)
+        assert os.environ["CUDA_DEVICE_ORDER"] == "PCI_BUS_ID"
+
+    def test_cuda_started_before_it_was_set_is_a_warning(
+            self, torch_started, caplog):
+        torch_started(True)
+        with caplog.at_level(logging.WARNING, logger=measure.logger.name):
+            measure.bus_order()
+            measure.bus_order()
+        assert len(caplog.records) == 1
+        assert "CUDA_DEVICE_ORDER=PCI_BUS_ID" in caplog.text
+
+    def test_cuda_not_started_is_no_warning(self, torch_started, caplog):
+        torch_started(False)
+        with caplog.at_level(logging.WARNING, logger=measure.logger.name):
+            measure.bus_order()
+        assert caplog.records == []
+
+
+class TestCapacityDetection:
+    def test_nvidia_smi_supplies_capacity_without_touching_torch(self, registered):
+        """Asking torch would start CUDA in this process before vLLM loads."""
+        m = registered("_res_smi", hf_model_id="org/smi", vram_gb=50.0)
+        with patch("redact.llms.resources.measure.free_total_gib",
+                   side_effect=AssertionError("torch probed")):
+            with patch("redact.llms.resources.measure.detect_gpus", return_value=("FakeGPU", 1)):
+                with patch("redact.llms.resources.measure.card_sizes_gib", return_value=[8.0]):
+                    plan = residency.plan_residency([m])
+        assert plan.per_gpu_gb == 8.0
+        assert not plan.fits          # 50GB on an 8GB card: correctly refused
+
+    def test_torch_supplies_capacity_when_nvidia_smi_cannot(self, registered):
+        m = registered("_res_both", hf_model_id="org/both", vram_gb=1.0)
+        with patch("redact.llms.resources.measure.free_total_gib", return_value=(20.0, 24.0)):
+            with patch("redact.llms.resources.measure.detect_gpus", return_value=("FakeGPU", 1)):
+                with patch("redact.llms.resources.measure.card_sizes_gib", return_value=None):
+                    plan = residency.plan_residency([m])
+        assert plan.per_gpu_gb == 24.0
+
+    def test_an_api_only_plan_never_probes_capacity(self):
+        """The torch probe imports torch; an API-only run must not pay for it."""
+        with patch("redact.llms.resources.measure.free_total_gib",
+                   side_effect=AssertionError("probed")), \
+             patch("redact.llms.resources.measure.card_sizes_gib",
+                   side_effect=AssertionError("probed")), \
+             patch("redact.llms.resources.measure.detect_gpus", return_value=("FakeGPU", 1)):
+            plan = residency.plan_residency(["claude-opus-4-6", "deepseek-v3.2"])
+        assert plan.groups == [] and plan.per_gpu_gb is None
+        assert plan.gpus_available == 1
+
+
+class TestRegistryFootprints:
+    """The shipped local entries declare a footprint, so planning works
+    without reading any HF config."""
+
+    @pytest.mark.parametrize("model,backend_type", [
+        ("venice-uncensored", "vllm"),
+        ("venice-paraphraser", None),
+        ("llama-3.2-3b-debug", None),
+    ])
+    def test_every_local_model_declares_a_footprint(self, model, backend_type):
+        fp = residency.footprint(model, backend_type)
+        assert fp is not None and fp.known, f"{model} has no vram_gb"
+        assert fp.source == "declared"
+
+    def test_the_shared_checkpoint_declares_the_same_footprint(self):
+        a = residency.footprint("venice-uncensored", "vllm")
+        b = residency.footprint("venice-paraphraser")
+        assert a.hf_model_id == b.hf_model_id
+        assert a.gb == b.gb        # one engine, one footprint
+
+
+def test_estimated_tensor_parallel_footprint_is_a_total_like_a_declared_one():
+    name = "_res_tp_estimated"
+    register_model(name, backend_type="vllm", vllm=VLLMConfig(
+        hf_model_id="org/tp", min_gpus=2))
+    try:
+        with patch("redact.llms.resources.estimate.estimate_weights_gib",
+                   return_value=30.0), \
+             patch("redact.llms.resources.estimate.estimate_kv_gib", return_value=0.0), \
+             patch("redact.llms.resources.measure.card_sizes_gib", return_value=[36.0]), \
+             patch("redact.llms.resources.measure.detect_gpus", return_value=("FakeGPU", 2)):
+            fp = residency.footprint(name)
+            out = residency.plan_residency([name]).explain()
+    finally:
+        MODEL_REGISTRY.pop(name, None)
+    assert fp.gb == 68.0            # (30 + 0) * 1.1 + 0.6 -> 34.0 per GPU, x2
+    assert "~34.0GiB each" in out
+    # The grant has to cover the 30 GiB of weights with overhead: 33.6.
+    assert "needs 33.6GiB per GPU with overhead (30.0 weights + KV, x1.1 +0.6) " \
+           "but gpu_memory_utilization=0.90 grants 32.4GiB" in out
+
+
+def test_same_checkpoint_with_different_engine_settings_is_two_loads():
+    names = ("_res_same_a", "_res_same_b")
+    for name, length in zip(names, (4096, 8192)):
+        register_model(name, backend_type="vllm", vllm=VLLMConfig(
+            hf_model_id="org/same", vram_gb=20.0, vllm_kwargs={"max_model_len": length}))
+    try:
+        with patch("redact.llms.resources.measure.card_sizes_gib", return_value=[24.0]), \
+             patch("redact.llms.resources.measure.detect_gpus", return_value=("FakeGPU", 1)):
+            plan = residency.plan_residency(list(names))
+    finally:
+        for name in names:
+            MODEL_REGISTRY.pop(name, None)
+    assert len(plan.groups) == 2    # 2 x 20GiB on one 24GiB card: one after the other
+
+
+def test_planner_engine_id_matches_the_vllm_cache_key():
+    import redact.llms.backends.vllm as vllm_module
+
+    cfg = VLLMConfig(hf_model_id="org/m", quantization="awq", min_gpus=2,
+                     vllm_kwargs={"max_model_len": 4096})
+    assert _engine_id(cfg, "vllm")[1:] == vllm_module._engine_key(
+        cfg.hf_model_id, cfg.quantization, cfg.engine_kwargs)
+
+
+class TestUnloadLocal:
+    @pytest.fixture()
+    def events(self):
+        seen = []
+        observe.set_emitter(seen.append)
+        yield seen
+        observe.set_emitter(None)
+
+    def test_kept_vllm_engine_stays_cached_and_timed(self, registered, events):
+        import redact.llms.backends.vllm as vllm_module
+
+        kept = registered("_unload_keep", hf_model_id="org/keep")
+        dropped = registered("_unload_drop", hf_model_id="org/drop")
+        key = {n: vllm_module._engine_key(f"org/{n.split('_')[-1]}", None, {})
+               for n in (kept, dropped)}
+        vllm_module._engines.clear()
+        vllm_module._engine_loaded_at.clear()
+        try:
+            for k in key.values():
+                vllm_module._engines[k] = object()
+                vllm_module._engine_loaded_at[k] = time.perf_counter()
+            engine = vllm_module._engines[key[kept]]
+
+            residency.unload_local(keep=[kept])
+
+            assert list(vllm_module._engines) == [key[kept]]
+            assert vllm_module._engines[key[kept]] is engine
+            assert list(vllm_module._engine_loaded_at) == [key[kept]]   # meter runs on
+            released = [e["hf_model_id"] for e in events if e.get("phase") == "release"]
+            assert released == ["org/drop"]
+
+            residency.unload_local()
+            assert vllm_module._engines == {} and vllm_module._engine_loaded_at == {}
+            released = [e["hf_model_id"] for e in events if e.get("phase") == "release"]
+            assert released == ["org/drop", "org/keep"]
+        finally:
+            vllm_module._engines.clear()
+            vllm_module._engine_loaded_at.clear()
+
+    def test_kept_transformers_model_stays_cached_and_timed(self, registered, events):
+        import redact.llms.backends.introspection as intro
+
+        kept = registered("_unload_keep_tf", setup="introspect", hf_model_id="org/ktf")
+        keep_key = ("org/ktf", "auto", "auto", "[]")
+        drop_key = ("org/dtf", "auto", "auto", "[]")
+        intro._models.clear()
+        intro._models_loaded_at.clear()
+        try:
+            for k in (keep_key, drop_key):
+                intro._models[k] = ("tok", "model")
+                intro._models_loaded_at[k] = time.perf_counter()
+
+            residency.unload_local(keep=[kept, "claude-opus-4-6", "not-registered"])
+
+            assert list(intro._models) == [keep_key]
+            assert list(intro._models_loaded_at) == [keep_key]
+            released = [e["hf_model_id"] for e in events if e.get("phase") == "release"]
+            assert released == ["org/dtf"]
+        finally:
+            intro._models.clear()
+            intro._models_loaded_at.clear()
+
+    def test_a_model_kept_under_a_non_default_setup_keeps_its_engine(self, events):
+        """venice-uncensored defaults to its API setup but also runs on vLLM."""
+        import redact.llms.backends.vllm as vllm_module
+
+        key = vllm_module._engine_key("dphn/Dolphin-Mistral-24B-Venice-Edition", None, {})
+        vllm_module._engines.clear()
+        try:
+            vllm_module._engines[key] = object()
+            residency.unload_local(keep=["venice-uncensored"])
+            assert list(vllm_module._engines) == [key]
+        finally:
+            vllm_module._engines.clear()
+            vllm_module._engine_loaded_at.clear()
+
+    def test_clear_cache_waits_for_a_load_in_progress(self):
+        import redact.llms.backends.introspection as intro
+        import redact.llms.backends.vllm as vllm_module
+
+        for lock, backend in ((vllm_module._engines_lock, vllm_module.VLLMBackend),
+                              (intro._models_lock,
+                               intro.TransformersIntrospectionBackend)):
+            done = threading.Event()
+            with lock:
+                thread = threading.Thread(
+                    target=lambda: (backend.clear_cache(), done.set()))
+                thread.start()
+                assert not done.wait(0.1)
+            thread.join(timeout=5)
+            assert done.is_set()
+
+    def test_api_connection_pools_are_left_alone(self):
+        from redact.llms.backends.openai import OpenAIBackend
+
+        with patch.object(OpenAIBackend, "clear_cache",
+                          side_effect=AssertionError("cleared")):
+            residency.unload_local()
+
+
+class TestBoundedRelease:
+    """A release given a wait waits that long for a load in progress, then
+    ends the engine processes of its build, which makes the load fail and
+    let go of the lock. Without a wait a release waits as before."""
+
+    #: Seconds within which a release given a short wait returns.
+    PROMPT_S = 2.0
+
+    @pytest.fixture()
+    def state(self, monkeypatch):
+        """Empty engine records, child processes as a list a test fills, and
+        the processes ended, as the lists handed to the helper."""
+        import multiprocessing
+
+        import redact.llms.backends.vllm as vllm_module
+
+        listed, ended, events = [], [], []
+        monkeypatch.setattr(multiprocessing, "active_children",
+                            lambda: [p for p in listed if p.is_alive()])
+        for name, value in (("_engines", {}), ("_engine_loaded_at", {}),
+                            ("_engine_procs", {}), ("_stray", []), ("_ended", set()),
+                            ("_GRACE_S", 0.3)):
+            monkeypatch.setattr(vllm_module, name, value)
+
+        def terminate(processes=(), **kw):
+            ended.append(sorted(p.pid for p in processes))
+            for p in processes:
+                p.alive = False
+            return []
+
+        monkeypatch.setattr(vllm_module, "terminate_engine_processes", terminate)
+        observe.set_emitter(events.append)
+        yield SimpleNamespace(
+            vllm=vllm_module, listed=listed, ended=ended, events=events)
+        observe.set_emitter(None)
+
+    @staticmethod
+    def _held(vllm_module, key, building, fails_when_ended=True):
+        """A thread holding the engine lock as a load does, its build started
+        or not. When it is, the load fails once the build's processes end,
+        as vLLM's start-up wait does. Returns the thread and an event that
+        ends it."""
+        holding, stop = threading.Event(), threading.Event()
+
+        def load():
+            with vllm_module._engines_lock, vllm_module._loading_of(key):
+                if building is not None:
+                    vllm_module._building = (key, frozenset())
+                holding.set()
+                while not stop.wait(0.01):
+                    if fails_when_ended and building and not building.alive:
+                        break
+                vllm_module._building = None
+
+        thread = threading.Thread(target=load)
+        thread.start()
+        assert holding.wait(5)
+        return thread, stop
+
+    @staticmethod
+    def _loaded(vllm_module, hf_model_id):
+        key = vllm_module._engine_key(hf_model_id, None, {})
+        vllm_module._engines[key] = SimpleNamespace(shutdown=lambda: None)
+        vllm_module._engine_loaded_at[key] = time.perf_counter()
+        return key
+
+    def test_a_wait_ends_the_build_in_progress_then_releases(self, state, caplog):
+        from tests.test_vllm_backend import _Proc
+
+        vllm_module = state.vllm
+        self._loaded(vllm_module, "org/loaded")
+        core = _Proc(7)
+        state.listed.append(core)
+        thread, stop = self._held(
+            vllm_module, vllm_module._engine_key("org/hung", None, {}), core)
+        try:
+            with caplog.at_level(logging.ERROR, logger=vllm_module.logger.name):
+                vllm_module.VLLMBackend.clear_cache(wait=0.05)
+        finally:
+            stop.set()
+            thread.join(5)
+        assert state.ended == [[7]]
+        assert "The load of org/hung has not returned" in caplog.text
+        assert "still held" not in caplog.text
+        assert vllm_module._engines == {}
+        assert [e["hf_model_id"] for e in state.events if e.get("phase") == "release"] \
+            == ["org/loaded"]
+        assert vllm_module._ended == {vllm_module._engine_key("org/hung", None, {})}
+
+    def test_a_load_that_has_not_started_its_build_has_nothing_to_end(
+            self, state, caplog):
+        """Such as one waiting for a transformers load to start CUDA."""
+        vllm_module = state.vllm
+        self._loaded(vllm_module, "org/loaded")
+        thread, stop = self._held(
+            vllm_module, vllm_module._engine_key("org/waiting", None, {}), None)
+        try:
+            with caplog.at_level(logging.ERROR, logger=vllm_module.logger.name):
+                vllm_module.VLLMBackend.clear_cache(wait=0.05)
+        finally:
+            stop.set()
+            thread.join(5)
+        assert state.ended == []
+        assert "org/waiting has not started its build" in caplog.text
+        assert "still held" in caplog.text
+        # The engines are left as they are, and their time is reported.
+        assert list(vllm_module._engines) == [
+            vllm_module._engine_key("org/loaded", None, {})]
+        assert [e["hf_model_id"] for e in state.events if e.get("phase") == "release"] \
+            == ["org/loaded"]
+
+    def test_a_build_that_does_not_fail_when_ended_leaves_the_engines(
+            self, state, caplog):
+        from tests.test_vllm_backend import _Proc
+
+        vllm_module = state.vllm
+        core = _Proc(7)
+        state.listed.append(core)
+        thread, stop = self._held(
+            vllm_module, vllm_module._engine_key("org/x", None, {}), core,
+            fails_when_ended=False)
+        try:
+            with caplog.at_level(logging.ERROR, logger=vllm_module.logger.name):
+                vllm_module.VLLMBackend.clear_cache(wait=0.05)
+        finally:
+            stop.set()
+            thread.join(5)
+        assert state.ended == [[7]] and "still held" in caplog.text
+
+    def test_processes_a_released_engine_leaves_are_ended_and_a_kept_ones_not(
+            self, state):
+        from tests.test_vllm_backend import _Proc
+
+        vllm_module = state.vllm
+        gone = self._loaded(vllm_module, "org/gone")
+        kept = self._loaded(vllm_module, "org/kept")
+        vllm_module._engine_procs.update({gone: [_Proc(1)], kept: [_Proc(2)]})
+        vllm_module._stray.append(_Proc(3))
+        vllm_module.VLLMBackend.clear_cache(keep={kept})
+        assert state.ended == [[1]]
+        assert list(vllm_module._engine_procs) == [kept]
+        # A failed build's processes are ended on the way out, given a wait.
+        vllm_module.VLLMBackend.clear_cache(wait=1.0)
+        assert state.ended == [[1], [2, 3]]
+        assert vllm_module._engine_procs == {} and vllm_module._stray == []
+
+    def test_a_load_whose_build_was_ended_says_so(self, state, monkeypatch):
+        """Not as a failed load: the exit ended it."""
+        vllm_module = state.vllm
+
+        class _LLM:
+            def __init__(self, **kw):
+                vllm_module._ended.add(vllm_module._engine_key("org/e", None, {}))
+                raise RuntimeError("Engine core initialization failed.")
+
+        for name, module in fake_vllm_modules(_LLM).items():
+            monkeypatch.setitem(__import__("sys").modules, name, module)
+        monkeypatch.setattr(vllm_module, "_prepare_environment", lambda: None)
+        with pytest.raises(vllm_module.EngineLoadEnded) as raised:
+            vllm_module._engine("org/e", None, {})
+        assert "ended" in str(raised.value)
+        assert isinstance(raised.value.__cause__, RuntimeError)
+        assert vllm_module._ended == set()
+
+    def test_a_transformers_load_past_the_wait_is_left_and_logged(self, caplog):
+        import redact.llms.backends.introspection as intro
+
+        with intro._models_lock, \
+             caplog.at_level(logging.ERROR, logger=intro.logger.name):
+            started = time.monotonic()
+            intro.TransformersIntrospectionBackend.clear_cache(wait=0.05)
+            took = time.monotonic() - started
+        assert took < self.PROMPT_S
+        assert "has not returned" in caplog.text
+
+    def test_unload_local_hands_the_wait_to_both_backends(self):
+        from redact.llms.backends.introspection import TransformersIntrospectionBackend
+        from redact.llms.backends.vllm import VLLMBackend
+
+        with patch.object(VLLMBackend, "clear_cache") as vllm_clear, \
+             patch.object(TransformersIntrospectionBackend, "clear_cache") as tf_clear:
+            residency.unload_local(wait=3.0)
+        assert [clear.call_args.kwargs["wait"] for clear in (vllm_clear, tf_clear)] \
+            == [3.0, 3.0]
+
+    def test_the_exit_hook_waits_at_most_exit_wait_s(self, monkeypatch):
+        import redact.llms.backends.vllm as vllm_module
+
+        seen = []
+        monkeypatch.setattr(vllm_module.VLLMBackend, "clear_cache",
+                            lambda **kw: seen.append(kw))
+        monkeypatch.setattr(vllm_module, "EXIT_WAIT_S", 7.0)
+        monkeypatch.setattr(vllm_module, "_exiting", False)
+        vllm_module._exit()
+        assert seen == [{"wait": 7.0}]
+
+
+def test_unload_local_keeps_rate_limit_windows():
+    from redact.llms import wrappers
+    from redact.llms.client import clear_client_cache
+
+    window = wrappers.shared_limiter("_test_unload_key")
+    try:
+        residency.unload_local()
+        assert wrappers.shared_limiter("_test_unload_key") is window
+    finally:
+        clear_client_cache()
+
+
+_HI = [[{"role": "user", "content": "hi"}]]
+
+
+class TestRelease:
+    """A released local model is shut down, its memory is freed and nothing
+    refers to it any longer. A kept one is untouched."""
+
+    @pytest.fixture()
+    def runtime(self):
+        """A fake ``vllm`` and ``torch``; yields the modules and what they saw."""
+        import redact.llms.backends.introspection as intro
+        import redact.llms.backends.vllm as vllm_module
+
+        log = SimpleNamespace(loads=[], shutdowns=[], emptied=[], events=[])
+
+        class _LLM:
+            hook = True     # False: an engine with no shutdown()
+            scheduler_config = SimpleNamespace(max_num_seqs=256)
+
+            def __init__(self, **kw):
+                model = kw["model"]
+                log.loads.append(model)
+                if self.hook:
+                    self.shutdown = lambda: log.shutdowns.append(model)
+
+            def get_tokenizer(self):
+                return SimpleNamespace(
+                    apply_chat_template=lambda messages, **kw: [1] * len(messages))
+
+            async def generate(self, prompt, params, request_id):
+                yield SimpleNamespace(prompt_token_ids=prompt["prompt_token_ids"], outputs=[
+                    SimpleNamespace(text="ok", token_ids=[1], finish_reason="stop")])
+
+        torch = SimpleNamespace(cuda=SimpleNamespace(
+            is_initialized=lambda: True, empty_cache=lambda: log.emptied.append(1)))
+        vllm_module.VLLMBackend.clear_cache()
+        intro.TransformersIntrospectionBackend.clear_cache()
+        observe.set_emitter(log.events.append)
+        with patch.dict("sys.modules", {**fake_vllm_modules(_LLM), "torch": torch}), \
+             patch.object(vllm_module, "_prepare_environment"):
+            yield SimpleNamespace(vllm=vllm_module, intro=intro, LLM=_LLM, log=log)
+            vllm_module.VLLMBackend.clear_cache()
+            intro.TransformersIntrospectionBackend.clear_cache()
+        observe.set_emitter(None)
+
+    @staticmethod
+    def _backend(model):
+        from redact.llms.backends import backend_for
+        from redact.llms.model_config import get_model_config
+
+        return backend_for(get_model_config(model))
+
+    @staticmethod
+    def _released(log):
+        return [e["hf_model_id"] for e in log.events if e.get("phase") == "release"]
+
+    def test_a_released_engine_is_shut_down_and_unreferenced(self, runtime, registered):
+        backend = self._backend(registered("_rel_gone", hf_model_id="org/gone"))
+        engine = weakref.ref(backend._llm)
+
+        residency.unload_local()
+
+        # The backend is still alive here, and must not keep the engine alive.
+        assert engine() is None
+        assert runtime.log.shutdowns == ["org/gone"]
+        assert runtime.log.emptied == [1]
+        assert runtime.vllm._engines == {}
+
+    def test_an_engine_without_a_shutdown_hook_is_still_dropped(
+            self, runtime, registered, caplog):
+        from redact.llms.backends import clear_transport_caches
+
+        runtime.LLM.hook = False
+        backend = self._backend(registered("_rel_nohook", hf_model_id="org/nohook"))
+        engine = weakref.ref(backend._llm)
+        with caplog.at_level(logging.DEBUG, logger=runtime.vllm.logger.name):
+            clear_transport_caches()
+        assert engine() is None
+        assert runtime.log.shutdowns == [] and runtime.log.emptied == [1]
+        assert "_LLM has no shutdown hook" in caplog.text
+
+    def test_shutdown_calls_the_hook_and_never_raises(self, runtime, caplog):
+        called = []
+
+        def fails():
+            called.append("fails")
+            raise RuntimeError("already stopped")
+
+        with caplog.at_level(logging.DEBUG, logger=runtime.vllm.logger.name):
+            runtime.vllm._shut_down(SimpleNamespace(shutdown=lambda: called.append("ok")))
+            runtime.vllm._shut_down(SimpleNamespace(shutdown=fails))
+            runtime.vllm._shut_down(SimpleNamespace())
+        assert called == ["ok", "fails"]
+        assert [(r.levelname, r.getMessage()) for r in caplog.records] == [
+            ("DEBUG", "[vllm] engine shut down"),
+            ("DEBUG", "[vllm] shutdown() failed (RuntimeError: already stopped)"),
+            ("WARNING", "[vllm] SimpleNamespace has no shutdown hook; "
+                        "left to garbage collection"),
+        ]
+
+    def test_a_kept_engine_is_untouched(self, runtime, registered):
+        kept = self._backend(registered("_rel_keep", hf_model_id="org/keep"))
+        self._backend(registered("_rel_drop", hf_model_id="org/drop"))
+        engine = kept._llm
+
+        residency.unload_local(keep=["_rel_keep"])
+
+        assert runtime.log.shutdowns == ["org/drop"]
+        assert kept._llm is engine
+        assert kept.generate(_HI) == ["ok"]
+        # The event, the meter and the cache name the same engines.
+        assert self._released(runtime.log) == ["org/drop"]
+        assert list(runtime.vllm.held_seconds()) == ["org/keep"]
+        assert [key[0] for key in runtime.vllm._engines] == ["org/keep"]
+
+    def test_a_second_release_does_nothing(self, runtime, registered):
+        self._backend(registered("_rel_once", hf_model_id="org/once"))
+        residency.unload_local()
+        residency.unload_local()
+        assert runtime.log.shutdowns == ["org/once"]
+        assert runtime.log.emptied == [1]
+        assert self._released(runtime.log) == ["org/once"]
+
+    def test_a_backend_on_a_released_engine_raises_and_does_not_reload(
+            self, runtime, registered):
+        name = registered("_rel_stale", hf_model_id="org/stale")
+        backend = self._backend(name)
+        residency.unload_local()
+
+        with pytest.raises(RuntimeError, match="was released"):
+            backend.generate(_HI)
+        assert runtime.log.loads == ["org/stale"]
+        assert [e for e in runtime.log.events if e["ev"] == "call"] == []
+
+        self._backend(name)                     # a new client loads it again
+        assert backend.generate(_HI) == ["ok"]
+        assert runtime.log.loads == ["org/stale", "org/stale"]
+
+    def test_a_release_waits_for_a_load_in_progress(self, runtime):
+        loading, proceed = threading.Event(), threading.Event()
+        load = runtime.LLM.__init__
+
+        def slow_load(self, **kw):
+            loading.set()
+            assert proceed.wait(5)
+            load(self, **kw)
+
+        runtime.LLM.__init__ = slow_load
+        released = threading.Event()
+        loader = threading.Thread(
+            target=lambda: runtime.vllm._engine("org/slow", None, {}))
+        releaser = threading.Thread(
+            target=lambda: (runtime.vllm.VLLMBackend.clear_cache(), released.set()))
+        loader.start()
+        assert loading.wait(5)
+        releaser.start()
+        assert not released.wait(0.1)           # blocked behind the load
+        proceed.set()
+        loader.join(5)
+        releaser.join(5)
+
+        assert released.is_set()                # no deadlock
+        assert runtime.log.loads == ["org/slow"]        # loaded once ...
+        assert runtime.log.shutdowns == ["org/slow"]    # ... and then released
+        assert runtime.vllm._engines == {}
+
+    def test_a_released_transformers_model_is_freed(self, runtime):
+        intro = runtime.intro
+
+        class _Part:
+            pass
+
+        key = intro._model_key("org/tf", "auto", "auto", {})
+        kept_key = intro._model_key("org/tf-kept", "auto", "auto", {})
+        tokenizer, model = _Part(), _Part()
+        refs = [weakref.ref(tokenizer), weakref.ref(model)]
+        intro._models[key] = (tokenizer, model)
+        intro._models[kept_key] = kept = (_Part(), _Part())
+        intro._models_loaded_at[key] = intro._models_loaded_at[kept_key] = 0.0
+        backend = object.__new__(intro.TransformersIntrospectionBackend)
+        backend._key, backend.model, backend.hf_model_id = key, "m", "org/tf"
+        assert backend._loaded()[1] is model
+        del tokenizer, model
+
+        intro.TransformersIntrospectionBackend.clear_cache(keep=[kept_key])
+
+        assert [ref() for ref in refs] == [None, None]
+        assert runtime.log.emptied == [1]
+        assert intro._models == {kept_key: kept}
+        assert self._released(runtime.log) == ["org/tf"]
+        assert list(intro.held_seconds()) == ["org/tf-kept"]
+        with pytest.raises(RuntimeError, match="was released"):
+            backend._loaded()
+
+    def test_keep_is_a_collection_of_keys_not_one_key(self, runtime):
+        for module, backend, key in (
+            (runtime.vllm, runtime.vllm.VLLMBackend, ("org/x", None, "[]")),
+            (runtime.intro, runtime.intro.TransformersIntrospectionBackend,
+             ("org/x", "auto", "auto", "[]")),
+        ):
+            cache = module._engines if module is runtime.vllm else module._models
+            cache[key] = loaded = (object(), object())
+            with pytest.raises(TypeError, match="collection of"):
+                backend.clear_cache(keep=key)
+            backend.clear_cache(keep=[key])
+            assert cache == {key: loaded}       # neither call released it
+
+    def test_the_summary_counts_a_released_engine_once_and_a_kept_one(
+            self, runtime, registered, tmp_path):
+        for name, hf_id in (("_rel_sum_keep", "org/sk"), ("_rel_sum_drop", "org/sd")):
+            registered(name, hf_model_id=hf_id)
+        telemetry.install(data_dir=tmp_path)
+        now = [100.0]
+        with patch("time.perf_counter", lambda: now[0]), \
+             patch("redact.llms.resources.measure.detect_gpus", return_value=(None, 0)):
+            self._backend("_rel_sum_keep")
+            self._backend("_rel_sum_drop")
+            now[0] = 160.0
+            residency.unload_local(keep=["_rel_sum_keep"])
+            now[0] = 200.0
+            for _ in range(2):                  # reading it twice adds nothing
+                assert telemetry.summary()["local_s"] == {
+                    "org/sd": 60.0, "org/sk": 100.0}
+            assert runtime.vllm.held_seconds() == {"org/sk": 100.0}
+            residency.unload_local()
+            assert telemetry.summary()["local_s"] == {"org/sd": 60.0, "org/sk": 100.0}
+            assert runtime.vllm.held_seconds() == {}
+
+    def test_held_time_starts_when_the_load_starts(self, runtime, registered):
+        """The card is rented through the load: held_s and load_ms share a start."""
+        registered("_rel_load", hf_model_id="org/load")
+        now = [100.0]
+        load = runtime.LLM.__init__
+
+        def slow_load(self, **kw):
+            now[0] = 160.0                      # the load takes 60 s
+            load(self, **kw)
+
+        runtime.LLM.__init__ = slow_load
+        with patch("time.perf_counter", lambda: now[0]):
+            self._backend("_rel_load")
+            now[0] = 200.0
+            residency.unload_local()
+        events = {e["phase"]: e for e in runtime.log.events if e.get("ev") == "local"}
+        assert events["load"]["load_ms"] == 60000.0
+        assert events["release"]["held_s"] == 100.0        # not 40
+
+    def test_a_transformers_load_is_held_from_its_start(self, runtime):
+        """Same for the in-process backend: a fake transformers, no torch."""
+        intro = runtime.intro
+        now = [100.0]
+
+        class _Auto:
+            @staticmethod
+            def from_pretrained(hf_model_id, **kw):
+                now[0] = 160.0                  # the load takes 60 s
+                return SimpleNamespace(eval=lambda: None)
+
+        fake = SimpleNamespace(AutoTokenizer=_Auto, AutoModelForCausalLM=_Auto,
+                               __version__="5.0.0")
+        with patch.dict("sys.modules", {"transformers": fake}), \
+             patch.object(measure, "_torch", return_value=None), \
+             patch("time.perf_counter", lambda: now[0]):
+            intro._load("org/tf-load", "auto", "auto", {})
+            now[0] = 200.0
+            intro.TransformersIntrospectionBackend.clear_cache()
+        events = {e["phase"]: e for e in runtime.log.events
+                  if e.get("backend") == "introspect"}
+        assert events["load"]["load_ms"] == 60000.0
+        assert events["release"]["held_s"] == 100.0
+
+
+class TestPlannedUtilization:
+    """The plan's computed gpu_memory_utilization reaches the engine."""
+
+    @pytest.fixture()
+    def engine(self):
+        """Load through a fake engine; yields ``(module, constructor calls)``."""
+        import redact.llms.backends.vllm as vllm_module
+
+        calls = []
+
+        class _LLM:
+            scheduler_config = SimpleNamespace(max_num_seqs=256)
+
+            def __init__(self, **kw):
+                time.sleep(0.05)
+                calls.append(kw)
+
+        vllm_module.VLLMBackend.clear_cache()
+        with patch.dict("sys.modules", fake_vllm_modules(_LLM)), \
+             patch.object(vllm_module, "_prepare_environment"):
+            yield vllm_module, calls
+        vllm_module.VLLMBackend.clear_cache()
+        vllm_module.set_planned_utilization({})     # a release keeps the plan
+
+    def test_the_planned_value_reaches_the_engine_constructor(self, registered, engine):
+        vllm_module, calls = engine
+        a = registered("_pu_a", hf_model_id="org/pua", vram_gb=20.0)
+        b = registered("_pu_b", hf_model_id="org/pub", vram_gb=10.0)
+        with _kv(0.0):
+            residency.apply_plan(_plan([a, b], 48.0, 1))
+        vllm_module._engine("org/pua", None, {})
+        vllm_module._engine("org/pub", None, {})
+        # Pool 43.2, padded needs 22.6 + 11.6, spare 9.0: 27.1 and 16.1 of the 48.
+        assert [c["gpu_memory_utilization"] for c in calls] == [0.5645, 0.3354]
+
+    def test_no_plan_loads_with_the_planners_whole_card_share(self, engine):
+        vllm_module, calls = engine
+        vllm_module._engine("org/noplan", None, {"max_model_len": 512})
+        assert calls == [{"model": "org/noplan", "quantization": None,
+                          "max_model_len": 512, "gpu_memory_utilization": 0.9,
+                          "disable_log_stats": True}]
+
+    def test_a_plan_is_swapped_in_whole(self, engine):
+        """A load must never read a cleared, half-filled plan."""
+        vllm_module, _ = engine
+        vllm_module.set_planned_utilization({("a",): 0.5})
+        before = vllm_module._planned_utilization
+        vllm_module.set_planned_utilization({("b",): 0.4})
+        assert before == {("a",): 0.5}                      # not cleared in place
+        assert vllm_module._planned_utilization == {("b",): 0.4}
+        vllm_module.set_planned_utilization({("b",): 0.1, ("c",): 0.2}, replace=False)
+        assert vllm_module._planned_utilization == {("b",): 0.4, ("c",): 0.2}
+
+    def test_a_registered_model_loads_with_the_planned_value(self, registered, engine):
+        from redact.llms.model_config import get_model_config
+
+        vllm_module, calls = engine
+        m = registered("_pu_reg", hf_model_id="org/pur", vram_gb=5.0,
+                       vllm_kwargs={"max_model_len": 512})
+        residency.apply_plan(_plan([m], 48.0, 1))
+        vllm_module.VLLMBackend.from_config(get_model_config(m))
+        assert calls == [{"model": "org/pur", "quantization": None,
+                          "max_model_len": 512, "gpu_memory_utilization": 0.9,
+                          "disable_log_stats": True}]
+
+    def test_a_directly_built_engine_keeps_its_own_value(self, engine):
+        """Outside the registry: no plan is keyed on these kwargs."""
+        vllm_module, calls = engine
+        kw = {"gpu_memory_utilization": 0.5, "max_model_len": 512}
+        vllm_module.set_planned_utilization(
+            {vllm_module._engine_key("org/pue", None, kw): 0.9})
+        vllm_module._engine("org/pue", None, kw)
+        assert calls[0]["gpu_memory_utilization"] == 0.5
+
+    def test_the_cache_key_is_unchanged_and_a_shared_checkpoint_loads_once(
+            self, registered, engine):
+        vllm_module, calls = engine
+        a = registered("_pu_share_a", hf_model_id="org/pus", vram_gb=20.0)
+        b = registered("_pu_share_b", hf_model_id="org/pus", vram_gb=20.0)
+        plan = _plan([a, b], 48.0, 1)
+        residency.apply_plan(plan)
+        assert [fp.planned_utilization for fp in plan.footprints] == [0.9, 0.9]
+        first = vllm_module._engine("org/pus", None, {})
+        assert vllm_module._engine("org/pus", None, {}) is first
+        assert list(vllm_module._engines) == [vllm_module._engine_key("org/pus", None, {})]
+        assert len(calls) == 1 and calls[0]["gpu_memory_utilization"] == 0.9
+
+    def test_preload_and_first_use_load_with_the_same_value(self, registered, engine):
+        vllm_module, calls = engine
+        a = registered("_pu_thr_a", hf_model_id="org/pta", vram_gb=10.0)
+        b = registered("_pu_thr_b", hf_model_id="org/ptb", vram_gb=10.0)
+        with _kv(0.0):
+            residency.apply_plan(_plan([a, b], 40.0, 1))
+        threads = [threading.Thread(target=vllm_module._engine,
+                                    args=("org/pta", None, {})) for _ in range(3)]
+        for t in threads:
+            t.start()
+        for t in threads:
+            t.join()
+        assert [c["gpu_memory_utilization"] for c in calls] == [0.45]
+
+    def test_a_second_plan_does_not_reuse_the_first(self, registered, engine):
+        vllm_module, calls = engine
+        a = registered("_pu_two_a", hf_model_id="org/p2a", vram_gb=10.0)
+        b = registered("_pu_two_b", hf_model_id="org/p2b", vram_gb=10.0)
+        key_a, key_b = (vllm_module._engine_key(f"org/p2{x}", None, {}) for x in "ab")
+        with _kv(0.0):
+            residency.apply_plan(_plan([a, b], 40.0, 1))
+            assert vllm_module._planned_utilization == {key_a: 0.45, key_b: 0.45}
+            residency.apply_plan(_plan([a], 40.0, 1))
+        assert vllm_module._planned_utilization == {key_a: 0.9}
+        vllm_module._engine("org/p2b", None, {})
+        assert calls[0]["gpu_memory_utilization"] == 0.9
+
+    def test_replace_false_keeps_the_values_already_set(self, registered, engine):
+        vllm_module, _ = engine
+        a = registered("_pu_keep_a", hf_model_id="org/pka", vram_gb=10.0)
+        b = registered("_pu_keep_b", hf_model_id="org/pkb", vram_gb=10.0)
+        key_a, key_b = (vllm_module._engine_key(f"org/pk{x}", None, {}) for x in "ab")
+        with _kv(0.0):
+            residency.apply_plan(_plan([a, b], 40.0, 1))
+            residency.apply_plan(_plan([a], 40.0, 1), replace=False)
+        assert vllm_module._planned_utilization == {key_a: 0.45, key_b: 0.45}
+
+    def test_a_released_engine_reloads_with_its_planned_share(self, registered, engine):
+        """A share belongs to the plan, not to the load: a release keeps it."""
+        vllm_module, calls = engine
+        a = registered("_pu_clr_a", hf_model_id="org/pca", vram_gb=10.0)
+        b = registered("_pu_clr_b", hf_model_id="org/pcb", vram_gb=10.0)
+        key_a, key_b = (vllm_module._engine_key(f"org/pc{x}", None, {}) for x in "ab")
+        with _kv(0.0):
+            plan = _plan([a, b], 40.0, 1)
+        residency.apply_plan(plan)
+        vllm_module._engine("org/pca", None, {})
+        residency.unload_local()
+        assert vllm_module._planned_utilization == {key_a: 0.45, key_b: 0.45}
+        vllm_module._engine("org/pca", None, {})            # loaded again
+        vllm_module._engine("org/pcb", None, {})            # loaded for the first time
+        assert [(c["model"], c["gpu_memory_utilization"]) for c in calls] == [
+            ("org/pca", 0.45), ("org/pca", 0.45), ("org/pcb", 0.45)]
+
+    def test_an_unknown_card_size_plans_no_value(self, registered, engine):
+        vllm_module, _ = engine
+        m = registered("_pu_nosize", hf_model_id="org/pns", vram_gb=10.0)
+        with patch("redact.llms.resources.measure.free_total_gib", return_value=None), \
+             patch("redact.llms.resources.measure.detect_gpus", return_value=("FakeGPU", 1)), \
+             patch("redact.llms.resources.measure.card_sizes_gib", return_value=None):
+            residency.apply_plan(residency.plan_residency([m]))
+        assert vllm_module._planned_utilization == {}
+
+
+class TestPlannedDevices:
+    """The plan's cards reach the engine: while it is built, only they are
+    visible."""
+
+    @pytest.fixture()
+    def engine(self, monkeypatch):
+        """Load through a fake engine, with ``CUDA_VISIBLE_DEVICES`` unset.
+
+        Yields ``(module, builds)``: per engine built, the variable as its
+        constructor saw it and the constructor's arguments. Setting
+        ``builds.fail`` makes a build raise, ``builds.fail_first`` the first
+        build only.
+        """
+        import redact.llms.backends.vllm as vllm_module
+
+        class _Builds(list):
+            fail = fail_first = False
+            #: The cards visible_gpu_ids() reads during each build.
+            read: list = []
+
+        builds = _Builds()
+
+        class _LLM:
+            scheduler_config = SimpleNamespace(max_num_seqs=256)
+
+            def __init__(self, **kw):
+                builds.append((os.environ.get("CUDA_VISIBLE_DEVICES"), kw))
+                builds.read.append(measure.visible_gpu_ids())
+                if builds.fail or (builds.fail_first and len(builds) == 1):
+                    raise RuntimeError("CUDA out of memory")
+
+        monkeypatch.delenv("CUDA_VISIBLE_DEVICES", raising=False)
+        vllm_module.VLLMBackend.clear_cache()
+        with patch.dict("sys.modules", fake_vllm_modules(_LLM)), \
+             patch.object(vllm_module, "_prepare_environment"):
+            yield vllm_module, builds
+        vllm_module.VLLMBackend.clear_cache()
+
+    def test_what_reads_the_variable_during_the_build_reads_the_parents(
+            self, engine, monkeypatch):
+        vllm_module, builds = engine
+        monkeypatch.setenv("CUDA_VISIBLE_DEVICES", "2,3")
+        vllm_module.set_planned_devices(
+            {vllm_module._engine_key("org/pdr", None, {}): (1,)})
+        vllm_module._engine("org/pdr", None, {})
+        assert [seen for seen, _ in builds] == ["3"]
+        assert builds.read == [["2", "3"]]
+
+    def test_the_planned_card_is_visible_only_during_the_build(self, registered, engine):
+        vllm_module, builds = engine
+        a = registered("_pd_a", hf_model_id="org/pda", vram_gb=10.0)
+        b = registered("_pd_b", hf_model_id="org/pdb", vram_gb=10.0)
+        residency.apply_plan(_plan([a, b], 24.0, 2))
+        vllm_module._engine("org/pda", None, {})
+        vllm_module._engine("org/pdb", None, {})
+        assert [visible for visible, _ in builds] == ["0", "1"]
+        assert "CUDA_VISIBLE_DEVICES" not in os.environ
+
+    def test_a_parent_variable_is_restored_and_translated(self, engine, monkeypatch):
+        """The plan counts over the visible cards: its card 1 is the second
+        card the parent's variable names."""
+        vllm_module, builds = engine
+        monkeypatch.setenv("CUDA_VISIBLE_DEVICES", "2,3")
+        vllm_module.set_planned_devices(
+            {vllm_module._engine_key("org/pdt", None, {}): (1,)})
+        vllm_module._engine("org/pdt", None, {})
+        assert [visible for visible, _ in builds] == ["3"]
+        assert os.environ["CUDA_VISIBLE_DEVICES"] == "2,3"
+
+    @pytest.mark.parametrize("before,during", [(None, "1"), ("2,3", "3")])
+    def test_a_failed_build_restores_the_variable(
+            self, engine, monkeypatch, before, during):
+        vllm_module, builds = engine
+        if before is not None:
+            monkeypatch.setenv("CUDA_VISIBLE_DEVICES", before)
+        vllm_module.set_planned_devices(
+            {vllm_module._engine_key("org/pdf", None, {}): (1,)})
+        builds.fail = True
+        with pytest.raises(RuntimeError, match="CUDA out of memory"):
+            vllm_module._engine("org/pdf", None, {})
+        assert [visible for visible, _ in builds] == [during]
+        assert os.environ.get("CUDA_VISIBLE_DEVICES") == before
+        assert vllm_module._engines == {} and vllm_module.held_seconds() == {}
+
+    @pytest.mark.parametrize("before", [None, "1"])
+    def test_no_plan_leaves_the_environment_alone(self, engine, monkeypatch, before):
+        """An engine built without a plan is built as it always was."""
+        vllm_module, builds = engine
+        if before is not None:
+            monkeypatch.setenv("CUDA_VISIBLE_DEVICES", before)
+        environment = dict(os.environ)
+        vllm_module._engine("org/pdn", None, {"max_model_len": 512})
+        assert builds == [(before, {
+            "model": "org/pdn", "quantization": None, "max_model_len": 512,
+            "gpu_memory_utilization": 0.9, "disable_log_stats": True})]
+        assert dict(os.environ) == environment
+
+    def test_a_one_card_plan_builds_the_engine_as_without_a_plan(self, registered, engine):
+        """One card: the same arguments, and the only card is the one shown."""
+        vllm_module, builds = engine
+        m = registered("_pd_one", hf_model_id="org/pdo", vram_gb=10.0,
+                       vllm_kwargs={"max_model_len": 512})
+        residency.apply_plan(_plan([m], 24.0, 1))
+        environment = dict(os.environ)
+        vllm_module._engine("org/pdo", None, {"max_model_len": 512})
+        assert builds == [("0", {
+            "model": "org/pdo", "quantization": None, "max_model_len": 512,
+            "gpu_memory_utilization": 0.9, "disable_log_stats": True})]
+        assert dict(os.environ) == environment
+
+    @pytest.mark.parametrize("visible,planned", [("", (0,)), ("1", (0, 1))])
+    def test_a_planned_card_that_is_not_visible_changes_nothing(
+            self, engine, monkeypatch, visible, planned):
+        """Such a plan does not fit. The engine is left what it can see, as
+        without a plan: an empty variable goes on hiding every card."""
+        vllm_module, builds = engine
+        monkeypatch.setenv("CUDA_VISIBLE_DEVICES", visible)
+        vllm_module.set_planned_devices(
+            {vllm_module._engine_key("org/pdx", None, {}): planned})
+        vllm_module._engine("org/pdx", None, {})
+        assert [seen for seen, _ in builds] == [visible]
+        assert os.environ["CUDA_VISIBLE_DEVICES"] == visible
+
+    CARDS = [measure.Card(i, f"GPU-{c * 4}-{i + 1}", 0.0, 24.0)
+             for i, c in enumerate("abc")]
+
+    @pytest.mark.parametrize("visible,planned,during", [
+        (None, (1, 0), "GPU-bbbb-2,GPU-aaaa-1"),
+        ("2,0", (0,), "GPU-cccc-3"),
+        # A card past those nvidia-smi lists is named as the variable names it.
+        (None, (3,), "3"),
+    ])
+    def test_the_planned_cards_are_named_by_their_uuid(
+            self, engine, monkeypatch, visible, planned, during):
+        """The plan sizes the cards nvidia-smi lists, so the engine gets the
+        same cards whatever order CUDA counts them in."""
+        vllm_module, builds = engine
+        cards = self.CARDS
+        if visible is not None:
+            monkeypatch.setenv("CUDA_VISIBLE_DEVICES", visible)
+            cards = [cards[int(i)] for i in visible.split(",")]
+        monkeypatch.setattr(measure, "gpu_cards",
+                            lambda visible=False: cards if visible else self.CARDS)
+        vllm_module.set_planned_devices(
+            {vllm_module._engine_key("org/pdu", None, {}): planned})
+        vllm_module._engine("org/pdu", None, {})
+        assert [seen for seen, _ in builds] == [during]
+        assert os.environ.get("CUDA_VISIBLE_DEVICES") == visible
+
+    def test_the_load_event_names_the_devices(self, engine, monkeypatch):
+        """As the engine's processes were handed them; none when none were."""
+        vllm_module, _ = engine
+        monkeypatch.setenv("CUDA_VISIBLE_DEVICES", "2,3")
+        vllm_module.set_planned_devices({
+            vllm_module._engine_key("org/pde", None, {}): (1, 0),
+            vllm_module._engine_key("org/pde-past", None, {}): (2,),
+        })
+        events = []
+        observe.set_emitter(events.append)
+        try:
+            for hf_model_id in ("org/pde", "org/pde-past", "org/pde-noplan"):
+                vllm_module._engine(hf_model_id, None, {})
+        finally:
+            observe.set_emitter(None)
+        assert [(e["hf_model_id"], e["devices"]) for e in events] == [
+            ("org/pde", ["3", "2"]), ("org/pde-past", []), ("org/pde-noplan", [])]
+
+    def test_apply_plan_hands_one_devices_entry_per_engine(self, registered, engine):
+        vllm_module, _ = engine
+        a = registered("_pd_tw_a", hf_model_id="org/pdtw", vram_gb=10.0)
+        b = registered("_pd_tw_b", hf_model_id="org/pdtx", vram_gb=10.0)
+        twin = registered("_pd_tw_c", hf_model_id="org/pdtw", vram_gb=10.0)
+        residency.apply_plan(_plan([a, b, twin], 24.0, 2))
+        assert vllm_module._planned_devices == {
+            vllm_module._engine_key("org/pdtw", None, {}): (0,),
+            vllm_module._engine_key("org/pdtx", None, {}): (1,),
+        }
+
+    def test_a_plan_is_swapped_in_whole_and_replace_false_keeps_what_is_set(self, engine):
+        vllm_module, _ = engine
+        vllm_module.set_planned_devices({("a",): (0,)})
+        before = vllm_module._planned_devices
+        vllm_module.set_planned_devices({("b",): (1,)})
+        assert before == {("a",): (0,)}                     # not cleared in place
+        assert vllm_module._planned_devices == {("b",): (1,)}
+        vllm_module.set_planned_devices({("b",): (0,), ("c",): (0,)}, replace=False)
+        assert vllm_module._planned_devices == {("b",): (1,), ("c",): (0,)}
+
+    def test_a_released_engine_reloads_on_its_planned_card(self, registered, engine):
+        vllm_module, builds = engine
+        a = registered("_pd_rel_a", hf_model_id="org/pdra", vram_gb=10.0)
+        b = registered("_pd_rel_b", hf_model_id="org/pdrb", vram_gb=10.0)
+        residency.apply_plan(_plan([a, b], 24.0, 2))
+        vllm_module._engine("org/pdrb", None, {})
+        residency.unload_local()
+        vllm_module._engine("org/pdrb", None, {})
+        assert [visible for visible, _ in builds] == ["1", "1"]
+
+    @staticmethod
+    def _load(vllm_module, model):
+        from redact.llms.model_config import get_model_config
+
+        return vllm_module.VLLMBackend.from_config(get_model_config(model))
+
+    def test_two_planned_cards_on_one_card_engine_become_two_copies(
+            self, registered, engine):
+        vllm_module, builds = engine
+        m = registered("_pd_dp", hf_model_id="org/pdd", vram_gb=10.0,
+                       vllm_kwargs={"max_model_len": 512})
+        residency.apply_plan(_plan([m], 24.0, 2))
+        self._load(vllm_module, m)
+        assert builds == [("0,1", {
+            "model": "org/pdd", "quantization": None, "max_model_len": 512,
+            "gpu_memory_utilization": 0.9, "disable_log_stats": True,
+            "data_parallel_size": 2})]
+        assert "CUDA_VISIBLE_DEVICES" not in os.environ
+
+    def test_a_tensor_parallel_plan_adds_no_copies(self, registered, engine):
+        vllm_module, builds = engine
+        m = registered("_pd_tp", hf_model_id="org/pdtp", vram_gb=40.0, min_gpus=2)
+        residency.apply_plan(_plan([m], 48.0, 2))
+        self._load(vllm_module, m)
+        (visible, kwargs), = builds
+        assert visible == "0,1" and kwargs["tensor_parallel_size"] == 2
+        assert "data_parallel_size" not in kwargs
+
+    def test_copies_of_a_tensor_parallel_engine_reach_it_as_both_arguments(
+            self, registered, engine):
+        vllm_module, builds = engine
+        m = registered("_pd_tp_dp", hf_model_id="org/pdtd", vram_gb=40.0, min_gpus=2)
+        residency.apply_plan(_plan([m], 48.0, 4, copies={m: 2}))
+        self._load(vllm_module, m)
+        (visible, kwargs), = builds
+        assert visible == "0,1,2,3"
+        assert (kwargs["tensor_parallel_size"], kwargs["data_parallel_size"]) == (2, 2)
+
+    def test_a_directly_built_engine_keeps_its_own_copies(self, engine):
+        """Outside the registry, which rejects the argument."""
+        vllm_module, builds = engine
+        kw = {"data_parallel_size": 2}
+        vllm_module.set_planned_devices(
+            {vllm_module._engine_key("org/pdk", None, kw): (0, 1, 2)})
+        vllm_module._engine("org/pdk", None, kw)
+        assert builds[0][1]["data_parallel_size"] == 2
+
+    COPIES = [
+        ((0, 1), {}, "2 copies, one per card (data_parallel_size=2)", "0"),
+        ((0, 1, 2, 3), {"tensor_parallel_size": 2},
+         "2 copies, each on 2 cards (data_parallel_size=2)", "0,1"),
+    ]
+
+    @pytest.mark.parametrize("planned,kwargs,copies,home", COPIES)
+    def test_a_failed_build_with_copies_loads_one_copy_instead(
+            self, engine, planned, kwargs, copies, home, caplog):
+        vllm_module, builds = engine
+        vllm_module.set_planned_devices(
+            {vllm_module._engine_key("org/pdf1", None, kwargs): planned})
+        builds.fail_first = True
+        events = []
+        observe.set_emitter(events.append)
+        try:
+            with caplog.at_level(logging.WARNING, logger=vllm_module.logger.name):
+                vllm_module._engine("org/pdf1", None, kwargs)
+        finally:
+            observe.set_emitter(None)
+        (first, kw_first), (second, kw_second) = builds
+        assert (first, second) == (",".join(map(str, planned)), home)
+        dp = len(planned) // len(home.split(","))
+        assert kw_first == {**kw_second, "data_parallel_size": dp}
+        (warning,) = [r.getMessage() for r in caplog.records]
+        assert warning == (
+            "[vllm] The engine of org/pdf1 failed to build with 2 copies "
+            f"(RuntimeError: CUDA out of memory); loading one copy on {home} instead. "
+            'To make this permanent, set "copies": 1 in the model\'s entry under '
+            '"models" in the recipe.')
+        (load,) = [e for e in events if e.get("phase") == "load"]
+        assert (load["data_parallel_size"], load["devices"], load["fallback"],
+                load["planned_copies"]) == (1, home.split(","), True, 2)
+        assert list(vllm_module._engines) == [
+            vllm_module._engine_key("org/pdf1", None, kwargs)]
+
+    @pytest.mark.parametrize("planned,kwargs,copies,home", COPIES)
+    def test_a_failed_fallback_names_both_failures(
+            self, engine, planned, kwargs, copies, home):
+        vllm_module, builds = engine
+        vllm_module.set_planned_devices(
+            {vllm_module._engine_key("org/pdh", None, kwargs): planned})
+        builds.fail = True
+        with pytest.raises(RuntimeError) as raised:
+            vllm_module._engine("org/pdh", None, kwargs)
+        assert str(raised.value) == (
+            f"The vLLM engine of org/pdh was being built with {copies}, and the "
+            "build failed (RuntimeError: CUDA out of memory). One copy on "
+            f"{home} failed as well (RuntimeError: CUDA out of memory).")
+        cause = raised.value.__cause__
+        assert type(cause) is RuntimeError and str(cause) == "CUDA out of memory"
+        assert [kw.get("data_parallel_size") for _, kw in builds] == [2, None]
+        assert "CUDA_VISIBLE_DEVICES" not in os.environ
+        assert vllm_module._engines == {} and vllm_module.held_seconds() == {}
+
+    @pytest.fixture()
+    def started(self, monkeypatch):
+        """The failed build starts process 31; what is ended is recorded, and
+        ``started.alive`` is what outlives it."""
+        import multiprocessing
+
+        import redact.llms.backends.vllm as vllm_module
+        from tests.test_vllm_backend import _Proc
+
+        record = SimpleNamespace(listed=[], ended=[], alive=[])
+        monkeypatch.setattr(multiprocessing, "active_children",
+                            lambda: [p for p in record.listed if p.is_alive()])
+        monkeypatch.setattr(vllm_module, "_stray", [])
+
+        def terminate(processes=(), **kw):
+            record.ended.append(sorted(p.pid for p in processes))
+            for p in processes:
+                p.alive = p.pid in record.alive
+            return [p.pid for p in processes if p.alive]
+
+        monkeypatch.setattr(vllm_module, "terminate_engine_processes", terminate)
+        record.proc = _Proc(31)
+        return record
+
+    def test_the_failed_builds_processes_end_before_one_copy_is_tried(
+            self, engine, started):
+        vllm_module, builds = engine
+        seen = []
+
+        class _Engine:
+            def __init__(self, **kw):
+                seen.append((list(started.ended), kw.get("data_parallel_size")))
+                if len(seen) == 1:
+                    started.listed.append(started.proc)
+                    raise RuntimeError("CUDA out of memory")
+
+        with patch.dict("sys.modules", fake_vllm_modules(_Engine)):
+            vllm_module.set_planned_devices(
+                {vllm_module._engine_key("org/pdk2", None, {}): (0, 1)})
+            vllm_module._engine("org/pdk2", None, {})
+        assert seen == [([], 2), ([[31]], None)]
+        assert vllm_module._stray == []
+
+    def test_one_copy_is_not_tried_while_the_failed_builds_processes_live(
+            self, engine, started):
+        vllm_module, builds = engine
+        started.alive = [31]
+
+        class _Engine:
+            def __init__(self, **kw):
+                builds.append(kw)
+                started.listed.append(started.proc)
+                raise RuntimeError("CUDA out of memory")
+
+        with patch.dict("sys.modules", fake_vllm_modules(_Engine)):
+            vllm_module.set_planned_devices(
+                {vllm_module._engine_key("org/pdk3", None, {}): (0, 1)})
+            with pytest.raises(RuntimeError) as raised:
+                vllm_module._engine("org/pdk3", None, {})
+        assert len(builds) == 1
+        assert str(raised.value).endswith(
+            'set "copies": 1 in the model\'s entry under "models" in the recipe, or '
+            "copies={model: 1} on the planner. One copy was not tried: processes "
+            "the build started are still alive (31).")
+        assert vllm_module._stray == [started.proc]       # ended on the way out
+
+    def test_one_copy_is_not_tried_on_the_way_out(self, engine, monkeypatch):
+        vllm_module, builds = engine
+        monkeypatch.setattr(vllm_module, "_exiting", False)
+
+        class _Engine:
+            def __init__(self, **kw):
+                builds.append(kw)
+                vllm_module._exiting = True
+                raise RuntimeError("CUDA out of memory")
+
+        with patch.dict("sys.modules", fake_vllm_modules(_Engine)):
+            vllm_module.set_planned_devices(
+                {vllm_module._engine_key("org/pdk4", None, {}): (0, 1)})
+            with pytest.raises(RuntimeError, match="To load one copy"):
+                vllm_module._engine("org/pdk4", None, {})
+        assert len(builds) == 1
+
+    @pytest.mark.parametrize("planned,kwargs", [
+        ((), {}), ((0,), {}), ((0, 1), {"tensor_parallel_size": 2})])
+    def test_a_failed_build_of_one_copy_raises_the_error_as_it_is(
+            self, engine, planned, kwargs):
+        vllm_module, builds = engine
+        vllm_module.set_planned_devices(
+            {vllm_module._engine_key("org/pdo1", None, kwargs): planned})
+        builds.fail = True
+        with pytest.raises(RuntimeError) as raised:
+            vllm_module._engine("org/pdo1", None, kwargs)
+        assert str(raised.value) == "CUDA out of memory"
+        assert raised.value.__cause__ is None
+
+    def test_the_load_event_counts_the_copies(self, engine):
+        vllm_module, _ = engine
+        vllm_module.set_planned_devices(
+            {vllm_module._engine_key("org/pdc", None, {}): (0, 1)})
+        events = []
+        observe.set_emitter(events.append)
+        try:
+            vllm_module._engine("org/pdc", None, {})
+            vllm_module._engine("org/pdc-noplan", None, {})
+        finally:
+            observe.set_emitter(None)
+        assert [(e["devices"], e["data_parallel_size"]) for e in events] == [
+            (["0", "1"], 2), ([], 1)]
+
+
+class TestPaddedGrant:
+    """A vLLM engine claims, is granted and is checked against its need with
+    overhead: (weights + KV) x 1.1 + 0.6, unrounded."""
+
+    def test_one_engine(self, registered):
+        a = registered("_pg_one", hf_model_id="org/pg1", vram_gb=20.0)
+        with _kv(2.0):
+            plan = _plan([a], 48.0, 1)
+        fp = plan.footprints[0]
+        assert (fp.need_gb, fp.gb) == (22.0, 25.0)
+        assert fp.padded_gb == pytest.approx(24.8)         # 22 x 1.1 + 0.6
+        assert fp.reserved_gb == pytest.approx(43.2) and fp.planned_utilization == 0.9
+        assert plan.fits
+
+    def test_two_engines_claim_their_padded_needs(self, registered):
+        """Bare needs 20 + 18 are under the 43.2 pool; padded 22.6 + 20.4
+        are 43.0, and 20 + 18.2 pad to 43.22, which is over it."""
+        a = registered("_pg_two_a", hf_model_id="org/pg2a", vram_gb=20.0)
+        b = registered("_pg_two_b", hf_model_id="org/pg2b", vram_gb=18.0)
+        c = registered("_pg_two_c", hf_model_id="org/pg2c", vram_gb=18.2)
+        with _kv(0.0):
+            fits = _plan([a, b], 48.0, 1)
+            over = _plan([a, c], 48.0, 1)
+        assert fits.fits and len(fits.groups) == 1
+        assert [fp.reserved_gb for fp in fits.footprints] == [
+            pytest.approx(22.7), pytest.approx(20.5)]     # 0.2 spare, split
+        assert [fp.planned_utilization for fp in fits.footprints] == [0.4729, 0.427]
+        assert len(over.groups) == 2 and not over.fits
+
+    @pytest.mark.parametrize("weights", [
+        (26.7384, 11.4434), (20.0, 18.181818), (7.77, 3.33, 9.1), (25.4321,)])
+    def test_the_fraction_covers_the_padded_need_after_rounding(self, registered, weights):
+        names = [registered(f"_pg_round_{i}", hf_model_id=f"org/pgr{i}", vram_gb=w)
+                 for i, w in enumerate(weights)]
+        with _kv(0.0):
+            plan = _plan(names, 48.0, 1)
+        assert plan.fits
+        for fp in plan.footprints:
+            assert fp.planned_utilization * 48.0 >= fp.padded_gb - 1e-6
+            assert fp.planned_utilization > 0
+
+    def test_rounding_up_applies_only_where_rounding_down_would_undercut(self, registered):
+        """Padded needs 33.6123 + 9.5877 fill the 43.2 pool exactly: 0.70025
+        and 0.19974 of the card floor to 0.7002 and 0.1997, under the needs."""
+        a = registered("_pg_tight_a", hf_model_id="org/pta", vram_gb=30.0)
+        b = registered("_pg_tight_b", hf_model_id="org/ptb", vram_gb=8.0)
+        with patch.object(estimate, "estimate_kv_gib",
+                          side_effect=[0.0111818, 0.1706364]):
+            plan = _plan([a, b], 48.0, 1)
+        assert plan.fits
+        assert [fp.planned_utilization for fp in plan.footprints] == [0.7003, 0.1998]
+
+
+class TestResidentEngines:
+    @pytest.fixture()
+    def loaded(self):
+        import redact.llms.backends.introspection as intro
+        import redact.llms.backends.vllm as vllm_module
+
+        vllm_module._engines.clear()
+        intro._models.clear()
+        yield vllm_module._engines, intro._models
+        vllm_module._engines.clear()
+        intro._models.clear()
+
+    def test_a_plan_warns_once_about_engines_it_does_not_cover(
+            self, registered, loaded, caplog):
+        engines, models = loaded
+        m = registered("_re_new", hf_model_id="org/new", vram_gb=5.0)
+        engines[("org/new", None, "[]")] = object()            # in the plan
+        engines[("org/old", None, "[]")] = object()
+        models[("org/old-tf", "auto", "auto", "[]")] = ("tok", "model")
+        with caplog.at_level(logging.WARNING, logger=residency.logger.name), _kv(0.0):
+            plan = _plan([m], 48.0, 1)
+        assert plan.fits                                       # the plan is unchanged
+        assert [r.getMessage() for r in caplog.records] == [
+            "[residency] already loaded and not in this plan, so the plan hands "
+            "their memory out again: org/old-tf[introspect], org/old[vllm]"]
+
+    def test_no_warning_when_every_loaded_engine_is_planned(
+            self, registered, loaded, caplog):
+        engines, _ = loaded
+        m = registered("_re_same", hf_model_id="org/same-re", vram_gb=5.0)
+        engines[("org/same-re", None, "[]")] = object()
+        with caplog.at_level(logging.WARNING, logger=residency.logger.name), _kv(0.0):
+            _plan([m], 48.0, 1)
+            _plan(["claude-opus-4-6"], 48.0, 1)                # nothing local
+        assert caplog.records == []
+
+    def test_unload_keeps_the_engines_it_is_handed(self, registered, loaded):
+        engines, models = loaded
+        pool = registered("_re_pool", hf_model_id="org/pool")
+        other, mine = ("org/other", None, "[]"), ("org/pool", None, "[]")
+        engines[other] = engines[mine] = object()
+        models[("org/tf", "auto", "auto", "[]")] = ("tok", "model")
+        resident = residency.loaded_engines(exclude=[pool])
+        assert resident == {"vllm": {other},
+                            "introspect": {("org/tf", "auto", "auto", "[]")}}
+        residency.unload_local(engines=resident)
+        assert list(engines) == [other] and len(models) == 1
+
+
+class TestDefaultContextLength:
+    """An unset max_model_len is 10000 tokens, in the plan and at load."""
+
+    SMALL = SimpleNamespace(**{**vars(MISTRAL_24B), "max_position_embeddings": 4096})
+
+    @pytest.fixture()
+    def engine(self):
+        import redact.llms.backends.vllm as vllm_module
+
+        calls = []
+        vllm_module.VLLMBackend.clear_cache()
+        fake = fake_vllm_modules(lambda **kw: calls.append(kw) or object())
+        with patch.dict("sys.modules", fake), \
+             patch.object(vllm_module, "_prepare_environment"):
+            yield vllm_module, calls
+        vllm_module.VLLMBackend.clear_cache()
+        vllm_module.set_planned_utilization({})     # a release keeps the plan
+
+    def test_the_plan_sizes_the_kv_cache_at_the_default(self, registered):
+        unset = registered("_dc_unset", hf_model_id="org/dcu", vram_gb=20.0)
+        explicit = registered("_dc_explicit", hf_model_id="org/dce", vram_gb=20.0,
+                              vllm_kwargs={"max_model_len": 10_000})
+        full = registered("_dc_full", hf_model_id="org/dcf", vram_gb=20.0,
+                          vllm_kwargs={"max_model_len": 32768})
+        with _config(MISTRAL_24B):
+            kv = [residency.footprint(m).parts["kv_gib"] for m in (unset, explicit, full)]
+        assert kv == [1.53, 1.53, 5.0]
+
+    def test_the_plan_caps_the_default_at_the_checkpoint_maximum(self, registered):
+        m = registered("_dc_small", hf_model_id="org/dcs", vram_gb=20.0)
+        with _config(self.SMALL):
+            assert residency.footprint(m).parts["kv_gib"] == 0.62   # 4096 tokens
+
+    def test_the_default_reaches_the_engine_without_a_plan(self, engine):
+        vllm_module, calls = engine
+        with _config(MISTRAL_24B):
+            vllm_module._engine("org/dc-noplan", None, {})
+        assert calls == [{"model": "org/dc-noplan", "quantization": None,
+                          "max_model_len": 10_000, "gpu_memory_utilization": 0.9,
+                          "disable_log_stats": True}]
+
+    def test_the_default_reaches_the_engine_with_a_plan(self, registered, engine):
+        vllm_module, calls = engine
+        m = registered("_dc_plan", hf_model_id="org/dcp", vram_gb=20.0)
+        with _config(MISTRAL_24B):
+            plan = _plan([m], 48.0, 1)
+            residency.apply_plan(plan)
+            vllm_module._engine("org/dcp", None, {})
+        assert plan.footprints[0].parts["kv_gib"] == 1.53
+        assert calls[0]["max_model_len"] == 10_000
+        assert calls[0]["gpu_memory_utilization"] == 0.9
+
+    def test_a_small_checkpoint_is_not_given_more_than_its_maximum(self, engine):
+        vllm_module, calls = engine
+        with _config(self.SMALL):
+            vllm_module._engine("org/dc-small", None, {})
+        assert calls[0]["max_model_len"] == 4096
+
+    def test_an_unreadable_config_gets_the_default(self, engine):
+        vllm_module, calls = engine
+        vllm_module._engine("org/dc-unread", None, {})
+        assert calls[0]["max_model_len"] == 10_000
+
+    def test_an_explicit_value_wins_and_reads_no_config(self, engine):
+        vllm_module, calls = engine
+        with patch.object(estimate, "_load_config", side_effect=AssertionError):
+            vllm_module._engine("org/dc-explicit", None, {"max_model_len": 32768})
+        assert calls[0]["max_model_len"] == 32768
+
+    def test_the_cache_key_and_engine_identity_are_unchanged(self, registered, engine):
+        vllm_module, calls = engine
+        a = registered("_dc_share_a", hf_model_id="org/dcsh", vram_gb=20.0)
+        b = registered("_dc_share_b", hf_model_id="org/dcsh", vram_gb=20.0)
+        key = vllm_module._engine_key("org/dcsh", None, {})
+        first = vllm_module._engine("org/dcsh", None, {})
+        assert vllm_module._engine("org/dcsh", None, {}) is first and len(calls) == 1
+        assert list(vllm_module._engines) == [key]
+        assert residency.footprint(a).engine == residency.footprint(b).engine
+        assert residency.footprint(a).engine[1:] == key
+        residency.unload_local(keep=[b])                     # keep= still matches
+        assert list(vllm_module._engines) == [key]
+
+
+class TestEngineSettingsSizeTheModel:
+    """A vLLM setup's dtype and quantization reach the estimate, for estimated
+    and for declared weights."""
+
+    FLOAT32 = SimpleNamespace(**{**vars(MISTRAL_24B), "torch_dtype": "float32"})
+
+    def test_a_float32_checkpoint_is_sized_as_vllm_loads_it(self, registered):
+        """vLLM's default dtype loads float32 as 16-bit; an explicit
+        dtype=float32 keeps 32-bit and needs twice the card."""
+        default = registered("_es_f32", hf_model_id="org/esf")
+        explicit = registered("_es_f32_explicit", hf_model_id="org/esf",
+                              vllm_kwargs={"dtype": "float32"})
+        with _config(self.FLOAT32):
+            half, full = _plan([default], 80.0, 1), _plan([explicit], 80.0, 1)
+        sized = [(plan.footprints[0].parts["weights_gib"],
+                  plan.footprints[0].parts["kv_gib"]) for plan in (half, full)]
+        assert sized == [(43.91, 1.53), (87.81, 3.05)]
+        assert "[float16, cast from float32]" in half.footprints[0].breakdown()
+        assert "[float32]" in full.footprints[0].breakdown()
+        assert half.fits and not full.fits        # 50.6 and 100.5 against 72.0
+
+    def test_declared_weights_get_a_kv_cache_at_the_engine_dtype(self, registered):
+        default = registered("_es_decl", hf_model_id="org/esd", vram_gb=20.0)
+        explicit = registered("_es_decl_explicit", hf_model_id="org/esd",
+                              vram_gb=20.0, vllm_kwargs={"dtype": "float32"})
+        with _config(self.FLOAT32):
+            kv = [residency.footprint(m).parts["kv_gib"] for m in (default, explicit)]
+        assert kv == [1.53, 3.05]
+
+    def test_quantization_decides_whether_the_model_fits(self, registered):
+        plain = registered("_es_plain", hf_model_id="org/esq")
+        awq = registered("_es_awq", hf_model_id="org/esq", quantization="awq")
+        with _config(MISTRAL_24B):
+            unquantized, quantized = _plan([plain], 48.0, 1), _plan([awq], 48.0, 1)
+        # 43.91 or 14.15 GiB of weights plus 1.53 of KV, against a 43.2 grant.
+        assert quantized.footprints[0].parts["weights_gib"] == 14.15
+        assert quantized.fits and not unquantized.fits
+
+
+class TestSharedEngineAcrossGroups:
+    """A model joins the group of the engine it shares, wherever that is."""
+
+    def test_a_later_twin_joins_its_engines_group(self, registered):
+        a = registered("_sg_a", hf_model_id="org/sga", vram_gb=30.0)
+        big = registered("_sg_big", hf_model_id="org/sgb", vram_gb=30.0)
+        twin = registered("_sg_twin", hf_model_id="org/sga", vram_gb=30.0)
+        with _kv(0.0):
+            plan = _plan([a, big, twin], 48.0, 1)
+        # 30 + 30 GiB do not share a 48 GiB card: two engines, two groups.
+        assert [[fp.model for fp in g] for g in plan.groups] == [[a, twin], [big]]
+        first, shared, second = plan.footprints
+        assert (shared.devices, shared.reserved_gb, shared.planned_utilization) == (
+            first.devices, first.reserved_gb, first.planned_utilization)
+        assert (first.planned_utilization, second.planned_utilization) == (0.9, 0.9)
+        assert plan.as_dict()["groups"] == [[a, twin], [big]]
+        assert [m["group"] for m in plan.as_dict()["models"]] == [0, 0, 1]
+        # Two groups for two engines, and none for a model beside its own engine.
+        assert plan.explain().count("cannot be resident with the above") == 1
+
+    def test_the_shares_handed_to_the_loader_are_one_per_engine(self, registered):
+        import redact.llms.backends.vllm as vllm_module
+
+        a = registered("_sg_key_a", hf_model_id="org/sgka", vram_gb=30.0)
+        big = registered("_sg_key_big", hf_model_id="org/sgkb", vram_gb=30.0)
+        twin = registered("_sg_key_twin", hf_model_id="org/sgka", vram_gb=30.0)
+        with _kv(0.0):
+            plan = _plan([a, big, twin], 48.0, 1)
+        try:
+            residency.apply_plan(plan)
+            assert vllm_module._planned_utilization == {
+                vllm_module._engine_key("org/sgka", None, {}): 0.9,
+                vllm_module._engine_key("org/sgkb", None, {}): 0.9,
+            }
+        finally:
+            vllm_module.set_planned_utilization({})
+
+
+class TestPlannerHoles:
+    def test_an_unknown_engine_does_not_join_a_tensor_parallel_card(self, registered):
+        big = registered("_ph_tp", hf_model_id="org/phtp", vram_gb=40.0, min_gpus=2)
+        unknown = registered("_ph_unknown", hf_model_id="org/phu")
+        plan = _plan([big, unknown], 48.0, 2)
+        assert [[fp.model for fp in g] for g in plan.groups] == [[big], [unknown]]
+        assert not plan.fits
+        assert plan.footprints[0].planned_utilization == 0.9
+
+    def test_no_fraction_at_or_below_zero_is_planned(self, registered):
+        """Fixed claims that leave a card nothing: the engine gets no value,
+        and the plan says so instead of publishing 0."""
+        import redact.llms.backends.vllm as vllm_module
+
+        m = registered("_ph_zero", hf_model_id="org/phz", vram_gb=5.0)
+        unknown = registered("_ph_zero_u", hf_model_id="org/phzu")
+        for name in (m, unknown):
+            fp = residency.footprint(name)
+            cards = _Cards([48.0])
+            cards.free[0] = 2.0                     # under the 4.8 kept back
+            cards.shared[0].append(fp)
+            fp.devices = (0,)
+            cards.settle()
+            assert fp.planned_utilization is None
+            assert fp.reserved_gb == 0.0
+            assert _exceeds_its_cards(fp, [48.0])
+            plan = residency.ResidencyPlan(groups=[[fp]], gpus_required=1,
+                                           gpus_available=1, per_gpu_gb=48.0,
+                                           oversized=[fp])
+            assert "is left no memory on its card" in plan.explain()
+            assert plan.as_dict()["models"][0]["gpu_memory_utilization"] is None
+            residency.apply_plan(plan)
+            assert vllm_module._planned_utilization == {}
+
+    def test_a_tensor_parallel_size_must_divide_the_heads(self, registered):
+        """Qwen2.5-7B has 28 heads: 4 divides them, 8 does not."""
+        bad = registered("_ph_heads_bad", hf_model_id="org/phb", min_gpus=8)
+        good = registered("_ph_heads_ok", hf_model_id="org/pho", min_gpus=4)
+        with _config(QWEN_7B):
+            bad_plan, good_plan = _plan([bad], 48.0, 8), _plan([good], 48.0, 8)
+        assert good_plan.fits and good_plan.problems == []
+        assert not bad_plan.fits and bad_plan.oversized == []
+        assert bad_plan.problems == [
+            "_ph_heads_bad[vllm] has 28 attention heads, which "
+            "tensor_parallel_size=8 does not divide, so vLLM cannot load it."]
+        assert "PROBLEM: _ph_heads_bad[vllm] has 28 attention heads" in bad_plan.explain()
+        assert bad_plan.as_dict()["fits"] is False
+
+    def test_unknown_card_size_with_two_engines_does_not_fit(self, registered):
+        a = registered("_ph_ns_a", hf_model_id="org/phna", vram_gb=5.0)
+        b = registered("_ph_ns_b", hf_model_id="org/phnb", vram_gb=5.0)
+        twin = registered("_ph_ns_twin", hf_model_id="org/phna", vram_gb=5.0)
+        with patch("redact.llms.resources.measure.free_total_gib", return_value=None):
+            two = _plan([a, b], None, 1)
+            one = _plan([a, twin], None, 1)            # one shared engine
+        assert not two.fits and len(two.groups) == 1
+        assert "the card size is unknown, so no gpu_memory_utilization is planned " \
+               "for the 2 vLLM engines" in two.problems[0]
+        assert [fp.planned_utilization for fp in two.footprints] == [None, None]
+        assert one.fits
+        assert any("card size is unknown" in w for w in one.warnings)
+
+    def test_zero_gpus_given_invents_no_card(self, registered):
+        m = registered("_ph_nocard", hf_model_id="org/phnc", vram_gb=5.0)
+        with _kv(0.0):
+            plan = residency.plan_residency([m], gpus=0, gib_per_gpu=24.0)
+        fp = plan.footprints[0]
+        assert not plan.fits and plan.gpus_available == 0
+        assert (fp.reserved_gb, fp.planned_utilization) == (None, None)
+        assert "vLLM gets" not in plan.explain()
+        assert any("no GPU is available" in p for p in plan.problems)
+
+    def test_a_size_without_a_count_is_still_one_card(self, registered):
+        """torch reports a size where nvidia-smi is missing."""
+        m = registered("_ph_torch", hf_model_id="org/pht", vram_gb=5.0)
+        with patch("redact.llms.resources.measure.free_total_gib",
+                   return_value=(20.0, 24.0)), _kv(0.0):
+            with patch("redact.llms.resources.measure.detect_gpus", return_value=(None, 0)), \
+                 patch("redact.llms.resources.measure.card_sizes_gib", return_value=None):
+                plan = residency.plan_residency([m])
+        assert plan.footprints[0].planned_utilization == 0.9
+
+
+class TestWhatThePlanCannotTell:
+    def test_an_unsized_engine_beside_another_does_not_fit(self, registered):
+        known = registered("_ct_known", hf_model_id="org/ctk", vram_gb=10.0)
+        unsized = registered("_ct_unsized", hf_model_id="org/ctu")
+        with _kv(0.0):
+            plan = _plan([known, unsized], 24.0, 1)
+        assert not plan.fits
+        assert any("has no known size" in p and unsized in p for p in plan.problems)
+
+    def test_a_lone_unsized_engine_is_flagged_not_refused(self, registered):
+        unsized = registered("_ct_alone", hf_model_id="org/cta")
+        plan = _plan([unsized], 24.0, 1)
+        assert plan.fits
+        assert any("has no known size" in w for w in plan.warnings)
+
+    def test_torch_alone_reports_the_card_it_plans(self, registered):
+        m = registered("_ct_torch", hf_model_id="org/ctt", vram_gb=5.0)
+        with _kv(0.0), \
+             patch("redact.llms.resources.measure.detect_gpus", return_value=(None, 0)), \
+             patch("redact.llms.resources.measure.card_sizes_gib", return_value=None), \
+             patch("redact.llms.resources.measure.free_total_gib",
+                   return_value=(24.0, 24.0)):
+            plan = residency.plan_residency([m])
+        assert plan.gpus_available == 1 and plan.fits
+
+    def test_a_cpu_model_is_never_too_large_for_a_card(self, registered):
+        m = registered("_ct_cpu", setup="introspect", hf_model_id="org/ctc",
+                       vram_gb=40.0, device_map="cpu")
+        plan = _plan([m], 24.0, 1)
+        assert plan.fits and plan.oversized == []
+
+
+def packed_sizes(rng, cards, pool, count):
+    """Weights in GiB of engines that are hard to place: a set that fills
+    ``cards`` cards of ``pool`` GiB closely, shuffled, and half the time one
+    engine more than that. ``count`` is the range of set sizes wanted."""
+    while True:
+        needs = []
+        for _ in range(cards):
+            cuts = sorted(rng.uniform(0.2, 0.8) for _ in range(rng.randint(0, 2)))
+            full = rng.uniform(0.8, 1.0) * pool
+            needs += [(b - a) * full for a, b in zip([0.0, *cuts], [*cuts, 1.0])]
+        if rng.random() < 0.5:
+            needs.append(rng.uniform(0.1, 0.6) * pool)
+        if len(needs) in count and min(needs) > 1.5:
+            break
+    rng.shuffle(needs)
+    # The weights under a need, rounded down so that the set still fills
+    # its cards.
+    return [int((need - estimate.DEFAULT_CUDA_CONTEXT_GIB)
+                / estimate.DEFAULT_FRAGMENTATION * 10) / 10 for need in needs]
+
+
+def fit_exists(needs, stages, cards, pool):
+    """Whether one card per engine keeps every card within its pool in
+    every stage, found by trying every assignment.
+
+    Args:
+        needs: Each engine's need with overhead, by name.
+        stages: The engines resident in each stage.
+        pool: GiB a card grants, or per card.
+    """
+    names = list(needs)
+    pools = pool if isinstance(pool, list) else [pool] * cards
+    # Where cards are alike, the first engine is on card 0.
+    first = range(1) if len(set(pools)) == 1 else range(cards)
+    for assigned in itertools.product(first, *[range(cards)] * (len(names) - 1)):
+        card_of = dict(zip(names, assigned))
+        for stage in stages:
+            load = [0.0] * cards
+            for name in stage:
+                load[card_of[name]] += needs[name]
+            if any(gib > limit + 1e-6 for gib, limit in zip(load, pools)):
+                break
+        else:
+            return True
+    return False
+
+
+def fit_exists_around(needs, whole, fixed, cards, card, shared=False):
+    """Whether cards exist for an engine on several cards and for
+    single-card engines, beside a transformers model on a fixed card, found
+    by trying every assignment.
+
+    Args:
+        needs: Each single-card engine's need with overhead.
+        whole: The other engine's need per card, and how many cards it takes.
+        fixed: The transformers model's card, and the GiB it claims there.
+        card: GiB of one card.
+        shared: The other engine's cards may hold other models: it is a
+            single-card engine with copies, not a tensor-parallel one.
+    """
+    pool = estimate.DEFAULT_GPU_MEMORY_UTILIZATION * card
+    (need, count), (at, claim) = whole, fixed
+    if need > pool + 1e-6 or claim > card + 1e-6:
+        return False
+    for taken in itertools.combinations(range(cards), count):
+        # A card held whole has nothing else on it.
+        if at in taken and not shared:
+            continue
+        rest = [d for d in range(cards) if shared or d not in taken]
+        for where in itertools.product(rest, repeat=len(needs)):
+            load = dict.fromkeys(where, 0.0)
+            for d in taken if shared else ():
+                load[d] = need
+            for one, d in zip(needs, where):
+                load[d] += one
+            if all(gib + claim * (d == at) <= pool + 1e-6 for d, gib in load.items()):
+                return True
+    return False
+
+
+def assert_no_card_is_overfull(plan, pool):
+    """Per card: the needs placed on it fit, the vLLM engines' fractions
+    stay under the ceiling and each covers its engine's need, and a card a
+    tensor-parallel engine holds holds nothing else. ``pool`` is the GiB a
+    card grants, or per card."""
+    ceiling = estimate.DEFAULT_GPU_MEMORY_UTILIZATION
+    pools = pool if isinstance(pool, list) else [pool] * plan.gpus_available
+    for card in range(plan.gpus_available):
+        on = list({fp.engine: fp for fp in plan.footprints
+                   if card in fp.devices}.values())
+        # A transformers model claims its size rounded up.
+        assert sum(fp.padded_gb if fp.setup == "vllm" else fp.gb
+                   for fp in on) <= pools[card] + 1e-6
+        engines = [fp for fp in on if fp.setup == "vllm"]
+        # A fraction may be rounded up a step to cover its need.
+        assert sum(fp.planned_utilization or 0.0 for fp in engines) \
+            <= ceiling + 1e-4 * len(engines) + 1e-9
+        for fp in engines:
+            if fp.known and fp.planned_utilization:
+                assert (fp.planned_utilization * pools[card] / ceiling + 1e-6
+                        >= fp.padded_gb)
+        assert len(on) <= 1 or all(fp.min_gpus == 1 for fp in engines)
+
+
+class TestSearch:
+    """Models that do not fit in the order given are placed in an
+    arrangement that fits, when there is one."""
+
+    #: 24 GiB cards grant 21.6 GiB. With overhead 3, 5, 7, 9, 11, 15 and
+    #: 18 GiB of weights need 3.9, 6.1, 8.3, 10.5, 12.7, 17.1 and 20.4.
+    CARD = 24.0
+
+    def _engines(self, registered, tag, weights):
+        return [registered(f"_se_{tag}_{i}", hf_model_id=f"org/se{tag}{i}", vram_gb=gb)
+                for i, gb in enumerate(weights)]
+
+    def test_models_that_fit_in_another_arrangement_are_placed_in_it(
+            self, registered, caplog):
+        """Two 32 GiB cards grant 28.8 GiB each; 16 and 8 GiB of weights
+        need 18.2 and 9.4. In the order given the two small engines share
+        card 1, and the last engine fits on neither card."""
+        names = self._engines(registered, "one", (16.0, 8.0, 8.0, 16.0))
+        with caplog.at_level(logging.INFO, logger=residency.logger.name):
+            plan = _plan(names, 32.0, 2)
+        assert plan.fits and [[fp.model for fp in g] for g in plan.groups] == [names]
+        assert [fp.devices for fp in plan.footprints] == [(0,), (1,), (0,), (1,)]
+        assert [fp.planned_utilization for fp in plan.footprints] == [
+            0.5875, 0.3125, 0.3125, 0.5875]
+        assert [r.getMessage() for r in caplog.records] == [
+            "[residency] placed in another arrangement than the order given: "
+            "_se_one_0 -> card 0, _se_one_1 -> card 1, _se_one_2 -> card 0, "
+            "_se_one_3 -> card 1"]
+
+    def test_a_fit_is_found_whenever_one_exists(self, registered, caplog):
+        """300 seeded sets of 2 to 6 engines on 2 to 4 cards: the plan fits
+        exactly when trying every assignment finds one that does."""
+        rng = random.Random(20261012)
+        unfit = 0
+        with caplog.at_level(logging.INFO, logger=placement.logger.name):
+            for i in range(300):
+                cards, card = rng.randint(2, 4), rng.choice((16.0, 24.0, 48.0))
+                pool = estimate.DEFAULT_GPU_MEMORY_UTILIZATION * card
+                names = self._engines(
+                    registered, f"or{i}", packed_sizes(rng, cards, pool, range(2, 7)))
+                plan = residency.plan_residency(names, gpus=cards, gib_per_gpu=card)
+                needs = {fp.model: fp.padded_gb for fp in plan.footprints}
+                exists = fit_exists(needs, [names], cards, pool)
+                assert plan.fits is exists, (i, cards, card, needs)
+                if exists:
+                    assert len(plan.groups) == 1
+                    assert_no_card_is_overfull(plan, pool)
+                unfit += not exists
+        # Of the 300, the sets that fit only in another arrangement than the
+        # order given, and those that fit in none.
+        assert (len(caplog.records), unfit) == (134, 82)
+
+    @pytest.mark.parametrize("weights,card,fits", [
+        ((16.0, 8.0, 8.0, 16.0), 32.0, True),           # two pairs of 27.6
+        ((11.0, 9.0, 7.0, 5.0, 3.0), 24.0, True),       # 21.0 and 20.5
+        ((11.0, 9.0, 7.0, 5.0, 5.0), 24.0, False),      # 43.7 for two cards
+    ])
+    def test_the_order_given_does_not_decide_whether_a_plan_fits(
+            self, registered, weights, card, fits):
+        names = self._engines(registered, "ord", weights)
+        for order in itertools.permutations(names):
+            plan = residency.plan_residency(list(order), gpus=2, gib_per_gpu=card)
+            assert plan.fits is fits, order
+
+    def test_no_arrangement_is_looked_for_where_the_order_given_fits(self, registered):
+        """Cards, shares and text of plans that fit in the order given, as
+        the planner made them before it looked for another arrangement."""
+        a = registered("_sm_a", hf_model_id="org/sma", vram_gb=10.0)
+        b = registered("_sm_b", hf_model_id="org/smb", vram_gb=5.0)
+        c = registered("_sm_c", hf_model_id="org/smc", vram_gb=10.0)
+        tp = registered("_sm_tp", hf_model_id="org/smtp", vram_gb=40.0, min_gpus=2)
+        ts = registered("_sm_ts", setup="introspect", hf_model_id="org/smts",
+                        vram_gb=13.0)
+
+        def plan(models, gpus, gib, **kwargs):
+            return residency.plan_residency(
+                models, gpus=gpus, gib_per_gpu=gib, **kwargs)
+
+        with _kv(0.0), patch.object(placement, "_Search", side_effect=AssertionError):
+            plans = [
+                plan([a, b, c], 2, 24.0),
+                plan([a, c], 3, 24.0),
+                plan([b, tp], 3, 48.0),
+                plan([a, ts, b], 2, 24.0),
+                plan([b, a], 3, 24.0, copies={b: 2}),
+                plan([a, c], 2, 24.0, pinned={residency.footprint(c).engine: (0,)}),
+                *(phase.plan for phase in residency.plan_phases(
+                    {"x": [a], "y": [a, b]}, gpus=3, gib_per_gpu=24.0)),
+            ]
+        assert [[(fp.devices, fp.planned_utilization) for fp in plan.footprints]
+                for plan in plans] == [cards for cards, _ in self.AS_BEFORE]
+        assert [plan.explain() for plan in plans] == [
+            "\n".join(text) for _, text in self.AS_BEFORE]
+
+    _A = "    _sm_a[vllm]  ~12.0GiB  (declared: 10.0 weights + 0.00 KV, x1.1 +0.6)  -> "
+    _B = "    _sm_b[vllm]  ~6.5GiB  (declared: 5.0 weights + 0.00 KV, x1.1 +0.6)  -> "
+    _C = "    _sm_c[vllm]  ~12.0GiB  (declared: 10.0 weights + 0.00 KV, x1.1 +0.6)  -> "
+    _FULL = "vLLM gets 21.6GiB (gpu_memory_utilization=0.90)"
+    _FULL_EACH = "vLLM gets 21.6GiB each (gpu_memory_utilization=0.90)"
+    #: Recorded at commit 155e6e1, per plan: ``(devices, share)`` per model
+    #: and the lines of ``explain()``. The last two have the copy beside
+    #: _sm_b that a card with room takes since copies share cards.
+    AS_BEFORE = [
+        ([((0,), 0.9), ((1,), 0.3354), ((1,), 0.5645)], (
+            "plan needs 2 GPU(s); planning for 2 GPU(s), 24.0GiB each",
+            "  group 1:",
+            _A + "card 0, " + _FULL,
+            _B + "card 1, vLLM gets 8.1GiB (gpu_memory_utilization=0.34)",
+            _C + "card 1, vLLM gets 13.6GiB (gpu_memory_utilization=0.56)")),
+        ([((0, 2), 0.9), ((1,), 0.9)], (
+            "plan needs 3 GPU(s); planning for 3 GPU(s), 24.0GiB each",
+            "  group 1:",
+            _A + "cards 0,2, " + _FULL_EACH,
+            "      -> x2 copies (data_parallel_size=2), one per card, ~12.0GiB each",
+            _C + "card 1, " + _FULL)),
+        ([((0,), 0.9), ((1, 2), 0.9)], (
+            "plan needs 3 GPU(s); planning for 3 GPU(s), 48.0GiB each",
+            "  group 1:",
+            _B + "card 0, vLLM gets 43.2GiB (gpu_memory_utilization=0.90)",
+            "    _sm_tp[vllm]  ~46.0GiB  (declared: 20.0 weights + 0.00 KV, x1.1 +0.6, "
+            "per GPU of 2)  -> cards 1-2, vLLM gets 43.2GiB each "
+            "(gpu_memory_utilization=0.90)",
+            "      -> 2 GPUs (tensor_parallel_size=2), ~23.0GiB each")),
+        ([((0,), 0.4834), ((0, 1), None), ((1,), 0.6916)], (
+            "plan needs 2 GPU(s); planning for 2 GPU(s), 24.0GiB each",
+            "  group 1:",
+            _A + "card 0, vLLM gets 11.6GiB (gpu_memory_utilization=0.48)",
+            "    _sm_ts[introspect]  ~15.0GiB  (declared: 13.0 weights, x1.1 +0.6)  "
+            "-> cards 0-1",
+            _B + "card 1, vLLM gets 16.6GiB (gpu_memory_utilization=0.69)")),
+        ([((0, 1), 0.9), ((2,), 0.9)], (
+            "plan needs 3 GPU(s); planning for 3 GPU(s), 24.0GiB each",
+            "  group 1:",
+            _B + "cards 0-1, " + _FULL_EACH,
+            "      -> x2 copies (data_parallel_size=2), one per card, ~6.5GiB each",
+            _A + "card 2, " + _FULL)),
+        ([((0,), 0.9), ((1,), 0.9)], (
+            "plan needs 2 GPU(s); planning for 2 GPU(s), 24.0GiB each",
+            "  group 1:",
+            _C + "card 0, " + _FULL,
+            _A + "card 1, " + _FULL)),
+        ([((0, 1, 2), 0.5645)], (
+            "plan needs 3 GPU(s); planning for 3 GPU(s), 24.0GiB each",
+            "  group 1:",
+            _A + "cards 0-2, vLLM gets 13.6GiB each (gpu_memory_utilization=0.56)",
+            "      -> x3 copies (data_parallel_size=3), one per card, ~12.0GiB each")),
+        ([((0, 1, 2), 0.5645), ((1,), 0.3354)], (
+            "plan needs 3 GPU(s); planning for 3 GPU(s), 24.0GiB each",
+            "  group 1:",
+            _A + "cards 0-2, vLLM gets 13.6GiB each (gpu_memory_utilization=0.56)",
+            "      -> x3 copies (data_parallel_size=3), one per card, ~12.0GiB each",
+            _B + "card 1, vLLM gets 8.1GiB (gpu_memory_utilization=0.34)")),
+    ]
+
+    def test_what_fits_in_no_arrangement_is_planned_in_the_order_given(
+            self, registered, caplog):
+        """Three engines of 17.1 GiB on two cards: no two share one."""
+        names = self._engines(registered, "none", (15.0, 15.0, 15.0))
+        with caplog.at_level(logging.INFO, logger=residency.logger.name):
+            plan = _plan(names, self.CARD, 2)
+        assert [[fp.model for fp in g] for g in plan.groups] == [names[:2], names[2:]]
+        assert [fp.devices for fp in plan.footprints] == [(0,), (1,), (0,)]
+        assert not plan.fits and caplog.records == []
+
+    def test_fewer_shared_cards_come_before_larger_shares(self, registered):
+        """Three cards and an engine of 17.1 GiB that shares with none of
+        the 6.1 GiB ones. Three of those are two on one card, at 0.45, and
+        not three, at 0.3. Four are three on one card and one alone: two
+        pairs would share two cards. The first has no copies, to show the
+        arrangement alone."""
+        names = self._engines(registered, "pref", (5.0, 5.0, 5.0, 5.0, 15.0))
+        one = {names[0]: 1}
+        three = _plan([*names[:3], names[4]], self.CARD, 3, copies=one)
+        assert three.fits
+        assert [(fp.devices, fp.planned_utilization) for fp in three.footprints] == [
+            ((0,), 0.45), ((1,), 0.9), ((0,), 0.45), ((2,), 0.9)]
+        four = _plan(names, self.CARD, 3, copies=one)
+        assert four.fits
+        assert [(fp.devices, fp.planned_utilization) for fp in four.footprints] == [
+            ((0,), 0.3), ((1,), 0.9), ((0,), 0.3), ((0,), 0.3), ((2,), 0.9)]
+
+    def test_idle_cards_go_to_the_first_engine_and_a_transformers_model_stays(
+            self, registered):
+        """A transformers model of 17.5 GiB on card 0 leaves no room beside
+        the engine the order given puts there. Found: the engines on cards
+        1 and 2, and the first of them takes a copy beside the second and
+        on the idle card 3, but none beside the transformers model."""
+        a, b = self._engines(registered, "tf", (5.0, 5.0))
+        fixed = registered("_se_tf_fixed", setup="introspect", hf_model_id="org/setf",
+                           vram_gb=15.0, device_map="cuda:0")
+        plan = _plan([a, b, fixed], self.CARD, 4)
+        assert plan.fits and len(plan.groups) == 1
+        assert [(fp.devices, fp.copies) for fp in plan.footprints] == [
+            ((1, 2, 3), 3), ((2,), 1), ((0,), 1)]
+
+    def test_an_engine_on_whole_cards_keeps_them(self, registered):
+        """In the order given each small engine takes a card and one is
+        left for the tensor-parallel engine. Found: the small engines on one
+        card, and two untouched."""
+        a, b = self._engines(registered, "whole", (5.0, 5.0))
+        big = registered("_se_whole_big", hf_model_id="org/sewb", vram_gb=30.0,
+                         min_gpus=2)
+        plan = _plan([a, b, big], self.CARD, 3)
+        assert plan.fits and len(plan.groups) == 1
+        assert [(fp.devices, fp.planned_utilization) for fp in plan.footprints] == [
+            ((0,), 0.45), ((0,), 0.45), ((1, 2), 0.9)]
+        assert plan.footprints[2].copies == 1
+
+    @pytest.mark.parametrize("whole,copies", [
+        ({"vram_gb": 30.0, "min_gpus": 2}, None),      # tensor parallel
+        ({"vram_gb": 10.0}, 2),                        # two copies given
+    ])
+    def test_an_engine_on_whole_cards_leaves_a_transformers_model_its_card(
+            self, registered, caplog, whole, copies):
+        """The first untouched cards are 0 and 1, and the transformers model
+        is fixed on card 0. Of three cards the engine takes 1 and 2. Two
+        cards leave it no other pair."""
+        big = registered("_se_apart_big", hf_model_id="org/seab", **whole)
+        fixed = registered("_se_apart_tf", setup="introspect", hf_model_id="org/seat",
+                           vram_gb=10.0, device_map="cuda:0")
+        given = copies and {big: copies}
+        with caplog.at_level(logging.INFO, logger=placement.logger.name):
+            three = _plan([big, fixed], self.CARD, 3, copies=given)
+            two = _plan([big, fixed], self.CARD, 2, copies=given)
+        assert three.fits and len(three.groups) == 1
+        assert [fp.devices for fp in three.footprints] == [(1, 2), (0,)]
+        assert not two.fits
+        assert [[fp.model for fp in g] for g in two.groups] == [[big], [fixed]]
+        assert [fp.devices for fp in two.footprints] == [(0, 1), (0,)]
+        assert [r.getMessage() for r in caplog.records] == [
+            "[residency] placed in another arrangement than the order given: "
+            "_se_apart_big -> cards 1,2"]
+
+    def test_a_fit_is_found_around_whole_cards_and_a_fixed_transformers_model(
+            self, registered, caplog):
+        """300 seeded sets on 3 or 4 cards, in a random order: an engine on
+        two whole cards (tensor parallel, or two copies given), 1 to 3
+        single-card engines and a transformers model fixed on one card. The
+        plan fits exactly when trying every assignment finds one that does."""
+        rng = random.Random(20261012)
+        pool = estimate.DEFAULT_GPU_MEMORY_UTILIZATION * self.CARD
+        unfit = 0
+        with caplog.at_level(logging.INFO, logger=placement.logger.name):
+            for i in range(300):
+                cards = rng.randint(3, 4)
+                singles = self._engines(registered, f"wh{i}", [
+                    round(rng.uniform(2.0, 16.0), 1) for _ in range(rng.randint(1, 3))])
+                per_card, split = round(rng.uniform(3.0, 17.0), 1), rng.random() < 0.5
+                big = registered(
+                    f"_se_wh{i}_big", hf_model_id=f"org/sewh{i}b",
+                    **({"vram_gb": 2 * per_card, "min_gpus": 2} if split
+                       else {"vram_gb": per_card}))
+                fixed = registered(
+                    f"_se_wh{i}_tf", setup="introspect", hf_model_id=f"org/sewh{i}t",
+                    vram_gb=round(rng.uniform(3.0, 15.0), 1),
+                    device_map=f"cuda:{rng.randrange(cards)}")
+                names = [*singles, big, fixed]
+                rng.shuffle(names)
+                plan = residency.plan_residency(
+                    names, gpus=cards, gib_per_gpu=self.CARD,
+                    copies=None if split else {big: 2})
+                by_name = {fp.model: fp for fp in plan.footprints}
+                exists = fit_exists_around(
+                    [by_name[m].padded_gb for m in singles],
+                    (by_name[big].padded_gb, 2),
+                    (by_name[fixed].devices[0], by_name[fixed].gb), cards, self.CARD,
+                    shared=not split)
+                assert plan.fits is exists, (i, cards, names)
+                if exists:
+                    assert len(plan.groups) == 1
+                    assert_no_card_is_overfull(plan, pool)
+                unfit += not exists
+        # Of the 300, the sets that fit only in another arrangement than the
+        # order given, and those that fit in none. Of the 152 with two copies
+        # given, 29 and 47; as tensor parallel, 38 and 78.
+        assert (len(caplog.records), unfit) == (67, 125)
+
+    def test_copies_given_are_tried_on_as_many_untouched_cards(
+            self, registered, caplog):
+        """In the order given m and n take a card each, and big's two copies
+        of 17.1 GiB find one card with room. Found: m and n on one card,
+        big on the two untouched ones, which one untouched card standing for
+        the others would never try."""
+        m, n = self._engines(registered, "rep", (8.0, 8.0))
+        big = registered("_se_rep_big", hf_model_id="org/serb", vram_gb=15.0)
+        with caplog.at_level(logging.INFO, logger=placement.logger.name):
+            plan = _plan([m, n, big], self.CARD, 3, copies={big: 2})
+        assert plan.fits and len(plan.groups) == 1
+        assert [(fp.devices, fp.planned_utilization) for fp in plan.footprints] == [
+            ((0,), 0.45), ((0,), 0.45), ((1, 2), 0.9)]
+        assert [r.getMessage() for r in caplog.records] == [
+            "[residency] placed in another arrangement than the order given: "
+            f"{m} -> card 0, {n} -> card 0, {big} -> cards 1,2"]
+
+    def test_a_loaded_engine_stays_on_its_card(self, registered):
+        """The engine loaded on card 1 is joined there, which leaves card 0
+        to the engine that shares with neither."""
+        loaded, small, big = self._engines(registered, "pin", (5.0, 5.0, 15.0))
+        pinned = {residency.footprint(loaded).engine: (1,)}
+        plan = _plan([loaded, small, big], self.CARD, 2, pinned=pinned)
+        assert plan.fits and len(plan.groups) == 1
+        assert [fp.devices for fp in plan.footprints] == [(1,), (1,), (0,)]
+
+    def test_eight_engines_are_searched_and_nine_are_not(self, registered):
+        """Five engines fit two cards only as 12.7 + 8.3 and 10.5 + 6.1 +
+        3.9, and the other cards go to engines that share with none. The
+        order given spreads the five over more cards, and so does largest
+        first."""
+        five = self._engines(registered, "lim", (11.0, 9.0, 7.0, 5.0, 3.0))
+        alone = self._engines(registered, "lim_alone", (18.0,) * 4)
+        eight = _plan([*five, *alone[:3]], self.CARD, 5)
+        assert eight.fits
+        assert [fp.devices for fp in eight.footprints] == [
+            (0,), (1,), (0,), (1,), (1,), (2,), (3,), (4,)]
+        nine = _plan([*five, *alone], self.CARD, 6)
+        assert not nine.fits
+        assert [[fp.model for fp in g] for g in nine.groups] == [
+            [*five, alone[0]], alone[1:]]
+        assert [fp.devices for fp in nine.footprints] == [
+            (0,), (1,), (2,), (3,), (4,), (5,), (0,), (1,), (2,)]
+
+    def test_nine_engines_are_placed_largest_first(self, registered, caplog):
+        """Three cards of 32 GiB, each filled by 18.2 + 9.4 + 1.15 GiB. In
+        the order given a card gets two of the 9.4 and the last 18.2 has
+        none. Largest first, every card gets one of each size."""
+        big, mid, tiny = (self._engines(registered, tag, (gb,) * 3)
+                          for tag, gb in (("big", 16.0), ("mid", 8.0), ("tiny", 0.5)))
+        names = [big[0], mid[0], mid[1], big[1], mid[2], big[2], *tiny]
+        with caplog.at_level(logging.INFO, logger=placement.logger.name):
+            plan = _plan(names, 32.0, 3)
+        assert plan.fits and len(plan.groups) == 1
+        assert [fp.devices for fp in plan.footprints] == [
+            (0,), (0,), (1,), (1,), (2,), (2,), (0,), (1,), (2,)]
+        assert len(caplog.records) == 1
+
+    def test_cards_found_largest_first_must_fit_the_order_given(
+            self, registered, caplog):
+        """Largest first, the 17.1 GiB engine is on card 0 before the
+        transformers model, which then takes 4.5 GiB there and 10.5 on
+        card 1, beside the eight small engines. In the order given a small
+        engine comes first, the transformers model takes 15 GiB of card 0,
+        and those cards do not fit."""
+        tiny = self._engines(registered, "lf_tiny", (0.7,) * 8)
+        big = registered("_se_lf_big", hf_model_id="org/selfb", vram_gb=15.0)
+        fixed = registered("_se_lf_tf", setup="introspect", hf_model_id="org/selft",
+                           vram_gb=13.0)
+        names = [tiny[0], fixed, big, *tiny[1:]]
+        with caplog.at_level(logging.INFO, logger=placement.logger.name):
+            plan = _plan(names, self.CARD, 2)
+        assert [[fp.model for fp in g] for g in plan.groups] == [names[:-1], names[-1:]]
+        assert [fp.devices for fp in plan.footprints[:4]] == [(0,), (0,), (1,), (0,)]
+        assert not plan.fits and caplog.records == []
+
+    def test_an_engine_of_unknown_size_is_not_crowded_into_one_group(
+            self, registered, caplog):
+        """A plan with an engine of unknown size beside others fits in no
+        arrangement. The four sized engines fit in pairs, but that would
+        leave the fifth 0.4 GiB beside one of them. The order given stands,
+        and it keeps a card's whole share in the second group."""
+        names = self._engines(registered, "unk", (16.0, 8.0, 8.0, 16.0))
+        unsized = registered("_se_unk_unsized", hf_model_id="org/seunk")
+        with caplog.at_level(logging.INFO, logger=residency.logger.name):
+            plan = _plan([*names, unsized], 32.0, 2)
+        assert [[fp.model for fp in g] for g in plan.groups] == [
+            names[:3], [names[3], unsized]]
+        assert [fp.devices for fp in plan.footprints] == [
+            (0,), (1,), (1,), (0,), (1,)]
+        assert plan.footprints[-1].planned_utilization == 0.9
+        assert not plan.fits and caplog.records == []
+
+    def test_a_search_stops_after_its_steps(self, registered):
+        """The first arrangement that fits is the seventh card tried. With
+        fewer steps the engines are placed once more, largest first, which
+        takes four; with fewer still the order given stands."""
+        names = self._engines(registered, "steps", (16.0, 8.0, 8.0, 16.0))
+        plans = {}
+        for steps in (3, 6, 7):
+            with patch.object(placement, "_SEARCH_STEPS", steps):
+                plans[steps] = _plan(names, 32.0, 2)
+        assert len(plans[3].groups) == 2 and not plans[3].fits
+        assert [fp.devices for fp in plans[3].footprints] == [(0,), (1,), (1,), (0,)]
+        assert plans[6].fits
+        assert [fp.devices for fp in plans[6].footprints] == [(0,), (0,), (1,), (1,)]
+        assert plans[7].fits
+        assert [fp.devices for fp in plans[7].footprints] == [(0,), (1,), (0,), (1,)]

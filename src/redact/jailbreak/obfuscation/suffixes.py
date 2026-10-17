@@ -1,25 +1,28 @@
-"""Adversarial suffix generation: punctuation, fragments, unicode, emoji.
+"""Suffix techniques: a random suffix of punctuation, fragments, symbols or emoji.
 
-All functions are pure transforms: str -> (str, str). No LLM dependency.
-Ported from reference obfuscation.py lines 850-941.
+``info`` is the suffix.
 """
 
 import random
+from collections.abc import Callable
 
 
-def to_adversarial_suffix_punctuation(prompt: str) -> tuple[str, str]:
+def to_adversarial_suffix_punctuation(
+    prompt: str, *, rng: random.Random | None = None,
+) -> tuple[str, str]:
     """Add punctuation-based adversarial suffix."""
+    rng = rng or random
     punctuation_types = ["!", "_", "=", "*", "/", '"', "~", "|", "bracket"]
-    length = random.randint(8, 40)
+    length = rng.randint(8, 40)
 
     suffix = ""
     i = 0
     while i < length:
-        punct_type = random.choice(punctuation_types)
-        repeat_count = random.randint(1, min(5, length - i))
+        punct_type = rng.choice(punctuation_types)
+        repeat_count = rng.randint(1, min(5, length - i))
 
         if punct_type == "bracket":
-            bracket_type = random.choice(["{", "[", "("])
+            bracket_type = rng.choice(["{", "[", "("])
             close_bracket = (
                 "}" if bracket_type == "{" else
                 "]" if bracket_type == "[" else ")"
@@ -37,43 +40,52 @@ def to_adversarial_suffix_punctuation(prompt: str) -> tuple[str, str]:
     return prompt + " " + suffix, suffix
 
 
-def to_adversarial_suffix_fragments(prompt: str) -> tuple[str, str]:
+def to_adversarial_suffix_fragments(
+    prompt: str, *, rng: random.Random | None = None,
+) -> tuple[str, str]:
     """Add word fragment-based adversarial suffix."""
+    rng = rng or random
     words = [
         "inst", "direct", "inverse", "desc", "steps",
         "style", "output", "format", "theorem", "logic",
     ]
-    length = random.randint(2, 10)
-    suffix = " ".join(random.choice(words) for _ in range(length))
+    length = rng.randint(2, 10)
+    suffix = " ".join(rng.choice(words) for _ in range(length))
     return prompt + " " + suffix, suffix
 
 
-def to_adversarial_suffix_unicode(prompt: str) -> tuple[str, str]:
+def to_adversarial_suffix_unicode(
+    prompt: str, *, rng: random.Random | None = None,
+) -> tuple[str, str]:
     """Add Unicode symbol-based adversarial suffix."""
+    rng = rng or random
     symbols = ["\u2200", "\u2203", "\u2211", "\u21d2", "\u222b", "\u03bb", "\u03a9", "\u03b4"]
-    length = random.randint(3, 10)
-    suffix = " ".join(random.choice(symbols) for _ in range(length))
+    length = rng.randint(3, 10)
+    suffix = " ".join(rng.choice(symbols) for _ in range(length))
     return prompt + " " + suffix, suffix
 
 
-def to_adversarial_suffix_emoji(prompt: str) -> tuple[str, str]:
+def to_adversarial_suffix_emoji(
+    prompt: str, *, rng: random.Random | None = None,
+) -> tuple[str, str]:
     """Add emoji-based adversarial suffix."""
+    rng = rng or random
     emojis = ["\U0001f513", "\u26a0\ufe0f", "\u2705", "\U0001f680",
               "\U0001f525", "\U0001f916", "\U0001f4ac", "\U0001f4af"]
-    length = random.randint(5, 20)
+    length = rng.randint(5, 20)
 
     suffix = ""
     i = 0
     while i < length:
-        emoji = random.choice(emojis)
-        repeat_count = random.randint(1, min(5, length - i))
+        emoji = rng.choice(emojis)
+        repeat_count = rng.randint(1, min(5, length - i))
         suffix += emoji * repeat_count
         i += repeat_count
 
     return prompt + " " + suffix, suffix
 
 
-def get_suffix_functions() -> list:
+def get_suffix_functions() -> list[Callable]:
     """Return all adversarial suffix technique functions."""
     return [
         to_adversarial_suffix_punctuation,

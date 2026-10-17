@@ -1,0 +1,121 @@
+{
+  "name": "benign",
+  "description": "Everyday topics the benign Q&A pairs of the fsh and dap techniques are written about, one set of pairs per subcategory.",
+  "categories": {
+    "Home & Daily Life": {
+      "description": "Running a home and the tasks of an ordinary day.",
+      "subcategories": [
+        "Cooking & Baking",
+        "Gardening & Plant Care",
+        "Pet Care",
+        "Home Organization",
+        "Cleaning",
+        "Home Maintenance & DIY Repairs",
+        "Car Maintenance"
+      ]
+    },
+    "Health & Wellness": {
+      "description": "Everyday health, fitness and rest.",
+      "subcategories": [
+        "Mindfulness & Meditation",
+        "Fitness & Workouts",
+        "Nutrition & Diet",
+        "First Aid",
+        "Sleep & Rest"
+      ]
+    },
+    "Personal Development": {
+      "description": "Learning, planning and improving one's own skills.",
+      "subcategories": [
+        "Task Planning & Organization",
+        "Language Learning",
+        "Public Speaking",
+        "Time Management",
+        "Study Techniques & Learning Strategies"
+      ]
+    },
+    "Work & Professional": {
+      "description": "Tasks and decisions of working life.",
+      "subcategories": [
+        "Email Writing",
+        "Presentation Creation",
+        "Programming & Technical Tasks",
+        "Career Planning & Development",
+        "Resume/CV Writing",
+        "Interview Preparation",
+        "Strategy & Business Planning",
+        "Project Management"
+      ]
+    },
+    "Finance & Shopping": {
+      "description": "Money matters and buying things.",
+      "subcategories": [
+        "Personal Finance & Budgeting",
+        "Product Comparisons",
+        "Shopping Recommendations",
+        "Financial Planning"
+      ]
+    },
+    "Travel & Leisure": {
+      "description": "Trips, routes and events.",
+      "subcategories": [
+        "Destination Selection",
+        "Route Planning & Itineraries",
+        "Travel Tips & Preparation",
+        "Event Planning (parties, gatherings)"
+      ]
+    },
+    "Entertainment & Hobbies": {
+      "description": "Pastimes, media and recreation.",
+      "subcategories": [
+        "Book/Movie/Game Recommendations",
+        "Sports & Recreation Activities",
+        "Crafts & DIY Art",
+        "Photography",
+        "Music Learning & Appreciation"
+      ]
+    },
+    "Creative & Writing": {
+      "description": "Writing and other creative work.",
+      "subcategories": [
+        "Creative Writing",
+        "Content Creation",
+        "Storytelling",
+        "Poetry & Literary Analysis"
+      ]
+    },
+    "Education & Knowledge": {
+      "description": "Explanations, homework and facts.",
+      "subcategories": [
+        "Homework Help (Math, Science, History)",
+        "Research Assistance",
+        "General Knowledge Questions",
+        "How-to Explanations",
+        "Historical & Factual Information",
+        "Science Concepts"
+      ]
+    },
+    "Social & Relationships": {
+      "description": "Getting on with other people.",
+      "subcategories": [
+        "Social Skills (small talk, networking)",
+        "Communication Skills",
+        "Conversation Starters",
+        "Etiquette & Social Norms",
+        "Gift Ideas & Selection",
+        "Relationship Advice (general)"
+      ]
+    },
+    "Technology & Tips": {
+      "description": "Everyday use of software and devices.",
+      "subcategories": [
+        "Tech Tips & Troubleshooting",
+        "Software Recommendations",
+        "Digital Organization",
+        "Productivity Tools"
+      ]
+    }
+  },
+  "aliases": {},
+  "groups": {}
+}

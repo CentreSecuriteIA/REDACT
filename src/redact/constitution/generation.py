@@ -1,449 +1,81 @@
-"""Constitution generation pipeline for constitutional classifiers.
+"""The constitution stage: generate each unit, save its rows, then ack it."""
 
-Generates structured category hierarchies (constitutions) across 4 severity
-levels: absolutely harmful, dual-use harmful, dual-use benign, and absolutely
-benign. Each constitution entry later seeds N input samples for classifier
-training.
-
-Usage:
-    from redact.llms import get_backend, RateLimiter
-    from redact.constitution import ConstitutionPipeline, EntryType
-
-    backend = get_backend("claude-opus-4-6")
-    pipeline = ConstitutionPipeline(backend, "claude-opus-4-6", RateLimiter())
-
-    result = pipeline.run(
-        taxonomy=load_taxonomy("content_moderation_categories"),
-        num_categories=10,
-    )
-    df = result.to_dataframe()
-"""
-
-import csv
 import logging
-import re
-from dataclasses import dataclass, field
-from enum import Enum
 from pathlib import Path
 
 import pandas as pd
 
-from ..llms.base import LLMBackend
-from ..llms.calls import generate_sample
-from ..llms.extraction import parse_constitution as _parse_raw
-from ..llms.prompts import load_prompt, build_messages
-from ..llms.wrappers import RateLimiter
-from ..dataset.taxonomy import iter_categories, get_subcategories
+from .. import paths
+from ..dataset import CommitBuffer, Ledger, Manifest, append_rows, resume_state
+from ..llm_pipeline import drive_units, extracted
+from ..llms.client import ModelClient
+from ..types import EntryType
+from .units import _COLUMNS, Unit, messages_of, plan_units, rows_of
 
 logger = logging.getLogger(__name__)
 
+# The reply limit of a call: a prompt asks for up to about 90 entries.
+_REPLY_TOKENS = 10000
+# Generations of a unit before it is given up.
+_ATTEMPTS = 3
 
-# ---------------------------------------------------------------------------
-# Entry type enum
-# ---------------------------------------------------------------------------
 
+def read_constitution(output_dir: str | Path) -> pd.DataFrame:
+    """The saved constitution: every cell as text, an empty one as ``""``.
 
-class EntryType(str, Enum):
-    """Severity level for a constitution entry.
-
-    Spectrum:
-        HARMFUL <-> DUAL_USE_HARMFUL <-> DUAL_USE_BENIGN <-> BENIGN
+    No ``merged.csv`` gives an empty frame with the constitution's columns.
     """
-
-    HARMFUL = "harmful"
-    DUAL_USE_HARMFUL = "dual_use_harmful"
-    DUAL_USE_BENIGN = "dual_use_benign"
-    BENIGN = "benign"
-
-
-ALL_ENTRY_TYPES = list(EntryType)
-
-
-# ---------------------------------------------------------------------------
-# Result dataclasses
-# ---------------------------------------------------------------------------
-
-
-@dataclass
-class ConstitutionEntry:
-    """A single parsed + tagged constitution entry."""
-
-    category: str  # LLM-generated category (## heading)
-    subcategory: str  # LLM-generated subcategory (### heading)
-    sample: str  # Sample description (- (...) line)
-    entry_type: str  # "harmful" / "benign" / "dual_use_benign" / "dual_use_harmful"
-    source_category: str  # Taxonomy category that seeded this
-    source_group_tag: str  # group_tag from taxonomy
-
-
-@dataclass
-class ConstitutionResult:
-    """Result of a constitution generation run."""
-
-    entries: list[ConstitutionEntry] = field(default_factory=list)
-    raw_outputs: dict[str, str] = field(default_factory=dict)
-
-    def to_dataframe(self) -> pd.DataFrame:
-        """Convert entries to a DataFrame."""
-        if not self.entries:
-            return pd.DataFrame(columns=_CSV_COLUMNS)
-        return pd.DataFrame(
-            [
-                {
-                    "constitution_category": e.category,
-                    "constitution_subcategory": e.subcategory,
-                    "sample_description": e.sample,
-                    "entry_type": e.entry_type,
-                    "source_category": e.source_category,
-                    "source_group_tag": e.source_group_tag,
-                }
-                for e in self.entries
-            ]
-        )
-
-
-# ---------------------------------------------------------------------------
-# [END] marker handling
-# ---------------------------------------------------------------------------
-
-_END_MARKER = re.compile(r"\n?\[END\]\s*$")
-
-
-def _strip_end_marker(text: str) -> tuple[str, bool]:
-    """Strip [END] marker from LLM output.
-
-    Returns:
-        (clean_text, was_complete): was_complete is True if [END] was found,
-        meaning the model finished normally rather than hitting the token limit.
-    """
-    if _END_MARKER.search(text):
-        return _END_MARKER.sub("", text), True
-    return text, False
-
-
-# ---------------------------------------------------------------------------
-# CSV helpers
-# ---------------------------------------------------------------------------
-
-_CSV_COLUMNS = [
-    "constitution_category",
-    "constitution_subcategory",
-    "sample_description",
-    "entry_type",
-    "source_category",
-    "source_group_tag",
-    "model",
-]
-
-
-def _save_entries_csv(
-    entries: list[ConstitutionEntry],
-    path: Path,
-    model: str,
-    append: bool = False,
-) -> None:
-    """Save constitution entries to CSV."""
-    path.parent.mkdir(parents=True, exist_ok=True)
-    mode = "a" if append and path.exists() else "w"
-    write_header = mode == "w" or not path.exists()
-
-    with open(path, mode, newline="", encoding="utf-8") as f:
-        writer = csv.DictWriter(f, fieldnames=_CSV_COLUMNS)
-        if write_header:
-            writer.writeheader()
-        for e in entries:
-            writer.writerow(
-                {
-                    "constitution_category": e.category,
-                    "constitution_subcategory": e.subcategory,
-                    "sample_description": e.sample,
-                    "entry_type": e.entry_type,
-                    "source_category": e.source_category,
-                    "source_group_tag": e.source_group_tag,
-                    "model": model,
-                }
-            )
-
-
-# ---------------------------------------------------------------------------
-# Pipeline
-# ---------------------------------------------------------------------------
+    merged = Path(output_dir) / paths.CONSTITUTION_MERGED_FILENAME
+    if not merged.exists():
+        return pd.DataFrame(columns=_COLUMNS)
+    return pd.read_csv(merged, dtype=str, keep_default_na=False)
 
 
 class ConstitutionPipeline:
-    """Generate constitution entries from taxonomy categories.
+    """Generate constitution entries from a taxonomy into ``output_dir``.
 
-    For each taxonomy category, makes up to 4 LLM calls (one per EntryType),
-    parses the 3-layer markdown via parse_constitution(), tags entries, and
-    saves type-based CSVs.
-
-    Attributes:
-        backend: LLM backend for generation.
-        model: Model identifier (default: claude-opus-4-6).
-        rate_limiter: Optional shared rate limiter.
-        output_dir: Directory for saving CSVs (Data_cache/constitution/).
+    Each unit's rows go to ``{entry_type}.csv`` and ``merged.csv``. The
+    ledger ``constitution.state.jsonl`` beside them is plain: no lock, no
+    recorded sizes. A crash between a unit's two appends leaves it un-acked,
+    and the next run appends its rows to the type's file again.
     """
 
     def __init__(
         self,
-        backend: LLMBackend,
-        model: str = "claude-opus-4-6",
-        rate_limiter: RateLimiter | None = None,
+        client: ModelClient,
         output_dir: str | Path | None = None,
+        prompt_dir: str | Path | None = None,
     ):
-        self.backend = backend
-        self.model = model
-        self.rate_limiter = rate_limiter
+        """``output_dir`` defaults to ``paths.constitution_dir()``; ``prompt_dir``
+        is the prompt overlay, the packaged prompts when None."""
+        self.client = client
+        self.model = client.model
+        self.output_dir = Path(
+            output_dir if output_dir is not None else paths.constitution_dir())
+        self.prompt_dir = prompt_dir
 
-        if output_dir is None:
-            from redact import get_output_dir
+    def _unit(self, unit: Unit):
+        """The unit's call, made again for a reply that is rejected whole.
 
-            output_dir = get_output_dir() / "Data_cache" / "constitution"
-        self.output_dir = Path(output_dir)
-
-    def _format_category_info(
-        self, category_name: str, category_info: dict
-    ) -> dict[str, str]:
-        """Format taxonomy category info as template kwargs."""
-        subcats = category_info.get("subcategories", [])
-        if isinstance(subcats, dict):
-            subcats_str = ", ".join(subcats.keys())
-        elif isinstance(subcats, list):
-            subcats_str = ", ".join(subcats)
-        else:
-            subcats_str = str(subcats)
-
-        return {
-            "Category": category_name,
-            "description": category_info.get("description", ""),
-            "subcategories": subcats_str,
-            "group_tag": category_info.get("group_tag", "general"),
-        }
-
-    def generate_for_type(
-        self,
-        category_name: str,
-        category_info: dict,
-        entry_type: EntryType,
-        num_categories: int = 10,
-    ) -> tuple[list[ConstitutionEntry], str]:
-        """Generate constitution entries of one type for one taxonomy category.
-
-        Makes an LLM call with up to 2 retries on failure, parses the 3-layer
-        markdown output, and tags each entry with metadata.
-
-        Args:
-            category_name: Taxonomy category name (e.g. "CBRN").
-            category_info: Dict with description, subcategories, group_tag.
-            entry_type: Which severity level to generate.
-            num_categories: Number of constitution categories to request.
-
-        Returns:
-            (entries, raw_output): List of tagged entries and raw LLM text.
-            Returns ([], "") if all attempts fail.
+        The generator returns ``(rows, attempts)``, ``rows`` empty when
+        every attempt was rejected.
         """
-        prompt_config = load_prompt("constitution/generation", entry_type.value)
-        kwargs = self._format_category_info(category_name, category_info)
-        kwargs["num_categories"] = str(num_categories)
-        messages = build_messages(prompt_config, **kwargs)
-        group_tag = category_info.get("group_tag", "general")
-
-        max_attempts = 3
-        for attempt in range(max_attempts):
-            try:
-                raw_output = generate_sample(
-                    self.backend,
-                    self.model,
-                    messages,
-                    rate_limiter=self.rate_limiter,
-                    max_tokens=10000,
-                )
-
-                # Strip [END] marker and check completeness
-                clean_output, was_complete = _strip_end_marker(raw_output)
-                if not was_complete:
-                    logger.warning(
-                        "Constitution output for %s/%s may be truncated "
-                        "(no [END] marker).",
-                        category_name,
-                        entry_type.value,
-                    )
-
-                # Parse 3-layer markdown into entries
-                parsed = _parse_raw(clean_output)
-
-                entries = [
-                    ConstitutionEntry(
-                        category=p.category,
-                        subcategory=p.subcategory,
-                        sample=p.sample,
-                        entry_type=entry_type.value,
-                        source_category=category_name,
-                        source_group_tag=group_tag,
-                    )
-                    for p in parsed
-                ]
-
-                if not entries:
-                    raise ValueError(
-                        f"No entries parsed (raw length: {len(raw_output)} chars)"
-                    )
-
-                return entries, raw_output
-
-            except Exception as e:
-                if attempt < max_attempts - 1:
-                    logger.warning(
-                        "Attempt %d/%d failed for %s/%s: %s. Retrying...",
-                        attempt + 1,
-                        max_attempts,
-                        category_name,
-                        entry_type.value,
-                        e,
-                    )
-                else:
-                    logger.error(
-                        "All %d attempts failed for %s/%s: %s. Skipping.",
-                        max_attempts,
-                        category_name,
-                        entry_type.value,
-                        e,
-                    )
-                    return [], ""
-
-    def generate_for_category(
-        self,
-        category_name: str,
-        category_info: dict,
-        entry_types: list[EntryType] | None = None,
-        num_categories: int = 10,
-    ) -> ConstitutionResult:
-        """Generate all entry types for one taxonomy category.
-
-        Args:
-            category_name: Taxonomy category name.
-            category_info: Dict with description, subcategories, group_tag.
-            entry_types: Which types to generate. Default: all four.
-            num_categories: Number of constitution categories per type.
-
-        Returns:
-            ConstitutionResult with all entries and raw outputs.
-        """
-        if entry_types is None:
-            entry_types = ALL_ENTRY_TYPES
-
-        result = ConstitutionResult()
-
-        for entry_type in entry_types:
-            entries, raw = self.generate_for_type(
-                category_name, category_info, entry_type, num_categories
-            )
-            result.entries.extend(entries)
-            key = f"{category_name}/{entry_type.value}"
-            result.raw_outputs[key] = raw
-
-        return result
-
-    def generate_general_benign(
-        self,
-        num_categories: int = 10,
-    ) -> tuple[list[ConstitutionEntry], str]:
-        """Generate category-free standalone benign constitution entries.
-
-        Makes a single LLM call to generate diverse benign content with no
-        taxonomy category influence. Entries are tagged with source_category
-        and source_group_tag set to "general".
-
-        Args:
-            num_categories: Number of benign constitution categories to generate.
-
-        Returns:
-            (entries, raw_output): List of tagged entries and raw LLM text.
-            Returns ([], "") if all attempts fail.
-        """
-        prompt_config = load_prompt("constitution/generation", "general_benign")
-        kwargs = {"num_categories": str(num_categories)}
-        messages = build_messages(prompt_config, **kwargs)
-
-        max_attempts = 3
-        for attempt in range(max_attempts):
-            try:
-                raw_output = generate_sample(
-                    self.backend,
-                    self.model,
-                    messages,
-                    rate_limiter=self.rate_limiter,
-                    max_tokens=10000,
-                )
-
-                clean_output, was_complete = _strip_end_marker(raw_output)
-                if not was_complete:
-                    logger.warning(
-                        "General benign output may be truncated (no [END] marker)."
-                    )
-
-                parsed = _parse_raw(clean_output)
-
-                entries = [
-                    ConstitutionEntry(
-                        category=p.category,
-                        subcategory=p.subcategory,
-                        sample=p.sample,
-                        entry_type="general_benign",
-                        source_category="general",
-                        source_group_tag="general",
-                    )
-                    for p in parsed
-                ]
-
-                if not entries:
-                    raise ValueError(
-                        f"No entries parsed (raw length: {len(raw_output)} chars)"
-                    )
-
-                return entries, raw_output
-
-            except Exception as e:
-                if attempt < max_attempts - 1:
-                    logger.warning(
-                        "Attempt %d/%d failed for general benign: %s. Retrying...",
-                        attempt + 1,
-                        max_attempts,
-                        e,
-                    )
-                else:
-                    logger.error(
-                        "All %d attempts failed for general benign: %s. Skipping.",
-                        max_attempts,
-                        e,
-                    )
-                    return [], ""
-
-    def _save_category_entries(
-        self,
-        cat_result: ConstitutionResult,
-    ) -> None:
-        """Append a single category's entries to the per-type and merged CSVs."""
-        self.output_dir.mkdir(parents=True, exist_ok=True)
-
-        by_type: dict[str, list[ConstitutionEntry]] = {}
-        for e in cat_result.entries:
-            by_type.setdefault(e.entry_type, []).append(e)
-
-        for entry_type_val, type_entries in by_type.items():
-            _save_entries_csv(
-                type_entries,
-                self.output_dir / f"{entry_type_val}.csv",
-                self.model,
-                append=True,
-            )
-
-        _save_entries_csv(
-            cat_result.entries,
-            self.output_dir / "merged.csv",
-            self.model,
-            append=True,
+        messages = messages_of(unit, self.prompt_dir)
+        return extracted(
+            self.client, lambda: messages,
+            lambda reply: rows_of(unit, reply, self.model),
+            max_tokens=_REPLY_TOKENS, max_attempts=_ATTEMPTS,
         )
+
+    def _append(self, rows: list[dict]) -> None:
+        """Append the rows to their entry type's CSV, then to ``merged.csv``."""
+        self.output_dir.mkdir(parents=True, exist_ok=True)
+        by_type: dict[str, list[dict]] = {}
+        for row in rows:
+            by_type.setdefault(row["entry_type"], []).append(row)
+        for entry_type, its_rows in by_type.items():
+            append_rows(self.output_dir / f"{entry_type}.csv", its_rows)
+        append_rows(self.output_dir / paths.CONSTITUTION_MERGED_FILENAME, rows)
 
     def run(
         self,
@@ -453,156 +85,89 @@ class ConstitutionPipeline:
         num_taxonomy_categories: int | None = None,
         include_standalone_benign: bool = False,
         standalone_benign_categories: int = 10,
-        save: bool = True,
+        resume: bool = True,
         verbose: bool = True,
-    ) -> ConstitutionResult:
-        """Run constitution generation across taxonomy categories.
+        read_back: bool = True,
+    ) -> pd.DataFrame:
+        """Generate the constitution, one call per ``(source_category, entry_type)``.
 
-        Args:
-            taxonomy: Loaded taxonomy dict.
-            entry_types: Which types to generate. Default: all four.
-            num_categories: Constitution categories per type per taxonomy category.
-            num_taxonomy_categories: Limit to first N taxonomy categories (None = all).
-            include_standalone_benign: If True, also generate category-free
-                benign entries in a single LLM call (no taxonomy influence).
-                Saved to general_benign.csv.
-            standalone_benign_categories: Number of benign constitution categories
-                to generate in the standalone benign call.
-            save: Whether to save CSVs to output_dir.
-            verbose: Print progress.
+        Each taxonomy category (the first ``num_taxonomy_categories``) gets
+        ``num_categories`` constitution categories per entry type (all four
+        by default); ``include_standalone_benign`` adds one call for
+        ``standalone_benign_categories`` benign ones with no taxonomy
+        category, saved to ``general_benign.csv``. ``resume=False`` removes
+        the CSVs, the ledger and the plan first.
+
+        The units run one at a time, in plan order. A reply without its
+        ``[END]`` marker, or with no entry that parses, is rejected and the
+        call made again, up to three times; a unit rejected every time is
+        acked ``rejected`` with no rows and skipped on resume. A failed call
+        stops the run; the units saved before it stay acked.
 
         Returns:
-            ConstitutionResult with all entries across all categories.
+            The saved constitution (:func:`read_constitution`), rows of earlier
+            runs included, or an empty frame when ``read_back`` is False.
         """
-        if entry_types is None:
-            entry_types = ALL_ENTRY_TYPES
+        units = plan_units(
+            taxonomy, entry_types, num_categories, num_taxonomy_categories,
+            include_standalone_benign, standalone_benign_categories)
+        merged = self.output_dir / paths.CONSTITUTION_MERGED_FILENAME
+        ledger = Ledger.sidecar(merged, ("unit",), {"unit": str},
+                                name="constitution.state.jsonl")
+        manifest = Manifest.sidecar(merged, name="constitution.manifest.jsonl")
 
-        all_categories = list(iter_categories(taxonomy))
-        categories = all_categories
-        if num_taxonomy_categories is not None:
-            categories = categories[:num_taxonomy_categories]
-
-        if verbose:
-            print(f"\n{'='*60}")
-            print("Constitution Generation")
-            print(f"{'='*60}")
-            print(f"  Model: {self.model}")
-            print(f"  Entry types: {[t.value for t in entry_types]}")
-            print(f"  Categories per type: {num_categories}")
-            print(f"  Taxonomy categories: {len(categories)}")
-            total_calls = len(categories) * len(entry_types)
-            if include_standalone_benign:
-                total_calls += 1
-                print(f"  Standalone benign: 1 category-free call"
-                      f" ({standalone_benign_categories} categories)")
-            print(f"  Total LLM calls: ~{total_calls}")
-            print()
-
-        # Clear existing CSVs for a fresh run
-        if save:
-            self.output_dir.mkdir(parents=True, exist_ok=True)
-            for f in self.output_dir.glob("*.csv"):
-                f.unlink()
-
-        all_result = ConstitutionResult()
-        skipped: list[str] = []
-
-        for i, (cat_name, cat_info) in enumerate(categories, 1):
-            if verbose:
-                print(f"  [{i}/{len(categories)}] {cat_name}")
-
-            cat_result = self.generate_for_category(
-                cat_name, cat_info, entry_types, num_categories
-            )
-
-            all_result.entries.extend(cat_result.entries)
-            all_result.raw_outputs.update(cat_result.raw_outputs)
-
-            # Track skipped types (empty results from failed retries)
-            for et in entry_types:
-                key = f"{cat_name}/{et.value}"
-                if key in cat_result.raw_outputs and cat_result.raw_outputs[key] == "":
-                    skipped.append(f"{cat_name}/{et.value}")
-
-            # Count by type for this category
-            if verbose:
-                type_counts: dict[str, int] = {}
-                for e in cat_result.entries:
-                    type_counts[e.entry_type] = type_counts.get(e.entry_type, 0) + 1
-                counts_str = ", ".join(
-                    f"{t}: {c}" for t, c in sorted(type_counts.items())
-                )
-                print(f"    -> {len(cat_result.entries)} entries ({counts_str})")
-
-            # Save iteratively after each category
-            if save and cat_result.entries:
-                self._save_category_entries(cat_result)
-
-        # ── Standalone benign generation (category-free) ─────────────
-        if include_standalone_benign:
-            if verbose:
-                print(f"\n  --- Standalone Benign Generation (category-free) ---")
-
-            entries, raw = self.generate_general_benign(
-                num_categories=standalone_benign_categories,
-            )
-
-            if not entries:
-                skipped.append("general_benign (standalone)")
-            else:
-                all_result.entries.extend(entries)
-                all_result.raw_outputs["general_benign"] = raw
-
-                if verbose:
-                    print(f"    -> {len(entries)} general benign entries")
-
-                if save:
-                    self.output_dir.mkdir(parents=True, exist_ok=True)
-                    _save_entries_csv(
-                        entries,
-                        self.output_dir / "general_benign.csv",
-                        self.model,
-                        append=True,
-                    )
-                    _save_entries_csv(
-                        entries,
-                        self.output_dir / "merged.csv",
-                        self.model,
-                        append=True,
-                    )
-
-        if verbose:
-            print(f"\n  Total: {len(all_result.entries)} constitution entries")
-            if skipped:
-                print(f"  Skipped (failed after retries): {len(skipped)}")
-                for s in skipped:
-                    print(f"    - {s}")
-            if save:
-                print(f"  Saved to: {self.output_dir}")
-
-        return all_result
-
-    def save(self, result: ConstitutionResult) -> None:
-        """Save entries to 4 type-based CSVs + merged.csv.
-
-        Files written to self.output_dir:
-            harmful.csv, benign.csv, dual_use_benign.csv, dual_use_harmful.csv,
-            merged.csv
-        """
         self.output_dir.mkdir(parents=True, exist_ok=True)
+        if not resume:
+            for csv_file in self.output_dir.glob("*.csv"):
+                csv_file.unlink()
+        done = resume_state(ledger, resume=resume, manifest=manifest)
+        manifest.write(unit.manifest_row for unit in units)
+        pending = [unit for unit in units if unit.key not in done]
 
-        # Group entries by type
-        by_type: dict[str, list[ConstitutionEntry]] = {}
-        for e in result.entries:
-            by_type.setdefault(e.entry_type, []).append(e)
+        if verbose:
+            logger.info("Constitution Generation")
+            logger.info("Model: %s | Units: %d | Categories per unit: %d",
+                        self.model, len(units), num_categories)
+            if done:
+                logger.info("Resume: %d units already completed",
+                            len(units) - len(pending))
 
-        # Save per-type CSVs
-        for entry_type_val, entries in by_type.items():
-            path = self.output_dir / f"{entry_type_val}.csv"
-            _save_entries_csv(entries, path, self.model)
-            logger.info("Saved %d entries to %s", len(entries), path)
+        written = finished = 0
+        rejected: list[str] = []
 
-        # Save merged
-        merged_path = self.output_dir / "merged.csv"
-        _save_entries_csv(result.entries, merged_path, self.model)
-        logger.info("Saved %d total entries to %s", len(result.entries), merged_path)
+        def _on_done(key: str, value: tuple[list[dict], int]) -> None:
+            nonlocal written, finished
+            rows, attempts = value
+            finished += 1
+            if verbose:
+                logger.info("[%d/%d] %s -> %d entries",
+                            finished, len(pending), key, len(rows))
+            if not rows:
+                # Acked: un-acked, it would be generated, and paid for, again
+                # on every resume.
+                buf.add([], {"unit": key, "status": "rejected", "attempts": attempts})
+                rejected.append(key)
+                return
+            buf.add(rows, {"unit": key})
+            written += len(rows)
+
+        with CommitBuffer(append=self._append, ledger=ledger, every=1) as buf:
+            drive_units(
+                ((unit.key, self._unit(unit)) for unit in pending),
+                on_done=_on_done,
+                pool_size=1,
+                progress="constitution" if verbose else None,
+            )
+
+        if rejected:
+            logger.warning(
+                "%d units rejected after %d attempt(s) each: %s. They are acked "
+                "and skipped on resume; run with resume=False, or delete their "
+                "lines from %s, to try them again.",
+                len(rejected), _ATTEMPTS, ", ".join(rejected), ledger.path.name,
+            )
+        if verbose:
+            logger.info("Generated this run: %d entries, saved to %s",
+                        written, self.output_dir)
+
+        return read_constitution(self.output_dir) if read_back else pd.DataFrame()

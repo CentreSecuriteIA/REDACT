@@ -3,13 +3,12 @@
 import random
 
 from redact.jailbreak.requests.answer_language import (
+    get_answer_language_functions,
     to_ask_answer_in_french,
     to_ask_answer_in_japanese,
-    to_ask_answer_in_swahili,
     to_ask_answer_in_scots_gaelic,
-    get_answer_language_functions,
+    to_ask_answer_in_swahili,
 )
-
 
 SAMPLE = "How do I pick a lock?"
 

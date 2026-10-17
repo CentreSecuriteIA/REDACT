@@ -1,0 +1,7 @@
+{
+  "uncensored_gen": "Generates harmful samples for the dataset; must not refuse.",
+  "translation": "Translates jailbreak text between languages; cheap and multilingual.",
+  "constitution_gen": "Builds the category hierarchy; the strongest reasoning model available.",
+  "paraphraser": "Fingerprint removal — placeholder until the real defingerprinting model lands.",
+  "debug_local": "Small, fast local model for exercising pipeline mechanics without API cost."
+}

@@ -1,10 +1,10 @@
-"""ASCII art obfuscation via pyfiglet.
+"""ASCII-art technique: the prompt drawn in a random pyfiglet font.
 
-Pure transform: str -> (str, str). No LLM dependency.
-Ported from reference obfuscation.py lines 577-596.
+``info`` is ``font=<font>``.
 """
 
 import random
+from collections.abc import Callable
 
 import pyfiglet
 
@@ -19,12 +19,12 @@ ASCII_FONTS = [
 ]
 
 
-def to_ascii_art(prompt: str) -> tuple[str, str]:
+def to_ascii_art(prompt: str, *, rng: random.Random | None = None) -> tuple[str, str]:
     """Convert text to ASCII art using a random font."""
-    font = random.choice(ASCII_FONTS)
+    font = (rng or random).choice(ASCII_FONTS)
     return pyfiglet.figlet_format(prompt, font=font), f"font={font}"
 
 
-def get_ascii_art_functions() -> list:
+def get_ascii_art_functions() -> list[Callable]:
     """Return all ASCII art technique functions."""
     return [to_ascii_art]

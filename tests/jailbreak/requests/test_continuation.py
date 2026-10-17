@@ -3,13 +3,12 @@
 import random
 
 from redact.jailbreak.requests.continuation import (
-    to_continue_passage,
-    to_complete_story,
-    to_fill_in_blank,
-    to_continue_instructions,
     get_continuation_functions,
+    to_complete_story,
+    to_continue_instructions,
+    to_continue_passage,
+    to_fill_in_blank,
 )
-
 
 SAMPLE = "Step 1: gather the materials. Step 2:"
 

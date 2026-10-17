@@ -1,10 +1,14 @@
 """Tests for AnthropicBackend with mocked Anthropic client."""
 
+import logging
 import os
 import sys
-from unittest.mock import patch, MagicMock
+from unittest.mock import MagicMock, patch
 
 import pytest
+
+from redact.llms import observe
+from tests.conftest import first_cut_warning
 
 
 @pytest.fixture()
@@ -21,26 +25,57 @@ def mock_anthropic_module():
 
 @pytest.fixture()
 def anthropic_backend(mock_anthropic_module):
-    """Create an AnthropicBackend with a mocked client."""
-    from redact.llms.anthropic_backend import AnthropicBackend
-    backend = AnthropicBackend(api_key="test-key")
-    return backend
+    """Create a configured AnthropicBackend with a mocked SDK client."""
+    from redact.llms.backends import AnthropicBackend
+    AnthropicBackend.clear_cache()
+    backend = AnthropicBackend(
+        "claude-opus-4-6", api_key="test-key", default_max_tokens=300,
+    )
+    yield backend
+    AnthropicBackend.clear_cache()
 
 
 class TestAnthropicBackendInit:
-    def test_from_env(self, mock_anthropic_module):
-        from redact.llms.anthropic_backend import AnthropicBackend
-        with patch.dict(os.environ, {"ANTHROPIC_API_KEY": "test-key"}):
-            backend = AnthropicBackend.from_env()
-            mock_anthropic_module.Anthropic.assert_called_with(api_key="test-key")
+    def test_from_config_uses_the_entrys_credentials(self, mock_anthropic_module):
+        """The registry entry's key env var and budget reach the backend."""
+        from redact.llms.backends import AnthropicBackend
+        from redact.llms.model_config import get_model_config
 
-    def test_from_env_missing_raises(self, mock_anthropic_module):
-        from redact.llms.anthropic_backend import AnthropicBackend
+        config = get_model_config("claude-opus-4-6")
+        AnthropicBackend.clear_cache()
+        with patch.dict(os.environ, {"ANTHROPIC_API_KEY": "test-key"}):
+            backend = AnthropicBackend.from_config(config)
+            mock_anthropic_module.Anthropic.assert_called_with(api_key="test-key")
+        assert backend.rpm == config.api.rpm
+        assert backend.max_workers == config.api.recommended_max_workers
+        AnthropicBackend.clear_cache()
+
+    def test_from_config_missing_api_key_raises(self, mock_anthropic_module):
+        from redact.llms.backends import AnthropicBackend
+        from redact.llms.model_config import get_model_config
+
+        config = get_model_config("claude-opus-4-6")
         env = os.environ.copy()
         env.pop("ANTHROPIC_API_KEY", None)
         with patch.dict(os.environ, env, clear=True):
             with pytest.raises(KeyError):
-                AnthropicBackend.from_env()
+                AnthropicBackend.from_config(config)
+
+    def test_a_cache_cleared_during_the_lookup_does_not_raise(self):
+        """A concurrent clear_cache() can empty the cache right after a
+        lookup finds the client."""
+        import redact.llms.backends.anthropic as anthropic_module
+
+        class _ClearedAfterContains(dict):
+            def __contains__(self, key):
+                found = super().__contains__(key)
+                self.clear()
+                return found
+
+        client = object()
+        cache = _ClearedAfterContains({"k": client})
+        with patch.object(anthropic_module, "_sdk_clients", cache):
+            assert anthropic_module._sdk_client("k") is client
 
     def test_backend_name(self, anthropic_backend):
         assert anthropic_backend.backend_name == "anthropic"
@@ -50,59 +85,188 @@ class TestAnthropicBackendInit:
 
 
 class TestAnthropicGenerate:
+    """The backend is a configured model: the model name and max_tokens
+    default come from construction, and only messages/system prompt/overrides
+    are per call.
+    """
+
+    def test_models_default_max_tokens_used_when_not_overridden(self, anthropic_backend):
+        anthropic_backend.generate([[{"role": "user", "content": "hi"}]])
+        assert anthropic_backend._client.messages.create.call_args[1]["max_tokens"] == 300
+
     def test_basic_generate(self, anthropic_backend):
         result = anthropic_backend.generate(
-            [{"role": "user", "content": "hi"}], "claude-opus-4-6"
+            [[{"role": "user", "content": "hi"}]]
         )
-        assert result == "claude response"
+        assert result == ["claude response"]
 
-    def test_system_message_extraction(self, anthropic_backend):
-        anthropic_backend.generate(
+    def test_batch_preserves_order(self, anthropic_backend):
+        anthropic_backend._client.messages.create.side_effect = [
+            MagicMock(content=[MagicMock(text="first")]),
+            MagicMock(content=[MagicMock(text="second")]),
+        ]
+        result = anthropic_backend.generate(
             [
-                {"role": "system", "content": "You are helpful."},
-                {"role": "user", "content": "hi"},
-            ],
-            "claude-opus-4-6",
+                [{"role": "user", "content": "a"}],
+                [{"role": "user", "content": "b"}],
+            ]
         )
+        assert result == ["first", "second"]
+
+    def test_system_prompt_passed_as_system_param(self, anthropic_backend):
+        anthropic_backend.generate([[
+            {"role": "system", "content": "You are helpful."},
+            {"role": "user", "content": "hi"},
+        ]])
         call_kwargs = anthropic_backend._client.messages.create.call_args[1]
         assert call_kwargs["system"] == "You are helpful."
-        assert len(call_kwargs["messages"]) == 1
-        assert call_kwargs["messages"][0]["role"] == "user"
+        assert call_kwargs["messages"] == [{"role": "user", "content": "hi"}]
 
-    def test_no_system_message(self, anthropic_backend):
+    def test_no_system_prompt_omits_system_key(self, anthropic_backend):
         anthropic_backend.generate(
-            [{"role": "user", "content": "hi"}],
-            "claude-opus-4-6",
+            [[{"role": "user", "content": "hi"}]],
         )
         call_kwargs = anthropic_backend._client.messages.create.call_args[1]
         assert "system" not in call_kwargs
 
-    def test_multiple_system_messages_joined(self, anthropic_backend):
+    def test_explicit_overrides_forwarded(self, anthropic_backend):
         anthropic_backend.generate(
-            [
-                {"role": "system", "content": "Part 1."},
-                {"role": "system", "content": "Part 2."},
-                {"role": "user", "content": "hi"},
-            ],
-            "claude-opus-4-6",
-        )
-        call_kwargs = anthropic_backend._client.messages.create.call_args[1]
-        assert call_kwargs["system"] == "Part 1.\n\nPart 2."
-
-    def test_resolves_defaults(self, anthropic_backend):
-        anthropic_backend.generate(
-            [{"role": "user", "content": "hi"}], "claude-opus-4-6"
-        )
-        call_kwargs = anthropic_backend._client.messages.create.call_args[1]
-        assert call_kwargs["max_tokens"] == 300  # from model config
-
-    def test_explicit_overrides(self, anthropic_backend):
-        anthropic_backend.generate(
-            [{"role": "user", "content": "hi"}],
-            "claude-opus-4-6",
+            [[{"role": "user", "content": "hi"}]],
             max_tokens=1000,
             temperature=0.3,
         )
         call_kwargs = anthropic_backend._client.messages.create.call_args[1]
         assert call_kwargs["max_tokens"] == 1000
         assert call_kwargs["temperature"] == 0.3
+
+    def test_omits_temperature_when_not_given(self, anthropic_backend):
+        anthropic_backend.generate(
+            [[{"role": "user", "content": "hi"}]],
+        )
+        call_kwargs = anthropic_backend._client.messages.create.call_args[1]
+        assert "temperature" not in call_kwargs
+
+    def test_strips_extra_message_keys(self, anthropic_backend):
+        anthropic_backend.generate(
+            [[{"role": "user", "content": "hi", "extra_field": "drop me"}]],
+        )
+        call_kwargs = anthropic_backend._client.messages.create.call_args[1]
+        assert call_kwargs["messages"] == [{"role": "user", "content": "hi"}]
+
+    def test_kwargs_cannot_retarget_the_call(self, anthropic_backend):
+        anthropic_backend.generate(
+            [[{"role": "user", "content": "hi"}]],
+            model="another-model", messages=[{"role": "user", "content": "other"}],
+        )
+        call_kwargs = anthropic_backend._client.messages.create.call_args[1]
+        assert call_kwargs["model"] == "claude-opus-4-6"
+        assert call_kwargs["messages"] == [{"role": "user", "content": "hi"}]
+
+
+class TestAnthropicEmptyReply:
+    """An empty reply is returned as "" with its stop reason on record."""
+
+    HI = [[{"role": "user", "content": "hi"}]]
+    LOGGER = "redact.llms.backends.anthropic"
+
+    @pytest.fixture()
+    def events(self):
+        seen = []
+        observe.set_emitter(seen.append)
+        yield seen
+        observe.set_emitter(None)
+
+    @pytest.mark.parametrize("content", [[], None, [MagicMock(text="")]],
+                             ids=["no-blocks", "content-none", "empty-text"])
+    def test_empty_reply_is_returned_and_warned_about(
+        self, anthropic_backend, events, caplog, content
+    ):
+        anthropic_backend._client.messages.create.return_value = MagicMock(
+            content=content, stop_reason="refusal", usage=None)
+        with caplog.at_level(logging.WARNING, logger=self.LOGGER):
+            assert anthropic_backend.generate(self.HI) == [""]
+        assert [r.getMessage() for r in caplog.records] == [
+            "claude-opus-4-6 returned an empty reply (stop_reason=refusal)."
+        ]
+        assert events[0]["finish_reason"] == "refusal"
+
+    def test_stop_reason_is_recorded_without_a_warning(
+        self, anthropic_backend, events, caplog
+    ):
+        anthropic_backend._client.messages.create.return_value = MagicMock(
+            content=[MagicMock(text="ok")], stop_reason="end_turn", usage=None)
+        with caplog.at_level(logging.WARNING, logger=self.LOGGER):
+            assert anthropic_backend.generate(self.HI) == ["ok"]
+        assert caplog.records == []
+        assert events[0]["finish_reason"] == "end_turn"
+
+    def test_usage_is_recorded_for_the_one_item(self, anthropic_backend, events):
+        anthropic_backend._client.messages.create.return_value = MagicMock(
+            content=[MagicMock(text="ok")], stop_reason="end_turn",
+            usage=MagicMock(input_tokens=5, output_tokens=7))
+        anthropic_backend.generate(self.HI)
+        assert (events[0]["in_tok"], events[0]["out_tok"], events[0]["out_tok_max"]) == (5, 7, 7)
+
+
+class TestAnthropicCutReply:
+    """A reply cut at max_tokens or the context window is returned as it is,
+    with one warning."""
+
+    @pytest.mark.parametrize("stop_reason", ["max_tokens", "model_context_window_exceeded"])
+    def test_a_cut_reply_warns_once(self, anthropic_backend, caplog, stop_reason):
+        anthropic_backend._client.messages.create.return_value = MagicMock(
+            content=[MagicMock(text="partial")], stop_reason=stop_reason, usage=None)
+        with caplog.at_level(logging.WARNING, logger="redact.llms.backends"):
+            assert anthropic_backend.generate(
+                [[{"role": "user", "content": "hi"}]], max_tokens=50) == ["partial"]
+        assert [r.getMessage() for r in caplog.records] == [
+            first_cut_warning("claude-opus-4-6", 50)]
+
+
+class _BadRequest(Exception):
+    """What the SDK raises for a 400: its message holds the response body."""
+
+    status_code = 400
+
+    def __init__(self, message: str):
+        super().__init__(
+            "Error code: 400 - {'type': 'error', 'error': {'type': "
+            f"'invalid_request_error', 'message': '{message}'}}}}")
+
+
+class TestAnthropicPromptTooLong:
+    """A prompt the API rejects as over the model's context raises
+    PromptTooLongError; any other rejection is raised as it is."""
+
+    HI = [[{"role": "user", "content": "hi"}]]
+
+    @pytest.fixture()
+    def events(self):
+        seen = []
+        observe.set_emitter(seen.append)
+        yield seen
+        observe.set_emitter(None)
+
+    @pytest.mark.parametrize("message", [
+        "prompt is too long: 210000 tokens > 200000 maximum",
+        "input length and `max_tokens` exceed context limit: 190000 + 20000 > "
+        "200000, decrease input length or `max_tokens` and try again",
+    ], ids=["prompt", "prompt-and-reply"])
+    def test_a_context_rejection_raises_prompt_too_long(
+        self, anthropic_backend, events, message
+    ):
+        from redact.exceptions import PromptTooLongError
+
+        error = _BadRequest(message)
+        anthropic_backend._client.messages.create.side_effect = error
+        with pytest.raises(PromptTooLongError) as raised:
+            anthropic_backend.generate(self.HI)
+        assert str(raised.value) == str(error) and raised.value.__cause__ is error
+        assert [event["error"] for event in events] == [f"_BadRequest: {error}"]
+
+    def test_another_bad_request_stays_as_it_is(self, anthropic_backend):
+        error = _BadRequest("messages: roles must alternate")
+        anthropic_backend._client.messages.create.side_effect = error
+        with pytest.raises(_BadRequest) as raised:
+            anthropic_backend.generate(self.HI)
+        assert raised.value is error

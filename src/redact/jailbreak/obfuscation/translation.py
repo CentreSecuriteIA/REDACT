@@ -1,21 +1,16 @@
-"""Low-resource language translation obfuscation.
+"""Translation techniques: the prompt translated to one of 20 languages.
 
-Delegates all translation + checking + retry logic to
-LLMs/translator.py::translate_with_check(). Each per-language function
-accepts backend/model/rate_limiter as parameters.
-
-Languages are grouped by resource level (safety training coverage):
-  - High-resource  (complexity 0): French, Japanese, Russian, Spanish, German, Arabic
-  - Mid-resource   (complexity 1): Turkish, Czech, Vietnamese, Greek, Croatian
-  - Low-resource   (complexity 2): Swahili, Thai, Khmer, Maori, Nepali,
-                                   Zulu, Scots Gaelic, Bengali, Javanese
-
-Ported from reference obfuscation.py lines 443-501.
+The run's translation model (the translation role's by default) translates
+and checks, retrying with the check's feedback; ``info`` is the language, or
+``DISCARDED; language=...; feedback=...`` when every attempt is rejected.
 """
 
-from redact.llms.base import LLMBackend
-from redact.llms.wrappers import RateLimiter
-from redact.llms.translator import translate_with_check, DEFAULT_TRANSLATE_MODEL
+from collections.abc import Callable
+
+from redact.jailbreak.technique import DISCARDED, TechniqueGen
+from redact.llm_pipeline import LLMRequest, is_accepted
+from redact.llms.model_config import default_model_for_role
+from redact.llms.prompting import build_messages, load_prompt
 
 LANGUAGES = [
     # High-resource
@@ -28,241 +23,102 @@ LANGUAGES = [
 ]
 
 
-def _translate(
+def _resolve_translate_model() -> str:
+    """Return the canonical translation model from the registry.
+
+    Looked up by role so the choice can be changed by registering a
+    different model with ``role="translation"``. Falls back to the
+    historical default ``deepseek-v3.2`` if the role isn't registered
+    (e.g. user mutated the registry).
+    """
+    try:
+        return default_model_for_role("translation")
+    except KeyError:
+        return "deepseek-v3.2"
+
+
+def _build_translate_messages(
+    text: str, language: str, feedback: str = "", prompt_dir=None,
+) -> list[dict]:
+    """Build the chat messages for a translation request (pure, no LLM call).
+
+    Loads ``translate`` (first attempt) or ``translate_retry`` (feedback
+    from a prior rejected attempt) — two separate prompt categories rather
+    than one template with a conditional block, since ``str.format_map()``
+    has no conditionals.
+    """
+    category = "translate_retry" if feedback else "translate"
+    config = load_prompt("jailbreak", category, prompt_dir)
+    return build_messages(config, language=language, text=text, feedback=feedback)
+
+
+def _build_check_messages(
+    original: str, translation: str, language: str, prompt_dir=None,
+) -> list[dict]:
+    """Build the chat messages for a translation-quality check (pure)."""
+    config = load_prompt("jailbreak", "translate_check", prompt_dir)
+    return build_messages(config, original=original, translation=translation, language=language)
+
+
+def _translate_gen(
     prompt: str,
     language: str,
-    backend: LLMBackend,
-    gen_model: str | None = None,
+    *,
+    translate_model: str | None = None,
     check_model: str | None = None,
-    rate_limiter: RateLimiter | None = None,
     num_retries: int = 4,
-) -> tuple[str, str]:
-    """Translate prompt to target language with checked retry.
+    prompt_dir=None,
+    **kwargs,
+) -> TechniqueGen:
+    """Translate ``prompt`` to ``language`` with checked, feedback-aware retry.
 
-    Args:
-        prompt: Text to translate.
-        language: Target language name.
-        backend: LLM backend.
-        gen_model: Model for translation (default: deepseek-v3.2).
-        check_model: Model for validation (default: deepseek-v3.2).
-        rate_limiter: Optional rate limiter.
-        num_retries: Maximum attempts.
+    Yields a translate request then a check request each round; returns
+    ``(translation, language)`` on success or
+    ``(last_attempt, "DISCARDED; language=...; feedback=...")`` on exhaustion.
 
-    Returns:
-        (translated_text, language) on success,
-        (last_attempt, "DISCARDED; language=...; feedback=...") on failure.
+    ``translate_model`` makes both calls, the translation role's model when
+    None; ``check_model`` replaces it for the check. ``prompt_dir`` is the
+    overlay the three prompts are read through. ``**kwargs`` swallows
+    engine-supplied keys (``gen_model``, ``benign_data``) that translation
+    does not use.
     """
-    return translate_with_check(
-        backend=backend,
-        gen_model=gen_model or DEFAULT_TRANSLATE_MODEL,
-        check_model=check_model or DEFAULT_TRANSLATE_MODEL,
-        text=prompt,
-        target_language=language,
-        rate_limiter=rate_limiter,
-        num_retries=num_retries,
-    )
+    # Resolved fresh per call (not a frozen import-time constant) so a
+    # runtime register_model(..., role="translation") takes effect
+    # immediately, same as every other role default in the library.
+    gen_model = translate_model or _resolve_translate_model()
+    chk_model = check_model or gen_model
+    feedback = ""
+    last = prompt
+    for _ in range(num_retries):
+        translation = yield LLMRequest(
+            gen_model, _build_translate_messages(prompt, language, feedback, prompt_dir)
+        )
+        verdict = yield LLMRequest(
+            chk_model, _build_check_messages(prompt, translation, language, prompt_dir)
+        )
+        if is_accepted(verdict):
+            return translation, language
+        feedback = verdict
+        last = translation
+    return last, f"{DISCARDED}; language={language}; feedback={feedback}"
 
 
-# ---------------------------------------------------------------------------
-# High-resource languages (complexity 0)
-# ---------------------------------------------------------------------------
+def _make_language_fn(language: str) -> Callable:
+    """The technique that translates to ``language``."""
 
-def to_french(
-    prompt: str, backend: LLMBackend,
-    gen_model: str | None = None, check_model: str | None = None,
-    rate_limiter: RateLimiter | None = None,
-) -> tuple[str, str]:
-    """Translate to French."""
-    return _translate(prompt, "French", backend, gen_model, check_model, rate_limiter)
+    def fn(prompt: str, **kwargs) -> TechniqueGen:
+        return (yield from _translate_gen(prompt, language, **kwargs))
+
+    fn.__name__ = fn.__qualname__ = "to_" + language.lower().replace(" ", "_")
+    fn.__doc__ = f"Translate to {language} (technique generator)."
+    return fn
 
 
-def to_japanese(
-    prompt: str, backend: LLMBackend,
-    gen_model: str | None = None, check_model: str | None = None,
-    rate_limiter: RateLimiter | None = None,
-) -> tuple[str, str]:
-    """Translate to Japanese."""
-    return _translate(prompt, "Japanese", backend, gen_model, check_model, rate_limiter)
+# One technique per language, named to_<language>: to_french, to_scots_gaelic, ...
+_FNS = [_make_language_fn(language) for language in LANGUAGES]
+globals().update({fn.__name__: fn for fn in _FNS})
 
 
-def to_russian(
-    prompt: str, backend: LLMBackend,
-    gen_model: str | None = None, check_model: str | None = None,
-    rate_limiter: RateLimiter | None = None,
-) -> tuple[str, str]:
-    """Translate to Russian."""
-    return _translate(prompt, "Russian", backend, gen_model, check_model, rate_limiter)
-
-
-def to_spanish(
-    prompt: str, backend: LLMBackend,
-    gen_model: str | None = None, check_model: str | None = None,
-    rate_limiter: RateLimiter | None = None,
-) -> tuple[str, str]:
-    """Translate to Spanish."""
-    return _translate(prompt, "Spanish", backend, gen_model, check_model, rate_limiter)
-
-
-def to_german(
-    prompt: str, backend: LLMBackend,
-    gen_model: str | None = None, check_model: str | None = None,
-    rate_limiter: RateLimiter | None = None,
-) -> tuple[str, str]:
-    """Translate to German."""
-    return _translate(prompt, "German", backend, gen_model, check_model, rate_limiter)
-
-
-def to_arabic(
-    prompt: str, backend: LLMBackend,
-    gen_model: str | None = None, check_model: str | None = None,
-    rate_limiter: RateLimiter | None = None,
-) -> tuple[str, str]:
-    """Translate to Arabic."""
-    return _translate(prompt, "Arabic", backend, gen_model, check_model, rate_limiter)
-
-
-# ---------------------------------------------------------------------------
-# Mid-resource languages (complexity 1)
-# ---------------------------------------------------------------------------
-
-def to_turkish(
-    prompt: str, backend: LLMBackend,
-    gen_model: str | None = None, check_model: str | None = None,
-    rate_limiter: RateLimiter | None = None,
-) -> tuple[str, str]:
-    """Translate to Turkish."""
-    return _translate(prompt, "Turkish", backend, gen_model, check_model, rate_limiter)
-
-
-def to_czech(
-    prompt: str, backend: LLMBackend,
-    gen_model: str | None = None, check_model: str | None = None,
-    rate_limiter: RateLimiter | None = None,
-) -> tuple[str, str]:
-    """Translate to Czech."""
-    return _translate(prompt, "Czech", backend, gen_model, check_model, rate_limiter)
-
-
-def to_vietnamese(
-    prompt: str, backend: LLMBackend,
-    gen_model: str | None = None, check_model: str | None = None,
-    rate_limiter: RateLimiter | None = None,
-) -> tuple[str, str]:
-    """Translate to Vietnamese."""
-    return _translate(prompt, "Vietnamese", backend, gen_model, check_model, rate_limiter)
-
-
-def to_greek(
-    prompt: str, backend: LLMBackend,
-    gen_model: str | None = None, check_model: str | None = None,
-    rate_limiter: RateLimiter | None = None,
-) -> tuple[str, str]:
-    """Translate to Greek."""
-    return _translate(prompt, "Greek", backend, gen_model, check_model, rate_limiter)
-
-
-def to_croatian(
-    prompt: str, backend: LLMBackend,
-    gen_model: str | None = None, check_model: str | None = None,
-    rate_limiter: RateLimiter | None = None,
-) -> tuple[str, str]:
-    """Translate to Croatian."""
-    return _translate(prompt, "Croatian", backend, gen_model, check_model, rate_limiter)
-
-
-# ---------------------------------------------------------------------------
-# Low-resource languages (complexity 2)
-# ---------------------------------------------------------------------------
-
-def to_swahili(
-    prompt: str, backend: LLMBackend,
-    gen_model: str | None = None, check_model: str | None = None,
-    rate_limiter: RateLimiter | None = None,
-) -> tuple[str, str]:
-    """Translate to Swahili."""
-    return _translate(prompt, "Swahili", backend, gen_model, check_model, rate_limiter)
-
-
-def to_thai(
-    prompt: str, backend: LLMBackend,
-    gen_model: str | None = None, check_model: str | None = None,
-    rate_limiter: RateLimiter | None = None,
-) -> tuple[str, str]:
-    """Translate to Thai."""
-    return _translate(prompt, "Thai", backend, gen_model, check_model, rate_limiter)
-
-
-def to_khmer(
-    prompt: str, backend: LLMBackend,
-    gen_model: str | None = None, check_model: str | None = None,
-    rate_limiter: RateLimiter | None = None,
-) -> tuple[str, str]:
-    """Translate to Khmer."""
-    return _translate(prompt, "Khmer", backend, gen_model, check_model, rate_limiter)
-
-
-def to_maori(
-    prompt: str, backend: LLMBackend,
-    gen_model: str | None = None, check_model: str | None = None,
-    rate_limiter: RateLimiter | None = None,
-) -> tuple[str, str]:
-    """Translate to Maori."""
-    return _translate(prompt, "Maori", backend, gen_model, check_model, rate_limiter)
-
-
-def to_nepali(
-    prompt: str, backend: LLMBackend,
-    gen_model: str | None = None, check_model: str | None = None,
-    rate_limiter: RateLimiter | None = None,
-) -> tuple[str, str]:
-    """Translate to Nepali."""
-    return _translate(prompt, "Nepali", backend, gen_model, check_model, rate_limiter)
-
-
-def to_zulu(
-    prompt: str, backend: LLMBackend,
-    gen_model: str | None = None, check_model: str | None = None,
-    rate_limiter: RateLimiter | None = None,
-) -> tuple[str, str]:
-    """Translate to Zulu."""
-    return _translate(prompt, "Zulu", backend, gen_model, check_model, rate_limiter)
-
-
-def to_scots_gaelic(
-    prompt: str, backend: LLMBackend,
-    gen_model: str | None = None, check_model: str | None = None,
-    rate_limiter: RateLimiter | None = None,
-) -> tuple[str, str]:
-    """Translate to Scots Gaelic."""
-    return _translate(prompt, "Scots Gaelic", backend, gen_model, check_model, rate_limiter)
-
-
-def to_bengali(
-    prompt: str, backend: LLMBackend,
-    gen_model: str | None = None, check_model: str | None = None,
-    rate_limiter: RateLimiter | None = None,
-) -> tuple[str, str]:
-    """Translate to Bengali."""
-    return _translate(prompt, "Bengali", backend, gen_model, check_model, rate_limiter)
-
-
-def to_javanese(
-    prompt: str, backend: LLMBackend,
-    gen_model: str | None = None, check_model: str | None = None,
-    rate_limiter: RateLimiter | None = None,
-) -> tuple[str, str]:
-    """Translate to Javanese."""
-    return _translate(prompt, "Javanese", backend, gen_model, check_model, rate_limiter)
-
-
-def get_translation_functions() -> list:
-    """Return all translation technique functions."""
-    return [
-        # High-resource
-        to_french, to_japanese, to_russian, to_spanish, to_german, to_arabic,
-        # Mid-resource
-        to_turkish, to_czech, to_vietnamese, to_greek, to_croatian,
-        # Low-resource
-        to_swahili, to_thai, to_khmer, to_maori, to_nepali,
-        to_zulu, to_scots_gaelic, to_bengali, to_javanese,
-    ]
+def get_translation_functions() -> list[Callable]:
+    """Return all translation technique generators."""
+    return list(_FNS)

@@ -1,191 +1,100 @@
-"""Taxonomy loading and application.
+"""The taxonomy and seed JSON files under ``configs/``: write a taxonomy, load
+them, and read what generation needs.
 
-Taxonomies define canonical category lists with descriptions, subcategories,
-aliases, and logical groups. They serve two purposes:
-1. Filtering/grouping existing datasets (normalize_categories, filter_by_group)
-2. Driving generation loops (iter_categories, get_category_descriptions)
+A taxonomy file::
 
-Taxonomy JSON schema:
-{
-    "name": "...",
-    "description": "...",
-    "categories": {
-        "CategoryName": {
-            "description": "...",
-            "subcategories": [...] or {...}
+    {
+        "name": "...",
+        "description": "...",
+        "categories": {
+            "CategoryName": {"description": "...", "subcategories": [...] or {...}},
+            ...
         },
-        ...
-    },
-    "aliases": {"AltName": "CanonicalName", ...},
-    "groups": {"group_name": ["Cat1", "Cat2"], ...}
-}
+        "aliases": {"AltName": "CanonicalName", ...},
+        "groups": {"group_name": ["Cat1", "Cat2"], ...}
+    }
+
+A seeds file maps each category to its hand-written prompts under ``"seeds"``.
 """
 
 import json
+import logging
+import warnings
 from collections.abc import Iterator
 from pathlib import Path
 
-import pandas as pd
+from .. import paths
 
-# Default config directory: Dataset_Configs/taxonomy/ inside the redact package
-_PACKAGE_DIR = Path(__file__).resolve().parent.parent
-_DEFAULT_CONFIG_DIR = _PACKAGE_DIR / "configs" / "taxonomy"
-_DEFAULT_SEEDS_DIR = _PACKAGE_DIR / "configs" / "seeds"
+logger = logging.getLogger(__name__)
+
+_DEFAULT_CONFIG_DIR = paths.taxonomy_dir()
+_DEFAULT_SEEDS_DIR = paths.seeds_dir()
+
+# Former file names, read for one release: former -> current.
+_FORMER_TAXONOMIES = {"content_moderation_categories": "harmful"}
+_FORMER_SEEDS = {"content_moderation_seeds": "harmful"}
 
 
 def load_taxonomy(
     name: str,
     config_dir: str | Path | None = None,
 ) -> dict:
-    """Load a taxonomy JSON file.
+    """Load the taxonomy file ``name``, with or without its ``.json``.
 
-    Args:
-        name: Taxonomy filename (with or without .json extension).
-        config_dir: Directory containing taxonomy files.
+    ``config_dir`` defaults to the packaged ``configs/taxonomy``. The former
+    name ``content_moderation_categories`` loads ``harmful``, and a directory
+    whose file has the former name is read for ``harmful``, each with a
+    ``DeprecationWarning``, for one release.
 
-    Returns:
-        Parsed taxonomy dict.
+    Raises:
+        FileNotFoundError: The directory holds no such file.
     """
     if config_dir is None:
         config_dir = _DEFAULT_CONFIG_DIR
-    path = Path(config_dir) / name
-    if not path.suffix:
-        path = path.with_suffix(".json")
-
-    if not path.exists():
-        raise FileNotFoundError(f"Taxonomy not found: {path}")
-
-    with open(path, encoding="utf-8") as f:
-        return json.load(f)
+    return _load_json(config_dir, name, "Taxonomy", _FORMER_TAXONOMIES)
 
 
-def get_categories(taxonomy: dict) -> list[str]:
-    """Get the canonical category name list from a taxonomy.
+def create_taxonomy(
+    name: str,
+    categories: dict[str, str | dict],
+    description: str = "",
+    aliases: dict[str, str] | None = None,
+    groups: dict[str, list[str]] | None = None,
+    taxonomy_dir: str | Path | None = None,
+    verbose: bool = True,
+) -> dict:
+    """Write the taxonomy file ``name`` and return the taxonomy it holds.
 
-    Args:
-        taxonomy: Loaded taxonomy dict.
-
-    Returns:
-        Sorted list of category names.
+    A category given as a bare description is written as
+    ``{"description": ...}``. ``taxonomy_dir`` defaults to the packaged
+    ``configs/taxonomy``, where :func:`load_taxonomy` reads by default.
+    ``verbose`` logs the path written.
     """
-    return sorted(taxonomy.get("categories", {}).keys())
-
-
-def get_category_descriptions(taxonomy: dict) -> dict[str, str]:
-    """Get {category: description} mapping.
-
-    Used by generation pipelines to feed category descriptions into prompts.
-
-    Args:
-        taxonomy: Loaded taxonomy dict.
-
-    Returns:
-        Dict mapping category name to its description string.
-    """
-    result: dict[str, str] = {}
-    for name, info in taxonomy.get("categories", {}).items():
-        if isinstance(info, dict):
-            result[name] = info.get("description", "")
-        else:
-            result[name] = str(info)
-    return result
-
-
-def get_subcategories(
-    taxonomy: dict,
-    category: str,
-) -> list[str] | dict[str, str]:
-    """Get subcategories for a category.
-
-    Returns a list if subcategories are plain strings, or a dict
-    if they have descriptions. Returns empty list if no subcategories.
-
-    Args:
-        taxonomy: Loaded taxonomy dict.
-        category: Category name.
-
-    Returns:
-        Subcategories as list[str] or dict[str, str].
-    """
-    info = taxonomy.get("categories", {}).get(category, {})
-    if isinstance(info, dict):
-        return info.get("subcategories", [])
-    return []
-
-
-def normalize_categories(
-    df: pd.DataFrame,
-    taxonomy: dict,
-    column: str = "category",
-) -> pd.DataFrame:
-    """Apply taxonomy aliases to normalize category names in a DataFrame.
-
-    Maps alias names to their canonical equivalents.
-
-    Args:
-        df: DataFrame with a category column.
-        taxonomy: Loaded taxonomy dict with "aliases" mapping.
-        column: Column to normalize.
-
-    Returns:
-        Copy of df with normalized category names.
-    """
-    aliases = taxonomy.get("aliases", {})
-    if not aliases or column not in df.columns:
-        return df
-    df = df.copy()
-    df[column] = df[column].replace(aliases)
-    return df
-
-
-def filter_by_group(
-    df: pd.DataFrame,
-    taxonomy: dict,
-    group: str,
-    column: str = "category",
-) -> pd.DataFrame:
-    """Filter DataFrame to categories in a taxonomy group.
-
-    Args:
-        df: DataFrame with a category column.
-        taxonomy: Loaded taxonomy dict with "groups" mapping.
-        group: Group name (e.g. "safety", "harmful_content").
-        column: Column to filter on.
-
-    Returns:
-        Filtered DataFrame.
-    """
-    group_cats = get_group_categories(taxonomy, group)
-    if not group_cats or column not in df.columns:
-        return df
-    return df[df[column].isin(group_cats)].reset_index(drop=True)
-
-
-def get_group_categories(taxonomy: dict, group: str) -> list[str]:
-    """Get the category list for a taxonomy group.
-
-    Args:
-        taxonomy: Loaded taxonomy dict.
-        group: Group name.
-
-    Returns:
-        List of category names in the group, or empty list.
-    """
-    return taxonomy.get("groups", {}).get(group, [])
+    taxonomy = {
+        "name": name,
+        "description": description,
+        "categories": {
+            category: {"description": info} if isinstance(info, str) else info
+            for category, info in categories.items()
+        },
+        "aliases": aliases or {},
+        "groups": groups or {},
+    }
+    directory = Path(taxonomy_dir or _DEFAULT_CONFIG_DIR)
+    directory.mkdir(parents=True, exist_ok=True)
+    path = directory / f"{name}.json"
+    with open(path, "w", encoding="utf-8") as f:
+        json.dump(taxonomy, f, indent=2, ensure_ascii=False)
+    if verbose:
+        logger.info("Taxonomy '%s' saved to %s", name, path)
+    return taxonomy
 
 
 def iter_categories(taxonomy: dict) -> Iterator[tuple[str, dict]]:
-    """Iterate over (category_name, category_info) pairs.
+    """Yield each category of a taxonomy as ``(name, info)``.
 
-    Convenience for generation loops that process each category.
-    category_info is the dict containing description, subcategories, etc.
-    If the value is not a dict, wraps it as {"description": value}.
-
-    Args:
-        taxonomy: Loaded taxonomy dict.
-
-    Yields:
-        (category_name, category_info_dict) tuples.
+    ``info`` is the category's dict. A category given as a bare description
+    yields ``{"description": ...}``.
     """
     for name, info in taxonomy.get("categories", {}).items():
         if isinstance(info, dict):
@@ -194,54 +103,76 @@ def iter_categories(taxonomy: dict) -> Iterator[tuple[str, dict]]:
             yield name, {"description": str(info)}
 
 
-# ---------------------------------------------------------------------------
-# Seed prompts
-# ---------------------------------------------------------------------------
-
-
 def load_seeds(
     name: str,
     seeds_dir: str | Path | None = None,
 ) -> dict:
-    """Load a seed prompts JSON file.
+    """Load the seeds file ``name``, with or without its ``.json``.
 
-    Args:
-        name: Seeds filename (with or without .json extension).
-        seeds_dir: Directory containing seed files.
+    ``seeds_dir`` defaults to the packaged ``configs/seeds``. The former name
+    ``content_moderation_seeds`` loads ``harmful``, with a
+    ``DeprecationWarning``, for one release.
 
-    Returns:
-        Parsed seeds dict with "seeds" key mapping category -> list[str].
+    Raises:
+        FileNotFoundError: The directory holds no such file.
     """
     if seeds_dir is None:
         seeds_dir = _DEFAULT_SEEDS_DIR
-    path = Path(seeds_dir) / name
-    if not path.suffix:
-        path = path.with_suffix(".json")
-
-    if not path.exists():
-        raise FileNotFoundError(f"Seeds file not found: {path}")
-
-    with open(path, encoding="utf-8") as f:
-        return json.load(f)
+    return _load_json(seeds_dir, name, "Seeds file", _FORMER_SEEDS)
 
 
 def get_seed_prompts(
     seeds: dict,
     category: str,
 ) -> str:
-    """Get formatted seed prompts for a category.
+    """A category's seed prompts as a numbered list, one per line.
 
-    Returns a numbered list string suitable for injection into the
-    generation template's {SeedPrompts} placeholder.
-
-    Args:
-        seeds: Loaded seeds dict (from load_seeds()).
-        category: Category name.
-
-    Returns:
-        Numbered list of seed prompts, or empty string if no seeds.
+    The text a generation template takes for ``{SeedPrompts}``. A category
+    without seeds gives ``""``.
     """
     prompts = seeds.get("seeds", {}).get(category, [])
     if not prompts:
         return ""
     return "\n".join(f"{i+1}. {p}" for i, p in enumerate(prompts))
+
+
+def _load_json(
+    directory: str | Path, name: str, what: str, former: dict[str, str],
+) -> dict:
+    """Parse ``name`` under ``directory``; ``what`` names the file in the error.
+
+    A file missing under ``name`` is read under the name ``former`` pairs it
+    with (a former name with its current one, or the other way round), with
+    a ``DeprecationWarning``.
+    """
+    path = Path(directory) / name
+    if not path.suffix:
+        path = path.with_suffix(".json")
+
+    if not path.exists():
+        path = _under_other_name(path, what, former)
+
+    with open(path, encoding="utf-8") as f:
+        return json.load(f)
+
+
+def _under_other_name(path: Path, what: str, former: dict[str, str]) -> Path:
+    """``path`` under the name ``former`` pairs its name with, with a warning.
+
+    Raises:
+        FileNotFoundError: Neither name is a file.
+    """
+    name = path.stem
+    paired = former.get(name) or next(
+        (old for old, current in former.items() if current == name), None)
+    other = path.with_name(f"{paired}.json")
+    if paired is None or not other.exists():
+        raise FileNotFoundError(f"{what} not found: {path}")
+    if name in former:
+        message = (f"{what} {name!r} is now {paired!r}; load it by that name. "
+                   "The former name is read for this release.")
+    else:
+        message = (f"{other} has the former name of {name!r}; rename it "
+                   f"{path.name}. It is read for this release.")
+    warnings.warn(message, DeprecationWarning, stacklevel=4)
+    return other

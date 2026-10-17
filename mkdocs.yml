@@ -1,0 +1,112 @@
+site_name: REDACT
+site_description: Red-team Dataset Automation & Construction Toolkit. A taxonomy and a recipe in, a checked and augmented red-teaming dataset out.
+site_url: https://centresecuriteia.github.io/REDACT/
+repo_url: https://github.com/CentreSecuriteIA/REDACT
+repo_name: CentreSecuriteIA/REDACT
+edit_uri: edit/main/docs/
+
+# docs/README.md is what GitHub shows for the docs/ folder. On the site,
+# index.md includes it (pymdownx.snippets), so README.md itself is left out.
+exclude_docs: |
+  /README.md
+
+theme:
+  name: material
+  features:
+    - navigation.sections
+    - navigation.top
+    - navigation.tracking
+    - content.code.copy
+    - search.suggest
+    - toc.follow
+  palette:
+    - media: "(prefers-color-scheme: light)"
+      scheme: default
+      primary: indigo
+      accent: indigo
+      toggle:
+        icon: material/weather-night
+        name: Switch to dark mode
+    - media: "(prefers-color-scheme: dark)"
+      scheme: slate
+      primary: indigo
+      accent: indigo
+      toggle:
+        icon: material/weather-sunny
+        name: Switch to light mode
+
+plugins:
+  - search
+  - mkdocstrings:
+      handlers:
+        python:
+          paths: [src]
+          options:
+            show_root_heading: true
+            show_source: true
+            show_signature_annotations: true
+            separate_signature: true
+            merge_init_into_class: true
+            members_order: source
+            docstring_section_style: table
+            filters: ["!^_"]
+            docstring_options:
+              # Not every parameter is annotated (**kwargs, resolve=...).
+              warn_missing_types: false
+
+markdown_extensions:
+  - admonition
+  - toc:
+      permalink: true
+  - pymdownx.highlight:
+      anchor_linenums: true
+  - pymdownx.superfences:
+      custom_fences:
+        - name: mermaid
+          class: mermaid
+          format: !!python/name:pymdownx.superfences.fence_code_format
+  - pymdownx.inlinehilite
+  - pymdownx.snippets:
+      base_path: ["."]
+      check_paths: true
+
+# With --strict, a link to a missing page or a missing anchor fails the build.
+validation:
+  omitted_files: warn
+  absolute_links: warn
+  unrecognized_links: warn
+  anchors: warn
+
+nav:
+  - Home: index.md
+  - Overview: overview.md
+  - Running a pipeline: running.md
+  - Configuration: configuration.md
+  - Jailbreak techniques: techniques.md
+  - Extending: extending.md
+  - Stages:
+      - Constitution: stages/constitution.md
+      - Inputs: stages/inputs.md
+      - Outputs: stages/outputs.md
+      - Paraphrase: stages/paraphrase.md
+      - Jailbreaks: stages/jailbreaks.md
+      - Conversations: stages/conversations.md
+      - Build: stages/build.md
+  - Internals:
+      - Top level: internals/top-level.md
+      - llms: internals/llms.md
+      - llm_pipeline: internals/llm_pipeline.md
+      - dataset: internals/dataset.md
+      - jailbreak: internals/jailbreak.md
+      - residency: internals/residency.md
+      - telemetry: internals/telemetry.md
+  - API Reference:
+      - Overview: api/index.md
+      - Stages: api/stages.md
+      - Recipes and runs: api/runs.md
+      - LLMs: api/llms.md
+      - Dataset: api/dataset.md
+      - Jailbreak: api/jailbreak.md
+      - Multi-turn: api/multi_turn.md
+      - Residency: api/residency.md
+      - Telemetry: api/telemetry.md

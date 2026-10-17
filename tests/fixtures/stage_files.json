@@ -1,0 +1,367 @@
+{
+ "conversations": {
+  "resumed": {
+   "conversations.csv": [
+    ["sample_id", "input_id", "iteration", "setting", "turns_used", "stop_reason", "transcript", "category", "entry_type", "source"],
+    ["a21192b2ba4f4da7", "given-1", "0", "conversation", "2", "max_turns", "[{\"type\": \"message\", \"actor\": \"u\", \"content\": \"question 0\", \"role\": \"user\", \"model\": null, \"meta\": {}}, {\"type\": \"reply\", \"actor\": \"b\", \"content\": \"ANSWER to: question 0\", \"role\": \"assistant\", \"model\": \"m\", \"meta\": {}}]", "Cyber", "", "conversation"],
+    ["da3cfbb953e64d9b", "given-1", "1", "conversation", "2", "max_turns", "[{\"type\": \"message\", \"actor\": \"u\", \"content\": \"question 0\", \"role\": \"user\", \"model\": null, \"meta\": {}}, {\"type\": \"reply\", \"actor\": \"b\", \"content\": \"ANSWER to: question 0\", \"role\": \"assistant\", \"model\": \"m\", \"meta\": {}}]", "Cyber", "", "conversation"],
+    ["1e6db6f7624290f0", "4fdd288d632ab655", "0", "conversation", "2", "max_turns", "[{\"type\": \"message\", \"actor\": \"u\", \"content\": \"question 1\", \"role\": \"user\", \"model\": null, \"meta\": {}}, {\"type\": \"reply\", \"actor\": \"b\", \"content\": \"ANSWER to: question 1\", \"role\": \"assistant\", \"model\": \"m\", \"meta\": {}}]", "Cyber", "", "conversation"],
+    ["e1b4d185c4c52629", "4fdd288d632ab655", "1", "conversation", "2", "max_turns", "[{\"type\": \"message\", \"actor\": \"u\", \"content\": \"question 1\", \"role\": \"user\", \"model\": null, \"meta\": {}}, {\"type\": \"reply\", \"actor\": \"b\", \"content\": \"ANSWER to: question 1\", \"role\": \"assistant\", \"model\": \"m\", \"meta\": {}}]", "Cyber", "", "conversation"],
+    ["7de89ec5f99524a4", "padded", "0", "conversation", "2", "max_turns", "[{\"type\": \"message\", \"actor\": \"u\", \"content\": \"question 2\", \"role\": \"user\", \"model\": null, \"meta\": {}}, {\"type\": \"reply\", \"actor\": \"b\", \"content\": \"ANSWER to: question 2\", \"role\": \"assistant\", \"model\": \"m\", \"meta\": {}}]", "Fraud", "", "conversation"],
+    ["89664e9411958fe5", "padded", "1", "conversation", "2", "max_turns", "[{\"type\": \"message\", \"actor\": \"u\", \"content\": \"question 2\", \"role\": \"user\", \"model\": null, \"meta\": {}}, {\"type\": \"reply\", \"actor\": \"b\", \"content\": \"ANSWER to: question 2\", \"role\": \"assistant\", \"model\": \"m\", \"meta\": {}}]", "Fraud", "", "conversation"],
+    ["7373c2882bd5ac08", "8b1921a8385c31f5", "0", "conversation", "2", "max_turns", "[{\"type\": \"message\", \"actor\": \"u\", \"content\": \"question 4\", \"role\": \"user\", \"model\": null, \"meta\": {}}, {\"type\": \"reply\", \"actor\": \"b\", \"content\": \"ANSWER to: question 4\", \"role\": \"assistant\", \"model\": \"m\", \"meta\": {}}]", "Cyber", "", "conversation"],
+    ["8db77b6517ad9e80", "8b1921a8385c31f5", "1", "conversation", "2", "max_turns", "[{\"type\": \"message\", \"actor\": \"u\", \"content\": \"question 4\", \"role\": \"user\", \"model\": null, \"meta\": {}}, {\"type\": \"reply\", \"actor\": \"b\", \"content\": \"ANSWER to: question 4\", \"role\": \"assistant\", \"model\": \"m\", \"meta\": {}}]", "Cyber", "", "conversation"],
+    ["8aa8991fbc8e8296", "77", "0", "conversation", "2", "max_turns", "[{\"type\": \"message\", \"actor\": \"u\", \"content\": \"question 5\", \"role\": \"user\", \"model\": null, \"meta\": {}}, {\"type\": \"reply\", \"actor\": \"b\", \"content\": \"ANSWER to: question 5\", \"role\": \"assistant\", \"model\": \"m\", \"meta\": {}}]", "Fraud", "", "conversation"],
+    ["e1ba0f59445b0342", "77", "1", "conversation", "2", "max_turns", "[{\"type\": \"message\", \"actor\": \"u\", \"content\": \"question 5\", \"role\": \"user\", \"model\": null, \"meta\": {}}, {\"type\": \"reply\", \"actor\": \"b\", \"content\": \"ANSWER to: question 5\", \"role\": \"assistant\", \"model\": \"m\", \"meta\": {}}]", "Fraud", "", "conversation"]
+   ],
+   "conversations.manifest.jsonl": [
+    {"category": "Cyber", "entry_type": "", "input_id": "given-1", "iteration": 0},
+    {"category": "Cyber", "entry_type": "", "input_id": "given-1", "iteration": 1},
+    {"category": "Cyber", "entry_type": "", "input_id": "4fdd288d632ab655", "iteration": 0},
+    {"category": "Cyber", "entry_type": "", "input_id": "4fdd288d632ab655", "iteration": 1},
+    {"category": "Fraud", "entry_type": "", "input_id": "padded", "iteration": 0},
+    {"category": "Fraud", "entry_type": "", "input_id": "padded", "iteration": 1},
+    {"category": "Fraud", "entry_type": "", "input_id": "given-1", "iteration": 0},
+    {"category": "Fraud", "entry_type": "", "input_id": "given-1", "iteration": 1},
+    {"category": "Cyber", "entry_type": "", "input_id": "8b1921a8385c31f5", "iteration": 0},
+    {"category": "Cyber", "entry_type": "", "input_id": "8b1921a8385c31f5", "iteration": 1},
+    {"category": "Fraud", "entry_type": "", "input_id": "77", "iteration": 0},
+    {"category": "Fraud", "entry_type": "", "input_id": "77", "iteration": 1}
+   ],
+   "conversations.state.jsonl": [
+    {},
+    {"input_id": "given-1", "iteration": 0, "stop_reason": "max_turns"},
+    {"input_id": "given-1", "iteration": 1, "stop_reason": "max_turns"},
+    {"input_id": "4fdd288d632ab655", "iteration": 0, "stop_reason": "max_turns"},
+    {"input_id": "4fdd288d632ab655", "iteration": 1, "stop_reason": "max_turns"},
+    {"input_id": "padded", "iteration": 0, "stop_reason": "max_turns"},
+    {"input_id": "padded", "iteration": 1, "stop_reason": "max_turns"},
+    {"input_id": "8b1921a8385c31f5", "iteration": 0, "stop_reason": "max_turns"},
+    {"input_id": "8b1921a8385c31f5", "iteration": 1, "stop_reason": "max_turns"},
+    {"input_id": "77", "iteration": 0, "stop_reason": "max_turns"},
+    {"input_id": "77", "iteration": 1, "stop_reason": "max_turns"}
+   ]
+  },
+  "stopped": {
+   "conversations.csv": [
+    ["sample_id", "input_id", "iteration", "setting", "turns_used", "stop_reason", "transcript", "category", "entry_type", "source"],
+    ["a21192b2ba4f4da7", "given-1", "0", "conversation", "2", "max_turns", "[{\"type\": \"message\", \"actor\": \"u\", \"content\": \"question 0\", \"role\": \"user\", \"model\": null, \"meta\": {}}, {\"type\": \"reply\", \"actor\": \"b\", \"content\": \"ANSWER to: question 0\", \"role\": \"assistant\", \"model\": \"m\", \"meta\": {}}]", "Cyber", "", "conversation"],
+    ["da3cfbb953e64d9b", "given-1", "1", "conversation", "2", "max_turns", "[{\"type\": \"message\", \"actor\": \"u\", \"content\": \"question 0\", \"role\": \"user\", \"model\": null, \"meta\": {}}, {\"type\": \"reply\", \"actor\": \"b\", \"content\": \"ANSWER to: question 0\", \"role\": \"assistant\", \"model\": \"m\", \"meta\": {}}]", "Cyber", "", "conversation"],
+    ["1e6db6f7624290f0", "4fdd288d632ab655", "0", "conversation", "2", "max_turns", "[{\"type\": \"message\", \"actor\": \"u\", \"content\": \"question 1\", \"role\": \"user\", \"model\": null, \"meta\": {}}, {\"type\": \"reply\", \"actor\": \"b\", \"content\": \"ANSWER to: question 1\", \"role\": \"assistant\", \"model\": \"m\", \"meta\": {}}]", "Cyber", "", "conversation"],
+    ["e1b4d185c4c52629", "4fdd288d632ab655", "1", "conversation", "2", "max_turns", "[{\"type\": \"message\", \"actor\": \"u\", \"content\": \"question 1\", \"role\": \"user\", \"model\": null, \"meta\": {}}, {\"type\": \"reply\", \"actor\": \"b\", \"content\": \"ANSWER to: question 1\", \"role\": \"assistant\", \"model\": \"m\", \"meta\": {}}]", "Cyber", "", "conversation"],
+    ["7de89ec5f99524a4", "padded", "0", "conversation", "2", "max_turns", "[{\"type\": \"message\", \"actor\": \"u\", \"content\": \"question 2\", \"role\": \"user\", \"model\": null, \"meta\": {}}, {\"type\": \"reply\", \"actor\": \"b\", \"content\": \"ANSWER to: question 2\", \"role\": \"assistant\", \"model\": \"m\", \"meta\": {}}]", "Fraud", "", "conversation"],
+    ["89664e9411958fe5", "padded", "1", "conversation", "2", "max_turns", "[{\"type\": \"message\", \"actor\": \"u\", \"content\": \"question 2\", \"role\": \"user\", \"model\": null, \"meta\": {}}, {\"type\": \"reply\", \"actor\": \"b\", \"content\": \"ANSWER to: question 2\", \"role\": \"assistant\", \"model\": \"m\", \"meta\": {}}]", "Fraud", "", "conversation"]
+   ],
+   "conversations.manifest.jsonl": [
+    {"category": "Cyber", "entry_type": "", "input_id": "given-1", "iteration": 0},
+    {"category": "Cyber", "entry_type": "", "input_id": "given-1", "iteration": 1},
+    {"category": "Cyber", "entry_type": "", "input_id": "4fdd288d632ab655", "iteration": 0},
+    {"category": "Cyber", "entry_type": "", "input_id": "4fdd288d632ab655", "iteration": 1},
+    {"category": "Fraud", "entry_type": "", "input_id": "padded", "iteration": 0},
+    {"category": "Fraud", "entry_type": "", "input_id": "padded", "iteration": 1},
+    {"category": "Fraud", "entry_type": "", "input_id": "given-1", "iteration": 0},
+    {"category": "Fraud", "entry_type": "", "input_id": "given-1", "iteration": 1},
+    {"category": "Cyber", "entry_type": "", "input_id": "8b1921a8385c31f5", "iteration": 0},
+    {"category": "Cyber", "entry_type": "", "input_id": "8b1921a8385c31f5", "iteration": 1},
+    {"category": "Fraud", "entry_type": "", "input_id": "77", "iteration": 0},
+    {"category": "Fraud", "entry_type": "", "input_id": "77", "iteration": 1}
+   ],
+   "conversations.state.jsonl": [
+    {},
+    {"input_id": "given-1", "iteration": 0, "stop_reason": "max_turns"},
+    {"input_id": "given-1", "iteration": 1, "stop_reason": "max_turns"},
+    {"input_id": "4fdd288d632ab655", "iteration": 0, "stop_reason": "max_turns"},
+    {"input_id": "4fdd288d632ab655", "iteration": 1, "stop_reason": "max_turns"},
+    {"input_id": "padded", "iteration": 0, "stop_reason": "max_turns"},
+    {"input_id": "padded", "iteration": 1, "stop_reason": "max_turns"}
+   ]
+  }
+ },
+ "jailbreaks": {
+  "stopped": {
+   "jailbreaks.coverage.csv": [
+    ["level", "name", "category", "entry_type", "iteration", "count"],
+    ["technique", "broken", "Cyber", "benign", "1", "2"],
+    ["technique", "broken", "Cyber", "harmful", "1", "1"],
+    ["technique", "broken", "Fraud", "harmful", "0", "1"],
+    ["technique", "broken", "Fraud", "harmful", "1", "2"],
+    ["technique", "one_step", "Fraud", "harmful", "1", "1"],
+    ["technique", "two_step", "Cyber", "benign", "0", "2"],
+    ["technique", "two_step", "Cyber", "harmful", "0", "1"],
+    ["technique", "two_step", "Fraud", "harmful", "0", "2"]
+   ],
+   "jailbreaks.csv": [
+    ["sample_id", "prompt", "category", "entry_type", "turn", "accepted", "note", "input_id", "jailbreak", "technique", "technique_info", "complexity", "num_techniques", "is_noop", "reasoning", "iteration", "combination_spec_version"],
+    ["8aa8991fbc8e8296", "zq5 sixth", "Fraud", "harmful", "5", "False", "said \"hi\"", "77", "zq5 sixth", "broken", "ERROR: chain failed", "0", "1", "True", "chain failed", "0", "1.0"]
+   ],
+   "jailbreaks.manifest.jsonl": [
+    {"sample_id": "4897ac10b496f1d8", "iteration": 0, "combination": ["two_step"], "settings": {"max_complexity": 6, "max_obfuscations": 2, "include_hacking": true, "include_manipulation": true, "include_obfuscation": true, "include_requests": true, "exact_techniques": 1, "seed": 5}, "category": "Cyber", "entry_type": "benign", "status": "planned"},
+    {"sample_id": "867ec320a9a53194", "iteration": 0, "combination": ["two_step"], "settings": {"max_complexity": 6, "max_obfuscations": 2, "include_hacking": true, "include_manipulation": true, "include_obfuscation": true, "include_requests": true, "exact_techniques": 1, "seed": 5}, "category": "Cyber", "entry_type": "benign", "status": "planned"},
+    {"sample_id": "given-1", "iteration": 0, "combination": ["two_step"], "settings": {"max_complexity": 6, "max_obfuscations": 2, "include_hacking": true, "include_manipulation": true, "include_obfuscation": true, "include_requests": true, "exact_techniques": 1, "seed": 5}, "category": "Cyber", "entry_type": "harmful", "status": "planned"},
+    {"sample_id": "77", "iteration": 0, "combination": ["broken"], "settings": {"max_complexity": 6, "max_obfuscations": 2, "include_hacking": true, "include_manipulation": true, "include_obfuscation": true, "include_requests": true, "exact_techniques": 1, "seed": 5}, "category": "Fraud", "entry_type": "harmful", "status": "planned"},
+    {"sample_id": "given-1", "iteration": 0, "combination": ["two_step"], "settings": {"max_complexity": 6, "max_obfuscations": 2, "include_hacking": true, "include_manipulation": true, "include_obfuscation": true, "include_requests": true, "exact_techniques": 1, "seed": 5}, "category": "Fraud", "entry_type": "harmful", "status": "planned"},
+    {"sample_id": "padded", "iteration": 0, "combination": ["two_step"], "settings": {"max_complexity": 6, "max_obfuscations": 2, "include_hacking": true, "include_manipulation": true, "include_obfuscation": true, "include_requests": true, "exact_techniques": 1, "seed": 5}, "category": "Fraud", "entry_type": "harmful", "status": "planned"},
+    {"sample_id": "4897ac10b496f1d8", "iteration": 1, "combination": ["broken"], "settings": {"max_complexity": 4, "max_obfuscations": 2, "include_hacking": true, "include_manipulation": true, "include_obfuscation": true, "include_requests": true, "seed": 5}, "category": "Cyber", "entry_type": "benign", "status": "planned"},
+    {"sample_id": "867ec320a9a53194", "iteration": 1, "combination": ["broken"], "settings": {"max_complexity": 4, "max_obfuscations": 2, "include_hacking": true, "include_manipulation": true, "include_obfuscation": true, "include_requests": true, "seed": 5}, "category": "Cyber", "entry_type": "benign", "status": "planned"},
+    {"sample_id": "given-1", "iteration": 1, "combination": ["broken"], "settings": {"max_complexity": 4, "max_obfuscations": 2, "include_hacking": true, "include_manipulation": true, "include_obfuscation": true, "include_requests": true, "seed": 5}, "category": "Cyber", "entry_type": "harmful", "status": "planned"},
+    {"sample_id": "77", "iteration": 1, "combination": ["one_step"], "settings": {"max_complexity": 4, "max_obfuscations": 2, "include_hacking": true, "include_manipulation": true, "include_obfuscation": true, "include_requests": true, "seed": 5}, "category": "Fraud", "entry_type": "harmful", "status": "planned"},
+    {"sample_id": "given-1", "iteration": 1, "combination": ["broken"], "settings": {"max_complexity": 4, "max_obfuscations": 2, "include_hacking": true, "include_manipulation": true, "include_obfuscation": true, "include_requests": true, "seed": 5}, "category": "Fraud", "entry_type": "harmful", "status": "planned"},
+    {"sample_id": "padded", "iteration": 1, "combination": ["broken"], "settings": {"max_complexity": 4, "max_obfuscations": 2, "include_hacking": true, "include_manipulation": true, "include_obfuscation": true, "include_requests": true, "seed": 5}, "category": "Fraud", "entry_type": "harmful", "status": "planned"}
+   ],
+   "jailbreaks.state.jsonl": [
+    {},
+    {"input_id": "77", "iteration": 0}
+   ]
+  },
+  "resumed": {
+   "jailbreaks.coverage.csv": [
+    ["level", "name", "category", "entry_type", "iteration", "count"],
+    ["technique", "broken", "Cyber", "benign", "1", "2"],
+    ["technique", "broken", "Cyber", "harmful", "1", "1"],
+    ["technique", "broken", "Fraud", "harmful", "0", "1"],
+    ["technique", "broken", "Fraud", "harmful", "1", "2"],
+    ["technique", "one_step", "Fraud", "harmful", "1", "1"],
+    ["technique", "two_step", "Cyber", "benign", "0", "2"],
+    ["technique", "two_step", "Cyber", "harmful", "0", "1"],
+    ["technique", "two_step", "Fraud", "harmful", "0", "2"]
+   ],
+   "jailbreaks.csv": [
+    ["sample_id", "prompt", "category", "entry_type", "turn", "accepted", "note", "input_id", "jailbreak", "technique", "technique_info", "complexity", "num_techniques", "is_noop", "reasoning", "iteration", "combination_spec_version"],
+    ["8aa8991fbc8e8296", "zq5 sixth", "Fraud", "harmful", "5", "False", "said \"hi\"", "77", "zq5 sixth", "broken", "ERROR: chain failed", "0", "1", "True", "chain failed", "0", "1.0"],
+    ["d9a44424f0cc039d", "zq1 second", "Cyber", "benign", "1", "True", "N/A", "4897ac10b496f1d8", "S2:S1:zq1 second", "two_step", "two_step", "0", "1", "False", "", "0", "1.0"],
+    ["24b251cf8eec34db", "zq4 fifth", "Cyber", "benign", "4", "True", "", "867ec320a9a53194", "S2:S1:zq4 fifth", "two_step", "two_step", "0", "1", "False", "", "0", "1.0"],
+    ["8ccead87fd5be7fe", "zq3 fourth, the id of the first", "Fraud", "harmful", "3", "True", "two\nlines", "given-1", "S2:S1:zq3 fourth, the id of the first", "two_step", "two_step", "0", "1", "False", "", "0", "1.0"],
+    ["8ccead87fd5be7fe", "zq3 fourth, the id of the first", "Fraud", "harmful", "3", "True", "two\nlines", "given-1", "S2:S1:zq3 fourth, the id of the first", "two_step", "two_step", "0", "1", "False", "", "0", "1.0"],
+    ["0173deca90e6e906", "zq1 second", "Cyber", "benign", "1", "False", "N/A", "4897ac10b496f1d8", "zq1 second", "broken", "ERROR: chain failed", "0", "1", "True", "chain failed", "1", "1.0"],
+    ["1cfdebb5e7ce1aa2", "zq4 fifth", "Cyber", "benign", "4", "False", "", "867ec320a9a53194", "zq4 fifth", "broken", "ERROR: chain failed", "0", "1", "True", "chain failed", "1", "1.0"],
+    ["da3cfbb953e64d9b", "zq3 fourth, the id of the first", "Fraud", "harmful", "3", "False", "two\nlines", "given-1", "zq3 fourth, the id of the first", "broken", "ERROR: chain failed", "0", "1", "True", "chain failed", "1", "1.0"],
+    ["d89c7a87d582616a", "zq2 third", "Fraud", "harmful", "2", "True", "a, b", "padded", "S2:S1:zq2 third", "two_step", "two_step", "0", "1", "False", "", "0", "1.0"],
+    ["4187698902316996", "zq5 sixth", "Fraud", "harmful", "5", "True", "said \"hi\"", "77", "S1:zq5 sixth", "one_step", "one_step", "0", "1", "False", "", "1", "1.0"],
+    ["da3cfbb953e64d9b", "zq3 fourth, the id of the first", "Fraud", "harmful", "3", "False", "two\nlines", "given-1", "zq3 fourth, the id of the first", "broken", "ERROR: chain failed", "0", "1", "True", "chain failed", "1", "1.0"],
+    ["89664e9411958fe5", "zq2 third", "Fraud", "harmful", "2", "False", "a, b", "padded", "zq2 third", "broken", "ERROR: chain failed", "0", "1", "True", "chain failed", "1", "1.0"]
+   ],
+   "jailbreaks.manifest.jsonl": [
+    {"sample_id": "4897ac10b496f1d8", "iteration": 0, "combination": ["two_step"], "settings": {"max_complexity": 6, "max_obfuscations": 2, "include_hacking": true, "include_manipulation": true, "include_obfuscation": true, "include_requests": true, "exact_techniques": 1, "seed": 5}, "category": "Cyber", "entry_type": "benign", "status": "planned"},
+    {"sample_id": "867ec320a9a53194", "iteration": 0, "combination": ["two_step"], "settings": {"max_complexity": 6, "max_obfuscations": 2, "include_hacking": true, "include_manipulation": true, "include_obfuscation": true, "include_requests": true, "exact_techniques": 1, "seed": 5}, "category": "Cyber", "entry_type": "benign", "status": "planned"},
+    {"sample_id": "given-1", "iteration": 0, "combination": ["two_step"], "settings": {"max_complexity": 6, "max_obfuscations": 2, "include_hacking": true, "include_manipulation": true, "include_obfuscation": true, "include_requests": true, "exact_techniques": 1, "seed": 5}, "category": "Cyber", "entry_type": "harmful", "status": "planned"},
+    {"sample_id": "77", "iteration": 0, "combination": ["broken"], "settings": {"max_complexity": 6, "max_obfuscations": 2, "include_hacking": true, "include_manipulation": true, "include_obfuscation": true, "include_requests": true, "exact_techniques": 1, "seed": 5}, "category": "Fraud", "entry_type": "harmful", "status": "planned"},
+    {"sample_id": "given-1", "iteration": 0, "combination": ["two_step"], "settings": {"max_complexity": 6, "max_obfuscations": 2, "include_hacking": true, "include_manipulation": true, "include_obfuscation": true, "include_requests": true, "exact_techniques": 1, "seed": 5}, "category": "Fraud", "entry_type": "harmful", "status": "planned"},
+    {"sample_id": "padded", "iteration": 0, "combination": ["two_step"], "settings": {"max_complexity": 6, "max_obfuscations": 2, "include_hacking": true, "include_manipulation": true, "include_obfuscation": true, "include_requests": true, "exact_techniques": 1, "seed": 5}, "category": "Fraud", "entry_type": "harmful", "status": "planned"},
+    {"sample_id": "4897ac10b496f1d8", "iteration": 1, "combination": ["broken"], "settings": {"max_complexity": 4, "max_obfuscations": 2, "include_hacking": true, "include_manipulation": true, "include_obfuscation": true, "include_requests": true, "seed": 5}, "category": "Cyber", "entry_type": "benign", "status": "planned"},
+    {"sample_id": "867ec320a9a53194", "iteration": 1, "combination": ["broken"], "settings": {"max_complexity": 4, "max_obfuscations": 2, "include_hacking": true, "include_manipulation": true, "include_obfuscation": true, "include_requests": true, "seed": 5}, "category": "Cyber", "entry_type": "benign", "status": "planned"},
+    {"sample_id": "given-1", "iteration": 1, "combination": ["broken"], "settings": {"max_complexity": 4, "max_obfuscations": 2, "include_hacking": true, "include_manipulation": true, "include_obfuscation": true, "include_requests": true, "seed": 5}, "category": "Cyber", "entry_type": "harmful", "status": "planned"},
+    {"sample_id": "77", "iteration": 1, "combination": ["one_step"], "settings": {"max_complexity": 4, "max_obfuscations": 2, "include_hacking": true, "include_manipulation": true, "include_obfuscation": true, "include_requests": true, "seed": 5}, "category": "Fraud", "entry_type": "harmful", "status": "planned"},
+    {"sample_id": "given-1", "iteration": 1, "combination": ["broken"], "settings": {"max_complexity": 4, "max_obfuscations": 2, "include_hacking": true, "include_manipulation": true, "include_obfuscation": true, "include_requests": true, "seed": 5}, "category": "Fraud", "entry_type": "harmful", "status": "planned"},
+    {"sample_id": "padded", "iteration": 1, "combination": ["broken"], "settings": {"max_complexity": 4, "max_obfuscations": 2, "include_hacking": true, "include_manipulation": true, "include_obfuscation": true, "include_requests": true, "seed": 5}, "category": "Fraud", "entry_type": "harmful", "status": "planned"}
+   ],
+   "jailbreaks.state.jsonl": [
+    {},
+    {"input_id": "77", "iteration": 0},
+    {"input_id": "4897ac10b496f1d8", "iteration": 0},
+    {"input_id": "867ec320a9a53194", "iteration": 0},
+    {"input_id": "given-1", "iteration": 0},
+    {"input_id": "given-1", "iteration": 0},
+    {"input_id": "4897ac10b496f1d8", "iteration": 1},
+    {"input_id": "867ec320a9a53194", "iteration": 1},
+    {"input_id": "given-1", "iteration": 1},
+    {"input_id": "padded", "iteration": 0},
+    {"input_id": "77", "iteration": 1},
+    {"input_id": "given-1", "iteration": 1},
+    {"input_id": "padded", "iteration": 1}
+   ],
+   "variations.coverage.csv": [
+    ["level", "name", "category", "entry_type", "iteration", "count"],
+    ["technique", "broken", "Fraud", "harmful", "0", "1"],
+    ["technique", "two_step", "Cyber", "benign", "0", "2"],
+    ["technique", "two_step", "Cyber", "harmful", "0", "1"],
+    ["technique", "two_step", "Fraud", "harmful", "0", "2"],
+    ["technique", "one_step", "", "", "", "0"]
+   ],
+   "variations.csv": [
+    ["sample_id", "prompt", "category", "entry_type", "turn", "accepted", "note", "input_id", "jailbreak", "technique", "technique_info", "complexity", "num_techniques", "is_noop", "reasoning", "iteration", "combination_spec_version"],
+    ["8aa8991fbc8e8296", "zq5 sixth", "Fraud", "harmful", "5", "False", "said \"hi\"", "77", "zq5 sixth", "broken", "ERROR: chain failed", "0", "1", "True", "chain failed", "0", "1.0"],
+    ["d9a44424f0cc039d", "zq1 second", "Cyber", "benign", "1", "True", "N/A", "4897ac10b496f1d8", "S2:S1:zq1 second", "two_step", "two_step", "0", "1", "False", "", "0", "1.0"],
+    ["24b251cf8eec34db", "zq4 fifth", "Cyber", "benign", "4", "True", "", "867ec320a9a53194", "S2:S1:zq4 fifth", "two_step", "two_step", "0", "1", "False", "", "0", "1.0"],
+    ["8ccead87fd5be7fe", "zq3 fourth, the id of the first", "Fraud", "harmful", "3", "True", "two\nlines", "given-1", "S2:S1:zq3 fourth, the id of the first", "two_step", "two_step", "0", "1", "False", "", "0", "1.0"],
+    ["8ccead87fd5be7fe", "zq3 fourth, the id of the first", "Fraud", "harmful", "3", "True", "two\nlines", "given-1", "S2:S1:zq3 fourth, the id of the first", "two_step", "two_step", "0", "1", "False", "", "0", "1.0"],
+    ["d89c7a87d582616a", "zq2 third", "Fraud", "harmful", "2", "True", "a, b", "padded", "S2:S1:zq2 third", "two_step", "two_step", "0", "1", "False", "", "0", "1.0"]
+   ],
+   "variations.manifest.jsonl": [
+    {"sample_id": "4897ac10b496f1d8", "iteration": 0, "combination": ["two_step"], "settings": {"exact_techniques": 1, "seed": 5}, "category": "Cyber", "entry_type": "benign", "status": "planned"},
+    {"sample_id": "867ec320a9a53194", "iteration": 0, "combination": ["two_step"], "settings": {"exact_techniques": 1, "seed": 5}, "category": "Cyber", "entry_type": "benign", "status": "planned"},
+    {"sample_id": "given-1", "iteration": 0, "combination": ["two_step"], "settings": {"exact_techniques": 1, "seed": 5}, "category": "Cyber", "entry_type": "harmful", "status": "planned"},
+    {"sample_id": "77", "iteration": 0, "combination": ["broken"], "settings": {"exact_techniques": 1, "seed": 5}, "category": "Fraud", "entry_type": "harmful", "status": "planned"},
+    {"sample_id": "given-1", "iteration": 0, "combination": ["two_step"], "settings": {"exact_techniques": 1, "seed": 5}, "category": "Fraud", "entry_type": "harmful", "status": "planned"},
+    {"sample_id": "padded", "iteration": 0, "combination": ["two_step"], "settings": {"exact_techniques": 1, "seed": 5}, "category": "Fraud", "entry_type": "harmful", "status": "planned"}
+   ],
+   "variations.state.jsonl": [
+    {},
+    {"input_id": "77", "iteration": 0},
+    {"input_id": "4897ac10b496f1d8", "iteration": 0},
+    {"input_id": "867ec320a9a53194", "iteration": 0},
+    {"input_id": "given-1", "iteration": 0},
+    {"input_id": "given-1", "iteration": 0},
+    {"input_id": "padded", "iteration": 0}
+   ]
+  }
+ },
+ "outputs": {
+  "resumed": {
+   "output_responses.csv": [
+    ["input_id", "input_prompt", "category", "subcategory", "entry_type", "model", "source", "sample_id", "output_response", "accepted", "rejection_reason"],
+    ["given-1", "zq0 question", "Cyber", "phishing", "harmful", "gen-model", "constitution", "ca653b8ec1bad10d", "answer zq0", "True", ""],
+    ["8067cf5991e9144b", "zq1 question", "Cyber", "nan", "benign", "gen-model", "constitution", "32000ce85144b0e3", "answer zq1", "False", "No: weak zq1"],
+    ["padded", "zq2 question", "Fraud", "", "harmful", "gen-model", "constitution", "0dcf5a99b052193f", "answer zq2", "True", ""],
+    ["given-1", "zq3 question", "Fraud", "N/A", "harmful", "gen-model", "constitution", "bfa427fac2412734", "answer zq3", "False", "No: weak zq3"],
+    ["1d97520eca276324", "zq4 question", "Cyber", "a, b", "benign", "gen-model", "constitution", "8693e17fdf51ca37", "answer zq4", "True", ""],
+    ["77", "zq5 question", "Fraud", "cards", "harmful", "gen-model", "constitution", "50dcf36526094e94", "answer zq5", "False", "No: weak zq5"]
+   ],
+   "output_responses.manifest.jsonl": [
+    {"input_id": "given-1", "status": "planned"},
+    {"input_id": "8067cf5991e9144b", "status": "planned"},
+    {"input_id": "padded", "status": "planned"},
+    {"input_id": "given-1", "status": "planned"},
+    {"input_id": "1d97520eca276324", "status": "planned"},
+    {"input_id": "77", "status": "planned"}
+   ],
+   "output_responses.state.jsonl": [
+    {},
+    {"input_id": "given-1"},
+    {"input_id": "8067cf5991e9144b"},
+    {"input_id": "padded"},
+    {"input_id": "given-1"},
+    {"input_id": "1d97520eca276324"},
+    {"input_id": "77"}
+   ]
+  },
+  "stopped": {
+   "output_responses.csv": [
+    ["input_id", "input_prompt", "category", "subcategory", "entry_type", "model", "source", "sample_id", "output_response", "accepted", "rejection_reason"],
+    ["given-1", "zq0 question", "Cyber", "phishing", "harmful", "gen-model", "constitution", "ca653b8ec1bad10d", "answer zq0", "True", ""],
+    ["8067cf5991e9144b", "zq1 question", "Cyber", "nan", "benign", "gen-model", "constitution", "32000ce85144b0e3", "answer zq1", "False", "No: weak zq1"],
+    ["padded", "zq2 question", "Fraud", "", "harmful", "gen-model", "constitution", "0dcf5a99b052193f", "answer zq2", "True", ""],
+    ["given-1", "zq3 question", "Fraud", "N/A", "harmful", "gen-model", "constitution", "bfa427fac2412734", "answer zq3", "False", "No: weak zq3"]
+   ],
+   "output_responses.manifest.jsonl": [
+    {"input_id": "given-1", "status": "planned"},
+    {"input_id": "8067cf5991e9144b", "status": "planned"},
+    {"input_id": "padded", "status": "planned"},
+    {"input_id": "given-1", "status": "planned"},
+    {"input_id": "1d97520eca276324", "status": "planned"},
+    {"input_id": "77", "status": "planned"}
+   ],
+   "output_responses.state.jsonl": [
+    {},
+    {"input_id": "given-1"},
+    {"input_id": "8067cf5991e9144b"},
+    {"input_id": "padded"},
+    {"input_id": "given-1"}
+   ]
+  }
+ },
+ "paraphrases": {
+  "resumed": {
+   "paraphrases_inputs.csv": [
+    ["sample_id", "input_id", "iteration", "sample", "category", "entry_type", "paraphrase_model", "accepted", "reasoning", "source"],
+    ["fd14d9aca079d1b5", "given-1", "0", "venice-paraphraser says alpha prompt", "Cyber", "harmful", "venice-paraphraser", "True", "", "paraphrase_inputs"],
+    ["c56a017f38f59d4a", "2084ee23d0d97ae6", "0", "venice-paraphraser says beta prompt", "Cyber", "benign", "venice-paraphraser", "True", "", "paraphrase_inputs"],
+    ["d34ff11639d24f78", "given-1", "0", "venice-paraphraser says delta prompt", "Fraud", "harmful", "venice-paraphraser", "False", "meaning changed", "paraphrase_inputs"],
+    ["b55e2bce800a4d95", "cd7d45cc1f5a2100", "0", "venice-paraphraser says epsilon prompt", "Cyber", "benign", "venice-paraphraser", "True", "", "paraphrase_inputs"],
+    ["d5ad389a25754399", "2084ee23d0d97ae6", "1", "_para_second says beta prompt", "Cyber", "benign", "_para_second", "True", "", "paraphrase_inputs"],
+    ["9471dbd89fdb118f", "cd7d45cc1f5a2100", "1", "_para_second says epsilon prompt", "Cyber", "benign", "_para_second", "True", "", "paraphrase_inputs"],
+    ["561591746817864c", "77", "0", "venice-paraphraser says zeta prompt", "Fraud", "harmful", "venice-paraphraser", "True", "", "paraphrase_inputs"]
+   ],
+   "paraphrases_inputs.manifest.jsonl": [
+    {"category": "Cyber", "entry_type": "harmful", "input_id": "given-1", "iteration": 0, "paraphrase_model": "venice-paraphraser", "status": "planned"},
+    {"category": "Cyber", "entry_type": "harmful", "input_id": "given-1", "iteration": 1, "paraphrase_model": "venice-paraphraser", "status": "planned"},
+    {"category": "Cyber", "entry_type": "benign", "input_id": "2084ee23d0d97ae6", "iteration": 0, "paraphrase_model": "venice-paraphraser", "status": "planned"},
+    {"category": "Cyber", "entry_type": "benign", "input_id": "2084ee23d0d97ae6", "iteration": 1, "paraphrase_model": "_para_second", "status": "planned"},
+    {"category": "Fraud", "entry_type": "harmful", "input_id": "padded", "iteration": 0, "paraphrase_model": "_para_second", "status": "planned"},
+    {"category": "Fraud", "entry_type": "harmful", "input_id": "padded", "iteration": 1, "paraphrase_model": "_para_second", "status": "planned"},
+    {"category": "Fraud", "entry_type": "harmful", "input_id": "given-1", "iteration": 0, "paraphrase_model": "venice-paraphraser", "status": "planned"},
+    {"category": "Fraud", "entry_type": "harmful", "input_id": "given-1", "iteration": 1, "paraphrase_model": "venice-paraphraser", "status": "planned"},
+    {"category": "Cyber", "entry_type": "benign", "input_id": "cd7d45cc1f5a2100", "iteration": 0, "paraphrase_model": "venice-paraphraser", "status": "planned"},
+    {"category": "Cyber", "entry_type": "benign", "input_id": "cd7d45cc1f5a2100", "iteration": 1, "paraphrase_model": "_para_second", "status": "planned"},
+    {"category": "Fraud", "entry_type": "harmful", "input_id": "77", "iteration": 0, "paraphrase_model": "venice-paraphraser", "status": "planned"},
+    {"category": "Fraud", "entry_type": "harmful", "input_id": "77", "iteration": 1, "paraphrase_model": "venice-paraphraser", "status": "planned"}
+   ],
+   "paraphrases_inputs.state.jsonl": [
+    {},
+    {"input_id": "given-1", "iteration": 0, "paraphrase_model": "venice-paraphraser", "status": "accepted"},
+    {"input_id": "given-1", "iteration": 1, "paraphrase_model": "venice-paraphraser", "status": "dropped_dedup"},
+    {"input_id": "2084ee23d0d97ae6", "iteration": 0, "paraphrase_model": "venice-paraphraser", "status": "accepted"},
+    {"input_id": "given-1", "iteration": 0, "paraphrase_model": "venice-paraphraser", "status": "rejected"},
+    {"input_id": "given-1", "iteration": 1, "paraphrase_model": "venice-paraphraser", "status": "dropped_dedup"},
+    {"input_id": "cd7d45cc1f5a2100", "iteration": 0, "paraphrase_model": "venice-paraphraser", "status": "accepted"},
+    {"input_id": "2084ee23d0d97ae6", "iteration": 1, "paraphrase_model": "_para_second", "status": "accepted"},
+    {"input_id": "padded", "iteration": 0, "paraphrase_model": "_para_second", "status": "dropped_dedup"},
+    {"input_id": "padded", "iteration": 1, "paraphrase_model": "_para_second", "status": "dropped_dedup"},
+    {"input_id": "cd7d45cc1f5a2100", "iteration": 1, "paraphrase_model": "_para_second", "status": "accepted"},
+    {"input_id": "77", "iteration": 0, "paraphrase_model": "venice-paraphraser", "status": "accepted"},
+    {"input_id": "77", "iteration": 1, "paraphrase_model": "venice-paraphraser", "status": "dropped_dedup"}
+   ],
+   "paraphrases_outputs.csv": [
+    ["sample_id", "input_id", "iteration", "sample", "category", "entry_type", "paraphrase_model", "accepted", "reasoning", "source"],
+    ["8ce8d1ee49d95a4f", "o1", "0", "venice-paraphraser says alpha answer", "Cyber", "", "venice-paraphraser", "True", "", "paraphrase_outputs"],
+    ["7d0bbb04deb7b290", "ed191712540e7d8b", "1", "venice-paraphraser says beta answer", "Cyber", "", "venice-paraphraser", "True", "", "paraphrase_outputs"],
+    ["70fd785a44c24957", "o4", "0", "venice-paraphraser says delta answer", "Cyber", "", "venice-paraphraser", "False", "meaning changed", "paraphrase_outputs"],
+    ["3ed8f3be770f193d", "o1", "1", "_para_second says alpha answer", "Cyber", "", "_para_second", "True", "", "paraphrase_outputs"],
+    ["20ee892c68eeb259", "ed191712540e7d8b", "0", "_para_second says beta answer", "Cyber", "", "_para_second", "True", "", "paraphrase_outputs"],
+    ["f49a6172aadd569d", "o4", "1", "_para_second says delta answer", "Cyber", "", "_para_second", "False", "meaning changed", "paraphrase_outputs"]
+   ],
+   "paraphrases_outputs.manifest.jsonl": [
+    {"category": "Cyber", "entry_type": "", "input_id": "o1", "iteration": 0, "paraphrase_model": "venice-paraphraser", "status": "planned"},
+    {"category": "Cyber", "entry_type": "", "input_id": "o1", "iteration": 1, "paraphrase_model": "_para_second", "status": "planned"},
+    {"category": "Cyber", "entry_type": "", "input_id": "ed191712540e7d8b", "iteration": 0, "paraphrase_model": "_para_second", "status": "planned"},
+    {"category": "Cyber", "entry_type": "", "input_id": "ed191712540e7d8b", "iteration": 1, "paraphrase_model": "venice-paraphraser", "status": "planned"},
+    {"category": "Cyber", "entry_type": "", "input_id": "o3", "iteration": 0, "paraphrase_model": "_para_second", "status": "planned"},
+    {"category": "Cyber", "entry_type": "", "input_id": "o3", "iteration": 1, "paraphrase_model": "_para_second", "status": "planned"},
+    {"category": "Cyber", "entry_type": "", "input_id": "o4", "iteration": 0, "paraphrase_model": "venice-paraphraser", "status": "planned"},
+    {"category": "Cyber", "entry_type": "", "input_id": "o4", "iteration": 1, "paraphrase_model": "_para_second", "status": "planned"}
+   ],
+   "paraphrases_outputs.state.jsonl": [
+    {},
+    {"input_id": "o1", "iteration": 0, "paraphrase_model": "venice-paraphraser", "status": "accepted"},
+    {"input_id": "ed191712540e7d8b", "iteration": 1, "paraphrase_model": "venice-paraphraser", "status": "accepted"},
+    {"input_id": "o4", "iteration": 0, "paraphrase_model": "venice-paraphraser", "status": "rejected"},
+    {"input_id": "o1", "iteration": 1, "paraphrase_model": "_para_second", "status": "accepted"},
+    {"input_id": "ed191712540e7d8b", "iteration": 0, "paraphrase_model": "_para_second", "status": "accepted"},
+    {"input_id": "o3", "iteration": 0, "paraphrase_model": "_para_second", "status": "dropped_dedup"},
+    {"input_id": "o3", "iteration": 1, "paraphrase_model": "_para_second", "status": "dropped_dedup"},
+    {"input_id": "o4", "iteration": 1, "paraphrase_model": "_para_second", "status": "rejected"}
+   ]
+  },
+  "stopped": {
+   "paraphrases_inputs.csv": [
+    ["sample_id", "input_id", "iteration", "sample", "category", "entry_type", "paraphrase_model", "accepted", "reasoning", "source"],
+    ["fd14d9aca079d1b5", "given-1", "0", "venice-paraphraser says alpha prompt", "Cyber", "harmful", "venice-paraphraser", "True", "", "paraphrase_inputs"],
+    ["c56a017f38f59d4a", "2084ee23d0d97ae6", "0", "venice-paraphraser says beta prompt", "Cyber", "benign", "venice-paraphraser", "True", "", "paraphrase_inputs"],
+    ["d34ff11639d24f78", "given-1", "0", "venice-paraphraser says delta prompt", "Fraud", "harmful", "venice-paraphraser", "False", "meaning changed", "paraphrase_inputs"],
+    ["b55e2bce800a4d95", "cd7d45cc1f5a2100", "0", "venice-paraphraser says epsilon prompt", "Cyber", "benign", "venice-paraphraser", "True", "", "paraphrase_inputs"]
+   ],
+   "paraphrases_inputs.manifest.jsonl": [
+    {"category": "Cyber", "entry_type": "harmful", "input_id": "given-1", "iteration": 0, "paraphrase_model": "venice-paraphraser", "status": "planned"},
+    {"category": "Cyber", "entry_type": "harmful", "input_id": "given-1", "iteration": 1, "paraphrase_model": "venice-paraphraser", "status": "planned"},
+    {"category": "Cyber", "entry_type": "benign", "input_id": "2084ee23d0d97ae6", "iteration": 0, "paraphrase_model": "venice-paraphraser", "status": "planned"},
+    {"category": "Cyber", "entry_type": "benign", "input_id": "2084ee23d0d97ae6", "iteration": 1, "paraphrase_model": "_para_second", "status": "planned"},
+    {"category": "Fraud", "entry_type": "harmful", "input_id": "padded", "iteration": 0, "paraphrase_model": "_para_second", "status": "planned"},
+    {"category": "Fraud", "entry_type": "harmful", "input_id": "padded", "iteration": 1, "paraphrase_model": "_para_second", "status": "planned"},
+    {"category": "Fraud", "entry_type": "harmful", "input_id": "given-1", "iteration": 0, "paraphrase_model": "venice-paraphraser", "status": "planned"},
+    {"category": "Fraud", "entry_type": "harmful", "input_id": "given-1", "iteration": 1, "paraphrase_model": "venice-paraphraser", "status": "planned"},
+    {"category": "Cyber", "entry_type": "benign", "input_id": "cd7d45cc1f5a2100", "iteration": 0, "paraphrase_model": "venice-paraphraser", "status": "planned"},
+    {"category": "Cyber", "entry_type": "benign", "input_id": "cd7d45cc1f5a2100", "iteration": 1, "paraphrase_model": "_para_second", "status": "planned"},
+    {"category": "Fraud", "entry_type": "harmful", "input_id": "77", "iteration": 0, "paraphrase_model": "venice-paraphraser", "status": "planned"},
+    {"category": "Fraud", "entry_type": "harmful", "input_id": "77", "iteration": 1, "paraphrase_model": "venice-paraphraser", "status": "planned"}
+   ],
+   "paraphrases_inputs.state.jsonl": [
+    {},
+    {"input_id": "given-1", "iteration": 0, "paraphrase_model": "venice-paraphraser", "status": "accepted"},
+    {"input_id": "given-1", "iteration": 1, "paraphrase_model": "venice-paraphraser", "status": "dropped_dedup"},
+    {"input_id": "2084ee23d0d97ae6", "iteration": 0, "paraphrase_model": "venice-paraphraser", "status": "accepted"},
+    {"input_id": "given-1", "iteration": 0, "paraphrase_model": "venice-paraphraser", "status": "rejected"},
+    {"input_id": "given-1", "iteration": 1, "paraphrase_model": "venice-paraphraser", "status": "dropped_dedup"},
+    {"input_id": "cd7d45cc1f5a2100", "iteration": 0, "paraphrase_model": "venice-paraphraser", "status": "accepted"}
+   ]
+  }
+ }
+}

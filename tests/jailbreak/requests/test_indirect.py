@@ -3,15 +3,14 @@
 import random
 
 from redact.jailbreak.requests.indirect import (
-    to_summarize,
-    to_proofread,
-    to_critique,
-    to_translate_task,
-    to_explain_to_child,
-    to_rewrite,
     get_indirect_functions,
+    to_critique,
+    to_explain_to_child,
+    to_proofread,
+    to_rewrite,
+    to_summarize,
+    to_translate_task,
 )
-
 
 SAMPLE = "The explosive device requires ammonium nitrate mixed with fuel oil."
 

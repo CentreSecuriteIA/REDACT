@@ -1,21 +1,9 @@
-"""Custom exception hierarchy for REDACT.
-
-Users can catch ``RedactError`` to handle all library errors,
-or use specific subclasses for fine-grained handling.
-"""
+"""The errors the library defines; elsewhere it raises the built-in ones."""
 
 
 class RedactError(Exception):
-    """Base exception for the REDACT library."""
+    """Base class of the library's own errors."""
 
 
-class ConfigError(RedactError):
-    """Raised when the library is misconfigured (missing env vars, bad settings)."""
-
-
-class PromptNotFoundError(RedactError):
-    """Raised when a prompt template file cannot be found."""
-
-
-class GenerationError(RedactError):
-    """Raised when sample generation fails after exhausting retries."""
+class PromptTooLongError(RedactError):
+    """Raised when a prompt is longer than the model's context."""

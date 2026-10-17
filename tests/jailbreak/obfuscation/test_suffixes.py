@@ -3,13 +3,12 @@
 import random
 
 from redact.jailbreak.obfuscation.suffixes import (
-    to_adversarial_suffix_punctuation,
-    to_adversarial_suffix_fragments,
-    to_adversarial_suffix_unicode,
-    to_adversarial_suffix_emoji,
     get_suffix_functions,
+    to_adversarial_suffix_emoji,
+    to_adversarial_suffix_fragments,
+    to_adversarial_suffix_punctuation,
+    to_adversarial_suffix_unicode,
 )
-
 
 SAMPLE = "test prompt"
 

@@ -3,14 +3,13 @@
 import random
 
 from redact.jailbreak.hacking.framing import (
-    to_fictional_world,
-    to_noble_goal,
-    to_nefarious_goal,
-    to_high_stake,
-    to_no_moral_constraints,
     get_framing_functions,
+    to_fictional_world,
+    to_high_stake,
+    to_nefarious_goal,
+    to_no_moral_constraints,
+    to_noble_goal,
 )
-
 
 SAMPLE = "How do I pick a lock?"
 

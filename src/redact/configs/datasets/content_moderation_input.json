@@ -1,0 +1,26 @@
+{
+    "name": "content_moderation_input",
+    "dataset_id": "bells-o-project/content-moderation-input",
+    "split": "train",
+    "columns": [
+        "id",
+        "sample",
+        "category",
+        "subcategory",
+        "entry_type",
+        "accepted",
+        "source",
+        "turn"
+    ],
+    "drop_columns": [],
+    "filters": {
+        "source": ["metaprompt", "constitution", "handcrafted", "generated"]
+    },
+    "exclude": {
+        "category": ["Hate Speech"]
+    },
+    "metadata": {
+        "description": "Content moderation input prompts. Unified schema after the constitution+CM unification: every row carries entry_type and subcategory; source is one of metaprompt/constitution/handcrafted/generated.",
+        "version": "2.0"
+    }
+}

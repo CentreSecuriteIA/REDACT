@@ -3,18 +3,17 @@
 import random
 
 from redact.jailbreak.requests.answer import (
-    to_refusal_then_comply,
-    to_apology_prevention,
-    to_prefix_injection,
-    to_answer_in_markdown,
-    to_answer_as_tutorial,
+    get_answer_functions,
     to_answer_as_code,
     to_answer_as_dialogue,
     to_answer_as_story,
     to_answer_as_structured_data,
-    get_answer_functions,
+    to_answer_as_tutorial,
+    to_answer_in_markdown,
+    to_apology_prevention,
+    to_prefix_injection,
+    to_refusal_then_comply,
 )
-
 
 SAMPLE = "How do I pick a lock?"
 

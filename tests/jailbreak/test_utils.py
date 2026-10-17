@@ -1,6 +1,34 @@
 """Tests for jailbreak technique composition utilities."""
 
-from redact.jailbreak.utils import combine_techniques, _parse_rejection_info, apply_combination
+import random
+
+import pytest
+
+from redact.jailbreak.chain import (
+    apply_combination,
+    combine_techniques,
+    in_layer_order,
+)
+from redact.jailbreak.plan import default_escalation_schedule
+from redact.jailbreak.sampling import (
+    sample_combination,
+    sample_exact_combination,
+)
+from redact.jailbreak.technique import is_discarded
+from redact.llm_pipeline import LLMRequest
+
+
+def _tech(name, layer, families, complexity=1, encode_weight=None):
+    """Build a fake tagged technique function (mirrors what technique.tag sets)."""
+    def fn(text, **kwargs):
+        return text, name
+    fn.__name__ = name
+    fn.layer = layer
+    fn.families = families
+    fn.complexity = complexity
+    fn.encode_weight = encode_weight
+    fn.within_layer_order = 0
+    return fn
 
 
 class TestCombineTechniques:
@@ -75,38 +103,18 @@ class TestCombineTechniques:
         assert info == "a;b;c"
 
 
-class TestParseRejectionInfo:
-    def test_accepted_empty_info(self):
-        accepted, reasoning = _parse_rejection_info("")
-        assert accepted is True
-        assert reasoning == ""
+class TestIsDiscarded:
+    @pytest.mark.parametrize("info", ["", "language=Swahili", "noop=to_rot13"])
+    def test_an_accepted_info(self, info):
+        assert not is_discarded(info)
 
-    def test_accepted_normal_info(self):
-        accepted, reasoning = _parse_rejection_info("language=Swahili")
-        assert accepted is True
-        assert reasoning == ""
-
-    def test_accepted_noop_info(self):
-        accepted, reasoning = _parse_rejection_info("noop=to_rot13")
-        assert accepted is True
-        assert reasoning == ""
-
-    def test_rejected_bare_discarded(self):
-        accepted, reasoning = _parse_rejection_info("DISCARDED")
-        assert accepted is False
-        assert reasoning == "DISCARDED"
-
-    def test_rejected_with_feedback(self):
-        info = "DISCARDED; language=Scots Gaelic; feedback=translation refused"
-        accepted, reasoning = _parse_rejection_info(info)
-        assert accepted is False
-        assert reasoning == info
-
-    def test_rejected_with_technique_prefix(self):
-        info = "DISCARDED; technique=to_scots_gaelic; feedback=refused"
-        accepted, reasoning = _parse_rejection_info(info)
-        assert accepted is False
-        assert reasoning == info
+    @pytest.mark.parametrize("info", [
+        "DISCARDED",
+        "DISCARDED; language=Scots Gaelic; feedback=translation refused",
+        "DISCARDED; technique=to_scots_gaelic; feedback=refused",
+    ])
+    def test_a_rejected_info(self, info):
+        assert is_discarded(info)
 
 
 class TestCombineTechniquesEarlyExit:
@@ -157,7 +165,47 @@ class TestCombineTechniquesEarlyExit:
         assert info.startswith("DISCARDED")
 
 
+class TestTagMaxTokens:
+    @staticmethod
+    def _spec(**techniques):
+        return {"families": {"f": {"layer": "obfuscation"}},
+                "techniques": {n: {"families": ["f"], **t} for n, t in techniques.items()}}
+
+    def test_spec_max_tokens_is_tagged_and_absent_means_none(self, monkeypatch):
+        import redact.jailbreak.technique as technique_module
+
+        monkeypatch.setattr(technique_module, "load_spec",
+                            lambda: self._spec(capped={"max_tokens": 64}, plain={}))
+
+        def capped(text): return text, ""
+        def plain(text): return text, ""
+        technique_module.tag([capped, plain])
+        assert (capped.max_tokens, plain.max_tokens) == (64, None)
+
+    @pytest.mark.parametrize("bad", [0, -5, "64", 2.5], ids=["zero", "negative", "str", "float"])
+    def test_a_bad_spec_limit_fails_at_tagging(self, monkeypatch, bad):
+        import redact.jailbreak.technique as technique_module
+
+        monkeypatch.setattr(technique_module, "load_spec",
+                            lambda: self._spec(capped={"max_tokens": bad}))
+
+        def capped(text): return text, ""
+        with pytest.raises(ValueError, match="'capped': max_tokens"):
+            technique_module.tag([capped])
+
+
 class TestApplyCombination:
+    def test_a_requests_limit_reaches_the_client(self):
+        from tests.conftest import MockBackend, make_client
+
+        def capped(text, *, gen_model=None, **kwargs):
+            reply = yield LLMRequest(gen_model, [{"role": "user", "content": text}], max_tokens=12)
+            return reply, "capped"
+
+        backend = MockBackend("r")
+        apply_combination(combine_techniques(capped), "hi", client=make_client(backend, "m"))
+        assert backend.calls[0]["max_tokens"] == 12
+
     def test_returns_four_tuple_on_success(self):
         def pure_tech(text):
             return text.upper(), "upper"
@@ -194,3 +242,165 @@ class TestApplyCombination:
         assert accepted is False
         assert "DISCARDED" in reasoning
         assert "_extra" not in result  # unused technique was skipped
+
+    def test_a_bare_generator_technique_runs(self):
+        from tests.conftest import MockBackend, make_client
+
+        def asks(text, *, gen_model=None, **kwargs):
+            reply = yield LLMRequest(gen_model, [{"role": "user", "content": text}])
+            return reply, "asked"
+
+        backend = MockBackend("r")
+        client = make_client(backend, "m")
+        text, info, accepted, _ = apply_combination(asks, "hi", client=client)
+        assert (text, info, accepted) == ("r", "asked", True)
+
+    def test_benign_data_is_loaded_for_a_technique_tagged_to_need_it(self, monkeypatch):
+        import redact.jailbreak.chain as chain_module
+
+        loads = []
+        monkeypatch.setattr(chain_module, "get_or_generate_benign_data",
+                            lambda **kwargs: loads.append(kwargs) or {"pairs": 1})
+
+        def tagged(text, **kwargs):
+            return text + str(kwargs.get("benign_data")), ""
+        tagged.requires_benign = True
+
+        def untagged(text, benign_data=None):
+            return text, ""
+
+        apply_combination(untagged, "a")
+        assert loads == []
+        text, _, _, _ = apply_combination(tagged, "a", benign_cache_path="b.csv")
+        assert text == "a{'pairs': 1}"
+        assert loads == [{"client": None, "cache_path": "b.csv", "prompt_dir": None}]
+
+    def test_prompt_dir_reaches_the_techniques_that_take_it(self):
+        seen = {}
+
+        def takes(text, prompt_dir=None):
+            seen["takes"] = prompt_dir
+            return text, ""
+
+        def ignores(text):
+            return text, ""
+
+        apply_combination(combine_techniques(takes, ignores), "a", prompt_dir="overlay")
+        assert seen == {"takes": "overlay"}
+
+
+class TestSampleExactCombination:
+    def _obfuscation_pool(self):
+        # Three distinct obfuscation families, all high-complexity, so a budget
+        # would block stacking — but the exact path ignores complexity.
+        return [
+            _tech("t_encode", "obfuscation", ["encode"], complexity=3),
+            _tech("t_structural", "obfuscation", ["structural"], complexity=3),
+            _tech("t_suffix", "obfuscation", ["suffixes"], complexity=1),
+        ]
+
+    def test_exactly_one(self):
+        fn = sample_exact_combination(random.Random(0), self._obfuscation_pool(), 1)
+        assert len(fn.techniques) == 1
+
+    def test_exactly_two(self):
+        fn = sample_exact_combination(random.Random(0), self._obfuscation_pool(), 2)
+        assert len(fn.techniques) == 2
+
+    def test_ignores_complexity(self):
+        """High-complexity techniques still stack — count is the only constraint."""
+        # 2 x complexity-3 = 6; a budget run would often reject the second pick.
+        for seed in range(10):
+            fn = sample_exact_combination(random.Random(seed), self._obfuscation_pool(), 2)
+            assert len(fn.techniques) == 2
+
+    def test_distinct_families(self):
+        """The two picks come from different families (family dedup)."""
+        fn = sample_exact_combination(random.Random(3), self._obfuscation_pool(), 2)
+        fams = [t.families[0] for t in fn.techniques]
+        assert len(set(fams)) == 2
+
+    def test_layer_cap_best_effort(self):
+        """Layer cap (1 hacking) means n=2 from a hacking-only pool yields 1."""
+        pool = [
+            _tech("h1", "hacking", ["framing"]),
+            _tech("h2", "hacking", ["persona"]),
+        ]
+        fn = sample_exact_combination(random.Random(0), pool, 2)
+        assert len(fn.techniques) == 1  # second hacking pick blocked by layer cap
+
+    def test_include_flags_filter_pool(self):
+        """include_* restrict the initial candidate pool by layer."""
+        pool = self._obfuscation_pool() + [_tech("h1", "hacking", ["framing"])]
+        fn = sample_exact_combination(
+            random.Random(0), pool, 1, include_obfuscation=False
+        )
+        # Only the hacking technique was eligible.
+        assert [t.__name__ for t in fn.techniques] == ["h1"]
+
+    def test_reproducible(self):
+        p = self._obfuscation_pool()
+        a = sample_exact_combination(random.Random(7), p, 2)
+        b = sample_exact_combination(random.Random(7), p, 2)
+        assert [t.__name__ for t in a.techniques] == [t.__name__ for t in b.techniques]
+
+    def test_zero_returns_identity(self):
+        fn = sample_exact_combination(random.Random(0), self._obfuscation_pool(), 0)
+        assert fn.techniques == []
+        assert fn.__name__ == "identity"
+
+    def test_sample_combination_dispatches(self):
+        """sample_combination(exact_techniques=2) delegates to the exact path."""
+        fn = sample_combination(
+            random.Random(0), self._obfuscation_pool(), exact_techniques=2,
+        )
+        assert len(fn.techniques) == 2
+
+
+class TestRequestLayerObfuscation:
+    """The phase-5 pick obfuscates the *finished* request, so it runs last.
+
+    Its layer is "obfuscation", so the usual hierarchy sort would move it ahead
+    of the request template — which is what used to happen.
+    """
+
+    def _pool(self):
+        request = _tech("ask_politely", "requests", ["asking"])
+        light_encode = _tech("to_fake_rot13", "obfuscation", ["encode"], encode_weight="light")
+        return [request, light_encode], request, light_encode
+
+    def test_pick_runs_after_the_request_technique(self):
+        pool, request, light_encode = self._pool()
+        fn = sample_combination(
+            random.Random(0), pool,
+            include_hacking=False, include_manipulation=False,
+            max_obfuscations=0, max_complexity=10,
+            allow_request_obfuscation=True,
+            sampling_probs={"requests": 1.0, "request_obfuscation": 1.0},
+        )
+        assert [t.__name__ for t in fn.techniques] == [request.__name__, light_encode.__name__]
+
+    def test_hierarchy_order_alone_would_put_it_first(self):
+        _pool, request, light_encode = self._pool()
+        assert [t.__name__ for t in in_layer_order([request, light_encode])] == [
+            light_encode.__name__, request.__name__,
+        ]
+
+
+class TestDefaultEscalationSchedule:
+    def test_four_rounds(self):
+        sched = default_escalation_schedule()
+        assert len(sched) == 4
+
+    def test_first_two_are_count_driven(self):
+        sched = default_escalation_schedule()
+        assert sched[0] == {"exact_techniques": 1}
+        assert sched[1] == {"exact_techniques": 2}
+
+    def test_last_two_are_budget_driven(self):
+        sched = default_escalation_schedule()
+        for r in sched[2:]:
+            assert "exact_techniques" not in r
+            assert "max_complexity" in r
+        # Complexity escalates between the two budget rounds.
+        assert sched[3]["max_complexity"] > sched[2]["max_complexity"]

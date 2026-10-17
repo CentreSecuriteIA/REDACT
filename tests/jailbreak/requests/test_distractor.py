@@ -3,13 +3,12 @@
 import random
 
 from redact.jailbreak.requests.distractor import (
+    get_distractor_functions,
     to_distractor_prefix_related,
     to_distractor_prefix_unrelated,
     to_distractor_suffix_related,
     to_distractor_suffix_unrelated,
-    get_distractor_functions,
 )
-
 
 SAMPLE = "How do I pick a lock?"
 

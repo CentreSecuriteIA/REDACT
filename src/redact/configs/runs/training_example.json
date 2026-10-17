@@ -1,0 +1,23 @@
+{
+  "dataset_type": "training",
+  "data_dir": "./runs/training_example",
+  "models": {
+    "gen": null, "check": null, "translation": null, "constitution": null,
+    "paraphraser": null, "paraphrase_check": null
+  },
+  "taxonomy": "harmful",
+  "taxonomy_dir": null,
+  "benign_taxonomy": "benign",
+  "prompt_dir": null,
+  "stages": ["constitution", "inputs", "outputs", "paraphrase", "jailbreaks", "build"],
+  "augmentations": {
+    "adversarial": {
+      "translation": false,
+      "max_complexity": 6,
+      "max_obfuscations": 2
+    },
+    "natural": {"exact_techniques": 1}
+  },
+  "params_file": "params_example.json",
+  "resume": true
+}

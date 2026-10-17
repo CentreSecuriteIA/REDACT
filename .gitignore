@@ -13,6 +13,9 @@ Data_cache/
 __pycache__/
 *.py[cod]
 *.egg-info/
+.pytest_cache/
+.coverage
+htmlcov/
 dist/
 build/
 .venv/
@@ -23,7 +26,22 @@ venv/
 .idea/
 .claude/
 *.code-workspace
+.ruff_cache/
+.mypy_cache/
 
 # OS
 .DS_Store
 Thumbs.db
+
+# Documentation files
+REFACTOR.md
+refactor-reference.md
+CLAUDE.md
+cleanup.md
+llms_refactor_log.md
+
+# Backups
+old_data.zip
+
+# The documentation site (mkdocs build)
+site/

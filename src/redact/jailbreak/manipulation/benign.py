@@ -1,274 +1,201 @@
-"""Benign sample generation and loading for FSH/DAP manipulation.
-
-Generated samples are saved in Data_cache/benign/.
-Loading is lazy (explicit function call, not module-level import).
-
-Ported from reference manipulation.py lines 40-289.
+"""Benign Q&A pairs for the FSH and DAP techniques: generated on the worker pool
+for each subcategory of a benign taxonomy, and cached.
 """
 
-import pandas as pd
+import logging
 from pathlib import Path
 
-from redact.llms.base import LLMBackend
-from redact.llms.calls import generate_sample
-from redact.llms.wrappers import RateLimiter
-from redact.llms.extraction import extract_structured_qa
+import pandas as pd
 
-from redact import get_output_dir
-from redact.llms.prompts import load_prompt, build_messages
+from redact import paths
+from redact.dataset import CommitBuffer, Ledger, Manifest, append_rows, resume_state
+from redact.dataset.taxonomy import iter_categories, load_taxonomy
+from redact.llm_pipeline import drive_units, extracted, pool_size
+from redact.llms.client import ModelClient
+from redact.llms.prompting import build_messages, extract_structured_qa, load_prompt
 
-_PACKAGE_DIR = Path(__file__).resolve().parent.parent.parent  # src/redact/
+logger = logging.getLogger(__name__)
 
-
-# ---------------------------------------------------------------------------
-# Category definitions (52 categories from reference)
-# ---------------------------------------------------------------------------
-
-BENIGN_CATEGORIES: list[tuple[str, str]] = [
-    # Home & Daily Life
-    ("Home & Daily Life", "Cooking & Baking"),
-    ("Home & Daily Life", "Gardening & Plant Care"),
-    ("Home & Daily Life", "Pet Care"),
-    ("Home & Daily Life", "Home Organization"),
-    ("Home & Daily Life", "Cleaning"),
-    ("Home & Daily Life", "Home Maintenance & DIY Repairs"),
-    ("Home & Daily Life", "Car Maintenance"),
-
-    # Health & Wellness
-    ("Health & Wellness", "Mindfulness & Meditation"),
-    ("Health & Wellness", "Fitness & Workouts"),
-    ("Health & Wellness", "Nutrition & Diet"),
-    ("Health & Wellness", "First Aid"),
-    ("Health & Wellness", "Sleep & Rest"),
-
-    # Personal Development
-    ("Personal Development", "Task Planning & Organization"),
-    ("Personal Development", "Language Learning"),
-    ("Personal Development", "Public Speaking"),
-    ("Personal Development", "Time Management"),
-    ("Personal Development", "Study Techniques & Learning Strategies"),
-
-    # Work & Professional
-    ("Work & Professional", "Email Writing"),
-    ("Work & Professional", "Presentation Creation"),
-    ("Work & Professional", "Programming & Technical Tasks"),
-    ("Work & Professional", "Career Planning & Development"),
-    ("Work & Professional", "Resume/CV Writing"),
-    ("Work & Professional", "Interview Preparation"),
-    ("Work & Professional", "Strategy & Business Planning"),
-    ("Work & Professional", "Project Management"),
-
-    # Finance & Shopping
-    ("Finance & Shopping", "Personal Finance & Budgeting"),
-    ("Finance & Shopping", "Product Comparisons"),
-    ("Finance & Shopping", "Shopping Recommendations"),
-    ("Finance & Shopping", "Financial Planning"),
-
-    # Travel & Leisure
-    ("Travel & Leisure", "Destination Selection"),
-    ("Travel & Leisure", "Route Planning & Itineraries"),
-    ("Travel & Leisure", "Travel Tips & Preparation"),
-    ("Travel & Leisure", "Event Planning (parties, gatherings)"),
-
-    # Entertainment & Hobbies
-    ("Entertainment & Hobbies", "Book/Movie/Game Recommendations"),
-    ("Entertainment & Hobbies", "Sports & Recreation Activities"),
-    ("Entertainment & Hobbies", "Crafts & DIY Art"),
-    ("Entertainment & Hobbies", "Photography"),
-    ("Entertainment & Hobbies", "Music Learning & Appreciation"),
-
-    # Creative & Writing
-    ("Creative & Writing", "Creative Writing"),
-    ("Creative & Writing", "Content Creation"),
-    ("Creative & Writing", "Storytelling"),
-    ("Creative & Writing", "Poetry & Literary Analysis"),
-
-    # Education & Knowledge
-    ("Education & Knowledge", "Homework Help (Math, Science, History)"),
-    ("Education & Knowledge", "Research Assistance"),
-    ("Education & Knowledge", "General Knowledge Questions"),
-    ("Education & Knowledge", "How-to Explanations"),
-    ("Education & Knowledge", "Historical & Factual Information"),
-    ("Education & Knowledge", "Science Concepts"),
-
-    # Social & Relationships
-    ("Social & Relationships", "Social Skills (small talk, networking)"),
-    ("Social & Relationships", "Communication Skills"),
-    ("Social & Relationships", "Conversation Starters"),
-    ("Social & Relationships", "Etiquette & Social Norms"),
-    ("Social & Relationships", "Gift Ideas & Selection"),
-    ("Social & Relationships", "Relationship Advice (general)"),
-
-    # Technology & Tips
-    ("Technology & Tips", "Tech Tips & Troubleshooting"),
-    ("Technology & Tips", "Software Recommendations"),
-    ("Technology & Tips", "Digital Organization"),
-    ("Technology & Tips", "Productivity Tools"),
-]
+#: The packaged benign taxonomy, ``configs/taxonomy/benign.json``.
+DEFAULT_TAXONOMY = "benign"
+#: The answer types of a subcategory's pairs, each one unit.
+ANSWER_TYPES = ("short", "long")
+# A unit's key, and its ledger's.
+_KEY_FIELDS = ("main_category", "sub_category", "answer_type")
+# Generations of a unit before it is given up.
+_ATTEMPTS = 3
 
 
-# ---------------------------------------------------------------------------
-# Generation
-# ---------------------------------------------------------------------------
+def benign_categories(taxonomy: dict) -> list[tuple[str, str]]:
+    """The ``(main, sub)`` pairs of a benign taxonomy, in file order, each once.
 
-_DEFAULT_PROMPT_DIR = _PACKAGE_DIR / "prompts"
-
-
-def generate_short_benign(
-    category: tuple[str, str],
-    backend: LLMBackend,
-    model: str,
-    rate_limiter: RateLimiter | None = None,
-    num_samples: int = 8,
-    prompt_dir: str | Path = _DEFAULT_PROMPT_DIR,
-) -> str:
-    """Generate short (1-sentence answer) benign prompts for a category.
-
-    Returns raw LLM text in structured **Prompt N:** format.
+    A category's subcategories are a list, or a dict of which the keys are
+    read; a category without any is its own subcategory.
     """
+    pairs = [(main, str(sub))
+             for main, info in iter_categories(taxonomy)
+             for sub in info.get("subcategories") or [main]]
+    return list(dict.fromkeys(pairs))
+
+
+def _ledger(path: Path) -> Ledger:
+    """The ledger of the benign data at ``path``: ``<name>.state.jsonl`` beside it."""
+    return Ledger.sidecar(path, _KEY_FIELDS, dict.fromkeys(_KEY_FIELDS, str))
+
+
+def generate_benign_data(
+    categories: list[tuple[str, str]],
+    client: ModelClient,
+    out_path: str | Path,
+    *,
+    prompt_dir: str | Path | None = None,
+    num_samples: int = 8,
+    batch_size: int = 256,
+    verbose: bool = True,
+) -> None:
+    """Generate the pairs ``out_path`` lacks for ``categories``, appended to it.
+
+    A unit is one ``(main, sub)`` and answer type: one call asking for
+    ``num_samples`` pairs. A reply with any other number of pairs is rejected
+    whole and the call made again, up to three times; a unit rejected every
+    time is acked ``rejected`` with no rows. ``pool_size(batch_size, client)``
+    units are live, a call carries up to ``batch_size`` requests, and rows
+    are appended every 32 units.
+
+    The run always resumes: the ledger beside ``out_path``, keyed
+    ``(main_category, sub_category, answer_type)``, says which units are
+    done, and a file written before the ledger is taken over, so only the
+    units it holds no rows of are generated.
+    """
+    out_path = Path(out_path)
     config = load_prompt("jailbreak", "benign_generation", prompt_dir)
-    messages = build_messages(
-        config,
-        sub_category=category[1],
-        main_category=category[0],
-        num_samples=str(num_samples),
-        answer_style="Keep the answers concise and to the point. Make the answer be only 1 sentence long.",
-    )
-    return generate_sample(backend, model, messages, rate_limiter)
+    units = [(main, sub, answer_type)
+             for main, sub in categories for answer_type in ANSWER_TYPES]
 
+    out_path.parent.mkdir(parents=True, exist_ok=True)
+    ledger = _ledger(out_path)
+    manifest = Manifest.sidecar(out_path)
+    done = resume_state(ledger, resume=True, artifact=out_path, manifest=manifest)
+    manifest.write({**dict(zip(_KEY_FIELDS, unit)), "status": "planned"}
+                   for unit in units)
+    pending = [unit for unit in units if unit not in done]
 
-def generate_long_benign(
-    category: tuple[str, str],
-    backend: LLMBackend,
-    model: str,
-    rate_limiter: RateLimiter | None = None,
-    num_samples: int = 8,
-    prompt_dir: str | Path = _DEFAULT_PROMPT_DIR,
-) -> str:
-    """Generate long (multi-sentence answer) benign prompts for a category.
+    if verbose:
+        logger.info("Benign data: %d units (%d subcategories x %d answer types), "
+                    "%d to generate | Model: %s | Batch: %d", len(units),
+                    len(categories), len(ANSWER_TYPES), len(pending), client.model,
+                    batch_size)
 
-    Returns raw LLM text in structured **Prompt N:** format.
-    """
-    config = load_prompt("jailbreak", "benign_generation", prompt_dir)
-    messages = build_messages(
-        config,
-        sub_category=category[1],
-        main_category=category[0],
-        num_samples=str(num_samples),
-        answer_style="Make the answers detailed and multi-sentence.",
-    )
-    return generate_sample(backend, model, messages, rate_limiter)
+    def _unit(unit: tuple[str, str, str]):
+        main, sub, answer_type = unit
+        messages = build_messages(
+            config,
+            sub_category=sub,
+            main_category=main,
+            num_samples=str(num_samples),
+            answer_style=config["answer_styles"][answer_type],
+        )
+        return extracted(
+            client, lambda: messages,
+            lambda reply: extract_structured_qa(reply, expected_count=num_samples),
+            max_attempts=_ATTEMPTS,
+        )
 
+    written = 0
+    rejected: list[tuple[str, str, str]] = []
 
-def process_category(
-    category: tuple[str, str],
-    backend: LLMBackend,
-    model: str,
-    rate_limiter: RateLimiter | None = None,
-    num_samples: int = 8,
-    prompt_dir: str | Path = _DEFAULT_PROMPT_DIR,
-) -> list[dict]:
-    """Generate both short and long benign samples for one category.
+    def _on_done(i: int, value: tuple[list[dict], int]) -> None:
+        nonlocal written
+        pairs, attempts = value
+        main, sub, answer_type = unit = pending[i]
+        record = dict(zip(_KEY_FIELDS, unit))
+        if not pairs:
+            # Acked: un-acked, it would be generated, and paid for, again on
+            # every resume.
+            buf.add([], {**record, "status": "rejected", "attempts": attempts})
+            rejected.append(unit)
+            return
+        buf.add([{"main_category": main, "sub_category": sub,
+                  "prompt": pair["question"], "answer": pair["answer"],
+                  "answer_type": answer_type} for pair in pairs], record)
+        written += len(pairs)
 
-    Returns list of row dicts with keys:
-    main_category, sub_category, prompt, answer, answer_type.
-    """
-    main_cat, sub_cat = category
+    with CommitBuffer(append=lambda rows: append_rows(out_path, rows),
+                      ledger=ledger) as buf:
+        drive_units(
+            ((i, _unit(unit)) for i, unit in enumerate(pending)),
+            on_done=_on_done,
+            pool_size=pool_size(batch_size, client),
+            cap=batch_size,
+            progress="benign" if verbose else None,
+        )
 
-    raw_short = generate_short_benign(
-        category, backend, model, rate_limiter, num_samples, prompt_dir
-    )
-    pairs_short = extract_structured_qa(raw_short)
-
-    raw_long = generate_long_benign(
-        category, backend, model, rate_limiter, num_samples, prompt_dir
-    )
-    pairs_long = extract_structured_qa(raw_long)
-
-    rows: list[dict] = []
-    for pair in pairs_short:
-        rows.append({
-            "main_category": main_cat,
-            "sub_category": sub_cat,
-            "prompt": pair["prompt"],
-            "answer": pair["answer"],
-            "answer_type": "short",
-        })
-    for pair in pairs_long:
-        rows.append({
-            "main_category": main_cat,
-            "sub_category": sub_cat,
-            "prompt": pair["prompt"],
-            "answer": pair["answer"],
-            "answer_type": "long",
-        })
-    return rows
-
-
-# ---------------------------------------------------------------------------
-# Loading
-# ---------------------------------------------------------------------------
-
-def _default_benign_path() -> Path:
-    return get_output_dir() / "Data_cache" / "benign" / "benign_samples.csv"
+    if rejected:
+        logger.warning(
+            "%d benign units rejected after %d attempt(s) each: %s. They are "
+            "acked and skipped on resume; delete %s to generate them again (the "
+            "pairs already in %s are kept).",
+            len(rejected), _ATTEMPTS, ", ".join(" / ".join(u) for u in rejected),
+            ledger.path.name, out_path.name,
+        )
+    if verbose:
+        logger.info("Benign data: %d pairs generated this run, saved to %s",
+                    written, out_path)
 
 
 def get_or_generate_benign_data(
-    backend=None,
-    model: str | None = None,
-    rate_limiter=None,
+    client: ModelClient | None = None,
     cache_path=None,
     verbose: bool = True,
+    *,
+    taxonomy: dict | str = DEFAULT_TAXONOMY,
+    taxonomy_dir: str | Path | None = None,
+    prompt_dir: str | Path | None = None,
+    batch_size: int = 256,
 ) -> dict:
-    """Load benign data from cache, or generate and cache it if missing.
+    """The benign data at ``cache_path``, generated first with ``client``.
 
-    Used by apply_combination() to auto-provision benign data for FSH/DAP
-    manipulation techniques without requiring the caller to pre-generate it.
-
-    Args:
-        backend: LLM backend (required only if generation is needed).
-        model: Model identifier (required only if generation is needed).
-        rate_limiter: Optional rate limiter.
-        cache_path: Path to benign CSV. Uses default Data_cache/benign/ if None.
-        verbose: Print progress messages during generation.
+    With a client, the pairs of every subcategory of ``taxonomy`` that the
+    cache does not hold yet are generated (:func:`generate_benign_data`).
+    ``taxonomy`` is a taxonomy file's name under ``taxonomy_dir`` (the
+    packaged ``configs/taxonomy`` by default), or a loaded taxonomy. Without
+    a client, the cache is loaded as it is. ``cache_path`` defaults to
+    ``paths.benign_csv()``.
 
     Returns:
-        Benign data dict (same format as load_benign_data).
+        What :func:`load_benign_data` returns.
 
     Raises:
-        ValueError: If generation is needed but backend/model are not provided.
+        ValueError: No cache and no client, a taxonomy without a category, or
+            no pair in the cache after generation.
+        FileNotFoundError: No such taxonomy file.
     """
-    path = Path(cache_path) if cache_path else _default_benign_path()
+    path = Path(cache_path) if cache_path else paths.benign_csv()
 
-    if path.exists():
+    if client is None:
+        if not path.exists():
+            raise ValueError(
+                "Benign data not found and no client provided for generation. "
+                f"Either pre-generate benign data at {path} or pass a ModelClient."
+            )
         if verbose:
-            print(f"  Loading cached benign data from {path}")
+            logger.info("Loading cached benign data from %s", path)
         return load_benign_data(path)
 
-    if backend is None or model is None:
+    if isinstance(taxonomy, str):
+        taxonomy = load_taxonomy(taxonomy, config_dir=taxonomy_dir)
+    categories = benign_categories(taxonomy)
+    if not categories:
         raise ValueError(
-            "Benign data not found and no backend/model provided for generation. "
-            f"Either pre-generate benign data at {path} or pass backend and model."
-        )
-
-    if verbose:
-        print(f"  Generating benign data ({len(BENIGN_CATEGORIES)} categories)...")
-
-    path.parent.mkdir(parents=True, exist_ok=True)
-    all_rows = []
-    for i, category in enumerate(BENIGN_CATEGORIES):
-        if verbose:
-            print(f"    [{i + 1}/{len(BENIGN_CATEGORIES)}] {category[0]} / {category[1]}", end="", flush=True)
-        rows = process_category(category, backend, model, rate_limiter)
-        all_rows.extend(rows)
-        pd.DataFrame(all_rows).to_csv(path, index=False)
-        if verbose:
-            print(f" → saved ({len(all_rows)} rows total)")
-
-    df = pd.DataFrame(all_rows)
-    if verbose:
-        print(f"  Done. {len(df)} benign samples saved to {path}")
-
+            f"The benign taxonomy {taxonomy.get('name', '')!r} has no category; "
+            "write its categories, each with its subcategories.")
+    generate_benign_data(categories, client, path, prompt_dir=prompt_dir,
+                         batch_size=batch_size, verbose=verbose)
+    if not path.exists():
+        raise ValueError(
+            f"No benign pairs at {path}: every unit's reply was rejected "
+            f"{_ATTEMPTS} times, and the units are acked as rejected in "
+            f"{_ledger(path).path.name}. Delete that file to generate them again.")
     return load_benign_data(path)
 
 
@@ -289,7 +216,7 @@ def load_benign_data(
     Raises:
         FileNotFoundError: If the CSV does not exist.
     """
-    path = Path(path) if path else _default_benign_path()
+    path = Path(path) if path else paths.benign_csv()
     if not path.exists():
         raise FileNotFoundError(
             f"Benign samples CSV not found at {path}. "
@@ -303,16 +230,14 @@ def load_benign_data(
     short = short_df.to_dict("records")
     long_ = long_df.to_dict("records")
 
-    by_subcat_short = (
-        short_df.groupby("sub_category")
-        .apply(lambda g: g.to_dict("records"))
-        .to_dict()
-    )
-    by_subcat_long = (
-        long_df.groupby("sub_category")
-        .apply(lambda g: g.to_dict("records"))
-        .to_dict()
-    )
+    by_subcat_short = {
+        subcat: group.to_dict("records")
+        for subcat, group in short_df.groupby("sub_category")
+    }
+    by_subcat_long = {
+        subcat: group.to_dict("records")
+        for subcat, group in long_df.groupby("sub_category")
+    }
 
     return {
         "short": short,

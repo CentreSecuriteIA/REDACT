@@ -1,231 +1,262 @@
-"""Rate limiting, retry logic, and multithreaded batch execution.
+"""Rate limiting and per-item fan-out for backends without native batching.
 
-Generalized from the jailbreak reference library:
-- RateLimiter:         from _RateLimitedClient (obfuscation.py:47-119)
-- with_retries:        from utils.py:52-82
-- with_feedback_retries: from utils.py:85-115
-- BatchCaller:         from runner script ThreadPoolExecutor patterns
+- ``RateLimiter``: thread-safe requests-per-minute limit over a sliding
+  60-second window.
+- ``BatchCaller``: runs a batch one item per call, in sequence or on a thread
+  pool.
+
+Both take a finished backend and read ``rpm``, ``max_workers`` and
+``compute_config`` from it.
 """
 
+import logging
 import threading
 import time
+from collections.abc import Callable
 from concurrent.futures import ThreadPoolExecutor, as_completed
-from typing import Callable
+from typing import TYPE_CHECKING
 
-from .base import LLMBackend
-from .model_config import get_model_config
+if TYPE_CHECKING:
+    from .backends import LLMBackend
+
+logger = logging.getLogger(__name__)
+
+_RATE_LIMIT_WINDOW_SECONDS = 60.0
 
 
 class RateLimiter:
-    """Thread-safe per-model RPM enforcement using a sliding window.
+    """Thread-safe RPM limit over a 60-second sliding window.
 
-    Standalone — not tied to any backend. A single instance should be
-    shared across all pipeline modules that hit the same API endpoint.
+    One instance is one window. :func:`shared_limiter` hands out one instance
+    per key (a model name, or an endpoint id for an account-wide budget), and
+    ``client._resolve_rate_limit()`` picks the key.
 
-    Algorithm: same as jailbreak _RateLimitedClient — track request
-    timestamps per model in a 60-second sliding window, sleep if at
-    capacity.
+    Instances outlive clients. A client is rebuilt on every
+    ``ModelClient.create()``, so a window tied to a client would reset each
+    time and two call sites on one model would exceed the budget together.
     """
 
     def __init__(self):
-        self._locks: dict[str, threading.Lock] = {}
-        self._timestamps: dict[str, list[float]] = {}
-        self._global_lock = threading.Lock()
+        self._timestamps: list[float] = []
+        self._lock = threading.Lock()
 
-    def _get_model_state(self, model: str) -> tuple[threading.Lock, list[float]]:
-        """Get or create the lock and timestamp list for a model."""
-        if model not in self._locks:
-            with self._global_lock:
-                # Double-check after acquiring global lock
-                if model not in self._locks:
-                    self._locks[model] = threading.Lock()
-                    self._timestamps[model] = []
-        return self._locks[model], self._timestamps[model]
+    def reserve(self, backend: "LLMBackend") -> float:
+        """Record a request if it fits in the window, without blocking.
 
-    def wait_if_needed(self, model: str) -> None:
-        """Block until making a request for this model is safe.
+        Args:
+            backend: The model whose ``rpm`` to enforce.
 
-        Enforces the RPM limit from model_config for the given model.
+        Returns:
+            0 when the request was recorded and may go now, which is always
+            the case when ``backend.rpm`` is ``None``. Otherwise the seconds
+            to wait before asking again; nothing was recorded.
         """
-        config = get_model_config(model)
-        rpm = config.rpm
-        lock, timestamps = self._get_model_state(model)
+        rpm = backend.rpm
+        if rpm is None:
+            return 0.0
 
-        with lock:
-            now = time.time()
-            # Prune timestamps older than 60 seconds
-            timestamps[:] = [t for t in timestamps if now - t < 60.0]
+        with self._lock:
+            # Monotonic: a wall-clock change must not empty or freeze the window.
+            now = time.monotonic()
+            self._timestamps[:] = [
+                t for t in self._timestamps
+                if now - t < _RATE_LIMIT_WINDOW_SECONDS
+            ]
+            if len(self._timestamps) < rpm:
+                self._timestamps.append(now)
+                return 0.0
+            wait = _RATE_LIMIT_WINDOW_SECONDS - (now - self._timestamps[0]) + 0.1
 
-            if len(timestamps) >= rpm:
-                sleep_for = 60.0 - (now - timestamps[0]) + 0.1
-                if sleep_for > 0:
-                    print(
-                        f"    [rate-limit] {model}: pausing {sleep_for:.1f}s "
-                        f"({rpm} RPM)"
-                    )
-                    # Release lock while sleeping so other models aren't blocked
-                    lock.release()
-                    try:
-                        time.sleep(sleep_for)
-                    finally:
-                        lock.acquire()
-                    # Re-prune after sleeping
-                    now = time.time()
-                    timestamps[:] = [t for t in timestamps if now - t < 60.0]
+        # Reported here: every caller pauses for this long next.
+        logger.info("[rate-limit] %s: pausing %.1fs (%d RPM)",
+                    backend.model, wait, rpm)
+        return wait
 
-            timestamps.append(time.time())
+    def wait_if_needed(self, backend: "LLMBackend") -> None:
+        """Block until a request against this backend fits in the window.
+
+        Args:
+            backend: The model whose ``rpm`` to enforce. Returns immediately
+                when its ``rpm`` is ``None``.
+        """
+        # Ask again after every sleep: several workers can wake together, and
+        # one that went without asking would exceed the limit.
+        while (wait := self.reserve(backend)) > 0:
+            time.sleep(wait)
 
 
-# ---------------------------------------------------------------------------
-# Retry wrappers
-# ---------------------------------------------------------------------------
+# One limiter per window key, kept here so that windows outlive clients.
+_shared_limiters: dict[str, RateLimiter] = {}
+_shared_limiters_lock = threading.Lock()
 
 
-def with_retries(
-    generate_fn: Callable[[str], str],
-    check_fn: Callable[[str, str], tuple[bool, str]],
-    num_retries: int = 5,
-) -> Callable[[str], tuple[str, str]]:
-    """Wrap a generate+check pair with a simple retry loop.
-
-    Each attempt calls generate_fn fresh with no feedback from the
-    previous attempt. Use this for non-translation LLM steps where the
-    generator does not accept corrective feedback.
+def shared_limiter(key: str) -> RateLimiter:
+    """Return the limiter shared by every caller on this key.
 
     Args:
-        generate_fn: callable(text) -> generated_text
-        check_fn: callable(original, generated) -> (accepted, reasoning)
-        num_retries: Maximum number of attempts.
-
-    Returns:
-        callable(text) -> (result, info)
-            On success: (result, "")
-            On exhaustion: (last_result, "DISCARDED")
+        key: ``backend.model`` for a per-model budget, or
+            ``APIConfig.endpoint_id`` for a per-account one.
     """
-
-    def wrapper(text: str) -> tuple[str, str]:
-        last_result = text
-        for _ in range(num_retries):
-            result = generate_fn(text)
-            accepted, _ = check_fn(text, result)
-            if accepted:
-                return result, ""
-            last_result = result
-        return last_result, "DISCARDED"
-
-    return wrapper
+    if key not in _shared_limiters:
+        with _shared_limiters_lock:
+            if key not in _shared_limiters:
+                _shared_limiters[key] = RateLimiter()
+    return _shared_limiters[key]
 
 
-def with_feedback_retries(
-    generate_fn: Callable[..., str],
-    check_fn: Callable[[str, str], tuple[bool, str]],
-    num_retries: int = 2,
-) -> Callable[[str], tuple[str, str]]:
-    """Wrap a generate+check pair with a feedback-aware retry loop.
-
-    On each failed attempt, the feedback from check_fn is forwarded to the
-    next generate_fn call so the generator can correct its mistakes.
-
-    Args:
-        generate_fn: callable(text, feedback="") -> generated_text
-        check_fn: callable(original, generated) -> (accepted, feedback)
-        num_retries: Maximum number of attempts.
-
-    Returns:
-        callable(text) -> (result, info)
-            On success: (result, "")
-            On exhaustion: (last_result, "DISCARDED; feedback=<feedback>")
-    """
-
-    def wrapper(text: str) -> tuple[str, str]:
-        feedback = ""
-        last_result = text
-        for _ in range(num_retries):
-            result = generate_fn(text, feedback=feedback)
-            accepted, feedback = check_fn(text, result)
-            if accepted:
-                return result, ""
-            last_result = result
-        return last_result, f"DISCARDED; feedback={feedback}"
-
-    return wrapper
-
-
-# ---------------------------------------------------------------------------
-# Batch caller
-# ---------------------------------------------------------------------------
+def clear_shared_limiters() -> None:
+    """Drop every rate-limit window. For tests, or after a registry change."""
+    with _shared_limiters_lock:
+        _shared_limiters.clear()
 
 
 class BatchCaller:
-    """Run multiple LLM calls with optional concurrency and rate limiting.
+    """Run a batch one item per call, in sequence or on a thread pool.
 
-    When max_workers=1 (default), runs sequentially for easy debugging.
-    When max_workers>1, uses ThreadPoolExecutor for parallel execution.
-
-    NOTE: When using a VLLMBackend, keep max_workers=1 — vLLM manages
-    GPU memory internally and its batch_generate() is the correct way to
-    parallelize. Multiple concurrent generate() calls from threads would
-    compete for GPU RAM and likely OOM or deadlock.
+    For backends without native batching. Concurrency defaults to
+    ``backend.max_workers``, which the backend already clamped to 1 if it
+    cannot take parallel calls. An explicit ``max_workers`` above 1 on such a
+    backend raises at construction.
     """
 
     def __init__(
         self,
-        backend: LLMBackend,
+        backend: "LLMBackend",
         rate_limiter: RateLimiter | None = None,
-        max_workers: int = 1,
+        max_workers: int | None = None,
     ):
+        """Set up fan-out around one configured backend.
+
+        Args:
+            backend: The configured model to call.
+            rate_limiter: Window to count calls against, or ``None`` for no
+                throttling.
+            max_workers: Override for ``backend.max_workers``.
+
+        Raises:
+            ValueError: ``max_workers > 1`` on a series-only backend.
+        """
         self._backend = backend
         self._rate_limiter = rate_limiter
-        self._max_workers = max_workers
+        self._max_workers = (
+            backend.max_workers if max_workers is None else max_workers
+        )
+        self._check_concurrency()
+
+    @property
+    def backend(self) -> "LLMBackend":
+        return self._backend
+
+    @property
+    def max_workers(self) -> int:
+        return self._max_workers
 
     def _call_one(
-        self, messages: list[dict], model: str, **kwargs
+        self,
+        messages: list[dict],
+        internals_id: str | None = None,
+        **kwargs,
     ) -> str:
-        """Make a single rate-limited call."""
+        """Make one rate-limited call for a single item (a batch of one)."""
         if self._rate_limiter:
-            self._rate_limiter.wait_if_needed(model)
-        return self._backend.generate(messages, model, **kwargs)
+            self._rate_limiter.wait_if_needed(self._backend)
+        results = self._backend.generate(
+            [messages],
+            internals_ids=[internals_id] if internals_id is not None else None,
+            **kwargs,
+        )
+        return results[0]
+
+    def _check_internals_support(self, internals_ids: list | None) -> None:
+        """Raise if ``internals_ids`` is passed to a backend that cannot capture.
+
+        Backends without capture would accept and ignore the ids, so the
+        request is rejected here. ``ModelClient.generate()`` makes the same
+        check.
+        """
+        if internals_ids is not None and not self._backend.compute_config.supports_internals:
+            raise ValueError(
+                f"{type(self._backend).__name__} does not support internals "
+                f"capture (supports_internals=False); remove internals_ids/"
+                f"internals_id or use an internals-capable backend."
+            )
+
+    def _check_concurrency(self) -> None:
+        """Raise if ``max_workers > 1`` on a backend that needs series calls.
+
+        The backend clamps its own value at construction, so in normal use
+        this fires only for an explicit ``max_workers`` override.
+        """
+        if not self._backend.compute_config.supports_parallel_calls and self._max_workers > 1:
+            raise ValueError(
+                f"{type(self._backend).__name__} requires series calls; "
+                f"max_workers must be 1 (got {self._max_workers}). "
+                f"Omit max_workers so the backend's own clamped value is used."
+            )
 
     def run(
         self,
         messages_list: list[list[dict]],
-        model: str,
         on_complete: Callable[[int, str], None] | None = None,
+        internals_ids: list[str | None] | None = None,
         **kwargs,
     ) -> list[str]:
-        """Run generation for a list of message sets.
+        """Generate one reply per message list.
+
+        Sequential when ``max_workers <= 1``, thread-pooled otherwise.
 
         Args:
-            messages_list: List of chat message lists.
-            model: Model identifier.
-            on_complete: Optional callback(index, result) called after each
-                         completion. Useful for incremental checkpointing.
-            **kwargs: Passed through to backend.generate().
+            messages_list: One chat message list per item.
+            on_complete: Called as ``on_complete(index, result)`` after each
+                item finishes. Drives progress ticks.
+            internals_ids: One capture id (or ``None``) per item. Only valid
+                when the backend supports internals capture.
+            **kwargs: Passed to ``backend.generate()`` (e.g. ``max_tokens``,
+                ``temperature``).
 
         Returns:
-            List of generated texts, in the same order as messages_list.
+            Generated text, in the same order as ``messages_list``.
+
+        Raises:
+            ValueError: ``internals_ids`` has the wrong length, or the backend
+                cannot capture internals.
         """
+        self._check_internals_support(internals_ids)
+        if internals_ids is not None and len(internals_ids) != len(messages_list):
+            raise ValueError(
+                f"internals_ids must be the same length as messages_list "
+                f"({len(internals_ids)} != {len(messages_list)})."
+            )
+
+        if not messages_list:
+            return []
+
         results: list[str | None] = [None] * len(messages_list)
+        ids = internals_ids or [None] * len(messages_list)
 
         if self._max_workers <= 1:
-            # Sequential
             for i, msgs in enumerate(messages_list):
-                result = self._call_one(msgs, model, **kwargs)
+                result = self._call_one(msgs, ids[i], **kwargs)
                 results[i] = result
                 if on_complete:
                     on_complete(i, result)
         else:
-            # Concurrent
             with ThreadPoolExecutor(max_workers=self._max_workers) as executor:
                 future_to_idx = {
-                    executor.submit(self._call_one, msgs, model, **kwargs): i
+                    executor.submit(self._call_one, msgs, ids[i], **kwargs): i
                     for i, msgs in enumerate(messages_list)
                 }
-                for future in as_completed(future_to_idx):
-                    idx = future_to_idx[future]
-                    result = future.result()  # Propagates exceptions
-                    results[idx] = result
-                    if on_complete:
-                        on_complete(idx, result)
+                try:
+                    for future in as_completed(future_to_idx):
+                        idx = future_to_idx[future]
+                        result = future.result()  # re-raises a worker's exception
+                        results[idx] = result
+                        if on_complete:
+                            on_complete(idx, result)
+                except BaseException:
+                    # Drop the items not yet started: a failed batch must not
+                    # keep spending calls. Running ones finish first.
+                    executor.shutdown(cancel_futures=True)
+                    raise
 
         return results  # type: ignore[return-value]

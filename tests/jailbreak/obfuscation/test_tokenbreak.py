@@ -3,12 +3,12 @@
 import random
 
 from redact.jailbreak.obfuscation.tokenbreak import (
+    get_tokenbreak_functions,
     match_case,
-    tokenbreak_prepend,
-    tokenbreak_split,
     tokenbreak_delimiter,
     tokenbreak_obfuscate_word,
-    get_tokenbreak_functions,
+    tokenbreak_prepend,
+    tokenbreak_split,
 )
 
 
@@ -111,3 +111,21 @@ class TestGetTokenbreakFunctions:
         assert "to_tokenbreak_prepend" in names
         assert "to_tokenbreak_split" in names
         assert "to_tokenbreak_delimiter" in names
+
+
+class TestParseHarmfulWords:
+    def test_a_short_word_list(self):
+        from redact.jailbreak.obfuscation.tokenbreak import _parse_harmful_words
+
+        assert _parse_harmful_words("  apple pear \n") == ["apple", "pear"]
+
+    def test_none_and_a_rambling_reply_give_no_words(self):
+        from redact.jailbreak.obfuscation.tokenbreak import _parse_harmful_words
+
+        assert _parse_harmful_words("None") == []
+        assert _parse_harmful_words(" ".join(["word"] * 11)) == []
+
+    def test_placeholder_words_are_dropped(self):
+        from redact.jailbreak.obfuscation.tokenbreak import _parse_harmful_words
+
+        assert _parse_harmful_words("apple n/a pear") == ["apple", "pear"]

@@ -1,0 +1,41 @@
+{
+  "_comment": "The augmentation section's defaults: what the attacks draw (adversarial, to jailbreaks.csv) and what the variations draw (natural, to variations.csv). A recipe's augmentations overlays them key by key (layers, families and techniques list by list); a kind given as null is off. An empty layer_rates is the spec's rates. The attacks never draw a family of natural_only_families unless their families.allow names it. translation alone decides the translation family, whatever the lists say: false keeps it out, true puts it in; flip it to true once a local translation model is registered. Read by jailbreak/augmentation.py.",
+
+  "natural_only_families": ["casual_writing"],
+
+  "adversarial": {
+    "entry_types": null,
+    "translation": false,
+    "layers": {"deny": []},
+    "families": {"allow": null, "deny": []},
+    "techniques": {"allow": null, "deny": []},
+    "pure_only": false,
+    "family_weights": {},
+    "iterations": 1,
+    "rounds": null,
+    "max_complexity": 6,
+    "max_obfuscations": 2,
+    "layer_rates": {},
+    "allow_request_obfuscation": false
+  },
+
+  "natural": {
+    "entry_types": null,
+    "translation": false,
+    "layers": {"deny": []},
+    "families": {
+      "allow": ["typos", "casual_writing", "structural", "answer_language",
+                "answer_format", "asking", "indirect", "temporal", "continuation"],
+      "deny": []
+    },
+    "techniques": {
+      "allow": ["to_leetspeak_basic", "to_adversarial_suffix_punctuation",
+                "to_adversarial_suffix_emoji"],
+      "deny": ["to_refusal_then_comply", "to_apology_prevention", "to_prefix_injection"]
+    },
+    "pure_only": false,
+    "family_weights": {},
+    "iterations": 1,
+    "exact_techniques": 1
+  }
+}

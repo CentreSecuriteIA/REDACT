@@ -1,66 +1,68 @@
-"""Jailbreak dataset generation pipeline.
+"""Jailbreak augmentation: a pool of techniques, a plan of one combination per
+input and iteration, and the stage that runs the units.
 
-Technique modules are organized by attack family:
-- obfuscation/ — text transformation attacks (encoding, translation, etc.)
-- hacking/ — cognitive/psychological prompt hacking
-- manipulation/ — few-shot hacking (FSH) and attention shifting (DAP)
-- requests/ — request-structure attacks (answer format, continuation, indirect)
+The techniques live in one subpackage per layer of the spec: ``hacking/``,
+``manipulation/``, ``obfuscation/`` and ``requests/``. A transform is
+``(prompt) -> (text, info)``; a technique that calls a model is a generator
+(:mod:`redact.jailbreak.technique`).
 
-All LLM-dependent functions accept (backend, model, rate_limiter) as params.
-Pure transforms (encoding, structural, suffixes, ascii_art, requests) need no LLM.
+Usage::
 
-Usage:
-    from redact.jailbreak import combine_techniques, sample_combination
-    from redact.jailbreak.obfuscation import get_type_to_getter
-    from redact.jailbreak.obfuscation.encoding import to_base64
-    from redact.jailbreak.requests import get_request_type_to_getter
+    from redact.jailbreak import apply_combination, combine_techniques
+    from redact.jailbreak.obfuscation.encoding import to_base64, to_rot13
+
+    combined = combine_techniques(to_rot13, to_base64)
+    text, info, accepted, reasoning = apply_combination(combined, prompt)
 """
 
-# Obfuscation registry
-from .obfuscation import (
-    get_type_to_getter,
-    get_obfuscation_types,
-    get_all_obfuscation_functions,
+# One input through its techniques
+from .chain import apply_combination, combine_techniques, in_layer_order, run_chain
+
+# The stage: plan, drive the units, save
+from .pipeline import run_augmentation
+
+# The plan of a run
+from .plan import (
+    assign_combination,
+    combination_of,
+    coverage,
+    coverage_path,
+    default_escalation_schedule,
+    plan_run,
 )
 
-# Hacking registry
-from .hacking import (
-    get_hacking_type_to_getter,
-    get_hacking_types,
-    get_all_hacking_functions,
-)
+# The techniques a run may draw from
+from .pool import all_techniques, registry, technique_pool, uses_translation
 
-# Manipulation registry
-from .manipulation import (
-    get_manipulation_type_to_getter,
-    get_manipulation_types,
-    get_all_manipulation_functions,
-)
+# Which techniques may still join a combination, and drawing one
+from .rules import compatible
+from .sampling import sample_combination, sample_exact_combination
 
-# Requests registry
-from .requests import get_request_type_to_getter, get_request_types, get_all_request_functions
+# The spec and its tags
+from .technique import load_spec, tag
 
-# Utilities
-from .utils import (
-    combine_techniques,
-    tag_all_functions,
-    get_compatible_remaining,
-    sample_combination,
-    apply_combination,
-    is_noop,
-    load_spec,
-)
+# Every registered technique carries its spec tags from import on.
+tag(all_techniques())
 
-# Distribution
-from .distribution import deterministic_balanced_assign, split_by_technique_functions
-
-# ---------------------------------------------------------------------------
-# Tag all technique functions with compatibility metadata at import time
-# ---------------------------------------------------------------------------
-
-tag_all_functions(
-    get_all_obfuscation_functions()
-    + get_all_hacking_functions()
-    + get_all_manipulation_functions()
-    + get_all_request_functions()
-)
+__all__ = [
+    "all_techniques",
+    "apply_combination",
+    "assign_combination",
+    "combination_of",
+    "combine_techniques",
+    "compatible",
+    "coverage",
+    "coverage_path",
+    "default_escalation_schedule",
+    "in_layer_order",
+    "load_spec",
+    "plan_run",
+    "registry",
+    "run_augmentation",
+    "run_chain",
+    "sample_combination",
+    "sample_exact_combination",
+    "tag",
+    "technique_pool",
+    "uses_translation",
+]

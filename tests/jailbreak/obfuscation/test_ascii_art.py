@@ -1,12 +1,11 @@
 """Tests for ASCII art obfuscation."""
 
 import random
-from unittest.mock import patch
 
 from redact.jailbreak.obfuscation.ascii_art import (
-    to_ascii_art,
-    get_ascii_art_functions,
     ASCII_FONTS,
+    get_ascii_art_functions,
+    to_ascii_art,
 )
 
 

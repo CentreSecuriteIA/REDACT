@@ -1,140 +1,63 @@
-"""Few-Shot Hacking (FSH) manipulation techniques.
+"""Few-shot (FSH) techniques: benign Q&A pairs, then the prompt as the last question.
 
-FSH places N benign Q&A pairs before the harmful question, priming
-the model to continue the helpful pattern.
-
-Ported from reference manipulation.py lines 340-426.
+``info`` is ``num_shots=...;sub_category=...``, plus ``selection=...`` when a
+model chose the subcategory.
 """
 
 import random
-from pathlib import Path
+from collections.abc import Callable
 
-from redact.llms.base import LLMBackend
-from redact.llms.calls import generate_sample
-from redact.llms.wrappers import RateLimiter
-from redact.llms.prompts import load_prompt, build_messages
+from redact.jailbreak.technique import TechniqueGen
 
-
-# ---------------------------------------------------------------------------
-# LLM-based category selection (shared with dap.py)
-# ---------------------------------------------------------------------------
-
-
-def select_best_subcategory(
-    harmful_prompt: str,
-    all_subcategories: list[str],
-    backend: LLMBackend,
-    model: str,
-    rate_limiter: RateLimiter | None = None,
-    prompt_dir: str | Path | None = None,
-) -> tuple[str, bool]:
-    """Use LLM to select the benign subcategory most similar to harmful prompt.
-
-    Returns:
-        (subcategory, was_fallback) where was_fallback is True if the
-        LLM response couldn't be parsed and a random category was used.
-    """
-    config = load_prompt("jailbreak", "category_selection", prompt_dir)
-    subcategory_list = "\n".join(f"- {sc}" for sc in all_subcategories)
-    messages = build_messages(
-        config,
-        harmful_prompt=harmful_prompt,
-        subcategory_list=subcategory_list,
-    )
-    chosen = generate_sample(backend, model, messages, rate_limiter).strip()
-
-    # Exact match
-    if chosen in all_subcategories:
-        return chosen, False
-    # Fuzzy: check if the response contains a known subcategory
-    for sc in all_subcategories:
-        if sc.lower() in chosen.lower():
-            return sc, False
-    # Fallback: random
-    return random.choice(all_subcategories), True
-
-
-# ---------------------------------------------------------------------------
-# Prompt assembly
-# ---------------------------------------------------------------------------
+from .pairs import run_random_manipulation, run_selected_manipulation
 
 
 def _build_fsh_prompt(
     harmful_prompt: str,
     benign_pairs: list[dict],
     num_shots: int,
-) -> str:
-    """Assemble FSH prompt: N benign Q&A then harmful question."""
-    shots = random.sample(benign_pairs, min(num_shots, len(benign_pairs)))
+    rng: random.Random | None = None,
+) -> tuple[str, dict]:
+    """Assemble FSH prompt: N benign Q&A then harmful question; no extra info."""
+    shots = (rng or random).sample(benign_pairs, min(num_shots, len(benign_pairs)))
     lines: list[str] = []
     for i, pair in enumerate(shots, 1):
         lines.append(f"Q{i}: {pair['prompt']}")
         lines.append(f"A{i}: {pair['answer']}\n")
     lines.append(f"Q{len(shots) + 1}: {harmful_prompt}")
     lines.append(f"A{len(shots) + 1}:")
-    return "\n".join(lines)
+    return "\n".join(lines), {}
 
 
-# ---------------------------------------------------------------------------
-# Technique functions
-# ---------------------------------------------------------------------------
-
-
-def to_fsh_random_short(prompt: str, benign_data: dict) -> tuple[str, str]:
+def to_fsh_random_short(
+    prompt: str, benign_data: dict, *, rng: random.Random | None = None,
+) -> tuple[str, str]:
     """FSH with randomly chosen category, short answers. No LLM needed."""
-    num_shots = random.randint(3, 7)
-    subcat = random.choice(benign_data["all_subcategories"])
-    pairs = benign_data["by_subcat_short"].get(subcat, benign_data["short"])
-    jailbreak = _build_fsh_prompt(prompt, pairs, num_shots)
-    return jailbreak, f"num_shots={num_shots};sub_category={subcat}"
+    return run_random_manipulation(
+        prompt, benign_data, "short", _build_fsh_prompt, rng)
 
 
-def to_fsh_random_long(prompt: str, benign_data: dict) -> tuple[str, str]:
+def to_fsh_random_long(
+    prompt: str, benign_data: dict, *, rng: random.Random | None = None,
+) -> tuple[str, str]:
     """FSH with randomly chosen category, long answers. No LLM needed."""
-    num_shots = random.randint(3, 7)
-    subcat = random.choice(benign_data["all_subcategories"])
-    pairs = benign_data["by_subcat_long"].get(subcat, benign_data["long"])
-    jailbreak = _build_fsh_prompt(prompt, pairs, num_shots)
-    return jailbreak, f"num_shots={num_shots};sub_category={subcat}"
+    return run_random_manipulation(
+        prompt, benign_data, "long", _build_fsh_prompt, rng)
 
 
-def to_fsh_selected_short(
-    prompt: str,
-    benign_data: dict,
-    backend: LLMBackend,
-    model: str,
-    rate_limiter: RateLimiter | None = None,
-) -> tuple[str, str]:
-    """FSH with LLM-selected category, short answers."""
-    num_shots = random.randint(3, 7)
-    subcat, was_fallback = select_best_subcategory(
-        prompt, benign_data["all_subcategories"], backend, model, rate_limiter
-    )
-    pairs = benign_data["by_subcat_short"].get(subcat, benign_data["short"])
-    jailbreak = _build_fsh_prompt(prompt, pairs, num_shots)
-    selection = "fallback_random" if was_fallback else "selected"
-    return jailbreak, f"num_shots={num_shots};sub_category={subcat};selection={selection}"
+def to_fsh_selected_short(prompt: str, **kwargs) -> TechniqueGen:
+    """FSH with LLM-selected category, short answers (technique generator)."""
+    return (yield from run_selected_manipulation(
+        prompt, "short", _build_fsh_prompt, **kwargs))
 
 
-def to_fsh_selected_long(
-    prompt: str,
-    benign_data: dict,
-    backend: LLMBackend,
-    model: str,
-    rate_limiter: RateLimiter | None = None,
-) -> tuple[str, str]:
-    """FSH with LLM-selected category, long answers."""
-    num_shots = random.randint(3, 7)
-    subcat, was_fallback = select_best_subcategory(
-        prompt, benign_data["all_subcategories"], backend, model, rate_limiter
-    )
-    pairs = benign_data["by_subcat_long"].get(subcat, benign_data["long"])
-    jailbreak = _build_fsh_prompt(prompt, pairs, num_shots)
-    selection = "fallback_random" if was_fallback else "selected"
-    return jailbreak, f"num_shots={num_shots};sub_category={subcat};selection={selection}"
+def to_fsh_selected_long(prompt: str, **kwargs) -> TechniqueGen:
+    """FSH with LLM-selected category, long answers (technique generator)."""
+    return (yield from run_selected_manipulation(
+        prompt, "long", _build_fsh_prompt, **kwargs))
 
 
-def get_fsh_functions() -> list:
+def get_fsh_functions() -> list[Callable]:
     """Return all FSH technique functions."""
     return [to_fsh_random_short, to_fsh_random_long,
             to_fsh_selected_short, to_fsh_selected_long]

@@ -1,36 +1,32 @@
-"""DAP (Distract and Persuade / Attention Shifting) techniques.
+"""DAP techniques: the prompt as one question among benign Q&A pairs.
 
-The harmful question is hidden among benign Q&A pairs at a random
-middle position with an empty answer placeholder.
-
-Ported from reference manipulation.py lines 356-468.
+``info`` is ``num_shots=...;harmful_idx=...;sub_category=...``, plus
+``selection=...`` when a model chose the subcategory.
 """
 
 import random
+from collections.abc import Callable
 
-from redact.llms.base import LLMBackend
-from redact.llms.wrappers import RateLimiter
-from .fsh import select_best_subcategory
+from redact.jailbreak.technique import TechniqueGen
 
-
-# ---------------------------------------------------------------------------
-# Prompt assembly
-# ---------------------------------------------------------------------------
+from .pairs import run_random_manipulation, run_selected_manipulation
 
 
 def _build_dap_prompt(
     harmful_prompt: str,
     benign_pairs: list[dict],
     num_shots: int,
-) -> tuple[str, int]:
+    rng: random.Random | None = None,
+) -> tuple[str, dict]:
     """Assemble DAP prompt with harmful question at random middle position.
 
     Returns:
-        (jailbreak_prompt, harmful_idx) where harmful_idx is 1-based.
+        (jailbreak_prompt, {"harmful_idx": harmful_idx}), harmful_idx 1-based.
     """
-    shots = random.sample(benign_pairs, min(num_shots, len(benign_pairs)))
+    rng = rng or random
+    shots = rng.sample(benign_pairs, min(num_shots, len(benign_pairs)))
     # Insert in the middle: never first (1), never last (len+1)
-    harmful_idx = random.randint(2, max(2, len(shots)))
+    harmful_idx = rng.randint(2, max(2, len(shots)))
 
     lines: list[str] = []
     idx = 1
@@ -45,69 +41,38 @@ def _build_dap_prompt(
             lines.append(f"Q{idx}: {pair['prompt']}")
             lines.append(f"A{idx}: {pair['answer']}\n")
             idx += 1
-    return "\n".join(lines), harmful_idx
+    return "\n".join(lines), {"harmful_idx": harmful_idx}
 
 
-# ---------------------------------------------------------------------------
-# Technique functions
-# ---------------------------------------------------------------------------
-
-
-def to_dap_random_short(prompt: str, benign_data: dict) -> tuple[str, str]:
+def to_dap_random_short(
+    prompt: str, benign_data: dict, *, rng: random.Random | None = None,
+) -> tuple[str, str]:
     """DAP with randomly chosen category, short answers. No LLM needed."""
-    num_shots = random.randint(3, 7)
-    subcat = random.choice(benign_data["all_subcategories"])
-    pairs = benign_data["by_subcat_short"].get(subcat, benign_data["short"])
-    jailbreak, harmful_idx = _build_dap_prompt(prompt, pairs, num_shots)
-    return jailbreak, f"num_shots={num_shots};harmful_idx={harmful_idx};sub_category={subcat}"
+    return run_random_manipulation(
+        prompt, benign_data, "short", _build_dap_prompt, rng)
 
 
-def to_dap_random_long(prompt: str, benign_data: dict) -> tuple[str, str]:
+def to_dap_random_long(
+    prompt: str, benign_data: dict, *, rng: random.Random | None = None,
+) -> tuple[str, str]:
     """DAP with randomly chosen category, long answers. No LLM needed."""
-    num_shots = random.randint(3, 7)
-    subcat = random.choice(benign_data["all_subcategories"])
-    pairs = benign_data["by_subcat_long"].get(subcat, benign_data["long"])
-    jailbreak, harmful_idx = _build_dap_prompt(prompt, pairs, num_shots)
-    return jailbreak, f"num_shots={num_shots};harmful_idx={harmful_idx};sub_category={subcat}"
+    return run_random_manipulation(
+        prompt, benign_data, "long", _build_dap_prompt, rng)
 
 
-def to_dap_selected_short(
-    prompt: str,
-    benign_data: dict,
-    backend: LLMBackend,
-    model: str,
-    rate_limiter: RateLimiter | None = None,
-) -> tuple[str, str]:
-    """DAP with LLM-selected category, short answers."""
-    num_shots = random.randint(3, 7)
-    subcat, was_fallback = select_best_subcategory(
-        prompt, benign_data["all_subcategories"], backend, model, rate_limiter
-    )
-    pairs = benign_data["by_subcat_short"].get(subcat, benign_data["short"])
-    jailbreak, harmful_idx = _build_dap_prompt(prompt, pairs, num_shots)
-    selection = "fallback_random" if was_fallback else "selected"
-    return jailbreak, f"num_shots={num_shots};harmful_idx={harmful_idx};sub_category={subcat};selection={selection}"
+def to_dap_selected_short(prompt: str, **kwargs) -> TechniqueGen:
+    """DAP with LLM-selected category, short answers (technique generator)."""
+    return (yield from run_selected_manipulation(
+        prompt, "short", _build_dap_prompt, **kwargs))
 
 
-def to_dap_selected_long(
-    prompt: str,
-    benign_data: dict,
-    backend: LLMBackend,
-    model: str,
-    rate_limiter: RateLimiter | None = None,
-) -> tuple[str, str]:
-    """DAP with LLM-selected category, long answers."""
-    num_shots = random.randint(3, 7)
-    subcat, was_fallback = select_best_subcategory(
-        prompt, benign_data["all_subcategories"], backend, model, rate_limiter
-    )
-    pairs = benign_data["by_subcat_long"].get(subcat, benign_data["long"])
-    jailbreak, harmful_idx = _build_dap_prompt(prompt, pairs, num_shots)
-    selection = "fallback_random" if was_fallback else "selected"
-    return jailbreak, f"num_shots={num_shots};harmful_idx={harmful_idx};sub_category={subcat};selection={selection}"
+def to_dap_selected_long(prompt: str, **kwargs) -> TechniqueGen:
+    """DAP with LLM-selected category, long answers (technique generator)."""
+    return (yield from run_selected_manipulation(
+        prompt, "long", _build_dap_prompt, **kwargs))
 
 
-def get_dap_functions() -> list:
+def get_dap_functions() -> list[Callable]:
     """Return all DAP technique functions."""
     return [to_dap_random_short, to_dap_random_long,
             to_dap_selected_short, to_dap_selected_long]

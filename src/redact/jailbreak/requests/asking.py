@@ -1,63 +1,29 @@
-"""Question-framing jailbreak techniques.
+"""Asking techniques: an innocuous-question framing, or a request for details.
 
-Pure string transforms: str -> tuple[str, str]. No LLM dependency.
-
-- innocuous_question: adds framing that makes the request sound casual or
-  academic, reducing the apparent intent.
-- ask_for_details: appends a directive requesting maximum specificity,
-  pushing the model toward detailed harmful output.
-
-Templates are stored in configs/asking_templates.json. One variant is
-selected per call using the globally seeded random module.
-
-additional_info format: "type={type_name};variant={variant_name}"
+``info`` is ``type=<name>;variant=<variant>``.
 """
 
-import json
-import random
-from pathlib import Path
+from collections.abc import Callable
+from functools import partial
+from random import Random
+
+from ..directives import apply_template_directive, load_templates
+
+_TEMPLATES: dict[str, list[dict]] = load_templates("requests", "asking_templates.json")
+_apply = partial(apply_template_directive, _TEMPLATES, info_key="type")
 
 
-# ---------------------------------------------------------------------------
-# Template loading
-# ---------------------------------------------------------------------------
-
-_TEMPLATES_PATH = Path(__file__).parent.parent.parent / "configs" / "jailbreak" / "requests" / "asking_templates.json"
-_TEMPLATES: dict[str, list[dict]] = json.loads(_TEMPLATES_PATH.read_text(encoding="utf-8"))
-
-
-# ---------------------------------------------------------------------------
-# Shared helper
-# ---------------------------------------------------------------------------
-
-
-def _apply(directive: str, prompt: str) -> tuple[str, str]:
-    t = random.choice(_TEMPLATES[directive])
-    result = t["template"].format_map({"prompt": prompt})
-    return result, f"type={directive};variant={t['name']}"
-
-
-# ---------------------------------------------------------------------------
-# Public functions
-# ---------------------------------------------------------------------------
-
-
-def to_innocuous_question(prompt: str) -> tuple[str, str]:
+def to_innocuous_question(prompt: str, *, rng: Random | None = None) -> tuple[str, str]:
     """Add a casual/academic framing prefix to make the request sound innocent."""
-    return _apply("innocuous_question", prompt)
+    return _apply("innocuous_question", prompt, rng=rng)
 
 
-def to_ask_for_details(prompt: str) -> tuple[str, str]:
+def to_ask_for_details(prompt: str, *, rng: Random | None = None) -> tuple[str, str]:
     """Append a directive requesting maximum detail and specificity."""
-    return _apply("ask_for_details", prompt)
+    return _apply("ask_for_details", prompt, rng=rng)
 
 
-# ---------------------------------------------------------------------------
-# Registry
-# ---------------------------------------------------------------------------
-
-
-def get_asking_functions() -> list:
+def get_asking_functions() -> list[Callable]:
     """Return all question-framing technique functions."""
     return [
         to_innocuous_question,

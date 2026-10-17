@@ -1,0 +1,101 @@
+"""The techniques a run may draw from: every registered one, filtered by a
+kind of the run's augmentation section.
+
+A fresh plan draws from the filtered pool; a planned row is read back through
+the registry of every technique, so a plan made with another pool still
+replays.
+"""
+
+from collections.abc import Callable
+
+from .hacking import get_all_hacking_functions
+from .manipulation import get_all_manipulation_functions
+from .obfuscation import get_all_obfuscation_functions
+from .requests import get_all_request_functions
+from .technique import load_spec
+
+#: The family a kind's ``translation`` switch decides.
+TRANSLATION = "translation"
+
+
+def all_techniques() -> list[Callable]:
+    """Every registered technique, one layer after another."""
+    return (
+        get_all_obfuscation_functions()
+        + get_all_hacking_functions()
+        + get_all_manipulation_functions()
+        + get_all_request_functions()
+    )
+
+
+def _check_against_spec(techniques: list[Callable]) -> None:
+    """Raise unless ``techniques`` and the spec name the same techniques.
+
+    A spec key starting with ``_`` is a comment, not a technique.
+
+    Raises:
+        ValueError: A registered technique the spec does not name, or a spec
+            entry with no registered function.
+    """
+    registered = {fn.__name__ for fn in techniques}
+    specified = {name for name in load_spec()["techniques"] if not name.startswith("_")}
+    problems = []
+    if unspecified := sorted(registered - specified):
+        problems.append(f"registered but not in the spec: {', '.join(unspecified)}")
+    if unregistered := sorted(specified - registered):
+        problems.append(f"in the spec but not registered: {', '.join(unregistered)}")
+    if problems:
+        raise ValueError(
+            "combination_spec.json and the technique registries differ; "
+            + "; ".join(problems))
+
+
+def technique_pool(resolved: dict) -> list[Callable]:
+    """The techniques one kind of the augmentation section draws from, in
+    registry order.
+
+    ``resolved`` is a kind as :func:`redact.jailbreak.augmentation.resolve`
+    returns it. From every registered technique: less the layers of
+    ``layers.deny``; when either ``allow`` is a list, those of a family in
+    ``families.allow`` or named in ``techniques.allow``; less those of a
+    family in ``families.deny`` and those named in ``techniques.deny``; with
+    ``pure_only``, less every technique that calls a model or needs benign
+    data. The translation family is in when ``translation`` is true, allowed
+    and not denied as a family, and out when it is false, whatever the
+    lists say.
+    """
+    families, techniques = resolved["families"], resolved["techniques"]
+    denied_layers = set(resolved["layers"]["deny"])
+    pool = [fn for fn in all_techniques()
+            if getattr(fn, "layer", None) not in denied_layers]
+    if families["allow"] is not None or techniques["allow"] is not None:
+        allowed = set(families["allow"] or ())
+        if resolved["translation"]:
+            allowed.add(TRANSLATION)
+        named = set(techniques["allow"] or ())
+        pool = [fn for fn in pool if fn.__name__ in named
+                or allowed.intersection(getattr(fn, "families", ()))]
+    # The switch, not the lists, decides the translation family.
+    denied = set(families["deny"]) - {TRANSLATION}
+    if not resolved["translation"]:
+        denied.add(TRANSLATION)
+    pool = [fn for fn in pool if fn.__name__ not in techniques["deny"]
+            and not denied.intersection(getattr(fn, "families", ()))]
+    if resolved["pure_only"]:
+        pool = [fn for fn in pool
+                if not getattr(fn, "requires_llm", False)
+                and not getattr(fn, "requires_benign", False)]
+    return pool
+
+
+def registry(techniques: list[Callable]) -> dict[str, Callable]:
+    """Each of ``techniques`` by its ``__name__``."""
+    return {fn.__name__: fn for fn in techniques}
+
+
+def uses_translation(pool: list[Callable]) -> bool:
+    """Whether ``pool`` holds a translation technique."""
+    return any(TRANSLATION in getattr(fn, "families", ()) for fn in pool)
+
+
+_check_against_spec(all_techniques())
