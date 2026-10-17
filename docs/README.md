@@ -31,7 +31,7 @@ extend REDACT.
   types, the params keys per stage, the augmentation section, the model
   registry, your own config folder, the prompt overlay.
 - [extending.md](extending.md): how to add a model, a prompt, a jailbreak
-  technique, a stage, a taxonomy or a dataset type.
+  technique, a stage or a taxonomy, and how to change a dataset type.
 - [techniques.md](techniques.md): every jailbreak technique by layer and
   family, for allow and deny lists, and the eval type's pool.
 

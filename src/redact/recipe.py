@@ -24,8 +24,7 @@ import warnings
 from functools import cache
 from pathlib import Path
 
-from redact import paths
-from redact.config_overlay import config_file, taxonomy_folder
+from redact.config_overlay import DATASET_TYPES, config_file, taxonomy_folder
 from redact.stages import STAGES, includes_general_benign
 
 _DEFAULT_MODELS = {
@@ -66,16 +65,9 @@ def _read_type_file(path: str, modified: int) -> dict:
 
 def _dataset_type_file(name: str, config_dir: str | Path | None) -> dict:
     """The type file, read again when it changes."""
+    if name not in DATASET_TYPES:
+        raise ValueError(f'dataset_type must be "eval" or "training", got {name!r}.')
     path = config_file(f"dataset_types/{name}.json", config_dir)
-    if not path.is_file():
-        folders = [paths.configs_dir() / "dataset_types"]
-        if config_dir is not None:
-            folders.append(Path(config_dir) / "dataset_types")
-        known = sorted({p.stem for folder in folders for p in folder.glob("*.json")})
-        where = ("configs/dataset_types" if config_dir is None
-                 else f"configs/dataset_types or {folders[1]}")
-        raise ValueError(
-            f"dataset_type {name!r} has no file in {where}; write one of {known}.")
     return _read_type_file(str(path), path.stat().st_mtime_ns)
 
 
@@ -86,8 +78,9 @@ def load_dataset_type(name: str, config_dir: str | Path | None = None) -> dict:
     the caller may change.
 
     Raises:
-        ValueError: No file has that name, the file does not hold exactly
-            those three keys, or :func:`load_params` refuses its params.
+        ValueError: ``name`` is not ``"eval"`` or ``"training"``, the file
+            does not hold exactly those three keys, or :func:`load_params`
+            refuses its params.
     """
     return copy.deepcopy(_dataset_type_file(name, config_dir))
 
@@ -99,6 +92,16 @@ def dataset_type_hash(name: str, config_dir: str | Path | None = None) -> str:
 
     return content_id(
         json.dumps(_dataset_type_file(name, config_dir), sort_keys=True))
+
+
+def stage_params(
+    stage: str, dataset_type: str, params: dict | None = None,
+    config_dir: str | Path | None = None,
+) -> dict:
+    """The params of ``stage``: the dataset type file's, with the entry of
+    ``params`` (the params file's) laid over them key by key."""
+    typed = load_dataset_type(dataset_type, config_dir)["params"].get(stage)
+    return {**(typed or {}), **((params or {}).get(stage) or {})}
 
 
 def _config_dir(data: dict) -> str | None:
@@ -124,8 +127,14 @@ def _config_dir(data: dict) -> str | None:
     return str(folder)
 
 
-def load_recipe(recipe: str | Path | dict) -> dict:
-    """Load + validate a recipe (JSON path or already-parsed dict)."""
+def load_recipe(
+    recipe: str | Path | dict, params: str | Path | dict | None = None,
+) -> dict:
+    """Load + validate a recipe (JSON path or already-parsed dict).
+
+    ``params`` stands in for the recipe's ``params_file``, as a run's does:
+    the benign taxonomy is checked with its params over the dataset type's.
+    """
     if isinstance(recipe, dict):
         data = dict(recipe)
         data.setdefault("_base_dir", None)
@@ -140,8 +149,6 @@ def load_recipe(recipe: str | Path | dict) -> dict:
         raise ValueError(
             'The recipe names no dataset_type; write "dataset_type": "eval" or '
             '"training".')
-    if not isinstance(dtype, str):
-        raise ValueError(f'dataset_type must be "eval" or "training", got {dtype!r}.')
     data["config_dir"] = _config_dir(data)
     dataset_type = load_dataset_type(dtype, data["config_dir"])
 
@@ -182,10 +189,28 @@ def load_recipe(recipe: str | Path | dict) -> dict:
     # For their errors. The entries stay as written, and a run reads them again.
     serving_of(data.get("models") or {})
     data["augmentations"] = augmentations_of(data)
-    data["benign_taxonomy"] = benign_taxonomy_of(data, stages)
+    # Read as written: the run checks the params, and warns, when it loads them.
+    given = _read_params(data.get("params_file") if params is None else params,
+                         data["_base_dir"])
+    data["benign_taxonomy"] = benign_taxonomy_of(data, stages, given)
     data["stages"] = stages
     data["dataset_type"] = dtype
     return data
+
+
+def _read_params(params: str | Path | dict | None,
+                 base_dir: str | Path | None = None) -> dict:
+    """``params`` as written: the dict, or the JSON file it names, a relative
+    path read from ``base_dir``; none for ``None``."""
+    if params is None:
+        return {}
+    if isinstance(params, dict):
+        return dict(params)
+    path = Path(params)
+    if not path.is_absolute() and base_dir is not None:
+        path = Path(base_dir) / path
+    with path.open(encoding="utf-8") as fh:
+        return json.load(fh)
 
 
 def load_params(
@@ -198,16 +223,7 @@ def load_params(
         ValueError: A key is not a stage's name, nor a comment (``_`` first),
             or ``params["jailbreaks"]`` sets a key of the augmentation section.
     """
-    if params is None:
-        return {}
-    if isinstance(params, dict):
-        data = dict(params)
-    else:
-        p = Path(params)
-        if not p.is_absolute() and base_dir is not None:
-            p = Path(base_dir) / p
-        with p.open(encoding="utf-8") as fh:
-            data = json.load(fh)
+    data = _read_params(params, base_dir)
     _check_jailbreak_params(data)
     unknown = [key for key in data if key not in STAGES and not key.startswith("_")]
     if unknown:
@@ -245,16 +261,19 @@ def _check_jailbreak_params(params: dict) -> None:
             DeprecationWarning, stacklevel=3)
 
 
-def benign_taxonomy_of(recipe: dict, stages: list[str]) -> dict | str:
+def benign_taxonomy_of(
+    recipe: dict, stages: list[str], params: dict | None = None,
+) -> dict | str:
     """The recipe's ``benign_taxonomy``: the taxonomy file, under ``taxonomy_dir``,
     whose categories the constitution's general-benign part is built from and
     whose subcategories the benign Q&A pairs of the fsh and dap techniques are
     generated for; ``"benign"``, the packaged one, when left out or null.
 
     The file is read when the recipe runs the constitution stage and its
-    dataset type's params switch the general-benign part on, or runs the
-    jailbreak stage and a kind of its ``augmentations`` (resolved) draws a
-    technique that needs benign data.
+    params (the dataset type's, with ``params``, the params file's, over
+    them) switch the general-benign part on, by its name or its former one,
+    or runs the jailbreak stage and a kind of its ``augmentations``
+    (resolved) draws a technique that needs benign data.
 
     Raises:
         ValueError: The key is not a name or an object, or the taxonomy it
@@ -274,10 +293,8 @@ def benign_taxonomy_of(recipe: dict, stages: list[str]) -> dict | str:
             f'a name such as "{DEFAULT_TAXONOMY}", or leave it out.')
     uses = []
     config_dir = recipe.get("config_dir")
-    typed = (load_dataset_type(recipe["dataset_type"], config_dir)["params"]
-             if recipe.get("dataset_type") else {})
-    if "constitution" in stages and includes_general_benign(
-            typed.get("constitution") or {}):
+    if "constitution" in stages and includes_general_benign(stage_params(
+            "constitution", recipe["dataset_type"], params, config_dir)):
         uses.append("the constitution builds its general-benign part from its "
                     "categories")
     kinds = [kind for kind in recipe["augmentations"].values() if kind is not None]

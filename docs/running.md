@@ -138,9 +138,10 @@ the stage's name.
 - `params_file` and `config_dir` are relative to the recipe's folder.
   `data_dir`, `prompt_dir` and `taxonomy_dir` are relative to the current
   directory.
-- `config_dir` names a folder of your own configs: a dataset type,
-  taxonomy or `jailbreak/augmentations.json` file there is read in place of
-  the packaged one; `taxonomy_dir`, when given, still wins for taxonomies.
+- `config_dir` names a folder of your own configs: a dataset type
+  (`eval.json` or `training.json`), taxonomy or
+  `jailbreak/augmentations.json` file there is read in place of the packaged
+  one; `taxonomy_dir`, when given, still wins for taxonomies.
 - A params file holds one entry per stage, under the stage's name. Any
   other top-level key raises, except a comment key that starts with `_`.
   Inside a stage's entry every key must be a parameter of the stage's front,
@@ -494,7 +495,7 @@ rate. [internals/telemetry.md](internals/telemetry.md) lists the events.
 | `ValueError: No constitution at ...` | A run whose inputs are seeded has no saved constitution | List `constitution` before `inputs` |
 | `RuntimeError: The run plans a model on a card another process holds memory on ...` | Before any stage: a card the plan uses is held, often by the engines of a run killed with `kill -9` | Kill the PIDs the message names and check `nvidia-smi` shows the card empty, or run on other cards (`CUDA_VISIBLE_DEVICES`) |
 | `ValueError: benign_taxonomy '...' cannot be read` / `has no category` | At recipe load: the benign taxonomy the constitution's general-benign part or the jailbreak stage's benign data needs is missing or empty | Name a file in `taxonomy_dir` or the `config_dir`'s `taxonomy/`, or leave the key out for the packaged `benign` |
-| `ValueError: The recipe names no dataset_type` / `dataset_type 'x' has no file in ...` | At recipe load: `dataset_type` is required and names a file of `configs/dataset_types/` (or of the `config_dir`'s) | Write `"dataset_type": "eval"` or `"training"` |
+| `ValueError: The recipe names no dataset_type` / `dataset_type must be "eval" or "training", got ...` | At recipe load: `dataset_type` is required and is `eval` or `training`; a file of another name in the `config_dir`'s `dataset_types/` is no new type | Write `"dataset_type": "eval"` or `"training"`; to change what one means, edit its file in the `config_dir` |
 | `FileNotFoundError: exclude_from names ...` | An eval build's `exclude_from` names a path that does not exist, or a folder with no `Datasets/*.csv` and no constitution; nothing is written | Name the training run's `data_dir` or one of its CSVs |
 | `ValueError: No benign pairs at ...` | Every benign unit was rejected three times | Use a stronger `gen` model, then delete the ledger the message names |
 | `KeyError: Model 'x' needs an API key, but the environment variable ... is not set` | A hosted model without its key | Add the key to `.env`, or serve the model locally |

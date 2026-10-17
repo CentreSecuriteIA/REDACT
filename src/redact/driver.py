@@ -456,7 +456,7 @@ def run_pipeline(
 
     from . import residency
 
-    recipe = load_recipe(recipe)
+    recipe = load_recipe(recipe, params=params)
     params = load_params(recipe.get("params_file") if params is None else params,
                          base_dir=recipe.get("_base_dir"))
     serving = serving_of(recipe.get("models") or {})
