@@ -321,7 +321,7 @@ Rows on disk. A stage's output is CSV: under `Datasets/` (one file for most stag
 - The twelve flat keywords (`include_*` ×5, `pure_only`, `max_complexity`, `max_obfuscations`, `sampling_probs`, `iterations`, `settings_per_iteration`, `entry_types`; `FLAT_KEYWORDS`) are deprecated aliases into the adversarial kind for one release, each with a `DeprecationWarning` (`apply_flat_keywords`), wherever they are written: `generate_jailbreaks` keywords, the flat form of a recipe's `augmentations`, or `params["jailbreaks"]`.
 
 **Known issues (open):**
-- Phase 5's request obfuscation is not counted against `max_obfuscations`, and when no other technique was picked its complexity is not checked against `max_complexity`.
+- Phase 5's request obfuscation is not counted against `max_obfuscations`.
 - The spec's per-family `max_picks` (and `description`) is not read: a combination holds one technique per family.
 - `to_tokenbreak_split` can produce characters no ASCII-art font draws, and the spec does not keep it from `ascii_art`, so that pair is often discarded.
 

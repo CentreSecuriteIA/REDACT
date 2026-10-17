@@ -140,6 +140,19 @@ def test_a_budget_draw_never_holds_a_forbidden_pair_or_breaks_a_layer_cap():
         assert over == [], (seed, names)
 
 
+@pytest.mark.parametrize("max_complexity", [0, 1, 2, 3])
+def test_a_budget_draw_stays_within_its_complexity(max_complexity):
+    for seed in range(300):
+        fn = sample_combination(
+            random.Random(seed), POOL, max_complexity=max_complexity,
+            max_obfuscations=3, allow_request_obfuscation=True,
+            dealer=_Dealer(key=(seed,)) if seed % 2 else None,
+            sampling_probs=dict.fromkeys(
+                ("hacking", "manipulation", "requests", "request_obfuscation"), 0.9))
+        names = [t.__name__ for t in fn.techniques]
+        assert sum(t.complexity for t in fn.techniques) <= max_complexity, (seed, names)
+
+
 def test_request_obfuscation_is_light_encoding_or_translation():
     names = {fn.__name__ for fn in request_obfuscation_candidates(POOL)}
     assert {"to_rot13", "to_french"} <= names

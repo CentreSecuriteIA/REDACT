@@ -146,11 +146,10 @@ the techniques still `compatible` with what is picked:
    light `encode` technique (the light `to_sensitive_words_encode_*` among
    them) or a translation, applied after the request technique.
 
-The apply order is the layers', whatever the pick order. After each pick, a
-technique above the remaining complexity is no longer eligible. The step-5
-pick is drawn from the techniques still compatible and within the remaining
-complexity, and is not counted against `max_obfuscations`; when no other
-technique was picked, its complexity is not checked.
+The apply order is the layers', whatever the pick order. A technique
+above the remaining complexity is never eligible, for the first pick too. The
+step-5 pick is drawn from the techniques still compatible and within the
+remaining complexity, and is not counted against `max_obfuscations`.
 
 **Count mode** (`exact_techniques: n`) picks exactly `n` compatible
 techniques from any layer, ignoring complexity. It returns fewer when the

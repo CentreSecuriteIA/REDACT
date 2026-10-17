@@ -409,6 +409,26 @@ class TestRequestLayerObfuscation:
         ]
 
 
+class TestBudget:
+    """In budget mode every pick fits the complexity the earlier ones leave."""
+
+    def test_the_first_pick_fits_the_budget(self):
+        heavy = _tech("t_persona", "hacking", ["persona"], complexity=3)
+        fn = sample_combination(random.Random(0), [heavy], max_complexity=1,
+                                sampling_probs={"hacking": 1.0})
+        assert fn.techniques == []
+
+    def test_a_request_obfuscation_picked_alone_fits_the_budget(self):
+        light_encode = _tech("to_fake_rot13", "obfuscation", ["encode"],
+                             complexity=2, encode_weight="light")
+        fn = sample_combination(
+            random.Random(0), [light_encode], max_complexity=1,
+            include_obfuscation=False, allow_request_obfuscation=True,
+            sampling_probs={"request_obfuscation": 1.0},
+        )
+        assert fn.techniques == []
+
+
 class TestDefaultEscalationSchedule:
     def test_four_rounds(self):
         sched = default_escalation_schedule()

@@ -100,7 +100,9 @@ def sample_combination(
     p_request_obfuscation = probs.get("request_obfuscation", 0.5)
     selected: list[Callable] = []
     remaining_complexity = max_complexity
-    current_pool = list(pool)
+    # Each pick, the first and the request obfuscation included, is drawn
+    # from what fits the budget the earlier picks leave.
+    current_pool = compatible(selected, pool, remaining_complexity)
 
     def _update_pool() -> None:
         nonlocal current_pool
