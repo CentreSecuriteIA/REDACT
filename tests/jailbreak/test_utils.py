@@ -275,6 +275,28 @@ class TestApplyCombination:
         assert text == "a{'pairs': 1}"
         assert loads == [{"client": None, "cache_path": "b.csv", "prompt_dir": None}]
 
+    def test_without_auto_benign_an_existing_cache_is_loaded(
+            self, monkeypatch, tmp_path):
+        import redact.jailbreak.chain as chain_module
+
+        loads = []
+        monkeypatch.setattr(chain_module, "get_or_generate_benign_data",
+                            lambda **kwargs: loads.append(kwargs) or {"pairs": 1})
+
+        def tagged(text, **kwargs):
+            return text + str(kwargs.get("benign_data")), ""
+        tagged.requires_benign = True
+
+        cache = tmp_path / "b.csv"
+        text, _, _, _ = apply_combination(tagged, "a", auto_benign=False,
+                                          benign_cache_path=cache)
+        assert text == "aNone" and loads == []
+        cache.write_text("x", encoding="utf-8")
+        text, _, _, _ = apply_combination(tagged, "a", auto_benign=False,
+                                          benign_cache_path=cache)
+        assert text == "a{'pairs': 1}"
+        assert loads == [{"client": None, "cache_path": cache, "prompt_dir": None}]
+
     def test_prompt_dir_reaches_the_techniques_that_take_it(self):
         seen = {}
 

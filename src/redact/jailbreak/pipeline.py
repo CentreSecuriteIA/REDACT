@@ -66,10 +66,11 @@ def run_augmentation(
     its pending units run through :func:`drive_units`, up to ``batch_size`` per
     call, their rows appended every 32 units. The combination is read back
     through every registered technique, so a plan made with another pool still
-    replays, and with ``auto_generate_benign`` the benign data is loaded when
-    a pending unit's techniques need it, its pairs generated first for each
-    subcategory of ``benign_taxonomy`` (a file name under ``taxonomy_dir``, or
-    a loaded taxonomy) that ``benign_path`` lacks. ``rounds`` holds each round's
+    replays. The benign data at ``benign_path`` is loaded when a pending unit's
+    techniques need it: with ``auto_generate_benign`` its pairs are generated
+    first for each subcategory of ``benign_taxonomy`` (a file name under
+    ``taxonomy_dir``, or a loaded taxonomy) that the file lacks; without it a
+    missing file raises before any unit runs. ``rounds`` holds each round's
     sampler settings, as :func:`redact.jailbreak.augmentation.rounds_of`
     gives them (one round of the sampler's defaults when None);
     ``family_weights`` and ``layer_rates``
@@ -154,7 +155,8 @@ def run_augmentation(
     planned = total = written = 0
     needs_benign = False
     unplanned = set(position) if reused else set()
-    if verbose or auto_generate_benign or reused:
+    pool_needs_benign = any(getattr(fn, "requires_benign", False) for fn in pool)
+    if verbose or pool_needs_benign or reused:
         for plan_row in manifest:
             planned += 1
             unplanned.discard(str(plan_row["sample_id"]))
@@ -170,9 +172,10 @@ def run_augmentation(
             "unit. Run with resume=False to plan every input again (the stage "
             "starts over).", label, len(unplanned), len(position), man_path.name)
     benign_data = None
-    if auto_generate_benign and needs_benign:
+    if needs_benign:
         benign_data = get_or_generate_benign_data(
-            client=client, cache_path=benign_path, verbose=verbose,
+            client=client if auto_generate_benign else None,
+            cache_path=benign_path, verbose=verbose,
             taxonomy=benign_taxonomy, taxonomy_dir=taxonomy_dir,
             prompt_dir=prompt_dir, batch_size=batch_size)
 

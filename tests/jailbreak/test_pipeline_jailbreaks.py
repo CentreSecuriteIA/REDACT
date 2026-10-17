@@ -517,6 +517,43 @@ def test_a_resume_loads_the_benign_data_its_plan_needs_whatever_its_pool(
     assert set(df["technique"]) == {"to_fsh_random_short"}
 
 
+_FSH = {"adversarial": {"techniques": {"allow": ["to_fsh_random_short"]},
+                        "rounds": [{"exact_techniques": 1}]}, "natural": None}
+
+
+def test_without_auto_generate_benign_the_cache_is_loaded_as_it_is(
+        tmp_path, monkeypatch):
+    import redact.jailbreak.manipulation.benign as JBenign
+
+    def generate(*args, **kwargs):
+        raise AssertionError("benign data was generated")
+
+    monkeypatch.setattr(JBenign, "generate_benign_data", generate)
+    benign = tmp_path / "benign.csv"
+    pd.DataFrame([
+        {"main_category": "A", "sub_category": "s", "prompt": f"q{i}",
+         "answer": f"a{i}", "answer_type": answer_type}
+        for i in range(8) for answer_type in ("short", "long")
+    ]).to_csv(benign, index=False)
+    inputs = _inputs().head(3)
+    df = generate_jailbreaks(
+        inputs=inputs, output_path=tmp_path / "jb.csv", benign_path=benign,
+        seed=7, augmentation=_FSH, auto_generate_benign=False, verbose=False)
+    assert len(df) == len(inputs) and df["accepted"].all()
+    assert set(df["technique"]) == {"to_fsh_random_short"}
+
+
+def test_without_auto_generate_benign_or_a_cache_the_run_raises_before_a_row(
+        tmp_path):
+    out = tmp_path / "jb.csv"
+    with pytest.raises(ValueError, match="Benign data not found"):
+        generate_jailbreaks(
+            inputs=_inputs().head(3), output_path=out,
+            benign_path=tmp_path / "benign.csv", seed=7, augmentation=_FSH,
+            auto_generate_benign=False, verbose=False)
+    assert not out.exists()
+
+
 def test_a_pool_without_one_loads_no_benign_data(tmp_path, monkeypatch):
     loads = _benign_loads(monkeypatch)
     df = generate_jailbreaks(inputs=_inputs(), output_path=tmp_path / "jb.csv", seed=7,
