@@ -290,6 +290,19 @@ class TestKV:
         with _with(None):                       # unreadable: the default stands
             assert E.effective_max_model_len("x") == 10_000
 
+    def test_unreadable_config_without_a_config_json_keeps_the_default(
+            self, monkeypatch):
+        """Nothing names the maximum: the default stands. The hub cache is
+        asked, never the network."""
+        import huggingface_hub
+
+        asked = []
+        monkeypatch.setattr(huggingface_hub, "try_to_load_from_cache",
+                            lambda repo, name: asked.append((repo, name)))
+        with _with(None):
+            assert E.effective_max_model_len("org/none") == E.DEFAULT_MAX_MODEL_LEN
+        assert asked == [("org/none", "config.json")]
+
     def test_dtype_follows_the_checkpoint_then_defaults_to_float32(self):
         with _with(_variant(MISTRAL_24B, drop=("torch_dtype",))):
             assert E.estimate_kv_gib("x", max_model_len=32768) == 10.0
@@ -329,6 +342,79 @@ class TestKV:
         with _with(mha):
             full = E.estimate_kv_gib("x", max_model_len=4096)
         assert full == pytest.approx(gqa * 4, rel=0.01)
+
+
+def _checkpoint(directory, **fields):
+    """A local checkpoint directory whose ``config.json`` holds ``fields``."""
+    import json
+
+    (directory / "config.json").write_text(json.dumps(fields), encoding="utf-8")
+    return str(directory)
+
+
+class TestContextFromConfigJson:
+    """When the config cannot be read as an object, or names no
+    ``max_position_embeddings``, the maximum is read from ``config.json`` as
+    data: no remote code runs. The default is capped at it as before."""
+
+    @pytest.mark.parametrize("key", [
+        "max_position_embeddings", "max_sequence_length", "seq_length",
+        "n_positions", "model_max_length"])
+    def test_each_field_caps_the_default(self, tmp_path, key):
+        path = _checkpoint(tmp_path, auto_map={"AutoConfig": "custom.Config"},
+                           **{key: 8192})
+        with _with(None):                       # needs remote code: unreadable
+            assert [E.effective_max_model_len(path)] == [8192]
+
+    def test_the_fields_are_read_in_order_and_only_lengths_count(self, tmp_path):
+        path = _checkpoint(tmp_path, max_position_embeddings=None,
+                           max_sequence_length=True, seq_length=0,
+                           n_positions=4096, model_max_length=2048)
+        with _with(None):
+            assert [E.effective_max_model_len(path)] == [4096]
+
+    def test_the_language_models_fields_come_first(self, tmp_path):
+        (tmp_path / "nested").mkdir()
+        nested = _checkpoint(tmp_path / "nested", max_position_embeddings=512,
+                             text_config={"seq_length": 6144})
+        outer = _checkpoint(tmp_path, max_position_embeddings=512, text_config={})
+        with _with(None):
+            assert [E.effective_max_model_len(nested),
+                    E.effective_max_model_len(outer)] == [6144, 512]
+
+    def test_a_readable_config_without_the_field_reads_the_file(self, tmp_path):
+        path = _checkpoint(tmp_path, seq_length=8192)
+        with _with(_variant(MISTRAL_24B, drop=("max_position_embeddings",))):
+            assert [E.effective_max_model_len(path)] == [8192]
+            assert E.estimate_kv_gib(path) == E.estimate_kv_gib(
+                path, max_model_len=8192)
+
+    def test_a_long_context_still_takes_the_default(self, tmp_path):
+        path = _checkpoint(tmp_path, seq_length=131072)
+        with _with(None):
+            assert [E.effective_max_model_len(path),
+                    E.effective_max_model_len(path, 32768)] == [10_000, 32768]
+
+    def test_a_hub_checkpoint_is_read_from_the_cache(self, tmp_path, monkeypatch):
+        import huggingface_hub
+
+        cached = _checkpoint(tmp_path, max_sequence_length=2048)
+        monkeypatch.setattr(
+            huggingface_hub, "try_to_load_from_cache",
+            lambda repo, name: f"{cached}/{name}" if repo == "org/remote" else None)
+        with _with(None):
+            assert [E.effective_max_model_len("org/remote"),
+                    E.effective_max_model_len("org/elsewhere")] == [2048, 10_000]
+
+    @pytest.mark.parametrize("content", ["{not json", "[8192]", ""])
+    def test_a_file_that_is_not_a_config_keeps_the_default(self, tmp_path, content):
+        (tmp_path / "config.json").write_text(content, encoding="utf-8")
+        with _with(None):
+            assert E.effective_max_model_len(str(tmp_path)) == E.DEFAULT_MAX_MODEL_LEN
+
+    def test_an_id_the_hub_rejects_keeps_the_default(self):
+        with _with(None):
+            assert E.effective_max_model_len("not/a/repo") == E.DEFAULT_MAX_MODEL_LEN
 
 
 class TestDtype:

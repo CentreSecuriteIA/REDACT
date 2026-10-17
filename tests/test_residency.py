@@ -2916,6 +2916,18 @@ class TestDefaultContextLength:
         with _config(self.SMALL):
             assert residency.footprint(m).parts["kv_gib"] == 0.62   # 4096 tokens
 
+    def test_the_engine_is_capped_at_the_maximum_config_json_names(
+            self, engine, tmp_path):
+        """A checkpoint whose config needs remote code: 10000 tokens would be
+        over its 8192, which vLLM refuses."""
+        vllm_module, calls = engine
+        (tmp_path / "config.json").write_text(
+            json.dumps({"auto_map": {"AutoConfig": "custom.Config"},
+                        "seq_length": 8192}), encoding="utf-8")
+        with _config(None):
+            vllm_module._engine(str(tmp_path), None, {})
+        assert [call["max_model_len"] for call in calls] == [8192]
+
     def test_the_default_reaches_the_engine_without_a_plan(self, engine):
         vllm_module, calls = engine
         with _config(MISTRAL_24B):
