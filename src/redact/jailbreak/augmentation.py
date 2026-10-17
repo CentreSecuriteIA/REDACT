@@ -2,25 +2,31 @@
 section says.
 
 A section is ``{"adversarial": {...}, "natural": {...}}``. A kind given
-overlays its default from ``configs/jailbreak/augmentations.json`` key by key:
+overlays its default from ``configs/jailbreak/augmentations.json`` (a config
+folder's, given one, see :mod:`redact.config_overlay`) key by key:
 a value given replaces the default's whole, except ``layers``, ``families``
 and ``techniques``, whose ``allow`` and ``deny`` lists replace the default's
 one by one. A kind given as ``None`` is off; a kind left out is the default.
 A key starting with ``_``, in the section or in a kind, is a comment and is
-skipped. ``translation`` alone decides whether a kind draws the translation family.
+skipped. ``translation`` alone decides whether a kind draws the translation
+family; the lists may narrow it to the languages they name.
 """
 
 import copy
 import json
+import logging
 from functools import lru_cache
 from numbers import Real
+from pathlib import Path
 
-from redact import paths
+from redact.config_overlay import config_file
 from redact.types import ALL_ENTRY_TYPES
 
 from .plan import default_escalation_schedule
-from .pool import TRANSLATION, all_techniques, technique_pool
+from .pool import TRANSLATION, all_techniques, languages, technique_pool
 from .technique import load_spec
+
+logger = logging.getLogger(__name__)
 
 KINDS = ("adversarial", "natural")
 
@@ -47,34 +53,49 @@ FLAT_KEYWORDS = (
 )
 
 
-@lru_cache(maxsize=1)
-def _packaged() -> dict:
-    path = paths.jailbreak_configs_dir() / "augmentations.json"
-    return json.loads(path.read_text(encoding="utf-8"))
+@lru_cache(maxsize=8)
+def _read(path: str, modified: int) -> dict:
+    return json.loads(Path(path).read_text(encoding="utf-8"))
 
 
-def defaults() -> dict:
-    """The packaged section, both kinds, as a copy the caller may change."""
-    return copy.deepcopy({kind: _packaged()[kind] for kind in KINDS})
+def _section_file(config_dir: str | Path | None) -> dict:
+    """``augmentations.json``, read again when the file changes."""
+    path = config_file("jailbreak/augmentations.json", config_dir)
+    return _read(str(path), path.stat().st_mtime_ns)
 
 
-def natural_only_families() -> list[str]:
+def defaults(config_dir: str | Path | None = None) -> dict:
+    """The default section, both kinds, as a copy the caller may change: the
+    packaged one, or ``config_dir``'s when it has the file."""
+    return copy.deepcopy({kind: _section_file(config_dir)[kind] for kind in KINDS})
+
+
+def natural_only_families(config_dir: str | Path | None = None) -> list[str]:
     """The families the adversarial kind draws only when its
     ``families.allow`` names them."""
-    return list(_packaged()["natural_only_families"])
+    return list(_section_file(config_dir)["natural_only_families"])
 
 
-def resolve(section: dict | None, kind: str) -> dict | None:
+def resolve(
+    section: dict | None, kind: str, base: dict | None = None,
+    config_dir: str | Path | None = None,
+) -> dict | None:
     """One kind of ``section``, overlaid on its default and checked.
 
     ``section`` may be ``None`` (both kinds the default) or a section already
-    resolved, which comes back unchanged. ``layers``, ``families`` and
+    resolved, which comes back unchanged. The default is the packaged kind,
+    or, with ``base``, ``base``'s kind resolved over it: a kind ``section``
+    leaves out is then ``base``'s (off when ``base`` gives it as ``None``),
+    and a kind it gives overlays ``base``'s, or the packaged one when
+    ``base`` switches it off; ``config_dir``'s ``augmentations.json``
+    replaces the packaged one when it has the file. ``layers``, ``families`` and
     ``techniques`` come back with both their lists (``allow`` ``None`` for
     all), and a kind with ``rounds`` with ``iterations`` set to their number.
     The adversarial ``families.deny`` holds every family of
     :func:`natural_only_families` its ``families.allow`` does not name.
-    ``translation`` is true or false, and an allow list names neither the
-    translation family nor one of its techniques while it is false.
+    ``translation`` is true or false; while it is false, what the allow
+    lists and ``family_weights`` name of translation is left out, with a
+    WARNING (:func:`_switch_off_translation`).
 
     Returns:
         The full kind, or ``None`` when ``section`` switches it off.
@@ -96,6 +117,11 @@ def resolve(section: dict | None, kind: str) -> dict | None:
             "each an object or null.")
     if kind in section and section[kind] is None:
         return None
+    default = (resolve(base, kind, config_dir=config_dir)
+               if base is not None else None)
+    if base is not None and kind not in section:
+        return default
+    default = default or defaults(config_dir)[kind]
     given = section.get(kind, {})
     where = f"augmentations.{kind}"
     if not isinstance(given, dict):
@@ -107,8 +133,7 @@ def resolve(section: dict | None, kind: str) -> dict | None:
             f"{where} has unknown key(s) {unknown}; write only "
             f"{list(_KIND_KEYS[kind])}.")
 
-    default = defaults()[kind]
-    resolved = {**default, **copy.deepcopy(given)}
+    resolved = {**copy.deepcopy(default), **copy.deepcopy(given)}
     _check_entry_types(where, resolved["entry_types"])
     for level, keys in (("layers", ("deny",)), ("families", ("allow", "deny")),
                         ("techniques", ("allow", "deny"))):
@@ -124,11 +149,11 @@ def resolve(section: dict | None, kind: str) -> dict | None:
             "techniques.allow, as the natural kind draws only what they name.")
     if kind == "adversarial":
         families = resolved["families"]
-        families["deny"] += [name for name in natural_only_families()
+        families["deny"] += [name for name in natural_only_families(config_dir)
                              if name not in (families["allow"] or ())
                              and name not in families["deny"]]
     _check_names(where, resolved)
-    _check_translation(where, resolved)
+    _switch_off_translation(where, resolved)
     if type(resolved["pure_only"]) is not bool:
         raise ValueError(
             f"{where}.pure_only must be true or false, got {resolved['pure_only']!r}.")
@@ -322,23 +347,45 @@ def _check_names(where: str, resolved: dict) -> None:
                     "registered technique implements; write a registered one.")
 
 
-def _check_translation(where: str, resolved: dict) -> None:
-    """``translation`` is a bool, and with it false no allow list names translation."""
+def _switch_off_translation(where: str, resolved: dict) -> None:
+    """With ``translation`` false, leave out of ``resolved`` the translation
+    family and techniques its allow lists name and its ``family_weights``
+    entry, and log a WARNING naming them.
+
+    An allow list left empty becomes ``None`` beside the other, which still
+    names something, so the pool draws what that one names.
+
+    Raises:
+        ValueError: ``translation`` is not a bool, or the allow lists name
+            nothing but translation.
+    """
     if type(resolved["translation"]) is not bool:
         raise ValueError(
             f"{where}.translation must be true or false, got "
             f"{resolved['translation']!r}.")
     if resolved["translation"]:
         return
-    languages = {fn.__name__ for fn in all_techniques() if TRANSLATION in fn.families}
-    named = [name for name in resolved["families"]["allow"] or ()
-             if name == TRANSLATION]
-    named += [name for name in resolved["techniques"]["allow"] or ()
-              if name in languages]
-    if named:
+    translation = {TRANSLATION, *languages()}
+    lists = [resolved["families"], resolved["techniques"]]
+    named = [name for given in lists for name in given["allow"] or ()
+             if name in translation]
+    weighted = TRANSLATION in resolved["family_weights"]
+    if not named and not weighted:
+        return
+    for given in lists:
+        if given["allow"] is not None:
+            given["allow"] = [name for name in given["allow"]
+                              if name not in translation] or None
+    if named and all(given["allow"] is None for given in lists):
         raise ValueError(
-            f"{where} allows {named} and {where}.translation is false; set "
-            '"translation": true to draw translation.')
+            f"{where} allows only translation ({named}) and {where}.translation "
+            'is false; set "translation": true, or allow something else.')
+    resolved["family_weights"] = {
+        family: weight for family, weight in resolved["family_weights"].items()
+        if family != TRANSLATION}
+    logger.warning(
+        "%s.translation is false, so the translation it names is left out: %s.",
+        where, named + ["family_weights.translation"] * weighted)
 
 
 def _check_count(where: str, key: str, value, *, least: int) -> None:

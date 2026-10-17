@@ -60,9 +60,10 @@ def technique_pool(resolved: dict) -> list[Callable]:
     ``families.allow`` or named in ``techniques.allow``; less those of a
     family in ``families.deny`` and those named in ``techniques.deny``; with
     ``pure_only``, less every technique that calls a model or needs benign
-    data. The translation family is in when ``translation`` is true, allowed
-    and not denied as a family, and out when it is false, whatever the
-    lists say.
+    data. The translation family is out when ``translation`` is false,
+    whatever the lists say. When it is true, the family is in, though
+    denied as a family, and with an allow list it is in whole unless
+    ``techniques.allow`` names some of its techniques: then those only.
     """
     families, techniques = resolved["families"], resolved["techniques"]
     denied_layers = set(resolved["layers"]["deny"])
@@ -70,9 +71,9 @@ def technique_pool(resolved: dict) -> list[Callable]:
             if getattr(fn, "layer", None) not in denied_layers]
     if families["allow"] is not None or techniques["allow"] is not None:
         allowed = set(families["allow"] or ())
-        if resolved["translation"]:
-            allowed.add(TRANSLATION)
         named = set(techniques["allow"] or ())
+        if resolved["translation"] and not named & languages():
+            allowed.add(TRANSLATION)
         pool = [fn for fn in pool if fn.__name__ in named
                 or allowed.intersection(getattr(fn, "families", ()))]
     # The switch, not the lists, decides the translation family.
@@ -86,6 +87,12 @@ def technique_pool(resolved: dict) -> list[Callable]:
                 if not getattr(fn, "requires_llm", False)
                 and not getattr(fn, "requires_benign", False)]
     return pool
+
+
+def languages() -> set[str]:
+    """The names of the translation family's techniques."""
+    return {fn.__name__ for fn in all_techniques()
+            if TRANSLATION in getattr(fn, "families", ())}
 
 
 def registry(techniques: list[Callable]) -> dict[str, Callable]:

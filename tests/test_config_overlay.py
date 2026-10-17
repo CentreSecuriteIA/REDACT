@@ -1,0 +1,260 @@
+"""A user's config folder over the packaged configs/, and the folder
+``scaffold_setup`` writes."""
+
+import json
+from pathlib import Path
+
+import pandas as pd
+import pytest
+
+from redact import paths, telemetry
+from redact.config_overlay import config_sources, report_config_sources, taxonomy_folder
+from redact.driver import read_record, run_pipeline
+from redact.jailbreak.augmentation import resolve
+from redact.recipe import load_dataset_type, load_params, load_recipe
+from redact.stages import STAGES, RunContext
+
+_SIX = ["constitution", "inputs", "outputs", "paraphrase", "jailbreaks", "build"]
+
+
+def _write(path: Path, data: dict) -> Path:
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(json.dumps(data), encoding="utf-8")
+    return path
+
+
+def _augmentations(**adversarial) -> dict:
+    """The packaged augmentations.json with ``adversarial`` keys over its kind."""
+    data = json.loads((paths.jailbreak_configs_dir() / "augmentations.json")
+                      .read_text(encoding="utf-8"))
+    data["adversarial"].update(adversarial)
+    return data
+
+
+# --- each kind of file is read from the folder first ---------------------------
+
+def test_a_dataset_type_file_in_the_folder_wins_and_the_others_stay_packaged(tmp_path):
+    _write(tmp_path / "dataset_types" / "eval.json",
+           {"stages": ["inputs"], "params": {}, "augmentations": {}})
+    eval_recipe = load_recipe({"dataset_type": "eval", "config_dir": str(tmp_path)})
+    assert eval_recipe["stages"] == ["inputs"]
+    assert eval_recipe["augmentations"] == {
+        kind: resolve(None, kind) for kind in ("adversarial", "natural")}
+    assert load_dataset_type("eval", tmp_path)["stages"] == ["inputs"]
+    assert load_dataset_type("eval")["stages"] == _SIX
+    assert load_recipe({"dataset_type": "training",
+                        "config_dir": str(tmp_path)})["stages"] == _SIX
+
+
+def test_a_new_dataset_type_in_the_folder_is_named_in_the_error_list(tmp_path):
+    _write(tmp_path / "dataset_types" / "mine.json",
+           {"stages": [], "params": {}, "augmentations": {}})
+    with pytest.raises(ValueError,
+                       match=r"write one of \['eval', 'mine', 'training'\]"):
+        load_recipe({"dataset_type": "bogus", "config_dir": str(tmp_path)})
+
+
+def test_a_taxonomy_file_in_the_folder_wins_and_the_others_stay_packaged(
+        tmp_path, monkeypatch):
+    from redact import generate_constitution
+    from redact.llms import ModelClient
+    from tests.conftest import MockBackend, make_client
+
+    _write(tmp_path / "taxonomy" / "harmful.json",
+           {"name": "harmful", "categories": {"Mine": {"description": "d"}}})
+    assert taxonomy_folder("harmful", None, tmp_path) == tmp_path / "taxonomy"
+    assert taxonomy_folder("benign", None, tmp_path) is None
+    assert taxonomy_folder("harmful") is None
+
+    backend = MockBackend("no entry\n[END]")
+    monkeypatch.setattr(ModelClient, "create",
+                        lambda model, *a, **k: make_client(backend, model))
+    generate_constitution(entry_types=["harmful"], model="m", data_dir=tmp_path,
+                          config_dir=tmp_path, include_general_benign=True,
+                          num_taxonomy_categories=1, verbose=False, read_back=False)
+    keys = {json.loads(line)["unit"] for line in (
+        paths.constitution_dir(tmp_path) / "constitution.state.jsonl"
+    ).read_text(encoding="utf-8").splitlines() if '"unit"' in line}
+    benign = (paths.taxonomy_dir() / "benign.json").read_text(encoding="utf-8")
+    packaged_benign = next(iter(json.loads(benign)["categories"]))
+    assert keys == {"Mine::harmful", f"{packaged_benign}::general_benign"}
+
+
+def test_taxonomy_dir_wins_over_the_folders_taxonomy(tmp_path):
+    _write(tmp_path / "cfg" / "taxonomy" / "harmful.json", {"categories": {}})
+    assert taxonomy_folder("harmful", tmp_path / "tax", tmp_path / "cfg") == (
+        tmp_path / "tax")
+    ctx = RunContext(
+        data_dir=tmp_path, dataset_type="training", models={}, prompt_dir=None,
+        taxonomy="harmful", taxonomy_dir=None, params={}, augmentations={},
+        resume=True, verbose=False, config_dir=tmp_path / "cfg")
+    assert STAGES["constitution"].sources(ctx) == [
+        tmp_path / "cfg" / "taxonomy" / "harmful.json",
+        paths.taxonomy_dir() / "benign.json"]
+
+
+def test_an_augmentations_file_in_the_folder_is_the_default_of_both_kinds(tmp_path):
+    _write(tmp_path / "jailbreak" / "augmentations.json",
+           {**_augmentations(max_complexity=3), "natural_only_families": []})
+    recipe = load_recipe({"dataset_type": "training", "config_dir": str(tmp_path)})
+    adversarial = recipe["augmentations"]["adversarial"]
+    assert adversarial["max_complexity"] == 3      # noqa: PLR2004
+    assert adversarial["families"]["deny"] == []    # no natural-only family
+    assert resolve(None, "adversarial", config_dir=tmp_path) == adversarial
+    # Resolved again over the same folder, as the jailbreak front does, it stays.
+    assert resolve({"adversarial": adversarial}, "adversarial",
+                   config_dir=tmp_path) == adversarial
+    assert resolve(None, "adversarial")["max_complexity"] != 3     # noqa: PLR2004
+
+
+def test_the_jailbreak_front_resolves_over_the_folder(tmp_path, monkeypatch):
+    import redact.stages as P
+
+    _write(tmp_path / "jailbreak" / "augmentations.json",
+           {**_augmentations(), "natural_only_families": []})
+    pools = []
+    monkeypatch.setattr(P, "run_augmentation",
+                        lambda inputs, pool, **k: pools.append(pool) or pd.DataFrame())
+    monkeypatch.setattr(P.ModelClient, "create", lambda model: None)
+    P.generate_jailbreaks(
+        inputs=pd.DataFrame({"sample": ["x"], "entry_type": ["harmful"]}),
+        data_dir=tmp_path, config_dir=tmp_path, verbose=False,
+        augmentation={"natural": None})
+    (pool,) = pools
+    assert any("casual_writing" in fn.families for fn in pool)
+
+
+# --- what the folder holds that is not read ------------------------------------
+
+def test_a_file_the_overlay_does_not_read_is_warned_about(tmp_path, caplog):
+    for relative in ("llm/models.json", "jailbreak/combination_spec.json",
+                     "jailbreak/hacking/personas.json", "datasets/x.json"):
+        _write(tmp_path / relative, {})
+    _write(tmp_path / "taxonomy" / "harmful.json", {"categories": {}})
+    _write(tmp_path / "taxonomy" / "mine.json", {"categories": {}})
+    with caplog.at_level("WARNING", logger="redact.config_overlay"):
+        found = report_config_sources(tmp_path, verbose=False)
+    assert found == config_sources(tmp_path) == {
+        "overridden": ["taxonomy/harmful.json"],
+        "added": ["taxonomy/mine.json"],
+        "ignored": ["datasets/x.json", "jailbreak/combination_spec.json",
+                    "jailbreak/hacking/personas.json", "llm/models.json"]}
+    (record,) = caplog.records
+    assert record.levelname == "WARNING"
+    assert "llm/models.json" in record.getMessage()
+    assert "ignored" in record.getMessage()
+
+
+def test_a_run_records_the_files_it_read_from_the_folder(tmp_path, monkeypatch, caplog):
+    import redact
+
+    config = tmp_path / "cfg"
+    _write(config / "taxonomy" / "harmful.json", {"categories": {}})
+    _write(config / "llm" / "models.json", {})
+    monkeypatch.setattr(redact, "generate_outputs", lambda **k: pd.DataFrame())
+    recipe = tmp_path / "recipe.json"
+    _write(recipe, {"dataset_type": "training", "config_dir": "cfg",
+                    "data_dir": str(tmp_path), "stages": ["outputs"]})
+    try:
+        with caplog.at_level("INFO", logger="redact.config_overlay"):
+            run_pipeline(str(recipe), params={}, verbose=True)
+    finally:
+        telemetry.uninstall()
+    record = read_record("outputs", tmp_path)
+    assert record["config_dir"] == str(config)
+    assert record["config_files"] == ["taxonomy/harmful.json"]
+    assert [r.levelname for r in caplog.records
+            if r.name == "redact.config_overlay"] == ["WARNING", "INFO"]
+
+
+def test_config_dir_is_read_relative_to_the_recipe(tmp_path):
+    (tmp_path / "sub" / "cfg").mkdir(parents=True)
+    recipe = _write(tmp_path / "sub" / "recipe.json",
+                    {"dataset_type": "eval", "config_dir": "cfg"})
+    assert load_recipe(recipe)["config_dir"] == str(tmp_path / "sub" / "cfg")
+
+
+def test_a_config_dir_that_is_no_folder_is_refused(tmp_path):
+    with pytest.raises(ValueError, match="is not a folder"):
+        load_recipe({"dataset_type": "eval", "config_dir": str(tmp_path / "none")})
+
+
+# --- scaffold_setup -------------------------------------------------------------
+
+_COPIES = {
+    "dataset_types/eval.json": "dataset_types/eval.json",
+    "dataset_types/training.json": "dataset_types/training.json",
+    "taxonomy/harmful.json": "taxonomy/harmful.json",
+    "taxonomy/benign.json": "taxonomy/benign.json",
+    "jailbreak/augmentations.json": "jailbreak/augmentations.json",
+    "eval_params.json": "runs/params_example.json",
+    "training_params.json": "runs/params_training_example.json",
+}
+
+
+def test_scaffold_setup_writes_the_packaged_files_as_they_are(tmp_path):
+    from redact import scaffold_setup
+
+    written = scaffold_setup(tmp_path)
+    assert sorted(p.relative_to(tmp_path).as_posix() for p in written) == sorted(
+        [*_COPIES, "eval_recipe.json", "training_recipe.json", "README.md"])
+    for mine, packaged in _COPIES.items():
+        assert (tmp_path / mine).read_bytes() == (
+            paths.configs_dir() / packaged).read_bytes(), mine
+    readme = (tmp_path / "README.md").read_text(encoding="utf-8")
+    assert "scaffold_prompts.py" in readme and "prompt_dir" in readme
+
+
+@pytest.mark.parametrize(("mine", "packaged"), [
+    ("eval_recipe.json", "eval_example.json"),
+    ("training_recipe.json", "training_example.json")])
+def test_a_scaffolded_recipe_runs_as_the_packaged_example(tmp_path, mine, packaged):
+    from redact import scaffold_setup
+
+    scaffold_setup(tmp_path / "setup")
+    ours = load_recipe(tmp_path / "setup" / mine)
+    theirs = load_recipe(paths.configs_dir() / "runs" / packaged)
+    assert ours["config_dir"] == str(tmp_path / "setup")
+    assert ours["stages"] == theirs["stages"]
+    assert ours["augmentations"] == theirs["augmentations"]
+    assert ours["data_dir"] == theirs["data_dir"]
+
+    def effective(recipe):
+        ctx = RunContext(
+            data_dir=tmp_path, dataset_type=recipe["dataset_type"], models={},
+            prompt_dir=None, taxonomy=recipe["taxonomy"], taxonomy_dir=None,
+            params=load_params(recipe["params_file"], base_dir=recipe["_base_dir"]),
+            augmentations=recipe["augmentations"], resume=True, verbose=False,
+            config_dir=recipe.get("config_dir"))
+        return {stage: STAGES[stage].params(ctx) for stage in recipe["stages"]}
+
+    assert effective(ours) == effective(theirs)
+
+
+def test_scaffold_setup_refuses_to_overwrite_unless_asked(tmp_path):
+    from redact import scaffold_setup
+
+    scaffold_setup(tmp_path)
+    (tmp_path / "taxonomy" / "harmful.json").write_text("{}", encoding="utf-8")
+    with pytest.raises(FileExistsError) as raised:
+        scaffold_setup(tmp_path)
+    assert "taxonomy/harmful.json" in str(raised.value)
+    assert "overwrite=True" in str(raised.value)
+    assert (tmp_path / "taxonomy" / "harmful.json").read_text(encoding="utf-8") == "{}"
+    scaffold_setup(tmp_path, overwrite=True)
+    assert (tmp_path / "taxonomy" / "harmful.json").read_bytes() == (
+        paths.taxonomy_dir() / "harmful.json").read_bytes()
+
+
+def test_the_scaffold_script_writes_the_folder(tmp_path, capsys):
+    import importlib.util
+
+    script = Path(__file__).parents[1] / "scripts" / "scaffold_setup.py"
+    spec = importlib.util.spec_from_file_location("scaffold_setup_script", script)
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    assert module.main([str(tmp_path)]) == 0
+    assert (tmp_path / "eval_recipe.json").is_file()
+    assert module.main([str(tmp_path)]) == 1
+    assert "overwrite" in capsys.readouterr().err
+    assert module.main([str(tmp_path), "--overwrite"]) == 0

@@ -28,6 +28,7 @@ from pathlib import Path
 import pandas as pd
 
 from redact import dataset, paths
+from redact.config_overlay import taxonomy_folder
 from redact.constitution import ConstitutionPipeline, read_constitution
 from redact.content_moderation import InputPipeline, run_output_generation
 from redact.content_moderation.paraphrase import (
@@ -65,21 +66,26 @@ def generate_constitution(
     num_categories: int = 10,
     model: str | None = None,
     num_taxonomy_categories: int | None = None,
-    include_standalone_benign: bool = False,
-    standalone_benign_categories: int = 10,
+    include_general_benign: bool = False,
+    general_benign_categories: int = 10,
+    benign_taxonomy: dict | str = "benign",
     data_dir: str | Path | None = None,
     taxonomy_dir: str | Path | None = None,
     prompt_dir: str | Path | None = None,
     resume: bool = True,
     verbose: bool = True,
     read_back: bool = True,
+    config_dir: str | Path | None = None,
+    include_standalone_benign: bool | None = None,
+    standalone_benign_categories: int | None = None,
 ) -> pd.DataFrame:
     """Generate a constitution (category hierarchy) for classifier training.
 
     For each taxonomy category, generates harmful, benign, and dual-use
     constitution entries using the specified model. Each entry defines a
     subcategory with sample descriptions that can later drive input sample
-    generation.
+    generation. The general-benign part adds benign entries for each
+    category of a benign taxonomy.
 
     Args:
         taxonomy: Taxonomy name or pre-loaded dict.
@@ -91,13 +97,18 @@ def generate_constitution(
         model: Generation model. ``None`` (default) resolves to the
             ``constitution_gen`` role — Claude Opus. The backend is auto-selected
             from the model name.
-        num_taxonomy_categories: Limit to first N taxonomy categories
-            (None = all).
-        include_standalone_benign: If True, also generate category-free
-            benign entries in a single LLM call (no taxonomy influence).
-            Saved to general_benign.csv.
-        standalone_benign_categories: Number of benign constitution categories
-            to generate in the standalone benign call.
+        num_taxonomy_categories: Limit each taxonomy, ``taxonomy`` and
+            ``benign_taxonomy``, to its first N categories (None = all).
+        include_general_benign: Also generate the general-benign part: one
+            call per category of ``benign_taxonomy``, with its description
+            and subcategories, through the ``general_benign`` prompt. Its
+            rows are ``benign`` entries whose ``source_category`` is the
+            benign category and ``source_taxonomy`` is ``benign``, saved to
+            general_benign.csv.
+        general_benign_categories: Constitution categories asked for per
+            general-benign call.
+        benign_taxonomy: The benign taxonomy's name under ``taxonomy_dir``,
+            or the loaded taxonomy; read only with ``include_general_benign``.
         data_dir: Working root; the constitution CSVs land in
             ``{data_dir}/Data_cache/constitution/``. Defaults to the project root
             (``get_output_dir()``).
@@ -112,15 +123,36 @@ def generate_constitution(
             ledger first and regenerate from scratch.
         verbose: Log progress.
         read_back: False returns an empty DataFrame and reads no entry back.
+        config_dir: A config folder whose ``taxonomy/`` files are read in
+            place of the packaged ones, when ``taxonomy_dir`` is not given
+            (:mod:`redact.config_overlay`). ``None``: the packaged only.
+        include_standalone_benign, standalone_benign_categories: The former
+            names of ``include_general_benign`` and
+            ``general_benign_categories``, read for this release with a
+            ``DeprecationWarning``; given, they win.
 
     Returns:
         DataFrame of all constitution entries, backed by the on-disk
         ``merged.csv`` (the full dataset, including rows from prior resumed
         runs — not just this run's delta).
     """
+    if (include_standalone_benign, standalone_benign_categories) != (None, None):
+        warnings.warn(
+            "generate_constitution: include_standalone_benign and "
+            "standalone_benign_categories are now include_general_benign and "
+            "general_benign_categories; the former names are read for this "
+            "release.", DeprecationWarning, stacklevel=2)
+        if include_standalone_benign is not None:
+            include_general_benign = include_standalone_benign
+        if standalone_benign_categories is not None:
+            general_benign_categories = standalone_benign_categories
     # Resolve taxonomy
     if isinstance(taxonomy, str):
-        taxonomy = load_taxonomy(taxonomy, config_dir=taxonomy_dir)
+        taxonomy = load_taxonomy(
+            taxonomy, config_dir=taxonomy_folder(taxonomy, taxonomy_dir, config_dir))
+    if include_general_benign and isinstance(benign_taxonomy, str):
+        benign_taxonomy = load_taxonomy(benign_taxonomy, config_dir=taxonomy_folder(
+            benign_taxonomy, taxonomy_dir, config_dir))
 
     # Resolve entry types
     resolved_types: list[EntryType] | None = None
@@ -143,8 +175,9 @@ def generate_constitution(
         entry_types=resolved_types,
         num_categories=num_categories,
         num_taxonomy_categories=num_taxonomy_categories,
-        include_standalone_benign=include_standalone_benign,
-        standalone_benign_categories=standalone_benign_categories,
+        include_general_benign=include_general_benign,
+        general_benign_categories=general_benign_categories,
+        benign_taxonomy=benign_taxonomy if include_general_benign else None,
         resume=resume,
         verbose=verbose,
         read_back=read_back,
@@ -421,6 +454,7 @@ def generate_jailbreaks(
     read_back: bool = True,
     augmentation: dict | None = None,
     variations_path: str | Path | None = None,
+    config_dir: str | Path | None = None,
 ) -> pd.DataFrame:
     """Augment input prompts with jailbreak technique combinations and natural
     variations (batched).
@@ -469,6 +503,10 @@ def generate_jailbreaks(
             "natural": ...}``, each kind overlaying the packaged default
             (:mod:`redact.jailbreak.augmentation`); None is the default. A
             kind given as None is off.
+        config_dir: A config folder whose ``jailbreak/augmentations.json``
+            and ``taxonomy/`` files are read in place of the packaged ones
+            (``taxonomy_dir``, given, wins for the benign taxonomy;
+            :mod:`redact.config_overlay`). ``None``: the packaged only.
 
     Deprecated aliases:
         ``max_complexity``, ``max_obfuscations``, ``pure_only``,
@@ -508,9 +546,10 @@ def generate_jailbreaks(
         ("settings_per_iteration", settings_per_iteration),
         ("entry_types", entry_types),
     ) if value is not None}
-    section = _augmentation_section(augmentation, flat)
-    adversarial = augmentation_kinds.resolve(section, "adversarial")
-    natural = augmentation_kinds.resolve(section, "natural")
+    section = _augmentation_section(augmentation, flat, config_dir)
+    adversarial = augmentation_kinds.resolve(section, "adversarial",
+                                             config_dir=config_dir)
+    natural = augmentation_kinds.resolve(section, "natural", config_dir=config_dir)
     if adversarial is None and natural is None:
         return pd.DataFrame()
     # Each kind that is on, with its CSV and its manifest.
@@ -552,7 +591,8 @@ def generate_jailbreaks(
             jailbreak_pool.technique_pool(kind),
             client=client, translation_model=translation_model, out_path=out_path,
             benign_path=benign, benign_taxonomy=benign_taxonomy,
-            taxonomy_dir=taxonomy_dir, prompt_dir=prompt_dir, seed=seed,
+            taxonomy_dir=taxonomy_folder(benign_taxonomy, taxonomy_dir, config_dir),
+            prompt_dir=prompt_dir, seed=seed,
             rounds=augmentation_kinds.rounds_of(kind),
             family_weights=kind["family_weights"] or None,
             auto_generate_benign=auto_generate_benign, batch_size=batch_size,
@@ -589,7 +629,9 @@ def _variations_csv(data_dir, output_path, variations_path) -> Path:
     return paths.variations_csv(data_dir)
 
 
-def _augmentation_section(augmentation: dict | None, flat: dict) -> dict:
+def _augmentation_section(
+    augmentation: dict | None, flat: dict, config_dir: str | Path | None = None,
+) -> dict:
     """``augmentation`` with the deprecated flat keywords applied over its
     adversarial kind.
 
@@ -605,7 +647,7 @@ def _augmentation_section(augmentation: dict | None, flat: dict) -> dict:
         "include_translation as translation, sampling_probs as layer_rates, "
         "settings_per_iteration as rounds).",
         DeprecationWarning, stacklevel=3)
-    kind = augmentation_kinds.resolve(section, "adversarial")
+    kind = augmentation_kinds.resolve(section, "adversarial", config_dir=config_dir)
     if kind is None:
         raise ValueError(
             f"augmentation['adversarial'] is null (off), and {sorted(flat)} set "
@@ -980,10 +1022,12 @@ class RunContext:
     taxonomy: dict | str
     taxonomy_dir: str | Path | None
     params: dict                # the params file: stage name -> the front's kwargs
+                                # (over the dataset type's, see Stage.params)
     augmentations: dict         # the section the jailbreak stage runs, resolved
     resume: bool
     verbose: bool
     benign_taxonomy: dict | str = "benign"     # the categories of fsh/dap's pairs
+    config_dir: str | Path | None = None       # a folder overlaid on configs/
 
 
 @dataclass(frozen=True)
@@ -1019,7 +1063,8 @@ class Stage:
         return getattr(redact, self.front)
 
     def params(self, ctx: RunContext) -> dict:
-        """The params file's kwargs for the stage.
+        """The stage's params: the dataset type's, overlaid key by key by the
+        params file's.
 
         Raises:
             ValueError: A key that is not a parameter of the front.
@@ -1036,8 +1081,8 @@ class Stage:
         return given
 
     def check(self, ctx: RunContext) -> dict:
-        """The params file's kwargs the front gets, checked without reading
-        any file, so a run checks every stage before the first runs.
+        """The params the front gets, checked without reading any stage
+        file, so a run checks every stage before the first runs.
 
         Raises:
             ValueError: A params key that is not a parameter of the front, or
@@ -1053,7 +1098,7 @@ class Stage:
         return {key: value for key, value in given.items() if key not in self.folded}
 
     def kwargs(self, ctx: RunContext) -> dict:
-        """The front's kwargs: the recipe's, then the params file's.
+        """The front's kwargs: the recipe's, then the params.
 
         Raises:
             ValueError: As :meth:`check`, or a saved value that is missing.
@@ -1073,8 +1118,12 @@ class Saved:
 
 
 def _params(ctx: RunContext, stage: str) -> dict:
-    """The params file's entry for ``stage``."""
-    return dict(ctx.params.get(stage) or {})
+    """The params of ``stage``: the dataset type file's, then the params file's."""
+    from redact.recipe import load_dataset_type
+
+    typed = load_dataset_type(ctx.dataset_type, ctx.config_dir)["params"].get(stage)
+    typed = typed or {}
+    return {**typed, **(ctx.params.get(stage) or {})}
 
 
 def _one_file(stage: str, default: Callable) -> Callable:
@@ -1087,9 +1136,18 @@ def _one_file(stage: str, default: Callable) -> Callable:
 def _constitution_kwargs(ctx: RunContext) -> dict:
     return dict(
         taxonomy=ctx.taxonomy, taxonomy_dir=ctx.taxonomy_dir,
+        benign_taxonomy=ctx.benign_taxonomy, config_dir=ctx.config_dir,
         model=ctx.models["constitution"], data_dir=ctx.data_dir,
         prompt_dir=ctx.prompt_dir, resume=ctx.resume, verbose=ctx.verbose,
     )
+
+
+def includes_general_benign(params: dict) -> bool:
+    """Whether the constitution ``params`` switch the general-benign part on,
+    by its name or its former name."""
+    former = params.get("include_standalone_benign")
+    return bool(params.get("include_general_benign", False)
+                if former is None else former)
 
 
 def _constitution_files(ctx: RunContext) -> tuple[list[Path], dict]:
@@ -1103,11 +1161,15 @@ def _json_file(folder: Path, name: str) -> Path:
     return path if path.suffix == ".json" else path.with_name(path.name + ".json")
 
 
-def _taxonomy_file(ctx: RunContext) -> list[Path]:
-    """The file of the run's taxonomy; none for one given as an object."""
-    if not isinstance(ctx.taxonomy, str):
-        return []
-    return [_json_file(Path(ctx.taxonomy_dir or paths.taxonomy_dir()), ctx.taxonomy)]
+def _taxonomy_files(ctx: RunContext) -> list[Path]:
+    """The files of the run's taxonomy and, with the general-benign part on,
+    its benign taxonomy; none for one given as an object."""
+    names = [ctx.taxonomy]
+    if includes_general_benign(_params(ctx, "constitution")):
+        names.append(ctx.benign_taxonomy)
+    return [_json_file(taxonomy_folder(name, ctx.taxonomy_dir, ctx.config_dir)
+                       or paths.taxonomy_dir(), name)
+            for name in names if isinstance(name, str)]
 
 
 def _inputs_kwargs(ctx: RunContext) -> dict:
@@ -1192,6 +1254,7 @@ def _jailbreaks_kwargs(ctx: RunContext) -> dict:
         translation_model=ctx.models["translation"], prompt_dir=ctx.prompt_dir,
         benign_taxonomy=ctx.benign_taxonomy, taxonomy_dir=ctx.taxonomy_dir,
         resume=ctx.resume, verbose=ctx.verbose, augmentation=ctx.augmentations,
+        config_dir=ctx.config_dir,
     )
 
 
@@ -1241,7 +1304,7 @@ STAGES: dict[str, Stage] = {stage.name: stage for stage in (
     Stage("constitution", "generate_constitution",
           roles=(("constitution", "constitution_gen"),),
           files=_constitution_files, recipe_kwargs=_constitution_kwargs,
-          sources=_taxonomy_file),
+          sources=_taxonomy_files),
     Stage("inputs", "generate_inputs", roles=(_GEN, _CHECK),
           files=_inputs_files, recipe_kwargs=_inputs_kwargs,
           sources=_inputs_sources),

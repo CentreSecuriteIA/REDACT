@@ -98,6 +98,46 @@ def test_registry_names_every_technique_it_is_given():
     assert all(by_name[fn.__name__] is fn for fn in techniques)
 
 
+def _languages(pool: list) -> list[str]:
+    return [fn.__name__ for fn in _in("translation", pool)]
+
+
+def test_the_switch_admits_only_the_translations_an_allow_list_names():
+    pool = technique_pool(_kind(translation=True, families={"allow": ["encode"]},
+                                techniques={"allow": ["to_swahili", "to_thai"]}))
+    assert sorted(_languages(pool)) == ["to_swahili", "to_thai"]
+    assert _in("encode", pool)
+
+
+def test_the_switch_admits_the_whole_family_when_no_list_names_one_of_it():
+    every = _languages(all_techniques())
+    pool = technique_pool(_kind(translation=True, families={"allow": ["encode"]},
+                                techniques={"allow": ["to_base64"]}))
+    assert _languages(pool) == every
+    # A list that names the family admits the family.
+    pool = technique_pool(_kind(
+        translation=True, families={"allow": ["translation"]},
+        techniques={"allow": ["to_thai"]}))
+    assert _languages(pool) == every
+
+
+def test_the_eval_pool_is_37_techniques_in_10_families():
+    from redact.recipe import load_dataset_type
+
+    section = load_dataset_type("eval")["augmentations"]
+    pool = technique_pool(resolve(section, "adversarial"))
+    assert len(pool) == 37      # noqa: PLR2004
+    assert {fn.families[0] for fn in pool} == {
+        "translation", "encode", "fsh", "dap", "framing", "structural",
+        "ascii_art", "continuation", "temporal", "answer_format"}
+    assert sorted(_languages(pool)) == sorted([
+        "to_swahili", "to_thai", "to_khmer", "to_maori", "to_nepali", "to_zulu",
+        "to_scots_gaelic", "to_bengali", "to_javanese"])
+    assert sorted(fn.__name__ for fn in _in("encode", pool)) == sorted([
+        "to_base64", "to_unicode_escape", "to_ascii_ordinal", "to_morse",
+        "to_braille"])
+
+
 def test_uses_translation():
     assert uses_translation(technique_pool(_kind(translation=True)))
     assert not uses_translation(technique_pool(_kind()))

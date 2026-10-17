@@ -109,6 +109,42 @@ def test_a_resolved_section_resolves_to_itself():
     assert once["adversarial"]["iterations"] == len(default_escalation_schedule())
 
 
+# --- a base section under the given one ----------------------------------------
+
+_BASE = {"adversarial": {"pure_only": True,
+                         "families": {"allow": ["encode", "framing"]}},
+         "natural": None}
+
+
+def test_a_kind_left_out_is_the_bases():
+    assert resolve(None, "adversarial", base=_BASE) == resolve(_BASE, "adversarial")
+    assert resolve({}, "natural", base=_BASE) is None
+
+
+def test_a_kind_given_overlays_the_bases_key_by_key():
+    kind = resolve({"adversarial": {"max_complexity": 4}}, "adversarial", base=_BASE)
+    assert kind == {**resolve(_BASE, "adversarial"), "max_complexity": 4}
+    # Its lists overlay the base's one by one.
+    kind = resolve({"adversarial": {"families": {"deny": ["framing"]}}},
+                   "adversarial", base=_BASE)
+    assert kind["families"] == {"allow": ["encode"],
+                                "deny": ["framing", "casual_writing"]}
+    assert kind["pure_only"] is True
+
+
+def test_a_kind_the_base_switches_off_comes_back_on_over_the_packaged_default():
+    given = {"natural": {"exact_techniques": 2}}
+    assert resolve(given, "natural", base=_BASE) == resolve(given, "natural")
+    assert resolve({"adversarial": None}, "adversarial", base=_BASE) is None
+
+
+def test_a_section_resolved_over_a_base_resolves_to_itself_over_it():
+    section = {"adversarial": {"rounds": [{"exact_techniques": 1}]}}
+    once = {kind: resolve(section, kind, base=_BASE) for kind in KINDS}
+    assert {kind: resolve(once, kind, base=_BASE) for kind in KINDS} == once
+    assert once["adversarial"]["iterations"] == 1
+
+
 @pytest.mark.parametrize("given", [{"adversarial": {"max_complexity": 3}},
                                    {"natural": {"iterations": 2}}], ids=KINDS)
 def test_a_comment_inside_a_kind_is_skipped(given):
@@ -168,8 +204,9 @@ def test_the_packaged_defaults():
      "augmentations.adversarial.family_weights['typos'] must be a number above 0"),
     ({"adversarial": {"family_weights": {"typos": True}}}, "adversarial",
      "family_weights['typos'] must be a number above 0"),
-    ({"adversarial": {"family_weights": {"translation": 2}}}, "adversarial",
-     "augmentations.adversarial.family_weights names 'translation', which the kind "
+    ({"adversarial": {"pure_only": True, "family_weights": {"typos": 2}}},
+     "adversarial",
+     "augmentations.adversarial.family_weights names 'typos', which the kind "
      "does not draw from"),
     ({"adversarial": {"layer_rates": {"hacking": 1.5}}}, "adversarial",
      "augmentations.adversarial.layer_rates['hacking'] must be a number from 0 to 1"),
@@ -321,16 +358,68 @@ def test_on_the_switch_wins_over_a_family_deny_and_a_technique_deny_still_applie
     assert "to_japanese" in pool and "to_french" not in pool
 
 
-@pytest.mark.parametrize("given", [
-    {"natural": {"families": {"allow": ["typos", "translation"]}}},
-    {"natural": {"techniques": {"allow": ["to_french"]}}},
-    {"adversarial": {"families": {"allow": ["translation"]}}},
+_DROPPED = "redact.jailbreak.augmentation"
+
+
+@pytest.mark.parametrize(("given", "named"), [
+    ({"natural": {"families": {"allow": ["typos", "translation"]}}},
+     "['translation']"),
+    ({"natural": {"techniques": {"allow": ["to_french"]}}}, "['to_french']"),
+    ({"adversarial": {"families": {"allow": ["encode"]},
+                      "techniques": {"allow": ["to_thai", "to_base64"]},
+                      "family_weights": {"translation": 2}}},
+     "['to_thai', 'family_weights.translation']"),
+    ({"adversarial": {"family_weights": {"translation": 2}}},
+     "['family_weights.translation']"),
 ])
-def test_allowing_translation_with_the_switch_off_raises(given):
+def test_translation_an_allow_list_names_with_the_switch_off_is_dropped_with_a_warning(
+        given, named, caplog):
     (kind,) = given
-    with pytest.raises(ValueError, match='set "translation": true'):
-        resolve(given, kind)
+    with caplog.at_level("WARNING", logger=_DROPPED):
+        resolved = resolve(given, kind)
+    assert [r.getMessage() for r in caplog.records] == [
+        f"augmentations.{kind}.translation is false, so the translation it names "
+        f"is left out: {named}."]
+    assert not _translates({kind: resolved}, kind)
+    assert "translation" not in resolved["family_weights"]
+    assert "translation" not in (resolved["families"]["allow"] or ())
+    # Resolved again, it names none, and says nothing.
+    caplog.clear()
+    with caplog.at_level("WARNING", logger=_DROPPED):
+        assert resolve({kind: resolved}, kind) == resolved
+    assert caplog.records == []
     assert _translates({kind: {**given[kind], "translation": True}}, kind)
+
+
+def test_a_list_left_empty_by_the_drop_is_no_list_beside_another():
+    kind = resolve({"natural": {"techniques": {"allow": ["to_french"]}}}, "natural")
+    assert kind["techniques"]["allow"] is None
+    assert kind["families"]["allow"] == defaults()["natural"]["families"]["allow"]
+
+
+def test_allowing_only_translation_with_the_switch_off_raises():
+    with pytest.raises(ValueError) as raised:
+        resolve({"adversarial": {"families": {"allow": ["translation"]}}},
+                 "adversarial")
+    assert str(raised.value) == (
+        "augmentations.adversarial allows only translation (['translation']) and "
+        "augmentations.adversarial.translation is false; set \"translation\": "
+        "true, or allow something else.")
+
+
+def test_switching_translation_off_over_the_eval_type_is_one_key(caplog):
+    from redact.recipe import load_dataset_type
+
+    base = load_dataset_type("eval")["augmentations"]
+    with caplog.at_level("WARNING", logger=_DROPPED):
+        kind = resolve({"adversarial": {"translation": False}}, "adversarial",
+                       base=base)
+    assert len(caplog.records) == 1
+    assert kind["family_weights"] == {}
+    assert kind["techniques"]["allow"] == ["to_refusal_then_comply"]
+    pool = technique_pool(kind)
+    assert len(pool) == 28      # noqa: PLR2004
+    assert not _translates({"adversarial": kind}, "adversarial")
 
 
 def test_the_switch_must_be_true_or_false():

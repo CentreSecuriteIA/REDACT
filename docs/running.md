@@ -62,14 +62,31 @@ The library logs under the `redact` logger and configures nothing. In your
 own script, call `logging.basicConfig(level=logging.INFO)` to see progress.
 `python scripts/inspect_run.py <data_dir>` prints each stage's run record.
 
+To start a setup of your own, write a folder of recipes and the configs
+they read:
+
+```bash
+python scripts/scaffold_setup.py ./my_setup
+python scripts/run.py ./my_setup/eval_recipe.json
+```
+
+Each recipe there has `"config_dir": "."`: the folder's dataset type,
+taxonomy and augmentation files are read in place of the library's, file by
+file ([configuration.md](configuration.md#your-own-config-folder)). Delete
+every file you do not change, so it keeps following the library.
+
 The notebooks in `notebooks/` walk through a run step by step:
 `eval_pipeline`, `training_pipeline`, `content_moderation` and
 `jailbreak_augmentation`.
 
 ## Write a recipe
 
-A recipe says what to run. A params file holds each stage's own settings,
-under the stage's name.
+A recipe says what to run. Its `dataset_type`, `eval` or `training`, is
+required: it names the packaged file that gives the run's default stages,
+params and augmentation section
+([configuration.md](configuration.md#dataset-types)), and the recipe and the
+params file overlay it. A params file holds each stage's own settings, under
+the stage's name.
 
 ```json
 {
@@ -100,18 +117,30 @@ under the stage's name.
 
 - `stages` run in the order listed. Keep the order of the stage table in
   [overview.md](overview.md#the-stages): each stage reads what earlier ones
-  wrote. Without `stages` a run takes `inputs`, `outputs`, `jailbreaks`,
-  `build`.
+  wrote. Without `stages` a run takes its dataset type's: all six,
+  `constitution`, `inputs`, `outputs`, `paraphrase`, `jailbreaks`, `build`.
+- Both dataset types add the general-benign part to the constitution:
+  benign entries for each category of `benign_taxonomy`.
+- An `eval` run generates only the `harmful` and `benign` entries and inputs,
+  and its jailbreak stage attacks the harmful inputs with a small pool of hard
+  techniques, in two rounds, with no natural variations; a `training` run
+  takes every entry type and the packaged augmentation section. Anything the
+  recipe or the params file gives wins.
 - The `inputs` stage reads the constitution saved under `data_dir`, in an
   eval run as in a training one. List `constitution` before it, or run it
   earlier on the same `data_dir`; without either it stops with
   `No constitution at ...`.
-- `taxonomy` names the taxonomy of the constitution (default `harmful`); `benign_taxonomy` the one whose subcategories
-  the benign data of the `fsh` and `dap` techniques covers (default
-  `benign`). Both are file names under `taxonomy_dir`, the packaged
-  `configs/taxonomy/` by default.
-- `params_file` is relative to the recipe's folder. `data_dir`,
-  `prompt_dir` and `taxonomy_dir` are relative to the current directory.
+- `taxonomy` names the taxonomy of the constitution (default `harmful`);
+  `benign_taxonomy` the one whose categories the constitution's
+  general-benign part is built from and whose subcategories the benign data
+  of the `fsh` and `dap` techniques covers (default `benign`). Both are file
+  names under `taxonomy_dir`, the packaged `configs/taxonomy/` by default.
+- `params_file` and `config_dir` are relative to the recipe's folder.
+  `data_dir`, `prompt_dir` and `taxonomy_dir` are relative to the current
+  directory.
+- `config_dir` names a folder of your own configs: a dataset type,
+  taxonomy or `jailbreak/augmentations.json` file there is read in place of
+  the packaged one; `taxonomy_dir`, when given, still wins for taxonomies.
 - A params file holds one entry per stage, under the stage's name. Any
   other top-level key raises, except a comment key that starts with `_`.
   Inside a stage's entry every key must be a parameter of the stage's front,
@@ -121,8 +150,9 @@ under the stage's name.
   raises when the recipe loads.
 
 The two example recipes under `src/redact/configs/runs/` each have a params
-file: `eval_example.json` runs a small constitution (`params_example.json`),
-`training_example.json` a larger one (`params_training_example.json`).
+file: `eval_example.json` runs a small constitution (`params_example.json`)
+and leaves everything else to the eval type, `training_example.json` a
+larger one (`params_training_example.json`).
 
 ## Choose models
 
@@ -359,7 +389,7 @@ A training run of all six stages, under `<data_dir>`:
 Data_cache/
   constitution/
     harmful.csv  dual_use_harmful.csv  dual_use_benign.csv  benign.csv
-    general_benign.csv                   # with include_standalone_benign
+    general_benign.csv                   # with include_general_benign
     merged.csv                           # every entry
     constitution.manifest.jsonl  constitution.state.jsonl
   benign/
@@ -396,7 +426,8 @@ Other files you may see:
 | `*.tmp` | A file being replaced. It is gone once the write finishes; a kill can leave one, which the next write replaces, and `resume: false` removes the output's |
 
 A run record, `Datasets/<stage>.run.json`, holds `stage`, `timestamp`,
-`params` (the params file's entry), `models` (the recipe's role names),
+`params` (the stage's params: the dataset type's with the params file's
+entry over them), `models` (the recipe's role names),
 `counts` (`rows`, and `accepted` when the files have that column),
 `sources` (the files the stage read its inputs from: the taxonomy file for
 the constitution; the saved constitution for the inputs; the input category
@@ -405,8 +436,10 @@ of the build), `serving` (per role the stage calls: `name`, `backend_type`,
 and `copies` for a vLLM model or `workers` for a hosted one; `copies` is the
 count the plan made before any stage ran, and when a build with copies fails
 and one copy loads instead, the trace's `load` event says so with `fallback`
-and `planned_copies`), and for the jailbreak stage `spec_version` and the
-resolved `augmentation` section.
+and `planned_copies`), `dataset_type` and `dataset_type_hash` (the content
+id of the type file the run read), with a `config_dir` that folder and
+`config_files` (the files read from it), and for the jailbreak stage
+`spec_version` and the resolved `augmentation` section.
 
 ## Telemetry and cost
 

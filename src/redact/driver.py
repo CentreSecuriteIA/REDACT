@@ -2,9 +2,11 @@
 
 Each stage writes ``{stage}.run.json`` under ``{data_dir}/Datasets/``: the
 resolved params, models, how the stage's models were served, row counts,
-spec version, timestamp and the files the stage read its inputs from
-(``sources``); the jailbreak stage's also holds the resolved augmentation
-section.
+spec version, timestamp, the files the stage read its inputs from
+(``sources``), and the dataset type with its file's hash; with a
+``config_dir``, the folder and the config files read from it
+(``config_files``); the jailbreak stage's also holds the resolved
+augmentation section.
 
 Usage::
 
@@ -25,6 +27,7 @@ from typing import Any
 import pandas as pd
 
 from redact import paths, telemetry
+from redact.config_overlay import report_config_sources
 from redact.dataset import count_rows, iter_rows
 from redact.llms.prompting import report_prompt_sources
 from redact.llms.resources import measure
@@ -32,6 +35,7 @@ from redact.recipe import (
     _DEFAULT_MODELS,
     _role_names,
     augmentations_of,
+    dataset_type_hash,
     load_params,
     load_recipe,
     resolve_role,
@@ -470,9 +474,12 @@ def run_pipeline(
             recipe, params.get("jailbreaks") if "jailbreaks" in stages else None),
         resume=recipe.get("resume", True),
         verbose=verbose,
+        config_dir=recipe.get("config_dir"),
     )
     for name in stages:
         STAGES[name].check(ctx)     # a bad params key fails before any stage runs
+    noted = {"dataset_type": ctx.dataset_type,
+             "dataset_type_hash": dataset_type_hash(ctx.dataset_type, ctx.config_dir)}
 
     if verbose:
         logger.info("Run pipeline (%s) — stages: %s", ctx.dataset_type, stages)
@@ -485,6 +492,10 @@ def run_pipeline(
         # "which prompt ran?" stops being obvious, and an override that
         # silently matches nothing is invisible without this.
         report_prompt_sources(ctx.prompt_dir)
+    configs = report_config_sources(ctx.config_dir, verbose=verbose)
+    if ctx.config_dir is not None:
+        noted.update(config_dir=str(ctx.config_dir),
+                     config_files=sorted(configs["overridden"] + configs["added"]))
 
     summary: dict = {
         "dataset_type": ctx.dataset_type, "data_dir": str(ctx.data_dir), "stages": {}}
@@ -531,6 +542,7 @@ def run_pipeline(
                     sources=[str(p) for p in stage.sources(ctx) if p.exists()],
                     spec_version=load_spec().get("version", "") if jailbreaks else None,
                     extra={"serving": {role: served[role] for role, _ in stage.roles},
+                           **noted,
                            **({"augmentation": ctx.augmentations} if jailbreaks
                               else {})},
                 )

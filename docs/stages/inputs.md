@@ -3,7 +3,8 @@
 Front `generate_inputs` (`stages.py`), core
 `InputPipeline.run_from_constitution` (`content_moderation/inputs.py`). Every
 run's inputs are seeded from a constitution, in an `eval` run as in a
-`training` one; the two differ only in the build.
+`training` one; an `eval` run keeps the `harmful` and `benign` entries only
+(its dataset type sets `entry_types`).
 
 The stage saves every sample, accepted or not, with its verdict, to
 `Datasets/constitution_inputs/<category>/samples.csv`. The later stages read
@@ -14,7 +15,10 @@ only the accepted ones: outputs, paraphrase and jailbreaks through
 ## Purpose
 
 Turn each constitution entry into `samples_per_entry` input samples, each
-checked against its category, entry type and subcategory.
+checked against its category, entry type and subcategory. An entry of the
+general-benign part is an input of its benign-taxonomy category: generated
+and checked with that category, entry type `benign` and its constitution
+subcategory.
 
 ## Inputs
 
@@ -26,7 +30,8 @@ checked against its category, entry type and subcategory.
   the front reads the saved one the same way.
 - Columns read per entry: `sample_description`, `entry_type`,
   `source_category`, `constitution_subcategory`, `constitution_category`,
-  `source_group_tag`. `entry_types` keeps only some entry types.
+  `source_group_tag`, and `source_taxonomy` when the constitution has it.
+  `entry_types` keeps only some entry types.
 - The prompt `prompts/input/generation/from_constitution/<style>/` with the
   `numbered` format instruction, and the check prompt
   `prompts/input/quality_check/`, each read through the overlay.
@@ -72,7 +77,7 @@ Under `Datasets/constitution_inputs/`:
 
 | File | Content |
 |---|---|
-| `<category>/samples.csv` | One per taxonomy category (`source_category`); accepted and rejected rows |
+| `<category>/samples.csv` | One per category (`source_category`): a harmful-taxonomy category, or a benign one for the general-benign part; a benign category named as a harmful one shares its file, its rows told apart by `entry_type` and `source_taxonomy`. Accepted and rejected rows |
 | `constitution_inputs.manifest.jsonl` | The plan of the current style |
 | `constitution_inputs.state.jsonl` | The ledger, for every style |
 
@@ -88,7 +93,7 @@ Columns of `samples.csv`:
 |---|---|
 | `sample_id` | Content id of `sample` |
 | `sample` | The generated text |
-| `category` | The taxonomy category |
+| `category` | The entry's `source_category`: the taxonomy category, or the benign-taxonomy category |
 | `subcategory` | The entry's `constitution_subcategory` |
 | `entry_type` | The entry's entry type |
 | `turn` | `0` |
@@ -98,6 +103,7 @@ Columns of `samples.csv`:
 | `source_sample_description` | The entry it came from |
 | `constitution_category` | The entry's constitution category |
 | `source_group_tag` | The entry's group tag |
+| `source_taxonomy` | `harmful` or `benign`, copied from the entry: `benign` marks the general-benign part. Only when the constitution has the column |
 | `template_style` | The `style` that generated it |
 
 ## How it resumes
@@ -107,6 +113,11 @@ all category files are checked and cut back together
 ([internals/dataset.md](../internals/dataset.md#a-stage-with-several-files)).
 Entries the ledger records are skipped. The ids on the ledger records keep a
 text from being written twice.
+
+A category file written from a constitution without `source_taxonomy`
+cannot take rows that have it: the save raises `Cannot append to ...: its
+header has no column 'source_taxonomy'`. Start the style over
+(`resume: false`) after regenerating the constitution.
 
 `resume: false` starts over the current `style` only. Its rows are removed
 from every category file and its acks from the ledger (`dataset.drop_units`);

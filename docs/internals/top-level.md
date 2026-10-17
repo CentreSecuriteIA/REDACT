@@ -108,14 +108,15 @@ takes them.
 | `sources` | `ctx -> paths`: the files the stage reads its inputs from; those that exist go in its run record |
 | `folded` | Params keys the run applies to a kwarg it passes itself (the jailbreak stage's flat keywords, folded into `augmentation`) |
 
-`Stage.params(ctx)` returns the params file's entry for the stage and raises
-on a key that is not a parameter of the front. `Stage.check(ctx)` also
-raises on a key the run passes itself. `Stage.kwargs(ctx)` returns the
-recipe's kwargs updated with the params file's.
+`Stage.params(ctx)` returns the dataset type file's params for the stage
+with the params file's entry over them, and raises on a key that is not a
+parameter of the front. `Stage.check(ctx)` also raises on a key the run
+passes itself. `Stage.kwargs(ctx)` returns the recipe's kwargs updated with
+the params.
 
 | Stage | Roles | Files counted | Sources |
 |---|---|---|---|
-| `constitution` | `constitution` -> `constitution_gen` | `Data_cache/constitution/merged.csv` | the taxonomy file |
+| `constitution` | `constitution` -> `constitution_gen` | `Data_cache/constitution/merged.csv` | the taxonomy file, and the benign taxonomy's with `include_general_benign` |
 | `inputs` | `gen`, `check` -> `uncensored_gen` | the category files of `constitution_inputs/`; accepted rows of the current style | the saved constitution, `merged.csv` |
 | `outputs` | `gen`, `check` -> `uncensored_gen` | `output_responses.csv`, or its `output_path` | the input category files (`dataset.input_files`) |
 | `paraphrase` | `paraphraser` -> `paraphraser`, `paraphrase_check` -> `uncensored_gen` | the files of the target(s) | the input category files and `output_responses.csv`, per target |
@@ -125,16 +126,18 @@ recipe's kwargs updated with the params file's.
 `RunContext` is what one run hands the stages: `data_dir`, `dataset_type`,
 `models` (role to name or `None`), `prompt_dir`, `taxonomy`,
 `taxonomy_dir`, `benign_taxonomy`, `params`, `augmentations` (resolved),
-`resume`, `verbose`.
+`resume`, `verbose`, `config_dir` (the user's config folder, see
+[configuration.md](../configuration.md#your-own-config-folder)).
 
 ## recipe.py
 
 | Function | Does |
 |---|---|
-| `load_recipe(path or dict)` | Reads and checks a recipe ([running.md](../running.md#write-a-recipe)); refuses a `resume` that is not a bool and a top-level `copies` other than null; resolves `augmentations`; reads the former taxonomy name `content_moderation_categories` as `harmful`, with a `DeprecationWarning` |
-| `benign_taxonomy_of(recipe, stages)` | The recipe's `benign_taxonomy` (`"benign"` by default); read, and checked to have a category, when the jailbreak stage runs a kind that draws a technique needing benign data |
+| `load_recipe(path or dict)` | Reads and checks a recipe ([running.md](../running.md#write-a-recipe)); refuses a recipe without a `dataset_type`, a `resume` that is not a bool and a top-level `copies` other than null; takes `stages` from the dataset type when left out; resolves `augmentations`; reads the former taxonomy name `content_moderation_categories` as `harmful`, with a `DeprecationWarning` |
+| `load_dataset_type(name)`, `dataset_type_hash(name)` | The packaged `configs/dataset_types/<name>.json` (`stages`, `params`, `augmentations`), as a copy; the content id of the file as parsed, which each run record holds ([configuration.md](../configuration.md#dataset-types)) |
+| `benign_taxonomy_of(recipe, stages)` | The recipe's `benign_taxonomy` (`"benign"` by default); read, and checked to have a category, when the constitution stage runs with its dataset type's `include_general_benign` on, or the jailbreak stage runs a kind that draws a technique needing benign data |
 | `load_params(path or dict, base_dir)` | Reads the params file; refuses a key that is not a stage name (a `_` key is a comment) and a `jailbreaks` key that belongs in the augmentation section, warns for a flat keyword |
-| `augmentations_of(recipe, jailbreak_params)` | The section, both kinds resolved; reads the flat form; applies the params' flat keywords over the adversarial kind |
+| `augmentations_of(recipe, jailbreak_params)` | The section, both kinds resolved over the recipe's dataset type's (`resolve(..., base=)`); reads the flat form; applies the params' flat keywords over the adversarial kind |
 | `serving_of(models)` | Refuses a key that is not a recipe role, whatever its value (a `_` key is a comment); checks the role objects; returns the keys given per model name |
 | `resolve_role(models, role, augmentations)` | The models a role stands for, as its stage resolves them |
 

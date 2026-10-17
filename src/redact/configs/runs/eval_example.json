@@ -9,15 +9,6 @@
   "taxonomy_dir": null,
   "benign_taxonomy": "benign",
   "prompt_dir": null,
-  "stages": ["constitution", "inputs", "outputs", "paraphrase", "jailbreaks", "build"],
-  "augmentations": {
-    "adversarial": {
-      "translation": false,
-      "max_complexity": 6,
-      "max_obfuscations": 2
-    },
-    "natural": {"exact_techniques": 1}
-  },
   "params_file": "params_example.json",
   "resume": true
 }

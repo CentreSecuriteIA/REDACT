@@ -543,14 +543,14 @@ def _stub_models(monkeypatch) -> None:
     monkeypatch.setattr("redact.llms.resources.estimate._load_config", lambda _id: None)
 
 
-def _counts(recipe: dict, before=None) -> dict:
+def _counts(recipe: dict, before=None, params=None) -> dict:
     """Run the recipe, after calling ``before``; the counts it reports, per stage."""
     from redact import run_pipeline
 
     if before:
         before()
     try:
-        summary = run_pipeline(recipe, params={}, verbose=False)
+        summary = run_pipeline(recipe, params=params or {}, verbose=False)
     finally:
         telemetry.uninstall()
     return {stage: done["counts"] for stage, done in summary["stages"].items()}
@@ -626,9 +626,17 @@ def _eval_run(folder: Path, monkeypatch, before=None) -> dict:
         "dataset_type": "eval", "data_dir": str(folder), "prompt_dir": str(overlay),
         "stages": ["constitution", "inputs", "outputs", "paraphrase", "jailbreaks",
                    "build"],
-        "models": _MODELS, "augmentations": _PURE,
-    }, before)
+        "models": _MODELS, "augmentations": _packaged(_PURE),
+    }, before, params={"jailbreaks": {"seed": 42}})     # not the eval type's 43
     return {"counts": counts}
+
+
+def _packaged(flat: dict) -> dict:
+    """The packaged section with ``flat`` over it, each kind whole, so the
+    eval type's section does not apply."""
+    from redact.recipe import augmentations_of
+
+    return augmentations_of({"augmentations": flat})
 
 
 _RUNS = {"training": _training_run, "eval": _eval_run}

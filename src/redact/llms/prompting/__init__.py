@@ -3,7 +3,8 @@
 - :mod:`prompts`: load a prompt JSON and render it into chat messages, and
   supply the format instruction that asks the model for a reply shape.
 - :mod:`extraction`: parse a reply into samples.
-- :mod:`scaffold`: write an editable copy of the prompt tree.
+- :mod:`scaffold`: write an editable copy of the prompt tree, or a setup
+  folder of recipes and configs.
 
 ``prompts`` imports ``extraction`` for the style names. ``extraction``
 imports nothing from this package.
@@ -24,7 +25,7 @@ from .prompts import (
     report_prompt_sources,
     resolve_prompt,
 )
-from .scaffold import scaffold_prompt_tree
+from .scaffold import scaffold_prompt_tree, scaffold_setup
 
 __all__ = [
     "EXTRACTION_STYLES",
@@ -38,5 +39,6 @@ __all__ = [
     "load_prompt",
     "report_prompt_sources",
     "resolve_prompt",
+    "scaffold_setup",
     "scaffold_prompt_tree",
 ]

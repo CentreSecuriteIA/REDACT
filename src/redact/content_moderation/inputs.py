@@ -108,10 +108,12 @@ class _Entry(NamedTuple):
     subcategory: str
     constitution_category: str
     group_tag: str
+    source_taxonomy: str | None     # None for a constitution without the column
 
 
 def _entry_fields(entry: pd.Series) -> _Entry:
     """Read an entry's fields once, each missing one as its default."""
+    taxonomy = entry.get("source_taxonomy")
     return _Entry(
         description=str(entry.get("sample_description", "")),
         entry_type=str(entry.get("entry_type", "harmful")),
@@ -119,6 +121,7 @@ def _entry_fields(entry: pd.Series) -> _Entry:
         subcategory=str(entry.get("constitution_subcategory", "")),
         constitution_category=str(entry.get("constitution_category", "")),
         group_tag=str(entry.get("source_group_tag", "")),
+        source_taxonomy=None if taxonomy is None else str(taxonomy),
     )
 
 
@@ -206,8 +209,12 @@ class InputPipeline:
 
         ``constitution_df`` has the constitution's columns
         (``source_category``, ``sample_description``,
-        ``constitution_subcategory``, ``entry_type``, ...); ``prompt_config``
-        is a prompt of ``input/generation/from_constitution/{style}``.
+        ``constitution_subcategory``, ``entry_type``, ...); its
+        ``source_taxonomy``, when it has one, is copied onto the rows. A
+        sample is checked against its ``source_category``: a harmful-taxonomy
+        category, or a benign one for the general-benign part.
+        ``prompt_config`` is a prompt of
+        ``input/generation/from_constitution/{style}``.
         """
         if constitution_df.empty:
             logger.warning("run_from_constitution: empty constitution_df, nothing to do")
@@ -385,6 +392,9 @@ class InputPipeline:
                         "source_sample_description": e.description,
                         "constitution_category": e.constitution_category,
                         "source_group_tag": e.group_tag,
+                        # Copied when the constitution has it.
+                        **({} if e.source_taxonomy is None
+                           else {"source_taxonomy": e.source_taxonomy}),
                         "template_style": style,
                         "rejection_reason": reasoning,
                     },

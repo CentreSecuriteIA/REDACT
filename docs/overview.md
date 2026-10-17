@@ -31,7 +31,9 @@ Two more fronts are outside the recipe: `generate_conversations` and
 
 Every run seeds its inputs from a constitution: the recipe's `constitution`
 stage writes it, or an earlier run saved it under `data_dir`. A recipe's
-`dataset_type` picks the build's mode.
+`dataset_type` names a packaged file, `configs/dataset_types/<type>.json`,
+that gives the run's default stages, params and augmentation section, and it
+picks the build's mode ([configuration.md](configuration.md#dataset-types)).
 
 ## How the files flow
 
@@ -88,14 +90,17 @@ summary = run_pipeline("src/redact/configs/runs/training_example.json")
 
 `recipe.load_recipe` reads the JSON and checks it before anything runs:
 
-- `dataset_type` is `eval` or `training`.
+- `dataset_type` is given and names a file under `configs/dataset_types/`
+  (`recipe.load_dataset_type`): `eval` or `training`. Its `stages` are the
+  default, and its params are checked as the params file's are.
 - Each name in `stages` is a key of `STAGES`, listed once.
 - No key outside the recipe keys (a key starting with `_` is a comment).
 - Each key under `models` is a recipe role (a key starting with `_` is a
   comment), and each role object is valid (`recipe.serving_of`).
 - `resume` is `true` or `false`.
-- The `augmentations` section is resolved over the packaged default
-  (`recipe.augmentations_of`), so a bad technique or family name fails here.
+- The `augmentations` section is resolved over the dataset type's, itself
+  over the packaged default (`recipe.augmentations_of`), so a bad technique
+  or family name fails here.
 - When the jailbreak stage runs a kind that draws a technique needing benign
   data, the `benign_taxonomy` is read and must have a category
   (`recipe.benign_taxonomy_of`).
@@ -222,11 +227,21 @@ table shows; [stages/build.md](stages/build.md) has the details.
 
 ## An eval run
 
-`eval_example.json` lists the same stages as a training run, with a small
-constitution: one taxonomy category and three constitution categories per
-entry type (`params_example.json`). The build runs in `eval` mode:
-paraphrases go to `Datasets/paraphrased.csv` instead of the complete
-dataset.
+`eval_example.json` names `"dataset_type": "eval"` and a small constitution
+(one taxonomy category and three constitution categories per entry type,
+`params_example.json`); the eval type file gives the rest. It runs the same
+six stages as a training run, with these differences:
+
+- the constitution and the inputs take only the `harmful` and `benign` entry
+  types, the clear ends, beside the general-benign part both types build
+  from the benign taxonomy;
+- the jailbreak stage attacks the harmful inputs only, with a pool of hard
+  techniques whose label stays certain (the heavy encodings, `fsh`, `dap`,
+  `framing`, `structural`, `ascii_art`, `continuation`, `temporal`,
+  `to_refusal_then_comply` and nine low-resource translations), one
+  technique then two, with seed 43, and makes no natural variations;
+- the build runs in `eval` mode: paraphrases go to
+  `Datasets/paraphrased.csv` instead of the complete dataset.
 
 ## Outside the recipe
 
