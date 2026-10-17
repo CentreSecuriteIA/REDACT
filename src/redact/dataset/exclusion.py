@@ -1,5 +1,6 @@
-"""The rows another run holds, which an eval build leaves out: by id, by text
-up to case, spacing and punctuation, and by constitution entry."""
+"""The rows another run holds, which an eval build leaves out: by id and by
+text up to case, spacing and punctuation; and those it only flags, from a
+constitution entry the other run has too."""
 
 from collections.abc import Callable, Iterable
 from pathlib import Path
@@ -12,7 +13,7 @@ from .identity import content_id, normalised_id
 from .rows import _CHUNK_ROWS, _has_bytes, accepted_mask
 
 #: Why a row is left out, in the order a row's reasons are taken.
-REASONS = ("exact", "normalised", "descriptions")
+REASONS = ("exact", "normalised")
 
 # The columns that hold a row's text in a stage file, a dataset or an eval file.
 _TEXT_COLUMNS = ("sample", "jailbreak", "output_response", "text")
@@ -38,14 +39,15 @@ class Exclusion:
     """What the files of another run hold, and the eval rows it leaves out.
 
     A row is left out when its ``sample_id`` is a row's of those files
-    (``exact``), when its text is one of theirs up to case, spacing and
-    punctuation (``normalised``), or when the input it comes from is left
-    out, its constitution entry being one of theirs (``descriptions``); a
-    row derived from a left-out input is left out for its input's reason.
-    Only the accepted rows of a file with an ``accepted`` column count.
+    (``exact``), or when its text is one of theirs up to case, spacing and
+    punctuation (``normalised``); a row derived from a left-out input is
+    left out for its input's reason. A row kept whose input came from a
+    constitution entry of theirs is only counted (``descriptions``). Only
+    the accepted rows of a file with an ``accepted`` column count.
 
     Attributes:
-        counts: The rows left out so far, by reason.
+        counts: The rows left out so far, by reason, and the rows kept that
+            ``descriptions`` flags.
     """
 
     def __init__(self, files: Iterable[Path]):
@@ -56,7 +58,8 @@ class Exclusion:
             self._read(path)
         self.normalised.discard(normalised_id(""))
         self.inputs: dict[str, str] = {}      # a left-out input's id: its reason
-        self.counts = dict.fromkeys(REASONS, 0)
+        self.described: set[str] = set()      # the kept inputs of a shared entry
+        self.counts = dict.fromkeys((*REASONS, "descriptions"), 0)
 
     def _read(self, path: Path) -> None:
         """Add the ids, texts and descriptions of the CSV at ``path``, read
@@ -83,28 +86,32 @@ class Exclusion:
                         self.descriptions.update(chunk[column].dropna().map(content_id))
 
     def read_inputs(self, inputs: Path | pd.DataFrame) -> None:
-        """Note which of the eval inputs are left out, and why, so the rows
-        derived from them are too."""
+        """Note which of the eval inputs are left out, and why, and which are
+        kept from a shared constitution entry, for the rows derived from them."""
         for chunk in _chunks(inputs):
             if "sample_id" not in chunk.columns:
                 continue
+            ids = chunk["sample_id"].astype(str)
             reasons = self._reasons(chunk, "sample")
+            left_out = reasons.dropna()
+            self.inputs.update(zip(ids[left_out.index], left_out))
             if "source_sample_description" in chunk.columns:
                 described = chunk["source_sample_description"].fillna("").astype(str)
-                held = described.ne("") & described.map(content_id).isin(
+                shared = described.ne("") & described.map(content_id).isin(
                     self.descriptions)
-                reasons = reasons.mask(reasons.isna() & held, "descriptions")
-            left_out = reasons.dropna()
-            ids = chunk.loc[left_out.index, "sample_id"].astype(str)
-            self.inputs.update(zip(ids, left_out))
+                self.described.update(ids[shared & reasons.isna()])
 
     def keeps(self, text: str, origin: str) -> Callable[[pd.DataFrame], pd.Series]:
         """A filter of chunks whose text is in column ``text`` and whose input's
-        id is in column ``origin``: the rows it keeps, counting the others."""
+        id is in column ``origin``: the rows it keeps, counting the others and
+        the kept rows of a shared constitution entry."""
         def kept(chunk: pd.DataFrame) -> pd.Series:
             reasons = self._reasons(chunk, text)
             if origin in chunk.columns:
-                reasons = reasons.fillna(chunk[origin].astype(str).map(self.inputs))
+                inputs = chunk[origin].astype(str)
+                reasons = reasons.fillna(inputs.map(self.inputs))
+                flagged = reasons.isna() & inputs.isin(self.described)
+                self.counts["descriptions"] += int(flagged.sum())
             for reason, count in reasons.value_counts().items():
                 self.counts[reason] += int(count)
             return reasons.isna()

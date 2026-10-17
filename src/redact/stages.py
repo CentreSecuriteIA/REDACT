@@ -827,8 +827,9 @@ def build_dataset(
     responses, then their paraphrases) and ``eval_jailbreaks.csv`` (the
     attacks that changed their input, ``is_jailbreak`` true, then the bare
     benign inputs, false); the variations are in none of them. With
-    ``exclude_from``, an eval build leaves out the rows another run holds
-    (:class:`redact.dataset.Exclusion`): it counts them by reason in
+    ``exclude_from``, an eval build leaves out the rows another run holds by
+    id or text, and flags those from a constitution entry it has too
+    (:class:`redact.dataset.Exclusion`); it counts both in
     ``Datasets/eval_excluded.json``, which the run record's counts take.
 
     Each file is copied in chunks into a temporary file that then replaces
@@ -1165,14 +1166,16 @@ def _warn_on_shared_benign(data_dir: str | Path | None, held_by: list[Path]) -> 
 
 def _save_excluded(data_dir: str | Path | None, files: list[Path],
                    counts: dict[str, int], *, verbose: bool) -> None:
-    """Save the counts of the rows an eval build left out, and log them."""
+    """Save the counts of the rows an eval build left out, and of those it
+    kept from a shared constitution entry, and log them."""
     if verbose:
-        logger.info("Left out %d rows that %d other files hold: %s",
-                    sum(counts.values()), len(files), counts)
+        logger.info("Left out %d rows that %d other files hold: %d by id, %d by "
+                    "normalised text", counts["exact"] + counts["normalised"],
+                    len(files), counts["exact"], counts["normalised"])
     if counts["descriptions"]:
         logger.warning(
             "%d rows come from a constitution entry that another run's "
-            "constitution holds too; they were left out.", counts["descriptions"])
+            "constitution has too; they are kept.", counts["descriptions"])
     path = paths.eval_excluded_json(data_dir)
     path.write_text(json.dumps({"sources": [str(f) for f in files],
                                 "excluded": counts}, indent=2), encoding="utf-8")

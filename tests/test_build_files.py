@@ -667,9 +667,12 @@ def _described(data_dir: Path) -> None:
 
 
 def test_an_eval_row_a_training_run_holds_is_left_out_with_its_descendants(
-        tmp_path):
-    """By id, by text up to case, spacing and punctuation, or by the
-    constitution entry its input came from."""
+        tmp_path, caplog):
+    """By id, or by text up to case, spacing and punctuation. A row whose
+    input came from a constitution entry the training run has too is kept,
+    and counted and warned about."""
+    import logging
+
     from redact import build_dataset
 
     data_dir = tmp_path / "eval"
@@ -680,16 +683,21 @@ def test_an_eval_row_a_training_run_holds_is_left_out_with_its_descendants(
     exact = paths.datasets(training) / "elsewhere.csv"
     pd.DataFrame({"sample_id": ["po-2"], "sample": ["x"]}).to_csv(exact, index=False)
 
-    build_dataset(data_dir=data_dir, mode="eval", exclude_from=[training],
-                  verbose=False)
+    with caplog.at_level(logging.WARNING, logger="redact"):
+        build_dataset(data_dir=data_dir, mode="eval", exclude_from=[training],
+                      verbose=False)
     files = _eval_files(data_dir)
-    # in-2 by its text, in-3 by its description, and every row from in-3.
-    assert files["eval_inputs.csv"]["sample_id"].tolist() == ["in-1", "pi-1"]
-    assert files["eval_outputs.csv"]["sample_id"].tolist() == ["out-1"]
+    # in-2 by its text, with every row from it; po-2 by its id. in-3 and the
+    # rows from it stay, flagged by its description.
+    inputs = files["eval_inputs.csv"]["sample_id"].tolist()
+    assert inputs == ["in-1", "in-3", "pi-1", "pi-3"]
+    assert files["eval_outputs.csv"]["sample_id"].tolist() == ["out-1", "out-3"]
     assert files["eval_jailbreaks.csv"]["sample_id"].tolist() == ["jb-1", "jb-4"]
     assert json.loads(paths.eval_excluded_json(data_dir).read_text(
         encoding="utf-8"))["excluded"] == {
         "exact": 1, "normalised": 3, "descriptions": 3}
+    (warned,) = [r.getMessage() for r in caplog.records]
+    assert warned.startswith("3 rows") and "kept" in warned
 
 
 def test_the_rows_of_a_training_dataset_file_are_left_out(tmp_path):

@@ -238,7 +238,9 @@ writes no complete dataset: it writes three files with one `text` and one
 The variations are in none of them. Every row keeps its `sample_id`, and
 a derived row its `input_id`, as in a training run's files. A training run
 and an eval run use two `data_dir`s; the eval build's `exclude_from` names
-the training run, and the rows it holds are left out and counted.
+the training run: the rows it holds by id or text are left out, those
+from a constitution entry it has too are kept and flagged, and both are
+counted.
 
 ## Outside the recipe
 

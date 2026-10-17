@@ -149,24 +149,28 @@ before anything is written. Of those files only the accepted rows count
 (those of a file without an `accepted` column, all), read in chunks into
 three sets of ids (`dataset.Exclusion`):
 
-| Reason | An eval row is left out when |
-|---|---|
-| `exact` | its `sample_id` is one of theirs |
-| `normalised` | its text is one of theirs up to case, spacing and punctuation (`dataset.normalised_id`, read from their `sample`, `jailbreak`, `output_response` and `text` columns) |
-| `descriptions` | its input's `source_sample_description` is an entry of theirs (`sample_description`, `source_sample_description`) |
+| Count | An eval row | When |
+|---|---|---|
+| `exact` | is left out | its `sample_id` is one of theirs |
+| `normalised` | is left out | its text is one of theirs up to case, spacing and punctuation (`dataset.normalised_id`, read from their `sample`, `jailbreak`, `output_response` and `text` columns) |
+| `descriptions` | is **kept**, and counted | its input's `source_sample_description` is an entry of theirs (`sample_description`, `source_sample_description`) |
 
 A row is checked for its own id and text first. A row derived from a
 left-out input (its paraphrases, its responses and theirs, its attacks) is
 left out too, for its input's reason, so every `input_id` of the eval files
-names a row of `eval_inputs.csv`. The build counts the rows left out of the
-three files by reason, logs them, warns when a row came from a shared
-constitution entry, and saves the counts with the files read in
-`Datasets/eval_excluded.json`; a build without `exclude_from` removes an
-earlier one. The run record's `counts` take them as `excluded`:
+names a row of `eval_inputs.csv`. A shared constitution entry only flags
+the rows that stay: the input and every row derived from it, each counted
+under `descriptions`, with a warning. The build saves the counts with the
+files read in `Datasets/eval_excluded.json`; a build without `exclude_from`
+removes an earlier one. The run record's `counts` take them as `excluded`,
+and its `sources` list the files read:
 
 ```json
-{"rows": 2310, "excluded": {"exact": 4, "normalised": 11, "descriptions": 0}}
+{"rows": 120, "excluded": {"exact": 2, "normalised": 5, "descriptions": 3}}
 ```
+
+`excluded.exact` and `excluded.normalised` are rows removed from the eval
+files; `excluded.descriptions` is rows still in them.
 
 The build also warns when a folder of `exclude_from` has the same
 `Data_cache/benign/benign_samples.csv` as the eval run: the `fsh` and
