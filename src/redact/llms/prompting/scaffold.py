@@ -118,6 +118,8 @@ _SETUP_COPIES = {
     "taxonomy/harmful.json": "taxonomy/harmful.json",
     "taxonomy/benign.json": "taxonomy/benign.json",
     "jailbreak/augmentations.json": "jailbreak/augmentations.json",
+    "generation_axes.json": "generation_axes.json",
+    "dimensions.json": "dimensions.json",
     "eval_params.json": "runs/params_eval_example.json",
     "training_params.json": "runs/params_training_example.json",
 }
@@ -134,7 +136,8 @@ Run a recipe from this folder: `python scripts/run.py eval_recipe.json`, or
 `training_recipe.json`. Each recipe's `"config_dir": "."` points the run here.
 
 - Every file here wins over the library's packaged copy of the same file:
-  `dataset_types/`, `taxonomy/` and `jailbreak/augmentations.json`.
+  `dataset_types/`, `taxonomy/`, `jailbreak/augmentations.json`,
+  `generation_axes.json` and `dimensions.json`.
 - Delete every file you do not change, so you keep getting the library's
   updates to it.
 - Prompts are a separate tier: `python scripts/scaffold_prompts.py ./prompts`
@@ -147,7 +150,8 @@ Run a recipe from this folder: `python scripts/run.py eval_recipe.json`, or
 def scaffold_setup(target_dir: str | Path, *, overwrite: bool = False) -> list[Path]:
     """Write a setup folder: an eval and a training recipe with their params
     files, the dataset type files, the two taxonomies, the augmentation
-    section's defaults, and a ``README.md``.
+    section's defaults, the generation axes, the dimensions, and a
+    ``README.md``.
 
     Each recipe is its packaged example with ``"config_dir": "."`` and its
     params file beside it, so it runs as the example does until a file here

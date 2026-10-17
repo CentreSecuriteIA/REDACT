@@ -11,7 +11,6 @@ from __future__ import annotations
 
 import json
 import logging
-import math
 import random
 from collections import Counter, defaultdict
 from collections.abc import Callable
@@ -20,8 +19,10 @@ from pathlib import Path
 import pandas as pd
 
 from redact.dataset import Manifest, row_id
+from redact.dataset.dealing import Dealer, stable_seed
+from redact.dataset.planfile import coverage_path, plan_record, write_plan
 
-from .chain import _stable_seed, combine_techniques
+from .chain import combine_techniques
 from .sampling import sample_combination
 
 logger = logging.getLogger(__name__)
@@ -30,50 +31,17 @@ logger = logging.getLogger(__name__)
 _SHORT = 2
 
 
-class _Dealer:
-    """Running family and layer counts of one ``(category, entry_type,
-    iteration)`` group, so the planner deals families and layers evenly.
-
-    ``weights`` sets a family's share within its layer (1 by default). The
-    planner sets ``position`` to the units dealt so far, including the current,
-    and calls ``observe`` with the techniques each unit was given. ``key``
-    names the group; it seeds where in the group each layer's picks fall.
-    ``targets`` holds each layer's picks due by the last unit asked.
-    """
-
-    def __init__(self, weights: dict | None = None, key: tuple = ()) -> None:
-        self.weights = dict(weights or {})
-        self.key = key
-        self.position = 0
-        self.family_counts: Counter = Counter()
-        self.layer_counts: Counter = Counter()
-        self.targets: dict[str, int] = {}
-        self._offsets: dict[str, float] = {}
-
-    def score(self, family: str) -> float:
-        return self.family_counts[family] / self.weights.get(family, 1.0)
-
-    def include(self, layer: str, rate: float) -> bool:
-        """Whether this unit takes ``layer``: the picks so far are below
-        ``rate * position`` shifted by the group's seeded offset in [0, 1), so
-        a group gets ``rate * size`` picks rounded down or up, and a group of
-        one takes the layer with probability ``rate``."""
-        if layer not in self._offsets:
-            seeded = random.Random(_stable_seed(*self.key, layer))
-            self._offsets[layer] = seeded.random()
-        self.targets[layer] = math.floor(rate * self.position + self._offsets[layer])
-        return self.layer_counts[layer] < self.targets[layer]
-
-    def observe(self, techniques) -> None:
-        for fn in techniques:
-            if fn is None:
-                continue
-            families = getattr(fn, "families", None) or []
-            if families:
-                self.family_counts[families[0]] += 1
-            layer = getattr(fn, "layer", None)
-            if layer is not None:
-                self.layer_counts[layer] += 1
+def _observe(dealer: Dealer, techniques) -> None:
+    """Count each technique's first family and its layer in ``dealer``."""
+    for fn in techniques:
+        if fn is None:
+            continue
+        families = getattr(fn, "families", None) or []
+        if families:
+            dealer.counts[families[0]] += 1
+        layer = getattr(fn, "layer", None)
+        if layer is not None:
+            dealer.included[layer] += 1
 
 
 def assign_combination(
@@ -99,7 +67,7 @@ def assign_combination(
     identity.
     """
     used_set = {tuple(c) for c in used}
-    base = _stable_seed(seed, sample_id, iteration)
+    base = stable_seed(seed, sample_id, iteration)
     chosen: list[str] = []
     for attempt in range(max_resamples):
         rng = random.Random(base + attempt)
@@ -150,8 +118,9 @@ def plan_run(
     them, key by key.
 
     The units of one ``(category, entry_type, iteration)`` group are dealt in
-    ``sample_id`` order from a shared :class:`_Dealer`, so each layer appears at
-    its rate (``layer_rates`` over the spec's) and each family at its weight
+    ``sample_id`` order from a shared
+    :class:`~redact.dataset.dealing.Dealer`, so each layer appears at its rate
+    (``layer_rates`` over the spec's) and each family at its weight
     (``family_weights``, equal by default), evenly across the group and
     independent of the input order; a row's ``settings`` record the weights
     when given. The plan file (:func:`plan_inputs`) is written beside the
@@ -188,7 +157,7 @@ def plan_run(
             )
             for key in sorted(subgroups):
                 category, entry_type = key
-                dealer = _Dealer(family_weights, key=(seed, category, entry_type, it))
+                dealer = Dealer(family_weights, key=(seed, category, entry_type, it))
                 for sid, idx in subgroups[key]:
                     dealer.position += 1
                     names = assign_combination(
@@ -196,7 +165,7 @@ def plan_run(
                         used=used_by_row[idx], dealer=dealer, **settings,
                     )
                     used_by_row[idx].append(tuple(names))
-                    dealer.observe(by_name.get(n) for n in names)
+                    _observe(dealer, (by_name.get(n) for n in names))
                     planned += 1
                     yield {
                         "sample_id": sid,
@@ -212,10 +181,9 @@ def plan_run(
     rounds = [{**(sample_kwargs or {}),
                **(settings_per_iteration[it] if settings_per_iteration else {})}
               for it in range(iterations)]
-    made_with = plan_inputs(pool, seed=seed, rounds=rounds,
-                            family_weights=family_weights, layer_rates=layer_rates)
-    plan_path(manifest_path).write_text(json.dumps(made_with, indent=1) + "\n",
-                                        encoding="utf-8")
+    write_plan(manifest_path, plan_inputs(
+        pool, seed=seed, rounds=rounds, family_weights=family_weights,
+        layer_rates=layer_rates))
     Manifest(manifest_path).write(units())
     coverage(manifest_path, pool)
 
@@ -225,37 +193,17 @@ def plan_run(
     return manifest_path
 
 
-def _warn_short(dealer: _Dealer, iteration: int, manifest_path: Path) -> None:
+def _warn_short(dealer: Dealer, iteration: int, manifest_path: Path) -> None:
     """Log each layer of a dealt group whose picks fell two or more short of
     its target, as when no technique of the layer fits a unit's other picks."""
     category, entry_type = dealer.key[1:3]
     for layer, target in dealer.targets.items():
-        if target - dealer.layer_counts[layer] >= _SHORT:
+        if target - dealer.included[layer] >= _SHORT:
             logger.warning(
                 "Plan: group (%s, %s), iteration %d: the %s layer has %d of its "
                 "target %d; the pool or the compatibility rules left the rest no "
                 "pick (see %s).", category, entry_type, iteration, layer,
-                dealer.layer_counts[layer], target, coverage_path(manifest_path).name)
-
-
-def _beside(manifest_path, suffix: str) -> Path:
-    """The file ``<stem><suffix>`` beside the manifest at ``manifest_path``."""
-    manifest_path = Path(manifest_path)
-    ending = ".manifest.jsonl"
-    stem = (manifest_path.name[:-len(ending)] if manifest_path.name.endswith(ending)
-            else manifest_path.stem)
-    return manifest_path.with_name(f"{stem}{suffix}")
-
-
-def coverage_path(manifest_path) -> Path:
-    """The coverage CSV beside the manifest at ``manifest_path``."""
-    return _beside(manifest_path, ".coverage.csv")
-
-
-def plan_path(manifest_path) -> Path:
-    """The plan file beside the manifest at ``manifest_path``: what the plan
-    was made with, as :func:`plan_inputs` gives it."""
-    return _beside(manifest_path, ".plan.json")
+                dealer.included[layer], target, coverage_path(manifest_path).name)
 
 
 def plan_inputs(
@@ -266,25 +214,12 @@ def plan_inputs(
     family_weights: dict | None = None,
     layer_rates: dict | None = None,
 ) -> dict:
-    """What a plan is made with: ``seed``, ``rounds``, the ``pool``'s technique
-    names sorted, ``family_weights`` and ``layer_rates``, as JSON reads them
-    back."""
-    return json.loads(json.dumps({
-        "seed": seed, "rounds": rounds,
-        "pool": sorted(fn.__name__ for fn in pool),
-        "family_weights": family_weights, "layer_rates": layer_rates,
-    }))
-
-
-def changed_plan_inputs(manifest_path, current: dict) -> list[str] | None:
-    """The keys of ``current`` (:func:`plan_inputs`) whose values differ from
-    those the plan at ``manifest_path`` was made with; ``None`` when it has no
-    plan file to compare with."""
-    path = plan_path(manifest_path)
-    if not path.exists():
-        return None
-    made_with = json.loads(path.read_text(encoding="utf-8"))
-    return [key for key, value in current.items() if made_with.get(key) != value]
+    """What a plan is made with, its plan file's record: ``seed``, ``rounds``,
+    the ``pool``'s technique names sorted, ``family_weights`` and
+    ``layer_rates``."""
+    return plan_record(
+        seed=seed, rounds=rounds, pool=sorted(fn.__name__ for fn in pool),
+        family_weights=family_weights, layer_rates=layer_rates)
 
 
 def _manifest_rows(manifest_path: Path):

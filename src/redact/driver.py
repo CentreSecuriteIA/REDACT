@@ -35,6 +35,7 @@ from redact.recipe import (
     _DEFAULT_MODELS,
     _role_names,
     augmentations_of,
+    check_dimensions,
     dataset_type_hash,
     load_params,
     load_recipe,
@@ -432,7 +433,9 @@ def run_pipeline(
     ``params`` replaces the recipe's ``params_file``, and ``data_dir`` its
     ``data_dir``. A params key that is not a parameter of its stage's front,
     or that the run passes the front itself, fails before any stage runs, as
-    does an augmentation section the params contradict; the jailbreak stage
+    do an augmentation section the params contradict and a generation axis
+    that varies the dimension of a family the section draws
+    (:func:`redact.recipe.check_dimensions`); the jailbreak stage
     runs and records the section with the params' flat keywords applied
     over its adversarial kind. No stage reads its rows back: the counts
     are taken from each stage's files, and the inputs are seeded from the
@@ -458,7 +461,8 @@ def run_pipeline(
 
     recipe = load_recipe(recipe, params=params)
     params = load_params(recipe.get("params_file") if params is None else params,
-                         base_dir=recipe.get("_base_dir"))
+                         base_dir=recipe.get("_base_dir"),
+                         config_dir=recipe.get("config_dir"))
     serving = serving_of(recipe.get("models") or {})
     stages = recipe["stages"]
     ctx = RunContext(
@@ -478,6 +482,8 @@ def run_pipeline(
     )
     for name in stages:
         STAGES[name].check(ctx)     # a bad params key fails before any stage runs
+    check_dimensions(ctx.params, ctx.augmentations, dataset_type=ctx.dataset_type,
+                     config_dir=ctx.config_dir)
     noted = {"dataset_type": ctx.dataset_type,
              "dataset_type_hash": dataset_type_hash(ctx.dataset_type, ctx.config_dir)}
 

@@ -144,7 +144,7 @@ checkers of `content_moderation/checker.py` build.
 | Stage | Driver | `pool_size` | `cap` | Unit |
 |---|---|---|---|---|
 | constitution | `drive_units` | 1 | 1 | `extracted` over one call |
-| inputs | `drive_units` | `pool_size(batch_size, gen, check)` | `batch_size` | `extracted`, then one check request per sample |
+| inputs | `drive_units` | `pool_size(batch_size, gen, check)` | `batch_size` | `extracted` over one call for one sample, then one check request |
 | outputs | `drive_units` | `pool_size(batch_size, client, check)` | `batch_size` | `checked` |
 | jailbreaks | `drive_units` | `pool_size(batch_size, client)` | `batch_size` | `jailbreak.chain.run_chain` over the unit's techniques |
 | benign data (`jailbreak/manipulation/benign.py`) | `drive_units` | `pool_size(batch_size, client)` | `batch_size` | `extracted` over one call: one subcategory and answer type, 3 attempts |

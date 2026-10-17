@@ -1,9 +1,10 @@
 """Resume-ledger tests for constitution-seeded input generation.
 
 Mirrors the ledger tests for the constitution / output / paraphrase stages:
-a completed ``(sample_description, entry_type, style)`` unit is acked to
-``constitution_inputs.state.jsonl`` and skipped on a resume re-run;
-``resume=False`` clears it. Fully offline (MockBackend).
+a completed ``(sample_description, entry_type, style, iteration)`` unit is
+acked to ``constitution_inputs.state.jsonl`` and skipped on a resume re-run;
+``resume=False`` clears it. A unit generates one sample, in a reply that ends
+with ``[END]``. Fully offline (MockBackend).
 """
 
 import json
@@ -25,12 +26,23 @@ from tests.conftest import MockBackend, make_client
 _PROMPT = {"system_prompt": "sys", "template": "Generate items about {sample_description}"}
 
 
+def one(text: str) -> str:
+    """A reply of one sample, ended as the stage asks."""
+    return f"1. {text}\n[END]"
+
+
+def _keys(*entries, style=""):
+    """The ledger keys of the two units of each ``(description, entry_type)``."""
+    return {(d, e, style, it) for d, e in entries for it in (0, 1)}
+
+
 def _pipeline(tmp_path):
     # Two registry names: one name and setup is one call group, answered by
-    # the first request's backend. Each of the two entries gets its own
-    # texts: a text the other entry wrote is dropped, and an entry left with
-    # no row cannot be found in the files once the ledger is gone.
-    replies = ["1. alpha sample\n2. beta sample", "1. gamma sample\n2. delta sample"]
+    # the first request's backend. Each of the four units gets its own text:
+    # a text another unit wrote is dropped, and a unit left with no row
+    # cannot be found in the files once the ledger is gone.
+    replies = [one("alpha sample"), one("beta sample"), one("gamma sample"),
+               one("delta sample")]
     return InputPipeline(
         gen=make_client(MockBackend(replies), "m"),
         check=make_client(MockBackend("Yes"), "m-check"),
@@ -50,11 +62,11 @@ def _const_df():
 def test_ledger_written_and_resume_skips(tmp_path):
     pipe = _pipeline(tmp_path)
     r1 = pipe.run_from_constitution(_const_df(), _PROMPT, samples_per_entry=2, verbose=False)
-    assert r1.total_entries_processed == 2
+    assert r1.total_entries_processed == 4
 
-    # ledger recorded both entries
+    # ledger recorded both units of both entries
     led = _constitution_inputs_ledger(tmp_path)
-    assert led.completed() == {("desc one", "harmful", ""), ("desc two", "benign", "")}
+    assert led.completed() == _keys(("desc one", "harmful"), ("desc two", "benign"))
 
     # resume run: every entry already acked -> nothing processed, no gen calls
     pipe2 = _pipeline(tmp_path)
@@ -64,7 +76,7 @@ def test_ledger_written_and_resume_skips(tmp_path):
 
 
 def test_check_calls_carry_the_limit(tmp_path):
-    gen, check = MockBackend("1. alpha sample\n2. beta sample"), MockBackend("Yes")
+    gen, check = MockBackend([one("alpha sample"), one("beta sample")]), MockBackend("Yes")
     pipe = InputPipeline(gen=make_client(gen, "m"), check=make_client(check, "m-check"),
                          dataset_dir=tmp_path)
     pipe.run_from_constitution(_const_df(), _PROMPT, samples_per_entry=2, verbose=False,
@@ -89,11 +101,12 @@ def test_manifest_written_before_generation(tmp_path):
                                style="long", verbose=False)
     man = _constitution_inputs_manifest(tmp_path)
     rows = man.load()
-    # one planned row per constitution entry, keyed like the ledger.
-    assert {(r["sample_description"], r["entry_type"], r["style"]) for r in rows} == {
-        ("desc one", "harmful", "long"), ("desc two", "benign", "long"),
-    }
-    assert all(r["status"] == "planned" for r in rows)
+    # one planned row per unit, keyed like the ledger, with its category.
+    assert {(r["sample_description"], r["entry_type"], r["style"], r["iteration"])
+            for r in rows} == _keys(("desc one", "harmful"), ("desc two", "benign"),
+                                    style="long")
+    assert {r["category"] for r in rows} == {"Violence", "Privacy"}
+    assert all(r["status"] == "planned" and "spec" not in r for r in rows)
 
 
 def test_fresh_clears_ledger_and_regenerates(tmp_path):
@@ -104,7 +117,7 @@ def test_fresh_clears_ledger_and_regenerates(tmp_path):
     pipe2 = _pipeline(tmp_path)
     r = pipe2.run_from_constitution(_const_df(), _PROMPT, samples_per_entry=2,
                                     resume=False, verbose=False)
-    assert r.total_entries_processed == 2          # regenerated despite prior ledger
+    assert r.total_entries_processed == 4          # regenerated despite prior ledger
     assert pipe2.gen.backend.calls != []
 
 
@@ -130,7 +143,7 @@ def test_check_calls_are_no_wider_than_batch_size(tmp_path):
     of 3 and never more."""
     check = _WidthBackend("Yes")
     pipe = InputPipeline(
-        gen=make_client(_TokenBackend(lambda t, n: f"1. first {t}\n2. second {t}"), "m"),
+        gen=make_client(_TokenBackend(lambda t, n: one(f"{_NTH[n]} {t}")), "m"),
         check=make_client(check, "m-check"),
         dataset_dir=tmp_path,
     )
@@ -150,10 +163,9 @@ def test_entry_with_no_extracted_samples_is_acked(tmp_path):
         )
 
     r = _pipe().run_from_constitution(_const_df(), _PROMPT, samples_per_entry=2, verbose=False)
-    assert r.skipped_entries == 2 and r.total_entries_processed == 0
-    assert _constitution_inputs_ledger(tmp_path).completed() == {
-        ("desc one", "harmful", ""), ("desc two", "benign", ""),
-    }
+    assert r.skipped_entries == 4 and r.total_entries_processed == 0
+    assert _constitution_inputs_ledger(tmp_path).completed() == _keys(
+        ("desc one", "harmful"), ("desc two", "benign"))
 
     pipe2 = _pipe()
     pipe2.run_from_constitution(_const_df(), _PROMPT, samples_per_entry=2, verbose=False)
@@ -184,35 +196,54 @@ def _one_entry_pipeline(tmp_path, gen_replies):
     return gen, pipe
 
 
-def test_a_rejected_reply_is_regenerated(tmp_path):
-    gen, pipe = _one_entry_pipeline(
-        tmp_path, ["sorry, nothing here", "1. alpha sample\n2. beta sample"])
+@pytest.mark.parametrize("first", [
+    "sorry, nothing here [END]",                    # no numbered sample
+    "1. alpha sample\n2. beta sample\n[END]",       # two samples
+    "1. alpha sample",                              # no [END]: cut
+])
+def test_a_rejected_reply_is_regenerated(tmp_path, first):
+    gen, pipe = _one_entry_pipeline(tmp_path, [first, one("alpha sample")])
     r = pipe.run_from_constitution(
-        _const_df().iloc[:1], _PROMPT, samples_per_entry=2, verbose=False)
+        _const_df().iloc[:1], _PROMPT, samples_per_entry=1, verbose=False)
     assert len(gen.calls) == 2
     assert r.skipped_entries == 0 and r.total_entries_processed == 1
+    assert _rows(tmp_path)["sample"].tolist() == ["alpha sample"]
+
+
+def test_replies_without_the_end_marker_are_counted(tmp_path, caplog):
+    gen, pipe = _one_entry_pipeline(
+        tmp_path, ["1. alpha sample", "1. alpha sample", one("alpha sample")])
+    with caplog.at_level(logging.WARNING):
+        pipe.run_from_constitution(
+            _const_df().iloc[:1], _PROMPT, samples_per_entry=1, verbose=False)
+    assert "2 replies had no [END] marker" in caplog.text
 
 
 def test_an_entry_rejected_every_time_is_acked_as_rejected(tmp_path, caplog):
     gen, pipe = _one_entry_pipeline(tmp_path, "sorry, nothing here")
     with caplog.at_level(logging.WARNING):
         r = pipe.run_from_constitution(
-            _const_df().iloc[:1], _PROMPT, samples_per_entry=2, max_attempts=2,
+            _const_df().iloc[:1], _PROMPT, samples_per_entry=1, max_attempts=2,
             verbose=False)
     assert len(gen.calls) == 2 and r.skipped_entries == 1
     ledger = _constitution_inputs_ledger(tmp_path)
     ack = json.loads(ledger.path.read_text(encoding="utf-8").splitlines()[-1])
-    assert (ack["status"], ack["attempts"]) == ("rejected", 2)
-    assert "1 entries rejected after 2 attempt(s)" in caplog.text
+    assert (ack["status"], ack["attempts"], ack["iteration"]) == ("rejected", 2, 0)
+    assert "1 units rejected after 2 attempt(s)" in caplog.text
+
+
+# The words for a token's first, second, ... request.
+_NTH = {1: "first", 2: "second", 3: "third"}
 
 
 class _TokenBackend(MockBackend):
     """Native-batching fake: ``reply(token, attempt)`` answers each request.
 
     ``token`` is the first ``zqN`` in the request, ``attempt`` how many times
-    this backend has seen it. Replies depend only on that, never on call
-    order, so rows compare across runs whose entries finish in other orders.
-    ``batches`` holds each call's tokens, with ``*`` on a repeated one.
+    this backend has seen it. Replies depend only on that: an entry's units
+    send their requests in iteration order, so rows compare across runs
+    whose entries finish in other orders. ``batches`` holds each call's
+    tokens, with ``*`` on a repeated one.
     """
 
     def __init__(self, reply):
@@ -265,14 +296,14 @@ def _rows(tmp_path):
 def test_pool_run_without_retries_writes_the_same_rows(tmp_path):
     from redact.dataset import content_id
 
-    gen = _TokenBackend(lambda t, n: f"1. first sample {t}\n2. second sample {t}")
+    gen = _TokenBackend(lambda t, n: one(f"{_NTH[n]} sample {t}"))
     # Every second sample of an odd entry is rejected.
     check = _TokenBackend(lambda t, n: "No: weak" if int(t[2:]) % 2 and n == 2 else "Yes")
     r = _token_pipeline(tmp_path, gen, check).run_from_constitution(
         _token_df(5), _PROMPT, samples_per_entry=2, batch_size=2, verbose=False)
 
-    def row(i, which, accepted):
-        text = f"{which} sample zq{i}"
+    def row(i, iteration, accepted):
+        text = f"{_NTH[iteration + 1]} sample zq{i}"
         category = ("Violence", "Privacy")[i % 2]
         return {
             "sample_id": content_id(text), "sample": text, "category": category,
@@ -281,28 +312,29 @@ def test_pool_run_without_retries_writes_the_same_rows(tmp_path):
             "source_sample_description": f"desc zq{i}", "constitution_category": "",
             "source_group_tag": "", "template_style": "",
             "rejection_reason": "" if accepted else "No: weak",
+            "iteration": str(iteration),
         }
 
-    expected = [row(i, "first", True) for i in range(5)]
-    expected += [row(i, "second", i % 2 == 0) for i in range(5)]
+    expected = [row(i, 0, True) for i in range(5)]
+    expected += [row(i, 1, i % 2 == 0) for i in range(5)]
     df = _rows(tmp_path)
     assert list(df.columns) == [
         "sample_id", "sample", "category", "subcategory", "entry_type", "turn",
         "accepted", "rejection_reason", "source", "source_sample_description",
-        "constitution_category", "source_group_tag", "template_style",
+        "constitution_category", "source_group_tag", "template_style", "iteration",
     ]
     assert len(df) == 10
     assert {r["sample_id"]: r for r in df.to_dict("records")} == {
         r["sample_id"]: r for r in expected}
     assert (r.total_prompts_generated, r.total_prompts_accepted) == (10, 8)
     assert _constitution_inputs_ledger(tmp_path).completed() == {
-        (f"desc zq{i}", "harmful", "") for i in range(5)}
+        (f"desc zq{i}", "harmful", "", it) for i in range(5) for it in (0, 1)}
 
 
 def test_pool_fills_a_call_with_a_retry_and_a_new_entry(tmp_path):
     # zq1's first reply has no samples, so it is generated again.
     gen = _TokenBackend(
-        lambda t, n: "sorry, nothing here" if (t, n) == ("zq1", 1) else f"1. sample {t}")
+        lambda t, n: "sorry, nothing here" if (t, n) == ("zq1", 1) else one(f"sample {t}"))
     check = _TokenBackend(lambda t, n: "Yes")
     r = _token_pipeline(tmp_path, gen, check).run_from_constitution(
         _token_df(6), _PROMPT, samples_per_entry=1, batch_size=2, verbose=False)
@@ -334,7 +366,7 @@ def test_pool_resume_after_a_failed_append_runs_only_unfinished_entries(
                                           samples_per_entry=1, batch_size=4, verbose=False)
 
     def reply(t, n):
-        return f"1. sample {t}"
+        return one(f"sample {t}")
 
     monkeypatch.setattr(G, "append_rows", failing_second_append)
     with pytest.raises(OSError, match="disk full"):
@@ -381,7 +413,7 @@ class _LaneGen(MockBackend):
         self.sent.append(token)
         if token in self.too_long:
             raise PromptTooLongError(f"{token} is over the context")
-        return f"1. sample {token}"
+        return one(f"sample {token}")
 
 
 def test_an_entry_whose_prompt_is_too_long_is_acked_as_rejected(tmp_path, caplog):
@@ -402,12 +434,12 @@ def test_an_entry_whose_prompt_is_too_long_is_acked_as_rejected(tmp_path, caplog
             for line in ledger.path.read_text(encoding="utf-8").splitlines()]
     assert [a for a in acks if a.get("sample_description") == "desc zq1"] == [{
         "sample_description": "desc zq1", "entry_type": "harmful", "style": "",
-        "status": "rejected", "attempts": 1}]
-    assert ledger.completed() == {(f"desc zq{i}", "harmful", "") for i in range(3)}
+        "iteration": 0, "status": "rejected", "attempts": 1}]
+    assert ledger.completed() == {(f"desc zq{i}", "harmful", "", 0) for i in range(3)}
     too_long, summary = [record.getMessage() for record in caplog.records]
-    assert too_long == ("Entry 'desc zq1' (harmful) rejected, its prompt is too "
-                        "long: zq1 is over the context")
-    assert summary.startswith("1 entries rejected")
+    assert too_long == ("Entry 'desc zq1' (harmful), iteration 0, rejected, its "
+                        "prompt is too long: zq1 is over the context")
+    assert summary.startswith("1 units rejected")
 
     again, r = run()
     assert again.sent == [] and r.skipped_entries == 0

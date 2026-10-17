@@ -1,0 +1,72 @@
+{
+  "_comment": "The dimensions a text varies along. Each tag belongs to one side: augmentation (a family of jailbreak/combination_spec.json, which transforms a finished text) or generation (an axis of generation_axes.json, which shapes a text as it is written). Each family and each axis carries one tag as dimension; the definition says what property of the text it varies. A generation tag may list in same_as the augmentation tags that are the same dimension, and in undecided those the owner has yet to rule on, checked as the same until then. A run stops before any stage when an axis that varies (one with from, or with two or more values of weight above 0) and a family a kind draws share a dimension. Read by redact/dimensions.py.",
+  "language": {
+    "side": "augmentation",
+    "definition": "The natural language the message is written in, or asks to be answered in."
+  },
+  "surface_noise": {
+    "side": "augmentation",
+    "definition": "Variation in spelling, casing, spacing, punctuation and added symbols that leaves the meaning of every word as it was."
+  },
+  "encoding": {
+    "side": "augmentation",
+    "definition": "The written form of some or all of the message's characters or words, when it is other than plain text in the message's own alphabet."
+  },
+  "container": {
+    "side": "augmentation",
+    "definition": "A data format, markup or document structure that the finished message is placed inside."
+  },
+  "role_framing": {
+    "side": "augmentation",
+    "definition": "A role, character or invented scenario set up in the message, for its writer or its reader, around the request."
+  },
+  "request_shape": {
+    "side": "augmentation",
+    "definition": "The frame a finished request is put in: its tense, a task or passage it is set within, and other text placed before or after it."
+  },
+  "answer_shape": {
+    "side": "augmentation",
+    "definition": "What the message asks of the answer's form: its format, layout or opening."
+  },
+  "example_priming": {
+    "side": "augmentation",
+    "definition": "Example exchanges placed in the message before the request."
+  },
+  "authorship": {
+    "side": "generation",
+    "definition": "Who the writer is, as their role or situation shows in what they ask and how, never offered as a reason to be answered."
+  },
+  "request_intent": {
+    "side": "generation",
+    "definition": "The act the writer's own request performs (an instruction, a question, a request for advice, a statement, a request for an opinion) and how plainly it names its subject."
+  },
+  "length": {
+    "side": "generation",
+    "definition": "How long the message is, from a few words to a document."
+  },
+  "register": {
+    "side": "generation",
+    "definition": "The formality, expertise and feeling of the message's word choice and sentence construction."
+  },
+  "focus": {
+    "side": "generation",
+    "definition": "Whether the subject fills the whole message or is one part of a message also about other things.",
+    "undecided": ["request_shape", "container", "example_priming"]
+  },
+  "domain": {
+    "side": "generation",
+    "definition": "The subject area of the taxonomy that the message is about."
+  },
+  "answer_length": {
+    "side": "generation",
+    "definition": "How long the response is."
+  },
+  "answer_layout": {
+    "side": "generation",
+    "definition": "The visual structure of the response: prose, a list, numbered steps, headed sections, a table or a code block."
+  },
+  "answer_tone": {
+    "side": "generation",
+    "definition": "The formality, warmth and expertise of the response's wording."
+  }
+}

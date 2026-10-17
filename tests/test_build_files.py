@@ -32,6 +32,11 @@ the runs is accepted: the build count of the training run is 88.
 The eval run is not that commit's: its inputs are seeded from a small
 constitution of placeholder entries, as every run's are.
 
+The merged inputs file of the training run ends in an ``iteration`` column
+and one column per input generation axis (``length`` to ``focus``), since
+each entry is a unit per sample, each dealt a spec; its other cells are as
+before.
+
 An eval build writes three files of one flat schema, ``eval_inputs.csv``,
 ``eval_outputs.csv`` and ``eval_jailbreaks.csv``, in place of the complete
 dataset and ``paraphrased.csv``: the fixture's two eval builds (``eval`` and
@@ -842,23 +847,27 @@ _MODELS = {"gen": "gen-model", "check": "check-model", "paraphraser": "para-mode
 
 
 def _stub_models(monkeypatch) -> None:
-    """Stub every model call of a run; a reply depends only on its request.
+    """Stub every model call of a run; a reply depends only on its request,
+    and an input's on how many requests of its entry and style came before.
 
-    A sample reads ``<style> <ordinal> zqN sample``. The third sample of
-    ``zq1`` is rejected as an input, the answers to a second sample of
-    ``zq0`` are rejected as outputs, and the paraphrases of a first sample of
-    ``zq2`` are rejected.
+    A sample reads ``<style> <ordinal> zqN sample``, the ordinal of the
+    entry's unit. The third sample of ``zq1`` is rejected as an input, the
+    answers to a second sample of ``zq0`` are rejected as outputs, and the
+    paraphrases of a first sample of ``zq2`` are rejected.
     """
     import redact.content_moderation.paraphrase as CP
     from redact.llms import ModelClient
     from tests.test_pipelines import _TokenBackend
 
+    units: dict[tuple[str, str], int] = {}
+
     def write(token, text):
         made = re.search(r"MAKE-INPUTS-(\w+)", text)
         if made:
             style = made.group(1).lower()
-            return "\n".join(f"{n}. {style} {ordinal} {token} sample" for n, ordinal
-                             in enumerate(("first", "second", "third"), 1))
+            n = units[token, style] = units.get((token, style), 0) + 1
+            ordinal = ("first", "second", "third")[n - 1]
+            return f"1. {style} {ordinal} {token} sample\n[END]"
         return "answer to the " + re.search(r"\w+ \w+ zq\d+ sample", text).group()
 
     def judge(token, text):
@@ -906,7 +915,8 @@ def _overlay(folder: Path) -> Path:
         template.mkdir(parents=True)
         (template / "template.json").write_text(json.dumps({
             "system_prompt": "sys",
-            "template": f"MAKE-INPUTS-{style.upper()} about {{sample_description}}",
+            "template": (f"MAKE-INPUTS-{style.upper()} about {{sample_description}}"
+                         "\n\n{sample_spec}"),
         }), encoding="utf-8")
     return overlay
 
@@ -1012,11 +1022,17 @@ def test_a_run_counts_its_rows_without_a_stage_reading_them_back(
     assert counted["counts"] == expected["counts"]
 
 
+def _one_each(*texts: str) -> MockBackend:
+    """A generator that answers its calls with ``texts`` in turn, one sample a
+    reply."""
+    return MockBackend([f"1. {text}\n[END]" for text in texts])
+
+
 def test_inputs_that_are_all_rejected_leave_no_merged_file(tmp_path, monkeypatch):
     from redact import generate_inputs
     from redact.llms import ModelClient
 
-    backends = {"gen-model": MockBackend("1. one zq0 sample\n2. another zq0 sample"),
+    backends = {"gen-model": _one_each("one zq0 sample", "another zq0 sample"),
                 "check-model": MockBackend("No: off topic")}
     monkeypatch.setattr(ModelClient, "create", lambda m: make_client(backends[m], m))
     constitution = pd.DataFrame([{
@@ -1037,7 +1053,7 @@ def test_a_fresh_run_that_accepts_nothing_removes_the_last_merged_file(
     from redact import build_dataset, generate_inputs
     from redact.llms import ModelClient
 
-    backends = {"gen-model": MockBackend("1. one zq0 sample\n2. another zq0 sample"),
+    backends = {"gen-model": _one_each("one zq0 sample", "another zq0 sample"),
                 "check-model": MockBackend("Yes")}
     monkeypatch.setattr(ModelClient, "create", lambda m: make_client(backends[m], m))
     constitution = pd.DataFrame([{
@@ -1050,7 +1066,7 @@ def test_a_fresh_run_that_accepts_nothing_removes_the_last_merged_file(
     assert list(pd.read_csv(merged)["sample"]) == [
         "one zq0 sample", "another zq0 sample"]
 
-    backends["gen-model"] = MockBackend("1. third zq0 sample\n2. fourth zq0 sample")
+    backends["gen-model"] = _one_each("third zq0 sample", "fourth zq0 sample")
     backends["check-model"] = MockBackend("No: off topic")
     generate_inputs(**run, resume=False)
     assert not merged.exists()
@@ -1067,7 +1083,7 @@ def test_inputs_not_read_back_are_merged_on_disk_and_into_no_frame(
     def merged_frame(*args, **kwargs):
         raise AssertionError("the inputs were merged into a frame")
 
-    backends = {"gen-model": MockBackend("1. one zq0 sample\n2. another zq0 sample"),
+    backends = {"gen-model": _one_each("one zq0 sample", "another zq0 sample"),
                 "check-model": MockBackend("Yes")}
     monkeypatch.setattr(ModelClient, "create", lambda m: make_client(backends[m], m))
     monkeypatch.setattr(P, "merge_all", merged_frame)

@@ -24,18 +24,13 @@ from redact.dataset import (
     resume_state,
     row_ids,
 )
+from redact.dataset.planfile import changed_plan, plan_path
 from redact.llm_pipeline import drive_units, pool_size
 from redact.llms.client import ModelClient
 
 from . import pool as pool_module
 from .manipulation import get_or_generate_benign_data
-from .plan import (
-    changed_plan_inputs,
-    coverage_path,
-    plan_inputs,
-    plan_path,
-    plan_run,
-)
+from .plan import coverage_path, plan_inputs, plan_run
 from .technique import load_spec
 from .units import error_row_of, is_pending, pending_units, row_of
 
@@ -144,7 +139,7 @@ def run_augmentation(
     if reused:
         if verbose:
             logger.info("Reusing existing manifest: %s", man_path)
-        changed = changed_plan_inputs(man_path, plan_inputs(
+        changed = changed_plan(man_path, plan_inputs(
             pool, seed=seed, rounds=rounds, family_weights=family_weights,
             layer_rates=layer_rates))
         if changed is None:

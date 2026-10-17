@@ -210,55 +210,102 @@
  },
  "outputs": {
   "resumed": {
+   "output_responses.coverage.csv": [
+    ["axis", "value", "category", "entry_type", "planned", "accepted"],
+    ["length", "brief", "Cyber", "benign", "1", "0"],
+    ["length", "short", "Cyber", "benign", "1", "1"],
+    ["length", "medium", "Cyber", "benign", "0", "0"],
+    ["length", "long", "Cyber", "benign", "0", "0"],
+    ["format", "prose", "Cyber", "benign", "0", "0"],
+    ["format", "list", "Cyber", "benign", "1", "0"],
+    ["format", "steps", "Cyber", "benign", "1", "1"],
+    ["format", "sections", "Cyber", "benign", "0", "0"],
+    ["format", "table", "Cyber", "benign", "0", "0"],
+    ["format", "code", "Cyber", "benign", "0", "0"],
+    ["register", "neutral", "Cyber", "benign", "1", "0"],
+    ["register", "friendly", "Cyber", "benign", "1", "1"],
+    ["register", "formal", "Cyber", "benign", "0", "0"],
+    ["register", "technical", "Cyber", "benign", "0", "0"],
+    ["length", "brief", "Cyber", "harmful", "1", "1"],
+    ["length", "short", "Cyber", "harmful", "0", "0"],
+    ["length", "medium", "Cyber", "harmful", "0", "0"],
+    ["length", "long", "Cyber", "harmful", "0", "0"],
+    ["format", "prose", "Cyber", "harmful", "1", "1"],
+    ["format", "list", "Cyber", "harmful", "0", "0"],
+    ["format", "steps", "Cyber", "harmful", "0", "0"],
+    ["format", "sections", "Cyber", "harmful", "0", "0"],
+    ["format", "table", "Cyber", "harmful", "0", "0"],
+    ["format", "code", "Cyber", "harmful", "0", "0"],
+    ["register", "neutral", "Cyber", "harmful", "0", "0"],
+    ["register", "friendly", "Cyber", "harmful", "1", "1"],
+    ["register", "formal", "Cyber", "harmful", "0", "0"],
+    ["register", "technical", "Cyber", "harmful", "0", "0"],
+    ["length", "brief", "Fraud", "harmful", "1", "1"],
+    ["length", "short", "Fraud", "harmful", "1", "1"],
+    ["length", "medium", "Fraud", "harmful", "0", "0"],
+    ["length", "long", "Fraud", "harmful", "1", "0"],
+    ["format", "prose", "Fraud", "harmful", "0", "0"],
+    ["format", "list", "Fraud", "harmful", "1", "1"],
+    ["format", "steps", "Fraud", "harmful", "0", "0"],
+    ["format", "sections", "Fraud", "harmful", "0", "0"],
+    ["format", "table", "Fraud", "harmful", "1", "1"],
+    ["format", "code", "Fraud", "harmful", "1", "0"],
+    ["register", "neutral", "Fraud", "harmful", "0", "0"],
+    ["register", "friendly", "Fraud", "harmful", "1", "1"],
+    ["register", "formal", "Fraud", "harmful", "1", "0"],
+    ["register", "technical", "Fraud", "harmful", "1", "1"]
+   ],
    "output_responses.csv": [
-    ["input_id", "input_prompt", "category", "subcategory", "entry_type", "model", "source", "sample_id", "output_response", "accepted", "rejection_reason"],
-    ["given-1", "zq0 question", "Cyber", "phishing", "harmful", "gen-model", "constitution", "ca653b8ec1bad10d", "answer zq0", "True", ""],
-    ["8067cf5991e9144b", "zq1 question", "Cyber", "nan", "benign", "gen-model", "constitution", "32000ce85144b0e3", "answer zq1", "False", "No: weak zq1"],
-    ["padded", "zq2 question", "Fraud", "", "harmful", "gen-model", "constitution", "0dcf5a99b052193f", "answer zq2", "True", ""],
-    ["given-1", "zq3 question", "Fraud", "N/A", "harmful", "gen-model", "constitution", "bfa427fac2412734", "answer zq3", "False", "No: weak zq3"],
-    ["1d97520eca276324", "zq4 question", "Cyber", "a, b", "benign", "gen-model", "constitution", "8693e17fdf51ca37", "answer zq4", "True", ""],
-    ["77", "zq5 question", "Fraud", "cards", "harmful", "gen-model", "constitution", "50dcf36526094e94", "answer zq5", "False", "No: weak zq5"]
+    ["input_id", "input_prompt", "category", "subcategory", "entry_type", "model", "source", "sample_id", "output_response", "accepted", "rejection_reason", "response_length", "response_format", "response_register"],
+    ["given-1", "zq0 question", "Cyber", "phishing", "harmful", "gen-model", "constitution", "ca653b8ec1bad10d", "answer zq0", "True", "", "brief", "prose", "friendly"],
+    ["8067cf5991e9144b", "zq1 question", "Cyber", "nan", "benign", "gen-model", "constitution", "32000ce85144b0e3", "answer zq1", "False", "No: weak zq1", "brief", "list", "neutral"],
+    ["padded", "zq2 question", "Fraud", "", "harmful", "gen-model", "constitution", "0dcf5a99b052193f", "answer zq2", "True", "", "short", "table", "technical"],
+    ["given-1", "zq3 question", "Fraud", "N/A", "harmful", "gen-model", "constitution", "bfa427fac2412734", "answer zq3", "False", "No: weak zq3", "brief", "list", "friendly"],
+    ["1d97520eca276324", "zq4 question", "Cyber", "a, b", "benign", "gen-model", "constitution", "8693e17fdf51ca37", "answer zq4", "True", "", "short", "steps", "friendly"],
+    ["77", "zq5 question", "Fraud", "cards", "harmful", "gen-model", "constitution", "50dcf36526094e94", "answer zq5", "False", "No: weak zq5", "long", "code", "formal"]
    ],
    "output_responses.manifest.jsonl": [
-    {"input_id": "given-1", "status": "planned"},
-    {"input_id": "8067cf5991e9144b", "status": "planned"},
-    {"input_id": "padded", "status": "planned"},
-    {"input_id": "given-1", "status": "planned"},
-    {"input_id": "1d97520eca276324", "status": "planned"},
-    {"input_id": "77", "status": "planned"}
+    {"input_id": "given-1", "category": "Cyber", "entry_type": "harmful", "spec": {"length": "brief", "format": "prose", "register": "friendly"}, "status": "planned"},
+    {"input_id": "8067cf5991e9144b", "category": "Cyber", "entry_type": "benign", "spec": {"length": "brief", "format": "list", "register": "neutral"}, "status": "planned"},
+    {"input_id": "padded", "category": "Fraud", "entry_type": "harmful", "spec": {"length": "short", "format": "table", "register": "technical"}, "status": "planned"},
+    {"input_id": "given-1", "category": "Fraud", "entry_type": "harmful", "spec": {"length": "brief", "format": "list", "register": "friendly"}, "status": "planned"},
+    {"input_id": "1d97520eca276324", "category": "Cyber", "entry_type": "benign", "spec": {"length": "short", "format": "steps", "register": "friendly"}, "status": "planned"},
+    {"input_id": "77", "category": "Fraud", "entry_type": "harmful", "spec": {"length": "long", "format": "code", "register": "formal"}, "status": "planned"}
    ],
+   "output_responses.plan.json": "{\n \"seed\": 42,\n \"axes\": {\n  \"length\": {\n   \"brief\": 0.2,\n   \"short\": 0.35,\n   \"medium\": 0.3,\n   \"long\": 0.15\n  },\n  \"format\": {\n   \"prose\": 0.35,\n   \"list\": 0.2,\n   \"steps\": 0.2,\n   \"sections\": 0.1,\n   \"table\": 0.05,\n   \"code\": 0.1\n  },\n  \"register\": {\n   \"neutral\": 0.4,\n   \"friendly\": 0.3,\n   \"formal\": 0.15,\n   \"technical\": 0.15\n  }\n }\n}\n",
    "output_responses.state.jsonl": [
     {},
-    {"input_id": "given-1"},
-    {"input_id": "8067cf5991e9144b"},
-    {"input_id": "padded"},
-    {"input_id": "given-1"},
-    {"input_id": "1d97520eca276324"},
-    {"input_id": "77"}
+    {"input_id": "given-1", "accepted": true},
+    {"input_id": "8067cf5991e9144b", "accepted": false},
+    {"input_id": "padded", "accepted": true},
+    {"input_id": "given-1", "accepted": false},
+    {"input_id": "1d97520eca276324", "accepted": true},
+    {"input_id": "77", "accepted": false}
    ]
   },
   "stopped": {
    "output_responses.csv": [
-    ["input_id", "input_prompt", "category", "subcategory", "entry_type", "model", "source", "sample_id", "output_response", "accepted", "rejection_reason"],
-    ["given-1", "zq0 question", "Cyber", "phishing", "harmful", "gen-model", "constitution", "ca653b8ec1bad10d", "answer zq0", "True", ""],
-    ["8067cf5991e9144b", "zq1 question", "Cyber", "nan", "benign", "gen-model", "constitution", "32000ce85144b0e3", "answer zq1", "False", "No: weak zq1"],
-    ["padded", "zq2 question", "Fraud", "", "harmful", "gen-model", "constitution", "0dcf5a99b052193f", "answer zq2", "True", ""],
-    ["given-1", "zq3 question", "Fraud", "N/A", "harmful", "gen-model", "constitution", "bfa427fac2412734", "answer zq3", "False", "No: weak zq3"]
+    ["input_id", "input_prompt", "category", "subcategory", "entry_type", "model", "source", "sample_id", "output_response", "accepted", "rejection_reason", "response_length", "response_format", "response_register"],
+    ["given-1", "zq0 question", "Cyber", "phishing", "harmful", "gen-model", "constitution", "ca653b8ec1bad10d", "answer zq0", "True", "", "brief", "prose", "friendly"],
+    ["8067cf5991e9144b", "zq1 question", "Cyber", "nan", "benign", "gen-model", "constitution", "32000ce85144b0e3", "answer zq1", "False", "No: weak zq1", "brief", "list", "neutral"],
+    ["padded", "zq2 question", "Fraud", "", "harmful", "gen-model", "constitution", "0dcf5a99b052193f", "answer zq2", "True", "", "short", "table", "technical"],
+    ["given-1", "zq3 question", "Fraud", "N/A", "harmful", "gen-model", "constitution", "bfa427fac2412734", "answer zq3", "False", "No: weak zq3", "brief", "list", "friendly"]
    ],
    "output_responses.manifest.jsonl": [
-    {"input_id": "given-1", "status": "planned"},
-    {"input_id": "8067cf5991e9144b", "status": "planned"},
-    {"input_id": "padded", "status": "planned"},
-    {"input_id": "given-1", "status": "planned"},
-    {"input_id": "1d97520eca276324", "status": "planned"},
-    {"input_id": "77", "status": "planned"}
+    {"input_id": "given-1", "category": "Cyber", "entry_type": "harmful", "spec": {"length": "brief", "format": "prose", "register": "friendly"}, "status": "planned"},
+    {"input_id": "8067cf5991e9144b", "category": "Cyber", "entry_type": "benign", "spec": {"length": "brief", "format": "list", "register": "neutral"}, "status": "planned"},
+    {"input_id": "padded", "category": "Fraud", "entry_type": "harmful", "spec": {"length": "short", "format": "table", "register": "technical"}, "status": "planned"},
+    {"input_id": "given-1", "category": "Fraud", "entry_type": "harmful", "spec": {"length": "brief", "format": "list", "register": "friendly"}, "status": "planned"},
+    {"input_id": "1d97520eca276324", "category": "Cyber", "entry_type": "benign", "spec": {"length": "short", "format": "steps", "register": "friendly"}, "status": "planned"},
+    {"input_id": "77", "category": "Fraud", "entry_type": "harmful", "spec": {"length": "long", "format": "code", "register": "formal"}, "status": "planned"}
    ],
+   "output_responses.plan.json": "{\n \"seed\": 42,\n \"axes\": {\n  \"length\": {\n   \"brief\": 0.2,\n   \"short\": 0.35,\n   \"medium\": 0.3,\n   \"long\": 0.15\n  },\n  \"format\": {\n   \"prose\": 0.35,\n   \"list\": 0.2,\n   \"steps\": 0.2,\n   \"sections\": 0.1,\n   \"table\": 0.05,\n   \"code\": 0.1\n  },\n  \"register\": {\n   \"neutral\": 0.4,\n   \"friendly\": 0.3,\n   \"formal\": 0.15,\n   \"technical\": 0.15\n  }\n }\n}\n",
    "output_responses.state.jsonl": [
     {},
-    {"input_id": "given-1"},
-    {"input_id": "8067cf5991e9144b"},
-    {"input_id": "padded"},
-    {"input_id": "given-1"}
+    {"input_id": "given-1", "accepted": true},
+    {"input_id": "8067cf5991e9144b", "accepted": false},
+    {"input_id": "padded", "accepted": true},
+    {"input_id": "given-1", "accepted": false}
    ]
   }
  },

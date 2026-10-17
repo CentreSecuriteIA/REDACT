@@ -26,8 +26,7 @@ def _pick_by_family(
     if dealer is None:
         chosen_family = rng.choice(families)
     else:
-        best = min(dealer.score(fam) for fam in families)
-        chosen_family = rng.choice([f for f in families if dealer.score(f) == best])
+        chosen_family = dealer.pick(rng, families)
     return rng.choice(family_map[chosen_family])
 
 

@@ -33,6 +33,7 @@ from redact import dataset, paths
 from redact.config_overlay import taxonomy_folder
 from redact.constitution import ConstitutionPipeline, read_constitution
 from redact.content_moderation import InputPipeline, run_output_generation
+from redact.content_moderation import axes as generation_axes
 from redact.content_moderation.paraphrase import (
     paraphrase_pool,
     run_paraphrase_target,
@@ -54,10 +55,10 @@ from redact.dataset import (
     take_per_group,
     write_concat,
 )
+from redact.dataset.planfile import coverage_path, plan_path
 from redact.jailbreak import augmentation as augmentation_kinds
 from redact.jailbreak import pool as jailbreak_pool
 from redact.jailbreak.pipeline import run_augmentation
-from redact.jailbreak.plan import coverage_path, plan_path
 from redact.llms import ModelClient, load_prompt
 from redact.llms.model_config import default_model_for_role
 from redact.types import EntryType
@@ -204,13 +205,17 @@ def generate_inputs(
     batch_size: int = 32,
     max_attempts: int = 3,
     check_max_tokens: int | None = None,
+    axes: dict | bool | None = None,
+    seed: int = 42,
+    config_dir: str | Path | None = None,
     read_back: bool = True,
 ) -> pd.DataFrame:
     """Generate content moderation input samples seeded from a constitution.
 
-    Each constitution entry becomes one generation request via
-    ``InputPipeline.run_from_constitution()``; the samples are checked with
-    the entry-type-aware quality checker.
+    Each constitution entry becomes ``samples_per_entry`` units of one sample
+    each via ``InputPipeline.run_from_constitution()``, each dealt a spec of
+    the generation axes; the samples are checked with the entry-type-aware
+    quality checker.
 
     Args:
         constitution_df: DataFrame of constitution entries. ``None`` reads
@@ -229,14 +234,24 @@ def generate_inputs(
         verbose: Log progress.
         style: Template style (``"long"`` / ``"short"`` / any directory under
             ``prompts/input/generation/from_constitution/``).
-        samples_per_entry: Prompts to generate per constitution entry.
+        samples_per_entry: Samples per constitution entry, one call each.
         entry_types: Filter constitution entries to these types
             (e.g. ``["harmful", "benign"]``). None = all.
         batch_size: Entries per LLM engine pass.
-        max_attempts: Generations per entry before a reply with the wrong
-            number of samples is given up on.
+        max_attempts: Generations per unit before a reply without its
+            ``[END]`` marker or with another number of samples is given up on.
         check_max_tokens: Reply limit for the check calls. ``None`` keeps the
             checker model's default.
+        axes: The generation axes each unit is dealt a value of, the
+            ``inputs`` section of ``configs/generation_axes.json``: ``None``
+            for those, ``False`` for none, or ``{axis: {value: weight}}``
+            over them, an axis as ``None`` to leave it out. With axes the
+            length axis sets each sample's length; ``style`` picks the
+            prompt only.
+        seed: The seed of the deal.
+        config_dir: A config folder whose ``generation_axes.json`` and
+            ``dimensions.json`` are read in place of the packaged ones when
+            it has them. ``None``: the packaged ones.
         read_back: False returns an empty DataFrame and reads no sample back.
 
     Returns:
@@ -244,8 +259,11 @@ def generate_inputs(
 
     Raises:
         ValueError: ``constitution_df`` is None and no constitution is saved
-            under ``data_dir``.
+            under ``data_dir``, ``axes`` names an unknown axis or value, or
+            the folder or its plan file stops the stage
+            (``InputPipeline.run_from_constitution``).
     """
+    axes = generation_axes.resolve("inputs", axes, config_dir=config_dir)
     if constitution_df is None:
         constitution_df = _saved_constitution(data_dir)
     model = model or default_model_for_role("uncensored_gen")
@@ -287,6 +305,8 @@ def generate_inputs(
         style=style,
         max_attempts=max_attempts,
         check_max_tokens=check_max_tokens,
+        axes=axes,
+        seed=seed,
     )
     if result.total_entries_processed:
         _warn_on_low_acceptance(
@@ -329,12 +349,16 @@ def generate_outputs(
     verbose: bool = True,
     max_attempts: int = 1,
     check_max_tokens: int | None = None,
+    axes: dict | bool | None = None,
+    seed: int = 42,
+    config_dir: str | Path | None = None,
     read_back: bool = True,
 ) -> pd.DataFrame:
     """Generate model responses for input samples, batched and quality-checked.
 
     Pipeline, in calls of up to ``batch_size`` rows:
-      1. Generation calls.
+      1. Generation calls, each asking for a response of the spec of the
+         response axes dealt to its row.
       2. Check calls, each row with its own entry-type-aware output
          checker. Refusals on harmful inputs are rejected; refusals on benign
          inputs are evaluated normally. With ``max_attempts > 1`` rejected
@@ -345,8 +369,10 @@ def generate_outputs(
     present, else ``content_id(prompt)``). Completed ids are recorded in a
     sidecar ``*.state.jsonl`` ledger beside the output CSV. On a re-run
     (``resume=True``) inputs already in the ledger are skipped, so a crash loses
-    only the rows still in progress. ``resume=False`` clears both the CSV and
-    the ledger first.
+    only the rows still in progress, and the specs are dealt as before:
+    ``output_responses.plan.json`` stops a resume with another ``seed`` or
+    other axes' weights. ``resume=False`` clears both the CSV and the ledger
+    first.
 
     Args:
         inputs: Input samples DataFrame. If None, the accepted inputs of the
@@ -382,6 +408,14 @@ def generate_outputs(
             response with the checker's verdict as feedback.
         check_max_tokens: Reply limit for the check calls; a verdict needs
             few tokens. ``None`` keeps the checker model's default.
+        axes: The response axes each row is dealt a value of, the
+            ``outputs`` section of ``configs/generation_axes.json``: ``None``
+            for those, ``False`` for none, or ``{axis: {value: weight}}``
+            over them, an axis as ``None`` to leave it out.
+        seed: The seed of the deal.
+        config_dir: A config folder whose ``generation_axes.json`` and
+            ``dimensions.json`` are read in place of the packaged ones when
+            it has them. ``None``: the packaged ones.
         read_back: False returns an empty DataFrame and does not read the
             output CSV.
 
@@ -390,21 +424,27 @@ def generate_outputs(
         rows from prior resumed runs) with the unified output schema:
         ``input_id``, ``sample_id``, ``input_prompt``, ``category``,
         ``subcategory``, ``entry_type``, ``output_response``, ``accepted``,
-        ``rejection_reason``, ``model``, ``source``. ``sample_id`` is this
-        row's own content-hash identity (``content_id(output_response)``),
-        distinct from ``input_id`` (the origin sample it responds to).
+        ``rejection_reason``, ``model``, ``source``, then with axes a
+        ``response_<axis>`` column per axis. ``sample_id`` is this row's own
+        content-hash identity (``content_id(output_response)``), distinct
+        from ``input_id`` (the origin sample it responds to).
 
     Raises:
-        ValueError: ``inputs`` is None and the run has no input sample at all.
+        ValueError: ``inputs`` is None and the run has no input sample at all,
+            ``axes`` names an unknown axis or value, or the plan file or the
+            file's columns stop a resume (:func:`run_output_generation`).
     """
+    axes = generation_axes.resolve("outputs", axes, config_dir=config_dir)
     out_path = (
         Path(output_path) if output_path
         else paths.output_responses_csv(data_dir)
     )
     inputs = _given_or_run_inputs(inputs, data_dir)
     if inputs.empty:
-        return _skipped("outputs", "input sample",
-                        clear=[] if resume else [{"artifact": out_path}])
+        manifest = Manifest.sidecar(out_path).path
+        return _skipped("outputs", "input sample", clear=[] if resume else [{
+            "artifact": out_path,
+            "also": (coverage_path(manifest), plan_path(manifest))}])
 
     # Per-group cap first (keeps every category/severity represented), then the
     # global head as a final safety cap.
@@ -426,6 +466,7 @@ def generate_outputs(
         batch_size=batch_size, out_path=out_path, prompt_dir=prompt_dir,
         resume=resume, verbose=verbose, max_attempts=max_attempts,
         check_max_tokens=check_max_tokens, read_back=read_back,
+        axes=axes, seed=seed,
     )
 
 
@@ -1440,6 +1481,7 @@ def _inputs_kwargs(ctx: RunContext) -> dict:
         data_dir=ctx.data_dir, prompt_dir=ctx.prompt_dir, model=ctx.models["gen"],
         check_model=ctx.models["check"], resume=ctx.resume, verbose=ctx.verbose,
         constitution_df=Saved(partial(_saved_constitution, ctx.data_dir)),
+        config_dir=ctx.config_dir,
     )
 
 
@@ -1482,7 +1524,7 @@ def _outputs_kwargs(ctx: RunContext) -> dict:
     return dict(
         data_dir=ctx.data_dir, model=ctx.models["gen"],
         check_model=ctx.models["check"], prompt_dir=ctx.prompt_dir,
-        resume=ctx.resume, verbose=ctx.verbose,
+        resume=ctx.resume, verbose=ctx.verbose, config_dir=ctx.config_dir,
     )
 
 

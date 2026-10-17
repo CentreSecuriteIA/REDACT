@@ -6,6 +6,7 @@ dispatch, record writing, and cross-stage chaining fully offline.
 """
 
 import json
+import re
 from pathlib import Path
 from unittest.mock import patch
 
@@ -320,6 +321,62 @@ def test_a_later_stages_params_clash_fails_before_any_stage_runs(tmp_path, monke
     assert raised == (
         "params['jailbreaks'] sets ['model'], which the run passes "
         "generate_jailbreaks itself; leave it out of the params.")
+
+
+def test_an_axis_that_varies_a_family_s_dimension_fails_before_any_stage(
+        tmp_path, monkeypatch):
+    raised = _fails_before_any_stage_or_model(
+        monkeypatch, tmp_path, {"stages": ["outputs", "jailbreaks"]},
+        {"inputs": {"axes": {"focus": {"mixed": 0.25}}}})
+    assert raised.startswith(
+        "A generation axis and augmentation families vary the same dimension")
+    assert "the axis inputs.focus (focus) and the request_shape families" in raised
+
+
+def _typed_axes(config_dir: Path, axes: dict) -> Path:
+    """Write the packaged eval type file into ``config_dir`` with ``axes`` as
+    its inputs stage's axes."""
+    from redact.recipe import load_dataset_type
+
+    typed = load_dataset_type("eval")
+    typed["params"]["inputs"] = {**typed["params"].get("inputs", {}), "axes": axes}
+    path = config_dir / "dataset_types" / "eval.json"
+    path.parent.mkdir(parents=True)
+    path.write_text(json.dumps(typed), encoding="utf-8")
+    return config_dir
+
+
+def test_an_axis_the_dataset_type_file_varies_fails_before_any_stage(
+        tmp_path, monkeypatch):
+    """The check reads a stage's params as the stage gets them: the type
+    file's, of the config folder when it has one."""
+    config = _typed_axes(tmp_path / "cfg", {"focus": {"mixed": 0.25}})
+    raised = _fails_before_any_stage_or_model(
+        monkeypatch, tmp_path,
+        {"stages": ["outputs", "jailbreaks"], "config_dir": str(config)}, {})
+    assert "the axis inputs.focus (focus) and the request_shape families" in raised
+
+
+def test_the_dimension_check_reads_the_params_files_axes_over_the_type_files(
+        tmp_path):
+    from redact.recipe import check_dimensions
+
+    config = _typed_axes(tmp_path / "cfg", {"focus": {"mixed": 0.25}})
+    augmentations = load_recipe({"dataset_type": "eval"})["augmentations"]
+    with pytest.raises(ValueError, match="inputs.focus"):
+        check_dimensions({}, augmentations, dataset_type="eval", config_dir=config)
+    check_dimensions({"inputs": {"axes": {"focus": {"mixed": 0}}}}, augmentations,
+                     dataset_type="eval", config_dir=config)
+    check_dimensions({}, augmentations, dataset_type="eval")
+
+
+def test_an_axis_the_type_file_pins_passes_the_dimension_check(tmp_path):
+    """One value dealt varies nothing, whichever value it is."""
+    from redact.recipe import check_dimensions
+
+    config = _typed_axes(tmp_path / "cfg", {"focus": {"single": 0, "mixed": 1}})
+    augmentations = load_recipe({"dataset_type": "eval"})["augmentations"]
+    check_dimensions({}, augmentations, dataset_type="eval", config_dir=config)
 
 
 def test_a_flat_param_for_an_adversarial_kind_switched_off_fails_before_any_stage(
@@ -832,6 +889,8 @@ def test_an_eval_recipe_may_include_the_constitution_stage():
 _SIX_STAGES = ["constitution", "inputs", "outputs", "paraphrase", "jailbreaks", "build"]
 _EVAL_SEED = 43
 _BATCH = 4
+# The eval type's pin of the inputs' directness.
+_EVAL_AXES = {"directness": {"explicit": 1, "implicit": 0, "euphemistic": 0}}
 
 
 def test_a_recipe_names_its_dataset_type():
@@ -919,11 +978,31 @@ def test_the_types_params_lie_under_the_params_files():
                             "inputs": {"samples_per_entry": 2}})
     assert STAGES["jailbreaks"].params(ctx) == {"seed": 1}
     assert STAGES["inputs"].params(ctx) == {
-        "entry_types": ["harmful", "benign"], "samples_per_entry": 2}
+        "entry_types": ["harmful", "benign"], "axes": _EVAL_AXES,
+        "samples_per_entry": 2}
     assert STAGES["constitution"].params(ctx)["entry_types"] == ["harmful", "benign"]
     assert STAGES["outputs"].params(ctx) == {}
     assert STAGES["jailbreaks"].params(_context("eval", {})) == {"seed": _EVAL_SEED}
     assert STAGES["inputs"].params(_context("training", {})) == {}
+
+
+def test_the_eval_type_deals_every_input_explicit():
+    """An implicit or euphemistic request is borderline by construction, and
+    eval keeps the clear ends: directness varies no request_intent there, the
+    other axes keep training's weights, and the dimension check passes."""
+    from redact.content_moderation import axes as A
+    from redact.recipe import check_dimensions, stage_params
+
+    evals = A.resolve("inputs", stage_params("inputs", "eval")["axes"])
+    training = A.resolve("inputs", stage_params("inputs", "training").get("axes"))
+    assert [value for value, entry in evals["directness"]["values"].items()
+            if entry["weight"]] == ["explicit"]
+    assert "directness" not in A.varied(evals)
+    assert A.varied(training)["directness"] == "request_intent"
+    assert {axis: entry for axis, entry in evals.items() if axis != "directness"} \
+        == {axis: entry for axis, entry in training.items() if axis != "directness"}
+    check_dimensions({}, load_recipe({"dataset_type": "eval"})["augmentations"],
+                     dataset_type="eval")
 
 
 def test_a_type_param_the_front_does_not_take_is_refused(monkeypatch):
@@ -978,8 +1057,10 @@ def test_an_eval_run_hands_each_front_the_types_params(tmp_path, monkeypatch):
     assert handed["generate_inputs"]["entry_types"] == ["harmful", "benign"]
     assert handed["generate_inputs"]["batch_size"] == _BATCH
     assert handed["generate_jailbreaks"]["seed"] == _EVAL_SEED
+    assert handed["generate_inputs"]["axes"] == _EVAL_AXES
     assert read_record("inputs", tmp_path)["params"] == {
-        "entry_types": ["harmful", "benign"], "batch_size": _BATCH}
+        "entry_types": ["harmful", "benign"], "axes": _EVAL_AXES,
+        "batch_size": _BATCH}
 
 
 def test_load_params_resolves_relative_to_base_dir(tmp_path):
@@ -988,6 +1069,40 @@ def test_load_params_resolves_relative_to_base_dir(tmp_path):
     assert load_params("params.json", base_dir=tmp_path) == {
         "inputs": {"samples_per_entry": 3}}
     assert load_params(None) == {}
+
+
+@pytest.mark.parametrize(("params", "named"), [
+    ({"inputs": {"axes": {"lenght": None}}}, "inputs.axes names no axis 'lenght'"),
+    ({"outputs": {"axes": {"format": {"poem": 1}}}},
+     "outputs.axes.format names no value 'poem'"),
+    ({"inputs": {"axes": "all"}}, "inputs.axes must be an object"),
+    ({"inputs": {"seed": "42"}}, "params['inputs'].seed must be a whole number"),
+    ({"outputs": {"seed": True}}, "params['outputs'].seed must be a whole number"),
+])
+def test_a_wrong_axes_entry_or_seed_fails_at_load(params, named):
+    with pytest.raises(ValueError, match=re.escape(named)):
+        load_params(params)
+
+
+def test_the_axes_of_the_params_are_read_against_the_config_folders_table(tmp_path):
+    from redact import paths as P
+
+    table = json.loads((P.configs_dir() / "generation_axes.json").read_text(
+        encoding="utf-8"))
+    table["inputs"]["mood"] = {"label": "Mood", "dimension": "register", "values": {
+        "calm": {"label": "calm", "hint": "Calm.", "weight": 1}}}
+    (tmp_path / "generation_axes.json").write_text(json.dumps(table),
+                                                   encoding="utf-8")
+    mine = {"inputs": {"axes": {"mood": {"calm": 1}}, "seed": 7}}
+    assert load_params(mine, config_dir=tmp_path) == mine
+    with pytest.raises(ValueError, match="no axis 'mood'"):
+        load_params(mine)
+
+
+def test_a_dataset_type_file_with_a_wrong_axes_entry_fails_at_load(tmp_path):
+    config = _typed_axes(tmp_path / "cfg", {"lenght": None})
+    with pytest.raises(ValueError, match="no axis 'lenght'"):
+        load_recipe({"dataset_type": "eval", "config_dir": str(config)})
 
 
 # --- models per role: a name, or an object that says how it is served ----------

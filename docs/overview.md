@@ -175,8 +175,9 @@ general-benign part) and `merged.csv`.
 under `data_dir` (`read_constitution`) and passes it as `constitution_df`,
 in an eval run as in a training one; without one the stage stops with
 `No constitution at ...`. `generate_inputs` calls
-`InputPipeline.run_from_constitution`: one unit per constitution entry,
-asking for `samples_per_entry` samples, each checked by the `check` model.
+`InputPipeline.run_from_constitution`: `samples_per_entry` units per
+constitution entry, each dealt a spec of the generation axes and asking for
+one sample, checked by the `check` model.
 Rows, accepted and rejected, go to
 `Datasets/constitution_inputs/<category>/samples.csv`. The front then copies
 the accepted rows of every category into
@@ -185,7 +186,7 @@ the accepted rows of every category into
 
 **outputs.** `generate_outputs` reads the accepted inputs of the run
 (`dataset.merge_inputs`) and calls `run_output_generation`: one unit per
-input, a response and a check. Rows go to `Datasets/output_responses.csv`.
+input, dealt a spec of the response axes, a response and a check. Rows go to `Datasets/output_responses.csv`.
 [stages/outputs.md](stages/outputs.md)
 
 **paraphrase.** `generate_paraphrases` paraphrases the accepted inputs and

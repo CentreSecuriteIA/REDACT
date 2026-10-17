@@ -159,8 +159,12 @@ class Ledger(JsonlSidecar):
         """The ledger beside ``artifact_path``; ``name`` replaces its file name."""
         return cls(cls._sidecar_path(artifact_path, name), key_fields, casters)
 
-    def _key(self, record: Mapping[str, Any]) -> Any:
-        """The record's key: one cast value, or a tuple of them."""
+    def key(self, record: Mapping[str, Any]) -> Any:
+        """The unit's key on ``record``: one cast value, or a tuple of them.
+
+        Raises:
+            KeyError: ``record`` lacks a key field.
+        """
         vals = tuple(
             self.casters.get(f, _identity)(record[f]) for f in self.key_fields
         )
@@ -191,7 +195,7 @@ class Ledger(JsonlSidecar):
                         continue
                     # A line without the key fields holds no unit.
                     with suppress(KeyError, TypeError, ValueError):
-                        pending.add(self._key(record))
+                        pending.add(self.key(record))
                     with suppress(TypeError):   # not a list of ids
                         pending_ids.update(record.get("ids") or ())
                     if "_saved" in record:
@@ -232,6 +236,19 @@ class Ledger(JsonlSidecar):
         if self._ids is _UNREAD:
             self.read()
         return self._ids
+
+    def records(self) -> Iterator[dict]:
+        """Each unit's record, in the order written; a line without the key
+        fields, or that does not parse, is skipped.
+
+        Read after a run: a save that did not finish has records here too.
+        """
+        for record in self._iter_records():
+            try:
+                self.key(record)
+            except (KeyError, TypeError, ValueError):
+                continue
+            yield record
 
     def record(
         self,

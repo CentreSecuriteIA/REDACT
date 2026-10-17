@@ -1,11 +1,12 @@
 {
-  "_comment": "What dataset_type eval means: the clear ends of the constitution (harmful and benign) and a hard, clear corner of the attacks, on the harmful inputs only. A recipe's stages replace these, its augmentations overlay these kind by kind, and its params file overlays these params key by key per stage.",
+  "_comment": "What dataset_type eval means: the clear ends of the constitution (harmful and benign) and a hard, clear corner of the attacks, on the harmful inputs only. Every input is explicit (inputs.axes.directness), since an implicit or euphemistic request is borderline by construction; the other axes keep their packaged weights. A recipe's stages replace these, its augmentations overlay these kind by kind, and its params file overlays these params key by key per stage.",
   "stages": ["constitution", "inputs", "outputs", "paraphrase", "jailbreaks", "build"],
   "params": {
     "constitution": {"entry_types": ["harmful", "benign"],
                      "include_general_benign": true,
                      "general_benign_categories": 10},
-    "inputs": {"entry_types": ["harmful", "benign"]},
+    "inputs": {"entry_types": ["harmful", "benign"],
+               "axes": {"directness": {"explicit": 1, "implicit": 0, "euphemistic": 0}}},
     "jailbreaks": {"seed": 43}
   },
   "augmentations": {

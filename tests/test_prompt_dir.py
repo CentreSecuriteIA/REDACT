@@ -77,14 +77,16 @@ def test_the_seeded_inputs_read_their_format_and_check_through_the_overlay(
     numbered.mkdir(parents=True)
     (numbered / "template.json").write_text(
         json.dumps({"instruction": " MINE-FORMAT {num_samples}"}), encoding="utf-8")
-    gen, check = MockBackend("1. one zq sample\n2. two zq sample"), MockBackend("Yes")
+    gen = MockBackend(["1. one zq sample\n[END]", "1. two zq sample\n[END]"])
+    check = MockBackend("Yes")
     _serve(monkeypatch, {"g-model": gen, "c-model": check})
     entry = pd.DataFrame([{"source_category": "Cyber", "sample_description": "d",
                            "constitution_subcategory": "S", "entry_type": "harmful"}])
     generate_inputs(data_dir=tmp_path, constitution_df=entry, samples_per_entry=2,
                     model="g-model", check_model="c-model", prompt_dir=overlay,
                     verbose=False, read_back=False)
-    assert _systems(gen) == ["MINE-GEN MINE-FORMAT 2"]
+    # One sample per call, the entry's two units.
+    assert _systems(gen) == ["MINE-GEN MINE-FORMAT 1"] * 2
     assert _systems(check) == ["MINE-CHECK", "MINE-CHECK"]
 
 

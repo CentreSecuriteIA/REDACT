@@ -23,6 +23,7 @@
     "sensitive_words": {
       "description": "Selective obfuscation of detected harmful words (char substitution, encoding, or synonym)",
       "layer": "obfuscation",
+      "dimension": "encoding",
       "within_layer_order": 1,
       "max_picks": 1,
       "cross_incompatible_with": []
@@ -30,6 +31,7 @@
     "tokenbreak": {
       "description": "Token-level splitting/prepending attacks targeting harmful words",
       "layer": "obfuscation",
+      "dimension": "encoding",
       "within_layer_order": 2,
       "max_picks": 1,
       "cross_incompatible_with": []
@@ -37,6 +39,7 @@
     "translation": {
       "description": "Full-text translation to a low/mid/high-resource language",
       "layer": "obfuscation",
+      "dimension": "language",
       "within_layer_order": 3,
       "max_picks": 1,
       "cross_incompatible_with": ["ascii_art"]
@@ -44,6 +47,7 @@
     "typos": {
       "description": "LLM-rewritten prompt with varying typo density",
       "layer": "obfuscation",
+      "dimension": "surface_noise",
       "within_layer_order": 4,
       "max_picks": 1,
       "cross_incompatible_with": []
@@ -51,6 +55,7 @@
     "suffixes": {
       "description": "Adversarial suffix appended to the prompt",
       "layer": "obfuscation",
+      "dimension": "surface_noise",
       "within_layer_order": 5,
       "max_picks": 1,
       "cross_incompatible_with": []
@@ -58,6 +63,7 @@
     "encode": {
       "description": "Full-text encoding/cyphering (base64, rot*, leetspeak, morse, braille, etc.)",
       "layer": "obfuscation",
+      "dimension": "encoding",
       "within_layer_order": 6,
       "max_picks": 1,
       "cross_incompatible_with": []
@@ -65,6 +71,7 @@
     "structural": {
       "description": "JSON/XML/Markdown structural wrapping as outer frame",
       "layer": "obfuscation",
+      "dimension": "container",
       "within_layer_order": 7,
       "max_picks": 1,
       "cross_incompatible_with": ["ascii_art"]
@@ -72,6 +79,7 @@
     "ascii_art": {
       "description": "Full-text ASCII art conversion (outermost, incompatible with structural and hacking/manipulation due to output size)",
       "layer": "obfuscation",
+      "dimension": "encoding",
       "within_layer_order": 8,
       "max_picks": 1,
       "cross_incompatible_with": ["structural", "translation", "framing", "persona", "cognitive", "fsh", "dap"]
@@ -79,6 +87,7 @@
     "casual_writing": {
       "description": "Casing, spacing, punctuation, abbreviations or accents as a person typing quickly writes them",
       "layer": "obfuscation",
+      "dimension": "surface_noise",
       "within_layer_order": 4.5,
       "max_picks": 1,
       "cross_incompatible_with": []
@@ -86,6 +95,7 @@
     "framing": {
       "description": "Scenario/context modifiers: fictional world, noble/nefarious goal, urgency, constraint removal",
       "layer": "hacking",
+      "dimension": "role_framing",
       "within_layer_order": 0,
       "max_picks": 1,
       "cross_incompatible_with": ["fsh", "dap"]
@@ -93,6 +103,7 @@
     "persona": {
       "description": "Named or invented persona roleplay archetypes",
       "layer": "hacking",
+      "dimension": "role_framing",
       "within_layer_order": 0,
       "max_picks": 1,
       "cross_incompatible_with": ["fsh", "dap"]
@@ -100,6 +111,7 @@
     "cognitive": {
       "description": "Two-step cognitive/psychological jailbreak construction",
       "layer": "hacking",
+      "dimension": "role_framing",
       "within_layer_order": 0,
       "max_picks": 1,
       "cross_incompatible_with": ["fsh", "dap"]
@@ -107,6 +119,7 @@
     "fsh": {
       "description": "Few-Shot Hacking: benign Q&A pairs before harmful question",
       "layer": "manipulation",
+      "dimension": "example_priming",
       "within_layer_order": 0,
       "max_picks": 1,
       "cross_incompatible_with": ["continuation", "indirect", "framing", "persona", "cognitive"]
@@ -114,6 +127,7 @@
     "dap": {
       "description": "Distract and Persuade: harmful question hidden in middle of benign Q&A pairs",
       "layer": "manipulation",
+      "dimension": "example_priming",
       "within_layer_order": 0,
       "max_picks": 1,
       "cross_incompatible_with": ["continuation", "indirect", "framing", "persona", "cognitive"]
@@ -121,6 +135,7 @@
     "answer_format": {
       "description": "Output-format and response-conditioning directives",
       "layer": "requests",
+      "dimension": "answer_shape",
       "within_layer_order": 0,
       "max_picks": 1,
       "cross_incompatible_with": []
@@ -128,6 +143,7 @@
     "answer_language": {
       "description": "Ask for the response in a specific language",
       "layer": "requests",
+      "dimension": "language",
       "within_layer_order": 0,
       "max_picks": 1,
       "cross_incompatible_with": []
@@ -135,6 +151,7 @@
     "continuation": {
       "description": "Frame the prompt as incomplete content to continue",
       "layer": "requests",
+      "dimension": "request_shape",
       "within_layer_order": 0,
       "max_picks": 1,
       "cross_incompatible_with": ["indirect", "fsh", "dap"]
@@ -142,6 +159,7 @@
     "indirect": {
       "description": "Embed harmful request inside a legitimate task (summarize, proofread, etc.)",
       "layer": "requests",
+      "dimension": "request_shape",
       "within_layer_order": 0,
       "max_picks": 1,
       "cross_incompatible_with": ["continuation", "fsh", "dap"]
@@ -149,6 +167,7 @@
     "distractor_prefix": {
       "description": "Add noise before the prompt to distract classifiers",
       "layer": "requests",
+      "dimension": "request_shape",
       "within_layer_order": 0,
       "max_picks": 1,
       "cross_incompatible_with": []
@@ -156,6 +175,7 @@
     "distractor_suffix": {
       "description": "Add noise after the prompt to distract classifiers",
       "layer": "requests",
+      "dimension": "request_shape",
       "within_layer_order": 0,
       "max_picks": 1,
       "cross_incompatible_with": []
@@ -163,6 +183,7 @@
     "impersonation": {
       "description": "Claim a trustworthy professional identity",
       "layer": "requests",
+      "dimension": "role_framing",
       "within_layer_order": 0,
       "max_picks": 1,
       "cross_incompatible_with": []
@@ -170,6 +191,7 @@
     "temporal": {
       "description": "Reframe the request as a past/historical event",
       "layer": "requests",
+      "dimension": "request_shape",
       "within_layer_order": 0,
       "max_picks": 1,
       "cross_incompatible_with": []
@@ -177,6 +199,7 @@
     "asking": {
       "description": "Innocuous framing or detail-maximising directives",
       "layer": "requests",
+      "dimension": "request_shape",
       "within_layer_order": 0,
       "max_picks": 1,
       "cross_incompatible_with": []

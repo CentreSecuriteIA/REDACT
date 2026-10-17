@@ -259,6 +259,20 @@ Input samples live in one `samples.csv` per category folder, under
 The build applies it to every part of the three eval files
 ([stages/build.md](../stages/build.md#leaving-out-what-a-training-run-holds)).
 
+## Dealing and plan files
+
+Shared by the planners: the jailbreak plan, and the generation axes of the
+inputs and outputs stages.
+
+| Function | Does |
+|---|---|
+| `dealing.Dealer(weights, key)` | Running counts of one group: `pick(rng, names)` takes the name with the lowest count over weight, ties broken by `rng`; `include(part, rate)` deals an optional part at its rate with an offset seeded per group and part |
+| `dealing.stable_seed(*parts)` | A seed from the parts, the same in every process: the first 16 hex digits of the SHA-256 of the parts joined by `::` |
+| `planfile.plan_path(manifest)`, `coverage_path(manifest)` | `<stem>.plan.json` and `<stem>.coverage.csv` beside a manifest |
+| `planfile.plan_record(**made_with)` | What a plan is made with, as JSON reads it back |
+| `planfile.write_plan(manifest, record)` | Writes the plan file |
+| `planfile.changed_plan(manifest, current)` | The keys whose values differ from the plan file's; `None` without a plan file |
+
 ## Taxonomy and published datasets
 
 | Function | Does |
@@ -276,8 +290,8 @@ taxonomy format.
 | Stage | `resume_state` call | Ledger key | Records also carry |
 |---|---|---|---|
 | constitution | plain: no artifact | `unit` | `status`, `attempts` when rejected |
-| inputs | `artifact=folder, pattern="*/samples.csv"`, `units_in` | `sample_description`, `entry_type`, `style` | `ids`; or `status`, `attempts` |
-| outputs | `artifact=output_responses.csv` | `input_id` | |
+| inputs | `artifact=folder, pattern="*/samples.csv"`, `units_in` | `sample_description`, `entry_type`, `style`, `iteration` | `ids`, `accepted`; or `status`, `attempts` |
+| outputs | `artifact=output_responses.csv` | `input_id` | `accepted` |
 | paraphrase | `artifact=paraphrases_<target>.csv` | `input_id`, `iteration` | `paraphrase_model`, `status` |
 | jailbreaks, per kind | `artifact=jailbreaks.csv` or `variations.csv` | `input_id`, `iteration` | |
 | benign data (jailbreaks) | `artifact=benign_samples.csv`, always `resume=True` | `main_category`, `sub_category`, `answer_type` | `status`, `attempts` when rejected |

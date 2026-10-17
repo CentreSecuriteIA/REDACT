@@ -2,9 +2,10 @@
 repeats it drops, and what a resume, a fresh run and a takeover leave.
 
 ``fixtures/seeded_inputs.json`` holds the category files of one run of three
-saves as the code at commit 66817a6 wrote them. A CSV is compared by its
-cells as text. Model calls are stubbed and depend only
-on the request, so a run writes the same rows every time.
+saves as the code at commit 66817a6 wrote them, when an entry was one call
+for its two samples. A CSV is compared by its cells as text. Model calls are
+stubbed and depend only on the request and how many of its entry's came
+before it, so a run writes the same rows every time.
 """
 
 import csv
@@ -32,6 +33,7 @@ from tests.content_moderation.test_constitution_input_ledger import (
     _PROMPT,
     _token_pipeline,
     _TokenBackend,
+    one,
 )
 
 _FIXTURE = Path(__file__).parents[1] / "fixtures" / "seeded_inputs.json"
@@ -70,17 +72,23 @@ def _entries(*numbers: int) -> pd.DataFrame:
     ])
 
 
-def _key(i: int, style: str = "") -> tuple[str, str, str]:
-    return f"desc zq{i}", "benign" if i % 3 == 0 else "harmful", style
+def _key(i: int, style: str = "", iteration: int = 0) -> tuple[str, str, str, int]:
+    return f"desc zq{i}", "benign" if i % 3 == 0 else "harmful", style, iteration
+
+
+def _keys(*numbers: int, style: str = "") -> set[tuple[str, str, str, int]]:
+    """The keys of both units of each entry."""
+    return {_key(i, style, iteration) for i in numbers for iteration in (0, 1)}
 
 
 def _write(token: str, attempt: int) -> str:
+    """An entry's first unit writes its first sample, its second its second."""
     i = int(token[2:])
     if i == _NO_SAMPLES:
         return "sorry, nothing here"
     first = _REPEATS.get(i, f"first sample {token}")
     second = first if i == _TWICE else f'second "quoted" sample, café {token}'
-    return f"1. {first}\n2. {second}"
+    return one((first, second)[(attempt - 1) % 2])
 
 
 def _judge(token: str, attempt: int) -> str:
@@ -134,8 +142,9 @@ def _no_read(*args, **kwargs):
     raise AssertionError("the stage read the rows of its output")
 
 
-def _three_saves(folder: Path) -> dict:
-    """The files and the counts of one run of 70 entries, saved 32 at a time."""
+def _five_saves(folder: Path) -> dict:
+    """The files and the counts of one run of 70 entries, 140 units saved 32
+    at a time."""
     result, _gen = _run(folder, _entries(), style="long")
     return {
         "files": _tree(folder),
@@ -150,26 +159,47 @@ def _three_saves(folder: Path) -> dict:
 
 
 class TestTheFilesOfARun:
-    def test_three_saves_write_the_rows_of_the_fixture_but_one(self, tmp_path):
-        """Same rows, columns and column order. The one row that is gone:
-        zq20 and zq21 were live together and gave one text, and each wrote
-        it to its own category. Now the first to finish writes it."""
-        expected = json.loads(_FIXTURE.read_text(encoding="utf-8"))
-        privacy = expected["files"]["Privacy/samples.csv"]
+    def test_five_saves_write_the_rows_of_the_fixture_with_their_iteration(
+            self, tmp_path):
+        """Same rows, columns and column order, and last an ``iteration``
+        column: 1 for an entry's second sample, else 0. The one row that is
+        gone: zq20 and zq21 were live together and gave one text, and each
+        wrote it to its own category. Now the first to finish writes it. The
+        two rows that moved: the first samples of zq40 and zq41 are repeats,
+        which are not checked, so their second units finish with those of
+        zq36 to zq39, not a check before them."""
+        expected = json.loads(_FIXTURE.read_text(encoding="utf-8"))["files"]
+        privacy = expected["Privacy/samples.csv"]
         (second_copy,) = (row for row in privacy if row[1] == _REPEATS[21])
         assert second_copy[_DESCRIPTION] == "desc zq21"
         privacy.remove(second_copy)
+        for category, moved, after in (("Violence", 40, 38), ("Privacy", 41, 39)):
+            rows = expected[f"{category}/samples.csv"]
+            (row,) = (row for row in rows if row[_DESCRIPTION] == f"desc zq{moved}")
+            rows.remove(row)
+            last = max(i for i, r in enumerate(rows)
+                       if r[_DESCRIPTION] == f"desc zq{after}")
+            rows.insert(last + 1, row)
+        for rows in expected.values():
+            rows[0].append("iteration")
+            for row in rows[1:]:
+                row.append("1" if row[1].startswith('second "quoted"') else "0")
 
-        assert _three_saves(tmp_path) == expected
+        run = _five_saves(tmp_path)
+        assert run["files"] == expected
+        # Units now: 140, of which zq30's two are rejected and five give a
+        # text the folder holds (zq10 or zq8, zq21, zq40, zq41, zq50).
+        assert run["counts"] == {"entries": 133, "skipped": 7, "generated": 133,
+                                 "accepted": 120, "rejected": 13}
         saves = [line for line in _constitution_inputs_ledger(tmp_path)
                  .path.read_bytes().splitlines() if b'"_saved"' in line]
-        assert len(saves) == 1 + 3      # the opening line, then one a save
+        assert len(saves) == 1 + 5      # the opening line, then one a save
 
     def test_a_text_that_is_exactly_n_a_survives_a_second_save(self, tmp_path):
         """The rewrite read ``N/A`` back as a missing value and wrote an
         empty cell."""
         def run(*numbers):
-            gen = _TokenBackend(lambda t, n: "1. N/A" if t == "zq0" else f"1. {t}")
+            gen = _TokenBackend(lambda t, n: one("N/A" if t == "zq0" else t))
             pipe = _token_pipeline(tmp_path, gen, MockBackend("Yes", model="tok-check"))
             pipe.run_from_constitution(
                 _entries(*numbers), _PROMPT, samples_per_entry=1, verbose=False)
@@ -192,6 +222,7 @@ class TestTheFilesOfARun:
             _run(tmp_path, _entries(0, 1, 2, 3))
         after = _files(tmp_path)
         assert after.pop("constitution_inputs.manifest.jsonl")
+        assert after.pop("constitution_inputs.plan.json")
         ledger = after.pop("constitution_inputs.state.jsonl")
         assert after == {name: data for name, data in before.items()
                          if name.endswith(".csv")}
@@ -205,31 +236,31 @@ class TestRepeatedTexts:
             "Violence": [_REPEATS[20], 'second "quoted" sample, café zq20'],
             "Privacy": ['second "quoted" sample, café zq21'],
         }
-        # Both entries are finished, and each records the rows it wrote.
+        # Every unit is finished, and each records the row it wrote.
         shared, of_20, of_21 = (content_id(text) for text in (
             _REPEATS[20], 'second "quoted" sample, café zq20',
             'second "quoted" sample, café zq21'))
+        fields = ("sample_description", "entry_type", "style", "iteration")
         assert _acks(tmp_path)[1:] == [
-            dict(zip(("sample_description", "entry_type", "style"), _key(20)),
-                 ids=[shared, of_20]),
-            dict(zip(("sample_description", "entry_type", "style"), _key(21)),
-                 ids=[of_21]),
+            dict(zip(fields, _key(20)), ids=[shared], accepted=True),
+            dict(zip(fields, _key(20, iteration=1)), ids=[of_20], accepted=True),
+            dict(zip(fields, _key(21)), status="no_sample", attempts=1),
+            dict(zip(fields, _key(21, iteration=1)), ids=[of_21], accepted=True),
         ]
-        # The counts are of what was generated, as before.
+        # The counts are of the rows written.
         counts = result.total_entries_processed, result.total_prompts_generated
-        assert counts == (2, 4)
+        assert counts == (3, 3)
 
-    def test_an_entry_whose_every_text_is_a_repeat_is_finished_with_no_row(
-            self, tmp_path):
+    def test_a_unit_whose_text_is_a_repeat_is_finished_with_no_row(self, tmp_path):
         def same(token, attempt):
-            return "1. one zq900 text\n2. another zq900 text"
+            return one(("one zq900 text", "another zq900 text")[attempt - 1])
 
         result, _gen = _run(tmp_path, _entries(0, 1), write=same)
         assert _texts(tmp_path) == {
             "Violence": ["one zq900 text", "another zq900 text"]}
         assert result.total_entries_processed == len(_entries(0, 1))
-        assert _constitution_inputs_ledger(tmp_path).completed() == {_key(0), _key(1)}
-        assert _acks(tmp_path)[-1]["ids"] == []
+        assert _constitution_inputs_ledger(tmp_path).completed() == _keys(0, 1)
+        assert _acks(tmp_path)[-1]["status"] == "no_sample"
 
     def test_a_text_repeated_in_another_category_after_a_resume_is_dropped(
             self, tmp_path, monkeypatch):
@@ -260,54 +291,20 @@ class TestRepeatedTexts:
         assert ledger.ids == set(_ids_on_disk(tmp_path))
 
 
-_SHOWN = 20     # the texts a request lists
-
-
-def _shown(prompt: str) -> tuple[list[str], str]:
-    """The texts a request lists as existing, and its last line."""
-    listed = prompt.split("Do NOT generate anything similar to these:\n")[1]
-    lines = listed.splitlines()
-    return [line[2:] for line in lines if line.startswith("- ")], lines[-1]
-
-
-class TestThePreviewOfEarlierTexts:
-    def _prompts(self, gen) -> dict[str, str]:
-        """The first request made for each entry, by its token."""
+class TestTheGenerationPrompt:
+    def _prompts(self, gen) -> dict[str, list[dict]]:
+        """The messages of the first request made for each entry, by its token."""
         prompts = {}
         for call in gen.calls:
             text = call["messages"][-1]["content"]
-            prompts.setdefault(re.search(r"zq\d+", text).group(), text)
+            prompts.setdefault(re.search(r"zq\d+", text).group(), call["messages"])
         return prompts
 
-    def test_a_request_lists_the_first_twenty_texts_of_the_run(self, tmp_path):
-        _result, gen = _run(tmp_path, _entries(*range(100, 140)))
-        prompts = self._prompts(gen)
-        assert "already exist" not in prompts["zq100"]
-
-        # The texts of the first ten entries, in the order they were finished.
-        ids = [sample_id for ack in _acks(tmp_path)[1:11] for sample_id in ack["ids"]]
-        text_of = {content_id(text): text
-                   for texts in _texts(tmp_path).values() for text in texts}
-        first_twenty = [text_of[sample_id] for sample_id in ids]
-        assert len(first_twenty) == _SHOWN
-        for late in ("zq132", "zq139"):
-            shown, _last = _shown(prompts[late])
-            assert shown == first_twenty
-
-    def test_a_request_says_how_many_more_there_are(self, tmp_path):
-        _result, gen = _run(tmp_path, _entries(*range(100, 140)))
-        shown, last = _shown(self._prompts(gen)["zq139"])
-        said = re.fullmatch(
-            r"\(\.\.\. and (\d+) more\. Ensure all your outputs are novel\.\)", last)
-        # The last four entries are generated once the first 32 are finished,
-        # with two texts each.
-        assert len(shown) == _SHOWN and int(said[1]) == 2 * 32 - _SHOWN
-
-    def test_after_a_resume_it_starts_empty(self, tmp_path, monkeypatch):
-        _run(tmp_path, _entries(*range(12)))
-        monkeypatch.setattr(pd, "read_csv", _no_read)
-        _result, gen = _run(tmp_path, _entries(*range(13)))
-        assert "already exist" not in self._prompts(gen)["zq12"]
+    def test_it_is_the_same_before_and_after_a_save(self, tmp_path):
+        """No text an earlier unit saved enters a later unit's prompt."""
+        _result, gen = _run(tmp_path / "many", _entries(*range(100, 140)))
+        _result, alone = _run(tmp_path / "alone", _entries(139))
+        assert self._prompts(gen)["zq139"] == self._prompts(alone)["zq139"]
 
 
 class TestAResume:
@@ -335,7 +332,7 @@ class TestAResume:
 
         _result, gen = _run(tmp_path, _entries(0, 1, 2, 3))
         assert sorted(token for batch in gen.batches for token in batch) == [
-            "zq2", "zq3"]
+            "zq2", "zq2*", "zq3", "zq3*"]
         assert _texts(tmp_path) == {
             "Violence": ["first sample zq0", 'second "quoted" sample, café zq0',
                          "first sample zq2", 'second "quoted" sample, café zq2'],
@@ -377,7 +374,7 @@ def _again(token: str, attempt: int) -> str:
     """What a second run writes: other texts, and none for the same entry."""
     if token == f"zq{_NO_SAMPLES}":
         return "sorry, nothing here"
-    return f"1. first sample again {token}\n2. second sample again {token}"
+    return one(f"{('first', 'second')[(attempt - 1) % 2]} sample again {token}")
 
 
 class TestAFreshRun:
@@ -396,9 +393,10 @@ class TestAFreshRun:
 
         _result, gen = _run(tmp_path, _entries(4, 5, 66, _NO_SAMPLES), write=_again,
                             style="short", resume=False)
-        # Every entry of the style was generated again, three times for none.
+        # Both units of every entry of the style were generated again, three
+        # times each for none.
         assert sorted(token for batch in gen.batches for token in batch) == sorted(
-            ["zq4", "zq5", "zq66", "zq30", "zq30*", "zq30*"])
+            ["zq4", "zq4*", "zq5", "zq5*", "zq66", "zq66*", "zq30", *["zq30*"] * 5])
         after = _files(tmp_path)
         for name in ("Violence/samples.csv", "Privacy/samples.csv"):
             assert after[name].startswith(long_only[name])      # byte for byte
@@ -411,9 +409,8 @@ class TestAFreshRun:
             "Fraud": ["first sample again zq66", "second sample again zq66"],
         }
         ledger = _constitution_inputs_ledger(tmp_path)
-        assert ledger.completed() == {
-            *(_key(i, "long") for i in (0, 1, 2)),
-            *(_key(i, "short") for i in (4, 5, 66, _NO_SAMPLES))}
+        assert ledger.completed() == (
+            _keys(0, 1, 2, style="long") | _keys(4, 5, 66, _NO_SAMPLES, style="short"))
         # No id of a removed row is known, and the sizes are those of the files.
         assert ledger.ids == set(_ids_on_disk(tmp_path))
         assert not ledger.ids & short_ids
@@ -433,11 +430,11 @@ class TestAFreshRun:
                    for rows in _tree(tmp_path).values() for row in rows[1:])
         assert "Fraud/samples.csv" not in _tree(tmp_path)   # no row left: no file
         ledger = _constitution_inputs_ledger(tmp_path)
-        assert ledger.completed() == {_key(i, "long") for i in (0, 1, 2)}
+        assert ledger.completed() == _keys(0, 1, 2, style="long")
         assert lock_is_free(ledger.path)
 
         result, _gen = _run(tmp_path, _entries(4, 5, 66, _NO_SAMPLES), style="short")
-        assert (result.total_entries_processed, result.skipped_entries) == (3, 1)
+        assert (result.total_entries_processed, result.skipped_entries) == (6, 2)
         assert _texts(tmp_path)["Fraud"] == [
             "first sample zq66", 'second "quoted" sample, café zq66']
         assert _constitution_inputs_ledger(tmp_path).ids == set(_ids_on_disk(tmp_path))
@@ -465,8 +462,8 @@ class TestAFreshRun:
         assert _texts(tmp_path)["Violence"][-2:] == [
             "first sample again zq4", "second sample again zq4"]
         ledger = _constitution_inputs_ledger(tmp_path)
-        assert ledger.completed() == {
-            *(_key(i, "long") for i in (0, 1, 2)), _key(4, "short")}
+        assert ledger.completed() == (
+            _keys(0, 1, 2, style="long") | _keys(4, style="short"))
         assert ledger.ids == set(_ids_on_disk(tmp_path))
 
     def test_of_another_style_stops_on_one_that_did_not_finish(
@@ -497,9 +494,8 @@ class TestAFreshRun:
             "Fraud": ["first sample zq66", 'second "quoted" sample, café zq66'],
         }
         ledger = _constitution_inputs_ledger(tmp_path)
-        assert ledger.completed() == {
-            *(_key(i, "long") for i in (0, 1, 2)),
-            *(_key(i, "short") for i in (4, 5, 66, _NO_SAMPLES))}
+        assert ledger.completed() == (
+            _keys(0, 1, 2, style="long") | _keys(4, 5, 66, _NO_SAMPLES, style="short"))
         assert ledger.ids == set(_ids_on_disk(tmp_path))
 
     def test_of_one_style_stops_on_a_file_that_lost_its_last_rows(self, tmp_path):
@@ -521,10 +517,12 @@ class TestAFreshRun:
         assert _files(tmp_path) == before
 
     def test_of_one_style_leaves_a_file_without_a_style_column_alone(self, tmp_path):
-        """Its rows are of no style, as a resume reads them."""
+        """Its rows are of no style, as a resume reads them; written without
+        an iteration, it then stops the stage."""
         write_inputs(tmp_path, ["an old sample"], "Violence", source="constitution")
         old = (tmp_path / "Violence" / "samples.csv").read_bytes()
-        _run(tmp_path, _entries(_NO_SAMPLES), style="long", resume=False)
+        with pytest.raises(ValueError, match="'iteration'"):
+            _run(tmp_path, _entries(_NO_SAMPLES), style="long", resume=False)
         assert (tmp_path / "Violence" / "samples.csv").read_bytes() == old
 
     def test_without_a_style_removes_the_tree_its_cut_files_and_the_ledger(
@@ -538,18 +536,20 @@ class TestAFreshRun:
         _result, gen = _run(tmp_path, _entries(1), resume=False)
         assert set(_files(tmp_path)) == {
             "Privacy/samples.csv", "constitution_inputs.state.jsonl",
-            "constitution_inputs.manifest.jsonl"}
+            "constitution_inputs.manifest.jsonl", "constitution_inputs.plan.json"}
         assert _acks(tmp_path)[0] == {}         # a new ledger: its opening line
-        assert _constitution_inputs_manifest(tmp_path).load() == [{
-            "sample_description": "desc zq1", "entry_type": "harmful", "style": "",
-            "status": "planned"}]
+        assert _constitution_inputs_manifest(tmp_path).load() == [
+            {"sample_description": "desc zq1", "entry_type": "harmful", "style": "",
+             "iteration": iteration, "category": "Privacy", "status": "planned"}
+            for iteration in (0, 1)]
 
 
 def _old_folder(folder: Path, with_rows, acked) -> None:
-    """A folder as the stage left it before the ledger recorded sizes and ids:
-    rows without ids in the ledger, and one plain ledger line per entry."""
+    """A folder as the stage left it before the ledger recorded sizes and ids,
+    and before an entry was a unit per sample: rows without an iteration, and
+    one plain ledger line per entry."""
     for i in with_rows:
-        description, entry_type, style = _key(i, "long")
+        description, entry_type, style, _iteration = _key(i, "long")
         write_inputs(
             folder, [f"first sample zq{i}", f"second sample zq{i}"], _category(i),
             source="constitution", extra={
@@ -563,65 +563,35 @@ def _old_folder(folder: Path, with_rows, acked) -> None:
         "".join(json.dumps(line) + "\n" for line in lines), encoding="utf-8")
 
 
-class TestAFolderWrittenBeforeSizesWereRecorded:
-    def test_it_is_taken_over_by_one_read_and_one_ledger_write(
-            self, tmp_path, monkeypatch):
-        # zq2 and zq3 have rows and no ack; zq30 is acked and has no row.
-        _old_folder(tmp_path, with_rows=(0, 1, 2, 3), acked=(0, 1, _NO_SAMPLES))
+class TestAFolderWrittenBeforeUnitsHadAnIteration:
+    def test_a_resume_stops_before_any_call_and_touches_nothing(self, tmp_path):
+        _old_folder(tmp_path, with_rows=(0, 1), acked=(0, 1))
         old = _files(tmp_path)
-        reads, writes = [], []
-        read_csv, record = pd.read_csv, Ledger.record
-        monkeypatch.setattr(pd, "read_csv", lambda path, *args, **kwargs: (
-            reads.append(Path(path).parent.name), read_csv(path, *args, **kwargs))[1])
-        monkeypatch.setattr(Ledger, "record", lambda self, *args, **kwargs: (
-            writes.append(len(writes)), record(self, *args, **kwargs))[1])
+        with pytest.raises(ValueError, match="without an iteration") as stopped:
+            result, gen = _run(tmp_path, _entries(0, 1, 2), style="long")
+        assert "resume=False" in str(stopped.value)
+        assert "new data_dir" in str(stopped.value)
+        assert _files(tmp_path) == old
+        assert lock_is_free(_constitution_inputs_ledger(tmp_path).path)
 
-        result, gen = _run(tmp_path, _entries(0, 1, 2, 3, _NO_SAMPLES), style="long")
-        assert gen.calls == [] and result.total_entries_processed == 0
-        assert reads == ["Privacy", "Violence"] and len(writes) == 1
-        after = _files(tmp_path)
-        assert {name: data for name, data in after.items()
-                if name.endswith(".csv")} == {
-            name: data for name, data in old.items() if name.endswith(".csv")}
-        ledger = _constitution_inputs_ledger(tmp_path)
-        assert after[ledger.path.name].startswith(old[ledger.path.name])
-        assert ledger.completed() == {
-            _key(i, "long") for i in (0, 1, 2, 3, _NO_SAMPLES)}
-        on_disk = _ids_on_disk(tmp_path)
-        assert ledger.ids == set(on_disk) and len(ledger.ids) == len(on_disk)
-
-    def test_the_resume_after_reads_the_ledger_alone_and_knows_the_ids(
-            self, tmp_path, monkeypatch):
-        _old_folder(tmp_path, with_rows=(0, 1, 2), acked=(0,))
-        _run(tmp_path, _entries(0, 1, 2), style="long")
-        monkeypatch.setattr(pd, "read_csv", _no_read)
-
-        def repeats(token, attempt):
-            return "1. first sample zq2\n2. a new sample zq5"
-
-        _run(tmp_path, _entries(0, 1, 2, 5), write=repeats, style="long")
-        assert _texts(tmp_path)["Privacy"][-1] == "a new sample zq5"
-        assert "first sample zq2" not in _texts(tmp_path)["Privacy"]
-
-    def test_a_file_of_the_first_format_is_read_by_the_columns_it_has(self, tmp_path):
-        """It names the description ``sample_description`` and has no style
-        column: its rows are of the style ``""``."""
+    def test_a_file_without_the_column_stops_it_too(self, tmp_path):
+        """Also with no ledger: a file of the first format."""
         old_columns = {"entry_type": "benign", "sample_description": "desc zq0"}
         write_inputs(tmp_path, ["first sample zq0", "second sample zq0"], "Violence",
                      source="constitution", extra=old_columns)
-        _result, gen = _run(tmp_path, _entries(0))
-        assert gen.calls == []
-        ledger = _constitution_inputs_ledger(tmp_path)
-        assert ledger.completed() == {_key(0)}
-        assert ledger.ids == set(_ids_on_disk(tmp_path))
+        with pytest.raises(ValueError, match="'iteration'"):
+            _run(tmp_path, _entries(0))
+        assert not _constitution_inputs_ledger(tmp_path).exists()
 
     def test_a_fresh_run_of_its_style_starts_every_entry_over(self, tmp_path):
         """The acks of a ledger of that time are removed with the rows."""
         _old_folder(tmp_path, with_rows=(0, 1), acked=(0, 1, _NO_SAMPLES))
         result, gen = _run(tmp_path, _entries(0, 1, _NO_SAMPLES), write=_again,
                            style="long", resume=False)
-        assert (result.total_entries_processed, result.skipped_entries) == (2, 1)
+        assert (result.total_entries_processed, result.skipped_entries) == (4, 2)
         assert _texts(tmp_path) == {
             "Violence": ["first sample again zq0", "second sample again zq0"],
             "Privacy": ["first sample again zq1", "second sample again zq1"],
         }
+        assert _constitution_inputs_ledger(tmp_path).completed() == _keys(
+            0, 1, _NO_SAMPLES, style="long")

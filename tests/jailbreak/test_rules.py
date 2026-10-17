@@ -5,10 +5,10 @@ import random
 import pytest
 
 import redact.jailbreak  # noqa: F401  (tags the techniques)
+from redact.dataset.dealing import Dealer
 from redact.jailbreak.hacking import get_all_hacking_functions
 from redact.jailbreak.manipulation import get_all_manipulation_functions
 from redact.jailbreak.obfuscation import get_all_obfuscation_functions
-from redact.jailbreak.plan import _Dealer
 from redact.jailbreak.requests import get_all_request_functions
 from redact.jailbreak.rules import compatible, request_obfuscation_candidates
 from redact.jailbreak.sampling import (
@@ -144,7 +144,7 @@ def test_a_budget_draw_never_holds_a_forbidden_pair_or_breaks_a_layer_cap():
         fn = sample_combination(
             random.Random(seed), POOL, max_complexity=9, max_obfuscations=3,
             allow_request_obfuscation=True,
-            dealer=_Dealer(key=(seed,)) if seed % 2 else None,
+            dealer=Dealer(key=(seed,)) if seed % 2 else None,
             sampling_probs=dict.fromkeys(
                 ("hacking", "manipulation", "requests", "request_obfuscation"), 0.9))
         names = [t.__name__ for t in fn.techniques]
@@ -162,7 +162,7 @@ def test_a_budget_draw_stays_within_its_complexity(max_complexity):
         fn = sample_combination(
             random.Random(seed), POOL, max_complexity=max_complexity,
             max_obfuscations=3, allow_request_obfuscation=True,
-            dealer=_Dealer(key=(seed,)) if seed % 2 else None,
+            dealer=Dealer(key=(seed,)) if seed % 2 else None,
             sampling_probs=dict.fromkeys(
                 ("hacking", "manipulation", "requests", "request_obfuscation"), 0.9))
         names = [t.__name__ for t in fn.techniques]
