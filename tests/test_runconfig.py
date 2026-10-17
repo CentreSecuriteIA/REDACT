@@ -573,7 +573,8 @@ def test_a_run_record_names_the_files_its_stage_read(tmp_path, monkeypatch):
     inputs = [paths.category_csv("Cyber", root=paths.constitution_inputs_dir(tmp_path))]
     outputs = paths.output_responses_csv(tmp_path)
     expected = {
-        "constitution": [paths.taxonomy_dir() / "harmful.json"],
+        "constitution": [paths.taxonomy_dir() / "harmful.json",
+                         paths.taxonomy_dir() / "benign.json"],
         "inputs": [paths.constitution_merged_csv(tmp_path)],
         "outputs": inputs,
         "paraphrase": [*inputs, outputs],
@@ -708,6 +709,54 @@ def test_a_benign_taxonomy_in_the_params_is_refused(tmp_path, monkeypatch):
     assert raised == (
         "params['jailbreaks'] sets ['benign_taxonomy'], which the run passes "
         "generate_jailbreaks itself; leave it out of the params.")
+
+
+@pytest.mark.parametrize("dataset_type", ["eval", "training"])
+def test_the_constitution_stage_gets_the_benign_taxonomy_and_the_general_part(
+        tmp_path, monkeypatch, dataset_type):
+    import redact
+
+    handed = []
+    monkeypatch.setattr(redact, "generate_constitution",
+                        lambda **k: handed.append(k) or pd.DataFrame())
+    _benign_file(tmp_path, "mine", {"Cooking": {"subcategories": ["Bread"]}})
+    _benign_file(tmp_path, "harmful", {"Cyber": {"subcategories": ["Malware"]}})
+    recipe = {"dataset_type": dataset_type, "data_dir": str(tmp_path),
+              "stages": ["constitution"], "taxonomy_dir": str(tmp_path),
+              "benign_taxonomy": "mine"}
+    try:
+        run_pipeline(recipe, params={"constitution": {"num_categories": 3}},
+                     verbose=False)
+    finally:
+        telemetry.uninstall()
+    (kwargs,) = handed
+    assert kwargs["benign_taxonomy"] == "mine"
+    assert kwargs["include_general_benign"] is True
+    assert kwargs["general_benign_categories"] == 10    # noqa: PLR2004
+    record = read_record("constitution", tmp_path)
+    assert record["sources"] == [str(tmp_path / "harmful.json"),
+                                 str(tmp_path / "mine.json")]
+
+
+def test_a_benign_taxonomy_the_constitution_reads_is_checked_at_load(tmp_path):
+    with pytest.raises(ValueError) as raised:
+        load_recipe({"dataset_type": "training", "stages": ["constitution"],
+                     "taxonomy_dir": str(tmp_path)})
+    assert str(raised.value).startswith("benign_taxonomy 'benign' cannot be read")
+    assert "general-benign" in str(raised.value)
+    # A run without the constitution stage does not read it.
+    load_recipe({"dataset_type": "training", "stages": ["inputs"],
+                 "taxonomy_dir": str(tmp_path)})
+
+
+def test_a_benign_taxonomy_in_the_constitutions_params_is_refused(
+        tmp_path, monkeypatch):
+    raised = _fails_before_any_stage_or_model(
+        monkeypatch, tmp_path, {"stages": ["outputs", "constitution"]},
+        {"constitution": {"benign_taxonomy": "mine"}})
+    assert raised == (
+        "params['constitution'] sets ['benign_taxonomy'], which the run passes "
+        "generate_constitution itself; leave it out of the params.")
 
 
 def test_an_eval_recipe_may_include_the_constitution_stage():
@@ -923,6 +972,7 @@ def test_a_recipe_naming_the_former_taxonomy_in_its_own_folder_keeps_the_name(
 
     create_taxonomy("content_moderation_categories", {"A": "a"},
                     taxonomy_dir=tmp_path, verbose=False)
+    _benign_file(tmp_path, "benign", {"B": {"subcategories": ["b"]}})
     with pytest.warns(DeprecationWarning):
         recipe = load_recipe({"dataset_type": "training",
                               "taxonomy": "content_moderation_categories",
@@ -2594,6 +2644,14 @@ def test_a_taxonomy_name_with_a_dot_names_its_json_file(tmp_path):
     ctx = RunContext(
         data_dir=tmp_path, dataset_type="eval", models={}, prompt_dir=None,
         taxonomy="my.tax", taxonomy_dir=tmp_path, params={},
-        augmentations={}, resume=True, verbose=False)
+        augmentations={}, resume=True, verbose=False, benign_taxonomy="my.benign")
+    assert STAGES["constitution"].sources(ctx) == [
+        tmp_path / "my.tax.json", tmp_path / "my.benign.json"]
+    # Without the general-benign part, the benign taxonomy is not read.
+    ctx = RunContext(
+        data_dir=tmp_path, dataset_type="eval", models={}, prompt_dir=None,
+        taxonomy="my.tax", taxonomy_dir=tmp_path,
+        params={"constitution": {"include_general_benign": False}},
+        augmentations={}, resume=True, verbose=False, benign_taxonomy="my.benign")
     assert STAGES["constitution"].sources(ctx) == [tmp_path / "my.tax.json"]
     assert STAGES["inputs"].sources(ctx) == [paths.constitution_merged_csv(tmp_path)]

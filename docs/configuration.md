@@ -16,7 +16,7 @@ that starts with `_` is a comment.
 | `models` | object | every role its default | A model per role; see [below](#the-models-object) |
 | `taxonomy` | name or object | `"harmful"` | The taxonomy of the constitution, by file name or as a loaded object. The former name `"content_moderation_categories"` loads `harmful` with a `DeprecationWarning`, for one release |
 | `taxonomy_dir` | path | `configs/taxonomy/` | Where a taxonomy name (`taxonomy`, `benign_taxonomy`) is looked up |
-| `benign_taxonomy` | name or object | `"benign"` | The taxonomy whose subcategories the benign Q&A pairs of the `fsh` and `dap` techniques are generated for. Read at load, and checked to have a category, when the recipe runs `jailbreaks` and a kind draws a technique that needs benign data |
+| `benign_taxonomy` | name or object | `"benign"` | The taxonomy whose categories the constitution's general-benign part is built from, and whose subcategories the benign Q&A pairs of the `fsh` and `dap` techniques are generated for. Read at load, and checked to have a category, when the recipe runs `constitution` and its dataset type switches the general-benign part on, or runs `jailbreaks` and a kind draws a technique that needs benign data |
 | `prompt_dir` | path | none | The prompt overlay; see [below](#the-prompt-overlay) |
 | `stages` | list of stage names | the dataset type's: all six | The stages to run, in order, each once. `[]` runs nothing |
 | `augmentations` | object | the dataset type's | The jailbreak stage's augmentation section, over the dataset type's; see [below](#the-augmentation-section) |
@@ -50,7 +50,7 @@ holds the merged values. Each record also holds `dataset_type` and
 | | `training.json` | `eval.json` |
 |---|---|---|
 | `stages` | `constitution`, `inputs`, `outputs`, `paraphrase`, `jailbreaks`, `build` | the same |
-| `params` | none | `constitution.entry_types` and `inputs.entry_types` `["harmful", "benign"]`; `jailbreaks.seed` 43 |
+| `params` | `constitution`: `include_general_benign` true, `general_benign_categories` 10 | the same, and `constitution.entry_types` and `inputs.entry_types` `["harmful", "benign"]`; `jailbreaks.seed` 43 |
 | `augmentations` | none: the packaged default | the adversarial kind below; `natural` off |
 
 The eval adversarial kind attacks the harmful inputs only, with a pool of
@@ -110,10 +110,14 @@ be written in JSON.
 | Key | Default | Meaning |
 |---|---|---|
 | `num_categories` | `10` | Constitution categories asked for per call |
-| `num_taxonomy_categories` | `null` | Only the first N taxonomy categories; `null` for all |
-| `entry_types` | `null` | Entry types to generate; `null` for all four |
-| `include_standalone_benign` | `false` | Add one call for benign entries with no taxonomy category |
-| `standalone_benign_categories` | `10` | Categories asked for in that call |
+| `num_taxonomy_categories` | `null` | Only the first N categories of the taxonomy and of the benign taxonomy; `null` for all |
+| `entry_types` | `null` | Entry types to generate; `null` for all four. The `eval` type sets `["harmful", "benign"]` |
+| `include_general_benign` | `false`; `true` in both dataset types | Add the general-benign part: one call per category of `benign_taxonomy`, its rows `benign` entries of that category with `source_taxonomy` `benign` ([stages/constitution.md](stages/constitution.md#unit-and-ledger-key)) |
+| `general_benign_categories` | `10` | Constitution categories asked for per general-benign call |
+
+`include_standalone_benign` and `standalone_benign_categories`, the former
+names of the last two, are read for this release with a
+`DeprecationWarning`; given, they win.
 
 ### `inputs`
 

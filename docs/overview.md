@@ -233,7 +233,8 @@ table shows; [stages/build.md](stages/build.md) has the details.
 six stages as a training run, with these differences:
 
 - the constitution and the inputs take only the `harmful` and `benign` entry
-  types, the clear ends;
+  types, the clear ends, beside the general-benign part both types build
+  from the benign taxonomy;
 - the jailbreak stage attacks the harmful inputs only, with a pool of hard
   techniques whose label stays certain (the heavy encodings, `fsh`, `dap`,
   `framing`, `structural`, `ascii_art`, `continuation`, `temporal`,

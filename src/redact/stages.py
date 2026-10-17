@@ -65,21 +65,25 @@ def generate_constitution(
     num_categories: int = 10,
     model: str | None = None,
     num_taxonomy_categories: int | None = None,
-    include_standalone_benign: bool = False,
-    standalone_benign_categories: int = 10,
+    include_general_benign: bool = False,
+    general_benign_categories: int = 10,
+    benign_taxonomy: dict | str = "benign",
     data_dir: str | Path | None = None,
     taxonomy_dir: str | Path | None = None,
     prompt_dir: str | Path | None = None,
     resume: bool = True,
     verbose: bool = True,
     read_back: bool = True,
+    include_standalone_benign: bool | None = None,
+    standalone_benign_categories: int | None = None,
 ) -> pd.DataFrame:
     """Generate a constitution (category hierarchy) for classifier training.
 
     For each taxonomy category, generates harmful, benign, and dual-use
     constitution entries using the specified model. Each entry defines a
     subcategory with sample descriptions that can later drive input sample
-    generation.
+    generation. The general-benign part adds benign entries for each
+    category of a benign taxonomy.
 
     Args:
         taxonomy: Taxonomy name or pre-loaded dict.
@@ -91,13 +95,18 @@ def generate_constitution(
         model: Generation model. ``None`` (default) resolves to the
             ``constitution_gen`` role — Claude Opus. The backend is auto-selected
             from the model name.
-        num_taxonomy_categories: Limit to first N taxonomy categories
-            (None = all).
-        include_standalone_benign: If True, also generate category-free
-            benign entries in a single LLM call (no taxonomy influence).
-            Saved to general_benign.csv.
-        standalone_benign_categories: Number of benign constitution categories
-            to generate in the standalone benign call.
+        num_taxonomy_categories: Limit each taxonomy, ``taxonomy`` and
+            ``benign_taxonomy``, to its first N categories (None = all).
+        include_general_benign: Also generate the general-benign part: one
+            call per category of ``benign_taxonomy``, with its description
+            and subcategories, through the ``general_benign`` prompt. Its
+            rows are ``benign`` entries whose ``source_category`` is the
+            benign category and ``source_taxonomy`` is ``benign``, saved to
+            general_benign.csv.
+        general_benign_categories: Constitution categories asked for per
+            general-benign call.
+        benign_taxonomy: The benign taxonomy's name under ``taxonomy_dir``,
+            or the loaded taxonomy; read only with ``include_general_benign``.
         data_dir: Working root; the constitution CSVs land in
             ``{data_dir}/Data_cache/constitution/``. Defaults to the project root
             (``get_output_dir()``).
@@ -112,15 +121,31 @@ def generate_constitution(
             ledger first and regenerate from scratch.
         verbose: Log progress.
         read_back: False returns an empty DataFrame and reads no entry back.
+        include_standalone_benign, standalone_benign_categories: The former
+            names of ``include_general_benign`` and
+            ``general_benign_categories``, read for this release with a
+            ``DeprecationWarning``; given, they win.
 
     Returns:
         DataFrame of all constitution entries, backed by the on-disk
         ``merged.csv`` (the full dataset, including rows from prior resumed
         runs — not just this run's delta).
     """
+    if (include_standalone_benign, standalone_benign_categories) != (None, None):
+        warnings.warn(
+            "generate_constitution: include_standalone_benign and "
+            "standalone_benign_categories are now include_general_benign and "
+            "general_benign_categories; the former names are read for this "
+            "release.", DeprecationWarning, stacklevel=2)
+        if include_standalone_benign is not None:
+            include_general_benign = include_standalone_benign
+        if standalone_benign_categories is not None:
+            general_benign_categories = standalone_benign_categories
     # Resolve taxonomy
     if isinstance(taxonomy, str):
         taxonomy = load_taxonomy(taxonomy, config_dir=taxonomy_dir)
+    if include_general_benign and isinstance(benign_taxonomy, str):
+        benign_taxonomy = load_taxonomy(benign_taxonomy, config_dir=taxonomy_dir)
 
     # Resolve entry types
     resolved_types: list[EntryType] | None = None
@@ -143,8 +168,9 @@ def generate_constitution(
         entry_types=resolved_types,
         num_categories=num_categories,
         num_taxonomy_categories=num_taxonomy_categories,
-        include_standalone_benign=include_standalone_benign,
-        standalone_benign_categories=standalone_benign_categories,
+        include_general_benign=include_general_benign,
+        general_benign_categories=general_benign_categories,
+        benign_taxonomy=benign_taxonomy if include_general_benign else None,
         resume=resume,
         verbose=verbose,
         read_back=read_back,
@@ -1092,9 +1118,18 @@ def _one_file(stage: str, default: Callable) -> Callable:
 def _constitution_kwargs(ctx: RunContext) -> dict:
     return dict(
         taxonomy=ctx.taxonomy, taxonomy_dir=ctx.taxonomy_dir,
+        benign_taxonomy=ctx.benign_taxonomy,
         model=ctx.models["constitution"], data_dir=ctx.data_dir,
         prompt_dir=ctx.prompt_dir, resume=ctx.resume, verbose=ctx.verbose,
     )
+
+
+def includes_general_benign(params: dict) -> bool:
+    """Whether the constitution ``params`` switch the general-benign part on,
+    by its name or its former name."""
+    former = params.get("include_standalone_benign")
+    return bool(params.get("include_general_benign", False)
+                if former is None else former)
 
 
 def _constitution_files(ctx: RunContext) -> tuple[list[Path], dict]:
@@ -1108,11 +1143,14 @@ def _json_file(folder: Path, name: str) -> Path:
     return path if path.suffix == ".json" else path.with_name(path.name + ".json")
 
 
-def _taxonomy_file(ctx: RunContext) -> list[Path]:
-    """The file of the run's taxonomy; none for one given as an object."""
-    if not isinstance(ctx.taxonomy, str):
-        return []
-    return [_json_file(Path(ctx.taxonomy_dir or paths.taxonomy_dir()), ctx.taxonomy)]
+def _taxonomy_files(ctx: RunContext) -> list[Path]:
+    """The files of the run's taxonomy and, with the general-benign part on,
+    its benign taxonomy; none for one given as an object."""
+    names = [ctx.taxonomy]
+    if includes_general_benign(_params(ctx, "constitution")):
+        names.append(ctx.benign_taxonomy)
+    folder = Path(ctx.taxonomy_dir or paths.taxonomy_dir())
+    return [_json_file(folder, name) for name in names if isinstance(name, str)]
 
 
 def _inputs_kwargs(ctx: RunContext) -> dict:
@@ -1246,7 +1284,7 @@ STAGES: dict[str, Stage] = {stage.name: stage for stage in (
     Stage("constitution", "generate_constitution",
           roles=(("constitution", "constitution_gen"),),
           files=_constitution_files, recipe_kwargs=_constitution_kwargs,
-          sources=_taxonomy_file),
+          sources=_taxonomy_files),
     Stage("inputs", "generate_inputs", roles=(_GEN, _CHECK),
           files=_inputs_files, recipe_kwargs=_inputs_kwargs,
           sources=_inputs_sources),

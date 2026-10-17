@@ -6,11 +6,18 @@ from pathlib import Path
 import pandas as pd
 
 from .. import paths
-from ..dataset import CommitBuffer, Ledger, Manifest, append_rows, resume_state
+from ..dataset import (
+    CommitBuffer,
+    Ledger,
+    Manifest,
+    append_rows,
+    check_columns,
+    resume_state,
+)
 from ..llm_pipeline import drive_units, extracted
 from ..llms.client import ModelClient
 from ..types import EntryType
-from .units import _COLUMNS, Unit, messages_of, plan_units, rows_of
+from .units import _COLUMNS, Unit, file_of, messages_of, plan_units, rows_of
 
 logger = logging.getLogger(__name__)
 
@@ -34,10 +41,11 @@ def read_constitution(output_dir: str | Path) -> pd.DataFrame:
 class ConstitutionPipeline:
     """Generate constitution entries from a taxonomy into ``output_dir``.
 
-    Each unit's rows go to ``{entry_type}.csv`` and ``merged.csv``. The
-    ledger ``constitution.state.jsonl`` beside them is plain: no lock, no
-    recorded sizes. A crash between a unit's two appends leaves it un-acked,
-    and the next run appends its rows to the type's file again.
+    Each unit's rows go to ``{entry_type}.csv``, or ``general_benign.csv``
+    for a benign-taxonomy unit, and to ``merged.csv``. The ledger
+    ``constitution.state.jsonl`` beside them is plain: no lock, no recorded
+    sizes. A crash between a unit's two appends leaves it un-acked, and the
+    next run appends its rows to the type's file again.
     """
 
     def __init__(
@@ -68,13 +76,14 @@ class ConstitutionPipeline:
         )
 
     def _append(self, rows: list[dict]) -> None:
-        """Append the rows to their entry type's CSV, then to ``merged.csv``."""
+        """Append the rows to their own CSV (:func:`file_of`), then to
+        ``merged.csv``."""
         self.output_dir.mkdir(parents=True, exist_ok=True)
-        by_type: dict[str, list[dict]] = {}
+        by_file: dict[str, list[dict]] = {}
         for row in rows:
-            by_type.setdefault(row["entry_type"], []).append(row)
-        for entry_type, its_rows in by_type.items():
-            append_rows(self.output_dir / f"{entry_type}.csv", its_rows)
+            by_file.setdefault(file_of(row), []).append(row)
+        for name, its_rows in by_file.items():
+            append_rows(self.output_dir / f"{name}.csv", its_rows)
         append_rows(self.output_dir / paths.CONSTITUTION_MERGED_FILENAME, rows)
 
     def run(
@@ -83,20 +92,23 @@ class ConstitutionPipeline:
         entry_types: list[EntryType] | None = None,
         num_categories: int = 10,
         num_taxonomy_categories: int | None = None,
-        include_standalone_benign: bool = False,
-        standalone_benign_categories: int = 10,
+        include_general_benign: bool = False,
+        general_benign_categories: int = 10,
+        benign_taxonomy: dict | None = None,
         resume: bool = True,
         verbose: bool = True,
         read_back: bool = True,
     ) -> pd.DataFrame:
-        """Generate the constitution, one call per ``(source_category, entry_type)``.
+        """Generate the constitution, one call per unit (:func:`plan_units`).
 
-        Each taxonomy category (the first ``num_taxonomy_categories``) gets
-        ``num_categories`` constitution categories per entry type (all four
-        by default); ``include_standalone_benign`` adds one call for
-        ``standalone_benign_categories`` benign ones with no taxonomy
-        category, saved to ``general_benign.csv``. ``resume=False`` removes
-        the CSVs, the ledger and the plan first.
+        Each taxonomy category gets ``num_categories`` constitution
+        categories per entry type (all four by default);
+        ``include_general_benign`` adds one call per category of
+        ``benign_taxonomy`` for ``general_benign_categories`` benign ones,
+        saved to ``general_benign.csv``. Each taxonomy gives its first
+        ``num_taxonomy_categories`` categories. ``resume=False`` removes the
+        CSVs, the ledger and the plan first; a resume of a constitution
+        saved without a column the rows now have raises before any call.
 
         The units run one at a time, in plan order. A reply without its
         ``[END]`` marker, or with no entry that parses, is rejected and the
@@ -110,8 +122,15 @@ class ConstitutionPipeline:
         """
         units = plan_units(
             taxonomy, entry_types, num_categories, num_taxonomy_categories,
-            include_standalone_benign, standalone_benign_categories)
+            include_general_benign, general_benign_categories, benign_taxonomy)
         merged = self.output_dir / paths.CONSTITUTION_MERGED_FILENAME
+        if resume:
+            try:
+                check_columns(merged, [dict.fromkeys(_COLUMNS)])
+            except ValueError as error:
+                raise ValueError(
+                    f"{error} It was saved before the column existed; run with "
+                    "resume=False to generate the constitution again.") from None
         ledger = Ledger.sidecar(merged, ("unit",), {"unit": str},
                                 name="constitution.state.jsonl")
         manifest = Manifest.sidecar(merged, name="constitution.manifest.jsonl")

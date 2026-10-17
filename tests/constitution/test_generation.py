@@ -12,7 +12,13 @@ from redact.constitution import (
     read_constitution,
 )
 from redact.constitution.parse import strip_end_marker
-from redact.constitution.units import Unit, _prompt_kwargs, plan_units, rows_of
+from redact.constitution.units import (
+    Unit,
+    _prompt_kwargs,
+    messages_of,
+    plan_units,
+    rows_of,
+)
 from redact.dataset import Ledger
 from tests.conftest import MockBackend, make_client
 
@@ -45,6 +51,11 @@ _TRUNCATED_OUTPUT = _VALID_CONSTITUTION_OUTPUT.replace("[END]", "")
 # The samples in it, and the generations a unit makes before it is given up.
 _SAMPLES = 4
 _ATTEMPTS = 3
+# A benign taxonomy of two categories.
+_BENIGN = {"categories": {
+    "Cooking": {"description": "Food at home", "subcategories": ["Bread", "Soup"]},
+    "Travel": {"description": "Trips", "subcategories": ["Trains"]},
+}}
 
 
 class TestEntryType:
@@ -74,8 +85,9 @@ class TestRowsOf:
         assert list(rows[0]) == [
             "sample_id", "constitution_category", "constitution_subcategory",
             "sample_description", "entry_type", "source_category",
-            "source_group_tag", "model",
+            "source_taxonomy", "source_group_tag", "model",
         ]
+        assert {r["source_taxonomy"] for r in rows} == {"harmful"}
         assert rows[0]["constitution_category"] == "Category One"
         assert rows[0]["constitution_subcategory"] == "Subcategory Alpha"
         assert rows[0]["sample_description"] == "Sample description one"
@@ -238,23 +250,90 @@ class TestConstitutionPipeline:
         assert (out_dir / "harmful.csv").exists()
         assert (out_dir / "merged.csv").exists()
 
-    def test_general_benign_is_the_last_unit(self):
+    def test_the_general_benign_units_are_one_per_benign_category_and_come_last(self):
         units = plan_units({"categories": {"Cat": {}}}, [EntryType.HARMFUL],
-                           include_standalone_benign=True,
-                           standalone_benign_categories=3)
-        unit = units[-1]
-        assert unit.key == "general::general_benign"
-        assert unit.kwargs == {"num_categories": "3"}
+                           include_general_benign=True,
+                           general_benign_categories=3,
+                           benign_taxonomy=_BENIGN)
+        assert [u.key for u in units] == [
+            "Cat::harmful", "Cooking::general_benign", "Travel::general_benign"]
+        unit = units[1]
+        assert unit.prompt == "general_benign"
+        assert unit.kwargs == {
+            "Category": "Cooking", "description": "Food at home",
+            "subcategories": "Bread, Soup", "group_tag": "general",
+            "num_categories": "3"}
         rows = rows_of(unit, _VALID_CONSTITUTION_OUTPUT, "m")
-        assert {r["entry_type"] for r in rows} == {"general_benign"}
-        assert {r["source_category"] for r in rows} == {"general"}
+        assert {r["entry_type"] for r in rows} == {"benign"}
+        assert {r["source_category"] for r in rows} == {"Cooking"}
+        assert {r["source_taxonomy"] for r in rows} == {"benign"}
 
-    def test_general_benign_is_saved_to_its_own_file(self, tmp_path):
+    def test_a_benign_category_named_as_a_harmful_one_is_a_unit_of_its_own(self):
+        units = plan_units({"categories": {"Cooking": {}}}, [EntryType.BENIGN],
+                           include_general_benign=True, benign_taxonomy=_BENIGN)
+        assert [u.key for u in units][:2] == [
+            "Cooking::benign", "Cooking::general_benign"]
+        assert units[0].manifest_row == {
+            "source_category": "Cooking", "entry_type": "benign",
+            "prompt": "benign", "status": "planned"}
+        assert units[1].manifest_row == {
+            "source_category": "Cooking", "entry_type": "benign",
+            "prompt": "general_benign", "status": "planned"}
+
+    def test_num_taxonomy_categories_limits_the_benign_taxonomy_too(self):
+        units = plan_units({"categories": {"A": {}, "B": {}}}, [EntryType.HARMFUL],
+                           num_taxonomy_categories=1, include_general_benign=True,
+                           benign_taxonomy=_BENIGN)
+        assert [u.key for u in units] == ["A::harmful", "Cooking::general_benign"]
+
+    def test_no_general_benign_unit_unless_asked(self):
+        units = plan_units({"categories": {"Cat": {}}}, [EntryType.HARMFUL],
+                           benign_taxonomy=_BENIGN)
+        assert [u.key for u in units] == ["Cat::harmful"]
+
+    def test_the_general_benign_rows_are_saved_to_their_own_file(self, tmp_path):
         pipeline = self._make_pipeline(MockBackend(_VALID_CONSTITUTION_OUTPUT), tmp_path)
-        pipeline.run({"categories": {}}, include_standalone_benign=True, verbose=False)
+        pipeline.run({"categories": {}}, include_general_benign=True,
+                     benign_taxonomy=_BENIGN, verbose=False)
         out_dir = tmp_path / "constitution"
-        assert len(pd.read_csv(out_dir / "general_benign.csv")) == _SAMPLES
-        assert _ledger(out_dir).completed() == {"general::general_benign"}
+        saved = pd.read_csv(out_dir / "general_benign.csv")
+        assert len(saved) == 2 * _SAMPLES
+        assert set(saved["entry_type"]) == {"benign"}
+        assert set(saved["source_taxonomy"]) == {"benign"}
+        assert not (out_dir / "benign.csv").exists()
+        assert len(pd.read_csv(out_dir / "merged.csv")) == 2 * _SAMPLES
+        assert _ledger(out_dir).completed() == {
+            "Cooking::general_benign", "Travel::general_benign"}
+
+    def test_the_packaged_general_benign_prompt_renders_the_benign_category(self):
+        unit = plan_units({"categories": {}}, include_general_benign=True,
+                          benign_taxonomy=_BENIGN)[0]
+        rendered = " ".join(m["content"] for m in messages_of(unit))
+        # Only the values are compared: the prompt's own text is not shown.
+        missing = [value for value in ("Cooking", "Food at home", "Bread, Soup")
+                   if value not in rendered]
+        assert missing == []
+
+    def test_a_resume_of_a_constitution_without_the_source_taxonomy_column_stops(
+            self, tmp_path):
+        out_dir = tmp_path / "constitution"
+        out_dir.mkdir()
+        pd.DataFrame([{"sample_id": "1", "entry_type": "harmful",
+                       "source_category": "Cat"}]).to_csv(
+            out_dir / "merged.csv", index=False)
+        backend = MockBackend(_VALID_CONSTITUTION_OUTPUT)
+        with pytest.raises(ValueError, match="run with resume=False") as raised:
+            self._make_pipeline(backend, tmp_path).run(
+                {"categories": {"Cat": {}}}, entry_types=[EntryType.HARMFUL],
+                verbose=False)
+        assert "'source_taxonomy'" in str(raised.value)
+        assert backend.calls == []
+        # A fresh run writes it anew.
+        self._make_pipeline(backend, tmp_path).run(
+            {"categories": {"Cat": {}}}, entry_types=[EntryType.HARMFUL],
+            resume=False, verbose=False)
+        assert set(pd.read_csv(out_dir / "merged.csv")["source_taxonomy"]) == {
+            "harmful"}
 
 
 class TestStateLedger:
@@ -442,3 +521,61 @@ class TestRunResume:
         )
         assert result.empty
         assert len(pd.read_csv(out_dir / "merged.csv")) > 0
+
+
+class TestTheFront:
+    """``generate_constitution``: the benign taxonomy and the former names."""
+
+    def _run(self, tmp_path, monkeypatch, **kwargs):
+        from redact import generate_constitution
+        from redact.llms import ModelClient
+
+        backend = MockBackend(_VALID_CONSTITUTION_OUTPUT)
+        monkeypatch.setattr(ModelClient, "create",
+                            lambda model, *a, **k: make_client(backend, model))
+        result = generate_constitution(
+            taxonomy={"categories": {}}, model="c-model", data_dir=tmp_path,
+            verbose=False, **kwargs)
+        return result, backend
+
+    def test_the_general_benign_part_is_built_from_a_benign_taxonomy_by_name(
+            self, tmp_path, monkeypatch):
+        from redact.dataset import create_taxonomy
+
+        create_taxonomy("mine", _BENIGN["categories"], taxonomy_dir=tmp_path,
+                        verbose=False)
+        result, backend = self._run(
+            tmp_path, monkeypatch, include_general_benign=True,
+            general_benign_categories=2, benign_taxonomy="mine",
+            taxonomy_dir=tmp_path)
+        assert len(backend.calls) == len(_BENIGN["categories"])
+        assert set(result["source_category"]) == {"Cooking", "Travel"}
+        assert set(result["source_taxonomy"]) == {"benign"}
+        assert set(result["entry_type"]) == {"benign"}
+
+    def test_without_the_switch_the_benign_taxonomy_is_not_read(
+            self, tmp_path, monkeypatch):
+        result, backend = self._run(tmp_path, monkeypatch, benign_taxonomy="missing")
+        assert backend.calls == []
+        assert result.empty
+
+    def test_the_former_names_are_read_with_a_warning(self, tmp_path, monkeypatch):
+        with pytest.warns(DeprecationWarning) as warned:
+            _, backend = self._run(
+                tmp_path, monkeypatch, include_standalone_benign=True,
+                standalone_benign_categories=2, benign_taxonomy=_BENIGN)
+        assert [str(w.message) for w in warned] == [
+            "generate_constitution: include_standalone_benign and "
+            "standalone_benign_categories are now include_general_benign and "
+            "general_benign_categories; the former names are read for this "
+            "release."]
+        assert len(backend.calls) == len(_BENIGN["categories"])
+        assert _ledger(tmp_path / "Data_cache" / "constitution").completed() == {
+            "Cooking::general_benign", "Travel::general_benign"}
+
+    def test_a_former_name_given_wins_over_the_new_one(self, tmp_path, monkeypatch):
+        with pytest.warns(DeprecationWarning):
+            _, backend = self._run(
+                tmp_path, monkeypatch, include_general_benign=True,
+                include_standalone_benign=False, benign_taxonomy=_BENIGN)
+        assert backend.calls == []

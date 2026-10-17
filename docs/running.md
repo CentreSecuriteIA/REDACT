@@ -106,6 +106,8 @@ the stage's name.
   [overview.md](overview.md#the-stages): each stage reads what earlier ones
   wrote. Without `stages` a run takes its dataset type's: all six,
   `constitution`, `inputs`, `outputs`, `paraphrase`, `jailbreaks`, `build`.
+- Both dataset types add the general-benign part to the constitution:
+  benign entries for each category of `benign_taxonomy`.
 - An `eval` run generates only the `harmful` and `benign` entries and inputs,
   and its jailbreak stage attacks the harmful inputs with a small pool of hard
   techniques, in two rounds, with no natural variations; a `training` run
@@ -115,10 +117,11 @@ the stage's name.
   eval run as in a training one. List `constitution` before it, or run it
   earlier on the same `data_dir`; without either it stops with
   `No constitution at ...`.
-- `taxonomy` names the taxonomy of the constitution (default `harmful`); `benign_taxonomy` the one whose subcategories
-  the benign data of the `fsh` and `dap` techniques covers (default
-  `benign`). Both are file names under `taxonomy_dir`, the packaged
-  `configs/taxonomy/` by default.
+- `taxonomy` names the taxonomy of the constitution (default `harmful`);
+  `benign_taxonomy` the one whose categories the constitution's
+  general-benign part is built from and whose subcategories the benign data
+  of the `fsh` and `dap` techniques covers (default `benign`). Both are file
+  names under `taxonomy_dir`, the packaged `configs/taxonomy/` by default.
 - `params_file` is relative to the recipe's folder. `data_dir`,
   `prompt_dir` and `taxonomy_dir` are relative to the current directory.
 - A params file holds one entry per stage, under the stage's name. Any
@@ -369,7 +372,7 @@ A training run of all six stages, under `<data_dir>`:
 Data_cache/
   constitution/
     harmful.csv  dual_use_harmful.csv  dual_use_benign.csv  benign.csv
-    general_benign.csv                   # with include_standalone_benign
+    general_benign.csv                   # with include_general_benign
     merged.csv                           # every entry
     constitution.manifest.jsonl  constitution.state.jsonl
   benign/

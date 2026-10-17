@@ -23,7 +23,7 @@ from functools import cache
 from pathlib import Path
 
 from redact import paths
-from redact.stages import STAGES
+from redact.stages import STAGES, includes_general_benign
 
 _DEFAULT_MODELS = {
     "gen": None, "check": None, "translation": None, "constitution": None,
@@ -213,11 +213,14 @@ def _check_jailbreak_params(params: dict) -> None:
 
 def benign_taxonomy_of(recipe: dict, stages: list[str]) -> dict | str:
     """The recipe's ``benign_taxonomy``: the taxonomy file, under ``taxonomy_dir``,
+    whose categories the constitution's general-benign part is built from and
     whose subcategories the benign Q&A pairs of the fsh and dap techniques are
     generated for; ``"benign"``, the packaged one, when left out or null.
 
-    The file is read when the recipe runs the jailbreak stage and a kind of
-    its ``augmentations`` (resolved) draws a technique that needs benign data.
+    The file is read when the recipe runs the constitution stage and its
+    dataset type's params switch the general-benign part on, or runs the
+    jailbreak stage and a kind of its ``augmentations`` (resolved) draws a
+    technique that needs benign data.
 
     Raises:
         ValueError: The key is not a name or an object, or the taxonomy it
@@ -235,10 +238,20 @@ def benign_taxonomy_of(recipe: dict, stages: list[str]) -> dict | str:
         raise ValueError(
             f"benign_taxonomy must name a taxonomy file, got {taxonomy!r}; write "
             f'a name such as "{DEFAULT_TAXONOMY}", or leave it out.')
+    uses = []
+    typed = (load_dataset_type(recipe["dataset_type"])["params"]
+             if recipe.get("dataset_type") else {})
+    if "constitution" in stages and includes_general_benign(
+            typed.get("constitution") or {}):
+        uses.append("the constitution builds its general-benign part from its "
+                    "categories")
     kinds = [kind for kind in recipe["augmentations"].values() if kind is not None]
-    if "jailbreaks" not in stages or not any(
+    if "jailbreaks" in stages and any(
             getattr(fn, "requires_benign", False)
             for kind in kinds for fn in technique_pool(kind)):
+        uses.append("the jailbreak stage generates the benign Q&A pairs of its "
+                    "fsh and dap techniques for its subcategories")
+    if not uses:
         return taxonomy
     where = repr(taxonomy) if isinstance(taxonomy, str) else "(an object)"
     try:
@@ -247,11 +260,10 @@ def benign_taxonomy_of(recipe: dict, stages: list[str]) -> dict | str:
         categories = benign_categories(loaded)
     except (OSError, ValueError, AttributeError, TypeError) as error:
         raise ValueError(
-            f"benign_taxonomy {where} cannot be read: {error}. The jailbreak "
-            "stage generates the benign Q&A pairs of its fsh and dap techniques "
-            "for its subcategories; name a taxonomy file in taxonomy_dir (the "
-            "packaged configs/taxonomy when it is left out, which holds "
-            "benign.json).") from None
+            f"benign_taxonomy {where} cannot be read: {error}. "
+            f"{' and '.join(uses).capitalize()}; name a taxonomy file in "
+            "taxonomy_dir (the packaged configs/taxonomy when it is left out, "
+            "which holds benign.json).") from None
     if not categories:
         raise ValueError(
             f"benign_taxonomy {where} has no category; write its categories, "

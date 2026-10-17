@@ -9,11 +9,14 @@ For each taxonomy category, ask a strong model for a hierarchy of
 constitution categories, subcategories and sample descriptions, at each of
 the four entry types: `harmful`, `dual_use_harmful`, `dual_use_benign`,
 `benign`. Each sample description later seeds input samples
-([inputs.md](inputs.md)). Every run seeds its inputs from a constitution,
-in `eval` and `training` runs alike: list this stage in `stages`, as both
-example recipes do, or run on a `data_dir` where an earlier run saved
-`merged.csv`. The default `stages`, used when a recipe names none, does not
-list it.
+([inputs.md](inputs.md)). The general-benign part adds benign entries for
+each category of the benign taxonomy. Every run seeds its inputs from a
+constitution, in `eval` and `training` runs alike: both dataset types list
+this stage in their default `stages`; a recipe that lists its own keeps it,
+or runs on a `data_dir` where an earlier run saved `merged.csv`. An `eval`
+run takes the `harmful` and `benign` entry types only, with the
+general-benign part; a `training` run all four, with the general-benign
+part ([configuration.md](../configuration.md#dataset-types)).
 
 The four entry types are the severities a classifier is trained to tell
 apart:
@@ -31,6 +34,13 @@ apart:
   `configs/taxonomy/harmful.json`) or a dict. Only the
   first `num_taxonomy_categories` categories are used. Each category's
   `description`, `subcategories` and `group_tag` fill the prompt.
+- With `include_general_benign`, the benign taxonomy: the recipe's
+  `benign_taxonomy` (default `configs/taxonomy/benign.json`, 11 categories,
+  58 subcategories), the same file the `fsh` and `dap` techniques' benign data
+  covers. Its first `num_taxonomy_categories` categories are used, each
+  filling the `general_benign` prompt as a taxonomy category fills its own:
+  `Category`, `description`, `subcategories` (joined by `, `), `group_tag`
+  (`general` when the file names none) and `num_categories`.
 - The prompts `prompts/constitution/<entry_type>/`, plus `general_benign`.
   The recipe's `prompt_dir` overlays them.
 
@@ -46,25 +56,35 @@ OpenRouter, is registered for the same role; name it in the recipe to use it.
 ## Settings
 
 Params keys: `num_categories`, `num_taxonomy_categories`, `entry_types`,
-`include_standalone_benign`, `standalone_benign_categories`
-([configuration.md](../configuration.md#constitution)).
+`include_general_benign`, `general_benign_categories`
+([configuration.md](../configuration.md#constitution)). The former names
+`include_standalone_benign` and `standalone_benign_categories` are read for
+this release, with a `DeprecationWarning`; given, they win. The run passes
+`benign_taxonomy` from the recipe.
 
 ## Unit and ledger key
 
-One unit is one call: a taxonomy category at one entry type. With
-`include_standalone_benign` one more unit asks for benign entries with no
-taxonomy category; its source category is `general` and its entry type
-`general_benign`.
+One unit is one call: a taxonomy category at one entry type, through the
+entry type's prompt. With `include_general_benign`, each benign-taxonomy
+category is one more unit, through the `general_benign` prompt, asking for
+`general_benign_categories` constitution categories; its rows are `benign`
+entries with the benign category as `source_category` and `benign` as
+`source_taxonomy`.
 
 | | Value |
 |---|---|
-| Ledger key | `unit` = `<source_category>::<entry_type>` |
+| Ledger key | `unit` = `<source_category>::<prompt>`: `<category>::<entry_type>` for a taxonomy unit, `<benign category>::general_benign` for a general-benign one, so a benign category named as a harmful one is a unit of its own |
 | Ledger record | `{"unit": ...}`; a unit rejected on every attempt: `{"unit": ..., "status": "rejected", "attempts": 3}` |
-| Manifest row | `source_category`, `entry_type`, `status` (`planned`) |
+| Manifest row | `source_category`, `entry_type`, `prompt`, `status` (`planned`) |
 
 The units run one at a time, in plan order: taxonomy categories in file
 order, entry types in the order above (or in the order `entry_types`
-gives them), the general-benign unit last.
+gives them), then the general-benign units in the benign taxonomy's order.
+At the defaults, 11 harmful categories and 11 benign ones, a training run
+makes 44 + 11 calls and an eval run 22 + 11. A ledger written before the
+general-benign part was built from the benign taxonomy holds a
+`general::general_benign` ack that matches no unit now; its rows stay in the
+CSVs until a fresh run.
 
 ## Files
 
@@ -73,7 +93,7 @@ All under `Data_cache/constitution/`:
 | File | Content |
 |---|---|
 | `harmful.csv`, `dual_use_harmful.csv`, `dual_use_benign.csv`, `benign.csv` | The entries of one entry type |
-| `general_benign.csv` | The general-benign entries, with `include_standalone_benign` |
+| `general_benign.csv` | The general-benign entries, with `include_general_benign` |
 | `merged.csv` | Every entry. The inputs stage reads this file |
 | `constitution.manifest.jsonl` | The plan |
 | `constitution.state.jsonl` | The ledger |
@@ -86,8 +106,9 @@ Every CSV has the same columns:
 | `constitution_category` | The top heading of the reply's hierarchy |
 | `constitution_subcategory` | The second heading |
 | `sample_description` | One sample description; seeds input samples |
-| `entry_type` | The unit's entry type |
-| `source_category` | The taxonomy category, or `general` |
+| `entry_type` | The unit's entry type; `benign` for a general-benign unit |
+| `source_category` | The taxonomy category, or the benign taxonomy's category for a general-benign unit |
+| `source_taxonomy` | `harmful` for a taxonomy unit, `benign` for a general-benign one: the general-benign part is one filter away |
 | `source_group_tag` | The taxonomy category's `group_tag`, else `general` |
 | `model` | The model that wrote the entry |
 
@@ -106,6 +127,9 @@ back. Each unit's rows are appended to its entry type's file and to
   manifest first.
 - A crash after a unit's rows are appended and before its ack leaves the
   unit un-acked. The next run generates it again and appends its rows again.
+- A resume of a `merged.csv` saved without a column the rows now have (one
+  written before `source_taxonomy`) raises before any call, naming the
+  column and `resume=False`.
 
 ## Rejected and failed units
 

@@ -19,36 +19,55 @@ _COLUMNS = [
     "sample_description",
     "entry_type",
     "source_category",
+    "source_taxonomy",
     "source_group_tag",
     "model",
 ]
 
-# The source category and group tag of the unit with no taxonomy category.
+# The group tag of a category that names none.
 _GENERAL = "general"
+# The prompt, and the file, of a benign-taxonomy category's unit.
+GENERAL_BENIGN = "general_benign"
+# The ``source_taxonomy`` of each side's rows.
+_HARMFUL, _BENIGN = "harmful", "benign"
 
 
 @dataclass
 class Unit:
-    """One call: an entry type for a taxonomy category, or the general-benign call.
+    """One call: an entry type for a taxonomy category, or the general-benign
+    call for a benign-taxonomy category.
 
-    ``entry_type`` also names the call's prompt under ``prompts/constitution/``;
-    ``kwargs`` are the prompt's placeholder values.
+    ``prompt`` names the call's prompt under ``prompts/constitution/``, the
+    entry type unless given; ``kwargs`` are its placeholder values.
+    ``source_taxonomy`` says which taxonomy the category comes from.
     """
 
     source_category: str
     entry_type: str
     group_tag: str
     kwargs: dict[str, str] = field(default_factory=dict)
+    prompt: str = ""
+    source_taxonomy: str = _HARMFUL
+
+    def __post_init__(self) -> None:
+        self.prompt = self.prompt or self.entry_type
 
     @property
     def key(self) -> str:
-        """The unit's ledger key, ``source_category::entry_type``."""
-        return f"{self.source_category}::{self.entry_type}"
+        """The unit's ledger key, ``source_category::prompt``."""
+        return f"{self.source_category}::{self.prompt}"
 
     @property
     def manifest_row(self) -> dict[str, str]:
         return {"source_category": self.source_category,
-                "entry_type": self.entry_type, "status": "planned"}
+                "entry_type": self.entry_type, "prompt": self.prompt,
+                "status": "planned"}
+
+
+def file_of(row: dict) -> str:
+    """The name of the CSV, beside ``merged.csv``, a constitution row goes to:
+    its entry type's, or ``general_benign`` for a benign-taxonomy row."""
+    return GENERAL_BENIGN if row["source_taxonomy"] == _BENIGN else row["entry_type"]
 
 
 def _prompt_kwargs(name: str, info: dict) -> dict[str, str]:
@@ -73,14 +92,18 @@ def plan_units(
     entry_types: Iterable[EntryType] | None = None,
     num_categories: int = 10,
     num_taxonomy_categories: int | None = None,
-    include_standalone_benign: bool = False,
-    standalone_benign_categories: int = 10,
+    include_general_benign: bool = False,
+    general_benign_categories: int = 10,
+    benign_taxonomy: dict | None = None,
 ) -> list[Unit]:
     """Every unit of a run, in the order they are generated.
 
-    Each taxonomy category (the first ``num_taxonomy_categories``) gets one
-    unit per entry type, asking for ``num_categories`` constitution
-    categories; the general-benign unit, when included, comes last.
+    Each category of ``taxonomy`` gets one unit per entry type, asking for
+    ``num_categories`` constitution categories. With
+    ``include_general_benign``, each category of ``benign_taxonomy`` then
+    gets one unit of the ``general_benign`` prompt, asking for
+    ``general_benign_categories``, its rows labelled ``benign``. Each
+    taxonomy gives its first ``num_taxonomy_categories`` categories.
     """
     if entry_types is None:
         entry_types = ALL_ENTRY_TYPES
@@ -92,16 +115,22 @@ def plan_units(
         for name, info in categories
         for entry_type in entry_types
     ]
-    if include_standalone_benign:
-        units.append(Unit(_GENERAL, "general_benign", _GENERAL,
-                          {"num_categories": str(standalone_benign_categories)}))
+    if include_general_benign:
+        benign = list(iter_categories(benign_taxonomy or {}))[:num_taxonomy_categories]
+        units += [
+            Unit(name, EntryType.BENIGN.value, info.get("group_tag", _GENERAL),
+                 {**_prompt_kwargs(name, info),
+                  "num_categories": str(general_benign_categories)},
+                 prompt=GENERAL_BENIGN, source_taxonomy=_BENIGN)
+            for name, info in benign
+        ]
     return units
 
 
 def messages_of(unit: Unit, prompt_dir=None) -> list[dict]:
     """The messages of the unit's call, its prompt read through ``prompt_dir``."""
     return build_messages(
-        load_prompt("constitution", unit.entry_type, prompt_dir), **unit.kwargs)
+        load_prompt("constitution", unit.prompt, prompt_dir), **unit.kwargs)
 
 
 def rows_of(unit: Unit, reply: str, model: str) -> list[dict]:
@@ -122,6 +151,7 @@ def rows_of(unit: Unit, reply: str, model: str) -> list[dict]:
             "sample_description": entry.sample,
             "entry_type": unit.entry_type,
             "source_category": unit.source_category,
+            "source_taxonomy": unit.source_taxonomy,
             "source_group_tag": unit.group_tag,
             "model": model,
         }
