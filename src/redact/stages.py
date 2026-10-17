@@ -51,7 +51,6 @@ from redact.dataset import (
     load_taxonomy,
     merge_all,
     merge_inputs,
-    row_ids,
     take_per_group,
     write_concat,
 )
@@ -632,7 +631,6 @@ def generate_jailbreaks(
         inputs = inputs.rename(columns={"sample": "prompt"})
     if "prompt" not in inputs.columns:
         raise ValueError("inputs must contain a 'prompt' (or 'sample') column.")
-    inputs["sample_id"] = row_ids(inputs, "prompt")
 
     client = ModelClient.create(model or default_model_for_role("uncensored_gen"))
     benign = Path(benign_path) if benign_path else paths.benign_csv(data_dir)
