@@ -380,6 +380,9 @@ def _served(
         served by vLLM (the plan's count, else the recipe's, else ``None``)
         or ``workers`` for a hosted one. A pool of several models is a list
         of these, and a role the run calls no model for is ``None``.
+        ``copies`` is what was planned, read before any stage runs: when a
+        build with the plan's copies fails and one copy loads instead, the
+        trace's ``load`` event says so (``fallback``, ``planned_copies``).
     """
     from .llms.backends import resolve_setup
     from .llms.model_config import get_model_config
