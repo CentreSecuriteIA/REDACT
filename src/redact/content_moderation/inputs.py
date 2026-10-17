@@ -1,10 +1,14 @@
 """The inputs stage: ``InputPipeline``, which turns constitution entries into
 checked samples in the per-category tree.
 
+Each entry is ``samples_per_entry`` units, one per iteration. A unit is dealt
+one spec of the generation axes, generates one sample in one call and checks
+it; every unit is its own generator on the ``drive_units`` pool.
+
 Usage::
 
     from redact.llms import ModelClient, load_prompt
-    from redact.content_moderation import InputPipeline
+    from redact.content_moderation import InputPipeline, axes
 
     pipeline = InputPipeline(
         gen=ModelClient.create("venice-uncensored"),
@@ -14,19 +18,19 @@ Usage::
     result = pipeline.run_from_constitution(
         constitution_df=constitution_df,
         prompt_config=load_prompt("input", "generation/from_constitution/long"),
-        samples_per_entry=3, style="long",
+        samples_per_entry=3, style="long", axes=axes.resolve("inputs"),
     )
 """
 
 import functools
 import logging
-from itertools import repeat
 from pathlib import Path
 from typing import NamedTuple
 
 import pandas as pd
 
 from .. import paths
+from ..constitution.parse import strip_end_marker
 from ..dataset import (
     Ledger,
     Manifest,
@@ -36,6 +40,7 @@ from ..dataset import (
     sample_row,
 )
 from ..dataset.drop import drop_units
+from ..dataset.planfile import changed_plan, plan_path, plan_record, write_plan
 from ..dataset.resume import release_lock, resume_state
 from ..dataset.save import CommitBuffer
 from ..exceptions import PromptTooLongError
@@ -43,7 +48,13 @@ from ..llm_pipeline import LLMRequest, drive_units, is_accepted, pool_size
 from ..llm_pipeline import extracted as extracted_unit
 from ..llms.client import ModelClient
 from ..llms.prompting import PromptTemplate, extract_and_clean
-from ..llms.router import assert_single_sample_per_call
+from .axes import (
+    deal_specs,
+    render_spec,
+    spec_columns,
+    warn_unshown,
+    write_stage_coverage,
+)
 from .checker import build_quality_checker
 from .results import ConstitutionInputResult
 
@@ -53,48 +64,83 @@ logger = logging.getLogger(__name__)
 _DESC_PREVIEW_LEN = 60
 # The category files of constitution-seeded inputs, under the stage's folder.
 _CATEGORY_FILES = f"*/{paths.SAMPLES_FILENAME}"
+# A unit's key in the ledger and the manifest.
+_KEY = ("sample_description", "entry_type", "style", "iteration")
+# The columns of a category file that name a row's unit, in key order, and its id.
+_UNIT_COLUMNS = ("source_sample_description", "entry_type", "template_style",
+                 "iteration", "sample_id")
 
 
 def _constitution_inputs_ledger(dataset_dir: str | Path) -> Ledger:
-    """The stage's ledger: one ack per entry, keyed like the manifest."""
+    """The stage's ledger: one ack per unit, keyed like the manifest."""
     return Ledger(
         Path(dataset_dir) / "constitution_inputs.state.jsonl",
-        key_fields=("sample_description", "entry_type", "style"),
-        casters={"sample_description": str, "entry_type": str, "style": str},
+        key_fields=_KEY,
+        casters={"sample_description": str, "entry_type": str, "style": str,
+                 "iteration": int},
     )
 
 
 def _constitution_inputs_manifest(dataset_dir: str | Path) -> Manifest:
-    """The stage's plan: one row per entry, by description, entry type and style."""
+    """The stage's plan: one row per unit, by description, entry type, style
+    and iteration."""
     return Manifest(Path(dataset_dir) / "constitution_inputs.manifest.jsonl")
 
 
-def _entries_in(path: Path) -> dict[tuple[str, str, str], list[str]]:
-    """Each entry with rows in a category file, by its ledger key, with their ids.
+def _entries_in(path: Path) -> dict[tuple[str, str, str, int], list[str]]:
+    """Each unit with a row in a category file, by its ledger key, with its ids.
 
-    Read once, when a folder written before the ledger recorded sizes and
-    ids is taken over. A file of that time may name the description
-    ``sample_description`` and have no style column: its rows are of the
-    style ``""``. A file without a description, an entry type or an id
-    column gives no entry.
+    Read once, when a folder whose ledger records no sizes, or has none, is
+    taken over. A file without one of the columns gives no unit: one written
+    before units had an iteration stops the stage before this.
     """
-    entries: dict[tuple[str, str, str], list[str]] = {}
+    entries: dict[tuple[str, str, str, int], list[str]] = {}
     # Every cell as the text it is: an id of digits is not a number.
     with pd.read_csv(
             path, dtype=str, keep_default_na=False, chunksize=50_000) as chunks:
         for chunk in chunks:
-            columns = set(chunk.columns)
-            described = next(
-                (name for name in ("source_sample_description", "sample_description")
-                 if name in columns), None)
-            if described is None or not {"entry_type", "sample_id"} <= columns:
+            if not set(_UNIT_COLUMNS) <= set(chunk.columns):
                 return {}
-            styles = chunk.get("template_style", repeat(""))
-            for description, entry_type, style, sample_id in zip(
-                    chunk[described], chunk["entry_type"], styles, chunk["sample_id"]):
-                key = str(description), str(entry_type), str(style)
-                entries.setdefault(key, []).append(str(sample_id))
+            for description, entry_type, style, iteration, sample_id in zip(
+                    *(chunk[column] for column in _UNIT_COLUMNS)):
+                if iteration.isdigit():
+                    key = description, entry_type, style, int(iteration)
+                    entries.setdefault(key, []).append(sample_id)
     return entries
+
+
+def _stop_on_earlier_files(
+        ledger: Ledger, files: list[Path], columns: list[str]) -> None:
+    """Raise when the folder was written before its units were these: an ack
+    without ``iteration`` (an entry was one call then), or a category file
+    whose header lacks one of ``columns``.
+
+    Raises:
+        ValueError: What was found, and the remedies.
+    """
+    remedy = (
+        "Start this style over with resume=False (a recipe's \"resume\": false), "
+        "which removes its rows and acks, or run the stage in a new data_dir; "
+        "a folder without the axis columns also takes params inputs.axes: false.")
+    earlier = Ledger(ledger.path, key_fields=_KEY[:-1])
+    if any("iteration" not in ack for ack in earlier.records()):
+        raise ValueError(
+            f"{ledger.path} acks units without an iteration: it was written when "
+            f"an entry was one call for all its samples. {remedy}")
+    row = [dict.fromkeys(columns, "")]
+    for path in files:
+        try:
+            check_columns(path, row)
+        except ValueError as error:
+            raise ValueError(f"{error} {remedy}") from None
+
+
+def _axis_weights(axes: dict | None) -> dict | None:
+    """Each dealt axis's weights, what a deal is made with."""
+    if not axes:
+        return None
+    return {axis: {value: v["weight"] for value, v in entry["values"].items()}
+            for axis, entry in axes.items() if "values" in entry}
 
 
 class _Entry(NamedTuple):
@@ -151,18 +197,18 @@ class InputPipeline:
     def _build_generation_messages(
         self,
         prompt_config: dict,
-        samples_per_request: int,
         **seed_kwargs: str,
     ) -> list[dict]:
-        """Build the generation messages, with the format instruction.
+        """Build the messages of one sample's generation, with the format
+        instruction.
 
         Args:
             prompt_config: Loaded prompt JSON config.
-            samples_per_request: Number of samples to request per LLM call.
-            **seed_kwargs: Template variables (Category, sample_description, ...).
+            **seed_kwargs: Template variables (Category, sample_description,
+                sample_spec, ...).
         """
         # The format instruction matches the style the reply is extracted with.
-        kwargs = {"num_samples": str(samples_per_request), **seed_kwargs}
+        kwargs = {"num_samples": "1", **seed_kwargs}
         return PromptTemplate(
             prompt_config, format_style=self.extraction_style,
             prompt_dir=self.prompt_dir, **kwargs,
@@ -180,22 +226,38 @@ class InputPipeline:
         style: str = "",
         max_attempts: int = 3,
         check_max_tokens: int | None = None,
+        axes: dict | None = None,
+        seed: int = 42,
     ) -> ConstitutionInputResult:
         """Generate ``samples_per_entry`` checked samples per constitution entry.
 
-        Each entry is one unit: a generation call, made again for a reply with
-        the wrong number of samples, up to ``max_attempts``; then one check
-        call per sample. A sample the checker rejects is saved with its
-        reason. An entry rejected on every attempt, or whose prompt is too
-        long for the model, is acked ``rejected`` with no rows. A call carries
-        up to ``batch_size`` requests; ``check_max_tokens`` limits a verdict.
+        Each entry is ``samples_per_entry`` units ``(entry, iteration)``. A
+        unit makes one generation call for one sample, made again for a reply
+        without its ``[END]`` marker or with another count, up to
+        ``max_attempts``; then one check call. A sample the checker rejects is
+        saved with its reason. A unit rejected on every attempt, or whose
+        prompt is too long for the model, is acked ``rejected`` with no row;
+        one whose sample the folder holds already is acked ``no_sample``. A
+        call carries up to ``batch_size`` requests; ``check_max_tokens``
+        limits a verdict.
+
+        ``axes`` (:func:`redact.content_moderation.axes.resolve`) deals each
+        unit one spec per ``(source_category, entry_type)``, an entry's units
+        one after another, from ``seed``; the template's ``{sample_spec}``
+        shows it, the row records it in a column per axis, and
+        ``constitution_inputs.coverage.csv`` counts the specs planned and
+        accepted. ``None``: no specs, and ``{sample_spec}`` is empty.
 
         Rows go to ``{dataset_dir}/{category}/samples.csv``, and a text is
         written once in the folder, whatever its category and style. The
         ledger beside them is keyed on ``(sample_description, entry_type,
-        style)``, and a resume reads it alone. ``resume=False`` starts this
-        style over and keeps the rows and acks of the others; without a
-        style it clears the folder.
+        style, iteration)``, and a resume reads it alone; the deal is made
+        again, and ``constitution_inputs.plan.json`` (``seed``,
+        ``samples_per_entry``, the axes' weights) stops a resume that would
+        deal another. ``resume=False`` starts this style over and keeps the
+        rows and acks of the others; without a style it clears the folder. A
+        folder written before its units had an iteration stops before any
+        call.
 
         ``constitution_df`` has the constitution's columns
         (``source_category``, ``sample_description``,
@@ -205,13 +267,18 @@ class InputPipeline:
         category, or a benign one for the general-benign part.
         ``prompt_config`` is a prompt of
         ``input/generation/from_constitution/{style}``.
+
+        Raises:
+            ValueError: A folder written before this layout, or a resume
+                whose ``seed``, ``samples_per_entry`` or axes' weights differ
+                from those of the plan file.
         """
         if constitution_df.empty:
             logger.warning("run_from_constitution: empty constitution_df, nothing to do")
             return ConstitutionInputResult()
+        if axes:
+            warn_unshown(prompt_config, "sample_spec", "of the inputs' generation")
 
-        # One forward pass's internals can be told apart for one sample only.
-        assert_single_sample_per_call(self.gen, samples_per_entry)
         capture_input = self.gen.compute_config.supports_internals
         capture_val_in = use_checker and self.check.compute_config.supports_internals
 
@@ -228,34 +295,70 @@ class InputPipeline:
                 acks=lambda ack: ack.get("style") == style,
                 **tree,
             )
+        if resume or style:
+            # Before anything is written: the files the run keeps must take
+            # its rows.
+            try:
+                _stop_on_earlier_files(
+                    ledger, sorted(folder.glob(_CATEGORY_FILES)),
+                    ["iteration", *spec_columns(axes, {})])
+            except ValueError:
+                release_lock(ledger)    # drop_units keeps it for the resume
+                raise
         # Before anything is written in the folder: it takes the stage's lock.
         processed = resume_state(
             ledger, resume=resume or bool(style), manifest=manifest, **tree)
         seen = set(ledger.ids)      # the content ids of the rows of every style
 
+        made_with = plan_record(seed=seed, samples_per_entry=samples_per_entry,
+                                axes=_axis_weights(axes))
+        changed = changed_plan(manifest.path, made_with) if resume else []
+        if changed:
+            release_lock(ledger)
+            raise ValueError(
+                f"Inputs: this run's {changed} differ from those the units in "
+                f"{folder} were dealt with (see {plan_path(manifest.path).name}), "
+                "and a resume deals them again as they were. Run with "
+                "resume=False to start the style over, or with the settings the "
+                "plan was made with.")
+        if changed is None and processed:
+            logger.warning(
+                "Inputs: %s has finished units and no %s, so whether this run's "
+                "seed, samples_per_entry and axes are the ones they were dealt "
+                "with is not checked.", folder, plan_path(manifest.path).name)
+        write_plan(manifest.path, made_with)
+
         entries = [_entry_fields(entry) for _, entry in constitution_df.iterrows()]
+        units = [(e, iteration)
+                 for e in entries for iteration in range(samples_per_entry)]
+        specs = deal_specs(
+            axes, [((e.category, e.entry_type), (e.description, iteration))
+                   for e, iteration in units], seed=seed)
         manifest.write(
             {"sample_description": e.description, "entry_type": e.entry_type,
-             "style": style, "status": "planned"}
-            for e in entries
+             "style": style, "iteration": iteration, "category": e.category,
+             **({"spec": spec} if axes else {}), "status": "planned"}
+            for (e, iteration), spec in zip(units, specs)
         )
-        pending = [e for e in entries
-                   if (e.description, e.entry_type, style) not in processed]
+        pending = [(e, iteration, spec) for (e, iteration), spec in zip(units, specs)
+                   if (e.description, e.entry_type, style, iteration) not in processed]
         result = ConstitutionInputResult()
-        if verbose and len(pending) < len(entries):
-            logger.info("Resuming: skipped %d already-processed entries, %d remaining",
-                        len(entries) - len(pending), len(pending))
+        if verbose and len(pending) < len(units):
+            logger.info("Resuming: skipped %d already-processed units, %d remaining",
+                        len(units) - len(pending), len(pending))
         if not pending:
             if verbose:
-                logger.info("All entries already processed — nothing to do.")
+                logger.info("All units already processed — nothing to do.")
             release_lock(ledger)    # no CommitBuffer will
+            write_stage_coverage(axes, manifest, ledger)
             return result
 
         total = len(pending)
         style_label = f" | style='{style}'" if style else ""
         if verbose:
-            logger.info("Constitution-seeded generation: %d entries, batch_size=%d, "
-                        "samples_per_entry=%d%s", total, batch_size, samples_per_entry,
+            logger.info("Constitution-seeded generation: %d entries, %d samples per "
+                        "entry, one call each: %d units, batch_size=%d%s",
+                        len(entries), samples_per_entry, total, batch_size,
                         style_label)
 
         @functools.cache
@@ -264,8 +367,20 @@ class InputPipeline:
                 category=category, entry_type=entry_type, subcategory=subcategory,
                 prompt_dir=self.prompt_dir)
 
-        rejected_entries = 0
+        rejected_units = 0
         finished = 0
+        unmarked = 0    # replies without their [END] marker
+
+        def _one_sample(raw: str) -> list[str]:
+            """The reply's one sample; ``[]`` for a reply without its ``[END]``
+            marker (cut at the token limit) or with another count."""
+            nonlocal unmarked
+            text, ended = strip_end_marker(raw)
+            if not ended:
+                unmarked += 1
+                return []
+            return extract_and_clean(text, style=self.extraction_style,
+                                     expected_count=1)
 
         def _append(rows: list[dict]) -> dict[Path, int]:
             """Append a save's rows, each to its category's file."""
@@ -287,88 +402,74 @@ class InputPipeline:
                             finished, total, n_acc, len(rows))
             return sizes
 
-        def _entry_unit(e: _Entry):
-            """Generate an entry's samples, drop those already seen, check each."""
-            # The samples do not exist yet: internals are captured under the entry.
+        input_label = f"input_{style}" if style else "input"
+        check_label = f"val_in_{style}" if style else "val_in"
+
+        def _unit(e: _Entry, iteration: int, spec: dict):
+            """Generate one sample to ``spec``, then check it unless the folder
+            holds it already."""
+            # The sample does not exist yet: internals are captured under the entry.
             eid = content_id(f"{e.description}:{e.entry_type}:{style}")
-            extracted, attempts = yield from extracted_unit(
+            fields = {
+                "Category": e.category,
+                "sample_description": e.description,
+                "constitution_subcategory": e.subcategory,
+                "entry_type": e.entry_type,
+                "sample_spec": render_spec(axes, spec, {"subcategory": e.subcategory}),
+            }
+            samples, attempts = yield from extracted_unit(
                 self.gen,
-                lambda: self._build_generation_messages(
-                    prompt_config,
-                    samples_per_request=samples_per_entry,
-                    Category=e.category,
-                    sample_description=e.description,
-                    constitution_subcategory=e.subcategory,
-                    entry_type=e.entry_type,
-                ),
-                lambda raw: extract_and_clean(
-                    raw, style=self.extraction_style,
-                    expected_count=samples_per_entry,
-                ),
-                internals_id=(
-                    (f"{eid}/input_{style}" if style else f"{eid}/input")
-                    if capture_input else None
-                ),
+                lambda: self._build_generation_messages(prompt_config, **fields),
+                _one_sample,
+                internals_id=(f"{eid}/{iteration}/{input_label}"
+                              if capture_input else None),
                 max_attempts=max_attempts,
             )
-            rejected = not extracted
+            if not samples:
+                return None, None, attempts
+            (text,) = samples
             # Outside the extraction: a repeat is not a reason to regenerate.
-            extracted = [s for s in extracted if content_id(s) not in seen]
-
-            verdicts = [(True, "")] * len(extracted)
-            if use_checker and extracted:
+            if content_id(text) in seen:
+                return text, None, attempts
+            verdict = (True, "")
+            if use_checker:
+                # The sample's content id is its sample_id.
                 checker = _checker(e.category, e.entry_type, e.subcategory)
-                suffix = f"val_in_{style}" if style else "val_in"
-                verdicts = []
-                for s in extracted:
-                    # The sample's content id is its sample_id.
-                    response = yield LLMRequest.for_client(
-                        self.check, checker("", s),
-                        internals_id=(
-                            f"{content_id(s)}/{suffix}" if capture_val_in else None
-                        ),
-                        max_tokens=check_max_tokens,
-                    )
-                    accepted = is_accepted(response)
-                    verdicts.append((accepted, "" if accepted else response))
-            return extracted, verdicts, attempts, rejected
+                response = yield LLMRequest.for_client(
+                    self.check, checker("", text),
+                    internals_id=(f"{content_id(text)}/{check_label}"
+                                  if capture_val_in else None),
+                    max_tokens=check_max_tokens,
+                )
+                accepted = is_accepted(response)
+                verdict = (accepted, "" if accepted else response)
+            return text, verdict, attempts
 
-        live: dict[int, _Entry] = {}   # entries of live units, by position
+        live: dict[int, tuple[_Entry, int, dict]] = {}   # live units, by position
 
         def _units():
-            for j, e in enumerate(pending):
-                live[j] = e
-                yield j, _entry_unit(e)
+            for j, unit in enumerate(pending):
+                live[j] = unit
+                yield j, _unit(*unit)
 
         def _on_done(j, value):
-            nonlocal rejected_entries, finished
-            e = live.pop(j)
-            extracted, verdicts, attempts, rejected = value
+            nonlocal rejected_units, finished
+            e, iteration, spec = live.pop(j)
+            text, verdict, attempts = value
             finished += 1
             if verbose:
                 desc_preview = e.description[:_DESC_PREVIEW_LEN]
                 if len(e.description) > _DESC_PREVIEW_LEN:
                     desc_preview += "..."
-                logger.debug("[%d/%d] %s | %s | %s",
-                             finished, total, e.category, e.entry_type, desc_preview)
+                logger.debug("[%d/%d] %s | %s | %s | %d",
+                             finished, total, e.category, e.entry_type, desc_preview,
+                             iteration)
 
             key = {"sample_description": e.description, "entry_type": e.entry_type,
-                   "style": style}
-            if not extracted:
-                result.skipped_entries += 1
-                rejected_entries += rejected
-                # Acked: un-acked, it would be generated, and paid for, again
-                # on every resume.
-                buf.add([], {**key, "status": "rejected" if rejected else "no_samples",
-                             "attempts": attempts})
-                if verbose:
-                    logger.debug("-> no samples extracted")
-                return
-
-            # Again here: an entry that was live with this one may have given
-            # one of its texts, and both passed the check when generated.
-            rows = []
-            for text, (accepted, reasoning) in zip(extracted, verdicts):
+                   "style": style, "iteration": iteration}
+            row = None
+            if verdict is not None:
+                accepted, reasoning = verdict
                 row = sample_row(
                     text, e.category, turn=0, accepted=accepted,
                     source="constitution",
@@ -383,32 +484,43 @@ class InputPipeline:
                            else {"source_taxonomy": e.source_taxonomy}),
                         "template_style": style,
                         "rejection_reason": reasoning,
+                        "iteration": iteration,
+                        **spec_columns(axes, spec),
                     },
                 )
-                if row["sample_id"] in seen:
-                    continue
-                seen.add(row["sample_id"])
-                rows.append(row)
-            # The ids of the rows it wrote: what a resume knows them by.
-            buf.add(rows, {**key, "ids": [row["sample_id"] for row in rows]})
+            # Again here: a unit that was live with this one may have given
+            # its text, and both passed the check when generated.
+            if row is None or row["sample_id"] in seen:
+                result.skipped_entries += 1
+                rejected_units += text is None
+                # Acked: un-acked, it would be generated, and paid for, again
+                # on every resume.
+                status = "rejected" if text is None else "no_sample"
+                buf.add([], {**key, "status": status, "attempts": attempts})
+                if verbose:
+                    logger.debug("-> no sample")
+                return
 
-            accepted_count = sum(accepted for accepted, _ in verdicts)
+            seen.add(row["sample_id"])
+            # The id of the row it wrote, what a resume knows it by, and the
+            # verdict, what the coverage table counts.
+            buf.add([row], {**key, "ids": [row["sample_id"]], "accepted": accepted})
             result.total_entries_processed += 1
-            result.total_prompts_generated += len(extracted)
-            result.total_prompts_accepted += accepted_count
-            result.total_prompts_rejected += len(extracted) - accepted_count
+            result.total_prompts_generated += 1
+            result.total_prompts_accepted += accepted
+            result.total_prompts_rejected += not accepted
             if verbose:
-                logger.debug("-> %d accepted, %d rejected",
-                             accepted_count, len(extracted) - accepted_count)
+                logger.debug("-> %s", "accepted" if accepted else "rejected")
 
-        # A prompt too long for the model ends the entry as one rejected on
+        # A prompt too long for the model ends the unit as one rejected on
         # every attempt; the ack says 1. Any other unit error stops the stage.
         def _on_error(j, exc):
             if not isinstance(exc, PromptTooLongError):
                 raise exc
-            logger.warning("Entry %r (%s) rejected, its prompt is too long: %s",
-                           live[j].description, live[j].entry_type, exc)
-            _on_done(j, ([], [], 1, True))
+            e, iteration, _ = live[j]
+            logger.warning("Entry %r (%s), iteration %d, rejected, its prompt is too "
+                           "long: %s", e.description, e.entry_type, iteration, exc)
+            _on_done(j, (None, None, 1))
 
         with CommitBuffer(append=_append, ledger=ledger) as buf:
             drive_units(
@@ -419,13 +531,18 @@ class InputPipeline:
                 cap=batch_size,
                 progress="inputs" if verbose else None,
             )
+        write_stage_coverage(axes, manifest, ledger)
 
-        if rejected_entries:
+        if unmarked:
             logger.warning(
-                "%d entries rejected after %d attempt(s) each. They are acked "
+                "%d replies had no [END] marker at their end, cut at the token limit "
+                "or written without it, and were asked again.", unmarked)
+        if rejected_units:
+            logger.warning(
+                "%d units rejected after %d attempt(s) each. They are acked "
                 "and skipped on resume; run with resume=False, or delete their "
                 "'rejected' lines from the ledger, to try them again.",
-                rejected_entries, max_attempts,
+                rejected_units, max_attempts,
             )
         if verbose:
             logger.info("Constitution-seeded run complete%s: %d/%d accepted (%.0f%%)",

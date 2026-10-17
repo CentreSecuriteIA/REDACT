@@ -16,6 +16,7 @@ import json
 import logging
 import math
 import random
+import string
 from collections import Counter, defaultdict
 from collections.abc import Iterable, Sequence
 from functools import lru_cache
@@ -343,3 +344,20 @@ def write_stage_coverage(
                    ((group, spec) for group, spec, key in planned if key in accepted))
     logger.info("Coverage of the generation axes -> %s", path)
     return path
+
+
+def warn_unshown(prompt_config: dict, placeholder: str, name: str) -> None:
+    """Warn when the prompt ``name`` has no ``{placeholder}``, as an overlay
+    written before the axes: the specs are dealt and recorded, but the model
+    is not shown them."""
+    fields: set[str] = set()
+    for text in (prompt_config.get("system_prompt"), prompt_config.get("template")):
+        try:
+            fields.update(f for _, f, _, _ in string.Formatter().parse(text or "") if f)
+        except ValueError:      # malformed: the render says so
+            return
+    if placeholder not in fields:
+        logger.warning(
+            "The prompt %s has no {%s}: each unit's spec is dealt and recorded, "
+            "and the model is not shown it. Add {%s} to its template.",
+            name, placeholder, placeholder)

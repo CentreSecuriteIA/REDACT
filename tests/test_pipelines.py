@@ -386,8 +386,8 @@ class TestInputsWarnOnLowAcceptance:
         from tests.conftest import make_client
 
         backends = {
-            "gen-model": MockBackend(["1. zqa sample\n2. zqb sample",
-                                      "1. zqc sample\n2. zqd sample"]),
+            "gen-model": MockBackend([f"1. {text} sample\n[END]"
+                                      for text in ("zqa", "zqb", "zqc", "zqd")]),
             "check-model": _JudgeByText(accept),
         }
         monkeypatch.setattr(P.ModelClient, "create",
@@ -417,7 +417,8 @@ class TestInputsWithoutAConstitutionGiven:
         from redact import generate_inputs, paths
         from tests.conftest import make_client
 
-        backends = {"gen-model": MockBackend("1. zqa sample\n2. zqb sample"),
+        backends = {"gen-model": MockBackend(["1. zqa sample\n[END]",
+                                              "1. zqb sample\n[END]"]),
                     "check-model": MockBackend("Yes")}
         monkeypatch.setattr(P.ModelClient, "create",
                             lambda m: make_client(backends[m], m))

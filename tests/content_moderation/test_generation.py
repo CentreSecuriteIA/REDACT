@@ -45,7 +45,7 @@ class TestGeneralBenignEntries:
         monkeypatch.setattr(G, "build_quality_checker",
                             lambda **k: checked.append(k) or build(**k))
         pipeline = InputPipeline(
-            gen=make_client(MockBackend("1. a question about bread"), "m"),
+            gen=make_client(MockBackend("1. a question about bread\n[END]"), "m"),
             check=make_client(MockBackend("Yes"), "m-check"), dataset_dir=tmp_path)
         pipeline.run_from_constitution(
             pd.DataFrame([{"source_category": "Cooking", "sample_description": "desc",

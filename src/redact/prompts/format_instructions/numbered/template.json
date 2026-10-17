@@ -1,5 +1,5 @@
 {
-  "instruction": "\n\nOUTPUT FORMAT INSTRUCTIONS:\nGenerate exactly {num_samples} samples.\nFormat your response as a numbered list. Each sample must be on its own line, starting with the number followed by a period and a space.\nExample format:\n1. [first sample]\n2. [second sample]\n...\n{num_samples}. [last sample]\n\nDo NOT include any preamble, explanation, or commentary. Output ONLY the numbered list.",
+  "instruction": "\n\nOUTPUT FORMAT INSTRUCTIONS:\nGenerate exactly {num_samples} samples.\nFormat your response as a numbered list. Each sample must be on its own line, starting with the number followed by a period and a space.\nExample format:\n1. [first sample]\n2. [second sample]\n...\n{num_samples}. [last sample]\n\nDo NOT include any preamble, explanation, or commentary. Output ONLY the numbered list.\n\nTODO(owner): the sentence asking the reply to end with [END].",
   "seed_fields": [
     "num_samples"
   ],

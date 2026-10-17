@@ -33,6 +33,7 @@ from redact import dataset, paths
 from redact.config_overlay import taxonomy_folder
 from redact.constitution import ConstitutionPipeline, read_constitution
 from redact.content_moderation import InputPipeline, run_output_generation
+from redact.content_moderation import axes as generation_axes
 from redact.content_moderation.paraphrase import (
     paraphrase_pool,
     run_paraphrase_target,
@@ -204,13 +205,16 @@ def generate_inputs(
     batch_size: int = 32,
     max_attempts: int = 3,
     check_max_tokens: int | None = None,
+    axes: dict | bool | None = None,
+    seed: int = 42,
     read_back: bool = True,
 ) -> pd.DataFrame:
     """Generate content moderation input samples seeded from a constitution.
 
-    Each constitution entry becomes one generation request via
-    ``InputPipeline.run_from_constitution()``; the samples are checked with
-    the entry-type-aware quality checker.
+    Each constitution entry becomes ``samples_per_entry`` units of one sample
+    each via ``InputPipeline.run_from_constitution()``, each dealt a spec of
+    the generation axes; the samples are checked with the entry-type-aware
+    quality checker.
 
     Args:
         constitution_df: DataFrame of constitution entries. ``None`` reads
@@ -229,14 +233,21 @@ def generate_inputs(
         verbose: Log progress.
         style: Template style (``"long"`` / ``"short"`` / any directory under
             ``prompts/input/generation/from_constitution/``).
-        samples_per_entry: Prompts to generate per constitution entry.
+        samples_per_entry: Samples per constitution entry, one call each.
         entry_types: Filter constitution entries to these types
             (e.g. ``["harmful", "benign"]``). None = all.
         batch_size: Entries per LLM engine pass.
-        max_attempts: Generations per entry before a reply with the wrong
-            number of samples is given up on.
+        max_attempts: Generations per unit before a reply without its
+            ``[END]`` marker or with another number of samples is given up on.
         check_max_tokens: Reply limit for the check calls. ``None`` keeps the
             checker model's default.
+        axes: The generation axes each unit is dealt a value of, the
+            ``inputs`` section of ``configs/generation_axes.json``: ``None``
+            for those, ``False`` for none, or ``{axis: {value: weight}}``
+            over them, an axis as ``None`` to leave it out. With axes the
+            length axis sets each sample's length; ``style`` picks the
+            prompt only.
+        seed: The seed of the deal.
         read_back: False returns an empty DataFrame and reads no sample back.
 
     Returns:
@@ -244,8 +255,11 @@ def generate_inputs(
 
     Raises:
         ValueError: ``constitution_df`` is None and no constitution is saved
-            under ``data_dir``.
+            under ``data_dir``, ``axes`` names an unknown axis or value, or
+            the folder or its plan file stops the stage
+            (``InputPipeline.run_from_constitution``).
     """
+    axes = generation_axes.resolve("inputs", axes)
     if constitution_df is None:
         constitution_df = _saved_constitution(data_dir)
     model = model or default_model_for_role("uncensored_gen")
@@ -287,6 +301,8 @@ def generate_inputs(
         style=style,
         max_attempts=max_attempts,
         check_max_tokens=check_max_tokens,
+        axes=axes,
+        seed=seed,
     )
     if result.total_entries_processed:
         _warn_on_low_acceptance(
