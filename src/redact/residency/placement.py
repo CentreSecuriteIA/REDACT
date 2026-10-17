@@ -630,11 +630,13 @@ def _place(
 
     plan.groups = groups
     plan.gpus_required = _gpus_required(footprints)
-    plan.oversized = [
-        fp for fp in footprints
-        if per_gpu_gb and _exceeds_its_cards(
-            fp, sizes or [per_gpu_gb] * max(plan.gpus_available, 1))
-    ]
+    # One entry per engine: the models on it share one load.
+    oversized: dict[tuple, ModelFootprint] = {}
+    for fp in footprints:
+        if per_gpu_gb and fp.engine not in oversized and _exceeds_its_cards(
+                fp, sizes or [per_gpu_gb] * max(plan.gpus_available, 1)):
+            oversized[fp.engine] = fp
+    plan.oversized = list(oversized.values())
 
 
 class _Search:

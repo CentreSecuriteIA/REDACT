@@ -22,7 +22,8 @@ class ResidencyPlan:
     #: Each card's size, in the order the plan numbers them. ``None`` when
     #: the card size is unknown.
     gib_per_card: list[float] | None = None
-    #: Models whose grant, or whose cards, do not cover their need.
+    #: Models whose grant, or whose cards, do not cover their need: the
+    #: first such model of each engine.
     oversized: list[ModelFootprint] = field(default_factory=list)
     #: True when the caller gave the card count or the card size.
     machine_given: bool = False

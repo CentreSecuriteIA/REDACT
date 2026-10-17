@@ -1023,6 +1023,19 @@ class TestCardsOfDifferentSizes:
             assert (fp.devices, fp.planned_utilization) == ((0, 1), 0.1979)
             assert fp in phase.plan.oversized and not phase.plan.fits
 
+    def test_a_lowered_share_reports_an_engine_once(self, registered):
+        """As above, with a second model on x's engine: one load, one problem."""
+        x = registered("_sz_low1_x", hf_model_id="org/szl1x", vram_gb=6.0)
+        twin = registered("_sz_low1_t", hf_model_id="org/szl1x", vram_gb=6.0)
+        y = registered("_sz_low1_y", hf_model_id="org/szl1y", vram_gb=50.0)
+        with patch.object(measure, "card_sizes_gib", return_value=[96.0, 16.0]), \
+             patch.object(measure, "detect_gpus", return_value=("FakeGPU", 2)):
+            a, b = residency.plan_phases(
+                {"a": [x, twin, y], "b": [x, twin]}, copies={x: 2})
+        for phase in (a, b):
+            assert [fp.model for fp in phase.plan.oversized] == [x]
+            assert phase.plan.explain().count("PROBLEM:") == 1
+
     def test_a_count_given_for_other_cards_plans_every_card_at_the_smallest(
             self, registered):
         """Four cards asked of a machine whose two are 96 and 32 GiB."""
@@ -1395,6 +1408,23 @@ class TestOversizedModels:
         with _kv(1.0):
             plan = _plan([big], 48.0, 1)
         assert len(plan.problems) == 1 and plan.warnings == []
+
+    def test_two_models_on_one_oversized_engine_are_one_problem(self, registered):
+        """Both load one engine, so it is reported once, under the first."""
+        a = registered("_res_over_twin_a", hf_model_id="org/ot", vram_gb=30.0)
+        b = registered("_res_over_twin_b", hf_model_id="org/ot", vram_gb=30.0)
+        plan = _plan([a, b], 24.0, 1)
+        assert len(plan.groups) == 1
+        assert [fp.model for fp in plan.oversized] == [a]
+        assert plan.explain().count("PROBLEM:") == 1
+
+    def test_a_twin_larger_than_its_engine_is_the_one_reported(self, registered):
+        """The engine is placed by the first model; a larger twin may not
+        fit the share that leaves."""
+        small = registered("_res_grow_a", hf_model_id="org/og", vram_gb=10.0)
+        large = registered("_res_grow_b", hf_model_id="org/og", vram_gb=30.0)
+        plan = _plan([small, large], 24.0, 1)
+        assert [fp.model for fp in plan.oversized] == [large]
 
     def test_declaring_min_gpus_clears_the_problem(self, registered):
         big = registered("_res_tp_ok", hf_model_id="org/huge2", vram_gb=50.0, min_gpus=8)
