@@ -247,11 +247,23 @@ Input samples live in one `samples.csv` per category folder, under
 | `input_files(data_dir)` | The category files `merge_inputs` reads |
 | `take_per_group(frame, n, group_by=("category", "entry_type"))` | The first `n` rows of each group, in the frame's order. Rows with a missing group value form a group of their own. Group columns the frame lacks are left out; with none present, the first `n` rows. `n=None` returns the frame |
 
+## What an eval build leaves out
+
+| Function | Does |
+|---|---|
+| `exclusion_files(paths)` | The CSVs the paths name: a file as it is, a run's folder as its `Datasets/*.csv` and its `Data_cache/constitution/merged.csv` |
+| `Exclusion(files)` | Reads those files in chunks, their accepted rows only (a file without `accepted`, all), into three sets: `sample_id`s, normalised ids of the text columns (`sample`, `jailbreak`, `output_response`, `text`), and content ids of the descriptions (`sample_description`, `source_sample_description`) |
+| `Exclusion.read_inputs(inputs)` | Notes which eval inputs are left out, and why, and which are kept from a shared constitution entry, for the rows derived from them |
+| `Exclusion.keeps(text, origin)` | A `Part.where` filter: a row is left out for its own `sample_id` (`exact`) or text (`normalised`), else for its input's reason through the `origin` column; it counts each, and the kept rows of a shared entry (`descriptions`), in `counts` |
+
+The build applies it to every part of the three eval files
+([stages/build.md](../stages/build.md#leaving-out-what-a-training-run-holds)).
+
 ## Taxonomy and published datasets
 
 | Function | Does |
 |---|---|
-| `load_taxonomy(name, config_dir=None)` | A taxonomy file, from `configs/taxonomy/` by default. The name is taken with or without `.json`; a name with another suffix gets `.json` added (`harmful.v2` reads `harmful.v2.json`). A missing file raises `FileNotFoundError`. The former name `content_moderation_categories` loads `harmful`, and a folder holding only `content_moderation_categories.json` is read for `harmful`, each with a `DeprecationWarning` |
+| `load_taxonomy(name, config_dir=None)` | A taxonomy file, from the folder `config_dir`, by default `configs/taxonomy/` (the folder of the files, not a recipe's `config_dir`, whose `taxonomy/` a run passes here through `config_overlay.taxonomy_folder`). The name is taken with or without `.json`; a name with another suffix gets `.json` added (`harmful.v2` reads `harmful.v2.json`). A missing file raises `FileNotFoundError`. The former name `content_moderation_categories` loads `harmful`, and a folder holding only `content_moderation_categories.json` is read for `harmful`, each with a `DeprecationWarning` |
 | `create_taxonomy(name, categories, description="", taxonomy_dir=None, verbose=True)` | Writes `<name>.json` under `taxonomy_dir` (default the packaged `configs/taxonomy/`) and returns the taxonomy; a bare description is written as `{"description": ...}`. It adds `.json` unless the name ends in it |
 | `iter_categories(taxonomy)` | `(name, info)` per category, a bare description as `{"description": ...}` |
 | `load_hf_dataset(dataset_id, split, columns, filters, exclude, ...)`, `load_from_config(name)` | A HuggingFace dataset, filtered, directly or from a config under `configs/datasets/`; needs the `hf` extra |

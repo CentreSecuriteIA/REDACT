@@ -27,7 +27,7 @@ the technique names are in [techniques.md](../techniques.md).
 | `technique.py` | The technique contract, `load_spec`, `tag`, `DISCARDED` |
 | `hacking/`, `manipulation/`, `obfuscation/`, `requests/` | The techniques, one module per family (`distractor.py` holds both distractor families), each with a getter; `get_all_hacking_functions`, `get_all_manipulation_functions`, `get_all_obfuscation_functions`, `get_all_request_functions` per subpackage. `manipulation/benign.py` makes the benign data: one unit per subcategory of the benign taxonomy and answer type, keyed `(main_category, sub_category, answer_type)` |
 | `pool.py` | `all_techniques`, `technique_pool(kind)`, `languages`, `registry`, `uses_translation` |
-| `augmentation.py` | `KINDS`, `defaults`, `resolve(section, kind)`, `rounds_of(kind)`, `apply_flat_keywords`, `FLAT_KEYWORDS` |
+| `augmentation.py` | `KINDS`, `defaults(config_dir)`, `resolve(section, kind, base=None, config_dir=None)`, `rounds_of(kind)`, `apply_flat_keywords`, `FLAT_KEYWORDS` |
 | `rules.py` | `compatible(selected, pool, remaining_complexity)`, `request_obfuscation_candidates` |
 | `sampling.py` | `sample_combination`, `sample_exact_combination`, `_pick_by_family` |
 | `plan.py` | `plan_run`, `assign_combination`, `combination_of`, `coverage`, `coverage_path`, `plan_path`, `plan_inputs`, `changed_plan_inputs` (the `<stem>.plan.json` beside the manifest), `default_escalation_schedule`, the dealer |
@@ -208,11 +208,18 @@ manifest whenever a plan is written: per `level` (`layer`, `family`,
 
 ## The augmentation section in code
 
-`augmentation.resolve(section, kind)` overlays a kind on its default from
-`configs/jailbreak/augmentations.json`, checks every key and name, and
-returns the full kind, or `None` for a kind that is off. A key starting
-with `_`, in the section or a kind, is a comment.
-`technique_pool(kind)` filters the registered techniques.
+`augmentation.resolve(section, kind, base=None, config_dir=None)` overlays
+a kind on its default, checks every key and name, and returns the full
+kind, or `None` for a kind that is off. The default is the packaged
+`configs/jailbreak/augmentations.json` (the `config_dir`'s when it has the
+file), with `base`, the dataset type's section, resolved over it: a kind
+`section` leaves out is `base`'s, and a kind `base` switches off comes back,
+over the packaged default, when `section` gives it. A key starting with
+`_`, in the section or a kind, is a comment. With `translation` false, the
+translation an allow list or `family_weights` names is dropped with a
+WARNING (`_switch_off_translation`). `technique_pool(kind)` filters the
+registered techniques; with the switch on, a `techniques.allow` that names
+some languages (`pool.languages()`) admits those alone.
 `rounds_of(kind)` turns the kind into one sampler-settings dict per round:
 a natural round is `{"exact_techniques": n}`; an adversarial round is the
 budget keys, an `include_<layer>` per layer and `allow_request_obfuscation`
