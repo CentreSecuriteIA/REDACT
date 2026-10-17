@@ -14,6 +14,8 @@ from redact.jailbreak.hacking import get_all_hacking_functions
 from redact.jailbreak.plan import coverage, plan_run
 
 _GROUP = 20
+# Of 200 units, the fewest a request family may get (about 15 each is even).
+_LEAST_PER_FAMILY = 10
 
 
 def _one_group(n: int) -> pd.DataFrame:
@@ -129,3 +131,18 @@ def test_the_escalation_asks_rates_the_rules_can_meet(tmp_path, caplog):
     with caplog.at_level(logging.WARNING, logger="redact.jailbreak.plan"):
         _plan_kind(tmp_path, {"rounds": "escalation"}, 40)
     assert [r.getMessage() for r in caplog.records] == []
+
+
+def test_the_default_budget_deals_every_request_family(tmp_path):
+    """The requests layer is picked before the obfuscations, so the budget
+    they spend does not leave only the cheapest request families."""
+    from redact.jailbreak.technique import load_spec
+
+    families = load_spec()["families"]
+    requests = [name for name, family in families.items()
+                if family["layer"] == "requests"]
+    rows = _plan_kind(tmp_path, {}, 200)
+    drawn = {r["name"]: int(r["count"]) for r in rows if r["level"] == "family"}
+    short = {name: drawn.get(name, 0) for name in requests
+             if drawn.get(name, 0) < _LEAST_PER_FAMILY}
+    assert short == {}
