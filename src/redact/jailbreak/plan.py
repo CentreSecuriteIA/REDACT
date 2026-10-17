@@ -355,7 +355,9 @@ def default_escalation_schedule() -> list[dict]:
     """The built-in four rounds, each one round's sampler settings.
 
     Rounds one and two draw exactly one and two techniques; rounds three and
-    four draw by budget, the fourth with the larger one. It is what an
+    four draw by budget, the fourth with the larger one. A unit holds a
+    hacking or a manipulation technique, never both, so the two rates of a
+    round sum to at most 1. It is what an
     adversarial kind's ``"rounds": "escalation"`` names; each round is merged
     over the kind's budget settings.
     """
@@ -366,7 +368,7 @@ def default_escalation_schedule() -> list[dict]:
             "max_complexity": 6,
             "max_obfuscations": 2,
             "sampling_probs": {
-                "hacking": 0.7, "manipulation": 0.5,
+                "hacking": 0.7, "manipulation": 0.3,
                 "requests": 0.8, "request_obfuscation": 0.5,
             },
             "allow_request_obfuscation": True,
@@ -375,7 +377,7 @@ def default_escalation_schedule() -> list[dict]:
             "max_complexity": 9,
             "max_obfuscations": 3,
             "sampling_probs": {
-                "hacking": 0.9, "manipulation": 0.7,
+                "hacking": 0.9, "manipulation": 0.1,
                 "requests": 0.9, "request_obfuscation": 0.7,
             },
             "allow_request_obfuscation": True,
