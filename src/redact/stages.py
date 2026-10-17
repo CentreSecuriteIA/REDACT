@@ -158,6 +158,14 @@ def generate_constitution(
     )
 
 
+# The parameters of generate_inputs that one of its paths takes and the other
+# ignores.
+_SEEDED_ONLY = ("style", "samples_per_entry", "max_attempts", "batch_size",
+                "check_max_tokens", "entry_types")
+_STANDALONE_ONLY = ("samples_per_category", "num_categories", "samples_per_request",
+                    "num_seeds", "use_metaprompt", "seeds_name")
+
+
 def generate_inputs(
     taxonomy: dict | str = "harmful",
     samples_per_category: int = 15,
@@ -241,10 +249,13 @@ def generate_inputs(
     Returns:
         Merged DataFrame of accepted samples.
     """
+    given = locals()
     # Generation model defaults to the uncensored_gen role (both modes).
     model = model or default_model_for_role("uncensored_gen")
 
     if constitution_df is not None:
+        _warn_on_ignored(_STANDALONE_ONLY, given, "the standalone inputs, and this "
+                         "run seeds its inputs from a constitution")
         client = ModelClient.create(model)
         check_model = check_model or model
         check_client = ModelClient.create(check_model)
@@ -324,6 +335,8 @@ def generate_inputs(
         DeprecationWarning,
         stacklevel=2,
     )
+    _warn_on_ignored(_SEEDED_ONLY, given, "the inputs seeded from a constitution, "
+                     "and this run is standalone")
     if isinstance(taxonomy, str):
         taxonomy = load_taxonomy(taxonomy, config_dir=taxonomy_dir)
     categories = list(iter_categories(taxonomy))
@@ -349,6 +362,17 @@ def generate_inputs(
         _warn_on_low_acceptance(sum(r.total_accepted for r in results),
                                 sum(r.total_extracted for r in results))
     return merge_all(ds_dir, accepted_only=True) if read_back else pd.DataFrame()
+
+
+def _warn_on_ignored(names: tuple[str, ...], given: dict, whose: str) -> None:
+    """Warn naming the parameters of ``names`` that ``given`` sets to other
+    than their default: the path of the inputs stage that runs ignores them.
+    ``whose`` says whose parameters they are."""
+    defaults = inspect.signature(generate_inputs).parameters
+    ignored = [name for name in names if given[name] != defaults[name].default]
+    if ignored:
+        logger.warning("inputs: %s are parameters of %s; they are ignored.",
+                       ignored, whose)
 
 
 def generate_outputs(

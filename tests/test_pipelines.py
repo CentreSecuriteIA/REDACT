@@ -431,6 +431,54 @@ class TestInputsWarnOnLowAcceptance:
             assert len(found) == 1 and warned in found[0]
 
 
+def _ignored_warnings(caplog) -> list[str]:
+    return [r.getMessage() for r in caplog.records
+            if r.levelno == logging.WARNING and "ignored" in r.getMessage()]
+
+
+class TestInputsWarnOfTheOtherPathsParameters:
+    """Each path of the inputs stage names the other's parameters it was given."""
+
+    def test_a_seeded_run_names_the_standalone_ones(
+            self, tmp_path, monkeypatch, caplog):
+        import redact.stages as P
+        from redact import generate_inputs
+        from tests.conftest import make_client
+
+        backends = {"gen-model": MockBackend("1. zqa sample\n2. zqb sample"),
+                    "check-model": MockBackend("Yes")}
+        monkeypatch.setattr(P.ModelClient, "create",
+                            lambda m: make_client(backends[m], m))
+        constitution = pd.DataFrame([{
+            "source_category": "Cyber", "constitution_subcategory": "Sub",
+            "sample_description": "what zq0 is about", "entry_type": "harmful"}])
+        with caplog.at_level(logging.WARNING, logger="redact"):
+            generate_inputs(data_dir=tmp_path, constitution_df=constitution,
+                            samples_per_entry=2, model="gen-model",
+                            check_model="check-model", verbose=False,
+                            num_categories=3, samples_per_request=5)
+        assert _ignored_warnings(caplog) == [
+            "inputs: ['num_categories'] are parameters of the standalone inputs, "
+            "and this run seeds its inputs from a constitution; they are ignored."]
+
+    def test_a_standalone_run_names_the_seeded_ones(
+            self, tmp_path, monkeypatch, caplog):
+        import redact.stages as P
+        from redact import generate_inputs
+        from tests.conftest import make_client
+
+        monkeypatch.setattr(P.ModelClient, "create",
+                            lambda m: make_client(MockBackend(), m))
+        with (caplog.at_level(logging.WARNING, logger="redact"),
+              pytest.warns(DeprecationWarning)):
+            generate_inputs(data_dir=tmp_path, taxonomy={"categories": {}},
+                            num_categories=0, style="short", batch_size=8,
+                            samples_per_entry=3, verbose=False)
+        assert _ignored_warnings(caplog) == [
+            "inputs: ['style', 'batch_size'] are parameters of the inputs seeded "
+            "from a constitution, and this run is standalone; they are ignored."]
+
+
 class TestGenerateOutputsReadBack:
     def test_without_read_back_the_output_is_written_and_not_read(
             self, tmp_path, monkeypatch):

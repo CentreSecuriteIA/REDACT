@@ -774,6 +774,33 @@ def test_a_recipe_naming_the_former_taxonomy_in_its_own_folder_keeps_the_name(
     assert list(taxonomy["categories"]) == ["A"]
 
 
+@pytest.mark.parametrize("name", ["eval_example.json", "training_example.json"])
+def test_every_stage_of_the_example_recipes_takes_their_params(name, tmp_path):
+    """And the inputs of each are given only their own path's parameters."""
+    from redact.recipe import _DEFAULT_MODELS, _role_names
+    from redact.stages import (
+        _SEEDED_ONLY,
+        _STANDALONE_ONLY,
+        STAGES,
+        RunContext,
+        _seeded,
+    )
+
+    recipe = load_recipe(paths.configs_dir() / "runs" / name)
+    params = load_params(recipe["params_file"], base_dir=recipe["_base_dir"])
+    ctx = RunContext(
+        data_dir=tmp_path, dataset_type=recipe["dataset_type"],
+        models={**_DEFAULT_MODELS, **_role_names(recipe["models"])},
+        prompt_dir=None, taxonomy=recipe["taxonomy"], taxonomy_dir=None,
+        params=params, augmentations=augmentations_of(recipe, params["jailbreaks"]),
+        resume=True, verbose=False, stages=tuple(recipe["stages"]))
+    for stage in recipe["stages"]:
+        STAGES[stage].check(ctx)
+    other_path = _STANDALONE_ONLY if _seeded(ctx) else _SEEDED_ONLY
+    assert set(params["inputs"]).isdisjoint(other_path)
+    assert _seeded(ctx) == (recipe["dataset_type"] == "training")
+
+
 # --- the augmentation section -------------------------------------------------
 
 def _section(augmentations) -> dict:
