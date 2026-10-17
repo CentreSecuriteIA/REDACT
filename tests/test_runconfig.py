@@ -889,6 +889,8 @@ def test_an_eval_recipe_may_include_the_constitution_stage():
 _SIX_STAGES = ["constitution", "inputs", "outputs", "paraphrase", "jailbreaks", "build"]
 _EVAL_SEED = 43
 _BATCH = 4
+# The eval type's pin of the inputs' directness.
+_EVAL_AXES = {"directness": {"explicit": 1, "implicit": 0, "euphemistic": 0}}
 
 
 def test_a_recipe_names_its_dataset_type():
@@ -976,11 +978,31 @@ def test_the_types_params_lie_under_the_params_files():
                             "inputs": {"samples_per_entry": 2}})
     assert STAGES["jailbreaks"].params(ctx) == {"seed": 1}
     assert STAGES["inputs"].params(ctx) == {
-        "entry_types": ["harmful", "benign"], "samples_per_entry": 2}
+        "entry_types": ["harmful", "benign"], "axes": _EVAL_AXES,
+        "samples_per_entry": 2}
     assert STAGES["constitution"].params(ctx)["entry_types"] == ["harmful", "benign"]
     assert STAGES["outputs"].params(ctx) == {}
     assert STAGES["jailbreaks"].params(_context("eval", {})) == {"seed": _EVAL_SEED}
     assert STAGES["inputs"].params(_context("training", {})) == {}
+
+
+def test_the_eval_type_deals_every_input_explicit():
+    """An implicit or euphemistic request is borderline by construction, and
+    eval keeps the clear ends: directness varies no request_intent there, the
+    other axes keep training's weights, and the dimension check passes."""
+    from redact.content_moderation import axes as A
+    from redact.recipe import check_dimensions, stage_params
+
+    evals = A.resolve("inputs", stage_params("inputs", "eval")["axes"])
+    training = A.resolve("inputs", stage_params("inputs", "training").get("axes"))
+    assert [value for value, entry in evals["directness"]["values"].items()
+            if entry["weight"]] == ["explicit"]
+    assert "directness" not in A.varied(evals)
+    assert A.varied(training)["directness"] == "request_intent"
+    assert {axis: entry for axis, entry in evals.items() if axis != "directness"} \
+        == {axis: entry for axis, entry in training.items() if axis != "directness"}
+    check_dimensions({}, load_recipe({"dataset_type": "eval"})["augmentations"],
+                     dataset_type="eval")
 
 
 def test_a_type_param_the_front_does_not_take_is_refused(monkeypatch):
@@ -1035,8 +1057,10 @@ def test_an_eval_run_hands_each_front_the_types_params(tmp_path, monkeypatch):
     assert handed["generate_inputs"]["entry_types"] == ["harmful", "benign"]
     assert handed["generate_inputs"]["batch_size"] == _BATCH
     assert handed["generate_jailbreaks"]["seed"] == _EVAL_SEED
+    assert handed["generate_inputs"]["axes"] == _EVAL_AXES
     assert read_record("inputs", tmp_path)["params"] == {
-        "entry_types": ["harmful", "benign"], "batch_size": _BATCH}
+        "entry_types": ["harmful", "benign"], "axes": _EVAL_AXES,
+        "batch_size": _BATCH}
 
 
 def test_load_params_resolves_relative_to_base_dir(tmp_path):
