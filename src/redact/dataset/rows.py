@@ -13,9 +13,6 @@ import pandas as pd
 # Rows per read of a file that is not read whole.
 _CHUNK_ROWS = 50_000
 
-# The cells pandas reads as true when it reads a column of verdicts whole.
-_TRUE_CELLS = ("True", "TRUE", "true")
-
 # Read as text: a content id of digits is not a number. pandas skips a column
 # the file lacks.
 _ID_COLUMNS = {"sample_id": str, "input_id": str}
@@ -149,6 +146,16 @@ def _blank_missing_text(frame: pd.DataFrame) -> pd.DataFrame:
     return frame.fillna(text) if text else frame
 
 
+def accepted_mask(verdicts: pd.Series) -> pd.Series:
+    """Which cells of an ``accepted`` column say true, in any case.
+
+    The cells may be booleans or text, as a file read whole or as text gives
+    them. Anything else, an empty cell, ``yes`` or ``1`` too, is not
+    accepted.
+    """
+    return verdicts.astype(str).str.strip().str.lower() == "true"
+
+
 def read_rows(path: str | Path) -> pd.DataFrame:
     """Every row of the CSV at ``path``, or an empty frame when there is no file.
 
@@ -240,7 +247,8 @@ class Part(NamedTuple):
         dataset_type: The value of the rows' ``dataset_type`` column. ``None``
             adds no such column.
         accepted_only: Copy only the rows of a file whose ``accepted`` cell
-            reads true. A file without the column is copied whole.
+            reads true (:func:`accepted_mask`). A file without the column is
+            copied whole.
         label: What the log calls the part.
     """
 
@@ -286,7 +294,7 @@ def _part_chunks(part: Part) -> Iterator[pd.DataFrame]:
     with pd.read_csv(part.source, dtype=str, chunksize=_CHUNK_ROWS) as chunks:
         for chunk in chunks:
             if part.accepted_only and "accepted" in chunk.columns:
-                chunk = chunk[chunk["accepted"].isin(_TRUE_CELLS)]
+                chunk = chunk[accepted_mask(chunk["accepted"])]
             yield chunk.assign(**tag)
 
 

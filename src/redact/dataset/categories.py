@@ -14,7 +14,7 @@ import pandas as pd
 from redact import paths
 
 from .identity import content_id
-from .rows import _ID_COLUMNS, _blank_missing_text, _has_bytes
+from .rows import _ID_COLUMNS, _blank_missing_text, _has_bytes, accepted_mask
 
 # The columns of an input sample row.
 SAMPLE_COLUMNS: list[str] = [
@@ -181,7 +181,8 @@ def merge_category_csvs(
 ) -> pd.DataFrame:
     """Concatenate the CSVs of ``categories`` into one frame.
 
-    ``accepted_only`` keeps the rows whose ``accepted`` is true. A category
+    ``accepted_only`` keeps the rows whose ``accepted`` is true
+    (:func:`redact.dataset.accepted_mask`). A category
     without a CSV is skipped; with none found the frame is empty.
     """
     frames: list[pd.DataFrame] = []
@@ -189,7 +190,7 @@ def merge_category_csvs(
         df = read_category_csv(category, dataset_dir, filename)
         if not df.empty:
             if accepted_only and "accepted" in df.columns:
-                df = df[df["accepted"] == True]  # noqa: E712
+                df = df[accepted_mask(df["accepted"])]
             frames.append(df)
 
     if not frames:

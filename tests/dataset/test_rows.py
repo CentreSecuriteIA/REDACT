@@ -10,6 +10,7 @@ import redact.dataset.rows as rows_module
 from redact.dataset import (
     Ledger,
     Part,
+    accepted_mask,
     append_rows,
     check_columns,
     count_rows,
@@ -423,6 +424,36 @@ class TestCheckColumns:
     def test_a_file_with_no_header_takes_any_columns(self, tmp_path):
         check_columns(tmp_path / "new.csv", [{"anything": 1}])
         assert list(tmp_path.iterdir()) == []
+
+
+# A verdict cell as the library, a spreadsheet or a hand edit writes it, and
+# whether it reads as accepted.
+_VERDICTS = [("True", True), ("TRUE", True), ("true", True), ("False", False),
+             ("FALSE", False), ("", False), ("yes", False), ("1", False),
+             ("0", False)]
+
+
+class TestAcceptedMask:
+    def test_true_in_any_case_and_nothing_else(self):
+        cells = pd.Series([cell for cell, _ in _VERDICTS], dtype=str)
+        assert accepted_mask(cells).tolist() == [ok for _, ok in _VERDICTS]
+
+    def test_a_column_read_as_booleans(self):
+        assert accepted_mask(pd.Series([True, False])).tolist() == [True, False]
+
+    def test_the_tree_and_the_build_keep_the_same_rows(self, tmp_path):
+        from redact.dataset import merge_inputs
+
+        path = tmp_path / "Datasets" / "Cyber" / "samples.csv"
+        path.parent.mkdir(parents=True)
+        path.write_text("sample_id,sample,accepted\n" + "".join(
+            f"id{n},t{n},{cell}\n" for n, (cell, _) in enumerate(_VERDICTS)),
+            encoding="utf-8")
+        kept = [f"id{n}" for n, (_, ok) in enumerate(_VERDICTS) if ok]
+        assert list(merge_inputs(tmp_path)["sample_id"]) == kept
+        out = tmp_path / "out.csv"
+        write_concat(out, [Part(path, accepted_only=True)])
+        assert list(read_rows(out)["sample_id"]) == kept
 
 
 class TestWriteConcat:

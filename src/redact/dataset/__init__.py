@@ -57,6 +57,7 @@ from .resume import release_lock, resume_state
 # Rows in one CSV
 from .rows import (
     Part,
+    accepted_mask,
     append_rows,
     check_columns,
     count_rows,
@@ -85,6 +86,7 @@ __all__ = [
     "Ledger",
     "Manifest",
     "Part",
+    "accepted_mask",
     "append_rows",
     "append_samples",
     "check_columns",

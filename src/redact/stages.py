@@ -41,6 +41,7 @@ from redact.content_moderation.paraphrase import (
 )
 from redact.dataset import (
     Part,
+    accepted_mask,
     discover_categories,
     has_rows,
     input_files,
@@ -813,7 +814,7 @@ def generate_paraphrases(
                       else dataset.read_rows(paths.output_responses_csv(data_dir)))
             has_rows = outputs is not None or not source.empty
             if "accepted" in source.columns:
-                source = source[source["accepted"] == True]  # noqa: E712
+                source = source[accepted_mask(source["accepted"])]
             out_path = (Path(outputs_path) if outputs_path
                         else paths.paraphrases_outputs_csv(data_dir))
         if has_rows and source.empty:
