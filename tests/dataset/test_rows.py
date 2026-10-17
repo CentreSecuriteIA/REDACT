@@ -262,6 +262,31 @@ class TestHasRows:
         assert not has_rows(tmp_path / "nope.csv")
 
 
+class TestAnEmptyFile:
+    """A save killed between opening the file and writing to it leaves 0 bytes:
+    a reader takes that as no rows, as it takes no file."""
+
+    @pytest.mark.parametrize("read, nothing", [
+        (lambda path: read_rows(path).empty, True),
+        (lambda path: list(iter_rows(path)), []),
+        (count_rows, 0),
+        (has_rows, False),
+        (lambda path: keys_in(path, _UNIT, _UNIT_CASTERS), set()),
+    ], ids=["read_rows", "iter_rows", "count_rows", "has_rows", "keys_in"])
+    def test_reads_as_no_rows(self, tmp_path, read, nothing):
+        path = tmp_path / "out.csv"
+        path.touch()
+        assert read(path) == nothing
+
+    def test_is_a_part_without_rows(self, tmp_path):
+        path, frame = tmp_path / "empty.csv", pd.DataFrame({"sample_id": ["b0"]})
+        path.touch()
+        out = tmp_path / "out.csv"
+        parts = [Part(path, accepted_only=True), Part(frame)]
+        assert write_concat(out, parts) == [0, 1]
+        assert _lines(out) == ["sample_id", "b0"]
+
+
 class TestKeysIn:
     def test_no_file_gives_no_keys(self, tmp_path):
         assert keys_in(tmp_path / "nope.csv", ("input_id",)) == set()

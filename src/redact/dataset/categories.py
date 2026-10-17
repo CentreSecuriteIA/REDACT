@@ -14,6 +14,7 @@ import pandas as pd
 from redact import paths
 
 from .identity import content_id
+from .rows import _has_bytes
 
 # The columns of an input sample row.
 SAMPLE_COLUMNS: list[str] = [
@@ -36,7 +37,7 @@ def read_category_csv(
 ) -> pd.DataFrame:
     """Read a category's CSV; an empty ``SAMPLE_COLUMNS`` frame when there is none."""
     path = paths.category_csv(category, root=dataset_dir, filename=filename)
-    if path.exists():
+    if _has_bytes(path):
         return pd.read_csv(path)
     return pd.DataFrame(columns=SAMPLE_COLUMNS)
 

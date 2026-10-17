@@ -25,6 +25,16 @@ class TestReadCategoryCsv:
         assert df.empty
         assert list(df.columns) == SAMPLE_COLUMNS
 
+    def test_an_empty_file_reads_as_none(self, tmp_dataset_dir):
+        """What a save killed before its first byte leaves."""
+        path = paths.category_csv("empty", root=tmp_dataset_dir)
+        path.parent.mkdir()
+        path.touch()
+        df = read_category_csv("empty", dataset_dir=tmp_dataset_dir)
+        assert df.empty and list(df.columns) == SAMPLE_COLUMNS
+        assert discover_categories(tmp_dataset_dir) == ["empty"]
+        assert merge_all(tmp_dataset_dir).empty
+
     def test_reads_existing(self, tmp_dataset_dir):
         cat_dir = tmp_dataset_dir / "test_cat"
         cat_dir.mkdir()

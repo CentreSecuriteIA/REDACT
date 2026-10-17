@@ -56,6 +56,15 @@ def _replace(source: Path, target: Path) -> None:
             time.sleep(_REPLACE_WAIT_SECONDS)
 
 
+def _has_bytes(path: Path) -> bool:
+    """Whether ``path`` is a file with a byte in it.
+
+    A save killed between opening a new file and writing to it leaves 0
+    bytes; a reader takes that as no file.
+    """
+    return path.is_file() and path.stat().st_size > 0
+
+
 def _header(path: Path) -> list[str] | None:
     """The column names of the CSV at ``path``, ``None`` when it has no header yet."""
     if not path.exists():
@@ -126,7 +135,7 @@ def append_rows(path: str | Path, rows: Sequence[Mapping[str, Any]]) -> dict[Pat
 def read_rows(path: str | Path) -> pd.DataFrame:
     """Every row of the CSV at ``path``, or an empty frame when there is no file."""
     path = Path(path)
-    return pd.read_csv(path) if path.exists() else pd.DataFrame()
+    return pd.read_csv(path) if _has_bytes(path) else pd.DataFrame()
 
 
 def iter_rows(
@@ -139,7 +148,7 @@ def iter_rows(
     one chunk and ``float`` in another that has an empty cell.
     """
     path = Path(path)
-    if not path.exists():
+    if not _has_bytes(path):
         return
     usecols = None if columns is None else list(columns)
     with pd.read_csv(path, usecols=usecols, chunksize=_CHUNK_ROWS) as chunks:
@@ -153,7 +162,7 @@ def count_rows(path: str | Path) -> int:
     Reads one column in chunks, never the whole file.
     """
     path = Path(path)
-    if not path.exists():
+    if not _has_bytes(path):
         return 0
     with pd.read_csv(path, usecols=[0], chunksize=_CHUNK_ROWS) as chunks:
         return sum(len(chunk) for chunk in chunks)
@@ -163,7 +172,7 @@ def has_rows(path: str | Path) -> bool:
     """Whether the CSV at ``path`` holds a row below its header, ``False`` when
     there is no file."""
     path = Path(path)
-    return path.exists() and not pd.read_csv(path, nrows=1, dtype=str).empty
+    return _has_bytes(path) and not pd.read_csv(path, nrows=1, dtype=str).empty
 
 
 def keys_in(
@@ -179,7 +188,7 @@ def keys_in(
     file is read in chunks and only the keys are kept.
     """
     path = Path(path)
-    if not path.exists():
+    if not _has_bytes(path):
         return set()
     key_fields = tuple(key_fields)
     casters = casters or {}
@@ -220,8 +229,10 @@ def _part_columns(part: Part) -> list[str]:
     """The columns a part's rows are written with."""
     if isinstance(part.source, pd.DataFrame):
         columns = list(part.source.columns)
-    else:
+    elif _has_bytes(part.source):
         columns = list(pd.read_csv(part.source, nrows=0).columns)
+    else:
+        columns = []
     if part.dataset_type is not None and "dataset_type" not in columns:
         columns.append("dataset_type")
     return columns
@@ -244,6 +255,8 @@ def _part_chunks(part: Part) -> Iterator[pd.DataFrame]:
                  if pd.api.types.is_float_dtype(frame[name])
                  and (frame[name].dropna() % 1 == 0).all()]
         yield frame.astype(dict.fromkeys(whole, "Int64")).assign(**tag)
+        return
+    if not _has_bytes(part.source):
         return
     with pd.read_csv(part.source, dtype=str, chunksize=_CHUNK_ROWS) as chunks:
         for chunk in chunks:

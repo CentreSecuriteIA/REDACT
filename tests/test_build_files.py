@@ -317,6 +317,18 @@ def test_a_cell_that_reads_as_a_missing_value_is_written_empty(tmp_path):
     assert [row[at] for row in rows[: len(_INPUTS)]] == ["", "", ""]
 
 
+def test_an_empty_stage_file_is_a_part_without_rows(tmp_path):
+    """What a save killed before its first byte leaves, outside the stage's resume."""
+    from redact import build_dataset
+
+    _write_stage_files(tmp_path)
+    for stage_file in (paths.jailbreaks_csv, paths.output_responses_csv):
+        stage_file(tmp_path).write_bytes(b"")
+    built = build_dataset(data_dir=tmp_path, verbose=False)
+    assert "jailbreak" not in set(built["dataset_type"])
+    assert "content_moderation_output" not in set(built["dataset_type"])
+
+
 def test_the_variations_are_their_accepted_rows_from_the_path_given(tmp_path):
     from redact import build_dataset
 
