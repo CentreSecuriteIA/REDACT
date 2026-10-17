@@ -11,6 +11,7 @@ from redact import telemetry
 from redact.driver import run_pipeline
 from redact.llms.resources import measure
 from redact.llms.resources.measure import CardUse
+from tests.conftest import save_constitution
 
 LOCAL = "llama-3.2-3b-debug"
 
@@ -33,6 +34,7 @@ def run(tmp_path, monkeypatch):
         monkeypatch.setattr(redact, "generate_inputs",
                             lambda **k: ran.append("inputs") or pd.DataFrame())
         models = models or {"gen": {"name": LOCAL, "copies": 1}}
+        save_constitution(tmp_path)
         recipe = {"dataset_type": "eval", "data_dir": str(tmp_path),
                   "stages": ["inputs"], "models": models}
         preloaded = lambda names, **kw: ran.append(("preload", names))  # noqa: E731

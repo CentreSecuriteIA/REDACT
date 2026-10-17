@@ -431,11 +431,10 @@ def run_pipeline(
     runs and records the section with the params' flat keywords applied
     over its adversarial kind. No stage reads its rows back: the counts
     are taken from each stage's files, and the inputs are seeded from the
-    constitution saved under ``data_dir``, in a training run always and in
-    an eval run when it has one. The local engines the run loaded are
-    released when it returns or raises; those loaded before it, such as a
-    notebook's, stay loaded unless the run calls one and unloads it between
-    stages. The way the recipe serves its models holds only until then.
+    constitution saved under ``data_dir``. The local engines the run loaded
+    are released when it returns or raises; those loaded before it, such as
+    a notebook's, stay loaded unless the run calls one and unloads it
+    between stages. The way the recipe serves its models holds only until then.
     Before any of them loads, the run stops if another process holds memory
     on a card the plan puts one on (:func:`_check_cards`). At the end a
     preload still loading is waited for at most ``EXIT_WAIT_S`` (60 s), then
@@ -470,7 +469,6 @@ def run_pipeline(
             recipe, params.get("jailbreaks") if "jailbreaks" in stages else None),
         resume=recipe.get("resume", True),
         verbose=verbose,
-        stages=tuple(stages),
     )
     for name in stages:
         STAGES[name].check(ctx)     # a bad params key fails before any stage runs

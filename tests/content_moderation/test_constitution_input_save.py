@@ -2,8 +2,8 @@
 repeats it drops, and what a resume, a fresh run and a takeover leave.
 
 ``fixtures/seeded_inputs.json`` holds the category files of one run of three
-saves as the code wrote them through ``append_samples`` (commit 66817a6). A
-CSV is compared by its cells as text. Model calls are stubbed and depend only
+saves as the code at commit 66817a6 wrote them. A CSV is compared by its
+cells as text. Model calls are stubbed and depend only
 on the request, so a run writes the same rows every time.
 """
 
@@ -20,8 +20,14 @@ from redact.content_moderation.inputs import (
     _constitution_inputs_ledger,
     _constitution_inputs_manifest,
 )
-from redact.dataset import Ledger, append_samples, content_id
-from tests.conftest import Killed, MockBackend, kill_after_rows, lock_is_free
+from redact.dataset import Ledger, content_id
+from tests.conftest import (
+    Killed,
+    MockBackend,
+    kill_after_rows,
+    lock_is_free,
+    write_inputs,
+)
 from tests.content_moderation.test_constitution_input_ledger import (
     _PROMPT,
     _token_pipeline,
@@ -144,7 +150,7 @@ def _three_saves(folder: Path) -> dict:
 
 
 class TestTheFilesOfARun:
-    def test_three_saves_write_the_rows_append_samples_wrote_but_one(self, tmp_path):
+    def test_three_saves_write_the_rows_of_the_fixture_but_one(self, tmp_path):
         """Same rows, columns and column order. The one row that is gone:
         zq20 and zq21 were live together and gave one text, and each wrote
         it to its own category. Now the first to finish writes it."""
@@ -158,18 +164,6 @@ class TestTheFilesOfARun:
         saves = [line for line in _constitution_inputs_ledger(tmp_path)
                  .path.read_bytes().splitlines() if b'"_saved"' in line]
         assert len(saves) == 1 + 3      # the opening line, then one a save
-
-    def test_a_file_has_the_columns_append_samples_gives_a_new_file(self, tmp_path):
-        _run(tmp_path, _entries(0))
-        append_samples(
-            ["a sample"], category="Old", turn=0, source="constitution",
-            extra_columns=[{
-                "entry_type": "harmful", "subcategory": "Sub",
-                "source_sample_description": "desc", "constitution_category": "Top",
-                "source_group_tag": "", "template_style": "", "rejection_reason": ""}],
-            dataset_dir=tmp_path)
-        tree = _tree(tmp_path)
-        assert tree["Violence/samples.csv"][0] == tree["Old/samples.csv"][0]
 
     def test_a_text_that_is_exactly_n_a_survives_a_second_save(self, tmp_path):
         """The rewrite read ``N/A`` back as a missing value and wrote an
@@ -528,8 +522,7 @@ class TestAFreshRun:
 
     def test_of_one_style_leaves_a_file_without_a_style_column_alone(self, tmp_path):
         """Its rows are of no style, as a resume reads them."""
-        append_samples(["an old sample"], category="Violence", turn=0,
-                       source="constitution", dataset_dir=tmp_path)
+        write_inputs(tmp_path, ["an old sample"], "Violence", source="constitution")
         old = (tmp_path / "Violence" / "samples.csv").read_bytes()
         _run(tmp_path, _entries(_NO_SAMPLES), style="long", resume=False)
         assert (tmp_path / "Violence" / "samples.csv").read_bytes() == old
@@ -554,17 +547,16 @@ class TestAFreshRun:
 
 def _old_folder(folder: Path, with_rows, acked) -> None:
     """A folder as the stage left it before the ledger recorded sizes and ids:
-    rows through ``append_samples``, and one plain ledger line per entry."""
+    rows without ids in the ledger, and one plain ledger line per entry."""
     for i in with_rows:
         description, entry_type, style = _key(i, "long")
-        append_samples(
-            [f"first sample zq{i}", f"second sample zq{i}"], category=_category(i),
-            turn=0, source="constitution", dataset_dir=folder,
-            extra_columns=[{
+        write_inputs(
+            folder, [f"first sample zq{i}", f"second sample zq{i}"], _category(i),
+            source="constitution", extra={
                 "entry_type": entry_type, "subcategory": "Sub",
                 "source_sample_description": description,
                 "constitution_category": "Top", "source_group_tag": "",
-                "template_style": style, "rejection_reason": ""}] * 2)
+                "template_style": style, "rejection_reason": ""})
     lines = [dict(zip(("sample_description", "entry_type", "style"), _key(i, "long")))
              for i in acked]
     _constitution_inputs_ledger(folder).path.write_text(
@@ -615,10 +607,8 @@ class TestAFolderWrittenBeforeSizesWereRecorded:
         """It names the description ``sample_description`` and has no style
         column: its rows are of the style ``""``."""
         old_columns = {"entry_type": "benign", "sample_description": "desc zq0"}
-        append_samples(
-            ["first sample zq0", "second sample zq0"], category="Violence", turn=0,
-            source="constitution", dataset_dir=tmp_path,
-            extra_columns=[old_columns] * 2)
+        write_inputs(tmp_path, ["first sample zq0", "second sample zq0"], "Violence",
+                     source="constitution", extra=old_columns)
         _result, gen = _run(tmp_path, _entries(0))
         assert gen.calls == []
         ledger = _constitution_inputs_ledger(tmp_path)

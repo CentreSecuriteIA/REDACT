@@ -272,15 +272,17 @@ def settle(seconds: float = 15) -> list[dict]:
 
 def seed(data_dir: Path, rows: int = ROWS) -> None:
     """Harmless input rows in one category of the run's tree."""
-    from redact.dataset import append_samples
+    from redact import paths
+    from redact.dataset import append_rows, sample_row
 
     topics = ["a lighthouse", "a garden", "a river", "a library", "a mountain",
               "a bakery", "a train", "a violin", "a comet", "a forest"]
     texts = [f"Write two sentences about {topics[i % len(topics)]} and the number {i}."
              for i in range(rows)]
-    append_samples(texts, "harmless", turn=0,
-                   extra_columns=[{"entry_type": "benign"}] * rows,
-                   dataset_dir=data_dir / "Datasets")
+    path = paths.category_csv("harmless", root=paths.constitution_inputs_dir(data_dir))
+    path.parent.mkdir(parents=True, exist_ok=True)
+    append_rows(path, [sample_row(text, "harmless", turn=0,
+                                  extra={"entry_type": "benign"}) for text in texts])
 
 
 def recipe(step_dir: Path, name: str, models: dict,

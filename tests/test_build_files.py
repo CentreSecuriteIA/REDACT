@@ -11,35 +11,37 @@ One difference is meant: ``turn``, ``complexity``, ``num_techniques`` and
 column, and print as integers now.
 
 Two cases of the fixture are not that commit's: without a merged inputs file
-(the ``standalone tree`` build, and the build count of the eval run) the
-build takes its inputs from the category files alone, with the ids they hold;
-and the rows of ``variations.csv``, which the jailbreak stage writes beside its
-jailbreaks, are a part of each build and are counted in each run.
+(the ``inputs tree`` build) the build takes its inputs from the category files
+alone, with the ids they hold; and the rows of ``variations.csv``, which the
+jailbreak stage writes beside its jailbreaks, are a part of each build and are
+counted in each run.
 
 The build now copies the accepted rows of every part. The rows of the
 rejected output ``out-2`` and the jailbreak error row ``jb-3`` are gone from
-each build that held them, and the build count of each run is its accepted
-rows: 19 of the eval run's 20, 88 of the training run's 92 (two of its
-jailbreaks draw the unicode or the emoji suffix then ASCII art, which no
-font draws whole, and are rejected).
+each build that held them, and the build count of the training run is its
+accepted rows: 88 of its 92 (two of its jailbreaks draw the unicode or the
+emoji suffix then ASCII art, which no font draws whole, and are rejected).
 
 The build leaves out a row whose ``sample_id`` an earlier part wrote. In the
 runs the stub model answers a natural typos rewrite with the text it answers
 that input's output request with, so those outputs are the variations' rows:
-the build count of the eval run is 18, of the training run 86.
+the build count of the training run is 86.
+
+The eval run is not that commit's: its inputs are seeded from a small
+constitution of placeholder entries, as every run's are. One of its 10
+jailbreaks draws the unicode suffix then ASCII art and is rejected; its build
+count is 18.
 """
 
 import json
 import re
-import warnings
 from pathlib import Path
 
 import pandas as pd
 import pytest
 
 from redact import paths, telemetry
-from redact.dataset import append_samples
-from tests.conftest import MockBackend, make_client
+from tests.conftest import MockBackend, make_client, write_inputs
 from tests.test_stage_files import _files
 
 _FIXTURE = Path(__file__).parent / "fixtures" / "build_files.json"
@@ -152,9 +154,9 @@ def _write_stage_files(data_dir: Path, *, inputs: str = "merged", rows: bool = T
     """Write the stage files a build reads under ``data_dir``.
 
     Args:
-        inputs: ``"merged"`` writes the merged file of a training run,
-            ``"tree"`` the category files of the standalone path, one of
-            their rows rejected.
+        inputs: ``"merged"`` writes the merged inputs file, ``"tree"`` only
+            the category files of the inputs tree, one of their rows
+            rejected.
         rows: False leaves the jailbreaks, the variations, the outputs and
             the paraphrased inputs with a header and no row.
     """
@@ -166,8 +168,10 @@ def _write_stage_files(data_dir: Path, *, inputs: str = "merged", rows: bool = T
         tree = _INPUTS.drop(columns=["subcategory", "entry_type", "template_style"])
         tree = tree.assign(accepted=[True, False, True])
         for category, part in tree.groupby("category"):
-            (datasets / category).mkdir()
-            part.to_csv(datasets / category / "samples.csv", index=False)
+            path = paths.category_csv(category,
+                                      root=paths.constitution_inputs_dir(data_dir))
+            path.parent.mkdir(parents=True)
+            part.to_csv(path, index=False)
     keep = slice(None) if rows else slice(0)
     _JAILBREAKS.iloc[keep].to_csv(paths.jailbreaks_csv(data_dir), index=False)
     _VARIATIONS.iloc[keep].to_csv(paths.variations_csv(data_dir), index=False)
@@ -183,7 +187,7 @@ def _write_stage_files(data_dir: Path, *, inputs: str = "merged", rows: bool = T
 _BUILDS = {
     "training": dict(mode="training"),
     "eval": dict(mode="eval"),
-    "standalone tree": dict(mode="eval", inputs="tree"),
+    "inputs tree": dict(mode="eval", inputs="tree"),
     "parts without rows": dict(mode="training", rows=False),
 }
 
@@ -466,22 +470,19 @@ def test_a_build_keeps_every_column_and_every_row_of_the_category_files(tmp_path
     from redact import build_dataset
 
     for category, entry_type in (("Cyber", "harmful"), ("Fraud", "benign")):
-        append_samples(["the same text"], category=category, turn=0,
-                       extra_columns=[{"entry_type": entry_type}],
-                       dataset_dir=paths.datasets(tmp_path))
+        write_inputs(paths.constitution_inputs_dir(tmp_path), ["the same text"],
+                     category, extra={"entry_type": entry_type})
     build_dataset(data_dir=tmp_path, verbose=False)
     inputs = _input_rows(tmp_path)
     assert list(inputs["category"]) == ["Cyber", "Fraud"]
     assert list(inputs["entry_type"]) == ["harmful", "benign"]
 
 
-def test_a_build_takes_the_seeded_inputs_that_were_not_merged(tmp_path):
+def test_a_build_takes_no_category_folder_outside_the_inputs_tree(tmp_path):
     from redact import build_dataset
 
-    append_samples(["a seeded input"], category="Cyber", turn=0,
-                   dataset_dir=paths.constitution_inputs_dir(tmp_path))
-    append_samples(["a standalone input"], category="Fraud", turn=0,
-                   dataset_dir=paths.datasets(tmp_path))
+    write_inputs(paths.constitution_inputs_dir(tmp_path), ["a seeded input"])
+    write_inputs(paths.datasets(tmp_path), ["a folder of Datasets"], "Fraud")
     build_dataset(data_dir=tmp_path, verbose=False)
     assert list(_input_rows(tmp_path)["sample"]) == ["a seeded input"]
 
@@ -554,11 +555,8 @@ def _counts(recipe: dict, before=None) -> dict:
     return {stage: done["counts"] for stage, done in summary["stages"].items()}
 
 
-def _training_run(folder: Path, monkeypatch, before=None) -> dict:
-    """A training run after an earlier call left inputs of another style."""
-    import redact
-    from redact import generate_inputs
-
+def _overlay(folder: Path) -> Path:
+    """A prompt overlay whose generation templates the stub model knows."""
     overlay = folder / "prompts"
     for style in ("long", "short"):
         template = overlay / "input" / "generation" / "from_constitution" / style
@@ -567,6 +565,28 @@ def _training_run(folder: Path, monkeypatch, before=None) -> dict:
             "system_prompt": "sys",
             "template": f"MAKE-INPUTS-{style.upper()} about {{sample_description}}",
         }), encoding="utf-8")
+    return overlay
+
+
+def _constitution_stage(monkeypatch, constitution: pd.DataFrame) -> None:
+    """Stub the constitution stage: it saves ``constitution``, which seeds
+    the inputs from there."""
+    import redact
+
+    def generate_constitution(**kwargs):
+        merged = paths.constitution_merged_csv(kwargs["data_dir"])
+        merged.parent.mkdir(parents=True, exist_ok=True)
+        constitution.to_csv(merged, index=False)
+        return pd.DataFrame()
+
+    monkeypatch.setattr(redact, "generate_constitution", generate_constitution)
+
+
+def _training_run(folder: Path, monkeypatch, before=None) -> dict:
+    """A training run after an earlier call left inputs of another style."""
+    from redact import generate_inputs
+
+    overlay = _overlay(folder)
     constitution = pd.DataFrame([
         {"source_category": category, "constitution_subcategory": "Sub",
          "sample_description": f"what zq{n} is about", "entry_type": entry_type}
@@ -575,15 +595,7 @@ def _training_run(folder: Path, monkeypatch, before=None) -> dict:
             ("Fraud", "dual_use_benign")])
     ])
     _stub_models(monkeypatch)
-
-    def generate_constitution(**kwargs):
-        # As the stage does: the entries are saved, and seed the inputs from there.
-        merged = paths.constitution_merged_csv(kwargs["data_dir"])
-        merged.parent.mkdir(parents=True, exist_ok=True)
-        constitution.to_csv(merged, index=False)
-        return pd.DataFrame()
-
-    monkeypatch.setattr(redact, "generate_constitution", generate_constitution)
+    _constitution_stage(monkeypatch, constitution)
 
     generate_inputs(
         data_dir=folder, constitution_df=constitution.iloc[:2], style="short",
@@ -599,26 +611,22 @@ def _training_run(folder: Path, monkeypatch, before=None) -> dict:
 
 
 def _eval_run(folder: Path, monkeypatch, before=None) -> dict:
-    """An eval run; the meta-prompt generation of its inputs stage is stubbed."""
-    from redact.content_moderation import InputPipeline
-
-    def run_standalone(self, categories, **kwargs):
-        for n, (category, _info) in enumerate(categories):
-            append_samples(
-                [f"eval {nth} zq{n} sample" for nth in ("first", "second", "third")],
-                category=category, turn=0, accepted=[True, True, n == 0],
-                dataset_dir=self.dataset_dir)
-
+    """An eval run from a small constitution of placeholder entries."""
+    overlay = _overlay(folder)
     _stub_models(monkeypatch)
-    monkeypatch.setattr(InputPipeline, "run_standalone", run_standalone)
-    with warnings.catch_warnings():
-        warnings.simplefilter("ignore", DeprecationWarning)    # the standalone path
-        counts = _counts({
-            "dataset_type": "eval", "data_dir": str(folder),
-            "taxonomy": {"categories": {"Cyber": "computers", "Fraud": "money"}},
-            "stages": ["inputs", "outputs", "paraphrase", "jailbreaks", "build"],
-            "models": _MODELS, "augmentations": _PURE,
-        }, before)
+    _constitution_stage(monkeypatch, pd.DataFrame([
+        {"source_category": category, "constitution_subcategory": "Subcategory",
+         "sample_description": f"placeholder sample description zq{n}",
+         "entry_type": entry_type}
+        for n, (category, entry_type) in enumerate([
+            ("Category A", "harmful"), ("Category B", "benign")])
+    ]))
+    counts = _counts({
+        "dataset_type": "eval", "data_dir": str(folder), "prompt_dir": str(overlay),
+        "stages": ["constitution", "inputs", "outputs", "paraphrase", "jailbreaks",
+                   "build"],
+        "models": _MODELS, "augmentations": _PURE,
+    }, before)
     return {"counts": counts}
 
 

@@ -1138,7 +1138,9 @@ def _run(tmp_path, monkeypatch, stages, models, **fronts):
     from redact import telemetry
     from redact.driver import run_pipeline
     from redact.llms.resources import measure
+    from tests.conftest import save_constitution
 
+    save_constitution(tmp_path)
     for front in ("generate_inputs", "generate_paraphrases"):
         stub = fronts.get(front, lambda **kw: pd.DataFrame())
         monkeypatch.setattr(redact, front, stub)

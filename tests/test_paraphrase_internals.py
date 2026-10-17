@@ -10,9 +10,9 @@ import pytest
 
 import redact.content_moderation.paraphrase as P
 from redact import generate_paraphrases, paths
-from redact.dataset import append_samples, content_id
+from redact.dataset import content_id
 from redact.llms.backends import ComputeConfig
-from tests.conftest import MockBackend, make_client
+from tests.conftest import MockBackend, make_client, write_inputs
 
 
 class _InternalsBackend(MockBackend):
@@ -33,10 +33,7 @@ class _InternalsBackend(MockBackend):
 
 
 def _seed_inputs(tmp_path):
-    append_samples(
-        ["alpha prompt"], category="Cyber", turn=0,
-        accepted=[True], dataset_dir=paths.datasets(tmp_path),
-    )
+    write_inputs(paths.constitution_inputs_dir(tmp_path), ["alpha prompt"])
 
 
 @pytest.fixture()

@@ -1,7 +1,6 @@
 """The prompt overlay reaches every prompt a stage's model calls are built from."""
 
 import json
-import warnings
 from pathlib import Path
 
 import pandas as pd
@@ -87,30 +86,6 @@ def test_the_seeded_inputs_read_their_format_and_check_through_the_overlay(
                     verbose=False, read_back=False)
     assert _systems(gen) == ["MINE-GEN MINE-FORMAT 2"]
     assert _systems(check) == ["MINE-CHECK", "MINE-CHECK"]
-
-
-def test_the_standalone_inputs_read_every_prompt_through_the_overlay(
-        tmp_path, monkeypatch):
-    from redact import generate_inputs
-
-    overlay = tmp_path / "prompts"
-    _overlay(overlay, "input/category_description", "MINE-DESCRIPTION")
-    _overlay(overlay, "input/seed_generation", "MINE-SEEDS")
-    _overlay(overlay, "input/generation/standalone", "MINE-GEN")
-    _overlay(overlay, "input/quality_check", "MINE-CHECK")
-    gen, check = MockBackend("1. one zq sample"), MockBackend("Yes")
-    _serve(monkeypatch, {"g-model": gen, "c-model": check})
-    with warnings.catch_warnings():
-        warnings.simplefilter("ignore", DeprecationWarning)    # the standalone path
-        generate_inputs(
-            taxonomy={"categories": {"Cyber": "computers"}}, samples_per_category=1,
-            samples_per_request=1, num_seeds=1, model="g-model",
-            check_model="c-model", data_dir=tmp_path, prompt_dir=overlay,
-            verbose=False, read_back=False)
-    systems = _systems(gen)
-    assert systems[:2] == ["MINE-DESCRIPTION", "MINE-SEEDS"]
-    assert systems[2:] and all(s.startswith("MINE-GEN") for s in systems[2:])
-    assert check.calls and set(_systems(check)) == {"MINE-CHECK"}
 
 
 # --- translation and the benign data ------------------------------------------

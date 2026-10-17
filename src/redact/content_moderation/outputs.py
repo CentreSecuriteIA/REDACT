@@ -143,7 +143,7 @@ def run_output_generation(
         }
         return i, checked(
             client,
-            lambda feedback: with_feedback(base, feedback, "output"),
+            lambda feedback: with_feedback(base, feedback),
             check if use_checker else None,
             _checker_for(category, entry_type) if use_checker else None,
             original=input_text,

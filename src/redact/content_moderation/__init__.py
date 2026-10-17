@@ -1,7 +1,6 @@
 """Content moderation stages: inputs, outputs and paraphrases, with their checkers.
 
-The seeded inputs stage is ``InputPipeline.run_from_constitution``; the
-deprecated standalone path is :func:`run_standalone_inputs`. The fronts in
+The inputs stage is ``InputPipeline.run_from_constitution``. The fronts in
 :mod:`redact.stages` resolve models and files and call these.
 
 Usage::
@@ -23,32 +22,16 @@ from .checker import (
     build_quality_checker,
 )
 from .inputs import InputPipeline
-from .metaprompt import (
-    generate_category_description,
-    generate_seeds,
-)
 from .outputs import run_output_generation
 from .paraphrase import paraphrase_batch
-from .results import (
-    CategoryResult,
-    ConstitutionInputResult,
-    SampleResult,
-    TurnResult,
-)
-from .standalone import run_standalone_inputs
+from .results import ConstitutionInputResult
 
 __all__ = [
-    "CategoryResult",
     "ConstitutionInputResult",
     "InputPipeline",
-    "SampleResult",
-    "TurnResult",
     "build_output_quality_checker",
     "build_paraphrase_checker",
     "build_quality_checker",
-    "generate_category_description",
-    "generate_seeds",
     "paraphrase_batch",
     "run_output_generation",
-    "run_standalone_inputs",
 ]

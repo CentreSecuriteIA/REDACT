@@ -181,21 +181,21 @@ units' rows and acks and leaves the rest. It puts the files back at the last
 save, writes each output again without the picked rows, then the ledger
 without the picked acks, each through a temporary file and a rename. Until it
 is done, `<ledger name>.dropping` holds `name`: a resume stops, and only the
-same call, made again, finishes the job. The seeded inputs stage uses it for
-a fresh run of one style.
+same call, made again, finishes the job. The inputs stage uses it for a
+fresh run of one style.
 
 ## The per-category tree
 
-Input samples live in one `samples.csv` per category folder.
+Input samples live in one `samples.csv` per category folder, under
+`Datasets/constitution_inputs/`; the functions below default to that folder.
 
 | Function | Does |
 |---|---|
 | `SAMPLE_COLUMNS` | `sample_id`, `sample`, `category`, `subcategory`, `entry_type`, `turn`, `accepted`, `rejection_reason`, `source`; more columns are kept |
 | `sample_row(text, category, turn, accepted, source, extra)` | One input row in that column order |
-| `append_samples(samples, category, turn, ...)` | Adds samples to a category's file, skipping ids already in it. Reads and rewrites the whole file; only the standalone inputs use it |
 | `discover_categories(dir)` | The category folders that hold a `samples.csv` |
 | `merge_all(dir, accepted_only=True)` | Every category's rows in one frame |
-| `merge_inputs(data_dir)` | The run's accepted inputs: the seeded tree when it has a category file, else the categories under `Datasets/` |
+| `merge_inputs(data_dir)` | The run's accepted inputs, from `Datasets/constitution_inputs/` |
 | `input_files(data_dir)` | The category files `merge_inputs` reads |
 | `take_per_group(frame, n, group_by=("category", "entry_type"))` | The first `n` rows of each group |
 
@@ -217,7 +217,7 @@ taxonomy format.
 | Stage | `resume_state` call | Ledger key | Records also carry |
 |---|---|---|---|
 | constitution | plain: no artifact | `unit` | `status`, `attempts` when rejected |
-| seeded inputs | `artifact=folder, pattern="*/samples.csv"`, `units_in` | `sample_description`, `entry_type`, `style` | `ids`; or `status`, `attempts` |
+| inputs | `artifact=folder, pattern="*/samples.csv"`, `units_in` | `sample_description`, `entry_type`, `style` | `ids`; or `status`, `attempts` |
 | outputs | `artifact=output_responses.csv` | `input_id` | |
 | paraphrase | `artifact=paraphrases_<target>.csv` | `input_id`, `iteration` | `paraphrase_model`, `status` |
 | jailbreaks, per kind | `artifact=jailbreaks.csv` or `variations.csv` | `input_id`, `iteration` | |
@@ -225,4 +225,4 @@ taxonomy format.
 | conversations | `artifact=conversations.csv` | `input_id`, `iteration` | `stop_reason` |
 | scoring | `artifact=conversations_scored.csv`, no manifest | `sample_id` | |
 
-The standalone inputs and the build use no ledger.
+The build uses no ledger.

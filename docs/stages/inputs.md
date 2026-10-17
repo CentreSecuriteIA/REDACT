@@ -1,34 +1,27 @@
 # Stage: inputs
 
-Front `generate_inputs` (`stages.py`). The stage has two paths:
+Front `generate_inputs` (`stages.py`), core
+`InputPipeline.run_from_constitution` (`content_moderation/inputs.py`). Every
+run's inputs are seeded from a constitution, in an `eval` run as in a
+`training` one; the two differ only in the build.
 
-| Path | When | Core | Writes |
-|---|---|---|---|
-| Seeded | `constitution_df` given; a `training` run, or an `eval` run that lists `constitution` or has one saved under `data_dir` | `InputPipeline.run_from_constitution` (`content_moderation/inputs.py`) | `Datasets/constitution_inputs/<category>/samples.csv` |
-| Standalone | no `constitution_df`; an `eval` run without a constitution | `run_standalone_inputs` (`content_moderation/standalone.py`) | `Datasets/<category>/samples.csv` |
+The stage saves every sample, accepted or not, with its verdict, to
+`Datasets/constitution_inputs/<category>/samples.csv`. The later stages read
+only the accepted ones, through `dataset.merge_inputs`.
 
-The standalone path is deprecated: it warns with a `DeprecationWarning` and
-still works. The seeded path gives coverage you can steer through the
-constitution.
-
-Both paths save every sample, accepted or not, with its verdict. The later
-stages read only the accepted ones, through `dataset.merge_inputs`: the
-seeded tree when it holds a category file, else the categories directly
-under `Datasets/`.
-
-## Seeded inputs
-
-### Purpose
+## Purpose
 
 Turn each constitution entry into `samples_per_entry` input samples, each
 checked against its category, entry type and subcategory.
 
-### Inputs
+## Inputs
 
 - The constitution frame. In a recipe run the driver reads
-  `Data_cache/constitution/merged.csv` when the stage starts; a seeded run
-  without it stops with `No constitution at ...`. Called directly, pass
-  `constitution_df=`.
+  `Data_cache/constitution/merged.csv` when the stage starts; a run without
+  it stops with `No constitution at ...`, which names both ways to have one:
+  the `constitution` stage in the recipe, or one saved by an earlier run on
+  the same `data_dir`. Called directly, pass `constitution_df=`; without it
+  the front reads the saved one the same way.
 - Columns read per entry: `sample_description`, `entry_type`,
   `source_category`, `constitution_subcategory`, `constitution_category`,
   `source_group_tag`. `entry_types` keeps only some entry types.
@@ -36,7 +29,7 @@ checked against its category, entry type and subcategory.
   `numbered` format instruction, and the check prompt
   `prompts/input/quality_check/`, each read through the overlay.
 
-### Models
+## Models
 
 | Recipe role | Registry role | Default | Calls |
 |---|---|---|---|
@@ -46,13 +39,13 @@ checked against its category, entry type and subcategory.
 Pick a checker that can judge. In the GPU check, a 3B checker accepted 2 of
 144 samples and a 24B checker 144 of 144.
 
-### Settings
+## Settings
 
 Params keys: `style`, `samples_per_entry`, `entry_types`, `batch_size`,
 `max_attempts`, `check_max_tokens`
-([configuration.md](../configuration.md#inputs-seeded-training)).
+([configuration.md](../configuration.md#inputs)).
 
-### Unit and ledger key
+## Unit and ledger key
 
 One unit is one constitution entry.
 
@@ -71,7 +64,7 @@ One unit is one constitution entry.
 | Ledger record | the key, and `ids`: the `sample_id`s of the rows it wrote. Or the key with `status` `rejected` or `no_samples` and `attempts` |
 | Manifest row | `sample_description`, `entry_type`, `style`, `status` |
 
-### Files
+## Files
 
 Under `Datasets/constitution_inputs/`:
 
@@ -103,7 +96,7 @@ Columns of `samples.csv`:
 | `source_group_tag` | The entry's group tag |
 | `template_style` | The `style` that generated it |
 
-### How it resumes
+## How it resumes
 
 The stage names its folder and the pattern `*/samples.csv` to the resume, so
 all category files are checked and cut back together
@@ -117,7 +110,7 @@ the rows of other styles stay. Until that finishes, a
 `constitution_inputs.state.jsonl.dropping` file names the style; a later run
 stops until the same fresh run is repeated.
 
-### Rejected and failed units
+## Rejected and failed units
 
 - A sample the checker rejects is saved with `accepted` false and the
   checker's reply in `rejection_reason`.
@@ -136,53 +129,3 @@ When under half of the generated samples are accepted, the front warns:
 With a model that captures internals, the stage requires
 `samples_per_entry: 1`, since one call's internals cannot be split between
 samples.
-
-## Standalone inputs
-
-### Purpose
-
-A cheap evaluation set without a constitution: per taxonomy category, turns
-of generate, check and save until the category has `samples_per_category`
-accepted samples.
-
-### Inputs and models
-
-- The taxonomy (first `num_categories` categories) from `taxonomy_dir`.
-- With `use_metaprompt: true` the `gen` model writes each category's
-  description (`prompts/input/category_description/`) and `num_seeds` seed
-  prompts (`prompts/input/seed_generation/`). With `false`, the taxonomy's
-  description and the seeds file `configs/seeds/<seeds_name>.json`. A
-  category without seeds is skipped.
-- Generation uses `prompts/input/generation/standalone/`, the check
-  `prompts/input/quality_check/` with entry type `harmful`, each read
-  through the overlay as the description and seed prompts are. Roles as for
-  seeded inputs.
-
-### How a category runs
-
-Each turn asks for `samples_per_request` samples. A reply with another number
-is rejected whole. Texts already in the category's file are dropped, the rest
-checked one by one, and all saved with their verdict. The rejection reasons
-go into the next turn's prompt. A category stops when this run has
-accepted `samples_per_category` samples, after
-`ceil(samples_per_category / samples_per_request) x 3` turns, or after a turn
-that yields no new sample (a rejected reply, or only repeats).
-
-Params keys: `samples_per_category`, `samples_per_request`, `num_categories`,
-`use_metaprompt`, `seeds_name`, `num_seeds`
-([configuration.md](../configuration.md#inputs-standalone-eval)).
-
-### Files
-
-`Datasets/<category>/samples.csv`, columns `sample_id`, `sample`,
-`category`, `turn`, `accepted`, `source` (`metaprompt`), `entry_type`
-(`harmful`), `subcategory` (empty), `rejection_reason`. No manifest, no
-ledger, no lock.
-
-### How it resumes
-
-There are no units. `resume: true` keeps each category's file and skips
-texts already in it. The target counts this run's accepted samples only, so
-a resumed run adds up to `samples_per_category` more accepted samples per
-category. `resume: false` deletes the files of the categories it runs first.
-Each save rewrites the category's whole file.

@@ -1,8 +1,9 @@
-"""The per-category tree ``Datasets/{category}/samples.csv``: append, read back,
-merge, cap per group.
+"""The per-category tree of the input samples,
+``Datasets/constitution_inputs/{category}/samples.csv``: its rows, read back,
+merged, capped per group.
 
-A category CSV may hold columns beyond ``SAMPLE_COLUMNS`` (reasoning,
-technique, language, ...); they are kept on read and write.
+A category CSV may hold columns beyond ``SAMPLE_COLUMNS`` (template_style,
+rejection_reason, ...); they are kept on read.
 """
 
 from collections.abc import Mapping
@@ -26,7 +27,7 @@ SAMPLE_COLUMNS: list[str] = [
     "turn",              # Generation turn index
     "accepted",          # Whether the sample passed the checker
     "rejection_reason",  # Checker reasoning on reject; "" on accept
-    "source",            # metaprompt / constitution / handcrafted / generated
+    "source",            # constitution / handcrafted / generated
 ]
 
 
@@ -37,102 +38,13 @@ def read_category_csv(
 ) -> pd.DataFrame:
     """Read a category's CSV; an empty ``SAMPLE_COLUMNS`` frame when there is none.
 
-    Ids are read as text, and a missing cell of a text column as ``""``.
+    ``dataset_dir`` defaults to ``paths.constitution_inputs_dir()``. Ids are
+    read as text, and a missing cell of a text column as ``""``.
     """
     path = paths.category_csv(category, root=dataset_dir, filename=filename)
     if _has_bytes(path):
         return _blank_missing_text(pd.read_csv(path, dtype=_ID_COLUMNS))
     return pd.DataFrame(columns=SAMPLE_COLUMNS)
-
-
-def write_category_csv(
-    df: pd.DataFrame,
-    category: str,
-    dataset_dir: str | Path | None = None,
-    filename: str = paths.SAMPLES_FILENAME,
-) -> Path:
-    """Write ``df`` as a category's CSV, replacing the file, and return its path."""
-    path = paths.category_csv(category, root=dataset_dir, filename=filename)
-    path.parent.mkdir(parents=True, exist_ok=True)
-    df.to_csv(path, index=False)
-    return path
-
-
-def get_existing_samples(
-    category: str,
-    dataset_dir: str | Path | None = None,
-    filename: str = paths.SAMPLES_FILENAME,
-) -> set[str]:
-    """The sample texts already in a category's CSV."""
-    df = read_category_csv(category, dataset_dir, filename)
-    if df.empty or "sample" not in df.columns:
-        return set()
-    return set(df["sample"].dropna().tolist())
-
-
-#TODO(dataset): append_samples reads and rewrites the whole category CSV on
-# every save, so a save slows down as the file grows. Append the new rows only.
-# Only the standalone inputs are saved through it.
-def append_samples(
-    samples: list[str],
-    category: str,
-    turn: int,
-    accepted: list[bool] | None = None,
-    source: str = "generated",
-    extra_columns: list[dict] | None = None,
-    dataset_dir: str | Path | None = None,
-    filename: str = paths.SAMPLES_FILENAME,
-) -> pd.DataFrame:
-    """Add samples to a category's CSV, skipping those whose id is already in it.
-
-    Args:
-        samples: Sample texts. A row's ``sample_id`` is the content id of its
-            text.
-        category: Category name.
-        turn: Generation turn index.
-        accepted: One flag per sample. ``None`` accepts all.
-        source: Source label for the rows.
-        extra_columns: One dict of further columns per sample, e.g.
-            ``{"reasoning": "...", "technique": "..."}``.
-        dataset_dir: Root of the tree.
-        filename: CSV file name inside the category folder.
-
-    Returns:
-        The category's rows after the append.
-    """
-    if accepted is None:
-        accepted = [True] * len(samples)
-    if extra_columns is None:
-        extra_columns = [{}] * len(samples)
-
-    existing = read_category_csv(category, dataset_dir, filename)
-    existing_ids = set(existing["sample_id"].tolist()) if not existing.empty else set()
-
-    new_rows: list[dict] = []
-    for i, (text, acc) in enumerate(zip(samples, accepted)):
-        sample_id = content_id(text)
-        if sample_id not in existing_ids:
-            row = {
-                "sample_id": sample_id,
-                "sample": text,
-                "category": category,
-                "turn": turn,
-                "accepted": acc,
-                "source": source,
-            }
-            # Merge extra metadata columns
-            if i < len(extra_columns):
-                row.update(extra_columns[i])
-            new_rows.append(row)
-            existing_ids.add(sample_id)
-
-    if new_rows:
-        new_df = pd.DataFrame(new_rows)
-        combined = pd.concat([existing, new_df], ignore_index=True)
-        write_category_csv(combined, category, dataset_dir, filename)
-        return combined
-
-    return existing
 
 
 def sample_row(
@@ -145,9 +57,8 @@ def sample_row(
 ) -> dict[str, Any]:
     """One input sample row: ``SAMPLE_COLUMNS`` first, the columns of ``extra`` after.
 
-    A new category CSV that takes its columns from such rows has the header
-    :func:`append_samples` gives one. ``sample_id`` is the content id of
-    ``text``; a ``SAMPLE_COLUMNS`` value that nothing gives is ``""``.
+    ``sample_id`` is the content id of ``text``; a ``SAMPLE_COLUMNS`` value
+    that nothing gives is ``""``.
     """
     given = {
         "sample_id": content_id(text),
@@ -163,8 +74,12 @@ def sample_row(
 
 
 def discover_categories(dataset_dir: str | Path | None = None) -> list[str]:
-    """The sorted names of the category folders that hold a samples CSV."""
-    base = Path(dataset_dir) if dataset_dir is not None else paths.datasets()
+    """The sorted names of the category folders that hold a samples CSV.
+
+    ``dataset_dir`` defaults to ``paths.constitution_inputs_dir()``.
+    """
+    base = (Path(dataset_dir) if dataset_dir is not None
+            else paths.constitution_inputs_dir())
     if not base.is_dir():
         return []
     return sorted(
@@ -208,27 +123,16 @@ def merge_all(
     return merge_category_csvs(categories, dataset_dir, accepted_only=accepted_only)
 
 
-def _input_tree(data_dir: str | Path | None) -> Path:
-    """The folder of the input samples of the run under ``data_dir``.
-
-    A run with a constitution seeds its inputs from it and keeps them in
-    ``Datasets/constitution_inputs/``. They are the run's inputs when that
-    tree holds a category CSV; otherwise the categories directly under
-    ``Datasets/`` are.
-    """
-    seeded = paths.constitution_inputs_dir(data_dir)
-    return seeded if discover_categories(seeded) else paths.datasets(data_dir)
-
-
 def input_files(data_dir: str | Path | None = None) -> list[Path]:
-    """The category files of the input samples of the run under ``data_dir``."""
-    tree = _input_tree(data_dir)
+    """The category files of the input samples of the run under ``data_dir``,
+    in ``Datasets/constitution_inputs/``."""
+    tree = paths.constitution_inputs_dir(data_dir)
     return [paths.category_csv(c, root=tree) for c in discover_categories(tree)]
 
 
 def merge_inputs(data_dir: str | Path | None = None) -> pd.DataFrame:
     """The accepted rows of :func:`input_files`, in one frame."""
-    return merge_all(_input_tree(data_dir), accepted_only=True)
+    return merge_all(paths.constitution_inputs_dir(data_dir), accepted_only=True)
 
 
 def take_per_group(

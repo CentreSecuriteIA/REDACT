@@ -456,7 +456,7 @@ class TestAcceptedMask:
     def test_the_tree_and_the_build_keep_the_same_rows(self, tmp_path):
         from redact.dataset import merge_inputs
 
-        path = tmp_path / "Datasets" / "Cyber" / "samples.csv"
+        path = tmp_path / "Datasets" / "constitution_inputs" / "Cyber" / "samples.csv"
         path.parent.mkdir(parents=True)
         path.write_text("sample_id,sample,accepted\n" + "".join(
             f"id{n},t{n},{cell}\n" for n, (cell, _) in enumerate(_VERDICTS)),

@@ -6,16 +6,13 @@ from redact import paths
 from redact.dataset import append_rows, content_id
 from redact.dataset.categories import (
     SAMPLE_COLUMNS,
-    append_samples,
     discover_categories,
-    get_existing_samples,
     merge_all,
     merge_category_csvs,
     merge_inputs,
     read_category_csv,
     sample_row,
     take_per_group,
-    write_category_csv,
 )
 
 
@@ -44,70 +41,6 @@ class TestReadCategoryCsv:
         assert df.iloc[0]["sample"] == "hello"
 
 
-class TestWriteCategoryCsv:
-    def test_creates_dir_and_file(self, tmp_dataset_dir):
-        df = pd.DataFrame({"sample": ["test"]})
-        path = write_category_csv(df, "new_cat", dataset_dir=tmp_dataset_dir)
-        assert path.exists()
-        assert (tmp_dataset_dir / "new_cat").is_dir()
-
-    def test_roundtrip(self, tmp_dataset_dir):
-        df = pd.DataFrame({"sample": ["a", "b"], "category": ["X", "Y"]})
-        write_category_csv(df, "roundtrip", dataset_dir=tmp_dataset_dir)
-        loaded = read_category_csv("roundtrip", dataset_dir=tmp_dataset_dir)
-        assert list(loaded["sample"]) == ["a", "b"]
-
-
-class TestAppendSamples:
-    def test_creates_file_on_first_append(self, tmp_dataset_dir):
-        result = append_samples(
-            ["sample1", "sample2"],
-            category="test",
-            turn=0,
-            dataset_dir=tmp_dataset_dir,
-        )
-        assert len(result) == 2
-        assert (tmp_dataset_dir / "test" / "samples.csv").exists()
-
-    def test_deduplicates(self, tmp_dataset_dir):
-        append_samples(["dup"], category="test", turn=0, dataset_dir=tmp_dataset_dir)
-        result = append_samples(["dup"], category="test", turn=1, dataset_dir=tmp_dataset_dir)
-        assert len(result) == 1  # not duplicated
-
-    def test_appends_new(self, tmp_dataset_dir):
-        append_samples(["first"], category="test", turn=0, dataset_dir=tmp_dataset_dir)
-        result = append_samples(["second"], category="test", turn=1, dataset_dir=tmp_dataset_dir)
-        assert len(result) == 2
-
-    def test_accepted_flags(self, tmp_dataset_dir):
-        result = append_samples(
-            ["a", "b"],
-            category="test",
-            turn=0,
-            accepted=[True, False],
-            dataset_dir=tmp_dataset_dir,
-        )
-        assert list(result["accepted"]) == [True, False]
-
-    def test_extra_columns(self, tmp_dataset_dir):
-        result = append_samples(
-            ["text"],
-            category="test",
-            turn=0,
-            extra_columns=[{"reasoning": "looks good"}],
-            dataset_dir=tmp_dataset_dir,
-        )
-        assert "reasoning" in result.columns
-        assert result.iloc[0]["reasoning"] == "looks good"
-
-    def test_standard_columns_present(self, tmp_dataset_dir):
-        result = append_samples(
-            ["x"], category="cat", turn=0, dataset_dir=tmp_dataset_dir
-        )
-        for col in SAMPLE_COLUMNS:
-            assert col in result.columns
-
-
 class TestSampleRow:
     _EXTRA = {"entry_type": "harmful", "subcategory": "Sub", "reasoning": "fine",
               "template_style": "long", "rejection_reason": ""}
@@ -129,33 +62,6 @@ class TestSampleRow:
             "", "", "")
         assert (row["accepted"], row["source"]) == (True, "generated")
 
-    def test_a_new_file_of_such_rows_is_the_one_append_samples_writes(
-            self, tmp_dataset_dir):
-        """Header and cells, so the two ways to write a category file agree."""
-        texts = ["first, with a comma", 'second "quoted"']
-        append_samples(texts, category="old", turn=1, accepted=[True, False],
-                       source="constitution", extra_columns=[self._EXTRA] * 2,
-                       dataset_dir=tmp_dataset_dir)
-        new = paths.category_csv("new", root=tmp_dataset_dir)
-        new.parent.mkdir()
-        append_rows(new, [
-            sample_row(text, "old", turn=1, accepted=accepted, source="constitution",
-                       extra=self._EXTRA)
-            for text, accepted in zip(texts, (True, False))])
-        old = paths.category_csv("old", root=tmp_dataset_dir)
-        assert new.read_bytes() == old.read_bytes()
-
-
-class TestGetExistingSamples:
-    def test_empty_when_no_file(self, tmp_dataset_dir):
-        result = get_existing_samples("missing", dataset_dir=tmp_dataset_dir)
-        assert result == set()
-
-    def test_returns_sample_texts(self, tmp_dataset_dir):
-        append_samples(["a", "b"], category="test", turn=0, dataset_dir=tmp_dataset_dir)
-        result = get_existing_samples("test", dataset_dir=tmp_dataset_dir)
-        assert result == {"a", "b"}
-
 
 def _write_test_csv(dataset_dir, category, samples, accepted=None):
     """Helper to create a test category CSV."""
@@ -169,7 +75,9 @@ def _write_test_csv(dataset_dir, category, samples, accepted=None):
         "accepted": accepted,
         "source": ["generated"] * len(samples),
     })
-    write_category_csv(df, category, dataset_dir=dataset_dir)
+    path = paths.category_csv(category, root=dataset_dir)
+    path.parent.mkdir(parents=True, exist_ok=True)
+    df.to_csv(path, index=False)
 
 
 class TestMergeCategoryCsvs:
@@ -220,37 +128,37 @@ class TestMergeAll:
 
 
 class TestMergeInputs:
-    """A run's inputs: the seeded tree when it holds a category, else the
-    categories directly under ``Datasets/``."""
+    """A run's inputs: the category files of ``Datasets/constitution_inputs/``."""
 
-    def test_the_seeded_inputs_are_read_when_their_tree_holds_one(self, tmp_path):
-        _write_test_csv(paths.constitution_inputs_dir(tmp_path), "Cyber", ["seeded"])
-        _write_test_csv(paths.datasets(tmp_path), "Fraud", ["standalone"])
-        assert list(merge_inputs(tmp_path)["sample"]) == ["seeded"]
-
-    def test_the_standalone_inputs_are_read_without_a_seeded_tree(self, tmp_path):
-        _write_test_csv(paths.datasets(tmp_path), "Cyber", ["a", "b"])
-        _write_test_csv(paths.datasets(tmp_path), "Fraud", ["c"])
+    def test_the_inputs_are_the_rows_of_the_seeded_tree(self, tmp_path):
+        tree = paths.constitution_inputs_dir(tmp_path)
+        _write_test_csv(tree, "Cyber", ["a", "b"])
+        _write_test_csv(tree, "Fraud", ["c"])
         result = merge_inputs(tmp_path)
-        pd.testing.assert_frame_equal(result, merge_all(paths.datasets(tmp_path)))
+        pd.testing.assert_frame_equal(result, merge_all(tree))
         assert list(result["sample"]) == ["a", "b", "c"]
 
-    def test_a_seeded_folder_without_a_category_csv_is_no_seeded_tree(self, tmp_path):
+    def test_a_category_folder_directly_under_datasets_is_no_input(self, tmp_path):
+        _write_test_csv(paths.constitution_inputs_dir(tmp_path), "Cyber", ["seeded"])
+        _write_test_csv(paths.datasets(tmp_path), "Fraud", ["elsewhere"])
+        assert list(merge_inputs(tmp_path)["sample"]) == ["seeded"]
+        _write_test_csv(paths.datasets(tmp_path / "other"), "Fraud", ["elsewhere"])
+        assert merge_inputs(tmp_path / "other").empty
+
+    def test_a_seeded_folder_without_a_category_csv_has_no_inputs(self, tmp_path):
         seeded = paths.constitution_inputs_dir(tmp_path)
         (seeded / "Cyber").mkdir(parents=True)
         (seeded / "constitution_inputs.state.jsonl").write_text("{}")
-        _write_test_csv(paths.datasets(tmp_path), "Fraud", ["standalone"])
-        assert list(merge_inputs(tmp_path)["sample"]) == ["standalone"]
+        assert merge_inputs(tmp_path).empty
 
     def test_only_accepted_rows_are_returned(self, tmp_path):
         _write_test_csv(paths.constitution_inputs_dir(tmp_path), "Cyber",
                         ["kept", "rejected"], [True, False])
         assert list(merge_inputs(tmp_path)["sample"]) == ["kept"]
 
-    def test_a_seeded_tree_of_rejected_rows_is_still_the_run_s_inputs(self, tmp_path):
+    def test_a_seeded_tree_of_rejected_rows_gives_no_input(self, tmp_path):
         _write_test_csv(paths.constitution_inputs_dir(tmp_path), "Cyber",
                         ["rejected"], [False])
-        _write_test_csv(paths.datasets(tmp_path), "Fraud", ["standalone"])
         assert merge_inputs(tmp_path).empty
 
     def test_no_tree_gives_an_empty_frame(self, tmp_path):
@@ -258,7 +166,7 @@ class TestMergeInputs:
 
     def test_ids_and_empty_cells_read_back_as_written(self, tmp_path):
         """A one-row file whose id looks like a number; a cell nothing gave."""
-        path = paths.category_csv("Cyber", root=paths.datasets(tmp_path))
+        path = paths.category_csv("Cyber", root=paths.constitution_inputs_dir(tmp_path))
         path.parent.mkdir(parents=True)
         append_rows(path, [{**sample_row("a text", "Cyber", turn=0),
                             "sample_id": "0123456789012345"}])

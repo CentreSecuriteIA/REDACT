@@ -19,7 +19,7 @@ A run is an ordered list of stages. Each stage has one public function, its
 | Stage | Front | What it does | Main output |
 |---|---|---|---|
 | `constitution` | `generate_constitution` | Per taxonomy category, a hierarchy of constitution categories and sample descriptions at four entry types | `Data_cache/constitution/merged.csv` |
-| `inputs` | `generate_inputs` | Checked input samples: seeded from the constitution (training, and eval with a constitution), or from meta-prompts (eval without one, deprecated) | `Datasets/constitution_inputs/<category>/samples.csv` or `Datasets/<category>/samples.csv` |
+| `inputs` | `generate_inputs` | Checked input samples, seeded from the constitution | `Datasets/constitution_inputs/<category>/samples.csv` |
 | `outputs` | `generate_outputs` | One checked model response per accepted input | `Datasets/output_responses.csv` |
 | `paraphrase` | `generate_paraphrases` | Checked paraphrases of the inputs and of the accepted outputs | `Datasets/paraphrases_inputs.csv`, `Datasets/paraphrases_outputs.csv` |
 | `jailbreaks` | `generate_jailbreaks` | Jailbreak attacks (adversarial kind) and natural variations (natural kind) of the accepted inputs | `Datasets/jailbreaks.csv`, `Datasets/variations.csv` |
@@ -29,10 +29,9 @@ Two more fronts are outside the recipe: `generate_conversations` and
 `evaluate_conversations` in `multi_turn/`
 ([stages/conversations.md](stages/conversations.md)).
 
-A recipe's `dataset_type` picks the input path. `training` seeds the inputs
-from the constitution. `eval` seeds them too when it lists the
-`constitution` stage or a constitution is saved under `data_dir`, and
-otherwise runs the standalone meta-prompt path.
+Every run seeds its inputs from a constitution: the recipe's `constitution`
+stage writes it, or an earlier run saved it under `data_dir`. A recipe's
+`dataset_type` picks the build's mode.
 
 ## How the files flow
 
@@ -213,15 +212,11 @@ table shows; [stages/build.md](stages/build.md) has the details.
 
 ## An eval run
 
-`eval_example.json` lists `inputs`, `outputs`, `paraphrase`, `jailbreaks`,
-`build`. The inputs stage runs the standalone path
-([stages/inputs.md](stages/inputs.md#standalone-inputs)): per category it
-generates a description and seed prompts (by default), then generates and
-checks samples in turns until the category has `samples_per_category`
-accepted samples or runs out of turns. It
-writes `Datasets/<category>/samples.csv` and warns with a
-`DeprecationWarning`. The build runs in `eval` mode: paraphrases go to
-`Datasets/paraphrased.csv` instead of the complete dataset.
+`eval_example.json` lists the same stages as a training run, with a small
+constitution: one taxonomy category and three constitution categories per
+entry type (`params_example.json`). The build runs in `eval` mode:
+paraphrases go to `Datasets/paraphrased.csv` instead of the complete
+dataset.
 
 ## Outside the recipe
 

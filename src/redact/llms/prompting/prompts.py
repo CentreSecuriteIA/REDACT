@@ -145,7 +145,7 @@ def load_prompt(
         pipeline: Pipeline name (e.g. "input", "output", "jailbreak",
             "constitution").
         category: Category within it (e.g. "quality_check",
-            "generation/standalone").
+            "generation/from_constitution/long").
         prompt_dir: Optional directory searched first. ``None`` uses the
             packaged prompts only.
 

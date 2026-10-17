@@ -2,14 +2,14 @@
   "dataset_type": "eval",
   "data_dir": "./runs/eval_example",
   "models": {
-    "gen": null, "check": null, "translation": null,
+    "gen": null, "check": null, "translation": null, "constitution": null,
     "paraphraser": null, "paraphrase_check": null
   },
   "taxonomy": "harmful",
   "taxonomy_dir": null,
   "benign_taxonomy": "benign",
   "prompt_dir": null,
-  "stages": ["inputs", "outputs", "paraphrase", "jailbreaks", "build"],
+  "stages": ["constitution", "inputs", "outputs", "paraphrase", "jailbreaks", "build"],
   "augmentations": {
     "adversarial": {
       "translation": false,

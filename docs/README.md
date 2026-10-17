@@ -40,7 +40,7 @@ and ledger key, files and columns, how it resumes, and what happens to a
 rejected or failed unit.
 
 - [stages/constitution.md](stages/constitution.md)
-- [stages/inputs.md](stages/inputs.md): seeded and standalone
+- [stages/inputs.md](stages/inputs.md): seeded from the constitution
 - [stages/outputs.md](stages/outputs.md)
 - [stages/paraphrase.md](stages/paraphrase.md)
 - [stages/jailbreaks.md](stages/jailbreaks.md): the adversarial and natural

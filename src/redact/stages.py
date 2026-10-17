@@ -11,8 +11,7 @@ calls, the files it writes and the kwargs a recipe gives it.
 #     rows. Called with read_back=False, as a recipe run calls every stage,
 #     it reads none of its output back.
 #   - Nothing locks the constitution's files against a second process; the
-#     stage is tens of units. The deprecated standalone inputs have no lock
-#     either.
+#     stage is tens of units.
 #TODO(dataset): the paraphrase stage reads its whole output CSV on every run,
 #   for the texts already in it. This goes when the stage moves onto
 #   drive_units with its ids on the ledger.
@@ -30,11 +29,7 @@ import pandas as pd
 
 from redact import dataset, paths
 from redact.constitution import ConstitutionPipeline, read_constitution
-from redact.content_moderation import (
-    InputPipeline,
-    run_output_generation,
-    run_standalone_inputs,
-)
+from redact.content_moderation import InputPipeline, run_output_generation
 from redact.content_moderation.paraphrase import (
     paraphrase_pool,
     run_paraphrase_target,
@@ -47,7 +42,6 @@ from redact.dataset import (
     discover_categories,
     has_rows,
     input_files,
-    iter_categories,
     load_taxonomy,
     merge_all,
     merge_inputs,
@@ -157,30 +151,14 @@ def generate_constitution(
     )
 
 
-# The parameters of generate_inputs that one of its paths takes and the other
-# ignores.
-_SEEDED_ONLY = ("style", "samples_per_entry", "max_attempts", "batch_size",
-                "check_max_tokens", "entry_types")
-_STANDALONE_ONLY = ("samples_per_category", "num_categories", "samples_per_request",
-                    "num_seeds", "use_metaprompt", "seeds_name")
-
-
 def generate_inputs(
-    taxonomy: dict | str = "harmful",
-    samples_per_category: int = 15,
-    use_metaprompt: bool = True,
-    seeds_name: str = "harmful",
-    samples_per_request: int = 5,
-    num_seeds: int = 8,
+    constitution_df: pd.DataFrame | None = None,
     model: str | None = None,
     check_model: str | None = None,
-    num_categories: int | None = None,
     data_dir: str | Path | None = None,
-    taxonomy_dir: str | Path | None = None,
     prompt_dir: str | Path | None = None,
     resume: bool = True,
     verbose: bool = True,
-    constitution_df: pd.DataFrame | None = None,
     style: str = "long",
     samples_per_entry: int = 3,
     entry_types: list[str] | None = None,
@@ -189,189 +167,112 @@ def generate_inputs(
     check_max_tokens: int | None = None,
     read_back: bool = True,
 ) -> pd.DataFrame:
-    """Generate content moderation input samples (standalone or constitution-seeded).
+    """Generate content moderation input samples seeded from a constitution.
 
-    Two modes share one implementation:
-
-    - **Standalone** (``constitution_df is None``, default): meta-prompt
-      seeds drive per-category multi-turn generation with the
-      entry-type-aware quality checker (entry_type defaults to ``harmful``).
-      **Deprecated** (emits ``DeprecationWarning``) in favour of the
-      constitution-seeded mode, which gives better/more adjustable coverage;
-      still fully functional as the cheap/simple "quick eval" path.
-    - **Constitution-seeded** (``constitution_df`` provided): each
-      constitution entry becomes one generation request via
-      ``InputPipeline.run_from_constitution()``. ``style``,
-      ``samples_per_entry``, ``entry_types``, ``batch_size`` configure this
-      mode. ``taxonomy`` / ``samples_per_category`` / ``num_seeds`` are
-      ignored.
+    Each constitution entry becomes one generation request via
+    ``InputPipeline.run_from_constitution()``; the samples are checked with
+    the entry-type-aware quality checker.
 
     Args:
-        taxonomy: Taxonomy name or pre-loaded dict. (Standalone mode only.)
-        samples_per_category: Target accepted samples per category. (Standalone.)
-        use_metaprompt: LLM-generate descriptions+seeds vs. hand-written. (Standalone.)
-        seeds_name: Seeds JSON name when ``use_metaprompt=False``. (Standalone.)
-        samples_per_request: Samples per LLM call per turn. (Standalone.)
-        num_seeds: Number of seed prompts to generate. (Standalone.)
+        constitution_df: DataFrame of constitution entries. ``None`` reads
+            the constitution saved under ``data_dir``.
         model: Generation model. ``None`` (default) resolves to the
             ``uncensored_gen`` role. Backend is auto-selected from the name.
         check_model: Checker model; defaults to ``model``.
-        num_categories: First N categories from taxonomy. (Standalone.)
-        data_dir: Working root. Standalone inputs land under
-            ``{data_dir}/Datasets/``; constitution-seeded inputs auto-route to
-            ``{data_dir}/Datasets/constitution_inputs/`` so they never clash.
-            Defaults to the project root (``get_output_dir()``).
-        taxonomy_dir: Directory to load the taxonomy from (name mode).
-            Defaults to the bundled ``configs/taxonomy/``.
+        data_dir: Working root. The inputs land under
+            ``{data_dir}/Datasets/constitution_inputs/``. Defaults to the
+            project root (``get_output_dir()``).
         prompt_dir: Root prompt directory for the generation, format and
-            check prompts, and the standalone description and seed prompts.
-            ``None`` (default) falls back to the bundled ``prompts/``.
-        resume: When True (default), keep and extend existing per-category CSVs
-            (standalone dedups against them; constitution mode skips entries
-            already present). When False, clear the relevant CSVs first and
-            regenerate from scratch.
+            check prompts. ``None`` (default) falls back to the bundled
+            ``prompts/``.
+        resume: When True (default), skip entries already processed. When
+            False, start this style over.
         verbose: Log progress.
-        constitution_df: DataFrame of constitution entries. Triggers
-            constitution-seeded mode when non-None.
-        style: Template style for constitution mode (``"long"`` / ``"short"`` /
-            any directory under ``prompts/input/generation/from_constitution/``).
+        style: Template style (``"long"`` / ``"short"`` / any directory under
+            ``prompts/input/generation/from_constitution/``).
         samples_per_entry: Prompts to generate per constitution entry.
         entry_types: Filter constitution entries to these types
             (e.g. ``["harmful", "benign"]``). None = all.
-        batch_size: Entries per LLM engine pass (constitution mode).
+        batch_size: Entries per LLM engine pass.
         max_attempts: Generations per entry before a reply with the wrong
-            number of samples is given up on (constitution mode).
-        check_max_tokens: Reply limit for the check calls (constitution
-            mode). ``None`` keeps the checker model's default.
+            number of samples is given up on.
+        check_max_tokens: Reply limit for the check calls. ``None`` keeps the
+            checker model's default.
         read_back: False returns an empty DataFrame and reads no sample back.
 
     Returns:
-        Merged DataFrame of accepted samples.
+        Merged DataFrame of accepted samples of ``style``.
+
+    Raises:
+        ValueError: ``constitution_df`` is None and no constitution is saved
+            under ``data_dir``.
     """
-    given = locals()
-    # Generation model defaults to the uncensored_gen role (both modes).
+    if constitution_df is None:
+        constitution_df = _saved_constitution(data_dir)
     model = model or default_model_for_role("uncensored_gen")
+    client = ModelClient.create(model)
+    check_model = check_model or model
+    check_client = ModelClient.create(check_model)
 
-    if constitution_df is not None:
-        _warn_on_ignored(_STANDALONE_ONLY, given, "the standalone inputs, and this "
-                         "run seeds its inputs from a constitution")
-        client = ModelClient.create(model)
-        check_model = check_model or model
-        check_client = ModelClient.create(check_model)
-
-        # Constitution-seeded inputs auto-route to a dedicated subfolder so they
-        # never collide with standalone content-moderation inputs.
-        ds_dir = paths.constitution_inputs_dir(data_dir)
-        pipeline = InputPipeline(
-            gen=client,
-            check=check_client,
-            extraction_style="numbered",
-            dataset_dir=ds_dir,
-            prompt_dir=prompt_dir,
-        )
-
-        if entry_types is not None:
-            constitution_df = constitution_df[
-                constitution_df["entry_type"].isin(entry_types)
-            ].reset_index(drop=True)
-
-        prompt_config = load_prompt(
-            "input", f"generation/from_constitution/{style}", prompt_dir=prompt_dir
-        )
-
-        if verbose:
-            logger.info("Generate Inputs (constitution-seeded)")
-            logger.info("Entries: %d | Style: %s | Samples/entry: %d | Batch: %d",
-                        len(constitution_df), style, samples_per_entry, batch_size)
-
-        result = pipeline.run_from_constitution(
-            constitution_df=constitution_df,
-            prompt_config=prompt_config,
-            samples_per_entry=samples_per_entry,
-            use_checker=True,
-            verbose=verbose,
-            batch_size=batch_size,
-            resume=resume,
-            style=style,
-            max_attempts=max_attempts,
-            check_max_tokens=check_max_tokens,
-        )
-        if result.total_entries_processed:
-            _warn_on_low_acceptance(
-                result.total_prompts_accepted, result.total_prompts_generated)
-
-        # Write the root-level handoff CSV build_dataset() actually looks for
-        # (paths.constitution_inputs_merged_csv) —
-        # without this, build_dataset() silently drops every constitution-
-        # seeded input row, since its own category-folder discovery scans
-        # Datasets/ directly and never finds the one-level-deeper
-        # Datasets/constitution_inputs/{category}/samples.csv layout.
-        # Unfiltered by style so build_dataset() sees every style generated
-        # under this data_dir, not just whichever style this call used.
-        # Copied from the category files in chunks; removed when no sample
-        # is accepted, so the build takes no row the files no longer hold.
-        files = (paths.category_csv(c, root=ds_dir)
-                 for c in discover_categories(ds_dir))
-        merged = paths.constitution_inputs_merged_csv(data_dir)
-        written = write_concat(
-            merged,
-            [Part(f, accepted_only=True) for f in files if has_rows(f)],
-            keep_empty=False,
-        )
-        if not any(written):
-            merged.unlink(missing_ok=True)
-        if not read_back:
-            return pd.DataFrame()
-        result = merge_all(ds_dir, accepted_only=True)
-        if style and not result.empty and "template_style" in result.columns:
-            result = result[result["template_style"] == style].reset_index(drop=True)
-        return result
-
-    warnings.warn(
-        "Standalone meta-prompt input generation (generate_inputs without "
-        "constitution_df) is deprecated in favour of constitution-seeded "
-        "generation (generate_inputs(constitution_df=...)); it remains functional.",
-        DeprecationWarning,
-        stacklevel=2,
-    )
-    _warn_on_ignored(_SEEDED_ONLY, given, "the inputs seeded from a constitution, "
-                     "and this run is standalone")
-    if isinstance(taxonomy, str):
-        taxonomy = load_taxonomy(taxonomy, config_dir=taxonomy_dir)
-    categories = list(iter_categories(taxonomy))
-    if num_categories is not None:
-        categories = categories[:num_categories]
-
-    ds_dir = paths.datasets(data_dir)
-    results = run_standalone_inputs(
-        categories,
-        ModelClient.create(model),
-        ModelClient.create(check_model or model),
-        ds_dir,
+    ds_dir = paths.constitution_inputs_dir(data_dir)
+    pipeline = InputPipeline(
+        gen=client,
+        check=check_client,
+        extraction_style="numbered",
+        dataset_dir=ds_dir,
         prompt_dir=prompt_dir,
-        samples_per_category=samples_per_category,
-        samples_per_request=samples_per_request,
-        use_metaprompt=use_metaprompt,
-        seeds_name=seeds_name,
-        num_seeds=num_seeds,
-        resume=resume,
-        verbose=verbose,
     )
-    if results:
-        _warn_on_low_acceptance(sum(r.total_accepted for r in results),
-                                sum(r.total_extracted for r in results))
-    return merge_all(ds_dir, accepted_only=True) if read_back else pd.DataFrame()
 
+    if entry_types is not None:
+        constitution_df = constitution_df[
+            constitution_df["entry_type"].isin(entry_types)
+        ].reset_index(drop=True)
 
-def _warn_on_ignored(names: tuple[str, ...], given: dict, whose: str) -> None:
-    """Warn naming the parameters of ``names`` that ``given`` sets to other
-    than their default: the path of the inputs stage that runs ignores them.
-    ``whose`` says whose parameters they are."""
-    defaults = inspect.signature(generate_inputs).parameters
-    ignored = [name for name in names if given[name] != defaults[name].default]
-    if ignored:
-        logger.warning("inputs: %s are parameters of %s; they are ignored.",
-                       ignored, whose)
+    prompt_config = load_prompt(
+        "input", f"generation/from_constitution/{style}", prompt_dir=prompt_dir
+    )
+
+    if verbose:
+        logger.info("Generate Inputs (constitution-seeded)")
+        logger.info("Entries: %d | Style: %s | Samples/entry: %d | Batch: %d",
+                    len(constitution_df), style, samples_per_entry, batch_size)
+
+    result = pipeline.run_from_constitution(
+        constitution_df=constitution_df,
+        prompt_config=prompt_config,
+        samples_per_entry=samples_per_entry,
+        use_checker=True,
+        verbose=verbose,
+        batch_size=batch_size,
+        resume=resume,
+        style=style,
+        max_attempts=max_attempts,
+        check_max_tokens=check_max_tokens,
+    )
+    if result.total_entries_processed:
+        _warn_on_low_acceptance(
+            result.total_prompts_accepted, result.total_prompts_generated)
+
+    # The merged file build_dataset() reads: the accepted rows of every
+    # style under this data_dir, copied from the category files in chunks;
+    # removed when no sample is accepted, so the build takes no row the files
+    # no longer hold.
+    files = (paths.category_csv(c, root=ds_dir)
+             for c in discover_categories(ds_dir))
+    merged = paths.constitution_inputs_merged_csv(data_dir)
+    written = write_concat(
+        merged,
+        [Part(f, accepted_only=True) for f in files if has_rows(f)],
+        keep_empty=False,
+    )
+    if not any(written):
+        merged.unlink(missing_ok=True)
+    if not read_back:
+        return pd.DataFrame()
+    result = merge_all(ds_dir, accepted_only=True)
+    if style and not result.empty and "template_style" in result.columns:
+        result = result[result["template_style"] == style].reset_index(drop=True)
+    return result
 
 
 def generate_outputs(
@@ -722,8 +623,7 @@ def _of_entry_types(inputs: pd.DataFrame, entry_types: list | None) -> pd.DataFr
 
 def _has_inputs(data_dir: str | Path | None) -> bool:
     """Whether the run under ``data_dir`` has input samples, accepted or not."""
-    return bool(discover_categories(paths.constitution_inputs_dir(data_dir))
-                or discover_categories(paths.datasets(data_dir)))
+    return bool(discover_categories(paths.constitution_inputs_dir(data_dir)))
 
 
 def _given_or_run_inputs(
@@ -919,9 +819,9 @@ def build_dataset(
     without that column is copied whole.
 
     The inputs are read from ``constitution_inputs_merged.csv``, which the
-    seeded inputs stage writes, or else from the run's per-category
-    ``{category}/samples.csv`` files (:func:`redact.dataset.merge_inputs`);
-    the outputs from ``output_responses.csv``. ``inputs_path`` /
+    inputs stage writes, or else from the category files of
+    ``constitution_inputs/`` (:func:`redact.dataset.merge_inputs`); the
+    outputs from ``output_responses.csv``. ``inputs_path`` /
     ``responses_path`` pick other files.
 
     Args:
@@ -1084,7 +984,6 @@ class RunContext:
     resume: bool
     verbose: bool
     benign_taxonomy: dict | str = "benign"     # the categories of fsh/dap's pairs
-    stages: tuple[str, ...] = ()    # the stages the recipe names
 
 
 @dataclass(frozen=True)
@@ -1212,23 +1111,11 @@ def _taxonomy_file(ctx: RunContext) -> list[Path]:
 
 
 def _inputs_kwargs(ctx: RunContext) -> dict:
-    kwargs = dict(
-        data_dir=ctx.data_dir, taxonomy=ctx.taxonomy, taxonomy_dir=ctx.taxonomy_dir,
-        prompt_dir=ctx.prompt_dir, model=ctx.models["gen"],
+    return dict(
+        data_dir=ctx.data_dir, prompt_dir=ctx.prompt_dir, model=ctx.models["gen"],
         check_model=ctx.models["check"], resume=ctx.resume, verbose=ctx.verbose,
+        constitution_df=Saved(partial(_saved_constitution, ctx.data_dir)),
     )
-    if _seeded(ctx):
-        kwargs["constitution_df"] = Saved(partial(_saved_constitution, ctx.data_dir))
-    return kwargs
-
-
-def _seeded(ctx: RunContext) -> bool:
-    """Whether the run's inputs are seeded from a constitution: a training
-    run's always are, an eval run's when it has one (the stage is in its
-    recipe, or a constitution is saved under ``data_dir``). The others are
-    standalone."""
-    return (ctx.dataset_type == "training" or "constitution" in ctx.stages
-            or paths.constitution_merged_csv(ctx.data_dir).exists())
 
 
 def _saved_constitution(data_dir: str | Path | None) -> pd.DataFrame:
@@ -1241,21 +1128,14 @@ def _saved_constitution(data_dir: str | Path | None) -> pd.DataFrame:
     if not merged.exists():
         raise ValueError(
             f"No constitution at {merged}. Its entries seed the inputs, so run "
-            "the 'constitution' stage before 'inputs', in this recipe or in an "
-            "earlier run on the same data_dir.")
+            "the 'constitution' stage (generate_constitution) before 'inputs', "
+            "in this recipe or in an earlier run on the same data_dir.")
     return read_constitution(paths.constitution_dir(data_dir))
 
 
 def _inputs_sources(ctx: RunContext) -> list[Path]:
-    """The saved constitution; for standalone inputs the taxonomy and, without
-    the metaprompt, the seeds file."""
-    if _seeded(ctx):
-        return [paths.constitution_merged_csv(ctx.data_dir)]
-    given = _params(ctx, "inputs")
-    if given.get("use_metaprompt", True):
-        return _taxonomy_file(ctx)
-    seeds = _json_file(paths.seeds_dir(), given.get("seeds_name", "harmful"))
-    return [*_taxonomy_file(ctx), seeds]
+    """The saved constitution, whose entries seed the inputs."""
+    return [paths.constitution_merged_csv(ctx.data_dir)]
 
 
 def _run_inputs(ctx: RunContext) -> list[Path]:
@@ -1263,13 +1143,12 @@ def _run_inputs(ctx: RunContext) -> list[Path]:
 
 
 def _inputs_files(ctx: RunContext) -> tuple[list[Path], dict]:
-    seeded = _seeded(ctx)
-    tree = (paths.constitution_inputs_dir if seeded else paths.datasets)(ctx.data_dir)
+    tree = paths.constitution_inputs_dir(ctx.data_dir)
     files = [paths.category_csv(c, root=tree) for c in discover_categories(tree)]
     keep = {"accepted": True}
-    # Seeded inputs of another style may share the tree.
+    # Inputs of another style may share the tree.
     style = _params(ctx, "inputs").get("style", "long")
-    if seeded and style:
+    if style:
         keep["template_style"] = style
     return files, keep
 

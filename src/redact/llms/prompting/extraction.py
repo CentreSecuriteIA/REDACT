@@ -15,10 +15,6 @@ Also provides sample cleaning (:func:`clean_sample`).
 #   - Retry a rejected reply a bounded number of times before giving up.
 #     Done for constitution inputs and the benign Q&A (llm_pipeline.extracted);
 #     the call sites below still treat a rejected reply as an empty one.
-#   - Standalone inputs (content_moderation/standalone.py): one rejected reply stops
-#     the whole category. Stop only on an empty reply or repeated failures.
-#   - Seeds (metaprompt.py): after 3 failed attempts the category is skipped
-#     with only an INFO log.
 #   - Count rejections and report them: a run that lost entries still logs
 #     "100% accepted", and skipped_entries mixes empty, rejected and duplicate.
 #   - prompts/format_instructions/numbered: the example shows two items even

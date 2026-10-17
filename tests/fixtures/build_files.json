@@ -31,7 +31,7 @@
     ["po-2", "another answer", "Fraud", "", "True", "paraphrase_outputs", "", "harmful", "", "content_moderation_paraphrase", "in-3", "", "", "", "", "0.0", "para-a", ""]
    ]
   },
-  "standalone tree": {
+  "inputs tree": {
    "complete_dataset.csv": [
     ["sample_id", "sample", "category", "turn", "accepted", "source", "dataset_type", "prompt", "subcategory", "entry_type", "template_style", "input_id", "jailbreak", "technique", "technique_info", "complexity", "num_techniques", "is_noop", "reasoning", "iteration", "combination_spec_version", "input_prompt", "model", "output_response", "rejection_reason"],
     ["in-1", "first input, with a comma", "Cyber", "0.0", "True", "constitution", "content_moderation_input", "", "", "", "", "", "", "", "", "", "", "", "", "", "", "", "", "", ""],
@@ -74,7 +74,7 @@
  },
  "runs": {
   "eval": {
-   "counts": {"build": {"accepted": 18, "rows": 18}, "inputs": {"accepted": 5, "rows": 5}, "jailbreaks": {"accepted": 10, "rows": 10}, "outputs": {"accepted": 4, "rows": 5}, "paraphrase": {"accepted": 9, "rows": 9}}
+   "counts": {"build": {"accepted": 18, "rows": 18}, "constitution": {"rows": 2}, "inputs": {"accepted": 5, "rows": 5}, "jailbreaks": {"accepted": 9, "rows": 10}, "outputs": {"accepted": 4, "rows": 5}, "paraphrase": {"accepted": 9, "rows": 9}}
   },
   "training": {
    "constitution_inputs_merged.csv": [

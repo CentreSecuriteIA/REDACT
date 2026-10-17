@@ -14,7 +14,7 @@ Under `src/redact/`:
 | `llm_pipeline/` | `LLMRequest`, the drivers of units of model calls, checks and retry steps ([llm_pipeline.md](llm_pipeline.md)) |
 | `residency/` | The GPU planner: which local models fit, per stage; preload and unload ([residency.md](residency.md)) |
 | `constitution/` | The constitution stage: `generation.py` (`ConstitutionPipeline`, `read_constitution`), `units.py` (one call per taxonomy category and entry type), `parse.py` (the `[END]` marker and the three-level markdown parser) |
-| `content_moderation/` | The inputs, outputs and paraphrase stages: `inputs.py` (`InputPipeline`), `standalone.py` (the deprecated standalone inputs), `outputs.py`, `paraphrase.py`, `checker.py` (the checkers), `feedback.py` (rejection feedback, the do-not-repeat note), `metaprompt.py` (category description and seeds), `results.py` (result classes) |
+| `content_moderation/` | The inputs, outputs and paraphrase stages: `inputs.py` (`InputPipeline`), `outputs.py`, `paraphrase.py`, `checker.py` (the checkers), `feedback.py` (rejection feedback, the do-not-repeat note), `results.py` (the inputs stage's totals) |
 | `jailbreak/` | The technique library, one subpackage per layer, and the augmentation engine ([jailbreak.md](jailbreak.md)) |
 | `multi_turn/` | Conversation datasets: settings, actors, `generate_conversations`, `evaluate_conversations` |
 | `multiturn_attacks/`, `optimization/` | Crescendo and PAIR attacks against a safety-trained target; a beam search over conversation moves ([conversations](../stages/conversations.md#attacks-and-search)) |
@@ -49,7 +49,7 @@ and calls one core, then returns what the core returns.
 | Front | Core | Returns |
 |---|---|---|
 | `generate_constitution` | `ConstitutionPipeline.run` | the saved constitution |
-| `generate_inputs` | `InputPipeline.run_from_constitution`, or `run_standalone_inputs` | the accepted inputs (of the current style, on the seeded path) |
+| `generate_inputs` | `InputPipeline.run_from_constitution` | the accepted inputs of the current style |
 | `generate_outputs` | `content_moderation.run_output_generation` | the rows of `output_responses.csv` |
 | `generate_paraphrases` | `content_moderation.paraphrase.run_paraphrase_target`, per target | `{"inputs": ..., "outputs": ...}` |
 | `generate_jailbreaks` | `jailbreak.pipeline.run_augmentation`, per kind | the rows of `jailbreaks.csv` |
@@ -112,7 +112,7 @@ recipe's kwargs updated with the params file's.
 | Stage | Roles | Files counted | Sources |
 |---|---|---|---|
 | `constitution` | `constitution` -> `constitution_gen` | `Data_cache/constitution/merged.csv` | the taxonomy file |
-| `inputs` | `gen`, `check` -> `uncensored_gen` | the category files of the run's tree; accepted rows of the current style | seeded: `merged.csv`; standalone: the taxonomy file, and the seeds file with `use_metaprompt: false` |
+| `inputs` | `gen`, `check` -> `uncensored_gen` | the category files of `constitution_inputs/`; accepted rows of the current style | the saved constitution, `merged.csv` |
 | `outputs` | `gen`, `check` -> `uncensored_gen` | `output_responses.csv`, or its `output_path` | the input category files (`dataset.input_files`) |
 | `paraphrase` | `paraphraser` -> `paraphraser`, `paraphrase_check` -> `uncensored_gen` | the files of the target(s) | the input category files and `output_responses.csv`, per target |
 | `jailbreaks` | `gen` -> `uncensored_gen`, `translation` -> `translation` | `jailbreaks.csv` and `variations.csv`, each when its kind is on | the input category files |
@@ -121,7 +121,7 @@ recipe's kwargs updated with the params file's.
 `RunContext` is what one run hands the stages: `data_dir`, `dataset_type`,
 `models` (role to name or `None`), `prompt_dir`, `taxonomy`,
 `taxonomy_dir`, `benign_taxonomy`, `params`, `augmentations` (resolved),
-`resume`, `verbose`, `stages` (the recipe's).
+`resume`, `verbose`.
 
 ## recipe.py
 
@@ -190,7 +190,7 @@ else the current directory.
 | Function | Path |
 |---|---|
 | `datasets(root)`, `data_cache(root)` | `<root>/Datasets`, `<root>/Data_cache` |
-| `category_csv(category, root)` | `<root or Datasets>/<category>/samples.csv`; a category with a path separator raises |
+| `category_csv(category, root)` | `<root>/<category>/samples.csv`, `root` by default `constitution_inputs_dir`; a category with a path separator raises |
 | `constitution_dir`, `constitution_merged_csv` | `Data_cache/constitution/`, `.../merged.csv` |
 | `constitution_inputs_dir`, `constitution_inputs_merged_csv` | `Datasets/constitution_inputs/`, `Datasets/constitution_inputs_merged.csv` |
 | `output_responses_csv`, `jailbreaks_csv`, `variations_csv` | under `Datasets/` |
@@ -247,8 +247,7 @@ How each stage departs from this:
 | Stage | Difference |
 |---|---|
 | constitution | A plain ledger: `resume_state` gets no artifact, so no lock and no sizes. It clears its own CSVs on a fresh run, saves after every unit (`every=1`), runs one unit at a time (`pool_size=1`), and reads back through `read_constitution` |
-| seeded inputs | A tree of files: `artifact=folder, pattern="*/samples.csv"`, sidecars named `constitution_inputs.*` in the folder, `drop_units` for a fresh run of one style. Returns `ConstitutionInputResult`; the front reads the tree |
-| standalone inputs | No sidecars and no units |
+| inputs | A tree of files: `artifact=folder, pattern="*/samples.csv"`, sidecars named `constitution_inputs.*` in the folder, `drop_units` for a fresh run of one style. Returns `ConstitutionInputResult`; the front reads the tree |
 | paraphrase | Chunked batch calls instead of `drive_units`, one save per chunk |
 | jailbreaks | Steps 2 to 7 run once per kind; the plan is reused on resume |
 | scoring | No plan |

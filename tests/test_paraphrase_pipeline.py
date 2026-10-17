@@ -12,7 +12,7 @@ import pytest
 
 import redact.content_moderation.paraphrase as CP
 from redact import generate_paraphrases, paths
-from redact.dataset import append_samples, content_id
+from redact.dataset import content_id
 from tests.conftest import (
     Killed,
     MockBackend,
@@ -20,6 +20,7 @@ from tests.conftest import (
     kill_after_rows,
     lock_is_free,
     make_client,
+    write_inputs,
 )
 
 
@@ -47,10 +48,8 @@ def patched(monkeypatch):
 
 
 def _seed_inputs(tmp_path):
-    append_samples(
-        ["alpha prompt", "beta prompt"], category="Cyber", turn=0,
-        accepted=[True, True], dataset_dir=paths.datasets(tmp_path),
-    )
+    write_inputs(paths.constitution_inputs_dir(tmp_path),
+                 ["alpha prompt", "beta prompt"])
 
 
 def test_paraphrase_inputs_dedup_and_manifest(tmp_path, patched):
@@ -76,11 +75,10 @@ def test_paraphrase_inputs_dedup_and_manifest(tmp_path, patched):
         assert row["sample_id"] != row["input_id"]
 
 
-@pytest.mark.parametrize("seeded", [True, False], ids=["seeded", "standalone"])
-def test_without_inputs_the_inputs_of_the_run_are_found(tmp_path, patched, seeded):
+def test_without_inputs_the_inputs_of_the_run_are_found(tmp_path, patched):
     from tests.test_pipelines import _seed_input_tree
 
-    text = _seed_input_tree(tmp_path, seeded)
+    text = _seed_input_tree(tmp_path)
     res = generate_paraphrases(data_dir=tmp_path, target="inputs", verbose=False)
     df = res["inputs"]
     assert list(df["sample"]) == [f"PARA::{text}"]
@@ -502,10 +500,7 @@ _FOUR = ["alpha prompt", "beta prompt", "gamma prompt", "delta prompt"]
 
 
 def _seed_four_inputs(tmp_path):
-    append_samples(
-        _FOUR, category="Cyber", turn=0, accepted=[True] * len(_FOUR),
-        dataset_dir=paths.datasets(tmp_path),
-    )
+    write_inputs(paths.constitution_inputs_dir(tmp_path), _FOUR)
     # gamma comes back unchanged, so its unit is dropped.
     return lambda client, texts, **kw: [
         t if t.startswith("gamma") else f"PARA::{t}" for t in texts

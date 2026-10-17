@@ -405,6 +405,49 @@ def tmp_dataset_dir(tmp_path):
     return ds_dir
 
 
+# A small synthetic constitution, placeholder text only.
+CONSTITUTION = pd.DataFrame([
+    {"source_category": "Category A", "constitution_category": "Topic A",
+     "constitution_subcategory": "Subcategory A",
+     "sample_description": "placeholder sample description one",
+     "entry_type": "harmful"},
+    {"source_category": "Category B", "constitution_category": "Topic B",
+     "constitution_subcategory": "Subcategory B",
+     "sample_description": "placeholder sample description two",
+     "entry_type": "benign"},
+])
+
+
+def save_constitution(data_dir, entries: pd.DataFrame = CONSTITUTION) -> None:
+    """Save ``entries`` as the constitution under ``data_dir``, where the
+    constitution stage saves it, so a run's inputs stage can start."""
+    from redact import paths
+
+    merged = paths.constitution_merged_csv(data_dir)
+    merged.parent.mkdir(parents=True, exist_ok=True)
+    entries.to_csv(merged, index=False)
+
+
+def write_inputs(tree, texts, category="Cyber", *, accepted=None,
+                 source="generated", extra=None) -> None:
+    """Append input rows of ``texts`` to ``category``'s file under ``tree``,
+    as the inputs stage writes them.
+
+    ``accepted`` holds one flag per text (all accepted by default); ``extra``
+    holds further columns, one dict for every row or a list of one per text.
+    """
+    from redact import paths
+    from redact.dataset import append_rows, sample_row
+
+    accepted = [True] * len(texts) if accepted is None else accepted
+    extras = extra if isinstance(extra, list) else [extra or {}] * len(texts)
+    path = paths.category_csv(category, root=tree)
+    path.parent.mkdir(parents=True, exist_ok=True)
+    append_rows(path, [
+        sample_row(text, category, turn=0, accepted=flag, source=source, extra=more)
+        for text, flag, more in zip(texts, accepted, extras)])
+
+
 def as_resolver(fake, backends=None):
     """Adapt an old-style fake router to the ``resolve(model) -> client`` seam.
 

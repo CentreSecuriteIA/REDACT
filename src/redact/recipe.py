@@ -1,10 +1,10 @@
 """What a recipe and its params file say.
 
 A recipe says what to run: ``dataset_type`` (``"eval"`` or ``"training"``;
-a training run's inputs are seeded from a constitution, an eval run's when
-it has one), ``data_dir``, ``models`` per role (a registry name, or an
-object that also says how the model is served, see
-:func:`serving_of`), ``taxonomy``/``taxonomy_dir``/``prompt_dir``,
+an eval build writes the paraphrases to a file of their own), ``data_dir``,
+``models`` per role (a registry name, or an object that also says how the
+model is served, see :func:`serving_of`),
+``taxonomy``/``taxonomy_dir``/``prompt_dir``,
 ``benign_taxonomy`` (see :func:`benign_taxonomy_of`), an ordered
 ``stages`` list, ``augmentations`` (the augmentation section, see
 :func:`augmentations_of`), a ``params_file`` and ``resume``. Its params file

@@ -1,7 +1,9 @@
 """The run-time prompt text of content_moderation/feedback.py.
 
 The hashes pin the text the stages rendered before it moved into
-feedback.py, so the move is verbatim.
+feedback.py, so the move is verbatim. ``output_empty_list`` and
+``messages_prohibited_many`` are pinned as the code before the standalone
+inputs were removed rendered them, the second without feedback.
 """
 
 import hashlib
@@ -9,35 +11,24 @@ import json
 
 import pytest
 
-from redact.content_moderation.feedback import (
-    next_turn_feedback,
-    prohibited_note,
-    with_feedback,
-)
+from redact.content_moderation.feedback import prohibited_note, with_feedback
 from redact.content_moderation.inputs import InputPipeline
-from redact.content_moderation.results import SampleResult, TurnResult
 
 _PINNED = {
-    "input_after_user":
-        "f2613962270ca85857838ee0380a9e747019cabc4e4eaa6f31b0684b9da3d68b",
     "output_after_user":
         "8a76acfe23a49fbcb922548b0f74946d7870d5e2b894b98f8b0014a503c08c56",
     "output_after_system":
         "8237d0ba91f2f6fc49c1ba59d311d4bb6cca7174efadabc3c19bafcfde25bfcb",
-    "input_empty_list":
-        "ad1769c736b28a8e67d7555aa6c05fbb9637c33a73ea7b9bb5b214eb384d7c58",
+    "output_empty_list":
+        "c5ba0eec2f835d8693fd57498199df1cf9cd249bfdf54c2a5d07c1e4eca5b821",
     "no_feedback":
         "fe87c17fff362934c9198d21ee2ae6329fb93479e4c2aa2d65c6102c904c5f93",
     "messages_prohibited_few":
         "a35366f54765dba03e5cab8750ca14a6c7eabda4766ddc6d27d34477f38595c2",
     "messages_prohibited_many":
-        "4584eb5c38d4d84ae546ebd6cbcd2933a2c88872208afaf5f028daeef3dea6c2",
+        "03e28f0221650445163e0ed732659a1d0db3c137381990545e23f1892a5d95cb",
     "messages_prohibited_more":
         "1af23f8796e70556c2651fbda65dcc2f06a4426c1171a3f716cb038f5155cc2f",
-    "next_turn":
-        "5f51f7d971cf0d7732e35f76349b08308ea1f8bf9aaed749b639b21d1bda2bcc",
-    "next_turn_none":
-        "12ae32cb1ec02d01eda3581b127c1fee3b0dc53572ed6baf239721a03d82e126",
 }
 
 _PROMPT = {"system_prompt": "sys", "template": "Make {num_samples} about {Category}"}
@@ -58,27 +49,14 @@ def _rendered(name: str):
     def build(**kwargs):
         return pipe._build_generation_messages(_PROMPT, 3, Category="Cat", **kwargs)
 
-    turn = TurnResult(0, "", 4, 1, 3, [
-        SampleResult("a", True, "", 0),
-        SampleResult("b", False, "r" * 250, 0),
-        SampleResult("c", False, "second reason", 0),
-        SampleResult("d", False, "third reason", 0),
-        SampleResult("e", False, "fourth reason", 0),
-    ])
     return {
-        "input_after_user": lambda: with_feedback(_base(), "- one\n- two"),
-        "output_after_user": lambda: with_feedback(_base(), "verdict", "output"),
-        "output_after_system": lambda: with_feedback(
-            _base()[:1], "verdict", "output"),
-        "input_empty_list": lambda: with_feedback([], "reason"),
+        "output_after_user": lambda: with_feedback(_base(), "verdict"),
+        "output_after_system": lambda: with_feedback(_base()[:1], "verdict"),
+        "output_empty_list": lambda: with_feedback([], "reason"),
         "no_feedback": lambda: with_feedback(_base(), ""),
         "messages_prohibited_few": lambda: build(prohibited=_TEXTS[:3]),
-        "messages_prohibited_many": lambda: build(
-            feedback="- bad", prohibited=_TEXTS, more=5),
+        "messages_prohibited_many": lambda: build(prohibited=_TEXTS, more=5),
         "messages_prohibited_more": lambda: build(prohibited=_TEXTS[:2], more=4),
-        "next_turn": lambda: next_turn_feedback(turn),
-        "next_turn_none": lambda: next_turn_feedback(
-            TurnResult(0, "", 1, 1, 0, [SampleResult("a", True, "", 0)])),
     }[name]()
 
 

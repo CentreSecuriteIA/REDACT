@@ -29,9 +29,7 @@ A stage that resumes and finds nothing to save opens no buffer and calls
 
 # The per-category tree of input samples
 from .categories import (
-    append_samples,
     discover_categories,
-    get_existing_samples,
     input_files,
     merge_all,
     merge_inputs,
@@ -88,7 +86,6 @@ __all__ = [
     "Part",
     "accepted_mask",
     "append_rows",
-    "append_samples",
     "check_columns",
     "clear_stage",
     "commit",
@@ -97,7 +94,6 @@ __all__ = [
     "create_taxonomy",
     "discover_categories",
     "drop_units",
-    "get_existing_samples",
     "get_seed_prompts",
     "has_rows",
     "input_files",

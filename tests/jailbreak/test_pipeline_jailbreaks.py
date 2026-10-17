@@ -799,11 +799,10 @@ def test_a_fresh_run_of_one_kind_leaves_the_others_files(tmp_path):
 # --- the inputs of the run ------------------------------------------------------
 
 
-@pytest.mark.parametrize("seeded", [True, False], ids=["seeded", "standalone"])
-def test_without_inputs_the_inputs_of_the_run_are_found(tmp_path, seeded):
+def test_without_inputs_the_inputs_of_the_run_are_found(tmp_path):
     from tests.test_pipelines import _seed_input_tree
 
-    text = _seed_input_tree(tmp_path, seeded)
+    text = _seed_input_tree(tmp_path)
     df = generate_jailbreaks(data_dir=tmp_path, seed=7, **PURE_KW)
     assert list(df["prompt"]) == [text]
     assert list(df["input_id"]) == [content_id(text)]

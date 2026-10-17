@@ -11,10 +11,10 @@ that starts with `_` is a comment.
 
 | Key | Type | Default | Meaning |
 |---|---|---|---|
-| `dataset_type` | `"eval"` or `"training"` | `"eval"` | `training` seeds the inputs from the constitution saved under `data_dir`; `eval` seeds them too when it lists `constitution` or a constitution is saved under `data_dir`, and otherwise runs the standalone inputs. Also the build's `mode` |
+| `dataset_type` | `"eval"` or `"training"` | `"eval"` | The build's `mode`: `eval` writes the paraphrases to `paraphrased.csv`, `training` merges them in. Either way the inputs are seeded from the constitution, which the recipe's `constitution` stage writes or an earlier run saved under `data_dir`; without one the `inputs` stage stops |
 | `data_dir` | path | the default working root | The run's root; `Datasets/` and `Data_cache/` go under it. Relative to the current directory. `run_pipeline(data_dir=...)` and `--data-dir` override it |
 | `models` | object | every role its default | A model per role; see [below](#the-models-object) |
-| `taxonomy` | name or object | `"harmful"` | The taxonomy of the constitution and the standalone inputs, by file name or as a loaded object. The former name `"content_moderation_categories"` loads `harmful` with a `DeprecationWarning`, for one release |
+| `taxonomy` | name or object | `"harmful"` | The taxonomy of the constitution, by file name or as a loaded object. The former name `"content_moderation_categories"` loads `harmful` with a `DeprecationWarning`, for one release |
 | `taxonomy_dir` | path | `configs/taxonomy/` | Where a taxonomy name (`taxonomy`, `benign_taxonomy`) is looked up |
 | `benign_taxonomy` | name or object | `"benign"` | The taxonomy whose subcategories the benign Q&A pairs of the `fsh` and `dap` techniques are generated for. Read at load, and checked to have a category, when the recipe runs `jailbreaks` and a kind draws a technique that needs benign data |
 | `prompt_dir` | path | none | The prompt overlay; see [below](#the-prompt-overlay) |
@@ -62,10 +62,7 @@ models, `data_dir`, `prompt_dir`, `taxonomy`, `taxonomy_dir`,
 | `include_standalone_benign` | `false` | Add one call for benign entries with no taxonomy category |
 | `standalone_benign_categories` | `10` | Categories asked for in that call |
 
-### `inputs`, seeded (training)
-
-These keys hold for an eval run whose inputs are seeded too (its recipe
-lists `constitution`, or a constitution is saved under `data_dir`).
+### `inputs`
 
 | Key | Default | Meaning |
 |---|---|---|
@@ -75,19 +72,6 @@ lists `constitution`, or a constitution is saved under `data_dir`).
 | `batch_size` | `32` | Requests per grouped call; the stage keeps twice as many units live, or the widest async lane when larger |
 | `max_attempts` | `3` | Generations of an entry before a reply with the wrong number of samples is given up |
 | `check_max_tokens` | `null` | Reply limit of a check call; `null` for the checker's default |
-
-### `inputs`, standalone (eval)
-
-These keys hold for an eval run without a constitution.
-
-| Key | Default | Meaning |
-|---|---|---|
-| `samples_per_category` | `15` | Accepted samples to reach per category |
-| `samples_per_request` | `5` | Samples asked for per call |
-| `num_categories` | `null` | Only the first N taxonomy categories |
-| `use_metaprompt` | `true` | Generate each category's description and seeds with the model; `false` reads the taxonomy description and a seeds file |
-| `seeds_name` | `"harmful"` | The seeds file under `configs/seeds/`, with `use_metaprompt: false`. The former name `"content_moderation_seeds"` loads `harmful` with a `DeprecationWarning`, for one release |
-| `num_seeds` | `8` | Seed prompts to generate per category |
 
 ### `outputs`
 
@@ -430,8 +414,8 @@ packaged prompt (a misspelt name) or that has several `.json` files and no
 
 Every stage passes `prompt_dir` to the loader, so each prompt a model call
 is built from is read from the overlay when the overlay has it: the
-constitution, the inputs (generation, format instruction, check, and the
-standalone description and seed calls), the outputs, the paraphrases, every
+constitution, the inputs (generation, format instruction and check), the
+outputs, the paraphrases, every
 technique of the jailbreak stage (translation included) and its benign data.
 The conversation functions, which no recipe runs (`evaluate_conversations`,
 `generate_attacks`, `score_attacks`, `optimize_attack`, `optimize`), take

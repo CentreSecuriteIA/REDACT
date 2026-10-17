@@ -13,23 +13,23 @@ import pandas as pd
 import pytest
 
 from redact import paths, telemetry
-from redact.dataset import append_samples
 from redact.driver import read_record, run_pipeline, write_record
 from redact.jailbreak.augmentation import resolve
 from redact.recipe import augmentations_of, load_params, load_recipe
+from tests.conftest import save_constitution, write_inputs
 
 # --- run records -------------------------------------------------------------
 
 def test_record_roundtrip(tmp_path):
     write_record(
         "inputs", data_dir=tmp_path,
-        params={"samples_per_category": 15}, models={"gen": None},
+        params={"samples_per_entry": 3}, models={"gen": None},
         counts={"rows": 42, "accepted": 30}, sources=["a.csv"],
     )
     m = read_record("inputs", tmp_path)
     assert m["stage"] == "inputs"
     assert m["counts"] == {"rows": 42, "accepted": 30}
-    assert m["params"]["samples_per_category"] == 15
+    assert m["params"]["samples_per_entry"] == 3
     assert "timestamp" in m
     # lands under Datasets/
     assert (paths.datasets(tmp_path) / "inputs.run.json").exists()
@@ -193,15 +193,15 @@ def test_a_training_run_starts_at_inputs_from_the_saved_constitution(
         "entry_type": ["harmful", "benign"], "sample_description": ["about zq0", ""]}
 
 
-@pytest.mark.parametrize("constitution", ["in the recipe", "saved", "none"])
-def test_an_eval_run_seeds_its_inputs_when_it_has_a_constitution(
+@pytest.mark.parametrize("constitution", ["in the recipe", "saved"])
+def test_an_eval_run_seeds_its_inputs_from_its_constitution(
         tmp_path, monkeypatch, constitution):
     """A constitution stage in the recipe, or a constitution saved under
-    ``data_dir``, seeds the inputs; without either they are standalone. The
-    counts are taken from the tree the inputs went to."""
+    ``data_dir``, seeds the inputs. The counts are taken from the inputs tree."""
     import redact
 
-    rows = {"entry_type": ["harmful"], "sample_description": ["about zq0"]}
+    rows = {"entry_type": ["harmful"],
+            "sample_description": ["placeholder sample description"]}
     monkeypatch.setattr(redact, "generate_constitution", _saves_a_constitution(rows))
     if constitution == "saved":
         _saves_a_constitution(rows)(data_dir=tmp_path)
@@ -211,9 +211,8 @@ def test_an_eval_run_seeds_its_inputs_when_it_has_a_constitution(
 
     def inputs(**kwargs):
         handed.append(kwargs)
-        seeded = "constitution_df" in kwargs
-        tree = (paths.constitution_inputs_dir if seeded else paths.datasets)(tmp_path)
-        append_samples(texts, category="Cyber", turn=0, dataset_dir=tree)
+        write_inputs(paths.constitution_inputs_dir(tmp_path), texts,
+                     extra={"template_style": "long"})
         return pd.DataFrame()
 
     monkeypatch.setattr(redact, "generate_inputs", inputs)
@@ -227,11 +226,25 @@ def test_an_eval_run_seeds_its_inputs_when_it_has_a_constitution(
     finally:
         telemetry.uninstall()
     (kwargs,) = handed
-    if constitution == "none":
-        assert "constitution_df" not in kwargs
-    else:
-        assert kwargs["constitution_df"].to_dict("list") == rows
+    assert kwargs["constitution_df"].to_dict("list") == rows
     assert summary["stages"]["inputs"]["counts"]["rows"] == len(texts)
+
+
+def test_an_eval_run_without_a_constitution_raises_naming_both_ways_to_one(
+        tmp_path, monkeypatch):
+    import redact
+
+    ran = []
+    monkeypatch.setattr(redact, "generate_inputs", lambda **k: ran.append(k))
+    try:
+        with pytest.raises(ValueError, match="No constitution at") as raised:
+            run_pipeline({"dataset_type": "eval", "data_dir": str(tmp_path),
+                          "stages": ["inputs"]}, params={}, verbose=False)
+    finally:
+        telemetry.uninstall()
+    assert "run the 'constitution' stage" in str(raised.value)
+    assert "an earlier run on the same data_dir" in str(raised.value)
+    assert ran == []
 
 
 def test_a_wrong_params_key_fails_before_any_stage_runs(tmp_path, monkeypatch):
@@ -525,8 +538,7 @@ def _stub_fronts(monkeypatch) -> None:
         return run
 
     def inputs(**kwargs):
-        append_samples(["an input"], category="Cyber", turn=0,
-                       dataset_dir=paths.constitution_inputs_dir(kwargs["data_dir"]))
+        write_inputs(paths.constitution_inputs_dir(kwargs["data_dir"]), ["an input"])
         return pd.DataFrame()
 
     monkeypatch.setattr(redact, "generate_constitution",
@@ -562,22 +574,6 @@ def test_a_run_record_names_the_files_its_stage_read(tmp_path, monkeypatch):
     for stage, files in expected.items():
         sources = read_record(stage, tmp_path)["sources"]
         assert [Path(p) for p in sources] == files, stage
-
-
-def test_a_standalone_run_records_its_taxonomy_and_seeds(tmp_path, monkeypatch):
-    _stub_fronts(monkeypatch)
-    folder = tmp_path / "taxonomies"
-    folder.mkdir()
-    (folder / "mine.json").write_text('{"categories": {"A": "a"}}', encoding="utf-8")
-    try:
-        run_pipeline({"dataset_type": "eval", "data_dir": str(tmp_path),
-                      "taxonomy": "mine", "taxonomy_dir": str(folder),
-                      "stages": ["inputs"]},
-                     params={"inputs": {"use_metaprompt": False}}, verbose=False)
-    finally:
-        telemetry.uninstall()
-    assert [Path(p) for p in read_record("inputs", tmp_path)["sources"]] == [
-        folder / "mine.json", paths.seeds_dir() / "harmful.json"]
 
 
 def test_run_pipeline_loads_params_file(tmp_path, monkeypatch):
@@ -710,8 +706,10 @@ def test_an_eval_recipe_may_include_the_constitution_stage():
 
 
 def test_load_params_resolves_relative_to_base_dir(tmp_path):
-    (tmp_path / "params.json").write_text(json.dumps({"inputs": {"num_seeds": 3}}))
-    assert load_params("params.json", base_dir=tmp_path) == {"inputs": {"num_seeds": 3}}
+    (tmp_path / "params.json").write_text(
+        json.dumps({"inputs": {"samples_per_entry": 3}}))
+    assert load_params("params.json", base_dir=tmp_path) == {
+        "inputs": {"samples_per_entry": 3}}
     assert load_params(None) == {}
 
 
@@ -777,15 +775,9 @@ def test_a_recipe_naming_the_former_taxonomy_in_its_own_folder_keeps_the_name(
 
 @pytest.mark.parametrize("name", ["eval_example.json", "training_example.json"])
 def test_every_stage_of_the_example_recipes_takes_their_params(name, tmp_path):
-    """And the inputs of each are given only their own path's parameters."""
+    """And each runs the constitution stage its inputs are seeded from."""
     from redact.recipe import _DEFAULT_MODELS, _role_names
-    from redact.stages import (
-        _SEEDED_ONLY,
-        _STANDALONE_ONLY,
-        STAGES,
-        RunContext,
-        _seeded,
-    )
+    from redact.stages import STAGES, RunContext
 
     recipe = load_recipe(paths.configs_dir() / "runs" / name)
     params = load_params(recipe["params_file"], base_dir=recipe["_base_dir"])
@@ -794,12 +786,10 @@ def test_every_stage_of_the_example_recipes_takes_their_params(name, tmp_path):
         models={**_DEFAULT_MODELS, **_role_names(recipe["models"])},
         prompt_dir=None, taxonomy=recipe["taxonomy"], taxonomy_dir=None,
         params=params, augmentations=augmentations_of(recipe, params["jailbreaks"]),
-        resume=True, verbose=False, stages=tuple(recipe["stages"]))
+        resume=True, verbose=False)
     for stage in recipe["stages"]:
         STAGES[stage].check(ctx)
-    other_path = _STANDALONE_ONLY if _seeded(ctx) else _SEEDED_ONLY
-    assert set(params["inputs"]).isdisjoint(other_path)
-    assert _seeded(ctx) == (recipe["dataset_type"] == "training")
+    assert recipe["stages"][:2] == ["constitution", "inputs"]
 
 
 # --- the augmentation section -------------------------------------------------
@@ -1221,6 +1211,7 @@ def test_a_stage_is_handed_a_model_name_per_role(tmp_path, monkeypatch):
         redact, "generate_inputs",
         lambda **k: handed.update(model=k["model"], check_model=k["check_model"])
         or pd.DataFrame({"x": [1]}))
+    save_constitution(tmp_path)
     recipe = {"dataset_type": "eval", "data_dir": str(tmp_path), "stages": ["inputs"],
               "models": {"gen": {"name": "deepseek-v3.2", "workers": 1}, "check": {}}}
     try:
@@ -1236,11 +1227,8 @@ def test_a_stage_is_handed_a_model_name_per_role(tmp_path, monkeypatch):
 # --- end-to-end driver (offline) --------------------------------------------
 
 def _seed_inputs(data_dir):
-    append_samples(
-        [f"prompt number {i} about a topic" for i in range(3)],
-        category="Cyber", turn=0, accepted=[True, True, True],
-        dataset_dir=paths.datasets(data_dir),
-    )
+    write_inputs(paths.constitution_inputs_dir(data_dir),
+                 [f"prompt number {i} about a topic" for i in range(3)])
 
 
 def test_run_pipeline_eval_jailbreaks_and_build(tmp_path, monkeypatch):
@@ -1287,8 +1275,7 @@ def test_run_pipeline_eval_jailbreaks_and_build(tmp_path, monkeypatch):
 
 
 def test_a_training_run_reads_the_inputs_it_seeded(tmp_path, monkeypatch):
-    """The stages after ``inputs`` used to look only at the standalone tree,
-    and a training run stopped at the first of them with no inputs found."""
+    """The stages after ``inputs`` find the inputs in the tree it seeded."""
     import redact.content_moderation.paraphrase as CP
     from redact.llms import ModelClient
     from tests.conftest import MockBackend, make_client
@@ -1302,10 +1289,8 @@ def test_a_training_run_reads_the_inputs_it_seeded(tmp_path, monkeypatch):
         CP, "batch_check_samples",
         lambda client, texts, checker, **kw: [(True, "") for _ in texts])
     monkeypatch.setattr("redact.llms.resources.estimate._load_config", lambda _id: None)
-    append_samples(
-        [f"prompt number {i} about a topic" for i in range(3)],
-        category="Cyber", turn=0, dataset_dir=paths.constitution_inputs_dir(tmp_path),
-    )
+    write_inputs(paths.constitution_inputs_dir(tmp_path),
+                 [f"prompt number {i} about a topic" for i in range(3)])
     recipe = {
         "dataset_type": "training",
         "data_dir": str(tmp_path),
@@ -1337,11 +1322,9 @@ def test_a_run_whose_inputs_were_all_rejected_warns_and_finishes(
     backend = MockBackend("unused")
     monkeypatch.setattr(ModelClient, "create",
                         lambda m, **kw: make_client(backend, m))
-    append_samples(
-        [f"prompt number {i} about a topic" for i in range(3)],
-        category="Cyber", turn=0, accepted=[False] * 3,
-        dataset_dir=paths.datasets(tmp_path),
-    )
+    write_inputs(paths.constitution_inputs_dir(tmp_path),
+                 [f"prompt number {i} about a topic" for i in range(3)],
+                 accepted=[False] * 3)
     recipe = {"dataset_type": "eval", "data_dir": str(tmp_path),
               "stages": ["outputs", "paraphrase", "jailbreaks", "build"]}
     try:
@@ -1402,7 +1385,7 @@ def test_run_pipeline_all_stages_mocked(tmp_path, monkeypatch):
         {"dataset_type": "training", "data_dir": str(tmp_path),
          "stages": ["constitution", "inputs", "outputs", "paraphrase", "jailbreaks", "build"],
          "augmentations": {"include_translation": False}},
-        params={"inputs": {"num_categories": 1}, "paraphrase": {"target": "inputs"}},
+        params={"inputs": {"samples_per_entry": 1}, "paraphrase": {"target": "inputs"}},
         verbose=True,
     )
     assert calls == ["constitution", "inputs", "outputs", "paraphrase", "jailbreaks", "build"]
@@ -1456,6 +1439,7 @@ def test_run_pipeline_reports_residency_before_running(tmp_path, monkeypatch, ca
     from redact import telemetry
 
     monkeypatch.setattr(redact, "build_dataset", lambda **k: pd.DataFrame({"x": [1]}))
+    save_constitution(tmp_path)
     recipe = {
         "dataset_type": "eval", "data_dir": str(tmp_path),
         "stages": ["inputs", "build"],
@@ -1790,6 +1774,7 @@ def test_run_pipeline_puts_the_plan_in_the_summary(tmp_path, monkeypatch, caplog
 
     monkeypatch.setattr(redact, "build_dataset", lambda **k: pd.DataFrame({"x": [1]}))
     monkeypatch.setattr(redact, "generate_inputs", lambda **k: pd.DataFrame({"x": [1]}))
+    save_constitution(tmp_path)
     recipe = {
         "dataset_type": "eval", "data_dir": str(tmp_path),
         "stages": ["inputs", "build"],
@@ -1831,6 +1816,7 @@ def _planned_copies(tmp_path, monkeypatch, models):
 
     seen = []
     monkeypatch.setattr(redact, "generate_inputs", lambda **k: pd.DataFrame({"x": [1]}))
+    save_constitution(tmp_path)
     recipe = {"dataset_type": "eval", "data_dir": str(tmp_path), "stages": ["inputs"],
               "models": models}
     try:
@@ -1874,6 +1860,7 @@ def test_run_pipeline_summary_carries_copies(tmp_path, monkeypatch, gen, planned
         redact, "generate_inputs",
         lambda **k: seen.append(list(vllm_module._planned_devices.values()))
         or pd.DataFrame({"x": [1]}))
+    save_constitution(tmp_path)
     recipe = {"dataset_type": "eval", "data_dir": str(tmp_path), "stages": ["inputs"],
               "models": {"gen": gen}}
     try:
@@ -1933,6 +1920,7 @@ def test_a_run_serves_a_hosted_model_locally_when_the_recipe_says_so(
         return pd.DataFrame({"x": [1]})
 
     monkeypatch.setattr(redact, "generate_inputs", generate_inputs)
+    save_constitution(tmp_path)
     recipe = {"dataset_type": "eval", "data_dir": str(tmp_path), "stages": ["inputs"],
               "models": {"gen": {"name": name, "backend_type": "vllm"}}}
     engine = SimpleNamespace(scheduler_config=SimpleNamespace(max_num_seqs=256))
@@ -1972,6 +1960,7 @@ def test_a_run_that_fails_leaves_no_serving_behind(
     if fails == "the plan":
         monkeypatch.setattr(residency, "plan_phases", fail)
     monkeypatch.setattr(redact, "generate_inputs", fail)
+    save_constitution(tmp_path)
     recipe = {"dataset_type": "eval", "data_dir": str(tmp_path), "stages": ["inputs"],
               "models": {"gen": {"name": hosted_and_local, "backend_type": "vllm"}}}
     card = _one_card(10.0)
@@ -1994,6 +1983,7 @@ def test_a_run_gives_a_hosted_model_the_recipes_workers(tmp_path, monkeypatch):
         redact, "generate_inputs",
         lambda **k: seen.append(ModelClient.create(k["model"]).backend.max_workers)
         or pd.DataFrame({"x": [1]}))
+    save_constitution(tmp_path)
     recipe = {"dataset_type": "eval", "data_dir": str(tmp_path), "stages": ["inputs"],
               "models": {"gen": {"name": "deepseek-v3.2", "workers": 1}}}
     try:
@@ -2015,6 +2005,7 @@ def test_a_recipe_of_names_and_nulls_is_recorded_with_how_it_was_served(
 
     monkeypatch.setattr(redact, "generate_inputs", lambda **k: pd.DataFrame({"x": [1]}))
     monkeypatch.setattr(redact, "build_dataset", lambda **k: pd.DataFrame({"x": [1]}))
+    save_constitution(tmp_path)
     recipe = {"dataset_type": "eval", "data_dir": str(tmp_path),
               "stages": ["inputs", "build"]}
     try:
@@ -2058,6 +2049,7 @@ def test_a_planner_exception_does_not_abort_the_run(tmp_path, monkeypatch, caplo
     monkeypatch.setattr(redact, "generate_inputs", lambda **k: pd.DataFrame({"x": [1]}))
     monkeypatch.setattr(residency, "plan_phases",
                         lambda *a, **k: 1 / 0)
+    save_constitution(tmp_path)
     recipe = {
         "dataset_type": "eval", "data_dir": str(tmp_path),
         "stages": ["inputs", "build"],
@@ -2114,6 +2106,7 @@ def test_a_failed_stage_still_releases_the_models_and_logs_the_summary(
     key = ("org/left-loaded", None, "[]")
     vllm_module._engine_loaded_at[key] = time.perf_counter() - 120.0
     wanted = []
+    save_constitution(tmp_path)
     recipe = {"dataset_type": "eval", "data_dir": str(tmp_path), "stages": ["inputs"],
               "models": {"gen": "llama-3.2-3b-debug"}}
     card = _one_card(10.0)
@@ -2154,6 +2147,7 @@ def test_a_run_waits_for_a_load_under_way_before_it_unloads(
 
     monkeypatch.setattr(redact, "generate_inputs", lambda **k: pd.DataFrame())
     gen = local_models("_rc_join_gen")
+    save_constitution(tmp_path)
     recipe = {"dataset_type": "eval", "data_dir": str(tmp_path), "stages": ["inputs"],
               "models": {"gen": gen}}
     card = _one_card(24.0)
@@ -2190,6 +2184,7 @@ def test_a_run_waits_at_most_exit_wait_s_for_a_load_then_ends_it(
 
     monkeypatch.setattr(redact, "generate_inputs", lambda **k: pd.DataFrame())
     gen = local_models("_rc_hung_gen")
+    save_constitution(tmp_path)
     recipe = {"dataset_type": "eval", "data_dir": str(tmp_path), "stages": ["inputs"],
               "models": {"gen": gen}}
     card = _one_card(24.0)
@@ -2226,6 +2221,7 @@ def test_a_run_leaves_no_planned_share_behind(tmp_path, monkeypatch):
         redact, "generate_inputs",
         lambda **k: seen.append(list(vllm_module._planned_utilization.values()))
         or pd.DataFrame({"x": [1]}))
+    save_constitution(tmp_path)
     recipe = {"dataset_type": "eval", "data_dir": str(tmp_path), "stages": ["inputs"],
               "models": {"gen": "llama-3.2-3b-debug"}}
     card = _one_card(10.0)
@@ -2248,6 +2244,7 @@ def test_a_run_leaves_no_planned_card_behind(tmp_path, monkeypatch):
         redact, "generate_inputs",
         lambda **k: seen.append(list(vllm_module._planned_devices.values()))
         or pd.DataFrame({"x": [1]}))
+    save_constitution(tmp_path)
     recipe = {"dataset_type": "eval", "data_dir": str(tmp_path), "stages": ["inputs"],
               "models": {"gen": "llama-3.2-3b-debug"}}
     card = _one_card(10.0)
@@ -2377,6 +2374,7 @@ def test_a_run_whose_copies_fail_to_build_runs_on_one_copy(
 
     monkeypatch.setattr(redact, "generate_inputs", run)
     monkeypatch.delenv("CUDA_VISIBLE_DEVICES", raising=False)
+    save_constitution(tmp_path)
     recipe = {"dataset_type": "eval", "data_dir": str(tmp_path), "stages": ["inputs"],
               "models": {"gen": gen}}
     try:
@@ -2422,14 +2420,12 @@ def test_a_failed_model_switch_does_not_abort_the_run(local_models, caplog):
     assert "could not switch models (RuntimeError: boom)" in caplog.text
 
 
-def test_a_taxonomy_or_seeds_name_with_a_dot_names_its_json_file(tmp_path):
+def test_a_taxonomy_name_with_a_dot_names_its_json_file(tmp_path):
     from redact.stages import STAGES, RunContext
 
     ctx = RunContext(
         data_dir=tmp_path, dataset_type="eval", models={}, prompt_dir=None,
-        taxonomy="my.tax", taxonomy_dir=tmp_path,
-        params={"inputs": {"use_metaprompt": False, "seeds_name": "my.seeds"}},
+        taxonomy="my.tax", taxonomy_dir=tmp_path, params={},
         augmentations={}, resume=True, verbose=False)
     assert STAGES["constitution"].sources(ctx) == [tmp_path / "my.tax.json"]
-    assert STAGES["inputs"].sources(ctx) == [
-        tmp_path / "my.tax.json", paths.seeds_dir() / "my.seeds.json"]
+    assert STAGES["inputs"].sources(ctx) == [paths.constitution_merged_csv(tmp_path)]

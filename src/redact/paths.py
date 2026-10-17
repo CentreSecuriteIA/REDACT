@@ -62,7 +62,7 @@ def _root(root: str | Path | None = None) -> Path:
 
 
 def datasets(root: str | Path | None = None) -> Path:
-    """The ``Datasets/`` root (per-category CSVs + merged handoff files)."""
+    """The ``Datasets/`` root (the stages' CSVs and the inputs' category tree)."""
     return _root(root) / DATASETS_DIRNAME
 
 
@@ -76,9 +76,10 @@ def category_csv(
     root: str | Path | None = None,
     filename: str = SAMPLES_FILENAME,
 ) -> Path:
-    """Per-category CSV path: ``{root or Datasets}/{category}/{filename}``.
+    """Per-category CSV path: ``{root}/{category}/{filename}``.
 
-    ``root`` is the folder that holds the category folders.
+    ``root`` is the folder that holds the category folders, by default
+    :func:`constitution_inputs_dir`.
 
     Raises:
         ValueError: The category name holds a path separator. Its files
@@ -89,7 +90,7 @@ def category_csv(
             f"Category name {category!r} holds a path separator. A category is "
             "stored under one folder name; rename it without '/' or '\\'."
         )
-    base_dir = Path(root) if root is not None else datasets()
+    base_dir = Path(root) if root is not None else constitution_inputs_dir()
     return base_dir / category / filename
 
 

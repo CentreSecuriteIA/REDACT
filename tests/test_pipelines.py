@@ -24,21 +24,6 @@ def test_the_former_module_name_still_resolves():
         "generate_paraphrases"}
 
 
-class TestStandaloneInputsDeprecation:
-    def test_standalone_generate_inputs_emits_deprecation_warning(self, tmp_path, monkeypatch):
-        import redact.stages as P
-        from redact import generate_inputs
-        from tests.conftest import MockBackend, make_client
-
-        monkeypatch.setattr(P.ModelClient, "create", lambda m: make_client(MockBackend(), m))
-        # empty taxonomy -> no categories -> warning fires, then a fast empty return
-        with pytest.warns(DeprecationWarning, match="constitution-seeded"):
-            generate_inputs(
-                data_dir=tmp_path, taxonomy={"categories": {}},
-                num_categories=0, verbose=False,
-            )
-
-
 class TestGenerateOutputsManifest:
     """generate_outputs writes a plan manifest before the batch loop (offline)."""
 
@@ -135,26 +120,21 @@ class TestGenerateOutputsManifest:
         assert list(df["input_prompt"]) == list(inputs["sample"])
 
 
-def _seed_input_tree(data_dir, seeded: bool):
-    """One accepted input row: in the seeded tree of a training run, or in
-    the standalone tree. Returns the row's text."""
+def _seed_input_tree(data_dir):
+    """One accepted input row in the run's inputs tree. Returns its text."""
     from redact import paths
-    from redact.dataset import append_samples
+    from tests.conftest import write_inputs
 
-    tree = paths.constitution_inputs_dir if seeded else paths.datasets
-    append_samples(
-        ["zq0 the one input"], category="Cyber", turn=0, source="constitution",
-        extra_columns=[{"subcategory": "phishing", "entry_type": "benign"}],
-        dataset_dir=tree(data_dir),
-    )
+    write_inputs(paths.constitution_inputs_dir(data_dir), ["zq0 the one input"],
+                 source="constitution",
+                 extra={"subcategory": "phishing", "entry_type": "benign"})
     return "zq0 the one input"
 
 
 class TestGenerateOutputsFindsItsInputs:
     """Called without ``inputs=``, the stage reads the inputs of its run."""
 
-    @pytest.mark.parametrize("seeded", [True, False], ids=["seeded", "standalone"])
-    def test_the_inputs_of_the_run_are_found(self, tmp_path, monkeypatch, seeded):
+    def test_the_inputs_of_the_run_are_found(self, tmp_path, monkeypatch):
         import redact.stages as P
         from redact import generate_outputs
         from redact.dataset import content_id
@@ -162,28 +142,26 @@ class TestGenerateOutputsFindsItsInputs:
 
         monkeypatch.setattr(
             P.ModelClient, "create", lambda m: make_client(MockBackend("ans"), m))
-        text = _seed_input_tree(tmp_path, seeded)
+        text = _seed_input_tree(tmp_path)
         df = generate_outputs(data_dir=tmp_path, check_outputs=False, verbose=False)
         assert list(df["input_prompt"]) == [text]
         assert list(df["input_id"]) == [content_id(text)]
         assert list(df["entry_type"]) == ["benign"]
 
-    def test_no_inputs_in_either_tree_raises(self, tmp_path):
+    def test_no_inputs_raises(self, tmp_path):
         from redact import generate_outputs
 
         with pytest.raises(ValueError, match="No input samples found"):
             generate_outputs(data_dir=tmp_path, check_outputs=False, verbose=False)
 
 
-def _seed_rejected_tree(data_dir, seeded: bool):
-    """Two input rows, both rejected, in the seeded or the standalone tree."""
+def _seed_rejected_tree(data_dir):
+    """Two input rows, both rejected, in the run's inputs tree."""
     from redact import paths
-    from redact.dataset import append_samples
+    from tests.conftest import write_inputs
 
-    tree = paths.constitution_inputs_dir if seeded else paths.datasets
-    append_samples(
-        ["zq0 one input", "zq1 another input"], category="Cyber", turn=0,
-        accepted=[False, False], dataset_dir=tree(data_dir))
+    write_inputs(paths.constitution_inputs_dir(data_dir),
+                 ["zq0 one input", "zq1 another input"], accepted=[False, False])
 
 
 def _no_model(monkeypatch):
@@ -223,12 +201,11 @@ class TestAStageWithNoAcceptedInput:
     """Inputs that were all rejected skip a stage with a warning; no inputs at
     all is the caller's mistake and raises."""
 
-    @pytest.mark.parametrize("seeded", [True, False], ids=["seeded", "standalone"])
     def test_outputs_warn_and_write_nothing(
-            self, tmp_path, monkeypatch, caplog, seeded):
+            self, tmp_path, monkeypatch, caplog):
         from redact import generate_outputs, paths
 
-        _seed_rejected_tree(tmp_path, seeded)
+        _seed_rejected_tree(tmp_path)
         _no_model(monkeypatch)
         with caplog.at_level(logging.WARNING, logger="redact"):
             df = generate_outputs(data_dir=tmp_path, verbose=False)
@@ -252,7 +229,7 @@ class TestAStageWithNoAcceptedInput:
     def test_jailbreaks_warn_and_write_nothing(self, tmp_path, monkeypatch, caplog):
         from redact import generate_jailbreaks, paths
 
-        _seed_rejected_tree(tmp_path, seeded=False)
+        _seed_rejected_tree(tmp_path)
         _no_model(monkeypatch)
         with caplog.at_level(logging.WARNING, logger="redact"):
             df = generate_jailbreaks(data_dir=tmp_path, verbose=False)
@@ -267,7 +244,7 @@ class TestAStageWithNoAcceptedInput:
         from redact import generate_paraphrases, paths
         from tests.conftest import make_client
 
-        _seed_rejected_tree(tmp_path, seeded=False)
+        _seed_rejected_tree(tmp_path)
         backend = MockBackend("unused")
         monkeypatch.setattr(P.ModelClient, "create",
                             lambda m: make_client(backend, m))
@@ -310,7 +287,7 @@ class TestAStageWithNoAcceptedInput:
         )
         from tests.conftest import make_client
 
-        _seed_rejected_tree(tmp_path, seeded=False)
+        _seed_rejected_tree(tmp_path)
         backend = MockBackend("unused")
         monkeypatch.setattr(P.ModelClient, "create", lambda m: make_client(backend, m))
         run, outs = {
@@ -332,7 +309,7 @@ class TestAStageWithNoAcceptedInput:
             self, tmp_path, monkeypatch):
         from redact import generate_outputs, paths
 
-        _seed_rejected_tree(tmp_path, seeded=False)
+        _seed_rejected_tree(tmp_path)
         _no_model(monkeypatch)
         out = paths.output_responses_csv(tmp_path)
         _left_by_an_earlier_run(out)
@@ -431,52 +408,40 @@ class TestInputsWarnOnLowAcceptance:
             assert len(found) == 1 and warned in found[0]
 
 
-def _ignored_warnings(caplog) -> list[str]:
-    return [r.getMessage() for r in caplog.records
-            if r.levelno == logging.WARNING and "ignored" in r.getMessage()]
+class TestInputsWithoutAConstitutionGiven:
+    """Without ``constitution_df`` the inputs stage reads the constitution
+    saved under ``data_dir``, and without one it raises."""
 
-
-class TestInputsWarnOfTheOtherPathsParameters:
-    """Each path of the inputs stage names the other's parameters it was given."""
-
-    def test_a_seeded_run_names_the_standalone_ones(
-            self, tmp_path, monkeypatch, caplog):
+    def test_the_saved_constitution_seeds_the_inputs(self, tmp_path, monkeypatch):
         import redact.stages as P
-        from redact import generate_inputs
+        from redact import generate_inputs, paths
         from tests.conftest import make_client
 
         backends = {"gen-model": MockBackend("1. zqa sample\n2. zqb sample"),
                     "check-model": MockBackend("Yes")}
         monkeypatch.setattr(P.ModelClient, "create",
                             lambda m: make_client(backends[m], m))
-        constitution = pd.DataFrame([{
-            "source_category": "Cyber", "constitution_subcategory": "Sub",
-            "sample_description": "what zq0 is about", "entry_type": "harmful"}])
-        with caplog.at_level(logging.WARNING, logger="redact"):
-            generate_inputs(data_dir=tmp_path, constitution_df=constitution,
-                            samples_per_entry=2, model="gen-model",
-                            check_model="check-model", verbose=False,
-                            num_categories=3, samples_per_request=5)
-        assert _ignored_warnings(caplog) == [
-            "inputs: ['num_categories'] are parameters of the standalone inputs, "
-            "and this run seeds its inputs from a constitution; they are ignored."]
+        merged = paths.constitution_merged_csv(tmp_path)
+        merged.parent.mkdir(parents=True)
+        pd.DataFrame([{
+            "source_category": "Category A", "constitution_subcategory": "Sub",
+            "sample_description": "placeholder sample description",
+            "entry_type": "harmful"}]).to_csv(merged, index=False)
+        df = generate_inputs(data_dir=tmp_path, samples_per_entry=2,
+                             model="gen-model", check_model="check-model",
+                             verbose=False)
+        assert list(df["sample"]) == ["zqa sample", "zqb sample"]
+        assert set(df["category"]) == {"Category A"}
 
-    def test_a_standalone_run_names_the_seeded_ones(
-            self, tmp_path, monkeypatch, caplog):
-        import redact.stages as P
+    def test_without_one_it_raises_naming_both_ways_to_have_one(
+            self, tmp_path, monkeypatch):
         from redact import generate_inputs
-        from tests.conftest import make_client
 
-        monkeypatch.setattr(P.ModelClient, "create",
-                            lambda m: make_client(MockBackend(), m))
-        with (caplog.at_level(logging.WARNING, logger="redact"),
-              pytest.warns(DeprecationWarning)):
-            generate_inputs(data_dir=tmp_path, taxonomy={"categories": {}},
-                            num_categories=0, style="short", batch_size=8,
-                            samples_per_entry=3, verbose=False)
-        assert _ignored_warnings(caplog) == [
-            "inputs: ['style', 'batch_size'] are parameters of the inputs seeded "
-            "from a constitution, and this run is standalone; they are ignored."]
+        _no_model(monkeypatch)
+        with pytest.raises(ValueError, match="No constitution at") as raised:
+            generate_inputs(data_dir=tmp_path, verbose=False)
+        assert "generate_constitution" in str(raised.value)
+        assert "an earlier run on the same data_dir" in str(raised.value)
 
 
 class TestGenerateOutputsReadBack:

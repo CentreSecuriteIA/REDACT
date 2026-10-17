@@ -112,7 +112,7 @@ grouped path.
 
 | Function | Use |
 |---|---|
-| `drive_sync(gen, call)` | One generator, answered by a blocking `call(request) -> str`. Used by `combine_techniques`, `apply_combination`, `run_conversation` and the standalone description and seed calls |
+| `drive_sync(gen, call)` | One generator, answered by a blocking `call(request) -> str`. Used by `combine_techniques`, `apply_combination` and `run_conversation` |
 | `drive_generators(gens, *, finalize, on_error=None, resolve=None, progress=None)` | Many generators, round by round: every pending request of a round is grouped by client and reply limit and sent as one call per group. Used by `optimization/search.py` |
 
 ## Checks and retry steps
@@ -133,10 +133,9 @@ checkers of `content_moderation/checker.py` build.
 | Stage | Driver | Unit |
 |---|---|---|
 | constitution | `drive_units`, pool of 1 | `extracted` over one call |
-| seeded inputs | `drive_units` | `extracted`, then one check request per sample |
+| inputs | `drive_units` | `extracted`, then one check request per sample |
 | outputs | `drive_units` | `checked` |
 | jailbreaks | `drive_units` | `jailbreak.chain.run_chain` over the unit's techniques |
 | conversations | `drive_units` | `multi_turn.conversation_gen` |
 | scoring | `drive_units` | one judge request |
 | paraphrase | none: chunked `batch_generate_samples` and `batch_check_samples` | |
-| standalone inputs | none: blocking calls and `batch_check_samples` | |

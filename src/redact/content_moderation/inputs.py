@@ -1,8 +1,5 @@
-"""The input stages: ``InputPipeline``, which turns constitution entries into
+"""The inputs stage: ``InputPipeline``, which turns constitution entries into
 checked samples in the per-category tree.
-
-The deprecated standalone path's methods come from the mixin in
-``standalone.py``.
 
 Usage::
 
@@ -49,14 +46,8 @@ from ..llms.client import ModelClient
 from ..llms.prompting import PromptTemplate, extract_and_clean
 from ..llms.router import assert_single_sample_per_call
 from .checker import build_quality_checker
-from .feedback import (
-    PROHIBITED_SHOWN,
-    append_to_user,
-    prohibited_note,
-    with_feedback,
-)
+from .feedback import PROHIBITED_SHOWN, append_to_user, prohibited_note
 from .results import ConstitutionInputResult
-from .standalone import _StandaloneGenerationMixin
 
 logger = logging.getLogger(__name__)
 
@@ -131,13 +122,9 @@ def _entry_fields(entry: pd.Series) -> _Entry:
     )
 
 
-class InputPipeline(_StandaloneGenerationMixin):
-    """What the input stages share: two clients, a reply format, a folder and
-    a prompt overlay.
-
-    ``run_from_constitution`` is the seeded stage; the deprecated standalone
-    methods come from ``_StandaloneGenerationMixin``.
-    """
+class InputPipeline:
+    """The inputs stage's two clients, reply format, folder and prompt
+    overlay; ``run_from_constitution`` runs it."""
 
     def __init__(
         self,
@@ -147,22 +134,23 @@ class InputPipeline(_StandaloneGenerationMixin):
         dataset_dir: str | Path | None = None,
         prompt_dir: str | Path | None = None,
     ):
-        """Bind the clients; ``dataset_dir`` defaults to ``paths.datasets()``.
+        """Bind the clients; ``dataset_dir`` defaults to
+        ``paths.constitution_inputs_dir()``.
 
-        ``prompt_dir`` is the overlay the format instruction, the checks and
-        the standalone description and seed calls read their prompts through.
+        ``prompt_dir`` is the overlay the format instruction and the checks
+        read their prompts through.
         """
         self.gen = gen
         self.check = check
         self.extraction_style = extraction_style
-        self.dataset_dir = dataset_dir if dataset_dir is not None else paths.datasets()
+        self.dataset_dir = (dataset_dir if dataset_dir is not None
+                            else paths.constitution_inputs_dir())
         self.prompt_dir = prompt_dir
 
     def _build_generation_messages(
         self,
         prompt_config: dict,
         samples_per_request: int,
-        feedback: str = "",
         prohibited: Collection[str] | None = None,
         more: int = 0,
         **seed_kwargs: str,
@@ -172,11 +160,10 @@ class InputPipeline(_StandaloneGenerationMixin):
         Args:
             prompt_config: Loaded prompt JSON config.
             samples_per_request: Number of samples to request per LLM call.
-            feedback: Rejection feedback from a previous turn (optional).
             prohibited: Existing sample texts to avoid repeating. The first
                 20 are shown, the rest counted.
             more: How many such texts exist beyond ``prohibited``.
-            **seed_kwargs: Template variables (Category, SeedPrompts, etc.).
+            **seed_kwargs: Template variables (Category, sample_description, ...).
         """
         # The format instruction matches the style the reply is extracted with.
         kwargs = {"num_samples": str(samples_per_request), **seed_kwargs}
@@ -186,7 +173,7 @@ class InputPipeline(_StandaloneGenerationMixin):
         )(**kwargs)
         if prohibited:
             messages = append_to_user(messages, prohibited_note(prohibited, more))
-        return with_feedback(messages, feedback)
+        return messages
 
     def run_from_constitution(
         self,

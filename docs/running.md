@@ -101,13 +101,11 @@ under the stage's name.
   [overview.md](overview.md#the-stages): each stage reads what earlier ones
   wrote. Without `stages` a run takes `inputs`, `outputs`, `jailbreaks`,
   `build`.
-- A training run's `inputs` stage reads the constitution saved under
-  `data_dir`. List `constitution` before it, or run it earlier on the same
-  `data_dir`. An eval run's inputs are seeded the same way when its recipe
-  lists `constitution` or a constitution is saved under `data_dir`; without
-  one they are standalone.
-- `taxonomy` names the taxonomy of the constitution and the standalone
-  inputs (default `harmful`); `benign_taxonomy` the one whose subcategories
+- The `inputs` stage reads the constitution saved under `data_dir`, in an
+  eval run as in a training one. List `constitution` before it, or run it
+  earlier on the same `data_dir`; without either it stops with
+  `No constitution at ...`.
+- `taxonomy` names the taxonomy of the constitution (default `harmful`); `benign_taxonomy` the one whose subcategories
   the benign data of the `fsh` and `dap` techniques covers (default
   `benign`). Both are file names under `taxonomy_dir`, the packaged
   `configs/taxonomy/` by default.
@@ -117,10 +115,9 @@ under the stage's name.
   recipe passes itself (`model`, `data_dir`, `resume`, ...). Both rules are
   checked for every stage before the first runs.
 
-The two example recipes under `src/redact/configs/runs/` share
-`params_example.json`. Its `inputs` entry holds standalone settings
-(`samples_per_category`, `num_categories`, ...), which a training run's
-seeded inputs ignore.
+The two example recipes under `src/redact/configs/runs/` each have a params
+file: `eval_example.json` runs a small constitution (`params_example.json`),
+`training_example.json` a larger one (`params_training_example.json`).
 
 ## Choose models
 
@@ -296,9 +293,8 @@ and ran the other 400. It ended with 432 rows, 433 ledger lines (the opening
 removes the stage's output, its `.cut` files, its ledger and its manifest,
 then plans anew. The exceptions:
 
-- The seeded `inputs` stage starts over only its current `style`. The rows
-  and acks of other styles stay.
-- The standalone `inputs` stage removes the files of the categories it runs.
+- The `inputs` stage starts over only its current `style`. The rows and
+  acks of other styles stay.
 - The `constitution` stage removes every CSV in `Data_cache/constitution/`.
 
 The benign data (`Data_cache/benign/benign_samples.csv`) is never cleared:
@@ -352,9 +348,7 @@ Datasets/
   run-<YYYYMMDD-HHMMSS>.trace.jsonl      # one per run_pipeline call
 ```
 
-An eval run with no constitution writes its inputs to
-`Datasets/<category>/samples.csv` (no sidecars); with one, it writes them as
-a training run does. Either way an eval build writes the paraphrases to
+An eval run writes the same files; its build writes the paraphrases to
 `Datasets/paraphrased.csv` in place of merging them.
 
 Other files you may see:
@@ -370,8 +364,7 @@ A run record, `Datasets/<stage>.run.json`, holds `stage`, `timestamp`,
 `params` (the params file's entry), `models` (the recipe's role names),
 `counts` (`rows`, and `accepted` when the files have that column),
 `sources` (the files the stage read its inputs from: the taxonomy file for
-the constitution and standalone inputs, plus the seeds file without the
-metaprompt; the saved constitution for seeded inputs; the input category
+the constitution; the saved constitution for the inputs; the input category
 files, and `output_responses.csv` for paraphrases of outputs; the part files
 of the build), `serving` (per role: name, setup, copies
 or workers), and for the jailbreak stage `spec_version` and the resolved

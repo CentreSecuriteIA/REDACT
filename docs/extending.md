@@ -222,17 +222,13 @@ recipe names as `taxonomy_dir`:
   folder name on disk, so it may not hold `/` or `\`.
 - The constitution stage fills its prompts with the category's name,
   `description`, `subcategories` (a list, or a dict whose keys are used) and
-  `group_tag` (default `general`, recorded as `source_group_tag`). The
-  standalone inputs read the `description` when `use_metaprompt` is off.
+  `group_tag` (default `general`, recorded as `source_group_tag`).
 - `aliases` and `groups` may be written (`create_taxonomy` writes both); no
   stage reads them.
 - **A new taxonomy**: write the file, or call
   `redact.create_taxonomy(name, categories, taxonomy_dir=...)`, then set
   `"taxonomy": "<name>"` (and `taxonomy_dir`) in the recipe. A dict passed to
   a front as `taxonomy=` works too.
-- For standalone inputs without meta-prompts, give the category's seeds in a
-  seeds file, `{"seeds": {"Category Name": ["...", "..."]}}`, under
-  `configs/seeds/`, and set `seeds_name`.
 
 The category reaches every later stage through its rows' `category` column.
 The benign categories of the `fsh` and `dap` data are a taxonomy of their

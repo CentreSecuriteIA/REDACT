@@ -34,10 +34,11 @@ def test_all_artifact_resolvers(tmp_path):
 
 
 def test_category_csv_default_and_explicit_root(tmp_path):
-    # explicit root wins; the default is datasets().
+    # explicit root wins; the default is the inputs tree, constitution_inputs_dir().
     assert paths.category_csv("Cyber", root=tmp_path) == tmp_path / "Cyber" / "samples.csv"
     assert paths.category_csv("Cyber", root=tmp_path, filename="x.csv") == tmp_path / "Cyber" / "x.csv"
-    assert paths.category_csv("Cyber") == paths.datasets() / "Cyber" / paths.SAMPLES_FILENAME
+    assert paths.category_csv("Cyber") == (
+        paths.constitution_inputs_dir() / "Cyber" / paths.SAMPLES_FILENAME)
 
 
 @pytest.mark.parametrize("name", ["Home/Garden", "Home\\Garden"])
