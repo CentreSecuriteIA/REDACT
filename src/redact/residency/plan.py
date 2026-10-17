@@ -7,6 +7,19 @@ from .explain import explain as _explain
 from .footprint import ModelFootprint
 
 
+def loaded_already(model: str, grant: tuple[float, tuple[int, ...]] | None) -> str:
+    """Why a planned vLLM engine that is loaded already may not leave the
+    room its plan counts on."""
+    held = ""
+    if grant is not None:
+        share, cards = grant
+        held = (f" (gpu_memory_utilization={share:.2f} on "
+                f"card{'s' if len(cards) > 1 else ''} {','.join(map(str, cards))})")
+    return (f"{model}[vllm] is loaded already{held}; the plan's share and cards "
+            f"for it apply only after it is released, so a model planned beside "
+            f"it may fail to load.")
+
+
 @dataclass
 class ResidencyPlan:
     """Whether a run's local models fit on a machine, and where."""
@@ -27,6 +40,10 @@ class ResidencyPlan:
     oversized: list[ModelFootprint] = field(default_factory=list)
     #: True when the caller gave the card count or the card size.
     machine_given: bool = False
+    #: The planned vLLM engines loaded already, by the first model on each:
+    #: the ``gpu_memory_utilization`` and cards each was built with.
+    loaded: dict[str, tuple[float, tuple[int, ...]] | None] = field(
+        default_factory=dict)
 
     @property
     def footprints(self) -> list[ModelFootprint]:
@@ -87,13 +104,16 @@ class ResidencyPlan:
 
     @property
     def warnings(self) -> list[str]:
-        """What may still fail: an unchecked plan or model, or a KV cache not sized."""
+        """What may still fail: an unchecked plan or model, a KV cache not
+        sized, or an engine loaded already."""
         out = [
             f"WARNING: {fp.model} has no known size, so whether it fits was "
             "not checked."
             for fp in {fp.engine: fp for fp in self.footprints}.values()
             if not fp.known
         ]
+        out += [f"WARNING: {loaded_already(model, grant)}"
+                for model, grant in self.loaded.items()]
         if not self.per_gpu_gb:
             if self.footprints and self.gpus_available > 0:
                 out.append("WARNING: the card size is unknown, so placement "

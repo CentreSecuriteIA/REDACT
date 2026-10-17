@@ -146,6 +146,16 @@ def loaded_engines(exclude: list[str] | None = None) -> dict[str, set]:
             "introspect": set(introspection._models) - skip["introspect"]}
 
 
+def loaded_grants() -> dict[tuple, tuple[float, tuple[int, ...]] | None]:
+    """The ``gpu_memory_utilization`` and cards each loaded vLLM engine was
+    built with, per engine id (:attr:`ModelFootprint.engine`), or ``None``
+    for one whose build recorded none."""
+    from redact.llms.backends import vllm
+
+    grants = vllm.engine_grants()
+    return {("vllm", *key): grants.get(key) for key in list(vllm._engines)}
+
+
 def unload_local(
     keep: list[str] | None = None,
     engines: dict | None = None,

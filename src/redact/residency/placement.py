@@ -10,8 +10,8 @@ from dataclasses import dataclass, field, replace
 from redact.llms.resources import measure
 
 from .footprint import _CARD_CEILING, _SPANNING_DEVICE_MAPS, ModelFootprint, footprint
-from .lifecycle import loaded_engines
-from .plan import ResidencyPlan
+from .lifecycle import loaded_engines, loaded_grants
+from .plan import ResidencyPlan, loaded_already
 
 logger = logging.getLogger(__name__)
 
@@ -438,6 +438,15 @@ def _survey(
         logger.warning(
             "[residency] already loaded and not in this plan, so the plan "
             "hands their memory out again: %s", ", ".join(resident))
+    if not given:
+        grants = loaded_grants()
+        first: dict[tuple, str] = {}
+        for fp in footprints:
+            first.setdefault(fp.engine, fp.model)
+        plan.loaded = {model: grants[engine]
+                       for engine, model in first.items() if engine in grants}
+        for model, grant in plan.loaded.items():
+            logger.warning("[residency] %s", loaded_already(model, grant))
 
     # Before anything starts CUDA: a transformers model's device_map counts
     # the cards in this order.

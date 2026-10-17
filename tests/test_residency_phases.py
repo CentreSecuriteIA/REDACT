@@ -1182,3 +1182,39 @@ def test_a_stage_keeps_the_engines_loaded_before_the_run_that_no_stage_plans(
          {"gen": gen, "paraphraser": para, "paraphrase_check": check})
     assert set(vllm_module._engines) == {users}
     assert engines.shut == [f"org/{gen}"]
+
+
+def test_a_planned_engine_loaded_already_is_warned_about(
+        local_model, monkeypatch, caplog):
+    """A notebook loaded gen alone, so with 0.9 of the card. The plan gives
+    it 0.45 beside check, which gen's cached engine does not give back:
+    check may then fail to load, so the plan says so."""
+    import logging
+    import sys
+    from types import SimpleNamespace
+
+    import redact.llms.backends.vllm as vllm_module
+    from redact.llms.resources import measure
+    from tests.conftest import fake_vllm_modules
+
+    gen, check = local_model("_ph_nb_gen"), local_model("_ph_nb_check")
+    engine = SimpleNamespace(shutdown=lambda: None)
+    for name, module in fake_vllm_modules(lambda **kw: engine).items():
+        monkeypatch.setitem(sys.modules, name, module)
+    monkeypatch.setattr(vllm_module, "_prepare_environment", lambda: None)
+    try:
+        vllm_module._engine(f"org/{gen}", None, {})
+        with patch.object(measure, "detect_gpus", return_value=("FakeGPU", 1)), \
+             patch.object(measure, "card_sizes_gib", return_value=[24.0]), \
+             caplog.at_level(logging.WARNING, logger="redact.residency"):
+            (phase,) = plan_phases({"inputs": [gen, check]})
+    finally:
+        vllm_module.VLLMBackend.clear_cache()
+    said = (f"{gen}[vllm] is loaded already (gpu_memory_utilization=0.90 on "
+            f"card 0); the plan's share and cards for it apply only after it is "
+            f"released, so a model planned beside it may fail to load.")
+    assert [r.getMessage() for r in caplog.records] == [f"[residency] {said}"]
+    assert [w for w in phase.plan.warnings if "loaded already" in w] == [
+        f"WARNING: {said}"]
+    assert (_share(phase, gen), _share(phase, check)) == (0.45, 0.45)  # as before
+    assert vllm_module.engine_grants() == {}                      # gone with the engine

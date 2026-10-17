@@ -52,6 +52,9 @@ _planned_utilization: dict[tuple, float] = {}
 # The cards per engine key, set by the residency plan and kept out of the
 # key like the share. Indices over the cards this process can see.
 _planned_devices: dict[tuple, tuple[int, ...]] = {}
+# The gpu_memory_utilization and cards each loaded engine was built with,
+# per engine key, as the plan numbers the cards.
+_engine_grants: dict[tuple, tuple[float, tuple[int, ...]]] = {}
 # The child processes each loaded engine's build started, per engine key:
 # its engine cores and, with copies, vLLM's coordinator, as multiprocessing
 # handles. Their own children, such as tensor-parallel workers, are found
@@ -106,6 +109,13 @@ def set_planned_devices(
     """
     global _planned_devices
     _planned_devices = {**planned, **({} if replace else _planned_devices)}
+
+
+def engine_grants() -> dict[tuple, tuple[float, tuple[int, ...]]]:
+    """The ``gpu_memory_utilization`` and cards each loaded engine was built
+    with, per engine key. The cards are indices over the visible ones."""
+    return {key: grant for key, grant in list(_engine_grants.items())
+            if key in _engines}
 
 
 def _physical_ids(devices: tuple[int, ...]) -> list[str]:
@@ -398,7 +408,7 @@ def _engine(hf_model_id: str, quantization: str | None, vllm_kwargs: dict):
                        if alive else "")
                 ) from exc
             kwargs = {k: v for k, v in kwargs.items() if k != "data_parallel_size"}
-            ids = ids[:span]
+            ids, devices = ids[:span], devices[:span]
             home = ",".join(ids) or "the cards it can see"
             logger.warning(
                 "[vllm] The engine of %s failed to build with %d copies (%s: %s); "
@@ -422,6 +432,9 @@ def _engine(hf_model_id: str, quantization: str | None, vllm_kwargs: dict):
         _ended.discard(key)
         _engines[key] = engine
         _engine_procs[key] = procs
+        # Without a plan the engine takes the first cards it can see.
+        _engine_grants[key] = (kwargs["gpu_memory_utilization"], devices or tuple(
+            range(span * kwargs.get("data_parallel_size", 1))))
         # Held from the start of the load; set after it, so a failed load
         # leaves no timer.
         _engine_loaded_at[key] = started
@@ -683,6 +696,7 @@ class VLLMBackend(LLMBackend):
                     "this shutdown, not a failed call.", len(released))
             for key in released:
                 _shut_down(_engines.pop(key))
+                _engine_grants.pop(key, None)
             if released:
                 free_memory()
             left = [p for key in [k for k in _engine_procs if k not in keep]

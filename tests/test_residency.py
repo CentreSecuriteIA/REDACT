@@ -2386,6 +2386,17 @@ class TestPlannedDevices:
         assert [visible for visible, _ in builds] == ["0", "1"]
         assert "CUDA_VISIBLE_DEVICES" not in os.environ
 
+    def test_the_share_and_cards_a_build_was_given_are_recorded(self, engine):
+        """Until the engine is released, so a later plan can name them."""
+        vllm_module, _ = engine
+        key = vllm_module._engine_key("org/pdg", None, {})
+        vllm_module.set_planned_utilization({key: 0.4523})
+        vllm_module.set_planned_devices({key: (1,)})
+        vllm_module._engine("org/pdg", None, {})
+        assert vllm_module.engine_grants() == {key: (0.4523, (1,))}
+        vllm_module.VLLMBackend.clear_cache()
+        assert vllm_module.engine_grants() == {}
+
     def test_a_parent_variable_is_restored_and_translated(self, engine, monkeypatch):
         """The plan counts over the visible cards: its card 1 is the second
         card the parent's variable names."""
@@ -2608,6 +2619,10 @@ class TestPlannedDevices:
                 load["planned_copies"]) == (1, home.split(","), True, 2)
         assert list(vllm_module._engines) == [
             vllm_module._engine_key("org/pdf1", None, kwargs)]
+        # The grant recorded is the one copy's cards, at the share it loaded with.
+        assert vllm_module.engine_grants() == {
+            vllm_module._engine_key("org/pdf1", None, kwargs):
+                (0.9, tuple(map(int, home.split(","))))}
 
     @pytest.mark.parametrize("planned,kwargs,copies,home", COPIES)
     def test_a_failed_fallback_names_both_failures(
@@ -2816,17 +2831,44 @@ class TestResidentEngines:
         assert plan.fits                                       # the plan is unchanged
         assert [r.getMessage() for r in caplog.records] == [
             "[residency] already loaded and not in this plan, so the plan hands "
-            "their memory out again: org/old-tf[introspect], org/old[vllm]"]
+            "their memory out again: org/old-tf[introspect], org/old[vllm]",
+            f"[residency] {m}[vllm] is loaded already; the plan's share and "
+            "cards for it apply only after it is released, so a model planned "
+            "beside it may fail to load."]
 
-    def test_no_warning_when_every_loaded_engine_is_planned(
+    def test_a_planned_engine_loaded_already_is_named_with_its_grant(
             self, registered, loaded, caplog):
+        """Once per engine, under its first model; nothing else is said."""
+        import redact.llms.backends.vllm as vllm_module
+
         engines, _ = loaded
         m = registered("_re_same", hf_model_id="org/same-re", vram_gb=5.0)
-        engines[("org/same-re", None, "[]")] = object()
+        twin = registered("_re_same_twin", hf_model_id="org/same-re", vram_gb=5.0)
+        key = ("org/same-re", None, "[]")
+        engines[key] = object()
+        vllm_module._engine_grants[key] = (0.4523, (0, 1))
+        try:
+            with caplog.at_level(logging.WARNING, logger=residency.logger.name), \
+                 _kv(0.0):
+                plan = _plan([m, twin], 48.0, 2)
+                _plan(["claude-opus-4-6"], 48.0, 1)            # nothing local
+        finally:
+            vllm_module._engine_grants.clear()
+        said = (f"{m}[vllm] is loaded already (gpu_memory_utilization=0.45 on "
+                "cards 0,1); the plan's share and cards for it apply only after "
+                "it is released, so a model planned beside it may fail to load.")
+        assert [r.getMessage() for r in caplog.records] == [f"[residency] {said}"]
+        assert plan.warnings == [f"WARNING: {said}"]
+        assert plan.as_dict()["warnings"] == [f"WARNING: {said}"]
+
+    def test_a_plan_for_another_machine_names_no_loaded_engine(
+            self, registered, loaded, caplog):
+        engines, _ = loaded
+        m = registered("_re_other", hf_model_id="org/other-re", vram_gb=5.0)
+        engines[("org/other-re", None, "[]")] = object()
         with caplog.at_level(logging.WARNING, logger=residency.logger.name), _kv(0.0):
-            _plan([m], 48.0, 1)
-            _plan(["claude-opus-4-6"], 48.0, 1)                # nothing local
-        assert caplog.records == []
+            plan = residency.plan_residency([m], gpus=1, gib_per_gpu=48.0)
+        assert caplog.records == [] and plan.warnings == []
 
     def test_unload_keeps_the_engines_it_is_handed(self, registered, loaded):
         engines, models = loaded
