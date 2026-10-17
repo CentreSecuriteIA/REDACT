@@ -38,7 +38,8 @@ on its own:
 5. **jailbreaks**: attacks drawn from 152 techniques in 23 families, dealt
    evenly across categories, and natural variations of the inputs.
 6. **build**: the accepted rows of every stage, merged into
-   `complete_dataset.csv`.
+   `complete_dataset.csv` for training, or into three flat files for
+   evaluation (`eval_inputs.csv`, `eval_outputs.csv`, `eval_jailbreaks.csv`).
 
 Models are hosted APIs or local vLLM engines, planned onto the GPUs stage by
 stage. Prompts are JSON files that a run can override one by one.

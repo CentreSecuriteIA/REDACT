@@ -20,7 +20,9 @@ OUTPUT_RESPONSES_FILENAME = "output_responses.csv"
 COMPLETE_DATASET_FILENAME = "complete_dataset.csv"
 PARAPHRASES_INPUTS_FILENAME = "paraphrases_inputs.csv"
 PARAPHRASES_OUTPUTS_FILENAME = "paraphrases_outputs.csv"
-PARAPHRASED_FILENAME = "paraphrased.csv"
+EVAL_INPUTS_FILENAME = "eval_inputs.csv"
+EVAL_OUTPUTS_FILENAME = "eval_outputs.csv"
+EVAL_JAILBREAKS_FILENAME = "eval_jailbreaks.csv"
 CONVERSATIONS_FILENAME = "conversations.csv"
 CONVERSATIONS_SCORED_FILENAME = "conversations_scored.csv"
 CONSTITUTION_INPUTS_DIRNAME = "constitution_inputs"
@@ -119,9 +121,19 @@ def paraphrases_outputs_csv(root: str | Path | None = None) -> Path:
     return datasets(root) / PARAPHRASES_OUTPUTS_FILENAME
 
 
-def paraphrased_csv(root: str | Path | None = None) -> Path:
-    """The eval-mode merged paraphrase artifact (paraphrased inputs + outputs)."""
-    return datasets(root) / PARAPHRASED_FILENAME
+def eval_inputs_csv(root: str | Path | None = None) -> Path:
+    """An eval build's inputs, harmful and benign, with their paraphrases."""
+    return datasets(root) / EVAL_INPUTS_FILENAME
+
+
+def eval_outputs_csv(root: str | Path | None = None) -> Path:
+    """An eval build's responses to its inputs, with their paraphrases."""
+    return datasets(root) / EVAL_OUTPUTS_FILENAME
+
+
+def eval_jailbreaks_csv(root: str | Path | None = None) -> Path:
+    """An eval build's attacks, and the bare benign inputs beside them."""
+    return datasets(root) / EVAL_JAILBREAKS_FILENAME
 
 
 def conversations_csv(root: str | Path | None = None) -> Path:

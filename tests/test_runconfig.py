@@ -524,7 +524,7 @@ def test_run_pipeline_counts_the_files_a_recipe_names(tmp_path, monkeypatch):
     }
     try:
         summary = run_pipeline(
-            {"dataset_type": "eval", "data_dir": str(tmp_path),
+            {"dataset_type": "training", "data_dir": str(tmp_path),
              "stages": ["outputs", "paraphrase", "jailbreaks", "build"],
              "augmentations": {"include_translation": False}},
             params=params, verbose=False)
@@ -1278,10 +1278,15 @@ def test_run_pipeline_eval_jailbreaks_and_build(tmp_path, monkeypatch):
     assert jb_manifest["augmentation"]["adversarial"]["pure_only"] is True
     assert jb_manifest["augmentation"]["natural"] == augmentations_of({})["natural"]
 
-    # build stage merged inputs + jailbreaks into the complete dataset + manifest
-    assert paths.complete_dataset_csv(tmp_path).exists()
+    # build stage wrote the inputs and the attacks into the eval files, and
+    # counted their rows
+    assert not paths.complete_dataset_csv(tmp_path).exists()
     assert read_record("build", tmp_path) is not None
-    assert summary["stages"]["build"]["counts"]["rows"] >= 9
+    written = [pd.read_csv(path(tmp_path)) for path in (
+        paths.eval_inputs_csv, paths.eval_outputs_csv, paths.eval_jailbreaks_csv)]
+    assert [len(rows) for rows in written[:2]] == [3, 0]
+    assert summary["stages"]["build"]["counts"] == {
+        "rows": sum(len(rows) for rows in written)}
 
 
 def test_a_training_run_reads_the_inputs_it_seeded(tmp_path, monkeypatch):

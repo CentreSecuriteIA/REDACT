@@ -28,7 +28,9 @@ def test_all_artifact_resolvers(tmp_path):
             == ds / "constitution_inputs_merged.csv")
     assert paths.paraphrases_inputs_csv(tmp_path) == ds / "paraphrases_inputs.csv"
     assert paths.paraphrases_outputs_csv(tmp_path) == ds / "paraphrases_outputs.csv"
-    assert paths.paraphrased_csv(tmp_path) == ds / "paraphrased.csv"
+    assert paths.eval_inputs_csv(tmp_path) == ds / "eval_inputs.csv"
+    assert paths.eval_outputs_csv(tmp_path) == ds / "eval_outputs.csv"
+    assert paths.eval_jailbreaks_csv(tmp_path) == ds / "eval_jailbreaks.csv"
     assert paths.conversations_csv(tmp_path) == ds / "conversations.csv"
     assert paths.conversations_scored_csv(tmp_path) == ds / "conversations_scored.csv"
 

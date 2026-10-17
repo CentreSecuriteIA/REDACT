@@ -54,7 +54,7 @@ and calls one core, then returns what the core returns.
 | `generate_outputs` | `content_moderation.run_output_generation` | the rows of `output_responses.csv` |
 | `generate_paraphrases` | `content_moderation.paraphrase.run_paraphrase_target`, per target | `{"inputs": ..., "outputs": ...}` |
 | `generate_jailbreaks` | `jailbreak.pipeline.run_augmentation`, per kind | the rows of `jailbreaks.csv` |
-| `build_dataset` | none; `dataset.write_concat` | the rows of the merged file |
+| `build_dataset` | none; `dataset.write_concat` | the rows of the merged file; in eval mode, of each eval file by `inputs`, `outputs`, `jailbreaks` |
 | `generate_conversations`, `evaluate_conversations` | themselves, in `multi_turn/` | their file's rows |
 
 Every front takes, where they apply:
@@ -120,7 +120,7 @@ recipe's kwargs updated with the params file's.
 | `outputs` | `gen`, `check` -> `uncensored_gen` | `output_responses.csv`, or its `output_path` | the input category files (`dataset.input_files`) |
 | `paraphrase` | `paraphraser` -> `paraphraser`, `paraphrase_check` -> `uncensored_gen` | the files of the target(s) | the input category files and `output_responses.csv`, per target |
 | `jailbreaks` | `gen` -> `uncensored_gen`, `translation` -> `translation` | `jailbreaks.csv` and `variations.csv`, each when its kind is on | the input category files |
-| `build` | none | `complete_dataset.csv`, or its `output_path` | the part files, where the params put them |
+| `build` | none | `complete_dataset.csv`, or its `output_path`; in eval the three `eval_*.csv` files | the part files, where the params put them (no variations in eval) |
 
 `RunContext` is what one run hands the stages: `data_dir`, `dataset_type`,
 `models` (role to name or `None`), `prompt_dir`, `taxonomy`,
@@ -212,7 +212,8 @@ else the current directory.
 | `constitution_dir`, `constitution_merged_csv` | `Data_cache/constitution/`, `.../merged.csv` |
 | `constitution_inputs_dir`, `constitution_inputs_merged_csv` | `Datasets/constitution_inputs/`, `Datasets/constitution_inputs_merged.csv` |
 | `output_responses_csv`, `jailbreaks_csv`, `variations_csv` | under `Datasets/` |
-| `paraphrases_inputs_csv`, `paraphrases_outputs_csv`, `paraphrased_csv` | under `Datasets/` |
+| `paraphrases_inputs_csv`, `paraphrases_outputs_csv` | under `Datasets/` |
+| `eval_inputs_csv`, `eval_outputs_csv`, `eval_jailbreaks_csv` | under `Datasets/` |
 | `conversations_csv`, `conversations_scored_csv`, `complete_dataset_csv` | under `Datasets/` |
 | `benign_csv` | `Data_cache/benign/benign_samples.csv` |
 

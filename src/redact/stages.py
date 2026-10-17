@@ -42,6 +42,7 @@ from redact.dataset import (
     discover_categories,
     has_rows,
     input_files,
+    iter_rows,
     load_taxonomy,
     merge_all,
     merge_inputs,
@@ -808,15 +809,24 @@ def build_dataset(
     include_paraphrases: bool = True,
     verbose: bool = True,
     read_back: bool = True,
-) -> pd.DataFrame:
-    """Merge all generated data into a single dataset.
+) -> pd.DataFrame | dict[str, pd.DataFrame]:
+    """Merge the accepted rows of the stage files into the dataset of a type.
 
-    Combines content moderation inputs, jailbreak variants, natural
-    variations and output responses from their saved CSVs on disk. Each CSV
-    is copied in chunks into a temporary file that then replaces the merged
-    one; a column that only some of them have is empty in the rows of the
-    others. Only the rows whose ``accepted`` is true are copied; a CSV
-    without that column is copied whole.
+    ``mode`` is the dataset type. A ``"training"`` build copies the inputs,
+    jailbreaks, natural variations, outputs and paraphrases, one part after
+    another, into ``complete_dataset.csv``; a column that only some parts
+    have is empty in the rows of the others. An ``"eval"`` build writes
+    three files of one flat schema instead, each with a ``text`` and a
+    ``label`` column: ``eval_inputs.csv`` (the inputs, then their
+    paraphrases, marked ``paraphrased``), ``eval_outputs.csv`` (the
+    responses, then their paraphrases) and ``eval_jailbreaks.csv`` (the
+    attacks that changed their input, ``is_jailbreak`` true, then the bare
+    benign inputs, false); the variations are in none of them.
+
+    Each file is copied in chunks into a temporary file that then replaces
+    it. Only the rows whose ``accepted`` is true are copied; a CSV without
+    that column is copied whole. A row whose ``sample_id`` an earlier part
+    of its file wrote is left out.
 
     The inputs are read from ``constitution_inputs_merged.csv``, which the
     inputs stage writes, or else from the category files of
@@ -825,17 +835,15 @@ def build_dataset(
     ``responses_path`` pick other files.
 
     Args:
-        data_dir: Working root. Inputs are discovered under
-            ``{data_dir}/Datasets/``, the jailbreaks CSV defaults to
-            ``{data_dir}/Datasets/jailbreaks.csv``, and the merged CSV to
-            ``{data_dir}/Datasets/complete_dataset.csv``. Defaults to the project
-            root (``get_output_dir()``).
+        data_dir: Working root. Every file is read and written under
+            ``{data_dir}/Datasets/`` unless its ``*_path`` says otherwise.
+            Defaults to the project root (``get_output_dir()``).
         jailbreak_path: Path to the jailbreaks CSV. Defaults to
             ``Datasets/jailbreaks.csv``.
         variations_path: Path to the variations CSV. Defaults to
             ``Datasets/variations.csv``.
-        output_path: Where to save merged CSV. Defaults to
-            ``Datasets/complete_dataset.csv``.
+        output_path: Where to save the complete dataset of a training build.
+            Defaults to ``Datasets/complete_dataset.csv``.
         inputs_path: Merged-inputs CSV. Defaults to
             ``Datasets/constitution_inputs_merged.csv``, falling back to the
             run's category files when it does not exist.
@@ -845,116 +853,58 @@ def build_dataset(
             ``Datasets/paraphrases_inputs.csv``.
         paraphrase_outputs_path: Explicit paraphrase-outputs CSV. Defaults to
             ``Datasets/paraphrases_outputs.csv``.
-        mode: ``"training"`` merges paraphrases into ``complete_dataset.csv``;
-            ``"eval"`` keeps them out of the complete dataset and writes them to a
-            separate ``Datasets/paraphrased.csv``. (Maps from the recipe
-            ``dataset_type``.)
-        include_inputs: Include content moderation input samples.
+        mode: The dataset type, ``"training"`` or ``"eval"`` (the recipe's
+            ``dataset_type``).
+        include_inputs: Include content moderation input samples; in eval
+            mode, the benign negatives of the jailbreak file too.
         include_jailbreaks: Include jailbreak samples.
-        include_variations: Include natural variations.
+        include_variations: Include natural variations (training only).
         include_outputs: Include output response samples.
-        include_paraphrases: Include paraphrase artifacts (per ``mode``).
+        include_paraphrases: Include paraphrases.
         verbose: Log progress.
-        read_back: False returns an empty DataFrame and does not read the
-            merged CSV.
+        read_back: False returns empty frames and reads no file back.
 
     Returns:
-        The rows of the merged CSV (the base+jailbreak+output set, plus paraphrases
-        when ``mode="training"``).
+        A training build: the rows of the complete dataset. An eval build:
+        the rows of each eval file, by ``"inputs"``, ``"outputs"`` and
+        ``"jailbreaks"``.
+
+    Raises:
+        ValueError: An unknown ``mode``, or an ``output_path`` in eval mode.
     """
     if mode not in ("training", "eval"):
         raise ValueError("mode must be 'training' or 'eval'.")
-    ds_dir = paths.datasets(data_dir)
-    jb_path = Path(jailbreak_path) if jailbreak_path else paths.jailbreaks_csv(data_dir)
-    out_path = Path(output_path) if output_path else (ds_dir / paths.COMPLETE_DATASET_FILENAME)
-
-    parts: list[Part] = []     # in the order their rows are written
-
+    if mode == "eval" and output_path:
+        raise ValueError("output_path moves complete_dataset.csv, which an eval "
+                         "build does not write; leave it out.")
     if verbose:
-        logger.info("Build Complete Dataset")
-
-    if include_inputs:
-        in_path = (Path(inputs_path) if inputs_path
-                   else paths.constitution_inputs_merged_csv(data_dir))
-        if in_path.exists():
-            parts.append(Part(in_path, "content_moderation_input", accepted_only=True,
-                              label=f"Inputs from {in_path.name}"))
-        else:
-            # The one part read whole. Without a row in any category file it
-            # has no column.
-            cm_df = merge_inputs(data_dir)
-            if len(cm_df.columns):
-                parts.append(Part(cm_df, "content_moderation_input",
-                                  label="Inputs from the category files"))
-            elif verbose:
-                logger.info("Inputs: none found")
-
-    # Jailbreaks. A file without a row adds no column to the merged CSV.
-    if include_jailbreaks and jb_path.exists():
-        if has_rows(jb_path):
-            parts.append(Part(jb_path, "jailbreak", accepted_only=True,
-                              label="Jailbreaks"))
-        elif verbose:
-            logger.info("Jailbreaks: none found")
-    elif verbose and include_jailbreaks:
-        logger.info("Jailbreaks: file not found (%s)", jb_path)
-
-    # The natural variations the jailbreak stage writes beside its jailbreaks.
-    var_path = (Path(variations_path) if variations_path
-                else paths.variations_csv(data_dir))
-    if include_variations and var_path.exists():
-        if has_rows(var_path):
-            parts.append(Part(var_path, "natural_variation", accepted_only=True,
-                              label="Variations"))
-        elif verbose:
-            logger.info("Variations: none found")
-    elif verbose and include_variations:
-        logger.info("Variations: file not found (%s)", var_path)
-
-    if include_outputs:
-        resp_path = (Path(responses_path) if responses_path
-                     else paths.output_responses_csv(data_dir))
-        if resp_path.exists():
-            parts.append(Part(resp_path, "content_moderation_output",
-                              accepted_only=True,
-                              label=f"Outputs from {resp_path.name}"))
-        elif verbose:
-            logger.info("Outputs: none found")
-
-    # Paraphrases — additive. In ``training`` mode they merge into the complete
-    # dataset; in ``eval`` mode they're kept separate in ``paraphrased.csv`` and
-    # excluded from the complete set (base always stays put either way).
-    if include_paraphrases:
-        pi_path = Path(paraphrase_inputs_path) if paraphrase_inputs_path else paths.paraphrases_inputs_csv(data_dir)
-        po_path = Path(paraphrase_outputs_path) if paraphrase_outputs_path else paths.paraphrases_outputs_csv(data_dir)
-        para_parts = [
-            Part(p, "content_moderation_paraphrase", accepted_only=True,
-                 label=f"Paraphrases from {p.name}")
-            for p in (pi_path, po_path) if has_rows(p)
-        ]
-        if para_parts and mode == "eval":
-            para_out = ds_dir / paths.PARAPHRASED_FILENAME
-            separate = sum(write_concat(para_out, para_parts, unique="sample_id"))
-            if verbose:
-                logger.info("Paraphrases: %d -> separate %s (eval mode)",
-                            separate, para_out.name)
-        elif para_parts:  # training — merge in
-            parts += para_parts
-        elif verbose:
-            logger.info("Paraphrases: none found")
-
+        logger.info("Build %s", "Complete Dataset" if mode == "training"
+                    else "Eval Datasets")
+    parts = _stage_parts(
+        data_dir, inputs_path=inputs_path, jailbreak_path=jailbreak_path,
+        variations_path=variations_path, responses_path=responses_path,
+        paraphrase_inputs_path=paraphrase_inputs_path,
+        paraphrase_outputs_path=paraphrase_outputs_path,
+        include={"inputs": include_inputs, "jailbreaks": include_jailbreaks,
+                 "variations": include_variations and mode == "training",
+                 "outputs": include_outputs, "paraphrases": include_paraphrases},
+        verbose=verbose)
     if not parts:
         if verbose:
             logger.info("No data found. Run generate_inputs/jailbreaks/outputs first.")
-        return pd.DataFrame()
+        return pd.DataFrame() if mode == "training" else {}
+    if mode == "eval":
+        return _build_eval(data_dir, parts, verbose=verbose, read_back=read_back)
 
+    out_path = (Path(output_path) if output_path
+                else paths.complete_dataset_csv(data_dir))
     # A row whose id an earlier part wrote is left out: an adversarial no-op
     # is its input, and a variation can be a jailbreak's text.
-    written = write_concat(out_path, parts, unique="sample_id")
+    written = write_concat(out_path, list(parts.values()), unique="sample_id")
 
     if verbose:
         by_type: Counter = Counter()
-        for part, rows in zip(parts, written):
+        for part, rows in zip(parts.values(), written):
             logger.info("%s: %d samples", part.label, rows)
             by_type[part.dataset_type] += rows
         logger.info("Total: %d samples", sum(written))
@@ -967,6 +917,200 @@ def build_dataset(
     # low_memory=False: a column that only some parts have would otherwise be
     # typed piece by piece, with a warning about its mixed types.
     return pd.read_csv(out_path, low_memory=False)
+
+
+def _stage_parts(
+    data_dir: str | Path | None, *, inputs_path, jailbreak_path, variations_path,
+    responses_path, paraphrase_inputs_path, paraphrase_outputs_path,
+    include: dict[str, bool], verbose: bool,
+) -> dict[str, Part]:
+    """The stage files a build copies, by part, in the order a training build
+    writes them.
+
+    A part that ``include`` leaves out, or that has nothing to copy, is
+    missing, and with ``verbose`` the log says so.
+    """
+    def at(given: str | Path | None, default: Callable) -> Path:
+        return Path(given) if given else default(data_dir)
+
+    parts: dict[str, Part] = {}
+    if include["inputs"]:
+        in_path = at(inputs_path, paths.constitution_inputs_merged_csv)
+        if in_path.exists():
+            parts["inputs"] = Part(in_path, "content_moderation_input",
+                                   accepted_only=True,
+                                   label=f"Inputs from {in_path.name}")
+        else:
+            # The one part read whole. Without a row in any category file it
+            # has no column.
+            cm_df = merge_inputs(data_dir)
+            if len(cm_df.columns):
+                parts["inputs"] = Part(cm_df, "content_moderation_input",
+                                       label="Inputs from the category files")
+            elif verbose:
+                logger.info("Inputs: none found")
+
+    # A file without a row adds no column to the merged CSV.
+    for name, path, dataset_type in (
+            ("jailbreaks", at(jailbreak_path, paths.jailbreaks_csv), "jailbreak"),
+            ("variations", at(variations_path, paths.variations_csv),
+             "natural_variation")):
+        label = name.capitalize()
+        if not include[name]:
+            continue
+        if not path.exists():
+            if verbose:
+                logger.info("%s: file not found (%s)", label, path)
+        elif has_rows(path):
+            parts[name] = Part(path, dataset_type, accepted_only=True, label=label)
+        elif verbose:
+            logger.info("%s: none found", label)
+
+    if include["outputs"]:
+        resp_path = at(responses_path, paths.output_responses_csv)
+        if resp_path.exists():
+            parts["outputs"] = Part(resp_path, "content_moderation_output",
+                                    accepted_only=True,
+                                    label=f"Outputs from {resp_path.name}")
+        elif verbose:
+            logger.info("Outputs: none found")
+
+    if include["paraphrases"]:
+        for name, path in (
+                ("paraphrases_inputs",
+                 at(paraphrase_inputs_path, paths.paraphrases_inputs_csv)),
+                ("paraphrases_outputs",
+                 at(paraphrase_outputs_path, paths.paraphrases_outputs_csv))):
+            if has_rows(path):
+                parts[name] = Part(path, "content_moderation_paraphrase",
+                                   accepted_only=True,
+                                   label=f"Paraphrases from {path.name}")
+        if verbose and not {"paraphrases_inputs", "paraphrases_outputs"} & set(parts):
+            logger.info("Paraphrases: none found")
+    return parts
+
+
+#: The files of an eval build, by the key its front returns their rows under.
+_EVAL_FILES = {"inputs": paths.eval_inputs_csv, "outputs": paths.eval_outputs_csv,
+               "jailbreaks": paths.eval_jailbreaks_csv}
+
+#: The columns a derived eval row takes from its input when its own stage
+#: file lacks them.
+_FROM_INPUT = ("subcategory", "source_taxonomy")
+
+
+def _build_eval(
+    data_dir: str | Path | None, parts: dict[str, Part], *, verbose: bool,
+    read_back: bool,
+) -> dict[str, pd.DataFrame]:
+    """Write the three eval files from the stage ``parts``; their rows, by file."""
+    built = {}
+    for name, file_parts in _eval_parts(parts).items():
+        path = _EVAL_FILES[name](data_dir)
+        written = write_concat(path, file_parts, unique="sample_id")
+        if verbose:
+            for part, rows in zip(file_parts, written):
+                if part.label:
+                    logger.info("%s: %s: %d samples", path.name, part.label, rows)
+            logger.info("Saved %d samples to: %s", sum(written), path)
+        built[name] = (pd.read_csv(path, dtype={"sample_id": str, "input_id": str},
+                                   low_memory=False)
+                       if read_back else pd.DataFrame())
+    return built
+
+
+def _eval_parts(parts: dict[str, Part]) -> dict[str, list[Part]]:
+    """The parts of each eval file, in the order they are written, each
+    mapped onto the file's columns.
+
+    A stage part the build did not find is one without rows, so each file
+    has its columns whatever the run made.
+    """
+    by_input = _by_input(parts.get("inputs"), _FROM_INPUT)
+
+    def part(name: str, **changes) -> Part:
+        found = parts.get(name, Part(pd.DataFrame(), ""))
+        return found._replace(**changes)
+
+    origin = {"entry_type": "entry_type", "category": "category",
+              "subcategory": "subcategory", "source_taxonomy": "source_taxonomy"}
+    derived = {**origin, **{column: _of_input(column, by_input[column])
+                            for column in _FROM_INPUT}}
+    inputs = {"sample_id": "sample_id", "text": "sample", "label": "entry_type",
+              "paraphrased": False, "input_id": None, "paraphrase_model": None,
+              **origin}
+    input_paraphrases = {**inputs, "paraphrased": True, "input_id": "input_id",
+                         "paraphrase_model": "paraphrase_model", **derived}
+    outputs = {"sample_id": "sample_id", "text": "output_response",
+               "label": "entry_type", "paraphrased": False, "input_id": "input_id",
+               "model": "model", "paraphrase_model": None, **derived}
+    output_paraphrases = {**outputs, "text": "sample", "paraphrased": True,
+                          "model": None, "paraphrase_model": "paraphrase_model"}
+    attacks = {"sample_id": "sample_id", "text": "jailbreak", "label": "entry_type",
+               "is_jailbreak": True, "technique": "technique",
+               "complexity": "complexity", "num_techniques": "num_techniques",
+               "iteration": "iteration", "input_id": "input_id", **derived}
+    negatives = {**attacks, "text": "sample", "is_jailbreak": False,
+                 "technique": None, "complexity": None, "num_techniques": None,
+                 "iteration": None, "input_id": None, **origin}
+    return {
+        "inputs": [part("inputs", columns=inputs),
+                   part("paraphrases_inputs", columns=input_paraphrases)],
+        "outputs": [part("outputs", columns=outputs),
+                    part("paraphrases_outputs", columns=output_paraphrases)],
+        "jailbreaks": [part("jailbreaks", columns=attacks, where=_changed),
+                       part("inputs", columns=negatives, where=_benign,
+                            label="Benign inputs" if "inputs" in parts else "")],
+    }
+
+
+def _changed(chunk: pd.DataFrame) -> pd.Series:
+    """The attack rows whose text is not their input's (``is_noop`` false)."""
+    if "is_noop" not in chunk.columns:
+        return pd.Series(True, index=chunk.index)
+    return ~accepted_mask(chunk["is_noop"])
+
+
+def _benign(chunk: pd.DataFrame) -> pd.Series:
+    """The rows of entry type ``benign``."""
+    if "entry_type" not in chunk.columns:
+        return pd.Series(False, index=chunk.index)
+    return chunk["entry_type"] == EntryType.BENIGN.value
+
+
+def _of_input(column: str, by_input: dict) -> Callable[[pd.DataFrame], pd.Series]:
+    """A derived row's ``column``: its own cell, else that of the input its
+    ``input_id`` names."""
+    def cells(chunk: pd.DataFrame) -> pd.Series:
+        if column in chunk.columns:
+            return chunk[column]
+        if "input_id" not in chunk.columns:
+            return pd.Series("", index=chunk.index)
+        return chunk["input_id"].map(by_input)
+    return cells
+
+
+def _by_input(inputs: Part | None, columns: tuple[str, ...]) -> dict[str, dict]:
+    """Each of ``columns`` of the inputs, by the inputs' ``sample_id``.
+
+    A file is read in chunks; a column the inputs lack maps no id.
+    """
+    by_input: dict[str, dict] = {column: {} for column in columns}
+    if inputs is None:
+        return by_input
+    if isinstance(inputs.source, pd.DataFrame):
+        header, rows = inputs.source.columns, inputs.source.to_dict("records")
+    else:
+        header = pd.read_csv(inputs.source, nrows=0).columns
+        rows = iter_rows(inputs.source,
+                         [c for c in ("sample_id", *columns) if c in header])
+    if "sample_id" not in header:
+        return by_input
+    for row in rows:
+        for column in columns:
+            if column in row:
+                by_input[column][str(row["sample_id"])] = row[column]
+    return by_input
 
 
 @dataclass(frozen=True)
@@ -1212,19 +1356,28 @@ def _build_kwargs(ctx: RunContext) -> dict:
     return dict(data_dir=ctx.data_dir, mode=ctx.dataset_type, verbose=ctx.verbose)
 
 
+def _build_files(ctx: RunContext) -> tuple[list[Path], dict]:
+    """The three eval files of an eval build, else the complete dataset."""
+    if ctx.dataset_type == "eval":
+        return [path(ctx.data_dir) for path in _EVAL_FILES.values()], {}
+    return _one_file("build", paths.complete_dataset_csv)(ctx)
+
+
 def _build_sources(ctx: RunContext) -> list[Path]:
     """The part files the build copies, in its order: each where its
-    ``*_path`` key puts it, and none of a part that ``include_*`` leaves out."""
+    ``*_path`` key puts it, and none of a part that ``include_*`` leaves out
+    or that the dataset type's build does not copy."""
     given = _params(ctx, "build")
 
     def at(key: str, default: Callable) -> Path:
         return Path(given[key]) if given.get(key) else default(ctx.data_dir)
 
     merged = at("inputs_path", paths.constitution_inputs_merged_csv)
+    training = ctx.dataset_type == "training"
     parts = {
         "inputs": [merged] if merged.exists() else input_files(ctx.data_dir),
         "jailbreaks": [at("jailbreak_path", paths.jailbreaks_csv)],
-        "variations": [at("variations_path", paths.variations_csv)],
+        "variations": [at("variations_path", paths.variations_csv)] if training else [],
         "outputs": [at("responses_path", paths.output_responses_csv)],
         "paraphrases": [at("paraphrase_inputs_path", paths.paraphrases_inputs_csv),
                         at("paraphrase_outputs_path", paths.paraphrases_outputs_csv)],
@@ -1259,6 +1412,5 @@ STAGES: dict[str, Stage] = {stage.name: stage for stage in (
           recipe_kwargs=_jailbreaks_kwargs, sources=_run_inputs,
           folded=augmentation_kinds.FLAT_KEYWORDS),
     Stage("build", "build_dataset", roles=(),
-          files=_one_file("build", paths.complete_dataset_csv),
-          recipe_kwargs=_build_kwargs, sources=_build_sources),
+          files=_build_files, recipe_kwargs=_build_kwargs, sources=_build_sources),
 )}

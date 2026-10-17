@@ -95,8 +95,9 @@ Per target, under `Datasets/`:
 | `source` | `paraphrase_inputs` or `paraphrase_outputs` |
 
 The build merges the accepted paraphrases into the complete dataset in
-`training` mode, and writes them to `Datasets/paraphrased.csv` in `eval`
-mode ([build.md](build.md)).
+`training` mode; in `eval` mode it writes them into `eval_inputs.csv` and
+`eval_outputs.csv`, after the rows they reword, marked `paraphrased`
+([build.md](build.md)).
 
 ## How it resumes
 

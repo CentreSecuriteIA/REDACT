@@ -256,17 +256,28 @@ class Part(NamedTuple):
             reads true (:func:`accepted_mask`). A file without the column is
             copied whole.
         label: What the log calls the part.
+        where: Copy only the rows for which this function of a chunk of the
+            source gives true, after ``accepted_only``.
+        columns: The columns the rows are written with, in order, and where
+            each comes from: a string names a column of the source, empty in
+            the rows of a source without it; a function of a chunk gives the
+            cells; any other value is the cell of every row. ``None`` writes
+            the source's own columns.
     """
 
     source: Path | pd.DataFrame
     dataset_type: str | None = None
     accepted_only: bool = False
     label: str = ""
+    where: Callable[[pd.DataFrame], pd.Series] | None = None
+    columns: Mapping[str, Any] | None = None
 
 
 def _part_columns(part: Part) -> list[str]:
     """The columns a part's rows are written with."""
-    if isinstance(part.source, pd.DataFrame):
+    if part.columns is not None:
+        columns = list(part.columns)
+    elif isinstance(part.source, pd.DataFrame):
         columns = list(part.source.columns)
     elif _has_bytes(part.source):
         columns = list(pd.read_csv(part.source, nrows=0).columns)
@@ -277,15 +288,14 @@ def _part_columns(part: Part) -> list[str]:
     return columns
 
 
-def _part_chunks(part: Part) -> Iterator[pd.DataFrame]:
-    """Yield a part's rows, a file's ``_CHUNK_ROWS`` at a time.
+def _source_chunks(part: Part) -> Iterator[pd.DataFrame]:
+    """Yield the rows of a part's source, a file's ``_CHUNK_ROWS`` at a time.
 
     The cells of a file are read as text, so a whole number is written as
     it stands, also where the rows of another part leave its column empty.
     A cell pandas reads as a missing value (``nan``, ``N/A``, ...) is
     written empty, as it is when the file is read whole.
     """
-    tag = {} if part.dataset_type is None else {"dataset_type": part.dataset_type}
     if isinstance(part.source, pd.DataFrame):
         frame = part.source
         # A column of whole numbers that a merge left gaps in is float. As
@@ -295,7 +305,7 @@ def _part_chunks(part: Part) -> Iterator[pd.DataFrame]:
                  and frame[name].isna().any()
                  and (frame[name].dropna() % 1 == 0).all()
                  and (frame[name].dropna().abs() < 2**63).all()]
-        yield frame.astype(dict.fromkeys(whole, "Int64")).assign(**tag)
+        yield frame.astype(dict.fromkeys(whole, "Int64"))
         return
     if not _has_bytes(part.source):
         return
@@ -303,7 +313,31 @@ def _part_chunks(part: Part) -> Iterator[pd.DataFrame]:
         for chunk in chunks:
             if part.accepted_only and "accepted" in chunk.columns:
                 chunk = chunk[accepted_mask(chunk["accepted"])]
-            yield chunk.assign(**tag)
+            yield chunk
+
+
+def _mapped(chunk: pd.DataFrame, columns: Mapping[str, Any]) -> pd.DataFrame:
+    """``chunk``'s rows under ``columns``, as :class:`Part` describes them."""
+    cells = {}
+    for name, given in columns.items():
+        if isinstance(given, str):
+            cells[name] = chunk[given] if given in chunk.columns else ""
+        elif callable(given):
+            cells[name] = given(chunk)
+        else:
+            cells[name] = given
+    return pd.DataFrame(cells, index=chunk.index, columns=list(columns))
+
+
+def _part_chunks(part: Part) -> Iterator[pd.DataFrame]:
+    """Yield a part's rows as they are written, a file's ``_CHUNK_ROWS`` at a time."""
+    tag = {} if part.dataset_type is None else {"dataset_type": part.dataset_type}
+    for chunk in _source_chunks(part):
+        if part.where is not None:
+            chunk = chunk[part.where(chunk)]
+        if part.columns is not None:
+            chunk = _mapped(chunk, part.columns)
+        yield chunk.assign(**tag)
 
 
 def _new_rows(
