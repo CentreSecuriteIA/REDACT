@@ -5,6 +5,7 @@ from redact.jailbreak.obfuscation.sensitive_words import (
     _sensitive_char_finish,
     _sensitive_encode_finish,
     _sensitive_separator_finish,
+    to_sensitive_words_variables,
     to_synonym_substitution,
 )
 from redact.llm_pipeline import drive_sync
@@ -52,3 +53,20 @@ def test_the_substitutions_are_one_field():
     _, info = _run(to_synonym_substitution, "an apple and a pear",
                    ["apple pear", "fruit", "produce"])
     assert info == "substitutions=apple->fruit,pear->produce"
+
+
+def test_a_bulleted_word_list_marks_those_words_only():
+    text, info = _run(to_sensitive_words_variables,
+                      "a well-known apple-growing guide to pears", ["- apple\n- pears"])
+    assert text.startswith("a well-known VAR_1-growing guide to VAR_2")
+    assert info == "char_sep=variables;detected_words=apple pears"
+
+
+def test_a_labelled_word_list_is_rejected():
+    from tests.jailbreak.obfuscation.test_typos import row_of_replies
+
+    row = row_of_replies(to_sensitive_words_variables, ["Harmful words: apple"],
+                         prompt="how to grow an apple")
+    assert (row["accepted"], row["jailbreak"]) == (False, "how to grow an apple")
+    assert "technique=to_sensitive_words_variables" in row["reasoning"]
+    assert "malformed word list" in row["reasoning"]
