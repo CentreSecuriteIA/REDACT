@@ -3,6 +3,7 @@
 import json
 import logging
 import re
+from functools import partial
 
 import pandas as pd
 import pytest
@@ -200,6 +201,24 @@ def _skip_warnings(caplog) -> list[str]:
             if r.levelno == logging.WARNING and "skipped" in r.getMessage()]
 
 
+def _left_by_an_earlier_run(out) -> None:
+    """The files an earlier run of a stage leaves beside its output ``out``;
+    those of a kind of the jailbreak stage hold its coverage and plan too."""
+    stem = out.name.removesuffix(".csv")
+    kind = ((f"{stem}.coverage.csv", f"{stem}.plan.json")
+            if stem in ("jailbreaks", "variations") else ())
+    out.parent.mkdir(parents=True, exist_ok=True)
+    for name in (out.name, f"{out.name}.cut", f"{out.name}.tmp", f"{stem}.state.jsonl",
+                 f"{stem}.manifest.jsonl", *kind):
+        out.with_name(name).write_text("left by an earlier run\n", encoding="utf-8")
+
+
+def _files_beside(out) -> list[str]:
+    """The files of the stage whose output is ``out``, its lock aside."""
+    stem = out.name.removesuffix(".csv")
+    return sorted(p.name for p in out.parent.glob(f"{stem}.*") if p.suffix != ".lock")
+
+
 class TestAStageWithNoAcceptedInput:
     """Inputs that were all rejected skip a stage with a warning; no inputs at
     all is the caller's mistake and raises."""
@@ -278,11 +297,92 @@ class TestAStageWithNoAcceptedInput:
         assert len(_skip_warnings(caplog)) == 1
         assert not paths.paraphrases_outputs_csv(tmp_path).exists()
 
+    @pytest.mark.parametrize("stage", ["outputs", "jailbreaks", "paraphrase"])
+    def test_a_fresh_run_clears_what_an_earlier_run_left(
+            self, tmp_path, monkeypatch, caplog, stage):
+        """Else the build merges rows whose inputs are now rejected."""
+        import redact.stages as P
+        from redact import (
+            generate_jailbreaks,
+            generate_outputs,
+            generate_paraphrases,
+            paths,
+        )
+        from tests.conftest import make_client
+
+        _seed_rejected_tree(tmp_path, seeded=False)
+        backend = MockBackend("unused")
+        monkeypatch.setattr(P.ModelClient, "create", lambda m: make_client(backend, m))
+        run, outs = {
+            "outputs": (generate_outputs, [paths.output_responses_csv(tmp_path)]),
+            "jailbreaks": (generate_jailbreaks, [paths.jailbreaks_csv(tmp_path),
+                                                 paths.variations_csv(tmp_path)]),
+            "paraphrase": (partial(generate_paraphrases, target="inputs"),
+                           [paths.paraphrases_inputs_csv(tmp_path)]),
+        }[stage]
+        for out in outs:
+            _left_by_an_earlier_run(out)
+        with caplog.at_level(logging.WARNING, logger="redact"):
+            run(data_dir=tmp_path, resume=False, verbose=False)
+        assert len(_skip_warnings(caplog)) == 1
+        assert backend.calls == []
+        assert [_files_beside(out) for out in outs] == [[] for _ in outs]
+
+    def test_a_resumed_run_keeps_what_an_earlier_run_left(
+            self, tmp_path, monkeypatch):
+        from redact import generate_outputs, paths
+
+        _seed_rejected_tree(tmp_path, seeded=False)
+        _no_model(monkeypatch)
+        out = paths.output_responses_csv(tmp_path)
+        _left_by_an_earlier_run(out)
+        before = _files_beside(out)
+        generate_outputs(data_dir=tmp_path, verbose=False)
+        assert _files_beside(out) == before
+
     def test_jailbreaks_without_any_inputs_raise(self, tmp_path):
         from redact import generate_jailbreaks
 
         with pytest.raises(ValueError, match="No input samples found"):
             generate_jailbreaks(data_dir=tmp_path, verbose=False)
+
+
+class TestAKindWhoseEntryTypesMatchNoInput:
+    _KIND = {"adversarial": {"entry_types": ["benign"]}, "natural": None}
+
+    def _run(self, tmp_path, monkeypatch, **kwargs):
+        import redact.stages as P
+        from redact import generate_jailbreaks
+        from tests.conftest import make_client
+
+        backend = MockBackend("unused")
+        monkeypatch.setattr(P.ModelClient, "create", lambda m: make_client(backend, m))
+        inputs = pd.DataFrame({"prompt": ["zq0 one", "zq1 two"],
+                               "category": ["Cyber"] * 2,
+                               "entry_type": ["harmful", "dual_use_harmful"]})
+        df = generate_jailbreaks(inputs=inputs, data_dir=tmp_path,
+                                 augmentation=self._KIND, verbose=False, **kwargs)
+        assert df.empty and backend.calls == []
+
+    def test_it_warns_naming_both_lists_and_writes_nothing(
+            self, tmp_path, monkeypatch, caplog):
+        from redact import paths
+
+        with caplog.at_level(logging.WARNING, logger="redact"):
+            self._run(tmp_path, monkeypatch)
+        (warned,) = [r.getMessage() for r in caplog.records
+                     if r.levelno == logging.WARNING]
+        assert "adversarial" in warned and "['benign']" in warned
+        assert "['dual_use_harmful', 'harmful']" in warned
+        assert _files_beside(paths.jailbreaks_csv(tmp_path)) == []
+
+    def test_a_fresh_run_clears_what_an_earlier_run_left(self, tmp_path, monkeypatch):
+        from redact import paths
+
+        out = paths.jailbreaks_csv(tmp_path)
+        _left_by_an_earlier_run(out)
+        self._run(tmp_path, monkeypatch, resume=False)
+        assert _files_beside(out) == []
 
 
 class _JudgeByText(MockBackend):
@@ -329,6 +429,54 @@ class TestInputsWarnOnLowAcceptance:
             assert found == []
         else:
             assert len(found) == 1 and warned in found[0]
+
+
+def _ignored_warnings(caplog) -> list[str]:
+    return [r.getMessage() for r in caplog.records
+            if r.levelno == logging.WARNING and "ignored" in r.getMessage()]
+
+
+class TestInputsWarnOfTheOtherPathsParameters:
+    """Each path of the inputs stage names the other's parameters it was given."""
+
+    def test_a_seeded_run_names_the_standalone_ones(
+            self, tmp_path, monkeypatch, caplog):
+        import redact.stages as P
+        from redact import generate_inputs
+        from tests.conftest import make_client
+
+        backends = {"gen-model": MockBackend("1. zqa sample\n2. zqb sample"),
+                    "check-model": MockBackend("Yes")}
+        monkeypatch.setattr(P.ModelClient, "create",
+                            lambda m: make_client(backends[m], m))
+        constitution = pd.DataFrame([{
+            "source_category": "Cyber", "constitution_subcategory": "Sub",
+            "sample_description": "what zq0 is about", "entry_type": "harmful"}])
+        with caplog.at_level(logging.WARNING, logger="redact"):
+            generate_inputs(data_dir=tmp_path, constitution_df=constitution,
+                            samples_per_entry=2, model="gen-model",
+                            check_model="check-model", verbose=False,
+                            num_categories=3, samples_per_request=5)
+        assert _ignored_warnings(caplog) == [
+            "inputs: ['num_categories'] are parameters of the standalone inputs, "
+            "and this run seeds its inputs from a constitution; they are ignored."]
+
+    def test_a_standalone_run_names_the_seeded_ones(
+            self, tmp_path, monkeypatch, caplog):
+        import redact.stages as P
+        from redact import generate_inputs
+        from tests.conftest import make_client
+
+        monkeypatch.setattr(P.ModelClient, "create",
+                            lambda m: make_client(MockBackend(), m))
+        with (caplog.at_level(logging.WARNING, logger="redact"),
+              pytest.warns(DeprecationWarning)):
+            generate_inputs(data_dir=tmp_path, taxonomy={"categories": {}},
+                            num_categories=0, style="short", batch_size=8,
+                            samples_per_entry=3, verbose=False)
+        assert _ignored_warnings(caplog) == [
+            "inputs: ['style', 'batch_size'] are parameters of the inputs seeded "
+            "from a constitution, and this run is standalone; they are ignored."]
 
 
 class TestGenerateOutputsReadBack:

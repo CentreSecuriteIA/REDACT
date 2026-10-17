@@ -1,5 +1,6 @@
 """Tests for dataset rows in one CSV."""
 
+import logging
 import os
 from pathlib import Path
 
@@ -10,6 +11,7 @@ import redact.dataset.rows as rows_module
 from redact.dataset import (
     Ledger,
     Part,
+    accepted_mask,
     append_rows,
     check_columns,
     count_rows,
@@ -17,11 +19,16 @@ from redact.dataset import (
     iter_rows,
     keys_in,
     read_rows,
+    row_ids,
     write_concat,
 )
 
 _UNIT = ("input_id", "iteration")
 _UNIT_CASTERS = {"input_id": str, "iteration": int}
+
+# Content ids that pandas would read as numbers: digits around an "e", and a
+# leading zero.
+_NUMBER_LIKE_IDS = ["12345678901234e5", "0123456789012345"]
 
 # Text as a model writes it: commas, quotes and line breaks of each kind.
 _TEXTS = [
@@ -160,6 +167,17 @@ class TestAppendRows:
         (size,) = append_rows(path, _batch(0)).values()
         assert sizes_at_sync == [size]
 
+    def test_no_rows_write_nothing(self, tmp_path):
+        """A new file is not created, so the first rows give it its header."""
+        path = tmp_path / "out.csv"
+        assert append_rows(path, []) == {path: 0}
+        assert not path.exists()
+        append_rows(path, [{"input_id": "a", "sample": "x"}])
+        before = path.read_bytes()
+        assert append_rows(path, []) == {path: len(before)}
+        assert path.read_bytes() == before
+        assert _lines(path) == ["input_id,sample", "a,x"]
+
     def test_an_empty_file_is_given_a_header(self, tmp_path):
         path = tmp_path / "out.csv"
         path.touch()
@@ -206,6 +224,43 @@ class TestReadRows:
     def test_no_file_gives_an_empty_frame(self, tmp_path):
         frame = read_rows(tmp_path / "nope.csv")
         assert isinstance(frame, pd.DataFrame) and frame.empty
+
+
+class TestIdsAreReadAsText:
+    """A file whose ids all look like numbers gives them back as written."""
+
+    @pytest.mark.parametrize("given", _NUMBER_LIKE_IDS)
+    def test_read_rows_and_row_ids(self, tmp_path, given):
+        path = tmp_path / "out.csv"
+        append_rows(path, [{"sample_id": given, "input_id": given, "sample": "x"}])
+        frame = read_rows(path)
+        assert list(frame["sample_id"]) == list(frame["input_id"]) == [given]
+        assert row_ids(frame, "sample") == [given]
+        assert [row["input_id"] for row in iter_rows(path)] == [given]
+
+    @pytest.mark.parametrize("given", _NUMBER_LIKE_IDS)
+    def test_keys_in(self, tmp_path, given):
+        path = tmp_path / "out.csv"
+        append_rows(path, [{"input_id": given, "iteration": 3}])
+        assert keys_in(path, _UNIT, _UNIT_CASTERS) == {(given, 3)}
+
+
+class TestMissingCells:
+    def test_an_empty_text_cell_reads_back_empty(self, tmp_path):
+        """A number column keeps its gap, so it stays numeric."""
+        path = tmp_path / "out.csv"
+        append_rows(path, [{"sample": "x", "subcategory": "", "turn": 0},
+                           {"sample": "y", "subcategory": "phishing", "turn": None}])
+        frame = read_rows(path)
+        assert list(frame["subcategory"]) == ["", "phishing"]
+        assert pd.api.types.is_numeric_dtype(frame["turn"])
+        assert frame["turn"].isna().tolist() == [False, True]
+
+    def test_a_column_without_a_value_reads_back_empty(self, tmp_path):
+        path = tmp_path / "out.csv"
+        append_rows(path, [{"sample": "x", "subcategory": ""},
+                           {"sample": "y", "subcategory": None}])
+        assert list(read_rows(path)["subcategory"]) == ["", ""]
 
 
 class TestIterRows:
@@ -260,6 +315,31 @@ class TestHasRows:
 
     def test_no_file_has_none(self, tmp_path):
         assert not has_rows(tmp_path / "nope.csv")
+
+
+class TestAnEmptyFile:
+    """A save killed between opening the file and writing to it leaves 0 bytes:
+    a reader takes that as no rows, as it takes no file."""
+
+    @pytest.mark.parametrize("read, nothing", [
+        (lambda path: read_rows(path).empty, True),
+        (lambda path: list(iter_rows(path)), []),
+        (count_rows, 0),
+        (has_rows, False),
+        (lambda path: keys_in(path, _UNIT, _UNIT_CASTERS), set()),
+    ], ids=["read_rows", "iter_rows", "count_rows", "has_rows", "keys_in"])
+    def test_reads_as_no_rows(self, tmp_path, read, nothing):
+        path = tmp_path / "out.csv"
+        path.touch()
+        assert read(path) == nothing
+
+    def test_is_a_part_without_rows(self, tmp_path):
+        path, frame = tmp_path / "empty.csv", pd.DataFrame({"sample_id": ["b0"]})
+        path.touch()
+        out = tmp_path / "out.csv"
+        parts = [Part(path, accepted_only=True), Part(frame)]
+        assert write_concat(out, parts) == [0, 1]
+        assert _lines(out) == ["sample_id", "b0"]
 
 
 class TestKeysIn:
@@ -358,6 +438,36 @@ class TestCheckColumns:
         assert list(tmp_path.iterdir()) == []
 
 
+# A verdict cell as the library, a spreadsheet or a hand edit writes it, and
+# whether it reads as accepted.
+_VERDICTS = [("True", True), ("TRUE", True), ("true", True), ("False", False),
+             ("FALSE", False), ("", False), ("yes", False), ("1", False),
+             ("0", False)]
+
+
+class TestAcceptedMask:
+    def test_true_in_any_case_and_nothing_else(self):
+        cells = pd.Series([cell for cell, _ in _VERDICTS], dtype=str)
+        assert accepted_mask(cells).tolist() == [ok for _, ok in _VERDICTS]
+
+    def test_a_column_read_as_booleans(self):
+        assert accepted_mask(pd.Series([True, False])).tolist() == [True, False]
+
+    def test_the_tree_and_the_build_keep_the_same_rows(self, tmp_path):
+        from redact.dataset import merge_inputs
+
+        path = tmp_path / "Datasets" / "Cyber" / "samples.csv"
+        path.parent.mkdir(parents=True)
+        path.write_text("sample_id,sample,accepted\n" + "".join(
+            f"id{n},t{n},{cell}\n" for n, (cell, _) in enumerate(_VERDICTS)),
+            encoding="utf-8")
+        kept = [f"id{n}" for n, (_, ok) in enumerate(_VERDICTS) if ok]
+        assert list(merge_inputs(tmp_path)["sample_id"]) == kept
+        out = tmp_path / "out.csv"
+        write_concat(out, [Part(path, accepted_only=True)])
+        assert list(read_rows(out)["sample_id"]) == kept
+
+
 class TestWriteConcat:
     def _parts(self, tmp_path):
         """A file of three rows, one not accepted, and a frame with other columns."""
@@ -372,6 +482,9 @@ class TestWriteConcat:
         out = tmp_path / "out.csv"
         assert write_concat(out, [Part(path), Part(frame)]) == [3, 1]
         expected = pd.concat([read_rows(path), frame], ignore_index=True)
+        # Read back, a column of text or of verdicts that a part lacks is
+        # empty in its rows; one of numbers is missing.
+        expected = expected.fillna({"sample": "", "accepted": "", "note": ""})
         pd.testing.assert_frame_equal(read_rows(out), expected)
 
     def test_a_dataset_type_tags_the_rows_of_its_part(self, tmp_path):
@@ -401,6 +514,48 @@ class TestWriteConcat:
         write_concat(out, [Part(pd.DataFrame({"turn": [0.0, None]})),
                            Part(pd.DataFrame({"other": ["x"]}))])
         assert _lines(out) == ["turn,other", "0,", ",", ",x"]
+
+    def test_a_column_of_numbers_with_decimals_keeps_them(self, tmp_path):
+        """Only a whole column with a gap, which a merge left, is written as
+        integers; so is no value beyond what an integer holds."""
+        out = tmp_path / "out.csv"
+        write_concat(out, [Part(pd.DataFrame({"score": [1.0, 2.0, 3.0],
+                                              "turn": [1.0, None, 2.0],
+                                              "big": [1e20, None, 1.0]}))])
+        assert _lines(out) == ["score,turn,big", "1.0,1,1e+20", "2.0,,", "3.0,2,1.0"]
+
+    def test_the_rows_are_synced_before_they_replace_the_target(
+            self, tmp_path, monkeypatch):
+        path, _ = self._parts(tmp_path)
+        out = tmp_path / "out.csv"
+        synced = []
+        monkeypatch.setattr(rows_module.os, "fsync", lambda fd: synced.append(
+            (os.fstat(fd).st_size, out.exists())))
+        write_concat(out, [Part(path)])
+        assert synced == [(out.stat().st_size, False)]
+
+    def test_unique_leaves_out_a_row_whose_id_an_earlier_part_wrote(
+            self, tmp_path, caplog):
+        """Two rows of one part keep their id, and a row without one stays."""
+        first = pd.DataFrame({"sample_id": ["a", "b", None], "n": [1, 2, 3]})
+        second = tmp_path / "second.csv"
+        append_rows(second, [{"sample_id": "b", "n": 4}, {"sample_id": "c", "n": 5},
+                             {"sample_id": "c", "n": 6}, {"sample_id": "", "n": 7}])
+        out = tmp_path / "out.csv"
+        with caplog.at_level(logging.INFO, logger="redact"):
+            written = write_concat(out, [Part(first, label="First"),
+                                         Part(second, label="Second")],
+                                   unique="sample_id")
+        assert written == [3, 3]
+        assert list(read_rows(out)["n"]) == [1, 2, 3, 5, 6, 7]
+        (logged,) = [r.getMessage() for r in caplog.records]
+        assert logged == (
+            "Second: left out 1 rows whose sample_id an earlier part wrote.")
+
+    def test_without_unique_every_row_is_written(self, tmp_path):
+        frame = pd.DataFrame({"sample_id": ["a", "a"]})
+        out = tmp_path / "out.csv"
+        assert write_concat(out, [Part(frame), Part(frame)]) == [2, 2]
 
     def test_the_size_of_a_chunk_does_not_change_a_byte(self, tmp_path, monkeypatch):
         path, frame = self._parts(tmp_path)

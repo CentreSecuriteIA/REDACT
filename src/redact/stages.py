@@ -40,7 +40,10 @@ from redact.content_moderation.paraphrase import (
     run_paraphrase_target,
 )
 from redact.dataset import (
+    Manifest,
     Part,
+    accepted_mask,
+    clear_stage,
     discover_categories,
     has_rows,
     input_files,
@@ -55,6 +58,7 @@ from redact.dataset import (
 from redact.jailbreak import augmentation as augmentation_kinds
 from redact.jailbreak import pool as jailbreak_pool
 from redact.jailbreak.pipeline import run_augmentation
+from redact.jailbreak.plan import coverage_path
 from redact.llms import ModelClient, load_prompt
 from redact.llms.model_config import default_model_for_role
 from redact.types import EntryType
@@ -154,6 +158,14 @@ def generate_constitution(
     )
 
 
+# The parameters of generate_inputs that one of its paths takes and the other
+# ignores.
+_SEEDED_ONLY = ("style", "samples_per_entry", "max_attempts", "batch_size",
+                "check_max_tokens", "entry_types")
+_STANDALONE_ONLY = ("samples_per_category", "num_categories", "samples_per_request",
+                    "num_seeds", "use_metaprompt", "seeds_name")
+
+
 def generate_inputs(
     taxonomy: dict | str = "harmful",
     samples_per_category: int = 15,
@@ -237,10 +249,13 @@ def generate_inputs(
     Returns:
         Merged DataFrame of accepted samples.
     """
+    given = locals()
     # Generation model defaults to the uncensored_gen role (both modes).
     model = model or default_model_for_role("uncensored_gen")
 
     if constitution_df is not None:
+        _warn_on_ignored(_STANDALONE_ONLY, given, "the standalone inputs, and this "
+                         "run seeds its inputs from a constitution")
         client = ModelClient.create(model)
         check_model = check_model or model
         check_client = ModelClient.create(check_model)
@@ -294,15 +309,18 @@ def generate_inputs(
         # Datasets/constitution_inputs/{category}/samples.csv layout.
         # Unfiltered by style so build_dataset() sees every style generated
         # under this data_dir, not just whichever style this call used.
-        # Copied from the category files in chunks; left as it is when no
-        # sample is accepted.
+        # Copied from the category files in chunks; removed when no sample
+        # is accepted, so the build takes no row the files no longer hold.
         files = (paths.category_csv(c, root=ds_dir)
                  for c in discover_categories(ds_dir))
-        write_concat(
-            paths.constitution_inputs_merged_csv(data_dir),
+        merged = paths.constitution_inputs_merged_csv(data_dir)
+        written = write_concat(
+            merged,
             [Part(f, accepted_only=True) for f in files if has_rows(f)],
             keep_empty=False,
         )
+        if not any(written):
+            merged.unlink(missing_ok=True)
         if not read_back:
             return pd.DataFrame()
         result = merge_all(ds_dir, accepted_only=True)
@@ -317,6 +335,8 @@ def generate_inputs(
         DeprecationWarning,
         stacklevel=2,
     )
+    _warn_on_ignored(_SEEDED_ONLY, given, "the inputs seeded from a constitution, "
+                     "and this run is standalone")
     if isinstance(taxonomy, str):
         taxonomy = load_taxonomy(taxonomy, config_dir=taxonomy_dir)
     categories = list(iter_categories(taxonomy))
@@ -342,6 +362,17 @@ def generate_inputs(
         _warn_on_low_acceptance(sum(r.total_accepted for r in results),
                                 sum(r.total_extracted for r in results))
     return merge_all(ds_dir, accepted_only=True) if read_back else pd.DataFrame()
+
+
+def _warn_on_ignored(names: tuple[str, ...], given: dict, whose: str) -> None:
+    """Warn naming the parameters of ``names`` that ``given`` sets to other
+    than their default: the path of the inputs stage that runs ignores them.
+    ``whose`` says whose parameters they are."""
+    defaults = inspect.signature(generate_inputs).parameters
+    ignored = [name for name in names if given[name] != defaults[name].default]
+    if ignored:
+        logger.warning("inputs: %s are parameters of %s; they are ignored.",
+                       ignored, whose)
 
 
 def generate_outputs(
@@ -427,9 +458,14 @@ def generate_outputs(
     Raises:
         ValueError: ``inputs`` is None and the run has no input sample at all.
     """
+    out_path = (
+        Path(output_path) if output_path
+        else paths.output_responses_csv(data_dir)
+    )
     inputs = _given_or_run_inputs(inputs, data_dir)
     if inputs.empty:
-        return _skipped("outputs", "input sample")
+        return _skipped("outputs", "input sample",
+                        clear=[] if resume else [{"artifact": out_path}])
 
     # Per-group cap first (keeps every category/severity represented), then the
     # global head as a final safety cap.
@@ -444,11 +480,6 @@ def generate_outputs(
     client = ModelClient.create(model)
     check_model = check_model or model
     check_client = ModelClient.create(check_model) if check_outputs else None
-
-    out_path = (
-        Path(output_path) if output_path
-        else paths.output_responses_csv(data_dir)
-    )
 
     return run_output_generation(
         inputs=inputs, client=client,
@@ -582,10 +613,19 @@ def generate_jailbreaks(
     natural = augmentation_kinds.resolve(section, "natural")
     if adversarial is None and natural is None:
         return pd.DataFrame()
+    # Each kind that is on, with its CSV and its manifest.
+    kinds = [(name, kind, out, man) for name, kind, out, man in (
+        ("adversarial", adversarial,
+         Path(output_path) if output_path else paths.jailbreaks_csv(data_dir),
+         Path(manifest_path) if manifest_path else None),
+        ("natural", natural, _variations_csv(data_dir, output_path, variations_path),
+         None),
+    ) if kind is not None]
 
     inputs = _given_or_run_inputs(inputs, data_dir)
     if inputs.empty:
-        return _skipped("jailbreaks", "input sample")
+        return _skipped("jailbreaks", "input sample", clear=[] if resume else [
+            _kind_files(out, man) for _name, _kind, out, man in kinds])
 
     inputs = inputs.copy()
     if "sample" in inputs.columns and "prompt" not in inputs.columns:
@@ -597,9 +637,19 @@ def generate_jailbreaks(
     client = ModelClient.create(model or default_model_for_role("uncensored_gen"))
     benign = Path(benign_path) if benign_path else paths.benign_csv(data_dir)
 
-    def run(kind: dict, out_path: Path, **kwargs) -> pd.DataFrame:
+    def run(name: str, kind: dict, out_path: Path, manifest_path: Path | None,
+            **kwargs) -> pd.DataFrame:
+        of_kind = _of_entry_types(inputs, kind["entry_types"])
+        if of_kind.empty:
+            logger.warning(
+                "%s kind skipped: entry_types %s match none of the inputs' (%s); "
+                "it writes nothing.", name, kind["entry_types"],
+                sorted(set(inputs["entry_type"].astype(str))))
+            if not resume:
+                clear_stage(**_kind_files(out_path, manifest_path))
+            return pd.DataFrame()
         return run_augmentation(
-            _of_entry_types(inputs, kind["entry_types"]),
+            of_kind,
             jailbreak_pool.technique_pool(kind),
             client=client, translation_model=translation_model, out_path=out_path,
             benign_path=benign, benign_taxonomy=benign_taxonomy,
@@ -607,21 +657,29 @@ def generate_jailbreaks(
             rounds=augmentation_kinds.rounds_of(kind),
             family_weights=kind["family_weights"] or None,
             auto_generate_benign=auto_generate_benign, batch_size=batch_size,
-            resume=resume, verbose=verbose, **kwargs,
+            resume=resume, verbose=verbose, manifest_path=manifest_path, **kwargs,
         )
 
     rows = pd.DataFrame()
-    if adversarial is not None:
-        rows = run(
-            adversarial,
-            Path(output_path) if output_path else paths.jailbreaks_csv(data_dir),
-            manifest_path=Path(manifest_path) if manifest_path else None,
-            layer_rates=adversarial["layer_rates"] or None,
-            read_back=read_back, label="jailbreak")
-    if natural is not None:
-        run(natural, _variations_csv(data_dir, output_path, variations_path),
-            read_back=False, label="variation", accept_noop=False)
+    for name, kind, out, man in kinds:
+        if name == "adversarial":
+            rows = run(name, kind, out, man,
+                       layer_rates=kind["layer_rates"] or None,
+                       read_back=read_back, label="jailbreak")
+        else:
+            run(name, kind, out, man,
+                read_back=False, label="variation", accept_noop=False)
     return rows
+
+
+def _kind_files(out_path: Path, manifest_path: Path | None) -> dict:
+    """:func:`redact.dataset.clear_stage`'s kwargs for the files of one kind
+    of the jailbreak stage: its CSV, manifest, coverage table and plan."""
+    manifest = manifest_path or Manifest.sidecar(out_path).path
+    coverage = coverage_path(manifest)
+    stem = coverage.name.removesuffix(".coverage.csv")
+    plan = coverage.with_name(f"{stem}.plan.json")
+    return {"artifact": out_path, "manifest_path": manifest, "also": (coverage, plan)}
 
 
 def _variations_csv(data_dir, output_path, variations_path) -> Path:
@@ -687,12 +745,19 @@ def _given_or_run_inputs(
     return merge_inputs(data_dir)
 
 
-def _skipped(stage: str, what: str) -> pd.DataFrame:
-    """Warn that ``stage`` has no accepted ``what`` and runs on nothing."""
+def _skipped(stage: str, what: str, *, clear=()) -> pd.DataFrame:
+    """Warn that ``stage`` has no accepted ``what`` and runs on nothing.
+
+    ``clear`` holds :func:`redact.dataset.clear_stage`'s kwargs for each
+    output a fresh run starts over, since the core that would clear it does
+    not run.
+    """
     logger.warning(
         "%s skipped: no %s was accepted, so it has nothing to work on and "
         "writes nothing. The rejection_reason column of the rejected rows says why.",
         stage, what)
+    for files in clear:
+        clear_stage(**files)
     return pd.DataFrame()
 
 
@@ -813,12 +878,13 @@ def generate_paraphrases(
                       else dataset.read_rows(paths.output_responses_csv(data_dir)))
             has_rows = outputs is not None or not source.empty
             if "accepted" in source.columns:
-                source = source[source["accepted"] == True]  # noqa: E712
+                source = source[accepted_mask(source["accepted"])]
             out_path = (Path(outputs_path) if outputs_path
                         else paths.paraphrases_outputs_csv(data_dir))
         if has_rows and source.empty:
             what = "input sample" if tgt == "inputs" else "output response"
-            results[tgt] = _skipped(f"paraphrase ({tgt})", what)
+            results[tgt] = _skipped(f"paraphrase ({tgt})", what, clear=[] if resume
+                                    else [{"artifact": out_path}])
             continue
         results[tgt] = run_paraphrase_target(
             tgt, source, out_path,
@@ -940,9 +1006,14 @@ def build_dataset(
     # The natural variations the jailbreak stage writes beside its jailbreaks.
     var_path = (Path(variations_path) if variations_path
                 else paths.variations_csv(data_dir))
-    if include_variations and has_rows(var_path):
-        parts.append(Part(var_path, "natural_variation", accepted_only=True,
-                          label="Variations"))
+    if include_variations and var_path.exists():
+        if has_rows(var_path):
+            parts.append(Part(var_path, "natural_variation", accepted_only=True,
+                              label="Variations"))
+        elif verbose:
+            logger.info("Variations: none found")
+    elif verbose and include_variations:
+        logger.info("Variations: file not found (%s)", var_path)
 
     if include_outputs:
         resp_path = (Path(responses_path) if responses_path
@@ -967,7 +1038,7 @@ def build_dataset(
         ]
         if para_parts and mode == "eval":
             para_out = ds_dir / paths.PARAPHRASED_FILENAME
-            separate = sum(write_concat(para_out, para_parts))
+            separate = sum(write_concat(para_out, para_parts, unique="sample_id"))
             if verbose:
                 logger.info("Paraphrases: %d -> separate %s (eval mode)",
                             separate, para_out.name)
@@ -981,7 +1052,9 @@ def build_dataset(
             logger.info("No data found. Run generate_inputs/jailbreaks/outputs first.")
         return pd.DataFrame()
 
-    written = write_concat(out_path, parts)
+    # A row whose id an earlier part wrote is left out: an adversarial no-op
+    # is its input, and a variation can be a jailbreak's text.
+    written = write_concat(out_path, parts, unique="sample_id")
 
     if verbose:
         by_type: Counter = Counter()
@@ -1128,12 +1201,18 @@ def _constitution_files(ctx: RunContext) -> tuple[list[Path], dict]:
     return [paths.constitution_merged_csv(ctx.data_dir)], {}
 
 
+def _json_file(folder: Path, name: str) -> Path:
+    """The file a config ``name`` under ``folder`` is read from, with or
+    without its ``.json``."""
+    path = folder / name
+    return path if path.suffix == ".json" else path.with_name(path.name + ".json")
+
+
 def _taxonomy_file(ctx: RunContext) -> list[Path]:
     """The file of the run's taxonomy; none for one given as an object."""
     if not isinstance(ctx.taxonomy, str):
         return []
-    path = Path(ctx.taxonomy_dir or paths.taxonomy_dir()) / ctx.taxonomy
-    return [path if path.suffix else path.with_suffix(".json")]
+    return [_json_file(Path(ctx.taxonomy_dir or paths.taxonomy_dir()), ctx.taxonomy)]
 
 
 def _inputs_kwargs(ctx: RunContext) -> dict:
@@ -1179,8 +1258,8 @@ def _inputs_sources(ctx: RunContext) -> list[Path]:
     given = _params(ctx, "inputs")
     if given.get("use_metaprompt", True):
         return _taxonomy_file(ctx)
-    seeds = paths.seeds_dir() / given.get("seeds_name", "harmful")
-    return [*_taxonomy_file(ctx), seeds if seeds.suffix else seeds.with_suffix(".json")]
+    seeds = _json_file(paths.seeds_dir(), given.get("seeds_name", "harmful"))
+    return [*_taxonomy_file(ctx), seeds]
 
 
 def _run_inputs(ctx: RunContext) -> list[Path]:

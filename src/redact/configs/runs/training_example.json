@@ -18,6 +18,6 @@
     },
     "natural": {"exact_techniques": 1}
   },
-  "params_file": "params_example.json",
+  "params_file": "params_training_example.json",
   "resume": true
 }

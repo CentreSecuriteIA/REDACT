@@ -52,11 +52,12 @@ from .identity import content_id, row_id, row_ids
 from .loading import load_from_config, load_hf_dataset
 
 # What a run skips
-from .resume import release_lock, resume_state
+from .resume import clear_stage, release_lock, resume_state
 
 # Rows in one CSV
 from .rows import (
     Part,
+    accepted_mask,
     append_rows,
     check_columns,
     count_rows,
@@ -85,9 +86,11 @@ __all__ = [
     "Ledger",
     "Manifest",
     "Part",
+    "accepted_mask",
     "append_rows",
     "append_samples",
     "check_columns",
+    "clear_stage",
     "commit",
     "content_id",
     "count_rows",

@@ -22,6 +22,11 @@ each build that held them, and the build count of each run is its accepted
 rows: 19 of the eval run's 20, 89 of the training run's 92 (one of its
 jailbreaks draws the unicode suffix then ASCII art in a font that has no
 glyph for the suffix's letters, and is rejected).
+
+The build leaves out a row whose ``sample_id`` an earlier part wrote. In the
+runs the stub model answers a natural typos rewrite with the text it answers
+that input's output request with, so those outputs are the variations' rows:
+the build count of the eval run is 18, of the training run 87.
 """
 
 import json
@@ -319,6 +324,42 @@ def test_a_cell_that_reads_as_a_missing_value_is_written_empty(tmp_path):
     assert [row[at] for row in rows[: len(_INPUTS)]] == ["", "", ""]
 
 
+def test_an_empty_stage_file_is_a_part_without_rows(tmp_path):
+    """What a save killed before its first byte leaves, outside the stage's resume."""
+    from redact import build_dataset
+
+    _write_stage_files(tmp_path)
+    for stage_file in (paths.jailbreaks_csv, paths.output_responses_csv):
+        stage_file(tmp_path).write_bytes(b"")
+    built = build_dataset(data_dir=tmp_path, verbose=False)
+    assert "jailbreak" not in set(built["dataset_type"])
+    assert "content_moderation_output" not in set(built["dataset_type"])
+
+
+def test_a_row_whose_id_an_earlier_part_wrote_is_left_out(tmp_path, caplog):
+    """A variation with a jailbreak's text, and an adversarial no-op, whose
+    text is its input's: each is the same row as one written before it."""
+    import logging
+
+    from redact import build_dataset
+
+    _write_stage_files(tmp_path)
+    noop = _JAILBREAKS.iloc[[0]].assign(sample_id="in-1", jailbreak=_TEXTS[0],
+                                        is_noop=True)
+    pd.concat([_JAILBREAKS, noop]).to_csv(paths.jailbreaks_csv(tmp_path), index=False)
+    _VARIATIONS.assign(sample_id=["jb-1", "var-2", "var-3"]).to_csv(
+        paths.variations_csv(tmp_path), index=False)
+    with caplog.at_level(logging.INFO, logger="redact"):
+        built = build_dataset(data_dir=tmp_path)
+    assert built["sample_id"].is_unique
+    by_id = dict(zip(built["sample_id"], built["dataset_type"]))
+    assert (by_id["in-1"], by_id["jb-1"]) == ("content_moderation_input", "jailbreak")
+    left_out = [r.getMessage() for r in caplog.records if "left out" in r.getMessage()]
+    assert left_out == [
+        "Jailbreaks: left out 1 rows whose sample_id an earlier part wrote.",
+        "Variations: left out 1 rows whose sample_id an earlier part wrote."]
+
+
 def test_the_variations_are_their_accepted_rows_from_the_path_given(tmp_path):
     from redact import build_dataset
 
@@ -333,6 +374,27 @@ def test_the_variations_are_their_accepted_rows_from_the_path_given(tmp_path):
     assert variations() == ["var-1", "var-3"]
     build_dataset(data_dir=tmp_path, include_variations=False, verbose=False)
     assert variations() == []
+
+
+@pytest.mark.parametrize("left", ["missing", "empty"])
+def test_variations_left_out_are_logged_as_the_other_parts_are(
+        tmp_path, caplog, left):
+    import logging
+
+    from redact import build_dataset
+
+    _write_stage_files(tmp_path)
+    variations = paths.variations_csv(tmp_path)
+    if left == "missing":
+        variations.unlink()
+    else:
+        _VARIATIONS.iloc[:0].to_csv(variations, index=False)
+    with caplog.at_level(logging.INFO, logger="redact"):
+        build_dataset(data_dir=tmp_path)
+    logged = [r.getMessage() for r in caplog.records
+              if r.getMessage().startswith("Variations")]
+    assert logged == ([f"Variations: file not found ({variations})"]
+                      if left == "missing" else ["Variations: none found"])
 
 
 def test_every_part_adds_its_accepted_rows_only(tmp_path):
@@ -608,6 +670,33 @@ def test_inputs_that_are_all_rejected_leave_no_merged_file(tmp_path, monkeypatch
     assert len(pd.read_csv(tree / "Cyber" / "samples.csv")) > 0     # all rejected
     assert returned.empty
     assert not (paths.datasets(tmp_path) / "constitution_inputs_merged.csv").exists()
+
+
+def test_a_fresh_run_that_accepts_nothing_removes_the_last_merged_file(
+        tmp_path, monkeypatch):
+    """So the build does not take inputs that no category file holds now."""
+    from redact import build_dataset, generate_inputs
+    from redact.llms import ModelClient
+
+    backends = {"gen-model": MockBackend("1. one zq0 sample\n2. another zq0 sample"),
+                "check-model": MockBackend("Yes")}
+    monkeypatch.setattr(ModelClient, "create", lambda m: make_client(backends[m], m))
+    constitution = pd.DataFrame([{
+        "source_category": "Cyber", "constitution_subcategory": "Sub",
+        "sample_description": "what zq0 is about", "entry_type": "harmful"}])
+    run = dict(data_dir=tmp_path, constitution_df=constitution, samples_per_entry=2,
+               model="gen-model", check_model="check-model", verbose=False)
+    generate_inputs(**run)
+    merged = paths.constitution_inputs_merged_csv(tmp_path)
+    assert list(pd.read_csv(merged)["sample"]) == [
+        "one zq0 sample", "another zq0 sample"]
+
+    backends["gen-model"] = MockBackend("1. third zq0 sample\n2. fourth zq0 sample")
+    backends["check-model"] = MockBackend("No: off topic")
+    generate_inputs(**run, resume=False)
+    assert not merged.exists()
+    built = build_dataset(data_dir=tmp_path, verbose=False)
+    assert built.empty
 
 
 def test_inputs_not_read_back_are_merged_on_disk_and_into_no_frame(

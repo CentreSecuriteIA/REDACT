@@ -2,6 +2,7 @@
 one CSV written from the rows of several."""
 
 import csv
+import logging
 import os
 import time
 from collections.abc import Callable, Iterable, Iterator, Mapping, Sequence
@@ -10,11 +11,14 @@ from typing import Any, NamedTuple, TypeVar
 
 import pandas as pd
 
+logger = logging.getLogger(__name__)
+
 # Rows per read of a file that is not read whole.
 _CHUNK_ROWS = 50_000
 
-# The cells pandas reads as true when it reads a column of verdicts whole.
-_TRUE_CELLS = ("True", "TRUE", "true")
+# Read as text: a content id of digits is not a number. pandas skips a column
+# the file lacks.
+_ID_COLUMNS = {"sample_id": str, "input_id": str}
 
 _HELD_ATTEMPTS = 20
 _HELD_WAIT_SECONDS = 0.1
@@ -54,6 +58,15 @@ def _replace(source: Path, target: Path) -> None:
             if attempt == _REPLACE_ATTEMPTS:
                 raise
             time.sleep(_REPLACE_WAIT_SECONDS)
+
+
+def _has_bytes(path: Path) -> bool:
+    """Whether ``path`` is a file with a byte in it.
+
+    A save killed between opening a new file and writing to it leaves 0
+    bytes; a reader takes that as no file.
+    """
+    return path.is_file() and path.stat().st_size > 0
 
 
 def _header(path: Path) -> list[str] | None:
@@ -100,7 +113,8 @@ def append_rows(path: str | Path, rows: Sequence[Mapping[str, Any]]) -> dict[Pat
     A file without a header takes the rows' column order and gets the header.
     Otherwise each row is written in the order of the file's header, with an
     empty cell for a column the row lacks. A file that another program holds
-    is opened again for a few seconds before any byte is written.
+    is opened again for a few seconds before any byte is written. No rows
+    write nothing, and create no file.
 
     Returns:
         The size of the file after the append, by its path.
@@ -110,6 +124,8 @@ def append_rows(path: str | Path, rows: Sequence[Mapping[str, Any]]) -> dict[Pat
             written.
     """
     path = Path(path)
+    if not rows:
+        return {path: path.stat().st_size if path.exists() else 0}
     frame = pd.DataFrame(rows)
     header = _header_for(path, frame.columns)
     if header is not None and list(frame.columns) != header:
@@ -123,10 +139,38 @@ def append_rows(path: str | Path, rows: Sequence[Mapping[str, Any]]) -> dict[Pat
         return {path: os.fstat(fh.fileno()).st_size}
 
 
+def _blank_missing_text(frame: pd.DataFrame) -> pd.DataFrame:
+    """``frame`` with each missing cell of a text column as ``""``.
+
+    A text column is one of strings, or one with no value at all. A column of
+    numbers keeps its gaps, so it stays numeric.
+    """
+    text = {name: "" for name in frame.columns
+            if pd.api.types.is_string_dtype(frame[name])
+            or pd.api.types.is_object_dtype(frame[name])
+            or frame[name].isna().all()}
+    return frame.fillna(text) if text else frame
+
+
+def accepted_mask(verdicts: pd.Series) -> pd.Series:
+    """Which cells of an ``accepted`` column say true, in any case.
+
+    The cells may be booleans or text, as a file read whole or as text gives
+    them. Anything else, an empty cell, ``yes`` or ``1`` too, is not
+    accepted.
+    """
+    return verdicts.astype(str).str.strip().str.lower() == "true"
+
+
 def read_rows(path: str | Path) -> pd.DataFrame:
-    """Every row of the CSV at ``path``, or an empty frame when there is no file."""
+    """Every row of the CSV at ``path``, or an empty frame when there is no file.
+
+    Ids are read as text, and a missing cell of a text column as ``""``.
+    """
     path = Path(path)
-    return pd.read_csv(path) if path.exists() else pd.DataFrame()
+    if not _has_bytes(path):
+        return pd.DataFrame()
+    return _blank_missing_text(pd.read_csv(path, dtype=_ID_COLUMNS))
 
 
 def iter_rows(
@@ -135,14 +179,16 @@ def iter_rows(
     """Yield the rows of the CSV at ``path`` as dicts, reading it in chunks.
 
     ``columns`` limits the read to those columns. No file gives no rows.
-    Values are typed chunk by chunk, so a column can come out as ``int`` in
-    one chunk and ``float`` in another that has an empty cell.
+    Ids are read as text. Other values are typed chunk by chunk, so a column
+    can come out as ``int`` in one chunk and ``float`` in another that has an
+    empty cell.
     """
     path = Path(path)
-    if not path.exists():
+    if not _has_bytes(path):
         return
     usecols = None if columns is None else list(columns)
-    with pd.read_csv(path, usecols=usecols, chunksize=_CHUNK_ROWS) as chunks:
+    with pd.read_csv(path, usecols=usecols, dtype=_ID_COLUMNS,
+                     chunksize=_CHUNK_ROWS) as chunks:
         for chunk in chunks:
             yield from chunk.to_dict("records")
 
@@ -153,7 +199,7 @@ def count_rows(path: str | Path) -> int:
     Reads one column in chunks, never the whole file.
     """
     path = Path(path)
-    if not path.exists():
+    if not _has_bytes(path):
         return 0
     with pd.read_csv(path, usecols=[0], chunksize=_CHUNK_ROWS) as chunks:
         return sum(len(chunk) for chunk in chunks)
@@ -163,7 +209,7 @@ def has_rows(path: str | Path) -> bool:
     """Whether the CSV at ``path`` holds a row below its header, ``False`` when
     there is no file."""
     path = Path(path)
-    return path.exists() and not pd.read_csv(path, nrows=1, dtype=str).empty
+    return _has_bytes(path) and not pd.read_csv(path, nrows=1, dtype=str).empty
 
 
 def keys_in(
@@ -174,19 +220,20 @@ def keys_in(
     """The unit keys of the rows in the CSV at ``path``.
 
     A key is the value of the one key field, or a tuple of the values of
-    several, each passed through its caster. A file that is missing, has no
+    several, each passed through its caster. The cells are read as text, so
+    a field without a caster gives a string. A file that is missing, has no
     rows or lacks a key column gives no keys. A cast that fails raises. The
     file is read in chunks and only the keys are kept.
     """
     path = Path(path)
-    if not path.exists():
+    if not _has_bytes(path):
         return set()
     key_fields = tuple(key_fields)
     casters = casters or {}
     keys: set = set()
     # Every column is parsed: with usecols pandas no longer raises on a row
     # that has more cells than the header.
-    with pd.read_csv(path, chunksize=_CHUNK_ROWS) as chunks:
+    with pd.read_csv(path, dtype=str, chunksize=_CHUNK_ROWS) as chunks:
         for chunk in chunks:
             if not set(key_fields) <= set(chunk.columns):
                 return set()
@@ -206,7 +253,8 @@ class Part(NamedTuple):
         dataset_type: The value of the rows' ``dataset_type`` column. ``None``
             adds no such column.
         accepted_only: Copy only the rows of a file whose ``accepted`` cell
-            reads true. A file without the column is copied whole.
+            reads true (:func:`accepted_mask`). A file without the column is
+            copied whole.
         label: What the log calls the part.
     """
 
@@ -220,8 +268,10 @@ def _part_columns(part: Part) -> list[str]:
     """The columns a part's rows are written with."""
     if isinstance(part.source, pd.DataFrame):
         columns = list(part.source.columns)
-    else:
+    elif _has_bytes(part.source):
         columns = list(pd.read_csv(part.source, nrows=0).columns)
+    else:
+        columns = []
     if part.dataset_type is not None and "dataset_type" not in columns:
         columns.append("dataset_type")
     return columns
@@ -242,29 +292,48 @@ def _part_chunks(part: Part) -> Iterator[pd.DataFrame]:
         # integers it prints 1 and not 1.0, as the cells of a file do.
         whole = [name for name in frame.columns
                  if pd.api.types.is_float_dtype(frame[name])
-                 and (frame[name].dropna() % 1 == 0).all()]
+                 and frame[name].isna().any()
+                 and (frame[name].dropna() % 1 == 0).all()
+                 and (frame[name].dropna().abs() < 2**63).all()]
         yield frame.astype(dict.fromkeys(whole, "Int64")).assign(**tag)
+        return
+    if not _has_bytes(part.source):
         return
     with pd.read_csv(part.source, dtype=str, chunksize=_CHUNK_ROWS) as chunks:
         for chunk in chunks:
             if part.accepted_only and "accepted" in chunk.columns:
-                chunk = chunk[chunk["accepted"].isin(_TRUE_CELLS)]
+                chunk = chunk[accepted_mask(chunk["accepted"])]
             yield chunk.assign(**tag)
+
+
+def _new_rows(
+    chunk: pd.DataFrame, column: str, earlier: set[str], values: set[str],
+) -> pd.DataFrame:
+    """The rows of ``chunk`` whose ``column`` is not in ``earlier``; their
+    values are added to ``values``. A row without a value stays."""
+    cells = chunk[column].astype(str)
+    given = chunk[column].notna() & (cells != "")
+    values.update(cells[given])
+    return chunk[~given | ~cells.isin(earlier)]
 
 
 def write_concat(
     target: str | Path, parts: Sequence[Part], *, keep_empty: bool = True,
+    unique: str | None = None,
 ) -> list[int]:
     """Write the rows of ``parts``, one part after another, as the CSV at ``target``.
 
     The columns are those of every part in the order they first appear, and
     a row is empty in the columns its part lacks: the file ``pd.concat`` of
     the parts would give, without the parts in memory. The rows go to a
-    temporary file beside ``target`` that then replaces it, so ``target``
-    holds its old rows or all the new ones.
+    temporary file beside ``target``, synced, that then replaces it, so
+    ``target`` holds its old rows or all the new ones.
 
     Args:
         keep_empty: False leaves ``target`` as it is when no part has a row.
+        unique: A column: a row whose value in it an earlier part wrote is
+            left out, and the count left out of each part is logged. The
+            values written are held in memory.
 
     Returns:
         The number of rows written of each part.
@@ -274,17 +343,29 @@ def write_concat(
     target.parent.mkdir(parents=True, exist_ok=True)
     temporary = target.with_name(target.name + ".tmp")
     written = []
+    earlier: set[str] = set()    # the values of ``unique`` the parts so far wrote
     try:
         # newline="": to_csv ends each row itself, as it does writing to a path.
         with temporary.open("w", encoding="utf-8", newline="") as fh:
             pd.DataFrame(columns=columns).to_csv(fh, index=False)
             for part in parts:
-                rows = 0
+                rows = left_out = 0
+                values: set[str] = set()
                 for chunk in _part_chunks(part):
+                    if unique in chunk.columns:
+                        kept = _new_rows(chunk, unique, earlier, values)
+                        left_out += len(chunk) - len(kept)
+                        chunk = kept
                     chunk = chunk.reindex(columns=columns, fill_value="")
                     chunk.to_csv(fh, header=False, index=False)
                     rows += len(chunk)
                 written.append(rows)
+                earlier |= values
+                if left_out:
+                    logger.info("%s: left out %d rows whose %s an earlier part wrote.",
+                                part.label or "A part", left_out, unique)
+            fh.flush()
+            os.fsync(fh.fileno())
         if keep_empty or any(written):
             _replace(temporary, target)
     finally:

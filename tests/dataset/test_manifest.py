@@ -7,7 +7,9 @@ JsonlSidecar base so Ledger and Manifest agree on file conventions.
 """
 
 import json
+import os
 
+import redact.dataset.sidecar as sidecar_module
 from redact.dataset import JsonlSidecar, Ledger, Manifest
 
 
@@ -95,3 +97,13 @@ def test_manifest_and_ledger_share_conventions(tmp_path):
     assert isinstance(man, JsonlSidecar) and isinstance(led, JsonlSidecar)
     assert man.path == tmp_path / "output_responses.manifest.jsonl"
     assert led.path == tmp_path / "output_responses.state.jsonl"
+
+
+def test_the_rows_are_synced_before_they_replace_the_file(tmp_path, monkeypatch):
+    """After a power loss the file holds its old rows or all the new ones."""
+    man = Manifest(tmp_path / "run.manifest.jsonl")
+    synced = []
+    monkeypatch.setattr(sidecar_module.os, "fsync", lambda fd: synced.append(
+        (os.fstat(fd).st_size, man.exists())))
+    man.write([{"id": "1"}, {"id": "2"}])
+    assert synced == [(man.path.stat().st_size, False)]

@@ -35,7 +35,7 @@ import zlib
 from collections.abc import Callable, Iterable, Mapping, Sequence
 from contextlib import suppress
 from pathlib import Path
-from typing import Any
+from typing import Any, TypeVar
 from weakref import WeakKeyDictionary
 
 from filelock import FileLock, Timeout
@@ -50,6 +50,8 @@ _UnitsIn = Callable[[Path], Mapping[Any, Iterable[str]]]
 
 # A checksum covers this many bytes at the end of what a save left in a file.
 _CHECKSUM_BYTES = 4096
+
+_T = TypeVar("_T")
 
 # The lock of each stage this process is the writer of, by its lock file.
 _locks: dict[Path, FileLock] = {}
@@ -78,8 +80,9 @@ def resume_state(
 
     Args:
         ledger: The stage's ledger.
-        resume: False starts over: the output, its ``.cut`` files, the
-            ledger and the manifest are removed and the result is empty.
+        resume: False starts over: the output, its ``.cut`` and ``.tmp``
+            files, the ledger and the manifest are removed and the result is
+            empty.
         artifact: The stage's output CSV, or with ``pattern`` the folder its
             output files are under. ``None`` for a stage that clears and
             reads its own output: its ledger is read as it is, nothing is
@@ -116,7 +119,8 @@ def resume_state(
         try:
             if not resume:
                 _clear(ledger, manifest, *_outputs(path, pattern),
-                       *_outputs(path, pattern, ".cut"), _drop_marker(ledger))
+                       *_outputs(path, pattern, ".cut"),
+                       *_outputs(path, pattern, ".tmp"), _drop_marker(ledger))
                 return set()
             _stop_on_unfinished_drop(ledger)    # before a file is checked or cut
             done = _restore(ledger, _outputs(path, pattern), units_in)
@@ -124,6 +128,32 @@ def resume_state(
             release_lock(ledger)    # a resume that stops holds nothing
             raise
     return done | set(extra) if extra else done
+
+
+def clear_stage(
+    artifact: str | Path,
+    *,
+    manifest_path: str | Path | None = None,
+    also: Iterable[str | Path] = (),
+) -> None:
+    """Remove what earlier runs of a stage left, as its fresh run does.
+
+    For a stage that starts over and has nothing to run: the output at
+    ``artifact``, its ``.cut`` and ``.tmp`` files, the ledger beside it, the
+    manifest (beside it unless ``manifest_path`` names it) and the files in
+    ``also``. The stage's lock is taken for the clear and given back.
+
+    Raises:
+        RuntimeError: Another run holds the stage's lock.
+    """
+    artifact = Path(artifact)
+    ledger = Ledger.sidecar(artifact, key_fields=("unit",))
+    manifest = (Manifest(manifest_path) if manifest_path
+                else Manifest.sidecar(artifact))
+    resume_state(ledger, resume=False, artifact=artifact, manifest=manifest)
+    release_lock(ledger)
+    for path in also:
+        Path(path).unlink(missing_ok=True)
 
 
 def release_lock(ledger: Ledger) -> None:
@@ -281,7 +311,8 @@ def _cut_back(path: Path, size: int) -> None:
     extra = path.stat().st_size - size
     if extra > 0:
         cut = _cut_file(path)
-        with path.open("rb") as source, cut.open("ab") as target:
+        with (path.open("rb") as source,
+              _retry_cut(cut, lambda: cut.open("ab")) as target):
             source.seek(size)
             shutil.copyfileobj(source, target)
             target.flush()
@@ -324,13 +355,14 @@ def _truncate(path: Path, size: int) -> None:
         )
 
 
-def _retry_cut(path: Path, cut: Callable[[], None]) -> None:
-    """Run ``cut``, which cuts or removes ``path``, again while the file is held.
+def _retry_cut(path: Path, cut: Callable[[], _T]) -> _T:
+    """Run ``cut``, which cuts, removes or opens ``path``, again while the file
+    is held; what it returns.
 
     A file that stays held stops the resume, with a message that says why.
     """
     try:
-        _retry_held(cut)
+        return _retry_held(cut)
     except PermissionError as error:
         raise RuntimeError(
             f"{path} could not be cut back: another program holds it. Close "

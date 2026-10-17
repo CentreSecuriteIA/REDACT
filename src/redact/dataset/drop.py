@@ -10,6 +10,7 @@ from __future__ import annotations
 
 import csv
 import os
+import sys
 from collections.abc import Callable, Iterable, Iterator, Mapping
 from pathlib import Path
 from typing import Any
@@ -99,7 +100,8 @@ def drop_units(
 
 def _mark_drop(ledger: Ledger, name: str) -> None:
     """Leave ``name`` beside the ledger, synced, as a :func:`drop_units` under way."""
-    with _drop_marker(ledger).open("wb") as fh:
+    marker = _drop_marker(ledger)
+    with _retry_held(lambda: marker.open("wb")) as fh:
         fh.write(name.encode("utf-8") + b"\n")
         fh.flush()
         os.fsync(fh.fileno())
@@ -166,6 +168,9 @@ def _records(lines: Iterable[str]) -> Iterator[tuple[str, list[str]]]:
             taken.append(line)
             yield line
 
+    # A cell as long as pandas writes and reads it. sys.maxsize overflows the
+    # C long the limit is on Windows.
+    csv.field_size_limit(min(sys.maxsize, 2**31 - 1))
     # strict: a file that ends inside a quoted cell raises, not a short record.
     for cells in csv.reader(take(), strict=True):
         yield "".join(taken), cells

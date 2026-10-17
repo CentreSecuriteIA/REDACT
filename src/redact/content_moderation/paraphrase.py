@@ -109,10 +109,6 @@ def run_paraphrase_target(
     meaning. Returns the artifact's rows, or with ``read_back=False`` an
     empty frame without reading them.
     """
-    if source.empty:
-        if verbose:
-            logger.info("[paraphrase:%s] no source rows; skipping.", target)
-        return pd.DataFrame()
     if target == "inputs":
         text_col = "sample" if "sample" in source.columns else "prompt"
         id_col = "sample_id"
@@ -133,6 +129,11 @@ def run_paraphrase_target(
     completed: set[tuple[str, int]] = resume_state(
         ledger, resume=resume, artifact=out_path, manifest=manifest,
     )
+    if source.empty:    # a fresh run has cleared what earlier ones left
+        if verbose:
+            logger.info("[paraphrase:%s] no source rows; skipping.", target)
+        release_lock(ledger)
+        return pd.DataFrame()
     # Read after the resume, which leaves only whole rows in the artifact.
     prev = read_rows(out_path)
     seen_texts: set[str] = (

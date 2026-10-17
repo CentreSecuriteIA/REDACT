@@ -25,6 +25,16 @@ class TestReadCategoryCsv:
         assert df.empty
         assert list(df.columns) == SAMPLE_COLUMNS
 
+    def test_an_empty_file_reads_as_none(self, tmp_dataset_dir):
+        """What a save killed before its first byte leaves."""
+        path = paths.category_csv("empty", root=tmp_dataset_dir)
+        path.parent.mkdir()
+        path.touch()
+        df = read_category_csv("empty", dataset_dir=tmp_dataset_dir)
+        assert df.empty and list(df.columns) == SAMPLE_COLUMNS
+        assert discover_categories(tmp_dataset_dir) == ["empty"]
+        assert merge_all(tmp_dataset_dir).empty
+
     def test_reads_existing(self, tmp_dataset_dir):
         cat_dir = tmp_dataset_dir / "test_cat"
         cat_dir.mkdir()
@@ -246,6 +256,16 @@ class TestMergeInputs:
     def test_no_tree_gives_an_empty_frame(self, tmp_path):
         assert merge_inputs(tmp_path).empty
 
+    def test_ids_and_empty_cells_read_back_as_written(self, tmp_path):
+        """A one-row file whose id looks like a number; a cell nothing gave."""
+        path = paths.category_csv("Cyber", root=paths.datasets(tmp_path))
+        path.parent.mkdir(parents=True)
+        append_rows(path, [{**sample_row("a text", "Cyber", turn=0),
+                            "sample_id": "0123456789012345"}])
+        (row,) = merge_inputs(tmp_path).to_dict("records")
+        assert row["sample_id"] == "0123456789012345"
+        assert (row["subcategory"], row["entry_type"]) == ("", "")
+
 
 class TestTakePerGroup:
     def _frame(self):
@@ -293,3 +313,9 @@ class TestTakePerGroup:
         df = self._frame()
         result = take_per_group(df, 100)
         assert len(result) == len(df)  # no padding, no error
+
+    def test_a_missing_group_value_is_a_group_of_its_own(self):
+        df = pd.DataFrame({"prompt": ["p0", "p1", "p2"],
+                           "category": ["Cyber", "Cyber", None],
+                           "entry_type": ["harmful", None, None]})
+        assert list(take_per_group(df, 5)["prompt"]) == ["p0", "p1", "p2"]
