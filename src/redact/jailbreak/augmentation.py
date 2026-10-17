@@ -7,11 +7,13 @@ a value given replaces the default's whole, except ``layers``, ``families``
 and ``techniques``, whose ``allow`` and ``deny`` lists replace the default's
 one by one. A kind given as ``None`` is off; a kind left out is the default.
 A key starting with ``_``, in the section or in a kind, is a comment and is
-skipped. ``translation`` alone decides whether a kind draws the translation family.
+skipped. ``translation`` alone decides whether a kind draws the translation
+family; the lists may narrow it to the languages they name.
 """
 
 import copy
 import json
+import logging
 from functools import lru_cache
 from numbers import Real
 
@@ -19,8 +21,10 @@ from redact import paths
 from redact.types import ALL_ENTRY_TYPES
 
 from .plan import default_escalation_schedule
-from .pool import TRANSLATION, all_techniques, technique_pool
+from .pool import TRANSLATION, all_techniques, languages, technique_pool
 from .technique import load_spec
+
+logger = logging.getLogger(__name__)
 
 KINDS = ("adversarial", "natural")
 
@@ -79,8 +83,9 @@ def resolve(
     all), and a kind with ``rounds`` with ``iterations`` set to their number.
     The adversarial ``families.deny`` holds every family of
     :func:`natural_only_families` its ``families.allow`` does not name.
-    ``translation`` is true or false, and an allow list names neither the
-    translation family nor one of its techniques while it is false.
+    ``translation`` is true or false; while it is false, what the allow
+    lists and ``family_weights`` name of translation is left out, with a
+    WARNING (:func:`_switch_off_translation`).
 
     Returns:
         The full kind, or ``None`` when ``section`` switches it off.
@@ -137,7 +142,7 @@ def resolve(
                              if name not in (families["allow"] or ())
                              and name not in families["deny"]]
     _check_names(where, resolved)
-    _check_translation(where, resolved)
+    _switch_off_translation(where, resolved)
     if type(resolved["pure_only"]) is not bool:
         raise ValueError(
             f"{where}.pure_only must be true or false, got {resolved['pure_only']!r}.")
@@ -331,23 +336,45 @@ def _check_names(where: str, resolved: dict) -> None:
                     "registered technique implements; write a registered one.")
 
 
-def _check_translation(where: str, resolved: dict) -> None:
-    """``translation`` is a bool, and with it false no allow list names translation."""
+def _switch_off_translation(where: str, resolved: dict) -> None:
+    """With ``translation`` false, leave out of ``resolved`` the translation
+    family and techniques its allow lists name and its ``family_weights``
+    entry, and log a WARNING naming them.
+
+    An allow list left empty becomes ``None`` beside the other, which still
+    names something, so the pool draws what that one names.
+
+    Raises:
+        ValueError: ``translation`` is not a bool, or the allow lists name
+            nothing but translation.
+    """
     if type(resolved["translation"]) is not bool:
         raise ValueError(
             f"{where}.translation must be true or false, got "
             f"{resolved['translation']!r}.")
     if resolved["translation"]:
         return
-    languages = {fn.__name__ for fn in all_techniques() if TRANSLATION in fn.families}
-    named = [name for name in resolved["families"]["allow"] or ()
-             if name == TRANSLATION]
-    named += [name for name in resolved["techniques"]["allow"] or ()
-              if name in languages]
-    if named:
+    translation = {TRANSLATION, *languages()}
+    lists = [resolved["families"], resolved["techniques"]]
+    named = [name for given in lists for name in given["allow"] or ()
+             if name in translation]
+    weighted = TRANSLATION in resolved["family_weights"]
+    if not named and not weighted:
+        return
+    for given in lists:
+        if given["allow"] is not None:
+            given["allow"] = [name for name in given["allow"]
+                              if name not in translation] or None
+    if named and all(given["allow"] is None for given in lists):
         raise ValueError(
-            f"{where} allows {named} and {where}.translation is false; set "
-            '"translation": true to draw translation.')
+            f"{where} allows only translation ({named}) and {where}.translation "
+            'is false; set "translation": true, or allow something else.')
+    resolved["family_weights"] = {
+        family: weight for family, weight in resolved["family_weights"].items()
+        if family != TRANSLATION}
+    logger.warning(
+        "%s.translation is false, so the translation it names is left out: %s.",
+        where, named + ["family_weights.translation"] * weighted)
 
 
 def _check_count(where: str, key: str, value, *, least: int) -> None:

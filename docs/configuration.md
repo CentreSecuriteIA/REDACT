@@ -249,8 +249,9 @@ From every registered technique, in this order:
 
 1. remove the layers in `layers.deny`;
 2. when `families.allow` or `techniques.allow` is a list, keep only the
-   techniques of an allowed family or with an allowed name (`translation`
-   counts as allowed when the switch is on);
+   techniques of an allowed family or with an allowed name (with the switch
+   on, `translation` counts as an allowed family unless `techniques.allow`
+   names some of its techniques: then only those are kept);
 3. remove the families in `families.deny` (`translation` aside), and
    `translation` when the switch is off;
 4. remove the techniques in `techniques.deny`;
@@ -281,9 +282,18 @@ From every registered technique, in this order:
 `"translation": false` keeps the `translation` family out of a kind, and
 `true` puts it in: the attacks draw it as any family, and the natural kind
 adds it to its allow list. No family list changes this; a
-`techniques.deny` still removes the languages it names. An allow list that
-names `translation` or one of its techniques while the switch is `false`
-raises.
+`techniques.deny` still removes the languages it names, and a
+`techniques.allow` that names some languages narrows the family to those
+(the eval type's nine low-resource languages).
+
+With the switch `false`, the translation an allow list names (the family or
+its techniques) and a `family_weights` entry for it are left out of the
+resolved kind, with a WARNING naming them:
+`augmentations.<kind>.translation is false, so the translation it names is
+left out: [...]`. So `"adversarial": {"translation": false}` over the eval
+type is a one-key override: its pool keeps the other 28 techniques. An allow
+list left empty by this is dropped when the other list still names
+something; when nothing but translation was allowed, the kind raises.
 
 Both kinds default to `false`. Each translation makes 2 to 8 calls, up to 4
 rounds of two ([stages/jailbreaks.md](stages/jailbreaks.md#models) says which
