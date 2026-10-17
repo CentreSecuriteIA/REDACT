@@ -159,6 +159,19 @@ class TestJsonlSink:
         make_client(MockBackend("ok")).generate(_messages(1))
         assert col.trace_path.exists()          # fell back to jsonl, not to off
 
+    def test_two_runs_in_one_second_write_two_traces(self, tmp_path):
+        """The run id is to the second, so a later install takes the next
+        free name rather than appending to the earlier run's trace."""
+        from datetime import UTC, datetime
+
+        with patch("redact.telemetry.datetime") as clock:
+            clock.now.return_value = datetime(2026, 10, 17, 12, 0, 0, tzinfo=UTC)
+            paths = [telemetry.install(data_dir=tmp_path).trace_path for _ in range(3)]
+        assert [p.name for p in paths] == [
+            "run-20261017-120000.trace.jsonl", "run-20261017-120000-2.trace.jsonl",
+            "run-20261017-120000-3.trace.jsonl"]
+        assert all(p.exists() for p in paths)    # claimed before any event
+
 
 class TestLoggerContract:
     """The library attaches no handler and sets no level — telemetry must not
