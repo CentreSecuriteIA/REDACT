@@ -50,6 +50,7 @@ from ..llms.client import ModelClient
 from ..llms.prompting import PromptTemplate, extract_and_clean
 from .axes import (
     deal_specs,
+    deal_weights,
     render_spec,
     spec_columns,
     warn_unshown,
@@ -133,14 +134,6 @@ def _stop_on_earlier_files(
             check_columns(path, row)
         except ValueError as error:
             raise ValueError(f"{error} {remedy}") from None
-
-
-def _axis_weights(axes: dict | None) -> dict | None:
-    """Each dealt axis's weights, what a deal is made with."""
-    if not axes:
-        return None
-    return {axis: {value: v["weight"] for value, v in entry["values"].items()}
-            for axis, entry in axes.items() if "values" in entry}
 
 
 class _Entry(NamedTuple):
@@ -311,7 +304,7 @@ class InputPipeline:
         seen = set(ledger.ids)      # the content ids of the rows of every style
 
         made_with = plan_record(seed=seed, samples_per_entry=samples_per_entry,
-                                axes=_axis_weights(axes))
+                                axes=deal_weights(axes))
         changed = changed_plan(manifest.path, made_with) if resume else []
         if changed:
             release_lock(ledger)

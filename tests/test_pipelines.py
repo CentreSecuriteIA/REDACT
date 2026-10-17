@@ -482,7 +482,8 @@ class TestGenerateOutputsResume:
 
         out = paths.output_responses_csv(tmp_path)
         out.parent.mkdir(parents=True, exist_ok=True)
-        # Same column order the stage appends in, since the append is headerless.
+        # Same column order the stage appends in, since the append is headerless;
+        # a run without the response axes, whose columns the file lacks.
         pd.DataFrame([{
             "input_id": content_id("p one"), "input_prompt": "p one",
             "category": "Cyber", "subcategory": "", "entry_type": "harmful",
@@ -498,7 +499,7 @@ class TestGenerateOutputsResume:
             "category": ["Cyber"] * 2, "entry_type": ["harmful"] * 2,
         })
         df = generate_outputs(data_dir=tmp_path, inputs=inputs, check_outputs=False,
-                              resume=True, verbose=False)
+                              resume=True, verbose=False, axes=False)
 
         assert len(backend.calls) == 1                      # only "p two" generated
         assert len(df) == 2                                 # prior row kept, one added
@@ -802,8 +803,10 @@ class TestGenerateOutputsPool:
         inputs = pd.DataFrame({
             "sample": tokens, "category": ["Cyber"] * 6, "entry_type": ["harmful"] * 6,
         })
+        # Without the response axes: the row of each input, as before them.
         generate_outputs(data_dir=tmp_path, inputs=inputs, model="gen-model",
-                         check_model="check-model", batch_size=2, verbose=False)
+                         check_model="check-model", batch_size=2, verbose=False,
+                         axes=False)
 
         df = pd.read_csv(paths.output_responses_csv(tmp_path), dtype=str,
                          keep_default_na=False)
@@ -1008,7 +1011,7 @@ class TestGenerateOutputsPool:
             gen = _LaneBackend("gen-model", too_long={"zq1"})
             self._clients(monkeypatch, gen, None)
             generate_outputs(data_dir=tmp_path, inputs=inputs, model="gen-model",
-                             check_outputs=False, verbose=False)
+                             check_outputs=False, verbose=False, axes=False)
             return gen
 
         with caplog.at_level(logging.WARNING):

@@ -192,6 +192,15 @@ def varied(axes: dict | None) -> dict[str, str]:
             or sum(value["weight"] > 0 for value in entry["values"].values()) > 1}
 
 
+def deal_weights(axes: dict | None) -> dict | None:
+    """Each dealt axis's weights, what a deal is made with: the record a
+    stage's plan file holds."""
+    if not axes:
+        return None
+    return {axis: {value: v["weight"] for value, v in entry["values"].items()}
+            for axis, entry in axes.items() if "values" in entry}
+
+
 def _clashes(axes: dict, spec: dict, axis: str, value: str) -> bool:
     """Whether ``value`` of ``axis`` and a value already in ``spec`` name each
     other in ``not_with``."""

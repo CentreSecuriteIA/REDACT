@@ -268,13 +268,34 @@ def test_the_inputs_front_deals_the_axes_of_the_folder(tmp_path, monkeypatch):
     assert rows["length"].tolist() == ["very_long", "very_long"]
 
 
-def test_a_run_passes_the_inputs_front_its_config_dir(tmp_path):
+def test_the_outputs_front_deals_the_axes_of_the_folder(tmp_path, monkeypatch):
+    from redact import generate_outputs
+    from redact.llms import ModelClient
+
+    def tables_only(axes: dict) -> None:
+        for value, entry in axes["outputs"]["format"]["values"].items():
+            entry["weight"] = 1 if value == "table" else 0
+
+    config = tmp_path / "cfg"
+    _overlaid(config, "generation_axes.json", tables_only)
+    monkeypatch.setattr(ModelClient, "create",
+                        lambda m: make_client(MockBackend("an answer"), m))
+    rows = generate_outputs(
+        inputs=pd.DataFrame({"sample": ["one", "two"], "category": "Cyber",
+                             "entry_type": "harmful"}),
+        data_dir=tmp_path, model="gen-model", check_outputs=False,
+        config_dir=config, verbose=False)
+    assert rows["response_format"].tolist() == ["table", "table"]
+
+
+@pytest.mark.parametrize("stage", ["inputs", "outputs"])
+def test_a_run_passes_the_front_its_config_dir(tmp_path, stage):
     ctx = RunContext(
         data_dir=tmp_path, dataset_type="training", models={"gen": None,
                                                             "check": None},
         prompt_dir=None, taxonomy="harmful", taxonomy_dir=None, params={},
         augmentations={}, resume=True, verbose=False, config_dir=tmp_path)
-    assert STAGES["inputs"].recipe_kwargs(ctx)["config_dir"] == tmp_path
+    assert STAGES[stage].recipe_kwargs(ctx)["config_dir"] == tmp_path
 
 
 # --- scaffold_setup -------------------------------------------------------------

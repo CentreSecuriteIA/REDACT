@@ -1,4 +1,5 @@
-"""The outputs stage: one checked model response per input row."""
+"""The outputs stage: one checked model response per input row, each dealt
+one spec of the response axes."""
 
 import functools
 import logging
@@ -6,17 +7,53 @@ from pathlib import Path
 
 import pandas as pd
 
-from ..dataset import Ledger, Manifest, append_rows, content_id, read_rows, row_ids
-from ..dataset.resume import resume_state
+from ..dataset import (
+    Ledger,
+    Manifest,
+    append_rows,
+    check_columns,
+    content_id,
+    read_rows,
+    row_ids,
+)
+from ..dataset.planfile import changed_plan, plan_path, plan_record, write_plan
+from ..dataset.resume import release_lock, resume_state
 from ..dataset.save import CommitBuffer
 from ..exceptions import PromptTooLongError
 from ..llm_pipeline import checked, drive_units, pool_size
 from ..llms.client import ModelClient
 from ..llms.prompting import build_messages, load_prompt
+from .axes import (
+    deal_specs,
+    deal_weights,
+    render_spec,
+    spec_columns,
+    warn_unshown,
+    write_stage_coverage,
+)
 from .checker import build_output_quality_checker
 from .feedback import with_feedback
 
 logger = logging.getLogger(__name__)
+
+# The prefix of a row's column for each response axis.
+_PREFIX = "response_"
+
+
+def _stop_on_an_earlier_file(out_path: Path, columns: list[str]) -> None:
+    """Raise when ``out_path`` has a header without one of ``columns``: it was
+    written before the response axes, or without them.
+
+    Raises:
+        ValueError: The column missing, and the remedies.
+    """
+    try:
+        check_columns(out_path, [dict.fromkeys(columns, "")])
+    except ValueError as error:
+        raise ValueError(
+            f"{error} Start the stage over with resume=False (a recipe's "
+            '"resume": false), run it in a new data_dir, or run it without the '
+            "response axes (params outputs.axes: false).") from None
 
 
 def run_output_generation(
@@ -32,6 +69,8 @@ def run_output_generation(
     max_attempts: int = 1,
     check_max_tokens: int | None = None,
     read_back: bool = True,
+    axes: dict | None = None,
+    seed: int = 42,
 ) -> pd.DataFrame:
     """Generate one checked response per input row, appended to ``out_path``.
 
@@ -43,14 +82,29 @@ def run_output_generation(
     rejected row with an empty response. A call carries up to ``batch_size``
     requests; ``check_max_tokens`` limits a verdict's reply.
 
+    ``axes`` (:func:`redact.content_moderation.axes.resolve`) deals each
+    row one spec per ``(category, entry_type)`` from ``seed``; the
+    template's ``{response_spec}`` shows it, the row records it in a
+    ``response_<axis>`` column per axis, and ``<stem>.coverage.csv`` beside
+    the manifest counts the specs planned and accepted. The checker is not
+    shown the spec. ``None``: no specs, and ``{response_spec}`` is empty.
+
     A row's ``input_id`` is its input's id (``row_ids``); its ``sample_id``
     is ``content_id`` of the response, or of ``"{input_id}:prompt too long"``
     for a prompt too long, which has none. The ledger beside ``out_path`` is
-    keyed on ``input_id``; ``resume=False`` starts the stage over.
+    keyed on ``input_id``, an ack holding the verdict too; ``resume=False``
+    starts the stage over. A resume deals the specs again, and
+    ``<stem>.plan.json`` (``seed``, the axes' weights) stops one that would
+    deal others; a file without the response columns stops it before any
+    call.
 
     Returns:
         The rows of ``out_path``, from this run and earlier ones, or an empty
         frame when ``read_back`` is False.
+
+    Raises:
+        ValueError: A resume whose ``seed`` or axes' weights differ from those
+            of the plan file, or onto a file without the response columns.
     """
     # Internals capture (opt-in): only true for an introspection-capable
     # backend (e.g. TransformersIntrospectionBackend); a no-op for the default
@@ -59,6 +113,8 @@ def run_output_generation(
     # never a CSV column (see .claude/introspection_backend_plan.md).
     capture_internals_gen = client.compute_config.supports_internals
     prompt_config = load_prompt("output", "generation", prompt_dir=prompt_dir)
+    if axes:
+        warn_unshown(prompt_config, "response_spec", "of the outputs' generation")
     capture_internals_check = (
         check is not None and check.compute_config.supports_internals
     )
@@ -81,15 +137,48 @@ def run_output_generation(
     completed = resume_state(
         ledger, resume=resume, artifact=out_path, manifest=manifest)
 
+    made_with = plan_record(seed=seed, axes=deal_weights(axes))
+    changed = changed_plan(manifest.path, made_with) if resume else []
+    try:
+        if changed:
+            raise ValueError(
+                f"Outputs: this run's {changed} differ from those the responses "
+                f"in {out_path.name} were dealt with (see "
+                f"{plan_path(manifest.path).name}), and a resume deals them again "
+                "as they were. Run with resume=False to start over, or with the "
+                "settings the plan was made with.")
+        if resume and out_path.exists():
+            _stop_on_an_earlier_file(out_path, list(spec_columns(
+                axes, {}, prefix=_PREFIX)))
+    except ValueError:
+        release_lock(ledger)
+        raise
+    if changed is None and completed:
+        logger.warning(
+            "Outputs: %s has finished rows and no %s, so whether this run's seed "
+            "and axes are the ones they were dealt with is not checked.",
+            out_path.name, plan_path(manifest.path).name)
+    write_plan(manifest.path, made_with)
+
+    groups = [(str(row.get("category", "unknown")),
+               str(row.get("entry_type", "harmful")))
+              for _, row in inputs.iterrows()]
+    specs = deal_specs(
+        axes, [(group, (sid, 0)) for group, sid in zip(groups, inputs["_state_id"])],
+        seed=seed)
     # Plan → manifest: one row per input_id, written before the batch loop so the
     # run's full intended scope is inspectable up front (keyed like the ledger).
     manifest.write(
-        {"input_id": sid, "status": "planned"} for sid in inputs["_state_id"]
+        {"input_id": sid, "category": category, "entry_type": entry_type,
+         **({"spec": spec} if axes else {}), "status": "planned"}
+        for sid, (category, entry_type), spec in zip(inputs["_state_id"], groups, specs)
     )
 
     if completed:
         before = len(inputs)
-        inputs = inputs[~inputs["_state_id"].isin(completed)].reset_index(drop=True)
+        pending = ~inputs["_state_id"].isin(completed)
+        specs = [spec for spec, keep in zip(specs, pending) if keep]
+        inputs = inputs[pending].reset_index(drop=True)
         if verbose and before != len(inputs):
             logger.info("Resume: skipping %d already-completed inputs", before - len(inputs))
 
@@ -131,7 +220,8 @@ def run_output_generation(
         input_id = str(row["_state_id"])
 
         base = build_messages(
-            prompt_config, input_prompt=input_text, Category=category
+            prompt_config, input_prompt=input_text, Category=category,
+            response_spec=render_spec(axes, specs[i], {"subcategory": subcategory}),
         )
         live_rows[i] = {
             "input_id": input_id,
@@ -166,7 +256,9 @@ def run_output_generation(
         r["output_response"] = resp
         r["accepted"] = accepted
         r["rejection_reason"] = reasoning
-        buf.add([r], {"input_id": r["input_id"]})
+        r.update(spec_columns(axes, specs[i], prefix=_PREFIX))
+        # The verdict, what the coverage table counts.
+        buf.add([r], {"input_id": r["input_id"], "accepted": bool(accepted)})
 
     # The row of a prompt that is too long is acked like any other: sent
     # again, the prompt would be too long again. Any other unit error stops
@@ -194,6 +286,7 @@ def run_output_generation(
             cap=batch_size,
             progress="outputs" if verbose else None,
         )
+    write_stage_coverage(axes, manifest, ledger)
 
     if not read_back:
         return pd.DataFrame()
