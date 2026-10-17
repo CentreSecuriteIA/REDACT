@@ -256,6 +256,16 @@ class TestMergeInputs:
     def test_no_tree_gives_an_empty_frame(self, tmp_path):
         assert merge_inputs(tmp_path).empty
 
+    def test_ids_and_empty_cells_read_back_as_written(self, tmp_path):
+        """A one-row file whose id looks like a number; a cell nothing gave."""
+        path = paths.category_csv("Cyber", root=paths.datasets(tmp_path))
+        path.parent.mkdir(parents=True)
+        append_rows(path, [{**sample_row("a text", "Cyber", turn=0),
+                            "sample_id": "0123456789012345"}])
+        (row,) = merge_inputs(tmp_path).to_dict("records")
+        assert row["sample_id"] == "0123456789012345"
+        assert (row["subcategory"], row["entry_type"]) == ("", "")
+
 
 class TestTakePerGroup:
     def _frame(self):

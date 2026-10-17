@@ -130,3 +130,24 @@ class TestRunStandaloneInputs:
         assert {name: kwargs[name] for name in forwarded} == {
             "samples_per_category": 4, "samples_per_request": 2, "num_seeds": 3}
         assert kwargs["seeds_db"] is None
+
+
+class TestOutputsOfStandaloneInputs:
+    def test_an_input_without_a_subcategory_gives_an_empty_one(
+            self, tmp_path, monkeypatch):
+        """Not the text ``nan``: the standalone path writes no subcategory."""
+        import pandas as pd
+
+        import redact.stages as P
+        from redact import generate_outputs, paths
+        from redact.dataset import append_samples
+
+        monkeypatch.setattr(P.ModelClient, "create",
+                            lambda m: make_client(MockBackend("ans"), m))
+        append_samples(["an input"], category="Cyber", turn=0,
+                       extra_columns=[{"entry_type": "harmful", "subcategory": ""}],
+                       dataset_dir=paths.datasets(tmp_path))
+        generate_outputs(data_dir=tmp_path, check_outputs=False, verbose=False)
+        written = pd.read_csv(paths.output_responses_csv(tmp_path), dtype=str,
+                              keep_default_na=False)
+        assert list(written["subcategory"]) == [""]

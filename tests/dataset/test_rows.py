@@ -17,11 +17,16 @@ from redact.dataset import (
     iter_rows,
     keys_in,
     read_rows,
+    row_ids,
     write_concat,
 )
 
 _UNIT = ("input_id", "iteration")
 _UNIT_CASTERS = {"input_id": str, "iteration": int}
+
+# Content ids that pandas would read as numbers: digits around an "e", and a
+# leading zero.
+_NUMBER_LIKE_IDS = ["12345678901234e5", "0123456789012345"]
 
 # Text as a model writes it: commas, quotes and line breaks of each kind.
 _TEXTS = [
@@ -206,6 +211,43 @@ class TestReadRows:
     def test_no_file_gives_an_empty_frame(self, tmp_path):
         frame = read_rows(tmp_path / "nope.csv")
         assert isinstance(frame, pd.DataFrame) and frame.empty
+
+
+class TestIdsAreReadAsText:
+    """A file whose ids all look like numbers gives them back as written."""
+
+    @pytest.mark.parametrize("given", _NUMBER_LIKE_IDS)
+    def test_read_rows_and_row_ids(self, tmp_path, given):
+        path = tmp_path / "out.csv"
+        append_rows(path, [{"sample_id": given, "input_id": given, "sample": "x"}])
+        frame = read_rows(path)
+        assert list(frame["sample_id"]) == list(frame["input_id"]) == [given]
+        assert row_ids(frame, "sample") == [given]
+        assert [row["input_id"] for row in iter_rows(path)] == [given]
+
+    @pytest.mark.parametrize("given", _NUMBER_LIKE_IDS)
+    def test_keys_in(self, tmp_path, given):
+        path = tmp_path / "out.csv"
+        append_rows(path, [{"input_id": given, "iteration": 3}])
+        assert keys_in(path, _UNIT, _UNIT_CASTERS) == {(given, 3)}
+
+
+class TestMissingCells:
+    def test_an_empty_text_cell_reads_back_empty(self, tmp_path):
+        """A number column keeps its gap, so it stays numeric."""
+        path = tmp_path / "out.csv"
+        append_rows(path, [{"sample": "x", "subcategory": "", "turn": 0},
+                           {"sample": "y", "subcategory": "phishing", "turn": None}])
+        frame = read_rows(path)
+        assert list(frame["subcategory"]) == ["", "phishing"]
+        assert pd.api.types.is_numeric_dtype(frame["turn"])
+        assert frame["turn"].isna().tolist() == [False, True]
+
+    def test_a_column_without_a_value_reads_back_empty(self, tmp_path):
+        path = tmp_path / "out.csv"
+        append_rows(path, [{"sample": "x", "subcategory": ""},
+                           {"sample": "y", "subcategory": None}])
+        assert list(read_rows(path)["subcategory"]) == ["", ""]
 
 
 class TestIterRows:
@@ -397,6 +439,9 @@ class TestWriteConcat:
         out = tmp_path / "out.csv"
         assert write_concat(out, [Part(path), Part(frame)]) == [3, 1]
         expected = pd.concat([read_rows(path), frame], ignore_index=True)
+        # Read back, a column of text or of verdicts that a part lacks is
+        # empty in its rows; one of numbers is missing.
+        expected = expected.fillna({"sample": "", "accepted": "", "note": ""})
         pd.testing.assert_frame_equal(read_rows(out), expected)
 
     def test_a_dataset_type_tags_the_rows_of_its_part(self, tmp_path):

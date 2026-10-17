@@ -16,6 +16,10 @@ _CHUNK_ROWS = 50_000
 # The cells pandas reads as true when it reads a column of verdicts whole.
 _TRUE_CELLS = ("True", "TRUE", "true")
 
+# Read as text: a content id of digits is not a number. pandas skips a column
+# the file lacks.
+_ID_COLUMNS = {"sample_id": str, "input_id": str}
+
 _HELD_ATTEMPTS = 20
 _HELD_WAIT_SECONDS = 0.1
 _REPLACE_ATTEMPTS = 5
@@ -132,10 +136,28 @@ def append_rows(path: str | Path, rows: Sequence[Mapping[str, Any]]) -> dict[Pat
         return {path: os.fstat(fh.fileno()).st_size}
 
 
+def _blank_missing_text(frame: pd.DataFrame) -> pd.DataFrame:
+    """``frame`` with each missing cell of a text column as ``""``.
+
+    A text column is one of strings, or one with no value at all. A column of
+    numbers keeps its gaps, so it stays numeric.
+    """
+    text = {name: "" for name in frame.columns
+            if pd.api.types.is_string_dtype(frame[name])
+            or pd.api.types.is_object_dtype(frame[name])
+            or frame[name].isna().all()}
+    return frame.fillna(text) if text else frame
+
+
 def read_rows(path: str | Path) -> pd.DataFrame:
-    """Every row of the CSV at ``path``, or an empty frame when there is no file."""
+    """Every row of the CSV at ``path``, or an empty frame when there is no file.
+
+    Ids are read as text, and a missing cell of a text column as ``""``.
+    """
     path = Path(path)
-    return pd.read_csv(path) if _has_bytes(path) else pd.DataFrame()
+    if not _has_bytes(path):
+        return pd.DataFrame()
+    return _blank_missing_text(pd.read_csv(path, dtype=_ID_COLUMNS))
 
 
 def iter_rows(
@@ -144,14 +166,16 @@ def iter_rows(
     """Yield the rows of the CSV at ``path`` as dicts, reading it in chunks.
 
     ``columns`` limits the read to those columns. No file gives no rows.
-    Values are typed chunk by chunk, so a column can come out as ``int`` in
-    one chunk and ``float`` in another that has an empty cell.
+    Ids are read as text. Other values are typed chunk by chunk, so a column
+    can come out as ``int`` in one chunk and ``float`` in another that has an
+    empty cell.
     """
     path = Path(path)
     if not _has_bytes(path):
         return
     usecols = None if columns is None else list(columns)
-    with pd.read_csv(path, usecols=usecols, chunksize=_CHUNK_ROWS) as chunks:
+    with pd.read_csv(path, usecols=usecols, dtype=_ID_COLUMNS,
+                     chunksize=_CHUNK_ROWS) as chunks:
         for chunk in chunks:
             yield from chunk.to_dict("records")
 
@@ -183,7 +207,8 @@ def keys_in(
     """The unit keys of the rows in the CSV at ``path``.
 
     A key is the value of the one key field, or a tuple of the values of
-    several, each passed through its caster. A file that is missing, has no
+    several, each passed through its caster. The cells are read as text, so
+    a field without a caster gives a string. A file that is missing, has no
     rows or lacks a key column gives no keys. A cast that fails raises. The
     file is read in chunks and only the keys are kept.
     """
@@ -195,7 +220,7 @@ def keys_in(
     keys: set = set()
     # Every column is parsed: with usecols pandas no longer raises on a row
     # that has more cells than the header.
-    with pd.read_csv(path, chunksize=_CHUNK_ROWS) as chunks:
+    with pd.read_csv(path, dtype=str, chunksize=_CHUNK_ROWS) as chunks:
         for chunk in chunks:
             if not set(key_fields) <= set(chunk.columns):
                 return set()
