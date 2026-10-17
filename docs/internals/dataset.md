@@ -16,6 +16,8 @@ It is responsible for:
 - what a run skips, and what a resume puts back (`resume.py`);
 - a fresh run of part of a stage (`drop.py`);
 - the per-category tree of inputs (`categories.py`);
+- what an eval build leaves out because another run holds it
+  (`exclusion.py`: `exclusion_files`, `Exclusion`);
 - writing and loading the taxonomy files (`taxonomy.py`) and published datasets
   (`loading.py`).
 
@@ -32,6 +34,7 @@ stored stays out of the resume logic.
 | `content_id(text)` | The MD5 of the text, cut to 16 hex characters |
 | `row_id(row, text_col, id_col="sample_id")` | The id a row carries in `id_col`, else the content id of its text. `None`, NaN, empty or `"nan"` count as missing |
 | `row_ids(frame, text_col, id_col="sample_id")` | `row_id` of every row, reading two columns only |
+| `normalised_id(text)` | The content id of the text in lower case, without punctuation, each run of whitespace one space |
 
 Every row a stage writes has a `sample_id`: the content id of its own text,
 or of its unit key where the row has no text of its own. A conversation uses
@@ -50,7 +53,7 @@ or of its unit key where the row has no text of its own. A conversation uses
 | `count_rows(path)`, `has_rows(path)` | The row count (one column, read in chunks); whether a row follows the header (one row read) |
 | `keys_in(path, key_fields, casters)` | The unit keys of a file's rows, every cell read as text and converted by `casters` (a field without a caster gives a string), in chunks. A file that lacks a key column gives no keys |
 | `accepted_mask(verdicts)` | Which cells of an `accepted` column read true, in any case, booleans or text; an empty cell, `yes` or `1` does not. The tree merge, the build and the paraphrase front use it |
-| `write_concat(target, parts, *, keep_empty=True, unique=None)` | One CSV from several `Part`s (`source`, a file or a frame; `dataset_type`; `accepted_only`; `label`), one after another |
+| `write_concat(target, parts, *, keep_empty=True, unique=None)` | One CSV from several `Part`s (`source`, a file or a frame; `dataset_type`; `accepted_only`; `label`; `where`; `columns`), one after another |
 
 A file that is missing, or has 0 bytes (a save killed before its first
 byte), reads as no rows in every reader.
@@ -59,7 +62,12 @@ byte), reads as no rows in every reader.
 appear; a row is empty in the columns its part lacks. A file part is read
 as text, in chunks, and `accepted_only` keeps the rows `accepted_mask`
 passes (a file without the column is copied whole); a frame part is not
-filtered. In a frame part, a float column of whole numbers that has gaps is
+filtered. `where`, a function of a chunk, keeps the rows it gives true, in
+a file or a frame part. `columns` maps each column written, in order, to
+where it comes from: a string names a column of the part (empty in a part
+without it), a function of a chunk gives the cells, any other value is
+every row's cell; the part's own columns are then not written, and a part
+with `columns` whose file is missing still gives the header. In a frame part, a float column of whole numbers that has gaps is
 written as `Int64`, so it prints `1`, not `1.0`. The rows go to
 `<target>.tmp`, synced to disk, which is then renamed onto the target.
 `keep_empty=False` leaves the target as it is when no part has a row.

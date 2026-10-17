@@ -23,7 +23,7 @@ A run is an ordered list of stages. Each stage has one public function, its
 | `outputs` | `generate_outputs` | One checked model response per accepted input | `Datasets/output_responses.csv` |
 | `paraphrase` | `generate_paraphrases` | Checked paraphrases of the inputs and of the accepted outputs | `Datasets/paraphrases_inputs.csv`, `Datasets/paraphrases_outputs.csv` |
 | `jailbreaks` | `generate_jailbreaks` | Jailbreak attacks (adversarial kind) and natural variations (natural kind) of the accepted inputs | `Datasets/jailbreaks.csv`, `Datasets/variations.csv` |
-| `build` | `build_dataset` | Merge every stage's rows into one file | `Datasets/complete_dataset.csv` |
+| `build` | `build_dataset` | Merge every stage's accepted rows: into one file (training), or into three files of one flat schema (eval) | `Datasets/complete_dataset.csv`; in eval `Datasets/eval_inputs.csv`, `eval_outputs.csv`, `eval_jailbreaks.csv` |
 
 Two more fronts are outside the recipe: `generate_conversations` and
 `evaluate_conversations` in `multi_turn/`
@@ -65,8 +65,8 @@ flowchart TD
     para --> build
     jb --> build
     var --> build
-    build --> complete[("Datasets/complete_dataset.csv")]
-    build -.->|eval mode| parad[("Datasets/paraphrased.csv")]
+    build -->|training| complete[("Datasets/complete_dataset.csv")]
+    build -.->|eval| evalsets[("Datasets/eval_inputs.csv<br/>Datasets/eval_outputs.csv<br/>Datasets/eval_jailbreaks.csv")]
 ```
 
 Beside each output CSV a stage keeps a manifest (`*.manifest.jsonl`, the
@@ -192,7 +192,8 @@ then drives the units. [stages/jailbreaks.md](stages/jailbreaks.md)
 **build.** `build_dataset` copies the accepted rows of every stage's file
 into `Datasets/complete_dataset.csv`, in chunks, with a `dataset_type` column
 per part. A row whose `sample_id` an earlier part wrote is left out, and the
-count left out is logged. [stages/build.md](stages/build.md)
+count left out is logged. An eval run's build writes three files of one
+flat schema instead (below). [stages/build.md](stages/build.md)
 
 ### 4. The run ends
 
@@ -219,7 +220,7 @@ input, and a variation can be a jailbreak's text.
 | `jailbreak` | `jailbreaks.csv` | accepted | `prompt` (the input), `jailbreak` |
 | `natural_variation` | `variations.csv` | accepted | `prompt`, `jailbreak` |
 | `content_moderation_output` | `output_responses.csv` | accepted | `input_prompt`, `output_response` |
-| `content_moderation_paraphrase` | `paraphrases_inputs.csv`, `paraphrases_outputs.csv` | accepted, training mode only | `sample` |
+| `content_moderation_paraphrase` | `paraphrases_inputs.csv`, `paraphrases_outputs.csv` | accepted | `sample` |
 
 Every row has a `sample_id`, the content id of its own text, and every
 derived row has an `input_id`, the `sample_id` of the input it comes from. The text sits in a different column per part, as the
@@ -240,8 +241,22 @@ six stages as a training run, with these differences:
   `framing`, `structural`, `ascii_art`, `continuation`, `temporal`,
   `to_refusal_then_comply` and nine low-resource translations), one
   technique then two, with seed 43, and makes no natural variations;
-- the build runs in `eval` mode: paraphrases go to
-  `Datasets/paraphrased.csv` instead of the complete dataset.
+- the build runs in `eval` mode and writes no complete dataset: it writes
+  three files with one `text` and one `label` column each, so an evaluation
+  reads them without a join.
+
+| File | Rows | `label` |
+|---|---|---|
+| `eval_inputs.csv` | the accepted inputs, then their paraphrases (`paraphrased` true) | the entry type |
+| `eval_outputs.csv` | the accepted responses, then their paraphrases | the entry type of the input answered |
+| `eval_jailbreaks.csv` | the accepted attacks that changed their input (`is_jailbreak` true), then the bare benign inputs (`is_jailbreak` false) | the entry type |
+
+The variations are in none of them. Every row keeps its `sample_id`, and
+a derived row its `input_id`, as in a training run's files. A training run
+and an eval run use two `data_dir`s; the eval build's `exclude_from` names
+the training run: the rows it holds by id or text are left out, those
+from a constitution entry it has too are kept and flagged, and both are
+counted.
 
 ## Outside the recipe
 

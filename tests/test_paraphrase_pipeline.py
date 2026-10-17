@@ -266,16 +266,18 @@ def test_build_dataset_training_merges_paraphrases(tmp_path):
     from redact import build_dataset
     train = build_dataset(data_dir=tmp_path, mode="training", verbose=False)
     assert bool((train["dataset_type"] == "content_moderation_paraphrase").any())
-    assert not paths.paraphrased_csv(tmp_path).exists()  # merged, not a separate file
+    assert not paths.eval_inputs_csv(tmp_path).exists()
 
 
-def test_build_dataset_eval_separates_paraphrases(tmp_path):
+def test_build_dataset_eval_marks_the_paraphrases_among_the_inputs(tmp_path):
     _seed_inputs(tmp_path)
     _seed_paraphrase_artifact(tmp_path)
     from redact import build_dataset
-    ev = build_dataset(data_dir=tmp_path, mode="eval", verbose=False)
-    assert not bool((ev["dataset_type"] == "content_moderation_paraphrase").any())  # excluded
-    assert paths.paraphrased_csv(tmp_path).exists()                                 # separate file
+    inputs = build_dataset(data_dir=tmp_path, mode="eval", verbose=False)["inputs"]
+    paraphrased = inputs[inputs["paraphrased"]]
+    assert list(paraphrased["text"]) == ["PARA::p"]
+    assert list(paraphrased["dataset_type"]) == ["content_moderation_paraphrase"]
+    assert not paths.complete_dataset_csv(tmp_path).exists()
 
 
 def test_run_pipeline_paraphrase_stage(tmp_path, patched):

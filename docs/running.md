@@ -405,14 +405,17 @@ Datasets/
   paraphrases_outputs.csv                # + .manifest.jsonl, .state.jsonl
   jailbreaks.csv                         # + .manifest.jsonl, .state.jsonl, .coverage.csv, .plan.json
   variations.csv                         # + .manifest.jsonl, .state.jsonl, .coverage.csv, .plan.json
-  complete_dataset.csv                   # the build
+  complete_dataset.csv                   # the build of a training run
+  eval_inputs.csv  eval_outputs.csv  eval_jailbreaks.csv   # the build of an eval run
+  eval_excluded.json                     # with exclude_from: the rows it left out
   constitution.run.json  inputs.run.json  outputs.run.json
   paraphrase.run.json  jailbreaks.run.json  build.run.json
   run-<YYYYMMDD-HHMMSS>.trace.jsonl      # one per run_pipeline call; -2, -3, ... when the name is taken
 ```
 
-An eval run writes the same files; its build writes the paraphrases to
-`Datasets/paraphrased.csv` in place of merging them.
+An eval run writes the same stage files; its build writes the three
+`eval_*.csv` files in place of `complete_dataset.csv`
+([stages/build.md](stages/build.md#eval-mode)).
 
 Other files you may see:
 

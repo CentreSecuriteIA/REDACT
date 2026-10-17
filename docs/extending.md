@@ -207,12 +207,15 @@ A stage is a core, a front, and a row in the stage table.
    (`ctx -> (paths, values)`: the CSVs that hold its rows and the column
    values a counted row holds), `recipe_kwargs` (`ctx -> dict`, what the run
    passes the front; a value an earlier stage saves is a `Saved`), `sources` (`ctx -> list[Path]`, the files it reads its
-   inputs from, for its run record; `[]` when it reads none), and `folded`
-   when the run folds some params keys into a kwarg it passes itself. A new
+   inputs from, for its run record; `[]` when it reads none), `folded`
+   when the run folds some params keys into a kwarg it passes itself, and
+   `extra_counts` when its record counts more than its files' rows. A new
    recipe role also goes in `_DEFAULT_MODELS` in `recipe.py`.
-5. **The build**: add a `Part` in `build_dataset`, with `accepted_only=True`,
+5. **The build**: add a `Part` in `_stage_parts`, with `accepted_only=True`,
    when its rows belong in the complete dataset, with its `include_<part>`
-   and path keys, and list its file in `_build_sources`. A row whose
+   and path keys, and list its file in `_build_sources`; when its rows
+   belong in an eval file too, map it onto that file's columns in
+   `_eval_parts`. A row whose
    `sample_id` an earlier part wrote is left out. Update
    `tests/fixtures/build_files.json`.
 6. **Tests.** Cover a stopped and resumed run: no unit twice, no unit lost.

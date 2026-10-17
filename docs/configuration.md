@@ -11,7 +11,7 @@ that starts with `_` is a comment.
 
 | Key | Type | Default | Meaning |
 |---|---|---|---|
-| `dataset_type` | `"eval"` or `"training"` | required | The [dataset type](#dataset-types): its file gives the run's default stages, params and augmentation section, and it is the build's `mode` (`eval` writes the paraphrases to `paraphrased.csv`, `training` merges them in). Either way the inputs are seeded from the constitution, which the recipe's `constitution` stage writes or an earlier run saved under `data_dir`; without one the `inputs` stage stops |
+| `dataset_type` | `"eval"` or `"training"` | required | The [dataset type](#dataset-types): its file gives the run's default stages, params and augmentation section, and it is the build's `mode` (`training` merges every part into `complete_dataset.csv`, `eval` writes `eval_inputs.csv`, `eval_outputs.csv` and `eval_jailbreaks.csv`; see [build](stages/build.md)). Either way the inputs are seeded from the constitution, which the recipe's `constitution` stage writes or an earlier run saved under `data_dir`; without one the `inputs` stage stops |
 | `data_dir` | path | the default working root | The run's root; `Datasets/` and `Data_cache/` go under it. Relative to the current directory. `run_pipeline(data_dir=...)` and `--data-dir` override it |
 | `models` | object | every role its default | A model per role; see [below](#the-models-object) |
 | `taxonomy` | name or object | `"harmful"` | The taxonomy of the constitution, by file name or as a loaded object. The former name `"content_moderation_categories"` loads `harmful` with a `DeprecationWarning`, for one release |
@@ -175,11 +175,12 @@ augmentation section has, such as `family_weights`, raises here.
 
 | Key | Default | Meaning |
 |---|---|---|
-| `include_inputs`, `include_jailbreaks`, `include_variations`, `include_outputs`, `include_paraphrases` | `true` | Which parts to merge |
-| `output_path` | `Datasets/complete_dataset.csv` | The merged file |
+| `include_inputs`, `include_jailbreaks`, `include_variations`, `include_outputs`, `include_paraphrases` | `true` | Which parts to merge. An eval build takes no variations, and without inputs its jailbreak file has no benign negatives |
+| `output_path` | `Datasets/complete_dataset.csv` | The merged file of a training build; an eval build raises on it |
 | `inputs_path` | `Datasets/constitution_inputs_merged.csv`, else the category files | The inputs part |
 | `jailbreak_path`, `variations_path`, `responses_path` | the stages' default files | The other parts |
 | `paraphrase_inputs_path`, `paraphrase_outputs_path` | the stage's default files | The paraphrase parts |
+| `exclude_from` | none | Eval only: a list of run folders or CSVs, such as a training run's; the eval files leave out every row they hold by id or by normalised text, keep and count the rows from a constitution entry they have too, and the record counts both ([build](stages/build.md#leaving-out-what-a-training-run-holds)) |
 
 A path key moves one stage's file only. Later stages read the default paths
 unless given their own: the build has a path key per part, and the paraphrase

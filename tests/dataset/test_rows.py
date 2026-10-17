@@ -524,6 +524,40 @@ class TestWriteConcat:
                                               "big": [1e20, None, 1.0]}))])
         assert _lines(out) == ["score,turn,big", "1.0,1,1e+20", "2.0,,", "3.0,2,1.0"]
 
+    def test_where_keeps_the_rows_it_says_true_of(self, tmp_path):
+        path, frame = self._parts(tmp_path)
+        out = tmp_path / "out.csv"
+        parts = [Part(path, accepted_only=True,
+                      where=lambda chunk: chunk["sample_id"] != "a0"),
+                 Part(frame, where=lambda chunk: chunk["score"] > 1)]
+        assert write_concat(out, parts) == [1, 0]
+        assert read_rows(out)["sample_id"].tolist() == ["a2"]
+
+    def test_columns_name_the_columns_written_and_where_each_comes_from(
+            self, tmp_path):
+        """A column of the source, empty where it lacks one; a function of
+        the chunk; or one value for every row."""
+        path, frame = self._parts(tmp_path)
+        out = tmp_path / "out.csv"
+        columns = {"id": "sample_id", "text": "sample", "marked": True,
+                   "size": lambda chunk: chunk["sample_id"].str.len(),
+                   "nothing": None}
+        write_concat(out, [Part(path, "input", accepted_only=True, columns=columns),
+                           Part(frame, "output", columns=columns)])
+        assert _lines(out)[0] == "id,text,marked,size,nothing,dataset_type"
+        built = read_rows(out)
+        assert built["id"].tolist() == ["a0", "a2", "b0"]
+        assert built["text"].tolist() == [_TEXTS[0], _TEXTS[2], ""]
+        assert built["marked"].tolist() == [True] * 3
+        assert built["size"].tolist() == [2] * 3
+        assert built["nothing"].tolist() == [""] * 3
+
+    def test_a_part_with_columns_and_no_file_writes_its_header(self, tmp_path):
+        out = tmp_path / "out.csv"
+        assert write_concat(out, [Part(tmp_path / "none.csv", "input",
+                                       columns={"id": "sample_id"})]) == [0]
+        assert _lines(out) == ["id,dataset_type"]
+
     def test_the_rows_are_synced_before_they_replace_the_target(
             self, tmp_path, monkeypatch):
         path, _ = self._parts(tmp_path)

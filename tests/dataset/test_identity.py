@@ -3,7 +3,7 @@
 import pandas as pd
 import pytest
 
-from redact.dataset import content_id, row_id, row_ids
+from redact.dataset import content_id, normalised_id, row_id, row_ids
 
 _TEXT = "the prompt"
 
@@ -26,6 +26,18 @@ class TestContentId:
 
     def test_hashes_the_utf8_bytes(self):
         assert content_id("é") == "66ddcd97cfdeabb2"
+
+
+class TestNormalisedId:
+    def test_is_the_content_id_of_the_normalised_text(self):
+        assert normalised_id("  How do I, then?\n") == content_id("how do i then")
+
+    def test_case_spacing_and_punctuation_do_not_change_it(self):
+        assert normalised_id("Hello,   World!") == normalised_id("hello world")
+
+    def test_letters_of_any_script_are_kept(self):
+        assert normalised_id("Привет, мир") == content_id("привет мир")
+        assert normalised_id("one word") != normalised_id("other word")
 
 
 class TestRowId:

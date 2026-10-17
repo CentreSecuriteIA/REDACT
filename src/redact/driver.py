@@ -535,6 +535,8 @@ def run_pipeline(
             with telemetry.stage(name):
                 stage.run(read_back=False, **stage.kwargs(ctx))
                 counts = file_counts(*stage.files(ctx))
+                if stage.extra_counts is not None:
+                    counts.update(stage.extra_counts(ctx))
                 jailbreaks = name == "jailbreaks"
                 path = write_record(
                     name, data_dir=ctx.data_dir, params=stage.params(ctx),
