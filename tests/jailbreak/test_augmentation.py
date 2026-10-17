@@ -109,6 +109,14 @@ def test_a_resolved_section_resolves_to_itself():
     assert once["adversarial"]["iterations"] == len(default_escalation_schedule())
 
 
+@pytest.mark.parametrize("given", [{"adversarial": {"max_complexity": 3}},
+                                   {"natural": {"iterations": 2}}], ids=KINDS)
+def test_a_comment_inside_a_kind_is_skipped(given):
+    ((kind, keys),) = given.items()
+    commented = {kind: {"_comment": "why", **keys}}
+    assert resolve(commented, kind) == resolve(given, kind)
+
+
 def test_the_packaged_defaults():
     adversarial, natural = defaults()["adversarial"], defaults()["natural"]
     assert adversarial["families"] == {"allow": None, "deny": []}
