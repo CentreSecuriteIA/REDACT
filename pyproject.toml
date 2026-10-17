@@ -46,8 +46,9 @@ dev = ["pytest>=7.0", "ruff>=0.4", "mypy>=1.0", "ipykernel>=7.0"]
 docs = ["mkdocs-material", "mkdocstrings[python]", "ruff"]
 
 [project.urls]
-Homepage = "https://github.com/leonhamnett/REDACT"
-Issues = "https://github.com/leonhamnett/REDACT/issues"
+Homepage = "https://github.com/CentreSecuriteIA/REDACT"
+Documentation = "https://centresecuriteia.github.io/REDACT/"
+Issues = "https://github.com/CentreSecuriteIA/REDACT/issues"
 
 [tool.hatch.build.targets.wheel]
 packages = ["src/redact"]

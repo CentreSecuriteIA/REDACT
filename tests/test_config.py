@@ -50,3 +50,15 @@ class TestSetSeed:
         out = subprocess.run([sys.executable, "-c", code], capture_output=True,
                              text=True, env=env, check=True)
         assert out.stdout.strip() == "[]"
+
+
+REPO = Path(__file__).resolve().parents[1]
+
+
+class TestProjectFiles:
+    def test_the_project_urls_name_the_repository(self):
+        import tomllib
+        urls = tomllib.loads((REPO / "pyproject.toml").read_text(encoding="utf-8"))[
+            "project"]["urls"]
+        assert urls["Homepage"] == "https://github.com/CentreSecuriteIA/REDACT"
+        assert urls["Issues"] == "https://github.com/CentreSecuriteIA/REDACT/issues"
