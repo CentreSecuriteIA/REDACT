@@ -9,9 +9,7 @@ A taxonomy file::
         "categories": {
             "CategoryName": {"description": "...", "subcategories": [...] or {...}},
             ...
-        },
-        "aliases": {"AltName": "CanonicalName", ...},
-        "groups": {"group_name": ["Cat1", "Cat2"], ...}
+        }
     }
 """
 
@@ -54,8 +52,6 @@ def create_taxonomy(
     name: str,
     categories: dict[str, str | dict],
     description: str = "",
-    aliases: dict[str, str] | None = None,
-    groups: dict[str, list[str]] | None = None,
     taxonomy_dir: str | Path | None = None,
     verbose: bool = True,
 ) -> dict:
@@ -73,8 +69,6 @@ def create_taxonomy(
             category: {"description": info} if isinstance(info, str) else info
             for category, info in categories.items()
         },
-        "aliases": aliases or {},
-        "groups": groups or {},
     }
     directory = Path(taxonomy_dir or _DEFAULT_CONFIG_DIR)
     directory.mkdir(parents=True, exist_ok=True)

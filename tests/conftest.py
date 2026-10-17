@@ -361,14 +361,6 @@ def sample_taxonomy():
                 "group_tag": "group1",
             },
         },
-        "aliases": {
-            "Alias A": "Cat A",
-            "Alt B": "Cat B",
-        },
-        "groups": {
-            "group1": ["Cat B"],
-            "group2": ["Cat A", "Cat B"],
-        },
     }
 
 

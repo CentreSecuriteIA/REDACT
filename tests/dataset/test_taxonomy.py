@@ -11,8 +11,7 @@ from redact.dataset.taxonomy import create_taxonomy, iter_categories, load_taxon
 class TestLoadTaxonomy:
     def test_loads_real_taxonomy(self):
         tax = load_taxonomy("harmful")
-        assert "categories" in tax
-        assert "aliases" in tax
+        assert list(tax) == ["name", "description", "categories"]
         assert len(tax["categories"]) >= 10
 
     def test_missing_raises(self):
@@ -73,6 +72,16 @@ class TestPackagedLayout:
         assert {p.name for p in paths.taxonomy_dir().iterdir()
                 if p.suffix == ".json"} == {"harmful.json", "benign.json"}
 
+    @pytest.mark.parametrize("path", [
+        "taxonomy/harmful.json", "taxonomy/benign.json",
+        "jailbreak/hacking/cognitive_techniques.json",
+        "jailbreak/hacking/personas.json"])
+    def test_a_file_of_the_taxonomy_form_holds_its_categories_only(self, path):
+        from redact import paths
+
+        data = json.loads((paths.configs_dir() / path).read_text(encoding="utf-8"))
+        assert list(data) == ["name", "description", "categories"]
+
 
 class TestCreateTaxonomy:
     def test_creates_json(self, tmp_path):
@@ -98,16 +107,12 @@ class TestCreateTaxonomy:
         )
         assert tax["categories"]["Cat"] == {"description": "just a string"}
 
-    def test_aliases_and_groups(self, tmp_path):
-        tax = create_taxonomy(
-            "full_test",
-            categories={"A": "desc"},
-            aliases={"B": "A"},
-            groups={"g1": ["A"]},
-            taxonomy_dir=tmp_path,
-        )
-        assert tax["aliases"] == {"B": "A"}
-        assert tax["groups"] == {"g1": ["A"]}
+    def test_it_writes_the_name_the_description_and_the_categories(self, tmp_path):
+        tax = create_taxonomy("full_test", categories={"A": "desc"},
+                              taxonomy_dir=tmp_path, verbose=False)
+        assert list(tax) == ["name", "description", "categories"]
+        written = json.loads((tmp_path / "full_test.json").read_text(encoding="utf-8"))
+        assert written == tax
 
     def test_returns_dict(self, tmp_path):
         result = create_taxonomy("ret_test", {"X": "Y"}, taxonomy_dir=tmp_path)

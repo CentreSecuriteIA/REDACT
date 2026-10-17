@@ -223,8 +223,6 @@ recipe names as `taxonomy_dir`:
 - The constitution stage fills its prompts with the category's name,
   `description`, `subcategories` (a list, or a dict whose keys are used) and
   `group_tag` (default `general`, recorded as `source_group_tag`).
-- `aliases` and `groups` may be written (`create_taxonomy` writes both); no
-  stage reads them.
 - **A new taxonomy**: write the file, or call
   `redact.create_taxonomy(name, categories, taxonomy_dir=...)`, then set
   `"taxonomy": "<name>"` (and `taxonomy_dir`) in the recipe. A dict passed to
