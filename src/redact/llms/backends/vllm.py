@@ -162,14 +162,16 @@ def _started_since(before: frozenset[int]) -> list:
     return [p for p in multiprocessing.active_children() if p.pid not in before]
 
 
-def terminate_engine_processes(processes=(), *, all: bool = False) -> list[int]:
+def terminate_engine_processes(
+    processes=(), *, all: bool = False, quiet: bool = False,
+) -> list[int]:
     """End engine processes this process started, and their children.
 
     Each gets SIGTERM, and SIGKILL when it is alive :data:`_END_WAIT_S`
     later: an engine hung in its start-up does not act on SIGTERM. Their
     children, such as tensor-parallel workers, are listed before any is
     signalled, since a worker may outlive its engine. Needs ``psutil``,
-    which vLLM installs. Logged; never raises.
+    which vLLM installs. Logged unless ``quiet``; never raises.
 
     Args:
         processes: ``multiprocessing`` handles of engine processes, as a
@@ -178,6 +180,8 @@ def terminate_engine_processes(processes=(), *, all: bool = False) -> list[int]:
             loaded, in progress or failed, and every child process named as
             vLLM names its engine processes. For a forced exit; no other
             child of this process is touched.
+        quiet: Log nothing, for a signal handler: a logging call there may
+            re-enter a write the handler interrupted, and raise.
 
     Returns:
         The pids still alive afterwards: empty when every one ended.
@@ -195,19 +199,21 @@ def terminate_engine_processes(processes=(), *, all: bool = False) -> list[int]:
     try:
         import psutil
     except ImportError:
-        logger.error(
-            "[vllm] psutil is not installed (vLLM requires it), so the engine "
-            "processes %s are left running.", " ".join(str(p.pid) for p in roots))
+        if not quiet:
+            logger.error(
+                "[vllm] psutil is not installed (vLLM requires it), so the engine "
+                "processes %s are left running.", " ".join(str(p.pid) for p in roots))
         return [p.pid for p in roots]
     children: dict[int, object] = {}
     for root in roots:
         with contextlib.suppress(psutil.Error):
             for child in psutil.Process(root.pid).children(recursive=True):
                 children.setdefault(child.pid, child)
-    logger.warning(
-        "[vllm] ending engine processes %s and their children %s",
-        ", ".join(f"{p.pid} ({p.name})" for p in roots),
-        " ".join(map(str, children)) or "(none)")
+    if not quiet:
+        logger.warning(
+            "[vllm] ending engine processes %s and their children %s",
+            ", ".join(f"{p.pid} ({p.name})" for p in roots),
+            " ".join(map(str, children)) or "(none)")
 
     def wait(roots, children):
         """Wait up to _END_WAIT_S for all; return those still alive."""
@@ -229,10 +235,11 @@ def terminate_engine_processes(processes=(), *, all: bool = False) -> list[int]:
         if not roots and not children:
             return []
     left = [p.pid for p in roots] + list(children)
-    logger.error(
-        "[vllm] engine processes %s are still alive after SIGKILL; end them "
-        "with kill -9 %s and check that nvidia-smi shows the cards free.",
-        left, " ".join(map(str, left)))
+    if not quiet:
+        logger.error(
+            "[vllm] engine processes %s are still alive after SIGKILL; end them "
+            "with kill -9 %s and check that nvidia-smi shows the cards free.",
+            left, " ".join(map(str, left)))
     return left
 
 

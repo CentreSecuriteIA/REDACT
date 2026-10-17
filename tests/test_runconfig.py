@@ -467,7 +467,8 @@ def test_a_forced_exit_ends_the_engine_processes_first(monkeypatch):
     assert done == []
     with pytest.raises(_Exited):
         handlers[signal.SIGINT](signal.SIGINT, None)
-    assert done == [("end", {"all": True}), ("exit", 128 + signal.SIGINT)]
+    assert done == [("end", {"all": True, "quiet": True}),
+                    ("exit", 128 + signal.SIGINT)]
 
 
 def test_every_recipe_role_is_called_by_a_stage():

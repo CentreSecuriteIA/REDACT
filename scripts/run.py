@@ -27,7 +27,8 @@ from redact.llms.backends.vllm import terminate_engine_processes
 
 
 def _say(line: str) -> None:
-    """Write a line to stderr from a signal handler, where ``print`` may raise."""
+    """Write a line to stderr from a signal handler, where ``print`` and
+    logging may raise."""
     with contextlib.suppress(OSError):
         os.write(2, (line + "\n").encode())
 
@@ -47,7 +48,11 @@ def _exit_through_release() -> None:
         if len(received) > 1:
             _say("Interrupted again: ending the engine processes and exiting at "
                  "once. Check with nvidia-smi that the card is free.")
-            terminate_engine_processes(all=True)
+            # Quiet: logging here may re-enter a write this signal interrupted.
+            left = terminate_engine_processes(all=True, quiet=True)
+            if left:
+                _say(f"Engine processes still alive: end them with "
+                     f"kill -9 {' '.join(map(str, left))}")
             os._exit(128 + signum)
         _say("Interrupted: releasing the models. Interrupt again to exit at once.")
         if signum == signal.SIGINT:

@@ -551,6 +551,19 @@ class TestEngineProcesses:
             assert vllm_module.terminate_engine_processes([core]) == [2, 21]
         assert "kill -9 2 21" in caplog.text
 
+    def test_quiet_logs_nothing_and_returns_what_lived_on(
+            self, children, monkeypatch, caplog):
+        """For a signal handler, where a logging call may re-enter a write."""
+        vllm_module, _ = children
+        monkeypatch.setitem(sys.modules, "psutil", _fake_psutil(
+            {2: [21]}, [], stubborn={21}, immortal={21}))
+        core = _Proc(2, stubborn=True, immortal=True)
+        with caplog.at_level(logging.DEBUG):
+            assert vllm_module.terminate_engine_processes([core], quiet=True) == [2, 21]
+            monkeypatch.setitem(sys.modules, "psutil", None)
+            assert vllm_module.terminate_engine_processes([_Proc(3)], quiet=True) == [3]
+        assert caplog.records == []
+
     def test_a_process_that_ended_already_is_left_alone(self, children, monkeypatch):
         vllm_module, _ = children
         monkeypatch.setitem(sys.modules, "psutil", None)    # not even imported
