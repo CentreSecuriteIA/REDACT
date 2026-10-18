@@ -94,6 +94,9 @@ Per target, under `Datasets/`:
 | `reasoning` | The checker's reply when rejected |
 | `source` | `paraphrase_inputs` or `paraphrase_outputs` |
 
+A paraphrase row carries no axis columns, by design: the spec of the
+generation axes stays on the row it rewords, which its `input_id` names.
+
 The build merges the accepted paraphrases into the complete dataset in
 `training` mode; in `eval` mode it writes them into `eval_inputs.csv` and
 `eval_outputs.csv`, after the rows they reword, marked `paraphrased`

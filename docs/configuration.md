@@ -54,7 +54,7 @@ types: a recipe naming one stops when it loads, before any stage runs.
 | | `training.json` | `eval.json` |
 |---|---|---|
 | `stages` | `constitution`, `inputs`, `outputs`, `paraphrase`, `jailbreaks`, `build` | the same |
-| `params` | `constitution`: `include_general_benign` true, `general_benign_categories` 10 | the same, and `constitution.entry_types` and `inputs.entry_types` `["harmful", "benign"]`; `inputs.axes` pins `directness` at `explicit`; `jailbreaks.seed` 43 |
+| `params` | `constitution`: `include_general_benign` true, `general_benign_categories` 10; `inputs.axes_weighting` `"log"` | `constitution` the same, and `constitution.entry_types` and `inputs.entry_types` `["harmful", "benign"]`; `inputs.axes` pins `directness` at `explicit`, and the inputs keep the table's weighting; `jailbreaks.seed` 43 |
 | `augmentations` | none: the packaged default | the adversarial kind below; `natural` off |
 
 The eval adversarial kind attacks the harmful inputs only, with a pool of
@@ -71,9 +71,10 @@ with `allow_request_obfuscation` false.
 Every eval input is explicit (`inputs.axes`: `{"directness": {"explicit": 1,
 "implicit": 0, "euphemistic": 0}}`): an implicit or euphemistic request is
 borderline by construction, and eval keeps the clear ends. The other axes
-keep their packaged weights, so eval covers them as training does. A params
-file's `inputs.axes` replaces the type's whole entry, so to change another
-axis of an eval run, write the directness pin again beside it.
+keep the table's weights, where training spreads its inputs more evenly over
+the values ([log weighting](#log-weighting)). A params file's `inputs.axes`
+replaces the type's whole entry, so to change another axis of an eval run,
+write the directness pin again beside it.
 
 A recipe changes one thing by giving it; the rest of the type stays. For
 example, an eval run with another stage list and a lighter translation share:
@@ -114,10 +115,11 @@ models, `data_dir`, `prompt_dir`, `taxonomy`, `taxonomy_dir`,
 `benign_taxonomy`, `config_dir`, `resume`, `verbose`, the inputs stage's
 `constitution_df`, the jailbreak stage's `augmentation`, the build's `mode`,
 `read_back`). Parameters that take a DataFrame (`inputs`, `outputs`) cannot
-be written in JSON. The `axes` and `seed` of `inputs` and `outputs` are
-checked when the params load (a params file's and a dataset type's): an
-unknown axis or value, a weight below 0, or a seed that is not a whole
-number raises, read against the `config_dir`'s axes table when it has one.
+be written in JSON. The `axes`, `axes_weighting` and `seed` of `inputs`
+and `outputs` are checked when the params load (a params file's and a
+dataset type's): an unknown axis or value, a weight below 0, a weighting
+other than `"table"` or `"log"`, or a seed that is not a whole number
+raises, read against the `config_dir`'s axes table when it has one.
 
 ### `constitution`
 
@@ -141,6 +143,7 @@ names of the last two, are read for this release with a
 | `samples_per_entry` | `3` | Samples per constitution entry: that many units, one sample per call |
 | `entry_types` | `null` | Use only the constitution entries of these entry types |
 | `axes` | `null`: the table's | The [generation axes](#the-generation-axes) each unit is dealt a value of: `{axis: {value: weight}}` over the table's `inputs` section, an axis as `null` to leave it out; `false` for none. The `eval` type pins `directness` |
+| `axes_weighting` | `"table"`; `"log"` in the `training` type | How the axes' weights are dealt: `"table"` as they are, `"log"` spread more evenly over each axis's values ([log weighting](#log-weighting)) |
 | `seed` | `42` | The seed of the deal |
 | `batch_size` | `32` | Requests per grouped call; the stage keeps twice as many units live, or the widest async lane when larger |
 | `max_attempts` | `3` | Generations of a unit before a reply without its `[END]` marker, or with another number of samples than one, is given up |
@@ -155,6 +158,7 @@ names of the last two, are read for this release with a
 | `max_per_category` | `null` | Keep the first N inputs per `(category, entry_type)` |
 | `max_samples` | `null` | Keep the first N inputs overall, after `max_per_category` |
 | `axes` | `null`: the table's | The response axes each input row is dealt a value of, over the table's `outputs` section, as for `inputs` |
+| `axes_weighting` | `"table"` | As for `inputs`; neither type sets it |
 | `seed` | `42` | The seed of the deal |
 | `batch_size` | `32` | Requests per grouped call; units live as for `inputs` |
 | `check_max_tokens` | `null` | Reply limit of a check call |
@@ -208,10 +212,12 @@ stage reads `Datasets/output_responses.csv` from its default place.
 `configs/generation_axes.json` says what each input sample (`inputs`) and
 each response (`outputs`) is asked to look like. Each stage deals one spec
 per call, a value of each axis, evenly over each `(category, entry_type)`
-group at the table's weights ([inputs](stages/inputs.md#the-generation-axes),
+group at the table's weights, or [log-weighted](#log-weighting)
+([inputs](stages/inputs.md#the-generation-axes),
 [outputs](stages/outputs.md#unit-and-ledger-key)); the prompt shows it in
 `{sample_spec}` or `{response_spec}`, and the row records it in a column per
-axis.
+axis. Paraphrase rows carry no axis columns, by design: a paraphrase's
+`input_id` names the row whose spec it rewords.
 
 | Stage | Axis | Values (weight) |
 |---|---|---|
@@ -242,6 +248,29 @@ only: change a label or a hint in your own copy of the file
 ([your own config folder](#your-own-config-folder)). A stage's plan file
 records its `seed` and weights, so a resume with others raises, naming
 `resume=False`.
+
+### Log weighting
+
+`axes_weighting` `"log"` spreads a stage's deal more evenly over each axis's
+values: after the `axes` overlay, each value of weight w above 0 is weighted
+1 + ln(w / m), m the axis's least weight above 0, normalised per axis. The
+values keep their order, and none is as common or as rare as the table makes
+it. A weight of 0 stays 0, and an axis with one value above 0 (a pinned one,
+such as eval's `directness`) is unchanged, so the same axes vary and the
+[dimension check](#dimensions-and-the-runs-check) sees them as the stage
+deals them. The `training` type sets it on `inputs`, to spread training data
+more evenly over the axis values; `eval`, and both types' `outputs`, keep
+`"table"`. The plan file records the weights dealt, so a resume with another
+weighting raises as another weight does. The packaged inputs, log-weighted:
+
+| Axis | Values (weight) |
+|---|---|
+| `length` | `fragment` .190, `one_liner` .252, `short` .252, `long` .216, `very_long` .090 |
+| `register` | `casual` .290, `neutral` .271, `formal` .181, `technical` .129, `emotional` .129 |
+| `writer` | `anonymous` .166, then .060 each of the 14 roles |
+| `framing` | `direct_request` .272, `question` .258, `advice` .221, `statement` .157, `opinion_or_validation` .092 |
+| `directness` | `explicit` .461, `implicit` .339, `euphemistic` .200 |
+| `focus` | unchanged: `single` .75, `mixed` 0 |
 
 ### Dimensions and the run's check
 
