@@ -9,7 +9,7 @@
         "one_liner": {"label": "one line", "hint": "A single sentence or question.", "weight": 0.30},
         "short": {"label": "short", "hint": "2 to 4 sentences.", "weight": 0.30},
         "long": {"label": "long", "hint": "One or more paragraphs, with background or detail.", "weight": 0.20},
-        "very_long": {"label": "very long", "hint": "300 words or more, at the scale of a document.", "weight": 0.05}
+        "very_long": {"label": "very long", "hint": "300 words or more, at the scale of a document. To reach that length the writer may add their own context about the subject: background, their situation, details and what they have tried; never a pasted or unrelated text.", "weight": 0.05}
       }
     },
     "register": {
