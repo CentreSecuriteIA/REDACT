@@ -720,7 +720,7 @@ class TestPlanResidency:
         assert len(plan.groups) == 2          # 30 GiB on one 24 GiB card
 
     def test_models_sharing_a_checkpoint_are_one_load(self, registered):
-        # venice-uncensored[vllm] and venice-paraphraser do exactly this. Two
+        # venice-uncensored-fp8 and venice-paraphraser do exactly this. Two
         # rows, one engine — counting it twice would split a plan that fits.
         a = registered("_res_shared_a", hf_model_id="org/same", vram_gb=18.0)
         b = registered("_res_shared_b", hf_model_id="org/same", vram_gb=18.0)
@@ -1614,7 +1614,9 @@ class TestRegistryFootprints:
 
     @pytest.mark.parametrize("model,backend_type", [
         ("venice-uncensored", "vllm"),
+        ("venice-uncensored-fp8", None),
         ("venice-paraphraser", None),
+        ("translategemma-27b", None),
         ("llama-3.2-3b-debug", None),
     ])
     def test_every_local_model_declares_a_footprint(self, model, backend_type):
@@ -1623,10 +1625,23 @@ class TestRegistryFootprints:
         assert fp.source == "declared"
 
     def test_the_shared_checkpoint_declares_the_same_footprint(self):
-        a = residency.footprint("venice-uncensored", "vllm")
+        a = residency.footprint("venice-uncensored-fp8")
         b = residency.footprint("venice-paraphraser")
         assert a.hf_model_id == b.hf_model_id
+        assert a.engine == b.engine    # one load at FP8
         assert a.gb == b.gb        # one engine, one footprint
+
+    def test_the_bf16_and_fp8_24b_are_two_loads(self):
+        assert (residency.footprint("venice-uncensored", "vllm").engine
+                != residency.footprint("venice-uncensored-fp8").engine)
+
+    def test_the_translator_is_sized_from_its_packaged_config(self):
+        """28.4 GiB declared, KV at its 4096 tokens, read from the shipped
+        config."""
+        with _config(_shipped_hf_config("translategemma-27b")):
+            fp = residency.footprint("translategemma-27b")
+        assert (fp.parts["weights_gib"], fp.parts["kv_gib"], fp.gb) == (
+            28.4, 1.94, 34.0)
 
 
 def test_estimated_tensor_parallel_footprint_is_a_total_like_a_declared_one():

@@ -30,6 +30,21 @@
     },
     "notes": "Carries BOTH setups: .api (the hosted Venice endpoint, its default) and .vllm (the same weights run locally). There is deliberately no separate '-vllm' entry — ModelClient.create(name, backend_type='vllm') selects the local setup off this one. NOTE: include_venice_system_prompt is false on every call that passes no extra_body of its own; a pipeline that needs the Venice system prompt active passes its own extra_body, which replaces default_extra_body whole. vram_gb=43.9 is the weights only, in GiB: ~23.6B params x 2 bytes (bf16). The planner adds the KV cache for max_model_len (10,000 tokens while unset, capped at the checkpoint's maximum) on top. Well beyond a single consumer card - expect the residency planner to say so. Venice list price as of 2026-08-30: $0.20/$0.90 per 1M in/out. The endpoint slug is versioned and now reads 'venice-uncensored-1-2', carried in api_model_id — the registry name stays 'venice-uncensored' because it keys roles, telemetry rows and the price lookup, and renaming it on every provider bump would orphan past traces."
   },
+  "venice-uncensored-fp8": {
+    "backend_type": "vllm",
+    "roles": [
+      "uncensored_gen"
+    ],
+    "is_uncensored": true,
+    "supports_system_prompt": true,
+    "default_max_tokens": 2000,
+    "vllm": {
+      "hf_model_id": "dphn/Dolphin-Mistral-24B-Venice-Edition",
+      "quantization": "fp8",
+      "vram_gb": 24.9
+    },
+    "notes": "venice-uncensored's local weights, quantized to FP8 on load (vLLM quantization fp8, from the bf16 checkpoint). vram_gb=24.9: 24.07 GiB of weights plus the non-torch share, measured on vLLM 0.31 (the pod test of 2026-10-17). It shares its download with venice-uncensored's .vllm setup, and its engine and footprint with venice-paraphraser (same checkpoint, quantization and kwargs), so gen, check and the paraphraser are one load; it fits beside translategemma-27b on one 80 or 96 GB card, which the bf16 setup does not on 80 GB. Listed after venice-uncensored, so the uncensored_gen default stays the hosted model: name it in a recipe ({\"name\": \"venice-uncensored-fp8\"}). The official FP8 checkpoint (dphn/Dolphin-Mistral-24B-Venice-Edition-FP8, compressed-tensors) is the alternative, unmeasured here."
+  },
   "deepseek-v3.2": {
     "backend_type": "api",
     "roles": [
@@ -55,6 +70,34 @@
       "price_per_1m_output": 0.48
     },
     "notes": "Venice-hosted; the translation role's default. Venice list price as of 2026-08-30: $0.33/$0.48 per 1M in/out ($0.16 cached input, not modelled — the library sends no cache control, so no call is ever billed at that rate)."
+  },
+  "translategemma-27b": {
+    "backend_type": "vllm",
+    "roles": [
+      "translation",
+      "machine_translation"
+    ],
+    "is_uncensored": false,
+    "supports_system_prompt": false,
+    "default_max_tokens": 1024,
+    "default_temperature": 0.2,
+    "vllm": {
+      "hf_model_id": "Infomaniak-AI/vllm-translategemma-27b-it",
+      "hf_config": "translategemma-27b",
+      "quantization": "fp8",
+      "vllm_kwargs": {
+        "max_model_len": 4096,
+        "limit_mm_per_prompt": {
+          "image": 0
+        }
+      },
+      "sampling": {
+        "top_p": 0.95,
+        "top_k": 64
+      },
+      "vram_gb": 28.4
+    },
+    "notes": "TranslateGemma 27B, Infomaniak's vLLM build of Google's model: the local translation model. It translates only (the machine_translation role): one user message in its fixed format <<<source>>>{code}<<<target>>>{code}<<<text>>>{text}, the prompt jailbreak/translate_mt, and its chat template raises on a system message and on a message without those markers, hence supports_system_prompt false. The translation technique checks its output itself (language, length) and has the generation model judge a back-translation. hf_config: the checkpoint's config.json stores rope_parameters flat (the transformers 4.57 form), which transformers 5.17 cannot read; the packaged copy under configs/llm/hf_configs/ has them per layer type and is read in its place. quantization fp8: FP8 on load, at most 0.2 chrF++ from bf16 (measured); vLLM 0.31 logs that the name is deprecated for fp8_per_tensor, which the estimator sizes too. vram_gb=28.4: 27.03 GiB of FP8 weights plus 1.3 GiB non-torch, measured on vLLM 0.31; max_model_len 4096, since every request carries its own reply cap. Sampling is the model's own generation config (top_p 0.95, top_k 64) at temperature 0.2. Ungated (no HF token); the Gemma Terms of Use and Prohibited Use Policy apply."
   },
   "olafangensan-glm-4.7-flash-heretic": {
     "backend_type": "api",
@@ -151,8 +194,9 @@
     "default_temperature": 0.8,
     "vllm": {
       "hf_model_id": "dphn/Dolphin-Mistral-24B-Venice-Edition",
-      "vram_gb": 43.9
+      "quantization": "fp8",
+      "vram_gb": 24.9
     },
-    "notes": "A DEDICATED model with its OWN identity, not an alias. The real defingerprinting model is trained separately and unavailable here, so as a stand-in this entry loads the SAME HF weights as venice-uncensored's local setup — it is its own model that happens to share weights. Swap hf_model_id, or register the real paraphraser with roles=['paraphraser'], when it lands. Shares venice-uncensored's checkpoint, so it shares its engine AND its footprint (vram_gb=43.9: weights only, GiB) - the planner counts the load once, not twice."
+    "notes": "A DEDICATED model with its OWN identity, not an alias. The real defingerprinting model is trained separately and unavailable here, so as a stand-in this entry loads the SAME HF weights as venice-uncensored's local setup, quantized to FP8 on load as venice-uncensored-fp8 is — it is its own model that happens to share weights. Swap hf_model_id, or register the real paraphraser with roles=['paraphraser'], when it lands. Shares venice-uncensored-fp8's checkpoint, quantization and kwargs, so it shares its engine AND its footprint (vram_gb=24.9: weights plus the non-torch share, GiB) - the planner counts the load once, not twice. Beside the bf16 venice-uncensored setup it is a second load."
   }
 }

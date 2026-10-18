@@ -208,9 +208,9 @@ class TestEngineCacheIsPerBackendClass:
         clear_transport_caches()
 
     def test_two_models_on_one_checkpoint_share_a_vllm_engine(self):
-        # venice-uncensored's .vllm setup and venice-paraphraser name the
-        # same HF weights; loading them twice would double GPU memory.
-        assert (MODEL_REGISTRY["venice-uncensored"].vllm.hf_model_id
+        # venice-uncensored-fp8 and venice-paraphraser name the same HF
+        # weights at FP8; loading them twice would double GPU memory.
+        assert (MODEL_REGISTRY["venice-uncensored-fp8"].vllm.hf_model_id
                 == MODEL_REGISTRY["venice-paraphraser"].vllm.hf_model_id)
         clear_transport_caches()
         loads = []
@@ -224,13 +224,13 @@ class TestEngineCacheIsPerBackendClass:
         # The load reads the HF config for the default context length.
         with patch("redact.llms.backends.vllm._prepare_environment"),              patch("redact.llms.resources.estimate._load_config", return_value=None):
             with patch.dict(sys.modules, fake_vllm_modules(_FakeLLM)):
-                a = backend_for(MODEL_REGISTRY["venice-uncensored"], "vllm")
+                a = backend_for(MODEL_REGISTRY["venice-uncensored-fp8"], "vllm")
                 b = backend_for(MODEL_REGISTRY["venice-paraphraser"], "vllm")
 
         assert a is not b                 # two configured models
         assert a.model != b.model
         assert a._llm is b._llm           # one loaded engine
-        assert loads == [MODEL_REGISTRY["venice-uncensored"].vllm.hf_model_id]
+        assert loads == [MODEL_REGISTRY["venice-uncensored-fp8"].vllm.hf_model_id]
 
     def test_vllm_and_introspection_never_share_a_load(self):
         import redact.llms.backends.introspection as intro_module

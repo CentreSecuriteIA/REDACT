@@ -1,6 +1,7 @@
 {
   "uncensored_gen": "Generates harmful samples for the dataset; must not refuse.",
   "translation": "Translates jailbreak text between languages; cheap and multilingual.",
+  "machine_translation": "Translates one message in a fixed source/target/text format and follows no other instruction; the translation technique uses its MT prompt, checks the output itself and judges with the generation model.",
   "constitution_gen": "Builds the category hierarchy; the strongest reasoning model available.",
   "paraphraser": "Fingerprint removal — placeholder until the real defingerprinting model lands.",
   "debug_local": "Small, fast local model for exercising pipeline mechanics without API cost."

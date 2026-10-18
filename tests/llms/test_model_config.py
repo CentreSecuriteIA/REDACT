@@ -920,3 +920,40 @@ def test_every_packaged_hf_config_loads_in_transformers(folder):
     at an engine's build."""
     transformers = pytest.importorskip("transformers")
     assert transformers.AutoConfig.from_pretrained(str(folder)) is not None
+
+
+class TestTheLocalTranslator:
+    """translategemma-27b: a vLLM model that only translates."""
+
+    def test_it_is_a_machine_translation_model_served_by_vllm(self):
+        cfg = get_model_config("translategemma-27b")
+        assert cfg.roles == ["translation", "machine_translation"]
+        assert (cfg.backend_type, cfg.api, cfg.is_uncensored,
+                cfg.supports_system_prompt) == ("vllm", None, False, False)
+        assert (cfg.default_temperature, cfg.default_max_tokens) == (0.2, 1024)
+        vllm = cfg.vllm
+        assert (vllm.hf_model_id, vllm.hf_config, vllm.quantization, vllm.vram_gb) == (
+            "Infomaniak-AI/vllm-translategemma-27b-it", "translategemma-27b",
+            "fp8", 28.4)
+        assert vllm.sampling == {"top_p": 0.95, "top_k": 64}
+        assert vllm.vllm_kwargs == {"max_model_len": 4096,
+                                    "limit_mm_per_prompt": {"image": 0}}
+
+    def test_machine_translation_is_a_declared_role(self):
+        from redact.llms.model_config import available_roles
+
+        assert "machine_translation" in available_roles()
+
+    def test_the_fp8_gen_and_the_paraphraser_load_the_24b_at_fp8(self):
+        gen, para = (get_model_config(n) for n in ("venice-uncensored-fp8",
+                                                    "venice-paraphraser"))
+        assert gen.roles == ["uncensored_gen"] and gen.is_uncensored
+        for cfg in (gen, para):
+            assert (cfg.backend_type, cfg.vllm.hf_model_id, cfg.vllm.quantization,
+                    cfg.vllm.vram_gb) == (
+                "vllm", "dphn/Dolphin-Mistral-24B-Venice-Edition", "fp8", 24.9)
+
+    def test_the_hosted_entries_stay_the_role_defaults(self):
+        from redact.llms.model_config import default_model_for_role
+
+        assert default_model_for_role("uncensored_gen") == "venice-uncensored"
