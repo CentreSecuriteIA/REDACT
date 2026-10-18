@@ -418,6 +418,12 @@ def test_switching_translation_off_over_the_eval_type_is_one_key(caplog):
     assert kind["family_weights"] == {}
     assert kind["techniques"]["allow"] == ["to_refusal_then_comply"]
     pool = technique_pool(kind)
+    from redact.jailbreak.pool import languages
+    from tests.jailbreak.test_pool import EVAL_POOL
+
+    # The pinned eval pool less its nine languages.
+    assert sorted(fn.__name__ for fn in pool) == [
+        name for name in EVAL_POOL if name not in languages()]
     assert len(pool) == 28      # noqa: PLR2004
     assert not _translates({"adversarial": kind}, "adversarial")
 

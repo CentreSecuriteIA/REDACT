@@ -142,7 +142,7 @@ REDACT/
 │       │
 │       └── prompts/                 # Prompt JSON per pipeline/step: constitution/, input/, output/, paraphrase/, jailbreak/, conversation/, format_instructions/
 │
-├── tests/                           # The test suite; fixtures/ pins the technique registry and each stage's files
+├── tests/                           # The test suite; fixtures/ pins the technique registry, the eval pool and each stage's files
 ├── notebooks/                       # eval_pipeline, training_pipeline, content_moderation, jailbreak_augmentation
 ├── scripts/                         # run.py, inspect_run.py, scaffold_prompts.py, scaffold_setup.py, download_models.py, gpu_check_residency.py
 ├── docs/                            # Developer docs and the mkdocs site: overview, running, configuration, techniques, extending, stages/, internals/, api/

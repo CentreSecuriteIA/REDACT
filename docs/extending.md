@@ -164,6 +164,16 @@ contract.
    `families.allow`, or the name to its `techniques.allow`, in
    `configs/jailbreak/augmentations.json`. A family meant for variations only
    goes in `natural_only_families`.
+   - **The eval pool.** `configs/dataset_types/eval.json` allows whole
+     families (`encode`, `fsh`, `dap`, `framing`, `structural`, `ascii_art`,
+     `continuation`, `temporal`), so a technique added to one of them joins
+     the eval attacks unless `eval.json` denies it under
+     `techniques.deny`. `tests/fixtures/eval_pool.json` pins the 37 names the
+     eval type draws, and `tests/jailbreak/test_pool.py` fails until the
+     owner decides: deny the technique in `eval.json`, or add its name to the
+     fixture. A user's copy of `eval.json` in a `config_dir` is not updated:
+     a deny added to the packaged file does not reach it, so a technique new
+     to a family the copy allows joins that user's eval pool.
 5. **Test it.** Add tests beside the module's, under
    `tests/jailbreak/<layer>/`. `tests/jailbreak/test_registry.py` compares
    the registry with `tests/fixtures/technique_registry.json` (names, tags,

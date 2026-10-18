@@ -1,5 +1,8 @@
 """The technique pool: every registered technique, a kind's filters, the registry."""
 
+import json
+from pathlib import Path
+
 import pytest
 
 import redact.jailbreak.pool as JPool
@@ -15,6 +18,11 @@ from redact.jailbreak.pool import (
 )
 from redact.jailbreak.requests import get_all_request_functions
 from redact.jailbreak.technique import load_spec
+
+#: The eval type's attack pool, sorted: ``fixtures/eval_pool.json``.
+EVAL_POOL = json.loads(
+    (Path(__file__).parents[1] / "fixtures" / "eval_pool.json").read_text(
+        encoding="utf-8"))
 
 
 def _in(family: str, pool: list) -> list:
@@ -121,11 +129,15 @@ def test_the_switch_admits_the_whole_family_when_no_list_names_one_of_it():
     assert _languages(pool) == every
 
 
-def test_the_eval_pool_is_37_techniques_in_10_families():
+def test_the_eval_pool_is_the_37_pinned_techniques_in_10_families():
+    """``eval.json`` allows whole families, so a technique added to one of
+    them joins the eval pool unless ``eval.json`` denies it. This fails until
+    the owner decides, in ``eval.json`` and ``fixtures/eval_pool.json``."""
     from redact.recipe import load_dataset_type
 
     section = load_dataset_type("eval")["augmentations"]
     pool = technique_pool(resolve(section, "adversarial"))
+    assert sorted(fn.__name__ for fn in pool) == EVAL_POOL
     assert len(pool) == 37      # noqa: PLR2004
     assert {fn.families[0] for fn in pool} == {
         "translation", "encode", "fsh", "dap", "framing", "structural",
