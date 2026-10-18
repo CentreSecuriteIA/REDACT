@@ -1,17 +1,23 @@
 """The jailbreak stage with a machine-translation model: the checks at its
 start, on fakes."""
 
+import asyncio
 import json
 import logging
+import re
 
 import pandas as pd
 import pytest
 
 import redact.stages as P
+from redact.exceptions import PromptTooLongError
 from redact.jailbreak.obfuscation import langid
-from redact.jailbreak.obfuscation.translation import check_mt_prompt
+from redact.jailbreak.obfuscation.translation import check_mt_prompt, reply_cap
+from redact.llm_pipeline import LLMRequest
+from redact.llms.backends import ComputeConfig
 from redact.llms.model_config import MODEL_REGISTRY, ModelConfig, VLLMConfig
 from redact.stages import generate_jailbreaks
+from tests.conftest import MockBackend
 
 MT = "mt-stage-fake"
 TRANSLATION_ONLY = {"adversarial": {"translation": True,
@@ -109,3 +115,128 @@ class TestTheDetectorWarning:
         self._run(tmp_path, monkeypatch, "local-translator", TRANSLATION_ONLY)
         self._run(tmp_path, monkeypatch, MT, {
             "adversarial": {"families": {"allow": ["encode"]}}, "natural": None})
+
+
+# --- translation units on the pool -------------------------------------------
+
+GEN = "mt-stage-gen"
+
+
+class _Gen(MockBackend):
+    """The generation model on the async lane: ``step1 x`` -> ``S1:x``, and
+    the judge's verdict ``Yes``. ``served`` is set once it has answered a
+    request of a unit that is not a translation."""
+
+    compute_config = ComputeConfig(supports_async_calls=True)
+
+    def __init__(self):
+        super().__init__(model=GEN)
+        self.served = asyncio.Event()
+        self.contents: list[str] = []
+
+    async def agenerate(self, messages, *, max_tokens=None, internals_id=None,
+                        **kwargs):
+        content = messages[-1]["content"]
+        self.contents.append(content)
+        if content.startswith("step1 "):
+            self.served.set()
+            return content.replace("step1 ", "S1:")
+        return "Yes"
+
+
+class _Translator(MockBackend):
+    """The machine-translation model on the async lane. Its first request
+    waits until the generation model has served another unit: the driver
+    must keep the other units going while a translation is in flight."""
+
+    compute_config = ComputeConfig(supports_async_calls=True)
+
+    def __init__(self, gen: _Gen, too_long=()):
+        super().__init__(model=MT)
+        self.gen, self.too_long = gen, set(too_long)
+        self.sent: list[tuple[str, str, str, int]] = []
+
+    async def agenerate(self, messages, *, max_tokens=None, internals_id=None,
+                        **kwargs):
+        (message,) = messages
+        source, target, text = re.fullmatch(
+            r"<<<source>>>(\w+)<<<target>>>(\w+)<<<text>>>(.*)", message["content"],
+            re.S).groups()
+        if not self.sent:
+            await asyncio.wait_for(self.gen.served.wait(), timeout=10)
+        self.sent.append((source, target, text, max_tokens))
+        if text in self.too_long:
+            raise PromptTooLongError(f"over the context: {text}")
+        return f"sw:{text}" if source == "en" else text.removeprefix("sw:")
+
+
+def one_step(text, *, gen_model=None, **kwargs):
+    """A unit that is not a translation: one call on the generation model."""
+    reply = yield LLMRequest(gen_model, [{"role": "user", "content": "step1 " + text}])
+    return reply, "one_step"
+
+
+def _stage(tmp_path, monkeypatch, plan, translator, gen):
+    """Run the stage on ``plan``, ``[(prompt, technique name), ...]``, written
+    as its manifest; return its rows by prompt."""
+    import redact.jailbreak.pool as JPool
+    from redact.dataset import Manifest, content_id
+    from tests.conftest import make_client
+
+    real = JPool.all_techniques()
+    monkeypatch.setattr(JPool, "all_techniques", lambda: [*real, one_step])
+    backends = {MT: translator, GEN: gen}
+    monkeypatch.setattr(P.ModelClient, "create",
+                        lambda m, *a, **k: make_client(backends[m], m))
+    monkeypatch.setattr(langid, "available", lambda: True)
+    out = tmp_path / "jb.csv"
+    Manifest(out.with_name("jb.manifest.jsonl")).write(
+        {"sample_id": content_id(p), "iteration": 0, "combination": [name],
+         "settings": {}, "status": "planned"} for p, name in plan)
+    inputs = pd.DataFrame({"prompt": [p for p, _ in plan], "category": "Cyber",
+                           "entry_type": "harmful"})
+    generate_jailbreaks(inputs=inputs, output_path=out, model=GEN,
+                        translation_model=MT, augmentation=TRANSLATION_ONLY,
+                        batch_size=2, verbose=False)
+    df = pd.read_csv(out, dtype=str, keep_default_na=False)
+    return {r["prompt"]: r for r in df.to_dict("records")}
+
+
+def test_translation_units_run_on_the_pool_beside_other_units(tmp_path, monkeypatch):
+    seen = {}
+
+    def detect(text):
+        seen[text] = seen.get(text, 0) + 1
+        once = text == "sw:Wrong language once." and seen[text] == 1
+        return "ind_Latn" if once else "swh_Latn"
+
+    monkeypatch.setattr(langid, "detect", detect)
+    gen = _Gen()
+    translator = _Translator(gen, too_long={"Far too long."})
+    rows = _stage(tmp_path, monkeypatch, [
+        ("Good morning, friend.", "to_swahili"),
+        ("other unit", "one_step"),
+        ("Wrong language once.", "to_swahili"),
+        ("Far too long.", "to_swahili"),
+    ], translator, gen)
+
+    assert {p: (r["jailbreak"], r["accepted"]) for p, r in rows.items()} == {
+        "Good morning, friend.": ("sw:Good morning, friend.", "True"),
+        "other unit": ("S1:other unit", "True"),
+        "Wrong language once.": ("sw:Wrong language once.", "True"),
+        "Far too long.": ("Far too long.", "False"),
+    }
+    assert rows["Far too long."]["technique_info"] == (
+        "ERROR: over the context: Far too long.")
+    # A round: translate, translate back, judge on the generation model.
+    by_text = {}
+    for source, target, text, cap in translator.sent:
+        by_text.setdefault(text.removeprefix("sw:"), []).append((source, target, cap))
+    assert by_text["Good morning, friend."] == [
+        ("en", "sw", reply_cap("Good morning, friend.")),
+        ("sw", "en", reply_cap("sw:Good morning, friend."))]
+    # The wrong label was resampled: two forward requests, then one back.
+    assert [s for s, _, _ in by_text["Wrong language once."]] == ["en", "en", "sw"]
+    # One judge call per translation that passed its checks.
+    judged = [c for c in gen.contents if not c.startswith("step1 ")]
+    assert len(judged) == 2                     # noqa: PLR2004
