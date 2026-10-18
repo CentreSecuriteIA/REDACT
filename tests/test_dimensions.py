@@ -158,9 +158,9 @@ class TestTheCheck:
         message = str(raised.value)
         assert "the axis inputs.focus (focus) and the request_shape families" in message
         assert "adversarial: asking, continuation" in message
-        assert "natural: asking, continuation, indirect, temporal" in message
-        assert ("the container families (adversarial: structural; natural: "
-                "structural)") in message
+        # The natural kind draws neither continuation, temporal nor structural.
+        assert "natural: asking, indirect)" in message
+        assert "the container families (adversarial: structural)." in message
         assert "the example_priming families (adversarial: dap, fsh)" in message
         assert message.count("undecided") == len(("request_shape", "container",
                                                    "example_priming"))

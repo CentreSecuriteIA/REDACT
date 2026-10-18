@@ -26,8 +26,12 @@ runs the stub model answers a natural typos rewrite with the text it answers
 that input's output request with, so those outputs are the variations' rows.
 
 The plan pairs ASCII art with neither the emoji or unicode suffix, braille
-nor a translation, whose characters no font draws, so every jailbreak of
-the runs is accepted: the build count of the training run is 88.
+nor a translation, whose characters no font draws, so every attack of the
+runs is accepted. The natural kind draws only what the spec marks natural
+(46 techniques): one variation of the training run is ``to_abbreviations``
+on a text with none of its words, a no-op the natural kind rejects (31 of
+32 jailbreak rows accepted), and one more typos rewrite repeats an accepted
+output, which the build leaves out: its count is 86.
 
 The eval run is not that commit's: its inputs are seeded from a small
 constitution of placeholder entries, as every run's are.
@@ -403,6 +407,40 @@ def test_the_variations_are_their_accepted_rows_from_the_path_given(tmp_path):
     assert variations() == ["var-1", "var-3"]
     build_dataset(data_dir=tmp_path, include_variations=False, verbose=False)
     assert variations() == []
+
+
+def test_a_benign_variation_the_natural_kind_would_not_make_is_left_out(
+        tmp_path, caplog):
+    """A plan made before a technique left the natural kind holds rows of
+    it; a benign or dual-use benign one would be labelled wrong. A
+    harmful-labelled row stays."""
+    import logging
+
+    from redact import build_dataset
+
+    _write_stage_files(tmp_path)
+    variations = pd.concat([_VARIATIONS, _VARIATIONS.iloc[[1]]]).assign(
+        sample_id=["var-1", "var-2", "var-3", "var-4"],
+        entry_type=["harmful", "benign", "dual_use_benign", "benign"],
+        technique=["to_xml", "to_answer_as_story", "to_uppercase+to_continue_passage",
+                   "to_uppercase+to_summarize"])
+    variations.to_csv(paths.variations_csv(tmp_path), index=False)
+    with caplog.at_level(logging.WARNING, logger="redact"):
+        built = build_dataset(data_dir=tmp_path, verbose=False)
+    kept = built[built["dataset_type"] == "natural_variation"]["sample_id"]
+    assert list(kept) == ["var-1", "var-4"]
+    assert [r.getMessage() for r in caplog.records] == [
+        "Variations: left out 2 benign or dual-use benign rows made with a "
+        "technique the natural kind does not draw (to_answer_as_story, "
+        "to_continue_passage); run the natural kind again with resume=False to "
+        "replace them."]
+    # The variations of a natural plan are all kept, and nothing is logged.
+    caplog.clear()
+    _VARIATIONS.to_csv(paths.variations_csv(tmp_path), index=False)
+    with caplog.at_level(logging.WARNING, logger="redact"):
+        built = build_dataset(data_dir=tmp_path, verbose=False)
+    assert (built["dataset_type"] == "natural_variation").sum() == len(_VARIATIONS)
+    assert caplog.records == []
 
 
 @pytest.mark.parametrize("left", ["missing", "empty"])

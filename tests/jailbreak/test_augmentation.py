@@ -35,30 +35,32 @@ def _without(names: list, *left_out: str) -> list:
 
 def test_a_deny_given_alone_keeps_the_defaults_allow():
     default = defaults()["natural"]
-    kind = resolve({"natural": {"families": {"deny": ["structural"]}}}, "natural")
+    kind = resolve({"natural": {"families": {"deny": ["typos"]}}}, "natural")
     assert kind["families"] == {
-        "allow": _without(default["families"]["allow"], "structural"),
-        "deny": ["structural"]}
+        "allow": _without(default["families"]["allow"], "typos"),
+        "deny": ["typos"]}
     assert kind["techniques"] == default["techniques"]
     pool = technique_pool(kind)
     families = {family for fn in pool for family in fn.families}
-    assert "structural" not in families and "typos" in families
+    assert "typos" not in families and "casual_writing" in families
     assert not any(fn.layer == "hacking" for fn in pool)
 
 
 def test_a_deny_given_alone_on_families_and_techniques_keeps_both_allows():
     default = defaults()["natural"]
-    kind = resolve({"natural": {"families": {"deny": ["structural"]},
+    kind = resolve({"natural": {"families": {"deny": ["typos"]},
                                 "techniques": {"deny": ["to_leetspeak_basic"]}}},
                    "natural")
-    assert kind["families"]["allow"] == _without(
-        default["families"]["allow"], "structural")
-    # A list given replaces the default's whole: the answer_format three are back.
+    assert kind["families"]["allow"] == _without(default["families"]["allow"], "typos")
+    # A list given replaces the default's whole: the answer_format three leave
+    # the deny list, and the spec's kinds still keep them out of the pool.
     assert kind["techniques"] == {
         "allow": _without(default["techniques"]["allow"], "to_leetspeak_basic"),
         "deny": ["to_leetspeak_basic"]}
     names = {fn.__name__ for fn in technique_pool(kind)}
-    assert "to_leetspeak_basic" not in names and "to_prefix_injection" in names
+    assert "to_leetspeak_basic" not in names
+    assert not names & set(default["techniques"]["deny"])
+    assert "to_answer_in_markdown" in names
 
 
 def test_an_allow_given_alone_keeps_the_defaults_deny():
@@ -73,12 +75,13 @@ def test_an_allow_given_alone_keeps_the_defaults_deny():
 
 
 def test_a_name_the_run_allows_leaves_the_defaults_deny():
-    kind = resolve({"natural": {"techniques": {"allow": ["to_prefix_injection"]}}},
-                   "natural")
-    assert kind["techniques"] == {
-        "allow": ["to_prefix_injection"],
-        "deny": ["to_refusal_then_comply", "to_apology_prevention"]}
-    assert "to_prefix_injection" in {fn.__name__ for fn in technique_pool(kind)}
+    base = {"natural": {"techniques": {"deny": ["to_leetspeak_basic", "to_rewrite"]}}}
+    kind = resolve({"natural": {"techniques": {"allow": ["to_leetspeak_basic"]}}},
+                   "natural", base=base)
+    assert kind["techniques"] == {"allow": ["to_leetspeak_basic"],
+                                  "deny": ["to_rewrite"]}
+    names = {fn.__name__ for fn in technique_pool(kind)}
+    assert "to_leetspeak_basic" in names and "to_rewrite" not in names
 
 
 def test_an_adversarial_deny_given_alone_keeps_allow_null():
@@ -102,8 +105,8 @@ def test_the_natural_kind_needs_an_allow_list():
 
 def test_a_resolved_section_resolves_to_itself():
     section = {"adversarial": {"rounds": "escalation", "family_weights": {"encode": 2}},
-               "natural": {"iterations": 2, "families": {"deny": ["structural"]},
-                           "techniques": {"allow": ["to_prefix_injection"]}}}
+               "natural": {"iterations": 2, "families": {"deny": ["typos"]},
+                           "techniques": {"allow": ["to_answer_as_code"]}}}
     once = {kind: resolve(section, kind) for kind in KINDS}
     assert {kind: resolve(once, kind) for kind in KINDS} == once
     assert once["adversarial"]["iterations"] == len(default_escalation_schedule())
@@ -245,6 +248,48 @@ def test_a_section_that_breaks_a_rule_raises_naming_the_kind_and_key(
     with pytest.raises(ValueError) as raised:
         resolve(section, kind)
     assert message in str(raised.value)
+
+
+@pytest.mark.parametrize(("given", "level", "name"), [
+    ({"families": {"allow": ["typos", "structural"]}}, "families", "structural"),
+    ({"techniques": {"allow": ["to_prefix_injection"]}}, "techniques",
+     "to_prefix_injection"),
+    # A family the kind draws, less a technique the spec keeps from it.
+    ({"techniques": {"allow": ["to_rewrite_with_typos_insane"]}}, "techniques",
+     "to_rewrite_with_typos_insane"),
+])
+def test_a_natural_allow_list_naming_what_the_kind_does_not_draw_raises(
+        given, level, name):
+    with pytest.raises(ValueError) as raised:
+        resolve({"natural": given}, "natural")
+    assert str(raised.value) == (
+        f"augmentations.natural.{level}.allow names {name!r}, which the natural "
+        "kind does not draw: its kinds in combination_spec.json are "
+        f"['adversarial']. Take it out of {level}.allow (a config_dir copy of "
+        "augmentations.json made before it left the natural kind still names "
+        'it), or add "natural" to its kinds in combination_spec.json.')
+
+
+def test_a_config_dir_copy_of_the_former_natural_kind_raises(tmp_path):
+    """A copy made before the spec's kinds: its natural kind still allows
+    structural, temporal and continuation."""
+    import json
+
+    from redact import paths
+
+    packaged = paths.jailbreak_configs_dir() / "augmentations.json"
+    section = json.loads(packaged.read_text(encoding="utf-8"))
+    section["natural"]["families"]["allow"] = [
+        "typos", "casual_writing", "structural", "answer_language", "answer_format",
+        "asking", "indirect", "temporal", "continuation"]
+    (tmp_path / "jailbreak").mkdir()
+    (tmp_path / "jailbreak" / "augmentations.json").write_text(
+        json.dumps(section), encoding="utf-8")
+    with pytest.raises(ValueError, match="families.allow names 'structural', which "
+                       "the natural kind does not draw"):
+        resolve(None, "natural", config_dir=tmp_path)
+    assert resolve(None, "adversarial", config_dir=tmp_path) == resolve(
+        None, "adversarial")
 
 
 def test_a_technique_the_registry_lacks_raises(monkeypatch):
