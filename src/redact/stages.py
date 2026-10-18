@@ -634,6 +634,7 @@ def generate_jailbreaks(
         raise ValueError("inputs must contain a 'prompt' (or 'sample') column.")
 
     if any(jailbreak_pool.uses_translation(jailbreak_pool.technique_pool(kind))
+           and not _of_entry_types(inputs, kind["entry_types"]).empty
            for _name, kind, _out, _man in kinds):
         _check_machine_translation(translation_model, prompt_dir)
     client = ModelClient.create(model or default_model_for_role("uncensored_gen"))

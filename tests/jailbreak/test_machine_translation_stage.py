@@ -114,7 +114,16 @@ class TestTheDetectorWarning:
                             lambda: pytest.fail("the detector was asked"))
         self._run(tmp_path, monkeypatch, "local-translator", TRANSLATION_ONLY)
         self._run(tmp_path, monkeypatch, MT, {
-            "adversarial": {"families": {"allow": ["encode"]}}, "natural": None})
+            "adversarial": {"translation": False, "families": {"allow": ["encode"]}},
+            "natural": None})
+
+    def test_nothing_is_asked_for_a_kind_that_matches_no_input(
+            self, tmp_path, monkeypatch):
+        monkeypatch.setattr(langid, "available",
+                            lambda: pytest.fail("the detector was asked"))
+        self._run(tmp_path, monkeypatch, MT, {
+            "adversarial": {**TRANSLATION_ONLY["adversarial"],
+                            "entry_types": ["benign"]}, "natural": None})
 
 
 # --- translation units on the pool -------------------------------------------
