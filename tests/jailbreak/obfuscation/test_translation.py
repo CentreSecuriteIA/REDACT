@@ -104,3 +104,55 @@ class TestTranslationModel:
 
         role = _resolve_translate_model()
         assert self._models() == [role, role]
+
+
+class TestMachineTranslationTables:
+    """The code, accepted labels and median length ratio of every language."""
+
+    def test_every_table_names_exactly_the_languages(self):
+        from redact.jailbreak.obfuscation.translation import (
+            ACCEPTED_LABELS,
+            LANGUAGE_CODES,
+            MEDIAN_RATIO,
+        )
+
+        for table in (LANGUAGE_CODES, ACCEPTED_LABELS, MEDIAN_RATIO):
+            assert list(table) == LANGUAGES
+
+    def test_codes_are_iso_639_1(self):
+        from redact.jailbreak.obfuscation.translation import LANGUAGE_CODES
+
+        assert LANGUAGE_CODES["Scots Gaelic"] == "gd"
+        assert LANGUAGE_CODES["Khmer"] == "km"
+        assert all(len(code) == 2 and code.islower()  # noqa: PLR2004
+                   for code in LANGUAGE_CODES.values())
+        assert len(set(LANGUAGE_CODES.values())) == len(LANGUAGES)
+
+    def test_javanese_never_accepts_indonesian(self):
+        """The pod's two real wrong-language outputs were Javanese answered
+        in Indonesian."""
+        from redact.jailbreak.obfuscation.translation import ACCEPTED_LABELS
+
+        assert ACCEPTED_LABELS["Javanese"] == {"jav_Latn"}
+        assert {"swh_Latn", "swc_Latn"} <= ACCEPTED_LABELS["Swahili"]
+        assert "xho_Latn" in ACCEPTED_LABELS["Zulu"]
+
+    def test_a_table_missing_a_language_is_refused(self):
+        import pytest
+
+        from redact.jailbreak.obfuscation.translation import (
+            LANGUAGE_CODES,
+            _check_tables,
+        )
+
+        without_thai = {k: v for k, v in LANGUAGE_CODES.items() if k != "Thai"}
+        with pytest.raises(ValueError, match=r"LANGUAGE_CODES.*missing \['Thai'\]"):
+            _check_tables({"LANGUAGE_CODES": without_thai})
+        with pytest.raises(ValueError, match=r"extra \['Maori'\]"):
+            _check_tables({"LANGUAGE_CODES": {**LANGUAGE_CODES, "Maori": "mi"}})
+
+    def test_the_reply_cap_is_about_three_times_the_inputs_tokens(self):
+        from redact.jailbreak.obfuscation.translation import reply_cap
+
+        assert [reply_cap("x" * n) for n in (81, 161, 400, 1500, 1505, 9000)] == [
+            113, 194, 434, 1532, 1536, 1536]

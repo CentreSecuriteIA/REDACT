@@ -5,6 +5,7 @@ and checks, retrying with the check's feedback; ``info`` is the language, or
 ``DISCARDED; language=...; feedback=...`` when every attempt is rejected.
 """
 
+import math
 from collections.abc import Callable
 
 from redact.jailbreak.technique import DISCARDED, TechniqueGen
@@ -22,6 +23,84 @@ LANGUAGES = [
     "Swahili", "Thai", "Khmer", "Nepali",
     "Zulu", "Scots Gaelic", "Bengali", "Javanese",
 ]
+
+#: The ISO 639-1 code a machine-translation model is sent for each language.
+#: Its template takes an unknown code as the language's name, so every
+#: language needs one.
+LANGUAGE_CODES = {
+    "French": "fr", "Japanese": "ja", "Russian": "ru", "Spanish": "es",
+    "German": "de", "Arabic": "ar", "Turkish": "tr", "Czech": "cs",
+    "Vietnamese": "vi", "Greek": "el", "Croatian": "hr", "Swahili": "sw",
+    "Thai": "th", "Khmer": "km", "Nepali": "ne", "Zulu": "zu",
+    "Scots Gaelic": "gd", "Bengali": "bn", "Javanese": "jv",
+}
+
+#: The GlotLID labels a translation into each language may carry: its own,
+#: and the near-identical languages GlotLID reads short text as.
+ACCEPTED_LABELS = {
+    "French": {"fra_Latn"},
+    "Japanese": {"jpn_Jpan"},
+    "Russian": {"rus_Cyrl"},
+    "Spanish": {"spa_Latn"},
+    "German": {"deu_Latn"},
+    "Arabic": {"arb_Arab", "acm_Arab", "acq_Arab", "aeb_Arab", "ajp_Arab",
+               "apc_Arab", "ars_Arab", "ary_Arab", "arz_Arab"},
+    "Turkish": {"tur_Latn"},
+    "Czech": {"ces_Latn"},
+    "Vietnamese": {"vie_Latn"},
+    "Greek": {"ell_Grek"},
+    "Croatian": {"hrv_Latn", "bos_Latn", "srp_Latn"},
+    "Swahili": {"swh_Latn", "swc_Latn", "swa_Latn"},
+    "Thai": {"tha_Thai"},
+    "Khmer": {"khm_Khmr"},
+    "Nepali": {"npi_Deva"},
+    "Zulu": {"zul_Latn", "nbl_Latn", "nde_Latn", "xho_Latn", "ssw_Latn"},
+    "Scots Gaelic": {"gla_Latn"},
+    "Bengali": {"ben_Beng"},
+    "Javanese": {"jav_Latn"},  # never ind_Latn: Indonesian is a real failure
+}
+
+#: A translation's length over its input's, in characters, at the median: the
+#: pod test's TranslateGemma figures, 1.0 for a language it did not measure.
+MEDIAN_RATIO = {
+    "French": 1.0, "Japanese": 1.0, "Russian": 1.0, "Spanish": 1.0,
+    "German": 1.0, "Arabic": 1.0, "Turkish": 1.0, "Czech": 1.0,
+    "Vietnamese": 1.0, "Greek": 1.0, "Croatian": 1.0, "Swahili": 1.16,
+    "Thai": 1.02, "Khmer": 1.09, "Nepali": 1.04, "Zulu": 1.17,
+    "Scots Gaelic": 1.32, "Bengali": 1.07, "Javanese": 1.12,
+}
+
+
+def _check_tables(tables: dict[str, dict]) -> None:
+    """Raise ``ValueError`` unless each table names exactly :data:`LANGUAGES`."""
+    for name, table in tables.items():
+        missing = [language for language in LANGUAGES if language not in table]
+        extra = sorted(set(table) - set(LANGUAGES))
+        if missing or extra:
+            raise ValueError(
+                f"translation.{name} must name exactly the LANGUAGES: "
+                f"missing {missing}, extra {extra}.")
+
+
+_check_tables({"LANGUAGE_CODES": LANGUAGE_CODES, "ACCEPTED_LABELS": ACCEPTED_LABELS,
+               "MEDIAN_RATIO": MEDIAN_RATIO})
+
+#: A translator reply is capped at about three times its input's tokens,
+#: counting a token as this many characters (which overstates an English
+#: text's tokens and leaves room for a script that spends more), plus
+#: :data:`REPLY_SLACK_TOKENS`, never above :data:`MAX_REPLY_TOKENS`. A reply
+#: cut there is a length outlier, so a runaway loop costs one capped request.
+CHARS_PER_TOKEN = 3
+REPLY_TOKENS_PER_INPUT_TOKEN = 3
+REPLY_SLACK_TOKENS = 32
+MAX_REPLY_TOKENS = 1536
+
+
+def reply_cap(text: str) -> int:
+    """The ``max_tokens`` of a translator request that translates ``text``."""
+    tokens = math.ceil(len(text) / CHARS_PER_TOKEN)
+    return min(MAX_REPLY_TOKENS,
+               REPLY_TOKENS_PER_INPUT_TOKEN * tokens + REPLY_SLACK_TOKENS)
 
 
 def _resolve_translate_model() -> str:
