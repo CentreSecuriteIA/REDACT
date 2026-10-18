@@ -675,3 +675,12 @@ class TestFloat32AsHalf:
             fp32 = E.estimate_weights_gib("x", dtype="float32")
             odd = E.estimate_weights_gib("x", dtype="int8", float32_as_half=True)
         assert odd == fp32
+
+
+def test_fp8_per_tensor_is_sized_as_fp8():
+    """vLLM's newer name for on-load FP8."""
+    with _with(MISTRAL_24B):
+        bf16 = E.estimate_weights_gib("x")
+        fp8 = E.estimate_weights_gib("x", quantization="fp8")
+        per_tensor = E.estimate_weights_gib("x", quantization="fp8_per_tensor")
+    assert per_tensor == fp8 < bf16

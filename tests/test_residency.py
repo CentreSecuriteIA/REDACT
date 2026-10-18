@@ -425,6 +425,84 @@ class TestFootprintResolution:
             assert residency.footprint(m).gb == 51.0
 
 
+
+def _shipped_hf_config(folder: str) -> SimpleNamespace:
+    """A packaged config.json as the attribute view transformers gives."""
+    from redact import paths
+
+    raw = json.loads((paths.hf_configs_dir() / folder / "config.json")
+                     .read_text(encoding="utf-8"))
+    text = SimpleNamespace(**raw["text_config"])
+    return SimpleNamespace(**{**raw, "text_config": text})
+
+
+class TestPackagedHFConfig:
+    """A setup's ``hf_config`` is the config the plan reads, and its path is
+    part of the engine's identity in the plan and at load."""
+
+    def test_the_footprint_reads_the_packaged_config_and_sizes_its_kv(
+            self, registered):
+        from redact import paths
+
+        m = registered("_hc_footprint", hf_model_id="org/broken-config",
+                       hf_config="translategemma-27b", vram_gb=28.4,
+                       vllm_kwargs={"max_model_len": 4096})
+        read = []
+
+        def load(source):
+            read.append(source)
+            return _shipped_hf_config("translategemma-27b")
+
+        with patch.object(estimate, "_load_config", side_effect=load):
+            fp = residency.footprint(m)
+        assert set(read) == {str(paths.hf_configs_dir() / "translategemma-27b")}
+        # KV: 2 x 62 layers x 16 KV heads x 128 x 4096 tokens x 2 bytes.
+        # Planned: (28.4 + 1.94) x 1.1 + 0.6 = 33.97, up to 34.0.
+        assert (fp.parts["weights_gib"], fp.parts["kv_gib"], fp.gb) == (
+            28.4, 1.94, 34.0)
+
+    def test_the_engine_key_and_the_plans_engine_id_carry_the_path(self, registered):
+        import redact.llms.backends.vllm as vllm_module
+        from redact import paths
+
+        m = registered("_hc_engine", hf_model_id="org/broken-config",
+                       hf_config="translategemma-27b", vram_gb=28.4)
+        local = MODEL_REGISTRY[m].vllm
+        key = vllm_module._engine_key(local.hf_model_id, local.quantization,
+                                      local.engine_kwargs)
+        folder = str(paths.hf_configs_dir() / "translategemma-27b")
+        assert repr(folder) in key[2]
+        assert residency.footprint(m).engine == ("vllm", *key)
+
+    def test_the_engine_caps_its_context_at_the_packaged_configs(self, registered):
+        """Without max_model_len the engine's default context is capped at
+        what the packaged config names, not the checkpoint's unreadable one."""
+        import redact.llms.backends.vllm as vllm_module
+        from redact import paths
+
+        calls = []
+        vllm_module.VLLMBackend.clear_cache()
+        fake = fake_vllm_modules(lambda **kw: calls.append(kw) or object())
+        small = SimpleNamespace(**{**vars(MISTRAL_24B),
+                                   "max_position_embeddings": 4096})
+        folder = str(paths.hf_configs_dir() / "translategemma-27b")
+        read = []
+        try:
+            with (
+                patch.dict("sys.modules", fake),
+                patch.object(vllm_module, "_prepare_environment"),
+                patch.object(estimate, "_load_config",
+                             side_effect=lambda source: read.append(source) or small),
+            ):
+                vllm_module._engine("org/broken-config", None,
+                                    {"hf_config_path": folder})
+        finally:
+            vllm_module.VLLMBackend.clear_cache()
+        assert read == [folder]
+        assert {k: calls[0][k] for k in ("max_model_len", "hf_config_path")} == {
+            "max_model_len": 4096, "hf_config_path": folder}
+
+
 class TestPlanResidency:
     def test_two_engines_share_a_card_when_their_grants_fit(self, registered):
         a = registered("_res_small_a", hf_model_id="org/sa", vram_gb=2.5)

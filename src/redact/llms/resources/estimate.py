@@ -29,7 +29,7 @@ _DTYPE_BYTES = {
 
 #: Weight bit width per vLLM quantization method. Any other method is sized
 #: unquantized, which errs high.
-_QUANT_BITS = {"awq": 4, "gptq": 4, "fp8": 8}
+_QUANT_BITS = {"awq": 4, "gptq": 4, "fp8": 8, "fp8_per_tensor": 8}
 
 #: Extra bits per quantized weight for group scales and zero points.
 _QUANT_OVERHEAD_BITS = 0.5
@@ -80,7 +80,11 @@ def _report_once(hf_model_id: str, reason: str) -> None:
 
 
 def _load_config(hf_model_id: str):
-    """The checkpoint's HF config, or ``None`` if it cannot be read. Never raises."""
+    """The checkpoint's HF config, or ``None`` if it cannot be read. Never raises.
+
+    ``hf_model_id`` may be a folder holding a ``config.json``, as a packaged
+    one (``VLLMConfig.hf_config``) is.
+    """
     try:
         from transformers import AutoConfig
     except ImportError:

@@ -202,6 +202,13 @@ def roles_json() -> Path:
     return llm_configs_dir() / "roles.json"
 
 
+def hf_configs_dir() -> Path:
+    """Package-bundled HF configs (``src/redact/configs/llm/hf_configs``): one
+    folder per config, each holding a ``config.json`` that a vLLM setup's
+    ``hf_config`` reads in place of its checkpoint's own."""
+    return llm_configs_dir() / "hf_configs"
+
+
 def gpu_pricing_json() -> Path:
     """The shipped GPU rate table (``configs/llm/gpu_pricing.json``).
 

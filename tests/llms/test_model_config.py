@@ -851,3 +851,72 @@ class TestEngineKwargs:
         cfg = VLLMConfig(hf_model_id="org/m", vllm_kwargs={"max_model_len": 384})
         assert cfg.engine_kwargs == {"max_model_len": 384}
         assert VLLMConfig(hf_model_id="org/m").engine_kwargs == {}
+
+
+class TestPackagedHFConfig:
+    """``hf_config`` names a packaged config.json read in place of the
+    checkpoint's own."""
+
+    FOLDER = "translategemma-27b"
+
+    def _path(self) -> str:
+        from redact import paths
+
+        return str(paths.hf_configs_dir() / self.FOLDER)
+
+    def test_the_folder_reaches_the_engine_as_hf_config_path(self):
+        cfg = VLLMConfig(hf_model_id="org/m", hf_config=self.FOLDER,
+                         vllm_kwargs={"max_model_len": 4096})
+        assert cfg.hf_config_path == self._path()
+        assert cfg.engine_kwargs == {"max_model_len": 4096,
+                                     "hf_config_path": self._path()}
+
+    def test_without_one_the_engine_reads_the_checkpoints_config(self):
+        cfg = VLLMConfig(hf_model_id="org/m")
+        assert cfg.hf_config_path is None and "hf_config_path" not in cfg.engine_kwargs
+
+    @pytest.mark.parametrize("name", ["no-such-config", "..", ".",
+                                      "../hf_configs/translategemma-27b",
+                                      "translategemma-27b/config.json"])
+    def test_a_name_that_is_no_packaged_folder_is_rejected(self, name):
+        with pytest.raises(ValueError, match="hf_config"):
+            VLLMConfig(hf_model_id="org/m", hf_config=name)
+
+    def test_a_wrong_type_is_rejected(self):
+        with pytest.raises(TypeError, match="hf_config"):
+            VLLMConfig(hf_model_id="org/m", hf_config=3)
+
+    def test_hf_config_path_in_vllm_kwargs_is_rejected(self):
+        with pytest.raises(ValueError, match=r"hf_config_path'\] is not a setting"):
+            VLLMConfig(hf_model_id="org/m", vllm_kwargs={"hf_config_path": "/x"})
+
+
+def _packaged_hf_configs() -> list:
+    from redact import paths
+
+    return sorted(p for p in paths.hf_configs_dir().iterdir() if p.is_dir())
+
+
+def test_the_translategemma_config_has_its_rope_per_layer_type():
+    """transformers 5 reads rope_parameters per layer type; the flat form the
+    checkpoint ships crashes it."""
+    import json
+
+    from redact import paths
+
+    path = paths.hf_configs_dir() / "translategemma-27b" / "config.json"
+    text = json.loads(path.read_text(encoding="utf-8"))["text_config"]
+    rope = text["rope_parameters"]
+    assert set(rope) == {"full_attention", "sliding_attention"}
+    assert "factor" not in rope and "rope_type" not in rope
+    assert rope["full_attention"] == {"rope_type": "linear", "factor": 8.0,
+                                      "rope_theta": 1000000.0}
+    assert not {"rope_theta", "rope_local_base_freq", "rope_scaling"} & set(text)
+
+
+@pytest.mark.parametrize("folder", _packaged_hf_configs(), ids=lambda p: p.name)
+def test_every_packaged_hf_config_loads_in_transformers(folder):
+    """A transformers upgrade that cannot read a shipped config fails here, not
+    at an engine's build."""
+    transformers = pytest.importorskip("transformers")
+    assert transformers.AutoConfig.from_pretrained(str(folder)) is not None

@@ -116,8 +116,9 @@ def footprint(model: str, backend_type: str | None = None) -> ModelFootprint | N
 
     The weights are the setup's declared ``vram_gb`` if set, else an estimate
     from the checkpoint's HF config (:mod:`~redact.llms.resources.estimate`),
-    else unknown: planning continues and the plan says so. For vLLM the KV
-    cache is always estimated, on top of either.
+    or the packaged one a vLLM setup's ``hf_config`` names, else unknown:
+    planning continues and the plan says so. For vLLM the KV cache is always
+    estimated, on top of either.
 
     Args:
         backend_type: Optional setup override, e.g. ``"vllm"``.
@@ -131,9 +132,12 @@ def footprint(model: str, backend_type: str | None = None) -> ModelFootprint | N
         return None
     config, setup = found
     local = getattr(config, setup)
+    # The config the shapes are read from: a packaged one when the setup names it.
+    source = local.hf_model_id
     if setup == "vllm":
         kw = local.vllm_kwargs or {}
         span, max_len = local.min_gpus, kw.get("max_model_len")
+        source = local.hf_config_path or source
         # vLLM's default dtype loads a float32 checkpoint as 16-bit, so that is
         # its real size. An explicit dtype=float32 is still sized at 32-bit.
         vllm_sizing = dict(dtype=kw.get("dtype"), max_model_len=max_len,
@@ -148,7 +152,7 @@ def footprint(model: str, backend_type: str | None = None) -> ModelFootprint | N
 
     if local.vram_gb is not None:
         weights = local.vram_gb / span
-        kv = (estimate.estimate_kv_gib(local.hf_model_id, **vllm_sizing)
+        kv = (estimate.estimate_kv_gib(source, **vllm_sizing)
               if vllm_sizing else None)
         terms = f"{weights:.1f} weights"
         if kv is not None:
@@ -163,12 +167,11 @@ def footprint(model: str, backend_type: str | None = None) -> ModelFootprint | N
 
     if vllm_sizing:
         est = estimate.estimate(
-            local.hf_model_id, quantization=local.quantization, **vllm_sizing)
+            source, quantization=local.quantization, **vllm_sizing)
     else:
         # No KV term: transformers does not preallocate one, and generation's
         # cache is small next to the weights.
-        est = estimate.estimate(
-            local.hf_model_id, dtype=local.torch_dtype, kv=False)
+        est = estimate.estimate(source, dtype=local.torch_dtype, kv=False)
     if est is None:
         return ModelFootprint(gb=None, source="unknown", parts=parts, **common)
     parts.update(weights_gib=est.weights_gib, kv_gib=est.kv_gib,
