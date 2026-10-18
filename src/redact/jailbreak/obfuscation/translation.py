@@ -1,4 +1,4 @@
-"""Translation techniques: the prompt translated to one of 20 languages.
+"""Translation techniques: the prompt translated to one of 19 languages.
 
 The run's translation model (the translation role's by default) translates
 and checks, retrying with the check's feedback; ``info`` is the language, or
@@ -17,8 +17,9 @@ LANGUAGES = [
     "French", "Japanese", "Russian", "Spanish", "German", "Arabic",
     # Mid-resource
     "Turkish", "Czech", "Vietnamese", "Greek", "Croatian",
-    # Low-resource
-    "Swahili", "Thai", "Khmer", "Maori", "Nepali",
+    # Low-resource. Not Maori: TranslateGemma invents its sensitive and
+    # technical terms, fluently enough to pass every check.
+    "Swahili", "Thai", "Khmer", "Nepali",
     "Zulu", "Scots Gaelic", "Bengali", "Javanese",
 ]
 

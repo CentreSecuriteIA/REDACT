@@ -60,8 +60,8 @@ types: a recipe naming one stops when it loads, before any stage runs.
 The eval adversarial kind attacks the harmful inputs only, with a pool of
 hard techniques whose label stays certain: the families `encode` (less the
 seven light encodings, and less `sensitive_words`), `fsh`, `dap`, `framing`,
-`structural`, `ascii_art`, `continuation`, `temporal`; the nine low-resource
-translations (`to_swahili`, `to_thai`, `to_khmer`, `to_maori`, `to_nepali`,
+`structural`, `ascii_art`, `continuation`, `temporal`; the eight low-resource
+translations (`to_swahili`, `to_thai`, `to_khmer`, `to_nepali`,
 `to_zulu`, `to_scots_gaelic`, `to_bengali`, `to_javanese`), with
 `"translation": true` and `family_weights` `{"translation": 3}`; and
 `to_refusal_then_comply`. It runs two count-driven rounds, one technique
@@ -400,7 +400,7 @@ From every registered technique, in this order:
 adds it to its allow list. No family list changes this; a
 `techniques.deny` still removes the languages it names, and a
 `techniques.allow` that names some languages narrows the family to those
-(the eval type's nine low-resource languages).
+(the eval type's eight low-resource languages).
 
 With the switch `false`, the translation an allow list names (the family or
 its techniques) and a `family_weights` entry for it are left out of the
@@ -412,7 +412,7 @@ list left empty by this is dropped when the other list still names
 something; when nothing but translation was allowed, the kind raises.
 
 Both kinds of the packaged section default to `false`; the eval type turns
-it on for its attacks, with the nine low-resource languages, which run on
+it on for its attacks, with the eight low-resource languages, which run on
 the hosted `translation` model until a local one is registered. Each
 translation makes 2 to 8 calls, up to 4 rounds of two
 ([stages/jailbreaks.md](stages/jailbreaks.md#models) says which model each

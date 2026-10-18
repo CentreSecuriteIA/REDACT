@@ -28,16 +28,20 @@ def _run(fn, prompt, backend):
 
 
 class TestLanguages:
-    def test_twenty_languages(self):
-        assert len(LANGUAGES) == 20
+    def test_nineteen_languages(self):
+        assert len(LANGUAGES) == 19
         assert "Zulu" in LANGUAGES
         assert "Swahili" in LANGUAGES
 
+    def test_maori_is_not_among_them(self):
+        """TranslateGemma invents Maori terms that pass every check."""
+        assert "Maori" not in LANGUAGES
+
 
 class TestTranslationFunctions:
-    def test_all_twenty_returned(self):
+    def test_all_nineteen_returned(self):
         funcs = get_translation_functions()
-        assert len(funcs) == 20
+        assert len(funcs) == 19
 
     def test_to_zulu(self):
         backend = MockBackend(["translated zulu", "Yes"])
