@@ -13,6 +13,10 @@ from redact.llm_pipeline import LLMRequest, is_accepted
 from redact.llms.model_config import default_model_for_role
 from redact.llms.prompting import build_messages, load_prompt
 
+#: The registry role of a model that only translates: it takes the MT
+#: prompt, and its output is checked here rather than by itself.
+MACHINE_TRANSLATION_ROLE = "machine_translation"
+
 LANGUAGES = [
     # High-resource
     "French", "Japanese", "Russian", "Spanish", "German", "Arabic",

@@ -34,7 +34,11 @@ dependencies = [
 # psutil: vLLM installs it, and redact imports it directly to end engine
 # processes and their workers (backends/vllm.py) and to tell this run's
 # engine processes from others on a card (driver.py, only with local models).
-vllm = ["vllm>=0.4", "hf_transfer>=0.1", "psutil>=5.9"]
+# A machine-translation model runs only on vLLM, so the extra brings langid.
+vllm = ["vllm>=0.4", "hf_transfer>=0.1", "psutil>=5.9", "redact[langid]"]
+# GlotLID, which checks the language of a machine translation
+# (jailbreak/obfuscation/langid.py): fastText inference only, no numpy.
+langid = ["fasttext-predict>=0.9.2.4", "huggingface_hub>=0.20"]
 # accelerate is required, not optional: IntrospectConfig.device_map defaults
 # to "auto", and transformers raises without accelerate whenever device_map
 # is set — so every introspection backend construction needs it.

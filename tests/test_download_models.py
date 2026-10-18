@@ -33,3 +33,12 @@ def test_a_dry_run_names_each_checkpoint_once(script, capsys):
     for repo in ("dphn/Dolphin-Mistral-24B-Venice-Edition",
                  "Infomaniak-AI/vllm-translategemma-27b-it"):
         assert sum(line.startswith(repo) for line in out.splitlines()) == 1
+
+
+def test_a_machine_translation_model_brings_the_language_identifier(script):
+    """GlotLID's one file is fetched with the translator, not its whole
+    repository."""
+    todo = script.checkpoints(["translategemma-27b"])
+    assert todo["cis-lmu/glotlid"] == ["translategemma-27b"]
+    assert script.FILES == {"cis-lmu/glotlid": "model_v3.bin"}
+    assert "cis-lmu/glotlid" not in script.checkpoints(["venice-uncensored-fp8"])
