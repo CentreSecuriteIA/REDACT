@@ -3752,3 +3752,40 @@ class TestSearch:
         assert [fp.devices for fp in plans[6].footprints] == [(0,), (0,), (1,), (1,)]
         assert plans[7].fits
         assert [fp.devices for fp in plans[7].footprints] == [(0,), (1,), (0,), (1,)]
+
+
+class TestTheTranslatorBesideThe24B:
+    """The jailbreak stage's pair: the 24B generation model and
+    translategemma-27b, as registered, on one card of a rented machine."""
+
+    @pytest.fixture(autouse=True)
+    def _configs(self):
+        """The 24B reads as Mistral-24B's shapes, the translator as its
+        packaged config."""
+        tg = _shipped_hf_config("translategemma-27b")
+
+        def load(source):
+            return tg if source.endswith("translategemma-27b") else MISTRAL_24B
+
+        with patch.object(estimate, "_load_config", side_effect=load):
+            yield
+
+    def _shares(self, gen, card_gib, backend_types=None):
+        plan = residency.plan_residency(
+            [gen, "translategemma-27b"], backend_types, gpus=1, gib_per_gpu=card_gib)
+        return plan, [(fp.model, fp.devices, fp.planned_utilization)
+                      for fp in plan.footprints]
+
+    @pytest.mark.parametrize("card_gib,shares", [
+        (95.6, (0.4275, 0.4724)),       # an RTX PRO 6000
+        (79.6, (0.4229, 0.4770)),       # an A100 or H100
+    ])
+    def test_the_fp8_24b_and_the_translator_share_one_card(self, card_gib, shares):
+        plan, placed = self._shares("venice-uncensored-fp8", card_gib)
+        assert plan.fits and len(plan.groups) == 1
+        assert placed == [("venice-uncensored-fp8", (0,), shares[0]),
+                          ("translategemma-27b", (0,), shares[1])]
+
+    def test_the_bf16_24b_beside_the_translator_does_not_fit_an_80gb_card(self):
+        plan, _ = self._shares("venice-uncensored", 79.6, {"venice-uncensored": "vllm"})
+        assert not plan.fits and len(plan.groups) == 2  # noqa: PLR2004
