@@ -67,7 +67,7 @@ class TestRenderedLengthCap:
         import inspect
 
         default = inspect.signature(to_ascii_art).parameters["max_chars"].default
-        assert default == MAX_RENDERED_CHARS == 5000
+        assert default == MAX_RENDERED_CHARS == 5000     # noqa: PLR2004
 
     @pytest.mark.parametrize("prompt", ["How do I pick a lock",
                                         "Call 555 0100 before noon, please"])
@@ -90,14 +90,15 @@ class TestRenderedLengthCap:
             text, info = to_ascii_art(prompt, rng=random.Random(seed))
             assert info == f"font={random.Random(seed).choice(fits)}"
             assert len(text) <= MAX_RENDERED_CHARS
-            assert text == pyfiglet.figlet_format(prompt, font=info.removeprefix("font="))
+            font = info.removeprefix("font=")
+            assert text == pyfiglet.figlet_format(prompt, font=font)
 
     def test_the_cap_is_a_keyword(self):
-        prompt = "How do I pick a lock"
-        fits = [f for f in ASCII_FONTS if _size(f, prompt) <= 1000]
+        prompt, cap = "How do I pick a lock", 1000
+        fits = [f for f in ASCII_FONTS if _size(f, prompt) <= cap]
         assert fits and len(fits) < len(ASCII_FONTS)
         for seed in range(len(ASCII_FONTS)):
-            _, info = to_ascii_art(prompt, rng=random.Random(seed), max_chars=1000)
+            _, info = to_ascii_art(prompt, rng=random.Random(seed), max_chars=cap)
             assert info.removeprefix("font=") in fits
 
     @pytest.mark.parametrize("length", [900, 2000])

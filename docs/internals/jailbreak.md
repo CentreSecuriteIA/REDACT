@@ -24,9 +24,9 @@ the technique names are in [techniques.md](../techniques.md).
 
 | Module | Holds |
 |---|---|
-| `technique.py` | The technique contract, `load_spec`, `tag`, `DISCARDED` |
+| `technique.py` | The technique contract, `load_spec`, `tag`, `DISCARDED`, `KINDS`, `DEFAULT_KINDS`, `family_kinds` |
 | `hacking/`, `manipulation/`, `obfuscation/`, `requests/` | The techniques, one module per family (`distractor.py` holds both distractor families), each with a getter; `get_all_hacking_functions`, `get_all_manipulation_functions`, `get_all_obfuscation_functions`, `get_all_request_functions` per subpackage. `manipulation/benign.py` makes the benign data: one unit per subcategory of the benign taxonomy and answer type, keyed `(main_category, sub_category, answer_type)` |
-| `pool.py` | `all_techniques`, `technique_pool(kind)`, `languages`, `registry`, `uses_translation` |
+| `pool.py` | `all_techniques`, `technique_pool(kind)`, `kind_of`, `languages`, `registry`, `uses_translation` |
 | `augmentation.py` | `KINDS`, `defaults(config_dir)`, `resolve(section, kind, base=None, config_dir=None)`, `rounds_of(kind)`, `apply_flat_keywords`, `FLAT_KEYWORDS` |
 | `rules.py` | `compatible(selected, pool, remaining_complexity)`, `request_obfuscation_candidates` |
 | `sampling.py` | `sample_combination`, `sample_exact_combination`, `_pick_by_family` |
@@ -68,7 +68,10 @@ def to_y(prompt: str, **kwargs) -> TechniqueGen:
   attributes: `families`, `complexity`, `requires_llm`, `requires_benign`,
   `encode_weight`, `max_tokens`, `cross_incompatible_with` (families this
   technique itself may not join), and from the first family `layer` and
-  `within_layer_order`.
+  `within_layer_order`; `kinds` (the augmentation kinds that may draw it)
+  is the technique's own, else its first family's, else `["adversarial"]`.
+  A `kinds` that is not a non-empty list of `adversarial` and `natural`
+  raises at import.
 
 `run_chain(techniques, text, ...)` runs one input through its techniques in
 the order given. A transform runs inline; a generator's requests are yielded
@@ -253,9 +256,18 @@ file), with `base`, the dataset type's section, resolved over it: a kind
 over the packaged default, when `section` gives it. A key starting with
 `_`, in the section or a kind, is a comment. With `translation` false, the
 translation an allow list or `family_weights` names is dropped with a
-WARNING (`_switch_off_translation`). `technique_pool(kind)` filters the
-registered techniques; with the switch on, a `techniques.allow` that names
-some languages (`pool.languages()`) admits those alone.
+WARNING (`_switch_off_translation`). `_check_kinds` raises for an allow
+list that names a family or technique whose spec `kinds` lack the kind.
+`technique_pool(kind)` filters the registered techniques; with the switch
+on, a `techniques.allow` that names some languages (`pool.languages()`)
+admits those alone. Last, it keeps the techniques whose `kinds` (set by
+`technique.tag`: the technique's own, else its first family's,
+`family_kinds`, else `DEFAULT_KINDS`, `["adversarial"]`) hold the kind,
+which `pool.kind_of(kind)` reads as `rounds_of` does: natural when the
+resolved kind has `exact_techniques`, so no key is added to it. Every
+technique holds `adversarial`, so only the natural pool is narrowed: to
+the 46 techniques of [techniques.md](../techniques.md#the-natural-pool) with
+translation off.
 `rounds_of(kind)` turns the kind into one sampler-settings dict per round:
 a natural round is `{"exact_techniques": n}`; an adversarial round is the
 budget keys, an `include_<layer>` per layer and `allow_request_obfuscation`

@@ -23,6 +23,10 @@ from redact.jailbreak.technique import load_spec
 EVAL_POOL = json.loads(
     (Path(__file__).parents[1] / "fixtures" / "eval_pool.json").read_text(
         encoding="utf-8"))
+#: The natural kind's default pool, sorted: ``fixtures/natural_pool.json``.
+NATURAL_POOL = json.loads(
+    (Path(__file__).parents[1] / "fixtures" / "natural_pool.json").read_text(
+        encoding="utf-8"))
 
 
 def _in(family: str, pool: list) -> list:
@@ -92,22 +96,24 @@ def _family(*names: str) -> list[str]:
     return [fn.__name__ for fn in all_techniques() if set(names) & set(fn.families)]
 
 
-#: The natural kind's default pool: what the spec marks natural, less
-#: translation, which its switch keeps out.
-NATURAL_POOL = sorted([
-    "to_rewrite_with_typos_low", "to_rewrite_with_typos_medium",
-    *_family("casual_writing", "answer_language", "asking", "indirect"),
-    "to_answer_in_markdown", "to_answer_as_tutorial", "to_answer_as_code",
-    "to_answer_as_structured_data",
-    "to_leetspeak_basic", "to_adversarial_suffix_punctuation",
-    "to_adversarial_suffix_emoji",
-])
-
-
-def test_the_default_variation_pool_is_the_46_natural_techniques():
+def test_the_default_variation_pool_is_the_46_pinned_natural_techniques():
+    """A technique added to a family the spec marks natural takes its
+    family's kinds, so it joins the natural pool unless its entry says
+    ``["adversarial"]``. This fails until the owner decides, in the spec and
+    ``fixtures/natural_pool.json``."""
     pool = technique_pool(resolve(None, "natural"))
     assert sorted(fn.__name__ for fn in pool) == NATURAL_POOL
     assert len(pool) == 46      # noqa: PLR2004
+    # Family by family: two typos, four whole families, four answer formats,
+    # and three techniques of attack families.
+    listed = sorted([
+        "to_rewrite_with_typos_low", "to_rewrite_with_typos_medium",
+        *_family("casual_writing", "answer_language", "asking", "indirect"),
+        "to_answer_in_markdown", "to_answer_as_tutorial", "to_answer_as_code",
+        "to_answer_as_structured_data",
+        "to_leetspeak_basic", "to_adversarial_suffix_punctuation",
+        "to_adversarial_suffix_emoji"])
+    assert listed == NATURAL_POOL
     assert {fn.families[0] for fn in pool} == {
         "typos", "casual_writing", "answer_language", "answer_format", "asking",
         "indirect", "encode", "suffixes"}

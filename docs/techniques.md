@@ -2,8 +2,9 @@
 
 The jailbreak stage draws from 152 techniques in 4 layers and 23 families.
 `configs/jailbreak/combination_spec.json` gives each technique its families,
-a complexity from 0 to 3, and whether it calls a model (`requires_llm`) or
-needs the benign data (`requires_benign`). This page lists them by name, for
+a complexity from 0 to 3, whether it calls a model (`requires_llm`) or
+needs the benign data (`requires_benign`), and the kinds that may draw it
+(`kinds`, [below](#the-natural-pool)). This page lists them by name, for
 the `allow` and `deny` lists of the
 [augmentation section](configuration.md#the-augmentation-section), and says
 briefly what each family does.
@@ -126,6 +127,43 @@ Model rewrites no check verifies (`cognitive`, `persona`, `typos`,
 `sensitive_words`, `tokenbreak`) are left out. With
 `"adversarial": {"translation": false}` the pool keeps the other 28.
 [configuration.md](configuration.md#dataset-types) gives the type file.
+
+## The natural pool
+
+A spec entry's `kinds` lists the kinds of the augmentation section that may
+draw the technique: `["adversarial"]` when neither the technique nor its
+first family gives one, and a technique's own `kinds` replace its family's.
+Every technique is adversarial. The families `typos`, `casual_writing`,
+`translation`, `answer_language`, `answer_format`, `asking` and `indirect`
+are marked `["adversarial", "natural"]`, less their attack-only techniques,
+and three techniques of attack families are marked natural on their own.
+The natural kind draws only what is marked natural: by default (translation
+off) these 46 techniques in 8 families, pinned in
+`tests/fixtures/natural_pool.json`:
+
+| Family | Natural techniques |
+|---|---|
+| `typos` | `to_rewrite_with_typos_low`, `to_rewrite_with_typos_medium` |
+| `casual_writing` | all nine |
+| `answer_language` | all twenty |
+| `answer_format` | `to_answer_in_markdown`, `to_answer_as_tutorial`, `to_answer_as_code`, `to_answer_as_structured_data` |
+| `asking` | `to_innocuous_question`, `to_ask_for_details` |
+| `indirect` | all six |
+| `encode` | `to_leetspeak_basic` |
+| `suffixes` | `to_adversarial_suffix_punctuation`, `to_adversarial_suffix_emoji` |
+
+With `"natural": {"translation": true}` the twenty translations join them.
+Attack-only: `structural`, `continuation`, `temporal`, the high and insane
+typos, `to_answer_as_dialogue`, `to_answer_as_story` and the three
+answer-format directives the natural kind denies anyway
+(`to_refusal_then_comply`, `to_apology_prevention`,
+`to_prefix_injection`), with every other family. A natural allow list that
+names one of them raises, so a `config_dir` copy of `augmentations.json`
+from before needs its natural `families.allow` trimmed. A natural-kind plan
+made before raises on resume, since its pool changed: run the natural kind
+with `resume=False`. A training build leaves out a benign or dual-use benign
+variation made with a technique the natural kind does not draw, with one
+WARNING that counts them ([stages/build.md](stages/build.md)).
 
 ## What the families do
 

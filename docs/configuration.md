@@ -323,6 +323,15 @@ A resumed run keeps each kind's plan: a changed pool, `rounds`,
 `family_weights`, `layer_rates` or `seed` raises an error that names them
 and `resume=False` ([stages/jailbreaks.md](stages/jailbreaks.md#how-it-resumes)).
 
+**Release note: the natural pool.** The natural kind now draws only what
+the spec's `kinds` mark natural (46 techniques by default; `structural`,
+`continuation`, `temporal`, the high and insane typos and the dialogue and
+story answer formats left it). A natural-kind plan made before raises on
+resume, since its pool changed: run the natural kind with `resume=False`.
+A training build leaves out the benign and dual-use benign variations such
+a plan made with a technique the natural kind no longer draws, with one
+WARNING that counts them.
+
 ### Keys
 
 Both kinds:
@@ -333,7 +342,7 @@ Both kinds:
 | `translation` | bool | `false`; `true` in the eval type's adversarial kind | Whether the kind draws the `translation` family. The family lists do not change it; `layers.deny`, `techniques.deny` and `pure_only` still apply |
 | `layers` | `{"deny": [...]}` | `{"deny": []}` | Layers left out |
 | `families` | `{"allow": [...] or null, "deny": [...]}` | adversarial: `{"allow": null, "deny": []}`; natural: the natural families | Families admitted and removed |
-| `techniques` | `{"allow": [...] or null, "deny": [...]}` | adversarial: `{"allow": null, "deny": []}`; natural: three techniques allowed, three denied | Techniques admitted and removed |
+| `techniques` | `{"allow": [...] or null, "deny": [...]}` | adversarial: `{"allow": null, "deny": []}`; natural: three techniques allowed, three denied | Techniques admitted and removed. Either `allow` names only what the spec's `kinds` let the kind draw |
 | `pure_only` | bool | `false` | Drop every technique that calls a model or needs benign data |
 | `family_weights` | `{family: number > 0}` | `{}` | A family's share within its layer when the plan deals families; 1 each by default |
 | `iterations` | int >= 1 | `1` | Units per input, numbered by `iteration` |
@@ -355,12 +364,13 @@ Natural only:
 | `exact_techniques` | int >= 1 | `1` | Techniques per variation |
 
 The packaged natural kind allows the families `typos`, `casual_writing`,
-`structural`, `answer_language`, `answer_format`, `asking`, `indirect`,
-`temporal`, `continuation`; allows the techniques `to_leetspeak_basic`,
-`to_adversarial_suffix_punctuation`, `to_adversarial_suffix_emoji`; and
-denies `to_refusal_then_comply`, `to_apology_prevention`,
-`to_prefix_injection`. A variation that leaves its input unchanged is
-rejected.
+`answer_language`, `answer_format`, `asking`, `indirect`; allows the
+techniques `to_leetspeak_basic`, `to_adversarial_suffix_punctuation`,
+`to_adversarial_suffix_emoji`; and denies `to_refusal_then_comply`,
+`to_apology_prevention`, `to_prefix_injection`. The spec's `kinds` narrow
+it further (step 6 below): its pool is 46 techniques
+([techniques.md](techniques.md#the-natural-pool)). A variation that leaves
+its input unchanged is rejected.
 
 ### How a kind's pool is built
 
@@ -375,7 +385,13 @@ From every registered technique, in this order:
    `translation` when the switch is off;
 4. remove the techniques in `techniques.deny`;
 5. with `pure_only`, remove every technique tagged `requires_llm` or
-   `requires_benign`.
+   `requires_benign`;
+6. keep only the techniques whose `kinds` in `combination_spec.json` hold
+   the kind: a technique's own, else its first family's, and
+   `["adversarial"]` for a family without any. So the natural kind draws
+   only what the spec marks natural ([extending.md](extending.md#add-a-jailbreak-technique)
+   says how to mark a technique). Every technique holds `adversarial`
+   today, so this step leaves the attacks' pool as it is.
 
 [techniques.md](techniques.md) lists every layer, family and technique name.
 
@@ -392,6 +408,12 @@ From every registered technique, in this order:
 - An `allow` list may not be empty: write `null` for all, or name what to
   leave out under `deny`. A name may not be under both.
 - The natural kind needs an allow list.
+- An allow list may name only families and techniques whose spec `kinds`
+  hold the kind. A natural allow list naming one the natural kind does not
+  draw (`structural`, `temporal`, `continuation`, `to_prefix_injection`,
+  ...) raises, naming it: a `config_dir` copy of `augmentations.json` made
+  before these left the natural kind does, so take them out of its
+  `families.allow`.
 - `natural_only_families`, at the top of `augmentations.json`
   (`casual_writing` in the packaged file), are added to the adversarial `families.deny` unless the
   adversarial `families.allow` names them.
@@ -400,7 +422,8 @@ From every registered technique, in this order:
 
 `"translation": false` keeps the `translation` family out of a kind, and
 `true` puts it in: the attacks draw it as any family, and the natural kind
-adds it to its allow list. No family list changes this; a
+adds it to its allow list (the spec marks the family natural). No family
+list changes this; a
 `techniques.deny` still removes the languages it names, and a
 `techniques.allow` that names some languages narrows the family to those
 (the eval type's nine low-resource languages).
@@ -745,7 +768,7 @@ values. Delete every file you do not change, then set `prompt_dir`.
 | File | Holds | Read by |
 |---|---|---|
 | `configs/llm/gpu_pricing.json` | Provider, then GPU name as `nvidia-smi` reports it, then hourly USD per GPU; `*` is a provider's fallback | the cost roll-up |
-| `configs/jailbreak/combination_spec.json` | `version`, `layer_order`, `layer_rates`, `layer_max_picks`, `families` (layer, order within the layer, incompatibilities, `dimension`; a `description`, which nothing reads), `manipulation_blocked_obfuscation`, `request_obfuscation_allowed_families`, `techniques` (families, complexity, `requires_llm`, `requires_benign`, `encode_weight`, optional `max_tokens`, `cross_incompatible_with`) | `jailbreak/technique.py` (`load_spec`, `tag`), `pool.py`, `rules.py`, `sampling.py`, `chain.py`, `augmentation.py`; its `version` goes in each row and in the jailbreak run record |
+| `configs/jailbreak/combination_spec.json` | `version`, `layer_order`, `layer_rates`, `layer_max_picks`, `families` (layer, order within the layer, incompatibilities, `dimension`, optional `kinds`; a `description`, which nothing reads), `manipulation_blocked_obfuscation`, `request_obfuscation_allowed_families`, `techniques` (families, complexity, `requires_llm`, `requires_benign`, `encode_weight`, optional `max_tokens`, `cross_incompatible_with`, `kinds`) | `jailbreak/technique.py` (`load_spec`, `tag`), `pool.py`, `rules.py`, `sampling.py`, `chain.py`, `augmentation.py`; its `version` goes in each row and in the jailbreak run record |
 | `configs/jailbreak/augmentations.json` | The two default kinds and `natural_only_families` | `jailbreak/augmentation.py` |
 | `configs/jailbreak/<layer>/*_templates.json` | Template variants of the pure techniques | `jailbreak/directives.py: load_templates` |
 | `configs/jailbreak/multi_turn/crescendo_followups.json` | Follow-ups of the crescendo attack | `multiturn_attacks/attacks.py` |

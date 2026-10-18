@@ -10,7 +10,7 @@ Augment the accepted inputs with technique combinations, in two kinds:
 | Kind | Writes | Default |
 |---|---|---|
 | `adversarial` | `Datasets/jailbreaks.csv`: jailbreak attacks | one round per input, by budget, from every technique but `translation` and `casual_writing` |
-| `natural` | `Datasets/variations.csv`: natural variations | one technique per input, from the natural allow lists |
+| `natural` | `Datasets/variations.csv`: natural variations | one technique per input, from the natural allow lists, of the 46 techniques the spec marks natural ([techniques.md](../techniques.md#the-natural-pool)) |
 
 These are the packaged defaults, which a `training` run takes: both kinds
 are on. An `eval` run's dataset type attacks the harmful inputs only, with
@@ -155,7 +155,12 @@ units its ledger does not record. Since the plan deals each family's
 techniques evenly, and counts the request obfuscation (when
 `allow_request_obfuscation` is on, as in the escalation's rounds 3 and 4)
 against `max_obfuscations`, a fresh plan with the same seed draws
-differently from one made before; a kept plan replays unchanged. A resume whose `seed`, pool, `rounds`,
+differently from one made before; a kept plan replays unchanged. The
+natural kind's pool is now what the spec's `kinds` mark natural, so a
+natural plan made before raises on resume (its pool changed): run the
+natural kind with `resume=False`. The build leaves out the benign and
+dual-use benign variations such a plan made with a technique the natural
+kind no longer draws ([build.md](build.md#training-mode)). A resume whose `seed`, pool, `rounds`,
 `family_weights` or `layer_rates` differ from those in the kind's
 `.plan.json` raises a `ValueError` that names them and `resume=False`; a
 plan without that file runs as it was made, with a WARNING. A changed

@@ -151,21 +151,43 @@ contract.
    `configs/jailbreak/combination_spec.json`: `families` (the first sets the
    layer and the order), `complexity` (0 to 3), `requires_llm`,
    `requires_benign`, `encode_weight` for an `encode` technique,
-   `max_tokens` to cap its calls' replies, and `cross_incompatible_with` for
-   families this technique, not its whole family, may not join. A new
+   `max_tokens` to cap its calls' replies, `cross_incompatible_with` for
+   families this technique, not its whole family, may not join, and
+   `kinds` when it should differ from its first family's (below). A new
    family also needs an entry under `families`: `layer`,
-   `within_layer_order` (its place in the obfuscation order; 0 elsewhere)
-   and `cross_incompatible_with`, plus a `description`, which nothing reads.
+   `within_layer_order` (its place in the obfuscation order; 0 elsewhere),
+   `dimension`, `cross_incompatible_with` and, for one variations may
+   draw, `kinds`, plus a `description`, which nothing reads.
    A combination takes one technique per family; a layer's cap is in
    `layer_max_picks`. A rule binds both ways, so one of the two families'
    lists is enough; a rule between two families of one capped layer is
    needless. Importing `redact.jailbreak` raises while the spec and the
    registry name different techniques.
-4. **Decide which kinds draw it.** The adversarial kind draws every family
-   unless denied. For variations, add the family to the natural kind's
+4. **Decide which kinds draw it.** The spec's `kinds`, a list of
+   `"adversarial"` and `"natural"`, say which kinds may draw a technique: a
+   technique's own `kinds` replace its first family's, and a family without
+   `kinds` is `["adversarial"]`. Give a technique `"natural"` only when a
+   benign input it rewrites stays benign and reads as a person would write
+   it. A family whose techniques are mostly natural carries both kinds,
+   and its attack-only techniques say `["adversarial"]` (the high and insane
+   typos, five answer formats); an attack family with one natural
+   technique keeps no `kinds` and that technique says both
+   (`to_leetspeak_basic`). So a new technique in an attack family is an
+   attack only until its entry says otherwise, and a new technique in a
+   family marked natural (`typos`, `casual_writing`, `translation`,
+   `answer_language`, `answer_format`, `asking`, `indirect`) takes its
+   family's kinds and joins the natural pool unless its entry says
+   `["adversarial"]`. The adversarial kind draws every family unless
+   denied. For variations, also add the family to the natural kind's
    `families.allow`, or the name to its `techniques.allow`, in
-   `configs/jailbreak/augmentations.json`. A family meant for variations only
-   goes in `natural_only_families`.
+   `configs/jailbreak/augmentations.json`; an allow list naming what the
+   spec keeps from the kind raises. A family meant for variations only goes
+   in `natural_only_families`.
+   - **The natural pool.** `tests/fixtures/natural_pool.json` pins the 46
+     names the natural kind draws by default, and
+     `tests/jailbreak/test_pool.py` fails until the owner decides: give the
+     technique `"kinds": ["adversarial"]`, or add its name to the fixture.
+     The same file checks the attack pool's 123 techniques in 21 families.
    - **The eval pool.** `configs/dataset_types/eval.json` allows whole
      families (`encode`, `fsh`, `dap`, `framing`, `structural`, `ascii_art`,
      `continuation`, `temporal`), so a technique added to one of them joins
