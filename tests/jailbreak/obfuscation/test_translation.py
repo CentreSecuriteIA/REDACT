@@ -156,3 +156,31 @@ class TestMachineTranslationTables:
 
         assert [reply_cap("x" * n) for n in (81, 161, 400, 1500, 1505, 9000)] == [
             113, 194, 434, 1532, 1536, 1536]
+
+
+class TestMachineTranslationPrompt:
+    """jailbreak/translate_mt: the model's wire format, one user message."""
+
+    def test_it_renders_to_one_user_message_and_no_system_prompt(self):
+        from redact.llms.prompting import build_messages, load_prompt
+
+        config = load_prompt("jailbreak", "translate_mt")
+        assert not {"system_prompt", "few_shot_examples"} & set(config)
+        assert config["seed_fields"] == ["source_code", "target_code", "text"]
+        text = "a {brace} and\n\ntwo lines"
+        assert build_messages(config, source_code="en", target_code="sw",
+                              text=text) == [{
+            "role": "user", "content": f"<<<source>>>en<<<target>>>sw<<<text>>>{text}",
+        }]
+
+    def test_an_overlay_of_it_is_reported(self, tmp_path):
+        import json
+
+        from redact.llms.prompting import report_prompt_sources
+
+        folder = tmp_path / "jailbreak" / "translate_mt"
+        folder.mkdir(parents=True)
+        (folder / "template.json").write_text(
+            json.dumps({"template": "{text}"}), encoding="utf-8")
+        overridden = report_prompt_sources(tmp_path)["overridden"]
+        assert overridden == ["jailbreak/translate_mt"]

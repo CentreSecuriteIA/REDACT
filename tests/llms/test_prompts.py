@@ -814,9 +814,11 @@ class TestEmptyScaffoldRenders:
         "name", [n for n in PACKAGED if not n.startswith("format_instructions/")]
     )
     def test_stub_renders_one_shot_and_in_two_stages(self, scaffold, name):
+        """A prompt without a system prompt (jailbreak/translate_mt) stays one
+        user message."""
         pipeline, category = name.split("/", 1)
         source = load_prompt(pipeline, category)
-        build = dict.fromkeys(_fields(source["system_prompt"]), "B")
+        build = dict.fromkeys(_fields(source.get("system_prompt", "")), "B")
         call = dict.fromkeys(_fields(source["template"]), "C")
 
         two_stage = PromptTemplate.load(
@@ -825,9 +827,10 @@ class TestEmptyScaffoldRenders:
         stub = load_prompt(pipeline, category, prompt_dir=scaffold)
         one_shot = build_messages(stub, **{**call, **build})
 
-        assert [m["role"] for m in two_stage] == ["system", "user"]
-        assert [m["role"] for m in one_shot] == ["system", "user"]
-        assert "{" not in two_stage[0]["content"] + two_stage[1]["content"]
+        roles = ["system", "user"] if "system_prompt" in source else ["user"]
+        assert [m["role"] for m in two_stage] == roles
+        assert [m["role"] for m in one_shot] == roles
+        assert "{" not in "".join(m["content"] for m in two_stage)
 
     def test_the_checker_builders_accept_it(self, scaffold):
         from redact.content_moderation.checker import (
