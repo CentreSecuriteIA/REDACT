@@ -18,7 +18,7 @@ layer, families apply in the order of their `within_layer_order`.
 |---|---|---|
 | `hacking` | 25 | at most 1 |
 | `manipulation` | 8 | at most 1 |
-| `obfuscation` | 72 | up to `max_obfuscations` families in budget mode, plus the request obfuscation when allowed |
+| `obfuscation` | 72 | up to `max_obfuscations` families in budget mode, the request obfuscation, when allowed, among them |
 | `requests` | 47 | at most 1 |
 
 ## Families and techniques

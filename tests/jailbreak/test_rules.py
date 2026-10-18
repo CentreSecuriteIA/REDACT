@@ -211,6 +211,24 @@ def test_a_budget_draw_stays_within_its_complexity(max_complexity):
         assert sum(t.complexity for t in fn.techniques) <= max_complexity, (seed, names)
 
 
+@pytest.mark.parametrize("max_obfuscations", [0, 1, 2, 3])
+def test_a_budget_draw_counts_its_request_obfuscation_against_max_obfuscations(
+        max_obfuscations):
+    for seed in range(300):
+        fn = sample_combination(
+            random.Random(seed), POOL, max_complexity=12,
+            max_obfuscations=max_obfuscations, allow_request_obfuscation=True,
+            dealer=Dealer(key=(seed,)) if seed % 2 else None,
+            sampling_probs=dict.fromkeys(
+                ("hacking", "manipulation", "requests", "request_obfuscation"), 0.9))
+        names = [t.__name__ for t in fn.techniques]
+        obfuscations = sum(t.layer == "obfuscation" for t in fn.techniques)
+        assert obfuscations <= max_obfuscations, (seed, names)
+        last = getattr(fn, "request_obfuscation", None)
+        if last is not None:
+            assert names[-1] == last.__name__, (seed, names)
+
+
 def test_request_obfuscation_is_light_encoding_or_translation():
     names = {fn.__name__ for fn in request_obfuscation_candidates(POOL)}
     assert {"to_rot13", "to_french"} <= names

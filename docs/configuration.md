@@ -344,9 +344,9 @@ Adversarial only:
 |---|---|---|---|
 | `rounds` | `null`, `"escalation"` or a list | `null` | The sampler settings per round; see [rounds](#rounds) |
 | `max_complexity` | int >= 0 | `6` | Budget mode: the most total complexity (each technique scores 0 to 3) |
-| `max_obfuscations` | int >= 0 | `2` | Budget mode: the most obfuscation families |
-| `layer_rates` | `{layer: 0..1}` | `{}`, the spec's rates | Target share of units that take a `hacking`, `manipulation` or `requests` technique, and the chance of `request_obfuscation` |
-| `allow_request_obfuscation` | bool | `false` | Allow one more technique after the request technique, at the `request_obfuscation` rate: a light `encode` technique (the light `to_sensitive_words_encode_*` among them), or a translation when the pool has one. It must fit the remaining complexity and is not counted against `max_obfuscations` |
+| `max_obfuscations` | int >= 0 | `2` | Budget mode: the most obfuscation families, the request obfuscation included |
+| `layer_rates` | `{layer: 0..1}` | `{}`, the spec's rates | Target share of units that take a `hacking`, `manipulation` or `requests` technique, or, with `allow_request_obfuscation`, a `request_obfuscation` |
+| `allow_request_obfuscation` | bool | `false` | Allow one more technique after the request technique, at the `request_obfuscation` rate: a light `encode` technique (the light `to_sensitive_words_encode_*` among them), or a translation when the pool has one. It is drawn before the other obfuscations, from what the earlier picks leave, and takes one of the `max_obfuscations` slots and its complexity from them; with `max_obfuscations` 0 there is none |
 
 Natural only:
 
@@ -469,7 +469,8 @@ explains the dealing.
 
 `hacking` and `manipulation` exclude each other, so their rates should sum to
 at most 1; beyond it, `manipulation` falls short of its rate and the plan
-logs a WARNING. `request_obfuscation` is a chance per unit, not dealt.
+logs a WARNING. With `allow_request_obfuscation`, `request_obfuscation` is
+dealt the same way, over the group's units.
 
 ### Examples
 

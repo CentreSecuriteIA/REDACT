@@ -140,16 +140,27 @@ the techniques still `compatible` with what is picked:
 1. `hacking`, when the layer joins (its rate);
 2. `manipulation`, when the layer joins;
 3. `requests`, when the layer joins;
-4. `obfuscation`: one pick after another, from what the budget leaves, until
-   `max_obfuscations` or until no technique fits;
-5. with `allow_request_obfuscation`, at the `request_obfuscation` rate, one
-   light `encode` technique (the light `to_sensitive_words_encode_*` among
-   them) or a translation, applied after the request technique.
+4. the request obfuscation (phase 5 in the code, decided and drawn before
+   phase 4): with `allow_request_obfuscation` and at least one
+   `max_obfuscations` slot, when it joins at the `request_obfuscation` rate
+   (the dealer's `include`, as for the layers; a per-unit draw without a
+   dealer), one light `encode` technique (the light
+   `to_sensitive_words_encode_*` among them) or a translation, applied
+   after the request technique;
+5. `obfuscation`: one pick after another, from what the budget leaves, until
+   `max_obfuscations`, less the request obfuscation's slot, or until no
+   technique fits.
 
-The apply order is the layers', whatever the pick order. A technique
-above the remaining complexity is never eligible, for the first pick too. The
-step-5 pick is drawn from the techniques still compatible and within the
-remaining complexity, and is not counted against `max_obfuscations`.
+The apply order is the layers', whatever the pick order, except the request
+obfuscation, which goes last. A technique above the remaining complexity is
+never eligible, for the first pick too. The request obfuscation is drawn
+from the techniques still compatible and within the remaining complexity,
+so it holds its slot and its complexity before the obfuscations fill the
+rest: a combination never has more than `max_obfuscations` obfuscations.
+With `allow_request_obfuscation` false (every packaged kind) the draws are
+those made before it was counted; a test pins them. The combined function
+names its request obfuscation in `request_obfuscation` (`None` without
+one), which `_observe` counts in the dealer.
 
 **Count mode** (`exact_techniques: n`) picks exactly `n` compatible
 techniques from any layer, ignoring complexity. It returns fewer when the
@@ -173,7 +184,9 @@ order.
   far are below `floor(rate x position + offset)`, where `position` counts
   the group's units so far and `offset` is a number in [0, 1) seeded per
   group and layer. A group gets `rate x size` picks, rounded down or up, and
-  a group of one takes the layer with probability `rate`.
+  a group of one takes the layer with probability `rate`. The request
+  obfuscation, when allowed, is dealt the same way under the name
+  `request_obfuscation`.
 - **Families.** Among the eligible families, the dealer picks the one with
   the lowest count over its weight (`family_weights`, 1 by default), ties
   broken by the unit's rng.
@@ -194,8 +207,8 @@ order.
   when the rules or the pool leave no fitting technique, is logged as a
   WARNING naming the coverage file.
 
-After each unit, `_observe` counts the kept draw's families, techniques and
-layers in the group's dealer. Each group has its own dealer; nothing is
+After each unit, `assign_combination` has `_observe` count the kept draw's
+families, techniques, layers and request obfuscation in the group's dealer. Each group has its own dealer; nothing is
 counted across groups.
 
 `tests/jailbreak/simulate.py` plans N synthetic inputs through `plan_run`

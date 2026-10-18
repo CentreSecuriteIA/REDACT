@@ -391,16 +391,43 @@ class TestRequestLayerObfuscation:
         light_encode = _tech("to_fake_rot13", "obfuscation", ["encode"], encode_weight="light")
         return [request, light_encode], request, light_encode
 
+    @staticmethod
+    def _draw(pool, **budget):
+        fn = sample_combination(
+            random.Random(0), pool, include_hacking=False, include_manipulation=False,
+            allow_request_obfuscation=True,
+            sampling_probs={"requests": 1.0, "request_obfuscation": 1.0}, **budget)
+        return fn
+
     def test_pick_runs_after_the_request_technique(self):
         pool, request, light_encode = self._pool()
-        fn = sample_combination(
-            random.Random(0), pool,
-            include_hacking=False, include_manipulation=False,
-            max_obfuscations=0, max_complexity=10,
-            allow_request_obfuscation=True,
-            sampling_probs={"requests": 1.0, "request_obfuscation": 1.0},
-        )
+        fn = self._draw(pool, max_obfuscations=1, max_complexity=10)
         assert [t.__name__ for t in fn.techniques] == [request.__name__, light_encode.__name__]
+        assert fn.request_obfuscation is light_encode
+
+    def test_it_takes_one_of_the_obfuscation_slots(self):
+        pool, request, light_encode = self._pool()
+        suffix = _tech("to_fake_suffix", "obfuscation", ["suffixes"])
+        one = self._draw([*pool, suffix], max_obfuscations=1, max_complexity=10)
+        two = self._draw([*pool, suffix], max_obfuscations=2, max_complexity=10)
+        assert [t.__name__ for t in one.techniques] == ["ask_politely", "to_fake_rot13"]
+        assert [t.__name__ for t in two.techniques] == [
+            "to_fake_suffix", "ask_politely", "to_fake_rot13"]
+
+    def test_no_obfuscation_slot_leaves_no_request_obfuscation(self):
+        pool, request, _light_encode = self._pool()
+        fn = self._draw(pool, max_obfuscations=0, max_complexity=10)
+        assert fn.techniques == [request]
+        assert fn.request_obfuscation is None
+
+    def test_it_holds_its_complexity_before_the_obfuscations_fill_the_budget(self):
+        # Budget 3: the request (1) and the request obfuscation (2) fill it, so
+        # the suffix (2) no longer fits; drawn last, it once found no room.
+        pool, _request, _light_encode = self._pool()
+        pool[1].complexity = 2
+        suffix = _tech("to_fake_suffix", "obfuscation", ["suffixes"], complexity=2)
+        fn = self._draw([*pool, suffix], max_obfuscations=2, max_complexity=3)
+        assert [t.__name__ for t in fn.techniques] == ["ask_politely", "to_fake_rot13"]
 
     def test_hierarchy_order_alone_would_put_it_first(self):
         _pool, request, light_encode = self._pool()

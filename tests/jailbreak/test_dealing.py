@@ -214,3 +214,53 @@ def test_a_kept_plan_replays_each_row_as_it_was_recorded(tmp_path):
     replayed = [[fn.__name__ for fn in combination_of(names, every).techniques]
                 for names in recorded]
     assert replayed == recorded
+
+
+# --- the request obfuscation -----------------------------------------------------
+# With allow_request_obfuscation on, the request obfuscation is dealt at its
+# rate like a layer and holds one obfuscation slot. Off (every packaged kind),
+# the draws are those the planner made before it was counted.
+
+_BUDGETS = [
+    {},
+    {"max_complexity": 9, "max_obfuscations": 3, "allow_request_obfuscation": False,
+     "sampling_probs": {"hacking": 0.9, "manipulation": 0.1, "requests": 0.9,
+                        "request_obfuscation": 0.7}},
+]
+_PINNED_DRAWS = "4f512a7cfa07878b26819cdf384113f401f42f82929dcdbe3289f55c82df49b3"
+
+
+def test_draws_without_the_request_obfuscation_are_those_made_before_it_was_counted():
+    import hashlib
+    import json
+    import random
+
+    from redact.jailbreak.pool import all_techniques
+    from redact.jailbreak.sampling import sample_combination
+
+    pool = all_techniques()
+    dealt = [simulate.deal(pool, 60, groups=2, seed=seed, rounds=_BUDGETS)
+             for seed in (1, 2)]
+    alone = [[t.__name__ for t in sample_combination(
+                 random.Random(seed), pool, **budget).techniques]
+             for seed in range(100) for budget in _BUDGETS]
+    digest = hashlib.sha256(json.dumps([dealt, alone]).encode()).hexdigest()
+    assert digest == _PINNED_DRAWS
+
+
+def test_the_plan_deals_the_request_obfuscation_at_its_rate():
+    """Half of a group of 40 takes one, exactly: dealt, not drawn per unit."""
+    from redact.dataset.dealing import Dealer
+    from redact.jailbreak.plan import assign_combination
+    from redact.jailbreak.pool import all_techniques
+
+    pool = all_techniques()
+    dealer = Dealer(key=(1, "Cyber", "harmful", 0))
+    for position in range(1, 2 * _GROUP + 1):
+        dealer.position = position
+        assign_combination(
+            f"unit{position}", pool, seed=1, dealer=dealer, max_complexity=9,
+            max_obfuscations=2, allow_request_obfuscation=True,
+            sampling_probs={"request_obfuscation": 0.5})
+    assert dealer.included["request_obfuscation"] == _GROUP
+    assert dealer.targets["request_obfuscation"] == _GROUP
