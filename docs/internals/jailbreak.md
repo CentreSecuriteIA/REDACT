@@ -161,7 +161,8 @@ from the techniques still compatible and within the remaining complexity,
 so it holds its slot and its complexity before the obfuscations fill the
 rest: a combination never has more than `max_obfuscations` obfuscations.
 With `allow_request_obfuscation` false (every packaged kind) the draws are
-those made before it was counted; a test pins them. The combined function
+those made before the request obfuscation was counted (member dealing
+aside); a test pins them. The combined function
 names its request obfuscation in `request_obfuscation` (`None` without
 one), which `_observe` counts in the dealer.
 
@@ -206,9 +207,9 @@ order.
 - **Repeats.** When a unit's combination equals one of its input's earlier
   iterations, it is drawn again without the dealer, up to 8 draws in all;
   the last is kept if none differs.
-- **Shortfall.** A layer two or more picks below its target in a group, as
-  when the rules or the pool leave no fitting technique, is logged as a
-  WARNING naming the coverage file.
+- **Shortfall.** A layer, or the request obfuscation step, two or more
+  picks below its target in a group, as when the rules or the pool leave no
+  fitting technique, is logged as a WARNING naming the coverage file.
 
 After each unit, `assign_combination` has `_observe` count the kept draw's
 families, techniques, layers and request obfuscation in the group's dealer. Each group has its own dealer; nothing is
@@ -258,6 +259,10 @@ over the packaged default, when `section` gives it. A key starting with
 translation an allow list or `family_weights` names is dropped with a
 WARNING (`_switch_off_translation`). `_check_kinds` raises for an allow
 list that names a family or technique whose spec `kinds` lack the kind.
+For a family, the message names those of its techniques the kind draws, to
+list under `techniques.allow`, and does not offer adding the kind to the
+family's `kinds`: they apply to every technique in it that sets none of
+its own.
 `technique_pool(kind)` filters the registered techniques; with the switch
 on, a `techniques.allow` that names some languages (`pool.languages()`)
 admits those alone. Last, it keeps the techniques whose `kinds` (set by

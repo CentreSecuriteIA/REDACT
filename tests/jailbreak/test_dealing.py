@@ -117,6 +117,23 @@ def test_a_layer_left_two_or_more_short_of_its_target_is_logged(tmp_path, caplog
         "pick (see jb.coverage.csv)."]
 
 
+def test_a_request_obfuscation_left_short_is_logged_as_a_step(tmp_path, caplog):
+    import logging
+
+    # No encode or translation technique in the pool: no unit can take one.
+    with caplog.at_level(logging.WARNING, logger="redact.jailbreak.plan"):
+        plan_run(_one_group(_GROUP), get_all_hacking_functions(),
+                 manifest_path=tmp_path / "jb.manifest.jsonl", seed=3,
+                 sample_kwargs={"allow_request_obfuscation": True},
+                 layer_rates={"hacking": 0.5, "manipulation": 0.0, "requests": 0.0,
+                              "request_obfuscation": 1.0},
+                 verbose=False)
+    assert [r.getMessage() for r in caplog.records] == [
+        "Plan: group (Cyber, harmful), iteration 0: the request obfuscation step "
+        f"has 0 of its target {_GROUP}; the pool or the compatibility rules left "
+        "the rest no pick (see jb.coverage.csv)."]
+
+
 def _plan_kind(tmp_path, section: dict, n: int):
     """Plan ``n`` inputs of one group under the adversarial ``section``; the
     coverage rows."""

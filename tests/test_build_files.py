@@ -30,8 +30,9 @@ nor a translation, whose characters no font draws, so every attack of the
 runs is accepted. The natural kind draws only what the spec marks natural
 (46 techniques): one variation of the training run is ``to_abbreviations``
 on a text with none of its words, a no-op the natural kind rejects (31 of
-32 jailbreak rows accepted), and one more typos rewrite repeats an accepted
-output, which the build leaves out: its count is 86.
+32 jailbreak rows accepted), and one more typos rewrite gives the text of an
+accepted output. The variations part is written before the outputs, so the
+build leaves out that output's row, not the rewrite: its count is 86.
 
 The eval run is not that commit's: its inputs are seeded from a small
 constitution of placeholder entries, as every run's are.

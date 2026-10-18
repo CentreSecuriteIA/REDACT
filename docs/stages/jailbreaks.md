@@ -152,10 +152,12 @@ Each kind resumes on its own, from its ledger, with the lock and cut-back of
 
 The plan is frozen. A resumed kind reuses its manifest and runs the planned
 units its ledger does not record. Since the plan deals each family's
-techniques evenly, and counts the request obfuscation (when
-`allow_request_obfuscation` is on, as in the escalation's rounds 3 and 4)
-against `max_obfuscations`, a fresh plan with the same seed draws
-differently from one made before; a kept plan replays unchanged. The
+techniques evenly, follows the persona and cognitive vs impersonation rule
+([techniques.md](../techniques.md#compatibility-rules)), and counts
+the request obfuscation (when `allow_request_obfuscation` is on, as in the
+escalation's rounds 3 and 4) against `max_obfuscations`, a fresh plan with
+the same seed draws differently from one made before; a kept plan replays
+unchanged. The
 natural kind's pool is now what the spec's `kinds` mark natural, so a
 natural plan made before raises on resume (its pool changed): run the
 natural kind with `resume=False`. The build leaves out the benign and

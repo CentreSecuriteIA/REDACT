@@ -250,24 +250,46 @@ def test_a_section_that_breaks_a_rule_raises_naming_the_kind_and_key(
     assert message in str(raised.value)
 
 
-@pytest.mark.parametrize(("given", "level", "name"), [
-    ({"families": {"allow": ["typos", "structural"]}}, "families", "structural"),
-    ({"techniques": {"allow": ["to_prefix_injection"]}}, "techniques",
-     "to_prefix_injection"),
+@pytest.mark.parametrize("name", [
+    "to_prefix_injection",
     # A family the kind draws, less a technique the spec keeps from it.
-    ({"techniques": {"allow": ["to_rewrite_with_typos_insane"]}}, "techniques",
-     "to_rewrite_with_typos_insane"),
+    "to_rewrite_with_typos_insane",
 ])
-def test_a_natural_allow_list_naming_what_the_kind_does_not_draw_raises(
-        given, level, name):
+def test_a_natural_techniques_allow_naming_one_the_kind_does_not_draw_raises(name):
     with pytest.raises(ValueError) as raised:
-        resolve({"natural": given}, "natural")
+        resolve({"natural": {"techniques": {"allow": [name]}}}, "natural")
     assert str(raised.value) == (
-        f"augmentations.natural.{level}.allow names {name!r}, which the natural "
+        f"augmentations.natural.techniques.allow names {name!r}, which the natural "
         "kind does not draw: its kinds in combination_spec.json are "
-        f"['adversarial']. Take it out of {level}.allow (a config_dir copy of "
+        "['adversarial']. Take it out of techniques.allow (a config_dir copy of "
         "augmentations.json made before it left the natural kind still names "
         'it), or add "natural" to its kinds in combination_spec.json.')
+
+
+@pytest.mark.parametrize(("family", "members"), [
+    ("encode", "list under techniques.allow those of its techniques the natural "
+               "kind draws: ['to_leetspeak_basic']."),
+    ("suffixes", "list under techniques.allow those of its techniques the natural "
+                 "kind draws: ['to_adversarial_suffix_punctuation', "
+                 "'to_adversarial_suffix_emoji']."),
+    ("structural", "the natural kind draws none of its techniques (to draw one, "
+                   'add "natural" to that technique\'s kinds in '
+                   "combination_spec.json)."),
+])
+def test_a_natural_families_allow_naming_one_the_kind_does_not_draw_names_its_members(
+        family, members):
+    """Not "add natural to the family's kinds": they apply to every technique
+    in it that sets none of its own, so the family's other techniques would
+    join the natural pool too."""
+    with pytest.raises(ValueError) as raised:
+        resolve({"natural": {"families": {"allow": ["typos", family]}}}, "natural")
+    assert str(raised.value) == (
+        f"augmentations.natural.families.allow names {family!r}, which the natural "
+        "kind does not draw: its kinds in combination_spec.json are "
+        "['adversarial'], and a family's kinds apply to every technique in it "
+        "that sets none of its own. Take it out of families.allow (a config_dir "
+        "copy of augmentations.json made before it left the natural kind still "
+        f"names it); {members}")
 
 
 def test_a_config_dir_copy_of_the_former_natural_kind_raises(tmp_path):

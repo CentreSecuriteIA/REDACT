@@ -357,10 +357,16 @@ def _check_kinds(where: str, kind: str, resolved: dict) -> None:
     Raises:
         ValueError: An allow list names one the spec keeps from ``kind``, as
             a copy of ``augmentations.json`` made before it left the kind
-            does. The message names it and both fixes.
+            does. The message names it and the fixes: for a technique, take
+            it out or add ``kind`` to its spec ``kinds``; for a family, take
+            it out and list under ``techniques.allow`` those of its
+            techniques ``kind`` draws. Adding ``kind`` to a family's
+            ``kinds`` is not offered: they apply to every technique in it
+            that sets none of its own.
     """
+    registered = all_techniques()
     techniques = {fn.__name__: getattr(fn, "kinds", DEFAULT_KINDS)
-                  for fn in all_techniques()}
+                  for fn in registered}
     families = load_spec()["families"]
     for level in ("families", "techniques"):
         for name in resolved[level]["allow"] or ():
@@ -368,13 +374,27 @@ def _check_kinds(where: str, kind: str, resolved: dict) -> None:
                 continue        # _check_names refuses a name nothing has
             kinds = (family_kinds(name) if level == "families"
                      else techniques[name])
-            if kind not in kinds:
+            if kind in kinds:
+                continue
+            refused = (f"{where}.{level}.allow names {name!r}, which the {kind} "
+                       f"kind does not draw: its kinds in {_SPEC} are {list(kinds)}")
+            take_out = (f"Take it out of {level}.allow (a config_dir copy of "
+                        f"augmentations.json made before it left the {kind} kind "
+                        "still names it)")
+            if level == "techniques":
                 raise ValueError(
-                    f"{where}.{level}.allow names {name!r}, which the {kind} kind "
-                    f"does not draw: its kinds in {_SPEC} are {list(kinds)}. Take it "
-                    f"out of {level}.allow (a config_dir copy of augmentations.json "
-                    f"made before it left the {kind} kind still names it), or add "
-                    f'"{kind}" to its kinds in {_SPEC}.')
+                    f'{refused}. {take_out}, or add "{kind}" to its kinds in {_SPEC}.')
+            drawn = [fn.__name__ for fn in registered
+                     if name in getattr(fn, "families", ())
+                     and kind in techniques[fn.__name__]]
+            members = (
+                f"list under techniques.allow those of its techniques the {kind} "
+                f"kind draws: {drawn}." if drawn else
+                f"the {kind} kind draws none of its techniques (to draw one, add "
+                f'"{kind}" to that technique\'s kinds in {_SPEC}).')
+            raise ValueError(
+                f"{refused}, and a family's kinds apply to every technique in it "
+                f"that sets none of its own. {take_out}; {members}")
 
 
 def _switch_off_translation(where: str, resolved: dict) -> None:

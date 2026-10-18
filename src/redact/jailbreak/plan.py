@@ -27,7 +27,8 @@ from .sampling import sample_combination
 
 logger = logging.getLogger(__name__)
 
-# A layer whose picks fall this far or further below its target is logged.
+# A layer, or the request obfuscation step, whose picks fall this far or
+# further below its target is logged.
 _SHORT = 2
 
 
@@ -204,16 +205,19 @@ def plan_run(
 
 
 def _warn_short(dealer: Dealer, iteration: int, manifest_path: Path) -> None:
-    """Log each layer of a dealt group whose picks fell two or more short of
-    its target, as when no technique of the layer fits a unit's other picks."""
+    """Log each layer of a dealt group, and the request obfuscation step,
+    whose picks fell two or more short of its target, as when no technique
+    of it fits a unit's other picks."""
     category, entry_type = dealer.key[1:3]
-    for layer, target in dealer.targets.items():
-        if target - dealer.included[layer] >= _SHORT:
+    for name, target in dealer.targets.items():
+        if target - dealer.included[name] >= _SHORT:
+            what = ("the request obfuscation step" if name == "request_obfuscation"
+                    else f"the {name} layer")
             logger.warning(
-                "Plan: group (%s, %s), iteration %d: the %s layer has %d of its "
-                "target %d; the pool or the compatibility rules left the rest no "
-                "pick (see %s).", category, entry_type, iteration, layer,
-                dealer.included[layer], target, coverage_path(manifest_path).name)
+                "Plan: group (%s, %s), iteration %d: %s has %d of its target %d; "
+                "the pool or the compatibility rules left the rest no pick (see "
+                "%s).", category, entry_type, iteration, what,
+                dealer.included[name], target, coverage_path(manifest_path).name)
 
 
 def plan_inputs(
