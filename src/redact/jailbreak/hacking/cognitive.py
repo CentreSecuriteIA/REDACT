@@ -2,31 +2,66 @@
 
 The five techniques are the categories of
 ``configs/jailbreak/hacking/cognitive_techniques.json``; ``info`` is
-``category=<key>``.
+``category=<key>``. A scenario reply without its scene is asked again, up to
+:func:`~redact.llm_pipeline.extracted`'s attempts, then the prompt is
+discarded (:data:`MALFORMED_SCENARIO`).
 """
 
 import re
-from collections.abc import Callable
+from collections.abc import Callable, Generator
 
 from redact.jailbreak.directives import load_templates
-from redact.jailbreak.technique import TechniqueGen
-from redact.llm_pipeline import LLMRequest
+from redact.jailbreak.technique import DISCARDED, TechniqueGen
+from redact.llm_pipeline import LLMRequest, extracted
 from redact.llms.prompting import build_messages, load_prompt
 
 _TECHNIQUES: dict[str, dict] = load_templates(
     "hacking", "cognitive_techniques.json")["categories"]
 
+#: The info of a technique whose scenario reply never held a scene.
+MALFORMED_SCENARIO = f"{DISCARDED}; reason=malformed scenario"
 
+# A line of three or more dashes: the scenario prompts put the scene behind it.
+_DELIMITER = re.compile(r"^[ \t]*-{3,}[ \t]*$", re.MULTILINE)
 _SCENARIO_RE = re.compile(
     r"\*{0,2}scenario description\*{0,2}[:\s]*[\s\*\n]*(.*)",
     re.DOTALL | re.IGNORECASE,
 )
+# The same heading at the start of a block.
+_HEADING_RE = re.compile(r"\A[#\s]*" + _SCENARIO_RE.pattern, re.DOTALL | re.IGNORECASE)
 
 
-def _extract_scenario(text: str) -> str:
-    """Pull the 'Scenario Description' section from an LLM reply, else the whole text."""
-    match = _SCENARIO_RE.search(text)
-    return match.group(1).strip() if match else text.strip()
+def _extract_scenario(text: str) -> str | None:
+    """The scene of a scenario reply, or None when it has none.
+
+    The scenario prompts ask for the scene at the bottom, set apart by ``---``
+    lines: it is the last block after the first delimiter, less a leading
+    'Scenario Description' heading. A reply without a delimiter may mark the
+    scene with that heading instead. A reply with neither, or an empty scene,
+    has none: it is rejected whole, never taken as the scene.
+    """
+    blocks = [block.strip() for block in _DELIMITER.split(text)[1:]]
+    blocks = [block for block in blocks if block]
+    if blocks:
+        heading = _HEADING_RE.match(blocks[-1])
+        scene = heading.group(1) if heading else blocks[-1]
+    else:
+        match = _SCENARIO_RE.search(text)
+        scene = match.group(1) if match else ""
+    return scene.strip() or None
+
+
+def _scenario_gen(
+    gen_model: str | None, messages: list[dict],
+) -> Generator[LLMRequest, str, str | None]:
+    """Ask for a scenario until a reply holds a scene (:func:`_extract_scenario`);
+    return the scene, or None when no attempt held one."""
+    def scene_of(reply: str) -> list[str]:
+        scene = _extract_scenario(reply)
+        return [scene] if scene else []
+
+    scenes, _attempts = yield from extracted(gen_model, lambda: messages, scene_of)
+    return scenes[0] if scenes else None
 
 
 def _scenario_messages(prompt: str, prompt_dir=None) -> list[dict]:
@@ -59,11 +94,14 @@ def _cognitive_gen(
     """Yield the scenario request, then the construction request for the
     technique ``key`` of the taxonomy; return ``(jailbreak, info)``.
 
-    A given ``scenario`` skips the scenario request.
+    A given ``scenario`` skips the scenario request. A scenario that no
+    attempt parses returns the prompt with :data:`MALFORMED_SCENARIO`.
     """
     if scenario is None:
-        raw = yield LLMRequest(gen_model, _scenario_messages(prompt, prompt_dir))
-        scenario = _extract_scenario(raw)
+        scenario = yield from _scenario_gen(
+            gen_model, _scenario_messages(prompt, prompt_dir))
+        if scenario is None:
+            return prompt, MALFORMED_SCENARIO
     technique = _TECHNIQUES[key]
     jailbreak = yield LLMRequest(gen_model, _construction_messages(
         prompt, technique["display_name"], technique["description"],

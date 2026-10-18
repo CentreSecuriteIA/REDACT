@@ -135,7 +135,14 @@ template variant or a font, for traceability.
 
 - `cognitive` and `persona` are two model calls each: a scenario, then the
   jailbreak built on it. A named persona grounds the scenario in the
-  persona's character first. The definitions live in
+  persona's character first; the prompt names it by its `display_name`
+  (`Someone from the Future`), the info by its key
+  (`category=someone_from_the_future_persona`). The scenario prompts ask
+  for the scene at the bottom, behind `---` delimiters: the scene is the
+  last block after the first delimiter, or, in a reply without one, what
+  follows a `Scenario Description` heading. A reply with neither is asked
+  again, up to 3 times in all, and then rejects the result
+  (`DISCARDED; reason=malformed scenario`). The definitions live in
   `configs/jailbreak/hacking/cognitive_techniques.json` and `personas.json`,
   editable without touching code. `to_invented_persona` makes the same two
   calls as `cognitive`'s `to_persona_roleplay` until it gets prompts of its
@@ -163,9 +170,14 @@ the answers.
   technique. The encoding, splitting or substitution then applies to those
   words. A reply that is not a list of at most ten of the prompt's words
   rejects the result (`DISCARDED; reason=malformed word list`). When the
-  model marks no word, the encodings and splits apply to the whole prompt
-  (every word for the fixed separators), and `to_sensitive_words_variables`
-  and `to_synonym_substitution` leave it unchanged. `to_synonym_substitution`
+  model marks no word, the three `heavy` encodings
+  (`to_sensitive_words_encode_base64`, `_unicode`, `_ascii`) reject the
+  result (`DISCARDED; reason=no sensitive word`): encoding the whole prompt
+  would make them a heavy full-text encoding, which the spec keeps away
+  from `fsh` and `dap`. The light encodings and the splits apply to the
+  whole prompt (every word for the fixed separators), and
+  `to_sensitive_words_variables` and `to_synonym_substitution` leave it
+  unchanged. `to_synonym_substitution`
   makes one more call per word; its info is `substitutions=a->b,c->d`.
 - `translation` covers 20 languages in three resource tiers, which the
   spec scores by complexity: high (`to_french`, `to_japanese`, `to_russian`,

@@ -3,8 +3,10 @@
 import pytest
 
 from redact.jailbreak.hacking.cognitive import (
+    MALFORMED_SCENARIO,
     _extract_scenario,
     get_cognitive_functions,
+    to_avi,
     to_persona_roleplay,
 )
 from redact.llm_pipeline import drive_sync
@@ -26,9 +28,25 @@ class TestScenario:
         reply = "Some preamble\n**Scenario Description**: A dark alley at midnight"
         assert _extract_scenario(reply) == "A dark alley at midnight"
 
-    def test_falls_back_to_full_text_on_no_match(self):
-        reply = "No scenario here, just random text"
-        assert _extract_scenario(reply) == reply
+    @pytest.mark.parametrize(("reply", "scene"), [
+        ("Notes on ideas\n---\nA dark alley at midnight\n---", "A dark alley at midnight"),
+        ("Notes\n---\nA dark alley at midnight", "A dark alley at midnight"),
+        ("Notes\n---\nfirst idea\n---\nA dark alley\n---\n", "A dark alley"),
+        ("Notes\n ---- \n**Scenario Description**:\nA dark alley\n---", "A dark alley"),
+        ("Notes\n---\n### Scenario Description\nA dark alley", "A dark alley"),
+    ])
+    def test_the_scene_is_the_last_block_behind_the_delimiters(self, reply, scene):
+        assert _extract_scenario(reply) == scene
+
+    @pytest.mark.parametrize("reply", [
+        "No scenario here, just random text",
+        "Notes\n---\n  \n---\n",
+        "**Scenario Description**:   ",
+        "",
+    ])
+    def test_a_reply_without_a_scene_has_none(self, reply):
+        """It is rejected whole, never taken as the scene."""
+        assert _extract_scenario(reply) is None
 
     def test_the_scenario_reaches_the_construction_request(self):
         replies = ["**Scenario Description**: A dark alley at midnight", "jailbreak"]
@@ -36,6 +54,20 @@ class TestScenario:
         assert result == ("jailbreak", "category=persona_roleplay")
         assert len(requests) == 2
         assert "dark alley" in str(requests[1].messages)
+
+    def test_a_reply_without_a_scene_is_asked_again(self):
+        replies = ["just notes", "Notes\n---\nA dark alley at midnight\n---", "jailbreak"]
+        result, requests = _drive(to_persona_roleplay, replies)
+        assert result == ("jailbreak", "category=persona_roleplay")
+        assert len(requests) == 3
+        assert requests[1].messages == requests[0].messages
+        assert requests[1].model == "m"
+        assert "dark alley" in str(requests[2].messages)
+
+    def test_three_replies_without_a_scene_discard_the_prompt(self):
+        result, requests = _drive(to_avi, ["notes", "more notes", "still notes"])
+        assert result == ("harmful prompt", MALFORMED_SCENARIO)
+        assert len(requests) == 3
 
 
 class TestConstruction:
@@ -55,9 +87,18 @@ class TestConstruction:
 def test_an_empty_construction_is_rejected_naming_the_technique():
     from tests.jailbreak.obfuscation.test_typos import row_of_replies
 
-    row = row_of_replies(to_persona_roleplay, ["scenario", ""])
+    row = row_of_replies(to_persona_roleplay, ["---\nscenario\n---", ""])
     assert (row["accepted"], row["jailbreak"]) == (False, "harmful prompt")
     assert "technique=to_persona_roleplay" in row["reasoning"]
+
+
+def test_a_discarded_scenario_rejects_the_row_naming_the_technique():
+    from tests.jailbreak.obfuscation.test_typos import row_of_replies
+
+    row = row_of_replies(to_avi, ["notes"] * 3)
+    assert (row["accepted"], row["jailbreak"]) == (False, "harmful prompt")
+    assert "technique=to_avi" in row["reasoning"]
+    assert "malformed scenario" in row["reasoning"]
 
 
 class TestGetCognitiveFunctions:

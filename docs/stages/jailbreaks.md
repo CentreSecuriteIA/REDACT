@@ -168,7 +168,7 @@ says how to plan one kind again and keep the other).
 
 | Case | Row |
 |---|---|
-| A technique rejects its result: a translation that fails its check in all 4 rounds, a malformed word list, a text no ASCII-art font draws whole, an empty reply or text | `jailbreak` holds the text before that technique; `accepted` false; `reasoning` and `technique_info` start with `DISCARDED; technique=<name>` |
+| A technique rejects its result: a translation that fails its check in all 4 rounds, a malformed word list, no word marked for a heavy word encoding, a scenario reply without its scene 3 times, a text no ASCII-art font draws whole, an empty reply or text | `jailbreak` holds the text before that technique; `accepted` false; `reasoning` and `technique_info` start with `DISCARDED; technique=<name>` |
 | A natural variation leaves the text unchanged | `accepted` false; `reasoning` `unchanged: the text is its input's`. An adversarial row that changes nothing stays accepted, with `is_noop` true; its `sample_id` is its input's, so the build leaves it out |
 | A technique raises, or a prompt is too long for a model on the async lane (an OpenAI-compatible endpoint or vLLM) | An error row: the input text, `accepted` false, `technique_info` `ERROR: <message>`, `reasoning` the message |
 | A call fails (a provider error, or a prompt too long on the grouped path: Anthropic, introspection) | The stage stops; saved units stay saved |

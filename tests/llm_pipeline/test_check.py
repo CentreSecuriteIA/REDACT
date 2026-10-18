@@ -194,3 +194,18 @@ class TestExtracted:
         with pytest.raises(ValueError):
             drive_sync(extracted(GEN, lambda: [], lambda raw: [raw], max_attempts=0),
                        _call({GEN: ["t"]}))
+
+    def test_a_model_name_makes_requests_the_driver_resolves(self):
+        """As a jailbreak technique's requests carry their model."""
+        replies = ["bad", "good"]
+        seen = []
+
+        def call(request):
+            seen.append(request)
+            return replies.pop(0)
+
+        out = drive_sync(extracted("m", lambda: [], lambda raw: [] if raw == "bad" else [raw],
+                                   internals_id="g"), call)
+        assert out == (["good"], 2)
+        assert [(r.model, r.client, r.internals_id) for r in seen] == [
+            ("m", None, "g"), ("m", None, "g/attempt_2")]
