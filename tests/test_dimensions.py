@@ -195,6 +195,17 @@ class TestTheCheck:
                 "(natural: typos).") in str(raised.value)
         assert "undecided" not in str(raised.value)
 
+    def test_authorship_and_role_framing_are_ruled_distinct(self):
+        """The owner's ruling: who writes the message (the writer axis) is not
+        a role or scenario the message sets up, so the axis varies beside the
+        persona, framing, cognitive and impersonation families."""
+        assert dimensions.relation("authorship", "role_framing") is None
+        assert A.varied(A.resolve("inputs"))["writer"] == "authorship"
+        drawn = augmentations_of({})["adversarial"]
+        assert set(_FAMILY_TAGS["role_framing"]) <= {
+            fn.families[0] for fn in JPool.technique_pool(drawn)}
+        check_dimensions({}, augmentations_of({}))
+
     def test_one_tag_on_both_sides_is_one_dimension(self, table_at):
         table_at({"noise": {"side": "generation", "definition": "A thing."}})
         assert dimensions.relation("noise", "noise") == "same"

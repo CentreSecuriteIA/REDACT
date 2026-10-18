@@ -298,7 +298,10 @@ kind. A pinned axis varies nothing, so the eval type's `directness` passes.
 The shipped table has one such pair: `focus` is undecided against
 `request_shape`, `container` and `example_priming`, so `mixed` is at 0 and
 every sample is `single`; a params weight on `mixed` stops a run whose kinds
-draw those families.
+draw those families. `authorship` (the `writer` axis) and `role_framing` are
+ruled distinct: who writes a message is not a role or scenario the message
+sets up, so the writer axis varies beside the persona, framing, cognitive and
+impersonation families (`tests/test_dimensions.py` records the ruling).
 
 ## The augmentation section
 
