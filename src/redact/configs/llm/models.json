@@ -47,9 +47,7 @@
   },
   "deepseek-v3.2": {
     "backend_type": "api",
-    "roles": [
-      "translation"
-    ],
+    "roles": [],
     "is_uncensored": true,
     "supports_system_prompt": true,
     "default_max_tokens": 2000,
@@ -69,7 +67,7 @@
       "price_per_1m_input": 0.33,
       "price_per_1m_output": 0.48
     },
-    "notes": "Venice-hosted; the translation role's default. Venice list price as of 2026-08-30: $0.33/$0.48 per 1M in/out ($0.16 cached input, not modelled — the library sends no cache control, so no call is ever billed at that rate)."
+    "notes": "Venice-hosted chat translator, callable by name (models.translation: \"deepseek-v3.2\" in a recipe) for a run without a GPU; translategemma-27b is the translation role's default. Venice list price as of 2026-08-30: $0.33/$0.48 per 1M in/out ($0.16 cached input, not modelled — the library sends no cache control, so no call is ever billed at that rate)."
   },
   "translategemma-27b": {
     "backend_type": "vllm",

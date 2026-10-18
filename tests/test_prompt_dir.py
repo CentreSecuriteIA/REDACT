@@ -99,7 +99,7 @@ def test_a_translation_reads_its_prompts_through_the_overlay(tmp_path):
     _overlay(overlay, "jailbreak/translate", "MINE-TRANSLATE")
     _overlay(overlay, "jailbreak/translate_retry", "MINE-RETRY")
     _overlay(overlay, "jailbreak/translate_check", "MINE-CHECK")
-    gen = to_swahili("hello", prompt_dir=overlay)
+    gen = to_swahili("hello", translate_model="local-translator", prompt_dir=overlay)
     systems = [gen.send(None).messages[0]["content"]]
     systems.append(gen.send("jambo").messages[0]["content"])
     systems.append(gen.send("No: not Swahili").messages[0]["content"])

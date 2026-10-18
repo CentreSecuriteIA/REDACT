@@ -20,11 +20,16 @@ from redact.llm_pipeline import drive_sync
 from tests.conftest import MockBackend
 
 
+#: A translator that is not registered: a chat model.
+CHAT = "local-translator"
+
+
 def _run(fn, prompt, backend):
-    """Drive a translation generator to completion against a MockBackend."""
+    """Drive a translation generator on a chat translator to completion
+    against a MockBackend."""
     def call(request):
         return backend.generate([request.messages])[0]
-    return drive_sync(fn(prompt), call)
+    return drive_sync(fn(prompt, translate_model=CHAT), call)
 
 
 class TestLanguages:
@@ -96,14 +101,32 @@ class TestTranslationModel:
         raise AssertionError("the translation made more than two calls")
 
     def test_the_runs_translation_model_translates_and_checks(self):
-        assert self._models(translate_model="local-translator") == [
-            "local-translator", "local-translator"]
+        assert self._models(translate_model=CHAT) == [CHAT, CHAT]
 
-    def test_without_one_both_calls_go_to_the_translation_role(self):
-        from redact.jailbreak.obfuscation.translation import _resolve_translate_model
+    def test_a_registered_chat_translator_translates_and_checks(self):
+        assert self._models(translate_model="deepseek-v3.2") == [
+            "deepseek-v3.2", "deepseek-v3.2"]
 
-        role = _resolve_translate_model()
-        assert self._models() == [role, role]
+    def test_without_one_the_translation_default_translates_as_a_machine(self):
+        from redact.jailbreak.obfuscation.translation import (
+            _resolve_translate_model,
+            is_machine_translation,
+        )
+
+        assert _resolve_translate_model() == "translategemma-27b"
+        assert is_machine_translation(_resolve_translate_model())
+        request = to_swahili("hello", gen_model="gen").send(None)
+        assert request.model == "translategemma-27b"
+        assert request.messages[0]["content"].startswith("<<<source>>>en")
+
+    def test_without_the_role_the_fallback_is_the_local_translator(self, monkeypatch):
+        from redact.jailbreak.obfuscation import translation
+
+        def no_role(role):
+            raise KeyError(role)
+
+        monkeypatch.setattr(translation, "default_model_for_role", no_role)
+        assert translation._resolve_translate_model() == "translategemma-27b"
 
 
 class TestMachineTranslationTables:

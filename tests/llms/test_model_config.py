@@ -957,3 +957,12 @@ class TestTheLocalTranslator:
         from redact.llms.model_config import default_model_for_role
 
         assert default_model_for_role("uncensored_gen") == "venice-uncensored"
+
+    def test_it_is_the_translation_default(self):
+        from redact.llms.model_config import default_model_for_role
+
+        assert default_model_for_role("translation") == "translategemma-27b"
+
+    def test_the_hosted_translator_stays_callable_by_name(self):
+        cfg = get_model_config("deepseek-v3.2")
+        assert cfg.roles == [] and cfg.api is not None

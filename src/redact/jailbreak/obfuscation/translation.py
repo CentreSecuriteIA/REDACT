@@ -320,14 +320,14 @@ def _resolve_translate_model() -> str:
     """Return the canonical translation model from the registry.
 
     Looked up by role so the choice can be changed by registering a
-    different model with ``role="translation"``. Falls back to the
-    historical default ``deepseek-v3.2`` if the role isn't registered
-    (e.g. user mutated the registry).
+    different model with ``role="translation"``. Falls back to the packaged
+    default ``translategemma-27b`` if the role isn't registered (e.g. user
+    mutated the registry).
     """
     try:
         return default_model_for_role("translation")
     except KeyError:
-        return "deepseek-v3.2"
+        return "translategemma-27b"
 
 
 def _build_translate_messages(
