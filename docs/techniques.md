@@ -78,8 +78,11 @@ technique is picked first. A technique may not join a combination when:
   the reverse. The spec pairs `structural` and `translation` with
   `ascii_art`; `ascii_art` with `framing`, `persona`, `cognitive`, `fsh`,
   `dap`; `fsh` and `dap` with `continuation`, `indirect`, `framing`,
-  `persona`, `cognitive`; and `continuation` with `indirect`. So a
-  combination holds a hacking or a manipulation technique, never both;
+  `persona`, `cognitive`; and `persona` and `cognitive` with
+  `impersonation`, so a prompt never carries two identities. So a
+  combination holds a hacking or a manipulation technique, never both
+  (`continuation` and `indirect`, both requests, are kept apart by the
+  layer cap);
 - one of its families is in the `cross_incompatible_with` of a taken
   technique's own spec entry, or a taken family is in its own. The spec keeps
   `to_adversarial_suffix_emoji`, `to_adversarial_suffix_unicode`,

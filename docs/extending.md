@@ -155,9 +155,11 @@ contract.
    families this technique, not its whole family, may not join. A new
    family also needs an entry under `families`: `layer`,
    `within_layer_order` (its place in the obfuscation order; 0 elsewhere)
-   and `cross_incompatible_with`. The families also carry `max_picks` and
-   `description`, which nothing reads: a combination takes one technique per
-   family. Importing `redact.jailbreak` raises while the spec and the
+   and `cross_incompatible_with`, plus a `description`, which nothing reads.
+   A combination takes one technique per family; a layer's cap is in
+   `layer_max_picks`. A rule binds both ways, so one of the two families'
+   lists is enough; a rule between two families of one capped layer is
+   needless. Importing `redact.jailbreak` raises while the spec and the
    registry name different techniques.
 4. **Decide which kinds draw it.** The adversarial kind draws every family
    unless denied. For variations, add the family to the natural kind's

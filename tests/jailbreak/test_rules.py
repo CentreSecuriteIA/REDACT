@@ -36,6 +36,48 @@ def test_a_cross_incompatibility_refuses_either_order(first, then):
 
 
 @pytest.mark.parametrize(("first", "then"), [
+    ("to_psychopath_persona", "to_impersonate_good_person"),
+    ("to_impersonate_good_person", "to_psychopath_persona"),
+    ("to_invented_persona", "to_impersonate_good_person"),
+    ("to_impersonate_good_person", "to_invented_persona"),
+    ("to_avi", "to_impersonate_good_person"),
+    ("to_impersonate_good_person", "to_avi"),
+])
+def test_a_persona_or_cognitive_scenario_refuses_an_impersonation_either_way(
+        first, then):
+    """Two identities in one prompt: the persona or scenario's, and the
+    asker's claimed one."""
+    assert not _joins(first, then)
+
+
+@pytest.mark.parametrize("framing", ["to_fictional_world", "to_noble_goal"])
+def test_a_framing_still_joins_an_impersonation(framing):
+    assert _joins(framing, "to_impersonate_good_person")
+    assert _joins("to_impersonate_good_person", framing)
+
+
+def test_continuation_and_indirect_are_kept_apart_by_the_requests_cap_alone():
+    """Both are request families, one a combination at most, so the spec
+    names no rule of its own between them."""
+    from redact.jailbreak.technique import load_spec
+
+    families = load_spec()["families"]
+    assert "indirect" not in families["continuation"]["cross_incompatible_with"]
+    assert "continuation" not in families["indirect"]["cross_incompatible_with"]
+    assert not _joins("to_continue_passage", "to_summarize")
+    assert not _joins("to_summarize", "to_continue_passage")
+
+
+def test_no_family_carries_a_pick_cap_of_its_own():
+    """A combination takes one technique per family; the layers' caps are
+    ``layer_max_picks``."""
+    from redact.jailbreak.technique import load_spec
+
+    assert not [name for name, family in load_spec()["families"].items()
+                if "max_picks" in family]
+
+
+@pytest.mark.parametrize(("first", "then"), [
     ("to_adversarial_suffix_emoji", "to_ascii_art"),
     ("to_ascii_art", "to_adversarial_suffix_emoji"),
     ("to_adversarial_suffix_unicode", "to_ascii_art"),

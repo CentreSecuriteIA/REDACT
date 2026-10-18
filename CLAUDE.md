@@ -316,7 +316,7 @@ Rows on disk. A stage's output is CSV: under `Datasets/` (one file for most stag
 **Compatibility rules** (`rules.compatible`), each binding both ways (a forbidden pair is refused whichever was picked first):
 - One technique per family; a multi-family technique blocks every family it belongs to.
 - Layer caps from `layer_max_picks`: 1 hacking / 1 manipulation / 1 request.
-- `cross_incompatible_with`, read from either family's list: fsh/dap ⊥ continuation, indirect, framing, persona, cognitive (so a combination holds a hacking or a manipulation technique, never both); continuation ⊥ indirect; structural, translation ⊥ ascii_art; ascii_art ⊥ framing, persona, cognitive, fsh, dap. A technique's own entry may hold the key too: `to_adversarial_suffix_emoji`, `to_adversarial_suffix_unicode`, `to_braille` and `to_tokenbreak_split` ⊥ ascii_art.
+- `cross_incompatible_with`, read from either family's list: fsh/dap ⊥ continuation, indirect, framing, persona, cognitive (so a combination holds a hacking or a manipulation technique, never both); persona, cognitive ⊥ impersonation (two identities in one prompt); structural, translation ⊥ ascii_art; ascii_art ⊥ framing, persona, cognitive, fsh, dap. A technique's own entry may hold the key too: `to_adversarial_suffix_emoji`, `to_adversarial_suffix_unicode`, `to_braille` and `to_tokenbreak_split` ⊥ ascii_art. Continuation and indirect, both requests, are kept apart by the layer cap alone. A family's `description` is documentation; nothing reads it.
 - `manipulation_blocked_obfuscation`: fsh/dap never sit with `translation`, `ascii_art` or heavy full-text `encode` (base64, unicode_escape, ascii_ordinal, morse, braille); `to_sensitive_words_encode_*` stays allowed.
 - Complexity filters only in budget mode (`remaining_complexity`).
 
@@ -337,7 +337,6 @@ Rows on disk. A stage's output is CSV: under `Datasets/` (one file for most stag
 
 **Known issues (open):**
 - Phase 5's request obfuscation is not counted against `max_obfuscations`.
-- The spec's per-family `max_picks` (and `description`) is not read: a combination holds one technique per family.
 
 **Reference list coverage:** benchmarked against 73 instruction primitives + 74 request primitives; every feasible one is covered. Left out by design: `agent_context_additional_instr` (needs the system prompt), `fine_tuning` (out of scope), `use_highly_specialized_language` (no clear way to build it), `direct_question` (changes nothing). Beyond the list: ASCII art, adversarial suffixes, structural wrapping, cognitive hacking, manipulation, continuation attacks, indirect embedding, casual writing, extra encodings and languages.
 

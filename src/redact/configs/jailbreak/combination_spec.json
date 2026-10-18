@@ -25,7 +25,6 @@
       "layer": "obfuscation",
       "dimension": "encoding",
       "within_layer_order": 1,
-      "max_picks": 1,
       "cross_incompatible_with": []
     },
     "tokenbreak": {
@@ -33,7 +32,6 @@
       "layer": "obfuscation",
       "dimension": "encoding",
       "within_layer_order": 2,
-      "max_picks": 1,
       "cross_incompatible_with": []
     },
     "translation": {
@@ -41,7 +39,6 @@
       "layer": "obfuscation",
       "dimension": "language",
       "within_layer_order": 3,
-      "max_picks": 1,
       "cross_incompatible_with": ["ascii_art"]
     },
     "typos": {
@@ -49,7 +46,6 @@
       "layer": "obfuscation",
       "dimension": "surface_noise",
       "within_layer_order": 4,
-      "max_picks": 1,
       "cross_incompatible_with": []
     },
     "suffixes": {
@@ -57,7 +53,6 @@
       "layer": "obfuscation",
       "dimension": "surface_noise",
       "within_layer_order": 5,
-      "max_picks": 1,
       "cross_incompatible_with": []
     },
     "encode": {
@@ -65,7 +60,6 @@
       "layer": "obfuscation",
       "dimension": "encoding",
       "within_layer_order": 6,
-      "max_picks": 1,
       "cross_incompatible_with": []
     },
     "structural": {
@@ -73,7 +67,6 @@
       "layer": "obfuscation",
       "dimension": "container",
       "within_layer_order": 7,
-      "max_picks": 1,
       "cross_incompatible_with": ["ascii_art"]
     },
     "ascii_art": {
@@ -81,7 +74,6 @@
       "layer": "obfuscation",
       "dimension": "encoding",
       "within_layer_order": 8,
-      "max_picks": 1,
       "cross_incompatible_with": ["structural", "translation", "framing", "persona", "cognitive", "fsh", "dap"]
     },
     "casual_writing": {
@@ -89,7 +81,6 @@
       "layer": "obfuscation",
       "dimension": "surface_noise",
       "within_layer_order": 4.5,
-      "max_picks": 1,
       "cross_incompatible_with": []
     },
     "framing": {
@@ -97,7 +88,6 @@
       "layer": "hacking",
       "dimension": "role_framing",
       "within_layer_order": 0,
-      "max_picks": 1,
       "cross_incompatible_with": ["fsh", "dap"]
     },
     "persona": {
@@ -105,23 +95,20 @@
       "layer": "hacking",
       "dimension": "role_framing",
       "within_layer_order": 0,
-      "max_picks": 1,
-      "cross_incompatible_with": ["fsh", "dap"]
+      "cross_incompatible_with": ["fsh", "dap", "impersonation"]
     },
     "cognitive": {
       "description": "Two-step cognitive/psychological jailbreak construction",
       "layer": "hacking",
       "dimension": "role_framing",
       "within_layer_order": 0,
-      "max_picks": 1,
-      "cross_incompatible_with": ["fsh", "dap"]
+      "cross_incompatible_with": ["fsh", "dap", "impersonation"]
     },
     "fsh": {
       "description": "Few-Shot Hacking: benign Q&A pairs before harmful question",
       "layer": "manipulation",
       "dimension": "example_priming",
       "within_layer_order": 0,
-      "max_picks": 1,
       "cross_incompatible_with": ["continuation", "indirect", "framing", "persona", "cognitive"]
     },
     "dap": {
@@ -129,7 +116,6 @@
       "layer": "manipulation",
       "dimension": "example_priming",
       "within_layer_order": 0,
-      "max_picks": 1,
       "cross_incompatible_with": ["continuation", "indirect", "framing", "persona", "cognitive"]
     },
     "answer_format": {
@@ -137,7 +123,6 @@
       "layer": "requests",
       "dimension": "answer_shape",
       "within_layer_order": 0,
-      "max_picks": 1,
       "cross_incompatible_with": []
     },
     "answer_language": {
@@ -145,7 +130,6 @@
       "layer": "requests",
       "dimension": "language",
       "within_layer_order": 0,
-      "max_picks": 1,
       "cross_incompatible_with": []
     },
     "continuation": {
@@ -153,23 +137,20 @@
       "layer": "requests",
       "dimension": "request_shape",
       "within_layer_order": 0,
-      "max_picks": 1,
-      "cross_incompatible_with": ["indirect", "fsh", "dap"]
+      "cross_incompatible_with": ["fsh", "dap"]
     },
     "indirect": {
       "description": "Embed harmful request inside a legitimate task (summarize, proofread, etc.)",
       "layer": "requests",
       "dimension": "request_shape",
       "within_layer_order": 0,
-      "max_picks": 1,
-      "cross_incompatible_with": ["continuation", "fsh", "dap"]
+      "cross_incompatible_with": ["fsh", "dap"]
     },
     "distractor_prefix": {
       "description": "Add noise before the prompt to distract classifiers",
       "layer": "requests",
       "dimension": "request_shape",
       "within_layer_order": 0,
-      "max_picks": 1,
       "cross_incompatible_with": []
     },
     "distractor_suffix": {
@@ -177,7 +158,6 @@
       "layer": "requests",
       "dimension": "request_shape",
       "within_layer_order": 0,
-      "max_picks": 1,
       "cross_incompatible_with": []
     },
     "impersonation": {
@@ -185,7 +165,6 @@
       "layer": "requests",
       "dimension": "role_framing",
       "within_layer_order": 0,
-      "max_picks": 1,
       "cross_incompatible_with": []
     },
     "temporal": {
@@ -193,7 +172,6 @@
       "layer": "requests",
       "dimension": "request_shape",
       "within_layer_order": 0,
-      "max_picks": 1,
       "cross_incompatible_with": []
     },
     "asking": {
@@ -201,7 +179,6 @@
       "layer": "requests",
       "dimension": "request_shape",
       "within_layer_order": 0,
-      "max_picks": 1,
       "cross_incompatible_with": []
     }
   },
