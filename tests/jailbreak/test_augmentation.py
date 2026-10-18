@@ -328,16 +328,18 @@ def _translates(section: dict, kind: str) -> bool:
     return uses_translation(technique_pool(resolve(section, kind)))
 
 
-def test_translation_is_off_in_both_default_kinds():
-    for kind in KINDS:
-        assert defaults()[kind]["translation"] is False
-        assert not _translates(None, kind)
+def test_translation_is_on_in_the_default_attacks_and_off_in_the_variations():
+    assert defaults()["adversarial"]["translation"] is True
+    assert _translates(None, "adversarial")
+    assert defaults()["natural"]["translation"] is False
+    assert not _translates(None, "natural")
 
 
-def test_a_deny_list_of_ones_own_keeps_translation_off():
-    assert not _translates({"adversarial": {"families": {"deny": ["ascii_art"]}}},
-                           "adversarial")
-    assert not _translates({"adversarial": {"families": {"deny": []}}}, "adversarial")
+def test_a_deny_list_of_ones_own_leaves_the_switch_as_it_is():
+    assert _translates({"adversarial": {"families": {"deny": ["ascii_art"]}}},
+                       "adversarial")
+    assert _translates({"adversarial": {"families": {"deny": []}}}, "adversarial")
+    assert not _translates({"natural": {"families": {"deny": ["typos"]}}}, "natural")
 
 
 @pytest.mark.parametrize("kind", KINDS)
@@ -365,11 +367,11 @@ _DROPPED = "redact.jailbreak.augmentation"
     ({"natural": {"families": {"allow": ["typos", "translation"]}}},
      "['translation']"),
     ({"natural": {"techniques": {"allow": ["to_french"]}}}, "['to_french']"),
-    ({"adversarial": {"families": {"allow": ["encode"]},
+    ({"adversarial": {"translation": False, "families": {"allow": ["encode"]},
                       "techniques": {"allow": ["to_thai", "to_base64"]},
                       "family_weights": {"translation": 2}}},
      "['to_thai', 'family_weights.translation']"),
-    ({"adversarial": {"family_weights": {"translation": 2}}},
+    ({"adversarial": {"translation": False, "family_weights": {"translation": 2}}},
      "['family_weights.translation']"),
 ])
 def test_translation_an_allow_list_names_with_the_switch_off_is_dropped_with_a_warning(
@@ -399,8 +401,9 @@ def test_a_list_left_empty_by_the_drop_is_no_list_beside_another():
 
 def test_allowing_only_translation_with_the_switch_off_raises():
     with pytest.raises(ValueError) as raised:
-        resolve({"adversarial": {"families": {"allow": ["translation"]}}},
-                 "adversarial")
+        resolve({"adversarial": {"translation": False,
+                                 "families": {"allow": ["translation"]}}},
+                "adversarial")
     assert str(raised.value) == (
         "augmentations.adversarial allows only translation (['translation']) and "
         "augmentations.adversarial.translation is false; set \"translation\": "

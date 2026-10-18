@@ -5,7 +5,7 @@
 
   "adversarial": {
     "entry_types": null,
-    "translation": false,
+    "translation": true,
     "layers": {"deny": []},
     "families": {"allow": null, "deny": []},
     "techniques": {"allow": null, "deny": []},

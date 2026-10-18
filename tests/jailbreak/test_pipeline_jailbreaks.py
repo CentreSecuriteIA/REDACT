@@ -562,7 +562,7 @@ def test_a_pool_with_a_technique_that_needs_benign_data_loads_it(tmp_path, monke
     df = generate_jailbreaks(
         inputs=_inputs(), output_path=tmp_path / "jb.csv", benign_path=benign, seed=7,
         augmentation={"adversarial": {
-            "layers": {"deny": []}, "pure_only": False,
+            "layers": {"deny": []}, "pure_only": False, "translation": False,
             "techniques": {"allow": ["to_fsh_random_short"]},
             "rounds": [{"exact_techniques": 1}]}, "natural": None},
         verbose=False)
@@ -582,7 +582,7 @@ def test_the_benign_data_is_made_with_the_stages_taxonomy_overlay_and_batch(
         benign_taxonomy="mine", taxonomy_dir=tmp_path / "taxonomy",
         prompt_dir=tmp_path / "prompts",
         augmentation={"adversarial": {
-            "techniques": {"allow": ["to_fsh_random_short"]},
+            "techniques": {"allow": ["to_fsh_random_short"]}, "translation": False,
             "rounds": [{"exact_techniques": 1}]}, "natural": None},
         verbose=False)
     (load,) = loads
@@ -604,6 +604,7 @@ def test_a_resume_loads_the_benign_data_its_plan_needs_whatever_its_pool(
     loads = _benign_loads(monkeypatch)
     out, finished, drive_units = tmp_path / "jb.csv", 2, JPipe.drive_units
     fsh = {"adversarial": {"techniques": {"allow": ["to_fsh_random_short"]},
+                           "translation": False,
                            "rounds": [{"exact_techniques": 1}]}, "natural": None}
 
     def stop_after_two(source, **kwargs):
@@ -628,6 +629,7 @@ def test_a_resume_loads_the_benign_data_its_plan_needs_whatever_its_pool(
 
 
 _FSH = {"adversarial": {"techniques": {"allow": ["to_fsh_random_short"]},
+                        "translation": False,
                         "rounds": [{"exact_techniques": 1}]}, "natural": None}
 
 
@@ -749,7 +751,7 @@ def test_a_variation_that_changes_nothing_is_not_accepted_nor_built(tmp_path):
     generate_jailbreaks(
         inputs=inputs, data_dir=tmp_path, seed=1, verbose=False, augmentation={
             "adversarial": {"families": {"allow": ["casual_writing"]},
-                            "techniques": {"deny": others},
+                            "translation": False, "techniques": {"deny": others},
                             "rounds": [{"exact_techniques": 1}]},
             "natural": {"families": {"allow": None},
                         "techniques": {"allow": ["to_lowercase"], "deny": []}}})

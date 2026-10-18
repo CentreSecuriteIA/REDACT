@@ -1281,7 +1281,8 @@ def test_the_example_recipes_run_their_types_section(name):
                        for kind in ("adversarial", "natural")}
     if recipe["dataset_type"] == "training":
         assert section == _section(None)
-        assert not any(kind["translation"] for kind in section.values())
+        assert section["adversarial"]["translation"]
+        assert not section["natural"]["translation"]
 
 
 def test_the_flat_form_warns_once_per_run_and_the_kinds_form_does_not():
@@ -1459,15 +1460,26 @@ def test_translation_is_planned_when_a_kind_switches_it_on(kind):
 
     on = {kind: {"translation": True}}
     assert "translategemma-27b" in _stage_models(_models(), ["jailbreaks"], on)
-    assert _stage_models(_models(), ["jailbreaks"], _section(None)) == [
+    off = {"adversarial": {"translation": False}}
+    assert _stage_models(_models(), ["jailbreaks"], _section(off)) == [
         "venice-uncensored"]
 
 
-def test_a_deny_list_does_not_plan_translation():
+def test_the_default_attacks_plan_the_local_translator():
+    from redact.driver import _stage_models
+
+    assert _stage_models(_models(), ["jailbreaks"], _section(None)) == [
+        "venice-uncensored", "translategemma-27b"]
+
+
+def test_a_deny_list_leaves_the_translation_plan_as_it_is():
     from redact.driver import _stage_models
 
     for deny in ([], ["ascii_art"]):
         section = {"adversarial": {"families": {"deny": deny}}}
+        assert _stage_models(_models(), ["jailbreaks"], section) == [
+            "venice-uncensored", "translategemma-27b"]
+        section["adversarial"]["translation"] = False
         assert _stage_models(_models(), ["jailbreaks"], section) == [
             "venice-uncensored"]
 
@@ -2023,8 +2035,11 @@ def test_stage_models_follow_the_order_the_stages_run():
     assert _stage_models(_models(), ["jailbreaks", "paraphrase"], translating) == [
         "venice-uncensored", "translategemma-27b", "venice-paraphraser",
     ]
-    # Translation is off by default.
-    assert _stage_models(_models(), ["jailbreaks"], {}) == ["venice-uncensored"]
+    # Translation is on by default, in the attacks.
+    assert _stage_models(_models(), ["jailbreaks"], {}) == [
+        "venice-uncensored", "translategemma-27b"]
+    off = {"adversarial": {"translation": False}}
+    assert _stage_models(_models(), ["jailbreaks"], off) == ["venice-uncensored"]
     assert _stage_models(_models(), ["build"], {}) == []
 
 
@@ -2784,6 +2799,7 @@ def test_a_run_unloads_a_model_for_a_stage_and_loads_it_again(
     stage("jailbreaks", "model")
     recipe = {"dataset_type": "training", "data_dir": str(tmp_path),
               "stages": ["constitution", "inputs", "paraphrase", "jailbreaks"],
+              "augmentations": {"adversarial": {"translation": False}},
               "models": {"constitution": x, "gen": g, "check": c,
                          "paraphraser": p, "paraphrase_check": x}}
     monkeypatch.delenv("CUDA_VISIBLE_DEVICES", raising=False)

@@ -327,7 +327,7 @@ Both kinds:
 | Key | Type | Default | Meaning |
 |---|---|---|---|
 | `entry_types` | list or `null` | `null` | Augment only inputs of these entry types; `null` for all. A kind whose entry types match no input logs a WARNING and writes nothing |
-| `translation` | bool | `false`; `true` in the eval type's adversarial kind | Whether the kind draws the `translation` family. The family lists do not change it; `layers.deny`, `techniques.deny` and `pure_only` still apply |
+| `translation` | bool | `true` in the adversarial kind, `false` in the natural one | Whether the kind draws the `translation` family. The family lists do not change it; `layers.deny`, `techniques.deny` and `pure_only` still apply |
 | `layers` | `{"deny": [...]}` | `{"deny": []}` | Layers left out |
 | `families` | `{"allow": [...] or null, "deny": [...]}` | adversarial: `{"allow": null, "deny": []}`; natural: the natural families | Families admitted and removed |
 | `techniques` | `{"allow": [...] or null, "deny": [...]}` | adversarial: `{"allow": null, "deny": []}`; natural: three techniques allowed, three denied | Techniques admitted and removed |
@@ -411,16 +411,18 @@ type is a one-key override: its pool keeps the other 28 techniques. An allow
 list left empty by this is dropped when the other list still names
 something; when nothing but translation was allowed, the kind raises.
 
-Both kinds of the packaged section default to `false`; the eval type turns
-it on for its attacks, with the eight low-resource languages, which run on
-the `translation` role's default, `translategemma-27b`, a local vLLM model
+The packaged attacks have it `true`, drawing all 19 languages, and the
+natural kind `false`; the eval type narrows its attacks to the eight
+low-resource languages. They run on the `translation` role's default,
+`translategemma-27b`, a local vLLM model
 (a GPU: about 34 GiB planned, beside the FP8 24B on one 80 or 96 GB card).
 It translates paragraph by paragraph; each piece is checked, then translated
 back and judged by the generation model, up to 4 rounds
 ([stages/jailbreaks.md](stages/jailbreaks.md#models) gives the calls). The
 translation model is planned and loaded only when a kind's pool holds a
-translation technique. Turning it on by default is one line per kind in
-`augmentations.json`.
+translation technique. An allow list admits the whole family while the switch
+is on, unless `techniques.allow` names some languages: a kind meant to draw
+only the techniques it lists says `"translation": false`.
 
 A run without a GPU keeps translation off (`"adversarial": {"translation":
 false}` in the recipe's `augmentations`), or names the hosted chat

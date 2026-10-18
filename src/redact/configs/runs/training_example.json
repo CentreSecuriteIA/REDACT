@@ -1,5 +1,5 @@
 {
-  "_comment": "Translation is off here. To turn it on, drop \"translation\": false: it runs on translategemma-27b, a local vLLM model, beside which venice-uncensored-fp8 as gen shares one card.",
+  "_comment": "Its attacks translate on translategemma-27b, a local vLLM model (one GPU); venice-uncensored-fp8 as gen shares its card. Without a GPU, set \"translation\": false in augmentations.adversarial, or name the hosted deepseek-v3.2 for translation.",
   "dataset_type": "training",
   "data_dir": "./runs/training_example",
   "models": {
@@ -13,7 +13,6 @@
   "stages": ["constitution", "inputs", "outputs", "paraphrase", "jailbreaks", "build"],
   "augmentations": {
     "adversarial": {
-      "translation": false,
       "max_complexity": 6,
       "max_obfuscations": 2
     },

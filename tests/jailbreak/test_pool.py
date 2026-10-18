@@ -31,10 +31,19 @@ def _kind(**given) -> dict:
     return resolve({"adversarial": given}, "adversarial")
 
 
-def test_the_default_attack_pool_is_every_technique_but_translation_and_casual():
+def test_the_default_attack_pool_is_every_technique_but_casual():
+    """Translation is on in the packaged attacks, served by the local
+    translator."""
     full = all_techniques()
-    left_out = _in("translation", full) + _in("casual_writing", full)
+    left_out = _in("casual_writing", full)
     assert technique_pool(_kind()) == [fn for fn in full if fn not in left_out]
+
+
+def test_the_packaged_natural_kind_keeps_translation_off():
+    from redact.jailbreak.augmentation import resolve
+
+    assert resolve(None, "adversarial")["translation"] is True
+    assert resolve(None, "natural")["translation"] is False
 
 
 def _attacks(techniques: list) -> list:
@@ -70,6 +79,7 @@ def test_pure_only_drops_model_calls_and_benign_data():
 
 def test_allow_lists_admit_their_families_and_techniques_then_deny_removes():
     pool = technique_pool(_kind(
+        translation=False,
         families={"allow": ["typos", "structural"], "deny": []},
         techniques={"allow": ["to_base64"], "deny": ["to_xml"]}))
     names = [fn.__name__ for fn in pool]
@@ -140,8 +150,10 @@ def test_the_eval_pool_is_36_techniques_in_10_families():
 
 def test_uses_translation():
     assert uses_translation(technique_pool(_kind(translation=True)))
-    assert not uses_translation(technique_pool(_kind()))
-    assert not uses_translation(technique_pool(_kind(families={"deny": []})))
+    assert uses_translation(technique_pool(_kind()))
+    assert not uses_translation(technique_pool(_kind(translation=False)))
+    assert not uses_translation(technique_pool(
+        _kind(translation=False, families={"deny": []})))
     assert not uses_translation(technique_pool(
         _kind(translation=True, layers={"deny": ["obfuscation"]})))
 
