@@ -89,7 +89,8 @@ technique is picked first. A technique may not join a combination when:
   `to_braille` and `to_tokenbreak_split` from `ascii_art`, since no font
   draws the characters they may leave; the other suffixes and encodings may
   still join it. `to_ascii_art` itself rejects a text with a character no
-  font draws (any non-ASCII character);
+  font draws (any non-ASCII character), or one every font draws longer than
+  its cap;
 - it pairs `fsh` or `dap` with an obfuscation in
   `manipulation_blocked_obfuscation`: the `translation` and `ascii_art`
   families and the `heavy` `encode` techniques, except those also in
@@ -202,9 +203,39 @@ the answers.
   its letter), leetspeak at three levels, morse, braille.
 - `structural` wraps the text in JSON, XML or markdown. `to_json` keeps
   non-ASCII characters as they are.
-- `ascii_art` draws the text in a pyfiglet font, drawn from the 16 that have
-  a glyph for every character of the text. When none has, the result is
-  rejected (`DISCARDED; reason=no font has every character`).
+- `ascii_art` draws the text in a pyfiglet font, drawn from those of the 16
+  that have a glyph for every character of the text and draw it in at most
+  `MAX_RENDERED_CHARS` (5,000) characters, the `max_chars` keyword's
+  default. When none has every glyph, the result is rejected
+  (`DISCARDED; reason=no font has every character`); when every such font
+  draws the text longer than the cap, it is rejected with the shortest
+  drawing's length (`DISCARDED; reason=too long; rendered=<n>;
+  max_chars=5000`). A text every font draws within the cap draws the same
+  font as without one. The cap was set from these drawing lengths, in
+  characters, of plain English text (a range over three texts; `-` where
+  the font lacks a character, a comma or a question mark):
+
+  | Font | 50 | 100 | 150 | 300 |
+  |---|---|---|---|---|
+  | `digital` | 306 | 603-606 | 903-906 | 1,716-1,806 |
+  | `bubble` | 728-744 | 1,440-1,468 | 2,148-2,204 | 4,072-4,360 |
+  | `small` | 990-1,015 | 1,935-1,965 | 2,835-2,965 | 5,330-5,805 |
+  | `alphabet` | 1,274-1,365 | 2,520-2,639 | 3,717-3,976 | 7,028-7,763 |
+  | `standard` | 1,368-1,464 | 2,706-2,820 | 3,990-4,236 | 7,536-8,298 |
+  | `slant` | 1,482-1,560 | 2,940-3,042 | 4,320-4,560 | 8,136-8,820 |
+  | `big` | 1,832-1,960 | 3,648-3,776 | 5,376-5,648 | 10,144-11,120 |
+  | `banner` | 2,344-2,360 | 4,560-4,632 | 6,784-6,984 | 12,752-13,896 |
+  | `gothic` | 2,466-2,502 | 4,860-4,995 | 7,191-7,452 | 13,644-14,562 |
+  | `block` | 3,280-3,584 | 6,600-6,856 | 9,728-10,256 | 18,416-20,128 |
+  | `alligator` | 3,290-3,633 | 6,552-6,993 | 9,849-10,346 | 18,851-19,999 |
+  | `dotmatrix` | 6,050-6,390 | 11,980-12,520 | 17,920-18,790 | 33,830-36,790 |
+  | `isometric1`-`4` | 6,347-6,699 | 12,892-13,112 | - | - |
+
+  So at 5,000 a text of about 30 characters is drawn in any font, one of
+  150 in the six smallest, one of 300 in `digital` and `bubble`, and one of
+  about 850 or more in none. Every font that has the glyphs draws the text
+  to measure it, so a text costs up to 16 drawings (about 0.07 s in all at
+  150 characters, 0.5 s at 2,000).
 
 **Requests.** These change how a request is posed, not its text, and call no
 model. Each technique picks one of its named template variants from a JSON
