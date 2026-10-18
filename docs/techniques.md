@@ -169,8 +169,12 @@ the answers.
   `to_spanish`, `to_german`, `to_arabic`; 0), mid (`to_turkish`,
   `to_czech`, `to_vietnamese`, `to_greek`, `to_croatian`; 1) and low
   (`to_swahili`, `to_thai`, `to_khmer`, `to_nepali`, `to_zulu`,
-  `to_scots_gaelic`, `to_bengali`, `to_javanese`; 2). Each is a translate,
-  check and retry loop on the `translation` model.
+  `to_scots_gaelic`, `to_bengali`, `to_javanese`; 2). On a chat translator
+  each is a translate, check and retry loop on the `translation` model. On
+  a machine-translation model (`translategemma-27b`, the default) the text
+  goes paragraph by paragraph; each piece is checked for its language
+  (GlotLID) and length, then translated back and judged by the generation
+  model ([stages/jailbreaks.md](stages/jailbreaks.md#models)).
 - `typos` is one rewrite by the model, at one of four densities, with the
   level's description in the prompt.
 - `casual_writing` is how a person typing quickly writes: casing, spacing,

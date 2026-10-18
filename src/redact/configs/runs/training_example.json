@@ -1,4 +1,5 @@
 {
+  "_comment": "Translation is off here. To turn it on, drop \"translation\": false: it runs on translategemma-27b, a local vLLM model, beside which venice-uncensored-fp8 as gen shares one card.",
   "dataset_type": "training",
   "data_dir": "./runs/training_example",
   "models": {
