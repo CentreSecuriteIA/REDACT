@@ -5,6 +5,7 @@ against; and the units run apart on the pool. Fully offline."""
 
 import asyncio
 import csv
+import json
 import logging
 import re
 from collections import Counter
@@ -37,13 +38,14 @@ _AXIS_COLUMNS = ["length", "register", "writer", "framing", "directness", "focus
 _SECOND = 2         # a token's second request
 
 
-def _run(folder, *, axes=True, k=_K, entries=_ENTRIES, judge=None, **kwargs):
+def _run(folder, *, axes=True, weighting="table", k=_K, entries=_ENTRIES,
+         judge=None, **kwargs):
     """Run the stage; the generating backend."""
     gen = _TokenBackend(lambda t, n: one(f"{_NTH.get(n, n)} sample {t}"))
     check = _TokenBackend(judge or (lambda t, n: "Yes"))
     _token_pipeline(folder, gen, check).run_from_constitution(
         _token_df(entries), _PROMPT, samples_per_entry=k, batch_size=4,
-        verbose=False, axes=A.resolve("inputs", axes), **kwargs)
+        verbose=False, axes=A.resolve("inputs", axes, weighting=weighting), **kwargs)
     return gen
 
 
@@ -108,6 +110,7 @@ class TestAResume:
     @pytest.mark.parametrize("changed, named", [
         ({"axes": {"length": {"fragment": 1, "one_liner": 0, "short": 0, "long": 0,
                               "very_long": 0}}}, "axes"),
+        ({"weighting": "log"}, "axes"),
         ({"k": 2}, "samples_per_entry"),
         ({"seed": 7}, "seed"),
     ])
@@ -119,6 +122,13 @@ class TestAResume:
         assert named in str(stopped.value)
         assert lock_is_free(_constitution_inputs_ledger(tmp_path).path)
         _run(tmp_path, resume=False, **changed)     # a fresh run deals it
+
+    def test_the_plan_file_holds_the_weights_dealt(self, tmp_path):
+        _run(tmp_path, weighting="log")
+        made_with = json.loads((tmp_path / "constitution_inputs.plan.json").read_text(
+            encoding="utf-8"))
+        scaled = A.deal_weights(A.resolve("inputs", weighting="log"))
+        assert made_with["axes"] == scaled != A.deal_weights(A.resolve("inputs"))
 
     def test_a_folder_without_its_plan_file_is_warned_about(self, tmp_path, caplog):
         _run(tmp_path)

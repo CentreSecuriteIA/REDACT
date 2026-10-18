@@ -206,6 +206,7 @@ def generate_inputs(
     max_attempts: int = 3,
     check_max_tokens: int | None = None,
     axes: dict | bool | None = None,
+    axes_weighting: str = "table",
     seed: int = 42,
     config_dir: str | Path | None = None,
     read_back: bool = True,
@@ -248,6 +249,9 @@ def generate_inputs(
             over them, an axis as ``None`` to leave it out. With axes the
             length axis sets each sample's length; ``style`` picks the
             prompt only.
+        axes_weighting: ``"table"`` deals the axes' weights as they are,
+            ``"log"`` spreads them more evenly over each axis's values
+            (:func:`redact.content_moderation.axes.resolve`).
         seed: The seed of the deal.
         config_dir: A config folder whose ``generation_axes.json`` and
             ``dimensions.json`` are read in place of the packaged ones when
@@ -259,11 +263,13 @@ def generate_inputs(
 
     Raises:
         ValueError: ``constitution_df`` is None and no constitution is saved
-            under ``data_dir``, ``axes`` names an unknown axis or value, or
-            the folder or its plan file stops the stage
+            under ``data_dir``, ``axes`` names an unknown axis or value or
+            ``axes_weighting`` another weighting, or the folder or its plan
+            file stops the stage
             (``InputPipeline.run_from_constitution``).
     """
-    axes = generation_axes.resolve("inputs", axes, config_dir=config_dir)
+    axes = generation_axes.resolve(
+        "inputs", axes, weighting=axes_weighting, config_dir=config_dir)
     if constitution_df is None:
         constitution_df = _saved_constitution(data_dir)
     model = model or default_model_for_role("uncensored_gen")
@@ -350,6 +356,7 @@ def generate_outputs(
     max_attempts: int = 1,
     check_max_tokens: int | None = None,
     axes: dict | bool | None = None,
+    axes_weighting: str = "table",
     seed: int = 42,
     config_dir: str | Path | None = None,
     read_back: bool = True,
@@ -412,6 +419,9 @@ def generate_outputs(
             ``outputs`` section of ``configs/generation_axes.json``: ``None``
             for those, ``False`` for none, or ``{axis: {value: weight}}``
             over them, an axis as ``None`` to leave it out.
+        axes_weighting: ``"table"`` deals the axes' weights as they are,
+            ``"log"`` spreads them more evenly over each axis's values
+            (:func:`redact.content_moderation.axes.resolve`).
         seed: The seed of the deal.
         config_dir: A config folder whose ``generation_axes.json`` and
             ``dimensions.json`` are read in place of the packaged ones when
@@ -431,10 +441,12 @@ def generate_outputs(
 
     Raises:
         ValueError: ``inputs`` is None and the run has no input sample at all,
-            ``axes`` names an unknown axis or value, or the plan file or the
-            file's columns stop a resume (:func:`run_output_generation`).
+            ``axes`` names an unknown axis or value or ``axes_weighting``
+            another weighting, or the plan file or the file's columns stop a
+            resume (:func:`run_output_generation`).
     """
-    axes = generation_axes.resolve("outputs", axes, config_dir=config_dir)
+    axes = generation_axes.resolve(
+        "outputs", axes, weighting=axes_weighting, config_dir=config_dir)
     out_path = (
         Path(output_path) if output_path
         else paths.output_responses_csv(data_dir)

@@ -35,7 +35,10 @@ constitution of placeholder entries, as every run's are.
 The merged inputs file of the training run ends in an ``iteration`` column
 and one column per input generation axis (``length`` to ``focus``), since
 each entry is a unit per sample, each dealt a spec; its other cells are as
-before.
+before. The training type deals the inputs' weights log-scaled, and so does
+the earlier call that leaves the other style's inputs, since the folder's
+plan file holds one deal's weights; on these groups of three the deal is the
+one the table's weights gave.
 
 An eval build writes three files of one flat schema, ``eval_inputs.csv``,
 ``eval_outputs.csv`` and ``eval_jailbreaks.csv``, in place of the complete
@@ -952,7 +955,8 @@ def _training_run(folder: Path, monkeypatch, before=None) -> dict:
 
     generate_inputs(
         data_dir=folder, constitution_df=constitution.iloc[:2], style="short",
-        model="gen-model", check_model="check-model", prompt_dir=overlay, verbose=False)
+        model="gen-model", check_model="check-model", prompt_dir=overlay,
+        axes_weighting="log", verbose=False)
     counts = _counts({
         "dataset_type": "training", "data_dir": str(folder), "prompt_dir": str(overlay),
         "stages": ["constitution", "inputs", "outputs", "paraphrase", "jailbreaks",
