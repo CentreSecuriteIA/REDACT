@@ -106,6 +106,36 @@ def test_a_translation_reads_its_prompts_through_the_overlay(tmp_path):
     assert systems == ["MINE-TRANSLATE", "MINE-CHECK", "MINE-RETRY"]
 
 
+def test_a_machine_translation_reads_its_prompts_through_the_overlay(
+        tmp_path, monkeypatch):
+    from redact.jailbreak.obfuscation import langid
+    from redact.jailbreak.obfuscation.translation import to_swahili
+    from redact.llms.model_config import MODEL_REGISTRY, ModelConfig, VLLMConfig
+
+    monkeypatch.setitem(MODEL_REGISTRY, "mt-overlay", ModelConfig(
+        name="mt-overlay", roles=["translation", "machine_translation"],
+        vllm=VLLMConfig(hf_model_id="org/mt")))
+    monkeypatch.setattr(langid, "detect", lambda text: None)
+    overlay = tmp_path / "prompts"
+    _overlay(overlay, "jailbreak/translate_check_back", "MINE-JUDGE",
+             template="{original}|{back_translation}|{language}")
+    mt = overlay / "jailbreak" / "translate_mt"
+    mt.mkdir(parents=True)
+    (mt / "template.json").write_text(json.dumps({
+        "template": "MINE<<<source>>>{source_code}<<<target>>>{target_code}"
+                    "<<<text>>>{text}"}), encoding="utf-8")
+    gen = to_swahili("hello", translate_model="mt-overlay", gen_model="gen",
+                     prompt_dir=overlay)
+    sent = [gen.send(None).messages]
+    sent.append(gen.send("jambo").messages)
+    sent.append(gen.send("hello").messages)
+    assert [m["content"] for m in sent[0]] == [
+        "MINE<<<source>>>en<<<target>>>sw<<<text>>>hello"]
+    assert [m["content"] for m in sent[1]] == [
+        "MINE<<<source>>>sw<<<target>>>en<<<text>>>jambo"]
+    assert [m["content"] for m in sent[2]] == ["MINE-JUDGE", "hello|hello|Swahili"]
+
+
 def test_apply_combination_hands_its_prompt_dir_to_the_benign_data(monkeypatch):
     import redact.jailbreak.chain as chain
 

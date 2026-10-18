@@ -1,17 +1,23 @@
 """Translation techniques: the prompt translated to one of 19 languages.
 
-The run's translation model (the translation role's by default) translates
-and checks, retrying with the check's feedback; ``info`` is the language, or
-``DISCARDED; language=...; feedback=...`` when every attempt is rejected.
+A chat translation model (the translation role's by default) translates and
+checks, retrying with the check's feedback. A machine-translation model gets
+the text paragraph by paragraph in its own format; each piece is checked
+here (empty, language, length), then translated back and the whole judged by
+the generation model, a failure resampled. ``info`` is the language, or
+``DISCARDED; language=...; ...; feedback=...`` when every round is rejected.
 """
 
 import math
+import re
 from collections.abc import Callable
 
 from redact.jailbreak.technique import DISCARDED, TechniqueGen
 from redact.llm_pipeline import LLMRequest, is_accepted
-from redact.llms.model_config import default_model_for_role
+from redact.llms.model_config import MODEL_REGISTRY, default_model_for_role
 from redact.llms.prompting import build_messages, load_prompt
+
+from . import langid
 
 #: The registry role of a model that only translates: it takes the MT
 #: prompt, and its output is checked here rather than by itself.
@@ -107,6 +113,181 @@ def reply_cap(text: str) -> int:
                REPLY_TOKENS_PER_INPUT_TOKEN * tokens + REPLY_SLACK_TOKENS)
 
 
+#: The language a machine translation starts from.
+SOURCE_CODE = "en"
+
+#: A paragraph longer than this many characters is cut at sentence ends into
+#: pieces of about this length at most, each its own request.
+MAX_PIECE_CHARS = 1200
+
+#: A translation's length ratio, over its language's median, must lie within.
+LENGTH_RATIO_BAND = (0.5, 2.0)
+
+#: The judge's reply cap: a verdict and a sentence.
+JUDGE_MAX_TOKENS = 128
+
+_PARAGRAPH_BREAK = re.compile(r"\n[ \t]*\n\s*")
+_SENTENCE_END = re.compile(r"[.!?]+[\"')\]]*(\s+)")
+
+
+def _paragraphs(text: str) -> list[tuple[int, int]]:
+    """Where each paragraph of ``text`` is, its outer whitespace left out:
+    the stretches between blank lines that hold a word."""
+    spans, start = [], 0
+    for match in _PARAGRAPH_BREAK.finditer(text):
+        spans.append((start, match.start()))
+        start = match.end()
+    spans.append((start, len(text)))
+    out = []
+    for start, end in spans:
+        chunk = text[start:end]
+        if chunk.strip():
+            lead = len(chunk) - len(chunk.lstrip())
+            out.append((start + lead, start + lead + len(chunk.strip())))
+    return out
+
+
+def _sentence_pieces(text: str, start: int, end: int) -> list[tuple[int, int]]:
+    """``text[start:end]`` cut at sentence ends into pieces of at most
+    :data:`MAX_PIECE_CHARS`, where its sentences allow."""
+    if end - start <= MAX_PIECE_CHARS:
+        return [(start, end)]
+    sentences, at = [], start
+    for match in _SENTENCE_END.finditer(text, start, end):
+        sentences.append((at, match.start(1)))
+        at = match.end()
+    sentences.append((at, end))
+    pieces = [sentences[0]]
+    for s, e in sentences[1:]:
+        if e - pieces[-1][0] <= MAX_PIECE_CHARS:
+            pieces[-1] = (pieces[-1][0], e)
+        else:
+            pieces.append((s, e))
+    return pieces
+
+
+def split_text(text: str) -> tuple[list[str], list[str]]:
+    """``text`` as the pieces a machine translation sends, and the gaps around
+    them: ``gaps[0] + pieces[0] + gaps[1] + ... + pieces[-1] + gaps[-1]`` is
+    ``text``.
+
+    A piece is a paragraph (blank lines apart), or part of one longer than
+    :data:`MAX_PIECE_CHARS`, cut at sentence ends. A text with no word is no
+    piece.
+    """
+    spans = [piece for paragraph in _paragraphs(text)
+             for piece in _sentence_pieces(text, *paragraph)]
+    bounds = [0, *(at for span in spans for at in span), len(text)]
+    gaps = [text[bounds[i]:bounds[i + 1]] for i in range(0, len(bounds), 2)]
+    return [text[s:e] for s, e in spans], gaps
+
+
+def join_pieces(pieces: list[str], gaps: list[str]) -> str:
+    """The text of ``pieces`` with the ``gaps`` of :func:`split_text`."""
+    return gaps[0] + "".join(p + g for p, g in zip(pieces, gaps[1:]))
+
+
+def is_machine_translation(model: str) -> bool:
+    """Whether ``model`` is registered with :data:`MACHINE_TRANSLATION_ROLE`;
+    an unregistered name is a chat model."""
+    config = MODEL_REGISTRY.get(model)
+    return config is not None and MACHINE_TRANSLATION_ROLE in config.roles
+
+
+def check_translation(translation: str, source: str, language: str) -> str | None:
+    """Why a machine translation of ``source`` is rejected, or ``None``.
+
+    Empty; a GlotLID label not among the language's accepted ones (skipped
+    without the detector); a length ratio, over the language's median,
+    outside :data:`LENGTH_RATIO_BAND`, which a reply cut at its cap is. A
+    copy of ``source`` passes: the chain records it as a no-op.
+    """
+    if not translation.strip():
+        return "empty"
+    if translation == source:
+        return None
+    label = langid.detect(translation)
+    if label is not None and label not in ACCEPTED_LABELS[language]:
+        return f"language={label}"
+    ratio = len(translation) / len(source) / MEDIAN_RATIO[language]
+    low, high = LENGTH_RATIO_BAND
+    if not low <= ratio <= high:
+        return f"length_ratio={ratio:.2f}"
+    return None
+
+
+def _mt_messages(
+    text: str, source_code: str, target_code: str, prompt_dir,
+) -> list[dict]:
+    """The one user message that has a machine-translation model translate
+    ``text`` from ``source_code`` to ``target_code``."""
+    config = load_prompt("jailbreak", "translate_mt", prompt_dir)
+    return build_messages(config, source_code=source_code, target_code=target_code,
+                          text=text)
+
+
+def _judge_messages(original: str, back_translation: str, language: str,
+                    prompt_dir) -> list[dict]:
+    """The judge's messages: the original against its back-translation."""
+    config = load_prompt("jailbreak", "translate_check_back", prompt_dir)
+    return build_messages(config, original=original,
+                          back_translation=back_translation, language=language)
+
+
+def _machine_translate_gen(
+    prompt: str, language: str, *, translator: str, judge: str, num_retries: int,
+    prompt_dir,
+) -> TechniqueGen:
+    """Translate ``prompt`` piece by piece on ``translator``, one request at a
+    time.
+
+    A round translates the pieces still pending and checks each
+    (:func:`check_translation`); a piece that fails is resampled alone in the
+    next round. When every piece passes, each is translated back and
+    ``judge`` reads the original against the joined back-translation; a
+    rejection resamples every piece in the next round. A resample is the same
+    request again: the model's temperature varies it. After ``num_retries``
+    rounds the info names the piece that failed (``piece=all`` for the judge)
+    and why.
+    """
+    pieces, gaps = split_text(prompt)
+    if not pieces:
+        return prompt, language
+    code = LANGUAGE_CODES[language]
+    translations = list(pieces)
+    pending = list(range(len(pieces)))
+    reason = ""
+    for _ in range(num_retries):
+        failed = []
+        for i in pending:
+            translations[i] = yield LLMRequest(
+                translator, _mt_messages(pieces[i], SOURCE_CODE, code, prompt_dir),
+                max_tokens=reply_cap(pieces[i]))
+            why = check_translation(translations[i], pieces[i], language)
+            if why is not None:
+                failed.append((i, why))
+        if failed:
+            first, why = failed[0]
+            reason = f"piece={first + 1}/{len(pieces)}; feedback={why}"
+            pending = [i for i, _ in failed]
+            continue
+        backs = []
+        for translated in translations:
+            backs.append((yield LLMRequest(
+                translator, _mt_messages(translated, code, SOURCE_CODE, prompt_dir),
+                max_tokens=reply_cap(translated))))
+        verdict = yield LLMRequest(
+            judge, _judge_messages(prompt, join_pieces(backs, gaps), language,
+                                   prompt_dir),
+            max_tokens=JUDGE_MAX_TOKENS)
+        if is_accepted(verdict):
+            return join_pieces(translations, gaps), language
+        reason = f"piece=all; feedback=judge={verdict}"
+        pending = list(range(len(pieces)))
+    return (join_pieces(translations, gaps),
+            f"{DISCARDED}; language={language}; {reason}")
+
+
 def _resolve_translate_model() -> str:
     """Return the canonical translation model from the registry.
 
@@ -150,32 +331,42 @@ def _translate_gen(
     *,
     translate_model: str | None = None,
     check_model: str | None = None,
+    gen_model: str | None = None,
     num_retries: int = 4,
     prompt_dir=None,
     **kwargs,
 ) -> TechniqueGen:
-    """Translate ``prompt`` to ``language`` with checked, feedback-aware retry.
+    """Translate ``prompt`` to ``language``, in up to ``num_retries`` rounds.
 
-    Yields a translate request then a check request each round; returns
-    ``(translation, language)`` on success or
-    ``(last_attempt, "DISCARDED; language=...; feedback=...")`` on exhaustion.
+    ``translate_model`` translates, the translation role's model when None.
+    A machine-translation model (:func:`is_machine_translation`) takes
+    :func:`_machine_translate_gen`'s path, judged by ``check_model``, else
+    ``gen_model`` (the stage's generation model), else the ``uncensored_gen``
+    default. A chat model translates and checks each round, ``check_model``
+    replacing it for the check, the check's verdict fed back to the next
+    round. Returns ``(translation, language)``, or ``(last_attempt,
+    "DISCARDED; language=...; ...")`` on exhaustion.
 
-    ``translate_model`` makes both calls, the translation role's model when
-    None; ``check_model`` replaces it for the check. ``prompt_dir`` is the
-    overlay the three prompts are read through. ``**kwargs`` swallows
-    engine-supplied keys (``gen_model``, ``benign_data``) that translation
+    ``prompt_dir`` is the overlay the prompts are read through. ``**kwargs``
+    swallows engine-supplied keys (``benign_data``, ``rng``) that translation
     does not use.
     """
     # Resolved fresh per call (not a frozen import-time constant) so a
     # runtime register_model(..., role="translation") takes effect
     # immediately, same as every other role default in the library.
-    gen_model = translate_model or _resolve_translate_model()
-    chk_model = check_model or gen_model
+    translator = translate_model or _resolve_translate_model()
+    if is_machine_translation(translator):
+        judge = check_model or gen_model or default_model_for_role("uncensored_gen")
+        return (yield from _machine_translate_gen(
+            prompt, language, translator=translator, judge=judge,
+            num_retries=num_retries, prompt_dir=prompt_dir))
+    chk_model = check_model or translator
     feedback = ""
     last = prompt
     for _ in range(num_retries):
         translation = yield LLMRequest(
-            gen_model, _build_translate_messages(prompt, language, feedback, prompt_dir)
+            translator,
+            _build_translate_messages(prompt, language, feedback, prompt_dir),
         )
         verdict = yield LLMRequest(
             chk_model, _build_check_messages(prompt, translation, language, prompt_dir)
