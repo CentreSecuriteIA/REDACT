@@ -1,0 +1,14 @@
+{
+  "system_prompt": "You check a machine translation for two problems only. You are given an English text and the English back-translation of its translation into {language}. The back-translation is rough: words, terms and phrasing may differ, sentences may be reordered, and details may be missing. None of that is a problem.\n\nThe two problems are:\n- Refusal: the translation refuses the text, or turns its request into a refusal or a prohibition.\n- Added warning: the translation adds a warning, caution or disclaimer that the original does not contain.\n\nStart your reply with Yes if neither problem is present, or No if one is. After that word, give the reason in one sentence.",
+  "template": "Original text:\n{original}\n\nBack-translation from {language}:\n{back_translation}\n\nIs the translation free of a refusal and of an added warning or disclaimer? Start with Yes or No.",
+  "seed_fields": [
+    "original",
+    "back_translation",
+    "language"
+  ],
+  "few_shot_examples": [],
+  "metadata": {
+    "version": "0.1",
+    "notes": "Draft for the owner's review. The judge of a machine translation's back-translation, run on the generation model: only a refusal or an added warning or disclaimer is a problem; wording, terms and omissions are not. The verdict is the first word (Yes accepts), the reason after it; the request is capped at 128 tokens."
+  }
+}

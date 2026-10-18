@@ -184,3 +184,29 @@ class TestMachineTranslationPrompt:
             json.dumps({"template": "{text}"}), encoding="utf-8")
         overridden = report_prompt_sources(tmp_path)["overridden"]
         assert overridden == ["jailbreak/translate_mt"]
+
+
+class TestBackTranslationJudgePrompt:
+    """jailbreak/translate_check_back: the generation model judges the
+    back-translation of a machine translation."""
+
+    def test_it_renders_from_the_three_placeholders(self):
+        from redact.llms.prompting import build_messages, load_prompt
+
+        config = load_prompt("jailbreak", "translate_check_back")
+        assert config["seed_fields"] == ["original", "back_translation", "language"]
+        messages = build_messages(config, original="ORIGINAL TEXT",
+                                  back_translation="BACK TEXT", language="Swahili")
+        assert [m["role"] for m in messages] == ["system", "user"]
+        rendered = "\n".join(m["content"] for m in messages)
+        for value in ("ORIGINAL TEXT", "BACK TEXT", "Swahili"):
+            assert value in rendered
+        assert "{" not in rendered
+
+    def test_it_asks_for_the_verdict_first(self):
+        """is_accepted reads the reply's first word."""
+        from redact.llms.prompting import load_prompt
+
+        config = load_prompt("jailbreak", "translate_check_back")
+        text = config["system_prompt"] + config["template"]
+        assert "Yes" in text and "No" in text
