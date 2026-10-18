@@ -1,4 +1,5 @@
-"""The shared dealer: names dealt by count over weight, parts at a rate."""
+"""The shared dealer: names dealt by count over weight, a name's members by
+count, parts at a rate."""
 
 import random
 
@@ -37,6 +38,26 @@ def test_pick_takes_only_the_names_given():
     dealer = Dealer()
     dealer.counts["a"] = 5
     assert dealer.pick(random.Random(0), ["a"]) == "a"
+
+
+def test_members_of_one_name_come_out_even_and_apart_from_the_names():
+    dealer = Dealer()
+    rng = random.Random(0)
+    dealt = []
+    for _ in range(30):
+        member = dealer.pick_member(rng, ["x1", "x2", "x3"])
+        dealer.members[member] += 1
+        dealt.append(member)
+    assert sorted(dealt.count(m) for m in ("x1", "x2", "x3")) == [10, 10, 10]
+    assert dealer.counts == {}
+
+
+def test_a_member_tie_is_broken_by_the_rng_among_the_least_dealt():
+    dealer = Dealer()
+    dealer.members.update({"x1": 2, "x2": 1, "x3": 1})
+    names = ["x1", "x2", "x3"]
+    picks = {dealer.pick_member(random.Random(s), names) for s in range(20)}
+    assert picks == {"x2", "x3"}
 
 
 def test_a_part_at_rate_one_half_joins_half_the_units():

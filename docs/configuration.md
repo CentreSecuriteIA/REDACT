@@ -461,8 +461,10 @@ rather than drawing each unit alone. In budget mode each of the `hacking`,
 to its rate: `layer_rates` over the spec's (hacking 0.5, manipulation 0.33,
 requests 0.7, request_obfuscation 0.5). Within a layer, families are dealt by
 count over `family_weights`, so `{"persona": 2}` gives `persona` twice the
-share of each other hacking family. `family_weights` may name only families
-the kind's pool draws. [internals/jailbreak.md](internals/jailbreak.md#balanced-dealing)
+share of each other hacking family; within a family, its techniques are
+dealt evenly among those a unit may take (the complexity budget still
+favours a family's cheaper techniques). `family_weights` may name only
+families the kind's pool draws. [internals/jailbreak.md](internals/jailbreak.md#balanced-dealing)
 explains the dealing.
 
 `hacking` and `manipulation` exclude each other, so their rates should sum to

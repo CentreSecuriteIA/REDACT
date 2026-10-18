@@ -32,13 +32,15 @@ _SHORT = 2
 
 
 def _observe(dealer: Dealer, techniques) -> None:
-    """Count each technique's first family and its layer in ``dealer``."""
+    """Count each technique's first family, the technique itself (a member of
+    that family) and its layer in ``dealer``."""
     for fn in techniques:
         if fn is None:
             continue
         families = getattr(fn, "families", None) or []
         if families:
             dealer.counts[families[0]] += 1
+        dealer.members[fn.__name__] += 1
         layer = getattr(fn, "layer", None)
         if layer is not None:
             dealer.included[layer] += 1
@@ -120,8 +122,9 @@ def plan_run(
     The units of one ``(category, entry_type, iteration)`` group are dealt in
     ``sample_id`` order from a shared
     :class:`~redact.dataset.dealing.Dealer`, so each layer appears at its rate
-    (``layer_rates`` over the spec's) and each family at its weight
-    (``family_weights``, equal by default), evenly across the group and
+    (``layer_rates`` over the spec's), each family at its weight
+    (``family_weights``, equal by default) and each technique of a family as
+    often as the others the unit may take, evenly across the group and
     independent of the input order; a row's ``settings`` record the weights
     when given. The plan file (:func:`plan_inputs`) is written beside the
     manifest first, and a coverage table after it. Returns ``manifest_path``.

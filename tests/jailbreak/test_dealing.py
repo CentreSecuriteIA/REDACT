@@ -1,21 +1,30 @@
 """Balanced dealing of a plan, and the coverage table beside it.
 
 The planner deals each layer at its target rate over a ``(category,
-entry_type, iteration)`` group, and the families of a layer evenly, in
-``sample_id`` order. ``plan.coverage`` records the result beside the manifest.
+entry_type, iteration)`` group, the families of a layer evenly, and the
+techniques of a family evenly, in ``sample_id`` order. ``plan.coverage``
+records the result beside the manifest.
 """
 
 import csv
 
 import pandas as pd
+import pytest
 
 import redact.jailbreak  # noqa: F401  (tags the techniques)
 from redact.jailbreak.hacking import get_all_hacking_functions
 from redact.jailbreak.plan import coverage, plan_run
+from tests.jailbreak import simulate
 
 _GROUP = 20
 # Of 200 units, the fewest a request family may get (about 15 each is even).
 _LEAST_PER_FAMILY = 10
+# Units a simulated plan deals, in three groups.
+_SIMULATED = 3000
+# The most a technique's share of its family may be, over an even share, by
+# budget and in a count round.
+_TOP_OVER_EVEN = 1.5
+_COUNT_TOP_OVER_EVEN = 1.2
 
 
 def _one_group(n: int) -> pd.DataFrame:
@@ -146,3 +155,62 @@ def test_the_default_budget_deals_every_request_family(tmp_path):
     short = {name: drawn.get(name, 0) for name in requests
              if drawn.get(name, 0) < _LEAST_PER_FAMILY}
     assert short == {}
+
+
+# --- the techniques of a family --------------------------------------------------
+# Within the family the dealer picks, the unit takes the technique it may take
+# that the group has dealt least. The complexity budget still favours a
+# family's cheaper techniques where they cost differently (encode,
+# sensitive_words): a heavy one fits fewer units, which is wanted.
+
+
+def _top_over_even(table: dict, family: str) -> float:
+    """The largest share of ``family`` one technique has, over an even share."""
+    in_family = [row["share_in_family"] for row in table.values()
+                 if row["family"] == family]
+    return max(in_family) * len(in_family)
+
+
+@pytest.fixture(scope="module")
+def default_shares() -> dict:
+    return simulate.shares(*simulate.deal_kind({}, _SIMULATED, groups=3))
+
+
+@pytest.mark.parametrize("family", ["persona", "answer_language"])
+def test_the_techniques_of_a_family_the_budget_never_limits_come_out_even(
+        default_shares, family):
+    assert _top_over_even(default_shares, family) <= _TOP_OVER_EVEN
+
+
+def test_a_count_round_deals_the_techniques_of_every_family_evenly():
+    """No budget limits a count round, so every family comes out even: within
+    one of the others per group (drawn alone, answer_language's top member
+    had about 1.4 times its share)."""
+    table = simulate.shares(*simulate.deal_kind(
+        {}, _SIMULATED, kind="natural", groups=3))
+    families = {row["family"] for row in table.values()}
+    uneven = {family: round(_top_over_even(table, family), 2) for family in families
+              if _top_over_even(table, family) > _COUNT_TOP_OVER_EVEN}
+    assert uneven == {}
+
+
+def test_a_kept_plan_replays_each_row_as_it_was_recorded(tmp_path):
+    """Dealing changes what a fresh plan draws; a plan already written is
+    replayed by name, in its recorded order, whatever the dealer does now."""
+    from redact.dataset import Manifest
+    from redact.jailbreak.augmentation import resolve, rounds_of
+    from redact.jailbreak.plan import combination_of
+    from redact.jailbreak.pool import all_techniques, registry, technique_pool
+
+    kind = resolve({"adversarial": {"rounds": "escalation"}}, "adversarial")
+    rounds = rounds_of(kind)
+    manifest = tmp_path / "jb.manifest.jsonl"
+    plan_run(_one_group(40), technique_pool(kind), manifest_path=manifest, seed=42,
+             iterations=len(rounds), settings_per_iteration=rounds, verbose=False)
+    # A row as an earlier planner wrote it: the request obfuscation last.
+    recorded = [row["combination"] for row in Manifest(manifest).load()]
+    recorded.append(["to_persona_roleplay", "to_answer_as_tutorial", "to_rot13"])
+    every = registry(all_techniques())
+    replayed = [[fn.__name__ for fn in combination_of(names, every).techniques]
+                for names in recorded]
+    assert replayed == recorded

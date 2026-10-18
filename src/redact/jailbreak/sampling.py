@@ -13,10 +13,11 @@ def _pick_by_family(
 ) -> Callable:
     """Pick a family, then a technique within it.
 
-    Without a ``dealer`` the family is uniform. With one, it is the eligible
-    family with the lowest count-over-weight so far in the group (ties broken by
-    ``rng``), so a group's families come out even. The technique within the
-    family is uniform either way.
+    Without a ``dealer`` both picks are uniform. With one, the family is the
+    eligible family with the lowest count-over-weight so far in the group, and
+    the technique the eligible member of that family with the lowest count so
+    far (:meth:`~redact.dataset.dealing.Dealer.pick_member`), ties broken by
+    ``rng``, so a group's families and each family's members come out even.
     """
     family_map: dict[str, list[Callable]] = {}
     for fn in candidates:
@@ -24,10 +25,9 @@ def _pick_by_family(
         family_map.setdefault(fam, []).append(fn)
     families = list(family_map)
     if dealer is None:
-        chosen_family = rng.choice(families)
-    else:
-        chosen_family = dealer.pick(rng, families)
-    return rng.choice(family_map[chosen_family])
+        return rng.choice(family_map[rng.choice(families)])
+    members = {fn.__name__: fn for fn in family_map[dealer.pick(rng, families)]}
+    return members[dealer.pick_member(rng, list(members))]
 
 
 def sample_combination(

@@ -151,7 +151,9 @@ Each kind resumes on its own, from its ledger, with the lock and cut-back of
 [internals/dataset.md](../internals/dataset.md).
 
 The plan is frozen. A resumed kind reuses its manifest and runs the planned
-units its ledger does not record. A resume whose `seed`, pool, `rounds`,
+units its ledger does not record. Since the plan deals each family's
+techniques evenly, a fresh plan with the same seed draws differently from
+one made before; a kept plan replays unchanged. A resume whose `seed`, pool, `rounds`,
 `family_weights` or `layer_rates` differ from those in the kind's
 `.plan.json` raises a `ValueError` that names them and `resume=False`; a
 plan without that file runs as it was made, with a WARNING. A changed

@@ -22,10 +22,11 @@ class Dealer:
 
     ``weights`` sets a name's share (1 by default); :meth:`pick` takes the
     name with the lowest count over weight. The planner records what each
-    unit was given in ``counts`` (names) and ``included`` (parts), and sets
-    ``position`` to the units dealt so far, including the current. ``key``
-    names the group; it seeds where in the group each part's picks fall.
-    ``targets`` holds each part's picks due by the last unit asked.
+    unit was given in ``counts`` (names), ``members`` (the members of a name,
+    for :meth:`pick_member`) and ``included`` (parts), and sets ``position``
+    to the units dealt so far, including the current. ``key`` names the
+    group; it seeds where in the group each part's picks fall. ``targets``
+    holds each part's picks due by the last unit asked.
     """
 
     def __init__(self, weights: dict | None = None, key: tuple = ()) -> None:
@@ -33,6 +34,7 @@ class Dealer:
         self.key = key
         self.position = 0
         self.counts: Counter = Counter()
+        self.members: Counter = Counter()
         self.included: Counter = Counter()
         self.targets: dict[str, int] = {}
         self._offsets: dict[str, float] = {}
@@ -44,6 +46,14 @@ class Dealer:
         """The name of ``names`` with the lowest score, ties broken by ``rng``."""
         best = min(self.score(name) for name in names)
         return rng.choice([name for name in names if self.score(name) == best])
+
+    def pick_member(self, rng: random.Random, names: Sequence):
+        """The name of ``names`` with the lowest count in ``members``, ties
+        broken by ``rng``. The planner passes the members of the name
+        :meth:`pick` chose, so they come out even; ``members`` is kept apart
+        from ``counts``, so :meth:`pick` deals the same with or without it."""
+        least = min(self.members[name] for name in names)
+        return rng.choice([name for name in names if self.members[name] == least])
 
     def include(self, part: str, rate: float) -> bool:
         """Whether this unit takes ``part``: the picks so far are below

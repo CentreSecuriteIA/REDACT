@@ -156,7 +156,9 @@ techniques from any layer, ignoring complexity. It returns fewer when the
 rules leave nothing; with the full pool, 1 and 2 are always reachable.
 
 Every pick is **family first** (`_pick_by_family`): a family, then a
-technique within it. The 20 translation languages are one choice, not 20.
+technique within it, both dealt when the plan passes its dealer
+([balanced dealing](#balanced-dealing)). The 20 translation languages are
+one choice, not 20.
 The rules are those of [techniques.md](../techniques.md#compatibility-rules).
 
 ## Balanced dealing
@@ -175,12 +177,32 @@ order.
 - **Families.** Among the eligible families, the dealer picks the one with
   the lowest count over its weight (`family_weights`, 1 by default), ties
   broken by the unit's rng.
+- **Techniques.** Within that family, the dealer picks the eligible member
+  the group has dealt least (`Dealer.pick_member`, its own `members`
+  counter, apart from the families' `counts` the generation axes also
+  use), ties broken by the unit's rng. A family whose members cost
+  differently still favours its cheaper ones under the complexity budget
+  (`encode`, `sensitive_words`): a heavy member fits fewer units, as
+  wanted. A direct `sample_combination` call without a dealer picks both
+  uniformly, as the registry fixture's seeds pin. A fresh plan with the
+  same seed draws differently from one made before member dealing; a kept
+  plan replays unchanged.
 - **Repeats.** When a unit's combination equals one of its input's earlier
   iterations, it is drawn again without the dealer, up to 8 draws in all;
   the last is kept if none differs.
 - **Shortfall.** A layer two or more picks below its target in a group, as
   when the rules or the pool leave no fitting technique, is logged as a
   WARNING naming the coverage file.
+
+After each unit, `_observe` counts the kept draw's families, techniques and
+layers in the group's dealer. Each group has its own dealer; nothing is
+counted across groups.
+
+`tests/jailbreak/simulate.py` plans N synthetic inputs through `plan_run`
+(in a temporary folder) and gives each technique's share of the units and
+its share within its family; `py -m tests.jailbreak.simulate [N]` prints
+them for the default adversarial kind. The coverage table does not hold
+these shares.
 
 ## Seeds
 
