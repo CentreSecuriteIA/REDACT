@@ -15,7 +15,7 @@ from collections.abc import Callable
 from redact.jailbreak.technique import DISCARDED, TechniqueGen
 from redact.llm_pipeline import LLMRequest, is_accepted
 from redact.llms.model_config import MODEL_REGISTRY, default_model_for_role
-from redact.llms.prompting import build_messages, load_prompt
+from redact.llms.prompting import PromptTemplate, build_messages, load_prompt
 
 from . import langid
 
@@ -224,6 +224,34 @@ def _mt_messages(
     config = load_prompt("jailbreak", "translate_mt", prompt_dir)
     return build_messages(config, source_code=source_code, target_code=target_code,
                           text=text)
+
+
+#: The markers of the machine-translation format, in their order.
+_MT_MARKERS = ("<<<source>>>", "<<<target>>>", "<<<text>>>")
+
+
+def check_mt_prompt(prompt_dir=None) -> None:
+    """Raise unless ``jailbreak/translate_mt`` renders to one user message
+    holding the model's three markers in order: its chat template raises on
+    anything else, which would fail every translation.
+
+    Raises:
+        ValueError: The prompt renders otherwise; the message names its file.
+    """
+    sample = {"source_code": SOURCE_CODE, "target_code": "sw", "text": "text"}
+    template = PromptTemplate.load("jailbreak", "translate_mt",
+                                   prompt_dir=prompt_dir, **sample)
+    messages = template(**sample)
+    roles = [m["role"] for m in messages]
+    content = messages[0]["content"] if roles == ["user"] else ""
+    at = [content.find(marker) for marker in _MT_MARKERS]
+    if -1 in at or at != sorted(at):
+        origin = "override" if template.is_override else "packaged"
+        raise ValueError(
+            f"The machine-translation prompt {template.source} ({origin}) must "
+            f"render to one user message holding {', '.join(_MT_MARKERS)} in this "
+            f"order; it renders to {roles}. The model's "
+            f"chat template refuses anything else.")
 
 
 def _judge_messages(original: str, back_translation: str, language: str,

@@ -58,6 +58,8 @@ from redact.dataset import (
 from redact.dataset.planfile import coverage_path, plan_path
 from redact.jailbreak import augmentation as augmentation_kinds
 from redact.jailbreak import pool as jailbreak_pool
+from redact.jailbreak.obfuscation import langid
+from redact.jailbreak.obfuscation import translation as jailbreak_translation
 from redact.jailbreak.pipeline import run_augmentation
 from redact.llms import ModelClient, load_prompt
 from redact.llms.model_config import default_model_for_role
@@ -631,6 +633,9 @@ def generate_jailbreaks(
     if "prompt" not in inputs.columns:
         raise ValueError("inputs must contain a 'prompt' (or 'sample') column.")
 
+    if any(jailbreak_pool.uses_translation(jailbreak_pool.technique_pool(kind))
+           for _name, kind, _out, _man in kinds):
+        _check_machine_translation(translation_model, prompt_dir)
     client = ModelClient.create(model or default_model_for_role("uncensored_gen"))
     benign = Path(benign_path) if benign_path else paths.benign_csv(data_dir)
 
@@ -668,6 +673,22 @@ def generate_jailbreaks(
             run(name, kind, out, man,
                 read_back=False, label="variation", accept_noop=False)
     return rows
+
+
+def _check_machine_translation(translation_model: str | None, prompt_dir) -> None:
+    """Before any call, for a machine-translation translator: its prompt
+    renders in the model's format, and a missing language identifier is
+    warned about once."""
+    translator = translation_model or jailbreak_translation._resolve_translate_model()
+    if not jailbreak_translation.is_machine_translation(translator):
+        return
+    jailbreak_translation.check_mt_prompt(prompt_dir)
+    if not langid.available():
+        logger.warning(
+            "jailbreaks: %s is a machine-translation model and GlotLID is not "
+            "available, so the language of its translations is not checked; "
+            "install redact[langid] and fetch its model with "
+            "scripts/download_models.py.", translator)
 
 
 def _kind_files(out_path: Path, manifest_path: Path | None) -> dict:
