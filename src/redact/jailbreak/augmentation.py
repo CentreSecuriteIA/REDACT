@@ -361,10 +361,11 @@ def _check_kinds(where: str, kind: str, resolved: dict) -> None:
     """
     techniques = {fn.__name__: getattr(fn, "kinds", DEFAULT_KINDS)
                   for fn in all_techniques()}
+    families = load_spec()["families"]
     for level in ("families", "techniques"):
         for name in resolved[level]["allow"] or ():
-            if level == "techniques" and name not in techniques:
-                continue        # _check_names refuses a name no technique has
+            if name not in (families if level == "families" else techniques):
+                continue        # _check_names refuses a name nothing has
             kinds = (family_kinds(name) if level == "families"
                      else techniques[name])
             if kind not in kinds:
