@@ -170,7 +170,7 @@ that lists that role.
 |---|---|---|---|
 | `gen` | inputs, outputs, jailbreaks | `uncensored_gen` | `venice-uncensored`, hosted (Venice) |
 | `check` | inputs, outputs | `uncensored_gen` | the `gen` model |
-| `translation` | jailbreaks, only when a kind's pool holds a translation technique (`"translation": true`; the eval type's attacks) | `translation` | `translategemma-27b`, local vLLM (27B, FP8); `deepseek-v3.2` by name for a hosted run |
+| `translation` | jailbreaks, only when a kind's pool holds a translation technique (`"translation": true`: the packaged attacks, and the eval type's) | `translation` | `translategemma-27b`, local vLLM (27B, FP8); `deepseek-v3.2` by name for a hosted run |
 | `constitution` | constitution | `constitution_gen` | `claude-opus-4-6`, hosted (Anthropic) |
 | `paraphraser` | paraphrase | `paraphraser` | `venice-paraphraser`, local vLLM (24B weights) |
 | `paraphrase_check` | paraphrase | `uncensored_gen` | `venice-uncensored`, hosted |
