@@ -20,7 +20,7 @@ defingerprinting model lives in another repository; register it with the
 | Target | Source rows | Text column | Id column |
 |---|---|---|---|
 | `inputs` | the accepted inputs of the run, or `inputs=` | `sample`, else `prompt` | `sample_id` |
-| `outputs` | the rows of `Datasets/output_responses.csv`, or of `outputs=`, whose `accepted` reads true (`dataset.accepted_mask`); a frame without the column is taken whole | `output_response`, else `sample` | `input_id` |
+| `outputs` | the rows of `Datasets/output_responses.csv`, or of `outputs=`, whose `accepted` reads true (`dataset.accepted_mask`); a frame without the column is taken whole | `output_response`, else `sample` | `sample_id`, the response's own id, as `response_id`; `input_id`, the input answered, is kept |
 
 `target` is `inputs`, `outputs` or `both`. A target whose source has rows but
 none accepted, or that is given an empty frame, is skipped with a warning
@@ -42,7 +42,8 @@ The prompts are `prompts/paraphrase/generation/` and
 
 `paraphraser` may name one model, or `"distribution"` for every model with
 the `paraphraser` role. With several, each unit goes to one of them, picked
-from a hash of `(seed, input_id, iteration)`. The front warns when the check
+from a hash of `(seed, id, iteration)`, the id being the unit's: `input_id`
+for the inputs, `response_id` for the outputs. The front warns when the check
 model is also a paraphraser, and when `paraphrases_per_sample` is above 1
 with a single paraphraser: identical paraphrases are dropped, so fewer may
 remain.
@@ -55,15 +56,25 @@ Params keys: `target`, `paraphrases_per_sample`, `check`, `batch_size`,
 
 ## Unit and ledger key
 
-One unit is one paraphrase of one source row: `(input_id, iteration)`, with
-`iteration` from 0 to `paraphrases_per_sample - 1`. For the `outputs` target,
-`input_id` is the output row's `input_id`, the input it answers.
+One unit is one paraphrase of one source row, with `iteration` from 0 to
+`paraphrases_per_sample - 1`. For the `inputs` target the row is an input,
+and the unit `(input_id, iteration)`, `input_id` the input's `sample_id`
+(else the content id of its text). For the `outputs` target the row is a
+response, and the unit `(response_id, iteration)`, `response_id` the
+response's `sample_id` (else the content id of its text): an input may have
+several responses, each paraphrased on its own. The unit keeps `input_id`,
+the response's own `input_id`, the input it answers.
 
-| | Value |
-|---|---|
-| Ledger key | `(input_id, iteration)` |
-| Ledger record | the key, `paraphrase_model`, and `status`: `accepted`, `rejected` or `dropped_dedup` |
-| Manifest row | `input_id`, `iteration`, `paraphrase_model`, `category`, `entry_type`, `status` |
+| | `inputs` | `outputs` |
+|---|---|---|
+| Ledger key | `(input_id, iteration)` | `(response_id, iteration)` |
+| Ledger record | the key, `paraphrase_model`, and `status`: `accepted`, `rejected` or `dropped_dedup` | the key, `input_id`, `paraphrase_model`, `status` |
+| Manifest row | `input_id`, `iteration`, `paraphrase_model`, `category`, `entry_type`, `status` | `response_id`, `input_id`, `iteration`, `paraphrase_model`, `category`, `entry_type`, `status` |
+
+Two accepted responses with one text (siblings of one input that a model
+answered alike) have one `response_id`: the target plans two units under
+one key, which a resume skips alike once acked, and the second paraphrase,
+equal to a text already written, is dropped.
 
 The stage runs one paraphraser at a time. For each it sends the pending units
 in chunks of `batch_size`: one batch of paraphrase calls, then one batch of
@@ -85,17 +96,21 @@ Per target, under `Datasets/`:
 | Column | Meaning |
 |---|---|
 | `sample_id` | Content id of the paraphrase |
-| `input_id` | The source row's id (see above) |
+| `response_id` | `outputs` only: the response it rewords |
+| `input_id` | The input: the one reworded, or the one the response answers |
 | `iteration` | Which paraphrase of the row |
 | `sample` | The paraphrase |
-| `category`, `entry_type` | Copied from the source row |
+| `category`, `entry_type` | Copied from the source row: for a response, its input's |
+| `response_mode`, `output_label`, `response_label` | `outputs` only: copied from the response, so a paraphrase carries its response's label ([outputs](outputs.md#answer-modes)). Always written, empty when the source lacks the column |
 | `paraphrase_model` | The model that wrote it |
 | `accepted` | The checker's verdict; `true` when `check` is off |
 | `reasoning` | The checker's reply when rejected |
 | `source` | `paraphrase_inputs` or `paraphrase_outputs` |
 
 A paraphrase row carries no axis columns, by design: the spec of the
-generation axes stays on the row it rewords, which its `input_id` names.
+generation axes stays on the row it rewords, which its `input_id` (an
+input) or `response_id` (a response) names. A response's answer-mode
+columns are copied, since they are its label.
 
 The build merges the accepted paraphrases into the complete dataset in
 `training` mode; in `eval` mode it writes them into `eval_inputs.csv` and
@@ -110,6 +125,15 @@ already in it. `resume: false` removes the CSV, its `.cut` and `.tmp`
 files, the ledger and the manifest of each target the run names, a skipped
 target too. The lock and the cut-back work as in
 [internals/dataset.md](../internals/dataset.md).
+
+A resume of the `outputs` target onto a folder written before its units were
+keyed on the response stops before any call: a ledger with an ack without
+`response_id` (read through a ledger keyed on `iteration`, since the stage's
+own skips a record without its key), or a `paraphrases_outputs.csv` whose
+header lacks `response_id`, `response_mode`, `output_label` or
+`response_label`. The message names `resume: false` (with `target:
+"outputs"`, which leaves the inputs' paraphrases as they are) and a new
+`data_dir`. The `inputs` target of the same folder resumes as before.
 
 ## Rejected and failed units
 

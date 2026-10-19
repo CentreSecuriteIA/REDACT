@@ -151,6 +151,8 @@ def test_paraphrase_outputs_accepted_only(tmp_path, patched):
     df = res["outputs"]
     assert list(df["sample"]) == ["PARA::a real answer"]   # only the accepted output paraphrased
     assert list(df["input_id"]) == ["id1"]
+    # A file without sample_ids: the response's id is that of its text.
+    assert list(df["response_id"]) == [content_id("a real answer")]
 
 
 def test_the_callers_frames_are_left_as_they_were(tmp_path, patched):
@@ -630,3 +632,136 @@ def test_a_failed_append_acks_none_of_its_chunk(tmp_path, patched):
         content_id(text) for text in _FOUR[:2]]
     saved = pd.read_csv(paths.paraphrases_inputs_csv(tmp_path))
     assert list(saved["sample"]) == ["PARA::alpha prompt", "PARA::beta prompt"]
+
+
+# --- the outputs target: a unit per response ---------------------------------
+
+def _responses(**columns) -> pd.DataFrame:
+    """Two accepted responses of one input, in the two modes, and one of another."""
+    return pd.DataFrame({
+        "input_id": ["in-1", "in-1", "in-2"],
+        "sample_id": ["out-a", "out-b", "out-c"],
+        "output_response": ["a harmful answer", "a helpful answer", "another answer"],
+        "accepted": [True, True, True],
+        "category": ["Cyber"] * 3,
+        "entry_type": ["dual_use_benign", "dual_use_benign", "harmful"],
+        "response_mode": ["harmful", "helpful", "harmful"],
+        "output_label": ["harmful", "benign", "harmful"],
+        "response_label": ["dual_use_benign_harmful", "dual_use_benign_benign",
+                           "harmful_harmful"],
+        **columns,
+    })
+
+
+def _outputs_state(tmp_path):
+    return paths.paraphrases_outputs_csv(tmp_path).with_name(
+        "paraphrases_outputs.state.jsonl")
+
+
+def test_each_response_of_an_input_is_its_own_unit(tmp_path, patched):
+    from redact.dataset import Ledger, Manifest
+
+    paraphrased = []
+    patched.setattr(
+        CP, "paraphrase_batch",
+        lambda client, texts, **kw: paraphrased.extend(texts) or [
+            f"PARA{len(paraphrased) - len(texts) + i}::{t}"
+            for i, t in enumerate(texts)])
+    with pytest.warns(UserWarning):     # K>1 with a single paraphraser
+        df = generate_paraphrases(outputs=_responses(), data_dir=tmp_path,
+                                  target="outputs", paraphrases_per_sample=2,
+                                  verbose=False)["outputs"]
+    out = paths.paraphrases_outputs_csv(tmp_path)
+    planned = Manifest.sidecar(out).load()
+    assert [(r["response_id"], r["input_id"], r["iteration"]) for r in planned] == [
+        ("out-a", "in-1", 0), ("out-a", "in-1", 1), ("out-b", "in-1", 0),
+        ("out-b", "in-1", 1), ("out-c", "in-2", 0), ("out-c", "in-2", 1)]
+    assert len(paraphrased) == len(planned)
+    assert Ledger.sidecar(out, ("response_id", "iteration")).completed() == {
+        (r["response_id"], r["iteration"]) for r in planned}
+    assert list(df.columns) == [
+        "sample_id", "response_id", "input_id", "iteration", "sample", "category",
+        "entry_type", "response_mode", "output_label", "response_label",
+        "paraphrase_model", "accepted", "reasoning", "source"]
+    by_response = df.groupby("response_id").first()
+    assert by_response.loc[["out-a", "out-b", "out-c"],
+                           ["input_id", "output_label", "response_label"]
+                           ].values.tolist() == [
+        ["in-1", "harmful", "dual_use_benign_harmful"],
+        ["in-1", "benign", "dual_use_benign_benign"],
+        ["in-2", "harmful", "harmful_harmful"]]
+    assert set(df["entry_type"]) == {"dual_use_benign", "harmful"}
+
+
+def test_a_frame_without_ids_or_labels_writes_the_columns_empty(tmp_path, patched):
+    """So a later run from a file that has them appends to the same header."""
+    bare = _responses().drop(columns=["sample_id", "response_mode", "output_label",
+                                      "response_label"]).iloc[:1]
+    first = generate_paraphrases(outputs=bare, data_dir=tmp_path, target="outputs",
+                                 verbose=False)["outputs"]
+    assert first[["response_id", "response_mode", "output_label", "response_label"]
+                 ].values.tolist() == [[content_id("a harmful answer"), "", "", ""]]
+    later = generate_paraphrases(outputs=_responses(), data_dir=tmp_path,
+                                 target="outputs", verbose=False)["outputs"]
+    # out-a's paraphrase is the text the first run wrote: dropped as a repeat.
+    assert list(later["response_id"]) == [
+        content_id("a harmful answer"), "out-b", "out-c"]
+    assert list(later["response_label"].iloc[1:]) == [
+        "dual_use_benign_benign", "harmful_harmful"]
+
+
+def _no_paraphrase(patched):
+    def paraphrase(client, texts, **kw):
+        raise AssertionError("a paraphrase was asked for")
+    patched.setattr(CP, "paraphrase_batch", paraphrase)
+
+
+def test_a_ledger_keyed_on_the_input_stops_the_outputs_before_any_call(
+        tmp_path, patched):
+    """The ledger of the stage skips a record without its key: the stop reads
+    the old acks through a ledger keyed on the iteration alone."""
+    out = paths.paraphrases_outputs_csv(tmp_path)
+    out.parent.mkdir(parents=True)
+    pd.DataFrame([{"sample_id": "p1", "input_id": "in-1", "iteration": 0,
+                   "sample": "PARA::x", "category": "Cyber", "entry_type": "harmful",
+                   "paraphrase_model": "m", "accepted": True, "reasoning": "",
+                   "source": "paraphrase_outputs"}]).to_csv(out, index=False)
+    _outputs_state(tmp_path).write_text(
+        '{"input_id": "in-1", "iteration": 0, "paraphrase_model": "m", '
+        '"status": "accepted"}\n', encoding="utf-8")
+    _no_paraphrase(patched)
+    with pytest.raises(ValueError, match="without a response_id") as raised:
+        generate_paraphrases(outputs=_responses(), data_dir=tmp_path,
+                             target="outputs", verbose=False)
+    assert "resume=False" in str(raised.value)
+    assert lock_is_free(_outputs_state(tmp_path))
+
+
+def test_a_file_without_the_response_columns_stops_the_outputs_before_any_call(
+        tmp_path, patched):
+    """Also with no ledger, which a resume takes over."""
+    out = paths.paraphrases_outputs_csv(tmp_path)
+    out.parent.mkdir(parents=True)
+    pd.DataFrame([{"sample_id": "p1", "input_id": "in-1", "iteration": 0,
+                   "sample": "PARA::x", "accepted": True}]).to_csv(out, index=False)
+    _no_paraphrase(patched)
+    with pytest.raises(ValueError, match="'response_id'") as raised:
+        generate_paraphrases(outputs=_responses(), data_dir=tmp_path,
+                             target="outputs", verbose=False)
+    assert "resume=False" in str(raised.value)
+    assert "new data_dir" in str(raised.value)
+
+
+def test_the_inputs_target_beside_an_old_outputs_folder_resumes_as_before(
+        tmp_path, patched):
+    _seed_inputs(tmp_path)
+    first = generate_paraphrases(data_dir=tmp_path, target="inputs",
+                                 verbose=False)["inputs"]
+    _outputs_state(tmp_path).write_text(
+        '{"input_id": "in-1", "iteration": 0, "paraphrase_model": "m", '
+        '"status": "accepted"}\n', encoding="utf-8")
+    _no_paraphrase(patched)
+    df = generate_paraphrases(data_dir=tmp_path, target="inputs",
+                              verbose=False)["inputs"]
+    assert "response_id" not in df.columns
+    pd.testing.assert_frame_equal(df, first)

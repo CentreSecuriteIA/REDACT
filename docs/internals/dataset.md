@@ -41,6 +41,8 @@ or of its unit key where the row has no text of its own. A conversation uses
 `<input_id>:<iteration>`; a jailbreak or variation error row uses
 `<label>:<input_id>:<iteration>`, where `label` is `jailbreak` or
 `variation`. A row derived from another has an `input_id`, that row's id.
+A paraphrase of a response keeps the input answered as `input_id` and names
+the response in `response_id`, the response's `sample_id`.
 
 ## Rows
 
@@ -292,7 +294,7 @@ taxonomy format.
 | constitution | plain: no artifact | `unit` | `status`, `attempts` when rejected |
 | inputs | `artifact=folder, pattern="*/samples.csv"`, `units_in` | `sample_description`, `entry_type`, `style`, `iteration` | `ids`, `accepted`; or `status`, `attempts` |
 | outputs | `artifact=output_responses.csv` | `input_id` | `accepted` |
-| paraphrase | `artifact=paraphrases_<target>.csv` | `input_id`, `iteration` | `paraphrase_model`, `status` |
+| paraphrase | `artifact=paraphrases_<target>.csv` | `input_id`, `iteration` (inputs); `response_id`, `iteration` (outputs) | `paraphrase_model`, `status`; `input_id` (outputs) |
 | jailbreaks, per kind | `artifact=jailbreaks.csv` or `variations.csv` | `input_id`, `iteration` | |
 | benign data (jailbreaks) | `artifact=benign_samples.csv`, always `resume=True` | `main_category`, `sub_category`, `answer_type` | `status`, `attempts` when rejected |
 | conversations | `artifact=conversations.csv` | `input_id`, `iteration` | `stop_reason` |

@@ -81,3 +81,19 @@ def test_dropped_paraphrase_is_not_renamed(tmp_path, monkeypatch, accept_all):
     assert res.empty  # dropped, nothing written
     assert backend.calls[0]["internals_id"].endswith("/attempt_0")
     assert backend.renames == []
+
+
+def test_a_paraphrase_of_a_response_is_captured_under_the_response(
+        tmp_path, monkeypatch, accept_all):
+    import pandas as pd
+
+    backend = _InternalsBackend("a paraphrase")
+    monkeypatch.setattr(P.ModelClient, "create", lambda m: make_client(backend, m))
+    outputs = pd.DataFrame({"input_id": ["in-1"], "sample_id": ["out-a"],
+                            "output_response": ["an answer"], "accepted": [True]})
+    df = generate_paraphrases(outputs=outputs, data_dir=tmp_path, target="outputs",
+                              verbose=False)["outputs"]
+    sample_id = df.iloc[0]["sample_id"]
+    assert backend.calls[0]["internals_id"] == "out-a/paraphrase/attempt_0"
+    assert backend.renames == [
+        ("out-a/paraphrase/attempt_0", f"out-a/paraphrase/{sample_id}")]

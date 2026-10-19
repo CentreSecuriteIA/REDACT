@@ -837,8 +837,14 @@ def generate_paraphrases(
     ``paraphraser`` pool. Each paraphrase is validated by a **separate**
     meaning-preservation checker (check→drop, no retry) and deduped so no two stored
     samples are identical. Rows land in ``paraphrases_inputs.csv`` /
-    ``paraphrases_outputs.csv`` under ``data_dir``, each keyed by
-    ``(input_id, iteration)`` and carrying ``paraphrase_model`` provenance. Per
+    ``paraphrases_outputs.csv`` under ``data_dir``, carrying
+    ``paraphrase_model`` provenance: those of the inputs keyed by
+    ``(input_id, iteration)``, those of the outputs by ``(response_id,
+    iteration)``, ``response_id`` the response's ``sample_id`` (an input may
+    have several responses). A paraphrase of a response keeps ``input_id``,
+    the input answered, and carries its response's ``response_mode``,
+    ``output_label`` and ``response_label``; an outputs folder written before
+    that key stops a resume before any call. Per
     artifact: a ``*.manifest.jsonl`` holds the full plan (every unit -> its model),
     and a sidecar ``*.state.jsonl`` **ledger** records every attempted unit + outcome
     — resume reads the ledger and re-runs only unrecorded units (so drops are never
@@ -860,7 +866,8 @@ def generate_paraphrases(
         paraphrases_per_sample: K units per base sample (warns if K>1 with 1 model).
         target: ``"inputs"`` | ``"outputs"`` | ``"both"``.
         check: Run the meaning-preservation checker (drop failures if it rejects).
-        resume: Skip already-produced ``(input_id, iteration)`` units.
+        resume: Skip already-produced units: ``(input_id, iteration)`` of
+            the inputs, ``(response_id, iteration)`` of the outputs.
         batch_size: Units per paraphrase/check batch.
         seed: Round-robin assignment seed.
         prompt_dir: Root prompt directory for the paraphrase **and** paraphrase-check

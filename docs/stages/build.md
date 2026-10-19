@@ -79,7 +79,7 @@ its text in its own columns:
 | `content_moderation_input` | `sample` | the row is the origin; `source_sample_description` names its constitution entry |
 | `jailbreak`, `natural_variation` | `jailbreak`; the input in `prompt` | `input_id` |
 | `content_moderation_output` | `output_response`; the input in `input_prompt` | `input_id` |
-| `content_moderation_paraphrase` | `sample` | `input_id`; `source` says which target |
+| `content_moderation_paraphrase` | `sample` | `input_id`, the input; for a paraphrase of a response also `response_id`, the response; `source` says which target |
 
 On an output row `entry_type` is the input's, as on every derived row; the
 label of the response is `response_label`, `<entry_type>_<output_label>`,

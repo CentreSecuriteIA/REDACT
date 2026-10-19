@@ -18,6 +18,7 @@ from ..dataset import (
     Ledger,
     Manifest,
     append_rows,
+    check_columns,
     content_id,
     count_rows,
     read_rows,
@@ -36,6 +37,11 @@ logger = logging.getLogger(__name__)
 
 #TODO(later): move this stage onto llm_pipeline.drive_units, like outputs and
 # jailbreaks. Waits for a trained paraphraser; a stand-in model runs it today.
+
+# The columns a paraphrase of a response takes from it: the response's id
+# (its unit's key) and how the response answers its input.
+_RESPONSE_COLUMNS = ("response_id", "response_mode", "output_label", "response_label")
+_LABEL_COLUMNS = _RESPONSE_COLUMNS[1:]
 
 
 def paraphrase_batch(
@@ -86,6 +92,35 @@ def _assign_paraphraser(base_id: str, k: int, pool: list[str], seed: int) -> str
     return pool[int(h, 16) % len(pool)]
 
 
+def _stop_on_an_earlier_folder(ledger: Ledger, out_path: Path) -> None:
+    """Raise when the outputs target's folder was written before its units
+    were keyed on the response: an ack without ``response_id``, or a file
+    whose header lacks one of the response's columns.
+
+    The old acks are read through a ledger keyed on ``iteration``, a field
+    both shapes have: the stage's own ledger skips a record without its key.
+
+    Raises:
+        ValueError: What was found, and the remedies.
+    """
+    remedy = ('Paraphrase the outputs over with resume=False (a recipe\'s "resume": '
+              'false; params paraphrase.target: "outputs" leaves the paraphrases '
+              "of the inputs as they are), or run the stage in a new data_dir.")
+    earlier = Ledger(ledger.path, key_fields=("iteration",))
+    if any("response_id" not in ack for ack in earlier.records()):
+        raise ValueError(
+            f"{ledger.path} acks units without a response_id: its paraphrases of "
+            "outputs were keyed on the input answered, before an input had "
+            f"several responses. {remedy}")
+    if out_path.exists():
+        try:
+            check_columns(out_path, [dict.fromkeys(_RESPONSE_COLUMNS, "")])
+        except ValueError as error:
+            raise ValueError(
+                f"{error} It was written before the paraphrases of outputs were "
+                f"keyed on their response. {remedy}") from None
+
+
 def run_paraphrase_target(
     target: str,
     source: pd.DataFrame,
@@ -104,31 +139,49 @@ def run_paraphrase_target(
     """Paraphrase each row of ``source`` ``k`` times into ``out_path``.
 
     ``target`` (``"inputs"`` or ``"outputs"``) says which columns hold a
-    row's text and id. Each unit goes to a paraphraser of ``pool``;
+    row's text and id. A unit of the inputs target is ``(input_id,
+    iteration)``, ``input_id`` the input's ``sample_id``; one of the outputs
+    target is ``(response_id, iteration)``, ``response_id`` the response's
+    ``sample_id``, since an input may have several responses. A paraphrase of
+    a response keeps ``input_id``, the input answered, and always carries
+    ``response_id``, ``response_mode``, ``output_label`` and
+    ``response_label`` (empty when ``source`` lacks the column). Each unit
+    goes to a paraphraser of ``pool``, picked by a hash of its id;
     ``check``, when given, judges that a paraphrase keeps its original's
     meaning. Returns the artifact's rows, or with ``read_back=False`` an
     empty frame without reading them.
+
+    Raises:
+        ValueError: For the outputs target, a folder written before its units
+            were keyed on the response (an ack without ``response_id``, or a
+            file without the response's columns), before any call.
     """
-    if target == "inputs":
+    outputs = target != "inputs"
+    if not outputs:
         text_col = "sample" if "sample" in source.columns else "prompt"
-        id_col = "sample_id"
     else:
         text_col = ("output_response" if "output_response" in source.columns
                     else "sample")
-        id_col = "input_id"
+    key_field = "response_id" if outputs else "input_id"
 
     src = source.reset_index(drop=True)
     out_path.parent.mkdir(parents=True, exist_ok=True)
 
     # Every attempted unit is acked, a dropped one too, so a resume skips it.
-    ledger = Ledger.sidecar(out_path, key_fields=("input_id", "iteration"),
-                            casters={"input_id": str, "iteration": int})
+    ledger = Ledger.sidecar(out_path, key_fields=(key_field, "iteration"),
+                            casters={key_field: str, "iteration": int})
     manifest = Manifest.sidecar(out_path)
     # A resume cuts off the rows of a save whose acks did not land: those
     # units are paraphrased again, and none ends with two rows.
     completed: set[tuple[str, int]] = resume_state(
         ledger, resume=resume, artifact=out_path, manifest=manifest,
     )
+    if outputs:
+        try:
+            _stop_on_an_earlier_folder(ledger, out_path)
+        except ValueError:
+            release_lock(ledger)
+            raise
     if source.empty:    # a fresh run has cleared what earlier ones left
         if verbose:
             logger.info("[paraphrase:%s] no source rows; skipping.", target)
@@ -142,30 +195,48 @@ def run_paraphrase_target(
         else set()
     )
 
-    # The plan: every (base_id, iteration) unit and the model it goes to.
-    ids = row_ids(src, text_col, id_col)
+    # The plan: every (base_id, iteration) unit and the model it goes to. The
+    # base id is the input's sample_id, or the response's for the outputs
+    # target, whose rows keep the input answered as input_id.
+    ids = row_ids(src, text_col, "sample_id")
+    input_ids = row_ids(src, text_col, "input_id") if outputs else ids
+
+    def _cells(column):
+        """``column`` of the source as text: empty where it has none."""
+        if column not in src.columns:
+            return repeat("")
+        return ("" if pd.isna(cell) else str(cell) for cell in src[column])
 
     def _units():
         """Yield the run's units in plan order, built anew on every call.
 
         A unit is ``(base_id, iteration, model, original_text, category,
-        entry_type)``.
+        entry_type, input_id, labels)``, ``labels`` the source's
+        ``response_mode``, ``output_label`` and ``response_label``.
         No list of them is held: a pass over the units costs time, not memory.
         """
         blank = repeat("")      # for a source without the column
         categories = src.get("category", blank)
         entry_types = src.get("entry_type", blank)
-        for bid, otext, cat, et in zip(ids, src[text_col], categories, entry_types):
+        labels = zip(*(_cells(column) for column in _LABEL_COLUMNS))
+        for bid, otext, cat, et, iid, label in zip(
+                ids, src[text_col], categories, entry_types, input_ids, labels):
             for iteration in range(k):
                 yield (bid, iteration, _assign_paraphraser(bid, iteration, pool, seed),
-                       str(otext), str(cat), str(et))
+                       str(otext), str(cat), str(et), str(iid), label)
+
+    def _keyed(bid, iteration, iid) -> dict:
+        """A unit's key fields, with the input answered for the outputs target."""
+        if outputs:
+            return {"response_id": bid, "input_id": iid, "iteration": iteration}
+        return {"input_id": bid, "iteration": iteration}
 
     manifest.write(
         {
-            "input_id": bid, "iteration": iteration, "paraphrase_model": m,
+            **_keyed(bid, iteration, iid), "paraphrase_model": m,
             "category": cat, "entry_type": et, "status": "planned",
         }
-        for bid, iteration, m, _o, cat, et in _units()
+        for bid, iteration, m, _o, cat, et, iid, _label in _units()
     )
 
     # The units left for each paraphraser, in the order its first one comes up.
@@ -253,11 +324,11 @@ def run_paraphrase_target(
                 for unit, ptext, (acc, reason), prov_id in zip(
                     chunk, paraphrased, checks, provisional_ids
                 ):
-                    bid, iteration, m, otext, cat, et = unit
+                    bid, iteration, m, otext, cat, et, iid, label = unit
                     pt = str(ptext).strip()
                     if not pt or pt == otext or pt in seen_texts:
                         attempted.append(([], {
-                            "input_id": bid, "iteration": iteration,
+                            **_keyed(bid, iteration, iid),
                             "paraphrase_model": m, "status": "dropped_dedup"}))
                         continue  # dedup: drop no-op / duplicate paraphrases
                     seen_texts.add(pt)
@@ -265,14 +336,16 @@ def run_paraphrase_target(
                     if capture_paraphrase:
                         client.rename_capture(prov_id, f"{bid}/paraphrase/{sample_id}")
                     row = {
-                        "sample_id": sample_id, "input_id": bid,
-                        "iteration": iteration, "sample": pt,
-                        "category": cat, "entry_type": et,
+                        "sample_id": sample_id, **_keyed(bid, iteration, iid),
+                        "sample": pt, "category": cat, "entry_type": et,
+                        # Always written for the outputs target, so a first
+                        # run's header holds them whatever its source has.
+                        **(dict(zip(_LABEL_COLUMNS, label)) if outputs else {}),
                         "paraphrase_model": m, "accepted": bool(acc),
                         "reasoning": reason, "source": f"paraphrase_{target}",
                     }
                     attempted.append(([row], {
-                        "input_id": bid, "iteration": iteration, "paraphrase_model": m,
+                        **_keyed(bid, iteration, iid), "paraphrase_model": m,
                         "status": "accepted" if acc else "rejected"}))
                 # Queued once the whole chunk is built: a chunk that fails part-way
                 # saves none of its units. The flush appends the rows, then acks

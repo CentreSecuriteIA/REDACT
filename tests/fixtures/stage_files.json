@@ -325,18 +325,18 @@
     ["561591746817864c", "77", "0", "venice-paraphraser says zeta prompt", "Fraud", "harmful", "venice-paraphraser", "True", "", "paraphrase_inputs"]
    ],
    "paraphrases_inputs.manifest.jsonl": [
-    {"category": "Cyber", "entry_type": "harmful", "input_id": "given-1", "iteration": 0, "paraphrase_model": "venice-paraphraser", "status": "planned"},
-    {"category": "Cyber", "entry_type": "harmful", "input_id": "given-1", "iteration": 1, "paraphrase_model": "venice-paraphraser", "status": "planned"},
-    {"category": "Cyber", "entry_type": "benign", "input_id": "2084ee23d0d97ae6", "iteration": 0, "paraphrase_model": "venice-paraphraser", "status": "planned"},
-    {"category": "Cyber", "entry_type": "benign", "input_id": "2084ee23d0d97ae6", "iteration": 1, "paraphrase_model": "_para_second", "status": "planned"},
-    {"category": "Fraud", "entry_type": "harmful", "input_id": "padded", "iteration": 0, "paraphrase_model": "_para_second", "status": "planned"},
-    {"category": "Fraud", "entry_type": "harmful", "input_id": "padded", "iteration": 1, "paraphrase_model": "_para_second", "status": "planned"},
-    {"category": "Fraud", "entry_type": "harmful", "input_id": "given-1", "iteration": 0, "paraphrase_model": "venice-paraphraser", "status": "planned"},
-    {"category": "Fraud", "entry_type": "harmful", "input_id": "given-1", "iteration": 1, "paraphrase_model": "venice-paraphraser", "status": "planned"},
-    {"category": "Cyber", "entry_type": "benign", "input_id": "cd7d45cc1f5a2100", "iteration": 0, "paraphrase_model": "venice-paraphraser", "status": "planned"},
-    {"category": "Cyber", "entry_type": "benign", "input_id": "cd7d45cc1f5a2100", "iteration": 1, "paraphrase_model": "_para_second", "status": "planned"},
-    {"category": "Fraud", "entry_type": "harmful", "input_id": "77", "iteration": 0, "paraphrase_model": "venice-paraphraser", "status": "planned"},
-    {"category": "Fraud", "entry_type": "harmful", "input_id": "77", "iteration": 1, "paraphrase_model": "venice-paraphraser", "status": "planned"}
+    {"input_id": "given-1", "iteration": 0, "paraphrase_model": "venice-paraphraser", "category": "Cyber", "entry_type": "harmful", "status": "planned"},
+    {"input_id": "given-1", "iteration": 1, "paraphrase_model": "venice-paraphraser", "category": "Cyber", "entry_type": "harmful", "status": "planned"},
+    {"input_id": "2084ee23d0d97ae6", "iteration": 0, "paraphrase_model": "venice-paraphraser", "category": "Cyber", "entry_type": "benign", "status": "planned"},
+    {"input_id": "2084ee23d0d97ae6", "iteration": 1, "paraphrase_model": "_para_second", "category": "Cyber", "entry_type": "benign", "status": "planned"},
+    {"input_id": "padded", "iteration": 0, "paraphrase_model": "_para_second", "category": "Fraud", "entry_type": "harmful", "status": "planned"},
+    {"input_id": "padded", "iteration": 1, "paraphrase_model": "_para_second", "category": "Fraud", "entry_type": "harmful", "status": "planned"},
+    {"input_id": "given-1", "iteration": 0, "paraphrase_model": "venice-paraphraser", "category": "Fraud", "entry_type": "harmful", "status": "planned"},
+    {"input_id": "given-1", "iteration": 1, "paraphrase_model": "venice-paraphraser", "category": "Fraud", "entry_type": "harmful", "status": "planned"},
+    {"input_id": "cd7d45cc1f5a2100", "iteration": 0, "paraphrase_model": "venice-paraphraser", "category": "Cyber", "entry_type": "benign", "status": "planned"},
+    {"input_id": "cd7d45cc1f5a2100", "iteration": 1, "paraphrase_model": "_para_second", "category": "Cyber", "entry_type": "benign", "status": "planned"},
+    {"input_id": "77", "iteration": 0, "paraphrase_model": "venice-paraphraser", "category": "Fraud", "entry_type": "harmful", "status": "planned"},
+    {"input_id": "77", "iteration": 1, "paraphrase_model": "venice-paraphraser", "category": "Fraud", "entry_type": "harmful", "status": "planned"}
    ],
    "paraphrases_inputs.state.jsonl": [
     {},
@@ -354,34 +354,34 @@
     {"input_id": "77", "iteration": 1, "paraphrase_model": "venice-paraphraser", "status": "dropped_dedup"}
    ],
    "paraphrases_outputs.csv": [
-    ["sample_id", "input_id", "iteration", "sample", "category", "entry_type", "paraphrase_model", "accepted", "reasoning", "source"],
-    ["8ce8d1ee49d95a4f", "o1", "0", "venice-paraphraser says alpha answer", "Cyber", "", "venice-paraphraser", "True", "", "paraphrase_outputs"],
-    ["7d0bbb04deb7b290", "ed191712540e7d8b", "1", "venice-paraphraser says beta answer", "Cyber", "", "venice-paraphraser", "True", "", "paraphrase_outputs"],
-    ["70fd785a44c24957", "o4", "0", "venice-paraphraser says delta answer", "Cyber", "", "venice-paraphraser", "False", "meaning changed", "paraphrase_outputs"],
-    ["3ed8f3be770f193d", "o1", "1", "_para_second says alpha answer", "Cyber", "", "_para_second", "True", "", "paraphrase_outputs"],
-    ["20ee892c68eeb259", "ed191712540e7d8b", "0", "_para_second says beta answer", "Cyber", "", "_para_second", "True", "", "paraphrase_outputs"],
-    ["f49a6172aadd569d", "o4", "1", "_para_second says delta answer", "Cyber", "", "_para_second", "False", "meaning changed", "paraphrase_outputs"]
+    ["sample_id", "response_id", "input_id", "iteration", "sample", "category", "entry_type", "response_mode", "output_label", "response_label", "paraphrase_model", "accepted", "reasoning", "source"],
+    ["8ce8d1ee49d95a4f", "c3eaaeb3d970a3d2", "o1", "0", "venice-paraphraser says alpha answer", "Cyber", "", "", "", "", "venice-paraphraser", "True", "", "paraphrase_outputs"],
+    ["7d0bbb04deb7b290", "ed191712540e7d8b", "ed191712540e7d8b", "1", "venice-paraphraser says beta answer", "Cyber", "", "", "", "", "venice-paraphraser", "True", "", "paraphrase_outputs"],
+    ["70fd785a44c24957", "7382f94de4b4f2a2", "o4", "1", "venice-paraphraser says delta answer", "Cyber", "", "", "", "", "venice-paraphraser", "False", "meaning changed", "paraphrase_outputs"],
+    ["3ed8f3be770f193d", "c3eaaeb3d970a3d2", "o1", "1", "_para_second says alpha answer", "Cyber", "", "", "", "", "_para_second", "True", "", "paraphrase_outputs"],
+    ["20ee892c68eeb259", "ed191712540e7d8b", "ed191712540e7d8b", "0", "_para_second says beta answer", "Cyber", "", "", "", "", "_para_second", "True", "", "paraphrase_outputs"],
+    ["f49a6172aadd569d", "7382f94de4b4f2a2", "o4", "0", "_para_second says delta answer", "Cyber", "", "", "", "", "_para_second", "False", "meaning changed", "paraphrase_outputs"]
    ],
    "paraphrases_outputs.manifest.jsonl": [
-    {"category": "Cyber", "entry_type": "", "input_id": "o1", "iteration": 0, "paraphrase_model": "venice-paraphraser", "status": "planned"},
-    {"category": "Cyber", "entry_type": "", "input_id": "o1", "iteration": 1, "paraphrase_model": "_para_second", "status": "planned"},
-    {"category": "Cyber", "entry_type": "", "input_id": "ed191712540e7d8b", "iteration": 0, "paraphrase_model": "_para_second", "status": "planned"},
-    {"category": "Cyber", "entry_type": "", "input_id": "ed191712540e7d8b", "iteration": 1, "paraphrase_model": "venice-paraphraser", "status": "planned"},
-    {"category": "Cyber", "entry_type": "", "input_id": "o3", "iteration": 0, "paraphrase_model": "_para_second", "status": "planned"},
-    {"category": "Cyber", "entry_type": "", "input_id": "o3", "iteration": 1, "paraphrase_model": "_para_second", "status": "planned"},
-    {"category": "Cyber", "entry_type": "", "input_id": "o4", "iteration": 0, "paraphrase_model": "venice-paraphraser", "status": "planned"},
-    {"category": "Cyber", "entry_type": "", "input_id": "o4", "iteration": 1, "paraphrase_model": "_para_second", "status": "planned"}
+    {"response_id": "c3eaaeb3d970a3d2", "input_id": "o1", "iteration": 0, "paraphrase_model": "venice-paraphraser", "category": "Cyber", "entry_type": "", "status": "planned"},
+    {"response_id": "c3eaaeb3d970a3d2", "input_id": "o1", "iteration": 1, "paraphrase_model": "_para_second", "category": "Cyber", "entry_type": "", "status": "planned"},
+    {"response_id": "ed191712540e7d8b", "input_id": "ed191712540e7d8b", "iteration": 0, "paraphrase_model": "_para_second", "category": "Cyber", "entry_type": "", "status": "planned"},
+    {"response_id": "ed191712540e7d8b", "input_id": "ed191712540e7d8b", "iteration": 1, "paraphrase_model": "venice-paraphraser", "category": "Cyber", "entry_type": "", "status": "planned"},
+    {"response_id": "b56dd31a81b87394", "input_id": "o3", "iteration": 0, "paraphrase_model": "venice-paraphraser", "category": "Cyber", "entry_type": "", "status": "planned"},
+    {"response_id": "b56dd31a81b87394", "input_id": "o3", "iteration": 1, "paraphrase_model": "venice-paraphraser", "category": "Cyber", "entry_type": "", "status": "planned"},
+    {"response_id": "7382f94de4b4f2a2", "input_id": "o4", "iteration": 0, "paraphrase_model": "_para_second", "category": "Cyber", "entry_type": "", "status": "planned"},
+    {"response_id": "7382f94de4b4f2a2", "input_id": "o4", "iteration": 1, "paraphrase_model": "venice-paraphraser", "category": "Cyber", "entry_type": "", "status": "planned"}
    ],
    "paraphrases_outputs.state.jsonl": [
     {},
-    {"input_id": "o1", "iteration": 0, "paraphrase_model": "venice-paraphraser", "status": "accepted"},
-    {"input_id": "ed191712540e7d8b", "iteration": 1, "paraphrase_model": "venice-paraphraser", "status": "accepted"},
-    {"input_id": "o4", "iteration": 0, "paraphrase_model": "venice-paraphraser", "status": "rejected"},
-    {"input_id": "o1", "iteration": 1, "paraphrase_model": "_para_second", "status": "accepted"},
-    {"input_id": "ed191712540e7d8b", "iteration": 0, "paraphrase_model": "_para_second", "status": "accepted"},
-    {"input_id": "o3", "iteration": 0, "paraphrase_model": "_para_second", "status": "dropped_dedup"},
-    {"input_id": "o3", "iteration": 1, "paraphrase_model": "_para_second", "status": "dropped_dedup"},
-    {"input_id": "o4", "iteration": 1, "paraphrase_model": "_para_second", "status": "rejected"}
+    {"response_id": "c3eaaeb3d970a3d2", "input_id": "o1", "iteration": 0, "paraphrase_model": "venice-paraphraser", "status": "accepted"},
+    {"response_id": "ed191712540e7d8b", "input_id": "ed191712540e7d8b", "iteration": 1, "paraphrase_model": "venice-paraphraser", "status": "accepted"},
+    {"response_id": "b56dd31a81b87394", "input_id": "o3", "iteration": 0, "paraphrase_model": "venice-paraphraser", "status": "dropped_dedup"},
+    {"response_id": "b56dd31a81b87394", "input_id": "o3", "iteration": 1, "paraphrase_model": "venice-paraphraser", "status": "dropped_dedup"},
+    {"response_id": "7382f94de4b4f2a2", "input_id": "o4", "iteration": 1, "paraphrase_model": "venice-paraphraser", "status": "rejected"},
+    {"response_id": "c3eaaeb3d970a3d2", "input_id": "o1", "iteration": 1, "paraphrase_model": "_para_second", "status": "accepted"},
+    {"response_id": "ed191712540e7d8b", "input_id": "ed191712540e7d8b", "iteration": 0, "paraphrase_model": "_para_second", "status": "accepted"},
+    {"response_id": "7382f94de4b4f2a2", "input_id": "o4", "iteration": 0, "paraphrase_model": "_para_second", "status": "rejected"}
    ]
   },
   "stopped": {
@@ -393,18 +393,18 @@
     ["b55e2bce800a4d95", "cd7d45cc1f5a2100", "0", "venice-paraphraser says epsilon prompt", "Cyber", "benign", "venice-paraphraser", "True", "", "paraphrase_inputs"]
    ],
    "paraphrases_inputs.manifest.jsonl": [
-    {"category": "Cyber", "entry_type": "harmful", "input_id": "given-1", "iteration": 0, "paraphrase_model": "venice-paraphraser", "status": "planned"},
-    {"category": "Cyber", "entry_type": "harmful", "input_id": "given-1", "iteration": 1, "paraphrase_model": "venice-paraphraser", "status": "planned"},
-    {"category": "Cyber", "entry_type": "benign", "input_id": "2084ee23d0d97ae6", "iteration": 0, "paraphrase_model": "venice-paraphraser", "status": "planned"},
-    {"category": "Cyber", "entry_type": "benign", "input_id": "2084ee23d0d97ae6", "iteration": 1, "paraphrase_model": "_para_second", "status": "planned"},
-    {"category": "Fraud", "entry_type": "harmful", "input_id": "padded", "iteration": 0, "paraphrase_model": "_para_second", "status": "planned"},
-    {"category": "Fraud", "entry_type": "harmful", "input_id": "padded", "iteration": 1, "paraphrase_model": "_para_second", "status": "planned"},
-    {"category": "Fraud", "entry_type": "harmful", "input_id": "given-1", "iteration": 0, "paraphrase_model": "venice-paraphraser", "status": "planned"},
-    {"category": "Fraud", "entry_type": "harmful", "input_id": "given-1", "iteration": 1, "paraphrase_model": "venice-paraphraser", "status": "planned"},
-    {"category": "Cyber", "entry_type": "benign", "input_id": "cd7d45cc1f5a2100", "iteration": 0, "paraphrase_model": "venice-paraphraser", "status": "planned"},
-    {"category": "Cyber", "entry_type": "benign", "input_id": "cd7d45cc1f5a2100", "iteration": 1, "paraphrase_model": "_para_second", "status": "planned"},
-    {"category": "Fraud", "entry_type": "harmful", "input_id": "77", "iteration": 0, "paraphrase_model": "venice-paraphraser", "status": "planned"},
-    {"category": "Fraud", "entry_type": "harmful", "input_id": "77", "iteration": 1, "paraphrase_model": "venice-paraphraser", "status": "planned"}
+    {"input_id": "given-1", "iteration": 0, "paraphrase_model": "venice-paraphraser", "category": "Cyber", "entry_type": "harmful", "status": "planned"},
+    {"input_id": "given-1", "iteration": 1, "paraphrase_model": "venice-paraphraser", "category": "Cyber", "entry_type": "harmful", "status": "planned"},
+    {"input_id": "2084ee23d0d97ae6", "iteration": 0, "paraphrase_model": "venice-paraphraser", "category": "Cyber", "entry_type": "benign", "status": "planned"},
+    {"input_id": "2084ee23d0d97ae6", "iteration": 1, "paraphrase_model": "_para_second", "category": "Cyber", "entry_type": "benign", "status": "planned"},
+    {"input_id": "padded", "iteration": 0, "paraphrase_model": "_para_second", "category": "Fraud", "entry_type": "harmful", "status": "planned"},
+    {"input_id": "padded", "iteration": 1, "paraphrase_model": "_para_second", "category": "Fraud", "entry_type": "harmful", "status": "planned"},
+    {"input_id": "given-1", "iteration": 0, "paraphrase_model": "venice-paraphraser", "category": "Fraud", "entry_type": "harmful", "status": "planned"},
+    {"input_id": "given-1", "iteration": 1, "paraphrase_model": "venice-paraphraser", "category": "Fraud", "entry_type": "harmful", "status": "planned"},
+    {"input_id": "cd7d45cc1f5a2100", "iteration": 0, "paraphrase_model": "venice-paraphraser", "category": "Cyber", "entry_type": "benign", "status": "planned"},
+    {"input_id": "cd7d45cc1f5a2100", "iteration": 1, "paraphrase_model": "_para_second", "category": "Cyber", "entry_type": "benign", "status": "planned"},
+    {"input_id": "77", "iteration": 0, "paraphrase_model": "venice-paraphraser", "category": "Fraud", "entry_type": "harmful", "status": "planned"},
+    {"input_id": "77", "iteration": 1, "paraphrase_model": "venice-paraphraser", "category": "Fraud", "entry_type": "harmful", "status": "planned"}
    ],
    "paraphrases_inputs.state.jsonl": [
     {},
