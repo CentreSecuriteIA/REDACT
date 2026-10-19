@@ -34,6 +34,7 @@ from redact.config_overlay import taxonomy_folder
 from redact.constitution import ConstitutionPipeline, read_constitution
 from redact.content_moderation import InputPipeline, run_output_generation
 from redact.content_moderation import axes as generation_axes
+from redact.content_moderation.modes import resolve_modes
 from redact.content_moderation.paraphrase import (
     paraphrase_pool,
     run_paraphrase_target,
@@ -360,28 +361,33 @@ def generate_outputs(
     axes: dict | bool | None = None,
     axes_weighting: str = "table",
     seed: int = 42,
+    modes: dict | None = None,
     config_dir: str | Path | None = None,
     read_back: bool = True,
 ) -> pd.DataFrame:
     """Generate model responses for input samples, batched and quality-checked.
 
-    Pipeline, in calls of up to ``batch_size`` rows:
-      1. Generation calls, each asking for a response of the spec of the
-         response axes dealt to its row.
-      2. Check calls, each row with its own entry-type-aware output
-         checker. Refusals on harmful inputs are rejected; refusals on benign
-         inputs are evaluated normally. With ``max_attempts > 1`` rejected
-         rows are regenerated with the checker's verdict as feedback.
+    Each row is dealt an answer mode, ``harmful`` or ``helpful``, from those
+    its input's entry type allows (``modes``), then a spec of the response
+    axes. Pipeline, in calls of up to ``batch_size`` rows:
+      1. Generation calls, each with its mode's prompt
+         (``output/generation/<mode>``), asking for a response of the spec
+         dealt to its row.
+      2. Check calls, each with its mode's checker
+         (``output/quality_check/<mode>``), shown the category and not the
+         entry type: a refusal is rejected in both modes. With
+         ``max_attempts > 1`` rejected rows are regenerated with the
+         checker's verdict as feedback.
       3. Incremental append to the output CSV as rows finish — crash-resilient.
 
     Resume: each input gets a stable content-hash id (its ``id`` column when
     present, else ``content_id(prompt)``). Completed ids are recorded in a
     sidecar ``*.state.jsonl`` ledger beside the output CSV. On a re-run
     (``resume=True``) inputs already in the ledger are skipped, so a crash loses
-    only the rows still in progress, and the specs are dealt as before:
-    ``output_responses.plan.json`` stops a resume with another ``seed`` or
-    other axes' weights. ``resume=False`` clears both the CSV and the ledger
-    first.
+    only the rows still in progress, and the modes and specs are dealt as
+    before: ``output_responses.plan.json`` stops a resume with another
+    ``seed``, other ``modes`` or other axes' weights. ``resume=False`` clears
+    both the CSV and the ledger first.
 
     Args:
         inputs: Input samples DataFrame. If None, the accepted inputs of the
@@ -390,7 +396,7 @@ def generate_outputs(
             empty frame.
         model: Generation model. ``None`` (default) resolves to the
             ``uncensored_gen`` role. Backend is auto-selected from the name.
-        check_outputs: Run the entry-type-aware output quality checker.
+        check_outputs: Run each row's mode's output quality checker.
             Set False to skip checking (accept everything).
         check_model: Checker model; defaults to ``model``.
         batch_size: Inputs per engine pass.
@@ -425,6 +431,10 @@ def generate_outputs(
             ``"log"`` spreads them more evenly over each axis's values
             (:func:`redact.content_moderation.axes.resolve`).
         seed: The seed of the deal.
+        modes: The answer modes each entry type allows, laid over the
+            default per entry type: ``harmful`` → ``["harmful"]``, both
+            dual-use types → ``["harmful", "helpful"]``, ``benign`` →
+            ``["helpful"]`` (:func:`redact.content_moderation.modes.resolve_modes`).
         config_dir: A config folder whose ``generation_axes.json`` and
             ``dimensions.json`` are read in place of the packaged ones when
             it has them. ``None``: the packaged ones.
@@ -434,21 +444,28 @@ def generate_outputs(
     Returns:
         DataFrame of all rows in the output CSV (the full dataset, including
         rows from prior resumed runs) with the unified output schema:
-        ``input_id``, ``sample_id``, ``input_prompt``, ``category``,
-        ``subcategory``, ``entry_type``, ``output_response``, ``accepted``,
-        ``rejection_reason``, ``model``, ``source``, then with axes a
-        ``response_<axis>`` column per axis. ``sample_id`` is this row's own
-        content-hash identity (``content_id(output_response)``), distinct
-        from ``input_id`` (the origin sample it responds to).
+        ``input_id``, ``input_prompt``, ``category``, ``subcategory``,
+        ``entry_type``, ``model``, ``source``, ``sample_id``,
+        ``output_response``, ``accepted``, ``rejection_reason``,
+        ``response_mode``, ``output_label``, ``response_label``, then with
+        axes a ``response_<axis>`` column per axis. ``entry_type`` is the
+        input's; ``response_label`` is ``<entry_type>_<output_label>``, the
+        output label ``harmful`` for the harmful mode and ``benign`` for the
+        helpful one. ``sample_id`` is this row's own content-hash identity
+        (``content_id(output_response)``), distinct from ``input_id`` (the
+        origin sample it responds to).
 
     Raises:
         ValueError: ``inputs`` is None and the run has no input sample at all,
             ``axes`` names an unknown axis or value or ``axes_weighting``
-            another weighting, or the plan file or the file's columns stop a
-            resume (:func:`run_output_generation`).
+            another weighting, ``modes`` is not a mapping of entry types to
+            modes, an input's entry type is one ``modes`` does not map, or
+            the plan file or the file's columns stop a resume
+            (:func:`run_output_generation`).
     """
     axes = generation_axes.resolve(
         "outputs", axes, weighting=axes_weighting, config_dir=config_dir)
+    modes = resolve_modes(modes)
     out_path = (
         Path(output_path) if output_path
         else paths.output_responses_csv(data_dir)
@@ -480,7 +497,7 @@ def generate_outputs(
         batch_size=batch_size, out_path=out_path, prompt_dir=prompt_dir,
         resume=resume, verbose=verbose, max_attempts=max_attempts,
         check_max_tokens=check_max_tokens, read_back=read_back,
-        axes=axes, seed=seed,
+        axes=axes, seed=seed, modes=modes,
     )
 
 
@@ -1240,10 +1257,13 @@ def _eval_parts(parts: dict[str, Part]) -> dict[str, list[Part]]:
     input_paraphrases = {**inputs, "paraphrased": True, "input_id": "input_id",
                          "paraphrase_model": "paraphrase_model", **derived}
     outputs = {"sample_id": "sample_id", "text": "output_response",
-               "label": "entry_type", "paraphrased": False, "input_id": "input_id",
-               "model": "model", "paraphrase_model": None, **derived}
-    output_paraphrases = {**outputs, "text": "sample", "paraphrased": True,
-                          "model": None, "paraphrase_model": "paraphrase_model"}
+               "label": _response_label("Outputs"), "output_label": "output_label",
+               "paraphrased": False, "input_id": "input_id", "model": "model",
+               "paraphrase_model": None, **derived}
+    output_paraphrases = {**outputs, "text": "sample",
+                          "label": _response_label("Output paraphrases"),
+                          "paraphrased": True, "model": None,
+                          "paraphrase_model": "paraphrase_model"}
     attacks = {"sample_id": "sample_id", "text": "jailbreak", "label": "entry_type",
                "is_jailbreak": True, "technique": "technique",
                "complexity": "complexity", "num_techniques": "num_techniques",
@@ -1352,6 +1372,34 @@ def _benign(chunk: pd.DataFrame) -> pd.Series:
     if "entry_type" not in chunk.columns:
         return pd.Series(False, index=chunk.index)
     return chunk["entry_type"] == EntryType.BENIGN.value
+
+
+def _response_label(part: str) -> Callable[[pd.DataFrame], pd.Series]:
+    """A response's eval ``label``: its ``response_label`` cell, else, for a
+    row written before the answer modes, its ``entry_type``. The first chunk
+    of the part that falls back logs a WARNING naming ``part``."""
+    warned = False
+
+    def cells(chunk: pd.DataFrame) -> pd.Series:
+        nonlocal warned
+        entry_type = (chunk["entry_type"] if "entry_type" in chunk.columns
+                      else pd.Series("", index=chunk.index))
+        if "response_label" in chunk.columns:
+            label = chunk["response_label"]
+            missing = label.isna() | (label.astype(str) == "")
+        else:
+            label = pd.Series("", index=chunk.index)
+            missing = pd.Series(True, index=chunk.index)
+        if not missing.any():
+            return label
+        if not warned:
+            warned = True
+            logger.warning(
+                "%s: rows without a response_label, written before the answer "
+                "modes, take their entry_type as their label in %s.", part,
+                paths.EVAL_OUTPUTS_FILENAME)
+        return label.where(~missing, entry_type)
+    return cells
 
 
 def _of_input(column: str, by_input: dict) -> Callable[[pd.DataFrame], pd.Series]:

@@ -321,7 +321,8 @@ template comes from `PromptTemplate.load`.
   `(original, sample) -> messages`. `build_quality_checker(category,
   entry_type, subcategory)` judges an input against all three, so a benign
   or dual-use sample is not rejected for falling outside a harm category;
-  `build_output_quality_checker` and `build_paraphrase_checker` are the
-  output and paraphrase checks.
+  `build_output_quality_checker(category, mode)` loads the checker of a
+  response's answer mode (`output/quality_check/<mode>`), and
+  `build_paraphrase_checker` the paraphrase check.
 - The residency planner reads `MODEL_REGISTRY`, `resources/estimate.py` and
   `resources/measure.py`, and hands its grants to `backends/vllm.py`.

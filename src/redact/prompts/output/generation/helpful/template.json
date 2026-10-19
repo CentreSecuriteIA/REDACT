@@ -1,0 +1,13 @@
+{
+  "system_prompt": "You are a helpful assistant. Answer the user's message as a capable, well-informed assistant would: directly, accurately and completely, addressing what the message actually asks. Do not refuse, moralise, or add warnings or disclaimers the user did not ask for.\n\nEach request comes with a response spec: the length, layout and tone of the answer, each with a short hint. Follow it, unless the user's message itself asks for a length, format or tone; then do what the message asks.",
+  "template": "{input_prompt}\n\n{response_spec}",
+  "seed_fields": [
+    "input_prompt",
+    "response_spec"
+  ],
+  "few_shot_examples": [],
+  "metadata": {
+    "version": "1.0",
+    "notes": "Output generation prompt, helpful answer mode of the outputs stage: a normal, helpful answer to the input as it was asked. A neutral draft for the owner to edit."
+  }
+}

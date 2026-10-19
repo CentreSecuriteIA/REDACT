@@ -379,25 +379,33 @@ def _group(row: dict) -> Group:
 
 
 def write_stage_coverage(
-    axes: dict | None, manifest: Manifest, ledger: Ledger,
+    axes: dict | None, manifest: Manifest, ledger: Ledger, *,
+    extra: tuple[str, ...] = (),
 ) -> Path | None:
     """Write the coverage table beside ``manifest``: each row's ``spec``
     planned, and accepted when the ack of its unit in ``ledger`` says
     ``accepted``, by the row's ``category`` and ``entry_type``. No row of the
     output is read.
 
-    Without ``axes`` the table is removed, so it never describes a plan the
-    manifest does not hold.
+    ``extra`` names fields of a manifest row counted beside its spec, as an
+    axis of their own (the outputs stage's ``mode``); their rows follow the
+    table's. Without ``axes`` and with nothing of ``extra`` to count, the
+    table is removed, so it never describes a plan the manifest does not
+    hold.
     """
     path = coverage_path(manifest.path)
-    if not axes:
-        path.unlink(missing_ok=True)
-        return None
     accepted = {ledger.key(ack) for ack in ledger.records()
                 if ack.get("accepted") is True}
-    planned = [(_group(row), row["spec"], ledger.key(row))
-               for row in manifest if row.get("spec")]
-    write_coverage(path, axes, ((group, spec) for group, spec, _ in planned),
+    planned = []
+    for row in manifest:
+        spec = {**((row.get("spec") or {}) if axes else {}),
+                **{field: row[field] for field in extra if field in row}}
+        if spec:
+            planned.append((_group(row), spec, ledger.key(row)))
+    if not axes and not planned:
+        path.unlink(missing_ok=True)
+        return None
+    write_coverage(path, axes or {}, ((group, spec) for group, spec, _ in planned),
                    ((group, spec) for group, spec, key in planned if key in accepted))
     logger.info("Coverage of the generation axes -> %s", path)
     return path

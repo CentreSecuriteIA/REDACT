@@ -186,7 +186,10 @@ the accepted rows of every category into
 
 **outputs.** `generate_outputs` reads the accepted inputs of the run
 (`dataset.merge_inputs`) and calls `run_output_generation`: one unit per
-input, dealt a spec of the response axes, a response and a check. Rows go to `Datasets/output_responses.csv`.
+input, dealt an answer mode its entry type allows (`harmful` or `helpful`,
+which picks the prompt and the checker and gives the response its label),
+then a spec of the response axes, a response and a check. Rows go to
+`Datasets/output_responses.csv`.
 [stages/outputs.md](stages/outputs.md)
 
 **paraphrase.** `generate_paraphrases` paraphrases the accepted inputs and
@@ -260,7 +263,7 @@ six stages as a training run, with these differences:
 | File | Rows | `label` |
 |---|---|---|
 | `eval_inputs.csv` | the accepted inputs, then their paraphrases (`paraphrased` true) | the entry type |
-| `eval_outputs.csv` | the accepted responses, then their paraphrases | the entry type of the input answered |
+| `eval_outputs.csv` | the accepted responses, then their paraphrases | `<entry_type>_<output_label>`: the entry type of the input answered, then `harmful` or `benign` for the response's answer mode (an `output_label` column holds the second part) |
 | `eval_jailbreaks.csv` | the accepted attacks that changed their input (`is_jailbreak` true), then the bare benign inputs (`is_jailbreak` false) | the entry type |
 
 The variations are in none of them. Every row keeps its `sample_id`, and

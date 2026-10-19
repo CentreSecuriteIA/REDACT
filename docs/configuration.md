@@ -116,10 +116,12 @@ models, `data_dir`, `prompt_dir`, `taxonomy`, `taxonomy_dir`,
 `constitution_df`, the jailbreak stage's `augmentation`, the build's `mode`,
 `read_back`). Parameters that take a DataFrame (`inputs`, `outputs`) cannot
 be written in JSON. The `axes`, `axes_weighting` and `seed` of `inputs`
-and `outputs` are checked when the params load (a params file's and a
-dataset type's): an unknown axis or value, a weight below 0, a weighting
-other than `"table"` or `"log"`, or a seed that is not a whole number
-raises, read against the `config_dir`'s axes table when it has one.
+and `outputs`, and the `modes` of `outputs`, are checked when the params
+load (a params file's and a dataset type's): an unknown axis or value, a
+weight below 0, a weighting other than `"table"` or `"log"`, a seed that is
+not a whole number, or a `modes` that is not an object of entry types to
+non-empty lists of distinct modes raises, the axes read against the
+`config_dir`'s axes table when it has one.
 
 ### `constitution`
 
@@ -157,6 +159,7 @@ names of the last two, are read for this release with a
 | `max_attempts` | `1` | Generations per input; above 1 a rejected response is generated again with the verdict as feedback |
 | `max_per_category` | `null` | Keep the first N inputs per `(category, entry_type)` |
 | `max_samples` | `null` | Keep the first N inputs overall, after `max_per_category` |
+| `modes` | `null`: the default | The answer modes each entry type allows, `{entry_type: [mode, ...]}` laid over the default per entry type: `harmful` → `["harmful"]`, `dual_use_harmful` and `dual_use_benign` → `["harmful", "helpful"]`, `benign` → `["helpful"]`. A mode picks the response's prompt and checker and gives its label ([outputs](stages/outputs.md#answer-modes)) |
 | `axes` | `null`: the table's | The response axes each input row is dealt a value of, over the table's `outputs` section, as for `inputs` |
 | `axes_weighting` | `"table"` | As for `inputs`; neither type sets it |
 | `seed` | `42` | The seed of the deal |
@@ -302,6 +305,12 @@ draw those families. `authorship` (the `writer` axis) and `role_framing` are
 ruled distinct: who writes a message is not a role or scenario the message
 sets up, so the writer axis varies beside the persona, framing, cognitive and
 impersonation families (`tests/test_dimensions.py` records the ruling).
+
+The outputs stage's answer mode (`harmful` or `helpful`) is no axis and
+carries no tag: it picks the response's prompt, checker and label, the
+response's side of `entry_type`, and no family varies whether a model
+complies (`answer_format` varies what a message asks of the answer's form),
+so `check_dimensions` has nothing to say about it.
 
 ## The augmentation section
 
@@ -772,7 +781,7 @@ The conversation functions, which no recipe runs (`evaluate_conversations`,
 |---|---|
 | `constitution` | `harmful`, `dual_use_harmful`, `dual_use_benign`, `benign`, `general_benign` |
 | `input` | `generation/from_constitution/long`, `generation/from_constitution/short`, `quality_check` |
-| `output` | `generation`, `quality_check` |
+| `output` | `generation/harmful`, `generation/helpful`, `quality_check/harmful`, `quality_check/helpful`: one generation prompt and one checker per [answer mode](stages/outputs.md#answer-modes) |
 | `paraphrase` | `generation`, `check` |
 | `jailbreak` | `scenario_generation`, `persona_scenario_generation`, `jailbreak_construction`, `category_selection`, `benign_generation`, `extract_harmful`, `synonym_substitution`, `rewrite_with_typos`, `translate`, `translate_retry`, `translate_check`, `translate_mt` (a machine translator's format: one user message, no system prompt; checked at the stage's start), `translate_check_back` |
 | `conversation` | `judge`, `success_judge`, `pair_attacker` |

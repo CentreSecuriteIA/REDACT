@@ -51,6 +51,13 @@ dataset and ``paraphrased.csv``: the fixture's two eval builds (``eval`` and
 ``inputs tree``) hold those files, as the code that first wrote them gave
 them, and the eval run's build counts their rows, which have no
 ``accepted`` column.
+
+Each response is dealt an answer mode, so the output rows and the
+paraphrases of outputs carry ``response_mode``, ``output_label`` and
+``response_label`` (the paraphrases ``response_id`` too), which the
+complete dataset holds as further columns. ``eval_outputs.csv`` takes its
+``label`` from ``response_label``, ``<entry_type>_<output_label>``, and gains
+an ``output_label`` column after it; its other cells are as before.
 """
 
 import json
@@ -142,6 +149,9 @@ _OUTPUTS = pd.DataFrame({
     "output_response": ["an answer", "a refusal, politely", "an answer\nof two lines"],
     "accepted": [True, False, True],
     "rejection_reason": ["", "No: a refusal", ""],
+    "response_mode": ["harmful", "helpful", "harmful"],
+    "output_label": ["harmful", "benign", "harmful"],
+    "response_label": ["harmful_harmful", "benign_benign", "harmful_harmful"],
 })
 
 _PARAPHRASED_INPUTS = pd.DataFrame({
@@ -160,10 +170,14 @@ _PARAPHRASED_INPUTS = pd.DataFrame({
 _PARAPHRASED_OUTPUTS = pd.DataFrame({
     "sample_id": ["po-1", "po-2"],
     "input_id": ["in-1", "in-3"],
+    "response_id": ["out-1", "out-3"],
     "iteration": [0, 0],
     "sample": ["an answer, reworded", "another answer"],
     "category": ["Cyber", "Fraud"],
     "entry_type": ["harmful", "harmful"],
+    "response_mode": ["harmful", "harmful"],
+    "output_label": ["harmful", "harmful"],
+    "response_label": ["harmful_harmful", "harmful_harmful"],
     "paraphrase_model": ["para-a", "para-a"],
     "accepted": [False, True],
     "reasoning": ["meaning changed", ""],
@@ -521,8 +535,8 @@ _EVAL_HEADERS = {
         "num_techniques", "iteration", "input_id", "entry_type", "category",
         "subcategory", "source_taxonomy", "dataset_type"],
     "eval_outputs.csv": [
-        "sample_id", "text", "label", "paraphrased", "input_id", "model",
-        "paraphrase_model", "entry_type", "category", "subcategory",
+        "sample_id", "text", "label", "output_label", "paraphrased", "input_id",
+        "model", "paraphrase_model", "entry_type", "category", "subcategory",
         "source_taxonomy", "dataset_type"],
 }
 
@@ -569,16 +583,63 @@ def test_the_output_file_holds_the_responses_then_their_paraphrases_marked(tmp_p
     _write_stage_files(tmp_path)
     build_dataset(data_dir=tmp_path, mode="eval", verbose=False)
     rows = _eval_files(tmp_path)["eval_outputs.csv"]
-    columns = ["sample_id", "text", "label", "paraphrased", "input_id", "model",
-               "paraphrase_model", "subcategory", "dataset_type"]
+    columns = ["sample_id", "text", "label", "output_label", "paraphrased",
+               "input_id", "model", "paraphrase_model", "entry_type", "subcategory",
+               "dataset_type"]
     assert rows[columns].values.tolist() == [
-        ["out-1", "an answer", "harmful", False, "in-1", "gen-model", "", "phishing",
-         "content_moderation_output"],
-        ["out-3", "an answer\nof two lines", "harmful", False, "in-3", "gen-model", "",
-         "cards", "content_moderation_output"],
-        ["po-2", "another answer", "harmful", True, "in-3", "", "para-a", "cards",
-         "content_moderation_paraphrase"],
+        ["out-1", "an answer", "harmful_harmful", "harmful", False, "in-1",
+         "gen-model", "", "harmful", "phishing", "content_moderation_output"],
+        ["out-3", "an answer\nof two lines", "harmful_harmful", "harmful", False,
+         "in-3", "gen-model", "", "harmful", "cards", "content_moderation_output"],
+        ["po-2", "another answer", "harmful_harmful", "harmful", True, "in-3", "",
+         "para-a", "harmful", "cards", "content_moderation_paraphrase"],
     ]
+
+
+def test_a_response_label_of_each_mode_is_the_eval_label(tmp_path):
+    """The label is the input's entry type and the response's output label."""
+    from redact import build_dataset
+
+    _write_stage_files(tmp_path)
+    _OUTPUTS.assign(
+        accepted=True, entry_type="dual_use_benign",
+        response_mode=["harmful", "helpful", "helpful"],
+        output_label=["harmful", "benign", "benign"],
+        response_label=["dual_use_benign_harmful", "dual_use_benign_benign",
+                        "dual_use_benign_benign"],
+    ).to_csv(paths.output_responses_csv(tmp_path), index=False)
+    build_dataset(data_dir=tmp_path, mode="eval", verbose=False)
+    rows = _eval_files(tmp_path)["eval_outputs.csv"]
+    assert rows[["sample_id", "label", "output_label", "entry_type"]
+                ].values.tolist()[:3] == [
+        ["out-1", "dual_use_benign_harmful", "harmful", "dual_use_benign"],
+        ["out-2", "dual_use_benign_benign", "benign", "dual_use_benign"],
+        ["out-3", "dual_use_benign_benign", "benign", "dual_use_benign"],
+    ]
+
+
+def test_responses_written_before_the_answer_modes_are_labelled_by_entry_type(
+        tmp_path, caplog):
+    """With one WARNING for each part that falls back."""
+    import logging
+
+    from redact import build_dataset
+
+    _write_stage_files(tmp_path)
+    label_columns = ["response_mode", "output_label", "response_label"]
+    _OUTPUTS.drop(columns=label_columns).to_csv(
+        paths.output_responses_csv(tmp_path), index=False)
+    _PARAPHRASED_OUTPUTS.drop(columns=[*label_columns, "response_id"]).to_csv(
+        paths.paraphrases_outputs_csv(tmp_path), index=False)
+    with caplog.at_level(logging.WARNING, logger="redact"):
+        build_dataset(data_dir=tmp_path, mode="eval", verbose=False)
+    rows = _eval_files(tmp_path)["eval_outputs.csv"]
+    assert rows[["sample_id", "label", "output_label"]].values.tolist() == [
+        ["out-1", "harmful", ""], ["out-3", "harmful", ""], ["po-2", "harmful", ""]]
+    warned = [r.getMessage().split(":")[0] for r in caplog.records
+              if "rows without a response_label" in r.getMessage()]
+    assert warned == ["Outputs", "Output paraphrases"]
+    assert [r.levelname for r in caplog.records] == ["WARNING", "WARNING"]
 
 
 def test_the_jailbreak_file_holds_the_attacks_then_the_bare_benign_inputs(tmp_path):

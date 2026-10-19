@@ -1129,6 +1129,37 @@ def test_a_wrong_axes_entry_or_seed_fails_at_load(params, named):
         load_params(params)
 
 
+@pytest.mark.parametrize(("modes", "named"), [
+    (["harmful"], "outputs.modes must be an object"),
+    ({"general": ["helpful"]}, "outputs.modes names no entry type 'general'"),
+    ({"benign": []}, "outputs.modes.benign must be a non-empty list"),
+    ({"benign": ["safe"]}, "outputs.modes.benign must be a non-empty list"),
+    ({"benign": ["helpful", "helpful"]},
+     "outputs.modes.benign must be a non-empty list of distinct modes"),
+])
+def test_a_wrong_answer_mode_mapping_fails_at_load(modes, named):
+    with pytest.raises(ValueError, match=re.escape(named)):
+        load_params({"outputs": {"modes": modes}})
+
+
+def test_an_answer_mode_mapping_is_read_as_written():
+    params = {"outputs": {"modes": {"_note": "x", "benign": ["harmful", "helpful"]}}}
+    assert load_params(params) == params
+
+
+def test_a_dataset_type_file_with_a_wrong_answer_mode_mapping_fails_at_load(
+        tmp_path):
+    from redact.recipe import load_dataset_type
+
+    typed = load_dataset_type("training")
+    typed["params"]["outputs"] = {"modes": {"benign": ["unsafe"]}}
+    path = tmp_path / "cfg" / "dataset_types" / "training.json"
+    path.parent.mkdir(parents=True)
+    path.write_text(json.dumps(typed), encoding="utf-8")
+    with pytest.raises(ValueError, match=re.escape("outputs.modes.benign")):
+        load_recipe({"dataset_type": "training", "config_dir": str(tmp_path / "cfg")})
+
+
 def test_the_axes_of_the_params_are_read_against_the_config_folders_table(tmp_path):
     from redact import paths as P
 

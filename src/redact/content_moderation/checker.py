@@ -8,6 +8,7 @@ from collections.abc import Callable
 
 from ..llms.prompting import PromptTemplate
 from ..types import EntryType
+from .modes import MODES
 
 Checker = Callable[[str, str], list[dict]]
 
@@ -48,17 +49,25 @@ def build_quality_checker(
 
 def build_output_quality_checker(
     category: str,
-    entry_type: str | EntryType = "harmful",
+    mode: str = "harmful",
     prompt_dir: str | None = None,
 ) -> Checker:
-    """Check a model's response (``sample``) to an input (``original``).
+    """Check a model's response (``sample``) to an input (``original``)
+    against its answer ``mode``, with the checker ``output/quality_check/<mode>``.
 
-    For a harmful input a refusal is rejected; for a benign one the response
-    is judged as any answer.
+    A harmful-mode response must carry what was asked for; a helpful-mode
+    one must be a normal, helpful answer to the request as it was asked. In
+    both a refusal is rejected. The checker is shown the category, not the
+    input's entry type. ``mode`` took the place of ``entry_type``.
+
+    Raises:
+        ValueError: ``mode`` is not one of the answer modes.
     """
+    if mode not in MODES:
+        raise ValueError(
+            f"The output checker's mode must be one of {list(MODES)}, got {mode!r}.")
     template = PromptTemplate.load(
-        "output", "quality_check", prompt_dir=prompt_dir,
-        Category=category, entry_type=_value(entry_type),
+        "output", f"quality_check/{mode}", prompt_dir=prompt_dir, Category=category,
     )
     return _pair(template, original="input_prompt", sample="output_response")
 

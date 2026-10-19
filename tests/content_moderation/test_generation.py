@@ -169,7 +169,11 @@ class TestTheResponseAxes:
         assert not set(_RESPONSE_COLUMNS) & set(_written(tmp_path).columns)
         assert all(call["messages"][-1]["content"].endswith("\n\n")
                    for call in gen.calls)
-        assert not _coverage(tmp_path).exists()
+        # The answer modes are still counted, and nothing else.
+        table = pd.read_csv(_coverage(tmp_path))
+        assert set(table["axis"]) == {"mode"}
+        assert table.groupby("category")["planned"].sum().to_dict() == {
+            "Cyber": _QUESTIONS // 2, "Fraud": _QUESTIONS // 2}
 
     def test_a_resume_deals_the_same_specs_and_makes_no_call(
             self, tmp_path, monkeypatch):
@@ -207,11 +211,14 @@ class TestTheResponseAxes:
                  judge=lambda token: "No: weak" if int(token[2:]) % 2 else "Yes")
         table = pd.read_csv(_coverage(tmp_path))
         values = sum(len(entry["values"]) for entry in A.resolve("outputs").values())
-        assert len(table) == 2 * values     # every value, in each of two groups
+        # Every value in each of two groups, then the one mode each group dealt.
+        assert len(table) == 2 * values + 2
+        assert table.tail(2)[["axis", "value"]].values.tolist() == [
+            ["mode", "harmful"]] * 2
         per_group = table.groupby(["category", "axis"])[["planned", "accepted"]].sum()
         assert set(per_group["planned"]) == {_QUESTIONS // 2}
-        assert per_group.loc["Cyber", "accepted"].tolist() == [_QUESTIONS // 2] * 3
-        assert per_group.loc["Fraud", "accepted"].tolist() == [0] * 3
+        assert per_group.loc["Cyber", "accepted"].tolist() == [_QUESTIONS // 2] * 4
+        assert per_group.loc["Fraud", "accepted"].tolist() == [0] * 4
 
     def test_a_file_written_before_the_response_columns_stops_a_resume_first(
             self, tmp_path, monkeypatch):
@@ -222,14 +229,189 @@ class TestTheResponseAxes:
             _respond(tmp_path, monkeypatch, inputs=_questions(2 * before))
         assert "response_length" in str(raised.value)
         assert "resume=False" in str(raised.value)
+        assert "outputs.axes: false" in str(raised.value)
+        assert len(_written(tmp_path)) == before
+
+    def test_a_file_written_before_the_answer_modes_stops_a_resume_first(
+            self, tmp_path, monkeypatch):
+        """Before the plan file, whose keys no setting of this run matches."""
+        before = 2
+        _respond(tmp_path, monkeypatch, inputs=_questions(before))
+        out = paths.output_responses_csv(tmp_path)
+        # A folder as the stage left it before the modes: no mode column, a
+        # plan file without modes, and no ledger, which a resume takes over.
+        old = _written(tmp_path).drop(columns=["response_mode", "output_label",
+                                               "response_label"])
+        old.to_csv(out, index=False)
+        for sidecar in ("state.jsonl", "manifest.jsonl"):
+            (paths.datasets(tmp_path) / f"output_responses.{sidecar}").unlink()
+        plan = paths.datasets(tmp_path) / "output_responses.plan.json"
+        record = json.loads(plan.read_text(encoding="utf-8"))
+        del record["modes"]
+        plan.write_text(json.dumps(record), encoding="utf-8")
+        with pytest.raises(ValueError) as raised:
+            _respond(tmp_path, monkeypatch, inputs=_questions(2 * before))
+        message = str(raised.value)
+        assert "response_mode" in message and "before the answer modes" in message
+        assert "resume=False" in message
+        assert "outputs.axes" not in message and "['modes']" not in message
         assert len(_written(tmp_path)) == before
 
     def test_a_prompt_without_the_placeholder_is_warned_about(
             self, tmp_path, monkeypatch, caplog):
-        overlay = tmp_path / "prompts" / "output" / "generation"
+        overlay = tmp_path / "prompts" / "output" / "generation" / "harmful"
         overlay.mkdir(parents=True)
         (overlay / "template.json").write_text(json.dumps(
             {"system_prompt": "s", "template": "{input_prompt}"}), encoding="utf-8")
         with caplog.at_level(logging.WARNING):
             _respond(tmp_path, monkeypatch, prompt_dir=tmp_path / "prompts")
-        assert "has no {response_spec}" in caplog.text
+        assert "output/generation/harmful has no {response_spec}" in caplog.text
+
+
+def _overlay(folder: Path) -> Path:
+    """A prompt overlay whose output prompts name their mode in the user turn."""
+    root = folder / "prompts" / "output"
+    for mode in ("harmful", "helpful"):
+        for step, template in (
+                ("generation",
+                 f"GEN-{mode.upper()} {{input_prompt}}\n\n{{response_spec}}"),
+                ("quality_check",
+                 f"CHECK-{mode.upper()} {{Category}}: {{input_prompt}} "
+                 "=> {output_response}")):
+            path = root / step / mode
+            path.mkdir(parents=True)
+            (path / "template.json").write_text(json.dumps(
+                {"system_prompt": "s", "template": template}), encoding="utf-8")
+    return folder / "prompts"
+
+
+def _questions_of(entry_types: list, category: str = "Cyber") -> pd.DataFrame:
+    n = len(entry_types)
+    return pd.DataFrame({
+        "sample_id": [f"in-{i}" for i in range(n)],
+        "sample": [f"zq{i} question" for i in range(n)],
+        "category": [category] * n,
+        "entry_type": entry_types,
+        "subcategory": ["Sub"] * n,
+        "source": ["constitution"] * n,
+    })
+
+
+def _marker(call: dict) -> str:
+    """The GEN- or CHECK- marker of a recorded call's user turn."""
+    return re.search(r"(GEN|CHECK)-(HARMFUL|HELPFUL)",
+                     call["messages"][-1]["content"]).group()
+
+
+def _token(call: dict) -> str:
+    return re.search(r"zq\d+", call["messages"][-1]["content"]).group()
+
+
+class TestTheAnswerModes:
+    """Each response is dealt a mode its input's entry type allows; the mode
+    picks the prompt and the checker and gives the row its label."""
+
+    _FOUR = ["harmful", "harmful", "dual_use_harmful", "dual_use_harmful",
+             "dual_use_benign", "dual_use_benign", "benign", "benign"]
+
+    def test_the_mode_picks_the_generation_prompt_and_the_checker(
+            self, tmp_path, monkeypatch):
+        inputs = _questions_of(self._FOUR)
+        gen, check = _respond(tmp_path, monkeypatch, inputs=inputs,
+                              prompt_dir=_overlay(tmp_path))
+        rows = _written(tmp_path).set_index("input_prompt")
+        mode_of = {f"zq{i}": rows.loc[f"zq{i} question", "response_mode"]
+                   for i in range(len(self._FOUR))}
+        assert {_token(c): _marker(c) for c in gen.calls} == {
+            token: f"GEN-{mode.upper()}" for token, mode in mode_of.items()}
+        assert {_token(c): _marker(c) for c in check.calls} == {
+            token: f"CHECK-{mode.upper()}" for token, mode in mode_of.items()}
+        # The checker is shown the category, never the entry type.
+        for call in check.calls:
+            text = call["messages"][-1]["content"]
+            assert "Cyber:" in text and "dual_use" not in text
+        assert (mode_of["zq0"], mode_of["zq6"]) == ("harmful", "helpful")
+
+    def test_the_rows_carry_the_mode_its_label_and_the_compound_label(
+            self, tmp_path, monkeypatch):
+        from redact.content_moderation.modes import DEFAULT_MODES, OUTPUT_LABEL
+
+        _respond(tmp_path, monkeypatch, inputs=_questions_of(self._FOUR))
+        rows = _written(tmp_path)
+        at = list(rows.columns).index("rejection_reason") + 1
+        assert list(rows.columns[at:at + 3]) == [
+            "response_mode", "output_label", "response_label"]
+        assert sorted(rows["entry_type"]) == sorted(self._FOUR)
+        for row in rows.to_dict("records"):
+            assert row["response_mode"] in DEFAULT_MODES[row["entry_type"]]
+            assert row["output_label"] == OUTPUT_LABEL[row["response_mode"]]
+            assert row["response_label"] == (
+                f"{row['entry_type']}_{row['output_label']}")
+        assert sorted(rows["response_label"]) == sorted([
+            "harmful_harmful", "harmful_harmful",
+            "dual_use_harmful_harmful", "dual_use_harmful_benign",
+            "dual_use_benign_harmful", "dual_use_benign_benign",
+            "benign_benign", "benign_benign"])
+
+    def test_a_dual_use_group_of_six_gives_three_of_each_mode(
+            self, tmp_path, monkeypatch):
+        _respond(tmp_path, monkeypatch,
+                 inputs=_questions_of(["dual_use_benign"] * 6))
+        assert _written(tmp_path)["response_mode"].value_counts().to_dict() == {
+            "harmful": 3, "helpful": 3}
+        planned = Manifest.sidecar(paths.output_responses_csv(tmp_path)).load()
+        assert sorted(row["mode"] for row in planned) == (
+            ["harmful"] * 3 + ["helpful"] * 3)
+
+    def test_a_custom_mapping_gives_its_modes(self, tmp_path, monkeypatch):
+        _respond(tmp_path, monkeypatch, inputs=_questions_of(["benign"] * 2),
+                 modes={"benign": ["harmful"]})
+        rows = _written(tmp_path)
+        assert set(rows["response_label"]) == {"benign_harmful"}
+        assert set(rows["output_label"]) == {"harmful"}
+
+    def test_a_resume_with_another_mapping_raises_naming_resume_false(
+            self, tmp_path, monkeypatch):
+        _respond(tmp_path, monkeypatch)
+        with pytest.raises(ValueError) as raised:
+            _respond(tmp_path, monkeypatch, modes={"harmful": ["helpful"]})
+        assert "['modes']" in str(raised.value)
+        assert "resume=False" in str(raised.value)
+        gen, _ = _respond(tmp_path, monkeypatch, resume=False,
+                          modes={"harmful": ["helpful"]})
+        assert len(gen.calls) == _QUESTIONS
+        assert set(_written(tmp_path)["response_label"]) == {"harmful_benign"}
+
+    def test_the_plan_file_records_the_whole_mapping(self, tmp_path, monkeypatch):
+        from redact.content_moderation.modes import resolve_modes
+
+        _respond(tmp_path, monkeypatch)
+        plan = json.loads((paths.datasets(tmp_path) / "output_responses.plan.json")
+                          .read_text(encoding="utf-8"))
+        assert list(plan) == ["seed", "modes", "axes"]
+        assert plan["modes"] == resolve_modes()
+
+    def test_an_unknown_entry_type_raises_before_anything_is_cleared(
+            self, tmp_path, monkeypatch):
+        _respond(tmp_path, monkeypatch)
+        out = paths.output_responses_csv(tmp_path)
+        files = {p.name: p.read_bytes() for p in out.parent.iterdir()
+                 if p.suffix != ".lock"}
+        with pytest.raises(ValueError) as raised:
+            _respond(tmp_path, monkeypatch, resume=False,
+                     inputs=_questions_of(["harmful", "general"]))
+        assert "outputs.modes" in str(raised.value)
+        assert "'general'" in str(raised.value)
+        assert {p.name: p.read_bytes() for p in out.parent.iterdir()
+                if p.suffix != ".lock"} == files
+
+    @pytest.mark.parametrize("cell", [float("nan"), None, ""])
+    def test_an_input_without_an_entry_type_is_harmful(
+            self, tmp_path, monkeypatch, cell):
+        inputs = _questions_of(["benign", "benign"]).astype({"entry_type": object})
+        inputs.loc[1, "entry_type"] = cell
+        _respond(tmp_path, monkeypatch, inputs=inputs)
+        rows = _written(tmp_path).set_index("input_id")
+        assert rows.loc["in-1", ["entry_type", "response_mode", "response_label"]
+                        ].tolist() == ["harmful", "harmful", "harmful_harmful"]
+        assert rows.loc["in-0", "response_label"] == "benign_benign"

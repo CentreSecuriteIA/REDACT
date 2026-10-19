@@ -489,7 +489,8 @@ class TestGenerateOutputsResume:
             "category": "Cyber", "subcategory": "", "entry_type": "harmful",
             "model": "mock-model", "source": "", "sample_id": "prior",
             "output_response": "written before the crash",
-            "accepted": True, "rejection_reason": "",
+            "accepted": True, "rejection_reason": "", "response_mode": "harmful",
+            "output_label": "harmful", "response_label": "harmful_harmful",
         }]).to_csv(out, index=False)
 
         backend = MockBackend("ans")
@@ -813,7 +814,7 @@ class TestGenerateOutputsPool:
         assert list(df.columns) == [
             "input_id", "input_prompt", "category", "subcategory", "entry_type",
             "model", "source", "sample_id", "output_response", "accepted",
-            "rejection_reason",
+            "rejection_reason", "response_mode", "output_label", "response_label",
         ]
         expected = {
             content_id(t): {
@@ -822,6 +823,8 @@ class TestGenerateOutputsPool:
                 "source": "", "sample_id": content_id(f"answer {t}"),
                 "output_response": f"answer {t}", "accepted": str(i % 2 == 0),
                 "rejection_reason": f"No: weak {t}" if i % 2 else "",
+                "response_mode": "harmful", "output_label": "harmful",
+                "response_label": "harmful_harmful",
             }
             for i, t in enumerate(tokens)
         }
@@ -1032,6 +1035,8 @@ class TestGenerateOutputsPool:
             "output_response": "",
             "accepted": "False",
             "rejection_reason": "prompt too long: zq1 is over the context",
+            "response_mode": "harmful", "output_label": "harmful",
+            "response_label": "harmful_harmful",
         }
         assert len(df) == len(tokens)
         assert {t: (rows[t]["output_response"], rows[t]["accepted"])

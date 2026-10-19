@@ -81,6 +81,12 @@ its text in its own columns:
 | `content_moderation_output` | `output_response`; the input in `input_prompt` | `input_id` |
 | `content_moderation_paraphrase` | `sample` | `input_id`; `source` says which target |
 
+On an output row `entry_type` is the input's, as on every derived row; the
+label of the response is `response_label`, `<entry_type>_<output_label>`,
+with its answer mode in `response_mode` and the mode's label in
+`output_label` ([outputs](outputs.md#answer-modes)). The three columns are
+empty on the rows of the other parts.
+
 ## Eval mode
 
 An eval build writes no `complete_dataset.csv` (an `output_path` raises)
@@ -111,7 +117,8 @@ set of columns, whatever columns the stage files have:
 | Column | Value |
 |---|---|
 | `sample_id`, `text` | the response or its paraphrase, and its id |
-| `label` | the entry type of the input answered: an accepted response to a harmful input complied (the checker rejects refusals) |
+| `label` | `<entry_type>_<output_label>`, the response's `response_label`: the entry type of the input answered, then `harmful` for a harmful-mode answer or `benign` for a helpful one, as `dual_use_benign_harmful`; a paraphrase's is its response's. The parts hold underscores: split on the last one only, or read `entry_type` and `output_label` |
+| `output_label` | the response's label alone, `harmful` or `benign` |
 | `paraphrased` | `False` for a response, `True` for a paraphrase |
 | `input_id` | the input answered, on every row |
 | `model` | the responding model; empty for a paraphrase |
@@ -131,6 +138,16 @@ set of columns, whatever columns the stage files have:
 | `input_id` | for an attack, the input attacked; empty for a negative |
 | `entry_type`, `category`, `subcategory`, `source_taxonomy` | the input's |
 | `dataset_type` | `jailbreak` or `content_moderation_input` |
+
+The files label in two vocabularies: `label` is an entry type in
+`eval_inputs.csv` and `eval_jailbreaks.csv` (`harmful`, `benign`, and the
+dual-use types in a run that has them), and a compound in
+`eval_outputs.csv`, so a reader mapping labels to numbers maps per file. An
+output or paraphrase file written before the answer modes has no
+`response_label`: its rows take their `entry_type` as `label`, with an
+empty `output_label`, and the build logs one WARNING per part that falls
+back (`Outputs: rows without a response_label, written before the answer
+modes, take their entry_type as their label in eval_outputs.csv.`).
 
 `label` and `is_jailbreak` are independent: an attack on a benign input,
 which the eval run's jailbreak kind does not make by default, is a `benign`

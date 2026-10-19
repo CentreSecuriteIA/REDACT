@@ -437,9 +437,10 @@ class TestPromptOverlay:
 
     def test_unoverridden_prompts_still_come_from_the_library(self, tmp_path):
         self._override(tmp_path, "input", "quality_check", "MINE")
-        other = load_prompt("output", "generation", prompt_dir=tmp_path)
+        other = load_prompt("output", "generation/harmful", prompt_dir=tmp_path)
         assert other["system_prompt"] != "MINE"
-        _, is_override = resolve_prompt("output", "generation", prompt_dir=tmp_path)
+        _, is_override = resolve_prompt(
+            "output", "generation/harmful", prompt_dir=tmp_path)
         assert is_override is False
 
     def test_empty_override_dir_changes_nothing(self, tmp_path):
@@ -459,6 +460,18 @@ class TestPromptOverlay:
         assert summary["overridden"] == ["input/quality_check"]
         assert summary["unused"] == ["input/quality_chek"]
         assert "never loaded" in caplog.text
+
+    def test_an_overlay_of_the_single_output_generation_prompt_is_unused(
+            self, tmp_path, caplog):
+        """The outputs stage reads a prompt per answer mode, under
+        ``output/generation/<mode>/``; an overlay of the one prompt it read
+        before overrides nothing."""
+        self._override(tmp_path, "output", "generation", "MINE")
+        with caplog.at_level(logging.WARNING, logger="redact.llms.prompting.prompts"):
+            summary = report_prompt_sources(tmp_path)
+        assert summary["overridden"] == []
+        assert summary["unused"] == ["output/generation"]
+        assert "output/generation" in caplog.text
 
 
 class TestPromptTemplateLoad:
@@ -531,7 +544,7 @@ class TestTemplateKwargs:
         (d / "template.json").write_text(
             json.dumps({"instruction": "\n\nMINE {num_samples}"}), encoding="utf-8"
         )
-        tmpl = PromptTemplate.load("output", "generation", prompt_dir=tmp_path,
+        tmpl = PromptTemplate.load("output", "generation/harmful", prompt_dir=tmp_path,
                                    format_style="numbered", num_samples=3)
         assert tmpl.system_prompt.endswith("MINE 3")
 
@@ -847,9 +860,15 @@ class TestEmptyScaffoldRenders:
         for checker in checkers:
             assert [m["role"] for m in checker("a", "b")] == ["system", "user"]
 
+    def test_the_output_checker_of_another_mode_raises_naming_the_modes(self):
+        from redact.content_moderation.checker import build_output_quality_checker
+
+        with pytest.raises(ValueError, match=r"\['harmful', 'helpful'\]"):
+            build_output_quality_checker("x", mode="benign")
+
     def test_the_format_instruction_stubs_render(self, scaffold):
         tmpl = PromptTemplate.load(
-            "output", "generation", prompt_dir=scaffold,
+            "output", "generation/harmful", prompt_dir=scaffold,
             format_style="numbered", num_samples=3,
         )
         assert tmpl.system_prompt.endswith("Placeholders: 3")
