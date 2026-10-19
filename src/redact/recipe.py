@@ -231,7 +231,8 @@ def load_params(
             against ``config_dir``'s ``generation_axes.json`` when it has
             one) or a ``seed`` that is not a whole number, or
             ``params["outputs"]["modes"]`` is not a mapping of entry types
-            to answer modes.
+            to answer modes, or ``params["outputs"]["outputs_per_input"]``
+            is not a whole number of at least 1.
     """
     data = _read_params(params, base_dir)
     _check_jailbreak_params(data)
@@ -275,15 +276,16 @@ def _check_jailbreak_params(params: dict) -> None:
 def _check_generation_params(params: dict, config_dir: str | Path | None) -> None:
     """Refuse an ``axes`` or ``axes_weighting`` entry of a stage with
     generation axes that :func:`redact.content_moderation.axes.resolve`
-    refuses, a ``seed`` of one that is not a whole number, and an
+    refuses, a ``seed`` of one that is not a whole number, an
     ``outputs.modes`` that :func:`redact.content_moderation.modes.resolve_modes`
-    refuses.
+    refuses, and an ``outputs.outputs_per_input`` that is not a whole number
+    of at least 1.
 
     Raises:
         ValueError: The stage and what is wrong.
     """
     from .content_moderation import axes as generation_axes
-    from .content_moderation.modes import resolve_modes
+    from .content_moderation.modes import check_outputs_per_input, resolve_modes
 
     for stage in generation_axes.STAGES:
         given = params.get(stage) or {}
@@ -298,6 +300,8 @@ def _check_generation_params(params: dict, config_dir: str | Path | None) -> Non
     outputs = params.get("outputs") or {}
     if "modes" in outputs:
         resolve_modes(outputs["modes"])
+    if "outputs_per_input" in outputs:
+        check_outputs_per_input(outputs["outputs_per_input"])
 
 
 def benign_taxonomy_of(

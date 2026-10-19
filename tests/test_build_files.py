@@ -22,17 +22,23 @@ each build that held them, and the build count of each run is its accepted
 rows.
 
 The build leaves out a row whose ``sample_id`` an earlier part wrote. In the
-runs the stub model answers a natural typos rewrite with the text it answers
-that input's output request with, so those outputs are the variations' rows.
+runs the stub model answered a natural typos rewrite with the text it
+answered that input's output request with, so three outputs of the training
+run were variations' rows and the build left them out; since each response
+carries its answer mode and the length its spec dealt, none is.
 
 The plan pairs ASCII art with neither the emoji or unicode suffix, braille
 nor a translation, whose characters no font draws, so every attack of the
 runs is accepted. The natural kind draws only what the spec marks natural
 (46 techniques): one variation of the training run is ``to_abbreviations``
 on a text with none of its words, a no-op the natural kind rejects (31 of
-32 jailbreak rows accepted), and one more typos rewrite gives the text of an
-accepted output. The variations part is written before the outputs, so the
-build leaves out that output's row, not the rewrite: its count is 86.
+32 jailbreak rows accepted). The training type answers each input twice
+(``outputs.outputs_per_input`` 2): 32 responses to 16 inputs, 28 accepted
+(the answers to the second samples of ``zq0`` are rejected), and 44
+paraphrases, of 16 inputs and 28 responses, 41 accepted. The build holds 16
+inputs, 16 jailbreaks, 15 variations, 28 responses and 41 paraphrases, and
+leaves nothing out: its count is 116, where it was 86 with one response per
+input and three responses equal to variations.
 
 The eval run is not that commit's: its inputs are seeded from a small
 constitution of placeholder entries, as every run's are.
@@ -954,9 +960,12 @@ def _stub_models(monkeypatch) -> None:
     and an input's on how many requests of its entry and style came before.
 
     A sample reads ``<style> <ordinal> zqN sample``, the ordinal of the
-    entry's unit. The third sample of ``zq1`` is rejected as an input, the
-    answers to a second sample of ``zq0`` are rejected as outputs, and the
-    paraphrases of a first sample of ``zq2`` are rejected.
+    entry's unit. A response reads ``<mode> answer to the <sample>
+    (<length>)``, its answer mode and the length its spec dealt, so no two
+    responses of one input share a text; any other request is answered
+    ``answer to the <sample>``. The third sample of ``zq1`` is rejected as an
+    input, the answers to a second sample of ``zq0`` are rejected as outputs,
+    and the paraphrases of a first sample of ``zq2`` are rejected.
     """
     import redact.content_moderation.paraphrase as CP
     from redact.llms import ModelClient
@@ -971,7 +980,13 @@ def _stub_models(monkeypatch) -> None:
             n = units[token, style] = units.get((token, style), 0) + 1
             ordinal = ("first", "second", "third")[n - 1]
             return f"1. {style} {ordinal} {token} sample\n[END]"
-        return "answer to the " + re.search(r"\w+ \w+ zq\d+ sample", text).group()
+        sample = re.search(r"\w+ \w+ zq\d+ sample", text).group()
+        answered = re.search(r"ANSWER-(HARMFUL|HELPFUL)", text)
+        if answered:
+            length = re.search(r"Length: (\w+)", text)
+            return (f"{answered.group(1).lower()} answer to the {sample} "
+                    f"({length.group(1) if length else ''})")
+        return "answer to the " + sample
 
     def judge(token, text):
         if "answer to the" in text:
@@ -1020,6 +1035,13 @@ def _overlay(folder: Path) -> Path:
             "system_prompt": "sys",
             "template": (f"MAKE-INPUTS-{style.upper()} about {{sample_description}}"
                          "\n\n{sample_spec}"),
+        }), encoding="utf-8")
+    for mode in ("harmful", "helpful"):
+        template = overlay / "output" / "generation" / mode
+        template.mkdir(parents=True)
+        (template / "template.json").write_text(json.dumps({
+            "system_prompt": "sys",
+            "template": f"ANSWER-{mode.upper()} {{input_prompt}}\n\n{{response_spec}}",
         }), encoding="utf-8")
     return overlay
 
@@ -1102,6 +1124,20 @@ _RUNS = {"training": _training_run, "eval": _eval_run}
 def test_a_run_reports_the_counts_it_reported_before(run, tmp_path, monkeypatch):
     expected = json.loads(_FIXTURE.read_text(encoding="utf-8"))["runs"][run]
     assert _RUNS[run](tmp_path, monkeypatch) == expected
+
+
+def test_the_responses_of_the_training_run_are_two_per_input_each_its_own(
+        tmp_path, monkeypatch):
+    """Two units per input, which the training type sets: a dual-use input
+    gets one answer of each mode, and no two accepted responses share an id."""
+    _training_run(tmp_path, monkeypatch)
+    rows = read_rows(paths.output_responses_csv(tmp_path))
+    assert set(rows.groupby("input_id").size()) == {2}
+    accepted = rows[rows["accepted"]]
+    assert accepted["sample_id"].is_unique
+    dual = rows[rows["entry_type"] == "dual_use_benign"]
+    assert set(dual.groupby("input_id")["response_mode"].apply(
+        lambda modes: tuple(sorted(modes)))) == {("harmful", "helpful")}
 
 
 @pytest.mark.parametrize("run", sorted(_RUNS))

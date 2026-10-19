@@ -34,7 +34,7 @@ from redact.config_overlay import taxonomy_folder
 from redact.constitution import ConstitutionPipeline, read_constitution
 from redact.content_moderation import InputPipeline, run_output_generation
 from redact.content_moderation import axes as generation_axes
-from redact.content_moderation.modes import resolve_modes
+from redact.content_moderation.modes import check_outputs_per_input, resolve_modes
 from redact.content_moderation.paraphrase import (
     paraphrase_pool,
     run_paraphrase_target,
@@ -362,14 +362,18 @@ def generate_outputs(
     axes_weighting: str = "table",
     seed: int = 42,
     modes: dict | None = None,
+    outputs_per_input: int = 1,
     config_dir: str | Path | None = None,
     read_back: bool = True,
 ) -> pd.DataFrame:
     """Generate model responses for input samples, batched and quality-checked.
 
-    Each row is dealt an answer mode, ``harmful`` or ``helpful``, from those
-    its input's entry type allows (``modes``), then a spec of the response
-    axes. Pipeline, in calls of up to ``batch_size`` rows:
+    Each input is ``outputs_per_input`` units, each a response dealt an
+    answer mode, ``harmful`` or ``helpful``, from those its input's entry
+    type allows (``modes``), then a spec of the response axes; an input's
+    responses differ on the axes, and from two per input a borderline input
+    gets one answer of each mode. Pipeline, in calls of up to ``batch_size``
+    rows:
       1. Generation calls, each with its mode's prompt
          (``output/generation/<mode>``), asking for a response of the spec
          dealt to its row.
@@ -381,13 +385,14 @@ def generate_outputs(
       3. Incremental append to the output CSV as rows finish — crash-resilient.
 
     Resume: each input gets a stable content-hash id (its ``id`` column when
-    present, else ``content_id(prompt)``). Completed ids are recorded in a
-    sidecar ``*.state.jsonl`` ledger beside the output CSV. On a re-run
-    (``resume=True``) inputs already in the ledger are skipped, so a crash loses
-    only the rows still in progress, and the modes and specs are dealt as
-    before: ``output_responses.plan.json`` stops a resume with another
-    ``seed``, other ``modes`` or other axes' weights. ``resume=False`` clears
-    both the CSV and the ledger first.
+    present, else ``content_id(prompt)``), and each unit is ``(input_id,
+    iteration)``. Completed units are recorded in a sidecar ``*.state.jsonl``
+    ledger beside the output CSV. On a re-run (``resume=True``) units already
+    in the ledger are skipped, so a crash loses only the rows still in
+    progress, and the modes and specs are dealt as before:
+    ``output_responses.plan.json`` stops a resume with another ``seed``,
+    ``outputs_per_input``, other ``modes`` or other axes' weights.
+    ``resume=False`` clears both the CSV and the ledger first.
 
     Args:
         inputs: Input samples DataFrame. If None, the accepted inputs of the
@@ -399,9 +404,11 @@ def generate_outputs(
         check_outputs: Run each row's mode's output quality checker.
             Set False to skip checking (accept everything).
         check_model: Checker model; defaults to ``model``.
-        batch_size: Inputs per engine pass.
+        batch_size: Units per engine pass.
         max_samples: Global cap on inputs processed (``head(N)`` over the whole
-            frame); None = all. Applied *after* ``max_per_category``.
+            frame); None = all. Applied *after* ``max_per_category``. Both
+            caps count inputs, before each is expanded to
+            ``outputs_per_input`` units.
         max_per_category: Deterministic cap of N inputs per
             ``(category, entry_type)`` group (falls back to per-``category``,
             then to a plain head, when those columns are absent). Unlike
@@ -435,6 +442,9 @@ def generate_outputs(
             default per entry type: ``harmful`` → ``["harmful"]``, both
             dual-use types → ``["harmful", "helpful"]``, ``benign`` →
             ``["helpful"]`` (:func:`redact.content_moderation.modes.resolve_modes`).
+        outputs_per_input: Responses per input, each a unit ``(input_id,
+            iteration)`` dealt its own mode and spec; a whole number of at
+            least 1. The ``training`` dataset type sets 2.
         config_dir: A config folder whose ``generation_axes.json`` and
             ``dimensions.json`` are read in place of the packaged ones when
             it has them. ``None``: the packaged ones.
@@ -447,25 +457,29 @@ def generate_outputs(
         ``input_id``, ``input_prompt``, ``category``, ``subcategory``,
         ``entry_type``, ``model``, ``source``, ``sample_id``,
         ``output_response``, ``accepted``, ``rejection_reason``,
-        ``response_mode``, ``output_label``, ``response_label``, then with
+        ``iteration``, ``response_mode``, ``output_label``,
+        ``response_label``, then with
         axes a ``response_<axis>`` column per axis. ``entry_type`` is the
         input's; ``response_label`` is ``<entry_type>_<output_label>``, the
         output label ``harmful`` for the harmful mode and ``benign`` for the
         helpful one. ``sample_id`` is this row's own content-hash identity
         (``content_id(output_response)``), distinct from ``input_id`` (the
-        origin sample it responds to).
+        origin sample it responds to); an input has ``outputs_per_input``
+        rows, one per ``iteration``.
 
     Raises:
         ValueError: ``inputs`` is None and the run has no input sample at all,
             ``axes`` names an unknown axis or value or ``axes_weighting``
             another weighting, ``modes`` is not a mapping of entry types to
-            modes, an input's entry type is one ``modes`` does not map, or
+            modes, ``outputs_per_input`` is not a whole number of at least 1,
+            an input's entry type is one ``modes`` does not map, or
             the plan file or the file's columns stop a resume
             (:func:`run_output_generation`).
     """
     axes = generation_axes.resolve(
         "outputs", axes, weighting=axes_weighting, config_dir=config_dir)
     modes = resolve_modes(modes)
+    check_outputs_per_input(outputs_per_input)
     out_path = (
         Path(output_path) if output_path
         else paths.output_responses_csv(data_dir)
@@ -497,7 +511,7 @@ def generate_outputs(
         batch_size=batch_size, out_path=out_path, prompt_dir=prompt_dir,
         resume=resume, verbose=verbose, max_attempts=max_attempts,
         check_max_tokens=check_max_tokens, read_back=read_back,
-        axes=axes, seed=seed, modes=modes,
+        axes=axes, seed=seed, modes=modes, outputs_per_input=outputs_per_input,
     )
 
 

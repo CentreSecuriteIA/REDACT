@@ -94,6 +94,21 @@ def resolve_modes(given: dict | None = None) -> dict[str, list[str]]:
     return resolved
 
 
+def check_outputs_per_input(value) -> int:
+    """``value`` when it is a whole number of at least 1: the responses the
+    outputs stage writes per input, each a unit of its own.
+
+    Raises:
+        ValueError: Anything else, a bool too. The message names
+            ``outputs.outputs_per_input``.
+    """
+    if isinstance(value, bool) or not isinstance(value, int) or value < 1:
+        raise ValueError(
+            "outputs.outputs_per_input must be a whole number of at least 1, got "
+            f"{value!r}.")
+    return value
+
+
 def response_label(entry_type, mode: str) -> str:
     """A response's label: its input's ``entry_type``, then the output label
     of its ``mode``, as ``dual_use_benign_harmful``. The parts hold

@@ -5,12 +5,15 @@ Front `generate_outputs` (`stages.py`); core `run_output_generation`
 
 ## Purpose
 
-Generate one model response per accepted input and check it. Each response
-is dealt an answer mode, `harmful` or `helpful`, from those its input's
-entry type allows (see [Answer modes](#answer-modes)), then a spec of the
-response axes (length, format, tone). The mode picks the generation prompt
-and the checker, and gives the response its label: the input's entry type
-and the mode's output label, as `dual_use_benign_harmful`.
+Generate `outputs_per_input` model responses per accepted input (1 by
+default, 2 in a `training` run) and check each. Each response is dealt an
+answer mode, `harmful` or `helpful`, from those its input's entry type
+allows (see [Answer modes](#answer-modes)), then a spec of the response axes
+(length, format, tone); an input's responses differ on the axes, and from
+two per input a borderline input gets one answer of each mode. The mode
+picks the generation prompt and the checker, and gives the response its
+label: the input's entry type and the mode's output label, as
+`dual_use_benign_harmful`.
 
 ## Inputs
 
@@ -29,16 +32,18 @@ and the mode's output label, as `dual_use_benign_harmful`.
   ledger, the manifest, the plan file and the coverage table
   (`dataset.clear_stage`).
 - `max_per_category` keeps the first N rows of each `(category, entry_type)`,
-  then `max_samples` the first N overall.
+  then `max_samples` the first N overall. Both count inputs, before each is
+  expanded to `outputs_per_input` units: N inputs per group give N × k
+  responses.
 - The prompts of each mode dealt: `prompts/output/generation/<mode>/` and
   `prompts/output/quality_check/<mode>/`, each through the overlay, read
   before anything is cleared. The generation template's `{response_spec}`
   shows the row's spec; a prompt without it is warned about, naming its
   folder. The checker is not shown the spec: its messages are those of a
-  run without axes. An overlay written before the modes,
-  `<prompt_dir>/output/generation/template.json`, overrides nothing, and
-  `report_prompt_sources` lists it as an unused override: copy it to
-  `generation/harmful/`.
+  run without axes. An overlay written before the modes, a prompt file
+  directly in `<prompt_dir>/output/generation/`, overrides nothing, and
+  `report_prompt_sources` lists it as an unused override
+  (`output/generation`): move it to `generation/harmful/`.
 - The `outputs` section of `generation_axes.json`, a recipe's `config_dir`'s
   when it has one ([configuration.md](../configuration.md#the-generation-axes)).
 
@@ -54,8 +59,8 @@ and the mode's output label, as `dual_use_benign_harmful`.
 ## Settings
 
 Params keys: `check_outputs`, `max_attempts`, `max_per_category`,
-`max_samples`, `modes`, `axes`, `axes_weighting`, `seed`, `batch_size`,
-`check_max_tokens`, `output_path`
+`max_samples`, `outputs_per_input`, `modes`, `axes`, `axes_weighting`,
+`seed`, `batch_size`, `check_max_tokens`, `output_path`
 ([configuration.md](../configuration.md#outputs)).
 
 ## Answer modes
@@ -96,37 +101,48 @@ say about it.
 
 ## Unit and ledger key
 
-One unit is one input row: generate, check, and with `max_attempts` above 1,
-generate again with the checker's verdict as feedback until accepted or out
-of attempts. The row holds the last attempt.
+Each input row is `outputs_per_input` units `(input_id, iteration)`,
+`iteration` from 0 to k - 1, each a row. A unit generates, checks, and with
+`max_attempts` above 1 generates again with the checker's verdict as
+feedback until accepted or out of attempts. The row holds the last attempt.
 
-Each row is dealt a mode, then a spec, both per `(category, entry_type)` in
-`input_id` order from one dealer each, so the deal does not depend on the
-input order. The mode is the allowed one with the lowest count in the group
-so far, ties broken by the row's rng, seeded by `(seed, category,
-entry_type, input_id, 0, "mode")`: an entry type with one mode gives every row that
-mode, and a dual-use group alternates, half each. The spec is dealt as the
-inputs stage deals its units ([inputs](inputs.md#the-generation-axes)): each
-row's rng seeded by `(seed, category, entry_type, input_id, 0)`, never a
-value beside one it names in `not_with` (`steps` and a `brief` answer, for
-example). The deal is made again every run; inputs that join a dual-use
-group can change the mode the manifest plans for a done input, whose row
-keeps the mode it was written with.
+Each unit is dealt a mode, then a spec, both per `(category, entry_type)`
+in `(input_id, iteration)` order from one dealer each, so the deal does not
+depend on the input order. The mode is the allowed one with room and the
+lowest count in the group so far, ties broken by the unit's rng, seeded by
+`(seed, category, entry_type, input_id, iteration, "mode")`; an input's k
+units take a mode at most ceil(k / modes) times. So an entry type with one
+mode gives every unit that mode; for a dual-use input, at k = 2 one unit of
+each, which one first being its own rng's draw, at k = 3 two and one, and at
+k = 1 the group alternates, half each. The spec is dealt as the inputs
+stage deals its units ([inputs](inputs.md#the-generation-axes)): each
+unit's rng seeded by `(seed, category, entry_type, input_id, iteration)`, an
+input's k units taking a value at most ceil(share × k) times, so they differ
+on every axis none of whose values weighs over 1/k (at k = 2 every packaged
+value: the largest is `neutral` at .40), and never a value beside one it
+names in `not_with` (`steps` and a `brief` answer, for example).
+
+The deal is made again every run. At an even k each input takes each of two
+modes k / 2 times, so the group's counts are level at every input's first
+unit and an input's modes depend on its own key alone: inputs that join the
+group leave them as they were. At k = 1 and an odd k, inputs that join a
+dual-use group can change the mode the manifest plans for a done unit,
+whose row keeps the mode it was written with.
 
 | | Value |
 |---|---|
-| Ledger key | `input_id`: the input's `sample_id`, else the content id of its text |
-| Ledger record | `{"input_id": ..., "accepted": ...}`, the verdict on the last attempt |
-| Manifest row | `input_id`, `category`, `entry_type`, `mode`, `spec` (the dealt value of each axis; none without axes), `status` (`planned`), one per input |
+| Ledger key | `(input_id, iteration)`: the input's `sample_id`, else the content id of its text, and which of its responses |
+| Ledger record | `{"input_id": ..., "iteration": ..., "accepted": ...}`, the verdict on the last attempt |
+| Manifest row | `input_id`, `iteration`, `category`, `entry_type`, `mode`, `spec` (the dealt value of each axis; none without axes), `status` (`planned`), one per unit |
 
 ## Files
 
 | File | Content |
 |---|---|
-| `Datasets/output_responses.csv` | One row per input; `output_path` moves it |
+| `Datasets/output_responses.csv` | One row per unit, `outputs_per_input` per input; `output_path` moves it |
 | `Datasets/output_responses.manifest.jsonl` | The plan, written again every run |
 | `Datasets/output_responses.state.jsonl` | The ledger |
-| `Datasets/output_responses.plan.json` | What the deal was made with: `seed`, `modes` (the whole mapping, every entry type) and each axis's weights (`null` without axes) |
+| `Datasets/output_responses.plan.json` | What the deal was made with: `seed`, `outputs_per_input`, `modes` (the whole mapping, every entry type) and each axis's weights (`null` without axes) |
 | `Datasets/output_responses.coverage.csv` | Per axis value and group: `axis`, `value`, `category`, `entry_type`, `planned`, `accepted`, as the inputs stage's, then a row `axis` `mode` per mode a group was dealt. Written when the stage ends, also without axes (the `mode` rows alone) |
 
 | Column | Meaning |
@@ -136,18 +152,25 @@ keeps the mode it was written with.
 | `category`, `subcategory`, `entry_type` | Copied from the input; `entry_type` is the input's, not the response's |
 | `model` | The generation model |
 | `source` | The input's `source` |
-| `sample_id` | Content id of `output_response`; for a prompt too long, of `{input_id}:prompt too long` |
+| `sample_id` | Content id of `output_response`; for a prompt too long, of `{input_id}:{iteration}:prompt too long` |
 | `output_response` | The response |
 | `accepted` | The checker's verdict on the last attempt |
 | `rejection_reason` | The checker's reply when rejected, else empty |
+| `iteration` | Which of the input's responses the row is, 0 to `outputs_per_input` - 1 |
 | `response_mode` | `harmful` or `helpful`: the prompt and checker the row was made with |
 | `output_label` | The mode's label: `harmful` or `benign` |
 | `response_label` | `<entry_type>_<output_label>`, as `dual_use_benign_harmful`. The parts hold underscores: split it on its last one only, or read `entry_type` and `output_label` |
 | `response_length`, `response_format`, `response_register` | The row's dealt value of each response axis. Only with axes |
 
+Two responses of one input can come back with one text, hence one
+`sample_id` twice in the file; the stage does not drop the repeat. The
+build compares a row only with the rows of earlier parts, so both reach the
+dataset, each with its own `response_label`; the siblings' different specs
+make it improbable.
+
 ## How it resumes
 
-The ledger alone decides: inputs it records are skipped, the rest run.
+The ledger alone decides: units it records are skipped, the rest run.
 Inputs added since the last run are planned, dealt into their groups and
 run; the rows done keep the modes and specs they record. Rows are saved
 every 32 units. `resume: false` removes the CSV, its `.cut` and `.tmp`
@@ -156,20 +179,25 @@ files, the ledger and the manifest first, also when the stage is skipped
 [internals/dataset.md](../internals/dataset.md) for the lock and the
 cut-back.
 
-Before any call, a resume onto a file of an earlier shape stops: one
-without `response_mode`, `output_label` and `response_label` (written
-before the answer modes), naming `resume: false` and a new `data_dir`; one
-without the response columns (written before the axes, or without them),
-naming those and `outputs.axes: false` too. This check comes before the
-plan file's, whose keys an old folder lacks. A resume then compares the
-run's `seed`, `modes` and axes' weights with `output_responses.plan.json`,
-and raises `Outputs: this run's [...] differ from those the responses in
-... were dealt with`, naming the keys and `resume=False`.
+Before any call, a resume onto a folder of an earlier shape stops, naming
+`resume: false` and a new `data_dir`: a ledger with an ack without
+`iteration` (written when a unit was an input; read through a ledger keyed
+on `input_id`, since the stage's own skips a record without its key and
+would run every unit again onto the rows), or a file without `iteration`,
+`response_mode`, `output_label` and `response_label` (written before an
+input had several responses, each in an answer mode). A file without the
+response columns (written before the axes, or without them) stops it too,
+naming `outputs.axes: false` besides. These checks come before the plan
+file's, whose keys an old folder lacks. A resume then compares the run's
+`seed`, `outputs_per_input`, `modes` and axes' weights with
+`output_responses.plan.json`, and raises `Outputs: this run's [...] differ
+from those the responses in ... were dealt with`, naming the keys and
+`resume=False`.
 
 ## Rejected and failed units
 
 - A rejected response is saved with `accepted` false and the reason, and its
-  input is acked: a resume does not try it again.
+  unit is acked: a resume does not try it again.
 - A response with almost no text is rejected before its check, with no check
   call: one with fewer than 20 characters (`MIN_RESPONSE_CHARS`) once its
   code-fence marker lines (a line that is three backticks, with an optional
@@ -182,7 +210,7 @@ and raises `Outputs: this run's [...] differ from those the responses in
 - On the async lane (an OpenAI-compatible endpoint or vLLM), an input whose
   generation or check prompt is too long for its model gets a row with an
   empty `output_response`, `accepted` false and `rejection_reason`
-  `prompt too long: ...`, and is acked. On an Anthropic or introspection
+  `prompt too long: ...` for each of its units, which are acked. On an Anthropic or introspection
   binding the requests go out in grouped calls, and a prompt too long there
   fails the call and stops the stage.
 - Any other error inside a unit, and any failed call, stops the stage. Saved

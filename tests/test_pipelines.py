@@ -64,8 +64,9 @@ class TestGenerateOutputsManifest:
         })
         out = paths.output_responses_csv(tmp_path)
         # Pre-seed the ledger as if "p one" was already completed.
-        Ledger.sidecar(out, key_fields=("input_id",), casters={"input_id": str}).record(
-            [{"input_id": content_id("p one")}]
+        Ledger.sidecar(out, key_fields=("input_id", "iteration"),
+                       casters={"input_id": str, "iteration": int}).record(
+            [{"input_id": content_id("p one"), "iteration": 0}]
         )
 
         generate_outputs(data_dir=tmp_path, inputs=inputs, check_outputs=False,
@@ -489,8 +490,9 @@ class TestGenerateOutputsResume:
             "category": "Cyber", "subcategory": "", "entry_type": "harmful",
             "model": "mock-model", "source": "", "sample_id": "prior",
             "output_response": "written before the crash",
-            "accepted": True, "rejection_reason": "", "response_mode": "harmful",
-            "output_label": "harmful", "response_label": "harmful_harmful",
+            "accepted": True, "rejection_reason": "", "iteration": 0,
+            "response_mode": "harmful", "output_label": "harmful",
+            "response_label": "harmful_harmful",
         }]).to_csv(out, index=False)
 
         backend = MockBackend("ans")
@@ -544,7 +546,7 @@ class TestGenerateOutputsInternals:
         df = generate_outputs(data_dir=tmp_path, inputs=inputs, check_outputs=False, verbose=False)
 
         seen = {c["internals_id"] for c in backend.calls}
-        expected = {f'{row["input_id"]}/output' for _, row in df.iterrows()}
+        expected = {f'{row["input_id"]}/0/output' for _, row in df.iterrows()}
         assert seen == expected
         # never a CSV column, regardless of capture
         assert "internals_id" not in df.columns
@@ -571,8 +573,8 @@ class TestGenerateOutputsInternals:
             data_dir=tmp_path, inputs=inputs, model="gen-model", check_model="check-model",
             verbose=False,
         )
-        assert check_backend.calls[0]["internals_id"].endswith("/val_out")
-        assert gen_backend.calls[0]["internals_id"].endswith("/output")
+        assert check_backend.calls[0]["internals_id"].endswith("/0/val_out")
+        assert gen_backend.calls[0]["internals_id"].endswith("/0/output")
         # same input_id root for both stages
         gen_root = gen_backend.calls[0]["internals_id"].split("/")[0]
         check_root = check_backend.calls[0]["internals_id"].split("/")[0]
@@ -818,7 +820,8 @@ class TestGenerateOutputsPool:
         assert list(df.columns) == [
             "input_id", "input_prompt", "category", "subcategory", "entry_type",
             "model", "source", "sample_id", "output_response", "accepted",
-            "rejection_reason", "response_mode", "output_label", "response_label",
+            "rejection_reason", "iteration", "response_mode", "output_label",
+            "response_label",
         ]
         expected = {
             content_id(t): {
@@ -827,7 +830,7 @@ class TestGenerateOutputsPool:
                 "source": "", "sample_id": content_id(f"answer {t}"),
                 "output_response": f"answer {t}", "accepted": str(i % 2 == 0),
                 "rejection_reason": f"No: weak {t}" if i % 2 else "",
-                "response_mode": "harmful", "output_label": "harmful",
+                "iteration": "0", "response_mode": "harmful", "output_label": "harmful",
                 "response_label": "harmful_harmful",
             }
             for i, t in enumerate(tokens)
@@ -1036,11 +1039,11 @@ class TestGenerateOutputsPool:
             "input_id": content_id("zq1"), "input_prompt": "zq1", "category": "Cyber",
             "subcategory": "", "entry_type": "harmful", "model": "gen-model",
             "source": "",
-            "sample_id": content_id(f"{content_id('zq1')}:prompt too long"),
+            "sample_id": content_id(f"{content_id('zq1')}:0:prompt too long"),
             "output_response": "",
             "accepted": "False",
             "rejection_reason": "prompt too long: zq1 is over the context",
-            "response_mode": "harmful", "output_label": "harmful",
+            "iteration": "0", "response_mode": "harmful", "output_label": "harmful",
             "response_label": "harmful_harmful",
         }
         assert len(df) == len(tokens)

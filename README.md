@@ -34,7 +34,7 @@ on its own:
    per category of a benign taxonomy.
 2. **inputs**: an uncensored model turns each description into prompts, and
    a checker model accepts or rejects every one.
-3. **outputs**: one checked model response per accepted input.
+3. **outputs**: k checked model responses per accepted input (2 in a training run), each in an answer mode, harmful or helpful.
 4. **paraphrase**: checked rewordings of the inputs and outputs, to remove the
    generating model's fingerprint.
 5. **jailbreaks**: attacks drawn from 151 techniques in 23 families, dealt

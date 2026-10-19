@@ -985,7 +985,8 @@ def test_the_types_params_lie_under_the_params_files():
     assert STAGES["jailbreaks"].params(_context("eval", {})) == {"seed": _EVAL_SEED}
     assert STAGES["inputs"].params(_context("training", {})) == {
         "axes_weighting": "log"}
-    assert STAGES["outputs"].params(_context("training", {})) == {}
+    assert STAGES["outputs"].params(_context("training", {})) == {
+        "outputs_per_input": 2}
 
 
 def test_the_eval_type_deals_every_input_explicit():
@@ -1140,6 +1141,14 @@ def test_a_wrong_axes_entry_or_seed_fails_at_load(params, named):
 def test_a_wrong_answer_mode_mapping_fails_at_load(modes, named):
     with pytest.raises(ValueError, match=re.escape(named)):
         load_params({"outputs": {"modes": modes}})
+
+
+@pytest.mark.parametrize("value", [0, -1, 1.5, True, "2", None])
+def test_outputs_per_input_that_is_not_a_whole_number_of_one_or_more_fails_at_load(
+        value):
+    with pytest.raises(ValueError, match=re.escape(
+            "outputs.outputs_per_input must be a whole number of at least 1")):
+        load_params({"outputs": {"outputs_per_input": value}})
 
 
 def test_an_answer_mode_mapping_is_read_as_written():
@@ -1801,7 +1810,8 @@ def test_a_training_run_reads_the_inputs_it_seeded(tmp_path, monkeypatch):
     from redact.llms import ModelClient
     from tests.conftest import MockBackend, make_client
 
-    answers = MockBackend(["answer one", "answer two", "answer three"])
+    answers = MockBackend([f"answer {n}" for n in (
+        "one", "two", "three", "four", "five", "six")])
     monkeypatch.setattr(ModelClient, "create", lambda m: make_client(answers, m))
     monkeypatch.setattr(
         CP, "paraphrase_batch",
@@ -1827,9 +1837,9 @@ def test_a_training_run_reads_the_inputs_it_seeded(tmp_path, monkeypatch):
     finally:
         telemetry.uninstall()
     rows = {stage: done["counts"]["rows"] for stage, done in summary["stages"].items()}
-    # Three inputs: a response each, a paraphrase of each input and response,
-    # a jailbreak and a variation each.
-    assert rows == {"outputs": 3, "paraphrase": 6, "jailbreaks": 6}
+    # Three inputs: two responses each (the training type's outputs_per_input),
+    # a paraphrase of each input and response, a jailbreak and a variation each.
+    assert rows == {"outputs": 6, "paraphrase": 9, "jailbreaks": 6}
 
 
 def test_a_run_whose_inputs_were_all_rejected_warns_and_finishes(

@@ -54,7 +54,7 @@ types: a recipe naming one stops when it loads, before any stage runs.
 | | `training.json` | `eval.json` |
 |---|---|---|
 | `stages` | `constitution`, `inputs`, `outputs`, `paraphrase`, `jailbreaks`, `build` | the same |
-| `params` | `constitution`: `include_general_benign` true, `general_benign_categories` 10; `inputs.axes_weighting` `"log"` | `constitution` the same, and `constitution.entry_types` and `inputs.entry_types` `["harmful", "benign"]`; `inputs.axes` pins `directness` at `explicit`, and the inputs keep the table's weighting; `jailbreaks.seed` 43 |
+| `params` | `constitution`: `include_general_benign` true, `general_benign_categories` 10; `inputs.axes_weighting` `"log"`; `outputs.outputs_per_input` 2, each input answered twice, so a borderline input gets one answer of each [answer mode](stages/outputs.md#answer-modes) | `constitution` the same, and `constitution.entry_types` and `inputs.entry_types` `["harmful", "benign"]`; `inputs.axes` pins `directness` at `explicit`, and the inputs keep the table's weighting; `jailbreaks.seed` 43; the outputs keep one response per input (their two entry types allow one mode each) |
 | `augmentations` | none: the packaged default | the adversarial kind below; `natural` off |
 
 The eval adversarial kind attacks the harmful inputs only, with a pool of
@@ -116,11 +116,12 @@ models, `data_dir`, `prompt_dir`, `taxonomy`, `taxonomy_dir`,
 `constitution_df`, the jailbreak stage's `augmentation`, the build's `mode`,
 `read_back`). Parameters that take a DataFrame (`inputs`, `outputs`) cannot
 be written in JSON. The `axes`, `axes_weighting` and `seed` of `inputs`
-and `outputs`, and the `modes` of `outputs`, are checked when the params
-load (a params file's and a dataset type's): an unknown axis or value, a
-weight below 0, a weighting other than `"table"` or `"log"`, a seed that is
-not a whole number, or a `modes` that is not an object of entry types to
-non-empty lists of distinct modes raises, the axes read against the
+and `outputs`, and the `modes` and `outputs_per_input` of `outputs`, are
+checked when the params load (a params file's and a dataset type's): an
+unknown axis or value, a weight below 0, a weighting other than `"table"`
+or `"log"`, a seed that is not a whole number, a `modes` that is not an
+object of entry types to non-empty lists of distinct modes, or an
+`outputs_per_input` that is not a whole number of at least 1 raises, the axes read against the
 `config_dir`'s axes table when it has one.
 
 ### `constitution`
@@ -159,6 +160,7 @@ names of the last two, are read for this release with a
 | `max_attempts` | `1` | Generations per input; above 1 a rejected response is generated again with the verdict as feedback |
 | `max_per_category` | `null` | Keep the first N inputs per `(category, entry_type)` |
 | `max_samples` | `null` | Keep the first N inputs overall, after `max_per_category` |
+| `outputs_per_input` | `1`; `2` in the `training` type | Responses per input, each a unit `(input_id, iteration)` dealt its own answer mode and spec, so an input's responses differ on the axes and, from 2, a borderline input gets one answer of each mode. `max_per_category` and `max_samples` count inputs, before this expansion. A whole number of at least 1 |
 | `modes` | `null`: the default | The answer modes each entry type allows, `{entry_type: [mode, ...]}` laid over the default per entry type: `harmful` → `["harmful"]`, `dual_use_harmful` and `dual_use_benign` → `["harmful", "helpful"]`, `benign` → `["helpful"]`. A mode picks the response's prompt and checker and gives its label ([outputs](stages/outputs.md#answer-modes)) |
 | `axes` | `null`: the table's | The response axes each input row is dealt a value of, over the table's `outputs` section, as for `inputs` |
 | `axes_weighting` | `"table"` | As for `inputs`; neither type sets it |

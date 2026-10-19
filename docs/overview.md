@@ -21,7 +21,7 @@ A run is an ordered list of stages. Each stage has one public function, its
 |---|---|---|---|
 | `constitution` | `generate_constitution` | Per taxonomy category, a hierarchy of constitution categories and sample descriptions at four entry types (two in an eval run), and benign ones per category of the benign taxonomy | `Data_cache/constitution/merged.csv` |
 | `inputs` | `generate_inputs` | Checked input samples, seeded from the constitution | `Datasets/constitution_inputs/<category>/samples.csv` |
-| `outputs` | `generate_outputs` | One checked model response per accepted input | `Datasets/output_responses.csv` |
+| `outputs` | `generate_outputs` | k checked model responses per accepted input (1, or 2 in a training run), each in an answer mode | `Datasets/output_responses.csv` |
 | `paraphrase` | `generate_paraphrases` | Checked paraphrases of the inputs and of the accepted outputs | `Datasets/paraphrases_inputs.csv`, `Datasets/paraphrases_outputs.csv` |
 | `jailbreaks` | `generate_jailbreaks` | Jailbreak attacks (adversarial kind) and natural variations (natural kind) of the accepted inputs | `Datasets/jailbreaks.csv`, `Datasets/variations.csv` |
 | `build` | `build_dataset` | Merge every stage's accepted rows: into one file (training), or into three files of one flat schema (eval) | `Datasets/complete_dataset.csv`; in eval `Datasets/eval_inputs.csv`, `eval_outputs.csv`, `eval_jailbreaks.csv` |
@@ -185,10 +185,11 @@ the accepted rows of every category into
 [stages/inputs.md](stages/inputs.md)
 
 **outputs.** `generate_outputs` reads the accepted inputs of the run
-(`dataset.merge_inputs`) and calls `run_output_generation`: one unit per
-input, dealt an answer mode its entry type allows (`harmful` or `helpful`,
-which picks the prompt and the checker and gives the response its label),
-then a spec of the response axes, a response and a check. Rows go to
+(`dataset.merge_inputs`) and calls `run_output_generation`:
+`outputs_per_input` units per input (2 in a training run), each dealt an
+answer mode its entry type allows (`harmful` or `helpful`, which picks the
+prompt and the checker and gives the response its label), then a spec of
+the response axes, a response and a check. Rows go to
 `Datasets/output_responses.csv`.
 [stages/outputs.md](stages/outputs.md)
 

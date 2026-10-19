@@ -1,4 +1,4 @@
-"""The outputs stage: one checked model response per input row, each dealt an
+"""The outputs stage: k checked model responses per input row, each dealt an
 answer mode its input's entry type allows and one spec of the response axes.
 
 The mode (:mod:`redact.content_moderation.modes`) picks the generation prompt
@@ -38,15 +38,26 @@ from .axes import (
 )
 from .checker import build_output_quality_checker
 from .feedback import TOO_SHORT, with_feedback
-from .modes import MODES, OUTPUT_LABEL, deal_modes, resolve_modes, response_label
+from .modes import (
+    MODES,
+    OUTPUT_LABEL,
+    check_outputs_per_input,
+    deal_modes,
+    resolve_modes,
+    response_label,
+)
 
 logger = logging.getLogger(__name__)
 
 # The prefix of a row's column for each response axis.
 _PREFIX = "response_"
 
-# The columns of a row that say how it answers its input.
-_MODE_COLUMNS = ("response_mode", "output_label", "response_label")
+# The columns of a row that say which of its input's responses it is, and
+# how it answers its input.
+_MODE_COLUMNS = ("iteration", "response_mode", "output_label", "response_label")
+
+# A unit's key in the ledger and the manifest.
+_KEY = ("input_id", "iteration")
 
 # The entry type of an input without one.
 _DEFAULT_ENTRY_TYPE = "harmful"
@@ -77,18 +88,39 @@ def _entry_type(cell) -> str:
     return text if text.strip() else _DEFAULT_ENTRY_TYPE
 
 
+_REMEDY = ('Start the stage over with resume=False (a recipe\'s "resume": '
+           "false), or run it in a new data_dir")
+
+
+def _stop_on_an_earlier_ledger(ledger: Ledger) -> None:
+    """Raise when ``ledger`` acks a unit without an ``iteration``: it was
+    written when a unit was an input, before an input had several responses.
+
+    The acks are read through a ledger keyed on ``input_id``, a field both
+    shapes have: the stage's own ledger skips a record without its key.
+
+    Raises:
+        ValueError: What was found, and the remedies.
+    """
+    earlier = Ledger(ledger.path, key_fields=_KEY[:1])
+    if any("iteration" not in ack for ack in earlier.records()):
+        raise ValueError(
+            f"{ledger.path} acks units without an iteration: it was written when "
+            f"a unit was an input, one response each. {_REMEDY}.")
+
+
 def _stop_on_an_earlier_file(out_path: Path, axes: dict | None) -> None:
-    """Raise when ``out_path`` has a header without the answer-mode columns
-    (it was written before the modes) or without a column of ``axes`` (it
+    """Raise when ``out_path`` has a header without ``iteration`` and the
+    answer-mode columns (it was written before an input had several
+    responses, each in an answer mode) or without a column of ``axes`` (it
     was written before the response axes, or without them).
 
     Raises:
         ValueError: The column missing, and the remedies.
     """
-    remedy = ('Start the stage over with resume=False (a recipe\'s "resume": '
-              "false), or run it in a new data_dir")
     for columns, written, other in (
-        (list(_MODE_COLUMNS), "before the answer modes", ""),
+        (list(_MODE_COLUMNS), "before an input had several responses, each in "
+         "an answer mode", ""),
         (list(spec_columns(axes, {}, prefix=_PREFIX)),
          "before the response axes, or without them",
          ", or run it without the response axes (params outputs.axes: false)"),
@@ -97,7 +129,7 @@ def _stop_on_an_earlier_file(out_path: Path, axes: dict | None) -> None:
             check_columns(out_path, [dict.fromkeys(columns, "")])
         except ValueError as error:
             raise ValueError(
-                f"{error} It was written {written}. {remedy}{other}.") from None
+                f"{error} It was written {written}. {_REMEDY}{other}.") from None
 
 
 def run_output_generation(
@@ -116,13 +148,18 @@ def run_output_generation(
     axes: dict | None = None,
     seed: int = 42,
     modes: dict | None = None,
+    outputs_per_input: int = 1,
 ) -> pd.DataFrame:
-    """Generate one checked response per input row, appended to ``out_path``.
+    """Generate ``outputs_per_input`` checked responses per input row,
+    appended to ``out_path``.
 
-    Each row is dealt an answer mode, ``harmful`` or ``helpful``, from those
-    ``modes`` (:func:`redact.content_moderation.modes.resolve_modes`; ``None``
-    the default) allows its input's entry type, per ``(category,
-    entry_type)`` from ``seed``. The mode picks the generation prompt
+    Each input is ``outputs_per_input`` units ``(input_id, iteration)``, each
+    a row. Each unit is dealt an answer mode, ``harmful`` or ``helpful``,
+    from those ``modes`` (:func:`redact.content_moderation.modes.resolve_modes`;
+    ``None`` the default) allows its input's entry type, per ``(category,
+    entry_type)`` from ``seed``, an input's units taking a mode at most
+    ceil(k / modes) times, so from k = 2 a dual-use input gets one answer
+    of each. The mode picks the generation prompt
     ``output/generation/<mode>`` and the checker ``output/quality_check/<mode>``,
     and gives the row ``response_mode``, ``output_label`` (``harmful`` or
     ``benign``) and ``response_label``, ``<entry_type>_<output_label>``. An
@@ -139,42 +176,48 @@ def run_output_generation(
     ``batch_size`` requests; ``check_max_tokens`` limits a verdict's reply.
 
     ``axes`` (:func:`redact.content_moderation.axes.resolve`) deals each
-    row one spec per ``(category, entry_type)`` from ``seed``; the
+    unit one spec per ``(category, entry_type)`` from ``seed``, an input's
+    units differing on every axis none of whose values weighs over 1/k; the
     template's ``{response_spec}`` shows it, the row records it in a
     ``response_<axis>`` column per axis. The checker is not shown the spec.
     ``None``: no specs, and ``{response_spec}`` is empty. ``<stem>.coverage.csv``
     beside the manifest counts the modes and the specs planned and accepted.
 
-    A row's ``input_id`` is its input's id (``row_ids``); its ``sample_id``
-    is ``content_id`` of the response, or of ``"{input_id}:prompt too long"``
-    for a prompt too long, which has none. The ledger beside ``out_path`` is
-    keyed on ``input_id``, an ack holding the verdict too; ``resume=False``
-    starts the stage over. A resume deals the modes and the specs again, and
-    ``<stem>.plan.json`` (``seed``, ``modes``, the axes' weights) stops one
-    that would deal others; a file without the answer-mode or response
-    columns stops it before any call.
+    A row's ``input_id`` is its input's id (``row_ids``) and its
+    ``iteration`` which of the input's responses it is; its ``sample_id`` is
+    ``content_id`` of the response, or of
+    ``"{input_id}:{iteration}:prompt too long"`` for a prompt too long,
+    which has none. The ledger beside ``out_path`` is keyed on ``(input_id,
+    iteration)``, an ack holding the verdict too; ``resume=False`` starts the
+    stage over. A resume deals the modes and the specs again, and
+    ``<stem>.plan.json`` (``seed``, ``outputs_per_input``, ``modes``, the
+    axes' weights) stops one that would deal others; a ledger with an ack
+    without ``iteration``, or a file without the ``iteration``, answer-mode
+    or response columns, stops it before any call.
 
     Returns:
         The rows of ``out_path``, from this run and earlier ones, or an empty
         frame when ``read_back`` is False.
 
     Raises:
-        ValueError: An input of an entry type ``modes`` does not map, raised
-            before anything is cleared; a resume whose ``seed``, ``modes`` or
-            axes' weights differ from those of the plan file, or onto a file
-            without the answer-mode or response columns.
+        ValueError: ``outputs_per_input`` is not a whole number of at least
+            1, or an input's entry type is one ``modes`` does not map, raised
+            before anything is cleared; a resume whose ``seed``,
+            ``outputs_per_input``, ``modes`` or axes' weights differ from
+            those of the plan file, or onto a folder of an earlier shape.
     """
     # Internals capture (opt-in): only true for an introspection-capable
     # backend (e.g. TransformersIntrospectionBackend); a no-op for the default
     # Venice/vLLM path — no internals_ids kwarg is passed below. Captures land
-    # under {log_dir}/{input_id}/output/ and .../val_out/ — a pure side channel,
-    # never a CSV column (see .claude/introspection_backend_plan.md).
+    # under {log_dir}/{input_id}/{iteration}/output/ and .../val_out/ — a pure
+    # side channel, never a CSV column (see .claude/introspection_backend_plan.md).
     capture_internals_gen = client.compute_config.supports_internals
     capture_internals_check = (
         check is not None and check.compute_config.supports_internals
     )
     use_checker = check_outputs and check is not None
     modes = resolve_modes(modes)
+    k = check_outputs_per_input(outputs_per_input)
 
     text_col = "sample" if "sample" in inputs.columns else "prompt"
     inputs = inputs.reset_index(drop=True)
@@ -189,10 +232,10 @@ def run_output_generation(
             f"Outputs: the inputs hold the entry type(s) {unknown}, which "
             f"outputs.modes does not map; it maps {list(modes)}.")
 
-    # One unit per input row, keyed by its position in ``units``, so two rows
-    # with one input_id stay two units. Every unit is dealt its mode and its
+    # k units per input row, each keyed by its position in ``units``, so two
+    # rows with one input_id stay apart. Every unit is dealt its mode and its
     # spec, done or not: the deal is a function of the whole plan.
-    units = [(i, 0) for i in range(len(rows))]
+    units = [(i, iteration) for i in range(len(rows)) for iteration in range(k)]
     keys = [(groups[i], (sids[i], iteration)) for i, iteration in units]
     unit_modes = deal_modes(modes, keys, seed=seed)
     specs = deal_specs(axes, keys, seed=seed)
@@ -209,7 +252,7 @@ def run_output_generation(
 
     out_path.parent.mkdir(parents=True, exist_ok=True)
     ledger = Ledger.sidecar(
-        out_path, key_fields=("input_id",), casters={"input_id": str})
+        out_path, key_fields=_KEY, casters={"input_id": str, "iteration": int})
 
     # Before the manifest is written: the resume takes the stage's lock. A
     # non-resume run wipes prior output, ledger and plan; a resume skips the ids the
@@ -219,11 +262,14 @@ def run_output_generation(
     completed = resume_state(
         ledger, resume=resume, artifact=out_path, manifest=manifest)
 
-    made_with = plan_record(seed=seed, modes=modes, axes=deal_weights(axes))
+    made_with = plan_record(seed=seed, outputs_per_input=k, modes=modes,
+                            axes=deal_weights(axes))
     changed: list[str] | None = []
     try:
-        # A file of an earlier shape first: its plan file, if any, lacks keys
-        # no setting of this run can match.
+        # A folder of an earlier shape first: its plan file, if any, lacks
+        # keys no setting of this run can match.
+        if resume:
+            _stop_on_an_earlier_ledger(ledger)
         if resume and out_path.exists():
             _stop_on_an_earlier_file(out_path, axes)
         changed = changed_plan(manifest.path, made_with) if resume else []
@@ -240,20 +286,23 @@ def run_output_generation(
     if changed is None and completed:
         logger.warning(
             "Outputs: %s has finished rows and no %s, so whether this run's seed, "
-            "modes and axes are the ones they were dealt with is not checked.",
+            "outputs_per_input, modes and axes are the ones they were dealt with "
+            "is not checked.",
             out_path.name, plan_path(manifest.path).name)
     write_plan(manifest.path, made_with)
 
     # Plan → manifest: one row per unit, written before the batch loop so the
     # run's full intended scope is inspectable up front (keyed like the ledger).
     manifest.write(
-        {"input_id": sids[i], "category": category, "entry_type": entry_type,
-         "mode": mode, **({"spec": spec} if axes else {}), "status": "planned"}
-        for (i, _), ((category, entry_type), _), mode, spec
+        {"input_id": sids[i], "iteration": iteration, "category": category,
+         "entry_type": entry_type, "mode": mode,
+         **({"spec": spec} if axes else {}), "status": "planned"}
+        for (i, iteration), ((category, entry_type), _), mode, spec
         in zip(units, keys, unit_modes, specs, strict=True)
     )
 
-    pending = [u for u, (i, _) in enumerate(units) if sids[i] not in completed]
+    pending = [u for u, (i, iteration) in enumerate(units)
+               if (sids[i], iteration) not in completed]
     if verbose and len(pending) != len(units):
         logger.info("Resume: skipping %d already-completed units",
                     len(units) - len(pending))
@@ -287,7 +336,7 @@ def run_output_generation(
 
     # One generate-check unit per unit index.
     def _unit(u):
-        i, _ = units[u]
+        i, iteration = units[u]
         row = rows[i]
         input_text = row[text_col]
         category, entry_type = groups[i]
@@ -315,8 +364,8 @@ def run_output_generation(
             _checker_for(category, mode) if use_checker else None,
             original=input_text,
             internals_ids=(
-                f"{input_id}/output" if capture_internals_gen else None,
-                f"{input_id}/val_out" if capture_internals_check else None,
+                f"{input_id}/{iteration}/output" if capture_internals_gen else None,
+                f"{input_id}/{iteration}/val_out" if capture_internals_check else None,
             ),
             max_tokens=(None, check_max_tokens),
             max_attempts=max_attempts,
@@ -330,16 +379,19 @@ def run_output_generation(
         resp, accepted, reasoning = value
         r = live_rows.pop(u)
         mode = unit_modes[u]
+        iteration = units[u][1]
         r["sample_id"] = sample_id or content_id(resp)
         r["output_response"] = resp
         r["accepted"] = accepted
         r["rejection_reason"] = reasoning
+        r["iteration"] = iteration
         r["response_mode"] = mode
         r["output_label"] = OUTPUT_LABEL[mode]
         r["response_label"] = response_label(r["entry_type"], mode)
         r.update(spec_columns(axes, specs[u], prefix=_PREFIX))
         # The verdict, what the coverage table counts.
-        buf.add([r], {"input_id": r["input_id"], "accepted": bool(accepted)})
+        buf.add([r], {"input_id": r["input_id"], "iteration": iteration,
+                      "accepted": bool(accepted)})
 
     # The row of a prompt that is too long is acked like any other: sent
     # again, the prompt would be too long again. Any other unit error stops
@@ -350,10 +402,10 @@ def run_output_generation(
         input_id = live_rows[u]["input_id"]
         logger.warning("Input %s rejected, its prompt is too long: %s",
                        input_id, exc)
-        # No response to hash: the id comes from the input's, so two such
+        # No response to hash: the id comes from the unit's key, so two such
         # rows never share one.
         _on_done(u, ("", False, f"prompt too long: {exc}"),
-                 sample_id=content_id(f"{input_id}:prompt too long"))
+                 sample_id=content_id(f"{input_id}:{units[u][1]}:prompt too long"))
 
     # Generation and check calls, topped up from the source as units finish.
     # The buffer appends finished rows, then acks them (see dataset/save.py),

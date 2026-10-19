@@ -118,9 +118,10 @@ def _respond(folder, monkeypatch, inputs=None, *, judge=lambda token: "Yes",
 
 
 def _planned(folder) -> dict:
-    """Each input's planned spec, by its id."""
+    """Each unit's planned spec, by its ``(input_id, iteration)``."""
     manifest = Manifest.sidecar(paths.output_responses_csv(folder))
-    return {row["input_id"]: row.get("spec") for row in manifest.load()}
+    return {(row["input_id"], row["iteration"]): row.get("spec")
+            for row in manifest.load()}
 
 
 def _written(folder) -> pd.DataFrame:
@@ -140,18 +141,18 @@ class TestTheResponseAxes:
             self, tmp_path, monkeypatch):
         gen, _ = _respond(tmp_path, monkeypatch)
         planned = _planned(tmp_path)
-        assert sorted(planned) == [f"in-{i}" for i in range(_QUESTIONS)]
+        assert sorted(planned) == [(f"in-{i}", 0) for i in range(_QUESTIONS)]
         rows = _written(tmp_path)
         assert list(rows.columns[-3:]) == _RESPONSE_COLUMNS
         for row in rows.to_dict("records"):
             assert {c: row[c] for c in _RESPONSE_COLUMNS} == {
                 f"response_{axis}": value
-                for axis, value in planned[row["input_id"]].items()}
+                for axis, value in planned[(row["input_id"], 0)].items()}
         axes = A.resolve("outputs")
         for call in gen.calls:
             text = call["messages"][-1]["content"]
             token = re.search(r"zq(\d+)", text).group(1)
-            spec = A.render_spec(axes, planned[f"in-{token}"], {})
+            spec = A.render_spec(axes, planned[(f"in-{token}", 0)], {})
             assert spec and text.endswith("\n\n" + spec)
 
     def test_the_checkers_messages_do_not_change(self, tmp_path, monkeypatch):
@@ -241,8 +242,8 @@ class TestTheResponseAxes:
         out = paths.output_responses_csv(tmp_path)
         # A folder as the stage left it before the modes: no mode column, a
         # plan file without modes, and no ledger, which a resume takes over.
-        old = _written(tmp_path).drop(columns=["response_mode", "output_label",
-                                               "response_label"])
+        old = _written(tmp_path).drop(columns=["iteration", "response_mode",
+                                               "output_label", "response_label"])
         old.to_csv(out, index=False)
         for sidecar in ("state.jsonl", "manifest.jsonl"):
             (paths.datasets(tmp_path) / f"output_responses.{sidecar}").unlink()
@@ -253,7 +254,8 @@ class TestTheResponseAxes:
         with pytest.raises(ValueError) as raised:
             _respond(tmp_path, monkeypatch, inputs=_questions(2 * before))
         message = str(raised.value)
-        assert "response_mode" in message and "before the answer modes" in message
+        assert "'iteration', 'response_mode'" in message
+        assert "each in an answer mode" in message
         assert "resume=False" in message
         assert "outputs.axes" not in message and "['modes']" not in message
         assert len(_written(tmp_path)) == before
@@ -341,8 +343,9 @@ class TestTheAnswerModes:
         _respond(tmp_path, monkeypatch, inputs=_questions_of(self._FOUR))
         rows = _written(tmp_path)
         at = list(rows.columns).index("rejection_reason") + 1
-        assert list(rows.columns[at:at + 3]) == [
-            "response_mode", "output_label", "response_label"]
+        assert list(rows.columns[at:at + 4]) == [
+            "iteration", "response_mode", "output_label", "response_label"]
+        assert set(rows["iteration"]) == {0}
         assert sorted(rows["entry_type"]) == sorted(self._FOUR)
         for row in rows.to_dict("records"):
             assert row["response_mode"] in DEFAULT_MODES[row["entry_type"]]
@@ -390,7 +393,8 @@ class TestTheAnswerModes:
         _respond(tmp_path, monkeypatch)
         plan = json.loads((paths.datasets(tmp_path) / "output_responses.plan.json")
                           .read_text(encoding="utf-8"))
-        assert list(plan) == ["seed", "modes", "axes"]
+        assert list(plan) == ["seed", "outputs_per_input", "modes", "axes"]
+        assert plan["outputs_per_input"] == 1
         assert plan["modes"] == resolve_modes()
 
     def test_an_unknown_entry_type_raises_before_anything_is_cleared(
@@ -417,6 +421,85 @@ class TestTheAnswerModes:
         assert rows.loc["in-1", ["entry_type", "response_mode", "response_label"]
                         ].tolist() == ["harmful", "harmful", "harmful_harmful"]
         assert rows.loc["in-0", "response_label"] == "benign_benign"
+
+    # --- k responses per input ---------------------------------------------
+
+    def test_each_input_is_k_units_whose_responses_differ_on_every_axis(
+            self, tmp_path, monkeypatch):
+        gen, _ = _respond(tmp_path, monkeypatch, outputs_per_input=2)
+        assert len(gen.calls) == 2 * _QUESTIONS
+        planned = _planned(tmp_path)
+        assert sorted(planned) == [(f"in-{i}", it) for i in range(_QUESTIONS)
+                                   for it in (0, 1)]
+        rows = _written(tmp_path)
+        assert sorted(zip(rows["input_id"], rows["iteration"])) == sorted(planned)
+        for i in range(_QUESTIONS):
+            first, second = planned[(f"in-{i}", 0)], planned[(f"in-{i}", 1)]
+            assert all(first[axis] != second[axis] for axis in first)
+
+    def test_at_two_per_input_a_dual_use_input_gets_one_answer_of_each_mode(
+            self, tmp_path, monkeypatch):
+        _respond(tmp_path, monkeypatch, outputs_per_input=2,
+                 inputs=_questions_of(["dual_use_harmful"] * 3 + ["benign"] * 2))
+        rows = _written(tmp_path)
+        modes = rows.groupby("input_id")["response_mode"].apply(sorted).to_dict()
+        assert modes == {"in-0": ["harmful", "helpful"], "in-1": ["harmful", "helpful"],
+                         "in-2": ["harmful", "helpful"], "in-3": ["helpful", "helpful"],
+                         "in-4": ["helpful", "helpful"]}
+        assert set(rows[rows["entry_type"] == "dual_use_harmful"]["response_label"]
+                   ) == {"dual_use_harmful_harmful", "dual_use_harmful_benign"}
+
+    def test_a_resume_makes_no_call_and_keeps_the_modes_and_specs(
+            self, tmp_path, monkeypatch):
+        inputs = _questions_of(["dual_use_benign"] * 4)
+        _respond(tmp_path, monkeypatch, inputs=inputs, outputs_per_input=2)
+        manifest = Manifest.sidecar(paths.output_responses_csv(tmp_path))
+        first = manifest.load()
+        gen, check = _respond(tmp_path, monkeypatch, inputs=inputs,
+                              outputs_per_input=2)
+        assert gen.calls == check.calls == []
+        assert manifest.load() == first
+
+    def test_a_resume_with_another_count_per_input_raises_naming_resume_false(
+            self, tmp_path, monkeypatch):
+        _respond(tmp_path, monkeypatch)
+        with pytest.raises(ValueError) as raised:
+            _respond(tmp_path, monkeypatch, outputs_per_input=2)
+        assert "['outputs_per_input']" in str(raised.value)
+        assert "resume=False" in str(raised.value)
+        gen, _ = _respond(tmp_path, monkeypatch, resume=False, outputs_per_input=2)
+        assert len(gen.calls) == 2 * _QUESTIONS
+
+    @pytest.mark.parametrize("value", [0, 1.5, True, "2"])
+    def test_a_count_per_input_that_is_not_a_whole_number_raises(
+            self, tmp_path, monkeypatch, value):
+        with pytest.raises(ValueError, match="outputs_per_input"):
+            _respond(tmp_path, monkeypatch, outputs_per_input=value)
+        assert not paths.datasets(tmp_path).exists()
+
+    @pytest.mark.parametrize("with_csv", [True, False])
+    def test_a_ledger_of_units_without_an_iteration_stops_before_any_call(
+            self, tmp_path, monkeypatch, with_csv):
+        """Read through a ledger keyed on input_id: the stage's own skips an
+        ack without its key, and would run every unit again onto the rows."""
+        _respond(tmp_path, monkeypatch, inputs=_questions(2))
+        out = paths.output_responses_csv(tmp_path)
+        state = out.with_name("output_responses.state.jsonl")
+        state.write_text("".join(
+            json.dumps({"input_id": f"in-{i}", "accepted": True}) + "\n"
+            for i in range(2)), encoding="utf-8")
+        if not with_csv:
+            out.unlink()
+
+        def no_model(source, **kwargs):
+            raise AssertionError("a unit reached a model")
+
+        import redact.content_moderation.outputs as G
+        monkeypatch.setattr(G, "drive_units", no_model)
+        with pytest.raises(ValueError, match="without an iteration") as raised:
+            _respond(tmp_path, monkeypatch, inputs=_questions(2))
+        assert "resume=False" in str(raised.value)
+        assert "new data_dir" in str(raised.value)
 
 
 class TestTheLengthFloor:

@@ -63,7 +63,10 @@ and the unit `(input_id, iteration)`, `input_id` the input's `sample_id`
 response, and the unit `(response_id, iteration)`, `response_id` the
 response's `sample_id` (else the content id of its text): an input may have
 several responses, each paraphrased on its own. The unit keeps `input_id`,
-the response's own `input_id`, the input it answers.
+the response's own `input_id`, the input it answers. With the outputs
+stage's `outputs_per_input` at k (2 in a training run), the outputs target
+paraphrases each of an input's k responses: its units are
+`paraphrases_per_sample` per accepted response, k times those per input.
 
 | | `inputs` | `outputs` |
 |---|---|---|
