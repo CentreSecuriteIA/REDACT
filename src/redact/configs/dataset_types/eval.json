@@ -19,7 +19,7 @@
         "deny": ["sensitive_words"]
       },
       "techniques": {
-        "allow": ["to_swahili", "to_thai", "to_khmer", "to_maori", "to_nepali",
+        "allow": ["to_swahili", "to_thai", "to_khmer", "to_nepali",
                   "to_zulu", "to_scots_gaelic", "to_bengali", "to_javanese",
                   "to_refusal_then_comply"],
         "deny": ["to_rot13", "to_rot18", "to_rot47", "to_separator",

@@ -1,6 +1,6 @@
 # Jailbreak techniques
 
-The jailbreak stage draws from 152 techniques in 4 layers and 23 families.
+The jailbreak stage draws from 151 techniques in 4 layers and 23 families.
 `configs/jailbreak/combination_spec.json` gives each technique its families,
 a complexity from 0 to 3, whether it calls a model (`requires_llm`) or
 needs the benign data (`requires_benign`), and the kinds that may draw it
@@ -19,7 +19,7 @@ layer, families apply in the order of their `within_layer_order`.
 |---|---|---|
 | `hacking` | 25 | at most 1 |
 | `manipulation` | 8 | at most 1 |
-| `obfuscation` | 72 | up to `max_obfuscations` families in budget mode, the request obfuscation, when allowed, among them |
+| `obfuscation` | 71 | up to `max_obfuscations` families in budget mode, the request obfuscation, when allowed, among them |
 | `requests` | 47 | at most 1 |
 
 ## Families and techniques
@@ -33,7 +33,7 @@ layer, families apply in the order of their `within_layer_order`.
 | manipulation | `fsh` | `example_priming` | | 4 | the `selected` two | yes | `to_fsh_random_short`, `to_fsh_random_long`, `to_fsh_selected_short`, `to_fsh_selected_long` |
 | obfuscation | `sensitive_words` | `encoding` | 1 | 16 | yes | no | `to_sensitive_words_encode_base64`, `to_sensitive_words_encode_rot13`, `to_sensitive_words_encode_rot18`, `to_sensitive_words_encode_rot47`, `to_sensitive_words_encode_unicode`, `to_sensitive_words_encode_ascii`, `to_sensitive_words_encode_separator`, `to_sensitive_words_encode_leetspeak_basic`, `to_sensitive_words_encode_leetspeak_intermediate`, `to_sensitive_words_encode_leetspeak_advanced`, `to_sensitive_words_split`, `to_sensitive_words_star`, `to_sensitive_words_hyphen`, `to_sensitive_words_underscore`, `to_sensitive_words_variables`, `to_synonym_substitution` |
 | obfuscation | `tokenbreak` | `encoding` | 2 | 3 | yes | no | `to_tokenbreak_prepend`, `to_tokenbreak_split`, `to_tokenbreak_delimiter` |
-| obfuscation | `translation` | `language` | 3 | 20 | yes, the `translation` model | no | `to_french`, `to_japanese`, `to_russian`, `to_spanish`, `to_german`, `to_arabic`, `to_turkish`, `to_czech`, `to_vietnamese`, `to_greek`, `to_croatian`, `to_swahili`, `to_thai`, `to_khmer`, `to_maori`, `to_nepali`, `to_zulu`, `to_scots_gaelic`, `to_bengali`, `to_javanese` |
+| obfuscation | `translation` | `language` | 3 | 19 | yes, the `translation` model | no | `to_french`, `to_japanese`, `to_russian`, `to_spanish`, `to_german`, `to_arabic`, `to_turkish`, `to_czech`, `to_vietnamese`, `to_greek`, `to_croatian`, `to_swahili`, `to_thai`, `to_khmer`, `to_nepali`, `to_zulu`, `to_scots_gaelic`, `to_bengali`, `to_javanese` |
 | obfuscation | `typos` | `surface_noise` | 4 | 4 | yes | no | `to_rewrite_with_typos_low`, `to_rewrite_with_typos_medium`, `to_rewrite_with_typos_high`, `to_rewrite_with_typos_insane` |
 | obfuscation | `casual_writing` | `surface_noise` | 4.5 | 9 | no | no | `to_lowercase`, `to_uppercase`, `to_no_sentence_capitals`, `to_dropped_spaces`, `to_doubled_spaces`, `to_dropped_punctuation`, `to_doubled_punctuation`, `to_abbreviations`, `to_stripped_accents` |
 | obfuscation | `suffixes` | `surface_noise` | 5 | 4 | no | no | `to_adversarial_suffix_punctuation`, `to_adversarial_suffix_fragments`, `to_adversarial_suffix_unicode`, `to_adversarial_suffix_emoji` |
@@ -113,7 +113,7 @@ the text unchanged or reversibly, or a check accepts the result:
 
 | Family | Techniques |
 |---|---|
-| `translation` | the nine low-resource languages, weighted 3 |
+| `translation` | the eight low-resource languages, weighted 3 |
 | `encode` | the five `heavy` ones: `to_base64`, `to_unicode_escape`, `to_ascii_ordinal`, `to_morse`, `to_braille` |
 | `fsh`, `dap` | all eight |
 | `framing` | all five |
@@ -162,7 +162,7 @@ off) these 46 techniques in 8 families, pinned in
 | `encode` | `to_leetspeak_basic` |
 | `suffixes` | `to_adversarial_suffix_punctuation`, `to_adversarial_suffix_emoji` |
 
-With `"natural": {"translation": true}` the twenty translations join them.
+With `"natural": {"translation": true}` the nineteen translations join them.
 Attack-only: `structural`, `continuation`, `temporal`, the high and insane
 typos, `to_answer_as_dialogue`, `to_answer_as_story` and the three
 answer-format directives the natural kind denies anyway
@@ -228,13 +228,17 @@ the answers.
   `to_sensitive_words_variables` and `to_synonym_substitution` leave it
   unchanged. `to_synonym_substitution`
   makes one more call per word; its info is `substitutions=a->b,c->d`.
-- `translation` covers 20 languages in three resource tiers, which the
+- `translation` covers 19 languages in three resource tiers, which the
   spec scores by complexity: high (`to_french`, `to_japanese`, `to_russian`,
   `to_spanish`, `to_german`, `to_arabic`; 0), mid (`to_turkish`,
   `to_czech`, `to_vietnamese`, `to_greek`, `to_croatian`; 1) and low
-  (`to_swahili`, `to_thai`, `to_khmer`, `to_maori`, `to_nepali`, `to_zulu`,
-  `to_scots_gaelic`, `to_bengali`, `to_javanese`; 2). Each is a translate,
-  check and retry loop on the `translation` model.
+  (`to_swahili`, `to_thai`, `to_khmer`, `to_nepali`, `to_zulu`,
+  `to_scots_gaelic`, `to_bengali`, `to_javanese`; 2). On a chat translator
+  each is a translate, check and retry loop on the `translation` model. On
+  a machine-translation model (`translategemma-27b`, the default) the text
+  goes paragraph by paragraph; each piece is checked for its language
+  (GlotLID) and length, then translated back and judged by the generation
+  model ([stages/jailbreaks.md](stages/jailbreaks.md#models)).
 - `typos` is one rewrite by the model, at one of four densities, with the
   level's description in the prompt.
 - `casual_writing` is how a person typing quickly writes: casing, spacing,

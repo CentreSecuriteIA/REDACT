@@ -244,7 +244,7 @@ _BUDGETS = [
      "sampling_probs": {"hacking": 0.9, "manipulation": 0.1, "requests": 0.9,
                         "request_obfuscation": 0.7}},
 ]
-_PINNED_DRAWS = "4f512a7cfa07878b26819cdf384113f401f42f82929dcdbe3289f55c82df49b3"
+_PINNED_DRAWS = "16be951e33395966dceff94a50bb754e20b59ab7092d60da59012fa871c83749"
 
 
 def test_draws_without_the_request_obfuscation_are_those_made_before_it_was_counted():

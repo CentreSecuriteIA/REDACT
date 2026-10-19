@@ -367,8 +367,10 @@ def _engine(hf_model_id: str, quantization: str | None, vllm_kwargs: dict):
         kwargs.setdefault("gpu_memory_utilization", _planned_utilization.get(
             key, estimate.DEFAULT_GPU_MEMORY_UTILIZATION))
         # After the key is built, so the default never splits a shared engine.
+        # Capped at the context of the config the engine reads.
         if not kwargs.get("max_model_len"):
-            kwargs["max_model_len"] = estimate.effective_max_model_len(hf_model_id)
+            kwargs["max_model_len"] = estimate.effective_max_model_len(
+                kwargs.get("hf_config_path") or hf_model_id)
         # vllm.LLM's default. Set false, the engine is asked for its stats
         # line every _STATS_INTERVAL_S (_log_stats).
         kwargs.setdefault("disable_log_stats", True)

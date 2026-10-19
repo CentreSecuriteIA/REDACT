@@ -46,11 +46,20 @@ in [techniques.md](../techniques.md).
 
 | Recipe role | Registry role | Default | Calls |
 |---|---|---|---|
-| `gen` | `uncensored_gen` | `venice-uncensored` | Every technique that calls a model, `translation` aside, and the benign data |
-| `translation` | `translation` | `deepseek-v3.2` | The `translation` family; resolved, planned and loaded only when a kind's pool holds a translation technique (`"translation": true`, as in the eval type's attacks) |
+| `gen` | `uncensored_gen` | `venice-uncensored` | Every technique that calls a model, the benign data, and the judge of a machine translation |
+| `translation` | `translation` | `translategemma-27b` | The `translation` family; resolved, planned and loaded only when a kind's pool holds a translation technique (`"translation": true`, as in the eval type's attacks) |
 
-Each translation is up to 4 rounds of two calls, a translation and its check,
-both to the `translation` model.
+A chat translator (`deepseek-v3.2`, named in the recipe) makes up to 4
+rounds of two calls, a translation and its check, both to it.
+
+A machine-translation model (the `machine_translation` role, `translategemma-27b`) gets the text piece by piece, one request after another inside its unit: a paragraph, or a paragraph over 1,200 characters cut at sentence ends, each request capped at about three times its piece's tokens (1,536 at most). Each piece is checked at no model cost (empty; its GlotLID label among the language's accepted ones; its length ratio, over the language's median, within 0.5 to 2.0, which a reply cut at its cap is not), and a failing piece is resampled alone. When every piece passes, each is translated back to English and the generation model judges the original against the joined back-translation (prompt `jailbreak/translate_check_back`, 128 tokens), a rejection resampling every piece. Up to 4 rounds; the `DISCARDED` info names the piece (`piece=2/3`, `piece=all` for the judge) and why. A round is one call per piece when a piece fails, else
+two per piece and one judge call: three for a one-piece text, twelve at
+most over 4 rounds. Every request is its unit's own, on the async lane, so
+other units keep both engines busy meanwhile. Before any call the stage
+renders `translate_mt` once and stops, naming the file, unless it is one
+user message with the model's three markers in order; without GlotLID
+(`pip install -e ".[langid]"`, in `[vllm]` too) it warns once and skips the
+language check.
 
 ## Settings
 
@@ -189,7 +198,7 @@ says how to plan one kind again and keep the other).
 
 | Case | Row |
 |---|---|
-| A technique rejects its result: a translation that fails its check in all 4 rounds, a malformed word list, no word marked for a heavy word encoding, a scenario reply without its scene 3 times, a text no ASCII-art font draws whole or within its cap, an empty reply or text | `jailbreak` holds the text before that technique; `accepted` false; `reasoning` and `technique_info` start with `DISCARDED; technique=<name>` |
+| A technique rejects its result: a translation that fails its checks in all 4 rounds, a malformed word list, no word marked for a heavy word encoding, a scenario reply without its scene 3 times, a text no ASCII-art font draws whole or within its cap, an empty reply or text | `jailbreak` holds the text before that technique; `accepted` false; `reasoning` and `technique_info` start with `DISCARDED; technique=<name>` |
 | A natural variation leaves the text unchanged | `accepted` false; `reasoning` `unchanged: the text is its input's`. An adversarial row that changes nothing stays accepted, with `is_noop` true; its `sample_id` is its input's, so the build leaves it out |
 | A technique raises, or a prompt is too long for a model on the async lane (an OpenAI-compatible endpoint or vLLM) | An error row: the input text, `accepted` false, `technique_info` `ERROR: <message>`, `reasoning` the message |
 | A call fails (a provider error, or a prompt too long on the grouped path: Anthropic, introspection) | The stage stops; saved units stay saved |

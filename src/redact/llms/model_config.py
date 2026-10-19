@@ -17,6 +17,7 @@ provider parameters.
 import dataclasses
 import json
 from dataclasses import dataclass, field
+from pathlib import Path
 
 from .. import paths
 from .backends import (
@@ -188,6 +189,11 @@ class VLLMConfig:
         min_gpus: Cards the engine is split across. Above 1 it is passed to
             vLLM as ``tensor_parallel_size``; a ``tensor_parallel_size`` in
             ``vllm_kwargs`` must equal it.
+        hf_config: A folder under ``configs/llm/hf_configs/`` whose
+            ``config.json`` vLLM (as ``hf_config_path``) and the estimator
+            read in place of the checkpoint's own, for a checkpoint whose
+            config the installed transformers cannot read. The weights and
+            tokenizer still come from ``hf_model_id``.
     """
 
     hf_model_id: str
@@ -196,6 +202,7 @@ class VLLMConfig:
     sampling: dict | None = None
     vram_gb: float | None = None
     min_gpus: int = 1
+    hf_config: str | None = None
 
     def __post_init__(self) -> None:
         _check_str("VLLMConfig.hf_model_id", self.hf_model_id)
@@ -204,6 +211,22 @@ class VLLMConfig:
         _check_dict("VLLMConfig.sampling", self.sampling)
         _check_number("VLLMConfig.vram_gb", self.vram_gb)
         _check_int("VLLMConfig.min_gpus", self.min_gpus, minimum=1)
+        _check_str("VLLMConfig.hf_config", self.hf_config, optional=True)
+        if self.hf_config is not None:
+            folder = paths.hf_configs_dir() / self.hf_config
+            _require(
+                self.hf_config not in {".", ".."}
+                and Path(self.hf_config).name == self.hf_config
+                and (folder / "config.json").is_file(),
+                f"VLLMConfig.hf_config={self.hf_config!r} names no folder with a "
+                f"config.json under {paths.hf_configs_dir()}.",
+            )
+        _require(
+            "hf_config_path" not in (self.vllm_kwargs or {}),
+            "VLLMConfig.vllm_kwargs['hf_config_path'] is not a setting: name a "
+            "folder under configs/llm/hf_configs/ in hf_config instead. Remove "
+            "it from vllm_kwargs.",
+        )
         _require(
             "gpu_memory_utilization" not in (self.vllm_kwargs or {}),
             "VLLMConfig.vllm_kwargs['gpu_memory_utilization'] is not a "
@@ -227,13 +250,23 @@ class VLLMConfig:
         )
 
     @property
+    def hf_config_path(self) -> str | None:
+        """The folder of :attr:`hf_config`, absolute; ``None`` without one."""
+        if self.hf_config is None:
+            return None
+        return str(paths.hf_configs_dir() / self.hf_config)
+
+    @property
     def engine_kwargs(self) -> dict:
-        """The kwargs the engine is built with, ``min_gpus`` included."""
+        """The kwargs the engine is built with, ``min_gpus`` and
+        :attr:`hf_config_path` included."""
         kwargs = dict(self.vllm_kwargs or {})
         if kwargs.get("tensor_parallel_size", 0) is None:
             del kwargs["tensor_parallel_size"]
         if self.min_gpus > 1:
             kwargs["tensor_parallel_size"] = self.min_gpus
+        if self.hf_config is not None:
+            kwargs["hf_config_path"] = self.hf_config_path
         return kwargs
 
 

@@ -176,8 +176,8 @@ rules leave nothing; with the full pool, 1 and 2 are always reachable.
 
 Every pick is **family first** (`_pick_by_family`): a family, then a
 technique within it, both dealt when the plan passes its dealer
-([balanced dealing](#balanced-dealing)). The 20 translation languages are
-one choice, not 20.
+([balanced dealing](#balanced-dealing)). The 19 translation languages are
+one choice, not 19.
 The rules are those of [techniques.md](../techniques.md#compatibility-rules).
 
 ## Balanced dealing

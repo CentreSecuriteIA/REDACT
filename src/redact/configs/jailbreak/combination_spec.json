@@ -228,7 +228,6 @@
     "to_swahili":            { "families": ["translation"], "complexity": 2, "requires_llm": true },
     "to_thai":               { "families": ["translation"], "complexity": 2, "requires_llm": true },
     "to_khmer":              { "families": ["translation"], "complexity": 2, "requires_llm": true },
-    "to_maori":              { "families": ["translation"], "complexity": 2, "requires_llm": true },
     "to_nepali":             { "families": ["translation"], "complexity": 2, "requires_llm": true },
     "to_zulu":               { "families": ["translation"], "complexity": 2, "requires_llm": true },
     "to_scots_gaelic":       { "families": ["translation"], "complexity": 2, "requires_llm": true },

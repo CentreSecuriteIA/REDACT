@@ -11,7 +11,8 @@ Python 3.11 or later.
 
 ```bash
 pip install -e .                   # core: pandas, openai, anthropic, python-dotenv, pyfiglet, filelock
-pip install -e ".[vllm]"           # local models through vLLM (vllm, hf_transfer, psutil)
+pip install -e ".[vllm]"           # local models through vLLM (vllm, hf_transfer, psutil, langid)
+pip install -e ".[langid]"         # GlotLID, the language check of a machine translation
 pip install -e ".[transformers]"   # the introspection backend (torch, transformers, accelerate)
 pip install -e ".[hf]"             # loading published datasets from the HuggingFace Hub
 pip install -e ".[dev]"            # pytest, ruff, mypy, ipykernel
@@ -168,7 +169,7 @@ that lists that role.
 |---|---|---|---|
 | `gen` | inputs, outputs, jailbreaks | `uncensored_gen` | `venice-uncensored`, hosted (Venice) |
 | `check` | inputs, outputs | `uncensored_gen` | the `gen` model |
-| `translation` | jailbreaks, only when a kind's pool holds a translation technique (`"translation": true`; the eval type's attacks) | `translation` | `deepseek-v3.2`, hosted (Venice) |
+| `translation` | jailbreaks, only when a kind's pool holds a translation technique (`"translation": true`; the eval type's attacks) | `translation` | `translategemma-27b`, local vLLM (27B, FP8); `deepseek-v3.2` by name for a hosted run |
 | `constitution` | constitution | `constitution_gen` | `claude-opus-4-6`, hosted (Anthropic) |
 | `paraphraser` | paraphrase | `paraphraser` | `venice-paraphraser`, local vLLM (24B weights) |
 | `paraphrase_check` | paraphrase | `uncensored_gen` | `venice-uncensored`, hosted |

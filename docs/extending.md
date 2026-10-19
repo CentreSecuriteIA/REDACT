@@ -45,6 +45,34 @@ A hosted one, on any OpenAI-compatible endpoint:
 }
 ```
 
+A local machine-translation model, which takes one user message in its own
+format and follows no other instruction:
+
+```json
+"my-translator": {
+  "backend_type": "vllm",
+  "roles": ["translation", "machine_translation"],
+  "supports_system_prompt": false,
+  "default_temperature": 0.2,
+  "vllm": {
+    "hf_model_id": "org/my-translator",
+    "hf_config": "my-translator",
+    "vllm_kwargs": {"max_model_len": 4096}
+  }
+}
+```
+
+- `machine_translation` makes the translation technique send it
+  `jailbreak/translate_mt` and check its output itself. Overlay that prompt
+  when the model's format differs; the stage checks it renders to one user
+  message.
+- `hf_config` names a folder under `configs/llm/hf_configs/` holding a
+  `config.json` read in place of the checkpoint's, when the installed
+  transformers cannot read the checkpoint's own. Leave it out otherwise.
+- Every language needs a code, accepted GlotLID labels and a median length
+  ratio in `jailbreak/obfuscation/translation.py`; import fails when one is
+  missing.
+
 - One entry may carry both an `api` and a `vllm` setup when the hosted model
   and the local weights are the same model; `backend_type` names the default,
   and a recipe picks the other with `"backend_type"` in the role's object.

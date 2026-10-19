@@ -425,6 +425,84 @@ class TestFootprintResolution:
             assert residency.footprint(m).gb == 51.0
 
 
+
+def _shipped_hf_config(folder: str) -> SimpleNamespace:
+    """A packaged config.json as the attribute view transformers gives."""
+    from redact import paths
+
+    raw = json.loads((paths.hf_configs_dir() / folder / "config.json")
+                     .read_text(encoding="utf-8"))
+    text = SimpleNamespace(**raw["text_config"])
+    return SimpleNamespace(**{**raw, "text_config": text})
+
+
+class TestPackagedHFConfig:
+    """A setup's ``hf_config`` is the config the plan reads, and its path is
+    part of the engine's identity in the plan and at load."""
+
+    def test_the_footprint_reads_the_packaged_config_and_sizes_its_kv(
+            self, registered):
+        from redact import paths
+
+        m = registered("_hc_footprint", hf_model_id="org/broken-config",
+                       hf_config="translategemma-27b", vram_gb=28.4,
+                       vllm_kwargs={"max_model_len": 4096})
+        read = []
+
+        def load(source):
+            read.append(source)
+            return _shipped_hf_config("translategemma-27b")
+
+        with patch.object(estimate, "_load_config", side_effect=load):
+            fp = residency.footprint(m)
+        assert set(read) == {str(paths.hf_configs_dir() / "translategemma-27b")}
+        # KV: 2 x 62 layers x 16 KV heads x 128 x 4096 tokens x 2 bytes.
+        # Planned: (28.4 + 1.94) x 1.1 + 0.6 = 33.97, up to 34.0.
+        assert (fp.parts["weights_gib"], fp.parts["kv_gib"], fp.gb) == (
+            28.4, 1.94, 34.0)
+
+    def test_the_engine_key_and_the_plans_engine_id_carry_the_path(self, registered):
+        import redact.llms.backends.vllm as vllm_module
+        from redact import paths
+
+        m = registered("_hc_engine", hf_model_id="org/broken-config",
+                       hf_config="translategemma-27b", vram_gb=28.4)
+        local = MODEL_REGISTRY[m].vllm
+        key = vllm_module._engine_key(local.hf_model_id, local.quantization,
+                                      local.engine_kwargs)
+        folder = str(paths.hf_configs_dir() / "translategemma-27b")
+        assert repr(folder) in key[2]
+        assert residency.footprint(m).engine == ("vllm", *key)
+
+    def test_the_engine_caps_its_context_at_the_packaged_configs(self, registered):
+        """Without max_model_len the engine's default context is capped at
+        what the packaged config names, not the checkpoint's unreadable one."""
+        import redact.llms.backends.vllm as vllm_module
+        from redact import paths
+
+        calls = []
+        vllm_module.VLLMBackend.clear_cache()
+        fake = fake_vllm_modules(lambda **kw: calls.append(kw) or object())
+        small = SimpleNamespace(**{**vars(MISTRAL_24B),
+                                   "max_position_embeddings": 4096})
+        folder = str(paths.hf_configs_dir() / "translategemma-27b")
+        read = []
+        try:
+            with (
+                patch.dict("sys.modules", fake),
+                patch.object(vllm_module, "_prepare_environment"),
+                patch.object(estimate, "_load_config",
+                             side_effect=lambda source: read.append(source) or small),
+            ):
+                vllm_module._engine("org/broken-config", None,
+                                    {"hf_config_path": folder})
+        finally:
+            vllm_module.VLLMBackend.clear_cache()
+        assert read == [folder]
+        assert {k: calls[0][k] for k in ("max_model_len", "hf_config_path")} == {
+            "max_model_len": 4096, "hf_config_path": folder}
+
+
 class TestPlanResidency:
     def test_two_engines_share_a_card_when_their_grants_fit(self, registered):
         a = registered("_res_small_a", hf_model_id="org/sa", vram_gb=2.5)
@@ -642,7 +720,7 @@ class TestPlanResidency:
         assert len(plan.groups) == 2          # 30 GiB on one 24 GiB card
 
     def test_models_sharing_a_checkpoint_are_one_load(self, registered):
-        # venice-uncensored[vllm] and venice-paraphraser do exactly this. Two
+        # venice-uncensored-fp8 and venice-paraphraser do exactly this. Two
         # rows, one engine — counting it twice would split a plan that fits.
         a = registered("_res_shared_a", hf_model_id="org/same", vram_gb=18.0)
         b = registered("_res_shared_b", hf_model_id="org/same", vram_gb=18.0)
@@ -1536,7 +1614,9 @@ class TestRegistryFootprints:
 
     @pytest.mark.parametrize("model,backend_type", [
         ("venice-uncensored", "vllm"),
+        ("venice-uncensored-fp8", None),
         ("venice-paraphraser", None),
+        ("translategemma-27b", None),
         ("llama-3.2-3b-debug", None),
     ])
     def test_every_local_model_declares_a_footprint(self, model, backend_type):
@@ -1545,10 +1625,23 @@ class TestRegistryFootprints:
         assert fp.source == "declared"
 
     def test_the_shared_checkpoint_declares_the_same_footprint(self):
-        a = residency.footprint("venice-uncensored", "vllm")
+        a = residency.footprint("venice-uncensored-fp8")
         b = residency.footprint("venice-paraphraser")
         assert a.hf_model_id == b.hf_model_id
+        assert a.engine == b.engine    # one load at FP8
         assert a.gb == b.gb        # one engine, one footprint
+
+    def test_the_bf16_and_fp8_24b_are_two_loads(self):
+        assert (residency.footprint("venice-uncensored", "vllm").engine
+                != residency.footprint("venice-uncensored-fp8").engine)
+
+    def test_the_translator_is_sized_from_its_packaged_config(self):
+        """28.4 GiB declared, KV at its 4096 tokens, read from the shipped
+        config."""
+        with _config(_shipped_hf_config("translategemma-27b")):
+            fp = residency.footprint("translategemma-27b")
+        assert (fp.parts["weights_gib"], fp.parts["kv_gib"], fp.gb) == (
+            28.4, 1.94, 34.0)
 
 
 def test_estimated_tensor_parallel_footprint_is_a_total_like_a_declared_one():
@@ -3659,3 +3752,40 @@ class TestSearch:
         assert [fp.devices for fp in plans[6].footprints] == [(0,), (0,), (1,), (1,)]
         assert plans[7].fits
         assert [fp.devices for fp in plans[7].footprints] == [(0,), (1,), (0,), (1,)]
+
+
+class TestTheTranslatorBesideThe24B:
+    """The jailbreak stage's pair: the 24B generation model and
+    translategemma-27b, as registered, on one card of a rented machine."""
+
+    @pytest.fixture(autouse=True)
+    def _configs(self):
+        """The 24B reads as Mistral-24B's shapes, the translator as its
+        packaged config."""
+        tg = _shipped_hf_config("translategemma-27b")
+
+        def load(source):
+            return tg if source.endswith("translategemma-27b") else MISTRAL_24B
+
+        with patch.object(estimate, "_load_config", side_effect=load):
+            yield
+
+    def _shares(self, gen, card_gib, backend_types=None):
+        plan = residency.plan_residency(
+            [gen, "translategemma-27b"], backend_types, gpus=1, gib_per_gpu=card_gib)
+        return plan, [(fp.model, fp.devices, fp.planned_utilization)
+                      for fp in plan.footprints]
+
+    @pytest.mark.parametrize("card_gib,shares", [
+        (95.6, (0.4275, 0.4724)),       # an RTX PRO 6000
+        (79.6, (0.4229, 0.4770)),       # an A100 or H100
+    ])
+    def test_the_fp8_24b_and_the_translator_share_one_card(self, card_gib, shares):
+        plan, placed = self._shares("venice-uncensored-fp8", card_gib)
+        assert plan.fits and len(plan.groups) == 1
+        assert placed == [("venice-uncensored-fp8", (0,), shares[0]),
+                          ("translategemma-27b", (0,), shares[1])]
+
+    def test_the_bf16_24b_beside_the_translator_does_not_fit_an_80gb_card(self):
+        plan, _ = self._shares("venice-uncensored", 79.6, {"venice-uncensored": "vllm"})
+        assert not plan.fits and len(plan.groups) == 2  # noqa: PLR2004

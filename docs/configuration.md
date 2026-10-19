@@ -60,8 +60,8 @@ types: a recipe naming one stops when it loads, before any stage runs.
 The eval adversarial kind attacks the harmful inputs only, with a pool of
 hard techniques whose label stays certain: the families `encode` (less the
 seven light encodings, and less `sensitive_words`), `fsh`, `dap`, `framing`,
-`structural`, `ascii_art`, `continuation`, `temporal`; the nine low-resource
-translations (`to_swahili`, `to_thai`, `to_khmer`, `to_maori`, `to_nepali`,
+`structural`, `ascii_art`, `continuation`, `temporal`; the eight low-resource
+translations (`to_swahili`, `to_thai`, `to_khmer`, `to_nepali`,
 `to_zulu`, `to_scots_gaelic`, `to_bengali`, `to_javanese`), with
 `"translation": true` and `family_weights` `{"translation": 3}`; and
 `to_refusal_then_comply`. It runs two count-driven rounds, one technique
@@ -443,7 +443,7 @@ adds it to its allow list (the spec marks the family natural). No family
 list changes this; a
 `techniques.deny` still removes the languages it names, and a
 `techniques.allow` that names some languages narrows the family to those
-(the eval type's nine low-resource languages).
+(the eval type's eight low-resource languages).
 
 With the switch `false`, the translation an allow list names (the family or
 its techniques) and a `family_weights` entry for it are left out of the
@@ -455,13 +455,19 @@ list left empty by this is dropped when the other list still names
 something; when nothing but translation was allowed, the kind raises.
 
 Both kinds of the packaged section default to `false`; the eval type turns
-it on for its attacks, with the nine low-resource languages, which run on
-the hosted `translation` model until a local one is registered. Each
-translation makes 2 to 8 calls, up to 4 rounds of two
-([stages/jailbreaks.md](stages/jailbreaks.md#models) says which model each
-goes to). The translation model is planned and loaded only when a kind's
-pool holds a translation technique. Turning it on by default is one line
-per kind in `augmentations.json`.
+it on for its attacks, with the eight low-resource languages, which run on
+the `translation` role's default, `translategemma-27b`, a local vLLM model
+(a GPU: about 34 GiB planned, beside the FP8 24B on one 80 or 96 GB card).
+It translates paragraph by paragraph; each piece is checked, then translated
+back and judged by the generation model, up to 4 rounds
+([stages/jailbreaks.md](stages/jailbreaks.md#models) gives the calls). The
+translation model is planned and loaded only when a kind's pool holds a
+translation technique. Turning it on by default is one line per kind in
+`augmentations.json`.
+
+A run without a GPU keeps translation off (`"adversarial": {"translation":
+false}` in the recipe's `augmentations`), or names the hosted chat
+translator: `"models": {"translation": "deepseek-v3.2"}`.
 
 ### Rounds
 
@@ -600,6 +606,7 @@ process only.
 | `sampling` | `null` | Sampling defaults (`top_p`, `top_k`, ...) over the backend's `top_p` 0.85 |
 | `vram_gb` | `null` | The weights in GiB, total over the model's cards, when known better than the estimate |
 | `min_gpus` | `1` | Cards per copy; above 1 it is the `tensor_parallel_size` |
+| `hf_config` | `null` | A folder under `configs/llm/hf_configs/` whose `config.json` vLLM (as `hf_config_path`) and the estimator read in place of the checkpoint's own, for a checkpoint whose config the installed transformers cannot read. The weights and tokenizer still come from `hf_model_id`; `vllm_kwargs` may not name `hf_config_path` |
 
 ### `introspect` (IntrospectConfig)
 
@@ -616,18 +623,24 @@ process only.
 ### Roles and shipped models
 
 `configs/llm/roles.json` lists the registry roles: `uncensored_gen`,
-`translation`, `constitution_gen`, `paraphraser`, `debug_local`. A role's
-default model is the first entry in `models.json` that lists it.
+`translation`, `machine_translation`, `constitution_gen`, `paraphraser`,
+`debug_local`. A role's default model is the first entry in `models.json`
+that lists it. `machine_translation` marks a model that only translates, in
+its own fixed format: the translation technique sends it
+`jailbreak/translate_mt`, checks its output and has the generation model
+judge a back-translation.
 
 | Model | Default setup | Other setup | Roles | Limits |
 |---|---|---|---|---|
 | `venice-uncensored` | `api` (Venice) | `vllm`, 24B, `vram_gb` 43.9 | `uncensored_gen` | 75 rpm, 3 workers |
-| `deepseek-v3.2` | `api` (Venice) | | `translation` | 20 rpm, 2 workers |
+| `venice-uncensored-fp8` | `vllm`, the same 24B weights, `fp8` on load, `vram_gb` 24.9 | | `uncensored_gen` | |
+| `deepseek-v3.2` | `api` (Venice) | | | 20 rpm, 2 workers; a chat translator, named in a recipe |
+| `translategemma-27b` | `vllm`, `fp8` on load, `hf_config`, `max_model_len` 4096, `vram_gb` 28.4 | | `translation`, `machine_translation` | temperature 0.2, `top_p` 0.95, `top_k` 64 |
 | `olafangensan-glm-4.7-flash-heretic` | `api` (Venice) | | `uncensored_gen` | 20 rpm, 2 workers |
 | `llama-3.2-3b-debug` | `vllm`, 3B, `max_model_len` 384 | | `debug_local` | |
 | `claude-opus-4-6` | `api` (Anthropic) | | `constitution_gen` | 5 rpm, 1 worker, endpoint window |
 | `claude-opus-5-5` | `api` (OpenRouter) | | `constitution_gen` | 600 rpm, 8 workers |
-| `venice-paraphraser` | `vllm`, same weights as `venice-uncensored` | | `paraphraser` | |
+| `venice-paraphraser` | `vllm`, same weights and `fp8` as `venice-uncensored-fp8`, one engine with it | | `paraphraser` | |
 
 `venice-paraphraser` stands in for a trained defingerprinting model, which
 lives in another repository. Register the real one with the `paraphraser`
@@ -759,7 +772,7 @@ The conversation functions, which no recipe runs (`evaluate_conversations`,
 | `input` | `generation/from_constitution/long`, `generation/from_constitution/short`, `quality_check` |
 | `output` | `generation`, `quality_check` |
 | `paraphrase` | `generation`, `check` |
-| `jailbreak` | `scenario_generation`, `persona_scenario_generation`, `jailbreak_construction`, `category_selection`, `benign_generation`, `extract_harmful`, `synonym_substitution`, `rewrite_with_typos`, `translate`, `translate_retry`, `translate_check` |
+| `jailbreak` | `scenario_generation`, `persona_scenario_generation`, `jailbreak_construction`, `category_selection`, `benign_generation`, `extract_harmful`, `synonym_substitution`, `rewrite_with_typos`, `translate`, `translate_retry`, `translate_check`, `translate_mt` (a machine translator's format: one user message, no system prompt; checked at the stage's start), `translate_check_back` |
 | `conversation` | `judge`, `success_judge`, `pair_attacker` |
 | `format_instructions` | `numbered`, `structured_qa` |
 

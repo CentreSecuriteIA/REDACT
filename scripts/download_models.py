@@ -5,22 +5,28 @@
     python scripts/download_models.py --dry-run            # list, download nothing
 
 Reads ``configs/llm/models.json`` through the registry, so a model added there
-is picked up here. Models sharing a checkpoint are downloaded once. Files land
-in the HuggingFace cache (``HF_HOME``), which is where vLLM and transformers
-look for them at load time.
+is picked up here. Models sharing a checkpoint are downloaded once. A
+machine-translation model brings the language identifier its translations are
+checked with. Files land in the HuggingFace cache (``HF_HOME``), which is where
+vLLM, transformers and the identifier look for them at load time.
 """
 
 import argparse
 import sys
 from pathlib import Path
 
+from redact.jailbreak.obfuscation.langid import GLOTLID_FILE, GLOTLID_REPO
+from redact.jailbreak.obfuscation.translation import MACHINE_TRANSLATION_ROLE
 from redact.llms.model_config import MODEL_REGISTRY
 
 _LOCAL_SETUPS = ("vllm", "introspect")
 
+#: Repositories of which one file is fetched, not the whole snapshot.
+FILES = {GLOTLID_REPO: GLOTLID_FILE}
+
 
 def checkpoints(names: list[str] | None = None) -> dict[str, list[str]]:
-    """Map each HF checkpoint to the registered models that load it."""
+    """Map each HF repository to fetch to the registered models that need it."""
     unknown = set(names or ()) - set(MODEL_REGISTRY)
     if unknown:
         raise KeyError(f"Not in the registry: {sorted(unknown)}")
@@ -37,6 +43,8 @@ def checkpoints(names: list[str] | None = None) -> dict[str, list[str]]:
             users = found.setdefault(local.hf_model_id, [])
             if name not in users:
                 users.append(name)
+        if MACHINE_TRANSLATION_ROLE in config.roles:
+            found.setdefault(GLOTLID_REPO, []).append(name)
     return found
 
 
@@ -56,7 +64,7 @@ def main(argv=None) -> int:
         return 0
 
     # Imported after redact, which has loaded .env (HF_HOME, HF_TOKEN) by now.
-    from huggingface_hub import constants, snapshot_download
+    from huggingface_hub import constants, hf_hub_download, snapshot_download
 
     print(f"HF cache: {constants.HF_HUB_CACHE}")
     failed = False
@@ -65,7 +73,10 @@ def main(argv=None) -> int:
         if args.dry_run:
             continue
         try:
-            print(f"  -> {snapshot_download(repo_id)}")
+            if repo_id in FILES:
+                print(f"  -> {hf_hub_download(repo_id, FILES[repo_id])}")
+            else:
+                print(f"  -> {snapshot_download(repo_id)}")
         except Exception as exc:  # noqa: BLE001 - report it and try the next one
             print(f"  FAILED: {exc}")
             failed = True

@@ -9,10 +9,7 @@ import random
 
 from redact.dataset import content_id
 from redact.jailbreak.chain import combine_techniques
-from redact.jailbreak.obfuscation.translation import (
-    _resolve_translate_model,
-    to_swahili,
-)
+from redact.jailbreak.obfuscation.translation import to_swahili
 from redact.jailbreak.units import (
     error_row_of,
     is_pending,
@@ -25,7 +22,7 @@ from redact.llms.backends import ComputeConfig
 from tests.conftest import make_client
 
 GEN = "test-gen"
-TRANS = _resolve_translate_model()
+TRANS = "local-translator"      # unregistered, so a chat translator
 
 
 # --- fake techniques ---------------------------------------------------------

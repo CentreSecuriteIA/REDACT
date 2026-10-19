@@ -378,12 +378,12 @@ def test_co_fitting_paraphrasers_load_with_planned_grants(tmp_path, patched):
             data_dir=tmp_path, target="inputs", paraphraser="distribution",
             paraphrases_per_sample=2, verbose=False,
         )
-        # Pool 72; padded needs 48.89 + 5.33 leave 17.78, so each gets 8.89
-        # on top.
+        # Pool 72; padded needs 27.99 (24.9 GiB at FP8) + 5.33 leave 38.68,
+        # so each gets 19.34 on top.
         assert vllm_module._planned_utilization == {
             vllm_module._engine_key(
-                "dphn/Dolphin-Mistral-24B-Venice-Edition", None, {}): 0.7222,
-            vllm_module._engine_key("org/small", None, {}): 0.1777,
+                "dphn/Dolphin-Mistral-24B-Venice-Edition", "fp8", {}): 0.5916,
+            vllm_module._engine_key("org/small", None, {}): 0.3083,
         }
     finally:
         MODEL_REGISTRY.pop("_para_small", None)
@@ -427,7 +427,7 @@ def test_the_pool_is_planned_with_one_copy_of_each_paraphraser(tmp_path, patched
         assert vllm_module._planned_devices == {
             vllm_module._engine_key("org/small", None, {}): (0,),
             vllm_module._engine_key(
-                "dphn/Dolphin-Mistral-24B-Venice-Edition", None, {}): (1,),
+                "dphn/Dolphin-Mistral-24B-Venice-Edition", "fp8", {}): (1,),
         }
     finally:
         MODEL_REGISTRY.pop("_para_small", None)

@@ -1,0 +1,12 @@
+{
+  "template": "<<<source>>>{source_code}<<<target>>>{target_code}<<<text>>>{text}",
+  "seed_fields": [
+    "source_code",
+    "target_code",
+    "text"
+  ],
+  "metadata": {
+    "version": "1.0",
+    "notes": "The wire format of a machine-translation model (TranslateGemma's, from its model card): one user message, ISO 639-1 codes, no system prompt; its chat template raises on anything else. The back-translation renders the two codes swapped."
+  }
+}

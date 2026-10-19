@@ -207,7 +207,7 @@ def test_the_switch_admits_the_whole_family_when_no_list_names_one_of_it():
     assert _languages(pool) == every
 
 
-def test_the_eval_pool_is_the_37_pinned_techniques_in_10_families():
+def test_the_eval_pool_is_the_36_pinned_techniques_in_10_families():
     """``eval.json`` allows whole families, so a technique added to one of
     them joins the eval pool unless ``eval.json`` denies it. This fails until
     the owner decides, in ``eval.json`` and ``fixtures/eval_pool.json``."""
@@ -216,12 +216,12 @@ def test_the_eval_pool_is_the_37_pinned_techniques_in_10_families():
     section = load_dataset_type("eval")["augmentations"]
     pool = technique_pool(resolve(section, "adversarial"))
     assert sorted(fn.__name__ for fn in pool) == EVAL_POOL
-    assert len(pool) == 37      # noqa: PLR2004
+    assert len(pool) == 36      # noqa: PLR2004
     assert {fn.families[0] for fn in pool} == {
         "translation", "encode", "fsh", "dap", "framing", "structural",
         "ascii_art", "continuation", "temporal", "answer_format"}
     assert sorted(_languages(pool)) == sorted([
-        "to_swahili", "to_thai", "to_khmer", "to_maori", "to_nepali", "to_zulu",
+        "to_swahili", "to_thai", "to_khmer", "to_nepali", "to_zulu",
         "to_scots_gaelic", "to_bengali", "to_javanese"])
     assert sorted(fn.__name__ for fn in _in("encode", pool)) == sorted([
         "to_base64", "to_unicode_escape", "to_ascii_ordinal", "to_morse",

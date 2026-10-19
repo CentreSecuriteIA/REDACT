@@ -1458,7 +1458,7 @@ def test_translation_is_planned_when_a_kind_switches_it_on(kind):
     from redact.driver import _stage_models
 
     on = {kind: {"translation": True}}
-    assert "deepseek-v3.2" in _stage_models(_models(), ["jailbreaks"], on)
+    assert "translategemma-27b" in _stage_models(_models(), ["jailbreaks"], on)
     assert _stage_models(_models(), ["jailbreaks"], _section(None)) == [
         "venice-uncensored"]
 
@@ -1494,7 +1494,7 @@ def test_the_object_form_is_read_per_model():
 @pytest.mark.parametrize("models,serving", [
     ({"gen": {"backend_type": "vllm"}},
      {"venice-uncensored": {"backend_type": "vllm"}}),
-    ({"translation": {"workers": 1}}, {"deepseek-v3.2": {"workers": 1}}),
+    ({"translation": {"copies": 1}}, {"translategemma-27b": {"copies": 1}}),
     ({"paraphraser": {"copies": 1}}, {"venice-paraphraser": {"copies": 1}}),
     # check without a name is the generation model.
     ({"gen": "llama-3.2-3b-debug", "check": {"copies": 1}},
@@ -2018,10 +2018,10 @@ def test_stage_models_follow_the_order_the_stages_run():
         "claude-opus-4-6",        # constitution
         "venice-uncensored",      # inputs: gen, and check falls back to it
         "venice-paraphraser",     # paraphrase
-        "deepseek-v3.2",          # jailbreaks: translation
+        "translategemma-27b",     # jailbreaks: translation
     ]
     assert _stage_models(_models(), ["jailbreaks", "paraphrase"], translating) == [
-        "venice-uncensored", "deepseek-v3.2", "venice-paraphraser",
+        "venice-uncensored", "translategemma-27b", "venice-paraphraser",
     ]
     # Translation is off by default.
     assert _stage_models(_models(), ["jailbreaks"], {}) == ["venice-uncensored"]
@@ -2046,7 +2046,7 @@ def test_translation_is_not_planned_when_the_recipe_excludes_it(augmentations):
     from redact.driver import _stage_models
 
     assert _stage_models(_models(), ["jailbreaks"], augmentations) == ["venice-uncensored"]
-    assert "deepseek-v3.2" in _stage_models(
+    assert "translategemma-27b" in _stage_models(
         _models(), ["jailbreaks"], {"include_translation": True})
 
 
@@ -2319,8 +2319,9 @@ def test_recipe_copies_reach_the_planner_by_model_name(
 def test_recipe_copies_reach_the_planner_for_a_roles_default_model(
         tmp_path, monkeypatch):
     models = {"gen": {"backend_type": "vllm", "copies": 2},
-              "translation": {"workers": 1}}
-    assert _planned_copies(tmp_path, monkeypatch, models) == {"venice-uncensored": 2}
+              "translation": {"copies": 1}}
+    assert _planned_copies(tmp_path, monkeypatch, models) == {
+        "venice-uncensored": 2, "translategemma-27b": 1}
 
 
 @pytest.mark.parametrize("gen,planned", [
