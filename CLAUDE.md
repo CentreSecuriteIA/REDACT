@@ -72,6 +72,7 @@ REDACT/
 │       │   ├── inputs.py            # InputPipeline.run_from_constitution: k units of one sample per entry, each dealt a spec
 │       │   ├── outputs.py           # run_output_generation: one checked response per input row, each dealt a response spec
 │       │   ├── axes.py              # The generation axes: resolve, varied, deal_specs, deal_weights, render_spec, spec_columns, write_stage_coverage, warn_unshown
+│       │   ├── modes.py             # MODES, DEFAULT_MODES, resolve_modes, response_label, deal_modes: the answer modes of the outputs stage
 │       │   ├── paraphrase.py        # paraphrase_pool, run_paraphrase_target, paraphrase_batch
 │       │   ├── checker.py           # build_quality_checker, build_output_quality_checker, build_paraphrase_checker
 │       │   ├── feedback.py          # Run-time prompt text: rejection feedback
