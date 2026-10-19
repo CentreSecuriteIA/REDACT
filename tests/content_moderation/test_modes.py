@@ -159,3 +159,30 @@ class TestTheDeal:
         modes = M.resolve_modes({"harmful": ["helpful", "harmful"]})
         units = _units(4, group=("Cyber", "harmful"), k=2)
         assert Counter(_dealt(units, modes)) == Counter(harmful=4, helpful=4)
+
+
+class TestTheDealItself:
+    """Which unit gets which mode, at seed 42: a change to the deal (its rng
+    seed, its sort, its tie-break) fails here, where every property above
+    would still hold. The deal is made again on every resume and the plan
+    file records no version, so such a change can give a dual-use input of
+    a folder mid-run two answers of one mode."""
+
+    _GROUP = ("Cyber", "dual_use_benign")
+
+    def _deal(self, n, k):
+        return _dealt(_units(n, group=self._GROUP, k=k))
+
+    def test_a_dual_use_pair_at_two_per_input(self):
+        assert self._deal(2, 2) == ["helpful", "harmful", "harmful", "helpful"]
+
+    def test_a_dual_use_pair_at_one_per_input(self):
+        assert self._deal(2, 1) == ["helpful", "harmful"]
+
+    def test_six_dual_use_inputs_at_one_per_input(self):
+        assert self._deal(6, 1) == [
+            "helpful", "harmful", "helpful", "harmful", "harmful", "helpful"]
+
+    def test_three_dual_use_inputs_at_two_per_input(self):
+        assert self._deal(3, 2) == [
+            "helpful", "harmful", "harmful", "helpful", "helpful", "harmful"]

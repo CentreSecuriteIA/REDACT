@@ -494,6 +494,23 @@ class TestTheAnswerModes:
         assert set(rows[rows["entry_type"] == "dual_use_harmful"]["response_label"]
                    ) == {"dual_use_harmful_harmful", "dual_use_harmful_benign"}
 
+    @pytest.mark.parametrize(("k", "dealt"), [
+        (2, {("in-0", 0): "helpful", ("in-0", 1): "harmful",
+             ("in-1", 0): "harmful", ("in-1", 1): "helpful"}),
+        (1, {("in-0", 0): "helpful", ("in-1", 0): "harmful"}),
+    ])
+    def test_the_stage_deals_a_dual_use_pair_these_modes(
+            self, tmp_path, monkeypatch, k, dealt):
+        """Pinned at the default seed: the units the stage builds and the
+        deal they get, planned and written."""
+        _respond(tmp_path, monkeypatch, outputs_per_input=k,
+                 inputs=_questions_of(["dual_use_benign"] * 2))
+        planned = Manifest.sidecar(paths.output_responses_csv(tmp_path)).load()
+        assert {(r["input_id"], r["iteration"]): r["mode"] for r in planned} == dealt
+        rows = _written(tmp_path)
+        assert dict(zip(zip(rows["input_id"], rows["iteration"]),
+                        rows["response_mode"], strict=True)) == dealt
+
     def test_a_resume_makes_no_call_and_keeps_the_modes_and_specs(
             self, tmp_path, monkeypatch):
         inputs = _questions_of(["dual_use_benign"] * 4)
