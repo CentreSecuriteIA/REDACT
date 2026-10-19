@@ -20,10 +20,12 @@ label: the input's entry type and the mode's output label, as
 - The accepted inputs of the run (`dataset.merge_inputs(data_dir)`), or a
   frame passed as `inputs=`. The text is the `sample` column, else `prompt`.
   Each row's `category`, `subcategory` and `entry_type` are read when
-  present (default `unknown`, empty, `harmful`; a missing, NaN or empty
-  `entry_type` cell is `harmful` too). An entry type that `outputs.modes`
-  does not map raises before anything is cleared, naming it and
-  `outputs.modes`.
+  present (default `unknown`, empty, `harmful`). A frame without an
+  `entry_type` column is answered as `harmful` inputs, with a WARNING. A
+  missing, NaN or empty cell in the column raises before anything is
+  cleared, naming the count and the first ids: the entry type picks the
+  modes and labels the responses, so it is never guessed. So does an entry
+  type that `outputs.modes` does not map, naming it and `outputs.modes`.
 - With no input file at all the front raises `No input samples found`. With
   files but no accepted row, or an empty `inputs=` frame, it warns
   `outputs skipped: no input sample was accepted, ...`, writes nothing and

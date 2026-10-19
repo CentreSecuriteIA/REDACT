@@ -1821,7 +1821,8 @@ def test_a_training_run_reads_the_inputs_it_seeded(tmp_path, monkeypatch):
         lambda client, texts, checker, **kw: [(True, "") for _ in texts])
     monkeypatch.setattr("redact.llms.resources.estimate._load_config", lambda _id: None)
     write_inputs(paths.constitution_inputs_dir(tmp_path),
-                 [f"prompt number {i} about a topic" for i in range(3)])
+                 [f"prompt number {i} about a topic" for i in range(3)],
+                 extra={"entry_type": "harmful"})
     recipe = {
         "dataset_type": "training",
         "data_dir": str(tmp_path),

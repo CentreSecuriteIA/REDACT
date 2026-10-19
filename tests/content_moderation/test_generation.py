@@ -429,16 +429,43 @@ class TestTheAnswerModes:
         assert {p.name: p.read_bytes() for p in out.parent.iterdir()
                 if p.suffix != ".lock"} == files
 
-    @pytest.mark.parametrize("cell", [float("nan"), None, ""])
-    def test_an_input_without_an_entry_type_is_harmful(
+    @pytest.mark.parametrize("cell", [float("nan"), None, "", "  "])
+    def test_an_input_without_an_entry_type_raises_before_anything_is_cleared(
             self, tmp_path, monkeypatch, cell):
-        inputs = _questions_of(["benign", "benign"]).astype({"entry_type": object})
+        """A mode and a label are never guessed for it."""
+        _respond(tmp_path, monkeypatch)
+        out = paths.output_responses_csv(tmp_path)
+        files = {p.name: p.read_bytes() for p in out.parent.iterdir()
+                 if p.suffix != ".lock"}
+        inputs = _questions_of(["benign"] * 3).astype({"entry_type": object})
         inputs.loc[1, "entry_type"] = cell
+        inputs.loc[2, "entry_type"] = cell
+        with pytest.raises(ValueError) as raised:
+            _respond(tmp_path, monkeypatch, inputs=inputs, resume=False)
+        message = str(raised.value)
+        assert "2 input(s) have no entry type" in message
+        assert "['in-1', 'in-2']" in message
+        assert {p.name: p.read_bytes() for p in out.parent.iterdir()
+                if p.suffix != ".lock"} == files
+
+    def test_a_frame_without_an_entry_type_column_is_harmful_with_a_warning(
+            self, tmp_path, monkeypatch, caplog):
+        inputs = _questions_of(["benign"] * 2).drop(columns="entry_type")
+        with caplog.at_level(logging.WARNING):
+            _respond(tmp_path, monkeypatch, inputs=inputs)
+        rows = _written(tmp_path)
+        assert set(rows["entry_type"]) == {"harmful"}
+        assert set(rows["response_label"]) == {"harmful_harmful"}
+        assert "no entry_type column" in caplog.text
+
+    def test_an_entry_type_member_is_read_as_its_value(self, tmp_path, monkeypatch):
+        from redact.types import EntryType
+
+        inputs = _questions_of([EntryType.BENIGN, EntryType.HARMFUL])
         _respond(tmp_path, monkeypatch, inputs=inputs)
         rows = _written(tmp_path).set_index("input_id")
-        assert rows.loc["in-1", ["entry_type", "response_mode", "response_label"]
-                        ].tolist() == ["harmful", "harmful", "harmful_harmful"]
-        assert rows.loc["in-0", "response_label"] == "benign_benign"
+        assert rows.loc[["in-0", "in-1"], "response_label"].tolist() == [
+            "benign_benign", "harmful_harmful"]
 
     # --- k responses per input ---------------------------------------------
 

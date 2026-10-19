@@ -59,8 +59,11 @@ _MODE_COLUMNS = ("iteration", "response_mode", "output_label", "response_label")
 # A unit's key in the ledger and the manifest.
 _KEY = ("input_id", "iteration")
 
-# The entry type of an input without one.
+# The entry type of every input of a frame without an entry_type column.
 _DEFAULT_ENTRY_TYPE = "harmful"
+
+# How many input ids an error names.
+_NAMED = 5
 
 #: The fewest characters a checked response holds once its code-fence marker
 #: lines are removed; a shorter one is rejected without a check call.
@@ -80,12 +83,40 @@ def _too_short(text: str) -> str:
 
 
 def _entry_type(cell) -> str:
-    """An input's entry type: :data:`_DEFAULT_ENTRY_TYPE` for a missing, NaN
-    or empty cell."""
+    """An input's entry type as text (an ``EntryType`` member as its value);
+    ``""`` for a missing, NaN or empty cell."""
+    cell = getattr(cell, "value", cell)
     if cell is None or (pd.api.types.is_scalar(cell) and pd.isna(cell)):
-        return _DEFAULT_ENTRY_TYPE
+        return ""
     text = str(cell)
-    return text if text.strip() else _DEFAULT_ENTRY_TYPE
+    return text if text.strip() else ""
+
+
+def _entry_types(inputs: pd.DataFrame, sids: list[str]) -> list[str]:
+    """Each input's entry type, checked before anything is cleared.
+
+    A frame without an ``entry_type`` column answers every input as
+    :data:`_DEFAULT_ENTRY_TYPE`, with a WARNING.
+
+    Raises:
+        ValueError: A missing, NaN or empty cell in the column, naming the
+            count and the first ids: a mode and a label are never guessed.
+    """
+    if "entry_type" not in inputs.columns:
+        logger.warning(
+            "Outputs: the inputs have no entry_type column: every input is "
+            "answered in the modes of %r and labelled as one.", _DEFAULT_ENTRY_TYPE)
+        return [_DEFAULT_ENTRY_TYPE] * len(inputs)
+    entry_types = [_entry_type(cell) for cell in inputs["entry_type"]]
+    blank = [sid for sid, entry_type in zip(sids, entry_types, strict=True)
+             if not entry_type]
+    if blank:
+        raise ValueError(
+            f"Outputs: {len(blank)} input(s) have no entry type (a missing, NaN "
+            f"or empty entry_type cell), first {blank[:_NAMED]}: an input's entry "
+            "type picks its answer modes and labels its responses, so none is "
+            "guessed. Give each one of the entry types outputs.modes maps.")
+    return entry_types
 
 
 _REMEDY = ('Start the stage over with resume=False (a recipe\'s "resume": '
@@ -162,8 +193,9 @@ def run_output_generation(
     of each. The mode picks the generation prompt
     ``output/generation/<mode>`` and the checker ``output/quality_check/<mode>``,
     and gives the row ``response_mode``, ``output_label`` (``harmful`` or
-    ``benign``) and ``response_label``, ``<entry_type>_<output_label>``. An
-    input without an entry type is ``harmful``.
+    ``benign``) and ``response_label``, ``<entry_type>_<output_label>``. A
+    frame without an ``entry_type`` column is answered as ``harmful`` inputs,
+    with a WARNING; a missing, NaN or empty cell in the column raises.
 
     Each row is a ``llm_pipeline.checked`` unit. With the checker on, a
     response with fewer than :data:`MIN_RESPONSE_CHARS` characters once its
@@ -203,8 +235,8 @@ def run_output_generation(
 
     Raises:
         ValueError: ``outputs_per_input`` is not a whole number of at least
-            1, or an input's entry type is one ``modes`` does not map, raised
-            before anything is cleared; a resume whose ``seed``,
+            1, or an input has no entry type or one ``modes`` does not map,
+            raised before anything is cleared; a resume whose ``seed``,
             ``outputs_per_input``, ``modes`` or axes' weights differ from
             those of the plan file, or onto a folder of an earlier shape.
     """
@@ -226,8 +258,8 @@ def run_output_generation(
     rows = [row for _, row in inputs.iterrows()]
     # Stable per-input id (content-hash) for resume — matches the jailbreak id.
     sids = [str(sid) for sid in row_ids(inputs, text_col)]
-    groups = [(str(row.get("category", "unknown")), _entry_type(row.get("entry_type")))
-              for row in rows]
+    groups = list(zip((str(row.get("category", "unknown")) for row in rows),
+                      _entry_types(inputs, sids), strict=True))
     unknown = sorted({entry_type for _, entry_type in groups} - set(modes))
     if unknown:
         raise ValueError(
