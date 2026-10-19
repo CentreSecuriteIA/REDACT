@@ -10,7 +10,7 @@ Augment the accepted inputs with technique combinations, in two kinds:
 | Kind | Writes | Default |
 |---|---|---|
 | `adversarial` | `Datasets/jailbreaks.csv`: jailbreak attacks | one round per input, by budget, from every technique but `translation` and `casual_writing` |
-| `natural` | `Datasets/variations.csv`: natural variations | one technique per input, from the natural allow lists |
+| `natural` | `Datasets/variations.csv`: natural variations | one technique per input, from the natural allow lists, of the 46 techniques the spec marks natural ([techniques.md](../techniques.md#the-natural-pool)) |
 
 These are the packaged defaults, which a `training` run takes: both kinds
 are on. An `eval` run's dataset type attacks the harmful inputs only, with
@@ -151,7 +151,28 @@ Each kind resumes on its own, from its ledger, with the lock and cut-back of
 [internals/dataset.md](../internals/dataset.md).
 
 The plan is frozen. A resumed kind reuses its manifest and runs the planned
-units its ledger does not record. A resume whose `seed`, pool, `rounds`,
+units its ledger does not record. Since the plan deals each family's
+techniques evenly, follows the persona and cognitive vs impersonation rule
+([techniques.md](../techniques.md#compatibility-rules)), and counts
+the request obfuscation (when `allow_request_obfuscation` is on, as in the
+escalation's rounds 3 and 4) against `max_obfuscations`, a fresh plan with
+the same seed draws differently from one made before; a kept plan replays
+unchanged. The
+natural kind's pool is now what the spec's `kinds` mark natural, so a
+natural plan made before raises on resume (its pool changed): run the
+natural kind with `resume=False`. The build leaves out the benign and
+dual-use benign variations such a plan made with a technique the natural
+kind no longer draws ([build.md](build.md#training-mode)). The
+5,000-character cap on `to_ascii_art` holds wherever it is drawn, the eval
+type's pool included, and changes the text a seed draws: the font changes for some
+texts from about 40 characters and for most from about 90, a text of about
+830 characters or more is rejected where it used to be drawn, and so are
+most inputs a `heavy` encoding lengthened first
+([techniques.md](../techniques.md#what-the-families-do) has the figures).
+A plan kept across this change mixes rows drawn without the cap, saved
+before, and rows drawn with it, run after: a replayed plan gives the same
+text only within one version of the library. Nothing flags it; run the
+kind with `resume=False` for one rendering. A resume whose `seed`, pool, `rounds`,
 `family_weights` or `layer_rates` differ from those in the kind's
 `.plan.json` raises a `ValueError` that names them and `resume=False`; a
 plan without that file runs as it was made, with a WARNING. A changed
@@ -168,7 +189,7 @@ says how to plan one kind again and keep the other).
 
 | Case | Row |
 |---|---|
-| A technique rejects its result: a translation that fails its check in all 4 rounds, a malformed word list, a text no ASCII-art font draws whole, an empty reply or text | `jailbreak` holds the text before that technique; `accepted` false; `reasoning` and `technique_info` start with `DISCARDED; technique=<name>` |
+| A technique rejects its result: a translation that fails its check in all 4 rounds, a malformed word list, no word marked for a heavy word encoding, a scenario reply without its scene 3 times, a text no ASCII-art font draws whole or within its cap, an empty reply or text | `jailbreak` holds the text before that technique; `accepted` false; `reasoning` and `technique_info` start with `DISCARDED; technique=<name>` |
 | A natural variation leaves the text unchanged | `accepted` false; `reasoning` `unchanged: the text is its input's`. An adversarial row that changes nothing stays accepted, with `is_noop` true; its `sample_id` is its input's, so the build leaves it out |
 | A technique raises, or a prompt is too long for a model on the async lane (an OpenAI-compatible endpoint or vLLM) | An error row: the input text, `accepted` false, `technique_info` `ERROR: <message>`, `reasoning` the message |
 | A call fails (a provider error, or a prompt too long on the grouped path: Anthropic, introspection) | The stage stops; saved units stay saved |

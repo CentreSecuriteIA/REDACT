@@ -54,7 +54,7 @@ types: a recipe naming one stops when it loads, before any stage runs.
 | | `training.json` | `eval.json` |
 |---|---|---|
 | `stages` | `constitution`, `inputs`, `outputs`, `paraphrase`, `jailbreaks`, `build` | the same |
-| `params` | `constitution`: `include_general_benign` true, `general_benign_categories` 10 | the same, and `constitution.entry_types` and `inputs.entry_types` `["harmful", "benign"]`; `inputs.axes` pins `directness` at `explicit`; `jailbreaks.seed` 43 |
+| `params` | `constitution`: `include_general_benign` true, `general_benign_categories` 10; `inputs.axes_weighting` `"log"` | `constitution` the same, and `constitution.entry_types` and `inputs.entry_types` `["harmful", "benign"]`; `inputs.axes` pins `directness` at `explicit`, and the inputs keep the table's weighting; `jailbreaks.seed` 43 |
 | `augmentations` | none: the packaged default | the adversarial kind below; `natural` off |
 
 The eval adversarial kind attacks the harmful inputs only, with a pool of
@@ -71,9 +71,10 @@ with `allow_request_obfuscation` false.
 Every eval input is explicit (`inputs.axes`: `{"directness": {"explicit": 1,
 "implicit": 0, "euphemistic": 0}}`): an implicit or euphemistic request is
 borderline by construction, and eval keeps the clear ends. The other axes
-keep their packaged weights, so eval covers them as training does. A params
-file's `inputs.axes` replaces the type's whole entry, so to change another
-axis of an eval run, write the directness pin again beside it.
+keep the table's weights, where training spreads its inputs more evenly over
+the values ([log weighting](#log-weighting)). A params file's `inputs.axes`
+replaces the type's whole entry, so to change another axis of an eval run,
+write the directness pin again beside it.
 
 A recipe changes one thing by giving it; the rest of the type stays. For
 example, an eval run with another stage list and a lighter translation share:
@@ -114,10 +115,11 @@ models, `data_dir`, `prompt_dir`, `taxonomy`, `taxonomy_dir`,
 `benign_taxonomy`, `config_dir`, `resume`, `verbose`, the inputs stage's
 `constitution_df`, the jailbreak stage's `augmentation`, the build's `mode`,
 `read_back`). Parameters that take a DataFrame (`inputs`, `outputs`) cannot
-be written in JSON. The `axes` and `seed` of `inputs` and `outputs` are
-checked when the params load (a params file's and a dataset type's): an
-unknown axis or value, a weight below 0, or a seed that is not a whole
-number raises, read against the `config_dir`'s axes table when it has one.
+be written in JSON. The `axes`, `axes_weighting` and `seed` of `inputs`
+and `outputs` are checked when the params load (a params file's and a
+dataset type's): an unknown axis or value, a weight below 0, a weighting
+other than `"table"` or `"log"`, or a seed that is not a whole number
+raises, read against the `config_dir`'s axes table when it has one.
 
 ### `constitution`
 
@@ -141,6 +143,7 @@ names of the last two, are read for this release with a
 | `samples_per_entry` | `3` | Samples per constitution entry: that many units, one sample per call |
 | `entry_types` | `null` | Use only the constitution entries of these entry types |
 | `axes` | `null`: the table's | The [generation axes](#the-generation-axes) each unit is dealt a value of: `{axis: {value: weight}}` over the table's `inputs` section, an axis as `null` to leave it out; `false` for none. The `eval` type pins `directness` |
+| `axes_weighting` | `"table"`; `"log"` in the `training` type | How the axes' weights are dealt: `"table"` as they are, `"log"` spread more evenly over each axis's values ([log weighting](#log-weighting)) |
 | `seed` | `42` | The seed of the deal |
 | `batch_size` | `32` | Requests per grouped call; the stage keeps twice as many units live, or the widest async lane when larger |
 | `max_attempts` | `3` | Generations of a unit before a reply without its `[END]` marker, or with another number of samples than one, is given up |
@@ -155,6 +158,7 @@ names of the last two, are read for this release with a
 | `max_per_category` | `null` | Keep the first N inputs per `(category, entry_type)` |
 | `max_samples` | `null` | Keep the first N inputs overall, after `max_per_category` |
 | `axes` | `null`: the table's | The response axes each input row is dealt a value of, over the table's `outputs` section, as for `inputs` |
+| `axes_weighting` | `"table"` | As for `inputs`; neither type sets it |
 | `seed` | `42` | The seed of the deal |
 | `batch_size` | `32` | Requests per grouped call; units live as for `inputs` |
 | `check_max_tokens` | `null` | Reply limit of a check call |
@@ -208,10 +212,12 @@ stage reads `Datasets/output_responses.csv` from its default place.
 `configs/generation_axes.json` says what each input sample (`inputs`) and
 each response (`outputs`) is asked to look like. Each stage deals one spec
 per call, a value of each axis, evenly over each `(category, entry_type)`
-group at the table's weights ([inputs](stages/inputs.md#the-generation-axes),
+group at the table's weights, or [log-weighted](#log-weighting)
+([inputs](stages/inputs.md#the-generation-axes),
 [outputs](stages/outputs.md#unit-and-ledger-key)); the prompt shows it in
 `{sample_spec}` or `{response_spec}`, and the row records it in a column per
-axis.
+axis. Paraphrase rows carry no axis columns, by design: a paraphrase's
+`input_id` names the row whose spec it rewords.
 
 | Stage | Axis | Values (weight) |
 |---|---|---|
@@ -243,6 +249,29 @@ only: change a label or a hint in your own copy of the file
 records its `seed` and weights, so a resume with others raises, naming
 `resume=False`.
 
+### Log weighting
+
+`axes_weighting` `"log"` spreads a stage's deal more evenly over each axis's
+values: after the `axes` overlay, each value of weight w above 0 is weighted
+1 + ln(w / m), m the axis's least weight above 0, normalised per axis. The
+values keep their order, and none is as common or as rare as the table makes
+it. A weight of 0 stays 0, and an axis with one value above 0 (a pinned one,
+such as eval's `directness`) is unchanged, so the same axes vary and the
+[dimension check](#dimensions-and-the-runs-check) sees them as the stage
+deals them. The `training` type sets it on `inputs`, to spread training data
+more evenly over the axis values; `eval`, and both types' `outputs`, keep
+`"table"`. The plan file records the weights dealt, so a resume with another
+weighting raises as another weight does. The packaged inputs, log-weighted:
+
+| Axis | Values (weight) |
+|---|---|
+| `length` | `fragment` .190, `one_liner` .252, `short` .252, `long` .216, `very_long` .090 |
+| `register` | `casual` .290, `neutral` .271, `formal` .181, `technical` .129, `emotional` .129 |
+| `writer` | `anonymous` .166, then .060 each of the 14 roles |
+| `framing` | `direct_request` .272, `question` .258, `advice` .221, `statement` .157, `opinion_or_validation` .092 |
+| `directness` | `explicit` .461, `implicit` .339, `euphemistic` .200 |
+| `focus` | unchanged: `single` .75, `mixed` 0 |
+
 ### Dimensions and the run's check
 
 `configs/dimensions.json` names the dimensions a text varies along, each on
@@ -269,7 +298,10 @@ kind. A pinned axis varies nothing, so the eval type's `directness` passes.
 The shipped table has one such pair: `focus` is undecided against
 `request_shape`, `container` and `example_priming`, so `mixed` is at 0 and
 every sample is `single`; a params weight on `mixed` stops a run whose kinds
-draw those families.
+draw those families. `authorship` (the `writer` axis) and `role_framing` are
+ruled distinct: who writes a message is not a role or scenario the message
+sets up, so the writer axis varies beside the persona, framing, cognitive and
+impersonation families (`tests/test_dimensions.py` records the ruling).
 
 ## The augmentation section
 
@@ -291,6 +323,32 @@ A resumed run keeps each kind's plan: a changed pool, `rounds`,
 `family_weights`, `layer_rates` or `seed` raises an error that names them
 and `resume=False` ([stages/jailbreaks.md](stages/jailbreaks.md#how-it-resumes)).
 
+**Release note: the natural pool.** The natural kind now draws only what
+the spec's `kinds` mark natural (46 techniques by default; `structural`,
+`continuation`, `temporal`, the high and insane typos and the dialogue and
+story answer formats left it). A natural-kind plan made before raises on
+resume, since its pool changed: run the natural kind with `resume=False`.
+A training build leaves out the benign and dual-use benign variations such
+a plan made with a technique the natural kind no longer draws, with one
+WARNING that counts them.
+
+**Release note: the ASCII-art cap.** `to_ascii_art` keeps a drawing of at
+most 5,000 characters wherever it is drawn, the eval type's pool included,
+and draws the font from the fonts that fit. This changes the text it gives,
+not only what it rejects. A text every font draws within the cap (up to
+about 38 characters) draws as before. Over that the same seed draws another
+font for some texts from about 40 characters and for most from about 90:
+of the 12 fonts that have a typical text's glyphs, 11 fit at 50 characters,
+9 to 11 at 75, 9 at 100, 6 at 150, 2 or 3 at 200 to 300, 1 at 400 to 800
+and none from about 830. A text of about 830 characters or more is rejected
+where it used to be drawn, and so are most inputs an encoding lengthened
+first (unicode escapes from about 140 characters, ASCII ordinals from about
+230, morse from about 250). A kept plan resumed across the change, an eval
+plan included, mixes drawings made with and without the cap, since a
+replayed plan gives the same text only within one version of the library;
+run the adversarial kind with `resume=False` for one rendering.
+[techniques.md](techniques.md#what-the-families-do) has the figures.
+
 ### Keys
 
 Both kinds:
@@ -301,7 +359,7 @@ Both kinds:
 | `translation` | bool | `false`; `true` in the eval type's adversarial kind | Whether the kind draws the `translation` family. The family lists do not change it; `layers.deny`, `techniques.deny` and `pure_only` still apply |
 | `layers` | `{"deny": [...]}` | `{"deny": []}` | Layers left out |
 | `families` | `{"allow": [...] or null, "deny": [...]}` | adversarial: `{"allow": null, "deny": []}`; natural: the natural families | Families admitted and removed |
-| `techniques` | `{"allow": [...] or null, "deny": [...]}` | adversarial: `{"allow": null, "deny": []}`; natural: three techniques allowed, three denied | Techniques admitted and removed |
+| `techniques` | `{"allow": [...] or null, "deny": [...]}` | adversarial: `{"allow": null, "deny": []}`; natural: three techniques allowed, three denied | Techniques admitted and removed. Either `allow` names only what the spec's `kinds` let the kind draw |
 | `pure_only` | bool | `false` | Drop every technique that calls a model or needs benign data |
 | `family_weights` | `{family: number > 0}` | `{}` | A family's share within its layer when the plan deals families; 1 each by default |
 | `iterations` | int >= 1 | `1` | Units per input, numbered by `iteration` |
@@ -312,9 +370,9 @@ Adversarial only:
 |---|---|---|---|
 | `rounds` | `null`, `"escalation"` or a list | `null` | The sampler settings per round; see [rounds](#rounds) |
 | `max_complexity` | int >= 0 | `6` | Budget mode: the most total complexity (each technique scores 0 to 3) |
-| `max_obfuscations` | int >= 0 | `2` | Budget mode: the most obfuscation families |
-| `layer_rates` | `{layer: 0..1}` | `{}`, the spec's rates | Target share of units that take a `hacking`, `manipulation` or `requests` technique, and the chance of `request_obfuscation` |
-| `allow_request_obfuscation` | bool | `false` | Allow one more technique after the request technique, at the `request_obfuscation` rate: a light `encode` technique (the light `to_sensitive_words_encode_*` among them), or a translation when the pool has one. It must fit the remaining complexity and is not counted against `max_obfuscations` |
+| `max_obfuscations` | int >= 0 | `2` | Budget mode: the most obfuscation families, the request obfuscation included |
+| `layer_rates` | `{layer: 0..1}` | `{}`, the spec's rates | Target share of units that take a `hacking`, `manipulation` or `requests` technique, or, with `allow_request_obfuscation`, a `request_obfuscation` |
+| `allow_request_obfuscation` | bool | `false` | Allow one more technique after the request technique, at the `request_obfuscation` rate: a light `encode` technique (the light `to_sensitive_words_encode_*` among them), or a translation when the pool has one. It is drawn before the other obfuscations, from what the earlier picks leave, and takes one of the `max_obfuscations` slots and its complexity from them; with `max_obfuscations` 0 there is none |
 
 Natural only:
 
@@ -323,12 +381,13 @@ Natural only:
 | `exact_techniques` | int >= 1 | `1` | Techniques per variation |
 
 The packaged natural kind allows the families `typos`, `casual_writing`,
-`structural`, `answer_language`, `answer_format`, `asking`, `indirect`,
-`temporal`, `continuation`; allows the techniques `to_leetspeak_basic`,
-`to_adversarial_suffix_punctuation`, `to_adversarial_suffix_emoji`; and
-denies `to_refusal_then_comply`, `to_apology_prevention`,
-`to_prefix_injection`. A variation that leaves its input unchanged is
-rejected.
+`answer_language`, `answer_format`, `asking`, `indirect`; allows the
+techniques `to_leetspeak_basic`, `to_adversarial_suffix_punctuation`,
+`to_adversarial_suffix_emoji`; and denies `to_refusal_then_comply`,
+`to_apology_prevention`, `to_prefix_injection`. The spec's `kinds` narrow
+it further (step 6 below): its pool is 46 techniques
+([techniques.md](techniques.md#the-natural-pool)). A variation that leaves
+its input unchanged is rejected.
 
 ### How a kind's pool is built
 
@@ -343,7 +402,13 @@ From every registered technique, in this order:
    `translation` when the switch is off;
 4. remove the techniques in `techniques.deny`;
 5. with `pure_only`, remove every technique tagged `requires_llm` or
-   `requires_benign`.
+   `requires_benign`;
+6. keep only the techniques whose `kinds` in `combination_spec.json` hold
+   the kind: a technique's own, else its first family's, and
+   `["adversarial"]` for a family without any. So the natural kind draws
+   only what the spec marks natural ([extending.md](extending.md#add-a-jailbreak-technique)
+   says how to mark a technique). Every technique holds `adversarial`
+   today, so this step leaves the attacks' pool as it is.
 
 [techniques.md](techniques.md) lists every layer, family and technique name.
 
@@ -360,6 +425,12 @@ From every registered technique, in this order:
 - An `allow` list may not be empty: write `null` for all, or name what to
   leave out under `deny`. A name may not be under both.
 - The natural kind needs an allow list.
+- An allow list may name only families and techniques whose spec `kinds`
+  hold the kind. A natural allow list naming one the natural kind does not
+  draw (`structural`, `temporal`, `continuation`, `to_prefix_injection`,
+  ...) raises, naming it: a `config_dir` copy of `augmentations.json` made
+  before these left the natural kind does, so take them out of its
+  `families.allow`.
 - `natural_only_families`, at the top of `augmentations.json`
   (`casual_writing` in the packaged file), are added to the adversarial `families.deny` unless the
   adversarial `families.allow` names them.
@@ -368,7 +439,8 @@ From every registered technique, in this order:
 
 `"translation": false` keeps the `translation` family out of a kind, and
 `true` puts it in: the attacks draw it as any family, and the natural kind
-adds it to its allow list. No family list changes this; a
+adds it to its allow list (the spec marks the family natural). No family
+list changes this; a
 `techniques.deny` still removes the languages it names, and a
 `techniques.allow` that names some languages narrows the family to those
 (the eval type's nine low-resource languages).
@@ -429,13 +501,16 @@ rather than drawing each unit alone. In budget mode each of the `hacking`,
 to its rate: `layer_rates` over the spec's (hacking 0.5, manipulation 0.33,
 requests 0.7, request_obfuscation 0.5). Within a layer, families are dealt by
 count over `family_weights`, so `{"persona": 2}` gives `persona` twice the
-share of each other hacking family. `family_weights` may name only families
-the kind's pool draws. [internals/jailbreak.md](internals/jailbreak.md#balanced-dealing)
+share of each other hacking family; within a family, its techniques are
+dealt evenly among those a unit may take (the complexity budget still
+favours a family's cheaper techniques). `family_weights` may name only
+families the kind's pool draws. [internals/jailbreak.md](internals/jailbreak.md#balanced-dealing)
 explains the dealing.
 
 `hacking` and `manipulation` exclude each other, so their rates should sum to
 at most 1; beyond it, `manipulation` falls short of its rate and the plan
-logs a WARNING. `request_obfuscation` is a chance per unit, not dealt.
+logs a WARNING. With `allow_request_obfuscation`, `request_obfuscation` is
+dealt the same way, over the group's units.
 
 ### Examples
 
@@ -710,7 +785,7 @@ values. Delete every file you do not change, then set `prompt_dir`.
 | File | Holds | Read by |
 |---|---|---|
 | `configs/llm/gpu_pricing.json` | Provider, then GPU name as `nvidia-smi` reports it, then hourly USD per GPU; `*` is a provider's fallback | the cost roll-up |
-| `configs/jailbreak/combination_spec.json` | `version`, `layer_order`, `layer_rates`, `layer_max_picks`, `families` (layer, order within the layer, incompatibilities, `dimension`; `max_picks` and `description`, which nothing reads), `manipulation_blocked_obfuscation`, `request_obfuscation_allowed_families`, `techniques` (families, complexity, `requires_llm`, `requires_benign`, `encode_weight`, optional `max_tokens`, `cross_incompatible_with`) | `jailbreak/technique.py` (`load_spec`, `tag`), `pool.py`, `rules.py`, `sampling.py`, `chain.py`, `augmentation.py`; its `version` goes in each row and in the jailbreak run record |
+| `configs/jailbreak/combination_spec.json` | `version`, `layer_order`, `layer_rates`, `layer_max_picks`, `families` (layer, order within the layer, incompatibilities, `dimension`, optional `kinds`; a `description`, which nothing reads), `manipulation_blocked_obfuscation`, `request_obfuscation_allowed_families`, `techniques` (families, complexity, `requires_llm`, `requires_benign`, `encode_weight`, optional `max_tokens`, `cross_incompatible_with`, `kinds`) | `jailbreak/technique.py` (`load_spec`, `tag`), `pool.py`, `rules.py`, `sampling.py`, `chain.py`, `augmentation.py`; its `version` goes in each row and in the jailbreak run record |
 | `configs/jailbreak/augmentations.json` | The two default kinds and `natural_only_families` | `jailbreak/augmentation.py` |
 | `configs/jailbreak/<layer>/*_templates.json` | Template variants of the pure techniques | `jailbreak/directives.py: load_templates` |
 | `configs/jailbreak/multi_turn/crescendo_followups.json` | Follow-ups of the crescendo attack | `multiturn_attacks/attacks.py` |

@@ -1,5 +1,5 @@
 {
-  "_comment": "Jailbreak technique compatibility specification. All rules enforced in jailbreak/rules.py.",
+  "_comment": "Jailbreak technique compatibility specification. All rules enforced in jailbreak/rules.py. kinds, on a family or a technique, lists the augmentation kinds that may draw it: absent is [\"adversarial\"], and a technique's own kinds replace its first family's. Read by jailbreak/technique.py (tag) and jailbreak/pool.py.",
 
   "version": "1.0",
 
@@ -25,7 +25,6 @@
       "layer": "obfuscation",
       "dimension": "encoding",
       "within_layer_order": 1,
-      "max_picks": 1,
       "cross_incompatible_with": []
     },
     "tokenbreak": {
@@ -33,23 +32,22 @@
       "layer": "obfuscation",
       "dimension": "encoding",
       "within_layer_order": 2,
-      "max_picks": 1,
       "cross_incompatible_with": []
     },
     "translation": {
       "description": "Full-text translation to a low/mid/high-resource language",
       "layer": "obfuscation",
       "dimension": "language",
+      "kinds": ["adversarial", "natural"],
       "within_layer_order": 3,
-      "max_picks": 1,
       "cross_incompatible_with": ["ascii_art"]
     },
     "typos": {
       "description": "LLM-rewritten prompt with varying typo density",
       "layer": "obfuscation",
       "dimension": "surface_noise",
+      "kinds": ["adversarial", "natural"],
       "within_layer_order": 4,
-      "max_picks": 1,
       "cross_incompatible_with": []
     },
     "suffixes": {
@@ -57,7 +55,6 @@
       "layer": "obfuscation",
       "dimension": "surface_noise",
       "within_layer_order": 5,
-      "max_picks": 1,
       "cross_incompatible_with": []
     },
     "encode": {
@@ -65,7 +62,6 @@
       "layer": "obfuscation",
       "dimension": "encoding",
       "within_layer_order": 6,
-      "max_picks": 1,
       "cross_incompatible_with": []
     },
     "structural": {
@@ -73,7 +69,6 @@
       "layer": "obfuscation",
       "dimension": "container",
       "within_layer_order": 7,
-      "max_picks": 1,
       "cross_incompatible_with": ["ascii_art"]
     },
     "ascii_art": {
@@ -81,15 +76,14 @@
       "layer": "obfuscation",
       "dimension": "encoding",
       "within_layer_order": 8,
-      "max_picks": 1,
       "cross_incompatible_with": ["structural", "translation", "framing", "persona", "cognitive", "fsh", "dap"]
     },
     "casual_writing": {
       "description": "Casing, spacing, punctuation, abbreviations or accents as a person typing quickly writes them",
       "layer": "obfuscation",
       "dimension": "surface_noise",
+      "kinds": ["adversarial", "natural"],
       "within_layer_order": 4.5,
-      "max_picks": 1,
       "cross_incompatible_with": []
     },
     "framing": {
@@ -97,7 +91,6 @@
       "layer": "hacking",
       "dimension": "role_framing",
       "within_layer_order": 0,
-      "max_picks": 1,
       "cross_incompatible_with": ["fsh", "dap"]
     },
     "persona": {
@@ -105,23 +98,20 @@
       "layer": "hacking",
       "dimension": "role_framing",
       "within_layer_order": 0,
-      "max_picks": 1,
-      "cross_incompatible_with": ["fsh", "dap"]
+      "cross_incompatible_with": ["fsh", "dap", "impersonation"]
     },
     "cognitive": {
       "description": "Two-step cognitive/psychological jailbreak construction",
       "layer": "hacking",
       "dimension": "role_framing",
       "within_layer_order": 0,
-      "max_picks": 1,
-      "cross_incompatible_with": ["fsh", "dap"]
+      "cross_incompatible_with": ["fsh", "dap", "impersonation"]
     },
     "fsh": {
       "description": "Few-Shot Hacking: benign Q&A pairs before harmful question",
       "layer": "manipulation",
       "dimension": "example_priming",
       "within_layer_order": 0,
-      "max_picks": 1,
       "cross_incompatible_with": ["continuation", "indirect", "framing", "persona", "cognitive"]
     },
     "dap": {
@@ -129,23 +119,22 @@
       "layer": "manipulation",
       "dimension": "example_priming",
       "within_layer_order": 0,
-      "max_picks": 1,
       "cross_incompatible_with": ["continuation", "indirect", "framing", "persona", "cognitive"]
     },
     "answer_format": {
       "description": "Output-format and response-conditioning directives",
       "layer": "requests",
       "dimension": "answer_shape",
+      "kinds": ["adversarial", "natural"],
       "within_layer_order": 0,
-      "max_picks": 1,
       "cross_incompatible_with": []
     },
     "answer_language": {
       "description": "Ask for the response in a specific language",
       "layer": "requests",
       "dimension": "language",
+      "kinds": ["adversarial", "natural"],
       "within_layer_order": 0,
-      "max_picks": 1,
       "cross_incompatible_with": []
     },
     "continuation": {
@@ -153,23 +142,21 @@
       "layer": "requests",
       "dimension": "request_shape",
       "within_layer_order": 0,
-      "max_picks": 1,
-      "cross_incompatible_with": ["indirect", "fsh", "dap"]
+      "cross_incompatible_with": ["fsh", "dap"]
     },
     "indirect": {
       "description": "Embed harmful request inside a legitimate task (summarize, proofread, etc.)",
       "layer": "requests",
       "dimension": "request_shape",
+      "kinds": ["adversarial", "natural"],
       "within_layer_order": 0,
-      "max_picks": 1,
-      "cross_incompatible_with": ["continuation", "fsh", "dap"]
+      "cross_incompatible_with": ["fsh", "dap"]
     },
     "distractor_prefix": {
       "description": "Add noise before the prompt to distract classifiers",
       "layer": "requests",
       "dimension": "request_shape",
       "within_layer_order": 0,
-      "max_picks": 1,
       "cross_incompatible_with": []
     },
     "distractor_suffix": {
@@ -177,7 +164,6 @@
       "layer": "requests",
       "dimension": "request_shape",
       "within_layer_order": 0,
-      "max_picks": 1,
       "cross_incompatible_with": []
     },
     "impersonation": {
@@ -185,7 +171,6 @@
       "layer": "requests",
       "dimension": "role_framing",
       "within_layer_order": 0,
-      "max_picks": 1,
       "cross_incompatible_with": []
     },
     "temporal": {
@@ -193,15 +178,14 @@
       "layer": "requests",
       "dimension": "request_shape",
       "within_layer_order": 0,
-      "max_picks": 1,
       "cross_incompatible_with": []
     },
     "asking": {
       "description": "Innocuous framing or detail-maximising directives",
       "layer": "requests",
       "dimension": "request_shape",
+      "kinds": ["adversarial", "natural"],
       "within_layer_order": 0,
-      "max_picks": 1,
       "cross_incompatible_with": []
     }
   },
@@ -224,7 +208,7 @@
     "to_unicode_escape":     { "families": ["encode"], "complexity": 3, "requires_llm": false, "encode_weight": "heavy" },
     "to_ascii_ordinal":      { "families": ["encode"], "complexity": 3, "requires_llm": false, "encode_weight": "heavy" },
     "to_separator":          { "families": ["encode"], "complexity": 2, "requires_llm": false, "encode_weight": "light" },
-    "to_leetspeak_basic":    { "families": ["encode"], "complexity": 1, "requires_llm": false, "encode_weight": "light" },
+    "to_leetspeak_basic":    { "families": ["encode"], "complexity": 1, "requires_llm": false, "encode_weight": "light", "kinds": ["adversarial", "natural"] },
     "to_leetspeak_intermediate": { "families": ["encode"], "complexity": 2, "requires_llm": false, "encode_weight": "light" },
     "to_leetspeak_advanced": { "families": ["encode"], "complexity": 2, "requires_llm": false, "encode_weight": "light" },
     "to_morse":              { "families": ["encode"], "complexity": 3, "requires_llm": false, "encode_weight": "heavy" },
@@ -280,13 +264,13 @@
 
     "to_rewrite_with_typos_low":    { "families": ["typos"], "complexity": 2, "requires_llm": true },
     "to_rewrite_with_typos_medium": { "families": ["typos"], "complexity": 2, "requires_llm": true },
-    "to_rewrite_with_typos_high":   { "families": ["typos"], "complexity": 3, "requires_llm": true },
-    "to_rewrite_with_typos_insane": { "families": ["typos"], "complexity": 3, "requires_llm": true },
+    "to_rewrite_with_typos_high":   { "families": ["typos"], "complexity": 3, "requires_llm": true, "kinds": ["adversarial"] },
+    "to_rewrite_with_typos_insane": { "families": ["typos"], "complexity": 3, "requires_llm": true, "kinds": ["adversarial"] },
 
-    "to_adversarial_suffix_punctuation": { "families": ["suffixes"], "complexity": 1, "requires_llm": false },
+    "to_adversarial_suffix_punctuation": { "families": ["suffixes"], "complexity": 1, "requires_llm": false, "kinds": ["adversarial", "natural"] },
     "to_adversarial_suffix_fragments":   { "families": ["suffixes"], "complexity": 1, "requires_llm": false },
     "to_adversarial_suffix_unicode":     { "families": ["suffixes"], "complexity": 1, "requires_llm": false, "cross_incompatible_with": ["ascii_art"] },
-    "to_adversarial_suffix_emoji":       { "families": ["suffixes"], "complexity": 1, "requires_llm": false, "cross_incompatible_with": ["ascii_art"] },
+    "to_adversarial_suffix_emoji":       { "families": ["suffixes"], "complexity": 1, "requires_llm": false, "cross_incompatible_with": ["ascii_art"], "kinds": ["adversarial", "natural"] },
 
     "to_lowercase":            { "families": ["casual_writing"], "complexity": 0, "requires_llm": false },
     "to_uppercase":            { "families": ["casual_writing"], "complexity": 0, "requires_llm": false },
@@ -336,14 +320,14 @@
     "to_dap_selected_short": { "families": ["dap"], "complexity": 3, "requires_llm": true, "requires_benign": true },
     "to_dap_selected_long":  { "families": ["dap"], "complexity": 3, "requires_llm": true, "requires_benign": true },
 
-    "to_refusal_then_comply":     { "families": ["answer_format"], "complexity": 3, "requires_llm": false },
-    "to_apology_prevention":      { "families": ["answer_format"], "complexity": 2, "requires_llm": false },
-    "to_prefix_injection":        { "families": ["answer_format"], "complexity": 2, "requires_llm": false },
+    "to_refusal_then_comply":     { "families": ["answer_format"], "complexity": 3, "requires_llm": false, "kinds": ["adversarial"] },
+    "to_apology_prevention":      { "families": ["answer_format"], "complexity": 2, "requires_llm": false, "kinds": ["adversarial"] },
+    "to_prefix_injection":        { "families": ["answer_format"], "complexity": 2, "requires_llm": false, "kinds": ["adversarial"] },
     "to_answer_in_markdown":      { "families": ["answer_format"], "complexity": 2, "requires_llm": false },
     "to_answer_as_tutorial":      { "families": ["answer_format"], "complexity": 2, "requires_llm": false },
     "to_answer_as_code":          { "families": ["answer_format"], "complexity": 2, "requires_llm": false },
-    "to_answer_as_dialogue":      { "families": ["answer_format"], "complexity": 2, "requires_llm": false },
-    "to_answer_as_story":         { "families": ["answer_format"], "complexity": 2, "requires_llm": false },
+    "to_answer_as_dialogue":      { "families": ["answer_format"], "complexity": 2, "requires_llm": false, "kinds": ["adversarial"] },
+    "to_answer_as_story":         { "families": ["answer_format"], "complexity": 2, "requires_llm": false, "kinds": ["adversarial"] },
     "to_answer_as_structured_data": { "families": ["answer_format"], "complexity": 2, "requires_llm": false },
 
     "to_ask_answer_in_french":      { "families": ["answer_language"], "complexity": 0, "requires_llm": false },

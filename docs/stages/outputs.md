@@ -44,8 +44,9 @@ to a benign input is judged as any answer.
 ## Settings
 
 Params keys: `check_outputs`, `max_attempts`, `max_per_category`,
-`max_samples`, `axes`, `seed`, `batch_size`, `check_max_tokens`,
-`output_path` ([configuration.md](../configuration.md#outputs)).
+`max_samples`, `axes`, `axes_weighting`, `seed`, `batch_size`,
+`check_max_tokens`, `output_path`
+([configuration.md](../configuration.md#outputs)).
 
 ## Unit and ledger key
 

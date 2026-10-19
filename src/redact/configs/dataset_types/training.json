@@ -1,8 +1,9 @@
 {
-  "_comment": "What dataset_type training means: every entry type and the packaged augmentation section. A recipe's stages replace these, its augmentations overlay these kind by kind, and its params file overlays these params key by key per stage.",
+  "_comment": "What dataset_type training means: every entry type and the packaged augmentation section. The inputs' axes are log-weighted (inputs.axes_weighting), to spread training data more evenly over the axis values; the outputs keep the table's weights. A recipe's stages replace these, its augmentations overlay these kind by kind, and its params file overlays these params key by key per stage.",
   "stages": ["constitution", "inputs", "outputs", "paraphrase", "jailbreaks", "build"],
   "params": {
-    "constitution": {"include_general_benign": true, "general_benign_categories": 10}
+    "constitution": {"include_general_benign": true, "general_benign_categories": 10},
+    "inputs": {"axes_weighting": "log"}
   },
   "augmentations": {}
 }

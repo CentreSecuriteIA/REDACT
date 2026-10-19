@@ -27,21 +27,29 @@ from .sampling import sample_combination
 
 logger = logging.getLogger(__name__)
 
-# A layer whose picks fall this far or further below its target is logged.
+# A layer, or the request obfuscation step, whose picks fall this far or
+# further below its target is logged.
 _SHORT = 2
 
 
-def _observe(dealer: Dealer, techniques) -> None:
-    """Count each technique's first family and its layer in ``dealer``."""
-    for fn in techniques:
-        if fn is None:
-            continue
+def _observe(dealer: Dealer, combined: Callable) -> None:
+    """Count in ``dealer`` what one unit's draw ``combined`` holds: each
+    technique's first family, the technique itself (a member of that family)
+    and its layer, and the request obfuscation when it has one."""
+    for fn in getattr(combined, "techniques", []):
         families = getattr(fn, "families", None) or []
         if families:
             dealer.counts[families[0]] += 1
+        dealer.members[fn.__name__] += 1
         layer = getattr(fn, "layer", None)
         if layer is not None:
             dealer.included[layer] += 1
+    if getattr(combined, "request_obfuscation", None) is not None:
+        dealer.included["request_obfuscation"] += 1
+
+
+def _names(combined: Callable) -> list[str]:
+    return [getattr(t, "__name__", "") for t in getattr(combined, "techniques", [])]
 
 
 def assign_combination(
@@ -62,22 +70,26 @@ def assign_combination(
     to ``max_resamples`` times, while it equals a combination in ``used`` (the
     sample's earlier iterations); the last draw is kept if none differs. The
     first draw is dealt from ``dealer``; a resample draws uniformly, so it can
-    escape a collision the deal would otherwise force on a small pool.
+    escape a collision the deal would otherwise force on a small pool. The
+    kept draw is counted in ``dealer`` (its families, techniques, layers and
+    request obfuscation), so the group's next unit is dealt after it.
     ``sample_kwargs`` go to :func:`sample_combination`. An empty list is the
     identity.
     """
     used_set = {tuple(c) for c in used}
     base = stable_seed(seed, sample_id, iteration)
-    chosen: list[str] = []
+    kept = None
     for attempt in range(max_resamples):
         rng = random.Random(base + attempt)
-        fn = sample_combination(
+        kept = sample_combination(
             rng, pool, dealer=(dealer if attempt == 0 else None), **sample_kwargs)
-        names = [getattr(t, "__name__", "") for t in getattr(fn, "techniques", [])]
-        chosen = names
-        if tuple(names) not in used_set:
+        if tuple(_names(kept)) not in used_set:
             break
-    return chosen
+    if kept is None:
+        return []
+    if dealer is not None:
+        _observe(dealer, kept)
+    return _names(kept)
 
 
 def combination_of(names: list[str], registry: dict[str, Callable]) -> Callable:
@@ -120,8 +132,9 @@ def plan_run(
     The units of one ``(category, entry_type, iteration)`` group are dealt in
     ``sample_id`` order from a shared
     :class:`~redact.dataset.dealing.Dealer`, so each layer appears at its rate
-    (``layer_rates`` over the spec's) and each family at its weight
-    (``family_weights``, equal by default), evenly across the group and
+    (``layer_rates`` over the spec's), each family at its weight
+    (``family_weights``, equal by default) and each technique of a family as
+    often as the others the unit may take, evenly across the group and
     independent of the input order; a row's ``settings`` record the weights
     when given. The plan file (:func:`plan_inputs`) is written beside the
     manifest first, and a coverage table after it. Returns ``manifest_path``.
@@ -130,7 +143,6 @@ def plan_run(
     if layer_rates is not None:
         base_kwargs = {"sampling_probs": dict(layer_rates), **base_kwargs}
     manifest_path = Path(manifest_path)
-    by_name = {fn.__name__: fn for fn in pool}
     planned = 0
 
     # Each (category, entry_type) subgroup's input rows, dealt in sample_id
@@ -165,7 +177,6 @@ def plan_run(
                         used=used_by_row[idx], dealer=dealer, **settings,
                     )
                     used_by_row[idx].append(tuple(names))
-                    _observe(dealer, (by_name.get(n) for n in names))
                     planned += 1
                     yield {
                         "sample_id": sid,
@@ -194,16 +205,19 @@ def plan_run(
 
 
 def _warn_short(dealer: Dealer, iteration: int, manifest_path: Path) -> None:
-    """Log each layer of a dealt group whose picks fell two or more short of
-    its target, as when no technique of the layer fits a unit's other picks."""
+    """Log each layer of a dealt group, and the request obfuscation step,
+    whose picks fell two or more short of its target, as when no technique
+    of it fits a unit's other picks."""
     category, entry_type = dealer.key[1:3]
-    for layer, target in dealer.targets.items():
-        if target - dealer.included[layer] >= _SHORT:
+    for name, target in dealer.targets.items():
+        if target - dealer.included[name] >= _SHORT:
+            what = ("the request obfuscation step" if name == "request_obfuscation"
+                    else f"the {name} layer")
             logger.warning(
-                "Plan: group (%s, %s), iteration %d: the %s layer has %d of its "
-                "target %d; the pool or the compatibility rules left the rest no "
-                "pick (see %s).", category, entry_type, iteration, layer,
-                dealer.included[layer], target, coverage_path(manifest_path).name)
+                "Plan: group (%s, %s), iteration %d: %s has %d of its target %d; "
+                "the pool or the compatibility rules left the rest no pick (see "
+                "%s).", category, entry_type, iteration, what,
+                dealer.included[name], target, coverage_path(manifest_path).name)
 
 
 def plan_inputs(

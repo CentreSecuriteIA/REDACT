@@ -1,17 +1,24 @@
 """Persona techniques: an invented persona or one of the 14 in
 ``configs/jailbreak/hacking/personas.json``.
 
-``info`` is ``category=<name>_persona``.
+``info`` is ``category=<name>_persona``, ``<name>`` the persona's key; the
+prompts get its ``display_name``. A scenario reply without its scene is asked
+again, then discarded, as for the cognitive techniques.
 """
 
 from collections.abc import Callable
 
 from redact.jailbreak.directives import load_templates
-from redact.jailbreak.technique import TechniqueGen
+from redact.jailbreak.technique import TechniqueGen, is_discarded
 from redact.llm_pipeline import LLMRequest
 from redact.llms.prompting import build_messages, load_prompt
 
-from .cognitive import _cognitive_gen, _construction_messages, _extract_scenario
+from .cognitive import (
+    MALFORMED_SCENARIO,
+    _cognitive_gen,
+    _construction_messages,
+    _scenario_gen,
+)
 
 _PERSONAS: dict[str, dict] = load_templates("hacking", "personas.json")["categories"]
 
@@ -22,6 +29,13 @@ _NAMED_PERSONAS = [
     "deformed_scientist", "politician", "deformed_professor",
     "religious_figure", "actor", "someone_from_the_future",
 ]
+
+
+def display_name(persona_name: str) -> str:
+    """The name a persona's prompts call it: its ``display_name``, else its
+    key in words (``cult_leader`` is ``Cult Leader``)."""
+    return (_PERSONAS[persona_name].get("display_name")
+            or persona_name.replace("_", " ").title())
 
 
 def _persona_scenario_messages(
@@ -46,13 +60,17 @@ def _persona_gen(
     prompt_dir=None,
     **kwargs,
 ) -> TechniqueGen:
-    """Yield persona-scenario then construction requests; return (jailbreak, info)."""
+    """Yield persona-scenario then construction requests; return (jailbreak, info).
+
+    The scenario prompt names the persona by :func:`display_name`, the info
+    by its key. A scenario that no attempt parses returns the prompt with
+    :data:`~redact.jailbreak.hacking.cognitive.MALFORMED_SCENARIO`.
+    """
     if scenario is None:
-        raw = yield LLMRequest(
-            gen_model,
-            _persona_scenario_messages(prompt, persona_name, persona_description, prompt_dir),
-        )
-        scenario = _extract_scenario(raw)
+        scenario = yield from _scenario_gen(gen_model, _persona_scenario_messages(
+            prompt, display_name(persona_name), persona_description, prompt_dir))
+        if scenario is None:
+            return prompt, MALFORMED_SCENARIO
     jailbreak = yield LLMRequest(
         gen_model,
         _construction_messages(
@@ -63,8 +81,8 @@ def _persona_gen(
 
 def to_invented_persona(prompt: str, **kwargs) -> TechniqueGen:
     """Persona jailbreak where the LLM freely invents the persona."""
-    jailbreak, _info = yield from _cognitive_gen(prompt, "persona_roleplay", **kwargs)
-    return jailbreak, "category=invented_persona"
+    jailbreak, info = yield from _cognitive_gen(prompt, "persona_roleplay", **kwargs)
+    return jailbreak, info if is_discarded(info) else "category=invented_persona"
 
 
 def _make_persona_fn(persona_name: str):
@@ -75,7 +93,7 @@ def _make_persona_fn(persona_name: str):
 
     fn.__name__ = f"to_{persona_name}_persona"
     fn.__qualname__ = fn.__name__
-    fn.__doc__ = f"Persona jailbreak: {_PERSONAS[persona_name].get('display_name', persona_name)}."
+    fn.__doc__ = f"Persona jailbreak: {display_name(persona_name)}."
     return fn
 
 

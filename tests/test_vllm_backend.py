@@ -22,6 +22,7 @@ import os
 import subprocess
 import sys
 import textwrap
+import time
 import types
 
 import pytest
@@ -247,6 +248,100 @@ class TestEngineArguments:
         the context, and the engine's own has lower ones."""
         seen = TestEngineDownloadDir._load(monkeypatch, {})
         assert seen["usage_context"] == "LLM_CLASS"    # the fake's UsageContext.LLM_CLASS
+
+
+class TestEngineStats:
+    """With ``disable_log_stats`` false, a task on the shared loop asks the
+    engine to log its stats every interval, until the engine is released;
+    vLLM's ``AsyncLLM`` logs them only when asked."""
+
+    _INTERVAL_S = 0.01
+    _CALLS = 3
+    _WAIT_S = 5.0
+
+    class _Engine:
+        """An engine that counts its ``do_log_stats()`` calls; ``fails``
+        calls raise first."""
+
+        def __init__(self, fails: int = 0, **kw):
+            self.calls = 0
+            self.fails = fails
+
+        async def do_log_stats(self):
+            self.calls += 1
+            if self.calls <= self.fails:
+                raise RuntimeError("no stats")
+
+        def shutdown(self):
+            pass
+
+    @pytest.fixture()
+    def load(self, monkeypatch):
+        """Load ``org/model`` with these kwargs on a counting engine; returns it."""
+        import redact.llms.backends.vllm as vllm_module
+
+        monkeypatch.setattr(vllm_module, "_STATS_INTERVAL_S", self._INTERVAL_S)
+        monkeypatch.setattr(vllm_module, "_prepare_environment", lambda: None)
+        monkeypatch.setattr(
+            "redact.llms.resources.estimate._load_config", lambda _id: None)
+
+        def load(vllm_kwargs, fails=0):
+            engine_cls = lambda **kw: self._Engine(fails, **kw)  # noqa: E731
+            for name, module in fake_vllm_modules(engine_cls).items():
+                monkeypatch.setitem(sys.modules, name, module)
+            return vllm_module._engine("org/model", None, vllm_kwargs)
+
+        yield load
+        vllm_module.VLLMBackend.clear_cache()
+
+    def _until(self, done) -> bool:
+        deadline = time.monotonic() + self._WAIT_S
+        while not done():
+            if time.monotonic() > deadline:
+                return False
+            time.sleep(self._INTERVAL_S)
+        return True
+
+    @pytest.mark.parametrize("vllm_kwargs", [{}, {"disable_log_stats": True}])
+    def test_no_task_is_started_without_the_flag(self, load, vllm_kwargs):
+        import redact.llms.backends.vllm as vllm_module
+
+        engine = load(vllm_kwargs)
+        time.sleep(10 * self._INTERVAL_S)
+        assert engine.calls == 0 and vllm_module._stats_tasks == {}
+
+    def test_the_engine_logs_its_stats_every_interval_until_released(self, load):
+        import redact.llms.backends.vllm as vllm_module
+
+        engine = load({"disable_log_stats": False})
+        assert self._until(lambda: engine.calls >= self._CALLS)
+        (task,) = vllm_module._stats_tasks.values()
+        vllm_module.VLLMBackend.clear_cache()
+        assert vllm_module._stats_tasks == {}
+        assert self._until(task.done) and task.cancelled()
+        calls = engine.calls
+        time.sleep(10 * self._INTERVAL_S)
+        assert engine.calls == calls
+
+    def test_a_failed_call_is_logged_at_debug_and_the_next_one_made(
+            self, load, caplog):
+        with caplog.at_level(logging.DEBUG, logger="redact.llms.backends.vllm"):
+            engine = load({"disable_log_stats": False}, fails=1)
+            assert self._until(lambda: engine.calls >= self._CALLS)
+        failed = [r for r in caplog.records if "do_log_stats" in r.getMessage()]
+        assert [r.levelno for r in failed] == [logging.DEBUG]
+        assert "RuntimeError: no stats" in failed[0].getMessage()
+
+    def test_the_exit_stops_the_task(self, load, monkeypatch):
+        import redact.llms.backends.vllm as vllm_module
+
+        monkeypatch.setattr(vllm_module, "_exiting", False)    # restored after
+        engine = load({"disable_log_stats": False})
+        assert self._until(lambda: engine.calls >= 1)
+        (task,) = vllm_module._stats_tasks.values()
+        vllm_module._exit()
+        assert vllm_module._stats_tasks == {} and vllm_module._engines == {}
+        assert self._until(task.done) and task.cancelled()
 
 
 class TestWorkerStartMethod:

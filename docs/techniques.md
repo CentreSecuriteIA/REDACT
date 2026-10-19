@@ -2,8 +2,9 @@
 
 The jailbreak stage draws from 152 techniques in 4 layers and 23 families.
 `configs/jailbreak/combination_spec.json` gives each technique its families,
-a complexity from 0 to 3, and whether it calls a model (`requires_llm`) or
-needs the benign data (`requires_benign`). This page lists them by name, for
+a complexity from 0 to 3, whether it calls a model (`requires_llm`) or
+needs the benign data (`requires_benign`), and the kinds that may draw it
+(`kinds`, [below](#the-natural-pool)). This page lists them by name, for
 the `allow` and `deny` lists of the
 [augmentation section](configuration.md#the-augmentation-section), and says
 briefly what each family does.
@@ -18,7 +19,7 @@ layer, families apply in the order of their `within_layer_order`.
 |---|---|---|
 | `hacking` | 25 | at most 1 |
 | `manipulation` | 8 | at most 1 |
-| `obfuscation` | 72 | up to `max_obfuscations` families in budget mode, plus the request obfuscation when allowed |
+| `obfuscation` | 72 | up to `max_obfuscations` families in budget mode, the request obfuscation, when allowed, among them |
 | `requests` | 47 | at most 1 |
 
 ## Families and techniques
@@ -78,15 +79,19 @@ technique is picked first. A technique may not join a combination when:
   the reverse. The spec pairs `structural` and `translation` with
   `ascii_art`; `ascii_art` with `framing`, `persona`, `cognitive`, `fsh`,
   `dap`; `fsh` and `dap` with `continuation`, `indirect`, `framing`,
-  `persona`, `cognitive`; and `continuation` with `indirect`. So a
-  combination holds a hacking or a manipulation technique, never both;
+  `persona`, `cognitive`; and `persona` and `cognitive` with
+  `impersonation`, so a prompt never carries two identities. So a
+  combination holds a hacking or a manipulation technique, never both
+  (`continuation` and `indirect`, both requests, are kept apart by the
+  layer cap);
 - one of its families is in the `cross_incompatible_with` of a taken
   technique's own spec entry, or a taken family is in its own. The spec keeps
   `to_adversarial_suffix_emoji`, `to_adversarial_suffix_unicode`,
   `to_braille` and `to_tokenbreak_split` from `ascii_art`, since no font
   draws the characters they may leave; the other suffixes and encodings may
   still join it. `to_ascii_art` itself rejects a text with a character no
-  font draws (any non-ASCII character);
+  font draws (any non-ASCII character), or one every font draws longer than
+  its cap;
 - it pairs `fsh` or `dap` with an obfuscation in
   `manipulation_blocked_obfuscation`: the `translation` and `ascii_art`
   families and the `heavy` `encode` techniques, except those also in
@@ -123,6 +128,53 @@ Model rewrites no check verifies (`cognitive`, `persona`, `typos`,
 `"adversarial": {"translation": false}` the pool keeps the other 28.
 [configuration.md](configuration.md#dataset-types) gives the type file.
 
+`to_ascii_art` keeps its 5,000-character cap in this pool too, so its eval
+attacks differ from those of a version without the cap: the font a seed
+draws changes for some texts from about 40 characters and for most from
+about 90, a text of about 830 characters or more is rejected where it used
+to be drawn, and so are most inputs when the second round pairs it with a
+`heavy` encoding that lengthens the text (`to_unicode_escape`,
+`to_ascii_ordinal`, `to_morse`). An eval plan kept across the change mixes
+the two renderings. [What the families do](#what-the-families-do) has the
+figures.
+
+## The natural pool
+
+A spec entry's `kinds` lists the kinds of the augmentation section that may
+draw the technique: `["adversarial"]` when neither the technique nor its
+first family gives one, and a technique's own `kinds` replace its family's.
+Every technique is adversarial. The families `typos`, `casual_writing`,
+`translation`, `answer_language`, `answer_format`, `asking` and `indirect`
+are marked `["adversarial", "natural"]`, less their attack-only techniques,
+and three techniques of attack families are marked natural on their own.
+The natural kind draws only what is marked natural: by default (translation
+off) these 46 techniques in 8 families, pinned in
+`tests/fixtures/natural_pool.json`:
+
+| Family | Natural techniques |
+|---|---|
+| `typos` | `to_rewrite_with_typos_low`, `to_rewrite_with_typos_medium` |
+| `casual_writing` | all nine |
+| `answer_language` | all twenty |
+| `answer_format` | `to_answer_in_markdown`, `to_answer_as_tutorial`, `to_answer_as_code`, `to_answer_as_structured_data` |
+| `asking` | `to_innocuous_question`, `to_ask_for_details` |
+| `indirect` | all six |
+| `encode` | `to_leetspeak_basic` |
+| `suffixes` | `to_adversarial_suffix_punctuation`, `to_adversarial_suffix_emoji` |
+
+With `"natural": {"translation": true}` the twenty translations join them.
+Attack-only: `structural`, `continuation`, `temporal`, the high and insane
+typos, `to_answer_as_dialogue`, `to_answer_as_story` and the three
+answer-format directives the natural kind denies anyway
+(`to_refusal_then_comply`, `to_apology_prevention`,
+`to_prefix_injection`), with every other family. A natural allow list that
+names one of them raises, so a `config_dir` copy of `augmentations.json`
+from before needs its natural `families.allow` trimmed. A natural-kind plan
+made before raises on resume, since its pool changed: run the natural kind
+with `resume=False`. A training build leaves out a benign or dual-use benign
+variation made with a technique the natural kind does not draw, with one
+WARNING that counts them ([stages/build.md](stages/build.md)).
+
 ## What the families do
 
 A transform returns `(text, info)`; the info names what it drew, such as a
@@ -132,7 +184,14 @@ template variant or a font, for traceability.
 
 - `cognitive` and `persona` are two model calls each: a scenario, then the
   jailbreak built on it. A named persona grounds the scenario in the
-  persona's character first. The definitions live in
+  persona's character first; the prompt names it by its `display_name`
+  (`Someone from the Future`), the info by its key
+  (`category=someone_from_the_future_persona`). The scenario prompts ask
+  for the scene at the bottom, behind `---` delimiters: the scene is the
+  last block after the first delimiter, or, in a reply without one, what
+  follows a `Scenario Description` heading. A reply with neither is asked
+  again, up to 3 times in all, and then rejects the result
+  (`DISCARDED; reason=malformed scenario`). The definitions live in
   `configs/jailbreak/hacking/cognitive_techniques.json` and `personas.json`,
   editable without touching code. `to_invented_persona` makes the same two
   calls as `cognitive`'s `to_persona_roleplay` until it gets prompts of its
@@ -160,9 +219,14 @@ the answers.
   technique. The encoding, splitting or substitution then applies to those
   words. A reply that is not a list of at most ten of the prompt's words
   rejects the result (`DISCARDED; reason=malformed word list`). When the
-  model marks no word, the encodings and splits apply to the whole prompt
-  (every word for the fixed separators), and `to_sensitive_words_variables`
-  and `to_synonym_substitution` leave it unchanged. `to_synonym_substitution`
+  model marks no word, the three `heavy` encodings
+  (`to_sensitive_words_encode_base64`, `_unicode`, `_ascii`) reject the
+  result (`DISCARDED; reason=no sensitive word`): encoding the whole prompt
+  would make them a heavy full-text encoding, which the spec keeps away
+  from `fsh` and `dap`. The light encodings and the splits apply to the
+  whole prompt (every word for the fixed separators), and
+  `to_sensitive_words_variables` and `to_synonym_substitution` leave it
+  unchanged. `to_synonym_substitution`
   makes one more call per word; its info is `substitutions=a->b,c->d`.
 - `translation` covers 20 languages in three resource tiers, which the
   spec scores by complexity: high (`to_french`, `to_japanese`, `to_russian`,
@@ -187,9 +251,63 @@ the answers.
   its letter), leetspeak at three levels, morse, braille.
 - `structural` wraps the text in JSON, XML or markdown. `to_json` keeps
   non-ASCII characters as they are.
-- `ascii_art` draws the text in a pyfiglet font, drawn from the 16 that have
-  a glyph for every character of the text. When none has, the result is
-  rejected (`DISCARDED; reason=no font has every character`).
+- `ascii_art` draws the text in a pyfiglet font, drawn from those of the 16
+  that have a glyph for every character of the text and draw it in at most
+  `MAX_RENDERED_CHARS` (5,000) characters, the `max_chars` keyword's
+  default. When none has every glyph, the result is rejected
+  (`DISCARDED; reason=no font has every character`); when every such font
+  draws the text longer than the cap, it is rejected with the shortest
+  drawing's length (`DISCARDED; reason=too long; rendered=<n>;
+  max_chars=5000`). The cap was set from these drawing lengths, in
+  characters, of plain English text (a range over three texts; `-` where
+  the font lacks a character, a comma or a question mark):
+
+  | Font | 50 | 100 | 150 | 300 |
+  |---|---|---|---|---|
+  | `digital` | 306 | 603-606 | 903-906 | 1,716-1,806 |
+  | `bubble` | 728-744 | 1,440-1,468 | 2,148-2,204 | 4,072-4,360 |
+  | `small` | 990-1,015 | 1,935-1,965 | 2,835-2,965 | 5,330-5,805 |
+  | `alphabet` | 1,274-1,365 | 2,520-2,639 | 3,717-3,976 | 7,028-7,763 |
+  | `standard` | 1,368-1,464 | 2,706-2,820 | 3,990-4,236 | 7,536-8,298 |
+  | `slant` | 1,482-1,560 | 2,940-3,042 | 4,320-4,560 | 8,136-8,820 |
+  | `big` | 1,832-1,960 | 3,648-3,776 | 5,376-5,648 | 10,144-11,120 |
+  | `banner` | 2,344-2,360 | 4,560-4,632 | 6,784-6,984 | 12,752-13,896 |
+  | `gothic` | 2,466-2,502 | 4,860-4,995 | 7,191-7,452 | 13,644-14,562 |
+  | `block` | 3,280-3,584 | 6,600-6,856 | 9,728-10,256 | 18,416-20,128 |
+  | `alligator` | 3,290-3,633 | 6,552-6,993 | 9,849-10,346 | 18,851-19,999 |
+  | `dotmatrix` | 6,050-6,390 | 11,980-12,520 | 17,920-18,790 | 33,830-36,790 |
+  | `isometric1`-`4` | 6,347-6,699 | 12,892-13,112 | - | - |
+
+  The cap holds wherever the technique is drawn, the
+  [eval pool](#the-eval-pool) included, and it changes the text, not only
+  what is rejected. A text every font
+  draws within the cap, up to about 38 characters, draws the same font as
+  without one. Over that, the font is drawn from the fonts that fit. Of the
+  12 fonts that have a typical text's glyphs (the four `isometric` fonts
+  have no digit or punctuation mark), all 12 fit up to about 38
+  characters, 11 at 50, 9 to 11 at 75, 9 at 100, 6 at 150, 2 or 3 at 200
+  to 300, 1 (`digital`) at 400 to 800 and none from about 830. So the same
+  seed draws another font, and another text, than it did before the cap:
+  for a text with a digit or a punctuation mark, about 1 unit in 12 from
+  about 45 to 75 characters (those that drew `dotmatrix`, the last font of
+  the list), about 2 in 3 at 90 to 100 and about 9 in 10 from about 125;
+  for one of letters and spaces alone (all 16 fonts), about 19 in 20 from
+  about 38.
+
+  A text of about 830 characters or more is rejected where it used to be
+  drawn. After an encoding that lengthens the text, most inputs are
+  rejected: unicode escapes make a text about 6 times as long, so an input
+  of about 140 characters or more is rejected after them, one of about 230
+  after ASCII ordinals (about 3.7 times) and one of about 250 after morse
+  (about 3.4 times); base64 (about 1.4 times) lowers the limit to about
+  610. A kept plan resumed across this change mixes rows drawn without the
+  cap (saved before) and with it (run after), so a replayed plan gives the
+  same text only within one version of the library; run the kind with
+  `resume=False` for one rendering.
+
+  Each font is loaded once per process. Every font that has the glyphs
+  draws the text to measure it, so a text costs up to 16 drawings (about
+  0.03 s in all at 150 characters, 0.4 s at 2,000).
 
 **Requests.** These change how a request is posed, not its text, and call no
 model. Each technique picks one of its named template variants from a JSON

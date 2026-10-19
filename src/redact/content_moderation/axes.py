@@ -33,6 +33,9 @@ logger = logging.getLogger(__name__)
 #: The stages with axes, each a section of the table.
 STAGES = ("inputs", "outputs")
 
+#: How a stage weighs the values of an axis (:func:`resolve`).
+WEIGHTINGS = ("table", "log")
+
 # The fields of a unit an axis may show with ``from``.
 _FIELDS = ("subcategory",)
 
@@ -123,24 +126,58 @@ def _check_positive(at: str, entry: dict) -> None:
 
 
 def resolve(
-    stage: str, given: dict | bool | None = None, *,
+    stage: str, given: dict | bool | None = None, *, weighting: str = "table",
     config_dir: str | Path | None = None,
 ) -> dict | None:
     """The axes ``stage`` deals: its section of the table (``config_dir``'s
-    when it has one) with ``given`` over it.
+    when it has one) with ``given`` over it, weighted by ``weighting``.
 
     ``given`` is ``None`` or ``True`` for the table's axes, ``False`` for
     none, or ``{axis: {value: weight}}``, an axis as ``None`` to leave it out.
-    A value not named keeps its weight.
+    A value not named keeps its weight. With ``weighting`` ``"table"`` the
+    weights are dealt as they are; with ``"log"`` each value of weight w
+    above 0 is weighted 1 + ln(w / m), m the axis's least weight above 0,
+    normalised per axis: the deal is spread more evenly over the values,
+    in the same order. A weight of 0 stays 0, and an axis with one value
+    above 0 is unchanged.
 
     Returns:
         The axes, in the table's order; ``None`` when there are none, or no
         axis with values is left.
 
     Raises:
-        ValueError: An unknown stage, axis or value, or a weight that is not
-            a number of at least 0. The message names the known ones.
+        ValueError: An unknown stage, axis, value or weighting, or a weight
+            that is not a number of at least 0. The message names the known
+            ones.
     """
+    if weighting not in WEIGHTINGS:
+        raise ValueError(
+            f"{stage}.axes_weighting must be one of {list(WEIGHTINGS)}, got "
+            f"{weighting!r}.")
+    axes = _overlaid(stage, given, config_dir)
+    if weighting == "log":
+        for entry in (axes or {}).values():
+            if "values" in entry:
+                _log_scale(entry["values"])
+    return axes
+
+
+def _log_scale(values: dict) -> None:
+    """Weigh each of ``values`` above 0 by 1 + ln(w / m), normalised."""
+    weights = {value: v["weight"] for value, v in values.items() if v["weight"] > 0}
+    if len(weights) <= 1:
+        return
+    least = min(weights.values())
+    scaled = {value: 1 + math.log(weight / least) for value, weight in weights.items()}
+    total = sum(scaled.values())
+    for value, weight in scaled.items():
+        values[value]["weight"] = weight / total
+
+
+def _overlaid(
+    stage: str, given: dict | bool | None, config_dir: str | Path | None,
+) -> dict | None:
+    """The axes of ``stage`` with ``given`` over them (:func:`resolve`)."""
     if stage not in STAGES:
         raise ValueError(
             f"The stage {stage!r} has no generation axes; {list(STAGES)} do.")

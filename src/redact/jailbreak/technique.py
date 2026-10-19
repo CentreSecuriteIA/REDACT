@@ -20,6 +20,11 @@ _SPEC_PATH = paths.jailbreak_configs_dir() / "combination_spec.json"
 
 DISCARDED = "DISCARDED"
 
+#: The kinds of the augmentation section; a spec ``kinds`` names some of them.
+KINDS = ("adversarial", "natural")
+#: The kinds of a family the spec gives no ``kinds``, and of its techniques.
+DEFAULT_KINDS = ("adversarial",)
+
 TechniqueResult = tuple[str, str]
 TechniqueGen = Generator[LLMRequest, str, TechniqueResult]
 
@@ -35,6 +40,28 @@ def load_spec() -> dict:
     return json.loads(_SPEC_PATH.read_text(encoding="utf-8"))
 
 
+def family_kinds(family: str) -> list[str]:
+    """The kinds that may draw ``family``'s techniques: its spec ``kinds``,
+    else :data:`DEFAULT_KINDS`. A technique's own ``kinds`` replace them.
+
+    Raises:
+        ValueError: The spec's ``kinds`` is not a list of kinds of :data:`KINDS`.
+    """
+    entry = load_spec()["families"][family]
+    return _checked_kinds(f"family {family!r}", entry.get("kinds", DEFAULT_KINDS))
+
+
+def _checked_kinds(whose: str, kinds) -> list[str]:
+    """``kinds`` as a list, checked to be a non-empty list of :data:`KINDS`."""
+    if (not isinstance(kinds, list | tuple) or not kinds
+            or any(kind not in KINDS for kind in kinds)
+            or len(set(kinds)) != len(kinds)):
+        raise ValueError(
+            f"combination_spec.json: the kinds of {whose} must be a non-empty list "
+            f"of {list(KINDS)}, each once, got {kinds!r}.")
+    return list(kinds)
+
+
 def tag(funcs: list[Callable]) -> None:
     """Set each function's spec tags as attributes of the function.
 
@@ -43,14 +70,16 @@ def tag(funcs: list[Callable]) -> None:
     (the reply limit of its model calls, None for the model's default) and
     ``cross_incompatible_with`` (the families the technique itself may not
     join, beside its families' own) come from the technique's entry;
-    ``layer`` and ``within_layer_order`` from its first family. A function
-    the spec does not name is skipped. Called once, when ``redact.jailbreak``
-    is imported.
+    ``layer`` and ``within_layer_order`` from its first family; ``kinds``
+    (the augmentation kinds that may draw it) from the technique's entry,
+    else its first family's (:func:`family_kinds`). A function the spec does
+    not name is skipped. Called once, when ``redact.jailbreak`` is imported.
 
     Raises:
         ValueError: A technique's ``max_tokens`` is not a whole number of at
-            least 1. Checked here, so a bad spec fails at import instead of
-            as an error row per sample.
+            least 1, or its ``kinds`` (or its family's) not a list of
+            :data:`KINDS`. Checked here, so a bad spec fails at import
+            instead of as an error row per sample.
     """
     spec = load_spec()
     families = spec["families"]
@@ -86,3 +115,6 @@ def tag(funcs: list[Callable]) -> None:
         primary_family = fn.families[0] if fn.families else None
         fn.layer = family_layer.get(primary_family, "obfuscation")
         fn.within_layer_order = family_wlo.get(primary_family, 0)
+        fn.kinds = (_checked_kinds(f"technique {name!r}", t["kinds"]) if "kinds" in t
+                    else family_kinds(primary_family) if primary_family in families
+                    else list(DEFAULT_KINDS))

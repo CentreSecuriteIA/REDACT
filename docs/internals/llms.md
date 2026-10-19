@@ -131,6 +131,11 @@ down and its memory freed, and a client built on it raises on its next call.
   loaded now.
 - Defaults: `temperature` 0.7 when the model sets none; `top_p` 0.85 unless
   `VLLMConfig.sampling` says otherwise.
+- Stats: an engine logs none (`disable_log_stats` true). With
+  `"disable_log_stats": false` in `vllm_kwargs`, a task on the shared loop
+  calls the engine's `do_log_stats()` every 10 s, so vLLM prints its stats
+  line, the prefix-cache hit rate among them; a failed call is logged at
+  DEBUG, and the task stops when the engine is released and at exit.
 - A prompt longer than the context raises `PromptTooLongError` for that
   request only. A request aborted because its engine is released raises.
 - Every request records one `call` event, a failed or cancelled one too

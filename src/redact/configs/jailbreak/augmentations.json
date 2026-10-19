@@ -1,5 +1,5 @@
 {
-  "_comment": "The augmentation section's defaults: what the attacks draw (adversarial, to jailbreaks.csv) and what the variations draw (natural, to variations.csv). A recipe's augmentations overlays them key by key (layers, families and techniques list by list); a kind given as null is off. An empty layer_rates is the spec's rates. The attacks never draw a family of natural_only_families unless their families.allow names it. translation alone decides the translation family, whatever the lists say: false keeps it out, true puts it in; flip it to true once a local translation model is registered. Read by jailbreak/augmentation.py.",
+  "_comment": "The augmentation section's defaults: what the attacks draw (adversarial, to jailbreaks.csv) and what the variations draw (natural, to variations.csv). A recipe's augmentations overlays them key by key (layers, families and techniques list by list); a kind given as null is off. An empty layer_rates is the spec's rates. The attacks never draw a family of natural_only_families unless their families.allow names it. translation alone decides the translation family, whatever the lists say: false keeps it out, true puts it in; flip it to true once a local translation model is registered. A kind draws only the techniques whose kinds in combination_spec.json hold it, and its allow lists may name only those: the natural kind draws only what the spec marks natural. Read by jailbreak/augmentation.py.",
 
   "natural_only_families": ["casual_writing"],
 
@@ -24,8 +24,8 @@
     "translation": false,
     "layers": {"deny": []},
     "families": {
-      "allow": ["typos", "casual_writing", "structural", "answer_language",
-                "answer_format", "asking", "indirect", "temporal", "continuation"],
+      "allow": ["typos", "casual_writing", "answer_language", "answer_format",
+                "asking", "indirect"],
       "deny": []
     },
     "techniques": {

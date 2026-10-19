@@ -27,7 +27,7 @@ _FIXTURE = Path(__file__).parents[1] / "fixtures" / "technique_registry.json"
 
 _TAGS = (
     "families", "complexity", "requires_llm", "requires_benign",
-    "encode_weight", "max_tokens", "layer", "within_layer_order",
+    "encode_weight", "max_tokens", "layer", "within_layer_order", "kinds",
 )
 _SEEDS = (0, 1, 2, 3, 4)
 

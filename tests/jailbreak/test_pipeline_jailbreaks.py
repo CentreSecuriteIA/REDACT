@@ -1000,6 +1000,11 @@ def broken(text, *, gen_model=None, **kwargs):
     raise ValueError("chain failed")
 
 
+# In no spec: both kinds may draw them, as a spec's kinds would say.
+for _fake in (one_step, two_step, broken):
+    _fake.kinds = ["adversarial", "natural"]
+
+
 class _StepBackend(MockBackend):
     """Native-batching fake: ``step1 x`` -> ``S1:x``, ``step2 x`` -> ``S2:x``.
 

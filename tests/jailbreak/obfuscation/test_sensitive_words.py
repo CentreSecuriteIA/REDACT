@@ -1,5 +1,7 @@
 """Tests for the sensitive-word techniques."""
 
+import pytest
+
 from redact.jailbreak.obfuscation.encoding import to_base64
 from redact.jailbreak.obfuscation.sensitive_words import (
     _sensitive_char_finish,
@@ -70,3 +72,60 @@ def test_a_labelled_word_list_is_rejected():
     assert (row["accepted"], row["jailbreak"]) == (False, "how to grow an apple")
     assert "technique=to_sensitive_words_variables" in row["reasoning"]
     assert "malformed word list" in row["reasoning"]
+
+
+# --- no word marked --------------------------------------------------------------
+
+_HEAVY = ["to_sensitive_words_encode_base64", "to_sensitive_words_encode_unicode",
+          "to_sensitive_words_encode_ascii"]
+
+
+def _technique(name: str):
+    from redact.jailbreak.obfuscation.sensitive_words import (
+        get_sensitive_words_functions,
+    )
+
+    return {fn.__name__: fn for fn in get_sensitive_words_functions()}[name]
+
+
+def test_the_heavy_word_encodings_are_those_the_spec_tags_heavy():
+    from redact.jailbreak.obfuscation.sensitive_words import (
+        get_sensitive_words_functions,
+    )
+
+    assert sorted(fn.__name__ for fn in get_sensitive_words_functions()
+                  if fn.encode_weight == "heavy") == sorted(_HEAVY)
+
+
+@pytest.mark.parametrize("name", _HEAVY)
+def test_a_heavy_encoding_with_no_word_marked_discards_the_prompt(name):
+    """Encoding the whole prompt would be a heavy full-text encoding, which
+    the spec keeps away from fsh and dap."""
+    from redact.jailbreak.obfuscation.sensitive_words import NO_SENSITIVE_WORD
+
+    prompt = "how to grow an apple"
+    assert _run(_technique(name), prompt, ["none"]) == (prompt, NO_SENSITIVE_WORD)
+    text, info = _run(_technique(name), prompt, ["apple"])
+    assert text != prompt and info.endswith("detected_words=apple")
+
+
+@pytest.mark.parametrize(("name", "expected"), [
+    ("to_sensitive_words_encode_rot13", "ubj gb tebj na nccyr"),
+    ("to_sensitive_words_encode_leetspeak_basic", "h0w 70 gr0w 4n 4ppl3"),
+    ("to_sensitive_words_split", "h o w t o g r o w a n a p p l e"),
+    ("to_sensitive_words_variables", "how to grow an apple"),
+])
+def test_the_other_techniques_keep_their_fallback(name, expected):
+    text, info = _run(_technique(name), "how to grow an apple", ["none"])
+    assert text == expected
+    assert info.endswith("detected_words=")
+
+
+def test_a_heavy_discard_rejects_the_row_naming_the_technique():
+    from tests.jailbreak.obfuscation.test_typos import row_of_replies
+
+    row = row_of_replies(_technique("to_sensitive_words_encode_base64"), ["none"],
+                         prompt="how to grow an apple")
+    assert (row["accepted"], row["jailbreak"]) == (False, "how to grow an apple")
+    assert "technique=to_sensitive_words_encode_base64" in row["reasoning"]
+    assert "no sensitive word" in row["reasoning"]

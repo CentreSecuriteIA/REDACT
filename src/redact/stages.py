@@ -206,6 +206,7 @@ def generate_inputs(
     max_attempts: int = 3,
     check_max_tokens: int | None = None,
     axes: dict | bool | None = None,
+    axes_weighting: str = "table",
     seed: int = 42,
     config_dir: str | Path | None = None,
     read_back: bool = True,
@@ -248,6 +249,9 @@ def generate_inputs(
             over them, an axis as ``None`` to leave it out. With axes the
             length axis sets each sample's length; ``style`` picks the
             prompt only.
+        axes_weighting: ``"table"`` deals the axes' weights as they are,
+            ``"log"`` spreads them more evenly over each axis's values
+            (:func:`redact.content_moderation.axes.resolve`).
         seed: The seed of the deal.
         config_dir: A config folder whose ``generation_axes.json`` and
             ``dimensions.json`` are read in place of the packaged ones when
@@ -259,11 +263,13 @@ def generate_inputs(
 
     Raises:
         ValueError: ``constitution_df`` is None and no constitution is saved
-            under ``data_dir``, ``axes`` names an unknown axis or value, or
-            the folder or its plan file stops the stage
+            under ``data_dir``, ``axes`` names an unknown axis or value or
+            ``axes_weighting`` another weighting, or the folder or its plan
+            file stops the stage
             (``InputPipeline.run_from_constitution``).
     """
-    axes = generation_axes.resolve("inputs", axes, config_dir=config_dir)
+    axes = generation_axes.resolve(
+        "inputs", axes, weighting=axes_weighting, config_dir=config_dir)
     if constitution_df is None:
         constitution_df = _saved_constitution(data_dir)
     model = model or default_model_for_role("uncensored_gen")
@@ -350,6 +356,7 @@ def generate_outputs(
     max_attempts: int = 1,
     check_max_tokens: int | None = None,
     axes: dict | bool | None = None,
+    axes_weighting: str = "table",
     seed: int = 42,
     config_dir: str | Path | None = None,
     read_back: bool = True,
@@ -412,6 +419,9 @@ def generate_outputs(
             ``outputs`` section of ``configs/generation_axes.json``: ``None``
             for those, ``False`` for none, or ``{axis: {value: weight}}``
             over them, an axis as ``None`` to leave it out.
+        axes_weighting: ``"table"`` deals the axes' weights as they are,
+            ``"log"`` spreads them more evenly over each axis's values
+            (:func:`redact.content_moderation.axes.resolve`).
         seed: The seed of the deal.
         config_dir: A config folder whose ``generation_axes.json`` and
             ``dimensions.json`` are read in place of the packaged ones when
@@ -431,10 +441,12 @@ def generate_outputs(
 
     Raises:
         ValueError: ``inputs`` is None and the run has no input sample at all,
-            ``axes`` names an unknown axis or value, or the plan file or the
-            file's columns stop a resume (:func:`run_output_generation`).
+            ``axes`` names an unknown axis or value or ``axes_weighting``
+            another weighting, or the plan file or the file's columns stop a
+            resume (:func:`run_output_generation`).
     """
-    axes = generation_axes.resolve("outputs", axes, config_dir=config_dir)
+    axes = generation_axes.resolve(
+        "outputs", axes, weighting=axes_weighting, config_dir=config_dir)
     out_path = (
         Path(output_path) if output_path
         else paths.output_responses_csv(data_dir)
@@ -919,7 +931,9 @@ def build_dataset(
     Each file is copied in chunks into a temporary file that then replaces
     it. Only the rows whose ``accepted`` is true are copied; a CSV without
     that column is copied whole. A row whose ``sample_id`` an earlier part
-    of its file wrote is left out.
+    of its file wrote is left out, and so is a benign or dual-use benign
+    variation made with a technique the natural kind does not draw (a plan
+    made before it left the kind), with one WARNING that counts them.
 
     The inputs are read from ``constitution_inputs_merged.csv``, which the
     inputs stage writes, or else from the category files of
@@ -1017,6 +1031,13 @@ def build_dataset(
     # A row whose id an earlier part wrote is left out: an adversarial no-op
     # is its input, and a variation can be a jailbreak's text.
     written = write_concat(out_path, list(parts.values()), unique="sample_id")
+    guard = parts["variations"].where if "variations" in parts else None
+    if guard is not None and guard.left_out:
+        logger.warning(
+            "Variations: left out %d benign or dual-use benign rows made with a "
+            "technique the natural kind does not draw (%s); run the natural kind "
+            "again with resume=False to replace them.",
+            guard.left_out, ", ".join(sorted(guard.techniques)))
 
     if verbose:
         by_type: Counter = Counter()
@@ -1067,10 +1088,11 @@ def _stage_parts(
                 logger.info("Inputs: none found")
 
     # A file without a row adds no column to the merged CSV.
-    for name, path, dataset_type in (
-            ("jailbreaks", at(jailbreak_path, paths.jailbreaks_csv), "jailbreak"),
+    for name, path, dataset_type, where in (
+            ("jailbreaks", at(jailbreak_path, paths.jailbreaks_csv), "jailbreak",
+             None),
             ("variations", at(variations_path, paths.variations_csv),
-             "natural_variation")):
+             "natural_variation", _NaturalVariations())):
         label = name.capitalize()
         if not include[name]:
             continue
@@ -1078,7 +1100,8 @@ def _stage_parts(
             if verbose:
                 logger.info("%s: file not found (%s)", label, path)
         elif has_rows(path):
-            parts[name] = Part(path, dataset_type, accepted_only=True, label=label)
+            parts[name] = Part(path, dataset_type, accepted_only=True, label=label,
+                               where=where)
         elif verbose:
             logger.info("%s: none found", label)
 
@@ -1104,6 +1127,36 @@ def _stage_parts(
         if verbose and not {"paraphrases_inputs", "paraphrases_outputs"} & set(parts):
             logger.info("Paraphrases: none found")
     return parts
+
+
+#: The entry types whose variations a build keeps only when the natural kind
+#: draws every technique that made them.
+_BENIGN_ENTRY_TYPES = (EntryType.BENIGN.value, EntryType.DUAL_USE_BENIGN.value)
+
+
+class _NaturalVariations:
+    """The ``where`` of the variations part: it leaves out a benign or
+    dual-use benign row whose ``technique`` holds one the natural kind does
+    not draw (its spec ``kinds`` lack ``natural``), as a plan made before the
+    technique left the natural kind holds, counting them in ``left_out`` and
+    their techniques in ``techniques``. A harmful-labelled row stays.
+    """
+
+    def __init__(self) -> None:
+        self.natural = {fn.__name__ for fn in jailbreak_pool.all_techniques()
+                        if "natural" in getattr(fn, "kinds", ())}
+        self.left_out = 0
+        self.techniques: set[str] = set()
+
+    def __call__(self, chunk: pd.DataFrame) -> pd.Series:
+        if not {"technique", "entry_type"} <= set(chunk.columns):
+            return pd.Series(True, index=chunk.index)
+        unnatural = chunk["technique"].fillna("").astype(str).map(
+            lambda chain: [t for t in chain.split("+") if t and t not in self.natural])
+        out = chunk["entry_type"].isin(_BENIGN_ENTRY_TYPES) & unnatural.map(bool)
+        self.left_out += int(out.sum())
+        self.techniques.update(t for chain in unnatural[out] for t in chain)
+        return ~out
 
 
 #: The files of an eval build, by the key its front returns their rows under.

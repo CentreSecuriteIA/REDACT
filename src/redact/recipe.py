@@ -225,7 +225,8 @@ def load_params(
     Raises:
         ValueError: A key is not a stage's name, nor a comment (``_`` first),
             ``params["jailbreaks"]`` sets a key of the augmentation section,
-            or a stage with generation axes has an ``axes`` entry
+            or a stage with generation axes has an ``axes`` or
+            ``axes_weighting`` entry
             :func:`redact.content_moderation.axes.resolve` refuses (read
             against ``config_dir``'s ``generation_axes.json`` when it has
             one) or a ``seed`` that is not a whole number.
@@ -270,9 +271,9 @@ def _check_jailbreak_params(params: dict) -> None:
 
 
 def _check_generation_params(params: dict, config_dir: str | Path | None) -> None:
-    """Refuse an ``axes`` entry of a stage with generation axes that
-    :func:`redact.content_moderation.axes.resolve` refuses, and a ``seed``
-    of one that is not a whole number.
+    """Refuse an ``axes`` or ``axes_weighting`` entry of a stage with
+    generation axes that :func:`redact.content_moderation.axes.resolve`
+    refuses, and a ``seed`` of one that is not a whole number.
 
     Raises:
         ValueError: The stage and what is wrong.
@@ -281,8 +282,10 @@ def _check_generation_params(params: dict, config_dir: str | Path | None) -> Non
 
     for stage in generation_axes.STAGES:
         given = params.get(stage) or {}
-        if "axes" in given:
-            generation_axes.resolve(stage, given["axes"], config_dir=config_dir)
+        if "axes" in given or "axes_weighting" in given:
+            generation_axes.resolve(
+                stage, given.get("axes"),
+                weighting=given.get("axes_weighting", "table"), config_dir=config_dir)
         seed = given.get("seed")
         if "seed" in given and (isinstance(seed, bool) or not isinstance(seed, int)):
             raise ValueError(
@@ -360,7 +363,8 @@ def check_dimensions(
     draws vary the same dimension (:func:`redact.dimensions.check`).
 
     The axes are each stage's in ``generation_axes.json`` with the ``axes``
-    entry of its params over them, read as the stage gets them
+    entry of its params over them, weighted by its ``axes_weighting``, read
+    as the stage gets them
     (:func:`stage_params`: the ``dataset_type`` file's, with ``params``, the
     params file's, over them); the families are those of the techniques each
     kind of ``augmentations`` (resolved) draws, and the dimensions those of
@@ -380,8 +384,10 @@ def check_dimensions(
 
     varied = {}
     for stage in generation_axes.STAGES:
-        given = stage_params(stage, dataset_type, params, config_dir).get("axes")
-        axes = generation_axes.resolve(stage, given, config_dir=config_dir)
+        given = stage_params(stage, dataset_type, params, config_dir)
+        axes = generation_axes.resolve(
+            stage, given.get("axes"),
+            weighting=given.get("axes_weighting", "table"), config_dir=config_dir)
         varied.update({f"{stage}.{axis}": tag
                        for axis, tag in generation_axes.varied(axes).items()})
     tags = {name: family["dimension"]

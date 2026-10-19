@@ -2,6 +2,7 @@
 per unit, the rendered spec, the columns and the coverage tables."""
 
 import csv
+import math
 from collections import Counter
 
 import pytest
@@ -103,6 +104,63 @@ class TestTheOverlay:
     def test_an_unknown_stage_raises(self):
         with pytest.raises(ValueError, match="no generation axes"):
             A.resolve("jailbreaks")
+
+
+def _weights(axes: dict, axis: str) -> dict:
+    return {value: v["weight"] for value, v in axes[axis]["values"].items()}
+
+
+class TestTheLogWeighting:
+    # The packaged inputs table, log-scaled, to three places.
+    _SCALED = {
+        "length": {"fragment": .190, "one_liner": .252, "short": .252, "long": .216,
+                   "very_long": .090},
+        "register": {"casual": .290, "neutral": .271, "formal": .181,
+                     "technical": .129, "emotional": .129},
+        "framing": {"direct_request": .272, "question": .258, "advice": .221,
+                    "statement": .157, "opinion_or_validation": .092},
+        "directness": {"explicit": .461, "implicit": .339, "euphemistic": .200},
+    }
+    _ANONYMOUS = .166
+    _ROLE = .060
+
+    def test_the_packaged_inputs_are_spread_by_one_plus_the_log_of_w_over_the_least(
+            self):
+        axes = A.resolve("inputs", weighting="log")
+        for axis, expected in self._SCALED.items():
+            assert {value: round(w, 3) for value, w in _weights(axes, axis).items()} \
+                == expected, axis
+        writer = _weights(axes, "writer")
+        assert round(writer.pop("anonymous"), 3) == self._ANONYMOUS
+        assert {round(w, 3) for w in writer.values()} == {self._ROLE}
+
+    def test_an_axis_with_one_value_dealt_is_unchanged(self):
+        assert A.resolve("inputs", weighting="log")["focus"] == \
+            A.resolve("inputs")["focus"]
+
+    def test_the_table_weighting_is_the_table(self):
+        assert A.resolve("inputs", weighting="table") == A.resolve("inputs")
+
+    def test_the_overlay_is_scaled_and_a_weight_of_zero_stays_zero(self):
+        given = {"length": {"fragment": 1, "one_liner": 0, "short": 1, "long": 4,
+                            "very_long": 0}}
+        lengths = _weights(A.resolve("inputs", given, weighting="log"), "length")
+        assert lengths["one_liner"] == lengths["very_long"] == 0
+        least = 1 / (3 + math.log(4))
+        assert lengths == pytest.approx({
+            "fragment": least, "one_liner": 0, "short": least, "long": 1 - 2 * least,
+            "very_long": 0})
+
+    def test_a_pinned_axis_stays_pinned(self):
+        pinned = {"directness": {"explicit": 1, "implicit": 0, "euphemistic": 0}}
+        axes = A.resolve("inputs", pinned, weighting="log")
+        assert axes["directness"] == A.resolve("inputs", pinned)["directness"]
+        assert "directness" not in A.varied(axes)
+
+    def test_another_weighting_raises_naming_the_known_ones(self):
+        with pytest.raises(ValueError, match=r"inputs.axes_weighting must be one of "
+                                             r"\['table', 'log'\], got 'flat'"):
+            A.resolve("inputs", weighting="flat")
 
 
 class TestTheDeal:

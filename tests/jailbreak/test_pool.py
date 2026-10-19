@@ -1,5 +1,8 @@
 """The technique pool: every registered technique, a kind's filters, the registry."""
 
+import json
+from pathlib import Path
+
 import pytest
 
 import redact.jailbreak.pool as JPool
@@ -15,6 +18,15 @@ from redact.jailbreak.pool import (
 )
 from redact.jailbreak.requests import get_all_request_functions
 from redact.jailbreak.technique import load_spec
+
+#: The eval type's attack pool, sorted: ``fixtures/eval_pool.json``.
+EVAL_POOL = json.loads(
+    (Path(__file__).parents[1] / "fixtures" / "eval_pool.json").read_text(
+        encoding="utf-8"))
+#: The natural kind's default pool, sorted: ``fixtures/natural_pool.json``.
+NATURAL_POOL = json.loads(
+    (Path(__file__).parents[1] / "fixtures" / "natural_pool.json").read_text(
+        encoding="utf-8"))
 
 
 def _in(family: str, pool: list) -> list:
@@ -80,15 +92,89 @@ def test_allow_lists_admit_their_families_and_techniques_then_deny_removes():
     assert "to_json" in names and "to_rewrite_with_typos_low" in names
 
 
-def test_the_default_variation_pool_is_the_natural_list():
+def _family(*names: str) -> list[str]:
+    return [fn.__name__ for fn in all_techniques() if set(names) & set(fn.families)]
+
+
+def test_the_default_variation_pool_is_the_46_pinned_natural_techniques():
+    """A technique added to a family the spec marks natural takes its
+    family's kinds, so it joins the natural pool unless its entry says
+    ``["adversarial"]``. This fails until the owner decides, in the spec and
+    ``fixtures/natural_pool.json``."""
     pool = technique_pool(resolve(None, "natural"))
-    families = {fn.families[0] for fn in pool}
-    assert {"typos", "structural", "answer_language", "asking"} <= families
-    attacks = {"translation", "framing", "persona", "fsh", "sensitive_words"}
-    assert not attacks & families
-    names = {fn.__name__ for fn in pool}
-    assert {"to_leetspeak_basic", "to_adversarial_suffix_emoji"} <= names
-    assert not {"to_refusal_then_comply", "to_prefix_injection", "to_base64"} & names
+    assert sorted(fn.__name__ for fn in pool) == NATURAL_POOL
+    assert len(pool) == 46      # noqa: PLR2004
+    # Family by family: two typos, four whole families, four answer formats,
+    # and three techniques of attack families.
+    listed = sorted([
+        "to_rewrite_with_typos_low", "to_rewrite_with_typos_medium",
+        *_family("casual_writing", "answer_language", "asking", "indirect"),
+        "to_answer_in_markdown", "to_answer_as_tutorial", "to_answer_as_code",
+        "to_answer_as_structured_data",
+        "to_leetspeak_basic", "to_adversarial_suffix_punctuation",
+        "to_adversarial_suffix_emoji"])
+    assert listed == NATURAL_POOL
+    assert {fn.families[0] for fn in pool} == {
+        "typos", "casual_writing", "answer_language", "answer_format", "asking",
+        "indirect", "encode", "suffixes"}
+
+
+def test_the_default_attack_pool_is_123_techniques_in_21_families():
+    pool = technique_pool(resolve(None, "adversarial"))
+    assert len(pool) == 123     # noqa: PLR2004
+    assert len({fn.families[0] for fn in pool}) == 21     # noqa: PLR2004
+
+
+def test_the_natural_kind_draws_only_what_the_spec_marks_natural():
+    natural = {fn.__name__ for fn in all_techniques() if "natural" in fn.kinds}
+    assert natural == {*NATURAL_POOL, *_family("translation")}
+    # Translation is natural too, when the kind's switch is on.
+    pool = technique_pool(resolve({"natural": {"translation": True}}, "natural"))
+    assert sorted(fn.__name__ for fn in pool) == sorted(natural)
+    # A family allowed whole gives its natural techniques only.
+    typos = resolve({"natural": {"families": {"allow": ["typos"]},
+                                 "techniques": {"allow": None}}}, "natural")
+    assert [fn.__name__ for fn in technique_pool(typos)] == [
+        "to_rewrite_with_typos_low", "to_rewrite_with_typos_medium"]
+    for name in ("to_rewrite_with_typos_high", "to_rewrite_with_typos_insane",
+                 "to_answer_as_dialogue", "to_answer_as_story", "to_json",
+                 "to_use_past_tense", "to_continue_passage"):
+        assert name not in natural
+
+
+def test_every_technique_is_adversarial_and_a_technique_s_kinds_win(monkeypatch):
+    from redact.jailbreak.technique import DEFAULT_KINDS, family_kinds
+
+    assert all("adversarial" in fn.kinds for fn in all_techniques())
+    assert family_kinds("encode") == list(DEFAULT_KINDS) == ["adversarial"]
+    by_name = registry(all_techniques())
+    assert by_name["to_leetspeak_basic"].kinds == ["adversarial", "natural"]
+    assert family_kinds("typos") == ["adversarial", "natural"]
+    assert by_name["to_rewrite_with_typos_high"].kinds == ["adversarial"]
+    # A kind draws only what its kinds name: a technique left out of the
+    # adversarial kind would leave its pool.
+    natural_only = by_name["to_lowercase"]
+    monkeypatch.setattr(natural_only, "kinds", ["natural"])
+    pool = technique_pool(_kind(families={"allow": ["casual_writing"]}))
+    assert natural_only not in pool and pool
+    assert natural_only in technique_pool(resolve(None, "natural"))
+
+
+@pytest.mark.parametrize("kinds", [[], ["natural", "natural"], ["attack"], "natural"])
+def test_kinds_that_are_not_a_list_of_kinds_raise_at_tagging(monkeypatch, kinds):
+    import redact.jailbreak.technique as T
+
+    spec = load_spec()
+    techniques = {**spec["techniques"],
+                  "to_base64": {**spec["techniques"]["to_base64"], "kinds": kinds}}
+    monkeypatch.setattr(T, "load_spec", lambda: {**spec, "techniques": techniques})
+
+    def to_base64(prompt):
+        return prompt, ""
+
+    with pytest.raises(ValueError, match="the kinds of technique 'to_base64' must be "
+                       r"a non-empty list of \['adversarial', 'natural'\]"):
+        T.tag([to_base64])
 
 
 def test_registry_names_every_technique_it_is_given():
@@ -121,11 +207,15 @@ def test_the_switch_admits_the_whole_family_when_no_list_names_one_of_it():
     assert _languages(pool) == every
 
 
-def test_the_eval_pool_is_37_techniques_in_10_families():
+def test_the_eval_pool_is_the_37_pinned_techniques_in_10_families():
+    """``eval.json`` allows whole families, so a technique added to one of
+    them joins the eval pool unless ``eval.json`` denies it. This fails until
+    the owner decides, in ``eval.json`` and ``fixtures/eval_pool.json``."""
     from redact.recipe import load_dataset_type
 
     section = load_dataset_type("eval")["augmentations"]
     pool = technique_pool(resolve(section, "adversarial"))
+    assert sorted(fn.__name__ for fn in pool) == EVAL_POOL
     assert len(pool) == 37      # noqa: PLR2004
     assert {fn.families[0] for fn in pool} == {
         "translation", "encode", "fsh", "dap", "framing", "structural",

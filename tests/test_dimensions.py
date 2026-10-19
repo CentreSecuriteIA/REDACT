@@ -158,9 +158,9 @@ class TestTheCheck:
         message = str(raised.value)
         assert "the axis inputs.focus (focus) and the request_shape families" in message
         assert "adversarial: asking, continuation" in message
-        assert "natural: asking, continuation, indirect, temporal" in message
-        assert ("the container families (adversarial: structural; natural: "
-                "structural)") in message
+        # The natural kind draws neither continuation, temporal nor structural.
+        assert "natural: asking, indirect)" in message
+        assert "the container families (adversarial: structural)." in message
         assert "the example_priming families (adversarial: dap, fsh)" in message
         assert message.count("undecided") == len(("request_shape", "container",
                                                    "example_priming"))
@@ -194,6 +194,17 @@ class TestTheCheck:
         assert ("the axis inputs.register (tone) and the noise families "
                 "(natural: typos).") in str(raised.value)
         assert "undecided" not in str(raised.value)
+
+    def test_authorship_and_role_framing_are_ruled_distinct(self):
+        """The owner's ruling: who writes the message (the writer axis) is not
+        a role or scenario the message sets up, so the axis varies beside the
+        persona, framing, cognitive and impersonation families."""
+        assert dimensions.relation("authorship", "role_framing") is None
+        assert A.varied(A.resolve("inputs"))["writer"] == "authorship"
+        drawn = augmentations_of({})["adversarial"]
+        assert set(_FAMILY_TAGS["role_framing"]) <= {
+            fn.families[0] for fn in JPool.technique_pool(drawn)}
+        check_dimensions({}, augmentations_of({}))
 
     def test_one_tag_on_both_sides_is_one_dimension(self, table_at):
         table_at({"noise": {"side": "generation", "definition": "A thing."}})

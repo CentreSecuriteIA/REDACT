@@ -54,10 +54,11 @@ Pick a checker that can judge. In the GPU check, a 3B checker accepted 2 of
 
 ## Settings
 
-Params keys: `style`, `samples_per_entry`, `entry_types`, `axes`, `seed`,
-`batch_size`, `max_attempts`, `check_max_tokens`
+Params keys: `style`, `samples_per_entry`, `entry_types`, `axes`,
+`axes_weighting`, `seed`, `batch_size`, `max_attempts`, `check_max_tokens`
 ([configuration.md](../configuration.md#inputs)). The `eval` type pins the
-`directness` axis at `explicit`.
+`directness` axis at `explicit`; the `training` type deals the weights
+log-scaled (`axes_weighting: "log"`).
 
 ## Unit and ledger key
 
@@ -85,8 +86,12 @@ and check requests take the async lane and units finish apart.
 ## The generation axes
 
 Each unit is dealt one spec: a value of each axis of the `inputs` section,
-at the table's weights with the `axes` param over them. The `domain` axis is
-not dealt: it shows the entry's subcategory.
+at the table's weights with the `axes` param over them, log-scaled when
+`axes_weighting` is `"log"`, as in the `training` type
+([configuration.md](../configuration.md#log-weighting)): each value of
+weight w above 0 weighted 1 + ln(w / m), m the axis's least weight above 0,
+normalised per axis. The `domain` axis is not dealt: it shows the entry's
+subcategory.
 
 - **Groups.** Units are dealt per `(source_category, entry_type)`, the
   input tree's folders and the coverage table's columns. A group's units go
@@ -121,7 +126,7 @@ Under `Datasets/constitution_inputs/`:
 | `<category>/samples.csv` | One per category (`source_category`): a harmful-taxonomy category, or a benign one for the general-benign part; a benign category named as a harmful one shares its file, its rows told apart by `entry_type` and `source_taxonomy`. Accepted and rejected rows |
 | `constitution_inputs.manifest.jsonl` | The plan of the current style, written again every run |
 | `constitution_inputs.state.jsonl` | The ledger, for every style |
-| `constitution_inputs.plan.json` | What the deal was made with: `seed`, `samples_per_entry`, and each dealt axis's weights (`null` without axes). Labels and hints are not in it: rewording them changes no deal |
+| `constitution_inputs.plan.json` | What the deal was made with: `seed`, `samples_per_entry`, and each dealt axis's weights as dealt, log-scaled with `axes_weighting` `"log"` (`null` without axes). Labels and hints are not in it: rewording them changes no deal |
 | `constitution_inputs.coverage.csv` | Per axis value and group: `axis`, `value`, `category`, `entry_type`, `planned` (from the manifest), `accepted` (from the acks of this style). Every value of the table has a row in every group seen, `0` when never dealt. Written when the stage ends, and when it has nothing to run; removed without axes |
 
 And `Datasets/constitution_inputs_merged.csv`: the rows of every category
@@ -160,10 +165,13 @@ Units the ledger records are skipped. The ids on the ledger records keep a
 text from being written twice.
 
 The deal is made again, and compared with `constitution_inputs.plan.json`:
-a resume whose `seed`, `samples_per_entry` or axes' weights differ raises
-`Inputs: this run's [...] differ from those the units in ... were dealt
-with`, naming the keys and `resume=False`. A folder with finished units and
-no plan file runs unchecked, with a WARNING.
+a resume whose `seed`, `samples_per_entry` or axes' weights differ (another
+`axes` or `axes_weighting`) raises `Inputs: this run's [...] differ from
+those the units in ... were dealt with`, naming the keys and `resume=False`.
+The plan file is the folder's, for every style: a `generate_inputs` call on
+a training run's folder passes `axes_weighting="log"`, as the run does. A
+folder with finished units and no plan file runs unchecked, with a
+WARNING.
 
 A folder written before units had an iteration stops before any call: a
 ledger that acks a unit without `iteration` (an entry was one call then), or

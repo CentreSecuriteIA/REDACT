@@ -177,7 +177,7 @@ def checked(
 
 
 def extracted(
-    gen: ModelClient,
+    gen: ModelClient | str | None,
     build_gen_messages: Callable[[], list[dict]],
     extract: Callable[[str], list[str]],
     *,
@@ -188,7 +188,8 @@ def extracted(
     """Generate until ``extract(reply)`` returns samples.
 
     Args:
-        gen: The generating model.
+        gen: The generating model: a client, or a model name, which the
+            driver resolves (as a jailbreak technique's requests carry it).
         build_gen_messages: Builds the messages; called once per attempt.
         extract: ``reply -> samples``; ``[]`` for a reply rejected whole.
         internals_id: The first attempt's capture id.
@@ -202,8 +203,10 @@ def extracted(
     """
     if max_attempts < 1:
         raise ValueError(f"max_attempts must be at least 1, got {max_attempts}.")
+    request = (LLMRequest if gen is None or isinstance(gen, str)
+               else LLMRequest.for_client)
     for attempt in range(1, max_attempts + 1):
-        raw = yield LLMRequest.for_client(
+        raw = yield request(
             gen, build_gen_messages(), internals_id=_attempt_id(internals_id, attempt),
             max_tokens=max_tokens,
         )

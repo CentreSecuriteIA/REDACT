@@ -13,10 +13,11 @@ def _pick_by_family(
 ) -> Callable:
     """Pick a family, then a technique within it.
 
-    Without a ``dealer`` the family is uniform. With one, it is the eligible
-    family with the lowest count-over-weight so far in the group (ties broken by
-    ``rng``), so a group's families come out even. The technique within the
-    family is uniform either way.
+    Without a ``dealer`` both picks are uniform. With one, the family is the
+    eligible family with the lowest count-over-weight so far in the group, and
+    the technique the eligible member of that family with the lowest count so
+    far (:meth:`~redact.dataset.dealing.Dealer.pick_member`), ties broken by
+    ``rng``, so a group's families and each family's members come out even.
     """
     family_map: dict[str, list[Callable]] = {}
     for fn in candidates:
@@ -24,10 +25,9 @@ def _pick_by_family(
         family_map.setdefault(fam, []).append(fn)
     families = list(family_map)
     if dealer is None:
-        chosen_family = rng.choice(families)
-    else:
-        chosen_family = dealer.pick(rng, families)
-    return rng.choice(family_map[chosen_family])
+        return rng.choice(family_map[rng.choice(families)])
+    members = {fn.__name__: fn for fn in family_map[dealer.pick(rng, families)]}
+    return members[dealer.pick_member(rng, list(members))]
 
 
 def sample_combination(
@@ -51,8 +51,9 @@ def sample_combination(
     - **Budget-driven** (default): probabilistic per-layer picking governed by
         ``max_complexity``, ``max_obfuscations``, and ``sampling_probs``. The
         hacking, manipulation and requests layers are picked first, at their
-        rates; the obfuscations then fill what the budget leaves, up to
-        ``max_obfuscations``.
+        rates; then the request obfuscation, when allowed and at its rate;
+        the obfuscations then fill what the budget leaves, up to
+        ``max_obfuscations`` with the request obfuscation counted.
     - **Count-driven** (``exact_techniques`` set): delegates to
         :func:`sample_exact_combination`, which picks exactly that many compatible
         techniques and ignores the complexity / obfuscation budget entirely. The
@@ -62,22 +63,32 @@ def sample_combination(
         rng: Random instance for reproducibility.
         pool: All available tagged technique functions.
         max_complexity: Maximum total complexity score across all selected techniques.
-        max_obfuscations: Maximum number of distinct obfuscation families to pick.
+        max_obfuscations: Maximum number of distinct obfuscation families to
+            pick, the request obfuscation included.
         include_hacking: Whether to consider hacking-layer techniques.
         include_manipulation: Whether to consider manipulation-layer techniques.
         include_obfuscation: Whether to consider obfuscation-layer techniques.
         include_requests: Whether to consider request-layer techniques.
         allow_request_obfuscation: If True, optionally add a light obfuscation after
-            the request layer (encode_light or translation only).
+            the request layer (encode_light or translation only). It is decided
+            (a dealer's ``include``, else an ``rng`` draw) and drawn before the
+            other obfuscations, taking one ``max_obfuscations`` slot and its
+            complexity from what they may use; with ``max_obfuscations`` 0 it
+            has no slot.
         sampling_probs: Per-layer inclusion probabilities. Overrides the
-            ``sampling_probs`` block in combination_spec.json. Recognised keys:
+            ``layer_rates`` block in combination_spec.json. Recognised keys:
             ``hacking``, ``manipulation``, ``requests``, ``request_obfuscation``.
         exact_techniques: If set, switch to count-driven mode and pick exactly this
             many techniques (best-effort if the pool runs out). The budget knobs are
             ignored in this mode.
+        dealer: The plan's :class:`~redact.dataset.dealing.Dealer` for the unit's
+            group, which deals the layers, families and techniques; ``None``
+            draws each from ``rng``.
 
     Returns:
-        A combined technique function, or an identity function if nothing was selected.
+        A combined technique function, or an identity function if nothing was
+        selected. In budget mode its ``request_obfuscation`` is the request
+        obfuscation it holds (applied last), or ``None``.
     """
     if exact_techniques is not None:
         return sample_exact_combination(
@@ -148,10 +159,24 @@ def sample_combination(
         if pick is not None:
             _commit(pick)
 
-    # Phase 4: Obfuscation (up to max_obfuscations families), what the budget leaves
+    # Phase 5, decided and drawn before phase 4: a request-layer obfuscation
+    # (optional, if enabled). It holds one of the max_obfuscations slots and
+    # its complexity, so the obfuscations fill what it leaves and the
+    # combination never holds more than max_obfuscations of them.
+    request_obfuscation: Callable | None = None
+    obfuscation_slots = max_obfuscations
+    if (allow_request_obfuscation and max_obfuscations > 0
+            and _include("request_obfuscation", p_request_obfuscation)):
+        req_obfusc_candidates = request_obfuscation_candidates(current_pool)
+        if req_obfusc_candidates:
+            request_obfuscation = _pick_by_family(rng, req_obfusc_candidates, dealer)
+            _commit(request_obfuscation)
+            obfuscation_slots -= 1
+
+    # Phase 4: Obfuscation (up to the slots left), what the budget leaves
     if include_obfuscation:
         obfusc_count = 0
-        while obfusc_count < max_obfuscations:
+        while obfusc_count < obfuscation_slots:
             candidates = [f for f in current_pool if getattr(f, "layer", None) == "obfuscation"]
             if not candidates:
                 break
@@ -159,27 +184,21 @@ def sample_combination(
             _commit(pick)
             obfusc_count += 1
 
-    # Phase 5: Request-layer obfuscation (optional, if enabled). Kept out of
-    # `selected` because it is the one pick whose position is *not* its layer's:
-    # it obfuscates the finished request, so it runs after the request template.
-    request_obfuscation: Callable | None = None
-    if allow_request_obfuscation and rng.random() < p_request_obfuscation:
-        req_obfusc_candidates = request_obfuscation_candidates(current_pool)
-        if req_obfusc_candidates:
-            request_obfuscation = _pick_by_family(rng, req_obfusc_candidates, dealer)
-
-    if not selected and request_obfuscation is None:
+    if not selected:
         # combine_techniques() with no techniques returns a no-op combined
         # callable named "identity" with .techniques == [].
         return combine_techniques()
 
-    # Order the regular picks here and chain in that exact order: passing the
-    # request-layer obfuscation to combine_techniques() for sorting would move
-    # it back into the obfuscation slot, i.e. before the request template.
-    ordered = in_layer_order(selected)
+    # Order the regular picks here and chain in that exact order. The request
+    # obfuscation is the one pick whose position is *not* its layer's: it
+    # obfuscates the finished request, so it runs after the request template;
+    # sorting it with the others would move it back into the obfuscation slot.
+    ordered = in_layer_order(fn for fn in selected if fn is not request_obfuscation)
     if request_obfuscation is not None:
         ordered.append(request_obfuscation)
-    return combine_techniques(*ordered, sort_by_hierarchy=False)
+    combined = combine_techniques(*ordered, sort_by_hierarchy=False)
+    combined.request_obfuscation = request_obfuscation
+    return combined
 
 
 def sample_exact_combination(

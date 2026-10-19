@@ -1,5 +1,5 @@
 """The techniques a run may draw from: every registered one, filtered by a
-kind of the run's augmentation section.
+kind of the run's augmentation section and by the kinds the spec gives each.
 
 A fresh plan draws from the filtered pool; a planned row is read back through
 the registry of every technique, so a plan made with another pool still
@@ -14,7 +14,7 @@ from .hacking import get_all_hacking_functions
 from .manipulation import get_all_manipulation_functions
 from .obfuscation import get_all_obfuscation_functions
 from .requests import get_all_request_functions
-from .technique import load_spec
+from .technique import DEFAULT_KINDS, load_spec
 
 #: The family a kind's ``translation`` switch decides.
 TRANSLATION = "translation"
@@ -63,6 +63,14 @@ def _check_dimensions() -> None:
     check_tags("combination_spec.json: families", families, "augmentation")
 
 
+def kind_of(resolved: dict) -> str:
+    """The kind ``resolved`` is: ``"natural"`` when it draws an exact count of
+    techniques (``exact_techniques``, as
+    :func:`~redact.jailbreak.augmentation.rounds_of` reads it), else
+    ``"adversarial"``."""
+    return "natural" if "exact_techniques" in resolved else "adversarial"
+
+
 def technique_pool(resolved: dict) -> list[Callable]:
     """The techniques one kind of the augmentation section draws from, in
     registry order.
@@ -77,6 +85,9 @@ def technique_pool(resolved: dict) -> list[Callable]:
     whatever the lists say. When it is true, the family is in, though
     denied as a family, and with an allow list it is in whole unless
     ``techniques.allow`` names some of its techniques: then those only.
+    Last, only the techniques whose spec ``kinds`` hold the kind
+    (:func:`kind_of`) stay: the natural kind draws only what the spec marks
+    natural, and every technique's ``kinds`` hold ``adversarial`` today.
     """
     families, techniques = resolved["families"], resolved["techniques"]
     denied_layers = set(resolved["layers"]["deny"])
@@ -99,7 +110,8 @@ def technique_pool(resolved: dict) -> list[Callable]:
         pool = [fn for fn in pool
                 if not getattr(fn, "requires_llm", False)
                 and not getattr(fn, "requires_benign", False)]
-    return pool
+    kind = kind_of(resolved)
+    return [fn for fn in pool if kind in getattr(fn, "kinds", DEFAULT_KINDS)]
 
 
 def languages() -> set[str]:

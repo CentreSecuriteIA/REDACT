@@ -983,26 +983,67 @@ def test_the_types_params_lie_under_the_params_files():
     assert STAGES["constitution"].params(ctx)["entry_types"] == ["harmful", "benign"]
     assert STAGES["outputs"].params(ctx) == {}
     assert STAGES["jailbreaks"].params(_context("eval", {})) == {"seed": _EVAL_SEED}
-    assert STAGES["inputs"].params(_context("training", {})) == {}
+    assert STAGES["inputs"].params(_context("training", {})) == {
+        "axes_weighting": "log"}
+    assert STAGES["outputs"].params(_context("training", {})) == {}
 
 
 def test_the_eval_type_deals_every_input_explicit():
     """An implicit or euphemistic request is borderline by construction, and
     eval keeps the clear ends: directness varies no request_intent there, the
-    other axes keep training's weights, and the dimension check passes."""
+    other axes keep the table's weights, and the dimension check passes."""
     from redact.content_moderation import axes as A
     from redact.recipe import check_dimensions, stage_params
 
     evals = A.resolve("inputs", stage_params("inputs", "eval")["axes"])
-    training = A.resolve("inputs", stage_params("inputs", "training").get("axes"))
+    table = A.resolve("inputs")
     assert [value for value, entry in evals["directness"]["values"].items()
             if entry["weight"]] == ["explicit"]
     assert "directness" not in A.varied(evals)
-    assert A.varied(training)["directness"] == "request_intent"
+    assert A.varied(table)["directness"] == "request_intent"
     assert {axis: entry for axis, entry in evals.items() if axis != "directness"} \
-        == {axis: entry for axis, entry in training.items() if axis != "directness"}
+        == {axis: entry for axis, entry in table.items() if axis != "directness"}
     check_dimensions({}, load_recipe({"dataset_type": "eval"})["augmentations"],
                      dataset_type="eval")
+
+
+@pytest.mark.parametrize(("dataset_type", "weighting"), [
+    ("training", "log"), ("eval", "table")])
+def test_the_training_type_deals_the_log_scaled_weights_and_eval_the_tables(
+        tmp_path, monkeypatch, dataset_type, weighting):
+    """A run's inputs are dealt its type's axes, weighted as the type says;
+    the outputs keep the table's in both, and the dimension check passes."""
+    import redact.stages as P
+    from redact.content_moderation import axes as A
+    from redact.content_moderation.results import ConstitutionInputResult
+    from redact.recipe import check_dimensions, stage_params
+    from tests.conftest import MockBackend, make_client
+
+    dealt = {}
+
+    def run_from_constitution(self, **k):
+        dealt["inputs"] = A.deal_weights(k["axes"])
+        return ConstitutionInputResult()
+
+    monkeypatch.setattr(P.InputPipeline, "run_from_constitution",
+                        run_from_constitution)
+    monkeypatch.setattr(P.ModelClient, "create",
+                        lambda m: make_client(MockBackend("Yes"), m))
+    save_constitution(tmp_path)
+    try:
+        run_pipeline({"dataset_type": dataset_type, "data_dir": str(tmp_path),
+                      "stages": ["inputs"]}, verbose=False)
+    finally:
+        telemetry.uninstall()
+    given = stage_params("inputs", dataset_type).get("axes")
+    other = {"log": "table", "table": "log"}[weighting]
+    assert dealt["inputs"] == A.deal_weights(
+        A.resolve("inputs", given, weighting=weighting))
+    assert dealt["inputs"] != A.deal_weights(
+        A.resolve("inputs", given, weighting=other))
+    assert "axes_weighting" not in stage_params("outputs", dataset_type)
+    check_dimensions({}, load_recipe({"dataset_type": dataset_type})["augmentations"],
+                     dataset_type=dataset_type)
 
 
 def test_a_type_param_the_front_does_not_take_is_refused(monkeypatch):
@@ -1078,6 +1119,10 @@ def test_load_params_resolves_relative_to_base_dir(tmp_path):
     ({"inputs": {"axes": "all"}}, "inputs.axes must be an object"),
     ({"inputs": {"seed": "42"}}, "params['inputs'].seed must be a whole number"),
     ({"outputs": {"seed": True}}, "params['outputs'].seed must be a whole number"),
+    ({"inputs": {"axes_weighting": "flat"}},
+     "inputs.axes_weighting must be one of ['table', 'log'], got 'flat'"),
+    ({"outputs": {"axes": False, "axes_weighting": None}},
+     "outputs.axes_weighting must be one of ['table', 'log'], got None"),
 ])
 def test_a_wrong_axes_entry_or_seed_fails_at_load(params, named):
     with pytest.raises(ValueError, match=re.escape(named)):

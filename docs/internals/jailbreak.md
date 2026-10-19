@@ -18,15 +18,19 @@ the technique names are in [techniques.md](../techniques.md).
   name through the registry of every technique, not through the run's pool,
   so a plan made with another pool still replays.
 - A technique draws its random choices from the `rng` it is given, so a
-  replayed plan gives the same text.
+  replayed plan gives the same text within one version of the library. A
+  technique changed between versions draws differently: the ASCII-art cap
+  changes the font `to_ascii_art` draws for most texts over about 90
+  characters, so a plan kept across it mixes the two renderings
+  ([techniques.md](../techniques.md#what-the-families-do)).
 
 ## Modules
 
 | Module | Holds |
 |---|---|
-| `technique.py` | The technique contract, `load_spec`, `tag`, `DISCARDED` |
+| `technique.py` | The technique contract, `load_spec`, `tag`, `DISCARDED`, `KINDS`, `DEFAULT_KINDS`, `family_kinds` |
 | `hacking/`, `manipulation/`, `obfuscation/`, `requests/` | The techniques, one module per family (`distractor.py` holds both distractor families), each with a getter; `get_all_hacking_functions`, `get_all_manipulation_functions`, `get_all_obfuscation_functions`, `get_all_request_functions` per subpackage. `manipulation/benign.py` makes the benign data: one unit per subcategory of the benign taxonomy and answer type, keyed `(main_category, sub_category, answer_type)` |
-| `pool.py` | `all_techniques`, `technique_pool(kind)`, `languages`, `registry`, `uses_translation` |
+| `pool.py` | `all_techniques`, `technique_pool(kind)`, `kind_of`, `languages`, `registry`, `uses_translation` |
 | `augmentation.py` | `KINDS`, `defaults(config_dir)`, `resolve(section, kind, base=None, config_dir=None)`, `rounds_of(kind)`, `apply_flat_keywords`, `FLAT_KEYWORDS` |
 | `rules.py` | `compatible(selected, pool, remaining_complexity)`, `request_obfuscation_candidates` |
 | `sampling.py` | `sample_combination`, `sample_exact_combination`, `_pick_by_family` |
@@ -68,7 +72,10 @@ def to_y(prompt: str, **kwargs) -> TechniqueGen:
   attributes: `families`, `complexity`, `requires_llm`, `requires_benign`,
   `encode_weight`, `max_tokens`, `cross_incompatible_with` (families this
   technique itself may not join), and from the first family `layer` and
-  `within_layer_order`.
+  `within_layer_order`; `kinds` (the augmentation kinds that may draw it)
+  is the technique's own, else its first family's, else `["adversarial"]`.
+  A `kinds` that is not a non-empty list of `adversarial` and `natural`
+  raises at import.
 
 `run_chain(techniques, text, ...)` runs one input through its techniques in
 the order given. A transform runs inline; a generator's requests are yielded
@@ -140,23 +147,37 @@ the techniques still `compatible` with what is picked:
 1. `hacking`, when the layer joins (its rate);
 2. `manipulation`, when the layer joins;
 3. `requests`, when the layer joins;
-4. `obfuscation`: one pick after another, from what the budget leaves, until
-   `max_obfuscations` or until no technique fits;
-5. with `allow_request_obfuscation`, at the `request_obfuscation` rate, one
-   light `encode` technique (the light `to_sensitive_words_encode_*` among
-   them) or a translation, applied after the request technique.
+4. the request obfuscation (phase 5 in the code, decided and drawn before
+   phase 4): with `allow_request_obfuscation` and at least one
+   `max_obfuscations` slot, when it joins at the `request_obfuscation` rate
+   (the dealer's `include`, as for the layers; a per-unit draw without a
+   dealer), one light `encode` technique (the light
+   `to_sensitive_words_encode_*` among them) or a translation, applied
+   after the request technique;
+5. `obfuscation`: one pick after another, from what the budget leaves, until
+   `max_obfuscations`, less the request obfuscation's slot, or until no
+   technique fits.
 
-The apply order is the layers', whatever the pick order. A technique
-above the remaining complexity is never eligible, for the first pick too. The
-step-5 pick is drawn from the techniques still compatible and within the
-remaining complexity, and is not counted against `max_obfuscations`.
+The apply order is the layers', whatever the pick order, except the request
+obfuscation, which goes last. A technique above the remaining complexity is
+never eligible, for the first pick too. The request obfuscation is drawn
+from the techniques still compatible and within the remaining complexity,
+so it holds its slot and its complexity before the obfuscations fill the
+rest: a combination never has more than `max_obfuscations` obfuscations.
+With `allow_request_obfuscation` false (every packaged kind) the draws are
+those made before the request obfuscation was counted (member dealing
+aside); a test pins them. The combined function
+names its request obfuscation in `request_obfuscation` (`None` without
+one), which `_observe` counts in the dealer.
 
 **Count mode** (`exact_techniques: n`) picks exactly `n` compatible
 techniques from any layer, ignoring complexity. It returns fewer when the
 rules leave nothing; with the full pool, 1 and 2 are always reachable.
 
 Every pick is **family first** (`_pick_by_family`): a family, then a
-technique within it. The 20 translation languages are one choice, not 20.
+technique within it, both dealt when the plan passes its dealer
+([balanced dealing](#balanced-dealing)). The 20 translation languages are
+one choice, not 20.
 The rules are those of [techniques.md](../techniques.md#compatibility-rules).
 
 ## Balanced dealing
@@ -171,16 +192,38 @@ order.
   far are below `floor(rate x position + offset)`, where `position` counts
   the group's units so far and `offset` is a number in [0, 1) seeded per
   group and layer. A group gets `rate x size` picks, rounded down or up, and
-  a group of one takes the layer with probability `rate`.
+  a group of one takes the layer with probability `rate`. The request
+  obfuscation, when allowed, is dealt the same way under the name
+  `request_obfuscation`.
 - **Families.** Among the eligible families, the dealer picks the one with
   the lowest count over its weight (`family_weights`, 1 by default), ties
   broken by the unit's rng.
+- **Techniques.** Within that family, the dealer picks the eligible member
+  the group has dealt least (`Dealer.pick_member`, its own `members`
+  counter, apart from the families' `counts` the generation axes also
+  use), ties broken by the unit's rng. A family whose members cost
+  differently still favours its cheaper ones under the complexity budget
+  (`encode`, `sensitive_words`): a heavy member fits fewer units, as
+  wanted. A direct `sample_combination` call without a dealer picks both
+  uniformly, as the registry fixture's seeds pin. A fresh plan with the
+  same seed draws differently from one made before member dealing; a kept
+  plan replays unchanged.
 - **Repeats.** When a unit's combination equals one of its input's earlier
   iterations, it is drawn again without the dealer, up to 8 draws in all;
   the last is kept if none differs.
-- **Shortfall.** A layer two or more picks below its target in a group, as
-  when the rules or the pool leave no fitting technique, is logged as a
-  WARNING naming the coverage file.
+- **Shortfall.** A layer, or the request obfuscation step, two or more
+  picks below its target in a group, as when the rules or the pool leave no
+  fitting technique, is logged as a WARNING naming the coverage file.
+
+After each unit, `assign_combination` has `_observe` count the kept draw's
+families, techniques, layers and request obfuscation in the group's dealer. Each group has its own dealer; nothing is
+counted across groups.
+
+`tests/jailbreak/simulate.py` plans N synthetic inputs through `plan_run`
+(in a temporary folder) and gives each technique's share of the units and
+its share within its family; `py -m tests.jailbreak.simulate [N]` prints
+them for the default adversarial kind. The coverage table does not hold
+these shares.
 
 ## Seeds
 
@@ -194,8 +237,11 @@ joined by `::`: the same in every process, unlike Python's `hash`.
 | A technique's random choices | `stable_seed(seed, label, input_id, iteration, technique name)`, the label `jailbreak` or `variation` |
 
 So the plan does not depend on the order or the chunking of the inputs, and
-a replayed plan gives the same text. The manifest row records the round's
-settings and the `seed`, and `<stem>.plan.json` what the whole plan was made
+a replayed plan gives the same text within one version of the library. The
+plan file records no library version, and a row's `combination_spec_version`
+is the spec's, which a change to a technique's code need not move (the
+ASCII-art cap did not). The manifest row records the round's settings and
+the `seed`, and `<stem>.plan.json` what the whole plan was made
 with: `seed`, `rounds`, `pool` (sorted names), `family_weights`,
 `layer_rates`.
 
@@ -218,9 +264,22 @@ file), with `base`, the dataset type's section, resolved over it: a kind
 over the packaged default, when `section` gives it. A key starting with
 `_`, in the section or a kind, is a comment. With `translation` false, the
 translation an allow list or `family_weights` names is dropped with a
-WARNING (`_switch_off_translation`). `technique_pool(kind)` filters the
-registered techniques; with the switch on, a `techniques.allow` that names
-some languages (`pool.languages()`) admits those alone.
+WARNING (`_switch_off_translation`). `_check_kinds` raises for an allow
+list that names a family or technique whose spec `kinds` lack the kind.
+For a family, the message names those of its techniques the kind draws, to
+list under `techniques.allow`, and does not offer adding the kind to the
+family's `kinds`: they apply to every technique in it that sets none of
+its own.
+`technique_pool(kind)` filters the registered techniques; with the switch
+on, a `techniques.allow` that names some languages (`pool.languages()`)
+admits those alone. Last, it keeps the techniques whose `kinds` (set by
+`technique.tag`: the technique's own, else its first family's,
+`family_kinds`, else `DEFAULT_KINDS`, `["adversarial"]`) hold the kind,
+which `pool.kind_of(kind)` reads as `rounds_of` does: natural when the
+resolved kind has `exact_techniques`, so no key is added to it. Every
+technique holds `adversarial`, so only the natural pool is narrowed: to
+the 46 techniques of [techniques.md](../techniques.md#the-natural-pool) with
+translation off.
 `rounds_of(kind)` turns the kind into one sampler-settings dict per round:
 a natural round is `{"exact_techniques": n}`; an adversarial round is the
 budget keys, an `include_<layer>` per layer and `allow_request_obfuscation`

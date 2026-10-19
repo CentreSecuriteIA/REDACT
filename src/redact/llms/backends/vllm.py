@@ -29,6 +29,8 @@ from ..resources import estimate, measure
 from .base import ComputeConfig, LLMBackend, free_memory
 
 if TYPE_CHECKING:
+    from concurrent.futures import Future
+
     from ..model_config import ModelConfig
 
 logger = logging.getLogger(__name__)
@@ -88,6 +90,12 @@ _GRACE_S = 10.0
 _exit_hook_registered = False
 # Numbers the requests: an engine needs each id unique in the process.
 _request_ids = itertools.count()
+# Seconds between two stats lines of an engine built with disable_log_stats
+# false, as often as vLLM's own server logs them.
+_STATS_INTERVAL_S = 10.0
+# The task on the shared loop that has such an engine log its stats, per
+# engine key.
+_stats_tasks: dict[tuple, "Future"] = {}
 
 
 def set_planned_utilization(planned: dict[tuple, float], replace: bool = True) -> None:
@@ -361,8 +369,8 @@ def _engine(hf_model_id: str, quantization: str | None, vllm_kwargs: dict):
         # After the key is built, so the default never splits a shared engine.
         if not kwargs.get("max_model_len"):
             kwargs["max_model_len"] = estimate.effective_max_model_len(hf_model_id)
-        # vllm.LLM's default. Left unset, the engine logs a stats line every
-        # 10 seconds.
+        # vllm.LLM's default. Set false, the engine is asked for its stats
+        # line every _STATS_INTERVAL_S (_log_stats).
         kwargs.setdefault("disable_log_stats", True)
         # The plan's cards. Without a plan the engine takes the first visible
         # card(s), and the environment is left alone.
@@ -445,6 +453,8 @@ def _engine(hf_model_id: str, quantization: str | None, vllm_kwargs: dict):
         # Held from the start of the load; set after it, so a failed load
         # leaves no timer.
         _engine_loaded_at[key] = started
+        if not kwargs["disable_log_stats"]:
+            _stats_tasks[key] = aio.submit(_log_stats(engine))
 
         observe.record({
             "ev": "local",
@@ -463,6 +473,27 @@ def _engine(hf_model_id: str, quantization: str | None, vllm_kwargs: dict):
             "load_ms": round((time.perf_counter() - started) * 1000, 1),
         })
         return _engines[key]
+
+
+async def _log_stats(engine) -> None:
+    """Have ``engine`` log its stats, the prefix-cache hit rate among them,
+    every :data:`_STATS_INTERVAL_S` until cancelled: vLLM's ``AsyncLLM``
+    logs them only when asked. A failed call is logged at DEBUG."""
+    while True:
+        await asyncio.sleep(_STATS_INTERVAL_S)
+        try:
+            await engine.do_log_stats()
+        except Exception as exc:  # noqa: BLE001 — a stats call must not reach a request
+            logger.debug("[vllm] do_log_stats() failed (%s: %s)",
+                         type(exc).__name__, exc)
+
+
+def _stop_stats(keys: Collection[tuple]) -> None:
+    """Cancel the stats task of each of ``keys`` that has one."""
+    for key in keys:
+        task = _stats_tasks.pop(key, None)
+        if task is not None:
+            task.cancel()
 
 
 def _end_load(waited: float) -> bool:
@@ -505,6 +536,7 @@ def _exit() -> None:
     at most :data:`EXIT_WAIT_S`. No load starts after it."""
     global _exiting
     _exiting = True
+    _stop_stats(list(_stats_tasks))
     VLLMBackend.clear_cache(wait=EXIT_WAIT_S)
 
 
@@ -663,9 +695,10 @@ class VLLMBackend(LLMBackend):
     ) -> None:
         """Release the loaded engines and free their memory.
 
-        Each is shut down, any of its processes the shutdown leaves running
-        is ended, and its hold time is reported. Its planned utilization
-        and cards stay until a plan is set again. A backend built on a released
+        Each is shut down, after its stats task (:func:`_log_stats`) is
+        stopped; any of its processes the shutdown leaves running is ended,
+        and its hold time is reported. Its planned utilization and cards
+        stay until a plan is set again. A backend built on a released
         engine raises on ``generate()`` until the checkpoint is loaded again.
         A call in flight on a released engine is not waited for.
         Also the exit hook (:func:`_exit`), registered when the first load
@@ -693,6 +726,7 @@ class VLLMBackend(LLMBackend):
             _release_engines(keep)
             return
         try:
+            _stop_stats([k for k in list(_stats_tasks) if k not in keep])
             released = [k for k in _engines if k not in keep]
             if released:
                 # vLLM stops an engine before its own output task, which

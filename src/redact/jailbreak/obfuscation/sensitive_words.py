@@ -2,7 +2,11 @@
 
 ``info`` lists the detected words with the encoding, separator or
 substitutions applied to them. A reply that is not a short list of the
-prompt's words discards the prompt.
+prompt's words discards the prompt. When the model marks no word, a heavy
+encoding (``encode_weight`` heavy in the spec) discards the prompt
+(:data:`NO_SENSITIVE_WORD`): encoding the whole of it would be a heavy
+full-text encoding, which the spec keeps away from ``fsh`` and ``dap``. The
+other techniques then apply to the whole prompt or leave it unchanged.
 """
 
 import random
@@ -23,17 +27,21 @@ from redact.jailbreak.obfuscation.encoding import (
     to_rot47,
     to_unicode_escape,
 )
-from redact.jailbreak.technique import TechniqueGen
+from redact.jailbreak.technique import DISCARDED, TechniqueGen
 from redact.llm_pipeline import LLMRequest
 from redact.llms.prompting import build_messages, load_prompt
 
 from .tokenbreak import MALFORMED_WORDS, harmful_words_gen, match_case
 
+#: The info of a heavy word encoding when the model marks no word.
+NO_SENSITIVE_WORD = f"{DISCARDED}; reason=no sensitive word"
+
 
 def _sensitive_encode_finish(
     prompt: str, encode_fn, encode_name: str, harmful_words: list[str]
 ) -> tuple[str, str]:
-    """Apply ``encode_fn`` to each harmful word (or the whole prompt as fallback)."""
+    """Apply ``encode_fn`` to each harmful word (or the whole prompt as
+    fallback; a heavy encoding never gets here without a word)."""
     if not harmful_words:
         encoded, _ = encode_fn(prompt)
         return encoded, f"encoding={encode_name};detected_words="
@@ -157,12 +165,19 @@ _ENCODE_SPECS = [
 
 
 def _make_word_fn(name: str, finish: Callable, doc: str) -> Callable:
-    """The technique that finds the prompt's words, then applies ``finish``."""
+    """The technique that finds the prompt's words, then applies ``finish``.
+
+    With no word marked, the technique discards the prompt when the spec
+    tags it a heavy encoding (its ``encode_weight``), else ``finish`` gets
+    no words.
+    """
 
     def fn(prompt: str, **kwargs) -> TechniqueGen:
         words = yield from harmful_words_gen(prompt, **kwargs)
         if words is None:
             return prompt, MALFORMED_WORDS
+        if not words and getattr(fn, "encode_weight", None) == "heavy":
+            return prompt, NO_SENSITIVE_WORD
         return finish(prompt, harmful_words=words)
 
     fn.__name__ = fn.__qualname__ = name

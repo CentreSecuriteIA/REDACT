@@ -266,7 +266,7 @@ inputs and outputs stages.
 
 | Function | Does |
 |---|---|
-| `dealing.Dealer(weights, key)` | Running counts of one group: `pick(rng, names)` takes the name with the lowest count over weight, ties broken by `rng`; `include(part, rate)` deals an optional part at its rate with an offset seeded per group and part |
+| `dealing.Dealer(weights, key)` | Running counts of one group: `pick(rng, names)` takes the name with the lowest count over weight, ties broken by `rng`; `pick_member(rng, names)` the name with the lowest count in its own `members` counter (a family's techniques), ties broken by `rng`, kept apart from `counts` so `pick` deals the same with or without it; `include(part, rate)` deals an optional part at its rate with an offset seeded per group and part |
 | `dealing.stable_seed(*parts)` | A seed from the parts, the same in every process: the first 16 hex digits of the SHA-256 of the parts joined by `::` |
 | `planfile.plan_path(manifest)`, `coverage_path(manifest)` | `<stem>.plan.json` and `<stem>.coverage.csv` beside a manifest |
 | `planfile.plan_record(**made_with)` | What a plan is made with, as JSON reads it back |

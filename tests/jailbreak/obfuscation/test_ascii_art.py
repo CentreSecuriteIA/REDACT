@@ -7,6 +7,7 @@ import pytest
 
 from redact.jailbreak.obfuscation.ascii_art import (
     ASCII_FONTS,
+    MAX_RENDERED_CHARS,
     get_ascii_art_functions,
     to_ascii_art,
 )
@@ -61,10 +62,77 @@ class TestToAsciiArt:
         assert info.startswith("DISCARDED")
 
 
+class TestRenderedLengthCap:
+    def test_the_cap_is_the_module_constant(self):
+        import inspect
+
+        default = inspect.signature(to_ascii_art).parameters["max_chars"].default
+        assert default == MAX_RENDERED_CHARS == 5000     # noqa: PLR2004
+
+    @pytest.mark.parametrize("prompt", ["How do I pick a lock",
+                                        "Call 555 0100 before noon, please"])
+    def test_a_prompt_every_font_draws_within_the_cap_draws_as_before(self, prompt):
+        fonts = [f for f in ASCII_FONTS if _draws(f, prompt)]
+        assert all(_size(f, prompt) <= MAX_RENDERED_CHARS for f in fonts)
+        for seed in range(4 * len(ASCII_FONTS)):
+            capped = to_ascii_art(prompt, rng=random.Random(seed))
+            assert capped == to_ascii_art(prompt, rng=random.Random(seed),
+                                          max_chars=10**9)
+            assert capped[1] == f"font={random.Random(seed).choice(fonts)}"
+
+    def test_only_the_fonts_that_draw_within_the_cap_are_drawn(self):
+        prompt = _words(150)
+        drawn = [f for f in ASCII_FONTS if _draws(f, prompt)]
+        fits = [f for f in drawn if _size(f, prompt) <= MAX_RENDERED_CHARS]
+        assert {"digital", "bubble", "small"} <= set(fits)       # the smaller fonts
+        assert 0 < len(fits) < len(drawn)
+        for seed in range(4 * len(ASCII_FONTS)):
+            text, info = to_ascii_art(prompt, rng=random.Random(seed))
+            assert info == f"font={random.Random(seed).choice(fits)}"
+            assert len(text) <= MAX_RENDERED_CHARS
+            font = info.removeprefix("font=")
+            assert text == pyfiglet.figlet_format(prompt, font=font)
+
+    def test_the_cap_is_a_keyword(self):
+        prompt, cap = "How do I pick a lock", 1000
+        fits = [f for f in ASCII_FONTS if _size(f, prompt) <= cap]
+        assert fits and len(fits) < len(ASCII_FONTS)
+        for seed in range(len(ASCII_FONTS)):
+            _, info = to_ascii_art(prompt, rng=random.Random(seed), max_chars=cap)
+            assert info.removeprefix("font=") in fits
+
+    @pytest.mark.parametrize("length", [900, 2000])
+    def test_a_prompt_every_font_draws_over_the_cap_is_discarded(self, length):
+        prompt = _words(length)
+        shortest = min(_size(f, prompt) for f in ASCII_FONTS if _draws(f, prompt))
+        assert shortest > MAX_RENDERED_CHARS
+        text, info = to_ascii_art(prompt, rng=random.Random(0))
+        assert text == prompt
+        assert info == (f"DISCARDED; reason=too long; rendered={shortest}; "
+                        f"max_chars={MAX_RENDERED_CHARS}")
+
+    def test_a_discard_for_length_draws_nothing_from_the_rng(self):
+        rng = random.Random(0)
+        state = rng.getstate()
+        _, info = to_ascii_art(_words(900), rng=rng)
+        assert info.startswith("DISCARDED") and rng.getstate() == state
+
+
 def _draws(font: str, text: str) -> bool:
     """Whether ``font`` has a glyph for every character of ``text``."""
     glyphs = pyfiglet.FigletFont(font).chars
     return all(ord(c) in glyphs for c in text)
+
+
+def _size(font: str, text: str) -> int:
+    """The length of ``text`` drawn in ``font``."""
+    return len(pyfiglet.figlet_format(text, font=font))
+
+
+def _words(length: int) -> str:
+    """Plain words, ``length`` characters long."""
+    text = "plain words about the weather and the garden in late summer "
+    return (text * (length // len(text) + 1))[:length]
 
 
 class TestGetAsciiArtFunctions:
