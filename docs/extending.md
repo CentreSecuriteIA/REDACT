@@ -68,10 +68,15 @@ format and follows no other instruction:
   message.
 - `hf_config` names a folder under `configs/llm/hf_configs/` holding a
   `config.json` read in place of the checkpoint's, when the installed
-  transformers cannot read the checkpoint's own. Leave it out otherwise.
+  transformers cannot read the checkpoint's own. vLLM also reads the config
+  of the folder it loads the tokenizer from, so the engine is given a folder
+  of the checkpoint's tokenizer files beside a copy of yours, built at load
+  (a `tokenizer` in `vllm_kwargs` replaces it). Leave it out otherwise.
 - Every language needs a code, accepted GlotLID labels and a median length
   ratio in `jailbreak/obfuscation/translation.py`; import fails when one is
-  missing.
+  missing. Measure the median with the model on a parallel corpus such as
+  FLORES-200: a guessed 1.0 rejected most Japanese translations, whose
+  median is 0.47.
 
 - One entry may carry both an `api` and a `vllm` setup when the hosted model
   and the local weights are the same model; `backend_type` names the default,

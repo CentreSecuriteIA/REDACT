@@ -237,7 +237,9 @@ the answers.
   each is a translate, check and retry loop on the `translation` model. On
   a machine-translation model (`translategemma-27b`, the default) the text
   goes paragraph by paragraph; each piece is checked for its language
-  (GlotLID) and length, then translated back and judged by the generation
+  (GlotLID) and length (against the language's median ratio, measured
+  with TranslateGemma on FLORES-200), then translated back and judged by
+  the generation
   model ([stages/jailbreaks.md](stages/jailbreaks.md#models)).
 - `typos` is one rewrite by the model, at one of four densities, with the
   level's description in the prompt.

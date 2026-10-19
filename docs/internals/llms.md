@@ -38,6 +38,7 @@ It must not:
 | `backends/openai.py` | `OpenAIBackend`: any OpenAI-compatible endpoint (Venice, OpenRouter) |
 | `backends/anthropic.py` | `AnthropicBackend`: the Anthropic Messages API |
 | `backends/vllm.py` | `VLLMBackend`: vLLM's `AsyncLLM` in this process |
+| `backends/tokenizer_folder.py` | `tokenizer_folder`: the folder a vLLM engine loads its tokenizer from when `hf_config` replaces its config |
 | `backends/introspection.py` | `TransformersIntrospectionBackend`: transformers, with internals capture |
 | `client.py` | `ModelClient` |
 | `wrappers.py` | `RateLimiter`, `shared_limiter`, `BatchCaller` |
@@ -129,6 +130,20 @@ down and its memory freed, and a client built on it raises on its next call.
   fails is tried once more with one copy. Each engine records the share and
   cards it was built with; `engine_grants()` gives them for the engines
   loaded now.
+- A setup with `hf_config` loads its tokenizer from a folder of its own:
+  vLLM reads the `config.json` of the folder it loads the tokenizer from,
+  not only `hf_config_path`, so the checkpoint's own config would still be
+  parsed. `tokenizer_folder()` fetches only the snapshot's tokenizer and
+  processor files (`TOKENIZER_FILES`; the hub cache serves them offline, and
+  a local `hf_model_id` is read in place), links them, or copies them where
+  the OS allows no link, beside a copy of the packaged `config.json`, and
+  the engine gets the folder as `tokenizer` unless `vllm_kwargs` names one.
+  The folder is `$HF_HOME/assets/redact/tokenizers/<checkpoint>-<hash>`,
+  hashed from the snapshot's path and the config's bytes, so a new snapshot
+  or a changed config gets a new one; one built before is reused. It is
+  built at load, under a lock, through a temporary folder renamed into
+  place. It stays out of the engine key, which already names the checkpoint
+  and the config and which the planner computes without fetching anything.
 - Defaults: `temperature` 0.7 when the model sets none; `top_p` 0.85 unless
   `VLLMConfig.sampling` says otherwise.
 - Stats: an engine logs none (`disable_log_stats` true). With

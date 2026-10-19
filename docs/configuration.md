@@ -606,7 +606,7 @@ process only.
 | `sampling` | `null` | Sampling defaults (`top_p`, `top_k`, ...) over the backend's `top_p` 0.85 |
 | `vram_gb` | `null` | The weights in GiB, total over the model's cards, when known better than the estimate |
 | `min_gpus` | `1` | Cards per copy; above 1 it is the `tensor_parallel_size` |
-| `hf_config` | `null` | A folder under `configs/llm/hf_configs/` whose `config.json` vLLM (as `hf_config_path`) and the estimator read in place of the checkpoint's own, for a checkpoint whose config the installed transformers cannot read. The weights and tokenizer still come from `hf_model_id`; `vllm_kwargs` may not name `hf_config_path` |
+| `hf_config` | `null` | A folder under `configs/llm/hf_configs/` whose `config.json` vLLM (as `hf_config_path`) and the estimator read in place of the checkpoint's own, for a checkpoint whose config the installed transformers cannot read. The weights come from `hf_model_id`. vLLM also reads the config of the folder it loads the tokenizer from, so at load the checkpoint's tokenizer files are gathered beside a copy of this config into a folder under `$HF_HOME/assets/redact/tokenizers/`, passed to the engine as `tokenizer` unless `vllm_kwargs` names one. `vllm_kwargs` may not name `hf_config_path` |
 
 ### `introspect` (IntrospectConfig)
 
