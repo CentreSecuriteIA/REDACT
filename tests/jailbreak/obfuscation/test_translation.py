@@ -174,6 +174,37 @@ class TestMachineTranslationTables:
         with pytest.raises(ValueError, match=r"extra \['Maori'\]"):
             _check_tables({"LANGUAGE_CODES": {**LANGUAGE_CODES, "Maori": "mi"}})
 
+    def test_every_language_has_a_measured_median(self):
+        """TranslateGemma on FLORES-200: no 1.0 placeholder is left, and
+        Japanese, whose placeholder rejected 634 of 1,012 good translations,
+        lies below 0.6."""
+        from redact.jailbreak.obfuscation.translation import MEDIAN_RATIO
+
+        assert 1.0 not in MEDIAN_RATIO.values()
+        assert MEDIAN_RATIO["Japanese"] < 0.6  # noqa: PLR2004
+
+    def test_the_measured_medians(self):
+        from redact.jailbreak.obfuscation.translation import (
+            LENGTH_RATIO_BAND,
+            MEDIAN_RATIO,
+        )
+
+        assert MEDIAN_RATIO == {
+            "French": 1.27, "Japanese": 0.47, "Russian": 1.18, "Spanish": 1.22,
+            "German": 1.24, "Arabic": 0.96, "Turkish": 1.13, "Czech": 1.05,
+            "Vietnamese": 1.16, "Greek": 1.28, "Croatian": 1.07, "Swahili": 1.16,
+            "Thai": 1.02, "Khmer": 1.09, "Nepali": 1.04, "Zulu": 1.17,
+            "Scots Gaelic": 1.31, "Bengali": 1.07, "Javanese": 1.12,
+        }
+        assert LENGTH_RATIO_BAND == (0.5, 2.0)
+
+    def test_a_japanese_translation_at_its_median_passes(self, monkeypatch):
+        from redact.jailbreak.obfuscation import langid
+        from redact.jailbreak.obfuscation.translation import check_translation
+
+        monkeypatch.setattr(langid, "detect", lambda text: "jpn_Jpan")
+        assert check_translation("訳" * 47, "x" * 100, "Japanese") is None
+
     def test_the_reply_cap_is_about_three_times_the_inputs_tokens(self):
         from redact.jailbreak.obfuscation.translation import reply_cap
 

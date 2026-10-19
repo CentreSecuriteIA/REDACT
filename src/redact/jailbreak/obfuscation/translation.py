@@ -70,14 +70,17 @@ ACCEPTED_LABELS = {
     "Javanese": {"jav_Latn"},  # never ind_Latn: Indonesian is a real failure
 }
 
-#: A translation's length over its input's, in characters, at the median: the
-#: pod test's TranslateGemma figures, 1.0 for a language it did not measure.
+#: A translation's length over its input's, in characters, at the median,
+#: measured: TranslateGemma 27B translating the FLORES-200 devtest (1,012
+#: sentences) from English, on 2026-10-19. The seven figures kept from an
+#: earlier pod test (Swahili to Javanese, Scots Gaelic aside) agree with that
+#: run within 0.02.
 MEDIAN_RATIO = {
-    "French": 1.0, "Japanese": 1.0, "Russian": 1.0, "Spanish": 1.0,
-    "German": 1.0, "Arabic": 1.0, "Turkish": 1.0, "Czech": 1.0,
-    "Vietnamese": 1.0, "Greek": 1.0, "Croatian": 1.0, "Swahili": 1.16,
+    "French": 1.27, "Japanese": 0.47, "Russian": 1.18, "Spanish": 1.22,
+    "German": 1.24, "Arabic": 0.96, "Turkish": 1.13, "Czech": 1.05,
+    "Vietnamese": 1.16, "Greek": 1.28, "Croatian": 1.07, "Swahili": 1.16,
     "Thai": 1.02, "Khmer": 1.09, "Nepali": 1.04, "Zulu": 1.17,
-    "Scots Gaelic": 1.32, "Bengali": 1.07, "Javanese": 1.12,
+    "Scots Gaelic": 1.31, "Bengali": 1.07, "Javanese": 1.12,
 }
 
 
