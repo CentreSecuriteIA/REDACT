@@ -7,6 +7,7 @@ The mode (:mod:`redact.content_moderation.modes`) picks the generation prompt
 
 import functools
 import logging
+import re
 from pathlib import Path
 
 import pandas as pd
@@ -36,7 +37,7 @@ from .axes import (
     write_stage_coverage,
 )
 from .checker import build_output_quality_checker
-from .feedback import with_feedback
+from .feedback import TOO_SHORT, with_feedback
 from .modes import MODES, OUTPUT_LABEL, deal_modes, resolve_modes, response_label
 
 logger = logging.getLogger(__name__)
@@ -49,6 +50,22 @@ _MODE_COLUMNS = ("response_mode", "output_label", "response_label")
 
 # The entry type of an input without one.
 _DEFAULT_ENTRY_TYPE = "harmful"
+
+#: The fewest characters a checked response holds once its code-fence marker
+#: lines are removed; a shorter one is rejected without a check call.
+MIN_RESPONSE_CHARS = 20
+
+# A line that opens or closes a code block: ``` with an optional language.
+_FENCE_LINE = re.compile(r"^\s*```[\w+-]*\s*$", re.MULTILINE)
+
+
+def _too_short(text: str) -> str:
+    """:data:`~redact.content_moderation.feedback.TOO_SHORT` when ``text``,
+    without its code-fence marker lines, holds fewer than
+    :data:`MIN_RESPONSE_CHARS` characters, else ``""``. A fenced answer
+    keeps its content; an empty code block counts 0."""
+    content = _FENCE_LINE.sub("", text).strip()
+    return TOO_SHORT if len(content) < MIN_RESPONSE_CHARS else ""
 
 
 def _entry_type(cell) -> str:
@@ -111,9 +128,13 @@ def run_output_generation(
     ``benign``) and ``response_label``, ``<entry_type>_<output_label>``. An
     input without an entry type is ``harmful``.
 
-    Each row is a ``llm_pipeline.checked`` unit. With ``max_attempts > 1`` a
-    rejected response is regenerated with the verdict as feedback, and the
-    row holds the last attempt. An input whose prompt is too long for the
+    Each row is a ``llm_pipeline.checked`` unit. With the checker on, a
+    response with fewer than :data:`MIN_RESPONSE_CHARS` characters once its
+    code-fence marker lines are removed is rejected without a check call
+    (``rejection_reason`` :data:`~redact.content_moderation.feedback.TOO_SHORT`).
+    With ``max_attempts > 1`` a rejected response is regenerated with the
+    verdict (or that reason) as feedback, and the row holds the last
+    attempt. An input whose prompt is too long for the
     model gets a rejected row with an empty response. A call carries up to
     ``batch_size`` requests; ``check_max_tokens`` limits a verdict's reply.
 
@@ -299,6 +320,7 @@ def run_output_generation(
             ),
             max_tokens=(None, check_max_tokens),
             max_attempts=max_attempts,
+            precheck=_too_short,
         )
 
     # A finished unit's row. sample_id is this row's own content-hash identity

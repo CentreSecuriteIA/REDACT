@@ -126,10 +126,13 @@ def _jailbreaks(folder, monkeypatch) -> dict:
 
 
 def _outputs(folder, monkeypatch) -> dict:
+    import redact.content_moderation.outputs as G
     import redact.stages as P
     from redact import generate_outputs
     from tests.test_pipelines import _TokenBackend
 
+    # The stub's answers are shorter than the length floor: checked anyway.
+    monkeypatch.setattr(G, "MIN_RESPONSE_CHARS", 0)
     inputs = pd.DataFrame({
         "sample_id": _IDS,
         "sample": [f"zq{i} question" for i in range(6)],

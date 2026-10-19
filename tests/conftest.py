@@ -79,6 +79,15 @@ def _no_cut_warned():
     base._cut_warned.clear()
 
 
+@pytest.fixture
+def no_length_floor(monkeypatch):
+    """The outputs stage checks a response of any length: its fake replies
+    (``answer zq0``) are shorter than the floor a real response must pass."""
+    import redact.content_moderation.outputs as outputs
+
+    monkeypatch.setattr(outputs, "MIN_RESPONSE_CHARS", 0)
+
+
 def first_cut_warning(model: str, max_tokens: int) -> str:
     """The warning at a model's first reply cut at the token limit in a stage."""
     return (f"{model}: a reply was cut at the token limit (max_tokens={max_tokens}) "

@@ -1,5 +1,10 @@
 """The prompt text the stages add at run time: rejection feedback for a
-regenerated response."""
+regenerated response, and the reason a response too short to check is
+rejected for."""
+
+#: The reason a response with almost no text is rejected, without a check
+#: call: the row's ``rejection_reason``, and the feedback of the next attempt.
+TOO_SHORT = "too short: the response has almost no content."
 
 _FEEDBACK = (
     "\n\n[FEEDBACK FROM PREVIOUS ATTEMPT]\n"

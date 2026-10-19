@@ -131,6 +131,7 @@ def _coverage(folder) -> Path:
     return paths.datasets(folder) / "output_responses.coverage.csv"
 
 
+@pytest.mark.usefixtures("no_length_floor")
 class TestTheResponseAxes:
     """One spec of the response axes per input row, shown in its prompt,
     recorded on its row and counted in the coverage table."""
@@ -307,6 +308,7 @@ def _token(call: dict) -> str:
     return re.search(r"zq\d+", call["messages"][-1]["content"]).group()
 
 
+@pytest.mark.usefixtures("no_length_floor")
 class TestTheAnswerModes:
     """Each response is dealt a mode its input's entry type allows; the mode
     picks the prompt and the checker and gives the row its label."""
@@ -415,3 +417,68 @@ class TestTheAnswerModes:
         assert rows.loc["in-1", ["entry_type", "response_mode", "response_label"]
                         ].tolist() == ["harmful", "harmful", "harmful_harmful"]
         assert rows.loc["in-0", "response_label"] == "benign_benign"
+
+
+class TestTheLengthFloor:
+    """With the checker on, a response with almost no text, once its
+    code-fence marker lines are removed, is rejected without a check call."""
+
+    def _run(self, folder, monkeypatch, replies, **kwargs):
+        import redact.stages as P
+        from redact import generate_outputs
+
+        gen = MockBackend(replies, "gen-model")
+        check = MockBackend("Yes", "check-model")
+        backends = {"gen-model": gen, "check-model": check}
+        monkeypatch.setattr(P.ModelClient, "create",
+                            lambda m: make_client(backends[m], m))
+        generate_outputs(inputs=_questions_of(["harmful"]), data_dir=folder,
+                         model="gen-model", check_model="check-model",
+                         verbose=False, **kwargs)
+        return gen, check, _written(folder).iloc[0]
+
+    @pytest.mark.parametrize("reply", [
+        "Here is a response:",                  # 19 characters
+        "```\n```",                             # an empty code block
+        "```python\n\n```\n",
+        "  [RESPONSE]  ",
+    ])
+    def test_a_response_with_almost_no_text_is_rejected_without_a_check(
+            self, tmp_path, monkeypatch, reply):
+        from redact.content_moderation.feedback import TOO_SHORT
+
+        _, check, row = self._run(tmp_path, monkeypatch, reply)
+        assert check.calls == []
+        assert not bool(row["accepted"])
+        assert row["rejection_reason"] == TOO_SHORT
+        assert row["rejection_reason"].startswith("too short")
+
+    @pytest.mark.parametrize("reply", [
+        "```python\nprint('forty characters of code')\n```",
+        "Here is a response with some content.",
+    ])
+    def test_a_response_with_twenty_characters_or_more_is_checked(
+            self, tmp_path, monkeypatch, reply):
+        _, check, row = self._run(tmp_path, monkeypatch, reply)
+        assert len(check.calls) == 1
+        assert bool(row["accepted"]) and row["output_response"] == reply
+
+    def test_a_short_response_is_generated_again_with_the_reason(
+            self, tmp_path, monkeypatch):
+        from redact.content_moderation.feedback import TOO_SHORT
+
+        gen, check, row = self._run(
+            tmp_path, monkeypatch,
+            ["Here is a response:", "A response long enough to be checked."],
+            max_attempts=2)
+        assert TOO_SHORT not in gen.calls[0]["messages"][-1]["content"]
+        assert TOO_SHORT in gen.calls[1]["messages"][-1]["content"]
+        assert len(check.calls) == 1
+        assert bool(row["accepted"])
+
+    def test_without_the_checker_a_short_response_is_accepted(
+            self, tmp_path, monkeypatch):
+        _, check, row = self._run(tmp_path, monkeypatch, "short",
+                                  check_outputs=False)
+        assert check.calls == []
+        assert bool(row["accepted"]) and row["rejection_reason"] == ""

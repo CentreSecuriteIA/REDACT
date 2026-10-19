@@ -133,6 +133,7 @@ def checked(
     internals_ids: tuple[str | None, str | None] = (None, None),
     max_tokens: tuple[int | None, int | None] = (None, None),
     max_attempts: int = 1,
+    precheck: Callable[[str], str] | None = None,
 ) -> Generator[LLMRequest, str, tuple[str, bool, str]]:
     """Generate, check, and regenerate a rejected reply with the verdict.
 
@@ -147,10 +148,14 @@ def checked(
         max_tokens: Reply limits for the (generation, check) requests.
             ``None`` keeps the model's default.
         max_attempts: Generations before giving up, at least 1.
+        precheck: ``text -> reason``, a code-side verdict on each reply
+            before its check: a non-empty reason rejects the reply with no
+            check request, and is the next attempt's feedback, or the
+            returned reasoning on the last. Not called without ``check``.
 
     Returns:
         ``(text, accepted, reasoning)``. ``reasoning`` is the last verdict
-        when every attempt was rejected, else ``""``.
+        (or precheck reason) when every attempt was rejected, else ``""``.
     """
     if max_attempts < 1:
         raise ValueError(f"max_attempts must be at least 1, got {max_attempts}.")
@@ -166,6 +171,10 @@ def checked(
         )
         if check is None:
             return text, True, ""
+        reason = precheck(text) if precheck is not None else ""
+        if reason:
+            feedback = reason
+            continue
         verdict = yield LLMRequest.for_client(
             check, build_check_messages(original, text),
             internals_id=_attempt_id(check_id, attempt), max_tokens=check_max,

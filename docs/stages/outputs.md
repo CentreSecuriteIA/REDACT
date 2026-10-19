@@ -170,6 +170,15 @@ and raises `Outputs: this run's [...] differ from those the responses in
 
 - A rejected response is saved with `accepted` false and the reason, and its
   input is acked: a resume does not try it again.
+- A response with almost no text is rejected before its check, with no check
+  call: one with fewer than 20 characters (`MIN_RESPONSE_CHARS`) once its
+  code-fence marker lines (a line that is three backticks, with an optional
+  language) are removed and its ends stripped. So `Here is a response:` (19)
+  and an empty code block are rejected, and a fenced code answer keeps its
+  content. Its `rejection_reason` is `too short: the response has almost no
+  content.`; with `max_attempts` above 1 it is generated again with that
+  reason as feedback. With `check_outputs: false` there is no floor: every
+  response is accepted.
 - On the async lane (an OpenAI-compatible endpoint or vLLM), an input whose
   generation or check prompt is too long for its model gets a row with an
   empty `output_response`, `accepted` false and `rejection_reason`

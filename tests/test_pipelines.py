@@ -549,6 +549,7 @@ class TestGenerateOutputsInternals:
         # never a CSV column, regardless of capture
         assert "internals_id" not in df.columns
 
+    @pytest.mark.usefixtures("no_length_floor")
     def test_check_internals_id_is_input_id_slash_val_out(self, tmp_path, monkeypatch):
         import redact.stages as P
         from redact import generate_outputs
@@ -577,6 +578,7 @@ class TestGenerateOutputsInternals:
         check_root = check_backend.calls[0]["internals_id"].split("/")[0]
         assert gen_root == check_root
 
+    @pytest.mark.usefixtures("no_length_floor")
     def test_check_internals_not_requested_when_check_backend_lacks_support(self, tmp_path, monkeypatch):
         import redact.stages as P
         from redact import generate_outputs
@@ -625,6 +627,7 @@ class TestGenerateOutputsSampleId:
             assert row["sample_id"] != row["input_id"]
 
 
+@pytest.mark.usefixtures("no_length_floor")
 class TestGenerateOutputsRetry:
     """max_attempts: a rejected response is regenerated with the verdict."""
 
@@ -791,6 +794,7 @@ class TestGenerateOutputsPool:
         backends = {"gen-model": gen, "check-model": check}
         monkeypatch.setattr(P.ModelClient, "create", lambda m: make_client(backends[m], m))
 
+    @pytest.mark.usefixtures("no_length_floor")
     def test_a_run_without_retries_writes_the_same_rows(self, tmp_path, monkeypatch):
         from redact import generate_outputs, paths
         from redact.dataset import content_id
@@ -905,6 +909,7 @@ class TestGenerateOutputsPool:
         assert gen.batches == []
         assert [p for p in out.parent.iterdir() if p.suffix != ".lock"] == []
 
+    @pytest.mark.usefixtures("no_length_floor")
     def test_a_retry_shares_a_call_with_a_new_unit(self, tmp_path, monkeypatch):
         from redact import generate_outputs, paths
 
@@ -1073,6 +1078,7 @@ class TestGenerateOutputsPool:
         assert not set(first.values()) & {content_id(""), *map(content_id, tokens)}
         assert ids(tmp_path / "b") == first
 
+    @pytest.mark.usefixtures("no_length_floor")
     def test_another_unit_error_still_stops_the_stage(self, tmp_path, monkeypatch):
         """Only a prompt that is too long becomes a row. This unit fails
         building its check, after its response arrived."""

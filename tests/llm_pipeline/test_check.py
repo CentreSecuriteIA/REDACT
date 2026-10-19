@@ -156,6 +156,30 @@ class TestChecked:
         drive_sync(checked(GEN, _gen_messages, CHECK, _check_messages, max_tokens=(400, 64)), call)
         assert [(r.client, r.max_tokens) for r in call.seen] == [(GEN, 400), (CHECK, 64)]
 
+    def test_a_precheck_reason_rejects_with_no_check_request(self):
+        call = _call({GEN: ["t1"], CHECK: []})
+        out = drive_sync(checked(GEN, _gen_messages, CHECK, _check_messages,
+                                 precheck=lambda text: "too short"), call)
+        assert out == ("t1", False, "too short")
+        assert [r.client for r in call.seen] == [GEN]
+
+    def test_a_precheck_reason_is_the_next_attempts_feedback(self):
+        call = _call({GEN: ["t", "a longer text"], CHECK: ["Yes"]})
+        out = drive_sync(checked(
+            GEN, _gen_messages, CHECK, _check_messages, max_attempts=2,
+            precheck=lambda text: "too short" if text == "t" else ""), call)
+        assert out == ("a longer text", True, "")
+        assert [r.client for r in call.seen] == [GEN, GEN, CHECK]
+        assert call.seen[1].messages[0]["content"] == "gen|too short"
+
+    def test_without_a_check_the_precheck_is_not_called(self):
+        def precheck(text):
+            raise AssertionError("precheck called")
+
+        call = _call({GEN: ["t1"]})
+        assert drive_sync(checked(GEN, _gen_messages, precheck=precheck),
+                          call) == ("t1", True, "")
+
     @pytest.mark.parametrize("kwargs", [
         {"max_attempts": 0}, {"check": CHECK},
     ], ids=["no-attempts", "check-without-builder"])
