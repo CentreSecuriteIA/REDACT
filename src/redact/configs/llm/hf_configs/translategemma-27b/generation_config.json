@@ -1,0 +1,11 @@
+{
+  "cache_implementation": "hybrid",
+  "do_sample": true,
+  "top_p": 0.95,
+  "top_k": 64,
+  "eos_token_id": [106,1],
+  "temperature": 0.15,
+  "bos_token_id": [2, 105],
+  "max_length": 131072,
+  "transformers_version": "4.57.3"
+}

@@ -915,6 +915,27 @@ def test_the_translategemma_config_has_its_rope_per_layer_type():
 
 
 @pytest.mark.parametrize("folder", _packaged_hf_configs(), ids=lambda p: p.name)
+def test_every_packaged_hf_config_carries_its_generation_config(folder):
+    """vLLM reads the generation config from ``hf_config_path`` too: without
+    the checkpoint's, it never learns the end-of-turn token, and every reply
+    runs to ``max_tokens`` (the GPU check of 2026-10-19: 2,021 of 2,022)."""
+    import json
+
+    config = json.loads((folder / "generation_config.json").read_text(encoding="utf-8"))
+    assert config.get("eos_token_id") not in (None, [], "")
+
+
+def test_the_translategemma_generation_config_stops_at_end_of_turn():
+    import json
+
+    from redact import paths
+
+    path = paths.hf_configs_dir() / "translategemma-27b" / "generation_config.json"
+    eos = json.loads(path.read_text(encoding="utf-8"))["eos_token_id"]
+    assert 106 in eos      # noqa: PLR2004   <end_of_turn>
+
+
+@pytest.mark.parametrize("folder", _packaged_hf_configs(), ids=lambda p: p.name)
 def test_every_packaged_hf_config_loads_in_transformers(folder):
     """A transformers upgrade that cannot read a shipped config fails here, not
     at an engine's build.
