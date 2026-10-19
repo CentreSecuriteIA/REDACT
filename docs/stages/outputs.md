@@ -132,14 +132,19 @@ names in `not_with` (`steps` and a `brief` answer, for example).
 The deal is made again every run. At an even k each input takes each of two
 modes k / 2 times, so the group's counts are level at every input's first
 unit and an input's modes depend on its own key alone: inputs that join the
-group leave them as they were. At k = 1 and an odd k, inputs that join a
-dual-use group can change the mode the manifest plans for a done unit,
-whose row keeps the mode it was written with.
+group leave them as they were. At k = 1 and an odd k the group alternates,
+so inputs that join a dual-use group would deal the units before them
+again. A done unit keeps the mode its ack records instead: the deal counts
+it as dealt and deals the other units around it, so the manifest and the
+coverage table agree with the rows, and the new inputs balance the modes
+the rows have. An ack written without a mode (on this branch before the
+fix) leaves its unit to the deal. The specs of done units are dealt again
+as before; the rows keep theirs.
 
 | | Value |
 |---|---|
 | Ledger key | `(input_id, iteration)`: the input's `sample_id`, else the content id of its text, and which of its responses |
-| Ledger record | `{"input_id": ..., "iteration": ..., "accepted": ...}`, the verdict on the last attempt |
+| Ledger record | `{"input_id": ..., "iteration": ..., "mode": ..., "accepted": ...}`: the mode the row was written with, and the verdict on the last attempt |
 | Manifest row | `input_id`, `iteration`, `category`, `entry_type`, `mode`, `spec` (the dealt value of each axis; none without axes), `status` (`planned`), one per unit |
 
 ## Files

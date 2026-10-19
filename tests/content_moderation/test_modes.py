@@ -155,6 +155,27 @@ class TestTheDeal:
                             "benign": Counter(helpful=8),
                             "dual_use_benign": Counter(harmful=4, helpful=4)}
 
+    def test_a_fixed_unit_keeps_its_mode_and_the_others_are_dealt_around_it(self):
+        units = _units(4)                       # k = 1: a group of four alternates
+        free = _dealt(units)
+        flipped = {"harmful": "helpful", "helpful": "harmful"}[free[0]]
+        dealt = M.deal_modes(M.resolve_modes(), units, seed=_SEED,
+                             fixed={0: flipped})
+        assert dealt[0] == flipped
+        assert Counter(dealt) == Counter(harmful=2, helpful=2)
+
+    def test_a_fixed_unit_counts_for_its_siblings(self):
+        units = _units(1, k=2)
+        for mode in _BOTH:
+            dealt = M.deal_modes(M.resolve_modes(), units, seed=_SEED, fixed={0: mode})
+            assert dealt == [mode, {"harmful": "helpful", "helpful": "harmful"}[mode]]
+
+    def test_fixing_the_modes_a_deal_gave_changes_nothing(self):
+        units = _units(5, k=3)
+        free = _dealt(units)
+        fixed = {i: free[i] for i in range(0, len(units), 2)}
+        assert M.deal_modes(M.resolve_modes(), units, seed=_SEED, fixed=fixed) == free
+
     def test_a_custom_mapping_deals_its_modes(self):
         modes = M.resolve_modes({"harmful": ["helpful", "harmful"]})
         units = _units(4, group=("Cyber", "harmful"), k=2)

@@ -223,7 +223,8 @@ def run_output_generation(
     ``"{input_id}:{iteration}:prompt too long"`` for a prompt too long,
     which has none. The ledger beside ``out_path`` is keyed on ``(input_id,
     iteration)``, an ack holding the verdict too; ``resume=False`` starts the
-    stage over. A resume deals the modes and the specs again, and
+    stage over. A resume deals the modes and the specs again, a done unit
+    keeping the mode its ack records, and
     ``<stem>.plan.json`` (``seed``, ``outputs_per_input``, ``modes``, the
     axes' weights) stops one that would deal others; a ledger with an ack
     without ``iteration``, or a file without the ``iteration``, answer-mode
@@ -267,16 +268,15 @@ def run_output_generation(
             f"outputs.modes does not map; it maps {list(modes)}.")
 
     # k units per input row, each keyed by its position in ``units``, so two
-    # rows with one input_id stay apart. Every unit is dealt its mode and its
-    # spec, done or not: the deal is a function of the whole plan.
+    # rows with one input_id stay apart.
     units = [(i, iteration) for i in range(len(rows)) for iteration in range(k)]
     keys = [(groups[i], (sids[i], iteration)) for i, iteration in units]
-    unit_modes = deal_modes(modes, keys, seed=seed)
-    specs = deal_specs(axes, keys, seed=seed)
 
-    # The prompts of the modes dealt, read before anything is cleared.
+    # The prompts of every mode the inputs' entry types allow, read before
+    # anything is cleared.
     prompts = {}
-    for mode in (mode for mode in MODES if mode in unit_modes):
+    in_use = {mode for _, entry_type in groups for mode in modes[entry_type]}
+    for mode in (mode for mode in MODES if mode in in_use):
         prompts[mode] = load_prompt(
             "output", f"generation/{mode}", prompt_dir=prompt_dir)
         if axes:
@@ -324,6 +324,18 @@ def run_output_generation(
             "is not checked.",
             out_path.name, plan_path(manifest.path).name)
     write_plan(manifest.path, made_with)
+
+    # Every unit is dealt its mode and its spec, done or not: the deal is a
+    # function of the whole plan. A done unit keeps the mode its ack records,
+    # so the manifest and the coverage table agree with its row, and the
+    # other units are dealt around it.
+    recorded = {ledger.key(ack): ack["mode"] for ack in ledger.records()
+                if "mode" in ack and ledger.key(ack) in completed}
+    fixed = {u: recorded[(sids[i], iteration)]
+             for u, (i, iteration) in enumerate(units)
+             if recorded.get((sids[i], iteration)) in modes[groups[i][1]]}
+    unit_modes = deal_modes(modes, keys, seed=seed, fixed=fixed)
+    specs = deal_specs(axes, keys, seed=seed)
 
     # Plan → manifest: one row per unit, written before the batch loop so the
     # run's full intended scope is inspectable up front (keyed like the ledger).
@@ -426,7 +438,7 @@ def run_output_generation(
         r.update(spec_columns(axes, specs[u], prefix=_PREFIX))
         # The verdict, what the coverage table counts.
         buf.add([r], {"input_id": r["input_id"], "iteration": iteration,
-                      "accepted": bool(accepted)})
+                      "mode": mode, "accepted": bool(accepted)})
 
     # The row of a prompt that is too long is acked like any other: sent
     # again, the prompt would be too long again. Any other unit error stops

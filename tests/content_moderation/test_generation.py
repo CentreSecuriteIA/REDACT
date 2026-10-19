@@ -511,6 +511,28 @@ class TestTheAnswerModes:
         assert dict(zip(zip(rows["input_id"], rows["iteration"]),
                         rows["response_mode"], strict=True)) == dealt
 
+    def test_inputs_joining_a_group_leave_the_done_units_their_modes(
+            self, tmp_path, monkeypatch):
+        """At one per input a group alternates, so the new inputs would deal
+        the done ones again. Each keeps the mode its ack records: the
+        manifest and the coverage table agree with the rows, and the new
+        inputs are balanced against the modes the rows have."""
+        # in-10 sorts between in-1 and in-2, so the deal of the eleven would
+        # give in-2 and in-4 the other mode.
+        _respond(tmp_path, monkeypatch, inputs=_questions_of(["dual_use_benign"] * 6))
+        first = _written(tmp_path).set_index("input_id")["response_mode"]
+        _respond(tmp_path, monkeypatch, inputs=_questions_of(["dual_use_benign"] * 11))
+        rows = _written(tmp_path)
+        now = rows.set_index("input_id")["response_mode"]
+        assert now.loc[first.index].equals(first)
+        planned = Manifest.sidecar(paths.output_responses_csv(tmp_path)).load()
+        assert {r["input_id"]: r["mode"] for r in planned} == dict(
+            zip(rows["input_id"], rows["response_mode"], strict=True))
+        table = pd.read_csv(_coverage(tmp_path))
+        counted = table[table["axis"] == "mode"].set_index("value")["planned"]
+        assert counted.to_dict() == rows["response_mode"].value_counts().to_dict()
+        assert sorted(rows["response_mode"].value_counts()) == [5, 6]
+
     def test_a_resume_makes_no_call_and_keeps_the_modes_and_specs(
             self, tmp_path, monkeypatch):
         inputs = _questions_of(["dual_use_benign"] * 4)

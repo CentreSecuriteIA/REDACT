@@ -21,14 +21,15 @@ times, k its units. At an even k every input takes each of two modes k / 2
 times, so the group's counts are level at every input's first unit and an
 input's deal is a function of its own key alone: a resume with more inputs
 keeps it. At k = 1 and an odd k the group alternates, so inputs that join a
-group can change the mode the manifest plans for a done input; its row keeps
-the mode it was written with.
+group would change the modes of units dealt before them; the stage passes
+the modes its done units were written with as ``fixed``, which the deal
+counts and deals the other units around.
 """
 
 import math
 import random
 from collections import Counter, defaultdict
-from collections.abc import Sequence
+from collections.abc import Mapping, Sequence
 
 from ..dataset.dealing import Dealer, stable_seed
 from ..types import ALL_ENTRY_TYPES
@@ -124,6 +125,7 @@ def response_label(entry_type, mode: str) -> str:
 
 def deal_modes(
     modes: dict[str, list[str]], units: Sequence[Unit], *, seed: int,
+    fixed: Mapping[int, str] | None = None,
 ) -> list[str]:
     """One mode for each unit, dealt per group from the modes its entry type
     allows.
@@ -138,9 +140,16 @@ def deal_modes(
     ceil(k / len(allowed)) times, so from k = 2 an input whose entry type
     allows two modes gets one answer of each.
 
+    ``fixed`` maps the index of a unit in ``units`` to the mode it already
+    has, as a done unit's row records it: the unit keeps it, and it counts
+    in the group and for its siblings as a dealt mode does, so the other
+    units are dealt around it. Each unit's rng is its own, so fixing one
+    changes no other unit's draws.
+
     Returns:
         Each unit's mode, in the order of ``units``.
     """
+    fixed = fixed or {}
     siblings = Counter((group, entry) for group, (entry, _) in units)
     taken: dict[tuple, Counter] = defaultdict(Counter)
     dealers: dict[Group, Dealer] = {}
@@ -154,7 +163,7 @@ def deal_modes(
         own = taken[(group, entry)]
         cap = math.ceil(siblings[(group, entry)] / len(allowed))
         room = [mode for mode in allowed if own[mode] < cap]
-        mode = dealer.pick(rng, room or list(allowed))
+        mode = fixed[i] if i in fixed else dealer.pick(rng, room or list(allowed))
         dealer.counts[mode] += 1
         own[mode] += 1
         dealt[i] = mode
