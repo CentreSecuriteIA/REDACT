@@ -332,6 +332,23 @@ A training build leaves out the benign and dual-use benign variations such
 a plan made with a technique the natural kind no longer draws, with one
 WARNING that counts them.
 
+**Release note: the ASCII-art cap.** `to_ascii_art` keeps a drawing of at
+most 5,000 characters wherever it is drawn, the eval type's pool included,
+and draws the font from the fonts that fit. This changes the text it gives,
+not only what it rejects. A text every font draws within the cap (up to
+about 38 characters) draws as before. Over that the same seed draws another
+font for some texts from about 40 characters and for most from about 90:
+of the 12 fonts that have a typical text's glyphs, 11 fit at 50 characters,
+9 to 11 at 75, 9 at 100, 6 at 150, 2 or 3 at 200 to 300, 1 at 400 to 800
+and none from about 830. A text of about 830 characters or more is rejected
+where it used to be drawn, and so are most inputs an encoding lengthened
+first (unicode escapes from about 140 characters, ASCII ordinals from about
+230, morse from about 250). A kept plan resumed across the change, an eval
+plan included, mixes drawings made with and without the cap, since a
+replayed plan gives the same text only within one version of the library;
+run the adversarial kind with `resume=False` for one rendering.
+[techniques.md](techniques.md#what-the-families-do) has the figures.
+
 ### Keys
 
 Both kinds:

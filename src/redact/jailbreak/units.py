@@ -33,7 +33,8 @@ def unit_gen(
 
     Each technique draws its random choices from an ``rng`` seeded by the
     plan's seed, ``label``, the unit's id and iteration, and the technique's
-    name, so a replayed plan gives the same text and the two kinds draw apart;
+    name, so a replayed plan gives the same text within one version of the
+    library and the two kinds draw apart;
     a unit with no seed leaves them to the global ``random``. With ``capture``
     the unit's LLM calls are tagged for internals capture under a provisional
     ``{id}/{label}/attempt_{iteration}`` root, which :func:`row_of` relabels to

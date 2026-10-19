@@ -18,7 +18,11 @@ the technique names are in [techniques.md](../techniques.md).
   name through the registry of every technique, not through the run's pool,
   so a plan made with another pool still replays.
 - A technique draws its random choices from the `rng` it is given, so a
-  replayed plan gives the same text.
+  replayed plan gives the same text within one version of the library. A
+  technique changed between versions draws differently: the ASCII-art cap
+  changes the font `to_ascii_art` draws for most texts over about 90
+  characters, so a plan kept across it mixes the two renderings
+  ([techniques.md](../techniques.md#what-the-families-do)).
 
 ## Modules
 
@@ -233,8 +237,11 @@ joined by `::`: the same in every process, unlike Python's `hash`.
 | A technique's random choices | `stable_seed(seed, label, input_id, iteration, technique name)`, the label `jailbreak` or `variation` |
 
 So the plan does not depend on the order or the chunking of the inputs, and
-a replayed plan gives the same text. The manifest row records the round's
-settings and the `seed`, and `<stem>.plan.json` what the whole plan was made
+a replayed plan gives the same text within one version of the library. The
+plan file records no library version, and a row's `combination_spec_version`
+is the spec's, which a change to a technique's code need not move (the
+ASCII-art cap did not). The manifest row records the round's settings and
+the `seed`, and `<stem>.plan.json` what the whole plan was made
 with: `seed`, `rounds`, `pool` (sorted names), `family_weights`,
 `layer_rates`.
 

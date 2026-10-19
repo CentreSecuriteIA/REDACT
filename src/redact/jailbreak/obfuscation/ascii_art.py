@@ -4,6 +4,20 @@
 every character of the prompt, since a font leaves out a character it lacks,
 and whose drawing is at most ``max_chars`` long; a prompt no font draws whole
 is discarded, and so is one every such font draws longer than the cap.
+
+The cap holds wherever the technique runs, the eval type's pool included,
+and it changes the text, not only what is discarded. A prompt every font
+draws within it (up to about 38 characters) draws the font it drew without a
+cap. Over that the font is drawn from fewer fonts, so the same ``rng`` often
+draws another: for a prompt with a digit or a punctuation mark (12 fonts;
+the isometric ones have neither), about 1 in 12 from about 45 to 75
+characters, 2 in 3 at 90 to 100 and 9 in 10 from about 125; for one of
+letters and spaces alone (16 fonts), about 19 in 20 from about 38. A prompt
+of about 830 characters or more is discarded where it used to be drawn, and
+so are most prompts an encoding lengthened first (unicode escapes, ASCII
+ordinals, morse). A plan kept across this change therefore mixes drawings
+made with and without the cap: a replayed plan gives the same text only
+within one version of the library.
 """
 
 import random
@@ -27,9 +41,10 @@ ASCII_FONTS = [
 # The longest drawing kept, in characters. A font draws a prompt character in
 # about 6 (digital), 15 (bubble), 20 (small), 26 to 30 (alphabet, standard,
 # slant), 37 (big), 46 to 49 (banner, gothic), 68 (block, alligator), 120
-# (dotmatrix) or 130 (isometric) characters, so at 5,000 a 33-character
-# prompt is drawn in any font, a 150-character one in the six smallest, a
-# 300-character one in digital and bubble, and an 850-character one in none.
+# (dotmatrix) or 130 (isometric) characters, so at 5,000 a prompt of up to
+# about 38 characters is drawn in any font, one of 150 in the six smallest,
+# one of 300 in digital and bubble, one of 400 to 800 in digital alone, and
+# one of about 830 or more in none.
 MAX_RENDERED_CHARS = 5000
 
 
@@ -40,7 +55,7 @@ def to_ascii_art(
     """Convert text to ASCII art in a random font that draws all of it within
     ``max_chars`` characters."""
     needed = {ord(c) for c in prompt} - {ord("\n")}     # a newline breaks the line
-    drawn = {font: pyfiglet.Figlet(font=font).renderText(prompt)
+    drawn = {font: _figlet(font).renderText(prompt)
              for font in ASCII_FONTS if needed <= _glyphs(font)}
     if not drawn:
         return prompt, f"{DISCARDED}; reason=no font has every character"
@@ -54,9 +69,22 @@ def to_ascii_art(
 
 
 @cache
+def _figlet(font: str) -> pyfiglet.Figlet:
+    """``font`` loaded once per process, since a call may draw all 16 fonts.
+
+    One Figlet is shared by every call and thread. That is safe: in pyfiglet
+    (read in 1.0.4, the locked version) ``renderText`` builds a new
+    ``FigletBuilder`` for each text and keeps every running buffer on it,
+    reading the Figlet and its ``FigletFont`` without writing to them. Never
+    call ``setFont`` or set ``width`` on it.
+    """
+    return pyfiglet.Figlet(font=font)
+
+
+@cache
 def _glyphs(font: str) -> frozenset[int]:
     """The code points ``font`` has a glyph for."""
-    return frozenset(pyfiglet.FigletFont(font).chars)
+    return frozenset(_figlet(font).Font.chars)
 
 
 def get_ascii_art_functions() -> list[Callable]:

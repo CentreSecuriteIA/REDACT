@@ -128,6 +128,16 @@ Model rewrites no check verifies (`cognitive`, `persona`, `typos`,
 `"adversarial": {"translation": false}` the pool keeps the other 28.
 [configuration.md](configuration.md#dataset-types) gives the type file.
 
+`to_ascii_art` keeps its 5,000-character cap in this pool too, so its eval
+attacks differ from those of a version without the cap: the font a seed
+draws changes for some texts from about 40 characters and for most from
+about 90, a text of about 830 characters or more is rejected where it used
+to be drawn, and so are most inputs when the second round pairs it with a
+`heavy` encoding that lengthens the text (`to_unicode_escape`,
+`to_ascii_ordinal`, `to_morse`). An eval plan kept across the change mixes
+the two renderings. [What the families do](#what-the-families-do) has the
+figures.
+
 ## The natural pool
 
 A spec entry's `kinds` lists the kinds of the augmentation section that may
@@ -248,8 +258,7 @@ the answers.
   (`DISCARDED; reason=no font has every character`); when every such font
   draws the text longer than the cap, it is rejected with the shortest
   drawing's length (`DISCARDED; reason=too long; rendered=<n>;
-  max_chars=5000`). A text every font draws within the cap draws the same
-  font as without one. The cap was set from these drawing lengths, in
+  max_chars=5000`). The cap was set from these drawing lengths, in
   characters, of plain English text (a range over three texts; `-` where
   the font lacks a character, a comma or a question mark):
 
@@ -269,11 +278,36 @@ the answers.
   | `dotmatrix` | 6,050-6,390 | 11,980-12,520 | 17,920-18,790 | 33,830-36,790 |
   | `isometric1`-`4` | 6,347-6,699 | 12,892-13,112 | - | - |
 
-  So at 5,000 a text of about 30 characters is drawn in any font, one of
-  150 in the six smallest, one of 300 in `digital` and `bubble`, and one of
-  about 850 or more in none. Every font that has the glyphs draws the text
-  to measure it, so a text costs up to 16 drawings (about 0.07 s in all at
-  150 characters, 0.5 s at 2,000).
+  The cap holds wherever the technique is drawn, the
+  [eval pool](#the-eval-pool) included, and it changes the text, not only
+  what is rejected. A text every font
+  draws within the cap, up to about 38 characters, draws the same font as
+  without one. Over that, the font is drawn from the fonts that fit. Of the
+  12 fonts that have a typical text's glyphs (the four `isometric` fonts
+  have no digit or punctuation mark), all 12 fit up to about 38
+  characters, 11 at 50, 9 to 11 at 75, 9 at 100, 6 at 150, 2 or 3 at 200
+  to 300, 1 (`digital`) at 400 to 800 and none from about 830. So the same
+  seed draws another font, and another text, than it did before the cap:
+  for a text with a digit or a punctuation mark, about 1 unit in 12 from
+  about 45 to 75 characters (those that drew `dotmatrix`, the last font of
+  the list), about 2 in 3 at 90 to 100 and about 9 in 10 from about 125;
+  for one of letters and spaces alone (all 16 fonts), about 19 in 20 from
+  about 38.
+
+  A text of about 830 characters or more is rejected where it used to be
+  drawn. After an encoding that lengthens the text, most inputs are
+  rejected: unicode escapes make a text about 6 times as long, so an input
+  of about 140 characters or more is rejected after them, one of about 230
+  after ASCII ordinals (about 3.7 times) and one of about 250 after morse
+  (about 3.4 times); base64 (about 1.4 times) lowers the limit to about
+  610. A kept plan resumed across this change mixes rows drawn without the
+  cap (saved before) and with it (run after), so a replayed plan gives the
+  same text only within one version of the library; run the kind with
+  `resume=False` for one rendering.
+
+  Each font is loaded once per process. Every font that has the glyphs
+  draws the text to measure it, so a text costs up to 16 drawings (about
+  0.03 s in all at 150 characters, 0.4 s at 2,000).
 
 **Requests.** These change how a request is posed, not its text, and call no
 model. Each technique picks one of its named template variants from a JSON

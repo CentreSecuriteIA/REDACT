@@ -162,7 +162,17 @@ natural kind's pool is now what the spec's `kinds` mark natural, so a
 natural plan made before raises on resume (its pool changed): run the
 natural kind with `resume=False`. The build leaves out the benign and
 dual-use benign variations such a plan made with a technique the natural
-kind no longer draws ([build.md](build.md#training-mode)). A resume whose `seed`, pool, `rounds`,
+kind no longer draws ([build.md](build.md#training-mode)). The
+5,000-character cap on `to_ascii_art` holds wherever it is drawn, the eval
+type's pool included, and changes the text a seed draws: the font changes for some
+texts from about 40 characters and for most from about 90, a text of about
+830 characters or more is rejected where it used to be drawn, and so are
+most inputs a `heavy` encoding lengthened first
+([techniques.md](../techniques.md#what-the-families-do) has the figures).
+A plan kept across this change mixes rows drawn without the cap, saved
+before, and rows drawn with it, run after: a replayed plan gives the same
+text only within one version of the library. Nothing flags it; run the
+kind with `resume=False` for one rendering. A resume whose `seed`, pool, `rounds`,
 `family_weights` or `layer_rates` differ from those in the kind's
 `.plan.json` raises a `ValueError` that names them and `resume=False`; a
 plan without that file runs as it was made, with a WARNING. A changed
