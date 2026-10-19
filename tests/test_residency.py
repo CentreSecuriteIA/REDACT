@@ -493,6 +493,8 @@ class TestPackagedHFConfig:
                 patch.object(vllm_module, "_prepare_environment"),
                 patch.object(estimate, "_load_config",
                              side_effect=lambda source: read.append(source) or small),
+                patch.object(vllm_module, "tokenizer_folder",
+                             return_value="/tokenizer/folder"),
             ):
                 vllm_module._engine("org/broken-config", None,
                                     {"hf_config_path": folder})

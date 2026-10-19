@@ -192,8 +192,13 @@ class VLLMConfig:
         hf_config: A folder under ``configs/llm/hf_configs/`` whose
             ``config.json`` vLLM (as ``hf_config_path``) and the estimator
             read in place of the checkpoint's own, for a checkpoint whose
-            config the installed transformers cannot read. The weights and
-            tokenizer still come from ``hf_model_id``.
+            config the installed transformers cannot read. The weights come
+            from ``hf_model_id``. vLLM also reads the config of the folder
+            it loads the tokenizer from, so at load the checkpoint's
+            tokenizer files are gathered beside a copy of this config into
+            a folder passed as ``tokenizer``
+            (``backends/tokenizer_folder.py``), unless ``vllm_kwargs`` names
+            a ``tokenizer``.
     """
 
     hf_model_id: str
@@ -259,7 +264,8 @@ class VLLMConfig:
     @property
     def engine_kwargs(self) -> dict:
         """The kwargs the engine is built with, ``min_gpus`` and
-        :attr:`hf_config_path` included."""
+        :attr:`hf_config_path` included; the tokenizer folder is added at
+        load."""
         kwargs = dict(self.vllm_kwargs or {})
         if kwargs.get("tensor_parallel_size", 0) is None:
             del kwargs["tensor_parallel_size"]

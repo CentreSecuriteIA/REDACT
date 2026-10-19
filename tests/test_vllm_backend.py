@@ -24,6 +24,7 @@ import sys
 import textwrap
 import time
 import types
+from pathlib import Path
 
 import pytest
 
@@ -248,6 +249,104 @@ class TestEngineArguments:
         the context, and the engine's own has lower ones."""
         seen = TestEngineDownloadDir._load(monkeypatch, {})
         assert seen["usage_context"] == "LLM_CLASS"    # the fake's UsageContext.LLM_CLASS
+
+
+class TestTokenizerFolder:
+    """A setup with ``hf_config`` loads its tokenizer from a folder of the
+    checkpoint's tokenizer files beside a copy of the packaged config: vLLM
+    reads the config of the tokenizer's folder as well as ``hf_config_path``."""
+
+    @staticmethod
+    def _load(monkeypatch, vllm_kwargs):
+        """The engine arguments, and each folder asked for."""
+        import redact.llms.backends.vllm as vllm_module
+
+        asked = []
+
+        def folder(hf_model_id, config_dir, *, revision=None):
+            asked.append((hf_model_id, config_dir, revision))
+            return "/tokenizer/folder"
+
+        monkeypatch.setattr(vllm_module, "tokenizer_folder", folder)
+        return TestEngineDownloadDir._load(monkeypatch, vllm_kwargs), asked
+
+    def test_the_engine_gets_the_folder_as_its_tokenizer(self, monkeypatch):
+        seen, asked = self._load(monkeypatch, {"hf_config_path": "/configs/m"})
+        assert (seen["tokenizer"], seen["hf_config_path"]) == (
+            "/tokenizer/folder", "/configs/m")
+        assert asked == [("org/model", "/configs/m", None)]
+
+    def test_an_entrys_own_tokenizer_wins(self, monkeypatch):
+        seen, asked = self._load(monkeypatch, {"hf_config_path": "/configs/m",
+                                               "tokenizer": "/my/tokenizer"})
+        assert seen["tokenizer"] == "/my/tokenizer" and asked == []
+
+    def test_a_setup_without_hf_config_is_unchanged(self, monkeypatch):
+        seen, asked = self._load(monkeypatch, {"max_model_len": 512})
+        assert "tokenizer" not in seen and asked == []
+
+    @pytest.mark.parametrize("kwargs,revision", [
+        ({"revision": "r1"}, "r1"),
+        ({"revision": "r1", "tokenizer_revision": "t1"}, "t1"),
+    ])
+    def test_the_tokenizers_revision_is_fetched(self, monkeypatch, kwargs, revision):
+        _, asked = self._load(monkeypatch, {"hf_config_path": "/configs/m", **kwargs})
+        assert asked == [("org/model", "/configs/m", revision)]
+
+    def test_a_registered_hf_config_reaches_the_engine_through_its_folder(
+            self, monkeypatch, tmp_path):
+        """From the registry entry to AsyncEngineArgs, on a fake hub: the
+        folder holds the snapshot's tokenizer files and the packaged config,
+        and the engine key is the one the planner computes, without it."""
+        import huggingface_hub
+        from huggingface_hub import constants
+
+        import redact.llms.backends.vllm as vllm_module
+        from redact import paths
+
+        snapshot = tmp_path / "snapshot"
+        snapshot.mkdir()
+        for name in ("tokenizer.json", "tokenizer_config.json", "config.json",
+                     "model.safetensors"):
+            (snapshot / name).write_text(name, encoding="utf-8")
+        monkeypatch.setattr(huggingface_hub, "snapshot_download",
+                            lambda repo_id, **kw: str(snapshot))
+        monkeypatch.setattr(constants, "HF_ASSETS_CACHE", str(tmp_path / "assets"))
+
+        seen = {}
+
+        class _Engine:
+            scheduler_config = types.SimpleNamespace(max_num_seqs=4)
+
+            def __init__(self, **kw):
+                seen.update(kw)
+
+            def shutdown(self):
+                """So clear_cache() finds a hook and stays quiet."""
+
+        for name, module in fake_vllm_modules(_Engine).items():
+            monkeypatch.setitem(sys.modules, name, module)
+        monkeypatch.setattr(vllm_module, "_prepare_environment", lambda: None)
+        name = "_test_hf_config_tokenizer"
+        register_model(name, backend_type="vllm", vllm=VLLMConfig(
+            hf_model_id="org/broken-config", hf_config="translategemma-27b",
+            vllm_kwargs={"max_model_len": 4096}))
+        try:
+            backend = ModelClient.create(name).backend
+            local = get_model_config(name).vllm
+        finally:
+            MODEL_REGISTRY.pop(name, None)
+
+        packaged = paths.hf_configs_dir() / "translategemma-27b" / "config.json"
+        folder = Path(seen["tokenizer"])
+        assert sorted(p.name for p in folder.iterdir()) == [
+            "config.json", "tokenizer.json", "tokenizer_config.json"]
+        assert (folder / "config.json").read_bytes() == packaged.read_bytes()
+        assert seen["hf_config_path"] == str(packaged.parent)
+        key = vllm_module._engine_key(local.hf_model_id, local.quantization,
+                                      local.engine_kwargs)
+        assert backend._key == key and key in vllm_module._engines
+        assert "tokenizer" not in key[2]
 
 
 class TestEngineStats:

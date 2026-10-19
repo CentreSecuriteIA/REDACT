@@ -917,7 +917,13 @@ def test_the_translategemma_config_has_its_rope_per_layer_type():
 @pytest.mark.parametrize("folder", _packaged_hf_configs(), ids=lambda p: p.name)
 def test_every_packaged_hf_config_loads_in_transformers(folder):
     """A transformers upgrade that cannot read a shipped config fails here, not
-    at an engine's build."""
+    at an engine's build.
+
+    Covers the config alone, as vLLM's model config (``hf_config_path``) and
+    the estimator read it. vLLM also reads a config from the folder it loads
+    the tokenizer from, which ``AutoConfig`` here cannot show: that folder is
+    built at load with this config in it (``test_tokenizer_folder.py``).
+    """
     transformers = pytest.importorskip("transformers")
     assert transformers.AutoConfig.from_pretrained(str(folder)) is not None
 

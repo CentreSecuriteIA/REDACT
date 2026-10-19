@@ -27,6 +27,7 @@ from ...exceptions import PromptTooLongError
 from .. import aio, observe
 from ..resources import estimate, measure
 from .base import ComputeConfig, LLMBackend, free_memory
+from .tokenizer_folder import tokenizer_folder
 
 if TYPE_CHECKING:
     from concurrent.futures import Future
@@ -371,6 +372,15 @@ def _engine(hf_model_id: str, quantization: str | None, vllm_kwargs: dict):
         if not kwargs.get("max_model_len"):
             kwargs["max_model_len"] = estimate.effective_max_model_len(
                 kwargs.get("hf_config_path") or hf_model_id)
+        # vLLM reads a config from the tokenizer's folder too, so a replaced
+        # config needs a folder of the checkpoint's tokenizer files beside a
+        # copy of it. Kept out of the key: the folder follows from the
+        # checkpoint and the config the key names, and the planner computes
+        # the key without fetching anything.
+        if kwargs.get("hf_config_path") and not kwargs.get("tokenizer"):
+            kwargs["tokenizer"] = tokenizer_folder(
+                hf_model_id, kwargs["hf_config_path"],
+                revision=kwargs.get("tokenizer_revision") or kwargs.get("revision"))
         # vllm.LLM's default. Set false, the engine is asked for its stats
         # line every _STATS_INTERVAL_S (_log_stats).
         kwargs.setdefault("disable_log_stats", True)
@@ -521,8 +531,9 @@ def _end_load(waited: float) -> bool:
     elif loading is not None:
         logger.error(
             "[vllm] The load of %s has not started its build in %g s (it reads "
-            "its model's config, or waits for a transformers load to start "
-            "CUDA), so there is no engine process to end.", loading[0], waited)
+            "its model's config, fetches its tokenizer files, or waits for a "
+            "transformers load to start CUDA), so there is no engine process "
+            "to end.", loading[0], waited)
     else:
         logger.error("[vllm] Another release has held the engine lock for %g s.",
                      waited)

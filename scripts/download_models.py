@@ -5,10 +5,12 @@
     python scripts/download_models.py --dry-run            # list, download nothing
 
 Reads ``configs/llm/models.json`` through the registry, so a model added there
-is picked up here. Models sharing a checkpoint are downloaded once. A
-machine-translation model brings the language identifier its translations are
-checked with. Files land in the HuggingFace cache (``HF_HOME``), which is where
-vLLM, transformers and the identifier look for them at load time.
+is picked up here. Models sharing a checkpoint are downloaded once, whole: the
+tokenizer files a setup with ``hf_config`` gathers into its tokenizer folder
+at load come with it. A machine-translation model brings the language
+identifier its translations are checked with. Files land in the HuggingFace
+cache (``HF_HOME``), which is where vLLM, transformers and the identifier look
+for them at load time.
 """
 
 import argparse

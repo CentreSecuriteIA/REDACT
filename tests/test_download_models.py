@@ -42,3 +42,22 @@ def test_a_machine_translation_model_brings_the_language_identifier(script):
     assert todo["cis-lmu/glotlid"] == ["translategemma-27b"]
     assert script.FILES == {"cis-lmu/glotlid": "model_v3.bin"}
     assert "cis-lmu/glotlid" not in script.checkpoints(["venice-uncensored-fp8"])
+
+
+def test_a_checkpoint_with_a_replaced_config_is_fetched_whole(script, monkeypatch):
+    """Its tokenizer files come with the snapshot, so the engine's tokenizer
+    folder finds them in the hub cache, offline too."""
+    import huggingface_hub
+
+    from redact.llms.model_config import MODEL_REGISTRY
+
+    replaced = {c.vllm.hf_model_id for c in MODEL_REGISTRY.values()
+                if c.vllm is not None and c.vllm.hf_config is not None}
+    fetched = []
+    monkeypatch.setattr(huggingface_hub, "snapshot_download",
+                        lambda repo_id, **kw: fetched.append((repo_id, kw)) or "/snap")
+    monkeypatch.setattr(huggingface_hub, "hf_hub_download", lambda *a, **kw: "/file")
+    names = [n for n, c in MODEL_REGISTRY.items()
+             if c.vllm is not None and c.vllm.hf_config is not None]
+    assert script.main(names) == 0
+    assert replaced and dict(fetched) == dict.fromkeys(replaced, {})
