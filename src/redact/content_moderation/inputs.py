@@ -44,7 +44,13 @@ from ..dataset.planfile import changed_plan, plan_path, plan_record, write_plan
 from ..dataset.resume import release_lock, resume_state
 from ..dataset.save import CommitBuffer
 from ..exceptions import PromptTooLongError
-from ..llm_pipeline import LLMRequest, drive_units, is_accepted, pool_size
+from ..llm_pipeline import (
+    CHECK_TEMPERATURE,
+    LLMRequest,
+    drive_units,
+    is_accepted,
+    pool_size,
+)
 from ..llm_pipeline import extracted as extracted_unit
 from ..llms.client import ModelClient
 from ..llms.prompting import PromptTemplate, extract_and_clean
@@ -433,6 +439,7 @@ class InputPipeline:
                     internals_id=(f"{content_id(text)}/{check_label}"
                                   if capture_val_in else None),
                     max_tokens=check_max_tokens,
+                    temperature=CHECK_TEMPERATURE,
                 )
                 accepted = is_accepted(response)
                 verdict = (accepted, "" if accepted else response)

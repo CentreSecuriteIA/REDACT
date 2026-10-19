@@ -265,6 +265,40 @@ def test_a_limit_below_one_is_rejected():
         LLMRequest("m", [], max_tokens=0)
 
 
+def test_a_temperature_below_zero_is_rejected():
+    with pytest.raises(ValueError, match="at least 0"):
+        LLMRequest("m", [], temperature=-0.1)
+
+
+def test_for_client_carries_the_temperature():
+    from tests.conftest import MockBackend, make_client
+
+    client = make_client(MockBackend(), "m-temp")
+    temperature = 0.15
+    assert LLMRequest.for_client(client, [], temperature=temperature).temperature == (
+        temperature)
+    assert LLMRequest("m", []).temperature is None
+
+
+def _tempered(tag, temperature, model="m"):
+    yield LLMRequest(model, [{"role": "user", "content": f"{tag}1"}],
+                     temperature=temperature)
+    return tag
+
+
+def test_drive_generators_groups_by_temperature_and_forwards_it():
+    calls = []
+
+    class _R:
+        def batch_generate(self, model, messages_list, **kw):
+            calls.append((len(messages_list), kw.get("temperature")))
+            return ["r"] * len(messages_list)
+
+    gens = {"a": _tempered("a", 0.15), "b": _tempered("b", 0.15), "c": _rounds("c", 1)}
+    drive_generators(gens, resolve=as_resolver(_R()), finalize=lambda k, v: v)
+    assert sorted(calls, key=str) == [(1, None), (2, 0.15)]
+
+
 def _capped(tag, limit, model="m"):
     yield LLMRequest(model, [{"role": "user", "content": f"{tag}1"}], max_tokens=limit)
     return tag
@@ -447,6 +481,22 @@ def test_drive_units_requests_with_different_limits_do_not_share_a_call():
     _drive(iter(units), rec, pool_size=3, cap=3)
     assert rec.batches == [["a1", "b1"], ["c1"]]      # the larger group goes first
     assert rec.limits == [50, None]                     # forwarded only when set
+
+
+def test_drive_units_requests_with_different_temperatures_do_not_share_a_call():
+    temperatures = []
+
+    class _R:
+        def batch_generate(self, model, messages_list, **kw):
+            temperatures.append((len(messages_list), kw.get("temperature")))
+            return ["r"] * len(messages_list)
+
+    units = [("a", _tempered("a", 0.15)), ("b", _tempered("b", 0.15)),
+             ("c", _rounds("c", 1)), ("d", _tempered("d", 0.7))]
+    drive_units(iter(units), resolve=as_resolver(_R()), pool_size=4, cap=4,
+                on_done=lambda k, v: None)
+    # The larger group first; a temperature is forwarded only when set.
+    assert temperatures == [(2, 0.15), (1, None), (1, 0.7)]
 
 
 def test_drive_units_progress_label_names_the_limit():

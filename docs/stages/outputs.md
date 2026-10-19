@@ -56,6 +56,11 @@ label: the input's entry type and the mode's output label, as
 
 `check_outputs: false` skips the check and accepts every response.
 
+The check calls run at temperature 0.15 (`llm_pipeline.CHECK_TEMPERATURE`),
+the generations at the model's default: in the checker test a checker at
+0.15 repeated its own verdict on 99.5 percent of harmful responses, against
+94.0 at the stages' 0.7, at the same acceptance.
+
 ## Settings
 
 Params keys: `check_outputs`, `max_attempts`, `max_per_category`,

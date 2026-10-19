@@ -237,6 +237,20 @@ def test_each_request_carries_its_own_limit_and_capture_id():
     assert script.sent == {"a1": (50, "root/0"), "b1": (None, None), "c1": (7, None)}
 
 
+def test_each_request_on_the_lane_carries_its_own_temperature():
+    sent = {}
+
+    class _Tempered(_Scripted):
+        async def agenerate(self, messages, *, temperature=None, **kwargs):
+            sent[messages[-1]["content"]] = temperature
+            return await super().agenerate(messages, **kwargs)
+
+    client = _lane_client(_Script(), "lane-tempered", backend_cls=_Tempered)
+    units = [("a", _unit(client, "a", temperature=0.15)), ("b", _unit(client, "b"))]
+    _drive(units, pool_size=2)
+    assert sent == {"a1": 0.15, "b1": None}
+
+
 def test_a_request_by_name_is_resolved_once_and_sent_on_the_lane():
     script = _Script(["b1", "a1"])
     client = _lane_client(script, "lane-named")

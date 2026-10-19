@@ -25,7 +25,7 @@ from ..dataset.planfile import changed_plan, plan_path, plan_record, write_plan
 from ..dataset.resume import release_lock, resume_state
 from ..dataset.save import CommitBuffer
 from ..exceptions import PromptTooLongError
-from ..llm_pipeline import checked, drive_units, pool_size
+from ..llm_pipeline import CHECK_TEMPERATURE, checked, drive_units, pool_size
 from ..llms.client import ModelClient
 from ..llms.prompting import build_messages, load_prompt
 from .axes import (
@@ -173,7 +173,9 @@ def run_output_generation(
     verdict (or that reason) as feedback, and the row holds the last
     attempt. An input whose prompt is too long for the
     model gets a rejected row with an empty response. A call carries up to
-    ``batch_size`` requests; ``check_max_tokens`` limits a verdict's reply.
+    ``batch_size`` requests; ``check_max_tokens`` limits a verdict's reply, and
+    the check calls run at ``CHECK_TEMPERATURE`` (0.15), the generations at
+    the model's default.
 
     ``axes`` (:func:`redact.content_moderation.axes.resolve`) deals each
     unit one spec per ``(category, entry_type)`` from ``seed``, an input's
@@ -370,6 +372,7 @@ def run_output_generation(
             max_tokens=(None, check_max_tokens),
             max_attempts=max_attempts,
             precheck=_too_short,
+            temperatures=(None, CHECK_TEMPERATURE),
         )
 
     # A finished unit's row. sample_id is this row's own content-hash identity

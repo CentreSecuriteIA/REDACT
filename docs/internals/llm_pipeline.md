@@ -29,13 +29,17 @@ It must not:
 ## LLMRequest
 
 ```python
-LLMRequest(model, messages, internals_id=None, *, client=None, max_tokens=None)
-LLMRequest.for_client(client, messages, *, internals_id=None, max_tokens=None)
+LLMRequest(model, messages, internals_id=None, *, client=None, max_tokens=None,
+           temperature=None)
+LLMRequest.for_client(client, messages, *, internals_id=None, max_tokens=None,
+                      temperature=None)
 ```
 
 A request names a model; with `client` it goes to that client, else the
-driver builds one with `ModelClient.create(model)`. Requests share a call
-only when their reply limits agree. The jailbreak techniques yield requests
+driver builds one with `ModelClient.create(model)`. `max_tokens` and
+`temperature` are the call's reply limit and sampling temperature, `None`
+the model's defaults. Requests share a call only when their reply limits and
+temperatures agree. The jailbreak techniques yield requests
 by model name; the content moderation units bind theirs to a client.
 
 A unit is a generator:
@@ -67,8 +71,8 @@ Each turn of the loop:
 1. Admit units into free slots and start each one.
 2. Hand back an async reply that has arrived, if any (see below), and go
    round again.
-3. Group the pending requests of the other models by model, setup and reply
-   limit.
+3. Group the pending requests of the other models by model, setup, reply
+   limit and temperature.
 4. Send every group that fills a call (`cap` requests, oldest first) as one
    `client.generate(...)`. When no group is full: while async requests are in
    flight, wait for the next reply, which may fill one; otherwise send the
@@ -124,7 +128,7 @@ backend.
 | Function | Use |
 |---|---|
 | `drive_sync(gen, call)` | One generator, answered by a blocking `call(request) -> str`. Used by `combine_techniques`, `apply_combination` and `run_conversation` |
-| `drive_generators(gens, *, finalize, on_error=None, resolve=None, progress=None)` | Many generators, round by round: every pending request of a round is grouped by client and reply limit and sent as one call per group. Used by `optimization/search.py` |
+| `drive_generators(gens, *, finalize, on_error=None, resolve=None, progress=None)` | Many generators, round by round: every pending request of a round is grouped by client, reply limit and temperature and sent as one call per group. Used by `optimization/search.py` |
 
 ## Checks and retry steps
 
@@ -133,7 +137,7 @@ backend.
 | `is_accepted(reply)` | The one accept rule: the reply's first word is `yes`, `ok`, `okay`, `accept`, `accepted`, `pass` or `passed`, in any case, after leading whitespace, markdown (`*`, `_`, `#`, `>`, backticks) and quotes, curly ones included. So `**Yes**`, `Yes.` and `yes, because` accept; `Yesterday`, `Acceptable` and `Verdict: yes` reject |
 | `check_sample(client, sample, build_check_messages, original="")` | One check call: `(accepted, reasoning)`, the reasoning being the full reply on rejection |
 | `batch_check_samples(client, samples, build_check_messages, originals=None, batch_size=32)` | Many check calls, in chunks, in order |
-| `checked(gen, build_gen_messages, check=None, build_check_messages=None, *, original="", internals_ids=(None, None), max_tokens=(None, None), max_attempts=1, precheck=None)` | A unit step: generate, check, and generate again with the verdict as feedback, up to `max_attempts`. `precheck(text) -> reason`, with a check, is a code-side verdict before it: a non-empty reason rejects the reply with no check request, and is the feedback (or the last attempt's reasoning). Returns `(text, accepted, reasoning)` |
+| `checked(gen, build_gen_messages, check=None, build_check_messages=None, *, original="", internals_ids=(None, None), max_tokens=(None, None), max_attempts=1, precheck=None, temperatures=(None, None))` | A unit step: generate, check, and generate again with the verdict as feedback, up to `max_attempts`. `max_tokens` and `temperatures` go to the (generation, check) requests. `precheck(text) -> reason`, with a check, is a code-side verdict before it: a non-empty reason rejects the reply with no check request, and is the feedback (or the last attempt's reasoning). Returns `(text, accepted, reasoning)` |
 | `extracted(gen, build_gen_messages, extract, *, internals_id=None, max_tokens=None, max_attempts=3)` | A unit step: generate until `extract(reply)` gives samples, up to `max_attempts`. Returns `(samples, attempts)`. `gen` is a client, or a model name the driver resolves, as a jailbreak technique's requests carry it (the cognitive and persona scenarios) |
 
 `build_check_messages` is `(original, sample) -> messages`, the shape the

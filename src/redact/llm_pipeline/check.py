@@ -14,6 +14,11 @@ from .request import LLMRequest
 
 _ACCEPT_WORDS = frozenset({"yes", "ok", "okay", "accept", "accepted", "pass", "passed"})
 
+#: The temperature of the inputs and outputs stages' check calls: at 0.15 a
+#: checker repeats its own verdict far more often than at the stages' 0.7
+#: (harmful responses 99.5 against 94.0 percent), at the same acceptance.
+CHECK_TEMPERATURE = 0.15
+
 # Leading whitespace, markdown and quote marks (straight and curly), then the
 # first word: its letters and digits.
 _FIRST_WORD = re.compile(r"[\s*_#>\"'`“”‘’]*([^\W_]+)")
@@ -134,6 +139,7 @@ def checked(
     max_tokens: tuple[int | None, int | None] = (None, None),
     max_attempts: int = 1,
     precheck: Callable[[str], str] | None = None,
+    temperatures: tuple[float | None, float | None] = (None, None),
 ) -> Generator[LLMRequest, str, tuple[str, bool, str]]:
     """Generate, check, and regenerate a rejected reply with the verdict.
 
@@ -152,6 +158,8 @@ def checked(
             before its check: a non-empty reason rejects the reply with no
             check request, and is the next attempt's feedback, or the
             returned reasoning on the last. Not called without ``check``.
+        temperatures: Sampling temperatures for the (generation, check)
+            requests. ``None`` keeps the model's default.
 
     Returns:
         ``(text, accepted, reasoning)``. ``reasoning`` is the last verdict
@@ -163,11 +171,13 @@ def checked(
         raise ValueError("A check client needs build_check_messages.")
     gen_id, check_id = internals_ids
     gen_max, check_max = max_tokens
+    gen_temperature, check_temperature = temperatures
     feedback = ""
     for attempt in range(1, max_attempts + 1):
         text = yield LLMRequest.for_client(
             gen, build_gen_messages(feedback),
             internals_id=_attempt_id(gen_id, attempt), max_tokens=gen_max,
+            temperature=gen_temperature,
         )
         if check is None:
             return text, True, ""
@@ -178,6 +188,7 @@ def checked(
         verdict = yield LLMRequest.for_client(
             check, build_check_messages(original, text),
             internals_id=_attempt_id(check_id, attempt), max_tokens=check_max,
+            temperature=check_temperature,
         )
         if is_accepted(verdict):
             return text, True, ""

@@ -686,6 +686,25 @@ class TestGenerateOutputsRetry:
         assert check.calls[0]["max_tokens"] == 64
         assert gen.calls[0]["max_tokens"] == gen.default_max_tokens
 
+    def test_check_calls_run_at_the_check_temperature_and_generation_not(
+            self, tmp_path, monkeypatch):
+        import redact.stages as P
+        from redact import generate_outputs
+        from redact.llm_pipeline import CHECK_TEMPERATURE
+        from tests.conftest import MockBackend, make_client
+
+        gen = MockBackend(["first answer", "second answer"])
+        check = MockBackend(["No: weak", "Yes"])
+        backends = {"gen-model": gen, "check-model": check}
+        monkeypatch.setattr(P.ModelClient, "create",
+                            lambda m: make_client(backends[m], m))
+        inputs = pd.DataFrame({"sample": ["p one"], "category": ["Cyber"],
+                               "entry_type": ["harmful"]})
+        generate_outputs(data_dir=tmp_path, inputs=inputs, model="gen-model",
+                         check_model="check-model", verbose=False, max_attempts=2)
+        assert [c.get("temperature") for c in check.calls] == [CHECK_TEMPERATURE] * 2
+        assert [c.get("temperature") for c in gen.calls] == [None, None]
+
     def test_a_chunk_is_one_generation_call_and_one_check_call(self, tmp_path, monkeypatch):
         import redact.stages as P
         from redact import generate_outputs

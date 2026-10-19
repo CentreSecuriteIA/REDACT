@@ -55,8 +55,8 @@ def drive_generators(
 
     Each generator yields :class:`LLMRequest`s and is resumed with the reply.
     Every round, the pending requests are grouped by ``request.client`` (by
-    ``request.model`` when none is attached) and ``request.max_tokens``, and
-    sent as one ``generate()`` call per group.
+    ``request.model`` when none is attached), ``request.max_tokens`` and
+    ``request.temperature``, and sent as one ``generate()`` call per group.
 
     Args:
         gens: ``{key: generator}``. Keys are returned unchanged.
@@ -115,7 +115,7 @@ def drive_generators(
         groups: dict[Hashable, list] = defaultdict(list)
         for key, req in pending.items():
             groups[(req.client if req.client is not None else req.model,
-                    req.max_tokens)].append(key)
+                    req.max_tokens, req.temperature)].append(key)
 
         round_requests = dict(pending)
         pending.clear()
@@ -128,6 +128,8 @@ def drive_generators(
             kw = {"progress": _label(progress, round_idx, first)} if progress else {}
             if first.max_tokens is not None:
                 kw["max_tokens"] = first.max_tokens
+            if first.temperature is not None:
+                kw["temperature"] = first.temperature
             # Pass internals_ids only when a request in this batch wants
             # capture. A client whose backend cannot capture rejects any
             # list, even one that is all None.
@@ -150,8 +152,11 @@ def drive_generators(
 
 
 def _label(progress: str, round_idx: int, first: LLMRequest) -> str:
-    """Progress label of one call; names the limit when the group has one."""
+    """Progress label of one call; names the limit and the temperature when
+    the group has them."""
     limit = f", max_tokens={first.max_tokens}" if first.max_tokens is not None else ""
+    if first.temperature is not None:
+        limit += f", temperature={first.temperature}"
     return f"{progress} round {round_idx} ({first.model}{limit})"
 
 
@@ -159,15 +164,16 @@ def _group_key(request: LLMRequest) -> Hashable:
     """The requests that may share one ``generate()`` call.
 
     A call carries one set of settings, so requests share one only when they
-    agree on the reply limit (``None`` meaning the model's default); beyond
-    that the same registry name on the same setup is enough, whichever client
-    object made the request. A request without a client is keyed by name and
-    resolved at dispatch.
+    agree on the reply limit and the temperature (``None`` meaning the
+    model's default); beyond that the same registry name on the same setup
+    is enough, whichever client object made the request. A request without a
+    client is keyed by name and resolved at dispatch.
     """
     client = request.client
     if client is None:
-        return request.model, request.max_tokens
-    return client.model, client.backend.backend_name, request.max_tokens
+        return request.model, request.max_tokens, request.temperature
+    return (client.model, client.backend.backend_name, request.max_tokens,
+            request.temperature)
 
 
 def _has_async_calls(client) -> bool:
@@ -212,10 +218,11 @@ def drive_units(
 
     A unit is ``(key, generator)``; the generator yields :class:`LLMRequest`s
     and is resumed with each reply. Each round admits units from ``source``
-    into free slots, groups every live unit's pending request by model, setup
-    and reply limit (by ``request.model`` and limit alone when no client is
-    attached), sends every group that fills a call — ``cap`` requests, oldest
-    first, one ``generate()`` each — or the largest group when none does, and
+    into free slots, groups every live unit's pending request by model, setup,
+    reply limit and temperature (by ``request.model``, limit and temperature
+    alone when no client is attached), sends every group that fills a call —
+    ``cap`` requests, oldest first, one ``generate()`` each — or the largest
+    group when none does, and
     hands the replies back. A unit that finishes is reported at once, so the
     caller can save it without waiting for the others. Each distinct limit on
     one model is another group: at ``pool_size = 2 * cap`` up to three keep
@@ -296,7 +303,8 @@ def drive_units(
             async with gate:
                 return await client.agenerate(
                     request.messages,
-                    max_tokens=request.max_tokens, internals_id=request.internals_id,
+                    max_tokens=request.max_tokens, temperature=request.temperature,
+                    internals_id=request.internals_id,
                 )
         finally:
             tasks.discard(task)
@@ -424,6 +432,8 @@ def drive_units(
                 kw = {"progress": _label(progress, round_idx, first)} if progress else {}
                 if first.max_tokens is not None:
                     kw["max_tokens"] = first.max_tokens
+                if first.temperature is not None:
+                    kw["temperature"] = first.temperature
                 ids = [r.internals_id for r in requests]
                 if any(i is not None for i in ids):    # a non-capturing client rejects any list
                     kw["internals_ids"] = ids

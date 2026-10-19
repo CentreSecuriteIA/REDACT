@@ -84,6 +84,24 @@ class TestGeneralBenignEntries:
         assert "source_taxonomy" not in rows.columns
 
 
+def test_the_inputs_check_runs_at_the_check_temperature_and_generation_at_the_default(
+        tmp_path):
+    gen = MockBackend("1. a question about bread\n[END]")
+    check = MockBackend("Yes")
+    pipeline = InputPipeline(gen=make_client(gen, "m"),
+                             check=make_client(check, "m-check"), dataset_dir=tmp_path)
+    pipeline.run_from_constitution(
+        pd.DataFrame([{"source_category": "Cooking", "sample_description": "desc",
+                       "constitution_subcategory": "Bread",
+                       "constitution_category": "Baking", "entry_type": "benign",
+                       "source_group_tag": "general"}]),
+        {"system_prompt": "sys", "template": "about {sample_description}"},
+        samples_per_entry=2, verbose=False)
+    assert check.calls
+    assert {c.get("temperature") for c in check.calls} == {0.15}
+    assert [c.get("temperature") for c in gen.calls] == [None, None]
+
+
 _RESPONSE_COLUMNS = ["response_length", "response_format", "response_register"]
 _QUESTIONS = 6
 

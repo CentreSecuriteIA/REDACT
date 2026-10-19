@@ -5,6 +5,7 @@ The stages import this; it imports only ``redact.llms``.
 """
 
 from .check import (
+    CHECK_TEMPERATURE,
     batch_check_samples,
     check_sample,
     checked,
@@ -15,6 +16,7 @@ from .drive import drive_generators, drive_sync, drive_units, pool_size
 from .request import LLMRequest
 
 __all__ = [
+    "CHECK_TEMPERATURE",
     "LLMRequest",
     "batch_check_samples",
     "check_sample",

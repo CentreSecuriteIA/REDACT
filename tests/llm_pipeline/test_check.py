@@ -172,6 +172,18 @@ class TestChecked:
         assert [r.client for r in call.seen] == [GEN, GEN, CHECK]
         assert call.seen[1].messages[0]["content"] == "gen|too short"
 
+    def test_temperatures_go_to_their_requests(self):
+        call = _call({GEN: ["t1", "t2"], CHECK: ["No", "Yes"]})
+        drive_sync(checked(GEN, _gen_messages, CHECK, _check_messages,
+                           max_attempts=2, temperatures=(None, 0.15)), call)
+        assert [(r.client, r.temperature) for r in call.seen] == [
+            (GEN, None), (CHECK, 0.15), (GEN, None), (CHECK, 0.15)]
+
+    def test_without_temperatures_every_request_keeps_the_default(self):
+        call = _call({GEN: ["t1"], CHECK: ["Yes"]})
+        drive_sync(checked(GEN, _gen_messages, CHECK, _check_messages), call)
+        assert [r.temperature for r in call.seen] == [None, None]
+
     def test_without_a_check_the_precheck_is_not_called(self):
         def precheck(text):
             raise AssertionError("precheck called")

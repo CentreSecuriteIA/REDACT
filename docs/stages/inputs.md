@@ -52,6 +52,11 @@ type `benign` and its constitution subcategory.
 Pick a checker that can judge. In the GPU check, a 3B checker accepted 2 of
 144 samples and a 24B checker 144 of 144.
 
+The check calls run at temperature 0.15 (`llm_pipeline.CHECK_TEMPERATURE`),
+the generations at the model's default: in the checker test the input
+checker repeated its own verdict on 95.2 percent of harmful samples at
+0.15, against 83.3 at the stages' 0.7, at the same acceptance.
+
 ## Settings
 
 Params keys: `style`, `samples_per_entry`, `entry_types`, `axes`,

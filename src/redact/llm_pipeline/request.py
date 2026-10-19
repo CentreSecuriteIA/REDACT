@@ -21,6 +21,9 @@ class LLMRequest:
             out as one batch; ``None`` resolves ``model`` by name.
         max_tokens: Reply limit for this call. ``None`` leaves the model's
             default. Requests share a call only when their limits agree.
+        temperature: Sampling temperature for this call. ``None`` leaves the
+            model's default. Requests share a call only when their
+            temperatures agree.
     """
 
     model: str
@@ -28,10 +31,14 @@ class LLMRequest:
     internals_id: str | None = None
     client: ModelClient | None = field(default=None, kw_only=True)
     max_tokens: int | None = field(default=None, kw_only=True)
+    temperature: float | None = field(default=None, kw_only=True)
 
     def __post_init__(self):
         if self.max_tokens is not None and self.max_tokens < 1:
             raise ValueError(f"max_tokens must be at least 1, got {self.max_tokens}.")
+        if self.temperature is not None and self.temperature < 0:
+            raise ValueError(
+                f"temperature must be at least 0, got {self.temperature}.")
 
     @classmethod
     def for_client(
@@ -41,7 +48,8 @@ class LLMRequest:
         *,
         internals_id: str | None = None,
         max_tokens: int | None = None,
+        temperature: float | None = None,
     ) -> LLMRequest:
         """A request bound to ``client``, with ``model`` set from it."""
         return cls(client.model, messages, internals_id=internals_id, client=client,
-                   max_tokens=max_tokens)
+                   max_tokens=max_tokens, temperature=temperature)
