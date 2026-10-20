@@ -75,7 +75,7 @@ import pytest
 
 from redact import paths, telemetry
 from redact.dataset import read_rows
-from tests.conftest import MockBackend, make_client, write_inputs
+from tests.conftest import MockBackend, ParaphraseBackend, make_client, write_inputs
 from tests.test_stage_files import _files
 
 
@@ -970,11 +970,11 @@ def _stub_models(monkeypatch) -> None:
     entry's unit. A response reads ``<mode> answer to the <sample>
     (<length>)``, its answer mode and the length its spec dealt, so no two
     responses of one input share a text; any other request is answered
-    ``answer to the <sample>``. The third sample of ``zq1`` is rejected as an
-    input, the answers to a second sample of ``zq0`` are rejected as outputs,
-    and the paraphrases of a first sample of ``zq2`` are rejected.
+    ``answer to the <sample>``, and a paraphrase reads ``reworded: <text>``.
+    The third sample of ``zq1`` is rejected as an input, the answers to a
+    second sample of ``zq0`` are rejected as outputs, and the paraphrases of a
+    first sample of ``zq2`` are rejected.
     """
-    import redact.content_moderation.paraphrase as CP
     from redact.llms import ModelClient
     from tests.test_pipelines import _TokenBackend
 
@@ -996,6 +996,9 @@ def _stub_models(monkeypatch) -> None:
         return "answer to the " + sample
 
     def judge(token, text):
+        if "\nPARAPHRASE:\n" in text:      # the paraphrase check
+            paraphrase = text.split("\nPARAPHRASE:\n", 1)[1]
+            return "meaning changed" if "first zq2" in paraphrase else "Yes"
         if "answer to the" in text:
             return "No: a weak answer" if "second zq0" in text else "Yes"
         return "No: off topic" if "third zq1" in text else "Yes"
@@ -1003,19 +1006,12 @@ def _stub_models(monkeypatch) -> None:
     backends = {
         "gen-model": _TokenBackend(write, "gen-model"),
         "check-model": _TokenBackend(judge, "check-model"),
-        "para-model": MockBackend(model="para-model"),
+        "para-model": ParaphraseBackend(
+            paraphrase=lambda model, text: f"reworded: {text}", model="para-model"),
     }
     for name, backend in backends.items():
         make_client(backend, name)      # registers the name
     monkeypatch.setattr(ModelClient, "create", lambda m: make_client(backends[m], m))
-    monkeypatch.setattr(
-        CP, "paraphrase_batch",
-        lambda client, texts, **kw: [f"reworded: {t}" for t in texts])
-    monkeypatch.setattr(
-        CP, "batch_check_samples",
-        lambda client, texts, checker, **kw: [
-            (False, "meaning changed") if "first zq2" in t else (True, "")
-            for t in texts])
     monkeypatch.setattr("redact.llms.resources.estimate._load_config", lambda _id: None)
 
 

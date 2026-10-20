@@ -19,7 +19,7 @@ from types import SimpleNamespace
 import pandas as pd
 import pytest
 
-from tests.conftest import MockBackend, make_client, pinned_pool
+from tests.conftest import ParaphraseBackend, make_client, pinned_pool
 
 _FIXTURE = Path(__file__).parent / "fixtures" / "stage_files.json"
 
@@ -170,18 +170,12 @@ def _outputs(folder, monkeypatch) -> dict:
 def _paraphrases(folder, monkeypatch) -> dict:
     import redact.content_moderation.paraphrase as CP
     from redact import generate_paraphrases, residency
+    from redact.llms.backends import ComputeConfig
     from redact.llms.model_config import MODEL_REGISTRY, VLLMConfig, register_model
 
-    monkeypatch.setattr(
-        CP.ModelClient, "create", lambda m: make_client(MockBackend(), m))
     monkeypatch.setattr(CP, "MIN_WORDS", 0)     # the texts are two words long
     # The pool the fixture pins, whatever other paraphrasers are registered.
     pinned_pool(monkeypatch, "venice-paraphraser", "_para_second")
-    # A text with "delta" is rejected by the check.
-    monkeypatch.setattr(
-        CP, "batch_check_samples",
-        lambda client, texts, checker, **kw: [
-            (False, "meaning changed") if "delta" in t else (True, "") for t in texts])
     monkeypatch.setattr(
         residency, "plan_residency",
         lambda models, copies=None: SimpleNamespace(sequential=False))
@@ -205,14 +199,26 @@ def _paraphrases(folder, monkeypatch) -> dict:
     def run(fails):
         calls: list = []
 
-        # A "gamma" text comes back unchanged, so its unit is dropped.
-        def paraphrase(client, texts, **kw):
-            if fails:
-                _dies_on_call(3, calls)
-            return [t if t.startswith("gamma") else f"{client.model} says {t}"
-                    for t in texts]
+        class Backend(ParaphraseBackend):
+            """Counts the paraphrasers' generate() calls: the third raises.
+            Native batching, so one call carries a whole group of requests."""
 
-        monkeypatch.setattr(CP, "paraphrase_batch", paraphrase)
+            compute_config = ComputeConfig(supports_native_batching=True)
+
+            def generate(self, messages_list, **kwargs):
+                if fails and not messages_list[0][-1]["content"].startswith(
+                        "ORIGINAL:\n"):
+                    _dies_on_call(3, calls)
+                return super().generate(messages_list, **kwargs)
+
+        # A "gamma" text comes back unchanged, so its unit is dropped; a text
+        # with "delta" is rejected by the check.
+        monkeypatch.setattr(CP.ModelClient, "create", lambda m, **kw: make_client(
+            Backend(paraphrase=lambda model, text: (
+                        text if text.startswith("gamma") else f"{model} says {text}"),
+                    check=lambda original, paraphrase: (
+                        "meaning changed" if "delta" in paraphrase else "Yes")),
+            m))
         generate_paraphrases(
             inputs=inputs, outputs=outputs, paraphraser="distribution",
             target="both", paraphrases_per_sample=2, batch_size=3, seed=9,

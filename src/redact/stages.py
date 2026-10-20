@@ -853,8 +853,9 @@ def generate_paraphrases(
     """Paraphrase the base inputs and, when ``target`` names them, the accepted
     base outputs, into additive artifacts.
 
-    Each base sample is paraphrased ``paraphrases_per_sample`` times (K repeated 1:1
-    calls, one per unit), with paraphraser models assigned round-robin from the
+    Each base sample is paraphrased ``paraphrases_per_sample`` times (K units,
+    driven as a pool of units, one paraphraser at a time, each with its own
+    reply cap), with paraphraser models assigned round-robin from the
     ``paraphraser`` pool. Each paraphrase passes five gates (length, split
     lines, script, language, artifacts) and is then validated by a
     **separate** checker at ``CHECK_TEMPERATURE`` (no retry), and is deduped
@@ -895,7 +896,8 @@ def generate_paraphrases(
             paraphrase is accepted.
         resume: Skip already-produced units: ``(input_id, iteration)`` of
             the inputs, ``(response_id, iteration)`` of the outputs.
-        batch_size: Units per paraphrase/check batch.
+        batch_size: Requests per grouped call; with ``pool_size``, how many
+            units the pool keeps live.
         seed: Round-robin assignment seed.
         prompt_dir: Root prompt directory for the paraphrase **and** paraphrase-check
             prompts. ``None`` (default) falls back to the bundled ``prompts/``.

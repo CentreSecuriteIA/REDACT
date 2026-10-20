@@ -202,6 +202,69 @@ class MockBackend(LLMBackend):
         return "mock"
 
 
+class ParaphraseBackend(MockBackend):
+    """A paraphraser and its checker in one fake, answering by prompt kind.
+
+    A request whose user content starts ``ORIGINAL:`` is a check: it gets
+    ``check(original, paraphrase)``, both read from the check prompt's two
+    blocks. Any other is a paraphrase: it gets ``paraphrase(model,
+    sample)``, the sample read from after ``TEXT:\\n`` (the generic prompt) or
+    before ``\\n\\n### Rewritten:`` (the humanizer's), else the whole content.
+    By default a paraphrase is ``PARA::<sample>`` and every check says Yes.
+
+    ``requests`` (shared when passed) gets one dict per item: ``kind``
+    (``paraphrase`` or ``check``), ``model``, ``sample`` or ``original`` and
+    ``paraphrase``, ``max_tokens`` and ``temperature`` as the call gave them.
+    ``calls`` is ``MockBackend``'s.
+    """
+
+    def __init__(self, paraphrase=None, check=None, model: str = "mock-model",
+                 requests: list | None = None, **identity):
+        super().__init__(model=model, **identity)
+        self._paraphrase = paraphrase or (lambda model, sample: f"PARA::{sample}")
+        self._check = check or (lambda original, paraphrase: "Yes")
+        self.requests = [] if requests is None else requests
+
+    @property
+    def rpm(self):
+        """Never rate-limited: a fake answers at once, and the shared window
+        of a hosted model's rpm would make a test wait on earlier tests'
+        calls. ``make_client`` binds a setup's rpm; it is ignored."""
+        return None
+
+    @rpm.setter
+    def rpm(self, value):
+        pass
+
+    def generate(self, messages_list, *, max_tokens=None, temperature=None,
+                 internals_ids=None, **kwargs):
+        super().generate(messages_list, max_tokens=max_tokens,
+                         temperature=temperature, internals_ids=internals_ids,
+                         **kwargs)
+        return [self._answer(messages, max_tokens, temperature)
+                for messages in messages_list]
+
+    def _answer(self, messages, max_tokens, temperature) -> str:
+        content = messages[-1]["content"]
+        seen = {"model": self.model, "max_tokens": max_tokens,
+                "temperature": temperature}
+        if content.startswith("ORIGINAL:\n"):
+            original, _, rest = content[len("ORIGINAL:\n"):].partition(
+                "\n\nPARAPHRASE:\n")
+            paraphrase = rest.rsplit("\n\nBegin your reply", 1)[0]
+            self.requests.append({"kind": "check", "original": original,
+                                  "paraphrase": paraphrase, **seen})
+            return self._check(original, paraphrase)
+        if content.startswith("TEXT:\n"):
+            sample = content[len("TEXT:\n"):]
+        elif "\n\n### Rewritten:" in content:
+            sample = content.rsplit("\n\n### Rewritten:", 1)[0]
+        else:
+            sample = content
+        self.requests.append({"kind": "paraphrase", "sample": sample, **seen})
+        return self._paraphrase(self.model, sample)
+
+
 def make_client(backend=None, model: str = "mock-model",
                 backend_type: str | None = None) -> ModelClient:
     """Wrap a backend in a ModelClient for tests.

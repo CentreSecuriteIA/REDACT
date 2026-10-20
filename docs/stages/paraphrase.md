@@ -96,7 +96,7 @@ training run), it paraphrases each of an input's k responses: its units are
 | | `inputs` | `outputs` |
 |---|---|---|
 | Ledger key | `(input_id, iteration)` | `(response_id, iteration)` |
-| Ledger record | the key, `paraphrase_model`, and `status`: `accepted`, `rejected`, `dropped_dedup` or `skipped` (with `reason` and `min_words`) | the key, `input_id`, `paraphrase_model`, `status` (and for `skipped`, `reason` and `min_words`) |
+| Ledger record | the key, `paraphrase_model`, and `status`: `accepted`, `rejected`, `dropped_dedup`, `prompt_too_long` or `skipped` (with `reason` and `min_words`) | the key, `input_id`, `paraphrase_model`, `status` (and for `skipped`, `reason` and `min_words`) |
 | Manifest row | `input_id`, `iteration`, `paraphrase_model`, `category`, `entry_type`, `status` (`planned`, or `skipped` for a text under `min_words` words) | `response_id`, `input_id`, `iteration`, `paraphrase_model`, `category`, `entry_type`, `status` |
 
 Two accepted responses with one text (siblings of one input that a model
@@ -104,13 +104,19 @@ answered alike) have one `response_id`: the target plans two units under
 one key, which a resume skips alike once acked, and the second paraphrase,
 equal to a text already written, is dropped.
 
-The stage runs one paraphraser at a time. For each it sends the pending units
-in chunks of `batch_size`: one batch of paraphrase calls, then the gates,
-then one batch of check calls for the paraphrases no gate rejected (none
-when every one was), then one save of the whole chunk. It does not use the unit pool
-or the async lane. When the paraphrasers cannot be resident together on the
-GPUs, the stage unloads each one before the next, and keeps the check model
-and the engines other stages hold.
+The stage runs one paraphraser at a time. Its pending units go to the unit
+pool (`llm_pipeline.drive_units`), each its own `llm_pipeline.checked`
+generator: one paraphrase request, the gates, then, for a paraphrase no gate
+rejected, one check request. The paraphrase and check requests of different
+units overlap, on the async lane for an OpenAI-compatible or vLLM model.
+Each paraphrase request has its own reply cap, `reply_cap(text, ceiling)`:
+2.5 times the original's tokens (3 characters a token) plus 32, at least 64,
+at most the paraphraser's `default_max_tokens`; a reply cut at it fails the
+length gate. The check request keeps the check model's default. A finished
+unit is saved without waiting for the others, every 32 units and on any
+exit. When the paraphrasers cannot be resident together on the GPUs, the
+stage unloads each one before the next, and keeps the check model and the
+engines other stages hold.
 
 ## Files
 
@@ -211,8 +217,8 @@ first that fails rejects the paraphrase:
 | artifact | the paraphrase holds an HTML tag (`p`, `br`, `div`, `span`, `b`, `i`, `ul`, `li`, `h1` to `h6`) or a rule line (`====`, `------`, `______`) and the original holds none | `artifact <match>` |
 
 A gated paraphrase is saved as a rejected row, its `reasoning` the gate's
-reason, and is not sent to the check model. The rest go to the check model in
-one batch call per chunk, at temperature 0.15
+reason, and is not sent to the check model. The rest go to the check model,
+one request a unit, at temperature 0.15
 (`llm_pipeline.CHECK_TEMPERATURE`, as the inputs and outputs checks), with the
 strict prompt `prompts/paraphrase/check/`. It judges content, not wording: it
 lists the rewordings that are fine, and answers No to an answer in place of a
@@ -242,10 +248,13 @@ layout out before they compare lengths, and the check judges content.
 - A paraphrase the checker rejects is saved with `accepted` false. The build
   leaves it out.
 - A paraphrase that is empty, equal to its original, or equal to a text
-  already in the file is dropped: no row, acked `dropped_dedup`.
-- Neither is tried again on resume.
-- A failed call stops the stage. A chunk that fails part way saves none of
-  its units, so they run again on resume.
-- The stage does not use the async lane, so a prompt too long for the
-  paraphraser or the checker fails its batch call and stops the stage, on
-  every backend.
+  already in the file is dropped: no row, acked `dropped_dedup`. Of two
+  units with one paraphrase, the one that finishes first keeps its row.
+- On the async lane (an OpenAI-compatible or vLLM model), a prompt too long
+  for the paraphraser or the checker acks its unit `prompt_too_long`, with
+  no row and a WARNING; the other units go on.
+- None of these is tried again on resume.
+- A failed call stops the stage, and so does a too-long prompt on a grouped
+  call (an Anthropic or introspection model), since which item was too
+  long is not known. The units that finished before it are saved; the
+  others run again on resume.

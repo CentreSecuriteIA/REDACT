@@ -1808,17 +1808,20 @@ def test_a_training_run_reads_the_inputs_it_seeded(tmp_path, monkeypatch):
     """The stages after ``inputs`` find the inputs in the tree it seeded."""
     import redact.content_moderation.paraphrase as CP
     from redact.llms import ModelClient
-    from tests.conftest import MockBackend, make_client
+    from tests.conftest import MockBackend, ParaphraseBackend, make_client
 
-    answers = MockBackend([f"answer {n}" for n in (
+    class Answers(ParaphraseBackend):
+        """An output prompt gets the next answer of the list; a paraphrase
+        and its check get the ParaphraseBackend's (PARA::<text>, Yes)."""
+
+        def generate(self, messages_list, **kwargs):
+            if messages_list[0][-1]["content"].startswith(("ORIGINAL:\n", "TEXT:\n")):
+                return super().generate(messages_list, **kwargs)
+            return MockBackend.generate(self, messages_list, **kwargs)
+
+    answers = Answers(responses=[f"answer {n}" for n in (
         "one", "two", "three", "four", "five", "six")])
     monkeypatch.setattr(ModelClient, "create", lambda m: make_client(answers, m))
-    monkeypatch.setattr(
-        CP, "paraphrase_batch",
-        lambda client, texts, **kw: [f"PARA::{t}" for t in texts])
-    monkeypatch.setattr(
-        CP, "batch_check_samples",
-        lambda client, texts, checker, **kw: [(True, "") for _ in texts])
     monkeypatch.setattr(CP, "MIN_WORDS", 0)     # the texts are six words long
     monkeypatch.setattr("redact.llms.resources.estimate._load_config", lambda _id: None)
     write_inputs(paths.constitution_inputs_dir(tmp_path),

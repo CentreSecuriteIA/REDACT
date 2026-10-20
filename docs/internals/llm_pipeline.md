@@ -154,6 +154,6 @@ checkers of `content_moderation/checker.py` build.
 | benign data (`jailbreak/manipulation/benign.py`) | `drive_units` | `pool_size(batch_size, client)` | `batch_size` | `extracted` over one call: one subcategory and answer type, 3 attempts |
 | conversations | `drive_units` | `pool_size(batch_size, *clients)` | `batch_size` | `multi_turn.conversation_gen` |
 | scoring | `drive_units` | `pool_size(batch_size, judge)` | `batch_size` | one judge request |
-| paraphrase | none: chunked `batch_generate_samples` and `batch_check_samples` | | | |
+| paraphrase | `drive_units`, per paraphraser | `pool_size(batch_size, client, check)` | `batch_size` | `checked` with the gates as `precheck`, the reply cap per unit as its `max_tokens` |
 
 The benign data runs with the jailbreak stage's `batch_size`.

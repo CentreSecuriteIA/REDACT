@@ -192,6 +192,20 @@ def _words(n: int) -> str:
     return " ".join(f"w{i}" for i in range(n))
 
 
+class TestReplyCap:
+    """About 2.5 times the original's tokens, plus slack, at least 64."""
+
+    def test_a_short_text_gets_the_floor(self):
+        assert (CP.reply_cap("x" * 6, 2048), CP.REPLY_FLOOR_TOKENS) == (64, 64)
+
+    def test_a_text_above_the_floor_gets_two_and_a_half_times_its_tokens(self):
+        # 60 characters, 20 tokens: 2.5 x 20 + 32.
+        assert [CP.reply_cap("x" * 60, 2048)] == [82]
+
+    def test_a_long_text_gets_the_ceiling(self):
+        assert [CP.reply_cap("x" * 10_000, 2048)] == [2048]
+
+
 class TestSkipReason:
     def test_a_text_under_min_words_is_short(self):
         assert CP.skip_reason(_words(11), min_words=12) == "short"

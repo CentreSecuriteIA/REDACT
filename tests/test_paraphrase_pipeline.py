@@ -1,8 +1,9 @@
 """Offline tests for generate_paraphrases (mapping/resume/dedup/check-drop).
 
-The paraphrase + check LLM calls are monkeypatched to deterministic transforms,
-so this exercises planning, model-grouped execution, dedup, resume, and both
-targets without any network access.
+Every model is a ParaphraseBackend (tests/conftest.py), which answers a
+paraphrase and a check prompt by deterministic rules, so this exercises
+planning, the unit pool, dedup, resume and both targets without any network
+access.
 """
 
 import json
@@ -15,7 +16,7 @@ from redact import generate_paraphrases, paths
 from redact.dataset import content_id
 from tests.conftest import (
     Killed,
-    MockBackend,
+    ParaphraseBackend,
     fake_vllm_modules,
     kill_after_rows,
     lock_is_free,
@@ -32,24 +33,38 @@ def _no_short_text_skip(monkeypatch):
     monkeypatch.setattr(CP, "MIN_WORDS", 0)
 
 
+def _serve(monkeypatch, paraphrase=None, check=None) -> list[dict]:
+    """Serve every model with a ParaphraseBackend (by default ``PARA::<text>``,
+    and every check says Yes); return the shared log of its requests."""
+    requests: list[dict] = []
+    monkeypatch.setattr(CP.ModelClient, "create", lambda model, **kw: make_client(
+        ParaphraseBackend(paraphrase=paraphrase, check=check, requests=requests),
+        model))
+    return requests
+
+
+def _asked(requests) -> list[str]:
+    """The texts the paraphrasers were sent, in order."""
+    return [r["sample"] for r in requests if r["kind"] == "paraphrase"]
+
+
+def _checks(requests) -> list[dict]:
+    """The check requests, in order."""
+    return [r for r in requests if r["kind"] == "check"]
+
+
+def _saves_every(monkeypatch, units: int) -> None:
+    """Save every ``units`` finished units, not the stage's 32, so a test of
+    a few units sees several saves."""
+    real = CP.CommitBuffer
+    monkeypatch.setattr(CP, "CommitBuffer", lambda **kw: real(**{**kw, "every": units}))
+
+
 @pytest.fixture()
 def patched(monkeypatch):
-    """Patch backend + paraphrase + check to deterministic offline behavior.
-
-    The plan/execute loop these patch points live in now runs in
-    content_moderation.paraphrase (moved out of pipelines.py), so the
-    monkeypatches target that module.
-    """
-    monkeypatch.setattr(CP.ModelClient, "create", lambda m: make_client(MockBackend(), m))
-    monkeypatch.setattr(
-        CP, "paraphrase_batch",
-        lambda client, texts, **kw: [f"PARA::{t}" for t in texts],
-    )
-    # accept everything by default
-    monkeypatch.setattr(
-        CP, "batch_check_samples",
-        lambda cc, payloads, checker, **kw: [(True, "") for _ in payloads],
-    )
+    """Every model a ParaphraseBackend: a paraphrase is ``PARA::<text>``, and
+    every check says Yes."""
+    _serve(monkeypatch)
     # A residency plan must not read an HF config over the network.
     monkeypatch.setattr("redact.llms.resources.estimate._load_config", lambda _id: None)
     return monkeypatch
@@ -109,8 +124,7 @@ def test_the_stage_paraphrases_the_frame_it_is_given_into_the_file_it_is_given(
 
 def test_a_paraphrase_equal_to_its_padded_original_stripped_is_dropped(
         tmp_path, patched):
-    patched.setattr(CP, "paraphrase_batch",
-                    lambda client, texts, **kw: [t.strip() for t in texts])
+    _serve(patched, paraphrase=lambda model, text: text)   # the stripped sample
     out = tmp_path / "paraphrased.csv"
     CP.run_paraphrase_target(
         "inputs", pd.DataFrame({"sample": ["  alpha prompt \n"]}), out,
@@ -169,10 +183,7 @@ def test_rows_in_the_csv_are_not_reparaphrased(tmp_path, patched):
 def test_paraphrase_check_drop(tmp_path, monkeypatch, patched):
     _seed_inputs(tmp_path)
     # Reject everything -> all dropped -> empty / no artifact rows.
-    monkeypatch.setattr(
-        CP, "batch_check_samples",
-        lambda cc, payloads, checker, **kw: [(False, "no") for _ in payloads],
-    )
+    _serve(monkeypatch, check=lambda original, paraphrase: "No")
     res = generate_paraphrases(data_dir=tmp_path, target="inputs", verbose=False)
     assert res["inputs"].empty or (res["inputs"]["accepted"] == False).all()  # noqa: E712
 
@@ -249,46 +260,36 @@ def test_without_read_back_no_artifact_is_read_after_its_last_save(
 
 def test_ledger_prevents_reattempt_of_dropped_units(tmp_path, monkeypatch):
     _seed_inputs(tmp_path)
-    calls = {"n": 0}
-
-    def fake_para(client, texts, **kw):
-        calls["n"] += len(texts)
-        return ["SAME" for _ in texts]  # identical -> 2nd unit is a dedup-drop
-
-    monkeypatch.setattr(CP.ModelClient, "create", lambda m: make_client(MockBackend(), m))
-    monkeypatch.setattr(CP, "paraphrase_batch", fake_para)
-    monkeypatch.setattr(CP, "batch_check_samples",
-                        lambda c, samples, chk, **k: [(True, "") for _ in samples])
+    # identical -> the 2nd unit to finish is a dedup-drop
+    requests = _serve(monkeypatch, paraphrase=lambda model, text: "SAME")
 
     generate_paraphrases(data_dir=tmp_path, target="inputs", verbose=False)
-    assert calls["n"] == 2  # 2 units attempted (1 kept, 1 deduped-dropped)
+    # 2 units attempted (1 kept, 1 deduped-dropped)
+    assert sorted(_asked(requests)) == ["alpha prompt", "beta prompt"]
     state = paths.paraphrases_inputs_csv(tmp_path).with_name("paraphrases_inputs.state.jsonl")
     assert state.exists()  # ledger recorded both attempts, including the drop
 
     # Resume: the dropped unit is in the ledger, so nothing is re-attempted.
     generate_paraphrases(data_dir=tmp_path, target="inputs", resume=True, verbose=False)
-    assert calls["n"] == 2  # no new paraphrase calls
+    assert sorted(_asked(requests)) == ["alpha prompt", "beta prompt"]  # no new calls
 
 
 def test_prompt_dir_threads_to_paraphrase_and_check(tmp_path, monkeypatch):
     _seed_inputs(tmp_path)
     seen = {}
-    monkeypatch.setattr(CP.ModelClient, "create", lambda m: make_client(MockBackend(), m))
-    monkeypatch.setattr(
-        CP, "paraphrase_batch",
-        lambda client, texts, prompt_dir=None, **kw: (
-            seen.__setitem__("para", prompt_dir) or [f"P::{t}" for t in texts]
-        ),
-    )
-    monkeypatch.setattr(
-        CP, "batch_check_samples",
-        lambda c, samples, chk, **k: [(True, "") for _ in samples],
-    )
-    # capture the checker's prompt_dir without loading real prompt files
-    monkeypatch.setattr(
-        CP, "build_paraphrase_checker",
-        lambda prompt_dir=None: seen.__setitem__("check", prompt_dir) or (lambda s: []),
-    )
+    _serve(monkeypatch)
+    prompt, checker = CP.paraphrase_prompt, CP.build_paraphrase_checker
+
+    def paraphrase_prompt(model, prompt_dir=None):
+        seen["para"] = prompt_dir
+        return prompt(model, prompt_dir)
+
+    def build_paraphrase_checker(prompt_dir=None):
+        seen["check"] = prompt_dir
+        return checker(prompt_dir=prompt_dir)
+
+    monkeypatch.setattr(CP, "paraphrase_prompt", paraphrase_prompt)
+    monkeypatch.setattr(CP, "build_paraphrase_checker", build_paraphrase_checker)
     custom = str(tmp_path / "myprompts")
     generate_paraphrases(data_dir=tmp_path, target="inputs", prompt_dir=custom, verbose=False)
     assert seen["para"] == custom   # paraphrase prompt dir threaded
@@ -358,7 +359,7 @@ def test_previous_paraphraser_is_unreferenced_before_unload(tmp_path, patched):
     def create(model):
         # A preload finishes during the stage: its engine must be kept too.
         patched.setitem(vllm_module._engines, late, object())
-        client = make_client(MockBackend(), model)
+        client = make_client(ParaphraseBackend(), model)
         created.append((model, weakref.ref(client)))
         return client
 
@@ -508,12 +509,13 @@ def test_an_unload_between_paraphrasers_shuts_down_only_their_engine(
         monkeypatch.setitem(sys.modules, name, module)
     monkeypatch.setattr(vllm_module, "_prepare_environment", lambda: None)
     monkeypatch.setattr("redact.llms.resources.estimate._load_config", lambda _id: None)
-    monkeypatch.setattr(
-        CP, "paraphrase_batch",
-        lambda client, texts, **kw: [f"PARA::{t}" for t in texts])
-    monkeypatch.setattr(
-        CP, "batch_check_samples",
-        lambda cc, payloads, checker, **kw: [(True, "") for _ in payloads])
+
+    # The fake engines take no request: a unit returns its paraphrase at once.
+    def unit(client, check, checker, template, original, **kw):
+        return f"PARA::{original}", True, ""
+        yield   # a generator, as the pool takes one
+
+    monkeypatch.setattr(CP, "_unit_gen", unit)
     monkeypatch.setattr(
         residency, "plan_residency",
         lambda models, copies=None: SimpleNamespace(sequential=True))
@@ -545,7 +547,7 @@ def test_an_unload_between_paraphrasers_shuts_down_only_their_engine(
         vllm_module.VLLMBackend.clear_cache()
 
 
-# --- how a chunk is saved ----------------------------------------------------
+# --- how finished units are saved ---------------------------------------------
 
 _FOUR = ["alpha prompt", "beta prompt", "gamma prompt", "delta prompt"]
 
@@ -553,9 +555,7 @@ _FOUR = ["alpha prompt", "beta prompt", "gamma prompt", "delta prompt"]
 def _seed_four_inputs(tmp_path):
     write_inputs(paths.constitution_inputs_dir(tmp_path), _FOUR)
     # gamma comes back unchanged, so its unit is dropped.
-    return lambda client, texts, **kw: [
-        t if t.startswith("gamma") else f"PARA::{t}" for t in texts
-    ]
+    return lambda model, text: text if text.startswith("gamma") else f"PARA::{text}"
 
 
 def _acks(tmp_path):
@@ -584,8 +584,9 @@ def test_the_ledger_records_how_much_of_the_output_is_saved(tmp_path, patched, t
     assert size == out.stat().st_size
 
 
-def test_a_chunk_is_one_append_followed_by_its_acks(tmp_path, patched):
-    patched.setattr(CP, "paraphrase_batch", _seed_four_inputs(tmp_path))
+def test_a_save_is_one_append_followed_by_its_acks(tmp_path, patched):
+    _serve(patched, paraphrase=_seed_four_inputs(tmp_path))
+    _saves_every(patched, 2)
     saves, append = [], CP.append_rows
 
     def spy(path, rows):
@@ -610,7 +611,8 @@ def test_a_chunk_is_one_append_followed_by_its_acks(tmp_path, patched):
 
 
 def test_a_run_killed_between_rows_and_acks_leaves_each_unit_once(tmp_path, patched):
-    patched.setattr(CP, "paraphrase_batch", _seed_four_inputs(tmp_path))
+    _serve(patched, paraphrase=_seed_four_inputs(tmp_path))
+    _saves_every(patched, 2)
     out = paths.paraphrases_inputs_csv(tmp_path)
     state = out.with_name("paraphrases_inputs.state.jsonl")
 
@@ -618,7 +620,7 @@ def test_a_run_killed_between_rows_and_acks_leaves_each_unit_once(tmp_path, patc
     with pytest.raises(Killed):
         generate_paraphrases(
             data_dir=tmp_path, target="inputs", batch_size=2, verbose=False)
-    # The second chunk's row landed; its acks did not.
+    # The second save's row landed; its acks did not.
     assert list(pd.read_csv(out)["sample"]) == [
         "PARA::alpha prompt", "PARA::beta prompt", "PARA::delta prompt"]
     assert [ack["input_id"] for ack in _acks(tmp_path)] == [
@@ -660,8 +662,9 @@ def test_a_fresh_run_on_no_source_row_clears_what_an_earlier_run_left(tmp_path):
     assert lock_is_free(out.with_name("paraphrases_inputs.state.jsonl"))
 
 
-def test_a_failed_append_acks_none_of_its_chunk(tmp_path, patched):
-    patched.setattr(CP, "paraphrase_batch", _seed_four_inputs(tmp_path))
+def test_a_failed_append_acks_none_of_its_save(tmp_path, patched):
+    _serve(patched, paraphrase=_seed_four_inputs(tmp_path))
+    _saves_every(patched, 2)
     outcomes, append = iter([None, OSError("disk full")]), CP.append_rows
 
     def failing(path, rows):
@@ -709,11 +712,12 @@ def test_each_response_of_an_input_is_its_own_unit(tmp_path, patched):
     from redact.dataset import Ledger, Manifest
 
     paraphrased = []
-    patched.setattr(
-        CP, "paraphrase_batch",
-        lambda client, texts, **kw: paraphrased.extend(texts) or [
-            f"PARA{len(paraphrased) - len(texts) + i}::{t}"
-            for i, t in enumerate(texts)])
+
+    def paraphrase(model, text):
+        paraphrased.append(text)
+        return f"PARA{len(paraphrased) - 1}::{text}"
+
+    _serve(patched, paraphrase=paraphrase)
     with pytest.warns(UserWarning):     # K>1 with a single paraphraser
         df = generate_paraphrases(outputs=_responses(), data_dir=tmp_path,
                                   target="outputs", paraphrases_per_sample=2,
@@ -758,9 +762,9 @@ def test_a_frame_without_ids_or_labels_writes_the_columns_empty(tmp_path, patche
 
 
 def _no_paraphrase(patched):
-    def paraphrase(client, texts, **kw):
+    def paraphrase(model, text):
         raise AssertionError("a paraphrase was asked for")
-    patched.setattr(CP, "paraphrase_batch", paraphrase)
+    _serve(patched, paraphrase=paraphrase)
 
 
 def test_a_ledger_keyed_on_the_input_stops_the_outputs_before_any_call(
@@ -799,18 +803,6 @@ def test_a_file_without_the_response_columns_stops_the_outputs_before_any_call(
     assert "new data_dir" in str(raised.value)
 
 
-def _recording_check(patched, verdict=(True, "")):
-    """Patch the check call to accept (or give ``verdict``); return its calls."""
-    calls = []
-
-    def check(cc, payloads, checker, **kw):
-        calls.append((list(payloads), kw))
-        return [verdict for _ in payloads]
-
-    patched.setattr(CP, "batch_check_samples", check)
-    return calls
-
-
 _RUN_ON = " and then it goes on into a long story nobody asked for"
 
 
@@ -818,9 +810,8 @@ def test_a_gated_paraphrase_is_a_rejected_row_and_is_not_checked(tmp_path, patch
     from redact.llm_pipeline import CHECK_TEMPERATURE
 
     _seed_inputs(tmp_path)
-    patched.setattr(CP, "paraphrase_batch", lambda client, texts, **kw: [
-        t + _RUN_ON if t.startswith("beta") else f"PARA::{t}" for t in texts])
-    calls = _recording_check(patched)
+    requests = _serve(patched, paraphrase=lambda model, text: (
+        text + _RUN_ON if text.startswith("beta") else f"PARA::{text}"))
     df = generate_paraphrases(data_dir=tmp_path, target="inputs",
                               verbose=False)["inputs"]
 
@@ -829,28 +820,27 @@ def test_a_gated_paraphrase_is_a_rejected_row_and_is_not_checked(tmp_path, patch
     gated = by_text.loc["beta prompt" + _RUN_ON]
     assert not bool(gated["accepted"])
     assert gated["reasoning"].startswith("length ratio")
-    assert [ack["status"] for ack in _acks(tmp_path)] == ["accepted", "rejected"]
+    # In the order the units finished: the gated one needed no check call.
+    assert {ack["input_id"]: ack["status"] for ack in _acks(tmp_path)} == {
+        content_id("alpha prompt"): "accepted", content_id("beta prompt"): "rejected"}
     # The check model saw the ungated paraphrase alone, at the check temperature.
-    assert calls == [(["PARA::alpha prompt"], {
-        "originals": ["alpha prompt"], "batch_size": 256, "progress": None,
-        "temperature": CHECK_TEMPERATURE})]
+    assert [(r["original"], r["paraphrase"], r["max_tokens"], r["temperature"])
+            for r in _checks(requests)] == [
+        ("alpha prompt", "PARA::alpha prompt", None, CHECK_TEMPERATURE)]
 
 
 def test_a_chunk_whose_paraphrases_are_all_gated_makes_no_check_call(tmp_path, patched):
     _seed_inputs(tmp_path)
-    patched.setattr(CP, "paraphrase_batch",
-                    lambda client, texts, **kw: [t + _RUN_ON for t in texts])
-    calls = _recording_check(patched)
+    requests = _serve(patched, paraphrase=lambda model, text: text + _RUN_ON)
     generate_paraphrases(data_dir=tmp_path, target="inputs", verbose=False)
-    assert calls == []
+    assert _checks(requests) == []
     assert [ack["status"] for ack in _acks(tmp_path)] == ["rejected", "rejected"]
 
 
 def test_a_gated_text_is_written_once(tmp_path, patched):
     """It is a row, so the same text from another unit is a repeat."""
     write_inputs(paths.constitution_inputs_dir(tmp_path), ["alpha prompt"])
-    patched.setattr(CP, "paraphrase_batch",
-                    lambda client, texts, **kw: [t + _RUN_ON for t in texts])
+    _serve(patched, paraphrase=lambda model, text: text + _RUN_ON)
     with pytest.warns(UserWarning):     # K>1 with a single paraphraser
         df = generate_paraphrases(data_dir=tmp_path, target="inputs",
                                   paraphrases_per_sample=2, verbose=False)["inputs"]
@@ -860,14 +850,12 @@ def test_a_gated_text_is_written_once(tmp_path, patched):
 
 def test_without_the_check_no_gate_runs(tmp_path, patched):
     _seed_inputs(tmp_path)
-    patched.setattr(CP, "paraphrase_batch",
-                    lambda client, texts, **kw: [t + _RUN_ON for t in texts])
+    requests = _serve(patched, paraphrase=lambda model, text: text + _RUN_ON)
     patched.setattr(CP, "gate_reason",
                     lambda *a: pytest.fail("a gate ran without the check"))
-    calls = _recording_check(patched)
     df = generate_paraphrases(data_dir=tmp_path, target="inputs", check=False,
                               verbose=False)["inputs"]
-    assert bool(df["accepted"].all()) and calls == []
+    assert bool(df["accepted"].all()) and _checks(requests) == []
 
 
 def test_the_language_gate_rejects_another_language(tmp_path, patched):
@@ -920,6 +908,78 @@ def test_without_a_source_row_the_glotlid_warning_is_not_given(
     with caplog.at_level(logging.WARNING):
         generate_paraphrases(data_dir=tmp_path, target="inputs", verbose=False)
     assert _glotlid_warnings(caplog) == []
+
+
+# --- the unit pool --------------------------------------------------------------
+
+def test_each_paraphrase_request_carries_its_own_reply_cap(tmp_path, patched):
+    from redact.llm_pipeline import CHECK_TEMPERATURE
+
+    texts = ["a short text", " ".join(["a much longer text"] * 20)]
+    write_inputs(paths.constitution_inputs_dir(tmp_path), texts)
+    requests = _serve(patched)
+    generate_paraphrases(data_dir=tmp_path, paraphraser="humanizer-12b", verbose=False)
+    asked = [r for r in requests if r["kind"] == "paraphrase"]
+    assert {r["sample"]: (r["max_tokens"], r["temperature"]) for r in asked} == {
+        text: (CP.reply_cap(text, 2048), None) for text in texts}
+    checks = _checks(requests)
+    assert len(checks) == len(texts)
+    assert {(r["max_tokens"], r["temperature"]) for r in checks} == {
+        (None, CHECK_TEMPERATURE)}
+
+
+def test_a_prompt_too_long_on_the_async_lane_acks_its_unit_and_the_others_finish(
+        tmp_path, patched, caplog):
+    import logging
+
+    from redact.exceptions import PromptTooLongError
+    from redact.llms.backends import ComputeConfig
+
+    class Lane(ParaphraseBackend):
+        """On the async lane; the paraphrase of a beta text is too long."""
+
+        compute_config = ComputeConfig(supports_async_calls=True)
+
+        async def agenerate(self, messages, *, max_tokens=None, temperature=None,
+                            internals_id=None, **kwargs):
+            content = messages[-1]["content"]
+            if "beta" in content and not content.startswith("ORIGINAL:\n"):
+                raise PromptTooLongError("beta is over the context")
+            return self._answer(messages, max_tokens, temperature)
+
+    patched.setattr(CP.ModelClient, "create", lambda m, **kw: make_client(Lane(), m))
+    _seed_inputs(tmp_path)
+    with caplog.at_level(logging.WARNING):
+        df = generate_paraphrases(data_dir=tmp_path, verbose=False)["inputs"]
+    assert list(df["sample"]) == ["PARA::alpha prompt"]
+    assert {ack["input_id"]: ack["status"] for ack in _acks(tmp_path)} == {
+        content_id("alpha prompt"): "accepted",
+        content_id("beta prompt"): "prompt_too_long"}
+    (warning,) = [r for r in caplog.records if "too long" in r.getMessage()]
+    assert "skipped" not in warning.getMessage()    # counted by other tests
+    # Acked: a resume does not send it again.
+    generate_paraphrases(data_dir=tmp_path, verbose=False)
+    assert [ack["status"] for ack in _acks(tmp_path)].count("prompt_too_long") == 1
+
+
+def test_each_paraphrasers_units_go_to_the_pool_with_both_clients(tmp_path, patched):
+    seen = {}
+    real_drive, real_size = CP.drive_units, CP.pool_size
+
+    def pool_size(batch_size, *clients):
+        seen["clients"] = [client.model for client in clients]
+        return real_size(batch_size, *clients)
+
+    def drive_units(source, **kwargs):
+        seen.update(progress=kwargs["progress"], cap=kwargs["cap"])
+        return real_drive(source, **kwargs)
+
+    patched.setattr(CP, "pool_size", pool_size)
+    patched.setattr(CP, "drive_units", drive_units)
+    _seed_inputs(tmp_path)
+    generate_paraphrases(data_dir=tmp_path, batch_size=4, verbose=True)
+    assert seen == {"clients": ["venice-paraphraser", "venice-uncensored"],
+                    "progress": "paraphrase:inputs (venice-paraphraser)", "cap": 4}
 
 
 # --- the default target: the inputs ------------------------------------------
@@ -1000,14 +1060,14 @@ _LONG = "a fifteen word input that is long enough to be sent to the paraphraser 
 
 
 def _recording_paraphrase(patched):
-    """Patch the paraphrase call to prefix PARA::; return the texts it got."""
+    """Serve paraphrases ``PARA::<text>``; return the texts asked for."""
     asked: list[str] = []
 
-    def paraphrase(client, texts, **kw):
-        asked.extend(texts)
-        return [f"PARA::{t}" for t in texts]
+    def paraphrase(model, text):
+        asked.append(text)
+        return f"PARA::{text}"
 
-    patched.setattr(CP, "paraphrase_batch", paraphrase)
+    _serve(patched, paraphrase=paraphrase)
     return asked
 
 
@@ -1183,10 +1243,11 @@ def test_a_check_prompt_that_does_not_build_stops_before_anything_is_cleared(
 def test_verdicts_go_back_to_their_units_past_a_gated_one(tmp_path, patched):
     write_inputs(paths.constitution_inputs_dir(tmp_path),
                  ["alpha prompt", "beta prompt", "gamma prompt"])
-    patched.setattr(CP, "paraphrase_batch", lambda client, texts, **kw: [
-        t + _RUN_ON if t.startswith("alpha") else f"PARA::{t}" for t in texts])
-    patched.setattr(CP, "batch_check_samples", lambda cc, payloads, checker, **kw: [
-        (False, "No: beta changed") if "beta" in t else (True, "") for t in payloads])
+    _serve(patched,
+           paraphrase=lambda model, text: (
+               text + _RUN_ON if text.startswith("alpha") else f"PARA::{text}"),
+           check=lambda original, paraphrase: (
+               "No: beta changed" if "beta" in paraphrase else "Yes"))
     df = generate_paraphrases(data_dir=tmp_path, verbose=False)["inputs"]
     by_input = {text: row for text in ("alpha", "beta", "gamma")
                 for _, row in df.iterrows() if row["sample"].removeprefix(

@@ -3,7 +3,9 @@
 Any capable model of the ``paraphraser`` role stands in for the trained
 defingerprinting model, which lives in another repository.
 
-Each paraphrase is checked in two steps. Five deterministic gates
+Each paraphraser's units run on the ``drive_units`` pool, one paraphraser
+at a time, each unit with its own reply cap (:func:`reply_cap`). Each
+paraphrase is checked in two steps. Five deterministic gates
 (:data:`GATES`: length, split lines, script, language, artifacts) reject
 what they can without a model call; the rest go to a separate model at
 ``llm_pipeline.CHECK_TEMPERATURE`` (0.15), with the strict prompt of
@@ -14,10 +16,11 @@ translation check's identifier, imported where it is used.
 
 import hashlib
 import logging
+import math
 import re
 import unicodedata
 from collections import Counter
-from itertools import islice, repeat
+from itertools import repeat
 from pathlib import Path
 
 import pandas as pd
@@ -36,7 +39,8 @@ from ..dataset import (
     resume_state,
     row_ids,
 )
-from ..llm_pipeline import CHECK_TEMPERATURE, batch_check_samples
+from ..exceptions import PromptTooLongError
+from ..llm_pipeline import CHECK_TEMPERATURE, checked, drive_units, pool_size
 from ..llms.backends import apply_system_prompt_policy
 from ..llms.client import ModelClient
 from ..llms.model_config import (
@@ -49,9 +53,6 @@ from ..llms.router import batch_generate_samples
 from .checker import build_paraphrase_checker
 
 logger = logging.getLogger(__name__)
-
-#TODO(later): move this stage onto llm_pipeline.drive_units, like outputs and
-# jailbreaks. Waits for a trained paraphraser; a stand-in model runs it today.
 
 # The columns a paraphrase of a response takes from it: the response's id
 # (its unit's key) and how the response answers its input.
@@ -236,6 +237,48 @@ def paraphrase_prompt(
         return PromptTemplate.load("paraphrase", "generation", prompt_dir=prompt_dir)
 
 
+#: A paraphrase's reply cap: REPLY_TOKENS_PER_INPUT_TOKEN times the
+#: original's tokens, estimated at CHARS_PER_TOKEN characters a token, plus
+#: REPLY_SLACK_TOKENS, at least REPLY_FLOOR_TOKENS. The humanizer's card
+#: allows "about 2.5 times the draft's token count"; the floor keeps a short
+#: text from running to the model's whole default (a 5-word fragment ran to
+#: its 256-token cap in the benign test). The same shape as the translation
+#: technique's reply_cap (jailbreak/obfuscation/translation.py), with other
+#: figures.
+REPLY_TOKENS_PER_INPUT_TOKEN = 2.5
+REPLY_FLOOR_TOKENS = 64
+REPLY_SLACK_TOKENS = 32
+CHARS_PER_TOKEN = 3
+
+
+def reply_cap(text: str, ceiling: int) -> int:
+    """The reply cap of a paraphrase of ``text``, at most ``ceiling`` (the
+    paraphraser's ``default_max_tokens``). A reply cut at it fails the length
+    gate."""
+    tokens = math.ceil(len(text) / CHARS_PER_TOKEN)
+    return min(ceiling, max(REPLY_FLOOR_TOKENS,
+                            math.ceil(REPLY_TOKENS_PER_INPUT_TOKEN * tokens)
+                            + REPLY_SLACK_TOKENS))
+
+
+def _unit_gen(client, check, checker, template, original, *, provisional_id=None):
+    """One unit: a paraphrase of ``original``, capped at its reply cap, then
+    the gates and the check (:func:`~redact.llm_pipeline.checked`, one
+    attempt). Without ``check`` the reply is accepted and no gate runs. The
+    check sees the paraphrase stripped, as the gates do."""
+    return checked(
+        client, lambda feedback: template(sample=original.strip()),
+        check,
+        (lambda o, text: checker(o, text.strip())) if check is not None else None,
+        original=original,
+        max_tokens=(reply_cap(original, client.backend.default_max_tokens), None),
+        precheck=lambda text: gate_reason(original, text),
+        temperatures=(None, CHECK_TEMPERATURE),
+        internals_ids=(provisional_id, None),
+        max_attempts=1,
+    )
+
+
 def check_paraphrase_prompt(model: str, prompt_dir: str | Path | None = None) -> None:
     """Check, before any call, that ``model``'s paraphrase prompt renders the
     format its ``fingerprint`` key pins.
@@ -309,7 +352,8 @@ def paraphrase_batch(
 
     Each sample is stripped and rendered with the client's own prompt
     (:func:`paraphrase_prompt`). ``progress`` labels the batch; ``kwargs``
-    go to ``batch_generate_samples``.
+    go to ``batch_generate_samples``. A helper for callers: the stage no
+    longer calls it, since its units run on the ``drive_units`` pool.
     """
     if not samples:
         return []
@@ -589,9 +633,70 @@ def run_paraphrase_target(
                 target, len(groups),
             )
 
-    # One save per chunk, at the flush below: ``every`` is not reached before it.
-    with CommitBuffer(append=_append, ledger=ledger, every=sum(groups.values())) as buf:
-        for group_i, (model, n_units) in enumerate(groups.items()):
+    # Each paraphraser's units go to the drive_units pool, one paraphraser at
+    # a time: their generation and check calls overlap, each unit has its own
+    # reply cap, and a finished unit is saved without waiting for the others
+    # (every 32 units, and on any exit). A unit's driver key is its index in
+    # plan order, since the outputs target may plan two units under one key.
+    live: dict[int, tuple] = {}     # index -> (unit, provisional id, client)
+
+    def _save(index, value):
+        """A finished unit's row and ack. A paraphrase that is empty, equal to
+        its original or to a text already written is dropped; which of two
+        equal texts is kept follows the order the units finish in."""
+        unit, prov_id, unit_client = live.pop(index)
+        bid, iteration, m, otext, cat, et, iid, label = unit
+        text, acc, reason = value
+        pt = str(text).strip()
+        if not pt or pt == otext.strip() or pt in seen_texts:
+            buf.add([], {**_keyed(bid, iteration, iid),
+                         "paraphrase_model": m, "status": "dropped_dedup"})
+            return
+        seen_texts.add(pt)
+        sample_id = content_id(pt)
+        if prov_id is not None:
+            unit_client.rename_capture(prov_id, f"{bid}/paraphrase/{sample_id}")
+        row = {
+            "sample_id": sample_id, **_keyed(bid, iteration, iid),
+            "sample": pt, "category": cat, "entry_type": et,
+            # Always written for the outputs target, so a first run's header
+            # holds them whatever its source has.
+            **(dict(zip(_LABEL_COLUMNS, label)) if outputs else {}),
+            "paraphrase_model": m, "accepted": bool(acc),
+            "reasoning": reason, "source": f"paraphrase_{target}",
+        }
+        buf.add([row], {**_keyed(bid, iteration, iid), "paraphrase_model": m,
+                        "status": "accepted" if acc else "rejected"})
+
+    def _too_long(index, exc):
+        """A prompt over a model's context acks its unit with no row: sent
+        again, it would be too long again. Any other unit error stops the
+        stage."""
+        if not isinstance(exc, PromptTooLongError):
+            raise exc
+        unit, _prov_id, _client = live.pop(index)
+        bid, iteration, m, *_rest = unit
+        logger.warning("[paraphrase:%s] %s %s, iteration %d, gets no paraphrase: "
+                       "its prompt is too long: %s", target, key_field, bid,
+                       iteration, exc)
+        buf.add([], {**_keyed(bid, iteration, unit[6]), "paraphrase_model": m,
+                     "status": "prompt_too_long"})
+
+    def _pending(model, client, template):
+        """The pending units of ``model``, each its own generator, built as
+        the pool takes them."""
+        capture = client.compute_config.supports_internals
+        for index, unit in enumerate(_units()):
+            if unit[2] != model or unit[:2] in completed:
+                continue
+            # Captured under the unit, renamed to the paraphrase's sample_id.
+            prov_id = f"{unit[0]}/paraphrase/attempt_{unit[1]}" if capture else None
+            live[index] = (unit, prov_id, client)
+            yield index, _unit_gen(client, check, checker, template, unit[3],
+                                   provisional_id=prov_id)
+
+    with CommitBuffer(append=_append, ledger=ledger) as buf:
+        for group_i, model in enumerate(groups):
             if group_i and unload_between:
                 # The previous client's engine is released next; the check
                 # model's is kept.
@@ -602,81 +707,14 @@ def run_paraphrase_target(
                     keep=[check.model] if check is not None else None,
                     engines=resident)
             client = ModelClient.create(model)
-            # Captured under the unit, renamed to the paraphrase's sample_id below.
-            capture_paraphrase = client.compute_config.supports_internals
-            gunits = (u for u in _units() if u[2] == model and u[:2] not in completed)
-            for _ in range(0, n_units, batch_size):
-                chunk = list(islice(gunits, batch_size))
-                texts = [u[3] for u in chunk]
-                provisional_ids = [
-                    f"{bid}/paraphrase/attempt_{iteration}"
-                    for bid, iteration, *_ in chunk
-                ]
-                paraphrased = paraphrase_batch(
-                    client, texts,
-                    prompt_dir=prompt_dir,
-                    progress=f"paraphrase:{target} ({model})" if verbose else None,
-                    internals_ids=provisional_ids if capture_paraphrase else None,
-                )
-                # 1. Per unit, in chunk order: the dedup drop, then the gates.
-                # A gated text is a row, so it joins seen_texts as any row does.
-                # The gates are part of the check: without one, neither runs.
-                kept = []   # (unit, paraphrase, gate reason, provisional id)
-                for unit, ptext, prov_id in zip(chunk, paraphrased, provisional_ids):
-                    pt = str(ptext).strip()
-                    if not pt or pt == unit[3].strip() or pt in seen_texts:
-                        kept.append((unit, None, "", prov_id))
-                        continue
-                    seen_texts.add(pt)
-                    reason = gate_reason(unit[3], pt) if check is not None else ""
-                    kept.append((unit, pt, reason, prov_id))
-                # 2. One check call for the kept, ungated units.
-                to_check = [(unit[3], pt) for unit, pt, reason, _ in kept
-                            if pt is not None and not reason]
-                verdicts = iter(batch_check_samples(
-                    check, [pt for _, pt in to_check], checker,
-                    originals=[otext for otext, _ in to_check],
-                    batch_size=batch_size,
-                    progress=f"paraphrase-check:{target}" if verbose else None,
-                    temperature=CHECK_TEMPERATURE,
-                ) if check is not None and to_check else ())
-
-                # 3. The rows and acks, in chunk order.
-                attempted = []  # (rows, ack) of each unit of the chunk
-                for unit, pt, gated, prov_id in kept:
-                    bid, iteration, m, otext, cat, et, iid, label = unit
-                    if pt is None:
-                        attempted.append(([], {
-                            **_keyed(bid, iteration, iid),
-                            "paraphrase_model": m, "status": "dropped_dedup"}))
-                        continue  # dedup: drop no-op / duplicate paraphrases
-                    if gated:
-                        acc, reason = False, gated
-                    elif check is not None:
-                        acc, reason = next(verdicts)
-                    else:
-                        acc, reason = True, ""
-                    sample_id = content_id(pt)
-                    if capture_paraphrase:
-                        client.rename_capture(prov_id, f"{bid}/paraphrase/{sample_id}")
-                    row = {
-                        "sample_id": sample_id, **_keyed(bid, iteration, iid),
-                        "sample": pt, "category": cat, "entry_type": et,
-                        # Always written for the outputs target, so a first
-                        # run's header holds them whatever its source has.
-                        **(dict(zip(_LABEL_COLUMNS, label)) if outputs else {}),
-                        "paraphrase_model": m, "accepted": bool(acc),
-                        "reasoning": reason, "source": f"paraphrase_{target}",
-                    }
-                    attempted.append(([row], {
-                        **_keyed(bid, iteration, iid), "paraphrase_model": m,
-                        "status": "accepted" if acc else "rejected"}))
-                # Queued once the whole chunk is built: a chunk that fails part-way
-                # saves none of its units. The flush appends the rows, then acks
-                # every attempted unit, so a dropped one is not attempted again.
-                for unit_rows, ack in attempted:
-                    buf.add(unit_rows, ack)
-                buf.flush()
+            drive_units(
+                _pending(model, client, paraphrase_prompt(model, prompt_dir)),
+                on_done=_save,
+                on_error=_too_long,
+                pool_size=pool_size(batch_size, client, check),
+                cap=batch_size,
+                progress=f"paraphrase:{target} ({model})" if verbose else None,
+            )
 
     if verbose:
         logger.info("[paraphrase:%s] +%d rows (artifact now %d) -> %s",
