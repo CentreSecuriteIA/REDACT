@@ -12,8 +12,9 @@ briefly what each family does.
 ## Layers
 
 A combination applies its techniques in layer order: `hacking`, then
-`manipulation`, then `obfuscation`, then `requests`. Within the obfuscation
-layer, families apply in the order of their `within_layer_order`.
+`manipulation`, then `obfuscation`, then `requests`; the request obfuscation,
+when allowed, comes last, after the request. Within the obfuscation layer,
+families apply in the order of their `within_layer_order`.
 
 | Layer | Techniques | Picks per combination |
 |---|---|---|
@@ -63,9 +64,10 @@ belong to `encode`, so one of them blocks both families.
 `to_rot18`, `to_rot47`, `to_separator` and the three `to_leetspeak_*`;
 `heavy` for `to_base64`, `to_unicode_escape`, `to_ascii_ordinal`,
 `to_morse`, `to_braille`. The ten `to_sensitive_words_encode_*` carry one
-too: `heavy` for base64, unicode and ascii, `light` for the rest. The
-`heavy` ones stay allowed with `fsh` and `dap`, and the `light` ones may be
-the request obfuscation.
+too: `heavy` for base64, unicode and ascii, `light` for the rest. Of these
+ten, the `heavy` ones stay allowed with `fsh` and `dap`, which the plain
+`heavy` `encode` techniques are not; the `light` ones, like the plain `light`
+ones, may be the request obfuscation.
 
 ## Compatibility rules
 
@@ -90,8 +92,9 @@ technique is picked first. A technique may not join a combination when:
   `to_braille` and `to_tokenbreak_split` from `ascii_art`, since no font
   draws the characters they may leave; the other suffixes and encodings may
   still join it. `to_ascii_art` itself rejects a text with a character no
-  font draws (any non-ASCII character), or one every font draws longer than
-  its cap;
+  single font draws (most non-ASCII characters: accented letters such as `é`
+  or `ñ`, dashes, curly quotes, kana; German umlauts and `ß` and some Greek
+  or Cyrillic text have fonts), or one every font draws longer than its cap;
 - it pairs `fsh` or `dap` with an obfuscation in
   `manipulation_blocked_obfuscation`: the `translation` and `ascii_art`
   families and the `heavy` `encode` techniques, except those also in
@@ -106,7 +109,7 @@ Adding a technique: [extending.md](extending.md#add-a-jailbreak-technique).
 
 ## The eval pool
 
-The `eval` dataset type's attacks draw from 37 techniques in 10 families:
+The `eval` dataset type's attacks draw from 36 techniques in 10 families:
 hard ones (complexity 2 or 3 but for `to_noble_goal`, and the low-resource
 languages) whose harmful content stays certain, since the technique carries
 the text unchanged or reversibly, or a check accepts the result:
@@ -228,9 +231,11 @@ the answers.
   `to_sensitive_words_variables` and `to_synonym_substitution` leave it
   unchanged. `to_synonym_substitution`
   makes one more call per word; its info is `substitutions=a->b,c->d`.
-- `translation` covers 19 languages in three resource tiers, which the
-  spec scores by complexity: high (`to_french`, `to_japanese`, `to_russian`,
-  `to_spanish`, `to_german`, `to_arabic`; 0), mid (`to_turkish`,
+- `translation` covers 19 languages (not Maori, which TranslateGemma renders
+  with invented sensitive and technical terms, fluently enough to pass every
+  check) in three resource tiers, which the spec scores by complexity:
+  high (`to_french`, `to_japanese`, `to_russian`, `to_spanish`, `to_german`,
+  `to_arabic`; 0), mid (`to_turkish`,
   `to_czech`, `to_vietnamese`, `to_greek`, `to_croatian`; 1) and low
   (`to_swahili`, `to_thai`, `to_khmer`, `to_nepali`, `to_zulu`,
   `to_scots_gaelic`, `to_bengali`, `to_javanese`; 2). On a chat translator
@@ -331,7 +336,7 @@ primitives and 74 request primitives.
 
 | Status | Primitives |
 |---|---|
-| Covered | All encoding, sensitive-words and typo primitives; all 16 translation languages; all 14 named personas; every framing directive (`fictional_world`, `noble_goal`, `nefarious_goal`, `high_stake`, `no_moral_constraints`, `refusal_then_comply`, `prefix_injection`, `apology_prevention`, `answer_in_markdown`, `answer_as_tutorial`); every request primitive (`innocuous_question`, `impersonate_good_person`, the four distractors, `use_past_tense`, `ask_for_details`, `ask_answer_in` for 16 languages) |
+| Covered | All encoding, sensitive-words and typo primitives; 15 of the 16 translation languages (Maori is left out, see [above](#what-the-families-do)); all 14 named personas; every framing directive (`fictional_world`, `noble_goal`, `nefarious_goal`, `high_stake`, `no_moral_constraints`, `refusal_then_comply`, `prefix_injection`, `apology_prevention`, `answer_in_markdown`, `answer_as_tutorial`); every request primitive (`innocuous_question`, `impersonate_good_person`, the four distractors, `use_past_tense`, `ask_for_details`, `ask_answer_in` for 16 languages) |
 | Left out by design | `agent_context_additional_instr` (needs access to the system prompt), `fine_tuning` (out of scope), `use_highly_specialized_language` (no clear way to build it), `direct_question` (changes nothing) |
 
 Beyond the reference list, the library adds:
@@ -347,4 +352,5 @@ Beyond the reference list, the library adds:
 - the manipulation families, FSH and DAP, in eight variants;
 - the answer formats code, dialogue, story and structured data;
 - continuation attacks (4) and indirect task embedding (6);
-- the answer languages Zulu, Scots Gaelic, Bengali and Javanese.
+- the languages Zulu, Scots Gaelic, Bengali and Javanese, for translation and
+  for the answer language.

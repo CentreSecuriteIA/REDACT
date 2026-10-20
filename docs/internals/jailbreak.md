@@ -30,8 +30,8 @@ the technique names are in [techniques.md](../techniques.md).
 |---|---|
 | `technique.py` | The technique contract, `load_spec`, `tag`, `DISCARDED`, `KINDS`, `DEFAULT_KINDS`, `family_kinds` |
 | `hacking/`, `manipulation/`, `obfuscation/`, `requests/` | The techniques, one module per family (`distractor.py` holds both distractor families), each with a getter; `get_all_hacking_functions`, `get_all_manipulation_functions`, `get_all_obfuscation_functions`, `get_all_request_functions` per subpackage. `manipulation/benign.py` makes the benign data: one unit per subcategory of the benign taxonomy and answer type, keyed `(main_category, sub_category, answer_type)` |
-| `pool.py` | `all_techniques`, `technique_pool(kind)`, `kind_of`, `languages`, `registry`, `uses_translation` |
-| `augmentation.py` | `KINDS`, `defaults(config_dir)`, `resolve(section, kind, base=None, config_dir=None)`, `rounds_of(kind)`, `apply_flat_keywords`, `FLAT_KEYWORDS` |
+| `pool.py` | `all_techniques`, `technique_pool(resolved)`, `kind_of(resolved)`, `languages`, `registry`, `uses_translation` |
+| `augmentation.py` | `KINDS`, `defaults(config_dir)`, `resolve(section, kind, base=None, config_dir=None)`, `rounds_of(resolved)`, `apply_flat_keywords`, `FLAT_KEYWORDS` |
 | `rules.py` | `compatible(selected, pool, remaining_complexity)`, `request_obfuscation_candidates` |
 | `sampling.py` | `sample_combination`, `sample_exact_combination`, `_pick_by_family` |
 | `plan.py` | `plan_run`, `assign_combination`, `combination_of`, `coverage`, `plan_inputs` (the record of the `<stem>.plan.json` beside the manifest, written and compared by `dataset/planfile.py`), `default_escalation_schedule`; it deals from `dataset.dealing.Dealer` |
@@ -270,19 +270,19 @@ For a family, the message names those of its techniques the kind draws, to
 list under `techniques.allow`, and does not offer adding the kind to the
 family's `kinds`: they apply to every technique in it that sets none of
 its own.
-`technique_pool(kind)` filters the registered techniques; with the switch
+`technique_pool(resolved)` filters the registered techniques; with the switch
 on, a `techniques.allow` that names some languages (`pool.languages()`)
 admits those alone. Last, it keeps the techniques whose `kinds` (set by
 `technique.tag`: the technique's own, else its first family's,
 `family_kinds`, else `DEFAULT_KINDS`, `["adversarial"]`) hold the kind,
-which `pool.kind_of(kind)` reads as `rounds_of` does: natural when the
+which `pool.kind_of(resolved)` reads as `rounds_of` does: natural when the
 resolved kind has `exact_techniques`, so no key is added to it. Every
 technique holds `adversarial`, so only the natural pool is narrowed: to
 the 46 techniques of [techniques.md](../techniques.md#the-natural-pool) with
 translation off.
-`rounds_of(kind)` turns the kind into one sampler-settings dict per round:
-a natural round is `{"exact_techniques": n}`; an adversarial round is the
-budget keys, an `include_<layer>` per layer and `allow_request_obfuscation`
+`rounds_of(resolved)` turns the kind into one sampler-settings dict per
+round: a natural round is `{"exact_techniques": n}`; an adversarial round is
+the budget keys, an `include_<layer>` per layer and `allow_request_obfuscation`
 when set, with the round's own keys merged over them. The kind's
 `layer_rates` goes to `run_augmentation(layer_rates=)` and from there to
 `plan_run`; a round's own `layer_rates`, passed on as the sampler's
