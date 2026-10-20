@@ -25,21 +25,25 @@ extend REDACT.
 
 - [overview.md](overview.md): the stages, a diagram of the files they pass
   on, and one training run end to end.
-- [running.md](running.md): writing a recipe, choosing models, the GPU
-  planner, resume, the files on disk, telemetry and cost, common failures.
+- [running.md](running.md): installing, running and writing a recipe,
+  choosing models, the GPU planner, resume, the files on disk, telemetry and
+  cost, common failures.
 - [configuration.md](configuration.md): every recipe key, the dataset
-  types, the params keys per stage, the augmentation section, the model
-  registry, your own config folder, the prompt overlay.
+  types, the params keys per stage, the generation axes, the augmentation
+  section, the model registry, the environment variables, your own config
+  folder, the prompt overlay.
 - [extending.md](extending.md): how to add a model, a prompt, a jailbreak
   technique, a stage or a taxonomy, and how to change a dataset type.
 - [techniques.md](techniques.md): every jailbreak technique by layer and
-  family, for allow and deny lists, and the eval type's pool.
+  family, for allow and deny lists, and the eval and natural pools.
+- [api/index.md](api/index.md): the API reference, generated from the
+  docstrings.
 
 ### Stages
 
-One page per stage. Each gives the purpose, inputs, models, settings, unit
-and ledger key, files and columns, how it resumes, and what happens to a
-rejected or failed unit.
+One page per stage. Each gives the purpose, inputs, files and how it
+resumes; the generation stages also give their models, settings, unit and
+ledger key, and what happens to a rejected or failed unit.
 
 - [stages/constitution.md](stages/constitution.md)
 - [stages/inputs.md](stages/inputs.md): seeded from the constitution
