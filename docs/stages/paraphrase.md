@@ -11,7 +11,8 @@ each paraphrase keeps its original's meaning. Paraphrases are extra rows,
 never replacements.
 
 The shipped paraphraser, `venice-paraphraser`, is a stand-in: it loads the
-same 24B weights as the local setup of `venice-uncensored`. The trained
+same 24B weights as the local setup of `venice-uncensored`, quantized to FP8
+on load. The trained
 defingerprinting model lives in another repository; register it with the
 `paraphraser` role when you have it.
 
@@ -114,7 +115,9 @@ target too. The lock and the cut-back work as in
 ## Rejected and failed units
 
 - A paraphrase the checker rejects is saved with `accepted` false. The build
-  leaves it out.
+  leaves it out. The check reply is read as in the inputs stage
+  ([inputs](inputs.md#rejected-and-failed-units)): its first word, `Yes` or
+  `No`, is the verdict.
 - A paraphrase that is empty, equal to its original, or equal to a text
   already in the file is dropped: no row, acked `dropped_dedup`.
 - Neither is tried again on resume.

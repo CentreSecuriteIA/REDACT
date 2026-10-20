@@ -102,8 +102,11 @@ subcategory.
   `(seed, category, entry_type, sample_description, iteration)`.
 - **Siblings.** An entry's units take a value at most `ceil(share x k)`
   times, `share` its share of the axis's weight. So an entry's samples
-  differ on every axis none of whose values has more than 1/k of the weight
-  (every dealt axis at k = 3), and no prompt sentence asks for it.
+  differ on every axis none of whose values has more than 1/k of the weight,
+  and no prompt sentence asks for it. In the packaged table at k = 3 those
+  axes are `length` and `writer`, and with `axes_weighting` `"log"` also
+  `register` and `framing`; `directness` (`explicit` holds over a third) and
+  `focus` (one dealt value) can repeat a value among an entry's samples.
 - **`not_with`.** A value is not dealt beside a value of another axis that
   either names in `not_with` (`advice` and a `fragment`, for example).
 - **Shown.** `{sample_spec}` renders the spec as one line per axis in the
@@ -114,8 +117,9 @@ subcategory.
   units of each group and `samples_per_entry`. It is made again on every
   run, and the plan file stops a run that would deal another. Entries added
   since (a regenerated constitution, a new category) are dealt into their
-  groups; units already done keep the specs their rows and acks record, and
-  the specs of units not done may move.
+  groups; units already done keep the specs their rows record (the manifest
+  and the coverage table take the new deal), and the specs of units not done
+  may move.
 
 ## Files
 
@@ -194,7 +198,12 @@ stops until the same fresh run is repeated.
 ## Rejected and failed units
 
 - A sample the checker rejects is saved with `accepted` false and the
-  checker's reply in `rejection_reason`.
+  checker's reply in `rejection_reason`. The check prompt asks for `Yes` or
+  `No` as the reply's first word; `is_accepted`
+  ([llm_pipeline](../internals/llm_pipeline.md)) accepts a first word of
+  `yes`, `ok`, `okay`, `accept`, `accepted`, `pass` or `passed`, in any case
+  and after leading markdown or quote marks, and rejects any other reply, one
+  that opens with a preamble included.
 - A unit with every reply rejected is acked `rejected`, with no row.
 - A unit whose sample the folder holds already is acked `no_sample`.
 - On the async lane (an OpenAI-compatible endpoint or vLLM), a unit whose

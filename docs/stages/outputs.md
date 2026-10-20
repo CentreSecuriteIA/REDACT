@@ -6,7 +6,8 @@ Front `generate_outputs` (`stages.py`); core `run_output_generation`
 ## Purpose
 
 Generate one model response per accepted input, written to a spec of the
-response axes (length, format, tone), and check it with a checker that knows
+response axes (`length`, `format` and `register`, which the prompt labels
+Tone), and check it with a checker that knows
 the input's entry type: a refusal of a harmful input is rejected; a response
 to a benign input is judged as any answer.
 
@@ -111,7 +112,9 @@ axes, or without them) stops a resume before any call, naming the remedies:
 ## Rejected and failed units
 
 - A rejected response is saved with `accepted` false and the reason, and its
-  input is acked: a resume does not try it again.
+  input is acked: a resume does not try it again. The check reply is read as
+  in the inputs stage ([inputs](inputs.md#rejected-and-failed-units)): its
+  first word, `Yes` or `No`, is the verdict.
 - On the async lane (an OpenAI-compatible endpoint or vLLM), an input whose
   generation or check prompt is too long for its model gets a row with an
   empty `output_response`, `accepted` false and `rejection_reason`

@@ -56,9 +56,10 @@ The recipe's `dataset_type` is the build's `mode`.
 ## Training mode
 
 `complete_dataset.csv` holds the parts in the order of the table above;
-`output_path` moves it. So an accepted adversarial no-op (`is_noop` true),
-whose text and id are its input's, is not in the complete dataset, and
-neither is a variation whose text a jailbreak row has.
+`output_path` moves it. A row whose `sample_id` an earlier part wrote is left
+out, so an accepted adversarial no-op (`is_noop` true), whose text and id are
+its input's, is not in the complete dataset, and neither is a variation whose
+text a jailbreak row has.
 
 A benign or dual-use benign variation whose `technique` holds one the
 natural kind does not draw (its spec `kinds` lack `natural`) is left out
@@ -71,7 +72,8 @@ again with resume=False to replace them.`); the run record does not count
 them apart.
 
 The columns are those of every part, in the order they first appear, plus
-`dataset_type`. A row is empty in the columns its part lacks. Each part keeps
+`dataset_type`, which comes right after the first part's columns. A row is
+empty in the columns its part lacks. Each part keeps
 its text in its own columns:
 
 | `dataset_type` | Text | Origin |

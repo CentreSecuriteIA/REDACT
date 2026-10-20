@@ -39,8 +39,10 @@ apart:
   58 subcategories), the same file the `fsh` and `dap` techniques' benign data
   covers. Its first `num_taxonomy_categories` categories are used, each
   filling the `general_benign` prompt as a taxonomy category fills its own:
-  `Category`, `description`, `subcategories` (joined by `, `), `group_tag`
-  (`general` when the file names none) and `num_categories`.
+  `Category`, `description`, `subcategories` (joined by `, `) and
+  `num_categories`. The call passes `group_tag` too (`general` when the file
+  names none), which the packaged `general_benign` prompt has no placeholder
+  for; it is the row's `source_group_tag`.
 - The prompts `prompts/constitution/<entry_type>/`, plus `general_benign`.
   The recipe's `prompt_dir` overlays them.
 
