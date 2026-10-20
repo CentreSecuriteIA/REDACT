@@ -52,8 +52,8 @@ remain.
 
 ## Settings
 
-Params keys: `target`, `paraphrases_per_sample`, `check`, `batch_size`,
-`seed`, `inputs_path`, `outputs_path`
+Params keys: `target`, `paraphrases_per_sample`, `check`, `min_words`,
+`batch_size`, `seed`, `inputs_path`, `outputs_path`
 ([configuration.md](../configuration.md#paraphrase)).
 
 ## Unit and ledger key
@@ -65,16 +65,16 @@ and the unit `(input_id, iteration)`, `input_id` the input's `sample_id`
 response, and the unit `(response_id, iteration)`, `response_id` the
 response's `sample_id` (else the content id of its text): an input may have
 several responses, each paraphrased on its own. The unit keeps `input_id`,
-the response's own `input_id`, the input it answers. When the outputs target runs, with the outputs
-stage's `outputs_per_input` at k (2 in a training run), it
-paraphrases each of an input's k responses: its units are
+the response's own `input_id`, the input it answers. When the outputs
+target runs, with the outputs stage's `outputs_per_input` at k (2 in a
+training run), it paraphrases each of an input's k responses: its units are
 `paraphrases_per_sample` per accepted response, k times those per input.
 
 | | `inputs` | `outputs` |
 |---|---|---|
 | Ledger key | `(input_id, iteration)` | `(response_id, iteration)` |
-| Ledger record | the key, `paraphrase_model`, and `status`: `accepted`, `rejected` or `dropped_dedup` | the key, `input_id`, `paraphrase_model`, `status` |
-| Manifest row | `input_id`, `iteration`, `paraphrase_model`, `category`, `entry_type`, `status` | `response_id`, `input_id`, `iteration`, `paraphrase_model`, `category`, `entry_type`, `status` |
+| Ledger record | the key, `paraphrase_model`, and `status`: `accepted`, `rejected`, `dropped_dedup` or `skipped` (with `reason` and `min_words`) | the key, `input_id`, `paraphrase_model`, `status` (and for `skipped`, `reason` and `min_words`) |
+| Manifest row | `input_id`, `iteration`, `paraphrase_model`, `category`, `entry_type`, `status` (`planned`, or `skipped` for a text under `min_words` words) | `response_id`, `input_id`, `iteration`, `paraphrase_model`, `category`, `entry_type`, `status` |
 
 Two accepted responses with one text (siblings of one input that a model
 answered alike) have one `response_id`: the target plans two units under
@@ -148,6 +148,29 @@ header lacks `response_id`, `response_mode`, `output_label` or
 `response_label`. The message names `resume: false` (with `target:
 "outputs"`, which leaves the inputs' paraphrases as they are) and a new
 `data_dir`. The `inputs` target of the same folder resumes as before.
+
+## Skipped texts
+
+A text under `min_words` words (12 by default, split on whitespace) gets no
+paraphrase from any paraphraser. Its unit is acked with `status` `skipped`,
+`reason` `short` and the `min_words` it was judged by, with no call and no
+row; the manifest marks it `skipped` too. Below 12 words the humanizer
+paraphraser read a text as a headline and wrote a post under it (on the
+benign test, 0 to 50% of its rewrites of 4 to 11 words were good, against
+92% at 12 to 15 words), and every input under 12 words was a fragment. In a
+default training run that is about one input in six, the `fragment` length
+value. `min_words: 0` paraphrases every text.
+
+The run record counts the skipped units per reason, over the targets the run
+named: `counts.skipped`, as `{"short": n}`; a run that skipped none has no
+`skipped` key.
+
+The acks win on resume: a unit acked `skipped` stays skipped whatever the
+current `min_words`. When the current threshold would send some of them, the
+stage warns once (`[paraphrase:<target>] N units acked under an earlier
+min_words stay unparaphrased on resume; run with resume: false to paraphrase
+them.`). A target whose texts are all short writes acks only and logs
+`N units under 12 words skipped; nothing to paraphrase.`
 
 ## The check
 

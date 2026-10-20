@@ -1819,6 +1819,7 @@ def test_a_training_run_reads_the_inputs_it_seeded(tmp_path, monkeypatch):
     monkeypatch.setattr(
         CP, "batch_check_samples",
         lambda client, texts, checker, **kw: [(True, "") for _ in texts])
+    monkeypatch.setattr(CP, "MIN_WORDS", 0)     # the texts are six words long
     monkeypatch.setattr("redact.llms.resources.estimate._load_config", lambda _id: None)
     write_inputs(paths.constitution_inputs_dir(tmp_path),
                  [f"prompt number {i} about a topic" for i in range(3)],

@@ -174,6 +174,7 @@ def _paraphrases(folder, monkeypatch) -> dict:
 
     monkeypatch.setattr(
         CP.ModelClient, "create", lambda m: make_client(MockBackend(), m))
+    monkeypatch.setattr(CP, "MIN_WORDS", 0)     # the texts are two words long
     # A text with "delta" is rejected by the check.
     monkeypatch.setattr(
         CP, "batch_check_samples",

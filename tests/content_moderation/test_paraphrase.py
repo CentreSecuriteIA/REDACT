@@ -33,6 +33,24 @@ def _words(n: int) -> str:
     return " ".join(f"w{i}" for i in range(n))
 
 
+class TestSkipReason:
+    def test_a_text_under_min_words_is_short(self):
+        assert CP.skip_reason(_words(11), min_words=12) == "short"
+
+    def test_a_text_of_min_words_is_sent(self):
+        assert CP.skip_reason(_words(12), min_words=12) == ""
+
+    def test_zero_sends_every_text(self):
+        assert CP.skip_reason("", min_words=0) == ""
+
+    def test_runs_of_spaces_and_newlines_are_one_break(self):
+        assert CP.skip_reason("one  two\n\nthree \t four", min_words=4) == ""
+        assert CP.skip_reason("one  two\n\nthree", min_words=4) == "short"
+
+    def test_the_default_is_twelve(self):
+        assert (CP.MIN_WORDS, CP.DEFAULT_TARGET) == (12, "inputs")
+
+
 SPLIT = "split into lines"
 
 

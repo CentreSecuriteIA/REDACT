@@ -28,6 +28,7 @@ from ..dataset import (
     Manifest,
     append_rows,
     check_columns,
+    commit,
     content_id,
     count_rows,
     read_rows,
@@ -56,6 +57,18 @@ _LABEL_COLUMNS = _RESPONSE_COLUMNS[1:]
 #: The outputs target (``"outputs"``, or ``"both"`` with the inputs) is an
 #: opt-in.
 DEFAULT_TARGET = "inputs"
+
+#: A text under this many words gets no paraphrase. Below 12 words the
+#: humanizer read a text as a headline and wrote a post under it (net
+#: acceptance 0 to 50% by word count on the benign test, 2026-10-20, against
+#: 91.7% at 12 to 15 words); every test input under 12 words was a fragment.
+MIN_WORDS = 12
+
+
+def skip_reason(text: str, *, min_words: int) -> str:
+    """Why ``text`` gets no paraphrase: ``"short"`` when it has under
+    ``min_words`` words (split on whitespace), else ``""``."""
+    return "short" if len(text.split()) < min_words else ""
 
 
 # --- the check's gates -------------------------------------------------------
@@ -289,6 +302,7 @@ def run_paraphrase_target(
     prompt_dir: str | Path | None = None,
     verbose: bool = True,
     read_back: bool = True,
+    min_words: int | None = None,
 ) -> pd.DataFrame:
     """Paraphrase each row of ``source`` ``k`` times into ``out_path``.
 
@@ -301,15 +315,23 @@ def run_paraphrase_target(
     ``response_id``, ``response_mode``, ``output_label`` and
     ``response_label`` (empty when ``source`` lacks the column). Each unit
     goes to a paraphraser of ``pool``, picked by a hash of its id;
-    ``check``, when given, judges that a paraphrase keeps its original's
-    meaning. Returns the artifact's rows, or with ``read_back=False`` an
-    empty frame without reading them.
+    ``check``, when given, gates each paraphrase and judges that it keeps
+    its original's meaning. A unit whose text has under ``min_words`` words
+    (``None``: :data:`MIN_WORDS`, read at the call; 0 sends every text) gets
+    no call: it is acked ``skipped`` with its ``reason`` and the threshold,
+    and writes no row. A unit acked ``skipped`` stays skipped on resume
+    whatever the current threshold (acks win, with a WARNING when the
+    threshold would now send it); ``resume=False`` plans anew. Returns the
+    artifact's rows, or with ``read_back=False`` an empty frame without
+    reading them.
 
     Raises:
         ValueError: For the outputs target, a folder written before its units
             were keyed on the response (an ack without ``response_id``, or a
             file without the response's columns), before any call.
     """
+    if min_words is None:
+        min_words = MIN_WORDS
     outputs = target != "inputs"
     if not outputs:
         text_col = "sample" if "sample" in source.columns else "prompt"
@@ -388,10 +410,46 @@ def run_paraphrase_target(
     manifest.write(
         {
             **_keyed(bid, iteration, iid), "paraphrase_model": m,
-            "category": cat, "entry_type": et, "status": "planned",
+            "category": cat, "entry_type": et,
+            "status": "skipped" if skip_reason(otext, min_words=min_words)
+            else "planned",
         }
-        for bid, iteration, m, _o, cat, et, iid, _label in _units()
+        for bid, iteration, m, otext, cat, et, iid, _label in _units()
     )
+
+    written = 0
+
+    def _append(rows: list[dict]) -> dict[Path, int]:
+        nonlocal written
+        sizes = append_rows(out_path, rows)
+        written += len(rows)
+        return sizes
+
+    # Acked skips of an earlier run whose text this threshold would send:
+    # acks win, so they stay unparaphrased.
+    earlier = ({ledger.key(ack) for ack in ledger.records()
+                if ack.get("status") == "skipped"} if completed else set())
+    stale = sum(1 for bid, iteration, _m, otext, *_ in _units()
+                if (bid, iteration) in earlier
+                and not skip_reason(otext, min_words=min_words))
+    if stale:
+        logger.warning(
+            "[paraphrase:%s] %d units acked under an earlier min_words stay "
+            "unparaphrased on resume; run with resume: false to paraphrase them.",
+            target, stale)
+
+    # A text too short to paraphrase: its unit is acked at once, with no call
+    # and no row.
+    skips: dict[tuple[str, int], dict] = {}
+    for bid, iteration, m, otext, _cat, _et, iid, _label in _units():
+        reason = skip_reason(otext, min_words=min_words)
+        if reason and (bid, iteration) not in completed:
+            skips[bid, iteration] = {
+                **_keyed(bid, iteration, iid), "paraphrase_model": m,
+                "status": "skipped", "reason": reason, "min_words": min_words}
+    if skips:
+        commit([], append=_append, ledger=ledger, records=skips.values())
+        completed |= set(skips)
 
     # The units left for each paraphraser, in the order its first one comes up.
     planned, groups = 0, {}
@@ -400,11 +458,17 @@ def run_paraphrase_target(
         if (bid, iteration) not in completed:
             groups[m] = groups.get(m, 0) + 1
     if not groups:
-        if verbose:
+        if verbose and skips:
+            logger.info("[paraphrase:%s] %d units under %d words skipped; "
+                        "nothing to paraphrase.", target, len(skips), min_words)
+        elif verbose:
             logger.info("[paraphrase:%s] nothing to do (all %d units done).",
                         target, planned)
         release_lock(ledger)    # no CommitBuffer will
         return read_rows(out_path) if read_back else pd.DataFrame()
+    if verbose and skips:
+        logger.info("[paraphrase:%s] %d units under %d words skipped.",
+                    target, len(skips), min_words)
 
     # One paraphraser runs at a time. The residency plan decides whether the
     # pool's engines are unloaded between groups: they stay loaded when the
@@ -427,13 +491,6 @@ def run_paraphrase_target(
 
     checker = (build_paraphrase_checker(prompt_dir=prompt_dir)
                if check is not None else None)
-    written = 0
-
-    def _append(rows: list[dict]) -> dict[Path, int]:
-        nonlocal written
-        sizes = append_rows(out_path, rows)
-        written += len(rows)
-        return sizes
 
     # One save per chunk, at the flush below: ``every`` is not reached before it.
     with CommitBuffer(append=_append, ledger=ledger, every=sum(groups.values())) as buf:

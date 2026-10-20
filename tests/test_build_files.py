@@ -78,6 +78,13 @@ from redact.dataset import read_rows
 from tests.conftest import MockBackend, make_client, write_inputs
 from tests.test_stage_files import _files
 
+
+@pytest.fixture(autouse=True)
+def _no_short_text_skip(monkeypatch):
+    """The stub texts are a few words long: the paraphrase stage's short-text
+    skip would leave every unit unparaphrased. Its own tests set min_words."""
+    monkeypatch.setattr("redact.content_moderation.paraphrase.MIN_WORDS", 0)
+
 _FIXTURE = Path(__file__).parent / "fixtures" / "build_files.json"
 
 _INTEGER_COLUMNS = ("turn", "complexity", "num_techniques", "iteration")

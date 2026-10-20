@@ -44,6 +44,7 @@ from redact.content_moderation.paraphrase import (
 )
 from redact.dataset import (
     Exclusion,
+    Ledger,
     Manifest,
     Part,
     accepted_mask,
@@ -846,6 +847,7 @@ def generate_paraphrases(
     outputs_path: str | Path | None = None,
     verbose: bool = True,
     read_back: bool = True,
+    min_words: int | None = None,
 ) -> dict[str, pd.DataFrame]:
     """Paraphrase the base inputs and, when ``target`` names them, the accepted
     base outputs, into additive artifacts.
@@ -901,6 +903,9 @@ def generate_paraphrases(
         verbose: Log progress.
         read_back: False returns empty DataFrames and does not read the
             artifacts back.
+        min_words: A text under this many words gets no paraphrase (default
+            12, ``paraphrase.MIN_WORDS``; 0 paraphrases every text): its unit
+            is acked ``skipped`` with no call, and a run record counts it.
 
     Returns:
         A key per target that ran: ``{"inputs": df}`` by default,
@@ -970,7 +975,7 @@ def generate_paraphrases(
             tgt, source, out_path,
             pool=pool, check=check_client, k=paraphrases_per_sample,
             resume=resume, batch_size=batch_size, seed=seed, prompt_dir=prompt_dir,
-            verbose=verbose, read_back=read_back,
+            verbose=verbose, read_back=read_back, min_words=min_words,
         )
     return results
 
@@ -1529,7 +1534,8 @@ class Stage:
     run applies to a kwarg it passes itself (the jailbreak stage's flat
     keywords, to its ``augmentation``), so the front does not get them again.
     ``extra_counts`` reads what the stage counts beyond its files' rows,
-    after it ran (the rows an eval build left out).
+    after it ran (the rows an eval build left out; the paraphrase units
+    skipped).
     """
 
     name: str
@@ -1733,6 +1739,21 @@ def _paraphrase_files(ctx: RunContext) -> tuple[list[Path], dict]:
             for name in default if target in (name, "both")], {}
 
 
+def _paraphrase_skipped(ctx: RunContext) -> dict:
+    """The paraphrase units acked ``skipped``, per reason, over the targets
+    the run named: ``{"skipped": {"short": n}}``, or ``{}`` when none was.
+
+    Each ledger is read keyed on ``iteration``, a field both targets' acks
+    have.
+    """
+    skipped: Counter = Counter()
+    for path in _paraphrase_files(ctx)[0]:
+        ledger = Ledger.sidecar(path, key_fields=("iteration",))
+        skipped.update(ack.get("reason", "") for ack in ledger.records()
+                       if ack.get("status") == "skipped")
+    return {"skipped": dict(skipped)} if skipped else {}
+
+
 def _jailbreaks_kwargs(ctx: RunContext) -> dict:
     return dict(
         data_dir=ctx.data_dir, model=ctx.models["gen"],
@@ -1818,7 +1839,7 @@ STAGES: dict[str, Stage] = {stage.name: stage for stage in (
           roles=(("paraphraser", "paraphraser"),
                  ("paraphrase_check", "uncensored_gen")),
           files=_paraphrase_files, recipe_kwargs=_paraphrase_kwargs,
-          sources=_paraphrase_sources),
+          sources=_paraphrase_sources, extra_counts=_paraphrase_skipped),
     Stage("jailbreaks", "generate_jailbreaks",
           roles=(_GEN, ("translation", "translation")),
           files=_jailbreaks_files,

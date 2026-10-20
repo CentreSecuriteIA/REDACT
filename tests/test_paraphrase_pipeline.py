@@ -24,6 +24,13 @@ from tests.conftest import (
 )
 
 
+@pytest.fixture(autouse=True)
+def _no_short_text_skip(monkeypatch):
+    """The stub texts are a few words long: the paraphrase stage's short-text
+    skip would leave every unit unparaphrased. Its own tests set min_words."""
+    monkeypatch.setattr(CP, "MIN_WORDS", 0)
+
+
 @pytest.fixture()
 def patched(monkeypatch):
     """Patch backend + paraphrase + check to deterministic offline behavior.
@@ -945,6 +952,126 @@ def test_a_recipe_without_a_target_reads_and_writes_the_inputs_alone(
     assert [p for p in sources if "output_responses" in p] == []
     assert sources and all("constitution_inputs" in p for p in sources)
     assert not paths.paraphrases_outputs_csv(tmp_path).exists()
+
+
+# --- the short-text skip -----------------------------------------------------
+
+_SHORT = "a five word input here"
+_LONG = "a fifteen word input that is long enough to be sent to the paraphraser now"
+
+
+def _recording_paraphrase(patched):
+    """Patch the paraphrase call to prefix PARA::; return the texts it got."""
+    asked: list[str] = []
+
+    def paraphrase(client, texts, **kw):
+        asked.extend(texts)
+        return [f"PARA::{t}" for t in texts]
+
+    patched.setattr(CP, "paraphrase_batch", paraphrase)
+    return asked
+
+
+def test_a_short_text_is_acked_skipped_with_no_call(tmp_path, patched):
+    from redact.dataset import Manifest
+
+    write_inputs(paths.constitution_inputs_dir(tmp_path), [_SHORT, _LONG])
+    asked = _recording_paraphrase(patched)
+    df = generate_paraphrases(data_dir=tmp_path, min_words=12, verbose=False)["inputs"]
+    assert asked == [_LONG]
+    assert list(df["sample"]) == [f"PARA::{_LONG}"]
+    assert _acks(tmp_path) == [
+        {"input_id": content_id(_SHORT), "iteration": 0,
+         "paraphrase_model": "venice-paraphraser", "status": "skipped",
+         "reason": "short", "min_words": 12},
+        {"input_id": content_id(_LONG), "iteration": 0,
+         "paraphrase_model": "venice-paraphraser", "status": "accepted"}]
+    planned = Manifest.sidecar(paths.paraphrases_inputs_csv(tmp_path)).load()
+    assert {r["input_id"]: r["status"] for r in planned} == {
+        content_id(_SHORT): "skipped", content_id(_LONG): "planned"}
+
+    del asked[:]
+    generate_paraphrases(data_dir=tmp_path, min_words=12, verbose=False)
+    assert asked == []                    # a resume calls nothing for either
+
+
+def test_a_resume_under_a_lower_threshold_keeps_the_skip_and_warns(
+        tmp_path, patched, caplog):
+    import logging
+
+    write_inputs(paths.constitution_inputs_dir(tmp_path), [_SHORT, _LONG])
+    asked = _recording_paraphrase(patched)
+    generate_paraphrases(data_dir=tmp_path, min_words=12, verbose=False)
+    del asked[:]
+    with caplog.at_level(logging.WARNING):
+        generate_paraphrases(data_dir=tmp_path, min_words=0, verbose=False)
+    assert asked == []
+    (warning,) = [r for r in caplog.records if "earlier min_words" in r.getMessage()]
+    assert warning.levelname == "WARNING" and "1 units" in warning.getMessage()
+    assert "resume: false" in warning.getMessage()
+    assert "skipped" not in warning.getMessage()    # counted by other tests
+
+
+def test_a_target_of_short_texts_only_writes_acks_and_gives_the_lock_back(
+        tmp_path, patched):
+    write_inputs(paths.constitution_inputs_dir(tmp_path), [_SHORT, "two words"])
+    asked = _recording_paraphrase(patched)
+    out = paths.paraphrases_inputs_csv(tmp_path)
+    df = generate_paraphrases(data_dir=tmp_path, min_words=12, verbose=False)["inputs"]
+    assert asked == [] and df.empty and not out.exists()
+    assert [ack["status"] for ack in _acks(tmp_path)] == ["skipped", "skipped"]
+    assert lock_is_free(out.with_name("paraphrases_inputs.state.jsonl"))
+
+
+def test_a_skipped_response_keeps_its_keys_and_resumes(tmp_path, patched):
+    responses = _responses(output_response=["too short", _LONG, "also too short"])
+    asked = _recording_paraphrase(patched)
+    generate_paraphrases(outputs=responses, data_dir=tmp_path, target="outputs",
+                         min_words=12, verbose=False)
+    acks = [json.loads(line) for line in
+            _outputs_state(tmp_path).read_text(encoding="utf-8").splitlines()]
+    skipped = [ack for ack in acks if ack.get("status") == "skipped"]
+    assert [(a["response_id"], a["input_id"]) for a in skipped] == [
+        ("out-a", "in-1"), ("out-c", "in-2")]
+    assert asked == [_LONG]
+    del asked[:]
+    # The resume check of the outputs target passes on these acks.
+    generate_paraphrases(outputs=responses, data_dir=tmp_path, target="outputs",
+                         min_words=12, verbose=False)
+    assert asked == []
+
+
+def test_a_run_record_counts_the_skipped_units(tmp_path, patched):
+    from redact import run_pipeline
+    from redact.telemetry import uninstall
+
+    write_inputs(paths.constitution_inputs_dir(tmp_path), [_SHORT, _LONG])
+    _recording_paraphrase(patched)
+    recipe = {"dataset_type": "training", "data_dir": str(tmp_path),
+              "stages": ["paraphrase"]}
+    try:
+        summary = run_pipeline(recipe, params={"paraphrase": {"min_words": 12}},
+                               verbose=False)
+        assert summary["stages"]["paraphrase"]["counts"] == {
+            "rows": 1, "accepted": 1, "skipped": {"short": 1}}
+        summary = run_pipeline({**recipe, "resume": False},
+                               params={"paraphrase": {"min_words": 0}}, verbose=False)
+    finally:
+        uninstall()
+    assert "skipped" not in summary["stages"]["paraphrase"]["counts"]
+
+
+def test_the_stage_takes_min_words_as_a_param(tmp_path):
+    from redact.recipe import _DEFAULT_MODELS
+    from redact.stages import STAGES, RunContext
+
+    ctx = RunContext(
+        data_dir=tmp_path, dataset_type="training", models=dict(_DEFAULT_MODELS),
+        prompt_dir=None, taxonomy="harmful", taxonomy_dir=None,
+        params={"paraphrase": {"min_words": 0}}, augmentations={},
+        resume=True, verbose=False)
+    STAGES["paraphrase"].check(ctx)
+    assert STAGES["paraphrase"].kwargs(ctx)["min_words"] == 0
 
 
 def test_the_inputs_target_beside_an_old_outputs_folder_resumes_as_before(

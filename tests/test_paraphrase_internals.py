@@ -15,6 +15,13 @@ from redact.llms.backends import ComputeConfig
 from tests.conftest import MockBackend, make_client, write_inputs
 
 
+@pytest.fixture(autouse=True)
+def _no_short_text_skip(monkeypatch):
+    """The stub texts are a few words long: the paraphrase stage's short-text
+    skip would leave every unit unparaphrased. Its own tests set min_words."""
+    monkeypatch.setattr(P, "MIN_WORDS", 0)
+
+
 class _InternalsBackend(MockBackend):
     """Tracks rename_capture calls too, so the wiring can be asserted without
     needing a real TransformersIntrospectionBackend (already covered in

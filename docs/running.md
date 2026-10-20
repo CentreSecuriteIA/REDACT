@@ -464,7 +464,8 @@ A run record, `Datasets/<stage>.run.json`, holds `stage`, `timestamp`,
 `params` (the stage's params: the dataset type's with the params file's
 entry over them), `models` (the recipe's role names),
 `counts` (`rows`, and `accepted` when the files have that column; for an
-eval build with `exclude_from`, `excluded`), `sources` (the files the stage
+eval build with `exclude_from`, `excluded`; for the paraphrase stage,
+`skipped`: the units under `min_words` words, per reason), `sources` (the files the stage
 read its inputs from: the taxonomy file for the constitution, and the benign
 taxonomy's with the general-benign part on; the saved constitution for the
 inputs; the input category files, and `output_responses.csv` for paraphrases
