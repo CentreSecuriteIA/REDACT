@@ -252,8 +252,10 @@ layout out before they compare lengths, and the check judges content.
 - A paraphrase the checker rejects is saved with `accepted` false. The build
   leaves it out.
 - A paraphrase that is empty, equal to its original, or equal to a text
-  already in the file is dropped: no row, acked `dropped_dedup`. Of two
-  units with one paraphrase, the one that finishes first keeps its row.
+  already in the file is dropped: no row, acked `dropped_dedup`. With the
+  check on, the unit finds it before its check call, and makes none. Of two
+  units with one paraphrase whose checks ran at once, the one that finishes
+  first keeps its row.
 - On the async lane (an OpenAI-compatible or vLLM model), a prompt too long
   for the paraphraser or the checker acks its unit `prompt_too_long`, with
   no row and a WARNING; the other units go on.

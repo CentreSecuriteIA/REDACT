@@ -552,6 +552,12 @@ def test_an_unload_between_paraphrasers_shuts_down_only_their_engine(
 _FOUR = ["alpha prompt", "beta prompt", "gamma prompt", "delta prompt"]
 
 
+# The order the four units finish in, at batch_size 2: gamma's unchanged
+# paraphrase needs no check call, so it finishes first; then the other
+# three, as their check calls return.
+_FINISHED = ["gamma prompt", "alpha prompt", "beta prompt", "delta prompt"]
+
+
 def _seed_four_inputs(tmp_path):
     write_inputs(paths.constitution_inputs_dir(tmp_path), _FOUR)
     # gamma comes back unchanged, so its unit is dropped.
@@ -597,16 +603,17 @@ def test_a_save_is_one_append_followed_by_its_acks(tmp_path, patched):
     df = generate_paraphrases(
         data_dir=tmp_path, target="inputs", batch_size=2, verbose=False)["inputs"]
 
-    # Per append: its rows, and the acks on disk when it was made.
+    # Per append: its rows, and the acks on disk when it was made. The first
+    # save is gamma's drop and alpha's row.
     assert saves == [
-        (["PARA::alpha prompt", "PARA::beta prompt"], 0), (["PARA::delta prompt"], 2)]
+        (["PARA::alpha prompt"], 0), (["PARA::beta prompt", "PARA::delta prompt"], 2)]
     assert list(df["sample"]) == [
         "PARA::alpha prompt", "PARA::beta prompt", "PARA::delta prompt"]
-    statuses = ["accepted", "accepted", "dropped_dedup", "accepted"]
+    statuses = ["dropped_dedup", "accepted", "accepted", "accepted"]
     assert _acks(tmp_path) == [
         {"input_id": content_id(text), "iteration": 0,
          "paraphrase_model": "venice-paraphraser", "status": status}
-        for text, status in zip(_FOUR, statuses)
+        for text, status in zip(_FINISHED, statuses)
     ]
 
 
@@ -620,11 +627,11 @@ def test_a_run_killed_between_rows_and_acks_leaves_each_unit_once(tmp_path, patc
     with pytest.raises(Killed):
         generate_paraphrases(
             data_dir=tmp_path, target="inputs", batch_size=2, verbose=False)
-    # The second save's row landed; its acks did not.
+    # The second save's rows landed; its acks did not.
     assert list(pd.read_csv(out)["sample"]) == [
         "PARA::alpha prompt", "PARA::beta prompt", "PARA::delta prompt"]
     assert [ack["input_id"] for ack in _acks(tmp_path)] == [
-        content_id(text) for text in _FOUR[:2]]
+        content_id(text) for text in _FINISHED[:2]]
     assert lock_is_free(state)
 
     df = generate_paraphrases(
@@ -633,7 +640,7 @@ def test_a_run_killed_between_rows_and_acks_leaves_each_unit_once(tmp_path, patc
         "PARA::alpha prompt", "PARA::beta prompt", "PARA::delta prompt"]
     cut = out.with_name("paraphrases_inputs.csv.cut")
     assert b"PARA::delta prompt" in cut.read_bytes()
-    statuses = ["accepted", "accepted", "dropped_dedup", "accepted"]
+    statuses = ["dropped_dedup", "accepted", "accepted", "accepted"]
     assert [ack["status"] for ack in _acks(tmp_path)] == statuses
     assert lock_is_free(state)
 
@@ -679,9 +686,9 @@ def test_a_failed_append_acks_none_of_its_save(tmp_path, patched):
             data_dir=tmp_path, target="inputs", batch_size=2, verbose=False)
 
     assert [ack["input_id"] for ack in _acks(tmp_path)] == [
-        content_id(text) for text in _FOUR[:2]]
+        content_id(text) for text in _FINISHED[:2]]
     saved = pd.read_csv(paths.paraphrases_inputs_csv(tmp_path))
-    assert list(saved["sample"]) == ["PARA::alpha prompt", "PARA::beta prompt"]
+    assert list(saved["sample"]) == ["PARA::alpha prompt"]
 
 
 # --- the outputs target: a unit per response ---------------------------------
@@ -835,6 +842,28 @@ def test_a_chunk_whose_paraphrases_are_all_gated_makes_no_check_call(tmp_path, p
     generate_paraphrases(data_dir=tmp_path, target="inputs", verbose=False)
     assert _checks(requests) == []
     assert [ack["status"] for ack in _acks(tmp_path)] == ["rejected", "rejected"]
+
+
+def test_an_unchanged_or_repeated_paraphrase_gets_no_check_call(tmp_path, patched):
+    """It is dropped as before (dropped_dedup, no row), with no check call."""
+    requests = _serve(patched, paraphrase=_seed_four_inputs(tmp_path))
+    generate_paraphrases(data_dir=tmp_path, verbose=False)
+    # gamma came back unchanged: no check request for it.
+    assert sorted(r["original"] for r in _checks(requests)) == [
+        "alpha prompt", "beta prompt", "delta prompt"]
+    assert {ack["input_id"]: ack["status"] for ack in _acks(tmp_path)} == {
+        content_id(text): "dropped_dedup" if text.startswith("gamma") else "accepted"
+        for text in _FOUR}
+
+    # A new unit whose paraphrase is a text already written: no check either.
+    del requests[:]
+    generate_paraphrases(
+        inputs=pd.DataFrame({"sample_id": ["another-id"], "sample": ["alpha prompt"]}),
+        data_dir=tmp_path, verbose=False)
+    assert _asked(requests) == ["alpha prompt"] and _checks(requests) == []
+    assert _acks(tmp_path)[-1] == {"input_id": "another-id", "iteration": 0,
+                                   "paraphrase_model": "venice-paraphraser",
+                                   "status": "dropped_dedup"}
 
 
 def test_a_gated_text_is_written_once(tmp_path, patched):

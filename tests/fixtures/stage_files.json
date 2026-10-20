@@ -346,9 +346,9 @@
     {"input_id": "given-1", "iteration": 0, "paraphrase_model": "venice-paraphraser", "status": "rejected"},
     {"input_id": "given-1", "iteration": 1, "paraphrase_model": "venice-paraphraser", "status": "dropped_dedup"},
     {"input_id": "cd7d45cc1f5a2100", "iteration": 0, "paraphrase_model": "venice-paraphraser", "status": "accepted"},
-    {"input_id": "2084ee23d0d97ae6", "iteration": 1, "paraphrase_model": "_para_second", "status": "accepted"},
     {"input_id": "padded", "iteration": 0, "paraphrase_model": "_para_second", "status": "dropped_dedup"},
     {"input_id": "padded", "iteration": 1, "paraphrase_model": "_para_second", "status": "dropped_dedup"},
+    {"input_id": "2084ee23d0d97ae6", "iteration": 1, "paraphrase_model": "_para_second", "status": "accepted"},
     {"input_id": "cd7d45cc1f5a2100", "iteration": 1, "paraphrase_model": "_para_second", "status": "accepted"},
     {"input_id": "77", "iteration": 0, "paraphrase_model": "venice-paraphraser", "status": "accepted"},
     {"input_id": "77", "iteration": 1, "paraphrase_model": "venice-paraphraser", "status": "dropped_dedup"}
@@ -374,10 +374,10 @@
    ],
    "paraphrases_outputs.state.jsonl": [
     {},
-    {"response_id": "c3eaaeb3d970a3d2", "input_id": "o1", "iteration": 0, "paraphrase_model": "venice-paraphraser", "status": "accepted"},
-    {"response_id": "ed191712540e7d8b", "input_id": "ed191712540e7d8b", "iteration": 1, "paraphrase_model": "venice-paraphraser", "status": "accepted"},
     {"response_id": "b56dd31a81b87394", "input_id": "o3", "iteration": 0, "paraphrase_model": "venice-paraphraser", "status": "dropped_dedup"},
     {"response_id": "b56dd31a81b87394", "input_id": "o3", "iteration": 1, "paraphrase_model": "venice-paraphraser", "status": "dropped_dedup"},
+    {"response_id": "c3eaaeb3d970a3d2", "input_id": "o1", "iteration": 0, "paraphrase_model": "venice-paraphraser", "status": "accepted"},
+    {"response_id": "ed191712540e7d8b", "input_id": "ed191712540e7d8b", "iteration": 1, "paraphrase_model": "venice-paraphraser", "status": "accepted"},
     {"response_id": "7382f94de4b4f2a2", "input_id": "o4", "iteration": 1, "paraphrase_model": "venice-paraphraser", "status": "rejected"},
     {"response_id": "c3eaaeb3d970a3d2", "input_id": "o1", "iteration": 1, "paraphrase_model": "_para_second", "status": "accepted"},
     {"response_id": "ed191712540e7d8b", "input_id": "ed191712540e7d8b", "iteration": 0, "paraphrase_model": "_para_second", "status": "accepted"},

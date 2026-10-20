@@ -271,18 +271,34 @@ def reply_cap(text: str, ceiling: int) -> int:
     return min(ceiling, cap)
 
 
-def _unit_gen(client, check, checker, template, original, *, provisional_id=None):
+#: The precheck's reason for a paraphrase that is empty, equal to its
+#: original or to a text already written: no check call, and the unit is
+#: dropped as a repeat (``dropped_dedup``).
+_REPEAT = "repeat: empty, unchanged or already written"
+
+
+def _unit_gen(client, check, checker, template, original, *, seen=frozenset(),
+              provisional_id=None):
     """One unit: a paraphrase of ``original``, capped at its reply cap, then
     the gates and the check (:func:`~redact.llm_pipeline.checked`, one
-    attempt). Without ``check`` the reply is accepted and no gate runs. The
-    check sees the paraphrase stripped, as the gates do."""
+    attempt). A paraphrase that is empty, unchanged or in ``seen`` (the texts
+    already written) gets :data:`_REPEAT` and no check call. Without
+    ``check`` the reply is accepted and nothing is prechecked. The check sees
+    the paraphrase stripped, as the gates do."""
+
+    def precheck(text: str) -> str:
+        stripped = text.strip()
+        if not stripped or stripped == original.strip() or stripped in seen:
+            return _REPEAT
+        return gate_reason(original, text)
+
     return checked(
         client, lambda feedback: template(sample=original.strip()),
         check,
         (lambda o, text: checker(o, text.strip())) if check is not None else None,
         original=original,
         max_tokens=(reply_cap(original, client.backend.default_max_tokens), None),
-        precheck=lambda text: gate_reason(original, text),
+        precheck=precheck,
         temperatures=(None, CHECK_TEMPERATURE),
         internals_ids=(provisional_id, None),
         max_attempts=1,
@@ -652,13 +668,15 @@ def run_paraphrase_target(
 
     def _save(index, value):
         """A finished unit's row and ack. A paraphrase that is empty, equal to
-        its original or to a text already written is dropped; which of two
-        equal texts is kept follows the order the units finish in."""
+        its original or to a text already written is dropped, whether the
+        precheck found it (no check call) or it became a repeat while its
+        check ran; which of two equal texts is kept follows the order the
+        units finish in."""
         unit, prov_id, unit_client = live.pop(index)
         bid, iteration, m, otext, cat, et, iid, label = unit
         text, acc, reason = value
         pt = str(text).strip()
-        if not pt or pt == otext.strip() or pt in seen_texts:
+        if reason == _REPEAT or not pt or pt == otext.strip() or pt in seen_texts:
             buf.add([], {**_keyed(bid, iteration, iid),
                          "paraphrase_model": m, "status": "dropped_dedup"})
             return
@@ -703,7 +721,7 @@ def run_paraphrase_target(
             prov_id = f"{unit[0]}/paraphrase/attempt_{unit[1]}" if capture else None
             live[index] = (unit, prov_id, client)
             yield index, _unit_gen(client, check, checker, template, unit[3],
-                                   provisional_id=prov_id)
+                                   seen=seen_texts, provisional_id=prov_id)
 
     with CommitBuffer(append=_append, ledger=ledger) as buf:
         for group_i, model in enumerate(groups):
