@@ -283,6 +283,18 @@ def fake_vllm_modules(engine_cls, SamplingParams=lambda **kw: kw) -> dict[str, o
     }
 
 
+def pinned_pool(monkeypatch, *names: str) -> None:
+    """Make the ``paraphraser`` role, as the paraphrase stage and the recipe
+    read it, give exactly ``names``, whatever roles the registry lists: a
+    test of a pool of two does not move when a paraphraser is registered."""
+    import redact.content_moderation.paraphrase as CP
+
+    original = CP.get_models_by_role
+    monkeypatch.setattr(CP, "get_models_by_role", lambda role: (
+        [get_model_config(n) for n in names] if role == "paraphraser"
+        else original(role)))
+
+
 def interrupt_next_run(monkeypatch, when) -> None:
     """Make the next ``aio.run()`` raise ``KeyboardInterrupt`` from its wait.
 

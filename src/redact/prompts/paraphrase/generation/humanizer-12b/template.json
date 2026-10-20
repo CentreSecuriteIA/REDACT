@@ -1,0 +1,16 @@
+{
+  "system_prompt": "Rewrite the text below so it reads like a person wrote it, not a language model.\n\nReorganize it as you see fit. Vary sentence length on purpose. Cut hedging,\nthroat-clearing, and any sentence that only announces what comes next.\nPrefer the concrete word over the abstract one. It is fine to sound uneven.\n\nEvery fact, number, unit, date, name and quotation must survive unchanged.",
+  "template": "{sample}\n\n### Rewritten:\n\n",
+  "seed_fields": [
+    "sample"
+  ],
+  "few_shot_examples": [],
+  "fingerprint": {
+    "sample": "X",
+    "sha256_16": "cc51d66b4c593fbe"
+  },
+  "metadata": {
+    "version": "1.0",
+    "notes": "The model card's prompt format for humanizer-12b (jialinyyzz/humanizer, prompt_format.json): instr + \"\\n\\n\" + draft.strip() + \"\\n\\n### Rewritten:\\n\\n\", after <bos>. system_prompt is the card's instruction byte for byte. The entry's supports_system_prompt false folds it into the user message with a blank line, which supplies the \"\\n\\n\" between the instruction and the draft; the paraphrase stage strips the draft; the entry's chat_template adds <bos> and refuses anything but one user message. The fingerprint key is checked at the paraphrase stage's start (check_paraphrase_prompt): the folded prompt for the sample X must hash (SHA-256, first 16 hex characters) to cc51d66b4c593fbe, the card's self-check. The model keys on the separator more than on the instruction's wording; remove the key to run another wording, unchecked."
+  }
+}

@@ -1620,6 +1620,7 @@ class TestRegistryFootprints:
         ("venice-paraphraser", None),
         ("translategemma-27b", None),
         ("llama-3.2-3b-debug", None),
+        ("humanizer-12b", None),
     ])
     def test_every_local_model_declares_a_footprint(self, model, backend_type):
         fp = residency.footprint(model, backend_type)
@@ -1636,6 +1637,19 @@ class TestRegistryFootprints:
     def test_the_bf16_and_fp8_24b_are_two_loads(self):
         assert (residency.footprint("venice-uncensored", "vllm").engine
                 != residency.footprint("venice-uncensored-fp8").engine)
+
+    def test_the_humanizer_is_sized_as_the_plan_computed(self):
+        """22.8 GiB declared, KV of 48 layers x 8 heads x 256 at 8192
+        tokens in bf16 (3.0 GiB), 29.0 GiB padded: the plan's section 4.4."""
+        text = SimpleNamespace(
+            num_hidden_layers=48, num_attention_heads=16, num_key_value_heads=8,
+            head_dim=256, hidden_size=3840, intermediate_size=15360,
+            vocab_size=262144, max_position_embeddings=262144,
+            torch_dtype="bfloat16")
+        with _config(SimpleNamespace(text_config=text, torch_dtype="bfloat16")):
+            fp = residency.footprint("humanizer-12b")
+        assert (fp.parts["weights_gib"], fp.parts["kv_gib"], fp.gb) == (
+            22.8, 3.0, 29.0)
 
     def test_the_translator_is_sized_from_its_packaged_config(self):
         """28.4 GiB declared, KV at its 4096 tokens, read from the shipped

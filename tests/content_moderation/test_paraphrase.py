@@ -1,6 +1,8 @@
 """Tests for paraphrase_batch, the paraphrase prompts and the check's gates."""
 
+import hashlib
 import json
+import logging
 
 import pytest
 
@@ -8,6 +10,7 @@ import redact.content_moderation.paraphrase as CP
 from redact.content_moderation.paraphrase import (
     GATES,
     artifact_gate,
+    check_paraphrase_prompt,
     gate_reason,
     language_gate,
     length_gate,
@@ -68,6 +71,121 @@ class TestParaphrasePrompt:
         assert paraphrase_prompt("mock-model", tmp_path).system_prompt == "OWN"
         assert paraphrase_prompt("venice-paraphraser", tmp_path).system_prompt == (
             "GENERIC")
+
+
+_SEP = "\n\n### Rewritten:\n\n"
+
+
+def _card_instruction() -> str:
+    from redact.llms.prompting import load_prompt
+
+    return load_prompt("paraphrase", "generation/humanizer-12b")["system_prompt"]
+
+
+def _folded(draft: str) -> str:
+    """The humanizer's user message for ``draft``, as the stage builds it."""
+    backend = MockBackend("p")
+    paraphrase_batch(make_client(backend, "humanizer-12b"), [draft])
+    (message,) = backend.calls[0]["messages"]
+    assert message["role"] == "user" and "system_prompt" not in backend.calls[0]
+    return message["content"]
+
+
+def _render_chat_template(messages: list[dict]) -> str:
+    """The entry's chat_template, rendered as transformers renders one."""
+    jinja2 = pytest.importorskip("jinja2")
+    from jinja2.sandbox import ImmutableSandboxedEnvironment
+
+    from redact.llms.model_config import get_model_config
+
+    def raise_exception(message):
+        raise jinja2.exceptions.TemplateError(message)
+
+    env = ImmutableSandboxedEnvironment(trim_blocks=True, lstrip_blocks=True)
+    env.globals["raise_exception"] = raise_exception
+    template = env.from_string(get_model_config("humanizer-12b").vllm.chat_template)
+    return template.render(messages=messages, bos_token="<bos>",
+                           add_generation_prompt=True)
+
+
+class TestHumanizerPrompt:
+    """The packaged prompt renders the model card's string, byte for byte."""
+
+    def test_the_prompt_for_x_hashes_to_the_cards_fingerprint(self):
+        assert hashlib.sha256(_folded("X").encode()).hexdigest()[:16] == (
+            "cc51d66b4c593fbe")
+
+    def test_the_draft_is_stripped_between_the_instruction_and_the_separator(self):
+        assert _folded("  some draft \n") == (
+            _card_instruction() + "\n\n" + "some draft" + _SEP)
+
+    def test_a_generic_override_does_not_reach_it(self, tmp_path):
+        folder = tmp_path / "paraphrase" / "generation"
+        folder.mkdir(parents=True)
+        (folder / "template.json").write_text(
+            json.dumps({"system_prompt": "GENERIC", "template": "{sample}"}),
+            encoding="utf-8")
+        template = paraphrase_prompt("humanizer-12b", tmp_path)
+        assert (template.name, template.is_override) == (
+            "paraphrase/generation/humanizer-12b", False)
+
+    def test_the_check_passes_the_packaged_prompt(self):
+        check_paraphrase_prompt("humanizer-12b")
+
+    def test_the_check_stops_an_override_with_another_separator(self, tmp_path):
+        from redact.llms.prompting import load_prompt
+
+        broken = load_prompt("paraphrase", "generation/humanizer-12b")
+        broken["template"] = "{sample}\n\nRewritten:\n\n"
+        folder = tmp_path / "paraphrase" / "generation" / "humanizer-12b"
+        folder.mkdir(parents=True)
+        (folder / "template.json").write_text(json.dumps(broken), encoding="utf-8")
+        with pytest.raises(ValueError, match="cc51d66b4c593fbe") as raised:
+            check_paraphrase_prompt("humanizer-12b", tmp_path)
+        assert "override" in str(raised.value)
+        assert str(folder / "template.json") in str(raised.value)
+
+    def test_an_override_without_the_key_is_unchecked_with_a_warning(
+            self, tmp_path, caplog):
+        folder = tmp_path / "paraphrase" / "generation" / "humanizer-12b"
+        folder.mkdir(parents=True)
+        (folder / "template.json").write_text(
+            json.dumps({"system_prompt": "Reword this.", "template": "{sample}"}),
+            encoding="utf-8")
+        with caplog.at_level(logging.WARNING):
+            check_paraphrase_prompt("humanizer-12b", tmp_path)
+        (warning,) = [r for r in caplog.records if r.levelno == logging.WARNING]
+        assert "format is not checked" in warning.getMessage()
+
+    def test_a_prompt_without_the_key_or_a_model_not_registered_is_not_checked(
+            self, caplog):
+        with caplog.at_level(logging.WARNING):
+            check_paraphrase_prompt("venice-paraphraser")
+            check_paraphrase_prompt("no-such-model")
+        assert not [r for r in caplog.records if r.levelno >= logging.WARNING]
+
+    def test_an_empty_scaffold_of_it_fails_the_check(self, tmp_path):
+        """--empty keeps the key and replaces the text with a TODO."""
+        from redact.llms.prompting import scaffold_prompt_tree
+
+        scaffold_prompt_tree(tmp_path, mode="empty")
+        with pytest.raises(ValueError, match="does not render"):
+            check_paraphrase_prompt("humanizer-12b", tmp_path)
+
+    def test_the_chat_template_gives_bos_and_the_folded_prompt(self):
+        content = _folded("A short draft to rewrite, of a dozen words or so here.")
+        assert _render_chat_template([{"role": "user", "content": content}]) == (
+            "<bos>" + content)
+
+    @pytest.mark.parametrize("messages", [
+        [{"role": "user", "content": "a"}, {"role": "user", "content": "b"}],
+        [{"role": "system", "content": "s"}, {"role": "user", "content": "a"}],
+        [{"role": "system", "content": "s"}],
+    ])
+    def test_the_chat_template_refuses_anything_but_one_user_message(self, messages):
+        jinja2 = pytest.importorskip("jinja2")
+        with pytest.raises(jinja2.exceptions.TemplateError, match="one user message"):
+            _render_chat_template(messages)
 
 
 def _words(n: int) -> str:

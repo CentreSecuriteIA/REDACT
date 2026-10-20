@@ -29,8 +29,8 @@ that holds `pyproject.toml` or `.git`, else the current directory), and its valu
 shell's. The keys the shipped models read are `VENICE_API_KEY`,
 `ANTHROPIC_API_KEY` and `OPENROUTER_API_KEY`. Local weights download to the
 HuggingFace cache (`HF_HOME`); `scripts/download_models.py` fetches every
-local checkpoint of the registry, whole (tokenizer files included), ahead of
-a run.
+local checkpoint of the registry, whole (tokenizer files included, GGUF files
+left out), at the revision an entry pins, ahead of a run.
 
 ## Run a recipe
 

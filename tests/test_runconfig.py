@@ -2114,7 +2114,7 @@ def test_a_paraphraser_pool_plans_every_model_in_it(local_models):
 
     extra = local_models("_rc_paraphraser", roles=["paraphraser"])
     wanted = _stage_models(_models(paraphraser="distribution"), ["paraphrase"], {})
-    assert wanted == ["venice-paraphraser", extra, "venice-uncensored"]
+    assert wanted == ["venice-paraphraser", "humanizer-12b", extra, "venice-uncensored"]
 
 
 def _one_card(gib):
@@ -2569,6 +2569,7 @@ def test_served_lists_a_pool_and_names_no_model_for_a_role_no_stage_calls(
         "paraphraser": [
             # No plan: the recipe's count, or none for one left to the plan.
             {"name": "venice-paraphraser", "backend_type": "vllm", "copies": None},
+            {"name": "humanizer-12b", "backend_type": "vllm", "copies": None},
             {"name": extra, "backend_type": "vllm", "copies": 2}],
         "paraphrase_check": {
             "name": "venice-uncensored", "backend_type": "api", "workers": 3},

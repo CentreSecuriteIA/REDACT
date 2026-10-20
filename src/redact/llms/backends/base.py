@@ -145,6 +145,24 @@ def fold_system_into_first_message(messages: list[dict]) -> list[dict]:
     return [*rest[:target], folded, *rest[target + 1:]]
 
 
+def apply_system_prompt_policy(
+    messages: list[dict], supports_system_prompt: bool,
+) -> tuple[str | None, list[dict]]:
+    """A model's system-prompt policy on one chat.
+
+    Returns:
+        ``(system_prompt, messages)``. For a model with a system role the
+        system-role messages are split out (:func:`extract_system_prompt`;
+        an empty prompt counts as none); for one without, they are folded
+        into the first user message (:func:`fold_system_into_first_message`)
+        and the prompt is ``None``.
+    """
+    if supports_system_prompt:
+        prompt, messages = extract_system_prompt(messages)
+        return prompt or None, messages
+    return None, fold_system_into_first_message(messages)
+
+
 def free_memory() -> None:
     """Collect garbage, then empty torch's CUDA cache. Never raises.
 
@@ -266,12 +284,9 @@ class LLMBackend(ABC):
         prompts: list[str | None] = []
         resolved: list[list[dict]] = []
         for messages in messages_list:
-            if self.supports_system_prompt:
-                prompt, messages = extract_system_prompt(messages)
-            else:
-                prompt, messages = None, fold_system_into_first_message(messages)
-            # An empty system prompt counts as none.
-            prompts.append(prompt or None)
+            prompt, messages = apply_system_prompt_policy(
+                messages, self.supports_system_prompt)
+            prompts.append(prompt)
             resolved.append(messages)
         return prompts, resolved
 

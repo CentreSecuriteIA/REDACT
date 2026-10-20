@@ -10,6 +10,7 @@ from .anthropic import AnthropicBackend
 from .base import (
     ComputeConfig,
     LLMBackend,
+    apply_system_prompt_policy,
     extract_system_prompt,
     fold_system_into_first_message,
 )
@@ -41,6 +42,7 @@ __all__ = [
     "backend_for",
     "clear_transport_caches",
     "compute_config_for",
+    "apply_system_prompt_policy",
     "extract_system_prompt",
     "fold_system_into_first_message",
     "resolve_setup",

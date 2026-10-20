@@ -20,6 +20,7 @@ from tests.conftest import (
     kill_after_rows,
     lock_is_free,
     make_client,
+    pinned_pool,
     write_inputs,
 )
 
@@ -120,6 +121,24 @@ def test_a_paraphrase_equal_to_its_padded_original_stripped_is_dropped(
               out.with_name("paraphrased.state.jsonl").read_text().splitlines()
               if "status" in line]
     assert ack["status"] == "dropped_dedup"
+
+
+def test_a_broken_humanizer_prompt_stops_the_stage_before_any_client(
+        tmp_path, patched):
+    from redact.llms.prompting import load_prompt
+
+    _seed_inputs(tmp_path)
+    broken = load_prompt("paraphrase", "generation/humanizer-12b")
+    broken["system_prompt"] += " Keep it short."
+    folder = tmp_path / "prompts" / "paraphrase" / "generation" / "humanizer-12b"
+    folder.mkdir(parents=True)
+    (folder / "template.json").write_text(json.dumps(broken), encoding="utf-8")
+    patched.setattr(CP.ModelClient, "create",
+                    lambda *a, **k: pytest.fail("a client was created"))
+    with pytest.raises(ValueError, match="does not render"):
+        generate_paraphrases(data_dir=tmp_path, paraphraser="humanizer-12b",
+                             prompt_dir=tmp_path / "prompts", verbose=False)
+    assert not paths.paraphrases_inputs_csv(tmp_path).exists()
 
 
 def test_paraphrase_resume_is_idempotent(tmp_path, patched):
@@ -333,6 +352,7 @@ def test_previous_paraphraser_is_unreferenced_before_unload(tmp_path, patched):
 
     register_model("_para_second", backend_type="vllm", roles=["paraphraser"],
                    vllm=VLLMConfig(hf_model_id="org/second"))
+    pinned_pool(patched, "venice-paraphraser", "_para_second")
     created: list = []     # (model, weak reference to its client)
 
     def create(model):
@@ -391,6 +411,7 @@ def test_co_fitting_paraphrasers_load_with_planned_grants(tmp_path, patched):
 
     register_model("_para_small", backend_type="vllm", roles=["paraphraser"],
                    vllm=VLLMConfig(hf_model_id="org/small", vram_gb=4.3))
+    pinned_pool(patched, "venice-paraphraser", "_para_small")
     patched.setattr(estimate, "estimate_kv_gib", lambda *a, **k: 0.0)
     patched.setattr("redact.llms.resources.measure.detect_gpus",
                     lambda visible=False: ("FakeGPU", 1))
@@ -429,6 +450,7 @@ def test_the_pool_is_planned_with_one_copy_of_each_paraphraser(tmp_path, patched
 
     register_model("_para_small", backend_type="vllm", roles=["paraphraser"],
                    vllm=VLLMConfig(hf_model_id="org/small", vram_gb=4.3))
+    pinned_pool(patched, "venice-paraphraser", "_para_small")
     patched.setattr(estimate, "estimate_kv_gib", lambda *a, **k: 0.0)
     patched.setattr("redact.llms.resources.measure.detect_gpus",
                     lambda visible=False: ("FakeGPU", cards))
@@ -499,6 +521,7 @@ def test_an_unload_between_paraphrasers_shuts_down_only_their_engine(
 
     register_model("_para_second", backend_type="vllm", roles=["paraphraser"],
                    vllm=VLLMConfig(hf_model_id="org/second"))
+    pinned_pool(monkeypatch, "venice-paraphraser", "_para_second")
     register_model("_para_check", backend_type="vllm",
                    vllm=VLLMConfig(hf_model_id="org/check"))
     pool = {"dphn/Dolphin-Mistral-24B-Venice-Edition", "org/second"}

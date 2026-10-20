@@ -47,6 +47,24 @@ stripped before it is rendered.
 | `paraphraser` | `paraphraser` | `venice-paraphraser` (local vLLM) |
 | `paraphrase_check` | `uncensored_gen` | `venice-uncensored` (hosted) |
 
+Two models have the `paraphraser` role: `venice-paraphraser`, the default,
+and `humanizer-12b`, a self-hosted Gemma 4 12B fine-tuned to rewrite model
+drafts as human text (name it, or use `"distribution"`). The humanizer is a
+text-completion model: its prompt, `prompts/paraphrase/generation/humanizer-12b/`,
+is the model card's format, the card's instruction, a blank line, the
+stripped draft, then `\n\n### Rewritten:\n\n`, after `<bos>`. The entry
+folds the instruction into the user message (`supports_system_prompt`
+false) and its `chat_template` adds `<bos>` and refuses anything but one
+user message.
+
+A paraphrase prompt with a `fingerprint` key (`{"sample": ..., "sha256_16":
+...}`) is checked at the stage's start, before any client is built: the
+prompt rendered for the sample, under the model's system-prompt policy, must
+hash to the key (`check_paraphrase_prompt`). A mismatch raises, naming the
+file and both hashes. An override without the key is not checked, and a
+WARNING says so when the packaged prompt it replaces has one; remove the key
+to run another wording.
+
 `paraphraser` may name one model, or `"distribution"` for every model with
 the `paraphraser` role. With several, each unit goes to one of them, picked
 from a hash of `(seed, id, iteration)`, the id being the unit's: `input_id`

@@ -39,6 +39,7 @@ from redact.content_moderation.paraphrase import (
     DEFAULT_TARGET as DEFAULT_PARAPHRASE_TARGET,
 )
 from redact.content_moderation.paraphrase import (
+    check_paraphrase_prompt,
     paraphrase_pool,
     run_paraphrase_target,
 )
@@ -912,6 +913,9 @@ def generate_paraphrases(
         ``{"inputs": df, "outputs": df}`` for ``"both"``.
     """
     pool = paraphrase_pool(paraphraser)
+    # Before any client: a paraphraser whose prompt breaks its format stops here.
+    for model in pool:
+        check_paraphrase_prompt(model, prompt_dir)
     if paraphrases_per_sample > 1 and len(pool) == 1:
         warnings.warn(
             f"paraphrases_per_sample={paraphrases_per_sample} with a single paraphraser "

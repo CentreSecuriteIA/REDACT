@@ -952,6 +952,36 @@ class TestVLLMChatTemplate:
                                templated.engine_kwargs))
 
 
+class TestHumanizerEntry:
+    """The humanizer 12B: a text-completion paraphraser with its own template."""
+
+    def test_the_entry_is_as_the_card_serves_the_model(self):
+        cfg = get_model_config("humanizer-12b")
+        assert cfg.roles == ["paraphraser"] and cfg.backend_type == "vllm"
+        assert cfg.supports_system_prompt is False and cfg.is_uncensored is False
+        assert (cfg.default_max_tokens, cfg.default_temperature) == (2048, 1.0)
+        assert cfg.vllm.hf_model_id == "jialinyyzz/humanizer"
+        assert cfg.vllm.sampling == {"top_p": 0.95, "top_k": 0, "min_p": 0.0}
+        assert cfg.vllm.vram_gb == 22.8   # noqa: PLR2004 - measured, the plan's figure
+        kwargs = cfg.vllm.vllm_kwargs
+        assert kwargs["max_model_len"] == 8192   # noqa: PLR2004 - the card's context
+        assert kwargs["limit_mm_per_prompt"] == {"image": 0, "audio": 0, "video": 0}
+
+    def test_the_revision_is_pinned_for_the_weights_and_the_tokenizer(self):
+        import re
+
+        kwargs = get_model_config("humanizer-12b").vllm.vllm_kwargs
+        assert kwargs["revision"] == kwargs["tokenizer_revision"]
+        assert re.fullmatch(r"[0-9a-f]{40}", kwargs["revision"])
+
+    def test_its_chat_template_passes_one_user_message_through_after_bos(self):
+        assert get_model_config("humanizer-12b").vllm.chat_template == (
+            "{% if messages | length != 1 or messages[0]['role'] != 'user' %}"
+            "{{ raise_exception('humanizer-12b takes exactly one user message: the "
+            "paraphrase prompt folded into it') }}{% endif %}"
+            "{{ bos_token }}{{ messages[0]['content'] }}")
+
+
 def _packaged_hf_configs() -> list:
     from redact import paths
 

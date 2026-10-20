@@ -37,9 +37,14 @@ from ..dataset import (
     row_ids,
 )
 from ..llm_pipeline import CHECK_TEMPERATURE, batch_check_samples
+from ..llms.backends import apply_system_prompt_policy
 from ..llms.client import ModelClient
-from ..llms.model_config import default_model_for_role, get_models_by_role
-from ..llms.prompting import PromptTemplate
+from ..llms.model_config import (
+    MODEL_REGISTRY,
+    default_model_for_role,
+    get_models_by_role,
+)
+from ..llms.prompting import PromptTemplate, load_prompt
 from ..llms.router import batch_generate_samples
 from .checker import build_paraphrase_checker
 
@@ -229,6 +234,68 @@ def paraphrase_prompt(
                                    prompt_dir=prompt_dir)
     except FileNotFoundError:
         return PromptTemplate.load("paraphrase", "generation", prompt_dir=prompt_dir)
+
+
+def check_paraphrase_prompt(model: str, prompt_dir: str | Path | None = None) -> None:
+    """Check, before any call, that ``model``'s paraphrase prompt renders the
+    format its ``fingerprint`` key pins.
+
+    A prompt file may hold ``"fingerprint": {"sample": ..., "sha256_16":
+    ...}``: the prompt rendered for ``sample``, under the model's
+    system-prompt policy, has a last user message whose SHA-256 begins with
+    ``sha256_16`` (16 hex characters). A model that formats its own prompt
+    (the humanizer, a text-completion model) gives junk on any other format,
+    so a broken override stops the stage here, as ``check_mt_prompt`` stops
+    the jailbreak stage. A file without the key is not checked; when it is
+    an override of a packaged prompt that has one, a WARNING says its format
+    is not checked. An unregistered ``model`` is left to
+    ``ModelClient.create``, which names it.
+
+    Raises:
+        ValueError: The key is malformed, a model without a system role gets
+            more than one user message, or the hash differs. The message
+            names the file, its origin and both hashes.
+    """
+    config = MODEL_REGISTRY.get(model)
+    if config is None:
+        return
+    template = paraphrase_prompt(model, prompt_dir)
+    where = f"{template.source} ({'override' if template.is_override else 'packaged'})"
+    pipeline, category = template.name.split("/", 1)
+    key = load_prompt(pipeline, category, prompt_dir).get("fingerprint")
+    if key is None:
+        if template.is_override:
+            try:
+                packaged = load_prompt("paraphrase", f"generation/{model}")
+            except FileNotFoundError:
+                packaged = {}
+            if "fingerprint" in packaged:
+                logger.warning(
+                    "paraphrase: %s, the paraphrase prompt of %s, has no fingerprint "
+                    "key, so its format is not checked.", where, model)
+        return
+    if not (isinstance(key, dict) and isinstance(key.get("sample"), str)
+            and isinstance(key.get("sha256_16"), str)):
+        raise ValueError(
+            f"The fingerprint of {where} must be "
+            f'{{"sample": "<text>", "sha256_16": "<16 hex>"}}, got {key!r}.')
+    _system, chat = apply_system_prompt_policy(
+        template(sample=key["sample"]), config.supports_system_prompt)
+    if not config.supports_system_prompt and [m.get("role") for m in chat] != ["user"]:
+        raise ValueError(
+            f"{where} renders {len(chat)} messages for {model}, which takes "
+            "exactly one user message (it has no system role); its few-shot "
+            "examples or roles do not fit the model's format.")
+    users = [m["content"] for m in chat if m.get("role") == "user"]
+    content = users[-1] if users else ""
+    found = hashlib.sha256(content.encode("utf-8")).hexdigest()[:16]
+    if found != key["sha256_16"]:
+        raise ValueError(
+            f"The paraphrase prompt of {model}, {where}, does not render the "
+            f"format its fingerprint pins: for the sample {key['sample']!r} its "
+            f"prompt hashes to {found}, not {key['sha256_16']}. Restore the "
+            "file, or remove its fingerprint key to run another wording "
+            "unchecked.")
 
 
 def paraphrase_batch(

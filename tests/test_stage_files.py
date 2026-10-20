@@ -19,7 +19,7 @@ from types import SimpleNamespace
 import pandas as pd
 import pytest
 
-from tests.conftest import MockBackend, make_client
+from tests.conftest import MockBackend, make_client, pinned_pool
 
 _FIXTURE = Path(__file__).parent / "fixtures" / "stage_files.json"
 
@@ -175,6 +175,8 @@ def _paraphrases(folder, monkeypatch) -> dict:
     monkeypatch.setattr(
         CP.ModelClient, "create", lambda m: make_client(MockBackend(), m))
     monkeypatch.setattr(CP, "MIN_WORDS", 0)     # the texts are two words long
+    # The pool the fixture pins, whatever other paraphrasers are registered.
+    pinned_pool(monkeypatch, "venice-paraphraser", "_para_second")
     # A text with "delta" is rejected by the check.
     monkeypatch.setattr(
         CP, "batch_check_samples",
