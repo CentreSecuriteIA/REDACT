@@ -110,11 +110,15 @@ generator: one paraphrase request, the gates, then, for a paraphrase no gate
 rejected, one check request. The paraphrase and check requests of different
 units overlap, on the async lane for an OpenAI-compatible or vLLM model.
 Each paraphrase request has its own reply cap, `reply_cap(text, ceiling)`:
-2.5 times the original's tokens (3 characters a token) plus 32, at least 64,
-at most the paraphraser's `default_max_tokens`; a reply cut at it fails the
-length gate. The check request keeps the check model's default. A finished
-unit is saved without waiting for the others, every 32 units and on any
-exit. When the paraphrasers cannot be resident together on the GPUs, the
+2.5 times the original's tokens (3 characters a token) plus 32, rounded up to
+a power of two from 64 (so a grouped call meets few distinct caps), at most
+the paraphraser's `default_max_tokens`. With the check on, a reply cut at its
+cap usually fails the length gate. Not always: the gate counts characters, so
+a cut reply in a script of few characters a token (Chinese, Japanese) can
+pass it; and with `check: false` no gate runs. The check request keeps the
+check model's default. A finished unit is saved without waiting for the
+others: every 32 units, after each paraphraser's last unit (before the next
+paraphraser is loaded), and on any exit. When the paraphrasers cannot be resident together on the GPUs, the
 stage unloads each one before the next, and keeps the check model and the
 engines other stages hold.
 

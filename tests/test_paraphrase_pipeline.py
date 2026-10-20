@@ -928,6 +928,78 @@ def test_each_paraphrase_request_carries_its_own_reply_cap(tmp_path, patched):
         (None, CHECK_TEMPERATURE)}
 
 
+@pytest.mark.parametrize("paraphraser, ceiling", [
+    ("venice-paraphraser", 2000), ("humanizer-12b", 2048)])
+def test_a_long_text_is_capped_at_the_paraphrasers_default_max_tokens(
+        tmp_path, patched, paraphraser, ceiling):
+    from redact.llms.model_config import get_model_config
+
+    text = " ".join(["a long input text"] * 600)       # over 10,000 characters
+    assert len(text) > 10_000     # noqa: PLR2004
+    write_inputs(paths.constitution_inputs_dir(tmp_path), [text])
+    requests = _serve(patched)
+    generate_paraphrases(data_dir=tmp_path, paraphraser=paraphraser, verbose=False)
+    (asked,) = [r for r in requests if r["kind"] == "paraphrase"]
+    assert asked["max_tokens"] == ceiling == get_model_config(
+        paraphraser).default_max_tokens
+
+
+def test_a_check_prompt_too_long_on_the_async_lane_acks_its_unit(
+        tmp_path, patched):
+    from redact.exceptions import PromptTooLongError
+    from redact.llms.backends import ComputeConfig
+
+    class Lane(ParaphraseBackend):
+        """On the async lane; the check of a beta paraphrase is too long."""
+
+        compute_config = ComputeConfig(supports_async_calls=True)
+
+        async def agenerate(self, messages, *, max_tokens=None, temperature=None,
+                            internals_id=None, **kwargs):
+            content = messages[-1]["content"]
+            if content.startswith("ORIGINAL:\n") and "beta" in content:
+                raise PromptTooLongError("the check of beta is over the context")
+            return self._answer(messages, max_tokens, temperature)
+
+    patched.setattr(CP.ModelClient, "create", lambda m, **kw: make_client(Lane(), m))
+    _seed_inputs(tmp_path)
+    df = generate_paraphrases(data_dir=tmp_path, verbose=False)["inputs"]
+    assert list(df["sample"]) == ["PARA::alpha prompt"]
+    assert {ack["input_id"]: ack["status"] for ack in _acks(tmp_path)} == {
+        content_id("alpha prompt"): "accepted",
+        content_id("beta prompt"): "prompt_too_long"}
+
+
+def test_each_paraphrasers_units_are_saved_before_the_next_is_loaded(
+        tmp_path, patched):
+    from types import SimpleNamespace
+
+    from redact import residency
+    from redact.dataset import Manifest
+    from redact.llms.model_config import MODEL_REGISTRY, VLLMConfig, register_model
+
+    register_model("_para_second", backend_type="vllm", roles=["paraphraser"],
+                   vllm=VLLMConfig(hf_model_id="org/second"))
+    pinned_pool(patched, "venice-paraphraser", "_para_second")
+    saved_at_unload = []
+    patched.setattr(residency, "plan_residency",
+                    lambda models, copies=None: SimpleNamespace(sequential=True))
+    patched.setattr(residency, "apply_plan", lambda plan, replace=True: None)
+    patched.setattr(residency, "unload_local", lambda keep=None, engines=None: (
+        saved_at_unload.append([ack["paraphrase_model"] for ack in _acks(tmp_path)])))
+    _seed_inputs(tmp_path)
+    try:
+        generate_paraphrases(data_dir=tmp_path, paraphraser="distribution",
+                             paraphrases_per_sample=2, verbose=False)
+    finally:
+        MODEL_REGISTRY.pop("_para_second", None)
+    planned = Manifest.sidecar(paths.paraphrases_inputs_csv(tmp_path)).load()
+    first = planned[0]["paraphrase_model"]
+    # At the one unload, every unit of the first paraphraser was acked on disk.
+    assert saved_at_unload == [
+        [first] * sum(r["paraphrase_model"] == first for r in planned)]
+
+
 def test_a_prompt_too_long_on_the_async_lane_acks_its_unit_and_the_others_finish(
         tmp_path, patched, caplog):
     import logging

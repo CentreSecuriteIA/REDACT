@@ -244,7 +244,9 @@ def paraphrase_prompt(
 #: text from running to the model's whole default (a 5-word fragment ran to
 #: its 256-token cap in the benign test). The same shape as the translation
 #: technique's reply_cap (jailbreak/obfuscation/translation.py), with other
-#: figures.
+#: figures. The cap is rounded up to a power of two (64, 128, ... 2048), so
+#: the requests of a grouped call (Anthropic, introspection), which share one
+#: reply limit, fall into few groups.
 REPLY_TOKENS_PER_INPUT_TOKEN = 2.5
 REPLY_FLOOR_TOKENS = 64
 REPLY_SLACK_TOKENS = 32
@@ -252,13 +254,21 @@ CHARS_PER_TOKEN = 3
 
 
 def reply_cap(text: str, ceiling: int) -> int:
-    """The reply cap of a paraphrase of ``text``, at most ``ceiling`` (the
-    paraphraser's ``default_max_tokens``). A reply cut at it fails the length
-    gate."""
+    """The reply cap of a paraphrase of ``text``: about 2.5 times its tokens,
+    rounded up to a power of two from 64, at most ``ceiling`` (the
+    paraphraser's ``default_max_tokens``).
+
+    With the check on, a reply cut at it usually fails the length gate. Not
+    always: the gate counts characters, so a cut reply in a script of few
+    characters a token (Chinese, Japanese) can pass it; and without the check
+    no gate runs."""
     tokens = math.ceil(len(text) / CHARS_PER_TOKEN)
-    return min(ceiling, max(REPLY_FLOOR_TOKENS,
-                            math.ceil(REPLY_TOKENS_PER_INPUT_TOKEN * tokens)
-                            + REPLY_SLACK_TOKENS))
+    need = max(REPLY_FLOOR_TOKENS,
+               math.ceil(REPLY_TOKENS_PER_INPUT_TOKEN * tokens) + REPLY_SLACK_TOKENS)
+    cap = REPLY_FLOOR_TOKENS
+    while cap < need:
+        cap *= 2
+    return min(ceiling, cap)
 
 
 def _unit_gen(client, check, checker, template, original, *, provisional_id=None):
@@ -715,6 +725,8 @@ def run_paraphrase_target(
                 cap=batch_size,
                 progress=f"paraphrase:{target} ({model})" if verbose else None,
             )
+            # Saved before the next paraphraser, and before an unload.
+            buf.flush()
 
     if verbose:
         logger.info("[paraphrase:%s] +%d rows (artifact now %d) -> %s",

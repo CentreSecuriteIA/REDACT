@@ -193,14 +193,24 @@ def _words(n: int) -> str:
 
 
 class TestReplyCap:
-    """About 2.5 times the original's tokens, plus slack, at least 64."""
+    """About 2.5 times the original's tokens, plus slack, rounded up to a
+    power of two from 64, at most the ceiling."""
 
     def test_a_short_text_gets_the_floor(self):
         assert (CP.reply_cap("x" * 6, 2048), CP.REPLY_FLOOR_TOKENS) == (64, 64)
 
-    def test_a_text_above_the_floor_gets_two_and_a_half_times_its_tokens(self):
-        # 60 characters, 20 tokens: 2.5 x 20 + 32.
-        assert [CP.reply_cap("x" * 60, 2048)] == [82]
+    def test_a_text_above_the_floor_gets_its_need_rounded_up(self):
+        # 60 characters, 20 tokens: 2.5 x 20 + 32 = 82, rounded up to 128.
+        assert [CP.reply_cap("x" * 60, 2048)] == [128]
+        # 600 characters, 200 tokens: 532, rounded up to 1024.
+        assert [CP.reply_cap("x" * 600, 2048)] == [1024]
+
+    def test_the_caps_are_few(self):
+        caps = {CP.reply_cap("x" * n, 2048) for n in range(0, 3000)}
+        assert caps == {64, 128, 256, 512, 1024, 2048}
+
+    def test_a_ceiling_under_the_power_of_two_wins(self):
+        assert [CP.reply_cap("x" * 10_000, 2000)] == [2000]
 
     def test_a_long_text_gets_the_ceiling(self):
         assert [CP.reply_cap("x" * 10_000, 2048)] == [2048]
