@@ -3,7 +3,7 @@
   "constitution": { "num_categories": 3, "num_taxonomy_categories": 1 },
   "inputs": { "style": "long", "samples_per_entry": 3, "batch_size": 32 },
   "outputs": { "check_outputs": true, "max_per_category": 20, "batch_size": 32 },
-  "paraphrase": { "paraphrases_per_sample": 1, "target": "both", "check": true },
+  "paraphrase": { "paraphrases_per_sample": 1, "target": "inputs", "check": true },
   "jailbreaks": { "batch_size": 256 },
   "build": { "include_paraphrases": true }
 }

@@ -52,6 +52,11 @@ logger = logging.getLogger(__name__)
 _RESPONSE_COLUMNS = ("response_id", "response_mode", "output_label", "response_label")
 _LABEL_COLUMNS = _RESPONSE_COLUMNS[1:]
 
+#: What a call or a recipe that names no ``target`` paraphrases: the inputs.
+#: The outputs target (``"outputs"``, or ``"both"`` with the inputs) is an
+#: opt-in.
+DEFAULT_TARGET = "inputs"
+
 
 # --- the check's gates -------------------------------------------------------
 #

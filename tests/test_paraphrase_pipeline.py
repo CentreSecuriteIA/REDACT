@@ -165,7 +165,8 @@ def test_the_callers_frames_are_left_as_they_were(tmp_path, patched):
     }, index=[9, 4])
     kept = inputs.copy(), outputs.copy()
     res = generate_paraphrases(
-        data_dir=tmp_path, inputs=inputs, outputs=outputs, verbose=False)
+        data_dir=tmp_path, inputs=inputs, outputs=outputs, target="both",
+        verbose=False)
     pd.testing.assert_frame_equal(inputs, kept[0])
     pd.testing.assert_frame_equal(outputs, kept[1])
     assert list(res["inputs"]["sample"]) == ["PARA::alpha prompt", "PARA::beta prompt"]
@@ -873,6 +874,77 @@ def test_without_a_source_row_the_glotlid_warning_is_not_given(
     with caplog.at_level(logging.WARNING):
         generate_paraphrases(data_dir=tmp_path, target="inputs", verbose=False)
     assert _glotlid_warnings(caplog) == []
+
+
+# --- the default target: the inputs ------------------------------------------
+
+def _seed_inputs_and_outputs(tmp_path):
+    _seed_inputs(tmp_path)
+    pd.DataFrame({
+        "input_id": ["id1"], "output_response": ["a real answer"], "accepted": [True],
+        "category": ["Cyber"], "entry_type": ["harmful"],
+    }).to_csv(paths.output_responses_csv(tmp_path), index=False)
+
+
+def test_by_default_only_the_inputs_are_paraphrased(tmp_path, patched):
+    _seed_inputs_and_outputs(tmp_path)
+    res = generate_paraphrases(data_dir=tmp_path, verbose=False)
+    assert list(res) == ["inputs"]
+    assert list(res["inputs"]["sample"]) == ["PARA::alpha prompt", "PARA::beta prompt"]
+    assert paths.paraphrases_inputs_csv(tmp_path).exists()
+    assert not paths.paraphrases_outputs_csv(tmp_path).exists()
+
+
+def test_both_targets_paraphrase_the_outputs_too(tmp_path, patched):
+    _seed_inputs_and_outputs(tmp_path)
+    res = generate_paraphrases(data_dir=tmp_path, target="both", verbose=False)
+    assert list(res) == ["inputs", "outputs"]
+    assert list(res["outputs"]["sample"]) == ["PARA::a real answer"]
+
+
+def _stale_warnings(caplog):
+    return [r for r in caplog.records if r.levelname == "WARNING"
+            and "paraphrases of responses from an earlier run" in r.getMessage()]
+
+
+def test_a_default_run_warns_of_paraphrases_of_outputs_an_earlier_run_left(
+        tmp_path, patched, caplog):
+    import logging
+
+    _seed_inputs_and_outputs(tmp_path)
+    with caplog.at_level(logging.WARNING):
+        generate_paraphrases(data_dir=tmp_path, verbose=False)
+    assert _stale_warnings(caplog) == []
+
+    generate_paraphrases(data_dir=tmp_path, target="outputs", verbose=False)
+    left = paths.paraphrases_outputs_csv(tmp_path).read_bytes()
+    caplog.clear()
+    with caplog.at_level(logging.WARNING):
+        generate_paraphrases(data_dir=tmp_path, verbose=False)
+    (warning,) = _stale_warnings(caplog)
+    assert "paraphrases_outputs.csv" in warning.getMessage()
+    assert 'run target "outputs" with resume: false' in warning.getMessage()
+    assert paths.paraphrases_outputs_csv(tmp_path).read_bytes() == left
+
+
+def test_a_recipe_without_a_target_reads_and_writes_the_inputs_alone(
+        tmp_path, patched):
+    from redact import run_pipeline
+    from redact.driver import read_record
+    from redact.telemetry import uninstall
+
+    _seed_inputs_and_outputs(tmp_path)
+    try:
+        summary = run_pipeline(
+            {"dataset_type": "training", "data_dir": str(tmp_path),
+             "stages": ["paraphrase"]}, params={}, verbose=False)
+    finally:
+        uninstall()
+    assert summary["stages"]["paraphrase"]["counts"] == {"rows": 2, "accepted": 2}
+    sources = read_record("paraphrase", tmp_path)["sources"]
+    assert [p for p in sources if "output_responses" in p] == []
+    assert sources and all("constitution_inputs" in p for p in sources)
+    assert not paths.paraphrases_outputs_csv(tmp_path).exists()
 
 
 def test_the_inputs_target_beside_an_old_outputs_folder_resumes_as_before(

@@ -212,7 +212,8 @@ def _paraphrases(folder, monkeypatch) -> dict:
         monkeypatch.setattr(CP, "paraphrase_batch", paraphrase)
         generate_paraphrases(
             inputs=inputs, outputs=outputs, paraphraser="distribution",
-            paraphrases_per_sample=2, batch_size=3, seed=9, verbose=False,
+            target="both", paraphrases_per_sample=2, batch_size=3, seed=9,
+            verbose=False,
             inputs_path=folder / "paraphrases_inputs.csv",
             outputs_path=folder / "paraphrases_outputs.csv")
 

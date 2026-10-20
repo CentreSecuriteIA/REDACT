@@ -5,10 +5,11 @@ Front `generate_paraphrases` (`stages.py`); core `run_paraphrase_target`
 
 ## Purpose
 
-Add reworded copies of the inputs and of the accepted outputs, to remove the
-generating model's fingerprint from the text. A separate model checks that
-each paraphrase keeps its original's meaning. Paraphrases are extra rows,
-never replacements.
+Add reworded copies of the inputs, to remove the generating model's
+fingerprint from the text; as an opt-in, of the accepted outputs too
+(`target: "outputs"` or `"both"`). A separate model checks that each
+paraphrase keeps its original's meaning. Paraphrases are extra rows, never
+replacements.
 
 The shipped paraphraser, `venice-paraphraser`, is a stand-in: it loads the
 same 24B weights as the local setup of `venice-uncensored`. The trained
@@ -22,7 +23,8 @@ defingerprinting model lives in another repository; register it with the
 | `inputs` | the accepted inputs of the run, or `inputs=` | `sample`, else `prompt` | `sample_id` |
 | `outputs` | the rows of `Datasets/output_responses.csv`, or of `outputs=`, whose `accepted` reads true (`dataset.accepted_mask`); a frame without the column is taken whole | `output_response`, else `sample` | `sample_id`, the response's own id, as `response_id`; `input_id`, the input answered, is kept |
 
-`target` is `inputs`, `outputs` or `both`. A target whose source has rows but
+`target` is `inputs` (the default), `outputs` or `both`: a call or a recipe
+that names none paraphrases the inputs alone. A target whose source has rows but
 none accepted, or that is given an empty frame, is skipped with a warning
 (`paraphrase (<target>) skipped: ...`). A target with no rows at all goes to
 `run_paraphrase_target`, which takes the lock, clears the target on a fresh
@@ -63,8 +65,8 @@ and the unit `(input_id, iteration)`, `input_id` the input's `sample_id`
 response, and the unit `(response_id, iteration)`, `response_id` the
 response's `sample_id` (else the content id of its text): an input may have
 several responses, each paraphrased on its own. The unit keeps `input_id`,
-the response's own `input_id`, the input it answers. With the outputs
-stage's `outputs_per_input` at k (2 in a training run), the outputs target
+the response's own `input_id`, the input it answers. When the outputs target runs, with the outputs
+stage's `outputs_per_input` at k (2 in a training run), it
 paraphrases each of an input's k responses: its units are
 `paraphrases_per_sample` per accepted response, k times those per input.
 
@@ -130,6 +132,13 @@ of their day; `resume: false` checks every paraphrase again.
 files, the ledger and the manifest of each target the run names, a skipped
 target too. The lock and the cut-back work as in
 [internals/dataset.md](../internals/dataset.md).
+
+A run that does not paraphrase the outputs leaves `paraphrases_outputs.csv`
+as an earlier run of that target wrote it, and the build still merges it.
+When the file holds rows, the front warns once (`paraphrase: <file> holds
+paraphrases of responses from an earlier run, and the build merges them;
+...`): delete the file, or run `target: "outputs"` with `resume: false` to
+replace them.
 
 A resume of the `outputs` target onto a folder written before its units were
 keyed on the response stops before any call: a ledger with an ack without

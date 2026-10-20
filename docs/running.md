@@ -432,7 +432,7 @@ Datasets/
   constitution_inputs_merged.csv         # the accepted inputs, for build
   output_responses.csv                   # + .manifest.jsonl, .state.jsonl, .coverage.csv, .plan.json
   paraphrases_inputs.csv                 # + .manifest.jsonl, .state.jsonl
-  paraphrases_outputs.csv                # + .manifest.jsonl, .state.jsonl
+  paraphrases_outputs.csv                # + .manifest.jsonl, .state.jsonl (target outputs or both)
   jailbreaks.csv                         # + .manifest.jsonl, .state.jsonl, .coverage.csv, .plan.json
   variations.csv                         # + .manifest.jsonl, .state.jsonl, .coverage.csv, .plan.json
   complete_dataset.csv                   # the build of a training run
@@ -558,6 +558,7 @@ rate. [internals/telemetry.md](internals/telemetry.md) lists the events.
 | `ValueError: Outputs: the inputs hold the entry type(s) [...], which outputs.modes does not map ...` | An input whose `entry_type` is none of the four; raised before anything is cleared | Fix the inputs' entry types |
 | WARNING `moved override: output/generation` (or `output/quality_check`) | A prompt overlay of the single output prompt or checker; the outputs stage reads one of each per answer mode | Move it to `output/generation/harmful/` (or `output/quality_check/harmful/`), and write `helpful/` if wanted |
 | A training run writes one response per input | Its recipe's `config_dir` holds a `dataset_types/training.json` scaffolded before `outputs.outputs_per_input` 2 | Add `"outputs": {"outputs_per_input": 2}` to that file's `params`, or delete the file |
+| WARNING `paraphrase: .../paraphrases_outputs.csv holds paraphrases of responses from an earlier run, and the build merges them ...` | The paraphrase stage ran on the inputs only (the default), and an earlier run of the outputs target left its file | Delete the file, or run the paraphrase stage with `target: "outputs"` and `"resume": false` to paraphrase the current responses |
 | `ValueError: .../paraphrases_outputs.state.jsonl acks units without a response_id ...` or `Cannot append to .../paraphrases_outputs.csv: its header has no column 'response_id' ...` | A resume of the outputs target onto paraphrases written when its units were keyed on the input answered | Run the paraphrase stage with `"resume": false` and `target: "outputs"` (the inputs' paraphrases stay), or in a new `data_dir` |
 | WARNING `Outputs: rows without a response_label, written before the answer modes, take their entry_type as their label in eval_outputs.csv.` | An eval build from an output or paraphrase file written before the answer modes | Run the outputs (and paraphrase) stage again with `"resume": false` for the compound labels |
 | `ValueError: variation: this run's ['pool'] differ from those the plan variations.manifest.jsonl was made with ...` | A natural plan made before the spec's `kinds` narrowed the natural pool to 46 techniques | Run the natural kind with `"resume": false` ([techniques.md](techniques.md#the-natural-pool)) |

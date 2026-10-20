@@ -174,7 +174,7 @@ names of the last two, are read for this release with a
 
 | Key | Default | Meaning |
 |---|---|---|
-| `target` | `"both"` | `inputs`, `outputs` or `both` |
+| `target` | `"inputs"` | `inputs`, `outputs` or `both`; the outputs are an opt-in |
 | `paraphrases_per_sample` | `1` | Paraphrase units per source row |
 | `check` | `true` | Gate each paraphrase and check it with the `paraphrase_check` model ([the check](stages/paraphrase.md#the-check)); `false` accepts every paraphrase |
 | `batch_size` | `256` | Units per paraphrase batch and per check batch |

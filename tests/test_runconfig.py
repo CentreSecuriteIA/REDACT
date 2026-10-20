@@ -634,7 +634,7 @@ def test_a_run_record_names_the_files_its_stage_read(tmp_path, monkeypatch):
                          paths.taxonomy_dir() / "benign.json"],
         "inputs": [paths.constitution_merged_csv(tmp_path)],
         "outputs": inputs,
-        "paraphrase": [*inputs, outputs],
+        "paraphrase": inputs,       # the default target
         "jailbreaks": inputs,
         "build": [*inputs, paths.jailbreaks_csv(tmp_path), outputs,
                   paths.paraphrases_outputs_csv(tmp_path)],
@@ -1839,8 +1839,9 @@ def test_a_training_run_reads_the_inputs_it_seeded(tmp_path, monkeypatch):
         telemetry.uninstall()
     rows = {stage: done["counts"]["rows"] for stage, done in summary["stages"].items()}
     # Three inputs: two responses each (the training type's outputs_per_input),
-    # a paraphrase of each input and response, a jailbreak and a variation each.
-    assert rows == {"outputs": 6, "paraphrase": 9, "jailbreaks": 6}
+    # a paraphrase of each input (the default target), a jailbreak and a
+    # variation each.
+    assert rows == {"outputs": 6, "paraphrase": 3, "jailbreaks": 6}
 
 
 def test_a_run_whose_inputs_were_all_rejected_warns_and_finishes(

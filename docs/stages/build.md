@@ -97,7 +97,7 @@ set of columns, whatever columns the stage files have:
 | File | Rows, in order | Read by |
 |---|---|---|
 | `eval_inputs.csv` | the accepted inputs, then the accepted paraphrases of inputs | content classifiers on the input side; jailbreak detectors, as the bare set they must stay silent on |
-| `eval_outputs.csv` | the accepted responses, then the accepted paraphrases of responses | content classifiers on the output side |
+| `eval_outputs.csv` | the accepted responses, then the accepted paraphrases of responses, when the paraphrase stage ran on the outputs | content classifiers on the output side |
 | `eval_jailbreaks.csv` | the accepted attacks whose text is not their input's (`is_noop` false), then the accepted inputs of entry type `benign`, bare | jailbreak detectors (`is_jailbreak`); content classifiers under attack (`label`) |
 
 `eval_inputs.csv`:

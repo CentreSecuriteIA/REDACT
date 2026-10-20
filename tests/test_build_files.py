@@ -1084,7 +1084,7 @@ def _training_run(folder: Path, monkeypatch, before=None) -> dict:
         "stages": ["constitution", "inputs", "outputs", "paraphrase", "jailbreaks",
                    "build"],
         "models": _MODELS, "augmentations": _PURE,
-    }, before)
+    }, before, params={"paraphrase": {"target": "both"}})   # the opt-in, too
     merged = "constitution_inputs_merged.csv"
     return {"counts": counts, merged: _files(paths.datasets(folder))[merged]}
 
@@ -1105,7 +1105,8 @@ def _eval_run(folder: Path, monkeypatch, before=None) -> dict:
         "stages": ["constitution", "inputs", "outputs", "paraphrase", "jailbreaks",
                    "build"],
         "models": _MODELS, "augmentations": _packaged(_PURE),
-    }, before, params={"jailbreaks": {"seed": 42}})     # not the eval type's 43
+    }, before, params={"jailbreaks": {"seed": 42},      # not the eval type's 43
+                       "paraphrase": {"target": "both"}})  # the opt-in, too
     return {"counts": counts}
 
 

@@ -36,6 +36,9 @@ from redact.content_moderation import InputPipeline, run_output_generation
 from redact.content_moderation import axes as generation_axes
 from redact.content_moderation.modes import check_outputs_per_input, resolve_modes
 from redact.content_moderation.paraphrase import (
+    DEFAULT_TARGET as DEFAULT_PARAPHRASE_TARGET,
+)
+from redact.content_moderation.paraphrase import (
     paraphrase_pool,
     run_paraphrase_target,
 )
@@ -833,7 +836,7 @@ def generate_paraphrases(
     paraphraser: str | None = None,
     check_model: str | None = None,
     paraphrases_per_sample: int = 1,
-    target: str = "both",
+    target: str = DEFAULT_PARAPHRASE_TARGET,
     check: bool = True,
     resume: bool = True,
     batch_size: int = 256,
@@ -844,7 +847,8 @@ def generate_paraphrases(
     verbose: bool = True,
     read_back: bool = True,
 ) -> dict[str, pd.DataFrame]:
-    """Paraphrase base inputs and/or accepted base outputs into additive artifacts.
+    """Paraphrase the base inputs and, when ``target`` names them, the accepted
+    base outputs, into additive artifacts.
 
     Each base sample is paraphrased ``paraphrases_per_sample`` times (K repeated 1:1
     calls, one per unit), with paraphraser models assigned round-robin from the
@@ -879,7 +883,10 @@ def generate_paraphrases(
         check_model: Validator model. ``None`` → ``uncensored_gen`` role (kept
             separate from the paraphraser; warns if they coincide).
         paraphrases_per_sample: K units per base sample (warns if K>1 with 1 model).
-        target: ``"inputs"`` | ``"outputs"`` | ``"both"``.
+        target: ``"inputs"`` (default) | ``"outputs"`` | ``"both"``. When the
+            outputs are not among the targets and ``paraphrases_outputs.csv``
+            holds rows from an earlier run, a WARNING says the build still
+            merges them.
         check: Gate each paraphrase and check it with the ``check_model``
             (rejected rows are kept, ``accepted`` false); off, every
             paraphrase is accepted.
@@ -896,7 +903,8 @@ def generate_paraphrases(
             artifacts back.
 
     Returns:
-        ``{"inputs": df, "outputs": df}`` for whichever targets ran.
+        A key per target that ran: ``{"inputs": df}`` by default,
+        ``{"inputs": df, "outputs": df}`` for ``"both"``.
     """
     pool = paraphrase_pool(paraphraser)
     if paraphrases_per_sample > 1 and len(pool) == 1:
@@ -923,6 +931,9 @@ def generate_paraphrases(
     targets = ["inputs", "outputs"] if target == "both" else [target]
     if not set(targets) <= {"inputs", "outputs"}:
         raise ValueError("target must be 'inputs', 'outputs', or 'both'.")
+    if "outputs" not in targets:
+        _warn_stale_outputs(Path(outputs_path) if outputs_path
+                            else paths.paraphrases_outputs_csv(data_dir), targets)
     check_client = ModelClient.create(check_model) if check else None
 
     results: dict[str, pd.DataFrame] = {}
@@ -964,6 +975,18 @@ def generate_paraphrases(
     return results
 
 
+def _warn_stale_outputs(path: Path, targets: list[str]) -> None:
+    """Warn when ``path``, the outputs target's file, holds rows a run that
+    does not paraphrase the outputs leaves as they are: the build merges
+    them, possibly paraphrases of responses generated anew since."""
+    if dataset.has_rows(path):
+        logger.warning(
+            "paraphrase: %s holds paraphrases of responses from an earlier "
+            "run, and the build merges them; this run paraphrases the %s only. "
+            'Delete the file, or run target "outputs" with resume: false, to '
+            "replace them.", path, " and ".join(targets))
+
+
 def build_dataset(
     data_dir: str | Path | None = None,
     jailbreak_path: str | Path | None = None,
@@ -992,7 +1015,8 @@ def build_dataset(
     three files of one flat schema instead, each with a ``text`` and a
     ``label`` column: ``eval_inputs.csv`` (the inputs, then their
     paraphrases, marked ``paraphrased``), ``eval_outputs.csv`` (the
-    responses, then their paraphrases) and ``eval_jailbreaks.csv`` (the
+    responses, then their paraphrases when the paraphrase stage ran on the
+    outputs) and ``eval_jailbreaks.csv`` (the
     attacks that changed their input, ``is_jailbreak`` true, then the bare
     benign inputs, false); the variations are in none of them. With
     ``exclude_from``, an eval build leaves out the rows another run holds by
@@ -1693,7 +1717,7 @@ def _paraphrase_kwargs(ctx: RunContext) -> dict:
 
 
 def _paraphrase_sources(ctx: RunContext) -> list[Path]:
-    target = _params(ctx, "paraphrase").get("target", "both")
+    target = _params(ctx, "paraphrase").get("target", DEFAULT_PARAPHRASE_TARGET)
     inputs = input_files(ctx.data_dir) if target in ("inputs", "both") else []
     outputs = ([paths.output_responses_csv(ctx.data_dir)]
                if target in ("outputs", "both") else [])
@@ -1702,7 +1726,7 @@ def _paraphrase_sources(ctx: RunContext) -> list[Path]:
 
 def _paraphrase_files(ctx: RunContext) -> tuple[list[Path], dict]:
     given = _params(ctx, "paraphrase")
-    target = given.get("target", "both")
+    target = given.get("target", DEFAULT_PARAPHRASE_TARGET)
     default = {"inputs": paths.paraphrases_inputs_csv,
                "outputs": paths.paraphrases_outputs_csv}
     return [given.get(f"{name}_path") or default[name](ctx.data_dir)

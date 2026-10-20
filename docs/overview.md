@@ -22,7 +22,7 @@ A run is an ordered list of stages. Each stage has one public function, its
 | `constitution` | `generate_constitution` | Per taxonomy category, a hierarchy of constitution categories and sample descriptions at four entry types (two in an eval run), and benign ones per category of the benign taxonomy | `Data_cache/constitution/merged.csv` |
 | `inputs` | `generate_inputs` | Checked input samples, seeded from the constitution | `Datasets/constitution_inputs/<category>/samples.csv` |
 | `outputs` | `generate_outputs` | k checked model responses per accepted input (1, or 2 in a training run), each in an answer mode | `Datasets/output_responses.csv` |
-| `paraphrase` | `generate_paraphrases` | Checked paraphrases of the inputs and of the accepted outputs | `Datasets/paraphrases_inputs.csv`, `Datasets/paraphrases_outputs.csv` |
+| `paraphrase` | `generate_paraphrases` | Checked paraphrases of the inputs (and, as an opt-in, of the accepted outputs) | `Datasets/paraphrases_inputs.csv`, `Datasets/paraphrases_outputs.csv` |
 | `jailbreaks` | `generate_jailbreaks` | Jailbreak attacks (adversarial kind) and natural variations (natural kind) of the accepted inputs | `Datasets/jailbreaks.csv`, `Datasets/variations.csv` |
 | `build` | `build_dataset` | Merge every stage's accepted rows: into one file (training), or into three files of one flat schema (eval) | `Datasets/complete_dataset.csv`; in eval `Datasets/eval_inputs.csv`, `eval_outputs.csv`, `eval_jailbreaks.csv` |
 
@@ -56,7 +56,7 @@ flowchart TD
     tree --> paraphrase["paraphrase"]
     tree --> jailbreaks["jailbreaks"]
     outputs --> resp[("Datasets/output_responses.csv")]
-    resp --> paraphrase
+    resp -.-> paraphrase
     paraphrase --> para[("Datasets/paraphrases_inputs.csv<br/>Datasets/paraphrases_outputs.csv")]
     jailbreaks -.->|"reads; adds the pairs it lacks"| benign[("Data_cache/benign/benign_samples.csv")]
     jailbreaks --> jb[("Datasets/jailbreaks.csv")]
@@ -193,9 +193,9 @@ the response axes, a response and a check. Rows go to
 `Datasets/output_responses.csv`.
 [stages/outputs.md](stages/outputs.md)
 
-**paraphrase.** `generate_paraphrases` paraphrases the accepted inputs and
-the accepted outputs, each target through `run_paraphrase_target`, and checks
-each paraphrase with a separate model. [stages/paraphrase.md](stages/paraphrase.md)
+**paraphrase.** `generate_paraphrases` paraphrases the accepted inputs (and,
+as an opt-in, the accepted outputs), each target through
+`run_paraphrase_target`, and checks each paraphrase with a separate model. [stages/paraphrase.md](stages/paraphrase.md)
 
 **jailbreaks.** `generate_jailbreaks` resolves the two kinds of the
 augmentation section and calls `jailbreak.pipeline.run_augmentation` once per
@@ -264,7 +264,7 @@ six stages as a training run, with these differences:
 | File | Rows | `label` |
 |---|---|---|
 | `eval_inputs.csv` | the accepted inputs, then their paraphrases (`paraphrased` true) | the entry type |
-| `eval_outputs.csv` | the accepted responses, then their paraphrases | `<entry_type>_<output_label>`: the entry type of the input answered, then `harmful` or `benign` for the response's answer mode (an `output_label` column holds the second part) |
+| `eval_outputs.csv` | the accepted responses, then their paraphrases (when the outputs were paraphrased) | `<entry_type>_<output_label>`: the entry type of the input answered, then `harmful` or `benign` for the response's answer mode (an `output_label` column holds the second part) |
 | `eval_jailbreaks.csv` | the accepted attacks that changed their input (`is_jailbreak` true), then the bare benign inputs (`is_jailbreak` false) | the entry type |
 
 The variations are in none of them. Every row keeps its `sample_id`, and
