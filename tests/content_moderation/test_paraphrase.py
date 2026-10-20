@@ -113,6 +113,11 @@ class TestGates:
                              "Hello, how are you today?")
         assert reason == "script changed: Cyrillic -> Latin"
 
+    def test_the_reason_names_the_script_the_original_lacks(self):
+        # Most letters stay Latin; the Cyrillic ones are over 10%.
+        reason = script_gate("hello there my friend", "hello there my friend привет")
+        assert reason == "script changed: Latin -> Cyrillic"
+
     def test_a_text_without_letters_passes(self):
         assert script_gate("Could you suggest dinners?", "") == ""
         assert script_gate("1234 + 5678 = ?", "Сколько будет?") == ""

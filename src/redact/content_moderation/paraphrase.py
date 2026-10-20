@@ -158,18 +158,20 @@ def _script_counts(text: str) -> Counter:
 def script_gate(original: str, paraphrase: str) -> str:
     """Fires when ``SCRIPT_SHARE`` or more of the paraphrase's letters are in
     scripts that make up under ``SCRIPT_RARE`` of the original's letters
-    (English answered in Chinese). A text with no letters never fires it."""
+    (English answered in Chinese). A text with no letters never fires it.
+    The reason names the original's main script and the main one of those
+    the original lacks."""
     ours = _script_counts(original.strip())
     theirs = _script_counts(paraphrase.strip())
     n_ours, n_theirs = sum(ours.values()), sum(theirs.values())
     if not n_ours or not n_theirs:
         return ""
-    foreign = sum(n for script, n in theirs.items()
-                  if ours.get(script, 0) / n_ours < SCRIPT_RARE)
-    if foreign / n_theirs < SCRIPT_SHARE:
+    foreign = Counter({script: n for script, n in theirs.items()
+                       if ours.get(script, 0) / n_ours < SCRIPT_RARE})
+    if sum(foreign.values()) / n_theirs < SCRIPT_SHARE:
         return ""
     return (f"script changed: {ours.most_common(1)[0][0]} -> "
-            f"{theirs.most_common(1)[0][0]}")
+            f"{foreign.most_common(1)[0][0]}")
 
 
 def language_gate(original: str, paraphrase: str) -> str:
@@ -342,6 +344,10 @@ def run_paraphrase_target(
 
     src = source.reset_index(drop=True)
     out_path.parent.mkdir(parents=True, exist_ok=True)
+    # Built before resume_state: a check prompt that does not build stops the
+    # stage before it takes the lock or clears anything.
+    checker = (build_paraphrase_checker(prompt_dir=prompt_dir)
+               if check is not None else None)
 
     # Every attempted unit is acked, a dropped one too, so a resume skips it.
     ledger = Ledger.sidecar(out_path, key_fields=(key_field, "iteration"),
@@ -407,12 +413,21 @@ def run_paraphrase_target(
             return {"response_id": bid, "input_id": iid, "iteration": iteration}
         return {"input_id": bid, "iteration": iteration}
 
+    # The units an earlier run acked skipped: acks win on resume.
+    earlier = ({ledger.key(ack) for ack in ledger.records()
+                if ack.get("status") == "skipped"} if completed else set())
+
+    def _skipped(bid, iteration, otext) -> bool:
+        """Whether the unit is skipped: acked so, or pending and short."""
+        if (bid, iteration) in completed:
+            return (bid, iteration) in earlier
+        return bool(skip_reason(otext, min_words=min_words))
+
     manifest.write(
         {
             **_keyed(bid, iteration, iid), "paraphrase_model": m,
             "category": cat, "entry_type": et,
-            "status": "skipped" if skip_reason(otext, min_words=min_words)
-            else "planned",
+            "status": "skipped" if _skipped(bid, iteration, otext) else "planned",
         }
         for bid, iteration, m, otext, cat, et, iid, _label in _units()
     )
@@ -426,17 +441,15 @@ def run_paraphrase_target(
         return sizes
 
     # Acked skips of an earlier run whose text this threshold would send:
-    # acks win, so they stay unparaphrased.
-    earlier = ({ledger.key(ack) for ack in ledger.records()
-                if ack.get("status") == "skipped"} if completed else set())
-    stale = sum(1 for bid, iteration, _m, otext, *_ in _units()
-                if (bid, iteration) in earlier
-                and not skip_reason(otext, min_words=min_words))
+    # acks win, so they stay unparaphrased. Counted by key, as acked.
+    stale = {(bid, iteration) for bid, iteration, _m, otext, *_ in _units()
+             if (bid, iteration) in earlier
+             and not skip_reason(otext, min_words=min_words)}
     if stale:
         logger.warning(
             "[paraphrase:%s] %d units acked under an earlier min_words stay "
             "unparaphrased on resume; run with resume: false to paraphrase them.",
-            target, stale)
+            target, len(stale))
 
     # A text too short to paraphrase: its unit is acked at once, with no call
     # and no row.
@@ -488,9 +501,6 @@ def run_paraphrase_target(
                 "[paraphrase:%s] %d paraphrasers do not co-fit; unloading between groups.",
                 target, len(groups),
             )
-
-    checker = (build_paraphrase_checker(prompt_dir=prompt_dir)
-               if check is not None else None)
 
     # One save per chunk, at the flush below: ``every`` is not reached before it.
     with CommitBuffer(append=_append, ledger=ledger, every=sum(groups.values())) as buf:

@@ -54,7 +54,7 @@ and calls one core, then returns what the core returns.
 | `generate_constitution` | `ConstitutionPipeline.run` | the saved constitution |
 | `generate_inputs` | `InputPipeline.run_from_constitution` | the accepted inputs of the current style |
 | `generate_outputs` | `content_moderation.run_output_generation` | the rows of `output_responses.csv` |
-| `generate_paraphrases` | `content_moderation.paraphrase.run_paraphrase_target`, per target | `{"inputs": ..., "outputs": ...}` |
+| `generate_paraphrases` | `content_moderation.paraphrase.run_paraphrase_target`, per target | a frame per target that ran: `{"inputs": ...}` by default, `{"inputs": ..., "outputs": ...}` for `target="both"` |
 | `generate_jailbreaks` | `jailbreak.pipeline.run_augmentation`, per kind | the rows of `jailbreaks.csv` |
 | `build_dataset` | none; `dataset.write_concat` | the rows of the merged file; in eval mode, of each eval file by `inputs`, `outputs`, `jailbreaks` |
 | `generate_conversations`, `evaluate_conversations` | themselves, in `multi_turn/` | their file's rows |
@@ -111,7 +111,7 @@ takes them.
 | `recipe_kwargs` | `ctx -> kwargs` the run passes the front itself. A value an earlier stage saves is a `Saved`, read when the stage starts |
 | `sources` | `ctx -> paths`: the files the stage reads its inputs from; those that exist go in its run record |
 | `folded` | Params keys the run applies to a kwarg it passes itself (the jailbreak stage's flat keywords, folded into `augmentation`) |
-| `extra_counts` | `ctx -> dict` or `None`: what the stage counts beyond its files' rows, read after it ran and added to its counts (the build's `excluded`) |
+| `extra_counts` | `ctx -> dict` or `None`: what the stage counts beyond its files' rows, read after it ran and added to its counts (the build's `excluded`; the paraphrase stage's `skipped`, per reason) |
 
 `Stage.params(ctx)` returns the dataset type file's params for the stage
 with the params file's entry over them, and raises on a key that is not a
@@ -124,7 +124,7 @@ the params.
 | `constitution` | `constitution` -> `constitution_gen` | `Data_cache/constitution/merged.csv` | the taxonomy file, and the benign taxonomy's with `include_general_benign` |
 | `inputs` | `gen`, `check` -> `uncensored_gen` | the category files of `constitution_inputs/`; accepted rows of the current style | the saved constitution, `merged.csv` |
 | `outputs` | `gen`, `check` -> `uncensored_gen` | `output_responses.csv`, or its `output_path` | the input category files (`dataset.input_files`) |
-| `paraphrase` | `paraphraser` -> `paraphraser`, `paraphrase_check` -> `uncensored_gen` | the files of the target(s) | the input category files and `output_responses.csv`, per target |
+| `paraphrase` | `paraphraser` -> `paraphraser`, `paraphrase_check` -> `uncensored_gen` | the files of the target(s) (`inputs` by default), plus `skipped` from their ledgers | the input category files and `output_responses.csv`, per target |
 | `jailbreaks` | `gen` -> `uncensored_gen`, `translation` -> `translation` | `jailbreaks.csv` and `variations.csv`, each when its kind is on | the input category files |
 | `build` | none | `complete_dataset.csv`, or its `output_path`; in eval the three `eval_*.csv` files, and `excluded` from `eval_excluded.json` (`extra_counts`) | the part files, where the params put them (no variations in eval), and the files `exclude_from` names |
 

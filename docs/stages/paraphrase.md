@@ -82,8 +82,9 @@ one key, which a resume skips alike once acked, and the second paraphrase,
 equal to a text already written, is dropped.
 
 The stage runs one paraphraser at a time. For each it sends the pending units
-in chunks of `batch_size`: one batch of paraphrase calls, then one batch of
-check calls, then one save of the whole chunk. It does not use the unit pool
+in chunks of `batch_size`: one batch of paraphrase calls, then the gates,
+then one batch of check calls for the paraphrases no gate rejected (none
+when every one was), then one save of the whole chunk. It does not use the unit pool
 or the async lane. When the paraphrasers cannot be resident together on the
 GPUs, the stage unloads each one before the next, and keeps the check model
 and the engines other stages hold.
@@ -154,7 +155,7 @@ header lacks `response_id`, `response_mode`, `output_label` or
 A text under `min_words` words (12 by default, split on whitespace) gets no
 paraphrase from any paraphraser. Its unit is acked with `status` `skipped`,
 `reason` `short` and the `min_words` it was judged by, with no call and no
-row; the manifest marks it `skipped` too. Below 12 words the humanizer
+row; the manifest marks it `skipped` too, on a resume as its ack says. Below 12 words the humanizer
 paraphraser read a text as a headline and wrote a post under it (on the
 benign test, 0 to 50% of its rewrites of 4 to 11 words were good, against
 92% at 12 to 15 words), and every input under 12 words was a fragment. In a
@@ -182,7 +183,7 @@ first that fails rejects the paraphrase:
 |---|---|---|
 | length | the paraphrase, squeezed (table rule lines, lines of only `-=_*\|:`, pipes and runs of whitespace taken out), is over 1.5 times the squeezed original plus 20 characters, or under 0.5 times it | `length ratio <r>` |
 | split | the original is one line of at most 35 words and the paraphrase has two or more non-empty lines | `split into lines` |
-| script | 10% or more of the paraphrase's letters are in scripts that make up under 1% of the original's | `script changed: <script> -> <script>` (`Latin -> Han`) |
+| script | 10% or more of the paraphrase's letters are in scripts that make up under 1% of the original's | `script changed: <script> -> <script>`: the original's main script, then the main one of those it lacks (`Latin -> Han`) |
 | language | GlotLID labels the two texts differently, both with a probability of 0.9 or above | `language <label> -> <label>` |
 | artifact | the paraphrase holds an HTML tag (`p`, `br`, `div`, `span`, `b`, `i`, `ul`, `li`, `h1` to `h6`) or a rule line (`====`, `------`, `______`) and the original holds none | `artifact <match>` |
 
@@ -198,8 +199,9 @@ of meaning or severity. Its verdict is the reply's first word.
 
 The thresholds were measured on 1,638 benign rewrites by two paraphrasers,
 set so that no rewrite read as good fails a gate; together with the strict
-prompt they caught 85% of the failures read, at 0.6% of the good rewrites
-rejected. Both were measured on benign text only.
+prompt they caught 85% of the failures read, and rejected 0.6% of the
+1,389 rewrites not labelled a failure. Both were measured on benign text
+only.
 
 `check: false` runs neither the gates nor the check model: every paraphrase
 is accepted. Without the `langid` extra, or when GlotLID cannot be loaded,

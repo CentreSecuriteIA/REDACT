@@ -1061,6 +1061,103 @@ def test_a_run_record_counts_the_skipped_units(tmp_path, patched):
     assert "skipped" not in summary["stages"]["paraphrase"]["counts"]
 
 
+def test_a_resume_after_an_all_skipped_target_calls_nothing_and_a_fresh_run_sends_them(
+        tmp_path, patched):
+    write_inputs(paths.constitution_inputs_dir(tmp_path), [_SHORT, "two words"])
+    asked = _recording_paraphrase(patched)
+    generate_paraphrases(data_dir=tmp_path, min_words=12, verbose=False)
+    generate_paraphrases(data_dir=tmp_path, min_words=12, verbose=False)
+    assert asked == []
+    generate_paraphrases(data_dir=tmp_path, min_words=0, resume=False, verbose=False)
+    assert sorted(asked) == sorted([_SHORT, "two words"])
+    assert [ack["status"] for ack in _acks(tmp_path)] == ["accepted", "accepted"]
+
+
+def test_one_skip_ack_is_one_unit_however_many_rows_share_its_key(
+        tmp_path, patched, caplog):
+    import logging
+
+    source = pd.DataFrame({"sample": [_SHORT, _SHORT]})   # one input_id
+    out = tmp_path / "paraphrased.csv"
+
+    def run(min_words):
+        return CP.run_paraphrase_target(
+            "inputs", source, out, pool=["venice-paraphraser"], check=None, k=1,
+            batch_size=8, seed=0, verbose=False, min_words=min_words)
+
+    run(12)
+    with caplog.at_level(logging.WARNING):
+        run(0)
+    (warning,) = [r for r in caplog.records if "earlier min_words" in r.getMessage()]
+    assert "] 1 units" in warning.getMessage()
+
+
+def test_on_resume_the_manifest_says_what_the_acks_say(tmp_path, patched):
+    from redact.dataset import Manifest
+
+    write_inputs(paths.constitution_inputs_dir(tmp_path), [_SHORT, _LONG])
+    _recording_paraphrase(patched)
+    generate_paraphrases(data_dir=tmp_path, min_words=12, verbose=False)
+    # _SHORT stays acked skipped, _LONG accepted, whatever the threshold says now.
+    generate_paraphrases(data_dir=tmp_path, min_words=40, verbose=False)
+    planned = Manifest.sidecar(paths.paraphrases_inputs_csv(tmp_path)).load()
+    assert {r["input_id"]: r["status"] for r in planned} == {
+        content_id(_SHORT): "skipped", content_id(_LONG): "planned"}
+
+
+def test_a_run_record_counts_the_skips_of_the_file_the_params_name(tmp_path, patched):
+    from redact import run_pipeline
+    from redact.telemetry import uninstall
+
+    write_inputs(paths.constitution_inputs_dir(tmp_path), [_SHORT, _LONG])
+    _recording_paraphrase(patched)
+    elsewhere = tmp_path / "elsewhere" / "paraphrased.csv"
+    try:
+        summary = run_pipeline(
+            {"dataset_type": "training", "data_dir": str(tmp_path),
+             "stages": ["paraphrase"]},
+            params={"paraphrase": {"min_words": 12, "inputs_path": str(elsewhere)}},
+            verbose=False)
+    finally:
+        uninstall()
+    assert summary["stages"]["paraphrase"]["counts"]["skipped"] == {"short": 1}
+    assert not paths.paraphrases_inputs_csv(tmp_path).exists()
+
+
+def test_a_check_prompt_that_does_not_build_stops_before_anything_is_cleared(
+        tmp_path, patched):
+    _seed_inputs(tmp_path)
+    generate_paraphrases(data_dir=tmp_path, verbose=False)
+    out = paths.paraphrases_inputs_csv(tmp_path)
+    before = out.read_bytes()
+
+    def broken(prompt_dir=None):
+        raise ValueError("the check prompt does not render")
+
+    patched.setattr(CP, "build_paraphrase_checker", broken)
+    with pytest.raises(ValueError, match="does not render"):
+        generate_paraphrases(data_dir=tmp_path, resume=False, verbose=False)
+    assert out.read_bytes() == before
+    assert lock_is_free(out.with_name("paraphrases_inputs.state.jsonl"))
+
+
+def test_verdicts_go_back_to_their_units_past_a_gated_one(tmp_path, patched):
+    write_inputs(paths.constitution_inputs_dir(tmp_path),
+                 ["alpha prompt", "beta prompt", "gamma prompt"])
+    patched.setattr(CP, "paraphrase_batch", lambda client, texts, **kw: [
+        t + _RUN_ON if t.startswith("alpha") else f"PARA::{t}" for t in texts])
+    patched.setattr(CP, "batch_check_samples", lambda cc, payloads, checker, **kw: [
+        (False, "No: beta changed") if "beta" in t else (True, "") for t in payloads])
+    df = generate_paraphrases(data_dir=tmp_path, verbose=False)["inputs"]
+    by_input = {text: row for text in ("alpha", "beta", "gamma")
+                for _, row in df.iterrows() if row["sample"].removeprefix(
+                    "PARA::").startswith(text)}
+    assert by_input["alpha"]["reasoning"].startswith("length ratio")
+    assert by_input["beta"]["reasoning"] == "No: beta changed"
+    assert [bool(by_input[t]["accepted"]) for t in ("alpha", "beta", "gamma")] == [
+        False, False, True]
+
+
 def test_the_stage_takes_min_words_as_a_param(tmp_path):
     from redact.recipe import _DEFAULT_MODELS
     from redact.stages import STAGES, RunContext

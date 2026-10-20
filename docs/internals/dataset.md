@@ -295,7 +295,7 @@ taxonomy format.
 | constitution | plain: no artifact | `unit` | `status`, `attempts` when rejected |
 | inputs | `artifact=folder, pattern="*/samples.csv"`, `units_in` | `sample_description`, `entry_type`, `style`, `iteration` | `ids`, `accepted`; or `status`, `attempts` |
 | outputs | `artifact=output_responses.csv` | `input_id`, `iteration` | `accepted` |
-| paraphrase | `artifact=paraphrases_<target>.csv` | `input_id`, `iteration` (inputs); `response_id`, `iteration` (outputs) | `paraphrase_model`, `status`; `input_id` (outputs) |
+| paraphrase | `artifact=paraphrases_<target>.csv` | `input_id`, `iteration` (inputs); `response_id`, `iteration` (outputs) | `paraphrase_model`, `status`; `input_id` (outputs); `reason`, `min_words` when `skipped` |
 | jailbreaks, per kind | `artifact=jailbreaks.csv` or `variations.csv` | `input_id`, `iteration` | |
 | benign data (jailbreaks) | `artifact=benign_samples.csv`, always `resume=True` | `main_category`, `sub_category`, `answer_type` | `status`, `attempts` when rejected |
 | conversations | `artifact=conversations.csv` | `input_id`, `iteration` | `stop_reason` |
