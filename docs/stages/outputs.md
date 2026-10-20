@@ -37,9 +37,13 @@ label: the input's entry type and the mode's output label, as
   then `max_samples` the first N overall. Both count inputs, before each is
   expanded to `outputs_per_input` units: N inputs per group give N × k
   responses.
-- The prompts of each mode dealt: `prompts/output/generation/<mode>/` and
-  `prompts/output/quality_check/<mode>/`, each through the overlay, read
-  before anything is cleared. The generation template's `{response_spec}`
+- The prompts of every mode the inputs' entry types allow:
+  `prompts/output/generation/<mode>/` and
+  `prompts/output/quality_check/<mode>/`, each through the overlay. Before
+  anything is cleared each is read and rendered once with empty values, and
+  the checker of each category and mode is built (and kept for the units),
+  so an overlay that does not render, such as one with an unknown
+  placeholder, stops the run there and not at its first unit. The generation template's `{response_spec}`
   shows the row's spec; a prompt without it is warned about, naming its
   folder. The checker is not shown the spec: its messages are those of a
   run without axes. An overlay written before the modes, a prompt file

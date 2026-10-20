@@ -429,6 +429,50 @@ class TestTheAnswerModes:
         assert {p.name: p.read_bytes() for p in out.parent.iterdir()
                 if p.suffix != ".lock"} == files
 
+    @pytest.mark.parametrize(("step", "prompt"), [
+        ("quality_check", {"system_prompt": "judge {Categry}",
+                           "template": "{input_prompt} {output_response}"}),
+        ("quality_check", {"system_prompt": "judge {Category}",
+                           "template": "{input_prompt} {response}"}),
+        ("generation", {"system_prompt": "s",
+                        "template": "{input_prompt} {response_spec} {tone}"}),
+    ], ids=["checker-system", "checker-template", "generation-template"])
+    def test_an_overlay_that_does_not_render_stops_before_anything_is_cleared(
+            self, tmp_path, monkeypatch, step, prompt):
+        """Not at the first unit of its category and mode, after a fresh
+        run's clear and after other units were paid for."""
+        import redact.content_moderation.outputs as G
+
+        _respond(tmp_path, monkeypatch)
+        out = paths.output_responses_csv(tmp_path)
+        files = {p.name: p.read_bytes() for p in out.parent.iterdir()
+                 if p.suffix != ".lock"}
+        overlay = tmp_path / "prompts" / "output" / step / "harmful"
+        overlay.mkdir(parents=True)
+        (overlay / "template.json").write_text(json.dumps(prompt), encoding="utf-8")
+
+        def no_model(source, **kwargs):
+            raise AssertionError("a unit reached a model")
+
+        monkeypatch.setattr(G, "drive_units", no_model)
+        with pytest.raises(ValueError, match="placeholder|missing"):
+            _respond(tmp_path, monkeypatch, resume=False,
+                     prompt_dir=tmp_path / "prompts")
+        assert {p.name: p.read_bytes() for p in out.parent.iterdir()
+                if p.suffix != ".lock"} == files
+
+    def test_each_checker_is_built_once_before_the_units(self, tmp_path, monkeypatch):
+        import redact.content_moderation.outputs as G
+
+        built = []
+        build = G.build_output_quality_checker
+        monkeypatch.setattr(G, "build_output_quality_checker",
+                            lambda **kw: built.append(kw) or build(**kw))
+        _respond(tmp_path, monkeypatch,
+                 inputs=_questions_of(["dual_use_benign"] * 3 + ["benign"]))
+        assert sorted((kw["category"], kw["mode"]) for kw in built) == [
+            ("Cyber", "harmful"), ("Cyber", "helpful")]
+
     @pytest.mark.parametrize("cell", [float("nan"), None, "", "  "])
     def test_an_input_without_an_entry_type_raises_before_anything_is_cleared(
             self, tmp_path, monkeypatch, cell):

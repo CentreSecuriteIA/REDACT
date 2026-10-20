@@ -27,7 +27,7 @@ from ..dataset.save import CommitBuffer
 from ..exceptions import PromptTooLongError
 from ..llm_pipeline import CHECK_TEMPERATURE, checked, drive_units, pool_size
 from ..llms.client import ModelClient
-from ..llms.prompting import build_messages, load_prompt
+from ..llms.prompting import PromptTemplate, build_messages, load_prompt
 from .axes import (
     deal_specs,
     deal_weights,
@@ -272,8 +272,16 @@ def run_output_generation(
     units = [(i, iteration) for i in range(len(rows)) for iteration in range(k)]
     keys = [(groups[i], (sids[i], iteration)) for i, iteration in units]
 
-    # The prompts of every mode the inputs' entry types allow, read before
-    # anything is cleared.
+    @functools.cache
+    def _checker_for(category: str, mode: str):
+        return build_output_quality_checker(
+            category=category, mode=mode, prompt_dir=prompt_dir)
+
+    # The prompts of every mode the inputs' entry types allow, read and
+    # rendered once with empty values before anything is cleared, so an
+    # overlay that does not render stops the run here, not at its first unit
+    # after a fresh run's clear. The checker of each category and mode is
+    # built now too, and kept for the units.
     prompts = {}
     in_use = {mode for _, entry_type in groups for mode in modes[entry_type]}
     for mode in (mode for mode in MODES if mode in in_use):
@@ -281,8 +289,16 @@ def run_output_generation(
             "output", f"generation/{mode}", prompt_dir=prompt_dir)
         if axes:
             warn_unshown(prompts[mode], "response_spec", f"output/generation/{mode}")
+        build_messages(prompts[mode], input_prompt="", Category="", response_spec="")
         if use_checker:
-            load_prompt("output", f"quality_check/{mode}", prompt_dir=prompt_dir)
+            PromptTemplate.load("output", f"quality_check/{mode}",
+                                prompt_dir=prompt_dir, Category="")(
+                input_prompt="", output_response="")
+    if use_checker:
+        pairs = {(category, mode) for category, entry_type in groups
+                 for mode in modes[entry_type]}
+        for category, mode in sorted(pairs):
+            _checker_for(category, mode)
 
     out_path.parent.mkdir(parents=True, exist_ok=True)
     ledger = Ledger.sidecar(
@@ -359,11 +375,6 @@ def run_output_generation(
                     len(pending), client.model,
                     f"enabled ({check.model})" if use_checker else "disabled",
                     batch_size)
-
-    @functools.cache
-    def _checker_for(category: str, mode: str):
-        return build_output_quality_checker(
-            category=category, mode=mode, prompt_dir=prompt_dir)
 
     written = 0
 
