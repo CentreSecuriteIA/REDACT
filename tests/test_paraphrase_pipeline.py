@@ -838,7 +838,7 @@ def test_a_gated_paraphrase_is_a_rejected_row_and_is_not_checked(tmp_path, patch
         ("alpha prompt", "PARA::alpha prompt", None, CHECK_TEMPERATURE)]
 
 
-def test_a_chunk_whose_paraphrases_are_all_gated_makes_no_check_call(tmp_path, patched):
+def test_units_whose_paraphrases_are_all_gated_make_no_check_call(tmp_path, patched):
     _seed_inputs(tmp_path)
     requests = _serve(patched, paraphrase=lambda model, text: text + _RUN_ON)
     generate_paraphrases(data_dir=tmp_path, target="inputs", verbose=False)

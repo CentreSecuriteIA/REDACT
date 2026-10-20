@@ -105,7 +105,8 @@ same batch.
 - A `PromptTooLongError` from an async request is raised inside its unit, at
   the `yield` that made it; the other requests stay in flight. The inputs
   stage acks that entry rejected, outputs writes a rejected row, jailbreaks
-  and conversations an error row, and scoring scores it false. The
+  and conversations an error row, paraphrase acks the unit
+  `prompt_too_long`, and scoring scores it false. The
   constitution and benign units take no `on_error`, so there it stops the
   stage.
 - Any other failed async request propagates, as a failed `generate()` does.
@@ -120,8 +121,7 @@ grouped path. There a `PromptTooLongError` fails the whole `generate()`,
 which is not known to belong to one item, so it propagates and stops the
 stage, as any failed call does. A stage's handling of a too-long prompt (a
 rejected row, an ack, an error row) therefore applies on the async lane
-only. Paraphrase is not on the pool, so a too-long prompt stops it on any
-backend.
+only.
 
 ## The other drivers
 
