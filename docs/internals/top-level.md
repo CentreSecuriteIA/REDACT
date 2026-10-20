@@ -257,14 +257,18 @@ Package folders take no root: `package_dir`, `prompts_dir`, `configs_dir`,
 
 A core owns its files. Every core with units follows the same seven steps,
 built from `dataset/` and `llm_pipeline/`. `content_moderation/outputs.py`
-is the plainest example.
+is the plainest example: k units `(row, iteration)` per input row, keyed
+`(input_id, iteration)`.
 
 ```python
 ids = row_ids(inputs, text_col)                                          # 1
-ledger = Ledger.sidecar(out, key_fields=("input_id",), casters={"input_id": str})
+units = [(i, it) for i in range(len(ids)) for it in range(k)]
+ledger = Ledger.sidecar(out, key_fields=("input_id", "iteration"),
+                        casters={"input_id": str, "iteration": int})
 manifest = Manifest.sidecar(out)                                         # 2
 done = resume_state(ledger, resume=resume, artifact=out, manifest=manifest)  # 3
-manifest.write({"input_id": i, "status": "planned"} for i in ids)       # 4
+manifest.write({"input_id": ids[i], "iteration": it, "status": "planned"}
+               for i, it in units)                                       # 4
 with CommitBuffer(append=lambda rows: append_rows(out, rows), ledger=ledger) as buf:
     drive_units(units_not_in(done), on_done=lambda k, v: buf.add(unit_rows(v), unit_ack(k)),
                 on_error=..., pool_size=pool_size(batch_size, *clients),
@@ -282,9 +286,9 @@ return read_rows(out) if read_back else pd.DataFrame()                   # 7
    kinds keep an existing plan on resume, since theirs is sampled, and check
    it against `<kind>.plan.json` beside the manifest.
 5. **The units.** Each pending unit is a generator of model calls, driven by
-   `llm_pipeline.drive_units`. Its key in the driver is its position among
-   the pending units, so two rows with one id stay two units; the ledger key
-   goes in the record `on_done` adds.
+   `llm_pipeline.drive_units`. Its key in the driver is its index in the
+   unit list, so two rows with one id, or two iterations of one row, stay
+   apart; the ledger key goes in the record `on_done` adds.
 6. **The save.** `on_done` hands a unit's rows and ack record to the
    `CommitBuffer`, which appends rows and then acks every 32 units and on any
    exit. A failed call propagates and is never turned into rows. Only a
@@ -301,6 +305,7 @@ How each stage departs from this:
 |---|---|
 | constitution | A plain ledger: `resume_state` gets no artifact, so no lock and no sizes. It clears its own CSVs on a fresh run, saves after every unit (`every=1`), runs one unit at a time (`pool_size=1`), and reads back through `read_constitution` |
 | inputs | A tree of files: `artifact=folder, pattern="*/samples.csv"`, sidecars named `constitution_inputs.*` in the folder, `drop_units` for a fresh run of one style. Returns `ConstitutionInputResult`; the front reads the tree |
+| outputs | Before step 3 it checks the inputs' entry types and renders its prompts and checkers; between steps 3 and 4 it stops on an old folder and on a changed plan file, then deals each unit an answer mode (a done unit keeping its ack's) and a spec |
 | paraphrase | Chunked batch calls instead of `drive_units`, one save per chunk |
 | jailbreaks | Steps 2 to 7 run once per kind; the plan is reused on resume |
 | scoring | No plan |

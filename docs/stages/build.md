@@ -85,7 +85,8 @@ On an output row `entry_type` is the input's, as on every derived row; the
 label of the response is `response_label`, `<entry_type>_<output_label>`,
 with its answer mode in `response_mode` and the mode's label in
 `output_label` ([outputs](outputs.md#answer-modes)). The three columns are
-empty on the rows of the other parts.
+empty on the rows of the other parts, except a paraphrase of a response,
+which carries its response's.
 
 ## Eval mode
 

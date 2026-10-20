@@ -61,7 +61,7 @@ label: the input's entry type and the mode's output label, as
 | Recipe role | Registry role | Default | Calls |
 |---|---|---|---|
 | `gen` | `uncensored_gen` | `venice-uncensored` | One response per attempt |
-| `check` | `uncensored_gen` | the `gen` model | One check per attempt |
+| `check` | `uncensored_gen` | the `gen` model | At most one check per attempt: none for a reply the length floor rejects |
 
 `check_outputs: false` skips the check and accepts every response.
 

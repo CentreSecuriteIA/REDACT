@@ -161,7 +161,7 @@ names of the last two, are read for this release with a
 | `max_attempts` | `1` | Generations per input; above 1 a rejected response is generated again with the verdict as feedback |
 | `max_per_category` | `null` | Keep the first N inputs per `(category, entry_type)` |
 | `max_samples` | `null` | Keep the first N inputs overall, after `max_per_category` |
-| `outputs_per_input` | `1`; `2` in the `training` type | Responses per input, each a unit `(input_id, iteration)` dealt its own answer mode and spec, so an input's responses differ on the axes and, from 2, a borderline input gets one answer of each mode. `max_per_category` and `max_samples` count inputs, before this expansion. A whole number of at least 1 |
+| `outputs_per_input` | `1`; `2` in the `training` type | Responses per input, each a unit `(input_id, iteration)` dealt its own answer mode and spec, so an input's responses differ on the axes and, from 2, a borderline input gets one answer of each mode. `max_per_category` and `max_samples` count inputs, before this expansion. A whole number of at least 1; `null` is not read as the default and raises at load |
 | `modes` | `null`: the default | The answer modes each entry type allows, `{entry_type: [mode, ...]}` laid over the default per entry type: `harmful` → `["harmful"]`, `dual_use_harmful` and `dual_use_benign` → `["harmful", "helpful"]`, `benign` → `["helpful"]`. A mode picks the response's prompt and checker and gives its label ([outputs](stages/outputs.md#answer-modes)) |
 | `axes` | `null`: the table's | The response axes each input row is dealt a value of, over the table's `outputs` section, as for `inputs` |
 | `axes_weighting` | `"table"` | As for `inputs`; neither type sets it |

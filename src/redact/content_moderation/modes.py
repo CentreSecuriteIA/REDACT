@@ -24,6 +24,9 @@ keeps it. At k = 1 and an odd k the group alternates, so inputs that join a
 group would change the modes of units dealt before them; the stage passes
 the modes its done units were written with as ``fixed``, which the deal
 counts and deals the other units around.
+
+:func:`check_outputs_per_input` checks the other setting the deal runs on:
+k, the units per input.
 """
 
 import math
