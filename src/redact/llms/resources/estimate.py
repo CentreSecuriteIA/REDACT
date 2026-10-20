@@ -109,13 +109,67 @@ def _read_config(hf_model_id: str, revision: str | None):
     return _load_config(hf_model_id)
 
 
+def _field(cfg, name: str, default=None):
+    """``getattr(cfg, name, default)`` that never raises.
+
+    A transformers config whose attribute varies per layer (a heterogeneous
+    config, as Gemma 4's under transformers 5.17) raises
+    ``AmbiguousGlobalPerLayerAttributeError`` for the global attribute. That
+    is a ``RuntimeError``, which ``getattr``'s default does not catch; here
+    it reads as unset, and the per-layer values are read instead
+    (:func:`_layer_attention`).
+    """
+    try:
+        return getattr(cfg, name, default)
+    except Exception:  # noqa: BLE001 — a planning hint must not fail a load
+        return default
+
+
 def _language_config(full):
     """The config holding the language model's shapes.
 
     Multimodal configs nest it as ``text_config``. Their vision tower and
     projector are not counted.
     """
-    return getattr(full, "text_config", None) or full
+    return _field(full, "text_config") or full
+
+
+def _layer_attention(cfg, layers: int | None) -> list[tuple[int, int]] | None:
+    """Each layer's ``(kv_heads, head_dim)`` when they differ by layer, read
+    without touching an attribute that raises; ``None`` for a config with
+    one attention shape for every layer, or when they cannot be read.
+
+    Two forms are read: transformers' per-layer configs
+    (``per_layer_config[i].num_key_value_heads`` and ``.head_dim``), and a
+    config listing ``layer_types`` with the full-attention layers' own
+    ``num_global_key_value_heads`` and ``global_head_dim`` beside the other
+    layers' ``num_key_value_heads`` and ``head_dim`` (Gemma 4's
+    ``config.json``).
+    """
+    per_layer = _field(cfg, "per_layer_config")
+    if per_layer:
+        try:
+            shapes = [(_field(layer, "num_key_value_heads"), _field(layer, "head_dim"))
+                      for layer in per_layer]
+        except TypeError:       # not a list of layer configs
+            shapes = []
+        if shapes and all(isinstance(kv, int) and isinstance(dim, int)
+                          and kv > 0 and dim > 0 for kv, dim in shapes):
+            return shapes
+    types = _field(cfg, "layer_types")
+    global_kv = _field(cfg, "num_global_key_value_heads")
+    global_dim = _field(cfg, "global_head_dim")
+    if not types or not (global_kv or global_dim):
+        return None
+    try:
+        types = list(types)
+    except TypeError:
+        return None
+    kv, dim = _field(cfg, "num_key_value_heads"), _field(cfg, "head_dim")
+    if not (kv and dim) or (layers and len(types) != layers):
+        return None
+    return [((global_kv or kv), (global_dim or dim)) if kind == "full_attention"
+            else (kv, dim) for kind in types]
 
 
 def _resolve_dtype(
@@ -133,7 +187,7 @@ def _resolve_dtype(
     names = [dtype]
     # A multimodal checkpoint may declare its dtype on either config.
     for cfg in (full, _language_config(full)):
-        names += [getattr(cfg, "torch_dtype", None), getattr(cfg, "dtype", None)]
+        names += [_field(cfg, "torch_dtype", None), _field(cfg, "dtype", None)]
     label, size = "float32 assumed", _DTYPE_BYTES["float32"]
     for name in names:
         key = str(name).lower().replace("torch.", "")
@@ -157,8 +211,8 @@ def _quant_bits(quantization: str | None, full) -> int | None:
     usual = _QUANT_BITS.get(str(quantization or "").lower())
     if usual is None:
         return None
-    qc = getattr(full, "quantization_config", None)
-    bits = qc.get("bits") if isinstance(qc, dict) else getattr(qc, "bits", None)
+    qc = _field(full, "quantization_config", None)
+    bits = qc.get("bits") if isinstance(qc, dict) else _field(qc, "bits", None)
     if isinstance(bits, bool) or not isinstance(bits, int):
         return usual
     return bits if 0 < bits <= _MAX_QUANT_BITS else usual
@@ -167,9 +221,9 @@ def _quant_bits(quantization: str | None, full) -> int | None:
 def _expert_count(cfg) -> int:
     """MLP experts per layer of an MoE config, shared ones included; else 0."""
     for name in ("num_local_experts", "num_experts", "n_routed_experts"):
-        experts = getattr(cfg, name, None)
+        experts = _field(cfg, name)
         if experts:
-            return experts + (getattr(cfg, "n_shared_experts", None) or 0)
+            return experts + (_field(cfg, "n_shared_experts", None) or 0)
     return 0
 
 
@@ -225,41 +279,45 @@ def estimate_weights_gib(
         return None
     cfg = _language_config(full)
 
-    layers = getattr(cfg, "num_hidden_layers", None)
-    hidden = getattr(cfg, "hidden_size", None)
-    vocab = getattr(cfg, "vocab_size", None)
-    intermediate = getattr(cfg, "intermediate_size", None)
-    heads = getattr(cfg, "num_attention_heads", None)
+    layers = _field(cfg, "num_hidden_layers")
+    hidden = _field(cfg, "hidden_size", None)
+    vocab = _field(cfg, "vocab_size", None)
+    intermediate = _field(cfg, "intermediate_size", None)
+    heads = _field(cfg, "num_attention_heads", None)
     if not all((layers, hidden, vocab, intermediate, heads)):
         _report_once(hf_model_id, "its config lacks the shape fields")
         return None
 
-    kv_heads = getattr(cfg, "num_key_value_heads", None) or heads
-    head_dim = getattr(cfg, "head_dim", None) or (hidden // heads)
+    # One attention shape per layer when it varies (Gemma 4), else the
+    # config's; all heads at hidden / heads when neither can be read (errs
+    # high).
+    shapes = _layer_attention(cfg, layers) or [(
+        _field(cfg, "num_key_value_heads") or heads,
+        _field(cfg, "head_dim") or (hidden // heads))] * layers
 
     # q and o are full width; k and v are narrower under GQA (kv_heads < heads).
-    attn_per_layer = (
+    attention = sum(
         hidden * heads * head_dim          # q_proj
         + 2 * hidden * kv_heads * head_dim  # k_proj + v_proj
         + heads * head_dim * hidden        # o_proj
-    )
+        for kv_heads, head_dim in shapes)
 
-    n_mats = 2 if getattr(cfg, "model_type", None) in _UNGATED_MODEL_TYPES else 3
+    n_mats = 2 if _field(cfg, "model_type", None) in _UNGATED_MODEL_TYPES else 3
     experts = _expert_count(cfg)
     if experts:
-        width = getattr(cfg, "moe_intermediate_size", None) or intermediate
+        width = _field(cfg, "moe_intermediate_size", None) or intermediate
         # Each expert is a full MLP; the router adds hidden x experts.
         mlp_per_layer = experts * n_mats * hidden * width + hidden * experts
         # Qwen2-MoE: one always-on shared expert per layer, of its own width.
-        shared = getattr(cfg, "shared_expert_intermediate_size", None)
+        shared = _field(cfg, "shared_expert_intermediate_size", None)
         if shared:
             mlp_per_layer += n_mats * hidden * shared
     else:
         mlp_per_layer = n_mats * hidden * intermediate
 
-    linear = layers * (attn_per_layer + mlp_per_layer)
+    linear = attention + layers * mlp_per_layer
     embed = vocab * hidden
-    if not getattr(cfg, "tie_word_embeddings", False):
+    if not _field(cfg, "tie_word_embeddings", False):
         embed *= 2  # separate lm_head
 
     dtype_bytes = _resolve_dtype(dtype, full, float32_as_half)[1]
@@ -302,7 +360,7 @@ def _context_limit(hf_model_id: str, full) -> int | None:
     (``text_config``) before the outer ones. The file is read for a config
     that needs remote code, or that names its context otherwise.
     """
-    limit = getattr(_language_config(full), "max_position_embeddings", None)
+    limit = _field(_language_config(full), "max_position_embeddings")
     if limit:
         return limit
     data = _config_json(hf_model_id) or {}
@@ -347,6 +405,9 @@ def estimate_kv_gib(
 
         2 (K and V) x layers x kv_heads x head_dim x context length x bytes
 
+    summed layer by layer when the attention shape varies by layer
+    (:func:`_layer_attention`), each layer at the full context length.
+
     This is one sequence of the engine's context length: the least KV cache
     vLLM needs to start, not what it will hold. vLLM gives the cache whatever
     its memory grant has left.
@@ -371,21 +432,27 @@ def estimate_kv_gib(
         return None
     cfg = _language_config(full)
 
-    layers = getattr(cfg, "num_hidden_layers", None)
-    heads = getattr(cfg, "num_attention_heads", None)
-    # Under GQA/MQA only the KV heads are cached. Falling back to all heads
-    # errs high.
-    kv_heads = getattr(cfg, "num_key_value_heads", None) or heads
-    hidden = getattr(cfg, "hidden_size", None)
-    head_dim = getattr(cfg, "head_dim", None) or (
-        hidden // heads if hidden and heads else None
-    )
-    if not all((layers, kv_heads, head_dim)):
-        return None
+    layers = _field(cfg, "num_hidden_layers")
+    shapes = _layer_attention(cfg, layers)
+    if shapes is None:
+        heads = _field(cfg, "num_attention_heads", None)
+        # Under GQA/MQA only the KV heads are cached. Falling back to all
+        # heads errs high.
+        kv_heads = _field(cfg, "num_key_value_heads", None) or heads
+        hidden = _field(cfg, "hidden_size", None)
+        head_dim = _field(cfg, "head_dim", None) or (
+            hidden // heads if hidden and heads else None
+        )
+        if not all((layers, kv_heads, head_dim)):
+            return None
+        shapes = [(kv_heads, head_dim)] * layers
     tokens = effective_max_model_len(hf_model_id, max_model_len, config=full)
 
+    # Every layer at the full context, sliding-window ones too: vLLM 0.31
+    # allocates so (Gemma 4: 0.33 MiB a token measured, 40 sliding layers at
+    # 8 x 256 and 8 full ones at 1 x 512).
     kv_bytes = (
-        2 * layers * kv_heads * head_dim * tokens
+        2 * sum(kv_heads * head_dim for kv_heads, head_dim in shapes) * tokens
         * _resolve_dtype(dtype, full, float32_as_half)[1]
     )
     return round(kv_bytes / _BYTES_PER_GIB / max(1, tensor_parallel_size or 1), 2)
@@ -480,7 +547,7 @@ def estimate(
     drivers = _drivers(full, dtype, quantization, float32_as_half)
     if drivers:
         text += f" [{', '.join(drivers)}]"
-    heads = getattr(_language_config(full), "num_attention_heads", None)
+    heads = _field(_language_config(full), "num_attention_heads")
     return Estimate(weights, kv_gib, per_gpu, per_gpu * tp, tp, heads, text)
 
 

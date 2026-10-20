@@ -479,6 +479,111 @@ def fake_transformers():
         yield _FakeAutoConfig
 
 
+class AmbiguousGlobalPerLayerAttributeError(RuntimeError):
+    """Stands in for transformers 5.17's error of the same name: a
+    ``RuntimeError``, so ``getattr``'s default does not catch it."""
+
+
+class _PerLayer:
+    """A config whose attention attributes vary per layer, as transformers
+    5.17 builds Gemma 4's: the global attribute raises, and each layer's
+    config holds its own value."""
+
+    _PER_LAYER = ("num_key_value_heads", "head_dim")
+
+    def __init__(self, layers, **fields):
+        self.per_layer_config = [SimpleNamespace(num_key_value_heads=kv, head_dim=dim)
+                                 for kv, dim in layers]
+        self.__dict__.update(fields)
+
+    def __getattr__(self, name):
+        if name in self._PER_LAYER:
+            raise AmbiguousGlobalPerLayerAttributeError(
+                f"'{name}' is a per-layer attribute and may vary across layers.")
+        raise AttributeError(name)
+
+
+#: Gemma 4 12B's text shapes (the humanizer's): five sliding layers at 8 KV
+#: heads of 256, then one full-attention layer at 1 of 512, eight times.
+_GEMMA4_LAYERS = ([(8, 256)] * 5 + [(1, 512)]) * 8
+_GEMMA4_FIELDS = dict(num_hidden_layers=48, num_attention_heads=16, hidden_size=3840,
+                      intermediate_size=15360, vocab_size=262144,
+                      max_position_embeddings=262144, tie_word_embeddings=True,
+                      torch_dtype="bfloat16")
+#: 2 x (40 x 8 x 256 + 8 x 1 x 512) x 2 bytes = 344,064 bytes a token, as
+#: measured on vLLM 0.31 (0.33 MiB); at 8,192 tokens 2.625 GiB.
+_GEMMA4_KV_8192 = 2.62
+
+
+def _gemma4(**overrides):
+    return SimpleNamespace(text_config=_PerLayer(
+        _GEMMA4_LAYERS, **{**_GEMMA4_FIELDS, **overrides}), torch_dtype="bfloat16")
+
+
+class TestPerLayerAttention:
+    """A config with one attention shape per layer (Gemma 4) is summed layer
+    by layer, and no attribute that raises crashes the estimate."""
+
+    def test_the_kv_cache_is_summed_over_the_layers(self):
+        assert E.estimate_kv_gib("org/gemma4", max_model_len=8192,
+                                 config=_gemma4()) == _GEMMA4_KV_8192
+
+    def test_the_weights_are_estimated_without_raising(self):
+        weights = E.estimate_weights_gib("org/gemma4", config=_gemma4())
+        # The text model's linear layers, the full-attention layers' wider
+        # heads included, and tied embeddings in bf16: near the checkpoint's
+        # 22.28 GiB (11.96B parameters), whose small vision and audio
+        # projectors are not counted.
+        assert weights == pytest.approx(22.21, abs=0.01)
+
+    def test_one_estimate_reads_both_without_raising(self):
+        with _with(_gemma4()):
+            est = E.estimate("org/gemma4", max_model_len=8192)
+        assert (est.kv_gib, est.attention_heads) == (_GEMMA4_KV_8192, 16)
+
+    def test_the_config_json_form_is_read_layer_by_layer(self):
+        """Gemma 4's config.json: the full-attention layers' own fields."""
+        text = SimpleNamespace(
+            **_GEMMA4_FIELDS, num_key_value_heads=8, head_dim=256,
+            num_global_key_value_heads=1, global_head_dim=512,
+            layer_types=(["sliding_attention"] * 5 + ["full_attention"]) * 8)
+        assert E.estimate_kv_gib(
+            "org/gemma4", max_model_len=8192,
+            config=SimpleNamespace(text_config=text)) == _GEMMA4_KV_8192
+
+    def test_unreadable_layers_fall_back_to_every_head_and_err_high(self):
+        broken = _gemma4()
+        broken.text_config.per_layer_config = None
+        kv = E.estimate_kv_gib("org/gemma4", max_model_len=8192, config=broken)
+        # 48 layers x 16 heads x 240 (hidden / heads): above the true 2.62.
+        assert kv == pytest.approx(5.62, abs=0.01) and kv > _GEMMA4_KV_8192
+
+    def test_the_real_gemma4_config_class(self):
+        """With transformers installed, the class that raised on the pod. As
+        the checkpoint's config.json, it sets attention_k_eq_v: the class
+        takes no num_global_key_value_heads, and gives the full-attention
+        layers one KV head of 512 under attention_k_eq_v (without it, 8 KV
+        heads, and 3.5 GiB)."""
+        transformers = pytest.importorskip("transformers")
+        config_class = getattr(transformers, "Gemma4UnifiedTextConfig", None)
+        if config_class is None:
+            pytest.skip("this transformers has no Gemma4UnifiedTextConfig")
+        try:
+            config = config_class(
+                num_hidden_layers=48, num_attention_heads=16, num_key_value_heads=8,
+                head_dim=256, global_head_dim=512, attention_k_eq_v=True,
+                hidden_size=3840, intermediate_size=15360, vocab_size=262144,
+                layer_types=(["sliding_attention"] * 5 + ["full_attention"]) * 8,
+                sliding_window=1024, max_position_embeddings=262144)
+        except (TypeError, ValueError) as error:
+            pytest.skip(f"the class takes other arguments: {error}")
+        kv = E.estimate_kv_gib("org/gemma4", max_model_len=8192, dtype="bfloat16",
+                               config=config)
+        assert kv == _GEMMA4_KV_8192
+        assert E.estimate_weights_gib("org/gemma4", dtype="bfloat16",
+                                      config=config) is not None
+
+
 class TestLoadConfig:
     def test_reads_through_autoconfig_without_remote_code(self, fake_transformers):
         assert E._load_config("org/llama") is LLAMA_3B

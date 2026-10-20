@@ -2610,6 +2610,9 @@ def test_a_planner_exception_does_not_abort_the_run(tmp_path, monkeypatch, caplo
     assert [r.levelname for r in mine] == ["ERROR"]
     assert "planning failed (ZeroDivisionError" in caplog.text
     assert "continues without a plan" in caplog.text
+    # Loud about what follows, with the traceback.
+    assert "every local engine loads unplanned" in caplog.text
+    assert mine[0].exc_info is not None and mine[0].exc_info[0] is ZeroDivisionError
 
 
 def test_run_pipeline_summary_counts_engines_still_loaded(tmp_path, monkeypatch):

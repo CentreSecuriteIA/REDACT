@@ -1655,18 +1655,33 @@ class TestRegistryFootprints:
         assert reads[0] == ("jialinyyzz/humanizer", pinned)
         assert reads[1][1] is None and reads[1][0].endswith("translategemma-27b")
 
-    def test_the_humanizer_is_sized_as_the_plan_computed(self):
-        """22.8 GiB declared, KV of 48 layers x 8 heads x 256 at 8192
-        tokens in bf16 (3.0 GiB), 29.0 GiB padded: the plan's section 4.4."""
-        text = SimpleNamespace(
-            num_hidden_layers=48, num_attention_heads=16, num_key_value_heads=8,
-            head_dim=256, hidden_size=3840, intermediate_size=15360,
-            vocab_size=262144, max_position_embeddings=262144,
-            torch_dtype="bfloat16")
-        with _config(SimpleNamespace(text_config=text, torch_dtype="bfloat16")):
+    def test_the_humanizer_is_sized_from_its_per_layer_config(self):
+        """22.8 GiB declared; KV summed over 40 sliding layers at 8 x 256 and
+        8 full ones at 1 x 512, at 8192 tokens in bf16 (2.62 GiB, the
+        measured 0.33 MiB a token); 29.0 GiB padded. The config raises on
+        the global attention attributes, as transformers 5.17's does."""
+        from tests.llms.test_estimate import _gemma4
+
+        with _config(_gemma4()):
             fp = residency.footprint("humanizer-12b")
         assert (fp.parts["weights_gib"], fp.parts["kv_gib"], fp.gb) == (
-            22.8, 3.0, 29.0)
+            22.8, 2.62, 29.0)
+
+    def test_the_humanizer_and_its_checker_fit_one_96gb_card(self):
+        """The GPU test's layout: the humanizer beside the FP8 24B checker,
+        both planned on one RTX PRO 6000 (94.97 GiB)."""
+        from tests.llms.test_estimate import _gemma4
+
+        def load(source, **kwargs):
+            return _gemma4() if source == "jialinyyzz/humanizer" else MISTRAL_24B
+
+        with patch.object(estimate, "_load_config", side_effect=load):
+            plan = residency.plan_residency(
+                ["humanizer-12b", "venice-uncensored-fp8"], gpus=1,
+                gib_per_gpu=94.97)
+        assert plan.fits and not plan.oversized and len(plan.groups) == 1
+        assert {fp.model: fp.gb for fp in plan.footprints} == {
+            "humanizer-12b": 29.0, "venice-uncensored-fp8": 30.0}
 
     def test_the_translator_is_sized_from_its_packaged_config(self):
         """28.4 GiB declared, KV at its 4096 tokens, read from the shipped

@@ -175,8 +175,11 @@ def _plan_phases(
             # when that stage is entered (_enter_phase).
             residency.apply_plan(phase.plan, replace=(i == 0))
     except Exception as exc:  # noqa: BLE001 — a planning bug must not abort a run
-        logger.error("[residency] planning failed (%s: %s); the run continues "
-                     "without a plan.", type(exc).__name__, exc)
+        logger.error(
+            "[residency] planning failed (%s: %s); the run continues without a "
+            "plan, so every local engine loads unplanned, at 0.9 of a whole "
+            "card: a second engine on the same card will not start.",
+            type(exc).__name__, exc, exc_info=exc)
         return []
     return phases
 

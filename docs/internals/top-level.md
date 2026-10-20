@@ -185,8 +185,9 @@ from the package only.
    `workers` for every client built during the run.
 5. `_plan_phases`: `residency.plan_phases` over each stage's models
    (`_stage_models` resolves them as the stages will), `residency.report` per
-   distinct plan, `residency.apply_plan`. A planning error is logged, never
-   raised.
+   distinct plan, `residency.apply_plan`. A planning error is logged at
+   ERROR with its traceback, never raised; the message says that every local
+   engine then loads unplanned, at 0.9 of a card.
 6. `_check_cards`: one `nvidia-smi` read (`measure.card_use`) before any
    model loads; a `RuntimeError` naming the cards, processes and PIDs when
    another process holds memory on a card the plan uses, with the vLLM

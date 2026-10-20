@@ -225,14 +225,21 @@ role that makes few calls (the constitution).
 When any stage calls a local model, the driver plans the GPUs before the
 first stage runs. The plan is a forecast and a set of instructions to the
 loader. It never aborts a run: a plan that does not fit is logged at ERROR
-and the run goes on. [internals/residency.md](internals/residency.md) has the
+and the run goes on. So is a planning error, with its traceback; then every
+local engine loads unplanned, at 0.9 of a whole card, so a second engine on
+that card does not start. [internals/residency.md](internals/residency.md) has the
 mechanics.
 
 **Footprint.** Each local model's need is worked out without loading it. The
 weights are the setup's `vram_gb` when set, else an estimate from the
 checkpoint's HuggingFace config, else unknown. A vLLM engine adds its KV cache
 at its `max_model_len`, or at 10,000 tokens capped at the checkpoint's own
-maximum. The padded need per card is (weights + KV) x 1.1 + 0.6 GiB. Two
+maximum. For a checkpoint whose attention shape varies by layer (Gemma 4,
+whose full-attention layers have fewer, wider KV heads than its sliding
+ones), the KV cache is summed layer by layer, every layer at the full
+context, as vLLM allocates it; a config field that cannot be read (in
+transformers 5.17 a per-layer attribute read globally raises) counts as
+unset, so an estimate never fails a plan. The padded need per card is (weights + KV) x 1.1 + 0.6 GiB. Two
 registry entries with the same checkpoint, quantization and engine kwargs
 share one engine and are counted once (`venice-paraphraser` and the local
 setup of `venice-uncensored` do).
@@ -550,6 +557,7 @@ rate. [internals/telemetry.md](internals/telemetry.md) lists the events.
 | WARNING `<model>: a reply was cut at the token limit (max_tokens=N) ...`, then `[<stage>] <model>: N replies were cut at the token limit and are incomplete.` | Replies hit `max_tokens` or the context: the first one per stage and model warns, the stage's end counts them, and `summary["telemetry"]["cut"]` holds the counts | Raise `default_max_tokens` or `max_model_len`, or ask for shorter replies |
 | The same WARNING for the paraphraser, in the `paraphrase` stage | Expected: each paraphrase is capped at about 2.5 times its original's tokens (`reply_cap`), so a reply that runs on into a post is cut there. With the check on, the length gate usually rejects it (a cut reply in Chinese or Japanese can pass the gate and go to the check model) | Nothing, unless many are cut: then read the rejected rows' `reasoning` |
 | WARNING `Entry ... rejected, its prompt is too long` (inputs) or `Input ... rejected, its prompt is too long` (outputs) | One prompt is longer than the model's context. On the async lane (an OpenAI-compatible endpoint or vLLM) the inputs stage acks the entry rejected and the outputs stage writes a rejected row; the jailbreak stage writes an error row for that unit | Raise `max_model_len`, or shorten the input |
+| ERROR `[residency] planning failed (...)`, then an engine fails with `Free memory on device ... is less than desired GPU memory utilization` | The planner raised, so every local engine loaded unplanned at 0.9 of a card, and the second engine on that card had no room | Read the traceback after the ERROR and report it; meanwhile serve one local model per card, or a hosted model for one role |
 | `PromptTooLongError` stops a stage | A prompt longer than the context of an Anthropic or introspection model, in any stage (grouped calls; the failed `generate()` stops the stage). The constitution stage and the benign data stop on any model, since they do not handle it per unit; on the async lane the paraphrase stage acks the unit `prompt_too_long` | Shorten the input, or serve that role on a model with a longer context |
 | A stage stops on a provider error (for example 429, model overloaded) | A failed call is the transport failing, so it stops the stage; the SDK retries it `max_retries` times first (2 by default) | Resume: finished units are kept; raise `max_retries` or `timeout_s` on the model's `api` setup |
 | WARNING `GPU cost reported as $0` | Local GPUs held, and no GPU price set | Set a rate (see above) |
