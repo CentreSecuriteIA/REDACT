@@ -11,10 +11,12 @@ fingerprint from the text; as an opt-in, of the accepted outputs too
 paraphrase keeps its original's meaning. Paraphrases are extra rows, never
 replacements.
 
-The shipped paraphraser, `venice-paraphraser`, is a stand-in: it loads the
-same 24B weights as the local setup of `venice-uncensored`. The trained
-defingerprinting model lives in another repository; register it with the
-`paraphraser` role when you have it.
+The shipped paraphraser is `humanizer-12b`, self-hosted on vLLM: Gemma 4 12B
+fine-tuned to rewrite model drafts as human text, keeping every fact.
+`venice-paraphraser`, the generator's own 24B weights, stood in before it and
+stays callable by name, for comparison. The trained defingerprinting model
+lives in another repository; register it with the `paraphraser` role when you
+have it.
 
 ## Inputs
 
@@ -44,12 +46,12 @@ stripped before it is rendered.
 
 | Recipe role | Registry role | Default |
 |---|---|---|
-| `paraphraser` | `paraphraser` | `venice-paraphraser` (local vLLM) |
+| `paraphraser` | `paraphraser` | `humanizer-12b` (local vLLM, 12B) |
 | `paraphrase_check` | `uncensored_gen` | `venice-uncensored` (hosted) |
 
-Two models have the `paraphraser` role: `venice-paraphraser`, the default,
-and `humanizer-12b`, a self-hosted Gemma 4 12B fine-tuned to rewrite model
-drafts as human text (name it, or use `"distribution"`). The humanizer is a
+`humanizer-12b` is the one model with the `paraphraser` role, so it is the
+default and the whole `"distribution"` pool; `venice-paraphraser` holds no
+role and runs only when a recipe names it. The humanizer is a
 text-completion model: its prompt, `prompts/paraphrase/generation/humanizer-12b/`,
 is the model card's format, the card's instruction, a blank line, the
 stripped draft, then `\n\n### Rewritten:\n\n`, after `<bos>`. The entry

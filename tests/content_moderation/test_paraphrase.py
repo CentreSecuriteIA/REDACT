@@ -108,6 +108,15 @@ def _render_chat_template(messages: list[dict]) -> str:
                            add_generation_prompt=True)
 
 
+class TestThePool:
+    def test_the_distribution_is_the_humanizer_alone(self):
+        assert CP.paraphrase_pool("distribution") == ["humanizer-12b"]
+        assert CP.paraphrase_pool(None) == ["humanizer-12b"]
+
+    def test_the_stand_in_is_still_a_name(self):
+        assert CP.paraphrase_pool("venice-paraphraser") == ["venice-paraphraser"]
+
+
 class TestHumanizerPrompt:
     """The packaged prompt renders the model card's string, byte for byte."""
 

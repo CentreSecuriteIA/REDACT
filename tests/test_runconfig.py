@@ -16,6 +16,7 @@ import pytest
 from redact import paths, telemetry
 from redact.driver import read_record, run_pipeline, write_record
 from redact.jailbreak.augmentation import resolve
+from redact.llms.model_config import default_model_for_role
 from redact.recipe import augmentations_of, load_params, load_recipe
 from tests.conftest import save_constitution, write_inputs
 
@@ -1547,7 +1548,8 @@ def test_the_object_form_is_read_per_model():
     ({"gen": {"backend_type": "vllm"}},
      {"venice-uncensored": {"backend_type": "vllm"}}),
     ({"translation": {"copies": 1}}, {"translategemma-27b": {"copies": 1}}),
-    ({"paraphraser": {"copies": 1}}, {"venice-paraphraser": {"copies": 1}}),
+    ({"paraphraser": {"copies": 1}},
+     {default_model_for_role("paraphraser"): {"copies": 1}}),
     # check without a name is the generation model.
     ({"gen": "llama-3.2-3b-debug", "check": {"copies": 1}},
      {"llama-3.2-3b-debug": {"copies": 1}}),
@@ -1815,7 +1817,9 @@ def test_a_training_run_reads_the_inputs_it_seeded(tmp_path, monkeypatch):
         and its check get the ParaphraseBackend's (PARA::<text>, Yes)."""
 
         def generate(self, messages_list, **kwargs):
-            if messages_list[0][-1]["content"].startswith(("ORIGINAL:\n", "TEXT:\n")):
+            content = messages_list[0][-1]["content"]
+            if (content.startswith(("ORIGINAL:\n", "TEXT:\n"))
+                    or "\n\n### Rewritten:" in content):    # the humanizer's
                 return super().generate(messages_list, **kwargs)
             return MockBackend.generate(self, messages_list, **kwargs)
 
@@ -2077,11 +2081,12 @@ def test_stage_models_follow_the_order_the_stages_run():
     assert _stage_models(_models(), ALL_STAGES, translating) == [
         "claude-opus-4-6",        # constitution
         "venice-uncensored",      # inputs: gen, and check falls back to it
-        "venice-paraphraser",     # paraphrase
+        default_model_for_role("paraphraser"),     # paraphrase
         "translategemma-27b",     # jailbreaks: translation
     ]
     assert _stage_models(_models(), ["jailbreaks", "paraphrase"], translating) == [
-        "venice-uncensored", "translategemma-27b", "venice-paraphraser",
+        "venice-uncensored", "translategemma-27b",
+        default_model_for_role("paraphraser"),
     ]
     # Translation is on by default, in the attacks.
     assert _stage_models(_models(), ["jailbreaks"], {}) == [
@@ -2118,7 +2123,7 @@ def test_a_paraphraser_pool_plans_every_model_in_it(local_models):
 
     extra = local_models("_rc_paraphraser", roles=["paraphraser"])
     wanted = _stage_models(_models(paraphraser="distribution"), ["paraphrase"], {})
-    assert wanted == ["venice-paraphraser", "humanizer-12b", extra, "venice-uncensored"]
+    assert wanted == ["humanizer-12b", extra, "venice-uncensored"]
 
 
 def _one_card(gib):
@@ -2572,7 +2577,6 @@ def test_served_lists_a_pool_and_names_no_model_for_a_role_no_stage_calls(
     assert served == {
         "paraphraser": [
             # No plan: the recipe's count, or none for one left to the plan.
-            {"name": "venice-paraphraser", "backend_type": "vllm", "copies": None},
             {"name": "humanizer-12b", "backend_type": "vllm", "copies": None},
             {"name": extra, "backend_type": "vllm", "copies": 2}],
         "paraphrase_check": {

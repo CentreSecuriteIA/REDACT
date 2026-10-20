@@ -656,16 +656,16 @@ judge a back-translation.
 | `llama-3.2-3b-debug` | `vllm`, 3B, `max_model_len` 384 | | `debug_local` | |
 | `claude-opus-4-6` | `api` (Anthropic) | | `constitution_gen` | 5 rpm, 1 worker, endpoint window |
 | `claude-opus-5-5` | `api` (OpenRouter) | | `constitution_gen` | 600 rpm, 8 workers |
-| `venice-paraphraser` | `vllm`, same weights and `fp8` as `venice-uncensored-fp8`, one engine with it | | `paraphraser` | |
 | `humanizer-12b` | `vllm`, bf16, `max_model_len` 8192, `vram_gb` 22.8, `chat_template`, revision pinned | | `paraphraser` | temperature 1.0, `top_p` 0.95, `top_k` 0 |
+| `venice-paraphraser` | `vllm`, same weights and `fp8` as `venice-uncensored-fp8`, one engine with it | | | named in a recipe |
 
-`humanizer-12b` is a self-hosted paraphraser: Gemma 4 12B fine-tuned to
+`humanizer-12b` is the default paraphraser, self-hosted: Gemma 4 12B fine-tuned to
 rewrite model drafts as human text, keeping every fact. It is a
 text-completion model with no chat template of its own: its entry's
 `chat_template` passes the prompt through after `<bos>`, and its prompt
 `prompts/paraphrase/generation/humanizer-12b/` is the model card's format,
 checked at the stage's start by its `fingerprint` key. `venice-paraphraser`
-is a stand-in that loads the generator's own 24B weights. A trained
+is the generator's own weights, kept for comparison: name it. A trained
 defingerprinting model lives in another repository; register it with the
 `paraphraser` role.
 

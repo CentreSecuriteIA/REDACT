@@ -72,7 +72,7 @@ python scripts/run.py src/redact/configs/runs/training_example.json --data-dir .
 ```
 
 The merged dataset lands in `./runs/first/Datasets/complete_dataset.csv`.
-The `paraphrase` stage loads a 24B model on a local GPU; take it out of the
+The `paraphrase` stage loads a 12B model on a local GPU; take it out of the
 recipe's `stages` to run on hosted models only. `eval_example.json` makes a
 small eval set the same way, as `eval_inputs.csv`, `eval_outputs.csv` and
 `eval_jailbreaks.csv`. A recipe's `dataset_type`, `training` or `eval`, picks

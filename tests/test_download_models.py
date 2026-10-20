@@ -83,9 +83,15 @@ def test_two_pins_of_one_checkpoint_stop_the_download(script, monkeypatch, capsy
 
 
 def test_a_paraphraser_brings_the_language_identifier(script):
-    """The paraphrase check's language gate reads GlotLID too."""
-    assert script.checkpoints(["venice-paraphraser"])["cis-lmu/glotlid"] == [
-        "venice-paraphraser"]
+    """The paraphrase check's language gate reads GlotLID too; a model named
+    for comparison, with no role, brings nothing."""
+    assert script.checkpoints(["humanizer-12b"])["cis-lmu/glotlid"] == [
+        "humanizer-12b"]
+    assert "cis-lmu/glotlid" not in script.checkpoints(["venice-paraphraser"])
+
+
+def test_every_local_checkpoint_includes_the_default_paraphraser(script):
+    assert script.checkpoints()["jialinyyzz/humanizer"] == ["humanizer-12b"]
 
 
 def test_a_checkpoint_with_a_replaced_config_is_fetched_whole(script, monkeypatch):

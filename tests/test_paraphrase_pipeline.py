@@ -14,6 +14,7 @@ import pytest
 import redact.content_moderation.paraphrase as CP
 from redact import generate_paraphrases, paths
 from redact.dataset import content_id
+from redact.llms.model_config import default_model_for_role
 from tests.conftest import (
     Killed,
     ParaphraseBackend,
@@ -24,6 +25,9 @@ from tests.conftest import (
     pinned_pool,
     write_inputs,
 )
+
+#: The paraphraser a call that names none gets.
+_DEFAULT = default_model_for_role("paraphraser")
 
 
 @pytest.fixture(autouse=True)
@@ -86,7 +90,7 @@ def test_paraphrase_inputs_dedup_and_manifest(tmp_path, patched):
     # 2 inputs x K=2 = 4 units, but PARA::<text> is identical across k -> dedup to 1/input.
     assert set(df["sample"]) == {"PARA::alpha prompt", "PARA::beta prompt"}
     assert bool((df["accepted"] == True).all())  # noqa: E712
-    assert set(df["paraphrase_model"]) == {"venice-paraphraser"}
+    assert set(df["paraphrase_model"]) == {_DEFAULT}
     out = paths.paraphrases_inputs_csv(tmp_path)
     assert out.exists()
     assert out.with_name("paraphrases_inputs.manifest.jsonl").exists()
@@ -614,7 +618,7 @@ def test_a_save_is_one_append_followed_by_its_acks(tmp_path, patched):
     statuses = ["dropped_dedup", "accepted", "accepted", "accepted"]
     assert _acks(tmp_path) == [
         {"input_id": content_id(text), "iteration": 0,
-         "paraphrase_model": "venice-paraphraser", "status": status}
+         "paraphrase_model": _DEFAULT, "status": status}
         for text, status in zip(_FINISHED, statuses)
     ]
 
@@ -864,7 +868,7 @@ def test_an_unchanged_or_repeated_paraphrase_gets_no_check_call(tmp_path, patche
         data_dir=tmp_path, verbose=False)
     assert _asked(requests) == ["alpha prompt"] and _checks(requests) == []
     assert _acks(tmp_path)[-1] == {"input_id": "another-id", "iteration": 0,
-                                   "paraphrase_model": "venice-paraphraser",
+                                   "paraphrase_model": _DEFAULT,
                                    "status": "dropped_dedup"}
 
 
@@ -1081,8 +1085,8 @@ def test_each_paraphrasers_units_go_to_the_pool_with_both_clients(tmp_path, patc
     patched.setattr(CP, "drive_units", drive_units)
     _seed_inputs(tmp_path)
     generate_paraphrases(data_dir=tmp_path, batch_size=4, verbose=True)
-    assert seen == {"clients": ["venice-paraphraser", "venice-uncensored"],
-                    "progress": "paraphrase:inputs (venice-paraphraser)", "cap": 4}
+    assert seen == {"clients": [_DEFAULT, "venice-uncensored"],
+                    "progress": f"paraphrase:inputs ({_DEFAULT})", "cap": 4}
 
 
 # --- the default target: the inputs ------------------------------------------
@@ -1184,10 +1188,10 @@ def test_a_short_text_is_acked_skipped_with_no_call(tmp_path, patched):
     assert list(df["sample"]) == [f"PARA::{_LONG}"]
     assert _acks(tmp_path) == [
         {"input_id": content_id(_SHORT), "iteration": 0,
-         "paraphrase_model": "venice-paraphraser", "status": "skipped",
+         "paraphrase_model": _DEFAULT, "status": "skipped",
          "reason": "short", "min_words": 12},
         {"input_id": content_id(_LONG), "iteration": 0,
-         "paraphrase_model": "venice-paraphraser", "status": "accepted"}]
+         "paraphrase_model": _DEFAULT, "status": "accepted"}]
     planned = Manifest.sidecar(paths.paraphrases_inputs_csv(tmp_path)).load()
     assert {r["input_id"]: r["status"] for r in planned} == {
         content_id(_SHORT): "skipped", content_id(_LONG): "planned"}

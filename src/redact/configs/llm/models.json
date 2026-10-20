@@ -181,22 +181,6 @@
     },
     "notes": "Claude Opus 5.5 through OpenRouter (OpenAI-compatible endpoint). OpenRouter states no rate limit, so rpm=600 is only a ceiling: the limiter needs a number. Prices are Anthropic's list price ($4/$20 per 1M in/out, 2026-10); check them against OpenRouter. Leave default_temperature unset: this model rejects sampling settings. It is not the constitution_gen default while claude-opus-4-6 is listed before it: name it in the recipe, or move this entry above that one."
   },
-  "venice-paraphraser": {
-    "backend_type": "vllm",
-    "roles": [
-      "paraphraser"
-    ],
-    "is_uncensored": true,
-    "supports_system_prompt": true,
-    "default_max_tokens": 2000,
-    "default_temperature": 0.8,
-    "vllm": {
-      "hf_model_id": "dphn/Dolphin-Mistral-24B-Venice-Edition",
-      "quantization": "fp8",
-      "vram_gb": 24.9
-    },
-    "notes": "A DEDICATED model with its OWN identity, not an alias. The real defingerprinting model is trained separately and unavailable here, so as a stand-in this entry loads the SAME HF weights as venice-uncensored's local setup, quantized to FP8 on load as venice-uncensored-fp8 is — it is its own model that happens to share weights. Swap hf_model_id, or register the real paraphraser with roles=['paraphraser'], when it lands. Shares venice-uncensored-fp8's checkpoint, quantization and kwargs, so it shares its engine AND its footprint (vram_gb=24.9: weights plus the non-torch share, GiB) - the planner counts the load once, not twice. Beside the bf16 venice-uncensored setup it is a second load."
-  },
   "humanizer-12b": {
     "backend_type": "vllm",
     "roles": [
@@ -226,6 +210,20 @@
       },
       "vram_gb": 22.8
     },
-    "notes": "Humanizer 12B (jialinyyzz/humanizer): Gemma 4 12B, the pretrained checkpoint, fine-tuned to rewrite model drafts into human-style text while keeping every fact (SFT on pairs of a model draft and its human original, then DPO and GRPO with a copy penalty). A self-hosted paraphraser, listed after venice-paraphraser. It is a text-completion model with no chat template: chat_template passes the folded prompt through after <bos> and refuses anything but one user message. Its prompt is prompts/paraphrase/generation/humanizer-12b, which must match the model card byte for byte (its fingerprint key, checked at the paraphrase stage's start); supports_system_prompt false folds the instruction into the user message with the card's blank line. max_model_len 8192, as the card serves it (the architecture takes 262,144 tokens; training examples were at most 2,560 tokens). default_max_tokens 2048 is the author's app ceiling, about 2.5 times a draft's tokens. Sampling is the card's: temperature 1.0, top_p 0.95, min_p 0, and top_k 0 set explicitly, since the checkpoint's generation_config.json says 64. vram_gb 22.8, measured on vLLM 0.31 ('Model loading took 22.83 GiB', 2026-10-20); KV 0.33 MiB a token, measured. The multimodal limits at 0 keep the encoder-free vision and audio paths out of the memory profile. revision is pinned, since the repository changes often, and tokenizer_revision equals it; the estimator reads its config at the same revision. scripts/download_models.py fetches the pinned snapshot without the repository's GGUF files. is_uncensored false until measured on harmful text; no code reads it. Measured on benign text only: responses 98.7% accepted; inputs of 12 words and more about 85% under the strict check; under 12 words it writes a headline and a post (the stage's short-text skip); it flattens Markdown (accepted); one English input of 819 came back in Chinese (the script gate). Apache 2.0."
+    "notes": "Humanizer 12B (jialinyyzz/humanizer): Gemma 4 12B, the pretrained checkpoint, fine-tuned to rewrite model drafts into human-style text while keeping every fact (SFT on pairs of a model draft and its human original, then DPO and GRPO with a copy penalty). The default paraphraser: the first entry with the paraphraser role. It is a text-completion model with no chat template: chat_template passes the folded prompt through after <bos> and refuses anything but one user message. Its prompt is prompts/paraphrase/generation/humanizer-12b, which must match the model card byte for byte (its fingerprint key, checked at the paraphrase stage's start); supports_system_prompt false folds the instruction into the user message with the card's blank line. max_model_len 8192, as the card serves it (the architecture takes 262,144 tokens; training examples were at most 2,560 tokens). default_max_tokens 2048 is the author's app ceiling, about 2.5 times a draft's tokens. Sampling is the card's: temperature 1.0, top_p 0.95, min_p 0, and top_k 0 set explicitly, since the checkpoint's generation_config.json says 64. vram_gb 22.8: 22.83 GiB of weights measured on vLLM 0.31; KV 0.33 MiB a token measured, which the planner sums layer by layer to 2.62 GiB at 8,192 tokens. The multimodal limits at 0 keep the encoder-free vision and audio paths out of the memory profile. revision is pinned, since the repository changes often, and tokenizer_revision equals it; the estimator reads its config at the same revision. scripts/download_models.py fetches the pinned snapshot without the repository's GGUF files. is_uncensored false until measured on harmful text; no code reads it. Measured by the GPU check (2026-10-21, this revision, REDACT's paraphrase stage as shipped, beside the venice-uncensored-fp8 checker on one 96 GB card, benign text only): 96.8% of the 434 inputs sent accepted, 0% language drift, 0 replies cut, 87 inputs under 12 words skipped, about 1,240 units a minute. Under 12 words it writes a headline and a post (hence the short-text skip), and it flattens Markdown (accepted). Apache 2.0."
+  },
+  "venice-paraphraser": {
+    "backend_type": "vllm",
+    "roles": [],
+    "is_uncensored": true,
+    "supports_system_prompt": true,
+    "default_max_tokens": 2000,
+    "default_temperature": 0.8,
+    "vllm": {
+      "hf_model_id": "dphn/Dolphin-Mistral-24B-Venice-Edition",
+      "quantization": "fp8",
+      "vram_gb": 24.9
+    },
+    "notes": "Kept for comparison, by name: it holds no role, so no default and no \"distribution\" pool picks it; name it as a recipe's paraphraser. It loads the SAME HF weights as venice-uncensored's local setup, quantized to FP8 on load as venice-uncensored-fp8 is: the generator's own checkpoint, which stood in as the paraphraser before humanizer-12b. Shares venice-uncensored-fp8's checkpoint, quantization and kwargs, so it shares its engine AND its footprint (vram_gb=24.9: weights plus the non-torch share, GiB) - the planner counts the load once, not twice. Beside the bf16 venice-uncensored setup it is a second load."
   }
 }

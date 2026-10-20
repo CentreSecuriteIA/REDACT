@@ -955,6 +955,15 @@ class TestVLLMChatTemplate:
 class TestHumanizerEntry:
     """The humanizer 12B: a text-completion paraphraser with its own template."""
 
+    def test_it_is_the_default_paraphraser(self):
+        from redact.llms.model_config import default_model_for_role
+
+        assert default_model_for_role("paraphraser") == "humanizer-12b"
+
+    def test_the_stand_in_is_kept_by_name_with_no_role(self):
+        cfg = get_model_config("venice-paraphraser")
+        assert cfg.roles == [] and cfg.vllm is not None
+
     def test_the_entry_is_as_the_card_serves_the_model(self):
         cfg = get_model_config("humanizer-12b")
         assert cfg.roles == ["paraphraser"] and cfg.backend_type == "vllm"

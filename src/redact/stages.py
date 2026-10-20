@@ -930,7 +930,7 @@ def generate_paraphrases(
         if check_model in pool:
             warnings.warn(
                 f"paraphrase check_model ({check_model}) is also a paraphraser - validation is "
-                f"not independent (expected under the placeholder paraphraser setup).",
+                f"not independent.",
                 stacklevel=2,
             )
 

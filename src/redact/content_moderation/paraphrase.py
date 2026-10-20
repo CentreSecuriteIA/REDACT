@@ -1,7 +1,8 @@
 """The paraphrase stage: K checked paraphrases per row, over a pool of paraphrasers.
 
-Any capable model of the ``paraphraser`` role stands in for the trained
-defingerprinting model, which lives in another repository.
+The default paraphraser is the humanizer 12B (``humanizer-12b``), self-hosted;
+any model of the ``paraphraser`` role can join the pool. The trained
+defingerprinting model lives in another repository.
 
 Each paraphraser's units run on the ``drive_units`` pool, one paraphraser
 at a time, each unit with its own reply cap (:func:`reply_cap`). Each

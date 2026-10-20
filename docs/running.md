@@ -176,7 +176,7 @@ that lists that role.
 | `check` | inputs, outputs | `uncensored_gen` | the `gen` model |
 | `translation` | jailbreaks, only when a kind's pool holds a translation technique (`"translation": true`: the packaged attacks, and the eval type's) | `translation` | `translategemma-27b`, local vLLM (27B, FP8); `deepseek-v3.2` by name for a hosted run |
 | `constitution` | constitution | `constitution_gen` | `claude-opus-4-6`, hosted (Anthropic) |
-| `paraphraser` | paraphrase | `paraphraser` | `venice-paraphraser`, local vLLM (24B weights) |
+| `paraphraser` | paraphrase | `paraphraser` | `humanizer-12b`, local vLLM (12B, bf16) |
 | `paraphrase_check` | paraphrase | `uncensored_gen` | `venice-uncensored`, hosted |
 
 A key under `models` must be one of these six roles, whatever its value; a
@@ -241,8 +241,8 @@ context, as vLLM allocates it; a config field that cannot be read (in
 transformers 5.17 a per-layer attribute read globally raises) counts as
 unset, so an estimate never fails a plan. The padded need per card is (weights + KV) x 1.1 + 0.6 GiB. Two
 registry entries with the same checkpoint, quantization and engine kwargs
-share one engine and are counted once (`venice-paraphraser` and the local
-setup of `venice-uncensored` do).
+share one engine and are counted once (`venice-paraphraser` and
+`venice-uncensored-fp8` do).
 
 **Placement and grants.** The vLLM engines on a card split 0.9 of it: each
 gets its padded need plus an equal share of what is left, and loads with that
