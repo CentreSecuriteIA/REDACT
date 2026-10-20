@@ -387,6 +387,29 @@ the same way.
   Start the stage over to try them again.
 - A file you edited stops the resume (see the table below).
 
+**Folders and setups from before the answer modes of the outputs stage.**
+
+- An outputs folder (`output_responses.*`) stops a resume before any call:
+  its ledger acks units without an `iteration`, or its file lacks the
+  `iteration` and answer-mode columns. Run the outputs stage with
+  `"resume": false`, or in a new `data_dir`.
+- The paraphrases of outputs stop the same way (acks without a
+  `response_id`): run the paraphrase stage with `"resume": false` and
+  `target: "outputs"`, which leaves the paraphrases of the inputs as they
+  are.
+- A prompt overlay of `output/generation/` or `output/quality_check/` is no
+  longer read: each is now one prompt per answer mode, under `<mode>/`.
+  `report_prompt_sources` warns `moved override: ...`; move the file to
+  `harmful/`, and write a `helpful/` one if wanted.
+- A `config_dir` written by `scaffold_setup` before the change holds a copy
+  of the former `dataset_types/training.json`, which it reads in place of
+  the packaged one: its training runs keep one response per input, with no
+  answer of each mode for a borderline input, and nothing warns. Add
+  `"outputs": {"outputs_per_input": 2}` to that file's `params`, or delete
+  the file to follow the packaged one.
+- `eval_outputs.csv`'s `label` is now `<entry_type>_<output_label>`, while
+  the other eval files keep the entry types ([build](stages/build.md#eval-mode)).
+
 ## What lands on disk
 
 A training run of all six stages, under `<data_dir>`:
@@ -533,7 +556,8 @@ rate. [internals/telemetry.md](internals/telemetry.md) lists the events.
 | `ValueError: Outputs: this run's ['outputs_per_input'] differ from those the responses in output_responses.csv were dealt with ...` (or `['modes']`) | A resume with another `outputs.outputs_per_input` or `outputs.modes` (or seed, or axes' weights) than the plan file's; a training folder of one response per input resumed with the type's 2 is one | Run the outputs stage with `"resume": false`, or with the plan's settings |
 | `ValueError: Outputs: N input(s) have no entry type (a missing, NaN or empty entry_type cell), first [...] ...` | Inputs given to the outputs stage with blank `entry_type` cells, such as a merged frame or a hand-edited `samples.csv`; raised before anything is cleared | Give each input one of the four entry types (a frame without the column at all is answered as `harmful`, with a WARNING) |
 | `ValueError: Outputs: the inputs hold the entry type(s) [...], which outputs.modes does not map ...` | An input whose `entry_type` is none of the four; raised before anything is cleared | Fix the inputs' entry types |
-| WARNING `unused override: output/generation` (or `ignored override`) | A prompt overlay of the single output prompt; the outputs stage reads one per answer mode | Move it to `output/generation/harmful/` (and write `helpful/` if wanted) |
+| WARNING `moved override: output/generation` (or `output/quality_check`) | A prompt overlay of the single output prompt or checker; the outputs stage reads one of each per answer mode | Move it to `output/generation/harmful/` (or `output/quality_check/harmful/`), and write `helpful/` if wanted |
+| A training run writes one response per input | Its recipe's `config_dir` holds a `dataset_types/training.json` scaffolded before `outputs.outputs_per_input` 2 | Add `"outputs": {"outputs_per_input": 2}` to that file's `params`, or delete the file |
 | `ValueError: .../paraphrases_outputs.state.jsonl acks units without a response_id ...` or `Cannot append to .../paraphrases_outputs.csv: its header has no column 'response_id' ...` | A resume of the outputs target onto paraphrases written when its units were keyed on the input answered | Run the paraphrase stage with `"resume": false` and `target: "outputs"` (the inputs' paraphrases stay), or in a new `data_dir` |
 | WARNING `Outputs: rows without a response_label, written before the answer modes, take their entry_type as their label in eval_outputs.csv.` | An eval build from an output or paraphrase file written before the answer modes | Run the outputs (and paraphrase) stage again with `"resume": false` for the compound labels |
 | `ValueError: variation: this run's ['pool'] differ from those the plan variations.manifest.jsonl was made with ...` | A natural plan made before the spec's `kinds` narrowed the natural pool to 46 techniques | Run the natural kind with `"resume": false` ([techniques.md](techniques.md#the-natural-pool)) |

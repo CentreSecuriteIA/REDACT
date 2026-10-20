@@ -461,17 +461,19 @@ class TestPromptOverlay:
         assert summary["unused"] == ["input/quality_chek"]
         assert "never loaded" in caplog.text
 
-    def test_an_overlay_of_the_single_output_generation_prompt_is_unused(
-            self, tmp_path, caplog):
-        """The outputs stage reads a prompt per answer mode, under
-        ``output/generation/<mode>/``; an overlay of the one prompt it read
-        before overrides nothing."""
-        self._override(tmp_path, "output", "generation", "MINE")
+    @pytest.mark.parametrize("category", ["generation", "quality_check"])
+    def test_an_overlay_of_a_single_output_prompt_is_named_as_moved(
+            self, tmp_path, caplog, category):
+        """The outputs stage reads a prompt and a checker per answer mode,
+        under ``output/<category>/<mode>/``; an overlay of the one it read
+        before overrides nothing, and the warning says where it goes."""
+        self._override(tmp_path, "output", category, "MINE")
         with caplog.at_level(logging.WARNING, logger="redact.llms.prompting.prompts"):
             summary = report_prompt_sources(tmp_path)
         assert summary["overridden"] == []
-        assert summary["unused"] == ["output/generation"]
-        assert "output/generation" in caplog.text
+        assert summary["unused"] == [f"output/{category}"]
+        assert f"moved override: output/{category}" in caplog.text
+        assert f"move it to output/{category}/harmful/" in caplog.text
 
 
 class TestPromptTemplateLoad:

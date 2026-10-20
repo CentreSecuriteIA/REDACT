@@ -47,9 +47,12 @@ label: the input's entry type and the mode's output label, as
   shows the row's spec; a prompt without it is warned about, naming its
   folder. The checker is not shown the spec: its messages are those of a
   run without axes. An overlay written before the modes, a prompt file
-  directly in `<prompt_dir>/output/generation/`, overrides nothing, and
-  `report_prompt_sources` lists it as an unused override
-  (`output/generation`): move it to `generation/harmful/`.
+  directly in `<prompt_dir>/output/generation/` or
+  `<prompt_dir>/output/quality_check/`, overrides nothing:
+  `report_prompt_sources` warns `moved override: output/generation` (or
+  `output/quality_check`) and names its new place. Move it to
+  `generation/harmful/` (or `quality_check/harmful/`), and write a
+  `helpful/` one if wanted.
 - The `outputs` section of `generation_axes.json`, a recipe's `config_dir`'s
   when it has one ([configuration.md](../configuration.md#the-generation-axes)).
 

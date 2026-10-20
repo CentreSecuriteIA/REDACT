@@ -190,6 +190,14 @@ def get_format_instruction(
     return _render(config["instruction"], {"num_samples": count}, what)
 
 
+#: Prompts that became one per mode: an override of the former name is
+#: never loaded, and the report says where it goes now.
+_MOVED_PROMPTS = {
+    "output/generation": "output/generation/<mode>/",
+    "output/quality_check": "output/quality_check/<mode>/",
+}
+
+
 def report_prompt_sources(
     prompt_dir: str | Path | None = None,
 ) -> dict[str, list[str]]:
@@ -198,8 +206,10 @@ def report_prompt_sources(
     This lists the files present: a stage reads an override only if it
     passes ``prompt_dir`` to the loader. Also warns when ``prompt_dir`` is
     not a directory, and about override directories no packaged prompt
-    resolves to, such as a misspelled ``input/quality_chek/`` or one with
-    several ``.json`` files and no ``template.json``.
+    resolves to, such as a misspelled ``input/quality_chek/``, one with
+    several ``.json`` files and no ``template.json``, or one of a prompt
+    that moved (``output/generation/``, ``output/quality_check/``, now one
+    per answer mode), whose warning names the new place.
 
     Args:
         prompt_dir: The override directory, or ``None``.
@@ -250,7 +260,14 @@ def report_prompt_sources(
             logger.debug("  overrides: %s", ", ".join(overridden))
     # Unused overrides are always listed, since each one is a mistake.
     for name in unused:
-        if name in packaged:
+        if name in _MOVED_PROMPTS:
+            moved = _MOVED_PROMPTS[name]
+            logger.warning(
+                "  moved override: %s — this prompt is now one per answer mode, "
+                "under %s (harmful, helpful), so this file is never loaded; move "
+                "it to %s", name, moved, moved.replace("<mode>", "harmful"),
+            )
+        elif name in packaged:
             logger.warning(
                 "  ignored override: %s — several .json files and no "
                 "template.json, so the packaged prompt is used", name,

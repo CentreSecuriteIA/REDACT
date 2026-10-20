@@ -48,7 +48,8 @@ file's are, before the first stage runs, and each run record's `params`
 holds the merged values. Each record also holds `dataset_type` and
 `dataset_type_hash`, the content id of the type file as parsed. A recipe's
 [`config_dir`](#your-own-config-folder) may hold its own `eval.json` or
-`training.json`, read in place of the packaged one. There are no other
+`training.json`, read in place of the packaged one, whole: a copy made
+before a change to the packaged file keeps the old values. There are no other
 types: a recipe naming one stops when it loads, before any stage runs.
 
 | | `training.json` | `eval.json` |
@@ -721,7 +722,10 @@ start from:
 
 A scaffolded recipe runs exactly as its packaged example until a file is
 changed. Every file in the folder wins over the packaged copy, so delete each
-file you do not change to keep getting the library's updates to it. It
+file you do not change to keep getting the library's updates to it. A
+folder scaffolded before `training.json` set `outputs.outputs_per_input` 2
+keeps its old copy, and so one response per input in a training run: add
+the key, or delete the copy. It
 refuses to overwrite a file the folder holds, naming them, unless asked to.
 Prompts are a separate tier: [the prompt overlay](#the-prompt-overlay) and
 `scripts/scaffold_prompts.py`.
