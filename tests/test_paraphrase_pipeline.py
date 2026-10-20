@@ -106,6 +106,22 @@ def test_the_stage_paraphrases_the_frame_it_is_given_into_the_file_it_is_given(
     assert not paths.datasets(tmp_path).exists()
 
 
+def test_a_paraphrase_equal_to_its_padded_original_stripped_is_dropped(
+        tmp_path, patched):
+    patched.setattr(CP, "paraphrase_batch",
+                    lambda client, texts, **kw: [t.strip() for t in texts])
+    out = tmp_path / "paraphrased.csv"
+    CP.run_paraphrase_target(
+        "inputs", pd.DataFrame({"sample": ["  alpha prompt \n"]}), out,
+        pool=["venice-paraphraser"], check=None, k=1, batch_size=8, seed=0,
+        verbose=False)
+    assert not out.exists()
+    (ack,) = [json.loads(line) for line in
+              out.with_name("paraphrased.state.jsonl").read_text().splitlines()
+              if "status" in line]
+    assert ack["status"] == "dropped_dedup"
+
+
 def test_paraphrase_resume_is_idempotent(tmp_path, patched):
     _seed_inputs(tmp_path)
     generate_paraphrases(data_dir=tmp_path, target="inputs", verbose=False)

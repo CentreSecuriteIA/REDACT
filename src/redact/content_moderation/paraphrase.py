@@ -213,6 +213,24 @@ def gate_reason(original: str, paraphrase: str) -> str:
     return ""
 
 
+def paraphrase_prompt(
+    model: str, prompt_dir: str | Path | None = None,
+) -> PromptTemplate:
+    """The paraphrase prompt of ``model``: ``paraphrase/generation/<model>``
+    when it exists, else the generic ``paraphrase/generation``.
+
+    The directory is the model's registry name. A prompt is looked for in
+    this order: the override's per-model file, the packaged per-model file,
+    the override's generic file, the packaged generic file. So a generic
+    override does not reach a model that has a per-model prompt.
+    """
+    try:
+        return PromptTemplate.load("paraphrase", f"generation/{model}",
+                                   prompt_dir=prompt_dir)
+    except FileNotFoundError:
+        return PromptTemplate.load("paraphrase", "generation", prompt_dir=prompt_dir)
+
+
 def paraphrase_batch(
     client: ModelClient,
     samples: list[str],
@@ -222,13 +240,15 @@ def paraphrase_batch(
 ) -> list[str]:
     """Paraphrase each sample, in order, in one batch of calls.
 
-    ``progress`` labels the batch; ``kwargs`` go to ``batch_generate_samples``.
+    Each sample is stripped and rendered with the client's own prompt
+    (:func:`paraphrase_prompt`). ``progress`` labels the batch; ``kwargs``
+    go to ``batch_generate_samples``.
     """
     if not samples:
         return []
-    template = PromptTemplate.load("paraphrase", "generation", prompt_dir=prompt_dir)
+    template = paraphrase_prompt(client.model, prompt_dir)
     return batch_generate_samples(
-        client, [template(sample=s) for s in samples],
+        client, [template(sample=s.strip()) for s in samples],
         batch_size=len(samples), progress=progress, **kwargs,
     )
 
@@ -537,7 +557,7 @@ def run_paraphrase_target(
                 kept = []   # (unit, paraphrase, gate reason, provisional id)
                 for unit, ptext, prov_id in zip(chunk, paraphrased, provisional_ids):
                     pt = str(ptext).strip()
-                    if not pt or pt == unit[3] or pt in seen_texts:
+                    if not pt or pt == unit[3].strip() or pt in seen_texts:
                         kept.append((unit, None, "", prov_id))
                         continue
                     seen_texts.add(pt)

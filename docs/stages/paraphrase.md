@@ -32,8 +32,13 @@ run, logs `[paraphrase:<target>] no source rows; skipping.` and returns an
 empty frame. Either way, with `resume: false` the target's files are removed
 as a fresh run removes them.
 
-The prompts are `prompts/paraphrase/generation/` and
-`prompts/paraphrase/check/`, both through the overlay.
+The prompts are `prompts/paraphrase/generation/`, or
+`prompts/paraphrase/generation/<model>/` for a paraphraser that has one (the
+directory is its registry name), and `prompts/paraphrase/check/`, all
+through the overlay. A model's own prompt is looked for first in the
+overlay, then in the packaged tree, before the generic one: a generic
+override does not reach a model that has a prompt of its own. The sample is
+stripped before it is rendered.
 
 ## Models
 

@@ -17,6 +17,7 @@ from pathlib import Path, PureWindowsPath
 from typing import Any
 
 from ... import paths
+from ..model_config import MODEL_REGISTRY
 from .extraction import EXTRACTION_STYLES, _sample_count
 
 logger = logging.getLogger(__name__)
@@ -198,6 +199,21 @@ _MOVED_PROMPTS = {
 }
 
 
+#: Prompts with a slot per model: ``<prompt>/<registry name>/`` is read in
+#: place of ``<prompt>/`` for that model, when it exists.
+_PER_MODEL_PROMPTS = ("paraphrase/generation",)
+
+
+def _per_model_slot(name: str) -> str | None:
+    """The model a prompt name one level below a per-model prompt names,
+    or ``None`` for any other name."""
+    for prompt in _PER_MODEL_PROMPTS:
+        model = name.removeprefix(prompt + "/")
+        if model != name and "/" not in model:
+            return model
+    return None
+
+
 def report_prompt_sources(
     prompt_dir: str | Path | None = None,
 ) -> dict[str, list[str]]:
@@ -209,15 +225,19 @@ def report_prompt_sources(
     resolves to, such as a misspelled ``input/quality_chek/``, one with
     several ``.json`` files and no ``template.json``, or one of a prompt
     that moved (``output/generation/``, ``output/quality_check/``, now one
-    per answer mode), whose warning names the new place.
+    per answer mode), whose warning names the new place. A directory one
+    level below ``paraphrase/generation/`` is a model's own paraphrase
+    prompt: an override when a registered model has that name, else unused.
 
     Args:
         prompt_dir: The override directory, or ``None``.
 
     Returns:
-        ``{"overridden": [...], "unused": [...], "packaged": [...]}``, each a
-        list of prompt names. ``overridden`` holds the packaged prompts that
-        resolve to a file in ``prompt_dir``.
+        ``{"overridden": [...], "per_model": [...], "unused": [...],
+        "packaged": [...]}``, each a list of prompt names. ``overridden``
+        holds the packaged prompts that resolve to a file in ``prompt_dir``;
+        ``per_model`` the per-model prompts of registered models that no
+        packaged prompt has.
     """
     # as_posix(), so a prompt name reads the same on every OS.
     packaged = sorted({
@@ -226,7 +246,7 @@ def report_prompt_sources(
     })
     if prompt_dir is None:
         logger.debug("prompts: %d from library, no override directory", len(packaged))
-        return {"overridden": [], "unused": [], "packaged": packaged}
+        return {"overridden": [], "per_model": [], "unused": [], "packaged": packaged}
 
     root = Path(prompt_dir)
     if not root.is_dir():
@@ -234,7 +254,7 @@ def report_prompt_sources(
             "prompts: override directory %s is not a directory, so all %d "
             "prompts come from the library", root, len(packaged),
         )
-        return {"overridden": [], "unused": [], "packaged": packaged}
+        return {"overridden": [], "per_model": [], "unused": [], "packaged": packaged}
 
     overridden = [name for name in packaged if _prompt_file(root / name) is not None]
     user = sorted({p.parent.relative_to(root).as_posix() for p in root.rglob("*.json")})
@@ -243,6 +263,9 @@ def report_prompt_sources(
         name for name in user
         if not any((root / name).samefile(root / used) for used in overridden)
     ]
+    # The registry says which per-model directories are read.
+    per_model = [name for name in unused if _per_model_slot(name) in MODEL_REGISTRY]
+    unused = [name for name in unused if name not in per_model]
 
     logger.info(
         "prompts: %d from library, %d overridden by files in %s (read only by "
@@ -258,6 +281,8 @@ def report_prompt_sources(
             logger.info("  (%d overrides; run with --debug to list them)",
                         len(overridden))
             logger.debug("  overrides: %s", ", ".join(overridden))
+    for name in per_model:
+        logger.info("  per-model override: %s", name)
     # Unused overrides are always listed, since each one is a mistake.
     for name in unused:
         if name in _MOVED_PROMPTS:
@@ -272,12 +297,18 @@ def report_prompt_sources(
                 "  ignored override: %s — several .json files and no "
                 "template.json, so the packaged prompt is used", name,
             )
+        elif _per_model_slot(name) is not None:
+            logger.warning(
+                "  unused override: %s — no registered model named %s, so "
+                "this file is never loaded", name, _per_model_slot(name),
+            )
         else:
             logger.warning(
                 "  unused override: %s — no packaged prompt by that name, so "
                 "this file is never loaded (typo?)", name,
             )
-    return {"overridden": overridden, "unused": unused, "packaged": packaged}
+    return {"overridden": overridden, "per_model": per_model, "unused": unused,
+            "packaged": packaged}
 
 
 def _field_roots(text: str) -> list[str]:

@@ -697,6 +697,26 @@ class TestReportPromptSources:
         assert "stages that pass prompt_dir" in caplog.text
         assert "override: input/quality_check" in caplog.text
 
+    def test_a_registered_models_paraphrase_prompt_is_an_override(
+            self, tmp_path, caplog):
+        _write(tmp_path, "paraphrase/generation/venice-paraphraser")
+        with caplog.at_level(logging.INFO, logger=self.LOGGER):
+            summary = report_prompt_sources(tmp_path)
+        assert summary["per_model"] == ["paraphrase/generation/venice-paraphraser"]
+        assert summary["unused"] == []
+        assert "per-model override: paraphrase/generation/venice-paraphraser" in (
+            caplog.text)
+        assert not [r for r in caplog.records if r.levelno >= logging.WARNING]
+
+    def test_a_paraphrase_prompt_of_no_registered_model_is_unused(
+            self, tmp_path, caplog):
+        _write(tmp_path, "paraphrase/generation/not-a-model")
+        with caplog.at_level(logging.WARNING, logger=self.LOGGER):
+            summary = report_prompt_sources(tmp_path)
+        assert summary["unused"] == ["paraphrase/generation/not-a-model"]
+        assert summary["per_model"] == []
+        assert "no registered model named not-a-model" in caplog.text
+
     def test_many_overrides_are_counted_not_listed(self, tmp_path, caplog):
         scaffold_prompt_tree(tmp_path)
         with caplog.at_level(logging.INFO, logger=self.LOGGER):

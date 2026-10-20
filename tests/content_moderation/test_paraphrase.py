@@ -1,4 +1,6 @@
-"""Tests for paraphrase_batch and the paraphrase check's gates."""
+"""Tests for paraphrase_batch, the paraphrase prompts and the check's gates."""
+
+import json
 
 import pytest
 
@@ -10,6 +12,7 @@ from redact.content_moderation.paraphrase import (
     language_gate,
     length_gate,
     paraphrase_batch,
+    paraphrase_prompt,
     script_gate,
     split_gate,
     squeezed,
@@ -27,6 +30,44 @@ class TestParaphraseBatch:
 
     def test_empty_list(self):
         assert paraphrase_batch(make_client(MockBackend()), []) == []
+
+    def test_the_sample_is_stripped(self):
+        backend = MockBackend("p")
+        paraphrase_batch(make_client(backend, "venice-paraphraser"), [" a b \n"])
+        assert backend.calls[0]["messages"][-1]["content"] == "TEXT:\na b"
+
+
+def _prompt(root, name: str, system: str) -> None:
+    """Write ``paraphrase/<name>/template.json`` under ``root``."""
+    folder = root / "paraphrase" / name
+    folder.mkdir(parents=True, exist_ok=True)
+    (folder / "template.json").write_text(
+        json.dumps({"system_prompt": system, "template": "{sample}"}), encoding="utf-8")
+
+
+class TestParaphrasePrompt:
+    """``paraphrase/generation/<model>`` is a model's own prompt."""
+
+    def test_a_model_with_a_prompt_of_its_own_gets_it(self, tmp_path):
+        _prompt(tmp_path, "generation/mock-model", "OWN")
+        backend = MockBackend("p")
+        paraphrase_batch(make_client(backend, "mock-model"), ["t"], prompt_dir=tmp_path)
+        assert backend.calls[0]["system_prompt"] == "OWN"
+        template = paraphrase_prompt("mock-model", tmp_path)
+        assert (template.name, template.is_override) == (
+            "paraphrase/generation/mock-model", True)
+
+    def test_a_model_without_one_gets_the_generic_prompt(self, tmp_path):
+        _prompt(tmp_path, "generation/mock-model", "OWN")
+        template = paraphrase_prompt("venice-paraphraser", tmp_path)
+        assert (template.name, template.is_override) == ("paraphrase/generation", False)
+
+    def test_a_generic_override_does_not_reach_a_model_with_its_own(self, tmp_path):
+        _prompt(tmp_path, "generation", "GENERIC")
+        _prompt(tmp_path, "generation/mock-model", "OWN")
+        assert paraphrase_prompt("mock-model", tmp_path).system_prompt == "OWN"
+        assert paraphrase_prompt("venice-paraphraser", tmp_path).system_prompt == (
+            "GENERIC")
 
 
 def _words(n: int) -> str:
