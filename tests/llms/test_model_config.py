@@ -891,6 +891,67 @@ class TestPackagedHFConfig:
             VLLMConfig(hf_model_id="org/m", vllm_kwargs={"hf_config_path": "/x"})
 
 
+_TEMPLATE = "{{ bos_token }}{{ messages[0]['content'] }}"
+
+
+class TestVLLMChatTemplate:
+    """``chat_template`` is a Jinja string the engine's tokenizer renders in
+    place of its own; it is not an engine argument."""
+
+    def test_it_defaults_to_none(self):
+        assert VLLMConfig(hf_model_id="org/m").chat_template is None
+
+    def test_a_string_is_kept_and_stays_out_of_the_engine_kwargs(self):
+        cfg = VLLMConfig(hf_model_id="org/m", chat_template=_TEMPLATE,
+                         vllm_kwargs={"max_model_len": 8192})
+        assert cfg.chat_template == _TEMPLATE
+        assert cfg.engine_kwargs == {"max_model_len": 8192}
+
+    @pytest.mark.parametrize("value", ["", "   "])
+    def test_an_empty_template_is_rejected(self, value):
+        with pytest.raises(ValueError, match="chat_template"):
+            VLLMConfig(hf_model_id="org/m", chat_template=value)
+
+    def test_a_template_that_is_no_string_is_rejected(self):
+        with pytest.raises(TypeError, match="chat_template"):
+            VLLMConfig(hf_model_id="org/m", chat_template=3)
+
+    def test_it_in_vllm_kwargs_is_rejected(self):
+        with pytest.raises(ValueError, match=r"'chat_template'\] is not an engine "
+                                             r"argument: set VLLMConfig.chat_template"):
+            VLLMConfig(hf_model_id="org/m", vllm_kwargs={"chat_template": _TEMPLATE})
+
+    def test_it_with_the_mistral_tokenizer_is_rejected(self):
+        with pytest.raises(ValueError, match="mistral"):
+            VLLMConfig(hf_model_id="org/m", chat_template=_TEMPLATE,
+                       vllm_kwargs={"tokenizer_mode": "mistral"})
+
+    def test_register_model_keeps_it(self):
+        try:
+            register_model("_templated", backend_type="vllm", vllm=VLLMConfig(
+                hf_model_id="org/m", chat_template=_TEMPLATE))
+            assert get_model_config("_templated").vllm.chat_template == _TEMPLATE
+        finally:
+            MODEL_REGISTRY.pop("_templated", None)
+
+    def test_a_registry_entry_with_the_key_builds(self):
+        from redact.llms.model_config import _build_entry
+
+        cfg = _build_entry("m", {"backend_type": "vllm", "vllm": {
+            "hf_model_id": "org/m", "chat_template": _TEMPLATE}})
+        assert cfg.vllm.chat_template == _TEMPLATE
+
+    def test_two_entries_that_differ_in_it_share_one_engine(self):
+        from redact.llms.backends.vllm import _engine_key
+
+        plain = VLLMConfig(hf_model_id="org/m", vllm_kwargs={"max_model_len": 8192})
+        templated = VLLMConfig(hf_model_id="org/m", chat_template=_TEMPLATE,
+                               vllm_kwargs={"max_model_len": 8192})
+        assert (_engine_key(plain.hf_model_id, plain.quantization, plain.engine_kwargs)
+                == _engine_key(templated.hf_model_id, templated.quantization,
+                               templated.engine_kwargs))
+
+
 def _packaged_hf_configs() -> list:
     from redact import paths
 

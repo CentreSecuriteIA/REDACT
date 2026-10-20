@@ -199,6 +199,10 @@ class VLLMConfig:
             a folder passed as ``tokenizer``
             (``backends/tokenizer_folder.py``), unless ``vllm_kwargs`` names
             a ``tokenizer``.
+        chat_template: A Jinja chat template rendered in place of the
+            tokenizer's own, for a checkpoint that ships none or an unusable
+            one. Not an engine argument: two entries on one checkpoint may
+            differ in it and still share the engine.
     """
 
     hf_model_id: str
@@ -208,6 +212,7 @@ class VLLMConfig:
     vram_gb: float | None = None
     min_gpus: int = 1
     hf_config: str | None = None
+    chat_template: str | None = None
 
     def __post_init__(self) -> None:
         _check_str("VLLMConfig.hf_model_id", self.hf_model_id)
@@ -217,6 +222,7 @@ class VLLMConfig:
         _check_number("VLLMConfig.vram_gb", self.vram_gb)
         _check_int("VLLMConfig.min_gpus", self.min_gpus, minimum=1)
         _check_str("VLLMConfig.hf_config", self.hf_config, optional=True)
+        _check_str("VLLMConfig.chat_template", self.chat_template, optional=True)
         if self.hf_config is not None:
             folder = paths.hf_configs_dir() / self.hf_config
             _require(
@@ -231,6 +237,18 @@ class VLLMConfig:
             "VLLMConfig.vllm_kwargs['hf_config_path'] is not a setting: name a "
             "folder under configs/llm/hf_configs/ in hf_config instead. Remove "
             "it from vllm_kwargs.",
+        )
+        _require(
+            "chat_template" not in (self.vllm_kwargs or {}),
+            "VLLMConfig.vllm_kwargs['chat_template'] is not an engine argument: "
+            "set VLLMConfig.chat_template. Remove it from vllm_kwargs.",
+        )
+        _require(
+            self.chat_template is None
+            or (self.vllm_kwargs or {}).get("tokenizer_mode") != "mistral",
+            "VLLMConfig.chat_template cannot be used with vllm_kwargs"
+            "['tokenizer_mode']='mistral': that tokenizer renders its own "
+            "format and takes no template.",
         )
         _require(
             "gpu_memory_utilization" not in (self.vllm_kwargs or {}),

@@ -632,6 +632,7 @@ class VLLMBackend(LLMBackend):
         quantization: str | None = None,
         vllm_kwargs: dict | None = None,
         sampling: dict | None = None,
+        chat_template: str | None = None,
         **identity,
     ):
         """Bind one registered model to a vLLM engine, loading it if needed.
@@ -645,6 +646,9 @@ class VLLMBackend(LLMBackend):
                 ``tokenizer_mode``).
             sampling: ``SamplingParams`` defaults for this model (``top_p``,
                 ``top_k``, ...), merged over :data:`_DEFAULT_SAMPLING`.
+            chat_template: A Jinja chat template rendered in place of the
+                tokenizer's own; ``None`` renders with the tokenizer's. Not
+                part of the engine's key.
             **identity: Forwarded to :meth:`LLMBackend.__init__`.
                 ``max_workers`` defaults to the number of sequences the
                 engine runs at once, over all its copies.
@@ -664,6 +668,7 @@ class VLLMBackend(LLMBackend):
             self.default_temperature = _DEFAULT_TEMPERATURE
         self.hf_model_id = hf_model_id
         self._sampling = {**_DEFAULT_SAMPLING, **(sampling or {})}
+        self._chat_template = chat_template
         self._key = _engine_key(hf_model_id, quantization, vllm_kwargs or {})
 
     @property
@@ -699,6 +704,7 @@ class VLLMBackend(LLMBackend):
             quantization=vllm.quantization,
             vllm_kwargs=vllm.engine_kwargs,
             sampling=vllm.sampling,
+            chat_template=vllm.chat_template,
             **cls._identity(config),
         )
 
@@ -876,9 +882,11 @@ class VLLMBackend(LLMBackend):
         (system_prompt,), (chat,) = self._prepare([messages])
         if system_prompt:
             chat = [{"role": "system", "content": system_prompt}, *chat]
-        # The engine takes token ids, so the chat template is applied here.
+        # The engine takes token ids, so the chat template is applied here:
+        # the chat template of the engine's tokenizer, or the entry's own.
+        own = {"chat_template": self._chat_template} if self._chat_template else {}
         ids = engine.get_tokenizer().apply_chat_template(
-            chat, add_generation_prompt=True, tokenize=True)
+            chat, add_generation_prompt=True, tokenize=True, **own)
         # Some tokenizers return the ids, some a mapping that holds them.
         if isinstance(ids, Mapping):
             ids = ids["input_ids"]

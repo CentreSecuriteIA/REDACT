@@ -622,6 +622,7 @@ process only.
 | `vram_gb` | `null` | The weights in GiB, total over the model's cards, when known better than the estimate |
 | `min_gpus` | `1` | Cards per copy; above 1 it is the `tensor_parallel_size` |
 | `hf_config` | `null` | A folder under `configs/llm/hf_configs/` whose `config.json` vLLM (as `hf_config_path`) and the estimator read in place of the checkpoint's own, for a checkpoint whose config the installed transformers cannot read. The folder holds the checkpoint's `generation_config.json` too: vLLM reads the generation config from `hf_config_path` as well, and without it a model misses its end-of-turn token and runs every reply to `max_tokens`. The weights come from `hf_model_id`. vLLM also reads the config of the folder it loads the tokenizer from, so at load the checkpoint's tokenizer files are gathered beside a copy of this config into a folder under `$HF_HOME/assets/redact/tokenizers/`, passed to the engine as `tokenizer` unless `vllm_kwargs` names one. `vllm_kwargs` may not name `hf_config_path` |
+| `chat_template` | `null` | A Jinja chat template rendered in place of the tokenizer's own, for a checkpoint that ships none; not an engine argument, so entries on one checkpoint may differ in it and share the engine. `vllm_kwargs` may not name it, and it does not go with `tokenizer_mode` `mistral` |
 
 ### `introspect` (IntrospectConfig)
 

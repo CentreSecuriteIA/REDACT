@@ -111,11 +111,14 @@ down and its memory freed, and a client built on it raises on its next call.
   engine request, awaited on the shared loop (`aio.py`); the engine batches
   whatever is in flight. `generate` sends one request per item and waits for
   all.
-- Prompts go through the chat template of the engine's tokenizer, so any
-  checkpoint whose tokenizer ships a usable `chat_template` works with no
-  extra setting. For one that does not (Mistral-3.x), pass vLLM's own
+- Prompts go through the chat template of the engine's tokenizer, or the
+  entry's `chat_template` (a Jinja string, passed to `apply_chat_template`)
+  for a checkpoint that ships none, so any checkpoint whose tokenizer ships
+  a usable `chat_template` works with no extra setting. For one that does
+  not (Mistral-3.x), pass vLLM's own
   `vllm_kwargs={"tokenizer_mode": "mistral"}`; the library formats no
-  prompt by hand.
+  prompt by hand. The entry's `chat_template` is not an engine argument:
+  two entries on one checkpoint that differ in it share one engine.
 - `max_workers` is the engine's `max_num_seqs` times its copies: what the
   async lane keeps in flight.
 - The load uses the residency plan's `gpu_memory_utilization` and cards

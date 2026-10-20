@@ -867,6 +867,18 @@ class _FakeTokenizer:
         return {"input_ids": ids} if self.as_mapping else ids
 
 
+class _KwargsTokenizer(_FakeTokenizer):
+    """A fake tokenizer that takes keyword arguments, and records them."""
+
+    def __init__(self):
+        super().__init__()
+        self.kwargs = []
+
+    def apply_chat_template(self, messages, add_generation_prompt, tokenize, **kwargs):
+        self.kwargs.append(kwargs)
+        return super().apply_chat_template(messages, add_generation_prompt, tokenize)
+
+
 class _FakeAsyncLLM:
     """A vLLM ``AsyncLLM`` whose requests follow a :class:`_Script`.
 
@@ -941,6 +953,36 @@ class TestVLLMAgenerate:
         assert engine.sent["hi"].chat == _ask("hi", system="A\n\nB")
         assert engine.sent["hi"].prompt == {"prompt_token_ids": [0, 1]}
         assert engine.tokenizer.options == [(True, True)]
+
+    def test_an_entrys_chat_template_is_rendered_in_place_of_the_tokenizers(
+            self, monkeypatch):
+        template = "{{ bos_token }}{{ messages[0]['content'] }}"
+        backend, engine = _vllm_backend(
+            monkeypatch, {"hi": _reply("ok")}, chat_template=template,
+            supports_system_prompt=False)
+        engine.tokenizer = _KwargsTokenizer()
+        assert aio.run(backend.agenerate(_ask("hi"))) == "ok"
+        assert engine.tokenizer.kwargs == [{"chat_template": template}]
+        assert engine.tokenizer.options == [(True, True)]
+
+    def test_without_a_chat_template_the_tokenizer_gets_no_extra_argument(
+            self, monkeypatch):
+        backend, engine = _vllm_backend(monkeypatch, {"hi": _reply("ok")})
+        engine.tokenizer = _KwargsTokenizer()
+        aio.run(backend.agenerate(_ask("hi")))
+        assert engine.tokenizer.kwargs == [{}]
+
+    def test_from_config_passes_the_entrys_chat_template(self, monkeypatch):
+        from redact.llms.backends import VLLMBackend
+        from redact.llms.model_config import ModelConfig, VLLMConfig
+
+        seen = {}
+        monkeypatch.setattr(VLLMBackend, "__init__",
+                            lambda self, **kw: seen.update(kw))
+        VLLMBackend.from_config(ModelConfig(
+            name="m", backend_type="vllm", vllm=VLLMConfig(
+                hf_model_id="org/x", chat_template="{{ messages[0]['content'] }}")))
+        assert seen["chat_template"] == "{{ messages[0]['content'] }}"
 
     def test_a_model_without_a_system_role_gets_it_folded_into_the_user_message(
             self, monkeypatch):
