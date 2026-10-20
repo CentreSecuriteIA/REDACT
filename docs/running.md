@@ -30,7 +30,11 @@ shell's. The keys the shipped models read are `VENICE_API_KEY`,
 `ANTHROPIC_API_KEY` and `OPENROUTER_API_KEY`. Local weights download to the
 HuggingFace cache (`HF_HOME`); `scripts/download_models.py` fetches every
 local checkpoint of the registry, whole (tokenizer files included, GGUF files
-left out), at the revision an entry pins, ahead of a run.
+left out), at the revision an entry pins, ahead of a run. It fetches GlotLID,
+the language identifier, with a model that has the `machine_translation` or
+the `paraphraser` role. A model named as a recipe's paraphraser without that
+role brings none: name a model with the role too, or the paraphrase check runs
+without its language gate (one WARNING says so).
 
 ## Run a recipe
 

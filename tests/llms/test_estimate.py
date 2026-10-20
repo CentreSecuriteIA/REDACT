@@ -484,6 +484,18 @@ class TestLoadConfig:
         assert E._load_config("org/llama") is LLAMA_3B
         assert fake_transformers.calls == [("org/llama", {"trust_remote_code": False})]
 
+    def test_a_pinned_revision_is_read(self, fake_transformers):
+        assert E._load_config("org/llama", revision="abc123") is LLAMA_3B
+        assert fake_transformers.calls == [
+            ("org/llama", {"trust_remote_code": False, "revision": "abc123"})]
+
+    def test_an_estimate_reads_the_revision_it_is_given(self, fake_transformers):
+        E.estimate("org/llama", max_model_len=384, revision="abc123")
+        E.estimate_kv_gib("org/llama", max_model_len=384, revision="abc123")
+        E.effective_max_model_len("org/llama", revision="abc123")
+        assert [kw.get("revision") for _, kw in fake_transformers.calls] == [
+            "abc123"] * 3
+
     def test_one_estimate_reads_the_config_once(self, fake_transformers):
         est = E.estimate("org/llama", max_model_len=384)
         assert est.weights_gib == pytest.approx(5.98, abs=0.01) and est.kv_gib == 0.04

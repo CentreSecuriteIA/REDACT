@@ -66,7 +66,8 @@ def patched(monkeypatch):
     every check says Yes."""
     _serve(monkeypatch)
     # A residency plan must not read an HF config over the network.
-    monkeypatch.setattr("redact.llms.resources.estimate._load_config", lambda _id: None)
+    monkeypatch.setattr("redact.llms.resources.estimate._load_config",
+                        lambda _id, **kw: None)
     return monkeypatch
 
 
@@ -508,7 +509,8 @@ def test_an_unload_between_paraphrasers_shuts_down_only_their_engine(
     for name, module in fake_vllm_modules(_LLM).items():
         monkeypatch.setitem(sys.modules, name, module)
     monkeypatch.setattr(vllm_module, "_prepare_environment", lambda: None)
-    monkeypatch.setattr("redact.llms.resources.estimate._load_config", lambda _id: None)
+    monkeypatch.setattr("redact.llms.resources.estimate._load_config",
+                        lambda _id, **kw: None)
 
     # The fake engines take no request: a unit returns its paraphrase at once.
     def unit(client, check, checker, template, original, **kw):

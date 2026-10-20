@@ -79,11 +79,13 @@ def _report_once(hf_model_id: str, reason: str) -> None:
         logger.info("No VRAM estimate for %s: %s", hf_model_id, reason)
 
 
-def _load_config(hf_model_id: str):
+def _load_config(hf_model_id: str, revision: str | None = None):
     """The checkpoint's HF config, or ``None`` if it cannot be read. Never raises.
 
     ``hf_model_id`` may be a folder holding a ``config.json``, as a packaged
-    one (``VLLMConfig.hf_config``) is.
+    one (``VLLMConfig.hf_config``) is. ``revision`` reads the config of a
+    pinned snapshot (``vllm_kwargs["revision"]``) instead of the default
+    branch's.
     """
     try:
         from transformers import AutoConfig
@@ -91,11 +93,20 @@ def _load_config(hf_model_id: str):
         _report_once(hf_model_id, "transformers is not installed")
         return None
     try:
-        return AutoConfig.from_pretrained(hf_model_id, trust_remote_code=False)
+        pinned = {"revision": revision} if revision else {}
+        return AutoConfig.from_pretrained(hf_model_id, trust_remote_code=False,
+                                          **pinned)
     except Exception as exc:  # noqa: BLE001 — a planning hint must not fail a load
         _report_once(hf_model_id,
                      f"its HF config could not be read ({type(exc).__name__}: {exc})")
         return None
+
+
+def _read_config(hf_model_id: str, revision: str | None):
+    """:func:`_load_config`, with ``revision`` passed only when one is set."""
+    if revision:
+        return _load_config(hf_model_id, revision=revision)
+    return _load_config(hf_model_id)
 
 
 def _language_config(full):
@@ -170,6 +181,7 @@ def estimate_weights_gib(
     tensor_parallel_size: int | None = 1,
     float32_as_half: bool = False,
     config=_UNREAD,
+    revision: str | None = None,
 ) -> float | None:
     """Per-GPU weight footprint, in GiB.
 
@@ -201,12 +213,14 @@ def estimate_weights_gib(
             names a dtype. Set for vLLM, whose default dtype loads it so.
         config: The checkpoint's config if already read; ``None`` if that
             read failed.
+        revision: The snapshot whose config to read (a setup's pinned
+            ``vllm_kwargs["revision"]``); ``None`` reads the default branch.
 
     Returns:
         GiB per GPU, or ``None`` when the config cannot be read or lacks the
         shape fields.
     """
-    full = _load_config(hf_model_id) if config is _UNREAD else config
+    full = _read_config(hf_model_id, revision) if config is _UNREAD else config
     if full is None:
         return None
     cfg = _language_config(full)
@@ -301,7 +315,8 @@ def _context_limit(hf_model_id: str, full) -> int | None:
 
 
 def effective_max_model_len(
-    hf_model_id: str, max_model_len: int | None = None, config=_UNREAD
+    hf_model_id: str, max_model_len: int | None = None, config=_UNREAD,
+    revision: str | None = None,
 ) -> int:
     """The context length a vLLM engine runs with.
 
@@ -311,7 +326,7 @@ def effective_max_model_len(
     """
     if max_model_len:
         return max_model_len
-    full = _load_config(hf_model_id) if config is _UNREAD else config
+    full = _read_config(hf_model_id, revision) if config is _UNREAD else config
     limit = _context_limit(hf_model_id, full)
     return min(DEFAULT_MAX_MODEL_LEN, limit) if limit else DEFAULT_MAX_MODEL_LEN
 
@@ -324,6 +339,7 @@ def estimate_kv_gib(
     tensor_parallel_size: int | None = 1,
     float32_as_half: bool = False,
     config=_UNREAD,
+    revision: str | None = None,
 ) -> float | None:
     """Per-GPU KV-cache need, in GiB.
 
@@ -344,12 +360,13 @@ def estimate_kv_gib(
             ``None`` is 1.
         float32_as_half: As in :func:`estimate_weights_gib`.
         config: As in :func:`estimate_weights_gib`.
+        revision: As in :func:`estimate_weights_gib`.
 
     Returns:
         GiB per GPU, or ``None`` when the config cannot be read or lacks the
         shape fields.
     """
-    full = _load_config(hf_model_id) if config is _UNREAD else config
+    full = _read_config(hf_model_id, revision) if config is _UNREAD else config
     if full is None:
         return None
     cfg = _language_config(full)
@@ -424,6 +441,7 @@ def estimate(
     tensor_parallel_size: int | None = 1,
     kv: bool = True,
     float32_as_half: bool = False,
+    revision: str | None = None,
 ) -> Estimate | None:
     """Everything a planner needs for one checkpoint, from one config read.
 
@@ -439,7 +457,7 @@ def estimate(
         The estimate, or ``None`` when the weights cannot be estimated.
     """
     tp = max(1, tensor_parallel_size or 1)
-    full = _load_config(hf_model_id)
+    full = _read_config(hf_model_id, revision)
     weights = estimate_weights_gib(
         hf_model_id, dtype=dtype, quantization=quantization,
         tensor_parallel_size=tp, float32_as_half=float32_as_half, config=full)

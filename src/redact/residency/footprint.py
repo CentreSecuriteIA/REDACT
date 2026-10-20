@@ -141,7 +141,10 @@ def footprint(model: str, backend_type: str | None = None) -> ModelFootprint | N
         # vLLM's default dtype loads a float32 checkpoint as 16-bit, so that is
         # its real size. An explicit dtype=float32 is still sized at 32-bit.
         vllm_sizing = dict(dtype=kw.get("dtype"), max_model_len=max_len,
-                           tensor_parallel_size=span, float32_as_half=True)
+                           tensor_parallel_size=span, float32_as_half=True,
+                           # The snapshot the engine loads; a packaged config
+                           # is a folder, with no revision.
+                           revision=None if local.hf_config else kw.get("revision"))
         parts = {"max_model_len": max_len}
     else:
         # A span of 1: the device_map decides the cards transformers uses.

@@ -1638,6 +1638,23 @@ class TestRegistryFootprints:
         assert (residency.footprint("venice-uncensored", "vllm").engine
                 != residency.footprint("venice-uncensored-fp8").engine)
 
+    def test_a_pinned_checkpoint_is_sized_from_its_pinned_config(self):
+        """The estimator reads the snapshot the engine loads; a packaged
+        config is a folder, read with no revision."""
+        from redact.llms.model_config import get_model_config
+
+        reads = []
+
+        def load(source, **kwargs):
+            reads.append((source, kwargs.get("revision")))
+
+        with patch.object(estimate, "_load_config", side_effect=load):
+            residency.footprint("humanizer-12b")
+            residency.footprint("translategemma-27b")
+        pinned = get_model_config("humanizer-12b").vllm.vllm_kwargs["revision"]
+        assert reads[0] == ("jialinyyzz/humanizer", pinned)
+        assert reads[1][1] is None and reads[1][0].endswith("translategemma-27b")
+
     def test_the_humanizer_is_sized_as_the_plan_computed(self):
         """22.8 GiB declared, KV of 48 layers x 8 heads x 256 at 8192
         tokens in bf16 (3.0 GiB), 29.0 GiB padded: the plan's section 4.4."""

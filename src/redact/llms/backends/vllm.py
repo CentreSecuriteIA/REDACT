@@ -370,8 +370,10 @@ def _engine(hf_model_id: str, quantization: str | None, vllm_kwargs: dict):
         # After the key is built, so the default never splits a shared engine.
         # Capped at the context of the config the engine reads.
         if not kwargs.get("max_model_len"):
+            replaced = kwargs.get("hf_config_path")
             kwargs["max_model_len"] = estimate.effective_max_model_len(
-                kwargs.get("hf_config_path") or hf_model_id)
+                replaced or hf_model_id,
+                revision=None if replaced else kwargs.get("revision"))
         # vLLM reads a config from the tokenizer's folder too, so a replaced
         # config needs a folder of the checkpoint's tokenizer files beside a
         # copy of it. Kept out of the key: the folder follows from the

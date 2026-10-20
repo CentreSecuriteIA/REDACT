@@ -1012,7 +1012,8 @@ def _stub_models(monkeypatch) -> None:
     for name, backend in backends.items():
         make_client(backend, name)      # registers the name
     monkeypatch.setattr(ModelClient, "create", lambda m: make_client(backends[m], m))
-    monkeypatch.setattr("redact.llms.resources.estimate._load_config", lambda _id: None)
+    monkeypatch.setattr("redact.llms.resources.estimate._load_config",
+                        lambda _id, **kw: None)
 
 
 def _counts(recipe: dict, before=None, params=None) -> dict:

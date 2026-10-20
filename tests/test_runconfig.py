@@ -1823,7 +1823,8 @@ def test_a_training_run_reads_the_inputs_it_seeded(tmp_path, monkeypatch):
         "one", "two", "three", "four", "five", "six")])
     monkeypatch.setattr(ModelClient, "create", lambda m: make_client(answers, m))
     monkeypatch.setattr(CP, "MIN_WORDS", 0)     # the texts are six words long
-    monkeypatch.setattr("redact.llms.resources.estimate._load_config", lambda _id: None)
+    monkeypatch.setattr("redact.llms.resources.estimate._load_config",
+                        lambda _id, **kw: None)
     write_inputs(paths.constitution_inputs_dir(tmp_path),
                  [f"prompt number {i} about a topic" for i in range(3)],
                  extra={"entry_type": "harmful"})

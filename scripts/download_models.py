@@ -8,10 +8,13 @@ Reads ``configs/llm/models.json`` through the registry, so a model added there
 is picked up here. Models sharing a checkpoint are downloaded once, whole,
 GGUF files left out (vLLM reads safetensors), at the revision an entry pins:
 the tokenizer files a setup with ``hf_config`` gathers into its tokenizer
-folder at load come with it. A machine-translation model or a paraphraser brings
-the language identifier its output is checked with. Files land in the
-HuggingFace cache (``HF_HOME``), which is where vLLM, transformers and the
-identifier look for them at load time.
+folder at load come with it. A model with the ``machine_translation`` or the
+``paraphraser`` role brings the language identifier its output is checked
+with. The role decides, not a recipe: a model named as a recipe's paraphraser
+without the role brings none, so fetch it beside a model with the role, or
+the paraphrase check runs without its language gate (with one WARNING).
+Files land in the HuggingFace cache (``HF_HOME``), which is where vLLM,
+transformers and the identifier look for them at load time.
 """
 
 import argparse
