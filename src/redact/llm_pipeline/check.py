@@ -14,9 +14,10 @@ from .request import LLMRequest
 
 _ACCEPT_WORDS = frozenset({"yes", "ok", "okay", "accept", "accepted", "pass", "passed"})
 
-#: The temperature of the inputs and outputs stages' check calls: at 0.15 a
-#: checker repeats its own verdict far more often than at the stages' 0.7
-#: (harmful responses 99.5 against 94.0 percent), at the same acceptance.
+#: The temperature of the inputs, outputs and paraphrase stages' check
+#: calls: at 0.15 a checker repeats its own verdict far more often than at
+#: the stages' 0.7 (harmful responses 99.5 against 94.0 percent), at the
+#: same acceptance.
 CHECK_TEMPERATURE = 0.15
 
 # Leading whitespace, markdown and quote marks (straight and curly), then the

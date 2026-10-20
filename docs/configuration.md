@@ -176,7 +176,7 @@ names of the last two, are read for this release with a
 |---|---|---|
 | `target` | `"both"` | `inputs`, `outputs` or `both` |
 | `paraphrases_per_sample` | `1` | Paraphrase units per source row |
-| `check` | `true` | Check each paraphrase with the `paraphrase_check` model |
+| `check` | `true` | Gate each paraphrase and check it with the `paraphrase_check` model ([the check](stages/paraphrase.md#the-check)); `false` accepts every paraphrase |
 | `batch_size` | `256` | Units per paraphrase batch and per check batch |
 | `seed` | `42` | Seed of the assignment of units to paraphrasers |
 | `inputs_path`, `outputs_path` | `Datasets/paraphrases_inputs.csv`, `Datasets/paraphrases_outputs.csv` | Where the paraphrases go |

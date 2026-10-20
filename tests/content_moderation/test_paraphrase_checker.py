@@ -11,7 +11,9 @@ def test_message_shape():
     assert msgs[0]["role"] == "system" and "paraphrase" in msgs[0]["content"].lower()
     assert msgs[1] == {
         "role": "user",
-        "content": "ORIGINAL:\nthe original\n\nPARAPHRASE:\na reworded version",
+        "content": "ORIGINAL:\nthe original\n\nPARAPHRASE:\na reworded version\n\n"
+                   "Begin your reply with Yes or No as its first word, "
+                   "then give your reason.",
     }
 
 

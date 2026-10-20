@@ -7,10 +7,10 @@
 Reads ``configs/llm/models.json`` through the registry, so a model added there
 is picked up here. Models sharing a checkpoint are downloaded once, whole: the
 tokenizer files a setup with ``hf_config`` gathers into its tokenizer folder
-at load come with it. A machine-translation model brings the language
-identifier its translations are checked with. Files land in the HuggingFace
-cache (``HF_HOME``), which is where vLLM, transformers and the identifier look
-for them at load time.
+at load come with it. A machine-translation model or a paraphraser brings
+the language identifier its output is checked with. Files land in the
+HuggingFace cache (``HF_HOME``), which is where vLLM, transformers and the
+identifier look for them at load time.
 """
 
 import argparse
@@ -22,6 +22,10 @@ from redact.jailbreak.obfuscation.translation import MACHINE_TRANSLATION_ROLE
 from redact.llms.model_config import MODEL_REGISTRY
 
 _LOCAL_SETUPS = ("vllm", "introspect")
+
+#: The roles whose output is checked with GlotLID: a machine translation's
+#: language, and a paraphrase's (the paraphrase check's language gate).
+_LANGID_ROLES = (MACHINE_TRANSLATION_ROLE, "paraphraser")
 
 #: Repositories of which one file is fetched, not the whole snapshot.
 FILES = {GLOTLID_REPO: GLOTLID_FILE}
@@ -45,7 +49,7 @@ def checkpoints(names: list[str] | None = None) -> dict[str, list[str]]:
             users = found.setdefault(local.hf_model_id, [])
             if name not in users:
                 users.append(name)
-        if MACHINE_TRANSLATION_ROLE in config.roles:
+        if any(role in config.roles for role in _LANGID_ROLES):
             found.setdefault(GLOTLID_REPO, []).append(name)
     return found
 

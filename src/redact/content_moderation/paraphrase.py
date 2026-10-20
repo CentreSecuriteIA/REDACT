@@ -1,13 +1,22 @@
 """The paraphrase stage: K checked paraphrases per row, over a pool of paraphrasers.
 
 Any capable model of the ``paraphraser`` role stands in for the trained
-defingerprinting model, which lives in another repository. A separate model
-checks that each paraphrase keeps the original's meaning
-(:func:`~redact.content_moderation.checker.build_paraphrase_checker`).
+defingerprinting model, which lives in another repository.
+
+Each paraphrase is checked in two steps. Five deterministic gates
+(:data:`GATES`: length, split lines, script, language, artifacts) reject
+what they can without a model call; the rest go to a separate model at
+``llm_pipeline.CHECK_TEMPERATURE`` (0.15), with the strict prompt of
+:func:`~redact.content_moderation.checker.build_paraphrase_checker`. The
+language gate reads GlotLID from ``jailbreak/obfuscation/langid.py``, the
+translation check's identifier, imported where it is used.
 """
 
 import hashlib
 import logging
+import re
+import unicodedata
+from collections import Counter
 from itertools import islice, repeat
 from pathlib import Path
 
@@ -26,7 +35,7 @@ from ..dataset import (
     resume_state,
     row_ids,
 )
-from ..llm_pipeline import batch_check_samples
+from ..llm_pipeline import CHECK_TEMPERATURE, batch_check_samples
 from ..llms.client import ModelClient
 from ..llms.model_config import default_model_for_role, get_models_by_role
 from ..llms.prompting import PromptTemplate
@@ -42,6 +51,146 @@ logger = logging.getLogger(__name__)
 # (its unit's key) and how the response answers its input.
 _RESPONSE_COLUMNS = ("response_id", "response_mode", "output_label", "response_label")
 _LABEL_COLUMNS = _RESPONSE_COLUMNS[1:]
+
+
+# --- the check's gates -------------------------------------------------------
+#
+# Each gate is ``(original, paraphrase) -> reason``, ``""`` when it passes, and
+# strips both texts itself. A gated paraphrase is saved as a rejected row and
+# is not sent to the check model. The thresholds were measured on 1,638 benign
+# rewrites of REDACT texts by two paraphrasers (2026-10-20), set so that no
+# rewrite read as good fails a gate.
+
+#: The squeezed paraphrase may be at most ``LENGTH_HIGH`` times the squeezed
+#: original plus ``LENGTH_SLACK`` characters, and at least ``LENGTH_LOW``
+#: times it. The nearest good rewrites were 1.40x (at +20) and 0.516x.
+LENGTH_HIGH = 1.5
+LENGTH_SLACK = 20
+LENGTH_LOW = 0.5
+
+#: A single-line original of at most this many words must stay on one line.
+#: The smallest good multi-line rewrite of a single-line original had 43.
+SPLIT_WORDS = 35
+
+#: A script that makes up under ``SCRIPT_RARE`` of the original's letters
+#: counts as absent from it; the gate fires when ``SCRIPT_SHARE`` or more of
+#: the paraphrase's letters are in such scripts. The nearest good rewrite had
+#: 0.07% of its letters in them.
+SCRIPT_SHARE = 0.10
+SCRIPT_RARE = 0.01
+
+#: GlotLID labels the two texts differently with at least this probability
+#: on both. The nearest good rewrite had 0.671; below 0.7 GlotLID labels
+#: code and tables as a language.
+LANGID_PROBABILITY = 0.9
+
+_WORD = re.compile(r"[\w']+")
+_SCRIPTS = ("LATIN", "CJK", "HIRAGANA", "KATAKANA", "HANGUL", "CYRILLIC",
+            "ARABIC", "DEVANAGARI", "THAI", "GREEK", "HEBREW")
+# An HTML tag, or a rule line, that a model's web text leaves in a reply.
+_ARTIFACT = re.compile(
+    r"</?(?:p|br|div|span|b|i|ul|li|h[1-6])\b[^>]*>|^\s*(?:={4,}|-{6,}|_{6,})\s*$",
+    re.IGNORECASE | re.MULTILINE)
+
+
+def squeezed(text: str) -> str:
+    """``text`` with its layout taken out and its content kept: table rule
+    lines and lines of only ``-=_*|:`` become a space, every ``|`` a space,
+    and each run of whitespace one space."""
+    text = re.sub(r"^\s*\|?\s*:?-{2,}.*$", " ", text, flags=re.MULTILINE)
+    text = re.sub(r"^[\s\-=_*|:]+$", " ", text, flags=re.MULTILINE)
+    text = text.replace("|", " ")
+    return " ".join(text.split())
+
+
+def length_gate(original: str, paraphrase: str) -> str:
+    """Fires when the squeezed paraphrase is over ``LENGTH_HIGH`` times the
+    squeezed original plus ``LENGTH_SLACK`` characters, or under
+    ``LENGTH_LOW`` times it: a run-on, an answer, or a reply cut short."""
+    o, p = len(squeezed(original)), len(squeezed(paraphrase))
+    if not o:
+        return f"length {p} against an empty original" if p > LENGTH_SLACK else ""
+    if p > LENGTH_HIGH * o + LENGTH_SLACK or p < LENGTH_LOW * o:
+        return f"length ratio {p / o:.2f}"
+    return ""
+
+
+def split_gate(original: str, paraphrase: str) -> str:
+    """Fires when a single-line original of at most ``SPLIT_WORDS`` words
+    comes back on two or more non-empty lines."""
+    if "\n" in original.strip() or len(_WORD.findall(original)) > SPLIT_WORDS:
+        return ""
+    lines = [line for line in paraphrase.strip().split("\n") if line.strip()]
+    return "split into lines" if len(lines) > 1 else ""
+
+
+def _script_counts(text: str) -> Counter:
+    """The letters of ``text`` per script, read from each character's
+    Unicode name; digits, punctuation and emoji count for none."""
+    counts: Counter = Counter()
+    for ch in text:
+        if not ch.isalpha():
+            continue
+        name = unicodedata.name(ch, "")
+        script = next((s for s in _SCRIPTS if name.startswith(s)), None)
+        counts["Han" if script == "CJK" else script.title() if script else "Other"] += 1
+    return counts
+
+
+def script_gate(original: str, paraphrase: str) -> str:
+    """Fires when ``SCRIPT_SHARE`` or more of the paraphrase's letters are in
+    scripts that make up under ``SCRIPT_RARE`` of the original's letters
+    (English answered in Chinese). A text with no letters never fires it."""
+    ours = _script_counts(original.strip())
+    theirs = _script_counts(paraphrase.strip())
+    n_ours, n_theirs = sum(ours.values()), sum(theirs.values())
+    if not n_ours or not n_theirs:
+        return ""
+    foreign = sum(n for script, n in theirs.items()
+                  if ours.get(script, 0) / n_ours < SCRIPT_RARE)
+    if foreign / n_theirs < SCRIPT_SHARE:
+        return ""
+    return (f"script changed: {ours.most_common(1)[0][0]} -> "
+            f"{theirs.most_common(1)[0][0]}")
+
+
+def language_gate(original: str, paraphrase: str) -> str:
+    """Fires when GlotLID labels the two texts differently, each with a
+    probability of ``LANGID_PROBABILITY`` or above. Without the ``langid``
+    extra or its model it passes every text (the front warns once)."""
+    from ..jailbreak.obfuscation import langid
+
+    ours = langid.label_probability(original.strip())
+    theirs = langid.label_probability(paraphrase.strip())
+    if ours is None or theirs is None:
+        return ""
+    (a, pa), (b, pb) = ours, theirs
+    if a != b and pa >= LANGID_PROBABILITY and pb >= LANGID_PROBABILITY:
+        return f"language {a} -> {b}"
+    return ""
+
+
+def artifact_gate(original: str, paraphrase: str) -> str:
+    """Fires when the paraphrase holds an HTML tag or a rule line and the
+    original holds none at all."""
+    found = _ARTIFACT.search(paraphrase.strip())
+    if found is None or _ARTIFACT.search(original.strip()):
+        return ""
+    return f"artifact {found.group().strip()}"
+
+
+#: The gates, in the order they are tried.
+GATES = (length_gate, split_gate, script_gate, language_gate, artifact_gate)
+
+
+def gate_reason(original: str, paraphrase: str) -> str:
+    """The reason of the first gate in :data:`GATES` that ``paraphrase``
+    fails, or ``""`` when it passes them all."""
+    for gate in GATES:
+        reason = gate(original, paraphrase)
+        if reason:
+            return reason
+    return ""
 
 
 def paraphrase_batch(
@@ -271,6 +420,8 @@ def run_paraphrase_target(
                 target, len(groups),
             )
 
+    checker = (build_paraphrase_checker(prompt_dir=prompt_dir)
+               if check is not None else None)
     written = 0
 
     def _append(rows: list[dict]) -> dict[Path, int]:
@@ -308,30 +459,44 @@ def run_paraphrase_target(
                     progress=f"paraphrase:{target} ({model})" if verbose else None,
                     internals_ids=provisional_ids if capture_paraphrase else None,
                 )
-                if check is not None:
-                    originals = [u[3] for u in chunk]
-                    checks = batch_check_samples(
-                        check, paraphrased,
-                        build_paraphrase_checker(prompt_dir=prompt_dir),
-                        originals=originals,
-                        batch_size=batch_size,
-                        progress=f"paraphrase-check:{target}" if verbose else None,
-                    )
-                else:
-                    checks = [(True, "")] * len(chunk)
-
-                attempted = []  # (rows, ack) of each unit of the chunk
-                for unit, ptext, (acc, reason), prov_id in zip(
-                    chunk, paraphrased, checks, provisional_ids
-                ):
-                    bid, iteration, m, otext, cat, et, iid, label = unit
+                # 1. Per unit, in chunk order: the dedup drop, then the gates.
+                # A gated text is a row, so it joins seen_texts as any row does.
+                # The gates are part of the check: without one, neither runs.
+                kept = []   # (unit, paraphrase, gate reason, provisional id)
+                for unit, ptext, prov_id in zip(chunk, paraphrased, provisional_ids):
                     pt = str(ptext).strip()
-                    if not pt or pt == otext or pt in seen_texts:
+                    if not pt or pt == unit[3] or pt in seen_texts:
+                        kept.append((unit, None, "", prov_id))
+                        continue
+                    seen_texts.add(pt)
+                    reason = gate_reason(unit[3], pt) if check is not None else ""
+                    kept.append((unit, pt, reason, prov_id))
+                # 2. One check call for the kept, ungated units.
+                to_check = [(unit[3], pt) for unit, pt, reason, _ in kept
+                            if pt is not None and not reason]
+                verdicts = iter(batch_check_samples(
+                    check, [pt for _, pt in to_check], checker,
+                    originals=[otext for otext, _ in to_check],
+                    batch_size=batch_size,
+                    progress=f"paraphrase-check:{target}" if verbose else None,
+                    temperature=CHECK_TEMPERATURE,
+                ) if check is not None and to_check else ())
+
+                # 3. The rows and acks, in chunk order.
+                attempted = []  # (rows, ack) of each unit of the chunk
+                for unit, pt, gated, prov_id in kept:
+                    bid, iteration, m, otext, cat, et, iid, label = unit
+                    if pt is None:
                         attempted.append(([], {
                             **_keyed(bid, iteration, iid),
                             "paraphrase_model": m, "status": "dropped_dedup"}))
                         continue  # dedup: drop no-op / duplicate paraphrases
-                    seen_texts.add(pt)
+                    if gated:
+                        acc, reason = False, gated
+                    elif check is not None:
+                        acc, reason = next(verdicts)
+                    else:
+                        acc, reason = True, ""
                     sample_id = content_id(pt)
                     if capture_paraphrase:
                         client.rename_capture(prov_id, f"{bid}/paraphrase/{sample_id}")

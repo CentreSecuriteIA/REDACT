@@ -70,6 +70,17 @@ def _no_busy_cards(monkeypatch):
 
 
 @pytest.fixture(autouse=True)
+def _no_glotlid(monkeypatch):
+    """No test fetches GlotLID (1.69 GB) or runs it: the language checks see
+    no identifier, as on a machine without the langid extra. Its own tests
+    reset both, and a gate test patches ``label_probability``."""
+    from redact.jailbreak.obfuscation import langid
+
+    monkeypatch.setattr(langid, "_model", None)
+    monkeypatch.setattr(langid, "_unavailable", True)
+
+
+@pytest.fixture(autouse=True)
 def _no_cut_warned():
     """A model's first cut reply in a stage warns once: a test's warning must
     not silence the next test's."""

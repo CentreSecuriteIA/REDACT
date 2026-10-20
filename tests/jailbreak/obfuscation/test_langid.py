@@ -62,6 +62,23 @@ def test_without_the_package_nothing_is_detected(monkeypatch):
     assert langid.detect("habari") is None
 
 
+def test_label_probability_gives_the_top_label_and_its_probability(monkeypatch):
+    """The paraphrase check's language gate reads the probability too."""
+    model = _Model("swh_Latn")
+    _installed(monkeypatch, model)
+    assert langid.label_probability("habari\n\nyako  leo") == ("swh_Latn", 0.97)
+    assert model.lines == ["habari yako leo"]
+
+
+def test_label_probability_is_none_without_the_package_or_a_word(monkeypatch):
+    model = _Model()
+    _installed(monkeypatch, model)
+    assert langid.label_probability(" \n ") is None and model.lines == []
+    monkeypatch.setattr(langid, "_model", None)
+    monkeypatch.setitem(sys.modules, "fasttext", None)      # import raises
+    assert langid.label_probability("habari") is None
+
+
 def test_text_without_a_word_has_no_label(monkeypatch):
     model = _Model()
     _installed(monkeypatch, model)
@@ -94,3 +111,4 @@ def test_a_model_that_cannot_be_had_warns_once_and_skips(monkeypatch, caplog):
     assert len(downloads) == 1
     warnings = [r for r in caplog.records if r.levelno == logging.WARNING]
     assert len(warnings) == 1 and "offline" in warnings[0].getMessage()
+    assert "machine translation, paraphrase" in warnings[0].getMessage()

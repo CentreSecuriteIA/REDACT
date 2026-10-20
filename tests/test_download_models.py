@@ -44,6 +44,12 @@ def test_a_machine_translation_model_brings_the_language_identifier(script):
     assert "cis-lmu/glotlid" not in script.checkpoints(["venice-uncensored-fp8"])
 
 
+def test_a_paraphraser_brings_the_language_identifier(script):
+    """The paraphrase check's language gate reads GlotLID too."""
+    assert script.checkpoints(["venice-paraphraser"])["cis-lmu/glotlid"] == [
+        "venice-paraphraser"]
+
+
 def test_a_checkpoint_with_a_replaced_config_is_fetched_whole(script, monkeypatch):
     """Its tokenizer files come with the snapshot, so the engine's tokenizer
     folder finds them in the hub cache, offline too."""

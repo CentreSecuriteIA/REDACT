@@ -752,6 +752,129 @@ def test_a_file_without_the_response_columns_stops_the_outputs_before_any_call(
     assert "new data_dir" in str(raised.value)
 
 
+def _recording_check(patched, verdict=(True, "")):
+    """Patch the check call to accept (or give ``verdict``); return its calls."""
+    calls = []
+
+    def check(cc, payloads, checker, **kw):
+        calls.append((list(payloads), kw))
+        return [verdict for _ in payloads]
+
+    patched.setattr(CP, "batch_check_samples", check)
+    return calls
+
+
+_RUN_ON = " and then it goes on into a long story nobody asked for"
+
+
+def test_a_gated_paraphrase_is_a_rejected_row_and_is_not_checked(tmp_path, patched):
+    from redact.llm_pipeline import CHECK_TEMPERATURE
+
+    _seed_inputs(tmp_path)
+    patched.setattr(CP, "paraphrase_batch", lambda client, texts, **kw: [
+        t + _RUN_ON if t.startswith("beta") else f"PARA::{t}" for t in texts])
+    calls = _recording_check(patched)
+    df = generate_paraphrases(data_dir=tmp_path, target="inputs",
+                              verbose=False)["inputs"]
+
+    by_text = df.set_index("sample")
+    assert bool(by_text.loc["PARA::alpha prompt", "accepted"])
+    gated = by_text.loc["beta prompt" + _RUN_ON]
+    assert not bool(gated["accepted"])
+    assert gated["reasoning"].startswith("length ratio")
+    assert [ack["status"] for ack in _acks(tmp_path)] == ["accepted", "rejected"]
+    # The check model saw the ungated paraphrase alone, at the check temperature.
+    assert calls == [(["PARA::alpha prompt"], {
+        "originals": ["alpha prompt"], "batch_size": 256, "progress": None,
+        "temperature": CHECK_TEMPERATURE})]
+
+
+def test_a_chunk_whose_paraphrases_are_all_gated_makes_no_check_call(tmp_path, patched):
+    _seed_inputs(tmp_path)
+    patched.setattr(CP, "paraphrase_batch",
+                    lambda client, texts, **kw: [t + _RUN_ON for t in texts])
+    calls = _recording_check(patched)
+    generate_paraphrases(data_dir=tmp_path, target="inputs", verbose=False)
+    assert calls == []
+    assert [ack["status"] for ack in _acks(tmp_path)] == ["rejected", "rejected"]
+
+
+def test_a_gated_text_is_written_once(tmp_path, patched):
+    """It is a row, so the same text from another unit is a repeat."""
+    write_inputs(paths.constitution_inputs_dir(tmp_path), ["alpha prompt"])
+    patched.setattr(CP, "paraphrase_batch",
+                    lambda client, texts, **kw: [t + _RUN_ON for t in texts])
+    with pytest.warns(UserWarning):     # K>1 with a single paraphraser
+        df = generate_paraphrases(data_dir=tmp_path, target="inputs",
+                                  paraphrases_per_sample=2, verbose=False)["inputs"]
+    assert len(df) == 1 and not bool(df["accepted"].iloc[0])
+    assert [ack["status"] for ack in _acks(tmp_path)] == ["rejected", "dropped_dedup"]
+
+
+def test_without_the_check_no_gate_runs(tmp_path, patched):
+    _seed_inputs(tmp_path)
+    patched.setattr(CP, "paraphrase_batch",
+                    lambda client, texts, **kw: [t + _RUN_ON for t in texts])
+    patched.setattr(CP, "gate_reason",
+                    lambda *a: pytest.fail("a gate ran without the check"))
+    calls = _recording_check(patched)
+    df = generate_paraphrases(data_dir=tmp_path, target="inputs", check=False,
+                              verbose=False)["inputs"]
+    assert bool(df["accepted"].all()) and calls == []
+
+
+def test_the_language_gate_rejects_another_language(tmp_path, patched):
+    from redact.jailbreak.obfuscation import langid
+
+    _seed_inputs(tmp_path)
+    patched.setattr(langid, "label_probability", lambda text: (
+        ("deu_Latn", 0.95) if text.startswith("PARA::") else ("eng_Latn", 0.95)))
+    df = generate_paraphrases(data_dir=tmp_path, target="inputs",
+                              verbose=False)["inputs"]
+    assert list(df["reasoning"]) == ["language eng_Latn -> deu_Latn"] * 2
+    assert not df["accepted"].astype(bool).any()
+
+
+def _glotlid_warnings(caplog):
+    return [r for r in caplog.records if r.levelname == "WARNING"
+            and "GlotLID is not available" in r.getMessage()]
+
+
+def test_without_glotlid_the_check_warns_once(tmp_path, patched, caplog):
+    import logging
+
+    from redact.jailbreak.obfuscation import langid
+
+    _seed_inputs(tmp_path)
+    pd.DataFrame({
+        "input_id": ["id1"], "output_response": ["a real answer"], "accepted": [True],
+        "category": ["Cyber"], "entry_type": ["harmful"],
+    }).to_csv(paths.output_responses_csv(tmp_path), index=False)
+    patched.setattr(langid, "available", lambda: False)
+    with caplog.at_level(logging.WARNING):
+        generate_paraphrases(data_dir=tmp_path, target="both", verbose=False)
+    (warning,) = _glotlid_warnings(caplog)
+    assert "skipped" not in warning.getMessage()    # counted by other tests
+    assert "redact[langid]" in warning.getMessage()
+
+    caplog.clear()
+    with caplog.at_level(logging.WARNING):
+        generate_paraphrases(data_dir=tmp_path, target="both", check=False,
+                             resume=False, verbose=False)
+    assert _glotlid_warnings(caplog) == []
+
+
+def test_without_a_source_row_the_glotlid_warning_is_not_given(
+        tmp_path, patched, caplog):
+    import logging
+
+    write_inputs(paths.constitution_inputs_dir(tmp_path), ["alpha prompt"],
+                 accepted=[False])
+    with caplog.at_level(logging.WARNING):
+        generate_paraphrases(data_dir=tmp_path, target="inputs", verbose=False)
+    assert _glotlid_warnings(caplog) == []
+
+
 def test_the_inputs_target_beside_an_old_outputs_folder_resumes_as_before(
         tmp_path, patched):
     _seed_inputs(tmp_path)

@@ -12,7 +12,7 @@ Python 3.11 or later.
 ```bash
 pip install -e .                   # core: pandas, openai, anthropic, python-dotenv, pyfiglet, filelock
 pip install -e ".[vllm]"           # local models through vLLM (vllm, hf_transfer, psutil, langid)
-pip install -e ".[langid]"         # GlotLID, the language check of a machine translation
+pip install -e ".[langid]"         # GlotLID, the language check of a machine translation and of a paraphrase
 pip install -e ".[transformers]"   # the introspection backend (torch, transformers, accelerate)
 pip install -e ".[hf]"             # loading published datasets from the HuggingFace Hub
 pip install -e ".[dev]"            # pytest, ruff, mypy, ipykernel

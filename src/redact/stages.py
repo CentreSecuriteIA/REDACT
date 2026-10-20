@@ -848,9 +848,10 @@ def generate_paraphrases(
 
     Each base sample is paraphrased ``paraphrases_per_sample`` times (K repeated 1:1
     calls, one per unit), with paraphraser models assigned round-robin from the
-    ``paraphraser`` pool. Each paraphrase is validated by a **separate**
-    meaning-preservation checker (check→drop, no retry) and deduped so no two stored
-    samples are identical. Rows land in ``paraphrases_inputs.csv`` /
+    ``paraphraser`` pool. Each paraphrase passes five gates (length, split
+    lines, script, language, artifacts) and is then validated by a
+    **separate** checker at ``CHECK_TEMPERATURE`` (no retry), and is deduped
+    so no two stored samples are identical. Rows land in ``paraphrases_inputs.csv`` /
     ``paraphrases_outputs.csv`` under ``data_dir``, carrying
     ``paraphrase_model`` provenance: those of the inputs keyed by
     ``(input_id, iteration)``, those of the outputs by ``(response_id,
@@ -879,7 +880,9 @@ def generate_paraphrases(
             separate from the paraphraser; warns if they coincide).
         paraphrases_per_sample: K units per base sample (warns if K>1 with 1 model).
         target: ``"inputs"`` | ``"outputs"`` | ``"both"``.
-        check: Run the meaning-preservation checker (drop failures if it rejects).
+        check: Gate each paraphrase and check it with the ``check_model``
+            (rejected rows are kept, ``accepted`` false); off, every
+            paraphrase is accepted.
         resume: Skip already-produced units: ``(input_id, iteration)`` of
             the inputs, ``(response_id, iteration)`` of the outputs.
         batch_size: Units per paraphrase/check batch.
@@ -923,6 +926,7 @@ def generate_paraphrases(
     check_client = ModelClient.create(check_model) if check else None
 
     results: dict[str, pd.DataFrame] = {}
+    langid_checked = not check
     for tgt in targets:
         if tgt == "inputs":
             # Rows of any verdict; a target without any is skipped silently.
@@ -943,6 +947,14 @@ def generate_paraphrases(
             results[tgt] = _skipped(f"paraphrase ({tgt})", what, clear=[] if resume
                                     else [{"artifact": out_path}])
             continue
+        if not langid_checked and not source.empty:
+            langid_checked = True
+            if not langid.available():
+                logger.warning(
+                    "paraphrase: GlotLID is not available, so the paraphrase "
+                    "check runs without its language gate (the script gate "
+                    "still runs); install redact[langid] and fetch its model "
+                    "with scripts/download_models.py.")
         results[tgt] = run_paraphrase_target(
             tgt, source, out_path,
             pool=pool, check=check_client, k=paraphrases_per_sample,

@@ -106,8 +106,8 @@ Per target, under `Datasets/`:
 | `category`, `entry_type` | Copied from the source row: for a response, its input's |
 | `response_mode`, `output_label`, `response_label` | `outputs` only: copied from the response, so a paraphrase carries its response's label ([outputs](outputs.md#answer-modes)). Always written, empty when the source lacks the column |
 | `paraphrase_model` | The model that wrote it |
-| `accepted` | The checker's verdict; `true` when `check` is off |
-| `reasoning` | The checker's reply when rejected |
+| `accepted` | The gates' and the checker's verdict; `true` when `check` is off |
+| `reasoning` | The gate's reason or the checker's reply when rejected |
 | `source` | `paraphrase_inputs` or `paraphrase_outputs` |
 
 A paraphrase row carries no axis columns, by design: the spec of the
@@ -124,7 +124,9 @@ The build merges the accepted paraphrases into the complete dataset in
 
 Every attempted unit is acked, whatever its outcome, so a resume runs only
 units no save recorded. A resume reads the whole artifact once for the texts
-already in it. `resume: false` removes the CSV, its `.cut` and `.tmp`
+already in it. Rows written before keep their verdicts, made with the check
+of their day; `resume: false` checks every paraphrase again.
+`resume: false` removes the CSV, its `.cut` and `.tmp`
 files, the ledger and the manifest of each target the run names, a skipped
 target too. The lock and the cut-back work as in
 [internals/dataset.md](../internals/dataset.md).
@@ -138,8 +140,48 @@ header lacks `response_id`, `response_mode`, `output_label` or
 "outputs"`, which leaves the inputs' paraphrases as they are) and a new
 `data_dir`. The `inputs` target of the same folder resumes as before.
 
+## The check
+
+With `check` on, each paraphrase passes five gates before the check model
+sees it. They are code, not model calls, and are tried in this order; the
+first that fails rejects the paraphrase:
+
+| Gate | Fails when | Reason saved |
+|---|---|---|
+| length | the paraphrase, squeezed (table rule lines, lines of only `-=_*\|:`, pipes and runs of whitespace taken out), is over 1.5 times the squeezed original plus 20 characters, or under 0.5 times it | `length ratio <r>` |
+| split | the original is one line of at most 35 words and the paraphrase has two or more non-empty lines | `split into lines` |
+| script | 10% or more of the paraphrase's letters are in scripts that make up under 1% of the original's | `script changed: <script> -> <script>` (`Latin -> Han`) |
+| language | GlotLID labels the two texts differently, both with a probability of 0.9 or above | `language <label> -> <label>` |
+| artifact | the paraphrase holds an HTML tag (`p`, `br`, `div`, `span`, `b`, `i`, `ul`, `li`, `h1` to `h6`) or a rule line (`====`, `------`, `______`) and the original holds none | `artifact <match>` |
+
+A gated paraphrase is saved as a rejected row, its `reasoning` the gate's
+reason, and is not sent to the check model. The rest go to the check model in
+one batch call per chunk, at temperature 0.15
+(`llm_pipeline.CHECK_TEMPERATURE`, as the inputs and outputs checks), with the
+strict prompt `prompts/paraphrase/check/`. It judges content, not wording: it
+lists the rewordings that are fine, and answers No to an answer in place of a
+rewrite, added or missing content, repetition, added profanity, another
+language, extra text (a preamble, a tag, a note about the task) and a change
+of meaning or severity. Its verdict is the reply's first word.
+
+The thresholds were measured on 1,638 benign rewrites by two paraphrasers,
+set so that no rewrite read as good fails a gate; together with the strict
+prompt they caught 85% of the failures read, at 0.6% of the good rewrites
+rejected. Both were measured on benign text only.
+
+`check: false` runs neither the gates nor the check model: every paraphrase
+is accepted. Without the `langid` extra, or when GlotLID cannot be loaded,
+the language gate passes every text and the front warns once (the script
+gate still runs).
+
+A paraphrase that loses its Markdown formatting (headings, code fences,
+lists, tables) but keeps the information is accepted: the gates squeeze the
+layout out before they compare lengths, and the check judges content.
+
 ## Rejected and failed units
 
+- A paraphrase a gate rejects is saved with `accepted` false and the gate's
+  reason as `reasoning`, without a check call.
 - A paraphrase the checker rejects is saved with `accepted` false. The build
   leaves it out.
 - A paraphrase that is empty, equal to its original, or equal to a text
