@@ -64,8 +64,10 @@ format and follows no other instruction:
 
 - `machine_translation` makes the translation technique send it
   `jailbreak/translate_mt` and check its output itself. Overlay that prompt
-  when the model's format differs; the stage checks it renders to one user
-  message.
+  to change its wording; the stage checks it renders to one user message
+  holding the three markers of the TranslateGemma format (source, target,
+  text) in that order (`check_mt_prompt` in `translation.py`), so a model
+  with another format needs that check changed.
 - `hf_config` names a folder under `configs/llm/hf_configs/` holding a
   `config.json` read in place of the checkpoint's, when the installed
   transformers cannot read the checkpoint's own. vLLM also reads the config
@@ -141,13 +143,15 @@ messages = template(sample=text)                           # template values, pe
 Pass `prompt_dir` down from the front, so a user's overlay reaches the new
 prompt. A placeholder may not share a name with a parameter of
 `PromptTemplate` (`prompt_config`, `few_shot`, `format_style`, `name`,
-`source`, `is_override`, `prompt_dir`).
+`source`, `is_override`, `prompt_dir`), nor, through `PromptTemplate.load`,
+with `pipeline` or `category`.
 
 **A new input style** needs only a file:
 `prompts/input/generation/from_constitution/<style>/template.json`, then
 `"style": "<style>"` under `inputs` in the params file. The seeded inputs
 stage renders it with `Category`, `sample_description`,
-`constitution_subcategory`, `entry_type` and `num_samples`, and appends the
+`constitution_subcategory`, `entry_type`, `sample_spec` (the unit's dealt
+generation axes; empty without axes) and `num_samples`, and appends the
 `numbered` format instruction.
 
 **To change a prompt for your runs** without editing the library, use the
@@ -189,8 +193,10 @@ contract.
    `kinds` when it should differ from its first family's (below). A new
    family also needs an entry under `families`: `layer`,
    `within_layer_order` (its place in the obfuscation order; 0 elsewhere),
-   `dimension`, `cross_incompatible_with` and, for one variations may
-   draw, `kinds`, plus a `description`, which nothing reads.
+   `dimension` (an augmentation tag of `configs/dimensions.json`, where a new
+   one is an entry with its side and definition; import fails otherwise),
+   `cross_incompatible_with` and, for one variations may draw, `kinds`,
+   plus a `description`, which nothing reads.
    A combination takes one technique per family; a layer's cap is in
    `layer_max_picks`. A rule binds both ways, so one of the two families'
    lists is enough; a rule between two families of one capped layer is
@@ -225,7 +231,7 @@ contract.
      families (`encode`, `fsh`, `dap`, `framing`, `structural`, `ascii_art`,
      `continuation`, `temporal`), so a technique added to one of them joins
      the eval attacks unless `eval.json` denies it under
-     `techniques.deny`. `tests/fixtures/eval_pool.json` pins the 37 names the
+     `techniques.deny`. `tests/fixtures/eval_pool.json` pins the 36 names the
      eval type draws, and `tests/jailbreak/test_pool.py` fails until the
      owner decides: deny the technique in `eval.json`, or add its name to the
      fixture. A user's copy of `eval.json` in a `config_dir` is not updated:
@@ -237,6 +243,8 @@ contract.
    signatures, and the combinations five seeds draw), so it fails on any new
    technique. Once the change is meant, regenerate the fixture from the
    repository root with `PYTHONPATH=src python -m tests.jailbreak.test_registry`.
+6. **Docs**: list it by name in [techniques.md](techniques.md), with the
+   counts there.
 
 ## Add a stage
 
@@ -277,7 +285,9 @@ A stage is a core, a front, and a row in the stage table.
    inputs from, for its run record; `[]` when it reads none), `folded`
    when the run folds some params keys into a kwarg it passes itself, and
    `extra_counts` when its record counts more than its files' rows. A new
-   recipe role also goes in `_DEFAULT_MODELS` in `recipe.py`.
+   recipe role also goes in `_DEFAULT_MODELS` in `recipe.py`, and the stage's
+   name in the `stages` of both dataset type files (`eval.json`,
+   `training.json`) to run by default; a recipe's own `stages` replace them.
 5. **The build**: add a `Part` in `_stage_parts`, with `accepted_only=True`,
    when its rows belong in the complete dataset, with its `include_<part>`
    and path keys, and list its file in `_build_sources`; when its rows
@@ -289,7 +299,8 @@ A stage is a core, a front, and a row in the stage table.
    `tests/test_stage_files.py` pins each stage's files after a stopped and a
    resumed run against `tests/fixtures/stage_files.json`; add the new stage
    there. `tests/conftest.py` has a mock backend and client.
-7. **Docs**: a page under `docs/stages/`.
+7. **Docs**: a page under `docs/stages/`, and its entry under Stages in the
+   `mkdocs.yml` nav.
 
 ## Add a category or a taxonomy
 
