@@ -11,9 +11,10 @@ A key starting with ``_``, in the section or in a kind, is a comment and is
 skipped. ``translation`` alone decides whether a kind draws the translation
 family; the lists may narrow it to the languages they name. A kind draws
 only the techniques whose ``kinds`` in ``combination_spec.json`` hold it, so
-the natural kind draws only what the spec marks natural. Both packaged kinds
-deny the ``rewrite`` layer; a kind that gives its own ``layers.deny``
-replaces that list, so it names ``rewrite`` to keep the layer off.
+the natural kind draws only what the spec marks natural. A layer the spec
+has off by default (``layers_off_by_default``: ``rewrite``) is denied by
+every kind whose ``layers.allow`` does not name it, whatever its
+``layers.deny`` says.
 """
 
 import copy
@@ -46,10 +47,10 @@ _ROUND_KEYS = ("exact_techniques", "max_complexity", "max_obfuscations",
                "layer_rates", "allow_request_obfuscation")
 _RATE_KEYS = ("rewrite", "hacking", "manipulation", "requests", "request_obfuscation")
 _LAYERS = ("rewrite", "hacking", "manipulation", "obfuscation", "requests")
-#: The layer off by default: the packaged kinds deny it, and a round says
-#: ``include_rewrite`` only for a kind that allows it while the registry holds
-#: a technique of the layer, so the rounds of every other kind are those
-#: written before the layer existed.
+#: The layer the spec has off by default: a kind denies it unless its
+#: ``layers.allow`` names it, and a round says ``include_rewrite`` only for a
+#: kind that allows it while the registry holds a technique of the layer, so
+#: the rounds of every other kind are those written before the layer existed.
 _REWRITE = "rewrite"
 _SPEC = "combination_spec.json"
 
@@ -86,6 +87,12 @@ def natural_only_families(config_dir: str | Path | None = None) -> list[str]:
     return list(_section_file(config_dir)["natural_only_families"])
 
 
+def layers_off_by_default() -> list[str]:
+    """The layers a kind denies unless its ``layers.allow`` names them: the
+    spec's ``layers_off_by_default``."""
+    return list(load_spec().get("layers_off_by_default", []))
+
+
 def resolve(
     section: dict | None, kind: str, base: dict | None = None,
     config_dir: str | Path | None = None,
@@ -98,9 +105,13 @@ def resolve(
     leaves out is then ``base``'s (off when ``base`` gives it as ``None``),
     and a kind it gives overlays ``base``'s, or the packaged one when
     ``base`` switches it off; ``config_dir``'s ``augmentations.json``
-    replaces the packaged one when it has the file. ``layers``, ``families`` and
+    replaces the packaged one when it has the file. ``families`` and
     ``techniques`` come back with both their lists (``allow`` ``None`` for
-    all), and a kind with ``rounds`` with ``iterations`` set to their number.
+    all), ``layers`` with its ``deny`` and, when one was given, its
+    ``allow``, and a kind with ``rounds`` with ``iterations`` set to their
+    number. ``layers.deny`` holds every layer of
+    :func:`layers_off_by_default` its ``layers.allow`` does not name
+    (:func:`_deny_layers_off`), so the pool and the rounds read one list.
     The adversarial ``families.deny`` holds every family of
     :func:`natural_only_families` its ``families.allow`` does not name.
     An allow list names only families and techniques whose spec ``kinds``
@@ -153,13 +164,12 @@ def resolve(
 
     resolved = {**copy.deepcopy(default), **copy.deepcopy(given)}
     _check_entry_types(where, resolved["entry_types"])
-    for level, keys in (("layers", ("deny",)), ("families", ("allow", "deny")),
-                        ("techniques", ("allow", "deny"))):
+    for level in ("layers", "families", "techniques"):
         if level in given:
-            lists = _lists(where, level, given[level], keys)
+            lists = _lists(where, level, given[level])
             resolved[level] = _overlay(
                 where, level, default[level],
-                {key: lists[key] for key in keys if key in given[level]})
+                {key: lists[key] for key in ("allow", "deny") if key in given[level]})
     if (kind == "natural" and resolved["families"]["allow"] is None
             and resolved["techniques"]["allow"] is None):
         raise ValueError(
@@ -171,6 +181,7 @@ def resolve(
                              if name not in (families["allow"] or ())
                              and name not in families["deny"]]
     _check_names(where, resolved)
+    _deny_layers_off(where, resolved["layers"])
     _check_kinds(where, kind, resolved)
     _switch_off_translation(where, resolved)
     if type(resolved["pure_only"]) is not bool:
@@ -212,10 +223,11 @@ def rounds_of(resolved: dict) -> list[dict]:
     as the sampler's ``sampling_probs``. ``include_rewrite`` is written only
     when the kind allows the rewrite layer and a rewrite technique is
     registered, where the others are always written: a round of any other
-    kind is as it was before the layer existed (a kind that gives its own
-    ``layers.deny`` allows the layer, but while the layer is empty nothing
-    changes, so its kept plan resumes). A count round does not read
-    ``include_rewrite``; its pool decides. ``budget`` is written only when ``"group"`` and
+    kind is as it was before the layer existed (a kind whose
+    ``layers.allow`` names it allows the layer, but while the layer is
+    empty nothing changes, so its kept plan resumes). A count round does
+    not read ``include_rewrite``; its pool decides. ``budget`` is written
+    only when ``"group"`` and
     ``max_unit_complexity`` only when given, so a kind that leaves them out
     or says ``"unit"`` has the rounds, and the plan file, it had before
     they existed; a count round carries them and ignores them.
@@ -314,28 +326,36 @@ def _check_entry_types(where: str, entry_types) -> None:
             f"{where}.entry_types names {unknown}; write entry types of {valid}.")
 
 
-def _lists(where: str, level: str, value, keys: tuple[str, ...]) -> dict:
-    """``value`` as ``{"allow": list | None, "deny": list}``, the keys of ``keys``."""
+def _lists(where: str, level: str, value) -> dict:
+    """``value`` as ``{"allow": list | None, "deny": list}``.
+
+    A ``layers.allow`` is a list, empty for none: it names the layers off by
+    default to turn on. A ``families`` or ``techniques`` ``allow`` is a
+    non-empty list, or ``None`` for all.
+    """
+    keys = ["allow", "deny"]
     if not isinstance(value, dict):
-        raise ValueError(
-            f"{where}.{level} must be an object of {list(keys)}, got {value!r}.")
+        raise ValueError(f"{where}.{level} must be an object of {keys}, got {value!r}.")
     unknown = [key for key in value if key not in keys]
     if unknown:
         raise ValueError(
-            f"{where}.{level} has unknown key(s) {unknown}; write only {list(keys)}.")
-    out = {}
-    if "allow" in keys:
+            f"{where}.{level} has unknown key(s) {unknown}; write only {keys}.")
+    if level == "layers":
+        allow = value.get("allow", [])
+        if not isinstance(allow, list):
+            raise ValueError(f"{where}.layers.allow must be a list, got {allow!r}.")
+    else:
         allow = value.get("allow")
         if allow is not None and (not isinstance(allow, list) or not allow):
             raise ValueError(
                 f"{where}.{level}.allow must be a non-empty list, got {allow!r}; "
                 "write null for all, or name what to leave out under deny.")
-        out["allow"] = None if allow is None else list(allow)
+    out = {"allow": None if allow is None else list(allow)}
     deny = value.get("deny", [])
     if not isinstance(deny, list):
         raise ValueError(f"{where}.{level}.deny must be a list, got {deny!r}.")
     out["deny"] = list(deny)
-    if "allow" in out and out["allow"]:
+    if out["allow"]:
         both = [name for name in out["allow"] if name in out["deny"]]
         if both:
             raise ValueError(
@@ -348,13 +368,15 @@ def _overlay(where: str, level: str, default: dict, given: dict) -> dict:
     """The lists ``given`` holds over ``default``'s, one by one.
 
     A name given under one list leaves the default's other list, so a deny
-    given alone is the default's allow less those names.
+    given alone is the default's allow less those names. A deny may empty
+    the default's ``layers.allow``, which then turns no layer on; one that
+    empties a families or techniques allow, which would draw nothing, raises.
     """
     out = {**default, **given}
     for key, other in (("allow", "deny"), ("deny", "allow")):
         if given.get(key) and other not in given and out.get(other):
             out[other] = [name for name in out[other] if name not in given[key]]
-            if other == "allow" and not out[other]:
+            if other == "allow" and not out[other] and level != "layers":
                 raise ValueError(
                     f"{where}.{level}.deny leaves out every name of the default's "
                     f"allow; write {level}.allow as well.")
@@ -369,11 +391,12 @@ def _check_names(where: str, resolved: dict) -> None:
     families = sorted(spec["families"])
     in_spec = {name for name in spec["techniques"] if not name.startswith("_")}
     registered = {fn.__name__ for fn in all_techniques()}
-    for name in resolved["layers"]["deny"]:
-        if name not in layers:
-            raise ValueError(
-                f"{where}.layers.deny names {name!r}, which is not a layer of "
-                f"{_SPEC}; write one of {layers}.")
+    for level in ("allow", "deny"):
+        for name in resolved["layers"].get(level) or ():
+            if name not in layers:
+                raise ValueError(
+                    f"{where}.layers.{level} names {name!r}, which is not a layer "
+                    f"of {_SPEC}; write one of {layers}.")
     for level in ("allow", "deny"):
         for name in resolved["families"][level] or ():
             if name not in families:
@@ -389,6 +412,36 @@ def _check_names(where: str, resolved: dict) -> None:
                 raise ValueError(
                     f"{where}.techniques.{level} names {name!r}, which no "
                     "registered technique implements; write a registered one.")
+
+
+def _deny_layers_off(where: str, layers: dict) -> None:
+    """Add to ``layers["deny"]`` every layer of :func:`layers_off_by_default`
+    that ``layers["allow"]`` does not name.
+
+    Such a layer stays off whatever ``deny`` says: a kind's own
+    ``layers.deny``, or a ``config_dir`` copy of ``augmentations.json`` that
+    says ``"deny": []``, leaves it off, and only ``layers.allow`` turns it
+    on.
+
+    Raises:
+        ValueError: ``allow`` names a layer that is on by default, or one
+            ``deny`` names too.
+    """
+    off = layers_off_by_default()
+    allow = layers.get("allow") or []
+    for name in allow:
+        if name not in off:
+            raise ValueError(
+                f"{where}.layers.allow names {name!r}, which is on already: "
+                f"layers.allow turns on only the layers {_SPEC} has off by "
+                f"default ({off}). Take it out of layers.allow.")
+    both = [name for name in allow if name in layers["deny"]]
+    if both:
+        raise ValueError(
+            f"{where}.layers names {both} under both allow and deny; write each "
+            "under one of them.")
+    layers["deny"] += [name for name in off
+                       if name not in allow and name not in layers["deny"]]
 
 
 def _check_kinds(where: str, kind: str, resolved: dict) -> None:

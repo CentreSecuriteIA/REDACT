@@ -388,8 +388,9 @@ The `translation` and `answer_language` techniques are generated from
 The `rewrite` layer comes first: its technique rewrites the whole prompt
 before every other layer applies, one at most a combination
 (`layer_max_picks`). It holds no technique yet and is off: the spec's
-`layer_rates.rewrite` is 0 and both packaged kinds deny it
-(`"layers": {"deny": ["rewrite"]}` in `configs/jailbreak/augmentations.json`).
+`layer_rates.rewrite` is 0 and the spec lists it in
+`layers_off_by_default`, so a kind leaves it out unless its `layers.allow`
+names it, whatever its `layers.deny` says.
 
 1. **Write and register it** as any technique (above), in a module under
    `jailbreak/rewrite/` whose getter `get_all_rewrite_functions` in
@@ -399,8 +400,8 @@ before every other layer applies, one at most a combination
 2. **Give it a family** in the spec with `"layer": "rewrite"`, a
    `dimension` and, for variations, `kinds`; the technique's entry carries
    `since`, the spec's `version` moved up.
-3. **Turn the layer on** for a kind: a `layers.deny` without `rewrite`
-   (`"layers": {"deny": []}`) puts the technique in the kind's pool, and a
+3. **Turn the layer on** for a kind: `"layers": {"allow": ["rewrite"]}`
+   puts the technique in the kind's pool, and a
    count round (`exact_techniques`: the natural kind, the escalation's
    first two rounds) may draw it from there. A budget round draws it only
    at a rate above 0, `"layer_rates": {"rewrite": 0.2}`; the escalation's
@@ -408,9 +409,9 @@ before every other layer applies, one at most a combination
    spec's 0. With the layer allowed and a rewrite technique registered,
    `rounds_of` writes `include_rewrite: true` in each of an adversarial
    kind's rounds, so a plan kept from before raises on resume naming
-   `rounds`: plan again with `resume=False`. To draw it in every run, take `rewrite` out of the
-   packaged kinds' `layers.deny` and give the spec's `layer_rates.rewrite`
-   a rate.
+   `rounds`: plan again with `resume=False`. To draw it in every run, take
+   `rewrite` out of the spec's `layers_off_by_default` and give the spec's
+   `layer_rates.rewrite` a rate.
 4. **Then as for any technique**: the registry fixture, the docs counts and
    the natural pool. The eval type's attacks allow named families only, so
    a rewrite family is not drawn there unless `eval.json` names it.

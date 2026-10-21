@@ -112,13 +112,22 @@ def read_spec(path: Path) -> dict:
     other keys, with the row's ``complexity``, ``since`` and ``deprecated``
     over them. A row's technique still needs its function, which the
     family's module builds from the same file. A key starting with ``_`` is
-    a comment.
+    a comment. ``layers_off_by_default`` (absent is none) lists layers of
+    ``layer_order`` that a kind of the augmentation section denies unless
+    its ``layers.allow`` names them
+    (:func:`redact.jailbreak.augmentation.resolve`).
 
     Raises:
         ValueError: A generator makes a name the spec, or another of its
-            rows, has already.
+            rows, has already; or ``layers_off_by_default`` is not a list of
+            layers of ``layer_order``.
     """
     spec = json.loads(Path(path).read_text(encoding="utf-8"))
+    layers, off = spec["layer_order"], spec.get("layers_off_by_default", [])
+    if not isinstance(off, list) or any(name not in layers for name in off):
+        raise ValueError(
+            f"combination_spec.json: layers_off_by_default must be a list of "
+            f"layers of layer_order, got {off!r}; write names of {layers}.")
     techniques = dict(spec["techniques"])
     for family, generator in spec.get("generators", {}).items():
         if family.startswith("_"):

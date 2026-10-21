@@ -25,7 +25,9 @@ _BUDGET_OFF = {key: value for key, value in _BUDGET.items()
 def test_both_kinds_are_the_default_when_the_section_is_none():
     for kind in KINDS:
         assert resolve(None, kind) == resolve({}, kind) == resolve(defaults(), kind)
-    assert resolve(None, "natural") == defaults()["natural"]
+    # The file's natural kind, with the layer the spec has off by default denied.
+    assert resolve(None, "natural") == {
+        **defaults()["natural"], "layers": {"deny": ["rewrite"]}}
 
 
 def test_a_kind_given_as_none_is_off():
@@ -183,8 +185,14 @@ def test_the_packaged_defaults():
      "augmentations.adversarial has unknown key(s) ['max_complexty']; write only"),
     ({"natural": {"rounds": "escalation"}}, "natural",
      "augmentations.natural has unknown key(s) ['rounds']"),
-    ({"natural": {"layers": {"allow": ["hacking"]}}}, "natural",
-     "augmentations.natural.layers has unknown key(s) ['allow']; write only ['deny']"),
+    ({"natural": {"layers": {"only": ["hacking"]}}}, "natural",
+     "augmentations.natural.layers has unknown key(s) ['only']; write only "
+     "['allow', 'deny']"),
+    ({"natural": {"layers": {"allow": "rewrite"}}}, "natural",
+     "augmentations.natural.layers.allow must be a list, got 'rewrite'."),
+    ({"natural": {"layers": {"allow": ["rewrit"]}}}, "natural",
+     "augmentations.natural.layers.allow names 'rewrit', which is not a layer of "
+     "combination_spec.json; write one of"),
     ({"natural": {"layers": {"deny": ["hackin"]}}}, "natural",
      "augmentations.natural.layers.deny names 'hackin', which is not a layer of "
      "combination_spec.json; write one of"),

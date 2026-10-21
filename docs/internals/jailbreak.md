@@ -477,10 +477,13 @@ when set, `budget` when `"group"` and `max_unit_complexity` when given, with
 the round's own keys merged over them. `include_rewrite` is
 the exception: written, true, only when the kind allows the rewrite layer
 and a rewrite technique is registered, so the rounds of a kind that denies it
-(both packaged kinds do), and of every kind while the layer is empty, are
-those written before the layer existed, and no kept plan of theirs changes.
-A `layers.deny` a section gives replaces the packaged `["rewrite"]` whole, so
-one that leaves `rewrite` out allows the layer. The kind's
+(every kind that does not allow it), and of every kind while the layer is
+empty, are those written before the layer existed, and no kept plan of
+theirs changes. `resolve` adds each layer of the spec's
+`layers_off_by_default` (`rewrite`) to the kind's `layers.deny` unless its
+`layers.allow` names it (`_deny_layers_off`), so a `layers.deny` a section
+gives, which replaces the default's whole, still leaves the layer off, and
+the pool and `rounds_of` read one list. The kind's
 `layer_rates` goes to `run_augmentation(layer_rates=)` and from there to
 `plan_run`; a round's own `layer_rates`, passed on as the sampler's
 `sampling_probs`, replaces it whole and is read over the spec's rates.

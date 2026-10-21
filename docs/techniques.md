@@ -46,8 +46,9 @@ among them.
 
 The `rewrite` layer rewrites the whole prompt before every other layer, at
 most one technique a combination. It is empty and off by default until the
-owner's prompts for its techniques land: its spec rate is 0 and both
-packaged kinds deny it (`layers.deny: ["rewrite"]`);
+owner's prompts for its techniques land: its spec rate is 0 and the spec
+lists it in `layers_off_by_default`, so a kind draws it only when its
+`layers.allow` names it;
 [extending.md](extending.md#add-a-rewrite-technique) says how to turn it
 on. (`to_rewrite`, despite its name, is an `indirect` request technique.)
 

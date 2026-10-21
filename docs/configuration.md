@@ -361,7 +361,7 @@ Both kinds:
 |---|---|---|---|
 | `entry_types` | list or `null` | `null` | Augment only inputs of these entry types; `null` for all. A kind whose entry types match no input logs a WARNING and writes nothing |
 | `translation` | bool | `true` in the adversarial kind, `false` in the natural one | Whether the kind draws the `translation` family. The family lists do not change it; `layers.deny`, `techniques.deny` and `pure_only` still apply |
-| `layers` | `{"deny": [...]}` | `{"deny": ["rewrite"]}` | Layers left out. The `rewrite` layer is off unless this list leaves it out; a list given replaces the default whole, so name `rewrite` in it to keep the layer off |
+| `layers` | `{"allow": [...], "deny": [...]}` | `{"deny": []}`, the `rewrite` layer off | `deny`: layers left out. `allow`: layers off by default to turn on. A layer the spec lists in `layers_off_by_default` (`rewrite`) is left out unless `allow` names it, whatever `deny` says; `allow` may name only such a layer, and a layer may not be under both |
 | `families` | `{"allow": [...] or null, "deny": [...]}` | adversarial: `{"allow": null, "deny": []}`; natural: the natural families | Families admitted and removed |
 | `techniques` | `{"allow": [...] or null, "deny": [...]}` | adversarial: `{"allow": null, "deny": []}`; natural: three techniques allowed, three denied | Techniques admitted and removed. Either `allow` names only what the spec's `kinds` let the kind draw. A technique the spec retired (`deprecated`) is drawn only when `allow` names it, with a `DeprecationWarning` |
 | `pure_only` | bool | `false` | Drop every technique that calls a model or needs benign data |
@@ -375,7 +375,7 @@ Adversarial only:
 | `rounds` | `null`, `"escalation"` or a list | `null` | The sampler settings per round; see [rounds](#rounds) |
 | `max_complexity` | int >= 0 | `6` | Budget mode: the most total complexity (each technique scores 0 to 3) |
 | `max_obfuscations` | int >= 0 | `2` | Budget mode: the most obfuscation families, the request obfuscation included |
-| `layer_rates` | `{layer: 0..1}` | `{}`, the spec's rates | Target share of units that take a `rewrite` (when `layers.deny` leaves it out; the spec's rate is 0), `hacking`, `manipulation` or `requests` technique, or, with `allow_request_obfuscation`, a `request_obfuscation` |
+| `layer_rates` | `{layer: 0..1}` | `{}`, the spec's rates | Target share of units that take a `rewrite` (when `layers.allow` names it; the spec's rate is 0), `hacking`, `manipulation` or `requests` technique, or, with `allow_request_obfuscation`, a `request_obfuscation` |
 | `allow_request_obfuscation` | bool | `true` (`false` in the eval type) | Allow one more technique after the request technique, at the `request_obfuscation` rate: a light `encode` technique (the light `to_sensitive_words_encode_*` among them), or a translation when the pool has one. It is drawn before the other obfuscations, from what the earlier picks leave, and takes one of the `max_obfuscations` slots and its complexity from them; with `max_obfuscations` 0 there is none |
 | `budget` | `"unit"`, `"group"` or `null` | `null`, as `"unit"` | `"unit"`: each unit may spend up to `max_complexity`. `"group"`: a unit may also spend what the group's earlier units left unspent of it, up to `max_unit_complexity`, so the group's mean stays at or below `max_complexity` ([the group budget](#the-group-budget)). A key of the kind, not of a round; the natural kind refuses it |
 | `max_unit_complexity` | int >= `max_complexity` | `max_complexity + 3` | With `"budget": "group"` only: the most one unit may spend. It may not be below `max_complexity` or any round's `max_complexity`; the natural kind refuses it |
@@ -400,7 +400,8 @@ its input unchanged is rejected.
 
 From every registered technique, in this order:
 
-1. remove the layers in `layers.deny` (`rewrite` by default);
+1. remove the layers in `layers.deny`, and those the spec has off by
+   default (`rewrite`) unless `layers.allow` names them;
 2. when `families.allow` or `techniques.allow` is a list, keep only the
    techniques of an allowed family or with an allowed name (with the switch
    on, `translation` counts as an allowed family unless `techniques.allow`
@@ -426,15 +427,20 @@ From every registered technique, in this order:
 - A value given replaces the default's whole value. A list replaces a list.
 - `layers`, `families` and `techniques` are overlaid list by list. An `allow`
   or `deny` given replaces the default's list of that name and keeps the
-  other. So a `layers.deny` given replaces the packaged `["rewrite"]`:
-  `{"deny": ["rewrite", "manipulation"]}` leaves out manipulation and keeps
-  the rewrite layer off, `{"deny": ["manipulation"]}` allows it.
+  other.
+- The layers the spec has off by default (`layers_off_by_default` in
+  `combination_spec.json`: `rewrite`) are added to `layers.deny` after the
+  overlay unless `layers.allow` names them. So `{"deny": ["manipulation"]}`
+  leaves out manipulation and keeps the rewrite layer off, and only
+  `{"allow": ["rewrite"]}` turns it on. A `layers.allow` naming a layer
+  that is on already raises.
 - A `deny` given without an `allow` also takes its names out of the default's
   `allow`. `"natural": {"families": {"deny": ["typos"]}}` is the natural
   default without typos. A deny that empties the default's allow raises:
   write the allow as well.
 - An `allow` list may not be empty: write `null` for all, or name what to
-  leave out under `deny`. A name may not be under both.
+  leave out under `deny` (`layers.allow` aside: a list, `[]` for none). A
+  name may not be under both.
 - The natural kind needs an allow list.
 - An allow list may name only families and techniques whose spec `kinds`
   hold the kind. A natural allow list naming one the natural kind does not
@@ -522,8 +528,8 @@ The plan deals techniques per `(category, entry_type, iteration)` group
 rather than drawing each unit alone. In budget mode each of the `hacking`,
 `manipulation` and `requests` layers joins a share of the group's units equal
 to its rate: `layer_rates` over the spec's (hacking 0.5, manipulation 0.33,
-requests 0.7, request_obfuscation 0.5). The `rewrite` layer, once a kind
-allows it, joins first at its rate (the spec's 0); a count round reads no
+requests 0.7, request_obfuscation 0.5). The `rewrite` layer, once a kind's
+`layers.allow` names it, joins first at its rate (the spec's 0); a count round reads no
 rate and may draw a rewrite technique its pool holds. Within a layer, families are dealt by
 count over `family_weights`, so `{"persona": 2}` gives `persona` twice the
 share of each other hacking family; within a family, its techniques are
@@ -990,22 +996,25 @@ raises or warns for it); finished rows keep their unchecked scenarios. The
 `eval` type draws neither family: its pool and draws do not change.
 
 **Release note: the rewrite layer.** The spec has a fifth layer, `rewrite`,
-first in the apply order. It holds no technique yet and is off: its spec
-rate is 0 and both packaged kinds deny it (`"layers": {"deny":
-["rewrite"]}`). Nothing changes for an existing plan whose section gives no
-`layers.deny` of its own, the dataset types' included: its pool, rounds,
-plan file and manifest are as before, and so are its draws. A section that
-gives its own `layers.deny` replaces the packaged list, so one that leaves
-`rewrite` out now allows the layer: nothing is drawn from it while it is
-empty, and its adversarial rounds say nothing of it (`include_rewrite` is
-written only while a rewrite technique is registered), so a plan kept from
-it resumes. A `config_dir` copy of `augmentations.json` made before says
-`"deny": []` in both kinds, so the same holds for it. Once the layer holds a
-technique, a kind that allows it gains `include_rewrite: true` in its
-adversarial rounds, and a plan kept from before raises on resume naming
-`rounds`: add `"rewrite"` to its `layers.deny` to keep the plan, or plan
-again with `resume=False`. The flat `include_<layer>` keywords keep the layer
-denied.
+first in the apply order. It holds no technique yet and is off by default:
+its spec rate is 0, and the spec lists it in `layers_off_by_default`, so
+every kind leaves it out unless its `layers.allow` names it, whatever its
+`layers.deny` says. Opt in with `"layers": {"allow": ["rewrite"]}` in the
+kind (and, for budget rounds, a `layer_rates.rewrite` above 0). A section's
+own `layers.deny` no longer allows the layer, as it did while the packaged
+kinds denied it in `augmentations.json`: `{"deny": ["hacking"]}` keeps it
+off, and so does a `config_dir` copy of `augmentations.json`, whether it
+says `"deny": []` (made before the layer) or `"deny": ["rewrite"]` (made
+before the spec listed it). Nothing changes for an existing plan, the
+dataset types' included: whatever its section's `layers` say, its pool,
+rounds, plan file and manifest are as before, and so are its draws, since
+an allowed layer adds nothing while it is empty (`include_rewrite` is
+written only while a rewrite technique is registered). Once the layer holds
+a technique, a kind whose `layers.allow` names it gains
+`include_rewrite: true` in its adversarial rounds, and a plan kept from
+before raises on resume naming `rounds`: take `rewrite` out of its
+`layers.allow` to keep the plan, or plan again with `resume=False`. The flat
+`include_<layer>` keywords keep the layer denied.
 
 ## The model registry
 
@@ -1274,7 +1283,7 @@ values. Delete every file you do not change, then set `prompt_dir`.
 | File | Holds | Read by |
 |---|---|---|
 | `configs/llm/gpu_pricing.json` | Provider, then GPU name as `nvidia-smi` reports it, then hourly USD per GPU; `*` is a provider's fallback | the cost roll-up |
-| `configs/jailbreak/combination_spec.json` | `version`, `layer_order`, `layer_rates`, `layer_max_picks`, `families` (layer, order within the layer, incompatibilities, `dimension`, optional `kinds`, `check` and `calls`; a `description`, which nothing reads), `manipulation_blocked_obfuscation`, `request_obfuscation_allowed_families`, `generators` (the families whose techniques come one per row of a data file, expanded into `techniques` as the spec loads), `techniques` (families, complexity, `requires_llm`, `requires_benign`, `encode_weight`, optional `max_tokens`, `cross_incompatible_with`, `kinds`, `check`, `calls`) | `jailbreak/technique.py` (`load_spec`, `tag`), `pool.py`, `rules.py`, `sampling.py`, `chain.py`, `augmentation.py`; its `version` goes in each row and in the jailbreak run record |
+| `configs/jailbreak/combination_spec.json` | `version`, `layer_order`, `layers_off_by_default` (the layers a kind leaves out unless its `layers.allow` names them, checked against `layer_order` as the spec loads), `layer_rates`, `layer_max_picks`, `families` (layer, order within the layer, incompatibilities, `dimension`, optional `kinds`, `check` and `calls`; a `description`, which nothing reads), `manipulation_blocked_obfuscation`, `request_obfuscation_allowed_families`, `generators` (the families whose techniques come one per row of a data file, expanded into `techniques` as the spec loads), `techniques` (families, complexity, `requires_llm`, `requires_benign`, `encode_weight`, optional `max_tokens`, `cross_incompatible_with`, `kinds`, `check`, `calls`) | `jailbreak/technique.py` (`load_spec`, `tag`), `pool.py`, `rules.py`, `sampling.py`, `chain.py`, `augmentation.py`; its `version` goes in each row and in the jailbreak run record |
 | `configs/jailbreak/languages.json` | One row per language: `name`, `slug`, `complexity`, `script`, and whether it has a `translation` and an `answer_language` technique | `jailbreak/technique.py` (the spec's generators), `obfuscation/translation.py`, `requests/answer_language.py` |
 | `configs/jailbreak/augmentations.json` | The two default kinds and `natural_only_families` | `jailbreak/augmentation.py` |
 | `configs/jailbreak/<layer>/*_templates.json` | The variant pools of the pure techniques: per directive, named variants (a `template`, or continuation's `prefix` and `suffix`) with an optional `weight` ([extending.md](extending.md#add-variants-to-a-template-pool)); `hacking/persona_templates.json` holds a frame per persona (with its `display_name`) and the `mechanics` drawn into them, `manipulation/fake_turns_templates.json` the fake turns | `jailbreak/directives.py: read_pools`, checked at import by `pool.py` (the persona frames by `hacking/persona_templates.py`) |
