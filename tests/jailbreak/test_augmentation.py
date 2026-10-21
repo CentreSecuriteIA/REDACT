@@ -242,6 +242,40 @@ def test_the_packaged_defaults():
      "augmentations.adversarial.pure_only must be true or false"),
     ({"adversarial": {"allow_request_obfuscation": 1}}, "adversarial",
      "augmentations.adversarial.allow_request_obfuscation must be true or false"),
+    ({"adversarial": {"budget": "pool"}}, "adversarial",
+     "augmentations.adversarial.budget must be \"unit\", \"group\" or null, "
+     "got 'pool'"),
+    ({"adversarial": {"max_unit_complexity": 9}}, "adversarial",
+     'augmentations.adversarial.max_unit_complexity applies only with "budget": '
+     '"group"'),
+    ({"adversarial": {"budget": "unit", "max_unit_complexity": 9}}, "adversarial",
+     'augmentations.adversarial.max_unit_complexity applies only with "budget": '
+     '"group"'),
+    ({"adversarial": {"budget": "group", "max_unit_complexity": 4}}, "adversarial",
+     "augmentations.adversarial.max_unit_complexity must be a whole number of at "
+     "least 6, got 4"),
+    ({"adversarial": {"budget": "group", "max_complexity": 8,
+                      "max_unit_complexity": 7}}, "adversarial",
+     "augmentations.adversarial.max_unit_complexity must be a whole number of at "
+     "least 8, got 7"),
+    ({"adversarial": {"budget": "group", "max_unit_complexity": 7.5}}, "adversarial",
+     "augmentations.adversarial.max_unit_complexity must be a whole number of at "
+     "least 6, got 7.5"),
+    ({"natural": {"budget": "group"}}, "natural",
+     "augmentations.natural gives ['budget'], which the natural kind ignores"),
+    ({"natural": {"max_unit_complexity": 9}}, "natural",
+     "augmentations.natural gives ['max_unit_complexity'], which the natural kind "
+     "ignores"),
+    ({"adversarial": {"budget": "group", "max_unit_complexity": 8,
+                      "rounds": [{"max_complexity": 9}]}}, "adversarial",
+     "augmentations.adversarial.rounds[0].max_complexity is 9, above "
+     "max_unit_complexity 8"),
+    ({"adversarial": {"budget": "group", "max_unit_complexity": 8,
+                      "rounds": "escalation"}}, "adversarial",
+     "augmentations.adversarial.rounds[3].max_complexity is 9, above "
+     "max_unit_complexity 8"),
+    ({"adversarial": {"rounds": [{"budget": "group"}]}}, "adversarial",
+     "augmentations.adversarial.rounds[0] has unknown key(s) ['budget']"),
     ({"natural": {"entry_types": ["bening"]}}, "natural",
      "augmentations.natural.entry_types names ['bening']; write entry types of"),
     ({"natural": {"entry_types": []}}, "natural",
@@ -338,6 +372,33 @@ def test_an_adversarial_round_is_the_budget_by_default():
     kind = resolve({"adversarial": {"iterations": 2, "max_complexity": 4}},
                    "adversarial")
     assert rounds_of(kind) == [{**_BUDGET, "max_complexity": 4}] * 2
+
+
+def test_a_unit_or_null_budget_leaves_the_rounds_as_they_were():
+    for budget in ("unit", None):
+        kind = resolve({"adversarial": {"budget": budget}}, "adversarial")
+        assert rounds_of(kind) == [_BUDGET]
+
+
+def test_the_group_budget_is_written_to_the_rounds_only_when_set():
+    kind = resolve({"adversarial": {"budget": "group"}}, "adversarial")
+    assert rounds_of(kind) == [{**_BUDGET, "budget": "group"}]
+    kind = resolve({"adversarial": {"budget": "group", "max_unit_complexity": 8}},
+                   "adversarial")
+    assert rounds_of(kind) == [{**_BUDGET, "budget": "group",
+                                "max_unit_complexity": 8}]
+
+
+def test_a_count_round_carries_the_group_budget_and_ignores_it():
+    """The eval type's rounds draw a count; the keys are written to them, as
+    to every round, and the sampler leaves them unread."""
+    from redact.recipe import load_dataset_type
+
+    base = load_dataset_type("eval")["augmentations"]
+    kind = resolve({"adversarial": {"budget": "group"}}, "adversarial", base=base)
+    group = {**_BUDGET_OFF, "budget": "group"}
+    assert rounds_of(kind) == [{**group, "exact_techniques": 1},
+                               {**group, "exact_techniques": 2}]
 
 
 def test_a_denied_layer_is_left_out_of_every_round():

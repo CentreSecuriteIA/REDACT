@@ -229,13 +229,6 @@ def test_the_default_budget_deals_every_request_family(tmp_path):
 # sensitive_words): a heavy one fits fewer units, which is wanted.
 
 
-def _top_over_even(table: dict, family: str) -> float:
-    """The largest share of ``family`` one technique has, over an even share."""
-    in_family = [row["share_in_family"] for row in table.values()
-                 if row["family"] == family]
-    return max(in_family) * len(in_family)
-
-
 @pytest.fixture(scope="module")
 def default_shares() -> dict:
     return simulate.shares(*simulate.deal_kind({}, _SIMULATED, groups=3))
@@ -244,7 +237,7 @@ def default_shares() -> dict:
 @pytest.mark.parametrize("family", ["persona", "answer_language"])
 def test_the_techniques_of_a_family_the_budget_never_limits_come_out_even(
         default_shares, family):
-    assert _top_over_even(default_shares, family) <= _TOP_OVER_EVEN
+    assert simulate.top_over_even(default_shares, family) <= _TOP_OVER_EVEN
 
 
 def test_a_count_round_deals_the_techniques_of_every_family_evenly():
@@ -254,8 +247,9 @@ def test_a_count_round_deals_the_techniques_of_every_family_evenly():
     table = simulate.shares(*simulate.deal_kind(
         {}, _SIMULATED, kind="natural", groups=3))
     families = {row["family"] for row in table.values()}
-    uneven = {family: round(_top_over_even(table, family), 2) for family in families
-              if _top_over_even(table, family) > _COUNT_TOP_OVER_EVEN}
+    uneven = {family: round(simulate.top_over_even(table, family), 2)
+              for family in families
+              if simulate.top_over_even(table, family) > _COUNT_TOP_OVER_EVEN}
     assert uneven == {}
 
 
