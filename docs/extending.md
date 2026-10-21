@@ -282,7 +282,8 @@ contract.
    technique. Once the change is meant, regenerate the fixture from the
    repository root with `PYTHONPATH=src python -m tests.jailbreak.test_registry`.
    A technique whose text comes from a template file (framing, structural,
-   the request families) is also pinned by what it writes:
+   the neutral containers, the request families) is also pinned by what it
+   writes:
    `tests/jailbreak/test_template_draws.py` runs each on two neutral probes
    for six seeds and compares a SHA-256 digest per technique and seed (of
    the texts, the infos and the rng's state after them, no text) with

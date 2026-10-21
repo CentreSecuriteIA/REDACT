@@ -1,7 +1,8 @@
 """What the template techniques write, pinned by digest.
 
 Every technique whose text comes from a template file (framing, structural,
-the request families) runs on two neutral probes for six seeds: three calls
+the neutral containers, the request families) runs on two neutral probes for
+six seeds: three calls
 in a row on one ``random.Random(seed)`` per probe. The SHA-256 digest of the
 texts, the infos and the generator's state after the calls is pinned per
 technique and seed in ``fixtures/template_draws.json``, so a change to how a
@@ -25,6 +26,9 @@ import pytest
 
 import redact.jailbreak  # noqa: F401  (tags the techniques)
 from redact.jailbreak.hacking.framing import get_framing_functions
+from redact.jailbreak.obfuscation.neutral_container import (
+    get_neutral_container_functions,
+)
 from redact.jailbreak.obfuscation.structural import get_structural_functions
 from redact.jailbreak.requests import get_all_request_functions
 
@@ -38,7 +42,8 @@ _SEEDS = range(6)
 _CALLS = 3
 
 _TECHNIQUES = {fn.__name__: fn for fn in (
-    get_framing_functions() + get_structural_functions() + get_all_request_functions())}
+    get_framing_functions() + get_structural_functions()
+    + get_neutral_container_functions() + get_all_request_functions())}
 
 
 def digest(fn, seed: int) -> str:
