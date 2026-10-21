@@ -191,7 +191,7 @@ contract.
    `max_tokens` to cap its calls' replies, `cross_incompatible_with` for
    families this technique, not its whole family, may not join,
    `kinds` when it should differ from its first family's (below), and
-   `since`: move the spec's `version` up (`"1.0"` to `"1.1"`; versions are
+   `since`: move the spec's `version` up (`"1.1"` to `"1.2"`; versions are
    dotted whole numbers, so `"1.10"` follows `"1.9"`), once per change that
    adds or retires techniques, and give each new technique that version. A
    jailbreak plan kept from before then resumes with a WARNING, without
@@ -233,7 +233,7 @@ contract.
      names the natural kind draws by default, and
      `tests/jailbreak/test_pool.py` fails until the owner decides: give the
      technique `"kinds": ["adversarial"]`, or add its name to the fixture.
-     The same file checks the attack pool's 142 techniques in 22 families.
+     The same file checks the attack pool's 135 techniques in 22 families.
    - **The eval pool.** `configs/dataset_types/eval.json` allows whole
      families (`encode`, `fsh`, `dap`, `framing`, `structural`, `ascii_art`,
      `continuation`, `temporal`), so a technique added to one of them joins

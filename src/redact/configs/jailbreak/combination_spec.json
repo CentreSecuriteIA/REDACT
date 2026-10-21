@@ -1,7 +1,7 @@
 {
   "_comment": "Jailbreak technique compatibility specification. All rules enforced in jailbreak/rules.py. kinds, on a family or a technique, lists the augmentation kinds that may draw it: absent is [\"adversarial\"], and a technique's own kinds replace its first family's. since and deprecated, on a technique, are the versions that added and retired it (absent since is \"1.0\"): version moves up, as dotted whole numbers (\"1.9\", \"1.10\"), in each change that adds or retires a technique, and the technique carries the new version. Read by jailbreak/technique.py (tag) and jailbreak/pool.py.",
 
-  "version": "1.0",
+  "version": "1.1",
 
   "layer_order": ["hacking", "manipulation", "obfuscation", "requests"],
 
@@ -255,9 +255,9 @@
     "to_sensitive_words_encode_leetspeak_intermediate": { "families": ["sensitive_words", "encode"], "complexity": 2, "requires_llm": true, "encode_weight": "light" },
     "to_sensitive_words_encode_leetspeak_advanced":  { "families": ["sensitive_words", "encode"], "complexity": 2, "requires_llm": true, "encode_weight": "light" },
     "to_sensitive_words_split":       { "families": ["sensitive_words"], "complexity": 2, "requires_llm": true },
-    "to_sensitive_words_star":        { "families": ["sensitive_words"], "complexity": 2, "requires_llm": true },
-    "to_sensitive_words_hyphen":      { "families": ["sensitive_words"], "complexity": 2, "requires_llm": true },
-    "to_sensitive_words_underscore":  { "families": ["sensitive_words"], "complexity": 2, "requires_llm": true },
+    "to_sensitive_words_star":        { "families": ["sensitive_words"], "complexity": 2, "requires_llm": true, "deprecated": "1.1" },
+    "to_sensitive_words_hyphen":      { "families": ["sensitive_words"], "complexity": 2, "requires_llm": true, "deprecated": "1.1" },
+    "to_sensitive_words_underscore":  { "families": ["sensitive_words"], "complexity": 2, "requires_llm": true, "deprecated": "1.1" },
     "to_sensitive_words_variables":   { "families": ["sensitive_words"], "complexity": 3, "requires_llm": true },
     "to_synonym_substitution":        { "families": ["sensitive_words"], "complexity": 2, "requires_llm": true },
 
@@ -301,11 +301,11 @@
     "to_very_advanced_ai_persona":      { "families": ["persona"], "complexity": 2, "requires_llm": true },
     "to_cartel_leader_persona":         { "families": ["persona"], "complexity": 2, "requires_llm": true },
     "to_artist_persona":                { "families": ["persona"], "complexity": 2, "requires_llm": true },
-    "to_mentally_ill_persona":          { "families": ["persona"], "complexity": 2, "requires_llm": true },
+    "to_mentally_ill_persona":          { "families": ["persona"], "complexity": 2, "requires_llm": true, "deprecated": "1.1" },
     "to_deformed_scientist_persona":    { "families": ["persona"], "complexity": 2, "requires_llm": true },
-    "to_politician_persona":            { "families": ["persona"], "complexity": 2, "requires_llm": true },
-    "to_deformed_professor_persona":    { "families": ["persona"], "complexity": 2, "requires_llm": true },
-    "to_religious_figure_persona":      { "families": ["persona"], "complexity": 2, "requires_llm": true },
+    "to_politician_persona":            { "families": ["persona"], "complexity": 2, "requires_llm": true, "deprecated": "1.1" },
+    "to_deformed_professor_persona":    { "families": ["persona"], "complexity": 2, "requires_llm": true, "deprecated": "1.1" },
+    "to_religious_figure_persona":      { "families": ["persona"], "complexity": 2, "requires_llm": true, "deprecated": "1.1" },
     "to_actor_persona":                 { "families": ["persona"], "complexity": 2, "requires_llm": true },
     "to_someone_from_the_future_persona": { "families": ["persona"], "complexity": 2, "requires_llm": true },
 

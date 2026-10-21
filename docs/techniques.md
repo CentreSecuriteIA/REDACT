@@ -1,6 +1,7 @@
 # Jailbreak techniques
 
-The jailbreak stage draws from 151 techniques in 4 layers and 23 families.
+The jailbreak stage draws from 144 active techniques in 4 layers and 23
+families.
 `configs/jailbreak/combination_spec.json` gives each technique its families,
 a complexity from 0 to 3, whether it calls a model (`requires_llm`) or
 needs the benign data (`requires_benign`), and the kinds that may draw it
@@ -16,7 +17,8 @@ pool draws it unless the kind's `techniques.allow` names it (with a
 `DeprecationWarning`, for this release). A jailbreak plan kept from before a
 technique was added or retired resumes with a WARNING
 ([stages/jailbreaks.md](stages/jailbreaks.md#how-it-resumes)). The counts on
-this page are of the active techniques; none is retired yet.
+this page are of the active techniques; the seven spec version 1.1 retired
+are listed [below](#retired-techniques).
 
 ## Layers
 
@@ -27,9 +29,9 @@ families apply in the order of their `within_layer_order`.
 
 | Layer | Techniques | Picks per combination |
 |---|---|---|
-| `hacking` | 25 | at most 1 |
+| `hacking` | 21 | at most 1 |
 | `manipulation` | 8 | at most 1 |
-| `obfuscation` | 71 | up to `max_obfuscations` families in budget mode, the request obfuscation, when allowed, among them |
+| `obfuscation` | 68 | up to `max_obfuscations` families in budget mode, the request obfuscation, when allowed, among them |
 | `requests` | 47 | at most 1 |
 
 ## Families and techniques
@@ -38,10 +40,10 @@ families apply in the order of their `within_layer_order`.
 |---|---|---|---|---|---|---|---|
 | hacking | `cognitive` | `role_framing` | | 5 | yes | no | `to_persona_roleplay`, `to_hypothetical_framing`, `to_authority_obedience`, `to_avi`, `to_deep_inception` |
 | hacking | `framing` | `role_framing` | | 5 | no | no | `to_fictional_world`, `to_noble_goal`, `to_nefarious_goal`, `to_high_stake`, `to_no_moral_constraints` |
-| hacking | `persona` | `role_framing` | | 15 | yes | no | `to_invented_persona`, `to_psychopath_persona`, `to_alien_persona`, `to_radical_politician_persona`, `to_cult_leader_persona`, `to_very_advanced_ai_persona`, `to_cartel_leader_persona`, `to_artist_persona`, `to_mentally_ill_persona`, `to_deformed_scientist_persona`, `to_politician_persona`, `to_deformed_professor_persona`, `to_religious_figure_persona`, `to_actor_persona`, `to_someone_from_the_future_persona` |
+| hacking | `persona` | `role_framing` | | 11 | yes | no | `to_invented_persona`, `to_psychopath_persona`, `to_alien_persona`, `to_radical_politician_persona`, `to_cult_leader_persona`, `to_very_advanced_ai_persona`, `to_cartel_leader_persona`, `to_artist_persona`, `to_deformed_scientist_persona`, `to_actor_persona`, `to_someone_from_the_future_persona` |
 | manipulation | `dap` | `example_priming` | | 4 | the `selected` two | yes | `to_dap_random_short`, `to_dap_random_long`, `to_dap_selected_short`, `to_dap_selected_long` |
 | manipulation | `fsh` | `example_priming` | | 4 | the `selected` two | yes | `to_fsh_random_short`, `to_fsh_random_long`, `to_fsh_selected_short`, `to_fsh_selected_long` |
-| obfuscation | `sensitive_words` | `encoding` | 1 | 16 | yes | no | `to_sensitive_words_encode_base64`, `to_sensitive_words_encode_rot13`, `to_sensitive_words_encode_rot18`, `to_sensitive_words_encode_rot47`, `to_sensitive_words_encode_unicode`, `to_sensitive_words_encode_ascii`, `to_sensitive_words_encode_separator`, `to_sensitive_words_encode_leetspeak_basic`, `to_sensitive_words_encode_leetspeak_intermediate`, `to_sensitive_words_encode_leetspeak_advanced`, `to_sensitive_words_split`, `to_sensitive_words_star`, `to_sensitive_words_hyphen`, `to_sensitive_words_underscore`, `to_sensitive_words_variables`, `to_synonym_substitution` |
+| obfuscation | `sensitive_words` | `encoding` | 1 | 13 | yes | no | `to_sensitive_words_encode_base64`, `to_sensitive_words_encode_rot13`, `to_sensitive_words_encode_rot18`, `to_sensitive_words_encode_rot47`, `to_sensitive_words_encode_unicode`, `to_sensitive_words_encode_ascii`, `to_sensitive_words_encode_separator`, `to_sensitive_words_encode_leetspeak_basic`, `to_sensitive_words_encode_leetspeak_intermediate`, `to_sensitive_words_encode_leetspeak_advanced`, `to_sensitive_words_split`, `to_sensitive_words_variables`, `to_synonym_substitution` |
 | obfuscation | `tokenbreak` | `encoding` | 2 | 3 | yes | no | `to_tokenbreak_prepend`, `to_tokenbreak_split`, `to_tokenbreak_delimiter` |
 | obfuscation | `translation` | `language` | 3 | 19 | yes, the `translation` model | no | `to_french`, `to_japanese`, `to_russian`, `to_spanish`, `to_german`, `to_arabic`, `to_turkish`, `to_czech`, `to_vietnamese`, `to_greek`, `to_croatian`, `to_swahili`, `to_thai`, `to_khmer`, `to_nepali`, `to_zulu`, `to_scots_gaelic`, `to_bengali`, `to_javanese` |
 | obfuscation | `typos` | `surface_noise` | 4 | 4 | yes | no | `to_rewrite_with_typos_low`, `to_rewrite_with_typos_medium`, `to_rewrite_with_typos_high`, `to_rewrite_with_typos_insane` |
@@ -77,6 +79,18 @@ too: `heavy` for base64, unicode and ascii, `light` for the rest. Of these
 ten, the `heavy` ones stay allowed with `fsh` and `dap`, which the plain
 `heavy` `encode` techniques are not; the `light` ones, like the plain `light`
 ones, may be the request obfuscation.
+
+## Retired techniques
+
+Spec version 1.1 retired seven techniques. They stay registered, so a plan
+that names them replays them, and a kind draws one only when its
+`techniques.allow` names it (with a `DeprecationWarning`):
+
+| Family | Technique | Why |
+|---|---|---|
+| `sensitive_words` | `to_sensitive_words_star`, `to_sensitive_words_hyphen`, `to_sensitive_words_underscore` | `to_sensitive_words_encode_separator` draws their separators (`*`, `-`, `_`) among its own; `to_sensitive_words_split` stays, since a space is not one of them |
+| `persona` | `to_politician_persona`, `to_deformed_professor_persona`, `to_religious_figure_persona` | near-duplicates of `to_radical_politician_persona`, `to_deformed_scientist_persona` and `to_cult_leader_persona`, which stay |
+| `persona` | `to_mentally_ill_persona` | retired, with no replacement |
 
 ## Compatibility rules
 
@@ -345,7 +359,7 @@ primitives and 74 request primitives.
 
 | Status | Primitives |
 |---|---|
-| Covered | All encoding, sensitive-words and typo primitives; 15 of the 16 translation languages (Maori is left out, see [above](#what-the-families-do)); all 14 named personas; every framing directive (`fictional_world`, `noble_goal`, `nefarious_goal`, `high_stake`, `no_moral_constraints`, `refusal_then_comply`, `prefix_injection`, `apology_prevention`, `answer_in_markdown`, `answer_as_tutorial`); every request primitive (`innocuous_question`, `impersonate_good_person`, the four distractors, `use_past_tense`, `ask_for_details`, `ask_answer_in` for 16 languages) |
+| Covered | All encoding, sensitive-words and typo primitives; 15 of the 16 translation languages (Maori is left out, see [above](#what-the-families-do)); all 14 named personas (4 of them retired, [above](#retired-techniques)); every framing directive (`fictional_world`, `noble_goal`, `nefarious_goal`, `high_stake`, `no_moral_constraints`, `refusal_then_comply`, `prefix_injection`, `apology_prevention`, `answer_in_markdown`, `answer_as_tutorial`); every request primitive (`innocuous_question`, `impersonate_good_person`, the four distractors, `use_past_tense`, `ask_for_details`, `ask_answer_in` for 16 languages) |
 | Left out by design | `agent_context_additional_instr` (needs access to the system prompt), `fine_tuning` (out of scope), `use_highly_specialized_language` (no clear way to build it), `direct_question` (changes nothing) |
 
 Beyond the reference list, the library adds:

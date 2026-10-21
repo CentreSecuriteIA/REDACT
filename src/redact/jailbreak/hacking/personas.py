@@ -103,5 +103,6 @@ globals().update({fn.__name__: fn for fn in _FNS})
 
 
 def get_persona_functions() -> list[Callable]:
-    """Return all persona jailbreak technique generators (1 invented + 14 named)."""
+    """Return all persona jailbreak technique generators (1 invented + 14
+    named, 4 of them retired by the spec: a kept plan still names them)."""
     return [to_invented_persona, *_FNS]

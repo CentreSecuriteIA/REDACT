@@ -43,11 +43,11 @@ def _kind(**given) -> dict:
     return resolve({"adversarial": given}, "adversarial")
 
 
-def test_the_default_attack_pool_is_every_technique_but_casual():
+def test_the_default_attack_pool_is_every_active_technique_but_casual():
     """Translation is on in the packaged attacks, served by the local
-    translator."""
+    translator. A retired technique is drawn only when named."""
     full = all_techniques()
-    left_out = _in("casual_writing", full)
+    left_out = _in("casual_writing", full) + [fn for fn in full if fn.deprecated]
     assert technique_pool(_kind()) == [fn for fn in full if fn not in left_out]
 
 
@@ -59,8 +59,10 @@ def test_the_packaged_natural_kind_keeps_translation_off():
 
 
 def _attacks(techniques: list) -> list:
-    """``techniques`` less the natural-only family, which no attack draws."""
-    return [fn for fn in techniques if "casual_writing" not in fn.families]
+    """``techniques`` less the natural-only family, which no attack draws,
+    and the retired techniques, which no list here names."""
+    return [fn for fn in techniques
+            if "casual_writing" not in fn.families and not fn.deprecated]
 
 
 def test_switching_translation_on_makes_the_pool_every_attack_technique():
@@ -129,11 +131,12 @@ def test_the_default_variation_pool_is_the_46_pinned_natural_techniques():
         "indirect", "encode", "suffixes"}
 
 
-def test_the_default_attack_pool_is_142_techniques_in_22_families():
-    """Every technique but casual writing: the 19 translations included, now
-    the packaged adversarial kind has its translation switch on."""
+def test_the_default_attack_pool_is_135_techniques_in_22_families():
+    """Every active technique but casual writing: the 19 translations
+    included, now the packaged adversarial kind has its translation switch
+    on; the seven spec 1.1 retired left out."""
     pool = technique_pool(resolve(None, "adversarial"))
-    assert len(pool) == 142     # noqa: PLR2004
+    assert len(pool) == 135     # noqa: PLR2004
     assert len({fn.families[0] for fn in pool}) == 22     # noqa: PLR2004
 
 

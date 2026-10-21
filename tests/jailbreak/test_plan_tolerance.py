@@ -5,10 +5,13 @@ The spec dates a technique with ``since``, the version that added it, and
 ``deprecated``, the one that retired it; the plan file records the spec
 version its pool was drawn at. A kept plan whose pool differs only by what
 the library added or retired after that version resumes with a WARNING;
-any other difference raises. The library has added and retired nothing yet,
-so these tests add a dummy technique, or retire a real one, by hand.
+any other difference raises. The plans these tests make are drawn at the
+library's own version, so they add a dummy technique, or retire a real one,
+by hand at a version after it. The last tests are about the techniques the
+library itself retired.
 """
 
+import pandas as pd
 import pytest
 
 import redact.jailbreak.pipeline as JPipe
@@ -17,12 +20,19 @@ import redact.jailbreak.technique as T
 from redact.dataset import Manifest
 from redact.dataset.planfile import read_plan, write_plan
 from redact.jailbreak.augmentation import resolve
+from redact.jailbreak.plan import combination_of
 from redact.jailbreak.pool import all_techniques, registry, technique_pool
 from redact.stages import generate_jailbreaks
-from tests.jailbreak.test_pipeline_jailbreaks import _inputs, _pure
+from tests.conftest import MockBackend
+from tests.jailbreak.test_pipeline_jailbreaks import GEN, _inputs, _llm_run, _pure, upper
+
+#: The spec version the plans these tests make are drawn at, and one after
+#: it, for a technique a test adds or retires after the plan.
+NOW = T.load_spec()["version"]
+LATER = f"{NOW}.1"
 
 
-def _retire(monkeypatch, name: str = "to_rot13", version: str = "1.1"):
+def _retire(monkeypatch, name: str = "to_rot13", version: str = LATER):
     """The technique ``name``, retired by spec version ``version``."""
     fn = registry(all_techniques())[name]
     monkeypatch.setattr(fn, "deprecated", version)
@@ -87,7 +97,7 @@ def test_naming_a_deprecated_technique_in_techniques_allow_draws_it_with_a_warni
         monkeypatch):
     retired = _retire(monkeypatch)
     with pytest.warns(DeprecationWarning,
-                      match="'to_rot13', which spec version 1.1 deprecated"):
+                      match=f"'to_rot13', which spec version {LATER} deprecated"):
         pool = technique_pool(resolve(
             {"adversarial": {"techniques": {"allow": ["to_rot13"]},
                              "translation": False}}, "adversarial"))
@@ -101,7 +111,7 @@ def test_a_technique_added_after_the_plan_warns_once_and_keeps_the_plan(
         tmp_path, monkeypatch, caplog):
     out = tmp_path / "jb.csv"
     plan = _planned(out, monkeypatch)
-    _add(monkeypatch, since="1.1")
+    _add(monkeypatch, since=LATER)
     with caplog.at_level("WARNING"):
         rows = _resume(out)
     (warning,) = _warnings(caplog)
@@ -118,7 +128,7 @@ def test_a_technique_added_without_a_later_since_raises(tmp_path, monkeypatch):
     """A name the plan's version already had, as one a section newly allows."""
     out = tmp_path / "jb.csv"
     _planned(out, monkeypatch)
-    _add(monkeypatch, since="1.0")
+    _add(monkeypatch, since=NOW)
     with pytest.raises(ValueError, match=r"\['pool'\].*resume=False"):
         _resume(out)
 
@@ -153,7 +163,7 @@ def test_a_technique_retired_by_the_plan_s_own_version_raises(tmp_path, monkeypa
     section's doing, not the library's."""
     out = tmp_path / "jb.csv"
     _planned(out, monkeypatch)
-    _retire(monkeypatch, "to_rot13", version="1.0")
+    _retire(monkeypatch, "to_rot13", version=NOW)
     with pytest.raises(ValueError, match=r"\['pool'\].*resume=False"):
         _resume(out)
 
@@ -182,7 +192,7 @@ def test_a_plan_file_without_a_spec_version_was_made_at_the_first_version(
     out = tmp_path / "jb.csv"
     _planned(out, monkeypatch)
     _without_spec_version(out)
-    _add(monkeypatch, since="1.1")
+    _add(monkeypatch, since=LATER)
     with caplog.at_level("WARNING"):
         _resume(out)
     (warning,) = _warnings(caplog)
@@ -199,6 +209,57 @@ def test_another_seed_or_section_raises_though_the_library_grew(
         tmp_path, monkeypatch, seed, kind, named):
     out = tmp_path / "jb.csv"
     _planned(out, monkeypatch)
-    _add(monkeypatch, since="1.1")
+    _add(monkeypatch, since=LATER)
     with pytest.raises(ValueError, match=rf"this run's \[{named!r}\].*resume=False"):
         _resume(out, seed=seed, **kind)
+
+
+# --- the techniques the library retired ----------------------------------------
+
+#: Retired by spec version 1.1: three duplicates of
+#: ``to_sensitive_words_encode_separator``, and four near-duplicate personas.
+RETIRED_IN_1_1 = [
+    "to_deformed_professor_persona", "to_mentally_ill_persona", "to_politician_persona",
+    "to_religious_figure_persona", "to_sensitive_words_hyphen",
+    "to_sensitive_words_star", "to_sensitive_words_underscore",
+]
+
+
+def test_spec_1_1_retires_three_word_separators_and_four_personas():
+    retired = sorted(fn.__name__ for fn in all_techniques() if fn.deprecated)
+    assert retired == RETIRED_IN_1_1
+    assert {registry(all_techniques())[name].deprecated for name in retired} == {"1.1"}
+
+
+def test_the_separator_encoding_draws_the_retired_separators_but_not_a_space():
+    """So ``to_sensitive_words_split``, which splits with a space, stays."""
+    from redact.jailbreak.obfuscation.encoding import SEPARATORS
+
+    assert {"*", "-", "_"} <= set(SEPARATORS) and " " not in SEPARATORS
+
+
+@pytest.mark.parametrize("kind", ["adversarial", "natural"])
+def test_no_default_pool_draws_a_retired_technique(kind):
+    pool = {fn.__name__ for fn in technique_pool(resolve(None, kind))}
+    assert pool and not pool & set(RETIRED_IN_1_1)
+
+
+@pytest.mark.parametrize("name", RETIRED_IN_1_1)
+def test_a_kept_plan_still_finds_each_retired_technique(name):
+    combined = combination_of([name], registry(all_techniques()))
+    assert [fn.__name__ for fn in combined.techniques] == [name]
+
+
+def test_a_kept_plan_runs_the_retired_word_separators_as_planned(tmp_path, monkeypatch):
+    """A plan made before 1.1 names them; its units still run them."""
+    retired = registry(all_techniques())
+    plan = [("a word here", retired["to_sensitive_words_star"]),
+            ("one word more", retired["to_sensitive_words_hyphen"]),
+            ("that word too", retired["to_sensitive_words_underscore"])]
+    out = _llm_run(tmp_path, monkeypatch, plan, MockBackend("word", model=GEN),
+                   techniques=[upper, *(fn for _, fn in plan)])
+    rows = pd.read_csv(out)
+    assert dict(zip(rows["prompt"], rows["jailbreak"])) == {
+        "a word here": "a w*o*r*d here", "one word more": "one w-o-r-d more",
+        "that word too": "that w_o_r_d too"}
+    assert rows["accepted"].all()

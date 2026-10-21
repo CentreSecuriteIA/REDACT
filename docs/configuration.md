@@ -349,6 +349,17 @@ techniques until it is planned again with `resume=False`. A changed seed,
 `rounds`, `family_weights`, `layer_rates`, or a pool your section changed,
 still raises.
 
+**Release note: seven techniques retired (spec 1.1).**
+`to_sensitive_words_star`, `to_sensitive_words_hyphen`,
+`to_sensitive_words_underscore` (`to_sensitive_words_encode_separator`
+draws their separators), `to_mentally_ill_persona`,
+`to_politician_persona`, `to_deformed_professor_persona` and
+`to_religious_figure_persona` leave every pool: the default attack pool is
+135 techniques. A fresh plan no longer draws them; a kept plan that does
+resumes with the WARNING above and still runs them. A section that names
+one in `techniques.allow` draws it, with a `DeprecationWarning`, for this
+release ([techniques.md](techniques.md#retired-techniques)).
+
 **Release note: the natural pool.** The natural kind now draws only what
 the spec's `kinds` mark natural (46 techniques by default; `structural`,
 `continuation`, `temporal`, the high and insane typos and the dialogue and
