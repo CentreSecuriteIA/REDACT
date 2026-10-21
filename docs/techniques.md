@@ -311,6 +311,25 @@ with `resume=False`. A training build leaves out a benign or dual-use benign
 variation made with a technique the natural kind does not draw, with one
 WARNING that counts them ([stages/build.md](stages/build.md)).
 
+## What a plan costs
+
+A technique that calls a model carries, in the spec, the model calls one
+application makes (`calls`, generation and checks, low to high: a typo
+rewrite 2 to 4, a translation of one paragraph 2 to 12, a word-marking
+step 1, the synonyms 1 to 11, an fsh or dap pick 1) and what checks its
+reply (`check`). When a plan is made, one INFO line adds them up over the
+planned units; for 1,000 inputs of one category and entry type, planned
+with the packaged attack kind and seed 42:
+
+```text
+Model calls: 829 of 1000 planned units call a model, 1337 to 4023 calls (translation 476 to 2856, from the spec's calls); units drawing a technique with no calls, not counted: 334.
+```
+
+The translation share goes to the translation model (a machine
+translation's judge, one call a round, to the generation model). The
+cognitive and persona techniques give no `calls` yet, so the units that
+draw one are counted apart and their calls left out.
+
 ## What the families do
 
 A transform returns `(text, info)`; the info names what it drew, such as a

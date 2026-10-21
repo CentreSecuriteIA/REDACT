@@ -23,6 +23,7 @@ from redact.dataset.dealing import Dealer, stable_seed
 from redact.dataset.planfile import coverage_path, plan_record, write_plan
 
 from .chain import combine_techniques
+from .pool import TRANSLATION
 from .sampling import sample_combination
 from .technique import FIRST_VERSION, applies, load_spec
 
@@ -149,7 +150,9 @@ def plan_run(
     often as the others the unit may take, evenly across the group and
     independent of the input order; a row's ``settings`` record the weights
     when given. The plan file (:func:`plan_inputs`) is written beside the
-    manifest first, and a coverage table after it. Returns ``manifest_path``.
+    manifest first, and a coverage table after it; with ``verbose``, one line
+    then says what the plan costs in model calls (:func:`log_model_calls`).
+    Returns ``manifest_path``.
     """
     base_kwargs = dict(sample_kwargs or {})
     if layer_rates is not None:
@@ -217,7 +220,41 @@ def plan_run(
     if verbose:
         logger.info("Planned %d units (%d samples x %d) -> %s",
                     planned, len(inputs), iterations, manifest_path)
+        log_model_calls(manifest_path, pool)
     return manifest_path
+
+
+def log_model_calls(manifest_path: Path, pool: list[Callable]) -> None:
+    """Log in one INFO line what the planned units cost in model calls.
+
+    A unit counts when it draws a technique that calls a model
+    (``requires_llm``), and its techniques' spec ``calls`` add up, low to
+    high; the translation family's are also given apart, since they go to
+    the translation model (a machine translation's judge aside). A technique
+    whose spec gives no ``calls`` (cognitive, persona) adds none, and the
+    line counts the units that draw one.
+    """
+    by_name = {fn.__name__: fn for fn in pool}
+    units = calling = uncounted = 0
+    calls, translation = [0, 0], [0, 0]
+    for row in _manifest_rows(Path(manifest_path)):
+        units += 1
+        fns = [by_name[name] for name in row.get("combination") or []
+               if getattr(by_name.get(name), "requires_llm", False)]
+        calling += bool(fns)
+        uncounted += any(fn.calls is None for fn in fns)
+        for fn in fns:
+            low, high = fn.calls or (0, 0)
+            calls[0] += low
+            calls[1] += high
+            if TRANSLATION in fn.families:
+                translation[0] += low
+                translation[1] += high
+    logger.info(
+        "Model calls: %d of %d planned units call a model, %d to %d calls "
+        "(translation %d to %d, from the spec's calls); units drawing a technique "
+        "with no calls, not counted: %d.", calling, units, *calls, *translation,
+        uncounted)
 
 
 def _warn_short(dealer: Dealer, iteration: int, manifest_path: Path) -> None:

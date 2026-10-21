@@ -342,7 +342,13 @@ manifest row records the round's settings and the `seed`, and
 manifest whenever a plan is written: per `level` (`layer`, `family`,
 `technique`) and `name`, the count per `category`, `entry_type` and
 `iteration`, plus a zero row for every pool technique never drawn. It logs
-`Coverage: N of M pool techniques drawn`.
+`Coverage: N of M pool techniques drawn`. With `verbose`,
+`log_model_calls(manifest_path, pool)` then logs what the plan costs:
+`Model calls: N of M planned units call a model, L to H calls (translation
+l to h, from the spec's calls); units drawing a technique with no calls,
+not counted: U.` A unit counts when it draws a `requires_llm` technique,
+and each such technique adds its spec `calls` (`[low, high]`); one with
+none (cognitive, persona) adds nothing and counts in `U`.
 
 `variants.write_variants(out_path, manifest_path, pool, registry)` writes
 `<stem>.variants.csv` (`technique`, `variant`, `rows`) after the units,

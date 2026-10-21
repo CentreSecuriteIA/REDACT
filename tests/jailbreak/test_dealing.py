@@ -102,6 +102,46 @@ def test_coverage_returns_none_without_a_manifest(tmp_path):
     assert coverage(tmp_path / "missing.manifest.jsonl", []) is None
 
 
+def test_a_plans_model_calls_add_up_from_the_spec(tmp_path, caplog):
+    """A synthetic plan: a pure unit, typos ([2, 4]), a translation
+    ([2, 12]), both, and a persona, whose spec gives no calls."""
+    import logging
+
+    from redact.dataset import Manifest
+    from redact.jailbreak.plan import log_model_calls
+    from redact.jailbreak.pool import all_techniques, registry
+
+    names = ["to_base64", "to_rewrite_with_typos_low", "to_swahili",
+             "to_artist_persona"]
+    pool = [registry(all_techniques())[name] for name in names]
+    manifest = tmp_path / "jb.manifest.jsonl"
+    Manifest(manifest).write(
+        {"sample_id": str(i), "iteration": 0, "combination": combination}
+        for i, combination in enumerate([
+            ["to_base64"], ["to_rewrite_with_typos_low", "to_base64"],
+            ["to_swahili"], ["to_swahili", "to_rewrite_with_typos_low"],
+            ["to_artist_persona"]]))
+    with caplog.at_level(logging.INFO, logger="redact.jailbreak.plan"):
+        log_model_calls(manifest, pool)
+    assert [r.getMessage() for r in caplog.records] == [
+        "Model calls: 4 of 5 planned units call a model, 8 to 32 calls "
+        "(translation 4 to 24, from the spec's calls); units drawing a technique "
+        "with no calls, not counted: 1."]
+
+
+def test_a_verbose_plan_logs_its_model_calls(tmp_path, caplog):
+    import logging
+
+    from redact.jailbreak.obfuscation.typos import to_rewrite_with_typos_low
+
+    with caplog.at_level(logging.INFO, logger="redact.jailbreak.plan"):
+        plan_run(_one_group(4), [to_rewrite_with_typos_low],
+                 manifest_path=tmp_path / "jb.manifest.jsonl", seed=3,
+                 settings_per_iteration=[{"exact_techniques": 1}])
+    assert ("Model calls: 4 of 4 planned units call a model, 8 to 16 calls "
+            "(translation 0 to 0") in caplog.text
+
+
 def test_a_layer_left_two_or_more_short_of_its_target_is_logged(tmp_path, caplog):
     import logging
 
