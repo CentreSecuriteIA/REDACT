@@ -282,7 +282,7 @@
     "to_hex":                  { "families": ["encode"], "complexity": 3, "requires_llm": false, "encode_weight": "heavy", "since": "1.2" },
     "to_binary":               { "families": ["encode"], "complexity": 3, "requires_llm": false, "encode_weight": "heavy", "since": "1.2" },
     "to_url_encoding":         { "families": ["encode"], "complexity": 2, "requires_llm": false, "encode_weight": "light", "since": "1.2" },
-    "to_html_entities":        { "families": ["encode"], "complexity": 2, "requires_llm": false, "encode_weight": "light", "since": "1.2" },
+    "to_html_entities":        { "families": ["encode"], "complexity": 3, "requires_llm": false, "encode_weight": "heavy", "since": "1.2" },
     "to_base32":               { "families": ["encode"], "complexity": 3, "requires_llm": false, "encode_weight": "heavy", "since": "1.2" },
     "to_base85":               { "families": ["encode"], "complexity": 3, "requires_llm": false, "encode_weight": "heavy", "since": "1.2" },
     "to_caesar_cipher":        { "families": ["encode"], "complexity": 2, "requires_llm": false, "encode_weight": "light", "needs_latin": true, "since": "1.2" },

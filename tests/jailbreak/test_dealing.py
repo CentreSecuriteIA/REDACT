@@ -336,8 +336,11 @@ _BUDGETS = [
 # fsh and dap variants moved it once more: a wider fsh and dap change the
 # member a manipulation draw lands on, and through the unit's rng and its
 # group's counts the rest of its draw (128 of the 240 dealt units; 6 of the
-# 200 undealt draws, each now drawing a many-shot variant).
-_PINNED_DRAWS = "cb94f4c348ac5bb7bdada55052aba1ec5d32d228d3c50752d399a028462622ab"
+# 200 undealt draws, each now drawing a many-shot variant). Scoring
+# to_html_entities as heavy, complexity 3 (it was light, 2) moved it last: the
+# budget it takes and the members it leaves out of fsh and dap units change the
+# picks after it (25 of the 240 dealt units, 3 of the 200 undealt draws).
+_PINNED_DRAWS = "abba4f371f147c5ef4d1c15e4d1b284b5c8164842ad3a30f640db92059cdbe1b"
 
 
 def test_draws_without_the_request_obfuscation_are_those_made_before_it_was_counted():

@@ -117,14 +117,15 @@ belong to `encode`, so one of them blocks both families.
 `encode` techniques carry an `encode_weight`: `light` for `to_rot13`,
 `to_rot18`, `to_rot47`, `to_separator`, the three `to_leetspeak_*`, the
 three reversals, `to_lookalike_letters`, `to_zero_width_noise`,
-`to_url_encoding`, `to_html_entities`, `to_caesar_cipher`, `to_atbash`,
-`to_fullwidth` and `to_math_styled`; `heavy` for `to_base64`,
-`to_unicode_escape`, `to_ascii_ordinal`, `to_hex`, `to_binary`, `to_base32`,
-`to_base85`, `to_morse`, `to_braille`. The ten `to_sensitive_words_encode_*`
+`to_url_encoding`, `to_caesar_cipher`, `to_atbash`, `to_fullwidth` and
+`to_math_styled`; `heavy` for `to_base64`, `to_unicode_escape`,
+`to_ascii_ordinal`, `to_hex`, `to_binary`, `to_html_entities`, `to_base32`,
+`to_base85`, `to_morse`, `to_braille` (each a code for every character, of
+complexity 3). The ten `to_sensitive_words_encode_*`
 carry one too: `heavy` for base64, unicode and ascii, `light` for the rest. Of
 these ten, the `heavy` ones stay allowed with `fsh` and `dap`, which the plain
 `heavy` `encode` techniques are not; the `light` ones, like the plain `light`
-ones, may be the request obfuscation.
+ones, may be the request obfuscation, which no `heavy` one is.
 
 Seventeen of them are tagged `needs_latin`: the ciphers `to_rot13`,
 `to_rot18`, `to_rot47`, `to_caesar_cipher`, `to_atbash`, the three
@@ -494,7 +495,7 @@ the rules of `fsh` and `dap`; their complexity is their siblings' plus one,
   in `shift=<n>`, not stated in the text) and Atbash on the Latin letters;
   and fullwidth and math-styled Unicode (math-styled drawing one
   Mathematical Alphanumeric style per call, reported in `style=<name>`).
-  Hex, binary, base32 and base85 are `heavy`, the rest `light`.
+  Hex, binary, HTML entities, base32 and base85 are `heavy`, the rest `light`.
 - `structural` wraps the text in JSON, XML or markdown. `to_json` keeps
   non-ASCII characters as they are.
 - `neutral_container` (spec version 1.2) places the text in an everyday
