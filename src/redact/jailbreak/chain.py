@@ -131,13 +131,15 @@ def _call_with(client: ModelClient | None) -> Callable[[LLMRequest], str]:
     """A blocking call for :func:`drive_sync`.
 
     A request goes to its own client, else to ``client`` when that serves the
-    request's model, else to a client made for the model.
+    request's model, else to a client made for the model, with its reply
+    limit and temperature.
     """
     def call(request: LLMRequest) -> str:
         c = request.client or client
         if c is None or c.model != request.model:
             c = ModelClient.create(request.model)
-        return generate_sample(c, request.messages, max_tokens=request.max_tokens)
+        return generate_sample(c, request.messages, max_tokens=request.max_tokens,
+                               temperature=request.temperature)
 
     return call
 

@@ -489,6 +489,18 @@ prompt would not return it whole. The natural kind does not draw them. The
 and its draws do not change
 ([techniques.md](techniques.md#what-the-families-do)).
 
+**Release note: the typo check.** Each typo rewrite (`typos`, in both
+kinds) is now read against its prompt by the stage's `check` model
+(`jailbreak/typo_check`, at temperature 0.15), and a rejected rewrite is
+made again once with the check's reply as feedback: a typo row costs one
+more call, and two more on a rejection (2 to 4 in all, against 1 before).
+A rewrite rejected twice discards its unit's chain (`reasoning`
+`DISCARDED; technique=to_rewrite_with_typos_<level>; reason=typo check
+failed; ...`). Fresh plans use it, and so do the pending units of a kept
+plan (the plan is not changed: no plan raises or warns for it); finished
+rows keep their unchecked text. The `eval` type draws no typo technique:
+its pool and draws do not change.
+
 **Release note: the obfuscation order.** A fresh plan applies translation,
 typos and casual writing before the word-level steps, sensitive words and
 tokenbreak, which used to come first, so a combination holding both gives
@@ -1028,12 +1040,12 @@ The conversation functions, which no recipe runs (`evaluate_conversations`,
 | `input` | `generation/from_constitution/long`, `generation/from_constitution/short`, `quality_check` |
 | `output` | `generation/harmful`, `generation/helpful`, `quality_check/harmful`, `quality_check/helpful`: one generation prompt and one checker per [answer mode](stages/outputs.md#answer-modes) |
 | `paraphrase` | `generation`, `generation/<model>` (a paraphraser's own, when it has one; the directory is the registry name), `check` |
-| `jailbreak` | `scenario_generation`, `persona_scenario_generation`, `jailbreak_construction`, `category_selection`, `benign_generation`, `extract_harmful`, `synonym_substitution`, `rewrite_with_typos`, `translate`, `translate_retry`, `translate_check`, `translate_mt` (a machine translator's format: one user message, no system prompt; checked at the stage's start), `translate_check_back` |
+| `jailbreak` | `scenario_generation`, `persona_scenario_generation`, `jailbreak_construction`, `category_selection`, `benign_generation`, `extract_harmful`, `synonym_substitution`, `rewrite_with_typos`, `typo_check`, `translate`, `translate_retry`, `translate_check`, `translate_mt` (a machine translator's format: one user message, no system prompt; checked at the stage's start), `translate_check_back` |
 | `conversation` | `judge`, `success_judge`, `pair_attacker` |
 | `format_instructions` | `numbered`, `structured_qa` |
 
-The tree also holds `input/category_check`, `jailbreak/benign_check`,
-`jailbreak/scenario_check` and `jailbreak/typo_check`, which no code loads.
+The tree also holds `input/category_check`, `jailbreak/benign_check` and
+`jailbreak/scenario_check`, which no code loads.
 
 Text the stages add at run time, the rejection feedback and the outputs'
 length floor's reason, lives in

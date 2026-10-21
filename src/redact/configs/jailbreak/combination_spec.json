@@ -54,6 +54,8 @@
       "dimension": "surface_noise",
       "kinds": ["adversarial", "natural"],
       "within_layer_order": 20,
+      "check": "typos",
+      "calls": [2, 4],
       "cross_incompatible_with": []
     },
     "suffixes": {

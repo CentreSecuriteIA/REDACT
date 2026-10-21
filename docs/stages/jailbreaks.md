@@ -47,7 +47,7 @@ in [techniques.md](../techniques.md).
 | Recipe role | Registry role | Default | Calls |
 |---|---|---|---|
 | `gen` | `uncensored_gen` | `venice-uncensored` | Every technique that calls a model, the benign data, and the judge of a machine translation |
-| `check` | `uncensored_gen` | the `gen` model | Passed to each technique as `check_model`, to check what its model writes; left out, it is the `gen` model, so no other model loads. Translation keeps its own checkers: the chat translator itself, the `gen` model as a machine translation's judge |
+| `check` | `uncensored_gen` | the `gen` model | Passed to each technique as `check_model`, to check what its model writes (today the typo check); left out, it is the `gen` model, so no other model loads. Translation keeps its own checkers: the chat translator itself, the `gen` model as a machine translation's judge |
 | `translation` | `translation` | `translategemma-27b` | The `translation` family; resolved, planned and loaded only when a kind's pool holds a translation technique (`"translation": true`, as in the packaged attacks and the eval type's) |
 
 A chat translator (`deepseek-v3.2`, named in the recipe) makes up to 4
@@ -235,6 +235,18 @@ pool raises as before. A section that newly names a family all of whose
 techniques came after the plan reads as such growth too, and warns instead
 of raising.
 
+**Release note: the typo check.** Each typo rewrite (`typos`, in both
+kinds) is now read against its prompt by the stage's `check` model
+(`jailbreak/typo_check`, at temperature 0.15), and a rejected rewrite is
+made again once with the check's reply as feedback: a typo row costs one
+more call, and two more on a rejection (2 to 4 in all, against 1 before).
+A rewrite rejected twice discards its unit's chain (`reasoning`
+`DISCARDED; technique=to_rewrite_with_typos_<level>; reason=typo check
+failed; ...`). Fresh plans use it, and so do the pending units of a kept
+plan (the plan is not changed: no plan raises or warns for it); finished
+rows keep their unchecked text. The `eval` type draws no typo technique:
+its pool and draws do not change.
+
 **Release note: the request obfuscation on.** The packaged adversarial kind
 now has `allow_request_obfuscation` true, which adds the key to its
 rounds, so a kept adversarial plan made before, whose section left the key
@@ -255,7 +267,7 @@ count rounds never read it: its draws do not change.
 
 | Case | Row |
 |---|---|
-| A technique rejects its result: a translation that fails its checks in all 4 rounds, a malformed word list, no word marked for a heavy word encoding, a scenario reply without its scene 3 times, a text no ASCII-art font draws whole or within its cap, an empty reply or text | `jailbreak` holds the text before that technique; `accepted` false; `reasoning` and `technique_info` start with `DISCARDED; technique=<name>` |
+| A technique rejects its result: a translation that fails its checks in all 4 rounds, a typo rewrite the check rejects twice, a malformed word list, no word marked for a heavy word encoding, a scenario reply without its scene 3 times, a text no ASCII-art font draws whole or within its cap, an empty reply or text | `jailbreak` holds the text before that technique; `accepted` false; `reasoning` and `technique_info` start with `DISCARDED; technique=<name>` |
 | A natural variation leaves the text unchanged | `accepted` false; `reasoning` `unchanged: the text is its input's`. An adversarial row that changes nothing stays accepted, with `is_noop` true; its `sample_id` is its input's, so the build leaves it out |
 | A technique raises, or a prompt is too long for a model on the async lane (an OpenAI-compatible endpoint or vLLM) | An error row: the input text, `accepted` false, `technique_info` `ERROR: <message>`, `reasoning` the message |
 | A call fails (a provider error, or a prompt too long on the grouped path: Anthropic, introspection) | The stage stops; saved units stay saved |

@@ -246,8 +246,10 @@ the text unchanged or reversibly, or a check accepts the result:
 | `temporal` | `to_use_past_tense` |
 | `answer_format` | `to_refusal_then_comply` |
 
-Model rewrites no check verifies (`cognitive`, `persona`, `typos`,
-`sensitive_words`, `tokenbreak`) are left out. The fifteen spec 1.2 encodings
+Model rewrites (`cognitive`, `persona`, `typos`, `sensitive_words`,
+`tokenbreak`) are left out while the eval pool is held; a technique of
+this pool that has a model write the prompt must carry a spec `check`
+(`cognitive` and `persona` have none yet). The fifteen spec 1.2 encodings
 are not drawn here either: `eval.json` denies each in `techniques.deny`, so the
 `encode` row keeps its five `heavy` members while the eval pool is held. The
 four spec 1.2 many-shot variants of `fsh` and `dap` are denied the same way. With
@@ -408,8 +410,13 @@ the rules of `fsh` and `dap`; their complexity is their siblings' plus one,
   with TranslateGemma on FLORES-200), then translated back and judged by
   the generation
   model ([stages/jailbreaks.md](stages/jailbreaks.md#models)).
-- `typos` is one rewrite by the model, at one of four densities, with the
-  level's description in the prompt.
+- `typos` is a rewrite by the model, at one of four densities, with the
+  level's description in the prompt, then a check: the stage's `check`
+  model (the `gen` model unless the recipe names one) reads the rewrite
+  against the prompt (`jailbreak/typo_check`, at temperature 0.15). A
+  rejected rewrite is made again with the check's reply as feedback, up to
+  two rewrites, so 2 to 4 calls (the spec's `calls`); one rejected twice is
+  discarded (`reason=typo check failed`).
 - `casual_writing` is how a person typing quickly writes: casing, spacing,
   punctuation, abbreviations, accents. `to_abbreviations` rewrites only the
   common words it lists, and `to_stripped_accents` only accented Latin

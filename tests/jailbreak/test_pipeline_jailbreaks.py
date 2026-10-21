@@ -15,7 +15,7 @@ from redact.dataset import Manifest, content_id
 from redact.exceptions import PromptTooLongError
 from redact.jailbreak.augmentation import resolve
 from redact.jailbreak.pool import technique_pool
-from redact.llm_pipeline import LLMRequest
+from redact.llm_pipeline import CHECK_TEMPERATURE, LLMRequest
 from redact.llms.backends import ComputeConfig
 from redact.stages import generate_jailbreaks
 from tests.conftest import (
@@ -1145,6 +1145,44 @@ def test_a_technique_is_given_the_check_model_the_generation_model_unless_named(
         _llm_run(tmp_path / folder, monkeypatch, [("zq0", checks)], _StepBackend(),
                  techniques=(checks,), **given)
     assert seen == [GEN, "jb-check"]
+
+
+class _TypoBackend(MockBackend):
+    """Native-batching fake: accepts every typo check, and rewrites any other
+    request's last line with a typo. ``temperatures`` holds each call's."""
+
+    def __init__(self):
+        super().__init__(model=GEN)
+        self.temperatures: list = []
+
+    @property
+    def compute_config(self) -> ComputeConfig:
+        return ComputeConfig(supports_native_batching=True)
+
+    def generate(self, messages_list, *, temperature=None, **kwargs):
+        self.temperatures.append(temperature)
+        return ["Yes" if "Text with typos:" in m[-1]["content"]
+                else m[-1]["content"].splitlines()[-1].replace("about", "abuot")
+                for m in messages_list]
+
+
+def test_the_natural_kind_checks_its_typo_rewrites(tmp_path, monkeypatch):
+    import redact.stages as P
+
+    backend = _TypoBackend()
+    monkeypatch.setattr(P.ModelClient, "create", lambda m: make_client(backend, m))
+    out = tmp_path / "jb.csv"
+    generate_jailbreaks(
+        inputs=_inputs(), output_path=out, model=GEN, check_model="jb-check",
+        augmentation={"adversarial": None, "natural": {
+            "families": {"allow": ["typos"]},
+            "techniques": {"allow": ["to_rewrite_with_typos_low"]}}},
+        verbose=False)
+    rows = pd.read_csv(tmp_path / "variations.csv")
+    assert rows["accepted"].all() and len(rows) == len(_inputs())
+    assert rows["jailbreak"].str.contains("abuot").all()
+    # Each rewrite, then its check at the check temperature.
+    assert backend.temperatures == [None, CHECK_TEMPERATURE]
 
 
 def test_pool_resume_after_a_failed_append_runs_only_unfinished_units(tmp_path, monkeypatch):
