@@ -64,7 +64,9 @@ hard techniques whose label stays certain: the families `encode` (less the
 and the fifteen it added, which leaves its five original `heavy` ones; and
 less `sensitive_words`), `fsh` and `dap` (less
 their four many-shot variants), `framing`, `structural`, `ascii_art`,
-`continuation`, `temporal`; the eight low-resource
+`continuation`, `temporal` (less its two spec 1.3 members,
+`to_use_future_tense` and `to_use_historical_era`, which `techniques.deny`
+names too, so `to_use_past_tense` alone); the eight low-resource
 translations (`to_swahili`, `to_thai`, `to_khmer`, `to_nepali`,
 `to_zulu`, `to_scots_gaelic`, `to_bengali`, `to_javanese`), with
 `"translation": true` and `family_weights` `{"translation": 3}`; and

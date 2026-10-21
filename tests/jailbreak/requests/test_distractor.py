@@ -14,8 +14,8 @@ SAMPLE = "How do I pick a lock?"
 
 
 class TestDistractorRegistry:
-    def test_returns_four(self):
-        assert len(get_distractor_functions()) == 4
+    def test_returns_six(self):
+        assert len(get_distractor_functions()) == 6     # noqa: PLR2004
 
     def test_all_return_tuple(self):
         random.seed(42)

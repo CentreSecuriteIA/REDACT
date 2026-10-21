@@ -1,6 +1,8 @@
-"""Impersonation technique: the prompt from a stated professional identity.
+"""Impersonation techniques: the prompt from a stated identity: a
+trustworthy professional, a position of authority (spec 1.3) or a developer
+of the model (spec 1.3).
 
-``info`` is ``type=good_person;variant=<variant>``.
+``info`` is ``type=<name>;variant=<variant>``.
 """
 
 from collections.abc import Callable
@@ -22,8 +24,26 @@ def to_impersonate_good_person(
     return _apply("good_person", prompt, rng=rng)
 
 
+@uses_pool(_FILE, "authority")
+def to_impersonate_authority(
+    prompt: str, *, rng: Random | None = None,
+) -> tuple[str, str]:
+    """Prepend a claimed position of authority to the prompt."""
+    return _apply("authority", prompt, rng=rng)
+
+
+@uses_pool(_FILE, "developer")
+def to_impersonate_developer(
+    prompt: str, *, rng: Random | None = None,
+) -> tuple[str, str]:
+    """Prepend a claim to be one of the model's developers to the prompt."""
+    return _apply("developer", prompt, rng=rng)
+
+
 def get_impersonation_functions() -> list[Callable]:
     """Return all impersonation technique functions."""
     return [
         to_impersonate_good_person,
+        to_impersonate_authority,
+        to_impersonate_developer,
     ]

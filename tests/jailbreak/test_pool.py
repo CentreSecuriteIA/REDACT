@@ -132,17 +132,21 @@ def test_the_default_variation_pool_is_the_71_pinned_natural_techniques():
     family's kinds, so it joins the natural pool unless its entry says
     ``["adversarial"]``. This fails until the owner decides, in the spec and
     ``fixtures/natural_pool.json``. Spec 1.2 added six answer languages and
-    the natural-only small talk (2) and benign roles (3)."""
+    the natural-only small talk (2) and benign roles (3). Spec 1.3 added none:
+    its three answer formats and ``to_ask_with_urgency`` say
+    ``["adversarial"]``, the urgent ask until the owner decides it is
+    natural."""
     pool = technique_pool(resolve(None, "natural"))
     assert sorted(fn.__name__ for fn in pool) == NATURAL_POOL
     assert len(pool) == 71      # noqa: PLR2004
-    # Family by family: two typos, eight whole families, four answer formats,
-    # the mild noise, and three techniques of attack families.
+    # Family by family: two typos, seven whole families, two asking, four
+    # answer formats, the mild noise, and three techniques of attack families.
     listed = sorted([
         "to_rewrite_with_typos_low", "to_rewrite_with_typos_medium",
         *_family("casual_writing", "neutral_container", "answer_language",
-                 "asking", "indirect", "smalltalk_prefix", "smalltalk_suffix",
+                 "indirect", "smalltalk_prefix", "smalltalk_suffix",
                  "benign_role"),
+        "to_innocuous_question", "to_ask_for_details",
         "to_answer_in_markdown", "to_answer_as_tutorial", "to_answer_as_code",
         "to_answer_as_structured_data", *_MILD_NOISE,
         "to_leetspeak_basic", "to_adversarial_suffix_punctuation",
@@ -155,17 +159,18 @@ def test_the_default_variation_pool_is_the_71_pinned_natural_techniques():
         "suffixes"}
 
 
-def test_the_default_attack_pool_is_195_techniques_in_26_families():
+def test_the_default_attack_pool_is_202_techniques_in_26_families():
     """Every active technique but casual writing and the natural-only
     families: the 19 translations included, now the packaged adversarial
     kind has its translation switch on; the seven spec 1.1 retired left out,
     the fifteen spec 1.2 encodings, the twelve spec 1.2 noise techniques, the
     six spec 1.2 neutral containers, the six spec 1.2 answer languages, the
     four spec 1.2 many-shot fsh and dap variants, the eleven spec 1.3
-    persona templates, the three spec 1.3 answer formats and the three spec
-    1.3 fake turns in. Small talk and the benign roles leave it as it was."""
+    persona templates, the three spec 1.3 answer formats, the three spec 1.3
+    fake turns and the seven spec 1.3 members of the thin request families
+    in. Small talk and the benign roles leave it as it was."""
     pool = technique_pool(resolve(None, "adversarial"))
-    assert len(pool) == 195     # noqa: PLR2004
+    assert len(pool) == 202     # noqa: PLR2004
     assert len({fn.families[0] for fn in pool}) == 26     # noqa: PLR2004
 
 
@@ -184,7 +189,9 @@ def test_the_natural_kind_draws_only_what_the_spec_marks_natural():
                  "to_answer_as_dialogue", "to_answer_as_story", "to_json",
                  "to_use_past_tense", "to_continue_passage",
                  "to_random_capitals_high", "to_scrambled_letters_high",
-                 "to_keyboard_typos_high", "to_emoji_sprinkle_high"):
+                 "to_keyboard_typos_high", "to_emoji_sprinkle_high",
+                 "to_dual_answer", "to_tagged_prefix", "to_answer_in_encoding",
+                 "to_ask_with_urgency"):
         assert name not in natural
 
 

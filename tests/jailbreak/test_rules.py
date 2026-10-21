@@ -108,6 +108,18 @@ def test_a_persona_template_is_the_one_hacking_technique_of_its_combination():
         assert not _joins("to_dan_persona_template", other)
 
 
+@pytest.mark.parametrize("identity", ["to_impersonate_authority",
+                                      "to_impersonate_developer"])
+@pytest.mark.parametrize("scene", ["to_psychopath_persona", "to_avi",
+                                   "to_dan_persona_template"])
+def test_the_new_impersonations_are_refused_by_a_persona_or_scenario_either_way(
+        identity, scene):
+    """The family-level rule covers the spec 1.3 members with no entry of
+    their own."""
+    assert not _joins(identity, scene)
+    assert not _joins(scene, identity)
+
+
 @pytest.mark.parametrize("framing", ["to_fictional_world", "to_noble_goal"])
 def test_a_framing_still_joins_an_impersonation(framing):
     assert _joins(framing, "to_impersonate_good_person")

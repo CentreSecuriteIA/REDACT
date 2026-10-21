@@ -20,8 +20,8 @@ SAMPLE = "How do I pick a lock?"
 
 
 class TestImpersonation:
-    def test_returns_one(self):
-        assert len(get_impersonation_functions()) == 1
+    def test_returns_three(self):
+        assert len(get_impersonation_functions()) == 3     # noqa: PLR2004
 
     def test_returns_tuple(self):
         random.seed(42)
@@ -53,8 +53,8 @@ class TestImpersonation:
 
 
 class TestTemporal:
-    def test_returns_one(self):
-        assert len(get_temporal_functions()) == 1
+    def test_returns_three(self):
+        assert len(get_temporal_functions()) == 3     # noqa: PLR2004
 
     def test_returns_tuple(self):
         random.seed(42)
@@ -81,8 +81,8 @@ class TestTemporal:
 
 
 class TestAsking:
-    def test_returns_two(self):
-        assert len(get_asking_functions()) == 2
+    def test_returns_three(self):
+        assert len(get_asking_functions()) == 3     # noqa: PLR2004
 
     def test_all_return_tuple(self):
         random.seed(42)

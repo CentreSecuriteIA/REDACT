@@ -458,13 +458,20 @@
     "to_distractor_prefix_unrelated": { "families": ["distractor_prefix"], "complexity": 2, "requires_llm": false },
     "to_distractor_suffix_related":   { "families": ["distractor_suffix"], "complexity": 2, "requires_llm": false },
     "to_distractor_suffix_unrelated": { "families": ["distractor_suffix"], "complexity": 2, "requires_llm": false },
+    "to_distractor_prefix_task":      { "families": ["distractor_prefix"], "complexity": 2, "requires_llm": false, "since": "1.3" },
+    "to_distractor_suffix_task":      { "families": ["distractor_suffix"], "complexity": 2, "requires_llm": false, "since": "1.3" },
 
     "to_impersonate_good_person": { "families": ["impersonation"], "complexity": 1, "requires_llm": false },
+    "to_impersonate_authority":   { "families": ["impersonation"], "complexity": 1, "requires_llm": false, "since": "1.3" },
+    "to_impersonate_developer":   { "families": ["impersonation"], "complexity": 1, "requires_llm": false, "since": "1.3" },
 
-    "to_use_past_tense": { "families": ["temporal"], "complexity": 3, "requires_llm": false },
+    "to_use_past_tense":     { "families": ["temporal"], "complexity": 3, "requires_llm": false },
+    "to_use_future_tense":   { "families": ["temporal"], "complexity": 3, "requires_llm": false, "since": "1.3" },
+    "to_use_historical_era": { "families": ["temporal"], "complexity": 3, "requires_llm": false, "since": "1.3" },
 
     "to_innocuous_question": { "families": ["asking"], "complexity": 0, "requires_llm": false },
     "to_ask_for_details":    { "families": ["asking"], "complexity": 1, "requires_llm": false },
+    "to_ask_with_urgency":   { "families": ["asking"], "complexity": 1, "requires_llm": false, "kinds": ["adversarial"], "since": "1.3" },
 
     "to_smalltalk_prefix": { "families": ["smalltalk_prefix"], "complexity": 0, "requires_llm": false, "since": "1.2" },
     "to_smalltalk_suffix": { "families": ["smalltalk_suffix"], "complexity": 0, "requires_llm": false, "since": "1.2" },

@@ -1,6 +1,6 @@
 # Jailbreak techniques
 
-The jailbreak stage draws from 209 active techniques in 5 layers and 30
+The jailbreak stage draws from 216 active techniques in 5 layers and 30
 families; the first layer, `rewrite`, holds none yet
 ([below](#layers)).
 `configs/jailbreak/combination_spec.json` gives each technique (the
@@ -58,8 +58,8 @@ on. (`to_rewrite`, despite its name, is an `indirect` request technique.)
 | `hacking` | 4 | 32 | at most 1 |
 | `manipulation` | 3 | 15 | at most 1 |
 | `obfuscation` | 11 | 101 | no cap |
-| `requests` | 12 | 61 | at most 1 |
-| all | 30 | 209 | |
+| `requests` | 12 | 68 | at most 1 |
+| all | 30 | 216 | |
 <!-- END layers -->
 
 ## Families and techniques
@@ -95,16 +95,16 @@ that call a model call the generation model.
 | obfuscation | `ascii_art` | `encoding` | 90 | 1 | no | no | `to_ascii_art` |
 | requests | `answer_format` | `answer_shape` |  | 12 | no | no | `to_refusal_then_comply`, `to_apology_prevention`, `to_prefix_injection`, `to_answer_in_markdown`, `to_answer_as_tutorial`, `to_answer_as_code`, `to_answer_as_dialogue`, `to_answer_as_story`, `to_answer_as_structured_data`, `to_dual_answer`, `to_tagged_prefix`, `to_answer_in_encoding` |
 | requests | `answer_language` | `language` |  | 26 | no | no | `to_ask_answer_in_french`, `to_ask_answer_in_japanese`, `to_ask_answer_in_russian`, `to_ask_answer_in_spanish`, `to_ask_answer_in_german`, `to_ask_answer_in_arabic`, `to_ask_answer_in_turkish`, `to_ask_answer_in_czech`, `to_ask_answer_in_vietnamese`, `to_ask_answer_in_greek`, `to_ask_answer_in_croatian`, `to_ask_answer_in_swahili`, `to_ask_answer_in_thai`, `to_ask_answer_in_khmer`, `to_ask_answer_in_maori`, `to_ask_answer_in_nepali`, `to_ask_answer_in_zulu`, `to_ask_answer_in_scots_gaelic`, `to_ask_answer_in_bengali`, `to_ask_answer_in_javanese`, `to_ask_answer_in_hmong`, `to_ask_answer_in_guarani`, `to_ask_answer_in_chinese`, `to_ask_answer_in_hindi`, `to_ask_answer_in_yoruba`, `to_ask_answer_in_amharic` |
-| requests | `asking` | `request_shape` |  | 2 | no | no | `to_innocuous_question`, `to_ask_for_details` |
+| requests | `asking` | `request_shape` |  | 3 | no | no | `to_innocuous_question`, `to_ask_for_details`, `to_ask_with_urgency` |
 | requests | `benign_role` | `role_framing` |  | 3 | no | no | `to_benign_role_subject_helper`, `to_benign_role_tutor`, `to_benign_role_task_assistant` |
 | requests | `continuation` | `request_shape` |  | 4 | no | no | `to_continue_passage`, `to_complete_story`, `to_fill_in_blank`, `to_continue_instructions` |
-| requests | `distractor_prefix` | `request_shape` |  | 2 | no | no | `to_distractor_prefix_related`, `to_distractor_prefix_unrelated` |
-| requests | `distractor_suffix` | `request_shape` |  | 2 | no | no | `to_distractor_suffix_related`, `to_distractor_suffix_unrelated` |
-| requests | `impersonation` | `role_framing` |  | 1 | no | no | `to_impersonate_good_person` |
+| requests | `distractor_prefix` | `request_shape` |  | 3 | no | no | `to_distractor_prefix_related`, `to_distractor_prefix_unrelated`, `to_distractor_prefix_task` |
+| requests | `distractor_suffix` | `request_shape` |  | 3 | no | no | `to_distractor_suffix_related`, `to_distractor_suffix_unrelated`, `to_distractor_suffix_task` |
+| requests | `impersonation` | `role_framing` |  | 3 | no | no | `to_impersonate_good_person`, `to_impersonate_authority`, `to_impersonate_developer` |
 | requests | `indirect` | `request_shape` |  | 6 | no | no | `to_summarize`, `to_proofread`, `to_critique`, `to_translate_task`, `to_explain_to_child`, `to_rewrite` |
 | requests | `smalltalk_prefix` | `request_shape` |  | 1 | no | no | `to_smalltalk_prefix` |
 | requests | `smalltalk_suffix` | `request_shape` |  | 1 | no | no | `to_smalltalk_suffix` |
-| requests | `temporal` | `request_shape` |  | 1 | no | no | `to_use_past_tense` |
+| requests | `temporal` | `request_shape` |  | 3 | no | no | `to_use_past_tense`, `to_use_future_tense`, `to_use_historical_era` |
 <!-- END families -->
 
 Each family's dimension is a tag of `configs/dimensions.json`: what the
@@ -277,7 +277,9 @@ Model rewrites (`cognitive`, `persona`, `typos`, `sensitive_words`,
 this pool that has a model write the prompt must carry a spec `check`. The fifteen spec 1.2 encodings
 are not drawn here either: `eval.json` denies each in `techniques.deny`, so the
 `encode` row keeps its five `heavy` members while the eval pool is held. The
-four spec 1.2 many-shot variants of `fsh` and `dap` are denied the same way. With
+four spec 1.2 many-shot variants of `fsh` and `dap` are denied the same way, and
+so are the two spec 1.3 members of `temporal` (`to_use_future_tense`,
+`to_use_historical_era`), so its row keeps `to_use_past_tense`. With
 `"adversarial": {"translation": false}` the pool keeps the other 28.
 [configuration.md](configuration.md#dataset-types) gives the type file.
 
@@ -327,7 +329,8 @@ With `"natural": {"translation": true}` the nineteen translations join them.
 Attack-only: `structural`, `continuation`, `temporal`, the high and insane
 typos, the four high-density noise techniques, `to_answer_as_dialogue`, `to_answer_as_story`,
 the three answer formats of spec version 1.3 (`to_dual_answer`,
-`to_tagged_prefix`, `to_answer_in_encoding`) and the three
+`to_tagged_prefix`, `to_answer_in_encoding`), its `to_ask_with_urgency`
+and the three
 answer-format directives the natural kind denies anyway
 (`to_refusal_then_comply`, `to_apology_prevention`,
 `to_prefix_injection`), with every other family. A natural allow list that
@@ -635,6 +638,21 @@ each: `to_dual_answer` asks for two answers, one after the other,
 `to_answer_in_encoding` for an answer written in an encoding. None is in
 the natural or the eval pool.
 
+It also gave each thin request family a member, two for impersonation and
+temporal, eight variants each, so each now has three:
+`to_impersonate_authority` and `to_impersonate_developer` (a claimed
+position of authority, or a claim to be one of the model's developers,
+before the prompt), `to_use_future_tense` and `to_use_historical_era` (the
+request set in the future, or in a historical era; complexity 3, as
+`to_use_past_tense`), `to_distractor_prefix_task` and
+`to_distractor_suffix_task` (another task before or after the prompt) and
+`to_ask_with_urgency` (a note of urgency before it). Their info has their
+family's form, `type=<directive>;variant=<name>`. All are attack-only:
+`to_ask_with_urgency` says `["adversarial"]` though `asking` is natural,
+until the owner decides whether an urgent ask is a natural variation. The
+`eval` type, which allows `temporal` whole, denies the two new temporal
+members, so its pool does not change.
+
 Three request families of spec version 1.2 are for natural variations only
 (their `kinds` are `["natural"]`, so no attack draws them): ordinary,
 harmless text that real users put around a request, which a classifier
@@ -673,7 +691,7 @@ Importing `redact.jailbreak` checks every pool and raises naming the file,
 directive and variant of a fault. A pool should hold at least 8 variants
 (a request or framing directive, a container, a fake turn), 12 for a
 benign role, 20 for small talk and 6 for the persona templates' mechanics;
-13 of the 53 pools are below their floor today (the five
+13 of the 60 pools are below their floor today (the five
 framing, the four continuation, the two structural, `refusal_then_comply` and
 `past_tense`, each with 4, or 1): the techniques of the eval pool, whose
 text waits for the eval review. A test ratchets the rest

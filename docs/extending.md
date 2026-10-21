@@ -291,7 +291,7 @@ contract.
      names the natural kind draws by default, and
      `tests/jailbreak/test_pool.py` fails until the owner decides: give the
      technique `"kinds": ["adversarial"]`, or add its name to the fixture.
-     The same file checks the attack pool's 195 techniques in 26 families.
+     The same file checks the attack pool's 202 techniques in 26 families.
    - **The eval pool.** `configs/dataset_types/eval.json` allows whole
      families (`encode`, `fsh`, `dap`, `framing`, `structural`, `ascii_art`,
      `continuation`, `temporal`), so a technique added to one of them joins
@@ -475,7 +475,7 @@ pool of one variant named after the entry. `personas.json` and
    without being on the fixture's `known_short` list, which the regenerator
    keeps as it is. A pool that reaches its floor must leave
    `known_short`: the test fails until it does, so the list only shrinks.
-   13 of the 53 pools are on it today, in 5 families, all drawn by
+   13 of the 60 pools are on it today, in 5 families, all drawn by
    eval-pool techniques; `to_json`'s wrapper is not a pool yet.
 
 A new directive is a new list in the file and a technique that names it

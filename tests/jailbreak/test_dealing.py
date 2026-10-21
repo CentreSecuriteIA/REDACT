@@ -352,8 +352,13 @@ _BUDGETS = [
 # 1.3 fake_turns family moved it again: one more manipulation family to deal,
 # needing no benign data, changes the manipulation pick of many dealt units
 # and, through their rng and their group's counts, the rest of their draw
-# (116 of the 240 dealt units, 9 of the 200 undealt draws).
-_PINNED_DRAWS = "aef2a152a55f6421f7b894e44b4f7033406bd21fc2b950a2bce526aa0fc20634"
+# (116 of the 240 dealt units, 9 of the 200 undealt draws). The seven spec 1.3
+# members of the thin request families (impersonation, temporal, the two
+# distractors, asking) moved it once more: wider families change the member
+# some request draws land on and, through the unit's rng and its group's
+# counts, the rest of their draw (99 of the 240 dealt units, 26 of the 200
+# undealt draws).
+_PINNED_DRAWS = "006f7195478e0cfe4dc7ecfc906b6c129bc861af48650800312125622d976766"
 
 
 def test_draws_without_the_request_obfuscation_are_those_made_before_it_was_counted():

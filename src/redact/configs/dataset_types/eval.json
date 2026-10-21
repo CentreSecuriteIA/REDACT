@@ -32,7 +32,8 @@
                  "to_base85", "to_caesar_cipher", "to_atbash",
                  "to_fullwidth", "to_math_styled",
                  "to_fsh_random_many", "to_fsh_selected_many",
-                 "to_dap_random_many", "to_dap_selected_many"]
+                 "to_dap_random_many", "to_dap_selected_many",
+                 "to_use_future_tense", "to_use_historical_era"]
       },
       "pure_only": false,
       "family_weights": {"translation": 3},
