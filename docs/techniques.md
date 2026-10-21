@@ -628,8 +628,10 @@ eval text ([extending.md](extending.md#add-variants-to-a-template-pool)).
 Importing `redact.jailbreak` checks every pool and raises naming the file,
 directive and variant of a fault. A pool should hold at least 8 variants
 (a request or framing directive, a container), 12 for a benign role and 20
-for small talk; most request and framing pools hold 4 today: 34 of the 46
-pools are below their floor, which a test ratchets
+for small talk; 13 of the 46 pools are below their floor today (the five
+framing, the four continuation, the two structural, `refusal_then_comply` and
+`past_tense`, each with 4, or 1): the techniques of the eval pool, whose
+text waits for the eval review. A test ratchets the rest
 ([extending.md](extending.md#add-variants-to-a-template-pool)).
 
 The info names the variant drawn: `variant=<name>` for the framing

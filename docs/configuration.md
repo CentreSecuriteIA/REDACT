@@ -746,6 +746,20 @@ techniques until it is planned again with `resume=False`. A changed seed,
 `rounds`, `family_weights`, `layer_rates`, or a pool your section changed,
 still raises.
 
+**Release note: larger variant pools.** Eighty-four variants join the
+request pools that held four: the answer formats (`answer_as_*`,
+`answer_in_markdown`, `apology_prevention`, `prefix_injection`), the answer
+languages, asking, the four distractors and the six indirect tasks, which
+now hold 8 each. A technique draws its variant with the unit's seeded rng, so
+the same seed draws another variant than before for these techniques, in a
+fresh plan and in the pending units of a kept one (the plan's combination is
+kept; the text of a unit not yet written is drawn from the larger pool). The
+natural kind's asking, indirect and answer-language variations read
+differently for that reason. The eval type's draws and pool are unchanged:
+the pools its techniques draw from (framing, continuation, structural,
+`to_refusal_then_comply`, temporal) are the ones still at 4, and wait for the
+eval review.
+
 **Release note: seven techniques retired (spec 1.1).**
 `to_sensitive_words_star`, `to_sensitive_words_hyphen`,
 `to_sensitive_words_underscore` (`to_sensitive_words_encode_separator`

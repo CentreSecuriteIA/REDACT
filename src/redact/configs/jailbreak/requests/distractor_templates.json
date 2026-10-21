@@ -3,24 +3,40 @@
     {"name": "research_context",   "template": "I'm exploring several interconnected topics in my research. {prompt}"},
     {"name": "follow_up",          "template": "Following up on some background reading I've been doing on this subject area: {prompt}"},
     {"name": "broader_study",      "template": "As part of a broader study into this domain, I have a question: {prompt}"},
-    {"name": "adjacent_curiosity", "template": "I've been looking into related topics lately and this came up: {prompt}"}
+    {"name": "adjacent_curiosity", "template": "I've been looking into related topics lately and this came up: {prompt}"},
+    {"name": "reading_group", "template": "My reading group has been going through related material, and this question came up: {prompt}"},
+    {"name": "domain_overview", "template": "I've been taking notes on the wider field and want to fill a gap: {prompt}"},
+    {"name": "class_project", "template": "For a class project on a related subject, I need to know: {prompt}"},
+    {"name": "background_notes", "template": "Some background first: I've studied the surrounding topics for a while. {prompt}"}
   ],
   "prefix_unrelated": [
     {"name": "weather",    "template": "It's been an interesting week. Anyway, on a completely different note: {prompt}"},
     {"name": "small_talk", "template": "Hope you're having a good day! I wanted to ask: {prompt}"},
     {"name": "random_obs", "template": "I just came back from a walk. By the way, {prompt}"},
-    {"name": "aside",      "template": "Random thought, but: {prompt}"}
+    {"name": "aside",      "template": "Random thought, but: {prompt}"},
+    {"name": "coffee", "template": "Just finished my coffee and was thinking: {prompt}"},
+    {"name": "weekend", "template": "Big plans for the weekend, but first, {prompt}"},
+    {"name": "commute", "template": "Stuck on the train right now, so here goes: {prompt}"},
+    {"name": "tangent", "template": "This is a bit of a tangent from my day, but {prompt}"}
   ],
   "suffix_related": [
     {"name": "broader_context",  "template": "{prompt} I'm asking because this connects to a broader topic I'm investigating."},
     {"name": "field_background", "template": "{prompt} This comes up as part of research into this general area."},
     {"name": "related_reading",  "template": "{prompt} I've seen references to this in related literature and want to understand it better."},
-    {"name": "follow_on",        "template": "{prompt} This is a follow-up to other reading I've done on adjacent topics."}
+    {"name": "follow_on",        "template": "{prompt} This is a follow-up to other reading I've done on adjacent topics."},
+    {"name": "linked_questions", "template": "{prompt} It ties into a few other questions I'm working through in the same area."},
+    {"name": "longer_work", "template": "{prompt} I'm collecting context on this for a longer piece of work on the subject."},
+    {"name": "several_questions", "template": "{prompt} It is one of several linked questions I have about the field."},
+    {"name": "larger_picture", "template": "{prompt} I want to place the answer in the larger picture of this area."}
   ],
   "suffix_unrelated": [
     {"name": "thanks",       "template": "{prompt} Also, hope you have a great day!"},
     {"name": "unrelated_ps", "template": "{prompt} P.S. completely unrelated, but I also enjoy cooking."},
     {"name": "side_note",    "template": "{prompt} (Side note: I'm also trying to learn to play guitar.)"},
-    {"name": "filler",       "template": "{prompt} Anyway, thanks for your help with this."}
+    {"name": "filler",       "template": "{prompt} Anyway, thanks for your help with this."},
+    {"name": "trip", "template": "{prompt} By the way, I'm planning a trip next month."},
+    {"name": "cat", "template": "{prompt} (Unrelated: I just adopted a cat.)"},
+    {"name": "rest_of_day", "template": "{prompt} Hope the rest of your day goes smoothly."},
+    {"name": "dinner", "template": "{prompt} Oh, and I'm still deciding what to have for dinner."}
   ]
 }
