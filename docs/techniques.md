@@ -432,18 +432,24 @@ primitives and 74 request primitives.
 | Covered | All encoding, sensitive-words and typo primitives; 15 of the 16 translation languages (Maori is left out, see [above](#what-the-families-do)); all 14 named personas (4 of them retired, [above](#retired-techniques)); every framing directive (`fictional_world`, `noble_goal`, `nefarious_goal`, `high_stake`, `no_moral_constraints`, `refusal_then_comply`, `prefix_injection`, `apology_prevention`, `answer_in_markdown`, `answer_as_tutorial`); every request primitive (`innocuous_question`, `impersonate_good_person`, the four distractors, `use_past_tense`, `ask_for_details`, `ask_answer_in` for 16 languages) |
 | Left out by design | `agent_context_additional_instr` (needs access to the system prompt), `fine_tuning` (out of scope), `use_highly_specialized_language` (no clear way to build it), `direct_question` (changes nothing) |
 
-Beyond the reference list, the library adds:
+Beyond the reference list, these are ports of the BELLS_Jailbreak reference
+library (its `hacking.py`, `manipulation.py` and `obfuscation.py`, as the
+module docstrings of this repository's first commit say):
 
-- the encodings rot18, rot47, braille, morse and ASCII ordinals;
-- ASCII art in 16 pyfiglet fonts;
+- ASCII art (pyfiglet fonts);
 - adversarial suffixes (punctuation, fragments, unicode, emoji);
-- the `casual_writing` family (9 techniques: casing, spacing, punctuation,
-  abbreviations, accents);
 - structural wrapping (JSON, XML, markdown);
 - the five cognitive techniques (`persona_roleplay`, `hypothetical_framing`,
   `authority_obedience`, `avi`, `deep_inception`);
 - the manipulation families, FSH and DAP, in eight variants;
+- the encodings morse and braille;
+- the translations into Zulu, Scots Gaelic, Bengali and Javanese.
+
+Also beyond the reference list:
+
+- the encodings rot18, rot47 and ASCII ordinals;
+- the `casual_writing` family (9 techniques: casing, spacing, punctuation,
+  abbreviations, accents);
 - the answer formats code, dialogue, story and structured data;
 - continuation attacks (4) and indirect task embedding (6);
-- the languages Zulu, Scots Gaelic, Bengali and Javanese, for translation and
-  for the answer language.
+- the answer languages Zulu, Scots Gaelic, Bengali and Javanese.
