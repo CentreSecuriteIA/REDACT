@@ -5,6 +5,7 @@ from redact.dataset.planfile import (
     coverage_path,
     plan_path,
     plan_record,
+    read_plan,
     write_plan,
 )
 
@@ -22,6 +23,7 @@ def test_a_record_round_trips_through_its_file(tmp_path):
                          axes={"length": {"short": 1, "long": 0.5}}, rounds=(1, 2))
     assert record["rounds"] == [1, 2]       # as JSON reads it back
     write_plan(manifest, record)
+    assert read_plan(manifest) == record
     assert changed_plan(manifest, record) == []
 
 
@@ -33,4 +35,5 @@ def test_a_changed_key_is_named(tmp_path):
 
 
 def test_without_a_plan_file_nothing_is_compared(tmp_path):
+    assert read_plan(tmp_path / "x.manifest.jsonl") is None
     assert changed_plan(tmp_path / "x.manifest.jsonl", plan_record(seed=1)) is None

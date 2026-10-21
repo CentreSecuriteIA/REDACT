@@ -193,7 +193,11 @@ contract.
    `kinds` when it should differ from its first family's (below), and
    `since`: move the spec's `version` up (`"1.0"` to `"1.1"`; versions are
    dotted whole numbers, so `"1.10"` follows `"1.9"`), once per change that
-   adds or retires techniques, and give each new technique that version. A new
+   adds or retires techniques, and give each new technique that version. A
+   jailbreak plan kept from before then resumes with a WARNING, without
+   drawing the new technique; without a later `since`, the new name in its
+   pool reads as the run's own change and the resume raises
+   ([stages/jailbreaks.md](stages/jailbreaks.md#how-it-resumes)). A new
    family also needs an entry under `families`: `layer`,
    `within_layer_order` (its place in the obfuscation order; 0 elsewhere),
    `dimension` (an augmentation tag of `configs/dimensions.json`, where a new

@@ -335,6 +335,19 @@ stops a run before the first stage.
 A resumed run keeps each kind's plan: a changed pool, `rounds`,
 `family_weights`, `layer_rates` or `seed` raises an error that names them
 and `resume=False` ([stages/jailbreaks.md](stages/jailbreaks.md#how-it-resumes)).
+A pool that changed only because the library added or retired techniques
+since the plan was made is no change of yours: the plan is kept, with a
+WARNING.
+
+**Release note: kept plans tolerate the library's growth.** A jailbreak
+plan file now records the spec version its pool was drawn at
+(`spec_version`; one written before is read as `"1.0"`). A kept plan
+resumed after the library added techniques (each with a later `since`) or
+retired some (a later `deprecated`) keeps its plan with one WARNING that
+names them, where it used to raise: the plan does not draw the new
+techniques until it is planned again with `resume=False`. A changed seed,
+`rounds`, `family_weights`, `layer_rates`, or a pool your section changed,
+still raises.
 
 **Release note: the natural pool.** The natural kind now draws only what
 the spec's `kinds` mark natural (46 techniques by default; `structural`,

@@ -13,8 +13,10 @@ The spec also dates each technique: `since` is the spec version that added
 it (`"1.0"` when absent) and `deprecated` the one that retired it. A retired
 technique stays registered, so a plan that names it still replays, but no
 pool draws it unless the kind's `techniques.allow` names it (with a
-`DeprecationWarning`, for this release). The counts on this page are of the
-active techniques; none is retired yet.
+`DeprecationWarning`, for this release). A jailbreak plan kept from before a
+technique was added or retired resumes with a WARNING
+([stages/jailbreaks.md](stages/jailbreaks.md#how-it-resumes)). The counts on
+this page are of the active techniques; none is retired yet.
 
 ## Layers
 

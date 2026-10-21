@@ -408,13 +408,16 @@ def _allow(name: str) -> dict:
 def test_a_plan_records_what_it_was_made_with(tmp_path):
     import json
 
+    from redact.jailbreak import load_spec
+
     out = tmp_path / "jb.csv"
     generate_jailbreaks(inputs=_inputs(), output_path=out, seed=1,
                         **_allow("to_base64"))
     made_with = json.loads(out.with_name("jb.plan.json").read_text(encoding="utf-8"))
     assert made_with == {
         "seed": 1, "rounds": made_with["rounds"], "pool": ["to_base64"],
-        "family_weights": None, "layer_rates": None}
+        "family_weights": None, "layer_rates": None,
+        "spec_version": load_spec()["version"]}
     assert [r["exact_techniques"] for r in made_with["rounds"]] == [1]
 
 

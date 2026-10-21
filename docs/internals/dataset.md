@@ -280,6 +280,7 @@ inputs and outputs stages.
 | `planfile.plan_path(manifest)`, `coverage_path(manifest)` | `<stem>.plan.json` and `<stem>.coverage.csv` beside a manifest |
 | `planfile.plan_record(**made_with)` | What a plan is made with, as JSON reads it back |
 | `planfile.write_plan(manifest, record)` | Writes the plan file |
+| `planfile.read_plan(manifest)` | The record the plan file holds; `None` without a plan file |
 | `planfile.changed_plan(manifest, current)` | The keys whose values differ from the plan file's; `None` without a plan file |
 
 ## Taxonomy and published datasets

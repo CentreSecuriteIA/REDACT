@@ -91,7 +91,7 @@ its own manifest, plan file, ledger and coverage table.
 | `Datasets/jailbreaks.manifest.jsonl` | Its plan |
 | `Datasets/jailbreaks.state.jsonl` | Its ledger |
 | `Datasets/jailbreaks.coverage.csv` | What its plan drew |
-| `Datasets/jailbreaks.plan.json` | What its plan was made with: `seed`, `rounds`, `pool` (the technique names), `family_weights`, `layer_rates` |
+| `Datasets/jailbreaks.plan.json` | What its plan was made with: `seed`, `rounds`, `pool` (the technique names), `family_weights`, `layer_rates`, `spec_version` (the spec's `version`, which dates the pool) |
 | `Datasets/variations.csv` and its four sidecars | The same for the natural kind |
 | `Data_cache/benign/benign_samples.csv` | The benign data, shared by both kinds, with its `.manifest.jsonl` and `.state.jsonl` |
 
@@ -193,6 +193,18 @@ added since the plan get no unit; a WARNING counts them and names
 files, ledger, manifest, plan file and coverage table, then plans again. A
 kind that is off is not touched ([running.md](../running.md#resume-fresh-runs-and-a-kill-partway-through)
 says how to plan one kind again and keep the other).
+
+A pool that differs only because the library grew is not a change of the
+run's. The plan file records the spec version its pool was drawn at
+(`spec_version`; a plan file without it was drawn at `"1.0"`). When every
+technique the pool gained has a `since` after that version, and every one
+it lost was retired (`deprecated`) after it, the resume keeps the plan
+and logs one WARNING that names them: the kept plan does not draw the
+added techniques, and runs the retired ones it names. Run the kind with
+`resume=False` to plan again and draw them. Any other difference in the
+pool raises as before. A section that newly names a family all of whose
+techniques came after the plan reads as such growth too, and warns instead
+of raising.
 
 ## Rejected and failed units
 

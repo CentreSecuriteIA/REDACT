@@ -24,14 +24,14 @@ from redact.dataset import (
     resume_state,
     row_ids,
 )
-from redact.dataset.planfile import changed_plan, plan_path
+from redact.dataset.planfile import changed_plan, plan_path, read_plan
 from redact.llm_pipeline import drive_units, pool_size
 from redact.llms.client import ModelClient
 
 from . import pool as pool_module
 from .manipulation import get_or_generate_benign_data
 from .plan import coverage_path, plan_inputs, plan_run
-from .technique import load_spec
+from .technique import FIRST_VERSION, load_spec, version_key
 from .units import error_row_of, is_pending, pending_units, row_of
 
 logger = logging.getLogger(__name__)
@@ -91,7 +91,11 @@ def run_augmentation(
     after it was made, gets no unit, and a WARNING counts those inputs. A
     reused plan made with another ``seed``, ``rounds``, pool, ``family_weights``
     or ``layer_rates`` (its plan file says) raises a ``ValueError``; one with
-    no plan file is run unchecked, with a WARNING.
+    no plan file is run unchecked, with a WARNING. A pool that differs only
+    by what the library added or retired after the plan's spec version
+    (:func:`_library_change`) is no change of this run's: the plan is kept,
+    with a WARNING that names those techniques, so a kept plan resumes in a
+    library that grew.
 
     Returns:
         The rows of ``out_path``, or an empty frame when ``read_back`` is False.
@@ -139,9 +143,18 @@ def run_augmentation(
     if reused:
         if verbose:
             logger.info("Reusing existing manifest: %s", man_path)
-        changed = changed_plan(man_path, plan_inputs(
+        # changed_plan compares every key of the record it is given, so it
+        # gets the record less the pool and the spec version, which
+        # _library_change compares below: a pool that differs only by what
+        # the library added or retired after the plan's spec_version is no
+        # change of this run's, and spec_version only dates the pool (a plan
+        # file written before it was recorded has none).
+        current = plan_inputs(
             pool, seed=seed, rounds=rounds, family_weights=family_weights,
-            layer_rates=layer_rates))
+            layer_rates=layer_rates)
+        changed = changed_plan(man_path, {
+            key: value for key, value in current.items()
+            if key not in ("pool", "spec_version")})
         if changed is None:
             logger.warning(
                 "%s: the plan %s has no %s beside it, so whether this run's "
@@ -149,14 +162,31 @@ def run_augmentation(
                 "it runs as it was made. Run with resume=False to plan again "
                 "(the stage starts over).", label, man_path.name,
                 plan_path(man_path).name)
-        elif changed:
-            release_lock(ledger)
-            raise ValueError(
-                f"{label}: this run's {changed} differ from those the plan "
-                f"{man_path.name} was made with (see {plan_path(man_path).name}), "
-                "and a resume keeps the plan as it was made. Run with "
-                "resume=False to plan again (the stage starts over), or with "
-                "the section and seed the plan was made with.")
+        else:
+            made_with = read_plan(man_path)
+            library = _library_change(made_with, pool, registry)
+            if library is None:
+                changed.append("pool")
+            if changed:
+                release_lock(ledger)
+                raise ValueError(
+                    f"{label}: this run's {changed} differ from those the plan "
+                    f"{man_path.name} was made with (see "
+                    f"{plan_path(man_path).name}), and a resume keeps the plan "
+                    "as it was made. Run with resume=False to plan again (the "
+                    "stage starts over), or with the section and seed the plan "
+                    "was made with.")
+            added, retired = library
+            if added or retired:
+                logger.warning(
+                    "%s: since the plan %s was made (spec version %s, now %s), "
+                    "the library added %s and retired %s. A resume keeps the "
+                    "plan as it was made: it does not draw the added "
+                    "techniques, and still runs the retired ones it names. Run "
+                    "with resume=False to plan again (the stage starts over).",
+                    label, man_path.name,
+                    made_with.get("spec_version", FIRST_VERSION), spec_version,
+                    added, retired)
     else:
         coverage_path(man_path).unlink(missing_ok=True)
         plan_path(man_path).unlink(missing_ok=True)
@@ -274,3 +304,34 @@ def run_augmentation(
         logger.info("Manifest: %s | Saved to: %s", man_path, out_path)
 
     return rows
+
+
+def _library_change(
+    made_with: dict, pool: list[Callable], registry: dict[str, Callable],
+) -> tuple[list[str], list[str]] | None:
+    """What the library changed in ``pool`` since the plan whose plan file
+    holds ``made_with``: ``(added, retired)``, the names it added after the
+    plan's ``spec_version`` (a later ``since``) and those it retired after
+    it (a later ``deprecated``), each sorted; both empty when the pool is
+    the plan's. ``None`` when the pool differs otherwise: a technique this
+    run's section adds or leaves out, or one no longer registered.
+
+    A plan file without ``spec_version``, written before it was recorded,
+    was made at :data:`FIRST_VERSION`. Known limit: a section that newly
+    names a family all of whose techniques came after the plan reads as the
+    library's growth too, and warns instead of raising.
+    """
+    made_at = version_key(made_with.get("spec_version", FIRST_VERSION))
+
+    def after(version) -> bool:
+        return version is not None and version_key(version) > made_at
+
+    planned = set(made_with.get("pool", ()))
+    current = {fn.__name__: fn for fn in pool}
+    added = sorted(set(current) - planned)
+    retired = sorted(planned - set(current))
+    if (all(after(getattr(current[name], "since", FIRST_VERSION)) for name in added)
+            and all(after(getattr(registry.get(name), "deprecated", None))
+                    for name in retired)):
+        return added, retired
+    return None

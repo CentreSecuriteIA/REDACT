@@ -43,12 +43,20 @@ def write_plan(manifest_path, record: dict) -> Path:
     return path
 
 
+def read_plan(manifest_path) -> dict | None:
+    """The record the plan file beside the manifest at ``manifest_path``
+    holds; ``None`` when there is no plan file."""
+    path = plan_path(manifest_path)
+    if not path.exists():
+        return None
+    return json.loads(path.read_text(encoding="utf-8"))
+
+
 def changed_plan(manifest_path, current: dict) -> list[str] | None:
     """The keys of ``current`` (:func:`plan_record`) whose values differ from
     those the plan at ``manifest_path`` was made with; ``None`` when it has no
     plan file to compare with."""
-    path = plan_path(manifest_path)
-    if not path.exists():
+    made_with = read_plan(manifest_path)
+    if made_with is None:
         return None
-    made_with = json.loads(path.read_text(encoding="utf-8"))
     return [key for key, value in current.items() if made_with.get(key) != value]

@@ -24,6 +24,7 @@ from redact.dataset.planfile import coverage_path, plan_record, write_plan
 
 from .chain import combine_techniques
 from .sampling import sample_combination
+from .technique import FIRST_VERSION, load_spec
 
 logger = logging.getLogger(__name__)
 
@@ -229,11 +230,14 @@ def plan_inputs(
     layer_rates: dict | None = None,
 ) -> dict:
     """What a plan is made with, its plan file's record: ``seed``, ``rounds``,
-    the ``pool``'s technique names sorted, ``family_weights`` and
-    ``layer_rates``."""
+    the ``pool``'s technique names sorted, ``family_weights``,
+    ``layer_rates``, and ``spec_version``, the spec's version, which dates
+    the pool: a resume reads off it what the library added or retired since
+    (:func:`redact.jailbreak.pipeline.run_augmentation`)."""
     return plan_record(
         seed=seed, rounds=rounds, pool=sorted(fn.__name__ for fn in pool),
-        family_weights=family_weights, layer_rates=layer_rates)
+        family_weights=family_weights, layer_rates=layer_rates,
+        spec_version=load_spec().get("version", FIRST_VERSION))
 
 
 def _manifest_rows(manifest_path: Path):

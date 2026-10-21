@@ -398,11 +398,15 @@ the same way.
 - The jailbreak stage reuses each kind's plan. `<kind>.plan.json`, beside
   the manifest, records what the plan was made with: `seed`, `rounds` (with
   the budget keys and `iterations`), the pool's technique names,
-  `family_weights` and `layer_rates`. A resume whose values differ stops
+  `family_weights`, `layer_rates` and `spec_version` (the spec version the
+  pool was drawn at). A resume whose values differ stops
   with a `ValueError` that names the keys; run the stage with
-  `"resume": false` to plan again. A plan without that file resumes
-  unchecked, with a WARNING. Inputs accepted after the plan was made get no
-  unit, and a WARNING counts them.
+  `"resume": false` to plan again. A pool that differs only by techniques
+  the library added or retired after `spec_version` is the library's
+  growth, not the run's change: the plan is kept, with a WARNING that names
+  them (the kept plan does not draw the new ones). A plan without that file
+  resumes unchecked, with a WARNING. Inputs accepted after the plan was made
+  get no unit, and a WARNING counts them.
 - A rejected unit is acked and not retried: a constitution unit or a seeded
   entry rejected on every attempt, a rejected output, a dropped paraphrase.
   Start the stage over to try them again.
@@ -475,7 +479,7 @@ Other files you may see:
 | `<ledger>.lock` | The stage's lock. The operating system holds it, so a run that died holds nothing; the file itself may stay |
 | `<output>.cut` | Bytes a resume cut off an output: the tail of a save that did not finish |
 | `<ledger>.dropping` | A fresh run of one seeded-inputs style that did not finish. Run it again |
-| `<kind>.plan.json` | What a jailbreak kind's plan was made with: `seed`, `rounds`, `pool`, `family_weights`, `layer_rates`. A resume compares them with the run's |
+| `<kind>.plan.json` | What a jailbreak kind's plan was made with: `seed`, `rounds`, `pool`, `family_weights`, `layer_rates`, `spec_version`. A resume compares them with the run's, the pool against what the library added or retired after `spec_version` |
 | `constitution_inputs.plan.json`, `output_responses.plan.json` | What the deal of the generation axes was made with: `seed`, the axes' weights, for the inputs `samples_per_entry`, and for the outputs `outputs_per_input` and `modes` (the answer modes of every entry type). A resume compares them with the run's |
 | `constitution_inputs.coverage.csv`, `output_responses.coverage.csv` | Per axis value, the specs planned and accepted per category and entry type; the outputs' also per answer mode (`axis` `mode`) |
 | `<kind>.coverage.csv` | Per layer, family and technique of a kind's plan, the count per category, entry type and iteration, with a zero row for each pool technique never drawn |
@@ -579,6 +583,8 @@ rate. [internals/telemetry.md](internals/telemetry.md) lists the events.
 | `DeprecationWarning` naming `content_moderation_categories` | The former name of `harmful.json` in `configs/taxonomy/`, read for one release | Write `"taxonomy": "harmful"`; rename a file of your own `harmful.json` |
 | WARNING `jailbreak: N of the M inputs are not in the plan ...` | A resume keeps the plan made before those inputs were accepted | Run the jailbreak stage with `"resume": false` to plan them |
 | `ValueError: jailbreak: this run's [...] differ from those the plan jailbreaks.manifest.jsonl was made with (see jailbreaks.plan.json) ...` | A resume with another augmentation section or seed than the plan's | Run the jailbreak stage with `"resume": false`, or with the plan's section and seed |
+| WARNING `jailbreak: since the plan jailbreaks.manifest.jsonl was made (spec version ..., now ...), the library added [...] and retired [...] ...` | The library added or retired techniques after the plan was made; the kept plan does not draw the added ones | Nothing, or `"resume": false` to plan again and draw them |
+| `DeprecationWarning`: `techniques.allow names '...', which spec version ... deprecated` | A kind's `techniques.allow` names a retired technique, which it still draws for this release | Take the name out of `techniques.allow` |
 | WARNING `jailbreak: the plan ... has no jailbreaks.plan.json beside it ...` | A plan made before plan files were written; its section and seed are not checked | Nothing, or `"resume": false` to plan again |
 | `ValueError: .../output_responses.state.jsonl acks units without an iteration ...` or `Cannot append to .../output_responses.csv: its header has no column 'iteration', 'response_mode', ... It was written before an input had several responses, each in an answer mode.` | A resume onto an outputs folder written when a unit was an input, before the answer modes | Run the outputs stage with `"resume": false`, or in a new `data_dir` |
 | `ValueError: Outputs: this run's ['outputs_per_input'] differ from those the responses in output_responses.csv were dealt with ...` (or `['modes']`) | A resume with another `outputs.outputs_per_input` or `outputs.modes` (or seed, or axes' weights) than the plan file's; a training folder of one response per input resumed with the type's 2 is one | Run the outputs stage with `"resume": false`, or with the plan's settings |
