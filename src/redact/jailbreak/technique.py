@@ -7,17 +7,30 @@ and returns ``(text, info)``. ``info`` is ``""`` or ``key=value;...``; a
 rejection's starts with :data:`DISCARDED`. A technique that makes a random
 choice draws it from the ``rng`` keyword (a ``random.Random``), else from the
 global ``random``.
+
+A family whose techniques come one per row of a data file (the languages of
+``languages.json``) is a ``generators`` entry of the spec, which
+:func:`load_spec` expands into technique entries, so every reader sees one
+``techniques`` dict.
 """
 
 import json
 import re
 from collections.abc import Callable, Generator
 from functools import lru_cache
+from pathlib import Path
 
 from redact import paths
 from redact.llm_pipeline import LLMRequest
 
-_SPEC_PATH = paths.jailbreak_configs_dir() / "combination_spec.json"
+_CONFIGS = paths.jailbreak_configs_dir()
+_SPEC_PATH = _CONFIGS / "combination_spec.json"
+
+#: The keys of a generator entry that say where its rows come from and how
+#: their techniques are named; every other key goes into each entry it makes.
+_GENERATOR_KEYS = ("file", "where", "name")
+#: The keys a data row may give its technique's entry, over the generator's.
+_ROW_KEYS = ("complexity", "since", "deprecated")
 
 DISCARDED = "DISCARDED"
 
@@ -48,8 +61,55 @@ def is_discarded(info: str) -> bool:
 
 @lru_cache(maxsize=1)
 def load_spec() -> dict:
-    """The combination spec: families, techniques, layer order and rules."""
-    return json.loads(_SPEC_PATH.read_text(encoding="utf-8"))
+    """The combination spec: families, techniques, layer order and rules,
+    the techniques of its generators among its techniques (:func:`read_spec`)."""
+    return read_spec(_SPEC_PATH)
+
+
+def read_spec(path: Path) -> dict:
+    """The spec at ``path``, each of its ``generators`` expanded into
+    technique entries, which follow the ones the spec writes out.
+
+    A generator is keyed by its family's name. Its ``file`` is a data file
+    in the folder of ``path`` (:func:`data_rows`); with ``where``, only the
+    rows whose column of that name is true count. Each row makes one
+    technique, named ``name`` with ``{slug}`` the row's ``slug``, whose
+    entry is ``families`` (the generator's family) and the generator's
+    other keys, with the row's ``complexity``, ``since`` and ``deprecated``
+    over them. A row's technique still needs its function, which the
+    family's module builds from the same file. A key starting with ``_`` is
+    a comment.
+
+    Raises:
+        ValueError: A generator makes a name the spec, or another of its
+            rows, has already.
+    """
+    spec = json.loads(Path(path).read_text(encoding="utf-8"))
+    techniques = dict(spec["techniques"])
+    for family, generator in spec.get("generators", {}).items():
+        if family.startswith("_"):
+            continue
+        given = {key: value for key, value in generator.items()
+                 if key not in _GENERATOR_KEYS and not key.startswith("_")}
+        for row in data_rows(generator["file"], Path(path).parent):
+            if "where" in generator and not row[generator["where"]]:
+                continue
+            name = generator["name"].format(slug=row["slug"])
+            if name in techniques:
+                raise ValueError(
+                    f"combination_spec.json: the generator of {family!r} makes "
+                    f"{name!r}, which the spec has already; give its row in "
+                    f"{generator['file']} another slug.")
+            techniques[name] = {"families": [family], **given,
+                                **{key: row[key] for key in _ROW_KEYS if key in row}}
+    return {**spec, "techniques": techniques}
+
+
+def data_rows(file: str, folder: Path = _CONFIGS) -> list[dict]:
+    """The rows of the data file ``file`` under ``folder``
+    (``configs/jailbreak/`` by default): a JSON object whose ``rows`` list
+    holds one row per technique."""
+    return json.loads((Path(folder) / file).read_text(encoding="utf-8"))["rows"]
 
 
 def family_kinds(family: str) -> list[str]:

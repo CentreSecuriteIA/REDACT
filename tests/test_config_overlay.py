@@ -137,6 +137,7 @@ def test_the_jailbreak_front_resolves_over_the_folder(tmp_path, monkeypatch):
 
 def test_a_file_the_overlay_does_not_read_is_warned_about(tmp_path, caplog):
     for relative in ("llm/models.json", "jailbreak/combination_spec.json",
+                     "jailbreak/languages.json",
                      "jailbreak/hacking/personas.json", "datasets/x.json",
                      "dataset_types/eval.json", "dataset_types/mine.json"):
         _write(tmp_path / relative, {})
@@ -149,7 +150,8 @@ def test_a_file_the_overlay_does_not_read_is_warned_about(tmp_path, caplog):
         "added": ["taxonomy/mine.json"],
         "ignored": ["dataset_types/mine.json", "datasets/x.json",
                     "jailbreak/combination_spec.json",
-                    "jailbreak/hacking/personas.json", "llm/models.json"]}
+                    "jailbreak/hacking/personas.json", "jailbreak/languages.json",
+                    "llm/models.json"]}
     (record,) = caplog.records
     assert record.levelname == "WARNING"
     assert "llm/models.json" in record.getMessage()

@@ -131,8 +131,8 @@
    {"name": "to_ask_answer_in_vietnamese", "families": ["answer_language"], "complexity": 1, "requires_llm": false, "requires_benign": false, "encode_weight": null, "needs_latin": false, "max_tokens": null, "layer": "requests", "within_layer_order": 0, "kinds": ["adversarial", "natural"], "generator": false, "signature": "(prompt, *, rng=None)"},
    {"name": "to_ask_answer_in_greek", "families": ["answer_language"], "complexity": 1, "requires_llm": false, "requires_benign": false, "encode_weight": null, "needs_latin": false, "max_tokens": null, "layer": "requests", "within_layer_order": 0, "kinds": ["adversarial", "natural"], "generator": false, "signature": "(prompt, *, rng=None)"},
    {"name": "to_ask_answer_in_croatian", "families": ["answer_language"], "complexity": 1, "requires_llm": false, "requires_benign": false, "encode_weight": null, "needs_latin": false, "max_tokens": null, "layer": "requests", "within_layer_order": 0, "kinds": ["adversarial", "natural"], "generator": false, "signature": "(prompt, *, rng=None)"},
-   {"name": "to_ask_answer_in_thai", "families": ["answer_language"], "complexity": 2, "requires_llm": false, "requires_benign": false, "encode_weight": null, "needs_latin": false, "max_tokens": null, "layer": "requests", "within_layer_order": 0, "kinds": ["adversarial", "natural"], "generator": false, "signature": "(prompt, *, rng=None)"},
    {"name": "to_ask_answer_in_swahili", "families": ["answer_language"], "complexity": 2, "requires_llm": false, "requires_benign": false, "encode_weight": null, "needs_latin": false, "max_tokens": null, "layer": "requests", "within_layer_order": 0, "kinds": ["adversarial", "natural"], "generator": false, "signature": "(prompt, *, rng=None)"},
+   {"name": "to_ask_answer_in_thai", "families": ["answer_language"], "complexity": 2, "requires_llm": false, "requires_benign": false, "encode_weight": null, "needs_latin": false, "max_tokens": null, "layer": "requests", "within_layer_order": 0, "kinds": ["adversarial", "natural"], "generator": false, "signature": "(prompt, *, rng=None)"},
    {"name": "to_ask_answer_in_khmer", "families": ["answer_language"], "complexity": 2, "requires_llm": false, "requires_benign": false, "encode_weight": null, "needs_latin": false, "max_tokens": null, "layer": "requests", "within_layer_order": 0, "kinds": ["adversarial", "natural"], "generator": false, "signature": "(prompt, *, rng=None)"},
    {"name": "to_ask_answer_in_maori", "families": ["answer_language"], "complexity": 2, "requires_llm": false, "requires_benign": false, "encode_weight": null, "needs_latin": false, "max_tokens": null, "layer": "requests", "within_layer_order": 0, "kinds": ["adversarial", "natural"], "generator": false, "signature": "(prompt, *, rng=None)"},
    {"name": "to_ask_answer_in_nepali", "families": ["answer_language"], "complexity": 2, "requires_llm": false, "requires_benign": false, "encode_weight": null, "needs_latin": false, "max_tokens": null, "layer": "requests", "within_layer_order": 0, "kinds": ["adversarial", "natural"], "generator": false, "signature": "(prompt, *, rng=None)"},
@@ -163,7 +163,7 @@
  "combinations": [
   ["to_rewrite_with_typos_high", "to_adversarial_suffix_unicode", "to_distractor_prefix_unrelated"],
   ["to_authority_obedience", "to_doubled_punctuation", "to_adversarial_suffix_fragments"],
-  ["to_doubled_spaces", "to_markdown", "to_ask_answer_in_thai"],
+  ["to_doubled_spaces", "to_markdown", "to_ask_answer_in_swahili"],
   ["to_noble_goal", "to_tokenbreak_delimiter", "to_leetspeak_basic", "to_ask_answer_in_javanese"],
   ["to_avi", "to_german", "to_sensitive_words_encode_rot13", "to_answer_as_dialogue"]
  ]

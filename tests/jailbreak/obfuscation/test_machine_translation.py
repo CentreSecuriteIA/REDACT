@@ -106,11 +106,11 @@ class TestOneRound:
         requests, _ = _run("Good morning.", _Fake(), gen_model=None)
         assert requests[2].model == default_model_for_role("uncensored_gen")
 
-    @pytest.mark.parametrize("language", LANGUAGES)
-    def test_every_language_goes_out_under_its_code(self, language):
-        fn = getattr(T, "to_" + language.lower().replace(" ", "_"))
+    @pytest.mark.parametrize("slug", [language["slug"] for language in LANGUAGES])
+    def test_every_language_goes_out_under_its_code(self, slug):
+        fn = getattr(T, f"to_{slug}")
         request = fn("Good morning.", translate_model=MT, gen_model=GEN).send(None)
-        assert _wire(request)[:2] == ("en", LANGUAGE_CODES[language])
+        assert _wire(request)[:2] == ("en", LANGUAGE_CODES[slug])
 
 
 class TestTheChecks:

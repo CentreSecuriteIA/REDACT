@@ -74,10 +74,12 @@ format and follows no other instruction:
   of the folder it loads the tokenizer from, so the engine is given a folder
   of the checkpoint's tokenizer files beside a copy of yours, built at load
   (a `tokenizer` in `vllm_kwargs` replaces it). Leave it out otherwise.
-- Every language needs a code, a script (`SCRIPTS`, the ISO 15924 code its
-  GlotLID labels end in, which the rules read), accepted GlotLID labels and
-  a median length ratio in `jailbreak/obfuscation/translation.py`; import
-  fails when one is missing. Measure the median with the model on a parallel corpus such as
+- Every translation language needs a code, accepted GlotLID labels and a
+  median length ratio in `jailbreak/obfuscation/translation.py`, keyed by
+  its slug in `configs/jailbreak/languages.json` (whose `script`, the ISO
+  15924 code its GlotLID labels end in, the rules read); import fails when
+  one is missing ([add a language](#add-a-language)). Measure the median
+  with the model on a parallel corpus such as
   FLORES-200: a guessed 1.0 rejected most Japanese translations, whose
   median is 0.47.
 
@@ -269,6 +271,48 @@ registered and replays, but leaves every pool unless a kind's
 `techniques.allow` names it, which gives a `DeprecationWarning`. Take it out
 of the counts in the docs, and out of `tests/fixtures/natural_pool.json` or
 `eval_pool.json` when it was in one.
+
+**A family whose techniques come one per row of a data file** is a
+`generators` entry of the spec instead of written-out techniques, keyed by
+the family: `file` (a JSON object under `configs/jailbreak/` whose `rows`
+list holds one row per technique), optionally `where` (a row column that
+must be true), `name` (the technique name, `{slug}` the row's `slug`) and
+the keys every technique's entry takes (`complexity`, `kinds`,
+`requires_llm`, ...). Loading the spec (`technique.read_spec`) adds one
+entry per row, the row's `complexity`, `since` and `deprecated` over the
+generator's; the family's module builds the functions from the same file
+(`technique.data_rows`). A file with no rows registers the family with no
+technique. The spec, its data files and the template files are read from
+the package only: a copy of them in a recipe's `config_dir` is ignored, with
+a warning, since the techniques are built when `redact.jailbreak` is
+imported.
+
+### Add a language
+
+The `translation` and `answer_language` techniques are generated from
+`configs/jailbreak/languages.json`, one row per language:
+
+1. **Add a row**, for example
+   `{"name": "Welsh", "slug": "welsh", "complexity": 2, "script": "Latn", "translation": false, "answer_language": true, "since": "1.3"}`:
+   `name` as prompts and infos write it, `slug` the end of its technique
+   names (`to_welsh`, `to_ask_answer_in_welsh`), `complexity` by resource
+   tier (0 high, 1 mid, 2 low), `script` the ISO 15924 code it is written
+   in, and which families it joins. A row's place in the file is its
+   technique's place in its family, which the draws follow: append it, since
+   moving a row changes which language a seed draws.
+2. **Date it**: move the spec's `version` up and give the row that `since`,
+   so a jailbreak plan kept from before resumes with a WARNING.
+3. **For a translation**, add the language's ISO 639-1 code, its accepted
+   GlotLID labels and its median length ratio, measured with the
+   translation model on a parallel corpus, to `LANGUAGE_CODES`,
+   `ACCEPTED_LABELS` and `MEDIAN_RATIO` in `obfuscation/translation.py`,
+   keyed by the slug. Import fails without them, naming the slug. Check that
+   the translation model covers the language first.
+4. **Then as for any technique**: regenerate the registry fixture, decide the
+   natural pool (an answer language joins it: add its name to
+   `tests/fixtures/natural_pool.json`), and update the counts in the docs.
+   The eval type's translation allow list names its languages, so a new
+   translation is not drawn there.
 
 ## Add a stage
 

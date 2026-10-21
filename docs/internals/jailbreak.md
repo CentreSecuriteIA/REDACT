@@ -13,7 +13,11 @@ the technique names are in [techniques.md](../techniques.md).
 - `configs/jailbreak/combination_spec.json` is the one source of families,
   layers, complexities and compatibility rules. Importing `redact.jailbreak`
   fails when the spec and the registered functions name different
-  techniques.
+  techniques. A family whose techniques come one per row of a data file
+  (the two language families, from `languages.json`) is a `generators`
+  entry, which `load_spec` expands into technique entries, so every reader
+  sees one `techniques` dict; the family's module builds its functions from
+  the same rows ([extending.md](../extending.md#add-a-jailbreak-technique)).
 - The plan is frozen in the manifest. A replay reads each combination by
   name through the registry of every technique, not through the run's pool,
   so a plan made with another pool still replays. A technique is retired
@@ -31,7 +35,7 @@ the technique names are in [techniques.md](../techniques.md).
 
 | Module | Holds |
 |---|---|
-| `technique.py` | The technique contract, `load_spec`, `tag`, `DISCARDED`, `KINDS`, `DEFAULT_KINDS`, `family_kinds`, `FIRST_VERSION`, `version_key` |
+| `technique.py` | The technique contract, `load_spec` and `read_spec` (the spec, its generators expanded), `data_rows`, `tag`, `DISCARDED`, `KINDS`, `DEFAULT_KINDS`, `family_kinds`, `FIRST_VERSION`, `version_key` |
 | `hacking/`, `manipulation/`, `obfuscation/`, `requests/` | The techniques, one module per family (`distractor.py` holds both distractor families), each with a getter; `get_all_hacking_functions`, `get_all_manipulation_functions`, `get_all_obfuscation_functions`, `get_all_request_functions` per subpackage. `manipulation/benign.py` makes the benign data: one unit per subcategory of the benign taxonomy and answer type, keyed `(main_category, sub_category, answer_type)` |
 | `pool.py` | `all_techniques`, `technique_pool(resolved)`, `kind_of(resolved)`, `languages`, `registry`, `uses_translation` |
 | `augmentation.py` | `KINDS`, `defaults(config_dir)`, `resolve(section, kind, base=None, config_dir=None)`, `rounds_of(resolved)`, `apply_flat_keywords`, `FLAT_KEYWORDS` |

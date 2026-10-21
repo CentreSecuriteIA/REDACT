@@ -1,4 +1,5 @@
-"""Translation techniques: the prompt translated to one of 19 languages.
+"""Translation techniques: the prompt translated to one of the languages of
+``configs/jailbreak/languages.json`` (19 today).
 
 A chat translation model (the translation role's by default) translates and
 checks, retrying with the check's feedback. A machine-translation model gets
@@ -12,7 +13,7 @@ import math
 import re
 from collections.abc import Callable
 
-from redact.jailbreak.technique import DISCARDED, TechniqueGen
+from redact.jailbreak.technique import DISCARDED, TechniqueGen, data_rows
 from redact.llm_pipeline import LLMRequest, is_accepted
 from redact.llms.model_config import MODEL_REGISTRY, default_model_for_role
 from redact.llms.prompting import PromptTemplate, build_messages, load_prompt
@@ -23,63 +24,49 @@ from . import langid
 #: prompt, and its output is checked here rather than by itself.
 MACHINE_TRANSLATION_ROLE = "machine_translation"
 
-LANGUAGES = [
-    # High-resource
-    "French", "Japanese", "Russian", "Spanish", "German", "Arabic",
-    # Mid-resource
-    "Turkish", "Czech", "Vietnamese", "Greek", "Croatian",
-    # Low-resource. Not Maori: TranslateGemma invents its sensitive and
-    # technical terms, fluently enough to pass every check.
-    "Swahili", "Thai", "Khmer", "Nepali",
-    "Zulu", "Scots Gaelic", "Bengali", "Javanese",
-]
+#: The languages a prompt is translated to: the rows of
+#: ``configs/jailbreak/languages.json`` whose ``translation`` is true, in its
+#: order, each with its ``name``, ``slug`` (``to_<slug>``), ``complexity``
+#: and ``script`` (the ISO 15924 code of its script, the suffix of its
+#: GlotLID labels; the rules keep a translation into a script other than
+#: :data:`~redact.jailbreak.technique.LATIN` from a ``needs_latin``
+#: technique). The tables below are keyed by the slug.
+LANGUAGES = [row for row in data_rows("languages.json") if row["translation"]]
 
 #: The ISO 639-1 code a machine-translation model is sent for each language.
 #: Its template takes an unknown code as the language's name, so every
 #: language needs one.
 LANGUAGE_CODES = {
-    "French": "fr", "Japanese": "ja", "Russian": "ru", "Spanish": "es",
-    "German": "de", "Arabic": "ar", "Turkish": "tr", "Czech": "cs",
-    "Vietnamese": "vi", "Greek": "el", "Croatian": "hr", "Swahili": "sw",
-    "Thai": "th", "Khmer": "km", "Nepali": "ne", "Zulu": "zu",
-    "Scots Gaelic": "gd", "Bengali": "bn", "Javanese": "jv",
-}
-
-#: The script each language is written in, as its ISO 15924 code (the
-#: suffix of its GlotLID labels). A language's technique carries it as
-#: ``script``; the rules keep a translation into a script other than
-#: :data:`~redact.jailbreak.technique.LATIN` from a ``needs_latin`` technique.
-SCRIPTS = {
-    "French": "Latn", "Japanese": "Jpan", "Russian": "Cyrl", "Spanish": "Latn",
-    "German": "Latn", "Arabic": "Arab", "Turkish": "Latn", "Czech": "Latn",
-    "Vietnamese": "Latn", "Greek": "Grek", "Croatian": "Latn", "Swahili": "Latn",
-    "Thai": "Thai", "Khmer": "Khmr", "Nepali": "Deva", "Zulu": "Latn",
-    "Scots Gaelic": "Latn", "Bengali": "Beng", "Javanese": "Latn",
+    "french": "fr", "japanese": "ja", "russian": "ru", "spanish": "es",
+    "german": "de", "arabic": "ar", "turkish": "tr", "czech": "cs",
+    "vietnamese": "vi", "greek": "el", "croatian": "hr", "swahili": "sw",
+    "thai": "th", "khmer": "km", "nepali": "ne", "zulu": "zu",
+    "scots_gaelic": "gd", "bengali": "bn", "javanese": "jv",
 }
 
 #: The GlotLID labels a translation into each language may carry: its own,
 #: and the near-identical languages GlotLID reads short text as.
 ACCEPTED_LABELS = {
-    "French": {"fra_Latn"},
-    "Japanese": {"jpn_Jpan"},
-    "Russian": {"rus_Cyrl"},
-    "Spanish": {"spa_Latn"},
-    "German": {"deu_Latn"},
-    "Arabic": {"arb_Arab", "acm_Arab", "acq_Arab", "aeb_Arab", "ajp_Arab",
+    "french": {"fra_Latn"},
+    "japanese": {"jpn_Jpan"},
+    "russian": {"rus_Cyrl"},
+    "spanish": {"spa_Latn"},
+    "german": {"deu_Latn"},
+    "arabic": {"arb_Arab", "acm_Arab", "acq_Arab", "aeb_Arab", "ajp_Arab",
                "apc_Arab", "ars_Arab", "ary_Arab", "arz_Arab"},
-    "Turkish": {"tur_Latn"},
-    "Czech": {"ces_Latn"},
-    "Vietnamese": {"vie_Latn"},
-    "Greek": {"ell_Grek"},
-    "Croatian": {"hrv_Latn", "bos_Latn", "srp_Latn"},
-    "Swahili": {"swh_Latn", "swc_Latn", "swa_Latn"},
-    "Thai": {"tha_Thai"},
-    "Khmer": {"khm_Khmr"},
-    "Nepali": {"npi_Deva"},
-    "Zulu": {"zul_Latn", "nbl_Latn", "nde_Latn", "xho_Latn", "ssw_Latn"},
-    "Scots Gaelic": {"gla_Latn"},
-    "Bengali": {"ben_Beng"},
-    "Javanese": {"jav_Latn"},  # never ind_Latn: Indonesian is a real failure
+    "turkish": {"tur_Latn"},
+    "czech": {"ces_Latn"},
+    "vietnamese": {"vie_Latn"},
+    "greek": {"ell_Grek"},
+    "croatian": {"hrv_Latn", "bos_Latn", "srp_Latn"},
+    "swahili": {"swh_Latn", "swc_Latn", "swa_Latn"},
+    "thai": {"tha_Thai"},
+    "khmer": {"khm_Khmr"},
+    "nepali": {"npi_Deva"},
+    "zulu": {"zul_Latn", "nbl_Latn", "nde_Latn", "xho_Latn", "ssw_Latn"},
+    "scots_gaelic": {"gla_Latn"},
+    "bengali": {"ben_Beng"},
+    "javanese": {"jav_Latn"},  # never ind_Latn: Indonesian is a real failure
 }
 
 #: A translation's length over its input's, in characters, at the median,
@@ -88,27 +75,30 @@ ACCEPTED_LABELS = {
 #: earlier pod test (Swahili to Javanese, Scots Gaelic aside) agree with that
 #: run within 0.02.
 MEDIAN_RATIO = {
-    "French": 1.27, "Japanese": 0.47, "Russian": 1.18, "Spanish": 1.22,
-    "German": 1.24, "Arabic": 0.96, "Turkish": 1.13, "Czech": 1.05,
-    "Vietnamese": 1.16, "Greek": 1.28, "Croatian": 1.07, "Swahili": 1.16,
-    "Thai": 1.02, "Khmer": 1.09, "Nepali": 1.04, "Zulu": 1.17,
-    "Scots Gaelic": 1.31, "Bengali": 1.07, "Javanese": 1.12,
+    "french": 1.27, "japanese": 0.47, "russian": 1.18, "spanish": 1.22,
+    "german": 1.24, "arabic": 0.96, "turkish": 1.13, "czech": 1.05,
+    "vietnamese": 1.16, "greek": 1.28, "croatian": 1.07, "swahili": 1.16,
+    "thai": 1.02, "khmer": 1.09, "nepali": 1.04, "zulu": 1.17,
+    "scots_gaelic": 1.31, "bengali": 1.07, "javanese": 1.12,
 }
 
 
 def _check_tables(tables: dict[str, dict]) -> None:
-    """Raise ``ValueError`` unless each table names exactly :data:`LANGUAGES`."""
+    """Raise ``ValueError`` unless each table names exactly the slugs of
+    :data:`LANGUAGES`: a language added to ``languages.json`` for
+    translation needs its code, labels and measured median here."""
+    slugs = [language["slug"] for language in LANGUAGES]
     for name, table in tables.items():
-        missing = [language for language in LANGUAGES if language not in table]
-        extra = sorted(set(table) - set(LANGUAGES))
+        missing = [slug for slug in slugs if slug not in table]
+        extra = sorted(set(table) - set(slugs))
         if missing or extra:
             raise ValueError(
-                f"translation.{name} must name exactly the LANGUAGES: "
-                f"missing {missing}, extra {extra}.")
+                f"translation.{name} must name exactly the translation languages "
+                f"of languages.json, by slug: missing {missing}, extra {extra}.")
 
 
-_check_tables({"LANGUAGE_CODES": LANGUAGE_CODES, "SCRIPTS": SCRIPTS,
-               "ACCEPTED_LABELS": ACCEPTED_LABELS, "MEDIAN_RATIO": MEDIAN_RATIO})
+_check_tables({"LANGUAGE_CODES": LANGUAGE_CODES, "ACCEPTED_LABELS": ACCEPTED_LABELS,
+               "MEDIAN_RATIO": MEDIAN_RATIO})
 
 #: A translator reply is capped at about three times its input's tokens,
 #: counting a token as this many characters (which overstates an English
@@ -209,8 +199,9 @@ def is_machine_translation(model: str) -> bool:
     return config is not None and MACHINE_TRANSLATION_ROLE in config.roles
 
 
-def check_translation(translation: str, source: str, language: str) -> str | None:
-    """Why a machine translation of ``source`` is rejected, or ``None``.
+def check_translation(translation: str, source: str, slug: str) -> str | None:
+    """Why a machine translation of ``source`` into the language ``slug``
+    is rejected, or ``None``.
 
     Empty; a GlotLID label not among the language's accepted ones (skipped
     without the detector); a length ratio, over the language's median,
@@ -222,9 +213,9 @@ def check_translation(translation: str, source: str, language: str) -> str | Non
     if translation == source:
         return None
     label = langid.detect(translation)
-    if label is not None and label not in ACCEPTED_LABELS[language]:
+    if label is not None and label not in ACCEPTED_LABELS[slug]:
         return f"language={label}"
-    ratio = len(translation) / len(source) / MEDIAN_RATIO[language]
+    ratio = len(translation) / len(source) / MEDIAN_RATIO[slug]
     low, high = LENGTH_RATIO_BAND
     if not low <= ratio <= high:
         return f"length_ratio={ratio:.2f}"
@@ -278,11 +269,11 @@ def _judge_messages(original: str, back_translation: str, language: str,
 
 
 def _machine_translate_gen(
-    prompt: str, language: str, *, translator: str, judge: str, num_retries: int,
+    prompt: str, language: dict, *, translator: str, judge: str, num_retries: int,
     prompt_dir,
 ) -> TechniqueGen:
     """Translate ``prompt`` piece by piece on ``translator``, one request at a
-    time.
+    time, into ``language`` (a row of :data:`LANGUAGES`).
 
     A round translates the pieces still pending and checks each
     (:func:`check_translation`); a piece that fails is resampled alone in the
@@ -293,10 +284,11 @@ def _machine_translate_gen(
     rounds the info names the piece that failed (``piece=all`` for the judge)
     and why.
     """
+    name, slug = language["name"], language["slug"]
     pieces, gaps = split_text(prompt)
     if not pieces:
-        return prompt, language
-    code = LANGUAGE_CODES[language]
+        return prompt, name
+    code = LANGUAGE_CODES[slug]
     translations = list(pieces)
     pending = list(range(len(pieces)))
     reason = ""
@@ -306,7 +298,7 @@ def _machine_translate_gen(
             translations[i] = yield LLMRequest(
                 translator, _mt_messages(pieces[i], SOURCE_CODE, code, prompt_dir),
                 max_tokens=reply_cap(pieces[i]))
-            why = check_translation(translations[i], pieces[i], language)
+            why = check_translation(translations[i], pieces[i], slug)
             if why is not None:
                 failed.append((i, why))
         if failed:
@@ -320,15 +312,15 @@ def _machine_translate_gen(
                 translator, _mt_messages(translated, code, SOURCE_CODE, prompt_dir),
                 max_tokens=reply_cap(translated))))
         verdict = yield LLMRequest(
-            judge, _judge_messages(prompt, join_pieces(backs, gaps), language,
+            judge, _judge_messages(prompt, join_pieces(backs, gaps), name,
                                    prompt_dir),
             max_tokens=JUDGE_MAX_TOKENS)
         if is_accepted(verdict):
-            return join_pieces(translations, gaps), language
+            return join_pieces(translations, gaps), name
         reason = f"piece=all; feedback=judge={verdict}"
         pending = list(range(len(pieces)))
     return (join_pieces(translations, gaps),
-            f"{DISCARDED}; language={language}; {reason}")
+            f"{DISCARDED}; language={name}; {reason}")
 
 
 def _resolve_translate_model() -> str:
@@ -370,7 +362,7 @@ def _build_check_messages(
 
 def _translate_gen(
     prompt: str,
-    language: str,
+    language: dict,
     *,
     translate_model: str | None = None,
     check_model: str | None = None,
@@ -379,7 +371,8 @@ def _translate_gen(
     prompt_dir=None,
     **kwargs,
 ) -> TechniqueGen:
-    """Translate ``prompt`` to ``language``, in up to ``num_retries`` rounds.
+    """Translate ``prompt`` to ``language`` (a row of :data:`LANGUAGES`), in
+    up to ``num_retries`` rounds.
 
     ``translate_model`` translates, the translation role's model when None.
     A machine-translation model (:func:`is_machine_translation`) takes
@@ -387,8 +380,8 @@ def _translate_gen(
     ``gen_model`` (the stage's generation model), else the ``uncensored_gen``
     default. A chat model translates and checks each round, ``check_model``
     replacing it for the check, the check's verdict fed back to the next
-    round. Returns ``(translation, language)``, or ``(last_attempt,
-    "DISCARDED; language=...; ...")`` on exhaustion.
+    round. Returns ``(translation, name)``, the language's name, or
+    ``(last_attempt, "DISCARDED; language=<name>; ...")`` on exhaustion.
 
     ``prompt_dir`` is the overlay the prompts are read through. ``**kwargs``
     swallows engine-supplied keys (``benign_data``, ``rng``) that translation
@@ -403,38 +396,39 @@ def _translate_gen(
         return (yield from _machine_translate_gen(
             prompt, language, translator=translator, judge=judge,
             num_retries=num_retries, prompt_dir=prompt_dir))
+    name = language["name"]
     chk_model = check_model or translator
     feedback = ""
     last = prompt
     for _ in range(num_retries):
         translation = yield LLMRequest(
             translator,
-            _build_translate_messages(prompt, language, feedback, prompt_dir),
+            _build_translate_messages(prompt, name, feedback, prompt_dir),
         )
         verdict = yield LLMRequest(
-            chk_model, _build_check_messages(prompt, translation, language, prompt_dir)
+            chk_model, _build_check_messages(prompt, translation, name, prompt_dir)
         )
         if is_accepted(verdict):
-            return translation, language
+            return translation, name
         feedback = verdict
         last = translation
-    return last, f"{DISCARDED}; language={language}; feedback={feedback}"
+    return last, f"{DISCARDED}; language={name}; feedback={feedback}"
 
 
-def _make_language_fn(language: str) -> Callable:
-    """The technique that translates to ``language``, with the language's
-    ``script`` (:data:`SCRIPTS`)."""
+def _make_language_fn(language: dict) -> Callable:
+    """The technique that translates to ``language`` (a row of
+    :data:`LANGUAGES`), named ``to_<slug>``, with the language's ``script``."""
 
     def fn(prompt: str, **kwargs) -> TechniqueGen:
         return (yield from _translate_gen(prompt, language, **kwargs))
 
-    fn.__name__ = fn.__qualname__ = "to_" + language.lower().replace(" ", "_")
-    fn.__doc__ = f"Translate to {language} (technique generator)."
-    fn.script = SCRIPTS[language]
+    fn.__name__ = fn.__qualname__ = f"to_{language['slug']}"
+    fn.__doc__ = f"Translate to {language['name']} (technique generator)."
+    fn.script = language["script"]
     return fn
 
 
-# One technique per language, named to_<language>: to_french, to_scots_gaelic, ...
+# One technique per language, named to_<slug>: to_french, to_scots_gaelic, ...
 _FNS = [_make_language_fn(language) for language in LANGUAGES]
 globals().update({fn.__name__: fn for fn in _FNS})
 

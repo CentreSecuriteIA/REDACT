@@ -32,15 +32,28 @@ def _run(fn, prompt, backend):
     return drive_sync(fn(prompt, translate_model=CHAT), call)
 
 
+def _names() -> list[str]:
+    return [language["name"] for language in LANGUAGES]
+
+
 class TestLanguages:
     def test_nineteen_languages(self):
         assert len(LANGUAGES) == 19
-        assert "Zulu" in LANGUAGES
-        assert "Swahili" in LANGUAGES
+        assert "Zulu" in _names()
+        assert "Swahili" in _names()
 
     def test_maori_is_not_among_them(self):
         """TranslateGemma invents Maori terms that pass every check."""
-        assert "Maori" not in LANGUAGES
+        assert "Maori" not in _names()
+
+    def test_they_are_the_rows_of_the_language_table_marked_translation(self):
+        from redact.jailbreak.technique import data_rows
+
+        rows = data_rows("languages.json")
+        assert [row for row in rows if row["translation"]] == LANGUAGES
+        assert [row["name"] for row in rows if not row["translation"]] == ["Maori"]
+        assert [fn.__name__ for fn in get_translation_functions()] == [
+            f"to_{language['slug']}" for language in LANGUAGES]
 
 
 class TestTranslationFunctions:
@@ -130,26 +143,33 @@ class TestTranslationModel:
 
 
 class TestMachineTranslationTables:
-    """The code, accepted labels and median length ratio of every language."""
+    """The code, accepted labels and median length ratio of every language,
+    keyed by its slug in ``languages.json``."""
 
-    def test_every_table_names_exactly_the_languages(self):
+    def test_every_translation_language_of_the_table_has_a_code_labels_and_a_ratio(
+            self):
+        """A row added to ``languages.json`` with ``translation`` true and no
+        measurements fails here, as the import does."""
         from redact.jailbreak.obfuscation.translation import (
             ACCEPTED_LABELS,
             LANGUAGE_CODES,
             MEDIAN_RATIO,
-            SCRIPTS,
         )
+        from redact.jailbreak.technique import data_rows
 
-        for table in (LANGUAGE_CODES, SCRIPTS, ACCEPTED_LABELS, MEDIAN_RATIO):
-            assert list(table) == LANGUAGES
+        slugs = [row["slug"] for row in data_rows("languages.json")
+                 if row["translation"]]
+        for table in (LANGUAGE_CODES, ACCEPTED_LABELS, MEDIAN_RATIO):
+            assert list(table) == slugs
 
     def test_a_language_s_script_is_its_glotlid_labels_script(self):
-        from redact.jailbreak.obfuscation.translation import ACCEPTED_LABELS, SCRIPTS
+        from redact.jailbreak.obfuscation.translation import ACCEPTED_LABELS
 
-        for language, labels in ACCEPTED_LABELS.items():
-            assert {label.split("_")[1] for label in labels} == {SCRIPTS[language]}
-        assert sorted(language for language, script in SCRIPTS.items()
-                      if script != "Latn") == [
+        for language in LANGUAGES:
+            assert {label.split("_")[1] for label in ACCEPTED_LABELS[language["slug"]]
+                    } == {language["script"]}
+        assert sorted(language["name"] for language in LANGUAGES
+                      if language["script"] != "Latn") == [
             "Arabic", "Bengali", "Greek", "Japanese", "Khmer", "Nepali", "Russian",
             "Thai"]
 
@@ -159,8 +179,8 @@ class TestMachineTranslationTables:
     def test_codes_are_iso_639_1(self):
         from redact.jailbreak.obfuscation.translation import LANGUAGE_CODES
 
-        assert LANGUAGE_CODES["Scots Gaelic"] == "gd"
-        assert LANGUAGE_CODES["Khmer"] == "km"
+        assert LANGUAGE_CODES["scots_gaelic"] == "gd"
+        assert LANGUAGE_CODES["khmer"] == "km"
         assert all(len(code) == 2 and code.islower()  # noqa: PLR2004
                    for code in LANGUAGE_CODES.values())
         assert len(set(LANGUAGE_CODES.values())) == len(LANGUAGES)
@@ -170,9 +190,9 @@ class TestMachineTranslationTables:
         in Indonesian."""
         from redact.jailbreak.obfuscation.translation import ACCEPTED_LABELS
 
-        assert ACCEPTED_LABELS["Javanese"] == {"jav_Latn"}
-        assert {"swh_Latn", "swc_Latn"} <= ACCEPTED_LABELS["Swahili"]
-        assert "xho_Latn" in ACCEPTED_LABELS["Zulu"]
+        assert ACCEPTED_LABELS["javanese"] == {"jav_Latn"}
+        assert {"swh_Latn", "swc_Latn"} <= ACCEPTED_LABELS["swahili"]
+        assert "xho_Latn" in ACCEPTED_LABELS["zulu"]
 
     def test_a_table_missing_a_language_is_refused(self):
         import pytest
@@ -182,11 +202,11 @@ class TestMachineTranslationTables:
             _check_tables,
         )
 
-        without_thai = {k: v for k, v in LANGUAGE_CODES.items() if k != "Thai"}
-        with pytest.raises(ValueError, match=r"LANGUAGE_CODES.*missing \['Thai'\]"):
+        without_thai = {k: v for k, v in LANGUAGE_CODES.items() if k != "thai"}
+        with pytest.raises(ValueError, match=r"LANGUAGE_CODES.*missing \['thai'\]"):
             _check_tables({"LANGUAGE_CODES": without_thai})
-        with pytest.raises(ValueError, match=r"extra \['Maori'\]"):
-            _check_tables({"LANGUAGE_CODES": {**LANGUAGE_CODES, "Maori": "mi"}})
+        with pytest.raises(ValueError, match=r"extra \['maori'\]"):
+            _check_tables({"LANGUAGE_CODES": {**LANGUAGE_CODES, "maori": "mi"}})
 
     def test_every_language_has_a_measured_median(self):
         """TranslateGemma on FLORES-200: no 1.0 placeholder is left, and
@@ -195,7 +215,7 @@ class TestMachineTranslationTables:
         from redact.jailbreak.obfuscation.translation import MEDIAN_RATIO
 
         assert 1.0 not in MEDIAN_RATIO.values()
-        assert MEDIAN_RATIO["Japanese"] < 0.6  # noqa: PLR2004
+        assert MEDIAN_RATIO["japanese"] < 0.6  # noqa: PLR2004
 
     def test_the_measured_medians(self):
         from redact.jailbreak.obfuscation.translation import (
@@ -204,11 +224,11 @@ class TestMachineTranslationTables:
         )
 
         assert MEDIAN_RATIO == {
-            "French": 1.27, "Japanese": 0.47, "Russian": 1.18, "Spanish": 1.22,
-            "German": 1.24, "Arabic": 0.96, "Turkish": 1.13, "Czech": 1.05,
-            "Vietnamese": 1.16, "Greek": 1.28, "Croatian": 1.07, "Swahili": 1.16,
-            "Thai": 1.02, "Khmer": 1.09, "Nepali": 1.04, "Zulu": 1.17,
-            "Scots Gaelic": 1.31, "Bengali": 1.07, "Javanese": 1.12,
+            "french": 1.27, "japanese": 0.47, "russian": 1.18, "spanish": 1.22,
+            "german": 1.24, "arabic": 0.96, "turkish": 1.13, "czech": 1.05,
+            "vietnamese": 1.16, "greek": 1.28, "croatian": 1.07, "swahili": 1.16,
+            "thai": 1.02, "khmer": 1.09, "nepali": 1.04, "zulu": 1.17,
+            "scots_gaelic": 1.31, "bengali": 1.07, "javanese": 1.12,
         }
         assert LENGTH_RATIO_BAND == (0.5, 2.0)
 
@@ -217,7 +237,7 @@ class TestMachineTranslationTables:
         from redact.jailbreak.obfuscation.translation import check_translation
 
         monkeypatch.setattr(langid, "detect", lambda text: "jpn_Jpan")
-        assert check_translation("訳" * 47, "x" * 100, "Japanese") is None
+        assert check_translation("訳" * 47, "x" * 100, "japanese") is None
 
     def test_the_reply_cap_is_about_three_times_the_inputs_tokens(self):
         from redact.jailbreak.obfuscation.translation import reply_cap

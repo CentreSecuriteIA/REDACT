@@ -198,6 +198,12 @@
 
   "request_obfuscation_allowed_families": ["encode_light", "translation"],
 
+  "generators": {
+    "_comment": "Families whose techniques come one per row of a data file beside this spec. jailbreak/technique.py (read_spec) expands each into technique entries, so every reader sees them under techniques: a row (of file, and with where only one whose column of that name is true) makes the technique name, {slug} its slug, with families [the key], this entry's other keys, and the row's complexity, since and deprecated over them. The family's module builds the functions from the same file, so adding a row adds the technique; import fails while the two disagree.",
+    "translation":     { "file": "languages.json", "where": "translation", "name": "to_{slug}", "requires_llm": true },
+    "answer_language": { "file": "languages.json", "where": "answer_language", "name": "to_ask_answer_in_{slug}", "requires_llm": false }
+  },
+
   "techniques": {
     "_comment": "encode_weight applies only to encode-family members. 'light' = model-readable after decoding; 'heavy' = opaque, blocked when manipulation is selected unless function also has sensitive_words family. needs_latin marks a technique that changes only Latin text (rot13, rot18, rot47, leetspeak and their sensitive-word forms): the rules keep it from a translation into another script, which would leave it nothing to change. Morse and braille, which pass other scripts through too, are not marked while the eval pool is held.",
 
@@ -214,27 +220,7 @@
     "to_morse":              { "families": ["encode"], "complexity": 3, "requires_llm": false, "encode_weight": "heavy" },
     "to_braille":            { "families": ["encode"], "complexity": 3, "requires_llm": false, "encode_weight": "heavy", "cross_incompatible_with": ["ascii_art"] },
 
-    "to_french":             { "families": ["translation"], "complexity": 0, "requires_llm": true },
-    "to_japanese":           { "families": ["translation"], "complexity": 0, "requires_llm": true },
-    "to_russian":            { "families": ["translation"], "complexity": 0, "requires_llm": true },
-    "to_spanish":            { "families": ["translation"], "complexity": 0, "requires_llm": true },
-    "to_german":             { "families": ["translation"], "complexity": 0, "requires_llm": true },
-    "to_arabic":             { "families": ["translation"], "complexity": 0, "requires_llm": true },
-    "to_turkish":            { "families": ["translation"], "complexity": 1, "requires_llm": true },
-    "to_czech":              { "families": ["translation"], "complexity": 1, "requires_llm": true },
-    "to_vietnamese":         { "families": ["translation"], "complexity": 1, "requires_llm": true },
-    "to_greek":              { "families": ["translation"], "complexity": 1, "requires_llm": true },
-    "to_croatian":           { "families": ["translation"], "complexity": 1, "requires_llm": true },
-    "to_swahili":            { "families": ["translation"], "complexity": 2, "requires_llm": true },
-    "to_thai":               { "families": ["translation"], "complexity": 2, "requires_llm": true },
-    "to_khmer":              { "families": ["translation"], "complexity": 2, "requires_llm": true },
-    "to_nepali":             { "families": ["translation"], "complexity": 2, "requires_llm": true },
-    "to_zulu":               { "families": ["translation"], "complexity": 2, "requires_llm": true },
-    "to_scots_gaelic":       { "families": ["translation"], "complexity": 2, "requires_llm": true },
-    "to_bengali":            { "families": ["translation"], "complexity": 2, "requires_llm": true },
-    "to_javanese":           { "families": ["translation"], "complexity": 2, "requires_llm": true },
-
-    "to_json":               { "families": ["structural"], "complexity": 2, "requires_llm": false },
+    "to_json":              { "families": ["structural"], "complexity": 2, "requires_llm": false },
     "to_xml":                { "families": ["structural"], "complexity": 2, "requires_llm": false },
     "to_markdown":           { "families": ["structural"], "complexity": 2, "requires_llm": false },
 
@@ -329,28 +315,7 @@
     "to_answer_as_story":         { "families": ["answer_format"], "complexity": 2, "requires_llm": false, "kinds": ["adversarial"] },
     "to_answer_as_structured_data": { "families": ["answer_format"], "complexity": 2, "requires_llm": false },
 
-    "to_ask_answer_in_french":      { "families": ["answer_language"], "complexity": 0, "requires_llm": false },
-    "to_ask_answer_in_japanese":    { "families": ["answer_language"], "complexity": 0, "requires_llm": false },
-    "to_ask_answer_in_russian":     { "families": ["answer_language"], "complexity": 0, "requires_llm": false },
-    "to_ask_answer_in_spanish":     { "families": ["answer_language"], "complexity": 0, "requires_llm": false },
-    "to_ask_answer_in_german":      { "families": ["answer_language"], "complexity": 0, "requires_llm": false },
-    "to_ask_answer_in_arabic":      { "families": ["answer_language"], "complexity": 0, "requires_llm": false },
-    "to_ask_answer_in_turkish":     { "families": ["answer_language"], "complexity": 1, "requires_llm": false },
-    "to_ask_answer_in_czech":       { "families": ["answer_language"], "complexity": 1, "requires_llm": false },
-    "to_ask_answer_in_vietnamese":  { "families": ["answer_language"], "complexity": 1, "requires_llm": false },
-    "to_ask_answer_in_greek":       { "families": ["answer_language"], "complexity": 1, "requires_llm": false },
-    "to_ask_answer_in_croatian":    { "families": ["answer_language"], "complexity": 1, "requires_llm": false },
-    "to_ask_answer_in_thai":        { "families": ["answer_language"], "complexity": 2, "requires_llm": false },
-    "to_ask_answer_in_swahili":     { "families": ["answer_language"], "complexity": 2, "requires_llm": false },
-    "to_ask_answer_in_khmer":       { "families": ["answer_language"], "complexity": 2, "requires_llm": false },
-    "to_ask_answer_in_maori":       { "families": ["answer_language"], "complexity": 2, "requires_llm": false },
-    "to_ask_answer_in_nepali":      { "families": ["answer_language"], "complexity": 2, "requires_llm": false },
-    "to_ask_answer_in_zulu":        { "families": ["answer_language"], "complexity": 2, "requires_llm": false },
-    "to_ask_answer_in_scots_gaelic": { "families": ["answer_language"], "complexity": 2, "requires_llm": false },
-    "to_ask_answer_in_bengali":     { "families": ["answer_language"], "complexity": 2, "requires_llm": false },
-    "to_ask_answer_in_javanese":    { "families": ["answer_language"], "complexity": 2, "requires_llm": false },
-
-    "to_continue_passage":      { "families": ["continuation"], "complexity": 3, "requires_llm": false },
+    "to_continue_passage":     { "families": ["continuation"], "complexity": 3, "requires_llm": false },
     "to_complete_story":        { "families": ["continuation"], "complexity": 3, "requires_llm": false },
     "to_fill_in_blank":         { "families": ["continuation"], "complexity": 3, "requires_llm": false },
     "to_continue_instructions": { "families": ["continuation"], "complexity": 3, "requires_llm": false },

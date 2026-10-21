@@ -43,6 +43,16 @@ class TestAnswerLanguageRegistry:
         assert "to_ask_answer_in_scots_gaelic" in names
         assert "to_ask_answer_in_javanese" in names
 
+    def test_one_per_row_of_the_language_table_marked_answer_language(self):
+        """Maori too, which translation leaves out."""
+        from redact.jailbreak.technique import data_rows
+
+        assert [f.__name__ for f in get_answer_language_functions()] == [
+            f"to_ask_answer_in_{row['slug']}" for row in data_rows("languages.json")
+            if row["answer_language"]]
+        assert "to_ask_answer_in_maori" in [
+            f.__name__ for f in get_answer_language_functions()]
+
 
 class TestIndividualLanguageFunctions:
     def test_french_info(self):

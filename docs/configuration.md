@@ -783,8 +783,9 @@ from the package otherwise:
 | `<config_dir>/dimensions.json` | the [dimensions](#dimensions-and-the-runs-check) table, whole. It must hold every tag the families carry; the run's check reads its `same_as` and `undecided` |
 
 `config_dir` is relative to the recipe's folder, as `params_file` is. The
-technique spec (`combination_spec.json`), the technique templates and other
-files under `jailbreak/`, `llm/` (`models.json`, `roles.json`,
+technique spec (`combination_spec.json`), the language table
+(`languages.json`), the technique templates and other files under
+`jailbreak/`, `llm/` (`models.json`, `roles.json`,
 `gpu_pricing.json`) and `datasets/` are loaded at import or tied to code, so
 they come from the package only (an axes or dimensions file in one of those
 folders too): a file of theirs in the folder is named in a
@@ -907,7 +908,8 @@ values. Delete every file you do not change, then set `prompt_dir`.
 | File | Holds | Read by |
 |---|---|---|
 | `configs/llm/gpu_pricing.json` | Provider, then GPU name as `nvidia-smi` reports it, then hourly USD per GPU; `*` is a provider's fallback | the cost roll-up |
-| `configs/jailbreak/combination_spec.json` | `version`, `layer_order`, `layer_rates`, `layer_max_picks`, `families` (layer, order within the layer, incompatibilities, `dimension`, optional `kinds`; a `description`, which nothing reads), `manipulation_blocked_obfuscation`, `request_obfuscation_allowed_families`, `techniques` (families, complexity, `requires_llm`, `requires_benign`, `encode_weight`, optional `max_tokens`, `cross_incompatible_with`, `kinds`) | `jailbreak/technique.py` (`load_spec`, `tag`), `pool.py`, `rules.py`, `sampling.py`, `chain.py`, `augmentation.py`; its `version` goes in each row and in the jailbreak run record |
+| `configs/jailbreak/combination_spec.json` | `version`, `layer_order`, `layer_rates`, `layer_max_picks`, `families` (layer, order within the layer, incompatibilities, `dimension`, optional `kinds`; a `description`, which nothing reads), `manipulation_blocked_obfuscation`, `request_obfuscation_allowed_families`, `generators` (the families whose techniques come one per row of a data file, expanded into `techniques` as the spec loads), `techniques` (families, complexity, `requires_llm`, `requires_benign`, `encode_weight`, optional `max_tokens`, `cross_incompatible_with`, `kinds`) | `jailbreak/technique.py` (`load_spec`, `tag`), `pool.py`, `rules.py`, `sampling.py`, `chain.py`, `augmentation.py`; its `version` goes in each row and in the jailbreak run record |
+| `configs/jailbreak/languages.json` | One row per language: `name`, `slug`, `complexity`, `script`, and whether it has a `translation` and an `answer_language` technique | `jailbreak/technique.py` (the spec's generators), `obfuscation/translation.py`, `requests/answer_language.py` |
 | `configs/jailbreak/augmentations.json` | The two default kinds and `natural_only_families` | `jailbreak/augmentation.py` |
 | `configs/jailbreak/<layer>/*_templates.json` | Template variants of the pure techniques | `jailbreak/directives.py: load_templates` |
 | `configs/jailbreak/multi_turn/crescendo_followups.json` | Follow-ups of the crescendo attack | `multiturn_attacks/attacks.py` |

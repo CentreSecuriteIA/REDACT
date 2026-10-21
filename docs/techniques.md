@@ -2,8 +2,10 @@
 
 The jailbreak stage draws from 144 active techniques in 4 layers and 23
 families.
-`configs/jailbreak/combination_spec.json` gives each technique its families,
-a complexity from 0 to 3, whether it calls a model (`requires_llm`) or
+`configs/jailbreak/combination_spec.json` gives each technique (the
+language ones through its `generators`, from
+[the language table](#the-language-table)) its families, a complexity from
+0 to 3, whether it calls a model (`requires_llm`) or
 needs the benign data (`requires_benign`), and the kinds that may draw it
 (`kinds`, [below](#the-natural-pool)). This page lists them by name, for
 the `allow` and `deny` lists of the
@@ -99,6 +101,22 @@ text in another script as it was, as a test checks on six scripts.
 spaces its characters out) but are not tagged: both are in the eval pool,
 which is held, and completing them would change its text.
 
+## The language table
+
+`configs/jailbreak/languages.json` holds one row per language: its `name`
+(as prompts and infos write it), `slug` (the end of its technique names),
+`complexity` (by resource tier: 0 high, 1 mid, 2 low), `script` (ISO 15924,
+which the script rule reads), and whether it has a `translation` technique
+(`to_<slug>`) and an `answer_language` one (`to_ask_answer_in_<slug>`). The
+spec's `generators` make a technique entry of each marked row as the spec
+loads, and the two families' modules build the functions from the same
+rows, in the table's order. Of the twenty rows, all have an answer-language
+technique and nineteen a translation (not Maori). The translation family
+kept the order it had; the answer languages took the table's, which puts
+Swahili before Thai, so a fresh plan that drew one of the two draws the
+other (a kept plan replays by name). The table is read from the package
+only. To add a language: [extending.md](extending.md#add-a-language).
+
 ## Retired techniques
 
 Spec version 1.1 retired seven techniques. They stay registered, so a plan
@@ -143,8 +161,8 @@ technique is picked first. A technique may not join a combination when:
   `sensitive_words`;
 - it pairs a `needs_latin` technique with a translation into a script
   other than Latin: Japanese, Russian, Arabic, Greek, Thai, Khmer, Nepali
-  or Bengali (each language's script is in `SCRIPTS`, in
-  `obfuscation/translation.py`). After the translation the encoding would
+  or Bengali (each language's `script` is in its row of
+  `configs/jailbreak/languages.json`). After the translation the encoding would
   change nothing, yet count in `num_techniques`; before it, the translator
   would get a cipher. The Latin-script translations still join them;
 - in budget mode, its complexity is above what is left of `max_complexity`.
@@ -288,9 +306,11 @@ the answers.
   `to_sensitive_words_variables` and `to_synonym_substitution` leave it
   unchanged. `to_synonym_substitution`
   makes one more call per word; its info is `substitutions=a->b,c->d`.
-- `translation` covers 19 languages (not Maori, which TranslateGemma renders
+- `translation` covers 19 languages, the rows of
+  [the language table](#the-language-table) marked `translation` (not Maori,
+  which TranslateGemma renders
   with invented sensitive and technical terms, fluently enough to pass every
-  check) in three resource tiers, which the spec scores by complexity:
+  check) in three resource tiers, which the table scores by complexity:
   high (`to_french`, `to_japanese`, `to_russian`, `to_spanish`, `to_german`,
   `to_arabic`; 0), mid (`to_turkish`,
   `to_czech`, `to_vietnamese`, `to_greek`, `to_croatian`; 1) and low
@@ -380,9 +400,9 @@ the answers.
 **Requests.** These change how a request is posed, not its text, and call no
 model. Each technique picks one of its named template variants from a JSON
 file under `configs/jailbreak/requests/`. The `answer_language` techniques
-are generated from the language list in `answer_language_templates.json`, so
-a new language is one JSON entry, plus its technique's entry in
-`combination_spec.json`. `to_impersonate_good_person` has eight
+are generated from the rows of `configs/jailbreak/languages.json` marked
+`answer_language` ([the language table](#the-language-table)), so a new
+language is one row. `to_impersonate_good_person` has eight
 profession variants (nurse, doctor, security researcher, teacher, ...) and
 `to_use_past_tense` four historical framings.
 
