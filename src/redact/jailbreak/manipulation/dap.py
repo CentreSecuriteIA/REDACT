@@ -1,7 +1,9 @@
 """DAP techniques: the prompt as one question among benign Q&A pairs.
 
 ``info`` is ``num_shots=...;harmful_idx=...;sub_category=...``, plus
-``selection=...`` when a model chose the subcategory.
+``selection=...`` when a model chose the subcategory. The many-shot variants
+show ``MANY_PAIRS`` short pairs (``pairs.py``); ``wanted=...`` follows
+``num_shots`` when the cache held fewer.
 """
 
 import random
@@ -9,7 +11,12 @@ from collections.abc import Callable
 
 from redact.jailbreak.technique import TechniqueGen
 
-from .pairs import run_random_manipulation, run_selected_manipulation
+from .pairs import (
+    run_random_manipulation,
+    run_random_many,
+    run_selected_manipulation,
+    run_selected_many,
+)
 
 
 def _build_dap_prompt(
@@ -72,6 +79,19 @@ def to_dap_selected_long(prompt: str, **kwargs) -> TechniqueGen:
     """DAP with LLM-selected category, long answers (technique generator)."""
     return (yield from run_selected_manipulation(
         prompt, "long", _build_dap_prompt, **kwargs))
+
+
+def to_dap_random_many(
+    prompt: str, benign_data: dict, *, rng: random.Random | None = None,
+) -> tuple[str, str]:
+    """DAP with many short pairs from every subcategory. No LLM needed."""
+    return run_random_many(prompt, benign_data, _build_dap_prompt, rng)
+
+
+def to_dap_selected_many(prompt: str, **kwargs) -> TechniqueGen:
+    """DAP with many short pairs, the LLM-selected category's first
+    (technique generator)."""
+    return (yield from run_selected_many(prompt, _build_dap_prompt, **kwargs))
 
 
 def get_dap_functions() -> list[Callable]:
