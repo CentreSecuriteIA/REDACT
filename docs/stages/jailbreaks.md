@@ -39,8 +39,8 @@ in [techniques.md](../techniques.md).
 - With no input file the front raises `No input samples found`; with no
   accepted input it warns `jailbreaks skipped: ...` and writes nothing. With
   `resume: false` it also removes the files of each kind that is on: CSV,
-  `.cut` and `.tmp` files, ledger, manifest, plan file and coverage table
-  (`dataset.clear_stage`).
+  `.cut` and `.tmp` files, ledger, manifest, plan file, coverage table and
+  variants table (`dataset.clear_stage`).
 
 ## Models
 
@@ -75,7 +75,7 @@ training run and an eval run does not get the same draws. The run passes
 
 One unit is one input at one iteration, for one kind: `(input_id,
 iteration)`. A kind with `rounds` has one iteration per round. Each kind has
-its own manifest, plan file, ledger and coverage table.
+its own manifest, plan file, ledger, coverage table and variants table.
 
 | | Value |
 |---|---|
@@ -91,8 +91,9 @@ its own manifest, plan file, ledger and coverage table.
 | `Datasets/jailbreaks.manifest.jsonl` | Its plan |
 | `Datasets/jailbreaks.state.jsonl` | Its ledger |
 | `Datasets/jailbreaks.coverage.csv` | What its plan drew |
+| `Datasets/jailbreaks.variants.csv` | Which template variants its rows drew, written after each run |
 | `Datasets/jailbreaks.plan.json` | What its plan was made with: `seed`, `rounds`, `pool` (the technique names), `family_weights`, `layer_rates`, `spec_version` (the spec's `version`, which dates the pool) |
-| `Datasets/variations.csv` and its four sidecars | The same for the natural kind |
+| `Datasets/variations.csv` and its five sidecars | The same for the natural kind |
 | `Data_cache/benign/benign_samples.csv` | The benign data, shared by both kinds, with its `.manifest.jsonl` and `.state.jsonl` |
 
 `variations.csv` goes to `variations_path` when given, else beside
@@ -123,6 +124,24 @@ Columns of the coverage table: `level` (`layer`, `family` or `technique`),
 plan drew per group, and adds a zero row for each technique of the pool
 never drawn. The planner logs a WARNING when a layer, or the request
 obfuscation step, falls two or more picks short of its rate in a group.
+
+Columns of the variants table: `technique`, `variant`, `rows`. When a
+kind's units are done, the stage reads its CSV in chunks (the rows of
+earlier runs too) and counts, per technique and variant name, the rows
+that drew it: a row for every variant of a template technique of the pool
+(weight above 0), 0 when no row drew it, then any other technique and
+variant a row drew (from a kept plan made with another pool). A row's
+`technique_info` joins its techniques' infos in their order, and a framing
+and a request technique both write `variant=<name>`, so the variants are
+paired by position: the n-th `variant=` of a row is the n-th of its
+techniques that writes one; a step noted `noop=` wrote none, and a rejected
+or error row, whose info is its rejection's, counts none. The framing
+techniques, the answer formats, the answer languages, asking, the
+distractors, impersonation, indirect and temporal write `variant=`;
+continuation writes `style=<name>`, read as its variant; structural's
+`to_xml` and `to_markdown`, one template each, name none and are not
+counted, nor is `to_json`, whose wrapper is in code. Continuation and
+structural keep their info as it is while the eval pool is held.
 
 ## The benign data
 
@@ -191,7 +210,8 @@ names a technique no registered function implements raises a `ValueError`
 naming `resume=False` when that unit is built, which stops the stage. Inputs
 added since the plan get no unit; a WARNING counts them and names
 `resume=False`. `resume: false` removes that kind's CSV, `.cut` and `.tmp`
-files, ledger, manifest, plan file and coverage table, then plans again. A
+files, ledger, manifest, plan file, coverage table and variants table, then
+plans again. A
 kind that is off is not touched ([running.md](../running.md#resume-fresh-runs-and-a-kill-partway-through)
 says how to plan one kind again and keep the other).
 

@@ -42,7 +42,7 @@ def to_json(prompt: str, *, rng: random.Random | None = None) -> tuple[str, str]
     return json_payload, f"priority={priority};format={fmt}"
 
 
-@uses_pool(_FILE, "to_xml", slots=("prompt", "policy_id"))
+@uses_pool(_FILE, "to_xml", slots=("prompt", "policy_id"), info_key=None)
 def to_xml(prompt: str, *, rng: random.Random | None = None) -> tuple[str, str]:
     """Wrap prompt in XML structure with policy override.
 
@@ -55,7 +55,7 @@ def to_xml(prompt: str, *, rng: random.Random | None = None) -> tuple[str, str]:
     return payload, f"policy_id={policy_id}"
 
 
-@uses_pool(_FILE, "to_markdown")
+@uses_pool(_FILE, "to_markdown", info_key=None)
 def to_markdown(prompt: str) -> tuple[str, str]:
     """Wrap prompt in Markdown structure with override framing.
 

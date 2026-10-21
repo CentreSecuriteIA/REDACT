@@ -61,7 +61,7 @@ from redact.dataset import (
     take_per_group,
     write_concat,
 )
-from redact.dataset.planfile import coverage_path, plan_path
+from redact.dataset.planfile import coverage_path, plan_path, variants_path
 from redact.jailbreak import augmentation as augmentation_kinds
 from redact.jailbreak import pool as jailbreak_pool
 from redact.jailbreak.obfuscation import langid
@@ -730,10 +730,12 @@ def _check_machine_translation(translation_model: str | None, prompt_dir) -> Non
 
 def _kind_files(out_path: Path, manifest_path: Path | None) -> dict:
     """:func:`redact.dataset.clear_stage`'s kwargs for the files of one kind
-    of the jailbreak stage: its CSV, manifest, coverage table and plan."""
+    of the jailbreak stage: its CSV, manifest, coverage table, plan and
+    variants table."""
     manifest = manifest_path or Manifest.sidecar(out_path).path
     return {"artifact": out_path, "manifest_path": manifest,
-            "also": (coverage_path(manifest), plan_path(manifest))}
+            "also": (coverage_path(manifest), plan_path(manifest),
+                     variants_path(manifest))}
 
 
 def _variations_csv(data_dir, output_path, variations_path) -> Path:

@@ -1,8 +1,10 @@
-"""The plan file and the coverage table beside a stage's manifest.
+"""The plan file and the tables beside a stage's manifest.
 
 The plan file ``<stem>.plan.json`` records what a stage's plan was made
 with, so a resume can tell when it would plan otherwise. The coverage table
-``<stem>.coverage.csv`` counts what the plan holds.
+``<stem>.coverage.csv`` counts what the plan holds; the jailbreak stage's
+variants table ``<stem>.variants.csv`` counts the template variants its
+rows drew.
 """
 
 import json
@@ -22,6 +24,11 @@ def _beside(manifest_path, suffix: str) -> Path:
 def coverage_path(manifest_path) -> Path:
     """The coverage CSV beside the manifest at ``manifest_path``."""
     return _beside(manifest_path, ".coverage.csv")
+
+
+def variants_path(manifest_path) -> Path:
+    """The variants CSV beside the manifest at ``manifest_path``."""
+    return _beside(manifest_path, ".variants.csv")
 
 
 def plan_path(manifest_path) -> Path:

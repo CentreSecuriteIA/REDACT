@@ -1,6 +1,8 @@
 """Continuation techniques: the prompt between a random variant's prefix and suffix.
 
-``info`` is ``style=<variant>``.
+``info`` is ``style=<variant>``: the key the other template techniques write
+as ``variant``. It stays ``style`` while the eval pool, which draws these
+techniques, is held; the variants table reads it as their variant.
 """
 
 import random
@@ -22,7 +24,7 @@ def _apply(
     return result, f"style={t['name']}"
 
 
-@uses_pool(_FILE, "continue_passage", slots=())
+@uses_pool(_FILE, "continue_passage", slots=(), info_key="style")
 def to_continue_passage(
     prompt: str, *, rng: random.Random | None = None,
 ) -> tuple[str, str]:
@@ -30,7 +32,7 @@ def to_continue_passage(
     return _apply("continue_passage", prompt, rng=rng)
 
 
-@uses_pool(_FILE, "complete_story", slots=())
+@uses_pool(_FILE, "complete_story", slots=(), info_key="style")
 def to_complete_story(
     prompt: str, *, rng: random.Random | None = None,
 ) -> tuple[str, str]:
@@ -38,7 +40,7 @@ def to_complete_story(
     return _apply("complete_story", prompt, rng=rng)
 
 
-@uses_pool(_FILE, "fill_in_blank", slots=())
+@uses_pool(_FILE, "fill_in_blank", slots=(), info_key="style")
 def to_fill_in_blank(
     prompt: str, *, rng: random.Random | None = None,
 ) -> tuple[str, str]:
@@ -46,7 +48,7 @@ def to_fill_in_blank(
     return _apply("fill_in_blank", prompt, rng=rng)
 
 
-@uses_pool(_FILE, "continue_instructions", slots=())
+@uses_pool(_FILE, "continue_instructions", slots=(), info_key="style")
 def to_continue_instructions(
     prompt: str, *, rng: random.Random | None = None,
 ) -> tuple[str, str]:

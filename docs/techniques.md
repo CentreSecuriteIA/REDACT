@@ -433,6 +433,16 @@ directive and variant of a fault. A pool should hold at least 8 variants
 35 pools are below that floor, which a test ratchets
 ([extending.md](extending.md#add-variants-to-a-template-pool)).
 
+The info names the variant drawn: `variant=<name>` for the framing
+techniques, the answer formats, the answer languages, asking, the
+distractors, impersonation, indirect and temporal; `style=<name>` for
+continuation. Structural's `to_xml` and `to_markdown` have one template
+each and name none (`to_xml`'s info names its policy id), and `to_json`
+writes its wrapper in code. Continuation and structural are drawn by the
+eval pool, so their infos stay as they are until the owner's eval review.
+After a run, `<kind>.variants.csv` counts the rows that drew each variant
+([stages/jailbreaks.md](stages/jailbreaks.md#files)).
+
 ## Reference list coverage
 
 The library is benchmarked against a reference set of 73 instruction

@@ -343,7 +343,8 @@ pool of one variant named after the entry. `personas.json` and
 `cognitive_techniques.json` are definitions, not pools.
 
 1. **Append a variant** to the directive's list: a `name` of its own in
-   the list (it is written in the info, `variant=<name>`), and a
+   the list (the info writes it, `variant=<name>`, and a kind's
+   `<kind>.variants.csv` counts the rows that drew it), and a
    `template` that holds `{prompt}` once and no other slot than those its
    technique fills (`{language}` for the answer languages, `{policy_id}`
    for `to_xml`); a literal brace is written `{{` or `}}`. A seed draws by

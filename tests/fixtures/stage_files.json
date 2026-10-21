@@ -171,6 +171,9 @@
     {"input_id": "given-1", "iteration": 1},
     {"input_id": "padded", "iteration": 1}
    ],
+   "jailbreaks.variants.csv": [
+    ["technique", "variant", "rows"]
+   ],
    "variations.coverage.csv": [
     ["level", "name", "category", "entry_type", "iteration", "count"],
     ["technique", "broken", "Fraud", "harmful", "0", "1"],
@@ -205,6 +208,9 @@
     {"input_id": "given-1", "iteration": 0},
     {"input_id": "given-1", "iteration": 0},
     {"input_id": "padded", "iteration": 0}
+   ],
+   "variations.variants.csv": [
+    ["technique", "variant", "rows"]
    ]
   }
  },

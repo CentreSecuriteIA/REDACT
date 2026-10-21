@@ -359,7 +359,8 @@ and ran the other 400. It ended with 432 rows, 433 ledger lines (the opening
 
 **Starting over.** `"resume": false` starts every listed stage over: it
 removes the stage's output, its `.cut` and `.tmp` files, its ledger and its
-manifest (and for each jailbreak kind its `.coverage.csv` and `.plan.json`),
+manifest (and for each jailbreak kind its `.coverage.csv`, `.plan.json` and
+`.variants.csv`),
 then plans anew. The exceptions:
 
 - The `inputs` stage starts over only its current `style`. The rows and
@@ -388,8 +389,8 @@ ledger and plan.
 A stage that is skipped because none of its inputs was accepted still
 starts over with `"resume": false`. Its earlier output, `.cut` and `.tmp`
 files, ledger and manifest are removed through `dataset.clear_stage`; for the
-jailbreak stage that is each kind that is on, with its `.coverage.csv` and
-`.plan.json`. So no stale rows reach the build. A jailbreak kind whose
+jailbreak stage that is each kind that is on, with its `.coverage.csv`,
+`.plan.json` and `.variants.csv`. So no stale rows reach the build. A jailbreak kind whose
 `entry_types` match none of the inputs is skipped with a WARNING and cleared
 the same way.
 
@@ -458,8 +459,8 @@ Datasets/
   output_responses.csv                   # + .manifest.jsonl, .state.jsonl, .coverage.csv, .plan.json
   paraphrases_inputs.csv                 # + .manifest.jsonl, .state.jsonl
   paraphrases_outputs.csv                # + .manifest.jsonl, .state.jsonl (target outputs or both)
-  jailbreaks.csv                         # + .manifest.jsonl, .state.jsonl, .coverage.csv, .plan.json
-  variations.csv                         # + .manifest.jsonl, .state.jsonl, .coverage.csv, .plan.json
+  jailbreaks.csv                         # + .manifest.jsonl, .state.jsonl, .coverage.csv, .plan.json, .variants.csv
+  variations.csv                         # + .manifest.jsonl, .state.jsonl, .coverage.csv, .plan.json, .variants.csv
   complete_dataset.csv                   # the build of a training run
   eval_inputs.csv  eval_outputs.csv  eval_jailbreaks.csv   # the build of an eval run
   eval_excluded.json                     # with exclude_from: the rows it left out
@@ -483,6 +484,7 @@ Other files you may see:
 | `constitution_inputs.plan.json`, `output_responses.plan.json` | What the deal of the generation axes was made with: `seed`, the axes' weights, for the inputs `samples_per_entry`, and for the outputs `outputs_per_input` and `modes` (the answer modes of every entry type). A resume compares them with the run's |
 | `constitution_inputs.coverage.csv`, `output_responses.coverage.csv` | Per axis value, the specs planned and accepted per category and entry type; the outputs' also per answer mode (`axis` `mode`) |
 | `<kind>.coverage.csv` | Per layer, family and technique of a kind's plan, the count per category, entry type and iteration, with a zero row for each pool technique never drawn |
+| `<kind>.variants.csv` | Per template technique and variant, the rows of a kind's CSV that drew it, written after each run, with a zero row for each variant of the pool never drawn ([stages/jailbreaks.md](stages/jailbreaks.md#files)) |
 | `*.tmp` | A file being replaced. It is gone once the write finishes; a kill can leave one, which the next write replaces, and `resume: false` removes the output's |
 
 A run record, `Datasets/<stage>.run.json`, holds `stage`, `timestamp`,

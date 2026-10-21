@@ -45,6 +45,7 @@ the technique names are in [techniques.md](../techniques.md).
 | `chain.py` | `run_chain`, `combine_techniques`, `in_layer_order`, `apply_combination` |
 | `units.py` | `pending_units`, `is_pending`, `unit_gen`, `row_of`, `error_row_of` |
 | `pipeline.py` | `run_augmentation`, the stage core; `_library_change`, the kept plan's pool against what the library added and retired since |
+| `variants.py` | `variants_of` (a row's template variants, paired by position), `write_variants` (the kind's `<stem>.variants.csv`), `COLUMNS` |
 | `directives.py` | The variant pools of the pure techniques: `read_pools` (a template file's pools by directive, whatever its shape), `PoolRef` and `uses_pool` (the pool a technique draws from, set as its `variant_pool`), `check_pools` (called by `pool.py` at import), `enabled`, `draw_variant`, `apply_template_directive`; `load_templates` (a file as written) |
 
 ## Techniques
@@ -152,8 +153,9 @@ core, called once per kind:
    leaves out a technique, or a technique no longer registered. Known
    limit: a section that newly names a family all of whose techniques came
    after the plan reads as growth, and warns. A manifest without the plan
-   file logs a WARNING and runs unchecked. Otherwise the old coverage and
-   plan files are removed, and `plan_run` writes the plan file, one manifest
+   file logs a WARNING and runs unchecked. Otherwise the old coverage
+   table, plan file and variants table are removed, and `plan_run` writes
+   the plan file, one manifest
    row per input and round, then the coverage table.
 4. **One pass over the plan** to count the pending units, see whether any
    needs benign data (if so, generate what the cache lacks for the benign
@@ -175,7 +177,9 @@ core, called once per kind:
    (OpenAI-compatible, vLLM), raised at the unit's `yield`. On the grouped
    path (Anthropic, introspection) a failed `generate()`, a too-long prompt
    included, propagates and stops the stage.
-7. **Read back** when asked.
+7. **Count the variants.** `write_variants` reads the kind's CSV in chunks
+   and writes `<stem>.variants.csv` beside the manifest (below).
+8. **Read back** when asked.
 
 A planned unit whose input is not in the frame is skipped; an input that is
 not in the plan gets no unit. A unit's key in the driver is its position
@@ -309,6 +313,22 @@ manifest whenever a plan is written: per `level` (`layer`, `family`,
 `technique`) and `name`, the count per `category`, `entry_type` and
 `iteration`, plus a zero row for every pool technique never drawn. It logs
 `Coverage: N of M pool techniques drawn`.
+
+`variants.write_variants(out_path, manifest_path, pool, registry)` writes
+`<stem>.variants.csv` (`technique`, `variant`, `rows`) after the units,
+from the rows of the kind's CSV, those of earlier runs included (the
+natural kind runs with `read_back=False`, so the file is read, not the
+frame). `variants_of(technique, info, registry)` pairs one row's variants by
+position: a technique's pool names the info key that holds its variant
+(`PoolRef.info_key`: `variant` as `apply_template_directive` writes it,
+continuation's `style`, structural's none), and the values of each key go,
+in order, to the row's techniques that write it, less those noted
+`noop=`; a row whose values and techniques do not pair up (a rejected or an
+error row) counts none. Every variant of weight above 0 of a pool
+technique gets a row, 0 when none drew it; a technique outside the pool
+that a row drew (a kept plan's) is added after. No technique's info
+changed for the table: the eval-pool techniques that name no `variant=`
+(continuation, structural) keep their info while the eval pool is held.
 
 ## The augmentation section in code
 

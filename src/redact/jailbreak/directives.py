@@ -60,11 +60,15 @@ def load_templates(*relative_parts: str) -> dict:
 class PoolRef:
     """The variant pool a technique draws from: ``directive`` of the template
     ``file`` (a path under ``configs/jailbreak/``), whose templates may name
-    the ``slots`` the technique fills."""
+    the ``slots`` the technique fills. ``info_key`` is the key of the
+    technique's info that names the variant it drew: ``variant``, as
+    :func:`apply_template_directive` writes it, continuation's ``style``, or
+    None for a technique whose info names none (structural's)."""
 
     file: str
     directive: str
     slots: tuple[str, ...] = ("prompt",)
+    info_key: str | None = "variant"
 
     @property
     def name(self) -> str:
@@ -74,11 +78,13 @@ class PoolRef:
 
 def uses_pool(
     file: str, directive: str, slots: tuple[str, ...] = ("prompt",),
+    info_key: str | None = "variant",
 ) -> Callable[[Callable], Callable]:
     """Mark a technique as drawing from the pool ``directive`` of ``file``,
-    filling ``slots``: sets its ``variant_pool`` (a :class:`PoolRef`)."""
+    filling ``slots`` and naming the variant in its info under ``info_key``:
+    sets its ``variant_pool`` (a :class:`PoolRef`)."""
     def mark(fn: Callable) -> Callable:
-        fn.variant_pool = PoolRef(file, directive, tuple(slots))
+        fn.variant_pool = PoolRef(file, directive, tuple(slots), info_key)
         return fn
     return mark
 

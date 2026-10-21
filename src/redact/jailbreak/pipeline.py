@@ -24,7 +24,7 @@ from redact.dataset import (
     resume_state,
     row_ids,
 )
-from redact.dataset.planfile import changed_plan, plan_path, read_plan
+from redact.dataset.planfile import changed_plan, plan_path, read_plan, variants_path
 from redact.llm_pipeline import drive_units, pool_size
 from redact.llms.client import ModelClient
 
@@ -33,6 +33,7 @@ from .manipulation import get_or_generate_benign_data
 from .plan import coverage_path, plan_inputs, plan_run
 from .technique import FIRST_VERSION, load_spec, version_key
 from .units import error_row_of, is_pending, pending_units, row_of
+from .variants import write_variants
 
 logger = logging.getLogger(__name__)
 
@@ -68,11 +69,14 @@ def run_augmentation(
     its pending units run through :func:`drive_units`, up to ``batch_size`` per
     call, their rows appended every 32 units. The combination is read back
     through every registered technique, so a plan made with another pool still
-    replays. The benign data at ``benign_path`` is loaded when a pending unit's
-    techniques need it: with ``auto_generate_benign`` its pairs are generated
-    first for each subcategory of ``benign_taxonomy`` (a file name under
-    ``taxonomy_dir``, or a loaded taxonomy) that the file lacks; without it a
-    missing file raises before any unit runs. ``rounds`` holds each round's
+    replays. When the units are done, ``<stem>.variants.csv`` beside the
+    manifest counts the template variants the rows of ``out_path`` drew
+    (:func:`~redact.jailbreak.variants.write_variants`). The benign data at
+    ``benign_path`` is loaded when a pending unit's techniques need it: with
+    ``auto_generate_benign`` its pairs are generated first for each
+    subcategory of ``benign_taxonomy`` (a file name under ``taxonomy_dir``,
+    or a loaded taxonomy) that the file lacks; without it a missing file
+    raises before any unit runs. ``rounds`` holds each round's
     sampler settings, as :func:`redact.jailbreak.augmentation.rounds_of`
     gives them (one round of the sampler's defaults when None);
     ``family_weights`` and ``layer_rates``
@@ -86,7 +90,8 @@ def run_augmentation(
 
     Resume: completion is a sidecar ``*.state.jsonl`` ledger keyed
     ``(input_id, iteration)``; ``resume=True`` reuses the plan and skips its
-    finished units, ``resume=False`` clears the output, ledger and plan first.
+    finished units, ``resume=False`` clears the output, ledger and plan (its
+    plan file, coverage and variants tables too) first.
     A reused plan runs as it was made: an input it does not hold, accepted
     after it was made, gets no unit, and a WARNING counts those inputs. A
     reused plan made with another ``seed``, ``rounds``, pool, ``family_weights``
@@ -190,6 +195,7 @@ def run_augmentation(
     else:
         coverage_path(man_path).unlink(missing_ok=True)
         plan_path(man_path).unlink(missing_ok=True)
+        variants_path(man_path).unlink(missing_ok=True)
         plan_run(
             inputs, pool, manifest_path=man_path, seed=seed,
             iterations=len(rounds), settings_per_iteration=rounds,
@@ -288,6 +294,9 @@ def run_augmentation(
             progress=label if verbose else None,
         )
 
+    # Read from the file, rows of earlier runs included: the natural kind
+    # runs with read_back False.
+    variants = write_variants(out_path, man_path, pool, registry)
     rows = read_rows(out_path) if read_back else pd.DataFrame()
 
     if verbose:
@@ -301,7 +310,8 @@ def run_augmentation(
             logger.info("Accepted: %d | Rejected: %d",
                         n_accepted, len(rows) - n_accepted)
             logger.info("No-ops: %d", n_noop)
-        logger.info("Manifest: %s | Saved to: %s", man_path, out_path)
+        logger.info("Manifest: %s | Saved to: %s | Variants: %s",
+                    man_path, out_path, variants)
 
     return rows
 

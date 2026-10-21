@@ -3,7 +3,8 @@
 ``fixtures/stage_files.json`` holds every file of one stopped and resumed run
 of each stage, as the code wrote them before the stages streamed their plans
 and units (commit e7106b1); the jailbreak stage's variations files were added
-when it gained them. Model calls are stubbed and depend only on the
+when it gained them, and each kind's variants table (header only: the stub
+techniques draw from no template pool) when the stage gained it. Model calls are stubbed and depend only on the
 request, so a run writes the same files every time.
 
 A file is compared as data, not bytes, since a CSV's line ending and the

@@ -193,7 +193,7 @@ names of the last two, are read for this release with a
 | `auto_generate_benign` | `true` | When a pending unit needs benign data, generate the pairs `benign_path` lacks for the benign taxonomy's subcategories, then load it. `false`: load the file as it is; with none, the stage stops before any unit runs (`Benign data not found ...`) |
 | `output_path` | `Datasets/jailbreaks.csv` | The adversarial kind's file |
 | `variations_path` | beside `output_path`, else `Datasets/variations.csv` | The natural kind's file |
-| `manifest_path` | `jailbreaks.manifest.jsonl` beside the output | The adversarial kind's plan, with its plan file `<stem>.plan.json` and coverage table beside it |
+| `manifest_path` | `jailbreaks.manifest.jsonl` beside the output | The adversarial kind's plan, with its plan file `<stem>.plan.json`, coverage table and variants table beside it |
 | `benign_path` | `Data_cache/benign/benign_samples.csv` | The benign data, with its manifest and ledger beside it |
 
 The flat keywords (`include_hacking`, ..., `entry_types`) are also accepted
