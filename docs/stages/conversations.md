@@ -1,5 +1,11 @@
 # Stages: conversations and scoring
 
+!!! warning "Planned extension, not finished"
+    The multi-turn modules (`multi_turn/`, `multiturn_attacks/`,
+    `optimization/`) are a first version of a planned extension. They are not
+    part of a recipe run, have not been validated like the recipe stages, and
+    their interfaces may change.
+
 Fronts and cores `generate_conversations` (`multi_turn/pipeline.py`) and
 `evaluate_conversations` (`multi_turn/evaluate.py`). Both are exported from
 `redact`. They are not recipe stages: call them from Python.

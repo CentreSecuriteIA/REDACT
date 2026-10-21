@@ -28,7 +28,8 @@ A run is an ordered list of stages. Each stage has one public function, its
 
 Two more fronts are outside the recipe: `generate_conversations` and
 `evaluate_conversations` in `multi_turn/`
-([stages/conversations.md](stages/conversations.md)).
+([stages/conversations.md](stages/conversations.md)), a planned extension,
+not finished.
 
 Every run seeds its inputs from a constitution: the recipe's `constitution`
 stage writes it, or an earlier run saved it under `data_dir`. A recipe's
@@ -281,7 +282,7 @@ counted.
 
 | Package | What it is for |
 |---|---|
-| `multi_turn/` | Conversation datasets: a `Setting` of actors played on seeds (`generate_conversations`), scored by a judge (`evaluate_conversations`) |
+| `multi_turn/` | Conversation datasets: a `Setting` of actors played on seeds (`generate_conversations`), scored by a judge (`evaluate_conversations`); a planned extension, not finished |
 | `multiturn_attacks/` | A `Setting` of an attacker and a target model (`generate_attacks`, `score_attacks`, `optimize_attack`), built on `multi_turn/` |
 | `optimization/` | A beam search over conversation moves scored by a judge (`optimize`) |
 | `dataset/loading.py` | Load a published dataset from the HuggingFace Hub (`load_hf_dataset`, `load_from_config`) |
