@@ -1,8 +1,8 @@
 """What the template techniques write, pinned by digest.
 
-Every technique whose text comes from a template file (framing, structural,
-the neutral containers, the request families, small talk and the benign
-roles) runs on two neutral probes for
+Every technique whose text comes from a template file (framing, the persona
+templates, structural, the neutral containers, the request families, small
+talk and the benign roles) runs on two neutral probes for
 six seeds: three calls
 in a row on one ``random.Random(seed)`` per probe. The SHA-256 digest of the
 texts, the infos and the generator's state after the calls is pinned per
@@ -27,6 +27,7 @@ import pytest
 
 import redact.jailbreak  # noqa: F401  (tags the techniques)
 from redact.jailbreak.hacking.framing import get_framing_functions
+from redact.jailbreak.hacking.persona_templates import get_persona_template_functions
 from redact.jailbreak.obfuscation.neutral_container import (
     get_neutral_container_functions,
 )
@@ -45,7 +46,8 @@ _SEEDS = range(6)
 _CALLS = 3
 
 _TECHNIQUES = {fn.__name__: fn for fn in (
-    get_framing_functions() + get_structural_functions()
+    get_framing_functions() + get_persona_template_functions()
+    + get_structural_functions()
     + get_neutral_container_functions() + get_all_request_functions()
     + get_smalltalk_functions() + get_benign_role_functions())}
 

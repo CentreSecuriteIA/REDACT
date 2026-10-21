@@ -342,8 +342,12 @@ _BUDGETS = [
 # picks after it (25 of the 240 dealt units, 3 of the 200 undealt draws).
 # Scoring the two selected_many variants 3 (they were 4: the scale stays 0 to
 # 3) moved it once more: they take a point less of a unit's budget (53 of the
-# 240 dealt units, 3 of the 200 undealt draws).
-_PINNED_DRAWS = "8a5cdf703b04e6a5633c4d9697146972991ba3842b60c4a2101c64a0ddc33d62"
+# 240 dealt units, 3 of the 200 undealt draws). The spec 1.3 persona_template
+# family moved it again: one more hacking family to deal, eleven members wide,
+# changes the hacking pick of many units and, through the unit's rng and its
+# group's counts, the rest of their draw (223 of the 240 dealt units, 125 of
+# the 200 undealt draws).
+_PINNED_DRAWS = "79a1d3fd4f6c30c498874cb7662b1c3e705c88ab1cc39eb937416ab91899fad5"
 
 
 def test_draws_without_the_request_obfuscation_are_those_made_before_it_was_counted():

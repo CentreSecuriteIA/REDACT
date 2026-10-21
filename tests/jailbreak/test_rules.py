@@ -52,6 +52,41 @@ def test_a_persona_or_cognitive_scenario_refuses_an_impersonation_either_way(
     assert not _joins(first, then)
 
 
+@pytest.mark.parametrize("persona", ["to_dan_persona_template",
+                                     "to_liberated_model_persona_template"])
+@pytest.mark.parametrize("other", [
+    "to_fsh_random_short", "to_dap_selected_long", "to_ascii_art",
+    "to_impersonate_good_person"])
+def test_a_persona_template_refuses_manipulation_ascii_art_and_impersonation(
+        persona, other):
+    """fsh and dap set their own scene, ascii_art cannot draw so long a
+    frame, and an impersonation would be a second identity."""
+    assert not _joins(persona, other)
+    assert not _joins(other, persona)
+
+
+@pytest.mark.parametrize("answer", ["to_refusal_then_comply", "to_prefix_injection"])
+def test_a_persona_template_refuses_the_answer_formats_its_mechanics_ask_for(answer):
+    """The mechanics already ask for a dual answer or a set opening: the two
+    answer formats list the family, so every persona template refuses them."""
+    assert not _joins("to_aim_persona_template", answer)
+    assert not _joins(answer, "to_aim_persona_template")
+
+
+@pytest.mark.parametrize("other", [
+    "to_base64", "to_rot13", "to_json", "to_answer_as_code", "to_summarize",
+    "to_use_past_tense"])
+def test_a_persona_template_joins_an_encoding_a_wrapper_or_a_request(other):
+    assert _joins("to_dan_persona_template", other)
+    assert _joins(other, "to_dan_persona_template")
+
+
+def test_a_persona_template_is_the_one_hacking_technique_of_its_combination():
+    for other in ("to_fictional_world", "to_psychopath_persona", "to_avi",
+                  "to_stan_persona_template"):
+        assert not _joins("to_dan_persona_template", other)
+
+
 @pytest.mark.parametrize("framing", ["to_fictional_world", "to_noble_goal"])
 def test_a_framing_still_joins_an_impersonation(framing):
     assert _joins(framing, "to_impersonate_good_person")

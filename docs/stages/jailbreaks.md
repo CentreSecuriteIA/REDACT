@@ -9,7 +9,7 @@ Augment the accepted inputs with technique combinations, in two kinds:
 
 | Kind | Writes | Default |
 |---|---|---|
-| `adversarial` | `Datasets/jailbreaks.csv`: jailbreak attacks | one round per input, by budget, from every active technique (178 in 24 families, the nineteen translations among them) but `casual_writing` and the natural-only small talk and benign roles; half the units take a request obfuscation, a light encoding or a translation after the request |
+| `adversarial` | `Datasets/jailbreaks.csv`: jailbreak attacks | one round per input, by budget, from every active technique (189 in 25 families, the nineteen translations among them) but `casual_writing` and the natural-only small talk and benign roles; half the units take a request obfuscation, a light encoding or a translation after the request |
 | `natural` | `Datasets/variations.csv`: natural variations | one technique per input, from the natural allow lists, which the spec's `kinds` narrow to 71 techniques (90 with `"translation": true`, which adds the nineteen translations) ([techniques.md](../techniques.md#the-natural-pool)) |
 
 These are the packaged defaults, which a `training` run takes: both kinds
@@ -139,7 +139,8 @@ techniques that writes one; a step noted `noop=` wrote none, and a rejected
 or error row, whose info is its rejection's, counts none. The framing
 techniques, the answer formats, the answer languages, asking, the
 distractors, impersonation, indirect, temporal, the neutral containers,
-small talk and the benign roles write `variant=`;
+small talk and the benign roles write `variant=`, and the persona templates
+the mechanic they drew (their frame is one per technique, not a variant);
 continuation writes `style=<name>`, read as its variant; structural's
 `to_xml` and `to_markdown`, one template each, name none and are not
 counted, nor is `to_json`, whose wrapper is in code. Continuation and

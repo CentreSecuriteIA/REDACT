@@ -1,6 +1,6 @@
 # Jailbreak techniques
 
-The jailbreak stage draws from 192 active techniques in 5 layers and 28
+The jailbreak stage draws from 203 active techniques in 5 layers and 29
 families; the first layer, `rewrite`, holds none yet
 ([below](#layers)).
 `configs/jailbreak/combination_spec.json` gives each technique (the
@@ -55,11 +55,11 @@ on. (`to_rewrite`, despite its name, is an `indirect` request technique.)
 | Layer | Families | Techniques | Picks per combination |
 |---|---|---|---|
 | `rewrite` | 0 | 0 | at most 1 |
-| `hacking` | 3 | 21 | at most 1 |
+| `hacking` | 4 | 32 | at most 1 |
 | `manipulation` | 2 | 12 | at most 1 |
 | `obfuscation` | 11 | 101 | no cap |
 | `requests` | 12 | 58 | at most 1 |
-| all | 28 | 192 | |
+| all | 29 | 203 | |
 <!-- END layers -->
 
 ## Families and techniques
@@ -78,6 +78,7 @@ that call a model call the generation model.
 | hacking | `cognitive` | `role_framing` |  | 5 | yes | no | `to_persona_roleplay`, `to_hypothetical_framing`, `to_authority_obedience`, `to_avi`, `to_deep_inception` |
 | hacking | `framing` | `role_framing` |  | 5 | no | no | `to_fictional_world`, `to_noble_goal`, `to_nefarious_goal`, `to_high_stake`, `to_no_moral_constraints` |
 | hacking | `persona` | `role_framing` |  | 11 | yes | no | `to_invented_persona`, `to_psychopath_persona`, `to_alien_persona`, `to_radical_politician_persona`, `to_cult_leader_persona`, `to_very_advanced_ai_persona`, `to_cartel_leader_persona`, `to_artist_persona`, `to_deformed_scientist_persona`, `to_actor_persona`, `to_someone_from_the_future_persona` |
+| hacking | `persona_template` | `role_framing` |  | 11 | no | no | `to_dan_persona_template`, `to_stan_persona_template`, `to_dude_persona_template`, `to_developer_mode_persona_template`, `to_aim_persona_template`, `to_evil_confidant_persona_template`, `to_opposite_mode_persona_template`, `to_unfiltered_oracle_persona_template`, `to_rogue_ai_persona_template`, `to_maintenance_mode_persona_template`, `to_liberated_model_persona_template` |
 | manipulation | `dap` | `example_priming` |  | 6 | `to_dap_selected_short`, `to_dap_selected_long`, `to_dap_selected_many` | yes | `to_dap_random_short`, `to_dap_random_long`, `to_dap_selected_short`, `to_dap_selected_long`, `to_dap_random_many`, `to_dap_selected_many` |
 | manipulation | `fsh` | `example_priming` |  | 6 | `to_fsh_selected_short`, `to_fsh_selected_long`, `to_fsh_selected_many` | yes | `to_fsh_random_short`, `to_fsh_random_long`, `to_fsh_selected_short`, `to_fsh_selected_long`, `to_fsh_random_many`, `to_fsh_selected_many` |
 | obfuscation | `translation` | `language` | 10 | 19 | yes | no | `to_french`, `to_japanese`, `to_russian`, `to_spanish`, `to_german`, `to_arabic`, `to_turkish`, `to_czech`, `to_vietnamese`, `to_greek`, `to_croatian`, `to_swahili`, `to_thai`, `to_khmer`, `to_nepali`, `to_zulu`, `to_scots_gaelic`, `to_bengali`, `to_javanese` |
@@ -198,7 +199,8 @@ technique is picked first. A technique may not join a combination when:
   the reverse. The spec pairs `structural` and `translation` with
   `ascii_art`; `ascii_art` with `framing`, `persona`, `cognitive`, `fsh`,
   `dap`; `fsh` and `dap` with `continuation`, `indirect`, `framing`,
-  `persona`, `cognitive`; `persona` and `cognitive` with
+  `persona`, `cognitive`; `persona_template` with `fsh`, `dap` and
+  `ascii_art`; `persona`, `cognitive` and `persona_template` with
   `impersonation`, so a prompt never carries two identities; `noise`
   with `typos` and `casual_writing`, one kind of surface noise per text; and
   `neutral_container` with `structural` (one document around the prompt)
@@ -214,7 +216,10 @@ technique is picked first. A technique may not join a combination when:
   `to_emoji_sprinkle_*` from `ascii_art`, since no font draws the characters
   they may leave; the other suffixes, encodings and noise may still join it.
   It keeps the four many-shot variants of `fsh` and `dap` from `typos`: a
-  model rewriting so long a prompt would not return it whole. `to_ascii_art` itself rejects a text with a character no
+  model rewriting so long a prompt would not return it whole. It keeps
+  `to_refusal_then_comply` and `to_prefix_injection` from
+  `persona_template`, whose mechanics already ask for a dual answer or a set
+  opening. `to_ascii_art` itself rejects a text with a character no
   single font draws (most non-ASCII characters: accented letters such as `é`
   or `ñ`, dashes, curly quotes, kana; German umlauts and `ß` and some Greek
   or Cyrillic text have fonts), or one every font draws longer than its cap;
@@ -373,6 +378,17 @@ template variant or a font, for traceability.
 - `framing` directives are transforms that change the scenario or the
   intent. Each has named template variants in
   `configs/jailbreak/hacking/framing_templates.json`; one is drawn per call.
+- `persona_template` (spec version 1.3) sets the prompt in a fixed frame
+  for one of eleven well-known jailbreak personas, a technique each
+  (`to_dan_persona_template` to `to_liberated_model_persona_template`), with
+  no model call. Each frame holds a place for a *mechanic*: one of six
+  pieces of text, drawn by `rng`, that sets the rules of the persona's
+  answers, named in the info (`category=dan_persona_template;variant=<mechanic>`)
+  and counted in the kind's variants table. The mechanic names the persona
+  by the frame's `display_name`. The frames and mechanics are in
+  `configs/jailbreak/hacking/persona_templates.json`; a frame is its
+  technique's own text, so the variant floor counts the six mechanics
+  alone. The family is attack-only, and the eval type does not draw it.
 
 **Manipulation.** Both families build on benign question-and-answer pairs
 of the subcategories of the benign taxonomy. The `random` variants pick a
@@ -627,8 +643,9 @@ a weight, and an eval-pool technique's may not, since a weight changes the
 eval text ([extending.md](extending.md#add-variants-to-a-template-pool)).
 Importing `redact.jailbreak` checks every pool and raises naming the file,
 directive and variant of a fault. A pool should hold at least 8 variants
-(a request or framing directive, a container), 12 for a benign role and 20
-for small talk; 13 of the 46 pools are below their floor today (the five
+(a request or framing directive, a container), 12 for a benign role, 20
+for small talk and 6 for the persona templates' mechanics; 13 of the 47
+pools are below their floor today (the five
 framing, the four continuation, the two structural, `refusal_then_comply` and
 `past_tense`, each with 4, or 1): the techniques of the eval pool, whose
 text waits for the eval review. A test ratchets the rest
@@ -637,8 +654,10 @@ text waits for the eval review. A test ratchets the rest
 The info names the variant drawn: `variant=<name>` for the framing
 techniques, the answer formats, the answer languages, asking, the
 distractors, impersonation, indirect, temporal, the neutral containers,
-small talk (`smalltalk=<prefix|suffix>;variant=<name>`) and the benign roles
-(`role=<style>;variant=<name>`); `style=<name>` for
+small talk (`smalltalk=<prefix|suffix>;variant=<name>`), the benign roles
+(`role=<style>;variant=<name>`) and the persona templates, which name the
+mechanic drawn (`category=<key>_persona_template;variant=<mechanic>`);
+`style=<name>` for
 continuation. Structural's `to_xml` and `to_markdown` have one template
 each and name none (`to_xml`'s info names its policy id), and `to_json`
 writes its wrapper in code. Continuation and structural are drawn by the

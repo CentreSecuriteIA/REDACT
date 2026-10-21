@@ -19,7 +19,7 @@ _FAMILY_TAGS = {
     "encoding": ["encode", "sensitive_words", "tokenbreak", "ascii_art"],
     "container": ["structural", "neutral_container"],
     "role_framing": ["persona", "framing", "cognitive", "impersonation",
-                     "benign_role"],
+                     "benign_role", "persona_template"],
     "request_shape": ["indirect", "distractor_prefix", "distractor_suffix",
                       "continuation", "asking", "temporal", "smalltalk_prefix",
                       "smalltalk_suffix"],
@@ -203,7 +203,8 @@ class TestTheCheck:
     def test_authorship_and_role_framing_are_ruled_distinct(self):
         """The owner's ruling: who writes the message (the writer axis) is not
         a role or scenario the message sets up, so the axis varies beside the
-        persona, framing, cognitive and impersonation families."""
+        persona, framing, cognitive, persona_template and impersonation
+        families."""
         assert dimensions.relation("authorship", "role_framing") is None
         assert A.varied(A.resolve("inputs"))["writer"] == "authorship"
         kinds = augmentations_of({})
