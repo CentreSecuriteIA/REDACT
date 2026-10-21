@@ -340,7 +340,10 @@ _BUDGETS = [
 # to_html_entities as heavy, complexity 3 (it was light, 2) moved it last: the
 # budget it takes and the members it leaves out of fsh and dap units change the
 # picks after it (25 of the 240 dealt units, 3 of the 200 undealt draws).
-_PINNED_DRAWS = "abba4f371f147c5ef4d1c15e4d1b284b5c8164842ad3a30f640db92059cdbe1b"
+# Scoring the two selected_many variants 3 (they were 4: the scale stays 0 to
+# 3) moved it once more: they take a point less of a unit's budget (53 of the
+# 240 dealt units, 3 of the 200 undealt draws).
+_PINNED_DRAWS = "8a5cdf703b04e6a5633c4d9697146972991ba3842b60c4a2101c64a0ddc33d62"
 
 
 def test_draws_without_the_request_obfuscation_are_those_made_before_it_was_counted():

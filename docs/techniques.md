@@ -6,7 +6,7 @@ families; the first layer, `rewrite`, holds none yet
 `configs/jailbreak/combination_spec.json` gives each technique (the
 language ones through its `generators`, from
 [the language table](#the-language-table)) its families, a complexity from
-0 to 4 (4 only for the two `selected_many` variants), whether it calls a model (`requires_llm`) or
+0 to 3, whether it calls a model (`requires_llm`) or
 needs the benign data (`requires_benign`), and the kinds that may draw it
 (`kinds`, [below](#the-natural-pool)). This page lists them by name, for
 the `allow` and `deny` lists of the
@@ -403,8 +403,8 @@ percentile, 2,800 were every pair as long as the longest), well inside the
 generation model's 10,000-token context with the request and the prompt of
 a later model step that reads the text. They refuse `typos` (a model
 rewriting so long a prompt would not return it whole) and otherwise share
-the rules of `fsh` and `dap`; their complexity is their siblings' plus one,
-3 for `random_many` and 4 for `selected_many`.
+the rules of `fsh` and `dap`; their complexity is 3, the top of the scale:
+one above their `random` siblings and level with their `selected` ones.
 
 **Obfuscation.**
 

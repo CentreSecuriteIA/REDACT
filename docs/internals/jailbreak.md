@@ -318,7 +318,7 @@ order.
   `sensitive_words`): a member of complexity 3 fits only a unit whose
   earlier picks leave 3 points, and `fsh` and `dap` refuse the heavy
   `encode` members, so over 3,000 units of the default attacks each heavy
-  `encode` member is drawn 5 to 8 times against 32 to 34 for one of
+  `encode` member is drawn 5 to 7 times against 33 to 34 for one of
   complexity 2. That skew is intended. A direct `sample_combination` call without a dealer picks both
   uniformly, as the registry fixture's seeds pin. A fresh plan with the
   same seed draws differently from one made before member dealing; a kept
@@ -378,10 +378,10 @@ budget.
   without `"group"` or below `max_complexity` or any round's
   `max_complexity`, and a round naming either key.
 - Measured with `simulate.compare_budgets` over 3,000 units of the default
-  attacks, it keeps the mean at `max_complexity` (5.78 to 6.00), lets some units reach the ceiling (514 of
+  attacks, it keeps the mean at `max_complexity` (5.77 to 6.00), lets some units reach the ceiling (533 of
   3,000 above 6, none above 9) and evens out the cheap members of `encode`
   and `sensitive_words`, and draws the heavy members a little more often
-  (each heavy `encode` member 6 to 8 times, against 5 to 8); the extra
+  (each heavy `encode` member 6 to 8 times, against 5 to 7); the extra
   allowance goes to the obfuscations. The table is in
   [configuration.md](../configuration.md#the-group-budget).
 

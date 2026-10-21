@@ -371,7 +371,7 @@ Adversarial only:
 | Key | Type | Default | Meaning |
 |---|---|---|---|
 | `rounds` | `null`, `"escalation"` or a list | `null` | The sampler settings per round; see [rounds](#rounds) |
-| `max_complexity` | int >= 0 | `6` | Budget mode: the most total complexity (each technique scores 0 to 4) |
+| `max_complexity` | int >= 0 | `6` | Budget mode: the most total complexity (each technique scores 0 to 3) |
 | `max_obfuscations` | int >= 0 | `2` | Budget mode: the most obfuscation families, the request obfuscation included |
 | `layer_rates` | `{layer: 0..1}` | `{}`, the spec's rates | Target share of units that take a `rewrite` (when `layers.deny` leaves it out; the spec's rate is 0), `hacking`, `manipulation` or `requests` technique, or, with `allow_request_obfuscation`, a `request_obfuscation` |
 | `allow_request_obfuscation` | bool | `true` (`false` in the eval type) | Allow one more technique after the request technique, at the `request_obfuscation` rate: a light `encode` technique (the light `to_sensitive_words_encode_*` among them), or a translation when the pool has one. It is drawn before the other obfuscations, from what the earlier picks leave, and takes one of the `max_obfuscations` slots and its complexity from them; with `max_obfuscations` 0 there is none |
@@ -542,7 +542,7 @@ obfuscation layer's.
 
 A budget round lets each unit spend up to `max_complexity`. A unit that
 draws cheap techniques leaves the rest unspent, so a group's units spend
-less than `max_complexity` on average (5.78 of 6 in the table below). With
+less than `max_complexity` on average (5.77 of 6 in the table below). With
 `"budget": "group"` the units of a `(category, entry_type, iteration)` group
 share it: a unit may spend `max_complexity` plus what the group's earlier
 units left unspent of it, up to `max_unit_complexity` (`max_complexity + 3`
@@ -574,29 +574,29 @@ three groups (seed 42, `max_complexity` 6, ceiling 9;
 
 | | `"unit"` | `"group"` |
 |---|---|---|
-| Mean complexity per unit | 5.78 | 6.00 |
+| Mean complexity per unit | 5.77 | 6.00 |
 | Highest complexity of one unit | 6 | 9 |
-| Units above 6 | 0 | 514 |
-| Obfuscations per unit | 1.69 | 1.74 |
-| Draws of complexity 3 or more | 1,543 | 1,626 |
-| `encode`: the top member's share of the family's draws, as a multiple of an even share | 8.07 | 6.71 |
-| `sensitive_words`: the same | 3.57 | 2.62 |
-| Of complexity 3 or more, drawn: `encode` (of 10) | all 10, 5 to 8 times each | all 10, 6 to 8 times each |
-| Of complexity 3 or more, drawn: `sensitive_words` (of 4) | all 4, 22 times each | all 4, 33 or 34 times each |
+| Units above 6 | 0 | 533 |
+| Obfuscations per unit | 1.71 | 1.77 |
+| Draws of complexity 3 or more | 1,555 | 1,647 |
+| `encode`: the top member's share of the family's draws, as a multiple of an even share | 8.19 | 6.57 |
+| `sensitive_words`: the same | 3.45 | 2.47 |
+| Of complexity 3 or more, drawn: `encode` (of 10) | all 10, 5 to 7 times each | all 10, 6 to 8 times each |
+| Of complexity 3 or more, drawn: `sensitive_words` (of 4) | all 4, 22 to 24 times each | all 4, 38 times each |
 
 The group budget evens out the cheap members of `encode` and
 `sensitive_words`, which the unit budget favours because a cheap one fits
 more units (the top member of each is the complexity-1 leetspeak), and
 spends the mean it is given. The heavy members stay rarer than those of
-complexity 2 under both budgets (each heavy `encode` member 5 to 8 times
-under the unit budget, against 32 to 34 for one of complexity 2): one of
+complexity 2 under both budgets (each heavy `encode` member 5 to 7 times
+under the unit budget, against 33 to 34 for one of complexity 2): one of
 complexity 3 fits only a unit whose earlier picks leave 3 points, and `fsh`
 and `dap` refuse the heavy `encode` members (not the `sensitive_words`
 ones, which are drawn more). That skew toward the cheaper members is
 intended. The extra allowance goes to the obfuscations, the request
-obfuscation's included (2.53 complexity per unit against 2.76; the other
+obfuscation's included (2.58 complexity per unit against 2.81; the other
 layers spend the same). The draws of complexity 3 or more include 165 of the
-two `selected_many` variants, which score 4, under both budgets.
+two `selected_many` variants under both budgets.
 
 ### Examples
 
@@ -691,14 +691,14 @@ groups (seed 42, spec 1.2): 50.0% of the units take one; of these, a third
 each (33.4% a light `to_sensitive_words_encode_*`, 33.3% a light `encode`
 technique, 33.3% a translation, which is 16.6% of the units), since the
 step's families are dealt among themselves, counted apart from the
-obfuscation layer's (the next note). The obfuscations per unit go from 1.75
-to 1.69 (the step holds a slot rather than adding one, and the complexity it
+obfuscation layer's (the next note). The obfuscations per unit go from 1.79
+to 1.71 (the step holds a slot rather than adding one, and the complexity it
 spends or the rules it brings sometimes leave the unit's other slot empty),
 the units holding a
-translation from 22.5% to 34.3%, the light encodings per unit from 0.27 to
+translation from 22.6% to 33.9%, the light encodings per unit from 0.28 to
 0.48, and the model-calling techniques per unit, translation aside, from
-1.01 to 1.00 (the step takes slots from the other obfuscation families
-alike, each from 0.17 to 0.11 picks per unit). The extra model cost is
+1.02 to 1.01 (the step takes slots from the other obfuscation families
+alike, each from 0.17 to 0.12 picks per unit). The extra model cost is
 mostly the translations the step adds: each runs on the translation model,
 a machine-translation pass per piece with its checks, back-translations and
 the generation model's judge, now over the request's wording as well as the
@@ -729,9 +729,9 @@ request obfuscation no longer starves the layer's `encode` and
 `sensitive_words`, so the layer deals them as often as its other families;
 the request obfuscation deals a translation a third of the time (it was
 4%), and `family_weights` apply to its families as to the layer's. The
-units holding a translation go from 26.4% to 34.3%, and the plan's
-translation calls, from the spec's, from 1,584–9,504 to 2,060–12,360 per
-3,000 units (all model calls from 7,086–21,858 to 7,393–24,827). This lands
+units holding a translation go from 26.4% to 33.9%, and the plan's
+translation calls, from the spec's, from 1,584–9,504 to 2,034–12,204 per
+3,000 units (all model calls from 7,086–21,858 to 7,407–24,781). This lands
 with the re-plan the request obfuscation already asks (the note above): a
 kept plan replays unchanged. A kind with `allow_request_obfuscation` false
 and the `eval` type, which draws by count, draw as before.

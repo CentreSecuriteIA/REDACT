@@ -214,7 +214,7 @@ contract.
    `__init__.py`.
 3. **Add its spec entry** under `techniques` in
    `configs/jailbreak/combination_spec.json`: `families` (the first sets the
-   layer and the order), `complexity` (0 to 4), `requires_llm`,
+   layer and the order), `complexity` (0 to 3), `requires_llm`,
    `requires_benign`, `encode_weight` for an `encode` technique,
    `needs_latin: true` for one that changes only Latin text (it is then
    kept from a translation into another script; `TestLatinOnly` in
