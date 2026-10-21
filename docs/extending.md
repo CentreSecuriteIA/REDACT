@@ -177,9 +177,12 @@ contract.
      `rng`) and yields `LLMRequest(gen_model, messages)`. Load its prompt from
      `prompts/jailbreak/<name>/` with `prompt_dir`.
    - A template-driven transform keeps its variants in
-     `configs/jailbreak/<layer>/<module>_templates.json`, reads it with
-     `directives.load_templates`, and applies one with
-     `directives.apply_template_directive(..., rng=rng)`.
+     `configs/jailbreak/<layer>/<module>_templates.json`, one list per
+     directive, reads them with `directives.read_pools`, names the pool it
+     draws from with `@uses_pool("<layer>/<module>_templates.json",
+     "<directive>")` (with `slots=` when it fills more than `{prompt}`), and applies
+     one with `directives.apply_template_directive(..., rng=rng)`
+     ([Add variants to a template pool](#add-variants-to-a-template-pool)).
    - Return `(text, info)`, `info` being `""` or `key=value;...`.
 2. **Register it**: return it from its module's getter
    (`get_encoding_functions`, `get_framing_functions`, ...), which its
@@ -327,6 +330,49 @@ The `translation` and `answer_language` techniques are generated from
    `tests/fixtures/natural_pool.json`), and update the counts in the docs.
    The eval type's translation allow list names its languages, so a new
    translation is not drawn there.
+
+### Add variants to a template pool
+
+A pure template technique draws its text from a *variant pool*: one
+directive's list in its template file under `configs/jailbreak/`, read by
+`directives.read_pools` whatever the file's shape. Most files are
+`{directive: [{"name", "template"}, ...]}`; continuation's variants are
+`{"name", "prefix", "suffix"}` (the prompt goes between them, unformatted);
+structural's `to_xml` and `to_markdown` have one template each, read as a
+pool of one variant named after the entry. `personas.json` and
+`cognitive_techniques.json` are definitions, not pools.
+
+1. **Append a variant** to the directive's list: a `name` of its own in
+   the list (it is written in the info, `variant=<name>`), and a
+   `template` that holds `{prompt}` once and no other slot than those its
+   technique fills (`{language}` for the answer languages, `{policy_id}`
+   for `to_xml`); a literal brace is written `{{` or `}}`. A seed draws by
+   the pool's length and order, so a new variant changes what some seeds
+   draw (step 4).
+2. **Weights are optional.** A variant may carry `"weight"`, a number of at
+   least 0. A pool where no variant has one is drawn with `rng.choice`,
+   each variant as likely; once one has a weight, the pool is drawn with
+   `rng.choices` by weight (a variant without one weighs 1), so every
+   seed may draw another variant. `0` turns a variant off; a pool keeps at
+   least one above 0, and a pool of one variant makes no draw. Never weight
+   the pool of an eval-pool technique (`tests/fixtures/eval_pool.json`):
+   `tests/jailbreak/test_directives.py` fails, since a weight changes the
+   eval text.
+3. **Import checks it.** `pool.py` checks every pool a technique names
+   (`check_pools`) when `redact.jailbreak` is imported, and raises naming
+   the file, the directive and the variant: an empty or repeated name, a
+   template without `{prompt}` or with a slot its technique does not fill
+   or an unpaired brace, a prefix without its suffix, an unknown key (a
+   misspelt `weight`), a weight that is not a number of at least 0, or
+   every variant at 0.
+4. **Regenerate the digests**: the pool's techniques write other text for
+   some seeds, so `tests/jailbreak/test_template_draws.py` fails until
+   `PYTHONPATH=src python -m tests.jailbreak.test_template_draws` is run.
+   A pool an eval-pool technique draws changes the eval text: that waits
+   for the owner's eval review.
+
+A new directive is a new list in the file and a technique that names it
+with `@uses_pool` ([above](#add-a-jailbreak-technique)).
 
 ## Add a stage
 

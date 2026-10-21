@@ -37,7 +37,7 @@ the technique names are in [techniques.md](../techniques.md).
 |---|---|
 | `technique.py` | The technique contract, `load_spec` and `read_spec` (the spec, its generators expanded), `data_rows`, `tag`, `DISCARDED`, `KINDS`, `DEFAULT_KINDS`, `family_kinds`, `FIRST_VERSION`, `version_key` |
 | `hacking/`, `manipulation/`, `obfuscation/`, `requests/` | The techniques, one module per family (`distractor.py` holds both distractor families), each with a getter; `get_all_hacking_functions`, `get_all_manipulation_functions`, `get_all_obfuscation_functions`, `get_all_request_functions` per subpackage. `manipulation/benign.py` makes the benign data: one unit per subcategory of the benign taxonomy and answer type, keyed `(main_category, sub_category, answer_type)` |
-| `pool.py` | `all_techniques`, `technique_pool(resolved)`, `kind_of(resolved)`, `languages`, `registry`, `uses_translation` |
+| `pool.py` | `all_techniques`, `technique_pool(resolved)`, `kind_of(resolved)`, `languages`, `registry`, `uses_translation`; at import, the spec against the registries, the families' dimensions and the techniques' variant pools |
 | `augmentation.py` | `KINDS`, `defaults(config_dir)`, `resolve(section, kind, base=None, config_dir=None)`, `rounds_of(resolved)`, `apply_flat_keywords`, `FLAT_KEYWORDS` |
 | `rules.py` | `compatible(selected, pool, remaining_complexity)`, `request_obfuscation_candidates` |
 | `sampling.py` | `sample_combination`, `sample_exact_combination`, `_pick_by_family` |
@@ -45,7 +45,7 @@ the technique names are in [techniques.md](../techniques.md).
 | `chain.py` | `run_chain`, `combine_techniques`, `in_layer_order`, `apply_combination` |
 | `units.py` | `pending_units`, `is_pending`, `unit_gen`, `row_of`, `error_row_of` |
 | `pipeline.py` | `run_augmentation`, the stage core; `_library_change`, the kept plan's pool against what the library added and retired since |
-| `directives.py` | `load_templates`, `apply_template_directive`: template variants of the pure techniques |
+| `directives.py` | The variant pools of the pure techniques: `read_pools` (a template file's pools by directive, whatever its shape), `PoolRef` and `uses_pool` (the pool a technique draws from, set as its `variant_pool`), `check_pools` (called by `pool.py` at import), `enabled`, `draw_variant`, `apply_template_directive`; `load_templates` (a file as written) |
 
 ## Techniques
 
@@ -89,6 +89,22 @@ def to_y(prompt: str, **kwargs) -> TechniqueGen:
   whole numbers and compare as such (`version_key`: `"1.10"` comes after
   `"1.9"`); a `since`, a `deprecated` or a spec `version` that is not one
   raises at import.
+- A pure template technique draws its text from a variant pool, one
+  directive's variants in its template file, and names it with
+  `@uses_pool(file, directive, slots)` (its `variant_pool`; the answer
+  languages share one pool, set by their factory). `read_pools` reads a
+  file of any of the three shapes (`{name, template}` lists,
+  continuation's `{name, prefix, suffix}`, structural's one template per
+  technique) into lists of variants; `pool.py` checks every named pool at
+  import (`check_pools`: unique non-empty names, `{prompt}` in each template
+  and only the technique's slots, a `weight` a number of at least 0, one
+  variant above 0), naming the file, directive and variant. `draw_variant`
+  draws an unweighted pool with `rng.choice`, so a seed draws what it drew
+  before pools had weights (`tests/fixtures/template_draws.json` pins every
+  template technique's texts and draws by digest), and a weighted one with
+  `rng.choices`; a variant of weight 0 is never drawn, and a pool of one
+  makes no draw. `to_json`'s wrapper is still written in
+  `obfuscation/structural.py`, until the owner's wrapper step.
 
 `run_chain(techniques, text, ...)` runs one input through its techniques in
 the order given. A transform runs inline; a generator's requests are yielded

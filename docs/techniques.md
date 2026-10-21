@@ -422,6 +422,14 @@ language is one row. `to_impersonate_good_person` has eight
 profession variants (nurse, doctor, security researcher, teacher, ...) and
 `to_use_past_tense` four historical framings.
 
+The variants of a directive (a framing, request or structural template)
+form its variant pool. Each is as likely to be drawn unless a variant of
+the pool gives a `weight`; `0` turns a variant off. No packaged variant has
+a weight, and an eval-pool technique's may not, since a weight changes the
+eval text ([extending.md](extending.md#add-variants-to-a-template-pool)).
+Importing `redact.jailbreak` checks every pool and raises naming the file,
+directive and variant of a fault.
+
 ## Reference list coverage
 
 The library is benchmarked against a reference set of 73 instruction

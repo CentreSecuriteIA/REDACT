@@ -13,6 +13,7 @@ from collections.abc import Callable
 
 from redact.dimensions import check_tags
 
+from .directives import check_pools
 from .hacking import get_all_hacking_functions
 from .manipulation import get_all_manipulation_functions
 from .obfuscation import get_all_obfuscation_functions
@@ -64,6 +65,14 @@ def _check_dimensions() -> None:
     families = {name: family.get("dimension")
                 for name, family in load_spec()["families"].items()}
     check_tags("combination_spec.json: families", families, "augmentation")
+
+
+def _check_variant_pools() -> None:
+    """Raise unless every variant pool a technique draws from (its
+    ``variant_pool``) is one it can draw: unique names, its slots only, a
+    variant on (:func:`redact.jailbreak.directives.check_pools`)."""
+    check_pools(fn.variant_pool for fn in all_techniques()
+                if hasattr(fn, "variant_pool"))
 
 
 def kind_of(resolved: dict) -> str:
@@ -146,3 +155,4 @@ def uses_translation(pool: list[Callable]) -> bool:
 
 _check_against_spec(all_techniques())
 _check_dimensions()
+_check_variant_pools()
