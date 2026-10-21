@@ -90,6 +90,13 @@ def to_y(prompt: str, **kwargs) -> TechniqueGen:
   whole numbers and compare as such (`version_key`: `"1.10"` comes after
   `"1.9"`); a `since`, a `deprecated` or a spec `version` that is not one
   raises at import.
+- A technique may carry an **applicability**: `@applicable_when(predicate)`
+  sets its `applicable`, `predicate(text, entry_type) -> bool`, and
+  `applies(fn, text, entry_type)` reads it, true for a technique without
+  one. The plan draws a technique only for an input it is true for
+  ([balanced dealing](#balanced-dealing)). The predicate calls the helper
+  the technique itself calls, so the two cannot drift apart. The registry
+  fixture records `has_applicable`, a bool, not the function.
 - A pure template technique draws its text from a variant pool, one
   directive's variants in its template file, and names it with
   `@uses_pool(file, directive, slots)` (its `variant_pool`; the answer
@@ -248,6 +255,17 @@ the group from one dealer (`dataset/dealing.py`, shared with the inputs' and
 outputs' generation axes), so every group gets its share whatever the input
 order.
 
+- **Applicability.** A unit draws from the techniques of the pool that
+  apply to its input (`applies`, on the input's text and entry type), in
+  pool order; with every technique applying that is the whole pool, so
+  the draws are those of a pool without an applicability. The predicate
+  sees the input, not what earlier steps of the combination wrote. A unit
+  no technique of a layer applies to takes no pick there; the dealer counts
+  what each unit drew, so the group's next unit that can take the layer
+  does, and a technique left out for some inputs is dealt to the others.
+  A unit no technique applies to gets the empty combination, the identity.
+  Both modes and both kinds draw this way; a kept plan replays its names
+  without asking any predicate.
 - **Layers.** A layer joins a unit when the group's picks of that layer so
   far are below `floor(rate x position + offset)`, where `position` counts
   the group's units so far and `offset` is a number in [0, 1) seeded per

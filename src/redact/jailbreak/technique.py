@@ -8,6 +8,9 @@ rejection's starts with :data:`DISCARDED`. A technique that makes a random
 choice draws it from the ``rng`` keyword (a ``random.Random``), else from the
 global ``random``.
 
+A technique may carry an applicability (:func:`applicable_when`): the plan
+draws it only for an input it is true for (:func:`applies`).
+
 A family whose techniques come one per row of a data file (the languages of
 ``languages.json``) is a ``generators`` entry of the spec, which
 :func:`load_spec` expands into technique entries, so every reader sees one
@@ -57,6 +60,31 @@ TechniqueGen = Generator[LLMRequest, str, TechniqueResult]
 def is_discarded(info: str) -> bool:
     """Whether ``info`` is a rejected technique's."""
     return info.startswith(DISCARDED)
+
+
+def applicable_when(predicate: Callable[[str, str], bool]) -> Callable:
+    """Give a technique an applicability: ``predicate(text, entry_type)``,
+    true when the technique may be drawn for an input of that text and
+    entry type.
+
+    The plan leaves the technique out of the pool of an input it is false
+    for (:func:`applies`), so it draws no step that would change nothing or
+    does not fit the input. Write ``predicate`` by calling the helper the
+    technique itself calls, so the two cannot drift apart. The technique is
+    returned as it was, with ``applicable`` set.
+    """
+    def decorate(fn: Callable) -> Callable:
+        fn.applicable = predicate
+        return fn
+    return decorate
+
+
+def applies(fn: Callable, text: str, entry_type: str) -> bool:
+    """Whether ``fn`` may be drawn for an input of ``text`` and
+    ``entry_type``: its ``applicable`` predicate's answer, true for a
+    technique without one."""
+    predicate = getattr(fn, "applicable", None)
+    return predicate is None or bool(predicate(text, entry_type))
 
 
 @lru_cache(maxsize=1)

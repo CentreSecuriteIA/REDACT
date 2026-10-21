@@ -184,7 +184,18 @@ contract.
      one with `directives.apply_template_directive(..., rng=rng)`
      ([Add variants to a template pool](#add-variants-to-a-template-pool)).
    - Return `(text, info)`, `info` being `""` or `key=value;...`.
-2. **Register it**: return it from its module's getter
+   - **An applicability**, when the technique would change nothing for
+     some inputs or does not fit them: decorate it with
+     `@applicable_when(predicate)` from `jailbreak/technique.py`, where
+     `predicate(text, entry_type)` is true for an input the plan may draw
+     it for. Write the predicate by calling the helper the technique itself
+     calls, never by restating its rule, so the two cannot drift apart, and
+     test that it is true exactly when the technique changes the text (or,
+     for an entry-type rule, for exactly the entry types meant). The plan
+     filters the pool per input before the draw; the predicate sees the
+     input, not what earlier steps of a combination wrote, and a kept plan
+     replays without asking it. A technique of a default pool that gains
+     one changes what a fresh plan draws: say so in a release note.: return it from its module's getter
    (`get_encoding_functions`, `get_framing_functions`, ...), which its
    subpackage's `get_all_hacking_functions`, `get_all_manipulation_functions`,
    `get_all_obfuscation_functions` or `get_all_request_functions` collects. A
@@ -261,7 +272,8 @@ contract.
 5. **Test it.** Add tests beside the module's, under
    `tests/jailbreak/<layer>/`. `tests/jailbreak/test_registry.py` compares
    the registry with `tests/fixtures/technique_registry.json` (names, tags,
-   signatures, and the combinations five seeds draw), so it fails on any new
+   whether each has an applicability, signatures, and the combinations five
+   seeds draw), so it fails on any new
    technique. Once the change is meant, regenerate the fixture from the
    repository root with `PYTHONPATH=src python -m tests.jailbreak.test_registry`.
    A technique whose text comes from a template file (framing, structural,

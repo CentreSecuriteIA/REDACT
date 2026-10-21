@@ -24,7 +24,7 @@ from redact.dataset.planfile import coverage_path, plan_record, write_plan
 
 from .chain import combine_techniques
 from .sampling import sample_combination
-from .technique import FIRST_VERSION, load_spec
+from .technique import FIRST_VERSION, applies, load_spec
 
 logger = logging.getLogger(__name__)
 
@@ -66,8 +66,10 @@ def assign_combination(
 ) -> list[str]:
     """The names of the combination one unit is assigned, in applied order.
 
-    The draw is seeded by ``(seed, sample_id, iteration)``, so it does not
-    depend on the order or the chunking of the inputs. It is drawn again, up
+    ``pool`` is what the unit may draw from: :func:`plan_run` passes the
+    techniques that apply to the unit's input. The draw is seeded by
+    ``(seed, sample_id, iteration)``, so it does not depend on the order or
+    the chunking of the inputs. It is drawn again, up
     to ``max_resamples`` times, while it equals a combination in ``used`` (the
     sample's earlier iterations); the last draw is kept if none differs. The
     first draw is dealt from ``dealer``; a resample draws uniformly, so it can
@@ -130,6 +132,15 @@ def plan_run(
     ``sample_kwargs`` with ``settings_per_iteration[iteration]`` merged over
     them, key by key.
 
+    Each unit draws from the techniques of ``pool`` that apply to its input
+    (:func:`~redact.jailbreak.technique.applies`, read off the input's
+    ``text_col`` and ``entry_type``), in pool order: the whole pool when
+    every technique applies, so the draw is the one the pool gives. A unit
+    no technique of a layer applies to takes no pick there, and the dealer,
+    which counts what each unit drew, gives the layer to the group's next
+    unit that can take it; a unit no technique applies to gets the empty
+    combination.
+
     The units of one ``(category, entry_type, iteration)`` group are dealt in
     ``sample_id`` order from a shared
     :class:`~redact.dataset.dealing.Dealer`, so each layer appears at its rate
@@ -150,10 +161,12 @@ def plan_run(
     # order so the plan does not depend on the order the inputs arrived in; a
     # row keeps its own dedup history across its iterations.
     subgroups: dict[tuple[str, str], list[tuple[str, int]]] = defaultdict(list)
+    texts: list[str] = []
     for idx, (_, row) in enumerate(inputs.iterrows()):
         sid = row_id(row, text_col, id_col)
         key = (str(row.get("category", "")), str(row.get("entry_type", "")))
         subgroups[key].append((sid, idx))
+        texts.append(str(row.get(text_col, "")))
     for members in subgroups.values():
         members.sort()
     used_by_row: dict[int, list[tuple]] = defaultdict(list)
@@ -173,8 +186,10 @@ def plan_run(
                 dealer = Dealer(family_weights, key=(seed, category, entry_type, it))
                 for sid, idx in subgroups[key]:
                     dealer.position += 1
+                    candidates = [fn for fn in pool
+                                  if applies(fn, texts[idx], entry_type)]
                     names = assign_combination(
-                        sid, pool, seed=seed, iteration=it,
+                        sid, candidates, seed=seed, iteration=it,
                         used=used_by_row[idx], dealer=dealer, **settings,
                     )
                     used_by_row[idx].append(tuple(names))

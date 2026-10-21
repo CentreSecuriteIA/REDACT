@@ -1,7 +1,8 @@
 """The registered techniques, against a snapshot of them.
 
 ``fixtures/technique_registry.json`` holds each layer's techniques in registry
-order, with their spec tags, whether each is a generator and its parameters,
+order, with their spec tags, whether each has an applicability
+(``has_applicable``), whether each is a generator and its parameters,
 and the combinations ``sample_combination`` draws from the whole pool for five
 seeds. A change that renames, reorders, retags or re-signs a technique fails
 here. A change meant to alter them regenerates the fixture, from the
@@ -57,6 +58,9 @@ def snapshot() -> dict:
             {
                 "name": fn.__name__,
                 **{tag: getattr(fn, tag) for tag in _TAGS},
+                # Whether it has an applicability; the predicate itself is
+                # code, which JSON does not hold.
+                "has_applicable": hasattr(fn, "applicable"),
                 "generator": inspect.isgeneratorfunction(fn),
                 "signature": _signature(fn),
             }
