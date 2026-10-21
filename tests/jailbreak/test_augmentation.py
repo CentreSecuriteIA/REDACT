@@ -13,9 +13,13 @@ from redact.jailbreak.augmentation import (
 )
 from redact.jailbreak.pool import technique_pool
 
+# The packaged adversarial kind's budget round, its request obfuscation on.
 _BUDGET = {"max_complexity": 6, "max_obfuscations": 2, "include_hacking": True,
            "include_manipulation": True, "include_obfuscation": True,
-           "include_requests": True}
+           "include_requests": True, "allow_request_obfuscation": True}
+# The same round with it off, as the eval type has it: the key left out.
+_BUDGET_OFF = {key: value for key, value in _BUDGET.items()
+               if key != "allow_request_obfuscation"}
 
 
 def test_both_kinds_are_the_default_when_the_section_is_none():
@@ -342,10 +346,32 @@ def test_a_denied_layer_is_left_out_of_every_round():
 
 
 def test_escalation_merges_the_built_in_rounds_over_the_budget():
-    kind = resolve({"adversarial": {"rounds": "escalation",
-                                    "allow_request_obfuscation": True}}, "adversarial")
-    budget = {**_BUDGET, "allow_request_obfuscation": True}
-    assert rounds_of(kind) == [{**budget, **r} for r in default_escalation_schedule()]
+    kind = resolve({"adversarial": {"rounds": "escalation"}}, "adversarial")
+    assert rounds_of(kind) == [{**_BUDGET, **r} for r in default_escalation_schedule()]
+
+
+def test_the_packaged_attacks_allow_the_request_obfuscation():
+    assert defaults()["adversarial"]["allow_request_obfuscation"] is True
+
+
+def test_the_request_obfuscation_switched_off_leaves_the_rounds_without_it():
+    """Off, a round carries no ``allow_request_obfuscation`` key at all: the
+    rounds a plan made before the packaged kind turned it on."""
+    kind = resolve({"adversarial": {"allow_request_obfuscation": False}},
+                   "adversarial")
+    assert rounds_of(kind) == [_BUDGET_OFF]
+
+
+def test_the_eval_type_keeps_the_request_obfuscation_off():
+    """``eval.json`` says false, so the packaged kind's true does not reach
+    it: its two count rounds carry no request obfuscation key, as before."""
+    from redact.recipe import load_dataset_type
+
+    base = load_dataset_type("eval")["augmentations"]
+    kind = resolve(None, "adversarial", base=base)
+    assert kind["allow_request_obfuscation"] is False
+    assert rounds_of(kind) == [{**_BUDGET_OFF, "exact_techniques": 1},
+                               {**_BUDGET_OFF, "exact_techniques": 2}]
 
 
 def test_a_rounds_layer_rates_reach_the_sampler_as_its_sampling_probs():

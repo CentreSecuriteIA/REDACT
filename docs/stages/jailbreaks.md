@@ -9,7 +9,7 @@ Augment the accepted inputs with technique combinations, in two kinds:
 
 | Kind | Writes | Default |
 |---|---|---|
-| `adversarial` | `Datasets/jailbreaks.csv`: jailbreak attacks | one round per input, by budget, from every technique but `casual_writing` |
+| `adversarial` | `Datasets/jailbreaks.csv`: jailbreak attacks | one round per input, by budget, from every technique but `casual_writing`; half the units take a request obfuscation, a light encoding or a translation after the request |
 | `natural` | `Datasets/variations.csv`: natural variations | one technique per input, from the natural allow lists, which the spec's `kinds` narrow to 46 techniques (65 with `"translation": true`, which adds the nineteen translations) ([techniques.md](../techniques.md#the-natural-pool)) |
 
 These are the packaged defaults, which a `training` run takes: both kinds
@@ -164,7 +164,8 @@ units its ledger does not record. Since the plan deals each family's
 techniques evenly, follows the persona and cognitive vs impersonation rule
 ([techniques.md](../techniques.md#compatibility-rules)), and counts
 the request obfuscation (when `allow_request_obfuscation` is on, as in the
-escalation's rounds 3 and 4) against `max_obfuscations`, a fresh plan with
+packaged attacks and the escalation's rounds 3 and 4) against
+`max_obfuscations`, a fresh plan with
 the same seed draws differently from one made before; a kept plan replays
 unchanged. The
 natural kind's pool is now what the spec's `kinds` mark natural, so a
@@ -205,6 +206,22 @@ added techniques, and runs the retired ones it names. Run the kind with
 pool raises as before. A section that newly names a family all of whose
 techniques came after the plan reads as such growth too, and warns instead
 of raising.
+
+**Release note: the request obfuscation on.** The packaged adversarial kind
+now has `allow_request_obfuscation` true, which adds the key to its
+rounds, so a kept adversarial plan made before, whose section left the key
+out, raises on resume, naming `rounds` and `resume=False`: run the adversarial kind once with
+`resume=False` (the natural kind's plan is not affected). A fresh plan
+gives half of each group's units, at the spec's `request_obfuscation` rate
+of 0.5, a light encoding or a translation after the request, in one of
+their `max_obfuscations` slots: in a 3,000-unit simulation 48% of these a
+light `to_sensitive_words_encode_*`, 48% a light `encode` technique and 4%
+a translation, about 2% of all rows, each translating the request's wording
+as well as the prompt on the `translation` model, piece by piece with its
+checks, back-translations and judge
+([configuration.md](../configuration.md#the-augmentation-section) has the
+figures and how to lower the rate). The eval type keeps it off, and its
+count rounds never read it: its draws do not change.
 
 ## Rejected and failed units
 

@@ -192,8 +192,11 @@ never eligible, for the first pick too. The request obfuscation is drawn
 from the techniques still compatible and within the remaining complexity,
 so it holds its slot and its complexity before the obfuscations fill the
 rest: a combination never has more than `max_obfuscations` obfuscations.
-With `allow_request_obfuscation` false (every packaged kind) the draws are
-those made before the request obfuscation was counted (member dealing
+The packaged attacks allow it, so half their units, at the spec's rate of
+0.5, take a request obfuscation in one of their `max_obfuscations` slots; the
+eval type sets it false, and its count rounds never read it (a test pins
+the eval type's draws). With `allow_request_obfuscation` false the draws
+are those made before the request obfuscation was counted (member dealing
 aside); a test pins them. The combined function
 names its request obfuscation in `request_obfuscation` (`None` without
 one), which `_observe` counts in the dealer.
@@ -250,8 +253,9 @@ counted across groups.
 `tests/jailbreak/simulate.py` plans N synthetic inputs through `plan_run`
 (in a temporary folder) and gives each technique's share of the units and
 its share within its family; `py -m tests.jailbreak.simulate [N]` prints
-them for the default adversarial kind. The coverage table does not hold
-these shares.
+them for the default adversarial kind, and `deal_kind(section, n,
+base=...)` plans a kind over a dataset type's section (the eval type's). The
+coverage table does not hold these shares.
 
 ## Seeds
 

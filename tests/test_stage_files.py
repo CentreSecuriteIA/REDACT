@@ -113,13 +113,17 @@ def _jailbreaks(folder, monkeypatch) -> dict:
         backend = Backend()
         monkeypatch.setattr(
             P.ModelClient, "create", lambda m: make_client(backend, m))
-        # The natural kind draws from the whole (fake) registry.
+        # The natural kind draws from the whole (fake) registry. The fixture
+        # was written with the request obfuscation off: the fake techniques
+        # hold none it could draw, and assign above picks by the number of
+        # settings, so the packaged kind's switch would move every pick.
         generate_jailbreaks(
             inputs=inputs, output_path=folder / "jailbreaks.csv",
             variations_path=folder / "variations.csv", model=GEN, seed=5,
             augmentation={
                 "adversarial": {"rounds": [{"exact_techniques": 1},
-                                           {"max_complexity": 4}]},
+                                           {"max_complexity": 4}],
+                                "allow_request_obfuscation": False},
                 "natural": {"families": {"allow": None},
                             "techniques": {"allow": ["one_step", "two_step", "broken"],
                                            "deny": []}},

@@ -455,6 +455,30 @@ def test_a_plan_made_with_translation_raises_when_resumed_without_it(
         run(translation=False)
 
 
+def test_a_plan_made_without_the_request_obfuscation_raises_under_the_packaged_kind(
+        tmp_path, monkeypatch):
+    """The packaged attacks turned it on, which adds a key to their rounds: a
+    plan kept from before is planned again with ``resume=False``."""
+    import redact.jailbreak.pipeline as JPipe
+
+    monkeypatch.setattr(JPipe, "drive_units", lambda units, **kwargs: None)
+    out = tmp_path / "jb.csv"
+
+    def run(resume=True, **adversarial):
+        # No manipulation, so no benign data to make.
+        generate_jailbreaks(
+            inputs=_inputs(), output_path=out, seed=1, verbose=False, resume=resume,
+            augmentation={"adversarial": {"layers": {"deny": ["manipulation"]},
+                                          **adversarial},
+                          "natural": None})
+
+    run(allow_request_obfuscation=False)
+    with pytest.raises(ValueError, match=r"\['rounds'\].*resume=False"):
+        run()
+    run(resume=False)
+    run()
+
+
 def test_a_resume_under_the_same_section_and_seed_is_quiet(tmp_path, caplog):
     out = tmp_path / "jb.csv"
     generate_jailbreaks(inputs=_inputs(), output_path=out, seed=1,

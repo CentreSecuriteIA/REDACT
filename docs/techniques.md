@@ -24,7 +24,8 @@ are listed [below](#retired-techniques).
 
 A combination applies its techniques in layer order: `hacking`, then
 `manipulation`, then `obfuscation`, then `requests`; the request obfuscation,
-when allowed, comes last, after the request. Within the obfuscation layer,
+when allowed (the packaged attacks allow it, for half their units; the eval
+type does not), comes last, after the request. Within the obfuscation layer,
 families apply in the order of their `within_layer_order`, numbered in tens
 so a family added later slots in between: the whole-text rewrites first
 (`translation` 10, `typos` 20, `casual_writing` 30), then the word-level

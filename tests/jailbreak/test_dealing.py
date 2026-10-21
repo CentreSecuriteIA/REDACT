@@ -234,9 +234,10 @@ def test_a_kept_plan_replays_each_row_as_it_was_recorded(tmp_path):
 
 
 # --- the request obfuscation -----------------------------------------------------
-# With allow_request_obfuscation on, the request obfuscation is dealt at its
-# rate like a layer and holds one obfuscation slot. Off (every packaged kind),
-# the draws are those the planner made before it was counted.
+# With allow_request_obfuscation on, as in the packaged attacks, the request
+# obfuscation is dealt at its rate like a layer and holds one obfuscation
+# slot. Off (the eval type, or a round that says false), the draws are those
+# the planner made before it was counted.
 
 _BUDGETS = [
     {},
@@ -286,3 +287,75 @@ def test_the_plan_deals_the_request_obfuscation_at_its_rate():
             sampling_probs={"request_obfuscation": 0.5})
     assert dealer.included["request_obfuscation"] == _GROUP
     assert dealer.targets["request_obfuscation"] == _GROUP
+
+
+def _request_obfuscations(monkeypatch, section: dict, n: int, **kwargs) -> list:
+    """Each unit's request obfuscation (``None`` without one) in a one-round
+    plan of the adversarial ``section``, read off each draw: the manifest
+    names a combination's techniques, not which of them is the request
+    obfuscation. One round, so no unit is drawn again."""
+    import redact.jailbreak.plan as JP
+
+    sample = JP.sample_combination
+    drawn = []
+
+    def recording(*args, **sample_kwargs):
+        combined = sample(*args, **sample_kwargs)
+        drawn.append(getattr(combined, "request_obfuscation", None))
+        return combined
+
+    monkeypatch.setattr(JP, "sample_combination", recording)
+    simulate.deal_kind(section, n, **kwargs)
+    return drawn
+
+
+# Units of the packaged attacks a test of the request obfuscation plans, in
+# three groups; the spec's request_obfuscation rate is 0.5.
+_ATTACKS = 600
+
+
+def test_the_packaged_attacks_deal_a_request_obfuscation_to_half_their_units(
+        monkeypatch):
+    drawn = _request_obfuscations(monkeypatch, {}, _ATTACKS, groups=3)
+    assert sum(fn is not None for fn in drawn) == _ATTACKS // 2
+
+
+def test_the_request_obfuscation_is_a_light_encoding_or_a_translation(monkeypatch):
+    """Light ``encode`` techniques, the light ``to_sensitive_words_encode_*``
+    (first family ``sensitive_words``) and the translations: all three are
+    drawn by the packaged attacks."""
+    drawn = [fn for fn in _request_obfuscations(monkeypatch, {}, _ATTACKS, groups=3)
+             if fn is not None]
+    assert {fn.families[0] for fn in drawn} == {
+        "encode", "sensitive_words", "translation"}
+    assert all(getattr(fn, "encode_weight", None) == "light"
+               or "translation" in fn.families for fn in drawn)
+
+
+# The eval type's plan of 300 inputs in three groups at its seed, 43, pinned
+# before the packaged attacks turned the request obfuscation on. The eval
+# pool and its draws are held (fixtures/eval_pool.json); they move only with
+# the owner's eval review.
+_PINNED_EVAL_DRAWS = "95083fbb5221e4b1bd39125bfa297bc06bfc51ddbdadde2ad1eb45a6d59b7afb"
+
+
+def _eval_draws(section: dict) -> list[list[str]]:
+    from redact.recipe import load_dataset_type
+
+    base = load_dataset_type("eval")["augmentations"]
+    dealt, _ = simulate.deal_kind(section, 300, groups=3, seed=43, base=base)
+    return dealt
+
+
+def test_the_eval_types_draws_are_held():
+    import hashlib
+    import json
+
+    digest = hashlib.sha256(json.dumps(_eval_draws({})).encode()).hexdigest()
+    assert digest == _PINNED_EVAL_DRAWS
+
+
+def test_a_count_round_ignores_the_request_obfuscation():
+    """The eval type's rounds draw an exact count, which never reads the
+    switch: on, they draw what they draw off."""
+    assert _eval_draws({"allow_request_obfuscation": True}) == _eval_draws({})

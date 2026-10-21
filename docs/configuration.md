@@ -67,7 +67,9 @@ translations (`to_swahili`, `to_thai`, `to_khmer`, `to_nepali`,
 `"translation": true` and `family_weights` `{"translation": 3}`; and
 `to_refusal_then_comply`. It runs two count-driven rounds, one technique
 then two (`rounds` `[{"exact_techniques": 1}, {"exact_techniques": 2}]`),
-with `allow_request_obfuscation` false.
+with `allow_request_obfuscation` false, written out since the packaged
+attacks have it true; a count round never reads it, so either way its draws
+are those made before the packaged attacks turned it on.
 
 Every eval input is explicit (`inputs.axes`: `{"directness": {"explicit": 1,
 "implicit": 0, "euphemistic": 0}}`): an implicit or euphemistic request is
@@ -386,6 +388,35 @@ A kept plan replays as it was made. The eval pool holds none of these
 encodings, so its draws do not change
 ([techniques.md](techniques.md#compatibility-rules)).
 
+**Release note: the request obfuscation on.** The packaged adversarial kind
+now sets `allow_request_obfuscation` true. A budget round deals, at the
+spec's `request_obfuscation` rate (0.5), a light encoding or a translation
+applied after the request technique, to the finished request; it takes one
+of the unit's `max_obfuscations` slots and its complexity, so a unit holds
+no more obfuscations than before. Measured with
+`tests/jailbreak/simulate.py` over 3,000 units of the default kind in three
+groups (seed 42): 50.0% of the units take one; of these, 47.9% a light
+`to_sensitive_words_encode_*`, 47.8% a light `encode` technique and 4.3% a
+translation, which is 2.2% of the units (the dealer gives the step the
+family of the three dealt least so far in the group, and translation is
+already the obfuscation family dealt most: 0.27 picks per unit, against
+0.22 or less for the others). The obfuscations per unit go from 1.77 to
+1.76, the units holding a translation from 26.7% to 26.4%, the light
+encodings per unit from 0.36 to 0.49, and the model-calling techniques per
+unit, translation aside, from 1.17 to 1.14 (the light encodings take slots
+from `typos`, `tokenbreak` and `structural`). The extra model cost is the
+translations moved after the request: each runs on the translation model,
+a machine-translation pass per piece with its checks, back-translations and
+the generation model's judge, now over the request's wording as well as the
+prompt, for about 2% of the rows; each light sensitive-word encoding makes
+its one marking call to the generation model, as it did as an obfuscation.
+The rate is a lever: `"layer_rates": {"request_obfuscation": 0.25}` in the
+adversarial kind halves it, and `"allow_request_obfuscation": false` turns it
+off. The kind's rounds gain the key, so an adversarial plan kept from
+before, whose section left the key out, raises on resume, naming `rounds`:
+run the adversarial kind once with `resume=False`. The eval type sets it false and draws by count, which never
+reads it: its pool and its draws do not change.
+
 **Release note: the natural pool.** The natural kind now draws only what
 the spec's `kinds` mark natural (46 techniques by default; `structural`,
 `continuation`, `temporal`, the high and insane typos and the dialogue and
@@ -435,7 +466,7 @@ Adversarial only:
 | `max_complexity` | int >= 0 | `6` | Budget mode: the most total complexity (each technique scores 0 to 3) |
 | `max_obfuscations` | int >= 0 | `2` | Budget mode: the most obfuscation families, the request obfuscation included |
 | `layer_rates` | `{layer: 0..1}` | `{}`, the spec's rates | Target share of units that take a `hacking`, `manipulation` or `requests` technique, or, with `allow_request_obfuscation`, a `request_obfuscation` |
-| `allow_request_obfuscation` | bool | `false` | Allow one more technique after the request technique, at the `request_obfuscation` rate: a light `encode` technique (the light `to_sensitive_words_encode_*` among them), or a translation when the pool has one. It is drawn before the other obfuscations, from what the earlier picks leave, and takes one of the `max_obfuscations` slots and its complexity from them; with `max_obfuscations` 0 there is none |
+| `allow_request_obfuscation` | bool | `true` (`false` in the eval type) | Allow one more technique after the request technique, at the `request_obfuscation` rate: a light `encode` technique (the light `to_sensitive_words_encode_*` among them), or a translation when the pool has one. It is drawn before the other obfuscations, from what the earlier picks leave, and takes one of the `max_obfuscations` slots and its complexity from them; with `max_obfuscations` 0 there is none |
 
 Natural only:
 

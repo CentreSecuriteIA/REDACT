@@ -58,10 +58,12 @@ def deal(
 
 
 def deal_kind(section: dict, n: int, *, kind: str = "adversarial",
-              groups: int = 1, seed: int = 42) -> tuple[list[list[str]], list]:
+              groups: int = 1, seed: int = 42,
+              base: dict | None = None) -> tuple[list[list[str]], list]:
     """:func:`deal` for an augmentation ``kind`` resolved from ``section``, as
-    the stage plans it; the combinations and the kind's pool."""
-    resolved = resolve({kind: section}, kind)
+    the stage plans it; the combinations and the kind's pool. ``base`` is a
+    dataset type's section under ``section`` (the eval type's, say)."""
+    resolved = resolve({kind: section}, kind, base=base)
     pool = technique_pool(resolved)
     combinations = deal(
         pool, n, groups=groups, seed=seed, rounds=rounds_of(resolved),
