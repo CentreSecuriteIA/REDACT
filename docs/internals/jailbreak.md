@@ -73,7 +73,9 @@ def to_y(prompt: str, **kwargs) -> TechniqueGen:
 - `info` is `""` or `key=value;...`. An info that starts with `DISCARDED`
   rejects the result.
 - A technique gets the keywords it declares, out of: `gen_model` (the `gen`
-  model's name), `translate_model`, `benign_data`, `prompt_dir`, `rng`. One
+  model's name), `translate_model`, `check_model` (the `check` model's
+  name, the `gen` model's when the recipe names none; translation keeps
+  its own checkers), `benign_data`, `prompt_dir`, `rng`. One
   that declares `**kwargs` gets them all. Every generator technique has the
   signature `(prompt, **kwargs)`; a test holds them to it.
 - At import, `tag(all_techniques())` sets each function's spec tags as

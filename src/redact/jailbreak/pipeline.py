@@ -43,6 +43,7 @@ def run_augmentation(
     pool: list[Callable],
     *,
     client: ModelClient,
+    check: ModelClient | None = None,
     translation_model: str | None = None,
     out_path: Path,
     manifest_path: Path | None = None,
@@ -80,7 +81,9 @@ def run_augmentation(
     sampler settings, as :func:`redact.jailbreak.augmentation.rounds_of`
     gives them (one round of the sampler's defaults when None);
     ``family_weights`` and ``layer_rates``
-    go to the dealing of :func:`plan_run`. ``label`` is the progress label, the
+    go to the dealing of :func:`plan_run`. ``check`` checks what a
+    technique's model writes (the typo check), ``client`` when None;
+    translation keeps its own checkers. ``label`` is the progress label, the
     internals-capture root, and part of the techniques' random seed and of an
     error row's id. With ``accept_noop`` False, a row whose text
     is its input's is not accepted.
@@ -116,6 +119,7 @@ def run_augmentation(
     # plan made with another pool still reconstructs.
     registry = pool_module.registry(pool_module.all_techniques())
     capture = client.compute_config.supports_internals
+    check = check or client
 
     spec_version = load_spec().get("version", "")
 
@@ -124,9 +128,9 @@ def run_augmentation(
         per_layer = Counter(getattr(fn, "layer", None) for fn in pool)
         logger.info(
             "Pool: %d techniques (%s) | Samples: %d | Rounds: %d | Model: %s | "
-            "Batch: %d", len(pool),
+            "Check: %s | Batch: %d", len(pool),
             ", ".join(f"{layer} {n}" for layer, n in per_layer.items()),
-            len(inputs), len(rounds), client.model, batch_size)
+            len(inputs), len(rounds), client.model, check.model, batch_size)
         if layer_rates or family_weights:
             logger.info("Layer rates: %s | Family weights: %s",
                         layer_rates or "the spec's", family_weights or "equal")
@@ -278,6 +282,7 @@ def run_augmentation(
             yield from pending_units(
                 plan, prompts, position, completed, registry, live,
                 gen_model=client.model, translate_model=translation_model,
+                check_model=check.model,
                 benign_data=benign_data, prompt_dir=prompt_dir,
                 capture=capture, label=label,
             )
@@ -290,7 +295,7 @@ def run_augmentation(
     ):
         drive_units(
             units, on_done=_on_done, on_error=_on_error,
-            pool_size=pool_size(batch_size, client), cap=batch_size,
+            pool_size=pool_size(batch_size, client, check), cap=batch_size,
             progress=label if verbose else None,
         )
 

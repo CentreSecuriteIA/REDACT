@@ -197,6 +197,10 @@ names of the last two, are read for this release with a
 | `manifest_path` | `jailbreaks.manifest.jsonl` beside the output | The adversarial kind's plan, with its plan file `<stem>.plan.json`, coverage table and variants table beside it |
 | `benign_path` | `Data_cache/benign/benign_samples.csv` | The benign data, with its manifest and ledger beside it |
 
+The run passes the recipe's `gen`, `check` and `translation` models as
+`model`, `check_model` and `translation_model`: the `check` model checks
+what a technique's model writes, and left out it is the `gen` model, so no
+other model loads ([the stage's models](stages/jailbreaks.md#models)).
 The flat keywords (`include_hacking`, ..., `entry_types`) are also accepted
 here, with a `DeprecationWarning`, and applied over the adversarial kind (see
 [deprecated keywords](#deprecated-flat-keywords)). A key that only the

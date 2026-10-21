@@ -365,7 +365,7 @@ def _translate_gen(
     language: dict,
     *,
     translate_model: str | None = None,
-    check_model: str | None = None,
+    translate_check_model: str | None = None,
     gen_model: str | None = None,
     num_retries: int = 4,
     prompt_dir=None,
@@ -376,28 +376,31 @@ def _translate_gen(
 
     ``translate_model`` translates, the translation role's model when None.
     A machine-translation model (:func:`is_machine_translation`) takes
-    :func:`_machine_translate_gen`'s path, judged by ``check_model``, else
-    ``gen_model`` (the stage's generation model), else the ``uncensored_gen``
-    default. A chat model translates and checks each round, ``check_model``
-    replacing it for the check, the check's verdict fed back to the next
-    round. Returns ``(translation, name)``, the language's name, or
+    :func:`_machine_translate_gen`'s path, judged by
+    ``translate_check_model``, else ``gen_model`` (the stage's generation
+    model), else the ``uncensored_gen`` default. A chat model translates and
+    checks each round, ``translate_check_model`` replacing it for the check,
+    the check's verdict fed back to the next round. Returns
+    ``(translation, name)``, the language's name, or
     ``(last_attempt, "DISCARDED; language=<name>; ...")`` on exhaustion.
 
     ``prompt_dir`` is the overlay the prompts are read through. ``**kwargs``
-    swallows engine-supplied keys (``benign_data``, ``rng``) that translation
-    does not use.
+    swallows engine-supplied keys (``benign_data``, ``rng``, and the stage's
+    ``check_model``, which checks the other techniques: translation keeps
+    its own checkers) that translation does not use.
     """
     # Resolved fresh per call (not a frozen import-time constant) so a
     # runtime register_model(..., role="translation") takes effect
     # immediately, same as every other role default in the library.
     translator = translate_model or _resolve_translate_model()
     if is_machine_translation(translator):
-        judge = check_model or gen_model or default_model_for_role("uncensored_gen")
+        judge = (translate_check_model or gen_model
+                 or default_model_for_role("uncensored_gen"))
         return (yield from _machine_translate_gen(
             prompt, language, translator=translator, judge=judge,
             num_retries=num_retries, prompt_dir=prompt_dir))
     name = language["name"]
-    chk_model = check_model or translator
+    chk_model = translate_check_model or translator
     feedback = ""
     last = prompt
     for _ in range(num_retries):

@@ -71,9 +71,9 @@ def run_chain(
     A transform runs inline. A generator's requests are yielded up, capped at
     the technique's ``max_tokens`` tag and, with ``internals_root``, tagged for
     capture under ``{internals_root}/{technique}``. Each technique gets the
-    ``kwargs`` it takes (``gen_model``, ``translate_model``, ``benign_data``,
-    ``prompt_dir``) and, with ``rng_seed``, an ``rng`` of its own:
-    ``random.Random(stable_seed(*rng_seed, technique.__name__))``.
+    ``kwargs`` it takes (``gen_model``, ``translate_model``, ``check_model``,
+    ``benign_data``, ``prompt_dir``) and, with ``rng_seed``, an ``rng`` of
+    its own: ``random.Random(stable_seed(*rng_seed, technique.__name__))``.
 
     Returns ``(text, info)``: the steps' infos joined by ``;``, a step that
     left the text unchanged as ``noop=<name>``. The first rejection stops the

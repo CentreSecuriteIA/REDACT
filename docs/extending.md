@@ -173,8 +173,8 @@ contract.
      Draw every random choice from `rng`.
    - A technique that calls a model: a generator with the signature
      `(prompt, **kwargs)`, delegating to a helper that takes the keywords it
-     needs (`gen_model`, `translate_model`, `benign_data`, `prompt_dir`,
-     `rng`) and yields `LLMRequest(gen_model, messages)`. Load its prompt from
+     needs (`gen_model`, `translate_model`, `check_model`, `benign_data`,
+     `prompt_dir`, `rng`) and yields `LLMRequest(gen_model, messages)`. Load its prompt from
      `prompts/jailbreak/<name>/` with `prompt_dir`.
    - A template-driven transform keeps its variants in
      `configs/jailbreak/<layer>/<module>_templates.json`, one list per

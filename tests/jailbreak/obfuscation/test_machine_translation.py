@@ -96,9 +96,16 @@ class TestOneRound:
         judge = "\n".join(m["content"] for m in requests[2].messages)
         assert "Good morning, friend." in judge and "Swahili" in judge
 
-    def test_check_model_names_the_judge(self):
-        requests, _ = _run("Good morning.", _Fake(), check_model="judge-fake")
+    def test_translate_check_model_names_the_judge(self):
+        requests, _ = _run("Good morning.", _Fake(),
+                           translate_check_model="judge-fake")
         assert [r.model for r in requests] == [MT, MT, "judge-fake"]
+
+    def test_the_stages_check_model_does_not_judge(self):
+        """The stage's check model checks the other techniques; the judge
+        stays the generation model, as before there was one."""
+        requests, _ = _run("Good morning.", _Fake(), check_model="check-fake")
+        assert [r.model for r in requests] == [MT, MT, GEN]
 
     def test_without_a_generation_model_the_uncensored_gen_default_judges(self):
         from redact.llms.model_config import default_model_for_role

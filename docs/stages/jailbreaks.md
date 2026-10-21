@@ -47,6 +47,7 @@ in [techniques.md](../techniques.md).
 | Recipe role | Registry role | Default | Calls |
 |---|---|---|---|
 | `gen` | `uncensored_gen` | `venice-uncensored` | Every technique that calls a model, the benign data, and the judge of a machine translation |
+| `check` | `uncensored_gen` | the `gen` model | Passed to each technique as `check_model`, to check what its model writes; left out, it is the `gen` model, so no other model loads. Translation keeps its own checkers: the chat translator itself, the `gen` model as a machine translation's judge |
 | `translation` | `translation` | `translategemma-27b` | The `translation` family; resolved, planned and loaded only when a kind's pool holds a translation technique (`"translation": true`, as in the packaged attacks and the eval type's) |
 
 A chat translator (`deepseek-v3.2`, named in the recipe) makes up to 4

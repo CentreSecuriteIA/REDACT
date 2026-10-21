@@ -123,6 +123,14 @@ class TestTranslationModel:
         assert self._models(translate_model="deepseek-v3.2") == [
             "deepseek-v3.2", "deepseek-v3.2"]
 
+    def test_the_stages_check_model_does_not_check_a_translation(self):
+        """The stage's check model checks the other techniques; the chat
+        translator still checks its own translation."""
+        assert self._models(translate_model=CHAT, check_model="check") == [
+            CHAT, CHAT]
+        assert self._models(translate_model=CHAT,
+                            translate_check_model="check") == [CHAT, "check"]
+
     def test_without_one_the_translation_default_translates_as_a_machine(self):
         from redact.jailbreak.obfuscation.translation import (
             _resolve_translate_model,

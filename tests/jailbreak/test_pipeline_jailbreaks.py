@@ -1131,6 +1131,22 @@ def test_pool_fills_a_call_with_a_later_step_and_a_new_unit(tmp_path, monkeypatc
     assert backend.batches[2] == ["step2 S1:zq0", "step1 zq4"]
 
 
+def test_a_technique_is_given_the_check_model_the_generation_model_unless_named(
+        tmp_path, monkeypatch):
+    seen = []
+
+    def checks(text, *, check_model=None, **kwargs):
+        seen.append(check_model)
+        return text + "!", ""
+
+    checks.kinds = ["adversarial", "natural"]
+    for folder, given in (("default", {}), ("named", {"check_model": "jb-check"})):
+        (tmp_path / folder).mkdir()
+        _llm_run(tmp_path / folder, monkeypatch, [("zq0", checks)], _StepBackend(),
+                 techniques=(checks,), **given)
+    assert seen == [GEN, "jb-check"]
+
+
 def test_pool_resume_after_a_failed_append_runs_only_unfinished_units(tmp_path, monkeypatch):
     plan = [(f"zq{i}", one_step) for i in range(70)]
     real_to_csv = pd.DataFrame.to_csv

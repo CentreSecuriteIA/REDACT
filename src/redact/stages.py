@@ -540,6 +540,7 @@ def generate_jailbreaks(
     sampling_probs: dict | None = None,
     model: str | None = None,
     translation_model: str | None = None,
+    check_model: str | None = None,
     auto_generate_benign: bool = True,
     batch_size: int = 256,
     iterations: int | None = None,
@@ -588,6 +589,10 @@ def generate_jailbreaks(
             role.
         translation_model: Model for the translation family. ``None`` uses the
             ``translation`` role, independently of ``model``.
+        check_model: Model that checks what a technique's model writes (the
+            typo check). ``None`` is ``model``, so no other model loads.
+            Translation keeps its own checkers: the translator itself, or
+            for a machine translation ``model`` as the judge.
         auto_generate_benign: Pre-load or generate benign data for FSH/DAP.
         batch_size: Requests per model call; twice as many units are live.
         prompt_dir: Prompt overlay forwarded to the LLM-dependent techniques.
@@ -674,6 +679,7 @@ def generate_jailbreaks(
            for _name, kind, _out, _man in kinds):
         _check_machine_translation(translation_model, prompt_dir)
     client = ModelClient.create(model or default_model_for_role("uncensored_gen"))
+    check = ModelClient.create(check_model) if check_model else client
     benign = Path(benign_path) if benign_path else paths.benign_csv(data_dir)
 
     def run(name: str, kind: dict, out_path: Path, manifest_path: Path | None,
@@ -690,7 +696,8 @@ def generate_jailbreaks(
         return run_augmentation(
             of_kind,
             jailbreak_pool.technique_pool(kind),
-            client=client, translation_model=translation_model, out_path=out_path,
+            client=client, check=check, translation_model=translation_model,
+            out_path=out_path,
             benign_path=benign, benign_taxonomy=benign_taxonomy,
             taxonomy_dir=taxonomy_folder(benign_taxonomy, taxonomy_dir, config_dir),
             prompt_dir=prompt_dir, seed=seed,
@@ -1765,6 +1772,7 @@ def _paraphrase_skipped(ctx: RunContext) -> dict:
 def _jailbreaks_kwargs(ctx: RunContext) -> dict:
     return dict(
         data_dir=ctx.data_dir, model=ctx.models["gen"],
+        check_model=ctx.models["check"],
         translation_model=ctx.models["translation"], prompt_dir=ctx.prompt_dir,
         benign_taxonomy=ctx.benign_taxonomy, taxonomy_dir=ctx.taxonomy_dir,
         resume=ctx.resume, verbose=ctx.verbose, augmentation=ctx.augmentations,
@@ -1849,7 +1857,7 @@ STAGES: dict[str, Stage] = {stage.name: stage for stage in (
           files=_paraphrase_files, recipe_kwargs=_paraphrase_kwargs,
           sources=_paraphrase_sources, extra_counts=_paraphrase_skipped),
     Stage("jailbreaks", "generate_jailbreaks",
-          roles=(_GEN, ("translation", "translation")),
+          roles=(_GEN, _CHECK, ("translation", "translation")),
           files=_jailbreaks_files,
           recipe_kwargs=_jailbreaks_kwargs, sources=_run_inputs,
           folded=augmentation_kinds.FLAT_KEYWORDS),
