@@ -1,6 +1,6 @@
 # Jailbreak techniques
 
-The jailbreak stage draws from 171 active techniques in 4 layers and 24
+The jailbreak stage draws from 177 active techniques in 4 layers and 25
 families.
 `configs/jailbreak/combination_spec.json` gives each technique (the
 language ones through its `generators`, from
@@ -32,7 +32,8 @@ families apply in the order of their `within_layer_order`, numbered in tens
 so a family added later slots in between: the whole-text rewrites first
 (`translation` 10, `typos` 20, `casual_writing` 30, `noise` 35), then the word-level
 steps (`sensitive_words` 40, `tokenbreak` 50), so a rewrite cannot undo a
-split or an encoded word, then `suffixes` 60, `encode` 70, `structural` 80
+split or an encoded word, then `suffixes` 60, `encode` 70, `structural` and
+`neutral_container` 80 (each excludes the other, so they share the place)
 and `ascii_art` 90, the outermost. A plan made before this order applied
 `sensitive_words` and `tokenbreak` first; a kept plan replays the order its
 manifest recorded, and a fresh plan applies translation, typos and casual
@@ -47,9 +48,9 @@ among them.
 |---|---|---|---|
 | `hacking` | 3 | 21 | at most 1 |
 | `manipulation` | 2 | 8 | at most 1 |
-| `obfuscation` | 10 | 95 | no cap |
+| `obfuscation` | 11 | 101 | no cap |
 | `requests` | 9 | 47 | at most 1 |
-| all | 24 | 171 | |
+| all | 25 | 177 | |
 <!-- END layers -->
 
 ## Families and techniques
@@ -78,6 +79,7 @@ that call a model call the generation model.
 | obfuscation | `tokenbreak` | `encoding` | 50 | 3 | yes | no | `to_tokenbreak_prepend`, `to_tokenbreak_split`, `to_tokenbreak_delimiter` |
 | obfuscation | `suffixes` | `surface_noise` | 60 | 4 | no | no | `to_adversarial_suffix_punctuation`, `to_adversarial_suffix_fragments`, `to_adversarial_suffix_unicode`, `to_adversarial_suffix_emoji` |
 | obfuscation | `encode` | `encoding` | 70 | 27 | no | no | `to_base64`, `to_rot13`, `to_rot18`, `to_rot47`, `to_unicode_escape`, `to_ascii_ordinal`, `to_separator`, `to_leetspeak_basic`, `to_leetspeak_intermediate`, `to_leetspeak_advanced`, `to_morse`, `to_braille`, `to_reversed_characters`, `to_reversed_words`, `to_reversed_word_order`, `to_lookalike_letters`, `to_zero_width_noise`, `to_hex`, `to_binary`, `to_url_encoding`, `to_html_entities`, `to_base32`, `to_base85`, `to_caesar_cipher`, `to_atbash`, `to_fullwidth`, `to_math_styled` |
+| obfuscation | `neutral_container` | `container` | 80 | 6 | no | no | `to_code_comment`, `to_yaml_document`, `to_csv_row`, `to_email_message`, `to_transcript_line`, `to_log_entry` |
 | obfuscation | `structural` | `container` | 80 | 3 | no | no | `to_json`, `to_xml`, `to_markdown` |
 | obfuscation | `ascii_art` | `encoding` | 90 | 1 | no | no | `to_ascii_art` |
 | requests | `answer_format` | `answer_shape` |  | 9 | no | no | `to_refusal_then_comply`, `to_apology_prevention`, `to_prefix_injection`, `to_answer_in_markdown`, `to_answer_as_tutorial`, `to_answer_as_code`, `to_answer_as_dialogue`, `to_answer_as_story`, `to_answer_as_structured_data` |
@@ -178,8 +180,10 @@ technique is picked first. A technique may not join a combination when:
   `ascii_art`; `ascii_art` with `framing`, `persona`, `cognitive`, `fsh`,
   `dap`; `fsh` and `dap` with `continuation`, `indirect`, `framing`,
   `persona`, `cognitive`; `persona` and `cognitive` with
-  `impersonation`, so a prompt never carries two identities; and `noise`
-  with `typos` and `casual_writing`, one kind of surface noise per text. So a
+  `impersonation`, so a prompt never carries two identities; `noise`
+  with `typos` and `casual_writing`, one kind of surface noise per text; and
+  `neutral_container` with `structural` (one document around the prompt)
+  and `ascii_art` (no font draws a document of that length). So a
   combination holds a hacking or a manipulation technique, never both
   (`continuation` and `indirect`, both requests, are kept apart by the
   layer cap);
@@ -254,11 +258,12 @@ A spec entry's `kinds` lists the kinds of the augmentation section that may
 draw the technique: `["adversarial"]` when neither the technique nor its
 first family gives one, and a technique's own `kinds` replace its family's.
 Every technique is adversarial. The families `typos`, `casual_writing`,
-`noise`, `translation`, `answer_language`, `answer_format`, `asking` and
-`indirect` are marked `["adversarial", "natural"]`, less their attack-only
+`noise`, `neutral_container`, `translation`, `answer_language`,
+`answer_format`, `asking` and `indirect` are marked
+`["adversarial", "natural"]`, less their attack-only
 techniques, and three techniques of attack families are marked natural on
 their own. The natural kind draws only what is marked natural: by default
-(translation off) these 54 techniques in 9 families, pinned in
+(translation off) these 60 techniques in 10 families, pinned in
 `tests/fixtures/natural_pool.json`:
 
 | Family | Natural techniques |
@@ -266,6 +271,7 @@ their own. The natural kind draws only what is marked natural: by default
 | `typos` | `to_rewrite_with_typos_low`, `to_rewrite_with_typos_medium` |
 | `casual_writing` | all nine |
 | `noise` | the low and medium densities of `to_random_capitals_*`, `to_scrambled_letters_*`, `to_keyboard_typos_*` and `to_emoji_sprinkle_*` (eight, since spec 1.2) |
+| `neutral_container` | all six (since spec 1.2) |
 | `answer_language` | all twenty |
 | `answer_format` | `to_answer_in_markdown`, `to_answer_as_tutorial`, `to_answer_as_code`, `to_answer_as_structured_data` |
 | `asking` | `to_innocuous_question`, `to_ask_for_details` |
@@ -410,6 +416,29 @@ the answers.
   Hex, binary, base32 and base85 are `heavy`, the rest `light`.
 - `structural` wraps the text in JSON, XML or markdown. `to_json` keeps
   non-ASCII characters as they are.
+- `neutral_container` (spec version 1.2) places the text in an everyday
+  document, the formats a classifier meets in real traffic. Each of its six
+  pure techniques draws one of eight variants of its pool in
+  `obfuscation/neutral_container_templates.json`, which give the
+  surroundings; the info is `container=<container>;variant=<name>`.
+  `to_code_comment` puts the text in a comment above a few lines of code
+  (Python, JavaScript, SQL, C, HTML, shell, Lisp, LaTeX), each line behind
+  the comment marker; `to_yaml_document` makes it a block scalar of a YAML
+  document (a ticket, front matter, a record list, a config map and so on),
+  each line indented; `to_csv_row` makes it one quoted field of a row below
+  a header (comma, semicolon, tab or pipe), its own quotes doubled;
+  `to_email_message` makes it the body of an email, below its headers and
+  above a signature; `to_transcript_line` makes it one speaker's line of a
+  transcript (a timestamped line, a WebVTT or SRT cue, an interview or a
+  meeting), and `to_log_entry` the message of a log entry (Python, syslog,
+  logback, Go, Ruby, nginx and other line formats), newlines kept in both.
+  The text is verbatim and can be read back whole. The surroundings are
+  neutral by design: no variant gives an instruction, says anything to the
+  reader or mentions answering, rules or policies; a test checks each
+  template against a list of such words, a starting list to extend. The
+  transcript and log containers come closest to a chat turn: a transcript
+  holds the one speaker's line and no other speaker's, and a log message
+  follows at most one neutral entry of the same log.
 - `ascii_art` draws the text in a pyfiglet font, drawn from those of the 16
   that have a glyph for every character of the text and draw it in at most
   `MAX_RENDERED_CHARS` (5,000) characters, the `max_chars` keyword's
@@ -528,6 +557,8 @@ Also beyond the reference list:
   abbreviations, accents);
 - the `noise` family (12 techniques: random capitals, scrambled letters,
   keyboard typos and emoji, each at three densities);
+- the `neutral_container` family (6 techniques: a code comment, a YAML
+  document, a CSV row, an email, a transcript line, a log entry);
 - the answer formats code, dialogue, story and structured data;
 - continuation attacks (4) and indirect task embedding (6);
 - the answer languages Zulu, Scots Gaelic, Bengali and Javanese.

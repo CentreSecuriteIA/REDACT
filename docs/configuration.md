@@ -407,6 +407,28 @@ already). A kept plan replays as it was made. The adversarial kind draws no
 casual writing unless its section allows the family, and the eval type
 draws none: their pools and draws do not change.
 
+**Release note: the neutral containers (spec 1.2).** A new obfuscation
+family, `neutral_container`, adds six pure techniques that place the text in
+an everyday document: a code comment, a YAML document, a CSV row, an email,
+a transcript line or a log entry, each with eight neutral variants of the
+surroundings. The default attack pool draws all six (168 techniques in 24
+families); the natural pool gains the six (60 techniques in 10 families),
+the packaged natural kind allowing the family. A fresh plan of either kind
+draws them, and since one more family is dealt, some units of a fresh plan
+draw other techniques than they did with the same seed; a kept plan resumes
+with the growth WARNING above and does not draw them until it is planned
+again with `resume=False`. `neutral_container` applies where `structural`
+does, after `encode`, and never sits beside `structural` or `ascii_art`. A
+`config_dir` copy of `augmentations.json` made before keeps its natural
+`families.allow` without `neutral_container`, so its natural kind does not
+draw them; the run logs this at INFO (add `"neutral_container"`, delete the
+copy, or `scaffold_setup(..., overwrite=True)`). The family carries the
+`container` dimension, which the `focus` axis is undecided against, so a
+run that deals `focus.mixed` (at weight 0 in the packaged table) denies it
+in both kinds, beside the families it denied before. The eval type
+allows no `neutral_container`, so its pool stays at 36 and its draws do not
+change ([techniques.md](techniques.md#what-the-families-do)).
+
 **Release note: the obfuscation order.** A fresh plan applies translation,
 typos and casual writing before the word-level steps, sensitive words and
 tokenbreak, which used to come first, so a combination holding both gives
@@ -520,11 +542,12 @@ Natural only:
 | `exact_techniques` | int >= 1 | `1` | Techniques per variation |
 
 The packaged natural kind allows the families `typos`, `casual_writing`,
-`noise`, `answer_language`, `answer_format`, `asking`, `indirect`; allows the
+`noise`, `neutral_container`, `answer_language`, `answer_format`, `asking`,
+`indirect`; allows the
 techniques `to_leetspeak_basic`, `to_adversarial_suffix_punctuation`,
 `to_adversarial_suffix_emoji`; and denies `to_refusal_then_comply`,
 `to_apology_prevention`, `to_prefix_injection`. The spec's `kinds` narrow
-it further (step 6 below): its pool is 54 techniques
+it further (step 6 below): its pool is 60 techniques
 ([techniques.md](techniques.md#the-natural-pool)). A variation that leaves
 its input unchanged is rejected.
 

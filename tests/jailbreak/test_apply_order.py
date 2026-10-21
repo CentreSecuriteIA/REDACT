@@ -47,6 +47,16 @@ def test_the_families_eval_draws_keep_their_order():
         "translation", "encode", "structural", "ascii_art"]
 
 
+def test_a_neutral_container_applies_where_structural_does():
+    """After the encodings, before ASCII art. The two containers share their
+    place: they exclude each other, so they never meet in a combination."""
+    assert (BY_NAME["to_csv_row"].within_layer_order
+            == BY_NAME["to_json"].within_layer_order)
+    assert _families_in_order(
+        ["to_ascii_art", "to_csv_row", "to_base64", "to_thai"]) == [
+        "translation", "encode", "neutral_container", "ascii_art"]
+
+
 def test_a_word_encoding_takes_the_order_of_its_first_family():
     """The ``to_sensitive_words_encode_*`` are in ``sensitive_words`` and
     ``encode``; ``sensitive_words`` comes first in their spec entries."""

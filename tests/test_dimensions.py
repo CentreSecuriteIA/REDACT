@@ -17,7 +17,7 @@ _FAMILY_TAGS = {
     "language": ["translation", "answer_language"],
     "surface_noise": ["typos", "casual_writing", "noise", "suffixes"],
     "encoding": ["encode", "sensitive_words", "tokenbreak", "ascii_art"],
-    "container": ["structural"],
+    "container": ["structural", "neutral_container"],
     "role_framing": ["persona", "framing", "cognitive", "impersonation"],
     "request_shape": ["indirect", "distractor_prefix", "distractor_suffix",
                       "continuation", "asking", "temporal"],
@@ -160,7 +160,8 @@ class TestTheCheck:
         assert "adversarial: asking, continuation" in message
         # The natural kind draws neither continuation, temporal nor structural.
         assert "natural: asking, indirect)" in message
-        assert "the container families (adversarial: structural)." in message
+        assert ("the container families (adversarial: neutral_container, "
+                "structural; natural: neutral_container).") in message
         assert "the example_priming families (adversarial: dap, fsh)" in message
         assert message.count("undecided") == len(("request_shape", "container",
                                                    "example_priming"))

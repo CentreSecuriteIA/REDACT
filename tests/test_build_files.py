@@ -30,9 +30,10 @@ carries its answer mode and the length its spec dealt, none is.
 The plan pairs ASCII art with neither the emoji or unicode suffix, the emoji
 sprinkle, braille nor a translation, whose characters no font draws, so
 every attack of the runs is accepted. The natural kind draws only what the
-spec marks natural (54 techniques, the low and medium noise among them since
-spec 1.2): two variations of the training run are no-ops the natural kind
-rejects, ``to_lowercase`` on a text in lower case already and
+spec marks natural (60 techniques, the low and medium noise and the neutral
+containers among them since spec 1.2; the containers moved some variations'
+draws, not their counts): two variations of the training run are no-ops the
+natural kind rejects, ``to_lowercase`` on a text in lower case already and
 ``to_doubled_punctuation`` on a text with no full stop (30 of 32 jailbreak
 rows accepted). They were ``to_abbreviations`` on a text with none of its
 words and ``to_stripped_accents`` on a text with no accent until the plan

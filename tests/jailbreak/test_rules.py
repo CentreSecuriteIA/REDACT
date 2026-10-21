@@ -188,6 +188,25 @@ def test_the_emoji_sprinkle_joins_a_translation_into_any_script(translation):
     assert _joins(translation, "to_emoji_sprinkle_low")
 
 
+_CONTAINERS = ["to_code_comment", "to_yaml_document", "to_csv_row",
+               "to_email_message", "to_transcript_line", "to_log_entry"]
+
+
+@pytest.mark.parametrize("container", _CONTAINERS)
+@pytest.mark.parametrize("other", ["to_json", "to_xml", "to_markdown", "to_ascii_art"])
+def test_a_neutral_container_refuses_structural_and_ascii_art_either_way(
+        container, other):
+    """One document around the prompt is enough, and a container's lines
+    are too long for a font to draw."""
+    assert not _joins(container, other)
+    assert not _joins(other, container)
+
+
+@pytest.mark.parametrize("other", ["to_base64", "to_french", "to_summarize"])
+def test_a_neutral_container_joins_an_encoding_a_translation_or_a_request(other):
+    assert _joins("to_csv_row", other) and _joins(other, "to_csv_row")
+
+
 @pytest.mark.parametrize(("first", "then"), [
     ("to_hex", "to_fsh_random_short"),
     ("to_fsh_random_short", "to_hex"),
@@ -235,6 +254,15 @@ def test_a_technique_names_only_families_it_is_incompatible_with():
              if not name.startswith("_")
              for family in entry.get("cross_incompatible_with", [])}
     assert named and named <= set(spec["families"])
+
+
+def test_a_family_names_only_families_the_spec_has():
+    from redact.jailbreak.technique import load_spec
+
+    families = load_spec()["families"]
+    named = {other for entry in families.values()
+             for other in entry["cross_incompatible_with"]}
+    assert named and named <= set(families)
 
 
 @pytest.mark.parametrize(("first", "then"), [

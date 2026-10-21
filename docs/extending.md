@@ -250,8 +250,9 @@ contract.
    technique keeps no `kinds` and that technique says both
    (`to_leetspeak_basic`). So a new technique in an attack family is an
    attack only until its entry says otherwise, and a new technique in a
-   family marked natural (`typos`, `casual_writing`, `noise`, `translation`,
-   `answer_language`, `answer_format`, `asking`, `indirect`) takes its
+   family marked natural (`typos`, `casual_writing`, `noise`,
+   `neutral_container`, `translation`, `answer_language`, `answer_format`,
+   `asking`, `indirect`) takes its
    family's kinds and joins the natural pool unless its entry says
    `["adversarial"]`. The adversarial kind draws every family unless
    denied. For variations, also add the family to the natural kind's
@@ -259,11 +260,11 @@ contract.
    `configs/jailbreak/augmentations.json`; an allow list naming what the
    spec keeps from the kind raises. A family meant for variations only goes
    in `natural_only_families`.
-   - **The natural pool.** `tests/fixtures/natural_pool.json` pins the 54
+   - **The natural pool.** `tests/fixtures/natural_pool.json` pins the 60
      names the natural kind draws by default, and
      `tests/jailbreak/test_pool.py` fails until the owner decides: give the
      technique `"kinds": ["adversarial"]`, or add its name to the fixture.
-     The same file checks the attack pool's 162 techniques in 23 families.
+     The same file checks the attack pool's 168 techniques in 24 families.
    - **The eval pool.** `configs/dataset_types/eval.json` allows whole
      families (`encode`, `fsh`, `dap`, `framing`, `structural`, `ascii_art`,
      `continuation`, `temporal`), so a technique added to one of them joins
@@ -402,7 +403,7 @@ pool of one variant named after the entry. `personas.json` and
    without being on the fixture's `known_short` list, which the regenerator
    keeps as it is. A pool that reaches its floor must leave
    `known_short`: the test fails until it does, so the list only shrinks.
-   34 of the 35 pools are on it today, in 10 families; `to_json`'s wrapper
+   34 of the 41 pools are on it today, in 10 families; `to_json`'s wrapper
    is not a pool yet.
 
 A new directive is a new list in the file and a technique that names it

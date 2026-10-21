@@ -1,5 +1,5 @@
 {
-  "_comment": "Jailbreak technique compatibility specification. All rules enforced in jailbreak/rules.py. kinds, on a family or a technique, lists the augmentation kinds that may draw it: absent is [\"adversarial\"], and a technique's own kinds replace its first family's. since and deprecated, on a technique, are the versions that added and retired it (absent since is \"1.0\"): version moves up, as dotted whole numbers (\"1.9\", \"1.10\"), in each change that adds or retires a technique, and the technique carries the new version. within_layer_order, on an obfuscation family, is the order the layer's families apply in, numbered in tens so a family added later slots in between: the whole-text rewrites first (translation 10, typos 20, casual_writing 30, noise 35), so they cannot undo a word-level step, then the word-level steps (sensitive_words 40, tokenbreak 50), suffixes 60, encode 70, structural 80 and ascii_art 90, the outermost. A technique takes its first family's. Read by jailbreak/technique.py (tag) and jailbreak/pool.py.",
+  "_comment": "Jailbreak technique compatibility specification. All rules enforced in jailbreak/rules.py. kinds, on a family or a technique, lists the augmentation kinds that may draw it: absent is [\"adversarial\"], and a technique's own kinds replace its first family's. since and deprecated, on a technique, are the versions that added and retired it (absent since is \"1.0\"): version moves up, as dotted whole numbers (\"1.9\", \"1.10\"), in each change that adds or retires a technique, and the technique carries the new version. within_layer_order, on an obfuscation family, is the order the layer's families apply in, numbered in tens so a family added later slots in between: the whole-text rewrites first (translation 10, typos 20, casual_writing 30, noise 35), so they cannot undo a word-level step, then the word-level steps (sensitive_words 40, tokenbreak 50), suffixes 60, encode 70, structural and neutral_container 80 (they exclude each other, so they never meet) and ascii_art 90, the outermost. A technique takes its first family's. Read by jailbreak/technique.py (tag) and jailbreak/pool.py.",
 
   "version": "1.2",
 
@@ -70,6 +70,14 @@
       "dimension": "container",
       "within_layer_order": 80,
       "cross_incompatible_with": ["ascii_art"]
+    },
+    "neutral_container": {
+      "description": "The prompt placed in an everyday document: a code comment, a YAML document, a CSV row, an email, a transcript line or a log entry",
+      "layer": "obfuscation",
+      "dimension": "container",
+      "kinds": ["adversarial", "natural"],
+      "within_layer_order": 80,
+      "cross_incompatible_with": ["structural", "ascii_art"]
     },
     "ascii_art": {
       "description": "Full-text ASCII art conversion (outermost, incompatible with structural and hacking/manipulation due to output size)",
@@ -247,6 +255,13 @@
     "to_json":              { "families": ["structural"], "complexity": 2, "requires_llm": false },
     "to_xml":                { "families": ["structural"], "complexity": 2, "requires_llm": false },
     "to_markdown":           { "families": ["structural"], "complexity": 2, "requires_llm": false },
+
+    "to_code_comment":       { "families": ["neutral_container"], "complexity": 1, "requires_llm": false, "since": "1.2" },
+    "to_yaml_document":      { "families": ["neutral_container"], "complexity": 1, "requires_llm": false, "since": "1.2" },
+    "to_csv_row":            { "families": ["neutral_container"], "complexity": 1, "requires_llm": false, "since": "1.2" },
+    "to_email_message":      { "families": ["neutral_container"], "complexity": 1, "requires_llm": false, "since": "1.2" },
+    "to_transcript_line":    { "families": ["neutral_container"], "complexity": 1, "requires_llm": false, "since": "1.2" },
+    "to_log_entry":          { "families": ["neutral_container"], "complexity": 1, "requires_llm": false, "since": "1.2" },
 
     "to_ascii_art":          { "families": ["ascii_art"], "complexity": 2, "requires_llm": false },
 

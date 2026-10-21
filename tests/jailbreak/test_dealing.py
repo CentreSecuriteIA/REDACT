@@ -261,8 +261,10 @@ _BUDGETS = [
 # for them, and the casual writing picks are dealt over the other members;
 # since a unit's rng and its group's counts follow the picks before, 65 units
 # draw differently, 40 of them outside casual writing. The draws without a
-# dealer filter nothing and do not move.
-_PINNED_DRAWS = "058a36e12928ad00ac57579616257c67e72f3a654f2f2c309d9afdffdf0132a6"
+# dealer filter nothing and do not move. The spec 1.2 neutral_container family
+# moved it again: one more obfuscation family to draw changes which family
+# some draws land on.
+_PINNED_DRAWS = "49576a0122db263f30f48521f0206589e39e27586edf14cb917065d582809b28"
 
 
 def test_draws_without_the_request_obfuscation_are_those_made_before_it_was_counted():
