@@ -27,17 +27,19 @@ answered that input's output request with, so three outputs of the training
 run were variations' rows and the build left them out; since each response
 carries its answer mode and the length its spec dealt, none is.
 
-The plan pairs ASCII art with neither the emoji or unicode suffix, braille
-nor a translation, whose characters no font draws, so every attack of the
-runs is accepted. The natural kind draws only what the spec marks natural
-(46 techniques): one variation of the training run is ``to_abbreviations``
-on a text with none of its words, a no-op the natural kind rejects (31 of
-32 jailbreak rows accepted). The training type answers each input twice
+The plan pairs ASCII art with neither the emoji or unicode suffix, the emoji
+sprinkle, braille nor a translation, whose characters no font draws, so
+every attack of the runs is accepted. The natural kind draws only what the
+spec marks natural (54 techniques, the low and medium noise among them since
+spec 1.2): two variations of the training run are no-ops the natural kind
+rejects, ``to_abbreviations`` on a text with none of its words and
+``to_stripped_accents`` on a text with no accent (30 of 32 jailbreak rows
+accepted). The training type answers each input twice
 (``outputs.outputs_per_input`` 2): 32 responses to 16 inputs, 28 accepted
 (the answers to the second samples of ``zq0`` are rejected), and 44
 paraphrases, of 16 inputs and 28 responses, 41 accepted. The build holds 16
-inputs, 16 jailbreaks, 15 variations, 28 responses and 41 paraphrases, and
-leaves nothing out: its count is 116, where it was 86 with one response per
+inputs, 16 jailbreaks, 14 variations, 28 responses and 41 paraphrases, and
+leaves nothing out: its count is 115, where it was 86 with one response per
 input and three responses equal to variations.
 
 The eval run is not that commit's: its inputs are seeded from a small

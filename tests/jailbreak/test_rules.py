@@ -143,6 +143,52 @@ def test_zero_width_noise_and_tokenbreak_are_never_planned_together(tokenbreak):
 
 
 @pytest.mark.parametrize(("first", "then"), [
+    ("to_keyboard_typos_low", "to_rewrite_with_typos_low"),
+    ("to_rewrite_with_typos_high", "to_scrambled_letters_medium"),
+    ("to_random_capitals_high", "to_lowercase"),
+    ("to_uppercase", "to_random_capitals_low"),
+    ("to_emoji_sprinkle_medium", "to_dropped_spaces"),
+    ("to_abbreviations", "to_emoji_sprinkle_low"),
+])
+def test_noise_refuses_the_typos_and_casual_writing_either_way(first, then):
+    """Three kinds of surface noise on one text: one is enough."""
+    assert not _joins(first, then)
+
+
+@pytest.mark.parametrize(("first", "then"), [
+    ("to_emoji_sprinkle_low", "to_ascii_art"),
+    ("to_ascii_art", "to_emoji_sprinkle_medium"),
+    ("to_emoji_sprinkle_high", "to_ascii_art"),
+])
+def test_ascii_art_refuses_the_emoji_sprinkle_either_way(first, then):
+    """No font has a glyph for an emoji."""
+    assert not _joins(first, then)
+
+
+@pytest.mark.parametrize("technique", [
+    "to_random_capitals_high", "to_scrambled_letters_high", "to_keyboard_typos_high"])
+def test_ascii_art_keeps_the_noise_of_latin_letters(technique):
+    assert _joins(technique, "to_ascii_art") and _joins("to_ascii_art", technique)
+
+
+@pytest.mark.parametrize(("first", "then"), [
+    ("to_random_capitals_low", "to_russian"),
+    ("to_greek", "to_scrambled_letters_medium"),
+    ("to_keyboard_typos_high", "to_thai"),
+    ("to_japanese", "to_keyboard_typos_low"),
+])
+def test_the_latin_letter_noise_refuses_a_translation_into_another_script(
+        first, then):
+    assert not _joins(first, then)
+
+
+@pytest.mark.parametrize("translation", ["to_thai", "to_french"])
+def test_the_emoji_sprinkle_joins_a_translation_into_any_script(translation):
+    assert _joins("to_emoji_sprinkle_low", translation)
+    assert _joins(translation, "to_emoji_sprinkle_low")
+
+
+@pytest.mark.parametrize(("first", "then"), [
     ("to_hex", "to_fsh_random_short"),
     ("to_fsh_random_short", "to_hex"),
     ("to_base32", "to_dap_random_long"),

@@ -365,7 +365,7 @@ release ([techniques.md](techniques.md#retired-techniques)).
 fifteen pure techniques (reversal of the characters, each word or the word
 order; look-alike letters; zero-width noise; hex, binary, URL, HTML-entity,
 base32 and base85 codecs; a Caesar shift and Atbash; fullwidth and math-styled
-Unicode), so the default attack pool is 150 techniques. A fresh adversarial
+Unicode), fifteen more in the default attack pool. A fresh adversarial
 plan draws them; a kept plan resumes with the growth WARNING above and does not
 draw them until it is planned again with `resume=False`. hex, binary, base32
 and base85 are `heavy`, so `fsh` and `dap` refuse them; the rest are `light`,
@@ -373,6 +373,24 @@ so they join the request obfuscation (phase 5), which changes a fresh plan's
 phase-5 draws (a wider set of light encodings to deal). The `eval` type denies
 all fifteen in `techniques.deny`, so its pool stays at 36 and its draws do not
 change ([techniques.md](techniques.md#what-the-families-do)).
+
+**Release note: the noise family (spec 1.2).** A new obfuscation family,
+`noise`, adds twelve pure techniques: random capitals, scrambled letters,
+keyboard typos and emoji between words, each at a low, medium and high
+density. The default attack pool draws all twelve (162 techniques in 23
+families); the natural pool gains the eight of low and medium density (54
+techniques in 9 families), the packaged natural kind allowing the family. A
+fresh plan of either kind draws them; a kept plan resumes with the growth
+WARNING above and does not draw them until it is planned again with
+`resume=False`. `noise` applies after `casual_writing` and before
+`sensitive_words` and never sits beside `typos` or `casual_writing`; the
+Latin-letter ones are kept from a translation into another script and the
+emoji ones from `ascii_art`. A `config_dir` copy of `augmentations.json`
+made before keeps its natural `families.allow` without `noise`, so its
+natural kind does not draw them; the run logs this at INFO (add `"noise"`,
+delete the copy, or `scaffold_setup(..., overwrite=True)`). The eval type
+allows no `noise`, so its pool stays at 36 and its draws do not change
+([techniques.md](techniques.md#what-the-families-do)).
 
 **Release note: the obfuscation order.** A fresh plan applies translation,
 typos and casual writing before the word-level steps, sensitive words and
@@ -430,7 +448,7 @@ run the adversarial kind once with `resume=False`. The eval type sets it false a
 reads it: its pool and its draws do not change.
 
 **Release note: the natural pool.** The natural kind now draws only what
-the spec's `kinds` mark natural (46 techniques by default; `structural`,
+the spec's `kinds` mark natural (then 46 techniques by default; `structural`,
 `continuation`, `temporal`, the high and insane typos and the dialogue and
 story answer formats left it). A natural-kind plan made before raises on
 resume, since its pool changed: run the natural kind with `resume=False`.
@@ -487,11 +505,11 @@ Natural only:
 | `exact_techniques` | int >= 1 | `1` | Techniques per variation |
 
 The packaged natural kind allows the families `typos`, `casual_writing`,
-`answer_language`, `answer_format`, `asking`, `indirect`; allows the
+`noise`, `answer_language`, `answer_format`, `asking`, `indirect`; allows the
 techniques `to_leetspeak_basic`, `to_adversarial_suffix_punctuation`,
 `to_adversarial_suffix_emoji`; and denies `to_refusal_then_comply`,
 `to_apology_prevention`, `to_prefix_injection`. The spec's `kinds` narrow
-it further (step 6 below): its pool is 46 techniques
+it further (step 6 below): its pool is 54 techniques
 ([techniques.md](techniques.md#the-natural-pool)). A variation that leaves
 its input unchanged is rejected.
 

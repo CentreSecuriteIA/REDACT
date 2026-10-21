@@ -20,7 +20,8 @@ BY_NAME = registry(all_techniques())
 #: One technique of each obfuscation family, by family.
 ONE_PER_FAMILY = {
     "translation": "to_thai", "typos": "to_rewrite_with_typos_low",
-    "casual_writing": "to_lowercase", "sensitive_words": "to_sensitive_words_split",
+    "casual_writing": "to_lowercase", "noise": "to_keyboard_typos_low",
+    "sensitive_words": "to_sensitive_words_split",
     "tokenbreak": "to_tokenbreak_split", "suffixes": "to_adversarial_suffix_fragments",
     "encode": "to_base64", "structural": "to_json", "ascii_art": "to_ascii_art",
 }
@@ -33,8 +34,8 @@ def _families_in_order(names) -> list[str]:
 
 def test_the_whole_text_rewrites_apply_before_the_word_level_steps():
     assert _families_in_order(reversed(ONE_PER_FAMILY.values())) == [
-        "translation", "typos", "casual_writing", "sensitive_words", "tokenbreak",
-        "suffixes", "encode", "structural", "ascii_art"]
+        "translation", "typos", "casual_writing", "noise", "sensitive_words",
+        "tokenbreak", "suffixes", "encode", "structural", "ascii_art"]
 
 
 def test_the_families_eval_draws_keep_their_order():

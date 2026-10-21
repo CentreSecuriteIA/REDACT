@@ -210,10 +210,10 @@ the techniques still `compatible` with what is picked:
 The apply order is the layers', whatever the pick order, except the request
 obfuscation, which goes last. Within the obfuscation layer it is each
 family's `within_layer_order`, in tens: `translation` 10, `typos` 20,
-`casual_writing` 30, `sensitive_words` 40, `tokenbreak` 50, `suffixes` 60,
-`encode` 70, `structural` 80, `ascii_art` 90. The whole-text rewrites come
-before the word-level steps, which they would otherwise undo; a family
-added later takes a number between two. The manifest records the order a
+`casual_writing` 30, `noise` 35, `sensitive_words` 40, `tokenbreak` 50,
+`suffixes` 60, `encode` 70, `structural` 80, `ascii_art` 90. The whole-text
+rewrites come before the word-level steps, which they would otherwise undo;
+a family added later takes a number between two, as `noise` did. The manifest records the order a
 combination applies in and a replay keeps it (`combination_of`), so a plan
 made before the renumbering, when `sensitive_words` and `tokenbreak` came
 first, still runs as it was made. A technique above the remaining complexity is
@@ -355,7 +355,7 @@ admits those alone. Last, it keeps the techniques whose `kinds` (set by
 which `pool.kind_of(resolved)` reads as `rounds_of` does: natural when the
 resolved kind has `exact_techniques`, so no key is added to it. Every
 technique holds `adversarial`, so only the natural pool is narrowed: to
-the 46 techniques of [techniques.md](../techniques.md#the-natural-pool) with
+the 54 techniques of [techniques.md](../techniques.md#the-natural-pool) with
 translation off. Then a technique whose `deprecated` tag is set leaves the
 pool unless `techniques.allow` names it; one it names stays, with a
 `DeprecationWarning` (read for this release). A family in `families.allow`

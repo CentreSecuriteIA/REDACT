@@ -342,22 +342,25 @@ def _leaves_unchanged(fn, text: str) -> bool:
 class TestLatinOnly:
     """``needs_latin`` marks what changes only Latin text, which the rules
     keep from a translation into another script. It is read off the
-    techniques' behaviour on the samples above."""
+    techniques' behaviour on the samples above, for the families that hold
+    such a technique: ``encode`` (with the sensitive-word encodings) and
+    ``noise``."""
 
     @staticmethod
     def _encodings() -> list:
         from redact.jailbreak.pool import all_techniques
 
-        return [fn for fn in all_techniques() if "encode" in fn.families]
+        return [fn for fn in all_techniques()
+                if {"encode", "noise"} & set(fn.families)]
 
-    def test_a_latin_only_encoding_leaves_every_other_script_unchanged(self):
+    def test_a_latin_only_technique_leaves_every_other_script_unchanged(self):
         tagged = [fn for fn in self._encodings() if fn.needs_latin]
-        assert len(tagged) == 17     # noqa: PLR2004
+        assert len(tagged) == 26     # noqa: PLR2004
         for fn in tagged:
             for language, text in NON_LATIN.items():
                 assert _leaves_unchanged(fn, text), (fn.__name__, language)
 
-    def test_every_encoding_that_leaves_them_unchanged_is_marked_but_braille(self):
+    def test_every_technique_that_leaves_them_unchanged_is_marked_but_braille(self):
         """Braille passes another script through too, but is in the eval
         pool, which is held: marking it would change the eval draws."""
         unchanged = {fn.__name__ for fn in self._encodings()

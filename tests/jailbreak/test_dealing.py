@@ -253,8 +253,10 @@ _BUDGETS = [
 # languages take its order, Swahili before Thai, so the draws that named one
 # of the two name the other, and nothing else changed. The fifteen spec 1.2
 # encodings moved it again: a wider encode family changes which member an
-# encode draw lands on for some seeds.
-_PINNED_DRAWS = "0f71eb72ec78ad71950f51296f182b23ecdda30e4d1580a035aadda446f08a93"
+# encode draw lands on for some seeds. The spec 1.2 noise family moved it once
+# more: one more obfuscation family to draw changes which family some draws
+# land on.
+_PINNED_DRAWS = "1960e169a9eb24148d6689f5952a4c79ea7704d57b2514f49f70c3a41b4d8470"
 
 
 def test_draws_without_the_request_obfuscation_are_those_made_before_it_was_counted():

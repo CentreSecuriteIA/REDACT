@@ -1,5 +1,5 @@
 {
-  "_comment": "Jailbreak technique compatibility specification. All rules enforced in jailbreak/rules.py. kinds, on a family or a technique, lists the augmentation kinds that may draw it: absent is [\"adversarial\"], and a technique's own kinds replace its first family's. since and deprecated, on a technique, are the versions that added and retired it (absent since is \"1.0\"): version moves up, as dotted whole numbers (\"1.9\", \"1.10\"), in each change that adds or retires a technique, and the technique carries the new version. within_layer_order, on an obfuscation family, is the order the layer's families apply in, numbered in tens so a family added later slots in between: the whole-text rewrites first (translation 10, typos 20, casual_writing 30), so they cannot undo a word-level step, then the word-level steps (sensitive_words 40, tokenbreak 50), suffixes 60, encode 70, structural 80 and ascii_art 90, the outermost. A technique takes its first family's. Read by jailbreak/technique.py (tag) and jailbreak/pool.py.",
+  "_comment": "Jailbreak technique compatibility specification. All rules enforced in jailbreak/rules.py. kinds, on a family or a technique, lists the augmentation kinds that may draw it: absent is [\"adversarial\"], and a technique's own kinds replace its first family's. since and deprecated, on a technique, are the versions that added and retired it (absent since is \"1.0\"): version moves up, as dotted whole numbers (\"1.9\", \"1.10\"), in each change that adds or retires a technique, and the technique carries the new version. within_layer_order, on an obfuscation family, is the order the layer's families apply in, numbered in tens so a family added later slots in between: the whole-text rewrites first (translation 10, typos 20, casual_writing 30, noise 35), so they cannot undo a word-level step, then the word-level steps (sensitive_words 40, tokenbreak 50), suffixes 60, encode 70, structural 80 and ascii_art 90, the outermost. A technique takes its first family's. Read by jailbreak/technique.py (tag) and jailbreak/pool.py.",
 
   "version": "1.2",
 
@@ -85,6 +85,14 @@
       "kinds": ["adversarial", "natural"],
       "within_layer_order": 30,
       "cross_incompatible_with": []
+    },
+    "noise": {
+      "description": "Random capitals, scrambled letters, keyboard typos or emoji between words, at three densities",
+      "layer": "obfuscation",
+      "dimension": "surface_noise",
+      "kinds": ["adversarial", "natural"],
+      "within_layer_order": 35,
+      "cross_incompatible_with": ["typos", "casual_writing"]
     },
     "framing": {
       "description": "Scenario/context modifiers: fictional world, noble/nefarious goal, urgency, constraint removal",
@@ -205,7 +213,7 @@
   },
 
   "techniques": {
-    "_comment": "encode_weight applies only to encode-family members. 'light' = model-readable after decoding; 'heavy' = opaque, blocked when manipulation is selected unless function also has sensitive_words family. needs_latin marks a technique that changes only Latin text (rot13, rot18, rot47, leetspeak and their sensitive-word forms): the rules keep it from a translation into another script, which would leave it nothing to change. Morse and braille, which pass other scripts through too, are not marked while the eval pool is held.",
+    "_comment": "encode_weight applies only to encode-family members. 'light' = model-readable after decoding; 'heavy' = opaque, blocked when manipulation is selected unless function also has sensitive_words family. needs_latin marks a technique that changes only Latin text (the Latin-only ciphers and transforms of encode, their sensitive-word forms, and the noise of random capitals, scrambled letters and keyboard typos): the rules keep it from a translation into another script, which would leave it nothing to change. Morse and braille, which pass other scripts through too, are not marked while the eval pool is held.",
 
     "to_base64":             { "families": ["encode"], "complexity": 3, "requires_llm": false, "encode_weight": "heavy" },
     "to_rot13":              { "families": ["encode"], "complexity": 2, "requires_llm": false, "encode_weight": "light", "needs_latin": true },
@@ -282,6 +290,19 @@
     "to_doubled_punctuation":  { "families": ["casual_writing"], "complexity": 0, "requires_llm": false },
     "to_abbreviations":        { "families": ["casual_writing"], "complexity": 1, "requires_llm": false },
     "to_stripped_accents":     { "families": ["casual_writing"], "complexity": 0, "requires_llm": false },
+
+    "to_random_capitals_low":      { "families": ["noise"], "complexity": 1, "requires_llm": false, "needs_latin": true, "since": "1.2" },
+    "to_random_capitals_medium":   { "families": ["noise"], "complexity": 1, "requires_llm": false, "needs_latin": true, "since": "1.2" },
+    "to_random_capitals_high":     { "families": ["noise"], "complexity": 1, "requires_llm": false, "needs_latin": true, "kinds": ["adversarial"], "since": "1.2" },
+    "to_scrambled_letters_low":    { "families": ["noise"], "complexity": 1, "requires_llm": false, "needs_latin": true, "since": "1.2" },
+    "to_scrambled_letters_medium": { "families": ["noise"], "complexity": 1, "requires_llm": false, "needs_latin": true, "since": "1.2" },
+    "to_scrambled_letters_high":   { "families": ["noise"], "complexity": 1, "requires_llm": false, "needs_latin": true, "kinds": ["adversarial"], "since": "1.2" },
+    "to_keyboard_typos_low":       { "families": ["noise"], "complexity": 1, "requires_llm": false, "needs_latin": true, "since": "1.2" },
+    "to_keyboard_typos_medium":    { "families": ["noise"], "complexity": 1, "requires_llm": false, "needs_latin": true, "since": "1.2" },
+    "to_keyboard_typos_high":      { "families": ["noise"], "complexity": 1, "requires_llm": false, "needs_latin": true, "kinds": ["adversarial"], "since": "1.2" },
+    "to_emoji_sprinkle_low":       { "families": ["noise"], "complexity": 1, "requires_llm": false, "cross_incompatible_with": ["ascii_art"], "since": "1.2" },
+    "to_emoji_sprinkle_medium":    { "families": ["noise"], "complexity": 1, "requires_llm": false, "cross_incompatible_with": ["ascii_art"], "since": "1.2" },
+    "to_emoji_sprinkle_high":      { "families": ["noise"], "complexity": 1, "requires_llm": false, "cross_incompatible_with": ["ascii_art"], "kinds": ["adversarial"], "since": "1.2" },
 
     "to_fictional_world":      { "families": ["framing"], "complexity": 2, "requires_llm": false },
     "to_noble_goal":           { "families": ["framing"], "complexity": 1, "requires_llm": false },

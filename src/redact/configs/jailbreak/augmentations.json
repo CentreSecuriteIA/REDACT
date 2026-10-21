@@ -24,8 +24,8 @@
     "translation": false,
     "layers": {"deny": []},
     "families": {
-      "allow": ["typos", "casual_writing", "answer_language", "answer_format",
-                "asking", "indirect"],
+      "allow": ["typos", "casual_writing", "noise", "answer_language",
+                "answer_format", "asking", "indirect"],
       "deny": []
     },
     "techniques": {

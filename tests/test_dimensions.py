@@ -15,7 +15,7 @@ from redact.recipe import check_dimensions as _check_dimensions
 
 _FAMILY_TAGS = {
     "language": ["translation", "answer_language"],
-    "surface_noise": ["typos", "casual_writing", "suffixes"],
+    "surface_noise": ["typos", "casual_writing", "noise", "suffixes"],
     "encoding": ["encode", "sensitive_words", "tokenbreak", "ascii_art"],
     "container": ["structural"],
     "role_framing": ["persona", "framing", "cognitive", "impersonation"],

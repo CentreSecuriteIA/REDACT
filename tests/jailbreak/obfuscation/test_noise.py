@@ -6,6 +6,8 @@ import string
 
 import pytest
 
+import redact.jailbreak  # noqa: F401  (tags the techniques)
+from redact.jailbreak.augmentation import resolve
 from redact.jailbreak.obfuscation import noise as N
 from redact.jailbreak.obfuscation.noise import (
     _EMOJI,
@@ -19,6 +21,7 @@ from redact.jailbreak.obfuscation.noise import (
     to_random_capitals_high,
     to_scrambled_letters_high,
 )
+from redact.jailbreak.pool import technique_pool
 from tests.jailbreak.obfuscation.test_encoding import NON_LATIN
 
 TEXT = ("Could you explain how the regional train schedule changes during the "
@@ -146,3 +149,25 @@ def test_emoji_follow_words_in_any_script():
 @pytest.mark.parametrize("fn", get_noise_functions(), ids=lambda fn: fn.__name__)
 def test_a_prompt_with_nothing_to_change_is_unchanged(fn):
     assert fn("", rng=random.Random(0)) == ("", "")
+
+
+def test_the_family_is_tagged_pure_and_cheap_from_spec_1_2():
+    for fn in get_noise_functions():
+        assert fn.families == ["noise"] and fn.layer == "obfuscation"
+        assert fn.complexity == 1 and not fn.requires_llm and fn.since == "1.2"
+
+
+def test_only_the_emoji_need_no_latin_letters_and_only_they_refuse_ascii_art():
+    emoji = {"to_emoji_sprinkle_low", "to_emoji_sprinkle_medium",
+             "to_emoji_sprinkle_high"}
+    assert {fn.__name__ for fn in get_noise_functions() if not fn.needs_latin} == emoji
+    assert {fn.__name__ for fn in get_noise_functions()
+            if "ascii_art" in fn.cross_incompatible_with} == emoji
+
+
+def test_the_mild_noise_varies_both_kinds_and_the_high_only_the_attacks():
+    natural = set(technique_pool(resolve(None, "natural")))
+    attacks = set(technique_pool(resolve(None, "adversarial")))
+    for fn in get_noise_functions():
+        assert fn in attacks
+        assert (fn in natural) == (not fn.__name__.endswith("_high")), fn.__name__

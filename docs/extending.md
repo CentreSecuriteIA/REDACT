@@ -229,11 +229,12 @@ contract.
    benign input it rewrites stays benign and reads as a person would write
    it. A family whose techniques are mostly natural carries both kinds,
    and its attack-only techniques say `["adversarial"]` (the high and insane
-   typos, five answer formats); an attack family with one natural
+   typos, the four high-density noise techniques, five answer formats); an
+   attack family with one natural
    technique keeps no `kinds` and that technique says both
    (`to_leetspeak_basic`). So a new technique in an attack family is an
    attack only until its entry says otherwise, and a new technique in a
-   family marked natural (`typos`, `casual_writing`, `translation`,
+   family marked natural (`typos`, `casual_writing`, `noise`, `translation`,
    `answer_language`, `answer_format`, `asking`, `indirect`) takes its
    family's kinds and joins the natural pool unless its entry says
    `["adversarial"]`. The adversarial kind draws every family unless
@@ -242,11 +243,11 @@ contract.
    `configs/jailbreak/augmentations.json`; an allow list naming what the
    spec keeps from the kind raises. A family meant for variations only goes
    in `natural_only_families`.
-   - **The natural pool.** `tests/fixtures/natural_pool.json` pins the 46
+   - **The natural pool.** `tests/fixtures/natural_pool.json` pins the 54
      names the natural kind draws by default, and
      `tests/jailbreak/test_pool.py` fails until the owner decides: give the
      technique `"kinds": ["adversarial"]`, or add its name to the fixture.
-     The same file checks the attack pool's 150 techniques in 22 families.
+     The same file checks the attack pool's 162 techniques in 23 families.
    - **The eval pool.** `configs/dataset_types/eval.json` allows whole
      families (`encode`, `fsh`, `dap`, `framing`, `structural`, `ascii_art`,
      `continuation`, `temporal`), so a technique added to one of them joins

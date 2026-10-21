@@ -1,6 +1,6 @@
 # Jailbreak techniques
 
-The jailbreak stage draws from 159 active techniques in 4 layers and 23
+The jailbreak stage draws from 171 active techniques in 4 layers and 24
 families.
 `configs/jailbreak/combination_spec.json` gives each technique (the
 language ones through its `generators`, from
@@ -30,7 +30,7 @@ when allowed (the packaged attacks allow it, for half their units; the eval
 type does not), comes last, after the request. Within the obfuscation layer,
 families apply in the order of their `within_layer_order`, numbered in tens
 so a family added later slots in between: the whole-text rewrites first
-(`translation` 10, `typos` 20, `casual_writing` 30), then the word-level
+(`translation` 10, `typos` 20, `casual_writing` 30, `noise` 35), then the word-level
 steps (`sensitive_words` 40, `tokenbreak` 50), so a rewrite cannot undo a
 split or an encoded word, then `suffixes` 60, `encode` 70, `structural` 80
 and `ascii_art` 90, the outermost. A plan made before this order applied
@@ -47,9 +47,9 @@ among them.
 |---|---|---|---|
 | `hacking` | 3 | 21 | at most 1 |
 | `manipulation` | 2 | 8 | at most 1 |
-| `obfuscation` | 9 | 83 | no cap |
+| `obfuscation` | 10 | 95 | no cap |
 | `requests` | 9 | 47 | at most 1 |
-| all | 23 | 159 | |
+| all | 24 | 171 | |
 <!-- END layers -->
 
 ## Families and techniques
@@ -73,6 +73,7 @@ that call a model call the generation model.
 | obfuscation | `translation` | `language` | 10 | 19 | yes | no | `to_french`, `to_japanese`, `to_russian`, `to_spanish`, `to_german`, `to_arabic`, `to_turkish`, `to_czech`, `to_vietnamese`, `to_greek`, `to_croatian`, `to_swahili`, `to_thai`, `to_khmer`, `to_nepali`, `to_zulu`, `to_scots_gaelic`, `to_bengali`, `to_javanese` |
 | obfuscation | `typos` | `surface_noise` | 20 | 4 | yes | no | `to_rewrite_with_typos_low`, `to_rewrite_with_typos_medium`, `to_rewrite_with_typos_high`, `to_rewrite_with_typos_insane` |
 | obfuscation | `casual_writing` | `surface_noise` | 30 | 9 | no | no | `to_lowercase`, `to_uppercase`, `to_no_sentence_capitals`, `to_dropped_spaces`, `to_doubled_spaces`, `to_dropped_punctuation`, `to_doubled_punctuation`, `to_abbreviations`, `to_stripped_accents` |
+| obfuscation | `noise` | `surface_noise` | 35 | 12 | no | no | `to_random_capitals_low`, `to_random_capitals_medium`, `to_random_capitals_high`, `to_scrambled_letters_low`, `to_scrambled_letters_medium`, `to_scrambled_letters_high`, `to_keyboard_typos_low`, `to_keyboard_typos_medium`, `to_keyboard_typos_high`, `to_emoji_sprinkle_low`, `to_emoji_sprinkle_medium`, `to_emoji_sprinkle_high` |
 | obfuscation | `sensitive_words` | `encoding` | 40 | 13 | yes | no | `to_sensitive_words_encode_base64`, `to_sensitive_words_encode_rot13`, `to_sensitive_words_encode_rot18`, `to_sensitive_words_encode_rot47`, `to_sensitive_words_encode_unicode`, `to_sensitive_words_encode_ascii`, `to_sensitive_words_encode_separator`, `to_sensitive_words_encode_leetspeak_basic`, `to_sensitive_words_encode_leetspeak_intermediate`, `to_sensitive_words_encode_leetspeak_advanced`, `to_sensitive_words_split`, `to_sensitive_words_variables`, `to_synonym_substitution` |
 | obfuscation | `tokenbreak` | `encoding` | 50 | 3 | yes | no | `to_tokenbreak_prepend`, `to_tokenbreak_split`, `to_tokenbreak_delimiter` |
 | obfuscation | `suffixes` | `surface_noise` | 60 | 4 | no | no | `to_adversarial_suffix_punctuation`, `to_adversarial_suffix_fragments`, `to_adversarial_suffix_unicode`, `to_adversarial_suffix_emoji` |
@@ -128,6 +129,14 @@ which is held, and completing them would change its text.
 `to_math_styled` write non-ASCII characters, so each is kept from `ascii_art`
 (`to_zero_width_noise` also from `tokenbreak`).
 
+Nine `noise` techniques are tagged `needs_latin` too: the three densities of
+`to_random_capitals_*` (ASCII small letters only), `to_scrambled_letters_*`
+(words of Latin letters only) and `to_keyboard_typos_*` (the letters of the
+QWERTY map only), checked on the same six scripts. The three
+`to_emoji_sprinkle_*` change a text in any script; their emoji have no glyph
+in any font, so each is kept from `ascii_art`. The `noise` family is kept
+from `typos` and `casual_writing`: one kind of surface noise per text.
+
 ## The language table
 
 `configs/jailbreak/languages.json` holds one row per language: its `name`
@@ -168,17 +177,19 @@ technique is picked first. A technique may not join a combination when:
   the reverse. The spec pairs `structural` and `translation` with
   `ascii_art`; `ascii_art` with `framing`, `persona`, `cognitive`, `fsh`,
   `dap`; `fsh` and `dap` with `continuation`, `indirect`, `framing`,
-  `persona`, `cognitive`; and `persona` and `cognitive` with
-  `impersonation`, so a prompt never carries two identities. So a
+  `persona`, `cognitive`; `persona` and `cognitive` with
+  `impersonation`, so a prompt never carries two identities; and `noise`
+  with `typos` and `casual_writing`, one kind of surface noise per text. So a
   combination holds a hacking or a manipulation technique, never both
   (`continuation` and `indirect`, both requests, are kept apart by the
   layer cap);
 - one of its families is in the `cross_incompatible_with` of a taken
   technique's own spec entry, or a taken family is in its own. The spec keeps
   `to_adversarial_suffix_emoji`, `to_adversarial_suffix_unicode`,
-  `to_braille` and `to_tokenbreak_split` from `ascii_art`, since no font
-  draws the characters they may leave; the other suffixes and encodings may
-  still join it. `to_ascii_art` itself rejects a text with a character no
+  `to_braille`, `to_tokenbreak_split`, `to_lookalike_letters`,
+  `to_zero_width_noise`, `to_fullwidth`, `to_math_styled` and the three
+  `to_emoji_sprinkle_*` from `ascii_art`, since no font draws the characters
+  they may leave; the other suffixes, encodings and noise may still join it. `to_ascii_art` itself rejects a text with a character no
   single font draws (most non-ASCII characters: accented letters such as `é`
   or `ñ`, dashes, curly quotes, kana; German umlauts and `ß` and some Greek
   or Cyrillic text have fonts), or one every font draws longer than its cap;
@@ -189,9 +200,10 @@ technique is picked first. A technique may not join a combination when:
 - it pairs a `needs_latin` technique with a translation into a script
   other than Latin: Japanese, Russian, Arabic, Greek, Thai, Khmer, Nepali
   or Bengali (each language's `script` is in its row of
-  `configs/jailbreak/languages.json`). After the translation the encoding would
-  change nothing, yet count in `num_techniques`; before it, the translator
-  would get a cipher. The Latin-script translations still join them;
+  `configs/jailbreak/languages.json`). After the translation the encoding or
+  the Latin-letter noise would change nothing, yet count in
+  `num_techniques`; before it, the translator would get a cipher. The
+  Latin-script translations still join them;
 - in budget mode, its complexity is above what is left of `max_complexity`.
 
 `combine_techniques` does not check these rules. It only sorts techniques
@@ -242,17 +254,18 @@ A spec entry's `kinds` lists the kinds of the augmentation section that may
 draw the technique: `["adversarial"]` when neither the technique nor its
 first family gives one, and a technique's own `kinds` replace its family's.
 Every technique is adversarial. The families `typos`, `casual_writing`,
-`translation`, `answer_language`, `answer_format`, `asking` and `indirect`
-are marked `["adversarial", "natural"]`, less their attack-only techniques,
-and three techniques of attack families are marked natural on their own.
-The natural kind draws only what is marked natural: by default (translation
-off) these 46 techniques in 8 families, pinned in
+`noise`, `translation`, `answer_language`, `answer_format`, `asking` and
+`indirect` are marked `["adversarial", "natural"]`, less their attack-only
+techniques, and three techniques of attack families are marked natural on
+their own. The natural kind draws only what is marked natural: by default
+(translation off) these 54 techniques in 9 families, pinned in
 `tests/fixtures/natural_pool.json`:
 
 | Family | Natural techniques |
 |---|---|
 | `typos` | `to_rewrite_with_typos_low`, `to_rewrite_with_typos_medium` |
 | `casual_writing` | all nine |
+| `noise` | the low and medium densities of `to_random_capitals_*`, `to_scrambled_letters_*`, `to_keyboard_typos_*` and `to_emoji_sprinkle_*` (eight, since spec 1.2) |
 | `answer_language` | all twenty |
 | `answer_format` | `to_answer_in_markdown`, `to_answer_as_tutorial`, `to_answer_as_code`, `to_answer_as_structured_data` |
 | `asking` | `to_innocuous_question`, `to_ask_for_details` |
@@ -262,7 +275,7 @@ off) these 46 techniques in 8 families, pinned in
 
 With `"natural": {"translation": true}` the nineteen translations join them.
 Attack-only: `structural`, `continuation`, `temporal`, the high and insane
-typos, `to_answer_as_dialogue`, `to_answer_as_story` and the three
+typos, the four high-density noise techniques, `to_answer_as_dialogue`, `to_answer_as_story` and the three
 answer-format directives the natural kind denies anyway
 (`to_refusal_then_comply`, `to_apology_prevention`,
 `to_prefix_injection`), with every other family. A natural allow list that
@@ -359,6 +372,19 @@ the answers.
   common words it lists, and `to_stripped_accents` only accented Latin
   letters (other scripts keep their marks), so either leaves many prompts
   unchanged: a no-op, which the natural kind rejects.
+- `noise` is the slips of a person typing, each at three densities (spec
+  version 1.2), all pure and drawn by `rng`. A density is the share of the
+  letters or words the technique may change that it changes, at least one:
+  random capitals write the ASCII small letters as capitals (low 0.05,
+  medium 0.15, high 0.4 of them); scrambled letters shuffle the inner
+  letters of a word of Latin letters, the first and last kept (0.1, 0.25,
+  0.5 of the words whose inner letters are not all the same, each changed);
+  keyboard typos replace a letter by a key beside it on a QWERTY keyboard,
+  its case kept (0.02, 0.05, 0.1 of the letters); the emoji sprinkle puts a
+  space and one of eight neutral emoji (smiles, thumbs up, folded hands, a
+  thinking face, sparkles, raised hands) after a word (0.05, 0.1, 0.25 of
+  the words), so taking them out gives the text back. The constants are in
+  `obfuscation/noise.py`. The high densities are attack-only.
 - `suffixes` appends an adversarial suffix: punctuation, fragments, unicode
   or emoji. Its info is `suffix=<suffix>`.
 - `encode` encodes the whole text: base64 (one line), rot13, rot18 (rot13 on
@@ -496,6 +522,8 @@ Also beyond the reference list:
 - the encodings rot18, rot47 and ASCII ordinals;
 - the `casual_writing` family (9 techniques: casing, spacing, punctuation,
   abbreviations, accents);
+- the `noise` family (12 techniques: random capitals, scrambled letters,
+  keyboard typos and emoji, each at three densities);
 - the answer formats code, dialogue, story and structured data;
 - continuation attacks (4) and indirect task embedding (6);
 - the answer languages Zulu, Scots Gaelic, Bengali and Javanese.
