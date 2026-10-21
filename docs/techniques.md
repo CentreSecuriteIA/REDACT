@@ -220,7 +220,9 @@ the text unchanged or reversibly, or a check accepts the result:
 | `answer_format` | `to_refusal_then_comply` |
 
 Model rewrites no check verifies (`cognitive`, `persona`, `typos`,
-`sensitive_words`, `tokenbreak`) are left out. With
+`sensitive_words`, `tokenbreak`) are left out. The fifteen spec 1.2 encodings
+are not drawn here either: `eval.json` denies each in `techniques.deny`, so the
+`encode` row keeps its five `heavy` members while the eval pool is held. With
 `"adversarial": {"translation": false}` the pool keeps the other 28.
 [configuration.md](configuration.md#dataset-types) gives the type file.
 

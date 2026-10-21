@@ -361,6 +361,19 @@ them; a kept plan that does resumes with the WARNING above and still runs them. 
 one in `techniques.allow` draws it, with a `DeprecationWarning`, for this
 release ([techniques.md](techniques.md#retired-techniques)).
 
+**Release note: fifteen new encodings (spec 1.2).** The `encode` family gains
+fifteen pure techniques (reversal of the characters, each word or the word
+order; look-alike letters; zero-width noise; hex, binary, URL, HTML-entity,
+base32 and base85 codecs; a Caesar shift and Atbash; fullwidth and math-styled
+Unicode), so the default attack pool is 150 techniques. A fresh adversarial
+plan draws them; a kept plan resumes with the growth WARNING above and does not
+draw them until it is planned again with `resume=False`. hex, binary, base32
+and base85 are `heavy`, so `fsh` and `dap` refuse them; the rest are `light`,
+so they join the request obfuscation (phase 5), which changes a fresh plan's
+phase-5 draws (a wider set of light encodings to deal). The `eval` type denies
+all fifteen in `techniques.deny`, so its pool stays at 36 and its draws do not
+change ([techniques.md](techniques.md#what-the-families-do)).
+
 **Release note: the obfuscation order.** A fresh plan applies translation,
 typos and casual writing before the word-level steps, sensitive words and
 tokenbreak, which used to come first, so a combination holding both gives
