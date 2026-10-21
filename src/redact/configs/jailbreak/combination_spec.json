@@ -1,5 +1,5 @@
 {
-  "_comment": "Jailbreak technique compatibility specification. All rules enforced in jailbreak/rules.py. kinds, on a family or a technique, lists the augmentation kinds that may draw it: absent is [\"adversarial\"], and a technique's own kinds replace its first family's. since and deprecated, on a technique, are the versions that added and retired it (absent since is \"1.0\"): version moves up, as dotted whole numbers (\"1.9\", \"1.10\"), in each change that adds or retires a technique, and the technique carries the new version. Read by jailbreak/technique.py (tag) and jailbreak/pool.py.",
+  "_comment": "Jailbreak technique compatibility specification. All rules enforced in jailbreak/rules.py. kinds, on a family or a technique, lists the augmentation kinds that may draw it: absent is [\"adversarial\"], and a technique's own kinds replace its first family's. since and deprecated, on a technique, are the versions that added and retired it (absent since is \"1.0\"): version moves up, as dotted whole numbers (\"1.9\", \"1.10\"), in each change that adds or retires a technique, and the technique carries the new version. within_layer_order, on an obfuscation family, is the order the layer's families apply in, numbered in tens so a family added later slots in between: the whole-text rewrites first (translation 10, typos 20, casual_writing 30), so they cannot undo a word-level step, then the word-level steps (sensitive_words 40, tokenbreak 50), suffixes 60, encode 70, structural 80 and ascii_art 90, the outermost. A technique takes its first family's. Read by jailbreak/technique.py (tag) and jailbreak/pool.py.",
 
   "version": "1.1",
 
@@ -24,14 +24,14 @@
       "description": "Selective obfuscation of detected harmful words (char substitution, encoding, or synonym)",
       "layer": "obfuscation",
       "dimension": "encoding",
-      "within_layer_order": 1,
+      "within_layer_order": 40,
       "cross_incompatible_with": []
     },
     "tokenbreak": {
       "description": "Token-level splitting/prepending attacks targeting harmful words",
       "layer": "obfuscation",
       "dimension": "encoding",
-      "within_layer_order": 2,
+      "within_layer_order": 50,
       "cross_incompatible_with": []
     },
     "translation": {
@@ -39,7 +39,7 @@
       "layer": "obfuscation",
       "dimension": "language",
       "kinds": ["adversarial", "natural"],
-      "within_layer_order": 3,
+      "within_layer_order": 10,
       "cross_incompatible_with": ["ascii_art"]
     },
     "typos": {
@@ -47,35 +47,35 @@
       "layer": "obfuscation",
       "dimension": "surface_noise",
       "kinds": ["adversarial", "natural"],
-      "within_layer_order": 4,
+      "within_layer_order": 20,
       "cross_incompatible_with": []
     },
     "suffixes": {
       "description": "Adversarial suffix appended to the prompt",
       "layer": "obfuscation",
       "dimension": "surface_noise",
-      "within_layer_order": 5,
+      "within_layer_order": 60,
       "cross_incompatible_with": []
     },
     "encode": {
       "description": "Full-text encoding/cyphering (base64, rot*, leetspeak, morse, braille, etc.)",
       "layer": "obfuscation",
       "dimension": "encoding",
-      "within_layer_order": 6,
+      "within_layer_order": 70,
       "cross_incompatible_with": []
     },
     "structural": {
       "description": "JSON/XML/Markdown structural wrapping as outer frame",
       "layer": "obfuscation",
       "dimension": "container",
-      "within_layer_order": 7,
+      "within_layer_order": 80,
       "cross_incompatible_with": ["ascii_art"]
     },
     "ascii_art": {
       "description": "Full-text ASCII art conversion (outermost, incompatible with structural and hacking/manipulation due to output size)",
       "layer": "obfuscation",
       "dimension": "encoding",
-      "within_layer_order": 8,
+      "within_layer_order": 90,
       "cross_incompatible_with": ["structural", "translation", "framing", "persona", "cognitive", "fsh", "dap"]
     },
     "casual_writing": {
@@ -83,7 +83,7 @@
       "layer": "obfuscation",
       "dimension": "surface_noise",
       "kinds": ["adversarial", "natural"],
-      "within_layer_order": 4.5,
+      "within_layer_order": 30,
       "cross_incompatible_with": []
     },
     "framing": {

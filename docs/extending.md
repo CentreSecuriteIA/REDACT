@@ -199,7 +199,9 @@ contract.
    pool reads as the run's own change and the resume raises
    ([stages/jailbreaks.md](stages/jailbreaks.md#how-it-resumes)). A new
    family also needs an entry under `families`: `layer`,
-   `within_layer_order` (its place in the obfuscation order; 0 elsewhere),
+   `within_layer_order` (its place in the obfuscation order, between the
+   numbers of the families it should follow and precede: they go in tens,
+   `translation` 10 to `ascii_art` 90; 0 elsewhere),
    `dimension` (an augmentation tag of `configs/dimensions.json`, where a new
    one is an entry with its side and definition; import fails otherwise),
    `cross_incompatible_with` and, for one variations may draw, `kinds`,

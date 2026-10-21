@@ -244,7 +244,9 @@ _BUDGETS = [
      "sampling_probs": {"hacking": 0.9, "manipulation": 0.1, "requests": 0.9,
                         "request_obfuscation": 0.7}},
 ]
-_PINNED_DRAWS = "16be951e33395966dceff94a50bb754e20b59ab7092d60da59012fa871c83749"
+# The obfuscation renumbering (whole-text rewrites before word-level steps)
+# moved this digest: the same techniques are drawn, some in another order.
+_PINNED_DRAWS = "d8f6b26d677fa603f423caa830a0ca3d59344287128b57251b894451ebb3896a"
 
 
 def test_draws_without_the_request_obfuscation_are_those_made_before_it_was_counted():

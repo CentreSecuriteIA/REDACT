@@ -360,6 +360,13 @@ resumes with the WARNING above and still runs them. A section that names
 one in `techniques.allow` draws it, with a `DeprecationWarning`, for this
 release ([techniques.md](techniques.md#retired-techniques)).
 
+**Release note: the obfuscation order.** A fresh plan applies translation,
+typos and casual writing before the word-level steps, sensitive words and
+tokenbreak, which used to come first, so a combination holding both gives
+another text. A kept plan replays the order its manifest recorded. The
+families the eval type draws keep their order
+([techniques.md](techniques.md#layers)).
+
 **Release note: the natural pool.** The natural kind now draws only what
 the spec's `kinds` mark natural (46 techniques by default; `structural`,
 `continuation`, `temporal`, the high and insane typos and the dialogue and

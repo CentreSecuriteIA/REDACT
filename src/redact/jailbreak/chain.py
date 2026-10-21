@@ -115,7 +115,8 @@ def run_chain(
 
 def in_layer_order(techniques: Iterable[Callable]) -> list[Callable]:
     """``techniques`` in the order they apply: by the spec's layer order, then
-    by rank within the layer."""
+    by rank within the layer (``within_layer_order``: in the obfuscation
+    layer, the whole-text rewrites before the word-level steps)."""
     layer_order = load_spec()["layer_order"]
 
     def _sort_key(fn: Callable) -> tuple[int, int]:

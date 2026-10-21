@@ -178,7 +178,15 @@ the techniques still `compatible` with what is picked:
    technique fits.
 
 The apply order is the layers', whatever the pick order, except the request
-obfuscation, which goes last. A technique above the remaining complexity is
+obfuscation, which goes last. Within the obfuscation layer it is each
+family's `within_layer_order`, in tens: `translation` 10, `typos` 20,
+`casual_writing` 30, `sensitive_words` 40, `tokenbreak` 50, `suffixes` 60,
+`encode` 70, `structural` 80, `ascii_art` 90. The whole-text rewrites come
+before the word-level steps, which they would otherwise undo; a family
+added later takes a number between two. The manifest records the order a
+combination applies in and a replay keeps it (`combination_of`), so a plan
+made before the renumbering, when `sensitive_words` and `tokenbreak` came
+first, still runs as it was made. A technique above the remaining complexity is
 never eligible, for the first pick too. The request obfuscation is drawn
 from the techniques still compatible and within the remaining complexity,
 so it holds its slot and its complexity before the obfuscations fill the
