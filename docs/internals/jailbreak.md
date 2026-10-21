@@ -327,11 +327,11 @@ counted across groups.
 
 `tests/jailbreak/simulate.py` plans N synthetic inputs through `plan_run`
 (in a temporary folder) and gives each technique's share of the units and
-its share within its family; `py -m tests.jailbreak.simulate [N]` prints
+its share within its family; `python -m tests.jailbreak.simulate [N]` prints
 them for the default adversarial kind, and `deal_kind(section, n,
 base=...)` plans a kind over a dataset type's section (the eval type's);
 `plan_kind` and `plan_rows` give the manifest rows, `spend` what the units
-spent in complexity, and `py -m tests.jailbreak.simulate [N] budget` the
+spent in complexity, and `python -m tests.jailbreak.simulate [N] budget` the
 unit budget against the group budget. The coverage table holds none of these.
 
 ### The group budget

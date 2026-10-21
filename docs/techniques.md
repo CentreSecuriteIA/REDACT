@@ -66,7 +66,7 @@ on. (`to_rewrite`, despite its name, is an `indirect` request technique.)
 
 The two tables on this page are made from the spec: after a change to it,
 make them again from the repository root with
-`PYTHONPATH=src py -m tests.jailbreak.test_docs_counts` (the test fails
+`PYTHONPATH=src python -m tests.jailbreak.test_docs_counts` (the test fails
 until then). A technique counts in its first family; a retired one is left
 out. The translation family calls the `translation` model (a machine
 translator also has the generation model judge it); the other techniques

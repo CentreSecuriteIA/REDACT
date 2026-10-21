@@ -567,7 +567,7 @@ group has no bank, so it spends up to `max_complexity`.
 
 What it does, measured over 3,000 units of the default adversarial kind in
 three groups (seed 42, `max_complexity` 6, ceiling 9;
-`py -m tests.jailbreak.simulate 3000 budget`):
+`python -m tests.jailbreak.simulate 3000 budget`):
 
 | | `"unit"` | `"group"` |
 |---|---|---|
