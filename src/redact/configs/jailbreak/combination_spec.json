@@ -1,5 +1,5 @@
 {
-  "_comment": "Jailbreak technique compatibility specification. All rules enforced in jailbreak/rules.py. kinds, on a family or a technique, lists the augmentation kinds that may draw it: absent is [\"adversarial\"], and a technique's own kinds replace its first family's. since and deprecated, on a technique, are the versions that added and retired it (absent since is \"1.0\"): version moves up, as dotted whole numbers (\"1.9\", \"1.10\"), in each change that adds or retires a technique, and the technique carries the new version. within_layer_order, on an obfuscation family, is the order the layer's families apply in, numbered in tens so a family added later slots in between: the whole-text rewrites first (translation 10, typos 20, casual_writing 30, noise 35), so they cannot undo a word-level step, then the word-level steps (sensitive_words 40, tokenbreak 50), suffixes 60, encode 70, structural and neutral_container 80 (they exclude each other, so they never meet) and ascii_art 90, the outermost. A technique takes its first family's. Read by jailbreak/technique.py (tag) and jailbreak/pool.py.",
+  "_comment": "Jailbreak technique compatibility specification. All rules enforced in jailbreak/rules.py. kinds, on a family or a technique, lists the augmentation kinds that may draw it: absent is [\"adversarial\"], and a technique's own kinds replace its first family's. since and deprecated, on a technique, are the versions that added and retired it (absent since is \"1.0\"): version moves up, as dotted whole numbers (\"1.9\", \"1.10\"), in each change that adds or retires a technique, and the technique carries the new version. within_layer_order, on an obfuscation family, is the order the layer's families apply in, numbered in tens so a family added later slots in between: the whole-text rewrites first (translation 10, typos 20, casual_writing 30, noise 35), so they cannot undo a word-level step, then the word-level steps (sensitive_words 40, tokenbreak 50), suffixes 60, encode 70, structural and neutral_container 80 (they exclude each other, so they never meet) and ascii_art 90, the outermost. A technique takes its first family's. check and calls, on a family or a technique (a technique's own replacing its first family's), declare what checks a model-written technique's reply (typos, scenario, word_list or translate) and the model calls one application makes, generation and checks, as a whole number or [low, high]; nothing changes the draw by them. A translation's calls are for a one-paragraph prompt: a chat translator makes 2 to 8, a machine translation 3 to 12 (2P + 1 a round for P pieces). Read by jailbreak/technique.py (tag) and jailbreak/pool.py.",
 
   "version": "1.2",
 
@@ -25,6 +25,8 @@
       "layer": "obfuscation",
       "dimension": "encoding",
       "within_layer_order": 40,
+      "check": "word_list",
+      "calls": 1,
       "cross_incompatible_with": []
     },
     "tokenbreak": {
@@ -32,6 +34,8 @@
       "layer": "obfuscation",
       "dimension": "encoding",
       "within_layer_order": 50,
+      "check": "word_list",
+      "calls": 1,
       "cross_incompatible_with": []
     },
     "translation": {
@@ -40,6 +44,8 @@
       "dimension": "language",
       "kinds": ["adversarial", "natural"],
       "within_layer_order": 10,
+      "check": "translate",
+      "calls": [2, 12],
       "cross_incompatible_with": ["ascii_art"]
     },
     "typos": {
@@ -308,7 +314,7 @@
     "to_sensitive_words_hyphen":      { "families": ["sensitive_words"], "complexity": 2, "requires_llm": true, "deprecated": "1.1" },
     "to_sensitive_words_underscore":  { "families": ["sensitive_words"], "complexity": 2, "requires_llm": true, "deprecated": "1.1" },
     "to_sensitive_words_variables":   { "families": ["sensitive_words"], "complexity": 3, "requires_llm": true },
-    "to_synonym_substitution":        { "families": ["sensitive_words"], "complexity": 2, "requires_llm": true },
+    "to_synonym_substitution":        { "families": ["sensitive_words"], "complexity": 2, "requires_llm": true, "calls": [1, 11] },
 
     "to_rewrite_with_typos_low":    { "families": ["typos"], "complexity": 2, "requires_llm": true },
     "to_rewrite_with_typos_medium": { "families": ["typos"], "complexity": 2, "requires_llm": true },
@@ -373,17 +379,17 @@
 
     "to_fsh_random_short":   { "families": ["fsh"], "complexity": 2, "requires_llm": false, "requires_benign": true },
     "to_fsh_random_long":    { "families": ["fsh"], "complexity": 2, "requires_llm": false, "requires_benign": true },
-    "to_fsh_selected_short": { "families": ["fsh"], "complexity": 3, "requires_llm": true, "requires_benign": true },
-    "to_fsh_selected_long":  { "families": ["fsh"], "complexity": 3, "requires_llm": true, "requires_benign": true },
+    "to_fsh_selected_short": { "families": ["fsh"], "complexity": 3, "requires_llm": true, "requires_benign": true, "calls": 1 },
+    "to_fsh_selected_long":  { "families": ["fsh"], "complexity": 3, "requires_llm": true, "requires_benign": true, "calls": 1 },
     "to_fsh_random_many":    { "families": ["fsh"], "complexity": 3, "requires_llm": false, "requires_benign": true, "cross_incompatible_with": ["typos"], "since": "1.2" },
-    "to_fsh_selected_many":  { "families": ["fsh"], "complexity": 4, "requires_llm": true, "requires_benign": true, "cross_incompatible_with": ["typos"], "since": "1.2" },
+    "to_fsh_selected_many":  { "families": ["fsh"], "complexity": 4, "requires_llm": true, "requires_benign": true, "calls": 1, "cross_incompatible_with": ["typos"], "since": "1.2" },
 
     "to_dap_random_short":   { "families": ["dap"], "complexity": 2, "requires_llm": false, "requires_benign": true },
     "to_dap_random_long":    { "families": ["dap"], "complexity": 2, "requires_llm": false, "requires_benign": true },
-    "to_dap_selected_short": { "families": ["dap"], "complexity": 3, "requires_llm": true, "requires_benign": true },
-    "to_dap_selected_long":  { "families": ["dap"], "complexity": 3, "requires_llm": true, "requires_benign": true },
+    "to_dap_selected_short": { "families": ["dap"], "complexity": 3, "requires_llm": true, "requires_benign": true, "calls": 1 },
+    "to_dap_selected_long":  { "families": ["dap"], "complexity": 3, "requires_llm": true, "requires_benign": true, "calls": 1 },
     "to_dap_random_many":    { "families": ["dap"], "complexity": 3, "requires_llm": false, "requires_benign": true, "cross_incompatible_with": ["typos"], "since": "1.2" },
-    "to_dap_selected_many":  { "families": ["dap"], "complexity": 4, "requires_llm": true, "requires_benign": true, "cross_incompatible_with": ["typos"], "since": "1.2" },
+    "to_dap_selected_many":  { "families": ["dap"], "complexity": 4, "requires_llm": true, "requires_benign": true, "calls": 1, "cross_incompatible_with": ["typos"], "since": "1.2" },
 
     "to_refusal_then_comply":     { "families": ["answer_format"], "complexity": 3, "requires_llm": false, "kinds": ["adversarial"] },
     "to_apology_prevention":      { "families": ["answer_format"], "complexity": 2, "requires_llm": false, "kinds": ["adversarial"] },

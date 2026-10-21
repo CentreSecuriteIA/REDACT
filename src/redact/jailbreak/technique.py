@@ -42,6 +42,12 @@ KINDS = ("adversarial", "natural")
 #: The kinds of a family the spec gives no ``kinds``, and of its techniques.
 DEFAULT_KINDS = ("adversarial",)
 
+#: What a spec ``check`` may name: how a technique's model reply is checked.
+#: ``typos``, the typo check; ``scenario``, the scenario check; ``word_list``,
+#: the strict parse of a marked-word list; ``translate``, translation's own
+#: check and retry. The spec only declares it; the technique runs the check.
+CHECKS = ("typos", "scenario", "word_list", "translate")
+
 #: The spec version of a technique whose entry gives no ``since``: the
 #: techniques the library had before the spec dated them.
 FIRST_VERSION = "1.0"
@@ -162,6 +168,30 @@ def _checked_kinds(whose: str, kinds) -> list[str]:
     return list(kinds)
 
 
+def _checked_check(name: str, check) -> str | None:
+    """``check``, checked to be one of :data:`CHECKS` or None."""
+    if check is not None and check not in CHECKS:
+        raise ValueError(
+            f"Technique {name!r}: check must be one of {list(CHECKS)}, got "
+            f"{check!r}.")
+    return check
+
+
+def _checked_calls(name: str, calls) -> list[int] | None:
+    """``calls`` as ``[low, high]``: a whole number ``n`` is ``[n, n]``; None
+    stays None."""
+    if calls is None:
+        return None
+    pair = [calls, calls] if isinstance(calls, int) else calls
+    if (not isinstance(pair, list) or len(pair) != 2  # noqa: PLR2004
+            or not all(isinstance(n, int) and not isinstance(n, bool) for n in pair)
+            or not 1 <= pair[0] <= pair[1]):
+        raise ValueError(
+            f"Technique {name!r}: calls must be a whole number of at least 1 or "
+            f"a [low, high] pair of them, got {calls!r}.")
+    return list(pair)
+
+
 def version_key(version: str) -> tuple[int, ...]:
     """A spec version as the whole numbers it compares by: ``"1.10"`` is
     ``(1, 10)``, so it comes after ``"1.9"``."""
@@ -190,17 +220,23 @@ def tag(funcs: list[Callable]) -> None:
     join, beside its families' own) come from the technique's entry;
     ``layer`` and ``within_layer_order`` from its first family; ``kinds``
     (the augmentation kinds that may draw it) from the technique's entry,
-    else its first family's (:func:`family_kinds`). ``since`` is the spec
-    version that added the technique (:data:`FIRST_VERSION` when its entry
-    gives none) and ``deprecated`` the one that retired it (None while it
-    is active). A function the spec does not name is skipped. Called once,
-    when ``redact.jailbreak`` is imported.
+    else its first family's (:func:`family_kinds`). ``check`` (what checks
+    its model reply, one of :data:`CHECKS`, None for no check) and ``calls``
+    (the model calls one application makes, generation and checks, as
+    ``[low, high]``; None when the spec does not say) come the same way,
+    from the technique's entry, else its first family's. ``since`` is the
+    spec version that added the technique (:data:`FIRST_VERSION` when its
+    entry gives none) and ``deprecated`` the one that retired it (None while
+    it is active). A function the spec does not name is skipped. Called
+    once, when ``redact.jailbreak`` is imported.
 
     Raises:
         ValueError: A technique's ``max_tokens`` is not a whole number of at
             least 1, its ``needs_latin`` not true or false, its ``kinds``
             (or its family's) not a list of
-            :data:`KINDS`, or its ``since`` or ``deprecated``, or the spec's
+            :data:`KINDS`, its ``check`` not one of :data:`CHECKS`, its
+            ``calls`` not a whole number or a ``[low, high]`` pair of them,
+            or its ``since`` or ``deprecated``, or the spec's
             ``version``, not dotted whole numbers. Checked here, so a bad
             spec fails at import instead of as an error row per sample or
             on a resume.
@@ -249,6 +285,9 @@ def tag(funcs: list[Callable]) -> None:
         fn.kinds = (_checked_kinds(f"technique {name!r}", t["kinds"]) if "kinds" in t
                     else family_kinds(primary_family) if primary_family in families
                     else list(DEFAULT_KINDS))
+        family = families.get(primary_family, {})
+        fn.check = _checked_check(name, t.get("check", family.get("check")))
+        fn.calls = _checked_calls(name, t.get("calls", family.get("calls")))
         fn.since = _checked_version(
             f"technique {name!r}", "since", t.get("since", FIRST_VERSION))
         fn.deprecated = (_checked_version(f"technique {name!r}", "deprecated",

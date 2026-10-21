@@ -221,7 +221,8 @@ contract.
    tagged, `to_braille` aside while the eval pool is held),
    `max_tokens` to cap its calls' replies, `cross_incompatible_with` for
    families this technique, not its whole family, may not join,
-   `kinds` when it should differ from its first family's (below), and
+   `kinds` when it should differ from its first family's (below),
+   `check` and `calls` for one that calls a model (below), and
    `since`: move the spec's `version` up (`"1.1"` to `"1.2"`; versions are
    dotted whole numbers, so `"1.10"` follows `"1.9"`), once per change that
    adds or retires techniques, and give each new technique that version. A
@@ -237,6 +238,20 @@ contract.
    one is an entry with its side and definition; import fails otherwise),
    `cross_incompatible_with` and, for one variations may draw, `kinds`,
    plus a `description`, which nothing reads.
+   - **A technique that calls a model** says how its reply is checked and
+     what one application costs. `check` names the check: `typos` (the
+     typo check), `scenario` (the scenario check), `word_list` (the strict
+     parse of a marked-word list) or `translate` (translation's own check
+     and retry); `calls` is the model calls one application makes,
+     generation and checks, a whole number or `[low, high]`. A family's
+     apply to each of its techniques whose entry gives none, as `kinds` do.
+     Both only declare: the technique runs its check itself (the strict
+     parse in `obfuscation/tokenbreak.py`, translation's rounds), and
+     import fails on a `check` outside those four or `calls` that are not
+     whole numbers of at least 1. A technique of the eval pool that has a
+     model write the prompt must carry a `check`
+     (`tests/jailbreak/test_pool.py`; the `to_{fsh,dap}_selected_*`, which
+     only pick their pairs with a model, are exempt by name).
    A combination takes one technique per family; a layer's cap is in
    `layer_max_picks`. A rule binds both ways, so one of the two families'
    lists is enough; a rule between two families of one capped layer is

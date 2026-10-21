@@ -252,6 +252,40 @@ def test_a_needs_latin_that_is_not_true_or_false_raises_at_tagging(
         _tag_base64(monkeypatch, needs_latin=needs_latin)
 
 
+def test_check_and_calls_come_from_the_first_family_unless_the_entry_says():
+    by_name = registry(all_techniques())
+    # A family's: the sensitive-word encodings take sensitive_words', their
+    # first family, not encode's (which has none).
+    encoded = by_name["to_sensitive_words_encode_base64"]
+    assert (encoded.check, encoded.calls) == ("word_list", [1, 1])
+    assert by_name["to_swahili"].check == "translate"
+    # The entry's own: the synonyms are one call per marked word.
+    assert by_name["to_synonym_substitution"].calls == [1, 11]
+    # A pure technique, and fsh's that picks its pairs without a check.
+    assert (by_name["to_base64"].check, by_name["to_base64"].calls) == (None, None)
+    picks = by_name["to_fsh_selected_short"]
+    assert (picks.check, picks.calls) == (None, [1, 1])
+    assert by_name["to_fsh_random_short"].calls is None
+
+
+@pytest.mark.parametrize("calls, tagged", [(1, [1, 1]), ([2, 4], [2, 4])])
+def test_calls_is_a_whole_number_or_a_low_high_pair(monkeypatch, calls, tagged):
+    assert _tag_base64(monkeypatch, calls=calls).calls == tagged
+
+
+@pytest.mark.parametrize("calls", [0, [3, 2], [1], [1, 2, 3], "2", True, [1.0, 2]])
+def test_calls_that_are_not_whole_numbers_raise_at_tagging(monkeypatch, calls):
+    with pytest.raises(ValueError, match="'to_base64': calls must be a whole number"):
+        _tag_base64(monkeypatch, calls=calls)
+
+
+def test_a_check_not_among_the_checks_raises_at_tagging(monkeypatch):
+    assert _tag_base64(monkeypatch, check="word_list").check == "word_list"
+    with pytest.raises(ValueError, match="'to_base64': check must be one of "
+                       r"\['typos', 'scenario', 'word_list', 'translate'\]"):
+        _tag_base64(monkeypatch, check="preserve")
+
+
 def test_a_technique_is_dated_by_the_versions_that_added_and_retired_it(
         monkeypatch):
     dated = _tag_base64(monkeypatch, since="1.1", deprecated="1.12")
@@ -333,6 +367,21 @@ def test_the_eval_pool_is_the_36_pinned_techniques_in_10_families():
     assert sorted(fn.__name__ for fn in _in("encode", pool)) == sorted([
         "to_base64", "to_unicode_escape", "to_ascii_ordinal", "to_morse",
         "to_braille"])
+
+
+#: The eval techniques that call a model with no check: they ask it only
+#: which benign subcategory's pairs to show, and keep none of its text.
+PICKS_PAIRS_ONLY = {
+    f"to_{family}_selected_{size}"
+    for family in ("fsh", "dap") for size in ("short", "long", "many")}
+
+
+def test_every_eval_technique_that_has_a_model_write_the_prompt_is_checked():
+    by_name = registry(all_techniques())
+    unchecked = [name for name in EVAL_POOL
+                 if by_name[name].requires_llm and by_name[name].check is None
+                 and name not in PICKS_PAIRS_ONLY]
+    assert unchecked == []
 
 
 def test_the_eval_pool_holds_no_many_shot_variant():

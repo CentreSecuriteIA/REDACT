@@ -84,7 +84,12 @@ def to_y(prompt: str, **kwargs) -> TechniqueGen:
   `within_layer_order`; `kinds` (the augmentation kinds that may draw it)
   is the technique's own, else its first family's, else `["adversarial"]`.
   A `kinds` that is not a non-empty list of `adversarial` and `natural`
-  raises at import. `since` is the spec version that added the technique
+  raises at import. `check` (what checks its model reply: `typos`,
+  `scenario`, `word_list` or `translate`; `None` for none) and `calls` (the
+  model calls one application makes, generation and checks, as
+  `[low, high]`; `None` when the spec gives none) come the same way, the
+  technique's own, else its first family's; a value outside those raises at
+  import. Both only declare: nothing draws by them. `since` is the spec version that added the technique
   (`FIRST_VERSION`, `"1.0"`, when its entry gives none) and `deprecated`
   the one that retired it (`None` while it is active). Versions are dotted
   whole numbers and compare as such (`version_key`: `"1.10"` comes after
