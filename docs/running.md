@@ -66,7 +66,8 @@ too.
 
 The library logs under the `redact` logger and configures nothing. In your
 own script, call `logging.basicConfig(level=logging.INFO)` to see progress.
-`python scripts/inspect_run.py <data_dir>` prints each stage's run record.
+`python scripts/inspect_run.py <data_dir>` prints one line per stage record:
+its timestamp, counts and models.
 
 To start a setup of your own, write a folder of recipes and the configs
 they read:
@@ -77,9 +78,10 @@ python scripts/run.py ./my_setup/eval_recipe.json
 ```
 
 Each recipe there has `"config_dir": "."`: the folder's dataset type,
-taxonomy and augmentation files are read in place of the library's, file by
-file ([configuration.md](configuration.md#your-own-config-folder)). Delete
-every file you do not change, so it keeps following the library.
+taxonomy, augmentation, generation axes and dimensions files are read in
+place of the library's, file by file
+([configuration.md](configuration.md#your-own-config-folder)). Delete every
+file you do not change, so it keeps following the library.
 
 The notebooks in `notebooks/` walk through a run step by step:
 `eval_pipeline`, `training_pipeline`, `content_moderation` and
@@ -145,9 +147,9 @@ the stage's name.
   `data_dir`, `prompt_dir` and `taxonomy_dir` are relative to the current
   directory.
 - `config_dir` names a folder of your own configs: a dataset type
-  (`eval.json` or `training.json`), taxonomy or
-  `jailbreak/augmentations.json` file there is read in place of the packaged
-  one; `taxonomy_dir`, when given, still wins for taxonomies.
+  (`eval.json` or `training.json`), taxonomy, `jailbreak/augmentations.json`,
+  `generation_axes.json` or `dimensions.json` file there is read in place of
+  the packaged one; `taxonomy_dir`, when given, still wins for taxonomies.
 - A params file holds one entry per stage, under the stage's name. Any
   other top-level key raises, except a comment key that starts with `_`.
   Inside a stage's entry every key must be a parameter of the stage's front,
@@ -174,7 +176,7 @@ that lists that role.
 |---|---|---|---|
 | `gen` | inputs, outputs, jailbreaks | `uncensored_gen` | `venice-uncensored`, hosted (Venice) |
 | `check` | inputs, outputs | `uncensored_gen` | the `gen` model |
-| `translation` | jailbreaks, only when a kind's pool holds a translation technique (`"translation": true`: the packaged attacks, and the eval type's) | `translation` | `translategemma-27b`, local vLLM (27B, FP8); `deepseek-v3.2` by name for a hosted run |
+| `translation` | jailbreaks, only when a kind's pool holds a translation technique (`"translation": true`: the packaged attacks, and the eval type's) | `translation` | `translategemma-27b`, local vLLM (27B, FP8). Without a GPU, name the hosted `deepseek-v3.2`, or set `"translation": false` in the adversarial kind |
 | `constitution` | constitution | `constitution_gen` | `claude-opus-4-6`, hosted (Anthropic) |
 | `paraphraser` | paraphrase | `paraphraser` | `humanizer-12b`, local vLLM (12B, bf16) |
 | `paraphrase_check` | paraphrase | `uncensored_gen` | `venice-uncensored`, hosted |
@@ -232,7 +234,9 @@ mechanics.
 
 **Footprint.** Each local model's need is worked out without loading it. The
 weights are the setup's `vram_gb` when set, else an estimate from the
-checkpoint's HuggingFace config, else unknown. A vLLM engine adds its KV cache
+checkpoint's HuggingFace config (the packaged copy under
+`configs/llm/hf_configs/` when the setup has `hf_config`), else unknown. A
+vLLM engine adds its KV cache
 at its `max_model_len`, or at 10,000 tokens capped at the checkpoint's own
 maximum. For a checkpoint whose attention shape varies by layer (Gemma 4,
 whose full-attention layers have fewer, wider KV heads than its sliding
@@ -242,7 +246,8 @@ transformers 5.17 a per-layer attribute read globally raises) counts as
 unset, so an estimate never fails a plan. The padded need per card is (weights + KV) x 1.1 + 0.6 GiB. Two
 registry entries with the same checkpoint, quantization and engine kwargs
 share one engine and are counted once (`venice-paraphraser` and
-`venice-uncensored-fp8` do).
+`venice-uncensored-fp8` do; the bf16 local setup of `venice-uncensored` is a
+second load).
 
 **Placement and grants.** The vLLM engines on a card split 0.9 of it: each
 gets its padded need plus an equal share of what is left, and loads with that
@@ -322,6 +327,11 @@ its ledger records as finished. A resumed stage:
 A unit is acked only after its rows are on disk, so a crash loses at most the
 units finished since the last save, and those run again. [internals/dataset.md](internals/dataset.md#the-save-and-resume-model)
 explains the mechanism.
+
+The constitution stage is the exception: its ledger is plain, with no lock, no
+recorded sizes and nothing cut back, and it saves each unit as it finishes. A
+crash between a unit's rows and its ack makes the next run generate that unit
+and append its rows again ([stages/constitution.md](stages/constitution.md#how-it-resumes)).
 
 **Stopping a run.** Ctrl-C, or `kill <pid>` on `scripts/run.py`, ends the run
 cleanly: the finished units are saved, requests in flight are cancelled, and
@@ -474,9 +484,10 @@ Other files you may see:
 A run record, `Datasets/<stage>.run.json`, holds `stage`, `timestamp`,
 `params` (the stage's params: the dataset type's with the params file's
 entry over them), `models` (the recipe's role names),
-`counts` (`rows`, and `accepted` when the files have that column; for an
-eval build with `exclude_from`, `excluded`; for the paraphrase stage,
-`skipped`: the units under `min_words` words, per reason), `sources` (the files the stage
+`counts` (`rows`, and `accepted` when the files have that column; the inputs
+stage counts only the accepted rows of its `style`; an eval build with
+`exclude_from` adds `excluded`; the paraphrase stage adds `skipped`: the units
+under `min_words` words, per reason), `sources` (the files the stage
 read its inputs from: the taxonomy file for the constitution, and the benign
 taxonomy's with the general-benign part on; the saved constitution for the
 inputs; the input category files, and `output_responses.csv` for paraphrases
@@ -497,8 +508,9 @@ Every `run_pipeline` call writes a trace,
 time when two runs start in one second), one JSON event per line:
 each model call, each engine load and release, each residency plan, each
 stage's duration. `REDACT_TRACE=wandb` mirrors the events to Weights &
-Biases (project `WANDB_PROJECT`, default `redact`), and `REDACT_TRACE=off`
-writes nothing.
+Biases (project `WANDB_PROJECT`, default `redact`; `pip install wandb`, which
+no extra brings), and `REDACT_TRACE=off` writes nothing and leaves
+`summary["telemetry"]` empty.
 
 At the end of the run the driver logs a roll-up at INFO and returns it as
 `summary["telemetry"]`:
@@ -530,7 +542,7 @@ rate. [internals/telemetry.md](internals/telemetry.md) lists the events.
 | What you see | What it means | What to do |
 |---|---|---|
 | `ValueError: No input samples found. Run generate_inputs() first.` | `generate_outputs` or `generate_jailbreaks` found no category file under `<data_dir>/Datasets/constitution_inputs/` (`generate_paraphrases` skips the target at INFO instead) | Run `inputs` first, or point `data_dir` at the run that has them |
-| WARNING `outputs skipped: no input sample was accepted ...` (or `paraphrase (...)`, `jailbreaks`) | No input is accepted; the stage writes nothing, and the run goes on. With `"resume": false` it also removes what an earlier run of the stage left, so its record counts 0 rows; on a resume its earlier rows stay | Read `rejection_reason` in the category files. A weak checker model rejects almost everything: in the GPU check a 3B checker accepted 2 of 144 seeded inputs, a 24B accepted 144 of 144 |
+| WARNING `outputs skipped: no input sample was accepted ...` (or `paraphrase (...)`, `jailbreaks`) | No input is accepted; the stage writes nothing, and the run goes on. With `"resume": false` it also removes what an earlier run of the stage left, so its record counts 0 rows; on a resume its earlier rows stay | Read `rejection_reason` in the category files. A checker's reply accepts only when its first word is `yes` (or `ok`, `accept`, `pass`), so a checker that opens with anything else rejects. A weak checker model rejects almost everything: in a GPU check made before the checker prompts stated the verdict as the reply's first word, a 3B checker accepted 2 of 144 seeded inputs, a 24B accepted 144 of 144 |
 | WARNING `inputs: only N of M generated samples were accepted (under half)` | The checker rejects most samples | As above |
 | `ValueError: No constitution at ...` | A run whose inputs are seeded has no saved constitution | List `constitution` before `inputs` |
 | `RuntimeError: The run plans a model on a card another process holds memory on ...` | Before any stage: a card the plan uses is held, often by the engines of a run killed with `kill -9` | Kill the PIDs the message names and check `nvidia-smi` shows the card empty, or run on other cards (`CUDA_VISIBLE_DEVICES`) |
@@ -539,6 +551,8 @@ rate. [internals/telemetry.md](internals/telemetry.md) lists the events.
 | `FileNotFoundError: exclude_from names ...` | An eval build's `exclude_from` names a path that does not exist, or a folder with no `Datasets/*.csv` and no constitution; nothing is written | Name the training run's `data_dir` or one of its CSVs |
 | `ValueError: No benign pairs at ...` | Every benign unit was rejected three times | Use a stronger `gen` model, then delete the ledger the message names |
 | `KeyError: Model 'x' needs an API key, but the environment variable ... is not set` | A hosted model without its key | Add the key to `.env`, or serve the model locally |
+| `ImportError: The 'vllm' package is required for VLLMBackend` | A stage calls a local model and the `vllm` extra is not installed. The role defaults for `translation` (when a kind translates) and `paraphraser` are local | Install the extra. On a machine without a GPU, name `deepseek-v3.2` for `translation` (or set `"translation": false` in the adversarial kind) and take `paraphrase` out of `stages` |
+| WARNING `jailbreaks: <model> is a machine-translation model and GlotLID is not available ...` | The `langid` extra, or GlotLID's model file, is missing, so the language of the translations is not checked (the other checks run) | `pip install -e ".[langid]"`, then `python scripts/download_models.py` |
 | `KeyError: Model 'x' is not registered` | A name not in the registry | Fix the name, or add the model ([extending.md](extending.md#add-a-model)) |
 | `ValueError: params['outputs'] names [...], which generate_outputs does not take` | A params key that is not a parameter of the front | Use a key from [configuration.md](configuration.md#params-keys-per-stage) |
 | `ValueError: params['x'] sets [...], which the run passes ... itself` | The params file sets a key the recipe owns (`model`, `resume`, ...) | Set it in the recipe |

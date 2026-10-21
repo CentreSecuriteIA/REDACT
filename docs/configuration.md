@@ -606,7 +606,7 @@ process only.
 | `api_model_id` | the registry name | The model id sent to the provider |
 | `rate_limit_scope` | `"model"` | `model`: one window per model. `endpoint`: one window for every model with the same provider, URL and key variable; they must declare the same `rpm` |
 | `recommended_max_workers` | `1` | Requests in flight. Must be 1 for `anthropic`. A run's `workers` in the recipe replaces it |
-| `default_extra_body` | `null` | Provider parameters sent with each call (OpenAI-compatible only) |
+| `default_extra_body` | `null` | Provider parameters sent with each call that passes no `extra_body` of its own, which replaces them whole (OpenAI-compatible only) |
 | `price_per_1m_input`, `price_per_1m_output` | `null` | USD per million tokens, for the cost roll-up |
 | `max_retries` | `2` | Retries the SDK makes of a failed call (a 429, a 5xx, a lost connection), with its own backoff, unseen by the rate limiter and the trace. A call that still fails stops the stage |
 | `timeout_s` | `null` | Seconds before the SDK gives up on a call; `null` keeps the SDK's default (10 minutes). Above 0 |
@@ -684,6 +684,7 @@ defingerprinting model lives in another repository; register it with the
 | `CUDA_VISIBLE_DEVICES` | the planner, vLLM | The cards the run may use, by index, UUID or UUID prefix; the plan numbers cards over them. As in CUDA, an entry that names no card ends the list |
 | `CUDA_DEVICE_ORDER` | CUDA | Set to `PCI_BUS_ID` by a plan or a load unless set, so CUDA counts the cards as `nvidia-smi` does |
 | `VLLM_WORKER_MULTIPROC_METHOD` | vLLM | Set to `spawn` before a load unless set |
+| `VLLM_USE_V2_MODEL_RUNNER` | vLLM | Set to `0` before a load on WSL2 unless set, where vLLM's V2 model runner fails every load; an explicit value wins |
 | `VLLM_PROCESS_NAME_PREFIX` | the card check | The title prefix of vLLM's engine processes, default `VLLM`, named in the `kill -9` advice |
 
 ## Your own config folder
@@ -715,7 +716,7 @@ taxonomies, `generate_inputs` and `generate_outputs` for their axes,
 `generate_jailbreaks` for its section and benign taxonomy); a front called
 alone with none reads the packaged files only.
 
-`scaffold_setup(target_dir, overwrite=False)` (also
+`scaffold_setup(target_dir, *, overwrite=False)` (also
 `python scripts/scaffold_setup.py TARGET [--overwrite]`) writes a folder to
 start from:
 

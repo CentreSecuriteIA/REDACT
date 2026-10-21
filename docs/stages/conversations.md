@@ -199,9 +199,11 @@ first turn. There is no default target; pass it explicitly.
 **Search** (`optimization/`): `optimize` is a beam search toward a judge's
 yes. At each depth it extends every frontier conversation by each candidate
 move, has the target reply to all of them in one round, scores the replies
-with the judge, keeps the whole tree, and goes on with the `beam` best.
-`beam=1` refines a single line, as PAIR does; a wider beam explores, as TAP
-does. `optimize_attack` uses jailbreak techniques as the moves:
+with the judge, keeps the whole tree, and goes on with the `beam` best,
+stopping at the first depth where a node succeeds (`stop_on_success`, true
+by default; `optimize_attack` does not set it). `beam=1` refines a single
+line, as PAIR does; a wider beam explores, as TAP does. `optimize_attack`
+uses jailbreak techniques as the moves:
 
 ```python
 from redact.jailbreak.obfuscation.encoding import to_base64, to_rot13
@@ -218,4 +220,4 @@ best, tree = optimize_attack(
 The design follows Inspect's vocabulary: a seed is a `Sample`, the messages
 are `ChatMessage`s, a `Setting` is a solver and the judge a scorer. The
 dependencies point one way: `llm_pipeline/` (`LLMRequest`, the drivers),
-then `multi_turn/`, then `multiturn_attacks/` and `optimization/`.
+then `multi_turn/`, then `optimization/`, then `multiturn_attacks/`.

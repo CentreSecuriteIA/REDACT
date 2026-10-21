@@ -19,7 +19,7 @@ Under `src/redact/`:
 | `multi_turn/` | Conversation datasets: settings, actors, `generate_conversations`, `evaluate_conversations` |
 | `multiturn_attacks/`, `optimization/` | Crescendo and PAIR attacks against a safety-trained target; a beam search over conversation moves ([conversations](../stages/conversations.md#attacks-and-search)) |
 | `dataset/` | Rows on disk: identity, the ledger and manifest, resume, the per-category tree, what an eval build leaves out ([dataset.md](dataset.md)) |
-| `configs/` | Package data: `llm/` (registry, roles, GPU prices), `jailbreak/` (the spec, the augmentation defaults, technique templates), `dataset_types/` (what `training` and `eval` mean), `taxonomy/`, `datasets/`, `runs/` (example recipes and their params files), `generation_axes.json` (the axes of the inputs and outputs), `dimensions.json` (what each family and axis varies) |
+| `configs/` | Package data: `llm/` (registry, roles, GPU prices, `hf_configs/`), `jailbreak/` (the spec, the augmentation defaults, technique templates), `dataset_types/` (what `training` and `eval` mean), `taxonomy/`, `datasets/`, `runs/` (example recipes and their params files), `generation_axes.json` (the axes of the inputs and outputs), `dimensions.json` (what each family and axis varies) |
 | `prompts/` | One prompt JSON per pipeline and step |
 | `stages.py`, `recipe.py`, `driver.py`, `paths.py`, `config_overlay.py` | This page |
 | `telemetry.py` | The run trace and the cost roll-up ([telemetry.md](telemetry.md)) |
@@ -65,8 +65,9 @@ Every front takes, where they apply:
 - `data_dir`, the working root;
 - one model name per role, `None` meaning the registry role's default;
 - `prompt_dir`, the prompt overlay;
-- `config_dir`, the user's config folder (the constitution and jailbreak
-  fronts, for their taxonomies and the augmentation section);
+- `config_dir`, the user's config folder (the constitution front, for its
+  taxonomies; the inputs and outputs fronts, for their generation axes; the
+  jailbreak front, for its augmentation section and benign taxonomy);
 - its tunables, which are the params keys;
 - `resume=True`, `verbose=True` and `read_back=True` (`False` returns an
   empty frame and reads nothing back);
@@ -203,10 +204,14 @@ from the package only.
 8. Per stage: `_enter_phase` (unload, apply the stage's plan, preload this
    stage's models and the next stage's when they fit), then inside
    `telemetry.stage(name)`: the front with `read_back=False`, `file_counts`
-   and the stage's `extra_counts`, `write_record` with `sources`, the
-   `dataset_type` and its `dataset_type_hash`, and with a `config_dir` that
-   folder and `config_files`. Leaving `telemetry.stage` logs the
-   stage's replies cut at the token limit, per model.
+   and the stage's `extra_counts`, then `write_record`: `stage`, `timestamp`,
+   the merged `params`, `models`, `counts`, `sources`, `serving` (the roles
+   the stage calls), `dataset_type` and its `dataset_type_hash`, with a
+   `config_dir` that folder and `config_files`, and for the jailbreak stage
+   `spec_version` and the resolved `augmentation` section
+   ([running.md](../running.md#what-lands-on-disk)). Leaving
+   `telemetry.stage` logs the stage's replies cut at the token limit, per
+   model.
 9. `finally`: clear the run's serving. When the run has a plan: join the
    preload threads for at most `vllm.EXIT_WAIT_S` (60 s) in all, unload the
    engines the run loaded (`residency.unload_local(engines=before,
@@ -250,7 +255,7 @@ else the current directory.
 | `benign_csv` | `Data_cache/benign/benign_samples.csv` |
 
 Package folders take no root: `package_dir`, `prompts_dir`, `configs_dir`,
-`llm_configs_dir`, `models_json`, `roles_json`, `gpu_pricing_json`,
+`llm_configs_dir`, `models_json`, `roles_json`, `hf_configs_dir`, `gpu_pricing_json`,
 `taxonomy_dir` (`harmful.json`, `benign.json`), `dataset_configs_dir`
 (`configs/datasets/`), `jailbreak_configs_dir`.
 

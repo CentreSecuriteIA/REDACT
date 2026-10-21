@@ -47,9 +47,11 @@ All sizes are GiB (bytes / 1024^3).
 local (`vllm` or `introspect`).
 
 - **Weights**: the setup's `vram_gb` (source `declared`), else an estimate
-  from the HF config (source `estimated`), else unknown. The estimate reads
-  shapes only, takes the larger figure where the config leaves a choice, and
-  sizes a quantized checkpoint (`awq`, `gptq` at 4 bits, `fp8` at 8).
+  from the HF config (source `estimated`; the packaged config a vLLM
+  setup's `hf_config` names, when it has one), else unknown. The estimate
+  reads shapes only, takes the larger figure where the config leaves a
+  choice, and sizes a quantized checkpoint (`awq`, `gptq` at 4 bits, `fp8`
+  and `fp8_per_tensor` at 8).
 - **KV cache** (vLLM only): always estimated, at `max_model_len`, else at
   10,000 tokens capped at the checkpoint's own maximum. Summed layer by
   layer when the attention shape varies by layer (transformers'
@@ -269,9 +271,10 @@ The driver (`driver.py`):
    engines loaded before the run stay, unless a stage unloaded them); clear
    the planned shares and cards.
 
-The paraphrase stage plans its own pool of paraphrasers (`plan_residency`
-with one copy each). When they do not fit together it unloads each before
-the next, keeping the check model and the engines of other stages.
+With more than one paraphraser, the paraphrase stage plans its own pool of
+them (`plan_residency` with one copy each). When they do not fit together it
+unloads each before the next, keeping the check model and the engines of
+other stages.
 
 ## Limits
 

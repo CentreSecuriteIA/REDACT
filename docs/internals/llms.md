@@ -24,8 +24,9 @@ It must not:
   unit: that is `llm_pipeline/`;
 - know about a stage's files, ledgers or rows: that is `dataset/` and the
   stage cores;
-- import anything above `llms/`. Telemetry leaves through `observe.record`,
-  a hook the top level installs;
+- import anything above `llms/`, but the leaf modules `paths` and
+  `exceptions`. Telemetry leaves through `observe.record`, a hook the top
+  level installs;
 - branch on a backend's type. Callers read its capability flags.
 
 ## Modules
@@ -46,7 +47,7 @@ It must not:
 | `aio.py` | The one event loop that runs every async model call |
 | `observe.py` | The telemetry hook: `record`, `set_emitter`, `set_stage`, `current_stage` |
 | `progress.py` | `ProgressReporter`: throttled progress lines |
-| `prompting/` | `prompts.py` (loading, overlay, rendering), `extraction.py` (parsing replies), `scaffold.py` (writing an editable prompt tree) |
+| `prompting/` | `prompts.py` (loading, overlay, rendering), `extraction.py` (parsing replies), `scaffold.py` (writing an editable prompt tree, or a setup folder) |
 | `resources/` | `estimate.py` (a model's GPU need from its HF config), `measure.py` (`nvidia-smi` probes) |
 
 ## The registry
@@ -133,7 +134,12 @@ down and its memory freed, and a client built on it raises on its next call.
   fails is tried once more with one copy. Each engine records the share and
   cards it was built with; `engine_grants()` gives them for the engines
   loaded now.
-- A setup with `hf_config` loads its tokenizer from a folder of its own:
+- A setup with `hf_config` is given the packaged folder as vLLM's
+  `hf_config_path`. vLLM reads the generation config from there too, so the
+  folder holds the checkpoint's `generation_config.json` beside the
+  replacement `config.json`; without it the engine never learns the
+  end-of-turn token and runs every reply to `max_tokens`.
+- Such a setup also loads its tokenizer from a folder of its own:
   vLLM reads the `config.json` of the folder it loads the tokenizer from,
   not only `hf_config_path`, so the checkpoint's own config would still be
   parsed. `tokenizer_folder()` fetches only the snapshot's tokenizer and

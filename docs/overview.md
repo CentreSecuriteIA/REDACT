@@ -125,7 +125,10 @@ models per role, prompt overlay, config folder, taxonomy, benign taxonomy,
 params, resolved augmentations, `resume`). Then:
 
 1. `Stage.check` runs for every stage, so a params key that the front does
-   not take fails before the first stage spends anything.
+   not take fails before the first stage spends anything. `check_dimensions`
+   then stops a run in which a generation axis that varies and a family the
+   augmentation section draws share a dimension
+   ([configuration.md](configuration.md#dimensions-and-the-runs-check)).
 2. `telemetry.install` opens the trace file.
 3. `report_prompt_sources` logs which prompts the overlay replaces, and
    `report_config_sources` which config files the `config_dir` replaces,

@@ -18,6 +18,8 @@ It is responsible for:
 - the per-category tree of inputs (`categories.py`);
 - what an eval build leaves out because another run holds it
   (`exclusion.py`: `exclusion_files`, `Exclusion`);
+- balanced dealing and the plan file beside a manifest (`dealing.py`,
+  `planfile.py`);
 - writing and loading the taxonomy files (`taxonomy.py`) and published datasets
   (`loading.py`).
 
@@ -87,6 +89,9 @@ fails.
 
 Both are JSON Lines files beside the stage's output, built on
 `JsonlSidecar`, whose read skips a line it cannot parse.
+`Ledger.sidecar(artifact, key_fields, casters, name=None)` and
+`Manifest.sidecar(artifact, name=None)` give the file beside an artifact;
+`name` replaces the file name.
 
 **The manifest**, by default `<output stem>.manifest.jsonl` (`Manifest`), is
 the plan:
@@ -119,7 +124,8 @@ before the recorded size.
 `Ledger.read()` returns the finished keys, the last `_saved`, and the byte
 offset where the counted lines end. A line counts only if it ends with a
 newline, and lines after the last `_saved` belong to a save that did not
-finish, so they do not count. `completed()` is the keys alone; `ids` the
+finish, so they do not count. A ledger with no `_saved` line at all, a plain
+one, counts every line. `completed()` is the keys alone; `ids` the
 content ids of every finished unit's rows.
 
 ## The save and resume model
@@ -191,8 +197,8 @@ unless `manifest_path` names it), gives the lock back, then removes the
 files in `also`. The fronts call it with `resume=False` for a stage skipped
 for want of accepted rows: outputs, each paraphrase target, and each
 jailbreak kind. A jailbreak kind is also cleared when its `entry_types`
-match no input; for a kind, `also` holds its `.coverage.csv` and
-`.plan.json`.
+match no input. `also` holds the `.coverage.csv` and `.plan.json` of the
+outputs stage and of a kind.
 
 ### The lock
 

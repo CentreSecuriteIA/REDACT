@@ -9,11 +9,11 @@ Generate `outputs_per_input` model responses per accepted input (1 by
 default, 2 in a `training` run) and check each. Each response is dealt an
 answer mode, `harmful` or `helpful`, from those its input's entry type
 allows (see [Answer modes](#answer-modes)), then a spec of the response axes
-(length, format, tone); an input's responses differ on the axes, and from
-two per input a borderline input gets one answer of each mode. The mode
-picks the generation prompt and the checker, and gives the response its
-label: the input's entry type and the mode's output label, as
-`dual_use_benign_harmful`.
+(`length`, `format` and `register`, which the prompt labels Tone); an input's
+responses differ on the axes, and from two per input a borderline input gets
+one answer of each mode. The mode picks the generation prompt and the
+checker, and gives the response its label: the input's entry type and the
+mode's output label, as `dual_use_benign_harmful`.
 
 ## Inputs
 
@@ -216,7 +216,9 @@ from those the responses in ... were dealt with`, naming the keys and
 ## Rejected and failed units
 
 - A rejected response is saved with `accepted` false and the reason, and its
-  unit is acked: a resume does not try it again.
+  unit is acked: a resume does not try it again. The check reply is read as
+  in the inputs stage ([inputs](inputs.md#rejected-and-failed-units)): its
+  first word, `Yes` or `No`, is the verdict.
 - A response with almost no text is rejected before its check, with no check
   call: one with fewer than 20 characters (`MIN_RESPONSE_CHARS`) once its
   code-fence marker lines (a line that is three backticks, with an optional

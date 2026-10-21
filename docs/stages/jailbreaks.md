@@ -10,11 +10,11 @@ Augment the accepted inputs with technique combinations, in two kinds:
 | Kind | Writes | Default |
 |---|---|---|
 | `adversarial` | `Datasets/jailbreaks.csv`: jailbreak attacks | one round per input, by budget, from every technique but `casual_writing` |
-| `natural` | `Datasets/variations.csv`: natural variations | one technique per input, from the natural allow lists, of the 46 techniques the spec marks natural ([techniques.md](../techniques.md#the-natural-pool)) |
+| `natural` | `Datasets/variations.csv`: natural variations | one technique per input, from the natural allow lists, which the spec's `kinds` narrow to 46 techniques (65 with `"translation": true`, which adds the nineteen translations) ([techniques.md](../techniques.md#the-natural-pool)) |
 
 These are the packaged defaults, which a `training` run takes: both kinds
 are on. An `eval` run's dataset type attacks the harmful inputs only, with
-37 hard techniques in two count-driven rounds, one technique then two, and
+36 hard techniques in two count-driven rounds, one technique then two, and
 switches the natural kind off
 ([configuration.md](../configuration.md#dataset-types)). The recipe's
 `augmentations` section, over the dataset type's, or the front's
@@ -121,8 +121,8 @@ the row's own values.
 Columns of the coverage table: `level` (`layer`, `family` or `technique`),
 `name`, `category`, `entry_type`, `iteration`, `count`. It counts what the
 plan drew per group, and adds a zero row for each technique of the pool
-never drawn. The planner logs a WARNING when a layer falls two or more picks
-short of its rate in a group.
+never drawn. The planner logs a WARNING when a layer, or the request
+obfuscation step, falls two or more picks short of its rate in a group.
 
 ## The benign data
 

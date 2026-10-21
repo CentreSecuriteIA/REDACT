@@ -13,10 +13,10 @@ replacements.
 
 The shipped paraphraser is `humanizer-12b`, self-hosted on vLLM: Gemma 4 12B
 fine-tuned to rewrite model drafts as human text, keeping every fact.
-`venice-paraphraser`, the generator's own 24B weights, stood in before it and
-stays callable by name, for comparison. The trained defingerprinting model
-lives in another repository; register it with the `paraphraser` role when you
-have it.
+`venice-paraphraser`, the generator's own 24B weights quantized to FP8 on
+load, stood in before it and stays callable by name, for comparison. The
+trained defingerprinting model lives in another repository; register it with
+the `paraphraser` role when you have it.
 
 ## Inputs
 
@@ -252,7 +252,9 @@ layout out before they compare lengths, and the check judges content.
 - A paraphrase a gate rejects is saved with `accepted` false and the gate's
   reason as `reasoning`, without a check call.
 - A paraphrase the checker rejects is saved with `accepted` false. The build
-  leaves it out.
+  leaves it out. The check reply is read as in the inputs stage
+  ([inputs](inputs.md#rejected-and-failed-units)): its first word, `Yes` or
+  `No`, is the verdict.
 - A paraphrase that is empty, equal to its original, or equal to a text
   already in the file is dropped: no row, acked `dropped_dedup`. With the
   check on, the unit finds it before its check call, and makes none. Of two
