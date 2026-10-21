@@ -9,6 +9,8 @@ import re
 import unicodedata
 from collections.abc import Callable
 
+from redact.jailbreak.technique import applicable_when
+
 # Share of a prompt's spaces that to_dropped_spaces and to_doubled_spaces change.
 _SPACE_SHARE = 0.2
 
@@ -73,15 +75,21 @@ def to_doubled_punctuation(prompt: str) -> tuple[str, str]:
     return re.sub(r"(?<![.!?])([.!?])(?=\s|$)", r"\1\1", prompt), ""
 
 
+def _abbreviated(prompt: str) -> str:
+    """``prompt`` with the words of the abbreviation map abbreviated."""
+    return _ABBREVIATED.sub(lambda m: _ABBREVIATIONS[m.group(1).lower()], prompt)
+
+
+@applicable_when(lambda text, entry_type: _abbreviated(text) != text)
 def to_abbreviations(prompt: str) -> tuple[str, str]:
-    """Write common words as their chat abbreviations."""
-    return _ABBREVIATED.sub(lambda m: _ABBREVIATIONS[m.group(1).lower()], prompt), ""
+    """Write common words as their chat abbreviations. Drawn only for a
+    prompt it changes, one that holds a word of the map."""
+    return _abbreviated(prompt), ""
 
 
-def to_stripped_accents(prompt: str) -> tuple[str, str]:
-    """Write accented Latin letters without their accents; the marks of other
-    scripts, which change the letter, stay. A prompt with no accented Latin
-    letter is unchanged."""
+def _without_accents(prompt: str) -> str:
+    """``prompt`` with its accented Latin letters written without their
+    accents."""
     kept: list[str] = []
     base = ""
     for c in unicodedata.normalize("NFD", prompt):
@@ -90,7 +98,15 @@ def to_stripped_accents(prompt: str) -> tuple[str, str]:
         elif unicodedata.name(base, "").startswith("LATIN"):
             continue
         kept.append(c)
-    return unicodedata.normalize("NFC", "".join(kept)), ""
+    return unicodedata.normalize("NFC", "".join(kept))
+
+
+@applicable_when(lambda text, entry_type: _without_accents(text) != text)
+def to_stripped_accents(prompt: str) -> tuple[str, str]:
+    """Write accented Latin letters without their accents; the marks of other
+    scripts, which change the letter, stay. Drawn only for a prompt it
+    changes, one with an accented Latin letter."""
+    return _without_accents(prompt), ""
 
 
 def get_casual_writing_functions() -> list[Callable]:

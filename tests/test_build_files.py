@@ -32,9 +32,14 @@ sprinkle, braille nor a translation, whose characters no font draws, so
 every attack of the runs is accepted. The natural kind draws only what the
 spec marks natural (54 techniques, the low and medium noise among them since
 spec 1.2): two variations of the training run are no-ops the natural kind
-rejects, ``to_abbreviations`` on a text with none of its words and
-``to_stripped_accents`` on a text with no accent (30 of 32 jailbreak rows
-accepted). The training type answers each input twice
+rejects, ``to_lowercase`` on a text in lower case already and
+``to_doubled_punctuation`` on a text with no full stop (30 of 32 jailbreak
+rows accepted). They were ``to_abbreviations`` on a text with none of its
+words and ``to_stripped_accents`` on a text with no accent until the plan
+drew a technique only for the inputs it applies to, which neither applies
+to here; the casual writing picks dealt over the other members gave those
+two, and a third input's ``to_uppercase`` became ``to_dropped_spaces``.
+The training type answers each input twice
 (``outputs.outputs_per_input`` 2): 32 responses to 16 inputs, 28 accepted
 (the answers to the second samples of ``zq0`` are rejected), and 44
 paraphrases, of 16 inputs and 28 responses, 41 accepted. The build holds 16

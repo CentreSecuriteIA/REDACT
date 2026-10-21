@@ -96,7 +96,9 @@ def to_y(prompt: str, **kwargs) -> TechniqueGen:
   one. The plan draws a technique only for an input it is true for
   ([balanced dealing](#balanced-dealing)). The predicate calls the helper
   the technique itself calls, so the two cannot drift apart. The registry
-  fixture records `has_applicable`, a bool, not the function.
+  fixture records `has_applicable`, a bool, not the function. Today
+  `to_abbreviations` and `to_stripped_accents` have one: each applies only
+  to a text it changes.
 - A pure template technique draws its text from a variant pool, one
   directive's variants in its template file, and names it with
   `@uses_pool(file, directive, slots)` (its `variant_pool`; the answer

@@ -255,8 +255,14 @@ _BUDGETS = [
 # encodings moved it again: a wider encode family changes which member an
 # encode draw lands on for some seeds. The spec 1.2 noise family moved it once
 # more: one more obfuscation family to draw changes which family some draws
-# land on.
-_PINNED_DRAWS = "1960e169a9eb24148d6689f5952a4c79ea7704d57b2514f49f70c3a41b4d8470"
+# land on. The applicability of to_stripped_accents and to_abbreviations
+# moved it again: the simulated inputs hold no accented letter, so
+# to_stripped_accents, which 7 of the 240 dealt units drew, is never drawn
+# for them, and the casual writing picks are dealt over the other members;
+# since a unit's rng and its group's counts follow the picks before, 65 units
+# draw differently, 40 of them outside casual writing. The draws without a
+# dealer filter nothing and do not move.
+_PINNED_DRAWS = "058a36e12928ad00ac57579616257c67e72f3a654f2f2c309d9afdffdf0132a6"
 
 
 def test_draws_without_the_request_obfuscation_are_those_made_before_it_was_counted():

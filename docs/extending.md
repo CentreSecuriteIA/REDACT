@@ -191,7 +191,12 @@ contract.
      it for. Write the predicate by calling the helper the technique itself
      calls, never by restating its rule, so the two cannot drift apart, and
      test that it is true exactly when the technique changes the text (or,
-     for an entry-type rule, for exactly the entry types meant). The plan
+     for an entry-type rule, for exactly the entry types meant).
+     `to_abbreviations` is the example: its body is
+     `return _abbreviated(prompt), ""` and its decorator
+     `@applicable_when(lambda text, entry_type: _abbreviated(text) != text)`;
+     `test_casual_writing.py` checks the two agree on a set of neutral
+     texts. The plan
      filters the pool per input before the draw; the predicate sees the
      input, not what earlier steps of a combination wrote, and a kept plan
      replays without asking it. A technique of a default pool that gains

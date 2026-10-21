@@ -370,8 +370,12 @@ the answers.
 - `casual_writing` is how a person typing quickly writes: casing, spacing,
   punctuation, abbreviations, accents. `to_abbreviations` rewrites only the
   common words it lists, and `to_stripped_accents` only accented Latin
-  letters (other scripts keep their marks), so either leaves many prompts
-  unchanged: a no-op, which the natural kind rejects.
+  letters (other scripts keep their marks), so either would leave many
+  prompts unchanged. Each has an applicability: a fresh plan draws it only
+  for an input it changes, read off the input before any other step of
+  the combination. The other members may still leave a prompt unchanged
+  (`to_lowercase` on a text in lower case already): a no-op, which the
+  natural kind rejects.
 - `noise` is the slips of a person typing, each at three densities (spec
   version 1.2), all pure and drawn by `rng`. A density is the share of the
   letters or words the technique may change that it changes, at least one:

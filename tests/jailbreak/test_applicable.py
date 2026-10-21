@@ -124,6 +124,8 @@ def test_an_input_no_technique_applies_to_gets_the_empty_combination(tmp_path):
 def test_a_predicate_true_for_every_input_changes_no_draw(monkeypatch):
     rounds = [{}, {"exact_techniques": 2}]
     pool = all_techniques()
+    for fn in pool:
+        monkeypatch.delattr(fn, "applicable", raising=False)
     before = simulate.deal(pool, 60, groups=2, rounds=rounds)
     for fn in pool:
         monkeypatch.setattr(fn, "applicable", lambda text, entry_type: True,

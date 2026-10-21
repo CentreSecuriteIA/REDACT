@@ -392,6 +392,21 @@ delete the copy, or `scaffold_setup(..., overwrite=True)`). The eval type
 allows no `noise`, so its pool stays at 36 and its draws do not change
 ([techniques.md](techniques.md#what-the-families-do)).
 
+**Release note: a technique drawn only where it applies.** A technique may
+now carry an applicability, and a fresh plan draws it only for an input it
+applies to ([extending.md](extending.md#add-a-jailbreak-technique)).
+`to_abbreviations` and `to_stripped_accents` (`casual_writing`) apply only
+to a text they change, so a fresh natural plan no longer draws them for a
+prompt with none of the listed words or no accented Latin letter, a no-op
+the natural kind rejected. A fresh natural plan therefore draws differently
+from one made before with the same seed: the casual writing picks of such
+inputs go to the other members, and since the dealer counts each unit's
+picks, later units of a group can draw other techniques too. Another member
+can still leave a prompt unchanged (`to_lowercase` on a text in lower case
+already). A kept plan replays as it was made. The adversarial kind draws no
+casual writing unless its section allows the family, and the eval type
+draws none: their pools and draws do not change.
+
 **Release note: the obfuscation order.** A fresh plan applies translation,
 typos and casual writing before the word-level steps, sensitive words and
 tokenbreak, which used to come first, so a combination holding both gives
