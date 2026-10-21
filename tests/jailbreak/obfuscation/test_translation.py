@@ -47,11 +47,14 @@ class TestLanguages:
         assert "Maori" not in _names()
 
     def test_they_are_the_rows_of_the_language_table_marked_translation(self):
+        """Not Maori, nor the six answer languages of spec 1.2, whose
+        translation waits for a measured length ratio and GlotLID labels."""
         from redact.jailbreak.technique import data_rows
 
         rows = data_rows("languages.json")
         assert [row for row in rows if row["translation"]] == LANGUAGES
-        assert [row["name"] for row in rows if not row["translation"]] == ["Maori"]
+        assert [row["name"] for row in rows if not row["translation"]] == [
+            "Maori", "Hmong", "Guarani", "Chinese", "Hindi", "Yoruba", "Amharic"]
         assert [fn.__name__ for fn in get_translation_functions()] == [
             f"to_{language['slug']}" for language in LANGUAGES]
 

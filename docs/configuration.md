@@ -429,6 +429,20 @@ in both kinds, beside the families it denied before. The eval type
 allows no `neutral_container`, so its pool stays at 36 and its draws do not
 change ([techniques.md](techniques.md#what-the-families-do)).
 
+**Release note: six answer languages (spec 1.2).** `answer_language` gains
+Hmong, Guarani, Chinese, Hindi, Yoruba and Amharic (rows of
+`configs/jailbreak/languages.json`): six pure techniques,
+`to_ask_answer_in_<slug>`, in the default attack pool (174 techniques in 24
+families) and the natural pool (66 techniques in 10 families). A fresh plan
+of either kind draws them, and since the family has more members, some units
+of a fresh plan draw other techniques than they did with the same seed; a
+kept plan resumes with the growth WARNING above and does not draw them until
+it is planned again with `resume=False`. They have no translation yet: each
+needs its length ratio and GlotLID labels measured with the translation
+model first. The eval type draws no answer language, so its pool stays at 36
+and its draws do not change
+([techniques.md](techniques.md#the-language-table)).
+
 **Release note: the obfuscation order.** A fresh plan applies translation,
 typos and casual writing before the word-level steps, sensitive words and
 tokenbreak, which used to come first, so a combination holding both gives
@@ -547,7 +561,7 @@ The packaged natural kind allows the families `typos`, `casual_writing`,
 techniques `to_leetspeak_basic`, `to_adversarial_suffix_punctuation`,
 `to_adversarial_suffix_emoji`; and denies `to_refusal_then_comply`,
 `to_apology_prevention`, `to_prefix_injection`. The spec's `kinds` narrow
-it further (step 6 below): its pool is 60 techniques
+it further (step 6 below): its pool is 66 techniques
 ([techniques.md](techniques.md#the-natural-pool)). A variation that leaves
 its input unchanged is rejected.
 

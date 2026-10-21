@@ -115,14 +115,14 @@ _MILD_NOISE = [f"to_{noise}_{density}" for noise in (
     for density in ("low", "medium")]
 
 
-def test_the_default_variation_pool_is_the_60_pinned_natural_techniques():
+def test_the_default_variation_pool_is_the_66_pinned_natural_techniques():
     """A technique added to a family the spec marks natural takes its
     family's kinds, so it joins the natural pool unless its entry says
     ``["adversarial"]``. This fails until the owner decides, in the spec and
-    ``fixtures/natural_pool.json``."""
+    ``fixtures/natural_pool.json``. Spec 1.2 added six answer languages."""
     pool = technique_pool(resolve(None, "natural"))
     assert sorted(fn.__name__ for fn in pool) == NATURAL_POOL
-    assert len(pool) == 60      # noqa: PLR2004
+    assert len(pool) == 66      # noqa: PLR2004
     # Family by family: two typos, five whole families, four answer formats,
     # the mild noise, and three techniques of attack families.
     listed = sorted([
@@ -140,14 +140,14 @@ def test_the_default_variation_pool_is_the_60_pinned_natural_techniques():
         "suffixes"}
 
 
-def test_the_default_attack_pool_is_168_techniques_in_24_families():
+def test_the_default_attack_pool_is_174_techniques_in_24_families():
     """Every active technique but casual writing: the 19 translations
     included, now the packaged adversarial kind has its translation switch
     on; the seven spec 1.1 retired left out, the fifteen spec 1.2 encodings,
-    the twelve spec 1.2 noise techniques and the six spec 1.2 neutral
-    containers in."""
+    the twelve spec 1.2 noise techniques, the six spec 1.2 neutral
+    containers and the six spec 1.2 answer languages in."""
     pool = technique_pool(resolve(None, "adversarial"))
-    assert len(pool) == 168     # noqa: PLR2004
+    assert len(pool) == 174     # noqa: PLR2004
     assert len({fn.families[0] for fn in pool}) == 24     # noqa: PLR2004
 
 

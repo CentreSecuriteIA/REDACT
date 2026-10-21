@@ -263,8 +263,11 @@ _BUDGETS = [
 # draw differently, 40 of them outside casual writing. The draws without a
 # dealer filter nothing and do not move. The spec 1.2 neutral_container family
 # moved it again: one more obfuscation family to draw changes which family
-# some draws land on.
-_PINNED_DRAWS = "49576a0122db263f30f48521f0206589e39e27586edf14cb917065d582809b28"
+# some draws land on. The six spec 1.2 answer languages moved it once more: a
+# wider answer_language family changes the member some draws land on, and
+# through the unit's rng the rest of its draw (6 of the 240 dealt units, 4 of
+# the 200 undealt draws).
+_PINNED_DRAWS = "bbaf53bd08e3fa9de02d76bd7aecd51e668d1cdf5f827e8a04b6fc325c91687d"
 
 
 def test_draws_without_the_request_obfuscation_are_those_made_before_it_was_counted():

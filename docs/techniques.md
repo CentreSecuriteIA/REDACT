@@ -1,6 +1,6 @@
 # Jailbreak techniques
 
-The jailbreak stage draws from 177 active techniques in 4 layers and 25
+The jailbreak stage draws from 183 active techniques in 4 layers and 25
 families.
 `configs/jailbreak/combination_spec.json` gives each technique (the
 language ones through its `generators`, from
@@ -49,8 +49,8 @@ among them.
 | `hacking` | 3 | 21 | at most 1 |
 | `manipulation` | 2 | 8 | at most 1 |
 | `obfuscation` | 11 | 101 | no cap |
-| `requests` | 9 | 47 | at most 1 |
-| all | 25 | 177 | |
+| `requests` | 9 | 53 | at most 1 |
+| all | 25 | 183 | |
 <!-- END layers -->
 
 ## Families and techniques
@@ -83,7 +83,7 @@ that call a model call the generation model.
 | obfuscation | `structural` | `container` | 80 | 3 | no | no | `to_json`, `to_xml`, `to_markdown` |
 | obfuscation | `ascii_art` | `encoding` | 90 | 1 | no | no | `to_ascii_art` |
 | requests | `answer_format` | `answer_shape` |  | 9 | no | no | `to_refusal_then_comply`, `to_apology_prevention`, `to_prefix_injection`, `to_answer_in_markdown`, `to_answer_as_tutorial`, `to_answer_as_code`, `to_answer_as_dialogue`, `to_answer_as_story`, `to_answer_as_structured_data` |
-| requests | `answer_language` | `language` |  | 20 | no | no | `to_ask_answer_in_french`, `to_ask_answer_in_japanese`, `to_ask_answer_in_russian`, `to_ask_answer_in_spanish`, `to_ask_answer_in_german`, `to_ask_answer_in_arabic`, `to_ask_answer_in_turkish`, `to_ask_answer_in_czech`, `to_ask_answer_in_vietnamese`, `to_ask_answer_in_greek`, `to_ask_answer_in_croatian`, `to_ask_answer_in_swahili`, `to_ask_answer_in_thai`, `to_ask_answer_in_khmer`, `to_ask_answer_in_maori`, `to_ask_answer_in_nepali`, `to_ask_answer_in_zulu`, `to_ask_answer_in_scots_gaelic`, `to_ask_answer_in_bengali`, `to_ask_answer_in_javanese` |
+| requests | `answer_language` | `language` |  | 26 | no | no | `to_ask_answer_in_french`, `to_ask_answer_in_japanese`, `to_ask_answer_in_russian`, `to_ask_answer_in_spanish`, `to_ask_answer_in_german`, `to_ask_answer_in_arabic`, `to_ask_answer_in_turkish`, `to_ask_answer_in_czech`, `to_ask_answer_in_vietnamese`, `to_ask_answer_in_greek`, `to_ask_answer_in_croatian`, `to_ask_answer_in_swahili`, `to_ask_answer_in_thai`, `to_ask_answer_in_khmer`, `to_ask_answer_in_maori`, `to_ask_answer_in_nepali`, `to_ask_answer_in_zulu`, `to_ask_answer_in_scots_gaelic`, `to_ask_answer_in_bengali`, `to_ask_answer_in_javanese`, `to_ask_answer_in_hmong`, `to_ask_answer_in_guarani`, `to_ask_answer_in_chinese`, `to_ask_answer_in_hindi`, `to_ask_answer_in_yoruba`, `to_ask_answer_in_amharic` |
 | requests | `asking` | `request_shape` |  | 2 | no | no | `to_innocuous_question`, `to_ask_for_details` |
 | requests | `continuation` | `request_shape` |  | 4 | no | no | `to_continue_passage`, `to_complete_story`, `to_fill_in_blank`, `to_continue_instructions` |
 | requests | `distractor_prefix` | `request_shape` |  | 2 | no | no | `to_distractor_prefix_related`, `to_distractor_prefix_unrelated` |
@@ -148,8 +148,14 @@ which the script rule reads), and whether it has a `translation` technique
 (`to_<slug>`) and an `answer_language` one (`to_ask_answer_in_<slug>`). The
 spec's `generators` make a technique entry of each marked row as the spec
 loads, and the two families' modules build the functions from the same
-rows, in the table's order. Of the twenty rows, all have an answer-language
-technique and nineteen a translation (not Maori). The translation family
+rows, in the table's order. Of the twenty-six rows, all have an
+answer-language technique and nineteen a translation: not Maori, nor the six
+rows spec version 1.2 added (Hmong, Guarani, Chinese, Hindi, Yoruba,
+Amharic), whose translations wait for each language's measured length ratio
+and GlotLID labels, a measurement with the translation model on a GPU. Of
+those six, Chinese is scored high (0, as Japanese), Hindi mid (1, as Turkish
+and Vietnamese), and Hmong, Guarani, Yoruba and Amharic low (2, as Zulu and
+Swahili). The translation family
 kept the order it had; the answer languages took the table's, which puts
 Swahili before Thai, so a fresh plan that drew one of the two draws the
 other (a kept plan replays by name). The table is read from the package
@@ -263,7 +269,7 @@ Every technique is adversarial. The families `typos`, `casual_writing`,
 `["adversarial", "natural"]`, less their attack-only
 techniques, and three techniques of attack families are marked natural on
 their own. The natural kind draws only what is marked natural: by default
-(translation off) these 60 techniques in 10 families, pinned in
+(translation off) these 66 techniques in 10 families, pinned in
 `tests/fixtures/natural_pool.json`:
 
 | Family | Natural techniques |
@@ -272,7 +278,7 @@ their own. The natural kind draws only what is marked natural: by default
 | `casual_writing` | all nine |
 | `noise` | the low and medium densities of `to_random_capitals_*`, `to_scrambled_letters_*`, `to_keyboard_typos_*` and `to_emoji_sprinkle_*` (eight, since spec 1.2) |
 | `neutral_container` | all six (since spec 1.2) |
-| `answer_language` | all twenty |
+| `answer_language` | all twenty-six (six since spec 1.2) |
 | `answer_format` | `to_answer_in_markdown`, `to_answer_as_tutorial`, `to_answer_as_code`, `to_answer_as_structured_data` |
 | `asking` | `to_innocuous_question`, `to_ask_for_details` |
 | `indirect` | all six |
@@ -561,4 +567,5 @@ Also beyond the reference list:
   document, a CSV row, an email, a transcript line, a log entry);
 - the answer formats code, dialogue, story and structured data;
 - continuation attacks (4) and indirect task embedding (6);
-- the answer languages Zulu, Scots Gaelic, Bengali and Javanese.
+- the answer languages Zulu, Scots Gaelic, Bengali and Javanese, and (spec
+  version 1.2) Hmong, Guarani, Chinese, Hindi, Yoruba and Amharic.

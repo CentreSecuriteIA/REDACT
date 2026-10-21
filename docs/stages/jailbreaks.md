@@ -10,7 +10,7 @@ Augment the accepted inputs with technique combinations, in two kinds:
 | Kind | Writes | Default |
 |---|---|---|
 | `adversarial` | `Datasets/jailbreaks.csv`: jailbreak attacks | one round per input, by budget, from every technique but `casual_writing`; half the units take a request obfuscation, a light encoding or a translation after the request |
-| `natural` | `Datasets/variations.csv`: natural variations | one technique per input, from the natural allow lists, which the spec's `kinds` narrow to 60 techniques (79 with `"translation": true`, which adds the nineteen translations) ([techniques.md](../techniques.md#the-natural-pool)) |
+| `natural` | `Datasets/variations.csv`: natural variations | one technique per input, from the natural allow lists, which the spec's `kinds` narrow to 66 techniques (85 with `"translation": true`, which adds the nineteen translations) ([techniques.md](../techniques.md#the-natural-pool)) |
 
 These are the packaged defaults, which a `training` run takes: both kinds
 are on. An `eval` run's dataset type attacks the harmful inputs only, with

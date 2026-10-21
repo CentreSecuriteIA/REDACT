@@ -376,7 +376,7 @@ admits those alone. Last, it keeps the techniques whose `kinds` (set by
 which `pool.kind_of(resolved)` reads as `rounds_of` does: natural when the
 resolved kind has `exact_techniques`, so no key is added to it. Every
 technique holds `adversarial`, so only the natural pool is narrowed: to
-the 60 techniques of [techniques.md](../techniques.md#the-natural-pool) with
+the 66 techniques of [techniques.md](../techniques.md#the-natural-pool) with
 translation off. Then a technique whose `deprecated` tag is set leaves the
 pool unless `techniques.allow` names it; one it names stays, with a
 `DeprecationWarning` (read for this release). A family in `families.allow`

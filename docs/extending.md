@@ -260,11 +260,11 @@ contract.
    `configs/jailbreak/augmentations.json`; an allow list naming what the
    spec keeps from the kind raises. A family meant for variations only goes
    in `natural_only_families`.
-   - **The natural pool.** `tests/fixtures/natural_pool.json` pins the 60
+   - **The natural pool.** `tests/fixtures/natural_pool.json` pins the 66
      names the natural kind draws by default, and
      `tests/jailbreak/test_pool.py` fails until the owner decides: give the
      technique `"kinds": ["adversarial"]`, or add its name to the fixture.
-     The same file checks the attack pool's 168 techniques in 24 families.
+     The same file checks the attack pool's 174 techniques in 24 families.
    - **The eval pool.** `configs/dataset_types/eval.json` allows whole
      families (`encode`, `fsh`, `dap`, `framing`, `structural`, `ascii_art`,
      `continuation`, `temporal`), so a technique added to one of them joins
@@ -344,8 +344,12 @@ The `translation` and `answer_language` techniques are generated from
    translation model on a parallel corpus, to `LANGUAGE_CODES`,
    `ACCEPTED_LABELS` and `MEDIAN_RATIO` in `obfuscation/translation.py`,
    keyed by the slug. Import fails without them, naming the slug. Check that
-   the translation model covers the language first.
-4. **Then as for any technique**: regenerate the registry fixture, decide the
+   the translation model covers the language first. The six rows spec 1.2
+   added (Hmong, Guarani, Chinese, Hindi, Yoruba, Amharic) are answer
+   languages only, `translation` false, until that measurement is made on a
+   GPU: each translation is then its row's `true` and those three entries.
+4. **Then as for any technique**: regenerate the registry fixture and, for
+   an answer language (a template technique), the template draws; decide the
    natural pool (an answer language joins it: add its name to
    `tests/fixtures/natural_pool.json`), and update the counts in the docs.
    The eval type's translation allow list names its languages, so a new
