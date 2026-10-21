@@ -1,5 +1,5 @@
 """Persona techniques: an invented persona or one of the 14 in
-``configs/jailbreak/hacking/personas.json``.
+``configs/jailbreak/hacking/personas.json`` (4 of them retired by the spec).
 
 ``info`` is ``category=<name>_persona``, ``<name>`` the persona's key; the
 prompts get its ``display_name``. A scenario reply without its scene is asked

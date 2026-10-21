@@ -1,4 +1,5 @@
-"""Encoding techniques: the prompt as a cipher, a character code, Morse or Braille.
+"""Encoding techniques: the prompt as a cipher, a character code, a byte codec,
+Morse or Braille, reversed, or in look-alike, fullwidth or math-styled letters.
 
 ``info`` is empty, except ``sep=<separator>`` from ``to_separator``,
 ``shift=<n>`` from ``to_caesar_cipher`` and ``style=<name>`` from

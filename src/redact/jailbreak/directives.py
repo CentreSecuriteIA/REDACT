@@ -8,7 +8,8 @@ with a ``name``, its text and optionally a ``weight``:
 
 - ``{directive: [{"name", "template"}, ...]}``: framing, the answer formats,
   the answer languages (one directive, ``templates``), asking, the
-  distractors, impersonation, indirect, temporal;
+  distractors, impersonation, indirect, temporal, the neutral containers,
+  small talk and the benign roles;
 - ``{directive: [{"name", "prefix", "suffix"}, ...]}``: continuation, which
   puts the prompt between the two, so they hold no slot;
 - ``{technique: {"template", ...}}``: structural's ``to_xml`` and
