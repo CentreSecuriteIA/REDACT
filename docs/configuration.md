@@ -356,9 +356,8 @@ still raises.
 `to_sensitive_words_underscore` (`to_sensitive_words_encode_separator`
 draws their separators), `to_mentally_ill_persona`,
 `to_politician_persona`, `to_deformed_professor_persona` and
-`to_religious_figure_persona` leave every pool: the default attack pool is
-135 techniques. A fresh plan no longer draws them; a kept plan that does
-resumes with the WARNING above and still runs them. A section that names
+`to_religious_figure_persona` leave every pool. A fresh plan no longer draws
+them; a kept plan that does resumes with the WARNING above and still runs them. A section that names
 one in `techniques.allow` draws it, with a `DeprecationWarning`, for this
 release ([techniques.md](techniques.md#retired-techniques)).
 

@@ -3,21 +3,41 @@
 import base64
 import codecs
 import random
+import re
+import urllib.parse
 
 from redact.jailbreak.obfuscation.encoding import (
+    _LOOKALIKE_MAP,
+    _MATH_STYLES,
+    _ZERO_WIDTH,
     get_encoding_functions,
     to_ascii_ordinal,
+    to_atbash,
+    to_base32,
     to_base64,
+    to_base85,
+    to_binary,
     to_braille,
+    to_caesar_cipher,
+    to_fullwidth,
+    to_hex,
+    to_html_entities,
     to_leetspeak_advanced,
     to_leetspeak_basic,
     to_leetspeak_intermediate,
+    to_lookalike_letters,
+    to_math_styled,
     to_morse,
+    to_reversed_characters,
+    to_reversed_word_order,
+    to_reversed_words,
     to_rot13,
     to_rot18,
     to_rot47,
     to_separator,
     to_unicode_escape,
+    to_url_encoding,
+    to_zero_width_noise,
 )
 
 SAMPLE = "Hello World"
@@ -154,6 +174,125 @@ class TestBraille:
         assert " " in result
 
 
+class TestReversal:
+    def test_characters_reversed(self):
+        assert to_reversed_characters("abc")[0] == "cba"
+
+    def test_a_base_letter_keeps_the_marks_after_it(self):
+        accented = "e" + chr(0x301)      # e, then a combining acute accent
+        # the accent reverses with its letter, not to the string's front
+        assert to_reversed_characters(accented + "a")[0] == "a" + accented
+
+    def test_each_word_is_reversed_in_place(self):
+        assert to_reversed_words("Hello World")[0] == "olleH dlroW"
+
+    def test_word_order_reversed(self):
+        assert to_reversed_word_order("one two three")[0] == "three two one"
+
+    def test_each_is_its_own_inverse(self):
+        for fn in (to_reversed_characters, to_reversed_words,
+                   to_reversed_word_order):
+            assert fn(fn(SAMPLE)[0])[0] == SAMPLE, fn.__name__
+
+
+class TestLookalikeLetters:
+    def test_a_fraction_of_the_letters_become_cyrillic_lookalikes(self):
+        encoded, _ = to_lookalike_letters(SAMPLE, rng=random.Random(0))
+        assert encoded != SAMPLE
+        # every change is a mapped letter swapped for its look-alike
+        back = {v: k for k, v in _LOOKALIKE_MAP.items()}
+        assert "".join(back.get(c, c) for c in encoded) == SAMPLE
+
+    def test_a_fixed_seed_is_deterministic(self):
+        a = to_lookalike_letters(SAMPLE, rng=random.Random(7))[0]
+        b = to_lookalike_letters(SAMPLE, rng=random.Random(7))[0]
+        assert a == b
+
+    def test_a_text_with_no_mapped_letter_is_unchanged(self):
+        assert to_lookalike_letters("123 ---")[0] == "123 ---"
+
+
+class TestZeroWidthNoise:
+    def test_stripping_the_zero_width_characters_recovers_the_text(self):
+        encoded, _ = to_zero_width_noise(SAMPLE, rng=random.Random(0))
+        assert encoded != SAMPLE
+        assert "".join(c for c in encoded if c not in _ZERO_WIDTH) == SAMPLE
+
+    def test_a_fixed_seed_is_deterministic(self):
+        a = to_zero_width_noise(SAMPLE, rng=random.Random(7))[0]
+        b = to_zero_width_noise(SAMPLE, rng=random.Random(7))[0]
+        assert a == b
+
+
+class TestCodecs:
+    def test_hex_roundtrip(self):
+        assert bytes.fromhex(to_hex(SAMPLE)[0]).decode() == SAMPLE
+
+    def test_binary_roundtrip(self):
+        bits = to_binary(SAMPLE)[0].split()
+        assert bytes(int(b, 2) for b in bits).decode() == SAMPLE
+
+    def test_url_roundtrip(self):
+        assert urllib.parse.unquote(to_url_encoding(SAMPLE)[0]) == SAMPLE
+
+    def test_html_entities_roundtrip(self):
+        encoded, _ = to_html_entities(SAMPLE)
+        assert "".join(chr(int(m)) for m in re.findall(r"&#(\d+);", encoded)) == SAMPLE
+
+    def test_base32_roundtrip(self):
+        assert base64.b32decode(to_base32(SAMPLE)[0]).decode() == SAMPLE
+
+    def test_base85_roundtrip(self):
+        assert base64.b85decode(to_base85(SAMPLE)[0]).decode() == SAMPLE
+
+
+class TestCaesarAndAtbash:
+    def test_caesar_shifts_without_stating_the_key_in_the_text(self):
+        encoded, info = to_caesar_cipher(SAMPLE, rng=random.Random(1))
+        shift = int(info.removeprefix("shift="))
+        assert shift != 13      # that is to_rot13      # noqa: PLR2004
+        assert str(shift) not in encoded
+        back = "".join(
+            chr((ord(c) - 97 - shift) % 26 + 97) if "a" <= c <= "z"
+            else chr((ord(c) - 65 - shift) % 26 + 65) if "A" <= c <= "Z" else c
+            for c in encoded)
+        assert back == SAMPLE
+
+    def test_caesar_is_deterministic_for_a_seed(self):
+        a = to_caesar_cipher(SAMPLE, rng=random.Random(3))
+        b = to_caesar_cipher(SAMPLE, rng=random.Random(3))
+        assert a == b
+
+    def test_atbash_is_its_own_inverse(self):
+        encoded, _ = to_atbash(SAMPLE)
+        assert encoded != SAMPLE
+        assert to_atbash(encoded)[0] == SAMPLE
+
+
+class TestStyledUnicode:
+    def test_fullwidth_roundtrip(self):
+        encoded, _ = to_fullwidth("Ab9 ok")
+        assert encoded != "Ab9 ok"
+        back = "".join(chr(ord(c) - 0xFEE0) if 0xFF01 <= ord(c) <= 0xFF5E else c
+                       for c in encoded)
+        assert back == "Ab9 ok"
+
+    def test_math_styled_names_its_style_and_maps_back(self):
+        encoded, info = to_math_styled(SAMPLE, rng=random.Random(2))
+        style = info.removeprefix("style=")
+        upper, lower = _MATH_STYLES[style]
+        back = "".join(
+            chr(65 + ord(c) - upper) if upper <= ord(c) < upper + 26
+            else chr(97 + ord(c) - lower) if lower <= ord(c) < lower + 26 else c
+            for c in encoded)
+        assert back == SAMPLE
+
+    def test_math_styled_is_deterministic_for_a_seed(self):
+        a = to_math_styled(SAMPLE, rng=random.Random(5))
+        b = to_math_styled(SAMPLE, rng=random.Random(5))
+        assert a == b
+
+
 class TestAllEncodings:
     def test_all_return_tuple_with_info(self):
         for fn in get_encoding_functions():
@@ -162,7 +301,7 @@ class TestAllEncodings:
             assert len(result) == 2
 
     def test_get_encoding_functions_count(self):
-        assert len(get_encoding_functions()) == 12
+        assert len(get_encoding_functions()) == 27
 
     def test_output_differs_from_input(self):
         for fn in get_encoding_functions():
@@ -213,7 +352,7 @@ class TestLatinOnly:
 
     def test_a_latin_only_encoding_leaves_every_other_script_unchanged(self):
         tagged = [fn for fn in self._encodings() if fn.needs_latin]
-        assert len(tagged) == 12     # noqa: PLR2004
+        assert len(tagged) == 17     # noqa: PLR2004
         for fn in tagged:
             for language, text in NON_LATIN.items():
                 assert _leaves_unchanged(fn, text), (fn.__name__, language)

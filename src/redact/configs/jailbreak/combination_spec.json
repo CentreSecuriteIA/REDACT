@@ -1,7 +1,7 @@
 {
   "_comment": "Jailbreak technique compatibility specification. All rules enforced in jailbreak/rules.py. kinds, on a family or a technique, lists the augmentation kinds that may draw it: absent is [\"adversarial\"], and a technique's own kinds replace its first family's. since and deprecated, on a technique, are the versions that added and retired it (absent since is \"1.0\"): version moves up, as dotted whole numbers (\"1.9\", \"1.10\"), in each change that adds or retires a technique, and the technique carries the new version. within_layer_order, on an obfuscation family, is the order the layer's families apply in, numbered in tens so a family added later slots in between: the whole-text rewrites first (translation 10, typos 20, casual_writing 30), so they cannot undo a word-level step, then the word-level steps (sensitive_words 40, tokenbreak 50), suffixes 60, encode 70, structural 80 and ascii_art 90, the outermost. A technique takes its first family's. Read by jailbreak/technique.py (tag) and jailbreak/pool.py.",
 
-  "version": "1.1",
+  "version": "1.2",
 
   "layer_order": ["hacking", "manipulation", "obfuscation", "requests"],
 
@@ -219,6 +219,22 @@
     "to_leetspeak_advanced": { "families": ["encode"], "complexity": 2, "requires_llm": false, "encode_weight": "light", "needs_latin": true },
     "to_morse":              { "families": ["encode"], "complexity": 3, "requires_llm": false, "encode_weight": "heavy" },
     "to_braille":            { "families": ["encode"], "complexity": 3, "requires_llm": false, "encode_weight": "heavy", "cross_incompatible_with": ["ascii_art"] },
+
+    "to_reversed_characters": { "families": ["encode"], "complexity": 2, "requires_llm": false, "encode_weight": "light", "since": "1.2" },
+    "to_reversed_words":       { "families": ["encode"], "complexity": 2, "requires_llm": false, "encode_weight": "light", "since": "1.2" },
+    "to_reversed_word_order":  { "families": ["encode"], "complexity": 2, "requires_llm": false, "encode_weight": "light", "since": "1.2" },
+    "to_lookalike_letters":    { "families": ["encode"], "complexity": 2, "requires_llm": false, "encode_weight": "light", "needs_latin": true, "cross_incompatible_with": ["ascii_art"], "since": "1.2" },
+    "to_zero_width_noise":     { "families": ["encode"], "complexity": 2, "requires_llm": false, "encode_weight": "light", "cross_incompatible_with": ["ascii_art", "tokenbreak"], "since": "1.2" },
+    "to_hex":                  { "families": ["encode"], "complexity": 3, "requires_llm": false, "encode_weight": "heavy", "since": "1.2" },
+    "to_binary":               { "families": ["encode"], "complexity": 3, "requires_llm": false, "encode_weight": "heavy", "since": "1.2" },
+    "to_url_encoding":         { "families": ["encode"], "complexity": 2, "requires_llm": false, "encode_weight": "light", "since": "1.2" },
+    "to_html_entities":        { "families": ["encode"], "complexity": 2, "requires_llm": false, "encode_weight": "light", "since": "1.2" },
+    "to_base32":               { "families": ["encode"], "complexity": 3, "requires_llm": false, "encode_weight": "heavy", "since": "1.2" },
+    "to_base85":               { "families": ["encode"], "complexity": 3, "requires_llm": false, "encode_weight": "heavy", "since": "1.2" },
+    "to_caesar_cipher":        { "families": ["encode"], "complexity": 2, "requires_llm": false, "encode_weight": "light", "needs_latin": true, "since": "1.2" },
+    "to_atbash":               { "families": ["encode"], "complexity": 2, "requires_llm": false, "encode_weight": "light", "needs_latin": true, "since": "1.2" },
+    "to_fullwidth":            { "families": ["encode"], "complexity": 2, "requires_llm": false, "encode_weight": "light", "needs_latin": true, "cross_incompatible_with": ["ascii_art"], "since": "1.2" },
+    "to_math_styled":          { "families": ["encode"], "complexity": 2, "requires_llm": false, "encode_weight": "light", "needs_latin": true, "cross_incompatible_with": ["ascii_art"], "since": "1.2" },
 
     "to_json":              { "families": ["structural"], "complexity": 2, "requires_llm": false },
     "to_xml":                { "families": ["structural"], "complexity": 2, "requires_llm": false },

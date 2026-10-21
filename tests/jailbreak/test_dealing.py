@@ -251,8 +251,10 @@ _BUDGETS = [
 # with a translation into another script, and a few more drew from a list
 # the rule narrowed. The language table moved it once more: the answer
 # languages take its order, Swahili before Thai, so the draws that named one
-# of the two name the other, and nothing else changed.
-_PINNED_DRAWS = "fbb976a560f0b639cddf175f5f30197c49dbea13b146908ee8d0b0c3a61cd3c2"
+# of the two name the other, and nothing else changed. The fifteen spec 1.2
+# encodings moved it again: a wider encode family changes which member an
+# encode draw lands on for some seeds.
+_PINNED_DRAWS = "0f71eb72ec78ad71950f51296f182b23ecdda30e4d1580a035aadda446f08a93"
 
 
 def test_draws_without_the_request_obfuscation_are_those_made_before_it_was_counted():

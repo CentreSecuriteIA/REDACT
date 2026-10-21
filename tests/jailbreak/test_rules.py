@@ -117,6 +117,56 @@ def test_ascii_art_keeps_the_rest_of_their_families(technique):
 
 
 @pytest.mark.parametrize("technique", [
+    "to_lookalike_letters", "to_zero_width_noise", "to_fullwidth",
+    "to_math_styled"])
+def test_ascii_art_refuses_the_non_ascii_encodings_either_way(technique):
+    """Their output is non-ASCII (look-alike and math letters, zero-width
+    noise, fullwidth forms), which no font draws."""
+    assert not _joins(technique, "to_ascii_art")
+    assert not _joins("to_ascii_art", technique)
+
+
+@pytest.mark.parametrize("technique", [
+    "to_hex", "to_binary", "to_base32", "to_base85", "to_caesar_cipher",
+    "to_atbash", "to_reversed_characters", "to_url_encoding", "to_html_entities"])
+def test_ascii_art_keeps_the_ascii_output_encodings(technique):
+    """These write ASCII, so a font can draw them."""
+    assert _joins(technique, "to_ascii_art") and _joins("to_ascii_art", technique)
+
+
+@pytest.mark.parametrize("tokenbreak", [
+    "to_tokenbreak_prepend", "to_tokenbreak_split", "to_tokenbreak_delimiter"])
+def test_zero_width_noise_and_tokenbreak_are_never_planned_together(tokenbreak):
+    """Both work on the characters between letters; the spec keeps them apart."""
+    assert not _joins("to_zero_width_noise", tokenbreak)
+    assert not _joins(tokenbreak, "to_zero_width_noise")
+
+
+@pytest.mark.parametrize(("first", "then"), [
+    ("to_hex", "to_fsh_random_short"),
+    ("to_fsh_random_short", "to_hex"),
+    ("to_base32", "to_dap_random_long"),
+    ("to_dap_random_long", "to_base85"),
+])
+def test_the_new_heavy_encodings_are_blocked_from_manipulation(first, then):
+    """Heavy full-text encodings leave fsh/dap's benign pairs unreadable."""
+    assert not _joins(first, then)
+
+
+@pytest.mark.parametrize(("first", "then"), [
+    ("to_caesar_cipher", "to_thai"),
+    ("to_thai", "to_caesar_cipher"),
+    ("to_atbash", "to_japanese"),
+    ("to_japanese", "to_atbash"),
+])
+def test_a_new_latin_only_cipher_refuses_a_translation_into_another_script(
+        first, then):
+    """After the translation the cipher would change nothing; before it, the
+    translator would get a cipher."""
+    assert not _joins(first, then)
+
+
+@pytest.mark.parametrize("technique", [
     "to_adversarial_suffix_punctuation", "to_adversarial_suffix_fragments",
     "to_base64", "to_morse", "to_rot47"])
 def test_ascii_art_draws_a_font_for_the_rest_of_their_families(technique):

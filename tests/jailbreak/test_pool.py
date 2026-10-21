@@ -131,12 +131,13 @@ def test_the_default_variation_pool_is_the_46_pinned_natural_techniques():
         "indirect", "encode", "suffixes"}
 
 
-def test_the_default_attack_pool_is_135_techniques_in_22_families():
+def test_the_default_attack_pool_is_150_techniques_in_22_families():
     """Every active technique but casual writing: the 19 translations
     included, now the packaged adversarial kind has its translation switch
-    on; the seven spec 1.1 retired left out."""
+    on; the seven spec 1.1 retired left out, the fifteen spec 1.2 encodings
+    in."""
     pool = technique_pool(resolve(None, "adversarial"))
-    assert len(pool) == 135     # noqa: PLR2004
+    assert len(pool) == 150     # noqa: PLR2004
     assert len({fn.families[0] for fn in pool}) == 22     # noqa: PLR2004
 
 

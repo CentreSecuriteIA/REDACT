@@ -1,6 +1,6 @@
 # Jailbreak techniques
 
-The jailbreak stage draws from 144 active techniques in 4 layers and 23
+The jailbreak stage draws from 159 active techniques in 4 layers and 23
 families.
 `configs/jailbreak/combination_spec.json` gives each technique (the
 language ones through its `generators`, from
@@ -47,9 +47,9 @@ among them.
 |---|---|---|---|
 | `hacking` | 3 | 21 | at most 1 |
 | `manipulation` | 2 | 8 | at most 1 |
-| `obfuscation` | 9 | 68 | no cap |
+| `obfuscation` | 9 | 83 | no cap |
 | `requests` | 9 | 47 | at most 1 |
-| all | 23 | 144 | |
+| all | 23 | 159 | |
 <!-- END layers -->
 
 ## Families and techniques
@@ -76,7 +76,7 @@ that call a model call the generation model.
 | obfuscation | `sensitive_words` | `encoding` | 40 | 13 | yes | no | `to_sensitive_words_encode_base64`, `to_sensitive_words_encode_rot13`, `to_sensitive_words_encode_rot18`, `to_sensitive_words_encode_rot47`, `to_sensitive_words_encode_unicode`, `to_sensitive_words_encode_ascii`, `to_sensitive_words_encode_separator`, `to_sensitive_words_encode_leetspeak_basic`, `to_sensitive_words_encode_leetspeak_intermediate`, `to_sensitive_words_encode_leetspeak_advanced`, `to_sensitive_words_split`, `to_sensitive_words_variables`, `to_synonym_substitution` |
 | obfuscation | `tokenbreak` | `encoding` | 50 | 3 | yes | no | `to_tokenbreak_prepend`, `to_tokenbreak_split`, `to_tokenbreak_delimiter` |
 | obfuscation | `suffixes` | `surface_noise` | 60 | 4 | no | no | `to_adversarial_suffix_punctuation`, `to_adversarial_suffix_fragments`, `to_adversarial_suffix_unicode`, `to_adversarial_suffix_emoji` |
-| obfuscation | `encode` | `encoding` | 70 | 12 | no | no | `to_base64`, `to_rot13`, `to_rot18`, `to_rot47`, `to_unicode_escape`, `to_ascii_ordinal`, `to_separator`, `to_leetspeak_basic`, `to_leetspeak_intermediate`, `to_leetspeak_advanced`, `to_morse`, `to_braille` |
+| obfuscation | `encode` | `encoding` | 70 | 27 | no | no | `to_base64`, `to_rot13`, `to_rot18`, `to_rot47`, `to_unicode_escape`, `to_ascii_ordinal`, `to_separator`, `to_leetspeak_basic`, `to_leetspeak_intermediate`, `to_leetspeak_advanced`, `to_morse`, `to_braille`, `to_reversed_characters`, `to_reversed_words`, `to_reversed_word_order`, `to_lookalike_letters`, `to_zero_width_noise`, `to_hex`, `to_binary`, `to_url_encoding`, `to_html_entities`, `to_base32`, `to_base85`, `to_caesar_cipher`, `to_atbash`, `to_fullwidth`, `to_math_styled` |
 | obfuscation | `structural` | `container` | 80 | 3 | no | no | `to_json`, `to_xml`, `to_markdown` |
 | obfuscation | `ascii_art` | `encoding` | 90 | 1 | no | no | `to_ascii_art` |
 | requests | `answer_format` | `answer_shape` |  | 9 | no | no | `to_refusal_then_comply`, `to_apology_prevention`, `to_prefix_injection`, `to_answer_in_markdown`, `to_answer_as_tutorial`, `to_answer_as_code`, `to_answer_as_dialogue`, `to_answer_as_story`, `to_answer_as_structured_data` |
@@ -100,22 +100,33 @@ spec entry. The ten `to_sensitive_words_encode_*` techniques also
 belong to `encode`, so one of them blocks both families.
 
 `encode` techniques carry an `encode_weight`: `light` for `to_rot13`,
-`to_rot18`, `to_rot47`, `to_separator` and the three `to_leetspeak_*`;
-`heavy` for `to_base64`, `to_unicode_escape`, `to_ascii_ordinal`,
-`to_morse`, `to_braille`. The ten `to_sensitive_words_encode_*` carry one
-too: `heavy` for base64, unicode and ascii, `light` for the rest. Of these
-ten, the `heavy` ones stay allowed with `fsh` and `dap`, which the plain
+`to_rot18`, `to_rot47`, `to_separator`, the three `to_leetspeak_*`, the
+three reversals, `to_lookalike_letters`, `to_zero_width_noise`,
+`to_url_encoding`, `to_html_entities`, `to_caesar_cipher`, `to_atbash`,
+`to_fullwidth` and `to_math_styled`; `heavy` for `to_base64`,
+`to_unicode_escape`, `to_ascii_ordinal`, `to_hex`, `to_binary`, `to_base32`,
+`to_base85`, `to_morse`, `to_braille`. The ten `to_sensitive_words_encode_*`
+carry one too: `heavy` for base64, unicode and ascii, `light` for the rest. Of
+these ten, the `heavy` ones stay allowed with `fsh` and `dap`, which the plain
 `heavy` `encode` techniques are not; the `light` ones, like the plain `light`
 ones, may be the request obfuscation.
 
-Twelve of them are tagged `needs_latin`: `to_rot13`, `to_rot18`,
-`to_rot47`, the three `to_leetspeak_*` and their six
-`to_sensitive_words_encode_*` forms. They change only Latin letters (ROT18
-also ASCII digits, ROT47 every printable ASCII character), so they leave a
-text in another script as it was, as a test checks on six scripts.
+Seventeen of them are tagged `needs_latin`: the ciphers `to_rot13`,
+`to_rot18`, `to_rot47`, `to_caesar_cipher`, `to_atbash`, the three
+`to_leetspeak_*` and their six `to_sensitive_words_encode_*` forms, and the
+Latin-only transforms `to_lookalike_letters`, `to_fullwidth` and
+`to_math_styled`. They change only Latin letters (ROT18 also ASCII digits,
+ROT47 every printable ASCII character, fullwidth also ASCII digits), so they
+leave a text in another script as it was, as a test checks on six scripts.
 `to_morse` and `to_braille` pass such a text through as well (Morse only
 spaces its characters out) but are not tagged: both are in the eval pool,
 which is held, and completing them would change its text.
+`to_reversed_*`, `to_zero_width_noise` and the byte codecs (`to_hex`,
+`to_binary`, `to_url_encoding`, `to_html_entities`, `to_base32`,
+`to_base85`) are not Latin-only: they change a text in any script.
+`to_lookalike_letters`, `to_zero_width_noise`, `to_fullwidth` and
+`to_math_styled` write non-ASCII characters, so each is kept from `ascii_art`
+(`to_zero_width_noise` also from `tokenbreak`).
 
 ## The language table
 
@@ -352,7 +363,19 @@ the answers.
   letters and rot5 on ASCII digits), rot47, unicode escapes (`\uXXXX`, or
   `\UXXXXXXXX` above U+FFFF), ASCII ordinals, a separator (between the
   characters as a reader sees them: a combining mark or a joiner stays with
-  its letter), leetspeak at three levels, morse, braille.
+  its letter), leetspeak at three levels, morse, braille. Spec version 1.2
+  added fifteen more, all pure: reversal of the characters, of each word's
+  characters or of the word order (by character cluster, so a base letter
+  keeps its marks); look-alike letters (a fraction of the Latin letters,
+  drawn by `rng`, swapped for the visually identical Cyrillic ones);
+  zero-width noise (zero-width characters scattered between the characters at
+  a density drawn by `rng`); the byte codecs hex, binary (eight bits per
+  UTF-8 byte), URL percent-encoding, numeric HTML entities, base32 and
+  base85; a Caesar shift (drawn by `rng` from a fixed set, never 13, reported
+  in `shift=<n>`, not stated in the text) and Atbash on the Latin letters;
+  and fullwidth and math-styled Unicode (math-styled drawing one
+  Mathematical Alphanumeric style per call, reported in `style=<name>`).
+  Hex, binary, base32 and base85 are `heavy`, the rest `light`.
 - `structural` wraps the text in JSON, XML or markdown. `to_json` keeps
   non-ASCII characters as they are.
 - `ascii_art` draws the text in a pyfiglet font, drawn from those of the 16
