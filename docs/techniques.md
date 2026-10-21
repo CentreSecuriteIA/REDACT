@@ -268,7 +268,16 @@ the answers.
   words of the prompt (prompt `jailbreak/extract_harmful`), one call per
   technique. The encoding, splitting or substitution then applies to those
   words. A reply that is not a list of at most ten of the prompt's words
-  rejects the result (`DISCARDED; reason=malformed word list`). When the
+  rejects the result (`DISCARDED; reason=malformed word list`). A word is a
+  letter, then letters, digits, apostrophes, hyphens and combining marks
+  (not first), so a word a translation wrote in Bengali, Nepali, Thai or
+  Khmer, whose vowel signs and viramas are marks, is a word.
+  `to_tokenbreak_split` and the separator branch of
+  `to_tokenbreak_delimiter` cut a word between the characters a reader
+  sees, as `to_separator` does, never between a letter and its marks; a
+  conjunct (a virama or Khmer coeng, then a consonant) can still be cut
+  between its letters, as `to_separator` cuts it too. An ASCII word is cut
+  as before. When the
   model marks no word, the three `heavy` encodings
   (`to_sensitive_words_encode_base64`, `_unicode`, `_ascii`) reject the
   result (`DISCARDED; reason=no sensitive word`): encoding the whole prompt

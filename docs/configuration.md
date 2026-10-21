@@ -367,6 +367,17 @@ another text. A kept plan replays the order its manifest recorded. The
 families the eval type draws keep their order
 ([techniques.md](techniques.md#layers)).
 
+**Release note: marked words in a translation's script.** Since a fresh
+plan applies the word-level steps (sensitive words, tokenbreak) after a
+translation, a marked word can be in the translation's language and
+script. The marked-word parse now accepts the combining marks of such a
+word (the vowel signs and viramas of Bengali, Nepali, Thai or Khmer),
+where it rejected the reply as a malformed word list, and tokenbreak's
+split and separator cut a word between the characters a reader sees,
+never between a letter and its marks; an ASCII word is cut as before.
+Whether the marking model finds the right words in these languages is not
+measured ([techniques.md](techniques.md#what-the-families-do)).
+
 **Release note: the script rule.** A fresh plan no longer pairs ROT13,
 ROT18, ROT47 or leetspeak (whole-text or word-level) with a translation
 into another script than Latin, where the encoding changed nothing; so
