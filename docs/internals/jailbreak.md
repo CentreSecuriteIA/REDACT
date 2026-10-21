@@ -16,7 +16,10 @@ the technique names are in [techniques.md](../techniques.md).
   techniques.
 - The plan is frozen in the manifest. A replay reads each combination by
   name through the registry of every technique, not through the run's pool,
-  so a plan made with another pool still replays.
+  so a plan made with another pool still replays. A technique is retired
+  with `deprecated` in the spec, never removed: it stays registered and
+  replays, but leaves the pools (`test_registry_only_grows` holds every name
+  the registry fixture pins to the registry).
 - A technique draws its random choices from the `rng` it is given, so a
   replayed plan gives the same text within one version of the library. A
   technique changed between versions draws differently: the ASCII-art cap
@@ -284,7 +287,10 @@ which `pool.kind_of(resolved)` reads as `rounds_of` does: natural when the
 resolved kind has `exact_techniques`, so no key is added to it. Every
 technique holds `adversarial`, so only the natural pool is narrowed: to
 the 46 techniques of [techniques.md](../techniques.md#the-natural-pool) with
-translation off.
+translation off. Then a technique whose `deprecated` tag is set leaves the
+pool unless `techniques.allow` names it; one it names stays, with a
+`DeprecationWarning` (read for this release). A family in `families.allow`
+does not keep its retired techniques.
 `rounds_of(resolved)` turns the kind into one sampler-settings dict per
 round: a natural round is `{"exact_techniques": n}`; an adversarial round is
 the budget keys, an `include_<layer>` per layer and `allow_request_obfuscation`

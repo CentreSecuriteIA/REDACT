@@ -105,6 +105,17 @@ def test_a_seed_draws_the_same_combination(expected, actual):
     assert actual["combinations"] == expected["combinations"]
 
 
+def test_registry_only_grows(expected):
+    """A kept plan replays its techniques by name, so every technique the
+    fixture pins stays registered, a deprecated one too: a technique is
+    retired with ``deprecated`` in the spec, never removed. This names a
+    removed one before the fixture is regenerated over it."""
+    registered = {fn.__name__ for fns in _layers().values() for fn in fns}
+    pinned = {entry["name"] for entries in expected["layers"].values()
+              for entry in entries}
+    assert sorted(pinned - registered) == []
+
+
 def test_the_spec_and_the_registry_name_the_same_techniques():
     registered = [fn.__name__ for fns in _layers().values() for fn in fns]
     in_spec = {name for name in load_spec()["techniques"] if not name.startswith("_")}

@@ -249,6 +249,15 @@ contract.
 6. **Docs**: list it by name in [techniques.md](techniques.md), with the
    counts there.
 
+To retire a technique, never remove it: a kept plan replays its techniques
+by name, and `tests/jailbreak/test_registry.py::test_registry_only_grows`
+fails when a name the registry fixture pins is no longer registered. Give
+its spec entry `deprecated`, the spec's `version` moved up for it. It stays
+registered and replays, but leaves every pool unless a kind's
+`techniques.allow` names it, which gives a `DeprecationWarning`. Take it out
+of the counts in the docs, and out of `tests/fixtures/natural_pool.json` or
+`eval_pool.json` when it was in one.
+
 ## Add a stage
 
 A stage is a core, a front, and a row in the stage table.

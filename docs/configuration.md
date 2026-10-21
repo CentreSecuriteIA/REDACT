@@ -372,7 +372,7 @@ Both kinds:
 | `translation` | bool | `true` in the adversarial kind, `false` in the natural one | Whether the kind draws the `translation` family. The family lists do not change it; `layers.deny`, `techniques.deny` and `pure_only` still apply |
 | `layers` | `{"deny": [...]}` | `{"deny": []}` | Layers left out |
 | `families` | `{"allow": [...] or null, "deny": [...]}` | adversarial: `{"allow": null, "deny": []}`; natural: the natural families | Families admitted and removed |
-| `techniques` | `{"allow": [...] or null, "deny": [...]}` | adversarial: `{"allow": null, "deny": []}`; natural: three techniques allowed, three denied | Techniques admitted and removed. Either `allow` names only what the spec's `kinds` let the kind draw |
+| `techniques` | `{"allow": [...] or null, "deny": [...]}` | adversarial: `{"allow": null, "deny": []}`; natural: three techniques allowed, three denied | Techniques admitted and removed. Either `allow` names only what the spec's `kinds` let the kind draw. A technique the spec retired (`deprecated`) is drawn only when `allow` names it, with a `DeprecationWarning` |
 | `pure_only` | bool | `false` | Drop every technique that calls a model or needs benign data |
 | `family_weights` | `{family: number > 0}` | `{}` | A family's share within its layer when the plan deals families; 1 each by default |
 | `iterations` | int >= 1 | `1` | Units per input, numbered by `iteration` |

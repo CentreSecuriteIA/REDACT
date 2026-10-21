@@ -9,6 +9,13 @@ the `allow` and `deny` lists of the
 [augmentation section](configuration.md#the-augmentation-section), and says
 briefly what each family does.
 
+The spec also dates each technique: `since` is the spec version that added
+it (`"1.0"` when absent) and `deprecated` the one that retired it. A retired
+technique stays registered, so a plan that names it still replays, but no
+pool draws it unless the kind's `techniques.allow` names it (with a
+`DeprecationWarning`, for this release). The counts on this page are of the
+active techniques; none is retired yet.
+
 ## Layers
 
 A combination applies its techniques in layer order: `hacking`, then
