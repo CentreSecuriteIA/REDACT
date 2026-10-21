@@ -187,17 +187,20 @@ Each kind resumes on its own, from its ledger, with the lock and cut-back of
 [internals/dataset.md](../internals/dataset.md).
 
 The plan is frozen. A resumed kind reuses its manifest and runs the planned
-units its ledger does not record. Since the plan deals each family's
-techniques evenly, follows the persona and cognitive vs impersonation rule
-([techniques.md](../techniques.md#compatibility-rules)), and counts
-the request obfuscation (when `allow_request_obfuscation` is on, as in the
-packaged attacks and the escalation's rounds 3 and 4) against
-`max_obfuscations`, a fresh plan with
-the same seed draws differently from one made before; a kept plan replays
-unchanged. The
-natural kind's pool is now what the spec's `kinds` mark natural, so a
-natural plan made before raises on resume (its pool changed): run the
-natural kind with `resume=False`. The build leaves out the benign and
+units its ledger does not record, so a kept plan replays unchanged. A fresh
+plan with the same seed draws differently from one made at spec 1.0: the
+plan deals each family's techniques evenly, follows the persona and
+cognitive vs impersonation rule
+([techniques.md](../techniques.md#compatibility-rules)), counts the request
+obfuscation (when `allow_request_obfuscation` is on, as in the packaged
+attacks and the escalation's rounds 3 and 4) against `max_obfuscations`,
+draws a technique only for the inputs it applies to, and deals the
+techniques spec 1.2 added and not the seven it retired. The
+[release notes](../configuration.md#release-notes) list the changes. A
+natural plan made before the natural kind's pool was narrowed to what the
+spec's `kinds` mark natural raises on resume (its pool changed): run the
+natural kind with `resume=False`; one made since resumes with the WARNING
+below, spec 1.2 having grown the pool. The build leaves out the benign and
 dual-use benign variations such a plan made with a technique the natural
 kind no longer draws ([build.md](build.md#training-mode)). The
 5,000-character cap on `to_ascii_art` holds wherever it is drawn, the eval
@@ -235,46 +238,14 @@ pool raises as before. A section that newly names a family all of whose
 techniques came after the plan reads as such growth too, and warns instead
 of raising.
 
-**Release note: the typo check.** Each typo rewrite (`typos`, in both
-kinds) is now read against its prompt by the stage's `check` model
-(`jailbreak/typo_check`, at temperature 0.15), and a rejected rewrite is
-made again once with the check's reply as feedback: a typo row costs one
-more call, and two more on a rejection (2 to 4 in all, against 1 before).
-A rewrite rejected twice discards its unit's chain (`reasoning`
-`DISCARDED; technique=to_rewrite_with_typos_<level>; reason=typo check
-failed; ...`). Fresh plans use it, and so do the pending units of a kept
-plan (the plan is not changed: no plan raises or warns for it); finished
-rows keep their unchecked text. The `eval` type draws no typo technique:
-its pool and draws do not change.
-
-**Release note: the scenario check.** Each scenario of the `cognitive` and
-`persona` techniques (the adversarial kind only) is now read against its
-prompt by the stage's `check` model (`jailbreak/scenario_check`, at
-temperature 0.15), and a rejected scenario is made again once with the
-check's reply as feedback: such a row costs one more call, and a
-regeneration and its check on a rejection (3 to 9 calls in all, against 2
-before). A scenario rejected twice discards its unit's chain (`reasoning`
-`DISCARDED; technique=<name>; reason=scenario check failed; ...`), the
-prompt unchanged and no construction call made. Fresh plans use it, and so
-do the pending units of a kept plan (the plan is not changed: no plan
-raises or warns for it); finished rows keep their unchecked scenarios. The
-`eval` type draws neither family: its pool and draws do not change.
-
-**Release note: the request obfuscation on.** The packaged adversarial kind
-now has `allow_request_obfuscation` true, which adds the key to its
-rounds, so a kept adversarial plan made before, whose section left the key
-out, raises on resume, naming `rounds` and `resume=False`: run the adversarial kind once with
-`resume=False` (the natural kind's plan is not affected). A fresh plan
-gives half of each group's units, at the spec's `request_obfuscation` rate
-of 0.5, a light encoding or a translation after the request, in one of
-their `max_obfuscations` slots: in a 3,000-unit simulation 48% of these a
-light `to_sensitive_words_encode_*`, 48% a light `encode` technique and 4%
-a translation, about 2% of all rows, each translating the request's wording
-as well as the prompt on the `translation` model, piece by piece with its
-checks, back-translations and judge
-([configuration.md](../configuration.md#the-augmentation-section) has the
-figures and how to lower the rate). The eval type keeps it off, and its
-count rounds never read it: its draws do not change.
+**Release notes.** What changed for a run you already have is in the
+[release notes](../configuration.md#release-notes) of the configuration
+reference, with a summary on top: the request obfuscation now dealt by the
+packaged attacks, the one re-plan this release asks of the adversarial kind
+(its plan kept from before raises on resume, naming `rounds`; run the kind
+once with `resume=False`, the natural kind's plan is not affected); the typo
+and the scenario checks, which cost model calls; the natural pool; and the
+techniques spec 1.2 adds.
 
 ## Rejected and failed units
 
