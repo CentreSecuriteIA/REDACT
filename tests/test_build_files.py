@@ -30,22 +30,24 @@ carries its answer mode and the length its spec dealt, none is.
 The plan pairs ASCII art with neither the emoji or unicode suffix, the emoji
 sprinkle, braille nor a translation, whose characters no font draws, so
 every attack of the runs is accepted. The natural kind draws only what the
-spec marks natural (60 techniques, the low and medium noise and the neutral
-containers among them since spec 1.2; the containers moved some variations'
-draws, not their counts): two variations of the training run are no-ops the
-natural kind rejects, ``to_lowercase`` on a text in lower case already and
-``to_doubled_punctuation`` on a text with no full stop (30 of 32 jailbreak
-rows accepted). They were ``to_abbreviations`` on a text with none of its
-words and ``to_stripped_accents`` on a text with no accent until the plan
-drew a technique only for the inputs it applies to, which neither applies
-to here; the casual writing picks dealt over the other members gave those
-two, and a third input's ``to_uppercase`` became ``to_dropped_spaces``.
+spec marks natural (71 techniques, the low and medium noise, the neutral
+containers, six more answer languages, small talk and the benign roles
+among them since spec 1.2): one variation of the training run is a no-op the
+natural kind rejects, ``to_doubled_punctuation`` on a text with no full stop
+(31 of 32 jailbreak rows accepted). With the 66 techniques before small talk
+and the benign roles there were two, ``to_lowercase`` on a text in lower
+case already the other; the three request families dealt with the others
+gave that input ``to_code_comment``, and a dual-use benign input a benign
+role, ``to_benign_role_task_assistant``, which no harmful input of the run
+draws. Before the plan drew a technique only for the inputs it applies to,
+the two no-ops were ``to_abbreviations`` on a text with none of its words
+and ``to_stripped_accents`` on a text with no accent.
 The training type answers each input twice
 (``outputs.outputs_per_input`` 2): 32 responses to 16 inputs, 28 accepted
 (the answers to the second samples of ``zq0`` are rejected), and 44
 paraphrases, of 16 inputs and 28 responses, 41 accepted. The build holds 16
-inputs, 16 jailbreaks, 14 variations, 28 responses and 41 paraphrases, and
-leaves nothing out: its count is 115, where it was 86 with one response per
+inputs, 16 jailbreaks, 15 variations, 28 responses and 41 paraphrases, and
+leaves nothing out: its count is 116, where it was 86 with one response per
 input and three responses equal to variations.
 
 The eval run is not that commit's: its inputs are seeded from a small

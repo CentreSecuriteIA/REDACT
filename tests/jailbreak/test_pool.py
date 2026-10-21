@@ -43,11 +43,19 @@ def _kind(**given) -> dict:
     return resolve({"adversarial": given}, "adversarial")
 
 
+def _natural_only(techniques: list) -> list:
+    """The techniques of ``techniques`` no attack may draw: their kinds are
+    ``["natural"]`` (small talk, the benign roles)."""
+    return [fn for fn in techniques if "adversarial" not in fn.kinds]
+
+
 def test_the_default_attack_pool_is_every_active_technique_but_casual():
     """Translation is on in the packaged attacks, served by the local
-    translator. A retired technique is drawn only when named."""
+    translator. A retired technique is drawn only when named, a natural-only
+    one never."""
     full = all_techniques()
-    left_out = _in("casual_writing", full) + [fn for fn in full if fn.deprecated]
+    left_out = (_in("casual_writing", full) + [fn for fn in full if fn.deprecated]
+                + _natural_only(full))
     assert technique_pool(_kind()) == [fn for fn in full if fn not in left_out]
 
 
@@ -59,10 +67,12 @@ def test_the_packaged_natural_kind_keeps_translation_off():
 
 
 def _attacks(techniques: list) -> list:
-    """``techniques`` less the natural-only family, which no attack draws,
-    and the retired techniques, which no list here names."""
+    """``techniques`` less casual writing, which no attack draws unless
+    allowed, the natural-only families, which no attack draws, and the
+    retired techniques, which no list here names."""
     return [fn for fn in techniques
-            if "casual_writing" not in fn.families and not fn.deprecated]
+            if "casual_writing" not in fn.families and not fn.deprecated
+            and "adversarial" in fn.kinds]
 
 
 def test_switching_translation_on_makes_the_pool_every_attack_technique():
@@ -115,20 +125,22 @@ _MILD_NOISE = [f"to_{noise}_{density}" for noise in (
     for density in ("low", "medium")]
 
 
-def test_the_default_variation_pool_is_the_66_pinned_natural_techniques():
+def test_the_default_variation_pool_is_the_71_pinned_natural_techniques():
     """A technique added to a family the spec marks natural takes its
     family's kinds, so it joins the natural pool unless its entry says
     ``["adversarial"]``. This fails until the owner decides, in the spec and
-    ``fixtures/natural_pool.json``. Spec 1.2 added six answer languages."""
+    ``fixtures/natural_pool.json``. Spec 1.2 added six answer languages and
+    the natural-only small talk (2) and benign roles (3)."""
     pool = technique_pool(resolve(None, "natural"))
     assert sorted(fn.__name__ for fn in pool) == NATURAL_POOL
-    assert len(pool) == 66      # noqa: PLR2004
-    # Family by family: two typos, five whole families, four answer formats,
+    assert len(pool) == 71      # noqa: PLR2004
+    # Family by family: two typos, eight whole families, four answer formats,
     # the mild noise, and three techniques of attack families.
     listed = sorted([
         "to_rewrite_with_typos_low", "to_rewrite_with_typos_medium",
         *_family("casual_writing", "neutral_container", "answer_language",
-                 "asking", "indirect"),
+                 "asking", "indirect", "smalltalk_prefix", "smalltalk_suffix",
+                 "benign_role"),
         "to_answer_in_markdown", "to_answer_as_tutorial", "to_answer_as_code",
         "to_answer_as_structured_data", *_MILD_NOISE,
         "to_leetspeak_basic", "to_adversarial_suffix_punctuation",
@@ -136,16 +148,18 @@ def test_the_default_variation_pool_is_the_66_pinned_natural_techniques():
     assert listed == NATURAL_POOL
     assert {fn.families[0] for fn in pool} == {
         "typos", "casual_writing", "noise", "neutral_container",
-        "answer_language", "answer_format", "asking", "indirect", "encode",
+        "answer_language", "answer_format", "asking", "indirect",
+        "smalltalk_prefix", "smalltalk_suffix", "benign_role", "encode",
         "suffixes"}
 
 
 def test_the_default_attack_pool_is_174_techniques_in_24_families():
-    """Every active technique but casual writing: the 19 translations
-    included, now the packaged adversarial kind has its translation switch
-    on; the seven spec 1.1 retired left out, the fifteen spec 1.2 encodings,
-    the twelve spec 1.2 noise techniques, the six spec 1.2 neutral
-    containers and the six spec 1.2 answer languages in."""
+    """Every active technique but casual writing and the natural-only
+    families: the 19 translations included, now the packaged adversarial
+    kind has its translation switch on; the seven spec 1.1 retired left out,
+    the fifteen spec 1.2 encodings, the twelve spec 1.2 noise techniques, the
+    six spec 1.2 neutral containers and the six spec 1.2 answer languages in.
+    Small talk and the benign roles leave it as it was."""
     pool = technique_pool(resolve(None, "adversarial"))
     assert len(pool) == 174     # noqa: PLR2004
     assert len({fn.families[0] for fn in pool}) == 24     # noqa: PLR2004
@@ -170,10 +184,13 @@ def test_the_natural_kind_draws_only_what_the_spec_marks_natural():
         assert name not in natural
 
 
-def test_every_technique_is_adversarial_and_a_technique_s_kinds_win(monkeypatch):
+def test_only_the_natural_only_families_are_not_adversarial(monkeypatch):
+    """And a technique's own kinds win over its family's."""
     from redact.jailbreak.technique import DEFAULT_KINDS, family_kinds
 
-    assert all("adversarial" in fn.kinds for fn in all_techniques())
+    assert {fn.families[0] for fn in _natural_only(all_techniques())} == {
+        "smalltalk_prefix", "smalltalk_suffix", "benign_role"}
+    assert family_kinds("benign_role") == ["natural"]
     assert family_kinds("encode") == list(DEFAULT_KINDS) == ["adversarial"]
     by_name = registry(all_techniques())
     assert by_name["to_leetspeak_basic"].kinds == ["adversarial", "natural"]
@@ -186,6 +203,14 @@ def test_every_technique_is_adversarial_and_a_technique_s_kinds_win(monkeypatch)
     pool = technique_pool(_kind(families={"allow": ["casual_writing"]}))
     assert natural_only not in pool and pool
     assert natural_only in technique_pool(resolve(None, "natural"))
+
+
+@pytest.mark.parametrize("family", ["smalltalk_prefix", "smalltalk_suffix",
+                                    "benign_role"])
+def test_an_attack_allow_list_naming_a_natural_only_family_raises(family):
+    with pytest.raises(ValueError, match=f"names '{family}', which the "
+                       "adversarial kind does not draw"):
+        _kind(families={"allow": [family]})
 
 
 def _tag_base64(monkeypatch, spec_version="1.0", **entry):

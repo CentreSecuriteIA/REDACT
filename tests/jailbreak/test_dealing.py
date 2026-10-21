@@ -161,12 +161,14 @@ def test_the_escalation_asks_rates_the_rules_can_meet(tmp_path, caplog):
 
 def test_the_default_budget_deals_every_request_family(tmp_path):
     """The requests layer is picked before the obfuscations, so the budget
-    they spend does not leave only the cheapest request families."""
-    from redact.jailbreak.technique import load_spec
+    they spend does not leave only the cheapest request families. Every
+    request family the attacks may draw: not the natural-only ones."""
+    from redact.jailbreak.technique import family_kinds, load_spec
 
     families = load_spec()["families"]
     requests = [name for name, family in families.items()
-                if family["layer"] == "requests"]
+                if family["layer"] == "requests"
+                and "adversarial" in family_kinds(name)]
     rows = _plan_kind(tmp_path, {}, 200)
     drawn = {r["name"]: int(r["count"]) for r in rows if r["level"] == "family"}
     short = {name: drawn.get(name, 0) for name in requests
@@ -266,8 +268,13 @@ _BUDGETS = [
 # some draws land on. The six spec 1.2 answer languages moved it once more: a
 # wider answer_language family changes the member some draws land on, and
 # through the unit's rng the rest of its draw (6 of the 240 dealt units, 4 of
-# the 200 undealt draws).
-_PINNED_DRAWS = "bbaf53bd08e3fa9de02d76bd7aecd51e668d1cdf5f827e8a04b6fc325c91687d"
+# the 200 undealt draws). The three spec 1.2 natural-only request families
+# (small talk before and after, benign roles) moved it again: all_techniques()
+# holds them, whatever their kinds, and three more request families to deal
+# change most draws (224 of the 240 dealt units, 49 of the 200 undealt ones).
+# The simulated inputs are harmful, so no dealt unit draws a benign role; the
+# undealt draws, which read no applicability, do.
+_PINNED_DRAWS = "1c260b392b6750c6b5417cc5cc86e7ddb4912be0713dd320f261c7954ed06c7e"
 
 
 def test_draws_without_the_request_obfuscation_are_those_made_before_it_was_counted():

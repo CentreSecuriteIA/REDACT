@@ -37,7 +37,7 @@ _FIXTURE = Path(__file__).parents[1] / "fixtures" / "variant_floor.json"
 
 #: The fewest variants a pool should have, by its family: 8 for a request or
 #: framing directive and for a container, 12 for a benign role, 20 for small
-#: talk. ``benign_role`` and the small-talk families have no pool yet.
+#: talk.
 FLOORS = {
     "framing": 8,
     "answer_format": 8,

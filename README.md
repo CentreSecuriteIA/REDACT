@@ -37,8 +37,8 @@ on its own:
 3. **outputs**: k checked model responses per accepted input (2 in a training run), each in an answer mode, harmful or helpful.
 4. **paraphrase**: checked rewordings of the inputs (and, opt-in, the outputs),
    to remove the generating model's fingerprint.
-5. **jailbreaks**: attacks drawn from 183 techniques in 25 families, dealt
-   evenly across categories, and natural variations of the inputs.
+5. **jailbreaks**: attacks and natural variations of the inputs, drawn from
+   188 techniques in 28 families and dealt evenly across categories.
 6. **build**: the accepted rows of every stage, merged into
    `complete_dataset.csv` for training, or into three flat files for
    evaluation (`eval_inputs.csv`, `eval_outputs.csv`, `eval_jailbreaks.csv`).

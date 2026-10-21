@@ -178,13 +178,14 @@ def test_a_copy_whose_natural_kind_misses_a_packaged_family_is_logged(
     _write(tmp_path / "jailbreak" / "augmentations.json", _natural_allowing(
         "typos", "casual_writing", "answer_language", "answer_format"))
     assert unseen_natural_families(tmp_path) == [
-        "noise", "neutral_container", "asking", "indirect"]
+        "noise", "neutral_container", "asking", "indirect", "smalltalk_prefix",
+        "smalltalk_suffix", "benign_role"]
     with caplog.at_level("INFO", logger="redact.config_overlay"):
         report_config_sources(tmp_path, verbose=False)
     (record,) = caplog.records
     assert record.levelname == "INFO"
-    assert ("does not allow noise, neutral_container, asking, indirect"
-            in record.getMessage())
+    assert ("does not allow noise, neutral_container, asking, indirect, "
+            "smalltalk_prefix, smalltalk_suffix, benign_role" in record.getMessage())
     assert "overwrite=True" in record.getMessage()
 
 

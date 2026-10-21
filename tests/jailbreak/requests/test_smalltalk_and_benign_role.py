@@ -4,6 +4,7 @@ an ordinary line before or after the prompt, the prompt kept as it is."""
 import random
 import re
 
+import pandas as pd
 import pytest
 
 import redact.jailbreak.directives as D
@@ -137,3 +138,30 @@ def test_a_benign_role_applies_to_benign_and_dual_use_benign_inputs_only(fn):
 def test_small_talk_applies_to_every_input(fn):
     assert all(applies(fn, TEXTS[0], entry_type.value)
                for entry_type in ALL_ENTRY_TYPES)
+
+
+def test_the_natural_plan_draws_a_benign_role_for_benign_inputs_only(tmp_path):
+    """The packaged natural pool planned for 26 inputs of each entry type,
+    one group each: the dealer gives every family of the pool its share of a
+    group whose inputs it applies to, so the benign groups draw benign roles
+    and the harmful ones none; small talk goes to every group."""
+    from redact.dataset import Manifest
+    from redact.jailbreak.augmentation import resolve
+    from redact.jailbreak.plan import plan_run
+    from redact.jailbreak.pool import technique_pool
+
+    entry_types = [entry_type.value for entry_type in ALL_ENTRY_TYPES] * 26
+    inputs = pd.DataFrame({
+        "prompt": [f"input {i} about a topic" for i in range(len(entry_types))],
+        "category": ["Cyber"] * len(entry_types), "entry_type": entry_types})
+    manifest = tmp_path / "variations.manifest.jsonl"
+    plan_run(inputs, technique_pool(resolve(None, "natural")), manifest_path=manifest,
+             seed=42, sample_kwargs={"exact_techniques": 1}, verbose=False)
+    rows = Manifest(manifest).load()
+
+    def drawn_for(prefix: str) -> set[str]:
+        return {row["entry_type"] for row in rows
+                if any(name.startswith(prefix) for name in row["combination"])}
+
+    assert drawn_for("to_benign_role_") == {"benign", "dual_use_benign"}
+    assert drawn_for("to_smalltalk_") == set(entry_types)

@@ -123,8 +123,8 @@ _SENTENCES = [
     ("CLAUDE.md", r"\*\*(?P<active>\d+) active single-turn techniques\*\* "
                   r"\((?P<registered>\d+) registered, (?P<retired>\d+) retired\) in "
                   r"\*\*(?P<layers>\d+) layers → (?P<families>\d+) families\*\*"),
-    ("README.md", r"attacks drawn from (?P<active>\d+) techniques in "
-                  r"(?P<families>\d+) families"),
+    ("README.md", r"variations of the inputs, drawn from (?P<active>\d+) "
+                  r"techniques in (?P<families>\d+) families"),
     ("docs/techniques.md", r"draws from (?P<active>\d+) active techniques in "
                            r"(?P<layers>\d+) layers and (?P<families>\d+) families"),
 ]

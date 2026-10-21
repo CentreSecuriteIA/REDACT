@@ -10,7 +10,7 @@ Augment the accepted inputs with technique combinations, in two kinds:
 | Kind | Writes | Default |
 |---|---|---|
 | `adversarial` | `Datasets/jailbreaks.csv`: jailbreak attacks | one round per input, by budget, from every technique but `casual_writing`; half the units take a request obfuscation, a light encoding or a translation after the request |
-| `natural` | `Datasets/variations.csv`: natural variations | one technique per input, from the natural allow lists, which the spec's `kinds` narrow to 66 techniques (85 with `"translation": true`, which adds the nineteen translations) ([techniques.md](../techniques.md#the-natural-pool)) |
+| `natural` | `Datasets/variations.csv`: natural variations | one technique per input, from the natural allow lists, which the spec's `kinds` narrow to 71 techniques (90 with `"translation": true`, which adds the nineteen translations) ([techniques.md](../techniques.md#the-natural-pool)) |
 
 These are the packaged defaults, which a `training` run takes: both kinds
 are on. An `eval` run's dataset type attacks the harmful inputs only, with
@@ -137,7 +137,8 @@ paired by position: the n-th `variant=` of a row is the n-th of its
 techniques that writes one; a step noted `noop=` wrote none, and a rejected
 or error row, whose info is its rejection's, counts none. The framing
 techniques, the answer formats, the answer languages, asking, the
-distractors, impersonation, indirect and temporal write `variant=`;
+distractors, impersonation, indirect, temporal, the neutral containers,
+small talk and the benign roles write `variant=`;
 continuation writes `style=<name>`, read as its variant; structural's
 `to_xml` and `to_markdown`, one template each, name none and are not
 counted, nor is `to_json`, whose wrapper is in code. Continuation and

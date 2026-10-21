@@ -5,10 +5,12 @@ from collections.abc import Callable
 from .answer import get_answer_functions
 from .answer_language import get_answer_language_functions
 from .asking import get_asking_functions
+from .benign_role import get_benign_role_functions
 from .continuation import get_continuation_functions
 from .distractor import get_distractor_functions
 from .impersonation import get_impersonation_functions
 from .indirect import get_indirect_functions
+from .smalltalk import get_smalltalk_functions
 from .temporal import get_temporal_functions
 
 
@@ -23,4 +25,6 @@ def get_all_request_functions() -> list[Callable]:
         + get_impersonation_functions()
         + get_temporal_functions()
         + get_asking_functions()
+        + get_smalltalk_functions()
+        + get_benign_role_functions()
     )

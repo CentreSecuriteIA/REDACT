@@ -310,7 +310,9 @@ every sample is `single`; a params weight on `mixed` stops a run whose kinds
 draw those families. `authorship` (the `writer` axis) and `role_framing` are
 ruled distinct: who writes a message is not a role or scenario the message
 sets up, so the writer axis varies beside the persona, framing, cognitive and
-impersonation families (`tests/test_dimensions.py` records the ruling).
+impersonation families and the natural kind's benign roles
+(`tests/test_dimensions.py` records the ruling, and checks both dataset
+types and both example recipes).
 
 The outputs stage's answer mode (`harmful` or `helpful`) is no axis and
 carries no tag: it picks the response's prompt, checker and label, the
@@ -443,6 +445,30 @@ model first. The eval type draws no answer language, so its pool stays at 36
 and its draws do not change
 ([techniques.md](techniques.md#the-language-table)).
 
+**Release note: small talk and benign roles (spec 1.2).** Three request
+families for natural variations only: `smalltalk_prefix` and
+`smalltalk_suffix` (a greeting before the text or a thanks after it, twenty
+variants each) and `benign_role` (a plain role given to the assistant before
+the text, three styles of twelve variants), drawn for benign and dual-use
+benign inputs only. The packaged natural kind allows the three families, so
+its pool is 71 techniques in 13 families; since three more request
+families are dealt, some units of a fresh natural plan draw other
+techniques than they did with the same seed. A kept natural plan resumes
+with the growth WARNING above and does not draw them until it is planned
+again with `resume=False`. Their spec `kinds` are `["natural"]`: the
+attacks never draw them (an adversarial allow list that names one raises),
+so the default attack pool stays at 174 and the eval type's at 36, its draws
+unchanged. A `config_dir` copy of `augmentations.json` made before keeps its
+natural `families.allow` without them, so its natural kind does not draw
+them; the run logs this at INFO (add the three, delete the copy, or
+`scaffold_setup(..., overwrite=True)`). The benign roles carry the
+`role_framing` dimension, which the `writer` axis is ruled apart from, so
+both dataset types and the example recipes pass the run's dimension check
+as before; small talk carries `request_shape`, which the `focus` axis is
+undecided against, so a run that deals `focus.mixed` denies the two
+small-talk families in the natural kind, beside `asking` and `indirect`
+([techniques.md](techniques.md#what-the-families-do)).
+
 **Release note: the obfuscation order.** A fresh plan applies translation,
 typos and casual writing before the word-level steps, sensitive words and
 tokenbreak, which used to come first, so a combination holding both gives
@@ -557,11 +583,11 @@ Natural only:
 
 The packaged natural kind allows the families `typos`, `casual_writing`,
 `noise`, `neutral_container`, `answer_language`, `answer_format`, `asking`,
-`indirect`; allows the
+`indirect`, `smalltalk_prefix`, `smalltalk_suffix`, `benign_role`; allows the
 techniques `to_leetspeak_basic`, `to_adversarial_suffix_punctuation`,
 `to_adversarial_suffix_emoji`; and denies `to_refusal_then_comply`,
 `to_apology_prevention`, `to_prefix_injection`. The spec's `kinds` narrow
-it further (step 6 below): its pool is 66 techniques
+it further (step 6 below): its pool is 71 techniques
 ([techniques.md](techniques.md#the-natural-pool)). A variation that leaves
 its input unchanged is rejected.
 
@@ -583,8 +609,10 @@ From every registered technique, in this order:
    the kind: a technique's own, else its first family's, and
    `["adversarial"]` for a family without any. So the natural kind draws
    only what the spec marks natural ([extending.md](extending.md#add-a-jailbreak-technique)
-   says how to mark a technique). Every technique holds `adversarial`
-   today, so this step leaves the attacks' pool as it is.
+   says how to mark a technique). Every technique holds `adversarial` but
+   those of `smalltalk_prefix`, `smalltalk_suffix` and `benign_role`, marked
+   `["natural"]` alone, so this step takes only those three families out of
+   the attacks' pool.
 
 [techniques.md](techniques.md) lists every layer, family and technique name.
 
@@ -609,7 +637,10 @@ From every registered technique, in this order:
   `families.allow`.
 - `natural_only_families`, at the top of `augmentations.json`
   (`casual_writing` in the packaged file), are added to the adversarial `families.deny` unless the
-  adversarial `families.allow` names them.
+  adversarial `families.allow` names them. A family the spec marks
+  `["natural"]` alone (`smalltalk_prefix`, `smalltalk_suffix`,
+  `benign_role`) needs no entry there: no attack may draw it, and an
+  adversarial allow list that names one raises.
 
 ### The translation switch
 

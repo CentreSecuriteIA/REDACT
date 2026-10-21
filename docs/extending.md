@@ -196,11 +196,15 @@ contract.
      `return _abbreviated(prompt), ""` and its decorator
      `@applicable_when(lambda text, entry_type: _abbreviated(text) != text)`;
      `test_casual_writing.py` checks the two agree on a set of neutral
-     texts. The plan
+     texts. An entry-type rule is a predicate of its own, which the
+     technique does not call: the benign roles take
+     `@applicable_when(is_benign_input)`, true for `benign` and
+     `dual_use_benign` whatever the text (`requests/benign_role.py`). The plan
      filters the pool per input before the draw; the predicate sees the
      input, not what earlier steps of a combination wrote, and a kept plan
      replays without asking it. A technique of a default pool that gains
-     one changes what a fresh plan draws: say so in a release note.: return it from its module's getter
+     one changes what a fresh plan draws: say so in a release note.
+2. **Register it**: return it from its module's getter
    (`get_encoding_functions`, `get_framing_functions`, ...), which its
    subpackage's `get_all_hacking_functions`, `get_all_manipulation_functions`,
    `get_all_obfuscation_functions` or `get_all_request_functions` collects. A
@@ -258,9 +262,13 @@ contract.
    denied. For variations, also add the family to the natural kind's
    `families.allow`, or the name to its `techniques.allow`, in
    `configs/jailbreak/augmentations.json`; an allow list naming what the
-   spec keeps from the kind raises. A family meant for variations only goes
-   in `natural_only_families`.
-   - **The natural pool.** `tests/fixtures/natural_pool.json` pins the 66
+   spec keeps from the kind raises. A family meant for variations only says
+   `"kinds": ["natural"]` (`smalltalk_prefix`, `smalltalk_suffix`,
+   `benign_role`): no attack draws it, and an adversarial allow list that
+   names it raises. One the attacks should draw only when a section asks
+   carries both kinds and goes in `natural_only_families`
+   (`casual_writing`).
+   - **The natural pool.** `tests/fixtures/natural_pool.json` pins the 71
      names the natural kind draws by default, and
      `tests/jailbreak/test_pool.py` fails until the owner decides: give the
      technique `"kinds": ["adversarial"]`, or add its name to the fixture.
@@ -407,7 +415,7 @@ pool of one variant named after the entry. `personas.json` and
    without being on the fixture's `known_short` list, which the regenerator
    keeps as it is. A pool that reaches its floor must leave
    `known_short`: the test fails until it does, so the list only shrinks.
-   34 of the 41 pools are on it today, in 10 families; `to_json`'s wrapper
+   34 of the 46 pools are on it today, in 10 families; `to_json`'s wrapper
    is not a pool yet.
 
 A new directive is a new list in the file and a technique that names it

@@ -98,7 +98,9 @@ def to_y(prompt: str, **kwargs) -> TechniqueGen:
   the technique itself calls, so the two cannot drift apart. The registry
   fixture records `has_applicable`, a bool, not the function. Today
   `to_abbreviations` and `to_stripped_accents` have one: each applies only
-  to a text it changes.
+  to a text it changes; and the three benign roles (spec 1.2), which apply
+  to benign and dual-use benign inputs only (`benign_role.is_benign_input`,
+  on the entry type alone).
 - A pure template technique draws its text from a variant pool, one
   directive's variants in its template file, and names it with
   `@uses_pool(file, directive, slots)` (its `variant_pool`; the answer
@@ -374,10 +376,12 @@ admits those alone. Last, it keeps the techniques whose `kinds` (set by
 `technique.tag`: the technique's own, else its first family's,
 `family_kinds`, else `DEFAULT_KINDS`, `["adversarial"]`) hold the kind,
 which `pool.kind_of(resolved)` reads as `rounds_of` does: natural when the
-resolved kind has `exact_techniques`, so no key is added to it. Every
-technique holds `adversarial`, so only the natural pool is narrowed: to
-the 66 techniques of [techniques.md](../techniques.md#the-natural-pool) with
-translation off. Then a technique whose `deprecated` tag is set leaves the
+resolved kind has `exact_techniques`, so no key is added to it. The
+natural pool is narrowed to the 71 techniques of
+[techniques.md](../techniques.md#the-natural-pool) with translation off;
+the attacks lose only the techniques of the three families marked
+`["natural"]` alone (`smalltalk_prefix`, `smalltalk_suffix`,
+`benign_role`). Then a technique whose `deprecated` tag is set leaves the
 pool unless `techniques.allow` names it; one it names stays, with a
 `DeprecationWarning` (read for this release). A family in `families.allow`
 does not keep its retired techniques.

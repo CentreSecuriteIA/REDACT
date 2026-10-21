@@ -99,7 +99,8 @@ def technique_pool(resolved: dict) -> list[Callable]:
     ``techniques.allow`` names some of its techniques: then those only.
     Then only the techniques whose spec ``kinds`` hold the kind
     (:func:`kind_of`) stay: the natural kind draws only what the spec marks
-    natural, and every technique's ``kinds`` hold ``adversarial`` today.
+    natural, and the attacks every technique but those of the families the
+    spec marks natural alone (small talk, the benign roles).
     Last, a technique the spec retired (its ``deprecated`` version) leaves
     the pool unless ``techniques.allow`` names it, which gives a
     ``DeprecationWarning`` and is read for this release.

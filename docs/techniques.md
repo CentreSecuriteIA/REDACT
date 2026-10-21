@@ -1,6 +1,6 @@
 # Jailbreak techniques
 
-The jailbreak stage draws from 183 active techniques in 4 layers and 25
+The jailbreak stage draws from 188 active techniques in 4 layers and 28
 families.
 `configs/jailbreak/combination_spec.json` gives each technique (the
 language ones through its `generators`, from
@@ -49,8 +49,8 @@ among them.
 | `hacking` | 3 | 21 | at most 1 |
 | `manipulation` | 2 | 8 | at most 1 |
 | `obfuscation` | 11 | 101 | no cap |
-| `requests` | 9 | 53 | at most 1 |
-| all | 25 | 183 | |
+| `requests` | 12 | 58 | at most 1 |
+| all | 28 | 188 | |
 <!-- END layers -->
 
 ## Families and techniques
@@ -85,11 +85,14 @@ that call a model call the generation model.
 | requests | `answer_format` | `answer_shape` |  | 9 | no | no | `to_refusal_then_comply`, `to_apology_prevention`, `to_prefix_injection`, `to_answer_in_markdown`, `to_answer_as_tutorial`, `to_answer_as_code`, `to_answer_as_dialogue`, `to_answer_as_story`, `to_answer_as_structured_data` |
 | requests | `answer_language` | `language` |  | 26 | no | no | `to_ask_answer_in_french`, `to_ask_answer_in_japanese`, `to_ask_answer_in_russian`, `to_ask_answer_in_spanish`, `to_ask_answer_in_german`, `to_ask_answer_in_arabic`, `to_ask_answer_in_turkish`, `to_ask_answer_in_czech`, `to_ask_answer_in_vietnamese`, `to_ask_answer_in_greek`, `to_ask_answer_in_croatian`, `to_ask_answer_in_swahili`, `to_ask_answer_in_thai`, `to_ask_answer_in_khmer`, `to_ask_answer_in_maori`, `to_ask_answer_in_nepali`, `to_ask_answer_in_zulu`, `to_ask_answer_in_scots_gaelic`, `to_ask_answer_in_bengali`, `to_ask_answer_in_javanese`, `to_ask_answer_in_hmong`, `to_ask_answer_in_guarani`, `to_ask_answer_in_chinese`, `to_ask_answer_in_hindi`, `to_ask_answer_in_yoruba`, `to_ask_answer_in_amharic` |
 | requests | `asking` | `request_shape` |  | 2 | no | no | `to_innocuous_question`, `to_ask_for_details` |
+| requests | `benign_role` | `role_framing` |  | 3 | no | no | `to_benign_role_subject_helper`, `to_benign_role_tutor`, `to_benign_role_task_assistant` |
 | requests | `continuation` | `request_shape` |  | 4 | no | no | `to_continue_passage`, `to_complete_story`, `to_fill_in_blank`, `to_continue_instructions` |
 | requests | `distractor_prefix` | `request_shape` |  | 2 | no | no | `to_distractor_prefix_related`, `to_distractor_prefix_unrelated` |
 | requests | `distractor_suffix` | `request_shape` |  | 2 | no | no | `to_distractor_suffix_related`, `to_distractor_suffix_unrelated` |
 | requests | `impersonation` | `role_framing` |  | 1 | no | no | `to_impersonate_good_person` |
 | requests | `indirect` | `request_shape` |  | 6 | no | no | `to_summarize`, `to_proofread`, `to_critique`, `to_translate_task`, `to_explain_to_child`, `to_rewrite` |
+| requests | `smalltalk_prefix` | `request_shape` |  | 1 | no | no | `to_smalltalk_prefix` |
+| requests | `smalltalk_suffix` | `request_shape` |  | 1 | no | no | `to_smalltalk_suffix` |
 | requests | `temporal` | `request_shape` |  | 1 | no | no | `to_use_past_tense` |
 <!-- END families -->
 
@@ -263,13 +266,16 @@ figures.
 A spec entry's `kinds` lists the kinds of the augmentation section that may
 draw the technique: `["adversarial"]` when neither the technique nor its
 first family gives one, and a technique's own `kinds` replace its family's.
-Every technique is adversarial. The families `typos`, `casual_writing`,
+Every technique is adversarial but those of the three request families
+spec version 1.2 marks `["natural"]` alone: `smalltalk_prefix`,
+`smalltalk_suffix` and `benign_role`, which no attack draws (an adversarial
+allow list that names one raises). The families `typos`, `casual_writing`,
 `noise`, `neutral_container`, `translation`, `answer_language`,
 `answer_format`, `asking` and `indirect` are marked
 `["adversarial", "natural"]`, less their attack-only
 techniques, and three techniques of attack families are marked natural on
 their own. The natural kind draws only what is marked natural: by default
-(translation off) these 66 techniques in 10 families, pinned in
+(translation off) these 71 techniques in 13 families, pinned in
 `tests/fixtures/natural_pool.json`:
 
 | Family | Natural techniques |
@@ -282,6 +288,8 @@ their own. The natural kind draws only what is marked natural: by default
 | `answer_format` | `to_answer_in_markdown`, `to_answer_as_tutorial`, `to_answer_as_code`, `to_answer_as_structured_data` |
 | `asking` | `to_innocuous_question`, `to_ask_for_details` |
 | `indirect` | all six |
+| `smalltalk_prefix`, `smalltalk_suffix` | `to_smalltalk_prefix`, `to_smalltalk_suffix` (since spec 1.2, natural only) |
+| `benign_role` | all three, for benign and dual-use benign inputs only (since spec 1.2, natural only) |
 | `encode` | `to_leetspeak_basic` |
 | `suffixes` | `to_adversarial_suffix_punctuation`, `to_adversarial_suffix_emoji` |
 
@@ -512,6 +520,35 @@ language is one row. `to_impersonate_good_person` has eight
 profession variants (nurse, doctor, security researcher, teacher, ...) and
 `to_use_past_tense` four historical framings.
 
+Three request families of spec version 1.2 are for natural variations only
+(their `kinds` are `["natural"]`, so no attack draws them): ordinary,
+harmless text that real users put around a request, which a classifier
+should not take for an attack. The text is kept as it is.
+
+- `smalltalk_prefix` and `smalltalk_suffix`: `to_smalltalk_prefix` puts one
+  of twenty greetings and friendly asides before the text ("Good morning!",
+  "Hey, quick question."), `to_smalltalk_suffix` one of twenty thanks and
+  closings after it ("Thanks in advance!", "Kind regards"), from
+  `requests/smalltalk_templates.json`. They apply to every input. Their
+  dimension is `request_shape`.
+- `benign_role` gives the assistant a plain role in front of the text, in
+  three styles of twelve variants each, from
+  `requests/benign_role_templates.json`: `to_benign_role_subject_helper` (an
+  expert in the field, a reference librarian, a science journalist, ...),
+  `to_benign_role_tutor` (a patient tutor, a study coach, a teaching
+  assistant, ...) and `to_benign_role_task_assistant` (help with a report
+  for work, a presentation, a study guide, ...). A benign role applies to
+  benign and dual-use benign inputs only: each technique carries an
+  applicability on the entry type, so the plan never draws one for a
+  harmful or dual-use harmful input: its rows are hard negatives, a role in
+  front of a harmless request. Its dimension is `role_framing`, which the
+  `writer` axis
+  is ruled apart from
+  ([configuration.md](configuration.md#dimensions-and-the-runs-check)).
+
+No greeting, closing or role says anything about rules or how to reply; a
+test checks each template against a list of such words.
+
 The variants of a directive (a framing, request or structural template)
 form its variant pool. Each is as likely to be drawn unless a variant of
 the pool gives a `weight`; `0` turns a variant off. No packaged variant has
@@ -519,13 +556,16 @@ a weight, and an eval-pool technique's may not, since a weight changes the
 eval text ([extending.md](extending.md#add-variants-to-a-template-pool)).
 Importing `redact.jailbreak` checks every pool and raises naming the file,
 directive and variant of a fault. A pool should hold at least 8 variants
-(a request or framing directive, a container); most hold 4 today: 34 of the
-35 pools are below that floor, which a test ratchets
+(a request or framing directive, a container), 12 for a benign role and 20
+for small talk; most request and framing pools hold 4 today: 34 of the 46
+pools are below their floor, which a test ratchets
 ([extending.md](extending.md#add-variants-to-a-template-pool)).
 
 The info names the variant drawn: `variant=<name>` for the framing
 techniques, the answer formats, the answer languages, asking, the
-distractors, impersonation, indirect and temporal; `style=<name>` for
+distractors, impersonation, indirect, temporal, the neutral containers,
+small talk (`smalltalk=<prefix|suffix>;variant=<name>`) and the benign roles
+(`role=<style>;variant=<name>`); `style=<name>` for
 continuation. Structural's `to_xml` and `to_markdown` have one template
 each and name none (`to_xml`'s info names its policy id), and `to_json`
 writes its wrapper in code. Continuation and structural are drawn by the
@@ -565,6 +605,8 @@ Also beyond the reference list:
   keyboard typos and emoji, each at three densities);
 - the `neutral_container` family (6 techniques: a code comment, a YAML
   document, a CSV row, an email, a transcript line, a log entry);
+- small talk before and after the text, and benign roles (5 techniques,
+  natural variations only);
 - the answer formats code, dialogue, story and structured data;
 - continuation attacks (4) and indirect task embedding (6);
 - the answer languages Zulu, Scots Gaelic, Bengali and Javanese, and (spec

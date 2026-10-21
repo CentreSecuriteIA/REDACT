@@ -203,6 +203,30 @@
       "kinds": ["adversarial", "natural"],
       "within_layer_order": 0,
       "cross_incompatible_with": []
+    },
+    "smalltalk_prefix": {
+      "description": "A greeting or a friendly aside before the prompt (natural variations only)",
+      "layer": "requests",
+      "dimension": "request_shape",
+      "kinds": ["natural"],
+      "within_layer_order": 0,
+      "cross_incompatible_with": []
+    },
+    "smalltalk_suffix": {
+      "description": "A thank-you or a polite closing line after the prompt (natural variations only)",
+      "layer": "requests",
+      "dimension": "request_shape",
+      "kinds": ["natural"],
+      "within_layer_order": 0,
+      "cross_incompatible_with": []
+    },
+    "benign_role": {
+      "description": "A plain role given to the assistant before the prompt: a subject helper, a tutor, a task assistant (natural variations of benign and dual-use benign inputs only)",
+      "layer": "requests",
+      "dimension": "role_framing",
+      "kinds": ["natural"],
+      "within_layer_order": 0,
+      "cross_incompatible_with": []
     }
   },
 
@@ -389,6 +413,13 @@
     "to_use_past_tense": { "families": ["temporal"], "complexity": 3, "requires_llm": false },
 
     "to_innocuous_question": { "families": ["asking"], "complexity": 0, "requires_llm": false },
-    "to_ask_for_details":    { "families": ["asking"], "complexity": 1, "requires_llm": false }
+    "to_ask_for_details":    { "families": ["asking"], "complexity": 1, "requires_llm": false },
+
+    "to_smalltalk_prefix": { "families": ["smalltalk_prefix"], "complexity": 0, "requires_llm": false, "since": "1.2" },
+    "to_smalltalk_suffix": { "families": ["smalltalk_suffix"], "complexity": 0, "requires_llm": false, "since": "1.2" },
+
+    "to_benign_role_subject_helper": { "families": ["benign_role"], "complexity": 1, "requires_llm": false, "since": "1.2" },
+    "to_benign_role_tutor":          { "families": ["benign_role"], "complexity": 1, "requires_llm": false, "since": "1.2" },
+    "to_benign_role_task_assistant": { "families": ["benign_role"], "complexity": 1, "requires_llm": false, "since": "1.2" }
   }
 }
