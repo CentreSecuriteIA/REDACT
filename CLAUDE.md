@@ -105,7 +105,7 @@ REDACT/
 │       │   │   ├── structural.py    # JSON, XML, markdown wrapping
 │       │   │   ├── neutral_container.py # The prompt in a code comment, a YAML document, a CSV row, an email, a transcript line or a log entry (6, pure, 8 neutral variants each)
 │       │   │   └── ascii_art.py     # A pyfiglet font drawn from the 16, among those that draw every character within the cap
-│       │   └── requests/            # answer.py (9), answer_language.py (26, the languages.json rows marked answer_language), continuation.py (4), indirect.py (6), distractor.py (4), impersonation.py, temporal.py, asking.py (2)
+│       │   └── requests/            # answer.py (9), answer_language.py (26, the languages.json rows marked answer_language), continuation.py (4), indirect.py (6), distractor.py (4), impersonation.py, temporal.py, asking.py (2), smalltalk.py (2: a greeting before or a thanks after, 20 variants each), benign_role.py (3: a subject helper, a tutor, a task assistant, 12 variants each, for benign and dual-use benign inputs only)
 │       │
 │       ├── multi_turn/              # Conversation datasets: a Setting played on seeds, saved and scored
 │       │   ├── transcript.py        # Step, StepType, Transcript
@@ -144,7 +144,7 @@ REDACT/
 │       │       ├── augmentations.json    # The packaged augmentation section: the adversarial and natural kinds
 │       │       ├── hacking/              # framing_templates.json, cognitive_techniques.json, personas.json
 │       │       ├── obfuscation/          # structural_templates.json, neutral_container_templates.json
-│       │       ├── requests/             # answer, answer_language, continuation, indirect, distractor, impersonation, temporal, asking templates
+│       │       ├── requests/             # answer, answer_language, continuation, indirect, distractor, impersonation, temporal, asking, smalltalk, benign_role templates
 │       │       └── multi_turn/           # crescendo_followups.json
 │       │
 │       └── prompts/                 # Prompt JSON per pipeline/step: constitution/, input/, output/, paraphrase/, jailbreak/, conversation/, format_instructions/
