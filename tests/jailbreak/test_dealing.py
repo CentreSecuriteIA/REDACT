@@ -346,8 +346,10 @@ _BUDGETS = [
 # family moved it again: one more hacking family to deal, eleven members wide,
 # changes the hacking pick of many units and, through the unit's rng and its
 # group's counts, the rest of their draw (223 of the 240 dealt units, 125 of
-# the 200 undealt draws).
-_PINNED_DRAWS = "79a1d3fd4f6c30c498874cb7662b1c3e705c88ab1cc39eb937416ab91899fad5"
+# the 200 undealt draws). The three spec 1.3 answer formats moved it once
+# more: a wider answer_format family changes the member some request draws
+# land on (5 of the 240 dealt units, 11 of the 200 undealt draws).
+_PINNED_DRAWS = "8b291689078e805a7b5846556c2ee9e85b78a3e8306fce74d431af5800f339d5"
 
 
 def test_draws_without_the_request_obfuscation_are_those_made_before_it_was_counted():

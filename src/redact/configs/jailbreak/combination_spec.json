@@ -427,6 +427,9 @@
     "to_answer_as_dialogue":      { "families": ["answer_format"], "complexity": 2, "requires_llm": false, "kinds": ["adversarial"] },
     "to_answer_as_story":         { "families": ["answer_format"], "complexity": 2, "requires_llm": false, "kinds": ["adversarial"] },
     "to_answer_as_structured_data": { "families": ["answer_format"], "complexity": 2, "requires_llm": false },
+    "to_dual_answer":             { "families": ["answer_format"], "complexity": 2, "requires_llm": false, "kinds": ["adversarial"], "cross_incompatible_with": ["persona_template"], "since": "1.3" },
+    "to_tagged_prefix":           { "families": ["answer_format"], "complexity": 2, "requires_llm": false, "kinds": ["adversarial"], "cross_incompatible_with": ["persona_template"], "since": "1.3" },
+    "to_answer_in_encoding":      { "families": ["answer_format"], "complexity": 2, "requires_llm": false, "kinds": ["adversarial"], "cross_incompatible_with": ["encode"], "since": "1.3" },
 
     "to_continue_passage":     { "families": ["continuation"], "complexity": 3, "requires_llm": false },
     "to_complete_story":        { "families": ["continuation"], "complexity": 3, "requires_llm": false },

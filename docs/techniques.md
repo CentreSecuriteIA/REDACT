@@ -1,6 +1,6 @@
 # Jailbreak techniques
 
-The jailbreak stage draws from 203 active techniques in 5 layers and 29
+The jailbreak stage draws from 206 active techniques in 5 layers and 29
 families; the first layer, `rewrite`, holds none yet
 ([below](#layers)).
 `configs/jailbreak/combination_spec.json` gives each technique (the
@@ -58,8 +58,8 @@ on. (`to_rewrite`, despite its name, is an `indirect` request technique.)
 | `hacking` | 4 | 32 | at most 1 |
 | `manipulation` | 2 | 12 | at most 1 |
 | `obfuscation` | 11 | 101 | no cap |
-| `requests` | 12 | 58 | at most 1 |
-| all | 29 | 203 | |
+| `requests` | 12 | 61 | at most 1 |
+| all | 29 | 206 | |
 <!-- END layers -->
 
 ## Families and techniques
@@ -92,7 +92,7 @@ that call a model call the generation model.
 | obfuscation | `neutral_container` | `container` | 80 | 6 | no | no | `to_code_comment`, `to_yaml_document`, `to_csv_row`, `to_email_message`, `to_transcript_line`, `to_log_entry` |
 | obfuscation | `structural` | `container` | 80 | 3 | no | no | `to_json`, `to_xml`, `to_markdown` |
 | obfuscation | `ascii_art` | `encoding` | 90 | 1 | no | no | `to_ascii_art` |
-| requests | `answer_format` | `answer_shape` |  | 9 | no | no | `to_refusal_then_comply`, `to_apology_prevention`, `to_prefix_injection`, `to_answer_in_markdown`, `to_answer_as_tutorial`, `to_answer_as_code`, `to_answer_as_dialogue`, `to_answer_as_story`, `to_answer_as_structured_data` |
+| requests | `answer_format` | `answer_shape` |  | 12 | no | no | `to_refusal_then_comply`, `to_apology_prevention`, `to_prefix_injection`, `to_answer_in_markdown`, `to_answer_as_tutorial`, `to_answer_as_code`, `to_answer_as_dialogue`, `to_answer_as_story`, `to_answer_as_structured_data`, `to_dual_answer`, `to_tagged_prefix`, `to_answer_in_encoding` |
 | requests | `answer_language` | `language` |  | 26 | no | no | `to_ask_answer_in_french`, `to_ask_answer_in_japanese`, `to_ask_answer_in_russian`, `to_ask_answer_in_spanish`, `to_ask_answer_in_german`, `to_ask_answer_in_arabic`, `to_ask_answer_in_turkish`, `to_ask_answer_in_czech`, `to_ask_answer_in_vietnamese`, `to_ask_answer_in_greek`, `to_ask_answer_in_croatian`, `to_ask_answer_in_swahili`, `to_ask_answer_in_thai`, `to_ask_answer_in_khmer`, `to_ask_answer_in_maori`, `to_ask_answer_in_nepali`, `to_ask_answer_in_zulu`, `to_ask_answer_in_scots_gaelic`, `to_ask_answer_in_bengali`, `to_ask_answer_in_javanese`, `to_ask_answer_in_hmong`, `to_ask_answer_in_guarani`, `to_ask_answer_in_chinese`, `to_ask_answer_in_hindi`, `to_ask_answer_in_yoruba`, `to_ask_answer_in_amharic` |
 | requests | `asking` | `request_shape` |  | 2 | no | no | `to_innocuous_question`, `to_ask_for_details` |
 | requests | `benign_role` | `role_framing` |  | 3 | no | no | `to_benign_role_subject_helper`, `to_benign_role_tutor`, `to_benign_role_task_assistant` |
@@ -217,9 +217,13 @@ technique is picked first. A technique may not join a combination when:
   they may leave; the other suffixes, encodings and noise may still join it.
   It keeps the four many-shot variants of `fsh` and `dap` from `typos`: a
   model rewriting so long a prompt would not return it whole. It keeps
-  `to_refusal_then_comply` and `to_prefix_injection` from
-  `persona_template`, whose mechanics already ask for a dual answer or a set
-  opening. `to_ascii_art` itself rejects a text with a character no
+  `to_refusal_then_comply`, `to_prefix_injection`, `to_dual_answer` and
+  `to_tagged_prefix` from `persona_template`, whose mechanics already ask
+  for a dual answer or a set opening, and `to_answer_in_encoding` from
+  `encode`: an answer asked for in an encoding is not put on an encoded
+  prompt. The ten `to_sensitive_words_encode_*` are `encode` members, so
+  they are kept from it too; the sensitive-word steps that encode no word
+  are not. `to_ascii_art` itself rejects a text with a character no
   single font draws (most non-ASCII characters: accented letters such as `é`
   or `ñ`, dashes, curly quotes, kana; German umlauts and `ß` and some Greek
   or Cyrillic text have fonts), or one every font draws longer than its cap;
@@ -317,7 +321,9 @@ their own. The natural kind draws only what is marked natural: by default
 
 With `"natural": {"translation": true}` the nineteen translations join them.
 Attack-only: `structural`, `continuation`, `temporal`, the high and insane
-typos, the four high-density noise techniques, `to_answer_as_dialogue`, `to_answer_as_story` and the three
+typos, the four high-density noise techniques, `to_answer_as_dialogue`, `to_answer_as_story`,
+the three answer formats of spec version 1.3 (`to_dual_answer`,
+`to_tagged_prefix`, `to_answer_in_encoding`) and the three
 answer-format directives the natural kind denies anyway
 (`to_refusal_then_comply`, `to_apology_prevention`,
 `to_prefix_injection`), with every other family. A natural allow list that
@@ -606,6 +612,12 @@ are generated from the rows of `configs/jailbreak/languages.json` marked
 language is one row. `to_impersonate_good_person` has eight
 profession variants (nurse, doctor, security researcher, teacher, ...) and
 `to_use_past_tense` four historical framings.
+
+Spec version 1.3 added three attack-only answer formats, eight variants
+each: `to_dual_answer` asks for two answers, one after the other,
+`to_tagged_prefix` for an answer that opens with a set tag, and
+`to_answer_in_encoding` for an answer written in an encoding. None is in
+the natural or the eval pool.
 
 Three request families of spec version 1.2 are for natural variations only
 (their `kinds` are `["natural"]`, so no attack draws them): ordinary,

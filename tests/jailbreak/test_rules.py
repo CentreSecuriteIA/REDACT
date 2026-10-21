@@ -65,9 +65,10 @@ def test_a_persona_template_refuses_manipulation_ascii_art_and_impersonation(
     assert not _joins(other, persona)
 
 
-@pytest.mark.parametrize("answer", ["to_refusal_then_comply", "to_prefix_injection"])
+@pytest.mark.parametrize("answer", ["to_refusal_then_comply", "to_prefix_injection",
+                                    "to_dual_answer", "to_tagged_prefix"])
 def test_a_persona_template_refuses_the_answer_formats_its_mechanics_ask_for(answer):
-    """The mechanics already ask for a dual answer or a set opening: the two
+    """The mechanics already ask for a dual answer or a set opening: the four
     answer formats list the family, so every persona template refuses them."""
     assert not _joins("to_aim_persona_template", answer)
     assert not _joins(answer, "to_aim_persona_template")
@@ -79,6 +80,26 @@ def test_a_persona_template_refuses_the_answer_formats_its_mechanics_ask_for(ans
 def test_a_persona_template_joins_an_encoding_a_wrapper_or_a_request(other):
     assert _joins("to_dan_persona_template", other)
     assert _joins(other, "to_dan_persona_template")
+
+
+@pytest.mark.parametrize("encoded", [
+    "to_base64", "to_rot13", "to_morse", "to_hex", "to_sensitive_words_encode_base64",
+    "to_sensitive_words_encode_leetspeak_basic"])
+def test_an_answer_in_an_encoding_refuses_an_encoded_prompt_either_way(encoded):
+    """A decode-and-reply-encoded request on top of an encoded prompt: the
+    ten sensitive-word encodings are encode members too."""
+    assert not _joins("to_answer_in_encoding", encoded)
+    assert not _joins(encoded, "to_answer_in_encoding")
+
+
+@pytest.mark.parametrize("other", [
+    "to_sensitive_words_split", "to_sensitive_words_variables",
+    "to_synonym_substitution", "to_french", "to_json", "to_dan_persona_template"])
+def test_an_answer_in_an_encoding_joins_what_encodes_nothing(other):
+    """It names encode alone: the sensitive-word steps that encode no word,
+    a translation, a wrapper and a persona template still join it."""
+    assert _joins("to_answer_in_encoding", other)
+    assert _joins(other, "to_answer_in_encoding")
 
 
 def test_a_persona_template_is_the_one_hacking_technique_of_its_combination():

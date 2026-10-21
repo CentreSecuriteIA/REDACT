@@ -155,17 +155,17 @@ def test_the_default_variation_pool_is_the_71_pinned_natural_techniques():
         "suffixes"}
 
 
-def test_the_default_attack_pool_is_189_techniques_in_25_families():
+def test_the_default_attack_pool_is_192_techniques_in_25_families():
     """Every active technique but casual writing and the natural-only
     families: the 19 translations included, now the packaged adversarial
     kind has its translation switch on; the seven spec 1.1 retired left out,
     the fifteen spec 1.2 encodings, the twelve spec 1.2 noise techniques, the
     six spec 1.2 neutral containers, the six spec 1.2 answer languages, the
-    four spec 1.2 many-shot fsh and dap variants and the eleven spec 1.3
-    persona templates in. Small talk and the benign roles leave it as it
-    was."""
+    four spec 1.2 many-shot fsh and dap variants, the eleven spec 1.3
+    persona templates and the three spec 1.3 answer formats in. Small talk
+    and the benign roles leave it as it was."""
     pool = technique_pool(resolve(None, "adversarial"))
-    assert len(pool) == 189     # noqa: PLR2004
+    assert len(pool) == 192     # noqa: PLR2004
     assert len({fn.families[0] for fn in pool}) == 25     # noqa: PLR2004
 
 
