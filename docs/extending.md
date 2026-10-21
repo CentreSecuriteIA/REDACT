@@ -189,8 +189,11 @@ contract.
    layer and the order), `complexity` (0 to 3), `requires_llm`,
    `requires_benign`, `encode_weight` for an `encode` technique,
    `max_tokens` to cap its calls' replies, `cross_incompatible_with` for
-   families this technique, not its whole family, may not join, and
-   `kinds` when it should differ from its first family's (below). A new
+   families this technique, not its whole family, may not join,
+   `kinds` when it should differ from its first family's (below), and
+   `since`: move the spec's `version` up (`"1.0"` to `"1.1"`; versions are
+   dotted whole numbers, so `"1.10"` follows `"1.9"`), once per change that
+   adds or retires techniques, and give each new technique that version. A new
    family also needs an entry under `families`: `layer`,
    `within_layer_order` (its place in the obfuscation order; 0 elsewhere),
    `dimension` (an augmentation tag of `configs/dimensions.json`, where a new

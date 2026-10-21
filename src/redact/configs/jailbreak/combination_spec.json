@@ -1,5 +1,5 @@
 {
-  "_comment": "Jailbreak technique compatibility specification. All rules enforced in jailbreak/rules.py. kinds, on a family or a technique, lists the augmentation kinds that may draw it: absent is [\"adversarial\"], and a technique's own kinds replace its first family's. Read by jailbreak/technique.py (tag) and jailbreak/pool.py.",
+  "_comment": "Jailbreak technique compatibility specification. All rules enforced in jailbreak/rules.py. kinds, on a family or a technique, lists the augmentation kinds that may draw it: absent is [\"adversarial\"], and a technique's own kinds replace its first family's. since and deprecated, on a technique, are the versions that added and retired it (absent since is \"1.0\"): version moves up, as dotted whole numbers (\"1.9\", \"1.10\"), in each change that adds or retires a technique, and the technique carries the new version. Read by jailbreak/technique.py (tag) and jailbreak/pool.py.",
 
   "version": "1.0",
 

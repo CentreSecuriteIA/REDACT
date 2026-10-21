@@ -172,21 +172,61 @@ def test_every_technique_is_adversarial_and_a_technique_s_kinds_win(monkeypatch)
     assert natural_only in technique_pool(resolve(None, "natural"))
 
 
-@pytest.mark.parametrize("kinds", [[], ["natural", "natural"], ["attack"], "natural"])
-def test_kinds_that_are_not_a_list_of_kinds_raise_at_tagging(monkeypatch, kinds):
+def _tag_base64(monkeypatch, spec_version="1.0", **entry):
+    """A ``to_base64`` tagged from a spec at ``spec_version`` whose entry for
+    it has ``entry`` over its own."""
     import redact.jailbreak.technique as T
 
     spec = load_spec()
     techniques = {**spec["techniques"],
-                  "to_base64": {**spec["techniques"]["to_base64"], "kinds": kinds}}
-    monkeypatch.setattr(T, "load_spec", lambda: {**spec, "techniques": techniques})
+                  "to_base64": {**spec["techniques"]["to_base64"], **entry}}
+    monkeypatch.setattr(T, "load_spec", lambda: {
+        **spec, "version": spec_version, "techniques": techniques})
 
     def to_base64(prompt):
         return prompt, ""
 
+    T.tag([to_base64])
+    return to_base64
+
+
+@pytest.mark.parametrize("kinds", [[], ["natural", "natural"], ["attack"], "natural"])
+def test_kinds_that_are_not_a_list_of_kinds_raise_at_tagging(monkeypatch, kinds):
     with pytest.raises(ValueError, match="the kinds of technique 'to_base64' must be "
                        r"a non-empty list of \['adversarial', 'natural'\]"):
-        T.tag([to_base64])
+        _tag_base64(monkeypatch, kinds=kinds)
+
+
+def test_a_technique_is_dated_by_the_versions_that_added_and_retired_it(
+        monkeypatch):
+    dated = _tag_base64(monkeypatch, since="1.1", deprecated="1.12")
+    assert (dated.since, dated.deprecated) == ("1.1", "1.12")
+    # An entry without them: one the library had before the spec dated them.
+    undated = _tag_base64(monkeypatch)
+    assert (undated.since, undated.deprecated) == ("1.0", None)
+
+
+@pytest.mark.parametrize("key", ["since", "deprecated"])
+@pytest.mark.parametrize("version", [1.1, "v1.1", "1.1.", "1..1", "", None])
+def test_a_since_or_deprecated_that_is_not_dotted_whole_numbers_raises_at_tagging(
+        monkeypatch, key, version):
+    with pytest.raises(ValueError, match=f"the {key} of technique 'to_base64' must "
+                       "be a version of dotted whole numbers"):
+        _tag_base64(monkeypatch, **{key: version})
+
+
+def test_a_spec_version_that_is_not_dotted_whole_numbers_raises_at_tagging(
+        monkeypatch):
+    with pytest.raises(ValueError, match="the version of the spec must be"):
+        _tag_base64(monkeypatch, spec_version="1.1-beta")
+
+
+def test_versions_compare_as_whole_numbers():
+    from redact.jailbreak.technique import version_key
+
+    assert version_key("1.10") > version_key("1.9") > version_key("1.1")
+    assert version_key("2") > version_key("1.99")
+    assert version_key("1.0.1") > version_key("1.0")
 
 
 def test_registry_names_every_technique_it_is_given():

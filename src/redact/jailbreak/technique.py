@@ -10,6 +10,7 @@ global ``random``.
 """
 
 import json
+import re
 from collections.abc import Callable, Generator
 from functools import lru_cache
 
@@ -24,6 +25,11 @@ DISCARDED = "DISCARDED"
 KINDS = ("adversarial", "natural")
 #: The kinds of a family the spec gives no ``kinds``, and of its techniques.
 DEFAULT_KINDS = ("adversarial",)
+
+#: The spec version of a technique whose entry gives no ``since``: the
+#: techniques the library had before the spec dated them.
+FIRST_VERSION = "1.0"
+_VERSION = re.compile(r"[0-9]+(\.[0-9]+)*")
 
 TechniqueResult = tuple[str, str]
 TechniqueGen = Generator[LLMRequest, str, TechniqueResult]
@@ -62,6 +68,22 @@ def _checked_kinds(whose: str, kinds) -> list[str]:
     return list(kinds)
 
 
+def version_key(version: str) -> tuple[int, ...]:
+    """A spec version as the whole numbers it compares by: ``"1.10"`` is
+    ``(1, 10)``, so it comes after ``"1.9"``."""
+    return tuple(int(part) for part in version.split("."))
+
+
+def _checked_version(whose: str, key: str, version) -> str:
+    """``version``, checked to be dotted whole numbers, as :func:`version_key`
+    reads them."""
+    if not isinstance(version, str) or not _VERSION.fullmatch(version):
+        raise ValueError(
+            f"combination_spec.json: the {key} of {whose} must be a version of "
+            f'dotted whole numbers, such as "1.1", got {version!r}.')
+    return version
+
+
 def tag(funcs: list[Callable]) -> None:
     """Set each function's spec tags as attributes of the function.
 
@@ -72,18 +94,24 @@ def tag(funcs: list[Callable]) -> None:
     join, beside its families' own) come from the technique's entry;
     ``layer`` and ``within_layer_order`` from its first family; ``kinds``
     (the augmentation kinds that may draw it) from the technique's entry,
-    else its first family's (:func:`family_kinds`). A function the spec does
-    not name is skipped. Called once, when ``redact.jailbreak`` is imported.
+    else its first family's (:func:`family_kinds`). ``since`` is the spec
+    version that added the technique (:data:`FIRST_VERSION` when its entry
+    gives none) and ``deprecated`` the one that retired it (None while it
+    is active). A function the spec does not name is skipped. Called once,
+    when ``redact.jailbreak`` is imported.
 
     Raises:
         ValueError: A technique's ``max_tokens`` is not a whole number of at
-            least 1, or its ``kinds`` (or its family's) not a list of
-            :data:`KINDS`. Checked here, so a bad spec fails at import
-            instead of as an error row per sample.
+            least 1, its ``kinds`` (or its family's) not a list of
+            :data:`KINDS`, or its ``since`` or ``deprecated``, or the spec's
+            ``version``, not dotted whole numbers. Checked here, so a bad
+            spec fails at import instead of as an error row per sample or
+            on a resume.
     """
     spec = load_spec()
     families = spec["families"]
     techniques = spec["techniques"]
+    _checked_version("the spec", "version", spec.get("version", FIRST_VERSION))
 
     family_layer = {name: f["layer"] for name, f in families.items()}
     family_wlo = {name: f.get("within_layer_order", 0) for name, f in families.items()}
@@ -118,3 +146,8 @@ def tag(funcs: list[Callable]) -> None:
         fn.kinds = (_checked_kinds(f"technique {name!r}", t["kinds"]) if "kinds" in t
                     else family_kinds(primary_family) if primary_family in families
                     else list(DEFAULT_KINDS))
+        fn.since = _checked_version(
+            f"technique {name!r}", "since", t.get("since", FIRST_VERSION))
+        fn.deprecated = (_checked_version(f"technique {name!r}", "deprecated",
+                                          t["deprecated"])
+                         if "deprecated" in t else None)

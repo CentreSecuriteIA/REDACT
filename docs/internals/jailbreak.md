@@ -28,7 +28,7 @@ the technique names are in [techniques.md](../techniques.md).
 
 | Module | Holds |
 |---|---|
-| `technique.py` | The technique contract, `load_spec`, `tag`, `DISCARDED`, `KINDS`, `DEFAULT_KINDS`, `family_kinds` |
+| `technique.py` | The technique contract, `load_spec`, `tag`, `DISCARDED`, `KINDS`, `DEFAULT_KINDS`, `family_kinds`, `FIRST_VERSION`, `version_key` |
 | `hacking/`, `manipulation/`, `obfuscation/`, `requests/` | The techniques, one module per family (`distractor.py` holds both distractor families), each with a getter; `get_all_hacking_functions`, `get_all_manipulation_functions`, `get_all_obfuscation_functions`, `get_all_request_functions` per subpackage. `manipulation/benign.py` makes the benign data: one unit per subcategory of the benign taxonomy and answer type, keyed `(main_category, sub_category, answer_type)` |
 | `pool.py` | `all_techniques`, `technique_pool(resolved)`, `kind_of(resolved)`, `languages`, `registry`, `uses_translation` |
 | `augmentation.py` | `KINDS`, `defaults(config_dir)`, `resolve(section, kind, base=None, config_dir=None)`, `rounds_of(resolved)`, `apply_flat_keywords`, `FLAT_KEYWORDS` |
@@ -75,6 +75,11 @@ def to_y(prompt: str, **kwargs) -> TechniqueGen:
   `within_layer_order`; `kinds` (the augmentation kinds that may draw it)
   is the technique's own, else its first family's, else `["adversarial"]`.
   A `kinds` that is not a non-empty list of `adversarial` and `natural`
+  raises at import. `since` is the spec version that added the technique
+  (`FIRST_VERSION`, `"1.0"`, when its entry gives none) and `deprecated`
+  the one that retired it (`None` while it is active). Versions are dotted
+  whole numbers and compare as such (`version_key`: `"1.10"` comes after
+  `"1.9"`); a `since`, a `deprecated` or a spec `version` that is not one
   raises at import.
 
 `run_chain(techniques, text, ...)` runs one input through its techniques in
