@@ -643,9 +643,9 @@ the default) and in `params["jailbreaks"]`.
 
 ### Release notes
 
-**Upgrading from the previous release (spec version 1.0, now 1.2).** The
-jailbreak library grew from 151 techniques in 23 families to 192 active ones
-(199 registered, 7 retired) in 28 families and five layers. What that asks of
+**Upgrading from the previous release (spec version 1.0, now 1.3).** The
+jailbreak library grew from 151 techniques in 23 families to 216 active ones
+(223 registered, 7 retired) in 30 families and five layers. What that asks of
 a run you already have, and what you will see; each point has its note below.
 
 - **One re-plan is planned: the adversarial kind.** The packaged attacks now
@@ -660,7 +660,8 @@ a run you already have, and what you will see; each point has its note below.
   again with `resume=False`, and still replays the retired ones.
 - **The natural kind's pool changed.** The spec's `kinds` narrowed it to the
   techniques marked natural, and spec 1.2 then grew it, to 71 techniques in
-  13 families by default (46 in 8 before; 90 with `"translation": true`). A
+  13 families by default (46 in 8 before; 90 with `"translation": true`);
+  spec 1.3 left it as it was. A
   natural plan made before the narrowing raises on resume: run the natural
   kind with `resume=False`. One made since resumes with the WARNING above.
   A `config_dir` copy of `augmentations.json` made before spec 1.2 does not
@@ -670,8 +671,9 @@ a run you already have, and what you will see; each point has its note below.
   not, a technique is drawn only for the inputs it applies to, several
   rules are new, and the request obfuscation's families are counted apart
   from the obfuscation layer's, so the attacks draw every technique of
-  their pool. The default attack pool is 178 techniques in 24 families
-  (142 in 22 before). The `eval` type's pool and draws are held, at 36
+  their pool. The default attack pool is 202 techniques in 26 families
+  (142 in 22 before; 178 in 24 at spec 1.2). The `eval` type's pool and
+  draws are held, at 36
   techniques in 10 families, but for the ASCII-art cap, which changes the font
   `to_ascii_art` draws for texts of about 40 characters or more.
 - **More model calls, and new files.** A typo rewrite and a cognitive or
@@ -783,6 +785,53 @@ and dual-use benign variations such a plan made with a technique the natural
 kind no longer draws, with one WARNING that counts them. A `config_dir` copy
 of `augmentations.json` whose natural `families.allow` names one of these
 families raises ([overlay rules](#overlay-rules)).
+
+**Release note: the techniques spec 1.3 adds.** Twenty-four pure template
+techniques, all attack-only, whose text the owner wrote
+([techniques.md](techniques.md#what-the-families-do)):
+
+- *Persona templates* (`persona_template`, hacking, 11): a fixed frame for a
+  well-known jailbreak persona around the prompt, with one of six mechanics
+  drawn into it (`to_dan_persona_template`, ...).
+- *Fake turns* (`fake_turns`, manipulation, 3): an invented system turn,
+  assistant turn or earlier exchange with the prompt (`to_fake_system_turn`,
+  `to_fake_assistant_turn`, `to_fake_history`). They take no benign data.
+- *Three answer formats*: `to_dual_answer`, `to_tagged_prefix`,
+  `to_answer_in_encoding`.
+- *One member for each thin request family* (two for impersonation and
+  temporal): `to_impersonate_authority`, `to_impersonate_developer`,
+  `to_use_future_tense`, `to_use_historical_era`,
+  `to_distractor_prefix_task`, `to_distractor_suffix_task`,
+  `to_ask_with_urgency`.
+
+A fresh plan of the adversarial kind draws them: the default attack pool goes
+from 178 techniques in 24 families to 202 in 26, and since each adds members
+or a family to deal, some units of a fresh plan draw other techniques than
+they did with the same seed. A plan kept from spec 1.2 resumes with the
+growth WARNING, which names the twenty-four, and does not draw them until it
+is planned again with `resume=False`. New rules bind a fresh plan:
+`persona_template` refuses `fsh`, `dap`, `ascii_art` and `impersonation`;
+`fake_turns` refuses `continuation`, `indirect`, `framing`, `persona`,
+`cognitive`, `persona_template`, `structural` and `neutral_container`, and
+takes the manipulation layer's block of `translation`, `ascii_art` and the
+heavy encodings; `to_refusal_then_comply`, `to_prefix_injection`,
+`to_dual_answer` and `to_tagged_prefix` refuse `persona_template`; and
+`to_answer_in_encoding` refuses `encode`. A kept plan replays its recorded
+combinations, so a rule changes none of them.
+
+The natural kind does not change: it draws 71 techniques. `answer_format`
+and `asking` are natural families, so their four new members say
+`"kinds": ["adversarial"]`; whether an urgent ask is a natural variation is
+the owner's call. The `eval` type does not change either: its pool stays at
+36 and its draws are those it made before. It allows none of the new
+families and, of `answer_format`, names `to_refusal_then_comply` alone; it
+allows `temporal` whole, so `eval.json` now ends its `techniques.deny` with
+`"to_use_future_tense", "to_use_historical_era"`. The rule that keeps
+`to_refusal_then_comply` from `persona_template` does not move its eval
+draws, since the eval type draws no persona template. A copy of `eval.json`
+in a `config_dir`, read whole in place of the packaged one, does not get the
+two denies: its eval attacks draw the two temporal members until you add
+them to its `techniques.deny`.
 
 **Release note: the techniques spec 1.2 adds.** Forty-eight techniques in
 six groups, below. A fresh plan draws them; since each adds members to deal,

@@ -197,12 +197,12 @@ cognitive vs impersonation rule
 obfuscation (when `allow_request_obfuscation` is on, as in the packaged
 attacks and the escalation's rounds 3 and 4) against `max_obfuscations`,
 draws a technique only for the inputs it applies to, and deals the
-techniques spec 1.2 added and not the seven it retired. The
+techniques specs 1.2 and 1.3 added and not the seven spec 1.1 retired. The
 [release notes](../configuration.md#release-notes) list the changes. A
 natural plan made before the natural kind's pool was narrowed to what the
 spec's `kinds` mark natural raises on resume (its pool changed): run the
 natural kind with `resume=False`; one made since resumes with the WARNING
-below, spec 1.2 having grown the pool. The build leaves out the benign and
+below, spec 1.2 having grown the pool (spec 1.3 left it as it was). The build leaves out the benign and
 dual-use benign variations such a plan made with a technique the natural
 kind no longer draws ([build.md](build.md#training-mode)). The
 5,000-character cap on `to_ascii_art` holds wherever it is drawn, the eval
@@ -247,7 +247,11 @@ packaged attacks, the one re-plan this release asks of the adversarial kind
 (its plan kept from before raises on resume, naming `rounds`; run the kind
 once with `resume=False`, the natural kind's plan is not affected); the typo
 and the scenario checks, which cost model calls; the natural pool; and the
-techniques spec 1.2 adds.
+techniques specs 1.2 and 1.3 add. A plan kept from spec 1.2 resumes with
+the growth WARNING above, naming the twenty-four techniques spec 1.3 adds
+(the persona templates, the fake turns, three answer formats and seven
+members of the thin request families), all attack-only, so only an
+adversarial plan names them.
 
 ## Rejected and failed units
 

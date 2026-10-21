@@ -750,4 +750,9 @@ Also beyond the reference list:
 - the answer formats code, dialogue, story and structured data;
 - continuation attacks (4) and indirect task embedding (6);
 - the answer languages Zulu, Scots Gaelic, Bengali and Javanese, and (spec
-  version 1.2) Hmong, Guarani, Chinese, Hindi, Yoruba and Amharic.
+  version 1.2) Hmong, Guarani, Chinese, Hindi, Yoruba and Amharic;
+- (spec version 1.3) the persona templates (11 frames, 6 mechanics) and the
+  fake turns (3); the answer formats dual answer, tagged prefix and answer
+  in an encoding; the impersonations of an authority and of a developer,
+  the future tense and a historical era, a task as a distractor before or
+  after the prompt, and an urgent ask.
