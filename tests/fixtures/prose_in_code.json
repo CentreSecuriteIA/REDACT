@@ -1,0 +1,13 @@
+{
+ "_comment": "Strings of eight or more words under src/redact/jailbreak/ that are not docstrings, raised errors, log calls or warnings: text a technique could write, kept in code. One entry per string, by file, enclosing function or module-level name, and word count, never its text. The list only shrinks: moving a text into a JSON template file takes its entry out (tests/jailbreak/test_prose_in_code.py).",
+ "allowed": [
+  {"file": "augmentation.py", "function": "_check_kinds", "words": 16, "_why": "an error message, raised below"},
+  {"file": "augmentation.py", "function": "_check_kinds", "words": 20, "_why": "an error message, raised below"},
+  {"file": "augmentation.py", "function": "_check_kinds", "words": 12, "_why": "an error message, raised below"},
+  {"file": "augmentation.py", "function": "_check_kinds", "words": 19, "_why": "an error message, raised below"},
+  {"file": "obfuscation/sensitive_words.py", "function": "_CHAR_SPECS", "words": 11, "_why": "a generated technique's docstring"},
+  {"file": "obfuscation/sensitive_words.py", "function": "_CHAR_SPECS", "words": 8, "_why": "a generated technique's docstring"},
+  {"file": "obfuscation/sensitive_words.py", "function": "_CHAR_SPECS", "words": 8, "_why": "a generated technique's docstring"},
+  {"file": "obfuscation/sensitive_words.py", "function": "_CHAR_SPECS", "words": 8, "_why": "a generated technique's docstring"}
+ ]
+}

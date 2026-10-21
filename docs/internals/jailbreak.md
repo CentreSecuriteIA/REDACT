@@ -104,7 +104,12 @@ def to_y(prompt: str, **kwargs) -> TechniqueGen:
   template technique's texts and draws by digest), and a weighted one with
   `rng.choices`; a variant of weight 0 is never drawn, and a pool of one
   makes no draw. `to_json`'s wrapper is still written in
-  `obfuscation/structural.py`, until the owner's wrapper step.
+  `obfuscation/structural.py`, until the owner's wrapper step. A
+  technique's text belongs in a template file: a lint
+  (`tests/jailbreak/test_prose_in_code.py`) fails on a string of eight or
+  more words in the package's code that is not a docstring or a message,
+  unless `tests/fixtures/prose_in_code.json` allows it by file, function
+  and word count; that list only shrinks.
 
 `run_chain(techniques, text, ...)` runs one input through its techniques in
 the order given. A transform runs inline; a generator's requests are yielded

@@ -389,6 +389,21 @@ A new directive is a new list in the file and a technique that names it
 with `@uses_pool` ([above](#add-a-jailbreak-technique)); its family needs
 a floor in `FLOORS`.
 
+**Keep a technique's text out of the code.** `tests/jailbreak/test_prose_in_code.py`
+reads every module under `src/redact/jailbreak/` with `ast` and finds each
+string of eight or more words that is not a docstring, and not inside a
+`raise`, a logging call or `warnings.warn`: text a technique could write.
+`tests/fixtures/prose_in_code.json` allows the eight found when the lint
+was written (four pieces of an error message in `augmentation.py`, four
+docstrings of generated `sensitive_words` techniques), each by file,
+enclosing function or module-level name, and word count, never its text.
+A new string fails, printing only `file:line` and its word count: put the
+text in a template file, or, for a message the lint cannot tell from
+output, add its entry. An entry no string matches fails too, so moving a
+text into JSON takes its entry out and the list only shrinks. Text built
+from shorter strings (the suffix fragments, the abbreviation map, the keys
+of `to_json`'s wrapper) is not found.
+
 ## Add a stage
 
 A stage is a core, a front, and a row in the stage table.
