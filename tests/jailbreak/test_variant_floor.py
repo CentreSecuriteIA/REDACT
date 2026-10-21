@@ -36,14 +36,15 @@ from redact.jailbreak.pool import variant_pools
 _FIXTURE = Path(__file__).parents[1] / "fixtures" / "variant_floor.json"
 
 #: The fewest variants a pool should have, by its family: 8 for a request or
-#: framing directive and for a container, 12 for a benign role, 20 for small
-#: talk, 6 for the persona templates' mechanics. A persona template's frame
+#: framing directive, a container and a fake turn, 12 for a benign role, 20
+#: for small talk, 6 for the persona templates' mechanics. A persona template's frame
 #: is not counted: it is its technique's own text, one per persona by design,
 #: not a pool the technique draws from, so the mechanics are the family's one
 #: pool here.
 FLOORS = {
     "framing": 8,
     "persona_template": 6,
+    "fake_turns": 8,
     "answer_format": 8,
     "answer_language": 8,
     "asking": 8,

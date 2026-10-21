@@ -355,6 +355,50 @@ def test_a_family_names_only_families_the_spec_has():
     assert named and named <= set(families)
 
 
+_FAKE_TURNS = ["to_fake_system_turn", "to_fake_assistant_turn", "to_fake_history"]
+
+
+@pytest.mark.parametrize("fake", _FAKE_TURNS)
+@pytest.mark.parametrize("other", [
+    "to_continue_passage", "to_summarize", "to_fictional_world",
+    "to_psychopath_persona", "to_avi", "to_dan_persona_template",
+    "to_json", "to_markdown", "to_csv_row", "to_email_message"])
+def test_a_fake_turn_refuses_what_fsh_and_dap_refuse_and_a_wrapper_either_way(
+        fake, other):
+    """The fsh/dap list (continuation, indirect, framing, persona, cognitive),
+    the persona templates, and the structural and neutral containers: an
+    invented turn is a conversation, not a document to wrap."""
+    assert not _joins(fake, other)
+    assert not _joins(other, fake)
+
+
+@pytest.mark.parametrize("fake", _FAKE_TURNS)
+@pytest.mark.parametrize("other", [
+    "to_french", "to_thai", "to_ascii_art", "to_base64", "to_morse", "to_hex"])
+def test_a_fake_turn_takes_the_manipulation_layer_s_obfuscation_block(fake, other):
+    """manipulation_blocked_obfuscation reads the manipulation layer, so the
+    fake turns are kept from translation, ascii_art and the heavy
+    full-text encodings, as fsh and dap are."""
+    assert not _joins(fake, other)
+    assert not _joins(other, fake)
+
+
+@pytest.mark.parametrize("fake", _FAKE_TURNS)
+@pytest.mark.parametrize("other", ["to_fsh_random_short", "to_dap_selected_long",
+                                   "to_fake_system_turn"])
+def test_a_fake_turn_is_the_one_manipulation_of_its_combination(fake, other):
+    assert not _joins(fake, other)
+
+
+@pytest.mark.parametrize("fake", _FAKE_TURNS)
+@pytest.mark.parametrize("other", [
+    "to_rot13", "to_sensitive_words_encode_base64", "to_rewrite_with_typos_low",
+    "to_answer_as_code", "to_refusal_then_comply", "to_impersonate_good_person"])
+def test_a_fake_turn_joins_a_light_or_word_level_encoding_typos_or_a_request(
+        fake, other):
+    assert _joins(fake, other) and _joins(other, fake)
+
+
 @pytest.mark.parametrize(("first", "then"), [
     ("to_french", "to_fsh_random_short"),
     ("to_fsh_random_short", "to_french"),

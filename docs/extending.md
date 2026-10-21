@@ -291,7 +291,7 @@ contract.
      names the natural kind draws by default, and
      `tests/jailbreak/test_pool.py` fails until the owner decides: give the
      technique `"kinds": ["adversarial"]`, or add its name to the fixture.
-     The same file checks the attack pool's 192 techniques in 25 families.
+     The same file checks the attack pool's 195 techniques in 26 families.
    - **The eval pool.** `configs/dataset_types/eval.json` allows whole
      families (`encode`, `fsh`, `dap`, `framing`, `structural`, `ascii_art`,
      `continuation`, `temporal`), so a technique added to one of them joins
@@ -310,8 +310,9 @@ contract.
    technique. Once the change is meant, regenerate the fixture from the
    repository root with `PYTHONPATH=src python -m tests.jailbreak.test_registry`.
    A technique whose text comes from a template file (framing, the persona
-   templates, structural, the neutral containers, the request families,
-   small talk and the benign roles) is also pinned by what it writes:
+   templates, the fake turns, structural, the neutral containers, the
+   request families, small talk and the benign roles) is also pinned by
+   what it writes:
    `tests/jailbreak/test_template_draws.py` runs each on two neutral probes
    for six seeds and compares a SHA-256 digest per technique and seed (of
    the texts, the infos and the rng's state after them, no text) with
@@ -462,8 +463,9 @@ pool of one variant named after the entry. `personas.json` and
 5. **Ratchet the floor.** `tests/fixtures/variant_floor.json` records each
    pool's family, its count of variants on and its floor, the fewest it
    should have (`FLOORS` by family in `tests/jailbreak/test_variant_floor.py`:
-   8 for a request or framing directive and a container, 12 for a benign
-   role, 20 for small talk, 6 for the persona templates' mechanics; a
+   8 for a request or framing directive, a container and a fake turn, 12
+   for a benign role, 20 for small talk, 6 for the persona templates'
+   mechanics; a
    persona frame is its technique's own text, one per persona, not a pool
    the technique draws from, and is not counted). Regenerate it with
    `PYTHONPATH=src python -m tests.jailbreak.test_variant_floor` to record
@@ -473,7 +475,7 @@ pool of one variant named after the entry. `personas.json` and
    without being on the fixture's `known_short` list, which the regenerator
    keeps as it is. A pool that reaches its floor must leave
    `known_short`: the test fails until it does, so the list only shrinks.
-   13 of the 47 pools are on it today, in 5 families, all drawn by
+   13 of the 53 pools are on it today, in 5 families, all drawn by
    eval-pool techniques; `to_json`'s wrapper is not a pool yet.
 
 A new directive is a new list in the file and a technique that names it

@@ -158,6 +158,13 @@
       "within_layer_order": 0,
       "cross_incompatible_with": ["continuation", "indirect", "framing", "persona", "cognitive"]
     },
+    "fake_turns": {
+      "description": "Invented turns of the conversation with the prompt: a system turn, an assistant turn or an earlier exchange (pure templates; no benign data)",
+      "layer": "manipulation",
+      "dimension": "example_priming",
+      "within_layer_order": 0,
+      "cross_incompatible_with": ["continuation", "indirect", "framing", "persona", "cognitive", "persona_template", "structural", "neutral_container"]
+    },
     "answer_format": {
       "description": "Output-format and response-conditioning directives",
       "layer": "requests",
@@ -252,7 +259,7 @@
   },
 
   "manipulation_blocked_obfuscation": {
-    "_comment": "When manipulation (fsh/dap) is selected, block these obfuscation families and encode_weight values (except when encode also has sensitive_words family — selective encoding is still fine)",
+    "_comment": "When manipulation (a family of the manipulation layer: fsh, dap, fake_turns) is selected, block these obfuscation families and encode_weight values (except when encode also has sensitive_words family — selective encoding is still fine)",
     "families": ["ascii_art", "translation"],
     "encode_weight": "heavy"
   },
@@ -417,6 +424,10 @@
     "to_dap_selected_long":  { "families": ["dap"], "complexity": 3, "requires_llm": true, "requires_benign": true, "calls": 1 },
     "to_dap_random_many":    { "families": ["dap"], "complexity": 3, "requires_llm": false, "requires_benign": true, "cross_incompatible_with": ["typos"], "since": "1.2" },
     "to_dap_selected_many":  { "families": ["dap"], "complexity": 3, "requires_llm": true, "requires_benign": true, "calls": 1, "cross_incompatible_with": ["typos"], "since": "1.2" },
+
+    "to_fake_system_turn":    { "families": ["fake_turns"], "complexity": 2, "requires_llm": false, "since": "1.3" },
+    "to_fake_assistant_turn": { "families": ["fake_turns"], "complexity": 2, "requires_llm": false, "since": "1.3" },
+    "to_fake_history":        { "families": ["fake_turns"], "complexity": 2, "requires_llm": false, "since": "1.3" },
 
     "to_refusal_then_comply":     { "families": ["answer_format"], "complexity": 3, "requires_llm": false, "kinds": ["adversarial"], "cross_incompatible_with": ["persona_template"] },
     "to_apology_prevention":      { "families": ["answer_format"], "complexity": 2, "requires_llm": false, "kinds": ["adversarial"] },

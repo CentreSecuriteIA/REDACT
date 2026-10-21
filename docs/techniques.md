@@ -1,6 +1,6 @@
 # Jailbreak techniques
 
-The jailbreak stage draws from 206 active techniques in 5 layers and 29
+The jailbreak stage draws from 209 active techniques in 5 layers and 30
 families; the first layer, `rewrite`, holds none yet
 ([below](#layers)).
 `configs/jailbreak/combination_spec.json` gives each technique (the
@@ -56,10 +56,10 @@ on. (`to_rewrite`, despite its name, is an `indirect` request technique.)
 |---|---|---|---|
 | `rewrite` | 0 | 0 | at most 1 |
 | `hacking` | 4 | 32 | at most 1 |
-| `manipulation` | 2 | 12 | at most 1 |
+| `manipulation` | 3 | 15 | at most 1 |
 | `obfuscation` | 11 | 101 | no cap |
 | `requests` | 12 | 61 | at most 1 |
-| all | 29 | 206 | |
+| all | 30 | 209 | |
 <!-- END layers -->
 
 ## Families and techniques
@@ -80,6 +80,7 @@ that call a model call the generation model.
 | hacking | `persona` | `role_framing` |  | 11 | yes | no | `to_invented_persona`, `to_psychopath_persona`, `to_alien_persona`, `to_radical_politician_persona`, `to_cult_leader_persona`, `to_very_advanced_ai_persona`, `to_cartel_leader_persona`, `to_artist_persona`, `to_deformed_scientist_persona`, `to_actor_persona`, `to_someone_from_the_future_persona` |
 | hacking | `persona_template` | `role_framing` |  | 11 | no | no | `to_dan_persona_template`, `to_stan_persona_template`, `to_dude_persona_template`, `to_developer_mode_persona_template`, `to_aim_persona_template`, `to_evil_confidant_persona_template`, `to_opposite_mode_persona_template`, `to_unfiltered_oracle_persona_template`, `to_rogue_ai_persona_template`, `to_maintenance_mode_persona_template`, `to_liberated_model_persona_template` |
 | manipulation | `dap` | `example_priming` |  | 6 | `to_dap_selected_short`, `to_dap_selected_long`, `to_dap_selected_many` | yes | `to_dap_random_short`, `to_dap_random_long`, `to_dap_selected_short`, `to_dap_selected_long`, `to_dap_random_many`, `to_dap_selected_many` |
+| manipulation | `fake_turns` | `example_priming` |  | 3 | no | no | `to_fake_system_turn`, `to_fake_assistant_turn`, `to_fake_history` |
 | manipulation | `fsh` | `example_priming` |  | 6 | `to_fsh_selected_short`, `to_fsh_selected_long`, `to_fsh_selected_many` | yes | `to_fsh_random_short`, `to_fsh_random_long`, `to_fsh_selected_short`, `to_fsh_selected_long`, `to_fsh_random_many`, `to_fsh_selected_many` |
 | obfuscation | `translation` | `language` | 10 | 19 | yes | no | `to_french`, `to_japanese`, `to_russian`, `to_spanish`, `to_german`, `to_arabic`, `to_turkish`, `to_czech`, `to_vietnamese`, `to_greek`, `to_croatian`, `to_swahili`, `to_thai`, `to_khmer`, `to_nepali`, `to_zulu`, `to_scots_gaelic`, `to_bengali`, `to_javanese` |
 | obfuscation | `typos` | `surface_noise` | 20 | 4 | yes | no | `to_rewrite_with_typos_low`, `to_rewrite_with_typos_medium`, `to_rewrite_with_typos_high`, `to_rewrite_with_typos_insane` |
@@ -201,7 +202,10 @@ technique is picked first. A technique may not join a combination when:
   `dap`; `fsh` and `dap` with `continuation`, `indirect`, `framing`,
   `persona`, `cognitive`; `persona_template` with `fsh`, `dap` and
   `ascii_art`; `persona`, `cognitive` and `persona_template` with
-  `impersonation`, so a prompt never carries two identities; `noise`
+  `impersonation`, so a prompt never carries two identities; `fake_turns`
+  with the list of `fsh` and `dap`, `persona_template`, `structural` and
+  `neutral_container` (an invented turn is a conversation, not a document
+  to wrap); `noise`
   with `typos` and `casual_writing`, one kind of surface noise per text; and
   `neutral_container` with `structural` (one document around the prompt)
   and `ascii_art` (no font draws a document of that length). So a
@@ -227,10 +231,10 @@ technique is picked first. A technique may not join a combination when:
   single font draws (most non-ASCII characters: accented letters such as `é`
   or `ñ`, dashes, curly quotes, kana; German umlauts and `ß` and some Greek
   or Cyrillic text have fonts), or one every font draws longer than its cap;
-- it pairs `fsh` or `dap` with an obfuscation in
-  `manipulation_blocked_obfuscation`: the `translation` and `ascii_art`
-  families and the `heavy` `encode` techniques, except those also in
-  `sensitive_words`;
+- it pairs a family of the manipulation layer (`fsh`, `dap`, `fake_turns`)
+  with an obfuscation in `manipulation_blocked_obfuscation`: the
+  `translation` and `ascii_art` families and the `heavy` `encode`
+  techniques, except those also in `sensitive_words`;
 - it pairs a `needs_latin` technique with a translation into a script
   other than Latin: Japanese, Russian, Arabic, Greek, Thai, Khmer, Nepali
   or Bengali (each language's `script` is in its row of
@@ -396,7 +400,7 @@ template variant or a font, for traceability.
   technique's own text, so the variant floor counts the six mechanics
   alone. The family is attack-only, and the eval type does not draw it.
 
-**Manipulation.** Both families build on benign question-and-answer pairs
+**Manipulation.** `fsh` and `dap` build on benign question-and-answer pairs
 of the subcategories of the benign taxonomy. The `random` variants pick a
 subcategory at random, the `selected` ones ask the model to choose one
 (prompt `jailbreak/category_selection`); `short` and `long` are the length of
@@ -427,6 +431,18 @@ a later model step that reads the text. They refuse `typos` (a model
 rewriting so long a prompt would not return it whole) and otherwise share
 the rules of `fsh` and `dap`; their complexity is 3, the top of the scale:
 one above their `random` siblings and level with their `selected` ones.
+
+`fake_turns` (spec version 1.3) puts an invented turn of the conversation
+before the prompt, with no model call and no benign data:
+`to_fake_system_turn` an invented system turn, `to_fake_assistant_turn` an
+invented assistant turn, `to_fake_history` an invented earlier exchange,
+eight variants each, from
+`configs/jailbreak/manipulation/fake_turns_templates.json`; the info names
+the variant (`variant=<name>`). Being of the manipulation layer, they take
+`fsh` and `dap`'s place in a combination (one manipulation at most) and
+their obfuscation block, and refuse the same hacking and request families,
+the persona templates, and the `structural` and `neutral_container`
+wrappers. The family is attack-only, and the eval type does not draw it.
 
 **Obfuscation.**
 
@@ -655,9 +671,9 @@ a weight, and an eval-pool technique's may not, since a weight changes the
 eval text ([extending.md](extending.md#add-variants-to-a-template-pool)).
 Importing `redact.jailbreak` checks every pool and raises naming the file,
 directive and variant of a fault. A pool should hold at least 8 variants
-(a request or framing directive, a container), 12 for a benign role, 20
-for small talk and 6 for the persona templates' mechanics; 13 of the 47
-pools are below their floor today (the five
+(a request or framing directive, a container, a fake turn), 12 for a
+benign role, 20 for small talk and 6 for the persona templates' mechanics;
+13 of the 53 pools are below their floor today (the five
 framing, the four continuation, the two structural, `refusal_then_comply` and
 `past_tense`, each with 4, or 1): the techniques of the eval pool, whose
 text waits for the eval review. A test ratchets the rest
@@ -667,8 +683,9 @@ The info names the variant drawn: `variant=<name>` for the framing
 techniques, the answer formats, the answer languages, asking, the
 distractors, impersonation, indirect, temporal, the neutral containers,
 small talk (`smalltalk=<prefix|suffix>;variant=<name>`), the benign roles
-(`role=<style>;variant=<name>`) and the persona templates, which name the
-mechanic drawn (`category=<key>_persona_template;variant=<mechanic>`);
+(`role=<style>;variant=<name>`), the fake turns (`variant=<name>`) and the
+persona templates, which name the mechanic drawn
+(`category=<key>_persona_template;variant=<mechanic>`);
 `style=<name>` for
 continuation. Structural's `to_xml` and `to_markdown` have one template
 each and name none (`to_xml`'s info names its policy id), and `to_json`

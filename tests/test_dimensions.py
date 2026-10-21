@@ -24,7 +24,7 @@ _FAMILY_TAGS = {
                       "continuation", "asking", "temporal", "smalltalk_prefix",
                       "smalltalk_suffix"],
     "answer_shape": ["answer_format"],
-    "example_priming": ["fsh", "dap"],
+    "example_priming": ["fsh", "dap", "fake_turns"],
 }
 
 _AXIS_TAGS = {
@@ -166,7 +166,8 @@ class TestTheCheck:
                 in message)
         assert ("the container families (adversarial: neutral_container, "
                 "structural; natural: neutral_container).") in message
-        assert "the example_priming families (adversarial: dap, fsh)" in message
+        assert ("the example_priming families (adversarial: dap, fake_turns, fsh)"
+                in message)
         assert message.count("undecided") == len(("request_shape", "container",
                                                    "example_priming"))
         assert 'params inputs.axes, as {"focus": null}' in message

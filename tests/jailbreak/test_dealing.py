@@ -348,8 +348,12 @@ _BUDGETS = [
 # group's counts, the rest of their draw (223 of the 240 dealt units, 125 of
 # the 200 undealt draws). The three spec 1.3 answer formats moved it once
 # more: a wider answer_format family changes the member some request draws
-# land on (5 of the 240 dealt units, 11 of the 200 undealt draws).
-_PINNED_DRAWS = "8b291689078e805a7b5846556c2ee9e85b78a3e8306fce74d431af5800f339d5"
+# land on (5 of the 240 dealt units, 11 of the 200 undealt draws). The spec
+# 1.3 fake_turns family moved it again: one more manipulation family to deal,
+# needing no benign data, changes the manipulation pick of many dealt units
+# and, through their rng and their group's counts, the rest of their draw
+# (116 of the 240 dealt units, 9 of the 200 undealt draws).
+_PINNED_DRAWS = "aef2a152a55f6421f7b894e44b4f7033406bd21fc2b950a2bce526aa0fc20634"
 
 
 def test_draws_without_the_request_obfuscation_are_those_made_before_it_was_counted():
