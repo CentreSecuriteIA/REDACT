@@ -428,7 +428,10 @@ the pool gives a `weight`; `0` turns a variant off. No packaged variant has
 a weight, and an eval-pool technique's may not, since a weight changes the
 eval text ([extending.md](extending.md#add-variants-to-a-template-pool)).
 Importing `redact.jailbreak` checks every pool and raises naming the file,
-directive and variant of a fault.
+directive and variant of a fault. A pool should hold at least 8 variants
+(a request or framing directive, a container); most hold 4 today: 34 of the
+35 pools are below that floor, which a test ratchets
+([extending.md](extending.md#add-variants-to-a-template-pool)).
 
 ## Reference list coverage
 

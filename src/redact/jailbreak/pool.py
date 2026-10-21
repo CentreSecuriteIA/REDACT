@@ -13,7 +13,7 @@ from collections.abc import Callable
 
 from redact.dimensions import check_tags
 
-from .directives import check_pools
+from .directives import check_pools, enabled, read_pools
 from .hacking import get_all_hacking_functions
 from .manipulation import get_all_manipulation_functions
 from .obfuscation import get_all_obfuscation_functions
@@ -135,6 +135,26 @@ def technique_pool(resolved: dict) -> list[Callable]:
                 "It is drawn for this release.", DeprecationWarning, stacklevel=2)
     return [fn for fn in pool
             if not getattr(fn, "deprecated", None) or fn.__name__ in named]
+
+
+def variant_pools() -> dict[str, dict]:
+    """Every variant pool a registered technique draws from, by its name
+    (``<file>:<directive>``): ``family``, its techniques' first family;
+    ``techniques``, their names; ``variants``, how many variants it may draw
+    (those of weight above 0). The variant floor
+    (``tests/jailbreak/test_variant_floor.py``) counts them."""
+    pools = {}
+    for fn in all_techniques():
+        ref = getattr(fn, "variant_pool", None)
+        if ref is None:
+            continue
+        if ref.name not in pools:
+            pools[ref.name] = {
+                "family": fn.families[0], "techniques": [],
+                "variants": len(enabled(read_pools(ref.file)[ref.directive])),
+            }
+        pools[ref.name]["techniques"].append(fn.__name__)
+    return pools
 
 
 def languages() -> set[str]:

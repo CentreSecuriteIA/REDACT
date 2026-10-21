@@ -370,9 +370,24 @@ pool of one variant named after the entry. `personas.json` and
    `PYTHONPATH=src python -m tests.jailbreak.test_template_draws` is run.
    A pool an eval-pool technique draws changes the eval text: that waits
    for the owner's eval review.
+5. **Ratchet the floor.** `tests/fixtures/variant_floor.json` records each
+   pool's family, its count of variants on and its floor, the fewest it
+   should have (`FLOORS` by family in `tests/jailbreak/test_variant_floor.py`:
+   8 for a request or framing directive and a container, 12 for a benign
+   role, 20 for small talk). Regenerate it with
+   `PYTHONPATH=src python -m tests.jailbreak.test_variant_floor` to record
+   the new count. The test fails when a pool has fewer variants than
+   recorded (a variant removed, or at weight 0), when the fixture is not
+   current, when a family has no floor, and when a pool is below its floor
+   without being on the fixture's `known_short` list, which the regenerator
+   keeps as it is. A pool that reaches its floor must leave
+   `known_short`: the test fails until it does, so the list only shrinks.
+   34 of the 35 pools are on it today, in 10 families; `to_json`'s wrapper
+   is not a pool yet.
 
 A new directive is a new list in the file and a technique that names it
-with `@uses_pool` ([above](#add-a-jailbreak-technique)).
+with `@uses_pool` ([above](#add-a-jailbreak-technique)); its family needs
+a floor in `FLOORS`.
 
 ## Add a stage
 
