@@ -127,7 +127,7 @@ def test_a_technique_added_after_the_plan_warns_once_and_keeps_the_plan(
     # Every planned unit ran as planned; none drew the new technique.
     assert Manifest.sidecar(out).load() == plan
     assert len(rows) == len(plan)
-    assert not rows["technique"].str.contains("to_reversed").any()
+    assert not any("to_reversed" in t.split("+") for t in rows["technique"])
 
 
 def test_a_technique_added_without_a_later_since_raises(tmp_path, monkeypatch):

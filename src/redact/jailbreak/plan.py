@@ -24,7 +24,7 @@ from redact.dataset.planfile import coverage_path, plan_record, write_plan
 
 from .chain import combine_techniques
 from .pool import TRANSLATION
-from .sampling import DEFAULT_MAX_COMPLEXITY, sample_combination
+from .sampling import DEFAULT_MAX_COMPLEXITY, REQUEST_SCOPE, sample_combination
 from .technique import FIRST_VERSION, applies, load_spec
 
 logger = logging.getLogger(__name__)
@@ -42,17 +42,21 @@ def _observe(dealer: Dealer, combined: Callable) -> None:
     """Count in ``dealer`` what one unit's draw ``combined`` holds: each
     technique's first family, the technique itself (a member of that family)
     and its layer, the request obfuscation when it has one, and the
-    complexity it spent, the request obfuscation's included."""
+    complexity it spent, the request obfuscation's included. The request
+    obfuscation's family is counted under :data:`REQUEST_SCOPE`, as phase 5
+    deals it, so it does not count against the obfuscation layer's."""
+    request_obfuscation = getattr(combined, "request_obfuscation", None)
     for fn in getattr(combined, "techniques", []):
         families = getattr(fn, "families", None) or []
         if families:
-            dealer.counts[families[0]] += 1
+            scope = REQUEST_SCOPE if fn is request_obfuscation else ""
+            dealer.counts[scope + families[0]] += 1
         dealer.members[fn.__name__] += 1
         layer = getattr(fn, "layer", None)
         if layer is not None:
             dealer.included[layer] += 1
         dealer.spent += getattr(fn, "complexity", 0)
-    if getattr(combined, "request_obfuscation", None) is not None:
+    if request_obfuscation is not None:
         dealer.included["request_obfuscation"] += 1
 
 
@@ -207,6 +211,10 @@ def plan_run(
         members.sort()
     used_by_row: dict[int, list[tuple]] = defaultdict(list)
     recorded = {"family_weights": dict(family_weights)} if family_weights else {}
+    # The request obfuscation's families are dealt under REQUEST_SCOPE and
+    # take the weights of the same families.
+    weights = dict(family_weights or {})
+    weights.update({REQUEST_SCOPE + name: w for name, w in weights.items()})
 
     # Yielded to the manifest one at a time: the plan is never held whole.
     def units():
@@ -219,7 +227,7 @@ def plan_run(
             )
             for key in sorted(subgroups):
                 category, entry_type = key
-                dealer = Dealer(family_weights, key=(seed, category, entry_type, it))
+                dealer = Dealer(weights, key=(seed, category, entry_type, it))
                 for sid, idx in subgroups[key]:
                     dealer.position += 1
                     candidates = [fn for fn in pool

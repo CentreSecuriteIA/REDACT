@@ -10,9 +10,14 @@ from .technique import load_spec
 #: The complexity a budget draw may spend when it is given none.
 DEFAULT_MAX_COMPLEXITY = 6
 
+#: The prefix of the request obfuscation's family names in a dealer's
+#: counts: its picks are counted apart from the obfuscation layer's, so they
+#: do not starve the layer's ``encode`` and ``sensitive_words``.
+REQUEST_SCOPE = "request_obfuscation:"
+
 
 def _pick_by_family(
-    rng: random.Random, candidates: list[Callable], dealer=None,
+    rng: random.Random, candidates: list[Callable], dealer=None, scope: str = "",
 ) -> Callable:
     """Pick a family, then a technique within it.
 
@@ -21,6 +26,9 @@ def _pick_by_family(
     the technique the eligible member of that family with the lowest count so
     far (:meth:`~redact.dataset.dealing.Dealer.pick_member`), ties broken by
     ``rng``, so a group's families and each family's members come out even.
+    The dealer counts the families under ``scope`` + their names
+    (:data:`REQUEST_SCOPE` for the request obfuscation); the members' counts
+    are shared.
     """
     family_map: dict[str, list[Callable]] = {}
     for fn in candidates:
@@ -29,7 +37,8 @@ def _pick_by_family(
     families = list(family_map)
     if dealer is None:
         return rng.choice(family_map[rng.choice(families)])
-    members = {fn.__name__: fn for fn in family_map[dealer.pick(rng, families)]}
+    fam = dealer.pick(rng, [scope + f for f in families])[len(scope):]
+    members = {fn.__name__: fn for fn in family_map[fam]}
     return members[dealer.pick_member(rng, list(members))]
 
 
@@ -186,14 +195,16 @@ def sample_combination(
     # Phase 5, decided and drawn before phase 4: a request-layer obfuscation
     # (optional, if enabled). It holds one of the max_obfuscations slots and
     # its complexity, so the obfuscations fill what it leaves and the
-    # combination never holds more than max_obfuscations of them.
+    # combination never holds more than max_obfuscations of them. Its
+    # families are dealt under REQUEST_SCOPE, apart from phase 4's.
     request_obfuscation: Callable | None = None
     obfuscation_slots = max_obfuscations
     if (allow_request_obfuscation and max_obfuscations > 0
             and _include("request_obfuscation", p_request_obfuscation)):
         req_obfusc_candidates = request_obfuscation_candidates(current_pool)
         if req_obfusc_candidates:
-            request_obfuscation = _pick_by_family(rng, req_obfusc_candidates, dealer)
+            request_obfuscation = _pick_by_family(
+                rng, req_obfusc_candidates, dealer, scope=REQUEST_SCOPE)
             _commit(request_obfuscation)
             obfuscation_slots -= 1
 

@@ -7,6 +7,7 @@ records the result beside the manifest.
 """
 
 import csv
+from collections import Counter
 
 import pandas as pd
 import pytest
@@ -14,6 +15,7 @@ import pytest
 import redact.jailbreak  # noqa: F401  (tags the techniques)
 from redact.jailbreak.hacking import get_all_hacking_functions
 from redact.jailbreak.plan import coverage, plan_run
+from redact.jailbreak.technique import applies
 from tests.jailbreak import simulate
 
 _GROUP = 20
@@ -253,6 +255,21 @@ def test_a_count_round_deals_the_techniques_of_every_family_evenly():
     assert uneven == {}
 
 
+@pytest.mark.parametrize("units", [2000, 3000])
+@pytest.mark.parametrize("section", [{}, {"budget": "group"}], ids=["unit", "group"])
+def test_the_default_attacks_draw_every_technique_of_their_pool(units, section):
+    """No step's picks starve another step's families: the request
+    obfuscation once counted its picks as the obfuscation layer's, and 14
+    encode and sensitive_words techniques were never drawn. A deprecated
+    technique, or one no simulated input may take, is not asked for."""
+    drawn, pool = simulate.deal_kind(section, units, groups=3)
+    table = simulate.shares(drawn, pool)
+    texts = simulate.inputs(units, groups=3)["prompt"]
+    asked = [fn.__name__ for fn in pool if not getattr(fn, "deprecated", None)
+             and any(applies(fn, text, "harmful") for text in texts)]
+    assert [name for name in asked if table[name]["count"] == 0] == []
+
+
 def test_a_kept_plan_replays_each_row_as_it_was_recorded(tmp_path):
     """Dealing changes what a fresh plan draws; a plan already written is
     replayed by name, in its recorded order, whatever the dealer does now."""
@@ -398,6 +415,16 @@ def test_the_request_obfuscation_is_a_light_encoding_or_a_translation(monkeypatc
         "encode", "sensitive_words", "translation"}
     assert all(getattr(fn, "encode_weight", None) == "light"
                or "translation" in fn.families for fn in drawn)
+
+
+def test_the_request_obfuscation_takes_the_family_weights(monkeypatch):
+    """Its families are counted apart from the obfuscation layer's and keep
+    their weights: translation at 3 takes three picks to each of the other
+    two families' one. A budget of 12 leaves every family room."""
+    section = {"max_complexity": 12, "family_weights": {"translation": 3}}
+    drawn = _request_obfuscations(monkeypatch, section, _ATTACKS, groups=3)
+    families = Counter(fn.families[0] for fn in drawn if fn is not None)
+    assert families == {"translation": 180, "encode": 60, "sensitive_words": 60}
 
 
 # The eval type's plan of 300 inputs in three groups at its seed, 43, pinned
