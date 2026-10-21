@@ -9,6 +9,7 @@ another name is none, the technique spec and templates under ``jailbreak/``,
 of theirs is warned about as ignored.
 """
 
+import json
 import logging
 from pathlib import Path
 
@@ -90,11 +91,39 @@ def config_sources(config_dir: str | Path) -> dict[str, list[str]]:
     }
 
 
+def _natural_allow(path: Path) -> list[str] | None:
+    """The natural kind's ``families.allow`` in the augmentations file at
+    ``path``, or None when it has none (the kind off, or every family
+    allowed)."""
+    natural = json.loads(path.read_text(encoding="utf-8")).get("natural")
+    families = natural.get("families") if isinstance(natural, dict) else None
+    allow = families.get("allow") if isinstance(families, dict) else None
+    return allow if isinstance(allow, list) else None
+
+
+def unseen_natural_families(config_dir: str | Path) -> list[str]:
+    """The families the packaged ``augmentations.json`` allows the natural
+    kind that the copy in ``config_dir`` does not: what a copy made before
+    the library added them cannot draw. Empty without a copy, or when either
+    file's natural kind has no allow list."""
+    mine = Path(config_dir) / _AUGMENTATIONS
+    if not mine.is_file():
+        return []
+    packaged = _natural_allow(paths.configs_dir() / _AUGMENTATIONS)
+    copied = _natural_allow(mine)
+    if packaged is None or copied is None:
+        return []
+    return [family for family in packaged if family not in copied]
+
+
 def report_config_sources(
     config_dir: str | Path | None, *, verbose: bool = True,
 ) -> dict[str, list[str]]:
     """Warn about the files of ``config_dir`` that are not read and, with
-    ``verbose``, log those that are.
+    ``verbose``, log those that are. A copy of ``augmentations.json`` whose
+    natural kind does not allow a family the packaged one allows is logged
+    at INFO, naming the families (:func:`unseen_natural_families`), so a
+    stale copy shows what it cannot draw.
 
     Returns:
         :func:`config_sources`, each list empty for no ``config_dir``.
@@ -113,4 +142,11 @@ def report_config_sources(
         logger.info(
             "configs: %d file(s) read from %s%s, the rest from the library",
             len(read), config_dir, f" ({', '.join(read)})" if read else "")
+    if unseen := unseen_natural_families(config_dir):
+        logger.info(
+            "configs: the natural kind of %s in %s does not allow %s, which the "
+            "library's allows, so its variations do not draw them: add them to "
+            "its natural families.allow, delete the copy, or write it again with "
+            "scaffold_setup(..., overwrite=True), which replaces your edits.",
+            _AUGMENTATIONS, config_dir, ", ".join(unseen))
     return found

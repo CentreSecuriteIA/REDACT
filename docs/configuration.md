@@ -819,6 +819,20 @@ folder scaffolded before `training.json` set `outputs.outputs_per_input` 2
 keeps its old copy, and so one response per input in a training run: add
 the key, or delete the copy. It
 refuses to overwrite a file the folder holds, naming them, unless asked to.
+
+**Refreshing a stale copy.** A copy does not follow the library. A family
+the library adds to the natural kind's `families.allow` in
+`jailbreak/augmentations.json` is not drawn through a copy made before it;
+the run says so at INFO, naming the families (`configs: the natural kind of
+jailbreak/augmentations.json in ... does not allow ...`). Add the names to
+the copy's natural `families.allow`, delete a copy you did not change, or
+write the folder again from the package with
+`scaffold_setup(target_dir, overwrite=True)` (or
+`python scripts/scaffold_setup.py TARGET --overwrite`). That rewrites every
+file it scaffolds, the recipes and params files included, and so replaces
+your edits to them: keep a copy of the files you changed and carry your
+changes over afterwards.
+
 Prompts are a separate tier: [the prompt overlay](#the-prompt-overlay) and
 `scripts/scaffold_prompts.py`.
 

@@ -9,7 +9,12 @@ import pandas as pd
 import pytest
 
 from redact import paths, telemetry
-from redact.config_overlay import config_sources, report_config_sources, taxonomy_folder
+from redact.config_overlay import (
+    config_sources,
+    report_config_sources,
+    taxonomy_folder,
+    unseen_natural_families,
+)
 from redact.content_moderation import axes as A
 from redact.driver import read_record, run_pipeline
 from redact.jailbreak.augmentation import resolve
@@ -158,6 +163,40 @@ def test_a_file_the_overlay_does_not_read_is_warned_about(tmp_path, caplog):
     assert "dataset_types/mine.json" in record.getMessage()
     assert "eval.json and training.json" in record.getMessage()
     assert "ignored" in record.getMessage()
+
+
+def _natural_allowing(*families: str) -> dict:
+    """The packaged augmentations.json with its natural kind allowing
+    ``families`` only: a copy made before the library allowed the others."""
+    data = _augmentations()
+    data["natural"]["families"]["allow"] = list(families)
+    return data
+
+
+def test_a_copy_whose_natural_kind_misses_a_packaged_family_is_logged(
+        tmp_path, caplog):
+    _write(tmp_path / "jailbreak" / "augmentations.json", _natural_allowing(
+        "typos", "casual_writing", "answer_language", "answer_format"))
+    assert unseen_natural_families(tmp_path) == ["asking", "indirect"]
+    with caplog.at_level("INFO", logger="redact.config_overlay"):
+        report_config_sources(tmp_path, verbose=False)
+    (record,) = caplog.records
+    assert record.levelname == "INFO"
+    assert "does not allow asking, indirect" in record.getMessage()
+    assert "overwrite=True" in record.getMessage()
+
+
+def test_a_current_copy_or_none_misses_no_natural_family(tmp_path):
+    assert unseen_natural_families(tmp_path) == []
+    _write(tmp_path / "jailbreak" / "augmentations.json", _augmentations())
+    assert unseen_natural_families(tmp_path) == []
+    # A natural kind that allows every family, or is off, misses none.
+    data = _augmentations()
+    data["natural"]["families"]["allow"] = None
+    _write(tmp_path / "jailbreak" / "augmentations.json", data)
+    assert unseen_natural_families(tmp_path) == []
+    _write(tmp_path / "jailbreak" / "augmentations.json", {**data, "natural": None})
+    assert unseen_natural_families(tmp_path) == []
 
 
 def test_a_run_records_the_files_it_read_from_the_folder(tmp_path, monkeypatch, caplog):
