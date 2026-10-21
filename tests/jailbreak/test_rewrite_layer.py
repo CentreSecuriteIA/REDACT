@@ -12,16 +12,22 @@ import pandas as pd
 import pytest
 
 import redact.jailbreak  # noqa: F401  (tags the techniques)
+import redact.jailbreak.pipeline as JPipe
 import redact.jailbreak.pool as JPool
+from redact.dataset import Manifest
 from redact.dataset.dealing import Dealer
-from redact.jailbreak.augmentation import resolve
+from redact.dataset.planfile import read_plan
+from redact.jailbreak.augmentation import resolve, rounds_of
 from redact.jailbreak.chain import in_layer_order
 from redact.jailbreak.plan import plan_run
 from redact.jailbreak.pool import all_techniques, registry, technique_pool
 from redact.jailbreak.rewrite import get_all_rewrite_functions
 from redact.jailbreak.rules import compatible
 from redact.jailbreak.sampling import sample_combination, sample_exact_combination
-from redact.jailbreak.technique import load_spec
+from redact.jailbreak.technique import KINDS, load_spec
+from redact.recipe import augmentations_of, load_dataset_type
+from redact.stages import generate_jailbreaks
+from tests.jailbreak.test_pipeline_jailbreaks import _inputs
 
 POOL = all_techniques()
 BY_NAME = registry(POOL)
@@ -228,7 +234,79 @@ def test_a_rewrite_layer_left_short_is_logged_as_any_layer(tmp_path, caplog):
 def test_layers_deny_rewrite_leaves_a_rewrite_technique_out_of_the_pool(monkeypatch):
     rewrite = _stand_in()
     monkeypatch.setattr(JPool, "all_techniques", lambda: [*POOL, rewrite])
-    denied = resolve({"adversarial": {"layers": {"deny": ["rewrite"]}}}, "adversarial")
     allowed = resolve({"adversarial": {"layers": {"deny": []}}}, "adversarial")
-    assert rewrite not in technique_pool(denied)
+    assert rewrite not in technique_pool(resolve(None, "adversarial"))
     assert rewrite in technique_pool(allowed)
+
+
+# --- the augmentation section ---------------------------------------------------
+
+#: An adversarial budget round as a plan file recorded it before the layer
+#: existed: the packaged kind's, an ``include_*`` for each of four layers.
+_ROUND_BEFORE = {"max_complexity": 6, "max_obfuscations": 2, "include_hacking": True,
+                 "include_manipulation": True, "include_obfuscation": True,
+                 "include_requests": True, "allow_request_obfuscation": True}
+
+
+@pytest.mark.parametrize("kind", KINDS)
+def test_both_packaged_kinds_deny_the_rewrite_layer(kind):
+    assert resolve(None, kind)["layers"] == {"deny": ["rewrite"]}
+
+
+@pytest.mark.parametrize("dataset_type", ["eval", "training"])
+def test_the_dataset_types_keep_the_packaged_deny(dataset_type):
+    base = load_dataset_type(dataset_type)["augmentations"]
+    for kind in KINDS:
+        resolved = resolve(None, kind, base=base)
+        assert resolved is None or resolved["layers"] == {"deny": ["rewrite"]}
+
+
+def test_a_layers_deny_given_replaces_the_packaged_one_whole():
+    """The overlay rule: a type file, or a section, that gives its own
+    ``layers.deny`` names ``rewrite`` in it to keep the layer off."""
+    for given in (["hacking"], ["rewrite", "hacking"]):
+        base = {"adversarial": {"layers": {"deny": given}}}
+        assert resolve(None, "adversarial", base=base)["layers"]["deny"] == given
+
+
+def test_the_packaged_kinds_rounds_are_those_written_before_the_layer():
+    assert rounds_of(resolve(None, "adversarial")) == [_ROUND_BEFORE]
+    escalation = resolve({"adversarial": {"rounds": "escalation"}}, "adversarial")
+    assert not [r for r in rounds_of(escalation) if "include_rewrite" in r]
+    assert rounds_of(resolve(None, "natural")) == [{"exact_techniques": 1}]
+
+
+def test_a_kind_that_allows_the_layer_says_include_rewrite_in_its_rounds():
+    kind = resolve({"adversarial": {"layers": {"deny": []},
+                                    "layer_rates": {"rewrite": 0.25}}}, "adversarial")
+    assert kind["layer_rates"] == {"rewrite": 0.25}
+    assert rounds_of(kind) == [{**_ROUND_BEFORE, "include_rewrite": True}]
+    hacking_off = resolve({"adversarial": {"layers": {"deny": ["hacking"]}}},
+                          "adversarial")
+    assert rounds_of(hacking_off) == [
+        {**_ROUND_BEFORE, "include_hacking": False, "include_rewrite": True}]
+
+
+def test_the_flat_keywords_keep_the_rewrite_layer_denied():
+    with pytest.warns(DeprecationWarning):
+        section = augmentations_of({"augmentations": {"include_hacking": False}})
+    assert section["adversarial"]["layers"] == {"deny": ["rewrite", "hacking"]}
+
+
+def test_a_plan_kept_from_before_the_layer_resumes(tmp_path, monkeypatch):
+    """A section without ``layers`` keeps the packaged deny, so its plan file
+    records the rounds a plan made before the layer recorded, and resumes."""
+    out = tmp_path / "jb.csv"
+    keywords = dict(
+        inputs=_inputs(), output_path=out, seed=1, auto_generate_benign=False,
+        verbose=False, augmentation={"natural": None, "adversarial": {
+            "pure_only": True, "translation": False,
+            "families": {"allow": ["encode"]}}})
+    with monkeypatch.context() as patch:
+        patch.setattr(JPipe, "drive_units", lambda units, **kwargs: None)
+        generate_jailbreaks(**keywords)
+    manifest = Manifest.sidecar(out)
+    plan = manifest.load()
+    assert read_plan(manifest.path)["rounds"] == [_ROUND_BEFORE]
+    rows = generate_jailbreaks(**keywords)
+    assert manifest.load() == plan and len(rows) == len(plan)

@@ -6,7 +6,7 @@
   "layer_order": ["rewrite", "hacking", "manipulation", "obfuscation", "requests"],
 
   "layer_rates": {
-    "_comment": "Per-layer target rates: the planner deals each layer at its rate over a group, and a direct sample_combination() call reads them as per-unit inclusion probabilities. Overridable per-call via the sampling_probs argument. rewrite, the first layer, holds no technique yet; its rate is 0.",
+    "_comment": "Per-layer target rates: the planner deals each layer at its rate over a group, and a direct sample_combination() call reads them as per-unit inclusion probabilities. Overridable per-call via the sampling_probs argument. rewrite, the first layer, holds no technique yet; its rate is 0, and both packaged kinds deny it (augmentations.json).",
     "rewrite": 0,
     "hacking": 0.5,
     "manipulation": 0.33,

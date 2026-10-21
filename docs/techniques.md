@@ -45,9 +45,11 @@ of its families in budget mode, the request obfuscation, when allowed,
 among them.
 
 The `rewrite` layer rewrites the whole prompt before every other layer, at
-most one technique a combination. It is empty until the owner's prompts for
-its techniques land, and its spec rate is 0. (`to_rewrite`, despite its
-name, is an `indirect` request technique.)
+most one technique a combination. It is empty and off by default until the
+owner's prompts for its techniques land: its spec rate is 0 and both
+packaged kinds deny it (`layers.deny: ["rewrite"]`);
+[extending.md](extending.md#add-a-rewrite-technique) says how to turn it
+on. (`to_rewrite`, despite its name, is an `indirect` request technique.)
 
 <!-- BEGIN layers: made from the spec by tests/jailbreak/test_docs_counts.py -->
 | Layer | Families | Techniques | Picks per combination |

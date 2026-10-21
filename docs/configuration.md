@@ -514,6 +514,21 @@ do the pending units of a kept plan (the plan is not changed: no plan
 raises or warns for it); finished rows keep their unchecked scenarios. The
 `eval` type draws neither family: its pool and draws do not change.
 
+**Release note: the rewrite layer.** The spec has a fifth layer, `rewrite`,
+first in the apply order. It holds no technique yet and is off: its spec
+rate is 0 and both packaged kinds deny it (`"layers": {"deny":
+["rewrite"]}`). Nothing changes for an existing plan whose section gives no
+`layers.deny` of its own, the dataset types' included: its pool, rounds,
+plan file and manifest are as before, and so are its draws. A section that
+gives its own `layers.deny` replaces the packaged list, so one that leaves
+`rewrite` out now allows the layer: nothing is drawn from it while it is
+empty, but its adversarial rounds gain `include_rewrite: true`, and a plan
+kept from it raises on resume naming `rounds`. Add `"rewrite"` to its
+`layers.deny` to keep the plan, or plan again with `resume=False`. A
+`config_dir` copy of `augmentations.json` made before says `"deny": []` in
+both kinds, so the same holds for it. The flat `include_<layer>` keywords
+keep the layer denied.
+
 **Release note: the obfuscation order.** A fresh plan applies translation,
 typos and casual writing before the word-level steps, sensitive words and
 tokenbreak, which used to come first, so a combination holding both gives
@@ -603,7 +618,7 @@ Both kinds:
 |---|---|---|---|
 | `entry_types` | list or `null` | `null` | Augment only inputs of these entry types; `null` for all. A kind whose entry types match no input logs a WARNING and writes nothing |
 | `translation` | bool | `true` in the adversarial kind, `false` in the natural one | Whether the kind draws the `translation` family. The family lists do not change it; `layers.deny`, `techniques.deny` and `pure_only` still apply |
-| `layers` | `{"deny": [...]}` | `{"deny": []}` | Layers left out |
+| `layers` | `{"deny": [...]}` | `{"deny": ["rewrite"]}` | Layers left out. The `rewrite` layer is off unless this list leaves it out; a list given replaces the default whole, so name `rewrite` in it to keep the layer off |
 | `families` | `{"allow": [...] or null, "deny": [...]}` | adversarial: `{"allow": null, "deny": []}`; natural: the natural families | Families admitted and removed |
 | `techniques` | `{"allow": [...] or null, "deny": [...]}` | adversarial: `{"allow": null, "deny": []}`; natural: three techniques allowed, three denied | Techniques admitted and removed. Either `allow` names only what the spec's `kinds` let the kind draw. A technique the spec retired (`deprecated`) is drawn only when `allow` names it, with a `DeprecationWarning` |
 | `pure_only` | bool | `false` | Drop every technique that calls a model or needs benign data |
@@ -617,7 +632,7 @@ Adversarial only:
 | `rounds` | `null`, `"escalation"` or a list | `null` | The sampler settings per round; see [rounds](#rounds) |
 | `max_complexity` | int >= 0 | `6` | Budget mode: the most total complexity (each technique scores 0 to 4) |
 | `max_obfuscations` | int >= 0 | `2` | Budget mode: the most obfuscation families, the request obfuscation included |
-| `layer_rates` | `{layer: 0..1}` | `{}`, the spec's rates | Target share of units that take a `hacking`, `manipulation` or `requests` technique, or, with `allow_request_obfuscation`, a `request_obfuscation` |
+| `layer_rates` | `{layer: 0..1}` | `{}`, the spec's rates | Target share of units that take a `rewrite` (when `layers.deny` leaves it out; the spec's rate is 0), `hacking`, `manipulation` or `requests` technique, or, with `allow_request_obfuscation`, a `request_obfuscation` |
 | `allow_request_obfuscation` | bool | `true` (`false` in the eval type) | Allow one more technique after the request technique, at the `request_obfuscation` rate: a light `encode` technique (the light `to_sensitive_words_encode_*` among them), or a translation when the pool has one. It is drawn before the other obfuscations, from what the earlier picks leave, and takes one of the `max_obfuscations` slots and its complexity from them; with `max_obfuscations` 0 there is none |
 
 Natural only:
@@ -640,7 +655,7 @@ its input unchanged is rejected.
 
 From every registered technique, in this order:
 
-1. remove the layers in `layers.deny`;
+1. remove the layers in `layers.deny` (`rewrite` by default);
 2. when `families.allow` or `techniques.allow` is a list, keep only the
    techniques of an allowed family or with an allowed name (with the switch
    on, `translation` counts as an allowed family unless `techniques.allow`
@@ -666,7 +681,9 @@ From every registered technique, in this order:
 - A value given replaces the default's whole value. A list replaces a list.
 - `layers`, `families` and `techniques` are overlaid list by list. An `allow`
   or `deny` given replaces the default's list of that name and keeps the
-  other.
+  other. So a `layers.deny` given replaces the packaged `["rewrite"]`:
+  `{"deny": ["rewrite", "manipulation"]}` leaves out manipulation and keeps
+  the rewrite layer off, `{"deny": ["manipulation"]}` allows it.
 - A `deny` given without an `allow` also takes its names out of the default's
   `allow`. `"natural": {"families": {"deny": ["typos"]}}` is the natural
   default without typos. A deny that empties the default's allow raises:
@@ -759,7 +776,9 @@ The plan deals techniques per `(category, entry_type, iteration)` group
 rather than drawing each unit alone. In budget mode each of the `hacking`,
 `manipulation` and `requests` layers joins a share of the group's units equal
 to its rate: `layer_rates` over the spec's (hacking 0.5, manipulation 0.33,
-requests 0.7, request_obfuscation 0.5). Within a layer, families are dealt by
+requests 0.7, request_obfuscation 0.5). The `rewrite` layer, once a kind
+allows it, joins first at its rate (the spec's 0); a count round reads no
+rate and may draw a rewrite technique its pool holds. Within a layer, families are dealt by
 count over `family_weights`, so `{"persona": 2}` gives `persona` twice the
 share of each other hacking family; within a family, its techniques are
 dealt evenly among those a unit may take (the complexity budget still

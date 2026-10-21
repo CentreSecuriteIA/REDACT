@@ -409,7 +409,12 @@ does not keep its retired techniques.
 `rounds_of(resolved)` turns the kind into one sampler-settings dict per
 round: a natural round is `{"exact_techniques": n}`; an adversarial round is
 the budget keys, an `include_<layer>` per layer and `allow_request_obfuscation`
-when set, with the round's own keys merged over them. The kind's
+when set, with the round's own keys merged over them. `include_rewrite` is
+the exception: written, true, only when the kind allows the rewrite layer,
+so the rounds of a kind that denies it (both packaged kinds do) are those
+written before the layer existed, and no kept plan of theirs changes. A
+`layers.deny` a section gives replaces the packaged `["rewrite"]` whole, so
+one that leaves `rewrite` out allows the layer. The kind's
 `layer_rates` goes to `run_augmentation(layer_rates=)` and from there to
 `plan_run`; a round's own `layer_rates`, passed on as the sampler's
 `sampling_probs`, replaces it whole and is read over the spec's rates.

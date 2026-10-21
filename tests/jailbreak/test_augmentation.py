@@ -92,7 +92,7 @@ def test_an_adversarial_deny_given_alone_keeps_allow_null():
     kind = resolve({"adversarial": {"families": {"deny": ["ascii_art"]}}},
                    "adversarial")
     assert kind["families"]["allow"] is None
-    assert kind["layers"] == {"deny": []}
+    assert kind["layers"] == {"deny": ["rewrite"]}
 
 
 def test_the_natural_kind_needs_an_allow_list():
@@ -219,7 +219,7 @@ def test_the_packaged_defaults():
      "augmentations.adversarial.layer_rates['hacking'] must be a number from 0 to 1"),
     ({"adversarial": {"layer_rates": {"obfuscation": 0.5}}}, "adversarial",
      "augmentations.adversarial.layer_rates names 'obfuscation'; write rates for "
-     "['hacking', 'manipulation', 'requests', 'request_obfuscation']"),
+     "['rewrite', 'hacking', 'manipulation', 'requests', 'request_obfuscation']"),
     ({"adversarial": {"rounds": "escalation", "iterations": 2}}, "adversarial",
      "augmentations.adversarial: rounds gives 4 rounds and iterations says 2; the "
      "rounds set the number, so leave iterations out"),
@@ -341,7 +341,8 @@ def test_an_adversarial_round_is_the_budget_by_default():
 
 
 def test_a_denied_layer_is_left_out_of_every_round():
-    kind = resolve({"adversarial": {"layers": {"deny": ["hacking"]}}}, "adversarial")
+    kind = resolve({"adversarial": {"layers": {"deny": ["rewrite", "hacking"]}}},
+                   "adversarial")
     assert rounds_of(kind) == [{**_BUDGET, "include_hacking": False}]
 
 
@@ -393,7 +394,7 @@ def test_the_flat_keywords_land_in_the_adversarial_kind():
     })
     assert kind == {
         **defaults()["adversarial"],
-        "layers": {"deny": ["hacking"]},
+        "layers": {"deny": ["rewrite", "hacking"]},
         "families": {"allow": None, "deny": ["casual_writing"]},
         "translation": True, "pure_only": True, "layer_rates": {"hacking": 0.1},
         "entry_types": ["benign"], "iterations": 2,

@@ -169,7 +169,7 @@ contract.
 
 1. **Write the function** in the module of its family, under
    `jailbreak/rewrite/`, `hacking/`, `manipulation/`, `obfuscation/` or
-   `requests/`.
+   `requests/` (a rewrite technique: [below](#add-a-rewrite-technique)).
    - A transform: `def to_name(prompt: str, *, rng=None) -> tuple[str, str]`.
      Draw every random choice from `rng`.
    - A technique that calls a model: a generator with the signature
@@ -381,6 +381,38 @@ The `translation` and `answer_language` techniques are generated from
    `tests/fixtures/natural_pool.json`), and update the counts in the docs.
    The eval type's translation allow list names its languages, so a new
    translation is not drawn there.
+
+### Add a rewrite technique
+
+The `rewrite` layer comes first: its technique rewrites the whole prompt
+before every other layer applies, one at most a combination
+(`layer_max_picks`). It holds no technique yet and is off: the spec's
+`layer_rates.rewrite` is 0 and both packaged kinds deny it
+(`"layers": {"deny": ["rewrite"]}` in `configs/jailbreak/augmentations.json`).
+
+1. **Write and register it** as any technique (above), in a module under
+   `jailbreak/rewrite/` whose getter `get_all_rewrite_functions` in
+   `rewrite/__init__.py` returns. One that has a model write the text loads
+   its prompt from `prompts/jailbreak/<name>/`, checks the reply (through
+   `llm_pipeline.checked`) and says so in its spec `check` and `calls`.
+2. **Give it a family** in the spec with `"layer": "rewrite"`, a
+   `dimension` and, for variations, `kinds`; the technique's entry carries
+   `since`, the spec's `version` moved up.
+3. **Turn the layer on** for a kind: a `layers.deny` without `rewrite`
+   (`"layers": {"deny": []}`) puts the technique in the kind's pool, and a
+   count round (`exact_techniques`: the natural kind, the escalation's
+   first two rounds) may draw it from there. A budget round draws it only
+   at a rate above 0, `"layer_rates": {"rewrite": 0.2}`; the escalation's
+   last two rounds give rates of their own, which leave `rewrite` at the
+   spec's 0. With the layer allowed, `rounds_of` writes
+   `include_rewrite: true` in each of an adversarial kind's rounds, so a
+   plan kept from before raises on resume naming `rounds`: plan again with
+   `resume=False`. To draw it in every run, take `rewrite` out of the
+   packaged kinds' `layers.deny` and give the spec's `layer_rates.rewrite`
+   a rate.
+4. **Then as for any technique**: the registry fixture, the docs counts and
+   the natural pool. The eval type's attacks allow named families only, so
+   a rewrite family is not drawn there unless `eval.json` names it.
 
 ### Add variants to a template pool
 

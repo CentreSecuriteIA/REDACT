@@ -27,7 +27,7 @@ from tests.conftest import (
 )
 
 _PURE_KIND = {"pure_only": True,
-              "layers": {"deny": ["hacking", "manipulation", "requests"]}}
+              "layers": {"deny": ["rewrite", "hacking", "manipulation", "requests"]}}
 
 
 def _pure(**kind) -> dict:

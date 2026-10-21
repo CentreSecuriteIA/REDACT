@@ -11,7 +11,9 @@ A key starting with ``_``, in the section or in a kind, is a comment and is
 skipped. ``translation`` alone decides whether a kind draws the translation
 family; the lists may narrow it to the languages they name. A kind draws
 only the techniques whose ``kinds`` in ``combination_spec.json`` hold it, so
-the natural kind draws only what the spec marks natural.
+the natural kind draws only what the spec marks natural. Both packaged kinds
+deny the ``rewrite`` layer; a kind that gives its own ``layers.deny``
+replaces that list, so it names ``rewrite`` to keep the layer off.
 """
 
 import copy
@@ -39,8 +41,12 @@ _KIND_KEYS = {
 }
 _ROUND_KEYS = ("exact_techniques", "max_complexity", "max_obfuscations",
                "layer_rates", "allow_request_obfuscation")
-_RATE_KEYS = ("hacking", "manipulation", "requests", "request_obfuscation")
-_LAYERS = ("hacking", "manipulation", "obfuscation", "requests")
+_RATE_KEYS = ("rewrite", "hacking", "manipulation", "requests", "request_obfuscation")
+_LAYERS = ("rewrite", "hacking", "manipulation", "obfuscation", "requests")
+#: The layer off by default: the packaged kinds deny it, and a round says
+#: ``include_rewrite`` only for a kind that allows it, so the rounds of a
+#: kind that denies it are those written before the layer existed.
+_REWRITE = "rewrite"
 _SPEC = "combination_spec.json"
 
 #: Today's keywords of ``generate_jailbreaks``, each an alias into the
@@ -185,17 +191,24 @@ def rounds_of(resolved: dict) -> list[dict]:
     budget keys, each layer's ``include_*``, and the round's own keys from
     ``rounds`` merged over them (``"escalation"`` is
     :func:`default_escalation_schedule`), a round's ``layer_rates`` passed on
-    as the sampler's ``sampling_probs``.
+    as the sampler's ``sampling_probs``. ``include_rewrite`` is written only
+    when the kind allows the rewrite layer, where the others are always
+    written: a round of a kind that denies it is as it was before the layer
+    existed. A count round does not read ``include_rewrite``; its pool
+    decides.
     """
     if "exact_techniques" in resolved:
         return [{"exact_techniques": resolved["exact_techniques"]}
                 for _ in range(resolved["iterations"])]
+    denied = resolved["layers"]["deny"]
     base = {
         "max_complexity": resolved["max_complexity"],
         "max_obfuscations": resolved["max_obfuscations"],
-        **{f"include_{layer}": layer not in resolved["layers"]["deny"]
-           for layer in _LAYERS},
+        **{f"include_{layer}": layer not in denied
+           for layer in _LAYERS if layer != _REWRITE},
     }
+    if _REWRITE not in denied:
+        base["include_rewrite"] = True
     if resolved["allow_request_obfuscation"]:
         base["allow_request_obfuscation"] = True
     rounds = resolved["rounds"]

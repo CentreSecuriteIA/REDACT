@@ -1366,7 +1366,8 @@ def test_the_flat_form_is_the_adversarial_kind_beside_the_default_natural_kind()
         section = _section({"include_hacking": False, "pure_only": True,
                             "include_translation": True})
     assert section["adversarial"] == resolve({"adversarial": {
-        "layers": {"deny": ["hacking"]}, "pure_only": True, "translation": True}},
+        "layers": {"deny": ["rewrite", "hacking"]}, "pure_only": True,
+        "translation": True}},
         "adversarial")
     assert section["natural"] == resolve(None, "natural")
 
