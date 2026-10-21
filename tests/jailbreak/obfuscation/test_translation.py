@@ -137,10 +137,24 @@ class TestMachineTranslationTables:
             ACCEPTED_LABELS,
             LANGUAGE_CODES,
             MEDIAN_RATIO,
+            SCRIPTS,
         )
 
-        for table in (LANGUAGE_CODES, ACCEPTED_LABELS, MEDIAN_RATIO):
+        for table in (LANGUAGE_CODES, SCRIPTS, ACCEPTED_LABELS, MEDIAN_RATIO):
             assert list(table) == LANGUAGES
+
+    def test_a_language_s_script_is_its_glotlid_labels_script(self):
+        from redact.jailbreak.obfuscation.translation import ACCEPTED_LABELS, SCRIPTS
+
+        for language, labels in ACCEPTED_LABELS.items():
+            assert {label.split("_")[1] for label in labels} == {SCRIPTS[language]}
+        assert sorted(language for language, script in SCRIPTS.items()
+                      if script != "Latn") == [
+            "Arabic", "Bengali", "Greek", "Japanese", "Khmer", "Nepali", "Russian",
+            "Thai"]
+
+    def test_a_language_s_technique_carries_its_script(self):
+        assert (to_thai.script, to_swahili.script) == ("Thai", "Latn")
 
     def test_codes_are_iso_639_1(self):
         from redact.jailbreak.obfuscation.translation import LANGUAGE_CODES

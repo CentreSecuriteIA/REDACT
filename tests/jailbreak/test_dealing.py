@@ -246,7 +246,10 @@ _BUDGETS = [
 ]
 # The obfuscation renumbering (whole-text rewrites before word-level steps)
 # moved this digest: the same techniques are drawn, some in another order.
-_PINNED_DRAWS = "d8f6b26d677fa603f423caa830a0ca3d59344287128b57251b894451ebb3896a"
+# The script rule moved it again: six draws paired a Latin-only encoding
+# with a translation into another script, and a few more drew from a list
+# the rule narrowed.
+_PINNED_DRAWS = "3e1a49fd510a56d63afaa6dd40d4a69209ab7aef824337b765c8a6387a137a51"
 
 
 def test_draws_without_the_request_obfuscation_are_those_made_before_it_was_counted():

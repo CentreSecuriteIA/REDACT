@@ -161,6 +161,31 @@ def test_manipulation_admits_light_and_word_level_encoding(first, then):
     assert _joins(first, then)
 
 
+@pytest.mark.parametrize(("first", "then"), [
+    ("to_rot13", "to_thai"),
+    ("to_thai", "to_rot13"),
+    ("to_leetspeak_advanced", "to_russian"),
+    ("to_russian", "to_leetspeak_advanced"),
+    ("to_sensitive_words_encode_rot47", "to_japanese"),
+    ("to_japanese", "to_sensitive_words_encode_rot47"),
+])
+def test_a_latin_only_encoding_refuses_a_translation_into_another_script(first, then):
+    """After it, the encoding would change nothing, yet count in
+    ``num_techniques``; before it, the translator would get a cipher."""
+    assert not _joins(first, then)
+
+
+@pytest.mark.parametrize(("first", "then"), [
+    ("to_rot13", "to_french"),
+    ("to_vietnamese", "to_leetspeak_basic"),
+    ("to_base64", "to_thai"),
+    ("to_bengali", "to_separator"),
+    ("to_morse", "to_greek"),
+])
+def test_a_latin_script_translation_or_another_encoding_still_joins(first, then):
+    assert _joins(first, then) and _joins(then, first)
+
+
 def test_every_pair_is_refused_or_admitted_both_ways():
     joins = {fn.__name__: {g.__name__ for g in compatible([fn], POOL)} for fn in POOL}
     one_way = [(a, b) for a in joins for b in joins[a] if a not in joins[b]]

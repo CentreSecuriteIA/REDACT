@@ -367,6 +367,14 @@ another text. A kept plan replays the order its manifest recorded. The
 families the eval type draws keep their order
 ([techniques.md](techniques.md#layers)).
 
+**Release note: the script rule.** A fresh plan no longer pairs ROT13,
+ROT18, ROT47 or leetspeak (whole-text or word-level) with a translation
+into another script than Latin, where the encoding changed nothing; so
+some draws differ from those an earlier version made with the same seed.
+A kept plan replays as it was made. The eval pool holds none of these
+encodings, so its draws do not change
+([techniques.md](techniques.md#compatibility-rules)).
+
 **Release note: the natural pool.** The natural kind now draws only what
 the spec's `kinds` mark natural (46 techniques by default; `structural`,
 `continuation`, `temporal`, the high and insane typos and the dialogue and

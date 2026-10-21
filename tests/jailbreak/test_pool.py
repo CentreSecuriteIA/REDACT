@@ -200,6 +200,19 @@ def test_kinds_that_are_not_a_list_of_kinds_raise_at_tagging(monkeypatch, kinds)
         _tag_base64(monkeypatch, kinds=kinds)
 
 
+def test_needs_latin_is_false_unless_the_entry_says_true(monkeypatch):
+    assert _tag_base64(monkeypatch).needs_latin is False
+    assert _tag_base64(monkeypatch, needs_latin=True).needs_latin is True
+
+
+@pytest.mark.parametrize("needs_latin", ["true", 1, None])
+def test_a_needs_latin_that_is_not_true_or_false_raises_at_tagging(
+        monkeypatch, needs_latin):
+    with pytest.raises(ValueError,
+                       match="'to_base64': needs_latin must be true or false"):
+        _tag_base64(monkeypatch, needs_latin=needs_latin)
+
+
 def test_a_technique_is_dated_by_the_versions_that_added_and_retired_it(
         monkeypatch):
     dated = _tag_base64(monkeypatch, since="1.1", deprecated="1.12")

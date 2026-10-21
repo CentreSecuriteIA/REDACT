@@ -73,7 +73,8 @@ def to_y(prompt: str, **kwargs) -> TechniqueGen:
   signature `(prompt, **kwargs)`; a test holds them to it.
 - At import, `tag(all_techniques())` sets each function's spec tags as
   attributes: `families`, `complexity`, `requires_llm`, `requires_benign`,
-  `encode_weight`, `max_tokens`, `cross_incompatible_with` (families this
+  `encode_weight`, `needs_latin` (true or false, else import fails),
+  `max_tokens`, `cross_incompatible_with` (families this
   technique itself may not join), and from the first family `layer` and
   `within_layer_order`; `kinds` (the augmentation kinds that may draw it)
   is the technique's own, else its first family's, else `["adversarial"]`.

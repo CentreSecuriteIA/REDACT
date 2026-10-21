@@ -168,3 +168,60 @@ class TestAllEncodings:
         for fn in get_encoding_functions():
             result, _ = fn(SAMPLE)
             assert result != SAMPLE, f"{fn.__name__} output should differ"
+
+
+#: A greeting and a count to three in six scripts other than Latin, with the
+#: script's own digits where it has them.
+NON_LATIN = {
+    "Bengali": "নমস্কার বন্ধু এক দুই তিন ১২৩",
+    "Thai": "สวัสดี ครับ หนึ่ง สอง สาม ๑๒๓",
+    "Japanese": "こんにちは 一 二 三",
+    "Arabic": "مرحبا واحد اثنان ثلاثة ١٢٣",
+    "Russian": "привет один два три",
+    "Greek": "γεια σου ένα δύο τρία",
+}
+
+
+def _leaves_unchanged(fn, text: str) -> bool:
+    """Whether ``fn`` gives ``text`` back unchanged, and does not reject it.
+
+    A sensitive-word technique's model marks no word, so it encodes the
+    whole text, or rejects it when its encoding is heavy.
+    """
+    import inspect
+
+    from redact.jailbreak.technique import is_discarded
+    from redact.llm_pipeline import drive_sync
+
+    if inspect.isgeneratorfunction(fn):
+        result, info = drive_sync(fn(text), lambda request: "none")
+    else:
+        result, info = fn(text)
+    return result == text and not is_discarded(info)
+
+
+class TestLatinOnly:
+    """``needs_latin`` marks what changes only Latin text, which the rules
+    keep from a translation into another script. It is read off the
+    techniques' behaviour on the samples above."""
+
+    @staticmethod
+    def _encodings() -> list:
+        from redact.jailbreak.pool import all_techniques
+
+        return [fn for fn in all_techniques() if "encode" in fn.families]
+
+    def test_a_latin_only_encoding_leaves_every_other_script_unchanged(self):
+        tagged = [fn for fn in self._encodings() if fn.needs_latin]
+        assert len(tagged) == 12     # noqa: PLR2004
+        for fn in tagged:
+            for language, text in NON_LATIN.items():
+                assert _leaves_unchanged(fn, text), (fn.__name__, language)
+
+    def test_every_encoding_that_leaves_them_unchanged_is_marked_but_braille(self):
+        """Braille passes another script through too, but is in the eval
+        pool, which is held: marking it would change the eval draws."""
+        unchanged = {fn.__name__ for fn in self._encodings()
+                     if all(_leaves_unchanged(fn, text) for text in NON_LATIN.values())}
+        tagged = {fn.__name__ for fn in self._encodings() if fn.needs_latin}
+        assert unchanged == tagged | {"to_braille"}

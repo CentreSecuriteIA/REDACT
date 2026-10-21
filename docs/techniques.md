@@ -89,6 +89,15 @@ ten, the `heavy` ones stay allowed with `fsh` and `dap`, which the plain
 `heavy` `encode` techniques are not; the `light` ones, like the plain `light`
 ones, may be the request obfuscation.
 
+Twelve of them are tagged `needs_latin`: `to_rot13`, `to_rot18`,
+`to_rot47`, the three `to_leetspeak_*` and their six
+`to_sensitive_words_encode_*` forms. They change only Latin letters (ROT18
+also ASCII digits, ROT47 every printable ASCII character), so they leave a
+text in another script as it was, as a test checks on six scripts.
+`to_morse` and `to_braille` pass such a text through as well (Morse only
+spaces its characters out) but are not tagged: both are in the eval pool,
+which is held, and completing them would change its text.
+
 ## Retired techniques
 
 Spec version 1.1 retired seven techniques. They stay registered, so a plan
@@ -131,6 +140,12 @@ technique is picked first. A technique may not join a combination when:
   `manipulation_blocked_obfuscation`: the `translation` and `ascii_art`
   families and the `heavy` `encode` techniques, except those also in
   `sensitive_words`;
+- it pairs a `needs_latin` technique with a translation into a script
+  other than Latin: Japanese, Russian, Arabic, Greek, Thai, Khmer, Nepali
+  or Bengali (each language's script is in `SCRIPTS`, in
+  `obfuscation/translation.py`). After the translation the encoding would
+  change nothing, yet count in `num_techniques`; before it, the translator
+  would get a cipher. The Latin-script translations still join them;
 - in budget mode, its complexity is above what is left of `max_complexity`.
 
 `combine_techniques` does not check these rules. It only sorts techniques

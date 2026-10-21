@@ -31,6 +31,12 @@ DEFAULT_KINDS = ("adversarial",)
 FIRST_VERSION = "1.0"
 _VERSION = re.compile(r"[0-9]+(\.[0-9]+)*")
 
+#: The ISO 15924 code of the Latin script. A translation technique's
+#: ``script`` names the script it writes (``obfuscation/translation.py``);
+#: a technique tagged ``needs_latin`` changes only Latin text, so the rules
+#: keep it from a translation into any other.
+LATIN = "Latn"
+
 TechniqueResult = tuple[str, str]
 TechniqueGen = Generator[LLMRequest, str, TechniqueResult]
 
@@ -88,7 +94,9 @@ def tag(funcs: list[Callable]) -> None:
     """Set each function's spec tags as attributes of the function.
 
     ``families``, ``complexity`` (0-3), ``requires_llm``, ``requires_benign``,
-    ``encode_weight`` (``"light"``, ``"heavy"`` or None), ``max_tokens``
+    ``encode_weight`` (``"light"``, ``"heavy"`` or None), ``needs_latin``
+    (whether it changes only Latin text, so a translation into another
+    script would leave it nothing to do; False when absent), ``max_tokens``
     (the reply limit of its model calls, None for the model's default) and
     ``cross_incompatible_with`` (the families the technique itself may not
     join, beside its families' own) come from the technique's entry;
@@ -102,7 +110,8 @@ def tag(funcs: list[Callable]) -> None:
 
     Raises:
         ValueError: A technique's ``max_tokens`` is not a whole number of at
-            least 1, its ``kinds`` (or its family's) not a list of
+            least 1, its ``needs_latin`` not true or false, its ``kinds``
+            (or its family's) not a list of
             :data:`KINDS`, or its ``since`` or ``deprecated``, or the spec's
             ``version``, not dotted whole numbers. Checked here, so a bad
             spec fails at import instead of as an error row per sample or
@@ -130,6 +139,12 @@ def tag(funcs: list[Callable]) -> None:
         # strictly no-LLM (pure_only) run.
         fn.requires_benign = t.get("requires_benign", False)
         fn.encode_weight = t.get("encode_weight", None)
+        needs_latin = t.get("needs_latin", False)
+        if not isinstance(needs_latin, bool):
+            raise ValueError(
+                f"Technique {name!r}: needs_latin must be true or false, got "
+                f"{needs_latin!r}.")
+        fn.needs_latin = needs_latin
         fn.cross_incompatible_with = t.get("cross_incompatible_with", [])
         # Reply limit for the technique's LLM calls; None keeps the model's
         # default. chain.run_chain puts it on each request.

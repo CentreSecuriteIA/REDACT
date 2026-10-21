@@ -74,9 +74,10 @@ format and follows no other instruction:
   of the folder it loads the tokenizer from, so the engine is given a folder
   of the checkpoint's tokenizer files beside a copy of yours, built at load
   (a `tokenizer` in `vllm_kwargs` replaces it). Leave it out otherwise.
-- Every language needs a code, accepted GlotLID labels and a median length
-  ratio in `jailbreak/obfuscation/translation.py`; import fails when one is
-  missing. Measure the median with the model on a parallel corpus such as
+- Every language needs a code, a script (`SCRIPTS`, the ISO 15924 code its
+  GlotLID labels end in, which the rules read), accepted GlotLID labels and
+  a median length ratio in `jailbreak/obfuscation/translation.py`; import
+  fails when one is missing. Measure the median with the model on a parallel corpus such as
   FLORES-200: a guessed 1.0 rejected most Japanese translations, whose
   median is 0.47.
 
@@ -188,6 +189,11 @@ contract.
    `configs/jailbreak/combination_spec.json`: `families` (the first sets the
    layer and the order), `complexity` (0 to 3), `requires_llm`,
    `requires_benign`, `encode_weight` for an `encode` technique,
+   `needs_latin: true` for one that changes only Latin text (it is then
+   kept from a translation into another script; `TestLatinOnly` in
+   `tests/jailbreak/obfuscation/test_encoding.py` checks it on six other
+   scripts, and fails when an encoding that leaves them unchanged is not
+   tagged, `to_braille` aside while the eval pool is held),
    `max_tokens` to cap its calls' replies, `cross_incompatible_with` for
    families this technique, not its whole family, may not join,
    `kinds` when it should differ from its first family's (below), and

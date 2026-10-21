@@ -45,6 +45,18 @@ LANGUAGE_CODES = {
     "Scots Gaelic": "gd", "Bengali": "bn", "Javanese": "jv",
 }
 
+#: The script each language is written in, as its ISO 15924 code (the
+#: suffix of its GlotLID labels). A language's technique carries it as
+#: ``script``; the rules keep a translation into a script other than
+#: :data:`~redact.jailbreak.technique.LATIN` from a ``needs_latin`` technique.
+SCRIPTS = {
+    "French": "Latn", "Japanese": "Jpan", "Russian": "Cyrl", "Spanish": "Latn",
+    "German": "Latn", "Arabic": "Arab", "Turkish": "Latn", "Czech": "Latn",
+    "Vietnamese": "Latn", "Greek": "Grek", "Croatian": "Latn", "Swahili": "Latn",
+    "Thai": "Thai", "Khmer": "Khmr", "Nepali": "Deva", "Zulu": "Latn",
+    "Scots Gaelic": "Latn", "Bengali": "Beng", "Javanese": "Latn",
+}
+
 #: The GlotLID labels a translation into each language may carry: its own,
 #: and the near-identical languages GlotLID reads short text as.
 ACCEPTED_LABELS = {
@@ -95,8 +107,8 @@ def _check_tables(tables: dict[str, dict]) -> None:
                 f"missing {missing}, extra {extra}.")
 
 
-_check_tables({"LANGUAGE_CODES": LANGUAGE_CODES, "ACCEPTED_LABELS": ACCEPTED_LABELS,
-               "MEDIAN_RATIO": MEDIAN_RATIO})
+_check_tables({"LANGUAGE_CODES": LANGUAGE_CODES, "SCRIPTS": SCRIPTS,
+               "ACCEPTED_LABELS": ACCEPTED_LABELS, "MEDIAN_RATIO": MEDIAN_RATIO})
 
 #: A translator reply is capped at about three times its input's tokens,
 #: counting a token as this many characters (which overstates an English
@@ -410,13 +422,15 @@ def _translate_gen(
 
 
 def _make_language_fn(language: str) -> Callable:
-    """The technique that translates to ``language``."""
+    """The technique that translates to ``language``, with the language's
+    ``script`` (:data:`SCRIPTS`)."""
 
     def fn(prompt: str, **kwargs) -> TechniqueGen:
         return (yield from _translate_gen(prompt, language, **kwargs))
 
     fn.__name__ = fn.__qualname__ = "to_" + language.lower().replace(" ", "_")
     fn.__doc__ = f"Translate to {language} (technique generator)."
+    fn.script = SCRIPTS[language]
     return fn
 
 
