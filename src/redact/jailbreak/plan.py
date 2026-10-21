@@ -24,7 +24,7 @@ from redact.dataset.planfile import coverage_path, plan_record, write_plan
 
 from .chain import combine_techniques
 from .pool import TRANSLATION
-from .sampling import sample_combination
+from .sampling import DEFAULT_MAX_COMPLEXITY, sample_combination
 from .technique import FIRST_VERSION, applies, load_spec
 
 logger = logging.getLogger(__name__)
@@ -33,11 +33,16 @@ logger = logging.getLogger(__name__)
 # further below its target is logged.
 _SHORT = 2
 
+#: How far above ``max_complexity`` a unit's allowance may go under the
+#: group budget when ``max_unit_complexity`` is not given.
+UNIT_HEADROOM = 3
+
 
 def _observe(dealer: Dealer, combined: Callable) -> None:
     """Count in ``dealer`` what one unit's draw ``combined`` holds: each
     technique's first family, the technique itself (a member of that family)
-    and its layer, and the request obfuscation when it has one."""
+    and its layer, the request obfuscation when it has one, and the
+    complexity it spent, the request obfuscation's included."""
     for fn in getattr(combined, "techniques", []):
         families = getattr(fn, "families", None) or []
         if families:
@@ -46,8 +51,20 @@ def _observe(dealer: Dealer, combined: Callable) -> None:
         layer = getattr(fn, "layer", None)
         if layer is not None:
             dealer.included[layer] += 1
+        dealer.spent += getattr(fn, "complexity", 0)
     if getattr(combined, "request_obfuscation", None) is not None:
         dealer.included["request_obfuscation"] += 1
+
+
+def _allowance(dealer: Dealer, mean: int, ceiling: int | None) -> int:
+    """The complexity a unit may spend under the group budget: ``mean`` plus
+    what the group's earlier units left unspent of it
+    (:meth:`~redact.dataset.dealing.Dealer.bank`), at most ``ceiling``
+    (``mean + UNIT_HEADROOM`` when ``None``). The group spends ``mean`` per
+    unit or less on average, and no unit more than ``ceiling``."""
+    if ceiling is None:
+        ceiling = mean + UNIT_HEADROOM
+    return min(mean + dealer.bank(mean), ceiling)
 
 
 def _names(combined: Callable) -> list[str]:
@@ -63,6 +80,8 @@ def assign_combination(
     used: tuple | list | set = (),
     max_resamples: int = 8,
     dealer=None,
+    budget: str | None = None,
+    max_unit_complexity: int | None = None,
     **sample_kwargs,
 ) -> list[str]:
     """The names of the combination one unit is assigned, in applied order.
@@ -75,11 +94,21 @@ def assign_combination(
     sample's earlier iterations); the last draw is kept if none differs. The
     first draw is dealt from ``dealer``; a resample draws uniformly, so it can
     escape a collision the deal would otherwise force on a small pool. The
-    kept draw is counted in ``dealer`` (its families, techniques, layers and
-    request obfuscation), so the group's next unit is dealt after it.
-    ``sample_kwargs`` go to :func:`sample_combination`. An empty list is the
-    identity.
+    kept draw is counted in ``dealer`` (its families, techniques, layers,
+    request obfuscation and complexity), so the group's next unit is dealt
+    after it. ``sample_kwargs`` go to :func:`sample_combination`. An empty
+    list is the identity.
+
+    With ``budget`` ``"group"`` and a ``dealer``, every draw of a budget
+    round may spend the unit's allowance (:func:`_allowance`, with
+    ``max_unit_complexity`` its ceiling) in place of ``max_complexity``.
+    ``budget`` ``None`` or ``"unit"``, no dealer, or a count draw
+    (``exact_techniques``, which has no budget) leaves the draw as it was.
     """
+    if (budget == "group" and dealer is not None
+            and sample_kwargs.get("exact_techniques") is None):
+        mean = sample_kwargs.get("max_complexity", DEFAULT_MAX_COMPLEXITY)
+        sample_kwargs["max_complexity"] = _allowance(dealer, mean, max_unit_complexity)
     used_set = {tuple(c) for c in used}
     base = stable_seed(seed, sample_id, iteration)
     kept = None
@@ -149,7 +178,11 @@ def plan_run(
     (``family_weights``, equal by default) and each technique of a family as
     often as the others the unit may take, evenly across the group and
     independent of the input order; a row's ``settings`` record the weights
-    when given. The plan file (:func:`plan_inputs`) is written beside the
+    when given. A round whose settings say ``budget`` ``"group"`` banks the
+    complexity over the group (:func:`assign_combination`): a unit may spend
+    what the units before it left of ``max_complexity``, up to
+    ``max_unit_complexity``, and the group's mean stays at or below
+    ``max_complexity``. The plan file (:func:`plan_inputs`) is written beside the
     manifest first, and a coverage table after it; with ``verbose``, one line
     then says what the plan costs in model calls (:func:`log_model_calls`).
     Returns ``manifest_path``.

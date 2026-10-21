@@ -7,6 +7,9 @@ from .chain import combine_techniques, in_layer_order
 from .rules import compatible, request_obfuscation_candidates
 from .technique import load_spec
 
+#: The complexity a budget draw may spend when it is given none.
+DEFAULT_MAX_COMPLEXITY = 6
+
 
 def _pick_by_family(
     rng: random.Random, candidates: list[Callable], dealer=None,
@@ -33,7 +36,7 @@ def _pick_by_family(
 def sample_combination(
     rng: random.Random,
     pool: list[Callable],
-    max_complexity: int = 6,
+    max_complexity: int = DEFAULT_MAX_COMPLEXITY,
     max_obfuscations: int = 2,
     include_rewrite: bool = False,
     include_hacking: bool = True,

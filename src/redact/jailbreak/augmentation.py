@@ -26,7 +26,7 @@ from pathlib import Path
 from redact.config_overlay import config_file
 from redact.types import ALL_ENTRY_TYPES
 
-from .plan import default_escalation_schedule
+from .plan import UNIT_HEADROOM, default_escalation_schedule
 from .pool import TRANSLATION, all_techniques, languages, technique_pool
 from .technique import DEFAULT_KINDS, KINDS, family_kinds, load_spec
 
@@ -34,9 +34,12 @@ logger = logging.getLogger(__name__)
 
 _COMMON_KEYS = ("entry_types", "translation", "layers", "families", "techniques",
                 "pure_only", "family_weights", "iterations")
+#: The group budget's keys: set only on an adversarial kind, and written to
+#: its rounds only when set (``budget`` only when ``"group"``).
+_GROUP_BUDGET_KEYS = ("budget", "max_unit_complexity")
 _KIND_KEYS = {
     "adversarial": (*_COMMON_KEYS, "rounds", "max_complexity", "max_obfuscations",
-                    "layer_rates", "allow_request_obfuscation"),
+                    "layer_rates", "allow_request_obfuscation", *_GROUP_BUDGET_KEYS),
     "natural": (*_COMMON_KEYS, "exact_techniques"),
 }
 _ROUND_KEYS = ("exact_techniques", "max_complexity", "max_obfuscations",
@@ -135,6 +138,12 @@ def resolve(
     if not isinstance(given, dict):
         raise ValueError(f"{where} must be an object or null, got {given!r}.")
     given = {key: value for key, value in given.items() if not key.startswith("_")}
+    budgeted = [key for key in given if key in _GROUP_BUDGET_KEYS]
+    if kind == "natural" and budgeted:
+        raise ValueError(
+            f"{where} gives {budgeted}, which the natural kind ignores: it draws "
+            "exact_techniques, a count with no complexity budget to bank. Take "
+            "them out.")
     unknown = [key for key in given if key not in _KIND_KEYS[kind]]
     if unknown:
         raise ValueError(
@@ -181,6 +190,14 @@ def resolve(
                 f"{given['iterations']}; the rounds set the number, so leave "
                 "iterations out.")
         resolved["iterations"] = len(rounds)
+        ceiling = resolved.get("max_unit_complexity")
+        for i, r in enumerate(rounds):
+            if ceiling is not None and r.get("max_complexity", 0) > ceiling:
+                raise ValueError(
+                    f"{where}.rounds[{i}].max_complexity is {r['max_complexity']}, "
+                    f"above max_unit_complexity {ceiling}; raise "
+                    "max_unit_complexity, or leave it out for each round's "
+                    f"max_complexity + {UNIT_HEADROOM}.")
     return resolved
 
 
@@ -195,7 +212,10 @@ def rounds_of(resolved: dict) -> list[dict]:
     when the kind allows the rewrite layer, where the others are always
     written: a round of a kind that denies it is as it was before the layer
     existed. A count round does not read ``include_rewrite``; its pool
-    decides.
+    decides. ``budget`` is written only when ``"group"`` and
+    ``max_unit_complexity`` only when given, so a kind that leaves them out
+    or says ``"unit"`` has the rounds, and the plan file, it had before
+    they existed; a count round carries them and ignores them.
     """
     if "exact_techniques" in resolved:
         return [{"exact_techniques": resolved["exact_techniques"]}
@@ -211,6 +231,10 @@ def rounds_of(resolved: dict) -> list[dict]:
         base["include_rewrite"] = True
     if resolved["allow_request_obfuscation"]:
         base["allow_request_obfuscation"] = True
+    if resolved.get("budget") == "group":
+        base["budget"] = "group"
+    if resolved.get("max_unit_complexity") is not None:
+        base["max_unit_complexity"] = resolved["max_unit_complexity"]
     rounds = resolved["rounds"]
     if rounds is None:
         return [dict(base) for _ in range(resolved["iterations"])]
@@ -496,7 +520,14 @@ def _check_rates(where: str, rates) -> None:
 
 
 def _check_budget(where: str, settings: dict) -> None:
-    """The budget keys an adversarial kind or one of its rounds gives."""
+    """The budget keys an adversarial kind or one of its rounds gives.
+
+    ``budget`` is ``"unit"`` (each unit spends up to ``max_complexity``,
+    the default), ``"group"`` (the group budget, see
+    :func:`redact.jailbreak.plan.assign_combination`) or ``None`` (the
+    default); ``max_unit_complexity`` is given only with ``"group"``, at or
+    above ``max_complexity``.
+    """
     for key in ("max_complexity", "max_obfuscations"):
         if key in settings:
             _check_count(where, key, settings[key], least=0)
@@ -509,6 +540,18 @@ def _check_budget(where: str, settings: dict) -> None:
         raise ValueError(
             f"{where}.allow_request_obfuscation must be true or false, got "
             f"{settings['allow_request_obfuscation']!r}.")
+    budget = settings.get("budget")
+    if budget not in (None, "unit", "group"):
+        raise ValueError(
+            f'{where}.budget must be "unit", "group" or null, got {budget!r}.')
+    ceiling = settings.get("max_unit_complexity")
+    if ceiling is not None:
+        if budget != "group":
+            raise ValueError(
+                f'{where}.max_unit_complexity applies only with "budget": '
+                '"group"; set that, or take max_unit_complexity out.')
+        _check_count(where, "max_unit_complexity", ceiling,
+                     least=settings.get("max_complexity", 0))
 
 
 def _rounds(where: str, rounds) -> list:
