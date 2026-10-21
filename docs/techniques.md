@@ -248,8 +248,7 @@ the text unchanged or reversibly, or a check accepts the result:
 
 Model rewrites (`cognitive`, `persona`, `typos`, `sensitive_words`,
 `tokenbreak`) are left out while the eval pool is held; a technique of
-this pool that has a model write the prompt must carry a spec `check`
-(`cognitive` and `persona` have none yet). The fifteen spec 1.2 encodings
+this pool that has a model write the prompt must carry a spec `check`. The fifteen spec 1.2 encodings
 are not drawn here either: `eval.json` denies each in `techniques.deny`, so the
 `encode` row keeps its five `heavy` members while the eval pool is held. The
 four spec 1.2 many-shot variants of `fsh` and `dap` are denied the same way. With
@@ -316,19 +315,18 @@ WARNING that counts them ([stages/build.md](stages/build.md)).
 A technique that calls a model carries, in the spec, the model calls one
 application makes (`calls`, generation and checks, low to high: a typo
 rewrite 2 to 4, a translation of one paragraph 2 to 12, a word-marking
-step 1, the synonyms 1 to 11, an fsh or dap pick 1) and what checks its
+step 1, the synonyms 1 to 11, an fsh or dap pick 1, a cognitive or persona
+scenario 3 to 9) and what checks its
 reply (`check`). When a plan is made, one INFO line adds them up over the
 planned units; for 1,000 inputs of one category and entry type, planned
 with the packaged attack kind and seed 42:
 
 ```text
-Model calls: 829 of 1000 planned units call a model, 1337 to 4023 calls (translation 476 to 2856, from the spec's calls); units drawing a technique with no calls, not counted: 334.
+Model calls: 816 of 1000 planned units call a model, 2470 to 7912 calls (translation 632 to 3792, from the spec's calls).
 ```
 
 The translation share goes to the translation model (a machine
-translation's judge, one call a round, to the generation model). The
-cognitive and persona techniques give no `calls` yet, so the units that
-draw one are counted apart and their calls left out.
+translation's judge, one call a round, to the generation model).
 
 ## What the families do
 
@@ -337,8 +335,8 @@ template variant or a font, for traceability.
 
 **Hacking.**
 
-- `cognitive` and `persona` are two model calls each: a scenario, then the
-  jailbreak built on it. A named persona grounds the scenario in the
+- `cognitive` and `persona` are a scenario, a check of it, then the
+  jailbreak built on it: 3 to 9 model calls (the spec's `calls`). A named persona grounds the scenario in the
   persona's character first; the prompt names it by its `display_name`
   (`Someone from the Future`), the info by its key
   (`category=someone_from_the_future_persona`). The scenario prompts ask
@@ -346,9 +344,14 @@ template variant or a font, for traceability.
   last block after the first delimiter, or, in a reply without one, what
   follows a `Scenario Description` heading. A reply with neither is asked
   again, up to 3 times in all, and then rejects the result
-  (`DISCARDED; reason=malformed scenario`). The definitions live in
+  (`DISCARDED; reason=malformed scenario`). The stage's `check` model (the
+  `gen` model unless the recipe names one) then reads the scene against the
+  prompt (`jailbreak/scenario_check`, at temperature 0.15). A scene it
+  rejects is asked for again with the check's reply as feedback, up to two
+  scenes; one rejected twice rejects the result (`DISCARDED; reason=scenario
+  check failed`). The definitions live in
   `configs/jailbreak/hacking/cognitive_techniques.json` and `personas.json`,
-  editable without touching code. `to_invented_persona` makes the same two
+  editable without touching code. `to_invented_persona` makes the same
   calls as `cognitive`'s `to_persona_roleplay` until it gets prompts of its
   own; only its info, `category=invented_persona`, differs.
 - `framing` directives are transforms that change the scenario or the

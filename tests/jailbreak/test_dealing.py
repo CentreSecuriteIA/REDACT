@@ -104,7 +104,7 @@ def test_coverage_returns_none_without_a_manifest(tmp_path):
 
 def test_a_plans_model_calls_add_up_from_the_spec(tmp_path, caplog):
     """A synthetic plan: a pure unit, typos ([2, 4]), a translation
-    ([2, 12]), both, and a persona, whose spec gives no calls."""
+    ([2, 12]), both, and a persona ([3, 9])."""
     import logging
 
     from redact.dataset import Manifest
@@ -124,9 +124,15 @@ def test_a_plans_model_calls_add_up_from_the_spec(tmp_path, caplog):
     with caplog.at_level(logging.INFO, logger="redact.jailbreak.plan"):
         log_model_calls(manifest, pool)
     assert [r.getMessage() for r in caplog.records] == [
-        "Model calls: 4 of 5 planned units call a model, 8 to 32 calls "
-        "(translation 4 to 24, from the spec's calls); units drawing a technique "
-        "with no calls, not counted: 1."]
+        "Model calls: 4 of 5 planned units call a model, 11 to 41 calls "
+        "(translation 4 to 24, from the spec's calls)."]
+
+
+def test_every_technique_that_calls_a_model_has_calls_in_the_spec():
+    from redact.jailbreak.pool import all_techniques
+
+    assert [fn.__name__ for fn in all_techniques()
+            if fn.requires_llm and fn.calls is None] == []
 
 
 def test_a_verbose_plan_logs_its_model_calls(tmp_path, caplog):

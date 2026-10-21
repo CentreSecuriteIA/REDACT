@@ -8,6 +8,6 @@
   "few_shot_examples": [],
   "metadata": {
     "version": "1.0",
-    "notes": "Not currently wired into any pipeline: cognitive/persona scenario generation (jailbreak/hacking/) has no check step today. Authored for a validation pass that ensures the scenario preserves the original harmful intent while staying internally consistent; load via load_prompt('jailbreak', 'scenario_check') to use it."
+    "notes": "Checks each scenario of the cognitive and persona techniques (jailbreak/hacking/cognitive.py, _scenario_gen) against the original prompt, on the jailbreak stage's check model; a rejection's reply is fed back to the next scenario, up to two scenarios. Authored to ensure the scenario preserves the original harmful intent while staying internally consistent."
   }
 }

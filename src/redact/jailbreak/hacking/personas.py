@@ -3,7 +3,8 @@
 
 ``info`` is ``category=<name>_persona``, ``<name>`` the persona's key; the
 prompts get its ``display_name``. A scenario reply without its scene is asked
-again, then discarded, as for the cognitive techniques.
+again, then discarded, and a scenario the check rejects is made again once, then
+discarded, as for the cognitive techniques.
 """
 
 from collections.abc import Callable
@@ -14,7 +15,6 @@ from redact.llm_pipeline import LLMRequest
 from redact.llms.prompting import build_messages, load_prompt
 
 from .cognitive import (
-    MALFORMED_SCENARIO,
     _cognitive_gen,
     _construction_messages,
     _scenario_gen,
@@ -56,21 +56,31 @@ def _persona_gen(
     persona_description: str,
     *,
     gen_model: str | None = None,
+    check_model: str | None = None,
+    check_attempts: int = 2,
     scenario: str | None = None,
     prompt_dir=None,
     **kwargs,
 ) -> TechniqueGen:
-    """Yield persona-scenario then construction requests; return (jailbreak, info).
+    """Yield the persona-scenario requests (``cognitive._scenario_gen``: the
+    scenario and its check), then the construction request; return
+    ``(jailbreak, info)``.
 
     The scenario prompt names the persona by :func:`display_name`, the info
-    by its key. A scenario that no attempt parses returns the prompt with
-    :data:`~redact.jailbreak.hacking.cognitive.MALFORMED_SCENARIO`.
+    by its key. A scenario that no attempt parses or the check rejects every
+    time returns the prompt with the discard info
+    (:data:`~redact.jailbreak.hacking.cognitive.MALFORMED_SCENARIO`,
+    ``scenario check failed``).
     """
     if scenario is None:
-        scenario = yield from _scenario_gen(gen_model, _persona_scenario_messages(
-            prompt, display_name(persona_name), persona_description, prompt_dir))
+        scenario, discard = yield from _scenario_gen(
+            gen_model,
+            _persona_scenario_messages(
+                prompt, display_name(persona_name), persona_description, prompt_dir),
+            original=prompt, check_model=check_model,
+            check_attempts=check_attempts, prompt_dir=prompt_dir)
         if scenario is None:
-            return prompt, MALFORMED_SCENARIO
+            return prompt, discard
     jailbreak = yield LLMRequest(
         gen_model,
         _construction_messages(

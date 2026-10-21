@@ -230,21 +230,19 @@ def log_model_calls(manifest_path: Path, pool: list[Callable]) -> None:
     A unit counts when it draws a technique that calls a model
     (``requires_llm``), and its techniques' spec ``calls`` add up, low to
     high; the translation family's are also given apart, since they go to
-    the translation model (a machine translation's judge aside). A technique
-    whose spec gives no ``calls`` (cognitive, persona) adds none, and the
-    line counts the units that draw one.
+    the translation model (a machine translation's judge aside). Every
+    ``requires_llm`` technique of the spec carries ``calls`` (a test holds it).
     """
     by_name = {fn.__name__: fn for fn in pool}
-    units = calling = uncounted = 0
+    units = calling = 0
     calls, translation = [0, 0], [0, 0]
     for row in _manifest_rows(Path(manifest_path)):
         units += 1
         fns = [by_name[name] for name in row.get("combination") or []
                if getattr(by_name.get(name), "requires_llm", False)]
         calling += bool(fns)
-        uncounted += any(fn.calls is None for fn in fns)
         for fn in fns:
-            low, high = fn.calls or (0, 0)
+            low, high = fn.calls
             calls[0] += low
             calls[1] += high
             if TRANSLATION in fn.families:
@@ -252,9 +250,8 @@ def log_model_calls(manifest_path: Path, pool: list[Callable]) -> None:
                 translation[1] += high
     logger.info(
         "Model calls: %d of %d planned units call a model, %d to %d calls "
-        "(translation %d to %d, from the spec's calls); units drawing a technique "
-        "with no calls, not counted: %d.", calling, units, *calls, *translation,
-        uncounted)
+        "(translation %d to %d, from the spec's calls).", calling, units, *calls,
+        *translation)
 
 
 def _warn_short(dealer: Dealer, iteration: int, manifest_path: Path) -> None:

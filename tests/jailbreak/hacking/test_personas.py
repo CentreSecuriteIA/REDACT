@@ -9,16 +9,22 @@ from redact.jailbreak.hacking.personas import (
     get_persona_functions,
     to_invented_persona,
 )
-from redact.llm_pipeline import drive_sync
+from redact.llm_pipeline import CHECK_TEMPERATURE, drive_sync
 
 _SCENE = "Notes\n---\nA quiet lab at night\n---"
 
 
 def _drive(technique, replies: list[str], **kwargs):
-    """Run ``technique`` with ``replies`` in turn; return its result and requests."""
+    """Run ``technique`` with ``replies`` in turn; return its result and requests.
+
+    The scenario check (its request is at the check temperature) accepts and is
+    not among the requests: ``test_scenario_check.py`` covers it.
+    """
     requests = []
 
     def call(request):
+        if request.temperature == CHECK_TEMPERATURE:
+            return "Yes"
         requests.append(request)
         return replies[len(requests) - 1]
 

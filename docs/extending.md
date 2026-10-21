@@ -247,8 +247,8 @@ contract.
      apply to each of its techniques whose entry gives none, as `kinds` do.
      Both only declare: the technique runs its check itself (the typo
      check through `llm_pipeline.checked` in `obfuscation/typos.py`, on the
-     `check_model` it is given; the strict parse in
-     `obfuscation/tokenbreak.py`; translation's rounds), and
+     `check_model` it is given; the scenario check in `hacking/cognitive.py`;
+     the strict parse in `obfuscation/tokenbreak.py`; translation's rounds), and
      import fails on a `check` outside those four or `calls` that are not
      whole numbers of at least 1. A technique of the eval pool that has a
      model write the prompt must carry a `check`
