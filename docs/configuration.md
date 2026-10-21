@@ -634,6 +634,8 @@ Adversarial only:
 | `max_obfuscations` | int >= 0 | `2` | Budget mode: the most obfuscation families, the request obfuscation included |
 | `layer_rates` | `{layer: 0..1}` | `{}`, the spec's rates | Target share of units that take a `rewrite` (when `layers.deny` leaves it out; the spec's rate is 0), `hacking`, `manipulation` or `requests` technique, or, with `allow_request_obfuscation`, a `request_obfuscation` |
 | `allow_request_obfuscation` | bool | `true` (`false` in the eval type) | Allow one more technique after the request technique, at the `request_obfuscation` rate: a light `encode` technique (the light `to_sensitive_words_encode_*` among them), or a translation when the pool has one. It is drawn before the other obfuscations, from what the earlier picks leave, and takes one of the `max_obfuscations` slots and its complexity from them; with `max_obfuscations` 0 there is none |
+| `budget` | `"unit"`, `"group"` or `null` | `null`, as `"unit"` | `"unit"`: each unit may spend up to `max_complexity`. `"group"`: a unit may also spend what the group's earlier units left unspent of it, up to `max_unit_complexity`, so the group's mean stays at or below `max_complexity` ([the group budget](#the-group-budget)). A key of the kind, not of a round; the natural kind refuses it |
+| `max_unit_complexity` | int >= `max_complexity` | `max_complexity + 3` | With `"budget": "group"` only: the most one unit may spend. It may not be below `max_complexity` or any round's `max_complexity`; the natural kind refuses it |
 
 Natural only:
 
@@ -756,8 +758,8 @@ round's `layer_rates` replaces the kind's whole and is read over the spec's.
 With `rounds`, `iterations` is the number of rounds; giving both with
 different values raises. A round with `exact_techniques` picks exactly that
 many compatible techniques and ignores `max_complexity`,
-`max_obfuscations`, `layer_rates` and `allow_request_obfuscation`. A round
-without it picks by budget.
+`max_obfuscations`, `layer_rates`, `allow_request_obfuscation` and the
+[group budget](#the-group-budget). A round without it picks by budget.
 
 The escalation schedule:
 
@@ -791,6 +793,61 @@ explains the dealing.
 at most 1; beyond it, `manipulation` falls short of its rate and the plan
 logs a WARNING. With `allow_request_obfuscation`, `request_obfuscation` is
 dealt the same way, over the group's units.
+
+### The group budget
+
+A budget round lets each unit spend up to `max_complexity`. A unit that
+draws cheap techniques leaves the rest unspent, so a group's units spend
+less than `max_complexity` on average (5.77 of 6 in the table below). With
+`"budget": "group"` the units of a `(category, entry_type, iteration)` group
+share it: a unit may spend `max_complexity` plus what the group's earlier
+units left unspent of it, up to `max_unit_complexity` (`max_complexity + 3`
+when left out). The group's mean complexity per unit then stays at or below
+`max_complexity`, and no unit goes above the ceiling. The first unit of a
+group has no bank, so it spends up to `max_complexity`.
+
+```json
+{"adversarial": {"budget": "group", "max_unit_complexity": 9}}
+```
+
+- It is off by default and no packaged kind or dataset type turns it on:
+  `"unit"`, `null` or the keys left out give the rounds, the plan file and
+  the draws of a run without the option.
+- `max_unit_complexity` needs `"budget": "group"` and may not be below
+  `max_complexity` or any round's `max_complexity`. Both are keys of the
+  kind: a round may not name them. With `rounds`, each round is a group of
+  its own with its own `max_complexity` (and, with no `max_unit_complexity`,
+  that plus 3).
+- A count round (`exact_techniques`) has no budget and ignores the keys; the
+  natural kind refuses them.
+- The keys reach a plan only when set. A plan kept from before resumes as it
+  was; a section that turns the option on or off over a kept plan raises on
+  resume, naming `rounds`: run the kind with `resume=False`.
+
+What it does, measured over 3,000 units of the default adversarial kind in
+three groups (seed 42, `max_complexity` 6, ceiling 9;
+`py -m tests.jailbreak.simulate 3000 budget`):
+
+| | `"unit"` | `"group"` |
+|---|---|---|
+| Mean complexity per unit | 5.77 | 6.00 |
+| Highest complexity of one unit | 6 | 9 |
+| Units above 6 | 0 | 534 |
+| Obfuscations per unit | 1.75 | 1.79 |
+| Draws of complexity 3 or more | 1,424 | 1,472 |
+| `encode`: the top member's share of the family's draws, as a multiple of an even share | 5.57 | 3.66 |
+| `sensitive_words`: the same | 2.52 | 1.94 |
+| Of complexity 3 or more, drawn: `encode` (of 9) | 1 (`to_base32`, once) | 1 (`to_base32`, once) |
+| Of complexity 3 or more, drawn: `sensitive_words` (of 4) | none | none |
+
+The group budget evens out the cheap members of `encode` and
+`sensitive_words`, which the unit budget favours because a cheap one fits
+more units, and spends the mean it is given. It brings in no heavy
+encoding: those stay as rare as under the unit budget. The extra allowance
+goes to the obfuscations, the request obfuscation's included (2.52
+complexity per unit against 2.76; the other layers spend the same). The
+draws of complexity 3 or more include 165 of the two `selected_many`
+variants, which score 4, under both budgets.
 
 ### Examples
 

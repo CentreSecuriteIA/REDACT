@@ -41,7 +41,7 @@ the technique names are in [techniques.md](../techniques.md).
 | `augmentation.py` | `KINDS`, `defaults(config_dir)`, `resolve(section, kind, base=None, config_dir=None)`, `rounds_of(resolved)`, `apply_flat_keywords`, `FLAT_KEYWORDS` |
 | `rules.py` | `compatible(selected, pool, remaining_complexity)`, `request_obfuscation_candidates` |
 | `sampling.py` | `sample_combination`, `sample_exact_combination`, `_pick_by_family` |
-| `plan.py` | `plan_run`, `assign_combination`, `combination_of`, `coverage`, `plan_inputs` (the record of the `<stem>.plan.json` beside the manifest, written through `dataset/planfile.py`, its `spec_version` dating the pool), `default_escalation_schedule`; it deals from `dataset.dealing.Dealer` |
+| `plan.py` | `plan_run`, `assign_combination` (with the opt-in group budget: `_allowance`, `UNIT_HEADROOM`), `combination_of`, `coverage`, `plan_inputs` (the record of the `<stem>.plan.json` beside the manifest, written through `dataset/planfile.py`, its `spec_version` dating the pool), `default_escalation_schedule`; it deals from `dataset.dealing.Dealer` |
 | `chain.py` | `run_chain`, `combine_techniques`, `in_layer_order`, `apply_combination` |
 | `units.py` | `pending_units`, `is_pending`, `unit_gen`, `row_of`, `error_row_of` |
 | `pipeline.py` | `run_augmentation`, the stage core; `_library_change`, the kept plan's pool against what the library added and retired since |
@@ -255,6 +255,10 @@ aside); a test pins them. The combined function
 names its request obfuscation in `request_obfuscation` (`None` without
 one), which `_observe` counts in the dealer.
 
+In budget mode `max_complexity` is what the unit may spend. The planner
+may pass a larger number in its place, the unit's allowance under the
+[group budget](#the-group-budget); the sampler reads it as any budget.
+
 **Count mode** (`exact_techniques: n`) picks exactly `n` compatible
 techniques from any layer, ignoring complexity. It returns fewer when the
 rules leave nothing; with the full pool, 1 and 2 are always reachable. It
@@ -315,15 +319,58 @@ order.
   fitting technique, is logged as a WARNING naming the coverage file.
 
 After each unit, `assign_combination` has `_observe` count the kept draw's
-families, techniques, layers and request obfuscation in the group's dealer. Each group has its own dealer; nothing is
+families, techniques, layers, request obfuscation and complexity in the
+group's dealer. Each group has its own dealer; nothing is
 counted across groups.
 
 `tests/jailbreak/simulate.py` plans N synthetic inputs through `plan_run`
 (in a temporary folder) and gives each technique's share of the units and
 its share within its family; `py -m tests.jailbreak.simulate [N]` prints
 them for the default adversarial kind, and `deal_kind(section, n,
-base=...)` plans a kind over a dataset type's section (the eval type's). The
-coverage table does not hold these shares.
+base=...)` plans a kind over a dataset type's section (the eval type's);
+`plan_kind` and `plan_rows` give the manifest rows, `spend` what the units
+spent in complexity, and `py -m tests.jailbreak.simulate [N] budget` the
+unit budget against the group budget. The coverage table holds none of these.
+
+### The group budget
+
+Opt-in, off in both packaged kinds and both dataset types: an adversarial
+kind's `budget` `"group"` (default `"unit"`) with `max_unit_complexity`
+(default `max_complexity + UNIT_HEADROOM`, 3). Without it a unit spends up
+to `max_complexity` and what it leaves is lost; with it the group shares the
+budget.
+
+- `_observe` adds each kept technique's complexity, the request
+  obfuscation's included, to the dealer's `spent`. `Dealer.bank(per_unit)` is
+  `max(0, per_unit x (position - 1) - spent)`: what the units dealt before
+  the current one left unspent of `per_unit` each.
+- Before it draws, `assign_combination` replaces the round's `max_complexity`
+  with the unit's allowance, `min(max_complexity + bank, ceiling)`
+  (`_allowance`), once, so a resample draws from the same allowance. Every
+  pick of a draw fits what is left of it (`compatible` checks the remaining
+  complexity, the first pick and the request obfuscation included), so a unit
+  never spends more than its allowance. By induction the group has spent at
+  most `max_complexity x position` after each unit, and no unit goes above
+  the ceiling.
+- A count draw (`exact_techniques`), a call without a dealer and a kind
+  without the option leave `max_complexity` as it was. Each round of a plan
+  is its own group with its own dealer, so its own bank.
+- `rounds_of` writes `budget` only when `"group"` and `max_unit_complexity`
+  only when given, so the rounds, the plan file and the draws of a kind
+  without the option are those it had before (the pinned digests of
+  `tests/jailbreak/test_dealing.py` hold). A kept plan made without the keys
+  resumes with no warning under a section that leaves them out or says
+  `"unit"`; a section that turns the option on or off over a kept plan, or
+  changes its ceiling, raises as `rounds` (`planfile.changed_plan`), naming
+  `resume=False`. `resolve` refuses the keys on the natural kind, a ceiling
+  without `"group"` or below `max_complexity` or any round's
+  `max_complexity`, and a round naming either key.
+- Measured with `simulate.compare_budgets` over 3,000 units of the default
+  attacks, it keeps the mean at `max_complexity` (5.77 to 6.00), lets some units reach the ceiling (534 of
+  3,000 above 6, none above 9) and evens out the cheap members of `encode`
+  and `sensitive_words`, but draws no more heavy encodings; the extra
+  allowance goes to the obfuscations. The table is in
+  [configuration.md](../configuration.md#the-group-budget).
 
 ## Seeds
 
@@ -409,7 +456,8 @@ does not keep its retired techniques.
 `rounds_of(resolved)` turns the kind into one sampler-settings dict per
 round: a natural round is `{"exact_techniques": n}`; an adversarial round is
 the budget keys, an `include_<layer>` per layer and `allow_request_obfuscation`
-when set, with the round's own keys merged over them. `include_rewrite` is
+when set, `budget` when `"group"` and `max_unit_complexity` when given, with
+the round's own keys merged over them. `include_rewrite` is
 the exception: written, true, only when the kind allows the rewrite layer,
 so the rounds of a kind that denies it (both packaged kinds do) are those
 written before the layer existed, and no kept plan of theirs changes. A

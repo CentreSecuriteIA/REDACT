@@ -228,7 +228,10 @@ technique is picked first. A technique may not join a combination when:
   the Latin-letter noise would change nothing, yet count in
   `num_techniques`; before it, the translator would get a cipher. The
   Latin-script translations still join them;
-- in budget mode, its complexity is above what is left of `max_complexity`.
+- in budget mode, its complexity is above what is left of `max_complexity`
+  (under the opt-in [group budget](configuration.md#the-group-budget), of the
+  unit's allowance: `max_complexity` plus what the group's earlier units left
+  unspent, up to `max_unit_complexity`).
 
 `combine_techniques` does not check these rules. It only sorts techniques
 into layer order. [internals/jailbreak.md](internals/jailbreak.md) explains
