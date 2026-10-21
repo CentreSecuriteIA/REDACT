@@ -126,7 +126,7 @@ the params.
 | `inputs` | `gen`, `check` -> `uncensored_gen` | the category files of `constitution_inputs/`; accepted rows of the current style | the saved constitution, `merged.csv` |
 | `outputs` | `gen`, `check` -> `uncensored_gen` | `output_responses.csv`, or its `output_path` | the input category files (`dataset.input_files`) |
 | `paraphrase` | `paraphraser` -> `paraphraser`, `paraphrase_check` -> `uncensored_gen` | the files of the target(s) (`inputs` by default), plus `skipped` from their ledgers | the input category files and `output_responses.csv`, per target |
-| `jailbreaks` | `gen` -> `uncensored_gen`, `translation` -> `translation` | `jailbreaks.csv` and `variations.csv`, each when its kind is on | the input category files |
+| `jailbreaks` | `gen`, `check` -> `uncensored_gen`, `translation` -> `translation` | `jailbreaks.csv` and `variations.csv`, each when its kind is on | the input category files |
 | `build` | none | `complete_dataset.csv`, or its `output_path`; in eval the three `eval_*.csv` files, and `excluded` from `eval_excluded.json` (`extra_counts`) | the part files, where the params put them (no variations in eval), and the files `exclude_from` names |
 
 `RunContext` is what one run hands the stages: `data_dir`, `dataset_type`,

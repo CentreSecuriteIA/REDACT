@@ -37,8 +37,8 @@ split or an encoded word, then `suffixes` 60, `encode` 70, `structural` and
 `neutral_container` 80 (each excludes the other, so they share the place)
 and `ascii_art` 90, the outermost. A plan made before this order applied
 `sensitive_words` and `tokenbreak` first; a kept plan replays the order its
-manifest recorded, and a fresh plan applies translation, typos and casual
-writing before the word-level steps. The families the eval type draws
+manifest recorded, and a fresh plan applies translation, typos, casual
+writing and noise before the word-level steps. The families the eval type draws
 (`translation`, `encode`, `structural`, `ascii_art`) keep their order. The
 obfuscation layer has no cap: a combination takes up to `max_obfuscations`
 of its families in budget mode, the request obfuscation, when allowed,
@@ -316,11 +316,14 @@ answer-format directives the natural kind denies anyway
 (`to_refusal_then_comply`, `to_apology_prevention`,
 `to_prefix_injection`), with every other family. A natural allow list that
 names one of them raises, so a `config_dir` copy of `augmentations.json`
-from before needs its natural `families.allow` trimmed. A natural-kind plan
-made before raises on resume, since its pool changed: run the natural kind
-with `resume=False`. A training build leaves out a benign or dual-use benign
-variation made with a technique the natural kind does not draw, with one
-WARNING that counts them ([stages/build.md](stages/build.md)).
+from before needs its natural `families.allow` trimmed. A natural plan made
+before the natural kind was narrowed to this pool raises on resume, since its
+pool changed: run the natural kind with `resume=False`. One made since, before
+spec version 1.2 grew the pool, resumes with the growth WARNING
+([configuration.md](configuration.md#release-notes)). A training build leaves
+out a benign or dual-use benign variation made with a technique the natural
+kind does not draw, with one WARNING that counts them
+([stages/build.md](stages/build.md)).
 
 ## What a plan costs
 

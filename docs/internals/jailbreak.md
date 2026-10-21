@@ -36,7 +36,7 @@ the technique names are in [techniques.md](../techniques.md).
 | Module | Holds |
 |---|---|
 | `technique.py` | The technique contract, `load_spec` and `read_spec` (the spec, its generators expanded), `data_rows`, `tag`, `DISCARDED`, `KINDS`, `DEFAULT_KINDS`, `family_kinds`, `FIRST_VERSION`, `version_key` |
-| `rewrite/`, `hacking/`, `manipulation/`, `obfuscation/`, `requests/` | The techniques, one module per family (`distractor.py` holds both distractor families), each with a getter; `get_all_rewrite_functions` (none yet), `get_all_hacking_functions`, `get_all_manipulation_functions`, `get_all_obfuscation_functions`, `get_all_request_functions` per subpackage; `all_techniques` joins the rewrite layer last, so the others keep their registry order. `manipulation/benign.py` makes the benign data: one unit per subcategory of the benign taxonomy and answer type, keyed `(main_category, sub_category, answer_type)` |
+| `rewrite/`, `hacking/`, `manipulation/`, `obfuscation/`, `requests/` | The techniques, one module per family (`distractor.py` and `smalltalk.py` each hold both families of their pair), each with a getter; `get_all_rewrite_functions` (none yet), `get_all_hacking_functions`, `get_all_manipulation_functions`, `get_all_obfuscation_functions`, `get_all_request_functions` per subpackage; `all_techniques` joins the rewrite layer last, so the others keep their registry order. `manipulation/benign.py` makes the benign data: one unit per subcategory of the benign taxonomy and answer type, keyed `(main_category, sub_category, answer_type)` |
 | `pool.py` | `all_techniques`, `technique_pool(resolved)`, `kind_of(resolved)`, `languages`, `registry`, `uses_translation`, `variant_pools` (each template pool's family, techniques and count of variants on, which the variant floor test ratchets); at import, the spec against the registries, the families' dimensions and the techniques' variant pools |
 | `augmentation.py` | `KINDS`, `defaults(config_dir)`, `resolve(section, kind, base=None, config_dir=None)`, `rounds_of(resolved)`, `apply_flat_keywords`, `FLAT_KEYWORDS` |
 | `rules.py` | `compatible(selected, pool, remaining_complexity)`, `request_obfuscation_candidates` |
@@ -110,8 +110,10 @@ def to_y(prompt: str, **kwargs) -> TechniqueGen:
   on the entry type alone).
 - A pure template technique draws its text from a variant pool, one
   directive's variants in its template file, and names it with
-  `@uses_pool(file, directive, slots)` (its `variant_pool`; the answer
-  languages share one pool, set by their factory). `read_pools` reads a
+  `@uses_pool(file, directive, slots, info_key)` (its `variant_pool`;
+  `info_key` the key of its info that names the variant drawn, `variant`
+  unless it says otherwise; the answer languages share one pool, set by
+  their factory). `read_pools` reads a
   file of any of the three shapes (`{name, template}` lists,
   continuation's `{name, prefix, suffix}`, structural's one template per
   technique) into lists of variants; `pool.py` checks every named pool at
@@ -185,7 +187,7 @@ core, called once per kind:
    input in this frame and not in the ledger, it builds the combination
    (`combination_of`) and the unit's generator (`unit_gen`, over
    `run_chain`) only when the driver takes it. `drive_units` runs them with
-   `pool_size(batch_size, client)` live and `cap=batch_size`. A plan row
+   `pool_size(batch_size, client, check)` live and `cap=batch_size`. A plan row
    naming a technique no registered function implements raises a
    `ValueError` naming `resume=False`, which stops the stage.
 6. **Save.** `on_done` makes the row (`row_of`); `on_error` makes an error
