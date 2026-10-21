@@ -60,7 +60,9 @@ types: a recipe naming one stops when it loads, before any stage runs.
 
 The eval adversarial kind attacks the harmful inputs only, with a pool of
 hard techniques whose label stays certain: the families `encode` (less the
-seven light encodings, and less `sensitive_words`), `fsh` and `dap` (less
+22 encodings `techniques.deny` names, the seven light ones of before spec 1.2
+and the fifteen it added, which leaves its five original `heavy` ones; and
+less `sensitive_words`), `fsh` and `dap` (less
 their four many-shot variants), `framing`, `structural`, `ascii_art`,
 `continuation`, `temporal`; the eight low-resource
 translations (`to_swahili`, `to_thai`, `to_khmer`, `to_nepali`,
@@ -562,16 +564,17 @@ applied after the request technique, to the finished request; it takes one
 of the unit's `max_obfuscations` slots and its complexity, so a unit holds
 no more obfuscations than before. Measured with
 `tests/jailbreak/simulate.py` over 3,000 units of the default kind in three
-groups (seed 42): 50.0% of the units take one; of these, 47.9% a light
-`to_sensitive_words_encode_*`, 47.8% a light `encode` technique and 4.3% a
-translation, which is 2.2% of the units (the dealer gives the step the
-family of the three dealt least so far in the group, and translation is
-already the obfuscation family dealt most: 0.27 picks per unit, against
-0.22 or less for the others). The obfuscations per unit go from 1.77 to
-1.76, the units holding a translation from 26.7% to 26.4%, the light
-encodings per unit from 0.36 to 0.49, and the model-calling techniques per
-unit, translation aside, from 1.17 to 1.14 (the light encodings take slots
-from `typos`, `tokenbreak` and `structural`). The extra model cost is the
+groups (seed 42, spec 1.2): 50.0% of the units take one; of these, 48.2% a
+light `to_sensitive_words_encode_*`, 47.9% a light `encode` technique and
+3.9% a translation, which is 1.9% of the units (the dealer gives the step
+the family of the three dealt least so far in the group, and translation is
+already the obfuscation family dealt most: 0.23 picks per unit, against
+0.17 for each of the others). The obfuscations per unit stay at 1.75, the
+units holding a translation go from 22.6% to 26.4%, the light encodings per
+unit from 0.27 to 0.48, and the model-calling techniques per unit,
+translation aside, from 1.01 to 1.02 (the light encodings take slots from
+the other obfuscation families alike, each from 0.17 to 0.14 picks per
+unit). The extra model cost is the
 translations moved after the request: each runs on the translation model,
 a machine-translation pass per piece with its checks, back-translations and
 the generation model's judge, now over the request's wording as well as the
