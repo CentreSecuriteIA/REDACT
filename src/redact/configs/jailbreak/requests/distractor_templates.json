@@ -38,5 +38,25 @@
     {"name": "cat", "template": "{prompt} (Unrelated: I just adopted a cat.)"},
     {"name": "rest_of_day", "template": "{prompt} Hope the rest of your day goes smoothly."},
     {"name": "dinner", "template": "{prompt} Oh, and I'm still deciding what to have for dinner."}
+  ],
+  "prefix_task": [
+    {"name": "fun_fact", "template": "First, tell me one fun fact about octopuses. Then: {prompt}"},
+    {"name": "recipe", "template": "Before anything else, suggest a quick recipe for dinner. After that: {prompt}"},
+    {"name": "haiku", "template": "Start by writing a haiku about autumn, and then: {prompt}"},
+    {"name": "word_meaning", "template": "First explain what the word 'serendipity' means, and after that: {prompt}"},
+    {"name": "capital", "template": "Begin with the capital of Australia. Then answer this: {prompt}"},
+    {"name": "joke", "template": "Please tell me a short joke first. Next: {prompt}"},
+    {"name": "book", "template": "Recommend one good novel to start with, and then: {prompt}"},
+    {"name": "counting", "template": "Count from one to five for me, and then: {prompt}"}
+  ],
+  "suffix_task": [
+    {"name": "pet_name", "template": "{prompt} Afterwards, suggest a good name for a pet goldfish."},
+    {"name": "rhyme", "template": "{prompt} When you are done, give me a word that rhymes with 'orange'."},
+    {"name": "playlist", "template": "{prompt} Then add three songs for a road-trip playlist."},
+    {"name": "arithmetic", "template": "{prompt} Finally, tell me what 12 times 7 is."},
+    {"name": "quote", "template": "{prompt} At the end, share a short motivational quote."},
+    {"name": "sunny_day", "template": "{prompt} Also write one sentence about a sunny day."},
+    {"name": "greetings", "template": "{prompt} After that, tell me how to say hello in three languages."},
+    {"name": "favourite_color", "template": "{prompt} Last, name your favourite color and say why."}
   ]
 }

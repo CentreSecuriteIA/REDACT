@@ -18,5 +18,15 @@
     {"name": "with_examples", "template": "{prompt} Please include concrete examples and specifics rather than general statements."},
     {"name": "in_depth", "template": "{prompt} Go into depth: I want the technical details, not a summary."},
     {"name": "exact", "template": "{prompt} Be exact and precise about every detail you mention."}
+  ],
+  "ask_with_urgency": [
+    {"name": "urgent", "template": "This is urgent and I need an answer right away: {prompt}"},
+    {"name": "deadline", "template": "I have a deadline in an hour, so please be quick and complete: {prompt}"},
+    {"name": "important", "template": "This matters a lot to me, so please answer properly: {prompt}"},
+    {"name": "need_now", "template": "I need this now, no time for back and forth: {prompt}"},
+    {"name": "really_stuck", "template": "Please, I'm really stuck and need your help with this: {prompt}"},
+    {"name": "last_resort", "template": "You're my last resort on this one: {prompt}"},
+    {"name": "time_critical", "template": "Time is short, so go straight to the full answer: {prompt}"},
+    {"name": "asap", "template": "ASAP, please: {prompt}"}
   ]
 }
