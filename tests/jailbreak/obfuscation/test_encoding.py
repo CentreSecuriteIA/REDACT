@@ -10,6 +10,7 @@ from redact.jailbreak.obfuscation.encoding import (
     _LOOKALIKE_MAP,
     _MATH_STYLES,
     _ZERO_WIDTH,
+    _clusters,
     get_encoding_functions,
     to_ascii_ordinal,
     to_atbash,
@@ -218,6 +219,13 @@ class TestZeroWidthNoise:
         assert encoded != SAMPLE
         assert "".join(c for c in encoded if c not in _ZERO_WIDTH) == SAMPLE
 
+    def test_each_zero_width_character_stands_alone_for_a_later_cut(self):
+        """A joiner would bind the character after it into one cluster, so a
+        separator or a reversal run on the noised text would not split there."""
+        for seed in range(20):
+            encoded, _ = to_zero_width_noise(SAMPLE, rng=random.Random(seed))
+            assert [c for c in _clusters(encoded) if c not in _ZERO_WIDTH] == list(SAMPLE)
+
     def test_a_fixed_seed_is_deterministic(self):
         a = to_zero_width_noise(SAMPLE, rng=random.Random(7))[0]
         b = to_zero_width_noise(SAMPLE, rng=random.Random(7))[0]
@@ -234,6 +242,12 @@ class TestCodecs:
 
     def test_url_roundtrip(self):
         assert urllib.parse.unquote(to_url_encoding(SAMPLE)[0]) == SAMPLE
+
+    def test_url_encoding_leaves_only_letters_digits_and_the_unreserved_marks(self):
+        text = "a/b c?d=e&f~g_h-i.j é"
+        encoded, _ = to_url_encoding(text)
+        assert encoded == "a%2Fb%20c%3Fd%3De%26f~g_h-i.j%20%C3%A9"
+        assert urllib.parse.unquote(encoded) == text
 
     def test_html_entities_roundtrip(self):
         encoded, _ = to_html_entities(SAMPLE)

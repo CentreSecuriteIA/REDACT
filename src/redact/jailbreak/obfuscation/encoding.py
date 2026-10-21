@@ -230,8 +230,9 @@ def to_lookalike_letters(
 
 
 #: The zero-width characters ``to_zero_width_noise`` scatters: the zero-width
-#: space, non-joiner and joiner.
-_ZERO_WIDTH = (chr(0x200B), chr(0x200C), chr(0x200D))
+#: space and non-joiner. Not the joiner: :func:`_clusters` binds the character
+#: after it, so a later cut or reversal of the text would not split there.
+_ZERO_WIDTH = (chr(0x200B), chr(0x200C))
 
 
 def to_zero_width_noise(
@@ -265,8 +266,9 @@ def to_binary(prompt: str) -> tuple[str, str]:
 
 
 def to_url_encoding(prompt: str) -> tuple[str, str]:
-    """Percent-encode the prompt, as a URL encodes its unsafe characters."""
-    return urllib.parse.quote(prompt), ""
+    """Percent-encode every character but letters, digits and ``_.-~``, as a
+    URL component does (a ``/`` is encoded too)."""
+    return urllib.parse.quote(prompt, safe=""), ""
 
 
 def to_html_entities(prompt: str) -> tuple[str, str]:

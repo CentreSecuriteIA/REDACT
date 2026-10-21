@@ -488,11 +488,14 @@ one above their `random` siblings and level with their `selected` ones.
   characters or of the word order (by character cluster, so a base letter
   keeps its marks); look-alike letters (a fraction of the Latin letters,
   drawn by `rng`, swapped for the visually identical Cyrillic ones);
-  zero-width noise (zero-width characters scattered between the characters at
-  a density drawn by `rng`); the byte codecs hex, binary (eight bits per
-  UTF-8 byte), URL percent-encoding, numeric HTML entities, base32 and
-  base85; a Caesar shift (drawn by `rng` from a fixed set, never 13, reported
-  in `shift=<n>`, not stated in the text) and Atbash on the Latin letters;
+  zero-width noise (zero-width spaces and non-joiners scattered between the
+  characters at a density drawn by `rng`; never the joiner, which the
+  character clusters of the separators and the reversals bind to the next
+  character); the byte codecs hex, binary (eight bits per UTF-8 byte), URL
+  percent-encoding (every character but letters, digits and `_.-~`, a `/`
+  too), numeric HTML entities, base32 and base85; a Caesar shift (drawn by
+  `rng` from a fixed set, never 13, reported in `shift=<n>`, not stated in the
+  text) and Atbash on the Latin letters;
   and fullwidth and math-styled Unicode (math-styled drawing one
   Mathematical Alphanumeric style per call, reported in `style=<name>`).
   Hex, binary, HTML entities, base32 and base85 are `heavy`, the rest `light`.
