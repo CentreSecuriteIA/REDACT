@@ -35,6 +35,7 @@ def sample_combination(
     pool: list[Callable],
     max_complexity: int = 6,
     max_obfuscations: int = 2,
+    include_rewrite: bool = False,
     include_hacking: bool = True,
     include_manipulation: bool = True,
     include_obfuscation: bool = True,
@@ -50,14 +51,17 @@ def sample_combination(
 
     - **Budget-driven** (default): probabilistic per-layer picking governed by
         ``max_complexity``, ``max_obfuscations``, and ``sampling_probs``. The
-        hacking, manipulation and requests layers are picked first, at their
-        rates; then the request obfuscation, when allowed and at its rate;
-        the obfuscations then fill what the budget leaves, up to
+        rewrite layer is picked first, when included and at its rate; then
+        the hacking, manipulation and requests layers, at their rates; then
+        the request obfuscation, when allowed and at its rate; the
+        obfuscations then fill what the budget leaves, up to
         ``max_obfuscations`` with the request obfuscation counted.
     - **Count-driven** (``exact_techniques`` set): delegates to
         :func:`sample_exact_combination`, which picks exactly that many compatible
         techniques and ignores the complexity / obfuscation budget entirely. The
-        budget knobs are meaningless in this mode and are not consulted.
+        budget knobs are meaningless in this mode and are not consulted, nor
+        are the rates and ``include_rewrite``: a rewrite technique in the pool
+        may be drawn.
 
     Args:
         rng: Random instance for reproducibility.
@@ -65,6 +69,12 @@ def sample_combination(
         max_complexity: Maximum total complexity score across all selected techniques.
         max_obfuscations: Maximum number of distinct obfuscation families to
             pick, the request obfuscation included.
+        include_rewrite: Whether to consider rewrite-layer techniques; off
+            unless a round says so (the layer is off by default). Phase 0
+            is decided (a dealer's ``include``, else an ``rng`` draw) only
+            when it is on, the ``rewrite`` rate is above 0 and the pool holds
+            a rewrite technique, so a draw without it consumes what it did
+            before the layer existed.
         include_hacking: Whether to consider hacking-layer techniques.
         include_manipulation: Whether to consider manipulation-layer techniques.
         include_obfuscation: Whether to consider obfuscation-layer techniques.
@@ -77,7 +87,8 @@ def sample_combination(
             has no slot.
         sampling_probs: Per-layer inclusion probabilities. Overrides the
             ``layer_rates`` block in combination_spec.json. Recognised keys:
-            ``hacking``, ``manipulation``, ``requests``, ``request_obfuscation``.
+            ``rewrite``, ``hacking``, ``manipulation``, ``requests``,
+            ``request_obfuscation``.
         exact_techniques: If set, switch to count-driven mode and pick exactly this
             many techniques (best-effort if the pool runs out). The budget knobs are
             ignored in this mode.
@@ -104,6 +115,7 @@ def sample_combination(
     probs = dict(spec.get("layer_rates", {}))
     if sampling_probs:
         probs.update(sampling_probs)
+    p_rewrite = probs.get("rewrite", 0)
     p_hacking = probs.get("hacking", 0.5)
     p_manipulation = probs.get("manipulation", 0.33)
     p_requests = probs.get("requests", 0.7)
@@ -139,6 +151,15 @@ def sample_combination(
         if dealer is None:
             return rng.random() < prob
         return dealer.include(layer, prob)
+
+    # Phase 0: Rewrite, first, as it applies first. Decided only when the
+    # round includes it, its rate is above 0 and a rewrite technique fits,
+    # so a draw without it makes no rng draw and no dealer call: the draws
+    # are those made before the layer existed.
+    rewrites = [f for f in current_pool if getattr(f, "layer", None) == "rewrite"]
+    if (include_rewrite and p_rewrite > 0 and rewrites
+            and _include("rewrite", p_rewrite)):
+        _commit(_pick_by_family(rng, rewrites, dealer))
 
     # Phase 1: Hacking
     if include_hacking and _include("hacking", p_hacking):
@@ -218,9 +239,12 @@ def sample_exact_combination(
     complexity or obfuscation budget. Each pick is still validated through
     :func:`redact.jailbreak.rules.compatible` (with ``remaining_complexity=None``, so complexity
     never filters anything) to enforce layer caps (1 rewrite / 1 hacking /
-    1 manipulation / 1 request) and cross-incompatibilities. The obfuscation layer has no per-layer
-    pick cap, so e.g. ``n=2`` may yield two obfuscation-family techniques — intended
-    diversity.
+    1 manipulation / 1 request) and cross-incompatibilities. The obfuscation
+    layer has no per-layer pick cap, so e.g. ``n=2`` may yield two
+    obfuscation-family techniques — intended diversity. No rate is read: a
+    rewrite technique in the pool is dealt as any family's, so the pool (a
+    kind's ``layers.deny``), not a rate, keeps the rewrite layer out of a
+    count round.
 
     Best-effort: if the compatible pool is exhausted before ``n`` picks (only possible
     via caps / incompatibilities, never via complexity), fewer techniques are returned.

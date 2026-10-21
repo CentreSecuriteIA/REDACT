@@ -211,6 +211,12 @@ stay two units.
 **Budget mode** (no `exact_techniques`) picks layer by layer, each pick from
 the techniques still `compatible` with what is picked:
 
+0. `rewrite` (phase 0), when the round includes it (`include_rewrite`,
+   false by default) and the layer joins at its rate (the spec's is 0). It
+   is decided only when included, at a rate above 0 and with a rewrite
+   technique in the pool; otherwise it makes no rng draw and no dealer
+   call, so every draw is the one made before the layer existed
+   (`tests/jailbreak/test_rewrite_layer.py` pins it);
 1. `hacking`, when the layer joins (its rate);
 2. `manipulation`, when the layer joins;
 3. `requests`, when the layer joins;
@@ -225,8 +231,8 @@ the techniques still `compatible` with what is picked:
    `max_obfuscations`, less the request obfuscation's slot, or until no
    technique fits.
 
-The apply order is the layers', whatever the pick order, except the request
-obfuscation, which goes last. Within the obfuscation layer it is each
+The apply order is the layers', whatever the pick order (a rewrite first),
+except the request obfuscation, which goes last. Within the obfuscation layer it is each
 family's `within_layer_order`, in tens: `translation` 10, `typos` 20,
 `casual_writing` 30, `noise` 35, `sensitive_words` 40, `tokenbreak` 50,
 `suffixes` 60, `encode` 70, `structural` and `neutral_container` 80 (each
@@ -251,7 +257,10 @@ one), which `_observe` counts in the dealer.
 
 **Count mode** (`exact_techniques: n`) picks exactly `n` compatible
 techniques from any layer, ignoring complexity. It returns fewer when the
-rules leave nothing; with the full pool, 1 and 2 are always reachable.
+rules leave nothing; with the full pool, 1 and 2 are always reachable. It
+reads no rate and no `include_rewrite`: a rewrite technique in the pool is
+dealt as any family's, so the pool (a kind's `layers.deny`), not a rate,
+keeps the rewrite layer out of a count round.
 
 Every pick is **family first** (`_pick_by_family`): a family, then a
 technique within it, both dealt when the plan passes its dealer
