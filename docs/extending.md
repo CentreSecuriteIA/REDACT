@@ -260,6 +260,16 @@ contract.
    signatures, and the combinations five seeds draw), so it fails on any new
    technique. Once the change is meant, regenerate the fixture from the
    repository root with `PYTHONPATH=src python -m tests.jailbreak.test_registry`.
+   A technique whose text comes from a template file (framing, structural,
+   the request families) is also pinned by what it writes:
+   `tests/jailbreak/test_template_draws.py` runs each on two neutral probes
+   for six seeds and compares a SHA-256 digest per technique and seed (of
+   the texts, the infos and the rng's state after them, no text) with
+   `tests/fixtures/template_draws.json`. A new template technique, or a
+   pool given new variants, regenerates it with
+   `PYTHONPATH=src python -m tests.jailbreak.test_template_draws`; the
+   digests of an eval-pool technique change only with the owner's eval
+   review.
 6. **Docs**: make the layer and family tables of
    [techniques.md](techniques.md) again from the spec with
    `PYTHONPATH=src python -m tests.jailbreak.test_docs_counts`, and update
