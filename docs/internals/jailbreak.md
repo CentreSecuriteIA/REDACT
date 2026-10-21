@@ -302,14 +302,24 @@ order.
   `request_obfuscation`.
 - **Families.** Among the eligible families, the dealer picks the one with
   the lowest count over its weight (`family_weights`, 1 by default), ties
-  broken by the unit's rng.
+  broken by the unit's rng. The request obfuscation's families are counted
+  apart, under `REQUEST_SCOPE` (`"request_obfuscation:"` before the family's
+  name, `sampling.py`), with the same weights (`plan_run` gives the scoped
+  names the family's), so its picks do not count against the obfuscation
+  layer's. Counted together, its `encode` and `sensitive_words` picks made
+  those the layer's families dealt most, and the layer drew them only when
+  no other family fitted: 14 techniques went undrawn in 3,000 units.
 - **Techniques.** Within that family, the dealer picks the eligible member
   the group has dealt least (`Dealer.pick_member`, its own `members`
   counter, apart from the families' `counts` the generation axes also
-  use), ties broken by the unit's rng. A family whose members cost
-  differently still favours its cheaper ones under the complexity budget
-  (`encode`, `sensitive_words`): a heavy member fits fewer units, as
-  wanted. A direct `sample_combination` call without a dealer picks both
+  use), ties broken by the unit's rng; the request obfuscation shares
+  these counts with the layer. A family whose members cost differently
+  still favours its cheaper ones under the complexity budget (`encode`,
+  `sensitive_words`): a member of complexity 3 fits only a unit whose
+  earlier picks leave 3 points, and `fsh` and `dap` refuse the heavy
+  `encode` members, so over 3,000 units of the default attacks each heavy
+  `encode` member is drawn 5 to 8 times against 30 to 32 for one of
+  complexity 2. That skew is intended. A direct `sample_combination` call without a dealer picks both
   uniformly, as the registry fixture's seeds pin. A fresh plan with the
   same seed draws differently from one made before member dealing; a kept
   plan replays unchanged.
@@ -321,8 +331,8 @@ order.
   fitting technique, is logged as a WARNING naming the coverage file.
 
 After each unit, `assign_combination` has `_observe` count the kept draw's
-families, techniques, layers, request obfuscation and complexity in the
-group's dealer. Each group has its own dealer; nothing is
+families (the request obfuscation's under `REQUEST_SCOPE`), techniques,
+layers, request obfuscation and complexity in the group's dealer. Each group has its own dealer; nothing is
 counted across groups.
 
 `tests/jailbreak/simulate.py` plans N synthetic inputs through `plan_run`
@@ -368,9 +378,10 @@ budget.
   without `"group"` or below `max_complexity` or any round's
   `max_complexity`, and a round naming either key.
 - Measured with `simulate.compare_budgets` over 3,000 units of the default
-  attacks, it keeps the mean at `max_complexity` (5.77 to 6.00), lets some units reach the ceiling (534 of
+  attacks, it keeps the mean at `max_complexity` (5.77 to 6.00), lets some units reach the ceiling (514 of
   3,000 above 6, none above 9) and evens out the cheap members of `encode`
-  and `sensitive_words`, but draws no more heavy encodings; the extra
+  and `sensitive_words`, and draws the heavy members a little more often
+  (each heavy `encode` member 7 to 9 times, against 5 to 8); the extra
   allowance goes to the obfuscations. The table is in
   [configuration.md](../configuration.md#the-group-budget).
 

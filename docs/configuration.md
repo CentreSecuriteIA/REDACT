@@ -533,7 +533,10 @@ explains the dealing.
 `hacking` and `manipulation` exclude each other, so their rates should sum to
 at most 1; beyond it, `manipulation` falls short of its rate and the plan
 logs a WARNING. With `allow_request_obfuscation`, `request_obfuscation` is
-dealt the same way, over the group's units.
+dealt the same way, over the group's units; its families (`encode` and
+`sensitive_words`, their light members only, and `translation`) are dealt
+among themselves at their `family_weights`, counted apart from the
+obfuscation layer's.
 
 ### The group budget
 
@@ -573,22 +576,27 @@ three groups (seed 42, `max_complexity` 6, ceiling 9;
 |---|---|---|
 | Mean complexity per unit | 5.77 | 6.00 |
 | Highest complexity of one unit | 6 | 9 |
-| Units above 6 | 0 | 534 |
-| Obfuscations per unit | 1.75 | 1.79 |
-| Draws of complexity 3 or more | 1,424 | 1,472 |
-| `encode`: the top member's share of the family's draws, as a multiple of an even share | 5.57 | 3.66 |
-| `sensitive_words`: the same | 2.52 | 1.94 |
-| Of complexity 3 or more, drawn: `encode` (of 9) | 1 (`to_base32`, once) | 1 (`to_base32`, once) |
-| Of complexity 3 or more, drawn: `sensitive_words` (of 4) | none | none |
+| Units above 6 | 0 | 514 |
+| Obfuscations per unit | 1.68 | 1.74 |
+| Draws of complexity 3 or more | 1,537 | 1,643 |
+| `encode`: the top member's share of the family's draws, as a multiple of an even share | 8.07 | 6.48 |
+| `sensitive_words`: the same | 3.57 | 2.61 |
+| Of complexity 3 or more, drawn: `encode` (of 9) | all 9, 5 to 8 times each | all 9, 7 to 9 times each |
+| Of complexity 3 or more, drawn: `sensitive_words` (of 4) | all 4, 20 to 23 times each | all 4, 35 or 36 times each |
 
 The group budget evens out the cheap members of `encode` and
 `sensitive_words`, which the unit budget favours because a cheap one fits
-more units, and spends the mean it is given. It brings in no heavy
-encoding: those stay as rare as under the unit budget. The extra allowance
-goes to the obfuscations, the request obfuscation's included (2.52
-complexity per unit against 2.76; the other layers spend the same). The
-draws of complexity 3 or more include 165 of the two `selected_many`
-variants, which score 4, under both budgets.
+more units (the top member of each is the complexity-1 leetspeak), and
+spends the mean it is given. The heavy members stay rarer than those of
+complexity 2 under both budgets (each heavy `encode` member 5 to 8 times
+under the unit budget, against 30 to 32 for one of complexity 2): one of
+complexity 3 fits only a unit whose earlier picks leave 3 points, and `fsh`
+and `dap` refuse the heavy `encode` members (not the `sensitive_words`
+ones, which are drawn more). That skew toward the cheaper members is
+intended. The extra allowance goes to the obfuscations, the request
+obfuscation's included (2.53 complexity per unit against 2.76; the other
+layers spend the same). The draws of complexity 3 or more include 165 of the
+two `selected_many` variants, which score 4, under both budgets.
 
 ### Examples
 
@@ -657,14 +665,18 @@ a run you already have, and what you will see; each point has its note below.
   draw the new natural families, and the run says so at INFO.
 - **Fresh plans draw differently.** The same seed gives other combinations
   than at spec 1.0: the new techniques are dealt, the seven retired ones are
-  not, a technique is drawn only for the inputs it applies to, and several
-  rules are new. The default attack pool is 178 techniques in 24 families
+  not, a technique is drawn only for the inputs it applies to, several
+  rules are new, and the request obfuscation's families are counted apart
+  from the obfuscation layer's, so the attacks draw every technique of
+  their pool. The default attack pool is 178 techniques in 24 families
   (142 in 22 before). The `eval` type's pool and draws are held, at 36
   techniques in 10 families, but for the ASCII-art cap, which changes the font
   `to_ascii_art` draws for texts of about 40 characters or more.
 - **More model calls, and new files.** A typo rewrite and a cognitive or
   persona scenario are now checked by a model, which costs calls (the typo
-  and scenario notes), for the pending units of a kept plan too. Each kind
+  and scenario notes), for the pending units of a kept plan too, and the
+  request obfuscation adds translations to a fresh attack plan (its notes).
+  Each kind
   writes a `<kind>.variants.csv` after a run, and its plan file records the
   `spec_version` its pool was drawn at.
 
@@ -675,21 +687,22 @@ applied after the request technique, to the finished request; it takes one
 of the unit's `max_obfuscations` slots and its complexity, so a unit holds
 no more obfuscations than before. Measured with
 `tests/jailbreak/simulate.py` over 3,000 units of the default kind in three
-groups (seed 42, spec 1.2): 50.0% of the units take one; of these, 48.2% a
-light `to_sensitive_words_encode_*`, 47.9% a light `encode` technique and
-3.9% a translation, which is 1.9% of the units (the dealer gives the step
-the family of the three dealt least so far in the group, and translation is
-already the obfuscation family dealt most: 0.23 picks per unit, against
-0.17 for each of the others). The obfuscations per unit stay at 1.75, the
-units holding a translation go from 22.6% to 26.4%, the light encodings per
-unit from 0.27 to 0.48, and the model-calling techniques per unit,
-translation aside, from 1.01 to 1.02 (the light encodings take slots from
-the other obfuscation families alike, each from 0.17 to 0.14 picks per
-unit). The extra model cost is the translations moved after the request:
-each runs on the translation model,
+groups (seed 42, spec 1.2): 50.0% of the units take one; of these, a third
+each (33.4% a light `to_sensitive_words_encode_*`, 33.3% a light `encode`
+technique, 33.3% a translation, which is 16.6% of the units), since the
+step's families are dealt among themselves, counted apart from the
+obfuscation layer's (the next note). The obfuscations per unit go from 1.75
+to 1.68 (the step holds a slot rather than adding one, and the complexity it
+spends or the rules it brings sometimes leave the unit's other slot empty),
+the units holding a
+translation from 22.6% to 34.2%, the light encodings per unit from 0.27 to
+0.48, and the model-calling techniques per unit, translation aside, from
+1.01 to 1.00 (the step takes slots from the other obfuscation families
+alike, each from 0.17 to 0.11 picks per unit). The extra model cost is
+mostly the translations the step adds: each runs on the translation model,
 a machine-translation pass per piece with its checks, back-translations and
 the generation model's judge, now over the request's wording as well as the
-prompt, for about 2% of the rows; each light sensitive-word encoding makes
+prompt, for about 17% of the rows; each light sensitive-word encoding makes
 its one marking call to the generation model, as it did as an obfuscation.
 The rate is a lever: `"layer_rates": {"request_obfuscation": 0.25}` in the
 adversarial kind halves it, and `"allow_request_obfuscation": false` turns it
@@ -698,6 +711,30 @@ before, whose section left the key out, raises on resume, naming `rounds`:
 run the adversarial kind once with `resume=False` (the natural kind's plan is
 not affected). The eval type sets it false and draws by count, which never
 reads it: its pool and its draws do not change.
+
+**Release note: the request obfuscation counted apart.** The planner now
+counts the request obfuscation's families apart from the obfuscation
+layer's. It counted them together before: the request obfuscation's picks
+made `encode` and `sensitive_words` the families dealt most, and since the
+dealer takes the family dealt least, the layer drew them only when no other
+family fitted, 3 times in 3,000 units of the default attacks (seed 42,
+three groups). 14 techniques were never drawn: `to_base64`, `to_base85`,
+`to_hex`, `to_binary`, `to_morse`, `to_braille`, `to_ascii_ordinal`, `to_unicode_escape`,
+`to_sensitive_words_split`, `to_synonym_substitution`,
+`to_sensitive_words_variables` and the base64, ascii and unicode
+`to_sensitive_words_encode_*`; `to_base32` was drawn once. Now every
+technique of the pool is drawn, and a test holds it over 2,000 and 3,000
+units under both budgets. Fresh default attack plans draw differently: the
+request obfuscation no longer starves the layer's `encode` and
+`sensitive_words`, so the layer deals them as often as its other families;
+the request obfuscation deals a translation a third of the time (it was
+4%), and `family_weights` apply to its families as to the layer's. The
+units holding a translation go from 26.4% to 34.2%, and the plan's
+translation calls, from the spec's, from 1,584–9,504 to 2,052–12,312 per
+3,000 units (all model calls from 7,086–21,858 to 7,385–24,799). This lands
+with the re-plan the request obfuscation already asks (the note above): a
+kept plan replays unchanged. A kind with `allow_request_obfuscation` false
+and the `eval` type, which draws by count, draw as before.
 
 **Release note: kept plans tolerate the library's growth.** A jailbreak
 plan file now records the spec version its pool was drawn at

@@ -228,7 +228,9 @@ def test_the_default_budget_deals_every_request_family(tmp_path):
 # Within the family the dealer picks, the unit takes the technique it may take
 # that the group has dealt least. The complexity budget still favours a
 # family's cheaper techniques where they cost differently (encode,
-# sensitive_words): a heavy one fits fewer units, which is wanted.
+# sensitive_words): one of complexity 3 fits only a unit whose earlier picks
+# leave 3 points, and fsh and dap refuse the heavy encodings, which is
+# wanted; each is still drawn.
 
 
 @pytest.fixture(scope="module")
