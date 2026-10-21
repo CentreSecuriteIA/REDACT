@@ -732,7 +732,8 @@ It translates paragraph by paragraph; each piece is checked, then translated
 back and judged by the generation model, up to 4 rounds
 ([stages/jailbreaks.md](stages/jailbreaks.md#models) gives the calls). The
 translation model is planned and loaded only when a kind's pool holds a
-translation technique. An allow list admits the whole family while the switch
+translation technique (a rewrite technique, once there is one, calls the
+generation model, as the other model-written techniques do). An allow list admits the whole family while the switch
 is on, unless `techniques.allow` names some languages: a kind meant to draw
 only the techniques it lists says `"translation": false`.
 

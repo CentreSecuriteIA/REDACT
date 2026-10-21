@@ -173,7 +173,9 @@ def registry(techniques: list[Callable]) -> dict[str, Callable]:
 
 
 def uses_translation(pool: list[Callable]) -> bool:
-    """Whether ``pool`` holds a translation technique."""
+    """Whether ``pool`` holds a translation technique, which the translation
+    model serves. Any other technique that calls a model, a rewrite among
+    them, calls the generation model."""
     return any(TRANSLATION in getattr(fn, "families", ()) for fn in pool)
 
 

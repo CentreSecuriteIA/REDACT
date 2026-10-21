@@ -20,12 +20,18 @@ from redact.dataset.planfile import read_plan
 from redact.jailbreak.augmentation import resolve, rounds_of
 from redact.jailbreak.chain import in_layer_order
 from redact.jailbreak.plan import plan_run
-from redact.jailbreak.pool import all_techniques, registry, technique_pool
+from redact.jailbreak.pool import (
+    all_techniques,
+    registry,
+    technique_pool,
+    uses_translation,
+)
 from redact.jailbreak.rewrite import get_all_rewrite_functions
 from redact.jailbreak.rules import compatible
 from redact.jailbreak.sampling import sample_combination, sample_exact_combination
 from redact.jailbreak.technique import KINDS, load_spec
-from redact.recipe import augmentations_of, load_dataset_type
+from redact.llms.model_config import default_model_for_role
+from redact.recipe import augmentations_of, load_dataset_type, load_recipe, resolve_role
 from redact.stages import generate_jailbreaks
 from tests.jailbreak.test_pipeline_jailbreaks import _inputs
 
@@ -310,3 +316,29 @@ def test_a_plan_kept_from_before_the_layer_resumes(tmp_path, monkeypatch):
     assert read_plan(manifest.path)["rounds"] == [_ROUND_BEFORE]
     rows = generate_jailbreaks(**keywords)
     assert manifest.load() == plan and len(rows) == len(plan)
+
+
+# --- the models a run plans -----------------------------------------------------
+
+def test_a_rewrite_technique_does_not_plan_the_translation_model(monkeypatch):
+    """A rewrite has the generation model write it, as any model-written
+    technique: only a translation technique plans the translation model."""
+    rewrite = _stand_in()
+    rewrite.requires_llm = True
+    monkeypatch.setattr(JPool, "all_techniques", lambda: [*POOL, rewrite])
+    section = {"adversarial": {"layers": {"deny": []}, "translation": False},
+               "natural": None}
+    pool = technique_pool(augmentations_of({"augmentations": section})["adversarial"])
+    assert rewrite in pool
+    assert not uses_translation(pool)
+    assert resolve_role({}, "translation", section) == []
+
+
+@pytest.mark.parametrize("dataset_type", ["eval", "training"])
+def test_the_dataset_types_plan_the_models_they_planned(dataset_type):
+    """Both types' attacks translate, so the translation model is planned; the
+    layer adds no role."""
+    section = load_recipe({"dataset_type": dataset_type})["augmentations"]
+    assert resolve_role({}, "translation", section) == [
+        default_model_for_role("translation")]
+    assert resolve_role({}, "check", section) == resolve_role({}, "gen", section)
