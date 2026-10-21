@@ -913,7 +913,8 @@ its pool and draws do not change.
 **Release note: the scenario check.** Each scenario of the `cognitive` and
 `persona` techniques (the adversarial kind only) is now read against its
 prompt by the stage's `check` model (`jailbreak/scenario_check`, at
-temperature 0.15), and a rejected scenario is made again once with the
+temperature 0.15, asking that it keep the request's intent, not a harmful
+one, since the attacks run on benign inputs too), and a rejected scenario is made again once with the
 check's reply as feedback: such a row costs one more call, and a
 regeneration and its check on a rejection (3 to 9 calls in all, against 2
 before). A scenario rejected twice discards its unit's chain (`reasoning`
