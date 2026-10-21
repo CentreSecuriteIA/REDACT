@@ -18,6 +18,7 @@ from .hacking import get_all_hacking_functions
 from .manipulation import get_all_manipulation_functions
 from .obfuscation import get_all_obfuscation_functions
 from .requests import get_all_request_functions
+from .rewrite import get_all_rewrite_functions
 from .technique import DEFAULT_KINDS, load_spec
 
 #: The family a kind's ``translation`` switch decides.
@@ -25,12 +26,14 @@ TRANSLATION = "translation"
 
 
 def all_techniques() -> list[Callable]:
-    """Every registered technique, one layer after another."""
+    """Every registered technique, one layer after another. The rewrite
+    layer, the newest, comes last, so the others keep their places."""
     return (
         get_all_obfuscation_functions()
         + get_all_hacking_functions()
         + get_all_manipulation_functions()
         + get_all_request_functions()
+        + get_all_rewrite_functions()
     )
 
 

@@ -10,6 +10,7 @@ from redact.jailbreak.hacking import get_all_hacking_functions
 from redact.jailbreak.manipulation import get_all_manipulation_functions
 from redact.jailbreak.obfuscation import get_all_obfuscation_functions
 from redact.jailbreak.requests import get_all_request_functions
+from redact.jailbreak.rewrite import get_all_rewrite_functions
 from redact.jailbreak.rules import compatible, request_obfuscation_candidates
 from redact.jailbreak.sampling import (
     sample_combination,
@@ -17,7 +18,8 @@ from redact.jailbreak.sampling import (
 )
 
 POOL = (get_all_obfuscation_functions() + get_all_hacking_functions()
-        + get_all_manipulation_functions() + get_all_request_functions())
+        + get_all_manipulation_functions() + get_all_request_functions()
+        + get_all_rewrite_functions())
 BY_NAME = {fn.__name__: fn for fn in POOL}
 
 

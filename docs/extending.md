@@ -168,7 +168,8 @@ Read [internals/jailbreak.md](internals/jailbreak.md#techniques) for the
 contract.
 
 1. **Write the function** in the module of its family, under
-   `jailbreak/hacking/`, `manipulation/`, `obfuscation/` or `requests/`.
+   `jailbreak/rewrite/`, `hacking/`, `manipulation/`, `obfuscation/` or
+   `requests/`.
    - A transform: `def to_name(prompt: str, *, rng=None) -> tuple[str, str]`.
      Draw every random choice from `rng`.
    - A technique that calls a model: a generator with the signature
@@ -206,8 +207,9 @@ contract.
      one changes what a fresh plan draws: say so in a release note.
 2. **Register it**: return it from its module's getter
    (`get_encoding_functions`, `get_framing_functions`, ...), which its
-   subpackage's `get_all_hacking_functions`, `get_all_manipulation_functions`,
-   `get_all_obfuscation_functions` or `get_all_request_functions` collects. A
+   subpackage's `get_all_rewrite_functions`, `get_all_hacking_functions`,
+   `get_all_manipulation_functions`, `get_all_obfuscation_functions` or
+   `get_all_request_functions` collects. A
    new module's getter is added to that collector in the subpackage's
    `__init__.py`.
 3. **Add its spec entry** under `techniques` in

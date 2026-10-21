@@ -217,8 +217,8 @@ def sample_exact_combination(
     Unlike :func:`sample_combination`, the **count is the only knob** — there is no
     complexity or obfuscation budget. Each pick is still validated through
     :func:`redact.jailbreak.rules.compatible` (with ``remaining_complexity=None``, so complexity
-    never filters anything) to enforce layer caps (1 hacking / 1 manipulation /
-    1 request) and cross-incompatibilities. The obfuscation layer has no per-layer
+    never filters anything) to enforce layer caps (1 rewrite / 1 hacking /
+    1 manipulation / 1 request) and cross-incompatibilities. The obfuscation layer has no per-layer
     pick cap, so e.g. ``n=2`` may yield two obfuscation-family techniques — intended
     diversity.
 

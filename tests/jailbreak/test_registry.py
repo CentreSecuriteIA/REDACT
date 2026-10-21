@@ -21,6 +21,7 @@ from redact.jailbreak.hacking import get_all_hacking_functions
 from redact.jailbreak.manipulation import get_all_manipulation_functions
 from redact.jailbreak.obfuscation import get_all_obfuscation_functions
 from redact.jailbreak.requests import get_all_request_functions
+from redact.jailbreak.rewrite import get_all_rewrite_functions
 from redact.jailbreak.sampling import sample_combination
 from redact.jailbreak.technique import load_spec
 
@@ -41,6 +42,7 @@ def _layers() -> dict[str, list]:
         "hacking": get_all_hacking_functions(),
         "manipulation": get_all_manipulation_functions(),
         "requests": get_all_request_functions(),
+        "rewrite": get_all_rewrite_functions(),
     }
 
 
@@ -101,7 +103,7 @@ def actual() -> dict:
 
 
 @pytest.mark.parametrize(
-    "layer", ["obfuscation", "hacking", "manipulation", "requests"])
+    "layer", ["obfuscation", "hacking", "manipulation", "requests", "rewrite"])
 def test_a_layer_registers_the_same_techniques_in_order(layer, expected, actual):
     assert actual["layers"][layer] == expected["layers"][layer]
 

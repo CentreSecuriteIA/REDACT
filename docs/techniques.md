@@ -1,7 +1,8 @@
 # Jailbreak techniques
 
-The jailbreak stage draws from 192 active techniques in 4 layers and 28
-families.
+The jailbreak stage draws from 192 active techniques in 5 layers and 28
+families; the first layer, `rewrite`, holds none yet
+([below](#layers)).
 `configs/jailbreak/combination_spec.json` gives each technique (the
 language ones through its `generators`, from
 [the language table](#the-language-table)) its families, a complexity from
@@ -24,9 +25,9 @@ are listed [below](#retired-techniques).
 
 ## Layers
 
-A combination applies its techniques in layer order: `hacking`, then
-`manipulation`, then `obfuscation`, then `requests`; the request obfuscation,
-when allowed (the packaged attacks allow it, for half their units; the eval
+A combination applies its techniques in layer order: `rewrite`, then
+`hacking`, then `manipulation`, then `obfuscation`, then `requests`; the
+request obfuscation, when allowed (the packaged attacks allow it, for half their units; the eval
 type does not), comes last, after the request. Within the obfuscation layer,
 families apply in the order of their `within_layer_order`, numbered in tens
 so a family added later slots in between: the whole-text rewrites first
@@ -43,9 +44,15 @@ obfuscation layer has no cap: a combination takes up to `max_obfuscations`
 of its families in budget mode, the request obfuscation, when allowed,
 among them.
 
+The `rewrite` layer rewrites the whole prompt before every other layer, at
+most one technique a combination. It is empty until the owner's prompts for
+its techniques land, and its spec rate is 0. (`to_rewrite`, despite its
+name, is an `indirect` request technique.)
+
 <!-- BEGIN layers: made from the spec by tests/jailbreak/test_docs_counts.py -->
 | Layer | Families | Techniques | Picks per combination |
 |---|---|---|---|
+| `rewrite` | 0 | 0 | at most 1 |
 | `hacking` | 3 | 21 | at most 1 |
 | `manipulation` | 2 | 12 | at most 1 |
 | `obfuscation` | 11 | 101 | no cap |
@@ -182,8 +189,8 @@ that names them replays them, and a kind draws one only when its
 technique is picked first. A technique may not join a combination when:
 
 - its family is taken already;
-- its layer is at its cap (`layer_max_picks`: one `hacking`, one
-  `manipulation`, one `requests`);
+- its layer is at its cap (`layer_max_picks`: one `rewrite`, one
+  `hacking`, one `manipulation`, one `requests`);
 - one of its families is in a taken family's `cross_incompatible_with`, or
   the reverse. The spec pairs `structural` and `translation` with
   `ascii_art`; `ascii_art` with `framing`, `persona`, `cognitive`, `fsh`,

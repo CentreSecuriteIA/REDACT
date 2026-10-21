@@ -17,6 +17,7 @@ from redact.jailbreak.pool import (
     uses_translation,
 )
 from redact.jailbreak.requests import get_all_request_functions
+from redact.jailbreak.rewrite import get_all_rewrite_functions
 from redact.jailbreak.technique import load_spec
 
 #: The eval type's attack pool, sorted: ``fixtures/eval_pool.json``.
@@ -33,10 +34,11 @@ def _in(family: str, pool: list) -> list:
     return [fn for fn in pool if family in fn.families]
 
 
-def test_all_techniques_are_the_four_layers_in_registry_order():
+def test_all_techniques_are_the_five_layers_in_registry_order():
     assert all_techniques() == (
         get_all_obfuscation_functions() + get_all_hacking_functions()
-        + get_all_manipulation_functions() + get_all_request_functions())
+        + get_all_manipulation_functions() + get_all_request_functions()
+        + get_all_rewrite_functions())
 
 
 def _kind(**given) -> dict:
