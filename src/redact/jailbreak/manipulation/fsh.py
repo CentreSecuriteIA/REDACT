@@ -80,4 +80,5 @@ def to_fsh_selected_many(prompt: str, **kwargs) -> TechniqueGen:
 def get_fsh_functions() -> list[Callable]:
     """Return all FSH technique functions."""
     return [to_fsh_random_short, to_fsh_random_long,
-            to_fsh_selected_short, to_fsh_selected_long]
+            to_fsh_selected_short, to_fsh_selected_long,
+            to_fsh_random_many, to_fsh_selected_many]

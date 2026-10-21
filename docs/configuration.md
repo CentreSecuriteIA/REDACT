@@ -60,8 +60,9 @@ types: a recipe naming one stops when it loads, before any stage runs.
 
 The eval adversarial kind attacks the harmful inputs only, with a pool of
 hard techniques whose label stays certain: the families `encode` (less the
-seven light encodings, and less `sensitive_words`), `fsh`, `dap`, `framing`,
-`structural`, `ascii_art`, `continuation`, `temporal`; the eight low-resource
+seven light encodings, and less `sensitive_words`), `fsh` and `dap` (less
+their four many-shot variants), `framing`, `structural`, `ascii_art`,
+`continuation`, `temporal`; the eight low-resource
 translations (`to_swahili`, `to_thai`, `to_khmer`, `to_nepali`,
 `to_zulu`, `to_scots_gaelic`, `to_bengali`, `to_javanese`), with
 `"translation": true` and `family_weights` `{"translation": 3}`; and
@@ -469,6 +470,21 @@ undecided against, so a run that deals `focus.mixed` denies the two
 small-talk families in the natural kind, beside `asking` and `indirect`
 ([techniques.md](techniques.md#what-the-families-do)).
 
+**Release note: many-shot fsh and dap (spec 1.2).** `fsh` and `dap` each
+gain two many-shot variants, `to_fsh_random_many`, `to_fsh_selected_many`,
+`to_dap_random_many` and `to_dap_selected_many`: their siblings' prompt with
+32 short benign pairs drawn across the benign cache, where the siblings show
+three to seven of one subcategory. Four more in the default attack pool (178
+techniques in 24 families). A fresh adversarial plan draws them, and since
+`fsh` and `dap` have more members, some units of a fresh plan draw other
+techniques than they did with the same seed; a kept plan resumes with the
+growth WARNING above and does not draw them until it is planned again with
+`resume=False`. They refuse `typos`, since a model rewriting so long a
+prompt would not return it whole. The natural kind does not draw them. The
+`eval` type denies all four in `techniques.deny`, so its pool stays at 36
+and its draws do not change
+([techniques.md](techniques.md#what-the-families-do)).
+
 **Release note: the obfuscation order.** A fresh plan applies translation,
 typos and casual writing before the word-level steps, sensitive words and
 tokenbreak, which used to come first, so a combination holding both gives
@@ -570,7 +586,7 @@ Adversarial only:
 | Key | Type | Default | Meaning |
 |---|---|---|---|
 | `rounds` | `null`, `"escalation"` or a list | `null` | The sampler settings per round; see [rounds](#rounds) |
-| `max_complexity` | int >= 0 | `6` | Budget mode: the most total complexity (each technique scores 0 to 3) |
+| `max_complexity` | int >= 0 | `6` | Budget mode: the most total complexity (each technique scores 0 to 4) |
 | `max_obfuscations` | int >= 0 | `2` | Budget mode: the most obfuscation families, the request obfuscation included |
 | `layer_rates` | `{layer: 0..1}` | `{}`, the spec's rates | Target share of units that take a `hacking`, `manipulation` or `requests` technique, or, with `allow_request_obfuscation`, a `request_obfuscation` |
 | `allow_request_obfuscation` | bool | `true` (`false` in the eval type) | Allow one more technique after the request technique, at the `request_obfuscation` rate: a light `encode` technique (the light `to_sensitive_words_encode_*` among them), or a translation when the pool has one. It is drawn before the other obfuscations, from what the earlier picks leave, and takes one of the `max_obfuscations` slots and its complexity from them; with `max_obfuscations` 0 there is none |

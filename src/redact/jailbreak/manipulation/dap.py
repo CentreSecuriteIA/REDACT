@@ -97,4 +97,5 @@ def to_dap_selected_many(prompt: str, **kwargs) -> TechniqueGen:
 def get_dap_functions() -> list[Callable]:
     """Return all DAP technique functions."""
     return [to_dap_random_short, to_dap_random_long,
-            to_dap_selected_short, to_dap_selected_long]
+            to_dap_selected_short, to_dap_selected_long,
+            to_dap_random_many, to_dap_selected_many]

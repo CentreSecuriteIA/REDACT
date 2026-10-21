@@ -212,7 +212,7 @@ contract.
    `__init__.py`.
 3. **Add its spec entry** under `techniques` in
    `configs/jailbreak/combination_spec.json`: `families` (the first sets the
-   layer and the order), `complexity` (0 to 3), `requires_llm`,
+   layer and the order), `complexity` (0 to 4), `requires_llm`,
    `requires_benign`, `encode_weight` for an `encode` technique,
    `needs_latin: true` for one that changes only Latin text (it is then
    kept from a translation into another script; `TestLatinOnly` in
@@ -272,7 +272,7 @@ contract.
      names the natural kind draws by default, and
      `tests/jailbreak/test_pool.py` fails until the owner decides: give the
      technique `"kinds": ["adversarial"]`, or add its name to the fixture.
-     The same file checks the attack pool's 174 techniques in 24 families.
+     The same file checks the attack pool's 178 techniques in 24 families.
    - **The eval pool.** `configs/dataset_types/eval.json` allows whole
      families (`encode`, `fsh`, `dap`, `framing`, `structural`, `ascii_art`,
      `continuation`, `temporal`), so a technique added to one of them joins

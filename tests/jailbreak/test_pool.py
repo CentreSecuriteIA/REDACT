@@ -153,15 +153,16 @@ def test_the_default_variation_pool_is_the_71_pinned_natural_techniques():
         "suffixes"}
 
 
-def test_the_default_attack_pool_is_174_techniques_in_24_families():
+def test_the_default_attack_pool_is_178_techniques_in_24_families():
     """Every active technique but casual writing and the natural-only
     families: the 19 translations included, now the packaged adversarial
     kind has its translation switch on; the seven spec 1.1 retired left out,
     the fifteen spec 1.2 encodings, the twelve spec 1.2 noise techniques, the
-    six spec 1.2 neutral containers and the six spec 1.2 answer languages in.
-    Small talk and the benign roles leave it as it was."""
+    six spec 1.2 neutral containers, the six spec 1.2 answer languages and
+    the four spec 1.2 many-shot fsh and dap variants in. Small talk and the
+    benign roles leave it as it was."""
     pool = technique_pool(resolve(None, "adversarial"))
-    assert len(pool) == 174     # noqa: PLR2004
+    assert len(pool) == 178     # noqa: PLR2004
     assert len({fn.families[0] for fn in pool}) == 24     # noqa: PLR2004
 
 
@@ -332,6 +333,20 @@ def test_the_eval_pool_is_the_36_pinned_techniques_in_10_families():
     assert sorted(fn.__name__ for fn in _in("encode", pool)) == sorted([
         "to_base64", "to_unicode_escape", "to_ascii_ordinal", "to_morse",
         "to_braille"])
+
+
+def test_the_eval_pool_holds_no_many_shot_variant():
+    """``eval.json`` denies the four, so fsh and dap keep their eight short
+    and long variants there."""
+    from redact.recipe import load_dataset_type
+
+    section = load_dataset_type("eval")["augmentations"]
+    pool = technique_pool(resolve(section, "adversarial"))
+    assert sorted(fn.__name__ for fn in _in("fsh", pool) + _in("dap", pool)) == sorted(
+        f"to_{family}_{form}_{size}" for family in ("fsh", "dap")
+        for form in ("random", "selected") for size in ("short", "long"))
+    assert {"to_fsh_random_many", "to_fsh_selected_many", "to_dap_random_many",
+            "to_dap_selected_many"} <= set(section["adversarial"]["techniques"]["deny"])
 
 
 def test_uses_translation():

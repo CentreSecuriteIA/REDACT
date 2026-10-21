@@ -181,7 +181,7 @@ def _checked_version(whose: str, key: str, version) -> str:
 def tag(funcs: list[Callable]) -> None:
     """Set each function's spec tags as attributes of the function.
 
-    ``families``, ``complexity`` (0-3), ``requires_llm``, ``requires_benign``,
+    ``families``, ``complexity`` (0-4), ``requires_llm``, ``requires_benign``,
     ``encode_weight`` (``"light"``, ``"heavy"`` or None), ``needs_latin``
     (whether it changes only Latin text, so a translation into another
     script would leave it nothing to do; False when absent), ``max_tokens``

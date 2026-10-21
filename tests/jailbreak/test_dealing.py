@@ -273,8 +273,12 @@ _BUDGETS = [
 # holds them, whatever their kinds, and three more request families to deal
 # change most draws (224 of the 240 dealt units, 49 of the 200 undealt ones).
 # The simulated inputs are harmful, so no dealt unit draws a benign role; the
-# undealt draws, which read no applicability, do.
-_PINNED_DRAWS = "1c260b392b6750c6b5417cc5cc86e7ddb4912be0713dd320f261c7954ed06c7e"
+# undealt draws, which read no applicability, do. The four spec 1.2 many-shot
+# fsh and dap variants moved it once more: a wider fsh and dap change the
+# member a manipulation draw lands on, and through the unit's rng and its
+# group's counts the rest of its draw (128 of the 240 dealt units; 6 of the
+# 200 undealt draws, each now drawing a many-shot variant).
+_PINNED_DRAWS = "cb94f4c348ac5bb7bdada55052aba1ec5d32d228d3c50752d399a028462622ab"
 
 
 def test_draws_without_the_request_obfuscation_are_those_made_before_it_was_counted():

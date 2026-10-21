@@ -166,6 +166,12 @@ every time is acked
 stage stops with `No benign pairs at ...`. The prompt
 `prompts/jailbreak/benign_generation/` is read through the overlay.
 
+The `short` and `long` variants show three to seven pairs of one
+subcategory. The many-shot variants (`*_many`) show 32 short pairs, more
+than a subcategory holds, drawn across the cache: the chosen subcategory's
+first, then its main category's, then the rest
+([techniques.md](../techniques.md#what-the-families-do)).
+
 The benign data always resumes: its ledger `benign_samples.state.jsonl`,
 keyed `(main_category, sub_category, answer_type)`, records the finished
 units, so a stopped run, or a larger taxonomy, generates only the units

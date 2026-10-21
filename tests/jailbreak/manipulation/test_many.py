@@ -127,7 +127,7 @@ def test_fsh_many_asks_the_request_after_every_pair(fn, data):
 def test_dap_many_asks_the_request_among_the_pairs(fn, seed, data):
     text, info = _call(fn, data, random.Random(seed))
     position = _questions(text).index("the request") + 1
-    assert 2 <= position <= MANY_PAIRS
+    assert 1 < position <= MANY_PAIRS  # never first, never last
     assert f"harmful_idx={position};" in info
 
 
@@ -151,9 +151,11 @@ def test_selected_many_falls_back_to_a_random_subcategory(data):
 
 @pytest.mark.parametrize("fn", _MANY, ids=lambda fn: fn.__name__)
 def test_the_info_says_when_the_cache_held_fewer_pairs(fn, tmp_path):
-    text, info = _call(fn, _cache(tmp_path, _SMALL), random.Random(0))
-    assert len(_questions(text)) == 17
-    assert info.startswith(f"num_shots=16;wanted={MANY_PAIRS};")
+    data = _cache(tmp_path, _SMALL)
+    cached = len(data["short"])     # 16, fewer than MANY_PAIRS
+    text, info = _call(fn, data, random.Random(0))
+    assert len(_questions(text)) == cached + 1
+    assert info.startswith(f"num_shots={cached};wanted={MANY_PAIRS};")
 
 
 # What the eight short and long variants write on the placeholder cache, for

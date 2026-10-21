@@ -1,11 +1,11 @@
 # Jailbreak techniques
 
-The jailbreak stage draws from 188 active techniques in 4 layers and 28
+The jailbreak stage draws from 192 active techniques in 4 layers and 28
 families.
 `configs/jailbreak/combination_spec.json` gives each technique (the
 language ones through its `generators`, from
 [the language table](#the-language-table)) its families, a complexity from
-0 to 3, whether it calls a model (`requires_llm`) or
+0 to 4 (4 only for the two `selected_many` variants), whether it calls a model (`requires_llm`) or
 needs the benign data (`requires_benign`), and the kinds that may draw it
 (`kinds`, [below](#the-natural-pool)). This page lists them by name, for
 the `allow` and `deny` lists of the
@@ -47,10 +47,10 @@ among them.
 | Layer | Families | Techniques | Picks per combination |
 |---|---|---|---|
 | `hacking` | 3 | 21 | at most 1 |
-| `manipulation` | 2 | 8 | at most 1 |
+| `manipulation` | 2 | 12 | at most 1 |
 | `obfuscation` | 11 | 101 | no cap |
 | `requests` | 12 | 58 | at most 1 |
-| all | 28 | 188 | |
+| all | 28 | 192 | |
 <!-- END layers -->
 
 ## Families and techniques
@@ -69,8 +69,8 @@ that call a model call the generation model.
 | hacking | `cognitive` | `role_framing` |  | 5 | yes | no | `to_persona_roleplay`, `to_hypothetical_framing`, `to_authority_obedience`, `to_avi`, `to_deep_inception` |
 | hacking | `framing` | `role_framing` |  | 5 | no | no | `to_fictional_world`, `to_noble_goal`, `to_nefarious_goal`, `to_high_stake`, `to_no_moral_constraints` |
 | hacking | `persona` | `role_framing` |  | 11 | yes | no | `to_invented_persona`, `to_psychopath_persona`, `to_alien_persona`, `to_radical_politician_persona`, `to_cult_leader_persona`, `to_very_advanced_ai_persona`, `to_cartel_leader_persona`, `to_artist_persona`, `to_deformed_scientist_persona`, `to_actor_persona`, `to_someone_from_the_future_persona` |
-| manipulation | `dap` | `example_priming` |  | 4 | `to_dap_selected_short`, `to_dap_selected_long` | yes | `to_dap_random_short`, `to_dap_random_long`, `to_dap_selected_short`, `to_dap_selected_long` |
-| manipulation | `fsh` | `example_priming` |  | 4 | `to_fsh_selected_short`, `to_fsh_selected_long` | yes | `to_fsh_random_short`, `to_fsh_random_long`, `to_fsh_selected_short`, `to_fsh_selected_long` |
+| manipulation | `dap` | `example_priming` |  | 6 | `to_dap_selected_short`, `to_dap_selected_long`, `to_dap_selected_many` | yes | `to_dap_random_short`, `to_dap_random_long`, `to_dap_selected_short`, `to_dap_selected_long`, `to_dap_random_many`, `to_dap_selected_many` |
+| manipulation | `fsh` | `example_priming` |  | 6 | `to_fsh_selected_short`, `to_fsh_selected_long`, `to_fsh_selected_many` | yes | `to_fsh_random_short`, `to_fsh_random_long`, `to_fsh_selected_short`, `to_fsh_selected_long`, `to_fsh_random_many`, `to_fsh_selected_many` |
 | obfuscation | `translation` | `language` | 10 | 19 | yes | no | `to_french`, `to_japanese`, `to_russian`, `to_spanish`, `to_german`, `to_arabic`, `to_turkish`, `to_czech`, `to_vietnamese`, `to_greek`, `to_croatian`, `to_swahili`, `to_thai`, `to_khmer`, `to_nepali`, `to_zulu`, `to_scots_gaelic`, `to_bengali`, `to_javanese` |
 | obfuscation | `typos` | `surface_noise` | 20 | 4 | yes | no | `to_rewrite_with_typos_low`, `to_rewrite_with_typos_medium`, `to_rewrite_with_typos_high`, `to_rewrite_with_typos_insane` |
 | obfuscation | `casual_writing` | `surface_noise` | 30 | 9 | no | no | `to_lowercase`, `to_uppercase`, `to_no_sentence_capitals`, `to_dropped_spaces`, `to_doubled_spaces`, `to_dropped_punctuation`, `to_doubled_punctuation`, `to_abbreviations`, `to_stripped_accents` |
@@ -202,7 +202,9 @@ technique is picked first. A technique may not join a combination when:
   `to_braille`, `to_tokenbreak_split`, `to_lookalike_letters`,
   `to_zero_width_noise`, `to_fullwidth`, `to_math_styled` and the three
   `to_emoji_sprinkle_*` from `ascii_art`, since no font draws the characters
-  they may leave; the other suffixes, encodings and noise may still join it. `to_ascii_art` itself rejects a text with a character no
+  they may leave; the other suffixes, encodings and noise may still join it.
+  It keeps the four many-shot variants of `fsh` and `dap` from `typos`: a
+  model rewriting so long a prompt would not return it whole. `to_ascii_art` itself rejects a text with a character no
   single font draws (most non-ASCII characters: accented letters such as `é`
   or `ñ`, dashes, curly quotes, kana; German umlauts and `ß` and some Greek
   or Cyrillic text have fonts), or one every font draws longer than its cap;
@@ -236,7 +238,7 @@ the text unchanged or reversibly, or a check accepts the result:
 |---|---|
 | `translation` | the eight low-resource languages, weighted 3 |
 | `encode` | the five `heavy` ones: `to_base64`, `to_unicode_escape`, `to_ascii_ordinal`, `to_morse`, `to_braille` |
-| `fsh`, `dap` | all eight |
+| `fsh`, `dap` | the eight `short` and `long` ones |
 | `framing` | all five |
 | `structural` | `to_json`, `to_xml`, `to_markdown` |
 | `ascii_art` | `to_ascii_art` |
@@ -247,7 +249,8 @@ the text unchanged or reversibly, or a check accepts the result:
 Model rewrites no check verifies (`cognitive`, `persona`, `typos`,
 `sensitive_words`, `tokenbreak`) are left out. The fifteen spec 1.2 encodings
 are not drawn here either: `eval.json` denies each in `techniques.deny`, so the
-`encode` row keeps its five `heavy` members while the eval pool is held. With
+`encode` row keeps its five `heavy` members while the eval pool is held. The
+four spec 1.2 many-shot variants of `fsh` and `dap` are denied the same way. With
 `"adversarial": {"translation": false}` the pool keeps the other 28.
 [configuration.md](configuration.md#dataset-types) gives the type file.
 
@@ -332,16 +335,36 @@ template variant or a font, for traceability.
   `configs/jailbreak/hacking/framing_templates.json`; one is drawn per call.
 
 **Manipulation.** Both families build on benign question-and-answer pairs
-of one subcategory of the benign taxonomy. The `random` variants pick the
+of the subcategories of the benign taxonomy. The `random` variants pick a
 subcategory at random, the `selected` ones ask the model to choose one
 (prompt `jailbreak/category_selection`); `short` and `long` are the length of
-the answers.
+the answers, three to seven pairs of that subcategory.
 
 - `fsh` (few-shot hacking): the benign pairs prime a helpful pattern, and the
   prompt comes last, as one more question.
 - `dap` (distract and persuade): the prompt is hidden among the benign pairs,
   at a random position. With no pair at all, the prompt is the only
   question.
+
+The `many` variants (spec 1.2: `to_fsh_random_many`,
+`to_fsh_selected_many`, `to_dap_random_many`, `to_dap_selected_many`) show
+`MANY_PAIRS`, 32, pairs with short answers. The cache holds eight of a kind
+per subcategory, so they draw from a pool across it
+(`manipulation/pairs.py: _many_pairs`): `random_many` from every short pair
+(its info says `sub_category=all`), `selected_many` the chosen
+subcategory's pairs first, then those of the other subcategories of its
+main category, then the rest, each group in an order drawn from the unit's
+rng, each question once. The prompt then shows them in a drawn order, as the
+siblings do. A cache of fewer than 32 short pairs gives them all, and the
+info says so (`num_shots=<n>;wanted=32`). Why 32: a short pair of the cache
+is about 150 characters as the prompt writes it, about 40 tokens at four
+characters a token, so 32 are about 1,200 tokens (1,450 at the cache's 90th
+percentile, 2,800 were every pair as long as the longest), well inside the
+generation model's 10,000-token context with the request and the prompt of
+a later model step that reads the text. They refuse `typos` (a model
+rewriting so long a prompt would not return it whole) and otherwise share
+the rules of `fsh` and `dap`; their complexity is their siblings' plus one,
+3 for `random_many` and 4 for `selected_many`.
 
 **Obfuscation.**
 
@@ -607,6 +630,7 @@ Also beyond the reference list:
   document, a CSV row, an email, a transcript line, a log entry);
 - small talk before and after the text, and benign roles (5 techniques,
   natural variations only);
+- many-shot variants of FSH and DAP (4 techniques, 32 pairs each);
 - the answer formats code, dialogue, story and structured data;
 - continuation attacks (4) and indirect task embedding (6);
 - the answer languages Zulu, Scots Gaelic, Bengali and Javanese, and (spec

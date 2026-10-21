@@ -375,11 +375,15 @@
     "to_fsh_random_long":    { "families": ["fsh"], "complexity": 2, "requires_llm": false, "requires_benign": true },
     "to_fsh_selected_short": { "families": ["fsh"], "complexity": 3, "requires_llm": true, "requires_benign": true },
     "to_fsh_selected_long":  { "families": ["fsh"], "complexity": 3, "requires_llm": true, "requires_benign": true },
+    "to_fsh_random_many":    { "families": ["fsh"], "complexity": 3, "requires_llm": false, "requires_benign": true, "cross_incompatible_with": ["typos"], "since": "1.2" },
+    "to_fsh_selected_many":  { "families": ["fsh"], "complexity": 4, "requires_llm": true, "requires_benign": true, "cross_incompatible_with": ["typos"], "since": "1.2" },
 
     "to_dap_random_short":   { "families": ["dap"], "complexity": 2, "requires_llm": false, "requires_benign": true },
     "to_dap_random_long":    { "families": ["dap"], "complexity": 2, "requires_llm": false, "requires_benign": true },
     "to_dap_selected_short": { "families": ["dap"], "complexity": 3, "requires_llm": true, "requires_benign": true },
     "to_dap_selected_long":  { "families": ["dap"], "complexity": 3, "requires_llm": true, "requires_benign": true },
+    "to_dap_random_many":    { "families": ["dap"], "complexity": 3, "requires_llm": false, "requires_benign": true, "cross_incompatible_with": ["typos"], "since": "1.2" },
+    "to_dap_selected_many":  { "families": ["dap"], "complexity": 4, "requires_llm": true, "requires_benign": true, "cross_incompatible_with": ["typos"], "since": "1.2" },
 
     "to_refusal_then_comply":     { "families": ["answer_format"], "complexity": 3, "requires_llm": false, "kinds": ["adversarial"] },
     "to_apology_prevention":      { "families": ["answer_format"], "complexity": 2, "requires_llm": false, "kinds": ["adversarial"] },

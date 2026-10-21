@@ -246,6 +246,38 @@ def test_ascii_art_draws_a_font_for_the_rest_of_their_families(technique):
         assert info.startswith("font="), (technique, seed, info)
 
 
+_MANY_SHOT = ["to_fsh_random_many", "to_fsh_selected_many",
+              "to_dap_random_many", "to_dap_selected_many"]
+
+
+@pytest.mark.parametrize("many", _MANY_SHOT)
+@pytest.mark.parametrize(
+    "typos", ["to_rewrite_with_typos_low", "to_rewrite_with_typos_insane"])
+def test_a_many_shot_variant_refuses_the_typos_either_way(many, typos):
+    """A model rewriting so long a prompt would not return it whole."""
+    assert not _joins(many, typos)
+    assert not _joins(typos, many)
+
+
+@pytest.mark.parametrize("many", _MANY_SHOT)
+@pytest.mark.parametrize("other", [
+    "to_ascii_art", "to_french", "to_base64", "to_hex",
+    "to_fictional_world", "to_psychopath_persona", "to_persona_roleplay",
+    "to_continue_passage", "to_summarize", "to_fsh_random_short"])
+def test_a_many_shot_variant_keeps_the_manipulation_layers_rules(many, other):
+    """The blocked obfuscations, the hacking and request families fsh and dap
+    refuse, and a second manipulation technique."""
+    assert not _joins(many, other)
+    assert not _joins(other, many)
+
+
+@pytest.mark.parametrize("many", _MANY_SHOT)
+@pytest.mark.parametrize("other", ["to_rot13", "to_sensitive_words_encode_base64",
+                                   "to_refusal_then_comply"])
+def test_a_many_shot_variant_joins_what_fsh_and_dap_join(many, other):
+    assert _joins(many, other) and _joins(other, many)
+
+
 def test_a_technique_names_only_families_it_is_incompatible_with():
     from redact.jailbreak.technique import load_spec
 
