@@ -404,10 +404,10 @@ before every other layer applies, one at most a combination
    first two rounds) may draw it from there. A budget round draws it only
    at a rate above 0, `"layer_rates": {"rewrite": 0.2}`; the escalation's
    last two rounds give rates of their own, which leave `rewrite` at the
-   spec's 0. With the layer allowed, `rounds_of` writes
-   `include_rewrite: true` in each of an adversarial kind's rounds, so a
-   plan kept from before raises on resume naming `rounds`: plan again with
-   `resume=False`. To draw it in every run, take `rewrite` out of the
+   spec's 0. With the layer allowed and a rewrite technique registered,
+   `rounds_of` writes `include_rewrite: true` in each of an adversarial
+   kind's rounds, so a plan kept from before raises on resume naming
+   `rounds`: plan again with `resume=False`. To draw it in every run, take `rewrite` out of the
    packaged kinds' `layers.deny` and give the spec's `layer_rates.rewrite`
    a rate.
 4. **Then as for any technique**: the registry fixture, the docs counts and

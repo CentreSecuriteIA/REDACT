@@ -47,8 +47,9 @@ _ROUND_KEYS = ("exact_techniques", "max_complexity", "max_obfuscations",
 _RATE_KEYS = ("rewrite", "hacking", "manipulation", "requests", "request_obfuscation")
 _LAYERS = ("rewrite", "hacking", "manipulation", "obfuscation", "requests")
 #: The layer off by default: the packaged kinds deny it, and a round says
-#: ``include_rewrite`` only for a kind that allows it, so the rounds of a
-#: kind that denies it are those written before the layer existed.
+#: ``include_rewrite`` only for a kind that allows it while the registry holds
+#: a technique of the layer, so the rounds of every other kind are those
+#: written before the layer existed.
 _REWRITE = "rewrite"
 _SPEC = "combination_spec.json"
 
@@ -209,10 +210,12 @@ def rounds_of(resolved: dict) -> list[dict]:
     ``rounds`` merged over them (``"escalation"`` is
     :func:`default_escalation_schedule`), a round's ``layer_rates`` passed on
     as the sampler's ``sampling_probs``. ``include_rewrite`` is written only
-    when the kind allows the rewrite layer, where the others are always
-    written: a round of a kind that denies it is as it was before the layer
-    existed. A count round does not read ``include_rewrite``; its pool
-    decides. ``budget`` is written only when ``"group"`` and
+    when the kind allows the rewrite layer and a rewrite technique is
+    registered, where the others are always written: a round of any other
+    kind is as it was before the layer existed (a kind that gives its own
+    ``layers.deny`` allows the layer, but while the layer is empty nothing
+    changes, so its kept plan resumes). A count round does not read
+    ``include_rewrite``; its pool decides. ``budget`` is written only when ``"group"`` and
     ``max_unit_complexity`` only when given, so a kind that leaves them out
     or says ``"unit"`` has the rounds, and the plan file, it had before
     they existed; a count round carries them and ignores them.
@@ -227,7 +230,8 @@ def rounds_of(resolved: dict) -> list[dict]:
         **{f"include_{layer}": layer not in denied
            for layer in _LAYERS if layer != _REWRITE},
     }
-    if _REWRITE not in denied:
+    if _REWRITE not in denied and any(
+            getattr(fn, "layer", None) == _REWRITE for fn in all_techniques()):
         base["include_rewrite"] = True
     if resolved["allow_request_obfuscation"]:
         base["allow_request_obfuscation"] = True

@@ -471,10 +471,11 @@ round: a natural round is `{"exact_techniques": n}`; an adversarial round is
 the budget keys, an `include_<layer>` per layer and `allow_request_obfuscation`
 when set, `budget` when `"group"` and `max_unit_complexity` when given, with
 the round's own keys merged over them. `include_rewrite` is
-the exception: written, true, only when the kind allows the rewrite layer,
-so the rounds of a kind that denies it (both packaged kinds do) are those
-written before the layer existed, and no kept plan of theirs changes. A
-`layers.deny` a section gives replaces the packaged `["rewrite"]` whole, so
+the exception: written, true, only when the kind allows the rewrite layer
+and a rewrite technique is registered, so the rounds of a kind that denies it
+(both packaged kinds do), and of every kind while the layer is empty, are
+those written before the layer existed, and no kept plan of theirs changes.
+A `layers.deny` a section gives replaces the packaged `["rewrite"]` whole, so
 one that leaves `rewrite` out allows the layer. The kind's
 `layer_rates` goes to `run_augmentation(layer_rates=)` and from there to
 `plan_run`; a round's own `layer_rates`, passed on as the sampler's

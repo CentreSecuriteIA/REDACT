@@ -930,12 +930,15 @@ rate is 0 and both packaged kinds deny it (`"layers": {"deny":
 plan file and manifest are as before, and so are its draws. A section that
 gives its own `layers.deny` replaces the packaged list, so one that leaves
 `rewrite` out now allows the layer: nothing is drawn from it while it is
-empty, but its adversarial rounds gain `include_rewrite: true`, and a plan
-kept from it raises on resume naming `rounds`. Add `"rewrite"` to its
-`layers.deny` to keep the plan, or plan again with `resume=False`. A
-`config_dir` copy of `augmentations.json` made before says `"deny": []` in
-both kinds, so the same holds for it. The flat `include_<layer>` keywords
-keep the layer denied.
+empty, and its adversarial rounds say nothing of it (`include_rewrite` is
+written only while a rewrite technique is registered), so a plan kept from
+it resumes. A `config_dir` copy of `augmentations.json` made before says
+`"deny": []` in both kinds, so the same holds for it. Once the layer holds a
+technique, a kind that allows it gains `include_rewrite: true` in its
+adversarial rounds, and a plan kept from before raises on resume naming
+`rounds`: add `"rewrite"` to its `layers.deny` to keep the plan, or plan
+again with `resume=False`. The flat `include_<layer>` keywords keep the layer
+denied.
 
 ## The model registry
 

@@ -5,6 +5,7 @@ one; nothing here edits a file.
 """
 
 import csv
+import json
 import logging
 import random
 
@@ -12,8 +13,10 @@ import pandas as pd
 import pytest
 
 import redact.jailbreak  # noqa: F401  (tags the techniques)
+import redact.jailbreak.augmentation as JAugmentation
 import redact.jailbreak.pipeline as JPipe
 import redact.jailbreak.pool as JPool
+from redact import paths
 from redact.dataset import Manifest
 from redact.dataset.dealing import Dealer
 from redact.dataset.planfile import read_plan
@@ -282,7 +285,20 @@ def test_the_packaged_kinds_rounds_are_those_written_before_the_layer():
     assert rounds_of(resolve(None, "natural")) == [{"exact_techniques": 1}]
 
 
-def test_a_kind_that_allows_the_layer_says_include_rewrite_in_its_rounds():
+def test_a_kind_that_allows_the_empty_layer_has_the_rounds_written_before_it():
+    """With no rewrite technique registered, allowing the layer changes no draw,
+    so its rounds stay as they were and a plan kept from the section resumes."""
+    allowed = resolve({"adversarial": {"layers": {"deny": []}}}, "adversarial")
+    assert rounds_of(allowed) == [_ROUND_BEFORE]
+    hacking_off = resolve({"adversarial": {"layers": {"deny": ["hacking"]}}},
+                          "adversarial")
+    assert rounds_of(hacking_off) == [{**_ROUND_BEFORE, "include_hacking": False}]
+
+
+def test_a_kind_that_allows_the_layer_says_include_rewrite_once_a_technique_exists(
+        monkeypatch):
+    monkeypatch.setattr(JAugmentation, "all_techniques",
+                        lambda: [*POOL, _stand_in()])
     kind = resolve({"adversarial": {"layers": {"deny": []},
                                     "layer_rates": {"rewrite": 0.25}}}, "adversarial")
     assert kind["layer_rates"] == {"rewrite": 0.25}
@@ -291,6 +307,21 @@ def test_a_kind_that_allows_the_layer_says_include_rewrite_in_its_rounds():
                           "adversarial")
     assert rounds_of(hacking_off) == [
         {**_ROUND_BEFORE, "include_hacking": False, "include_rewrite": True}]
+    assert rounds_of(resolve(None, "adversarial")) == [_ROUND_BEFORE]
+
+
+def test_a_config_dir_copy_made_before_the_layer_has_the_rounds_it_had(tmp_path):
+    """The file the former release wrote, ``layers.deny`` empty, allows the
+    layer; its rounds say nothing of it."""
+    section = json.loads(
+        (paths.jailbreak_configs_dir() / "augmentations.json").read_text("utf-8"))
+    section["adversarial"]["layers"] = {"deny": []}
+    (tmp_path / "jailbreak").mkdir()
+    (tmp_path / "jailbreak" / "augmentations.json").write_text(
+        json.dumps(section), encoding="utf-8")
+    kind = resolve(None, "adversarial", config_dir=tmp_path)
+    assert kind["layers"] == {"deny": []}
+    assert rounds_of(kind) == [_ROUND_BEFORE]
 
 
 def test_the_flat_keywords_keep_the_rewrite_layer_denied():
@@ -299,21 +330,30 @@ def test_the_flat_keywords_keep_the_rewrite_layer_denied():
     assert section["adversarial"]["layers"] == {"deny": ["rewrite", "hacking"]}
 
 
-def test_a_plan_kept_from_before_the_layer_resumes(tmp_path, monkeypatch):
-    """A section without ``layers`` keeps the packaged deny, so its plan file
-    records the rounds a plan made before the layer recorded, and resumes."""
+@pytest.mark.parametrize(("layers", "round_before"), [
+    (None, _ROUND_BEFORE),
+    ({"deny": ["hacking"]}, {**_ROUND_BEFORE, "include_hacking": False}),
+    ({"deny": []}, _ROUND_BEFORE),
+], ids=["packaged deny", "hacking denied alone", "no deny"])
+def test_a_plan_kept_from_before_the_layer_resumes(
+        tmp_path, monkeypatch, layers, round_before):
+    """A section that gives its own ``layers.deny`` allows the layer, but with
+    no technique in it the plan file records the rounds a plan made before the
+    layer recorded, and resumes."""
     out = tmp_path / "jb.csv"
+    adversarial = {"pure_only": True, "translation": False,
+                   "families": {"allow": ["encode"]}}
+    if layers is not None:
+        adversarial["layers"] = layers
     keywords = dict(
         inputs=_inputs(), output_path=out, seed=1, auto_generate_benign=False,
-        verbose=False, augmentation={"natural": None, "adversarial": {
-            "pure_only": True, "translation": False,
-            "families": {"allow": ["encode"]}}})
+        verbose=False, augmentation={"natural": None, "adversarial": adversarial})
     with monkeypatch.context() as patch:
         patch.setattr(JPipe, "drive_units", lambda units, **kwargs: None)
         generate_jailbreaks(**keywords)
     manifest = Manifest.sidecar(out)
     plan = manifest.load()
-    assert read_plan(manifest.path)["rounds"] == [_ROUND_BEFORE]
+    assert read_plan(manifest.path)["rounds"] == [round_before]
     rows = generate_jailbreaks(**keywords)
     assert manifest.load() == plan and len(rows) == len(plan)
 
