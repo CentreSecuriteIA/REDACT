@@ -430,7 +430,11 @@ pool of one variant named after the entry. `personas.json` and
    `<kind>.variants.csv` counts the rows that drew it), and a
    `template` that holds `{prompt}` once and no other slot than those its
    technique fills (`{language}` for the answer languages, `{policy_id}`
-   for `to_xml`); a literal brace is written `{{` or `}}`. A seed draws by
+   for `to_xml`); a literal brace is written `{{` or `}}`. A pool whose
+   technique sets the filled variant into another template, which holds the
+   request, has no request slot: its technique names it with
+   `@uses_pool(..., slots=(...), request_slot=False)`, and its templates
+   hold no `{prompt}`. A seed draws by
    the pool's length and order, so a new variant changes what some seeds
    draw (step 4).
 2. **Weights are optional.** A variant may carry `"weight"`, a number of at
@@ -445,7 +449,8 @@ pool of one variant named after the entry. `personas.json` and
 3. **Import checks it.** `pool.py` checks every pool a technique names
    (`check_pools`) when `redact.jailbreak` is imported, and raises naming
    the file, the directive and the variant: an empty or repeated name, a
-   template without `{prompt}` or with a slot its technique does not fill
+   template without `{prompt}` (in a pool with a request slot) or with a
+   slot its technique does not fill
    or an unpaired brace, a prefix without its suffix, an unknown key (a
    misspelt `weight`), a weight that is not a number of at least 0, or
    every variant at 0.

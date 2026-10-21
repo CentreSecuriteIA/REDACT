@@ -28,7 +28,10 @@ technique's never should: a weight changes the draws of its whole pool.
 
 A technique marks the pool it draws from with :func:`uses_pool`, and
 ``pool.py`` checks every marked pool when ``redact.jailbreak`` is imported
-(:func:`check_pools`).
+(:func:`check_pools`). A template holds the request slot ``{prompt}``,
+unless its pool says it has none (``request_slot=False``): a piece of text
+the technique fills with its own slots and sets into another template, as
+the persona templates' mechanics are.
 """
 
 import json
@@ -64,12 +67,16 @@ class PoolRef:
     the ``slots`` the technique fills. ``info_key`` is the key of the
     technique's info that names the variant it drew: ``variant``, as
     :func:`apply_template_directive` writes it, continuation's ``style``, or
-    None for a technique whose info names none (structural's)."""
+    None for a technique whose info names none (structural's).
+    ``request_slot`` is False for a pool whose templates hold no
+    ``{prompt}``: the technique sets the filled variant into another
+    template, which holds the request."""
 
     file: str
     directive: str
     slots: tuple[str, ...] = ("prompt",)
     info_key: str | None = "variant"
+    request_slot: bool = True
 
     @property
     def name(self) -> str:
@@ -79,13 +86,14 @@ class PoolRef:
 
 def uses_pool(
     file: str, directive: str, slots: tuple[str, ...] = ("prompt",),
-    info_key: str | None = "variant",
+    info_key: str | None = "variant", request_slot: bool = True,
 ) -> Callable[[Callable], Callable]:
     """Mark a technique as drawing from the pool ``directive`` of ``file``,
-    filling ``slots`` and naming the variant in its info under ``info_key``:
-    sets its ``variant_pool`` (a :class:`PoolRef`)."""
+    filling ``slots`` and naming the variant in its info under ``info_key``;
+    ``request_slot=False`` for a pool whose templates hold no ``{prompt}``.
+    Sets its ``variant_pool`` (a :class:`PoolRef`)."""
     def mark(fn: Callable) -> Callable:
-        fn.variant_pool = PoolRef(file, directive, tuple(slots), info_key)
+        fn.variant_pool = PoolRef(file, directive, tuple(slots), info_key, request_slot)
         return fn
     return mark
 
@@ -136,9 +144,10 @@ def check_pools(refs: Iterable[PoolRef], folder: Path = _CONFIGS_JAILBREAK_DIR) 
     A pool is a non-empty list of variants with non-empty names, each once;
     a variant has a ``template``, or a ``prefix`` and a ``suffix`` (strings),
     and no key beyond those, ``name`` and ``weight``. A template names the
-    request slot ``{prompt}`` and no slot but the pool's ``slots``; a prefix
-    and a suffix are not formatted, so they hold none. A ``weight`` is a
-    number of at least 0, and at least one variant is above 0.
+    request slot ``{prompt}`` (unless the pool has no ``request_slot``) and
+    no slot but the pool's ``slots``; a prefix and a suffix are not
+    formatted, so they hold none. A ``weight`` is a number of at least 0,
+    and at least one variant is above 0.
 
     Raises:
         ValueError: The first problem, naming the file, the directive and
@@ -169,15 +178,19 @@ def _check_pool(ref: PoolRef, pools: dict[str, list]) -> None:
             raise ValueError(f"{where}, variant {name!r}: the name is taken; "
                              "give each variant of a directive its own.")
         seen.add(name)
-        _check_variant(f"{where}, variant {name!r}", variant, ref.slots)
+        _check_variant(f"{where}, variant {name!r}", variant, ref.slots,
+                       ref.request_slot)
     if not enabled(variants):
         raise ValueError(f"{where}: every variant has weight 0; give one a "
                          "weight above 0, or leave the weights out.")
 
 
-def _check_variant(where: str, variant: dict, slots: tuple[str, ...]) -> None:
+def _check_variant(
+    where: str, variant: dict, slots: tuple[str, ...], request_slot: bool = True,
+) -> None:
     """Raise unless ``variant`` has a text its technique can fill and a
-    sound weight."""
+    sound weight; its template holds ``{prompt}`` when the pool has a
+    ``request_slot``."""
     if unknown := sorted(set(variant) - _VARIANT_KEYS):
         raise ValueError(f"{where}: unknown keys {unknown}; a variant has "
                          f"{sorted(_VARIANT_KEYS)}.")
@@ -191,7 +204,7 @@ def _check_variant(where: str, variant: dict, slots: tuple[str, ...]) -> None:
         if not isinstance(template, str):
             raise ValueError(f"{where}: the template is not a string.")
         named = _slots_of(where, template)
-        if "prompt" not in named:
+        if request_slot and "prompt" not in named:
             raise ValueError(f"{where}: the template has no {{prompt}} slot.")
         if extra := sorted(named - set(slots)):
             raise ValueError(

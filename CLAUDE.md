@@ -89,7 +89,7 @@ REDACT/
 │       │   ├── pipeline.py          # run_augmentation: the stage core, once per kind
 │       │   ├── variants.py          # variants_of (a row's template variants, paired by position), write_variants (<stem>.variants.csv)
 │       │   ├── augmentation.py      # The augmentation section: KINDS, resolve, rounds_of, the deprecated flat keywords
-│       │   ├── directives.py        # Variant pools: read_pools (any template file's shape), PoolRef/uses_pool, check_pools, draw_variant (rng.choice, or by weight), apply_template_directive; load_templates
+│       │   ├── directives.py        # Variant pools: read_pools (any template file's shape), PoolRef/uses_pool (a pool may have no request slot), check_pools, draw_variant (rng.choice, or by weight), apply_template_directive; load_templates
 │       │   ├── rewrite/             # The first layer: whole-prompt rewrites, none yet (get_all_rewrite_functions returns []); off by default, the packaged kinds deny it
 │       │   ├── hacking/             # cognitive.py (5; also the scenario and its check, shared with personas.py), personas.py (invented + 14 named, 4 retired), framing.py (5, templates)
 │       │   ├── manipulation/        # benign.py (the benign Q&A pairs), pairs.py (what fsh and dap share, the many-shot pair pool), fsh.py, dap.py

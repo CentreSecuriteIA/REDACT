@@ -110,7 +110,7 @@ def to_y(prompt: str, **kwargs) -> TechniqueGen:
   on the entry type alone).
 - A pure template technique draws its text from a variant pool, one
   directive's variants in its template file, and names it with
-  `@uses_pool(file, directive, slots, info_key)` (its `variant_pool`;
+  `@uses_pool(file, directive, slots, info_key, request_slot)` (its `variant_pool`;
   `info_key` the key of its info that names the variant drawn, `variant`
   unless it says otherwise; the answer languages share one pool, set by
   their factory). `read_pools` reads a
@@ -119,7 +119,11 @@ def to_y(prompt: str, **kwargs) -> TechniqueGen:
   technique) into lists of variants; `pool.py` checks every named pool at
   import (`check_pools`: unique non-empty names, `{prompt}` in each template
   and only the technique's slots, a `weight` a number of at least 0, one
-  variant above 0), naming the file, directive and variant. `draw_variant`
+  variant above 0), naming the file, directive and variant. A pool marked
+  `request_slot=False` (`PoolRef.request_slot`) holds pieces the technique
+  fills and sets into another template, which holds the request: its
+  templates need no `{prompt}`, and one that names it fails as an unfilled
+  slot. `draw_variant`
   draws an unweighted pool with `rng.choice`, so a seed draws what it drew
   before pools had weights (`tests/fixtures/template_draws.json` pins every
   template technique's texts and draws by digest), and a weighted one with

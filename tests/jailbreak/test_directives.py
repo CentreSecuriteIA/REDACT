@@ -18,6 +18,7 @@ from redact.jailbreak.directives import (
     check_pools,
     draw_variant,
     read_pools,
+    uses_pool,
 )
 from redact.jailbreak.hacking.framing import get_framing_functions
 from redact.jailbreak.obfuscation.structural import get_structural_functions
@@ -112,6 +113,36 @@ class TestCheckPools:
         folder = _folder(tmp_path, {"d": [_ALPHA]})
         with pytest.raises(ValueError, match="directive 'e': the file has no such"):
             check_pools([PoolRef("t.json", "e")], folder)
+
+    def test_a_pool_without_a_request_slot_needs_no_prompt(self, tmp_path):
+        """Its variants are set into another template, which holds the request."""
+        folder = _folder(tmp_path, {"d": [
+            {"name": "alpha", "template": "alpha {persona}"},
+            {"name": "beta", "template": "beta"}]})
+        check_pools([PoolRef("t.json", "d", ("persona",), request_slot=False)], folder)
+
+    def test_a_pool_without_a_request_slot_refuses_the_prompt(self, tmp_path):
+        folder = _folder(tmp_path, {"d": [
+            {"name": "alpha", "template": "alpha {persona} {prompt}"}]})
+        with pytest.raises(ValueError, match=r"variant 'alpha': the template names "
+                           r"\['prompt'\], which its technique does not fill"):
+            check_pools([PoolRef("t.json", "d", ("persona",), request_slot=False)],
+                        folder)
+
+    def test_a_pool_has_a_request_slot_unless_it_says_otherwise(self, tmp_path):
+        folder = _folder(tmp_path, {"d": [
+            {"name": "alpha", "template": "alpha {persona}"}]})
+        with pytest.raises(ValueError, match="the template has no {prompt} slot"):
+            check_pools([PoolRef("t.json", "d", ("prompt", "persona"))], folder)
+
+    def test_uses_pool_marks_a_pool_without_a_request_slot(self):
+        @uses_pool("t.json", "d", ("persona",), request_slot=False)
+        def to_x(prompt, *, rng=None):
+            return prompt, ""
+
+        assert to_x.variant_pool == PoolRef(
+            "t.json", "d", ("persona",), "variant", request_slot=False)
+        assert uses_pool("t.json", "d")(lambda p: p).variant_pool.request_slot is True
 
 
 class TestDrawVariant:
