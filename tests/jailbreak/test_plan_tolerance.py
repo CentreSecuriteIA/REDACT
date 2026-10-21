@@ -24,7 +24,13 @@ from redact.jailbreak.plan import combination_of
 from redact.jailbreak.pool import all_techniques, registry, technique_pool
 from redact.stages import generate_jailbreaks
 from tests.conftest import MockBackend
-from tests.jailbreak.test_pipeline_jailbreaks import GEN, _inputs, _llm_run, _pure, upper
+from tests.jailbreak.test_pipeline_jailbreaks import (
+    GEN,
+    _inputs,
+    _llm_run,
+    _pure,
+    upper,
+)
 
 #: The spec version the plans these tests make are drawn at, and one after
 #: it, for a technique a test adds or retires after the plan.
