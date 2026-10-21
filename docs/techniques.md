@@ -37,42 +37,58 @@ and `ascii_art` 90, the outermost. A plan made before this order applied
 `sensitive_words` and `tokenbreak` first; a kept plan replays the order its
 manifest recorded, and a fresh plan applies translation, typos and casual
 writing before the word-level steps. The families the eval type draws
-(`translation`, `encode`, `structural`, `ascii_art`) keep their order.
+(`translation`, `encode`, `structural`, `ascii_art`) keep their order. The
+obfuscation layer has no cap: a combination takes up to `max_obfuscations`
+of its families in budget mode, the request obfuscation, when allowed,
+among them.
 
-| Layer | Techniques | Picks per combination |
-|---|---|---|
-| `hacking` | 21 | at most 1 |
-| `manipulation` | 8 | at most 1 |
-| `obfuscation` | 68 | up to `max_obfuscations` families in budget mode, the request obfuscation, when allowed, among them |
-| `requests` | 47 | at most 1 |
+<!-- BEGIN layers: made from the spec by tests/jailbreak/test_docs_counts.py -->
+| Layer | Families | Techniques | Picks per combination |
+|---|---|---|---|
+| `hacking` | 3 | 21 | at most 1 |
+| `manipulation` | 2 | 8 | at most 1 |
+| `obfuscation` | 9 | 68 | no cap |
+| `requests` | 9 | 47 | at most 1 |
+| all | 23 | 144 | |
+<!-- END layers -->
 
 ## Families and techniques
 
+The two tables on this page are made from the spec: after a change to it,
+make them again from the repository root with
+`PYTHONPATH=src py -m tests.jailbreak.test_docs_counts` (the test fails
+until then). A technique counts in its first family; a retired one is left
+out. The translation family calls the `translation` model (a machine
+translator also has the generation model judge it); the other techniques
+that call a model call the generation model.
+
+<!-- BEGIN families: made from the spec by tests/jailbreak/test_docs_counts.py -->
 | Layer | Family | Dimension | Order | Count | Calls a model | Needs benign data | Techniques |
 |---|---|---|---|---|---|---|---|
-| hacking | `cognitive` | `role_framing` | | 5 | yes | no | `to_persona_roleplay`, `to_hypothetical_framing`, `to_authority_obedience`, `to_avi`, `to_deep_inception` |
-| hacking | `framing` | `role_framing` | | 5 | no | no | `to_fictional_world`, `to_noble_goal`, `to_nefarious_goal`, `to_high_stake`, `to_no_moral_constraints` |
-| hacking | `persona` | `role_framing` | | 11 | yes | no | `to_invented_persona`, `to_psychopath_persona`, `to_alien_persona`, `to_radical_politician_persona`, `to_cult_leader_persona`, `to_very_advanced_ai_persona`, `to_cartel_leader_persona`, `to_artist_persona`, `to_deformed_scientist_persona`, `to_actor_persona`, `to_someone_from_the_future_persona` |
-| manipulation | `dap` | `example_priming` | | 4 | the `selected` two | yes | `to_dap_random_short`, `to_dap_random_long`, `to_dap_selected_short`, `to_dap_selected_long` |
-| manipulation | `fsh` | `example_priming` | | 4 | the `selected` two | yes | `to_fsh_random_short`, `to_fsh_random_long`, `to_fsh_selected_short`, `to_fsh_selected_long` |
-| obfuscation | `sensitive_words` | `encoding` | 40 | 13 | yes | no | `to_sensitive_words_encode_base64`, `to_sensitive_words_encode_rot13`, `to_sensitive_words_encode_rot18`, `to_sensitive_words_encode_rot47`, `to_sensitive_words_encode_unicode`, `to_sensitive_words_encode_ascii`, `to_sensitive_words_encode_separator`, `to_sensitive_words_encode_leetspeak_basic`, `to_sensitive_words_encode_leetspeak_intermediate`, `to_sensitive_words_encode_leetspeak_advanced`, `to_sensitive_words_split`, `to_sensitive_words_variables`, `to_synonym_substitution` |
-| obfuscation | `tokenbreak` | `encoding` | 50 | 3 | yes | no | `to_tokenbreak_prepend`, `to_tokenbreak_split`, `to_tokenbreak_delimiter` |
-| obfuscation | `translation` | `language` | 10 | 19 | yes, the `translation` model | no | `to_french`, `to_japanese`, `to_russian`, `to_spanish`, `to_german`, `to_arabic`, `to_turkish`, `to_czech`, `to_vietnamese`, `to_greek`, `to_croatian`, `to_swahili`, `to_thai`, `to_khmer`, `to_nepali`, `to_zulu`, `to_scots_gaelic`, `to_bengali`, `to_javanese` |
+| hacking | `cognitive` | `role_framing` |  | 5 | yes | no | `to_persona_roleplay`, `to_hypothetical_framing`, `to_authority_obedience`, `to_avi`, `to_deep_inception` |
+| hacking | `framing` | `role_framing` |  | 5 | no | no | `to_fictional_world`, `to_noble_goal`, `to_nefarious_goal`, `to_high_stake`, `to_no_moral_constraints` |
+| hacking | `persona` | `role_framing` |  | 11 | yes | no | `to_invented_persona`, `to_psychopath_persona`, `to_alien_persona`, `to_radical_politician_persona`, `to_cult_leader_persona`, `to_very_advanced_ai_persona`, `to_cartel_leader_persona`, `to_artist_persona`, `to_deformed_scientist_persona`, `to_actor_persona`, `to_someone_from_the_future_persona` |
+| manipulation | `dap` | `example_priming` |  | 4 | `to_dap_selected_short`, `to_dap_selected_long` | yes | `to_dap_random_short`, `to_dap_random_long`, `to_dap_selected_short`, `to_dap_selected_long` |
+| manipulation | `fsh` | `example_priming` |  | 4 | `to_fsh_selected_short`, `to_fsh_selected_long` | yes | `to_fsh_random_short`, `to_fsh_random_long`, `to_fsh_selected_short`, `to_fsh_selected_long` |
+| obfuscation | `translation` | `language` | 10 | 19 | yes | no | `to_french`, `to_japanese`, `to_russian`, `to_spanish`, `to_german`, `to_arabic`, `to_turkish`, `to_czech`, `to_vietnamese`, `to_greek`, `to_croatian`, `to_swahili`, `to_thai`, `to_khmer`, `to_nepali`, `to_zulu`, `to_scots_gaelic`, `to_bengali`, `to_javanese` |
 | obfuscation | `typos` | `surface_noise` | 20 | 4 | yes | no | `to_rewrite_with_typos_low`, `to_rewrite_with_typos_medium`, `to_rewrite_with_typos_high`, `to_rewrite_with_typos_insane` |
 | obfuscation | `casual_writing` | `surface_noise` | 30 | 9 | no | no | `to_lowercase`, `to_uppercase`, `to_no_sentence_capitals`, `to_dropped_spaces`, `to_doubled_spaces`, `to_dropped_punctuation`, `to_doubled_punctuation`, `to_abbreviations`, `to_stripped_accents` |
+| obfuscation | `sensitive_words` | `encoding` | 40 | 13 | yes | no | `to_sensitive_words_encode_base64`, `to_sensitive_words_encode_rot13`, `to_sensitive_words_encode_rot18`, `to_sensitive_words_encode_rot47`, `to_sensitive_words_encode_unicode`, `to_sensitive_words_encode_ascii`, `to_sensitive_words_encode_separator`, `to_sensitive_words_encode_leetspeak_basic`, `to_sensitive_words_encode_leetspeak_intermediate`, `to_sensitive_words_encode_leetspeak_advanced`, `to_sensitive_words_split`, `to_sensitive_words_variables`, `to_synonym_substitution` |
+| obfuscation | `tokenbreak` | `encoding` | 50 | 3 | yes | no | `to_tokenbreak_prepend`, `to_tokenbreak_split`, `to_tokenbreak_delimiter` |
 | obfuscation | `suffixes` | `surface_noise` | 60 | 4 | no | no | `to_adversarial_suffix_punctuation`, `to_adversarial_suffix_fragments`, `to_adversarial_suffix_unicode`, `to_adversarial_suffix_emoji` |
 | obfuscation | `encode` | `encoding` | 70 | 12 | no | no | `to_base64`, `to_rot13`, `to_rot18`, `to_rot47`, `to_unicode_escape`, `to_ascii_ordinal`, `to_separator`, `to_leetspeak_basic`, `to_leetspeak_intermediate`, `to_leetspeak_advanced`, `to_morse`, `to_braille` |
 | obfuscation | `structural` | `container` | 80 | 3 | no | no | `to_json`, `to_xml`, `to_markdown` |
 | obfuscation | `ascii_art` | `encoding` | 90 | 1 | no | no | `to_ascii_art` |
-| requests | `answer_format` | `answer_shape` | | 9 | no | no | `to_refusal_then_comply`, `to_apology_prevention`, `to_prefix_injection`, `to_answer_in_markdown`, `to_answer_as_tutorial`, `to_answer_as_code`, `to_answer_as_dialogue`, `to_answer_as_story`, `to_answer_as_structured_data` |
-| requests | `answer_language` | `language` | | 20 | no | no | `to_ask_answer_in_french`, `to_ask_answer_in_japanese`, `to_ask_answer_in_russian`, `to_ask_answer_in_spanish`, `to_ask_answer_in_german`, `to_ask_answer_in_arabic`, `to_ask_answer_in_turkish`, `to_ask_answer_in_czech`, `to_ask_answer_in_vietnamese`, `to_ask_answer_in_greek`, `to_ask_answer_in_croatian`, `to_ask_answer_in_thai`, `to_ask_answer_in_swahili`, `to_ask_answer_in_khmer`, `to_ask_answer_in_maori`, `to_ask_answer_in_nepali`, `to_ask_answer_in_zulu`, `to_ask_answer_in_scots_gaelic`, `to_ask_answer_in_bengali`, `to_ask_answer_in_javanese` |
-| requests | `asking` | `request_shape` | | 2 | no | no | `to_innocuous_question`, `to_ask_for_details` |
-| requests | `continuation` | `request_shape` | | 4 | no | no | `to_continue_passage`, `to_complete_story`, `to_fill_in_blank`, `to_continue_instructions` |
-| requests | `distractor_prefix` | `request_shape` | | 2 | no | no | `to_distractor_prefix_related`, `to_distractor_prefix_unrelated` |
-| requests | `distractor_suffix` | `request_shape` | | 2 | no | no | `to_distractor_suffix_related`, `to_distractor_suffix_unrelated` |
-| requests | `impersonation` | `role_framing` | | 1 | no | no | `to_impersonate_good_person` |
-| requests | `indirect` | `request_shape` | | 6 | no | no | `to_summarize`, `to_proofread`, `to_critique`, `to_translate_task`, `to_explain_to_child`, `to_rewrite` |
-| requests | `temporal` | `request_shape` | | 1 | no | no | `to_use_past_tense` |
+| requests | `answer_format` | `answer_shape` |  | 9 | no | no | `to_refusal_then_comply`, `to_apology_prevention`, `to_prefix_injection`, `to_answer_in_markdown`, `to_answer_as_tutorial`, `to_answer_as_code`, `to_answer_as_dialogue`, `to_answer_as_story`, `to_answer_as_structured_data` |
+| requests | `answer_language` | `language` |  | 20 | no | no | `to_ask_answer_in_french`, `to_ask_answer_in_japanese`, `to_ask_answer_in_russian`, `to_ask_answer_in_spanish`, `to_ask_answer_in_german`, `to_ask_answer_in_arabic`, `to_ask_answer_in_turkish`, `to_ask_answer_in_czech`, `to_ask_answer_in_vietnamese`, `to_ask_answer_in_greek`, `to_ask_answer_in_croatian`, `to_ask_answer_in_swahili`, `to_ask_answer_in_thai`, `to_ask_answer_in_khmer`, `to_ask_answer_in_maori`, `to_ask_answer_in_nepali`, `to_ask_answer_in_zulu`, `to_ask_answer_in_scots_gaelic`, `to_ask_answer_in_bengali`, `to_ask_answer_in_javanese` |
+| requests | `asking` | `request_shape` |  | 2 | no | no | `to_innocuous_question`, `to_ask_for_details` |
+| requests | `continuation` | `request_shape` |  | 4 | no | no | `to_continue_passage`, `to_complete_story`, `to_fill_in_blank`, `to_continue_instructions` |
+| requests | `distractor_prefix` | `request_shape` |  | 2 | no | no | `to_distractor_prefix_related`, `to_distractor_prefix_unrelated` |
+| requests | `distractor_suffix` | `request_shape` |  | 2 | no | no | `to_distractor_suffix_related`, `to_distractor_suffix_unrelated` |
+| requests | `impersonation` | `role_framing` |  | 1 | no | no | `to_impersonate_good_person` |
+| requests | `indirect` | `request_shape` |  | 6 | no | no | `to_summarize`, `to_proofread`, `to_critique`, `to_translate_task`, `to_explain_to_child`, `to_rewrite` |
+| requests | `temporal` | `request_shape` |  | 1 | no | no | `to_use_past_tense` |
+<!-- END families -->
 
 Each family's dimension is a tag of `configs/dimensions.json`: what the
 family varies in a finished text. A run stops before any stage when a

@@ -260,8 +260,12 @@ contract.
    signatures, and the combinations five seeds draw), so it fails on any new
    technique. Once the change is meant, regenerate the fixture from the
    repository root with `PYTHONPATH=src python -m tests.jailbreak.test_registry`.
-6. **Docs**: list it by name in [techniques.md](techniques.md), with the
-   counts there.
+6. **Docs**: make the layer and family tables of
+   [techniques.md](techniques.md) again from the spec with
+   `PYTHONPATH=src python -m tests.jailbreak.test_docs_counts`, and update
+   the totals the sentences of `CLAUDE.md`, `README.md` and that page's
+   introduction quote; `tests/jailbreak/test_docs_counts.py` fails until
+   both agree with the spec.
 
 To retire a technique, never remove it: a kept plan replays its techniques
 by name, and `tests/jailbreak/test_registry.py::test_registry_only_grows`
