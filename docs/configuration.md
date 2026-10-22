@@ -453,6 +453,14 @@ From every registered technique, in this order:
   ...) raises, naming it: a `config_dir` copy of `augmentations.json` made
   before these left the natural kind does, so take them out of its
   `families.allow`.
+- An allow list or `family_weights` naming a family or technique of a layer
+  the spec has off by default (`rewrite`) raises unless `layers.allow`
+  names the layer, saying to write `"layers": {"allow": ["rewrite"]}`: the
+  pool would drop it, and a kind that names nothing else would draw
+  nothing. One of a layer the kind's `layers.deny` names is left out with a
+  WARNING (the eval type's lists name `framing`, so an eval run that denies
+  `hacking` draws the other 31), and a `family_weights` entry of such a
+  layer raises.
 - `natural_only_families`, at the top of `augmentations.json`
   (`casual_writing` in the packaged file), are added to the adversarial `families.deny` unless the
   adversarial `families.allow` names them. A family the spec marks
@@ -1165,7 +1173,9 @@ tense rewrites and model distractors, attacks only) and is off by default:
 its spec rate is 0, and the spec lists it in `layers_off_by_default`, so
 every kind leaves it out unless its `layers.allow` names it, whatever its
 `layers.deny` says. Opt in with `"layers": {"allow": ["rewrite"]}` in the
-kind (and, for budget rounds, a `layer_rates.rewrite` above 0). A section's
+kind (and, for budget rounds, a `layer_rates.rewrite` above 0). An allow
+list or `family_weights` that names a rewrite family or technique without it
+raises, saying so. A section's
 own `layers.deny` no longer allows the layer, as it did while the packaged
 kinds denied it in `augmentations.json`: `{"deny": ["hacking"]}` keeps it
 off, and so does a `config_dir` copy of `augmentations.json`, whether it

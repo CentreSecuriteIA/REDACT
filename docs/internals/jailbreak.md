@@ -489,7 +489,12 @@ list that names a family or technique whose spec `kinds` lack the kind.
 For a family, the message names those of its techniques the kind draws, to
 list under `techniques.allow`, and does not offer adding the kind to the
 family's `kinds`: they apply to every technique in it that sets none of
-its own.
+its own. `_check_denied_layers` reads each name of the allow lists and
+`family_weights` against `layers.deny` after `_deny_layers_off`: a name of
+a layer off by default (`rewrite` without `layers.allow`) raises, saying
+to write `"layers": {"allow": ["rewrite"]}`, since the pool would drop it
+silently; one of a layer the kind's own `layers.deny` names is dropped with
+a WARNING, and a `family_weights` entry of it raises.
 `technique_pool(resolved)` filters the registered techniques; with the switch
 on, a `techniques.allow` that names some languages (`pool.languages()`)
 admits those alone. Last, it keeps the techniques whose `kinds` (set by

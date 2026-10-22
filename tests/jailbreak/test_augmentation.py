@@ -573,6 +573,33 @@ def test_allowing_only_translation_with_the_switch_off_raises():
         "true, or allow something else.")
 
 
+def test_a_layer_the_kind_denies_drops_what_its_allow_lists_name_of_it(caplog):
+    """The eval type's lists name framing, a hacking family: a run that
+    denies the layer over the type leaves framing out, says so, and keeps
+    the rest of the eval pool."""
+    from redact.recipe import load_dataset_type
+
+    base = load_dataset_type("eval")["augmentations"]
+    with caplog.at_level("WARNING", logger=_DROPPED):
+        kind = resolve({"adversarial": {"layers": {"deny": ["hacking"]}}},
+                       "adversarial", base=base)
+    (record,) = caplog.records
+    assert "the allow lists name framing (hacking)" in record.getMessage()
+    pool = technique_pool(kind)
+    assert not [fn for fn in pool if fn.layer == "hacking"]
+    assert len(pool) == 31      # the 36 less framing's five  # noqa: PLR2004
+
+
+def test_a_family_weight_of_a_layer_the_kind_denies_raises():
+    with pytest.raises(ValueError) as raised:
+        resolve({"adversarial": {"layers": {"deny": ["hacking"]},
+                                 "family_weights": {"framing": 2}}}, "adversarial")
+    assert str(raised.value) == (
+        "augmentations.adversarial.family_weights names 'framing', of the hacking "
+        "layer, which augmentations.adversarial.layers.deny names; take it out of "
+        "family_weights, or the layer out of layers.deny.")
+
+
 def test_switching_translation_off_over_the_eval_type_is_one_key(caplog):
     from redact.recipe import load_dataset_type
 

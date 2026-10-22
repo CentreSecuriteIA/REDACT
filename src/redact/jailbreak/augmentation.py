@@ -115,7 +115,10 @@ def resolve(
     The adversarial ``families.deny`` holds every family of
     :func:`natural_only_families` its ``families.allow`` does not name.
     An allow list names only families and techniques whose spec ``kinds``
-    hold the kind (:func:`_check_kinds`).
+    hold the kind (:func:`_check_kinds`), and of a layer the kind draws: a
+    name of a layer off by default raises, saying to write
+    ``layers.allow``, and one of a layer its ``layers.deny`` names is
+    dropped with a WARNING (:func:`_check_denied_layers`).
     ``translation`` is true or false; while it is false, what the allow
     lists and ``family_weights`` name of translation is left out, with a
     WARNING (:func:`_switch_off_translation`).
@@ -184,6 +187,7 @@ def resolve(
     _deny_layers_off(where, resolved["layers"])
     _check_kinds(where, kind, resolved)
     _switch_off_translation(where, resolved)
+    _check_denied_layers(where, resolved)
     if type(resolved["pure_only"]) is not bool:
         raise ValueError(
             f"{where}.pure_only must be true or false, got {resolved['pure_only']!r}.")
@@ -490,6 +494,59 @@ def _check_kinds(where: str, kind: str, resolved: dict) -> None:
             raise ValueError(
                 f"{refused}, and a family's kinds apply to every technique in it "
                 f"that sets none of its own. {take_out}; {members}")
+
+
+def _check_denied_layers(where: str, resolved: dict) -> None:
+    """Every family and technique the allow lists and ``family_weights``
+    name is of a layer the kind draws.
+
+    The pool leaves out a denied layer whatever the lists say, so a name of
+    one is dropped there. For a layer :func:`layers_off_by_default` leaves
+    off, that would be silent, and a kind that allows nothing else would
+    draw nothing: it raises, saying to write ``layers.allow``. For a layer
+    the kind's ``layers.deny`` names, as a run that denies a layer of the
+    eval type's lists does, the names are dropped with a WARNING. A
+    ``family_weights`` entry of a denied layer raises either way, as one of
+    any family the kind does not draw does (:func:`_check_weights`).
+
+    Raises:
+        ValueError: A name of a layer off by default, or a
+            ``family_weights`` entry of a denied layer. The message names it,
+            its layer and the fix.
+    """
+    denied = resolved["layers"]["deny"]
+    off = layers_off_by_default()
+    family_layer = {name: family["layer"]
+                    for name, family in load_spec()["families"].items()}
+    technique_layer = {fn.__name__: fn.layer for fn in all_techniques()}
+    named = [
+        *(("families.allow", name, family_layer.get(name))
+          for name in resolved["families"]["allow"] or ()),
+        *(("techniques.allow", name, technique_layer.get(name))
+          for name in resolved["techniques"]["allow"] or ()),
+        *(("family_weights", name, family_layer.get(name))
+          for name in resolved["family_weights"]),
+    ]
+    dropped = []
+    for key, name, layer in named:
+        if layer not in denied:
+            continue
+        if layer in off:
+            raise ValueError(
+                f"{where}.{key} names {name!r}, of the {layer} layer, which "
+                f"{_SPEC} has off by default, so the kind would not draw it: "
+                f'write "layers": {{"allow": ["{layer}"]}} in the kind to turn '
+                f"the layer on, or take it out of {key}.")
+        if key == "family_weights":
+            raise ValueError(
+                f"{where}.family_weights names {name!r}, of the {layer} layer, "
+                f"which {where}.layers.deny names; take it out of "
+                "family_weights, or the layer out of layers.deny.")
+        dropped.append(f"{name} ({layer})")
+    if dropped:
+        logger.warning(
+            "%s: the allow lists name %s, of a layer layers.deny names, so the "
+            "kind does not draw them.", where, ", ".join(dropped))
 
 
 def _switch_off_translation(where: str, resolved: dict) -> None:

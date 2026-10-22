@@ -377,6 +377,27 @@ def test_layers_allow_naming_a_layer_on_by_default_raises():
         "off by default (['rewrite']). Take it out of layers.allow.")
 
 
+@pytest.mark.parametrize(("given", "key", "name"), [
+    ({"techniques": {"allow": ["to_persuade_scarcity"]}}, "techniques.allow",
+     "to_persuade_scarcity"),
+    ({"families": {"allow": ["persuasion"]}}, "families.allow", "persuasion"),
+    ({"family_weights": {"persuasion": 2}}, "family_weights", "persuasion"),
+], ids=["technique", "family", "weight"])
+def test_naming_a_rewrite_technique_without_layers_allow_raises(given, key, name):
+    """The pool would drop it, and a kind that named nothing else would draw
+    nothing; with the layer allowed it is drawn."""
+    with pytest.raises(ValueError) as raised:
+        resolve({"adversarial": given}, "adversarial")
+    assert str(raised.value) == (
+        f"augmentations.adversarial.{key} names {name!r}, of the rewrite layer, "
+        "which combination_spec.json has off by default, so the kind would not "
+        'draw it: write "layers": {"allow": ["rewrite"]} in the kind to turn the '
+        f"layer on, or take it out of {key}.")
+    allowed = resolve({"adversarial": {**given, "layers": {"allow": ["rewrite"]}}},
+                      "adversarial")
+    assert [fn for fn in technique_pool(allowed) if fn.layer == "rewrite"]
+
+
 def _config_dir(tmp_path, layers: dict):
     """A config folder whose ``augmentations.json`` is the packaged one with
     ``layers`` in both kinds."""
