@@ -40,6 +40,7 @@
   "obfuscation/payload_split_templates.json:reassembly": {"family": "payload_split", "variants": 8, "floor": 8},
   "obfuscation/structural_templates.json:to_markdown": {"family": "structural", "variants": 1, "floor": 8},
   "obfuscation/structural_templates.json:to_xml": {"family": "structural", "variants": 1, "floor": 8},
+  "obfuscation/word_art_templates.json:decode": {"family": "word_art", "variants": 8, "floor": 8},
   "requests/answer_language_templates.json:templates": {"family": "answer_language", "variants": 8, "floor": 8},
   "requests/answer_templates.json:answer_as_code": {"family": "answer_format", "variants": 8, "floor": 8},
   "requests/answer_templates.json:answer_as_dialogue": {"family": "answer_format", "variants": 8, "floor": 8},

@@ -257,19 +257,22 @@ def test_a_count_round_deals_the_techniques_of_every_family_evenly():
     assert uneven == {}
 
 
-@pytest.mark.parametrize("units", [4000, 6000])
 @pytest.mark.parametrize("section", [{}, {"budget": "group"}], ids=["unit", "group"])
-def test_the_default_attacks_draw_every_technique_of_their_pool(units, section):
+def test_the_default_attacks_draw_every_technique_of_their_pool(section):
     """No step's picks starve another step's families: the request
     obfuscation once counted its picks as the obfuscation layer's, and 14
     encode and sensitive_words techniques were never drawn. A deprecated
     technique, or one no simulated input may take, is not asked for. The
-    nine heavy encodings are drawn in about 1 unit in 500 (one of complexity
-    3 fits only a unit whose earlier picks leave 3 points, and the payload
-    splits take the obfuscation slots of some units that would hold an
-    encoding), so the plans are large enough that each is still drawn."""
-    drawn, pool = simulate.deal_kind(section, units, groups=3)
-    table = simulate.shares(drawn, pool)
+    nine heavy encodings are the rarest draws (one of complexity 3 fits only
+    a unit whose earlier picks leave 3 points, and the other families of
+    complexity 3, the word art's among them, take those units too), about 1
+    unit in 500 each, and a seed can leave one out of its plan altogether:
+    to_braille, which ascii_art refuses, is drawn 0 times at seed 42 and 8
+    at seed 43 in 4,000 units. So the plans of two seeds are pooled."""
+    units, seeds = 4000, (42, 43)
+    plans = [simulate.deal_kind(section, units, groups=3, seed=seed) for seed in seeds]
+    pool = plans[0][1]
+    table = simulate.shares([names for drawn, _ in plans for names in drawn], pool)
     texts = simulate.inputs(units, groups=3)["prompt"]
     asked = [fn.__name__ for fn in pool if not getattr(fn, "deprecated", None)
              and any(applies(fn, text, "harmful") for text in texts)]
@@ -365,8 +368,12 @@ _BUDGETS = [
 # obfuscation family to deal, which refuses encode, changes the family some
 # obfuscation draws land on and, through the unit's rng and its group's
 # counts, the rest of their draw (221 of the 240 dealt units, 73 of the 200
-# undealt draws).
-_PINNED_DRAWS = "d3f421d73cb9e9d99932372be0e2cc97ca1df75b85711892036040cccf655a70"
+# undealt draws). The spec 1.3 word art moved it once more: one more
+# obfuscation family to deal, complexity 3 and refusing the other word-level
+# steps, changes the family some obfuscation draws land on and, through the
+# unit's rng and its group's counts, the rest of their draw (204 of the 240
+# dealt units, 27 of the 200 undealt draws).
+_PINNED_DRAWS = "8594b813c8957a372ded440d0f646560432ae5e63399713ff1afb7c62abf9a98"
 
 
 def test_draws_without_the_request_obfuscation_are_those_made_before_it_was_counted():

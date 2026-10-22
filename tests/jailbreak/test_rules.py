@@ -450,6 +450,36 @@ def test_a_payload_split_joins_a_translation_noise_a_wrapper_a_request_or_a_scen
     assert _joins(split, other) and _joins(other, split)
 
 
+@pytest.mark.parametrize("other", [
+    "to_ascii_art", "to_payload_split", "to_payload_split_semantic", "to_base64",
+    "to_rot13", "to_sensitive_words_split", "to_sensitive_words_encode_base64",
+    "to_tokenbreak_split", "to_json", "to_code_comment", "to_fake_system_turn"])
+def test_word_art_refuses_what_draws_or_encodes_the_text_either_way(other):
+    """A font on the whole text, another split, an encoding, another word-level
+    step on the word, a wrapper and an invented turn: one disguise of the
+    word is enough, and the art is long."""
+    assert not _joins("to_word_art", other)
+    assert not _joins(other, "to_word_art")
+
+
+@pytest.mark.parametrize("other", [
+    "to_fsh_random_short", "to_fsh_selected_long", "to_dap_random_long",
+    "to_dap_selected_short"])
+def test_word_art_takes_the_manipulation_layer_s_obfuscation_block(other):
+    """manipulation_blocked_obfuscation names it: the art is long and the benign
+    pairs of fsh and dap would sit between it and the request."""
+    assert not _joins("to_word_art", other)
+    assert not _joins(other, "to_word_art")
+
+
+@pytest.mark.parametrize("other", [
+    "to_french", "to_rewrite_with_typos_low", "to_adversarial_suffix_punctuation",
+    "to_random_capitals_low", "to_lowercase", "to_summarize",
+    "to_psychopath_persona", "to_fictional_world"])
+def test_word_art_joins_a_translation_noise_a_suffix_a_request_or_a_scene(other):
+    assert _joins("to_word_art", other) and _joins(other, "to_word_art")
+
+
 @pytest.mark.parametrize(("first", "then"), [
     ("to_french", "to_fsh_random_short"),
     ("to_fsh_random_short", "to_french"),

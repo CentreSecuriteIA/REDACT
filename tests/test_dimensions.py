@@ -17,7 +17,7 @@ _FAMILY_TAGS = {
     "language": ["translation", "answer_language"],
     "surface_noise": ["typos", "casual_writing", "noise", "suffixes"],
     "encoding": ["encode", "sensitive_words", "tokenbreak", "ascii_art",
-                 "payload_split"],
+                 "payload_split", "word_art"],
     "container": ["structural", "neutral_container"],
     "role_framing": ["persona", "framing", "cognitive", "impersonation",
                      "benign_role", "persona_template"],

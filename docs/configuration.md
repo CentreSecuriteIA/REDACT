@@ -650,8 +650,8 @@ the default) and in `params["jailbreaks"]`.
 ### Release notes
 
 **Upgrading from the previous release (spec version 1.0, now 1.3).** The
-jailbreak library grew from 151 techniques in 23 families to 218 active ones
-(225 registered, 7 retired) in 31 families and five layers. What that asks of
+jailbreak library grew from 151 techniques in 23 families to 219 active ones
+(226 registered, 7 retired) in 32 families and five layers. What that asks of
 a run you already have, and what you will see; each point has its note below.
 
 - **One re-plan is planned: the adversarial kind.** The packaged attacks now
@@ -677,7 +677,7 @@ a run you already have, and what you will see; each point has its note below.
   not, a technique is drawn only for the inputs it applies to, several
   rules are new, and the request obfuscation's families are counted apart
   from the obfuscation layer's, so the attacks draw every technique of
-  their pool. The default attack pool is 204 techniques in 27 families
+  their pool. The default attack pool is 205 techniques in 28 families
   (142 in 22 before; 178 in 24 at spec 1.2). The `eval` type's pool and
   draws are held, at 36
   techniques in 10 families, but for the ASCII-art cap, which changes the font
@@ -814,9 +814,9 @@ A fresh plan of the adversarial kind draws them: the default attack pool goes
 from 178 techniques in 24 families to 202 in 26, and since each adds members
 or a family to deal, some units of a fresh plan draw other techniques than
 they did with the same seed. A plan kept from spec 1.2 resumes with the
-growth WARNING, which names the twenty-four (and the two payload splits,
-below), and does not draw them until it is planned again with
-`resume=False`. New rules bind a fresh plan:
+growth WARNING, which names the twenty-four (and the two payload splits
+and the word art, below), and does not draw them until it is planned again
+with `resume=False`. New rules bind a fresh plan:
 `persona_template` refuses `fsh`, `dap`, `ascii_art` and `impersonation`;
 `fake_turns` refuses `continuation`, `indirect`, `framing`, `persona`,
 `cognitive`, `persona_template`, `structural` and `neutral_container`, and
@@ -865,16 +865,34 @@ parts A, B, C ... and writes one of eight variants that asks the reader to join
 them ([techniques.md](techniques.md#what-the-families-do)). A fresh plan of
 the adversarial kind draws them, in about one unit in ten: the default
 attack pool goes from 202 techniques in 26 families to 204 in 27. The family
-refuses `ascii_art`, `encode` and `fake_turns` and, like `translation`, is
-kept from `fsh` and `dap`, so some units of a fresh plan draw other
-techniques than they did with the same seed, and the `encode` family is
-picked a little less (854 picks in 3,000 units, 819 now); the nine heavy
-encodings, which only a unit with three points left can take, are drawn about
-a seventh less often (357 draws in six plans of 2,000 units, 308 now). A plan
-kept from before resumes with the growth WARNING, which names the two, and
-does not draw them until it is planned again with `resume=False`. The `eval`
-and natural kinds draw neither: both pools are as they were.
+refuses `ascii_art`, `encode`, `fake_turns` and `word_art` and, like
+`translation`, is kept from `fsh` and `dap`, so some units of a fresh plan
+draw other techniques than they did with the same seed. A plan kept from
+before resumes with the growth WARNING, which names the two, and does not
+draw them until it is planned again with `resume=False`. The `eval` and
+natural kinds draw neither: both pools are as they were.
 
+**Release note: the word art.** One technique of a new obfuscation family,
+`word_art` (spec 1.3, order 55, complexity 3, attack only): `to_word_art`
+has the generation model mark the text's harmful words (one call, the
+word-list parse and rejections of `sensitive_words` and `tokenbreak`), draws
+the first in an ASCII-art font chosen as `to_ascii_art` chooses its fonts,
+puts `[MASK]` in its place in the text, and writes one of eight variants that
+asks the reader to read the art and put the word back
+([techniques.md](techniques.md#what-the-families-do)). A fresh plan of the
+adversarial kind draws it, in about one unit in thirteen: the default attack
+pool goes from 204 techniques in 27 families to 205 in 28. The family refuses
+`ascii_art`, `payload_split`, `encode`, `sensitive_words`, `tokenbreak`,
+`structural`, `neutral_container` and `fake_turns` and, like `translation`
+and `payload_split`, is kept from `fsh` and `dap`, so some units of a fresh
+plan draw other techniques than they did with the same seed. The two new
+families share the units that have three points of the budget left, which the
+nine heavy encodings need too, and the `encode` family is picked less
+(854 picks in 3,000 units, 806 now): the heavy encodings are drawn about half
+as often (357 draws in six plans of 2,000 units, 190 now), one in about 500
+units each in the default kind. A plan kept from before resumes with the
+growth WARNING, which names it, and does not draw it until it is planned
+again with `resume=False`. The `eval` and natural kinds do not draw it.
 **Release note: the techniques spec 1.2 adds.** Forty-eight techniques in
 six groups, below. A fresh plan draws them; since each adds members to deal,
 or a family, some units of a fresh plan draw other techniques than they did

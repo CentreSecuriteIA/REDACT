@@ -14,6 +14,7 @@ from .suffixes import get_suffix_functions
 from .tokenbreak import get_tokenbreak_functions
 from .translation import get_translation_functions
 from .typos import get_typos_functions
+from .word_art import get_word_art_functions
 
 
 def get_all_obfuscation_functions() -> list[Callable]:
@@ -31,4 +32,5 @@ def get_all_obfuscation_functions() -> list[Callable]:
         + get_noise_functions()
         + get_neutral_container_functions()
         + get_payload_split_functions()
+        + get_word_art_functions()
     )
