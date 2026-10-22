@@ -231,6 +231,19 @@ def test_a_natural_plan_of_spec_1_2_finds_the_urgent_ask_as_the_library_s_growth
         ["to_ask_with_urgency"], [])
 
 
+def test_an_attack_plan_of_spec_1_2_finds_the_four_translations_as_growth():
+    """Spec 1.3 switched on the translation of Hmong, Chinese, Hindi and
+    Amharic, dated by their rows' ``translation_since``: the pool of an
+    attack plan made at 1.2 differs by those four names, which the library
+    added after the plan, so the plan is kept and the run warns."""
+    four = ["to_amharic", "to_chinese", "to_hindi", "to_hmong"]
+    pool = technique_pool(resolve(None, "adversarial"))
+    made_with = {"spec_version": "1.2", "pool": sorted(
+        fn.__name__ for fn in pool if fn.__name__ not in four)}
+    assert JPipe._library_change(made_with, pool, registry(all_techniques())) == (
+        four, [])
+
+
 # --- the techniques the library retired ----------------------------------------
 
 #: Retired by spec version 1.1: three duplicates of

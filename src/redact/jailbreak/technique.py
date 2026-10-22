@@ -33,6 +33,8 @@ _SPEC_PATH = _CONFIGS / "combination_spec.json"
 #: their techniques are named; every other key goes into each entry it makes.
 _GENERATOR_KEYS = ("file", "where", "name")
 #: The keys a data row may give its technique's entry, over the generator's.
+#: A row's ``<family>_since`` (``translation_since``) is read over its
+#: ``since`` for that family's technique alone.
 _ROW_KEYS = ("complexity", "since", "deprecated")
 
 DISCARDED = "DISCARDED"
@@ -111,10 +113,13 @@ def read_spec(path: Path) -> dict:
     technique, named ``name`` with ``{slug}`` the row's ``slug``, whose
     entry is ``families`` (the generator's family) and the generator's
     other keys, with the row's ``complexity``, ``since`` and ``deprecated``
-    over them. A row's technique still needs its function, which the
-    family's module builds from the same file. A key starting with ``_`` is
-    a comment. ``layers_off_by_default`` (absent is none) lists layers of
-    ``layer_order`` that a kind of the augmentation section denies unless
+    over them; the row's ``<family>_since`` (``translation_since``) is that
+    family's ``since``, for a language one of whose families came in a later
+    spec version than its row. A row's technique still needs its function,
+    which the family's module builds from the same file. A key starting
+    with ``_`` is a comment. ``layers_off_by_default`` (absent is none)
+    lists layers of ``layer_order`` that a kind of the augmentation section
+    denies unless
     its ``layers.allow`` names them
     (:func:`redact.jailbreak.augmentation.resolve`). ``decode_hint_rate``
     (absent is 0) is the share of hinted encodings written with a hint
@@ -154,8 +159,11 @@ def read_spec(path: Path) -> dict:
                     f"combination_spec.json: the generator of {family!r} makes "
                     f"{name!r}, which the spec has already; give its row in "
                     f"{generator['file']} another slug.")
-            techniques[name] = {"families": [family], **given,
-                                **{key: row[key] for key in _ROW_KEYS if key in row}}
+            entry = {"families": [family], **given,
+                     **{key: row[key] for key in _ROW_KEYS if key in row}}
+            if f"{family}_since" in row:
+                entry["since"] = row[f"{family}_since"]
+            techniques[name] = entry
     return {**spec, "techniques": techniques}
 
 

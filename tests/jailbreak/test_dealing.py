@@ -376,8 +376,12 @@ _BUDGETS = [
 # archetypes moved it once more: a wider persona family changes the member
 # some hacking draws land on and, through the unit's rng and its group's
 # counts, the rest of their draw (149 of the 240 dealt units, 42 of the 200
+# undealt draws). The four spec 1.3 translations (Hmong, Chinese, Hindi,
+# Amharic) moved it once more: a wider translation family changes the member
+# some translation draws land on and, through the unit's rng and its group's
+# counts, the rest of their draw (38 of the 240 dealt units, 7 of the 200
 # undealt draws).
-_PINNED_DRAWS = "57cad840b5b37c9e929af781978ea45c43e7fc1797460dea73e5c894ee8eb413"
+_PINNED_DRAWS = "45ef42c3003ceaa2b668cea0c8040f057115d1c045cf41b9dcd88527cd3a2020"
 
 
 def test_draws_without_the_request_obfuscation_are_those_made_before_it_was_counted():

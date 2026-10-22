@@ -1,6 +1,6 @@
 # Jailbreak techniques
 
-The jailbreak stage draws from 238 active techniques in 5 layers and 35
+The jailbreak stage draws from 242 active techniques in 5 layers and 35
 families; the first layer, `rewrite`, holds 16 and is off by default
 ([below](#layers)).
 `configs/jailbreak/combination_spec.json` gives each technique (the
@@ -61,9 +61,9 @@ on. (`to_rewrite`, despite its name, is an `indirect` request technique.)
 | `rewrite` | 3 | 16 | at most 1 |
 | `hacking` | 4 | 35 | at most 1 |
 | `manipulation` | 3 | 15 | at most 1 |
-| `obfuscation` | 13 | 104 | no cap |
+| `obfuscation` | 13 | 108 | no cap |
 | `requests` | 12 | 68 | at most 1 |
-| all | 35 | 238 | |
+| all | 35 | 242 | |
 <!-- END layers -->
 
 ## Families and techniques
@@ -89,7 +89,7 @@ that call a model call the generation model.
 | manipulation | `dap` | `example_priming` |  | 6 | `to_dap_selected_short`, `to_dap_selected_long`, `to_dap_selected_many` | yes | `to_dap_random_short`, `to_dap_random_long`, `to_dap_selected_short`, `to_dap_selected_long`, `to_dap_random_many`, `to_dap_selected_many` |
 | manipulation | `fake_turns` | `example_priming` |  | 3 | no | no | `to_fake_system_turn`, `to_fake_assistant_turn`, `to_fake_history` |
 | manipulation | `fsh` | `example_priming` |  | 6 | `to_fsh_selected_short`, `to_fsh_selected_long`, `to_fsh_selected_many` | yes | `to_fsh_random_short`, `to_fsh_random_long`, `to_fsh_selected_short`, `to_fsh_selected_long`, `to_fsh_random_many`, `to_fsh_selected_many` |
-| obfuscation | `translation` | `language` | 10 | 19 | yes | no | `to_french`, `to_japanese`, `to_russian`, `to_spanish`, `to_german`, `to_arabic`, `to_turkish`, `to_czech`, `to_vietnamese`, `to_greek`, `to_croatian`, `to_swahili`, `to_thai`, `to_khmer`, `to_nepali`, `to_zulu`, `to_scots_gaelic`, `to_bengali`, `to_javanese` |
+| obfuscation | `translation` | `language` | 10 | 23 | yes | no | `to_french`, `to_japanese`, `to_russian`, `to_spanish`, `to_german`, `to_arabic`, `to_turkish`, `to_czech`, `to_vietnamese`, `to_greek`, `to_croatian`, `to_swahili`, `to_thai`, `to_khmer`, `to_nepali`, `to_zulu`, `to_scots_gaelic`, `to_bengali`, `to_javanese`, `to_hmong`, `to_chinese`, `to_hindi`, `to_amharic` |
 | obfuscation | `typos` | `surface_noise` | 20 | 4 | yes | no | `to_rewrite_with_typos_low`, `to_rewrite_with_typos_medium`, `to_rewrite_with_typos_high`, `to_rewrite_with_typos_insane` |
 | obfuscation | `casual_writing` | `surface_noise` | 30 | 9 | no | no | `to_lowercase`, `to_uppercase`, `to_no_sentence_capitals`, `to_dropped_spaces`, `to_doubled_spaces`, `to_dropped_punctuation`, `to_doubled_punctuation`, `to_abbreviations`, `to_stripped_accents` |
 | obfuscation | `noise` | `surface_noise` | 35 | 12 | no | no | `to_random_capitals_low`, `to_random_capitals_medium`, `to_random_capitals_high`, `to_scrambled_letters_low`, `to_scrambled_letters_medium`, `to_scrambled_letters_high`, `to_keyboard_typos_low`, `to_keyboard_typos_medium`, `to_keyboard_typos_high`, `to_emoji_sprinkle_low`, `to_emoji_sprinkle_medium`, `to_emoji_sprinkle_high` |
@@ -173,14 +173,30 @@ which the script rule reads), and whether it has a `translation` technique
 spec's `generators` make a technique entry of each marked row as the spec
 loads, and the two families' modules build the functions from the same
 rows, in the table's order. Of the twenty-six rows, all have an
-answer-language technique and nineteen a translation: not Maori, nor the six
-rows spec version 1.2 added (Hmong, Guarani, Chinese, Hindi, Yoruba,
-Amharic), whose translations wait for each language's measured length ratio
-and GlotLID labels, a measurement with the translation model on a GPU. Of
-those six, Chinese is scored high (0, as Japanese), Hindi mid (1, as Turkish
-and Vietnamese), and Hmong, Guarani, Yoruba and Amharic low (2, as Zulu and
-Swahili). The translation family
-kept the order it had; the answer languages took the table's, which puts
+answer-language technique and twenty-three a translation: not Maori, nor
+Guarani and Yoruba, two of the six rows spec version 1.2 added (Hmong,
+Guarani, Chinese, Hindi, Yoruba, Amharic). Spec version 1.3 switched on the
+translations of the other four (Hmong, Chinese, Hindi, Amharic) after a
+measurement with the translation model on a GPU (2026-10-22: TranslateGemma
+27B on the FLORES-200 devtest, 1,012 sentences, and on REDACT's inputs, with
+the whole machine-translation path): 96% to 100% of the units accepted,
+GlotLID reading 99.8% to 99.9% of the translations as the language, and
+runaway replies (1,500 tokens or more) in none of Chinese's and Hindi's 1,012
+sentences, 3 of Amharic's and 4 of Hmong's. Guarani stays an
+answer language, since TranslateGemma loops on a fifth of its sentences and
+only 40% of the units pass; Yoruba too, since the judge rejects 41% of its
+calls and 93% of the units pass, below the 97% bar. A row's
+`translation_since` (`"1.3"` for these four) dates its translation apart from
+its `since` (`"1.2"`, the answer language), so a plan kept from spec 1.2
+resumes with the growth WARNING. Chinese is scored high (0, as Japanese),
+Hindi mid (1, as Turkish and Vietnamese), and Hmong, Guarani, Yoruba and
+Amharic low (2, as Zulu and Swahili). Two of the four are on watch, as Scots
+Gaelic is: the judge rejects 20% of Hmong's calls (a back-translation
+chrF++ of 45, 10 points below the shipped languages') and Amharic's chrF++
+on the devtest is 9 points below NLLB-200's. Hmong is sent to the translation
+model by its name, never a code (`hmn` and `mww` gave Hawaiian and Marathi);
+Chinese is accepted as `cmn_Hani` or `wuu_Hani`. The translation family
+kept the order it had, the four joining at their rows; the answer languages took the table's, which puts
 Swahili before Thai, so a fresh plan that drew one of the two draws the
 other (a kept plan replays by name). The table is read from the package
 only. To add a language: [extending.md](extending.md#add-a-language).
@@ -253,8 +269,8 @@ technique is picked first. A technique may not join a combination when:
   `translation`, `ascii_art`, `payload_split` and `word_art` families and
   the `heavy` `encode` techniques, except those also in `sensitive_words`;
 - it pairs a `needs_latin` technique with a translation into a script
-  other than Latin: Japanese, Russian, Arabic, Greek, Thai, Khmer, Nepali
-  or Bengali (each language's `script` is in its row of
+  other than Latin: Japanese, Russian, Arabic, Greek, Thai, Khmer, Nepali,
+  Bengali, Chinese, Hindi or Amharic (each language's `script` is in its row of
   `configs/jailbreak/languages.json`). After the translation the encoding or
   the Latin-letter noise would change nothing, yet count in
   `num_techniques`; before it, the translator would get a cipher. The
@@ -342,7 +358,7 @@ their own. The natural kind draws only what is marked natural: by default
 | `encode` | `to_leetspeak_basic` |
 | `suffixes` | `to_adversarial_suffix_punctuation`, `to_adversarial_suffix_emoji` |
 
-With `"natural": {"translation": true}` the nineteen translations join them.
+With `"natural": {"translation": true}` the 23 translations join them (95).
 Attack-only: `structural`, `continuation`, `temporal`, the high and insane
 typos, the four high-density noise techniques, `to_answer_as_dialogue`, `to_answer_as_story`,
 the three answer formats of spec version 1.3 (`to_dual_answer`,
@@ -526,16 +542,19 @@ wrappers. The family is attack-only, and the eval type does not draw it.
   `to_sensitive_words_variables` and `to_synonym_substitution` leave it
   unchanged. `to_synonym_substitution`
   makes one more call per word; its info is `substitutions=a->b,c->d`.
-- `translation` covers 19 languages, the rows of
+- `translation` covers 23 languages, the rows of
   [the language table](#the-language-table) marked `translation` (not Maori,
   which TranslateGemma renders
   with invented sensitive and technical terms, fluently enough to pass every
-  check) in three resource tiers, which the table scores by complexity:
+  check, nor Guarani and Yoruba, which measured below the acceptance bar) in
+  three resource tiers, which the table scores by complexity:
   high (`to_french`, `to_japanese`, `to_russian`, `to_spanish`, `to_german`,
-  `to_arabic`; 0), mid (`to_turkish`,
-  `to_czech`, `to_vietnamese`, `to_greek`, `to_croatian`; 1) and low
+  `to_arabic`, `to_chinese`; 0), mid (`to_turkish`,
+  `to_czech`, `to_vietnamese`, `to_greek`, `to_croatian`, `to_hindi`; 1) and low
   (`to_swahili`, `to_thai`, `to_khmer`, `to_nepali`, `to_zulu`,
-  `to_scots_gaelic`, `to_bengali`, `to_javanese`; 2). On a chat translator
+  `to_scots_gaelic`, `to_bengali`, `to_javanese`, `to_hmong`, `to_amharic`; 2),
+  the last two (spec 1.3) on watch like Scots Gaelic ([the language
+  table](#the-language-table)). On a chat translator
   each is a translate, check and retry loop on the `translation` model. On
   a machine-translation model (`translategemma-27b`, the default) the text
   goes paragraph by paragraph; each piece is checked for its language
@@ -850,7 +869,8 @@ Also beyond the reference list:
 - the answer formats code, dialogue, story and structured data;
 - continuation attacks (4) and indirect task embedding (6);
 - the answer languages Zulu, Scots Gaelic, Bengali and Javanese, and (spec
-  version 1.2) Hmong, Guarani, Chinese, Hindi, Yoruba and Amharic;
+  version 1.2) Hmong, Guarani, Chinese, Hindi, Yoruba and Amharic, of which
+  (spec version 1.3) Hmong, Chinese, Hindi and Amharic are also translations;
 - (spec version 1.3) the persona templates (11 frames, 6 mechanics), three
   named personas (a mercenary, an underground hacker, an anarchist
   philosopher), the fake turns (3), the payload split (2: at word boundaries, or where a

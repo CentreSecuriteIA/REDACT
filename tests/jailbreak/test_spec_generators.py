@@ -107,6 +107,16 @@ def test_a_row_s_complexity_since_and_deprecated_win_over_the_generator_s(tmp_pa
         "kinds": ["adversarial"], "since": "1.2", "deprecated": "1.3"}
 
 
+def test_a_row_s_family_since_dates_that_family_s_technique_alone(tmp_path):
+    """A language that joined a second family later: the row's ``since`` dates
+    the first, its ``<family>_since`` the second."""
+    spec = _spec(tmp_path, [{"slug": "first", "since": "1.2", "stand_in_since": "1.3"}])
+    assert spec["techniques"]["to_first_stand_in"]["since"] == "1.3"
+    packaged = T.load_spec()["techniques"]
+    assert packaged["to_chinese"]["since"] == "1.3"
+    assert packaged["to_ask_answer_in_chinese"]["since"] == "1.2"
+
+
 def test_where_keeps_only_the_rows_whose_column_is_true(tmp_path):
     spec = _spec(tmp_path, [{"slug": "first", "drawn": True},
                             {"slug": "second", "drawn": False}], where="drawn")

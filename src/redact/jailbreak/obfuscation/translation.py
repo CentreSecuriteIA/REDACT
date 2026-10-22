@@ -1,5 +1,5 @@
 """Translation techniques: the prompt translated to one of the languages of
-``configs/jailbreak/languages.json`` (19 today).
+``configs/jailbreak/languages.json`` (23 today).
 
 A chat translation model (the translation role's by default) translates and
 checks, retrying with the check's feedback. A machine-translation model gets
@@ -33,15 +33,18 @@ MACHINE_TRANSLATION_ROLE = "machine_translation"
 #: technique). The tables below are keyed by the slug.
 LANGUAGES = [row for row in data_rows("languages.json") if row["translation"]]
 
-#: The ISO 639-1 code a machine-translation model is sent for each language.
-#: Its template takes an unknown code as the language's name, so every
-#: language needs one.
+#: The code a machine-translation model is sent for each language: its
+#: ISO 639-1 code. Its template takes an unknown code as the language's name,
+#: so every language needs one. Hmong has none, and the model takes it only by
+#: that name (``hmn`` gave Hawaiian for 39% of the sentences, ``mww`` Marathi
+#: for 68%).
 LANGUAGE_CODES = {
     "french": "fr", "japanese": "ja", "russian": "ru", "spanish": "es",
     "german": "de", "arabic": "ar", "turkish": "tr", "czech": "cs",
     "vietnamese": "vi", "greek": "el", "croatian": "hr", "swahili": "sw",
     "thai": "th", "khmer": "km", "nepali": "ne", "zulu": "zu",
     "scots_gaelic": "gd", "bengali": "bn", "javanese": "jv",
+    "hmong": "Hmong", "chinese": "zh", "hindi": "hi", "amharic": "am",
 }
 
 #: The GlotLID labels a translation into each language may carry: its own,
@@ -67,19 +70,25 @@ ACCEPTED_LABELS = {
     "scots_gaelic": {"gla_Latn"},
     "bengali": {"ben_Beng"},
     "javanese": {"jav_Latn"},  # never ind_Latn: Indonesian is a real failure
+    "hmong": {"mww_Latn"},
+    "chinese": {"cmn_Hani", "wuu_Hani"},  # GlotLID never says zho_*
+    "hindi": {"hin_Deva", "anp_Deva"},
+    "amharic": {"amh_Ethi"},
 }
 
 #: A translation's length over its input's, in characters, at the median,
 #: measured: TranslateGemma 27B translating the FLORES-200 devtest (1,012
-#: sentences) from English, on 2026-10-19. The seven figures kept from an
-#: earlier pod test (Swahili to Javanese, Scots Gaelic aside) agree with that
-#: run within 0.02.
+#: sentences) from English, on 2026-10-19 (the first nineteen languages) and
+#: 2026-10-22 (Chinese, Hindi, Amharic and Hmong). The seven figures kept from
+#: an earlier pod test (Swahili to Javanese, Scots Gaelic aside) agree with the
+#: first run within 0.02.
 MEDIAN_RATIO = {
     "french": 1.27, "japanese": 0.47, "russian": 1.18, "spanish": 1.22,
     "german": 1.24, "arabic": 0.96, "turkish": 1.13, "czech": 1.05,
     "vietnamese": 1.16, "greek": 1.28, "croatian": 1.07, "swahili": 1.16,
     "thai": 1.02, "khmer": 1.09, "nepali": 1.04, "zulu": 1.17,
     "scots_gaelic": 1.31, "bengali": 1.07, "javanese": 1.12,
+    "hmong": 1.31, "chinese": 0.34, "hindi": 1.08, "amharic": 0.76,
 }
 
 

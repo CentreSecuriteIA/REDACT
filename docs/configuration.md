@@ -474,7 +474,7 @@ type is a one-key override: its pool keeps the other 28 techniques. An allow
 list left empty by this is dropped when the other list still names
 something; when nothing but translation was allowed, the kind raises.
 
-The packaged attacks have it `true`, drawing all 19 languages, and the
+The packaged attacks have it `true`, drawing all 23 languages, and the
 natural kind `false`; the eval type narrows its attacks to the eight
 low-resource languages. They run on the `translation` role's default,
 `translategemma-27b`, a local vLLM model
@@ -650,8 +650,8 @@ the default) and in `params["jailbreaks"]`.
 ### Release notes
 
 **Upgrading from the previous release (spec version 1.0, now 1.3).** The
-jailbreak library grew from 151 techniques in 23 families to 238 active ones
-(245 registered, 7 retired) in 35 families and five layers. What that asks of
+jailbreak library grew from 151 techniques in 23 families to 242 active ones
+(249 registered, 7 retired) in 35 families and five layers. What that asks of
 a run you already have, and what you will see; each point has its note below.
 
 - **One re-plan is planned: the adversarial kind.** The packaged attacks now
@@ -667,7 +667,7 @@ a run you already have, and what you will see; each point has its note below.
 - **The natural kind's pool changed.** The spec's `kinds` narrowed it to the
   techniques marked natural, and spec 1.2 then grew it, to 71 techniques in
   13 families by default (46 in 8 before); spec 1.3 added the urgent ask, to
-  72 (91 with `"translation": true`). A
+  72 (95 with `"translation": true`). A
   natural plan made before the narrowing raises on resume: run the natural
   kind with `resume=False`. One made since resumes with the WARNING above.
   A `config_dir` copy of `augmentations.json` made before spec 1.2 does not
@@ -677,7 +677,7 @@ a run you already have, and what you will see; each point has its note below.
   not, a technique is drawn only for the inputs it applies to, several
   rules are new, and the request obfuscation's families are counted apart
   from the obfuscation layer's, so the attacks draw every technique of
-  their pool. The default attack pool is 208 techniques in 28 families
+  their pool. The default attack pool is 212 techniques in 28 families
   (142 in 22 before; 178 in 24 at spec 1.2). The `eval` type's pool and
   draws are held, at 36
   techniques in 10 families, but for the ASCII-art cap, which changes the font
@@ -834,7 +834,7 @@ combinations, so a rule changes none of them.
 The natural kind gains one technique, `to_ask_with_urgency`: `asking` is a
 natural family, and the owner decided that an urgent ask is a natural
 variation, so it takes its family's kinds and the natural pool is 72
-techniques (91 with `"translation": true`). `answer_format` is a natural
+techniques (95 with `"translation": true`). `answer_format` is a natural
 family too, but its three new members say `"kinds": ["adversarial"]`. A fresh
 natural plan may draw the urgent ask; a natural plan kept from before
 resumes with the growth WARNING above, which names it, and does not draw it
@@ -969,8 +969,8 @@ in `techniques.deny` and allows none of the families), so its pool stays at
 - *Six answer languages.* `answer_language` gains Hmong, Guarani, Chinese,
   Hindi, Yoruba and Amharic (rows of `configs/jailbreak/languages.json`): six
   pure techniques, `to_ask_answer_in_<slug>`, in the default attack pool and
-  the natural pool. They have no translation yet: each needs its length ratio
-  and GlotLID labels measured with the translation model first. The answer
+  the natural pool. Four of them became translations in spec 1.3 (the note
+  on the four translation languages). The answer
   languages now follow the language table's order, which puts Swahili before
   Thai, so a fresh plan that drew one of the two draws the other (a kept plan
   replays by name) ([techniques.md](techniques.md#the-language-table)).
@@ -1121,12 +1121,12 @@ application costs 2 to 4 calls; a distractor costs 1 to 3 (a reply with no
 text is asked for again), and no check reads it. They add no model role.
 
 The layer is off, so a run that does not allow it changes nowhere: the
-default attack pool is still 208 techniques in 28 families, the natural pool
+default attack pool is still 212 techniques in 28 families, the natural pool
 the 72 (every rewrite technique says `["adversarial"]`), and the `eval`
 type's pool and draws are held (36 techniques; its allow lists name no rewrite
 family, so allowing the layer there adds nothing until the families are
 allowed too). A kind that allows the layer draws them: the packaged
-adversarial kind's pool is then 224 techniques in 31 families, its rounds say
+adversarial kind's pool is then 228 techniques in 31 families, its rounds say
 `include_rewrite: true` (an adversarial plan kept from a section that allowed
 the layer before it held a technique raises on resume naming `rounds`), a
 budget round deals the layer at `layer_rates.rewrite` (the spec's 0: set it,
@@ -1137,6 +1137,25 @@ New rules bind a fresh plan, both ways: `persuasion` refuses `impersonation`
 and `ascii_art`, `tense_rewrite` refuses `temporal`, and `model_distractors`
 refuse `ascii_art`, `distractor_prefix` and `distractor_suffix`; a kept plan
 replays its recorded combinations, so a rule changes none of them.
+
+**Release note: four more translation languages.** Spec 1.3 switches the
+translation of four answer languages on: `to_hmong`, `to_chinese`, `to_hindi`
+and `to_amharic` (their answer languages, `to_ask_answer_in_<slug>`, are as
+they were), measured on a GPU pod on 2026-10-22 with the machine-translation
+path (TranslateGemma 27B, GlotLID, the back-translation judge). Guarani and
+Yoruba stay answer languages only: TranslateGemma loops on a fifth of
+Guarani's sentences, and the judge rejects 41% of Yoruba's calls. The default
+attack pool goes from 208 techniques in 28 families to 212 in 28, and the
+natural pool with `"translation": true` from 91 to 95 (72 without, as
+before); the `eval` type names its eight translations, so its pool and draws
+are held (36 techniques in 10 families). Since the family is wider some
+units of a fresh plan draw other techniques than they did with the same seed.
+A plan kept from before resumes with the growth WARNING, which names the
+four, and does not draw them until it is planned again with `resume=False`.
+Amharic and Hmong are on watch, as Scots Gaelic is (the judge rejects 20% of
+Hmong's calls, and Amharic's chrF++ on FLORES-200 is 9 points below
+NLLB-200's); Hmong is sent to the translation model by its name, not a code
+([techniques.md](techniques.md#the-language-table)).
 
 ## The model registry
 

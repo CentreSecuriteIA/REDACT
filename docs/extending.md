@@ -293,7 +293,7 @@ contract.
      names the natural kind draws by default, and
      `tests/jailbreak/test_pool.py` fails until the owner decides: give the
      technique `"kinds": ["adversarial"]`, or add its name to the fixture.
-     The same file checks the attack pool's 208 techniques in 28 families.
+     The same file checks the attack pool's 212 techniques in 28 families.
    - **The eval pool.** `configs/dataset_types/eval.json` allows whole
      families (`encode`, `fsh`, `dap`, `framing`, `structural`, `ascii_art`,
      `continuation`, `temporal`), so a technique added to one of them joins
@@ -347,7 +347,8 @@ must be true), `name` (the technique name, `{slug}` the row's `slug`) and
 the keys every technique's entry takes (`complexity`, `kinds`,
 `requires_llm`, ...). Loading the spec (`technique.read_spec`) adds one
 entry per row, the row's `complexity`, `since` and `deprecated` over the
-generator's; the family's module builds the functions from the same file
+generator's (and its `<family>_since`, `translation_since`, as that family's
+`since`); the family's module builds the functions from the same file
 (`technique.data_rows`). A file with no rows registers the family with no
 technique. The spec, its data files and the template files are read from
 the package only: a copy of them in a recipe's `config_dir` is ignored, with
@@ -368,16 +369,23 @@ The `translation` and `answer_language` techniques are generated from
    technique's place in its family, which the draws follow: append it, since
    moving a row changes which language a seed draws.
 2. **Date it**: move the spec's `version` up and give the row that `since`,
-   so a jailbreak plan kept from before resumes with a WARNING.
-3. **For a translation**, add the language's ISO 639-1 code, its accepted
+   so a jailbreak plan kept from before resumes with a WARNING. A language
+   already in the table that gains a family (an answer language measured as a
+   translation) keeps its `since` and gets `translation_since` for the new
+   technique, which the spec's `version` then dates.
+3. **For a translation**, add the language's ISO 639-1 code (or its name, when
+   the translation model takes it only by name, as Hmong), its accepted
    GlotLID labels and its median length ratio, measured with the
    translation model on a parallel corpus, to `LANGUAGE_CODES`,
    `ACCEPTED_LABELS` and `MEDIAN_RATIO` in `obfuscation/translation.py`,
    keyed by the slug. Import fails without them, naming the slug. Check that
-   the translation model covers the language first. The six rows spec 1.2
-   added (Hmong, Guarani, Chinese, Hindi, Yoruba, Amharic) are answer
-   languages only, `translation` false, until that measurement is made on a
-   GPU: each translation is then its row's `true` and those three entries.
+   the translation model covers the language first. Of the six rows spec 1.2
+   added (Hmong, Guarani, Chinese, Hindi, Yoruba, Amharic), the measurement
+   was made on a GPU pod on 2026-10-22 and four became translations in spec
+   1.3: their rows say `"translation": true, "translation_since": "1.3"` and
+   they have those three entries. Guarani (it loops on a fifth of its
+   sentences) and Yoruba (the judge rejects 41% of its calls) stay answer
+   languages only.
 4. **Then as for any technique**: regenerate the registry fixture and, for
    an answer language (a template technique), the template draws; decide the
    natural pool (an answer language joins it: add its name to

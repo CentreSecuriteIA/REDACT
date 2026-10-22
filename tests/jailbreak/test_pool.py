@@ -166,10 +166,11 @@ def test_the_default_variation_pool_is_the_72_pinned_natural_techniques():
         "suffixes"}
 
 
-def test_the_default_attack_pool_is_208_techniques_in_28_families():
+def test_the_default_attack_pool_is_212_techniques_in_28_families():
     """Every active technique but casual writing and the natural-only
-    families: the 19 translations included, now the packaged adversarial
-    kind has its translation switch on; the seven spec 1.1 retired left out,
+    families: the 23 translations included, now the packaged adversarial
+    kind has its translation switch on (the four spec 1.3 ones are Hmong,
+    Chinese, Hindi and Amharic); the seven spec 1.1 retired left out,
     the fifteen spec 1.2 encodings, the twelve spec 1.2 noise techniques, the
     six spec 1.2 neutral containers, the six spec 1.2 answer languages, the
     four spec 1.2 many-shot fsh and dap variants, the eleven spec 1.3
@@ -179,20 +180,20 @@ def test_the_default_attack_pool_is_208_techniques_in_28_families():
     spec 1.3 persona archetypes in. Small talk and the benign roles leave it
     as it was."""
     pool = technique_pool(resolve(None, "adversarial"))
-    assert len(pool) == 208     # noqa: PLR2004
+    assert len(pool) == 212     # noqa: PLR2004
     assert len({fn.families[0] for fn in pool}) == 28     # noqa: PLR2004
 
 
 def test_the_rewrite_layer_is_off_by_default_and_layers_allow_adds_its_16_techniques():
     """The spec has the layer off by default, so the default attack pool is
-    the 208 and no other pool holds a rewrite technique; a section that allows
+    the 212 and no other pool holds a rewrite technique; a section that allows
     the layer gains the 16 of its three families, and nothing else leaves or
     joins."""
     default = technique_pool(resolve(None, "adversarial"))
     allowed = technique_pool(resolve(
         {"adversarial": {"layers": {"allow": ["rewrite"]}}}, "adversarial"))
     gained = [fn for fn in allowed if fn not in default]
-    assert (len(default), len(allowed), len(gained)) == (208, 224, 16)   # noqa: PLR2004
+    assert (len(default), len(allowed), len(gained)) == (212, 228, 16)   # noqa: PLR2004
     assert gained == _rewrites(all_techniques())
     assert {fn.families[0] for fn in gained} == {
         "persuasion", "tense_rewrite", "model_distractors"}
@@ -219,6 +220,7 @@ def test_the_natural_kind_draws_only_what_the_spec_marks_natural():
     # Translation is natural too, when the kind's switch is on.
     pool = technique_pool(resolve({"natural": {"translation": True}}, "natural"))
     assert sorted(fn.__name__ for fn in pool) == sorted(natural)
+    assert (len(NATURAL_POOL), len(pool)) == (72, 95)     # noqa: PLR2004
     # A family allowed whole gives its natural techniques only.
     typos = resolve({"natural": {"families": {"allow": ["typos"]},
                                  "techniques": {"allow": None}}}, "natural")
