@@ -549,10 +549,14 @@ wrappers. The family is attack-only, and the eval type does not draw it.
   technique. The encoding, splitting or substitution then applies to those
   words. A reply that is not a list of at most ten of the prompt's words
   rejects the result (`DISCARDED; reason=malformed word list`). A word is a
-  letter, then letters, digits, apostrophes, hyphens and combining marks
-  (not first), so a word a translation wrote in Bengali, Nepali, Thai or
-  Khmer, whose vowel signs and viramas are marks, is a word (a fresh plan
-  does not pair a translation with these steps, but a kept plan may).
+  letter, then letters, digits, apostrophes, hyphens, combining marks and
+  zero-width format characters (none first), so a word in Bengali, Nepali,
+  Thai or Khmer, whose vowel signs and viramas are marks, or in Persian or
+  Bengali with a zero-width joiner or non-joiner, is a word. A word of one
+  letter is refused unless it is a Chinese character, since the step would
+  change that letter wherever it stands, inside other words too; a word
+  named twice, in any case, counts once (the first spelling); a reply may
+  put straight or curly quotes, guillemets or an ellipsis around its words.
   `to_tokenbreak_split` and the separator branch of
   `to_tokenbreak_delimiter` cut a word between the characters a reader
   sees, as `to_separator` does, never between a letter and its marks; a
