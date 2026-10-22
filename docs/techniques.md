@@ -364,7 +364,7 @@ planned units; for 1,000 inputs of one category and entry type, planned
 with the packaged attack kind and seed 42:
 
 ```text
-Model calls: 816 of 1000 planned units call a model, 2470 to 7912 calls (translation 632 to 3792, from the spec's calls).
+Model calls: 846 of 1000 planned units call a model, 2334 to 8188 calls (translation 784 to 4704, from the spec's calls).
 ```
 
 The translation share goes to the translation model (a machine

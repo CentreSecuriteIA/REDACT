@@ -685,8 +685,9 @@ a run you already have, and what you will see; each point has its note below.
 - **More model calls, and new files.** A typo rewrite and a cognitive or
   persona scenario are now checked by a model, which costs calls (the typo
   and scenario notes), for the pending units of a kept plan too, and the
-  request obfuscation adds translations to a fresh attack plan (its notes).
-  Each kind
+  request obfuscation adds translations to a fresh attack plan (its notes);
+  an invented persona asks for its persona first, and `to_payload_split_semantic`
+  and `to_word_art` call the generation model too (their notes). Each kind
   writes a `<kind>.variants.csv` after a run, and its plan file records the
   `spec_version` its pool was drawn at.
 

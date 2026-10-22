@@ -479,7 +479,7 @@ pool of one variant named after the entry. `personas.json` and
    without being on the fixture's `known_short` list, which the regenerator
    keeps as it is. A pool that reaches its floor must leave
    `known_short`: the test fails until it does, so the list only shrinks.
-   13 of the 81 pools are on it today, in 5 families, all drawn by
+   13 of the 83 pools are on it today, in 5 families, all drawn by
    eval-pool techniques; `to_json`'s wrapper is not a pool yet.
 
 A new directive is a new list in the file and a technique that names it
