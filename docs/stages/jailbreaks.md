@@ -9,7 +9,7 @@ Augment the accepted inputs with technique combinations, in two kinds:
 
 | Kind | Writes | Default |
 |---|---|---|
-| `adversarial` | `Datasets/jailbreaks.csv`: jailbreak attacks | one round per input, by budget, from every active technique (212 in 28 families, the 23 translations among them) but `casual_writing` and the natural-only small talk and benign roles; half the units take a request obfuscation, a light encoding or a translation after the request |
+| `adversarial` | `Datasets/jailbreaks.csv`: jailbreak attacks | one round per input, by budget, from every active technique (214 in 29 families, the 23 translations among them) but `casual_writing` and the natural-only small talk and benign roles; half the units take a request obfuscation, a light encoding or a translation after the request |
 | `natural` | `Datasets/variations.csv`: natural variations | one technique per input, from the natural allow lists, which the spec's `kinds` narrow to 72 techniques (95 with `"translation": true`, which adds the 23 translations) ([techniques.md](../techniques.md#the-natural-pool)) |
 
 These are the packaged defaults, which a `training` run takes: both kinds
@@ -140,8 +140,9 @@ or error row, whose info is its rejection's, counts none. The framing
 techniques, the answer formats, the answer languages, asking, the
 distractors, impersonation, indirect, temporal, the neutral containers,
 small talk, the benign roles, the fake turns, the payload splits (which add
-`parts=<n>`) and the word art (which adds `font=<font>` and
-`detected_words=<word>`) write `variant=`, the
+`parts=<n>`), the word art (which adds `font=<font>` and
+`detected_words=<word>`) and the wording (which adds `detected_words=<words>`)
+write `variant=`, the
 persona templates the mechanic they drew (their frame is one per technique,
 not a variant), and an encoding with decode hints `hint=<name>` after its own
 info when it drew one (a row without one counts none and keeps its other
@@ -252,11 +253,13 @@ packaged attacks, the one re-plan this release asks of the adversarial kind
 once with `resume=False`, the natural kind's plan is not affected); the typo
 and the scenario checks, which cost model calls; the natural pool; and the
 techniques specs 1.2 and 1.3 add. A plan kept from spec 1.2 resumes with
-the growth WARNING above, naming the thirty techniques spec 1.3 adds
+the growth WARNING above, naming the thirty-six techniques spec 1.3 adds
 (the persona templates, the fake turns, three answer formats, seven
-members of the thin request families, two payload splits, the word art and
-three personas), all attack-only but the urgent ask, so only an
-adversarial plan names the others and a natural plan names that one. The
+members of the thin request families, two payload splits, the word art, the
+two wording techniques, three personas and four translations), all
+attack-only but the urgent ask and the translations, so an adversarial plan
+names the others, and a natural plan names the urgent ask, and the
+translations when its `translation` switch is on. The
 sixteen techniques of the `rewrite` layer are off by default, in no kind's
 pool, so no plan names them.
 

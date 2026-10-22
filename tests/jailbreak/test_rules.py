@@ -484,7 +484,8 @@ def test_word_art_joins_typos_noise_a_suffix_a_request_or_a_scene(other):
 @pytest.mark.parametrize("marking", [
     "to_sensitive_words_split", "to_sensitive_words_encode_base64",
     "to_sensitive_words_variables", "to_synonym_substitution",
-    "to_tokenbreak_split", "to_tokenbreak_prepend", "to_word_art"])
+    "to_tokenbreak_split", "to_tokenbreak_prepend", "to_word_art",
+    "to_pseudonym_substitution", "to_word_game"])
 def test_a_translation_refuses_a_step_that_has_a_model_mark_words_either_way(
         translation, marking):
     """The marking call finds a word in 62 of 100 harmful English inputs but in
@@ -501,6 +502,48 @@ def test_a_translation_refuses_a_step_that_has_a_model_mark_words_either_way(
     "to_summarize", "to_psychopath_persona", "to_fictional_world"])
 def test_a_translation_keeps_the_families_it_has_no_rule_against(other):
     assert _joins("to_french", other) and _joins(other, "to_french")
+
+
+@pytest.mark.parametrize("wording", ["to_pseudonym_substitution", "to_word_game"])
+@pytest.mark.parametrize("other", [
+    "to_sensitive_words_split", "to_sensitive_words_variables",
+    "to_sensitive_words_encode_base64", "to_synonym_substitution",
+    "to_tokenbreak_split", "to_tokenbreak_delimiter", "to_word_art", "to_ascii_art"])
+def test_wording_refuses_the_other_word_level_steps_and_ascii_art_either_way(
+        wording, other):
+    """The other steps that put the marked words in other terms, a font on the
+    text, and (above) a translation: one disguise of the words is enough, and
+    the key or the puzzles are long."""
+    assert not _joins(wording, other)
+    assert not _joins(other, wording)
+
+
+@pytest.mark.parametrize("wording", ["to_pseudonym_substitution", "to_word_game"])
+@pytest.mark.parametrize("other", [
+    "to_fsh_random_short", "to_fsh_selected_long", "to_dap_random_long",
+    "to_dap_selected_short", "to_fake_system_turn"])
+def test_wording_takes_the_manipulation_layer_s_obfuscation_block(wording, other):
+    """manipulation_blocked_obfuscation names the family: the key or the
+    puzzles and the benign pairs of fsh and dap would sit between the reader
+    and the request."""
+    assert not _joins(wording, other)
+    assert not _joins(other, wording)
+
+
+@pytest.mark.parametrize("wording", ["to_pseudonym_substitution", "to_word_game"])
+@pytest.mark.parametrize("other", [
+    "to_rewrite_with_typos_low", "to_random_capitals_low", "to_lowercase",
+    "to_adversarial_suffix_punctuation", "to_base64", "to_rot13", "to_payload_split",
+    "to_json", "to_csv_row", "to_summarize", "to_psychopath_persona",
+    "to_fictional_world"])
+def test_wording_joins_typos_noise_a_suffix_an_encoding_a_wrapper_a_request_or_a_scene(
+        wording, other):
+    assert _joins(wording, other) and _joins(other, wording)
+
+
+def test_wording_is_one_technique_of_its_family_in_a_combination():
+    assert not _joins("to_pseudonym_substitution", "to_word_game")
+    assert not _joins("to_word_game", "to_pseudonym_substitution")
 
 
 @pytest.mark.parametrize(("first", "then"), [

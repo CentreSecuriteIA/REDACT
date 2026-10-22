@@ -1,6 +1,6 @@
 # Jailbreak techniques
 
-The jailbreak stage draws from 242 active techniques in 5 layers and 35
+The jailbreak stage draws from 244 active techniques in 5 layers and 36
 families; the first layer, `rewrite`, holds 16 and is off by default
 ([below](#layers)).
 `configs/jailbreak/combination_spec.json` gives each technique (the
@@ -32,8 +32,8 @@ type does not), comes last, after the request. Within the obfuscation layer,
 families apply in the order of their `within_layer_order`, numbered in tens
 so a family added later slots in between: the whole-text rewrites first
 (`translation` 10, `typos` 20, `casual_writing` 30, `noise` 35), then the word-level
-steps (`sensitive_words` 40, `tokenbreak` 50, `word_art` 55), so a rewrite cannot undo a
-split or an encoded word, then `suffixes` 60, `payload_split` 65, `encode` 70, `structural` and
+steps (`sensitive_words` 40, `wording` 45, `tokenbreak` 50, `word_art` 55), so a rewrite cannot undo a
+split, an encoded word or a code name, then `suffixes` 60, `payload_split` 65, `encode` 70, `structural` and
 `neutral_container` 80 (each excludes the other, so they share the place)
 and `ascii_art` 90, the outermost. A plan made before this order applied
 `sensitive_words` and `tokenbreak` first; a kept plan replays the order its
@@ -61,9 +61,9 @@ on. (`to_rewrite`, despite its name, is an `indirect` request technique.)
 | `rewrite` | 3 | 16 | at most 1 |
 | `hacking` | 4 | 35 | at most 1 |
 | `manipulation` | 3 | 15 | at most 1 |
-| `obfuscation` | 13 | 108 | no cap |
+| `obfuscation` | 14 | 110 | no cap |
 | `requests` | 12 | 68 | at most 1 |
-| all | 35 | 242 | |
+| all | 36 | 244 | |
 <!-- END layers -->
 
 ## Families and techniques
@@ -94,6 +94,7 @@ that call a model call the generation model.
 | obfuscation | `casual_writing` | `surface_noise` | 30 | 9 | no | no | `to_lowercase`, `to_uppercase`, `to_no_sentence_capitals`, `to_dropped_spaces`, `to_doubled_spaces`, `to_dropped_punctuation`, `to_doubled_punctuation`, `to_abbreviations`, `to_stripped_accents` |
 | obfuscation | `noise` | `surface_noise` | 35 | 12 | no | no | `to_random_capitals_low`, `to_random_capitals_medium`, `to_random_capitals_high`, `to_scrambled_letters_low`, `to_scrambled_letters_medium`, `to_scrambled_letters_high`, `to_keyboard_typos_low`, `to_keyboard_typos_medium`, `to_keyboard_typos_high`, `to_emoji_sprinkle_low`, `to_emoji_sprinkle_medium`, `to_emoji_sprinkle_high` |
 | obfuscation | `sensitive_words` | `encoding` | 40 | 13 | yes | no | `to_sensitive_words_encode_base64`, `to_sensitive_words_encode_rot13`, `to_sensitive_words_encode_rot18`, `to_sensitive_words_encode_rot47`, `to_sensitive_words_encode_unicode`, `to_sensitive_words_encode_ascii`, `to_sensitive_words_encode_separator`, `to_sensitive_words_encode_leetspeak_basic`, `to_sensitive_words_encode_leetspeak_intermediate`, `to_sensitive_words_encode_leetspeak_advanced`, `to_sensitive_words_split`, `to_sensitive_words_variables`, `to_synonym_substitution` |
+| obfuscation | `wording` | `encoding` | 45 | 2 | yes | no | `to_pseudonym_substitution`, `to_word_game` |
 | obfuscation | `tokenbreak` | `encoding` | 50 | 3 | yes | no | `to_tokenbreak_prepend`, `to_tokenbreak_split`, `to_tokenbreak_delimiter` |
 | obfuscation | `word_art` | `encoding` | 55 | 1 | yes | no | `to_word_art` |
 | obfuscation | `suffixes` | `surface_noise` | 60 | 4 | no | no | `to_adversarial_suffix_punctuation`, `to_adversarial_suffix_fragments`, `to_adversarial_suffix_unicode`, `to_adversarial_suffix_emoji` |
@@ -224,7 +225,7 @@ technique is picked first. A technique may not join a combination when:
 - one of its families is in a taken family's `cross_incompatible_with`, or
   the reverse. The spec pairs `structural` with `ascii_art`; `translation`
   with `ascii_art` and with the three families that have a model mark words,
-  `sensitive_words`, `tokenbreak` and `word_art` (the marking call finds a
+  `sensitive_words`, `tokenbreak`, `word_art` and `wording` (the marking call finds a
   word in 62 of 100 harmful English inputs but in 3 to 36 of their
   translations, so a heavy encoding after a translation is discarded and a
   light one changes nothing); `ascii_art` with `framing`, `persona`, `cognitive`, `fsh`,
@@ -235,7 +236,10 @@ technique is picked first. A technique may not join a combination when:
   invented turn is a conversation already); `word_art` with `ascii_art`,
   `payload_split`, `encode`, `sensitive_words`, `tokenbreak`, `structural`,
   `neutral_container` and `fake_turns` (one disguise of the word, and the art
-  is long); `persona`, `cognitive`, `persona_template` and `persuasion` with
+  is long); `wording` with `sensitive_words`, `tokenbreak`, `word_art`,
+  `translation` and `ascii_art` (the other steps that put the marked words in
+  other terms, a translation the marking call fails on, and a font on a text
+  the key or the puzzles lengthen); `persona`, `cognitive`, `persona_template` and `persuasion` with
   `impersonation`, so a prompt never carries two identities; `persuasion`
   also with `ascii_art`, `tense_rewrite` with `temporal` (the request would be
   set in time twice) and `model_distractors` with `ascii_art`,
@@ -270,7 +274,7 @@ technique is picked first. A technique may not join a combination when:
   or Cyrillic text have fonts), or one every font draws longer than its cap;
 - it pairs a family of the manipulation layer (`fsh`, `dap`, `fake_turns`)
   with an obfuscation in `manipulation_blocked_obfuscation`: the
-  `translation`, `ascii_art`, `payload_split` and `word_art` families and
+  `translation`, `ascii_art`, `payload_split`, `word_art` and `wording` families and
   the `heavy` `encode` techniques, except those also in `sensitive_words`;
 - it pairs a `needs_latin` technique with a translation into a script
   other than Latin: Japanese, Russian, Arabic, Greek, Thai, Khmer, Nepali,
@@ -596,6 +600,27 @@ wrappers. The family is attack-only, and the eval type does not draw it.
   thinking face, sparkles, raised hands) after a word (0.05, 0.1, 0.25 of
   the words), so taking them out gives the text back. The constants are in
   `obfuscation/noise.py`. The high densities are attack-only.
+- `wording` (spec version 1.3, complexity 2) puts each word the generation
+  model marks harmful (the call and the strict word-list parse of
+  `sensitive_words`, `tokenbreak` and `word_art`; a reply that marks no word
+  is rejected, `DISCARDED; reason=no sensitive word`, a malformed one too)
+  in other terms, with one more call for each distinct word (the `pseudonym`
+  or `word_game` prompt, capped at 128 tokens), and one of eight variants of
+  its pool around the text says how to read them.
+  `to_pseudonym_substitution` swaps in a code name of one or two words the
+  model gives the word, with the case of the word it replaces, and adds the
+  key, one `<alias> = <word>` line per word (the pool `pseudonym_key` of
+  `obfuscation/wording_templates.json`). `to_word_game` puts a placeholder
+  `[W1]`, `[W2]`, ... for every occurrence of each word and lists a puzzle
+  that resolves to it, one `[Wn]: <puzzle>` line per placeholder, in a variant
+  that asks the reader to solve them first (the pool `word_game_solve`). A
+  reply that is not a code name (over two words, on more than one line, with an
+  `=`, holding a marked word, or equal to an earlier one) or not a puzzle
+  (empty, over 40 words, or holding the word) is asked for again once, then
+  discards the text (`malformed pseudonym`, `malformed puzzle`). The info is
+  `variant=<name>;detected_words=<words>`. It is attack only and outside the
+  eval type's pool; `to_synonym_substitution`, which swaps a plain synonym
+  with no key or puzzle, stays in `sensitive_words`.
 - `word_art` (spec version 1.3, complexity 3) draws one word of the text in
   ASCII art: the generation model marks the text's harmful words (the call
   and the strict word-list parse of `sensitive_words` and `tokenbreak`), the
@@ -810,9 +835,9 @@ eval text ([extending.md](extending.md#add-variants-to-a-template-pool)).
 Importing `redact.jailbreak` checks every pool and raises naming the file,
 directive and variant of a fault. A pool should hold at least 8 variants
 (a request or framing directive, a container, a fake turn, the payload split's reassembly, the
-word art's decoding), 12 for a benign role, 20 for small talk, 6 for the
+word art's decoding, the wording's key and puzzles), 12 for a benign role, 20 for small talk, 6 for the
 persona templates' mechanics and 4 for an encoding's decode hints;
-13 of the 83 pools are below their floor today (the five
+13 of the 85 pools are below their floor today (the five
 framing, the four continuation, the two structural, `refusal_then_comply` and
 `past_tense`, each with 4, or 1): the techniques of the eval pool, whose
 text waits for the eval review. A test ratchets the rest
@@ -822,7 +847,8 @@ The info names the variant drawn: `variant=<name>` for the framing
 techniques, the answer formats, the answer languages, asking, the
 distractors, impersonation, indirect, temporal, the neutral containers,
 the payload splits (`variant=<name>;parts=<n>`), the word art
-(`variant=<name>;font=<font>;detected_words=<word>`),
+(`variant=<name>;font=<font>;detected_words=<word>`), the wording
+(`variant=<name>;detected_words=<words>`),
 small talk (`smalltalk=<prefix|suffix>;variant=<name>`), the benign roles
 (`role=<style>;variant=<name>`), the fake turns (`variant=<name>`) and the
 persona templates, which name the mechanic drawn
@@ -879,8 +905,9 @@ Also beyond the reference list:
 - (spec version 1.3) the persona templates (11 frames, 6 mechanics), three
   named personas (a mercenary, an underground hacker, an anarchist
   philosopher), the fake turns (3), the payload split (2: at word boundaries, or where a
-  model finds the meaning allows) and the word art (1: a marked word drawn
-  as ASCII art); the answer formats dual answer, tagged prefix and answer
+  model finds the meaning allows), the word art (1: a marked word drawn
+  as ASCII art) and the wording (2: a code name with a key, a word game);
+  the answer formats dual answer, tagged prefix and answer
   in an encoding; the impersonations of an authority and of a developer,
   the future tense and a historical era, a task as a distractor before or
   after the prompt, and an urgent ask.

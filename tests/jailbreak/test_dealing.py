@@ -384,8 +384,13 @@ _BUDGETS = [
 # model mark words (sensitive_words, tokenbreak, word_art) moved it again: a
 # draw that held both now takes another technique, and through the unit's rng
 # and its group's counts the rest of its draw (185 of the 240 dealt units, 68 of
-# the 200 undealt draws).
-_PINNED_DRAWS = "2939e4ad151d6b1dc9c314b709114397dfe0bae68730e614b7c6d40a7b1a6f99"
+# the 200 undealt draws). The spec 1.3 wording family (a code name with a key,
+# a word game) moved it once more: one more obfuscation family to deal, which
+# refuses the other word-level steps, a translation and ascii_art, changes the
+# family some obfuscation draws land on and, through the unit's rng and its
+# group's counts, the rest of their draw (221 of the 240 dealt units, 123 of the
+# 200 undealt draws).
+_PINNED_DRAWS = "995ee011a8f6b0b166ab1a96a048611f711a757a82e7a23e8d1d821ef4de3d19"
 
 
 def test_draws_without_the_request_obfuscation_are_those_made_before_it_was_counted():

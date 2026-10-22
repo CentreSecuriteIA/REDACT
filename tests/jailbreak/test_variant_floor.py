@@ -38,11 +38,12 @@ _FIXTURE = Path(__file__).parents[1] / "fixtures" / "variant_floor.json"
 #: The fewest variants a pool should have, by its family: 8 for a request or
 #: framing directive, a container and a fake turn, 12 for a benign role, 20
 #: for small talk, 6 for the persona templates' mechanics, 8 for the payload
-#: split's reassembly and the word art's decoding, 4 for the decode hints of an encoding (each encoding has a pool of its own, named
-#: ``<file>:<technique>``). A persona template's frame
-#: is not counted: it is its technique's own text, one per persona by design,
-#: not a pool the technique draws from, so the mechanics are the family's one
-#: pool here.
+#: split's reassembly and the word art's decoding and the wording's key and
+#: puzzles (two pools), 4 for the decode hints of an encoding (each encoding
+#: has a pool of its own, named ``<file>:<technique>``). A persona template's
+#: frame is not counted: it is its technique's own text, one per persona by
+#: design, not a pool the technique draws from, so the mechanics are the
+#: family's one pool here.
 FLOORS = {
     "framing": 8,
     "persona_template": 6,
@@ -61,6 +62,7 @@ FLOORS = {
     "neutral_container": 8,
     "payload_split": 8,
     "word_art": 8,
+    "wording": 8,
     "benign_role": 12,
     "smalltalk_prefix": 20,
     "smalltalk_suffix": 20,

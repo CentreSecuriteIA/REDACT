@@ -38,7 +38,7 @@ def _names() -> list[str]:
 
 class TestLanguages:
     def test_twenty_three_languages(self):
-        assert len(LANGUAGES) == 23
+        assert len(LANGUAGES) == 23     # noqa: PLR2004
         assert "Zulu" in _names()
         assert "Swahili" in _names()
 
@@ -63,7 +63,7 @@ class TestLanguages:
 class TestTranslationFunctions:
     def test_all_twenty_three_returned(self):
         funcs = get_translation_functions()
-        assert len(funcs) == 23
+        assert len(funcs) == 23     # noqa: PLR2004
 
     def test_to_zulu(self):
         backend = MockBackend(["translated zulu", "Yes"])

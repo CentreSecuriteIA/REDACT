@@ -650,8 +650,8 @@ the default) and in `params["jailbreaks"]`.
 ### Release notes
 
 **Upgrading from the previous release (spec version 1.0, now 1.3).** The
-jailbreak library grew from 151 techniques in 23 families to 242 active ones
-(249 registered, 7 retired) in 35 families and five layers. What that asks of
+jailbreak library grew from 151 techniques in 23 families to 244 active ones
+(251 registered, 7 retired) in 36 families and five layers. What that asks of
 a run you already have, and what you will see; each point has its note below.
 
 - **One re-plan is planned: the adversarial kind.** The packaged attacks now
@@ -677,7 +677,7 @@ a run you already have, and what you will see; each point has its note below.
   not, a technique is drawn only for the inputs it applies to, several
   rules are new, and the request obfuscation's families are counted apart
   from the obfuscation layer's, so the attacks draw every technique of
-  their pool. The default attack pool is 212 techniques in 28 families
+  their pool. The default attack pool is 214 techniques in 29 families
   (142 in 22 before; 178 in 24 at spec 1.2). The `eval` type's pool and
   draws are held, at 36
   techniques in 10 families, but for the ASCII-art cap, which changes the font
@@ -690,8 +690,9 @@ a run you already have, and what you will see; each point has its note below.
   persona scenario are now checked by a model, which costs calls (the typo
   and scenario notes), for the pending units of a kept plan too, and the
   request obfuscation adds translations to a fresh attack plan (its notes);
-  an invented persona asks for its persona first, and `to_payload_split_semantic`
-  and `to_word_art` call the generation model too (their notes). Each kind
+  an invented persona asks for its persona first, and `to_payload_split_semantic`,
+  `to_word_art` and the two wording techniques call the generation model too
+  (their notes). Each kind
   writes a `<kind>.variants.csv` after a run, and its plan file records the
   `spec_version` its pool was drawn at.
 
@@ -1123,12 +1124,12 @@ application costs 2 to 4 calls; a distractor costs 1 to 3 (a reply with no
 text is asked for again), and no check reads it. They add no model role.
 
 The layer is off, so a run that does not allow it changes nowhere: the
-default attack pool is still 212 techniques in 28 families, the natural pool
+default attack pool is still 214 techniques in 29 families, the natural pool
 the 72 (every rewrite technique says `["adversarial"]`), and the `eval`
 type's pool and draws are held (36 techniques; its allow lists name no rewrite
 family, so allowing the layer there adds nothing until the families are
 allowed too). A kind that allows the layer draws them: the packaged
-adversarial kind's pool is then 228 techniques in 31 families, its rounds say
+adversarial kind's pool is then 230 techniques in 32 families, its rounds say
 `include_rewrite: true` (an adversarial plan kept from a section that allowed
 the layer before it held a technique raises on resume naming `rounds`), a
 budget round deals the layer at `layer_rates.rewrite` (the spec's 0: set it,
@@ -1178,6 +1179,36 @@ ascii_art, continuation, temporal, answer format and eight translations), and
 the natural kind none of them either: their pools and draws are held. A
 translation chosen as the request obfuscation shares the rule with the
 obfuscations drawn after it.
+
+**Release note: the wording family.** Two techniques of a new obfuscation
+family, `wording` (spec 1.3, order 45, between `sensitive_words` and
+`tokenbreak`, complexity 2, attack only, the `encoding` dimension): each
+has the generation model mark the text's harmful words (the call, strict
+word-list parse and rejections of `sensitive_words`, `tokenbreak` and
+`word_art`), then one call more for each distinct word, capped at 128 tokens
+and asked again once on a reply that will not do, so a text costs 1 to 21
+calls (`[1, 21]` in the spec's `calls`) ([techniques.md](techniques.md#what-the-families-do)).
+`to_pseudonym_substitution` swaps in a code name of one or two words
+(`jailbreak/pseudonym`), case-matched, and adds a key of `<alias> = <word>`
+lines; `to_word_game` puts a placeholder `[W1]`, `[W2]`, ... for the word and
+lists a puzzle that resolves to it (`jailbreak/word_game`), asking the reader
+to solve them first. Each writes one of eight variants of its pool in
+`obfuscation/wording_templates.json` (`variant=<name>;detected_words=<words>`);
+a text whose replies never take the form is discarded (`malformed pseudonym`,
+`malformed puzzle`). `to_synonym_substitution` stays in `sensitive_words`. The
+family refuses `sensitive_words`, `tokenbreak`, `word_art`, `translation` and
+`ascii_art`, and, like `word_art`, is kept from `fsh` and `dap`, so some units
+of a fresh plan draw other techniques than they did with the same seed. A
+fresh attack plan draws it in about one unit in thirteen (228 of 3,000 units
+of the default kind in three groups, seed 42): the default attack pool goes
+from 212 techniques in 28 families to 214 in 29. A plan kept
+from before resumes with the growth WARNING, which names the two, and does not
+draw them until it is planned again with `resume=False`. The `eval` type
+allows no `wording` technique and the natural kind none, so their pools
+(36 and 72) and the eval draws are as they were; the family's dimension is
+`encoding`, which no generation axis varies, so the `training` type needs no
+denial. Prompts of your own (`prompt_dir`) overlay the two new ones as any
+other.
 
 ## The model registry
 
@@ -1419,7 +1450,7 @@ The conversation functions, which no recipe runs (`evaluate_conversations`,
 | `input` | `generation/from_constitution/long`, `generation/from_constitution/short`, `quality_check` |
 | `output` | `generation/harmful`, `generation/helpful`, `quality_check/harmful`, `quality_check/helpful`: one generation prompt and one checker per [answer mode](stages/outputs.md#answer-modes) |
 | `paraphrase` | `generation`, `generation/<model>` (a paraphraser's own, when it has one; the directory is the registry name), `check` |
-| `jailbreak` | `scenario_generation`, `persona_invention`, `persona_scenario_generation`, `jailbreak_construction`, `payload_split_semantic`, `category_selection`, `benign_generation`, `extract_harmful`, `synonym_substitution`, `rewrite_with_typos`, `typo_check`, `scenario_check`, `persuasion_rewrite`, `tense_rewrite`, `model_distractor`, `preserve_check`, `translate`, `translate_retry`, `translate_check`, `translate_mt` (a machine translator's format: one user message, no system prompt; checked at the stage's start), `translate_check_back` |
+| `jailbreak` | `scenario_generation`, `persona_invention`, `persona_scenario_generation`, `jailbreak_construction`, `payload_split_semantic`, `category_selection`, `benign_generation`, `extract_harmful`, `synonym_substitution`, `pseudonym`, `word_game`, `rewrite_with_typos`, `typo_check`, `scenario_check`, `persuasion_rewrite`, `tense_rewrite`, `model_distractor`, `preserve_check`, `translate`, `translate_retry`, `translate_check`, `translate_mt` (a machine translator's format: one user message, no system prompt; checked at the stage's start), `translate_check_back` |
 | `conversation` | `judge`, `success_judge`, `pair_attacker` |
 | `format_instructions` | `numbered`, `structured_qa` |
 
