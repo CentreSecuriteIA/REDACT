@@ -358,7 +358,7 @@ A technique that calls a model carries, in the spec, the model calls one
 application makes (`calls`, generation and checks, low to high: a typo
 rewrite 2 to 4, a translation of one paragraph 2 to 12, a word-marking
 step 1, the synonyms 1 to 11, an fsh or dap pick 1, a cognitive or persona
-scenario 3 to 9) and what checks its
+scenario 3 to 9, an invented persona 4 to 12) and what checks its
 reply (`check`). When a plan is made, one INFO line adds them up over the
 planned units; for 1,000 inputs of one category and entry type, planned
 with the packaged attack kind and seed 42:
@@ -396,9 +396,15 @@ template variant or a font, for traceability.
   scenes; one rejected twice rejects the result (`DISCARDED; reason=scenario
   check failed`). The definitions live in
   `configs/jailbreak/hacking/cognitive_techniques.json` and `personas.json`,
-  editable without touching code. `to_invented_persona` makes the same
-  calls as `cognitive`'s `to_persona_roleplay` until it gets prompts of its
-  own; only its info, `category=invented_persona`, differs.
+  editable without touching code. `to_invented_persona` first asks the model
+  for a persona for the text (the `persona_invention` prompt): a name and a
+  description, as a `Name:` line and then a `Description:`, and nothing else
+  but blank lines (markdown labels, a missing or empty field and two
+  personas are other forms). A reply in another form is asked for again, up
+  to three replies in all, and then rejects the result (`DISCARDED;
+  reason=malformed persona`). The scenario, its check and the construction
+  then go as for a named persona, with the invented name and description:
+  4 to 12 calls, and the info `category=invented_persona`.
 - `framing` directives are transforms that change the scenario or the
   intent. Each has named template variants in
   `configs/jailbreak/hacking/framing_templates.json`; one is drawn per call.

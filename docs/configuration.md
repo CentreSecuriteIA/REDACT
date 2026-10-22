@@ -894,6 +894,17 @@ units each in the default kind. A plan kept from before resumes with the
 growth WARNING, which names it, and does not draw it until it is planned
 again with `resume=False`. The `eval` and natural kinds do not draw it.
 
+**Release note: the invented persona's own step.** `to_invented_persona`
+no longer makes the calls of `cognitive`'s `to_persona_roleplay`: it first
+asks the generation model for a persona for the text (the
+`persona_invention` prompt), read strictly as a `Name:` line then a
+`Description:` and asked again up to three replies, and then makes the
+scenario, its check and the construction of a named persona with that name
+and description. It costs one to three calls more (4 to 12, against 3 to 9),
+for the pending units of a kept plan too, and a text whose replies never take
+the form is discarded (`DISCARDED; reason=malformed persona`). Its info is
+still `category=invented_persona`, and no plan, pool or draw changes.
+
 **Release note: three persona archetypes.** The `persona` family gains
 `to_mercenary_persona`, `to_underground_hacker_persona` and
 `to_anarchist_philosopher_persona` (spec 1.3, complexity 2, attack only),
@@ -1323,7 +1334,7 @@ The conversation functions, which no recipe runs (`evaluate_conversations`,
 | `input` | `generation/from_constitution/long`, `generation/from_constitution/short`, `quality_check` |
 | `output` | `generation/harmful`, `generation/helpful`, `quality_check/harmful`, `quality_check/helpful`: one generation prompt and one checker per [answer mode](stages/outputs.md#answer-modes) |
 | `paraphrase` | `generation`, `generation/<model>` (a paraphraser's own, when it has one; the directory is the registry name), `check` |
-| `jailbreak` | `scenario_generation`, `persona_scenario_generation`, `jailbreak_construction`, `category_selection`, `benign_generation`, `extract_harmful`, `synonym_substitution`, `rewrite_with_typos`, `typo_check`, `scenario_check`, `translate`, `translate_retry`, `translate_check`, `translate_mt` (a machine translator's format: one user message, no system prompt; checked at the stage's start), `translate_check_back` |
+| `jailbreak` | `scenario_generation`, `persona_invention`, `persona_scenario_generation`, `jailbreak_construction`, `payload_split_semantic`, `category_selection`, `benign_generation`, `extract_harmful`, `synonym_substitution`, `rewrite_with_typos`, `typo_check`, `scenario_check`, `translate`, `translate_retry`, `translate_check`, `translate_mt` (a machine translator's format: one user message, no system prompt; checked at the stage's start), `translate_check_back` |
 | `conversation` | `judge`, `success_judge`, `pair_attacker` |
 | `format_instructions` | `numbered`, `structured_qa` |
 

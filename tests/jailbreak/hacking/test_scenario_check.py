@@ -7,10 +7,12 @@ from redact.jailbreak.hacking.cognitive import (
     MALFORMED_SCENARIO,
     to_hypothetical_framing,
 )
-from redact.jailbreak.hacking.personas import to_artist_persona, to_invented_persona
+from redact.jailbreak.hacking.personas import to_artist_persona
 from redact.llm_pipeline import CHECK_TEMPERATURE, drive_sync
 
-TECHNIQUES = [to_hypothetical_framing, to_artist_persona, to_invented_persona]
+# to_invented_persona asks for its persona first: test_personas.py covers that
+# step and the scenario it shares with the named personas.
+TECHNIQUES = [to_hypothetical_framing, to_artist_persona]
 
 PROMPT = "sample request 1"
 # A scenario reply: notes, then the scene between two delimiter lines.
@@ -121,7 +123,7 @@ def test_an_application_makes_no_more_calls_than_the_spec_says(technique, replie
 
 
 def test_the_spec_counts_three_to_nine_calls_for_both_families():
-    assert [t.calls for t in TECHNIQUES] == [[3, 9]] * 3
+    assert [t.calls for t in TECHNIQUES] == [[3, 9]] * len(TECHNIQUES)
     assert {t.check for t in TECHNIQUES} == {"scenario"}
 
 
