@@ -41,7 +41,7 @@ the technique names are in [techniques.md](../techniques.md).
 | `augmentation.py` | `KINDS`, `defaults(config_dir)`, `resolve(section, kind, base=None, config_dir=None)`, `rounds_of(resolved)`, `apply_flat_keywords`, `FLAT_KEYWORDS` |
 | `rules.py` | `compatible(selected, pool, remaining_complexity)`, `request_obfuscation_candidates` |
 | `sampling.py` | `sample_combination`, `sample_exact_combination`, `_pick_by_family` |
-| `plan.py` | `plan_run`, `assign_combination` (with the opt-in group budget: `_allowance`, `UNIT_HEADROOM`), `combination_of`, `coverage`, `plan_inputs` (the record of the `<stem>.plan.json` beside the manifest, written through `dataset/planfile.py`, its `spec_version` dating the pool), `default_escalation_schedule`; it deals from `dataset.dealing.Dealer` |
+| `plan.py` | `plan_run`, `assign_combination` (with the opt-in group budget: `_allowance`, `UNIT_HEADROOM`), `combination_of`, `coverage`, `plan_inputs` (the record of the `<stem>.plan.json` beside the manifest, written through `dataset/planfile.py`, its `spec_version` dating the pool and its `rules` the rules it was drawn by, `rules_id`), `default_escalation_schedule`; it deals from `dataset.dealing.Dealer` |
 | `chain.py` | `run_chain`, `combine_techniques`, `in_layer_order`, `apply_combination` |
 | `units.py` | `pending_units`, `is_pending`, `unit_gen`, `row_of`, `error_row_of` |
 | `pipeline.py` | `run_augmentation`, the stage core; `_library_change`, the kept plan's pool against what the library added and retired since |
@@ -164,29 +164,39 @@ core, called once per kind:
    manifest=manifest)`: the lock, the cut-back, the finished keys.
 3. **Plan.** On a resume with a manifest, reuse it: `planfile.changed_plan`
    compares the run's seed, rounds, `family_weights` and `layer_rates`
-   (`plan_inputs`, less `pool` and `spec_version`) with `<stem>.plan.json`;
-   a difference raises a `ValueError` naming the keys and `resume=False`.
-   The pool is compared apart (`_library_change`): the names the run's pool
-   adds must each have a `since` after the plan file's `spec_version`
-   (`"1.0"` in a plan file written before it was recorded), and the names
-   it lacks must each be registered with a `deprecated` after it. Then the
-   difference is the library's: one WARNING names what was added and
-   retired, says the kept plan does not draw the added techniques and names
-   `resume=False`, and the plan runs as it was made, its retired techniques
-   included. Any other difference raises as `pool`: a section that adds or
-   leaves out a technique, or a technique no longer registered. Known
-   limit: a section that newly names a family all of whose techniques came
-   after the plan reads as growth, and warns. A manifest without the plan
-   file logs a WARNING and runs unchecked. Otherwise the old coverage
-   table, plan file and variants table are removed, and `plan_run` writes
-   the plan file, one manifest
-   row per input and round, then the coverage table.
+   (`plan_inputs`, less `pool`, `spec_version` and `rules`) with
+   `<stem>.plan.json`; a difference raises a `ValueError` naming the keys
+   and `resume=False`. The pool is compared apart (`_library_change`): the
+   names the run's pool adds must each have a `since` after the plan file's
+   `spec_version` (`"1.0"` in a plan file written before it was recorded),
+   and the names it lacks must each be registered with a `deprecated` after
+   it. Then the difference is the library's, and the plan runs as it was
+   made, its retired techniques included. Any other difference raises as
+   `pool`: a section that adds or leaves out a technique, or a technique no
+   longer registered. Known limit: a section that newly names a family all
+   of whose techniques came after the plan reads as growth, and warns. The
+   rules are compared apart too (`_rules_change`): `rules_id` of the plan's
+   pool names, as the library tags them today, against the plan file's
+   `rules` (unknown in a plan file written before it recorded them). When
+   the library added or retired techniques, or the plan's `spec_version` or
+   rules are not today's, one WARNING (`_warn_since_plan`, given after the
+   pass of step 4) names both versions, what was added and retired, whether
+   the rules changed or are not recorded, and how many pending units hold a
+   combination `compatible()` now refuses (`_refused`); it says the kept
+   plan does not draw the added techniques and runs those units as planned,
+   and names `resume=False`. The rows of a kept plan record its
+   `spec_version`, not the library's. A manifest without the plan file logs
+   a WARNING and runs unchecked, its rows recording the library's version.
+   Otherwise the old coverage table, plan file and variants table are
+   removed, and `plan_run` writes the plan file, one manifest row per input
+   and round, then the coverage table.
 4. **One pass over the plan** to count the pending units, see whether any
    needs benign data (if so, generate what the cache lacks for the benign
    taxonomy's subcategories, on the pool with its own ledger, then load it;
    with `auto_generate_benign` off, the cache is loaded as it is, and a
    missing cache raises before any unit), and, on a resume, count the inputs
-   the kept plan does not hold, logged as a WARNING.
+   the kept plan does not hold, logged as a WARNING, and the pending units
+   whose combination today's rules refuse, for step 3's WARNING.
 5. **Drive.** `pending_units` streams the plan: for each planned row of an
    input in this frame and not in the ledger, it builds the combination
    (`combination_of`) and the unit's generator (`unit_gen`, over
@@ -408,12 +418,15 @@ joined by `::`: the same in every process, unlike Python's `hash`.
 
 So the plan does not depend on the order or the chunking of the inputs, and
 a replayed plan gives the same text within one version of the library. The
-plan file's `spec_version` and a row's `combination_spec_version` are the
-spec's `version`, which moves when techniques are added or retired, not when
-a technique's code changes (the ASCII-art cap did not move it). The
+plan file's `spec_version` is the spec's `version` when the plan was drawn,
+and a row's `combination_spec_version` is its plan's; the version moves
+when techniques are added or retired, not when a technique's code changes
+(the ASCII-art cap did not move it) nor always when a rule does, which the
+plan file's `rules` (`rules_id(pool)`) records instead. The
 manifest row records the round's settings and the `seed`, and
 `<stem>.plan.json` what the whole plan was made with: `seed`, `rounds`,
-`pool` (sorted names), `family_weights`, `layer_rates`, `spec_version`.
+`pool` (sorted names), `family_weights`, `layer_rates`, `spec_version`,
+`rules`.
 
 ## Coverage
 

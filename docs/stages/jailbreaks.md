@@ -93,7 +93,7 @@ its own manifest, plan file, ledger, coverage table and variants table.
 | `Datasets/jailbreaks.state.jsonl` | Its ledger |
 | `Datasets/jailbreaks.coverage.csv` | What its plan drew |
 | `Datasets/jailbreaks.variants.csv` | Which template variants its rows drew, written after each run |
-| `Datasets/jailbreaks.plan.json` | What its plan was made with: `seed`, `rounds`, `pool` (the technique names), `family_weights`, `layer_rates`, `spec_version` (the spec's `version`, which dates the pool) |
+| `Datasets/jailbreaks.plan.json` | What its plan was made with: `seed`, `rounds`, `pool` (the technique names), `family_weights`, `layer_rates`, `spec_version` (the spec's `version`, which dates the pool), `rules` (a content id of the rules the pool was drawn by) |
 | `Datasets/variations.csv` and its five sidecars | The same for the natural kind |
 | `Data_cache/benign/benign_samples.csv` | The benign data, shared by both kinds, with its `.manifest.jsonl` and `.state.jsonl` |
 
@@ -118,7 +118,7 @@ the row's own values.
 | `accepted` | Whether the row is usable |
 | `reasoning` | Why not, when `accepted` is false |
 | `iteration` | The unit's iteration |
-| `combination_spec_version` | The spec's `version` |
+| `combination_spec_version` | The spec's `version` the row's plan was drawn at |
 
 Columns of the coverage table: `level` (`layer`, `family` or `technique`),
 `name`, `category`, `entry_type`, `iteration`, `count`. It counts what the
@@ -241,7 +241,13 @@ it lost was retired (`deprecated`) after it, the resume keeps the plan
 and logs one WARNING that names them: the kept plan does not draw the
 added techniques, and runs the retired ones it names. Run the kind with
 `resume=False` to plan again and draw them. Any other difference in the
-pool raises as before. A section that newly names a family all of whose
+pool raises as before. The plan file also records the rules the pool was
+drawn by (`rules`, a content id), which can change while the spec version
+does not. When the plan's spec version or rules are not today's (a plan
+file written before it recorded `rules` counts as not knowing them), the
+same WARNING says so and counts the pending units whose combination
+today's rules refuse; they run as planned, and every row records the spec
+version its plan was drawn at. A section that newly names a family all of whose
 techniques came after the plan reads as such growth too, and warns instead
 of raising.
 

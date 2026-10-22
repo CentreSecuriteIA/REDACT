@@ -399,14 +399,19 @@ the same way.
 - The jailbreak stage reuses each kind's plan. `<kind>.plan.json`, beside
   the manifest, records what the plan was made with: `seed`, `rounds` (with
   the budget keys and `iterations`), the pool's technique names,
-  `family_weights`, `layer_rates` and `spec_version` (the spec version the
-  pool was drawn at). A resume whose values differ stops
+  `family_weights`, `layer_rates`, `spec_version` (the spec version the
+  pool was drawn at) and `rules` (a content id of the rules it was drawn
+  by). A resume whose values differ stops
   with a `ValueError` that names the keys; run the stage with
   `"resume": false` to plan again. A pool that differs only by techniques
   the library added or retired after `spec_version` is the library's
-  growth, not the run's change: the plan is kept, with a WARNING that names
-  them (the kept plan does not draw the new ones). A plan without that file
-  resumes unchecked, with a WARNING. Inputs accepted after the plan was made
+  growth, not the run's change, and another `spec_version` or `rules` is
+  the library's too: the plan is kept, with one WARNING that names both
+  versions and what was added and retired, and counts the pending units
+  whose combination today's rules refuse (the kept plan does not draw the
+  new techniques, and runs those units as planned). Its rows record the
+  plan's spec version. A plan without that file resumes unchecked, with a
+  WARNING. Inputs accepted after the plan was made
   get no unit, and a WARNING counts them.
 - A rejected unit is acked and not retried: a constitution unit or a seeded
   entry rejected on every attempt, a rejected output, a dropped paraphrase.
@@ -480,7 +485,7 @@ Other files you may see:
 | `<ledger>.lock` | The stage's lock. The operating system holds it, so a run that died holds nothing; the file itself may stay |
 | `<output>.cut` | Bytes a resume cut off an output: the tail of a save that did not finish |
 | `<ledger>.dropping` | A fresh run of one seeded-inputs style that did not finish. Run it again |
-| `<kind>.plan.json` | What a jailbreak kind's plan was made with: `seed`, `rounds`, `pool`, `family_weights`, `layer_rates`, `spec_version`. A resume compares them with the run's, the pool against what the library added or retired after `spec_version` |
+| `<kind>.plan.json` | What a jailbreak kind's plan was made with: `seed`, `rounds`, `pool`, `family_weights`, `layer_rates`, `spec_version`, `rules`. A resume compares them with the run's, the pool against what the library added or retired after `spec_version`, and warns when `spec_version` or `rules` is not today's |
 | `constitution_inputs.plan.json`, `output_responses.plan.json` | What the deal of the generation axes was made with: `seed`, the axes' weights, for the inputs `samples_per_entry`, and for the outputs `outputs_per_input` and `modes` (the answer modes of every entry type). A resume compares them with the run's |
 | `constitution_inputs.coverage.csv`, `output_responses.coverage.csv` | Per axis value, the specs planned and accepted per category and entry type; the outputs' also per answer mode (`axis` `mode`) |
 | `<kind>.coverage.csv` | Per layer, family and technique of a kind's plan, the count per category, entry type and iteration, with a zero row for each pool technique never drawn |

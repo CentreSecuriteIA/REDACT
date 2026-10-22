@@ -30,7 +30,8 @@ from redact.llms.client import ModelClient
 
 from . import pool as pool_module
 from .manipulation import get_or_generate_benign_data
-from .plan import coverage_path, plan_inputs, plan_run
+from .plan import coverage_path, plan_inputs, plan_run, rules_id
+from .rules import compatible
 from .technique import FIRST_VERSION, load_spec, version_key
 from .units import error_row_of, is_pending, pending_units, row_of
 from .variants import write_variants
@@ -103,7 +104,14 @@ def run_augmentation(
     by what the library added or retired after the plan's spec version
     (:func:`_library_change`) is no change of this run's: the plan is kept,
     with a WARNING that names those techniques, so a kept plan resumes in a
-    library that grew.
+    library that grew. The same one WARNING is given when the plan's spec
+    version or the rules it was drawn by (its plan file's ``rules``,
+    :func:`~redact.jailbreak.plan.rules_id`; unknown in a plan file written
+    before it recorded them) are not today's, and counts the pending units
+    whose combination today's rules refuse; they run as planned. A row
+    records the spec version its plan was drawn at
+    (``combination_spec_version``), not the library's; a plan without a
+    plan file records none, and its rows the library's.
 
     Returns:
         The rows of ``out_path``, or an empty frame when ``read_back`` is False.
@@ -149,21 +157,31 @@ def run_augmentation(
         ledger, resume=resume, artifact=out_path, manifest=manifest)
 
     reused = resume and man_path.exists()
+    # The spec version the plan was drawn at, which its rows record: this
+    # library's for a fresh plan, the plan file's for a kept one ("1.0" in a
+    # plan file written before it recorded one), and this library's again
+    # for a kept plan without a plan file, which records nothing.
+    plan_version = spec_version
+    # What the library changed since a kept plan was made, said in one
+    # WARNING once the pass over the plan has counted the pending units
+    # whose combination today's rules refuse.
+    since_plan = None
     if reused:
         if verbose:
             logger.info("Reusing existing manifest: %s", man_path)
         # changed_plan compares every key of the record it is given, so it
-        # gets the record less the pool and the spec version, which
-        # _library_change compares below: a pool that differs only by what
-        # the library added or retired after the plan's spec_version is no
-        # change of this run's, and spec_version only dates the pool (a plan
-        # file written before it was recorded has none).
+        # gets the record less the pool, the spec version and the rules,
+        # which are compared below: a pool that differs only by what the
+        # library added or retired after the plan's spec_version is no
+        # change of this run's, spec_version only dates the pool (a plan
+        # file written before it was recorded has none), and the rules are
+        # the library's, not the run's.
         current = plan_inputs(
             pool, seed=seed, rounds=rounds, family_weights=family_weights,
             layer_rates=layer_rates)
         changed = changed_plan(man_path, {
             key: value for key, value in current.items()
-            if key not in ("pool", "spec_version")})
+            if key not in ("pool", "spec_version", "rules")})
         if changed is None:
             logger.warning(
                 "%s: the plan %s has no %s beside it, so whether this run's "
@@ -173,6 +191,7 @@ def run_augmentation(
                 plan_path(man_path).name)
         else:
             made_with = read_plan(man_path)
+            plan_version = made_with.get("spec_version", FIRST_VERSION)
             library = _library_change(made_with, pool, registry)
             if library is None:
                 changed.append("pool")
@@ -186,16 +205,10 @@ def run_augmentation(
                     "stage starts over), or with the section and seed the plan "
                     "was made with.")
             added, retired = library
-            if added or retired:
-                logger.warning(
-                    "%s: since the plan %s was made (spec version %s, now %s), "
-                    "the library added %s and retired %s. A resume keeps the "
-                    "plan as it was made: it does not draw the added "
-                    "techniques, and still runs the retired ones it names. Run "
-                    "with resume=False to plan again (the stage starts over).",
-                    label, man_path.name,
-                    made_with.get("spec_version", FIRST_VERSION), spec_version,
-                    added, retired)
+            rules = _rules_change(made_with, registry)
+            if added or retired or rules or plan_version != spec_version:
+                since_plan = {"added": added, "retired": retired, "rules": rules,
+                              "refused": 0}
     else:
         coverage_path(man_path).unlink(missing_ok=True)
         plan_path(man_path).unlink(missing_ok=True)
@@ -215,8 +228,9 @@ def run_augmentation(
 
     # One pass over the plan, for the numbers in the log lines, for whether
     # a pending unit's techniques need benign data (read off the plan, not the
-    # pool, since a plan made with another pool still replays), and for the
-    # inputs a reused plan does not hold.
+    # pool, since a plan made with another pool still replays), for the
+    # inputs a reused plan does not hold, and for the pending units whose
+    # combination today's rules refuse.
     planned = total = written = 0
     needs_benign = False
     unplanned = set(position) if reused else set()
@@ -230,6 +244,11 @@ def run_augmentation(
                 needs_benign = needs_benign or any(
                     getattr(registry.get(name), "requires_benign", False)
                     for name in plan_row["combination"])
+                if since_plan is not None:
+                    since_plan["refused"] += _refused(plan_row["combination"], registry)
+    if since_plan is not None:
+        _warn_since_plan(label, man_path.name, plan_version, spec_version,
+                         pending=total, **since_plan)
     if unplanned:
         logger.warning(
             "%s: %d of the %d inputs are not in the plan %s, which a resume "
@@ -267,12 +286,12 @@ def run_augmentation(
 
     def _on_done(i, value):
         _row(live.pop(i),
-             lambda u, r: row_of(u, value, r, spec_version, gen_model=client.model,
+             lambda u, r: row_of(u, value, r, plan_version, gen_model=client.model,
                                  accept_noop=accept_noop))
 
     def _on_error(i, exc):
         _row(live.pop(i),
-             lambda u, r: error_row_of(u, exc, r, spec_version, gen_model=client.model,
+             lambda u, r: error_row_of(u, exc, r, plan_version, gen_model=client.model,
                                        label=label))
 
     def _units():
@@ -350,3 +369,50 @@ def _library_change(
                     for name in retired)):
         return added, retired
     return None
+
+
+def _rules_change(made_with: dict, registry: dict[str, Callable]) -> str | None:
+    """How the rules the plan whose plan file holds ``made_with`` was drawn
+    by compare with today's, for the techniques of its pool
+    (:func:`~redact.jailbreak.plan.rules_id`): ``None`` when they are the
+    same, ``"changed"`` when they differ, and ``"unknown"`` when the plan
+    file, written before it recorded them, has no ``rules``."""
+    if "rules" not in made_with:
+        return "unknown"
+    planned = [registry[name] for name in made_with.get("pool", ()) if name in registry]
+    return None if rules_id(planned) == made_with["rules"] else "changed"
+
+
+def _refused(names: list[str], registry: dict[str, Callable]) -> bool:
+    """Whether today's rules refuse the combination ``names``: one of its
+    techniques may not join those before it (:func:`compatible`; the rules
+    bind both ways, so the order does not matter). A name no technique has
+    is left to the replay, which raises on it."""
+    if any(name not in registry for name in names):
+        return False
+    fns = [registry[name] for name in names]
+    return any(not compatible(fns[:i], [fn]) for i, fn in enumerate(fns))
+
+
+def _warn_since_plan(
+    label: str, plan_name: str, made_at: str, now: str, *,
+    added: list[str], retired: list[str], rules: str | None, refused: int,
+    pending: int,
+) -> None:
+    """The one WARNING of a kept plan the library changed since: the spec
+    versions it was made at and is resumed at, what the library added and
+    retired, whether its rules changed or are not recorded (``rules``, as
+    :func:`_rules_change` gives it), and the ``refused`` of its ``pending``
+    units whose combination today's rules refuse."""
+    logger.warning(
+        "%s: since the plan %s was made (spec version %s, now %s), the library "
+        "added %s and retired %s%s; %d of its %d pending units hold a "
+        "combination today's rules refuse. A resume keeps the plan as it was "
+        "made: it does not draw the added techniques, still runs the retired "
+        "ones and the refused combinations it names, and its rows record spec "
+        "version %s. Run with resume=False to plan again (the stage starts "
+        "over).", label, plan_name, made_at, now, added, retired,
+        ", and changed the rules a combination is drawn by" if rules == "changed"
+        else ", and the plan file does not record the rules it was drawn by"
+        if rules == "unknown" else "",
+        refused, pending, made_at)

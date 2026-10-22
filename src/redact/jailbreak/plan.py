@@ -18,14 +18,14 @@ from pathlib import Path
 
 import pandas as pd
 
-from redact.dataset import Manifest, row_id
+from redact.dataset import Manifest, content_id, row_id
 from redact.dataset.dealing import Dealer, stable_seed
 from redact.dataset.planfile import coverage_path, plan_record, write_plan
 
 from .chain import combine_techniques
 from .pool import TRANSLATION
 from .sampling import DEFAULT_MAX_COMPLEXITY, REQUEST_SCOPE, sample_combination
-from .technique import FIRST_VERSION, applies, load_spec
+from .technique import FIRST_VERSION, LATIN, applies, load_spec
 
 logger = logging.getLogger(__name__)
 
@@ -321,13 +321,61 @@ def plan_inputs(
 ) -> dict:
     """What a plan is made with, its plan file's record: ``seed``, ``rounds``,
     the ``pool``'s technique names sorted, ``family_weights``,
-    ``layer_rates``, and ``spec_version``, the spec's version, which dates
+    ``layer_rates``, ``spec_version``, the spec's version, which dates
     the pool: a resume reads off it what the library added or retired since
-    (:func:`redact.jailbreak.pipeline.run_augmentation`)."""
+    (:func:`redact.jailbreak.pipeline.run_augmentation`), and ``rules``, the
+    rules the pool was drawn by (:func:`rules_id`), which can change while
+    the version does not."""
     return plan_record(
         seed=seed, rounds=rounds, pool=sorted(fn.__name__ for fn in pool),
         family_weights=family_weights, layer_rates=layer_rates,
-        spec_version=load_spec().get("version", FIRST_VERSION))
+        spec_version=load_spec().get("version", FIRST_VERSION),
+        rules=rules_id(pool))
+
+
+def _without_comments(entry: dict) -> dict:
+    return {key: value for key, value in entry.items() if not key.startswith("_")}
+
+
+def rules_id(pool: list[Callable]) -> str:
+    """The content id of what a draw from ``pool`` reads off the spec: its
+    ``layer_order``, ``layer_max_picks`` and ``layer_rates``, the
+    obfuscations it keeps from the manipulation layer and the families a
+    request obfuscation may draw; the ``layer``, ``within_layer_order`` and
+    ``cross_incompatible_with`` of each family of the pool; and each pool
+    technique's ``families``, ``complexity``, ``cross_incompatible_with``,
+    ``encode_weight``, ``needs_latin`` and ``script``, as its tags hold
+    them. A spec comment changes nothing. Two pools with the same names
+    give the same id while these stay as they are, so a resume can tell
+    whether a kept plan's combinations were drawn by today's rules."""
+    spec = load_spec()
+    techniques = sorted(pool, key=lambda fn: fn.__name__)
+    families = sorted({family for fn in techniques
+                       for family in getattr(fn, "families", ())})
+    record = {
+        "layer_order": spec["layer_order"],
+        "layer_max_picks": spec.get("layer_max_picks", {}),
+        "layer_rates": _without_comments(spec.get("layer_rates", {})),
+        "manipulation_blocked_obfuscation": _without_comments(
+            spec.get("manipulation_blocked_obfuscation", {})),
+        "request_obfuscation_allowed_families": spec.get(
+            "request_obfuscation_allowed_families", []),
+        "families": {
+            name: {key: spec["families"].get(name, {}).get(key)
+                   for key in ("layer", "within_layer_order", "cross_incompatible_with")}
+            for name in families},
+        "techniques": {
+            fn.__name__: {
+                "families": list(getattr(fn, "families", ())),
+                "complexity": getattr(fn, "complexity", 0),
+                "cross_incompatible_with": list(
+                    getattr(fn, "cross_incompatible_with", ())),
+                "encode_weight": getattr(fn, "encode_weight", None),
+                "needs_latin": getattr(fn, "needs_latin", False),
+                "script": getattr(fn, "script", LATIN),
+            } for fn in techniques},
+    }
+    return content_id(json.dumps(record, sort_keys=True))
 
 
 def _manifest_rows(manifest_path: Path):

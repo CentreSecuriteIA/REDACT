@@ -12,7 +12,9 @@ sizes a ledger records differ between platforms: the cells of a CSV as text,
 the rows of a manifest, and the lines of a ledger without ``_saved``. The
 spec version a jailbreak file records (a row's ``combination_spec_version``,
 a plan file's ``spec_version``) is written ``<spec version>`` in the fixture
-and read as the spec's version, so a version bump edits no cell.
+and read as the spec's version, so a version bump edits no cell; a plan
+file's ``rules`` is written ``<rules>`` and read as the fake pool's rules id,
+so a change of the spec's rules edits none either.
 """
 
 import csv
@@ -27,6 +29,7 @@ from tests.conftest import ParaphraseBackend, make_client, pinned_pool
 
 _FIXTURE = Path(__file__).parent / "fixtures" / "stage_files.json"
 _SPEC_VERSION = "<spec version>"
+_RULES = "<rules>"
 
 # An id that is given, missing, padded, given twice, NaN and a number.
 _IDS = ["given-1", None, " padded ", "given-1", float("nan"), 77]
@@ -281,8 +284,11 @@ _STAGES = {
 @pytest.mark.parametrize("stage", sorted(_STAGES))
 def test_a_stage_writes_the_files_it_wrote_before(stage, tmp_path, monkeypatch):
     from redact.jailbreak import load_spec
+    from redact.jailbreak.plan import rules_id
+    from tests.jailbreak.test_pipeline_jailbreaks import broken, one_step, two_step
 
     fixture = _FIXTURE.read_text(encoding="utf-8").replace(
-        _SPEC_VERSION, load_spec()["version"])
+        _SPEC_VERSION, load_spec()["version"]).replace(
+        _RULES, rules_id([one_step, two_step, broken]))
     expected = json.loads(fixture)[stage]
     assert _STAGES[stage](tmp_path, monkeypatch) == expected

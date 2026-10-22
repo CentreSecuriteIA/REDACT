@@ -174,23 +174,120 @@ def test_a_technique_retired_by_the_plan_s_own_version_raises(tmp_path, monkeypa
         _resume(out)
 
 
+def _rewrite_plan_file(out, **made_with) -> None:
+    """Set the keys ``made_with`` in the plan file beside ``out``; a key
+    given as None is taken out, as a plan file written before it held it."""
+    manifest = Manifest.sidecar(out).path
+    record = read_plan(manifest)
+    for key, value in made_with.items():
+        if value is None:
+            del record[key]
+        else:
+            record[key] = value
+    write_plan(manifest, record)
+
+
 def _without_spec_version(out) -> None:
     """Make the plan file beside ``out`` one written before it recorded
     ``spec_version``."""
-    manifest = Manifest.sidecar(out).path
-    made_with = read_plan(manifest)
-    del made_with["spec_version"]
-    write_plan(manifest, made_with)
+    _rewrite_plan_file(out, spec_version=None)
 
 
-def test_a_plan_file_without_a_spec_version_resumes_quietly(
+def test_a_plan_file_without_a_spec_version_warns_and_its_rows_record_1_0(
         tmp_path, monkeypatch, caplog):
+    """It was drawn at the first version, which is not today's."""
     out = tmp_path / "jb.csv"
     plan = _planned(out, monkeypatch)
     _without_spec_version(out)
     with caplog.at_level("WARNING"):
         rows = _resume(out)
-    assert _warnings(caplog) == [] and len(rows) == len(plan)
+    (warning,) = _warnings(caplog)
+    assert f"(spec version 1.0, now {NOW})" in warning
+    assert f"0 of its {len(plan)} pending units" in warning
+    assert set(rows["combination_spec_version"].astype(str)) == {"1.0"}
+
+
+def test_a_plan_file_without_rules_warns_that_it_does_not_record_them(
+        tmp_path, monkeypatch, caplog):
+    out = tmp_path / "jb.csv"
+    plan = _planned(out, monkeypatch)
+    _rewrite_plan_file(out, rules=None)
+    with caplog.at_level("WARNING"):
+        rows = _resume(out)
+    (warning,) = _warnings(caplog)
+    assert "the plan file does not record the rules it was drawn by" in warning
+    assert f"0 of its {len(plan)} pending units" in warning
+    assert len(rows) == len(plan)
+
+
+def test_the_rules_id_moves_with_a_rule_not_with_the_pool_order_or_a_comment(
+        monkeypatch):
+    import redact.jailbreak.plan as JP
+
+    every = registry(all_techniques())
+    pool = [every["to_base64"], every["to_rot13"]]
+    before = JP.rules_id(pool)
+    assert JP.rules_id(pool[::-1]) == before
+    spec = T.load_spec()
+    with monkeypatch.context() as patch:
+        patch.setattr(JP, "load_spec", lambda: {**spec, "layer_rates": {
+            **spec["layer_rates"], "_comment": "reworded"}})
+        assert JP.rules_id(pool) == before
+    monkeypatch.setattr(pool[0], "complexity", pool[0].complexity + 1)
+    assert JP.rules_id(pool) != before
+
+
+def test_a_resume_under_the_plan_s_version_and_rules_is_quiet(
+        tmp_path, monkeypatch, caplog):
+    out = tmp_path / "jb.csv"
+    _planned(out, monkeypatch)
+    with caplog.at_level("WARNING"):
+        _resume(out)
+    assert _warnings(caplog) == []
+
+
+def test_a_resume_across_a_rule_change_warns_counts_and_stamps_the_plan_s_version(
+        tmp_path, monkeypatch, caplog):
+    """A plan of two obfuscations each, drawn at 1.2; today one of the first
+    unit's techniques may no longer join the other's family. The units that
+    pair the two still run as planned, and every row records 1.2."""
+    out, pair = tmp_path / "jb.csv", [{"exact_techniques": 2}]
+    plan = _planned(out, monkeypatch, rounds=pair)
+    _rewrite_plan_file(out, spec_version="1.2")
+    every = registry(all_techniques())
+    first, second = (every[name] for name in plan[0]["combination"])
+    monkeypatch.setattr(first, "cross_incompatible_with", [second.families[0]])
+    refused = sum(
+        first.__name__ in row["combination"]
+        and any(second.families[0] in every[name].families
+                for name in row["combination"])
+        for row in plan)
+    with caplog.at_level("WARNING"):
+        rows = _resume(out, rounds=pair)
+    (warning,) = _warnings(caplog)
+    assert f"(spec version 1.2, now {NOW})" in warning
+    assert "changed the rules a combination is drawn by" in warning
+    assert f"{refused} of its {len(plan)} pending units" in warning and refused
+    assert "+".join(plan[0]["combination"]) in set(rows["technique"])
+    assert set(rows["combination_spec_version"].astype(str)) == {"1.2"}
+
+
+def test_each_kind_s_rows_record_the_version_its_plan_was_drawn_at(
+        tmp_path, monkeypatch):
+    """One run, two plans: the attacks kept from 1.2, the variations planned
+    afresh. Each file's rows record the version their plan was drawn at."""
+    out = tmp_path / "jb.csv"
+    _planned(out, monkeypatch)
+    _rewrite_plan_file(out, spec_version="1.2")
+    generate_jailbreaks(
+        inputs=_inputs(), output_path=out, seed=1, auto_generate_benign=False,
+        verbose=False, augmentation={
+            "adversarial": _pure()["augmentation"]["adversarial"],
+            "natural": {"families": {"allow": ["casual_writing"]}}})
+    stamps = {name: set(pd.read_csv(tmp_path / name, dtype=str)
+                        ["combination_spec_version"])
+              for name in ("jb.csv", "variations.csv")}
+    assert stamps == {"jb.csv": {"1.2"}, "variations.csv": {NOW}}
 
 
 def test_a_plan_file_without_a_spec_version_was_made_at_the_first_version(

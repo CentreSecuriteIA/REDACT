@@ -409,6 +409,8 @@ def test_a_plan_records_what_it_was_made_with(tmp_path):
     import json
 
     from redact.jailbreak import load_spec
+    from redact.jailbreak.obfuscation.encoding import to_base64
+    from redact.jailbreak.plan import rules_id
 
     out = tmp_path / "jb.csv"
     generate_jailbreaks(inputs=_inputs(), output_path=out, seed=1,
@@ -417,7 +419,7 @@ def test_a_plan_records_what_it_was_made_with(tmp_path):
     assert made_with == {
         "seed": 1, "rounds": made_with["rounds"], "pool": ["to_base64"],
         "family_weights": None, "layer_rates": None,
-        "spec_version": load_spec()["version"]}
+        "spec_version": load_spec()["version"], "rules": rules_id([to_base64])}
     assert [r["exact_techniques"] for r in made_with["rounds"]] == [1]
 
 

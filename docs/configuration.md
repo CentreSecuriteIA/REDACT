@@ -661,9 +661,13 @@ a run you already have, and what you will see; each point has its note below.
   `resume=False`, or set `"allow_request_obfuscation": false` in the kind to
   keep the plan as it is.
 - **A kept plan warns when the library grew.** Resumed after the library
-  added or retired techniques, either kind keeps its plan with one WARNING
-  that names them. It does not draw the new techniques until it is planned
-  again with `resume=False`, and still replays the retired ones.
+  added or retired techniques, or changed its version or its rules, either
+  kind keeps its plan with one WARNING that names them and counts the
+  pending units whose combination today's rules refuse. It does not draw
+  the new techniques until it is planned again with `resume=False`, still
+  replays the retired ones, and its rows record the spec version the plan
+  was drawn at. A plan file written before this release records no rules,
+  so its first resume warns once.
 - **The natural kind's pool changed.** The spec's `kinds` narrowed it to the
   techniques marked natural, and spec 1.2 then grew it, to 71 techniques in
   13 families by default (46 in 8 before); spec 1.3 added the urgent ask, to
@@ -761,6 +765,21 @@ names them, where it used to raise: the plan does not draw the new
 techniques until it is planned again with `resume=False`. A changed seed,
 `rounds`, `family_weights`, `layer_rates`, or a pool your section changed,
 still raises.
+
+**Release note: the rules a plan was drawn by.** A jailbreak plan file now
+also records `rules`, a content id of what a draw reads off the spec (the
+layer order, caps and rates, the manipulation and request-obfuscation
+lists, the pool's families and each pool technique's tags), since the rules
+can change while the spec version does not (as they did twice within 1.3).
+The one WARNING of a kept plan is now given also when its spec version or
+its rules are not today's (and when its plan file, written before this
+release, records no rules), and it counts the pending units whose recorded
+combination today's rules refuse; those still run as planned (a plan of the
+default attacks made at spec 1.2 holds 95 such units in 600, the escalation
+337 in 2,400). A row's `combination_spec_version` is now the spec version
+its plan was drawn at, not the library's: the rows a resume writes for a
+plan kept from 1.2 say 1.2. The run record's `spec_version` is still the
+library's. Nothing raises that did not, and no draw changes.
 
 **Release note: larger variant pools.** Eighty-four variants join the
 request pools that held four: the answer formats (`answer_as_*`,
