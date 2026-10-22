@@ -257,13 +257,17 @@ def test_a_count_round_deals_the_techniques_of_every_family_evenly():
     assert uneven == {}
 
 
-@pytest.mark.parametrize("units", [2000, 3000])
+@pytest.mark.parametrize("units", [4000, 6000])
 @pytest.mark.parametrize("section", [{}, {"budget": "group"}], ids=["unit", "group"])
 def test_the_default_attacks_draw_every_technique_of_their_pool(units, section):
     """No step's picks starve another step's families: the request
     obfuscation once counted its picks as the obfuscation layer's, and 14
     encode and sensitive_words techniques were never drawn. A deprecated
-    technique, or one no simulated input may take, is not asked for."""
+    technique, or one no simulated input may take, is not asked for. The
+    nine heavy encodings are drawn in about 1 unit in 500 (one of complexity
+    3 fits only a unit whose earlier picks leave 3 points, and the payload
+    splits take the obfuscation slots of some units that would hold an
+    encoding), so the plans are large enough that each is still drawn."""
     drawn, pool = simulate.deal_kind(section, units, groups=3)
     table = simulate.shares(drawn, pool)
     texts = simulate.inputs(units, groups=3)["prompt"]
@@ -357,8 +361,12 @@ _BUDGETS = [
 # distractors, asking) moved it once more: wider families change the member
 # some request draws land on and, through the unit's rng and its group's
 # counts, the rest of their draw (99 of the 240 dealt units, 26 of the 200
+# undealt draws). The two spec 1.3 payload splits moved it again: one more
+# obfuscation family to deal, which refuses encode, changes the family some
+# obfuscation draws land on and, through the unit's rng and its group's
+# counts, the rest of their draw (221 of the 240 dealt units, 73 of the 200
 # undealt draws).
-_PINNED_DRAWS = "006f7195478e0cfe4dc7ecfc906b6c129bc861af48650800312125622d976766"
+_PINNED_DRAWS = "d3f421d73cb9e9d99932372be0e2cc97ca1df75b85711892036040cccf655a70"
 
 
 def test_draws_without_the_request_obfuscation_are_those_made_before_it_was_counted():

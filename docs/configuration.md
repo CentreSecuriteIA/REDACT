@@ -650,8 +650,8 @@ the default) and in `params["jailbreaks"]`.
 ### Release notes
 
 **Upgrading from the previous release (spec version 1.0, now 1.3).** The
-jailbreak library grew from 151 techniques in 23 families to 216 active ones
-(223 registered, 7 retired) in 30 families and five layers. What that asks of
+jailbreak library grew from 151 techniques in 23 families to 218 active ones
+(225 registered, 7 retired) in 31 families and five layers. What that asks of
 a run you already have, and what you will see; each point has its note below.
 
 - **One re-plan is planned: the adversarial kind.** The packaged attacks now
@@ -677,7 +677,7 @@ a run you already have, and what you will see; each point has its note below.
   not, a technique is drawn only for the inputs it applies to, several
   rules are new, and the request obfuscation's families are counted apart
   from the obfuscation layer's, so the attacks draw every technique of
-  their pool. The default attack pool is 202 techniques in 26 families
+  their pool. The default attack pool is 204 techniques in 27 families
   (142 in 22 before; 178 in 24 at spec 1.2). The `eval` type's pool and
   draws are held, at 36
   techniques in 10 families, but for the ASCII-art cap, which changes the font
@@ -814,8 +814,9 @@ A fresh plan of the adversarial kind draws them: the default attack pool goes
 from 178 techniques in 24 families to 202 in 26, and since each adds members
 or a family to deal, some units of a fresh plan draw other techniques than
 they did with the same seed. A plan kept from spec 1.2 resumes with the
-growth WARNING, which names the twenty-four, and does not draw them until it
-is planned again with `resume=False`. New rules bind a fresh plan:
+growth WARNING, which names the twenty-four (and the two payload splits,
+below), and does not draw them until it is planned again with
+`resume=False`. New rules bind a fresh plan:
 `persona_template` refuses `fsh`, `dap`, `ascii_art` and `impersonation`;
 `fake_turns` refuses `continuation`, `indirect`, `framing`, `persona`,
 `cognitive`, `persona_template`, `structural` and `neutral_container`, and
@@ -853,6 +854,26 @@ techniques and combinations as they were, and its pending units draw hints,
 so a run resumed across this change holds encoded texts with and without
 one. No combination, pool or round changes, and the `eval` and natural
 kinds draw no hinted encoding.
+
+**Release note: the payload split.** Two techniques of a new obfuscation
+family, `payload_split` (spec 1.3, order 65, complexity 2, attack only):
+`to_payload_split` cuts the text into two to four parts at word boundaries,
+and `to_payload_split_semantic` has the generation model cut it where its
+meaning allows (one to three calls, no check model: the parts are kept only
+when they give the text back, compared without whitespace). Each names the
+parts A, B, C ... and writes one of eight variants that asks the reader to join
+them ([techniques.md](techniques.md#what-the-families-do)). A fresh plan of
+the adversarial kind draws them, in about one unit in ten: the default
+attack pool goes from 202 techniques in 26 families to 204 in 27. The family
+refuses `ascii_art`, `encode` and `fake_turns` and, like `translation`, is
+kept from `fsh` and `dap`, so some units of a fresh plan draw other
+techniques than they did with the same seed, and the `encode` family is
+picked a little less (854 picks in 3,000 units, 819 now); the nine heavy
+encodings, which only a unit with three points left can take, are drawn about
+a seventh less often (357 draws in six plans of 2,000 units, 308 now). A plan
+kept from before resumes with the growth WARNING, which names the two, and
+does not draw them until it is planned again with `resume=False`. The `eval`
+and natural kinds draw neither: both pools are as they were.
 
 **Release note: the techniques spec 1.2 adds.** Forty-eight techniques in
 six groups, below. A fresh plan draws them; since each adds members to deal,

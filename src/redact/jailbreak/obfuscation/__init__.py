@@ -7,6 +7,7 @@ from .casual_writing import get_casual_writing_functions
 from .encoding import get_encoding_functions
 from .neutral_container import get_neutral_container_functions
 from .noise import get_noise_functions
+from .payload_split import get_payload_split_functions
 from .sensitive_words import get_sensitive_words_functions
 from .structural import get_structural_functions
 from .suffixes import get_suffix_functions
@@ -29,4 +30,5 @@ def get_all_obfuscation_functions() -> list[Callable]:
         + get_casual_writing_functions()
         + get_noise_functions()
         + get_neutral_container_functions()
+        + get_payload_split_functions()
     )

@@ -411,6 +411,45 @@ def test_a_fake_turn_joins_a_light_or_word_level_encoding_typos_or_a_request(
     assert _joins(fake, other) and _joins(other, fake)
 
 
+_PAYLOAD_SPLITS = ["to_payload_split", "to_payload_split_semantic"]
+
+
+@pytest.mark.parametrize("split", _PAYLOAD_SPLITS)
+@pytest.mark.parametrize("other", [
+    "to_ascii_art", "to_base64", "to_rot13", "to_sensitive_words_encode_base64",
+    "to_fake_system_turn", "to_fake_history", "to_payload_split",
+    "to_payload_split_semantic"])
+def test_a_payload_split_refuses_ascii_art_encode_and_fake_turns_either_way(
+        split, other):
+    """Parts a font or a cipher would break apart, an invented turn already
+    a conversation, and one cut of the prompt is enough (a family holds one
+    technique)."""
+    assert not _joins(split, other)
+    assert not _joins(other, split)
+
+
+@pytest.mark.parametrize("split", _PAYLOAD_SPLITS)
+@pytest.mark.parametrize("other", [
+    "to_fsh_random_short", "to_fsh_selected_long", "to_dap_random_long",
+    "to_dap_selected_short"])
+def test_a_payload_split_takes_the_manipulation_layer_s_obfuscation_block(
+        split, other):
+    """manipulation_blocked_obfuscation names it: the benign pairs of fsh and
+    dap would sit between the parts and the request to join them."""
+    assert not _joins(split, other)
+    assert not _joins(other, split)
+
+
+@pytest.mark.parametrize("split", _PAYLOAD_SPLITS)
+@pytest.mark.parametrize("other", [
+    "to_french", "to_thai", "to_rewrite_with_typos_low", "to_tokenbreak_split",
+    "to_sensitive_words_split", "to_json", "to_csv_row", "to_summarize",
+    "to_psychopath_persona", "to_fictional_world"])
+def test_a_payload_split_joins_a_translation_noise_a_wrapper_a_request_or_a_scene(
+        split, other):
+    assert _joins(split, other) and _joins(other, split)
+
+
 @pytest.mark.parametrize(("first", "then"), [
     ("to_french", "to_fsh_random_short"),
     ("to_fsh_random_short", "to_french"),

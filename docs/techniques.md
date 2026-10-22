@@ -1,6 +1,6 @@
 # Jailbreak techniques
 
-The jailbreak stage draws from 216 active techniques in 5 layers and 30
+The jailbreak stage draws from 218 active techniques in 5 layers and 31
 families; the first layer, `rewrite`, holds none yet
 ([below](#layers)).
 `configs/jailbreak/combination_spec.json` gives each technique (the
@@ -33,7 +33,7 @@ families apply in the order of their `within_layer_order`, numbered in tens
 so a family added later slots in between: the whole-text rewrites first
 (`translation` 10, `typos` 20, `casual_writing` 30, `noise` 35), then the word-level
 steps (`sensitive_words` 40, `tokenbreak` 50), so a rewrite cannot undo a
-split or an encoded word, then `suffixes` 60, `encode` 70, `structural` and
+split or an encoded word, then `suffixes` 60, `payload_split` 65, `encode` 70, `structural` and
 `neutral_container` 80 (each excludes the other, so they share the place)
 and `ascii_art` 90, the outermost. A plan made before this order applied
 `sensitive_words` and `tokenbreak` first; a kept plan replays the order its
@@ -58,9 +58,9 @@ on. (`to_rewrite`, despite its name, is an `indirect` request technique.)
 | `rewrite` | 0 | 0 | at most 1 |
 | `hacking` | 4 | 32 | at most 1 |
 | `manipulation` | 3 | 15 | at most 1 |
-| `obfuscation` | 11 | 101 | no cap |
+| `obfuscation` | 12 | 103 | no cap |
 | `requests` | 12 | 68 | at most 1 |
-| all | 30 | 216 | |
+| all | 31 | 218 | |
 <!-- END layers -->
 
 ## Families and techniques
@@ -90,6 +90,7 @@ that call a model call the generation model.
 | obfuscation | `sensitive_words` | `encoding` | 40 | 13 | yes | no | `to_sensitive_words_encode_base64`, `to_sensitive_words_encode_rot13`, `to_sensitive_words_encode_rot18`, `to_sensitive_words_encode_rot47`, `to_sensitive_words_encode_unicode`, `to_sensitive_words_encode_ascii`, `to_sensitive_words_encode_separator`, `to_sensitive_words_encode_leetspeak_basic`, `to_sensitive_words_encode_leetspeak_intermediate`, `to_sensitive_words_encode_leetspeak_advanced`, `to_sensitive_words_split`, `to_sensitive_words_variables`, `to_synonym_substitution` |
 | obfuscation | `tokenbreak` | `encoding` | 50 | 3 | yes | no | `to_tokenbreak_prepend`, `to_tokenbreak_split`, `to_tokenbreak_delimiter` |
 | obfuscation | `suffixes` | `surface_noise` | 60 | 4 | no | no | `to_adversarial_suffix_punctuation`, `to_adversarial_suffix_fragments`, `to_adversarial_suffix_unicode`, `to_adversarial_suffix_emoji` |
+| obfuscation | `payload_split` | `encoding` | 65 | 2 | `to_payload_split_semantic` | no | `to_payload_split`, `to_payload_split_semantic` |
 | obfuscation | `encode` | `encoding` | 70 | 27 | no | no | `to_base64`, `to_rot13`, `to_rot18`, `to_rot47`, `to_unicode_escape`, `to_ascii_ordinal`, `to_separator`, `to_leetspeak_basic`, `to_leetspeak_intermediate`, `to_leetspeak_advanced`, `to_morse`, `to_braille`, `to_reversed_characters`, `to_reversed_words`, `to_reversed_word_order`, `to_lookalike_letters`, `to_zero_width_noise`, `to_hex`, `to_binary`, `to_url_encoding`, `to_html_entities`, `to_base32`, `to_base85`, `to_caesar_cipher`, `to_atbash`, `to_fullwidth`, `to_math_styled` |
 | obfuscation | `neutral_container` | `container` | 80 | 6 | no | no | `to_code_comment`, `to_yaml_document`, `to_csv_row`, `to_email_message`, `to_transcript_line`, `to_log_entry` |
 | obfuscation | `structural` | `container` | 80 | 3 | no | no | `to_json`, `to_xml`, `to_markdown` |
@@ -202,7 +203,9 @@ technique is picked first. A technique may not join a combination when:
   `ascii_art`; `ascii_art` with `framing`, `persona`, `cognitive`, `fsh`,
   `dap`; `fsh` and `dap` with `continuation`, `indirect`, `framing`,
   `persona`, `cognitive`; `persona_template` with `fsh`, `dap` and
-  `ascii_art`; `persona`, `cognitive` and `persona_template` with
+  `ascii_art`; `payload_split` with `ascii_art`, `encode` and `fake_turns`
+  (a font or a cipher would break the parts apart, and an invented turn is a
+  conversation already); `persona`, `cognitive` and `persona_template` with
   `impersonation`, so a prompt never carries two identities; `fake_turns`
   with the list of `fsh` and `dap`, `persona_template`, `structural` and
   `neutral_container` (an invented turn is a conversation, not a document
@@ -234,8 +237,8 @@ technique is picked first. A technique may not join a combination when:
   or Cyrillic text have fonts), or one every font draws longer than its cap;
 - it pairs a family of the manipulation layer (`fsh`, `dap`, `fake_turns`)
   with an obfuscation in `manipulation_blocked_obfuscation`: the
-  `translation` and `ascii_art` families and the `heavy` `encode`
-  techniques, except those also in `sensitive_words`;
+  `translation`, `ascii_art` and `payload_split` families and the `heavy`
+  `encode` techniques, except those also in `sensitive_words`;
 - it pairs a `needs_latin` technique with a translation into a script
   other than Latin: Japanese, Russian, Arabic, Greek, Thai, Khmer, Nepali
   or Bengali (each language's `script` is in its row of
@@ -521,6 +524,22 @@ wrappers. The family is attack-only, and the eval type does not draw it.
   `obfuscation/noise.py`. The high densities are attack-only.
 - `suffixes` appends an adversarial suffix: punctuation, fragments, unicode
   or emoji. Its info is `suffix=<suffix>`.
+- `payload_split` (spec version 1.3) cuts the text into two to four parts,
+  names them A, B, C ..., and writes them, one per line as `A: "..."`, in one
+  of eight variants of its pool (`reassembly` in
+  `obfuscation/payload_split_templates.json`) that asks the reader to join
+  them in order. `to_payload_split` is pure: it cuts at word boundaries into
+  parts of nearly equal word count (the text's whitespace becomes single
+  spaces). `to_payload_split_semantic` has a model cut the text where its
+  meaning allows (the `payload_split_semantic` prompt), asked again up to
+  three times until the reply is a numbered list of the drawn count of
+  parts, and keeps the parts only when, joined in order and compared
+  without whitespace, they are the text: a check in code, no check model
+  (`DISCARDED; reason=parts differ from the prompt`, or `malformed parts`
+  when no reply was the list). Both draw the count, two to four and no more
+  than the text's words, from `rng`, discard a text of fewer than two words
+  (`too few words to split`), and write `variant=<name>;parts=<n>`. The
+  family is attack only, and outside the eval type's pool.
 - `encode` encodes the whole text: base64 (one line), rot13, rot18 (rot13 on
   letters and rot5 on ASCII digits), rot47, unicode escapes (`\uXXXX`, or
   `\UXXXXXXXX` above U+FFFF), ASCII ordinals, a separator (between the
@@ -702,10 +721,10 @@ a weight, and an eval-pool technique's may not, since a weight changes the
 eval text ([extending.md](extending.md#add-variants-to-a-template-pool)).
 Importing `redact.jailbreak` checks every pool and raises naming the file,
 directive and variant of a fault. A pool should hold at least 8 variants
-(a request or framing directive, a container, a fake turn), 12 for a
-benign role, 20 for small talk, 6 for the persona templates' mechanics and
-4 for an encoding's decode hints;
-13 of the 81 pools are below their floor today (the five
+(a request or framing directive, a container, a fake turn, the payload split's reassembly), 12
+for a benign role, 20 for small talk, 6 for the persona templates' mechanics
+and 4 for an encoding's decode hints;
+13 of the 82 pools are below their floor today (the five
 framing, the four continuation, the two structural, `refusal_then_comply` and
 `past_tense`, each with 4, or 1): the techniques of the eval pool, whose
 text waits for the eval review. A test ratchets the rest
@@ -714,6 +733,7 @@ text waits for the eval review. A test ratchets the rest
 The info names the variant drawn: `variant=<name>` for the framing
 techniques, the answer formats, the answer languages, asking, the
 distractors, impersonation, indirect, temporal, the neutral containers,
+the payload splits (`variant=<name>;parts=<n>`),
 small talk (`smalltalk=<prefix|suffix>;variant=<name>`), the benign roles
 (`role=<style>;variant=<name>`), the fake turns (`variant=<name>`) and the
 persona templates, which name the mechanic drawn
@@ -766,8 +786,9 @@ Also beyond the reference list:
 - continuation attacks (4) and indirect task embedding (6);
 - the answer languages Zulu, Scots Gaelic, Bengali and Javanese, and (spec
   version 1.2) Hmong, Guarani, Chinese, Hindi, Yoruba and Amharic;
-- (spec version 1.3) the persona templates (11 frames, 6 mechanics) and the
-  fake turns (3); the answer formats dual answer, tagged prefix and answer
+- (spec version 1.3) the persona templates (11 frames, 6 mechanics), the
+  fake turns (3) and the payload split (2: at word boundaries, or where a
+  model finds the meaning allows); the answer formats dual answer, tagged prefix and answer
   in an encoding; the impersonations of an authority and of a developer,
   the future tense and a historical era, a task as a distractor before or
   after the prompt, and an urgent ask.

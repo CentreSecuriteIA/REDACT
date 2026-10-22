@@ -1,9 +1,9 @@
 """What the template techniques write, pinned by digest.
 
 Every technique whose text comes from a template file (framing, the persona
-templates, the fake turns, structural, the neutral containers, the request
-families, small talk, the benign roles and the encodings with decode hints)
-runs on two neutral probes for
+templates, the fake turns, structural, the neutral containers, the pure
+payload split, the request families, small talk, the benign roles and the
+encodings with decode hints) runs on two neutral probes for
 six seeds: three calls
 in a row on one ``random.Random(seed)`` per probe. The SHA-256 digest of the
 texts, the infos and the generator's state after the calls is pinned per
@@ -34,6 +34,7 @@ from redact.jailbreak.obfuscation.encoding import get_encoding_functions
 from redact.jailbreak.obfuscation.neutral_container import (
     get_neutral_container_functions,
 )
+from redact.jailbreak.obfuscation.payload_split import to_payload_split
 from redact.jailbreak.obfuscation.structural import get_structural_functions
 from redact.jailbreak.requests import get_all_request_functions
 from redact.jailbreak.requests.benign_role import get_benign_role_functions
@@ -53,7 +54,8 @@ _TECHNIQUES = {fn.__name__: fn for fn in (
     + get_fake_turn_functions()
     + [fn for fn in get_encoding_functions() if hasattr(fn, "variant_pool")]
     + get_structural_functions()
-    + get_neutral_container_functions() + get_all_request_functions()
+    + get_neutral_container_functions() + [to_payload_split]
+    + get_all_request_functions()
     + get_smalltalk_functions() + get_benign_role_functions())}
 
 

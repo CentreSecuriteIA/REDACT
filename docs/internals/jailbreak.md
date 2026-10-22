@@ -241,7 +241,7 @@ The apply order is the layers', whatever the pick order (a rewrite first),
 except the request obfuscation, which goes last. Within the obfuscation layer it is each
 family's `within_layer_order`, in tens: `translation` 10, `typos` 20,
 `casual_writing` 30, `noise` 35, `sensitive_words` 40, `tokenbreak` 50,
-`suffixes` 60, `encode` 70, `structural` and `neutral_container` 80 (each
+`suffixes` 60, `payload_split` 65, `encode` 70, `structural` and `neutral_container` 80 (each
 excludes the other, so they never meet), `ascii_art` 90. The whole-text
 rewrites come before the word-level steps, which they would otherwise undo;
 a family added later takes a number between two, as `noise` did. The manifest records the order a
