@@ -96,7 +96,20 @@ def to_y(prompt: str, **kwargs) -> TechniqueGen:
   the one that retired it (`None` while it is active). Versions are dotted
   whole numbers and compare as such (`version_key`: `"1.10"` comes after
   `"1.9"`); a `since`, a `deprecated` or a spec `version` that is not one
-  raises at import.
+  raises at import. So does an entry with a key outside `TECHNIQUE_KEYS`
+  (`complexty` used to give complexity 1 silently), `families` that are
+  not a non-empty list of the spec's families (an unknown one used to put
+  the technique in the obfuscation layer), a `complexity` that is not a
+  whole number from 0 to 3, a `requires_llm` or `requires_benign` that is
+  not true or false, an `encode_weight` other than `light`, `heavy` or
+  none, and a `max_tokens` of `true`. `read_spec` checks the rest: each
+  family's keys (`FAMILY_KEYS`) and a `layer` of `layer_order`, the spec's
+  `layer_rates` (numbers from 0 to 1, for a layer or
+  `request_obfuscation`), each generator keyed by a family of the spec, and
+  each data row (its `where` column true or false, its `complexity`, its
+  versions, and a `<family>_since` only for a family made from that file,
+  so a misspelled `translaton_since` raises), its messages naming the data
+  file; `data_rows` raises for a row without a `slug`.
 - A technique may carry an **applicability**: `@applicable_when(predicate)`
   sets its `applicable`, `predicate(text, entry_type) -> bool`, and
   `applies(fn, text, entry_type)` reads it, true for a technique without

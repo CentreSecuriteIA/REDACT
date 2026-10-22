@@ -127,3 +127,60 @@ def test_where_keeps_only_the_rows_whose_column_is_true(tmp_path):
 def test_a_generated_name_the_spec_has_already_raises(tmp_path):
     with pytest.raises(ValueError, match="'to_base64', which the spec has already"):
         _spec(tmp_path, [{"slug": "base64"}], name="to_{slug}")
+
+
+@pytest.mark.parametrize(("rows", "generator", "message"), [
+    ([{"slug": "first", "drawn": "yes"}], {"where": "drawn"},
+     "hacking/stand_ins.json: row 'first' must give 'drawn' true or false"),
+    ([{"slug": "first"}], {"where": "drawn"},
+     "hacking/stand_ins.json: row 'first' must give 'drawn' true or false"),
+    ([{"name": "first"}], {}, "hacking/stand_ins.json: row 0 has no slug"),
+    ([{"slug": "first", "complexity": "low"}], {},
+     "hacking/stand_ins.json: the complexity of row 'first' must be a whole number "
+     "from 0 to 3, got 'low'"),
+    ([{"slug": "first", "stand_ins_since": "1.3"}], {},
+     "hacking/stand_ins.json: row 'first' gives 'stand_ins_since', which names no "
+     "family made from this file"),
+    ([{"slug": "first", "stand_in_since": "1.x"}], {},
+     "hacking/stand_ins.json: the stand_in_since of row 'first' must be a version"),
+], ids=["where text", "where missing", "no slug", "complexity text",
+        "misspelled family since", "bad family since"])
+def test_a_row_that_breaks_a_rule_raises_naming_its_file(tmp_path, rows, generator,
+                                                        message):
+    with pytest.raises(ValueError) as raised:
+        _spec(tmp_path, rows, **generator)
+    assert str(raised.value).startswith(message)
+
+
+def _read_changed(tmp_path, change) -> dict:
+    """The packaged spec with ``change`` applied, read from ``tmp_path``."""
+    shutil.copy(_PACKAGED / "languages.json", tmp_path / "languages.json")
+    spec = json.loads((_PACKAGED / "combination_spec.json").read_text(encoding="utf-8"))
+    change(spec)
+    path = tmp_path / "combination_spec.json"
+    path.write_text(json.dumps(spec), encoding="utf-8")
+    return T.read_spec(path)
+
+
+@pytest.mark.parametrize(("change", "message"), [
+    (lambda s: s["families"]["encode"].__setitem__("within_layer_ordr", 3),
+     "combination_spec.json: family 'encode' has unknown key(s) ['within_layer_ordr']"),
+    (lambda s: s["families"]["encode"].__setitem__("layer", "bogus"),
+     "combination_spec.json: the layer of family 'encode' must be one of layer_order"),
+    (lambda s: s["layer_rates"].__setitem__("hacking", 2),
+     "combination_spec.json: layer_rates['hacking'] must be a number from 0 to 1"),
+    (lambda s: s["layer_rates"].__setitem__("hackin", 0.5),
+     "combination_spec.json: layer_rates['hackin'] must be a number from 0 to 1"),
+    (lambda s: s["generators"].__setitem__(
+        "translatoin", s["generators"].pop("translation")),
+     "combination_spec.json: generators has 'translatoin', which is not a family"),
+], ids=["family key", "family layer", "rate 2", "rate of no layer",
+        "generator of no family"])
+def test_a_spec_that_breaks_a_rule_raises_when_read(tmp_path, change, message):
+    with pytest.raises(ValueError) as raised:
+        _read_changed(tmp_path, change)
+    assert str(raised.value).startswith(message)
+
+
+def test_the_packaged_spec_reads_as_it_is(tmp_path):
+    assert _read_changed(tmp_path, lambda spec: None) == T.load_spec()

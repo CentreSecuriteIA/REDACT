@@ -239,7 +239,10 @@ contract.
    `dimension` (an augmentation tag of `configs/dimensions.json`, where a new
    one is an entry with its side and definition; import fails otherwise),
    `cross_incompatible_with` and, for one variations may draw, `kinds`,
-   plus a `description`, which nothing reads.
+   plus a `description`, which nothing reads. Import fails on a family key
+   outside these (and `check`, `calls`), a `layer` not in `layer_order`,
+   and a technique entry with an unknown key, a family the spec does not
+   have, or a `complexity` that is not a whole number from 0 to 3.
    - **A technique that calls a model** says how its reply is checked and
      what one application costs. `check` names the check: `typos` (the
      typo check), `scenario` (the scenario check), `word_list` (the strict

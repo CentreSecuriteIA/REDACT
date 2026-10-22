@@ -303,6 +303,35 @@ def test_a_needs_latin_that_is_not_true_or_false_raises_at_tagging(
         _tag_base64(monkeypatch, needs_latin=needs_latin)
 
 
+@pytest.mark.parametrize(("entry", "message"), [
+    ({"families": []}, "families must be a non-empty list of families of "
+                       "combination_spec.json, got []"),
+    ({"families": ["encodez"]}, "families must be a non-empty list of families "
+                                "of combination_spec.json, got ['encodez']"),
+    ({"complexity": 4}, "complexity must be a whole number from 0 to 3, got 4"),
+    ({"complexity": "high"}, "complexity must be a whole number from 0 to 3, got "
+                             "'high'"),
+    ({"complexity": True}, "complexity must be a whole number from 0 to 3, got True"),
+    ({"requires_llm": "yes"}, "requires_llm must be true or false, got 'yes'"),
+    ({"requires_benign": 1}, "requires_benign must be true or false, got 1"),
+    ({"encode_weight": "medium"}, 'encode_weight must be "light", "heavy" or '
+                                  "absent, got 'medium'"),
+    ({"max_tokens": True}, "max_tokens must be a whole number of at least 1, got "
+                           "True"),
+    ({"complexty": 2}, "has unknown key(s) ['complexty'] in combination_spec.json"),
+], ids=["no family", "unknown family", "complexity 4", "complexity text",
+        "complexity bool", "requires_llm text", "requires_benign number",
+        "encode_weight", "max_tokens bool", "unknown key"])
+def test_a_spec_entry_that_breaks_a_rule_raises_at_tagging(monkeypatch, entry, message):
+    """At import, not when a plan is made or a family is misread: a family
+    that does not exist used to put the technique in the obfuscation layer,
+    and a complexity of 7 to leave it undrawn."""
+    with pytest.raises(ValueError) as raised:
+        _tag_base64(monkeypatch, **entry)
+    assert str(raised.value).startswith("Technique 'to_base64'")
+    assert message in str(raised.value)
+
+
 def test_check_and_calls_come_from_the_first_family_unless_the_entry_says():
     by_name = registry(all_techniques())
     # A family's: the sensitive-word encodings take sensitive_words', their
