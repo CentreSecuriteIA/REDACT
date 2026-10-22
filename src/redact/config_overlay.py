@@ -116,14 +116,47 @@ def unseen_natural_families(config_dir: str | Path) -> list[str]:
     return [family for family in packaged if family not in copied]
 
 
+def extra_eval_techniques(config_dir: str | Path) -> list[str]:
+    """The techniques the eval type's attacks draw through ``config_dir``
+    that the packaged eval type's do not, sorted: what a copy of
+    ``dataset_types/eval.json`` (or ``jailbreak/augmentations.json``) made
+    before the library added techniques to a family it allows lets in. The
+    library holds the eval pool; a copy does not follow it. Empty when the
+    folder holds neither file.
+
+    Raises:
+        ValueError: The folder's eval type does not resolve, as a recipe of
+            that type would raise when it loads.
+    """
+    if not any((Path(config_dir) / name).is_file()
+               for name in ("dataset_types/eval.json", _AUGMENTATIONS)):
+        return []
+    # Imported here: the recipe and the jailbreak package read this module.
+    from redact.jailbreak.augmentation import resolve
+    from redact.jailbreak.pool import technique_pool
+    from redact.recipe import load_dataset_type
+
+    def pool(folder: str | Path | None) -> set[str]:
+        base = load_dataset_type("eval", folder)["augmentations"]
+        kind = resolve(None, "adversarial", base=base, config_dir=folder)
+        return {fn.__name__ for fn in technique_pool(kind)} if kind else set()
+
+    return sorted(pool(config_dir) - pool(None))
+
+
 def report_config_sources(
     config_dir: str | Path | None, *, verbose: bool = True,
+    dataset_type: str | None = None,
 ) -> dict[str, list[str]]:
     """Warn about the files of ``config_dir`` that are not read and, with
     ``verbose``, log those that are. A copy of ``augmentations.json`` whose
     natural kind does not allow a family the packaged one allows is logged
     at INFO, naming the families (:func:`unseen_natural_families`), so a
-    stale copy shows what it cannot draw.
+    stale copy shows what it cannot draw. For a ``dataset_type`` ``"eval"``
+    run, the techniques its attacks draw through the folder beyond the
+    packaged eval type's are named in a WARNING
+    (:func:`extra_eval_techniques`): a copy made before the library grew
+    widens the eval pool the library holds.
 
     Returns:
         :func:`config_sources`, each list empty for no ``config_dir``.
@@ -149,4 +182,13 @@ def report_config_sources(
             "its natural families.allow, delete the copy, or write it again with "
             "scaffold_setup(..., overwrite=True), which replaces your edits.",
             _AUGMENTATIONS, config_dir, ", ".join(unseen))
+    if dataset_type == "eval" and (extra := extra_eval_techniques(config_dir)):
+        logger.warning(
+            "configs: the eval attacks of %s draw %d technique(s) the library's "
+            "eval type does not: %s. A copy of dataset_types/eval.json (or of "
+            "%s) made before the library added them widens the eval pool, which "
+            "the library holds: delete the copy, write it again with "
+            "scaffold_setup(..., overwrite=True), which replaces your edits, or "
+            "add them to its adversarial techniques.deny.",
+            config_dir, len(extra), ", ".join(extra), _AUGMENTATIONS)
     return found

@@ -506,7 +506,8 @@ def run_pipeline(
         # "which prompt ran?" stops being obvious, and an override that
         # silently matches nothing is invisible without this.
         report_prompt_sources(ctx.prompt_dir)
-    configs = report_config_sources(ctx.config_dir, verbose=verbose)
+    configs = report_config_sources(ctx.config_dir, verbose=verbose,
+                                    dataset_type=ctx.dataset_type)
     if ctx.config_dir is not None:
         noted.update(config_dir=str(ctx.config_dir),
                      config_files=sorted(configs["overridden"] + configs["added"]))

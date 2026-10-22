@@ -329,9 +329,11 @@ Model rewrites (`cognitive`, `persona`, `typos`, `sensitive_words`,
 this pool that has a model write the prompt must carry a spec `check`. The fifteen spec 1.2 encodings
 are not drawn here either: `eval.json` denies each in `techniques.deny`, so the
 `encode` row keeps its five `heavy` members while the eval pool is held. The
-four spec 1.2 many-shot variants of `fsh` and `dap` are denied the same way, and
-so are the two spec 1.3 members of `temporal` (`to_use_future_tense`,
-`to_use_historical_era`), so its row keeps `to_use_past_tense`. With
+four spec 1.2 many-shot variants of `fsh` and `dap` are denied the same way.
+`temporal` is not allowed as a family: `eval.json` names `to_use_past_tense`
+under `techniques.allow`, so neither spec 1.3 member of the family
+(`to_use_future_tense`, `to_use_historical_era`) nor a later one reaches the
+pool. With
 `"adversarial": {"translation": false}` the pool keeps the other 28.
 [configuration.md](configuration.md#dataset-types) gives the type file.
 
@@ -817,8 +819,8 @@ request set in the future, or in a historical era; complexity 3, as
 family's form, `type=<directive>;variant=<name>`. All are attack-only but
 `to_ask_with_urgency`: `asking` is natural, and the owner decided that an
 urgent ask is a natural variation, so it takes its family's kinds. The
-`eval` type, which allows `temporal` whole, denies the two new temporal
-members, so its pool does not change.
+`eval` type names `to_use_past_tense` alone of `temporal`, not the family,
+so its pool does not change.
 
 Three request families of spec version 1.2 are for natural variations only
 (their `kinds` are `["natural"]`, so no attack draws them): ordinary,

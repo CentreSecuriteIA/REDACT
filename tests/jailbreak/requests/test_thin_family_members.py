@@ -79,14 +79,16 @@ def test_the_urgent_ask_is_natural_as_its_family():
         fn.__name__ for fn in natural}
 
 
-def test_the_eval_type_denies_the_two_new_temporal_members():
-    """Eval allows the temporal family whole, so it names them in
-    techniques.deny, and its temporal row keeps to_use_past_tense alone."""
+def test_the_eval_type_names_to_use_past_tense_alone_of_temporal():
+    """Eval names to_use_past_tense under techniques.allow and does not allow
+    the temporal family, so neither new member, nor one added later, reaches
+    its pool."""
     from redact.recipe import load_dataset_type
 
     section = load_dataset_type("eval")["augmentations"]
-    assert {"to_use_future_tense", "to_use_historical_era"} <= set(
-        section["adversarial"]["techniques"]["deny"])
+    adversarial = section["adversarial"]
+    assert "temporal" not in adversarial["families"]["allow"]
+    assert "to_use_past_tense" in adversarial["techniques"]["allow"]
     pool = technique_pool(resolve(section, "adversarial"))
     drawn = {fn.__name__ for fn in pool} & set(_MEMBERS)
     assert drawn == set()

@@ -15,13 +15,13 @@
       "translation": true,
       "families": {
         "allow": ["encode", "fsh", "dap", "framing", "structural", "ascii_art",
-                  "continuation", "temporal"],
+                  "continuation"],
         "deny": ["sensitive_words"]
       },
       "techniques": {
         "allow": ["to_swahili", "to_thai", "to_khmer", "to_nepali",
                   "to_zulu", "to_scots_gaelic", "to_bengali", "to_javanese",
-                  "to_refusal_then_comply"],
+                  "to_refusal_then_comply", "to_use_past_tense"],
         "deny": ["to_rot13", "to_rot18", "to_rot47", "to_separator",
                  "to_leetspeak_basic", "to_leetspeak_intermediate",
                  "to_leetspeak_advanced",
@@ -32,8 +32,7 @@
                  "to_base85", "to_caesar_cipher", "to_atbash",
                  "to_fullwidth", "to_math_styled",
                  "to_fsh_random_many", "to_fsh_selected_many",
-                 "to_dap_random_many", "to_dap_selected_many",
-                 "to_use_future_tense", "to_use_historical_era"]
+                 "to_dap_random_many", "to_dap_selected_many"]
       },
       "pure_only": false,
       "family_weights": {"translation": 3},

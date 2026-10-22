@@ -64,13 +64,15 @@ hard techniques whose label stays certain: the families `encode` (less the
 and the fifteen it added, which leaves its five original `heavy` ones; and
 less `sensitive_words`), `fsh` and `dap` (less
 their four many-shot variants), `framing`, `structural`, `ascii_art`,
-`continuation`, `temporal` (less its two spec 1.3 members,
-`to_use_future_tense` and `to_use_historical_era`, which `techniques.deny`
-names too, so `to_use_past_tense` alone); the eight low-resource
+`continuation`; the eight low-resource
 translations (`to_swahili`, `to_thai`, `to_khmer`, `to_nepali`,
 `to_zulu`, `to_scots_gaelic`, `to_bengali`, `to_javanese`), with
 `"translation": true` and `family_weights` `{"translation": 3}`; and
-`to_refusal_then_comply`. It runs two count-driven rounds, one technique
+`to_refusal_then_comply` and `to_use_past_tense`, named under
+`techniques.allow` rather than their families, so a technique the library
+adds to `answer_format` or `temporal` does not reach the eval pool (the
+families it allows whole name each later member under `techniques.deny`).
+It runs two count-driven rounds, one technique
 then two (`rounds` `[{"exact_techniques": 1}, {"exact_techniques": 2}]`),
 with `allow_request_obfuscation` false, written out since the packaged
 attacks have it true; a count round never reads it, so either way its draws
@@ -679,6 +681,21 @@ a run you already have, and what you will see; each point has its note below.
   kind with `resume=False`. One made since resumes with the WARNING above.
   A `config_dir` copy of `augmentations.json` made before spec 1.2 does not
   draw the new natural families, and the run says so at INFO.
+- **A `config_dir` copy of `eval.json` widens the eval pool.** A copy made
+  before this release (what `scaffold_setup` wrote) keeps its old deny list,
+  so its eval attacks draw 57 techniques, not the held 36: the 21 the library
+  added to the families it allows, `to_atbash`, `to_base32`, `to_base85`,
+  `to_binary`, `to_caesar_cipher`, `to_dap_random_many`,
+  `to_dap_selected_many`, `to_fsh_random_many`, `to_fsh_selected_many`,
+  `to_fullwidth`, `to_hex`, `to_html_entities`, `to_lookalike_letters`,
+  `to_math_styled`, `to_reversed_characters`, `to_reversed_word_order`,
+  `to_reversed_words`, `to_url_encoding`, `to_use_future_tense`,
+  `to_use_historical_era` and `to_zero_width_noise`. An eval run names them
+  in a WARNING (`configs: the eval attacks of ... draw 21 technique(s) the
+  library's eval type does not ...`). Delete a copy you did not change, or
+  write it again with `scaffold_setup(..., overwrite=True)`
+  ([refreshing a stale copy](#your-own-config-folder)); to keep your edits,
+  add the 21 names to its adversarial `techniques.deny`.
 - **Fresh plans draw differently.** The same seed gives other combinations
   than at spec 1.0: the new techniques are dealt, the seven retired ones are
   not, a technique is drawn only for the inputs it applies to, several
@@ -897,14 +914,15 @@ until it is planned again with `resume=False`. The training build's rule
 that leaves out the benign variations made with a technique the natural kind
 does not draw does not touch it. The `eval` type does not change either: its pool stays at
 36 and its draws are those it made before. It allows none of the new
-families and, of `answer_format`, names `to_refusal_then_comply` alone; it
-allows `temporal` whole, so `eval.json` now ends its `techniques.deny` with
-`"to_use_future_tense", "to_use_historical_era"`. The rule that keeps
+families and, of `answer_format`, names `to_refusal_then_comply` alone; of
+`temporal`, which it allowed whole, it now names `to_use_past_tense` alone
+under `techniques.allow`, so neither new member, nor a later one, reaches
+it (its pool, rounds, plan file and draws are those of before). The rule that keeps
 `to_refusal_then_comply` from `persona_template` does not move its eval
 draws, since the eval type draws no persona template. A copy of `eval.json`
-in a `config_dir`, read whole in place of the packaged one, does not get the
-two denies: its eval attacks draw the two temporal members until you add
-them to its `techniques.deny`.
+in a `config_dir`, read whole in place of the packaged one, still allows
+`temporal` whole: its eval attacks draw the two temporal members, and an
+eval run names them in a WARNING (the upgrade summary above).
 
 **Release note: decode hints.** Twenty-one of the 27 encodings
 (`to_rot13`, `to_hex`, `to_caesar_cipher` and so on; not the five of the eval
@@ -1451,8 +1469,13 @@ refuses to overwrite a file the folder holds, naming them, unless asked to.
 the library adds to the natural kind's `families.allow` in
 `jailbreak/augmentations.json` is not drawn through a copy made before it;
 the run says so at INFO, naming the families (`configs: the natural kind of
-jailbreak/augmentations.json in ... does not allow ...`). Add the names to
-the copy's natural `families.allow`, delete a copy you did not change, or
+jailbreak/augmentations.json in ... does not allow ...`). A technique the
+library adds to a family `dataset_types/eval.json` allows, and denies there
+to hold the eval pool, is drawn through a copy made before it; an eval run
+says so in a WARNING, naming the techniques (`configs: the eval attacks of
+... draw ... technique(s) the library's eval type does not ...`). Add the
+names to the copy's natural `families.allow` (or its adversarial
+`techniques.deny`), delete a copy you did not change, or
 write the folder again from the package with
 `scaffold_setup(target_dir, overwrite=True)` (or
 `python scripts/scaffold_setup.py TARGET --overwrite`). That rewrites every

@@ -296,14 +296,17 @@ contract.
      The same file checks the attack pool's 214 techniques in 29 families.
    - **The eval pool.** `configs/dataset_types/eval.json` allows whole
      families (`encode`, `fsh`, `dap`, `framing`, `structural`, `ascii_art`,
-     `continuation`, `temporal`), so a technique added to one of them joins
+     `continuation`), so a technique added to one of them joins
      the eval attacks unless `eval.json` denies it under
-     `techniques.deny`. `tests/fixtures/eval_pool.json` pins the 36 names the
+     `techniques.deny`; of `temporal` and `answer_format` it names single
+     techniques under `techniques.allow`, so a new member of those does not
+     join. `tests/fixtures/eval_pool.json` pins the 36 names the
      eval type draws, and `tests/jailbreak/test_pool.py` fails until the
      owner decides: deny the technique in `eval.json`, or add its name to the
      fixture. A user's copy of `eval.json` in a `config_dir` is not updated:
      a deny added to the packaged file does not reach it, so a technique new
-     to a family the copy allows joins that user's eval pool.
+     to a family the copy allows joins that user's eval pool, and an eval
+     run names it in a WARNING (`extra_eval_techniques`).
 5. **Test it.** Add tests beside the module's, under
    `tests/jailbreak/<layer>/`. `tests/jailbreak/test_registry.py` compares
    the registry with `tests/fixtures/technique_registry.json` (names, tags,

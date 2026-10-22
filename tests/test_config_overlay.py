@@ -11,6 +11,7 @@ import pytest
 from redact import paths, telemetry
 from redact.config_overlay import (
     config_sources,
+    extra_eval_techniques,
     report_config_sources,
     taxonomy_folder,
     unseen_natural_families,
@@ -200,6 +201,52 @@ def test_a_current_copy_or_none_misses_no_natural_family(tmp_path):
     assert unseen_natural_families(tmp_path) == []
     _write(tmp_path / "jailbreak" / "augmentations.json", {**data, "natural": None})
     assert unseen_natural_families(tmp_path) == []
+
+
+def _eval_before_growth() -> dict:
+    """The packaged eval.json as a copy made before the library grew would
+    hold it: the temporal family allowed whole, and two denies missing."""
+    data = json.loads((paths.configs_dir() / "dataset_types" / "eval.json")
+                      .read_text(encoding="utf-8"))
+    adversarial = data["augmentations"]["adversarial"]
+    adversarial["families"]["allow"].append("temporal")
+    adversarial["techniques"]["allow"].remove("to_use_past_tense")
+    adversarial["techniques"]["deny"].remove("to_hex")
+    adversarial["techniques"]["deny"].remove("to_fsh_random_many")
+    return data
+
+
+def test_a_stale_eval_copy_names_what_it_adds_to_the_eval_pool(tmp_path, caplog):
+    _write(tmp_path / "dataset_types" / "eval.json", _eval_before_growth())
+    extra = ["to_fsh_random_many", "to_hex", "to_use_future_tense",
+             "to_use_historical_era"]
+    assert extra_eval_techniques(tmp_path) == extra
+    with caplog.at_level("WARNING", logger="redact.config_overlay"):
+        report_config_sources(tmp_path, verbose=False, dataset_type="eval")
+    (record,) = caplog.records
+    assert record.levelname == "WARNING"
+    assert f"draw 4 technique(s) the library's eval type does not: {', '.join(extra)}" \
+        in record.getMessage()
+    assert "overwrite=True" in record.getMessage()
+
+
+def test_only_an_eval_run_is_warned_about_its_eval_copy(tmp_path, caplog):
+    _write(tmp_path / "dataset_types" / "eval.json", _eval_before_growth())
+    with caplog.at_level("WARNING", logger="redact.config_overlay"):
+        report_config_sources(tmp_path, verbose=False, dataset_type="training")
+        report_config_sources(tmp_path, verbose=False)
+    assert caplog.records == []
+
+
+def test_a_current_eval_copy_or_none_adds_nothing(tmp_path, caplog):
+    assert extra_eval_techniques(tmp_path) == []
+    _write(tmp_path / "dataset_types" / "eval.json", json.loads(
+        (paths.configs_dir() / "dataset_types" / "eval.json").read_text("utf-8")))
+    _write(tmp_path / "jailbreak" / "augmentations.json", _augmentations())
+    with caplog.at_level("WARNING", logger="redact.config_overlay"):
+        report_config_sources(tmp_path, verbose=False, dataset_type="eval")
+    assert extra_eval_techniques(tmp_path) == []
+    assert caplog.records == []
 
 
 def test_a_run_records_the_files_it_read_from_the_folder(tmp_path, monkeypatch, caplog):
