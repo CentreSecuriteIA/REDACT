@@ -1,6 +1,6 @@
 # Jailbreak techniques
 
-The jailbreak stage draws from 219 active techniques in 5 layers and 32
+The jailbreak stage draws from 222 active techniques in 5 layers and 32
 families; the first layer, `rewrite`, holds none yet
 ([below](#layers)).
 `configs/jailbreak/combination_spec.json` gives each technique (the
@@ -56,11 +56,11 @@ on. (`to_rewrite`, despite its name, is an `indirect` request technique.)
 | Layer | Families | Techniques | Picks per combination |
 |---|---|---|---|
 | `rewrite` | 0 | 0 | at most 1 |
-| `hacking` | 4 | 32 | at most 1 |
+| `hacking` | 4 | 35 | at most 1 |
 | `manipulation` | 3 | 15 | at most 1 |
 | `obfuscation` | 13 | 104 | no cap |
 | `requests` | 12 | 68 | at most 1 |
-| all | 32 | 219 | |
+| all | 32 | 222 | |
 <!-- END layers -->
 
 ## Families and techniques
@@ -78,7 +78,7 @@ that call a model call the generation model.
 |---|---|---|---|---|---|---|---|
 | hacking | `cognitive` | `role_framing` |  | 5 | yes | no | `to_persona_roleplay`, `to_hypothetical_framing`, `to_authority_obedience`, `to_avi`, `to_deep_inception` |
 | hacking | `framing` | `role_framing` |  | 5 | no | no | `to_fictional_world`, `to_noble_goal`, `to_nefarious_goal`, `to_high_stake`, `to_no_moral_constraints` |
-| hacking | `persona` | `role_framing` |  | 11 | yes | no | `to_invented_persona`, `to_psychopath_persona`, `to_alien_persona`, `to_radical_politician_persona`, `to_cult_leader_persona`, `to_very_advanced_ai_persona`, `to_cartel_leader_persona`, `to_artist_persona`, `to_deformed_scientist_persona`, `to_actor_persona`, `to_someone_from_the_future_persona` |
+| hacking | `persona` | `role_framing` |  | 14 | yes | no | `to_invented_persona`, `to_psychopath_persona`, `to_alien_persona`, `to_radical_politician_persona`, `to_cult_leader_persona`, `to_very_advanced_ai_persona`, `to_cartel_leader_persona`, `to_artist_persona`, `to_deformed_scientist_persona`, `to_actor_persona`, `to_someone_from_the_future_persona`, `to_mercenary_persona`, `to_underground_hacker_persona`, `to_anarchist_philosopher_persona` |
 | hacking | `persona_template` | `role_framing` |  | 11 | no | no | `to_dan_persona_template`, `to_stan_persona_template`, `to_dude_persona_template`, `to_developer_mode_persona_template`, `to_aim_persona_template`, `to_evil_confidant_persona_template`, `to_opposite_mode_persona_template`, `to_unfiltered_oracle_persona_template`, `to_rogue_ai_persona_template`, `to_maintenance_mode_persona_template`, `to_liberated_model_persona_template` |
 | manipulation | `dap` | `example_priming` |  | 6 | `to_dap_selected_short`, `to_dap_selected_long`, `to_dap_selected_many` | yes | `to_dap_random_short`, `to_dap_random_long`, `to_dap_selected_short`, `to_dap_selected_long`, `to_dap_random_many`, `to_dap_selected_many` |
 | manipulation | `fake_turns` | `example_priming` |  | 3 | no | no | `to_fake_system_turn`, `to_fake_assistant_turn`, `to_fake_history` |
@@ -381,7 +381,10 @@ template variant or a font, for traceability.
   jailbreak built on it: 3 to 9 model calls (the spec's `calls`). A named persona grounds the scenario in the
   persona's character first; the prompt names it by its `display_name`
   (`Someone from the Future`), the info by its key
-  (`category=someone_from_the_future_persona`). The scenario prompts ask
+  (`category=someone_from_the_future_persona`). Spec version 1.3 added
+  three named personas, `mercenary`, `underground_hacker` and
+  `anarchist_philosopher` (attack only, like the rest of the family). The
+  scenario prompts ask
   for the scene at the bottom, behind `---` delimiters: the scene is the
   last block after the first delimiter, or, in a reply without one, what
   follows a `Scenario Description` heading. A reply with neither is asked
@@ -805,8 +808,9 @@ Also beyond the reference list:
 - continuation attacks (4) and indirect task embedding (6);
 - the answer languages Zulu, Scots Gaelic, Bengali and Javanese, and (spec
   version 1.2) Hmong, Guarani, Chinese, Hindi, Yoruba and Amharic;
-- (spec version 1.3) the persona templates (11 frames, 6 mechanics), the
-  fake turns (3), the payload split (2: at word boundaries, or where a
+- (spec version 1.3) the persona templates (11 frames, 6 mechanics), three
+  named personas (a mercenary, an underground hacker, an anarchist
+  philosopher), the fake turns (3), the payload split (2: at word boundaries, or where a
   model finds the meaning allows) and the word art (1: a marked word drawn
   as ASCII art); the answer formats dual answer, tagged prefix and answer
   in an encoding; the impersonations of an authority and of a developer,

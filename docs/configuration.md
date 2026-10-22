@@ -650,8 +650,8 @@ the default) and in `params["jailbreaks"]`.
 ### Release notes
 
 **Upgrading from the previous release (spec version 1.0, now 1.3).** The
-jailbreak library grew from 151 techniques in 23 families to 219 active ones
-(226 registered, 7 retired) in 32 families and five layers. What that asks of
+jailbreak library grew from 151 techniques in 23 families to 222 active ones
+(229 registered, 7 retired) in 32 families and five layers. What that asks of
 a run you already have, and what you will see; each point has its note below.
 
 - **One re-plan is planned: the adversarial kind.** The packaged attacks now
@@ -677,7 +677,7 @@ a run you already have, and what you will see; each point has its note below.
   not, a technique is drawn only for the inputs it applies to, several
   rules are new, and the request obfuscation's families are counted apart
   from the obfuscation layer's, so the attacks draw every technique of
-  their pool. The default attack pool is 205 techniques in 28 families
+  their pool. The default attack pool is 208 techniques in 28 families
   (142 in 22 before; 178 in 24 at spec 1.2). The `eval` type's pool and
   draws are held, at 36
   techniques in 10 families, but for the ASCII-art cap, which changes the font
@@ -814,9 +814,9 @@ A fresh plan of the adversarial kind draws them: the default attack pool goes
 from 178 techniques in 24 families to 202 in 26, and since each adds members
 or a family to deal, some units of a fresh plan draw other techniques than
 they did with the same seed. A plan kept from spec 1.2 resumes with the
-growth WARNING, which names the twenty-four (and the two payload splits
-and the word art, below), and does not draw them until it is planned again
-with `resume=False`. New rules bind a fresh plan:
+growth WARNING, which names the twenty-four (and the two payload splits,
+the word art and the three personas, below), and does not draw them until
+it is planned again with `resume=False`. New rules bind a fresh plan:
 `persona_template` refuses `fsh`, `dap`, `ascii_art` and `impersonation`;
 `fake_turns` refuses `continuation`, `indirect`, `framing`, `persona`,
 `cognitive`, `persona_template`, `structural` and `neutral_container`, and
@@ -893,6 +893,19 @@ as often (357 draws in six plans of 2,000 units, 190 now), one in about 500
 units each in the default kind. A plan kept from before resumes with the
 growth WARNING, which names it, and does not draw it until it is planned
 again with `resume=False`. The `eval` and natural kinds do not draw it.
+
+**Release note: three persona archetypes.** The `persona` family gains
+`to_mercenary_persona`, `to_underground_hacker_persona` and
+`to_anarchist_philosopher_persona` (spec 1.3, complexity 2, attack only),
+generated from their entries of `hacking/personas.json` as the other named
+personas are: the same scenario, scenario check and construction (3 to 9
+model calls), the info `category=<key>_persona`. A fresh plan of the
+adversarial kind draws them: the default attack pool goes from 205
+techniques in 28 families to 208 in 28, and since the family is wider some
+units of a fresh plan draw other techniques than they did with the same
+seed. A plan kept from before resumes with the growth WARNING, which names
+them, and does not draw them until it is planned again with `resume=False`.
+The `eval` and natural kinds do not draw them.
 **Release note: the techniques spec 1.2 adds.** Forty-eight techniques in
 six groups, below. A fresh plan draws them; since each adds members to deal,
 or a family, some units of a fresh plan draw other techniques than they did

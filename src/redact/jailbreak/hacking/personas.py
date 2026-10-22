@@ -1,4 +1,4 @@
-"""Persona techniques: an invented persona or one of the 14 in
+"""Persona techniques: an invented persona or one of the 17 in
 ``configs/jailbreak/hacking/personas.json`` (4 of them retired by the spec).
 
 ``info`` is ``category=<name>_persona``, ``<name>`` the persona's key; the
@@ -28,6 +28,7 @@ _NAMED_PERSONAS = [
     "very_advanced_ai", "cartel_leader", "artist", "mentally_ill",
     "deformed_scientist", "politician", "deformed_professor",
     "religious_figure", "actor", "someone_from_the_future",
+    "mercenary", "underground_hacker", "anarchist_philosopher",
 ]
 
 
@@ -113,6 +114,6 @@ globals().update({fn.__name__: fn for fn in _FNS})
 
 
 def get_persona_functions() -> list[Callable]:
-    """Return all persona jailbreak technique generators (1 invented + 14
+    """Return all persona jailbreak technique generators (1 invented + 17
     named, 4 of them retired by the spec: a kept plan still names them)."""
     return [to_invented_persona, *_FNS]

@@ -37,9 +37,25 @@ def _named() -> dict:
             for fn in get_persona_functions() if fn is not to_invented_persona}
 
 
-def test_there_are_one_invented_and_fourteen_named_personas():
-    assert len(get_persona_functions()) == 15
+def test_there_are_one_invented_and_seventeen_named_personas():
+    assert len(get_persona_functions()) == 18
     assert sorted(_named()) == sorted(P._NAMED_PERSONAS)
+
+
+def test_every_persona_of_the_data_file_has_a_technique():
+    """A persona added to personas.json without its entry in the registry
+    would never be drawn."""
+    assert sorted(P._PERSONAS) == sorted(P._NAMED_PERSONAS)
+
+
+@pytest.mark.parametrize("key", ["mercenary", "underground_hacker",
+                                 "anarchist_philosopher"])
+def test_the_three_spec_1_3_archetypes_are_attack_only_scenario_checked_personas(key):
+    fn = _named()[key]
+    assert (fn.families, fn.layer, fn.complexity) == (["persona"], "hacking", 2)
+    assert (fn.requires_llm, fn.requires_benign, fn.check, fn.calls) == (
+        True, False, "scenario", [3, 9])
+    assert (fn.kinds, fn.since) == (["adversarial"], "1.3")
 
 
 def test_every_named_persona_has_a_display_name_and_a_description():

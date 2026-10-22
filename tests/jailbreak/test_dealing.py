@@ -372,8 +372,12 @@ _BUDGETS = [
 # obfuscation family to deal, complexity 3 and refusing the other word-level
 # steps, changes the family some obfuscation draws land on and, through the
 # unit's rng and its group's counts, the rest of their draw (204 of the 240
-# dealt units, 27 of the 200 undealt draws).
-_PINNED_DRAWS = "8594b813c8957a372ded440d0f646560432ae5e63399713ff1afb7c62abf9a98"
+# dealt units, 27 of the 200 undealt draws). The three spec 1.3 persona
+# archetypes moved it once more: a wider persona family changes the member
+# some hacking draws land on and, through the unit's rng and its group's
+# counts, the rest of their draw (149 of the 240 dealt units, 42 of the 200
+# undealt draws).
+_PINNED_DRAWS = "57cad840b5b37c9e929af781978ea45c43e7fc1797460dea73e5c894ee8eb413"
 
 
 def test_draws_without_the_request_obfuscation_are_those_made_before_it_was_counted():
