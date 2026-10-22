@@ -10,21 +10,35 @@ log level and logger. The surroundings are neutral by design: they hold no
 instruction and say nothing to the reader.
 
 The prompt is first fitted to its format, so it can be read back whole: in a
-comment or a YAML block scalar each of its lines after the first takes the
-comment marker or the indent the template puts before the first; in a CSV row
-it is one quoted field, its own quotes doubled; an email body, a transcript
-line and a log entry keep it as it is, newlines too.
+comment or a YAML block scalar its line breaks (CR LF, CR, a vertical tab, a
+form feed, NEL, U+2028, U+2029) are written as a line feed, and each of its
+lines after the first takes the comment marker or the indent the template puts
+before the first; a block comment's closer in the prompt (``*/``, ``-->``) is
+broken by a space, and in a block scalar the prompt's blank lines are emptied
+and the first line's leading spaces dropped, since they would set an indent
+the next lines lack; in a CSV row it is one quoted field, its own quotes
+doubled; in a subtitle cue (a template holding ``-->``) the prompt keeps only
+its non-blank lines, since a blank line ends a cue, and its own ``-->`` is
+broken; an email body, any other transcript line and a log entry keep it as it
+is, newlines too.
 
 ``info`` is ``container=<directive>;variant=<variant>``.
 """
 
 import random
+import re
 from collections.abc import Callable
 
 from ..directives import draw_variant, read_pools, uses_pool
 
 _FILE = "obfuscation/neutral_container_templates.json"
 _POOLS: dict[str, list[dict]] = read_pools(_FILE)
+
+#: What a line-structured format reads as a line break, besides a line feed.
+_LINE_BREAKS = re.compile(r"\r\n|[\r\x0b\x0c\x1c-\x1e\x85\u2028\u2029]")
+
+#: What ends a block comment, or a subtitle cue's timing line.
+_CLOSERS = ("*/", "-->")
 
 
 def _line_prefix(template: str) -> str:
@@ -36,8 +50,39 @@ def _line_prefix(template: str) -> str:
 def _each_line_prefixed(prompt: str, template: str) -> str:
     """``prompt`` with each line after the first behind the prefix
     ``template`` gives the first (:func:`_line_prefix`), so every line stays
-    in the comment or the block."""
-    return prompt.replace("\n", "\n" + _line_prefix(template))
+    in the comment or the block. Every line break is first written as a line
+    feed (:data:`_LINE_BREAKS`), the only one the prefix follows."""
+    prefixed = _LINE_BREAKS.sub("\n", prompt)
+    return prefixed.replace("\n", "\n" + _line_prefix(template))
+
+
+def _closers_broken(prompt: str, template: str) -> str:
+    """``prompt`` with each closer (:data:`_CLOSERS`) that ``template`` holds
+    broken by a space before its last character (``* /``, ``-- >``), so the
+    prompt cannot end the comment or the cue's timing line."""
+    for closer in _CLOSERS:
+        if closer in template:
+            prompt = prompt.replace(closer, closer[:-1] + " " + closer[-1])
+    return prompt
+
+
+def _block_scalar_text(prompt: str) -> str:
+    """``prompt`` as the text of a YAML block scalar: its lines of only
+    spaces emptied, and the leading spaces of its first line with text
+    dropped. The scalar's indent is that of its first line with text, so a
+    line less indented than that one would end the scalar."""
+    text = re.sub(r"^[ \t]+$", "", _LINE_BREAKS.sub("\n", prompt), flags=re.MULTILINE)
+    return re.sub(r"\A(\n*) +", r"\1", text)
+
+
+def _cue_text(prompt: str, template: str) -> str:
+    """``prompt`` for a template that holds ``-->``, a subtitle cue (WebVTT,
+    SRT): its own ``-->`` broken, and only its non-blank lines kept, since a
+    blank line ends a cue. Any other template gets ``prompt`` as it is."""
+    if "-->" not in template:
+        return prompt
+    text = _LINE_BREAKS.sub("\n", _closers_broken(prompt, template))
+    return "\n".join(line for line in text.split("\n") if line.strip())
 
 
 def _csv_field(prompt: str) -> str:
@@ -60,8 +105,9 @@ def to_code_comment(
     """Put the prompt in a comment above a few lines of code, each of its
     lines behind the comment marker."""
     variant = draw_variant(_POOLS["code_comment"], rng)
-    return _filled("code_comment", variant,
-                   _each_line_prefixed(prompt, variant["template"]))
+    template = variant["template"]
+    return _filled("code_comment", variant, _each_line_prefixed(
+        _closers_broken(prompt, template), template))
 
 
 @uses_pool(_FILE, "yaml_document")
@@ -71,8 +117,8 @@ def to_yaml_document(
     """Put the prompt in a YAML document as a block scalar, each of its lines
     indented."""
     variant = draw_variant(_POOLS["yaml_document"], rng)
-    return _filled("yaml_document", variant,
-                   _each_line_prefixed(prompt, variant["template"]))
+    return _filled("yaml_document", variant, _each_line_prefixed(
+        _block_scalar_text(prompt), variant["template"]))
 
 
 @uses_pool(_FILE, "csv_row")
@@ -100,7 +146,8 @@ def to_transcript_line(
     """Put the prompt in a transcript as one speaker's line, after its
     timestamp."""
     variant = draw_variant(_POOLS["transcript_line"], rng)
-    return _filled("transcript_line", variant, prompt)
+    return _filled("transcript_line", variant,
+                   _cue_text(prompt, variant["template"]))
 
 
 @uses_pool(_FILE, "log_entry")

@@ -15,7 +15,7 @@ pip install -e ".[vllm]"           # local models through vLLM (vllm, hf_transfe
 pip install -e ".[langid]"         # GlotLID, the language check of a machine translation and of a paraphrase
 pip install -e ".[transformers]"   # the introspection backend (torch, transformers, accelerate)
 pip install -e ".[hf]"             # loading published datasets from the HuggingFace Hub
-pip install -e ".[dev]"            # pytest, ruff, mypy, ipykernel
+pip install -e ".[dev]"            # pytest, ruff, mypy, ipykernel, pyyaml
 pip install -e ".[docs]"           # the documentation site: mkdocs build --strict
 ```
 

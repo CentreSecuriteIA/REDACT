@@ -728,7 +728,16 @@ wrappers. The family is attack-only, and the eval type does not draw it.
   transcript (a timestamped line, a WebVTT or SRT cue, an interview or a
   meeting), and `to_log_entry` the message of a log entry (Python, syslog,
   logback, Go, Ruby, nginx and other line formats), newlines kept in both.
-  The text is verbatim and can be read back whole. The surroundings are
+  The text can be read back whole, except for what would end its container:
+  in a comment or a YAML block scalar every kind of line break (carriage
+  return, vertical tab, form feed, NEL, U+2028, U+2029) is written as a
+  line feed, so the next line stays behind the marker or the indent; in a
+  block comment (C, HTML) a `*/` or `-->` of the text gets a space before
+  its last character; in a block scalar the lines of only spaces are
+  emptied and the leading spaces of the first line with text dropped (they
+  would set an indent the next lines lack); in a WebVTT or SRT cue, which a
+  blank line ends, only the non-blank lines are kept and a `-->` is broken
+  the same way. The surroundings are
   neutral by design: no variant gives an instruction, says anything to the
   reader or mentions answering, rules or policies; a test checks each
   template against a list of such words, a starting list to extend. The

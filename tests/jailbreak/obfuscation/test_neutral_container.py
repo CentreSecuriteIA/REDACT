@@ -1,6 +1,9 @@
 """The neutral containers: the prompt in a code comment, a YAML document, a
 CSV row, an email, a transcript line or a log entry, read back whole by a
-small parser of each format."""
+small parser of each format (the YAML ones by PyYAML), also for a prompt that
+holds what could end the format around it: a block comment's closer, a line
+break of any kind, a blank line in a subtitle cue, spaces before a block
+scalar's first line."""
 
 import csv
 import email
@@ -22,6 +25,9 @@ TEXTS = [
     'She said "hello"; the note read: "back at 5", in quotes.',
     "Tabs\tand pipes | and {braces}, café",
 ]
+
+#: Every line break a reader may split on, besides a line feed.
+LINE_BREAKS = ["\r\n", "\r", "\x0b", "\x0c", "\x85", "\u2028", "\u2029"]
 
 #: Words no variant's surroundings hold: a container gives no instruction
 #: and says nothing to the reader. A starting list, for the owner to extend.
@@ -87,6 +93,16 @@ def _from_last_line(written: str, template: str) -> str:
     return written[len(before):]
 
 
+def _is_cue(variant: dict) -> bool:
+    """A subtitle cue (WebVTT, SRT): its timing line holds ``-->``."""
+    return "-->" in variant["template"]
+
+
+def _cue_text(text: str) -> str:
+    """What a cue holds of ``text``: its non-blank lines, as a blank line ends one."""
+    return "\n".join(line for line in text.split("\n") if line.strip())
+
+
 _READ_BACK = {
     "to_code_comment": _from_prefixed_lines,
     "to_yaml_document": _from_prefixed_lines,
@@ -122,14 +138,14 @@ def test_each_container_has_eight_variants_each_named_once(fn):
 def test_the_prompt_is_read_back_whole_from_every_variant(
         monkeypatch, fn, variant, text):
     written, info = _written(monkeypatch, fn, variant, text)
-    assert _READ_BACK[fn.__name__](written, variant["template"]) == text
+    held = _cue_text(text) if fn is NC.to_transcript_line and _is_cue(variant) else text
+    assert _READ_BACK[fn.__name__](written, variant["template"]) == held
     assert info.endswith(f";variant={variant['name']}")
 
 
-@pytest.mark.parametrize("text", TEXTS)
-@pytest.mark.parametrize("variant", _pool(NC.to_yaml_document),
-                         ids=lambda variant: variant["name"])
-def test_a_yaml_document_parses_with_the_prompt_as_a_value(monkeypatch, variant, text):
+def _yaml_values(monkeypatch, variant: dict, text: str) -> list[str]:
+    """The strings of the YAML document ``to_yaml_document`` writes for ``text``
+    with ``variant``, read by PyYAML, less one final line feed."""
     yaml = pytest.importorskip("yaml")
     written, _ = _written(monkeypatch, NC.to_yaml_document, variant, text)
     values = []
@@ -146,7 +162,98 @@ def test_a_yaml_document_parses_with_the_prompt_as_a_value(monkeypatch, variant,
 
     for document in yaml.safe_load_all(written):
         collect(document)
-    assert text in values
+    return values
+
+
+_YAML_VARIANTS = _pool(NC.to_yaml_document)
+_YAML_IDS = [variant["name"] for variant in _YAML_VARIANTS]
+
+#: A prompt a YAML block scalar needs fitted, with the text the document holds.
+_YAML_FITTED = [
+    ("  indented first\nsecond line", "indented first\nsecond line"),
+    ("    deep\n  shallower\nflush", "deep\n  shallower\nflush"),
+    ("first\n    \n\t\nlast", "first\n\n\nlast"),
+    ("\n  after a blank line\nsecond", "\nafter a blank line\nsecond"),
+    *[(f"first{kind}second", "first\nsecond") for kind in LINE_BREAKS],
+]
+
+
+@pytest.mark.parametrize("text", TEXTS)
+@pytest.mark.parametrize("variant", _YAML_VARIANTS, ids=_YAML_IDS)
+def test_a_yaml_document_parses_with_the_prompt_as_a_value(monkeypatch, variant, text):
+    assert text in _yaml_values(monkeypatch, variant, text)
+
+
+@pytest.mark.parametrize(("text", "held"), _YAML_FITTED)
+@pytest.mark.parametrize("variant", _YAML_VARIANTS, ids=_YAML_IDS)
+def test_a_yaml_document_parses_for_a_prompt_that_needs_fitting(
+        monkeypatch, variant, text, held):
+    """Spaces before the first line, lines of spaces and every kind of line
+    break: the document parses, holding the prompt with its line breaks as
+    line feeds, its first line's indent gone and its blank lines empty."""
+    assert held in _yaml_values(monkeypatch, variant, text)
+
+
+_COMMENTS = [(fn, variant) for fn, variant in _VARIANTS if fn is NC.to_code_comment]
+_COMMENT_IDS = [variant["name"] for _, variant in _COMMENTS]
+
+
+@pytest.mark.parametrize("kind", LINE_BREAKS, ids=repr)
+@pytest.mark.parametrize(("fn", "variant"), _COMMENTS, ids=_COMMENT_IDS)
+def test_every_kind_of_line_break_keeps_the_next_line_in_the_comment(
+        monkeypatch, fn, variant, kind):
+    """A reader that splits on a carriage return, a form feed, NEL or the
+    Unicode separators sees each line of the prompt behind the marker."""
+    written, _ = _written(monkeypatch, fn, variant, f"first{kind}second")
+    prefix = NC._line_prefix(variant["template"])
+    assert [line for line in written.splitlines() if "second" in line] == [
+        prefix + "second"]
+
+
+@pytest.mark.parametrize(("closer", "broken"), [("*/", "* /"), ("-->", "-- >")])
+@pytest.mark.parametrize(("fn", "variant"), _COMMENTS, ids=_COMMENT_IDS)
+def test_a_closer_in_the_prompt_cannot_end_the_comment(
+        monkeypatch, fn, variant, closer, broken):
+    """Where the variant's template holds the closer the prompt's is broken by a
+    space; elsewhere (a ``#`` or ``//`` comment) the prompt is left as it is."""
+    text = f"before {closer} after {closer}{closer}"
+    written, _ = _written(monkeypatch, fn, variant, text)
+    held = _from_prefixed_lines(written, variant["template"])
+    if closer in variant["template"]:
+        assert written.count(closer) == variant["template"].count(closer)
+        assert held == text.replace(closer, broken)
+    else:
+        assert held == text
+
+
+_TRANSCRIPTS = [(fn, variant) for fn, variant in _VARIANTS
+                if fn is NC.to_transcript_line]
+_CUES = [(fn, variant) for fn, variant in _TRANSCRIPTS if _is_cue(variant)]
+_OTHER_LINES = [(fn, variant) for fn, variant in _TRANSCRIPTS if not _is_cue(variant)]
+
+
+def test_the_transcript_pool_holds_two_subtitle_cues():
+    assert [variant["name"] for _, variant in _CUES] == ["webvtt", "srt"]
+
+
+@pytest.mark.parametrize(("fn", "variant"), _CUES,
+                         ids=[variant["name"] for _, variant in _CUES])
+def test_a_subtitle_cue_holds_no_blank_line_and_no_arrow_of_the_prompt(
+        monkeypatch, fn, variant):
+    text = "\nfirst line\n\n  \nsecond --> line\n\nlast\n"
+    written, _ = _written(monkeypatch, fn, variant, text)
+    before, _ = _around(variant["template"])
+    assert written[len(before):] == "first line\nsecond -- > line\nlast"
+    assert written.count("-->") == variant["template"].count("-->")
+
+
+@pytest.mark.parametrize(("fn", "variant"), _OTHER_LINES,
+                         ids=[variant["name"] for _, variant in _OTHER_LINES])
+def test_another_transcript_line_keeps_the_blank_lines_and_arrows(
+        monkeypatch, fn, variant):
+    text = "first\n\nsecond --> line\n"
+    written, _ = _written(monkeypatch, fn, variant, text)
+    assert _from_last_line(written, variant["template"]) == text
 
 
 def test_a_comment_puts_its_marker_before_every_line():

@@ -105,7 +105,7 @@ REDACT/
 │       │   │   ├── noise.py         # Random capitals, scrambled letters, QWERTY keyboard typos, emoji between words, at 3 densities each (12, pure)
 │       │   │   ├── suffixes.py      # Adversarial suffixes (4)
 │       │   │   ├── structural.py    # JSON, XML, markdown wrapping
-│       │   │   ├── neutral_container.py # The prompt in a code comment, a YAML document, a CSV row, an email, a transcript line or a log entry (6, pure, 8 neutral variants each)
+│       │   │   ├── neutral_container.py # The prompt in a code comment, a YAML document, a CSV row, an email, a transcript line or a log entry (6, pure, 8 neutral variants each); fitted to its format: line breaks, a block comment's closer, a cue's blank lines, a block scalar's indent
 │       │   │   ├── payload_split.py # The prompt cut into 2 to 4 lettered parts, with a request to join them (2): at word boundaries (pure) or where a model finds the meaning allows (parts checked in code against the prompt)
 │       │   │   ├── word_art.py      # One word a model marks drawn as ASCII art in a font of to_ascii_art's choosing, [MASK] in its place in the prompt, and a request to read the art (1)
 │       │   │   └── ascii_art.py     # A pyfiglet font drawn from the 16, among those that draw every character within the cap
@@ -455,7 +455,7 @@ pip install -e ".[vllm]"           # local models through vLLM (+ hf_transfer, p
 pip install -e ".[langid]"         # GlotLID, the language check of a machine translation and of a paraphrase (fasttext-predict, huggingface_hub)
 pip install -e ".[transformers]"   # the introspection backend (torch, transformers, accelerate)
 pip install -e ".[hf]"             # published datasets from the HuggingFace Hub
-pip install -e ".[dev]"            # pytest, ruff, mypy, ipykernel
+pip install -e ".[dev]"            # pytest, ruff, mypy, ipykernel, pyyaml
 pip install -e ".[docs]"           # the documentation site: mkdocs build --strict
 ```
 
