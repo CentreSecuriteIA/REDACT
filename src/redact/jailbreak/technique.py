@@ -45,8 +45,9 @@ DEFAULT_KINDS = ("adversarial",)
 #: What a spec ``check`` may name: how a technique's model reply is checked.
 #: ``typos``, the typo check; ``scenario``, the scenario check; ``word_list``,
 #: the strict parse of a marked-word list; ``translate``, translation's own
-#: check and retry. The spec only declares it; the technique runs the check.
-CHECKS = ("typos", "scenario", "word_list", "translate")
+#: check and retry; ``preserve``, the check that a rewrite is the prompt's own
+#: request. The spec only declares it; the technique runs the check.
+CHECKS = ("typos", "scenario", "word_list", "translate", "preserve")
 
 #: The spec version of a technique whose entry gives no ``since``: the
 #: techniques the library had before the spec dated them.

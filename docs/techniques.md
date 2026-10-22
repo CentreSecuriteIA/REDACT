@@ -1,7 +1,7 @@
 # Jailbreak techniques
 
-The jailbreak stage draws from 222 active techniques in 5 layers and 32
-families; the first layer, `rewrite`, holds none yet
+The jailbreak stage draws from 238 active techniques in 5 layers and 35
+families; the first layer, `rewrite`, holds 16 and is off by default
 ([below](#layers)).
 `configs/jailbreak/combination_spec.json` gives each technique (the
 language ones through its `generators`, from
@@ -44,23 +44,26 @@ obfuscation layer has no cap: a combination takes up to `max_obfuscations`
 of its families in budget mode, the request obfuscation, when allowed,
 among them.
 
-The `rewrite` layer rewrites the whole prompt before every other layer, at
-most one technique a combination. It is empty and off by default until the
-owner's prompts for its techniques land: its spec rate is 0 and the spec
-lists it in `layers_off_by_default`, so a kind draws it only when its
-`layers.allow` names it;
+The `rewrite` layer comes before every other layer, at most one technique a
+combination: a model rewrites the whole prompt as a persuasion appeal or in
+another tense, or writes sentences placed before or after it
+([below](#what-the-families-do)). It is off by default: its spec rate is 0
+and the spec lists it in `layers_off_by_default`, so a kind draws it only
+when its `layers.allow` names it. Its 16 techniques say `["adversarial"]`,
+so the natural kind never draws them, and `eval.json` names no rewrite
+family;
 [extending.md](extending.md#add-a-rewrite-technique) says how to turn it
 on. (`to_rewrite`, despite its name, is an `indirect` request technique.)
 
 <!-- BEGIN layers: made from the spec by tests/jailbreak/test_docs_counts.py -->
 | Layer | Families | Techniques | Picks per combination |
 |---|---|---|---|
-| `rewrite` | 0 | 0 | at most 1 |
+| `rewrite` | 3 | 16 | at most 1 |
 | `hacking` | 4 | 35 | at most 1 |
 | `manipulation` | 3 | 15 | at most 1 |
 | `obfuscation` | 13 | 104 | no cap |
 | `requests` | 12 | 68 | at most 1 |
-| all | 32 | 222 | |
+| all | 35 | 238 | |
 <!-- END layers -->
 
 ## Families and techniques
@@ -76,6 +79,9 @@ that call a model call the generation model.
 <!-- BEGIN families: made from the spec by tests/jailbreak/test_docs_counts.py -->
 | Layer | Family | Dimension | Order | Count | Calls a model | Needs benign data | Techniques |
 |---|---|---|---|---|---|---|---|
+| rewrite | `model_distractors` | `request_shape` |  | 2 | yes | no | `to_model_distractor_prefix`, `to_model_distractor_suffix` |
+| rewrite | `persuasion` | `request_shape` |  | 12 | yes | no | `to_persuade_evidence_based`, `to_persuade_logical_appeal`, `to_persuade_expert_endorsement`, `to_persuade_authority_endorsement`, `to_persuade_social_proof`, `to_persuade_emotional_appeal`, `to_persuade_reciprocity`, `to_persuade_commitment_consistency`, `to_persuade_scarcity`, `to_persuade_priming`, `to_persuade_framing`, `to_persuade_relationship_leverage` |
+| rewrite | `tense_rewrite` | `request_shape` |  | 2 | yes | no | `to_rewrite_in_past_tense`, `to_rewrite_in_future_tense` |
 | hacking | `cognitive` | `role_framing` |  | 5 | yes | no | `to_persona_roleplay`, `to_hypothetical_framing`, `to_authority_obedience`, `to_avi`, `to_deep_inception` |
 | hacking | `framing` | `role_framing` |  | 5 | no | no | `to_fictional_world`, `to_noble_goal`, `to_nefarious_goal`, `to_high_stake`, `to_no_moral_constraints` |
 | hacking | `persona` | `role_framing` |  | 14 | yes | no | `to_invented_persona`, `to_psychopath_persona`, `to_alien_persona`, `to_radical_politician_persona`, `to_cult_leader_persona`, `to_very_advanced_ai_persona`, `to_cartel_leader_persona`, `to_artist_persona`, `to_deformed_scientist_persona`, `to_actor_persona`, `to_someone_from_the_future_persona`, `to_mercenary_persona`, `to_underground_hacker_persona`, `to_anarchist_philosopher_persona` |
@@ -209,8 +215,11 @@ technique is picked first. A technique may not join a combination when:
   invented turn is a conversation already); `word_art` with `ascii_art`,
   `payload_split`, `encode`, `sensitive_words`, `tokenbreak`, `structural`,
   `neutral_container` and `fake_turns` (one disguise of the word, and the art
-  is long); `persona`, `cognitive` and `persona_template` with
-  `impersonation`, so a prompt never carries two identities; `fake_turns`
+  is long); `persona`, `cognitive`, `persona_template` and `persuasion` with
+  `impersonation`, so a prompt never carries two identities; `persuasion`
+  also with `ascii_art`, `tense_rewrite` with `temporal` (the request would be
+  set in time twice) and `model_distractors` with `ascii_art`,
+  `distractor_prefix` and `distractor_suffix`; `fake_turns`
   with the list of `fsh` and `dap`, `persona_template`, `structural` and
   `neutral_container` (an invented turn is a conversation, not a document
   to wrap); `noise`
@@ -357,7 +366,8 @@ A technique that calls a model carries, in the spec, the model calls one
 application makes (`calls`, generation and checks, low to high: a typo
 rewrite 2 to 4, a translation of one paragraph 2 to 12, a word-marking
 step 1, the synonyms 1 to 11, an fsh or dap pick 1, a cognitive or persona
-scenario 3 to 9, an invented persona 4 to 12) and what checks its
+scenario 3 to 9, an invented persona 4 to 12, a persuasion or tense rewrite
+2 to 4, a model distractor 1 to 3) and what checks its
 reply (`check`). When a plan is made, one INFO line adds them up over the
 planned units; for 1,000 inputs of one category and entry type, planned
 with the packaged attack kind and seed 42:
@@ -373,6 +383,34 @@ translation's judge, one call a round, to the generation model).
 
 A transform returns `(text, info)`; the info names what it drew, such as a
 template variant or a font, for traceability.
+
+**Rewrite.** Off by default, adversarial only, one technique at most per
+combination, applied before every other layer. All of them call the
+generation model.
+
+- `persuasion` (12, `to_persuade_<key>`, one per entry of
+  `configs/jailbreak/rewrite/persuasion_techniques.json`) has a model rewrite
+  the whole prompt as an appeal of that persuasion technique, given its name,
+  definition and an example (`jailbreak/persuasion_rewrite`); the info is
+  `category=<key>`.
+- `tense_rewrite` (`to_rewrite_in_past_tense`, `to_rewrite_in_future_tense`)
+  has a model rewrite the whole prompt in that tense, changing the verbs and
+  what the grammar requires (`jailbreak/tense_rewrite`); the info is
+  `tense=<tense>`. The pure `to_use_past_tense` and `to_use_future_tense`
+  wrap the request in a sentence instead.
+- Both are checked: the stage's `check` model (the `gen` model unless the
+  recipe names one) reads the rewrite against the prompt, for the same
+  request (`jailbreak/preserve_check`, at temperature 0.15). A rejected
+  rewrite is made again with the check's reply as feedback, up to two
+  rewrites, so 2 to 4 calls (the spec's `calls`); one rejected twice is
+  discarded (`reason=preserve check failed`).
+- `model_distractors` (`to_model_distractor_prefix`,
+  `to_model_distractor_suffix`) has a model write a few sentences in the
+  voice of the person asking (`jailbreak/model_distractor`), placed before or
+  after the prompt, which is not rewritten; they are joined to it with a
+  space. No check model reads them. A reply with no text is asked for again,
+  up to 3 replies in all, and then rejects the result
+  (`DISCARDED; reason=empty distractor`). The info is `position=<position>`.
 
 **Hacking.**
 

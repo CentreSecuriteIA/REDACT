@@ -1,13 +1,16 @@
-"""The rewrite layer: the spec's first layer, which holds no technique yet.
+"""The rewrite layer: the spec's first layer, off by default.
 
-A stand-in technique, tagged by hand, shows what the layer does once it has
-one; nothing here edits a file.
+``POOL`` is every technique but the layer's own, so a stand-in technique,
+tagged by hand, can be the layer's only one and show what the layer does;
+nothing here edits a file. The last tests are about the 16 techniques the
+layer holds.
 """
 
 import csv
 import json
 import logging
 import random
+from collections import Counter
 
 import pandas as pd
 import pytest
@@ -43,7 +46,7 @@ from redact.recipe import augmentations_of, load_dataset_type, load_recipe, reso
 from redact.stages import generate_jailbreaks
 from tests.jailbreak.test_pipeline_jailbreaks import _inputs
 
-POOL = all_techniques()
+POOL = [fn for fn in all_techniques() if fn.layer != "rewrite"]
 BY_NAME = registry(POOL)
 _BUDGET = {"max_complexity": 9, "max_obfuscations": 3,
            "allow_request_obfuscation": True}
@@ -78,14 +81,19 @@ def _dealer(seed: int) -> Dealer:
 
 # --- the layer ------------------------------------------------------------------
 
-def test_the_rewrite_layer_comes_first_and_holds_no_technique_yet():
+def test_the_rewrite_layer_comes_first_and_holds_16_techniques_in_three_families():
     spec = load_spec()
     assert spec["layer_order"] == [
         "rewrite", "hacking", "manipulation", "obfuscation", "requests"]
     assert spec["layer_rates"]["rewrite"] == 0
-    assert get_all_rewrite_functions() == []
-    assert not [name for name, family in spec["families"].items()
-                if family["layer"] == "rewrite"]
+    assert {name for name, family in spec["families"].items()
+            if family["layer"] == "rewrite"} == {
+        "persuasion", "tense_rewrite", "model_distractors"}
+    rewrites = get_all_rewrite_functions()
+    assert Counter(fn.families[0] for fn in rewrites) == {
+        "persuasion": 12, "tense_rewrite": 2, "model_distractors": 2}
+    assert {(fn.layer, fn.requires_llm, tuple(fn.kinds), fn.since, fn.complexity)
+            for fn in rewrites} == {("rewrite", True, ("adversarial",), "1.3", 2)}
 
 
 def test_the_rewrite_layer_takes_one_pick_per_combination():
@@ -243,12 +251,31 @@ def test_a_rewrite_layer_left_short_is_logged_as_any_layer(tmp_path, caplog):
         "pick (see jb.coverage.csv)."]
 
 
+def test_a_plan_deals_the_real_rewrite_families_evenly_at_the_layer_rate(tmp_path):
+    """Half of 12 units draw one rewrite technique each: two of each of the
+    three families, no technique twice."""
+    allowed = resolve({"adversarial": {"layers": {"allow": ["rewrite"]}}},
+                      "adversarial")
+    plan_run(_one_group(12), technique_pool(allowed),
+             manifest_path=tmp_path / "jb.manifest.jsonl", seed=3,
+             sample_kwargs={"include_rewrite": True},
+             layer_rates={"rewrite": 0.5}, verbose=False)
+    counts = _coverage(tmp_path / "jb.coverage.csv")
+    assert counts[("layer", "rewrite")] == 6    # noqa: PLR2004
+    assert [counts[("family", family)] for family in (
+        "persuasion", "tense_rewrite", "model_distractors")] == [2, 2, 2]
+    assert max(counts[("technique", fn.__name__)]
+               for fn in get_all_rewrite_functions()) == 1
+
+
 # --- the pool -------------------------------------------------------------------
 
-def _register(monkeypatch, rewrite) -> None:
-    """``rewrite`` registered beside every technique, for the pool and the rounds."""
+def _register(monkeypatch, *rewrites) -> None:
+    """``rewrites`` registered beside every other layer's technique and in place
+    of the layer's own, for the pool and the rounds: none leaves the layer
+    empty, as it was before it held any."""
     for module in (JPool, JAugmentation):
-        monkeypatch.setattr(module, "all_techniques", lambda: [*POOL, rewrite])
+        monkeypatch.setattr(module, "all_techniques", lambda: [*POOL, *rewrites])
 
 
 def test_layers_allow_rewrite_puts_a_rewrite_technique_in_the_pool(monkeypatch):
@@ -384,9 +411,11 @@ def test_the_packaged_kinds_rounds_are_those_written_before_the_layer():
     assert rounds_of(resolve(None, "natural")) == [{"exact_techniques": 1}]
 
 
-def test_a_kind_that_allows_the_empty_layer_has_the_rounds_written_before_it():
+def test_a_kind_that_allows_the_empty_layer_keeps_the_rounds_written_before_it(
+        monkeypatch):
     """With no rewrite technique registered, allowing the layer changes no draw,
-    so its rounds stay as they were and a plan kept from the section resumes."""
+    so its rounds stay as they were."""
+    _register(monkeypatch)
     allowed = resolve({"adversarial": {"layers": {"allow": ["rewrite"]}}},
                       "adversarial")
     assert rounds_of(allowed) == [_ROUND_BEFORE]
@@ -396,9 +425,7 @@ def test_a_kind_that_allows_the_empty_layer_has_the_rounds_written_before_it():
     assert rounds_of(hacking_off) == [{**_ROUND_BEFORE, "include_hacking": False}]
 
 
-def test_a_kind_that_allows_the_layer_says_include_rewrite_once_a_technique_exists(
-        monkeypatch):
-    _register(monkeypatch, _stand_in())
+def test_a_kind_that_allows_the_layer_says_include_rewrite_for_its_techniques():
     kind = resolve({"adversarial": {"layers": {"allow": ["rewrite"]},
                                     "layer_rates": {"rewrite": 0.25}}}, "adversarial")
     assert kind["layer_rates"] == {"rewrite": 0.25}
@@ -439,15 +466,17 @@ def test_the_flat_keywords_keep_the_rewrite_layer_denied():
     ({"deny": ["rewrite"]}, _ROUND_BEFORE),
     ({"deny": ["hacking"]}, {**_ROUND_BEFORE, "include_hacking": False}),
     ({"deny": []}, _ROUND_BEFORE),
-    ({"allow": ["rewrite"]}, _ROUND_BEFORE),
+    ({"allow": ["rewrite"]}, {**_ROUND_BEFORE, "include_rewrite": True}),
 ], ids=["packaged deny", "former packaged deny", "hacking denied alone", "no deny",
         "layer allowed"])
 def test_a_plan_kept_from_before_the_layer_resumes(
         tmp_path, monkeypatch, layers, round_before):
     """Whatever the section's ``layers`` say, the former packaged
     ``{"deny": ["rewrite"]}`` among them, the plan file records the rounds a
-    plan made before the layer recorded, and resumes: the layer is denied,
-    or allowed with no technique in it."""
+    plan made before the layer recorded, and resumes: the layer is denied, so
+    the rounds say nothing of it though the layer now holds techniques. Where
+    the section allows the layer, they say ``include_rewrite``, and the plan
+    resumes as well."""
     out = tmp_path / "jb.csv"
     adversarial = {"pure_only": True, "translation": False,
                    "families": {"allow": ["encode"]}}

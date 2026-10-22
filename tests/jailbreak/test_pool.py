@@ -54,10 +54,11 @@ def _natural_only(techniques: list) -> list:
 def test_the_default_attack_pool_is_every_active_technique_but_casual():
     """Translation is on in the packaged attacks, served by the local
     translator. A retired technique is drawn only when named, a natural-only
-    one never."""
+    one never, and the rewrite layer, off by default, only when a section
+    allows it."""
     full = all_techniques()
     left_out = (_in("casual_writing", full) + [fn for fn in full if fn.deprecated]
-                + _natural_only(full))
+                + _natural_only(full) + _rewrites(full))
     assert technique_pool(_kind()) == [fn for fn in full if fn not in left_out]
 
 
@@ -68,13 +69,19 @@ def test_the_packaged_natural_kind_keeps_translation_off():
     assert resolve(None, "natural")["translation"] is False
 
 
+def _rewrites(techniques: list) -> list:
+    """The techniques of the rewrite layer, which the spec has off by default."""
+    return [fn for fn in techniques if fn.layer == "rewrite"]
+
+
 def _attacks(techniques: list) -> list:
     """``techniques`` less casual writing, which no attack draws unless
-    allowed, the natural-only families, which no attack draws, and the
-    retired techniques, which no list here names."""
+    allowed, the natural-only families, which no attack draws, the retired
+    techniques, which no list here names, and the rewrite layer, off by
+    default."""
     return [fn for fn in techniques
             if "casual_writing" not in fn.families and not fn.deprecated
-            and "adversarial" in fn.kinds]
+            and "adversarial" in fn.kinds and fn.layer != "rewrite"]
 
 
 def test_switching_translation_on_makes_the_pool_every_attack_technique():
@@ -174,6 +181,36 @@ def test_the_default_attack_pool_is_208_techniques_in_28_families():
     pool = technique_pool(resolve(None, "adversarial"))
     assert len(pool) == 208     # noqa: PLR2004
     assert len({fn.families[0] for fn in pool}) == 28     # noqa: PLR2004
+
+
+def test_the_rewrite_layer_is_off_by_default_and_layers_allow_adds_its_16_techniques():
+    """The spec has the layer off by default, so the default attack pool is
+    the 208 and no other pool holds a rewrite technique; a section that allows
+    the layer gains the 16 of its three families, and nothing else leaves or
+    joins."""
+    default = technique_pool(resolve(None, "adversarial"))
+    allowed = technique_pool(resolve(
+        {"adversarial": {"layers": {"allow": ["rewrite"]}}}, "adversarial"))
+    gained = [fn for fn in allowed if fn not in default]
+    assert (len(default), len(allowed), len(gained)) == (208, 224, 16)   # noqa: PLR2004
+    assert gained == _rewrites(all_techniques())
+    assert {fn.families[0] for fn in gained} == {
+        "persuasion", "tense_rewrite", "model_distractors"}
+    assert all(fn in allowed for fn in default)
+    assert not _rewrites(technique_pool(resolve(None, "natural")))
+
+
+def test_the_natural_kind_and_the_eval_type_draw_no_rewrite_technique_though_allowed():
+    """Every rewrite technique says ``["adversarial"]``, and ``eval.json`` allows
+    whole families it names, none of them a rewrite family."""
+    from redact.recipe import load_dataset_type
+
+    natural = resolve({"natural": {"layers": {"allow": ["rewrite"]}}}, "natural")
+    assert technique_pool(natural) == technique_pool(resolve(None, "natural"))
+    section = load_dataset_type("eval")["augmentations"]
+    allowed = resolve({"adversarial": {"layers": {"allow": ["rewrite"]}}},
+                      "adversarial", base=section)
+    assert sorted(fn.__name__ for fn in technique_pool(allowed)) == EVAL_POOL
 
 
 def test_the_natural_kind_draws_only_what_the_spec_marks_natural():
@@ -293,9 +330,11 @@ def test_calls_that_are_not_whole_numbers_raise_at_tagging(monkeypatch, calls):
 
 def test_a_check_not_among_the_checks_raises_at_tagging(monkeypatch):
     assert _tag_base64(monkeypatch, check="word_list").check == "word_list"
+    assert _tag_base64(monkeypatch, check="preserve").check == "preserve"
     with pytest.raises(ValueError, match="'to_base64': check must be one of "
-                       r"\['typos', 'scenario', 'word_list', 'translate'\]"):
-        _tag_base64(monkeypatch, check="preserve")
+                       r"\['typos', 'scenario', 'word_list', 'translate', "
+                       r"'preserve'\]"):
+        _tag_base64(monkeypatch, check="typo")
 
 
 def test_a_technique_is_dated_by_the_versions_that_added_and_retired_it(

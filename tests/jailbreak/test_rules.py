@@ -525,6 +525,57 @@ def test_a_latin_script_translation_or_another_encoding_still_joins(first, then)
     assert _joins(first, then) and _joins(then, first)
 
 
+_PERSUASIONS = ["to_persuade_evidence_based", "to_persuade_scarcity"]
+_TENSE_REWRITES = ["to_rewrite_in_past_tense", "to_rewrite_in_future_tense"]
+_MODEL_DISTRACTORS = ["to_model_distractor_prefix", "to_model_distractor_suffix"]
+
+
+@pytest.mark.parametrize("persuasion", _PERSUASIONS)
+@pytest.mark.parametrize("other", [
+    "to_impersonate_good_person", "to_impersonate_authority", "to_ascii_art"])
+def test_a_persuasion_refuses_an_impersonation_and_ascii_art_either_way(
+        persuasion, other):
+    """Two identities in one prompt, and a font on a rewrite the model wrote
+    at length."""
+    assert not _joins(persuasion, other)
+    assert not _joins(other, persuasion)
+
+
+@pytest.mark.parametrize("tense", _TENSE_REWRITES)
+@pytest.mark.parametrize("other", [
+    "to_use_past_tense", "to_use_future_tense", "to_use_historical_era"])
+def test_a_tense_rewrite_refuses_the_temporal_requests_either_way(tense, other):
+    """The request would be set in time twice."""
+    assert not _joins(tense, other)
+    assert not _joins(other, tense)
+
+
+@pytest.mark.parametrize("distractor", _MODEL_DISTRACTORS)
+@pytest.mark.parametrize("other", [
+    "to_ascii_art", "to_distractor_prefix_related", "to_distractor_suffix_task"])
+def test_a_model_distractor_refuses_ascii_art_and_the_template_distractors_either_way(
+        distractor, other):
+    assert not _joins(distractor, other)
+    assert not _joins(other, distractor)
+
+
+@pytest.mark.parametrize("first", [*_PERSUASIONS, *_TENSE_REWRITES,
+                                   *_MODEL_DISTRACTORS])
+@pytest.mark.parametrize("second", [*_PERSUASIONS, *_TENSE_REWRITES,
+                                    *_MODEL_DISTRACTORS])
+def test_a_combination_holds_one_technique_of_the_rewrite_layer(first, second):
+    assert not _joins(first, second)
+
+
+@pytest.mark.parametrize("rewrite", [_PERSUASIONS[0], _TENSE_REWRITES[0],
+                                     _MODEL_DISTRACTORS[0]])
+@pytest.mark.parametrize("other", [
+    "to_base64", "to_french", "to_json", "to_answer_as_code", "to_fictional_world",
+    "to_psychopath_persona", "to_fsh_random_short", "to_summarize"])
+def test_a_rewrite_joins_the_other_layers_it_has_no_rule_against(rewrite, other):
+    assert _joins(rewrite, other) and _joins(other, rewrite)
+
+
 def test_every_pair_is_refused_or_admitted_both_ways():
     joins = {fn.__name__: {g.__name__ for g in compatible([fn], POOL)} for fn in POOL}
     one_way = [(a, b) for a in joins for b in joins[a] if a not in joins[b]]

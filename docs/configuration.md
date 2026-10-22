@@ -483,8 +483,8 @@ It translates paragraph by paragraph; each piece is checked, then translated
 back and judged by the generation model, up to 4 rounds
 ([stages/jailbreaks.md](stages/jailbreaks.md#models) gives the calls). The
 translation model is planned and loaded only when a kind's pool holds a
-translation technique (a rewrite technique, once there is one, calls the
-generation model, as the other model-written techniques do). An allow list admits the whole family while the switch
+translation technique (a rewrite technique calls the generation model, as
+the other model-written techniques do). An allow list admits the whole family while the switch
 is on, unless `techniques.allow` names some languages: a kind meant to draw
 only the techniques it lists says `"translation": false`.
 
@@ -650,8 +650,8 @@ the default) and in `params["jailbreaks"]`.
 ### Release notes
 
 **Upgrading from the previous release (spec version 1.0, now 1.3).** The
-jailbreak library grew from 151 techniques in 23 families to 222 active ones
-(229 registered, 7 retired) in 32 families and five layers. What that asks of
+jailbreak library grew from 151 techniques in 23 families to 238 active ones
+(245 registered, 7 retired) in 35 families and five layers. What that asks of
 a run you already have, and what you will see; each point has its note below.
 
 - **One re-plan is planned: the adversarial kind.** The packaged attacks now
@@ -1081,7 +1081,8 @@ raises or warns for it); finished rows keep their unchecked scenarios. The
 `eval` type draws neither family: its pool and draws do not change.
 
 **Release note: the rewrite layer.** The spec has a fifth layer, `rewrite`,
-first in the apply order. It holds no technique yet and is off by default:
+first in the apply order. It holds 16 techniques (spec 1.3: persuasion,
+tense rewrites and model distractors, attacks only) and is off by default:
 its spec rate is 0, and the spec lists it in `layers_off_by_default`, so
 every kind leaves it out unless its `layers.allow` names it, whatever its
 `layers.deny` says. Opt in with `"layers": {"allow": ["rewrite"]}` in the
@@ -1091,15 +1092,15 @@ kinds denied it in `augmentations.json`: `{"deny": ["hacking"]}` keeps it
 off, and so does a `config_dir` copy of `augmentations.json`, whether it
 says `"deny": []` (made before the layer) or `"deny": ["rewrite"]` (made
 before the spec listed it). Nothing changes for an existing plan, the
-dataset types' included: whatever its section's `layers` say, its pool,
-rounds, plan file and manifest are as before, and so are its draws, since
-an allowed layer adds nothing while it is empty (`include_rewrite` is
-written only while a rewrite technique is registered). Once the layer holds
-a technique, a kind whose `layers.allow` names it gains
-`include_rewrite: true` in its adversarial rounds, and a plan kept from
-before raises on resume naming `rounds`: take `rewrite` out of its
-`layers.allow` to keep the plan, or plan again with `resume=False`. The flat
-`include_<layer>` keywords keep the layer denied.
+dataset types' included: no packaged section allows the layer, so its pool,
+rounds, plan file and manifest are as before, and so are its draws. A kind
+whose `layers.allow` names it gains the 16 techniques and `include_rewrite:
+true` in its adversarial rounds (written only when the layer is allowed and
+a rewrite technique is registered), so a plan kept from a section that
+allowed the layer before it held a technique raises on resume naming
+`rounds`: take `rewrite` out of its `layers.allow` to keep the plan, or plan
+again with `resume=False`. The flat `include_<layer>` keywords keep the
+layer denied.
 
 ## The model registry
 
@@ -1341,7 +1342,7 @@ The conversation functions, which no recipe runs (`evaluate_conversations`,
 | `input` | `generation/from_constitution/long`, `generation/from_constitution/short`, `quality_check` |
 | `output` | `generation/harmful`, `generation/helpful`, `quality_check/harmful`, `quality_check/helpful`: one generation prompt and one checker per [answer mode](stages/outputs.md#answer-modes) |
 | `paraphrase` | `generation`, `generation/<model>` (a paraphraser's own, when it has one; the directory is the registry name), `check` |
-| `jailbreak` | `scenario_generation`, `persona_invention`, `persona_scenario_generation`, `jailbreak_construction`, `payload_split_semantic`, `category_selection`, `benign_generation`, `extract_harmful`, `synonym_substitution`, `rewrite_with_typos`, `typo_check`, `scenario_check`, `translate`, `translate_retry`, `translate_check`, `translate_mt` (a machine translator's format: one user message, no system prompt; checked at the stage's start), `translate_check_back` |
+| `jailbreak` | `scenario_generation`, `persona_invention`, `persona_scenario_generation`, `jailbreak_construction`, `payload_split_semantic`, `category_selection`, `benign_generation`, `extract_harmful`, `synonym_substitution`, `rewrite_with_typos`, `typo_check`, `scenario_check`, `persuasion_rewrite`, `tense_rewrite`, `model_distractor`, `preserve_check`, `translate`, `translate_retry`, `translate_check`, `translate_mt` (a machine translator's format: one user message, no system prompt; checked at the stage's start), `translate_check_back` |
 | `conversation` | `judge`, `success_judge`, `pair_attacker` |
 | `format_instructions` | `numbered`, `structured_qa` |
 

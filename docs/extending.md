@@ -243,15 +243,17 @@ contract.
    - **A technique that calls a model** says how its reply is checked and
      what one application costs. `check` names the check: `typos` (the
      typo check), `scenario` (the scenario check), `word_list` (the strict
-     parse of a marked-word list) or `translate` (translation's own check
-     and retry); `calls` is the model calls one application makes,
+     parse of a marked-word list), `translate` (translation's own check
+     and retry) or `preserve` (the check that a rewrite is the prompt's own
+     request); `calls` is the model calls one application makes,
      generation and checks, a whole number or `[low, high]`. A family's
      apply to each of its techniques whose entry gives none, as `kinds` do.
      Both only declare: the technique runs its check itself (the typo
      check through `llm_pipeline.checked` in `obfuscation/typos.py`, on the
      `check_model` it is given; the scenario check in `hacking/cognitive.py`;
-     the strict parse in `obfuscation/tokenbreak.py`; translation's rounds), and
-     import fails on a `check` outside those four or `calls` that are not
+     the strict parse in `obfuscation/tokenbreak.py`; translation's rounds; the
+     preserve check in `rewrite/preserve.py`), and
+     import fails on a `check` outside those five or `calls` that are not
      whole numbers of at least 1. A technique of the eval pool that has a
      model write the prompt must carry a `check`
      (`tests/jailbreak/test_pool.py`; the `to_{fsh,dap}_selected_*`, which
@@ -387,16 +389,21 @@ The `translation` and `answer_language` techniques are generated from
 
 The `rewrite` layer comes first: its technique rewrites the whole prompt
 before every other layer applies, one at most a combination
-(`layer_max_picks`). It holds no technique yet and is off: the spec's
-`layer_rates.rewrite` is 0 and the spec lists it in
-`layers_off_by_default`, so a kind leaves it out unless its `layers.allow`
-names it, whatever its `layers.deny` says.
+(`layer_max_picks`). It holds 16 techniques (`persuasion`, `tense_rewrite`,
+`model_distractors`) and is off: the spec's `layer_rates.rewrite` is 0 and
+the spec lists it in `layers_off_by_default`, so a kind leaves it out unless
+its `layers.allow` names it, whatever its `layers.deny` says.
 
 1. **Write and register it** as any technique (above), in a module under
    `jailbreak/rewrite/` whose getter `get_all_rewrite_functions` in
    `rewrite/__init__.py` returns. One that has a model write the text loads
    its prompt from `prompts/jailbreak/<name>/`, checks the reply (through
-   `llm_pipeline.checked`) and says so in its spec `check` and `calls`.
+   `llm_pipeline.checked`) and says so in its spec `check` and `calls`. A
+   technique that rewrites the whole prompt calls
+   `rewrite/preserve.py: preserved_rewrite_gen`, which `persuasion` and
+   `tense_rewrite` share (`check` `preserve`, `jailbreak/preserve_check`); one
+   more persuasion technique is an entry of `persuasion_techniques.json` and
+   its spec entry, `to_persuade_<key>`.
 2. **Give it a family** in the spec with `"layer": "rewrite"`, a
    `dimension` and, for variations, `kinds`; the technique's entry carries
    `since`, the spec's `version` moved up.
