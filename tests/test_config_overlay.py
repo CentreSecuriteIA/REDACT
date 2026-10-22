@@ -122,6 +122,45 @@ def test_an_augmentations_file_in_the_folder_is_the_default_of_both_kinds(tmp_pa
     assert resolve(None, "adversarial")["max_complexity"] != 3     # noqa: PLR2004
 
 
+def test_an_unknown_key_in_an_augmentations_copy_is_left_out_with_a_warning(
+        tmp_path, caplog):
+    """A typo did nothing before, so a copy may hold one: the run warns and
+    resolves as without it."""
+    data = _augmentations(max_complexty=9)
+    data["adversarial"]["layers"] = {"deny": [], "alow": ["rewrite"]}
+    path = _write(tmp_path / "jailbreak" / "augmentations.json", data)
+    with caplog.at_level("WARNING", logger="redact.jailbreak.augmentation"):
+        adversarial = resolve(None, "adversarial", config_dir=tmp_path)
+    assert adversarial == resolve(None, "adversarial")
+    assert [r.getMessage().split(" which")[0] for r in caplog.records] == [
+        f"{path}: adversarial has unknown key(s) ['max_complexty'],",
+        f"{path}: adversarial.layers has unknown key(s) ['alow'],"]
+
+
+@pytest.mark.parametrize(("change", "message"), [
+    (lambda d: d["adversarial"].pop("layers"), "adversarial lacks ['layers']"),
+    (lambda d: d["natural"].pop("exact_techniques"),
+     "natural lacks ['exact_techniques']"),
+    (lambda d: d.pop("natural_only_families"), "lacks natural_only_families"),
+    (lambda d: d.__setitem__("natural", None),
+     "natural must be an object of the kind's keys, got None"),
+    (lambda d: d["adversarial"].__setitem__("exact_techniques", 1),
+     "adversarial gives exact_techniques, a key of the natural kind"),
+], ids=["no layers", "no exact_techniques", "no natural_only_families",
+        "a kind null", "a count on the attacks"])
+def test_an_augmentations_copy_that_cannot_be_read_raises_naming_the_file(
+        tmp_path, change, message):
+    """What failed as a bare KeyError, or read the attacks as the natural
+    kind, now stops the recipe at load with the file and the key."""
+    data = _augmentations()
+    change(data)
+    path = _write(tmp_path / "jailbreak" / "augmentations.json", data)
+    with pytest.raises(ValueError) as raised:
+        load_recipe({"dataset_type": "training", "config_dir": str(tmp_path)})
+    assert str(raised.value).startswith(str(path))
+    assert message in str(raised.value)
+
+
 def test_the_jailbreak_front_resolves_over_the_folder(tmp_path, monkeypatch):
     import redact.stages as P
 

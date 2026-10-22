@@ -413,16 +413,19 @@ def _config_dir(tmp_path, layers: dict):
 
 @pytest.mark.parametrize("where", ["section", "config_dir"])
 def test_a_layer_named_under_both_allow_and_deny_raises(tmp_path, where):
+    """In a section; in a copy, whose message names the file."""
     both = {"allow": ["rewrite"], "deny": ["rewrite"]}
     if where == "section":
         section, config_dir = {"adversarial": {"layers": both}}, None
+        named = "augmentations.adversarial"
     else:
         section, config_dir = None, _config_dir(tmp_path, both)
+        named = f"{tmp_path / 'jailbreak' / 'augmentations.json'}: adversarial"
     with pytest.raises(ValueError) as raised:
         resolve(section, "adversarial", config_dir=config_dir)
     assert str(raised.value) == (
-        "augmentations.adversarial.layers names ['rewrite'] under both allow and "
-        "deny; write each under one of them.")
+        f"{named}.layers names ['rewrite'] under both allow and deny; write each "
+        "under one of them.")
 
 
 def test_the_packaged_kinds_rounds_are_those_written_before_the_layer():

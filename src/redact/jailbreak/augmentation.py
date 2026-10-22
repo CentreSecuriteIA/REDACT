@@ -53,6 +53,7 @@ _LAYERS = ("rewrite", "hacking", "manipulation", "obfuscation", "requests")
 #: other kind are those written before the layer existed.
 _REWRITE = "rewrite"
 _SPEC = "combination_spec.json"
+_NATURAL_ONLY = "natural_only_families"
 
 #: Today's keywords of ``generate_jailbreaks``, each an alias into the
 #: adversarial kind for one release (:func:`apply_flat_keywords`).
@@ -66,25 +67,110 @@ FLAT_KEYWORDS = (
 
 @lru_cache(maxsize=8)
 def _read(path: str, modified: int) -> dict:
-    return json.loads(Path(path).read_text(encoding="utf-8"))
+    return _checked_file(path, json.loads(Path(path).read_text(encoding="utf-8")))
 
 
 def _section_file(config_dir: str | Path | None) -> dict:
-    """``augmentations.json``, read again when the file changes."""
+    """``augmentations.json``, checked (:func:`_checked_file`) and read again
+    when the file changes."""
     path = config_file("jailbreak/augmentations.json", config_dir)
     return _read(str(path), path.stat().st_mtime_ns)
 
 
+def _checked_file(path: str, data) -> dict:
+    """``data``, the ``augmentations.json`` at ``path``, with each default
+    kind checked as a section's kind is: a ``config_dir`` copy is read with
+    no recipe to catch what it holds.
+
+    A key the file or a kind may not hold (a typo, as ``max_complexty`` or
+    ``layers.alow``) did nothing before, so a copy may hold one: it is left
+    out with a WARNING that names it. A kind's ``layers``, ``families`` and
+    ``techniques`` are read as a section's (:func:`_lists`), the ``allow`` a
+    ``families`` or ``techniques`` leaves out ``None`` and a ``deny`` ``[]``.
+
+    Raises:
+        ValueError: A kind is not an object or lacks a key, the
+            adversarial kind gives ``exact_techniques`` (it would be read as
+            the natural kind, :func:`~redact.jailbreak.pool.kind_of`), a list
+            is malformed, or ``natural_only_families`` is missing or names a
+            family the spec does not have. The message names the file and
+            the key.
+    """
+    known = [*KINDS, _NATURAL_ONLY]
+    if not isinstance(data, dict):
+        raise ValueError(f"{path} must hold an object of {known}, got {data!r}.")
+    unknown = [key for key in data if key not in known and not key.startswith("_")]
+    if unknown:
+        logger.warning("%s has unknown key(s) %s, which are ignored; it holds %s.",
+                       path, unknown, known)
+    if _NATURAL_ONLY not in data:
+        raise ValueError(
+            f"{path} lacks {_NATURAL_ONLY}, the families the attacks draw only when "
+            "their families.allow names them; write it as the library's file does, "
+            "delete the copy, or write it again with scaffold_setup(..., "
+            "overwrite=True), which replaces your edits.")
+    only, families = data[_NATURAL_ONLY], load_spec()["families"]
+    if not isinstance(only, list) or not all(name in families for name in only):
+        raise ValueError(
+            f"{path}: {_NATURAL_ONLY} must be a list of families of {_SPEC}, [] for "
+            f"none, got {only!r}.")
+    return {**{key: value for key, value in data.items() if key not in unknown},
+            **{kind: _checked_default(f"{path}: {kind}", kind, data.get(kind))
+               for kind in KINDS}}
+
+
+def _checked_default(where: str, kind: str, value) -> dict:
+    """``value``, a default kind of ``augmentations.json``, checked
+    (:func:`_checked_file`)."""
+    if not isinstance(value, dict):
+        raise ValueError(
+            f"{where} must be an object of the kind's keys, got {value!r}; a "
+            "dataset type file or a recipe switches a kind off with null.")
+    value = {key: v for key, v in value.items() if not key.startswith("_")}
+    if kind == "adversarial" and "exact_techniques" in value:
+        raise ValueError(
+            f"{where} gives exact_techniques, a key of the natural kind: the "
+            "attacks would be read as natural and draw its pool. Take it out; a "
+            "round of rounds may give it.")
+    unknown = [key for key in value if key not in _KIND_KEYS[kind]]
+    if unknown:
+        logger.warning("%s has unknown key(s) %s, which are ignored; write only %s.",
+                       where, unknown, list(_KIND_KEYS[kind]))
+    value = {key: v for key, v in value.items() if key not in unknown}
+    missing = [key for key in _KIND_KEYS[kind]
+               if key not in value and key not in _GROUP_BUDGET_KEYS]
+    if missing:
+        raise ValueError(
+            f"{where} lacks {missing}; write them as the library's file does, "
+            "delete the copy, or write it again with scaffold_setup(..., "
+            "overwrite=True), which replaces your edits.")
+    for level in ("layers", "families", "techniques"):
+        given = value[level]
+        extra = [key for key in given if key not in ("allow", "deny")] if isinstance(
+            given, dict) else []
+        if extra:
+            logger.warning(
+                "%s.%s has unknown key(s) %s, which are ignored; write only "
+                "['allow', 'deny'].", where, level, extra)
+            given = {key: given[key] for key in ("allow", "deny") if key in given}
+        lists = _lists(where, level, given)
+        value[level] = lists if level != "layers" else {
+            **({"allow": lists["allow"]} if "allow" in given else {}),
+            "deny": lists["deny"]}
+    return value
+
+
 def defaults(config_dir: str | Path | None = None) -> dict:
     """The default section, both kinds, as a copy the caller may change: the
-    packaged one, or ``config_dir``'s when it has the file."""
+    packaged one, or ``config_dir``'s when it has the file, checked
+    (:func:`_checked_file`)."""
     return copy.deepcopy({kind: _section_file(config_dir)[kind] for kind in KINDS})
 
 
 def natural_only_families(config_dir: str | Path | None = None) -> list[str]:
     """The families the adversarial kind draws only when its
     ``families.allow`` names them."""
-    return list(_section_file(config_dir)["natural_only_families"])
+    return list(_section_file(config_dir)[_NATURAL_ONLY])
 
 
 def layers_off_by_default() -> list[str]:

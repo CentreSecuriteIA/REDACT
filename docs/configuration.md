@@ -1440,7 +1440,7 @@ from the package otherwise:
 |---|---|
 | `<config_dir>/dataset_types/eval.json`, `training.json` | the [dataset type](#dataset-types) file of that name. A file of another name there is no new type: it is not read, and the run warns about it as ignored |
 | `<config_dir>/taxonomy/<name>.json` | a taxonomy of that name (`taxonomy`, `benign_taxonomy`); a new name there is a taxonomy of your own. `taxonomy_dir`, when given, wins and is read alone |
-| `<config_dir>/jailbreak/augmentations.json` | the default [augmentation section](#the-augmentation-section), both kinds and `natural_only_families` |
+| `<config_dir>/jailbreak/augmentations.json` | the default [augmentation section](#the-augmentation-section), both kinds and `natural_only_families`, checked when read: an unknown key (of the file, a kind, or its `layers`, `families` or `techniques`) is left out with a WARNING naming the file; a kind that is not an object or lacks a key, a missing `natural_only_families`, or `exact_techniques` in the adversarial kind (which would read the attacks as the natural kind) stops the recipe at load, naming the file |
 | `<config_dir>/generation_axes.json` | the [generation axes](#the-generation-axes) table, whole: its labels, hints, weights and `not_with`. Its axes are checked against the folder's `dimensions.json` when it has one |
 | `<config_dir>/dimensions.json` | the [dimensions](#dimensions-and-the-runs-check) table, whole. It must hold every tag the families carry; the run's check reads its `same_as` and `undecided` |
 

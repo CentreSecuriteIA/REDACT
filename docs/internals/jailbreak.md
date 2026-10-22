@@ -482,7 +482,13 @@ kind, or `None` for a kind that is off. The default is the packaged
 file), with `base`, the dataset type's section, resolved over it: a kind
 `section` leaves out is `base`'s, and a kind `base` switches off comes back,
 over the packaged default, when `section` gives it. A key starting with
-`_`, in the section or a kind, is a comment. With `translation` false, the
+`_`, in the section or a kind, is a comment. The file is checked when it is
+read (`_checked_file`, cached per path and modification time, so once per
+version): each default kind's keys against `_KIND_KEYS` and its lists with
+`_lists`, as a section's; an unknown key is left out with a WARNING (a
+copy's typo did nothing before), and a missing key, a kind that is not an
+object, a bad `natural_only_families` or an adversarial `exact_techniques`
+(which `kind_of` would read as natural) raise, naming the file. With `translation` false, the
 translation an allow list or `family_weights` names is dropped with a
 WARNING (`_switch_off_translation`). `_check_kinds` raises for an allow
 list that names a family or technique whose spec `kinds` lack the kind.
