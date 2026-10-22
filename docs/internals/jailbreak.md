@@ -465,7 +465,7 @@ admits those alone. Last, it keeps the techniques whose `kinds` (set by
 `family_kinds`, else `DEFAULT_KINDS`, `["adversarial"]`) hold the kind,
 which `pool.kind_of(resolved)` reads as `rounds_of` does: natural when the
 resolved kind has `exact_techniques`, so no key is added to it. The
-natural pool is narrowed to the 71 techniques of
+natural pool is narrowed to the 72 techniques of
 [techniques.md](../techniques.md#the-natural-pool) with translation off;
 the attacks lose only the techniques of the three families marked
 `["natural"]` alone (`smalltalk_prefix`, `smalltalk_suffix`,

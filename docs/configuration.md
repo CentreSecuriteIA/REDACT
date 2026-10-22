@@ -392,7 +392,7 @@ The packaged natural kind allows the families `typos`, `casual_writing`,
 techniques `to_leetspeak_basic`, `to_adversarial_suffix_punctuation`,
 `to_adversarial_suffix_emoji`; and denies `to_refusal_then_comply`,
 `to_apology_prevention`, `to_prefix_injection`. The spec's `kinds` narrow
-it further (step 6 below): its pool is 71 techniques
+it further (step 6 below): its pool is 72 techniques
 ([techniques.md](techniques.md#the-natural-pool)). A variation that leaves
 its input unchanged is rejected.
 
@@ -666,8 +666,8 @@ a run you already have, and what you will see; each point has its note below.
   again with `resume=False`, and still replays the retired ones.
 - **The natural kind's pool changed.** The spec's `kinds` narrowed it to the
   techniques marked natural, and spec 1.2 then grew it, to 71 techniques in
-  13 families by default (46 in 8 before; 90 with `"translation": true`);
-  spec 1.3 left it as it was. A
+  13 families by default (46 in 8 before); spec 1.3 added the urgent ask, to
+  72 (91 with `"translation": true`). A
   natural plan made before the narrowing raises on resume: run the natural
   kind with `resume=False`. One made since resumes with the WARNING above.
   A `config_dir` copy of `augmentations.json` made before spec 1.2 does not
@@ -784,7 +784,7 @@ them. A section that names one in `techniques.allow` draws it, with a
 
 **Release note: the natural pool.** The natural kind now draws only what
 the spec's `kinds` mark natural (46 techniques by default when this came in,
-71 since spec 1.2, below; `structural`, `continuation`, `temporal`, the high
+71 since spec 1.2 and 72 since spec 1.3, below; `structural`, `continuation`, `temporal`, the high
 and insane typos and the dialogue and story answer formats left it). A
 natural-kind plan made before raises on resume, since its pool changed: run
 the natural kind with `resume=False`. A training build leaves out the benign
@@ -794,7 +794,7 @@ of `augmentations.json` whose natural `families.allow` names one of these
 families raises ([overlay rules](#overlay-rules)).
 
 **Release note: the techniques spec 1.3 adds.** Twenty-four pure template
-techniques, all attack-only, whose text the owner wrote
+techniques, attack-only but the urgent ask, whose text the owner wrote
 ([techniques.md](techniques.md#what-the-families-do)):
 
 - *Persona templates* (`persona_template`, hacking, 11): a fixed frame for a
@@ -827,10 +827,16 @@ heavy encodings; `to_refusal_then_comply`, `to_prefix_injection`,
 `to_answer_in_encoding` refuses `encode`. A kept plan replays its recorded
 combinations, so a rule changes none of them.
 
-The natural kind does not change: it draws 71 techniques. `answer_format`
-and `asking` are natural families, so their four new members say
-`"kinds": ["adversarial"]`; whether an urgent ask is a natural variation is
-the owner's call. The `eval` type does not change either: its pool stays at
+The natural kind gains one technique, `to_ask_with_urgency`: `asking` is a
+natural family, and the owner decided that an urgent ask is a natural
+variation, so it takes its family's kinds and the natural pool is 72
+techniques (91 with `"translation": true`). `answer_format` is a natural
+family too, but its three new members say `"kinds": ["adversarial"]`. A fresh
+natural plan may draw the urgent ask; a natural plan kept from before
+resumes with the growth WARNING above, which names it, and does not draw it
+until it is planned again with `resume=False`. The training build's rule
+that leaves out the benign variations made with a technique the natural kind
+does not draw does not touch it. The `eval` type does not change either: its pool stays at
 36 and its draws are those it made before. It allows none of the new
 families and, of `answer_format`, names `to_refusal_then_comply` alone; it
 allows `temporal` whole, so `eval.json` now ends its `techniques.deny` with

@@ -315,7 +315,7 @@ allow list that names one raises). The families `typos`, `casual_writing`,
 `["adversarial", "natural"]`, less their attack-only
 techniques, and three techniques of attack families are marked natural on
 their own. The natural kind draws only what is marked natural: by default
-(translation off) these 71 techniques in 13 families, pinned in
+(translation off) these 72 techniques in 13 families, pinned in
 `tests/fixtures/natural_pool.json`:
 
 | Family | Natural techniques |
@@ -326,7 +326,7 @@ their own. The natural kind draws only what is marked natural: by default
 | `neutral_container` | all six (since spec 1.2) |
 | `answer_language` | all twenty-six (six since spec 1.2) |
 | `answer_format` | `to_answer_in_markdown`, `to_answer_as_tutorial`, `to_answer_as_code`, `to_answer_as_structured_data` |
-| `asking` | `to_innocuous_question`, `to_ask_for_details` |
+| `asking` | all three (`to_ask_with_urgency` since spec 1.3) |
 | `indirect` | all six |
 | `smalltalk_prefix`, `smalltalk_suffix` | `to_smalltalk_prefix`, `to_smalltalk_suffix` (since spec 1.2, natural only) |
 | `benign_role` | all three, for benign and dual-use benign inputs only (since spec 1.2, natural only) |
@@ -337,8 +337,7 @@ With `"natural": {"translation": true}` the nineteen translations join them.
 Attack-only: `structural`, `continuation`, `temporal`, the high and insane
 typos, the four high-density noise techniques, `to_answer_as_dialogue`, `to_answer_as_story`,
 the three answer formats of spec version 1.3 (`to_dual_answer`,
-`to_tagged_prefix`, `to_answer_in_encoding`), its `to_ask_with_urgency`
-and the three
+`to_tagged_prefix`, `to_answer_in_encoding`) and the three
 answer-format directives the natural kind denies anyway
 (`to_refusal_then_comply`, `to_apology_prevention`,
 `to_prefix_injection`), with every other family. A natural allow list that
@@ -706,9 +705,9 @@ request set in the future, or in a historical era; complexity 3, as
 `to_use_past_tense`), `to_distractor_prefix_task` and
 `to_distractor_suffix_task` (another task before or after the prompt) and
 `to_ask_with_urgency` (a note of urgency before it). Their info has their
-family's form, `type=<directive>;variant=<name>`. All are attack-only:
-`to_ask_with_urgency` says `["adversarial"]` though `asking` is natural,
-until the owner decides whether an urgent ask is a natural variation. The
+family's form, `type=<directive>;variant=<name>`. All are attack-only but
+`to_ask_with_urgency`: `asking` is natural, and the owner decided that an
+urgent ask is a natural variation, so it takes its family's kinds. The
 `eval` type, which allows `temporal` whole, denies the two new temporal
 members, so its pool does not change.
 

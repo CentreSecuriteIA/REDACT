@@ -1,9 +1,9 @@
 """The seven members spec 1.3 added to the thin request families:
 impersonation, temporal, the two distractors and asking.
 
-Their variants are adversarial on purpose; these tests compare flags and
-names (the prompt kept, the slot filled, the variant named), never print a
-text.
+Their variants are attacks, and the urgent ask is a natural variation too,
+as its family; these tests compare flags and names (the prompt kept, the slot
+filled, the variant named), never print a text.
 """
 
 import random
@@ -52,12 +52,14 @@ def test_a_member_writes_its_directive_s_variant_as_its_family_names_it(name):
 
 
 @pytest.mark.parametrize("name", _MEMBERS)
-def test_a_member_is_a_pure_attack_of_spec_1_3(name):
+def test_a_member_is_a_pure_technique_of_spec_1_3_that_takes_its_family_s_kinds(name):
+    """Only the asking family is natural: its member draws as a variation too."""
     family, _file, _directive, complexity, _before = _MEMBERS[name]
     fn = _BY_NAME[name]
     assert (fn.families, fn.complexity, fn.requires_llm) == ([family], complexity,
                                                              False)
-    assert (fn.kinds, fn.since) == (["adversarial"], "1.3")
+    kinds = ["adversarial", "natural"] if family == "asking" else ["adversarial"]
+    assert (fn.kinds, fn.since) == (kinds, "1.3")
 
 
 @pytest.mark.parametrize("family", ["impersonation", "temporal", "distractor_prefix",
@@ -66,12 +68,15 @@ def test_each_thin_family_now_has_three_members(family):
     assert len([fn for fn in all_techniques() if fn.families[0] == family]) == 3  # noqa: PLR2004
 
 
-def test_the_urgent_ask_is_attack_only_though_asking_is_natural():
-    """The owner decides whether it is natural; until then the natural pool
-    keeps its 71."""
+def test_the_urgent_ask_is_natural_as_its_family():
+    """The owner decided (2026-10-22) that an urgent ask is a natural
+    variation: the natural pool is 72, with the other asking members, and the
+    other six members of spec 1.3 stay attacks."""
     natural = technique_pool(resolve(None, "natural"))
-    assert _BY_NAME["to_ask_with_urgency"] not in natural
+    assert _BY_NAME["to_ask_with_urgency"] in natural
     assert _BY_NAME["to_innocuous_question"] in natural
+    assert not {name for name in _MEMBERS if name != "to_ask_with_urgency"} & {
+        fn.__name__ for fn in natural}
 
 
 def test_the_eval_type_denies_the_two_new_temporal_members():

@@ -220,6 +220,17 @@ def test_another_seed_or_section_raises_though_the_library_grew(
         _resume(out, seed=seed, **kind)
 
 
+def test_a_natural_plan_of_spec_1_2_finds_the_urgent_ask_as_the_library_s_growth():
+    """Spec 1.3 added ``to_ask_with_urgency`` to the natural pool, the one
+    technique it added: the pool of a natural plan made at 1.2 differs by that
+    name alone, which the library added after the plan, so the plan is kept."""
+    pool = technique_pool(resolve(None, "natural"))
+    made_with = {"spec_version": "1.2", "pool": sorted(
+        fn.__name__ for fn in pool if fn.__name__ != "to_ask_with_urgency")}
+    assert JPipe._library_change(made_with, pool, registry(all_techniques())) == (
+        ["to_ask_with_urgency"], [])
+
+
 # --- the techniques the library retired ----------------------------------------
 
 #: Retired by spec version 1.1: three duplicates of

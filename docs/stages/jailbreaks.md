@@ -10,7 +10,7 @@ Augment the accepted inputs with technique combinations, in two kinds:
 | Kind | Writes | Default |
 |---|---|---|
 | `adversarial` | `Datasets/jailbreaks.csv`: jailbreak attacks | one round per input, by budget, from every active technique (208 in 28 families, the nineteen translations among them) but `casual_writing` and the natural-only small talk and benign roles; half the units take a request obfuscation, a light encoding or a translation after the request |
-| `natural` | `Datasets/variations.csv`: natural variations | one technique per input, from the natural allow lists, which the spec's `kinds` narrow to 71 techniques (90 with `"translation": true`, which adds the nineteen translations) ([techniques.md](../techniques.md#the-natural-pool)) |
+| `natural` | `Datasets/variations.csv`: natural variations | one technique per input, from the natural allow lists, which the spec's `kinds` narrow to 72 techniques (91 with `"translation": true`, which adds the nineteen translations) ([techniques.md](../techniques.md#the-natural-pool)) |
 
 These are the packaged defaults, which a `training` run takes: both kinds
 are on. An `eval` run's dataset type attacks the harmful inputs only, with
@@ -255,8 +255,8 @@ techniques specs 1.2 and 1.3 add. A plan kept from spec 1.2 resumes with
 the growth WARNING above, naming the thirty techniques spec 1.3 adds
 (the persona templates, the fake turns, three answer formats, seven
 members of the thin request families, two payload splits, the word art and
-three personas), all attack-only, so only an
-adversarial plan names them.
+three personas), all attack-only but the urgent ask, so only an
+adversarial plan names the others and a natural plan names that one.
 
 ## Rejected and failed units
 

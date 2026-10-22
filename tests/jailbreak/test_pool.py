@@ -127,26 +127,26 @@ _MILD_NOISE = [f"to_{noise}_{density}" for noise in (
     for density in ("low", "medium")]
 
 
-def test_the_default_variation_pool_is_the_71_pinned_natural_techniques():
+def test_the_default_variation_pool_is_the_72_pinned_natural_techniques():
     """A technique added to a family the spec marks natural takes its
     family's kinds, so it joins the natural pool unless its entry says
     ``["adversarial"]``. This fails until the owner decides, in the spec and
     ``fixtures/natural_pool.json``. Spec 1.2 added six answer languages and
-    the natural-only small talk (2) and benign roles (3). Spec 1.3 added none:
-    its three answer formats and ``to_ask_with_urgency`` say
-    ``["adversarial"]``, the urgent ask until the owner decides it is
-    natural."""
+    the natural-only small talk (2) and benign roles (3). Spec 1.3 added one:
+    ``to_ask_with_urgency``, which the owner decided is natural; its three
+    answer formats say ``["adversarial"]``."""
     pool = technique_pool(resolve(None, "natural"))
     assert sorted(fn.__name__ for fn in pool) == NATURAL_POOL
-    assert len(pool) == 71      # noqa: PLR2004
-    # Family by family: two typos, seven whole families, two asking, four
-    # answer formats, the mild noise, and three techniques of attack families.
+    assert len(pool) == 72      # noqa: PLR2004
+    # Family by family: two typos, seven whole families, the asking family
+    # whole, four answer formats, the mild noise, and three techniques of
+    # attack families.
     listed = sorted([
         "to_rewrite_with_typos_low", "to_rewrite_with_typos_medium",
         *_family("casual_writing", "neutral_container", "answer_language",
                  "indirect", "smalltalk_prefix", "smalltalk_suffix",
                  "benign_role"),
-        "to_innocuous_question", "to_ask_for_details",
+        *_family("asking"),
         "to_answer_in_markdown", "to_answer_as_tutorial", "to_answer_as_code",
         "to_answer_as_structured_data", *_MILD_NOISE,
         "to_leetspeak_basic", "to_adversarial_suffix_punctuation",
@@ -192,9 +192,9 @@ def test_the_natural_kind_draws_only_what_the_spec_marks_natural():
                  "to_use_past_tense", "to_continue_passage",
                  "to_random_capitals_high", "to_scrambled_letters_high",
                  "to_keyboard_typos_high", "to_emoji_sprinkle_high",
-                 "to_dual_answer", "to_tagged_prefix", "to_answer_in_encoding",
-                 "to_ask_with_urgency"):
+                 "to_dual_answer", "to_tagged_prefix", "to_answer_in_encoding"):
         assert name not in natural
+    assert "to_ask_with_urgency" in natural
 
 
 def test_only_the_natural_only_families_are_not_adversarial(monkeypatch):
