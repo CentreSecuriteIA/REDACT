@@ -31,7 +31,8 @@ _FIXTURE = Path(__file__).parent / "fixtures" / "stage_files.json"
 _SPEC_VERSION = "<spec version>"
 _RULES = "<rules>"
 
-# An id that is given, missing, padded, given twice, NaN and a number.
+# An id that is given, missing, padded, given twice (the jailbreak stage keeps
+# the last row of it), NaN and a number.
 _IDS = ["given-1", None, " padded ", "given-1", float("nan"), 77]
 
 

@@ -32,10 +32,15 @@ in [techniques.md](../techniques.md).
 
 - The accepted inputs of the run, or `inputs=`. A `sample` column is renamed
   `prompt`; the frame must have one of the two. Each row's id is its
-  `sample_id`, else the content id of its text.
+  `sample_id`, else the content id of its text. Rows that share an id (one
+  text twice, or an id given twice) are planned once, from the last of
+  them, with a WARNING; rows that share one under different entry types
+  raise a `ValueError` naming the ids, since one of the two labels would
+  be wrong.
 - Each kind keeps the rows of its `entry_types` (all by default). A kind
-  whose `entry_types` match no input logs a WARNING `<kind> kind skipped:
-  ...` and writes nothing; with `resume: false` its files are removed.
+  whose `entry_types` match no input, or whose section leaves no technique
+  in its pool, logs a WARNING `<kind> kind skipped: ...` and writes
+  nothing; with `resume: false` its files are removed.
 - With no input file the front raises `No input samples found`; with no
   accepted input it warns `jailbreaks skipped: ...` and writes nothing. With
   `resume: false` it also removes the files of each kind that is on: CSV,

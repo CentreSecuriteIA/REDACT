@@ -391,8 +391,8 @@ starts over with `"resume": false`. Its earlier output, `.cut` and `.tmp`
 files, ledger and manifest are removed through `dataset.clear_stage`; for the
 jailbreak stage that is each kind that is on, with its `.coverage.csv`,
 `.plan.json` and `.variants.csv`. So no stale rows reach the build. A jailbreak kind whose
-`entry_types` match none of the inputs is skipped with a WARNING and cleared
-the same way.
+`entry_types` match none of the inputs, or whose section leaves no technique
+in its pool, is skipped with a WARNING and cleared the same way.
 
 **What a resume does not change.**
 
@@ -609,6 +609,8 @@ rate. [internals/telemetry.md](internals/telemetry.md) lists the events.
 | `ValueError: The plan names the technique '...', which no registered technique implements` | A kept plan names a technique that was renamed or removed | Run the jailbreak stage with `"resume": false` |
 | `ValueError: Benign data not found and no client provided for generation ...` | `auto_generate_benign` is false and there is no benign file | Run once with it on, or set `benign_path` |
 | WARNING `adversarial kind skipped: entry_types [...] match none of the inputs' (...)` | No input of the kind's `entry_types` | Fix `entry_types` in the augmentation section |
+| WARNING `adversarial kind skipped: its section leaves no technique to draw (...)` | The kind's `layers`, `families`, `techniques`, `pure_only` and `translation` leave its pool empty | Allow a layer, family or technique in the augmentation section |
+| WARNING `jailbreak: N input rows share their id with another (...)` | Two input rows hold one text without ids, or one id given twice | Nothing to do (the last row of each id is kept), or drop the copies; under two entry types the stage raises instead |
 | `ValueError: The params file has key(s) [...], which are not stages ...` | A top-level params key that is not a stage name, such as a typo | Write only stage names, or a comment key starting with `_` |
 | `ValueError: resume must be true or false, got 'false'.` | `resume` is not a JSON bool | Write `true` or `false` |
 | `ValueError: models['x'] is not a model role; write one of [...]` | A key under `models` that is no recipe role | Use one of the six roles ([Choose models](#choose-models)) |

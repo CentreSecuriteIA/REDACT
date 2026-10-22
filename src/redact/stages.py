@@ -694,18 +694,25 @@ def generate_jailbreaks(
 
     def run(name: str, kind: dict, out_path: Path, manifest_path: Path | None,
             **kwargs) -> pd.DataFrame:
+        pool = jailbreak_pool.technique_pool(kind)
         of_kind = _of_entry_types(inputs, kind["entry_types"])
-        if of_kind.empty:
-            logger.warning(
-                "%s kind skipped: entry_types %s match none of the inputs' (%s); "
-                "it writes nothing.", name, kind["entry_types"],
-                sorted(set(inputs["entry_type"].astype(str))))
+        if not pool or of_kind.empty:
+            if not pool:
+                logger.warning(
+                    "%s kind skipped: its section leaves no technique to draw "
+                    "(every layer, family or technique of the pool denied); it "
+                    "writes nothing.", name)
+            else:
+                logger.warning(
+                    "%s kind skipped: entry_types %s match none of the inputs' "
+                    "(%s); it writes nothing.", name, kind["entry_types"],
+                    sorted(set(inputs["entry_type"].astype(str))))
             if not resume:
                 clear_stage(**_kind_files(out_path, manifest_path))
             return pd.DataFrame()
         return run_augmentation(
             of_kind,
-            jailbreak_pool.technique_pool(kind),
+            pool,
             client=client, check=check, translation_model=translation_model,
             out_path=out_path,
             benign_path=benign, benign_taxonomy=benign_taxonomy,

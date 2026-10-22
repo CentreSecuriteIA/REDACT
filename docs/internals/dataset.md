@@ -197,7 +197,7 @@ unless `manifest_path` names it), gives the lock back, then removes the
 files in `also`. The fronts call it with `resume=False` for a stage skipped
 for want of accepted rows: outputs, each paraphrase target, and each
 jailbreak kind. A jailbreak kind is also cleared when its `entry_types`
-match no input. `also` holds the `.coverage.csv` and `.plan.json` of the
+match no input or its pool is empty. `also` holds the `.coverage.csv` and `.plan.json` of the
 outputs stage and of a kind, and a kind's `.variants.csv`.
 
 ### The lock

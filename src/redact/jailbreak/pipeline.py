@@ -90,7 +90,9 @@ def run_augmentation(
     is its input's is not accepted.
 
     Each input's id is its ``sample_id`` when it has one, else the content id
-    of its prompt.
+    of its prompt. Of rows that share an id, the last is kept, with a
+    WARNING (:func:`_one_row_per_id`); rows that share one under different
+    entry types raise a ``ValueError`` before anything is written.
 
     Resume: completion is a sidecar ``*.state.jsonl`` ledger keyed
     ``(input_id, iteration)``; ``resume=True`` reuses the plan and skips its
@@ -116,7 +118,7 @@ def run_augmentation(
     Returns:
         The rows of ``out_path``, or an empty frame when ``read_back`` is False.
     """
-    inputs = inputs.assign(sample_id=row_ids(inputs, "prompt"))
+    inputs = _one_row_per_id(inputs.assign(sample_id=row_ids(inputs, "prompt")), label)
     out_path = Path(out_path)
     man_path = Path(manifest_path) if manifest_path else Manifest.sidecar(out_path).path
     rounds = [{}] if rounds is None else list(rounds)
@@ -220,9 +222,9 @@ def run_augmentation(
             layer_rates=layer_rates, verbose=verbose,
         )
 
-    # Where each input is in the frame, by its id; of two inputs with one id
-    # the later one. A unit's prompt and its row's input columns are read there
-    # when needed, so no copy of every input is held.
+    # Where each input is in the frame, by its id (one row per id, by now).
+    # A unit's prompt and its row's input columns are read there when
+    # needed, so no copy of every input is held.
     position = dict(zip(inputs["sample_id"], range(len(inputs))))
     prompts = inputs["prompt"]
 
@@ -338,6 +340,37 @@ def run_augmentation(
                     man_path, out_path, variants)
 
     return rows
+
+
+def _one_row_per_id(inputs: pd.DataFrame, label: str) -> pd.DataFrame:
+    """``inputs`` with one row per ``sample_id``. Rows that share one (one
+    text without an id of its own, or an id given twice) would be planned
+    as two units under one ledger key, the row of each written with the
+    last one's columns; the last is kept, with a WARNING.
+
+    Raises:
+        ValueError: Rows that share an id have different entry types, so
+            one of the two labels would be wrong.
+    """
+    repeated = inputs["sample_id"].duplicated(keep=False)
+    if not repeated.any():
+        return inputs
+    if "entry_type" in inputs.columns:
+        types = inputs.loc[repeated].groupby("sample_id")["entry_type"].nunique(
+            dropna=False)
+        mixed = sorted(types[types > 1].index)
+        if mixed:
+            raise ValueError(
+                f"{label}: {len(mixed)} input id(s) are each held by rows of "
+                f"different entry types ({mixed[:3]}), the same text or the same "
+                "id under two labels; keep one row of each in the inputs, or "
+                "give the rows ids of their own.")
+    kept = inputs.drop_duplicates("sample_id", keep="last")
+    logger.warning(
+        "%s: %d input rows share their id with another (the same text, or an "
+        "id given twice); the plan keeps the last row of each id and leaves "
+        "out %d.", label, int(repeated.sum()), len(inputs) - len(kept))
+    return kept
 
 
 def _library_change(

@@ -398,6 +398,75 @@ def test_entry_types_keep_the_inputs_of_those_types(tmp_path):
     assert list(df["entry_type"]) == ["benign", "benign"]
 
 
+def test_a_kind_whose_section_leaves_no_technique_is_skipped(tmp_path, caplog):
+    """Every layer denied: no plan of identity rows, but a WARNING."""
+    out = tmp_path / "jb.csv"
+    every_layer = {"deny": ["hacking", "manipulation", "obfuscation", "requests"]}
+    with caplog.at_level("WARNING"):
+        df = generate_jailbreaks(inputs=_inputs(), output_path=out, seed=1,
+                                 **_pure(layers=every_layer))
+    assert df.empty and not out.exists()
+    assert not Manifest.sidecar(out).path.exists()
+    assert ("adversarial kind skipped: its section leaves no technique to draw"
+            in caplog.text)
+
+
+# --- inputs that share an id ----------------------------------------------------
+
+
+def _twins(n: int = 4, twin_type: str = "harmful") -> pd.DataFrame:
+    """``n`` inputs of Crime, then the first one's text again under Hobby,
+    as ``twin_type``."""
+    prompts = [f"prompt number {i} about a topic" for i in range(n)]
+    return pd.DataFrame({
+        "prompt": [*prompts, prompts[0]],
+        "category": ["Crime"] * n + ["Hobby"],
+        "entry_type": ["harmful"] * n + [twin_type]})
+
+
+def test_inputs_that_share_an_id_are_planned_once_with_a_warning(tmp_path, caplog):
+    """The last row of the id is kept: its unit, its columns, its group."""
+    out = tmp_path / "jb.csv"
+    with caplog.at_level("WARNING"):
+        df = generate_jailbreaks(inputs=_twins(), output_path=out, seed=1, **PURE_KW)
+    plan = Manifest.sidecar(out).load()
+    twin = content_id("prompt number 0 about a topic")
+    assert [(r["category"], r["entry_type"]) for r in plan
+            if r["sample_id"] == twin] == [("Hobby", "harmful")]
+    assert len(plan) == len(df) == len(_twins()) - 1
+    assert df.loc[df["input_id"] == twin, "category"].tolist() == ["Hobby"]
+    assert ("2 input rows share their id with another (the same text, or an id "
+            "given twice); the plan keeps the last row of each id and leaves out 1"
+            in caplog.text)
+
+
+def test_inputs_that_share_an_id_under_two_entry_types_raise(tmp_path):
+    """Either row's label would be the other's: nothing is planned."""
+    out = tmp_path / "jb.csv"
+    with pytest.raises(ValueError, match=r"1 input id\(s\) are each held by rows "
+                                         r"of different entry types"):
+        generate_jailbreaks(inputs=_twins(twin_type="benign"), output_path=out,
+                            seed=1, **PURE_KW)
+    assert not out.exists() and not Manifest.sidecar(out).path.exists()
+
+
+def test_a_run_killed_between_saves_resumes_every_unit_of_inputs_that_share_an_id(
+        tmp_path, monkeypatch):
+    """Two units under one ledger key lost the second when a run stopped
+    between their saves; one unit per id loses none."""
+    import redact.jailbreak.pipeline as JPipe
+
+    out, inputs = tmp_path / "jb.csv", _twins(40)
+    # The rows of the second save (32 units, then the rest) land, not its acks.
+    kill_after_rows(monkeypatch, JPipe, on_call=2)
+    with pytest.raises(Killed):
+        generate_jailbreaks(inputs=inputs, output_path=out, seed=1, **PURE_KW)
+    generate_jailbreaks(inputs=inputs, output_path=out, seed=1, **PURE_KW)
+    rows = pd.read_csv(out, dtype=str)
+    assert len(Manifest.sidecar(out).load()) == len(rows) == len(inputs) - 1
+    assert rows["input_id"].is_unique
+
+
 # --- a kept plan against the run's section --------------------------------------
 
 

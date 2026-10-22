@@ -361,8 +361,8 @@ def rules_id(pool: list[Callable]) -> str:
         "request_obfuscation_allowed_families": spec.get(
             "request_obfuscation_allowed_families", []),
         "families": {
-            name: {key: spec["families"].get(name, {}).get(key)
-                   for key in ("layer", "within_layer_order", "cross_incompatible_with")}
+            name: {key: spec["families"].get(name, {}).get(key) for key in (
+                "layer", "within_layer_order", "cross_incompatible_with")}
             for name in families},
         "techniques": {
             fn.__name__: {

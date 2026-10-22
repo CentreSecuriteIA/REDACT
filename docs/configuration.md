@@ -362,7 +362,7 @@ Both kinds:
 
 | Key | Type | Default | Meaning |
 |---|---|---|---|
-| `entry_types` | list or `null` | `null` | Augment only inputs of these entry types; `null` for all. A kind whose entry types match no input logs a WARNING and writes nothing |
+| `entry_types` | list or `null` | `null` | Augment only inputs of these entry types; `null` for all. A kind whose entry types match no input, or whose other keys leave its pool empty, logs a WARNING and writes nothing |
 | `translation` | bool | `true` in the adversarial kind, `false` in the natural one | Whether the kind draws the `translation` family. The family lists do not change it; `layers.deny`, `techniques.deny` and `pure_only` still apply |
 | `layers` | `{"allow": [...], "deny": [...]}` | `{"deny": []}`, the `rewrite` layer off | `deny`: layers left out. `allow`: layers off by default to turn on. A layer the spec lists in `layers_off_by_default` (`rewrite`) is left out unless `allow` names it, whatever `deny` says; `allow` may name only such a layer, and a layer may not be under both |
 | `families` | `{"allow": [...] or null, "deny": [...]}` | adversarial: `{"allow": null, "deny": []}`; natural: the natural families | Families admitted and removed |
