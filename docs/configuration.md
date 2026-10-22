@@ -376,7 +376,7 @@ Adversarial only:
 | `max_complexity` | int >= 0 | `6` | Budget mode: the most total complexity (each technique scores 0 to 3) |
 | `max_obfuscations` | int >= 0 | `2` | Budget mode: the most obfuscation families, the request obfuscation included |
 | `layer_rates` | `{layer: 0..1}` | `{}`, the spec's rates | Target share of units that take a `rewrite` (when `layers.allow` names it; the spec's rate is 0), `hacking`, `manipulation` or `requests` technique, or, with `allow_request_obfuscation`, a `request_obfuscation` |
-| `allow_request_obfuscation` | bool | `true` (`false` in the eval type) | Allow one more technique after the request technique, at the `request_obfuscation` rate: a light `encode` technique (the light `to_sensitive_words_encode_*` among them), or a translation when the pool has one. It is drawn before the other obfuscations, from what the earlier picks leave, and takes one of the `max_obfuscations` slots and its complexity from them; with `max_obfuscations` 0 there is none |
+| `allow_request_obfuscation` | bool | `true` (`false` in the eval type) | Allow one more technique after the request technique, for a unit that drew one (a unit without a request takes none), at the `request_obfuscation` rate over the group's units: a light `encode` technique (the light `to_sensitive_words_encode_*` among them), or a translation when the pool has one. It is drawn before the other obfuscations, from what the earlier picks leave, and takes one of the `max_obfuscations` slots and its complexity from them; with `max_obfuscations` 0 there is none |
 | `budget` | `"unit"`, `"group"` or `null` | `null`, as `"unit"` | `"unit"`: each unit may spend up to `max_complexity`. `"group"`: a unit may also spend what the group's earlier units left unspent of it, up to `max_unit_complexity`, so the group's mean stays at or below `max_complexity` ([the group budget](#the-group-budget)). A key of the kind, not of a round; the natural kind refuses it |
 | `max_unit_complexity` | int >= `max_complexity` | `max_complexity + 3` | With `"budget": "group"` only: the most one unit may spend. It may not be below `max_complexity` or any round's `max_complexity`; the natural kind refuses it |
 
@@ -796,6 +796,22 @@ they meet on 48 to 56% of the hacking units and `ascii_art` is drawn 68 to
 picks rounded down or up. A fresh budget plan draws differently from the
 same seed; a kept plan replays unchanged; the `eval` type, which draws by
 count, deals no layer and draws as before.
+
+**Release note: the request obfuscation only with a request.** The step
+obfuscates the finished request, but it was decided whether or not the unit
+had drawn a request technique; without one it was applied after the
+outermost wrapper (a third of the units that took it in the default
+attacks had no request, 500 of 1,500 in 3,000 units, 181 of them after a
+structural wrapper or a neutral container). It is now decided only once a
+request technique is picked. It is still dealt at its rate over the
+group's units, so it falls on the units that hold a request (0.7 of them
+by default) more often, and the default attacks still give it to half
+their units (1,500 of 3,000, at seeds 1, 2 and 42; 1,499 at 43), the
+escalation's rounds 3 and 4 to 0.5 and 0.7 of theirs; a group whose last
+units hold no request may fall one short. A fresh plan with the request
+obfuscation on draws differently from the same seed; a kept plan replays
+unchanged; a kind with it off and the `eval` type, which draws by count,
+draw as before.
 
 **Release note: larger variant pools.** Eighty-four variants join the
 request pools that held four: the answer formats (`answer_as_*`,

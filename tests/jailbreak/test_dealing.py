@@ -168,12 +168,16 @@ def test_a_layer_left_two_or_more_short_of_its_target_is_logged(tmp_path, caplog
 def test_a_request_obfuscation_left_short_is_logged_as_a_step(tmp_path, caplog):
     import logging
 
-    # No encode or translation technique in the pool: no unit can take one.
+    from redact.jailbreak.requests import get_all_request_functions
+
+    # Every unit takes a request, and no encode or translation technique is
+    # in the pool: no unit can take a request obfuscation.
     with caplog.at_level(logging.WARNING, logger="redact.jailbreak.plan"):
-        plan_run(_one_group(_GROUP), get_all_hacking_functions(),
+        plan_run(_one_group(_GROUP),
+                 [*get_all_hacking_functions(), *get_all_request_functions()],
                  manifest_path=tmp_path / "jb.manifest.jsonl", seed=3,
                  sample_kwargs={"allow_request_obfuscation": True},
-                 layer_rates={"hacking": 0.5, "manipulation": 0.0, "requests": 0.0,
+                 layer_rates={"hacking": 0.5, "manipulation": 0.0, "requests": 1.0,
                               "request_obfuscation": 1.0},
                  verbose=False)
     assert [r.getMessage() for r in caplog.records] == [
@@ -303,9 +307,9 @@ def test_a_kept_plan_replays_each_row_as_it_was_recorded(tmp_path):
 
 # --- the request obfuscation -----------------------------------------------------
 # With allow_request_obfuscation on, as in the packaged attacks, the request
-# obfuscation is dealt at its rate like a layer and holds one obfuscation
-# slot. Off (the eval type, or a round that says false), the draws are those
-# the planner made before it was counted.
+# obfuscation is dealt at its rate like a layer, to units that drew a request,
+# and holds one obfuscation slot. Off (the eval type, or a round that says
+# false), the draws are those the planner made before it was counted.
 
 _BUDGETS = [
     {},
@@ -465,8 +469,41 @@ _ATTACKS = 600
 
 def test_the_packaged_attacks_deal_a_request_obfuscation_to_half_their_units(
         monkeypatch):
+    """Dealt among the units that hold a request (0.7 of them), half of all
+    the units take one; a group whose last units hold no request may fall
+    one short of its half."""
     drawn = _request_obfuscations(monkeypatch, {}, _ATTACKS, groups=3)
-    assert sum(fn is not None for fn in drawn) == _ATTACKS // 2
+    assert _ATTACKS // 2 - 3 <= sum(fn is not None for fn in drawn) <= _ATTACKS // 2
+
+
+@pytest.mark.parametrize("dealt", [False, True], ids=["drawn", "dealt"])
+def test_a_unit_without_a_request_takes_no_request_obfuscation(dealt):
+    """It obfuscates the finished request, so a unit that drew no request is
+    not asked, whatever the rate: it never lands after the outermost
+    wrapper. Half the units take a request here, and each of those one."""
+    import random
+
+    import redact.jailbreak.plan as JP
+    from redact.dataset.dealing import Dealer
+    from redact.jailbreak.pool import all_techniques
+    from redact.jailbreak.sampling import sample_combination
+
+    dealer = Dealer(key=(1, "Cyber", "harmful", 0)) if dealt else None
+    held = []
+    for position in range(1, 2 * _GROUP + 1):
+        if dealer is not None:
+            dealer.position = position
+        combined = sample_combination(
+            random.Random(position), all_techniques(), dealer=dealer,
+            allow_request_obfuscation=True,
+            sampling_probs={"requests": 0.5, "request_obfuscation": 1.0})
+        if dealer is not None:
+            JP._observe(dealer, combined)
+        held.append((any(fn.layer == "requests" for fn in combined.techniques),
+                     combined.request_obfuscation is not None))
+    assert [request for request, obfuscated in held if obfuscated] == [True] * sum(
+        obfuscated for _, obfuscated in held)
+    assert sum(obfuscated for _, obfuscated in held) >= _GROUP // 2
 
 
 def test_the_request_obfuscation_is_a_light_encoding_or_a_translation(monkeypatch):

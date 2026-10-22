@@ -237,12 +237,15 @@ the techniques still `compatible` with what is picked:
 2. `manipulation`, when the layer joins;
 3. `requests`, when the layer joins;
 4. the request obfuscation (phase 5 in the code, decided and drawn before
-   phase 4): with `allow_request_obfuscation` and at least one
-   `max_obfuscations` slot, when it joins at the `request_obfuscation` rate
-   (the dealer's `include`, as for the layers; a per-unit draw without a
-   dealer), one light `encode` technique (the light
-   `to_sensitive_words_encode_*` among them) or a translation, applied
-   after the request technique;
+   phase 4): with `allow_request_obfuscation`, at least one
+   `max_obfuscations` slot and a request technique picked in step 3, when
+   it joins at the `request_obfuscation` rate (the dealer's `include`, as
+   for the layers, over the group's units, so the units holding a request
+   take it more often; a per-unit draw without a dealer), one light
+   `encode` technique (the light `to_sensitive_words_encode_*` among them)
+   or a translation, applied after the request technique. A unit without a
+   request is not asked, so the step never lands after the outermost
+   wrapper;
 5. `obfuscation`: one pick after another, from what the budget leaves, until
    `max_obfuscations`, less the request obfuscation's slot, or until no
    technique fits.
