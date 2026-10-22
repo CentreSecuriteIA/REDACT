@@ -268,9 +268,11 @@ rest: a combination never has more than `max_obfuscations` obfuscations.
 The packaged attacks allow it, so half their units, at the spec's rate of
 0.5, take a request obfuscation in one of their `max_obfuscations` slots; the
 eval type sets it false, and its count rounds never read it (a test pins
-the eval type's draws). With `allow_request_obfuscation` false the draws
-are those made before the request obfuscation was counted (member dealing
-aside); a test pins them. The combined function
+the eval type's draws). With `allow_request_obfuscation` false the sampler
+never decides it (no dealer call, no candidates drawn; a test holds it), so
+the draws are those of a sampler without the step; a digest of the budget
+draws pins them as a change detector, re-pinned on purpose whenever a change
+moves a draw. The combined function
 names its request obfuscation in `request_obfuscation` (`None` without
 one), which `_observe` counts in the dealer.
 

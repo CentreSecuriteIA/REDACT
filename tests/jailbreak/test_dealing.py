@@ -55,8 +55,9 @@ def test_a_group_of_twenty_gets_its_hacking_target_dealt_over_families(tmp_path)
     # Rate 0.5 over 20 units -> exactly 10 hacking picks.
     assert cov[("layer", "hacking")] == _GROUP // 2
 
-    # Those 10 are dealt evenly over the three hacking families (framing,
-    # cognitive, persona): each count within one of the others.
+    # Those 10 are dealt evenly over the four hacking families (framing,
+    # cognitive, persona, persona_template): each count within one of the
+    # others.
     families = sorted(getattr(f, "families", [None])[0] for f in hacking)
     family_counts = [cov.get(("family", fam), 0) for fam in set(families)]
     assert sum(family_counts) == _GROUP // 2
@@ -165,6 +166,22 @@ def test_a_layer_left_two_or_more_short_of_its_target_is_logged(tmp_path, caplog
         "pick (see jb.coverage.csv)."]
 
 
+@pytest.mark.parametrize(("size", "logged"), [(4, True), (2, False)],
+                         ids=["two short", "one short"])
+def test_a_layer_is_logged_from_two_picks_short_of_its_target(
+        tmp_path, caplog, size, logged):
+    """At rate 0.5 a group of ``size`` is due exactly ``size / 2`` request
+    picks, and no unit can take one: two short is logged, one is not."""
+    import logging
+
+    with caplog.at_level(logging.WARNING, logger="redact.jailbreak.plan"):
+        plan_run(_one_group(size), get_all_hacking_functions(),
+                 manifest_path=tmp_path / "jb.manifest.jsonl", seed=3,
+                 layer_rates={"hacking": 0.5, "manipulation": 0.0, "requests": 0.5},
+                 verbose=False)
+    assert bool(caplog.records) is logged
+
+
 def test_a_request_obfuscation_left_short_is_logged_as_a_step(tmp_path, caplog):
     import logging
 
@@ -267,20 +284,47 @@ def test_the_default_attacks_draw_every_technique_of_their_pool(section):
     obfuscation once counted its picks as the obfuscation layer's, and 14
     encode and sensitive_words techniques were never drawn. A deprecated
     technique, or one no simulated input may take, is not asked for. The
-    nine heavy encodings are the rarest draws (one of complexity 3 fits only
+    ten heavy encodings are the rarest draws (one of complexity 3 fits only
     a unit whose earlier picks leave 3 points, and the other families of
-    complexity 3, the word art's among them, take those units too), about 1
-    unit in 500 each, and a seed can leave one out of its plan altogether:
-    to_braille, which ascii_art refuses, is drawn 0 times at seed 42 and 8
-    at seed 43 in 4,000 units. So the plans of two seeds are pooled."""
-    units, seeds = 4000, (42, 43)
-    plans = [simulate.deal_kind(section, units, groups=3, seed=seed) for seed in seeds]
-    pool = plans[0][1]
-    table = simulate.shares([names for drawn, _ in plans for names in drawn], pool)
+    complexity 3, the word art's among them, take those units too), 4 to 7
+    times each in 4,000 units: to_braille, which ascii_art refuses, 5 times
+    under the unit budget and 7 under the group budget, at seeds 42 and 43
+    alike. When the layers of one rate were locked in or out of phase, it
+    was drawn 2 times at seed 42 and 14 at 43; one plan now holds them all."""
+    units = 4000
+    drawn, pool = simulate.deal_kind(section, units, groups=3, seed=42)
+    table = simulate.shares(drawn, pool)
     texts = simulate.inputs(units, groups=3)["prompt"]
     asked = [fn.__name__ for fn in pool if not getattr(fn, "deprecated", None)
              and any(applies(fn, text, "harmful") for text in texts)]
     assert [name for name in asked if table[name]["count"] == 0] == []
+
+
+def test_no_family_of_the_default_attacks_thins_out_in_a_group():
+    """Every family of the pool gets, in every group of 200 units, at least
+    half its mean count per group, over four seeds in one group and in
+    three. With the layers of one rate locked in or out of phase for a whole
+    group, ascii_art, which refuses both a hacking technique and a
+    translation, got 1 draw in a group where its mean was 7; now every
+    family gets 0.9 of its mean or more."""
+    per_group = 200
+    counts: list[Counter] = []
+    for seed in (1, 7, 42, 43):
+        for groups in (1, 3):
+            rows, pool = simulate.plan_kind(
+                {}, simulate.inputs(per_group * groups, groups), seed=seed)
+            family = {fn.__name__: fn.families[0] for fn in pool}
+            by_group: dict[str, Counter] = {}
+            for row in rows:
+                by_group.setdefault(row["category"], Counter()).update(
+                    family[name] for name in row["combination"])
+            counts.extend(by_group.values())
+    families = {name for group in counts for name in group}
+    mean = {name: sum(group[name] for group in counts) / len(counts)
+            for name in families}
+    thin = {name: min(group[name] for group in counts) for name in families
+            if min(group[name] for group in counts) < mean[name] / 2}
+    assert thin == {}
 
 
 def test_a_kept_plan_replays_each_row_as_it_was_recorded(tmp_path):
@@ -309,7 +353,8 @@ def test_a_kept_plan_replays_each_row_as_it_was_recorded(tmp_path):
 # With allow_request_obfuscation on, as in the packaged attacks, the request
 # obfuscation is dealt at its rate like a layer, to units that drew a request,
 # and holds one obfuscation slot. Off (the eval type, or a round that says
-# false), the draws are those the planner made before it was counted.
+# false), the sampler never decides it, so the draws are those of a sampler
+# without the step.
 
 _BUDGETS = [
     {},
@@ -406,7 +451,12 @@ _BUDGETS = [
 _PINNED_DRAWS = "b7a07d7e3e1eb68c10737e1b57a49ef2d8e5b672247d18a914b66cb69f5c4a1c"
 
 
-def test_draws_without_the_request_obfuscation_are_those_made_before_it_was_counted():
+def test_the_budget_draws_are_the_pinned_ones():
+    """A change detector, not a property: two dealt plans and 200 undealt
+    draws of every registered technique, under the default budget and a
+    larger one, the request obfuscation off. Any change in what the planner
+    or the sampler draws moves the digest; re-pin it on purpose, and say in
+    the commit and the comment above what moved and why."""
     import hashlib
     import json
     import random
@@ -422,6 +472,36 @@ def test_draws_without_the_request_obfuscation_are_those_made_before_it_was_coun
              for seed in range(100) for budget in _BUDGETS]
     digest = hashlib.sha256(json.dumps([dealt, alone]).encode()).hexdigest()
     assert digest == _PINNED_DRAWS
+
+
+@pytest.mark.parametrize("dealt", [False, True], ids=["drawn", "dealt"])
+def test_a_draw_with_the_request_obfuscation_off_never_decides_it(
+        monkeypatch, dealt):
+    """Off, the sampler neither asks the dealer for the step nor draws its
+    candidates, at any rate: the draws are those a sampler without the step
+    makes."""
+    import random
+
+    import redact.jailbreak.sampling as JS
+    from redact.dataset.dealing import Dealer
+    from redact.jailbreak.plan import assign_combination
+    from redact.jailbreak.pool import all_techniques
+
+    def never(pool):
+        raise AssertionError("the request obfuscation's candidates were drawn")
+
+    monkeypatch.setattr(JS, "request_obfuscation_candidates", never)
+    dealer = Dealer(key=(1, "Cyber", "harmful", 0)) if dealt else None
+    for position in range(1, 2 * _GROUP + 1):
+        settings = {"allow_request_obfuscation": False,
+                    "sampling_probs": {"requests": 1.0, "request_obfuscation": 1.0}}
+        if dealer is None:
+            JS.sample_combination(random.Random(position), all_techniques(), **settings)
+            continue
+        dealer.position = position
+        assign_combination(f"unit{position}", all_techniques(), seed=1,
+                           dealer=dealer, **settings)
+    assert dealer is None or "request_obfuscation" not in dealer.targets
 
 
 def test_the_plan_deals_the_request_obfuscation_at_its_rate():

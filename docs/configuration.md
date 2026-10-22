@@ -746,8 +746,8 @@ three groups). 14 techniques were never drawn: `to_base64`, `to_base85`,
 `to_sensitive_words_split`, `to_synonym_substitution`,
 `to_sensitive_words_variables` and the base64, ascii and unicode
 `to_sensitive_words_encode_*`; `to_base32` was drawn once. Now every
-technique of the pool is drawn, and a test holds it over 2,000 and 3,000
-units under both budgets. Fresh default attack plans draw differently: the
+technique of the pool is drawn, and a test holds it over one plan of 4,000
+units under each budget. Fresh default attack plans draw differently: the
 request obfuscation no longer starves the layer's `encode` and
 `sensitive_words`, so the layer deals them as often as its other families;
 the request obfuscation deals a translation a third of the time (it was
