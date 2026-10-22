@@ -380,8 +380,12 @@ _BUDGETS = [
 # Amharic) moved it once more: a wider translation family changes the member
 # some translation draws land on and, through the unit's rng and its group's
 # counts, the rest of their draw (38 of the 240 dealt units, 7 of the 200
-# undealt draws).
-_PINNED_DRAWS = "45ef42c3003ceaa2b668cea0c8040f057115d1c045cf41b9dcd88527cd3a2020"
+# undealt draws). The rule keeping a translation from the families that have a
+# model mark words (sensitive_words, tokenbreak, word_art) moved it again: a
+# draw that held both now takes another technique, and through the unit's rng
+# and its group's counts the rest of its draw (185 of the 240 dealt units, 68 of
+# the 200 undealt draws).
+_PINNED_DRAWS = "2939e4ad151d6b1dc9c314b709114397dfe0bae68730e614b7c6d40a7b1a6f99"
 
 
 def test_draws_without_the_request_obfuscation_are_those_made_before_it_was_counted():

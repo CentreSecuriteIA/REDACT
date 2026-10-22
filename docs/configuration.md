@@ -1031,7 +1031,9 @@ where it rejected the reply as a malformed word list, and tokenbreak's
 split and separator cut a word between the characters a reader sees,
 never between a letter and its marks; an ASCII word is cut as before.
 Whether the marking model finds the right words in these languages is not
-measured ([techniques.md](techniques.md#what-the-families-do)).
+measured ([techniques.md](techniques.md#what-the-families-do)); a later
+measurement found it mostly does not, and a fresh plan no longer pairs the
+two (the note on word marking after a translation, below).
 
 **Release note: the script rule.** A fresh plan no longer pairs ROT13,
 ROT18, ROT47 or leetspeak (whole-text or word-level) with a translation
@@ -1156,6 +1158,26 @@ Amharic and Hmong are on watch, as Scots Gaelic is (the judge rejects 20% of
 Hmong's calls, and Amharic's chrF++ on FLORES-200 is 9 points below
 NLLB-200's); Hmong is sent to the translation model by its name, not a code
 ([techniques.md](techniques.md#the-language-table)).
+
+**Release note: no word-marking step after a translation.** A fresh plan no
+longer pairs a translation with `sensitive_words`, `tokenbreak` or
+`word_art`, the three families that have the generation model mark the
+prompt's harmful words (`extract_harmful`): the spec's `translation` entry
+keeps them apart, both ways, as it keeps `ascii_art` apart. A GPU pod
+measurement of 2026-10-22 found that the marking call, which marks at least
+one word on 62 of 100 harmful English inputs, marks one on only 3 (Khmer) to
+36 (Hindi) of their translations (Chinese 34, Thai 26, Hmong 17, Amharic 5):
+a heavy encoding after such a translation was discarded (`no sensitive
+word`) and a light one changed nothing, so the unit's calls were wasted.
+Over 3,000 units of the default attack kind in three groups (seed 42), 319
+(10.6%) held both before and none does now; the units holding a translation
+go from 1,037 to 801 and the obfuscations per unit from 1.72 to 1.63. A plan kept from before replays its recorded combinations,
+so a rule changes none of them. The eval type draws none of the three
+families (its pool holds only its encodings, framing, fsh, dap, structural,
+ascii_art, continuation, temporal, answer format and eight translations), and
+the natural kind none of them either: their pools and draws are held. A
+translation chosen as the request obfuscation shares the rule with the
+obfuscations drawn after it.
 
 ## The model registry
 

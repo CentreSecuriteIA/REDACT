@@ -473,11 +473,34 @@ def test_word_art_takes_the_manipulation_layer_s_obfuscation_block(other):
 
 
 @pytest.mark.parametrize("other", [
-    "to_french", "to_rewrite_with_typos_low", "to_adversarial_suffix_punctuation",
+    "to_rewrite_with_typos_low", "to_adversarial_suffix_punctuation",
     "to_random_capitals_low", "to_lowercase", "to_summarize",
     "to_psychopath_persona", "to_fictional_world"])
-def test_word_art_joins_a_translation_noise_a_suffix_a_request_or_a_scene(other):
+def test_word_art_joins_typos_noise_a_suffix_a_request_or_a_scene(other):
     assert _joins("to_word_art", other) and _joins(other, "to_word_art")
+
+
+@pytest.mark.parametrize("translation", ["to_french", "to_thai", "to_hindi"])
+@pytest.mark.parametrize("marking", [
+    "to_sensitive_words_split", "to_sensitive_words_encode_base64",
+    "to_sensitive_words_variables", "to_synonym_substitution",
+    "to_tokenbreak_split", "to_tokenbreak_prepend", "to_word_art"])
+def test_a_translation_refuses_a_step_that_has_a_model_mark_words_either_way(
+        translation, marking):
+    """The marking call finds a word in 62 of 100 harmful English inputs but in
+    3 to 36 of their translations, so a heavy encoding after one is discarded
+    and a light one changes nothing: the spec keeps the families apart,
+    whichever is picked first."""
+    assert not _joins(translation, marking)
+    assert not _joins(marking, translation)
+
+
+@pytest.mark.parametrize("other", [
+    "to_rewrite_with_typos_low", "to_random_capitals_low",
+    "to_adversarial_suffix_punctuation", "to_base64", "to_rot13", "to_json",
+    "to_summarize", "to_psychopath_persona", "to_fictional_world"])
+def test_a_translation_keeps_the_families_it_has_no_rule_against(other):
+    assert _joins("to_french", other) and _joins(other, "to_french")
 
 
 @pytest.mark.parametrize(("first", "then"), [

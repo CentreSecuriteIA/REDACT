@@ -222,8 +222,12 @@ technique is picked first. A technique may not join a combination when:
 - its layer is at its cap (`layer_max_picks`: one `rewrite`, one
   `hacking`, one `manipulation`, one `requests`);
 - one of its families is in a taken family's `cross_incompatible_with`, or
-  the reverse. The spec pairs `structural` and `translation` with
-  `ascii_art`; `ascii_art` with `framing`, `persona`, `cognitive`, `fsh`,
+  the reverse. The spec pairs `structural` with `ascii_art`; `translation`
+  with `ascii_art` and with the three families that have a model mark words,
+  `sensitive_words`, `tokenbreak` and `word_art` (the marking call finds a
+  word in 62 of 100 harmful English inputs but in 3 to 36 of their
+  translations, so a heavy encoding after a translation is discarded and a
+  light one changes nothing); `ascii_art` with `framing`, `persona`, `cognitive`, `fsh`,
   `dap`; `fsh` and `dap` with `continuation`, `indirect`, `framing`,
   `persona`, `cognitive`; `persona_template` with `fsh`, `dap` and
   `ascii_art`; `payload_split` with `ascii_art`, `encode`, `fake_turns` and
@@ -526,7 +530,8 @@ wrappers. The family is attack-only, and the eval type does not draw it.
   rejects the result (`DISCARDED; reason=malformed word list`). A word is a
   letter, then letters, digits, apostrophes, hyphens and combining marks
   (not first), so a word a translation wrote in Bengali, Nepali, Thai or
-  Khmer, whose vowel signs and viramas are marks, is a word.
+  Khmer, whose vowel signs and viramas are marks, is a word (a fresh plan
+  does not pair a translation with these steps, but a kept plan may).
   `to_tokenbreak_split` and the separator branch of
   `to_tokenbreak_delimiter` cut a word between the characters a reader
   sees, as `to_separator` does, never between a letter and its marks; a

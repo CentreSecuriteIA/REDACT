@@ -276,7 +276,11 @@ Every pick is **family first** (`_pick_by_family`): a family, then a
 technique within it, both dealt when the plan passes its dealer
 ([balanced dealing](#balanced-dealing)). The 23 translation languages are
 one choice, not 23.
-The rules are those of [techniques.md](../techniques.md#compatibility-rules).
+The rules are those of [techniques.md](../techniques.md#compatibility-rules);
+among them, a translation is never paired with `sensitive_words`,
+`tokenbreak` or `word_art`, whose marking call mostly fails on translated
+text, in either pick order (a request obfuscation that is a translation
+takes the rule into the obfuscations drawn after it as any other pick does).
 
 ## Balanced dealing
 
