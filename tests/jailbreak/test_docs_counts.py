@@ -109,8 +109,8 @@ def test_a_generated_table_of_techniques_md_is_the_spec_s(name):
 
 def _counts() -> dict[str, int]:
     """The totals the docs quote: active, registered and retired
-    techniques, the spec's layers (the rewrite layer, empty, among them) and
-    the families that hold an active technique."""
+    techniques, the spec's layers (the rewrite layer, off by default, among
+    them) and the families that hold an active technique."""
     spec = load_spec()
     by_family = _by_family()
     registered = sum(not name.startswith("_") for name in spec["techniques"])

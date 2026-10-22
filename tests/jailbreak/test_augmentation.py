@@ -189,7 +189,8 @@ def test_the_packaged_defaults():
      "augmentations.natural.layers has unknown key(s) ['only']; write only "
      "['allow', 'deny']"),
     ({"natural": {"layers": {"allow": "rewrite"}}}, "natural",
-     "augmentations.natural.layers.allow must be a list, got 'rewrite'."),
+     "augmentations.natural.layers.allow must be a list of the layers to turn on, "
+     "[] for none, got 'rewrite'."),
     ({"natural": {"layers": {"allow": ["rewrit"]}}}, "natural",
      "augmentations.natural.layers.allow names 'rewrit', which is not a layer of "
      "combination_spec.json; write one of"),

@@ -398,6 +398,17 @@ def test_naming_a_rewrite_technique_without_layers_allow_raises(given, key, name
     assert [fn for fn in technique_pool(allowed) if fn.layer == "rewrite"]
 
 
+def test_layers_allow_on_the_natural_kind_raises():
+    """Every rewrite technique says ["adversarial"], so it would turn nothing
+    on; an empty layer, as before it held a technique, is let through."""
+    with pytest.raises(ValueError) as raised:
+        resolve({"natural": {"layers": {"allow": ["rewrite"]}}}, "natural")
+    assert str(raised.value) == (
+        "augmentations.natural.layers.allow names 'rewrite', none of whose "
+        "techniques the natural kind draws (their kinds in combination_spec.json), "
+        "so it turns nothing on; take it out of layers.allow.")
+
+
 def _config_dir(tmp_path, layers: dict):
     """A config folder whose ``augmentations.json`` is the packaged one with
     ``layers`` in both kinds."""

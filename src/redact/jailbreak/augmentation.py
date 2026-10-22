@@ -272,6 +272,7 @@ def resolve(
     _check_names(where, resolved)
     _deny_layers_off(where, resolved["layers"])
     _check_kinds(where, kind, resolved)
+    _warn_retired(where, resolved)
     _switch_off_translation(where, resolved)
     _check_denied_layers(where, resolved)
     if type(resolved["pure_only"]) is not bool:
@@ -445,7 +446,9 @@ def _lists(where: str, level: str, value) -> dict:
     if level == "layers":
         allow = value.get("allow", [])
         if not isinstance(allow, list):
-            raise ValueError(f"{where}.layers.allow must be a list, got {allow!r}.")
+            raise ValueError(
+                f"{where}.layers.allow must be a list of the layers to turn on, "
+                f"[] for none, got {allow!r}.")
     else:
         allow = value.get("allow")
         if allow is not None and (not isinstance(allow, list) or not allow):
@@ -548,7 +551,8 @@ def _deny_layers_off(where: str, layers: dict) -> None:
 
 def _check_kinds(where: str, kind: str, resolved: dict) -> None:
     """Every family and technique the allow lists name is one ``kind`` may
-    draw: its spec ``kinds`` hold it, as :func:`technique_pool` reads them.
+    draw: its spec ``kinds`` hold it, as :func:`technique_pool` reads them;
+    and every layer ``layers.allow`` names holds one, or none at all.
 
     Raises:
         ValueError: An allow list names one the spec keeps from ``kind``, as
@@ -558,11 +562,21 @@ def _check_kinds(where: str, kind: str, resolved: dict) -> None:
             it out and list under ``techniques.allow`` those of its
             techniques ``kind`` draws. Adding ``kind`` to a family's
             ``kinds`` is not offered: they apply to every technique in it
-            that sets none of its own.
+            that sets none of its own. Or ``layers.allow`` names a layer
+            whose techniques ``kind`` draws none of (the rewrite layer on
+            the natural kind), which would turn nothing on.
     """
     registered = all_techniques()
     techniques = {fn.__name__: getattr(fn, "kinds", DEFAULT_KINDS)
                   for fn in registered}
+    for layer in resolved["layers"].get("allow") or ():
+        members = [fn.__name__ for fn in registered
+                   if getattr(fn, "layer", None) == layer]
+        if members and not any(kind in techniques[name] for name in members):
+            raise ValueError(
+                f"{where}.layers.allow names {layer!r}, none of whose techniques "
+                f"the {kind} kind draws (their kinds in {_SPEC}), so it turns "
+                "nothing on; take it out of layers.allow.")
     families = load_spec()["families"]
     for level in ("families", "techniques"):
         for name in resolved[level]["allow"] or ():
@@ -591,6 +605,22 @@ def _check_kinds(where: str, kind: str, resolved: dict) -> None:
             raise ValueError(
                 f"{refused}, and a family's kinds apply to every technique in it "
                 f"that sets none of its own. {take_out}; {members}")
+
+
+def _warn_retired(where: str, resolved: dict) -> None:
+    """Log a WARNING naming each technique ``techniques.allow`` names that
+    the spec retired (its ``deprecated`` version). The pool draws it for
+    this release with a ``DeprecationWarning``
+    (:func:`~redact.jailbreak.pool.technique_pool`), which Python shows only
+    for code run as ``__main__``, so a run would not see it."""
+    named = resolved["techniques"]["allow"] or ()
+    retired = [f"{fn.__name__} ({fn.deprecated})" for fn in all_techniques()
+               if getattr(fn, "deprecated", None) and fn.__name__ in named]
+    if retired:
+        logger.warning(
+            "%s.techniques.allow names %s, which the spec retired at the version "
+            "given; take them out of techniques.allow. They are drawn for this "
+            "release.", where, ", ".join(retired))
 
 
 def _check_denied_layers(where: str, resolved: dict) -> None:

@@ -527,7 +527,9 @@ the attacks lose only the techniques of the three families marked
 `["natural"]` alone (`smalltalk_prefix`, `smalltalk_suffix`,
 `benign_role`). Then a technique whose `deprecated` tag is set leaves the
 pool unless `techniques.allow` names it; one it names stays, with a
-`DeprecationWarning` (read for this release). A family in `families.allow`
+`DeprecationWarning` (read for this release); `resolve` logs it as a WARNING
+too (`_warn_retired`), since Python shows that warning only to `__main__`.
+A family in `families.allow`
 does not keep its retired techniques.
 `rounds_of(resolved)` turns the kind into one sampler-settings dict per
 round: a natural round is `{"exact_techniques": n}`; an adversarial round is

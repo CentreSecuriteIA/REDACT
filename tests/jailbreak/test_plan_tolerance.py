@@ -110,6 +110,20 @@ def test_naming_a_deprecated_technique_in_techniques_allow_draws_it_with_a_warni
     assert pool == [retired]
 
 
+def test_naming_a_deprecated_technique_in_techniques_allow_is_logged(
+        monkeypatch, caplog):
+    """The DeprecationWarning shows only for code run as __main__, so a run
+    also logs it."""
+    _retire(monkeypatch)
+    with caplog.at_level("WARNING", logger="redact.jailbreak.augmentation"):
+        resolve({"adversarial": {"techniques": {"allow": ["to_rot13"]},
+                                 "translation": False}}, "adversarial")
+    (record,) = caplog.records
+    assert record.getMessage().startswith(
+        f"augmentations.adversarial.techniques.allow names to_rot13 ({LATER}), "
+        "which the spec retired")
+
+
 # --- a kept plan on resume -----------------------------------------------------
 
 

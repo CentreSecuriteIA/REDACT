@@ -202,12 +202,13 @@ def test_the_rewrite_layer_is_off_by_default_and_layers_allow_adds_its_16_techni
 
 
 def test_the_natural_kind_and_the_eval_type_draw_no_rewrite_technique_though_allowed():
-    """Every rewrite technique says ``["adversarial"]``, and ``eval.json`` allows
-    whole families it names, none of them a rewrite family."""
+    """Every rewrite technique says ``["adversarial"]``, so allowing the layer
+    in the natural kind would turn nothing on, and raises; ``eval.json``
+    names families and techniques, none of the rewrite layer."""
     from redact.recipe import load_dataset_type
 
-    natural = resolve({"natural": {"layers": {"allow": ["rewrite"]}}}, "natural")
-    assert technique_pool(natural) == technique_pool(resolve(None, "natural"))
+    with pytest.raises(ValueError, match="so it turns nothing on"):
+        resolve({"natural": {"layers": {"allow": ["rewrite"]}}}, "natural")
     section = load_dataset_type("eval")["augmentations"]
     allowed = resolve({"adversarial": {"layers": {"allow": ["rewrite"]}}},
                       "adversarial", base=section)

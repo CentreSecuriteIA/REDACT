@@ -210,7 +210,8 @@ only. To add a language: [extending.md](extending.md#add-a-language).
 
 Spec version 1.1 retired seven techniques. They stay registered, so a plan
 that names them replays them, and a kind draws one only when its
-`techniques.allow` names it (with a `DeprecationWarning`):
+`techniques.allow` names it (with a WARNING in the log and a
+`DeprecationWarning`):
 
 | Family | Technique | Why |
 |---|---|---|
