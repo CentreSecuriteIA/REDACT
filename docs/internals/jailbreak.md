@@ -314,12 +314,20 @@ order.
   Both modes and both kinds draw this way; a kept plan replays its names
   without asking any predicate.
 - **Layers.** A layer joins a unit when the group's picks of that layer so
-  far are below `floor(rate x position + offset)`, where `position` counts
-  the group's units so far and `offset` is a number in [0, 1) seeded per
-  group and layer. A group gets `rate x size` picks, rounded down or up, and
-  a group of one takes the layer with probability `rate`. The request
+  far are below `floor(rate x position + jitter)`, where `position` counts
+  the group's units so far and `jitter` is a number in [0, 1) seeded per
+  group, layer and position. A group gets `rate x size` picks, rounded down
+  or up, every prefix of the group is within one pick of `rate x position`,
+  and a group of one takes the layer with probability `rate`. The request
   obfuscation, when allowed, is dealt the same way under the name
-  `request_obfuscation`.
+  `request_obfuscation`. The jitter is drawn afresh for each unit: with one
+  offset per group and layer, a layer's picks repeated every `1 / rate`
+  units, so two layers of one rate (hacking and the request obfuscation,
+  both 0.5) met on every unit or on almost none for the whole group, by the
+  seed, and `ascii_art`, which refuses both a hacking technique and a
+  translation, was drawn 8 to 51 times in 900 units by the seed; with the
+  jitter they meet on about a quarter of the units and it is drawn 68 to 72
+  times.
 - **Families.** Among the eligible families, the dealer picks the one with
   the lowest count over its weight (`family_weights`, 1 by default), ties
   broken by the unit's rng. The request obfuscation's families are counted
@@ -413,7 +421,7 @@ joined by `::`: the same in every process, unlike Python's `hash`.
 | Draw | Seed |
 |---|---|
 | A unit's combination | `stable_seed(seed, input_id, iteration)`, plus the attempt number on a redraw |
-| A layer's offset in a group | `stable_seed(seed, category, entry_type, iteration, layer)` |
+| A layer's jitter at a unit | `stable_seed(seed, category, entry_type, iteration, layer, position)` |
 | A technique's random choices | `stable_seed(seed, label, input_id, iteration, technique name)`, the label `jailbreak` or `variation` |
 
 So the plan does not depend on the order or the chunking of the inputs, and

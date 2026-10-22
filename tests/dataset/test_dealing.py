@@ -3,6 +3,8 @@ count, parts at a rate, and the bank of what earlier units left unspent."""
 
 import random
 
+import pytest
+
 from redact.dataset.dealing import Dealer, stable_seed
 
 _UNITS = 20
@@ -71,6 +73,33 @@ def test_a_part_at_rate_one_half_joins_half_the_units():
     assert taken == dealer.targets["layer"] == _HALF
 
 
+@pytest.mark.parametrize("size", [1000, 2000])
+@pytest.mark.parametrize("seed", [1, 2, 42, 43])
+def test_two_parts_of_one_rate_meet_on_about_rate_times_rate_of_the_units(
+        seed, size):
+    """Each part keeps its rate, and whether a unit takes one says nothing
+    of the other: they meet on rate x rate of the units, within a fifth.
+    With one offset per part they met on every unit that took one, or on
+    almost none, for the whole group."""
+    dealer = Dealer(key=(seed, "group"))
+    both = 0
+    for position in range(1, size + 1):
+        dealer.position = position
+        took = [dealer.include(part, 0.5) for part in ("a", "b")]
+        dealer.included.update({part: t for part, t in zip("ab", took)})
+        both += all(took)
+    assert dealer.included == {"a": size // 2, "b": size // 2}
+    assert abs(both - 0.25 * size) <= 0.2 * 0.25 * size
+
+
+def test_every_prefix_of_a_group_is_within_one_pick_of_the_rate():
+    dealer = Dealer(key=("group",))
+    for position in range(1, 601):
+        dealer.position = position
+        dealer.included["layer"] += dealer.include("layer", 0.35)
+        assert abs(dealer.included["layer"] - 0.35 * position) < 1
+
+
 def test_the_bank_is_what_the_earlier_units_left_unspent():
     dealer = Dealer()
     dealer.position = 1
@@ -96,6 +125,10 @@ def test_a_stable_seed_is_the_same_for_the_same_parts():
 # the inputs and outputs stages, so a change in how pick and include consume
 # the rng or count would deal another spec to the units a resumed run has not
 # generated yet. These pins were taken before the member counts joined it.
+# The axes call pick only; include, which the jailbreak plan calls (a kept
+# plan replays its names), took a jitter per unit in place of one offset per
+# part, which moved the trace's include flags (14 of the 40; still 16 picks)
+# and none of its names, nor the rng, nor the axes' specs.
 
 def _value(weight, **not_with):
     return {"label": "x", "hint": "", "weight": weight, "not_with": not_with}
@@ -109,8 +142,8 @@ _AXES = {
     "who": {"label": "Who", "values": {f"w{i}": _value(1) for i in range(7)}},
 }
 _PINNED_SPECS = "30e81995929826dfb2e1882b877655d465a1cd786e7ce8a947b1c98642e34958"
-_PINNED_TRACE = ("c0b1a0b0b1a0c1b0a0c1b0a1b0b0c1b0c1a0b0b1a0c1b0a0b1c0a1b0b0c1b0b1"
-                 "a0b0c1c0b1a0a0b1")
+_PINNED_TRACE = ("c0b1a1b0b0a0c1b0a0c1b0a1b0b0c1b1c0a0b0b1a1c0b0a0b1c0a1b0b1c0b1"
+                 "b0a0b1c0c0b1a0a1b0")
 
 
 def test_the_axes_deal_the_pinned_specs():

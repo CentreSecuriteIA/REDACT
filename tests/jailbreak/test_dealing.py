@@ -391,10 +391,15 @@ _BUDGETS = [
 # group's counts, the rest of their draw (221 of the 240 dealt units, 123 of the
 # 200 undealt draws). The rule keeping a translation from the word-level and
 # character-level changes (typos, casual_writing, noise, payload_split) moved
-# it last: a draw that held both now takes another technique, and through the
+# it again: a draw that held both now takes another technique, and through the
 # unit's rng and its group's counts the rest of its draw (179 of the 240 dealt
-# units, 75 of the 200 undealt draws).
-_PINNED_DRAWS = "3d12a4781341f7ff6d185dc09fed3128dfe3cf212a1aaa1e41804f250f8ddbd4"
+# units, 75 of the 200 undealt draws). The dealer's jitter per unit (in place
+# of one offset per layer and group, which locked the layers of one rate in or
+# out of phase for a whole group) moved it last: each layer falls on other
+# units of its group, at the same rate, and through the units' rng and counts
+# the rest of their draws follow (235 of the 240 dealt units; the 200 undealt
+# draws, which ask no dealer, do not move).
+_PINNED_DRAWS = "b7a07d7e3e1eb68c10737e1b57a49ef2d8e5b672247d18a914b66cb69f5c4a1c"
 
 
 def test_draws_without_the_request_obfuscation_are_those_made_before_it_was_counted():
@@ -479,8 +484,10 @@ def test_the_request_obfuscation_is_a_light_encoding_or_a_translation(monkeypatc
 def test_the_request_obfuscation_takes_the_family_weights(monkeypatch):
     """Its families are counted apart from the obfuscation layer's and keep
     their weights: translation at 3 takes three picks to each of the other
-    two families' one. A budget of 12 leaves every family room."""
-    section = {"max_complexity": 12, "family_weights": {"translation": 3}}
+    two families' one. A budget of 12 leaves every family room, and the
+    manipulation layer, whose families refuse a translation, is denied."""
+    section = {"max_complexity": 12, "family_weights": {"translation": 3},
+               "layers": {"deny": ["manipulation"]}}
     drawn = _request_obfuscations(monkeypatch, section, _ATTACKS, groups=3)
     families = Counter(fn.families[0] for fn in drawn if fn is not None)
     assert families == {"translation": 180, "encode": 60, "sensitive_words": 60}

@@ -781,6 +781,22 @@ its plan was drawn at, not the library's: the rows a resume writes for a
 plan kept from 1.2 say 1.2. The run record's `spec_version` is still the
 library's. Nothing raises that did not, and no draw changes.
 
+**Release note: layers dealt with a jitter per unit.** The planner deals a
+layer over a group while its picks are below `floor(rate x position +
+jitter)`, the jitter now drawn afresh for each unit (seeded by the group,
+the layer and the position) where it was one offset per group and layer. With
+one offset a layer's picks repeated every `1 / rate` units, so two layers of
+one rate fell on the same units, or almost never on the same, for a whole
+group, by the seed: in the default attacks, hacking and the request
+obfuscation (both 0.5) met on 100% or on 2 to 3% of the hacking units, and
+`ascii_art`, which refuses both a hacking technique and a translation, was
+drawn 8 to 51 times in 900 units (seeds 1, 2, 42, 43, three groups). Now
+they meet on 48 to 56% of the hacking units and `ascii_art` is drawn 68 to
+72 times. Every layer keeps its rate and a group still gets `rate x size`
+picks rounded down or up. A fresh budget plan draws differently from the
+same seed; a kept plan replays unchanged; the `eval` type, which draws by
+count, deals no layer and draws as before.
+
 **Release note: larger variant pools.** Eighty-four variants join the
 request pools that held four: the answer formats (`answer_as_*`,
 `answer_in_markdown`, `apology_prevention`, `prefix_injection`), the answer
