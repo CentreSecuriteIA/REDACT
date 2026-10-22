@@ -365,7 +365,7 @@ def _stage_models(models: dict, stages: list[str], augmentations: dict) -> list[
     for stage in stages:
         for role, _ in STAGES[stage].roles:
             try:
-                wanted.extend(resolve_role(models, role, augmentations))
+                wanted.extend(resolve_role(models, role, augmentations, stage=stage))
             except (KeyError, ValueError):
                 # No model registered for the role; the stage reports it.
                 continue
@@ -398,13 +398,18 @@ def _served(
 
     planned = {fp.model: fp.copies for phase in phases for fp in phase.plan.footprints}
     served: dict = {}
-    roles = dict.fromkeys(
-        role for stage in stages for role, _ in STAGES[stage].roles)
-    for role in roles:
-        try:
-            names = resolve_role(models, role, augmentations)
-        except (KeyError, ValueError):
-            names = []      # no model registered for the role; the stage reports it
+    # Each role's models over the stages that call it, as each stage
+    # resolves it (the jailbreak stage's check may be none).
+    roles: dict[str, list[str]] = {}
+    for stage in stages:
+        for role, _ in STAGES[stage].roles:
+            try:
+                names = resolve_role(models, role, augmentations, stage=stage)
+            except (KeyError, ValueError):
+                names = []  # no model registered for the role; the stage reports it
+            known = roles.setdefault(role, [])
+            known.extend(name for name in names if name not in known)
+    for role, names in roles.items():
         entries = []
         for name in names:
             entry = {"name": name}

@@ -147,12 +147,15 @@ the params.
 | `check_dimensions(params, augmentations, *, dataset_type, config_dir=None)` | Raises when an axis that varies, in each stage's params as `stage_params` gives them (its `axes`, weighted by its `axes_weighting`), shares a dimension with a family a kind draws (`dimensions.check`); the axes, dimensions and type files are the `config_dir`'s when it has them |
 | `augmentations_of(recipe, jailbreak_params)` | The section, both kinds resolved over the recipe's dataset type's (`resolve(..., base=)`), itself over the packaged default or the `config_dir`'s `augmentations.json`; reads the flat form; applies the params' flat keywords over the adversarial kind |
 | `serving_of(models)` | Refuses a key that is not a recipe role, whatever its value (a `_` key is a comment); checks the role objects; returns the keys given per model name |
-| `resolve_role(models, role, augmentations)` | The models a role stands for, as its stage resolves them |
+| `resolve_role(models, role, augmentations, *, stage=None)` | The models a role stands for, as its stage resolves them |
 
-`resolve_role` has three rules beyond "the name, else the registry role's
+`resolve_role` has four rules beyond "the name, else the registry role's
 default": `paraphraser` may be a pool (`"distribution"`); `check` left out is
 the `gen` model; `translation` is no model when no kind's pool holds a
-translation technique.
+translation technique; and in the `jailbreaks` stage `check` is no model when
+no kind's pool holds a technique whose spec `check` a check model makes
+(`typos`, `scenario`, `preserve`; `jailbreak.pool.uses_check`). The driver
+passes each stage, for the plan and for the run record's `serving`.
 
 ## config_overlay.py
 

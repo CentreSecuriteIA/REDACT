@@ -204,7 +204,10 @@ names of the last two, are read for this release with a
 The run passes the recipe's `gen`, `check` and `translation` models as
 `model`, `check_model` and `translation_model`: the `check` model checks
 what a technique's model writes, and left out it is the `gen` model, so no
-other model loads ([the stage's models](stages/jailbreaks.md#models)).
+other model loads ([the stage's models](stages/jailbreaks.md#models)). A
+`check` model of its own is created, planned and loaded for the stage only
+when a kind draws a technique it checks (the typo, scenario or rewrite
+check); the eval type's attacks draw none.
 The flat keywords (`include_hacking`, ..., `entry_types`) are also accepted
 here, with a `DeprecationWarning`, and applied over the adversarial kind (see
 [deprecated keywords](#deprecated-flat-keywords)). A key that only the

@@ -1135,6 +1135,7 @@ def test_pool_fills_a_call_with_a_later_step_and_a_new_unit(tmp_path, monkeypatc
 
 def test_a_technique_is_given_the_check_model_the_generation_model_unless_named(
         tmp_path, monkeypatch):
+    """A technique whose reply a check model checks (here the typo check)."""
     seen = []
 
     def checks(text, *, check_model=None, **kwargs):
@@ -1142,11 +1143,30 @@ def test_a_technique_is_given_the_check_model_the_generation_model_unless_named(
         return text + "!", ""
 
     checks.kinds = ["adversarial", "natural"]
+    checks.check = "typos"
     for folder, given in (("default", {}), ("named", {"check_model": "jb-check"})):
         (tmp_path / folder).mkdir()
         _llm_run(tmp_path / folder, monkeypatch, [("zq0", checks)], _StepBackend(),
                  techniques=(checks,), **given)
     assert seen == [GEN, "jb-check"]
+
+
+def test_a_named_check_model_is_not_created_when_no_technique_is_checked(
+        tmp_path, monkeypatch):
+    """Pure obfuscations check nothing with a model: the generation model's
+    client stands in, and the check model is never loaded."""
+    import redact.stages as P
+
+    created = []
+
+    def create(model):
+        created.append(model)
+        return make_client(MockBackend("unused", model=model), model)
+
+    monkeypatch.setattr(P.ModelClient, "create", create)
+    generate_jailbreaks(inputs=_inputs(), output_path=tmp_path / "jb.csv", seed=1,
+                        model=GEN, check_model="jb-check", **PURE_KW)
+    assert created == [GEN]
 
 
 class _TypoBackend(MockBackend):

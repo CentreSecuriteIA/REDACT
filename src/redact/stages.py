@@ -590,8 +590,11 @@ def generate_jailbreaks(
         translation_model: Model for the translation family. ``None`` uses the
             ``translation`` role, independently of ``model``.
         check_model: Model that checks what a technique's model writes (the
-            typo check). ``None`` is ``model``, so no other model loads.
-            Translation keeps its own checkers: the translator itself, or
+            typo, scenario and rewrite checks). ``None`` is ``model``, so no
+            other model loads; given, its client is created only when a kind
+            that runs draws a technique with such a check
+            (:func:`redact.jailbreak.pool.uses_check`), else ``model`` stands
+            in. Translation keeps its own checkers: the translator itself, or
             for a machine translation ``model`` as the judge.
         auto_generate_benign: Pre-load or generate benign data for FSH/DAP.
         batch_size: Requests per model call; twice as many units are live.
@@ -674,12 +677,19 @@ def generate_jailbreaks(
     if "prompt" not in inputs.columns:
         raise ValueError("inputs must contain a 'prompt' (or 'sample') column.")
 
-    if any(jailbreak_pool.uses_translation(jailbreak_pool.technique_pool(kind))
-           and not _of_entry_types(inputs, kind["entry_types"]).empty
-           for _name, kind, _out, _man in kinds):
+    def drawn(uses) -> bool:
+        """Whether a kind that runs on these inputs draws what ``uses`` asks."""
+        return any(uses(jailbreak_pool.technique_pool(kind))
+                   and not _of_entry_types(inputs, kind["entry_types"]).empty
+                   for _name, kind, _out, _man in kinds)
+
+    if drawn(jailbreak_pool.uses_translation):
         _check_machine_translation(translation_model, prompt_dir)
     client = ModelClient.create(model or default_model_for_role("uncensored_gen"))
-    check = ModelClient.create(check_model) if check_model else client
+    # A check model only when a technique the kinds draw has its reply
+    # checked, so a separate local one is not loaded for nothing.
+    check = (ModelClient.create(check_model)
+             if check_model and drawn(jailbreak_pool.uses_check) else client)
     benign = Path(benign_path) if benign_path else paths.benign_csv(data_dir)
 
     def run(name: str, kind: dict, out_path: Path, manifest_path: Path | None,
