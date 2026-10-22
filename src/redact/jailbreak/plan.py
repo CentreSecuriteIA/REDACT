@@ -144,6 +144,30 @@ def combination_of(names: list[str], registry: dict[str, Callable]) -> Callable:
     return combine_techniques(*(registry[n] for n in names), sort_by_hierarchy=False)
 
 
+def _applicable(
+    pool: list[Callable], text: str, entry_type: str, sample_id: str,
+) -> list[Callable]:
+    """The techniques of ``pool`` that apply to an input, in pool order
+    (:func:`~redact.jailbreak.technique.applies`).
+
+    Raises:
+        RuntimeError: A predicate raised; the message names the technique and
+            the input, since one input would otherwise stop the whole kind
+            with the predicate's bare error.
+    """
+    candidates = []
+    for fn in pool:
+        try:
+            if applies(fn, text, entry_type):
+                candidates.append(fn)
+        except Exception as error:
+            raise RuntimeError(
+                f"The applicability of {fn.__name__} raised {error!r} for the "
+                f"input {sample_id}; fix the predicate, or take the input out "
+                "of the inputs.") from error
+    return candidates
+
+
 def plan_run(
     inputs: pd.DataFrame,
     pool: list,
@@ -230,8 +254,7 @@ def plan_run(
                 dealer = Dealer(weights, key=(seed, category, entry_type, it))
                 for sid, idx in subgroups[key]:
                     dealer.position += 1
-                    candidates = [fn for fn in pool
-                                  if applies(fn, texts[idx], entry_type)]
+                    candidates = _applicable(pool, texts[idx], entry_type, sid)
                     names = assign_combination(
                         sid, candidates, seed=seed, iteration=it,
                         used=used_by_row[idx], dealer=dealer, **settings,

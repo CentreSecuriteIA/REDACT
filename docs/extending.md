@@ -203,7 +203,10 @@ contract.
      `dual_use_benign` whatever the text (`requests/benign_role.py`). The plan
      filters the pool per input before the draw; the predicate sees the
      input, not what earlier steps of a combination wrote, and a kept plan
-     replays without asking it. A technique of a default pool that gains
+     replays without asking it. A predicate must not raise for any text (a
+     text that starts with a combining mark, an empty one): one that does
+     stops the plan with a `RuntimeError` naming the technique and the
+     input. A technique of a default pool that gains
      one changes what a fresh plan draws: say so in a release note.
 2. **Register it**: return it from its module's getter
    (`get_encoding_functions`, `get_framing_functions`, ...), which its

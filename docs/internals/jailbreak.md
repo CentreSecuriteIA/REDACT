@@ -114,7 +114,9 @@ def to_y(prompt: str, **kwargs) -> TechniqueGen:
   sets its `applicable`, `predicate(text, entry_type) -> bool`, and
   `applies(fn, text, entry_type)` reads it, true for a technique without
   one. The plan draws a technique only for an input it is true for
-  ([balanced dealing](#balanced-dealing)). The predicate calls the helper
+  ([balanced dealing](#balanced-dealing)); a predicate that raises stops
+  the plan with a `RuntimeError` naming the technique and the input. The
+  predicate calls the helper
   the technique itself calls, so the two cannot drift apart. The registry
   fixture records `has_applicable`, a bool, not the function. Today
   `to_abbreviations` and `to_stripped_accents` have one: each applies only
