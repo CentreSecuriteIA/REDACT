@@ -224,9 +224,10 @@ def rounds_of(resolved: dict) -> list[dict]:
     when the kind allows the rewrite layer and a rewrite technique is
     registered, where the others are always written: a round of any other
     kind is as it was before the layer existed (a kind whose
-    ``layers.allow`` names it allows the layer, but while the layer is
-    empty nothing changes, so its kept plan resumes). A count round does
-    not read ``include_rewrite``; its pool decides. ``budget`` is written
+    ``layers.allow`` names it has the key, so a plan kept from such a kind
+    made while the layer held no technique raises on resume, naming
+    ``rounds``). A count round does not read ``include_rewrite``; its pool
+    decides. ``budget`` is written
     only when ``"group"`` and
     ``max_unit_complexity`` only when given, so a kind that leaves them out
     or says ``"unit"`` has the rounds, and the plan file, it had before

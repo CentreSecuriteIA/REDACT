@@ -682,6 +682,10 @@ a run you already have, and what you will see; each point has its note below.
   draws are held, at 36
   techniques in 10 families, but for the ASCII-art cap, which changes the font
   `to_ascii_art` draws for texts of about 40 characters or more.
+- **A new layer, off by default.** The `rewrite` layer holds 16 model-written
+  techniques (persuasion, tense rewrites, model distractors; attacks only).
+  No packaged section allows it, so no pool, plan or draw changes unless a
+  kind writes `"layers": {"allow": ["rewrite"]}` (its note below).
 - **More model calls, and new files.** A typo rewrite and a cognitive or
   persona scenario are now checked by a model, which costs calls (the typo
   and scenario notes), for the pending units of a kept plan too, and the
@@ -1101,6 +1105,38 @@ allowed the layer before it held a technique raises on resume naming
 `rounds`: take `rewrite` out of its `layers.allow` to keep the plan, or plan
 again with `resume=False`. The flat `include_<layer>` keywords keep the
 layer denied.
+
+**Release note: the rewrite techniques.** Spec 1.3 gives the `rewrite` layer
+its first sixteen techniques, all model-written and attack-only:
+`persuasion` (12, `to_persuade_<key>`: a model rewrites the whole prompt as an
+appeal of one of twelve persuasion techniques), `tense_rewrite`
+(`to_rewrite_in_past_tense` and `to_rewrite_in_future_tense`: it rewrites it
+in that tense) and `model_distractors` (`to_model_distractor_prefix` and
+`_suffix`: it writes a few sentences placed before or after the prompt, which
+is not rewritten) ([techniques.md](techniques.md#what-the-families-do)). The
+first two are checked: a model (the `check` model, else the `gen` model) reads
+each rewrite against the prompt (`jailbreak/preserve_check`), a rejected one
+is made again with the verdict, and one rejected twice is discarded, so each
+application costs 2 to 4 calls; a distractor costs 1 to 3 (a reply with no
+text is asked for again), and no check reads it. They add no model role.
+
+The layer is off, so a run that does not allow it changes nowhere: the
+default attack pool is still 208 techniques in 28 families, the natural pool
+the 72 (every rewrite technique says `["adversarial"]`), and the `eval`
+type's pool and draws are held (36 techniques; its allow lists name no rewrite
+family, so allowing the layer there adds nothing until the families are
+allowed too). A kind that allows the layer draws them: the packaged
+adversarial kind's pool is then 224 techniques in 31 families, its rounds say
+`include_rewrite: true` (an adversarial plan kept from a section that allowed
+the layer before it held a technique raises on resume naming `rounds`), a
+budget round deals the layer at `layer_rates.rewrite` (the spec's 0: set it,
+for example 0.5, which gives half the units of a group one rewrite technique,
+the three families dealt evenly and each applied first) and a count round,
+the escalation's first two among them, draws from the pool whatever the rate.
+New rules bind a fresh plan, both ways: `persuasion` refuses `impersonation`
+and `ascii_art`, `tense_rewrite` refuses `temporal`, and `model_distractors`
+refuse `ascii_art`, `distractor_prefix` and `distractor_suffix`; a kept plan
+replays its recorded combinations, so a rule changes none of them.
 
 ## The model registry
 

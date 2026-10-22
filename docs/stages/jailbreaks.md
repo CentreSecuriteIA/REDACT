@@ -47,7 +47,7 @@ in [techniques.md](../techniques.md).
 | Recipe role | Registry role | Default | Calls |
 |---|---|---|---|
 | `gen` | `uncensored_gen` | `venice-uncensored` | Every technique that calls a model, the benign data, and the judge of a machine translation |
-| `check` | `uncensored_gen` | the `gen` model | Passed to each technique as `check_model`, to check what its model writes (the typo check and the scenario check); left out, it is the `gen` model, so no other model loads. Translation keeps its own checkers: the chat translator itself, the `gen` model as a machine translation's judge |
+| `check` | `uncensored_gen` | the `gen` model | Passed to each technique as `check_model`, to check what its model writes (the typo, scenario and preserve checks); left out, it is the `gen` model, so no other model loads. Translation keeps its own checkers: the chat translator itself, the `gen` model as a machine translation's judge |
 | `translation` | `translation` | `translategemma-27b` | The `translation` family; resolved, planned and loaded only when a kind's pool holds a translation technique (`"translation": true`, as in the packaged attacks and the eval type's) |
 
 A chat translator (`deepseek-v3.2`, named in the recipe) makes up to 4
@@ -256,7 +256,9 @@ the growth WARNING above, naming the thirty techniques spec 1.3 adds
 (the persona templates, the fake turns, three answer formats, seven
 members of the thin request families, two payload splits, the word art and
 three personas), all attack-only but the urgent ask, so only an
-adversarial plan names the others and a natural plan names that one.
+adversarial plan names the others and a natural plan names that one. The
+sixteen techniques of the `rewrite` layer are off by default, in no kind's
+pool, so no plan names them.
 
 ## Rejected and failed units
 
