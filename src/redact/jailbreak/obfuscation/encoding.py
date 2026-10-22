@@ -33,10 +33,18 @@ _ROT47_PRINTABLE_MAX = 126
 # The last code point a four-digit escape can name.
 _BMP_MAX = 0xFFFF
 
-# Joined to the character before them: the zero-width joiner and the two
-# emoji variation selectors (as is every combining mark).
+# Joined to the character before them: the zero-width joiner, the two
+# emoji variation selectors and the five skin-tone modifiers (as is every
+# combining mark).
 _ZWJ = "\u200d"
-_JOINED = {_ZWJ, "\ufe0e", "\ufe0f"}
+_JOINED = {_ZWJ, "\ufe0e", "\ufe0f", *map(chr, range(0x1F3FB, 0x1F400))}
+
+# The 26 regional indicators, which pair into a flag, and the three kinds of
+# conjoining Hangul jamo, which a decomposed syllable is made of.
+_REGIONAL = range(0x1F1E6, 0x1F200)
+_LEAD = range(0x1100, 0x1160)
+_VOWEL = range(0x1160, 0x11A8)
+_TRAIL = range(0x11A8, 0x1200)
 
 
 def to_base64(prompt: str) -> tuple[str, str]:
@@ -90,15 +98,32 @@ def to_ascii_ordinal(prompt: str) -> tuple[str, str]:
 SEPARATORS = ["-", "_", ".", "|", "/", "*", "~"]
 
 
+def _stays_with(cluster: str, c: str) -> bool:
+    """Whether ``c`` stays with ``cluster``, the characters before it that a
+    reader sees as one: ``c`` is a combining mark, a zero-width joiner, a
+    variation selector or a skin-tone modifier, ``cluster`` ends with a joiner,
+    ``c`` is the second regional indicator of a flag, or ``c`` is the jamo of a
+    decomposed Hangul syllable that goes after the one before it (a lead
+    consonant, a vowel, a trailing consonant, in that order)."""
+    code, last = ord(c), ord(cluster[-1])
+    return (unicodedata.category(c).startswith("M") or c in _JOINED
+            or cluster.endswith(_ZWJ)
+            or (code in _REGIONAL and last in _REGIONAL and len(cluster) == 1)
+            or (code in _LEAD and last in _LEAD)
+            or (code in _VOWEL and (last in _LEAD or last in _VOWEL))
+            or (code in _TRAIL and (last in _VOWEL or last in _TRAIL)))
+
+
 def _clusters(text: str) -> list[str]:
-    """``text`` cut into the characters a reader sees: a combining mark, a
-    zero-width joiner or a variation selector stays with the character before
-    it, and so does the character after a joiner."""
+    """``text`` cut into the characters a reader sees (:func:`_stays_with`):
+    a mark, a joiner, a variation selector or a skin tone stays with the
+    character before it, and so does the character after a joiner; a flag's
+    two letters and a decomposed Hangul syllable's jamo stay together. Not a
+    full grapheme segmenter: the rest of emoji sequences and the Indic
+    conjuncts keep their characters apart."""
     clusters: list[str] = []
     for c in text:
-        joined = (unicodedata.category(c).startswith("M") or c in _JOINED
-                  or (clusters and clusters[-1].endswith(_ZWJ)))
-        if clusters and joined:
+        if clusters and _stays_with(clusters[-1], c):
             clusters[-1] += c
         else:
             clusters.append(c)

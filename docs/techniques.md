@@ -685,8 +685,11 @@ wrappers. The family is attack-only, and the eval type does not draw it.
 - `encode` encodes the whole text: base64 (one line), rot13, rot18 (rot13 on
   letters and rot5 on ASCII digits), rot47, unicode escapes (`\uXXXX`, or
   `\UXXXXXXXX` above U+FFFF), ASCII ordinals, a separator (between the
-  characters as a reader sees them: a combining mark or a joiner stays with
-  its letter), leetspeak at three levels, morse, braille. Spec version 1.2
+  characters as a reader sees them: a combining mark, a joiner, an emoji's
+  skin tone, a flag's two letters and a decomposed Hangul syllable's jamo
+  stay together, as the reversals and the zero-width noise below take them;
+  not a full segmenter, so the rest of emoji sequences and Indic conjuncts
+  can still be cut), leetspeak at three levels, morse, braille. Spec version 1.2
   added fifteen more, all pure: reversal of the characters, of each word's
   characters or of the word order (by character cluster, so a base letter
   keeps its marks); look-alike letters (a fraction of the Latin letters,

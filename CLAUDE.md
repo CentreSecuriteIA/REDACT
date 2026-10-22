@@ -97,7 +97,7 @@ REDACT/
 │       │   │   ├── encoding.py      # base64, rot13/18/47, caesar, atbash, unicode escapes, ASCII ordinals, hex, binary, URL, HTML entities, base32/85, separator, leetspeak, reversal, look-alike, zero-width, fullwidth, math-styled, morse, braille; 21 of them with decode hints (_with_hint)
 │       │   │   ├── sensitive_words.py # Encode, split or substitute the words a model marks (16, 3 retired)
 │       │   │   ├── wording.py       # Each word a model marks put in other terms (2, spec 1.3): a code name a model gives it, swapped in case-matched, with a key; or a placeholder `[W1]`, `[W2]`, ... with a puzzle per word to solve first; one call per word, asked again once (attack only)
-│       │   │   ├── tokenbreak.py    # Token splitting of the marked words (3), cut at character clusters; the strict word-list parse (combining marks and zero-width joiners accepted)
+│       │   │   ├── tokenbreak.py    # Token splitting of the marked words (3), cut at character clusters (`encoding._clusters`: a mark, a joiner, a skin tone, a flag's two letters and a decomposed Hangul syllable's jamo stay together); the strict word-list parse (combining marks and zero-width joiners accepted)
 │       │   │   ├── translation.py   # 23 languages (the languages.json rows marked translation; their codes, GlotLID labels and median ratios by slug): a chat translator (translate → check → retry), or a machine-translation one piece by piece (checks, back-translation, judge)
 │       │   │   ├── langid.py        # GlotLID: detect, label_probability, available (the langid extra)
 │       │   │   ├── typos.py         # Model-written typos at 4 densities, each rewrite checked (typo_check)

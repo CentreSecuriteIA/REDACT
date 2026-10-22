@@ -4,7 +4,10 @@ import base64
 import codecs
 import random
 import re
+import unicodedata
 import urllib.parse
+
+import pytest
 
 from redact.jailbreak.obfuscation.encoding import (
     _LOOKALIKE_MAP,
@@ -129,6 +132,64 @@ class TestSeparator:
         family = chr(0x1F468) + chr(0x200D) + chr(0x1F469)   # joined by a ZWJ
         text, info = to_separator(f"{accented}{family}!", rng=random.Random(0))
         assert text.split(info.removeprefix("sep=")) == [accented, family, "!"]
+
+
+THUMB = chr(0x1F44D)
+TONE = chr(0x1F3FD)                       # a skin-tone modifier
+FRANCE = chr(0x1F1EB) + chr(0x1F1F7)      # regional indicators F, R
+GERMANY = chr(0x1F1E9) + chr(0x1F1EA)     # regional indicators D, E
+SPAIN_ITALY = [chr(0x1F1EA) + chr(0x1F1F8), chr(0x1F1EE) + chr(0x1F1F9)]
+KOREAN = unicodedata.normalize("NFD", "한국어")      # eight jamo, three syllables
+
+
+class TestClusters:
+    def test_a_skin_tone_stays_with_its_emoji(self):
+        assert _clusters(f"a{THUMB}{TONE}b") == ["a", THUMB + TONE, "b"]
+
+    def test_the_two_letters_of_a_flag_stay_together_and_the_next_flag_starts_anew(self):
+        assert _clusters(FRANCE + GERMANY) == [FRANCE, GERMANY]
+        assert _clusters("x" + "".join(SPAIN_ITALY)) == ["x", *SPAIN_ITALY]
+
+    def test_a_third_regional_indicator_starts_a_cluster(self):
+        assert _clusters(FRANCE + FRANCE[0]) == [FRANCE, FRANCE[0]]
+
+    def test_the_jamo_of_a_decomposed_syllable_stay_together(self):
+        assert len(KOREAN) == 8     # noqa: PLR2004
+        assert ["".join(unicodedata.normalize("NFD", syllable))
+                for syllable in "한국어"] == _clusters(KOREAN)
+
+    def test_a_syllable_with_two_trailing_consonants_is_one_cluster(self):
+        text = chr(0x1103) + chr(0x1161) + chr(0x11AF) + chr(0x11A8)
+        assert _clusters(text) == [text]
+
+    def test_a_vowel_or_a_lead_after_a_trailing_consonant_starts_a_cluster(self):
+        text = unicodedata.normalize("NFD", "각아")
+        assert _clusters(text) == [text[:3], text[3:]]
+
+    @pytest.mark.parametrize("text", [
+        THUMB + TONE, FRANCE + GERMANY, KOREAN, "e" + chr(0x301) + "x",
+        chr(0x1F468) + chr(0x200D) + chr(0x1F469), "plain text", "",
+    ])
+    def test_the_clusters_give_the_text_back(self, text):
+        assert "".join(_clusters(text)) == text
+
+    def test_a_flag_reversed_is_the_same_flag(self):
+        assert to_reversed_characters(f"a{FRANCE}b")[0] == f"b{FRANCE}a"
+
+    def test_an_emoji_with_its_tone_reverses_as_one_character(self):
+        assert to_reversed_characters(f"a{THUMB}{TONE}b")[0] == f"b{THUMB}{TONE}a"
+
+    def test_a_separator_goes_between_clusters_not_inside_them(self):
+        text, info = to_separator(f"{THUMB}{TONE}{FRANCE}{KOREAN}", rng=random.Random(0))
+        sep = info.removeprefix("sep=")
+        assert text.split(sep) == [THUMB + TONE, FRANCE,
+                                   *_clusters(KOREAN)]
+
+    def test_zero_width_noise_never_cuts_a_cluster(self):
+        text = f"a{THUMB}{TONE}{FRANCE}{KOREAN}"
+        for seed in range(20):
+            encoded, _ = to_zero_width_noise(text, rng=random.Random(seed))
+            assert [c for c in _clusters(encoded) if c not in _ZERO_WIDTH] == _clusters(text)
 
 
 class TestLeetspeak:
