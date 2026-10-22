@@ -9,7 +9,8 @@ with a ``name``, its text and optionally a ``weight``:
 - ``{directive: [{"name", "template"}, ...]}``: framing, the answer formats,
   the answer languages (one directive, ``templates``), asking, the
   distractors, impersonation, indirect, temporal, the neutral containers,
-  small talk and the benign roles;
+  small talk and the benign roles, and the decode hints of the encodings (a
+  directive per encoding, named after its technique);
 - ``{directive: [{"name", "prefix", "suffix"}, ...]}``: continuation, which
   puts the prompt between the two, so they hold no slot;
 - ``{technique: {"template", ...}}``: structural's ``to_xml`` and
@@ -70,13 +71,16 @@ class PoolRef:
     None for a technique whose info names none (structural's).
     ``request_slot`` is False for a pool whose templates hold no
     ``{prompt}``: the technique sets the filled variant into another
-    template, which holds the request."""
+    template, which holds the request. ``optional`` is True for a technique
+    that draws from its pool only at a rate (a decode hint), so its info
+    names a variant only when it drew one."""
 
     file: str
     directive: str
     slots: tuple[str, ...] = ("prompt",)
     info_key: str | None = "variant"
     request_slot: bool = True
+    optional: bool = False
 
     @property
     def name(self) -> str:
@@ -87,13 +91,16 @@ class PoolRef:
 def uses_pool(
     file: str, directive: str, slots: tuple[str, ...] = ("prompt",),
     info_key: str | None = "variant", request_slot: bool = True,
+    optional: bool = False,
 ) -> Callable[[Callable], Callable]:
     """Mark a technique as drawing from the pool ``directive`` of ``file``,
     filling ``slots`` and naming the variant in its info under ``info_key``;
-    ``request_slot=False`` for a pool whose templates hold no ``{prompt}``.
+    ``request_slot=False`` for a pool whose templates hold no ``{prompt}``,
+    ``optional=True`` for one the technique draws from only at a rate.
     Sets its ``variant_pool`` (a :class:`PoolRef`)."""
     def mark(fn: Callable) -> Callable:
-        fn.variant_pool = PoolRef(file, directive, tuple(slots), info_key, request_slot)
+        fn.variant_pool = PoolRef(
+            file, directive, tuple(slots), info_key, request_slot, optional)
         return fn
     return mark
 

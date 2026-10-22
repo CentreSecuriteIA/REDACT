@@ -26,6 +26,7 @@ _REGISTRY = {fn.__name__: fn for fn in (
     _technique("to_ask", PoolRef("t.json", "ask")),
     _technique("to_cont", PoolRef("t.json", "cont", (), info_key="style")),
     _technique("to_wrap", PoolRef("t.json", "wrap", info_key=None)),
+    _technique("to_enc", PoolRef("t.json", "enc", info_key="hint", optional=True)),
     _technique("to_code"),
 )}
 
@@ -53,6 +54,20 @@ class TestVariantsOf:
         "DISCARDED; technique=to_ask; reason=empty text", "ERROR: boom"])
     def test_a_rejected_or_error_row_drew_none(self, info):
         assert variants_of("to_frame+to_ask", info, _REGISTRY) == []
+
+    def test_a_hinted_encoding_names_its_hint_among_the_row_s_infos(self):
+        assert variants_of("to_enc+to_ask", "sep=-;hint=one;type=ask;variant=two",
+                           _REGISTRY) == [("to_enc", "one"), ("to_ask", "two")]
+
+    def test_a_row_without_a_hint_keeps_the_variants_it_drew_otherwise(self):
+        """An optional pool writes its key only when it drew: no hint is
+        not a row that fails to pair up."""
+        assert variants_of("to_enc+to_ask", "sep=-;type=ask;variant=two",
+                           _REGISTRY) == [("to_ask", "two")]
+
+    def test_a_row_of_a_required_pool_that_does_not_pair_up_draws_none(self):
+        assert variants_of("to_frame+to_ask+to_enc",
+                           "directive=frame;variant=one;hint=one", _REGISTRY) == []
 
 
 def test_the_table_counts_each_variant_on_of_the_pool_and_any_other_drawn(tmp_path):
@@ -85,6 +100,27 @@ def test_the_table_counts_each_variant_on_of_the_pool_and_any_other_drawn(tmp_pa
         ["to_b", "alpha", 0], ["to_b", "beta", 1],
         ["to_old", "alpha", 1],
     ]
+
+
+def test_the_table_counts_the_hints_of_a_hinted_encoding(tmp_path):
+    """A row that drew no hint adds none, and every hint of the pool is listed."""
+    (tmp_path / "t.json").write_text(json.dumps({"enc": [
+        {"name": "one", "template": "one {prompt}"},
+        {"name": "two", "template": "two {prompt}"},
+    ]}), encoding="utf-8")
+    ref = PoolRef(str(tmp_path / "t.json"), "enc", info_key="hint", optional=True)
+    enc = _technique("to_enc", ref)
+    pd.DataFrame({
+        "prompt": ["p"] * 3,
+        "technique": ["to_enc"] * 3,
+        "technique_info": ["sep=-;hint=two", "sep=_", "hint=two"],
+    }).to_csv(tmp_path / "jb.csv", index=False)
+
+    out = write_variants(tmp_path / "jb.csv", tmp_path / "jb.manifest.jsonl",
+                         [enc], {"to_enc": enc})
+
+    assert pd.read_csv(out).values.tolist() == [
+        ["to_enc", "one", 0], ["to_enc", "two", 2]]
 
 
 def _inputs(n: int = 5) -> pd.DataFrame:

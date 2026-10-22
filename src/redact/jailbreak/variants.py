@@ -3,12 +3,15 @@ rows drew, counted per technique.
 
 A template technique names the variant it drew in its info, under its
 pool's ``info_key`` (:class:`~redact.jailbreak.directives.PoolRef`):
-``variant=<name>``, or ``style=<name>`` for continuation; structural's
-``to_xml`` and ``to_markdown`` name none and are not counted. A row's
-``technique_info`` joins its techniques' infos in their order, and a
-framing and a request technique both write ``variant=``, so a variant is
-told apart by position: the n-th ``variant=`` of a row belongs to the n-th
-of its techniques that writes one.
+``variant=<name>``, or ``style=<name>`` for continuation, or ``hint=<name>``
+for a hinted encoding; structural's ``to_xml`` and ``to_markdown`` name none
+and are not counted. A row's ``technique_info`` joins its techniques' infos
+in their order, and a framing and a request technique both write
+``variant=``, so a variant is told apart by position: the n-th ``variant=``
+of a row belongs to the n-th of its techniques that writes one. A hinted
+encoding writes ``hint=`` only when it drew a hint (an optional pool,
+:class:`~redact.jailbreak.directives.PoolRef`), so a row without one counts
+no hint and loses none of its other variants.
 """
 
 from collections import Counter
@@ -39,19 +42,25 @@ def variants_of(
     to the row's techniques whose pool writes that key, less those the info
     notes as ``noop=<name>``. A row whose values and techniques do not pair
     up gives none: a rejected row, whose info is its rejection's, or an
-    error row.
+    error row. The exception is a key of an optional pool: when its values
+    and techniques do not pair up (no hint drawn), only that key gives none.
     """
     pairs = [part.split("=", 1) for part in str(info).split(";") if "=" in part]
     noops = {value for key, value in pairs if key == "noop"}
     writers: dict[str, list[str]] = {}
+    optional: set[str] = set()
     for name in str(technique).split("+"):
         ref = getattr(registry.get(name), "variant_pool", None)
         if ref is not None and ref.info_key and name not in noops:
             writers.setdefault(ref.info_key, []).append(name)
+            if ref.optional:
+                optional.add(ref.info_key)
     drawn = []
     for key, names in writers.items():
         values = [value for k, value in pairs if k == key]
         if len(values) != len(names):
+            if key in optional:
+                continue
             return []
         drawn += zip(names, values)
     return drawn

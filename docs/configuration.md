@@ -839,6 +839,21 @@ in a `config_dir`, read whole in place of the packaged one, does not get the
 two denies: its eval attacks draw the two temporal members until you add
 them to its `techniques.deny`.
 
+**Release note: decode hints.** Twenty-one of the 27 encodings
+(`to_rot13`, `to_hex`, `to_caesar_cipher` and so on; not the five of the eval
+pool, `to_leetspeak_basic` or the sensitive-word encodings) now write, at the
+spec's `decode_hint_rate` (0.5, a top-level key of `combination_spec.json`),
+one of four hints around the encoded text that says how to decode it
+([techniques.md](techniques.md#what-the-families-do)). So the adversarial
+kind's encoded texts come with a hint about half the time, and a row's
+`technique_info` gains `hint=<name>`; the kind's variants table counts the
+hints. The draw is made when the unit runs, from the technique's own
+seeded generator, not in the plan: a plan kept from before replays its
+techniques and combinations as they were, and its pending units draw hints,
+so a run resumed across this change holds encoded texts with and without
+one. No combination, pool or round changes, and the `eval` and natural
+kinds draw no hinted encoding.
+
 **Release note: the techniques spec 1.2 adds.** Forty-eight techniques in
 six groups, below. A fresh plan draws them; since each adds members to deal,
 or a family, some units of a fresh plan draw other techniques than they did

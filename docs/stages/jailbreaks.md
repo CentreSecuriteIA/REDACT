@@ -139,9 +139,11 @@ techniques that writes one; a step noted `noop=` wrote none, and a rejected
 or error row, whose info is its rejection's, counts none. The framing
 techniques, the answer formats, the answer languages, asking, the
 distractors, impersonation, indirect, temporal, the neutral containers,
-small talk, the benign roles and the fake turns write `variant=`, and the
+small talk, the benign roles and the fake turns write `variant=`, the
 persona templates the mechanic they drew (their frame is one per technique,
-not a variant);
+not a variant), and an encoding with decode hints `hint=<name>` after its own
+info when it drew one (a row without one counts none and keeps its other
+variants);
 continuation writes `style=<name>`, read as its variant; structural's
 `to_xml` and `to_markdown`, one template each, name none and are not
 counted, nor is `to_json`, whose wrapper is in code. Continuation and

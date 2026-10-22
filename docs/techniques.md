@@ -541,6 +541,18 @@ wrappers. The family is attack-only, and the eval type does not draw it.
   and fullwidth and math-styled Unicode (math-styled drawing one
   Mathematical Alphanumeric style per call, reported in `style=<name>`).
   Hex, binary, HTML entities, base32 and base85 are `heavy`, the rest `light`.
+  Spec version 1.3 gives 21 of the 27 *decode hints*: at the spec's
+  `decode_hint_rate` (0.5), such an encoding writes one of four hints around
+  the encoded text, drawn by `rng` after the encoding, which says how to
+  decode it (the Caesar cipher's states the shift that call used). The hints
+  are in `obfuscation/decode_hints.json`, a pool of four per technique; the
+  info gains `hint=<name>` when a hint was written, and the kind's variants
+  table counts them. An encoding that changed nothing (a text of digits under
+  ROT13) gets none. Six encodings have none: the five of the eval pool,
+  `to_base64`, `to_unicode_escape`, `to_ascii_ordinal`, `to_morse` and
+  `to_braille`, whose hints wait for the eval review, and `to_leetspeak_basic`,
+  which the natural kind draws. The ten `to_sensitive_words_encode_*` techniques
+  call the plain encoders, so they carry none.
 - `structural` wraps the text in JSON, XML or markdown. `to_json` keeps
   non-ASCII characters as they are.
 - `neutral_container` (spec version 1.2) places the text in an everyday
@@ -691,8 +703,9 @@ eval text ([extending.md](extending.md#add-variants-to-a-template-pool)).
 Importing `redact.jailbreak` checks every pool and raises naming the file,
 directive and variant of a fault. A pool should hold at least 8 variants
 (a request or framing directive, a container, a fake turn), 12 for a
-benign role, 20 for small talk and 6 for the persona templates' mechanics;
-13 of the 60 pools are below their floor today (the five
+benign role, 20 for small talk, 6 for the persona templates' mechanics and
+4 for an encoding's decode hints;
+13 of the 81 pools are below their floor today (the five
 framing, the four continuation, the two structural, `refusal_then_comply` and
 `past_tense`, each with 4, or 1): the techniques of the eval pool, whose
 text waits for the eval review. A test ratchets the rest
@@ -705,7 +718,8 @@ small talk (`smalltalk=<prefix|suffix>;variant=<name>`), the benign roles
 (`role=<style>;variant=<name>`), the fake turns (`variant=<name>`) and the
 persona templates, which name the mechanic drawn
 (`category=<key>_persona_template;variant=<mechanic>`);
-`style=<name>` for
+`hint=<name>` after an encoding's own info (`shift=<n>;hint=<name>`) when
+it wrote a decode hint; `style=<name>` for
 continuation. Structural's `to_xml` and `to_markdown` have one template
 each and name none (`to_xml`'s info names its policy id), and `to_json`
 writes its wrapper in code. Continuation and structural are drawn by the

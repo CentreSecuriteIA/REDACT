@@ -115,12 +115,15 @@ def read_spec(path: Path) -> dict:
     a comment. ``layers_off_by_default`` (absent is none) lists layers of
     ``layer_order`` that a kind of the augmentation section denies unless
     its ``layers.allow`` names them
-    (:func:`redact.jailbreak.augmentation.resolve`).
+    (:func:`redact.jailbreak.augmentation.resolve`). ``decode_hint_rate``
+    (absent is 0) is the share of hinted encodings written with a hint
+    (:func:`decode_hint_rate`).
 
     Raises:
         ValueError: A generator makes a name the spec, or another of its
-            rows, has already; or ``layers_off_by_default`` is not a list of
-            layers of ``layer_order``.
+            rows, has already; ``layers_off_by_default`` is not a list of
+            layers of ``layer_order``; or ``decode_hint_rate`` is not a
+            number from 0 to 1.
     """
     spec = json.loads(Path(path).read_text(encoding="utf-8"))
     layers, off = spec["layer_order"], spec.get("layers_off_by_default", [])
@@ -128,6 +131,13 @@ def read_spec(path: Path) -> dict:
         raise ValueError(
             f"combination_spec.json: layers_off_by_default must be a list of "
             f"layers of layer_order, got {off!r}; write names of {layers}.")
+    rate = spec.get("decode_hint_rate", 0)
+    if (isinstance(rate, bool) or not isinstance(rate, int | float)
+            or not 0 <= rate <= 1):
+        raise ValueError(
+            f"combination_spec.json: decode_hint_rate must be a number from 0 "
+            f"to 1, the share of hinted encodings written with a hint, got "
+            f"{rate!r}.")
     techniques = dict(spec["techniques"])
     for family, generator in spec.get("generators", {}).items():
         if family.startswith("_"):
@@ -146,6 +156,13 @@ def read_spec(path: Path) -> dict:
             techniques[name] = {"families": [family], **given,
                                 **{key: row[key] for key in _ROW_KEYS if key in row}}
     return {**spec, "techniques": techniques}
+
+
+def decode_hint_rate() -> float:
+    """The spec's ``decode_hint_rate``: the probability that a hinted
+    encoding (``obfuscation/decode_hints.json``) writes its text with a hint
+    to decode it; 0 when the spec gives none."""
+    return load_spec().get("decode_hint_rate", 0)
 
 
 def data_rows(file: str, folder: Path = _CONFIGS) -> list[dict]:

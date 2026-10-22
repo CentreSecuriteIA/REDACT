@@ -4,14 +4,27 @@ Morse or Braille, reversed, or in look-alike, fullwidth or math-styled letters.
 ``info`` is empty, except ``sep=<separator>`` from ``to_separator``,
 ``shift=<n>`` from ``to_caesar_cipher`` and ``style=<name>`` from
 ``to_math_styled`` (traceability metadata, not part of the encoded text).
+
+The ``to_<name>`` functions here are the plain encoders. A technique of the
+registry (:func:`get_encoding_functions`) with a pool in
+``obfuscation/decode_hints.json`` is its encoder with a hint: at the spec's
+``decode_hint_rate`` (0.5) it writes one of four hints around the encoded
+text, which says how to decode it, and adds ``hint=<name>`` to the info. The
+five encodings of the eval pool, ``to_leetspeak_basic`` (natural) and the
+sensitive-word encodings, which import the plain encoders, have no hints.
 """
 
 import base64
 import codecs
+import inspect
 import random
 import unicodedata
 import urllib.parse
 from collections.abc import Callable
+
+from redact.jailbreak.technique import decode_hint_rate
+
+from ..directives import draw_variant, read_pools, uses_pool
 
 # ROT47 operates on the printable-ASCII range '!' (33) through '~' (126).
 _ROT47_PRINTABLE_MIN = 33
@@ -368,34 +381,96 @@ def to_math_styled(
     return "".join(out), f"style={style}"
 
 
+_ENCODERS = [
+    to_base64,
+    to_rot13,
+    to_rot18,
+    to_rot47,
+    to_unicode_escape,
+    to_ascii_ordinal,
+    to_separator,
+    to_leetspeak_basic,
+    to_leetspeak_intermediate,
+    to_leetspeak_advanced,
+    to_morse,
+    to_braille,
+    to_reversed_characters,
+    to_reversed_words,
+    to_reversed_word_order,
+    to_lookalike_letters,
+    to_zero_width_noise,
+    to_hex,
+    to_binary,
+    to_url_encoding,
+    to_html_entities,
+    to_base32,
+    to_base85,
+    to_caesar_cipher,
+    to_atbash,
+    to_fullwidth,
+    to_math_styled,
+]
+
+_HINTS_FILE = "obfuscation/decode_hints.json"
+#: The hints of each encoding that has them, by technique name.
+_HINTS: dict[str, list[dict]] = read_pools(_HINTS_FILE)
+#: What a hint fills beside ``{prompt}``, the encoded text: the values its
+#: encoder reports in its info. Only the Caesar cipher's ``shift`` is stated.
+_HINT_SLOTS = {"to_caesar_cipher": ("prompt", "shift")}
+
+
+def _info_values(info: str) -> dict[str, str]:
+    """The ``key=value`` pairs of an encoder's info."""
+    return dict(part.split("=", 1) for part in info.split(";") if "=" in part)
+
+
+def _with_hint(encode: Callable) -> Callable:
+    """The technique ``encode`` is in a run: its encoding, then, at the
+    spec's ``decode_hint_rate``, one of its hints around the encoded text.
+
+    The hint is drawn from ``rng`` after the encoder's own draws, so an
+    outcome without one leaves its text and its info as ``encode`` writes
+    them. The rate is one ``rng.random()`` per call, drawn before the hint;
+    only this technique's ``rng`` is read, so no other technique's draws
+    move. An encoding that changed nothing gets no hint, so it stays a noop.
+    """
+    name = encode.__name__
+    takes_rng = "rng" in inspect.signature(encode).parameters
+
+    def technique(
+        prompt: str, *, rng: random.Random | None = None,
+    ) -> tuple[str, str]:
+        text, info = encode(prompt, rng=rng) if takes_rng else encode(prompt)
+        rng = rng or random
+        if text == prompt or rng.random() >= decode_hint_rate():
+            return text, info
+        hint = draw_variant(_HINTS[name], rng)
+        filled = hint["template"].format_map({**_info_values(info), "prompt": text})
+        return filled, ";".join(filter(None, [info, f"hint={hint['name']}"]))
+
+    technique.__name__ = technique.__qualname__ = name
+    technique.__doc__ = encode.__doc__
+    return uses_pool(_HINTS_FILE, name, _HINT_SLOTS.get(name, ("prompt",)),
+                     info_key="hint", optional=True)(technique)
+
+
+def _check_hints(hints: dict[str, list[dict]], encoders: list[Callable]) -> None:
+    """Raise unless every pool of ``hints`` is that of an encoder in
+    ``encoders``, so a misspelt name cannot leave an encoding without hints."""
+    if unnamed := sorted(set(hints) - {fn.__name__ for fn in encoders}):
+        raise ValueError(
+            f"configs/jailbreak/{_HINTS_FILE} has hints for {unnamed}, which are "
+            "not encoders of obfuscation/encoding.py; name an encoder or remove "
+            "the entry.")
+
+
+_check_hints(_HINTS, _ENCODERS)
+
+#: The registry's encodings: each with a pool of hints is its encoder with them.
+_TECHNIQUES = [_with_hint(fn) if fn.__name__ in _HINTS else fn for fn in _ENCODERS]
+
+
 def get_encoding_functions() -> list[Callable]:
-    """Return all encoding/cyphering technique functions."""
-    return [
-        to_base64,
-        to_rot13,
-        to_rot18,
-        to_rot47,
-        to_unicode_escape,
-        to_ascii_ordinal,
-        to_separator,
-        to_leetspeak_basic,
-        to_leetspeak_intermediate,
-        to_leetspeak_advanced,
-        to_morse,
-        to_braille,
-        to_reversed_characters,
-        to_reversed_words,
-        to_reversed_word_order,
-        to_lookalike_letters,
-        to_zero_width_noise,
-        to_hex,
-        to_binary,
-        to_url_encoding,
-        to_html_entities,
-        to_base32,
-        to_base85,
-        to_caesar_cipher,
-        to_atbash,
-        to_fullwidth,
-        to_math_styled,
-    ]
+    """Return all encoding/cyphering technique functions: the plain encoder,
+    or, for one with a pool of hints, the encoder with its hint."""
+    return list(_TECHNIQUES)

@@ -436,7 +436,10 @@ pool of one variant named after the entry. `personas.json` and
    technique sets the filled variant into another template, which holds the
    request, has no request slot: its technique names it with
    `@uses_pool(..., slots=(...), request_slot=False)`, and its templates
-   hold no `{prompt}`. A seed draws by
+   hold no `{prompt}`. A pool a technique draws from only at a rate (an
+   encoding's decode hints, at the spec's `decode_hint_rate`) says
+   `optional=True`: its info names a variant only when one was drawn, and a
+   row without one still counts the variants it drew otherwise. A seed draws by
    the pool's length and order, so a new variant changes what some seeds
    draw (step 4).
 2. **Weights are optional.** A variant may carry `"weight"`, a number of at
@@ -466,7 +469,7 @@ pool of one variant named after the entry. `personas.json` and
    should have (`FLOORS` by family in `tests/jailbreak/test_variant_floor.py`:
    8 for a request or framing directive, a container and a fake turn, 12
    for a benign role, 20 for small talk, 6 for the persona templates'
-   mechanics; a
+   mechanics, 4 for an encoding's decode hints; a
    persona frame is its technique's own text, one per persona, not a pool
    the technique draws from, and is not counted). Regenerate it with
    `PYTHONPATH=src python -m tests.jailbreak.test_variant_floor` to record
@@ -476,7 +479,7 @@ pool of one variant named after the entry. `personas.json` and
    without being on the fixture's `known_short` list, which the regenerator
    keeps as it is. A pool that reaches its floor must leave
    `known_short`: the test fails until it does, so the list only shrinks.
-   13 of the 60 pools are on it today, in 5 families, all drawn by
+   13 of the 81 pools are on it today, in 5 families, all drawn by
    eval-pool techniques; `to_json`'s wrapper is not a pool yet.
 
 A new directive is a new list in the file and a technique that names it
