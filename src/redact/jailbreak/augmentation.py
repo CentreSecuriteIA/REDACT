@@ -49,8 +49,8 @@ _RATE_KEYS = ("rewrite", "hacking", "manipulation", "requests", "request_obfusca
 _LAYERS = ("rewrite", "hacking", "manipulation", "obfuscation", "requests")
 #: The layer the spec has off by default: a kind denies it unless its
 #: ``layers.allow`` names it, and a round says ``include_rewrite`` only for a
-#: kind that allows it while the registry holds a technique of the layer, so
-#: the rounds of every other kind are those written before the layer existed.
+#: kind whose pool holds a technique of the layer, so the rounds of every
+#: other kind are those written before the layer existed.
 _REWRITE = "rewrite"
 _SPEC = "combination_spec.json"
 
@@ -214,6 +214,7 @@ def resolve(
                     f"above max_unit_complexity {ceiling}; raise "
                     "max_unit_complexity, or leave it out for each round's "
                     f"max_complexity + {UNIT_HEADROOM}.")
+    _warn_rewrite_rate(where, resolved)
     return resolved
 
 
@@ -225,13 +226,16 @@ def rounds_of(resolved: dict) -> list[dict]:
     ``rounds`` merged over them (``"escalation"`` is
     :func:`default_escalation_schedule`), a round's ``layer_rates`` passed on
     as the sampler's ``sampling_probs``. ``include_rewrite`` is written only
-    when the kind allows the rewrite layer and a rewrite technique is
-    registered, where the others are always written: a round of any other
-    kind is as it was before the layer existed (a kind whose
-    ``layers.allow`` names it has the key, so a plan kept from such a kind
-    made while the layer held no technique raises on resume, naming
-    ``rounds``). A count round does not read ``include_rewrite``; its pool
-    decides. ``budget`` is written
+    when the kind's pool holds a rewrite technique (the layer allowed, and
+    drawn by its lists), where the others are always written: a round of
+    any other kind, the eval type's with the layer allowed among them, is
+    as it was before the layer existed (a plan kept from a kind that
+    allowed the layer before its pool held a rewrite technique has no key,
+    so it raises on resume, naming ``rounds``). A count round does not read
+    ``include_rewrite``; its pool decides. Under ``"escalation"`` a kind
+    that draws the layer carries its ``layer_rates.rewrite``, when it gives
+    one, into the budget rounds' rates, which replace the kind's whole.
+    ``budget`` is written
     only when ``"group"`` and
     ``max_unit_complexity`` only when given, so a kind that leaves them out
     or says ``"unit"`` has the rounds, and the plan file, it had before
@@ -247,8 +251,9 @@ def rounds_of(resolved: dict) -> list[dict]:
         **{f"include_{layer}": layer not in denied
            for layer in _LAYERS if layer != _REWRITE},
     }
-    if _REWRITE not in denied and any(
-            getattr(fn, "layer", None) == _REWRITE for fn in all_techniques()):
+    rewrites = _REWRITE not in denied and any(
+        getattr(fn, "layer", None) == _REWRITE for fn in technique_pool(resolved))
+    if rewrites:
         base["include_rewrite"] = True
     if resolved["allow_request_obfuscation"]:
         base["allow_request_obfuscation"] = True
@@ -260,7 +265,13 @@ def rounds_of(resolved: dict) -> list[dict]:
     if rounds is None:
         return [dict(base) for _ in range(resolved["iterations"])]
     if rounds == "escalation":
-        return [{**base, **r} for r in default_escalation_schedule()]
+        schedule = default_escalation_schedule()
+        rate = resolved["layer_rates"].get(_REWRITE)
+        if rewrites and rate is not None:
+            # A budget round's rates replace the kind's: carry its rewrite rate.
+            schedule = [{**r, "sampling_probs": {_REWRITE: rate, **r["sampling_probs"]}}
+                        if "sampling_probs" in r else r for r in schedule]
+        return [{**base, **r} for r in schedule]
     return [{**base, **{("sampling_probs" if key == "layer_rates" else key): value
                         for key, value in r.items()}}
             for r in rounds]
@@ -667,6 +678,43 @@ def _check_budget(where: str, settings: dict) -> None:
                 '"group"; set that, or take max_unit_complexity out.')
         _check_count(where, "max_unit_complexity", ceiling,
                      least=settings.get("max_complexity", 0))
+
+
+def _warn_rewrite_rate(where: str, resolved: dict) -> None:
+    """Log a WARNING when an adversarial kind's rewrite rate and its layer
+    disagree, which leaves the layer undrawn without a word.
+
+    With the layer off, a ``layer_rates.rewrite`` above 0, the kind's or a
+    round's, draws nothing. With the layer drawn (the kind's pool holds a
+    rewrite technique), a budget round whose rate for it is 0 draws none
+    there: the spec's rate is 0, and a round's own ``layer_rates`` replace
+    the kind's (``"escalation"`` carries the kind's, :func:`rounds_of`). A
+    count round draws the layer whatever the rate.
+    """
+    rates = [resolved["layer_rates"]]
+    if isinstance(resolved["rounds"], list):
+        rates += [r.get("layer_rates", {}) for r in resolved["rounds"]]
+    if _REWRITE in resolved["layers"]["deny"]:
+        if any(given.get(_REWRITE, 0) > 0 for given in rates):
+            logger.warning(
+                '%s gives the rewrite layer a rate in layer_rates, but the layer '
+                'is off, so the kind draws no rewrite: write "layers": {"allow": '
+                '["rewrite"]} to turn it on, or take the rate out.', where)
+        return
+    rounds = rounds_of(resolved)
+    if "include_rewrite" not in rounds[0]:
+        return
+    spec_rate = load_spec().get("layer_rates", {}).get(_REWRITE, 0)
+    flat = [i for i, r in enumerate(rounds) if "exact_techniques" not in r
+            and r.get("sampling_probs", resolved["layer_rates"]).get(
+                _REWRITE, spec_rate) == 0]
+    if flat:
+        logger.warning(
+            "%s draws the rewrite layer, but its budget round(s) %s (from 0) "
+            "draw it at rate 0, the spec's rate unless layer_rates give one (a "
+            "round's own layer_rates replace the kind's): give "
+            "layer_rates.rewrite a rate above 0, in the kind and in each round "
+            "that gives its own layer_rates.", where, flat)
 
 
 def _rounds(where: str, rounds) -> list:

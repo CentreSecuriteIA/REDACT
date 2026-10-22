@@ -422,9 +422,10 @@ its `layers.allow` names it, whatever its `layers.deny` says.
    puts the technique in the kind's pool, and a
    count round (`exact_techniques`: the natural kind, the escalation's
    first two rounds) may draw it from there. A budget round draws it only
-   at a rate above 0, `"layer_rates": {"rewrite": 0.2}`; the escalation's
-   last two rounds give rates of their own, which leave `rewrite` at the
-   spec's 0. With the layer allowed and a rewrite technique registered,
+   at a rate above 0, `"layer_rates": {"rewrite": 0.2}` (a budget round at
+   rate 0 for a kind that draws the layer warns); the escalation's last two
+   rounds give rates of their own, over which `rounds_of` carries the
+   kind's `rewrite` rate. With a rewrite technique in the kind's pool,
    `rounds_of` writes `include_rewrite: true` in each of an adversarial
    kind's rounds, so a plan kept from before raises on resume naming
    `rounds`: plan again with `resume=False`. To draw it in every run, take

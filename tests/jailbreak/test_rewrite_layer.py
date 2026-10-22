@@ -30,7 +30,7 @@ from redact.jailbreak.augmentation import (
     rounds_of,
 )
 from redact.jailbreak.chain import in_layer_order
-from redact.jailbreak.plan import plan_run
+from redact.jailbreak.plan import default_escalation_schedule, plan_run
 from redact.jailbreak.pool import (
     all_techniques,
     registry,
@@ -459,6 +459,65 @@ def test_a_kind_that_allows_the_layer_says_include_rewrite_for_its_techniques():
     assert rounds_of(resolve(None, "adversarial")) == [_ROUND_BEFORE]
 
 
+def test_a_kind_whose_pool_holds_no_rewrite_keeps_its_rounds_with_the_layer_allowed():
+    """The eval type's lists name no rewrite family, so allowing the layer
+    there adds nothing to its pool and nothing to its rounds: a kept eval
+    plan resumes."""
+    base = load_dataset_type("eval")["augmentations"]
+    allowed = resolve({"adversarial": {"layers": {"allow": ["rewrite"]}}},
+                      "adversarial", base=base)
+    assert rounds_of(allowed) == rounds_of(resolve(None, "adversarial", base=base))
+
+
+def test_the_escalation_carries_the_kinds_rewrite_rate_into_its_budget_rounds():
+    kind = resolve({"adversarial": {"layers": {"allow": ["rewrite"]},
+                                    "layer_rates": {"rewrite": 0.5},
+                                    "rounds": "escalation"}}, "adversarial")
+    schedule = default_escalation_schedule()
+    rounds = rounds_of(kind)
+    assert [r.get("sampling_probs") for r in rounds] == [
+        None, None, *({"rewrite": 0.5, **r["sampling_probs"]} for r in schedule[2:])]
+    # A kind that does not draw the layer keeps the schedule's rates.
+    plain = resolve({"adversarial": {"rounds": "escalation"}}, "adversarial")
+    assert [r.get("sampling_probs") for r in rounds_of(plain)] == [
+        r.get("sampling_probs") for r in schedule]
+
+
+_RATE_0 = "draw it at rate 0"
+
+
+@pytest.mark.parametrize(("given", "flat"), [
+    ({}, "[0]"),
+    ({"layer_rates": {"rewrite": 0.5}}, None),
+    ({"layer_rates": {"rewrite": 0.5}, "rounds": "escalation"}, None),
+    ({"rounds": "escalation"}, "[2, 3]"),
+    ({"layer_rates": {"rewrite": 0.5},
+      "rounds": [{"max_complexity": 6}, {"layer_rates": {"hacking": 0.9}}]}, "[1]"),
+], ids=["no rate", "rate", "escalation with a rate", "escalation without",
+        "a round's own rates"])
+def test_allowing_the_layer_warns_for_each_budget_round_at_rate_0(caplog, given, flat):
+    with caplog.at_level("WARNING", logger="redact.jailbreak.augmentation"):
+        resolve({"adversarial": {"layers": {"allow": ["rewrite"]}, **given}},
+                "adversarial")
+    warned = [r.getMessage() for r in caplog.records if _RATE_0 in r.getMessage()]
+    if flat is None:
+        assert warned == []
+    else:
+        (message,) = warned
+        assert f"its budget round(s) {flat} (from 0) draw it at rate 0" in message
+
+
+def test_a_rewrite_rate_with_the_layer_off_warns(caplog):
+    with caplog.at_level("WARNING", logger="redact.jailbreak.augmentation"):
+        resolve({"adversarial": {"layer_rates": {"rewrite": 0.5}}}, "adversarial")
+        resolve({"adversarial": {"layer_rates": {"rewrite": 0}}}, "adversarial")
+    (record,) = caplog.records
+    assert record.getMessage() == (
+        "augmentations.adversarial gives the rewrite layer a rate in layer_rates, "
+        'but the layer is off, so the kind draws no rewrite: write "layers": '
+        '{"allow": ["rewrite"]} to turn it on, or take the rate out.')
+
+
 @pytest.mark.parametrize("deny", [[], ["rewrite"]], ids=["empty", "names rewrite"])
 def test_a_config_dir_copy_made_before_denies_the_layer(tmp_path, monkeypatch, deny):
     """The former releases wrote ``"deny": []`` (before the layer) and
@@ -487,7 +546,7 @@ def test_the_flat_keywords_keep_the_rewrite_layer_denied():
     ({"deny": ["rewrite"]}, _ROUND_BEFORE),
     ({"deny": ["hacking"]}, {**_ROUND_BEFORE, "include_hacking": False}),
     ({"deny": []}, _ROUND_BEFORE),
-    ({"allow": ["rewrite"]}, {**_ROUND_BEFORE, "include_rewrite": True}),
+    ({"allow": ["rewrite"]}, _ROUND_BEFORE),
 ], ids=["packaged deny", "former packaged deny", "hacking denied alone", "no deny",
         "layer allowed"])
 def test_a_plan_kept_from_before_the_layer_resumes(
@@ -495,9 +554,9 @@ def test_a_plan_kept_from_before_the_layer_resumes(
     """Whatever the section's ``layers`` say, the former packaged
     ``{"deny": ["rewrite"]}`` among them, the plan file records the rounds a
     plan made before the layer recorded, and resumes: the layer is denied, so
-    the rounds say nothing of it though the layer now holds techniques. Where
-    the section allows the layer, they say ``include_rewrite``, and the plan
-    resumes as well."""
+    the rounds say nothing of it though the layer now holds techniques.
+    Where the section allows the layer, its pure ``encode`` pool holds no
+    rewrite technique, so the rounds say nothing of it either."""
     out = tmp_path / "jb.csv"
     adversarial = {"pure_only": True, "translation": False,
                    "families": {"allow": ["encode"]}}

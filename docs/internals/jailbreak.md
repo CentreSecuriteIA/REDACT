@@ -515,11 +515,15 @@ round: a natural round is `{"exact_techniques": n}`; an adversarial round is
 the budget keys, an `include_<layer>` per layer and `allow_request_obfuscation`
 when set, `budget` when `"group"` and `max_unit_complexity` when given, with
 the round's own keys merged over them. `include_rewrite` is
-the exception: written, true, only when the kind allows the rewrite layer
-and a rewrite technique is registered, so the rounds of a kind that denies it
-(every kind that does not allow it), and of every kind while the layer is
-empty, are those written before the layer existed, and no kept plan of
-theirs changes. `resolve` adds each layer of the spec's
+the exception: written, true, only when the kind's pool holds a rewrite
+technique, so the rounds of a kind that denies the layer (every kind that
+does not allow it), and of one whose lists name no rewrite family (the eval
+type's, the layer allowed), are those written before the layer existed, and
+no kept plan of theirs changes. Under `"escalation"` a kind that draws the
+layer has its `layer_rates.rewrite` carried into the two budget rounds'
+`sampling_probs`, which replace the kind's rates. `_warn_rewrite_rate`
+logs a WARNING for a budget round at rate 0 in such a kind, and for a
+rewrite rate above 0 while the layer is off. `resolve` adds each layer of the spec's
 `layers_off_by_default` (`rewrite`) to the kind's `layers.deny` unless its
 `layers.allow` names it (`_deny_layers_off`), so a `layers.deny` a section
 gives, which replaces the default's whole, still leaves the layer off, and

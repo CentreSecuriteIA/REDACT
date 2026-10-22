@@ -1184,12 +1184,18 @@ before the spec listed it). Nothing changes for an existing plan, the
 dataset types' included: no packaged section allows the layer, so its pool,
 rounds, plan file and manifest are as before, and so are its draws. A kind
 whose `layers.allow` names it gains the 16 techniques and `include_rewrite:
-true` in its adversarial rounds (written only when the layer is allowed and
-a rewrite technique is registered), so a plan kept from a section that
-allowed the layer before it held a technique raises on resume naming
+true` in its adversarial rounds (written only when the kind's pool holds a
+rewrite technique, so a kind whose lists name no rewrite family, the eval
+type's among them, keeps its rounds), so a plan kept from a section that
+allowed the layer before its pool held one raises on resume naming
 `rounds`: take `rewrite` out of its `layers.allow` to keep the plan, or plan
 again with `resume=False`. The flat `include_<layer>` keywords keep the
-layer denied.
+layer denied. The run warns when the two disagree: a kind that draws the
+layer but has a budget round at rate 0 for it (no `layer_rates.rewrite`, or
+a round whose own `layer_rates` leave it out), and a `layer_rates.rewrite`
+above 0 while the layer is off. `"rounds": "escalation"` carries the kind's
+`layer_rates.rewrite` into its two budget rounds, whose own rates replace
+the kind's: they drew no rewrite before.
 
 **Release note: the rewrite techniques.** Spec 1.3 gives the `rewrite` layer
 its first sixteen techniques, all model-written and attack-only:
@@ -1209,14 +1215,15 @@ The layer is off, so a run that does not allow it changes nowhere: the
 default attack pool is still 214 techniques in 29 families, the natural pool
 the 72 (every rewrite technique says `["adversarial"]`), and the `eval`
 type's pool and draws are held (36 techniques; its allow lists name no rewrite
-family, so allowing the layer there adds nothing until the families are
-allowed too). A kind that allows the layer draws them: the packaged
+family, so allowing the layer there adds nothing to its pool or its rounds
+until the families are allowed too). A kind that allows the layer draws them: the packaged
 adversarial kind's pool is then 230 techniques in 32 families, its rounds say
 `include_rewrite: true` (an adversarial plan kept from a section that allowed
-the layer before it held a technique raises on resume naming `rounds`), a
-budget round deals the layer at `layer_rates.rewrite` (the spec's 0: set it,
-for example 0.5, which gives half the units of a group one rewrite technique,
-the three families dealt evenly and each applied first) and a count round,
+the layer before its pool held a technique raises on resume naming `rounds`), a
+budget round deals the layer at `layer_rates.rewrite` (the spec's 0, with a
+WARNING: set it, for example 0.5, which gives half the units of a group one
+rewrite technique, the three families dealt evenly and each applied first;
+the escalation's budget rounds take it too) and a count round,
 the escalation's first two among them, draws from the pool whatever the rate.
 New rules bind a fresh plan, both ways: `persuasion` refuses `impersonation`
 and `ascii_art`, `tense_rewrite` refuses `temporal`, and `model_distractors`
