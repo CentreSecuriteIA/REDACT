@@ -1,0 +1,13 @@
+{
+  "system_prompt": "",
+  "template": "The following sentence contains the word \"{word}\":\n\n\"{prompt}\"\n\nInvent one code name for \"{word}\": a plain, innocent-sounding name of one or two words that does not hint at the word's meaning and would not be mistaken for another word of the sentence. Return only the code name, nothing else.",
+  "seed_fields": [
+    "word",
+    "prompt"
+  ],
+  "few_shot_examples": [],
+  "metadata": {
+    "version": "1.0",
+    "notes": "Used by to_pseudonym_substitution (wording family): one call per marked word. The code name is swapped in, case-matched, and the key is written by wording_templates.json pseudonym_key. Differs from synonym_substitution: the code name carries no meaning of its own and needs a key."
+  }
+}
