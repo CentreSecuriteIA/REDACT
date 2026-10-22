@@ -277,10 +277,12 @@ technique within it, both dealt when the plan passes its dealer
 ([balanced dealing](#balanced-dealing)). The 23 translation languages are
 one choice, not 23.
 The rules are those of [techniques.md](../techniques.md#compatibility-rules);
-among them, a translation is never paired with `sensitive_words`,
+among them, a translation is never paired with `sensitive_words`, `wording`,
 `tokenbreak` or `word_art`, whose marking call mostly fails on translated
-text, in either pick order (a request obfuscation that is a translation
-takes the rule into the obfuscations drawn after it as any other pick does).
+text, nor with `typos`, `casual_writing`, `noise` or `payload_split`, one
+change more to a text already hard to read, in either pick order (a request
+obfuscation that is a translation takes the rules into the obfuscations drawn
+after it as any other pick does).
 
 ## Balanced dealing
 

@@ -38,7 +38,8 @@ split, an encoded word or a code name, then `suffixes` 60, `payload_split` 65, `
 and `ascii_art` 90, the outermost. A plan made before this order applied
 `sensitive_words` and `tokenbreak` first; a kept plan replays the order its
 manifest recorded, and a fresh plan applies translation, typos, casual
-writing and noise before the word-level steps. The families the eval type draws
+writing and noise before the word-level steps (a fresh plan never pairs a
+translation with the other three, which a kept plan may hold). The families the eval type draws
 (`translation`, `encode`, `structural`, `ascii_art`) keep their order. The
 obfuscation layer has no cap: a combination takes up to `max_obfuscations`
 of its families in budget mode, the request obfuscation, when allowed,
@@ -162,7 +163,9 @@ Nine `noise` techniques are tagged `needs_latin` too: the three densities of
 QWERTY map only), checked on the same six scripts. The three
 `to_emoji_sprinkle_*` change a text in any script; their emoji have no glyph
 in any font, so each is kept from `ascii_art`. The `noise` family is kept
-from `typos` and `casual_writing`: one kind of surface noise per text.
+from `typos` and `casual_writing`: one kind of surface noise per text. It is
+kept from `translation` too, whatever the script, so its tag no longer
+decides a pair with one.
 
 ## The language table
 
@@ -224,11 +227,16 @@ technique is picked first. A technique may not join a combination when:
   `hacking`, one `manipulation`, one `requests`);
 - one of its families is in a taken family's `cross_incompatible_with`, or
   the reverse. The spec pairs `structural` with `ascii_art`; `translation`
-  with `ascii_art` and with the three families that have a model mark words,
+  with `ascii_art`, with the four families that have a model mark words,
   `sensitive_words`, `tokenbreak`, `word_art` and `wording` (the marking call finds a
   word in 62 of 100 harmful English inputs but in 3 to 36 of their
   translations, so a heavy encoding after a translation is discarded and a
-  light one changes nothing); `ascii_art` with `framing`, `persona`, `cognitive`, `fsh`,
+  light one changes nothing), and with `typos`, `casual_writing`, `noise` and
+  `payload_split` (a translated prompt is already hard to read, for the model
+  that writes or marks text and for the model that answers, and one more
+  word-level or character-level change on top is too complex; `encode` and
+  `structural` stay allowed beside a translation, the eval type draws them
+  together); `ascii_art` with `framing`, `persona`, `cognitive`, `fsh`,
   `dap`; `fsh` and `dap` with `continuation`, `indirect`, `framing`,
   `persona`, `cognitive`; `persona_template` with `fsh`, `dap` and
   `ascii_art`; `payload_split` with `ascii_art`, `encode`, `fake_turns` and
@@ -279,10 +287,12 @@ technique is picked first. A technique may not join a combination when:
 - it pairs a `needs_latin` technique with a translation into a script
   other than Latin: Japanese, Russian, Arabic, Greek, Thai, Khmer, Nepali,
   Bengali, Chinese, Hindi or Amharic (each language's `script` is in its row of
-  `configs/jailbreak/languages.json`). After the translation the encoding or
-  the Latin-letter noise would change nothing, yet count in
-  `num_techniques`; before it, the translator would get a cipher. The
-  Latin-script translations still join them;
+  `configs/jailbreak/languages.json`). After the translation the encoding
+  would change nothing, yet count in `num_techniques`; before it, the
+  translator would get a cipher. The Latin-script translations still join the
+  encodings. The family rules above keep `noise` and the six
+  `to_sensitive_words_encode_*` forms from every translation, so this rule
+  decides a pair only for the `encode` family's own members;
 - in budget mode, its complexity is above what is left of `max_complexity`
   (under the opt-in [group budget](configuration.md#the-group-budget), of the
   unit's allowance: `max_complexity` plus what the group's earlier units left
@@ -366,7 +376,10 @@ their own. The natural kind draws only what is marked natural: by default
 | `encode` | `to_leetspeak_basic` |
 | `suffixes` | `to_adversarial_suffix_punctuation`, `to_adversarial_suffix_emoji` |
 
-With `"natural": {"translation": true}` the 23 translations join them (95).
+With `"natural": {"translation": true}` the 23 translations join them (95);
+the kind draws one technique per input unless `exact_techniques` says more,
+and with two or more a translation is kept from `typos`, `casual_writing` and
+`noise` by the rules above.
 Attack-only: `structural`, `continuation`, `temporal`, the high and insane
 typos, the four high-density noise techniques, `to_answer_as_dialogue`, `to_answer_as_story`,
 the three answer formats of spec version 1.3 (`to_dual_answer`,
@@ -570,16 +583,22 @@ wrappers. The family is attack-only, and the eval type does not draw it.
   (GlotLID) and length (against the language's median ratio, measured
   with TranslateGemma on FLORES-200), then translated back and judged by
   the generation
-  model ([stages/jailbreaks.md](stages/jailbreaks.md#models)).
+  model ([stages/jailbreaks.md](stages/jailbreaks.md#models)). A fresh plan
+  never follows a translation with a step that marks words or changes the
+  words or characters of its text (`sensitive_words`, `wording`,
+  `tokenbreak`, `word_art`, `typos`, `casual_writing`, `noise`,
+  `payload_split`; [the rules](#compatibility-rules)).
 - `typos` is a rewrite by the model, at one of four densities, with the
   level's description in the prompt, then a check: the stage's `check`
   model (the `gen` model unless the recipe names one) reads the rewrite
   against the prompt (`jailbreak/typo_check`, at temperature 0.15). A
   rejected rewrite is made again with the check's reply as feedback, up to
   two rewrites, so 2 to 4 calls (the spec's `calls`); one rejected twice is
-  discarded (`reason=typo check failed`).
+  discarded (`reason=typo check failed`). It is not drawn with a
+  translation.
 - `casual_writing` is how a person typing quickly writes: casing, spacing,
-  punctuation, abbreviations, accents. `to_abbreviations` rewrites only the
+  punctuation, abbreviations, accents. It is not drawn with a translation.
+  `to_abbreviations` rewrites only the
   common words it lists, and `to_stripped_accents` only accented Latin
   letters (other scripts keep their marks), so either would leave many
   prompts unchanged. Each has an applicability: a fresh plan draws it only
@@ -599,7 +618,8 @@ wrappers. The family is attack-only, and the eval type does not draw it.
   space and one of eight neutral emoji (smiles, thumbs up, folded hands, a
   thinking face, sparkles, raised hands) after a word (0.05, 0.1, 0.25 of
   the words), so taking them out gives the text back. The constants are in
-  `obfuscation/noise.py`. The high densities are attack-only.
+  `obfuscation/noise.py`. The high densities are attack-only. The family is
+  not drawn with a translation, whatever the script.
 - `wording` (spec version 1.3, complexity 2) puts each word the generation
   model marks harmful (the call and the strict word-list parse of
   `sensitive_words`, `tokenbreak` and `word_art`; a reply that marks no word
@@ -652,7 +672,8 @@ wrappers. The family is attack-only, and the eval type does not draw it.
   when no reply was the list). Both draw the count, two to four and no more
   than the text's words, from `rng`, discard a text of fewer than two words
   (`too few words to split`), and write `variant=<name>;parts=<n>`. The
-  family is attack only, and outside the eval type's pool.
+  family is attack only, and outside the eval type's pool. It is not drawn
+  with a translation.
 - `encode` encodes the whole text: base64 (one line), rot13, rot18 (rot13 on
   letters and rot5 on ASCII digits), rot47, unicode escapes (`\uXXXX`, or
   `\UXXXXXXXX` above U+FFFF), ASCII ordinals, a separator (between the

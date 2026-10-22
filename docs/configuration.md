@@ -1180,6 +1180,24 @@ the natural kind none of them either: their pools and draws are held. A
 translation chosen as the request obfuscation shares the rule with the
 obfuscations drawn after it.
 
+The same entry now keeps a translation apart from `typos`, `casual_writing`,
+`noise` and `payload_split` too (an owner decision of 2026-10-22): a
+translated prompt is already hard to read, for the model that writes or marks
+text and for the model that answers, and one more word-level or
+character-level change on top is too complex. A fresh plan no longer pairs a
+translation with these steps either, so some draws differ from those an
+earlier version made with the same seed. Over 3,000 units of the default
+attack kind in three groups (seed 42), 204 held a translation and one of the
+four and none does now; the units holding a translation go from 787 to 798 and
+the obfuscations per unit from 1.63 to 1.64. A plan kept from before replays its recorded combinations, so a kept
+plan may still pair them. `encode`, `structural`, `suffixes` and
+`neutral_container` stay allowed beside a translation: the eval type draws
+`encode` and `structural` with its translations, and its pool (36 techniques)
+and draws are held, since it holds no technique of the four families. The
+natural pool (72) is held as well; the natural kind draws one technique per
+input, and takes the rules only with `exact_techniques` of 2 or more and
+`"translation": true`.
+
 **Release note: the wording family.** Two techniques of a new obfuscation
 family, `wording` (spec 1.3, order 45, between `sensitive_words` and
 `tokenbreak`, complexity 2, attack only, the `encoding` dimension): each

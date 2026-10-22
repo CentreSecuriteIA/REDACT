@@ -389,8 +389,12 @@ _BUDGETS = [
 # refuses the other word-level steps, a translation and ascii_art, changes the
 # family some obfuscation draws land on and, through the unit's rng and its
 # group's counts, the rest of their draw (221 of the 240 dealt units, 123 of the
-# 200 undealt draws).
-_PINNED_DRAWS = "995ee011a8f6b0b166ab1a96a048611f711a757a82e7a23e8d1d821ef4de3d19"
+# 200 undealt draws). The rule keeping a translation from the word-level and
+# character-level changes (typos, casual_writing, noise, payload_split) moved
+# it last: a draw that held both now takes another technique, and through the
+# unit's rng and its group's counts the rest of its draw (179 of the 240 dealt
+# units, 75 of the 200 undealt draws).
+_PINNED_DRAWS = "3d12a4781341f7ff6d185dc09fed3128dfe3cf212a1aaa1e41804f250f8ddbd4"
 
 
 def test_draws_without_the_request_obfuscation_are_those_made_before_it_was_counted():

@@ -241,23 +241,6 @@ def test_ascii_art_keeps_the_noise_of_latin_letters(technique):
     assert _joins(technique, "to_ascii_art") and _joins("to_ascii_art", technique)
 
 
-@pytest.mark.parametrize(("first", "then"), [
-    ("to_random_capitals_low", "to_russian"),
-    ("to_greek", "to_scrambled_letters_medium"),
-    ("to_keyboard_typos_high", "to_thai"),
-    ("to_japanese", "to_keyboard_typos_low"),
-])
-def test_the_latin_letter_noise_refuses_a_translation_into_another_script(
-        first, then):
-    assert not _joins(first, then)
-
-
-@pytest.mark.parametrize("translation", ["to_thai", "to_french"])
-def test_the_emoji_sprinkle_joins_a_translation_into_any_script(translation):
-    assert _joins("to_emoji_sprinkle_low", translation)
-    assert _joins(translation, "to_emoji_sprinkle_low")
-
-
 _CONTAINERS = ["to_code_comment", "to_yaml_document", "to_csv_row",
                "to_email_message", "to_transcript_line", "to_log_entry"]
 
@@ -442,10 +425,10 @@ def test_a_payload_split_takes_the_manipulation_layer_s_obfuscation_block(
 
 @pytest.mark.parametrize("split", _PAYLOAD_SPLITS)
 @pytest.mark.parametrize("other", [
-    "to_french", "to_thai", "to_rewrite_with_typos_low", "to_tokenbreak_split",
+    "to_rewrite_with_typos_low", "to_tokenbreak_split",
     "to_sensitive_words_split", "to_json", "to_csv_row", "to_summarize",
     "to_psychopath_persona", "to_fictional_world"])
-def test_a_payload_split_joins_a_translation_noise_a_wrapper_a_request_or_a_scene(
+def test_a_payload_split_joins_typos_a_marking_step_a_wrapper_a_request_or_a_scene(
         split, other):
     assert _joins(split, other) and _joins(other, split)
 
@@ -496,10 +479,52 @@ def test_a_translation_refuses_a_step_that_has_a_model_mark_words_either_way(
     assert not _joins(marking, translation)
 
 
+@pytest.mark.parametrize("translation", ["to_french", "to_thai", "to_hindi"])
+@pytest.mark.parametrize("typos", [
+    "to_rewrite_with_typos_low", "to_rewrite_with_typos_medium",
+    "to_rewrite_with_typos_high", "to_rewrite_with_typos_insane"])
+def test_a_translation_refuses_typos_either_way(translation, typos):
+    """A translated prompt is already hard to read, for the model that writes
+    text and for the model that answers: a rewrite with typos on top is one
+    change too many, whichever is picked first."""
+    assert not _joins(translation, typos)
+    assert not _joins(typos, translation)
+
+
+@pytest.mark.parametrize("translation", ["to_french", "to_thai", "to_hindi"])
+@pytest.mark.parametrize("casual", [
+    "to_lowercase", "to_no_sentence_capitals", "to_dropped_spaces",
+    "to_doubled_punctuation", "to_abbreviations", "to_stripped_accents"])
+def test_a_translation_refuses_casual_writing_either_way(translation, casual):
+    """Casing, spacing, punctuation, abbreviations and accents are one more
+    change to a text already hard to read."""
+    assert not _joins(translation, casual)
+    assert not _joins(casual, translation)
+
+
+@pytest.mark.parametrize("translation", ["to_french", "to_thai", "to_hindi"])
+@pytest.mark.parametrize("noise", [
+    "to_random_capitals_low", "to_scrambled_letters_medium",
+    "to_keyboard_typos_high", "to_emoji_sprinkle_low"])
+def test_a_translation_refuses_noise_either_way(translation, noise):
+    """Random capitals, scrambled letters, keyboard typos and emoji are one
+    more change to a text already hard to read, whatever its script."""
+    assert not _joins(translation, noise)
+    assert not _joins(noise, translation)
+
+
+@pytest.mark.parametrize("translation", ["to_french", "to_thai", "to_hindi"])
+@pytest.mark.parametrize("split", _PAYLOAD_SPLITS)
+def test_a_translation_refuses_a_payload_split_either_way(translation, split):
+    """The prompt cut in parts named by letters is one more change to a text
+    already hard to read."""
+    assert not _joins(translation, split)
+    assert not _joins(split, translation)
+
+
 @pytest.mark.parametrize("other", [
-    "to_rewrite_with_typos_low", "to_random_capitals_low",
     "to_adversarial_suffix_punctuation", "to_base64", "to_rot13", "to_json",
-    "to_summarize", "to_psychopath_persona", "to_fictional_world"])
+    "to_csv_row", "to_summarize", "to_psychopath_persona", "to_fictional_world"])
 def test_a_translation_keeps_the_families_it_has_no_rule_against(other):
     assert _joins("to_french", other) and _joins(other, "to_french")
 

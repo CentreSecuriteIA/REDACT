@@ -263,10 +263,10 @@
   ]
  },
  "combinations": [
-  ["to_rewrite_with_typos_insane", "to_sensitive_words_encode_leetspeak_basic", "to_distractor_prefix_task"],
+  ["to_rewrite_with_typos_insane", "to_adversarial_suffix_emoji", "to_distractor_prefix_task"],
   ["to_authority_obedience", "to_tokenbreak_prepend", "to_adversarial_suffix_emoji"],
   ["to_emoji_sprinkle_medium", "to_word_art", "to_ask_answer_in_swahili"],
-  ["to_deformed_professor_persona", "to_random_capitals_low", "to_csv_row", "to_smalltalk_suffix"],
+  ["to_deformed_professor_persona", "to_random_capitals_low", "to_payload_split_semantic", "to_smalltalk_suffix"],
   ["to_avi", "to_doubled_spaces", "to_reversed_characters", "to_answer_as_dialogue"]
  ]
 }
