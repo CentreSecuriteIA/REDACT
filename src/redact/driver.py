@@ -22,7 +22,7 @@ import threading
 import time
 import warnings
 from collections.abc import Iterable, Mapping
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
 
@@ -70,7 +70,7 @@ def write_record(
     record = {
         "stage": stage,
         # UTC, with its offset, as the trace's timestamps are.
-        "timestamp": datetime.now(timezone.utc).isoformat(timespec="seconds"),
+        "timestamp": datetime.now(UTC).isoformat(timespec="seconds"),
         "params": params or {},
         "models": models or {},
         "counts": counts or {},

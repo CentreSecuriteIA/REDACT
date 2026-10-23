@@ -965,7 +965,8 @@ def test_a_build_takes_no_category_folder_outside_the_inputs_tree(tmp_path):
 
 # Pure techniques of the obfuscation layer; the natural kind is the default.
 _PURE = {"adversarial": {
-    "pure_only": True, "layers": {"deny": ["rewrite", "hacking", "manipulation", "requests"]},
+    "pure_only": True,
+    "layers": {"deny": ["rewrite", "hacking", "manipulation", "requests"]},
 }}
 _MODELS = {"gen": "gen-model", "check": "check-model", "paraphraser": "para-model",
            "paraphrase_check": "check-model"}

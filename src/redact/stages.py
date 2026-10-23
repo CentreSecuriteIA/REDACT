@@ -394,8 +394,8 @@ def generate_outputs(
 
     Resume: each input gets a stable id (its ``sample_id`` when present, else
     the content id of its ``sample``, or ``prompt``), and each unit is
-    ``(input_id, iteration)``. Completed units are recorded in a sidecar ``*.state.jsonl``
-    ledger beside the output CSV. On a re-run (``resume=True``) units already
+    ``(input_id, iteration)``. Completed units are recorded in a sidecar
+    ``*.state.jsonl`` ledger beside the output CSV. On a re-run (``resume=True``) units already
     in the ledger are skipped, so a crash loses only the rows still in
     progress, and the modes and specs are dealt as before:
     ``output_responses.plan.json`` stops a resume with another ``seed``,
@@ -883,8 +883,9 @@ def generate_paraphrases(
     Each base sample is paraphrased ``paraphrases_per_sample`` times (K units,
     driven as a pool of units, one paraphraser at a time, each with its own
     reply cap), each unit's paraphraser picked from the ``paraphraser`` pool
-    by a seeded hash of its id and iteration. Each paraphrase passes five gates (length, split
-    lines, script, language, artifacts) and is then validated by a
+    by a seeded hash of its id and iteration. Each paraphrase passes five
+    gates (length, split lines, script, language, artifacts) and is then
+    validated by a
     **separate** checker at ``CHECK_TEMPERATURE`` (no retry), and is deduped
     so no two stored samples are identical. Rows land in ``paraphrases_inputs.csv`` /
     ``paraphrases_outputs.csv`` under ``data_dir``, carrying
@@ -949,8 +950,9 @@ def generate_paraphrases(
             (:func:`redact.content_moderation.paraphrase.check_settings`),
             before anything runs.
     """
-    targets = check_settings(target=target, paraphrases_per_sample=paraphrases_per_sample,
-                             min_words=min_words)
+    targets = check_settings(
+        target=target, paraphrases_per_sample=paraphrases_per_sample,
+        min_words=min_words)
     pool = paraphrase_pool(paraphraser)
     # Before any client, and before a fresh run clears the target: an
     # unregistered paraphraser (KeyError), or one whose prompt breaks its

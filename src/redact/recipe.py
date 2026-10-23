@@ -211,7 +211,9 @@ def load_recipe(
     return data
 
 
-def params_file_of(recipe: dict, params: str | Path | dict | None = None) -> Path | None:
+def params_file_of(
+    recipe: dict, params: str | Path | dict | None = None,
+) -> Path | None:
     """The params file a run of ``recipe`` reads, absolute; ``None`` when it
     reads none, or ``params`` is a dict.
 
@@ -371,8 +373,8 @@ def _check_paraphrase_params(params: dict) -> None:
     from .content_moderation.paraphrase import check_settings
 
     given = params.get("paraphrase") or {}
-    check_settings(**{key: given[key] for key in
-                      ("target", "paraphrases_per_sample", "min_words") if key in given})
+    keys = ("target", "paraphrases_per_sample", "min_words")
+    check_settings(**{key: given[key] for key in keys if key in given})
 
 
 def check_build_params(dataset_type: str, params: dict | None = None,
