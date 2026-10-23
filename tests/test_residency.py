@@ -266,6 +266,18 @@ class TestReporting:
                 residency.report(_plan([model], 48.0, 1))
             assert [r.levelname for r in caplog.records] == [level]
 
+    def test_a_quiet_report_still_tells_of_trouble(self, registered, caplog):
+        """--quiet runs with verbose=False: a plan that will fail, or may,
+        is logged all the same; a clean one is not."""
+        fine = registered("_res_quiet_ok", hf_model_id="org/qo", vram_gb=10.0)
+        big = registered("_res_quiet_err", hf_model_id="org/qe", vram_gb=60.0)
+        for model, kv, levels in ((fine, 1.0, []), (fine, None, ["WARNING"]),
+                                  (big, 1.0, ["ERROR"])):
+            caplog.clear()
+            with caplog.at_level(logging.INFO, logger=residency.logger.name), _kv(kv):
+                residency.report(_plan([model], 48.0, 1), verbose=False)
+            assert [r.levelname for r in caplog.records] == levels
+
 
 class TestMeasurement:
     """Post-hoc diagnostic only — nothing here feeds planning."""

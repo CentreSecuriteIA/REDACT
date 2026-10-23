@@ -92,7 +92,8 @@ def test_this_process_on_a_planned_card_does_not_stop_the_run(run, caplog):
     with caplog.at_level(logging.WARNING, logger="redact.driver"):
         ran = run([_card(0, 4.0, [(os.getpid(), "python", 4.0)]), _card(1)])
     assert "inputs" in ran
-    assert caplog.records == []
+    # The plan's own warnings (an offline KV estimate) are logged quiet too.
+    assert [r for r in caplog.records if r.name == "redact.driver"] == []
 
 
 def test_the_plan_counts_its_cards_over_the_visible_ones(run, monkeypatch):

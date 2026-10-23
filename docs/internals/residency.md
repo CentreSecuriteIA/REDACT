@@ -177,9 +177,10 @@ memory out again.
 | `as_dict()` | The plan as data, for the trace and the run summary |
 | `explain()` | The plan as text, with each model's derivation, card and grant, the problems, and advice |
 
-`report(plan, stages=...)` logs `explain()` at ERROR when the plan does not
-fit, at WARNING when it has warnings, else at INFO, and records a
-`residency` event.
+`report(plan, verbose=True, stages=...)` logs `explain()` at ERROR when the
+plan does not fit and at WARNING when it has warnings, also with
+`verbose=False` (a `--quiet` run), else at INFO with `verbose` only, and
+records a `residency` event.
 
 ## Phases
 
