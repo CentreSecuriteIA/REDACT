@@ -375,6 +375,14 @@ class InputPipeline:
                 acks=lambda ack: ack.get("style") == style,
                 **tree,
             )
+            # A fresh run of a style writes its record anew: a plan file that
+            # holds none would stop the resume below, which keeps the others.
+            try:
+                read_plan(manifest.path)
+            except ValueError as error:
+                logger.warning("%s It is removed: this style's record is written "
+                               "anew, and the other styles resume unchecked.", error)
+                plan_path(manifest.path).unlink()
         if resume or style:
             # Before anything is written: the files the run keeps must take
             # its rows.

@@ -254,6 +254,18 @@ class TestAResume:
         plan.unlink()
         assert _run(tmp_path).calls == []   # deleted, the resume runs unchecked
 
+    def test_a_fresh_run_of_a_style_replaces_a_broken_plan_file(
+            self, tmp_path, caplog):
+        _run(tmp_path, style="long")
+        plan = tmp_path / "constitution_inputs.plan.json"
+        plan.write_text('{"styles": {"long"', encoding="utf-8")
+        with caplog.at_level(logging.WARNING):
+            gen = _run(tmp_path, style="short", resume=False)
+        assert "It is removed" in caplog.text
+        assert len(gen.calls) == _ENTRIES * _K
+        assert set(json.loads(plan.read_text(encoding="utf-8"))["styles"]) == {
+            "short"}
+
     def test_a_folder_written_without_the_axes_stops_a_run_with_them(self, tmp_path):
         _run(tmp_path, axes=False)
         with pytest.raises(ValueError, match="'length'") as stopped:
