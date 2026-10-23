@@ -214,6 +214,44 @@ class TestTheResponseAxes:
         assert len(now) == 2 * _QUESTIONS
         assert now.loc[first.index].equals(first)
 
+    def test_inputs_that_join_a_group_leave_the_done_units_specs_to_their_rows(
+            self, tmp_path, monkeypatch):
+        """The plan and the coverage table keep the specs the rows were
+        written with; the new inputs are dealt around them."""
+        every = _questions(2 * _QUESTIONS)
+        _respond(tmp_path, monkeypatch, inputs=every.iloc[_QUESTIONS:])
+        gen, _ = _respond(tmp_path, monkeypatch, inputs=every)
+        assert len(gen.calls) == _QUESTIONS
+        planned = _planned(tmp_path)
+        rows = _written(tmp_path)
+        for row in rows.to_dict("records"):
+            assert {c: row[c] for c in _RESPONSE_COLUMNS} == {
+                f"response_{axis}": value
+                for axis, value in planned[(row["input_id"], 0)].items()}
+        table = pd.read_csv(_coverage(tmp_path))
+        table = table[table["accepted"] > 0]
+        counted = {(f"response_{a}", v, c): n for a, v, c, n in zip(
+            table["axis"], table["value"], table["category"], table["accepted"])
+            if a != "mode"}
+        assert counted == {(column, value, category): n
+                           for column in _RESPONSE_COLUMNS
+                           for (value, category), n in rows.groupby(
+                               [column, "category"]).size().items()}
+
+    def test_acks_written_before_they_recorded_a_spec_are_dealt_again(
+            self, tmp_path, monkeypatch):
+        every = _questions(2 * _QUESTIONS)
+        _respond(tmp_path, monkeypatch, inputs=every.iloc[_QUESTIONS:])
+        ledger = paths.datasets(tmp_path) / "output_responses.state.jsonl"
+        lines = [json.loads(line) for line in ledger.read_text(
+            encoding="utf-8").splitlines()]
+        assert all("spec" in ack for ack in lines if "input_id" in ack)
+        ledger.write_text("".join(
+            json.dumps({k: v for k, v in ack.items() if k != "spec"}) + "\n"
+            for ack in lines), encoding="utf-8")
+        gen, _ = _respond(tmp_path, monkeypatch, inputs=every)
+        assert len(gen.calls) == _QUESTIONS and len(_written(tmp_path)) == len(every)
+
     @pytest.mark.parametrize(("changed", "named"), [
         ({"axes": {"format": {"code": 0}}}, "axes"), ({"seed": 7}, "seed")])
     def test_a_resume_with_another_deal_raises_naming_resume_false(

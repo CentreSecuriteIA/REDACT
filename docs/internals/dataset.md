@@ -306,8 +306,8 @@ taxonomy format.
 | Stage | `resume_state` call | Ledger key | Records also carry |
 |---|---|---|---|
 | constitution | `artifact=Data_cache/constitution/, pattern="*.csv"`, `units_in` (the units of `merged.csv`'s rows) | `unit` | `status`, `attempts` when rejected |
-| inputs | `artifact=folder, pattern="*/samples.csv"`, `units_in` | `sample_description`, `entry_type`, `style`, `iteration` | `ids`, `accepted`; or `status`, `attempts` |
-| outputs | `artifact=output_responses.csv` | `input_id`, `iteration` | `accepted` |
+| inputs | `artifact=folder, pattern="*/samples.csv"`, `units_in` | `sample_description`, `entry_type`, `style`, `iteration` | `ids`, `accepted`; or `status`, `attempts`; and `spec` with axes |
+| outputs | `artifact=output_responses.csv` | `input_id`, `iteration` | `mode`, `spec` (with axes), `accepted` |
 | paraphrase | `artifact=paraphrases_<target>.csv` | `input_id`, `iteration` (inputs); `response_id`, `iteration` (outputs) | `paraphrase_model`, `status`; `input_id` (outputs); `reason`, `min_words` when `skipped` |
 | jailbreaks, per kind | `artifact=jailbreaks.csv` or `variations.csv` | `input_id`, `iteration` | |
 | benign data (jailbreaks) | `artifact=benign_samples.csv`, always `resume=True` | `main_category`, `sub_category`, `answer_type` | `status`, `attempts` when rejected |

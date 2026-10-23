@@ -18,7 +18,7 @@ import math
 import random
 import string
 from collections import Counter, defaultdict
-from collections.abc import Iterable, Sequence
+from collections.abc import Iterable, Mapping, Sequence
 from numbers import Real
 from pathlib import Path
 
@@ -280,7 +280,19 @@ def _one_spec(
     return spec
 
 
-def deal_specs(axes: dict | None, units: Sequence[Unit], *, seed: int) -> list[dict]:
+def _fits(axes: dict, spec) -> bool:
+    """Whether ``spec`` gives each axis with values one of its values, and
+    names no other axis: a spec this table can have dealt."""
+    dealt = {axis: entry["values"] for axis, entry in axes.items()
+             if "values" in entry}
+    return (isinstance(spec, dict) and set(spec) == set(dealt)
+            and all(spec[axis] in values for axis, values in dealt.items()))
+
+
+def deal_specs(
+    axes: dict | None, units: Sequence[Unit], *, seed: int,
+    fixed: Mapping[int, dict] | None = None,
+) -> list[dict]:
     """One spec for each unit, dealt per group.
 
     ``units`` are ``(group, (entry, iteration))`` pairs, an entry's units its
@@ -292,12 +304,21 @@ def deal_specs(axes: dict | None, units: Sequence[Unit], *, seed: int) -> list[d
     siblings differ on every axis none of whose values has more than 1/k of
     the weight.
 
+    ``fixed`` maps the index of a unit in ``units`` to the spec it already
+    has, as a done unit's ack records it: the unit keeps it, and it counts
+    in the group and for its siblings as a dealt spec does, so the other
+    units are dealt around it. A spec that does not fit ``axes`` (an axis
+    added or left out since, or a value the table no longer has) is dealt
+    again. Each unit's rng is its own, so fixing one changes no other
+    unit's draws.
+
     Returns:
         Each unit's spec, in the order of ``units``; empty ones without
         ``axes``.
     """
     if not axes:
         return [{} for _ in units]
+    fixed = {i: spec for i, spec in (fixed or {}).items() if _fits(axes, spec)}
     weights = {(axis, value): v["weight"] for axis, entry in axes.items()
                for value, v in entry.get("values", {}).items()}
     siblings = Counter((group, entry) for group, (entry, _) in units)
@@ -309,7 +330,13 @@ def deal_specs(axes: dict | None, units: Sequence[Unit], *, seed: int) -> list[d
         dealer = dealers.setdefault(group, Dealer(weights, key=(seed, *group)))
         rng = random.Random(stable_seed(seed, *group, entry, iteration))
         own = taken[(group, entry)]
-        specs[i] = _one_spec(axes, dealer, rng, own, siblings[(group, entry)])
+        if i in fixed:
+            # In the table's order, as a dealt spec is.
+            specs[i] = {axis: fixed[i][axis] for axis in axes if axis in fixed[i]}
+            for axis, value in specs[i].items():
+                dealer.counts[(axis, value)] += 1
+        else:
+            specs[i] = _one_spec(axes, dealer, rng, own, siblings[(group, entry)])
         for axis, value in specs[i].items():
             own[axis][value] += 1
     return specs
@@ -384,8 +411,10 @@ def write_stage_coverage(
 ) -> Path | None:
     """Write the coverage table beside ``manifest``: each row's ``spec``
     planned, and accepted when the ack of its unit in ``ledger`` says
-    ``accepted``, by the row's ``category`` and ``entry_type``. No row of the
-    output is read.
+    ``accepted``, by the row's ``category`` and ``entry_type``. An accepted
+    unit counts the spec its ack records, the one its row was written with,
+    else (an ack without one, or a key two planned units share) the
+    manifest's. No row of the output is read.
 
     ``extra`` names fields of a manifest row counted beside its spec, as an
     axis of their own (the outputs stage's ``mode``); their rows follow the
@@ -394,7 +423,7 @@ def write_stage_coverage(
     hold.
     """
     path = coverage_path(manifest.path)
-    accepted = {ledger.key(ack) for ack in ledger.records()
+    accepted = {ledger.key(ack): ack for ack in ledger.records()
                 if ack.get("accepted") is True}
     planned = []
     for row in manifest:
@@ -405,8 +434,19 @@ def write_stage_coverage(
     if not axes and not planned:
         path.unlink(missing_ok=True)
         return None
+
+    shared = Counter(key for _, _, key in planned)
+
+    def _written(spec: dict, key) -> dict:
+        """The spec an accepted unit's row was written with."""
+        recorded = accepted[key].get("spec")
+        if axes and isinstance(recorded, dict) and shared[key] == 1:
+            return {**spec, **recorded}
+        return spec
+
     write_coverage(path, axes or {}, ((group, spec) for group, spec, _ in planned),
-                   ((group, spec) for group, spec, key in planned if key in accepted))
+                   ((group, _written(spec, key)) for group, spec, key in planned
+                    if key in accepted))
     logger.info("Coverage of the generation axes -> %s", path)
     return path
 

@@ -138,6 +138,58 @@ class TestAResume:
         assert "no constitution_inputs.plan.json" in caplog.text
         assert (tmp_path / "constitution_inputs.plan.json").exists()
 
+    @staticmethod
+    def _entries(tokens) -> pd.DataFrame:
+        return pd.DataFrame([
+            {"source_category": "Violence", "sample_description": f"desc zq{t}",
+             "constitution_subcategory": "Sub", "entry_type": "harmful"}
+            for t in tokens])
+
+    def _resume(self, folder, tokens):
+        gen = _TokenBackend(lambda t, n: one(f"{_NTH.get(n, n)} sample {t}"))
+        _token_pipeline(folder, gen, _TokenBackend(lambda t, n: "Yes")) \
+            .run_from_constitution(self._entries(tokens), _PROMPT,
+                                   samples_per_entry=_K, batch_size=4,
+                                   verbose=False, axes=A.resolve("inputs"))
+        return gen
+
+    def test_entries_that_join_a_group_leave_the_done_units_specs_to_their_rows(
+            self, tmp_path):
+        """zq1 sorts before the done zq5 and zq7 of its group: their units
+        keep, in the manifest and the coverage table, the specs their rows
+        were written with, and zq1's are dealt around them."""
+        self._resume(tmp_path, [5, 7])
+        gen = self._resume(tmp_path, [1, 5, 7])
+        assert len(gen.calls) == _K
+        planned = _planned(tmp_path)
+        rows = _rows(tmp_path)
+        assert len(rows) == 3 * _K
+        for row in rows.to_dict("records"):
+            spec = planned[row["source_sample_description"], int(row["iteration"])]
+            assert {axis: row[axis] for axis in _AXIS_COLUMNS} == spec
+        with (tmp_path / "constitution_inputs.coverage.csv").open(
+                encoding="utf-8", newline="") as fh:
+            accepted = {(r["axis"], r["value"]): int(r["accepted"])
+                        for r in csv.DictReader(fh) if int(r["accepted"])}
+        assert accepted == {(axis, value): n for axis in _AXIS_COLUMNS
+                            for value, n in rows[axis].value_counts().items()}
+        # zq1's siblings still differ on length.
+        assert rows[rows["source_sample_description"] == "desc zq1"][
+            "length"].nunique() == _K
+
+    def test_acks_written_before_they_recorded_a_spec_are_dealt_again(
+            self, tmp_path):
+        self._resume(tmp_path, [5, 7])
+        ledger = _constitution_inputs_ledger(tmp_path).path
+        lines = [json.loads(line) for line in ledger.read_text(
+            encoding="utf-8").splitlines()]
+        assert all("spec" in ack for ack in lines if "sample_description" in ack)
+        ledger.write_text("".join(
+            json.dumps({k: v for k, v in ack.items() if k != "spec"}) + "\n"
+            for ack in lines), encoding="utf-8")
+        gen = self._resume(tmp_path, [1, 5, 7])
+        assert len(gen.calls) == _K and len(_rows(tmp_path)) == 3 * _K
+
     def test_a_broken_plan_file_stops_it_naming_the_remedies(self, tmp_path):
         _run(tmp_path)
         plan = tmp_path / "constitution_inputs.plan.json"

@@ -8,6 +8,7 @@ The mode (:mod:`redact.content_moderation.modes`) picks the generation prompt
 import functools
 import logging
 import re
+from collections import Counter
 from pathlib import Path
 
 import pandas as pd
@@ -222,9 +223,10 @@ def run_output_generation(
     ``content_id`` of the response, or of
     ``"{input_id}:{iteration}:prompt too long"`` for a prompt too long,
     which has none. The ledger beside ``out_path`` is keyed on ``(input_id,
-    iteration)``, an ack holding the verdict too; ``resume=False`` starts the
-    stage over. A resume deals the modes and the specs again, a done unit
-    keeping the mode its ack records, and
+    iteration)``, an ack holding the mode, the spec and the verdict too;
+    ``resume=False`` starts the stage over. A resume deals the modes and the
+    specs again, a done unit keeping the mode and the spec its ack records,
+    and
     ``<stem>.plan.json`` (``seed``, ``outputs_per_input``, ``modes``, the
     axes' weights) stops one that would deal others; a ledger with an ack
     without ``iteration``, or a file without the ``iteration``, answer-mode
@@ -342,16 +344,25 @@ def run_output_generation(
     write_plan(manifest.path, made_with)
 
     # Every unit is dealt its mode and its spec, done or not: the deal is a
-    # function of the whole plan. A done unit keeps the mode its ack records,
-    # so the manifest and the coverage table agree with its row, and the
-    # other units are dealt around it.
-    recorded = {ledger.key(ack): ack["mode"] for ack in ledger.records()
-                if "mode" in ack and ledger.key(ack) in completed}
-    fixed = {u: recorded[(sids[i], iteration)]
+    # function of the whole plan. A done unit keeps the mode and the spec
+    # its ack records, so the manifest and the coverage table agree with its
+    # row, and the other units are dealt around it. An ack without them
+    # (written before acks recorded them) leaves its unit to the deal, and
+    # so does the spec of a key two input rows share: one ack holds it, and
+    # which row's it is, nothing says.
+    done_acks = {key: ack for ack in ledger.records()
+                 if (key := ledger.key(ack)) in completed}
+    fixed = {u: done_acks[(sids[i], iteration)].get("mode")
              for u, (i, iteration) in enumerate(units)
-             if recorded.get((sids[i], iteration)) in modes[groups[i][1]]}
+             if (sids[i], iteration) in done_acks}
+    fixed = {u: mode for u, mode in fixed.items()
+             if mode in modes[groups[units[u][0]][1]]}
+    shared = Counter(unit_key for _, unit_key in keys)
+    fixed_specs = {u: done_acks[unit_key]["spec"]
+                   for u, (_, unit_key) in enumerate(keys)
+                   if shared[unit_key] == 1 and "spec" in done_acks.get(unit_key, {})}
     unit_modes = deal_modes(modes, keys, seed=seed, fixed=fixed)
-    specs = deal_specs(axes, keys, seed=seed)
+    specs = deal_specs(axes, keys, seed=seed, fixed=fixed_specs)
 
     # Plan → manifest: one row per unit, written before the batch loop so the
     # run's full intended scope is inspectable up front (keyed like the ledger).
@@ -447,9 +458,11 @@ def run_output_generation(
         r["output_label"] = OUTPUT_LABEL[mode]
         r["response_label"] = response_label(r["entry_type"], mode)
         r.update(spec_columns(axes, specs[u], prefix=_PREFIX))
-        # The verdict, what the coverage table counts.
+        # The mode and the spec, what a resume deals the unit again, and the
+        # verdict, what the coverage table counts.
         buf.add([r], {"input_id": r["input_id"], "iteration": iteration,
-                      "mode": mode, "accepted": bool(accepted)})
+                      "mode": mode, **({"spec": specs[u]} if axes else {}),
+                      "accepted": bool(accepted)})
 
     # The row of a prompt that is too long is acked like any other: sent
     # again, the prompt would be too long again. Any other unit error stops

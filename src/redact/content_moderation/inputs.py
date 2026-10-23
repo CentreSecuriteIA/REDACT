@@ -24,6 +24,7 @@ Usage::
 
 import functools
 import logging
+from collections import Counter
 from pathlib import Path
 from typing import NamedTuple
 
@@ -251,8 +252,9 @@ class InputPipeline:
         Rows go to ``{dataset_dir}/{category}/samples.csv``, and a text is
         written once in the folder, whatever its category and style. The
         ledger beside them is keyed on ``(sample_description, entry_type,
-        style, iteration)``, and a resume reads it alone; the deal is made
-        again, and ``constitution_inputs.plan.json`` (``seed``,
+        style, iteration)``, an ack recording the unit's spec, and a resume
+        reads it alone; the deal is made again, a done unit keeping the spec
+        its ack records, and ``constitution_inputs.plan.json`` (``seed``,
         ``samples_per_entry``, the axes' weights) stops a resume that would
         deal another. ``resume=False`` starts this style over and keeps the
         rows and acks of the others; without a style it clears the folder. A
@@ -349,9 +351,22 @@ class InputPipeline:
 
         units = [(e, iteration)
                  for e in entries for iteration in range(samples_per_entry)]
+        # Every unit is dealt its spec, done or not: the deal is a function
+        # of the whole plan. A done unit keeps the spec its ack records, so
+        # the manifest and the coverage table agree with its row, and the
+        # other units are dealt around it. An ack without one (written
+        # before acks recorded it) leaves its unit to the deal, and so does
+        # a key two entries share.
+        recorded = {key: ack["spec"] for ack in ledger.records()
+                    if "spec" in ack and (key := ledger.key(ack)) in processed}
+        unit_keys = [(e.description, e.entry_type, style, iteration)
+                     for e, iteration in units]
+        shared = Counter(unit_keys)
+        fixed = {j: recorded[key] for j, key in enumerate(unit_keys)
+                 if key in recorded and shared[key] == 1}
         specs = deal_specs(
             axes, [((e.category, e.entry_type), (e.description, iteration))
-                   for e, iteration in units], seed=seed)
+                   for e, iteration in units], seed=seed, fixed=fixed)
         manifest.write(
             {"sample_description": e.description, "entry_type": e.entry_type,
              "style": style, "iteration": iteration, "category": e.category,
@@ -484,8 +499,10 @@ class InputPipeline:
                              finished, total, e.category, e.entry_type, desc_preview,
                              iteration)
 
+            # The spec the unit was dealt, what a resume deals it again.
             key = {"sample_description": e.description, "entry_type": e.entry_type,
-                   "style": style, "iteration": iteration}
+                   "style": style, "iteration": iteration,
+                   **({"spec": spec} if axes else {})}
             row = None
             if verdict is not None:
                 accepted, reasoning = verdict

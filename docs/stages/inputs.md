@@ -85,7 +85,7 @@ and check requests take the async lane and units finish apart.
 | | Value |
 |---|---|
 | Ledger key | `(sample_description, entry_type, style, iteration)` |
-| Ledger record | the key, `ids` (the `sample_id` of the row it wrote) and `accepted` (the verdict). Or the key with `status` `rejected` or `no_sample` and `attempts` |
+| Ledger record | the key, `ids` (the `sample_id` of the row it wrote) and `accepted` (the verdict). Or the key with `status` `rejected` or `no_sample` and `attempts`. Each also holds `spec`, the unit's dealt spec (none without axes) |
 | Manifest row | `sample_description`, `entry_type`, `style`, `iteration`, `category`, `spec` (the dealt value of each axis; none without axes), `status` |
 
 ## The generation axes
@@ -120,11 +120,20 @@ subcategory.
   `{sample_spec}` is empty.
 - **Deterministic.** The deal is a function of the seed, the weights, the
   units of each group and `samples_per_entry`. It is made again on every
-  run, and the plan file stops a run that would deal another. Entries added
-  since (a regenerated constitution, a new category) are dealt into their
-  groups; units already done keep the specs their rows record (the manifest
-  and the coverage table take the new deal), and the specs of units not done
-  may move.
+  run, and the plan file stops a run that would deal another.
+- **Done units keep their spec.** A done unit keeps the spec its ack
+  records, the one its row was written with: the deal counts it as dealt
+  and deals the other units around it, so the manifest and the coverage
+  table agree with the rows. Entries that join a group already dealt (a
+  frame passed with entries added) are dealt around the done units, and
+  the specs of units not done may move; a new category is a group of its
+  own. An ack written by an earlier version, without a spec, leaves its
+  unit to the deal: its row keeps its spec, and the manifest may show
+  another.
+- **Entries that leave.** The units of entries no longer in the frame (a
+  constitution regenerated with `resume: false`, or a subset passed) are
+  not planned: their rows stay in the category files and reach the later
+  stages, and the manifest and the coverage table no longer count them.
 
 ## Files
 
@@ -136,7 +145,7 @@ Under `Datasets/constitution_inputs/`:
 | `constitution_inputs.manifest.jsonl` | The plan of the current style, written again every run |
 | `constitution_inputs.state.jsonl` | The ledger, for every style |
 | `constitution_inputs.plan.json` | What the deal was made with: `seed`, `samples_per_entry`, and each dealt axis's weights as dealt, log-scaled with `axes_weighting` `"log"` (`null` without axes). Labels and hints are not in it: rewording them changes no deal |
-| `constitution_inputs.coverage.csv` | Per axis value and group: `axis`, `value`, `category`, `entry_type`, `planned` (from the manifest), `accepted` (from the acks of this style). Every value of the table has a row in every group seen, `0` when never dealt. Written when the stage ends, and when it has nothing to run; removed without axes |
+| `constitution_inputs.coverage.csv` | Per axis value and group: `axis`, `value`, `category`, `entry_type`, `planned` (from the manifest), `accepted` (from the acks of this style, each counting the spec it records). Every value of the table has a row in every group seen, `0` when never dealt. Written when the stage ends, and when it has nothing to run; removed without axes |
 
 And `Datasets/constitution_inputs_merged.csv`: the rows of every category
 and every style whose `accepted` reads true (`dataset.accepted_mask`),
