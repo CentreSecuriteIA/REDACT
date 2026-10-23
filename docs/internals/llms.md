@@ -236,9 +236,9 @@ is known. Capture never adds a column or a row.
 
 | Stage | Capture ids |
 |---|---|
-| outputs | `<input_id>/output`, `<input_id>/val_out`; later attempts under `/attempt_<n>` |
+| outputs | `<input_id>/<iteration>/output`, `<input_id>/<iteration>/val_out`; later attempts under `/attempt_<n>` |
 | seeded inputs | `<entry id>/<iteration>/input_<style>`; `<sample_id>/val_in_<style>` |
-| paraphrase | `<input_id>/paraphrase/attempt_<iteration>`, renamed to `<input_id>/paraphrase/<sample_id>` |
+| paraphrase | `<input_id>/paraphrase/attempt_<iteration>`, renamed to `<input_id>/paraphrase/<sample_id>`; for the outputs target, `<response_id>` in place of `<input_id>` (an input may have several responses) |
 | jailbreaks | `<input_id>/<label>/attempt_<iteration>/<technique>/<n>`, the root renamed to `<input_id>/<label>/<sample_id>` |
 
 Conversations are not captured.

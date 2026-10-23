@@ -243,7 +243,9 @@ its lines to stderr itself, with a `kill -9` line for a pid still alive.
 fails, one copy on the engine's first cards is built instead, once, with a
 WARNING naming the error and `"copies": 1` as the way to make it permanent.
 Not when a process the failed build started outlives SIGKILL, when the
-process is exiting, or when the copies were handed to the engine directly.
+process is exiting, or when the copies were handed to the engine directly
+(`data_parallel_size` in the `vllm_kwargs` of a `VLLMBackend` built by hand:
+a registry entry may not name it).
 The load event carries `planned_copies` and `fallback`.
 
 **The exit.** The exit hook releases every engine, waiting for a load in

@@ -86,8 +86,9 @@ def assert_single_sample_per_call(client: ModelClient, samples_per_call: int) ->
 
     When one prompt asks for several samples in one completion, the captured
     internals of that forward pass cannot be attributed to any single sample.
-    Pipelines with that shape (e.g. ``InputPipeline.run_from_constitution``)
-    call this before dispatch with their own samples-per-call setting.
+    A pipeline with that shape calls this before dispatch with its own
+    samples-per-call setting. No stage has that shape now: every call of
+    the inputs stage asks for one sample.
 
     Args:
         client: The generation client.

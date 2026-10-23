@@ -225,8 +225,8 @@ def drive_units(
     group when none does, and
     hands the replies back. A unit that finishes is reported at once, so the
     caller can save it without waiting for the others. Each distinct limit on
-    one model is another group: at ``pool_size = 2 * cap`` up to three keep
-    the calls full, more leave them part-full.
+    one model is another group: at ``pool_size = 2 * cap`` two keep the
+    calls full, more leave them part-full.
 
     A request whose client has async calls (``supports_async_calls``) is not
     grouped. It is sent on the shared event loop the moment its unit yields
