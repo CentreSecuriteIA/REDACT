@@ -238,15 +238,16 @@ def generate_inputs(
         prompt_dir: Root prompt directory for the generation, format and
             check prompts. ``None`` (default) falls back to the bundled
             ``prompts/``.
-        resume: When True (default), skip entries already processed. When
-            False, start this style over.
+        resume: When True (default), skip the units ``(entry, iteration)``
+            already acked in the ledger. When False, start this style over.
         verbose: Log progress.
         style: Template style (``"long"`` / ``"short"`` / any directory under
             ``prompts/input/generation/from_constitution/``).
         samples_per_entry: Samples per constitution entry, one call each.
         entry_types: Filter constitution entries to these types
             (e.g. ``["harmful", "benign"]``). None = all.
-        batch_size: Entries per LLM engine pass.
+        batch_size: Requests per grouped call; the unit pool keeps at least
+            twice as many units live (``llm_pipeline.pool_size``).
         max_attempts: Generations per unit before a reply without its
             ``[END]`` marker or with another number of samples is given up on.
         check_max_tokens: Reply limit for the check calls. ``None`` keeps the
@@ -391,9 +392,9 @@ def generate_outputs(
          checker's verdict as feedback.
       3. Incremental append to the output CSV as rows finish — crash-resilient.
 
-    Resume: each input gets a stable content-hash id (its ``id`` column when
-    present, else ``content_id(prompt)``), and each unit is ``(input_id,
-    iteration)``. Completed units are recorded in a sidecar ``*.state.jsonl``
+    Resume: each input gets a stable id (its ``sample_id`` when present, else
+    the content id of its ``sample``, or ``prompt``), and each unit is
+    ``(input_id, iteration)``. Completed units are recorded in a sidecar ``*.state.jsonl``
     ledger beside the output CSV. On a re-run (``resume=True``) units already
     in the ledger are skipped, so a crash loses only the rows still in
     progress, and the modes and specs are dealt as before:
@@ -411,7 +412,8 @@ def generate_outputs(
         check_outputs: Run each row's mode's output quality checker.
             Set False to skip checking (accept everything).
         check_model: Checker model; defaults to ``model``.
-        batch_size: Units per engine pass.
+        batch_size: Requests per grouped call; the unit pool keeps at least
+            twice as many units live (``llm_pipeline.pool_size``).
         max_samples: Global cap on inputs processed (``head(N)`` over the whole
             frame); None = all. Applied *after* ``max_per_category``. Both
             caps count inputs, before each is expanded to
@@ -430,11 +432,12 @@ def generate_outputs(
             over ``data_dir``.
         prompt_dir: Root prompt directory for the generation **and** output-check
             prompts. ``None`` (default) falls back to the bundled ``prompts/``.
-        resume: When True (default), skip inputs already recorded in the sidecar
-            state ledger. When False, clear the output CSV and ledger first.
+        resume: When True (default), skip the units ``(input_id,
+            iteration)`` already recorded in the sidecar state ledger. When
+            False, clear the output CSV and ledger first.
         verbose: Print per-batch progress.
-        max_attempts: Generations per input; more than 1 retries a rejected
-            response with the checker's verdict as feedback.
+        max_attempts: Generations per response (unit); more than 1 retries a
+            rejected response with the checker's verdict as feedback.
         check_max_tokens: Reply limit for the check calls; a verdict needs
             few tokens. ``None`` keeps the checker model's default.
         axes: The response axes each row is dealt a value of, the
@@ -592,7 +595,8 @@ def generate_jailbreaks(
         translation_model: Model for the translation family. ``None`` uses the
             ``translation`` role, independently of ``model``.
         check_model: Model that checks what a technique's model writes (the
-            typo check). ``None`` is ``model``, so no other model loads.
+            typo and scenario checks). ``None`` is ``model``, so no other
+            model loads.
             Translation keeps its own checkers: the translator itself, or
             for a machine translation ``model`` as the judge.
         auto_generate_benign: Pre-load or generate benign data for FSH/DAP.
@@ -626,7 +630,7 @@ def generate_jailbreaks(
 
     Returns:
         The rows of the jailbreaks CSV (input columns plus ``sample_id``,
-        ``jailbreak``, ``technique``, ``technique_info``, ``complexity``,
+        ``input_id``, ``jailbreak``, ``technique``, ``technique_info``, ``complexity``,
         ``num_techniques``, ``is_noop``, ``accepted``, ``reasoning``,
         ``iteration``, ``combination_spec_version``), or an empty frame when
         the adversarial kind is off. ``sample_id`` is this row's own
@@ -1863,7 +1867,8 @@ def _build_sources(ctx: RunContext) -> list[Path]:
 _GEN = ("gen", "uncensored_gen")
 _CHECK = ("check", "uncensored_gen")
 
-#: The stages a recipe can name, in the order a run takes them.
+#: The stages a recipe can name, in the order of a full run. A run takes the
+#: stages in its recipe's order, which nothing checks against this one.
 STAGES: dict[str, Stage] = {stage.name: stage for stage in (
     Stage("constitution", "generate_constitution",
           roles=(("constitution", "constitution_gen"),),

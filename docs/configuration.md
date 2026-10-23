@@ -169,7 +169,7 @@ names of the last two, are read for this release with a
 | Key | Default | Meaning |
 |---|---|---|
 | `check_outputs` | `true` | Check each response; `false` accepts every response |
-| `max_attempts` | `1` | Generations per input; above 1 a rejected response is generated again with the verdict as feedback |
+| `max_attempts` | `1` | Generations per response (unit); above 1 a rejected response is generated again with the verdict as feedback |
 | `max_per_category` | `null` | Keep the first N inputs per `(category, entry_type)` |
 | `max_samples` | `null` | Keep the first N inputs overall, after `max_per_category` |
 | `outputs_per_input` | `1`; `2` in the `training` type | Responses per input, each a unit `(input_id, iteration)` dealt its own answer mode and spec, so an input's responses differ on the axes and, from 2, a borderline input gets one answer of each mode. `max_per_category` and `max_samples` count inputs, before this expansion. A whole number of at least 1; `null` is not read as the default and raises at load |

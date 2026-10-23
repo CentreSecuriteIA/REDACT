@@ -16,8 +16,8 @@ Under `src/redact/`:
 | `constitution/` | The constitution stage: `generation.py` (`ConstitutionPipeline`, `read_constitution`), `units.py` (one call per taxonomy category and entry type, and one per benign-taxonomy category for the general-benign part), `parse.py` (the `[END]` marker and the three-level markdown parser) |
 | `content_moderation/` | The inputs, outputs and paraphrase stages: `inputs.py` (`InputPipeline`), `outputs.py`, `axes.py` (the generation axes: resolve, deal, render, coverage), `modes.py` (the outputs' answer modes: the mapping, the label, the deal), `paraphrase.py`, `checker.py` (the checkers), `feedback.py` (rejection feedback, the length floor's reason), `results.py` (the inputs stage's totals) |
 | `jailbreak/` | The technique library, one subpackage per layer, and the augmentation engine ([jailbreak.md](jailbreak.md)) |
-| `multi_turn/` | Conversation datasets: settings, actors, `generate_conversations`, `evaluate_conversations` |
-| `multiturn_attacks/`, `optimization/` | Crescendo and PAIR attacks against a safety-trained target; a beam search over conversation moves ([conversations](../stages/conversations.md#attacks-and-search)) |
+| `multi_turn/` | Conversation datasets: settings, actors, `generate_conversations`, `evaluate_conversations`; a planned extension, not finished |
+| `multiturn_attacks/`, `optimization/` | Crescendo and PAIR attacks against a safety-trained target; a beam search over conversation moves ([conversations](../stages/conversations.md#attacks-and-search)); planned extensions, not finished |
 | `dataset/` | Rows on disk: identity, the ledger and manifest, resume, the per-category tree, what an eval build leaves out ([dataset.md](dataset.md)) |
 | `configs/` | Package data: `llm/` (registry, roles, GPU prices, `hf_configs/`), `jailbreak/` (the spec, the augmentation defaults, technique templates), `dataset_types/` (what `training` and `eval` mean), `taxonomy/`, `datasets/`, `runs/` (example recipes and their params files), `generation_axes.json` (the axes of the inputs and outputs), `dimensions.json` (what each family and axis varies) |
 | `prompts/` | One prompt JSON per pipeline and step |
@@ -100,8 +100,9 @@ print(f"{result.total_prompts_accepted} accepted samples")
 
 ## The stage table
 
-`stages.STAGES` maps each recipe stage name to a `Stage`, in the order a run
-takes them.
+`stages.STAGES` maps each recipe stage name to a `Stage`, in the order of a
+full run. A run takes the stages in its recipe's order, which nothing checks
+against this one: a recipe that lists `build` before `inputs` builds first.
 
 | Field | Meaning |
 |---|---|

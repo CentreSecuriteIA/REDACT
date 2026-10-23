@@ -285,8 +285,8 @@ counted.
 | Package | What it is for |
 |---|---|
 | `multi_turn/` | Conversation datasets: a `Setting` of actors played on seeds (`generate_conversations`), scored by a judge (`evaluate_conversations`); a planned extension, not finished |
-| `multiturn_attacks/` | A `Setting` of an attacker and a target model (`generate_attacks`, `score_attacks`, `optimize_attack`), built on `multi_turn/` |
-| `optimization/` | A beam search over conversation moves scored by a judge (`optimize`) |
+| `multiturn_attacks/` | A `Setting` of an attacker and a target model (`generate_attacks`, `score_attacks`, `optimize_attack`), built on `multi_turn/`; a planned extension, not finished |
+| `optimization/` | A beam search over conversation moves scored by a judge (`optimize`); a planned extension, not finished |
 | `dataset/loading.py` | Load a published dataset from the HuggingFace Hub (`load_hf_dataset`, `load_from_config`) |
 
 ## Out of scope
