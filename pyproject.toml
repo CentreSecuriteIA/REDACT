@@ -36,7 +36,9 @@ dependencies = [
 # engine processes from others on a card (driver.py, only with local models).
 # A machine-translation model runs only on vLLM, and the paraphrase check's
 # language gate runs beside a local paraphraser, so the extra brings langid.
-vllm = ["vllm>=0.4", "hf_transfer>=0.1", "psutil>=5.9", "redact[langid]"]
+# vLLM 0.31 is the oldest tested (requirements.lock): the backend runs its V1
+# engine, AsyncLLM, and APIs older releases lack (backends/vllm.py, MIN_VLLM).
+vllm = ["vllm>=0.31", "hf_transfer>=0.1", "psutil>=5.9", "redact[langid]"]
 # GlotLID, which checks the language of a machine translation and of a
 # paraphrase (jailbreak/obfuscation/langid.py): fastText inference only, no numpy.
 langid = ["fasttext-predict>=0.9.2.4", "huggingface_hub>=0.20"]

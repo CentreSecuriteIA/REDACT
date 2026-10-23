@@ -112,6 +112,11 @@ down and its memory freed, and a client built on it raises on its next call.
   engine request, awaited on the shared loop (`aio.py`); the engine batches
   whatever is in flight. `generate` sends one request per item and waits for
   all.
+- It needs vLLM 0.31 or later (`MIN_VLLM`, the `vllm` extra's floor, the
+  version `requirements.lock` pins): the V1 engine and the APIs used with
+  it. vLLM is imported at the first load (`_import_vllm`). An installed
+  vLLM that fails to import is named in the error, which says when it is
+  too old; an older one that imports is warned about.
 - Prompts go through the chat template of the engine's tokenizer, or the
   entry's `chat_template` (a Jinja string, passed to `apply_chat_template`)
   for a checkpoint that ships none, so any checkpoint whose tokenizer ships

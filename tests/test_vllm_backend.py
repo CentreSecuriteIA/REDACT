@@ -463,6 +463,70 @@ class TestWorkerStartMethod:
         assert os.environ["VLLM_WORKER_MULTIPROC_METHOD"] == "spawn"
 
 
+class TestVLLMImport:
+    """The backend runs vLLM's V1 engine: an installed vLLM too old for it
+    is named, not reported as missing."""
+
+    @pytest.fixture()
+    def installed(self, monkeypatch):
+        """Make vLLM installed at a version (``None``: not installed), and
+        importable or not."""
+        import importlib.metadata
+
+        def _set(version, importable):
+            def fake_version(name):
+                if name != "vllm" or version is None:
+                    raise importlib.metadata.PackageNotFoundError(name)
+                return version
+
+            monkeypatch.setattr(importlib.metadata, "version", fake_version)
+            for name, module in fake_vllm_modules(object).items():
+                monkeypatch.setitem(sys.modules, name, module if importable else None)
+        return _set
+
+    def test_not_installed(self, installed):
+        import redact.llms.backends.vllm as vllm_module
+
+        installed(None, importable=False)
+        with pytest.raises(ImportError, match=r"pip install 'redact\[vllm\]'") as err:
+            vllm_module._import_vllm()
+        assert isinstance(err.value.__cause__, ImportError)
+
+    def test_too_old_to_import(self, installed):
+        import redact.llms.backends.vllm as vllm_module
+
+        installed("0.10.1", importable=False)
+        with pytest.raises(ImportError) as err:
+            vllm_module._import_vllm()
+        message = str(err.value)
+        assert message.startswith("vLLM 0.10.1 is installed, but VLLMBackend needs "
+                                  f"vLLM {vllm_module.MIN_VLLM} or later")
+        assert f"pip install -U 'vllm>={vllm_module.MIN_VLLM}'" in message
+        assert isinstance(err.value.__cause__, ImportError)
+
+    def test_recent_but_broken(self, installed):
+        import redact.llms.backends.vllm as vllm_module
+
+        installed("0.31.0", importable=False)
+        with pytest.raises(ImportError, match=r"^vLLM 0\.31\.0 is installed but "
+                                              r"failed to import"):
+            vllm_module._import_vllm()
+
+    @pytest.mark.parametrize("version, warned", [
+        ("0.30.2", True), ("0.31.0", False), ("0.32.0rc1.dev4+g1a2b", False),
+        ("1.0.0", False), ("unknown", False)])
+    def test_an_old_one_that_imports_is_warned_about(
+            self, installed, caplog, version, warned):
+        import redact.llms.backends.vllm as vllm_module
+
+        installed(version, importable=True)
+        with caplog.at_level(logging.WARNING, logger=vllm_module.logger.name):
+            assert len(vllm_module._import_vllm()) == 3
+        assert bool(caplog.records) is warned
+        if warned:
+            assert f"vLLM {version} is installed" in caplog.text
+
+
 class TestExitHook:
     """A process that ends with an engine loaded shuts it down first, or
     multiprocessing's exit hook waits for the engine's child process forever.
