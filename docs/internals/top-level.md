@@ -188,7 +188,9 @@ tied to code, so they come from the package only.
    `workers` for every client built during the run.
 5. `_plan_phases`: `residency.plan_phases` over each stage's models
    (`_stage_models` resolves them as the stages will), `residency.report` per
-   distinct plan, `residency.apply_plan`. A planning error is logged at
+   distinct plan (a plan that does not fit at ERROR and one with warnings at
+   WARNING whatever `verbose` says, so `--quiet` still shows them; one that
+   fits at INFO with `verbose`), `residency.apply_plan`. A planning error is logged at
    ERROR with its traceback, never raised; the message says that every local
    engine then loads unplanned, at 0.9 of a card.
 6. `_check_cards`: one `nvidia-smi` read (`measure.card_use`) before any

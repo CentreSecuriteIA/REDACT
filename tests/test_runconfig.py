@@ -2272,6 +2272,26 @@ def test_phases_plan_each_stage_and_preload_what_fits(local_models):
     assert calls == [("preload", [gen])]
 
 
+def test_a_plan_that_does_not_fit_is_logged_without_verbose(local_models, caplog):
+    """--quiet runs with verbose off at WARNING: the plan that does not fit
+    still shows, at ERROR, and one with warnings at WARNING; none at INFO."""
+    from redact.driver import _plan_phases
+
+    gen = local_models("_rc_zz_gen")
+    paraphraser = local_models("_rc_aa_paraphraser")
+    models = _models(gen=gen, paraphraser=paraphraser, paraphrase_check=gen)
+    card = _one_card(8.0)                         # 5 + 5 GiB is over 0.9 x 8
+    try:
+        with card[0], card[1], caplog.at_level("INFO", logger="redact.residency"):
+            _plan_phases(models, ["inputs", "paraphrase"], verbose=False)
+    finally:
+        telemetry.uninstall()
+    logged = [(r.levelname, r.getMessage().split(":")[0]) for r in caplog.records
+              if r.getMessage().startswith("[residency] stages")]
+    assert ("ERROR", "[residency] stages paraphrase") in logged
+    assert "INFO" not in {level for level, _ in logged}
+
+
 def test_phases_apply_one_share_per_engine_for_the_run(local_models):
     """gen is alone in the inputs stage and shares the card in the paraphrase
     stage: it loads once, with the smaller share."""

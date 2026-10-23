@@ -143,7 +143,9 @@ def _plan_phases(
 
     Runs before the stage loop, so a stage that does not fit says so before
     any stage spends its budget. Nothing here aborts the run: a plan that
-    does not fit and a planning error are only logged. ``copies`` is the
+    does not fit and a planning error are only logged, at ERROR, and so is a
+    plan with warnings, at WARNING, with ``verbose`` off too; a plan that
+    fits is logged at INFO with ``verbose`` only. ``copies`` is the
     recipe's: a number of copies per model name.
 
     Returns:
@@ -168,8 +170,12 @@ def _plan_phases(
         for i, phase in enumerate(phases):
             if phase.resident and id(phase.plan) not in reported:
                 reported.add(id(phase.plan))
+                # A plan that does not fit, or warns, is logged whatever
+                # verbose says: --quiet runs at WARNING and still shows it.
                 residency.report(
-                    phase.plan, verbose=verbose, stages=stages_of[id(phase.plan)])
+                    phase.plan,
+                    verbose=verbose or not phase.plan.fits or bool(phase.plan.warnings),
+                    stages=stages_of[id(phase.plan)])
             # The first replaces what an earlier run left. An engine loaded
             # a second time has other values in a later plan, which it gets
             # when that stage is entered (_enter_phase).

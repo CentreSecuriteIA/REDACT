@@ -230,8 +230,8 @@ role that makes few calls (the constitution).
 
 When any stage calls a local model, the driver plans the GPUs before the
 first stage runs. The plan is a forecast and a set of instructions to the
-loader. It never aborts a run: a plan that does not fit is logged at ERROR
-and the run goes on. So is a planning error, with its traceback; then every
+loader. It never aborts a run: a plan that does not fit is logged at ERROR,
+with `--quiet` too, and the run goes on. So is a planning error, with its traceback; then every
 local engine loads unplanned, at 0.9 of a whole card, so a second engine on
 that card does not start. [internals/residency.md](internals/residency.md) has the
 mechanics.
