@@ -160,15 +160,20 @@ not retried forever. Leaving the block also releases the stage's lock.
 
 1. takes the stage's lock (below);
 2. stops if a `drop_units` did not finish;
-3. reads the ledger;
-4. checks every file the last `_saved` names: a file that is missing,
+3. reads the plan file beside the manifest, when one is given and the file
+   exists: one that holds no record (not JSON, or not an object) stops the
+   resume with a `ValueError` naming the file and the remedies (delete it,
+   and the stage resumes without comparing its settings, with a WARNING; or
+   start over with `resume=False`), and the lock is given back;
+4. reads the ledger;
+5. checks every file the last `_saved` names: a file that is missing,
    shorter than recorded, or different in the last 4 kB before the recorded
    size stops the resume with a `RuntimeError` naming the remedies. Every
    file is checked before any is changed;
-5. cuts each file back to its recorded size. The bytes cut off, the tail of a
+6. cuts each file back to its recorded size. The bytes cut off, the tail of a
    save that did not finish, are appended to `<file>.cut`;
-6. cuts the ledger back to the end of its last `_saved` line;
-7. returns the finished keys. It reads no row of the output.
+7. cuts the ledger back to the end of its last `_saved` line;
+8. returns the finished keys. It reads no row of the output.
 
 The units of the unfinished save run again, so no unit ends with two sets of
 rows. `tests/dataset/test_crash_matrix.py` crashes a save at every write and
@@ -279,8 +284,8 @@ inputs and outputs stages.
 | `dealing.stable_seed(*parts)` | A seed from the parts, the same in every process: the first 16 hex digits of the SHA-256 of the parts joined by `::` |
 | `planfile.plan_path(manifest)`, `coverage_path(manifest)`, `variants_path(manifest)` | `<stem>.plan.json`, `<stem>.coverage.csv` and `<stem>.variants.csv` (the jailbreak kind's variants table) beside a manifest |
 | `planfile.plan_record(**made_with)` | What a plan is made with, as JSON reads it back |
-| `planfile.write_plan(manifest, record)` | Writes the plan file |
-| `planfile.read_plan(manifest)` | The record the plan file holds; `None` without a plan file |
+| `planfile.write_plan(manifest, record)` | Writes the plan file through `<name>.tmp`, synced, and a rename, so it holds the old record or the new one |
+| `planfile.read_plan(manifest)` | The record the plan file holds; `None` without a plan file. A file that is not a JSON object raises a `ValueError` naming it and the remedies: delete it, or `resume=False` |
 | `planfile.changed_plan(manifest, current)` | The keys whose values differ from the plan file's; `None` without a plan file |
 
 ## Taxonomy and published datasets

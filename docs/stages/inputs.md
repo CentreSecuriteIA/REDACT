@@ -180,7 +180,9 @@ those the units in ... were dealt with`, naming the keys and `resume=False`.
 The plan file is the folder's, for every style: a `generate_inputs` call on
 a training run's folder passes `axes_weighting="log"`, as the run does. A
 folder with finished units and no plan file runs unchecked, with a
-WARNING.
+WARNING. A plan file that holds no record (one an earlier version cut off
+as it wrote it) stops the resume before anything is cut, naming the file:
+delete it to resume unchecked, or start the style over.
 
 A folder written before units had an iteration stops before any call: a
 ledger that acks a unit without `iteration` (an entry was one call then), or

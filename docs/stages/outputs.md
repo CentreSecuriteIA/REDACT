@@ -211,7 +211,9 @@ file's, whose keys an old folder lacks. A resume then compares the run's
 `seed`, `outputs_per_input`, `modes` and axes' weights with
 `output_responses.plan.json`, and raises `Outputs: this run's [...] differ
 from those the responses in ... were dealt with`, naming the keys and
-`resume=False`.
+`resume=False`. A plan file that holds no record (one an earlier version
+cut off as it wrote it) stops the resume before anything is cut, naming the
+file: delete it to resume unchecked, or start over.
 
 ## Rejected and failed units
 

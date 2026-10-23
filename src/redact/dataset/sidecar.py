@@ -29,7 +29,7 @@ from itertools import chain, islice
 from pathlib import Path
 from typing import Any, NamedTuple
 
-from .rows import _replace, _retry_held
+from .rows import _replace, _retry_held, _write_atomic
 
 # Stands for what a ledger's file records until the file is read.
 _UNREAD: Any = object()
@@ -89,20 +89,13 @@ class JsonlSidecar:
         first = list(islice(rows, 1))
         if not first:
             return
-        self.path.parent.mkdir(parents=True, exist_ok=True)
         # ensure_ascii=False keeps unicode readable in the sidecar file;
-        # the file is always opened as utf-8 and read back via json.loads.
-        lines = (json.dumps(r, ensure_ascii=False) + "\n" for r in chain(first, rows))
-        temporary = self.path.with_name(self.path.name + ".tmp")
-        try:
-            with temporary.open("w", encoding="utf-8") as fh:
-                fh.writelines(lines)
-                fh.flush()
-                os.fsync(fh.fileno())
-            _replace(temporary, self.path)
-        finally:
-            # Still there only when the write or the rename failed.
-            temporary.unlink(missing_ok=True)
+        # the file is always read as utf-8 and each line via json.loads. The
+        # lines end as a text write ends them: json.dumps writes no raw line
+        # break of its own.
+        _write_atomic(self.path, (
+            (json.dumps(r, ensure_ascii=False) + os.linesep).encode("utf-8")
+            for r in chain(first, rows)))
 
 
 class LedgerState(NamedTuple):

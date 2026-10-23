@@ -138,6 +138,17 @@ class TestAResume:
         assert "no constitution_inputs.plan.json" in caplog.text
         assert (tmp_path / "constitution_inputs.plan.json").exists()
 
+    def test_a_broken_plan_file_stops_it_naming_the_remedies(self, tmp_path):
+        _run(tmp_path)
+        plan = tmp_path / "constitution_inputs.plan.json"
+        plan.write_text(plan.read_text(encoding="utf-8")[:20], encoding="utf-8")
+        with pytest.raises(ValueError, match="resume=False") as stopped:
+            _run(tmp_path)
+        assert plan.name in str(stopped.value)
+        assert lock_is_free(_constitution_inputs_ledger(tmp_path).path)
+        plan.unlink()
+        assert _run(tmp_path).calls == []   # deleted, the resume runs unchecked
+
     def test_a_folder_written_without_the_axes_stops_a_run_with_them(self, tmp_path):
         _run(tmp_path, axes=False)
         with pytest.raises(ValueError, match="'length'") as stopped:
