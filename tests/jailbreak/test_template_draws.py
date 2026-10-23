@@ -162,6 +162,13 @@ def test_a_template_technique_writes_and_draws_as_pinned(name, expected):
 
 # --- the regeneration -----------------------------------------------------------
 
+def same_text(written: Path, fixture: Path) -> bool:
+    """Whether the two files hold the same text; the line ends are not
+    compared, since a checkout may end lines with CRLF and a write with LF
+    (or the other way round)."""
+    return written.read_text(encoding="utf-8") == fixture.read_text(encoding="utf-8")
+
+
 def _copy_of_the_fixture(tmp_path, change) -> Path:
     """A copy of the fixture in ``tmp_path``, after ``change(data)``."""
     data = json.loads(_FIXTURE.read_text(encoding="utf-8"))
@@ -181,10 +188,10 @@ def test_the_eval_pool_holds_the_one_and_not_the_other():
     assert _NOT_IN_EVAL not in eval_pool and _NOT_IN_EVAL in _TECHNIQUES
 
 
-def test_regenerating_the_current_fixture_writes_it_byte_for_byte(tmp_path):
+def test_regenerating_the_current_fixture_writes_it_as_it_is(tmp_path):
     copy = _copy_of_the_fixture(tmp_path, lambda data: None)
     regenerate(copy)
-    assert copy.read_bytes() == _FIXTURE.read_bytes()
+    assert same_text(copy, _FIXTURE)
 
 
 def test_a_changed_eval_digest_is_refused_and_nothing_is_written(tmp_path):
@@ -209,14 +216,14 @@ def test_eval_review_records_the_changed_digest(tmp_path):
     copy = _copy_of_the_fixture(
         tmp_path, lambda data: data[_IN_EVAL].update({"0": "0" * 64}))
     regenerate(copy, eval_review=True)
-    assert copy.read_bytes() == _FIXTURE.read_bytes()
+    assert same_text(copy, _FIXTURE)
 
 
 def test_a_changed_digest_outside_the_eval_pool_is_recorded_without_a_flag(tmp_path):
     copy = _copy_of_the_fixture(
         tmp_path, lambda data: data[_NOT_IN_EVAL].update({"0": "0" * 64}))
     regenerate(copy)
-    assert copy.read_bytes() == _FIXTURE.read_bytes()
+    assert same_text(copy, _FIXTURE)
 
 
 if __name__ == "__main__":

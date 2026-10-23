@@ -77,7 +77,7 @@ def test_the_refused_family_pairs_are_as_pinned(recorded):
         "PYTHONPATH=src py -m tests.jailbreak.test_family_pairs")
 
 
-def test_the_fixture_is_the_regeneration_byte_for_byte():
+def test_the_fixture_is_what_the_regeneration_writes():
     assert _FIXTURE.read_text(encoding="utf-8") == _dumps(snapshot())
 
 

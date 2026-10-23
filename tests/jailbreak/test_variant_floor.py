@@ -169,6 +169,13 @@ def test_a_known_short_pool_is_still_short(recorded, current):
 
 # --- the regeneration -----------------------------------------------------------
 
+def same_text(written: Path, fixture: Path) -> bool:
+    """Whether the two files hold the same text; the line ends are not
+    compared, since a checkout may end lines with CRLF and a write with LF
+    (or the other way round)."""
+    return written.read_text(encoding="utf-8") == fixture.read_text(encoding="utf-8")
+
+
 def _copy_of_the_fixture(tmp_path, change=None) -> Path:
     """A copy of the fixture in ``tmp_path``, after ``change(data)``."""
     data = json.loads(_FIXTURE.read_text(encoding="utf-8"))
@@ -179,10 +186,10 @@ def _copy_of_the_fixture(tmp_path, change=None) -> Path:
     return copy
 
 
-def test_regenerating_the_current_fixture_writes_it_byte_for_byte(tmp_path):
+def test_regenerating_the_current_fixture_writes_it_as_it_is(tmp_path):
     copy = _copy_of_the_fixture(tmp_path)
     regenerate(copy)
-    assert copy.read_bytes() == _FIXTURE.read_bytes()
+    assert same_text(copy, _FIXTURE)
 
 
 def test_a_pool_with_fewer_variants_is_refused_and_nothing_is_written(tmp_path):
@@ -217,7 +224,7 @@ def test_allow_drop_records_the_lower_count(tmp_path):
 
     copy = _copy_of_the_fixture(tmp_path, one_more_recorded)
     regenerate(copy, allow_drop=True)
-    assert copy.read_bytes() == _FIXTURE.read_bytes()
+    assert same_text(copy, _FIXTURE)
 
 
 def test_a_pool_that_gained_variants_is_recorded_without_a_flag(tmp_path):
@@ -228,7 +235,7 @@ def test_a_pool_that_gained_variants_is_recorded_without_a_flag(tmp_path):
 
     copy = _copy_of_the_fixture(tmp_path, fewer_recorded)
     regenerate(copy)
-    assert copy.read_bytes() == _FIXTURE.read_bytes()
+    assert same_text(copy, _FIXTURE)
 
 
 if __name__ == "__main__":
