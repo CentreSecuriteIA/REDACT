@@ -729,11 +729,14 @@ a run you already have, and what you will see; each point has its note below.
 - **The eval release moves the eval type's draws.** The pool is the same 36
   techniques, but a translation now refuses every `encode` technique and
   ASCII art the heavy full-text encodings, so the pool loses 44 of its 335
-  pairs and eval files made before this release are not comparable with
-  those made after. A kept eval plan replays its recorded combinations and warns on
+  pairs, and the manipulation layer now applies last, around the finished
+  question, so 40 of the 291 pairs left (each `fsh` or `dap` technique
+  beside a wrapper or a request) write another text: eval files made before
+  this release are not comparable with those made after. A kept eval plan
+  replays its recorded combinations in their recorded order and warns on
   resume that the rules changed; plan the eval type again with
   `resume=False` to take them. Two more rules and a limit on a translation
-  drawn last change the training attacks only: `sensitive_words` and
+  drawn as the request obfuscation change the training attacks only: `sensitive_words` and
   `tokenbreak` refuse each other, and the request obfuscation, when it
   translates, keeps a suffix, a wrapper and a container out of the unit (the
   note on the eval release, below).
@@ -1415,9 +1418,11 @@ other.
 
 **Release note: the eval release.** The eval type's pool is the same 36
 techniques (`tests/fixtures/eval_pool.json`), but which pairs of them one
-combination may hold has changed, so eval files made before this release are
+combination may hold has changed, and so has the text of 40 of the pairs it
+keeps (the fifth change, below), so eval files made before this release are
 not comparable with those made after. No technique is added or retired, so
-the spec's version stays 1.3: these are changes to rules, which the plan
+the spec's version stays 1.3, as when rules changed within 1.3 before: these
+are changes to rules and to the order the layers apply in, which the plan
 file's `rules` id records. The first change is that a translation refuses
 every `encode` technique, light or heavy, into any script (the `translation`
 entry of the spec): both rewrite the whole text, so one is enough, and a
@@ -1467,8 +1472,8 @@ to 72 units (seeds 42 to 46) drew both before the rule, and none does since;
 
 The fourth change is for training only too: a translation drawn as the
 request obfuscation (phase 5, the packaged attacks only) refuses a suffix, a
-structural wrapper and a neutral container. It applies last, to the finished
-request, so it would translate the suffix, the keys of a JSON, XML or
+structural wrapper and a neutral container. It applies after the request, to
+the finished request, so it would translate the suffix, the keys of a JSON, XML or
 Markdown wrapper or the lines of a container (a new key of the spec,
 `request_obfuscation_refuses`, which the plan file's `rules` id records). A
 translation drawn as an ordinary obfuscation runs before those steps and
@@ -1484,7 +1489,7 @@ does not know which technique of a combination is the request obfuscation,
 so the WARNING of a kept plan, which counts the pending units whose
 combination today's rules refuse, leaves this rule out.
 
-Together the four changes close most pairings the ten heavy full-text
+Together the four rule changes close most pairings the ten heavy full-text
 encodings (complexity 3, which fits only a unit whose earlier picks leave 3
 points) were dealt with, so the default attack kind draws them rarely: 8 to
 16 draws of the ten in 3,000 units in three groups (seeds 42 to 46), against
@@ -1496,8 +1501,47 @@ page quotes from the simulation (the group-budget table, the request
 obfuscation's and the translation's shares) are measured on the rules of this
 release.
 
-A plan kept from before replays its recorded combinations, so it still holds
-the pairs now refused. Its plan file's `rules` id differs from today's, so a
+The fifth change is the order: the manipulation layer (`fsh`, `dap`,
+`fake_turns`) now applies last, after the obfuscations, the request and the
+request obfuscation, and puts the finished question among its examples or
+after its invented turn. The spec's `layer_order` is `rewrite`, `hacking`,
+`obfuscation`, `requests`, `manipulation`, and the sampler places the
+request obfuscation right after the request. Before, the steps after the
+layer read and changed the whole text: a typo rewrite or a marking call read
+3 to 32 benign pairs, a suffix landed after the last answer, a request
+framed the whole list, and an encoding multiplied the tokens of every pair.
+Now they change the question alone, and the examples stay as written. A
+selected `fsh` or `dap` variant shows its model the clean input (the unit's
+input, passed as `source_prompt`), not the encoded or wrapped question, and
+inserts the finished one. The same techniques are drawn, in another order:
+no pair is added or taken out. In the eval pool, the 40 pairs of the eight
+`fsh` and `dap` techniques with `to_json`, `to_xml`, `to_markdown`,
+`to_refusal_then_comply` and `to_use_past_tense` write another text (the
+wrapper or the request goes around the question alone), and the other 251
+pairs and the 36 single techniques write what they wrote; a plan of 3,000
+inputs at seed 43 holds 858 such units among its 3,000 round-2 ones, and the
+plan of 300 inputs the digest pins 86 of its 300. The rules stay: the
+manipulation block (`manipulation_blocked_obfuscation`) is kept as it was
+(lifting it would admit 104 eval pairs, each `fsh` or `dap` technique beside
+a translation or a heavy encoding, a change of the eval coverage of its own),
+and so are the many-shot variants' refusal of `typos`, whose reason (a
+rewrite of the whole many-shot text) is gone. On the default attack kind
+(3,000 units in three groups at seed 42, filler English inputs, the model
+steps stubbed, tokens estimated at about four characters a token), the 988
+units with a manipulation technique go from a 99th percentile of 4,059
+tokens and a longest row of 10,234 to 1,653 and 2,174 on 400-character
+inputs, and from 4,583 and 11,557 to 2,370 and 3,497 on 1,200-character
+ones; the typo rewrites that would pass the generation model's 2,000-token
+reply cap go from 8 units to none on 1,200-character inputs, and from 17 to
+none on 2,400-character ones. ASCII art, which never meets the manipulation
+layer, is rejected as often as before. A row of a very long input under a
+lengthening encoding, with no manipulation technique, can still pass 6,000
+tokens.
+
+A plan kept from before replays its recorded combinations in their recorded
+order, so it still holds the pairs now refused and applies its manipulation
+technique second: its pending units write the old text. Its plan file's
+`rules` id, which holds the layer order, differs from today's, so a
 resume logs one WARNING that the rules a combination is drawn by changed and
 counts the pending units whose combination today's rules refuse. To take the
 new rules, run the jailbreak stage with `resume=False` (the stage starts

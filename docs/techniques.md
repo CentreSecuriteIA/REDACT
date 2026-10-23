@@ -26,17 +26,27 @@ are listed [below](#retired-techniques).
 ## Layers
 
 A combination applies its techniques in layer order: `rewrite`, then
-`hacking`, then `manipulation`, then `obfuscation`, then `requests`; the
+`hacking`, then `obfuscation`, then `requests`, then `manipulation`; the
 request obfuscation, when allowed (the packaged attacks allow it, for half their units, all
-among those that drew a request; the eval type does not), comes last, after the request; a
-combination without a request takes none. Within the obfuscation layer,
+among those that drew a request; the eval type does not), comes right after the request,
+before the manipulation layer; a combination without a request takes none.
+The manipulation layer comes last since the eval release: `fsh`, `dap` and
+`fake_turns` put the finished question, obfuscated and with its request
+around it, among their examples or after their invented turn, so the
+obfuscations, the request and the model steps (a typo rewrite, a marking
+call) read and change the question alone, and the examples stay as written.
+A selected `fsh` or `dap` variant picks its examples on the clean input
+([below](#what-the-families-do)). A plan made before the eval release
+applied the manipulation layer second; a kept plan replays the order its
+manifest recorded, and its resume warns that the rules changed (the plan
+file's `rules` id holds the layer order). Within the obfuscation layer,
 families apply in the order of their `within_layer_order`, numbered in tens
 so a family added later slots in between: the whole-text rewrites first
 (`translation` 10, `typos` 20, `casual_writing` 30, `noise` 35), then the word-level
 steps (`sensitive_words` 40, `wording` 45, `tokenbreak` 50, `word_art` 55), so a rewrite cannot undo a
 split, an encoded word or a code name, then `suffixes` 60, `payload_split` 65, `encode` 70, `structural` and
 `neutral_container` 80 (each excludes the other, so they share the place)
-and `ascii_art` 90, the outermost. A plan made before this order applied
+and `ascii_art` 90, the outermost obfuscation. A plan made before this order applied
 `sensitive_words` and `tokenbreak` first; a kept plan replays the order its
 manifest recorded, and a fresh plan applies translation, typos, casual
 writing and noise before the word-level steps (a fresh plan never pairs a
@@ -62,9 +72,9 @@ on. (`to_rewrite`, despite its name, is an `indirect` request technique.)
 |---|---|---|---|
 | `rewrite` | 3 | 16 | at most 1 |
 | `hacking` | 4 | 35 | at most 1 |
-| `manipulation` | 3 | 15 | at most 1 |
 | `obfuscation` | 14 | 110 | no cap |
 | `requests` | 12 | 68 | at most 1 |
+| `manipulation` | 3 | 15 | at most 1 |
 | all | 36 | 244 | |
 <!-- END layers -->
 
@@ -88,9 +98,6 @@ that call a model call the generation model.
 | hacking | `framing` | `role_framing` |  | 5 | no | no | `to_fictional_world`, `to_noble_goal`, `to_nefarious_goal`, `to_high_stake`, `to_no_moral_constraints` |
 | hacking | `persona` | `role_framing` |  | 14 | yes | no | `to_invented_persona`, `to_psychopath_persona`, `to_alien_persona`, `to_radical_politician_persona`, `to_cult_leader_persona`, `to_very_advanced_ai_persona`, `to_cartel_leader_persona`, `to_artist_persona`, `to_deformed_scientist_persona`, `to_actor_persona`, `to_someone_from_the_future_persona`, `to_mercenary_persona`, `to_underground_hacker_persona`, `to_anarchist_philosopher_persona` |
 | hacking | `persona_template` | `role_framing` |  | 11 | no | no | `to_dan_persona_template`, `to_stan_persona_template`, `to_dude_persona_template`, `to_developer_mode_persona_template`, `to_aim_persona_template`, `to_evil_confidant_persona_template`, `to_opposite_mode_persona_template`, `to_unfiltered_oracle_persona_template`, `to_rogue_ai_persona_template`, `to_maintenance_mode_persona_template`, `to_liberated_model_persona_template` |
-| manipulation | `dap` | `example_priming` |  | 6 | `to_dap_selected_short`, `to_dap_selected_long`, `to_dap_selected_many` | yes | `to_dap_random_short`, `to_dap_random_long`, `to_dap_selected_short`, `to_dap_selected_long`, `to_dap_random_many`, `to_dap_selected_many` |
-| manipulation | `fake_turns` | `example_priming` |  | 3 | no | no | `to_fake_system_turn`, `to_fake_assistant_turn`, `to_fake_history` |
-| manipulation | `fsh` | `example_priming` |  | 6 | `to_fsh_selected_short`, `to_fsh_selected_long`, `to_fsh_selected_many` | yes | `to_fsh_random_short`, `to_fsh_random_long`, `to_fsh_selected_short`, `to_fsh_selected_long`, `to_fsh_random_many`, `to_fsh_selected_many` |
 | obfuscation | `translation` | `language` | 10 | 23 | yes | no | `to_french`, `to_japanese`, `to_russian`, `to_spanish`, `to_german`, `to_arabic`, `to_turkish`, `to_czech`, `to_vietnamese`, `to_greek`, `to_croatian`, `to_swahili`, `to_thai`, `to_khmer`, `to_nepali`, `to_zulu`, `to_scots_gaelic`, `to_bengali`, `to_javanese`, `to_hmong`, `to_chinese`, `to_hindi`, `to_amharic` |
 | obfuscation | `typos` | `surface_noise` | 20 | 4 | yes | no | `to_rewrite_with_typos_low`, `to_rewrite_with_typos_medium`, `to_rewrite_with_typos_high`, `to_rewrite_with_typos_insane` |
 | obfuscation | `casual_writing` | `surface_noise` | 30 | 9 | no | no | `to_lowercase`, `to_uppercase`, `to_no_sentence_capitals`, `to_dropped_spaces`, `to_doubled_spaces`, `to_dropped_punctuation`, `to_doubled_punctuation`, `to_abbreviations`, `to_stripped_accents` |
@@ -117,6 +124,9 @@ that call a model call the generation model.
 | requests | `smalltalk_prefix` | `request_shape` |  | 1 | no | no | `to_smalltalk_prefix` |
 | requests | `smalltalk_suffix` | `request_shape` |  | 1 | no | no | `to_smalltalk_suffix` |
 | requests | `temporal` | `request_shape` |  | 3 | no | no | `to_use_past_tense`, `to_use_future_tense`, `to_use_historical_era` |
+| manipulation | `dap` | `example_priming` |  | 6 | `to_dap_selected_short`, `to_dap_selected_long`, `to_dap_selected_many` | yes | `to_dap_random_short`, `to_dap_random_long`, `to_dap_selected_short`, `to_dap_selected_long`, `to_dap_random_many`, `to_dap_selected_many` |
+| manipulation | `fake_turns` | `example_priming` |  | 3 | no | no | `to_fake_system_turn`, `to_fake_assistant_turn`, `to_fake_history` |
+| manipulation | `fsh` | `example_priming` |  | 6 | `to_fsh_selected_short`, `to_fsh_selected_long`, `to_fsh_selected_many` | yes | `to_fsh_random_short`, `to_fsh_random_long`, `to_fsh_selected_short`, `to_fsh_selected_long`, `to_fsh_random_many`, `to_fsh_selected_many` |
 <!-- END families -->
 
 Each family's dimension is a tag of `configs/dimensions.json`: what the
@@ -300,8 +310,10 @@ technique is picked first. A technique may not join a combination when:
   text, so one is enough. The three `heavy` `to_sensitive_words_encode_*`
   encode only the words a model marks and may still join it, as the `light`
   encodings that write ASCII and the other suffixes and noise do.
-  It keeps the four many-shot variants of `fsh` and `dap` from `typos`: a
-  model rewriting so long a prompt would not return it whole. It keeps
+  It keeps the four many-shot variants of `fsh` and `dap` from `typos`, a
+  rule written when the typo rewrite read the whole many-shot text, which a
+  model would not return whole; the manipulation layer now applies last, so
+  the rewrite reads the question alone, and the rule is kept as it was. It keeps
   `to_refusal_then_comply`, `to_prefix_injection`, `to_dual_answer` and
   `to_tagged_prefix` from `persona_template`, whose mechanics already ask
   for a dual answer or a set opening, and `to_answer_in_encoding` from
@@ -315,11 +327,19 @@ technique is picked first. A technique may not join a combination when:
 - it pairs a family of the manipulation layer (`fsh`, `dap`, `fake_turns`)
   with an obfuscation in `manipulation_blocked_obfuscation`: the
   `translation`, `ascii_art`, `payload_split`, `word_art` and `wording` families and
-  the `heavy` `encode` techniques, except those also in `sensitive_words`;
+  the `heavy` `encode` techniques, except those also in `sensitive_words`. The
+  block was written when the manipulation layer applied before the
+  obfuscations, which then changed the examples too; since the eval release
+  the layer applies last and an obfuscation changes the question alone, and
+  the block is kept as it was (lifting it would admit 104 eval pairs, each
+  `fsh` or `dap` technique beside a translation or a heavy encoding, a change
+  of the eval coverage of its own);
 - it is a suffix, a structural wrapper or a neutral container and the
   combination's request obfuscation is a translation (budget mode with
-  `allow_request_obfuscation`). The request obfuscation applies last, to the
-  finished request, so the translation would translate the suffix, the keys
+  `allow_request_obfuscation`). The request obfuscation applies right after
+  the request, to the finished request (a manipulation technique, the only
+  step after it, never meets a translation), so the translation would
+  translate the suffix, the keys
   of the wrapper or the lines of the container. The spec's
   `request_obfuscation_refuses` names these three families for a translation;
   the sampler draws the request obfuscation before the obfuscations and keeps
@@ -394,6 +414,15 @@ to be drawn, and so were most inputs when the second round paired it with a
 keeps ASCII art from those encodings, so a fresh eval plan no longer draws
 the pairs. An eval plan kept across the change mixes the two renderings. [What the families do](#what-the-families-do) has the
 figures.
+
+The eval release also put the manipulation layer last. The 40 pairs that
+hold one of the eight `fsh` and `dap` techniques, each beside `to_json`,
+`to_xml`, `to_markdown`, `to_refusal_then_comply` or `to_use_past_tense`,
+now wrap or reframe the question alone and insert it among the examples,
+where the wrapper or the request used to go around the whole list; no pair
+is added or taken out, and the other 251 pairs and the 36 single techniques
+write what they wrote. An eval plan kept from before writes the old text for
+its pending units (`tests/jailbreak/test_eval_pairs.py` names the 40).
 
 ## The natural pool
 
@@ -565,6 +594,16 @@ the answers, three to seven pairs of that subcategory.
   at a random position. With no pair at all, the prompt is the only
   question.
 
+The manipulation layer applies last, so the prompt they insert is the
+finished question: obfuscated, its request around it, its request
+obfuscation applied; the pairs stay as written. A `selected` variant shows
+its model the clean input instead, the text the unit started from, which
+`run_chain` passes the techniques that take it as `source_prompt`: it picks
+the subcategory on what the question is about, not on its cipher or its
+wrapper, then inserts the finished question. In a plan kept from before the
+eval release, where `fsh` or `dap` ran first, the clean input is the text
+the variant read, so it picks as it did.
+
 The `many` variants (spec 1.2: `to_fsh_random_many`,
 `to_fsh_selected_many`, `to_dap_random_many`, `to_dap_selected_many`) show
 `MANY_PAIRS`, 32, pairs with short answers. The cache holds eight of a kind
@@ -583,14 +622,16 @@ error row, instead of writing a prompt with no shot. Why 32: a short pair of the
 is about 150 characters as the prompt writes it, about 40 tokens at four
 characters a token, so 32 are about 1,200 tokens (1,450 at the cache's 90th
 percentile, 2,800 were every pair as long as the longest), well inside the
-generation model's 10,000-token context with the request and the prompt of
-a later model step that reads the text. They refuse `typos` (a model
-rewriting so long a prompt would not return it whole) and otherwise share
+generation model's 10,000-token context; since the layer applies last, no
+later model step reads them. They refuse `typos`, a rule written when a typo
+rewrite read the pairs too (a model rewriting so long a prompt would not
+return it whole) and kept as it was, and otherwise share
 the rules of `fsh` and `dap`; their complexity is 3, the top of the scale:
 one above their `random` siblings and level with their `selected` ones.
 
 `fake_turns` (spec version 1.3) puts an invented turn of the conversation
-before the prompt, with no model call and no benign data:
+before the prompt (the finished question, as for `fsh` and `dap`), with no
+model call and no benign data:
 `to_fake_system_turn` an invented system turn, `to_fake_assistant_turn` an
 invented assistant turn, `to_fake_history` an invented earlier exchange,
 eight variants each, from

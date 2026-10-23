@@ -140,7 +140,9 @@ variant a row drew (from a kept plan made with another pool). A row's
 `technique_info` joins its techniques' infos in their order, and a framing
 and a request technique both write `variant=<name>`, so the variants are
 paired by position: the n-th `variant=` of a row is the n-th of its
-techniques that writes one; a step noted `noop=` wrote none, and a rejected
+techniques that writes one. The infos and the names follow one order, the
+applied one, so the pairing holds in a fresh plan (a request, then the fake
+turn after it) as in a kept one (the fake turn first); a step noted `noop=` wrote none, and a rejected
 or error row, whose info is its rejection's, counts none. The framing
 techniques, the answer formats, the answer languages, asking, the
 distractors, impersonation, indirect, temporal, the neutral containers,
@@ -294,7 +296,8 @@ one `combine_techniques(...)` result, on one prompt with blocking calls, and
 returns `(text, info, accepted, reasoning)`. It loads the benign data when a
 technique needs it, generating what the cache lacks with `client`; its
 `prompt_dir` reaches the techniques and the benign data. `combine_techniques` sorts the techniques into layer
-order but does not check the compatibility rules.
+order (the manipulation layer last, around the finished question, since the
+eval release) but does not check the compatibility rules.
 
 ```python
 from redact.jailbreak import apply_combination, combine_techniques

@@ -303,6 +303,22 @@ def test_the_rules_id_moves_with_what_a_request_obfuscation_keeps_out(monkeypatc
     assert JP.rules_id(pool) != before
 
 
+def test_the_rules_id_moves_with_the_layer_order(monkeypatch):
+    """The eval release moved the manipulation layer last: a plan kept from
+    before it, whose combinations apply fsh before the cipher, has another
+    rules id, so its resume warns."""
+    import redact.jailbreak.plan as JP
+
+    every = registry(all_techniques())
+    pool = [every["to_fsh_random_short"], every["to_rot13"]]
+    before = JP.rules_id(pool)
+    spec = T.load_spec()
+    assert spec["layer_order"][-1] == "manipulation"
+    monkeypatch.setattr(JP, "load_spec", lambda: {**spec, "layer_order": [
+        "rewrite", "hacking", "manipulation", "obfuscation", "requests"]})
+    assert JP.rules_id(pool) != before
+
+
 def test_a_resume_under_the_plan_s_version_and_rules_is_quiet(
         tmp_path, monkeypatch, caplog):
     out = tmp_path / "jb.csv"

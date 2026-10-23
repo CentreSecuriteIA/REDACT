@@ -380,7 +380,9 @@ class TestSampleExactCombination:
 
 
 class TestRequestLayerObfuscation:
-    """The phase-5 pick obfuscates the *finished* request, so it runs last.
+    """The phase-5 pick obfuscates the *finished* request, so it runs right
+    after the request template; only the manipulation layer, which inserts
+    the finished question, comes after it.
 
     Its layer is "obfuscation", so the usual hierarchy sort would move it ahead
     of the request template — which is what used to happen.
@@ -403,6 +405,18 @@ class TestRequestLayerObfuscation:
         pool, request, light_encode = self._pool()
         fn = self._draw(pool, max_obfuscations=1, max_complexity=10)
         assert [t.__name__ for t in fn.techniques] == [request.__name__, light_encode.__name__]
+        assert fn.request_obfuscation is light_encode
+
+    def test_the_manipulation_layer_still_comes_after_it(self):
+        pool, _request, light_encode = self._pool()
+        priming = _tech("to_fake_priming", "manipulation", ["fsh"])
+        fn = sample_combination(
+            random.Random(0), [*pool, priming], include_hacking=False,
+            allow_request_obfuscation=True, max_obfuscations=1, max_complexity=10,
+            sampling_probs={"manipulation": 1.0, "requests": 1.0,
+                            "request_obfuscation": 1.0})
+        assert [t.__name__ for t in fn.techniques] == [
+            "ask_politely", "to_fake_rot13", "to_fake_priming"]
         assert fn.request_obfuscation is light_encode
 
     def test_it_takes_one_of_the_obfuscation_slots(self):

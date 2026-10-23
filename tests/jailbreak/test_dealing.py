@@ -350,9 +350,11 @@ def test_a_kept_plan_replays_each_row_as_it_was_recorded(tmp_path):
     manifest = tmp_path / "jb.manifest.jsonl"
     plan_run(_one_group(40), technique_pool(kind), manifest_path=manifest, seed=42,
              iterations=len(rounds), settings_per_iteration=rounds, verbose=False)
-    # A row as an earlier planner wrote it: the request obfuscation last.
+    # Rows as earlier planners wrote them: the request obfuscation last, and
+    # the manipulation layer before the obfuscations and the request.
     recorded = [row["combination"] for row in Manifest(manifest).load()]
     recorded.append(["to_persona_roleplay", "to_answer_as_tutorial", "to_rot13"])
+    recorded.append(["to_fsh_random_short", "to_rot13", "to_use_past_tense"])
     every = registry(all_techniques())
     replayed = [[fn.__name__ for fn in combination_of(names, every).techniques]
                 for names in recorded]
@@ -469,8 +471,11 @@ _BUDGETS = [
 # tokenbreak apart, one model marking step per text, moved it again: a draw that
 # held both takes another technique, and through the unit's rng and its group's
 # counts the rest of its draw (159 of the 240 dealt units, 30 of the 200
-# undealt draws).
-_PINNED_DRAWS = "e196040a3debe8e75f4389ae534035c7834f2148d449943afe9e331a64aad727"
+# undealt draws). The manipulation layer applying last, around the finished
+# question, moved it once more, by order alone: the same techniques are drawn,
+# and a draw that holds a manipulation technique beside a later step names it
+# last (48 of the 240 dealt units, 19 of the 200 undealt draws).
+_PINNED_DRAWS = "4b5617f1ee9641ddc935cd315fe5b6c49a940d2fb8451fcc31bb5acc5aa9e556"
 
 
 def test_the_budget_draws_are_the_pinned_ones():
@@ -632,18 +637,24 @@ def test_the_request_obfuscation_takes_the_family_weights(monkeypatch):
     assert families == {"translation": 180, "encode": 60, "sensitive_words": 60}
 
 
+def _translates_after_a_request(names: list[str], by: dict) -> bool:
+    """Whether a translation applies after the request in ``names``: it is
+    then the request obfuscation (a phase-4 translation runs before the
+    requests), wherever it stands."""
+    layers = [by[name].layer for name in names]
+    return "requests" in layers and any(
+        "translation" in by[name].families
+        for name in names[layers.index("requests") + 1:])
+
+
 def test_a_planned_request_obfuscation_that_translates_holds_nothing_to_translate():
-    """A translation applied last, after a request, can only be the request
-    obfuscation (a phase-4 translation runs before the requests). Of the 3,000
-    units about 500 take one, and none holds what it would translate: a suffix,
-    a wrapper's keys or a container's lines."""
+    """A translation applied after a request can only be the request
+    obfuscation. Of the 3,000 units about 500 take one, and none holds what
+    it would translate: a suffix, a wrapper's keys or a container's lines."""
     rows, pool = simulate.plan_kind({}, simulate.inputs(_SIMULATED, groups=3))
     by = {fn.__name__: fn for fn in pool}
     translating = [row["combination"] for row in rows
-                   if len(row["combination"]) > 1
-                   and "translation" in by[row["combination"][-1]].families
-                   and any(by[name].layer == "requests"
-                           for name in row["combination"][:-1])]
+                   if _translates_after_a_request(row["combination"], by)]
     assert len(translating) > _SIMULATED // 8
     kept_out = {"suffixes", "structural", "neutral_container"}
     assert [names for names in translating
@@ -665,8 +676,12 @@ def test_a_planned_request_obfuscation_that_translates_holds_nothing_to_translat
 # the rule), 485 of the 3,000 round-2 units of that plan holding one after
 # the first change, and 279 of the 300 round-2 units are dealt another pair.
 # The rule keeping sensitive_words and tokenbreak apart did not move it: the
-# pool holds neither.
-_PINNED_EVAL_DRAWS = "2f6f8076ebc1470d24883d9f4ccfdc6557ba58f58a0d5791f5880c20240782f8"
+# pool holds neither. The manipulation layer applying last moved it again, by
+# order alone: the same pairs go to the same units, and the 86 of the 300
+# round-2 units that hold fsh or dap beside to_json, to_xml, to_markdown,
+# to_refusal_then_comply or to_use_past_tense (40 of the 291 pairs) name it
+# last; a plan of 3,000 inputs holds 858 such units of its 3,000 round-2 ones.
+_PINNED_EVAL_DRAWS = "83b556e3453a5b709b14907db5d649e4b7e289a4e61796af2be771ddbc76d221"
 
 
 def _eval_draws(section: dict) -> list[list[str]]:

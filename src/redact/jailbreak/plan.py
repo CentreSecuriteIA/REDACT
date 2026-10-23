@@ -362,10 +362,11 @@ def _without_comments(entry: dict) -> dict:
 
 def rules_id(pool: list[Callable]) -> str:
     """The content id of what a draw from ``pool`` reads off the spec: its
-    ``layer_order``, ``layer_max_picks`` and ``layer_rates``, the
-    obfuscations it keeps from the manipulation layer, the families a
-    request obfuscation may draw and the families it keeps out of a
-    combination; the ``layer``, ``within_layer_order`` and
+    ``layer_order`` (the order a combination applies in, which put the
+    manipulation layer last in the eval release), ``layer_max_picks`` and
+    ``layer_rates``, the obfuscations it keeps from the manipulation layer,
+    the families a request obfuscation may draw and the families it keeps
+    out of a combination; the ``layer``, ``within_layer_order`` and
     ``cross_incompatible_with`` of each family of the pool; and each pool
     technique's ``families``, ``complexity``, ``cross_incompatible_with``,
     ``encode_weight``, ``needs_latin`` and ``script``, as its tags hold

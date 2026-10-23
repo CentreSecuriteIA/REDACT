@@ -159,7 +159,13 @@ the order given. A transform runs inline; a generator's requests are yielded
 up, each capped at the technique's `max_tokens` tag and, under capture,
 tagged with an internals id. Each technique gets
 `rng = random.Random(stable_seed(seed, label, input_id, iteration, name))`,
-the label being `jailbreak` or `variation`, so the two kinds draw apart. A
+the label being `jailbreak` or `variation`, so the two kinds draw apart, and,
+when it takes it, `source_prompt`: the text the chain started from (the
+unit's input) unless the caller gives one. The selected `fsh` and `dap`
+variants, which apply last, pick their examples' subcategory on it, not on
+the encoded, translated or wrapped question they then insert; in a kept plan
+where they run first it is the text they read before (`_select_kwargs`
+passes it, as the other keywords, to the techniques that take it). A
 step that leaves the text unchanged is noted `noop=<name>`. A step that
 leaves the text empty or blank is a rejection,
 `DISCARDED; technique=<name>; reason=empty text`. The first rejection stops
@@ -168,7 +174,10 @@ the chain, returning the text before that technique, with the info
 
 `combine_techniques(*fns)` wraps techniques as one, sorted into layer order
 (`in_layer_order`), and runs it with blocking calls. It does not check the
-rules.
+rules. A caller that combines techniques itself (a notebook, a transform for
+the multi-turn crescendo) gets the layer order of the library it runs on: the
+manipulation layer last since the eval release, as `sample_exact_combination`,
+which sorts the same way.
 
 ## Plan, then drive
 
@@ -262,10 +271,12 @@ obfuscation is phase 5 and runs before phase 4):
   `request_obfuscation` rate (the dealer's `include`, as for the layers, over
   the group's units, so the units holding a request take it more often; a
   per-unit draw without a dealer), one light `encode` technique (the light
-  `to_sensitive_words_encode_*` among them) or a translation, applied after
-  the request technique. A unit without a request is not asked, so the step
-  never lands after the outermost wrapper. A translation drawn this way
-  applies last, so it would translate a suffix, a wrapper's keys or a
+  `to_sensitive_words_encode_*` among them) or a translation, applied right
+  after the request technique, before the manipulation layer. A unit without
+  a request is not asked, so the step never lands after the outermost
+  wrapper. A translation drawn this way applies after every obfuscation and
+  the request (a manipulation technique, the only step after it, never meets
+  a translation), so it would translate a suffix, a wrapper's keys or a
   container's lines: the spec's `request_obfuscation_refuses` keeps the
   `suffixes`, `structural` and `neutral_container` families out of its
   combination, and the sampler narrows phase 4's pool by it
@@ -275,8 +286,14 @@ obfuscation is phase 5 and runs before phase 4):
   leaves, until `max_obfuscations`, less the request obfuscation's slot, or
   until no technique fits.
 
-The apply order is the layers', whatever the pick order (a rewrite first),
-except the request obfuscation, which goes last. Within the obfuscation layer it is each
+The apply order is the layers' (`rewrite`, `hacking`, `obfuscation`,
+`requests`, `manipulation`), whatever the pick order (a rewrite first, a
+manipulation technique last), except the request obfuscation, which goes
+right after the request (`sample_combination` inserts it there, so it still
+precedes a manipulation technique). The manipulation layer comes last since
+the eval release: it inserts the finished question among its examples or
+after its invented turn, so the obfuscations, the request and the model
+steps change the question alone. Within the obfuscation layer it is each
 family's `within_layer_order`, in tens: `translation` 10, `typos` 20,
 `casual_writing` 30, `noise` 35, `sensitive_words` 40, `wording` 45,
 `tokenbreak` 50, `word_art` 55, `suffixes` 60, `payload_split` 65, `encode` 70, `structural` and `neutral_container` 80 (each
@@ -285,7 +302,10 @@ rewrites come before the word-level steps, which they would otherwise undo;
 a family added later takes a number between two, as `noise` did. The manifest records the order a
 combination applies in and a replay keeps it (`combination_of`), so a plan
 made before the renumbering, when `sensitive_words` and `tokenbreak` came
-first, still runs as it was made. A technique above the remaining complexity is
+first, still runs as it was made, and one made before the eval release
+still applies its manipulation technique second. `rules_id` holds the
+spec's `layer_order`, so the resume of such a plan warns that the rules
+changed. A technique above the remaining complexity is
 never eligible, for the first pick too. The request obfuscation is drawn
 from the techniques still compatible and within the remaining complexity,
 so it holds its slot and its complexity before the obfuscations fill the

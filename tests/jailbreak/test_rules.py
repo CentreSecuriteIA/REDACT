@@ -898,9 +898,14 @@ def test_a_budget_draw_counts_its_request_obfuscation_against_max_obfuscations(
         names = [t.__name__ for t in fn.techniques]
         obfuscations = sum(t.layer == "obfuscation" for t in fn.techniques)
         assert obfuscations <= max_obfuscations, (seed, names)
-        last = getattr(fn, "request_obfuscation", None)
-        if last is not None:
-            assert names[-1] == last.__name__, (seed, names)
+        held = getattr(fn, "request_obfuscation", None)
+        if held is not None:
+            # Right after the request it obfuscates; only the manipulation
+            # layer, which inserts the finished question, comes after it.
+            at = names.index(held.__name__)
+            assert fn.techniques[at - 1].layer == "requests", (seed, names)
+            assert {t.layer for t in fn.techniques[at + 1:]} <= {"manipulation"}, (
+                seed, names)
 
 
 def test_request_obfuscation_is_light_encoding_or_translation():
@@ -910,10 +915,11 @@ def test_request_obfuscation_is_light_encoding_or_translation():
 
 
 # --- a translation drawn as the request obfuscation ------------------------------
-# It applies last, to the finished request, so it would translate a suffix, a
-# wrapper's keys or a container's lines: the spec's request_obfuscation_refuses
-# keeps them out of its combination. A translation drawn in phase 4 runs before
-# those steps and meets none of these rules.
+# It applies right after the request, to the finished request (a manipulation
+# technique, the only one that may follow it, never meets a translation), so it
+# would translate a suffix, a wrapper's keys or a container's lines: the spec's
+# request_obfuscation_refuses keeps them out of its combination. A translation
+# drawn in phase 4 runs before those steps and meets none of these rules.
 
 _AFTER_A_TRANSLATION = [
     "to_adversarial_suffix_punctuation", "to_adversarial_suffix_unicode",

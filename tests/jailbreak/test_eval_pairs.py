@@ -22,7 +22,8 @@ import pytest
 
 import redact.jailbreak  # noqa: F401  (tags the techniques)
 from redact.jailbreak.augmentation import resolve
-from redact.jailbreak.pool import technique_pool
+from redact.jailbreak.chain import in_layer_order
+from redact.jailbreak.pool import registry, technique_pool
 from redact.jailbreak.rules import compatible
 from redact.recipe import load_dataset_type
 
@@ -95,6 +96,26 @@ def test_the_eval_pool_has_no_word_marking_step():
     "to_ascii_ordinal", "to_base64", "to_braille", "to_morse", "to_unicode_escape"])
 def test_the_eval_draws_no_ascii_art_beside_a_heavy_encoding(encoding):
     assert "|".join(sorted(("to_ascii_art", encoding))) not in snapshot()
+
+
+def test_the_eval_s_fsh_and_dap_insert_the_question_last_beside_five_partners():
+    """The manipulation layer applies last: the 40 pairs that hold one of the
+    eight ``fsh`` and ``dap`` techniques put the finished question, wrapped
+    or with its request, among the examples. Each was applied fsh or dap
+    first before the eval release, so these 40 changed their text, and no
+    other pair did."""
+    by = registry(_eval_pool())
+    pairs = [pair.split("|") for pair in snapshot()]
+    held = [pair for pair in pairs
+            if any(by[name].layer == "manipulation" for name in pair)]
+    partners = {name for pair in held for name in pair
+                if by[name].layer != "manipulation"}
+    assert (len(held), partners) == (40, {
+        "to_json", "to_markdown", "to_refusal_then_comply", "to_use_past_tense",
+        "to_xml"})
+    assert [pair for pair in held
+            if in_layer_order(by[name] for name in pair)[-1].layer != "manipulation"
+            ] == []
 
 
 def test_ascii_art_still_joins_a_suffix_a_request_and_a_scene_in_the_eval_pool():

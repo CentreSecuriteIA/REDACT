@@ -116,8 +116,11 @@ def sample_combination(
 
     Returns:
         A combined technique function, or an identity function if nothing was
-        selected. In budget mode its ``request_obfuscation`` is the request
-        obfuscation it holds (applied last), or ``None``.
+        selected, its techniques in the order they apply: the layer order
+        (``rewrite``, ``hacking``, ``obfuscation``, ``requests``,
+        ``manipulation``), the request obfuscation right after the request.
+        In budget mode its ``request_obfuscation`` is the request obfuscation
+        it holds, or ``None``.
     """
     if exact_techniques is not None:
         return sample_exact_combination(
@@ -235,11 +238,13 @@ def sample_combination(
 
     # Order the regular picks here and chain in that exact order. The request
     # obfuscation is the one pick whose position is *not* its layer's: it
-    # obfuscates the finished request, so it runs after the request template;
-    # sorting it with the others would move it back into the obfuscation slot.
+    # obfuscates the finished request, so it runs right after the request
+    # template; sorting it with the others would move it back into the
+    # obfuscation slot. The manipulation layer, last in the layer order,
+    # still comes after it: it inserts the finished question.
     ordered = in_layer_order(fn for fn in selected if fn is not request_obfuscation)
     if request_obfuscation is not None:
-        ordered.append(request_obfuscation)
+        ordered.insert(ordered.index(request) + 1, request_obfuscation)
     combined = combine_techniques(*ordered, sort_by_hierarchy=False)
     combined.request_obfuscation = request_obfuscation
     return combined
@@ -283,7 +288,10 @@ def sample_exact_combination(
         include_requests: Layer toggle, as ``include_hacking``.
 
     Returns:
-        A combined technique function (``"identity"`` if ``n <= 0`` or nothing picked).
+        A combined technique function (``"identity"`` if ``n <= 0`` or nothing
+        picked), its techniques sorted into layer order
+        (:func:`~redact.jailbreak.chain.in_layer_order`), the manipulation
+        layer last.
     """
     layer_included = {
         "hacking": include_hacking,
