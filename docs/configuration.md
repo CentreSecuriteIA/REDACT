@@ -569,7 +569,7 @@ obfuscation layer's.
 
 A budget round lets each unit spend up to `max_complexity`. A unit that
 draws cheap techniques leaves the rest unspent, so a group's units spend
-less than `max_complexity` on average (5.83 of 6 in the table below). With
+less than `max_complexity` on average (5.63 of 6 in the table below). With
 `"budget": "group"` the units of a `(category, entry_type, iteration)` group
 share it: a unit may spend `max_complexity` plus what the group's earlier
 units left unspent of it, up to `max_unit_complexity` (`max_complexity + 3`
@@ -602,27 +602,27 @@ seeds 42 to 46:
 
 | | `"unit"` | `"group"` |
 |---|---|---|
-| Mean complexity per unit | 5.83 (5.83 to 5.85) | 6.00 |
+| Mean complexity per unit | 5.63 (5.62 to 5.64) | 6.00 |
 | Highest complexity of one unit | 6 | 9 |
-| Units above 6 | 0 | 393 (356 to 393) |
-| Obfuscations per unit | 1.60 (1.60 to 1.61) | 1.66 (1.66 to 1.67) |
-| Draws of complexity 3 or more | 1,488 (1,480 to 1,497) | 1,555 (1,539 to 1,559) |
-| `encode`: the top member's share of the family's draws, as a multiple of an even share | 9.46 (8.37 to 9.46) | 7.10 (7.10 to 7.56) |
-| `sensitive_words`: the same | 3.87 (3.87 to 4.29) | 3.21 (3.21 to 3.68) |
-| Of complexity 3 or more, drawn: `encode` (of 10) | all 10, 3 to 4 times each (2 to 5) | all 10, 4 to 6 times each (3 to 6) |
-| Of complexity 3 or more, drawn: `sensitive_words` (of 4) | all 4, 18 to 19 times each (15 to 22) | all 4, 26 to 27 times each (22 to 27) |
+| Units above 6 | 0 | 800 (760 to 800) |
+| Obfuscations per unit | 1.47 (1.47 to 1.48) | 1.62 (1.62 to 1.63) |
+| Draws of complexity 3 or more | 1,431 (1,418 to 1,431) | 1,544 (1,533 to 1,545) |
+| `encode`: the top member's share of the family's draws, as a multiple of an even share | 8.57 (7.77 to 8.59) | 4.04 (3.77 to 4.61) |
+| `sensitive_words`: the same | 3.38 (3.38 to 3.93) | 1.74 (1.59 to 1.93) |
+| Of complexity 3 or more, drawn: `encode` (of 10) | 8 of 10 (7 to 10), 0 to 3 times each (0 to 3) | 8 of 10 (6 to 10), 0 to 2 times each (0 to 3) |
+| Of complexity 3 or more, drawn: `sensitive_words` (of 4) | all 4, 21 to 22 times each (18 to 23) | all 4, 36 times each (34 to 37) |
 
 The group budget evens out the cheap members of `encode` and
 `sensitive_words`, which the unit budget favours because a cheap one fits
 more units (the top member of each is the complexity-1 leetspeak), and
 spends the mean it is given. The heavy members stay rarer than those of
-complexity 2 under both budgets (each heavy `encode` member 3 to 4 times
-under the unit budget at seed 42, against 27 to 30 for one of complexity 2):
+complexity 2 under both budgets (each heavy `encode` member 0 to 3 times
+under the unit budget at seed 42, against 30 to 31 for one of complexity 2):
 one of complexity 3 fits only a unit whose earlier picks leave 3 points, and
 `fsh` and `dap` refuse the heavy `encode` members (not the `sensitive_words`
 ones, which are drawn more). That skew toward the cheaper members is
 intended. The extra allowance goes to the obfuscations, the request
-obfuscation's included (2.71 complexity per unit against 2.87; the other
+obfuscation's included (2.51 complexity per unit against 2.87; the other
 layers spend the same). The draws of complexity 3 or more include 112 of the
 two `selected_many` variants under both budgets (108 to 112 over the seeds).
 
@@ -732,7 +732,11 @@ a run you already have, and what you will see; each point has its note below.
   pairs and eval files made before this release are not comparable with
   those made after. A kept eval plan replays its recorded combinations and warns on
   resume that the rules changed; plan the eval type again with
-  `resume=False` to take them (the note on the eval release, below).
+  `resume=False` to take them. Two more rules and a limit on a translation
+  drawn last change the training attacks only: `sensitive_words` and
+  `tokenbreak` refuse each other, and the request obfuscation, when it
+  translates, keeps a suffix, a wrapper and a container out of the unit (the
+  note on the eval release, below).
 - **Stricter checks, and what they skip.** An allow list or `family_weights`
   that names a family or technique of a layer the kind leaves off raises
   (the `rewrite` layer needs `layers.allow`); a `config_dir`
@@ -772,13 +776,15 @@ two seeds), and no unit takes one without a request. Of these, a third each
 (about 16.6% of the units each, 498 to 501): a translation, a light `encode`
 technique and a light `to_sensitive_words_encode_*`, since the step's
 families are dealt among themselves, counted apart from the obfuscation
-layer's (the next note). The obfuscations per unit stay at 1.60 (1.60 to 1.61)
-with or without the step: it holds a slot rather than adding one. The units
-holding a translation go from 12.4% (12.3% to 12.4%) to 25.3% (25.1% to
-25.5%), the light `encode` techniques per unit from 0.11 (0.11 to 0.12) to
-0.24, and the model-calling techniques per unit, translation aside, from 1.03
-(1.03 to 1.04) to 0.99 (0.99 to 1.00): the step takes slots from the other
-obfuscation families. The extra model cost is mostly the translations the
+layer's (the next note). The obfuscations per unit are 1.47 (1.47 to 1.48)
+with the step and 1.58 (1.57 to 1.59) without: it holds a slot rather than
+adding one, and a translation drawn this way keeps a suffix, a wrapper and a
+container out of the unit's other obfuscations (the eval release note, below).
+The units holding a translation go from 12.3% (12.1% to 12.3%) to 24.0%
+(24.0% to 24.1%), the light `encode` techniques per unit from 0.12 (0.12 to
+0.12) to 0.24, and the model-calling techniques per unit, translation aside,
+from 1.03 (1.02 to 1.03) to 0.94 (0.93 to 0.94): the step takes slots from the
+other obfuscation families. The extra model cost is mostly the translations the
 step adds: each runs on the translation model, a machine-translation pass
 per piece with its checks, back-translations and the generation model's
 judge, now over the request's wording as well as the prompt, for about 17%
@@ -849,7 +855,7 @@ three groups), hacking and the request obfuscation (both 0.5) met on 68% of
 the hacking units at seeds 1 and 2, 100% at seed 42 and 2% at seed 43, and
 `ascii_art`, which refuses both a hacking technique and a translation, was
 drawn 33, 35, 51 and 8 times. Now they meet on 49% to 55% of the hacking
-units (seeds 1, 2 and 42 to 46) and `ascii_art` is drawn 71 to 75 times.
+units (seeds 1, 2 and 42 to 46) and `ascii_art` is drawn 62 to 65 times.
 Every layer keeps its rate and a group still gets `rate x size` picks
 rounded down or up. A fresh budget plan draws differently from the same
 seed; a kept plan replays unchanged; the `eval` type, which draws by count,
@@ -1026,7 +1032,7 @@ meaning allows (one to three calls, no check model: the parts are kept only
 when they give the text back, compared without whitespace). Each names the
 parts A, B, C ... and writes one of eight variants that asks the reader to join
 them ([techniques.md](techniques.md#what-the-families-do)). A fresh plan of
-the adversarial kind draws them, in about one unit in twelve (253 to 255 of
+the adversarial kind draws them, in about one unit in fourteen (221 to 223 of
 3,000 units of the default kind in three groups, seeds 42 to 46): the default
 attack pool goes from 202 techniques in 26 families to 204 in 27. The family
 refuses `ascii_art`, `encode`, `fake_turns` and `word_art` and, like
@@ -1044,7 +1050,7 @@ the first in an ASCII-art font chosen as `to_ascii_art` chooses its fonts,
 puts `[MASK]` in its place in the text, and writes one of eight variants that
 asks the reader to read the art and put the word back
 ([techniques.md](techniques.md#what-the-families-do)). A fresh plan of the
-adversarial kind draws it, in about one unit in twelve (252 to 255 of 3,000
+adversarial kind draws it, in about one unit in fourteen (220 to 224 of 3,000
 units, same plans): the default attack
 pool goes from 204 techniques in 27 families to 205 in 28. The family refuses
 `ascii_art`, `payload_split`, `encode`, `sensitive_words`, `tokenbreak`,
@@ -1053,8 +1059,8 @@ and `payload_split`, is kept from `fsh` and `dap`, so some units of a fresh
 plan draw other techniques than they did with the same seed. The two new
 families share the units that have three points of the budget left, which the
 ten heavy encodings need too, so the heavy encodings are the rarest draws of
-the default kind: each is drawn 2 to 5 times in 3,000 units in three groups
-(seeds 42 to 46), one unit in about 800. A plan kept from before resumes with the
+the default kind: each is drawn 0 to 3 times in 3,000 units in three groups
+(seeds 42 to 46), one unit in about 2,600. A plan kept from before resumes with the
 growth WARNING, which names it, and does not draw it until it is planned
 again with `resume=False`. The `eval` and natural kinds do not draw it.
 
@@ -1364,9 +1370,9 @@ those an earlier version made with the same seed. Measured at commit
 drew a translation and one of the four before and none since; the units
 holding a translation went from 787 to 798 and the obfuscations per unit from
 1.63 to 1.64. At the current commit no unit holds a translation beside any of
-the eight families (0 of 3,000 units at seeds 42 to 46), 25.3% hold a
-translation (25.1% to 25.5%) and the obfuscations per unit are 1.60 (1.60 to
-1.61). A plan kept from before replays its recorded combinations, so a kept
+the eight families (0 of 3,000 units at seeds 42 to 46), 24.0% hold a
+translation (24.0% to 24.1%) and the obfuscations per unit are 1.47 (1.47 to
+1.48). A plan kept from before replays its recorded combinations, so a kept
 plan may still pair them. `structural`, `suffixes` and `neutral_container`
 stay allowed beside a translation: the eval type draws `structural` with its
 translations, and its pool (36 techniques) and draws are unchanged by these
@@ -1395,8 +1401,8 @@ a text whose replies never take the form is discarded (`malformed pseudonym`,
 family refuses `sensitive_words`, `tokenbreak`, `word_art`, `translation` and
 `ascii_art`, and, like `word_art`, is kept from `fsh` and `dap`, so some units
 of a fresh plan draw other techniques than they did with the same seed. A
-fresh attack plan draws it in about one unit in twelve (252 of 3,000 units
-of the default kind in three groups at seed 42; 252 to 255 over seeds 42 to
+fresh attack plan draws it in about one unit in fourteen (221 of 3,000 units
+of the default kind in three groups at seed 42; 220 to 225 over seeds 42 to
 46): the default attack pool goes
 from 212 techniques in 28 families to 214 in 29. A plan kept
 from before resumes with the growth WARNING, which names the two, and does not
@@ -1469,20 +1475,26 @@ translation drawn as an ordinary obfuscation runs before those steps and
 still joins them. In 3,000 units of the default attack kind in three groups,
 498 to 501 units (seeds 42 to 46) take a translation as the request
 obfuscation; before the rule 68 to 79 of them held a suffix, 130 to 151 a
-structural wrapper and 115 to 128 a neutral container, and none does now.
-The eval type draws no phase-5 step, so its pairs and draws, and the budget
+structural wrapper and 115 to 128 a neutral container, and none does now;
+the obfuscations per unit are 1.47 (1.47 to 1.48) with the step on, against
+1.58 (1.57 to 1.59) with it off and 1.57 before this rule. The eval type
+draws no phase-5 step, so its pairs and draws, and the budget
 draws the digest pins (phase 5 off in both), do not move. `rules.compatible`
 does not know which technique of a combination is the request obfuscation,
 so the WARNING of a kept plan, which counts the pending units whose
 combination today's rules refuse, leaves this rule out.
 
-The first two changes together close most pairings the ten heavy full-text
+Together the four changes close most pairings the ten heavy full-text
 encodings (complexity 3, which fits only a unit whose earlier picks leave 3
-points) were dealt with, so the default attack kind draws them rarely: 3 to
-5 draws of the ten in 3,000 units in three groups (seeds 42 to 46), against
-31 to 42 before the release, and 7 or 8 of them go undrawn in 4,000 units at
-seed 42. The test that every technique of the default attacks is drawn leaves
-them out for now (`_AWAITING_THE_HEAVY_SLOT` in `test_dealing.py`).
+points) were dealt with, so the default attack kind draws them rarely: 8 to
+16 draws of the ten in 3,000 units in three groups (seeds 42 to 46), against
+31 to 42 before the release, and in 4,000 units at seed 42 five of them are
+never drawn under the unit budget and two under the group budget. The test
+that every technique of the default attacks is drawn leaves them out for now
+(`_AWAITING_THE_HEAVY_SLOT` in `test_dealing.py`). The other figures this
+page quotes from the simulation (the group-budget table, the request
+obfuscation's and the translation's shares) are measured on the rules of this
+release.
 
 A plan kept from before replays its recorded combinations, so it still holds
 the pairs now refused. Its plan file's `rules` id differs from today's, so a
@@ -1490,6 +1502,9 @@ resume logs one WARNING that the rules a combination is drawn by changed and
 counts the pending units whose combination today's rules refuse. To take the
 new rules, run the jailbreak stage with `resume=False` (the stage starts
 over); until then the rows of a kept eval plan are not those of a fresh one.
+The rules are the spec's, which a `config_dir` never overlays, so a run on a
+`config_dir` copy of the eval type takes them too, its pool as wide as its
+copy of `eval.json` makes it (the bullet on a stale copy, above).
 
 ## The model registry
 

@@ -281,10 +281,10 @@ def test_a_count_round_deals_the_techniques_of_every_family_evenly():
 # The ten heavy full-text encodings, which the eval release's rules (a
 # translation and ascii_art refuse them) left only the cheap partners they were
 # dealt with: of complexity 3, each fits only a unit whose earlier picks leave 3
-# points, and over 4,000 units in three groups at seed 42 the ten are drawn 4
-# times in all under the unit budget and 2 under the group budget, seven or
-# eight of them never. They wait for a dealing slot of their own, and the
-# test asks for them again once it comes: delete this set with it.
+# points, and over 4,000 units in three groups at seed 42 the ten are drawn 5
+# times in all under the unit budget and 10 under the group budget, five and
+# two of them never. They wait for a dealing slot of their own, and the test
+# asks for them again once it comes: delete this set with it.
 _AWAITING_THE_HEAVY_SLOT = {
     "to_base64", "to_unicode_escape", "to_ascii_ordinal", "to_morse", "to_braille",
     "to_hex", "to_binary", "to_html_entities", "to_base32", "to_base85"}

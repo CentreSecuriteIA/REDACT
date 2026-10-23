@@ -462,12 +462,12 @@ planned units; for 1,000 inputs of one category and entry type, planned
 with the packaged attack kind and seed 42:
 
 ```text
-Model calls: 886 of 1000 planned units call a model, 2103 to 8189 calls (translation 510 to 3060, from the spec's calls).
+Model calls: 847 of 1000 planned units call a model, 2003 to 7717 calls (translation 480 to 2880, from the spec's calls).
 ```
 
-Other seeds (43 to 46) give 872 to 889 units, 2,087 to 2,103 calls at the
-low end, 8,139 to 8,216 at the high end and a translation share of 500 to 510
-and 3,000 to 3,060.
+Other seeds (43 to 46) give 849 to 857 units, 1,995 to 2,003 calls at the
+low end, 7,683 to 7,745 at the high end and a translation share of 480 to 482
+and 2,880 to 2,892.
 
 The translation share goes to the translation model (a machine
 translation's judge, one call a round, to the generation model).

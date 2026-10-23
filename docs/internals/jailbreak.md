@@ -358,7 +358,7 @@ order.
   translation, was drawn 8 to 51 times in 900 units by the seed (commit
   `590babe`, seeds 1, 2, 42 and 43, three groups); with the jitter they meet
   on about a quarter of the units (49% to 55% of the hacking units, seeds 1,
-  2 and 42 to 46) and it is drawn 71 to 75 times.
+  2 and 42 to 46) and it is drawn 62 to 65 times.
 - **Families.** Among the eligible families, the dealer picks the one with
   the lowest count over its weight (`family_weights`, 1 by default), ties
   broken by the unit's rng. The request obfuscation's families are counted
@@ -378,8 +378,8 @@ order.
   `sensitive_words`): a member of complexity 3 fits only a unit whose
   earlier picks leave 3 points, and `fsh` and `dap` refuse the heavy
   `encode` members, so over 3,000 units of the default attacks (three groups)
-  each heavy `encode` member is drawn 3 to 4 times at seed 42 (2 to 5 over
-  seeds 42 to 46) against 27 to 30 for one of complexity 2 (27 to 32). That
+  each heavy `encode` member is drawn 0 to 3 times at seed 42 (0 to 3 over
+  seeds 42 to 46) against 30 to 31 for one of complexity 2 (30 to 33). That
   skew is intended. A direct `sample_combination` call without a dealer picks both
   uniformly, as the registry fixture's seeds pin. A fresh plan with the
   same seed draws differently from one made before member dealing; a kept
@@ -440,11 +440,12 @@ budget.
   `max_complexity`, and a round naming either key.
 - Measured with `simulate.compare_budgets` over 3,000 units of the default
   attacks (three groups, seed 42; in brackets the range over seeds 42 to 46),
-  it keeps the mean at `max_complexity` (5.83 to 6.00), lets some units reach
-  the ceiling (393 of 3,000 above 6, 356 to 393, none above 9) and evens out
-  the cheap members of `encode` and `sensitive_words`, and draws the heavy
-  members a little more often (each heavy `encode` member 4 to 6 times, 3 to
-  6, against 3 to 4, 2 to 5); the extra allowance goes to the obfuscations.
+  it keeps the mean at `max_complexity` (5.63 to 6.00), lets some units reach
+  the ceiling (800 of 3,000 above 6, 760 to 800, none above 9) and evens out
+  the cheap members of `encode` and `sensitive_words`, and draws more
+  techniques of complexity 3 or more (1,544 against 1,431, the heavy `encode`
+  members 0 to 2 times each, 0 to 3, against 0 to 3, 0 to 3); the extra
+  allowance goes to the obfuscations.
   The table is in [configuration.md](../configuration.md#the-group-budget).
 
 ## Seeds
