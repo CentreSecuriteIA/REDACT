@@ -377,15 +377,32 @@ def test_the_setup_readme_runs_a_recipe_from_the_folder(tmp_path):
 
     from redact import scaffold_setup
 
-    scaffold_setup(tmp_path)
-    readme = (tmp_path / "README.md").read_text(encoding="utf-8")
-    (command,) = [line.strip() for line in readme.splitlines()
-                  if line.startswith("    python")]
-    assert command.endswith("eval_recipe.json") or "run_pipeline('eval_recipe.json')" in command
-    script = re.match(r'python "(.+)" eval_recipe\.json$', command)
-    assert script is not None       # this test runs from a checkout
-    assert Path(script.group(1)).is_absolute()
-    assert Path(script.group(1)) == Path(__file__).parents[1] / "scripts" / "run.py"
+    def command(folder):
+        scaffold_setup(folder)
+        readme = (folder / "README.md").read_text(encoding="utf-8")
+        (line,) = [line.strip() for line in readme.splitlines()
+                   if line.startswith("    python")]
+        return line
+
+    script = paths.package_dir().parents[1] / "scripts" / "run.py"
+    if script.is_file():            # a checkout, as the suite runs from
+        found = re.match(r'python "(.+)" eval_recipe\.json$', command(tmp_path / "a"))
+        assert found is not None
+        assert Path(found.group(1)).is_absolute()
+        assert Path(found.group(1)) == script
+
+
+def test_without_a_checkout_the_setup_readme_runs_the_recipe_from_python(
+        tmp_path, monkeypatch):
+    from redact.llms.prompting import scaffold
+
+    installed = tmp_path / "site-packages" / "redact"
+    installed.mkdir(parents=True)
+    monkeypatch.setattr(scaffold.paths, "package_dir", lambda: installed)
+    command = scaffold._run_command()
+    assert command.strip().startswith("python -c")
+    assert "run_pipeline('eval_recipe.json')" in command
+    assert "scripts/run.py" not in command
 
 
 @pytest.mark.parametrize(("mine", "packaged"), [
