@@ -659,6 +659,23 @@ def test_run_pipeline_loads_params_file(tmp_path, monkeypatch):
     assert "build" in summary["stages"]
 
 
+def test_the_run_uninstalls_its_telemetry_when_it_returns(tmp_path, monkeypatch):
+    """A front called after the run, as from a notebook, records into neither
+    the finished run's trace nor its roll-up."""
+    import redact
+    from redact.llms import observe
+
+    monkeypatch.setattr(redact, "build_dataset", lambda **k: pd.DataFrame())
+    summary = run_pipeline({"dataset_type": "eval", "data_dir": str(tmp_path),
+                            "stages": ["build"]}, verbose=False)
+    trace = Path(summary["trace"])
+    lines = trace.read_text(encoding="utf-8").splitlines()
+    assert telemetry.collector() is None
+    observe.record({"ev": "call", "model": "m", "n_items": 1})
+    assert trace.read_text(encoding="utf-8").splitlines() == lines
+    assert telemetry.summary() == {}
+
+
 class TestAParamsPathGivenInPlaceOfTheRecipes:
     """``--params`` / ``params=``: a relative path is read from the current
     directory, else from the recipe's folder; the recipe's own

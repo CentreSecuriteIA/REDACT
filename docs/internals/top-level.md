@@ -221,7 +221,9 @@ tied to code, so they come from the package only.
    engines the run loaded (`residency.unload_local(engines=before,
    wait=vllm._GRACE_S)`, 10 s, which ends a load still running; engines
    loaded before the run stay), and clear the planned shares and cards.
-   Then `telemetry.summary()`.
+   Then `telemetry.summary()`, and `telemetry.uninstall()`: a front called
+   after the run, as from a notebook, records into neither its trace nor
+   its roll-up.
 
 `scripts/run.py` makes the first Ctrl-C or SIGTERM exit through that
 `finally`. A second calls `terminate_engine_processes(all=True, quiet=True)`:

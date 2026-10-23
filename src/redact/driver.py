@@ -458,7 +458,9 @@ def run_pipeline(
     Before any of them loads, the run stops if another process holds memory
     on a card the plan puts one on (:func:`_check_cards`). At the end a
     preload still loading is waited for at most ``EXIT_WAIT_S`` (60 s), then
-    its load is ended.
+    its load is ended, and the run's telemetry is rolled up and uninstalled:
+    a front called after the run records into neither its trace nor its
+    roll-up.
 
     Returns:
         ``dataset_type``, ``data_dir``, ``stages`` (per stage, its
@@ -607,7 +609,10 @@ def run_pipeline(
         except Exception as exc:  # noqa: BLE001 — must not mask the stage's error
             logger.error("[residency] end of run failed (%s: %s)",
                          type(exc).__name__, exc)
-    trace = telemetry.collector()
-    if trace is not None and trace.trace_path is not None:
-        summary["trace"] = str(trace.trace_path)
+        trace = telemetry.collector()
+        if trace is not None and trace.trace_path is not None:
+            summary["trace"] = str(trace.trace_path)
+        # The trace and the roll-up were this run's: a front called after it,
+        # as from a notebook, records into neither.
+        telemetry.uninstall()
     return summary

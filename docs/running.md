@@ -523,7 +523,9 @@ no extra brings), and `REDACT_TRACE=off` writes nothing and leaves
 `summary["telemetry"]` empty.
 
 At the end of the run the driver logs a roll-up at INFO and returns it as
-`summary["telemetry"]`:
+`summary["telemetry"]`, then stops collecting: a stage function called after
+the run, as from a notebook, writes to no trace until the next run, and
+`telemetry.summary()` is then empty.
 
 | Key | Meaning |
 |---|---|
