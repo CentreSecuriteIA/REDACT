@@ -166,7 +166,7 @@ passes each stage, for the plan and for the run record's `serving`.
 | `config_sources(config_dir)` | The folder's files under the folders of `configs/`: `overridden`, `added` (read, with no packaged file of that name) and `ignored` |
 | `report_config_sources(config_dir, verbose=True, dataset_type=None)` | Warns about the `ignored` files and, with `verbose`, logs the files read; logs at INFO the families of `unseen_natural_families`; for an `eval` run, names the techniques of `extra_eval_techniques` in a WARNING |
 | `unseen_natural_families(config_dir)` | The families the packaged `augmentations.json` allows the natural kind that the folder's copy does not: what a copy made before the library added them cannot draw |
-| `extra_eval_techniques(config_dir)` | The techniques the eval type's attacks draw through the folder that the packaged eval type's do not: what a copy of `eval.json` (or `augmentations.json`) made before the library added them lets into the held eval pool |
+| `extra_eval_techniques(config_dir)` | The techniques the eval type's attacks draw through the folder that the packaged eval type's do not: what a copy of `eval.json` (or `augmentations.json`) made before the library added them lets into the pinned eval pool |
 
 These files are read from the folder: `dataset_types/eval.json` and
 `training.json`, `taxonomy/<name>.json`, `jailbreak/augmentations.json`,

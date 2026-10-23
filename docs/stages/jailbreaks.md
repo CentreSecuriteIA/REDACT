@@ -9,7 +9,7 @@ Augment the accepted inputs with technique combinations, in two kinds:
 
 | Kind | Writes | Default |
 |---|---|---|
-| `adversarial` | `Datasets/jailbreaks.csv`: jailbreak attacks | one round per input, by budget, from every active technique (214 in 29 families, the 23 translations among them) but `casual_writing` and the natural-only small talk and benign roles; half the units take a request obfuscation, a light encoding or a translation after the request |
+| `adversarial` | `Datasets/jailbreaks.csv`: jailbreak attacks | one round per input, by budget, from 214 techniques in 29 families, the 23 translations among them: the 244 active techniques less the 16 of the `rewrite` layer (off by default), the nine `casual_writing` ones and the five natural-only small talk and benign roles; half the units take a request obfuscation, a light encoding or a translation after the request |
 | `natural` | `Datasets/variations.csv`: natural variations | one technique per input, from the natural allow lists, which the spec's `kinds` narrow to 72 techniques (95 with `"translation": true`, which adds the 23 translations) ([techniques.md](../techniques.md#the-natural-pool)) |
 
 These are the packaged defaults, which a `training` run takes: both kinds
@@ -155,7 +155,8 @@ variants);
 continuation writes `style=<name>`, read as its variant; structural's
 `to_xml` and `to_markdown`, one template each, name none and are not
 counted, nor is `to_json`, whose wrapper is in code. Continuation and
-structural keep their info as it is while the eval pool is held.
+structural keep their info as it is while the eval pool is pinned
+([techniques.md](../techniques.md#the-eval-pool)).
 
 ## The benign data
 
@@ -212,7 +213,8 @@ techniques specs 1.2 and 1.3 added and not the seven spec 1.1 retired. The
 natural plan made before the natural kind's pool was narrowed to what the
 spec's `kinds` mark natural raises on resume (its pool changed): run the
 natural kind with `resume=False`; one made since resumes with the WARNING
-below, spec 1.2 having grown the pool (spec 1.3 left it as it was). The build leaves out the benign and
+below, spec 1.2 having grown the pool and spec 1.3 added one technique (the
+urgent ask). The build leaves out the benign and
 dual-use benign variations such a plan made with a technique the natural
 kind no longer draws ([build.md](build.md#training-mode)). The
 5,000-character cap on `to_ascii_art` holds wherever it is drawn, the eval
@@ -264,15 +266,14 @@ packaged attacks, the one re-plan this release asks of the adversarial kind
 once with `resume=False`, the natural kind's plan is not affected); the typo
 and the scenario checks, which cost model calls; the natural pool; and the
 techniques specs 1.2 and 1.3 add. A plan kept from spec 1.2 resumes with
-the growth WARNING above, naming the thirty-six techniques spec 1.3 adds
-(the persona templates, the fake turns, three answer formats, seven
-members of the thin request families, two payload splits, the word art, the
-two wording techniques, three personas and four translations), all
-attack-only but the urgent ask and the translations, so an adversarial plan
-names the others, and a natural plan names the urgent ask, and the
-translations when its `translation` switch is on. The
-sixteen techniques of the `rewrite` layer are off by default, in no kind's
-pool, so no plan names them.
+the growth WARNING above. An adversarial plan names all thirty-six
+techniques spec 1.3 adds to its pool (the eleven persona templates, the
+three fake turns, three answer formats, seven members of the thin request
+families, among them the urgent ask, two payload splits, the word art, the
+two wording techniques, three personas and four translations); a natural
+plan names the urgent ask alone, and the four translations too when its
+`translation` switch is on. The sixteen techniques of the `rewrite` layer
+are off by default, in no kind's pool, so no plan names them.
 
 ## Rejected and failed units
 

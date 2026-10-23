@@ -8,6 +8,12 @@ the change. Run the tests with:
 PYTHONPATH=src python -m pytest tests -q
 ```
 
+One known order dependence predates the jailbreak work: running
+`tests/test_runconfig.py` before `tests/llms/test_estimate.py` in one process
+(as `pytest tests/test_runconfig.py tests/llms/test_estimate.py` does) fails
+ten of the estimate tests, on `refactor` too. Each file passes alone, and the
+full suite in its default order passes.
+
 ## Add a model
 
 **For good**, add an entry to `src/redact/configs/llm/models.json`. Every
@@ -223,7 +229,7 @@ contract.
    kept from a translation into another script; `TestLatinOnly` in
    `tests/jailbreak/obfuscation/test_encoding.py` checks it on six other
    scripts, and fails when an encoding that leaves them unchanged is not
-   tagged, `to_braille` aside while the eval pool is held),
+   tagged, `to_braille` aside while the eval pool is pinned),
    `max_tokens` to cap its calls' replies, `cross_incompatible_with` for
    families this technique, not its whole family, may not join,
    `kinds` when it should differ from its first family's (below),
@@ -253,7 +259,8 @@ contract.
      and retry) or `preserve` (the check that a rewrite is the prompt's own
      request); `calls` is the model calls one application makes,
      generation and checks, a whole number or `[low, high]`. A family's
-     apply to each of its techniques whose entry gives none, as `kinds` do.
+     `check` and `calls` apply to each of its techniques whose entry gives
+     none, as `kinds` do.
      Both only declare: the technique runs its check itself (the typo
      check through `llm_pipeline.checked` in `obfuscation/typos.py`, on the
      `check_model` it is given; the scenario check in `hacking/cognitive.py`;
@@ -297,7 +304,7 @@ contract.
    (`casual_writing`).
    - **The natural pool.** `tests/fixtures/natural_pool.json` pins the 72
      names the natural kind draws by default, and
-     `tests/jailbreak/test_pool.py` fails until the owner decides: give the
+     `tests/jailbreak/test_pool.py` fails until you decide: give the
      technique `"kinds": ["adversarial"]`, or add its name to the fixture.
      The same file checks the attack pool's 214 techniques in 29 families.
    - **The eval pool.** `configs/dataset_types/eval.json` allows whole
@@ -307,9 +314,10 @@ contract.
      `techniques.deny`; of `temporal` and `answer_format` it names single
      techniques under `techniques.allow`, so a new member of those does not
      join. `tests/fixtures/eval_pool.json` pins the 36 names the
-     eval type draws, and `tests/jailbreak/test_pool.py` fails until the
-     owner decides: deny the technique in `eval.json`, or add its name to the
-     fixture. A user's copy of `eval.json` in a `config_dir` is not updated:
+     eval type draws, and `tests/jailbreak/test_pool.py` fails until you
+     decide: deny the technique in `eval.json` (the eval pool is pinned, so
+     this is the usual answer), or add its name to the fixture in an eval
+     review. A user's copy of `eval.json` in a `config_dir` is not updated:
      a deny added to the packaged file does not reach it, so a technique new
      to a family the copy allows joins that user's eval pool, and an eval
      run names it in a WARNING (`extra_eval_techniques`).
@@ -335,9 +343,9 @@ contract.
    `tests/fixtures/template_draws.json`. A new template technique, or a
    pool given new variants, regenerates it with
    `PYTHONPATH=src python -m tests.jailbreak.test_template_draws`; the
-   digests of an eval-pool technique change only with the owner's eval
-   review, and the regeneration refuses to write one without
-   `--eval-review`.
+   digests of an eval-pool technique change only in an eval review (a
+   deliberate change of the pinned eval pool), and the regeneration refuses to
+   write one without `--eval-review`.
 6. **Docs**: make the layer and family tables of
    [techniques.md](techniques.md) again from the spec with
    `PYTHONPATH=src python -m tests.jailbreak.test_docs_counts`, and update
@@ -377,15 +385,16 @@ The `translation` and `answer_language` techniques are generated from
 `configs/jailbreak/languages.json`, one row per language:
 
 1. **Add a row**, for example
-   `{"name": "Welsh", "slug": "welsh", "complexity": 2, "script": "Latn", "translation": false, "answer_language": true, "since": "1.3"}`:
+   `{"name": "Welsh", "slug": "welsh", "complexity": 2, "script": "Latn", "translation": false, "answer_language": true, "since": "1.4"}`:
    `name` as prompts and infos write it, `slug` the end of its technique
    names (`to_welsh`, `to_ask_answer_in_welsh`), `complexity` by resource
    tier (0 high, 1 mid, 2 low), `script` the ISO 15924 code it is written
    in, and which families it joins. A row's place in the file is its
    technique's place in its family, which the draws follow: append it, since
    moving a row changes which language a seed draws.
-2. **Date it**: move the spec's `version` up and give the row that `since`,
-   so a jailbreak plan kept from before resumes with a WARNING. A language
+2. **Date it**: move the spec's `version` up (to `"1.4"`, the example's
+   `since`, when the spec is at 1.3) and give the row that `since`, so a
+   jailbreak plan kept from before resumes with a WARNING. A language
    already in the table that gains a family (an answer language measured as a
    translation) keeps its `since` and gets `translation_since` for the new
    technique, which the spec's `version` then dates.
@@ -497,12 +506,13 @@ pool of one variant named after the entry. `personas.json` and
    some seeds, so `tests/jailbreak/test_template_draws.py` fails until
    `PYTHONPATH=src python -m tests.jailbreak.test_template_draws` is run.
    A pool an eval-pool technique draws changes the eval text: that waits
-   for the owner's eval review.
+   for an eval review.
 5. **Ratchet the floor.** `tests/fixtures/variant_floor.json` records each
    pool's family, its count of variants on and its floor, the fewest it
    should have (`FLOORS` by family in `tests/jailbreak/test_variant_floor.py`:
-   8 for a request or framing directive, a container, a fake turn and the
-   payload split's reassembly, 12 for a benign role, 20 for small talk, 6
+   8 for a request or framing directive, a container, a fake turn, the
+   payload split's reassembly, the word art's decoding and the wording's key
+   and puzzles, 12 for a benign role, 20 for small talk, 6
    for the persona templates' mechanics, 4 for an encoding's decode hints; a
    persona frame is its technique's own text, one per persona, not a pool
    the technique draws from, and is not counted). Regenerate it with
@@ -513,9 +523,11 @@ pool of one variant named after the entry. `personas.json` and
    current, when a family has no floor, and when a pool is below its floor
    without being on the fixture's `known_short` list, which the regenerator
    keeps as it is. A pool that reaches its floor must leave
-   `known_short`: the test fails until it does, so the list only shrinks.
-   13 of the 83 pools are on it today, in 5 families, all drawn by
-   eval-pool techniques; `to_json`'s wrapper is not a pool yet.
+   `known_short`: the test fails until it does. The list is kept by hand and
+   nothing but review stops a new below-floor pool from being added to it, so
+   add one only on purpose. 13 of the 85 pools are on it today, in 5
+   families, all drawn by eval-pool techniques (whose text is pinned);
+   `to_json`'s wrapper is not a pool yet.
 
 A new directive is a new list in the file and a technique that names it
 with `@uses_pool` ([above](#add-a-jailbreak-technique)); its family needs
