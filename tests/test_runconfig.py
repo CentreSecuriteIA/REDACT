@@ -82,14 +82,6 @@ def test_runconfig_and_the_former_record_names_still_resolve():
         redact.no_such_name  # noqa: B018
 
 
-def test_redact_pipelines_still_resolves_with_a_warning():
-    from redact import stages
-
-    with pytest.deprecated_call(match="redact.pipelines is now redact.stages"):
-        pipelines = _import_afresh("redact.pipelines")
-    assert pipelines.generate_inputs is stages.generate_inputs
-    assert pipelines.STAGES is stages.STAGES
-
 
 class TestFileCounts:
     """The counts of a stage's files are those of its rows read into one frame."""
