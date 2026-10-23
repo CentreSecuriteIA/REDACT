@@ -934,6 +934,24 @@ def test_a_runs_params_stand_in_for_its_params_file_in_the_benign_check(
     assert kwargs["include_general_benign"] is False
 
 
+@pytest.mark.parametrize("taxonomy", [{}, {"taxonomy": None}])
+def test_a_taxonomy_left_out_or_null_is_the_packaged_harmful(
+        tmp_path, monkeypatch, taxonomy):
+    import redact
+
+    handed = []
+    monkeypatch.setattr(redact, "generate_constitution",
+                        lambda **k: handed.append(k) or pd.DataFrame())
+    try:
+        run_pipeline({"dataset_type": "training", "data_dir": str(tmp_path),
+                      "stages": ["constitution"], **taxonomy}, verbose=False)
+    finally:
+        telemetry.uninstall()
+    (kwargs,) = handed
+    assert kwargs["taxonomy"] == "harmful"
+    assert read_record("constitution", tmp_path)["sources"][0].endswith("harmful.json")
+
+
 def test_a_benign_taxonomy_in_the_constitutions_params_is_refused(
         tmp_path, monkeypatch):
     raised = _fails_before_any_stage_or_model(
