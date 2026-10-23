@@ -65,13 +65,13 @@ REDACT/
 │       │
 │       ├── constitution/            # The constitution stage
 │       │   ├── generation.py        # ConstitutionPipeline.run, read_constitution
-│       │   ├── units.py             # Unit (one call), plan_units, messages_of, rows_of, file_of
+│       │   ├── units.py             # Unit (one call), plan_units (names checked), messages_of, rows_of, file_of, key_of
 │       │   └── parse.py             # strip_end_marker ([END]), parse_constitution (3-level markdown)
 │       │
 │       ├── content_moderation/      # The inputs, outputs and paraphrase stages
 │       │   ├── inputs.py            # InputPipeline.run_from_constitution: k units of one sample per entry, each dealt a spec
 │       │   ├── outputs.py           # run_output_generation: k checked responses per input row, each dealt an answer mode and a response spec
-│       │   ├── axes.py              # The generation axes: resolve, varied, deal_specs, deal_weights, render_spec, spec_columns, write_stage_coverage, warn_unshown
+│       │   ├── axes.py              # The generation axes: resolve, varied, deal_specs (fixed: done units keep theirs), deal_weights, render_spec, spec_columns, write_stage_coverage, warn_unshown
 │       │   ├── modes.py             # MODES, DEFAULT_MODES, resolve_modes, response_label, deal_modes (fixed: done units keep theirs), check_outputs_per_input: the answer modes of the outputs stage
 │       │   ├── paraphrase.py        # paraphrase_pool, paraphrase_prompt, check_paraphrase_prompt, run_paraphrase_target (units on drive_units, reply_cap), skip_reason, the check's gates (gate_reason), paraphrase_batch
 │       │   ├── checker.py           # build_quality_checker, build_output_quality_checker (per answer mode), build_paraphrase_checker
@@ -127,7 +127,7 @@ REDACT/
 │       │   ├── resume.py            # resume_state, clear_stage, release_lock
 │       │   ├── save.py              # commit, CommitBuffer: rows, then acks
 │       │   ├── drop.py              # drop_units: a fresh run of part of a stage
-│       │   ├── categories.py        # The inputs tree constitution_inputs/{category}/samples.csv: sample_row, discover_categories, merge_all, input_files, merge_inputs, take_per_group
+│       │   ├── categories.py        # The inputs tree constitution_inputs/{category}/samples.csv: check_category_name, sample_row, discover_categories, merge_all, input_files, merge_inputs, take_per_group
 │       │   ├── taxonomy.py          # load_taxonomy, create_taxonomy, iter_categories
 │       │   └── loading.py           # load_hf_dataset, load_from_config
 │       │
