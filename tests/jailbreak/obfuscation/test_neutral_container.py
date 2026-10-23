@@ -30,7 +30,7 @@ TEXTS = [
 LINE_BREAKS = ["\r\n", "\r", "\x0b", "\x0c", "\x85", "\u2028", "\u2029"]
 
 #: Words no variant's surroundings hold: a container gives no instruction
-#: and says nothing to the reader. A starting list, for the owner to extend.
+#: and says nothing to the reader. A starting list, to extend.
 NOT_NEUTRAL = (
     "ignore", "override", "bypass", "disregard", "obey", "unrestricted",
     "jailbreak", "system", "admin", "administrator", "instruction",

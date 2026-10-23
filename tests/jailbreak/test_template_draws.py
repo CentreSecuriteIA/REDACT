@@ -19,8 +19,8 @@ The techniques are the registry's, so a new one with a pool fails the
 fixture check until the fixture holds it. A change meant to alter the
 digests (new variants in a pool) regenerates the fixture, from the
 repository root, with
-``PYTHONPATH=src py -m tests.jailbreak.test_template_draws``. The digests of
-the techniques in ``fixtures/eval_pool.json`` change only with the owner's
+``PYTHONPATH=src python -m tests.jailbreak.test_template_draws``. The digests of
+the techniques in ``fixtures/eval_pool.json`` change only in an
 eval review: the regeneration refuses to write one that differs from the
 fixture's (or one the fixture lacks) unless it is run with ``--eval-review``.
 """
@@ -49,7 +49,7 @@ _SEEDS = range(6)
 _CALLS = 3
 
 #: The registry's techniques with a pool, and ``to_json``, whose wrapper is
-#: written in code until the owner's wrapper step but which the eval pool holds.
+#: written in code until the next eval review but which the eval pool holds.
 _TECHNIQUES = {fn.__name__: fn for fn in all_techniques()
                if hasattr(fn, "variant_pool") or fn.__name__ == "to_json"}
 
@@ -140,7 +140,7 @@ def regenerate(fixture: Path = _FIXTURE, *, eval_review: bool = False) -> None:
             json.loads(fixture.read_text(encoding="utf-8")), current)):
         raise SystemExit(
             f"refusing to change the digests of the eval pool in {fixture.name}: "
-            f"{', '.join(changed)}. They change only with the owner's eval "
+            f"{', '.join(changed)}. They change only in an eval "
             "review; run with --eval-review to write them.")
     fixture.write_text(json.dumps(current, indent=1) + "\n", encoding="utf-8")
 

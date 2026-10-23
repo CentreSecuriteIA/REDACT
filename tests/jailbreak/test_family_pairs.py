@@ -14,7 +14,7 @@ A rule that is added, dropped or narrowed, or a technique that is refused
 where its family's others are not, changes a line, which this test names; the
 digests of a plan's draws change for any of them, but only say that something
 did. A change meant to alter the matrix regenerates the fixture, from the
-repository root, with ``PYTHONPATH=src py -m tests.jailbreak.test_family_pairs``.
+repository root, with ``PYTHONPATH=src python -m tests.jailbreak.test_family_pairs``.
 """
 
 import json

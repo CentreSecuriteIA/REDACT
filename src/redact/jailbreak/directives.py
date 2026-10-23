@@ -18,7 +18,7 @@ with a ``name``, its text and optionally a ``weight``:
   after its entry; the entry's other keys (``policy_ids``) are its
   technique's own. ``to_json`` still writes its wrapper in
   ``obfuscation/structural.py``; moving it into the file waits for the
-  owner's wrapper step.
+  next eval review.
 
 ``personas.json`` and ``cognitive_techniques.json`` define personas and
 scenarios, not variants: their modules read them with :func:`load_templates`.

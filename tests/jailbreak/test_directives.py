@@ -219,7 +219,7 @@ class TestDrawVariant:
 
 
 def test_every_template_technique_names_its_pool_but_to_json():
-    """``to_json`` writes its wrapper in code until the owner's wrapper step."""
+    """``to_json`` writes its wrapper in code until the next eval review."""
     unmarked = [name for name, fn in _TEMPLATE_TECHNIQUES.items()
                 if not hasattr(fn, "variant_pool")]
     assert unmarked == ["to_json"]
@@ -247,7 +247,7 @@ def test_a_technique_writes_a_variant_of_the_pool_it_names(name):
 def test_no_eval_pool_technique_has_a_weighted_variant():
     """A weight of 0 takes a variant out of the eval text, and any weight
     draws the whole pool by ``rng.choices``, so every seed may draw another
-    variant: the eval pool's variants carry none until the owner's eval
+    variant: the eval pool's variants carry none until the next eval
     review."""
     weighted = sorted(
         name for name in _EVAL_POOL

@@ -3,7 +3,7 @@ name with a key (``to_pseudonym_substitution``) or a placeholder with a puzzle
 (``to_word_game``), and a variant of a pool around the prompt that says how to
 read them.
 
-The packaged variants and prompts are the owner's text; these tests fill the
+The packaged variants and prompts are written separately; these tests fill the
 pools with stand-ins of their own and assert on the placeholders, the key and
 puzzle lines, the case of a code name, the replay and the discards, never on
 the packaged wording.

@@ -510,7 +510,7 @@ class TestLatinOnly:
 
     def test_every_technique_that_leaves_them_unchanged_is_marked_but_braille(self):
         """Braille passes another script through too, but is in the eval
-        pool, which is held: marking it would change the eval draws."""
+        pool, which is pinned: marking it would change the eval draws."""
         unchanged = {fn.__name__ for fn in self._encodings()
                      if all(_leaves_unchanged(fn, text) for text in NON_LATIN.values())}
         tagged = {fn.__name__ for fn in self._encodings() if fn.needs_latin}

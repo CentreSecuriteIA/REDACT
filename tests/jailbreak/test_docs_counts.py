@@ -5,7 +5,7 @@
 active techniques per layer and per family. A technique counts in its first
 family only, and a retired one (``deprecated``) not at all. A change to the
 spec that moves them fails here until the tables are made again, from the
-repository root, with ``PYTHONPATH=src py -m tests.jailbreak.test_docs_counts``.
+repository root, with ``PYTHONPATH=src python -m tests.jailbreak.test_docs_counts``.
 
 The few sentences that quote the totals (the jailbreak heading of
 ``CLAUDE.md``, ``README.md`` and the introduction of ``techniques.md``) are

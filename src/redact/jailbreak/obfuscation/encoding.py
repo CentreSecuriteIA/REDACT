@@ -441,7 +441,7 @@ _ENCODERS = [
 
 _HINTS_FILE = "obfuscation/decode_hints.json"
 #: The encodings that never carry a hint: the five of the eval pool, whose
-#: text waits for the owner's eval review, and the one the natural kind draws.
+#: text waits for the next eval review, and the one the natural kind draws.
 NEVER_HINTED = frozenset({
     "to_base64", "to_unicode_escape", "to_ascii_ordinal", "to_morse",
     "to_braille", "to_leetspeak_basic"})
@@ -506,7 +506,7 @@ def _check_hints(hints: dict[str, list[dict]], encoders: list[Callable]) -> None
             f"configs/jailbreak/{_HINTS_FILE} has hints for {held}, which the "
             "eval pool or the natural kind draws: a hint would change their "
             "text. Remove the entry, or take the encoding out of NEVER_HINTED "
-            "of obfuscation/encoding.py with the owner's eval review.")
+            "of obfuscation/encoding.py in an eval review.")
 
 
 _check_hints(_HINTS, _ENCODERS)

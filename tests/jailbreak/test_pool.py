@@ -137,10 +137,10 @@ _MILD_NOISE = [f"to_{noise}_{density}" for noise in (
 def test_the_default_variation_pool_is_the_72_pinned_natural_techniques():
     """A technique added to a family the spec marks natural takes its
     family's kinds, so it joins the natural pool unless its entry says
-    ``["adversarial"]``. This fails until the owner decides, in the spec and
+    ``["adversarial"]``. This fails until it is decided, in the spec and
     ``fixtures/natural_pool.json``. Spec 1.2 added six answer languages and
     the natural-only small talk (2) and benign roles (3). Spec 1.3 added one:
-    ``to_ask_with_urgency``, which the owner decided is natural; its three
+    ``to_ask_with_urgency``, which was decided to be natural; its three
     answer formats say ``["adversarial"]``."""
     pool = technique_pool(resolve(None, "natural"))
     assert sorted(fn.__name__ for fn in pool) == NATURAL_POOL
@@ -434,7 +434,7 @@ def test_the_switch_admits_the_whole_family_when_no_list_names_one_of_it():
 def test_the_eval_pool_is_the_36_pinned_techniques_in_10_families():
     """``eval.json`` allows whole families, so a technique added to one of
     them joins the eval pool unless ``eval.json`` denies it. This fails until
-    the owner decides, in ``eval.json`` and ``fixtures/eval_pool.json``."""
+    it is decided, in ``eval.json`` and ``fixtures/eval_pool.json``."""
     from redact.recipe import load_dataset_type
 
     section = load_dataset_type("eval")["augmentations"]

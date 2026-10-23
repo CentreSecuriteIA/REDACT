@@ -2,7 +2,7 @@
 ``[MASK]`` in its place in the prompt, and a variant of the pool asking the
 reader to read the art and put the word back.
 
-The packaged variants are the owner's text; these tests fill the pool with
+The packaged variants are written separately; these tests fill the pool with
 stand-ins of their own and assert on the art, the mask, the font, the info
 and the verdicts, never on the packaged wording.
 """

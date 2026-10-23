@@ -10,7 +10,7 @@ close.
 The tests fail when:
 
 - a pool has fewer variants than the fixture records (a variant removed or
-  turned off); a drop is the owner's call;
+  turned off); a drop is a deliberate decision;
 - the fixture does not record every pool as the code counts it (a new pool,
   or a pool that grew): regenerate it to ratchet the count up;
 - a pool's family has no floor in :data:`FLOORS`: add one;
@@ -19,13 +19,13 @@ The tests fail when:
   take it out of the list (closing a gap shrinks the list).
 
 Regenerate the fixture from the repository root with
-``PYTHONPATH=src py -m tests.jailbreak.test_variant_floor``: it writes every
+``PYTHONPATH=src python -m tests.jailbreak.test_variant_floor``: it writes every
 pool's family, count and floor from the code, and keeps ``known_short`` as
 the file has it (a new pool below its floor is added to the list by hand,
-with the owner's agreement); with no fixture yet, it lists every pool below
+on purpose); with no fixture yet, it lists every pool below
 its floor. It refuses to record a pool with fewer variants than the fixture
-has, or one the code no longer has: pass ``--allow-drop`` with the owner's
-agreement.
+has, or one the code no longer has: pass ``--allow-drop`` on
+purpose.
 """
 
 import argparse
@@ -115,7 +115,7 @@ def regenerate(fixture: Path = _FIXTURE, *, allow_drop: bool = False) -> None:
             dropped := lost(existing["pools"], pools)):
         raise SystemExit(
             f"refusing to record fewer variants than {fixture.name} has: "
-            f"{'; '.join(dropped)}. A drop is the owner's call; run with "
+            f"{'; '.join(dropped)}. A drop is a deliberate decision; run with "
             "--allow-drop to record it.")
     known_short = (existing["known_short"] if existing is not None
                    else [name for name, entry in pools.items()
@@ -157,7 +157,7 @@ def test_a_pool_below_its_floor_is_known_short(recorded, current):
     unknown = sorted(set(short) - set(recorded["known_short"]))
     assert unknown == [], (
         "these pools are below their floor: give them more variants, or add "
-        "them to known_short with the owner's agreement")
+        "them to known_short on purpose")
 
 
 def test_a_known_short_pool_is_still_short(recorded, current):

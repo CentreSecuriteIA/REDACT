@@ -72,7 +72,7 @@ def test_each_thin_family_now_has_three_members(family):
 
 
 def test_the_urgent_ask_is_natural_as_its_family():
-    """The owner decided (2026-10-22) that an urgent ask is a natural
+    """An urgent ask was decided (2026-10-22) to be a natural
     variation: the natural pool is 72, with the other asking members, and the
     other six members of spec 1.3 stay attacks."""
     natural = technique_pool(resolve(None, "natural"))

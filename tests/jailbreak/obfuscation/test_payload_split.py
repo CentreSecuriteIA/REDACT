@@ -1,7 +1,7 @@
 """The payload-split techniques: the prompt cut into two to four lettered
 parts, which a variant of the pool asks the reader to join.
 
-The packaged variants are the owner's text; these tests fill the pool with
+The packaged variants are written separately; these tests fill the pool with
 stand-ins of their own and assert on the parts, the letters, the counts and
 the verdicts, never on the packaged wording.
 """

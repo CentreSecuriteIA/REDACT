@@ -9,7 +9,7 @@ parameters,
 and the combinations ``sample_combination`` draws from the whole pool for five
 seeds. A change that renames, reorders, retags or re-signs a technique fails
 here. A change meant to alter them regenerates the fixture, from the
-repository root, with ``py -m tests.jailbreak.test_registry``.
+repository root, with ``python -m tests.jailbreak.test_registry``.
 """
 
 import inspect

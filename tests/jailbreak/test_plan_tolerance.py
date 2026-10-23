@@ -368,7 +368,7 @@ def test_a_natural_plan_of_spec_1_2_finds_the_urgent_ask_as_the_library_s_growth
 
 
 def test_an_eval_plan_of_spec_1_2_finds_no_growth():
-    """The eval type's attack pool is held: the 36 techniques of 1.2 are the
+    """The eval type's attack pool is pinned: the 36 techniques of 1.2 are the
     36 of today's, so a 1.2 eval plan resumes without a pool warning."""
     from redact.recipe import load_dataset_type
 
