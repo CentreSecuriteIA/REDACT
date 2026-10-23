@@ -5,6 +5,8 @@ import warnings
 
 import pytest
 
+from redact.dataset import rows
+from redact.dataset import taxonomy as taxonomy_module
 from redact.dataset.taxonomy import create_taxonomy, iter_categories, load_taxonomy
 
 
@@ -133,6 +135,49 @@ class TestCreateTaxonomy:
         import redact
 
         assert redact.create_taxonomy is create_taxonomy
+
+    def test_a_packaged_taxonomy_is_not_written_over_unless_asked(self):
+        packaged = taxonomy_module._json_path(taxonomy_module._DEFAULT_CONFIG_DIR,
+                                              "harmful")
+        before = packaged.read_bytes()
+        with pytest.raises(FileExistsError, match="overwrite=True"):
+            create_taxonomy("harmful", {"Mine": "m"}, verbose=False)
+        assert packaged.read_bytes() == before
+
+    def test_with_overwrite_a_packaged_one_is_written(self, tmp_path, monkeypatch):
+        monkeypatch.setattr(taxonomy_module, "_DEFAULT_CONFIG_DIR", tmp_path)
+        create_taxonomy("harmful", {"Old": "o"}, verbose=False)
+        with pytest.raises(FileExistsError):
+            create_taxonomy("harmful", {"New": "n"}, verbose=False)
+        create_taxonomy("harmful", {"New": "n"}, verbose=False, overwrite=True)
+        assert list(load_taxonomy("harmful")["categories"]) == ["New"]
+
+    def test_a_file_of_another_folder_is_written_over(self, tmp_path):
+        create_taxonomy("mine", {"Old": "o"}, taxonomy_dir=tmp_path, verbose=False)
+        create_taxonomy("mine", {"New": "n"}, taxonomy_dir=tmp_path, verbose=False)
+        assert list(load_taxonomy("mine", config_dir=tmp_path)["categories"]) == [
+            "New"]
+
+    def test_a_write_that_fails_keeps_the_old_file(self, tmp_path, monkeypatch):
+        create_taxonomy("mine", {"Old": "o"}, taxonomy_dir=tmp_path, verbose=False)
+
+        def refuse(source, target):
+            raise PermissionError("held by another process")
+
+        monkeypatch.setattr(rows.os, "replace", refuse)
+        monkeypatch.setattr(rows.time, "sleep", lambda seconds: None)
+        with pytest.raises(PermissionError):
+            create_taxonomy("mine", {"New": "n"}, taxonomy_dir=tmp_path, verbose=False)
+        assert list(load_taxonomy("mine", config_dir=tmp_path)["categories"]) == [
+            "Old"]
+        assert [p.name for p in tmp_path.iterdir()] == ["mine.json"]
+
+    def test_a_category_that_cannot_name_a_folder_is_refused_and_nothing_written(
+            self, tmp_path):
+        with pytest.raises(ValueError, match="'Fraud/Scams' cannot name a folder"):
+            create_taxonomy("bad", {"Cyber": "c", "Fraud/Scams": "f"},
+                            taxonomy_dir=tmp_path, verbose=False)
+        assert list(tmp_path.iterdir()) == []
 
 
 class TestIterCategories:

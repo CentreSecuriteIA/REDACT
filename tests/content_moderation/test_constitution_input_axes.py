@@ -128,7 +128,60 @@ class TestAResume:
         made_with = json.loads((tmp_path / "constitution_inputs.plan.json").read_text(
             encoding="utf-8"))
         scaled = A.deal_weights(A.resolve("inputs", weighting="log"))
-        assert made_with["axes"] == scaled != A.deal_weights(A.resolve("inputs"))
+        # One record per style; the runs here have none (style "").
+        assert made_with["styles"][""]["axes"] == scaled != A.deal_weights(
+            A.resolve("inputs"))
+
+    @pytest.mark.parametrize("k", [0, -1, 2.5, True, "3"])
+    def test_samples_per_entry_that_is_not_a_whole_number_of_at_least_1_raises_first(
+            self, tmp_path, k):
+        _run(tmp_path, style="long")
+        before = sorted(p.name for p in tmp_path.rglob("*"))
+        plan = (tmp_path / "constitution_inputs.plan.json").read_bytes()
+        with pytest.raises(ValueError, match="inputs.samples_per_entry"):
+            _run(tmp_path, k=k, style="long", resume=False)
+        assert sorted(p.name for p in tmp_path.rglob("*")) == before
+        assert (tmp_path / "constitution_inputs.plan.json").read_bytes() == plan
+        assert len(_rows(tmp_path)) == _ENTRIES * _K
+
+    def test_a_fresh_run_of_one_style_keeps_the_others_plan_record(self, tmp_path):
+        """A resume of style long, with its own settings, still runs after a
+        fresh run of style short with others."""
+        _run(tmp_path, style="long", entries=2)
+        _run(tmp_path, style="short", seed=7, resume=False)
+        made_with = json.loads((tmp_path / "constitution_inputs.plan.json").read_text(
+            encoding="utf-8"))["styles"]
+        assert (made_with["long"]["seed"], made_with["short"]["seed"]) == (42, 7)
+        gen = _run(tmp_path, style="long")      # two more entries of long
+        assert len(gen.calls) == (_ENTRIES - 2) * _K
+        with pytest.raises(ValueError, match="'seed'"):
+            _run(tmp_path, style="short")
+
+    def test_a_style_with_no_done_unit_is_not_compared(self, tmp_path):
+        """Nothing dealt before has to be dealt again: the first run of a
+        style runs with its own settings, whatever the plan file holds."""
+        _run(tmp_path, style="long")
+        gen = _run(tmp_path, style="short", seed=7)
+        assert len(gen.calls) == _ENTRIES * _K
+        # The record a fresh run of style x wrote before its first save.
+        path = tmp_path / "constitution_inputs.plan.json"
+        plans = json.loads(path.read_text(encoding="utf-8"))
+        plans["styles"]["x"] = {**plans["styles"]["short"], "seed": 1}
+        path.write_text(json.dumps(plans), encoding="utf-8")
+        assert len(_run(tmp_path, style="x", seed=9).calls) == _ENTRIES * _K
+
+    def test_a_plan_file_of_one_record_is_the_record_of_the_styles_with_units(
+            self, tmp_path):
+        """As an earlier version wrote it: the last run's record alone."""
+        _run(tmp_path, style="long")
+        path = tmp_path / "constitution_inputs.plan.json"
+        record = json.loads(path.read_text(encoding="utf-8"))["styles"]["long"]
+        path.write_text(json.dumps(record), encoding="utf-8")
+        assert _run(tmp_path, style="long").calls == []
+        assert set(json.loads(path.read_text(encoding="utf-8"))["styles"]) == {"long"}
+        path.write_text(json.dumps({**record, "seed": 7}), encoding="utf-8")
+        with pytest.raises(ValueError, match="'seed'"):
+            _run(tmp_path, style="long")
 
     def test_a_folder_without_its_plan_file_is_warned_about(self, tmp_path, caplog):
         _run(tmp_path)
@@ -137,6 +190,81 @@ class TestAResume:
             _run(tmp_path)
         assert "no constitution_inputs.plan.json" in caplog.text
         assert (tmp_path / "constitution_inputs.plan.json").exists()
+
+    @staticmethod
+    def _entries(tokens) -> pd.DataFrame:
+        return pd.DataFrame([
+            {"source_category": "Violence", "sample_description": f"desc zq{t}",
+             "constitution_subcategory": "Sub", "entry_type": "harmful"}
+            for t in tokens])
+
+    def _resume(self, folder, tokens):
+        gen = _TokenBackend(lambda t, n: one(f"{_NTH.get(n, n)} sample {t}"))
+        _token_pipeline(folder, gen, _TokenBackend(lambda t, n: "Yes")) \
+            .run_from_constitution(self._entries(tokens), _PROMPT,
+                                   samples_per_entry=_K, batch_size=4,
+                                   verbose=False, axes=A.resolve("inputs"))
+        return gen
+
+    def test_entries_that_join_a_group_leave_the_done_units_specs_to_their_rows(
+            self, tmp_path):
+        """zq1 sorts before the done zq5 and zq7 of its group: their units
+        keep, in the manifest and the coverage table, the specs their rows
+        were written with, and zq1's are dealt around them."""
+        self._resume(tmp_path, [5, 7])
+        gen = self._resume(tmp_path, [1, 5, 7])
+        assert len(gen.calls) == _K
+        planned = _planned(tmp_path)
+        rows = _rows(tmp_path)
+        assert len(rows) == 3 * _K
+        for row in rows.to_dict("records"):
+            spec = planned[row["source_sample_description"], int(row["iteration"])]
+            assert {axis: row[axis] for axis in _AXIS_COLUMNS} == spec
+        with (tmp_path / "constitution_inputs.coverage.csv").open(
+                encoding="utf-8", newline="") as fh:
+            accepted = {(r["axis"], r["value"]): int(r["accepted"])
+                        for r in csv.DictReader(fh) if int(r["accepted"])}
+        assert accepted == {(axis, value): n for axis in _AXIS_COLUMNS
+                            for value, n in rows[axis].value_counts().items()}
+        # zq1's siblings still differ on length.
+        assert rows[rows["source_sample_description"] == "desc zq1"][
+            "length"].nunique() == _K
+
+    def test_acks_written_before_they_recorded_a_spec_are_dealt_again(
+            self, tmp_path):
+        self._resume(tmp_path, [5, 7])
+        ledger = _constitution_inputs_ledger(tmp_path).path
+        lines = [json.loads(line) for line in ledger.read_text(
+            encoding="utf-8").splitlines()]
+        assert all("spec" in ack for ack in lines if "sample_description" in ack)
+        ledger.write_text("".join(
+            json.dumps({k: v for k, v in ack.items() if k != "spec"}) + "\n"
+            for ack in lines), encoding="utf-8")
+        gen = self._resume(tmp_path, [1, 5, 7])
+        assert len(gen.calls) == _K and len(_rows(tmp_path)) == 3 * _K
+
+    def test_a_broken_plan_file_stops_it_naming_the_remedies(self, tmp_path):
+        _run(tmp_path)
+        plan = tmp_path / "constitution_inputs.plan.json"
+        plan.write_text(plan.read_text(encoding="utf-8")[:20], encoding="utf-8")
+        with pytest.raises(ValueError, match="resume=False") as stopped:
+            _run(tmp_path)
+        assert plan.name in str(stopped.value)
+        assert lock_is_free(_constitution_inputs_ledger(tmp_path).path)
+        plan.unlink()
+        assert _run(tmp_path).calls == []   # deleted, the resume runs unchecked
+
+    def test_a_fresh_run_of_a_style_replaces_a_broken_plan_file(
+            self, tmp_path, caplog):
+        _run(tmp_path, style="long")
+        plan = tmp_path / "constitution_inputs.plan.json"
+        plan.write_text('{"styles": {"long"', encoding="utf-8")
+        with caplog.at_level(logging.WARNING):
+            gen = _run(tmp_path, style="short", resume=False)
+        assert "It is removed" in caplog.text
+        assert len(gen.calls) == _ENTRIES * _K
+        assert set(json.loads(plan.read_text(encoding="utf-8"))["styles"]) == {
+            "short"}
 
     def test_a_folder_written_without_the_axes_stops_a_run_with_them(self, tmp_path):
         _run(tmp_path, axes=False)

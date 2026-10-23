@@ -35,12 +35,13 @@ from ..dataset import (
     Ledger,
     Manifest,
     append_rows,
+    check_category_name,
     check_columns,
     content_id,
     sample_row,
 )
 from ..dataset.drop import drop_units
-from ..dataset.planfile import changed_plan, plan_path, plan_record, write_plan
+from ..dataset.planfile import plan_path, plan_record, read_plan, write_plan
 from ..dataset.resume import release_lock, resume_state
 from ..dataset.save import CommitBuffer
 from ..exceptions import PromptTooLongError
@@ -142,6 +143,37 @@ def _stop_on_earlier_files(
             raise ValueError(f"{error} {remedy}") from None
 
 
+def check_samples_per_entry(value) -> int:
+    """``value`` when it is a whole number of at least 1: the units, one
+    sample each, of every constitution entry.
+
+    Raises:
+        ValueError: Anything else, a bool too. The message names
+            ``inputs.samples_per_entry``.
+    """
+    if isinstance(value, bool) or not isinstance(value, int) or value < 1:
+        raise ValueError(
+            "inputs.samples_per_entry must be a whole number of at least 1, got "
+            f"{value!r}.")
+    return value
+
+
+def _style_plans(manifest_path: Path, processed: set) -> dict[str, dict]:
+    """The plan record of each style, from the folder's plan file.
+
+    The file holds one record per style, under ``styles``. One written
+    before that holds a single record, the last run's: it is taken as the
+    record of every style with a finished unit.
+    """
+    made_with = read_plan(manifest_path)
+    if made_with is None:
+        return {}
+    styles = made_with.get("styles")
+    if isinstance(styles, dict):
+        return dict(styles)
+    return {key[2]: made_with for key in processed}
+
+
 class _Entry(NamedTuple):
     """The fields of a constitution entry that the stage reads."""
 
@@ -152,6 +184,29 @@ class _Entry(NamedTuple):
     constitution_category: str
     group_tag: str
     source_taxonomy: str | None     # None for a constitution without the column
+
+
+def _distinct(entries: list[_Entry]) -> list[_Entry]:
+    """``entries`` less each whose ``(sample_description, entry_type)`` an
+    earlier one has, with a WARNING.
+
+    A unit's key holds those two and no category, so two such entries (one
+    description in two categories, or a constitution row saved twice) would
+    share their units' keys: both would run, and a resume would skip both
+    once one of them was done.
+    """
+    seen: set[tuple[str, str]] = set()
+    kept = []
+    for e in entries:
+        if (e.description, e.entry_type) not in seen:
+            seen.add((e.description, e.entry_type))
+            kept.append(e)
+    if len(kept) < len(entries):
+        logger.warning(
+            "Inputs: %d constitution entries repeat the sample_description and "
+            "entry_type of an earlier one, which a unit is keyed on; each is left "
+            "out, the first kept.", len(entries) - len(kept))
+    return kept
 
 
 def _entry_fields(entry: pd.Series) -> _Entry:
@@ -250,13 +305,17 @@ class InputPipeline:
         Rows go to ``{dataset_dir}/{category}/samples.csv``, and a text is
         written once in the folder, whatever its category and style. The
         ledger beside them is keyed on ``(sample_description, entry_type,
-        style, iteration)``, and a resume reads it alone; the deal is made
-        again, and ``constitution_inputs.plan.json`` (``seed``,
+        style, iteration)``, an ack recording the unit's spec, and a resume
+        reads it alone; the deal is made again, a done unit keeping the spec
+        its ack records, and ``constitution_inputs.plan.json`` (``seed``,
         ``samples_per_entry``, the axes' weights) stops a resume that would
-        deal another. ``resume=False`` starts this style over and keeps the
-        rows and acks of the others; without a style it clears the folder. A
-        folder written before its units had an iteration stops before any
-        call.
+        deal another; the file holds one record per style. ``resume=False``
+        starts this style over and keeps the rows and acks of the others;
+        without a style it clears the folder, also for an empty
+        ``constitution_df``. A folder written before its units had an
+        iteration stops before any call. An entry whose
+        ``(sample_description, entry_type)`` an earlier entry has is left
+        out, with a WARNING: its units would share their keys.
 
         ``constitution_df`` has the constitution's columns
         (``source_category``, ``sample_description``,
@@ -267,16 +326,38 @@ class InputPipeline:
         ``prompt_config`` is a prompt of
         ``input/generation/from_constitution/{style}``.
 
+        Before anything is cleared or any call made, each entry's
+        ``source_category`` must name a folder
+        (:func:`~redact.dataset.check_category_name`), and the generation
+        prompt and the check prompt must render, so a broken overlay stops
+        the run here rather than inside its units.
+
         Raises:
-            ValueError: A folder written before this layout, or a resume
-                whose ``seed``, ``samples_per_entry`` or axes' weights differ
-                from those of the plan file.
+            ValueError: ``samples_per_entry`` is not a whole number of at
+                least 1, a category name cannot name a folder, a prompt does
+                not render, a folder was written before this layout, or a
+                resume's ``seed``, ``samples_per_entry`` or axes' weights
+                differ from those its style's done units were dealt with.
         """
+        check_samples_per_entry(samples_per_entry)
         if constitution_df.empty:
-            logger.warning("run_from_constitution: empty constitution_df, nothing to do")
-            return ConstitutionInputResult()
+            logger.warning("run_from_constitution: empty constitution_df, nothing "
+                           "to generate%s", "" if resume else "; the style starts over")
+            if resume:
+                return ConstitutionInputResult()
+        entries = _distinct(
+            [_entry_fields(entry) for _, entry in constitution_df.iterrows()])
+        for category in sorted({e.category for e in entries}):
+            check_category_name(category)
         if axes:
             warn_unshown(prompt_config, "sample_spec", "of the inputs' generation")
+        # Rendered once with empty values: an overlay that does not render
+        # stops the run before its first paid call.
+        self._build_generation_messages(
+            prompt_config, Category="", sample_description="",
+            constitution_subcategory="", entry_type="", sample_spec="")
+        if use_checker:
+            build_quality_checker(category="", prompt_dir=self.prompt_dir)("", "")
 
         capture_input = self.gen.compute_config.supports_internals
         capture_val_in = use_checker and self.check.compute_config.supports_internals
@@ -294,13 +375,23 @@ class InputPipeline:
                 acks=lambda ack: ack.get("style") == style,
                 **tree,
             )
+            # A fresh run of a style writes its record anew: a plan file that
+            # holds none would stop the resume below, which keeps the others.
+            try:
+                read_plan(manifest.path)
+            except ValueError as error:
+                logger.warning("%s It is removed: this style's record is written "
+                               "anew, and the other styles resume unchecked.", error)
+                plan_path(manifest.path).unlink()
         if resume or style:
             # Before anything is written: the files the run keeps must take
             # its rows.
             try:
                 _stop_on_earlier_files(
                     ledger, sorted(folder.glob(_CATEGORY_FILES)),
-                    ["iteration", *spec_columns(axes, {})])
+                    ["iteration", *spec_columns(axes, {}),
+                     *(["source_taxonomy"] if "source_taxonomy"
+                       in constitution_df.columns else [])])
             except ValueError:
                 release_lock(ledger)    # drop_units keeps it for the resume
                 raise
@@ -309,36 +400,59 @@ class InputPipeline:
             ledger, resume=resume or bool(style), manifest=manifest, **tree)
         seen = set(ledger.ids)      # the content ids of the rows of every style
 
+        # One record per style: a style's deal is its own, and a fresh run
+        # of one style leaves the others' records as it leaves their rows.
+        # Compared only when this style has a done unit: with none, nothing
+        # dealt before has to be dealt again.
         made_with = plan_record(seed=seed, samples_per_entry=samples_per_entry,
                                 axes=deal_weights(axes))
-        changed = changed_plan(manifest.path, made_with) if resume else []
-        if changed:
-            release_lock(ledger)
-            raise ValueError(
-                f"Inputs: this run's {changed} differ from those the units in "
-                f"{folder} were dealt with (see {plan_path(manifest.path).name}), "
-                "and a resume deals them again as they were. Run with "
-                "resume=False to start the style over, or with the settings the "
-                "plan was made with.")
-        if changed is None and processed:
-            logger.warning(
-                "Inputs: %s has finished units and no %s, so whether this run's "
-                "seed, samples_per_entry and axes are the ones they were dealt "
-                "with is not checked.", folder, plan_path(manifest.path).name)
-        write_plan(manifest.path, made_with)
+        plan_file = plan_path(manifest.path)
+        plans = _style_plans(manifest.path, processed) if resume or style else {}
+        if resume and any(key[2] == style for key in processed):
+            earlier = plans.get(style)
+            changed = [key for key, value in made_with.items()
+                       if earlier is not None and earlier.get(key) != value]
+            if changed:
+                release_lock(ledger)
+                raise ValueError(
+                    f"Inputs: this run's {changed} differ from those the units "
+                    f"of style {style!r} in {folder} were dealt with (see "
+                    f"{plan_file.name}), and a resume deals them again as they "
+                    "were. Run with resume=False to start the style over, or "
+                    "with the settings the plan was made with.")
+            if earlier is None:
+                logger.warning(
+                    "Inputs: %s has finished units of style %r and %s, so "
+                    "whether this run's seed, samples_per_entry and axes are the "
+                    "ones they were dealt with is not checked.", folder, style,
+                    f"no record of it in {plan_file.name}" if plan_file.exists()
+                    else f"no {plan_file.name}")
+        write_plan(manifest.path, {"styles": {**plans, style: made_with}})
 
-        entries = [_entry_fields(entry) for _, entry in constitution_df.iterrows()]
         units = [(e, iteration)
                  for e in entries for iteration in range(samples_per_entry)]
+        # Every unit is dealt its spec, done or not: the deal is a function
+        # of the whole plan. A done unit keeps the spec its ack records, so
+        # the manifest and the coverage table agree with its row, and the
+        # other units are dealt around it. An ack without one (written
+        # before acks recorded it) leaves its unit to the deal. Entries are
+        # distinct, so each key is one unit's.
+        recorded = {key: ack["spec"] for ack in ledger.records()
+                    if "spec" in ack and (key := ledger.key(ack)) in processed}
+        fixed = {j: recorded[key] for j, (e, iteration) in enumerate(units)
+                 if (key := (e.description, e.entry_type, style, iteration))
+                 in recorded}
         specs = deal_specs(
             axes, [((e.category, e.entry_type), (e.description, iteration))
-                   for e, iteration in units], seed=seed)
+                   for e, iteration in units], seed=seed, fixed=fixed)
         manifest.write(
             {"sample_description": e.description, "entry_type": e.entry_type,
              "style": style, "iteration": iteration, "category": e.category,
              **({"spec": spec} if axes else {}), "status": "planned"}
             for (e, iteration), spec in zip(units, specs)
         )
+        if not units:
+            manifest.reset()    # an empty plan writes nothing: no earlier one stays
         pending = [(e, iteration, spec) for (e, iteration), spec in zip(units, specs)
                    if (e.description, e.entry_type, style, iteration) not in processed]
         result = ConstitutionInputResult()
@@ -465,8 +579,10 @@ class InputPipeline:
                              finished, total, e.category, e.entry_type, desc_preview,
                              iteration)
 
+            # The spec the unit was dealt, what a resume deals it again.
             key = {"sample_description": e.description, "entry_type": e.entry_type,
-                   "style": style, "iteration": iteration}
+                   "style": style, "iteration": iteration,
+                   **({"spec": spec} if axes else {})}
             row = None
             if verdict is not None:
                 accepted, reasoning = verdict
