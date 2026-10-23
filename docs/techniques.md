@@ -145,9 +145,13 @@ Seventeen of them are tagged `needs_latin`: the ciphers `to_rot13`,
 `to_rot18`, `to_rot47`, `to_caesar_cipher`, `to_atbash`, the three
 `to_leetspeak_*` and their six `to_sensitive_words_encode_*` forms, and the
 Latin-only transforms `to_lookalike_letters`, `to_fullwidth` and
-`to_math_styled`. They change only Latin letters (ROT18 also ASCII digits,
-ROT47 every printable ASCII character, fullwidth also ASCII digits), so they
-leave a text in another script as it was, as a test checks on six scripts.
+`to_math_styled`. They change only ASCII characters, the letters (ROT18
+also the digits, ROT47 every printable ASCII character, fullwidth also the
+digits), so they leave a text in another script as it was when it holds none
+of those, as a test checks on six samples of other scripts; ROT47 changes the
+ASCII punctuation or digits of such a text, and in a Latin-script text with
+accents (Vietnamese, Yoruba, Czech) the accented letters stay in clear under
+the letter ciphers.
 `to_morse` and `to_braille` pass such a text through as well (Morse only
 spaces its characters out) but are not tagged: both are in the eval pool,
 which is held, and completing them would change its text.

@@ -941,7 +941,9 @@ one of four hints around the encoded text that says how to decode it
 kind's encoded texts come with a hint about half the time, and a row's
 `technique_info` gains `hint=<name>`; the kind's variants table counts the
 hints. The draw is made when the unit runs, from the technique's own
-seeded generator, not in the plan: a plan kept from before replays its
+seeded generator, not in the plan (one `rng.random()` when the encoding
+changed the text; a registry encoder called directly with no `rng` is
+therefore random now, where the plain encoder is not): a plan kept from before replays its
 techniques and combinations as they were, and its pending units draw hints,
 so a run resumed across this change holds encoded texts with and without
 one. No combination, pool or round changes, and the `eval` and natural

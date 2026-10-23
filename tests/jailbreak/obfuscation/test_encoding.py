@@ -464,11 +464,12 @@ def _leaves_unchanged(fn, text: str) -> bool:
 
 
 class TestLatinOnly:
-    """``needs_latin`` marks what changes only Latin text, which the rules
+    """``needs_latin`` marks what changes only ASCII characters, which the rules
     keep from a translation into another script. It is read off the
     techniques' behaviour on the samples above, for the families that hold
     such a technique: ``encode`` (with the sensitive-word encodings) and
-    ``noise``."""
+    ``noise``. "Latin" is ASCII: the samples hold no ASCII punctuation or
+    digit, which ROT47 would change in a text of another script."""
 
     @staticmethod
     def _encodings() -> list:

@@ -456,9 +456,14 @@ def _with_hint(encode: Callable) -> Callable:
 
     The hint is drawn from ``rng`` after the encoder's own draws, so an
     outcome without one leaves its text and its info as ``encode`` writes
-    them. The rate is one ``rng.random()`` per call, drawn before the hint;
-    only this technique's ``rng`` is read, so no other technique's draws
-    move. An encoding that changed nothing gets no hint, so it stays a noop.
+    them. The rate is one ``rng.random()`` when the encoding changed the text,
+    drawn before the hint (a noop draws nothing and gets no hint, so it stays
+    a noop): after such a call ``rng`` is one draw ahead of the plain
+    encoder's, at rate 0 too, though the text and the info are the same. Only
+    this technique's ``rng`` is read, so no other technique's draws move.
+    Called without an ``rng``, a hinted encoder draws from the global
+    generator, so a direct call of a registry encoder is random where the plain
+    encoder is not; a stage always gives each technique a seeded one.
     """
     name = encode.__name__
     takes_rng = "rng" in inspect.signature(encode).parameters
