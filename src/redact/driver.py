@@ -20,6 +20,7 @@ import logging
 import os
 import threading
 import time
+import warnings
 from collections.abc import Iterable, Mapping
 from pathlib import Path
 from typing import Any
@@ -93,10 +94,27 @@ def read_record(stage: str, data_dir: str | Path | None = None) -> dict | None:
         return json.load(fh)
 
 
-# Former names of the three record functions, kept for one release.
-manifest_path = record_path
-write_manifest = write_record
-read_manifest = read_record
+#: Former names of the three record functions, read for one release with a
+#: DeprecationWarning (a run record is not a ``*.manifest.jsonl``).
+FORMER_RECORD_NAMES = {"manifest_path": "record_path",
+                       "write_manifest": "write_record",
+                       "read_manifest": "read_record"}
+
+
+def former_record_name(module: str, name: str, stacklevel: int = 3):
+    """The record function ``name``, a former name, stands for, with a
+    ``DeprecationWarning`` naming ``module`` and the new name."""
+    new = FORMER_RECORD_NAMES[name]
+    warnings.warn(
+        f"{module}.{name} is now {new}; the former name is read for this release.",
+        DeprecationWarning, stacklevel=stacklevel)
+    return globals()[new]
+
+
+def __getattr__(name: str):
+    if name in FORMER_RECORD_NAMES:
+        return former_record_name(__name__, name)
+    raise AttributeError(f"module {__name__!r} has no attribute {name!r}")
 
 
 def file_counts(

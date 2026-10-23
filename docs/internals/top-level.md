@@ -238,10 +238,12 @@ still alive with a `kill -9` line, and leaves with `os._exit(128 + signum)`.
 | `file_counts(files, keep)` | Counts `rows`, and `accepted` when a file has the column, reading in chunks |
 | `write_record`, `read_record`, `record_path` | The run record `Datasets/<stage>.run.json` |
 
-`write_manifest`, `read_manifest` and `manifest_path` are aliases of the
-three record functions, kept for one release. `pipelines.py` re-exports
-`stages.py` and `runconfig.py` re-exports `recipe.py` and `driver.py`, also
-for one release.
+`write_manifest`, `read_manifest` and `manifest_path` are former names of
+the three record functions, kept for one release: read from `redact.driver`,
+or the first two from `redact` (out of its `__all__`), each warns with a
+`DeprecationWarning` through a module `__getattr__`. `pipelines.py`
+re-exports `stages.py` and `runconfig.py` re-exports `recipe.py` and
+`driver.py`, also for one release; importing either warns.
 
 ## paths.py
 

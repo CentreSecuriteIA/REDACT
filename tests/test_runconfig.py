@@ -47,10 +47,21 @@ def test_write_record_with_extra_and_spec(tmp_path):
     assert m["note"] == "hi" and m["spec_version"] == "1.0"
 
 
+def _import_afresh(name: str):
+    """Import module ``name`` as a first import does, running its body."""
+    import importlib
+    import sys
+
+    sys.modules.pop(name, None)
+    return importlib.import_module(name)
+
+
 def test_runconfig_and_the_former_record_names_still_resolve():
     import redact
-    from redact import driver, recipe, runconfig
+    from redact import driver, recipe
 
+    with pytest.deprecated_call(match="redact.runconfig is deprecated"):
+        runconfig = _import_afresh("redact.runconfig")
     assert runconfig.run_pipeline is driver.run_pipeline
     assert runconfig.load_recipe is recipe.load_recipe
     assert runconfig.load_params is recipe.load_params
@@ -60,8 +71,24 @@ def test_runconfig_and_the_former_record_names_still_resolve():
                      ("read_manifest", "read_record")]:
         assert getattr(runconfig, old) is getattr(driver, new)
         assert getattr(runconfig, new) is getattr(driver, new)
-    assert redact.write_manifest is redact.write_record is driver.write_record
-    assert redact.read_manifest is redact.read_record is driver.read_record
+        with pytest.deprecated_call(match=f"redact.driver.{old} is now {new}"):
+            assert getattr(driver, old) is getattr(driver, new)
+    with pytest.deprecated_call(match="redact.write_manifest is now write_record"):
+        assert redact.write_manifest is redact.write_record is driver.write_record
+    with pytest.deprecated_call(match="redact.read_manifest is now read_record"):
+        assert redact.read_manifest is redact.read_record is driver.read_record
+    assert not {"read_manifest", "write_manifest"} & set(redact.__all__)
+    with pytest.raises(AttributeError):
+        redact.no_such_name  # noqa: B018
+
+
+def test_redact_pipelines_still_resolves_with_a_warning():
+    from redact import stages
+
+    with pytest.deprecated_call(match="redact.pipelines is now redact.stages"):
+        pipelines = _import_afresh("redact.pipelines")
+    assert pipelines.generate_inputs is stages.generate_inputs
+    assert pipelines.STAGES is stages.STAGES
 
 
 class TestFileCounts:
