@@ -18,6 +18,8 @@ and says in its commit which pairs went.
 import json
 from pathlib import Path
 
+import pytest
+
 import redact.jailbreak  # noqa: F401  (tags the techniques)
 from redact.jailbreak.augmentation import resolve
 from redact.jailbreak.pool import technique_pool
@@ -70,6 +72,15 @@ def test_the_pairs_of_the_eval_pool_the_rules_admit_are_as_pinned():
 
 def test_the_fixture_is_what_the_regeneration_writes():
     assert _PAIRS.read_text(encoding="utf-8") == _dumps(snapshot())
+
+
+@pytest.mark.parametrize("translation", [
+    "to_bengali", "to_javanese", "to_khmer", "to_nepali", "to_scots_gaelic",
+    "to_swahili", "to_thai", "to_zulu"])
+@pytest.mark.parametrize("encoding", [
+    "to_ascii_ordinal", "to_base64", "to_braille", "to_morse", "to_unicode_escape"])
+def test_the_eval_draws_no_translation_beside_an_encoding(translation, encoding):
+    assert "|".join(sorted((translation, encoding))) not in snapshot()
 
 
 if __name__ == "__main__":

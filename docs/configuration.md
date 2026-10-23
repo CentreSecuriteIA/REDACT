@@ -722,9 +722,16 @@ a run you already have, and what you will see; each point has its note below.
   families are counted apart from the obfuscation layer's, so the attacks
   draw every technique of their pool. The default attack pool is 214
   techniques in 29 families (142 in 22 before; 178 in 24 at spec 1.2). The
-  `eval` type's pool and draws are unchanged, at 36 techniques in 10
-  families, but for the ASCII-art cap, which changes the font `to_ascii_art`
-  draws for texts of about 40 characters or more.
+  `eval` type's pool is unchanged, at 36 techniques in 10 families, but its
+  draws moved: the ASCII-art cap changes the font `to_ascii_art` draws for
+  texts of about 40 characters or more, and the rules of the eval release
+  (below) change which pairs of the pool one combination may hold.
+- **The eval release moves the eval type's draws.** The pool is the same 36
+  techniques, but a translation now refuses every `encode` technique, so
+  eval files made before this release are not comparable with those made
+  after. A kept eval plan replays its recorded combinations and warns on
+  resume that the rules changed; plan the eval type again with
+  `resume=False` to take them (the note on the eval release, below).
 - **Stricter checks, and what they skip.** An allow list or `family_weights`
   that names a family or technique of a layer the kind leaves off raises
   (the `rewrite` layer needs `layers.allow`); a `config_dir`
@@ -1099,8 +1106,8 @@ in `techniques.deny` and allows none of the families), so its pool stays at
   pool draws all twelve; the natural pool gains the eight of low and medium
   density, the packaged natural kind allowing the family. `noise` applies
   after `casual_writing` and before `sensitive_words` and never sits beside
-  `typos` or `casual_writing`; the Latin-letter ones are kept from a
-  translation into another script and the emoji ones from `ascii_art`.
+  `typos`, `casual_writing` or a translation; the emoji ones are kept from
+  `ascii_art`.
 - *The neutral containers.* A new obfuscation family, `neutral_container`,
   adds six pure techniques that place the text in an everyday document: a
   code comment, a YAML document, a CSV row, an email, a transcript line or a
@@ -1187,7 +1194,10 @@ into another script than Latin, where the encoding changed nothing; so
 some draws differ from those an earlier version made with the same seed.
 A kept plan replays as it was made. The eval pool holds none of these
 encodings, so its draws do not change
-([techniques.md](techniques.md#compatibility-rules)).
+([techniques.md](techniques.md#compatibility-rules)). The eval release has
+since replaced the rule: a translation refuses every `encode` technique,
+whatever its script, so the rule refused nothing more and is gone (the note
+on the eval release, below).
 
 **Release note: the ASCII-art cap.** `to_ascii_art` keeps a drawing of at
 most 5,000 characters wherever it is drawn, the eval type's pool included,
@@ -1355,10 +1365,11 @@ holding a translation went from 787 to 798 and the obfuscations per unit from
 the eight families (0 of 3,000 units at seeds 42 to 46), 25.3% hold a
 translation (25.1% to 25.5%) and the obfuscations per unit are 1.60 (1.60 to
 1.61). A plan kept from before replays its recorded combinations, so a kept
-plan may still pair them. `encode`, `structural`, `suffixes` and
-`neutral_container` stay allowed beside a translation: the eval type draws
-`encode` and `structural` with its translations, and its pool (36 techniques)
-and draws are unchanged, since it holds no technique of the four families. The
+plan may still pair them. `structural`, `suffixes` and `neutral_container`
+stay allowed beside a translation: the eval type draws `structural` with its
+translations, and its pool (36 techniques) and draws are unchanged by these
+four families, since it holds no technique of them (`encode`, which it holds,
+is refused beside a translation since the eval release, below). The
 natural pool (72) is unchanged as well; the natural kind draws one technique
 per input, and takes the rules only with `exact_techniques` of 2 or more and
 `"translation": true`.
@@ -1393,6 +1404,39 @@ allows no `wording` technique and the natural kind none, so their pools
 `encoding`, which no generation axis varies, so the `training` type needs no
 denial. Prompts of your own (`prompt_dir`) overlay the two new ones as any
 other.
+
+**Release note: the eval release.** The eval type's pool is the same 36
+techniques (`tests/fixtures/eval_pool.json`), but which pairs of them one
+combination may hold has changed, so eval files made before this release are
+not comparable with those made after. No technique is added or retired, so
+the spec's version stays 1.3: these are changes to rules, which the plan
+file's `rules` id records. The first change is that a translation refuses
+every `encode` technique, light or heavy, into any script (the `translation`
+entry of the spec): both rewrite the whole text, so one is enough, and a
+cipher before a translation would hand the translator a cipher. The pool
+loses 40 of its 335 pairs, each of its eight translations (Bengali,
+Javanese, Khmer, Nepali, Scots Gaelic, Swahili, Thai, Zulu) beside each of
+its five encodings (`to_ascii_ordinal`, `to_base64`, `to_braille`,
+`to_morse`, `to_unicode_escape`), and 295 remain
+(`tests/fixtures/eval_pairs.json`). Round 1 of the eval type draws one
+technique per input and does not move. In round 2 (two techniques) a plan of
+3,000 inputs at the eval's seed, 43, held such a pair in 304 units before; a
+plan of 300 inputs in three groups deals 283 of its 300 round-2 units another
+pair, since the group counts follow the lost pairs. The default attack kind
+loses the pairing too: on 3,000 units in three groups, 247 to 266 units
+(seeds 42 to 46) drew a translation and an encoding before, and none does
+since; the units holding a translation go from 25.3% to 24.6% at seed 42.
+The script rule (its note, above) is gone with this change: it kept a
+Latin-only technique from a translation into another script, and every such
+technique is an `encode` or `noise` technique that a translation now refuses
+outright; the `needs_latin` tag stays, and a test asserts the invariant.
+
+A plan kept from before replays its recorded combinations, so it still holds
+the pairs now refused. Its plan file's `rules` id differs from today's, so a
+resume logs one WARNING that the rules a combination is drawn by changed and
+counts the pending units whose combination today's rules refuse. To take the
+new rules, run the jailbreak stage with `resume=False` (the stage starts
+over); until then the rows of a kept eval plan are not those of a fresh one.
 
 ## The model registry
 

@@ -110,7 +110,7 @@
   "encode|payload_split": [108, 108],
   "encode|sensitive_words": [540, 864],
   "encode|tokenbreak": [6, 162],
-  "encode|translation": [242, 1242],
+  "encode|translation": [1242, 1242],
   "encode|word_art": [54, 54],
   "fake_turns|framing": [30, 30],
   "fake_turns|fsh": [36, 36],

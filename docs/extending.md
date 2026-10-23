@@ -225,11 +225,14 @@ contract.
    `configs/jailbreak/combination_spec.json`: `families` (the first sets the
    layer and the order), `complexity` (0 to 3), `requires_llm`,
    `requires_benign`, `encode_weight` for an `encode` technique,
-   `needs_latin: true` for one that changes only Latin text (it is then
-   kept from a translation into another script; `TestLatinOnly` in
-   `tests/jailbreak/obfuscation/test_encoding.py` checks it on six other
-   scripts, and fails when an encoding that leaves them unchanged is not
-   tagged, `to_braille` aside while the eval pool is pinned),
+   `needs_latin: true` for one that changes only Latin text (no rule reads
+   it: a test asserts that the family rules refuse every tagged technique
+   beside every translation into another script, so one outside `encode`
+   and `noise` needs a rule against `translation` in the spec;
+   `TestLatinOnly` in `tests/jailbreak/obfuscation/test_encoding.py` checks
+   it on six other scripts, and fails when an encoding that leaves them
+   unchanged is not tagged, `to_braille` aside while the eval pool is
+   pinned),
    `max_tokens` to cap its calls' replies, `cross_incompatible_with` for
    families this technique, not its whole family, may not join,
    `kinds` when it should differ from its first family's (below),

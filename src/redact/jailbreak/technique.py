@@ -74,8 +74,9 @@ _VERSION = re.compile(r"[0-9]+(\.[0-9]+)*")
 
 #: The ISO 15924 code of the Latin script. A translation technique's
 #: ``script`` names the script it writes (``obfuscation/translation.py``);
-#: a technique tagged ``needs_latin`` changes only Latin text, so the rules
-#: keep it from a translation into any other.
+#: a technique tagged ``needs_latin`` changes only Latin text. No rule reads
+#: either: the family rules keep every such technique from every translation
+#: (``translation`` refuses ``encode`` and ``noise``), and a test asserts it.
 LATIN = "Latn"
 
 TechniqueResult = tuple[str, str]
@@ -357,8 +358,10 @@ def tag(funcs: list[Callable]) -> None:
 
     ``families``, ``complexity`` (0-3), ``requires_llm``, ``requires_benign``,
     ``encode_weight`` (``"light"``, ``"heavy"`` or None), ``needs_latin``
-    (whether it changes only Latin text, so a translation into another
-    script would leave it nothing to do; False when absent), ``max_tokens``
+    (whether it changes only Latin text, which a translation into another
+    script would leave it nothing to do on; no rule reads it, a test asserts
+    the family rules refuse it beside each such translation; False when
+    absent), ``max_tokens``
     (the reply limit of its model calls, None for the model's default) and
     ``cross_incompatible_with`` (the families the technique itself may not
     join, beside its families' own) come from the technique's entry;

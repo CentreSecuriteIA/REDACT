@@ -447,11 +447,16 @@ _BUDGETS = [
 # unit's rng and its group's counts the rest of its draw (179 of the 240 dealt
 # units, 75 of the 200 undealt draws). The dealer's jitter per unit (in place
 # of one offset per layer and group, which locked the layers of one rate in or
-# out of phase for a whole group) moved it last: each layer falls on other
+# out of phase for a whole group) moved it once more: each layer falls on other
 # units of its group, at the same rate, and through the units' rng and counts
 # the rest of their draws follow (235 of the 240 dealt units; the 200 undealt
-# draws, which ask no dealer, do not move).
-_PINNED_DRAWS = "b7a07d7e3e1eb68c10737e1b57a49ef2d8e5b672247d18a914b66cb69f5c4a1c"
+# draws, which ask no dealer, do not move). The rule keeping a translation from
+# every encode technique moved it in the eval release: a draw that held both
+# now takes another technique, and through the unit's rng and its group's
+# counts the rest of its draw (128 of the 240 dealt units, 19 of the 200
+# undealt draws). The script rule it made dead, a Latin-only technique beside a
+# translation into another script, is gone.
+_PINNED_DRAWS = "cf4e6a0b496e4904106d20f7da6d73b486cba6ee07db1854bcee709b7d60a878"
 
 
 def test_the_budget_draws_are_the_pinned_ones():
@@ -616,8 +621,13 @@ def test_the_request_obfuscation_takes_the_family_weights(monkeypatch):
 # The eval type's plan of 300 inputs in three groups at its seed, 43, pinned
 # before the packaged attacks turned the request obfuscation on. The eval
 # pool and its draws are pinned (fixtures/eval_pool.json); they move only in
-# an eval review.
-_PINNED_EVAL_DRAWS = "95083fbb5221e4b1bd39125bfa297bc06bfc51ddbdadde2ad1eb45a6d59b7afb"
+# an eval review. The eval release moved it, first by the rule keeping a
+# translation from every encode technique: the pool lost 40 of its 335
+# pairs (each of its eight translations beside each of its five encodings),
+# and 283 of the 300 round-2 units are dealt another pair, the group counts
+# following the lost pairs (round 1 draws one technique and does not move).
+# In a plan of 3,000 units, 304 round-2 units held such a pair.
+_PINNED_EVAL_DRAWS = "e7811e8ef0fdf06eac34a5dc1df65b141b742015aaf642c6e0f926c8fa05be8e"
 
 
 def _eval_draws(section: dict) -> list[list[str]]:

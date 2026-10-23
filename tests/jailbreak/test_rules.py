@@ -573,9 +573,22 @@ def test_a_translation_refuses_a_payload_split_either_way(translation, split):
     assert not _joins(split, translation)
 
 
+@pytest.mark.parametrize("translation", ["to_french", "to_thai", "to_hindi"])
+@pytest.mark.parametrize("encoding", [
+    "to_rot13", "to_leetspeak_basic", "to_separator", "to_hex", "to_base64",
+    "to_unicode_escape", "to_morse", "to_braille",
+    "to_sensitive_words_encode_rot13", "to_sensitive_words_encode_base64"])
+def test_a_translation_refuses_an_encoding_either_way(translation, encoding):
+    """Both rewrite the whole text, so one is enough: every member of the
+    ``encode`` family, light or heavy, the ten sensitive-word encodings
+    included, and into any script, whichever is picked first."""
+    assert not _joins(translation, encoding)
+    assert not _joins(encoding, translation)
+
+
 @pytest.mark.parametrize("other", [
-    "to_adversarial_suffix_punctuation", "to_base64", "to_rot13", "to_json",
-    "to_csv_row", "to_summarize", "to_psychopath_persona", "to_fictional_world"])
+    "to_adversarial_suffix_punctuation", "to_json", "to_csv_row", "to_summarize",
+    "to_psychopath_persona", "to_fictional_world"])
 def test_a_translation_keeps_the_families_it_has_no_rule_against(other):
     assert _joins("to_french", other) and _joins(other, "to_french")
 
@@ -656,15 +669,22 @@ def test_a_latin_only_encoding_refuses_a_translation_into_another_script(first, 
     assert not _joins(first, then)
 
 
-@pytest.mark.parametrize(("first", "then"), [
-    ("to_rot13", "to_french"),
-    ("to_vietnamese", "to_leetspeak_basic"),
-    ("to_base64", "to_thai"),
-    ("to_bengali", "to_separator"),
-    ("to_morse", "to_greek"),
-])
-def test_a_latin_script_translation_or_another_encoding_still_joins(first, then):
-    assert _joins(first, then) and _joins(then, first)
+def test_every_latin_only_technique_is_refused_beside_every_translation_into_another_script():
+    """``needs_latin`` marks what would change nothing in a text of another
+    script, and no rule reads it: the family rules do the work, a translation
+    refusing ``encode`` (the Latin-only ciphers and their sensitive-word
+    forms) and ``noise`` (the random capitals, scrambled letters and keyboard
+    typos). A new Latin-only technique in a family a translation does not
+    refuse fails here, until the spec keeps the two apart."""
+    from redact.jailbreak.technique import LATIN
+
+    latin_only = [fn for fn in POOL if fn.needs_latin]
+    into_another_script = [fn for fn in POOL
+                           if "translation" in fn.families and fn.script != LATIN]
+    assert latin_only and into_another_script
+    joined = [(a.__name__, b.__name__) for a in latin_only for b in into_another_script
+              if b in compatible([a], [b]) or a in compatible([b], [a])]
+    assert joined == []
 
 
 _PERSUASIONS = ["to_persuade_evidence_based", "to_persuade_scarcity"]

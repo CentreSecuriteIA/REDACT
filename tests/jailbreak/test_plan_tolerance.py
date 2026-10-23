@@ -254,6 +254,24 @@ def test_the_rules_id_moves_with_a_rule_not_with_the_pool_order_or_a_comment(
     assert JP.rules_id(pool) != before
 
 
+def test_the_rules_id_moves_when_a_translation_stops_refusing_encode(monkeypatch):
+    """The eval release made the family rule: a plan kept from before it has
+    another rules id, so its resume warns."""
+    import copy
+
+    import redact.jailbreak.plan as JP
+
+    every = registry(all_techniques())
+    pool = [every["to_base64"], every["to_french"]]
+    before = JP.rules_id(pool)
+    spec = copy.deepcopy(T.load_spec())
+    refused = spec["families"]["translation"]["cross_incompatible_with"]
+    assert "encode" in refused
+    refused.remove("encode")
+    monkeypatch.setattr(JP, "load_spec", lambda: spec)
+    assert JP.rules_id(pool) != before
+
+
 def test_a_resume_under_the_plan_s_version_and_rules_is_quiet(
         tmp_path, monkeypatch, caplog):
     out = tmp_path / "jb.csv"
