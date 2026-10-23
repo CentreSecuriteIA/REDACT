@@ -340,15 +340,14 @@ class LLMBackend(ABC):
         if cut:
             event["cut"] = True
         observe.record(event)
-        if cut:
-            if observe.first_in_stage(("cut", self.model)):
-                logger.warning(
-                    "%s: a reply was cut at the token limit (max_tokens=%s) and "
-                    "is incomplete; raise max_tokens or the context length "
-                    "(max_model_len), or ask for shorter replies. Later ones are "
-                    "only counted: see the stage's end and the telemetry summary.",
-                    self.model, max_tokens,
-                )
+        if cut and observe.first_in_stage(("cut", self.model)):
+            logger.warning(
+                "%s: a reply was cut at the token limit (max_tokens=%s) and "
+                "is incomplete; raise max_tokens or the context length "
+                "(max_model_len), or ask for shorter replies. Later ones are "
+                "only counted: see the stage's end and the telemetry summary.",
+                self.model, max_tokens,
+            )
 
     def _resolve(
         self, max_tokens: int | None, temperature: float | None

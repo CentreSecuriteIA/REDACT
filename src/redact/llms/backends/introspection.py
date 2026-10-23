@@ -40,6 +40,8 @@ _CAPTURE_VALUES = {
 # Override them per model with IntrospectConfig.sampling.
 _DEFAULT_SAMPLING = {"top_p": 0.85}
 _DEFAULT_TEMPERATURE = 0.7
+# The transformers major that renamed from_pretrained's torch_dtype to dtype.
+_DTYPE_MAJOR = 5
 
 # Loaded (tokenizer, model) pairs, keyed by _model_key(). This holds the only
 # reference to each: a backend keeps the key, so a released model is freed.
@@ -63,7 +65,8 @@ def validate_capture(capture: dict | None) -> None:
         allowed = _CAPTURE_VALUES.get(key)
         if allowed is None:
             raise ValueError(
-                f"Unknown capture key {key!r}. Expected one of {sorted(_CAPTURE_VALUES)}."
+                f"Unknown capture key {key!r}. "
+                f"Expected one of {sorted(_CAPTURE_VALUES)}."
             )
         # The type check keeps 1 and 0 from passing as True and False.
         if type(value) not in (bool, str) or value not in allowed:
@@ -95,7 +98,9 @@ def _load(hf_model_id: str, device_map: str, torch_dtype: str, hf_kwargs: dict):
         return _load_locked(key, hf_model_id, device_map, torch_dtype, hf_kwargs)
 
 
-def _load_locked(key, hf_model_id: str, device_map: str, torch_dtype: str, hf_kwargs: dict):
+def _load_locked(
+    key, hf_model_id: str, device_map: str, torch_dtype: str, hf_kwargs: dict
+):
     """Load the tokenizer and model. Call with ``_models_lock`` held."""
     started = time.perf_counter()
     # torch is not imported here: __init__ already did, before any load.
@@ -118,12 +123,14 @@ def _load_locked(key, hf_model_id: str, device_map: str, torch_dtype: str, hf_kw
     import transformers
 
     dtype_kwarg = (
-        "dtype" if int(transformers.__version__.split(".")[0]) >= 5 else "torch_dtype"
+        "dtype" if int(transformers.__version__.split(".")[0]) >= _DTYPE_MAJOR
+        else "torch_dtype"
     )
     # CUDA starts here, so not while a vLLM build has narrowed the cards.
     with measure.cuda_lock, measure.Measurement() as measured:
         model = AutoModelForCausalLM.from_pretrained(
-            hf_model_id, device_map=device_map, **{dtype_kwarg: torch_dtype}, **hf_kwargs,
+            hf_model_id, device_map=device_map, **{dtype_kwarg: torch_dtype},
+            **hf_kwargs,
         )
     model.eval()
 
@@ -425,7 +432,8 @@ class TransformersIntrospectionBackend(LLMBackend):
             )
             stacked = {
                 li: torch.stack(
-                    [step[li][0, -1, :].detach().cpu() for step in outputs.hidden_states]
+                    [step[li][0, -1, :].detach().cpu()
+                     for step in outputs.hidden_states]
                 )
                 for li in layers
             }
@@ -480,11 +488,13 @@ class TransformersIntrospectionBackend(LLMBackend):
         tokenizer, model = self._loaded()  # raises before any work if released
         prompts, resolved = self._prepare(messages_list)
         max_tok, temp = self._resolve(max_tokens, temperature)
-        ids = internals_ids if internals_ids is not None else [None] * len(messages_list)
+        ids = (internals_ids if internals_ids is not None
+               else [None] * len(messages_list))
         sampling = {**self._sampling, **kwargs}
 
         results: list[str] = []
-        # Runs once via ModelClient (one item per call); the list is just the return contract.
+        # Runs once via ModelClient (one item per call); the list is just the
+        # return contract.
         for messages, system_prompt, internals_id in zip(
             resolved, prompts, ids, strict=True
         ):

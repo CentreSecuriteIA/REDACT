@@ -31,6 +31,9 @@ from .backends import (
 from .backends.base import DEFAULT_MAX_RETRIES
 from .backends.introspection import validate_capture
 
+#: The highest default_temperature a model may set.
+_MAX_TEMPERATURE = 2.0
+
 # Whose budget an APIConfig's rpm is: "model" for this model alone, "endpoint"
 # for every model behind the same provider, URL and key.
 RATE_LIMIT_SCOPES: frozenset[str] = frozenset({"model", "endpoint"})
@@ -395,7 +398,8 @@ class ModelConfig:
     def __post_init__(self) -> None:
         _check_str("ModelConfig.name", self.name)
         _require(isinstance(self.roles, list),
-                 f"{self.name!r}: roles must be a list, got {type(self.roles).__name__}",
+                 f"{self.name!r}: roles must be a list, "
+                 f"got {type(self.roles).__name__}",
                  TypeError)
         for role in self.roles:
             _check_str(f"{self.name!r}: role", role)
@@ -416,7 +420,7 @@ class ModelConfig:
                 TypeError,
             )
             _require(
-                0.0 <= self.default_temperature <= 2.0,
+                0.0 <= self.default_temperature <= _MAX_TEMPERATURE,
                 f"{self.name!r}: default_temperature must be within 0.0-2.0, "
                 f"got {self.default_temperature!r}",
             )
@@ -489,13 +493,15 @@ def _load_roles() -> dict[str, str]:
         roles = json.loads(path.read_text(encoding="utf-8"))
     except (OSError, json.JSONDecodeError) as exc:
         raise ValueError(f"Could not read roles from {path}: {exc}") from exc
-    _require(isinstance(roles, dict), f"{path}: expected a JSON object of role -> description")
+    _require(isinstance(roles, dict),
+             f"{path}: expected a JSON object of role -> description")
     return roles
 
 
 def _build_entry(name: str, raw: dict) -> ModelConfig:
     """Turn one JSON entry into a validated :class:`ModelConfig`."""
-    _require(isinstance(raw, dict), f"model {name!r}: entry must be a JSON object", TypeError)
+    _require(isinstance(raw, dict),
+             f"model {name!r}: entry must be a JSON object", TypeError)
     fields = {k: v for k, v in raw.items() if k not in _SETUP_CLASSES and k != "notes"}
     unknown = set(fields) - {f.name for f in dataclasses.fields(ModelConfig)}
     _require(not unknown, f"model {name!r}: unknown field(s) {sorted(unknown)}")
@@ -516,7 +522,8 @@ def _load_registry() -> dict[str, ModelConfig]:
         raw = json.loads(path.read_text(encoding="utf-8"))
     except (OSError, json.JSONDecodeError) as exc:
         raise ValueError(f"Could not read models from {path}: {exc}") from exc
-    _require(isinstance(raw, dict), f"{path}: expected a JSON object of model -> config")
+    _require(isinstance(raw, dict),
+             f"{path}: expected a JSON object of model -> config")
 
     registry: dict[str, ModelConfig] = {}
     problems: list[str] = []

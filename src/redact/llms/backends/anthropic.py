@@ -55,7 +55,8 @@ def _sdk_client(api_key: str, *, max_retries: int, timeout_s: float | None):
                     "The 'anthropic' package could not be imported. It is a "
                     "required dependency: reinstall redact (pip install -e .)."
                 )
-            # The SDK retries a failed call itself, unseen by the rate limiter and the trace.
+            # The SDK retries a failed call itself, unseen by the rate limiter
+            # and the trace.
             client = anthropic.Anthropic(
                 api_key=api_key, **sdk_client_kwargs(max_retries, timeout_s))
             _sdk_clients[key] = client
@@ -224,7 +225,8 @@ class AnthropicBackend(LLMBackend):
         results = []
         # Runs once via ModelClient (one item per call); loops only for direct callers.
         for messages, system_prompt in zip(resolved, prompts):
-            conv_messages = [{"role": m["role"], "content": m["content"]} for m in messages]
+            conv_messages = [{"role": m["role"], "content": m["content"]}
+                             for m in messages]
             # kwargs first: a model= or messages= in them must not re-target the call.
             call_kwargs: dict = {
                 **kwargs,

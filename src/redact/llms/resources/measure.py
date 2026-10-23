@@ -194,7 +194,8 @@ def detect_gpus(visible: bool = False) -> tuple[str | None, int]:
             capture_output=True, text=True, timeout=10, check=True,
         ).stdout
     except (subprocess.SubprocessError, OSError) as exc:
-        logger.debug("nvidia-smi failed (%s: %s); reporting no GPUs", type(exc).__name__, exc)
+        logger.debug("nvidia-smi failed (%s: %s); reporting no GPUs",
+                     type(exc).__name__, exc)
         return None, 0
     names = [ln.strip() for ln in out.splitlines() if ln.strip()]
     ids = visible_gpu_ids() if visible else None

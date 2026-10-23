@@ -100,8 +100,9 @@ def assert_single_sample_per_call(client: ModelClient, samples_per_call: int) ->
     """
     if client.compute_config.supports_internals and samples_per_call != 1:
         raise ValueError(
-            f"{type(client.backend).__name__} supports internals capture, but this call "
-            f"requests {samples_per_call} samples per LLM call — one forward pass "
-            f"can't be attributed to more than one resulting sample. Set the "
+            f"{type(client.backend).__name__} supports internals capture, but "
+            f"this call requests {samples_per_call} samples per LLM call — one "
+            f"forward pass can't be attributed to more than one resulting "
+            f"sample. Set the "
             f"samples-per-call parameter to 1, or don't request internals capture."
         )

@@ -414,7 +414,8 @@ def _engine(hf_model_id: str, quantization: str | None, vllm_kwargs: dict):
             atexit.register(_exit)
             _exit_hook_registered = True
 
-        # No download_dir is passed: the hub cache is $HF_HOME/hub, so HF_HOME would download again.
+        # No download_dir is passed: the hub cache is $HF_HOME/hub, so
+        # HF_HOME would download again.
         kwargs = dict(vllm_kwargs)
         # The plan's share, else the planner's whole-card one: vLLM's own
         # default is more than the plan assumes.

@@ -29,7 +29,8 @@ logger = logging.getLogger(__name__)
 EXTRACTION_STYLES: frozenset[str] = frozenset({"numbered", "structured_qa"})
 
 
-#NOTE: Checks num_samples in prompts.get_format_instruction and expected_count in both extractors; name is the one the error reports.
+#NOTE: Checks num_samples in prompts.get_format_instruction and expected_count
+# in both extractors; name is the one the error reports.
 def _sample_count(value: object, name: str = "num_samples") -> int:
     """Validate a sample count: an int >= 1, or a string of one.
 
@@ -59,7 +60,8 @@ _CHATML_TOKEN = re.compile(
     r"<?\|im_(?:start\|?>?(?:(?:system|user|assistant)\b)?|end\|?>?)"
 )
 
-#NOTE: The format instruction asks for "1. text"; the other separators and the bold forms are accepted variants.
+#NOTE: The format instruction asks for "1. text"; the other separators and the
+# bold forms are accepted variants.
 # Groups: indent, opening "**", number, separator, closing "**". The bold
 # markers cover "**1.** text" and "**1. Title** text". The number is bounded
 # ASCII so int() cannot fail on it. The separator touches its number and is

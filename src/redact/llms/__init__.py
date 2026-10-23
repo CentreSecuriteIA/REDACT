@@ -32,16 +32,6 @@ from .backends import (
 )
 from .client import ModelClient, clear_client_cache
 
-# Extraction
-from .prompting import (
-    EXTRACTION_STYLES,
-    clean_sample,
-    extract_and_clean,
-    extract_numbered_list,
-    extract_structured_qa,
-    get_format_instruction,
-)
-
 # Model registry
 from .model_config import (
     MODEL_REGISTRY,
@@ -59,8 +49,18 @@ from .model_config import (
 # Progress reporting
 from .progress import ProgressReporter
 
-# Prompt loading
-from .prompting import PromptTemplate, build_messages, load_prompt
+# Prompt loading and extraction
+from .prompting import (
+    EXTRACTION_STYLES,
+    PromptTemplate,
+    build_messages,
+    clean_sample,
+    extract_and_clean,
+    extract_numbered_list,
+    extract_structured_qa,
+    get_format_instruction,
+    load_prompt,
+)
 
 # Helpers over a client
 from .router import (
