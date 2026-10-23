@@ -61,7 +61,9 @@ checker repeated its own verdict on 95.2 percent of harmful samples at
 
 Params keys: `style`, `samples_per_entry`, `entry_types`, `axes`,
 `axes_weighting`, `seed`, `batch_size`, `max_attempts`, `check_max_tokens`
-([configuration.md](../configuration.md#inputs)). The `eval` type pins the
+([configuration.md](../configuration.md#inputs)). A `samples_per_entry`
+that is not a whole number of at least 1 raises before the stage writes
+anything. The `eval` type pins the
 `directness` axis at `explicit`; the `training` type deals the weights
 log-scaled (`axes_weighting: "log"`).
 
@@ -144,7 +146,7 @@ Under `Datasets/constitution_inputs/`:
 | `<category>/samples.csv` | One per category (`source_category`): a harmful-taxonomy category, or a benign one for the general-benign part; a benign category named as a harmful one shares its file, its rows told apart by `entry_type` and `source_taxonomy`. Accepted and rejected rows |
 | `constitution_inputs.manifest.jsonl` | The plan of the current style, written again every run |
 | `constitution_inputs.state.jsonl` | The ledger, for every style |
-| `constitution_inputs.plan.json` | What the deal was made with: `seed`, `samples_per_entry`, and each dealt axis's weights as dealt, log-scaled with `axes_weighting` `"log"` (`null` without axes). Labels and hints are not in it: rewording them changes no deal |
+| `constitution_inputs.plan.json` | What each style's deal was made with, `{"styles": {<style>: {...}}}`: `seed`, `samples_per_entry`, and each dealt axis's weights as dealt, log-scaled with `axes_weighting` `"log"` (`null` without axes). Labels and hints are not in it: rewording them changes no deal |
 | `constitution_inputs.coverage.csv` | Per axis value and group: `axis`, `value`, `category`, `entry_type`, `planned` (from the manifest), `accepted` (from the acks of this style, each counting the spec it records). Every value of the table has a row in every group seen, `0` when never dealt. Written when the stage ends, and when it has nothing to run; removed without axes |
 
 And `Datasets/constitution_inputs_merged.csv`: the rows of every category
@@ -182,14 +184,19 @@ all category files are checked and cut back together
 Units the ledger records are skipped. The ids on the ledger records keep a
 text from being written twice.
 
-The deal is made again, and compared with `constitution_inputs.plan.json`:
-a resume whose `seed`, `samples_per_entry` or axes' weights differ (another
-`axes` or `axes_weighting`) raises `Inputs: this run's [...] differ from
-those the units in ... were dealt with`, naming the keys and `resume=False`.
-The plan file is the folder's, for every style: a `generate_inputs` call on
-a training run's folder passes `axes_weighting="log"`, as the run does. A
-folder with finished units and no plan file runs unchecked, with a
-WARNING. A plan file that holds no record (one an earlier version cut off
+The deal is made again, and compared with the style's record in
+`constitution_inputs.plan.json`: a resume whose `seed`, `samples_per_entry`
+or axes' weights differ (another `axes` or `axes_weighting`) from those its
+style's done units were dealt with raises `Inputs: this run's [...] differ
+from those the units of style ... were dealt with`, naming the keys and
+`resume=False`. A `generate_inputs` call on a training run's folder passes
+`axes_weighting="log"`, as the run does. The file holds one record per
+style: a fresh run of one style replaces its record and keeps the others',
+as it keeps their rows. A style with no done unit is not compared (its
+first run, or a fresh run that stopped before its first save). A file an
+earlier version wrote, with one record, is taken as the record of every
+style with done units. A style with finished units and no record runs
+unchecked, with a WARNING. A plan file that holds no record (one an earlier version cut off
 as it wrote it) stops the resume before anything is cut, naming the file:
 delete it to resume unchecked, or start the style over.
 

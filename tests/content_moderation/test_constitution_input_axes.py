@@ -128,7 +128,60 @@ class TestAResume:
         made_with = json.loads((tmp_path / "constitution_inputs.plan.json").read_text(
             encoding="utf-8"))
         scaled = A.deal_weights(A.resolve("inputs", weighting="log"))
-        assert made_with["axes"] == scaled != A.deal_weights(A.resolve("inputs"))
+        # One record per style; the runs here have none (style "").
+        assert made_with["styles"][""]["axes"] == scaled != A.deal_weights(
+            A.resolve("inputs"))
+
+    @pytest.mark.parametrize("k", [0, -1, 2.5, True, "3"])
+    def test_samples_per_entry_that_is_not_a_whole_number_of_at_least_1_raises_first(
+            self, tmp_path, k):
+        _run(tmp_path, style="long")
+        before = sorted(p.name for p in tmp_path.rglob("*"))
+        plan = (tmp_path / "constitution_inputs.plan.json").read_bytes()
+        with pytest.raises(ValueError, match="inputs.samples_per_entry"):
+            _run(tmp_path, k=k, style="long", resume=False)
+        assert sorted(p.name for p in tmp_path.rglob("*")) == before
+        assert (tmp_path / "constitution_inputs.plan.json").read_bytes() == plan
+        assert len(_rows(tmp_path)) == _ENTRIES * _K
+
+    def test_a_fresh_run_of_one_style_keeps_the_others_plan_record(self, tmp_path):
+        """A resume of style long, with its own settings, still runs after a
+        fresh run of style short with others."""
+        _run(tmp_path, style="long", entries=2)
+        _run(tmp_path, style="short", seed=7, resume=False)
+        made_with = json.loads((tmp_path / "constitution_inputs.plan.json").read_text(
+            encoding="utf-8"))["styles"]
+        assert (made_with["long"]["seed"], made_with["short"]["seed"]) == (42, 7)
+        gen = _run(tmp_path, style="long")      # two more entries of long
+        assert len(gen.calls) == (_ENTRIES - 2) * _K
+        with pytest.raises(ValueError, match="'seed'"):
+            _run(tmp_path, style="short")
+
+    def test_a_style_with_no_done_unit_is_not_compared(self, tmp_path):
+        """Nothing dealt before has to be dealt again: the first run of a
+        style runs with its own settings, whatever the plan file holds."""
+        _run(tmp_path, style="long")
+        gen = _run(tmp_path, style="short", seed=7)
+        assert len(gen.calls) == _ENTRIES * _K
+        # The record a fresh run of style x wrote before its first save.
+        path = tmp_path / "constitution_inputs.plan.json"
+        plans = json.loads(path.read_text(encoding="utf-8"))
+        plans["styles"]["x"] = {**plans["styles"]["short"], "seed": 1}
+        path.write_text(json.dumps(plans), encoding="utf-8")
+        assert len(_run(tmp_path, style="x", seed=9).calls) == _ENTRIES * _K
+
+    def test_a_plan_file_of_one_record_is_the_record_of_the_styles_with_units(
+            self, tmp_path):
+        """As an earlier version wrote it: the last run's record alone."""
+        _run(tmp_path, style="long")
+        path = tmp_path / "constitution_inputs.plan.json"
+        record = json.loads(path.read_text(encoding="utf-8"))["styles"]["long"]
+        path.write_text(json.dumps(record), encoding="utf-8")
+        assert _run(tmp_path, style="long").calls == []
+        assert set(json.loads(path.read_text(encoding="utf-8"))["styles"]) == {"long"}
+        path.write_text(json.dumps({**record, "seed": 7}), encoding="utf-8")
+        with pytest.raises(ValueError, match="'seed'"):
+            _run(tmp_path, style="long")
 
     def test_a_folder_without_its_plan_file_is_warned_about(self, tmp_path, caplog):
         _run(tmp_path)

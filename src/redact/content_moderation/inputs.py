@@ -42,7 +42,7 @@ from ..dataset import (
     sample_row,
 )
 from ..dataset.drop import drop_units
-from ..dataset.planfile import changed_plan, plan_path, plan_record, write_plan
+from ..dataset.planfile import plan_path, plan_record, read_plan, write_plan
 from ..dataset.resume import release_lock, resume_state
 from ..dataset.save import CommitBuffer
 from ..exceptions import PromptTooLongError
@@ -142,6 +142,37 @@ def _stop_on_earlier_files(
             check_columns(path, row)
         except ValueError as error:
             raise ValueError(f"{error} {remedy}") from None
+
+
+def check_samples_per_entry(value) -> int:
+    """``value`` when it is a whole number of at least 1: the units, one
+    sample each, of every constitution entry.
+
+    Raises:
+        ValueError: Anything else, a bool too. The message names
+            ``inputs.samples_per_entry``.
+    """
+    if isinstance(value, bool) or not isinstance(value, int) or value < 1:
+        raise ValueError(
+            "inputs.samples_per_entry must be a whole number of at least 1, got "
+            f"{value!r}.")
+    return value
+
+
+def _style_plans(manifest_path: Path, processed: set) -> dict[str, dict]:
+    """The plan record of each style, from the folder's plan file.
+
+    The file holds one record per style, under ``styles``. One written
+    before that holds a single record, the last run's: it is taken as the
+    record of every style with a finished unit.
+    """
+    made_with = read_plan(manifest_path)
+    if made_with is None:
+        return {}
+    styles = made_with.get("styles")
+    if isinstance(styles, dict):
+        return dict(styles)
+    return {key[2]: made_with for key in processed}
 
 
 class _Entry(NamedTuple):
@@ -256,10 +287,10 @@ class InputPipeline:
         reads it alone; the deal is made again, a done unit keeping the spec
         its ack records, and ``constitution_inputs.plan.json`` (``seed``,
         ``samples_per_entry``, the axes' weights) stops a resume that would
-        deal another. ``resume=False`` starts this style over and keeps the
-        rows and acks of the others; without a style it clears the folder. A
-        folder written before its units had an iteration stops before any
-        call.
+        deal another; the file holds one record per style. ``resume=False``
+        starts this style over and keeps the rows and acks of the others;
+        without a style it clears the folder. A folder written before its
+        units had an iteration stops before any call.
 
         ``constitution_df`` has the constitution's columns
         (``source_category``, ``sample_description``,
@@ -277,11 +308,13 @@ class InputPipeline:
         the run here rather than inside its units.
 
         Raises:
-            ValueError: A category name that cannot name a folder, a prompt
-                that does not render, a folder written before this layout, or
-                a resume whose ``seed``, ``samples_per_entry`` or axes'
-                weights differ from those of the plan file.
+            ValueError: ``samples_per_entry`` is not a whole number of at
+                least 1, a category name cannot name a folder, a prompt does
+                not render, a folder was written before this layout, or a
+                resume's ``seed``, ``samples_per_entry`` or axes' weights
+                differ from those its style's done units were dealt with.
         """
+        check_samples_per_entry(samples_per_entry)
         if constitution_df.empty:
             logger.warning("run_from_constitution: empty constitution_df, nothing to do")
             return ConstitutionInputResult()
@@ -331,23 +364,34 @@ class InputPipeline:
             ledger, resume=resume or bool(style), manifest=manifest, **tree)
         seen = set(ledger.ids)      # the content ids of the rows of every style
 
+        # One record per style: a style's deal is its own, and a fresh run
+        # of one style leaves the others' records as it leaves their rows.
+        # Compared only when this style has a done unit: with none, nothing
+        # dealt before has to be dealt again.
         made_with = plan_record(seed=seed, samples_per_entry=samples_per_entry,
                                 axes=deal_weights(axes))
-        changed = changed_plan(manifest.path, made_with) if resume else []
-        if changed:
-            release_lock(ledger)
-            raise ValueError(
-                f"Inputs: this run's {changed} differ from those the units in "
-                f"{folder} were dealt with (see {plan_path(manifest.path).name}), "
-                "and a resume deals them again as they were. Run with "
-                "resume=False to start the style over, or with the settings the "
-                "plan was made with.")
-        if changed is None and processed:
-            logger.warning(
-                "Inputs: %s has finished units and no %s, so whether this run's "
-                "seed, samples_per_entry and axes are the ones they were dealt "
-                "with is not checked.", folder, plan_path(manifest.path).name)
-        write_plan(manifest.path, made_with)
+        plan_file = plan_path(manifest.path)
+        plans = _style_plans(manifest.path, processed) if resume or style else {}
+        if resume and any(key[2] == style for key in processed):
+            earlier = plans.get(style)
+            changed = [key for key, value in made_with.items()
+                       if earlier is not None and earlier.get(key) != value]
+            if changed:
+                release_lock(ledger)
+                raise ValueError(
+                    f"Inputs: this run's {changed} differ from those the units "
+                    f"of style {style!r} in {folder} were dealt with (see "
+                    f"{plan_file.name}), and a resume deals them again as they "
+                    "were. Run with resume=False to start the style over, or "
+                    "with the settings the plan was made with.")
+            if earlier is None:
+                logger.warning(
+                    "Inputs: %s has finished units of style %r and %s, so "
+                    "whether this run's seed, samples_per_entry and axes are the "
+                    "ones they were dealt with is not checked.", folder, style,
+                    f"no record of it in {plan_file.name}" if plan_file.exists()
+                    else f"no {plan_file.name}")
+        write_plan(manifest.path, {"styles": {**plans, style: made_with}})
 
         units = [(e, iteration)
                  for e in entries for iteration in range(samples_per_entry)]
