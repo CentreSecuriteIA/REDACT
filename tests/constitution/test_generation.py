@@ -575,7 +575,7 @@ class TestRunResume:
             entry_types=[EntryType.HARMFUL, EntryType.BENIGN],
             num_categories=2, verbose=False,
         )
-        assert len(backend.calls) == 2          # the benign units only
+        assert len(backend.calls) == len(self._TAXONOMY["categories"])  # benign
         assert len(read_constitution(out_dir)) == 4 * _SAMPLES
         assert _ledger(out_dir).read().saved is not None
         assert _ledger(out_dir).completed() == {

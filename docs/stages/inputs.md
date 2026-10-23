@@ -84,6 +84,13 @@ and check requests take the async lane and units finish apart.
    and any style) is dropped.
 4. A sample left gets one check call.
 
+The key holds no category. So an entry whose `sample_description` and
+`entry_type` an earlier entry of the frame has (one description in two
+categories, or a constitution row saved twice by an earlier version) is
+left out, the first kept, with a WARNING (`Inputs: N constitution entries
+repeat ...`): the two would share their units' keys, both run, and a resume
+would skip both once one was done.
+
 | | Value |
 |---|---|
 | Ledger key | `(sample_description, entry_type, style, iteration)` |
@@ -215,7 +222,9 @@ regenerating the constitution, or run in a new `data_dir`.
 
 `resume: false` starts over the current `style` only. Its rows are removed
 from every category file and its acks from the ledger (`dataset.drop_units`);
-the rows of other styles stay. Until that finishes, a
+the rows of other styles stay. An empty constitution frame (every entry
+filtered out by `entry_types`, say) still starts the style over, and leaves
+no manifest; on a resume it changes nothing. Until that finishes, a
 `constitution_inputs.state.jsonl.dropping` file names the style; a later run
 stops until the same fresh run is repeated.
 

@@ -471,12 +471,16 @@ def test_another_unit_error_still_stops_the_stage(tmp_path, monkeypatch):
 
 # --- checked before any call ----------------------------------------------------
 
+_FIRST = 2      # the entries, one unit each, of the first run
+
+
 def _first_run_then(tmp_path, constitution, *, prompt=_PROMPT, **kwargs):
     """Run two entries of style ``long``; then run ``constitution`` with
     ``kwargs``, expecting a ValueError; the generator of the second run."""
     _token_pipeline(tmp_path, _TokenBackend(lambda t, n: one(f"sample {t}")),
                     _TokenBackend(lambda t, n: "Yes")).run_from_constitution(
-        _token_df(2), _PROMPT, samples_per_entry=1, style="long", verbose=False)
+        _token_df(_FIRST), _PROMPT, samples_per_entry=1, style="long",
+        verbose=False)
     gen = _TokenBackend(lambda t, n: one(f"again {t}"))
     pipe = _token_pipeline(tmp_path, gen, _TokenBackend(lambda t, n: "Yes"))
     with pytest.raises(ValueError) as stopped:
@@ -494,7 +498,7 @@ def test_a_category_that_cannot_name_a_folder_stops_before_any_call_or_clear(
     assert repr(name) in message and "folder" in message
     assert gen.calls == []
     # The fresh run of the style stopped before it removed the style's rows.
-    assert len(_rows(tmp_path)) == 2
+    assert len(_rows(tmp_path)) == _FIRST
     assert lock_is_free(_constitution_inputs_ledger(tmp_path).path)
 
 
@@ -505,8 +509,8 @@ def test_a_check_prompt_that_does_not_render_stops_before_any_call(tmp_path):
         {"system_prompt": "Judge {Category}.", "template": "{sample} {not_a_field}"}),
         encoding="utf-8")
     gen = _TokenBackend(lambda t, n: one(f"sample {t}"))
-    pipe = InputPipeline(gen=make_client(gen, "tok-gen"),
-                         check=make_client(_TokenBackend(lambda t, n: "Yes"), "tok-check"),
+    check = make_client(_TokenBackend(lambda t, n: "Yes"), "tok-check")
+    pipe = InputPipeline(gen=make_client(gen, "tok-gen"), check=check,
                          dataset_dir=tmp_path / "out", prompt_dir=tmp_path / "prompts")
     with pytest.raises(ValueError, match="not_a_field"):
         pipe.run_from_constitution(_token_df(2), _PROMPT, samples_per_entry=1,
@@ -521,7 +525,7 @@ def test_a_generation_prompt_that_does_not_render_stops_before_any_call(tmp_path
                                         "template": "{sample_description} {nope}"},
         resume=False)
     assert "nope" in message
-    assert gen.calls == [] and len(_rows(tmp_path)) == 2
+    assert gen.calls == [] and len(_rows(tmp_path)) == _FIRST
 
 
 def test_files_without_source_taxonomy_stop_a_constitution_with_it_before_any_call(
@@ -530,3 +534,51 @@ def test_files_without_source_taxonomy_stop_a_constitution_with_it_before_any_ca
     gen, message = _first_run_then(tmp_path, with_taxonomy)
     assert "'source_taxonomy'" in message and "resume=False" in message
     assert gen.calls == []
+
+
+# --- the entries ------------------------------------------------------------------
+
+@pytest.mark.parametrize("second", ["Privacy", "Violence"])
+def test_an_entry_repeating_an_earlier_ones_key_is_left_out_with_a_warning(
+        tmp_path, caplog, second):
+    """One description in two categories, or a constitution row saved
+    twice: a unit's key holds no category, so the two would share keys."""
+    entries = pd.DataFrame([
+        {"source_category": "Violence", "sample_description": "desc zq1",
+         "constitution_subcategory": "Sub", "entry_type": "harmful"},
+        {"source_category": second, "sample_description": "desc zq1",
+         "constitution_subcategory": "Sub", "entry_type": "harmful"},
+        {"source_category": second, "sample_description": "desc zq1",
+         "constitution_subcategory": "Sub", "entry_type": "benign"},
+    ])
+    gen = _TokenBackend(lambda t, n: one(f"{_NTH.get(n, n)} sample {t}"))
+    with caplog.at_level(logging.WARNING):
+        _token_pipeline(tmp_path, gen, _TokenBackend(lambda t, n: "Yes")) \
+            .run_from_constitution(entries, _PROMPT, samples_per_entry=2,
+                                   verbose=False)
+    assert "1 constitution entries repeat" in caplog.text
+    kept = [("Violence", "harmful")] * 2 + [(second, "benign")] * 2
+    assert len(gen.calls) == len(kept)      # two entries, two units each
+    rows = _rows(tmp_path)
+    assert sorted(zip(rows["category"], rows["entry_type"])) == sorted(kept)
+    assert len(_constitution_inputs_manifest(tmp_path).load()) == len(kept)
+
+
+def test_an_empty_constitution_with_resume_false_still_starts_the_style_over(
+        tmp_path):
+    def run(entries, **kwargs):
+        gen = _TokenBackend(lambda t, n: one(f"{kwargs['style']} {t}"))
+        _token_pipeline(tmp_path, gen, _TokenBackend(lambda t, n: "Yes")) \
+            .run_from_constitution(entries, _PROMPT, samples_per_entry=1,
+                                   verbose=False, **kwargs)
+
+    run(_token_df(2), style="long")
+    run(_token_df(2), style="short")
+    run(_token_df(0), style="long")                 # a resume: nothing changes
+    assert sorted(_rows(tmp_path)["template_style"]) == ["long"] * 2 + ["short"] * 2
+    run(_token_df(0), style="long", resume=False)
+    assert list(_rows(tmp_path)["template_style"]) == ["short"] * 2
+    ledger = _constitution_inputs_ledger(tmp_path)
+    assert {key[2] for key in ledger.completed()} == {"short"}
+    assert not _constitution_inputs_manifest(tmp_path).exists()
+    assert lock_is_free(ledger.path)

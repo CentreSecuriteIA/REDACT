@@ -24,7 +24,6 @@ Usage::
 
 import functools
 import logging
-from collections import Counter
 from pathlib import Path
 from typing import NamedTuple
 
@@ -187,6 +186,29 @@ class _Entry(NamedTuple):
     source_taxonomy: str | None     # None for a constitution without the column
 
 
+def _distinct(entries: list[_Entry]) -> list[_Entry]:
+    """``entries`` less each whose ``(sample_description, entry_type)`` an
+    earlier one has, with a WARNING.
+
+    A unit's key holds those two and no category, so two such entries (one
+    description in two categories, or a constitution row saved twice) would
+    share their units' keys: both would run, and a resume would skip both
+    once one of them was done.
+    """
+    seen: set[tuple[str, str]] = set()
+    kept = []
+    for e in entries:
+        if (e.description, e.entry_type) not in seen:
+            seen.add((e.description, e.entry_type))
+            kept.append(e)
+    if len(kept) < len(entries):
+        logger.warning(
+            "Inputs: %d constitution entries repeat the sample_description and "
+            "entry_type of an earlier one, which a unit is keyed on; each is left "
+            "out, the first kept.", len(entries) - len(kept))
+    return kept
+
+
 def _entry_fields(entry: pd.Series) -> _Entry:
     """Read an entry's fields once, each missing one as its default."""
     taxonomy = entry.get("source_taxonomy")
@@ -289,8 +311,11 @@ class InputPipeline:
         ``samples_per_entry``, the axes' weights) stops a resume that would
         deal another; the file holds one record per style. ``resume=False``
         starts this style over and keeps the rows and acks of the others;
-        without a style it clears the folder. A folder written before its
-        units had an iteration stops before any call.
+        without a style it clears the folder, also for an empty
+        ``constitution_df``. A folder written before its units had an
+        iteration stops before any call. An entry whose
+        ``(sample_description, entry_type)`` an earlier entry has is left
+        out, with a WARNING: its units would share their keys.
 
         ``constitution_df`` has the constitution's columns
         (``source_category``, ``sample_description``,
@@ -316,9 +341,12 @@ class InputPipeline:
         """
         check_samples_per_entry(samples_per_entry)
         if constitution_df.empty:
-            logger.warning("run_from_constitution: empty constitution_df, nothing to do")
-            return ConstitutionInputResult()
-        entries = [_entry_fields(entry) for _, entry in constitution_df.iterrows()]
+            logger.warning("run_from_constitution: empty constitution_df, nothing "
+                           "to generate%s", "" if resume else "; the style starts over")
+            if resume:
+                return ConstitutionInputResult()
+        entries = _distinct(
+            [_entry_fields(entry) for _, entry in constitution_df.iterrows()])
         for category in sorted({e.category for e in entries}):
             check_category_name(category)
         if axes:
@@ -399,15 +427,13 @@ class InputPipeline:
         # of the whole plan. A done unit keeps the spec its ack records, so
         # the manifest and the coverage table agree with its row, and the
         # other units are dealt around it. An ack without one (written
-        # before acks recorded it) leaves its unit to the deal, and so does
-        # a key two entries share.
+        # before acks recorded it) leaves its unit to the deal. Entries are
+        # distinct, so each key is one unit's.
         recorded = {key: ack["spec"] for ack in ledger.records()
                     if "spec" in ack and (key := ledger.key(ack)) in processed}
-        unit_keys = [(e.description, e.entry_type, style, iteration)
-                     for e, iteration in units]
-        shared = Counter(unit_keys)
-        fixed = {j: recorded[key] for j, key in enumerate(unit_keys)
-                 if key in recorded and shared[key] == 1}
+        fixed = {j: recorded[key] for j, (e, iteration) in enumerate(units)
+                 if (key := (e.description, e.entry_type, style, iteration))
+                 in recorded}
         specs = deal_specs(
             axes, [((e.category, e.entry_type), (e.description, iteration))
                    for e, iteration in units], seed=seed, fixed=fixed)
@@ -417,6 +443,8 @@ class InputPipeline:
              **({"spec": spec} if axes else {}), "status": "planned"}
             for (e, iteration), spec in zip(units, specs)
         )
+        if not units:
+            manifest.reset()    # an empty plan writes nothing: no earlier one stays
         pending = [(e, iteration, spec) for (e, iteration), spec in zip(units, specs)
                    if (e.description, e.entry_type, style, iteration) not in processed]
         result = ConstitutionInputResult()

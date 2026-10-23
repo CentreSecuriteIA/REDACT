@@ -31,8 +31,10 @@ SAMPLE_COLUMNS: list[str] = [
 ]
 
 
-# What a folder name may not hold on Windows, besides the path separators.
+# What a folder name may not hold on Windows, besides the path separators
+# and the control characters, those below the space.
 _NOT_IN_A_FOLDER_NAME = '<>:"|?*'
+_SPACE = " "
 # The device names Windows reserves, with or without an extension.
 _RESERVED_NAMES = {"CON", "PRN", "AUX", "NUL",
                    *(f"COM{n}" for n in range(1, 10)),
@@ -58,7 +60,7 @@ def check_category_name(name: Any) -> str:
         why = "it is empty"
     elif "/" in text or "\\" in text:
         why = "it holds a path separator ('/' or '\\')"
-    elif any(c in _NOT_IN_A_FOLDER_NAME or ord(c) < 32 for c in text):
+    elif any(c in _NOT_IN_A_FOLDER_NAME or c < _SPACE for c in text):
         why = (f"it holds a character a folder name may not hold "
                f"({_NOT_IN_A_FOLDER_NAME} or a control character)")
     elif text.endswith((".", " ")):
