@@ -15,7 +15,9 @@ from redact.jailbreak.augmentation import resolve
 from redact.jailbreak.directives import draw_variant, read_pools
 from redact.jailbreak.pool import all_techniques, registry, technique_pool
 
-_PROBE = "a neutral probe about the weather"
+#: Two lines, so a prompt written through ``{prompt!r}`` (which escapes the
+#: newline) would no longer be found whole.
+_PROBE = "a neutral probe\nabout the weather"
 _BY_NAME = registry(all_techniques())
 
 #: Each new member: its family, its template file and directive, its
@@ -38,7 +40,8 @@ _MEMBERS = {
 @pytest.mark.parametrize("name", _MEMBERS)
 def test_a_member_writes_its_directive_s_variant_as_its_family_names_it(name):
     """``type=<directive>;variant=<name>``, the form of its family's other
-    members; compared as flags, so no text is shown."""
+    members; the prompt is written once. Compared as flags, so no text is
+    shown."""
     _family, file, directive, _complexity, before = _MEMBERS[name]
     fn = _BY_NAME[name]
     pool = read_pools(f"requests/{file}_templates.json")[directive]
@@ -47,8 +50,8 @@ def test_a_member_writes_its_directive_s_variant_as_its_family_names_it(name):
         text, info = fn(_PROBE, rng=random.Random(seed))
         drawn = draw_variant(pool, random.Random(seed))["name"]
         assert info == f"type={directive};variant={drawn}"
-        found = (_PROBE in text, text.find(_PROBE) > 0, "{prompt}" in text)
-        assert found == (True, before, False), (name, seed)
+        found = (text.count(_PROBE), text.find(_PROBE) > 0, "{prompt}" in text)
+        assert found == (1, before, False), (name, seed)
 
 
 @pytest.mark.parametrize("name", _MEMBERS)

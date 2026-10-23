@@ -17,7 +17,9 @@ from redact.jailbreak.directives import draw_variant, read_pools
 from redact.jailbreak.manipulation import get_all_manipulation_functions
 from redact.jailbreak.pool import technique_pool
 
-_PROBE = "a neutral probe about the weather"
+#: Two lines, so a prompt written through ``{prompt!r}`` (which escapes the
+#: newline) would no longer be found whole.
+_PROBE = "a neutral probe\nabout the weather"
 _FNS = FT.get_fake_turn_functions()
 _DIRECTIVES = {"to_fake_system_turn": "fake_system_turn",
                "to_fake_assistant_turn": "fake_assistant_turn",
@@ -39,8 +41,8 @@ def test_the_spec_tags_a_pure_adversarial_manipulation_of_spec_1_3(fn):
 
 @pytest.mark.parametrize("fn", _FNS, ids=lambda fn: fn.__name__)
 def test_a_draw_is_its_directive_s_variant_after_an_invented_turn(fn):
-    """Compared as flags: no text is shown. The invented turn comes first,
-    so the prompt is never at the start."""
+    """Compared as flags: no text is shown. The prompt is written once, after
+    the invented turn, so never at the start."""
     directive = _DIRECTIVES[fn.__name__]
     assert fn.variant_pool.directive == directive
     pool = read_pools("manipulation/fake_turns_templates.json")[directive]
@@ -48,8 +50,8 @@ def test_a_draw_is_its_directive_s_variant_after_an_invented_turn(fn):
     for seed in range(12):
         text, info = fn(_PROBE, rng=random.Random(seed))
         assert info == f"variant={draw_variant(pool, random.Random(seed))['name']}"
-        found = (_PROBE in text, text.find(_PROBE) > 0, "{prompt}" in text)
-        assert found == (True, True, False), (fn.__name__, seed)
+        found = (text.count(_PROBE), text.find(_PROBE) > 0, "{prompt}" in text)
+        assert found == (1, True, False), (fn.__name__, seed)
 
 
 def test_a_variant_is_drawn_as_rng_choice_draws_it(monkeypatch):

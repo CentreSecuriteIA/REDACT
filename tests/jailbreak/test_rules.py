@@ -108,6 +108,57 @@ def test_a_persona_template_is_the_one_hacking_technique_of_its_combination():
         assert not _joins("to_dan_persona_template", other)
 
 
+#: What the two frame families refuse, as families, written out from the
+#: spec's rules: the layer's one pick, the cross lists, and for fake turns the
+#: manipulation block. Every family not named here must still join them, so a
+#: rule added by mistake shows as a pair that no longer joins.
+_REFUSED_BY = {
+    "to_dan_persona_template": {
+        "persona_template", "persona", "cognitive", "framing",
+        "fsh", "dap", "fake_turns", "ascii_art", "impersonation"},
+    "to_fake_history": {
+        "fake_turns", "fsh", "dap", "framing", "persona", "cognitive",
+        "persona_template", "continuation", "indirect", "structural",
+        "neutral_container", "ascii_art", "translation", "payload_split",
+        "word_art", "wording"},
+}
+#: The four answer formats a persona template's own rules refuse; no other
+#: technique of their family is refused.
+_ANSWER_FORMATS_OF_THE_MECHANICS = {
+    "to_refusal_then_comply", "to_prefix_injection", "to_dual_answer",
+    "to_tagged_prefix"}
+
+
+def _one_technique_of_each_family() -> dict[str, str]:
+    """The first technique of each family, but a heavy encoding (which
+    fake turns refuse) and the four answer formats above."""
+    first: dict[str, str] = {}
+    for fn in POOL:
+        if (getattr(fn, "encode_weight", None) == "heavy"
+                or fn.__name__ in _ANSWER_FORMATS_OF_THE_MECHANICS):
+            continue
+        first.setdefault(fn.families[0], fn.__name__)
+    return first
+
+
+_JOINING = [(frame, name) for frame, refused in _REFUSED_BY.items()
+            for family, name in _one_technique_of_each_family().items()
+            if family not in refused]
+
+
+@pytest.mark.parametrize(("frame", "other"), _JOINING,
+                         ids=[f"{frame}-{name}" for frame, name in _JOINING])
+def test_a_frame_joins_a_technique_of_every_family_it_has_no_rule_against(frame, other):
+    assert _joins(frame, other)
+    assert _joins(other, frame)
+
+
+def test_every_family_has_a_technique_to_try_and_every_refused_name_is_a_family():
+    families = {fn.families[0] for fn in POOL}
+    assert set(_one_technique_of_each_family()) == families
+    assert all(refused <= families for refused in _REFUSED_BY.values())
+
+
 @pytest.mark.parametrize("identity", ["to_impersonate_authority",
                                       "to_impersonate_developer"])
 @pytest.mark.parametrize("scene", ["to_psychopath_persona", "to_avi",

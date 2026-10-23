@@ -19,7 +19,9 @@ from redact.jailbreak.pool import registry, technique_pool, variant_pools
 from redact.jailbreak.requests.answer import to_answer_as_code
 from redact.jailbreak.variants import variants_of
 
-_PROBE = "a neutral probe about the weather"
+#: Two lines, so a prompt written through ``{prompt!r}`` (which escapes the
+#: newline) would no longer be found whole.
+_PROBE = "a neutral probe\nabout the weather"
 _FNS = PT.get_persona_template_functions()
 _MECHANICS = PT._POOLS[PT.MECHANICS]
 #: A slot of a frame or a mechanic left in a text.
@@ -65,16 +67,17 @@ def test_the_spec_tags_a_pure_adversarial_hacking_technique_of_spec_1_3(fn):
 
 
 @pytest.mark.parametrize("fn", _FNS, ids=lambda fn: fn.__name__)
-def test_a_technique_fills_every_slot_and_names_the_mechanic_drawn(fn):
-    """Compared as flags: no text is shown."""
+def test_a_technique_writes_the_prompt_once_and_the_mechanic_drawn(fn):
+    """The prompt once, the drawn mechanic with the frame's name in it, and no
+    slot left. Compared as flags: no text is shown."""
     key = fn.__name__.removeprefix("to_").removesuffix("_persona_template")
     for seed in range(12):
         text, info = fn(_PROBE, rng=random.Random(seed))
-        drawn = draw_variant(_MECHANICS, random.Random(seed))["name"]
-        assert info == f"category={key}_persona_template;variant={drawn}"
-        found = (_PROBE in text, PT.display_name(key) in text,
-                 _SLOT.search(text) is None)
-        assert found == (True, True, True), (fn.__name__, seed)
+        drawn = draw_variant(_MECHANICS, random.Random(seed))
+        written = drawn["template"].format_map({"persona": PT.display_name(key)})
+        assert info == f"category={key}_persona_template;variant={drawn['name']}"
+        found = (text.count(_PROBE), written in text, _SLOT.search(text) is None)
+        assert found == (1, True, True), (fn.__name__, seed)
 
 
 def test_the_draws_reach_every_mechanic():
