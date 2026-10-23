@@ -5,9 +5,11 @@ import json
 import pandas as pd
 import pytest
 
+from redact.jailbreak.chain import run_chain
 from redact.jailbreak.directives import PoolRef, read_pools
 from redact.jailbreak.pool import all_techniques
 from redact.jailbreak.variants import COLUMNS, variants_of, write_variants
+from redact.llm_pipeline import drive_sync
 from redact.stages import generate_jailbreaks
 
 
@@ -68,6 +70,42 @@ class TestVariantsOf:
     def test_a_row_of_a_required_pool_that_does_not_pair_up_draws_none(self):
         assert variants_of("to_frame+to_ask+to_enc",
                            "directive=frame;variant=one;hint=one", _REGISTRY) == []
+
+
+_PAIRS = [{"main_category": "M", "sub_category": "S", "prompt": f"question {i}",
+           "answer": f"answer {i}"} for i in range(40)]
+_BENIGN = {"short": _PAIRS, "long": _PAIRS, "by_subcat_short": {"S": _PAIRS},
+           "by_subcat_long": {"S": _PAIRS}, "all_subcategories": ["S"]}
+
+
+def _info_keys(fn) -> set[str]:
+    """The keys of the info ``fn`` writes for a plain sentence: a technique that
+    calls a model is answered ``None`` to every request, so it writes the
+    keys of that path (and none for a rejection beyond its own)."""
+    _, info = drive_sync(
+        run_chain([fn], "How do plants turn sunlight into food?", gen_model="m",
+                  check_model="m", translate_model="m", benign_data=_BENIGN,
+                  rng_seed=(0, "info-keys")),
+        lambda request: "None")
+    return {part.split("=", 1)[0] for part in info.split(";") if "=" in part}
+
+
+def test_no_technique_writes_in_its_info_a_key_that_names_another_one_s_variant():
+    """``variants_of`` reads the variants under the pools' ``info_key`` (``variant``,
+    ``style``, ``hint``) and gives a row with two values for one writer none:
+    ``to_math_styled`` once wrote its own ``style=``, beside continuation's."""
+    techniques = all_techniques()
+    pool_keys = {fn.variant_pool.info_key for fn in techniques
+                 if getattr(fn, "variant_pool", None) and fn.variant_pool.info_key}
+    assert {"variant", "style", "hint"} <= pool_keys
+    clashes = {}
+    for fn in techniques:
+        ref = getattr(fn, "variant_pool", None)
+        own = ref.info_key if ref else None
+        foreign = (_info_keys(fn) - {own}) & pool_keys
+        if foreign:
+            clashes[fn.__name__] = sorted(foreign)
+    assert clashes == {}
 
 
 def test_the_table_counts_each_variant_on_of_the_pool_and_any_other_drawn(tmp_path):

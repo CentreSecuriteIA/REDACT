@@ -711,7 +711,7 @@ wrappers. The family is attack-only, and the eval type does not draw it.
   `rng` from a fixed set, never 13, reported in `shift=<n>`, not stated in the
   text) and Atbash on the Latin letters;
   and fullwidth and math-styled Unicode (math-styled drawing one
-  Mathematical Alphanumeric style per call, reported in `style=<name>`).
+  Mathematical Alphanumeric style per call, reported in `math_style=<name>`).
   Hex, binary, HTML entities, base32 and base85 are `heavy`, the rest `light`.
   Spec version 1.3 gives 21 of the 27 *decode hints*: at the spec's
   `decode_hint_rate` (0.5), such an encoding writes one of four hints around

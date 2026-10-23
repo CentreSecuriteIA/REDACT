@@ -403,7 +403,7 @@ class TestStyledUnicode:
 
     def test_math_styled_names_its_style_and_maps_back(self):
         encoded, info = to_math_styled(SAMPLE, rng=random.Random(2))
-        style = info.removeprefix("style=")
+        style = info.removeprefix("math_style=")
         upper, lower = _MATH_STYLES[style]
         back = "".join(
             chr(65 + ord(c) - upper) if upper <= ord(c) < upper + 26

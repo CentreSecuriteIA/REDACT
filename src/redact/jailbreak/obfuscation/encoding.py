@@ -2,8 +2,9 @@
 Morse or Braille, reversed, or in look-alike, fullwidth or math-styled letters.
 
 ``info`` is empty, except ``sep=<separator>`` from ``to_separator``,
-``shift=<n>`` from ``to_caesar_cipher`` and ``style=<name>`` from
-``to_math_styled`` (traceability metadata, not part of the encoded text).
+``shift=<n>`` from ``to_caesar_cipher`` and ``math_style=<name>`` from
+``to_math_styled`` (traceability metadata, not part of the encoded text; not
+``style=``, the key continuation's variant is read under).
 
 The ``to_<name>`` functions here are the plain encoders. A technique of the
 registry (:func:`get_encoding_functions`) with a pool in
@@ -403,7 +404,7 @@ def to_math_styled(
             out.append(chr(lower + ord(c) - 97))
         else:
             out.append(c)
-    return "".join(out), f"style={style}"
+    return "".join(out), f"math_style={style}"
 
 
 _ENCODERS = [
