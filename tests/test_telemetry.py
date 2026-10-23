@@ -147,6 +147,19 @@ class TestJsonlSink:
         assert all(e["stage"] == "inputs" for e in calls)
         assert all("ts" in e for e in events)
 
+    def test_the_collector_keeps_totals_not_events(self, tmp_path):
+        """A million-row run makes millions of events: the trace holds them,
+        the collector only what the roll-up needs."""
+        col = telemetry.install(data_dir=tmp_path)
+        for n in range(3):
+            observe.record({"ev": "call", "model": "m", "n_items": 1, "in_tok": 1,
+                            "out_tok": 1, "ms": 1, **({"error": "x"} if n else {})})
+        assert not hasattr(col, "events")
+        assert col.errors == 2
+        assert telemetry.summary()["errors"] == 2
+        lines = col.trace_path.read_text(encoding="utf-8").splitlines()
+        assert len(lines) == 3
+
     def test_off_writes_nothing_and_installs_no_emitter(self, tmp_path):
         telemetry.install(data_dir=tmp_path, sink="off")
         make_client(MockBackend("ok")).generate(_messages(1))

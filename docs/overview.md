@@ -258,10 +258,11 @@ six stages as a training run, with these differences:
   types, the clear ends, beside the general-benign part both types build
   from the benign taxonomy;
 - the jailbreak stage attacks the harmful inputs only, with a pool of hard
-  techniques whose label stays certain (the heavy encodings, `fsh`, `dap`,
-  `framing`, `structural`, `ascii_art`, `continuation`, `temporal`,
-  `to_refusal_then_comply` and eight low-resource translations), one
-  technique then two, with seed 43, and makes no natural variations;
+  techniques whose label stays certain (five heavy encodings, `fsh` and
+  `dap` less their many-shot variants, `framing`, `structural`,
+  `ascii_art`, `continuation`, `temporal`, `to_refusal_then_comply` and
+  eight low-resource translations), one technique then two, with seed 43,
+  and makes no natural variations;
 - the build runs in `eval` mode and writes no complete dataset: it writes
   three files with one `text` and one `label` column each, so an evaluation
   reads them without a join.
@@ -284,8 +285,8 @@ counted.
 | Package | What it is for |
 |---|---|
 | `multi_turn/` | Conversation datasets: a `Setting` of actors played on seeds (`generate_conversations`), scored by a judge (`evaluate_conversations`); a planned extension, not finished |
-| `multiturn_attacks/` | A `Setting` of an attacker and a target model (`generate_attacks`, `score_attacks`, `optimize_attack`), built on `multi_turn/` |
-| `optimization/` | A beam search over conversation moves scored by a judge (`optimize`) |
+| `multiturn_attacks/` | A `Setting` of an attacker and a target model (`generate_attacks`, `score_attacks`, `optimize_attack`), built on `multi_turn/`; a planned extension, not finished |
+| `optimization/` | A beam search over conversation moves scored by a judge (`optimize`); a planned extension, not finished |
 | `dataset/loading.py` | Load a published dataset from the HuggingFace Hub (`load_hf_dataset`, `load_from_config`) |
 
 ## Out of scope

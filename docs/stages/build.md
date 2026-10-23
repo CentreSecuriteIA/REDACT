@@ -38,11 +38,11 @@ input's `entry_type`, so in the dataset it would carry the wrong label; it
 stays in its stage file, where `rejection_reason` or `reasoning` says why. A
 file without an `accepted` column is copied whole.
 
-Each row is written once by `sample_id` in a file. A row whose `sample_id`
-an earlier part of the file wrote is left out, and the log counts them per
-part (`Jailbreaks: left out N rows whose sample_id an earlier part
-wrote.`). A row without a `sample_id` stays. Rows of one part are not
-compared with each other.
+A row whose `sample_id` an earlier part of the file wrote is left out, and
+the log counts them per part (`Jailbreaks: left out N rows whose sample_id
+an earlier part wrote.`). A row without a `sample_id` stays. Rows of one
+part are not compared with each other, so a part's own repeats stay: two
+sibling responses with one text are two rows with one `sample_id`.
 
 ## Mode
 

@@ -48,6 +48,7 @@ from . import (  # noqa: E402
     constitution,
     content_moderation,
     dataset,
+    driver,
     jailbreak,
     llm_pipeline,
     llms,
@@ -59,13 +60,7 @@ from . import (  # noqa: E402
     telemetry,
 )
 from .dataset import create_taxonomy  # noqa: E402
-from .driver import (  # noqa: E402
-    read_manifest,
-    read_record,
-    run_pipeline,
-    write_manifest,
-    write_record,
-)
+from .driver import read_record, run_pipeline, write_record  # noqa: E402
 from .jailbreak import default_escalation_schedule  # noqa: E402
 from .llms.prompting import scaffold_setup  # noqa: E402
 from .multi_turn import evaluate_conversations, generate_conversations  # noqa: E402
@@ -109,13 +104,20 @@ __all__ = [
     "multiturn_attacks",
     "optimization",
     "paths",
-    "read_manifest",
     "read_record",
     "residency",
     "run_pipeline",
     "scaffold_setup",
     "set_seed",
     "telemetry",
-    "write_manifest",
     "write_record",
 ]
+
+
+def __getattr__(name: str):
+    """``read_manifest`` and ``write_manifest``, the former names of
+    ``read_record`` and ``write_record``, with a ``DeprecationWarning``; kept
+    out of ``__all__``."""
+    if name in ("read_manifest", "write_manifest"):
+        return driver.former_record_name(__name__, name)
+    raise AttributeError(f"module {__name__!r} has no attribute {name!r}")

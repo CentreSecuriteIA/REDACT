@@ -44,8 +44,11 @@ From the command line:
 python scripts/run.py src/redact/configs/runs/training_example.json --data-dir ./runs/my_run
 ```
 
-`--params` replaces the recipe's `params_file`, `--data-dir` its `data_dir`.
-`--quiet` logs warnings only and `--debug` logs per-item detail. The script
+`--params` replaces the recipe's `params_file`: a relative path is read
+from the current directory, else from the recipe's folder, and the run logs
+the file it read. `--data-dir` replaces the recipe's `data_dir`.
+`--quiet` logs warnings only and `--debug` logs redact's per-item detail (the
+HTTP and lock libraries stay at INFO). The script
 prints the run summary as JSON. The first Ctrl-C, or `kill <pid>`, ends the
 run through its cleanup, which saves the finished units and releases the
 models. A second one ends vLLM's engine processes and exits at once.
@@ -145,7 +148,9 @@ the stage's name.
   names under `taxonomy_dir`, the packaged `configs/taxonomy/` by default.
 - `params_file` and `config_dir` are relative to the recipe's folder.
   `data_dir`, `prompt_dir` and `taxonomy_dir` are relative to the current
-  directory.
+  directory. A params file given in place of `params_file` (`--params`,
+  `run_pipeline(params=...)`) is read from the current directory when it is
+  there, else from the recipe's folder.
 - `config_dir` names a folder of your own configs: a dataset type
   (`eval.json` or `training.json`), taxonomy, `jailbreak/augmentations.json`,
   `generation_axes.json` or `dimensions.json` file there is read in place of
@@ -212,12 +217,12 @@ the local GPU instead.
   workers. `venice-uncensored` allows 75 requests a minute and 3 in flight;
   `claude-opus-4-6` allows 5 a minute, one at a time, and its window is
   shared by every model on the same Anthropic key.
-- A local vLLM model has no rate limit. The inputs, outputs and jailbreak
-  stages keep as many requests in flight as the engine runs at once, times
-  its copies. In the GPU check on an A100 80GB, every such stage ran its
-  local model with at most 256 requests in flight. The paraphrase stage
-  sends calls of `batch_size` instead, and the constitution stage one unit
-  at a time.
+- A local vLLM model has no rate limit. The inputs, outputs, paraphrase and
+  jailbreak stages keep as many requests in flight as the engine runs at
+  once, times its copies (`llm_pipeline.drive_units`, on the async lane). In
+  the GPU check on an A100 80GB, the inputs, outputs and jailbreak stages ran
+  their local model with at most 256 requests in flight. The constitution
+  stage runs one unit at a time.
 
 Large runs belong on local models. A hosted model suits a small run, or the
 role that makes few calls (the constitution).
@@ -226,8 +231,8 @@ role that makes few calls (the constitution).
 
 When any stage calls a local model, the driver plans the GPUs before the
 first stage runs. The plan is a forecast and a set of instructions to the
-loader. It never aborts a run: a plan that does not fit is logged at ERROR
-and the run goes on. So is a planning error, with its traceback; then every
+loader. It never aborts a run: a plan that does not fit is logged at ERROR,
+with `--quiet` too, and the run goes on. So is a planning error, with its traceback; then every
 local engine loads unplanned, at 0.9 of a whole card, so a second engine on
 that card does not start. [internals/residency.md](internals/residency.md) has the
 mechanics.
@@ -263,6 +268,13 @@ the driver unloads the engines that stage does not keep, and preloads the
 stage's models on a background thread (and the next stage's, when they fit
 beside them). An engine keeps the cards it loaded on, and the smallest share
 any of its stages plans for it.
+
+A local engine loaded before the run (a notebook that called a local model,
+then `run_pipeline`) counts, for the plan, only from the first stage that
+calls it: the stages before are planned as if its memory were free (the plan
+warns that it is loaded already), and the run does not release it for them.
+Release it first with `redact.residency.unload_local()`, or let the run load
+it.
 
 In the GPU check of this release, a 24B generator and a 3B checker on one
 A100 80GB give two plans: the 24B alone for `constitution` and `jailbreaks`,
@@ -388,9 +400,10 @@ ledger and plan.
 
 A stage that is skipped because none of its inputs was accepted still
 starts over with `"resume": false`. Its earlier output, `.cut` and `.tmp`
-files, ledger and manifest are removed through `dataset.clear_stage`; for the
-jailbreak stage that is each kind that is on, with its `.coverage.csv`,
-`.plan.json` and `.variants.csv`. So no stale rows reach the build. A jailbreak kind whose
+files, ledger and manifest are removed through `dataset.clear_stage`, with
+the outputs stage's `.coverage.csv` and `.plan.json`; for the jailbreak
+stage that is each kind that is on, with its `.coverage.csv`, `.plan.json`
+and `.variants.csv`. So no stale rows reach the build. A jailbreak kind whose
 `entry_types` match none of the inputs is skipped with a WARNING and cleared
 the same way.
 
@@ -408,6 +421,15 @@ the same way.
   them (the kept plan does not draw the new ones). A plan without that file
   resumes unchecked, with a WARNING. Inputs accepted after the plan was made
   get no unit, and a WARNING counts them.
+- The inputs and outputs stages deal their generation axes again on every
+  run, and the outputs stage its answer modes, from the settings recorded
+  in `<stem>.plan.json` beside the manifest
+  (`constitution_inputs.plan.json`, `output_responses.plan.json`): the
+  `seed` and the axes' weights, with `samples_per_entry` for the inputs and
+  `outputs_per_input` and `modes` for the outputs. A resume with other
+  values stops with a `ValueError` that names the keys (`Inputs: this run's
+  [...] differ ...`, `Outputs: this run's [...] differ ...`); run the stage
+  with `"resume": false`, or with the settings the plan was made with.
 - A rejected unit is acked and not retried: a constitution unit or a seeded
   entry rejected on every attempt, a rejected output, a dropped paraphrase.
   Start the stage over to try them again.
@@ -487,9 +509,10 @@ Other files you may see:
 | `<kind>.variants.csv` | Per template technique and variant, the rows of a kind's CSV that drew it, written after each run, with a zero row for each variant of the pool never drawn ([stages/jailbreaks.md](stages/jailbreaks.md#files)) |
 | `*.tmp` | A file being replaced. It is gone once the write finishes; a kill can leave one, which the next write replaces, and `resume: false` removes the output's |
 
-A run record, `Datasets/<stage>.run.json`, holds `stage`, `timestamp`,
-`params` (the stage's params: the dataset type's with the params file's
-entry over them), `models` (the recipe's role names),
+A run record, `Datasets/<stage>.run.json`, holds `stage`, `timestamp`
+(UTC, with its offset, as the trace's), `params` (the stage's params: the dataset type's with the params file's
+entry over them), `models` (the recipe's role names, its comment keys left
+out),
 `counts` (`rows`, and `accepted` when the files have that column; the inputs
 stage counts only the accepted rows of its `style`; an eval build with
 `exclude_from` adds `excluded`; the paraphrase stage adds `skipped`: the units
@@ -519,7 +542,9 @@ no extra brings), and `REDACT_TRACE=off` writes nothing and leaves
 `summary["telemetry"]` empty.
 
 At the end of the run the driver logs a roll-up at INFO and returns it as
-`summary["telemetry"]`:
+`summary["telemetry"]`, then stops collecting: a stage function called after
+the run, as from a notebook, writes to no trace until the next run, and
+`telemetry.summary()` is then empty.
 
 | Key | Meaning |
 |---|---|
@@ -589,6 +614,7 @@ rate. [internals/telemetry.md](internals/telemetry.md) lists the events.
 | `DeprecationWarning`: `techniques.allow names '...', which spec version ... deprecated` | A kind's `techniques.allow` names a retired technique, which it still draws for this release | Take the name out of `techniques.allow` |
 | WARNING `jailbreak: the plan ... has no jailbreaks.plan.json beside it ...` | A plan made before plan files were written; its section and seed are not checked | Nothing, or `"resume": false` to plan again |
 | `ValueError: .../output_responses.state.jsonl acks units without an iteration ...` or `Cannot append to .../output_responses.csv: its header has no column 'iteration', 'response_mode', ... It was written before an input had several responses, each in an answer mode.` | A resume onto an outputs folder written when a unit was an input, before the answer modes | Run the outputs stage with `"resume": false`, or in a new `data_dir` |
+| `ValueError: Inputs: this run's ['samples_per_entry'] differ from those the units in constitution_inputs were dealt with ...` (or `['seed']`, `['axes']`) | A resume of the inputs with another `samples_per_entry`, seed or axes' weights (another `axes_weighting` too) than the plan file's; a folder written by the fronts' defaults, then run as a `training` type (log weights), is one | Run the inputs stage with `"resume": false`, or with the plan's settings |
 | `ValueError: Outputs: this run's ['outputs_per_input'] differ from those the responses in output_responses.csv were dealt with ...` (or `['modes']`) | A resume with another `outputs.outputs_per_input` or `outputs.modes` (or seed, or axes' weights) than the plan file's; a training folder of one response per input resumed with the type's 2 is one | Run the outputs stage with `"resume": false`, or with the plan's settings |
 | `ValueError: Outputs: N input(s) have no entry type (a missing, NaN or empty entry_type cell), first [...] ...` | Inputs given to the outputs stage with blank `entry_type` cells, such as a merged frame or a hand-edited `samples.csv`; raised before anything is cleared | Give each input one of the four entry types (a frame without the column at all is answered as `harmful`, with a WARNING) |
 | `ValueError: Outputs: the inputs hold the entry type(s) [...], which outputs.modes does not map ...` | An input whose `entry_type` is none of the four; raised before anything is cleared | Fix the inputs' entry types |

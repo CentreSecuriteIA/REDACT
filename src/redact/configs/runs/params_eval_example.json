@@ -1,5 +1,5 @@
 {
-  "_comment": "A small eval run: one category of each taxonomy, three constitution categories per unit; the eval dataset type gives the rest. To leave out of the eval files the rows a training run holds, add exclude_from to build once that run exists, as a list holding its data_dir (./runs/training_example for the training example).",
+  "_comment": "A small eval run: one category of each taxonomy, three constitution categories per unit; the eval dataset type gives the rest. To leave out of the eval files the rows a training run holds, add exclude_from to build once that run exists, as a list holding the data_dir of the training recipe beside this one.",
   "constitution": { "num_categories": 3, "num_taxonomy_categories": 1 },
   "inputs": { "style": "long", "samples_per_entry": 3, "batch_size": 32 },
   "outputs": { "check_outputs": true, "max_per_category": 20, "batch_size": 32 },

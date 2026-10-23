@@ -73,10 +73,19 @@ python scripts/run.py src/redact/configs/runs/training_example.json --data-dir .
 
 The merged dataset lands in `./runs/first/Datasets/complete_dataset.csv`.
 The `paraphrase` stage loads a 12B model, and the `jailbreaks` stage the 27B
-TranslateGemma translator, on a local GPU. To run on hosted models only, take
-`paraphrase` out of the recipe's `stages` and set `"translation": false` in
-`augmentations.adversarial` (or name the hosted `deepseek-v3.2` as the
-`translation` model; [docs/running.md](docs/running.md#choose-models)).
+TranslateGemma translator, on a local GPU. To run on hosted models only,
+write a setup of your own rather than edit the packaged recipe:
+
+```bash
+python scripts/scaffold_setup.py ./my_setup
+```
+
+then, in `./my_setup/training_recipe.json`, take `paraphrase` out of
+`stages` and set `"translation": false` in `augmentations.adversarial` (or
+name the hosted `deepseek-v3.2` as the `translation` model;
+[docs/running.md](docs/running.md#choose-models)), and run
+`python scripts/run.py ./my_setup/training_recipe.json`. The setup writes
+into its own `runs/` folder; its `README.md` says what each file is.
 `eval_example.json` makes a small eval set the same way, as `eval_inputs.csv`,
 `eval_outputs.csv` and
 `eval_jailbreaks.csv`. A recipe's `dataset_type`, `training` or `eval`, picks

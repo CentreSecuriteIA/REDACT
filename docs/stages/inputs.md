@@ -62,8 +62,9 @@ checker repeated its own verdict on 95.2 percent of harmful samples at
 Params keys: `style`, `samples_per_entry`, `entry_types`, `axes`,
 `axes_weighting`, `seed`, `batch_size`, `max_attempts`, `check_max_tokens`
 ([configuration.md](../configuration.md#inputs)). A `samples_per_entry`
-that is not a whole number of at least 1 raises before the stage writes
-anything. The `eval` type pins the
+that is not a whole number of at least 1 raises
+(`check_samples_per_entry`) when the params load, and again in the front
+and the core, before the stage writes anything. The `eval` type pins the
 `directness` axis at `explicit`; the `training` type deals the weights
 log-scaled (`axes_weighting: "log"`).
 

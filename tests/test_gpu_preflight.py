@@ -88,11 +88,11 @@ def test_memory_in_use_on_a_planned_card_with_no_process_listed_is_a_warning(
 
 
 def test_this_process_on_a_planned_card_does_not_stop_the_run(run, caplog):
-    """Its engines are the plan's to warn about."""
+    """Its engines are the plan's to warn about: the card check says nothing
+    (the plan's own warnings, logged with verbose off too, are not its)."""
     with caplog.at_level(logging.WARNING, logger="redact.driver"):
         ran = run([_card(0, 4.0, [(os.getpid(), "python", 4.0)]), _card(1)])
     assert "inputs" in ran
-    # The plan's own warnings (an offline KV estimate) are logged quiet too.
     assert [r for r in caplog.records if r.name == "redact.driver"] == []
 
 

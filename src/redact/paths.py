@@ -70,7 +70,7 @@ def datasets(root: str | Path | None = None) -> Path:
 
 
 def data_cache(root: str | Path | None = None) -> Path:
-    """The ``Data_cache/`` root (benign, constitution, scenarios, …)."""
+    """The ``Data_cache/`` root: the constitution and the benign pairs."""
     return _root(root) / DATA_CACHE_DIRNAME
 
 

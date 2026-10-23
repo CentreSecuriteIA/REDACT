@@ -6,9 +6,10 @@ Execute a whole REDACT run from a recipe JSON (eval or training)::
     python scripts/run.py path/to/recipe.json --params path/to/params.json
     python scripts/run.py path/to/recipe.json --data-dir ./runs/my_run
 
-The recipe's ``params_file`` is used unless ``--params`` overrides it, and
-``--data-dir`` overrides the recipe's ``data_dir``. Each stage writes a
-``{stage}.run.json`` manifest under ``{data_dir}/Datasets/``.
+The recipe's ``params_file`` is used unless ``--params`` overrides it (a
+relative path is read from the current directory, else from the recipe's
+folder), and ``--data-dir`` overrides the recipe's ``data_dir``. Each stage
+writes a ``{stage}.run.json`` run record under ``{data_dir}/Datasets/``.
 
 The first Ctrl-C (or ``kill <pid>``) releases the models and exits; a
 second one ends vLLM's engine processes and exits at once.
@@ -66,21 +67,23 @@ def _exit_through_release() -> None:
 def main(argv=None) -> int:
     parser = argparse.ArgumentParser(description="Run a REDACT pipeline from a recipe JSON.")
     parser.add_argument("recipe", help="Path to the recipe JSON.")
-    parser.add_argument("--params", help="Override the recipe's params_file.", default=None)
+    parser.add_argument(
+        "--params", default=None,
+        help="Override the recipe's params_file; a relative path is read from "
+             "the current directory, else from the recipe's folder.")
     parser.add_argument("--data-dir", help="Override the recipe's data_dir.", default=None)
     parser.add_argument("--quiet", action="store_true", help="Suppress per-stage progress.")
-    parser.add_argument("--debug", action="store_true", help="Show per-item DEBUG detail.")
+    parser.add_argument("--debug", action="store_true",
+                        help="Show redact's per-item DEBUG detail.")
     args = parser.parse_args(argv)
 
     # redact's pipelines log progress via the standard `logging` module rather than
     # print() — as the entry point, we're responsible for giving it somewhere to go.
+    logging.basicConfig(level=logging.WARNING if args.quiet else logging.INFO,
+                        format="%(message)s")
     if args.debug:
-        level = logging.DEBUG
-    elif args.quiet:
-        level = logging.WARNING
-    else:
-        level = logging.INFO
-    logging.basicConfig(level=level, format="%(message)s")
+        # redact's own detail only: httpx, httpcore and filelock stay at INFO.
+        logging.getLogger("redact").setLevel(logging.DEBUG)
 
     _exit_through_release()
 

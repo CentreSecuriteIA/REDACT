@@ -14,8 +14,16 @@ from tests.conftest import MockBackend
 
 
 def test_the_former_module_name_still_resolves():
-    from redact import pipelines, stages
+    """It warns on import (a first one: the module body warns), and
+    re-exports redact.stages's objects."""
+    import importlib
+    import sys
 
+    from redact import stages
+
+    sys.modules.pop("redact.pipelines", None)
+    with pytest.deprecated_call(match="redact.pipelines is now redact.stages"):
+        pipelines = importlib.import_module("redact.pipelines")
     for name in pipelines.__all__:
         assert getattr(pipelines, name) is getattr(stages, name)
     assert set(pipelines.__all__) == {

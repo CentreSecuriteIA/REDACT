@@ -20,7 +20,9 @@ import logging
 import os
 import threading
 import time
+import warnings
 from collections.abc import Iterable, Mapping
+from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
 
@@ -41,6 +43,7 @@ from redact.recipe import (
     load_recipe,
     resolve_role,
     serving_of,
+    stage_params,
 )
 from redact.stages import STAGES, RunContext
 
@@ -66,7 +69,8 @@ def write_record(
     """Write a stage's run record and return its path."""
     record = {
         "stage": stage,
-        "timestamp": time.strftime("%Y-%m-%dT%H:%M:%S"),
+        # UTC, with its offset, as the trace's timestamps are.
+        "timestamp": datetime.now(UTC).isoformat(timespec="seconds"),
         "params": params or {},
         "models": models or {},
         "counts": counts or {},
@@ -93,10 +97,27 @@ def read_record(stage: str, data_dir: str | Path | None = None) -> dict | None:
         return json.load(fh)
 
 
-# Former names of the three record functions, kept for one release.
-manifest_path = record_path
-write_manifest = write_record
-read_manifest = read_record
+#: Former names of the three record functions, read for one release with a
+#: DeprecationWarning (a run record is not a ``*.manifest.jsonl``).
+FORMER_RECORD_NAMES = {"manifest_path": "record_path",
+                       "write_manifest": "write_record",
+                       "read_manifest": "read_record"}
+
+
+def former_record_name(module: str, name: str, stacklevel: int = 3):
+    """The record function ``name``, a former name, stands for, with a
+    ``DeprecationWarning`` naming ``module`` and the new name."""
+    new = FORMER_RECORD_NAMES[name]
+    warnings.warn(
+        f"{module}.{name} is now {new}; the former name is read for this release.",
+        DeprecationWarning, stacklevel=stacklevel)
+    return globals()[new]
+
+
+def __getattr__(name: str):
+    if name in FORMER_RECORD_NAMES:
+        return former_record_name(__name__, name)
+    raise AttributeError(f"module {__name__!r} has no attribute {name!r}")
 
 
 def file_counts(
@@ -143,7 +164,9 @@ def _plan_phases(
 
     Runs before the stage loop, so a stage that does not fit says so before
     any stage spends its budget. Nothing here aborts the run: a plan that
-    does not fit and a planning error are only logged. ``copies`` is the
+    does not fit and a planning error are only logged, at ERROR, and so is a
+    plan with warnings, at WARNING, with ``verbose`` off too; a plan that
+    fits is logged at INFO with ``verbose`` only. ``copies`` is the
     recipe's: a number of copies per model name.
 
     Returns:
@@ -168,6 +191,8 @@ def _plan_phases(
         for i, phase in enumerate(phases):
             if phase.resident and id(phase.plan) not in reported:
                 reported.add(id(phase.plan))
+                # report() logs a plan that does not fit, or warns, whatever
+                # verbose says: --quiet runs at WARNING and still shows it.
                 residency.report(
                     phase.plan, verbose=verbose, stages=stages_of[id(phase.plan)])
             # The first replaces what an earlier run left. An engine loaded
@@ -433,7 +458,10 @@ def run_pipeline(
 ) -> dict:
     """Run the stages a recipe names, in order, writing a run record per stage.
 
-    ``params`` replaces the recipe's ``params_file``, and ``data_dir`` its
+    ``params`` replaces the recipe's ``params_file``: a dict, or a file's
+    path, which when relative is read from the current directory, else from
+    the recipe's folder (:func:`redact.recipe.params_file_of`); with
+    ``verbose`` the file read is logged. ``data_dir`` replaces the recipe's
     ``data_dir``. A params key that is not a parameter of its stage's front,
     or that the run passes the front itself, fails before any stage runs, as
     do an augmentation section the params contradict and a generation axis
@@ -449,11 +477,14 @@ def run_pipeline(
     Before any of them loads, the run stops if another process holds memory
     on a card the plan puts one on (:func:`_check_cards`). At the end a
     preload still loading is waited for at most ``EXIT_WAIT_S`` (60 s), then
-    its load is ended.
+    its load is ended, and the run's telemetry is rolled up and uninstalled:
+    a front called after the run records into neither its trace nor its
+    roll-up.
 
     Returns:
-        ``dataset_type``, ``data_dir``, ``stages`` (per stage, its
-        ``counts`` and the path of its record under ``manifest``),
+        ``dataset_type``, ``data_dir`` (the root the run wrote under),
+        ``stages`` (per stage, its ``counts`` and the path of its run record
+        under ``manifest``, a key kept by that name),
         ``serving`` (:func:`_served`) and ``telemetry``; ``residency`` when
         a stage calls a local model, and ``trace`` when one is written.
     """
@@ -463,8 +494,8 @@ def run_pipeline(
     from . import residency
 
     recipe = load_recipe(recipe, params=params)
-    params = load_params(recipe.get("params_file") if params is None else params,
-                         base_dir=recipe.get("_base_dir"),
+    params_file = recipe["_params_file"]
+    params = load_params(params if isinstance(params, dict) else params_file,
                          config_dir=recipe.get("config_dir"))
     serving = serving_of(recipe.get("models") or {})
     stages = recipe["stages"]
@@ -473,12 +504,16 @@ def run_pipeline(
         dataset_type=recipe["dataset_type"],
         models={**_DEFAULT_MODELS, **_role_names(recipe.get("models") or {})},
         prompt_dir=recipe.get("prompt_dir"),
-        taxonomy=recipe.get("taxonomy", "harmful"),
+        # null, as the examples write taxonomy_dir and prompt_dir, is the default.
+        taxonomy=("harmful" if recipe.get("taxonomy") is None
+                  else recipe["taxonomy"]),
         taxonomy_dir=recipe.get("taxonomy_dir"),
         benign_taxonomy=recipe["benign_taxonomy"],
         params=params,
-        augmentations=augmentations_of(
-            recipe, params.get("jailbreaks") if "jailbreaks" in stages else None),
+        # The type file's flat keywords too, which load_params warns are read.
+        augmentations=augmentations_of(recipe, stage_params(
+            "jailbreaks", recipe["dataset_type"], params, recipe.get("config_dir"))
+            if "jailbreaks" in stages else None),
         resume=recipe.get("resume", True),
         verbose=verbose,
         config_dir=recipe.get("config_dir"),
@@ -492,6 +527,8 @@ def run_pipeline(
 
     if verbose:
         logger.info("Run pipeline (%s) — stages: %s", ctx.dataset_type, stages)
+        if params_file is not None:
+            logger.info("Params file: %s", params_file)
 
     # Telemetry first, so the plan and preload below are themselves recorded.
     telemetry.install(data_dir=ctx.data_dir)
@@ -507,7 +544,9 @@ def run_pipeline(
                      config_files=sorted(configs["overridden"] + configs["added"]))
 
     summary: dict = {
-        "dataset_type": ctx.dataset_type, "data_dir": str(ctx.data_dir), "stages": {}}
+        "dataset_type": ctx.dataset_type,
+        # The root the run wrote under, get_output_dir() when it names none.
+        "data_dir": str(paths.datasets(ctx.data_dir).parent), "stages": {}}
     phases: list = []
     warm: set[str] = set()
     preloads: list[tuple[threading.Thread, list[str]]] = []
@@ -559,7 +598,7 @@ def run_pipeline(
                 )
                 summary["stages"][name] = {"counts": counts, "manifest": str(path)}
                 if verbose:
-                    logger.info("[%s] %s -> manifest %s", name, counts, path.name)
+                    logger.info("[%s] %s -> record %s", name, counts, path.name)
     finally:
         # The serving was this run's: a call made after it must not get it.
         capabilities.set_run_serving({})
@@ -594,7 +633,10 @@ def run_pipeline(
         except Exception as exc:  # noqa: BLE001 — must not mask the stage's error
             logger.error("[residency] end of run failed (%s: %s)",
                          type(exc).__name__, exc)
-    trace = telemetry.collector()
-    if trace is not None and trace.trace_path is not None:
-        summary["trace"] = str(trace.trace_path)
+        trace = telemetry.collector()
+        if trace is not None and trace.trace_path is not None:
+            summary["trace"] = str(trace.trace_path)
+        # The trace and the roll-up were this run's: a front called after it,
+        # as from a notebook, records into neither.
+        telemetry.uninstall()
     return summary

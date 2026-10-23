@@ -47,10 +47,21 @@ def test_write_record_with_extra_and_spec(tmp_path):
     assert m["note"] == "hi" and m["spec_version"] == "1.0"
 
 
+def _import_afresh(name: str):
+    """Import module ``name`` as a first import does, running its body."""
+    import importlib
+    import sys
+
+    sys.modules.pop(name, None)
+    return importlib.import_module(name)
+
+
 def test_runconfig_and_the_former_record_names_still_resolve():
     import redact
-    from redact import driver, recipe, runconfig
+    from redact import driver, recipe
 
+    with pytest.deprecated_call(match="redact.runconfig is deprecated"):
+        runconfig = _import_afresh("redact.runconfig")
     assert runconfig.run_pipeline is driver.run_pipeline
     assert runconfig.load_recipe is recipe.load_recipe
     assert runconfig.load_params is recipe.load_params
@@ -60,8 +71,16 @@ def test_runconfig_and_the_former_record_names_still_resolve():
                      ("read_manifest", "read_record")]:
         assert getattr(runconfig, old) is getattr(driver, new)
         assert getattr(runconfig, new) is getattr(driver, new)
-    assert redact.write_manifest is redact.write_record is driver.write_record
-    assert redact.read_manifest is redact.read_record is driver.read_record
+        with pytest.deprecated_call(match=f"redact.driver.{old} is now {new}"):
+            assert getattr(driver, old) is getattr(driver, new)
+    with pytest.deprecated_call(match="redact.write_manifest is now write_record"):
+        assert redact.write_manifest is redact.write_record is driver.write_record
+    with pytest.deprecated_call(match="redact.read_manifest is now read_record"):
+        assert redact.read_manifest is redact.read_record is driver.read_record
+    assert not {"read_manifest", "write_manifest"} & set(redact.__all__)
+    with pytest.raises(AttributeError):
+        redact.no_such_name  # noqa: B018
+
 
 
 class TestFileCounts:
@@ -172,7 +191,7 @@ def test_run_pipeline_asks_no_stage_to_read_its_rows_back(tmp_path, monkeypatch)
             {"dataset_type": "training", "data_dir": str(tmp_path),
              "stages": ["constitution", "inputs", "outputs", "paraphrase", "jailbreaks",
                         "build"],
-             "augmentations": {"include_translation": False}},
+             "augmentations": {"adversarial": {"translation": False}}},
             params={}, verbose=False)
     finally:
         telemetry.uninstall()
@@ -430,7 +449,7 @@ def test_the_jailbreak_stage_gets_the_recipes_prompt_dir(tmp_path, monkeypatch):
                         lambda **k: handed.append(k["prompt_dir"]) or pd.DataFrame())
     recipe = {"dataset_type": "training", "data_dir": str(tmp_path),
               "stages": ["jailbreaks"], "prompt_dir": str(tmp_path / "prompts"),
-              "augmentations": {"include_translation": False}}
+              "augmentations": {"adversarial": {"translation": False}}}
     try:
         run_pipeline(recipe, params={}, verbose=False)
     finally:
@@ -584,7 +603,7 @@ def test_run_pipeline_counts_the_files_a_recipe_names(tmp_path, monkeypatch):
         summary = run_pipeline(
             {"dataset_type": "training", "data_dir": str(tmp_path),
              "stages": ["outputs", "paraphrase", "jailbreaks", "build"],
-             "augmentations": {"include_translation": False}},
+             "augmentations": {"adversarial": {"translation": False}}},
             params=params, verbose=False)
     finally:
         telemetry.uninstall()
@@ -657,6 +676,87 @@ def test_run_pipeline_loads_params_file(tmp_path, monkeypatch):
     from redact import run_pipeline
     summary = run_pipeline(str(recipe), verbose=False)  # params=None -> load params_file
     assert "build" in summary["stages"]
+
+
+def test_the_run_uninstalls_its_telemetry_when_it_returns(tmp_path, monkeypatch):
+    """A front called after the run, as from a notebook, records into neither
+    the finished run's trace nor its roll-up."""
+    import redact
+    from redact.llms import observe
+
+    monkeypatch.setattr(redact, "build_dataset", lambda **k: pd.DataFrame())
+    summary = run_pipeline({"dataset_type": "eval", "data_dir": str(tmp_path),
+                            "stages": ["build"]}, verbose=False)
+    trace = Path(summary["trace"])
+    lines = trace.read_text(encoding="utf-8").splitlines()
+    assert telemetry.collector() is None
+    observe.record({"ev": "call", "model": "m", "n_items": 1})
+    assert trace.read_text(encoding="utf-8").splitlines() == lines
+    assert telemetry.summary() == {}
+
+
+class TestAParamsPathGivenInPlaceOfTheRecipes:
+    """``--params`` / ``params=``: a relative path is read from the current
+    directory, else from the recipe's folder; the recipe's own
+    ``params_file`` from the recipe's folder."""
+
+    @pytest.fixture
+    def folders(self, tmp_path, monkeypatch):
+        recipes, cwd = tmp_path / "recipes", tmp_path / "cwd"
+        recipes.mkdir()
+        cwd.mkdir()
+        monkeypatch.chdir(cwd)
+        (recipes / "recipe.json").write_text(json.dumps({
+            "dataset_type": "eval", "data_dir": str(tmp_path / "run"),
+            "stages": ["build"], "params_file": "params.json"}))
+        (recipes / "params.json").write_text(json.dumps(
+            {"build": {"include_paraphrases": True}}))
+        return recipes, cwd
+
+    def test_a_copy_in_the_current_directory_wins(self, folders):
+        recipes, cwd = folders
+        (cwd / "params.json").write_text(json.dumps(
+            {"build": {"include_paraphrases": False}}))
+        recipe = load_recipe(recipes / "recipe.json", params="params.json")
+        assert recipe["_params_file"] == str(cwd / "params.json")
+
+    def test_a_name_only_the_recipes_folder_holds_is_read_from_there(self, folders):
+        recipes, _ = folders
+        recipe = load_recipe(recipes / "recipe.json", params="params.json")
+        assert recipe["_params_file"] == str(recipes / "params.json")
+
+    def test_the_recipes_own_params_file_is_read_from_its_folder(self, folders):
+        recipes, cwd = folders
+        (cwd / "params.json").write_text("{}")
+        recipe = load_recipe(recipes / "recipe.json")
+        assert recipe["_params_file"] == str(recipes / "params.json")
+
+    def test_a_name_in_neither_place_names_both(self, folders):
+        recipes, cwd = folders
+        with pytest.raises(FileNotFoundError) as raised:
+            load_recipe(recipes / "recipe.json", params="other.json")
+        assert str(cwd / "other.json") in str(raised.value)
+        assert str(recipes / "other.json") in str(raised.value)
+
+    def test_the_run_reads_the_current_directorys_copy_and_logs_it(
+            self, folders, monkeypatch, caplog):
+        import redact
+
+        recipes, cwd = folders
+        (cwd / "params.json").write_text(json.dumps(
+            {"build": {"include_paraphrases": False}}))
+        handed = []
+        monkeypatch.setattr(redact, "build_dataset",
+                            lambda **k: handed.append(k) or pd.DataFrame())
+        try:
+            with caplog.at_level("INFO", logger="redact.driver"):
+                run_pipeline(str(recipes / "recipe.json"), params="params.json")
+        finally:
+            telemetry.uninstall()
+        assert handed[0]["include_paraphrases"] is False
+        assert f"Params file: {cwd / 'params.json'}" in caplog.messages
+        record = read_record("build", recipes.parent / "run")
+        assert record["params"]["include_paraphrases"] is False
 
 
 # --- recipe / params loading -------------------------------------------------
@@ -868,6 +968,24 @@ def test_a_runs_params_stand_in_for_its_params_file_in_the_benign_check(
         telemetry.uninstall()
     (kwargs,) = handed
     assert kwargs["include_general_benign"] is False
+
+
+@pytest.mark.parametrize("taxonomy", [{}, {"taxonomy": None}])
+def test_a_taxonomy_left_out_or_null_is_the_packaged_harmful(
+        tmp_path, monkeypatch, taxonomy):
+    import redact
+
+    handed = []
+    monkeypatch.setattr(redact, "generate_constitution",
+                        lambda **k: handed.append(k) or pd.DataFrame())
+    try:
+        run_pipeline({"dataset_type": "training", "data_dir": str(tmp_path),
+                      "stages": ["constitution"], **taxonomy}, verbose=False)
+    finally:
+        telemetry.uninstall()
+    (kwargs,) = handed
+    assert kwargs["taxonomy"] == "harmful"
+    assert read_record("constitution", tmp_path)["sources"][0].endswith("harmful.json")
 
 
 def test_a_benign_taxonomy_in_the_constitutions_params_is_refused(
@@ -1152,6 +1270,80 @@ def test_outputs_per_input_that_is_not_a_whole_number_of_one_or_more_fails_at_lo
         load_params({"outputs": {"outputs_per_input": value}})
 
 
+@pytest.mark.parametrize(("params", "named"), [
+    ({"paraphrase": {"target": "output"}},
+     "paraphrase.target must be one of ['inputs', 'outputs', 'both'], got 'output'"),
+    ({"paraphrase": {"target": None}}, "paraphrase.target must be one of"),
+    ({"paraphrase": {"paraphrases_per_sample": 0}},
+     "paraphrase.paraphrases_per_sample must be a whole number of at least 1, got 0"),
+    ({"paraphrase": {"paraphrases_per_sample": 2.5}},
+     "paraphrase.paraphrases_per_sample must be a whole number of at least 1"),
+    ({"paraphrase": {"min_words": -1}},
+     "paraphrase.min_words must be a whole number of at least 0, got -1"),
+    ({"paraphrase": {"min_words": True}},
+     "paraphrase.min_words must be a whole number"),
+    ({"inputs": {"samples_per_entry": 0}},
+     "inputs.samples_per_entry must be a whole number of at least 1, got 0"),
+    ({"inputs": {"samples_per_entry": 2.5}},
+     "inputs.samples_per_entry must be a whole number of at least 1"),
+])
+def test_a_wrong_paraphrase_or_sample_count_fails_at_load(params, named):
+    with pytest.raises(ValueError, match=re.escape(named)):
+        load_params(params)
+
+
+def test_the_paraphrase_settings_a_run_may_give_load():
+    params = {"paraphrase": {"target": "both", "paraphrases_per_sample": 2,
+                             "min_words": 0},
+              "inputs": {"samples_per_entry": 1}}
+    assert load_params(params) == params
+    assert load_params({"paraphrase": {"min_words": None}})
+
+
+def test_a_paraphrase_target_typo_fails_before_any_stage_runs(tmp_path, monkeypatch):
+    raised = _fails_before_any_stage_or_model(
+        monkeypatch, tmp_path, {"stages": ["outputs", "paraphrase"]},
+        {"paraphrase": {"target": "output"}})
+    assert raised.startswith("paraphrase.target must be one of")
+
+
+def test_a_training_builds_exclude_from_fails_before_any_stage_runs(
+        tmp_path, monkeypatch):
+    raised = _fails_before_any_stage_or_model(
+        monkeypatch, tmp_path,
+        {"dataset_type": "training", "stages": ["outputs", "build"]},
+        {"build": {"exclude_from": [str(tmp_path)]}})
+    assert raised.startswith("params['build'] sets exclude_from")
+    # An eval build takes it, and a training run without the build checks none.
+    load_recipe({"dataset_type": "eval", "stages": ["build"]},
+                params={"build": {"exclude_from": [str(tmp_path)]}})
+    load_recipe({"dataset_type": "training", "stages": ["outputs"]},
+                params={"build": {"exclude_from": [str(tmp_path)]}})
+
+
+@pytest.mark.parametrize(("kwargs", "named"), [
+    ({"target": "output"}, "paraphrase.target"),
+    ({"paraphrases_per_sample": 0}, "paraphrase.paraphrases_per_sample"),
+    ({"min_words": -2}, "paraphrase.min_words"),
+])
+def test_the_paraphrase_front_checks_its_settings_before_anything(
+        tmp_path, monkeypatch, kwargs, named):
+    import redact
+    from redact.llms import ModelClient
+
+    monkeypatch.setattr(ModelClient, "create",
+                        lambda *a, **k: pytest.fail("a client was built"))
+    with pytest.raises(ValueError, match=re.escape(named)):
+        redact.generate_paraphrases(data_dir=tmp_path, **kwargs)
+
+
+def test_the_inputs_front_checks_its_sample_count_before_anything(tmp_path):
+    import redact
+
+    with pytest.raises(ValueError, match=re.escape("inputs.samples_per_entry")):
+        redact.generate_inputs(data_dir=tmp_path, samples_per_entry=0)
+
+
 def test_an_answer_mode_mapping_is_read_as_written():
     params = {"outputs": {"modes": {"_note": "x", "benign": ["harmful", "helpful"]}}}
     assert load_params(params) == params
@@ -1214,7 +1406,9 @@ def test_names_and_nulls_load_as_written():
               "paraphraser": "distribution", "_note": "a comment"}
     recipe = load_recipe({"dataset_type": "eval", "models": models})
     assert recipe["models"] == models
-    assert _role_names(recipe["models"]) == models
+    # The role names leave the comment out, so no run record holds it.
+    assert _role_names(recipe["models"]) == {
+        role: name for role, name in models.items() if role != "_note"}
     assert _serving_of(models) == {}
 
 
@@ -1791,15 +1985,12 @@ def test_run_pipeline_eval_jailbreaks_and_build(tmp_path, monkeypatch):
         "dataset_type": "eval",
         "data_dir": str(tmp_path),
         "stages": ["jailbreaks", "build"],
-        # The packaged section with the flat form over it, in place of the eval
-        # type's.
-        "augmentations": augmentations_of({"augmentations": {
+        # The packaged section with pure techniques of the obfuscation layer
+        # only, in place of the eval type's.
+        "augmentations": augmentations_of({"augmentations": {"adversarial": {
             "pure_only": True,
-            "include_hacking": False,
-            "include_manipulation": False,
-            "include_obfuscation": True,
-            "include_requests": False,
-        }}),
+            "layers": {"deny": ["rewrite", "hacking", "manipulation", "requests"]},
+        }}}),
         "resume": True,
     }
     params = {"jailbreaks": {"seed": 7}}
@@ -1860,10 +2051,10 @@ def test_a_training_run_reads_the_inputs_it_seeded(tmp_path, monkeypatch):
         "dataset_type": "training",
         "data_dir": str(tmp_path),
         "stages": ["outputs", "paraphrase", "jailbreaks"],
-        "augmentations": {
-            "pure_only": True, "include_hacking": False, "include_manipulation": False,
-            "include_requests": False,
-        },
+        "augmentations": {"adversarial": {
+            "pure_only": True,
+            "layers": {"deny": ["rewrite", "hacking", "manipulation", "requests"]},
+        }},
     }
     try:
         summary = run_pipeline(
@@ -1950,7 +2141,7 @@ def test_run_pipeline_all_stages_mocked(tmp_path, monkeypatch):
     summary = run_pipeline(
         {"dataset_type": "training", "data_dir": str(tmp_path),
          "stages": ["constitution", "inputs", "outputs", "paraphrase", "jailbreaks", "build"],
-         "augmentations": {"include_translation": False}},
+         "augmentations": {"adversarial": {"translation": False}}},
         params={"inputs": {"samples_per_entry": 1}, "paraphrase": {"target": "inputs"}},
         verbose=True,
     )
@@ -2101,7 +2292,7 @@ def test_stage_models_follow_the_order_the_stages_run():
     """Stage order, not role name: what loads first is planned first."""
     from redact.driver import _stage_models
 
-    translating = {"include_translation": True}
+    translating = {"adversarial": {"translation": True}}
     assert _stage_models(_models(), ALL_STAGES, translating) == [
         "claude-opus-4-6",        # constitution
         "venice-uncensored",      # inputs: gen, and check falls back to it
@@ -2130,16 +2321,24 @@ def test_check_resolves_to_the_generation_model_like_the_stages(local_models):
 
 
 @pytest.mark.parametrize("augmentations", [
-    {"include_translation": False},
-    {"pure_only": True},
-    {"include_obfuscation": False},
+    {"adversarial": {"translation": False}},
+    {"adversarial": {"pure_only": True}},
+    {"adversarial": {"layers": {"deny": ["obfuscation"]}}},
 ])
 def test_translation_is_not_planned_when_the_recipe_excludes_it(augmentations):
     from redact.driver import _stage_models
 
     assert _stage_models(_models(), ["jailbreaks"], augmentations) == ["venice-uncensored"]
     assert "translategemma-27b" in _stage_models(
-        _models(), ["jailbreaks"], {"include_translation": True})
+        _models(), ["jailbreaks"], {"adversarial": {"translation": True}})
+
+
+def test_translation_is_not_planned_for_the_deprecated_flat_form_either():
+    from redact.driver import _stage_models
+
+    with pytest.deprecated_call():
+        assert _stage_models(_models(), ["jailbreaks"], {"include_translation": False}) \
+            == ["venice-uncensored"]
 
 
 def test_a_paraphraser_pool_plans_every_model_in_it(local_models):
@@ -2188,6 +2387,26 @@ def test_phases_plan_each_stage_and_preload_what_fits(local_models):
     assert phases[0].plan.fits and not phases[1].plan.fits
     assert phases[1].plan.as_dict()["groups"] == [[gen], [paraphraser]]
     assert calls == [("preload", [gen])]
+
+
+def test_a_plan_that_does_not_fit_is_logged_without_verbose(local_models, caplog):
+    """--quiet runs with verbose off at WARNING: the plan that does not fit
+    still shows, at ERROR, and one with warnings at WARNING; none at INFO."""
+    from redact.driver import _plan_phases
+
+    gen = local_models("_rc_zz_gen")
+    paraphraser = local_models("_rc_aa_paraphraser")
+    models = _models(gen=gen, paraphraser=paraphraser, paraphrase_check=gen)
+    card = _one_card(8.0)                         # 5 + 5 GiB is over 0.9 x 8
+    try:
+        with card[0], card[1], caplog.at_level("INFO", logger="redact.residency"):
+            _plan_phases(models, ["inputs", "paraphrase"], verbose=False)
+    finally:
+        telemetry.uninstall()
+    logged = [(r.levelname, r.getMessage().split(":")[0]) for r in caplog.records
+              if r.getMessage().startswith("[residency] stages")]
+    assert ("ERROR", "[residency] stages paraphrase") in logged
+    assert "INFO" not in {level for level, _ in logged}
 
 
 def test_phases_apply_one_share_per_engine_for_the_run(local_models):
@@ -2597,7 +2816,7 @@ def test_served_lists_a_pool_and_names_no_model_for_a_role_no_stage_calls(
     extra = local_models("_rc_served_para", roles=["paraphraser"])
     models = _models(gen="no-such-model", paraphraser="distribution")
     served = _served(models, ["paraphrase", "jailbreaks"],
-                     {"include_translation": False}, {extra: {"copies": 2}}, [])
+                     {"adversarial": {"translation": False}}, {extra: {"copies": 2}}, [])
     assert served == {
         "paraphraser": [
             # No plan: the recipe's count, or none for one left to the plan.
@@ -3014,3 +3233,65 @@ def test_a_taxonomy_name_with_a_dot_names_its_json_file(tmp_path):
         augmentations={}, resume=True, verbose=False, benign_taxonomy="my.benign")
     assert STAGES["constitution"].sources(ctx) == [tmp_path / "my.tax.json"]
     assert STAGES["inputs"].sources(ctx) == [paths.constitution_merged_csv(tmp_path)]
+
+
+# --- what a run records and returns ------------------------------------------
+
+def test_a_record_leaves_the_models_comments_out_and_has_a_utc_timestamp(
+        tmp_path, monkeypatch):
+    import redact
+
+    monkeypatch.setattr(redact, "build_dataset", lambda **k: pd.DataFrame())
+    try:
+        run_pipeline({"dataset_type": "eval", "data_dir": str(tmp_path),
+                      "stages": ["build"],
+                      "models": {"_comment": "a note", "gen": None}}, verbose=False)
+    finally:
+        telemetry.uninstall()
+    record = read_record("build", tmp_path)
+    assert "_comment" not in record["models"]
+    assert record["timestamp"].endswith("+00:00")
+
+
+def test_the_summary_names_the_root_a_run_without_a_data_dir_wrote_under(
+        tmp_path, monkeypatch):
+    import redact
+
+    monkeypatch.setenv("REDACT_OUTPUT_DIR", str(tmp_path))
+    monkeypatch.setattr(redact, "build_dataset", lambda **k: pd.DataFrame())
+    try:
+        summary = run_pipeline({"dataset_type": "eval", "stages": ["build"]},
+                               verbose=False)
+    finally:
+        telemetry.uninstall()
+    assert summary["data_dir"] == str(tmp_path.resolve())
+    assert read_record("build", tmp_path) is not None
+
+
+def test_a_type_files_flat_jailbreak_keyword_is_applied_as_it_warns(
+        tmp_path, monkeypatch):
+    """load_params warns that a flat keyword of a type file's
+    params.jailbreaks is read as before: the run applies it to the
+    adversarial kind, as it does the params file's."""
+    import redact
+    from redact.recipe import load_dataset_type
+
+    typed = load_dataset_type("training")
+    typed["params"]["jailbreaks"] = {"max_complexity": 2}
+    (tmp_path / "cfg" / "dataset_types").mkdir(parents=True)
+    (tmp_path / "cfg" / "dataset_types" / "training.json").write_text(
+        json.dumps(typed), encoding="utf-8")
+    handed = []
+    monkeypatch.setattr(redact, "generate_jailbreaks",
+                        lambda **k: handed.append(k) or pd.DataFrame())
+    recipe = {"dataset_type": "training", "data_dir": str(tmp_path / "run"),
+              "config_dir": str(tmp_path / "cfg"), "stages": ["jailbreaks"],
+              "augmentations": {"adversarial": {"translation": False}}}
+    try:
+        with pytest.deprecated_call():
+            run_pipeline(recipe, verbose=False)
+    finally:
+        telemetry.uninstall()
+    (kwargs,) = handed
+    assert kwargs["augmentation"]["adversarial"]["max_complexity"] == 2
+    assert "max_complexity" not in kwargs

@@ -49,12 +49,17 @@ takes each item as its own engine request, so both give one event per item.
 | `stage(label)` | A context manager: labels every event inside it, and records a `stage` event with its duration on exit; then logs a WARNING per model that had replies cut at the token limit in the stage, with their count |
 | `summary()` | Rolls up the run and logs it; `{}` when telemetry is off |
 | `collector()` | The installed `Collector`, or `None` |
-| `uninstall()` | Stops collecting |
+| `uninstall()` | Stops collecting; `run_pipeline` calls it when it returns, after its roll-up |
 | `set_gpu_rate(usd_per_hour)` | Prices this machine's GPUs, over the environment and the table |
 
 With `REDACT_TRACE=wandb` the same events also go to Weights & Biases (a
 missing `wandb` package logs a warning and keeps the JSONL trace). With
-`off` nothing is collected and `summary()` is empty.
+`off` nothing is collected and `summary()` is empty; a backend still warns
+for the first cut reply of each model in each stage, but the stage-end
+counts are lost.
+
+A `Collector` keeps the totals the roll-up needs, never the events: a large
+run makes millions of them, and the trace holds them.
 
 ## The roll-up
 

@@ -14,13 +14,13 @@ that starts with `_` is a comment.
 | `dataset_type` | `"eval"` or `"training"` | required | Any other value raises at load. The [dataset type](#dataset-types): its file gives the run's default stages, params and augmentation section, and it is the build's `mode` (`training` merges every part into `complete_dataset.csv`, `eval` writes `eval_inputs.csv`, `eval_outputs.csv` and `eval_jailbreaks.csv`; see [build](stages/build.md)). Either way the inputs are seeded from the constitution, which the recipe's `constitution` stage writes or an earlier run saved under `data_dir`; without one the `inputs` stage stops |
 | `data_dir` | path | the default working root | The run's root; `Datasets/` and `Data_cache/` go under it. Relative to the current directory. `run_pipeline(data_dir=...)` and `--data-dir` override it |
 | `models` | object | every role its default | A model per role; see [below](#the-models-object) |
-| `taxonomy` | name or object | `"harmful"` | The taxonomy of the constitution, by file name or as a loaded object. The former name `"content_moderation_categories"` loads `harmful` with a `DeprecationWarning`, for one release |
+| `taxonomy` | name or object | `"harmful"` | The taxonomy of the constitution, by file name or as a loaded object; `null` is the default. The former name `"content_moderation_categories"` loads `harmful` with a `DeprecationWarning`, for one release |
 | `taxonomy_dir` | path | `<config_dir>/taxonomy/` for a file it has, else `configs/taxonomy/` | Where a taxonomy name (`taxonomy`, `benign_taxonomy`) is looked up; given, it wins over `config_dir` |
 | `benign_taxonomy` | name or object | `"benign"` | The taxonomy whose categories the constitution's general-benign part is built from, and whose subcategories the benign Q&A pairs of the `fsh` and `dap` techniques are generated for. Read at load, and checked to have a category, when the recipe runs `constitution` and its params switch the general-benign part on (`include_general_benign`, or its former name: the dataset type's, with the params file's over them), or runs `jailbreaks` and a kind draws a technique that needs benign data |
 | `prompt_dir` | path | none | The prompt overlay; see [below](#the-prompt-overlay) |
 | `stages` | list of stage names | the dataset type's: all six | The stages to run, in order, each once. `[]` runs nothing |
 | `augmentations` | object | the dataset type's | The jailbreak stage's augmentation section, over the dataset type's; see [below](#the-augmentation-section) |
-| `params_file` | path | none | The params file, relative to the recipe's folder. `--params` and `run_pipeline(params=...)` override it |
+| `params_file` | path | none | The params file, relative to the recipe's folder. `--params` and `run_pipeline(params=...)` override it; their relative path is read from the current directory, else from the recipe's folder, and the run logs the file it read |
 | `config_dir` | path | none | [Your own config folder](#your-own-config-folder), relative to the recipe's folder: its dataset type, taxonomy, augmentation, generation axes and dimensions files are read in place of the packaged ones. Not a folder: raises at load |
 | `resume` | bool | `true` | `false` starts every listed stage over ([running.md](running.md#resume-fresh-runs-and-a-kill-partway-through)). Any other value than `true` or `false`, the string `"false"` too, raises |
 
@@ -122,13 +122,19 @@ models, `data_dir`, `prompt_dir`, `taxonomy`, `taxonomy_dir`,
 `constitution_df`, the jailbreak stage's `augmentation`, the build's `mode`,
 `read_back`). Parameters that take a DataFrame (`inputs`, `outputs`) cannot
 be written in JSON. The `axes`, `axes_weighting` and `seed` of `inputs`
-and `outputs`, and the `modes` and `outputs_per_input` of `outputs`, are
-checked when the params load (a params file's and a dataset type's): an
-unknown axis or value, a weight below 0, a weighting other than `"table"`
-or `"log"`, a seed that is not a whole number, a `modes` that is not an
-object of entry types to non-empty lists of distinct modes, or an
-`outputs_per_input` that is not a whole number of at least 1 raises, the axes read against the
-`config_dir`'s axes table when it has one.
+and `outputs`, the `samples_per_entry` of `inputs`, the `modes` and
+`outputs_per_input` of `outputs`, and the `target`, `paraphrases_per_sample`
+and `min_words` of `paraphrase` are checked when the params load (a params
+file's and a dataset type's): an unknown axis or value, a weight below 0, a
+weighting other than `"table"` or `"log"`, a seed that is not a whole
+number, a `modes` that is not an object of entry types to non-empty lists
+of distinct modes, a `samples_per_entry`, `outputs_per_input` or
+`paraphrases_per_sample` that is not a whole number of at least 1, a
+`target` other than `inputs`, `outputs` and `both`, or a `min_words` that is
+not a whole number of at least 0 raises, the axes read against the
+`config_dir`'s axes table when it has one. So does a `build.exclude_from`
+in a `training` run that lists the build. A typo stops the run before its
+first stage.
 
 ### `constitution`
 
@@ -149,7 +155,7 @@ names of the last two, are read for this release with a
 | Key | Default | Meaning |
 |---|---|---|
 | `style` | `"long"` | The prompt under `prompts/input/generation/from_constitution/<style>/`: `long` or `short`. With axes, the length axis sets each sample's length |
-| `samples_per_entry` | `3` | Samples per constitution entry: that many units, one sample per call |
+| `samples_per_entry` | `3` | Samples per constitution entry: that many units, one sample per call. A whole number of at least 1 |
 | `entry_types` | `null` | Use only the constitution entries of these entry types |
 | `axes` | `null`: the table's | The [generation axes](#the-generation-axes) each unit is dealt a value of: `{axis: {value: weight}}` over the table's `inputs` section, an axis as `null` to leave it out; `false` for none. The `eval` type pins `directness` |
 | `axes_weighting` | `"table"`; `"log"` in the `training` type | How the axes' weights are dealt: `"table"` as they are, `"log"` spread more evenly over each axis's values ([log weighting](#log-weighting)) |
@@ -163,7 +169,7 @@ names of the last two, are read for this release with a
 | Key | Default | Meaning |
 |---|---|---|
 | `check_outputs` | `true` | Check each response; `false` accepts every response |
-| `max_attempts` | `1` | Generations per input; above 1 a rejected response is generated again with the verdict as feedback |
+| `max_attempts` | `1` | Generations per response (unit); above 1 a rejected response is generated again with the verdict as feedback |
 | `max_per_category` | `null` | Keep the first N inputs per `(category, entry_type)` |
 | `max_samples` | `null` | Keep the first N inputs overall, after `max_per_category` |
 | `outputs_per_input` | `1`; `2` in the `training` type | Responses per input, each a unit `(input_id, iteration)` dealt its own answer mode and spec, so an input's responses differ on the axes and, from 2, a borderline input gets one answer of each mode. `max_per_category` and `max_samples` count inputs, before this expansion. A whole number of at least 1; `null` is not read as the default and raises at load |
@@ -179,10 +185,10 @@ names of the last two, are read for this release with a
 
 | Key | Default | Meaning |
 |---|---|---|
-| `target` | `"inputs"` | `inputs`, `outputs` or `both`; the outputs are an opt-in |
-| `paraphrases_per_sample` | `1` | Paraphrase units per source row |
+| `target` | `"inputs"` | `inputs`, `outputs` or `both`; the outputs are an opt-in. Another value raises at load |
+| `paraphrases_per_sample` | `1` | Paraphrase units per source row; a whole number of at least 1 |
 | `check` | `true` | Gate each paraphrase and check it with the `paraphrase_check` model ([the check](stages/paraphrase.md#the-check)); `false` accepts every paraphrase |
-| `min_words` | `12` | A text under this many words (split on whitespace) gets no paraphrase; its unit is acked `skipped`. `0` paraphrases every text |
+| `min_words` | `12` | A text under this many words (split on whitespace) gets no paraphrase; its unit is acked `skipped`. `0` paraphrases every text; a whole number of at least 0, or `null` for the default |
 | `batch_size` | `256` | Requests per grouped call; at least twice as many units are live |
 | `seed` | `42` | Seed of the assignment of units to paraphrasers |
 | `inputs_path`, `outputs_path` | `Datasets/paraphrases_inputs.csv`, `Datasets/paraphrases_outputs.csv` | Where the paraphrases go |
@@ -217,7 +223,7 @@ augmentation section has, such as `family_weights`, raises here.
 | `inputs_path` | `Datasets/constitution_inputs_merged.csv`, else the category files | The inputs part |
 | `jailbreak_path`, `variations_path`, `responses_path` | the stages' default files | The other parts |
 | `paraphrase_inputs_path`, `paraphrase_outputs_path` | the stage's default files | The paraphrase parts |
-| `exclude_from` | none | Eval only: a list of run folders or CSVs, such as a training run's; the eval files leave out every row they hold by id or by normalised text, keep and count the rows from a constitution entry they have too, and the record counts both ([build](stages/build.md#leaving-out-what-a-training-run-holds)) |
+| `exclude_from` | none | Eval only (a `training` run that lists the build refuses it at load): a list of run folders or CSVs, such as a training run's; the eval files leave out every row they hold by id or by normalised text, keep and count the rows from a constitution entry they have too, and the record counts both ([build](stages/build.md#leaving-out-what-a-training-run-holds)) |
 
 A path key moves one stage's file only. Later stages read the default paths
 unless given their own: the build has a path key per part, and the paraphrase
@@ -1091,16 +1097,18 @@ start from:
 
 | File | What it is |
 |---|---|
-| `eval_recipe.json`, `training_recipe.json` | The packaged example recipes, with `"config_dir": "."` and their params file beside them |
+| `eval_recipe.json`, `training_recipe.json` | The packaged example recipes, with `"config_dir": "."`, their params file beside them, and a `data_dir` of the folder's own: `runs/eval` or `runs/training` in it, as an absolute path (a `data_dir` is read from the current directory) |
 | `eval_params.json`, `training_params.json` | The example params files, as they are |
 | `dataset_types/eval.json`, `dataset_types/training.json` | Copies of the packaged files |
 | `taxonomy/harmful.json`, `taxonomy/benign.json` | Copies of the packaged files |
 | `jailbreak/augmentations.json` | A copy of the packaged file |
 | `generation_axes.json`, `dimensions.json` | Copies of the packaged files |
-| `README.md` | What follows, in short |
+| `README.md` | What follows, in short, and a command that runs a recipe from the folder |
 
-A scaffolded recipe runs exactly as its packaged example until a file is
-changed. Every file in the folder wins over the packaged copy, so delete each
+A scaffolded recipe runs as its packaged example until a file is changed,
+but into its own `data_dir`: a run of the example and a run of the setup
+never resume into each other's files. Move the folder and write the two
+`data_dir` paths again. Every file in the folder wins over the packaged copy, so delete each
 file you do not change to keep getting the library's updates to it. A
 folder scaffolded before `training.json` set `outputs.outputs_per_input` 2
 keeps its old copy, and so one response per input in a training run: add
@@ -1202,7 +1210,11 @@ python scripts/scaffold_prompts.py ./my_prompts --empty   # skeletons with the s
 
 `--empty` replaces `system_prompt`, `template` and `instruction` with a TODO
 that keeps the field's placeholders, so a skeleton renders with the same
-values. Delete every file you do not change, then set `prompt_dir`.
+values. Delete every file you do not change, then set `prompt_dir`. The
+script refuses to write over a file the folder holds, naming some of them,
+and writes nothing: a skeleton written over an edited prompt would still
+render, and the next run would use it. `--overwrite` replaces them
+(`scaffold_prompt_tree(..., overwrite=True)`).
 
 ## Other configuration files
 
