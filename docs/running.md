@@ -11,7 +11,7 @@ Python 3.11 or later.
 
 ```bash
 pip install -e .                   # core: pandas, openai, anthropic, python-dotenv, pyfiglet, filelock
-pip install -e ".[vllm]"           # local models through vLLM (vllm, hf_transfer, psutil, langid)
+pip install -e ".[vllm]"           # local models through vLLM 0.31 or later (vllm, hf_transfer, psutil, langid)
 pip install -e ".[langid]"         # GlotLID, the language check of a machine translation and of a paraphrase
 pip install -e ".[transformers]"   # the introspection backend (torch, transformers, accelerate)
 pip install -e ".[hf]"             # loading published datasets from the HuggingFace Hub
@@ -19,9 +19,12 @@ pip install -e ".[dev]"            # pytest, ruff, mypy, ipykernel
 pip install -e ".[docs]"           # the documentation site: mkdocs build --strict
 ```
 
-`requirements.lock` pins an environment that runs vLLM on a GPU pod. Its
-torch build needs a host driver for CUDA 13; on an older driver vLLM stops at
-load with "The NVIDIA driver on your system is too old".
+`requirements.lock` pins an environment that runs vLLM on a GPU pod (Linux,
+Python 3.12, CUDA 13 wheels). It holds the packages of the `vllm`,
+`transformers` and `dev` extras, not redact itself: `pip install -r
+requirements.lock`, then `pip install -e . --no-deps`. Its torch build needs a
+host driver for CUDA 13; on an older driver vLLM stops at load with "The
+NVIDIA driver on your system is too old".
 
 Put API keys in a `.env` file. `import redact` loads `.env` from the default
 working root (`REDACT_OUTPUT_DIR`, else the first folder above the package
@@ -30,7 +33,10 @@ shell's. The keys the shipped models read are `VENICE_API_KEY`,
 `ANTHROPIC_API_KEY` and `OPENROUTER_API_KEY`. Local weights download to the
 HuggingFace cache (`HF_HOME`); `scripts/download_models.py` fetches every
 local checkpoint of the registry, whole (tokenizer files included, GGUF files
-left out), at the revision an entry pins, ahead of a run. It fetches GlotLID,
+left out), at the revision an entry pins, ahead of a run, and the tokenizer
+files of a setup whose tokenizer vLLM loads from elsewhere (a `tokenizer`
+naming another repository, or a `tokenizer_revision` other than `revision`);
+`--dry-run` lists them without `huggingface_hub`. It fetches GlotLID,
 the language identifier, with a model that has the `machine_translation` or
 the `paraphraser` role. A model named as a recipe's paraphraser without that
 role brings none: name a model with the role too, or the paraphrase check runs
@@ -340,10 +346,9 @@ A unit is acked only after its rows are on disk, so a crash loses at most the
 units finished since the last save, and those run again. [internals/dataset.md](internals/dataset.md#the-save-and-resume-model)
 explains the mechanism.
 
-The constitution stage is the exception: its ledger is plain, with no lock, no
-recorded sizes and nothing cut back, and it saves each unit as it finishes. A
-crash between a unit's rows and its ack makes the next run generate that unit
-and append its rows again ([stages/constitution.md](stages/constitution.md#how-it-resumes)).
+The constitution stage saves each unit as it finishes, and resumes the same
+way: a torn row, or rows written before their ack, are cut back and the unit
+runs again ([stages/constitution.md](stages/constitution.md#how-it-resumes)).
 
 **Stopping a run.** Ctrl-C, or `kill <pid>` on `scripts/run.py`, ends the run
 cleanly: the finished units are saved, requests in flight are cancelled, and
@@ -426,10 +431,22 @@ the same way.
   in `<stem>.plan.json` beside the manifest
   (`constitution_inputs.plan.json`, `output_responses.plan.json`): the
   `seed` and the axes' weights, with `samples_per_entry` for the inputs and
-  `outputs_per_input` and `modes` for the outputs. A resume with other
-  values stops with a `ValueError` that names the keys (`Inputs: this run's
-  [...] differ ...`, `Outputs: this run's [...] differ ...`); run the stage
-  with `"resume": false`, or with the settings the plan was made with.
+  `outputs_per_input` and `modes` for the outputs. A done unit keeps the
+  spec (and answer mode) its ack records. A resume with other values stops
+  with a `ValueError` that names the keys (`Inputs: this run's [...] differ
+  ...`, `Outputs: this run's [...] differ ...`); run the stage with
+  `"resume": false`, or with the settings the plan was made with.
+- The inputs plan file holds one record per style, `{"styles": {<style>:
+  {seed, samples_per_entry, axes}}}`. A resume compares only its own style's
+  record, and only when that style has a done unit; a fresh run of one style
+  keeps the other styles' records. A one-record file an earlier version
+  wrote counts for every style with done units.
+- A plan file that holds no record (not JSON, or not an object, as one an
+  earlier version cut off mid-write) stops a resume of the inputs, outputs
+  or jailbreak stage before anything is cut, and gives the lock back. Delete
+  it (the resume then runs unchecked, with a WARNING) or run with
+  `"resume": false`; a fresh run of one input style replaces it, with a
+  WARNING.
 - A rejected unit is acked and not retried: a constitution unit or a seeded
   entry rejected on every attempt, a rejected output, a dropped paraphrase.
   Start the stage over to try them again.
@@ -503,7 +520,7 @@ Other files you may see:
 | `<output>.cut` | Bytes a resume cut off an output: the tail of a save that did not finish |
 | `<ledger>.dropping` | A fresh run of one seeded-inputs style that did not finish. Run it again |
 | `<kind>.plan.json` | What a jailbreak kind's plan was made with: `seed`, `rounds`, `pool`, `family_weights`, `layer_rates`, `spec_version`. A resume compares them with the run's, the pool against what the library added or retired after `spec_version` |
-| `constitution_inputs.plan.json`, `output_responses.plan.json` | What the deal of the generation axes was made with: `seed`, the axes' weights, for the inputs `samples_per_entry`, and for the outputs `outputs_per_input` and `modes` (the answer modes of every entry type). A resume compares them with the run's |
+| `constitution_inputs.plan.json`, `output_responses.plan.json` | What the deal of the generation axes was made with: `seed`, the axes' weights, for the inputs `samples_per_entry` (one record per style, under `styles`), and for the outputs `outputs_per_input` and `modes` (the answer modes of every entry type). A resume compares them with the run's |
 | `constitution_inputs.coverage.csv`, `output_responses.coverage.csv` | Per axis value, the specs planned and accepted per category and entry type; the outputs' also per answer mode (`axis` `mode`) |
 | `<kind>.coverage.csv` | Per layer, family and technique of a kind's plan, the count per category, entry type and iteration, with a zero row for each pool technique never drawn |
 | `<kind>.variants.csv` | Per template technique and variant, the rows of a kind's CSV that drew it, written after each run, with a zero row for each variant of the pool never drawn ([stages/jailbreaks.md](stages/jailbreaks.md#files)) |
@@ -614,7 +631,10 @@ rate. [internals/telemetry.md](internals/telemetry.md) lists the events.
 | `DeprecationWarning`: `techniques.allow names '...', which spec version ... deprecated` | A kind's `techniques.allow` names a retired technique, which it still draws for this release | Take the name out of `techniques.allow` |
 | WARNING `jailbreak: the plan ... has no jailbreaks.plan.json beside it ...` | A plan made before plan files were written; its section and seed are not checked | Nothing, or `"resume": false` to plan again |
 | `ValueError: .../output_responses.state.jsonl acks units without an iteration ...` or `Cannot append to .../output_responses.csv: its header has no column 'iteration', 'response_mode', ... It was written before an input had several responses, each in an answer mode.` | A resume onto an outputs folder written when a unit was an input, before the answer modes | Run the outputs stage with `"resume": false`, or in a new `data_dir` |
-| `ValueError: Inputs: this run's ['samples_per_entry'] differ from those the units in constitution_inputs were dealt with ...` (or `['seed']`, `['axes']`) | A resume of the inputs with another `samples_per_entry`, seed or axes' weights (another `axes_weighting` too) than the plan file's; a folder written by the fronts' defaults, then run as a `training` type (log weights), is one | Run the inputs stage with `"resume": false`, or with the plan's settings |
+| `ValueError: Inputs: this run's ['samples_per_entry'] differ from those the units of style 'long' in constitution_inputs were dealt with ...` (or `['seed']`, `['axes']`) | A resume of a style with done units with another `samples_per_entry`, seed or axes' weights (another `axes_weighting` too) than the plan file's record for that style; a folder written by the fronts' defaults, then run as a `training` type (log weights), is one | Run the inputs stage with `"resume": false` (it starts that style over), or with the plan's settings |
+| `ValueError: The plan file <path> holds no plan record (...). Delete it ..., or run with resume=False ...` | A resume of the inputs, outputs or jailbreak stage found a plan file that is not a JSON object, such as one an earlier version cut off mid-write; nothing was cut, and the lock is given back | Delete the file (the resume then runs unchecked, with a WARNING), or `"resume": false`; a fresh run of one input style removes it itself, with a WARNING |
+| `RuntimeError: Cannot resume .../merged.csv: constitution.state.jsonl recorded ...` | A constitution CSV is missing, or was edited or replaced since its last save | Restore the file; or delete the ledger, and the next resume takes over the units whose rows are in `merged.csv`; or `"resume": false` |
+| `ValueError: Category name '...' cannot name a folder: ...` | A taxonomy (or constitution) category with a path separator, one of `<>:"?*` or the vertical bar, a control character, a trailing dot or space, an empty name, or a Windows device name (`CON`, `NUL`, `COM1`, ...); raised by the constitution or the inputs stage before any call | Rename the category in the taxonomy |
 | `ValueError: Outputs: this run's ['outputs_per_input'] differ from those the responses in output_responses.csv were dealt with ...` (or `['modes']`) | A resume with another `outputs.outputs_per_input` or `outputs.modes` (or seed, or axes' weights) than the plan file's; a training folder of one response per input resumed with the type's 2 is one | Run the outputs stage with `"resume": false`, or with the plan's settings |
 | `ValueError: Outputs: N input(s) have no entry type (a missing, NaN or empty entry_type cell), first [...] ...` | Inputs given to the outputs stage with blank `entry_type` cells, such as a merged frame or a hand-edited `samples.csv`; raised before anything is cleared | Give each input one of the four entry types (a frame without the column at all is answered as `harmful`, with a WARNING) |
 | `ValueError: Outputs: the inputs hold the entry type(s) [...], which outputs.modes does not map ...` | An input whose `entry_type` is none of the four; raised before anything is cleared | Fix the inputs' entry types |

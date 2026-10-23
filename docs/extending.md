@@ -565,14 +565,23 @@ folder of a recipe's `config_dir`, or under the folder a recipe names as
 ```
 
 - **A new category** is one more entry under `categories`. Its name is a
-  folder name on disk, so it may not hold `/` or `\`.
+  folder name on disk, so `dataset.check_category_name` refuses, on every
+  platform, a name no folder can have on Windows: a path separator, any of
+  `<>:"|?*`, a control character, a trailing dot or space, an empty name,
+  or a device name (`CON`, `NUL`, `COM1`, ...). The constitution checks the
+  categories it plans and the inputs stage every `source_category`, before
+  any call; `create_taxonomy` checks every category it writes.
 - The constitution stage fills its prompts with the category's name,
   `description`, `subcategories` (a list, or a dict whose keys are used) and
   `group_tag` (default `general`, recorded as `source_group_tag`).
 - **A new taxonomy**: write the file, or call
   `redact.create_taxonomy(name, categories, taxonomy_dir=...)`, then set
   `"taxonomy": "<name>"` (and `taxonomy_dir`) in the recipe. A dict passed to
-  a front as `taxonomy=` works too.
+  a front as `taxonomy=` works too. `create_taxonomy` writes to the packaged
+  `configs/taxonomy/` by default, and refuses (`FileExistsError`) to write
+  over a taxonomy packaged there (`harmful`, `benign`) unless
+  `overwrite=True`, since every run reads it; give a `taxonomy_dir` of your
+  own. A file in another folder is written over.
 
 The category reaches every later stage through its rows' `category` column.
 The benign categories are a taxonomy of their own,

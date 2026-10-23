@@ -56,7 +56,7 @@ Python 3.11 or later.
 git clone https://github.com/CentreSecuriteIA/REDACT.git
 cd REDACT
 pip install -e .            # hosted models (Venice, Anthropic, OpenRouter)
-pip install -e ".[vllm]"    # + local models through vLLM
+pip install -e ".[vllm]"    # + local models through vLLM (0.31 or later)
 ```
 
 Put the API keys (`VENICE_API_KEY`, `ANTHROPIC_API_KEY`,

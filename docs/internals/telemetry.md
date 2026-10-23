@@ -25,6 +25,7 @@ describes the output from a user's side.
 | `observe.set_emitter(fn)` | Installs the emitter; `telemetry.install` calls it |
 | `observe.set_stage(label)` | The stage later events carry; a module global, since thread pools do not pass context variables to their workers |
 | `observe.current_stage()` | The stage label set now |
+| `observe.first_in_stage(key)` | Whether `key` is new since the stage label was last set; `set_stage` forgets what it saw. The cut-reply warning uses it, so it warns once per stage run (a second `run_pipeline` in a notebook warns again) |
 
 ## Events
 
@@ -70,7 +71,7 @@ token limit per stage and model
 `Collector.cut_in(stage)` gives one stage's counts.
 
 A backend marks a cut reply with `cut` on its `call` event and warns for the
-first cut reply of each model in each stage; later ones are only counted.
+first cut reply of each model in each stage run; later ones are only counted.
 
 Two meters, because two things are bought:
 

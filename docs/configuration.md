@@ -966,6 +966,7 @@ process only.
 | `supports_system_prompt` | `true` | `false` folds system messages into the first user message (the first message when none is the user's); an empty system message is dropped |
 | `default_max_tokens` | `2000` | Reply limit when a call gives none |
 | `default_temperature` | `null` | 0.0 to 2.0; `null` leaves it to the backend (vLLM and introspection use 0.7) |
+| `supports_temperature` | `true` | `false` for a model that rejects sampling settings (Claude Opus 4.7 and later, such as `claude-opus-5-5`): a temperature a call asks for, the checks' 0.15 included, is not sent, and the provider's default sampling applies. Such a model may set no `default_temperature` |
 | `api`, `vllm`, `introspect` | `null` | The setups; at least one |
 | `notes` | | Free text, ignored |
 
@@ -1029,7 +1030,7 @@ judge a back-translation.
 | `olafangensan-glm-4.7-flash-heretic` | `api` (Venice) | | `uncensored_gen` | 20 rpm, 2 workers |
 | `llama-3.2-3b-debug` | `vllm`, 3B, `max_model_len` 384 | | `debug_local` | |
 | `claude-opus-4-6` | `api` (Anthropic) | | `constitution_gen` | 5 rpm, 1 worker, endpoint window |
-| `claude-opus-5-5` | `api` (OpenRouter) | | `constitution_gen` | 600 rpm, 8 workers |
+| `claude-opus-5-5` | `api` (OpenRouter) | | `constitution_gen` | 600 rpm, 8 workers; takes no temperature |
 | `humanizer-12b` | `vllm`, bf16, `max_model_len` 8192, `vram_gb` 22.8, `chat_template`, revision pinned | | `paraphraser` | temperature 1.0, `top_p` 0.95, `top_k` 0 |
 | `venice-paraphraser` | `vllm`, same weights and `fp8` as `venice-uncensored-fp8`, one engine with it | | | named in a recipe |
 
