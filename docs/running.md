@@ -269,6 +269,13 @@ stage's models on a background thread (and the next stage's, when they fit
 beside them). An engine keeps the cards it loaded on, and the smallest share
 any of its stages plans for it.
 
+A local engine loaded before the run (a notebook that called a local model,
+then `run_pipeline`) counts, for the plan, only from the first stage that
+calls it: the stages before are planned as if its memory were free (the plan
+warns that it is loaded already), and the run does not release it for them.
+Release it first with `redact.residency.unload_local()`, or let the run load
+it.
+
 In the GPU check of this release, a 24B generator and a 3B checker on one
 A100 80GB give two plans: the 24B alone for `constitution` and `jailbreaks`,
 and the 24B with the 3B for `inputs`, `outputs` and `paraphrase`. The 24B
