@@ -433,8 +433,9 @@ class TestAllEncodings:
             assert result != SAMPLE, f"{fn.__name__} output should differ"
 
 
-#: A greeting and a count to three in six scripts other than Latin, with the
-#: script's own digits where it has them.
+#: A greeting and a count to three in ten scripts other than Latin, with the
+#: script's own digits where it has them: one for each script a translation
+#: technique writes (:data:`SCRIPT_OF`).
 NON_LATIN = {
     "Bengali": "নমস্কার বন্ধু এক দুই তিন ১২৩",
     "Thai": "สวัสดี ครับ หนึ่ง สอง สาม ๑๒๓",
@@ -442,6 +443,18 @@ NON_LATIN = {
     "Arabic": "مرحبا واحد اثنان ثلاثة ١٢٣",
     "Russian": "привет один два три",
     "Greek": "γεια σου ένα δύο τρία",
+    "Han": "你好 朋友 一 二 三",
+    "Devanagari": "नमस्ते दोस्त एक दो तीन १२३",
+    "Ethiopic": "ሰላም ጓደኛ አንድ ሁለት ሦስት ፩፪፫",
+    "Khmer": "សួស្តី មិត្ត មួយ ពីរ បី ១២៣",
+}
+
+#: The ISO 15924 code of each sample's script, as a translation technique's
+#: ``script`` names it.
+SCRIPT_OF = {
+    "Bengali": "Beng", "Thai": "Thai", "Japanese": "Jpan", "Arabic": "Arab",
+    "Russian": "Cyrl", "Greek": "Grek", "Han": "Hani", "Devanagari": "Deva",
+    "Ethiopic": "Ethi", "Khmer": "Khmr",
 }
 
 
@@ -477,6 +490,16 @@ class TestLatinOnly:
 
         return [fn for fn in all_techniques()
                 if {"encode", "noise"} & set(fn.families)]
+
+    def test_the_samples_cover_every_script_a_translation_writes(self):
+        """So a language added in a script with no sample here fails until it
+        has one."""
+        from redact.jailbreak.pool import all_techniques
+
+        written = {fn.script for fn in all_techniques()
+                   if "translation" in fn.families}
+        assert set(SCRIPT_OF) == set(NON_LATIN)
+        assert written - {"Latn"} == set(SCRIPT_OF.values())
 
     def test_a_latin_only_technique_leaves_every_other_script_unchanged(self):
         tagged = [fn for fn in self._encodings() if fn.needs_latin]
