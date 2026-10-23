@@ -103,3 +103,21 @@ def request_obfuscation_candidates(pool: list[Callable]) -> list[Callable]:
         return "translation" in allowed and "translation" in families
 
     return [fn for fn in pool if allowed_for_request(fn)]
+
+
+def after_request_obfuscation(pick: Callable, pool: list[Callable]) -> list[Callable]:
+    """The techniques of ``pool`` that may still join a combination whose
+    request obfuscation is ``pick``.
+
+    The request obfuscation applies last, to the finished request, so a
+    translation drawn as one translates what the obfuscations before it
+    wrote. The spec's ``request_obfuscation_refuses`` names, for its family,
+    the families that would leave it a suffix, a wrapper's keys or a
+    container's lines to translate. A translation drawn as an ordinary
+    obfuscation runs before those steps and meets none of these rules. The
+    sampler draws the request obfuscation before the obfuscations, so this
+    narrows what they draw from.
+    """
+    table = load_spec().get("request_obfuscation_refuses", {})
+    refused = set().union(*(table.get(family, ()) for family in _families(pick)))
+    return [fn for fn in pool if not _families(fn) & refused]

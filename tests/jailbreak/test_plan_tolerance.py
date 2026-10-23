@@ -284,6 +284,25 @@ def test_the_rules_id_moves_when_a_technique_stops_refusing_ascii_art(monkeypatc
     assert JP.rules_id([base64]) != before
 
 
+def test_the_rules_id_moves_with_what_a_request_obfuscation_keeps_out(monkeypatch):
+    """A draw with the request obfuscation on reads the spec's
+    ``request_obfuscation_refuses``, so its content is in the id, its comment
+    is not."""
+    import copy
+
+    import redact.jailbreak.plan as JP
+
+    every = registry(all_techniques())
+    pool = [every["to_french"], every["to_json"]]
+    before = JP.rules_id(pool)
+    spec = copy.deepcopy(T.load_spec())
+    spec["request_obfuscation_refuses"]["_comment"] = "reworded"
+    monkeypatch.setattr(JP, "load_spec", lambda: spec)
+    assert JP.rules_id(pool) == before
+    spec["request_obfuscation_refuses"]["translation"].remove("structural")
+    assert JP.rules_id(pool) != before
+
+
 def test_a_resume_under_the_plan_s_version_and_rules_is_quiet(
         tmp_path, monkeypatch, caplog):
     out = tmp_path / "jb.csv"

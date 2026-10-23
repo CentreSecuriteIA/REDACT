@@ -316,6 +316,19 @@ technique is picked first. A technique may not join a combination when:
   with an obfuscation in `manipulation_blocked_obfuscation`: the
   `translation`, `ascii_art`, `payload_split`, `word_art` and `wording` families and
   the `heavy` `encode` techniques, except those also in `sensitive_words`;
+- it is a suffix, a structural wrapper or a neutral container and the
+  combination's request obfuscation is a translation (budget mode with
+  `allow_request_obfuscation`). The request obfuscation applies last, to the
+  finished request, so the translation would translate the suffix, the keys
+  of the wrapper or the lines of the container. The spec's
+  `request_obfuscation_refuses` names these three families for a translation;
+  the sampler draws the request obfuscation before the obfuscations and keeps
+  them out of the pool the obfuscations draw from
+  (`rules.after_request_obfuscation`, not part of `compatible`, which does not
+  know which technique of a combination is the request obfuscation). A
+  translation drawn as an ordinary obfuscation runs before those steps and
+  joins them, and an encoding is kept from any translation by the family
+  rule above;
 - in budget mode, its complexity is above what is left of `max_complexity`
   (under the opt-in [group budget](configuration.md#the-group-budget), of the
   unit's allowance: `max_complexity` plus what the group's earlier units left

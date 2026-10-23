@@ -153,7 +153,9 @@ def read_spec(path: Path) -> dict:
             is malformed; a family has an unknown key or a layer that is
             not in ``layer_order``; ``layers_off_by_default`` is not a list
             of layers of ``layer_order``; a ``layer_rates`` entry is not a
-            number from 0 to 1 for a layer or ``request_obfuscation``; or
+            number from 0 to 1 for a layer or ``request_obfuscation``;
+            ``request_obfuscation_refuses`` names a family the spec lacks or
+            gives something else than a list of families; or
             ``decode_hint_rate`` is not a number from 0 to 1.
     """
     spec = json.loads(Path(path).read_text(encoding="utf-8"))
@@ -169,6 +171,7 @@ def read_spec(path: Path) -> dict:
             f"to 1, the share of hinted encodings written with a hint, got "
             f"{rate!r}.")
     _check_families(spec["families"], layers)
+    _check_request_obfuscation_refuses(spec)
     for key, rate in spec.get("layer_rates", {}).items():
         if not key.startswith("_") and (
                 key not in [*layers, _REQUEST_OBFUSCATION] or not _is_rate(rate)):
@@ -228,6 +231,21 @@ def _check_families(families: dict, layers: list) -> None:
             raise ValueError(
                 f"{_SPEC}: the layer of family {name!r} must be one of layer_order, "
                 f"{layers}, got {family.get('layer')!r}.")
+
+
+def _check_request_obfuscation_refuses(spec: dict) -> None:
+    """Raise unless each entry of the spec's ``request_obfuscation_refuses``
+    (``_`` keys are comments) is a family of the spec with a list of families
+    of the spec: a name in neither place would refuse nothing."""
+    families = spec["families"]
+    for key, refused in spec.get("request_obfuscation_refuses", {}).items():
+        if key.startswith("_"):
+            continue
+        if key not in families or not isinstance(refused, list) or any(
+                name not in families for name in refused):
+            raise ValueError(
+                f"{_SPEC}: request_obfuscation_refuses[{key!r}] must be a family "
+                f"with a list of families of the spec, got {refused!r}.")
 
 
 def _checked_row(row: dict, family: str, generator: dict,

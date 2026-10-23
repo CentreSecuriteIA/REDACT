@@ -907,3 +907,76 @@ def test_request_obfuscation_is_light_encoding_or_translation():
     names = {fn.__name__ for fn in request_obfuscation_candidates(POOL)}
     assert {"to_rot13", "to_french"} <= names
     assert not names & {"to_base64", "to_ascii_art", "to_summarize"}
+
+
+# --- a translation drawn as the request obfuscation ------------------------------
+# It applies last, to the finished request, so it would translate a suffix, a
+# wrapper's keys or a container's lines: the spec's request_obfuscation_refuses
+# keeps them out of its combination. A translation drawn in phase 4 runs before
+# those steps and meets none of these rules.
+
+_AFTER_A_TRANSLATION = [
+    "to_adversarial_suffix_punctuation", "to_adversarial_suffix_unicode",
+    "to_json", "to_xml", "to_markdown", "to_csv_row", "to_code_comment",
+    "to_email_message"]
+
+
+def test_a_request_obfuscation_that_translates_keeps_out_what_it_would_translate():
+    from redact.jailbreak.rules import after_request_obfuscation
+
+    left = {fn.__name__ for fn in after_request_obfuscation(BY_NAME["to_french"], POOL)}
+    assert not left & set(_AFTER_A_TRANSLATION)
+    assert {fn.__name__ for fn in POOL} - left == {
+        fn.__name__ for fn in POOL
+        if {"suffixes", "structural", "neutral_container"} & set(fn.families)}
+
+
+@pytest.mark.parametrize("pick", ["to_rot13", "to_sensitive_words_encode_rot13"])
+def test_a_request_obfuscation_that_is_not_a_translation_keeps_nothing_out(pick):
+    from redact.jailbreak.rules import after_request_obfuscation
+
+    assert after_request_obfuscation(BY_NAME[pick], POOL) == POOL
+
+
+_SMALL_POOL = [BY_NAME[name] for name in [
+    "to_french", "to_summarize", "to_fictional_world",
+    "to_adversarial_suffix_punctuation", "to_json", "to_csv_row"]]
+
+
+def _drawn(request_obfuscation: bool, seeds=range(200)):
+    """The combinations of a small pool where a scene and a request are sure
+    and the request obfuscation is allowed or not, drawn without and with a
+    dealer."""
+    for seed in seeds:
+        yield sample_combination(
+            random.Random(seed), _SMALL_POOL, max_complexity=12, max_obfuscations=3,
+            allow_request_obfuscation=request_obfuscation,
+            sampling_probs=dict.fromkeys(
+                ("hacking", "requests", "request_obfuscation"), 1.0),
+            include_manipulation=False,
+            dealer=Dealer(key=(seed,)) if seed % 2 else None)
+
+
+def _translates_last(fn) -> bool:
+    return "translation" in getattr(fn.request_obfuscation, "families", ())
+
+
+def test_a_translation_drawn_last_comes_without_a_suffix_wrapper_or_container():
+    translating = [fn for fn in _drawn(True) if _translates_last(fn)]
+    assert len(translating) > 20     # noqa: PLR2004
+    for fn in translating:
+        names = {t.__name__ for t in fn.techniques}
+        assert not names & set(_AFTER_A_TRANSLATION), names
+
+
+def test_a_translation_drawn_last_still_joins_a_scene_and_a_request():
+    names = {frozenset(t.__name__ for t in fn.techniques)
+             for fn in _drawn(True) if _translates_last(fn)}
+    assert names == {frozenset({"to_french", "to_summarize", "to_fictional_world"})}
+
+
+def test_a_translation_drawn_in_phase_4_still_joins_a_suffix_wrapper_container():
+    held = {t.__name__ for fn in _drawn(False)
+            if "to_french" in {t.__name__ for t in fn.techniques}
+            for t in fn.techniques}
+    assert {"to_adversarial_suffix_punctuation", "to_json", "to_csv_row"} <= held

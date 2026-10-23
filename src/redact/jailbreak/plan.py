@@ -363,8 +363,9 @@ def _without_comments(entry: dict) -> dict:
 def rules_id(pool: list[Callable]) -> str:
     """The content id of what a draw from ``pool`` reads off the spec: its
     ``layer_order``, ``layer_max_picks`` and ``layer_rates``, the
-    obfuscations it keeps from the manipulation layer and the families a
-    request obfuscation may draw; the ``layer``, ``within_layer_order`` and
+    obfuscations it keeps from the manipulation layer, the families a
+    request obfuscation may draw and the families it keeps out of a
+    combination; the ``layer``, ``within_layer_order`` and
     ``cross_incompatible_with`` of each family of the pool; and each pool
     technique's ``families``, ``complexity``, ``cross_incompatible_with``,
     ``encode_weight``, ``needs_latin`` and ``script``, as its tags hold
@@ -383,6 +384,8 @@ def rules_id(pool: list[Callable]) -> str:
             spec.get("manipulation_blocked_obfuscation", {})),
         "request_obfuscation_allowed_families": spec.get(
             "request_obfuscation_allowed_families", []),
+        "request_obfuscation_refuses": _without_comments(
+            spec.get("request_obfuscation_refuses", {})),
         "families": {
             name: {key: spec["families"].get(name, {}).get(key) for key in (
                 "layer", "within_layer_order", "cross_incompatible_with")}

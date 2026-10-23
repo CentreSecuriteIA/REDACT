@@ -4,7 +4,11 @@ import random
 from collections.abc import Callable
 
 from .chain import combine_techniques, in_layer_order
-from .rules import compatible, request_obfuscation_candidates
+from .rules import (
+    after_request_obfuscation,
+    compatible,
+    request_obfuscation_candidates,
+)
 from .technique import load_spec
 
 #: The complexity a budget draw may spend when it is given none.
@@ -210,6 +214,7 @@ def sample_combination(
             request_obfuscation = _pick_by_family(
                 rng, req_obfusc_candidates, dealer, scope=REQUEST_SCOPE)
             _commit(request_obfuscation)
+            current_pool = after_request_obfuscation(request_obfuscation, current_pool)
             obfuscation_slots -= 1
 
     # Phase 4: Obfuscation (up to the slots left), what the budget leaves

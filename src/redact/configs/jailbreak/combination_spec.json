@@ -321,6 +321,11 @@
 
   "request_obfuscation_allowed_families": ["encode_light", "translation"],
 
+  "request_obfuscation_refuses": {
+    "_comment": "For a family a request obfuscation is drawn from, the families it then keeps out of the combination. The request obfuscation applies last, to the finished request, so a translation drawn as one translates what the obfuscations before it wrote: an adversarial suffix, the keys of a JSON, XML or Markdown wrapper, the lines of a neutral container. The sampler draws it before the obfuscations (jailbreak/sampling.py) and narrows their pool by this table. A translation drawn as an ordinary obfuscation runs before those steps and meets none of them. An encoding is kept from a translation by the families' own rule.",
+    "translation": ["suffixes", "structural", "neutral_container"]
+  },
+
   "generators": {
     "_comment": "Families whose techniques come one per row of a data file beside this spec. jailbreak/technique.py (read_spec) expands each into technique entries, so every reader sees them under techniques: a row (of file, and with where only one whose column of that name is true) makes the technique name, {slug} its slug, with families [the key], this entry's other keys, and the row's complexity, since and deprecated over them. The family's module builds the functions from the same file, so adding a row adds the technique; import fails while the two disagree.",
     "translation":     { "file": "languages.json", "where": "translation", "name": "to_{slug}", "requires_llm": true },

@@ -632,6 +632,25 @@ def test_the_request_obfuscation_takes_the_family_weights(monkeypatch):
     assert families == {"translation": 180, "encode": 60, "sensitive_words": 60}
 
 
+def test_a_planned_request_obfuscation_that_translates_holds_nothing_to_translate():
+    """A translation applied last, after a request, can only be the request
+    obfuscation (a phase-4 translation runs before the requests). Of the 3,000
+    units about 500 take one, and none holds what it would translate: a suffix,
+    a wrapper's keys or a container's lines."""
+    rows, pool = simulate.plan_kind({}, simulate.inputs(_SIMULATED, groups=3))
+    by = {fn.__name__: fn for fn in pool}
+    translating = [row["combination"] for row in rows
+                   if len(row["combination"]) > 1
+                   and "translation" in by[row["combination"][-1]].families
+                   and any(by[name].layer == "requests"
+                           for name in row["combination"][:-1])]
+    assert len(translating) > _SIMULATED // 8
+    kept_out = {"suffixes", "structural", "neutral_container"}
+    assert [names for names in translating
+            if kept_out & {family for name in names for family in by[name].families}
+            ] == []
+
+
 # The eval type's plan of 300 inputs in three groups at its seed, 43, pinned
 # before the packaged attacks turned the request obfuscation on. The eval
 # pool and its draws are pinned (fixtures/eval_pool.json); they move only in

@@ -39,7 +39,7 @@ the technique names are in [techniques.md](../techniques.md).
 | `rewrite/`, `hacking/`, `manipulation/`, `obfuscation/`, `requests/` | The techniques, one module per family (`distractor.py` and `smalltalk.py` each hold both families of their pair), each with a getter; `get_all_rewrite_functions` (16), `get_all_hacking_functions`, `get_all_manipulation_functions`, `get_all_obfuscation_functions`, `get_all_request_functions` per subpackage; `all_techniques` joins the rewrite layer last, so the others keep their registry order. `manipulation/benign.py` makes the benign data: one unit per subcategory of the benign taxonomy and answer type, keyed `(main_category, sub_category, answer_type)`; the fake turns (`manipulation/fake_turns.py`) need none. `hacking/persona_templates.py` checks its persona frames at import (`check_pools`): a frame is its technique's own text, and only the mechanics are its `variant_pool` |
 | `pool.py` | `all_techniques`, `technique_pool(resolved)`, `kind_of(resolved)`, `languages`, `registry`, `uses_translation`, `uses_check` (whether a pool holds a technique the check model checks), `variant_pools` (each template pool's family, techniques and count of variants on, which the variant floor test ratchets); at import, the spec against the registries, the families' dimensions and the techniques' variant pools |
 | `augmentation.py` | `KINDS`, `defaults(config_dir)`, `resolve(section, kind, base=None, config_dir=None)`, `rounds_of(resolved)`, `apply_flat_keywords`, `FLAT_KEYWORDS` |
-| `rules.py` | `compatible(selected, pool, remaining_complexity)`, `request_obfuscation_candidates` |
+| `rules.py` | `compatible(selected, pool, remaining_complexity)`, `request_obfuscation_candidates`, `after_request_obfuscation` (what may still join once a pick is the request obfuscation) |
 | `sampling.py` | `sample_combination`, `sample_exact_combination`, `_pick_by_family` |
 | `plan.py` | `plan_run`, `assign_combination` (with the opt-in group budget: `_allowance`, `UNIT_HEADROOM`), `combination_of`, `coverage`, `plan_inputs` (the record of the `<stem>.plan.json` beside the manifest, written through `dataset/planfile.py`, its `spec_version` dating the pool and its `rules` the rules it was drawn by, `rules_id`), `default_escalation_schedule`; it deals from `dataset.dealing.Dealer` |
 | `chain.py` | `run_chain`, `combine_techniques`, `in_layer_order`, `apply_combination` |
@@ -264,7 +264,13 @@ obfuscation is phase 5 and runs before phase 4):
   per-unit draw without a dealer), one light `encode` technique (the light
   `to_sensitive_words_encode_*` among them) or a translation, applied after
   the request technique. A unit without a request is not asked, so the step
-  never lands after the outermost wrapper.
+  never lands after the outermost wrapper. A translation drawn this way
+  applies last, so it would translate a suffix, a wrapper's keys or a
+  container's lines: the spec's `request_obfuscation_refuses` keeps the
+  `suffixes`, `structural` and `neutral_container` families out of its
+  combination, and the sampler narrows phase 4's pool by it
+  (`rules.after_request_obfuscation`). A translation drawn in phase 4 runs
+  before those steps and is not limited.
 - **Phase 4, `obfuscation`**: one pick after another, from what the budget
   leaves, until `max_obfuscations`, less the request obfuscation's slot, or
   until no technique fits.

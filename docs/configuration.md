@@ -1459,6 +1459,23 @@ move with it. In 3,000 units of the default attack kind in three groups, 50
 to 72 units (seeds 42 to 46) drew both before the rule, and none does since;
 39 technique pairs are refused that were not.
 
+The fourth change is for training only too: a translation drawn as the
+request obfuscation (phase 5, the packaged attacks only) refuses a suffix, a
+structural wrapper and a neutral container. It applies last, to the finished
+request, so it would translate the suffix, the keys of a JSON, XML or
+Markdown wrapper or the lines of a container (a new key of the spec,
+`request_obfuscation_refuses`, which the plan file's `rules` id records). A
+translation drawn as an ordinary obfuscation runs before those steps and
+still joins them. In 3,000 units of the default attack kind in three groups,
+498 to 501 units (seeds 42 to 46) take a translation as the request
+obfuscation; before the rule 68 to 79 of them held a suffix, 130 to 151 a
+structural wrapper and 115 to 128 a neutral container, and none does now.
+The eval type draws no phase-5 step, so its pairs and draws, and the budget
+draws the digest pins (phase 5 off in both), do not move. `rules.compatible`
+does not know which technique of a combination is the request obfuscation,
+so the WARNING of a kept plan, which counts the pending units whose
+combination today's rules refuse, leaves this rule out.
+
 The first two changes together close most pairings the ten heavy full-text
 encodings (complexity 3, which fits only a unit whose earlier picks leave 3
 points) were dealt with, so the default attack kind draws them rarely: 3 to
@@ -1746,7 +1763,7 @@ values. Delete every file you do not change, then set `prompt_dir`.
 | File | Holds | Read by |
 |---|---|---|
 | `configs/llm/gpu_pricing.json` | Provider, then GPU name as `nvidia-smi` reports it, then hourly USD per GPU; `*` is a provider's fallback | the cost roll-up |
-| `configs/jailbreak/combination_spec.json` | `version`, `layer_order`, `layers_off_by_default` (the layers a kind leaves out unless its `layers.allow` names them, checked against `layer_order` as the spec loads), `decode_hint_rate` (the share of hinted encodings that write a decode hint, 0.5), `layer_rates`, `layer_max_picks`, `families` (layer, order within the layer, incompatibilities, `dimension`, optional `kinds`, `check` and `calls`; a `description`, which nothing reads), `manipulation_blocked_obfuscation`, `request_obfuscation_allowed_families`, `generators` (the families whose techniques come one per row of a data file, expanded into `techniques` as the spec loads), `techniques` (families, complexity, `requires_llm`, `requires_benign`, `encode_weight`, `needs_latin`, optional `max_tokens`, `cross_incompatible_with`, `kinds`, `check`, `calls`, `since`, the spec version that added the technique, and `deprecated`, the one that retired it) | `jailbreak/technique.py` (`load_spec`, `tag`), `pool.py`, `rules.py`, `sampling.py`, `chain.py`, `augmentation.py`; its `version` goes in each row and in the jailbreak run record |
+| `configs/jailbreak/combination_spec.json` | `version`, `layer_order`, `layers_off_by_default` (the layers a kind leaves out unless its `layers.allow` names them, checked against `layer_order` as the spec loads), `decode_hint_rate` (the share of hinted encodings that write a decode hint, 0.5), `layer_rates`, `layer_max_picks`, `families` (layer, order within the layer, incompatibilities, `dimension`, optional `kinds`, `check` and `calls`; a `description`, which nothing reads), `manipulation_blocked_obfuscation`, `request_obfuscation_allowed_families`, `request_obfuscation_refuses` (per family a request obfuscation is drawn from, the families it then keeps out of the combination: a translation keeps `suffixes`, `structural` and `neutral_container`; each name checked against the families as the spec loads), `generators` (the families whose techniques come one per row of a data file, expanded into `techniques` as the spec loads), `techniques` (families, complexity, `requires_llm`, `requires_benign`, `encode_weight`, `needs_latin`, optional `max_tokens`, `cross_incompatible_with`, `kinds`, `check`, `calls`, `since`, the spec version that added the technique, and `deprecated`, the one that retired it) | `jailbreak/technique.py` (`load_spec`, `tag`), `pool.py`, `rules.py`, `sampling.py`, `chain.py`, `augmentation.py`; its `version` goes in each row and in the jailbreak run record |
 | `configs/jailbreak/languages.json` | One row per language: `name`, `slug`, `complexity`, `script`, whether it has a `translation` and an `answer_language` technique, and the spec versions that added them: `since` (the row) and `translation_since` (its translation, when later) | `jailbreak/technique.py` (the spec's generators), `obfuscation/translation.py`, `requests/answer_language.py` |
 | `configs/jailbreak/augmentations.json` | The two default kinds and `natural_only_families` | `jailbreak/augmentation.py` |
 | `configs/jailbreak/<layer>/*_templates.json` | The variant pools of the pure techniques: per directive, named variants (a `template`, or continuation's `prefix` and `suffix`) with an optional `weight` ([extending.md](extending.md#add-variants-to-a-template-pool)); `hacking/persona_templates.json` holds a frame per persona (with its `display_name`) and the `mechanics` drawn into them, `manipulation/fake_turns_templates.json` the fake turns | `jailbreak/directives.py: read_pools`, checked at import by `pool.py` (the persona frames by `hacking/persona_templates.py`) |

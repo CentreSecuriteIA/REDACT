@@ -174,8 +174,15 @@ def _read_changed(tmp_path, change) -> dict:
     (lambda s: s["generators"].__setitem__(
         "translatoin", s["generators"].pop("translation")),
      "combination_spec.json: generators has 'translatoin', which is not a family"),
+    (lambda s: s["request_obfuscation_refuses"].__setitem__("translatoin", ["a"]),
+     "combination_spec.json: request_obfuscation_refuses['translatoin'] must"),
+    (lambda s: s["request_obfuscation_refuses"].__setitem__("translation", ["suffix"]),
+     "combination_spec.json: request_obfuscation_refuses['translation'] must"),
+    (lambda s: s["request_obfuscation_refuses"].__setitem__("translation", "suffixes"),
+     "combination_spec.json: request_obfuscation_refuses['translation'] must"),
 ], ids=["family key", "family layer", "rate 2", "rate of no layer",
-        "generator of no family"])
+        "generator of no family", "refuses of no family", "refuses a non-family",
+        "refuses not a list"])
 def test_a_spec_that_breaks_a_rule_raises_when_read(tmp_path, change, message):
     with pytest.raises(ValueError) as raised:
         _read_changed(tmp_path, change)
