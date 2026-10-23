@@ -286,11 +286,14 @@ def test_the_default_attacks_draw_every_technique_of_their_pool(section):
     technique, or one no simulated input may take, is not asked for. The
     ten heavy encodings are the rarest draws (one of complexity 3 fits only
     a unit whose earlier picks leave 3 points, and the other families of
-    complexity 3, the word art's among them, take those units too), 4 to 7
-    times each in 4,000 units: to_braille, which ascii_art refuses, 5 times
-    under the unit budget and 7 under the group budget, at seeds 42 and 43
-    alike. When the layers of one rate were locked in or out of phase, it
-    was drawn 2 times at seed 42 and 14 at 43; one plan now holds them all."""
+    complexity 3, the word art's among them, take those units too): over
+    4,000 units in three groups, each is drawn 4 to 5 times at seed 42 under
+    the unit budget (3 to 7 over seeds 42 to 46) and 7 to 9 times under the
+    group budget (4 to 9). to_braille, which ascii_art refuses, is drawn 5
+    times under the unit budget and 7 under the group budget, at seeds 42
+    and 43 alike. When the layers of one rate were locked in or out of phase
+    (commit 590babe), it was drawn 2 times at seed 42 and 14 at 43 under the
+    unit budget; one plan now holds them all."""
     units = 4000
     drawn, pool = simulate.deal_kind(section, units, groups=3, seed=42)
     table = simulate.shares(drawn, pool)
@@ -612,8 +615,8 @@ def test_the_request_obfuscation_takes_the_family_weights(monkeypatch):
 
 # The eval type's plan of 300 inputs in three groups at its seed, 43, pinned
 # before the packaged attacks turned the request obfuscation on. The eval
-# pool and its draws are held (fixtures/eval_pool.json); they move only with
-# the owner's eval review.
+# pool and its draws are pinned (fixtures/eval_pool.json); they move only in
+# an eval review.
 _PINNED_EVAL_DRAWS = "95083fbb5221e4b1bd39125bfa297bc06bfc51ddbdadde2ad1eb45a6d59b7afb"
 
 

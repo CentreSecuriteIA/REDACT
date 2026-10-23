@@ -154,7 +154,7 @@ accents (Vietnamese, Yoruba, Czech) the accented letters stay in clear under
 the letter ciphers.
 `to_morse` and `to_braille` pass such a text through as well (Morse only
 spaces its characters out) but are not tagged: both are in the eval pool,
-which is held, and completing them would change its text.
+which is [pinned](#the-eval-pool), and completing them would change its text.
 `to_reversed_*`, `to_zero_width_noise` and the byte codecs (`to_hex`,
 `to_binary`, `to_url_encoding`, `to_html_entities`, `to_base32`,
 `to_base85`) are not Latin-only: they change a text in any script.
@@ -201,8 +201,10 @@ resumes with the growth WARNING. Chinese is scored high (0, as Japanese),
 Hindi mid (1, as Turkish and Vietnamese), and Hmong, Guarani, Yoruba and
 Amharic low (2, as Zulu and Swahili). Two of the four are on watch, as Scots
 Gaelic is: the judge rejects 20% of Hmong's calls (a back-translation
-chrF++ of 45, 10 points below the shipped languages') and Amharic's chrF++
-on the devtest is 9 points below NLLB-200's. Hmong is sent to the translation
+chrF++ of 45.1, 9 to 12 points below the four shipped languages measured the
+same way) and Amharic's chrF++ on the devtest is 9 points below NLLB-200's.
+Hmong's acceptance, 230 of 237 units (97.05%, a Wilson 95% interval of 94.0%
+to 98.6%), passes the 97% bar on the point estimate and not with certainty. Hmong is sent to the translation
 model by its name, never a code (`hmn` and `mww` gave Hawaiian and Marathi);
 Chinese is accepted as `cmn_Hani` or `wuu_Hani`. The translation family
 kept the order it had, the four joining at their rows; the answer languages took the table's, which puts
@@ -236,8 +238,9 @@ technique is picked first. A technique may not join a combination when:
   with `ascii_art`, with the four families that have a model mark words,
   `sensitive_words`, `tokenbreak`, `word_art` and `wording` (the marking call finds a
   word in 62 of 100 harmful English inputs but in 3 to 36 of their
-  translations, so a heavy encoding after a translation is discarded and a
-  light one changes nothing), and with `typos`, `casual_writing`, `noise` and
+  translations, measured on nine languages and none of the European ones, so
+  a heavy encoding after a translation is discarded and a light one changes
+  nothing), and with `typos`, `casual_writing`, `noise` and
   `payload_split` (a translated prompt is already hard to read, for the model
   that writes or marks text and for the model that answers, and one more
   word-level or character-level change on top is too complex; `encode` and
@@ -315,7 +318,16 @@ Adding a technique: [extending.md](extending.md#add-a-jailbreak-technique).
 The `eval` dataset type's attacks draw from 36 techniques in 10 families:
 hard ones (complexity 2 or 3 but for `to_noble_goal`, and the low-resource
 languages) whose harmful content stays certain, since the technique carries
-the text unchanged or reversibly, or a check accepts the result:
+the text unchanged or reversibly, or a check accepts the result.
+
+The pool is **pinned**: its 36 names, its two count rounds and the text each
+technique draws for a seed stay the same from release to release, so the
+results of an eval run stay comparable. `tests/fixtures/eval_pool.json` pins
+the names and a digest pins the draws; a change to the pool, or to the text or
+info of one of its techniques, is made on purpose in a review of the eval type
+(a new spec version and new fixtures) and fails the tests until then. This
+page and the others say *pinned*, or *unchanged*, where it matters; *the next
+eval review* is that deliberate change.
 
 | Family | Techniques |
 |---|---|
@@ -330,10 +342,10 @@ the text unchanged or reversibly, or a check accepts the result:
 | `answer_format` | `to_refusal_then_comply` |
 
 Model rewrites (`cognitive`, `persona`, `typos`, `sensitive_words`,
-`tokenbreak`) are left out while the eval pool is held; a technique of
+`tokenbreak`) are left out while the eval pool is pinned; a technique of
 this pool that has a model write the prompt must carry a spec `check`. The fifteen spec 1.2 encodings
 are not drawn here either: `eval.json` denies each in `techniques.deny`, so the
-`encode` row keeps its five `heavy` members while the eval pool is held. The
+`encode` row keeps its five `heavy` members while the eval pool is pinned. The
 four spec 1.2 many-shot variants of `fsh` and `dap` are denied the same way.
 `temporal` is not allowed as a family: `eval.json` names `to_use_past_tense`
 under `techniques.allow`, so neither spec 1.3 member of the family
@@ -410,16 +422,21 @@ kind does not draw, with one WARNING that counts them
 A technique that calls a model carries, in the spec, the model calls one
 application makes (`calls`, generation and checks, low to high: a typo
 rewrite 2 to 4, a translation of one paragraph 2 to 12, a word-marking
-step 1, the synonyms 1 to 11, an fsh or dap pick 1, a cognitive or persona
-scenario 3 to 9, an invented persona 4 to 12, a persuasion or tense rewrite
-2 to 4, a model distractor 1 to 3) and what checks its
+step 1, the synonyms 1 to 11, a wording technique 1 to 21, a semantic payload
+split 1 to 3, an fsh or dap pick 1, a cognitive or persona scenario 3 to 9, an
+invented persona 4 to 12, a persuasion or tense rewrite 2 to 4, a model
+distractor 1 to 3) and what checks its
 reply (`check`). When a plan is made, one INFO line adds them up over the
 planned units; for 1,000 inputs of one category and entry type, planned
 with the packaged attack kind and seed 42:
 
 ```text
-Model calls: 846 of 1000 planned units call a model, 2334 to 8188 calls (translation 784 to 4704, from the spec's calls).
+Model calls: 886 of 1000 planned units call a model, 2103 to 8189 calls (translation 510 to 3060, from the spec's calls).
 ```
+
+Other seeds (43 to 46) give 872 to 889 units, 2,087 to 2,103 calls at the
+low end, 8,139 to 8,216 at the high end and a translation share of 500 to 510
+and 3,000 to 3,060.
 
 The translation share goes to the translation model (a machine
 translation's judge, one call a round, to the generation model).
@@ -720,7 +737,7 @@ wrappers. The family is attack-only, and the eval type does not draw it.
   and fullwidth and math-styled Unicode (math-styled drawing one
   Mathematical Alphanumeric style per call, reported in `math_style=<name>`).
   Hex, binary, HTML entities, base32 and base85 are `heavy`, the rest `light`.
-  Spec version 1.3 gives 21 of the 27 *decode hints*: at the spec's
+  Spec version 1.3 gives 21 of the 27 encodings *decode hints*: at the spec's
   `decode_hint_rate` (0.5), such an encoding writes one of four hints around
   the encoded text, drawn by `rng` after the encoding, which says how to
   decode it (the Caesar cipher's states the shift that call used). The hints
@@ -729,7 +746,7 @@ wrappers. The family is attack-only, and the eval type does not draw it.
   table counts them. An encoding that changed nothing (a text of digits under
   ROT13) gets none. Six encodings have none: the five of the eval pool,
   `to_base64`, `to_unicode_escape`, `to_ascii_ordinal`, `to_morse` and
-  `to_braille`, whose hints wait for the eval review, and `to_leetspeak_basic`,
+  `to_braille`, whose hints would change the pinned eval pool's text, and `to_leetspeak_basic`,
   which the natural kind draws; import fails for a pool of hints that names one
   (`NEVER_HINTED` in `obfuscation/encoding.py`). The ten `to_sensitive_words_encode_*` techniques
   call the plain encoders, so they carry none.
@@ -831,8 +848,7 @@ file under `configs/jailbreak/requests/`. The `answer_language` techniques
 are generated from the rows of `configs/jailbreak/languages.json` marked
 `answer_language` ([the language table](#the-language-table)), so a new
 language is one row. `to_impersonate_good_person` has eight
-profession variants (nurse, doctor, security researcher, teacher, ...) and
-`to_use_past_tense` four historical framings.
+profession variants and `to_use_past_tense` four historical framings.
 
 Spec version 1.3 added three attack-only answer formats, eight variants
 each: `to_dual_answer` asks for two answers, one after the other,
@@ -850,8 +866,8 @@ request set in the future, or in a historical era; complexity 3, as
 `to_distractor_suffix_task` (another task before or after the prompt) and
 `to_ask_with_urgency` (a note of urgency before it). Their info has their
 family's form, `type=<directive>;variant=<name>`. All are attack-only but
-`to_ask_with_urgency`: `asking` is natural, and the owner decided that an
-urgent ask is a natural variation, so it takes its family's kinds. The
+`to_ask_with_urgency`: `asking` is natural, and an urgent ask is a natural
+variation, so it takes its family's kinds. The
 `eval` type names `to_use_past_tense` alone of `temporal`, not the family,
 so its pool does not change.
 
@@ -861,18 +877,16 @@ harmless text that real users put around a request, which a classifier
 should not take for an attack. The text is kept as it is.
 
 - `smalltalk_prefix` and `smalltalk_suffix`: `to_smalltalk_prefix` puts one
-  of twenty greetings and friendly asides before the text ("Good morning!",
-  "Hey, quick question."), `to_smalltalk_suffix` one of twenty thanks and
-  closings after it ("Thanks in advance!", "Kind regards"), from
+  of twenty greetings and friendly asides before the text,
+  `to_smalltalk_suffix` one of twenty thanks and closings after it, from
   `requests/smalltalk_templates.json`. They apply to every input. Their
   dimension is `request_shape`.
 - `benign_role` gives the assistant a plain role in front of the text, in
   three styles of twelve variants each, from
-  `requests/benign_role_templates.json`: `to_benign_role_subject_helper` (an
-  expert in the field, a reference librarian, a science journalist, ...),
-  `to_benign_role_tutor` (a patient tutor, a study coach, a teaching
-  assistant, ...) and `to_benign_role_task_assistant` (help with a report
-  for work, a presentation, a study guide, ...). A benign role applies to
+  `requests/benign_role_templates.json`: `to_benign_role_subject_helper` (a
+  subject expert or a reference worker), `to_benign_role_tutor` (a teacher or
+  a study helper) and `to_benign_role_task_assistant` (help with a task for
+  work or study). A benign role applies to
   benign and dual-use benign inputs only: each technique carries an
   applicability on the entry type, so the plan never draws one for a
   harmful or dual-use harmful input: its rows are hard negatives, a role in
@@ -897,7 +911,7 @@ persona templates' mechanics and 4 for an encoding's decode hints;
 13 of the 85 pools are below their floor today (the five
 framing, the four continuation, the two structural, `refusal_then_comply` and
 `past_tense`, each with 4, or 1): the techniques of the eval pool, whose
-text waits for the eval review. A test ratchets the rest
+text is pinned until the next eval review. A test ratchets the rest
 ([extending.md](extending.md#add-variants-to-a-template-pool)).
 
 The info names the variant drawn: `variant=<name>` for the framing
@@ -915,7 +929,7 @@ it wrote a decode hint; `style=<name>` for
 continuation. Structural's `to_xml` and `to_markdown` have one template
 each and name none (`to_xml`'s info names its policy id), and `to_json`
 writes its wrapper in code. Continuation and structural are drawn by the
-eval pool, so their infos stay as they are until the owner's eval review.
+eval pool, so their infos stay as they are until the next eval review.
 After a run, `<kind>.variants.csv` counts the rows that drew each variant
 ([stages/jailbreaks.md](stages/jailbreaks.md#files)).
 

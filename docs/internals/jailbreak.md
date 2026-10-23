@@ -146,7 +146,8 @@ def to_y(prompt: str, **kwargs) -> TechniqueGen:
   template technique's texts and draws by digest), and a weighted one with
   `rng.choices`; a variant of weight 0 is never drawn, and a pool of one
   makes no draw. `to_json`'s wrapper is still written in
-  `obfuscation/structural.py`, until the owner's wrapper step. A
+  `obfuscation/structural.py`, since it is in the pinned eval pool and moves
+  only in an eval review. A
   technique's text belongs in a template file: a lint
   (`tests/jailbreak/test_prose_in_code.py`) fails on a string of eight or
   more words in the package's code that is not a docstring or a message,
@@ -242,30 +243,31 @@ stay two units.
 `sample_combination(rng, pool, ...)` has two modes.
 
 **Budget mode** (no `exact_techniques`) picks layer by layer, each pick from
-the techniques still `compatible` with what is picked:
+the techniques still `compatible` with what is picked. The phases carry the
+numbers `sampling.py` gives them, in the order they run (the request
+obfuscation is phase 5 and runs before phase 4):
 
-0. `rewrite` (phase 0), when the round includes it (`include_rewrite`,
-   false by default) and the layer joins at its rate (the spec's is 0). It
-   is decided only when included, at a rate above 0 and with a rewrite
-   technique in the pool; otherwise it makes no rng draw and no dealer
-   call, so every draw is the one made before the layer existed
-   (`tests/jailbreak/test_rewrite_layer.py` pins it);
-1. `hacking`, when the layer joins (its rate);
-2. `manipulation`, when the layer joins;
-3. `requests`, when the layer joins;
-4. the request obfuscation (phase 5 in the code, decided and drawn before
-   phase 4): with `allow_request_obfuscation`, at least one
-   `max_obfuscations` slot and a request technique picked in step 3, when
-   it joins at the `request_obfuscation` rate (the dealer's `include`, as
-   for the layers, over the group's units, so the units holding a request
-   take it more often; a per-unit draw without a dealer), one light
-   `encode` technique (the light `to_sensitive_words_encode_*` among them)
-   or a translation, applied after the request technique. A unit without a
-   request is not asked, so the step never lands after the outermost
-   wrapper;
-5. `obfuscation`: one pick after another, from what the budget leaves, until
-   `max_obfuscations`, less the request obfuscation's slot, or until no
-   technique fits.
+- **Phase 0, `rewrite`**, when the round includes it (`include_rewrite`,
+  false by default) and the layer joins at its rate (the spec's is 0). It
+  is decided only when included, at a rate above 0 and with a rewrite
+  technique in the pool; otherwise it makes no rng draw and no dealer
+  call, so every draw is the one made before the layer existed
+  (`tests/jailbreak/test_rewrite_layer.py` pins it).
+- **Phase 1, `hacking`**, when the layer joins (its rate).
+- **Phase 2, `manipulation`**, when the layer joins.
+- **Phase 3, `requests`**, when the layer joins.
+- **Phase 5, the request obfuscation**, decided and drawn before phase 4:
+  with `allow_request_obfuscation`, at least one `max_obfuscations` slot and
+  a request technique picked in phase 3, when it joins at the
+  `request_obfuscation` rate (the dealer's `include`, as for the layers, over
+  the group's units, so the units holding a request take it more often; a
+  per-unit draw without a dealer), one light `encode` technique (the light
+  `to_sensitive_words_encode_*` among them) or a translation, applied after
+  the request technique. A unit without a request is not asked, so the step
+  never lands after the outermost wrapper.
+- **Phase 4, `obfuscation`**: one pick after another, from what the budget
+  leaves, until `max_obfuscations`, less the request obfuscation's slot, or
+  until no technique fits.
 
 The apply order is the layers', whatever the pick order (a rewrite first),
 except the request obfuscation, which goes last. Within the obfuscation layer it is each
@@ -347,9 +349,10 @@ order.
   units, so two layers of one rate (hacking and the request obfuscation,
   both 0.5) met on every unit or on almost none for the whole group, by the
   seed, and `ascii_art`, which refuses both a hacking technique and a
-  translation, was drawn 8 to 51 times in 900 units by the seed; with the
-  jitter they meet on about a quarter of the units and it is drawn 68 to 72
-  times.
+  translation, was drawn 8 to 51 times in 900 units by the seed (commit
+  `590babe`, seeds 1, 2, 42 and 43, three groups); with the jitter they meet
+  on about a quarter of the units (49% to 55% of the hacking units, seeds 1,
+  2 and 42 to 46) and it is drawn 71 to 75 times.
 - **Families.** Among the eligible families, the dealer picks the one with
   the lowest count over its weight (`family_weights`, 1 by default), ties
   broken by the unit's rng. The request obfuscation's families are counted
@@ -358,7 +361,8 @@ order.
   names the family's), so its picks do not count against the obfuscation
   layer's. Counted together, its `encode` and `sensitive_words` picks made
   those the layer's families dealt most, and the layer drew them only when
-  no other family fitted: 14 techniques went undrawn in 3,000 units.
+  no other family fitted: 14 techniques went undrawn in 3,000 units (before
+  commit `ec8bb42`, seed 42, three groups; none does since).
 - **Techniques.** Within that family, the dealer picks the eligible member
   the group has dealt least (`Dealer.pick_member`, its own `members`
   counter, apart from the families' `counts` the generation axes also
@@ -367,9 +371,10 @@ order.
   still favours its cheaper ones under the complexity budget (`encode`,
   `sensitive_words`): a member of complexity 3 fits only a unit whose
   earlier picks leave 3 points, and `fsh` and `dap` refuse the heavy
-  `encode` members, so over 3,000 units of the default attacks each heavy
-  `encode` member is drawn 5 to 7 times against 33 to 34 for one of
-  complexity 2. That skew is intended. A direct `sample_combination` call without a dealer picks both
+  `encode` members, so over 3,000 units of the default attacks (three groups)
+  each heavy `encode` member is drawn 3 to 4 times at seed 42 (2 to 5 over
+  seeds 42 to 46) against 27 to 30 for one of complexity 2 (27 to 32). That
+  skew is intended. A direct `sample_combination` call without a dealer picks both
   uniformly, as the registry fixture's seeds pin. A fresh plan with the
   same seed draws differently from one made before member dealing; a kept
   plan replays unchanged.
@@ -428,12 +433,13 @@ budget.
   without `"group"` or below `max_complexity` or any round's
   `max_complexity`, and a round naming either key.
 - Measured with `simulate.compare_budgets` over 3,000 units of the default
-  attacks, it keeps the mean at `max_complexity` (5.77 to 6.00), lets some units reach the ceiling (533 of
-  3,000 above 6, none above 9) and evens out the cheap members of `encode`
-  and `sensitive_words`, and draws the heavy members a little more often
-  (each heavy `encode` member 6 to 8 times, against 5 to 7); the extra
-  allowance goes to the obfuscations. The table is in
-  [configuration.md](../configuration.md#the-group-budget).
+  attacks (three groups, seed 42; in brackets the range over seeds 42 to 46),
+  it keeps the mean at `max_complexity` (5.83 to 6.00), lets some units reach
+  the ceiling (393 of 3,000 above 6, 356 to 393, none above 9) and evens out
+  the cheap members of `encode` and `sensitive_words`, and draws the heavy
+  members a little more often (each heavy `encode` member 4 to 6 times, 3 to
+  6, against 3 to 4, 2 to 5); the extra allowance goes to the obfuscations.
+  The table is in [configuration.md](../configuration.md#the-group-budget).
 
 ## Seeds
 
@@ -488,7 +494,7 @@ none for that key and keeps its other variants. Every variant of weight above 0 
 technique gets a row, 0 when none drew it; a technique outside the pool
 that a row drew (a kept plan's) is added after. No technique's info
 changed for the table: the eval-pool techniques that name no `variant=`
-(continuation, structural) keep their info while the eval pool is held.
+(continuation, structural) keep their info while the eval pool is pinned.
 
 ## The augmentation section in code
 
