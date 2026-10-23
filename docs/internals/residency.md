@@ -85,9 +85,14 @@ another machine.
 
 The plan numbers cards as `nvidia-smi` does, in PCI bus order, and CUDA's
 own order puts the fastest card first. So a plan or a load sets
-`CUDA_DEVICE_ORDER=PCI_BUS_ID` unless it is set, warning when CUDA has
-started in this process already, and a load hands an engine its cards by
-UUID.
+`CUDA_DEVICE_ORDER=PCI_BUS_ID` unless it is set, and a load hands an engine
+its cards by UUID. CUDA reads the variable once, when it starts: an engine
+process starts after it is set and counts as the plan does, but a process
+whose CUDA started before keeps the fastest-first order. Only a model loaded
+in that process sees it, so a plan warns when CUDA started first and it
+places a transformers model off the CPU on two or more visible cards, or on
+one that `CUDA_VISIBLE_DEVICES` names by index on a machine of several
+(`measure.bus_order` says whether the setting came too late).
 
 A vLLM build narrows `CUDA_VISIBLE_DEVICES` for the whole process while it
 runs (`measure.visible_only`). Meanwhile `visible_gpu_ids()` reads the value

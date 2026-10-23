@@ -260,7 +260,8 @@ def _prepare_environment() -> None:
     """Set up the process environment before vLLM is constructed."""
     # CUDA fails in a forked child when the parent already initialised it.
     os.environ.setdefault("VLLM_WORKER_MULTIPROC_METHOD", "spawn")
-    # The engine's processes count the cards as the plan does.
+    # The engine's processes, started after this, count the cards as the
+    # plan does, whenever CUDA started in this process.
     measure.bus_order()
 
     # WSL2 workaround: vLLM's V2 model runner fails every load there with

@@ -1450,7 +1450,7 @@ class TestVLLMBackendGPU:
     def test_a_cut_reply_warns(self, backend, caplog):
         with caplog.at_level(logging.WARNING, logger="redact.llms.backends"):
             backend.generate([[{"role": "user", "content": "Count from 1 to 500."}]], max_tokens=4)
-        assert any("1 of 1 replies were cut" in r.getMessage() for r in caplog.records)
+        assert first_cut_warning(TEST_MODEL_NAME, 4) in [r.getMessage() for r in caplog.records]
 
     def test_batch_generate_single_item(self, backend):
         prompts = [[{"role": "user", "content": "Say the word yes."}]]

@@ -60,13 +60,19 @@ def _no_planned_shares():
 def _no_busy_cards(monkeypatch):
     """A run reads what the machine's cards hold before it loads a model,
     and a load names its cards as nvidia-smi does: a test's run sees no
-    card, also on a machine with a busy one. The order CUDA counts the
-    cards in, which a plan sets, is the test's own."""
+    card, also on a machine with a busy one.
+
+    No test asks the real torch either, which on a GPU machine would start
+    CUDA in this process (the planner's fallback card size, a transformers
+    load's measurement): the probe finds no CUDA, as on a machine without
+    one. And the order CUDA counts the cards in, which a plan or a load sets
+    unless it is set, is set already: the tests of that setting remove it."""
     from redact.llms.resources import measure
 
     monkeypatch.setattr(measure, "card_use", lambda: None)
     monkeypatch.setattr(measure, "gpu_cards", lambda visible=False: None)
-    monkeypatch.delenv("CUDA_DEVICE_ORDER", raising=False)
+    monkeypatch.setattr(measure, "_torch", lambda: None)
+    monkeypatch.setenv("CUDA_DEVICE_ORDER", "PCI_BUS_ID")
 
 
 @pytest.fixture(autouse=True)
