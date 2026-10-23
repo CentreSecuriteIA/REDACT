@@ -1,5 +1,5 @@
 """The shared dealer: names dealt by count over weight, a name's members by
-count, parts at a rate."""
+count, parts at a rate, and the bank of what earlier units left unspent."""
 
 import random
 
@@ -69,6 +69,20 @@ def test_a_part_at_rate_one_half_joins_half_the_units():
             dealer.included["layer"] += 1
             taken += 1
     assert taken == dealer.targets["layer"] == _HALF
+
+
+def test_the_bank_is_what_the_earlier_units_left_unspent():
+    dealer = Dealer()
+    dealer.position = 1
+    assert dealer.bank(6) == 0                  # no unit before the first
+    dealer.position, dealer.spent = 3, 8        # two units before, 12 allowed
+    assert dealer.bank(6) == 4
+
+
+def test_the_bank_never_goes_below_zero():
+    dealer = Dealer()
+    dealer.position, dealer.spent = 2, 9
+    assert dealer.bank(6) == 0
 
 
 def test_a_stable_seed_is_the_same_for_the_same_parts():

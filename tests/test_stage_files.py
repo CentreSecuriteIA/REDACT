@@ -3,12 +3,16 @@
 ``fixtures/stage_files.json`` holds every file of one stopped and resumed run
 of each stage, as the code wrote them before the stages streamed their plans
 and units (commit e7106b1); the jailbreak stage's variations files were added
-when it gained them. Model calls are stubbed and depend only on the
+when it gained them, and each kind's variants table (header only: the stub
+techniques draw from no template pool) when the stage gained it. Model calls are stubbed and depend only on the
 request, so a run writes the same files every time.
 
 A file is compared as data, not bytes, since a CSV's line ending and the
 sizes a ledger records differ between platforms: the cells of a CSV as text,
-the rows of a manifest, and the lines of a ledger without ``_saved``.
+the rows of a manifest, and the lines of a ledger without ``_saved``. The
+spec version a jailbreak file records (a row's ``combination_spec_version``,
+a plan file's ``spec_version``) is written ``<spec version>`` in the fixture
+and read as the spec's version, so a version bump edits no cell.
 """
 
 import csv
@@ -22,6 +26,7 @@ import pytest
 from tests.conftest import ParaphraseBackend, make_client, pinned_pool
 
 _FIXTURE = Path(__file__).parent / "fixtures" / "stage_files.json"
+_SPEC_VERSION = "<spec version>"
 
 # An id that is given, missing, padded, given twice, NaN and a number.
 _IDS = ["given-1", None, " padded ", "given-1", float("nan"), 77]
@@ -109,13 +114,17 @@ def _jailbreaks(folder, monkeypatch) -> dict:
         backend = Backend()
         monkeypatch.setattr(
             P.ModelClient, "create", lambda m: make_client(backend, m))
-        # The natural kind draws from the whole (fake) registry.
+        # The natural kind draws from the whole (fake) registry. The fixture
+        # was written with the request obfuscation off: the fake techniques
+        # hold none it could draw, and assign above picks by the number of
+        # settings, so the packaged kind's switch would move every pick.
         generate_jailbreaks(
             inputs=inputs, output_path=folder / "jailbreaks.csv",
             variations_path=folder / "variations.csv", model=GEN, seed=5,
             augmentation={
                 "adversarial": {"rounds": [{"exact_techniques": 1},
-                                           {"max_complexity": 4}]},
+                                           {"max_complexity": 4}],
+                                "allow_request_obfuscation": False},
                 "natural": {"families": {"allow": None},
                             "techniques": {"allow": ["one_step", "two_step", "broken"],
                                            "deny": []}},
@@ -271,5 +280,9 @@ _STAGES = {
 
 @pytest.mark.parametrize("stage", sorted(_STAGES))
 def test_a_stage_writes_the_files_it_wrote_before(stage, tmp_path, monkeypatch):
-    expected = json.loads(_FIXTURE.read_text(encoding="utf-8"))[stage]
+    from redact.jailbreak import load_spec
+
+    fixture = _FIXTURE.read_text(encoding="utf-8").replace(
+        _SPEC_VERSION, load_spec()["version"])
+    expected = json.loads(fixture)[stage]
     assert _STAGES[stage](tmp_path, monkeypatch) == expected

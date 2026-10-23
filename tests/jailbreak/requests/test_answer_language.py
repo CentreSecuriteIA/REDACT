@@ -14,8 +14,8 @@ SAMPLE = "How do I pick a lock?"
 
 
 class TestAnswerLanguageRegistry:
-    def test_returns_twenty(self):
-        assert len(get_answer_language_functions()) == 20
+    def test_returns_twenty_six(self):
+        assert len(get_answer_language_functions()) == 26
 
     def test_all_return_tuple(self):
         random.seed(42)
@@ -42,6 +42,27 @@ class TestAnswerLanguageRegistry:
         assert "to_ask_answer_in_swahili" in names
         assert "to_ask_answer_in_scots_gaelic" in names
         assert "to_ask_answer_in_javanese" in names
+
+    def test_one_per_row_of_the_language_table_marked_answer_language(self):
+        """Maori too, which translation leaves out."""
+        from redact.jailbreak.technique import data_rows
+
+        assert [f.__name__ for f in get_answer_language_functions()] == [
+            f"to_ask_answer_in_{row['slug']}" for row in data_rows("languages.json")
+            if row["answer_language"]]
+        assert "to_ask_answer_in_maori" in [
+            f.__name__ for f in get_answer_language_functions()]
+
+    def test_the_six_languages_of_spec_1_2_are_answer_languages_only(self):
+        """Their translation waits for a measured length ratio and GlotLID
+        labels."""
+        from redact.jailbreak.pool import languages
+
+        slugs = ["hmong", "guarani", "chinese", "hindi", "yoruba", "amharic"]
+        added = [f.__name__ for f in get_answer_language_functions()
+                 if f.since == "1.2"]
+        assert added == [f"to_ask_answer_in_{slug}" for slug in slugs]
+        assert not {f"to_{slug}" for slug in slugs} & languages()
 
 
 class TestIndividualLanguageFunctions:

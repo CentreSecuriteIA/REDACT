@@ -1,12 +1,16 @@
-"""Encoding techniques: the prompt as a cipher, a character code, Morse or Braille.
+"""Encoding techniques: the prompt as a cipher, a character code, a byte codec,
+Morse or Braille, reversed, or in look-alike, fullwidth or math-styled letters.
 
-``info`` is empty, except ``sep=<separator>`` from ``to_separator``.
+``info`` is empty, except ``sep=<separator>`` from ``to_separator``,
+``shift=<n>`` from ``to_caesar_cipher`` and ``style=<name>`` from
+``to_math_styled`` (traceability metadata, not part of the encoded text).
 """
 
 import base64
 import codecs
 import random
 import unicodedata
+import urllib.parse
 from collections.abc import Callable
 
 # ROT47 operates on the printable-ASCII range '!' (33) through '~' (126).
@@ -176,6 +180,194 @@ def to_braille(prompt: str) -> tuple[str, str]:
     return "".join(_BRAILLE_MAP.get(c.lower(), c) for c in prompt), ""
 
 
+def to_reversed_characters(prompt: str) -> tuple[str, str]:
+    """Reverse the characters a reader sees, so a base letter keeps the
+    combining marks that follow it."""
+    return "".join(reversed(_clusters(prompt))), ""
+
+
+def to_reversed_words(prompt: str) -> tuple[str, str]:
+    """Reverse the characters a reader sees within each space-separated word,
+    the word order kept."""
+    return " ".join("".join(reversed(_clusters(word)))
+                    for word in prompt.split(" ")), ""
+
+
+def to_reversed_word_order(prompt: str) -> tuple[str, str]:
+    """Reverse the order of the space-separated words, each word kept as it is."""
+    return " ".join(reversed(prompt.split(" "))), ""
+
+
+#: Latin letters and the visually identical Cyrillic letter each maps to, an
+#: injective map so a reader (and a test) can map it back. ``to_lookalike_letters``
+#: replaces a fraction of a prompt's mapped letters and keeps the rest.
+_LOOKALIKE_MAP = {
+    "A": "А", "B": "В", "C": "С", "E": "Е", "H": "Н", "I": "І", "J": "Ј",
+    "K": "К", "M": "М", "O": "О", "P": "Р", "S": "Ѕ", "T": "Т", "X": "Х",
+    "a": "а", "c": "с", "e": "е", "i": "і", "j": "ј", "o": "о", "p": "р",
+    "s": "ѕ", "x": "х", "y": "у",
+}
+
+#: The fractions of eligible characters ``to_lookalike_letters`` and
+#: ``to_zero_width_noise`` draw from.
+_NOISE_DENSITIES = (0.25, 0.5, 0.75, 1.0)
+
+
+def to_lookalike_letters(
+        prompt: str, *, rng: random.Random | None = None) -> tuple[str, str]:
+    """Replace a fraction of the Latin letters that have a look-alike with the
+    visually identical Cyrillic letter (:data:`_LOOKALIKE_MAP`), the fraction
+    drawn from :data:`_NOISE_DENSITIES` and the letters by ``rng``; at least one
+    is replaced, the rest kept."""
+    rng = rng or random
+    positions = [i for i, c in enumerate(prompt) if c in _LOOKALIKE_MAP]
+    if not positions:
+        return prompt, ""
+    density = rng.choice(_NOISE_DENSITIES)
+    chosen = set(rng.sample(positions, max(1, round(density * len(positions)))))
+    return "".join(_LOOKALIKE_MAP[c] if i in chosen else c
+                   for i, c in enumerate(prompt)), ""
+
+
+#: The zero-width characters ``to_zero_width_noise`` scatters: the zero-width
+#: space and non-joiner. Not the joiner: :func:`_clusters` binds the character
+#: after it, so a later cut or reversal of the text would not split there.
+_ZERO_WIDTH = (chr(0x200B), chr(0x200C))
+
+
+def to_zero_width_noise(
+        prompt: str, *, rng: random.Random | None = None) -> tuple[str, str]:
+    """Insert zero-width characters between the characters a reader sees, at a
+    density drawn from :data:`_NOISE_DENSITIES` by ``rng`` (at least one gap
+    filled); stripping the zero-width characters recovers the text."""
+    rng = rng or random
+    clusters = _clusters(prompt)
+    if len(clusters) < 2:   # noqa: PLR2004
+        return prompt, ""
+    gaps = range(1, len(clusters))
+    chosen = set(rng.sample(list(gaps), max(1, round(rng.choice(_NOISE_DENSITIES)
+                                                      * len(gaps)))))
+    out = []
+    for i, cluster in enumerate(clusters):
+        if i in chosen:
+            out.append(rng.choice(_ZERO_WIDTH))
+        out.append(cluster)
+    return "".join(out), ""
+
+
+def to_hex(prompt: str) -> tuple[str, str]:
+    """Encode each UTF-8 byte as two hex digits, space-separated."""
+    return " ".join(f"{b:02x}" for b in prompt.encode()), ""
+
+
+def to_binary(prompt: str) -> tuple[str, str]:
+    """Encode each UTF-8 byte as eight bits, space-separated."""
+    return " ".join(f"{b:08b}" for b in prompt.encode()), ""
+
+
+def to_url_encoding(prompt: str) -> tuple[str, str]:
+    """Percent-encode every character but letters, digits and ``_.-~``, as a
+    URL component does (a ``/`` is encoded too)."""
+    return urllib.parse.quote(prompt, safe=""), ""
+
+
+def to_html_entities(prompt: str) -> tuple[str, str]:
+    """Encode each character as a numeric HTML entity (``&#<code>;``)."""
+    return "".join(f"&#{ord(c)};" for c in prompt), ""
+
+
+def to_base32(prompt: str) -> tuple[str, str]:
+    """Encode the UTF-8 bytes as Base32."""
+    return base64.b32encode(prompt.encode()).decode(), ""
+
+
+def to_base85(prompt: str) -> tuple[str, str]:
+    """Encode the UTF-8 bytes as Base85."""
+    return base64.b85encode(prompt.encode()).decode(), ""
+
+
+#: The shifts ``to_caesar_cipher`` draws from: 13 is left out, it is ``to_rot13``.
+_CAESAR_SHIFTS = (3, 5, 7, 11, 17, 19, 23)
+
+
+def to_caesar_cipher(
+        prompt: str, *, rng: random.Random | None = None) -> tuple[str, str]:
+    """Shift every Latin letter by an amount drawn from :data:`_CAESAR_SHIFTS`
+    by ``rng`` (never 13, which is :func:`to_rot13`). The shift is reported in
+    the info for traceability, not stated in the encoded text."""
+    shift = (rng or random).choice(_CAESAR_SHIFTS)
+    out = []
+    for c in prompt:
+        if "a" <= c <= "z":
+            out.append(chr((ord(c) - 97 + shift) % 26 + 97))
+        elif "A" <= c <= "Z":
+            out.append(chr((ord(c) - 65 + shift) % 26 + 65))
+        else:
+            out.append(c)
+    return "".join(out), f"shift={shift}"
+
+
+def to_atbash(prompt: str) -> tuple[str, str]:
+    """Mirror each Latin letter in the alphabet (a<->z, b<->y); applying it
+    twice recovers the text."""
+    out = []
+    for c in prompt:
+        if "a" <= c <= "z":
+            out.append(chr(219 - ord(c)))   # ord('a') + ord('z')
+        elif "A" <= c <= "Z":
+            out.append(chr(155 - ord(c)))   # ord('A') + ord('Z')
+        else:
+            out.append(c)
+    return "".join(out), ""
+
+
+#: ASCII to its fullwidth forms: the fullwidth block (U+FF01 on) follows the
+#: ASCII printable block (U+0021 on) at this offset.
+_FULLWIDTH_OFFSET = 0xFF01 - 0x21
+
+
+def to_fullwidth(prompt: str) -> tuple[str, str]:
+    """Replace the Latin letters and ASCII digits with their fullwidth forms."""
+    return "".join(
+        chr(ord(c) + _FULLWIDTH_OFFSET)
+        if c.isascii() and (c.isalpha() or c.isdigit()) else c
+        for c in prompt), ""
+
+
+#: Mathematical Alphanumeric Symbols styles with no reserved holes across A-Z
+#: and a-z (the styles whose letters are all one contiguous run): the code
+#: points of each style's ``A`` and ``a``. ``to_math_styled`` draws one.
+_MATH_STYLES = {
+    "bold": (0x1D400, 0x1D41A),
+    "bold_italic": (0x1D468, 0x1D482),
+    "bold_script": (0x1D4D0, 0x1D4EA),
+    "bold_fraktur": (0x1D56C, 0x1D586),
+    "sans_serif": (0x1D5A0, 0x1D5BA),
+    "sans_serif_bold": (0x1D5D4, 0x1D5EE),
+    "sans_serif_italic": (0x1D608, 0x1D622),
+    "sans_serif_bold_italic": (0x1D63C, 0x1D656),
+    "monospace": (0x1D670, 0x1D68A),
+}
+
+
+def to_math_styled(
+        prompt: str, *, rng: random.Random | None = None) -> tuple[str, str]:
+    """Replace the Latin letters with one Mathematical Alphanumeric style,
+    drawn from :data:`_MATH_STYLES` by ``rng``. The style is reported in the
+    info, so a reader can map it back."""
+    style = (rng or random).choice(list(_MATH_STYLES))
+    upper, lower = _MATH_STYLES[style]
+    out = []
+    for c in prompt:
+        if "A" <= c <= "Z":
+            out.append(chr(upper + ord(c) - 65))
+        elif "a" <= c <= "z":
+            out.append(chr(lower + ord(c) - 97))
+        else:
+            out.append(c)
+    return "".join(out), f"style={style}"
+
+
 def get_encoding_functions() -> list[Callable]:
     """Return all encoding/cyphering technique functions."""
     return [
@@ -191,4 +383,19 @@ def get_encoding_functions() -> list[Callable]:
         to_leetspeak_advanced,
         to_morse,
         to_braille,
+        to_reversed_characters,
+        to_reversed_words,
+        to_reversed_word_order,
+        to_lookalike_letters,
+        to_zero_width_noise,
+        to_hex,
+        to_binary,
+        to_url_encoding,
+        to_html_entities,
+        to_base32,
+        to_base85,
+        to_caesar_cipher,
+        to_atbash,
+        to_fullwidth,
+        to_math_styled,
     ]

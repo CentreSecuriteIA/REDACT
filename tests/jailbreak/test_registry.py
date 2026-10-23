@@ -1,7 +1,8 @@
 """The registered techniques, against a snapshot of them.
 
 ``fixtures/technique_registry.json`` holds each layer's techniques in registry
-order, with their spec tags, whether each is a generator and its parameters,
+order, with their spec tags, whether each has an applicability
+(``has_applicable``), whether each is a generator and its parameters,
 and the combinations ``sample_combination`` draws from the whole pool for five
 seeds. A change that renames, reorders, retags or re-signs a technique fails
 here. A change meant to alter them regenerates the fixture, from the
@@ -20,6 +21,7 @@ from redact.jailbreak.hacking import get_all_hacking_functions
 from redact.jailbreak.manipulation import get_all_manipulation_functions
 from redact.jailbreak.obfuscation import get_all_obfuscation_functions
 from redact.jailbreak.requests import get_all_request_functions
+from redact.jailbreak.rewrite import get_all_rewrite_functions
 from redact.jailbreak.sampling import sample_combination
 from redact.jailbreak.technique import load_spec
 
@@ -27,7 +29,8 @@ _FIXTURE = Path(__file__).parents[1] / "fixtures" / "technique_registry.json"
 
 _TAGS = (
     "families", "complexity", "requires_llm", "requires_benign",
-    "encode_weight", "max_tokens", "layer", "within_layer_order", "kinds",
+    "encode_weight", "needs_latin", "max_tokens", "layer", "within_layer_order",
+    "kinds", "check", "calls",
 )
 _SEEDS = (0, 1, 2, 3, 4)
 
@@ -39,6 +42,7 @@ def _layers() -> dict[str, list]:
         "hacking": get_all_hacking_functions(),
         "manipulation": get_all_manipulation_functions(),
         "requests": get_all_request_functions(),
+        "rewrite": get_all_rewrite_functions(),
     }
 
 
@@ -56,6 +60,9 @@ def snapshot() -> dict:
             {
                 "name": fn.__name__,
                 **{tag: getattr(fn, tag) for tag in _TAGS},
+                # Whether it has an applicability; the predicate itself is
+                # code, which JSON does not hold.
+                "has_applicable": hasattr(fn, "applicable"),
                 "generator": inspect.isgeneratorfunction(fn),
                 "signature": _signature(fn),
             }
@@ -96,13 +103,24 @@ def actual() -> dict:
 
 
 @pytest.mark.parametrize(
-    "layer", ["obfuscation", "hacking", "manipulation", "requests"])
+    "layer", ["obfuscation", "hacking", "manipulation", "requests", "rewrite"])
 def test_a_layer_registers_the_same_techniques_in_order(layer, expected, actual):
     assert actual["layers"][layer] == expected["layers"][layer]
 
 
 def test_a_seed_draws_the_same_combination(expected, actual):
     assert actual["combinations"] == expected["combinations"]
+
+
+def test_registry_only_grows(expected):
+    """A kept plan replays its techniques by name, so every technique the
+    fixture pins stays registered, a deprecated one too: a technique is
+    retired with ``deprecated`` in the spec, never removed. This names a
+    removed one before the fixture is regenerated over it."""
+    registered = {fn.__name__ for fns in _layers().values() for fn in fns}
+    pinned = {entry["name"] for entries in expected["layers"].values()
+              for entry in entries}
+    assert sorted(pinned - registered) == []
 
 
 def test_the_spec_and_the_registry_name_the_same_techniques():

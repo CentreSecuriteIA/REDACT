@@ -19,6 +19,8 @@ from redact.jailbreak.obfuscation.casual_writing import (
     to_uppercase,
 )
 from redact.jailbreak.pool import technique_pool
+from redact.jailbreak.technique import applies
+from tests.jailbreak import simulate
 
 TEXT = "Can you tell me about the café? It costs 3.5 euros. Thanks, Anna!"
 
@@ -70,6 +72,32 @@ def test_the_marks_of_other_scripts_stay(text):
 
 def test_accents_leave_latin_letters():
     assert to_stripped_accents("café naïve Việt") == ("cafe naive Viet", "")
+
+
+# Neutral texts with and without a word of the abbreviation map or an
+# accented Latin letter, in Latin and other scripts, composed and decomposed.
+_SAMPLES = [
+    TEXT, "", "plain ascii", "Please send the message tomorrow.",
+    "THANKS, YOU ARE KIND", "yourself", "a pupil's notes", "café naïve Việt",
+    "café", "Über alles", "Привет, как дела?", "がぎぐ パン", "नमस्ते",
+]
+
+
+@pytest.mark.parametrize("fn", [to_abbreviations, to_stripped_accents])
+def test_a_technique_applies_exactly_to_the_texts_it_changes(fn):
+    entry_types = ("harmful", "dual_use_harmful", "dual_use_benign", "benign")
+    answers = {(text, entry_type): applies(fn, text, entry_type)
+               for text in _SAMPLES for entry_type in entry_types}
+    assert answers == {(text, entry_type): fn(text)[0] != text
+                       for text, entry_type in answers}
+    assert set(answers.values()) == {True, False}     # the samples hold both
+
+
+def test_a_natural_plan_draws_neither_for_a_text_it_would_leave_unchanged():
+    """The simulated inputs hold no accented letter and the word "about"."""
+    combinations, _ = simulate.deal_kind({}, 300, kind="natural", groups=3)
+    drawn = {name for names in combinations for name in names}
+    assert "to_stripped_accents" not in drawn and "to_abbreviations" in drawn
 
 
 def test_a_prompt_without_spaces_keeps_them():

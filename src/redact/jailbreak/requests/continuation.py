@@ -1,25 +1,30 @@
 """Continuation techniques: the prompt between a random variant's prefix and suffix.
 
-``info`` is ``style=<variant>``.
+``info`` is ``style=<variant>``: the key the other template techniques write
+as ``variant``. It stays ``style`` while the eval pool, which draws these
+techniques, is held; the variants table reads it as their variant.
 """
 
 import random
 from collections.abc import Callable
 
-from ..directives import load_templates
+from ..directives import draw_variant, read_pools, uses_pool
 
-_TEMPLATES: dict[str, list[dict]] = load_templates("requests", "continuation_templates.json")
+_FILE = "requests/continuation_templates.json"
+_TEMPLATES: dict[str, list[dict]] = read_pools(_FILE)
 
 
 def _apply(
     directive: str, prompt: str, rng: random.Random | None = None,
 ) -> tuple[str, str]:
-    """Select a random variant and wrap the prompt with its prefix/suffix."""
-    t = (rng or random).choice(_TEMPLATES[directive])
+    """Draw a variant (:func:`~redact.jailbreak.directives.draw_variant`) and
+    wrap the prompt with its prefix and suffix."""
+    t = draw_variant(_TEMPLATES[directive], rng)
     result = t["prefix"] + prompt + t["suffix"]
     return result, f"style={t['name']}"
 
 
+@uses_pool(_FILE, "continue_passage", slots=(), info_key="style")
 def to_continue_passage(
     prompt: str, *, rng: random.Random | None = None,
 ) -> tuple[str, str]:
@@ -27,6 +32,7 @@ def to_continue_passage(
     return _apply("continue_passage", prompt, rng=rng)
 
 
+@uses_pool(_FILE, "complete_story", slots=(), info_key="style")
 def to_complete_story(
     prompt: str, *, rng: random.Random | None = None,
 ) -> tuple[str, str]:
@@ -34,6 +40,7 @@ def to_complete_story(
     return _apply("complete_story", prompt, rng=rng)
 
 
+@uses_pool(_FILE, "fill_in_blank", slots=(), info_key="style")
 def to_fill_in_blank(
     prompt: str, *, rng: random.Random | None = None,
 ) -> tuple[str, str]:
@@ -41,6 +48,7 @@ def to_fill_in_blank(
     return _apply("fill_in_blank", prompt, rng=rng)
 
 
+@uses_pool(_FILE, "continue_instructions", slots=(), info_key="style")
 def to_continue_instructions(
     prompt: str, *, rng: random.Random | None = None,
 ) -> tuple[str, str]:

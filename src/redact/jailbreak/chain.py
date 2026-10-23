@@ -71,9 +71,9 @@ def run_chain(
     A transform runs inline. A generator's requests are yielded up, capped at
     the technique's ``max_tokens`` tag and, with ``internals_root``, tagged for
     capture under ``{internals_root}/{technique}``. Each technique gets the
-    ``kwargs`` it takes (``gen_model``, ``translate_model``, ``benign_data``,
-    ``prompt_dir``) and, with ``rng_seed``, an ``rng`` of its own:
-    ``random.Random(stable_seed(*rng_seed, technique.__name__))``.
+    ``kwargs`` it takes (``gen_model``, ``translate_model``, ``check_model``,
+    ``benign_data``, ``prompt_dir``) and, with ``rng_seed``, an ``rng`` of
+    its own: ``random.Random(stable_seed(*rng_seed, technique.__name__))``.
 
     Returns ``(text, info)``: the steps' infos joined by ``;``, a step that
     left the text unchanged as ``noop=<name>``. The first rejection stops the
@@ -115,7 +115,8 @@ def run_chain(
 
 def in_layer_order(techniques: Iterable[Callable]) -> list[Callable]:
     """``techniques`` in the order they apply: by the spec's layer order, then
-    by rank within the layer."""
+    by rank within the layer (``within_layer_order``: in the obfuscation
+    layer, the whole-text rewrites before the word-level steps)."""
     layer_order = load_spec()["layer_order"]
 
     def _sort_key(fn: Callable) -> tuple[int, int]:
@@ -130,13 +131,15 @@ def _call_with(client: ModelClient | None) -> Callable[[LLMRequest], str]:
     """A blocking call for :func:`drive_sync`.
 
     A request goes to its own client, else to ``client`` when that serves the
-    request's model, else to a client made for the model.
+    request's model, else to a client made for the model, with its reply
+    limit and temperature.
     """
     def call(request: LLMRequest) -> str:
         c = request.client or client
         if c is None or c.model != request.model:
             c = ModelClient.create(request.model)
-        return generate_sample(c, request.messages, max_tokens=request.max_tokens)
+        return generate_sample(c, request.messages, max_tokens=request.max_tokens,
+                               temperature=request.temperature)
 
     return call
 

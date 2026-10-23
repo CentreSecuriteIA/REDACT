@@ -5,6 +5,12 @@ import random
 import pytest
 
 from redact.jailbreak.obfuscation.tokenbreak import (
+    _CHAR_TOKENS,
+    _INVISIBLE_CHARS,
+    _SEPARATOR_DELIMITERS,
+    _VARIATION_SELECTORS,
+    _is_mark,
+    _is_word,
     _parse_harmful_words,
     get_tokenbreak_functions,
     match_case,
@@ -13,6 +19,24 @@ from redact.jailbreak.obfuscation.tokenbreak import (
     tokenbreak_prepend,
     tokenbreak_split,
 )
+
+# Greetings whose letters carry combining marks (a vowel sign, a virama, a
+# Khmer coeng), which \w does not match.
+BENGALI = "নমস্কার"  # namaskar (greeting)
+THAI = "สวัสดี"  # sawasdee (hello)
+NEPALI = "नमस्ते"  # namaste
+KHMER = "សួស្តី"  # suostei (hello)
+MARKED_WORDS = pytest.mark.parametrize(
+    "word", [BENGALI, THAI, NEPALI, KHMER], ids=["bengali", "thai", "nepali", "khmer"],
+)
+
+
+class _LastChoice(random.Random):
+    """A seeded rng whose ``choice`` takes the last option: tokenbreak_split
+    inserts U+FE0F, tokenbreak_delimiter takes its separator branch with "|"."""
+
+    def choice(self, seq):
+        return seq[-1]
 
 
 class TestMatchCase:
@@ -67,6 +91,27 @@ class TestTokenbreakSplit:
         # At minimum, the word is longer than original
         assert len(result) > len("test")
 
+    @MARKED_WORDS
+    def test_a_split_keeps_each_letter_with_its_marks(self, word):
+        for seed in range(10):
+            result, _ = tokenbreak_split(word, _LastChoice(seed))
+            left, right = result.split("️")
+            assert left + right == word
+            assert not _is_mark(right[0])
+
+    def test_an_ascii_word_is_split_as_before(self):
+        # Each ASCII character is a cluster, so the draw is the one made over
+        # characters before the split cut at clusters.
+        tokens = {"char": _CHAR_TOKENS, "invisible_char": _INVISIBLE_CHARS,
+                  "variation_selector": _VARIATION_SELECTORS}
+        for seed in range(20):
+            rng = random.Random(seed)
+            kind = rng.choice(["char", "invisible_char", "variation_selector"])
+            token = rng.choice(tokens[kind])
+            position = rng.randint(1, len("hello") - 1)
+            expected = "hello"[:position] + token + "hello"[position:]
+            assert tokenbreak_split("hello", random.Random(seed))[0] == expected
+
 
 class TestTokenbreakDelimiter:
     def test_returns_tuple(self):
@@ -82,6 +127,28 @@ class TestTokenbreakDelimiter:
             result, _ = tokenbreak_delimiter("test")
             # Either the word is in the result or it's been split by separators
             assert "t" in result
+
+    @MARKED_WORDS
+    def test_a_separator_keeps_each_letter_with_its_marks(self, word):
+        result, delimiter = tokenbreak_delimiter(word, _LastChoice(0))
+        pieces = result.split(delimiter)
+        assert "".join(pieces) == word
+        assert not any(_is_mark(piece[0]) for piece in pieces)
+
+    def test_a_separator_cuts_a_conjunct_between_its_letters(self):
+        # na | ma | sa + virama | ka + vowel sign aa | ra: the conjunct sa-ka is
+        # cut after its virama, as to_separator cuts it.
+        result, _ = tokenbreak_delimiter(BENGALI, _LastChoice(0))
+        assert result == "ন|ম|স্|কা|র"
+
+    def test_an_ascii_word_is_separated_as_before(self):
+        # Before the clusters, the separator branch joined the word's characters.
+        for seed in range(20):
+            rng = random.Random(seed)
+            if rng.choice(["standard", "structural", "separator"]) != "separator":
+                continue
+            expected = rng.choice(_SEPARATOR_DELIMITERS).join(list("hello"))
+            assert tokenbreak_delimiter("hello", random.Random(seed))[0] == expected
 
 
 class TestTokenbreakObfuscateWord:
@@ -136,3 +203,24 @@ class TestParseHarmfulWords:
     ], ids=["labelled", "not-in-prompt", "placeholder", "number", "rambling"])
     def test_a_malformed_reply_gives_none(self, reply):
         assert _parse_harmful_words(reply, self.PROMPT) is None
+
+    @MARKED_WORDS
+    def test_a_word_with_combining_marks_gives_its_word(self, word):
+        assert _parse_harmful_words(f"- {word}", f"Say {word} to a friend.") == [word]
+
+    def test_a_token_starting_with_a_mark_gives_none(self):
+        # The end of namaskar, from its vowel sign aa: in the prompt, not a word.
+        assert _parse_harmful_words("ার", BENGALI) is None
+
+
+class TestIsWord:
+    @MARKED_WORDS
+    def test_a_word_with_combining_marks_is_a_word(self, word):
+        assert _is_word(word)
+
+    @pytest.mark.parametrize("token", [
+        "ার",  # the end of namaskar, from its vowel sign aa
+        "apple pear", "42", "n/a", "_apple", "",
+    ], ids=["leading-mark", "space", "number", "placeholder", "underscore", "empty"])
+    def test_a_token_that_is_not_a_word_is_refused(self, token):
+        assert not _is_word(token)

@@ -129,10 +129,20 @@ def _attempt_id(internals_id: str | None, attempt: int) -> str | None:
     return f"{internals_id}/attempt_{attempt}"
 
 
+def _request(model: ModelClient | str | None, messages: list[dict],
+             **kwargs) -> LLMRequest:
+    """A request to ``model``: bound to it when it is a client, else naming
+    it, for the driver to resolve (as a jailbreak technique's requests
+    carry it)."""
+    if model is None or isinstance(model, str):
+        return LLMRequest(model, messages, **kwargs)
+    return LLMRequest.for_client(model, messages, **kwargs)
+
+
 def checked(
-    gen: ModelClient,
+    gen: ModelClient | str | None,
     build_gen_messages: Callable[[str], list[dict]],
-    check: ModelClient | None = None,
+    check: ModelClient | str | None = None,
     build_check_messages: Callable[[str, str], list[dict]] | None = None,
     *,
     original: str = "",
@@ -145,10 +155,12 @@ def checked(
     """Generate, check, and regenerate a rejected reply with the verdict.
 
     Args:
-        gen: The generating model.
+        gen: The generating model: a client, or a model name, which the
+            driver resolves (as a jailbreak technique's requests carry it).
         build_gen_messages: ``feedback -> messages``. ``feedback`` is ``""``
             on the first attempt and the checker's reply afterwards.
-        check: The checker model. ``None`` accepts the first reply.
+        check: The checker model, a client or a name. ``None`` accepts the
+            first reply.
         build_check_messages: ``(original, text) -> messages``.
         original: Text the reply is compared against.
         internals_ids: The first attempt's (generation, check) capture ids.
@@ -175,7 +187,7 @@ def checked(
     gen_temperature, check_temperature = temperatures
     feedback = ""
     for attempt in range(1, max_attempts + 1):
-        text = yield LLMRequest.for_client(
+        text = yield _request(
             gen, build_gen_messages(feedback),
             internals_id=_attempt_id(gen_id, attempt), max_tokens=gen_max,
             temperature=gen_temperature,
@@ -186,7 +198,7 @@ def checked(
         if reason:
             feedback = reason
             continue
-        verdict = yield LLMRequest.for_client(
+        verdict = yield _request(
             check, build_check_messages(original, text),
             internals_id=_attempt_id(check_id, attempt), max_tokens=check_max,
             temperature=check_temperature,
@@ -224,10 +236,8 @@ def extracted(
     """
     if max_attempts < 1:
         raise ValueError(f"max_attempts must be at least 1, got {max_attempts}.")
-    request = (LLMRequest if gen is None or isinstance(gen, str)
-               else LLMRequest.for_client)
     for attempt in range(1, max_attempts + 1):
-        raw = yield request(
+        raw = yield _request(
             gen, build_gen_messages(), internals_id=_attempt_id(internals_id, attempt),
             max_tokens=max_tokens,
         )

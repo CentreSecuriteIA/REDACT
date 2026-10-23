@@ -1,8 +1,10 @@
-"""The plan file and the coverage table beside a stage's manifest.
+"""The plan file and the tables beside a stage's manifest.
 
 The plan file ``<stem>.plan.json`` records what a stage's plan was made
 with, so a resume can tell when it would plan otherwise. The coverage table
-``<stem>.coverage.csv`` counts what the plan holds.
+``<stem>.coverage.csv`` counts what the plan holds; the jailbreak stage's
+variants table ``<stem>.variants.csv`` counts the template variants its
+rows drew.
 """
 
 import json
@@ -24,6 +26,11 @@ def coverage_path(manifest_path) -> Path:
     return _beside(manifest_path, ".coverage.csv")
 
 
+def variants_path(manifest_path) -> Path:
+    """The variants CSV beside the manifest at ``manifest_path``."""
+    return _beside(manifest_path, ".variants.csv")
+
+
 def plan_path(manifest_path) -> Path:
     """The plan file beside the manifest at ``manifest_path``."""
     return _beside(manifest_path, ".plan.json")
@@ -43,12 +50,20 @@ def write_plan(manifest_path, record: dict) -> Path:
     return path
 
 
+def read_plan(manifest_path) -> dict | None:
+    """The record the plan file beside the manifest at ``manifest_path``
+    holds; ``None`` when there is no plan file."""
+    path = plan_path(manifest_path)
+    if not path.exists():
+        return None
+    return json.loads(path.read_text(encoding="utf-8"))
+
+
 def changed_plan(manifest_path, current: dict) -> list[str] | None:
     """The keys of ``current`` (:func:`plan_record`) whose values differ from
     those the plan at ``manifest_path`` was made with; ``None`` when it has no
     plan file to compare with."""
-    path = plan_path(manifest_path)
-    if not path.exists():
+    made_with = read_plan(manifest_path)
+    if made_with is None:
         return None
-    made_with = json.loads(path.read_text(encoding="utf-8"))
     return [key for key, value in current.items() if made_with.get(key) != value]

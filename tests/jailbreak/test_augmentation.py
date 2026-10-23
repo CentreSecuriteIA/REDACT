@@ -13,9 +13,13 @@ from redact.jailbreak.augmentation import (
 )
 from redact.jailbreak.pool import technique_pool
 
+# The packaged adversarial kind's budget round, its request obfuscation on.
 _BUDGET = {"max_complexity": 6, "max_obfuscations": 2, "include_hacking": True,
            "include_manipulation": True, "include_obfuscation": True,
-           "include_requests": True}
+           "include_requests": True, "allow_request_obfuscation": True}
+# The same round with it off, as the eval type has it: the key left out.
+_BUDGET_OFF = {key: value for key, value in _BUDGET.items()
+               if key != "allow_request_obfuscation"}
 
 
 def test_both_kinds_are_the_default_when_the_section_is_none():
@@ -88,7 +92,7 @@ def test_an_adversarial_deny_given_alone_keeps_allow_null():
     kind = resolve({"adversarial": {"families": {"deny": ["ascii_art"]}}},
                    "adversarial")
     assert kind["families"]["allow"] is None
-    assert kind["layers"] == {"deny": []}
+    assert kind["layers"] == {"deny": ["rewrite"]}
 
 
 def test_the_natural_kind_needs_an_allow_list():
@@ -215,7 +219,7 @@ def test_the_packaged_defaults():
      "augmentations.adversarial.layer_rates['hacking'] must be a number from 0 to 1"),
     ({"adversarial": {"layer_rates": {"obfuscation": 0.5}}}, "adversarial",
      "augmentations.adversarial.layer_rates names 'obfuscation'; write rates for "
-     "['hacking', 'manipulation', 'requests', 'request_obfuscation']"),
+     "['rewrite', 'hacking', 'manipulation', 'requests', 'request_obfuscation']"),
     ({"adversarial": {"rounds": "escalation", "iterations": 2}}, "adversarial",
      "augmentations.adversarial: rounds gives 4 rounds and iterations says 2; the "
      "rounds set the number, so leave iterations out"),
@@ -238,6 +242,40 @@ def test_the_packaged_defaults():
      "augmentations.adversarial.pure_only must be true or false"),
     ({"adversarial": {"allow_request_obfuscation": 1}}, "adversarial",
      "augmentations.adversarial.allow_request_obfuscation must be true or false"),
+    ({"adversarial": {"budget": "pool"}}, "adversarial",
+     "augmentations.adversarial.budget must be \"unit\", \"group\" or null, "
+     "got 'pool'"),
+    ({"adversarial": {"max_unit_complexity": 9}}, "adversarial",
+     'augmentations.adversarial.max_unit_complexity applies only with "budget": '
+     '"group"'),
+    ({"adversarial": {"budget": "unit", "max_unit_complexity": 9}}, "adversarial",
+     'augmentations.adversarial.max_unit_complexity applies only with "budget": '
+     '"group"'),
+    ({"adversarial": {"budget": "group", "max_unit_complexity": 4}}, "adversarial",
+     "augmentations.adversarial.max_unit_complexity must be a whole number of at "
+     "least 6, got 4"),
+    ({"adversarial": {"budget": "group", "max_complexity": 8,
+                      "max_unit_complexity": 7}}, "adversarial",
+     "augmentations.adversarial.max_unit_complexity must be a whole number of at "
+     "least 8, got 7"),
+    ({"adversarial": {"budget": "group", "max_unit_complexity": 7.5}}, "adversarial",
+     "augmentations.adversarial.max_unit_complexity must be a whole number of at "
+     "least 6, got 7.5"),
+    ({"natural": {"budget": "group"}}, "natural",
+     "augmentations.natural gives ['budget'], which the natural kind ignores"),
+    ({"natural": {"max_unit_complexity": 9}}, "natural",
+     "augmentations.natural gives ['max_unit_complexity'], which the natural kind "
+     "ignores"),
+    ({"adversarial": {"budget": "group", "max_unit_complexity": 8,
+                      "rounds": [{"max_complexity": 9}]}}, "adversarial",
+     "augmentations.adversarial.rounds[0].max_complexity is 9, above "
+     "max_unit_complexity 8"),
+    ({"adversarial": {"budget": "group", "max_unit_complexity": 8,
+                      "rounds": "escalation"}}, "adversarial",
+     "augmentations.adversarial.rounds[3].max_complexity is 9, above "
+     "max_unit_complexity 8"),
+    ({"adversarial": {"rounds": [{"budget": "group"}]}}, "adversarial",
+     "augmentations.adversarial.rounds[0] has unknown key(s) ['budget']"),
     ({"natural": {"entry_types": ["bening"]}}, "natural",
      "augmentations.natural.entry_types names ['bening']; write entry types of"),
     ({"natural": {"entry_types": []}}, "natural",
@@ -336,16 +374,66 @@ def test_an_adversarial_round_is_the_budget_by_default():
     assert rounds_of(kind) == [{**_BUDGET, "max_complexity": 4}] * 2
 
 
+def test_a_unit_or_null_budget_leaves_the_rounds_as_they_were():
+    for budget in ("unit", None):
+        kind = resolve({"adversarial": {"budget": budget}}, "adversarial")
+        assert rounds_of(kind) == [_BUDGET]
+
+
+def test_the_group_budget_is_written_to_the_rounds_only_when_set():
+    kind = resolve({"adversarial": {"budget": "group"}}, "adversarial")
+    assert rounds_of(kind) == [{**_BUDGET, "budget": "group"}]
+    kind = resolve({"adversarial": {"budget": "group", "max_unit_complexity": 8}},
+                   "adversarial")
+    assert rounds_of(kind) == [{**_BUDGET, "budget": "group",
+                                "max_unit_complexity": 8}]
+
+
+def test_a_count_round_carries_the_group_budget_and_ignores_it():
+    """The eval type's rounds draw a count; the keys are written to them, as
+    to every round, and the sampler leaves them unread."""
+    from redact.recipe import load_dataset_type
+
+    base = load_dataset_type("eval")["augmentations"]
+    kind = resolve({"adversarial": {"budget": "group"}}, "adversarial", base=base)
+    group = {**_BUDGET_OFF, "budget": "group"}
+    assert rounds_of(kind) == [{**group, "exact_techniques": 1},
+                               {**group, "exact_techniques": 2}]
+
+
 def test_a_denied_layer_is_left_out_of_every_round():
-    kind = resolve({"adversarial": {"layers": {"deny": ["hacking"]}}}, "adversarial")
+    kind = resolve({"adversarial": {"layers": {"deny": ["rewrite", "hacking"]}}},
+                   "adversarial")
     assert rounds_of(kind) == [{**_BUDGET, "include_hacking": False}]
 
 
 def test_escalation_merges_the_built_in_rounds_over_the_budget():
-    kind = resolve({"adversarial": {"rounds": "escalation",
-                                    "allow_request_obfuscation": True}}, "adversarial")
-    budget = {**_BUDGET, "allow_request_obfuscation": True}
-    assert rounds_of(kind) == [{**budget, **r} for r in default_escalation_schedule()]
+    kind = resolve({"adversarial": {"rounds": "escalation"}}, "adversarial")
+    assert rounds_of(kind) == [{**_BUDGET, **r} for r in default_escalation_schedule()]
+
+
+def test_the_packaged_attacks_allow_the_request_obfuscation():
+    assert defaults()["adversarial"]["allow_request_obfuscation"] is True
+
+
+def test_the_request_obfuscation_switched_off_leaves_the_rounds_without_it():
+    """Off, a round carries no ``allow_request_obfuscation`` key at all: the
+    rounds a plan made before the packaged kind turned it on."""
+    kind = resolve({"adversarial": {"allow_request_obfuscation": False}},
+                   "adversarial")
+    assert rounds_of(kind) == [_BUDGET_OFF]
+
+
+def test_the_eval_type_keeps_the_request_obfuscation_off():
+    """``eval.json`` says false, so the packaged kind's true does not reach
+    it: its two count rounds carry no request obfuscation key, as before."""
+    from redact.recipe import load_dataset_type
+
+    base = load_dataset_type("eval")["augmentations"]
+    kind = resolve(None, "adversarial", base=base)
+    assert kind["allow_request_obfuscation"] is False
+    assert rounds_of(kind) == [{**_BUDGET_OFF, "exact_techniques": 1},
+                               {**_BUDGET_OFF, "exact_techniques": 2}]
 
 
 def test_a_rounds_layer_rates_reach_the_sampler_as_its_sampling_probs():
@@ -367,7 +455,7 @@ def test_the_flat_keywords_land_in_the_adversarial_kind():
     })
     assert kind == {
         **defaults()["adversarial"],
-        "layers": {"deny": ["hacking"]},
+        "layers": {"deny": ["rewrite", "hacking"]},
         "families": {"allow": None, "deny": ["casual_writing"]},
         "translation": True, "pure_only": True, "layer_rates": {"hacking": 0.1},
         "entry_types": ["benign"], "iterations": 2,

@@ -96,9 +96,16 @@ class TestOneRound:
         judge = "\n".join(m["content"] for m in requests[2].messages)
         assert "Good morning, friend." in judge and "Swahili" in judge
 
-    def test_check_model_names_the_judge(self):
-        requests, _ = _run("Good morning.", _Fake(), check_model="judge-fake")
+    def test_translate_check_model_names_the_judge(self):
+        requests, _ = _run("Good morning.", _Fake(),
+                           translate_check_model="judge-fake")
         assert [r.model for r in requests] == [MT, MT, "judge-fake"]
+
+    def test_the_stages_check_model_does_not_judge(self):
+        """The stage's check model checks the other techniques; the judge
+        stays the generation model, as before there was one."""
+        requests, _ = _run("Good morning.", _Fake(), check_model="check-fake")
+        assert [r.model for r in requests] == [MT, MT, GEN]
 
     def test_without_a_generation_model_the_uncensored_gen_default_judges(self):
         from redact.llms.model_config import default_model_for_role
@@ -106,11 +113,11 @@ class TestOneRound:
         requests, _ = _run("Good morning.", _Fake(), gen_model=None)
         assert requests[2].model == default_model_for_role("uncensored_gen")
 
-    @pytest.mark.parametrize("language", LANGUAGES)
-    def test_every_language_goes_out_under_its_code(self, language):
-        fn = getattr(T, "to_" + language.lower().replace(" ", "_"))
+    @pytest.mark.parametrize("slug", [language["slug"] for language in LANGUAGES])
+    def test_every_language_goes_out_under_its_code(self, slug):
+        fn = getattr(T, f"to_{slug}")
         request = fn("Good morning.", translate_model=MT, gen_model=GEN).send(None)
-        assert _wire(request)[:2] == ("en", LANGUAGE_CODES[language])
+        assert _wire(request)[:2] == ("en", LANGUAGE_CODES[slug])
 
 
 class TestTheChecks:

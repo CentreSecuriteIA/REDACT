@@ -24,7 +24,15 @@
                   "to_refusal_then_comply"],
         "deny": ["to_rot13", "to_rot18", "to_rot47", "to_separator",
                  "to_leetspeak_basic", "to_leetspeak_intermediate",
-                 "to_leetspeak_advanced"]
+                 "to_leetspeak_advanced",
+                 "to_reversed_characters", "to_reversed_words",
+                 "to_reversed_word_order", "to_lookalike_letters",
+                 "to_zero_width_noise", "to_hex", "to_binary",
+                 "to_url_encoding", "to_html_entities", "to_base32",
+                 "to_base85", "to_caesar_cipher", "to_atbash",
+                 "to_fullwidth", "to_math_styled",
+                 "to_fsh_random_many", "to_fsh_selected_many",
+                 "to_dap_random_many", "to_dap_selected_many"]
       },
       "pure_only": false,
       "family_weights": {"translation": 3},

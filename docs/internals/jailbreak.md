@@ -13,10 +13,17 @@ the technique names are in [techniques.md](../techniques.md).
 - `configs/jailbreak/combination_spec.json` is the one source of families,
   layers, complexities and compatibility rules. Importing `redact.jailbreak`
   fails when the spec and the registered functions name different
-  techniques.
+  techniques. A family whose techniques come one per row of a data file
+  (the two language families, from `languages.json`) is a `generators`
+  entry, which `load_spec` expands into technique entries, so every reader
+  sees one `techniques` dict; the family's module builds its functions from
+  the same rows ([extending.md](../extending.md#add-a-jailbreak-technique)).
 - The plan is frozen in the manifest. A replay reads each combination by
   name through the registry of every technique, not through the run's pool,
-  so a plan made with another pool still replays.
+  so a plan made with another pool still replays. A technique is retired
+  with `deprecated` in the spec, never removed: it stays registered and
+  replays, but leaves the pools (`test_registry_only_grows` holds every name
+  the registry fixture pins to the registry).
 - A technique draws its random choices from the `rng` it is given, so a
   replayed plan gives the same text within one version of the library. A
   technique changed between versions draws differently: the ASCII-art cap
@@ -28,17 +35,18 @@ the technique names are in [techniques.md](../techniques.md).
 
 | Module | Holds |
 |---|---|
-| `technique.py` | The technique contract, `load_spec`, `tag`, `DISCARDED`, `KINDS`, `DEFAULT_KINDS`, `family_kinds` |
-| `hacking/`, `manipulation/`, `obfuscation/`, `requests/` | The techniques, one module per family (`distractor.py` holds both distractor families), each with a getter; `get_all_hacking_functions`, `get_all_manipulation_functions`, `get_all_obfuscation_functions`, `get_all_request_functions` per subpackage. `manipulation/benign.py` makes the benign data: one unit per subcategory of the benign taxonomy and answer type, keyed `(main_category, sub_category, answer_type)` |
-| `pool.py` | `all_techniques`, `technique_pool(resolved)`, `kind_of(resolved)`, `languages`, `registry`, `uses_translation` |
+| `technique.py` | The technique contract, `load_spec` and `read_spec` (the spec, its generators expanded), `data_rows`, `tag`, `DISCARDED`, `KINDS`, `DEFAULT_KINDS`, `family_kinds`, `FIRST_VERSION`, `version_key` |
+| `rewrite/`, `hacking/`, `manipulation/`, `obfuscation/`, `requests/` | The techniques, one module per family (`distractor.py` and `smalltalk.py` each hold both families of their pair), each with a getter; `get_all_rewrite_functions` (none yet), `get_all_hacking_functions`, `get_all_manipulation_functions`, `get_all_obfuscation_functions`, `get_all_request_functions` per subpackage; `all_techniques` joins the rewrite layer last, so the others keep their registry order. `manipulation/benign.py` makes the benign data: one unit per subcategory of the benign taxonomy and answer type, keyed `(main_category, sub_category, answer_type)` |
+| `pool.py` | `all_techniques`, `technique_pool(resolved)`, `kind_of(resolved)`, `languages`, `registry`, `uses_translation`, `variant_pools` (each template pool's family, techniques and count of variants on, which the variant floor test ratchets); at import, the spec against the registries, the families' dimensions and the techniques' variant pools |
 | `augmentation.py` | `KINDS`, `defaults(config_dir)`, `resolve(section, kind, base=None, config_dir=None)`, `rounds_of(resolved)`, `apply_flat_keywords`, `FLAT_KEYWORDS` |
 | `rules.py` | `compatible(selected, pool, remaining_complexity)`, `request_obfuscation_candidates` |
 | `sampling.py` | `sample_combination`, `sample_exact_combination`, `_pick_by_family` |
-| `plan.py` | `plan_run`, `assign_combination`, `combination_of`, `coverage`, `plan_inputs` (the record of the `<stem>.plan.json` beside the manifest, written and compared by `dataset/planfile.py`), `default_escalation_schedule`; it deals from `dataset.dealing.Dealer` |
+| `plan.py` | `plan_run`, `assign_combination` (with the opt-in group budget: `_allowance`, `UNIT_HEADROOM`), `combination_of`, `coverage`, `plan_inputs` (the record of the `<stem>.plan.json` beside the manifest, written through `dataset/planfile.py`, its `spec_version` dating the pool), `default_escalation_schedule`; it deals from `dataset.dealing.Dealer` |
 | `chain.py` | `run_chain`, `combine_techniques`, `in_layer_order`, `apply_combination` |
 | `units.py` | `pending_units`, `is_pending`, `unit_gen`, `row_of`, `error_row_of` |
-| `pipeline.py` | `run_augmentation`, the stage core |
-| `directives.py` | `load_templates`, `apply_template_directive`: template variants of the pure techniques |
+| `pipeline.py` | `run_augmentation`, the stage core; `_library_change`, the kept plan's pool against what the library added and retired since |
+| `variants.py` | `variants_of` (a row's template variants, paired by position), `write_variants` (the kind's `<stem>.variants.csv`), `COLUMNS` |
+| `directives.py` | The variant pools of the pure techniques: `read_pools` (a template file's pools by directive, whatever its shape), `PoolRef` and `uses_pool` (the pool a technique draws from, set as its `variant_pool`), `check_pools` (called by `pool.py` at import), `enabled`, `draw_variant`, `apply_template_directive`; `load_templates` (a file as written) |
 
 ## Techniques
 
@@ -65,17 +73,64 @@ def to_y(prompt: str, **kwargs) -> TechniqueGen:
 - `info` is `""` or `key=value;...`. An info that starts with `DISCARDED`
   rejects the result.
 - A technique gets the keywords it declares, out of: `gen_model` (the `gen`
-  model's name), `translate_model`, `benign_data`, `prompt_dir`, `rng`. One
+  model's name), `translate_model`, `check_model` (the `check` model's
+  name, the `gen` model's when the recipe names none; translation keeps
+  its own checkers), `benign_data`, `prompt_dir`, `rng`. One
   that declares `**kwargs` gets them all. Every generator technique has the
   signature `(prompt, **kwargs)`; a test holds them to it.
 - At import, `tag(all_techniques())` sets each function's spec tags as
   attributes: `families`, `complexity`, `requires_llm`, `requires_benign`,
-  `encode_weight`, `max_tokens`, `cross_incompatible_with` (families this
+  `encode_weight`, `needs_latin` (true or false, else import fails),
+  `max_tokens`, `cross_incompatible_with` (families this
   technique itself may not join), and from the first family `layer` and
   `within_layer_order`; `kinds` (the augmentation kinds that may draw it)
   is the technique's own, else its first family's, else `["adversarial"]`.
   A `kinds` that is not a non-empty list of `adversarial` and `natural`
+  raises at import. `check` (what checks its model reply: `typos`,
+  `scenario`, `word_list` or `translate`; `None` for none) and `calls` (the
+  model calls one application makes, generation and checks, as
+  `[low, high]`; `None` when the spec gives none) come the same way, the
+  technique's own, else its first family's; a value outside those raises at
+  import. Both only declare: nothing draws by them. `since` is the spec version that added the technique
+  (`FIRST_VERSION`, `"1.0"`, when its entry gives none) and `deprecated`
+  the one that retired it (`None` while it is active). Versions are dotted
+  whole numbers and compare as such (`version_key`: `"1.10"` comes after
+  `"1.9"`); a `since`, a `deprecated` or a spec `version` that is not one
   raises at import.
+- A technique may carry an **applicability**: `@applicable_when(predicate)`
+  sets its `applicable`, `predicate(text, entry_type) -> bool`, and
+  `applies(fn, text, entry_type)` reads it, true for a technique without
+  one. The plan draws a technique only for an input it is true for
+  ([balanced dealing](#balanced-dealing)). The predicate calls the helper
+  the technique itself calls, so the two cannot drift apart. The registry
+  fixture records `has_applicable`, a bool, not the function. Today
+  `to_abbreviations` and `to_stripped_accents` have one: each applies only
+  to a text it changes; and the three benign roles (spec 1.2), which apply
+  to benign and dual-use benign inputs only (`benign_role.is_benign_input`,
+  on the entry type alone).
+- A pure template technique draws its text from a variant pool, one
+  directive's variants in its template file, and names it with
+  `@uses_pool(file, directive, slots, info_key)` (its `variant_pool`;
+  `info_key` the key of its info that names the variant drawn, `variant`
+  unless it says otherwise; the answer languages share one pool, set by
+  their factory). `read_pools` reads a
+  file of any of the three shapes (`{name, template}` lists,
+  continuation's `{name, prefix, suffix}`, structural's one template per
+  technique) into lists of variants; `pool.py` checks every named pool at
+  import (`check_pools`: unique non-empty names, `{prompt}` in each template
+  and only the technique's slots, a `weight` a number of at least 0, one
+  variant above 0), naming the file, directive and variant. `draw_variant`
+  draws an unweighted pool with `rng.choice`, so a seed draws what it drew
+  before pools had weights (`tests/fixtures/template_draws.json` pins every
+  template technique's texts and draws by digest), and a weighted one with
+  `rng.choices`; a variant of weight 0 is never drawn, and a pool of one
+  makes no draw. `to_json`'s wrapper is still written in
+  `obfuscation/structural.py`, until the owner's wrapper step. A
+  technique's text belongs in a template file: a lint
+  (`tests/jailbreak/test_prose_in_code.py`) fails on a string of eight or
+  more words in the package's code that is not a docstring or a message,
+  unless `tests/fixtures/prose_in_code.json` allows it by file, function
+  and word count; that list only shrinks.
 
 `run_chain(techniques, text, ...)` runs one input through its techniques in
 the order given. A transform runs inline; a generator's requests are yielded
@@ -104,12 +159,24 @@ core, called once per kind:
    "iteration"))`, then `resume_state(..., artifact=out_path,
    manifest=manifest)`: the lock, the cut-back, the finished keys.
 3. **Plan.** On a resume with a manifest, reuse it: `planfile.changed_plan`
-   compares the run's seed, rounds, pool, `family_weights` and `layer_rates`
-   (`plan_inputs`) with `<stem>.plan.json`; a difference raises a `ValueError` naming the
-   keys and `resume=False`, and a manifest without the file logs a WARNING
-   and runs unchecked. Otherwise the old coverage and plan files are removed,
-   and `plan_run` writes the plan file, one manifest row per input and round,
-   then the coverage table.
+   compares the run's seed, rounds, `family_weights` and `layer_rates`
+   (`plan_inputs`, less `pool` and `spec_version`) with `<stem>.plan.json`;
+   a difference raises a `ValueError` naming the keys and `resume=False`.
+   The pool is compared apart (`_library_change`): the names the run's pool
+   adds must each have a `since` after the plan file's `spec_version`
+   (`"1.0"` in a plan file written before it was recorded), and the names
+   it lacks must each be registered with a `deprecated` after it. Then the
+   difference is the library's: one WARNING names what was added and
+   retired, says the kept plan does not draw the added techniques and names
+   `resume=False`, and the plan runs as it was made, its retired techniques
+   included. Any other difference raises as `pool`: a section that adds or
+   leaves out a technique, or a technique no longer registered. Known
+   limit: a section that newly names a family all of whose techniques came
+   after the plan reads as growth, and warns. A manifest without the plan
+   file logs a WARNING and runs unchecked. Otherwise the old coverage
+   table, plan file and variants table are removed, and `plan_run` writes
+   the plan file, one manifest
+   row per input and round, then the coverage table.
 4. **One pass over the plan** to count the pending units, see whether any
    needs benign data (if so, generate what the cache lacks for the benign
    taxonomy's subcategories, on the pool with its own ledger, then load it;
@@ -120,7 +187,7 @@ core, called once per kind:
    input in this frame and not in the ledger, it builds the combination
    (`combination_of`) and the unit's generator (`unit_gen`, over
    `run_chain`) only when the driver takes it. `drive_units` runs them with
-   `pool_size(batch_size, client)` live and `cap=batch_size`. A plan row
+   `pool_size(batch_size, client, check)` live and `cap=batch_size`. A plan row
    naming a technique no registered function implements raises a
    `ValueError` naming `resume=False`, which stops the stage.
 6. **Save.** `on_done` makes the row (`row_of`); `on_error` makes an error
@@ -130,7 +197,9 @@ core, called once per kind:
    (OpenAI-compatible, vLLM), raised at the unit's `yield`. On the grouped
    path (Anthropic, introspection) a failed `generate()`, a too-long prompt
    included, propagates and stops the stage.
-7. **Read back** when asked.
+7. **Count the variants.** `write_variants` reads the kind's CSV in chunks
+   and writes `<stem>.variants.csv` beside the manifest (below).
+8. **Read back** when asked.
 
 A planned unit whose input is not in the frame is skipped; an input that is
 not in the plan gets no unit. A unit's key in the driver is its position
@@ -144,6 +213,12 @@ stay two units.
 **Budget mode** (no `exact_techniques`) picks layer by layer, each pick from
 the techniques still `compatible` with what is picked:
 
+0. `rewrite` (phase 0), when the round includes it (`include_rewrite`,
+   false by default) and the layer joins at its rate (the spec's is 0). It
+   is decided only when included, at a rate above 0 and with a rewrite
+   technique in the pool; otherwise it makes no rng draw and no dealer
+   call, so every draw is the one made before the layer existed
+   (`tests/jailbreak/test_rewrite_layer.py` pins it);
 1. `hacking`, when the layer joins (its rate);
 2. `manipulation`, when the layer joins;
 3. `requests`, when the layer joins;
@@ -158,21 +233,40 @@ the techniques still `compatible` with what is picked:
    `max_obfuscations`, less the request obfuscation's slot, or until no
    technique fits.
 
-The apply order is the layers', whatever the pick order, except the request
-obfuscation, which goes last. A technique above the remaining complexity is
+The apply order is the layers', whatever the pick order (a rewrite first),
+except the request obfuscation, which goes last. Within the obfuscation layer it is each
+family's `within_layer_order`, in tens: `translation` 10, `typos` 20,
+`casual_writing` 30, `noise` 35, `sensitive_words` 40, `tokenbreak` 50,
+`suffixes` 60, `encode` 70, `structural` and `neutral_container` 80 (each
+excludes the other, so they never meet), `ascii_art` 90. The whole-text
+rewrites come before the word-level steps, which they would otherwise undo;
+a family added later takes a number between two, as `noise` did. The manifest records the order a
+combination applies in and a replay keeps it (`combination_of`), so a plan
+made before the renumbering, when `sensitive_words` and `tokenbreak` came
+first, still runs as it was made. A technique above the remaining complexity is
 never eligible, for the first pick too. The request obfuscation is drawn
 from the techniques still compatible and within the remaining complexity,
 so it holds its slot and its complexity before the obfuscations fill the
 rest: a combination never has more than `max_obfuscations` obfuscations.
-With `allow_request_obfuscation` false (every packaged kind) the draws are
-those made before the request obfuscation was counted (member dealing
+The packaged attacks allow it, so half their units, at the spec's rate of
+0.5, take a request obfuscation in one of their `max_obfuscations` slots; the
+eval type sets it false, and its count rounds never read it (a test pins
+the eval type's draws). With `allow_request_obfuscation` false the draws
+are those made before the request obfuscation was counted (member dealing
 aside); a test pins them. The combined function
 names its request obfuscation in `request_obfuscation` (`None` without
 one), which `_observe` counts in the dealer.
 
+In budget mode `max_complexity` is what the unit may spend. The planner
+may pass a larger number in its place, the unit's allowance under the
+[group budget](#the-group-budget); the sampler reads it as any budget.
+
 **Count mode** (`exact_techniques: n`) picks exactly `n` compatible
 techniques from any layer, ignoring complexity. It returns fewer when the
-rules leave nothing; with the full pool, 1 and 2 are always reachable.
+rules leave nothing; with the full pool, 1 and 2 are always reachable. It
+reads no rate and no `include_rewrite`: a rewrite technique in the pool is
+dealt as any family's, so the pool (a kind's `layers.deny`), not a rate,
+keeps the rewrite layer out of a count round.
 
 Every pick is **family first** (`_pick_by_family`): a family, then a
 technique within it, both dealt when the plan passes its dealer
@@ -188,6 +282,17 @@ the group from one dealer (`dataset/dealing.py`, shared with the inputs' and
 outputs' generation axes), so every group gets its share whatever the input
 order.
 
+- **Applicability.** A unit draws from the techniques of the pool that
+  apply to its input (`applies`, on the input's text and entry type), in
+  pool order; with every technique applying that is the whole pool, so
+  the draws are those of a pool without an applicability. The predicate
+  sees the input, not what earlier steps of the combination wrote. A unit
+  no technique of a layer applies to takes no pick there; the dealer counts
+  what each unit drew, so the group's next unit that can take the layer
+  does, and a technique left out for some inputs is dealt to the others.
+  A unit no technique applies to gets the empty combination, the identity.
+  Both modes and both kinds draw this way; a kept plan replays its names
+  without asking any predicate.
 - **Layers.** A layer joins a unit when the group's picks of that layer so
   far are below `floor(rate x position + offset)`, where `position` counts
   the group's units so far and `offset` is a number in [0, 1) seeded per
@@ -197,14 +302,24 @@ order.
   `request_obfuscation`.
 - **Families.** Among the eligible families, the dealer picks the one with
   the lowest count over its weight (`family_weights`, 1 by default), ties
-  broken by the unit's rng.
+  broken by the unit's rng. The request obfuscation's families are counted
+  apart, under `REQUEST_SCOPE` (`"request_obfuscation:"` before the family's
+  name, `sampling.py`), with the same weights (`plan_run` gives the scoped
+  names the family's), so its picks do not count against the obfuscation
+  layer's. Counted together, its `encode` and `sensitive_words` picks made
+  those the layer's families dealt most, and the layer drew them only when
+  no other family fitted: 14 techniques went undrawn in 3,000 units.
 - **Techniques.** Within that family, the dealer picks the eligible member
   the group has dealt least (`Dealer.pick_member`, its own `members`
   counter, apart from the families' `counts` the generation axes also
-  use), ties broken by the unit's rng. A family whose members cost
-  differently still favours its cheaper ones under the complexity budget
-  (`encode`, `sensitive_words`): a heavy member fits fewer units, as
-  wanted. A direct `sample_combination` call without a dealer picks both
+  use), ties broken by the unit's rng; the request obfuscation shares
+  these counts with the layer. A family whose members cost differently
+  still favours its cheaper ones under the complexity budget (`encode`,
+  `sensitive_words`): a member of complexity 3 fits only a unit whose
+  earlier picks leave 3 points, and `fsh` and `dap` refuse the heavy
+  `encode` members, so over 3,000 units of the default attacks each heavy
+  `encode` member is drawn 5 to 7 times against 33 to 34 for one of
+  complexity 2. That skew is intended. A direct `sample_combination` call without a dealer picks both
   uniformly, as the registry fixture's seeds pin. A fresh plan with the
   same seed draws differently from one made before member dealing; a kept
   plan replays unchanged.
@@ -216,14 +331,59 @@ order.
   fitting technique, is logged as a WARNING naming the coverage file.
 
 After each unit, `assign_combination` has `_observe` count the kept draw's
-families, techniques, layers and request obfuscation in the group's dealer. Each group has its own dealer; nothing is
+families (the request obfuscation's under `REQUEST_SCOPE`), techniques,
+layers, request obfuscation and complexity in the group's dealer. Each group has its own dealer; nothing is
 counted across groups.
 
 `tests/jailbreak/simulate.py` plans N synthetic inputs through `plan_run`
 (in a temporary folder) and gives each technique's share of the units and
-its share within its family; `py -m tests.jailbreak.simulate [N]` prints
-them for the default adversarial kind. The coverage table does not hold
-these shares.
+its share within its family; `python -m tests.jailbreak.simulate [N]` prints
+them for the default adversarial kind, and `deal_kind(section, n,
+base=...)` plans a kind over a dataset type's section (the eval type's);
+`plan_kind` and `plan_rows` give the manifest rows, `spend` what the units
+spent in complexity, and `python -m tests.jailbreak.simulate [N] budget` the
+unit budget against the group budget. The coverage table holds none of these.
+
+### The group budget
+
+Opt-in, off in both packaged kinds and both dataset types: an adversarial
+kind's `budget` `"group"` (default `"unit"`) with `max_unit_complexity`
+(default `max_complexity + UNIT_HEADROOM`, 3). Without it a unit spends up
+to `max_complexity` and what it leaves is lost; with it the group shares the
+budget.
+
+- `_observe` adds each kept technique's complexity, the request
+  obfuscation's included, to the dealer's `spent`. `Dealer.bank(per_unit)` is
+  `max(0, per_unit x (position - 1) - spent)`: what the units dealt before
+  the current one left unspent of `per_unit` each.
+- Before it draws, `assign_combination` replaces the round's `max_complexity`
+  with the unit's allowance, `min(max_complexity + bank, ceiling)`
+  (`_allowance`), once, so a resample draws from the same allowance. Every
+  pick of a draw fits what is left of it (`compatible` checks the remaining
+  complexity, the first pick and the request obfuscation included), so a unit
+  never spends more than its allowance. By induction the group has spent at
+  most `max_complexity x position` after each unit, and no unit goes above
+  the ceiling.
+- A count draw (`exact_techniques`), a call without a dealer and a kind
+  without the option leave `max_complexity` as it was. Each round of a plan
+  is its own group with its own dealer, so its own bank.
+- `rounds_of` writes `budget` only when `"group"` and `max_unit_complexity`
+  only when given, so the rounds, the plan file and the draws of a kind
+  without the option are those it had before (the pinned digests of
+  `tests/jailbreak/test_dealing.py` hold). A kept plan made without the keys
+  resumes with no warning under a section that leaves them out or says
+  `"unit"`; a section that turns the option on or off over a kept plan, or
+  changes its ceiling, raises as `rounds` (`planfile.changed_plan`), naming
+  `resume=False`. `resolve` refuses the keys on the natural kind, a ceiling
+  without `"group"` or below `max_complexity` or any round's
+  `max_complexity`, and a round naming either key.
+- Measured with `simulate.compare_budgets` over 3,000 units of the default
+  attacks, it keeps the mean at `max_complexity` (5.77 to 6.00), lets some units reach the ceiling (533 of
+  3,000 above 6, none above 9) and evens out the cheap members of `encode`
+  and `sensitive_words`, and draws the heavy members a little more often
+  (each heavy `encode` member 6 to 8 times, against 5 to 7); the extra
+  allowance goes to the obfuscations. The table is in
+  [configuration.md](../configuration.md#the-group-budget).
 
 ## Seeds
 
@@ -238,12 +398,12 @@ joined by `::`: the same in every process, unlike Python's `hash`.
 
 So the plan does not depend on the order or the chunking of the inputs, and
 a replayed plan gives the same text within one version of the library. The
-plan file records no library version, and a row's `combination_spec_version`
-is the spec's, which a change to a technique's code need not move (the
-ASCII-art cap did not). The manifest row records the round's settings and
-the `seed`, and `<stem>.plan.json` what the whole plan was made
-with: `seed`, `rounds`, `pool` (sorted names), `family_weights`,
-`layer_rates`.
+plan file's `spec_version` and a row's `combination_spec_version` are the
+spec's `version`, which moves when techniques are added or retired, not when
+a technique's code changes (the ASCII-art cap did not move it). The
+manifest row records the round's settings and the `seed`, and
+`<stem>.plan.json` what the whole plan was made with: `seed`, `rounds`,
+`pool` (sorted names), `family_weights`, `layer_rates`, `spec_version`.
 
 ## Coverage
 
@@ -251,7 +411,28 @@ with: `seed`, `rounds`, `pool` (sorted names), `family_weights`,
 manifest whenever a plan is written: per `level` (`layer`, `family`,
 `technique`) and `name`, the count per `category`, `entry_type` and
 `iteration`, plus a zero row for every pool technique never drawn. It logs
-`Coverage: N of M pool techniques drawn`.
+`Coverage: N of M pool techniques drawn`. With `verbose`,
+`log_model_calls(manifest_path, pool)` then logs what the plan costs:
+`Model calls: N of M planned units call a model, L to H calls (translation
+l to h, from the spec's calls).` A unit counts when it draws a
+`requires_llm` technique, and each such technique adds its spec `calls`
+(`[low, high]`; every `requires_llm` technique has them, a test holds it).
+
+`variants.write_variants(out_path, manifest_path, pool, registry)` writes
+`<stem>.variants.csv` (`technique`, `variant`, `rows`) after the units,
+from the rows of the kind's CSV, those of earlier runs included (the
+natural kind runs with `read_back=False`, so the file is read, not the
+frame). `variants_of(technique, info, registry)` pairs one row's variants by
+position: a technique's pool names the info key that holds its variant
+(`PoolRef.info_key`: `variant` as `apply_template_directive` writes it,
+continuation's `style`, structural's none), and the values of each key go,
+in order, to the row's techniques that write it, less those noted
+`noop=`; a row whose values and techniques do not pair up (a rejected or an
+error row) counts none. Every variant of weight above 0 of a pool
+technique gets a row, 0 when none drew it; a technique outside the pool
+that a row drew (a kept plan's) is added after. No technique's info
+changed for the table: the eval-pool techniques that name no `variant=`
+(continuation, structural) keep their info while the eval pool is held.
 
 ## The augmentation section in code
 
@@ -276,14 +457,26 @@ admits those alone. Last, it keeps the techniques whose `kinds` (set by
 `technique.tag`: the technique's own, else its first family's,
 `family_kinds`, else `DEFAULT_KINDS`, `["adversarial"]`) hold the kind,
 which `pool.kind_of(resolved)` reads as `rounds_of` does: natural when the
-resolved kind has `exact_techniques`, so no key is added to it. Every
-technique holds `adversarial`, so only the natural pool is narrowed: to
-the 46 techniques of [techniques.md](../techniques.md#the-natural-pool) with
-translation off.
+resolved kind has `exact_techniques`, so no key is added to it. The
+natural pool is narrowed to the 71 techniques of
+[techniques.md](../techniques.md#the-natural-pool) with translation off;
+the attacks lose only the techniques of the three families marked
+`["natural"]` alone (`smalltalk_prefix`, `smalltalk_suffix`,
+`benign_role`). Then a technique whose `deprecated` tag is set leaves the
+pool unless `techniques.allow` names it; one it names stays, with a
+`DeprecationWarning` (read for this release). A family in `families.allow`
+does not keep its retired techniques.
 `rounds_of(resolved)` turns the kind into one sampler-settings dict per
 round: a natural round is `{"exact_techniques": n}`; an adversarial round is
 the budget keys, an `include_<layer>` per layer and `allow_request_obfuscation`
-when set, with the round's own keys merged over them. The kind's
+when set, `budget` when `"group"` and `max_unit_complexity` when given, with
+the round's own keys merged over them. `include_rewrite` is
+the exception: written, true, only when the kind allows the rewrite layer
+and a rewrite technique is registered, so the rounds of a kind that denies it
+(both packaged kinds do), and of every kind while the layer is empty, are
+those written before the layer existed, and no kept plan of theirs changes.
+A `layers.deny` a section gives replaces the packaged `["rewrite"]` whole, so
+one that leaves `rewrite` out allows the layer. The kind's
 `layer_rates` goes to `run_augmentation(layer_rates=)` and from there to
 `plan_run`; a round's own `layer_rates`, passed on as the sampler's
 `sampling_probs`, replaces it whole and is read over the spec's rates.

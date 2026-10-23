@@ -24,15 +24,16 @@ from redact.dataset import (
     resume_state,
     row_ids,
 )
-from redact.dataset.planfile import changed_plan, plan_path
+from redact.dataset.planfile import changed_plan, plan_path, read_plan, variants_path
 from redact.llm_pipeline import drive_units, pool_size
 from redact.llms.client import ModelClient
 
 from . import pool as pool_module
 from .manipulation import get_or_generate_benign_data
 from .plan import coverage_path, plan_inputs, plan_run
-from .technique import load_spec
+from .technique import FIRST_VERSION, load_spec, version_key
 from .units import error_row_of, is_pending, pending_units, row_of
+from .variants import write_variants
 
 logger = logging.getLogger(__name__)
 
@@ -42,6 +43,7 @@ def run_augmentation(
     pool: list[Callable],
     *,
     client: ModelClient,
+    check: ModelClient | None = None,
     translation_model: str | None = None,
     out_path: Path,
     manifest_path: Path | None = None,
@@ -68,15 +70,20 @@ def run_augmentation(
     its pending units run through :func:`drive_units`, up to ``batch_size`` per
     call, their rows appended every 32 units. The combination is read back
     through every registered technique, so a plan made with another pool still
-    replays. The benign data at ``benign_path`` is loaded when a pending unit's
-    techniques need it: with ``auto_generate_benign`` its pairs are generated
-    first for each subcategory of ``benign_taxonomy`` (a file name under
-    ``taxonomy_dir``, or a loaded taxonomy) that the file lacks; without it a
-    missing file raises before any unit runs. ``rounds`` holds each round's
+    replays. When the units are done, ``<stem>.variants.csv`` beside the
+    manifest counts the template variants the rows of ``out_path`` drew
+    (:func:`~redact.jailbreak.variants.write_variants`). The benign data at
+    ``benign_path`` is loaded when a pending unit's techniques need it: with
+    ``auto_generate_benign`` its pairs are generated first for each
+    subcategory of ``benign_taxonomy`` (a file name under ``taxonomy_dir``,
+    or a loaded taxonomy) that the file lacks; without it a missing file
+    raises before any unit runs. ``rounds`` holds each round's
     sampler settings, as :func:`redact.jailbreak.augmentation.rounds_of`
     gives them (one round of the sampler's defaults when None);
     ``family_weights`` and ``layer_rates``
-    go to the dealing of :func:`plan_run`. ``label`` is the progress label, the
+    go to the dealing of :func:`plan_run`. ``check`` checks what a
+    technique's model writes (the typo check), ``client`` when None;
+    translation keeps its own checkers. ``label`` is the progress label, the
     internals-capture root, and part of the techniques' random seed and of an
     error row's id. With ``accept_noop`` False, a row whose text
     is its input's is not accepted.
@@ -86,12 +93,17 @@ def run_augmentation(
 
     Resume: completion is a sidecar ``*.state.jsonl`` ledger keyed
     ``(input_id, iteration)``; ``resume=True`` reuses the plan and skips its
-    finished units, ``resume=False`` clears the output, ledger and plan first.
+    finished units, ``resume=False`` clears the output, ledger and plan (its
+    plan file, coverage and variants tables too) first.
     A reused plan runs as it was made: an input it does not hold, accepted
     after it was made, gets no unit, and a WARNING counts those inputs. A
     reused plan made with another ``seed``, ``rounds``, pool, ``family_weights``
     or ``layer_rates`` (its plan file says) raises a ``ValueError``; one with
-    no plan file is run unchecked, with a WARNING.
+    no plan file is run unchecked, with a WARNING. A pool that differs only
+    by what the library added or retired after the plan's spec version
+    (:func:`_library_change`) is no change of this run's: the plan is kept,
+    with a WARNING that names those techniques, so a kept plan resumes in a
+    library that grew.
 
     Returns:
         The rows of ``out_path``, or an empty frame when ``read_back`` is False.
@@ -107,6 +119,7 @@ def run_augmentation(
     # plan made with another pool still reconstructs.
     registry = pool_module.registry(pool_module.all_techniques())
     capture = client.compute_config.supports_internals
+    check = check or client
 
     spec_version = load_spec().get("version", "")
 
@@ -115,9 +128,9 @@ def run_augmentation(
         per_layer = Counter(getattr(fn, "layer", None) for fn in pool)
         logger.info(
             "Pool: %d techniques (%s) | Samples: %d | Rounds: %d | Model: %s | "
-            "Batch: %d", len(pool),
+            "Check: %s | Batch: %d", len(pool),
             ", ".join(f"{layer} {n}" for layer, n in per_layer.items()),
-            len(inputs), len(rounds), client.model, batch_size)
+            len(inputs), len(rounds), client.model, check.model, batch_size)
         if layer_rates or family_weights:
             logger.info("Layer rates: %s | Family weights: %s",
                         layer_rates or "the spec's", family_weights or "equal")
@@ -139,9 +152,18 @@ def run_augmentation(
     if reused:
         if verbose:
             logger.info("Reusing existing manifest: %s", man_path)
-        changed = changed_plan(man_path, plan_inputs(
+        # changed_plan compares every key of the record it is given, so it
+        # gets the record less the pool and the spec version, which
+        # _library_change compares below: a pool that differs only by what
+        # the library added or retired after the plan's spec_version is no
+        # change of this run's, and spec_version only dates the pool (a plan
+        # file written before it was recorded has none).
+        current = plan_inputs(
             pool, seed=seed, rounds=rounds, family_weights=family_weights,
-            layer_rates=layer_rates))
+            layer_rates=layer_rates)
+        changed = changed_plan(man_path, {
+            key: value for key, value in current.items()
+            if key not in ("pool", "spec_version")})
         if changed is None:
             logger.warning(
                 "%s: the plan %s has no %s beside it, so whether this run's "
@@ -149,17 +171,35 @@ def run_augmentation(
                 "it runs as it was made. Run with resume=False to plan again "
                 "(the stage starts over).", label, man_path.name,
                 plan_path(man_path).name)
-        elif changed:
-            release_lock(ledger)
-            raise ValueError(
-                f"{label}: this run's {changed} differ from those the plan "
-                f"{man_path.name} was made with (see {plan_path(man_path).name}), "
-                "and a resume keeps the plan as it was made. Run with "
-                "resume=False to plan again (the stage starts over), or with "
-                "the section and seed the plan was made with.")
+        else:
+            made_with = read_plan(man_path)
+            library = _library_change(made_with, pool, registry)
+            if library is None:
+                changed.append("pool")
+            if changed:
+                release_lock(ledger)
+                raise ValueError(
+                    f"{label}: this run's {changed} differ from those the plan "
+                    f"{man_path.name} was made with (see "
+                    f"{plan_path(man_path).name}), and a resume keeps the plan "
+                    "as it was made. Run with resume=False to plan again (the "
+                    "stage starts over), or with the section and seed the plan "
+                    "was made with.")
+            added, retired = library
+            if added or retired:
+                logger.warning(
+                    "%s: since the plan %s was made (spec version %s, now %s), "
+                    "the library added %s and retired %s. A resume keeps the "
+                    "plan as it was made: it does not draw the added "
+                    "techniques, and still runs the retired ones it names. Run "
+                    "with resume=False to plan again (the stage starts over).",
+                    label, man_path.name,
+                    made_with.get("spec_version", FIRST_VERSION), spec_version,
+                    added, retired)
     else:
         coverage_path(man_path).unlink(missing_ok=True)
         plan_path(man_path).unlink(missing_ok=True)
+        variants_path(man_path).unlink(missing_ok=True)
         plan_run(
             inputs, pool, manifest_path=man_path, seed=seed,
             iterations=len(rounds), settings_per_iteration=rounds,
@@ -242,6 +282,7 @@ def run_augmentation(
             yield from pending_units(
                 plan, prompts, position, completed, registry, live,
                 gen_model=client.model, translate_model=translation_model,
+                check_model=check.model,
                 benign_data=benign_data, prompt_dir=prompt_dir,
                 capture=capture, label=label,
             )
@@ -254,10 +295,13 @@ def run_augmentation(
     ):
         drive_units(
             units, on_done=_on_done, on_error=_on_error,
-            pool_size=pool_size(batch_size, client), cap=batch_size,
+            pool_size=pool_size(batch_size, client, check), cap=batch_size,
             progress=label if verbose else None,
         )
 
+    # Read from the file, rows of earlier runs included: the natural kind
+    # runs with read_back False.
+    variants = write_variants(out_path, man_path, pool, registry)
     rows = read_rows(out_path) if read_back else pd.DataFrame()
 
     if verbose:
@@ -271,6 +315,38 @@ def run_augmentation(
             logger.info("Accepted: %d | Rejected: %d",
                         n_accepted, len(rows) - n_accepted)
             logger.info("No-ops: %d", n_noop)
-        logger.info("Manifest: %s | Saved to: %s", man_path, out_path)
+        logger.info("Manifest: %s | Saved to: %s | Variants: %s",
+                    man_path, out_path, variants)
 
     return rows
+
+
+def _library_change(
+    made_with: dict, pool: list[Callable], registry: dict[str, Callable],
+) -> tuple[list[str], list[str]] | None:
+    """What the library changed in ``pool`` since the plan whose plan file
+    holds ``made_with``: ``(added, retired)``, the names it added after the
+    plan's ``spec_version`` (a later ``since``) and those it retired after
+    it (a later ``deprecated``), each sorted; both empty when the pool is
+    the plan's. ``None`` when the pool differs otherwise: a technique this
+    run's section adds or leaves out, or one no longer registered.
+
+    A plan file without ``spec_version``, written before it was recorded,
+    was made at :data:`FIRST_VERSION`. Known limit: a section that newly
+    names a family all of whose techniques came after the plan reads as the
+    library's growth too, and warns instead of raising.
+    """
+    made_at = version_key(made_with.get("spec_version", FIRST_VERSION))
+
+    def after(version) -> bool:
+        return version is not None and version_key(version) > made_at
+
+    planned = set(made_with.get("pool", ()))
+    current = {fn.__name__: fn for fn in pool}
+    added = sorted(set(current) - planned)
+    retired = sorted(planned - set(current))
+    if (all(after(getattr(current[name], "since", FIRST_VERSION)) for name in added)
+            and all(after(getattr(registry.get(name), "deprecated", None))
+                    for name in retired)):
+        return added, retired
+    return None

@@ -9,8 +9,8 @@ Augment the accepted inputs with technique combinations, in two kinds:
 
 | Kind | Writes | Default |
 |---|---|---|
-| `adversarial` | `Datasets/jailbreaks.csv`: jailbreak attacks | one round per input, by budget, from every technique but `casual_writing` |
-| `natural` | `Datasets/variations.csv`: natural variations | one technique per input, from the natural allow lists, which the spec's `kinds` narrow to 46 techniques (65 with `"translation": true`, which adds the nineteen translations) ([techniques.md](../techniques.md#the-natural-pool)) |
+| `adversarial` | `Datasets/jailbreaks.csv`: jailbreak attacks | one round per input, by budget, from every active technique (178 in 24 families, the nineteen translations among them) but `casual_writing` and the natural-only small talk and benign roles; half the units take a request obfuscation, a light encoding or a translation after the request |
+| `natural` | `Datasets/variations.csv`: natural variations | one technique per input, from the natural allow lists, which the spec's `kinds` narrow to 71 techniques (90 with `"translation": true`, which adds the nineteen translations) ([techniques.md](../techniques.md#the-natural-pool)) |
 
 These are the packaged defaults, which a `training` run takes: both kinds
 are on. An `eval` run's dataset type attacks the harmful inputs only, with
@@ -39,14 +39,15 @@ in [techniques.md](../techniques.md).
 - With no input file the front raises `No input samples found`; with no
   accepted input it warns `jailbreaks skipped: ...` and writes nothing. With
   `resume: false` it also removes the files of each kind that is on: CSV,
-  `.cut` and `.tmp` files, ledger, manifest, plan file and coverage table
-  (`dataset.clear_stage`).
+  `.cut` and `.tmp` files, ledger, manifest, plan file, coverage table and
+  variants table (`dataset.clear_stage`).
 
 ## Models
 
 | Recipe role | Registry role | Default | Calls |
 |---|---|---|---|
 | `gen` | `uncensored_gen` | `venice-uncensored` | Every technique that calls a model, the benign data, and the judge of a machine translation |
+| `check` | `uncensored_gen` | the `gen` model | Passed to each technique as `check_model`, to check what its model writes (the typo check and the scenario check); left out, it is the `gen` model, so no other model loads. Translation keeps its own checkers: the chat translator itself, the `gen` model as a machine translation's judge |
 | `translation` | `translation` | `translategemma-27b` | The `translation` family; resolved, planned and loaded only when a kind's pool holds a translation technique (`"translation": true`, as in the packaged attacks and the eval type's) |
 
 A chat translator (`deepseek-v3.2`, named in the recipe) makes up to 4
@@ -75,7 +76,7 @@ training run and an eval run does not get the same draws. The run passes
 
 One unit is one input at one iteration, for one kind: `(input_id,
 iteration)`. A kind with `rounds` has one iteration per round. Each kind has
-its own manifest, plan file, ledger and coverage table.
+its own manifest, plan file, ledger, coverage table and variants table.
 
 | | Value |
 |---|---|
@@ -91,8 +92,9 @@ its own manifest, plan file, ledger and coverage table.
 | `Datasets/jailbreaks.manifest.jsonl` | Its plan |
 | `Datasets/jailbreaks.state.jsonl` | Its ledger |
 | `Datasets/jailbreaks.coverage.csv` | What its plan drew |
-| `Datasets/jailbreaks.plan.json` | What its plan was made with: `seed`, `rounds`, `pool` (the technique names), `family_weights`, `layer_rates` |
-| `Datasets/variations.csv` and its four sidecars | The same for the natural kind |
+| `Datasets/jailbreaks.variants.csv` | Which template variants its rows drew, written after each run |
+| `Datasets/jailbreaks.plan.json` | What its plan was made with: `seed`, `rounds`, `pool` (the technique names), `family_weights`, `layer_rates`, `spec_version` (the spec's `version`, which dates the pool) |
+| `Datasets/variations.csv` and its five sidecars | The same for the natural kind |
 | `Data_cache/benign/benign_samples.csv` | The benign data, shared by both kinds, with its `.manifest.jsonl` and `.state.jsonl` |
 
 `variations.csv` goes to `variations_path` when given, else beside
@@ -124,6 +126,25 @@ plan drew per group, and adds a zero row for each technique of the pool
 never drawn. The planner logs a WARNING when a layer, or the request
 obfuscation step, falls two or more picks short of its rate in a group.
 
+Columns of the variants table: `technique`, `variant`, `rows`. When a
+kind's units are done, the stage reads its CSV in chunks (the rows of
+earlier runs too) and counts, per technique and variant name, the rows
+that drew it: a row for every variant of a template technique of the pool
+(weight above 0), 0 when no row drew it, then any other technique and
+variant a row drew (from a kept plan made with another pool). A row's
+`technique_info` joins its techniques' infos in their order, and a framing
+and a request technique both write `variant=<name>`, so the variants are
+paired by position: the n-th `variant=` of a row is the n-th of its
+techniques that writes one; a step noted `noop=` wrote none, and a rejected
+or error row, whose info is its rejection's, counts none. The framing
+techniques, the answer formats, the answer languages, asking, the
+distractors, impersonation, indirect, temporal, the neutral containers,
+small talk and the benign roles write `variant=`;
+continuation writes `style=<name>`, read as its variant; structural's
+`to_xml` and `to_markdown`, one template each, name none and are not
+counted, nor is `to_json`, whose wrapper is in code. Continuation and
+structural keep their info as it is while the eval pool is held.
+
 ## The benign data
 
 Techniques tagged `requires_benign` (the `fsh` and `dap` families) need
@@ -146,6 +167,12 @@ every time is acked
 stage stops with `No benign pairs at ...`. The prompt
 `prompts/jailbreak/benign_generation/` is read through the overlay.
 
+The `short` and `long` variants show three to seven pairs of one
+subcategory. The many-shot variants (`*_many`) show 32 short pairs, more
+than a subcategory holds, drawn across the cache: the chosen subcategory's
+first, then its main category's, then the rest
+([techniques.md](../techniques.md#what-the-families-do)).
+
 The benign data always resumes: its ledger `benign_samples.state.jsonl`,
 keyed `(main_category, sub_category, answer_type)`, records the finished
 units, so a stopped run, or a larger taxonomy, generates only the units
@@ -160,16 +187,20 @@ Each kind resumes on its own, from its ledger, with the lock and cut-back of
 [internals/dataset.md](../internals/dataset.md).
 
 The plan is frozen. A resumed kind reuses its manifest and runs the planned
-units its ledger does not record. Since the plan deals each family's
-techniques evenly, follows the persona and cognitive vs impersonation rule
-([techniques.md](../techniques.md#compatibility-rules)), and counts
-the request obfuscation (when `allow_request_obfuscation` is on, as in the
-escalation's rounds 3 and 4) against `max_obfuscations`, a fresh plan with
-the same seed draws differently from one made before; a kept plan replays
-unchanged. The
-natural kind's pool is now what the spec's `kinds` mark natural, so a
-natural plan made before raises on resume (its pool changed): run the
-natural kind with `resume=False`. The build leaves out the benign and
+units its ledger does not record, so a kept plan replays unchanged. A fresh
+plan with the same seed draws differently from one made at spec 1.0: the
+plan deals each family's techniques evenly, follows the persona and
+cognitive vs impersonation rule
+([techniques.md](../techniques.md#compatibility-rules)), counts the request
+obfuscation (when `allow_request_obfuscation` is on, as in the packaged
+attacks and the escalation's rounds 3 and 4) against `max_obfuscations`,
+draws a technique only for the inputs it applies to, and deals the
+techniques spec 1.2 added and not the seven it retired. The
+[release notes](../configuration.md#release-notes) list the changes. A
+natural plan made before the natural kind's pool was narrowed to what the
+spec's `kinds` mark natural raises on resume (its pool changed): run the
+natural kind with `resume=False`; one made since resumes with the WARNING
+below, spec 1.2 having grown the pool. The build leaves out the benign and
 dual-use benign variations such a plan made with a technique the natural
 kind no longer draws ([build.md](build.md#training-mode)). The
 5,000-character cap on `to_ascii_art` holds wherever it is drawn, the eval
@@ -190,15 +221,37 @@ names a technique no registered function implements raises a `ValueError`
 naming `resume=False` when that unit is built, which stops the stage. Inputs
 added since the plan get no unit; a WARNING counts them and names
 `resume=False`. `resume: false` removes that kind's CSV, `.cut` and `.tmp`
-files, ledger, manifest, plan file and coverage table, then plans again. A
+files, ledger, manifest, plan file, coverage table and variants table, then
+plans again. A
 kind that is off is not touched ([running.md](../running.md#resume-fresh-runs-and-a-kill-partway-through)
 says how to plan one kind again and keep the other).
+
+A pool that differs only because the library grew is not a change of the
+run's. The plan file records the spec version its pool was drawn at
+(`spec_version`; a plan file without it was drawn at `"1.0"`). When every
+technique the pool gained has a `since` after that version, and every one
+it lost was retired (`deprecated`) after it, the resume keeps the plan
+and logs one WARNING that names them: the kept plan does not draw the
+added techniques, and runs the retired ones it names. Run the kind with
+`resume=False` to plan again and draw them. Any other difference in the
+pool raises as before. A section that newly names a family all of whose
+techniques came after the plan reads as such growth too, and warns instead
+of raising.
+
+**Release notes.** What changed for a run you already have is in the
+[release notes](../configuration.md#release-notes) of the configuration
+reference, with a summary on top: the request obfuscation now dealt by the
+packaged attacks, the one re-plan this release asks of the adversarial kind
+(its plan kept from before raises on resume, naming `rounds`; run the kind
+once with `resume=False`, the natural kind's plan is not affected); the typo
+and the scenario checks, which cost model calls; the natural pool; and the
+techniques spec 1.2 adds.
 
 ## Rejected and failed units
 
 | Case | Row |
 |---|---|
-| A technique rejects its result: a translation that fails its checks in all 4 rounds, a malformed word list, no word marked for a heavy word encoding, a scenario reply without its scene 3 times, a text no ASCII-art font draws whole or within its cap, an empty reply or text | `jailbreak` holds the text before that technique; `accepted` false; `reasoning` and `technique_info` start with `DISCARDED; technique=<name>` |
+| A technique rejects its result: a translation that fails its checks in all 4 rounds, a typo rewrite the check rejects twice, a malformed word list, no word marked for a heavy word encoding, a scenario reply without its scene 3 times, a scenario the check rejects twice, a text no ASCII-art font draws whole or within its cap, an empty reply or text | `jailbreak` holds the text before that technique; `accepted` false; `reasoning` and `technique_info` start with `DISCARDED; technique=<name>` |
 | A natural variation leaves the text unchanged | `accepted` false; `reasoning` `unchanged: the text is its input's`. An adversarial row that changes nothing stays accepted, with `is_noop` true; its `sample_id` is its input's, so the build leaves it out |
 | A technique raises, or a prompt is too long for a model on the async lane (an OpenAI-compatible endpoint or vLLM) | An error row: the input text, `accepted` false, `technique_info` `ERROR: <message>`, `reasoning` the message |
 | A call fails (a provider error, or a prompt too long on the grouped path: Anthropic, introspection) | The stage stops; saved units stay saved |

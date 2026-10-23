@@ -175,7 +175,7 @@ that lists that role.
 | Recipe role | Called by | Registry role | Default today |
 |---|---|---|---|
 | `gen` | inputs, outputs, jailbreaks | `uncensored_gen` | `venice-uncensored`, hosted (Venice) |
-| `check` | inputs, outputs | `uncensored_gen` | the `gen` model |
+| `check` | inputs, outputs, jailbreaks (what a technique's model writes; translation keeps its own checkers) | `uncensored_gen` | the `gen` model |
 | `translation` | jailbreaks, only when a kind's pool holds a translation technique (`"translation": true`: the packaged attacks, and the eval type's) | `translation` | `translategemma-27b`, local vLLM (27B, FP8). Without a GPU, name the hosted `deepseek-v3.2`, or set `"translation": false` in the adversarial kind |
 | `constitution` | constitution | `constitution_gen` | `claude-opus-4-6`, hosted (Anthropic) |
 | `paraphraser` | paraphrase | `paraphraser` | `humanizer-12b`, local vLLM (12B, bf16) |
@@ -359,7 +359,8 @@ and ran the other 400. It ended with 432 rows, 433 ledger lines (the opening
 
 **Starting over.** `"resume": false` starts every listed stage over: it
 removes the stage's output, its `.cut` and `.tmp` files, its ledger and its
-manifest (and for each jailbreak kind its `.coverage.csv` and `.plan.json`),
+manifest (and for each jailbreak kind its `.coverage.csv`, `.plan.json` and
+`.variants.csv`),
 then plans anew. The exceptions:
 
 - The `inputs` stage starts over only its current `style`. The rows and
@@ -388,8 +389,8 @@ ledger and plan.
 A stage that is skipped because none of its inputs was accepted still
 starts over with `"resume": false`. Its earlier output, `.cut` and `.tmp`
 files, ledger and manifest are removed through `dataset.clear_stage`; for the
-jailbreak stage that is each kind that is on, with its `.coverage.csv` and
-`.plan.json`. So no stale rows reach the build. A jailbreak kind whose
+jailbreak stage that is each kind that is on, with its `.coverage.csv`,
+`.plan.json` and `.variants.csv`. So no stale rows reach the build. A jailbreak kind whose
 `entry_types` match none of the inputs is skipped with a WARNING and cleared
 the same way.
 
@@ -398,11 +399,15 @@ the same way.
 - The jailbreak stage reuses each kind's plan. `<kind>.plan.json`, beside
   the manifest, records what the plan was made with: `seed`, `rounds` (with
   the budget keys and `iterations`), the pool's technique names,
-  `family_weights` and `layer_rates`. A resume whose values differ stops
+  `family_weights`, `layer_rates` and `spec_version` (the spec version the
+  pool was drawn at). A resume whose values differ stops
   with a `ValueError` that names the keys; run the stage with
-  `"resume": false` to plan again. A plan without that file resumes
-  unchecked, with a WARNING. Inputs accepted after the plan was made get no
-  unit, and a WARNING counts them.
+  `"resume": false` to plan again. A pool that differs only by techniques
+  the library added or retired after `spec_version` is the library's
+  growth, not the run's change: the plan is kept, with a WARNING that names
+  them (the kept plan does not draw the new ones). A plan without that file
+  resumes unchecked, with a WARNING. Inputs accepted after the plan was made
+  get no unit, and a WARNING counts them.
 - A rejected unit is acked and not retried: a constitution unit or a seeded
   entry rejected on every attempt, a rejected output, a dropped paraphrase.
   Start the stage over to try them again.
@@ -454,8 +459,8 @@ Datasets/
   output_responses.csv                   # + .manifest.jsonl, .state.jsonl, .coverage.csv, .plan.json
   paraphrases_inputs.csv                 # + .manifest.jsonl, .state.jsonl
   paraphrases_outputs.csv                # + .manifest.jsonl, .state.jsonl (target outputs or both)
-  jailbreaks.csv                         # + .manifest.jsonl, .state.jsonl, .coverage.csv, .plan.json
-  variations.csv                         # + .manifest.jsonl, .state.jsonl, .coverage.csv, .plan.json
+  jailbreaks.csv                         # + .manifest.jsonl, .state.jsonl, .coverage.csv, .plan.json, .variants.csv
+  variations.csv                         # + .manifest.jsonl, .state.jsonl, .coverage.csv, .plan.json, .variants.csv
   complete_dataset.csv                   # the build of a training run
   eval_inputs.csv  eval_outputs.csv  eval_jailbreaks.csv   # the build of an eval run
   eval_excluded.json                     # with exclude_from: the rows it left out
@@ -475,10 +480,11 @@ Other files you may see:
 | `<ledger>.lock` | The stage's lock. The operating system holds it, so a run that died holds nothing; the file itself may stay |
 | `<output>.cut` | Bytes a resume cut off an output: the tail of a save that did not finish |
 | `<ledger>.dropping` | A fresh run of one seeded-inputs style that did not finish. Run it again |
-| `<kind>.plan.json` | What a jailbreak kind's plan was made with: `seed`, `rounds`, `pool`, `family_weights`, `layer_rates`. A resume compares them with the run's |
+| `<kind>.plan.json` | What a jailbreak kind's plan was made with: `seed`, `rounds`, `pool`, `family_weights`, `layer_rates`, `spec_version`. A resume compares them with the run's, the pool against what the library added or retired after `spec_version` |
 | `constitution_inputs.plan.json`, `output_responses.plan.json` | What the deal of the generation axes was made with: `seed`, the axes' weights, for the inputs `samples_per_entry`, and for the outputs `outputs_per_input` and `modes` (the answer modes of every entry type). A resume compares them with the run's |
 | `constitution_inputs.coverage.csv`, `output_responses.coverage.csv` | Per axis value, the specs planned and accepted per category and entry type; the outputs' also per answer mode (`axis` `mode`) |
 | `<kind>.coverage.csv` | Per layer, family and technique of a kind's plan, the count per category, entry type and iteration, with a zero row for each pool technique never drawn |
+| `<kind>.variants.csv` | Per template technique and variant, the rows of a kind's CSV that drew it, written after each run, with a zero row for each variant of the pool never drawn ([stages/jailbreaks.md](stages/jailbreaks.md#files)) |
 | `*.tmp` | A file being replaced. It is gone once the write finishes; a kill can leave one, which the next write replaces, and `resume: false` removes the output's |
 
 A run record, `Datasets/<stage>.run.json`, holds `stage`, `timestamp`,
@@ -578,7 +584,9 @@ rate. [internals/telemetry.md](internals/telemetry.md) lists the events.
 | `DeprecationWarning` for flat augmentation keys | `include_*`, `sampling_probs` and the other flat keywords | Write them in the `adversarial` kind |
 | `DeprecationWarning` naming `content_moderation_categories` | The former name of `harmful.json` in `configs/taxonomy/`, read for one release | Write `"taxonomy": "harmful"`; rename a file of your own `harmful.json` |
 | WARNING `jailbreak: N of the M inputs are not in the plan ...` | A resume keeps the plan made before those inputs were accepted | Run the jailbreak stage with `"resume": false` to plan them |
-| `ValueError: jailbreak: this run's [...] differ from those the plan jailbreaks.manifest.jsonl was made with (see jailbreaks.plan.json) ...` | A resume with another augmentation section or seed than the plan's | Run the jailbreak stage with `"resume": false`, or with the plan's section and seed |
+| `ValueError: jailbreak: this run's [...] differ from those the plan jailbreaks.manifest.jsonl was made with (see jailbreaks.plan.json) ...` | A resume with another augmentation section or seed than the plan's; also an adversarial plan made before the packaged attacks dealt a request obfuscation, whose rounds now carry `allow_request_obfuscation` (the differing key is `rounds`) | Run the jailbreak stage with `"resume": false`, or with the plan's section and seed (`"allow_request_obfuscation": false` in the adversarial kind for a plan made before) ([release notes](configuration.md#release-notes)) |
+| WARNING `jailbreak: since the plan jailbreaks.manifest.jsonl was made (spec version ..., now ...), the library added [...] and retired [...] ...` | The library added or retired techniques after the plan was made; the kept plan does not draw the added ones | Nothing, or `"resume": false` to plan again and draw them |
+| `DeprecationWarning`: `techniques.allow names '...', which spec version ... deprecated` | A kind's `techniques.allow` names a retired technique, which it still draws for this release | Take the name out of `techniques.allow` |
 | WARNING `jailbreak: the plan ... has no jailbreaks.plan.json beside it ...` | A plan made before plan files were written; its section and seed are not checked | Nothing, or `"resume": false` to plan again |
 | `ValueError: .../output_responses.state.jsonl acks units without an iteration ...` or `Cannot append to .../output_responses.csv: its header has no column 'iteration', 'response_mode', ... It was written before an input had several responses, each in an answer mode.` | A resume onto an outputs folder written when a unit was an input, before the answer modes | Run the outputs stage with `"resume": false`, or in a new `data_dir` |
 | `ValueError: Outputs: this run's ['outputs_per_input'] differ from those the responses in output_responses.csv were dealt with ...` (or `['modes']`) | A resume with another `outputs.outputs_per_input` or `outputs.modes` (or seed, or axes' weights) than the plan file's; a training folder of one response per input resumed with the type's 2 is one | Run the outputs stage with `"resume": false`, or with the plan's settings |
@@ -589,8 +597,9 @@ rate. [internals/telemetry.md](internals/telemetry.md) lists the events.
 | WARNING `paraphrase: .../paraphrases_outputs.csv holds paraphrases of responses from an earlier run, and the build merges them ...` | The paraphrase stage ran on the inputs only (the default), and an earlier run of the outputs target left its file | Delete the file, or run the paraphrase stage with `target: "outputs"` and `"resume": false` to paraphrase the current responses |
 | `ValueError: .../paraphrases_outputs.state.jsonl acks units without a response_id ...` or `Cannot append to .../paraphrases_outputs.csv: its header has no column 'response_id' ...` | A resume of the outputs target onto paraphrases written when its units were keyed on the input answered | Run the paraphrase stage with `"resume": false` and `target: "outputs"` (the inputs' paraphrases stay), or in a new `data_dir` |
 | WARNING `Outputs: rows without a response_label, written before the answer modes, take their entry_type as their label in eval_outputs.csv.` | An eval build from an output or paraphrase file written before the answer modes | Run the outputs (and paraphrase) stage again with `"resume": false` for the compound labels |
-| `ValueError: variation: this run's ['pool'] differ from those the plan variations.manifest.jsonl was made with ...` | A natural plan made before the spec's `kinds` narrowed the natural pool to 46 techniques | Run the natural kind with `"resume": false` ([techniques.md](techniques.md#the-natural-pool)) |
+| `ValueError: variation: this run's ['pool'] differ from those the plan variations.manifest.jsonl was made with ...` | A natural plan made before the spec's `kinds` narrowed the natural pool: it names techniques the natural kind no longer draws | Run the natural kind with `"resume": false` ([techniques.md](techniques.md#the-natural-pool)) |
 | `ValueError: augmentations.natural.families.allow names 'structural', which the natural kind does not draw ...` | A `config_dir` copy of `augmentations.json` from before; its natural `families.allow` names `structural`, `temporal`, `continuation` | Take them out of that list |
+| INFO `configs: the natural kind of jailbreak/augmentations.json in ... does not allow ..., which the library's allows ...` | A `config_dir` copy of `augmentations.json` made before the library allowed those natural families; its variations do not draw them | Add them to the copy's natural `families.allow`, delete the copy, or `scaffold_setup(..., overwrite=True)`, which replaces your edits ([configuration.md](configuration.md#your-own-config-folder)) |
 | WARNING `Variations: left out N benign or dual-use benign rows made with a technique the natural kind does not draw (...)` | `variations.csv` holds rows of a natural plan made before the `kinds` gate; the build leaves the benign ones out | Run the natural kind with `"resume": false` and build again |
 | `ValueError: The plan names the technique '...', which no registered technique implements` | A kept plan names a technique that was renamed or removed | Run the jailbreak stage with `"resume": false` |
 | `ValueError: Benign data not found and no client provided for generation ...` | `auto_generate_benign` is false and there is no benign file | Run once with it on, or set `benign_path` |

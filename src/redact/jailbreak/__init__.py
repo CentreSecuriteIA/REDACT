@@ -1,8 +1,9 @@
 """Jailbreak augmentation: a pool of techniques, a plan of one combination per
 input and iteration, and the stage that runs the units.
 
-The techniques live in one subpackage per layer of the spec: ``hacking/``,
-``manipulation/``, ``obfuscation/`` and ``requests/``. A transform is
+The techniques live in one subpackage per layer of the spec: ``rewrite/``
+(empty for now), ``hacking/``, ``manipulation/``, ``obfuscation/`` and
+``requests/``. A transform is
 ``(prompt) -> (text, info)``; a technique that calls a model is a generator
 (:mod:`redact.jailbreak.technique`).
 

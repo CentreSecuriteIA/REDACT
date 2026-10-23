@@ -15,12 +15,14 @@ from redact.recipe import check_dimensions as _check_dimensions
 
 _FAMILY_TAGS = {
     "language": ["translation", "answer_language"],
-    "surface_noise": ["typos", "casual_writing", "suffixes"],
+    "surface_noise": ["typos", "casual_writing", "noise", "suffixes"],
     "encoding": ["encode", "sensitive_words", "tokenbreak", "ascii_art"],
-    "container": ["structural"],
-    "role_framing": ["persona", "framing", "cognitive", "impersonation"],
+    "container": ["structural", "neutral_container"],
+    "role_framing": ["persona", "framing", "cognitive", "impersonation",
+                     "benign_role"],
     "request_shape": ["indirect", "distractor_prefix", "distractor_suffix",
-                      "continuation", "asking", "temporal"],
+                      "continuation", "asking", "temporal", "smalltalk_prefix",
+                      "smalltalk_suffix"],
     "answer_shape": ["answer_format"],
     "example_priming": ["fsh", "dap"],
 }
@@ -158,9 +160,12 @@ class TestTheCheck:
         message = str(raised.value)
         assert "the axis inputs.focus (focus) and the request_shape families" in message
         assert "adversarial: asking, continuation" in message
-        # The natural kind draws neither continuation, temporal nor structural.
-        assert "natural: asking, indirect)" in message
-        assert "the container families (adversarial: structural)." in message
+        # The natural kind draws neither continuation, temporal nor
+        # structural; the attacks draw no small talk.
+        assert ("natural: asking, indirect, smalltalk_prefix, smalltalk_suffix)"
+                in message)
+        assert ("the container families (adversarial: neutral_container, "
+                "structural; natural: neutral_container).") in message
         assert "the example_priming families (adversarial: dap, fsh)" in message
         assert message.count("undecided") == len(("request_shape", "container",
                                                    "example_priming"))
@@ -201,10 +206,26 @@ class TestTheCheck:
         persona, framing, cognitive and impersonation families."""
         assert dimensions.relation("authorship", "role_framing") is None
         assert A.varied(A.resolve("inputs"))["writer"] == "authorship"
-        drawn = augmentations_of({})["adversarial"]
-        assert set(_FAMILY_TAGS["role_framing"]) <= {
-            fn.families[0] for fn in JPool.technique_pool(drawn)}
+        kinds = augmentations_of({})
+        drawn = {fn.families[0] for kind in kinds.values()
+                 for fn in JPool.technique_pool(kind)}
+        assert set(_FAMILY_TAGS["role_framing"]) <= drawn
         check_dimensions({}, augmentations_of({}))
+
+    @pytest.mark.parametrize("name", ["eval_example.json", "training_example.json"])
+    def test_the_example_recipes_and_their_types_pass(self, name):
+        """With their params files, and with their dataset types alone: the
+        natural kind draws the benign roles (role_framing) beside the writer
+        axis, which the ruling above keeps apart."""
+        from redact.recipe import load_params, load_recipe
+
+        recipe = load_recipe(paths.configs_dir() / "runs" / name)
+        params = load_params(recipe["params_file"], base_dir=recipe["_base_dir"])
+        dataset_type = recipe["dataset_type"]
+        _check_dimensions(params, augmentations_of(recipe, params["jailbreaks"]),
+                          dataset_type=dataset_type)
+        _check_dimensions({}, load_recipe({"dataset_type": dataset_type})[
+            "augmentations"], dataset_type=dataset_type)
 
     def test_one_tag_on_both_sides_is_one_dimension(self, table_at):
         table_at({"noise": {"side": "generation", "definition": "A thing."}})

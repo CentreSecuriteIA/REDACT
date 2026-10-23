@@ -7,6 +7,7 @@ records the result beside the manifest.
 """
 
 import csv
+from collections import Counter
 
 import pandas as pd
 import pytest
@@ -14,6 +15,7 @@ import pytest
 import redact.jailbreak  # noqa: F401  (tags the techniques)
 from redact.jailbreak.hacking import get_all_hacking_functions
 from redact.jailbreak.plan import coverage, plan_run
+from redact.jailbreak.technique import applies
 from tests.jailbreak import simulate
 
 _GROUP = 20
@@ -102,6 +104,52 @@ def test_coverage_returns_none_without_a_manifest(tmp_path):
     assert coverage(tmp_path / "missing.manifest.jsonl", []) is None
 
 
+def test_a_plans_model_calls_add_up_from_the_spec(tmp_path, caplog):
+    """A synthetic plan: a pure unit, typos ([2, 4]), a translation
+    ([2, 12]), both, and a persona ([3, 9])."""
+    import logging
+
+    from redact.dataset import Manifest
+    from redact.jailbreak.plan import log_model_calls
+    from redact.jailbreak.pool import all_techniques, registry
+
+    names = ["to_base64", "to_rewrite_with_typos_low", "to_swahili",
+             "to_artist_persona"]
+    pool = [registry(all_techniques())[name] for name in names]
+    manifest = tmp_path / "jb.manifest.jsonl"
+    Manifest(manifest).write(
+        {"sample_id": str(i), "iteration": 0, "combination": combination}
+        for i, combination in enumerate([
+            ["to_base64"], ["to_rewrite_with_typos_low", "to_base64"],
+            ["to_swahili"], ["to_swahili", "to_rewrite_with_typos_low"],
+            ["to_artist_persona"]]))
+    with caplog.at_level(logging.INFO, logger="redact.jailbreak.plan"):
+        log_model_calls(manifest, pool)
+    assert [r.getMessage() for r in caplog.records] == [
+        "Model calls: 4 of 5 planned units call a model, 11 to 41 calls "
+        "(translation 4 to 24, from the spec's calls)."]
+
+
+def test_every_technique_that_calls_a_model_has_calls_in_the_spec():
+    from redact.jailbreak.pool import all_techniques
+
+    assert [fn.__name__ for fn in all_techniques()
+            if fn.requires_llm and fn.calls is None] == []
+
+
+def test_a_verbose_plan_logs_its_model_calls(tmp_path, caplog):
+    import logging
+
+    from redact.jailbreak.obfuscation.typos import to_rewrite_with_typos_low
+
+    with caplog.at_level(logging.INFO, logger="redact.jailbreak.plan"):
+        plan_run(_one_group(4), [to_rewrite_with_typos_low],
+                 manifest_path=tmp_path / "jb.manifest.jsonl", seed=3,
+                 settings_per_iteration=[{"exact_techniques": 1}])
+    assert ("Model calls: 4 of 4 planned units call a model, 8 to 16 calls "
+            "(translation 0 to 0") in caplog.text
+
+
 def test_a_layer_left_two_or_more_short_of_its_target_is_logged(tmp_path, caplog):
     import logging
 
@@ -161,12 +209,14 @@ def test_the_escalation_asks_rates_the_rules_can_meet(tmp_path, caplog):
 
 def test_the_default_budget_deals_every_request_family(tmp_path):
     """The requests layer is picked before the obfuscations, so the budget
-    they spend does not leave only the cheapest request families."""
-    from redact.jailbreak.technique import load_spec
+    they spend does not leave only the cheapest request families. Every
+    request family the attacks may draw: not the natural-only ones."""
+    from redact.jailbreak.technique import family_kinds, load_spec
 
     families = load_spec()["families"]
     requests = [name for name, family in families.items()
-                if family["layer"] == "requests"]
+                if family["layer"] == "requests"
+                and "adversarial" in family_kinds(name)]
     rows = _plan_kind(tmp_path, {}, 200)
     drawn = {r["name"]: int(r["count"]) for r in rows if r["level"] == "family"}
     short = {name: drawn.get(name, 0) for name in requests
@@ -178,14 +228,9 @@ def test_the_default_budget_deals_every_request_family(tmp_path):
 # Within the family the dealer picks, the unit takes the technique it may take
 # that the group has dealt least. The complexity budget still favours a
 # family's cheaper techniques where they cost differently (encode,
-# sensitive_words): a heavy one fits fewer units, which is wanted.
-
-
-def _top_over_even(table: dict, family: str) -> float:
-    """The largest share of ``family`` one technique has, over an even share."""
-    in_family = [row["share_in_family"] for row in table.values()
-                 if row["family"] == family]
-    return max(in_family) * len(in_family)
+# sensitive_words): one of complexity 3 fits only a unit whose earlier picks
+# leave 3 points, and fsh and dap refuse the heavy encodings, which is
+# wanted; each is still drawn.
 
 
 @pytest.fixture(scope="module")
@@ -196,7 +241,7 @@ def default_shares() -> dict:
 @pytest.mark.parametrize("family", ["persona", "answer_language"])
 def test_the_techniques_of_a_family_the_budget_never_limits_come_out_even(
         default_shares, family):
-    assert _top_over_even(default_shares, family) <= _TOP_OVER_EVEN
+    assert simulate.top_over_even(default_shares, family) <= _TOP_OVER_EVEN
 
 
 def test_a_count_round_deals_the_techniques_of_every_family_evenly():
@@ -206,9 +251,25 @@ def test_a_count_round_deals_the_techniques_of_every_family_evenly():
     table = simulate.shares(*simulate.deal_kind(
         {}, _SIMULATED, kind="natural", groups=3))
     families = {row["family"] for row in table.values()}
-    uneven = {family: round(_top_over_even(table, family), 2) for family in families
-              if _top_over_even(table, family) > _COUNT_TOP_OVER_EVEN}
+    uneven = {family: round(simulate.top_over_even(table, family), 2)
+              for family in families
+              if simulate.top_over_even(table, family) > _COUNT_TOP_OVER_EVEN}
     assert uneven == {}
+
+
+@pytest.mark.parametrize("units", [2000, 3000])
+@pytest.mark.parametrize("section", [{}, {"budget": "group"}], ids=["unit", "group"])
+def test_the_default_attacks_draw_every_technique_of_their_pool(units, section):
+    """No step's picks starve another step's families: the request
+    obfuscation once counted its picks as the obfuscation layer's, and 14
+    encode and sensitive_words techniques were never drawn. A deprecated
+    technique, or one no simulated input may take, is not asked for."""
+    drawn, pool = simulate.deal_kind(section, units, groups=3)
+    table = simulate.shares(drawn, pool)
+    texts = simulate.inputs(units, groups=3)["prompt"]
+    asked = [fn.__name__ for fn in pool if not getattr(fn, "deprecated", None)
+             and any(applies(fn, text, "harmful") for text in texts)]
+    assert [name for name in asked if table[name]["count"] == 0] == []
 
 
 def test_a_kept_plan_replays_each_row_as_it_was_recorded(tmp_path):
@@ -234,9 +295,10 @@ def test_a_kept_plan_replays_each_row_as_it_was_recorded(tmp_path):
 
 
 # --- the request obfuscation -----------------------------------------------------
-# With allow_request_obfuscation on, the request obfuscation is dealt at its
-# rate like a layer and holds one obfuscation slot. Off (every packaged kind),
-# the draws are those the planner made before it was counted.
+# With allow_request_obfuscation on, as in the packaged attacks, the request
+# obfuscation is dealt at its rate like a layer and holds one obfuscation
+# slot. Off (the eval type, or a round that says false), the draws are those
+# the planner made before it was counted.
 
 _BUDGETS = [
     {},
@@ -244,7 +306,44 @@ _BUDGETS = [
      "sampling_probs": {"hacking": 0.9, "manipulation": 0.1, "requests": 0.9,
                         "request_obfuscation": 0.7}},
 ]
-_PINNED_DRAWS = "16be951e33395966dceff94a50bb754e20b59ab7092d60da59012fa871c83749"
+# The obfuscation renumbering (whole-text rewrites before word-level steps)
+# moved this digest: the same techniques are drawn, some in another order.
+# The script rule moved it again: six draws paired a Latin-only encoding
+# with a translation into another script, and a few more drew from a list
+# the rule narrowed. The language table moved it once more: the answer
+# languages take its order, Swahili before Thai, so the draws that named one
+# of the two name the other, and nothing else changed. The fifteen spec 1.2
+# encodings moved it again: a wider encode family changes which member an
+# encode draw lands on for some seeds. The spec 1.2 noise family moved it once
+# more: one more obfuscation family to draw changes which family some draws
+# land on. The applicability of to_stripped_accents and to_abbreviations
+# moved it again: the simulated inputs hold no accented letter, so
+# to_stripped_accents, which 7 of the 240 dealt units drew, is never drawn
+# for them, and the casual writing picks are dealt over the other members;
+# since a unit's rng and its group's counts follow the picks before, 65 units
+# draw differently, 40 of them outside casual writing. The draws without a
+# dealer filter nothing and do not move. The spec 1.2 neutral_container family
+# moved it again: one more obfuscation family to draw changes which family
+# some draws land on. The six spec 1.2 answer languages moved it once more: a
+# wider answer_language family changes the member some draws land on, and
+# through the unit's rng the rest of its draw (6 of the 240 dealt units, 4 of
+# the 200 undealt draws). The three spec 1.2 natural-only request families
+# (small talk before and after, benign roles) moved it again: all_techniques()
+# holds them, whatever their kinds, and three more request families to deal
+# change most draws (224 of the 240 dealt units, 49 of the 200 undealt ones).
+# The simulated inputs are harmful, so no dealt unit draws a benign role; the
+# undealt draws, which read no applicability, do. The four spec 1.2 many-shot
+# fsh and dap variants moved it once more: a wider fsh and dap change the
+# member a manipulation draw lands on, and through the unit's rng and its
+# group's counts the rest of its draw (128 of the 240 dealt units; 6 of the
+# 200 undealt draws, each now drawing a many-shot variant). Scoring
+# to_html_entities as heavy, complexity 3 (it was light, 2) moved it last: the
+# budget it takes and the members it leaves out of fsh and dap units change the
+# picks after it (25 of the 240 dealt units, 3 of the 200 undealt draws).
+# Scoring the two selected_many variants 3 (they were 4: the scale stays 0 to
+# 3) moved it once more: they take a point less of a unit's budget (53 of the
+# 240 dealt units, 3 of the 200 undealt draws).
+_PINNED_DRAWS = "8a5cdf703b04e6a5633c4d9697146972991ba3842b60c4a2101c64a0ddc33d62"
 
 
 def test_draws_without_the_request_obfuscation_are_those_made_before_it_was_counted():
@@ -281,3 +380,85 @@ def test_the_plan_deals_the_request_obfuscation_at_its_rate():
             sampling_probs={"request_obfuscation": 0.5})
     assert dealer.included["request_obfuscation"] == _GROUP
     assert dealer.targets["request_obfuscation"] == _GROUP
+
+
+def _request_obfuscations(monkeypatch, section: dict, n: int, **kwargs) -> list:
+    """Each unit's request obfuscation (``None`` without one) in a one-round
+    plan of the adversarial ``section``, read off each draw: the manifest
+    names a combination's techniques, not which of them is the request
+    obfuscation. One round, so no unit is drawn again."""
+    import redact.jailbreak.plan as JP
+
+    sample = JP.sample_combination
+    drawn = []
+
+    def recording(*args, **sample_kwargs):
+        combined = sample(*args, **sample_kwargs)
+        drawn.append(getattr(combined, "request_obfuscation", None))
+        return combined
+
+    monkeypatch.setattr(JP, "sample_combination", recording)
+    simulate.deal_kind(section, n, **kwargs)
+    return drawn
+
+
+# Units of the packaged attacks a test of the request obfuscation plans, in
+# three groups; the spec's request_obfuscation rate is 0.5.
+_ATTACKS = 600
+
+
+def test_the_packaged_attacks_deal_a_request_obfuscation_to_half_their_units(
+        monkeypatch):
+    drawn = _request_obfuscations(monkeypatch, {}, _ATTACKS, groups=3)
+    assert sum(fn is not None for fn in drawn) == _ATTACKS // 2
+
+
+def test_the_request_obfuscation_is_a_light_encoding_or_a_translation(monkeypatch):
+    """Light ``encode`` techniques, the light ``to_sensitive_words_encode_*``
+    (first family ``sensitive_words``) and the translations: all three are
+    drawn by the packaged attacks."""
+    drawn = [fn for fn in _request_obfuscations(monkeypatch, {}, _ATTACKS, groups=3)
+             if fn is not None]
+    assert {fn.families[0] for fn in drawn} == {
+        "encode", "sensitive_words", "translation"}
+    assert all(getattr(fn, "encode_weight", None) == "light"
+               or "translation" in fn.families for fn in drawn)
+
+
+def test_the_request_obfuscation_takes_the_family_weights(monkeypatch):
+    """Its families are counted apart from the obfuscation layer's and keep
+    their weights: translation at 3 takes three picks to each of the other
+    two families' one. A budget of 12 leaves every family room."""
+    section = {"max_complexity": 12, "family_weights": {"translation": 3}}
+    drawn = _request_obfuscations(monkeypatch, section, _ATTACKS, groups=3)
+    families = Counter(fn.families[0] for fn in drawn if fn is not None)
+    assert families == {"translation": 180, "encode": 60, "sensitive_words": 60}
+
+
+# The eval type's plan of 300 inputs in three groups at its seed, 43, pinned
+# before the packaged attacks turned the request obfuscation on. The eval
+# pool and its draws are held (fixtures/eval_pool.json); they move only with
+# the owner's eval review.
+_PINNED_EVAL_DRAWS = "95083fbb5221e4b1bd39125bfa297bc06bfc51ddbdadde2ad1eb45a6d59b7afb"
+
+
+def _eval_draws(section: dict) -> list[list[str]]:
+    from redact.recipe import load_dataset_type
+
+    base = load_dataset_type("eval")["augmentations"]
+    dealt, _ = simulate.deal_kind(section, 300, groups=3, seed=43, base=base)
+    return dealt
+
+
+def test_the_eval_types_draws_are_held():
+    import hashlib
+    import json
+
+    digest = hashlib.sha256(json.dumps(_eval_draws({})).encode()).hexdigest()
+    assert digest == _PINNED_EVAL_DRAWS
+
+
+def test_a_count_round_ignores_the_request_obfuscation():
+    """The eval type's rounds draw an exact count, which never reads the
+    switch: on, they draw what they draw off."""
+    assert _eval_draws({"allow_request_obfuscation": True}) == _eval_draws({})

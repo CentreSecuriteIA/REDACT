@@ -7,11 +7,17 @@ import json
 import random
 from collections.abc import Callable
 
-from ..directives import load_templates
+from ..directives import draw_variant, load_templates, read_pools, uses_pool
 
-_TEMPLATES = load_templates("obfuscation", "structural_templates.json")
+_FILE = "obfuscation/structural_templates.json"
+#: The file as written: ``to_xml``'s ``policy_ids`` are read here.
+_TEMPLATES = load_templates(*_FILE.split("/"))
+#: Its variant pools: one template each for ``to_xml`` and ``to_markdown``.
+_POOLS = read_pools(_FILE)
 
 
+# The wrapper is written here, not in the template file: moving it into a
+# variant pool waits for the owner's wrapper step (its text is eval-pool text).
 def to_json(prompt: str, *, rng: random.Random | None = None) -> tuple[str, str]:
     """Wrap prompt in JSON structure with override semantics."""
     rng = rng or random
@@ -36,17 +42,29 @@ def to_json(prompt: str, *, rng: random.Random | None = None) -> tuple[str, str]
     return json_payload, f"priority={priority};format={fmt}"
 
 
+@uses_pool(_FILE, "to_xml", slots=("prompt", "policy_id"), info_key=None)
 def to_xml(prompt: str, *, rng: random.Random | None = None) -> tuple[str, str]:
-    """Wrap prompt in XML structure with policy override."""
-    cfg = _TEMPLATES["to_xml"]
-    policy_id = (rng or random).choice(cfg["policy_ids"])
-    payload = cfg["template"].format_map({"policy_id": policy_id, "prompt": prompt})
+    """Wrap prompt in XML structure with policy override.
+
+    The template is drawn first (a pool of one makes no draw), then the
+    policy id from the entry's ``policy_ids``.
+    """
+    variant = draw_variant(_POOLS["to_xml"], rng)
+    policy_id = (rng or random).choice(_TEMPLATES["to_xml"]["policy_ids"])
+    payload = variant["template"].format_map({"policy_id": policy_id, "prompt": prompt})
     return payload, f"policy_id={policy_id}"
 
 
+@uses_pool(_FILE, "to_markdown", info_key=None)
 def to_markdown(prompt: str) -> tuple[str, str]:
-    """Wrap prompt in Markdown structure with override framing."""
-    payload = _TEMPLATES["to_markdown"]["template"].format_map({"prompt": prompt})
+    """Wrap prompt in Markdown structure with override framing.
+
+    It takes no ``rng``: its pool has one template, so there is no draw. A
+    second template needs the ``rng`` keyword with it (the owner's wrapper
+    step).
+    """
+    variant = draw_variant(_POOLS["to_markdown"])
+    payload = variant["template"].format_map({"prompt": prompt})
     return payload, ""
 
 

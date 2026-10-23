@@ -5,6 +5,8 @@ from collections.abc import Callable
 from .ascii_art import get_ascii_art_functions
 from .casual_writing import get_casual_writing_functions
 from .encoding import get_encoding_functions
+from .neutral_container import get_neutral_container_functions
+from .noise import get_noise_functions
 from .sensitive_words import get_sensitive_words_functions
 from .structural import get_structural_functions
 from .suffixes import get_suffix_functions
@@ -25,4 +27,6 @@ def get_all_obfuscation_functions() -> list[Callable]:
         + get_typos_functions()
         + get_suffix_functions()
         + get_casual_writing_functions()
+        + get_noise_functions()
+        + get_neutral_container_functions()
     )

@@ -7,12 +7,14 @@ from collections.abc import Callable
 from functools import partial
 from random import Random
 
-from ..directives import apply_template_directive, load_templates
+from ..directives import apply_template_directive, read_pools, uses_pool
 
-_TEMPLATES: dict[str, list[dict]] = load_templates("requests", "distractor_templates.json")
+_FILE = "requests/distractor_templates.json"
+_TEMPLATES: dict[str, list[dict]] = read_pools(_FILE)
 _apply = partial(apply_template_directive, _TEMPLATES, info_key="type")
 
 
+@uses_pool(_FILE, "prefix_related")
 def to_distractor_prefix_related(
     prompt: str, *, rng: Random | None = None,
 ) -> tuple[str, str]:
@@ -20,6 +22,7 @@ def to_distractor_prefix_related(
     return _apply("prefix_related", prompt, rng=rng)
 
 
+@uses_pool(_FILE, "prefix_unrelated")
 def to_distractor_prefix_unrelated(
     prompt: str, *, rng: Random | None = None,
 ) -> tuple[str, str]:
@@ -27,6 +30,7 @@ def to_distractor_prefix_unrelated(
     return _apply("prefix_unrelated", prompt, rng=rng)
 
 
+@uses_pool(_FILE, "suffix_related")
 def to_distractor_suffix_related(
     prompt: str, *, rng: Random | None = None,
 ) -> tuple[str, str]:
@@ -34,6 +38,7 @@ def to_distractor_suffix_related(
     return _apply("suffix_related", prompt, rng=rng)
 
 
+@uses_pool(_FILE, "suffix_unrelated")
 def to_distractor_suffix_unrelated(
     prompt: str, *, rng: Random | None = None,
 ) -> tuple[str, str]:

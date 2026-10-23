@@ -105,6 +105,6 @@ class TestDapSelected:
 
 
 class TestGetDapFunctions:
-    def test_returns_four(self):
+    def test_returns_six(self):
         funcs = get_dap_functions()
-        assert len(funcs) == 4
+        assert len(funcs) == 6

@@ -23,7 +23,9 @@ from redact.dataset.dealing import Dealer, stable_seed
 from redact.dataset.planfile import coverage_path, plan_record, write_plan
 
 from .chain import combine_techniques
-from .sampling import sample_combination
+from .pool import TRANSLATION
+from .sampling import DEFAULT_MAX_COMPLEXITY, REQUEST_SCOPE, sample_combination
+from .technique import FIRST_VERSION, applies, load_spec
 
 logger = logging.getLogger(__name__)
 
@@ -31,21 +33,42 @@ logger = logging.getLogger(__name__)
 # further below its target is logged.
 _SHORT = 2
 
+#: How far above ``max_complexity`` a unit's allowance may go under the
+#: group budget when ``max_unit_complexity`` is not given.
+UNIT_HEADROOM = 3
+
 
 def _observe(dealer: Dealer, combined: Callable) -> None:
     """Count in ``dealer`` what one unit's draw ``combined`` holds: each
     technique's first family, the technique itself (a member of that family)
-    and its layer, and the request obfuscation when it has one."""
+    and its layer, the request obfuscation when it has one, and the
+    complexity it spent, the request obfuscation's included. The request
+    obfuscation's family is counted under :data:`REQUEST_SCOPE`, as phase 5
+    deals it, so it does not count against the obfuscation layer's."""
+    request_obfuscation = getattr(combined, "request_obfuscation", None)
     for fn in getattr(combined, "techniques", []):
         families = getattr(fn, "families", None) or []
         if families:
-            dealer.counts[families[0]] += 1
+            scope = REQUEST_SCOPE if fn is request_obfuscation else ""
+            dealer.counts[scope + families[0]] += 1
         dealer.members[fn.__name__] += 1
         layer = getattr(fn, "layer", None)
         if layer is not None:
             dealer.included[layer] += 1
-    if getattr(combined, "request_obfuscation", None) is not None:
+        dealer.spent += getattr(fn, "complexity", 0)
+    if request_obfuscation is not None:
         dealer.included["request_obfuscation"] += 1
+
+
+def _allowance(dealer: Dealer, mean: int, ceiling: int | None) -> int:
+    """The complexity a unit may spend under the group budget: ``mean`` plus
+    what the group's earlier units left unspent of it
+    (:meth:`~redact.dataset.dealing.Dealer.bank`), at most ``ceiling``
+    (``mean + UNIT_HEADROOM`` when ``None``). The group spends ``mean`` per
+    unit or less on average, and no unit more than ``ceiling``."""
+    if ceiling is None:
+        ceiling = mean + UNIT_HEADROOM
+    return min(mean + dealer.bank(mean), ceiling)
 
 
 def _names(combined: Callable) -> list[str]:
@@ -61,21 +84,35 @@ def assign_combination(
     used: tuple | list | set = (),
     max_resamples: int = 8,
     dealer=None,
+    budget: str | None = None,
+    max_unit_complexity: int | None = None,
     **sample_kwargs,
 ) -> list[str]:
     """The names of the combination one unit is assigned, in applied order.
 
-    The draw is seeded by ``(seed, sample_id, iteration)``, so it does not
-    depend on the order or the chunking of the inputs. It is drawn again, up
+    ``pool`` is what the unit may draw from: :func:`plan_run` passes the
+    techniques that apply to the unit's input. The draw is seeded by
+    ``(seed, sample_id, iteration)``, so it does not depend on the order or
+    the chunking of the inputs. It is drawn again, up
     to ``max_resamples`` times, while it equals a combination in ``used`` (the
     sample's earlier iterations); the last draw is kept if none differs. The
     first draw is dealt from ``dealer``; a resample draws uniformly, so it can
     escape a collision the deal would otherwise force on a small pool. The
-    kept draw is counted in ``dealer`` (its families, techniques, layers and
-    request obfuscation), so the group's next unit is dealt after it.
-    ``sample_kwargs`` go to :func:`sample_combination`. An empty list is the
-    identity.
+    kept draw is counted in ``dealer`` (its families, techniques, layers,
+    request obfuscation and complexity), so the group's next unit is dealt
+    after it. ``sample_kwargs`` go to :func:`sample_combination`. An empty
+    list is the identity.
+
+    With ``budget`` ``"group"`` and a ``dealer``, every draw of a budget
+    round may spend the unit's allowance (:func:`_allowance`, with
+    ``max_unit_complexity`` its ceiling) in place of ``max_complexity``.
+    ``budget`` ``None`` or ``"unit"``, no dealer, or a count draw
+    (``exact_techniques``, which has no budget) leaves the draw as it was.
     """
+    if (budget == "group" and dealer is not None
+            and sample_kwargs.get("exact_techniques") is None):
+        mean = sample_kwargs.get("max_complexity", DEFAULT_MAX_COMPLEXITY)
+        sample_kwargs["max_complexity"] = _allowance(dealer, mean, max_unit_complexity)
     used_set = {tuple(c) for c in used}
     base = stable_seed(seed, sample_id, iteration)
     kept = None
@@ -129,6 +166,15 @@ def plan_run(
     ``sample_kwargs`` with ``settings_per_iteration[iteration]`` merged over
     them, key by key.
 
+    Each unit draws from the techniques of ``pool`` that apply to its input
+    (:func:`~redact.jailbreak.technique.applies`, read off the input's
+    ``text_col`` and ``entry_type``), in pool order: the whole pool when
+    every technique applies, so the draw is the one the pool gives. A unit
+    no technique of a layer applies to takes no pick there, and the dealer,
+    which counts what each unit drew, gives the layer to the group's next
+    unit that can take it; a unit no technique applies to gets the empty
+    combination.
+
     The units of one ``(category, entry_type, iteration)`` group are dealt in
     ``sample_id`` order from a shared
     :class:`~redact.dataset.dealing.Dealer`, so each layer appears at its rate
@@ -136,8 +182,14 @@ def plan_run(
     (``family_weights``, equal by default) and each technique of a family as
     often as the others the unit may take, evenly across the group and
     independent of the input order; a row's ``settings`` record the weights
-    when given. The plan file (:func:`plan_inputs`) is written beside the
-    manifest first, and a coverage table after it. Returns ``manifest_path``.
+    when given. A round whose settings say ``budget`` ``"group"`` banks the
+    complexity over the group (:func:`assign_combination`): a unit may spend
+    what the units before it left of ``max_complexity``, up to
+    ``max_unit_complexity``, and the group's mean stays at or below
+    ``max_complexity``. The plan file (:func:`plan_inputs`) is written beside the
+    manifest first, and a coverage table after it; with ``verbose``, one line
+    then says what the plan costs in model calls (:func:`log_model_calls`).
+    Returns ``manifest_path``.
     """
     base_kwargs = dict(sample_kwargs or {})
     if layer_rates is not None:
@@ -149,14 +201,20 @@ def plan_run(
     # order so the plan does not depend on the order the inputs arrived in; a
     # row keeps its own dedup history across its iterations.
     subgroups: dict[tuple[str, str], list[tuple[str, int]]] = defaultdict(list)
+    texts: list[str] = []
     for idx, (_, row) in enumerate(inputs.iterrows()):
         sid = row_id(row, text_col, id_col)
         key = (str(row.get("category", "")), str(row.get("entry_type", "")))
         subgroups[key].append((sid, idx))
+        texts.append(str(row.get(text_col, "")))
     for members in subgroups.values():
         members.sort()
     used_by_row: dict[int, list[tuple]] = defaultdict(list)
     recorded = {"family_weights": dict(family_weights)} if family_weights else {}
+    # The request obfuscation's families are dealt under REQUEST_SCOPE and
+    # take the weights of the same families.
+    weights = dict(family_weights or {})
+    weights.update({REQUEST_SCOPE + name: w for name, w in weights.items()})
 
     # Yielded to the manifest one at a time: the plan is never held whole.
     def units():
@@ -169,11 +227,13 @@ def plan_run(
             )
             for key in sorted(subgroups):
                 category, entry_type = key
-                dealer = Dealer(family_weights, key=(seed, category, entry_type, it))
+                dealer = Dealer(weights, key=(seed, category, entry_type, it))
                 for sid, idx in subgroups[key]:
                     dealer.position += 1
+                    candidates = [fn for fn in pool
+                                  if applies(fn, texts[idx], entry_type)]
                     names = assign_combination(
-                        sid, pool, seed=seed, iteration=it,
+                        sid, candidates, seed=seed, iteration=it,
                         used=used_by_row[idx], dealer=dealer, **settings,
                     )
                     used_by_row[idx].append(tuple(names))
@@ -201,7 +261,38 @@ def plan_run(
     if verbose:
         logger.info("Planned %d units (%d samples x %d) -> %s",
                     planned, len(inputs), iterations, manifest_path)
+        log_model_calls(manifest_path, pool)
     return manifest_path
+
+
+def log_model_calls(manifest_path: Path, pool: list[Callable]) -> None:
+    """Log in one INFO line what the planned units cost in model calls.
+
+    A unit counts when it draws a technique that calls a model
+    (``requires_llm``), and its techniques' spec ``calls`` add up, low to
+    high; the translation family's are also given apart, since they go to
+    the translation model (a machine translation's judge aside). Every
+    ``requires_llm`` technique of the spec carries ``calls`` (a test holds it).
+    """
+    by_name = {fn.__name__: fn for fn in pool}
+    units = calling = 0
+    calls, translation = [0, 0], [0, 0]
+    for row in _manifest_rows(Path(manifest_path)):
+        units += 1
+        fns = [by_name[name] for name in row.get("combination") or []
+               if getattr(by_name.get(name), "requires_llm", False)]
+        calling += bool(fns)
+        for fn in fns:
+            low, high = fn.calls
+            calls[0] += low
+            calls[1] += high
+            if TRANSLATION in fn.families:
+                translation[0] += low
+                translation[1] += high
+    logger.info(
+        "Model calls: %d of %d planned units call a model, %d to %d calls "
+        "(translation %d to %d, from the spec's calls).", calling, units, *calls,
+        *translation)
 
 
 def _warn_short(dealer: Dealer, iteration: int, manifest_path: Path) -> None:
@@ -229,11 +320,14 @@ def plan_inputs(
     layer_rates: dict | None = None,
 ) -> dict:
     """What a plan is made with, its plan file's record: ``seed``, ``rounds``,
-    the ``pool``'s technique names sorted, ``family_weights`` and
-    ``layer_rates``."""
+    the ``pool``'s technique names sorted, ``family_weights``,
+    ``layer_rates``, and ``spec_version``, the spec's version, which dates
+    the pool: a resume reads off it what the library added or retired since
+    (:func:`redact.jailbreak.pipeline.run_augmentation`)."""
     return plan_record(
         seed=seed, rounds=rounds, pool=sorted(fn.__name__ for fn in pool),
-        family_weights=family_weights, layer_rates=layer_rates)
+        family_weights=family_weights, layer_rates=layer_rates,
+        spec_version=load_spec().get("version", FIRST_VERSION))
 
 
 def _manifest_rows(manifest_path: Path):

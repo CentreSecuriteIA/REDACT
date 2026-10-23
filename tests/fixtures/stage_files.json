@@ -92,7 +92,7 @@
    ],
    "jailbreaks.csv": [
     ["sample_id", "prompt", "category", "entry_type", "turn", "accepted", "note", "input_id", "jailbreak", "technique", "technique_info", "complexity", "num_techniques", "is_noop", "reasoning", "iteration", "combination_spec_version"],
-    ["c90c52876253af83", "zq5 sixth", "Fraud", "harmful", "5", "False", "said \"hi\"", "77", "zq5 sixth", "broken", "ERROR: chain failed", "0", "1", "True", "chain failed", "0", "1.0"]
+    ["c90c52876253af83", "zq5 sixth", "Fraud", "harmful", "5", "False", "said \"hi\"", "77", "zq5 sixth", "broken", "ERROR: chain failed", "0", "1", "True", "chain failed", "0", "<spec version>"]
    ],
    "jailbreaks.manifest.jsonl": [
     {"sample_id": "4897ac10b496f1d8", "iteration": 0, "combination": ["two_step"], "settings": {"max_complexity": 6, "max_obfuscations": 2, "include_hacking": true, "include_manipulation": true, "include_obfuscation": true, "include_requests": true, "exact_techniques": 1, "seed": 5}, "category": "Cyber", "entry_type": "benign", "status": "planned"},
@@ -108,7 +108,7 @@
     {"sample_id": "given-1", "iteration": 1, "combination": ["broken"], "settings": {"max_complexity": 4, "max_obfuscations": 2, "include_hacking": true, "include_manipulation": true, "include_obfuscation": true, "include_requests": true, "seed": 5}, "category": "Fraud", "entry_type": "harmful", "status": "planned"},
     {"sample_id": "padded", "iteration": 1, "combination": ["broken"], "settings": {"max_complexity": 4, "max_obfuscations": 2, "include_hacking": true, "include_manipulation": true, "include_obfuscation": true, "include_requests": true, "seed": 5}, "category": "Fraud", "entry_type": "harmful", "status": "planned"}
    ],
-   "jailbreaks.plan.json": "{\n \"seed\": 5,\n \"rounds\": [\n  {\n   \"max_complexity\": 6,\n   \"max_obfuscations\": 2,\n   \"include_hacking\": true,\n   \"include_manipulation\": true,\n   \"include_obfuscation\": true,\n   \"include_requests\": true,\n   \"exact_techniques\": 1\n  },\n  {\n   \"max_complexity\": 4,\n   \"max_obfuscations\": 2,\n   \"include_hacking\": true,\n   \"include_manipulation\": true,\n   \"include_obfuscation\": true,\n   \"include_requests\": true\n  }\n ],\n \"pool\": [\n  \"broken\",\n  \"one_step\",\n  \"two_step\"\n ],\n \"family_weights\": null,\n \"layer_rates\": null\n}\n",
+   "jailbreaks.plan.json": "{\n \"seed\": 5,\n \"rounds\": [\n  {\n   \"max_complexity\": 6,\n   \"max_obfuscations\": 2,\n   \"include_hacking\": true,\n   \"include_manipulation\": true,\n   \"include_obfuscation\": true,\n   \"include_requests\": true,\n   \"exact_techniques\": 1\n  },\n  {\n   \"max_complexity\": 4,\n   \"max_obfuscations\": 2,\n   \"include_hacking\": true,\n   \"include_manipulation\": true,\n   \"include_obfuscation\": true,\n   \"include_requests\": true\n  }\n ],\n \"pool\": [\n  \"broken\",\n  \"one_step\",\n  \"two_step\"\n ],\n \"family_weights\": null,\n \"layer_rates\": null,\n \"spec_version\": \"<spec version>\"\n}\n",
    "jailbreaks.state.jsonl": [
     {},
     {"input_id": "77", "iteration": 0}
@@ -128,18 +128,18 @@
    ],
    "jailbreaks.csv": [
     ["sample_id", "prompt", "category", "entry_type", "turn", "accepted", "note", "input_id", "jailbreak", "technique", "technique_info", "complexity", "num_techniques", "is_noop", "reasoning", "iteration", "combination_spec_version"],
-    ["c90c52876253af83", "zq5 sixth", "Fraud", "harmful", "5", "False", "said \"hi\"", "77", "zq5 sixth", "broken", "ERROR: chain failed", "0", "1", "True", "chain failed", "0", "1.0"],
-    ["d9a44424f0cc039d", "zq1 second", "Cyber", "benign", "1", "True", "N/A", "4897ac10b496f1d8", "S2:S1:zq1 second", "two_step", "two_step", "0", "1", "False", "", "0", "1.0"],
-    ["24b251cf8eec34db", "zq4 fifth", "Cyber", "benign", "4", "True", "", "867ec320a9a53194", "S2:S1:zq4 fifth", "two_step", "two_step", "0", "1", "False", "", "0", "1.0"],
-    ["8ccead87fd5be7fe", "zq3 fourth, the id of the first", "Fraud", "harmful", "3", "True", "two\nlines", "given-1", "S2:S1:zq3 fourth, the id of the first", "two_step", "two_step", "0", "1", "False", "", "0", "1.0"],
-    ["8ccead87fd5be7fe", "zq3 fourth, the id of the first", "Fraud", "harmful", "3", "True", "two\nlines", "given-1", "S2:S1:zq3 fourth, the id of the first", "two_step", "two_step", "0", "1", "False", "", "0", "1.0"],
-    ["173d1de97bcb0961", "zq1 second", "Cyber", "benign", "1", "False", "N/A", "4897ac10b496f1d8", "zq1 second", "broken", "ERROR: chain failed", "0", "1", "True", "chain failed", "1", "1.0"],
-    ["5d18908c97afc010", "zq4 fifth", "Cyber", "benign", "4", "False", "", "867ec320a9a53194", "zq4 fifth", "broken", "ERROR: chain failed", "0", "1", "True", "chain failed", "1", "1.0"],
-    ["309afe71e46678f8", "zq3 fourth, the id of the first", "Fraud", "harmful", "3", "False", "two\nlines", "given-1", "zq3 fourth, the id of the first", "broken", "ERROR: chain failed", "0", "1", "True", "chain failed", "1", "1.0"],
-    ["d89c7a87d582616a", "zq2 third", "Fraud", "harmful", "2", "True", "a, b", "padded", "S2:S1:zq2 third", "two_step", "two_step", "0", "1", "False", "", "0", "1.0"],
-    ["4187698902316996", "zq5 sixth", "Fraud", "harmful", "5", "True", "said \"hi\"", "77", "S1:zq5 sixth", "one_step", "one_step", "0", "1", "False", "", "1", "1.0"],
-    ["309afe71e46678f8", "zq3 fourth, the id of the first", "Fraud", "harmful", "3", "False", "two\nlines", "given-1", "zq3 fourth, the id of the first", "broken", "ERROR: chain failed", "0", "1", "True", "chain failed", "1", "1.0"],
-    ["3e26738feee0f44e", "zq2 third", "Fraud", "harmful", "2", "False", "a, b", "padded", "zq2 third", "broken", "ERROR: chain failed", "0", "1", "True", "chain failed", "1", "1.0"]
+    ["c90c52876253af83", "zq5 sixth", "Fraud", "harmful", "5", "False", "said \"hi\"", "77", "zq5 sixth", "broken", "ERROR: chain failed", "0", "1", "True", "chain failed", "0", "<spec version>"],
+    ["d9a44424f0cc039d", "zq1 second", "Cyber", "benign", "1", "True", "N/A", "4897ac10b496f1d8", "S2:S1:zq1 second", "two_step", "two_step", "0", "1", "False", "", "0", "<spec version>"],
+    ["24b251cf8eec34db", "zq4 fifth", "Cyber", "benign", "4", "True", "", "867ec320a9a53194", "S2:S1:zq4 fifth", "two_step", "two_step", "0", "1", "False", "", "0", "<spec version>"],
+    ["8ccead87fd5be7fe", "zq3 fourth, the id of the first", "Fraud", "harmful", "3", "True", "two\nlines", "given-1", "S2:S1:zq3 fourth, the id of the first", "two_step", "two_step", "0", "1", "False", "", "0", "<spec version>"],
+    ["8ccead87fd5be7fe", "zq3 fourth, the id of the first", "Fraud", "harmful", "3", "True", "two\nlines", "given-1", "S2:S1:zq3 fourth, the id of the first", "two_step", "two_step", "0", "1", "False", "", "0", "<spec version>"],
+    ["173d1de97bcb0961", "zq1 second", "Cyber", "benign", "1", "False", "N/A", "4897ac10b496f1d8", "zq1 second", "broken", "ERROR: chain failed", "0", "1", "True", "chain failed", "1", "<spec version>"],
+    ["5d18908c97afc010", "zq4 fifth", "Cyber", "benign", "4", "False", "", "867ec320a9a53194", "zq4 fifth", "broken", "ERROR: chain failed", "0", "1", "True", "chain failed", "1", "<spec version>"],
+    ["309afe71e46678f8", "zq3 fourth, the id of the first", "Fraud", "harmful", "3", "False", "two\nlines", "given-1", "zq3 fourth, the id of the first", "broken", "ERROR: chain failed", "0", "1", "True", "chain failed", "1", "<spec version>"],
+    ["d89c7a87d582616a", "zq2 third", "Fraud", "harmful", "2", "True", "a, b", "padded", "S2:S1:zq2 third", "two_step", "two_step", "0", "1", "False", "", "0", "<spec version>"],
+    ["4187698902316996", "zq5 sixth", "Fraud", "harmful", "5", "True", "said \"hi\"", "77", "S1:zq5 sixth", "one_step", "one_step", "0", "1", "False", "", "1", "<spec version>"],
+    ["309afe71e46678f8", "zq3 fourth, the id of the first", "Fraud", "harmful", "3", "False", "two\nlines", "given-1", "zq3 fourth, the id of the first", "broken", "ERROR: chain failed", "0", "1", "True", "chain failed", "1", "<spec version>"],
+    ["3e26738feee0f44e", "zq2 third", "Fraud", "harmful", "2", "False", "a, b", "padded", "zq2 third", "broken", "ERROR: chain failed", "0", "1", "True", "chain failed", "1", "<spec version>"]
    ],
    "jailbreaks.manifest.jsonl": [
     {"sample_id": "4897ac10b496f1d8", "iteration": 0, "combination": ["two_step"], "settings": {"max_complexity": 6, "max_obfuscations": 2, "include_hacking": true, "include_manipulation": true, "include_obfuscation": true, "include_requests": true, "exact_techniques": 1, "seed": 5}, "category": "Cyber", "entry_type": "benign", "status": "planned"},
@@ -155,7 +155,7 @@
     {"sample_id": "given-1", "iteration": 1, "combination": ["broken"], "settings": {"max_complexity": 4, "max_obfuscations": 2, "include_hacking": true, "include_manipulation": true, "include_obfuscation": true, "include_requests": true, "seed": 5}, "category": "Fraud", "entry_type": "harmful", "status": "planned"},
     {"sample_id": "padded", "iteration": 1, "combination": ["broken"], "settings": {"max_complexity": 4, "max_obfuscations": 2, "include_hacking": true, "include_manipulation": true, "include_obfuscation": true, "include_requests": true, "seed": 5}, "category": "Fraud", "entry_type": "harmful", "status": "planned"}
    ],
-   "jailbreaks.plan.json": "{\n \"seed\": 5,\n \"rounds\": [\n  {\n   \"max_complexity\": 6,\n   \"max_obfuscations\": 2,\n   \"include_hacking\": true,\n   \"include_manipulation\": true,\n   \"include_obfuscation\": true,\n   \"include_requests\": true,\n   \"exact_techniques\": 1\n  },\n  {\n   \"max_complexity\": 4,\n   \"max_obfuscations\": 2,\n   \"include_hacking\": true,\n   \"include_manipulation\": true,\n   \"include_obfuscation\": true,\n   \"include_requests\": true\n  }\n ],\n \"pool\": [\n  \"broken\",\n  \"one_step\",\n  \"two_step\"\n ],\n \"family_weights\": null,\n \"layer_rates\": null\n}\n",
+   "jailbreaks.plan.json": "{\n \"seed\": 5,\n \"rounds\": [\n  {\n   \"max_complexity\": 6,\n   \"max_obfuscations\": 2,\n   \"include_hacking\": true,\n   \"include_manipulation\": true,\n   \"include_obfuscation\": true,\n   \"include_requests\": true,\n   \"exact_techniques\": 1\n  },\n  {\n   \"max_complexity\": 4,\n   \"max_obfuscations\": 2,\n   \"include_hacking\": true,\n   \"include_manipulation\": true,\n   \"include_obfuscation\": true,\n   \"include_requests\": true\n  }\n ],\n \"pool\": [\n  \"broken\",\n  \"one_step\",\n  \"two_step\"\n ],\n \"family_weights\": null,\n \"layer_rates\": null,\n \"spec_version\": \"<spec version>\"\n}\n",
    "jailbreaks.state.jsonl": [
     {},
     {"input_id": "77", "iteration": 0},
@@ -171,6 +171,9 @@
     {"input_id": "given-1", "iteration": 1},
     {"input_id": "padded", "iteration": 1}
    ],
+   "jailbreaks.variants.csv": [
+    ["technique", "variant", "rows"]
+   ],
    "variations.coverage.csv": [
     ["level", "name", "category", "entry_type", "iteration", "count"],
     ["technique", "broken", "Fraud", "harmful", "0", "1"],
@@ -181,12 +184,12 @@
    ],
    "variations.csv": [
     ["sample_id", "prompt", "category", "entry_type", "turn", "accepted", "note", "input_id", "jailbreak", "technique", "technique_info", "complexity", "num_techniques", "is_noop", "reasoning", "iteration", "combination_spec_version"],
-    ["1237a6567af2d536", "zq5 sixth", "Fraud", "harmful", "5", "False", "said \"hi\"", "77", "zq5 sixth", "broken", "ERROR: chain failed", "0", "1", "True", "chain failed", "0", "1.0"],
-    ["d9a44424f0cc039d", "zq1 second", "Cyber", "benign", "1", "True", "N/A", "4897ac10b496f1d8", "S2:S1:zq1 second", "two_step", "two_step", "0", "1", "False", "", "0", "1.0"],
-    ["24b251cf8eec34db", "zq4 fifth", "Cyber", "benign", "4", "True", "", "867ec320a9a53194", "S2:S1:zq4 fifth", "two_step", "two_step", "0", "1", "False", "", "0", "1.0"],
-    ["8ccead87fd5be7fe", "zq3 fourth, the id of the first", "Fraud", "harmful", "3", "True", "two\nlines", "given-1", "S2:S1:zq3 fourth, the id of the first", "two_step", "two_step", "0", "1", "False", "", "0", "1.0"],
-    ["8ccead87fd5be7fe", "zq3 fourth, the id of the first", "Fraud", "harmful", "3", "True", "two\nlines", "given-1", "S2:S1:zq3 fourth, the id of the first", "two_step", "two_step", "0", "1", "False", "", "0", "1.0"],
-    ["d89c7a87d582616a", "zq2 third", "Fraud", "harmful", "2", "True", "a, b", "padded", "S2:S1:zq2 third", "two_step", "two_step", "0", "1", "False", "", "0", "1.0"]
+    ["1237a6567af2d536", "zq5 sixth", "Fraud", "harmful", "5", "False", "said \"hi\"", "77", "zq5 sixth", "broken", "ERROR: chain failed", "0", "1", "True", "chain failed", "0", "<spec version>"],
+    ["d9a44424f0cc039d", "zq1 second", "Cyber", "benign", "1", "True", "N/A", "4897ac10b496f1d8", "S2:S1:zq1 second", "two_step", "two_step", "0", "1", "False", "", "0", "<spec version>"],
+    ["24b251cf8eec34db", "zq4 fifth", "Cyber", "benign", "4", "True", "", "867ec320a9a53194", "S2:S1:zq4 fifth", "two_step", "two_step", "0", "1", "False", "", "0", "<spec version>"],
+    ["8ccead87fd5be7fe", "zq3 fourth, the id of the first", "Fraud", "harmful", "3", "True", "two\nlines", "given-1", "S2:S1:zq3 fourth, the id of the first", "two_step", "two_step", "0", "1", "False", "", "0", "<spec version>"],
+    ["8ccead87fd5be7fe", "zq3 fourth, the id of the first", "Fraud", "harmful", "3", "True", "two\nlines", "given-1", "S2:S1:zq3 fourth, the id of the first", "two_step", "two_step", "0", "1", "False", "", "0", "<spec version>"],
+    ["d89c7a87d582616a", "zq2 third", "Fraud", "harmful", "2", "True", "a, b", "padded", "S2:S1:zq2 third", "two_step", "two_step", "0", "1", "False", "", "0", "<spec version>"]
    ],
    "variations.manifest.jsonl": [
     {"sample_id": "4897ac10b496f1d8", "iteration": 0, "combination": ["two_step"], "settings": {"exact_techniques": 1, "seed": 5}, "category": "Cyber", "entry_type": "benign", "status": "planned"},
@@ -196,7 +199,7 @@
     {"sample_id": "given-1", "iteration": 0, "combination": ["two_step"], "settings": {"exact_techniques": 1, "seed": 5}, "category": "Fraud", "entry_type": "harmful", "status": "planned"},
     {"sample_id": "padded", "iteration": 0, "combination": ["two_step"], "settings": {"exact_techniques": 1, "seed": 5}, "category": "Fraud", "entry_type": "harmful", "status": "planned"}
    ],
-   "variations.plan.json": "{\n \"seed\": 5,\n \"rounds\": [\n  {\n   \"exact_techniques\": 1\n  }\n ],\n \"pool\": [\n  \"broken\",\n  \"one_step\",\n  \"two_step\"\n ],\n \"family_weights\": null,\n \"layer_rates\": null\n}\n",
+   "variations.plan.json": "{\n \"seed\": 5,\n \"rounds\": [\n  {\n   \"exact_techniques\": 1\n  }\n ],\n \"pool\": [\n  \"broken\",\n  \"one_step\",\n  \"two_step\"\n ],\n \"family_weights\": null,\n \"layer_rates\": null,\n \"spec_version\": \"<spec version>\"\n}\n",
    "variations.state.jsonl": [
     {},
     {"input_id": "77", "iteration": 0},
@@ -205,6 +208,9 @@
     {"input_id": "given-1", "iteration": 0},
     {"input_id": "given-1", "iteration": 0},
     {"input_id": "padded", "iteration": 0}
+   ],
+   "variations.variants.csv": [
+    ["technique", "variant", "rows"]
    ]
   }
  },

@@ -137,7 +137,7 @@ only.
 | `is_accepted(reply)` | The one accept rule: the reply's first word is `yes`, `ok`, `okay`, `accept`, `accepted`, `pass` or `passed`, in any case, after leading whitespace, markdown (`*`, `_`, `#`, `>`, backticks) and quotes, curly ones included. So `**Yes**`, `Yes.` and `yes, because` accept; `Yesterday`, `Acceptable` and `Verdict: yes` reject |
 | `check_sample(client, sample, build_check_messages, original="")` | One check call: `(accepted, reasoning)`, the reasoning being the full reply on rejection |
 | `batch_check_samples(client, samples, build_check_messages, originals=None, batch_size=32)` | Many check calls, in chunks, in order |
-| `checked(gen, build_gen_messages, check=None, build_check_messages=None, *, original="", internals_ids=(None, None), max_tokens=(None, None), max_attempts=1, precheck=None, temperatures=(None, None))` | A unit step: generate, check, and generate again with the verdict as feedback, up to `max_attempts`. `max_tokens` and `temperatures` go to the (generation, check) requests. `precheck(text) -> reason`, with a check, is a code-side verdict before it: a non-empty reason rejects the reply with no check request, and is the feedback (or the last attempt's reasoning). Returns `(text, accepted, reasoning)` |
+| `checked(gen, build_gen_messages, check=None, build_check_messages=None, *, original="", internals_ids=(None, None), max_tokens=(None, None), max_attempts=1, precheck=None, temperatures=(None, None))` | A unit step: generate, check, and generate again with the verdict as feedback, up to `max_attempts`. `gen` and `check` are each a client or a model name, which the driver resolves (a jailbreak technique's, as the typo check's). `max_tokens` and `temperatures` go to the (generation, check) requests. `precheck(text) -> reason`, with a check, is a code-side verdict before it: a non-empty reason rejects the reply with no check request, and is the feedback (or the last attempt's reasoning). Returns `(text, accepted, reasoning)` |
 | `extracted(gen, build_gen_messages, extract, *, internals_id=None, max_tokens=None, max_attempts=3)` | A unit step: generate until `extract(reply)` gives samples, up to `max_attempts`. Returns `(samples, attempts)`. `gen` is a client, or a model name the driver resolves, as a jailbreak technique's requests carry it (the cognitive and persona scenarios) |
 
 `build_check_messages` is `(original, sample) -> messages`, the shape the
@@ -150,7 +150,7 @@ checkers of `content_moderation/checker.py` build.
 | constitution | `drive_units` | 1 | 1 | `extracted` over one call |
 | inputs | `drive_units` | `pool_size(batch_size, gen, check)` | `batch_size` | `extracted` over one call for one sample, then one check request |
 | outputs | `drive_units` | `pool_size(batch_size, client, check)` | `batch_size` | `checked` |
-| jailbreaks | `drive_units` | `pool_size(batch_size, client)` | `batch_size` | `jailbreak.chain.run_chain` over the unit's techniques |
+| jailbreaks | `drive_units` | `pool_size(batch_size, client, check)` | `batch_size` | `jailbreak.chain.run_chain` over the unit's techniques |
 | benign data (`jailbreak/manipulation/benign.py`) | `drive_units` | `pool_size(batch_size, client)` | `batch_size` | `extracted` over one call: one subcategory and answer type, 3 attempts |
 | conversations | `drive_units` | `pool_size(batch_size, *clients)` | `batch_size` | `multi_turn.conversation_gen` |
 | scoring | `drive_units` | `pool_size(batch_size, judge)` | `batch_size` | one judge request |

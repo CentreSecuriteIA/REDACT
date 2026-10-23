@@ -9,14 +9,20 @@ from redact.jailbreak.hacking.cognitive import (
     to_avi,
     to_persona_roleplay,
 )
-from redact.llm_pipeline import drive_sync
+from redact.llm_pipeline import CHECK_TEMPERATURE, drive_sync
 
 
 def _drive(technique, replies: list[str], **kwargs):
-    """Run ``technique`` with ``replies`` in turn; return its result and requests."""
+    """Run ``technique`` with ``replies`` in turn; return its result and requests.
+
+    The scenario check (its request is at the check temperature) accepts and is
+    not among the requests: ``test_scenario_check.py`` covers it.
+    """
     requests = []
 
     def call(request):
+        if request.temperature == CHECK_TEMPERATURE:
+            return "Yes"
         requests.append(request)
         return replies[len(requests) - 1]
 
@@ -87,7 +93,7 @@ class TestConstruction:
 def test_an_empty_construction_is_rejected_naming_the_technique():
     from tests.jailbreak.obfuscation.test_typos import row_of_replies
 
-    row = row_of_replies(to_persona_roleplay, ["---\nscenario\n---", ""])
+    row = row_of_replies(to_persona_roleplay, ["---\nscenario\n---", "Yes", ""])
     assert (row["accepted"], row["jailbreak"]) == (False, "harmful prompt")
     assert "technique=to_persona_roleplay" in row["reasoning"]
 

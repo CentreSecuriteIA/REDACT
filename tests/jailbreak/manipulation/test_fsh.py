@@ -118,6 +118,6 @@ class TestFshSelected:
 
 
 class TestGetFshFunctions:
-    def test_returns_four(self):
+    def test_returns_six(self):
         funcs = get_fsh_functions()
-        assert len(funcs) == 4
+        assert len(funcs) == 6

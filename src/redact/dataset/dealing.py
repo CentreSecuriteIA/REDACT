@@ -23,10 +23,11 @@ class Dealer:
     ``weights`` sets a name's share (1 by default); :meth:`pick` takes the
     name with the lowest count over weight. The planner records what each
     unit was given in ``counts`` (names), ``members`` (the members of a name,
-    for :meth:`pick_member`) and ``included`` (parts), and sets ``position``
-    to the units dealt so far, including the current. ``key`` names the
-    group; it seeds where in the group each part's picks fall. ``targets``
-    holds each part's picks due by the last unit asked.
+    for :meth:`pick_member`), ``included`` (parts) and ``spent`` (the cost
+    the units spent, for :meth:`bank`), and sets ``position`` to the units
+    dealt so far, including the current. ``key`` names the group; it seeds
+    where in the group each part's picks fall. ``targets`` holds each part's
+    picks due by the last unit asked.
     """
 
     def __init__(self, weights: dict | None = None, key: tuple = ()) -> None:
@@ -36,6 +37,7 @@ class Dealer:
         self.counts: Counter = Counter()
         self.members: Counter = Counter()
         self.included: Counter = Counter()
+        self.spent = 0
         self.targets: dict[str, int] = {}
         self._offsets: dict[str, float] = {}
 
@@ -65,3 +67,11 @@ class Dealer:
             self._offsets[part] = seeded.random()
         self.targets[part] = math.floor(rate * self.position + self._offsets[part])
         return self.included[part] < self.targets[part]
+
+    def bank(self, per_unit: int) -> int:
+        """What the units dealt before this one left unspent of ``per_unit``
+        each: ``per_unit`` times their number, less ``spent``, never below 0.
+        Units each given at most ``per_unit`` plus the bank keep ``spent`` at
+        or below ``per_unit`` times ``position``: a cheap unit leaves what it
+        did not spend to the units after it."""
+        return max(0, per_unit * (self.position - 1) - self.spent)

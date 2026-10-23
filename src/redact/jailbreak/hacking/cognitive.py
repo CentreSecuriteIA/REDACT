@@ -1,19 +1,24 @@
-"""Cognitive techniques: a model writes a scenario, then the prompt built on it.
+"""Cognitive techniques: a model writes a scenario, a check model reads it
+against the prompt, then the prompt is built on it.
 
 The five techniques are the categories of
 ``configs/jailbreak/hacking/cognitive_techniques.json``; ``info`` is
 ``category=<key>``. A scenario reply without its scene is asked again, up to
 :func:`~redact.llm_pipeline.extracted`'s attempts, then the prompt is
-discarded (:data:`MALFORMED_SCENARIO`).
+discarded (:data:`MALFORMED_SCENARIO`); a scenario the check rejects is made
+again once with the verdict, then discarded (``reason=scenario check
+failed``).
 """
 
 import re
 from collections.abc import Callable, Generator
+from functools import partial
 
+from redact.content_moderation.feedback import with_feedback
 from redact.jailbreak.directives import load_templates
 from redact.jailbreak.technique import DISCARDED, TechniqueGen
-from redact.llm_pipeline import LLMRequest, extracted
-from redact.llms.prompting import build_messages, load_prompt
+from redact.llm_pipeline import CHECK_TEMPERATURE, LLMRequest, extracted, is_accepted
+from redact.llms.prompting import PromptTemplate, build_messages, load_prompt
 
 _TECHNIQUES: dict[str, dict] = load_templates(
     "hacking", "cognitive_techniques.json")["categories"]
@@ -52,16 +57,47 @@ def _extract_scenario(text: str) -> str | None:
 
 
 def _scenario_gen(
-    gen_model: str | None, messages: list[dict],
-) -> Generator[LLMRequest, str, str | None]:
-    """Ask for a scenario until a reply holds a scene (:func:`_extract_scenario`);
-    return the scene, or None when no attempt held one."""
+    gen_model: str | None,
+    messages: list[dict],
+    *,
+    original: str,
+    check_model: str | None = None,
+    check_attempts: int = 2,
+    prompt_dir=None,
+) -> Generator[LLMRequest, str, tuple[str | None, str]]:
+    """Ask for a scenario until a reply holds a scene (:func:`_extract_scenario`)
+    that ``check_model`` (``gen_model`` when None) accepts against ``original``
+    (``jailbreak/scenario_check``, at :data:`CHECK_TEMPERATURE`).
+
+    A reply without a scene is asked for again, up to 3 replies. A scene the
+    check rejects is asked for again with the verdict as feedback, up to
+    ``check_attempts`` scenes, so the scenario and its check cost 2 to
+    ``4 * check_attempts`` calls. Returns ``(scene, "")``, or ``(None, info)``
+    with the ``DISCARDED`` info when no attempt held a scene
+    (:data:`MALFORMED_SCENARIO`) or every scene was rejected.
+    """
+    if check_attempts < 1:
+        raise ValueError(f"check_attempts must be at least 1, got {check_attempts}.")
+
     def scene_of(reply: str) -> list[str]:
         scene = _extract_scenario(reply)
         return [scene] if scene else []
 
-    scenes, _attempts = yield from extracted(gen_model, lambda: messages, scene_of)
-    return scenes[0] if scenes else None
+    check = PromptTemplate.load("jailbreak", "scenario_check", prompt_dir=prompt_dir)
+    feedback = ""
+    for _ in range(check_attempts):
+        scenes, _attempts = yield from extracted(
+            gen_model, partial(with_feedback, messages, feedback), scene_of)
+        if not scenes:
+            return None, MALFORMED_SCENARIO
+        verdict = yield LLMRequest(
+            check_model or gen_model,
+            check(original_prompt=original, scenario=scenes[0]),
+            temperature=CHECK_TEMPERATURE)
+        if is_accepted(verdict):
+            return scenes[0], ""
+        feedback = verdict
+    return None, f"{DISCARDED}; reason=scenario check failed; feedback={verdict}"
 
 
 def _scenario_messages(prompt: str, prompt_dir=None) -> list[dict]:
@@ -87,21 +123,27 @@ def _cognitive_gen(
     key: str,
     *,
     gen_model: str | None = None,
+    check_model: str | None = None,
+    check_attempts: int = 2,
     scenario: str | None = None,
     prompt_dir=None,
     **kwargs,
 ) -> TechniqueGen:
-    """Yield the scenario request, then the construction request for the
-    technique ``key`` of the taxonomy; return ``(jailbreak, info)``.
+    """Yield the scenario requests (:func:`_scenario_gen`), then the
+    construction request for the technique ``key`` of the taxonomy; return
+    ``(jailbreak, info)``.
 
-    A given ``scenario`` skips the scenario request. A scenario that no
-    attempt parses returns the prompt with :data:`MALFORMED_SCENARIO`.
+    A given ``scenario`` skips the scenario and its check. A scenario that no
+    attempt parses or the check rejects every time returns the prompt with the
+    discard info (:data:`MALFORMED_SCENARIO`, ``scenario check failed``).
     """
     if scenario is None:
-        scenario = yield from _scenario_gen(
-            gen_model, _scenario_messages(prompt, prompt_dir))
+        scenario, discard = yield from _scenario_gen(
+            gen_model, _scenario_messages(prompt, prompt_dir), original=prompt,
+            check_model=check_model, check_attempts=check_attempts,
+            prompt_dir=prompt_dir)
         if scenario is None:
-            return prompt, MALFORMED_SCENARIO
+            return prompt, discard
     technique = _TECHNIQUES[key]
     jailbreak = yield LLMRequest(gen_model, _construction_messages(
         prompt, technique["display_name"], technique["description"],

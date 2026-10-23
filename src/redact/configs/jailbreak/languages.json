@@ -1,0 +1,31 @@
+{
+  "_comment": "The languages of the translation and answer_language families, one row each: the generators of combination_spec.json make a technique per row whose column of the family's name is true (to_<slug>, to_ask_answer_in_<slug>), in this order. name: the language as prompts and infos write it. slug: the end of its technique names. complexity: the spec complexity of its techniques, by resource tier (0 high, 1 mid, 2 low). script: the ISO 15924 code of the script it is written in (the suffix of its GlotLID labels); the rules keep a translation into a script other than Latn from a needs_latin technique. A row may carry since (and later deprecated), as a spec technique entry does. A translation language also needs its ISO 639-1 code, accepted GlotLID labels and measured median length ratio in jailbreak/obfuscation/translation.py, keyed by its slug: import fails without them. Not Maori for translation: TranslateGemma invents its sensitive and technical terms, fluently enough to pass every check. The six rows of spec 1.2 (Hmong to Amharic) are answer languages only until their translation is measured. Read from the package only, never from a config_dir.",
+  "rows": [
+    {"name": "French", "slug": "french", "complexity": 0, "script": "Latn", "translation": true, "answer_language": true},
+    {"name": "Japanese", "slug": "japanese", "complexity": 0, "script": "Jpan", "translation": true, "answer_language": true},
+    {"name": "Russian", "slug": "russian", "complexity": 0, "script": "Cyrl", "translation": true, "answer_language": true},
+    {"name": "Spanish", "slug": "spanish", "complexity": 0, "script": "Latn", "translation": true, "answer_language": true},
+    {"name": "German", "slug": "german", "complexity": 0, "script": "Latn", "translation": true, "answer_language": true},
+    {"name": "Arabic", "slug": "arabic", "complexity": 0, "script": "Arab", "translation": true, "answer_language": true},
+    {"name": "Turkish", "slug": "turkish", "complexity": 1, "script": "Latn", "translation": true, "answer_language": true},
+    {"name": "Czech", "slug": "czech", "complexity": 1, "script": "Latn", "translation": true, "answer_language": true},
+    {"name": "Vietnamese", "slug": "vietnamese", "complexity": 1, "script": "Latn", "translation": true, "answer_language": true},
+    {"name": "Greek", "slug": "greek", "complexity": 1, "script": "Grek", "translation": true, "answer_language": true},
+    {"name": "Croatian", "slug": "croatian", "complexity": 1, "script": "Latn", "translation": true, "answer_language": true},
+    {"name": "Swahili", "slug": "swahili", "complexity": 2, "script": "Latn", "translation": true, "answer_language": true},
+    {"name": "Thai", "slug": "thai", "complexity": 2, "script": "Thai", "translation": true, "answer_language": true},
+    {"name": "Khmer", "slug": "khmer", "complexity": 2, "script": "Khmr", "translation": true, "answer_language": true},
+    {"name": "Maori", "slug": "maori", "complexity": 2, "script": "Latn", "translation": false, "answer_language": true},
+    {"name": "Nepali", "slug": "nepali", "complexity": 2, "script": "Deva", "translation": true, "answer_language": true},
+    {"name": "Zulu", "slug": "zulu", "complexity": 2, "script": "Latn", "translation": true, "answer_language": true},
+    {"name": "Scots Gaelic", "slug": "scots_gaelic", "complexity": 2, "script": "Latn", "translation": true, "answer_language": true},
+    {"name": "Bengali", "slug": "bengali", "complexity": 2, "script": "Beng", "translation": true, "answer_language": true},
+    {"name": "Javanese", "slug": "javanese", "complexity": 2, "script": "Latn", "translation": true, "answer_language": true},
+    {"name": "Hmong", "slug": "hmong", "complexity": 2, "script": "Latn", "translation": false, "answer_language": true, "since": "1.2"},
+    {"name": "Guarani", "slug": "guarani", "complexity": 2, "script": "Latn", "translation": false, "answer_language": true, "since": "1.2"},
+    {"name": "Chinese", "slug": "chinese", "complexity": 0, "script": "Hani", "translation": false, "answer_language": true, "since": "1.2"},
+    {"name": "Hindi", "slug": "hindi", "complexity": 1, "script": "Deva", "translation": false, "answer_language": true, "since": "1.2"},
+    {"name": "Yoruba", "slug": "yoruba", "complexity": 2, "script": "Latn", "translation": false, "answer_language": true, "since": "1.2"},
+    {"name": "Amharic", "slug": "amharic", "complexity": 2, "script": "Ethi", "translation": false, "answer_language": true, "since": "1.2"}
+  ]
+}

@@ -30,7 +30,8 @@ extend REDACT.
   cost, common failures.
 - [configuration.md](configuration.md): every recipe key, the dataset
   types, the params keys per stage, the generation axes, the augmentation
-  section, the model registry, the environment variables, your own config
+  section and its release notes (what an upgrade asks of a run you already
+  have), the model registry, the environment variables, your own config
   folder, the prompt overlay.
 - [extending.md](extending.md): how to add a model, a prompt, a jailbreak
   technique, a stage or a taxonomy, and how to change a dataset type.

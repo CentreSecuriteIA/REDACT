@@ -1366,7 +1366,8 @@ def test_the_flat_form_is_the_adversarial_kind_beside_the_default_natural_kind()
         section = _section({"include_hacking": False, "pure_only": True,
                             "include_translation": True})
     assert section["adversarial"] == resolve({"adversarial": {
-        "layers": {"deny": ["hacking"]}, "pure_only": True, "translation": True}},
+        "layers": {"deny": ["rewrite", "hacking"]}, "pure_only": True,
+        "translation": True}},
         "adversarial")
     assert section["natural"] == resolve(None, "natural")
 
@@ -1746,6 +1747,29 @@ def test_a_stage_is_handed_a_model_name_per_role(tmp_path, monkeypatch):
     assert read_record("inputs", tmp_path)["models"] == {
         "gen": "deepseek-v3.2", "check": None, "translation": None,
         "constitution": None, "paraphraser": None, "paraphrase_check": None}
+
+
+@pytest.mark.parametrize("check", ["deepseek-v3.2", None])
+def test_the_jailbreak_stage_is_handed_the_recipes_check_model(
+        tmp_path, monkeypatch, check):
+    """It checks the typo rewrites; left out, the front takes the gen model."""
+    import redact
+
+    handed = {}
+    monkeypatch.setattr(
+        redact, "generate_jailbreaks",
+        lambda **k: handed.update(check_model=k["check_model"]) or pd.DataFrame())
+    recipe = {"dataset_type": "training", "data_dir": str(tmp_path),
+              "stages": ["jailbreaks"],
+              "augmentations": {"adversarial": {"translation": False}},
+              "models": {"gen": "venice-uncensored", "check": check}}
+    try:
+        run_pipeline(recipe, params={"jailbreaks": {}}, verbose=False)
+    finally:
+        telemetry.uninstall()
+    assert handed == {"check_model": check}
+    assert read_record("jailbreaks", tmp_path)["serving"]["check"]["name"] == (
+        check or "venice-uncensored")
 
 
 # --- end-to-end driver (offline) --------------------------------------------
@@ -2582,6 +2606,7 @@ def test_served_lists_a_pool_and_names_no_model_for_a_role_no_stage_calls(
         "paraphrase_check": {
             "name": "venice-uncensored", "backend_type": "api", "workers": 3},
         "gen": {"name": "no-such-model"},          # its stage reports it
+        "check": {"name": "no-such-model"},        # left out: the gen model
         "translation": None,
     }
 
@@ -2812,7 +2837,8 @@ def test_a_run_unloads_a_model_for_a_stage_and_loads_it_again(
     """Two 24 GiB cards. The inputs stage's two engines need a card each, so
     x, which the constitution and paraphrase stages call, is unloaded for
     it. Its second load takes that lifetime's card, copies and share, and
-    the run leaves nothing loaded or planned."""
+    the run leaves nothing loaded or planned. The jailbreak stage plans the
+    check model c too (its fake here makes no call)."""
     import logging
     import os
     from types import SimpleNamespace
@@ -2874,7 +2900,7 @@ def test_a_run_unloads_a_model_for_a_stage_and_loads_it_again(
         vllm_module.VLLMBackend.clear_cache()
     assert summary["residency"]["fits"] is True
     assert [phase["resident"] for phase in summary["residency"]["phases"]] == [
-        [x], [g, c], [x, g, p], [g]]
+        [x], [g, c], [x, g, p], [g, c]]
     assert f"{x} is unloaded for stage inputs and loaded again for stage " \
            "paraphrase, so that inputs fits." in caplog.text
     assert events == [

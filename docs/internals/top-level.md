@@ -126,7 +126,7 @@ the params.
 | `inputs` | `gen`, `check` -> `uncensored_gen` | the category files of `constitution_inputs/`; accepted rows of the current style | the saved constitution, `merged.csv` |
 | `outputs` | `gen`, `check` -> `uncensored_gen` | `output_responses.csv`, or its `output_path` | the input category files (`dataset.input_files`) |
 | `paraphrase` | `paraphraser` -> `paraphraser`, `paraphrase_check` -> `uncensored_gen` | the files of the target(s) (`inputs` by default), plus `skipped` from their ledgers | the input category files and `output_responses.csv`, per target |
-| `jailbreaks` | `gen` -> `uncensored_gen`, `translation` -> `translation` | `jailbreaks.csv` and `variations.csv`, each when its kind is on | the input category files |
+| `jailbreaks` | `gen`, `check` -> `uncensored_gen`, `translation` -> `translation` | `jailbreaks.csv` and `variations.csv`, each when its kind is on | the input category files |
 | `build` | none | `complete_dataset.csv`, or its `output_path`; in eval the three `eval_*.csv` files, and `excluded` from `eval_excluded.json` (`extra_counts`) | the part files, where the params put them (no variations in eval), and the files `exclude_from` names |
 
 `RunContext` is what one run hands the stages: `data_dir`, `dataset_type`,
@@ -161,14 +161,15 @@ translation technique.
 | `config_file(relative, config_dir)` | `configs/<relative>`: the `config_dir`'s file when it has one, else the packaged one |
 | `taxonomy_folder(name, taxonomy_dir, config_dir)` | The folder a taxonomy is read from: `taxonomy_dir` when given, else `<config_dir>/taxonomy` when it has the file, else `None` (the packaged one) |
 | `config_sources(config_dir)` | The folder's files under the folders of `configs/`: `overridden`, `added` (read, with no packaged file of that name) and `ignored` |
-| `report_config_sources(config_dir, verbose=True)` | Warns about the `ignored` files and, with `verbose`, logs the files read |
+| `report_config_sources(config_dir, verbose=True)` | Warns about the `ignored` files and, with `verbose`, logs the files read; logs at INFO the families of `unseen_natural_families` |
+| `unseen_natural_families(config_dir)` | The families the packaged `augmentations.json` allows the natural kind that the folder's copy does not: what a copy made before the library added them cannot draw |
 
 These files are read from the folder: `dataset_types/eval.json` and
 `training.json`, `taxonomy/<name>.json`, `jailbreak/augmentations.json`,
 and at its top `generation_axes.json` and `dimensions.json`. A dataset type file of another name is
-`ignored`, as there are no other types. The technique spec and templates,
-`llm/` and `datasets/` are loaded at import or tied to code, so they come
-from the package only.
+`ignored`, as there are no other types. The technique spec, the language
+table and the templates, `llm/` and `datasets/` are loaded at import or
+tied to code, so they come from the package only.
 
 ## driver.py
 
@@ -179,8 +180,9 @@ from the package only.
    stage's axes.
 3. `telemetry.install(data_dir)`; with `verbose`,
    `report_prompt_sources(prompt_dir)`. `report_config_sources(config_dir)`
-   warns about the files of the folder no run reads, and with `verbose` logs
-   those it reads.
+   warns about the files of the folder no run reads, with `verbose` logs
+   those it reads, and logs the packaged natural families its copy of
+   `augmentations.json` does not allow.
 4. `residency.loaded_engines()`: the engines loaded before the run.
    `capabilities.set_run_serving(...)`: each model's `backend_type` and
    `workers` for every client built during the run.

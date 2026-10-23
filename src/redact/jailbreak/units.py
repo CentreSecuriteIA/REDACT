@@ -24,6 +24,7 @@ def unit_gen(
     *,
     gen_model: str,
     translate_model: str | None = None,
+    check_model: str | None = None,
     benign_data: dict | None = None,
     prompt_dir=None,
     capture: bool = False,
@@ -31,6 +32,8 @@ def unit_gen(
 ) -> Iterator:
     """The chain generator of one unit.
 
+    ``check_model`` checks what a technique's model writes (the typo check),
+    the generation model's when None; translation keeps its own checkers.
     Each technique draws its random choices from an ``rng`` seeded by the
     plan's seed, ``label``, the unit's id and iteration, and the technique's
     name, so a replayed plan gives the same text within one version of the
@@ -49,6 +52,7 @@ def unit_gen(
     return run_chain(
         unit["combination"].techniques, unit["prompt"],
         gen_model=gen_model, translate_model=translate_model,
+        check_model=check_model,
         benign_data=benign_data, prompt_dir=prompt_dir, internals_root=root,
         rng_seed=(
             None if unit.get("seed") is None

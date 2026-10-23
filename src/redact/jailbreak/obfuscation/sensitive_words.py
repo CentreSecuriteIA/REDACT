@@ -232,7 +232,11 @@ _CHAR_SPECS = [
 ]
 
 
-# One technique per separator, named to_sensitive_words_<separator name>.
+# One technique per separator, named to_sensitive_words_<separator name>. The
+# spec retires star, hyphen and underscore: their separators are among
+# SEPARATORS, which to_sensitive_words_encode_separator draws from. They stay
+# registered, so a kept plan that names them still runs; split stays, as a
+# space is not among SEPARATORS.
 _SEPARATED = [
     _make_word_fn(
         name,

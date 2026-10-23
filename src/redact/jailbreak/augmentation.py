@@ -11,7 +11,9 @@ A key starting with ``_``, in the section or in a kind, is a comment and is
 skipped. ``translation`` alone decides whether a kind draws the translation
 family; the lists may narrow it to the languages they name. A kind draws
 only the techniques whose ``kinds`` in ``combination_spec.json`` hold it, so
-the natural kind draws only what the spec marks natural.
+the natural kind draws only what the spec marks natural. Both packaged kinds
+deny the ``rewrite`` layer; a kind that gives its own ``layers.deny``
+replaces that list, so it names ``rewrite`` to keep the layer off.
 """
 
 import copy
@@ -24,7 +26,7 @@ from pathlib import Path
 from redact.config_overlay import config_file
 from redact.types import ALL_ENTRY_TYPES
 
-from .plan import default_escalation_schedule
+from .plan import UNIT_HEADROOM, default_escalation_schedule
 from .pool import TRANSLATION, all_techniques, languages, technique_pool
 from .technique import DEFAULT_KINDS, KINDS, family_kinds, load_spec
 
@@ -32,15 +34,23 @@ logger = logging.getLogger(__name__)
 
 _COMMON_KEYS = ("entry_types", "translation", "layers", "families", "techniques",
                 "pure_only", "family_weights", "iterations")
+#: The group budget's keys: set only on an adversarial kind, and written to
+#: its rounds only when set (``budget`` only when ``"group"``).
+_GROUP_BUDGET_KEYS = ("budget", "max_unit_complexity")
 _KIND_KEYS = {
     "adversarial": (*_COMMON_KEYS, "rounds", "max_complexity", "max_obfuscations",
-                    "layer_rates", "allow_request_obfuscation"),
+                    "layer_rates", "allow_request_obfuscation", *_GROUP_BUDGET_KEYS),
     "natural": (*_COMMON_KEYS, "exact_techniques"),
 }
 _ROUND_KEYS = ("exact_techniques", "max_complexity", "max_obfuscations",
                "layer_rates", "allow_request_obfuscation")
-_RATE_KEYS = ("hacking", "manipulation", "requests", "request_obfuscation")
-_LAYERS = ("hacking", "manipulation", "obfuscation", "requests")
+_RATE_KEYS = ("rewrite", "hacking", "manipulation", "requests", "request_obfuscation")
+_LAYERS = ("rewrite", "hacking", "manipulation", "obfuscation", "requests")
+#: The layer off by default: the packaged kinds deny it, and a round says
+#: ``include_rewrite`` only for a kind that allows it while the registry holds
+#: a technique of the layer, so the rounds of every other kind are those
+#: written before the layer existed.
+_REWRITE = "rewrite"
 _SPEC = "combination_spec.json"
 
 #: Today's keywords of ``generate_jailbreaks``, each an alias into the
@@ -129,6 +139,12 @@ def resolve(
     if not isinstance(given, dict):
         raise ValueError(f"{where} must be an object or null, got {given!r}.")
     given = {key: value for key, value in given.items() if not key.startswith("_")}
+    budgeted = [key for key in given if key in _GROUP_BUDGET_KEYS]
+    if kind == "natural" and budgeted:
+        raise ValueError(
+            f"{where} gives {budgeted}, which the natural kind ignores: it draws "
+            "exact_techniques, a count with no complexity budget to bank. Take "
+            "them out.")
     unknown = [key for key in given if key not in _KIND_KEYS[kind]]
     if unknown:
         raise ValueError(
@@ -175,6 +191,14 @@ def resolve(
                 f"{given['iterations']}; the rounds set the number, so leave "
                 "iterations out.")
         resolved["iterations"] = len(rounds)
+        ceiling = resolved.get("max_unit_complexity")
+        for i, r in enumerate(rounds):
+            if ceiling is not None and r.get("max_complexity", 0) > ceiling:
+                raise ValueError(
+                    f"{where}.rounds[{i}].max_complexity is {r['max_complexity']}, "
+                    f"above max_unit_complexity {ceiling}; raise "
+                    "max_unit_complexity, or leave it out for each round's "
+                    f"max_complexity + {UNIT_HEADROOM}.")
     return resolved
 
 
@@ -185,19 +209,36 @@ def rounds_of(resolved: dict) -> list[dict]:
     budget keys, each layer's ``include_*``, and the round's own keys from
     ``rounds`` merged over them (``"escalation"`` is
     :func:`default_escalation_schedule`), a round's ``layer_rates`` passed on
-    as the sampler's ``sampling_probs``.
+    as the sampler's ``sampling_probs``. ``include_rewrite`` is written only
+    when the kind allows the rewrite layer and a rewrite technique is
+    registered, where the others are always written: a round of any other
+    kind is as it was before the layer existed (a kind that gives its own
+    ``layers.deny`` allows the layer, but while the layer is empty nothing
+    changes, so its kept plan resumes). A count round does not read
+    ``include_rewrite``; its pool decides. ``budget`` is written only when ``"group"`` and
+    ``max_unit_complexity`` only when given, so a kind that leaves them out
+    or says ``"unit"`` has the rounds, and the plan file, it had before
+    they existed; a count round carries them and ignores them.
     """
     if "exact_techniques" in resolved:
         return [{"exact_techniques": resolved["exact_techniques"]}
                 for _ in range(resolved["iterations"])]
+    denied = resolved["layers"]["deny"]
     base = {
         "max_complexity": resolved["max_complexity"],
         "max_obfuscations": resolved["max_obfuscations"],
-        **{f"include_{layer}": layer not in resolved["layers"]["deny"]
-           for layer in _LAYERS},
+        **{f"include_{layer}": layer not in denied
+           for layer in _LAYERS if layer != _REWRITE},
     }
+    if _REWRITE not in denied and any(
+            getattr(fn, "layer", None) == _REWRITE for fn in all_techniques()):
+        base["include_rewrite"] = True
     if resolved["allow_request_obfuscation"]:
         base["allow_request_obfuscation"] = True
+    if resolved.get("budget") == "group":
+        base["budget"] = "group"
+    if resolved.get("max_unit_complexity") is not None:
+        base["max_unit_complexity"] = resolved["max_unit_complexity"]
     rounds = resolved["rounds"]
     if rounds is None:
         return [dict(base) for _ in range(resolved["iterations"])]
@@ -483,7 +524,14 @@ def _check_rates(where: str, rates) -> None:
 
 
 def _check_budget(where: str, settings: dict) -> None:
-    """The budget keys an adversarial kind or one of its rounds gives."""
+    """The budget keys an adversarial kind or one of its rounds gives.
+
+    ``budget`` is ``"unit"`` (each unit spends up to ``max_complexity``,
+    the default), ``"group"`` (the group budget, see
+    :func:`redact.jailbreak.plan.assign_combination`) or ``None`` (the
+    default); ``max_unit_complexity`` is given only with ``"group"``, at or
+    above ``max_complexity``.
+    """
     for key in ("max_complexity", "max_obfuscations"):
         if key in settings:
             _check_count(where, key, settings[key], least=0)
@@ -496,6 +544,18 @@ def _check_budget(where: str, settings: dict) -> None:
         raise ValueError(
             f"{where}.allow_request_obfuscation must be true or false, got "
             f"{settings['allow_request_obfuscation']!r}.")
+    budget = settings.get("budget")
+    if budget not in (None, "unit", "group"):
+        raise ValueError(
+            f'{where}.budget must be "unit", "group" or null, got {budget!r}.')
+    ceiling = settings.get("max_unit_complexity")
+    if ceiling is not None:
+        if budget != "group":
+            raise ValueError(
+                f'{where}.max_unit_complexity applies only with "budget": '
+                '"group"; set that, or take max_unit_complexity out.')
+        _check_count(where, "max_unit_complexity", ceiling,
+                     least=settings.get("max_complexity", 0))
 
 
 def _rounds(where: str, rounds) -> list:

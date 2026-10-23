@@ -1,7 +1,9 @@
 """Few-shot (FSH) techniques: benign Q&A pairs, then the prompt as the last question.
 
 ``info`` is ``num_shots=...;sub_category=...``, plus ``selection=...`` when a
-model chose the subcategory.
+model chose the subcategory. The many-shot variants show ``MANY_PAIRS`` short
+pairs (``pairs.py``); ``wanted=...`` follows ``num_shots`` when the cache held
+fewer.
 """
 
 import random
@@ -9,7 +11,12 @@ from collections.abc import Callable
 
 from redact.jailbreak.technique import TechniqueGen
 
-from .pairs import run_random_manipulation, run_selected_manipulation
+from .pairs import (
+    run_random_manipulation,
+    run_random_many,
+    run_selected_manipulation,
+    run_selected_many,
+)
 
 
 def _build_fsh_prompt(
@@ -57,7 +64,21 @@ def to_fsh_selected_long(prompt: str, **kwargs) -> TechniqueGen:
         prompt, "long", _build_fsh_prompt, **kwargs))
 
 
+def to_fsh_random_many(
+    prompt: str, benign_data: dict, *, rng: random.Random | None = None,
+) -> tuple[str, str]:
+    """FSH with many short pairs from every subcategory. No LLM needed."""
+    return run_random_many(prompt, benign_data, _build_fsh_prompt, rng)
+
+
+def to_fsh_selected_many(prompt: str, **kwargs) -> TechniqueGen:
+    """FSH with many short pairs, the LLM-selected category's first
+    (technique generator)."""
+    return (yield from run_selected_many(prompt, _build_fsh_prompt, **kwargs))
+
+
 def get_fsh_functions() -> list[Callable]:
     """Return all FSH technique functions."""
     return [to_fsh_random_short, to_fsh_random_long,
-            to_fsh_selected_short, to_fsh_selected_long]
+            to_fsh_selected_short, to_fsh_selected_long,
+            to_fsh_random_many, to_fsh_selected_many]

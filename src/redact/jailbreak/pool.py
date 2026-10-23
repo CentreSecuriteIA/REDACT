@@ -3,17 +3,22 @@ kind of the run's augmentation section and by the kinds the spec gives each.
 
 A fresh plan draws from the filtered pool; a planned row is read back through
 the registry of every technique, so a plan made with another pool still
-replays.
+replays. A technique the spec retires (``deprecated``) stays registered, so a
+plan that names it still replays, but leaves the pool unless
+``techniques.allow`` names it.
 """
 
+import warnings
 from collections.abc import Callable
 
 from redact.dimensions import check_tags
 
+from .directives import check_pools, enabled, read_pools
 from .hacking import get_all_hacking_functions
 from .manipulation import get_all_manipulation_functions
 from .obfuscation import get_all_obfuscation_functions
 from .requests import get_all_request_functions
+from .rewrite import get_all_rewrite_functions
 from .technique import DEFAULT_KINDS, load_spec
 
 #: The family a kind's ``translation`` switch decides.
@@ -21,12 +26,14 @@ TRANSLATION = "translation"
 
 
 def all_techniques() -> list[Callable]:
-    """Every registered technique, one layer after another."""
+    """Every registered technique, one layer after another. The rewrite
+    layer, the newest, comes last, so the others keep their places."""
     return (
         get_all_obfuscation_functions()
         + get_all_hacking_functions()
         + get_all_manipulation_functions()
         + get_all_request_functions()
+        + get_all_rewrite_functions()
     )
 
 
@@ -63,6 +70,14 @@ def _check_dimensions() -> None:
     check_tags("combination_spec.json: families", families, "augmentation")
 
 
+def _check_variant_pools() -> None:
+    """Raise unless every variant pool a technique draws from (its
+    ``variant_pool``) is one it can draw: unique names, its slots only, a
+    variant on (:func:`redact.jailbreak.directives.check_pools`)."""
+    check_pools(fn.variant_pool for fn in all_techniques()
+                if hasattr(fn, "variant_pool"))
+
+
 def kind_of(resolved: dict) -> str:
     """The kind ``resolved`` is: ``"natural"`` when it draws an exact count of
     techniques (``exact_techniques``, as
@@ -85,17 +100,21 @@ def technique_pool(resolved: dict) -> list[Callable]:
     whatever the lists say. When it is true, the family is in, though
     denied as a family, and with an allow list it is in whole unless
     ``techniques.allow`` names some of its techniques: then those only.
-    Last, only the techniques whose spec ``kinds`` hold the kind
+    Then only the techniques whose spec ``kinds`` hold the kind
     (:func:`kind_of`) stay: the natural kind draws only what the spec marks
-    natural, and every technique's ``kinds`` hold ``adversarial`` today.
+    natural, and the attacks every technique but those of the families the
+    spec marks natural alone (small talk, the benign roles).
+    Last, a technique the spec retired (its ``deprecated`` version) leaves
+    the pool unless ``techniques.allow`` names it, which gives a
+    ``DeprecationWarning`` and is read for this release.
     """
     families, techniques = resolved["families"], resolved["techniques"]
+    named = set(techniques["allow"] or ())
     denied_layers = set(resolved["layers"]["deny"])
     pool = [fn for fn in all_techniques()
             if getattr(fn, "layer", None) not in denied_layers]
     if families["allow"] is not None or techniques["allow"] is not None:
         allowed = set(families["allow"] or ())
-        named = set(techniques["allow"] or ())
         if resolved["translation"] and not named & languages():
             allowed.add(TRANSLATION)
         pool = [fn for fn in pool if fn.__name__ in named
@@ -111,7 +130,35 @@ def technique_pool(resolved: dict) -> list[Callable]:
                 if not getattr(fn, "requires_llm", False)
                 and not getattr(fn, "requires_benign", False)]
     kind = kind_of(resolved)
-    return [fn for fn in pool if kind in getattr(fn, "kinds", DEFAULT_KINDS)]
+    pool = [fn for fn in pool if kind in getattr(fn, "kinds", DEFAULT_KINDS)]
+    for fn in pool:
+        if getattr(fn, "deprecated", None) and fn.__name__ in named:
+            warnings.warn(
+                f"techniques.allow names {fn.__name__!r}, which spec version "
+                f"{fn.deprecated} deprecated; take it out of techniques.allow. "
+                "It is drawn for this release.", DeprecationWarning, stacklevel=2)
+    return [fn for fn in pool
+            if not getattr(fn, "deprecated", None) or fn.__name__ in named]
+
+
+def variant_pools() -> dict[str, dict]:
+    """Every variant pool a registered technique draws from, by its name
+    (``<file>:<directive>``): ``family``, its techniques' first family;
+    ``techniques``, their names; ``variants``, how many variants it may draw
+    (those of weight above 0). The variant floor
+    (``tests/jailbreak/test_variant_floor.py``) counts them."""
+    pools = {}
+    for fn in all_techniques():
+        ref = getattr(fn, "variant_pool", None)
+        if ref is None:
+            continue
+        if ref.name not in pools:
+            pools[ref.name] = {
+                "family": fn.families[0], "techniques": [],
+                "variants": len(enabled(read_pools(ref.file)[ref.directive])),
+            }
+        pools[ref.name]["techniques"].append(fn.__name__)
+    return pools
 
 
 def languages() -> set[str]:
@@ -126,9 +173,12 @@ def registry(techniques: list[Callable]) -> dict[str, Callable]:
 
 
 def uses_translation(pool: list[Callable]) -> bool:
-    """Whether ``pool`` holds a translation technique."""
+    """Whether ``pool`` holds a translation technique, which the translation
+    model serves. Any other technique that calls a model, a rewrite among
+    them, calls the generation model."""
     return any(TRANSLATION in getattr(fn, "families", ()) for fn in pool)
 
 
 _check_against_spec(all_techniques())
 _check_dimensions()
+_check_variant_pools()

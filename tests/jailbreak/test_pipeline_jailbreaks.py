@@ -15,7 +15,7 @@ from redact.dataset import Manifest, content_id
 from redact.exceptions import PromptTooLongError
 from redact.jailbreak.augmentation import resolve
 from redact.jailbreak.pool import technique_pool
-from redact.llm_pipeline import LLMRequest
+from redact.llm_pipeline import CHECK_TEMPERATURE, LLMRequest
 from redact.llms.backends import ComputeConfig
 from redact.stages import generate_jailbreaks
 from tests.conftest import (
@@ -27,7 +27,7 @@ from tests.conftest import (
 )
 
 _PURE_KIND = {"pure_only": True,
-              "layers": {"deny": ["hacking", "manipulation", "requests"]}}
+              "layers": {"deny": ["rewrite", "hacking", "manipulation", "requests"]}}
 
 
 def _pure(**kind) -> dict:
@@ -408,13 +408,16 @@ def _allow(name: str) -> dict:
 def test_a_plan_records_what_it_was_made_with(tmp_path):
     import json
 
+    from redact.jailbreak import load_spec
+
     out = tmp_path / "jb.csv"
     generate_jailbreaks(inputs=_inputs(), output_path=out, seed=1,
                         **_allow("to_base64"))
     made_with = json.loads(out.with_name("jb.plan.json").read_text(encoding="utf-8"))
     assert made_with == {
         "seed": 1, "rounds": made_with["rounds"], "pool": ["to_base64"],
-        "family_weights": None, "layer_rates": None}
+        "family_weights": None, "layer_rates": None,
+        "spec_version": load_spec()["version"]}
     assert [r["exact_techniques"] for r in made_with["rounds"]] == [1]
 
 
@@ -450,6 +453,30 @@ def test_a_plan_made_with_translation_raises_when_resumed_without_it(
     run(translation=True)
     with pytest.raises(ValueError, match="pool"):
         run(translation=False)
+
+
+def test_a_plan_made_without_the_request_obfuscation_raises_under_the_packaged_kind(
+        tmp_path, monkeypatch):
+    """The packaged attacks turned it on, which adds a key to their rounds: a
+    plan kept from before is planned again with ``resume=False``."""
+    import redact.jailbreak.pipeline as JPipe
+
+    monkeypatch.setattr(JPipe, "drive_units", lambda units, **kwargs: None)
+    out = tmp_path / "jb.csv"
+
+    def run(resume=True, **adversarial):
+        # No manipulation, so no benign data to make.
+        generate_jailbreaks(
+            inputs=_inputs(), output_path=out, seed=1, verbose=False, resume=resume,
+            augmentation={"adversarial": {"layers": {"deny": ["manipulation"]},
+                                          **adversarial},
+                          "natural": None})
+
+    run(allow_request_obfuscation=False)
+    with pytest.raises(ValueError, match=r"\['rounds'\].*resume=False"):
+        run()
+    run(resume=False)
+    run()
 
 
 def test_a_resume_under_the_same_section_and_seed_is_quiet(tmp_path, caplog):
@@ -1102,6 +1129,60 @@ def test_pool_fills_a_call_with_a_later_step_and_a_new_unit(tmp_path, monkeypatc
     # A chunk loop sends zq0's second step alone ([2, 1, 2, 2]).
     assert [len(b) for b in backend.batches] == [2, 2, 2, 1]
     assert backend.batches[2] == ["step2 S1:zq0", "step1 zq4"]
+
+
+def test_a_technique_is_given_the_check_model_the_generation_model_unless_named(
+        tmp_path, monkeypatch):
+    seen = []
+
+    def checks(text, *, check_model=None, **kwargs):
+        seen.append(check_model)
+        return text + "!", ""
+
+    checks.kinds = ["adversarial", "natural"]
+    for folder, given in (("default", {}), ("named", {"check_model": "jb-check"})):
+        (tmp_path / folder).mkdir()
+        _llm_run(tmp_path / folder, monkeypatch, [("zq0", checks)], _StepBackend(),
+                 techniques=(checks,), **given)
+    assert seen == [GEN, "jb-check"]
+
+
+class _TypoBackend(MockBackend):
+    """Native-batching fake: accepts every typo check, and rewrites any other
+    request's last line with a typo. ``temperatures`` holds each call's."""
+
+    def __init__(self):
+        super().__init__(model=GEN)
+        self.temperatures: list = []
+
+    @property
+    def compute_config(self) -> ComputeConfig:
+        return ComputeConfig(supports_native_batching=True)
+
+    def generate(self, messages_list, *, temperature=None, **kwargs):
+        self.temperatures.append(temperature)
+        return ["Yes" if "Text with typos:" in m[-1]["content"]
+                else m[-1]["content"].splitlines()[-1].replace("about", "abuot")
+                for m in messages_list]
+
+
+def test_the_natural_kind_checks_its_typo_rewrites(tmp_path, monkeypatch):
+    import redact.stages as P
+
+    backend = _TypoBackend()
+    monkeypatch.setattr(P.ModelClient, "create", lambda m: make_client(backend, m))
+    out = tmp_path / "jb.csv"
+    generate_jailbreaks(
+        inputs=_inputs(), output_path=out, model=GEN, check_model="jb-check",
+        augmentation={"adversarial": None, "natural": {
+            "families": {"allow": ["typos"]},
+            "techniques": {"allow": ["to_rewrite_with_typos_low"]}}},
+        verbose=False)
+    rows = pd.read_csv(tmp_path / "variations.csv")
+    assert rows["accepted"].all() and len(rows) == len(_inputs())
+    assert rows["jailbreak"].str.contains("abuot").all()
+    # Each rewrite, then its check at the check temperature.
+    assert backend.temperatures == [None, CHECK_TEMPERATURE]
 
 
 def test_pool_resume_after_a_failed_append_runs_only_unfinished_units(tmp_path, monkeypatch):

@@ -1,13 +1,17 @@
 """Tokenbreak techniques over the words a model marks harmful.
 
 ``info`` lists the detected words with the tokens applied to them. A reply
-that is not a short list of the prompt's words discards the prompt.
+that is not a short list of the prompt's words discards the prompt. A split
+or a separator cuts a word between the characters a reader sees, never
+between a letter and its marks, since a translation may come first.
 """
 
 import random
 import re
+import unicodedata
 from collections.abc import Callable
 
+from redact.jailbreak.obfuscation.encoding import _clusters
 from redact.jailbreak.technique import DISCARDED, TechniqueGen
 from redact.llm_pipeline import LLMRequest
 from redact.llms.prompting import build_messages, load_prompt
@@ -58,7 +62,8 @@ _VARIATION_SELECTORS = [
 
 
 def tokenbreak_split(word: str, rng: random.Random | None = None) -> tuple[str, str]:
-    """Split word with a random token in the middle."""
+    """Split word with a random token in the middle, between two of the
+    characters a reader sees (a letter keeps its marks)."""
     rng = rng or random
     token_type = rng.choice(["char", "invisible_char", "variation_selector"])
 
@@ -72,10 +77,11 @@ def tokenbreak_split(word: str, rng: random.Random | None = None) -> tuple[str, 
         token = rng.choice(_VARIATION_SELECTORS)
         token_repr = f"VS{ord(token) - 0xFE00:02d}"
 
-    if len(word) <= 1:
+    clusters = _clusters(word)
+    if len(clusters) <= 1:
         return word + token, token_repr
-    position = rng.randint(1, len(word) - 1)
-    obfuscated_word = word[:position] + token + word[position:]
+    position = rng.randint(1, len(clusters) - 1)
+    obfuscated_word = "".join(clusters[:position]) + token + "".join(clusters[position:])
     return obfuscated_word, token_repr
 
 
@@ -90,7 +96,8 @@ _SEPARATOR_DELIMITERS = [".", "-", "_", "~", "/", "\\", "|"]
 def tokenbreak_delimiter(
     word: str, rng: random.Random | None = None,
 ) -> tuple[str, str]:
-    """Wrap or split word with delimiters."""
+    """Wrap word with delimiters, or split it with a separator between the
+    characters a reader sees."""
     rng = rng or random
     delimiter_type = rng.choice(["standard", "structural", "separator"])
 
@@ -106,7 +113,7 @@ def tokenbreak_delimiter(
         return delimiter + word + delimiter, delimiter
     else:
         delimiter = rng.choice(_SEPARATOR_DELIMITERS)
-        return delimiter.join(list(word)), delimiter
+        return delimiter.join(_clusters(word)), delimiter
 
 
 _ATTACKS = {
@@ -138,12 +145,31 @@ _SURROUNDING = ".,;:!?\"'()[]*"
 MALFORMED_WORDS = f"{DISCARDED}; reason=malformed word list"
 
 
+def _is_mark(char: str) -> bool:
+    """Whether ``char`` is a combining mark (Unicode category M)."""
+    return unicodedata.category(char).startswith("M")
+
+
+def _is_word(token: str) -> bool:
+    """Whether ``token`` is a word: a letter, then letters, digits,
+    apostrophes, hyphens and combining marks.
+
+    ``\\w`` matches no combining mark, yet most Bengali, Nepali, Thai or Khmer
+    words hold one (a vowel sign, a virama), so the marks are taken out
+    before the match; a token may not start with one.
+    """
+    if not token or _is_mark(token[0]):
+        return False
+    return _WORD.fullmatch("".join(c for c in token if not _is_mark(c))) is not None
+
+
 def _parse_harmful_words(reply: str, prompt: str) -> list[str] | None:
     """The words of an extraction reply: none for a ``none``-like reply, else
     each token with list markers dropped and surrounding punctuation stripped.
 
     Returns ``None`` for a malformed reply: more than ten words, a token that
-    is not a word, or a word ``prompt`` does not hold (in any case).
+    is not a word (:func:`_is_word`), or a word ``prompt`` does not hold (in
+    any case).
     """
     raw = reply.strip()
     if raw.lower().strip(_SURROUNDING) in _TOKENBREAK_EMPTY_RESPONSES:
@@ -153,7 +179,7 @@ def _parse_harmful_words(reply: str, prompt: str) -> list[str] | None:
     if not words or len(words) > _MAX_HARMFUL_WORDS_RESPONSE_LEN:
         return None
     text = prompt.lower()
-    if all(_WORD.fullmatch(word) and word.lower() in text for word in words):
+    if all(_is_word(word) and word.lower() in text for word in words):
         return words
     return None
 

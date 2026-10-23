@@ -7,12 +7,14 @@ from collections.abc import Callable
 from functools import partial
 from random import Random
 
-from ..directives import apply_template_directive, load_templates
+from ..directives import apply_template_directive, read_pools, uses_pool
 
-_TEMPLATES: dict[str, list[dict]] = load_templates("requests", "impersonation_templates.json")
+_FILE = "requests/impersonation_templates.json"
+_TEMPLATES: dict[str, list[dict]] = read_pools(_FILE)
 _apply = partial(apply_template_directive, _TEMPLATES, info_key="type")
 
 
+@uses_pool(_FILE, "good_person")
 def to_impersonate_good_person(
     prompt: str, *, rng: Random | None = None,
 ) -> tuple[str, str]:
