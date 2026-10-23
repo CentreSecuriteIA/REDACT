@@ -73,18 +73,17 @@ def main(argv=None) -> int:
              "the current directory, else from the recipe's folder.")
     parser.add_argument("--data-dir", help="Override the recipe's data_dir.", default=None)
     parser.add_argument("--quiet", action="store_true", help="Suppress per-stage progress.")
-    parser.add_argument("--debug", action="store_true", help="Show per-item DEBUG detail.")
+    parser.add_argument("--debug", action="store_true",
+                        help="Show redact's per-item DEBUG detail.")
     args = parser.parse_args(argv)
 
     # redact's pipelines log progress via the standard `logging` module rather than
     # print() — as the entry point, we're responsible for giving it somewhere to go.
+    logging.basicConfig(level=logging.WARNING if args.quiet else logging.INFO,
+                        format="%(message)s")
     if args.debug:
-        level = logging.DEBUG
-    elif args.quiet:
-        level = logging.WARNING
-    else:
-        level = logging.INFO
-    logging.basicConfig(level=level, format="%(message)s")
+        # redact's own detail only: httpx, httpcore and filelock stay at INFO.
+        logging.getLogger("redact").setLevel(logging.DEBUG)
 
     _exit_through_release()
 

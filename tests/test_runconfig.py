@@ -1413,7 +1413,9 @@ def test_names_and_nulls_load_as_written():
               "paraphraser": "distribution", "_note": "a comment"}
     recipe = load_recipe({"dataset_type": "eval", "models": models})
     assert recipe["models"] == models
-    assert _role_names(recipe["models"]) == models
+    # The role names leave the comment out, so no run record holds it.
+    assert _role_names(recipe["models"]) == {
+        role: name for role, name in models.items() if role != "_note"}
     assert _serving_of(models) == {}
 
 
@@ -3238,3 +3240,65 @@ def test_a_taxonomy_name_with_a_dot_names_its_json_file(tmp_path):
         augmentations={}, resume=True, verbose=False, benign_taxonomy="my.benign")
     assert STAGES["constitution"].sources(ctx) == [tmp_path / "my.tax.json"]
     assert STAGES["inputs"].sources(ctx) == [paths.constitution_merged_csv(tmp_path)]
+
+
+# --- what a run records and returns ------------------------------------------
+
+def test_a_record_leaves_the_models_comments_out_and_has_a_utc_timestamp(
+        tmp_path, monkeypatch):
+    import redact
+
+    monkeypatch.setattr(redact, "build_dataset", lambda **k: pd.DataFrame())
+    try:
+        run_pipeline({"dataset_type": "eval", "data_dir": str(tmp_path),
+                      "stages": ["build"],
+                      "models": {"_comment": "a note", "gen": None}}, verbose=False)
+    finally:
+        telemetry.uninstall()
+    record = read_record("build", tmp_path)
+    assert "_comment" not in record["models"]
+    assert record["timestamp"].endswith("+00:00")
+
+
+def test_the_summary_names_the_root_a_run_without_a_data_dir_wrote_under(
+        tmp_path, monkeypatch):
+    import redact
+
+    monkeypatch.setenv("REDACT_OUTPUT_DIR", str(tmp_path))
+    monkeypatch.setattr(redact, "build_dataset", lambda **k: pd.DataFrame())
+    try:
+        summary = run_pipeline({"dataset_type": "eval", "stages": ["build"]},
+                               verbose=False)
+    finally:
+        telemetry.uninstall()
+    assert summary["data_dir"] == str(tmp_path.resolve())
+    assert read_record("build", tmp_path) is not None
+
+
+def test_a_type_files_flat_jailbreak_keyword_is_applied_as_it_warns(
+        tmp_path, monkeypatch):
+    """load_params warns that a flat keyword of a type file's
+    params.jailbreaks is read as before: the run applies it to the
+    adversarial kind, as it does the params file's."""
+    import redact
+    from redact.recipe import load_dataset_type
+
+    typed = load_dataset_type("training")
+    typed["params"]["jailbreaks"] = {"max_complexity": 2}
+    (tmp_path / "cfg" / "dataset_types").mkdir(parents=True)
+    (tmp_path / "cfg" / "dataset_types" / "training.json").write_text(
+        json.dumps(typed), encoding="utf-8")
+    handed = []
+    monkeypatch.setattr(redact, "generate_jailbreaks",
+                        lambda **k: handed.append(k) or pd.DataFrame())
+    recipe = {"dataset_type": "training", "data_dir": str(tmp_path / "run"),
+              "config_dir": str(tmp_path / "cfg"), "stages": ["jailbreaks"],
+              "augmentations": {"adversarial": {"translation": False}}}
+    try:
+        with pytest.deprecated_call():
+            run_pipeline(recipe, verbose=False)
+    finally:
+        telemetry.uninstall()
+    (kwargs,) = handed
+    assert kwargs["augmentation"]["adversarial"]["max_complexity"] == 2
+    assert "max_complexity" not in kwargs

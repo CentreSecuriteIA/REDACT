@@ -70,3 +70,26 @@ def test_the_forced_exit_names_what_outlived_it(second_signal, capfd):
         handle()
     assert "kill -9 21 22" in capfd.readouterr().err
     assert done[-1] == ("exit", 128 + signal.SIGINT)
+
+
+@pytest.mark.parametrize(("flags", "root", "own"), [
+    ([], logging.INFO, logging.NOTSET),
+    (["--quiet"], logging.WARNING, logging.NOTSET),
+    (["--debug"], logging.INFO, logging.DEBUG),
+])
+def test_debug_shows_redacts_detail_only(monkeypatch, flags, root, own):
+    """--debug sets the redact logger to DEBUG, so httpx, httpcore and
+    filelock lines do not bury redact's own; the root stays at INFO."""
+    spec = importlib.util.spec_from_file_location(
+        "run_script", Path(__file__).parents[1] / "scripts" / "run.py")
+    script = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(script)
+    configured = []
+    redact_logger = logging.getLogger("redact")
+    monkeypatch.setattr(redact_logger, "level", redact_logger.level)
+    monkeypatch.setattr(script, "run_pipeline", lambda recipe, **kw: {})
+    monkeypatch.setattr(script, "_exit_through_release", lambda: None)
+    monkeypatch.setattr(logging, "basicConfig", lambda **kw: configured.append(kw))
+    assert script.main(["recipe.json", *flags]) == 0
+    assert [kw["level"] for kw in configured] == [root]
+    assert redact_logger.level == own

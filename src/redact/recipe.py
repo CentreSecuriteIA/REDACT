@@ -124,8 +124,9 @@ def _config_dir(data: dict) -> str | None:
     if not folder.is_dir():
         raise ValueError(
             f"config_dir {str(folder)!r} is not a folder; write the folder of "
-            "your dataset_types/, taxonomy/ and jailbreak/ files, relative to "
-            "the recipe.")
+            "your dataset_types/, taxonomy/, jailbreak/augmentations.json, "
+            "generation_axes.json and dimensions.json files, relative to the "
+            "recipe.")
     return str(folder)
 
 
@@ -578,9 +579,10 @@ def augmentations_of(recipe: dict, jailbreak_params: dict | None = None) -> dict
 
 
 def _role_names(models: dict) -> dict:
-    """A recipe's ``models`` with each object reduced to its model name."""
+    """A recipe's ``models`` with each object reduced to its model name, and
+    its comments (``_`` first) left out."""
     return {role: entry.get("name") if isinstance(entry, dict) else entry
-            for role, entry in models.items()}
+            for role, entry in models.items() if not role.startswith("_")}
 
 
 def resolve_role(

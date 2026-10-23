@@ -47,7 +47,8 @@ python scripts/run.py src/redact/configs/runs/training_example.json --data-dir .
 `--params` replaces the recipe's `params_file`: a relative path is read
 from the current directory, else from the recipe's folder, and the run logs
 the file it read. `--data-dir` replaces the recipe's `data_dir`.
-`--quiet` logs warnings only and `--debug` logs per-item detail. The script
+`--quiet` logs warnings only and `--debug` logs redact's per-item detail (the
+HTTP and lock libraries stay at INFO). The script
 prints the run summary as JSON. The first Ctrl-C, or `kill <pid>`, ends the
 run through its cleanup, which saves the finished units and releases the
 models. A second one ends vLLM's engine processes and exits at once.
@@ -501,9 +502,10 @@ Other files you may see:
 | `<kind>.variants.csv` | Per template technique and variant, the rows of a kind's CSV that drew it, written after each run, with a zero row for each variant of the pool never drawn ([stages/jailbreaks.md](stages/jailbreaks.md#files)) |
 | `*.tmp` | A file being replaced. It is gone once the write finishes; a kill can leave one, which the next write replaces, and `resume: false` removes the output's |
 
-A run record, `Datasets/<stage>.run.json`, holds `stage`, `timestamp`,
-`params` (the stage's params: the dataset type's with the params file's
-entry over them), `models` (the recipe's role names),
+A run record, `Datasets/<stage>.run.json`, holds `stage`, `timestamp`
+(UTC, with its offset, as the trace's), `params` (the stage's params: the dataset type's with the params file's
+entry over them), `models` (the recipe's role names, its comment keys left
+out),
 `counts` (`rows`, and `accepted` when the files have that column; the inputs
 stage counts only the accepted rows of its `style`; an eval build with
 `exclude_from` adds `excluded`; the paraphrase stage adds `skipped`: the units

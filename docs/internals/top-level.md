@@ -209,8 +209,8 @@ tied to code, so they come from the package only.
 8. Per stage: `_enter_phase` (unload, apply the stage's plan, preload this
    stage's models and the next stage's when they fit), then inside
    `telemetry.stage(name)`: the front with `read_back=False`, `file_counts`
-   and the stage's `extra_counts`, then `write_record`: `stage`, `timestamp`,
-   the merged `params`, `models`, `counts`, `sources`, `serving` (the roles
+   and the stage's `extra_counts`, then `write_record`: `stage`, `timestamp`
+   (UTC, with its offset), the merged `params`, `models` (no comment key), `counts`, `sources`, `serving` (the roles
    the stage calls), `dataset_type` and its `dataset_type_hash`, with a
    `config_dir` that folder and `config_files`, and for the jailbreak stage
    `spec_version` and the resolved `augmentation` section

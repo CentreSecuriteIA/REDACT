@@ -22,6 +22,7 @@ import threading
 import time
 import warnings
 from collections.abc import Iterable, Mapping
+from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 
@@ -42,6 +43,7 @@ from redact.recipe import (
     load_recipe,
     resolve_role,
     serving_of,
+    stage_params,
 )
 from redact.stages import STAGES, RunContext
 
@@ -67,7 +69,8 @@ def write_record(
     """Write a stage's run record and return its path."""
     record = {
         "stage": stage,
-        "timestamp": time.strftime("%Y-%m-%dT%H:%M:%S"),
+        # UTC, with its offset, as the trace's timestamps are.
+        "timestamp": datetime.now(timezone.utc).isoformat(timespec="seconds"),
         "params": params or {},
         "models": models or {},
         "counts": counts or {},
@@ -481,8 +484,9 @@ def run_pipeline(
     roll-up.
 
     Returns:
-        ``dataset_type``, ``data_dir``, ``stages`` (per stage, its
-        ``counts`` and the path of its record under ``manifest``),
+        ``dataset_type``, ``data_dir`` (the root the run wrote under),
+        ``stages`` (per stage, its ``counts`` and the path of its run record
+        under ``manifest``, a key kept by that name),
         ``serving`` (:func:`_served`) and ``telemetry``; ``residency`` when
         a stage calls a local model, and ``trace`` when one is written.
     """
@@ -508,8 +512,10 @@ def run_pipeline(
         taxonomy_dir=recipe.get("taxonomy_dir"),
         benign_taxonomy=recipe["benign_taxonomy"],
         params=params,
-        augmentations=augmentations_of(
-            recipe, params.get("jailbreaks") if "jailbreaks" in stages else None),
+        # The type file's flat keywords too, which load_params warns are read.
+        augmentations=augmentations_of(recipe, stage_params(
+            "jailbreaks", recipe["dataset_type"], params, recipe.get("config_dir"))
+            if "jailbreaks" in stages else None),
         resume=recipe.get("resume", True),
         verbose=verbose,
         config_dir=recipe.get("config_dir"),
@@ -540,7 +546,9 @@ def run_pipeline(
                      config_files=sorted(configs["overridden"] + configs["added"]))
 
     summary: dict = {
-        "dataset_type": ctx.dataset_type, "data_dir": str(ctx.data_dir), "stages": {}}
+        "dataset_type": ctx.dataset_type,
+        # The root the run wrote under, get_output_dir() when it names none.
+        "data_dir": str(paths.datasets(ctx.data_dir).parent), "stages": {}}
     phases: list = []
     warm: set[str] = set()
     preloads: list[tuple[threading.Thread, list[str]]] = []
@@ -592,7 +600,7 @@ def run_pipeline(
                 )
                 summary["stages"][name] = {"counts": counts, "manifest": str(path)}
                 if verbose:
-                    logger.info("[%s] %s -> manifest %s", name, counts, path.name)
+                    logger.info("[%s] %s -> record %s", name, counts, path.name)
     finally:
         # The serving was this run's: a call made after it must not get it.
         capabilities.set_run_serving({})
