@@ -444,3 +444,34 @@ def test_the_scaffold_script_writes_the_folder(tmp_path, capsys):
     assert module.main([str(tmp_path)]) == 1
     assert "overwrite" in capsys.readouterr().err
     assert module.main([str(tmp_path), "--overwrite"]) == 0
+
+
+# --- scaffold_prompt_tree --------------------------------------------------------
+
+def test_scaffolding_prompts_refuses_to_overwrite_unless_asked(tmp_path):
+    """A skeleton written over an edited prompt still renders, so the next run
+    would use it without a word: an existing file stops the call."""
+    from redact.llms.prompting import scaffold_prompt_tree
+
+    written = scaffold_prompt_tree(tmp_path)
+    edited = tmp_path / "input" / "quality_check" / "template.json"
+    edited.write_text('{"template": "mine {sample}"}', encoding="utf-8")
+    with pytest.raises(FileExistsError) as raised:
+        scaffold_prompt_tree(tmp_path, mode="empty")
+    assert "overwrite=True" in str(raised.value)
+    assert edited.read_text(encoding="utf-8") == '{"template": "mine {sample}"}'
+    assert scaffold_prompt_tree(tmp_path, mode="empty", overwrite=True) == written
+    assert json.loads(edited.read_text(encoding="utf-8"))["template"].startswith("TODO")
+
+
+def test_the_prompt_scaffold_script_refuses_to_overwrite(tmp_path, capsys):
+    import importlib.util
+
+    script = Path(__file__).parents[1] / "scripts" / "scaffold_prompts.py"
+    spec = importlib.util.spec_from_file_location("scaffold_prompts_script", script)
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    assert module.main([str(tmp_path)]) == 0
+    assert module.main([str(tmp_path), "--empty"]) == 1
+    assert "overwrite" in capsys.readouterr().err
+    assert module.main([str(tmp_path), "--empty", "--overwrite"]) == 0

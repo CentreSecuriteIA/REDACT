@@ -66,6 +66,8 @@ def scaffold_prompt_tree(
     target_dir: str | Path,
     source_dir: str | Path | None = None,
     mode: str = "copy",
+    *,
+    overwrite: bool = False,
 ) -> int:
     """Write an editable copy of a ``prompts/`` tree.
 
@@ -78,6 +80,10 @@ def scaffold_prompt_tree(
         mode: ``"copy"`` (default) writes the real prompts. ``"empty"``
             writes skeletons whose text fields are replaced by TODOs that
             keep each field's own ``{placeholders}``.
+        overwrite: Replace the files ``target_dir`` already holds. Off, a
+            file to write that exists stops the call before it writes any:
+            a skeleton written over an edited prompt still renders, so the
+            next run would use it without a word.
 
     Returns:
         Number of files written.
@@ -85,10 +91,8 @@ def scaffold_prompt_tree(
     Raises:
         ValueError: Unknown ``mode``.
         FileNotFoundError: The source directory does not exist.
-
-    Note:
-        ``"empty"`` replaces prompt text only. Directory and category names
-        are left as they are, so review the output before publishing.
+        FileExistsError: A file to write exists and ``overwrite`` is False;
+            the message names them. Nothing is written.
     """
     if mode not in ("copy", "empty"):
         raise ValueError(f"mode must be 'copy' or 'empty', got {mode!r}")
@@ -97,8 +101,15 @@ def scaffold_prompt_tree(
     if not source.is_dir():
         raise FileNotFoundError(f"Prompt source directory {source} does not exist.")
     target = Path(target_dir)
+    sources = sorted(source.rglob("*.json"))
+    existing = [path.relative_to(source).as_posix() for path in sources
+                if (target / path.relative_to(source)).exists()]
+    if existing and not overwrite:
+        raise FileExistsError(
+            f"{target} already holds {len(existing)} of the prompt files, such as "
+            f"{existing[:5]}; pass overwrite=True (--overwrite) to replace them.")
     written = 0
-    for src_path in source.rglob("*.json"):
+    for src_path in sources:
         dst_path = target / src_path.relative_to(source)
         dst_path.parent.mkdir(parents=True, exist_ok=True)
         if mode == "copy":

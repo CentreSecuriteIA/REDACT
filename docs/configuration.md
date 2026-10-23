@@ -1204,7 +1204,11 @@ python scripts/scaffold_prompts.py ./my_prompts --empty   # skeletons with the s
 
 `--empty` replaces `system_prompt`, `template` and `instruction` with a TODO
 that keeps the field's placeholders, so a skeleton renders with the same
-values. Delete every file you do not change, then set `prompt_dir`.
+values. Delete every file you do not change, then set `prompt_dir`. The
+script refuses to write over a file the folder holds, naming some of them,
+and writes nothing: a skeleton written over an edited prompt would still
+render, and the next run would use it. `--overwrite` replaces them
+(`scaffold_prompt_tree(..., overwrite=True)`).
 
 ## Other configuration files
 
