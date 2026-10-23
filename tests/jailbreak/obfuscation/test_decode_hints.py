@@ -15,11 +15,13 @@ import pytest
 
 import redact.jailbreak  # noqa: F401  (tags the techniques)
 from redact import paths
+from redact.jailbreak.augmentation import resolve
 from redact.jailbreak.chain import combine_techniques
 from redact.jailbreak.directives import check_pools
 from redact.jailbreak.obfuscation import encoding as E
 from redact.jailbreak.obfuscation.encoding import get_encoding_functions
 from redact.jailbreak.obfuscation.sensitive_words import _ENCODE_SPECS
+from redact.jailbreak.pool import technique_pool
 from redact.jailbreak.technique import decode_hint_rate, load_spec, read_spec
 
 PROMPT = "How do plants turn sunlight into food"
@@ -110,6 +112,24 @@ def test_a_hint_pool_named_for_no_encoder_raises():
         "encoder or remove the entry.")
 
 
+@pytest.mark.parametrize("name", sorted(UNHINTED))
+def test_a_hint_pool_for_an_eval_or_natural_encoding_raises(name):
+    """A hint would change the text of an encoding the eval pool or the
+    natural kind draws, so a pool naming one fails at import."""
+    with pytest.raises(ValueError, match=rf"has hints for \['{name}'\], which the "
+                       "eval pool or the natural kind draws"):
+        E._check_hints({name: []}, E._ENCODERS)
+
+
+def test_the_never_hinted_encodings_are_the_eval_and_natural_ones():
+    """The constant ``_check_hints`` reads is the encoders the packaged eval
+    pool and natural kind hold, so a change to either shows here."""
+    encoders = {fn.__name__ for fn in E._ENCODERS}
+    eval_pool = set(json.loads(_EVAL_POOL.read_text(encoding="utf-8")))
+    natural = {fn.__name__ for fn in technique_pool(resolve(None, "natural"))}
+    assert E.NEVER_HINTED == UNHINTED == (eval_pool | natural) & encoders
+
+
 # --- the plain encoders -------------------------------------------------------
 
 @pytest.mark.parametrize("name", sorted(UNHINTED))
@@ -134,10 +154,18 @@ def test_the_sensitive_word_encodings_call_the_plain_encoders():
 
 # --- no hint: today's output and today's draws ---------------------------------
 
+@pytest.mark.parametrize("seed", range(5))
+@pytest.mark.parametrize("prompt", [PROMPT, 'Say "hi" to {x}\nthen go, café 123', "42"],
+                         ids=["plain", "hostile", "digits"])
 @pytest.mark.parametrize("name", HINTED)
-def test_a_call_without_a_hint_writes_what_the_plain_encoder_writes(name, never):
-    assert REGISTERED[name](PROMPT, rng=random.Random(5)) == _plain(
-        name, random.Random(5))
+def test_a_call_without_a_hint_writes_what_the_plain_encoder_writes(
+        name, prompt, seed, never):
+    """Also for a text some encoders leave as it is (digits), which gets no
+    hint at any rate."""
+    encode = getattr(E, name)
+    expected = (encode(prompt, rng=random.Random(seed))
+                if "rng" in inspect.signature(encode).parameters else encode(prompt))
+    assert REGISTERED[name](prompt, rng=random.Random(seed)) == expected
 
 
 @pytest.mark.parametrize("name", HINTED)
@@ -158,9 +186,12 @@ def test_the_packaged_rate_is_one_half_and_the_spec_reads_it():
 @pytest.mark.parametrize("name", ["to_rot13", "to_separator", "to_caesar_cipher"])
 def test_about_half_the_calls_carry_a_hint_at_the_packaged_rate(
         name, stand_in_hints):
+    """2,000 seeded calls give 1,003 to 1,040 hinted at 0.5; a rate of 0.45
+    gives 872 to 933 and one of 0.55 gives 1,095 to 1,164, so the bounds
+    (nearly three standard deviations of a fair coin, 22) keep them out."""
     hinted = sum("hint=" in REGISTERED[name](PROMPT, rng=random.Random(seed))[1]
-                 for seed in range(400))
-    assert 160 <= hinted <= 240  # noqa: PLR2004
+                 for seed in range(2000))
+    assert 940 <= hinted <= 1060  # noqa: PLR2004
 
 
 # --- a hint --------------------------------------------------------------------

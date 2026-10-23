@@ -730,7 +730,8 @@ wrappers. The family is attack-only, and the eval type does not draw it.
   ROT13) gets none. Six encodings have none: the five of the eval pool,
   `to_base64`, `to_unicode_escape`, `to_ascii_ordinal`, `to_morse` and
   `to_braille`, whose hints wait for the eval review, and `to_leetspeak_basic`,
-  which the natural kind draws. The ten `to_sensitive_words_encode_*` techniques
+  which the natural kind draws; import fails for a pool of hints that names one
+  (`NEVER_HINTED` in `obfuscation/encoding.py`). The ten `to_sensitive_words_encode_*` techniques
   call the plain encoders, so they carry none.
 - `structural` wraps the text in JSON, XML or markdown. `to_json` keeps
   non-ASCII characters as they are.

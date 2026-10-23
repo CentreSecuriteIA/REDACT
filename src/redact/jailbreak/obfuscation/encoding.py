@@ -12,7 +12,9 @@ registry (:func:`get_encoding_functions`) with a pool in
 ``decode_hint_rate`` (0.5) it writes one of four hints around the encoded
 text, which says how to decode it, and adds ``hint=<name>`` to the info. The
 five encodings of the eval pool, ``to_leetspeak_basic`` (natural) and the
-sensitive-word encodings, which import the plain encoders, have no hints.
+sensitive-word encodings, which import the plain encoders, have no hints:
+:data:`NEVER_HINTED` names the first six, and import fails for a pool of hints
+that names one.
 """
 
 import base64
@@ -438,6 +440,11 @@ _ENCODERS = [
 ]
 
 _HINTS_FILE = "obfuscation/decode_hints.json"
+#: The encodings that never carry a hint: the five of the eval pool, whose
+#: text waits for the owner's eval review, and the one the natural kind draws.
+NEVER_HINTED = frozenset({
+    "to_base64", "to_unicode_escape", "to_ascii_ordinal", "to_morse",
+    "to_braille", "to_leetspeak_basic"})
 #: The hints of each encoding that has them, by technique name.
 _HINTS: dict[str, list[dict]] = read_pools(_HINTS_FILE)
 #: What a hint fills beside ``{prompt}``, the encoded text: the values its
@@ -487,12 +494,19 @@ def _with_hint(encode: Callable) -> Callable:
 
 def _check_hints(hints: dict[str, list[dict]], encoders: list[Callable]) -> None:
     """Raise unless every pool of ``hints`` is that of an encoder in
-    ``encoders``, so a misspelt name cannot leave an encoding without hints."""
+    ``encoders``, so a misspelt name cannot leave an encoding without hints,
+    and of none in :data:`NEVER_HINTED`, whose text a hint would change."""
     if unnamed := sorted(set(hints) - {fn.__name__ for fn in encoders}):
         raise ValueError(
             f"configs/jailbreak/{_HINTS_FILE} has hints for {unnamed}, which are "
             "not encoders of obfuscation/encoding.py; name an encoder or remove "
             "the entry.")
+    if held := sorted(set(hints) & NEVER_HINTED):
+        raise ValueError(
+            f"configs/jailbreak/{_HINTS_FILE} has hints for {held}, which the "
+            "eval pool or the natural kind draws: a hint would change their "
+            "text. Remove the entry, or take the encoding out of NEVER_HINTED "
+            "of obfuscation/encoding.py with the owner's eval review.")
 
 
 _check_hints(_HINTS, _ENCODERS)
