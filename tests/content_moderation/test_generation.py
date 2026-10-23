@@ -71,8 +71,10 @@ class TestGeneralBenignEntries:
     def test_it_is_checked_against_its_benign_category_and_keeps_its_taxonomy(
             self, tmp_path, monkeypatch):
         checked, rows = self._run(tmp_path, monkeypatch, source_taxonomy="benign")
-        assert checked == [{"category": "Cooking", "entry_type": "benign",
-                            "subcategory": "Bread", "prompt_dir": None}]
+        # Less the stage's render of the check prompt before any call.
+        assert [k for k in checked if k["category"]] == [
+            {"category": "Cooking", "entry_type": "benign", "subcategory": "Bread",
+             "prompt_dir": None}]
         assert rows[["category", "entry_type", "subcategory", "source_taxonomy",
                      "accepted"]].to_dict("records") == [
             {"category": "Cooking", "entry_type": "benign", "subcategory": "Bread",

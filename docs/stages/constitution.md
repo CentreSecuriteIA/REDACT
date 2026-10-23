@@ -46,6 +46,14 @@ apart:
 - The prompts `prompts/constitution/<entry_type>/`, plus `general_benign`.
   The recipe's `prompt_dir` overlays them.
 
+Before any call, the stage checks that each category it plans, in either
+taxonomy, can name a folder, since its inputs are stored under one
+(`dataset.check_category_name`): a path separator, one of `<>:"|?*` or a
+control character, a trailing dot or space, an empty name, or a device name
+Windows reserves (`CON`, `NUL`, `COM1`, ...) raises a `ValueError`, on every
+platform, naming the category. So does `include_general_benign` with a
+benign taxonomy that has no category.
+
 ## Models
 
 | Recipe role | Registry role | Default |

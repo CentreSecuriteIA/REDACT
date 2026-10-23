@@ -192,15 +192,28 @@ a new `data_dir`, or, for a folder without the axis columns,
 `inputs.axes: false`.
 
 A category file written from a constitution without `source_taxonomy`
-cannot take rows that have it: the save raises `Cannot append to ...: its
-header has no column 'source_taxonomy'`. Start the style over
-(`resume: false`) after regenerating the constitution.
+cannot take rows that have it: with a constitution that has the column, the
+stage stops before any call with `Cannot append to ...: its header has no
+column 'source_taxonomy'`. Start the style over (`resume: false`) after
+regenerating the constitution, or run in a new `data_dir`.
 
 `resume: false` starts over the current `style` only. Its rows are removed
 from every category file and its acks from the ledger (`dataset.drop_units`);
 the rows of other styles stay. Until that finishes, a
 `constitution_inputs.state.jsonl.dropping` file names the style; a later run
 stops until the same fresh run is repeated.
+
+## Checked before any call
+
+Before anything is cleared (a fresh run's `drop_units`) or any call made:
+
+- each entry's `source_category` must name a folder
+  (`dataset.check_category_name`; see
+  [constitution](constitution.md#inputs)), else a `ValueError` names it;
+- the generation prompt, with its format instruction, and the check prompt
+  are rendered once with empty values, so an overlay with a placeholder the
+  stage does not fill stops the run here rather than inside its first units;
+- the folder of an earlier layout stops it, as above.
 
 ## Rejected and failed units
 

@@ -31,6 +31,49 @@ SAMPLE_COLUMNS: list[str] = [
 ]
 
 
+# What a folder name may not hold on Windows, besides the path separators.
+_NOT_IN_A_FOLDER_NAME = '<>:"|?*'
+# The device names Windows reserves, with or without an extension.
+_RESERVED_NAMES = {"CON", "PRN", "AUX", "NUL",
+                   *(f"COM{n}" for n in range(1, 10)),
+                   *(f"LPT{n}" for n in range(1, 10))}
+
+
+def check_category_name(name: Any) -> str:
+    """``name`` when it can name a category's folder, on every platform.
+
+    A category's input samples are stored under a folder of its name
+    (``{category}/samples.csv``), and a run folder may be copied to another
+    machine, so a name Windows cannot use as a folder is refused on every
+    platform: a path separator, one of ``<>:"|?*`` or a control character, a
+    trailing dot or space, an empty name, or a reserved device name such as
+    ``CON``.
+
+    Raises:
+        ValueError: The name, why, and what to do.
+    """
+    text = name if isinstance(name, str) else ""
+    stem = text.split(".")[0].strip().upper()
+    if not text.strip():
+        why = "it is empty"
+    elif "/" in text or "\\" in text:
+        why = "it holds a path separator ('/' or '\\')"
+    elif any(c in _NOT_IN_A_FOLDER_NAME or ord(c) < 32 for c in text):
+        why = (f"it holds a character a folder name may not hold "
+               f"({_NOT_IN_A_FOLDER_NAME} or a control character)")
+    elif text.endswith((".", " ")):
+        why = "it ends with a dot or a space"
+    elif stem in _RESERVED_NAMES:
+        why = f"{stem} is a device name Windows reserves"
+    else:
+        return text
+    raise ValueError(
+        f"Category name {name!r} cannot name a folder: {why}. A category's "
+        "inputs are stored under a folder of its name, on every platform the "
+        "run may be copied to; rename the category in the taxonomy (or the "
+        "constitution's source_category).")
+
+
 def read_category_csv(
     category: str,
     dataset_dir: str | Path | None = None,

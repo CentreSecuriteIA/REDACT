@@ -287,6 +287,31 @@ class TestConstitutionPipeline:
                            benign_taxonomy=_BENIGN)
         assert [u.key for u in units] == ["A::harmful", "Cooking::general_benign"]
 
+    @pytest.mark.parametrize("side", ["taxonomy", "benign"])
+    def test_a_category_that_cannot_name_a_folder_stops_the_run_before_any_call(
+            self, tmp_path, side):
+        bad = {"categories": {"Weapons/Explosives": {"description": ""}}}
+        taxonomy, benign = (bad, _BENIGN) if side == "taxonomy" else (
+            {"categories": {"Cat": {}}}, bad)
+        backend = MockBackend(_VALID_CONSTITUTION_OUTPUT)
+        with pytest.raises(ValueError, match="'Weapons/Explosives' cannot name"):
+            self._make_pipeline(backend, tmp_path).run(
+                taxonomy, include_general_benign=True, benign_taxonomy=benign,
+                verbose=False)
+        assert backend.calls == []
+        assert not (tmp_path / "constitution").exists()
+
+    def test_a_category_left_out_by_the_cap_is_not_checked(self):
+        units = plan_units({"categories": {"Cat": {}, "A/B": {}}},
+                           [EntryType.HARMFUL], num_taxonomy_categories=1)
+        assert [u.key for u in units] == ["Cat::harmful"]
+
+    @pytest.mark.parametrize("benign", [None, {"categories": {}}])
+    def test_the_general_benign_part_without_a_benign_category_raises(self, benign):
+        with pytest.raises(ValueError, match="benign taxonomy has no category"):
+            plan_units({"categories": {"Cat": {}}}, include_general_benign=True,
+                       benign_taxonomy=benign)
+
     def test_no_general_benign_unit_unless_asked(self):
         units = plan_units({"categories": {"Cat": {}}}, [EntryType.HARMFUL],
                            benign_taxonomy=_BENIGN)

@@ -252,6 +252,7 @@ Input samples live in one `samples.csv` per category folder, under
 
 | Function | Does |
 |---|---|
+| `check_category_name(name)` | The name, when it can name a category's folder on every platform; else a `ValueError` saying why: a path separator, one of `<>:"|?*` or a control character, a trailing dot or space, an empty name, or a device name Windows reserves. The constitution checks the categories it plans, the inputs stage every `source_category`, `create_taxonomy` every category it writes |
 | `categories.SAMPLE_COLUMNS` | `sample_id`, `sample`, `category`, `subcategory`, `entry_type`, `turn`, `accepted`, `rejection_reason`, `source`; more columns are kept |
 | `sample_row(text, category, turn, accepted, source, extra)` | One input row in that column order |
 | `categories.read_category_csv(category, dataset_dir=None, filename="samples.csv")` | A category's file: ids as text, missing text as `""`; an empty `SAMPLE_COLUMNS` frame when there is no file or it has 0 bytes |

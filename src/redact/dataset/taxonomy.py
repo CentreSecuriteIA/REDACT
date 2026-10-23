@@ -20,6 +20,7 @@ from collections.abc import Iterator
 from pathlib import Path
 
 from .. import paths
+from .categories import check_category_name
 
 logger = logging.getLogger(__name__)
 
@@ -62,7 +63,13 @@ def create_taxonomy(
     unless it ends in it. ``taxonomy_dir`` defaults to the packaged
     ``configs/taxonomy``, where :func:`load_taxonomy` reads by default.
     ``verbose`` logs the path written.
+
+    Raises:
+        ValueError: A category name cannot name a folder
+            (:func:`~redact.dataset.check_category_name`); nothing is written.
     """
+    for category in categories:
+        check_category_name(category)
     taxonomy = {
         "name": name,
         "description": description,

@@ -134,6 +134,13 @@ class TestCreateTaxonomy:
 
         assert redact.create_taxonomy is create_taxonomy
 
+    def test_a_category_that_cannot_name_a_folder_is_refused_and_nothing_written(
+            self, tmp_path):
+        with pytest.raises(ValueError, match="'Fraud/Scams' cannot name a folder"):
+            create_taxonomy("bad", {"Cyber": "c", "Fraud/Scams": "f"},
+                            taxonomy_dir=tmp_path, verbose=False)
+        assert list(tmp_path.iterdir()) == []
+
 
 class TestIterCategories:
     def test_yields_pairs(self, sample_taxonomy):

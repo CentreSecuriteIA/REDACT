@@ -21,7 +21,7 @@ from redact.content_moderation.inputs import (
 )
 from redact.exceptions import PromptTooLongError
 from redact.llms.backends import ComputeConfig
-from tests.conftest import MockBackend, make_client
+from tests.conftest import MockBackend, lock_is_free, make_client
 
 _PROMPT = {"system_prompt": "sys", "template": "Generate items about {sample_description}"}
 
@@ -447,10 +447,15 @@ def test_an_entry_whose_prompt_is_too_long_is_acked_as_rejected(tmp_path, caplog
 
 def test_another_unit_error_still_stops_the_stage(tmp_path, monkeypatch):
     """Only a prompt that is too long is acked as rejected. This entry fails
-    building its check, after its samples arrived."""
+    building its check, after its samples arrived (the stage's own render of
+    the check prompt, before any call, passes)."""
     import redact.content_moderation.inputs as G
 
+    build = G.build_quality_checker
+
     def no_checker(**kwargs):
+        if not kwargs["category"]:
+            return build(**kwargs)
         raise KeyError("no checker")
 
     monkeypatch.setattr(G, "build_quality_checker", no_checker)
@@ -462,3 +467,66 @@ def test_another_unit_error_still_stops_the_stage(tmp_path, monkeypatch):
     assert gen.sent == ["zq0"]
     assert _constitution_inputs_ledger(tmp_path).completed() == set()
     assert list(tmp_path.glob("*/samples.csv")) == []
+
+
+# --- checked before any call ----------------------------------------------------
+
+def _first_run_then(tmp_path, constitution, *, prompt=_PROMPT, **kwargs):
+    """Run two entries of style ``long``; then run ``constitution`` with
+    ``kwargs``, expecting a ValueError; the generator of the second run."""
+    _token_pipeline(tmp_path, _TokenBackend(lambda t, n: one(f"sample {t}")),
+                    _TokenBackend(lambda t, n: "Yes")).run_from_constitution(
+        _token_df(2), _PROMPT, samples_per_entry=1, style="long", verbose=False)
+    gen = _TokenBackend(lambda t, n: one(f"again {t}"))
+    pipe = _token_pipeline(tmp_path, gen, _TokenBackend(lambda t, n: "Yes"))
+    with pytest.raises(ValueError) as stopped:
+        pipe.run_from_constitution(constitution, prompt, samples_per_entry=1,
+                                   style="long", verbose=False, **kwargs)
+    return gen, str(stopped.value)
+
+
+@pytest.mark.parametrize("name", ["Weapons/Explosives", "Back\\slash", "Q: tricks",
+                                  "Ends with a dot.", ""])
+def test_a_category_that_cannot_name_a_folder_stops_before_any_call_or_clear(
+        tmp_path, name):
+    gen, message = _first_run_then(
+        tmp_path, _token_df(3, categories=("Violence", name)), resume=False)
+    assert repr(name) in message and "folder" in message
+    assert gen.calls == []
+    # The fresh run of the style stopped before it removed the style's rows.
+    assert len(_rows(tmp_path)) == 2
+    assert lock_is_free(_constitution_inputs_ledger(tmp_path).path)
+
+
+def test_a_check_prompt_that_does_not_render_stops_before_any_call(tmp_path):
+    overlay = tmp_path / "prompts" / "input" / "quality_check"
+    overlay.mkdir(parents=True)
+    (overlay / "template.json").write_text(json.dumps(
+        {"system_prompt": "Judge {Category}.", "template": "{sample} {not_a_field}"}),
+        encoding="utf-8")
+    gen = _TokenBackend(lambda t, n: one(f"sample {t}"))
+    pipe = InputPipeline(gen=make_client(gen, "tok-gen"),
+                         check=make_client(_TokenBackend(lambda t, n: "Yes"), "tok-check"),
+                         dataset_dir=tmp_path / "out", prompt_dir=tmp_path / "prompts")
+    with pytest.raises(ValueError, match="not_a_field"):
+        pipe.run_from_constitution(_token_df(2), _PROMPT, samples_per_entry=1,
+                                   verbose=False)
+    assert gen.calls == []
+    assert not (tmp_path / "out").exists()
+
+
+def test_a_generation_prompt_that_does_not_render_stops_before_any_call(tmp_path):
+    gen, message = _first_run_then(
+        tmp_path, _token_df(2), prompt={"system_prompt": "s",
+                                        "template": "{sample_description} {nope}"},
+        resume=False)
+    assert "nope" in message
+    assert gen.calls == [] and len(_rows(tmp_path)) == 2
+
+
+def test_files_without_source_taxonomy_stop_a_constitution_with_it_before_any_call(
+        tmp_path):
+    with_taxonomy = _token_df(3).assign(source_taxonomy="harmful")
+    gen, message = _first_run_then(tmp_path, with_taxonomy)
+    assert "'source_taxonomy'" in message and "resume=False" in message
+    assert gen.calls == []

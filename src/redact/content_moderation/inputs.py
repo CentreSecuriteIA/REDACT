@@ -35,6 +35,7 @@ from ..dataset import (
     Ledger,
     Manifest,
     append_rows,
+    check_category_name,
     check_columns,
     content_id,
     sample_row,
@@ -267,16 +268,33 @@ class InputPipeline:
         ``prompt_config`` is a prompt of
         ``input/generation/from_constitution/{style}``.
 
+        Before anything is cleared or any call made, each entry's
+        ``source_category`` must name a folder
+        (:func:`~redact.dataset.check_category_name`), and the generation
+        prompt and the check prompt must render, so a broken overlay stops
+        the run here rather than inside its units.
+
         Raises:
-            ValueError: A folder written before this layout, or a resume
-                whose ``seed``, ``samples_per_entry`` or axes' weights differ
-                from those of the plan file.
+            ValueError: A category name that cannot name a folder, a prompt
+                that does not render, a folder written before this layout, or
+                a resume whose ``seed``, ``samples_per_entry`` or axes'
+                weights differ from those of the plan file.
         """
         if constitution_df.empty:
             logger.warning("run_from_constitution: empty constitution_df, nothing to do")
             return ConstitutionInputResult()
+        entries = [_entry_fields(entry) for _, entry in constitution_df.iterrows()]
+        for category in sorted({e.category for e in entries}):
+            check_category_name(category)
         if axes:
             warn_unshown(prompt_config, "sample_spec", "of the inputs' generation")
+        # Rendered once with empty values: an overlay that does not render
+        # stops the run before its first paid call.
+        self._build_generation_messages(
+            prompt_config, Category="", sample_description="",
+            constitution_subcategory="", entry_type="", sample_spec="")
+        if use_checker:
+            build_quality_checker(category="", prompt_dir=self.prompt_dir)("", "")
 
         capture_input = self.gen.compute_config.supports_internals
         capture_val_in = use_checker and self.check.compute_config.supports_internals
@@ -300,7 +318,9 @@ class InputPipeline:
             try:
                 _stop_on_earlier_files(
                     ledger, sorted(folder.glob(_CATEGORY_FILES)),
-                    ["iteration", *spec_columns(axes, {})])
+                    ["iteration", *spec_columns(axes, {}),
+                     *(["source_taxonomy"] if "source_taxonomy"
+                       in constitution_df.columns else [])])
             except ValueError:
                 release_lock(ledger)    # drop_units keeps it for the resume
                 raise
@@ -327,7 +347,6 @@ class InputPipeline:
                 "with is not checked.", folder, plan_path(manifest.path).name)
         write_plan(manifest.path, made_with)
 
-        entries = [_entry_fields(entry) for _, entry in constitution_df.iterrows()]
         units = [(e, iteration)
                  for e in entries for iteration in range(samples_per_entry)]
         specs = deal_specs(

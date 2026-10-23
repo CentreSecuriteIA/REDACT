@@ -4,7 +4,7 @@ import logging
 from collections.abc import Iterable
 from dataclasses import dataclass, field
 
-from ..dataset import content_id, iter_categories
+from ..dataset import check_category_name, content_id, iter_categories
 from ..llms.prompting import build_messages, load_prompt
 from ..types import ALL_ENTRY_TYPES, EntryType
 from .parse import parse_constitution, strip_end_marker
@@ -110,11 +110,26 @@ def plan_units(
     gets one unit of the ``general_benign`` prompt, asking for
     ``general_benign_categories``, its rows labelled ``benign``. Each
     taxonomy gives its first ``num_taxonomy_categories`` categories.
+
+    Raises:
+        ValueError: A category's name cannot name a folder
+            (:func:`~redact.dataset.check_category_name`): its inputs are
+            stored under one, and the run would stop at their first save,
+            after this stage's calls. Or ``include_general_benign`` is on and
+            ``benign_taxonomy`` has no category.
     """
     if entry_types is None:
         entry_types = ALL_ENTRY_TYPES
     entry_types = list(dict.fromkeys(entry_types))
     categories = list(iter_categories(taxonomy))[:num_taxonomy_categories]
+    benign = list(iter_categories(benign_taxonomy or {}))[:num_taxonomy_categories]
+    if include_general_benign and not benign:
+        raise ValueError(
+            "include_general_benign is on and the benign taxonomy has no "
+            "category, so the general-benign part would have no unit. Give it "
+            "categories, or turn include_general_benign off.")
+    for name, _ in categories + (benign if include_general_benign else []):
+        check_category_name(name)
     units = [
         Unit(name, entry_type.value, info.get("group_tag", _GENERAL),
              {**_prompt_kwargs(name, info), "num_categories": str(num_categories)})
@@ -122,7 +137,6 @@ def plan_units(
         for entry_type in entry_types
     ]
     if include_general_benign:
-        benign = list(iter_categories(benign_taxonomy or {}))[:num_taxonomy_categories]
         units += [
             Unit(name, EntryType.BENIGN.value, info.get("group_tag", _GENERAL),
                  {**_prompt_kwargs(name, info),
