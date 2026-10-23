@@ -602,7 +602,10 @@ its model the clean input instead, the text the unit started from, which
 the subcategory on what the question is about, not on its cipher or its
 wrapper, then inserts the finished question. In a plan kept from before the
 eval release, where `fsh` or `dap` ran first, the clean input is the text
-the variant read, so it picks as it did.
+the variant read, so it picks as it did; the exception is a rewrite
+technique (in a kind that allows the rewrite layer), which runs first in
+both orders: the variant is now shown the input before the rewrite, where
+a kept plan's was shown the rewritten text.
 
 The `many` variants (spec 1.2: `to_fsh_random_many`,
 `to_fsh_selected_many`, `to_dap_random_many`, `to_dap_selected_many`) show

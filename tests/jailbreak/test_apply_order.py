@@ -204,6 +204,27 @@ def test_a_selected_variant_picks_on_the_clean_input_of_a_translated_question():
     assert (_PROBE in text, "translated stand-in" in text) == (False, True)
 
 
+def test_after_a_rewrite_the_pick_reads_the_input_before_it():
+    """A rewrite (a kind that allows the layer) runs first in both orders:
+    the pick reads the chain's input, where a plan kept from before showed
+    the variant the rewritten text. A stand-in rewrite upper-cases here."""
+    def to_stand_in_rewrite(prompt: str) -> tuple[str, str]:
+        return prompt.upper(), ""
+
+    asked = []
+
+    def call(request):
+        asked.append(request)
+        return "Gardening"
+
+    text, _ = _run([to_stand_in_rewrite, BY_NAME["to_fsh_selected_short"]], call,
+                   gen_model="gen")
+    (selection,) = asked
+    shown = "\n".join(message["content"] for message in selection.messages)
+    assert (_PROBE in shown, _PROBE.upper() in shown) == (True, False)
+    assert (_PROBE in text, _PROBE.upper() in text) == (False, True)
+
+
 def test_a_kept_plan_with_fsh_first_picks_on_what_it_picked_on_before():
     """Its fsh runs on the input itself, so the model is shown what the
     variant alone, without a ``source_prompt``, shows it."""

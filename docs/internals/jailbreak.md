@@ -164,8 +164,10 @@ when it takes it, `source_prompt`: the text the chain started from (the
 unit's input) unless the caller gives one. The selected `fsh` and `dap`
 variants, which apply last, pick their examples' subcategory on it, not on
 the encoded, translated or wrapped question they then insert; in a kept plan
-where they run first it is the text they read before (`_select_kwargs`
-passes it, as the other keywords, to the techniques that take it). A
+where they run first it is the text they read before, unless a rewrite step
+ran before them, whose output they read then and whose input they read now
+(`_select_kwargs` passes it, as the other keywords, to the techniques that
+take it). A
 step that leaves the text unchanged is noted `noop=<name>`. A step that
 leaves the text empty or blank is a rejection,
 `DISCARDED; technique=<name>; reason=empty text`. The first rejection stops

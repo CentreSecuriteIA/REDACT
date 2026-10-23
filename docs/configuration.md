@@ -1513,7 +1513,9 @@ framed the whole list, and an encoding multiplied the tokens of every pair.
 Now they change the question alone, and the examples stay as written. A
 selected `fsh` or `dap` variant shows its model the clean input (the unit's
 input, passed as `source_prompt`), not the encoded or wrapped question, and
-inserts the finished one. The same techniques are drawn, in another order:
+inserts the finished one; after a rewrite technique (a kind that allows the
+rewrite layer) that is the input before the rewrite, which a kept plan's
+variant did not see. The same techniques are drawn, in another order:
 no pair is added or taken out. In the eval pool, the 40 pairs of the eight
 `fsh` and `dap` techniques with `to_json`, `to_xml`, `to_markdown`,
 `to_refusal_then_comply` and `to_use_past_tense` write another text (the
@@ -1531,9 +1533,11 @@ steps stubbed, tokens estimated at about four characters a token), the 988
 units with a manipulation technique go from a 99th percentile of 4,059
 tokens and a longest row of 10,234 to 1,653 and 2,174 on 400-character
 inputs, and from 4,583 and 11,557 to 2,370 and 3,497 on 1,200-character
-ones; the typo rewrites that would pass the generation model's 2,000-token
-reply cap go from 8 units to none on 1,200-character inputs, and from 17 to
-none on 2,400-character ones. ASCII art, which never meets the manipulation
+ones (seeds 42 to 46: 4,583 to 5,953 and 9,953 to 11,619 before, 2,327 to
+2,423 and 3,410 to 3,541 after); the typo rewrites that would pass the
+generation model's 2,000-token reply cap go from 2 to 8 units (seeds 42 to
+46) to none on 1,200-character inputs, and from 17 to none on
+2,400-character ones (seed 42). ASCII art, which never meets the manipulation
 layer, is rejected as often as before. A row of a very long input under a
 lengthening encoding, with no manipulation technique, can still pass 6,000
 tokens.
