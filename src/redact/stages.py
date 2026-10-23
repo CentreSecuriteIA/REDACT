@@ -12,9 +12,8 @@ calls, the files it writes and the kwargs a recipe gives it.
 #     it reads none of its output back.
 #   - Nothing locks the constitution's files against a second process; the
 #     stage is tens of units.
-#TODO(dataset): the paraphrase stage reads its whole output CSV on every run,
-#   for the texts already in it. This goes when the stage moves onto
-#   drive_units with its ids on the ledger.
+#   - The paraphrase stage reads its whole output CSV on every run, for the
+#     texts already in it (see the TODO in content_moderation/paraphrase.py).
 
 import filecmp
 import inspect

@@ -562,6 +562,10 @@ def run_paraphrase_target(
         release_lock(ledger)
         return pd.DataFrame()
     # Read after the resume, which leaves only whole rows in the artifact.
+    #TODO(dataset): the whole artifact is read, on every run, for the texts
+    #   already in it, which the dedup needs. This goes when the ledger's
+    #   acks carry the content id of their unit's paraphrase, so a resume can
+    #   build the seen set from the acks alone.
     prev = read_rows(out_path)
     seen_texts: set[str] = (
         set(prev["sample"].astype(str))

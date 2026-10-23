@@ -258,10 +258,11 @@ six stages as a training run, with these differences:
   types, the clear ends, beside the general-benign part both types build
   from the benign taxonomy;
 - the jailbreak stage attacks the harmful inputs only, with a pool of hard
-  techniques whose label stays certain (the heavy encodings, `fsh`, `dap`,
-  `framing`, `structural`, `ascii_art`, `continuation`, `temporal`,
-  `to_refusal_then_comply` and eight low-resource translations), one
-  technique then two, with seed 43, and makes no natural variations;
+  techniques whose label stays certain (five heavy encodings, `fsh` and
+  `dap` less their many-shot variants, `framing`, `structural`,
+  `ascii_art`, `continuation`, `temporal`, `to_refusal_then_comply` and
+  eight low-resource translations), one technique then two, with seed 43,
+  and makes no natural variations;
 - the build runs in `eval` mode and writes no complete dataset: it writes
   three files with one `text` and one `label` column each, so an evaluation
   reads them without a join.
