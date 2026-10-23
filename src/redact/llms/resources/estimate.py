@@ -52,7 +52,6 @@ DEFAULT_FRAGMENTATION = 1.1
 #: the model, so it is added after the multiplier.
 DEFAULT_CUDA_CONTEXT_GIB = 0.6
 
-#TODO: make this a run-level setting, chosen at startup and capped per checkpoint.
 #: Context length of a vLLM engine whose setup sets no ``max_model_len``.
 DEFAULT_MAX_MODEL_LEN = 10_000
 
@@ -142,9 +141,14 @@ def _layer_attention(cfg, layers: int | None) -> list[tuple[int, int]] | None:
     Two forms are read: transformers' per-layer configs
     (``per_layer_config[i].num_key_value_heads`` and ``.head_dim``), and a
     config listing ``layer_types`` with the full-attention layers' own
-    ``num_global_key_value_heads`` and ``global_head_dim`` beside the other
-    layers' ``num_key_value_heads`` and ``head_dim`` (Gemma 4's
-    ``config.json``).
+    ``num_global_key_value_heads`` or ``global_head_dim`` beside the other
+    layers' ``num_key_value_heads`` and ``head_dim``. A field of the two left
+    out is the other layers': Gemma 4's ``config.json`` sets
+    ``global_head_dim`` and ``attention_k_eq_v`` but no
+    ``num_global_key_value_heads``, so its full-attention layers count every
+    KV head, not the one transformers gives them under
+    ``attention_k_eq_v``, which errs high (3.5 GiB of KV for the humanizer
+    at 8,192 tokens, against 2.62 from ``per_layer_config``).
     """
     per_layer = _field(cfg, "per_layer_config")
     if per_layer:

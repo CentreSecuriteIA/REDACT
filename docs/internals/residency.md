@@ -55,8 +55,10 @@ local (`vllm` or `introspect`).
 - **KV cache** (vLLM only): always estimated, at `max_model_len`, else at
   10,000 tokens capped at the checkpoint's own maximum. Summed layer by
   layer when the attention shape varies by layer (transformers'
-  `per_layer_config`, or `layer_types` with `num_global_key_value_heads` and
-  `global_head_dim`, as Gemma 4's config has), each layer at the full
+  `per_layer_config`, or `layer_types` with `num_global_key_value_heads` or
+  `global_head_dim`; Gemma 4's `config.json` names no
+  `num_global_key_value_heads`, so read that way its full-attention layers
+  count every KV head, which errs high), each layer at the full
   context, as vLLM 0.31 allocates it. Every config field is read through
   `estimate._field`, which reads an attribute that raises (transformers
   5.17's `AmbiguousGlobalPerLayerAttributeError`, a `RuntimeError`) as unset;

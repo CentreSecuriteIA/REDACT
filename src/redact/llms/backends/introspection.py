@@ -80,7 +80,6 @@ def _model_key(
 
 # Same caching as vllm._engine(). The load is split into _load_locked() so
 # tests can replace it without loading a model.
-#TODO: With the memory-management work, check the naming/structure inconsistency between this and vllm._engine().
 def _load(hf_model_id: str, device_map: str, torch_dtype: str, hf_kwargs: dict):
     """Get or load the tokenizer + model pair for one checkpoint."""
     key = _model_key(hf_model_id, device_map, torch_dtype, hf_kwargs)
