@@ -6,7 +6,8 @@ extra)``, where ``extra`` holds its own info fields.
 
 The many-shot variants (``*_many``) show :data:`MANY_PAIRS` short pairs. A
 subcategory holds only eight of a kind in the cache, so they draw from a pool
-across subcategories (:func:`_many_pairs`).
+across subcategories (:func:`_many_pairs`). A cache with no short pair raises
+(:func:`_require_short_pairs`) rather than give a prompt with no shot.
 """
 
 import random
@@ -69,6 +70,22 @@ def _select_subcategory_gen(
 def _pick_pairs(benign_data: dict, answer_type: str, subcat: str) -> list[dict]:
     """Benign Q&A pairs for one subcategory + answer-length tier ("short"/"long")."""
     return benign_data[f"by_subcat_{answer_type}"].get(subcat, benign_data[answer_type])
+
+
+def _require_short_pairs(benign_data: dict) -> None:
+    """Raise unless ``benign_data`` holds a short pair, which a many-shot
+    variant shows; without one it would write the request alone, marked
+    ``num_shots=0``, or fail on the empty subcategory list.
+
+    Raises:
+        ValueError: No short pair; the message says how to generate them again.
+    """
+    if not benign_data["short"]:
+        raise ValueError(
+            "The benign data holds no short pair, which a many-shot variant "
+            "shows (every short unit was rejected, or the cache lacks them). "
+            "Delete the benign cache, benign_samples.csv and the ledger beside "
+            "it, to generate the pairs again.")
 
 
 def _many_pairs(
@@ -166,6 +183,7 @@ def run_random_many(
 ) -> tuple[str, str]:
     """The body of a ``*_random_many`` variant: :data:`MANY_PAIRS` short pairs
     drawn from every subcategory (``sub_category=all``); no model call."""
+    _require_short_pairs(benign_data)
     rng = rng or random
     pairs = _many_pairs(benign_data, rng)
     jailbreak, extra = build_prompt(prompt, pairs, len(pairs), rng)
@@ -186,6 +204,7 @@ def run_selected_many(
     """The body of a ``*_selected_many`` variant: :data:`MANY_PAIRS` short
     pairs, those of the subcategory a model picks first, then its main
     category's, then the rest's."""
+    _require_short_pairs(benign_data)
     rng = rng or random
     subcat, was_fallback = yield from _select_subcategory_gen(
         prompt, benign_data["all_subcategories"],

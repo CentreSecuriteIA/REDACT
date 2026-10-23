@@ -1,12 +1,16 @@
 {
-  "_comment": "Jailbreak technique compatibility specification. All rules enforced in jailbreak/rules.py. kinds, on a family or a technique, lists the augmentation kinds that may draw it: absent is [\"adversarial\"], and a technique's own kinds replace its first family's. since and deprecated, on a technique, are the versions that added and retired it (absent since is \"1.0\"): version moves up, as dotted whole numbers (\"1.9\", \"1.10\"), in each change that adds or retires a technique, and the technique carries the new version. within_layer_order, on an obfuscation family, is the order the layer's families apply in, numbered in tens so a family added later slots in between: the whole-text rewrites first (translation 10, typos 20, casual_writing 30, noise 35), so they cannot undo a word-level step, then the word-level steps (sensitive_words 40, tokenbreak 50), suffixes 60, encode 70, structural and neutral_container 80 (they exclude each other, so they never meet) and ascii_art 90, the outermost. A technique takes its first family's. check and calls, on a family or a technique (a technique's own replacing its first family's), declare what checks a model-written technique's reply (typos, scenario, word_list or translate) and the model calls one application makes, generation and checks, as a whole number or [low, high]; nothing changes the draw by them. A translation's calls are for a one-paragraph prompt: a chat translator makes 2 to 8, a machine translation 3 to 12 (2P + 1 a round for P pieces). A cognitive or persona technique makes 3 to 9: a scenario (up to 3 replies for one with a scene), its check, again once when rejected, then the construction. Read by jailbreak/technique.py (tag) and jailbreak/pool.py.",
+  "_comment": "Jailbreak technique compatibility specification. All rules enforced in jailbreak/rules.py. layers_off_by_default lists the layers of layer_order that a kind of the augmentation section denies unless its layers.allow names them, whatever its layers.deny says (jailbreak/augmentation.py). decode_hint_rate is the share of the texts a hinted encoding (the 21 named in obfuscation/decode_hints.json) writes that come with a hint to decode them, a number from 0 to 1 (jailbreak/obfuscation/encoding.py). kinds, on a family or a technique, lists the augmentation kinds that may draw it: absent is [\"adversarial\"], and a technique's own kinds replace its first family's. since and deprecated, on a technique, are the versions that added and retired it (absent since is \"1.0\"): version moves up, as dotted whole numbers (\"1.9\", \"1.10\"), in each change that adds or retires a technique, and the technique carries the new version. within_layer_order, on an obfuscation family, is the order the layer's families apply in, numbered in tens so a family added later slots in between: the whole-text rewrites first (translation 10, typos 20, casual_writing 30, noise 35), so they cannot undo a word-level step, then the word-level steps (sensitive_words 40, wording 45, tokenbreak 50, word_art 55), suffixes 60, payload_split 65, encode 70, structural and neutral_container 80 (they exclude each other, so they never meet) and ascii_art 90, the outermost. A translation never meets the families that have a model mark words (sensitive_words, wording, tokenbreak, word_art): on 100 harmful inputs the marking call found a word in 62 English ones but in 3 to 36 of their translations, so a heavy encoding after one was discarded and a light one changed nothing. Nor does it meet a word-level or character-level change (typos, casual_writing, noise, payload_split): a translated prompt is already hard to read, for the model that writes or marks text and for the model that answers, and one more change is too complex. A technique takes its first family's. check and calls, on a family or a technique (a technique's own replacing its first family's), declare what checks a model-written technique's reply (typos, scenario, word_list, translate or preserve) and the model calls one application makes, generation and checks, as a whole number or [low, high]; nothing changes the draw by them. A translation's calls are for a one-paragraph prompt: a chat translator makes 2 to 8, a machine translation 3 to 12 (2P + 1 a round for P pieces). A cognitive or persona technique makes 3 to 9: a scenario (up to 3 replies for one with a scene), its check, again once when rejected, then the construction; to_invented_persona makes 4 to 12, its persona (up to 3 replies for a name and a description) coming first. A rewrite-layer persuasion or tense_rewrite technique makes 2 to 4: a rewrite and its preserve check, once more on a rejection; a model_distractors technique 1 to 3, a reply with no text asked for again. Read by jailbreak/technique.py (tag) and jailbreak/pool.py.",
 
-  "version": "1.2",
+  "version": "1.3",
 
   "layer_order": ["rewrite", "hacking", "manipulation", "obfuscation", "requests"],
 
+  "layers_off_by_default": ["rewrite"],
+
+  "decode_hint_rate": 0.5,
+
   "layer_rates": {
-    "_comment": "Per-layer target rates: the planner deals each layer at its rate over a group, and a direct sample_combination() call reads them as per-unit inclusion probabilities. Overridable per-call via the sampling_probs argument. rewrite, the first layer, holds no technique yet; its rate is 0, and both packaged kinds deny it (augmentations.json).",
+    "_comment": "Per-layer target rates: the planner deals each layer at its rate over a group, and a direct sample_combination() call reads them as per-unit inclusion probabilities. Overridable per-call via the sampling_probs argument. rewrite, the first layer, is off by default (layers_off_by_default) and its rate is 0: a budget round draws it only when the kind's layer_rates give it a rate above 0, a count round whenever the kind's pool holds a rewrite technique.",
     "rewrite": 0,
     "hacking": 0.5,
     "manipulation": 0.33,
@@ -31,6 +35,15 @@
       "calls": 1,
       "cross_incompatible_with": []
     },
+    "wording": {
+      "description": "Each harmful word a model marks put in other terms: a code name with a key, or a placeholder with a puzzle to solve first",
+      "layer": "obfuscation",
+      "dimension": "encoding",
+      "within_layer_order": 45,
+      "check": "word_list",
+      "calls": [1, 21],
+      "cross_incompatible_with": ["sensitive_words", "tokenbreak", "word_art", "translation", "ascii_art"]
+    },
     "tokenbreak": {
       "description": "Token-level splitting/prepending attacks targeting harmful words",
       "layer": "obfuscation",
@@ -48,7 +61,7 @@
       "within_layer_order": 10,
       "check": "translate",
       "calls": [2, 12],
-      "cross_incompatible_with": ["ascii_art"]
+      "cross_incompatible_with": ["ascii_art", "sensitive_words", "tokenbreak", "word_art", "wording", "typos", "casual_writing", "noise", "payload_split"]
     },
     "typos": {
       "description": "LLM-rewritten prompt with varying typo density",
@@ -60,12 +73,28 @@
       "calls": [2, 4],
       "cross_incompatible_with": []
     },
+    "word_art": {
+      "description": "One word the model marks drawn as ASCII art, [MASK] in its place in the prompt, and a request to read the art and put the word back",
+      "layer": "obfuscation",
+      "dimension": "encoding",
+      "within_layer_order": 55,
+      "check": "word_list",
+      "calls": 1,
+      "cross_incompatible_with": ["ascii_art", "payload_split", "encode", "sensitive_words", "tokenbreak", "structural", "neutral_container", "fake_turns"]
+    },
     "suffixes": {
       "description": "Adversarial suffix appended to the prompt",
       "layer": "obfuscation",
       "dimension": "surface_noise",
       "within_layer_order": 60,
       "cross_incompatible_with": []
+    },
+    "payload_split": {
+      "description": "The prompt cut into two to four parts, each named by a letter, with a request to join them in order (a cut at word boundaries, or one a model makes where the meaning allows)",
+      "layer": "obfuscation",
+      "dimension": "encoding",
+      "within_layer_order": 65,
+      "cross_incompatible_with": ["ascii_art", "encode", "fake_turns", "word_art"]
     },
     "encode": {
       "description": "Full-text encoding/cyphering (base64, rot*, leetspeak, morse, braille, etc.)",
@@ -137,6 +166,13 @@
       "calls": [3, 9],
       "cross_incompatible_with": ["fsh", "dap", "impersonation"]
     },
+    "persona_template": {
+      "description": "A fixed persona frame around the prompt, with one of six mechanics drawn into it (pure templates)",
+      "layer": "hacking",
+      "dimension": "role_framing",
+      "within_layer_order": 0,
+      "cross_incompatible_with": ["fsh", "dap", "ascii_art", "impersonation"]
+    },
     "fsh": {
       "description": "Few-Shot Hacking: benign Q&A pairs before harmful question",
       "layer": "manipulation",
@@ -150,6 +186,13 @@
       "dimension": "example_priming",
       "within_layer_order": 0,
       "cross_incompatible_with": ["continuation", "indirect", "framing", "persona", "cognitive"]
+    },
+    "fake_turns": {
+      "description": "Invented turns of the conversation with the prompt: a system turn, an assistant turn or an earlier exchange (pure templates; no benign data)",
+      "layer": "manipulation",
+      "dimension": "example_priming",
+      "within_layer_order": 0,
+      "cross_incompatible_with": ["continuation", "indirect", "framing", "persona", "cognitive", "persona_template", "structural", "neutral_container"]
     },
     "answer_format": {
       "description": "Output-format and response-conditioning directives",
@@ -241,12 +284,38 @@
       "kinds": ["natural"],
       "within_layer_order": 0,
       "cross_incompatible_with": []
+    },
+    "persuasion": {
+      "description": "A model rewrites the whole prompt as an appeal of one of 12 persuasion techniques, and a check model reads the rewrite against the prompt (rewrite layer, off by default)",
+      "layer": "rewrite",
+      "dimension": "request_shape",
+      "within_layer_order": 0,
+      "check": "preserve",
+      "calls": [2, 4],
+      "cross_incompatible_with": ["impersonation", "ascii_art"]
+    },
+    "tense_rewrite": {
+      "description": "A model rewrites the whole prompt in the past or the future tense, and a check model reads the rewrite against the prompt (rewrite layer, off by default)",
+      "layer": "rewrite",
+      "dimension": "request_shape",
+      "within_layer_order": 0,
+      "check": "preserve",
+      "calls": [2, 4],
+      "cross_incompatible_with": ["temporal"]
+    },
+    "model_distractors": {
+      "description": "A model writes sentences placed before or after the prompt, which is not rewritten; no check model (rewrite layer, off by default)",
+      "layer": "rewrite",
+      "dimension": "request_shape",
+      "within_layer_order": 0,
+      "calls": [1, 3],
+      "cross_incompatible_with": ["ascii_art", "distractor_prefix", "distractor_suffix"]
     }
   },
 
   "manipulation_blocked_obfuscation": {
-    "_comment": "When manipulation (fsh/dap) is selected, block these obfuscation families and encode_weight values (except when encode also has sensitive_words family — selective encoding is still fine)",
-    "families": ["ascii_art", "translation"],
+    "_comment": "When manipulation (a family of the manipulation layer: fsh, dap, fake_turns) is selected, block these obfuscation families and encode_weight values (except when encode also has sensitive_words family — selective encoding is still fine)",
+    "families": ["ascii_art", "translation", "payload_split", "word_art", "wording"],
     "encode_weight": "heavy"
   },
 
@@ -301,11 +370,16 @@
     "to_transcript_line":    { "families": ["neutral_container"], "complexity": 1, "requires_llm": false, "since": "1.2" },
     "to_log_entry":          { "families": ["neutral_container"], "complexity": 1, "requires_llm": false, "since": "1.2" },
 
+    "to_payload_split":          { "families": ["payload_split"], "complexity": 2, "requires_llm": false, "kinds": ["adversarial"], "since": "1.3" },
+    "to_payload_split_semantic": { "families": ["payload_split"], "complexity": 2, "requires_llm": true, "calls": [1, 3], "kinds": ["adversarial"], "since": "1.3" },
+
     "to_ascii_art":          { "families": ["ascii_art"], "complexity": 2, "requires_llm": false },
 
     "to_tokenbreak_prepend":   { "families": ["tokenbreak"], "complexity": 2, "requires_llm": true },
     "to_tokenbreak_split":     { "families": ["tokenbreak"], "complexity": 2, "requires_llm": true, "cross_incompatible_with": ["ascii_art"] },
     "to_tokenbreak_delimiter": { "families": ["tokenbreak"], "complexity": 2, "requires_llm": true },
+
+    "to_word_art":             { "families": ["word_art"], "complexity": 3, "requires_llm": true, "kinds": ["adversarial"], "since": "1.3" },
 
     "to_sensitive_words_encode_base64":              { "families": ["sensitive_words", "encode"], "complexity": 3, "requires_llm": true, "encode_weight": "heavy" },
     "to_sensitive_words_encode_rot13":               { "families": ["sensitive_words", "encode"], "complexity": 2, "requires_llm": true, "encode_weight": "light", "needs_latin": true },
@@ -323,6 +397,9 @@
     "to_sensitive_words_underscore":  { "families": ["sensitive_words"], "complexity": 2, "requires_llm": true, "deprecated": "1.1" },
     "to_sensitive_words_variables":   { "families": ["sensitive_words"], "complexity": 3, "requires_llm": true },
     "to_synonym_substitution":        { "families": ["sensitive_words"], "complexity": 2, "requires_llm": true, "calls": [1, 11] },
+
+    "to_pseudonym_substitution":      { "families": ["wording"], "complexity": 2, "requires_llm": true, "kinds": ["adversarial"], "since": "1.3" },
+    "to_word_game":                   { "families": ["wording"], "complexity": 2, "requires_llm": true, "kinds": ["adversarial"], "since": "1.3" },
 
     "to_rewrite_with_typos_low":    { "families": ["typos"], "complexity": 2, "requires_llm": true },
     "to_rewrite_with_typos_medium": { "families": ["typos"], "complexity": 2, "requires_llm": true },
@@ -369,7 +446,7 @@
     "to_avi":                  { "families": ["cognitive"], "complexity": 2, "requires_llm": true },
     "to_deep_inception":       { "families": ["cognitive"], "complexity": 2, "requires_llm": true },
 
-    "to_invented_persona":              { "families": ["persona"], "complexity": 2, "requires_llm": true },
+    "to_invented_persona":              { "families": ["persona"], "complexity": 2, "requires_llm": true, "calls": [4, 12] },
     "to_psychopath_persona":            { "families": ["persona"], "complexity": 2, "requires_llm": true },
     "to_alien_persona":                 { "families": ["persona"], "complexity": 2, "requires_llm": true },
     "to_radical_politician_persona":    { "families": ["persona"], "complexity": 2, "requires_llm": true },
@@ -384,6 +461,21 @@
     "to_religious_figure_persona":      { "families": ["persona"], "complexity": 2, "requires_llm": true, "deprecated": "1.1" },
     "to_actor_persona":                 { "families": ["persona"], "complexity": 2, "requires_llm": true },
     "to_someone_from_the_future_persona": { "families": ["persona"], "complexity": 2, "requires_llm": true },
+    "to_mercenary_persona":             { "families": ["persona"], "complexity": 2, "requires_llm": true, "kinds": ["adversarial"], "since": "1.3" },
+    "to_underground_hacker_persona":    { "families": ["persona"], "complexity": 2, "requires_llm": true, "kinds": ["adversarial"], "since": "1.3" },
+    "to_anarchist_philosopher_persona": { "families": ["persona"], "complexity": 2, "requires_llm": true, "kinds": ["adversarial"], "since": "1.3" },
+
+    "to_dan_persona_template":               { "families": ["persona_template"], "complexity": 2, "requires_llm": false, "since": "1.3" },
+    "to_stan_persona_template":              { "families": ["persona_template"], "complexity": 2, "requires_llm": false, "since": "1.3" },
+    "to_dude_persona_template":              { "families": ["persona_template"], "complexity": 2, "requires_llm": false, "since": "1.3" },
+    "to_developer_mode_persona_template":    { "families": ["persona_template"], "complexity": 2, "requires_llm": false, "since": "1.3" },
+    "to_aim_persona_template":               { "families": ["persona_template"], "complexity": 2, "requires_llm": false, "since": "1.3" },
+    "to_evil_confidant_persona_template":    { "families": ["persona_template"], "complexity": 2, "requires_llm": false, "since": "1.3" },
+    "to_opposite_mode_persona_template":     { "families": ["persona_template"], "complexity": 2, "requires_llm": false, "since": "1.3" },
+    "to_unfiltered_oracle_persona_template": { "families": ["persona_template"], "complexity": 2, "requires_llm": false, "since": "1.3" },
+    "to_rogue_ai_persona_template":          { "families": ["persona_template"], "complexity": 2, "requires_llm": false, "since": "1.3" },
+    "to_maintenance_mode_persona_template":  { "families": ["persona_template"], "complexity": 2, "requires_llm": false, "since": "1.3" },
+    "to_liberated_model_persona_template":   { "families": ["persona_template"], "complexity": 2, "requires_llm": false, "since": "1.3" },
 
     "to_fsh_random_short":   { "families": ["fsh"], "complexity": 2, "requires_llm": false, "requires_benign": true },
     "to_fsh_random_long":    { "families": ["fsh"], "complexity": 2, "requires_llm": false, "requires_benign": true },
@@ -399,15 +491,22 @@
     "to_dap_random_many":    { "families": ["dap"], "complexity": 3, "requires_llm": false, "requires_benign": true, "cross_incompatible_with": ["typos"], "since": "1.2" },
     "to_dap_selected_many":  { "families": ["dap"], "complexity": 3, "requires_llm": true, "requires_benign": true, "calls": 1, "cross_incompatible_with": ["typos"], "since": "1.2" },
 
-    "to_refusal_then_comply":     { "families": ["answer_format"], "complexity": 3, "requires_llm": false, "kinds": ["adversarial"] },
+    "to_fake_system_turn":    { "families": ["fake_turns"], "complexity": 2, "requires_llm": false, "since": "1.3" },
+    "to_fake_assistant_turn": { "families": ["fake_turns"], "complexity": 2, "requires_llm": false, "since": "1.3" },
+    "to_fake_history":        { "families": ["fake_turns"], "complexity": 2, "requires_llm": false, "since": "1.3" },
+
+    "to_refusal_then_comply":     { "families": ["answer_format"], "complexity": 3, "requires_llm": false, "kinds": ["adversarial"], "cross_incompatible_with": ["persona_template"] },
     "to_apology_prevention":      { "families": ["answer_format"], "complexity": 2, "requires_llm": false, "kinds": ["adversarial"] },
-    "to_prefix_injection":        { "families": ["answer_format"], "complexity": 2, "requires_llm": false, "kinds": ["adversarial"] },
+    "to_prefix_injection":        { "families": ["answer_format"], "complexity": 2, "requires_llm": false, "kinds": ["adversarial"], "cross_incompatible_with": ["persona_template"] },
     "to_answer_in_markdown":      { "families": ["answer_format"], "complexity": 2, "requires_llm": false },
     "to_answer_as_tutorial":      { "families": ["answer_format"], "complexity": 2, "requires_llm": false },
     "to_answer_as_code":          { "families": ["answer_format"], "complexity": 2, "requires_llm": false },
     "to_answer_as_dialogue":      { "families": ["answer_format"], "complexity": 2, "requires_llm": false, "kinds": ["adversarial"] },
     "to_answer_as_story":         { "families": ["answer_format"], "complexity": 2, "requires_llm": false, "kinds": ["adversarial"] },
     "to_answer_as_structured_data": { "families": ["answer_format"], "complexity": 2, "requires_llm": false },
+    "to_dual_answer":             { "families": ["answer_format"], "complexity": 2, "requires_llm": false, "kinds": ["adversarial"], "cross_incompatible_with": ["persona_template"], "since": "1.3" },
+    "to_tagged_prefix":           { "families": ["answer_format"], "complexity": 2, "requires_llm": false, "kinds": ["adversarial"], "cross_incompatible_with": ["persona_template"], "since": "1.3" },
+    "to_answer_in_encoding":      { "families": ["answer_format"], "complexity": 2, "requires_llm": false, "kinds": ["adversarial"], "cross_incompatible_with": ["encode"], "since": "1.3" },
 
     "to_continue_passage":     { "families": ["continuation"], "complexity": 3, "requires_llm": false },
     "to_complete_story":        { "families": ["continuation"], "complexity": 3, "requires_llm": false },
@@ -425,19 +524,45 @@
     "to_distractor_prefix_unrelated": { "families": ["distractor_prefix"], "complexity": 2, "requires_llm": false },
     "to_distractor_suffix_related":   { "families": ["distractor_suffix"], "complexity": 2, "requires_llm": false },
     "to_distractor_suffix_unrelated": { "families": ["distractor_suffix"], "complexity": 2, "requires_llm": false },
+    "to_distractor_prefix_task":      { "families": ["distractor_prefix"], "complexity": 2, "requires_llm": false, "since": "1.3" },
+    "to_distractor_suffix_task":      { "families": ["distractor_suffix"], "complexity": 2, "requires_llm": false, "since": "1.3" },
 
     "to_impersonate_good_person": { "families": ["impersonation"], "complexity": 1, "requires_llm": false },
+    "to_impersonate_authority":   { "families": ["impersonation"], "complexity": 1, "requires_llm": false, "since": "1.3" },
+    "to_impersonate_developer":   { "families": ["impersonation"], "complexity": 1, "requires_llm": false, "since": "1.3" },
 
-    "to_use_past_tense": { "families": ["temporal"], "complexity": 3, "requires_llm": false },
+    "to_use_past_tense":     { "families": ["temporal"], "complexity": 3, "requires_llm": false },
+    "to_use_future_tense":   { "families": ["temporal"], "complexity": 3, "requires_llm": false, "since": "1.3" },
+    "to_use_historical_era": { "families": ["temporal"], "complexity": 3, "requires_llm": false, "since": "1.3" },
 
     "to_innocuous_question": { "families": ["asking"], "complexity": 0, "requires_llm": false },
     "to_ask_for_details":    { "families": ["asking"], "complexity": 1, "requires_llm": false },
+    "to_ask_with_urgency":   { "families": ["asking"], "complexity": 1, "requires_llm": false, "since": "1.3" },
 
     "to_smalltalk_prefix": { "families": ["smalltalk_prefix"], "complexity": 0, "requires_llm": false, "since": "1.2" },
     "to_smalltalk_suffix": { "families": ["smalltalk_suffix"], "complexity": 0, "requires_llm": false, "since": "1.2" },
 
     "to_benign_role_subject_helper": { "families": ["benign_role"], "complexity": 1, "requires_llm": false, "since": "1.2" },
     "to_benign_role_tutor":          { "families": ["benign_role"], "complexity": 1, "requires_llm": false, "since": "1.2" },
-    "to_benign_role_task_assistant": { "families": ["benign_role"], "complexity": 1, "requires_llm": false, "since": "1.2" }
+    "to_benign_role_task_assistant": { "families": ["benign_role"], "complexity": 1, "requires_llm": false, "since": "1.2" },
+
+    "to_persuade_evidence_based":         { "families": ["persuasion"], "complexity": 2, "requires_llm": true, "kinds": ["adversarial"], "since": "1.3" },
+    "to_persuade_logical_appeal":         { "families": ["persuasion"], "complexity": 2, "requires_llm": true, "kinds": ["adversarial"], "since": "1.3" },
+    "to_persuade_expert_endorsement":     { "families": ["persuasion"], "complexity": 2, "requires_llm": true, "kinds": ["adversarial"], "since": "1.3" },
+    "to_persuade_authority_endorsement":  { "families": ["persuasion"], "complexity": 2, "requires_llm": true, "kinds": ["adversarial"], "since": "1.3" },
+    "to_persuade_social_proof":           { "families": ["persuasion"], "complexity": 2, "requires_llm": true, "kinds": ["adversarial"], "since": "1.3" },
+    "to_persuade_emotional_appeal":       { "families": ["persuasion"], "complexity": 2, "requires_llm": true, "kinds": ["adversarial"], "since": "1.3" },
+    "to_persuade_reciprocity":            { "families": ["persuasion"], "complexity": 2, "requires_llm": true, "kinds": ["adversarial"], "since": "1.3" },
+    "to_persuade_commitment_consistency": { "families": ["persuasion"], "complexity": 2, "requires_llm": true, "kinds": ["adversarial"], "since": "1.3" },
+    "to_persuade_scarcity":               { "families": ["persuasion"], "complexity": 2, "requires_llm": true, "kinds": ["adversarial"], "since": "1.3" },
+    "to_persuade_priming":                { "families": ["persuasion"], "complexity": 2, "requires_llm": true, "kinds": ["adversarial"], "since": "1.3" },
+    "to_persuade_framing":                { "families": ["persuasion"], "complexity": 2, "requires_llm": true, "kinds": ["adversarial"], "since": "1.3" },
+    "to_persuade_relationship_leverage":  { "families": ["persuasion"], "complexity": 2, "requires_llm": true, "kinds": ["adversarial"], "since": "1.3" },
+
+    "to_rewrite_in_past_tense":   { "families": ["tense_rewrite"], "complexity": 2, "requires_llm": true, "kinds": ["adversarial"], "since": "1.3" },
+    "to_rewrite_in_future_tense": { "families": ["tense_rewrite"], "complexity": 2, "requires_llm": true, "kinds": ["adversarial"], "since": "1.3" },
+
+    "to_model_distractor_prefix": { "families": ["model_distractors"], "complexity": 2, "requires_llm": true, "kinds": ["adversarial"], "since": "1.3" },
+    "to_model_distractor_suffix": { "families": ["model_distractors"], "complexity": 2, "requires_llm": true, "kinds": ["adversarial"], "since": "1.3" }
   }
 }

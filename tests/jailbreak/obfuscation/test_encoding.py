@@ -2,9 +2,13 @@
 
 import base64
 import codecs
+import html
 import random
 import re
+import unicodedata
 import urllib.parse
+
+import pytest
 
 from redact.jailbreak.obfuscation.encoding import (
     _LOOKALIKE_MAP,
@@ -129,6 +133,112 @@ class TestSeparator:
         family = chr(0x1F468) + chr(0x200D) + chr(0x1F469)   # joined by a ZWJ
         text, info = to_separator(f"{accented}{family}!", rng=random.Random(0))
         assert text.split(info.removeprefix("sep=")) == [accented, family, "!"]
+
+
+THUMB = chr(0x1F44D)
+TONE = chr(0x1F3FD)                       # a skin-tone modifier
+FRANCE = chr(0x1F1EB) + chr(0x1F1F7)      # regional indicators F, R
+GERMANY = chr(0x1F1E9) + chr(0x1F1EA)     # regional indicators D, E
+SPAIN_ITALY = [chr(0x1F1EA) + chr(0x1F1F8), chr(0x1F1EE) + chr(0x1F1F9)]
+KOREAN = unicodedata.normalize("NFD", "한국어")      # eight jamo, three syllables
+
+
+class TestClusters:
+    def test_a_skin_tone_stays_with_its_emoji(self):
+        assert _clusters(f"a{THUMB}{TONE}b") == ["a", THUMB + TONE, "b"]
+
+    def test_the_two_letters_of_a_flag_stay_together_and_the_next_flag_starts_anew(self):
+        assert _clusters(FRANCE + GERMANY) == [FRANCE, GERMANY]
+        assert _clusters("x" + "".join(SPAIN_ITALY)) == ["x", *SPAIN_ITALY]
+
+    def test_a_third_regional_indicator_starts_a_cluster(self):
+        assert _clusters(FRANCE + FRANCE[0]) == [FRANCE, FRANCE[0]]
+
+    def test_the_jamo_of_a_decomposed_syllable_stay_together(self):
+        assert len(KOREAN) == 8     # noqa: PLR2004
+        assert ["".join(unicodedata.normalize("NFD", syllable))
+                for syllable in "한국어"] == _clusters(KOREAN)
+
+    def test_a_syllable_with_two_trailing_consonants_is_one_cluster(self):
+        text = chr(0x1103) + chr(0x1161) + chr(0x11AF) + chr(0x11A8)
+        assert _clusters(text) == [text]
+
+    def test_a_vowel_or_a_lead_after_a_trailing_consonant_starts_a_cluster(self):
+        text = unicodedata.normalize("NFD", "각아")
+        assert _clusters(text) == [text[:3], text[3:]]
+
+    @pytest.mark.parametrize("text", [
+        THUMB + TONE, FRANCE + GERMANY, KOREAN, "e" + chr(0x301) + "x",
+        chr(0x1F468) + chr(0x200D) + chr(0x1F469), "plain text", "",
+    ])
+    def test_the_clusters_give_the_text_back(self, text):
+        assert "".join(_clusters(text)) == text
+
+    def test_a_flag_reversed_is_the_same_flag(self):
+        assert to_reversed_characters(f"a{FRANCE}b")[0] == f"b{FRANCE}a"
+
+    def test_an_emoji_with_its_tone_reverses_as_one_character(self):
+        assert to_reversed_characters(f"a{THUMB}{TONE}b")[0] == f"b{THUMB}{TONE}a"
+
+    def test_a_separator_goes_between_clusters_not_inside_them(self):
+        text, info = to_separator(f"{THUMB}{TONE}{FRANCE}{KOREAN}", rng=random.Random(0))
+        sep = info.removeprefix("sep=")
+        assert text.split(sep) == [THUMB + TONE, FRANCE,
+                                   *_clusters(KOREAN)]
+
+    def test_zero_width_noise_never_cuts_a_cluster(self):
+        text = f"a{THUMB}{TONE}{FRANCE}{KOREAN}"
+        for seed in range(20):
+            encoded, _ = to_zero_width_noise(text, rng=random.Random(seed))
+            assert [c for c in _clusters(encoded) if c not in _ZERO_WIDTH] == _clusters(text)
+
+
+LONE_SURROGATE = chr(0xD800)
+
+
+class TestEdgeInputs:
+    """What the encodings do with text no pipeline row holds in practice, so a
+    change to it is a decision."""
+
+    @pytest.mark.parametrize("fn", [to_base64, to_hex, to_binary, to_base32,
+                                    to_base85, to_url_encoding],
+                             ids=lambda fn: fn.__name__)
+    def test_a_lone_surrogate_stops_a_byte_codec_with_a_unicode_error(self, fn):
+        """No replacement character is written in its place: the unit gets an
+        error row, which names the codec and the position."""
+        with pytest.raises(UnicodeEncodeError, match="surrogates not allowed"):
+            fn("a" + LONE_SURROGATE)
+
+    @pytest.mark.parametrize("fn", [to_html_entities, to_unicode_escape,
+                                    to_ascii_ordinal],
+                             ids=lambda fn: fn.__name__)
+    def test_a_lone_surrogate_is_written_as_ascii_by_a_code_point_encoding(self, fn):
+        assert fn("a" + LONE_SURROGATE)[0].isascii()
+
+    def test_html_entities_read_back_by_html5_but_for_nul_and_the_c1_controls(self):
+        """``html.unescape`` reads ``&#0;`` as U+FFFD and 27 of ``&#128;`` to
+        ``&#159;`` as their Windows-1252 characters (``&#133;`` is an ellipsis),
+        so those characters do not come back as written; every other one does,
+        also the 5 C1 codes Windows-1252 leaves undefined."""
+        undefined = (0x81, 0x8D, 0x8F, 0x90, 0x9D)
+        text = SAMPLE + " caf" + chr(0xE9) + chr(0xA0) + chr(0x1F600) + "\t\n"
+        text += "".join(map(chr, undefined))
+        assert html.unescape(to_html_entities(text)[0]) == text
+        for code in (0, *(c for c in range(0x80, 0xA0) if c not in undefined)):
+            assert html.unescape(to_html_entities(chr(code))[0]) != chr(code), code
+
+    @pytest.mark.parametrize(("text", "back"), [
+        (chr(0x301) + "ab", "a" + chr(0x301) + "b"),     # a mark with no letter before it
+        ("ab" + chr(0x200D), "b" + chr(0x200D) + "a"),   # a joiner with nothing after it
+    ], ids=["leading-mark", "trailing-joiner"])
+    def test_reversing_twice_is_not_the_identity_for_a_mark_or_joiner_at_the_edge(
+            self, text, back):
+        """A mark stays with the letter before it and a joiner binds the
+        character after it, so a mark that starts the text lands on the letter
+        that follows it on the second pass, and a joiner that ends it binds the
+        letter that comes before it."""
+        once = to_reversed_characters(text)[0]
+        assert to_reversed_characters(once)[0] == back != text
 
 
 class TestLeetspeak:
@@ -293,7 +403,7 @@ class TestStyledUnicode:
 
     def test_math_styled_names_its_style_and_maps_back(self):
         encoded, info = to_math_styled(SAMPLE, rng=random.Random(2))
-        style = info.removeprefix("style=")
+        style = info.removeprefix("math_style=")
         upper, lower = _MATH_STYLES[style]
         back = "".join(
             chr(65 + ord(c) - upper) if upper <= ord(c) < upper + 26
@@ -323,8 +433,9 @@ class TestAllEncodings:
             assert result != SAMPLE, f"{fn.__name__} output should differ"
 
 
-#: A greeting and a count to three in six scripts other than Latin, with the
-#: script's own digits where it has them.
+#: A greeting and a count to three in ten scripts other than Latin, with the
+#: script's own digits where it has them: one for each script a translation
+#: technique writes (:data:`SCRIPT_OF`).
 NON_LATIN = {
     "Bengali": "নমস্কার বন্ধু এক দুই তিন ১২৩",
     "Thai": "สวัสดี ครับ หนึ่ง สอง สาม ๑๒๓",
@@ -332,6 +443,18 @@ NON_LATIN = {
     "Arabic": "مرحبا واحد اثنان ثلاثة ١٢٣",
     "Russian": "привет один два три",
     "Greek": "γεια σου ένα δύο τρία",
+    "Han": "你好 朋友 一 二 三",
+    "Devanagari": "नमस्ते दोस्त एक दो तीन १२३",
+    "Ethiopic": "ሰላም ጓደኛ አንድ ሁለት ሦስት ፩፪፫",
+    "Khmer": "សួស្តី មិត្ត មួយ ពីរ បី ១២៣",
+}
+
+#: The ISO 15924 code of each sample's script, as a translation technique's
+#: ``script`` names it.
+SCRIPT_OF = {
+    "Bengali": "Beng", "Thai": "Thai", "Japanese": "Jpan", "Arabic": "Arab",
+    "Russian": "Cyrl", "Greek": "Grek", "Han": "Hani", "Devanagari": "Deva",
+    "Ethiopic": "Ethi", "Khmer": "Khmr",
 }
 
 
@@ -354,11 +477,12 @@ def _leaves_unchanged(fn, text: str) -> bool:
 
 
 class TestLatinOnly:
-    """``needs_latin`` marks what changes only Latin text, which the rules
+    """``needs_latin`` marks what changes only ASCII characters, which the rules
     keep from a translation into another script. It is read off the
     techniques' behaviour on the samples above, for the families that hold
     such a technique: ``encode`` (with the sensitive-word encodings) and
-    ``noise``."""
+    ``noise``. "Latin" is ASCII: the samples hold no ASCII punctuation or
+    digit, which ROT47 would change in a text of another script."""
 
     @staticmethod
     def _encodings() -> list:
@@ -366,6 +490,16 @@ class TestLatinOnly:
 
         return [fn for fn in all_techniques()
                 if {"encode", "noise"} & set(fn.families)]
+
+    def test_the_samples_cover_every_script_a_translation_writes(self):
+        """So a language added in a script with no sample here fails until it
+        has one."""
+        from redact.jailbreak.pool import all_techniques
+
+        written = {fn.script for fn in all_techniques()
+                   if "translation" in fn.families}
+        assert set(SCRIPT_OF) == set(NON_LATIN)
+        assert written - {"Latn"} == set(SCRIPT_OF.values())
 
     def test_a_latin_only_technique_leaves_every_other_script_unchanged(self):
         tagged = [fn for fn in self._encodings() if fn.needs_latin]
@@ -376,7 +510,7 @@ class TestLatinOnly:
 
     def test_every_technique_that_leaves_them_unchanged_is_marked_but_braille(self):
         """Braille passes another script through too, but is in the eval
-        pool, which is held: marking it would change the eval draws."""
+        pool, which is pinned: marking it would change the eval draws."""
         unchanged = {fn.__name__ for fn in self._encodings()
                      if all(_leaves_unchanged(fn, text) for text in NON_LATIN.values())}
         tagged = {fn.__name__ for fn in self._encodings() if fn.needs_latin}

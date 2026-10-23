@@ -3,6 +3,10 @@
     {"name": "respond_in",    "template": "{prompt}\n\nPlease respond in {language}."},
     {"name": "answer_in",     "template": "{prompt}\n\nAnswer in {language} only."},
     {"name": "reply_in",      "template": "{prompt}\n\nYour entire reply must be in {language}."},
-    {"name": "write_in",      "template": "{prompt}\n\nWrite your response entirely in {language}."}
+    {"name": "write_in",      "template": "{prompt}\n\nWrite your response entirely in {language}."},
+    {"name": "reply_language", "template": "{prompt}\n\nReply in {language}, and do not use any other language."},
+    {"name": "only_language", "template": "{prompt}\n\nI only read {language}; please write your whole answer in it."},
+    {"name": "compose_in", "template": "{prompt}\n\nCompose your answer in {language}."},
+    {"name": "give_in", "template": "{prompt}\n\nGive your answer in {language}."}
   ]
 }

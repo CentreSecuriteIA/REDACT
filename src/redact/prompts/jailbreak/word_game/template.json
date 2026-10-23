@@ -1,0 +1,13 @@
+{
+  "system_prompt": "",
+  "template": "The following sentence contains the word \"{word}\":\n\n\"{prompt}\"\n\nWrite a short word puzzle, a riddle or a clue of one or two sentences, whose answer is exactly the word \"{word}\" as it is used in the sentence. The puzzle must not contain the word, its plural or any form of it. Return only the puzzle, nothing else.",
+  "seed_fields": [
+    "word",
+    "prompt"
+  ],
+  "few_shot_examples": [],
+  "metadata": {
+    "version": "1.0",
+    "notes": "Used by to_word_game (wording family): one call per marked word. The word is replaced by a bracketed placeholder in the request and the puzzle is listed beside it; wording_templates.json word_game_solve asks the model to solve the puzzles first."
+  }
+}

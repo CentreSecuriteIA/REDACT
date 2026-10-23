@@ -35,13 +35,13 @@ the technique names are in [techniques.md](../techniques.md).
 
 | Module | Holds |
 |---|---|
-| `technique.py` | The technique contract, `load_spec` and `read_spec` (the spec, its generators expanded), `data_rows`, `tag`, `DISCARDED`, `KINDS`, `DEFAULT_KINDS`, `family_kinds`, `FIRST_VERSION`, `version_key` |
-| `rewrite/`, `hacking/`, `manipulation/`, `obfuscation/`, `requests/` | The techniques, one module per family (`distractor.py` and `smalltalk.py` each hold both families of their pair), each with a getter; `get_all_rewrite_functions` (none yet), `get_all_hacking_functions`, `get_all_manipulation_functions`, `get_all_obfuscation_functions`, `get_all_request_functions` per subpackage; `all_techniques` joins the rewrite layer last, so the others keep their registry order. `manipulation/benign.py` makes the benign data: one unit per subcategory of the benign taxonomy and answer type, keyed `(main_category, sub_category, answer_type)` |
-| `pool.py` | `all_techniques`, `technique_pool(resolved)`, `kind_of(resolved)`, `languages`, `registry`, `uses_translation`, `variant_pools` (each template pool's family, techniques and count of variants on, which the variant floor test ratchets); at import, the spec against the registries, the families' dimensions and the techniques' variant pools |
+| `technique.py` | The technique contract, `load_spec` and `read_spec` (the spec, its generators expanded), `data_rows`, `tag`, `DISCARDED`, `KINDS`, `DEFAULT_KINDS`, `family_kinds`, `FIRST_VERSION`, `version_key`, `decode_hint_rate` (the spec's share of hinted encodings written with a hint) |
+| `rewrite/`, `hacking/`, `manipulation/`, `obfuscation/`, `requests/` | The techniques, one module per family (`distractor.py` and `smalltalk.py` each hold both families of their pair), each with a getter; `get_all_rewrite_functions` (16), `get_all_hacking_functions`, `get_all_manipulation_functions`, `get_all_obfuscation_functions`, `get_all_request_functions` per subpackage; `all_techniques` joins the rewrite layer last, so the others keep their registry order. `manipulation/benign.py` makes the benign data: one unit per subcategory of the benign taxonomy and answer type, keyed `(main_category, sub_category, answer_type)`; the fake turns (`manipulation/fake_turns.py`) need none. `hacking/persona_templates.py` checks its persona frames at import (`check_pools`): a frame is its technique's own text, and only the mechanics are its `variant_pool` |
+| `pool.py` | `all_techniques`, `technique_pool(resolved)`, `kind_of(resolved)`, `languages`, `registry`, `uses_translation`, `uses_check` (whether a pool holds a technique the check model checks), `variant_pools` (each template pool's family, techniques and count of variants on, which the variant floor test ratchets); at import, the spec against the registries, the families' dimensions and the techniques' variant pools |
 | `augmentation.py` | `KINDS`, `defaults(config_dir)`, `resolve(section, kind, base=None, config_dir=None)`, `rounds_of(resolved)`, `apply_flat_keywords`, `FLAT_KEYWORDS` |
 | `rules.py` | `compatible(selected, pool, remaining_complexity)`, `request_obfuscation_candidates` |
 | `sampling.py` | `sample_combination`, `sample_exact_combination`, `_pick_by_family` |
-| `plan.py` | `plan_run`, `assign_combination` (with the opt-in group budget: `_allowance`, `UNIT_HEADROOM`), `combination_of`, `coverage`, `plan_inputs` (the record of the `<stem>.plan.json` beside the manifest, written through `dataset/planfile.py`, its `spec_version` dating the pool), `default_escalation_schedule`; it deals from `dataset.dealing.Dealer` |
+| `plan.py` | `plan_run`, `assign_combination` (with the opt-in group budget: `_allowance`, `UNIT_HEADROOM`), `combination_of`, `coverage`, `plan_inputs` (the record of the `<stem>.plan.json` beside the manifest, written through `dataset/planfile.py`, its `spec_version` dating the pool and its `rules` the rules it was drawn by, `rules_id`), `default_escalation_schedule`; it deals from `dataset.dealing.Dealer` |
 | `chain.py` | `run_chain`, `combine_techniques`, `in_layer_order`, `apply_combination` |
 | `units.py` | `pending_units`, `is_pending`, `unit_gen`, `row_of`, `error_row_of` |
 | `pipeline.py` | `run_augmentation`, the stage core; `_library_change`, the kept plan's pool against what the library added and retired since |
@@ -87,7 +87,7 @@ def to_y(prompt: str, **kwargs) -> TechniqueGen:
   is the technique's own, else its first family's, else `["adversarial"]`.
   A `kinds` that is not a non-empty list of `adversarial` and `natural`
   raises at import. `check` (what checks its model reply: `typos`,
-  `scenario`, `word_list` or `translate`; `None` for none) and `calls` (the
+  `scenario`, `word_list`, `translate` or `preserve`; `None` for none) and `calls` (the
   model calls one application makes, generation and checks, as
   `[low, high]`; `None` when the spec gives none) come the same way, the
   technique's own, else its first family's; a value outside those raises at
@@ -96,12 +96,27 @@ def to_y(prompt: str, **kwargs) -> TechniqueGen:
   the one that retired it (`None` while it is active). Versions are dotted
   whole numbers and compare as such (`version_key`: `"1.10"` comes after
   `"1.9"`); a `since`, a `deprecated` or a spec `version` that is not one
-  raises at import.
+  raises at import. So does an entry with a key outside `TECHNIQUE_KEYS`
+  (`complexty` used to give complexity 1 silently), `families` that are
+  not a non-empty list of the spec's families (an unknown one used to put
+  the technique in the obfuscation layer), a `complexity` that is not a
+  whole number from 0 to 3, a `requires_llm` or `requires_benign` that is
+  not true or false, an `encode_weight` other than `light`, `heavy` or
+  none, and a `max_tokens` of `true`. `read_spec` checks the rest: each
+  family's keys (`FAMILY_KEYS`) and a `layer` of `layer_order`, the spec's
+  `layer_rates` (numbers from 0 to 1, for a layer or
+  `request_obfuscation`), each generator keyed by a family of the spec, and
+  each data row (its `where` column true or false, its `complexity`, its
+  versions, and a `<family>_since` only for a family made from that file,
+  so a misspelled `translaton_since` raises), its messages naming the data
+  file; `data_rows` raises for a row without a `slug`.
 - A technique may carry an **applicability**: `@applicable_when(predicate)`
   sets its `applicable`, `predicate(text, entry_type) -> bool`, and
   `applies(fn, text, entry_type)` reads it, true for a technique without
   one. The plan draws a technique only for an input it is true for
-  ([balanced dealing](#balanced-dealing)). The predicate calls the helper
+  ([balanced dealing](#balanced-dealing)); a predicate that raises stops
+  the plan with a `RuntimeError` naming the technique and the input. The
+  predicate calls the helper
   the technique itself calls, so the two cannot drift apart. The registry
   fixture records `has_applicable`, a bool, not the function. Today
   `to_abbreviations` and `to_stripped_accents` have one: each applies only
@@ -110,22 +125,29 @@ def to_y(prompt: str, **kwargs) -> TechniqueGen:
   on the entry type alone).
 - A pure template technique draws its text from a variant pool, one
   directive's variants in its template file, and names it with
-  `@uses_pool(file, directive, slots, info_key)` (its `variant_pool`;
+  `@uses_pool(file, directive, slots, info_key, request_slot)` (its `variant_pool`;
   `info_key` the key of its info that names the variant drawn, `variant`
   unless it says otherwise; the answer languages share one pool, set by
   their factory). `read_pools` reads a
   file of any of the three shapes (`{name, template}` lists,
   continuation's `{name, prefix, suffix}`, structural's one template per
   technique) into lists of variants; `pool.py` checks every named pool at
-  import (`check_pools`: unique non-empty names, `{prompt}` in each template
-  and only the technique's slots, a `weight` a number of at least 0, one
-  variant above 0), naming the file, directive and variant. `draw_variant`
+  import (`check_pools`: unique non-empty names of letters, digits, `_` and
+  `-`, `{prompt}` exactly once in each template and only the technique's
+  slots, each written alone with no conversion or format spec, a `weight` a
+  number of at least 0, one variant above 0), naming the file, directive
+  and variant; a persona frame also names `{mechanic}` exactly once. A pool marked
+  `request_slot=False` (`PoolRef.request_slot`) holds pieces the technique
+  fills and sets into another template, which holds the request: its
+  templates need no `{prompt}`, and one that names it fails as an unfilled
+  slot. `draw_variant`
   draws an unweighted pool with `rng.choice`, so a seed draws what it drew
   before pools had weights (`tests/fixtures/template_draws.json` pins every
   template technique's texts and draws by digest), and a weighted one with
   `rng.choices`; a variant of weight 0 is never drawn, and a pool of one
   makes no draw. `to_json`'s wrapper is still written in
-  `obfuscation/structural.py`, until the owner's wrapper step. A
+  `obfuscation/structural.py`, since it is in the pinned eval pool and moves
+  only in an eval review. A
   technique's text belongs in a template file: a lint
   (`tests/jailbreak/test_prose_in_code.py`) fails on a string of eight or
   more words in the package's code that is not a docstring or a message,
@@ -160,29 +182,39 @@ core, called once per kind:
    manifest=manifest)`: the lock, the cut-back, the finished keys.
 3. **Plan.** On a resume with a manifest, reuse it: `planfile.changed_plan`
    compares the run's seed, rounds, `family_weights` and `layer_rates`
-   (`plan_inputs`, less `pool` and `spec_version`) with `<stem>.plan.json`;
-   a difference raises a `ValueError` naming the keys and `resume=False`.
-   The pool is compared apart (`_library_change`): the names the run's pool
-   adds must each have a `since` after the plan file's `spec_version`
-   (`"1.0"` in a plan file written before it was recorded), and the names
-   it lacks must each be registered with a `deprecated` after it. Then the
-   difference is the library's: one WARNING names what was added and
-   retired, says the kept plan does not draw the added techniques and names
-   `resume=False`, and the plan runs as it was made, its retired techniques
-   included. Any other difference raises as `pool`: a section that adds or
-   leaves out a technique, or a technique no longer registered. Known
-   limit: a section that newly names a family all of whose techniques came
-   after the plan reads as growth, and warns. A manifest without the plan
-   file logs a WARNING and runs unchecked. Otherwise the old coverage
-   table, plan file and variants table are removed, and `plan_run` writes
-   the plan file, one manifest
-   row per input and round, then the coverage table.
+   (`plan_inputs`, less `pool`, `spec_version` and `rules`) with
+   `<stem>.plan.json`; a difference raises a `ValueError` naming the keys
+   and `resume=False`. The pool is compared apart (`_library_change`): the
+   names the run's pool adds must each have a `since` after the plan file's
+   `spec_version` (`"1.0"` in a plan file written before it was recorded),
+   and the names it lacks must each be registered with a `deprecated` after
+   it. Then the difference is the library's, and the plan runs as it was
+   made, its retired techniques included. Any other difference raises as
+   `pool`: a section that adds or leaves out a technique, or a technique no
+   longer registered. Known limit: a section that newly names a family all
+   of whose techniques came after the plan reads as growth, and warns. The
+   rules are compared apart too (`_rules_change`): `rules_id` of the plan's
+   pool names, as the library tags them today, against the plan file's
+   `rules` (unknown in a plan file written before it recorded them). When
+   the library added or retired techniques, or the plan's `spec_version` or
+   rules are not today's, one WARNING (`_warn_since_plan`, given after the
+   pass of step 4) names both versions, what was added and retired, whether
+   the rules changed or are not recorded, and how many pending units hold a
+   combination `compatible()` now refuses (`_refused`); it says the kept
+   plan does not draw the added techniques and runs those units as planned,
+   and names `resume=False`. The rows of a kept plan record its
+   `spec_version`, not the library's. A manifest without the plan file logs
+   a WARNING and runs unchecked, its rows recording the library's version.
+   Otherwise the old coverage table, plan file and variants table are
+   removed, and `plan_run` writes the plan file, one manifest row per input
+   and round, then the coverage table.
 4. **One pass over the plan** to count the pending units, see whether any
    needs benign data (if so, generate what the cache lacks for the benign
    taxonomy's subcategories, on the pool with its own ledger, then load it;
    with `auto_generate_benign` off, the cache is loaded as it is, and a
    missing cache raises before any unit), and, on a resume, count the inputs
-   the kept plan does not hold, logged as a WARNING.
+   the kept plan does not hold, logged as a WARNING, and the pending units
+   whose combination today's rules refuse, for step 3's WARNING.
 5. **Drive.** `pending_units` streams the plan: for each planned row of an
    input in this frame and not in the ledger, it builds the combination
    (`combination_of`) and the unit's generator (`unit_gen`, over
@@ -211,33 +243,37 @@ stay two units.
 `sample_combination(rng, pool, ...)` has two modes.
 
 **Budget mode** (no `exact_techniques`) picks layer by layer, each pick from
-the techniques still `compatible` with what is picked:
+the techniques still `compatible` with what is picked. The phases carry the
+numbers `sampling.py` gives them, in the order they run (the request
+obfuscation is phase 5 and runs before phase 4):
 
-0. `rewrite` (phase 0), when the round includes it (`include_rewrite`,
-   false by default) and the layer joins at its rate (the spec's is 0). It
-   is decided only when included, at a rate above 0 and with a rewrite
-   technique in the pool; otherwise it makes no rng draw and no dealer
-   call, so every draw is the one made before the layer existed
-   (`tests/jailbreak/test_rewrite_layer.py` pins it);
-1. `hacking`, when the layer joins (its rate);
-2. `manipulation`, when the layer joins;
-3. `requests`, when the layer joins;
-4. the request obfuscation (phase 5 in the code, decided and drawn before
-   phase 4): with `allow_request_obfuscation` and at least one
-   `max_obfuscations` slot, when it joins at the `request_obfuscation` rate
-   (the dealer's `include`, as for the layers; a per-unit draw without a
-   dealer), one light `encode` technique (the light
-   `to_sensitive_words_encode_*` among them) or a translation, applied
-   after the request technique;
-5. `obfuscation`: one pick after another, from what the budget leaves, until
-   `max_obfuscations`, less the request obfuscation's slot, or until no
-   technique fits.
+- **Phase 0, `rewrite`**, when the round includes it (`include_rewrite`,
+  false by default) and the layer joins at its rate (the spec's is 0). It
+  is decided only when included, at a rate above 0 and with a rewrite
+  technique in the pool; otherwise it makes no rng draw and no dealer
+  call, so every draw is the one made before the layer existed
+  (`tests/jailbreak/test_rewrite_layer.py` pins it).
+- **Phase 1, `hacking`**, when the layer joins (its rate).
+- **Phase 2, `manipulation`**, when the layer joins.
+- **Phase 3, `requests`**, when the layer joins.
+- **Phase 5, the request obfuscation**, decided and drawn before phase 4:
+  with `allow_request_obfuscation`, at least one `max_obfuscations` slot and
+  a request technique picked in phase 3, when it joins at the
+  `request_obfuscation` rate (the dealer's `include`, as for the layers, over
+  the group's units, so the units holding a request take it more often; a
+  per-unit draw without a dealer), one light `encode` technique (the light
+  `to_sensitive_words_encode_*` among them) or a translation, applied after
+  the request technique. A unit without a request is not asked, so the step
+  never lands after the outermost wrapper.
+- **Phase 4, `obfuscation`**: one pick after another, from what the budget
+  leaves, until `max_obfuscations`, less the request obfuscation's slot, or
+  until no technique fits.
 
 The apply order is the layers', whatever the pick order (a rewrite first),
 except the request obfuscation, which goes last. Within the obfuscation layer it is each
 family's `within_layer_order`, in tens: `translation` 10, `typos` 20,
-`casual_writing` 30, `noise` 35, `sensitive_words` 40, `tokenbreak` 50,
-`suffixes` 60, `encode` 70, `structural` and `neutral_container` 80 (each
+`casual_writing` 30, `noise` 35, `sensitive_words` 40, `wording` 45,
+`tokenbreak` 50, `word_art` 55, `suffixes` 60, `payload_split` 65, `encode` 70, `structural` and `neutral_container` 80 (each
 excludes the other, so they never meet), `ascii_art` 90. The whole-text
 rewrites come before the word-level steps, which they would otherwise undo;
 a family added later takes a number between two, as `noise` did. The manifest records the order a
@@ -251,9 +287,11 @@ rest: a combination never has more than `max_obfuscations` obfuscations.
 The packaged attacks allow it, so half their units, at the spec's rate of
 0.5, take a request obfuscation in one of their `max_obfuscations` slots; the
 eval type sets it false, and its count rounds never read it (a test pins
-the eval type's draws). With `allow_request_obfuscation` false the draws
-are those made before the request obfuscation was counted (member dealing
-aside); a test pins them. The combined function
+the eval type's draws). With `allow_request_obfuscation` false the sampler
+never decides it (no dealer call, no candidates drawn; a test holds it), so
+the draws are those of a sampler without the step; a digest of the budget
+draws pins them as a change detector, re-pinned on purpose whenever a change
+moves a draw. The combined function
 names its request obfuscation in `request_obfuscation` (`None` without
 one), which `_observe` counts in the dealer.
 
@@ -270,9 +308,15 @@ keeps the rewrite layer out of a count round.
 
 Every pick is **family first** (`_pick_by_family`): a family, then a
 technique within it, both dealt when the plan passes its dealer
-([balanced dealing](#balanced-dealing)). The 19 translation languages are
-one choice, not 19.
-The rules are those of [techniques.md](../techniques.md#compatibility-rules).
+([balanced dealing](#balanced-dealing)). The 23 translation languages are
+one choice, not 23.
+The rules are those of [techniques.md](../techniques.md#compatibility-rules);
+among them, a translation is never paired with `sensitive_words`, `wording`,
+`tokenbreak` or `word_art`, whose marking call mostly fails on translated
+text, nor with `typos`, `casual_writing`, `noise` or `payload_split`, one
+change more to a text already hard to read, in either pick order (a request
+obfuscation that is a translation takes the rules into the obfuscations drawn
+after it as any other pick does).
 
 ## Balanced dealing
 
@@ -294,12 +338,21 @@ order.
   Both modes and both kinds draw this way; a kept plan replays its names
   without asking any predicate.
 - **Layers.** A layer joins a unit when the group's picks of that layer so
-  far are below `floor(rate x position + offset)`, where `position` counts
-  the group's units so far and `offset` is a number in [0, 1) seeded per
-  group and layer. A group gets `rate x size` picks, rounded down or up, and
-  a group of one takes the layer with probability `rate`. The request
+  far are below `floor(rate x position + jitter)`, where `position` counts
+  the group's units so far and `jitter` is a number in [0, 1) seeded per
+  group, layer and position. A group gets `rate x size` picks, rounded down
+  or up, every prefix of the group is within one pick of `rate x position`,
+  and a group of one takes the layer with probability `rate`. The request
   obfuscation, when allowed, is dealt the same way under the name
-  `request_obfuscation`.
+  `request_obfuscation`. The jitter is drawn afresh for each unit: with one
+  offset per group and layer, a layer's picks repeated every `1 / rate`
+  units, so two layers of one rate (hacking and the request obfuscation,
+  both 0.5) met on every unit or on almost none for the whole group, by the
+  seed, and `ascii_art`, which refuses both a hacking technique and a
+  translation, was drawn 8 to 51 times in 900 units by the seed (commit
+  `590babe`, seeds 1, 2, 42 and 43, three groups); with the jitter they meet
+  on about a quarter of the units (49% to 55% of the hacking units, seeds 1,
+  2 and 42 to 46) and it is drawn 71 to 75 times.
 - **Families.** Among the eligible families, the dealer picks the one with
   the lowest count over its weight (`family_weights`, 1 by default), ties
   broken by the unit's rng. The request obfuscation's families are counted
@@ -308,7 +361,8 @@ order.
   names the family's), so its picks do not count against the obfuscation
   layer's. Counted together, its `encode` and `sensitive_words` picks made
   those the layer's families dealt most, and the layer drew them only when
-  no other family fitted: 14 techniques went undrawn in 3,000 units.
+  no other family fitted: 14 techniques went undrawn in 3,000 units (before
+  commit `ec8bb42`, seed 42, three groups; none does since).
 - **Techniques.** Within that family, the dealer picks the eligible member
   the group has dealt least (`Dealer.pick_member`, its own `members`
   counter, apart from the families' `counts` the generation axes also
@@ -317,9 +371,10 @@ order.
   still favours its cheaper ones under the complexity budget (`encode`,
   `sensitive_words`): a member of complexity 3 fits only a unit whose
   earlier picks leave 3 points, and `fsh` and `dap` refuse the heavy
-  `encode` members, so over 3,000 units of the default attacks each heavy
-  `encode` member is drawn 5 to 7 times against 33 to 34 for one of
-  complexity 2. That skew is intended. A direct `sample_combination` call without a dealer picks both
+  `encode` members, so over 3,000 units of the default attacks (three groups)
+  each heavy `encode` member is drawn 3 to 4 times at seed 42 (2 to 5 over
+  seeds 42 to 46) against 27 to 30 for one of complexity 2 (27 to 32). That
+  skew is intended. A direct `sample_combination` call without a dealer picks both
   uniformly, as the registry fixture's seeds pin. A fresh plan with the
   same seed draws differently from one made before member dealing; a kept
   plan replays unchanged.
@@ -378,12 +433,13 @@ budget.
   without `"group"` or below `max_complexity` or any round's
   `max_complexity`, and a round naming either key.
 - Measured with `simulate.compare_budgets` over 3,000 units of the default
-  attacks, it keeps the mean at `max_complexity` (5.77 to 6.00), lets some units reach the ceiling (533 of
-  3,000 above 6, none above 9) and evens out the cheap members of `encode`
-  and `sensitive_words`, and draws the heavy members a little more often
-  (each heavy `encode` member 6 to 8 times, against 5 to 7); the extra
-  allowance goes to the obfuscations. The table is in
-  [configuration.md](../configuration.md#the-group-budget).
+  attacks (three groups, seed 42; in brackets the range over seeds 42 to 46),
+  it keeps the mean at `max_complexity` (5.83 to 6.00), lets some units reach
+  the ceiling (393 of 3,000 above 6, 356 to 393, none above 9) and evens out
+  the cheap members of `encode` and `sensitive_words`, and draws the heavy
+  members a little more often (each heavy `encode` member 4 to 6 times, 3 to
+  6, against 3 to 4, 2 to 5); the extra allowance goes to the obfuscations.
+  The table is in [configuration.md](../configuration.md#the-group-budget).
 
 ## Seeds
 
@@ -393,17 +449,20 @@ joined by `::`: the same in every process, unlike Python's `hash`.
 | Draw | Seed |
 |---|---|
 | A unit's combination | `stable_seed(seed, input_id, iteration)`, plus the attempt number on a redraw |
-| A layer's offset in a group | `stable_seed(seed, category, entry_type, iteration, layer)` |
+| A layer's jitter at a unit | `stable_seed(seed, category, entry_type, iteration, layer, position)` |
 | A technique's random choices | `stable_seed(seed, label, input_id, iteration, technique name)`, the label `jailbreak` or `variation` |
 
 So the plan does not depend on the order or the chunking of the inputs, and
 a replayed plan gives the same text within one version of the library. The
-plan file's `spec_version` and a row's `combination_spec_version` are the
-spec's `version`, which moves when techniques are added or retired, not when
-a technique's code changes (the ASCII-art cap did not move it). The
+plan file's `spec_version` is the spec's `version` when the plan was drawn,
+and a row's `combination_spec_version` is its plan's; the version moves
+when techniques are added or retired, not when a technique's code changes
+(the ASCII-art cap did not move it) nor always when a rule does, which the
+plan file's `rules` (`rules_id(pool)`) records instead. The
 manifest row records the round's settings and the `seed`, and
 `<stem>.plan.json` what the whole plan was made with: `seed`, `rounds`,
-`pool` (sorted names), `family_weights`, `layer_rates`, `spec_version`.
+`pool` (sorted names), `family_weights`, `layer_rates`, `spec_version`,
+`rules`.
 
 ## Coverage
 
@@ -428,11 +487,14 @@ position: a technique's pool names the info key that holds its variant
 continuation's `style`, structural's none), and the values of each key go,
 in order, to the row's techniques that write it, less those noted
 `noop=`; a row whose values and techniques do not pair up (a rejected or an
-error row) counts none. Every variant of weight above 0 of a pool
+error row) counts none, except for the key of an optional pool
+(`PoolRef.optional`: the decode hints of the encodings, written at a rate),
+whose values may be fewer than its techniques: a row without a hint counts
+none for that key and keeps its other variants. Every variant of weight above 0 of a pool
 technique gets a row, 0 when none drew it; a technique outside the pool
 that a row drew (a kept plan's) is added after. No technique's info
 changed for the table: the eval-pool techniques that name no `variant=`
-(continuation, structural) keep their info while the eval pool is held.
+(continuation, structural) keep their info while the eval pool is pinned.
 
 ## The augmentation section in code
 
@@ -443,14 +505,25 @@ kind, or `None` for a kind that is off. The default is the packaged
 file), with `base`, the dataset type's section, resolved over it: a kind
 `section` leaves out is `base`'s, and a kind `base` switches off comes back,
 over the packaged default, when `section` gives it. A key starting with
-`_`, in the section or a kind, is a comment. With `translation` false, the
+`_`, in the section or a kind, is a comment. The file is checked when it is
+read (`_checked_file`, cached per path and modification time, so once per
+version): each default kind's keys against `_KIND_KEYS` and its lists with
+`_lists`, as a section's; an unknown key is left out with a WARNING (a
+copy's typo did nothing before), and a missing key, a kind that is not an
+object, a bad `natural_only_families` or an adversarial `exact_techniques`
+(which `kind_of` would read as natural) raise, naming the file. With `translation` false, the
 translation an allow list or `family_weights` names is dropped with a
 WARNING (`_switch_off_translation`). `_check_kinds` raises for an allow
 list that names a family or technique whose spec `kinds` lack the kind.
 For a family, the message names those of its techniques the kind draws, to
 list under `techniques.allow`, and does not offer adding the kind to the
 family's `kinds`: they apply to every technique in it that sets none of
-its own.
+its own. `_check_denied_layers` reads each name of the allow lists and
+`family_weights` against `layers.deny` after `_deny_layers_off`: a name of
+a layer off by default (`rewrite` without `layers.allow`) raises, saying
+to write `"layers": {"allow": ["rewrite"]}`, since the pool would drop it
+silently; one of a layer the kind's own `layers.deny` names is dropped with
+a WARNING, and a `family_weights` entry of it raises.
 `technique_pool(resolved)` filters the registered techniques; with the switch
 on, a `techniques.allow` that names some languages (`pool.languages()`)
 admits those alone. Last, it keeps the techniques whose `kinds` (set by
@@ -458,25 +531,34 @@ admits those alone. Last, it keeps the techniques whose `kinds` (set by
 `family_kinds`, else `DEFAULT_KINDS`, `["adversarial"]`) hold the kind,
 which `pool.kind_of(resolved)` reads as `rounds_of` does: natural when the
 resolved kind has `exact_techniques`, so no key is added to it. The
-natural pool is narrowed to the 71 techniques of
+natural pool is narrowed to the 72 techniques of
 [techniques.md](../techniques.md#the-natural-pool) with translation off;
 the attacks lose only the techniques of the three families marked
 `["natural"]` alone (`smalltalk_prefix`, `smalltalk_suffix`,
 `benign_role`). Then a technique whose `deprecated` tag is set leaves the
 pool unless `techniques.allow` names it; one it names stays, with a
-`DeprecationWarning` (read for this release). A family in `families.allow`
+`DeprecationWarning` (read for this release); `resolve` logs it as a WARNING
+too (`_warn_retired`), since Python shows that warning only to `__main__`.
+A family in `families.allow`
 does not keep its retired techniques.
 `rounds_of(resolved)` turns the kind into one sampler-settings dict per
 round: a natural round is `{"exact_techniques": n}`; an adversarial round is
 the budget keys, an `include_<layer>` per layer and `allow_request_obfuscation`
 when set, `budget` when `"group"` and `max_unit_complexity` when given, with
 the round's own keys merged over them. `include_rewrite` is
-the exception: written, true, only when the kind allows the rewrite layer
-and a rewrite technique is registered, so the rounds of a kind that denies it
-(both packaged kinds do), and of every kind while the layer is empty, are
-those written before the layer existed, and no kept plan of theirs changes.
-A `layers.deny` a section gives replaces the packaged `["rewrite"]` whole, so
-one that leaves `rewrite` out allows the layer. The kind's
+the exception: written, true, only when the kind's pool holds a rewrite
+technique, so the rounds of a kind that denies the layer (every kind that
+does not allow it), and of one whose lists name no rewrite family (the eval
+type's, the layer allowed), are those written before the layer existed, and
+no kept plan of theirs changes. Under `"escalation"` a kind that draws the
+layer has its `layer_rates.rewrite` carried into the two budget rounds'
+`sampling_probs`, which replace the kind's rates. `_warn_rewrite_rate`
+logs a WARNING for a budget round at rate 0 in such a kind, and for a
+rewrite rate above 0 while the layer is off. `resolve` adds each layer of the spec's
+`layers_off_by_default` (`rewrite`) to the kind's `layers.deny` unless its
+`layers.allow` names it (`_deny_layers_off`), so a `layers.deny` a section
+gives, which replaces the default's whole, still leaves the layer off, and
+the pool and `rounds_of` read one list. The kind's
 `layer_rates` goes to `run_augmentation(layer_rates=)` and from there to
 `plan_run`; a round's own `layer_rates`, passed on as the sampler's
 `sampling_probs`, replaces it whole and is read over the spec's rates.

@@ -6,8 +6,8 @@ combination (:func:`plan_rows` its manifest row). :func:`shares` gives each
 technique's share of the units and its share within its family, and
 :func:`spend` what the units spent in complexity. They are for tests and for
 tuning a kind; the run's coverage table does not hold them. From the
-repository root, ``py -m tests.jailbreak.simulate [N]`` prints the shares for
-the default adversarial kind, and ``py -m tests.jailbreak.simulate [N]
+repository root, ``python -m tests.jailbreak.simulate [N]`` prints the shares for
+the default adversarial kind, and ``python -m tests.jailbreak.simulate [N]
 budget`` what the unit budget and the group budget spend
 (:func:`compare_budgets`).
 """

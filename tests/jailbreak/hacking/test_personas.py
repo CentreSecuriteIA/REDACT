@@ -5,13 +5,17 @@ import pytest
 import redact.jailbreak.hacking.personas as P
 from redact.jailbreak.hacking.cognitive import MALFORMED_SCENARIO
 from redact.jailbreak.hacking.personas import (
+    MALFORMED_PERSONA,
     display_name,
     get_persona_functions,
     to_invented_persona,
 )
+from redact.jailbreak.technique import DISCARDED
 from redact.llm_pipeline import CHECK_TEMPERATURE, drive_sync
 
 _SCENE = "Notes\n---\nA quiet lab at night\n---"
+_PERSONA = (
+    "Name: Maple the Baker\nDescription: A cheerful baker who talks about bread.")
 
 
 def _drive(technique, replies: list[str], **kwargs):
@@ -37,9 +41,25 @@ def _named() -> dict:
             for fn in get_persona_functions() if fn is not to_invented_persona}
 
 
-def test_there_are_one_invented_and_fourteen_named_personas():
-    assert len(get_persona_functions()) == 15
+def test_there_are_one_invented_and_seventeen_named_personas():
+    assert len(get_persona_functions()) == 18
     assert sorted(_named()) == sorted(P._NAMED_PERSONAS)
+
+
+def test_every_persona_of_the_data_file_has_a_technique():
+    """A persona added to personas.json without its entry in the registry
+    would never be drawn."""
+    assert sorted(P._PERSONAS) == sorted(P._NAMED_PERSONAS)
+
+
+@pytest.mark.parametrize("key", ["mercenary", "underground_hacker",
+                                 "anarchist_philosopher"])
+def test_the_three_spec_1_3_archetypes_are_attack_only_scenario_checked_personas(key):
+    fn = _named()[key]
+    assert (fn.families, fn.layer, fn.complexity) == (["persona"], "hacking", 2)
+    assert (fn.requires_llm, fn.requires_benign, fn.check, fn.calls) == (
+        True, False, "scenario", [3, 9])
+    assert (fn.kinds, fn.since) == (["adversarial"], "1.3")
 
 
 def test_every_named_persona_has_a_display_name_and_a_description():
@@ -81,11 +101,78 @@ def test_a_scenario_reply_without_a_scene_is_asked_again_then_discards():
     assert len(requests) == 3
 
 
-def test_the_invented_persona_keeps_its_category_and_its_discard():
-    result, _ = _drive(to_invented_persona, [_SCENE, "jailbreak"])
+def test_the_invented_persona_asks_for_a_persona_first_then_makes_the_scenario():
+    result, requests = _drive(to_invented_persona, [_PERSONA, _SCENE, "jailbreak"])
     assert result == ("jailbreak", "category=invented_persona")
-    result, _ = _drive(to_invented_persona, ["notes"] * 3)
+    assert len(requests) == 3
+    assert [request.model for request in requests] == ["m"] * 3
+    assert "harmful prompt" in str(requests[0].messages)
+
+
+def test_the_scenario_and_the_construction_get_the_invented_name_and_description():
+    _, requests = _drive(to_invented_persona, [_PERSONA, _SCENE, "jailbreak"])
+    scenario_prompt, construction_prompt = (
+        str(requests[1].messages), str(requests[2].messages))
+    assert "Maple the Baker" in scenario_prompt
+    assert "A cheerful baker who talks about bread." in scenario_prompt
+    assert "A cheerful baker who talks about bread." in construction_prompt
+    assert "A quiet lab at night" in construction_prompt
+
+
+@pytest.mark.parametrize("reply", [
+    "Name: Maple the Baker",                                     # no description
+    "Description: A baker.",                                     # no name
+    "Name:\nDescription: A baker.",                              # an empty name
+    "Name: Maple\nDescription:",                                 # an empty description
+    "**Name:** Maple\n**Description:** A baker.",                # markdown labels
+    "Here is one.\nName: Maple\nDescription: A baker.",          # text before
+    "Name: Maple\nDescription: A baker.\nName: Rye\nDescription: A miller.",  # two
+    "Maple, a baker",                                            # no labels
+], ids=["no description", "no name", "empty name", "empty description", "markdown",
+        "text before", "two personas", "no labels"])
+def test_a_reply_that_is_not_a_name_then_a_description_is_asked_again(reply):
+    result, requests = _drive(
+        to_invented_persona, [reply, _PERSONA, _SCENE, "jailbreak"])
+    assert result == ("jailbreak", "category=invented_persona")
+    assert len(requests) == 4
+
+
+@pytest.mark.parametrize(("reply", "persona"), [
+    (_PERSONA, ["Maple the Baker", "A cheerful baker who talks about bread."]),
+    ("\n\nName:   Maple  \n\nDescription:  A baker.\n", ["Maple", "A baker."]),
+    ("Name: Maple\r\nDescription: A baker.\r\n", ["Maple", "A baker."]),
+    ("Name: Maple\nDescription: A baker,\nwho bakes bread.",
+     ["Maple", "A baker,\nwho bakes bread."]),
+], ids=["plain", "blank lines and spaces", "CRLF", "a description over lines"])
+def test_a_name_then_a_description_is_read_whole(reply, persona):
+    assert P._persona_of(reply) == persona
+
+
+def test_an_invented_persona_whose_replies_never_took_the_form_is_discarded():
+    result, requests = _drive(to_invented_persona, ["notes"] * 3)
+    assert result == ("harmful prompt", MALFORMED_PERSONA)
+    assert MALFORMED_PERSONA.startswith(DISCARDED)
+    assert len(requests) == 3
+
+
+def test_an_invented_persona_keeps_the_scenario_discard():
+    result, requests = _drive(to_invented_persona, [_PERSONA, *["notes"] * 3])
     assert result == ("harmful prompt", MALFORMED_SCENARIO)
+    assert len(requests) == 4
+
+
+def test_a_given_scenario_skips_the_scenario_but_not_the_invention():
+    result, requests = _drive(
+        to_invented_persona, [_PERSONA, "jailbreak"], scenario="a stage")
+    assert result == ("jailbreak", "category=invented_persona")
+    assert len(requests) == 2
+    assert "A cheerful baker who talks about bread." in str(requests[1].messages)
+
+
+def test_the_invented_persona_declares_its_invention_in_its_calls():
+    """The family's 3 to 9 calls, and its persona first: up to 3 replies."""
+    assert to_invented_persona.calls == [4, 12]
+    assert _named()["alien"].calls == [3, 9]
 
 
 def test_a_given_scenario_skips_the_scenario_request():

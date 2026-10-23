@@ -1507,6 +1507,22 @@ def test_translation_is_planned_when_a_kind_switches_it_on(kind):
         "venice-uncensored"]
 
 
+def test_a_separate_check_model_is_planned_for_the_attacks_only_when_they_check():
+    """The eval type's attacks draw no technique a check model checks (no
+    typos, scenario or rewrite), so the jailbreak stage plans no check model;
+    the inputs stage still does, and the training type's attacks do."""
+    from redact.driver import _stage_models
+    from redact.recipe import load_dataset_type
+
+    models = _models(gen="venice-uncensored-fp8", check="llama-3.2-3b-debug")
+    evals = load_dataset_type("eval")["augmentations"]
+    assert _stage_models(models, ["jailbreaks"], evals) == [
+        "venice-uncensored-fp8", "translategemma-27b"]
+    assert "llama-3.2-3b-debug" in _stage_models(models, ["inputs"], evals)
+    training = load_dataset_type("training")["augmentations"]
+    assert "llama-3.2-3b-debug" in _stage_models(models, ["jailbreaks"], training)
+
+
 def test_the_default_attacks_plan_the_local_translator():
     from redact.driver import _stage_models
 

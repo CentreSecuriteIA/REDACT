@@ -65,9 +65,9 @@ def sample_combination(
         ``max_complexity``, ``max_obfuscations``, and ``sampling_probs``. The
         rewrite layer is picked first, when included and at its rate; then
         the hacking, manipulation and requests layers, at their rates; then
-        the request obfuscation, when allowed and at its rate; the
-        obfuscations then fill what the budget leaves, up to
-        ``max_obfuscations`` with the request obfuscation counted.
+        the request obfuscation, when allowed, the unit holds a request and
+        at its rate; the obfuscations then fill what the budget leaves, up
+        to ``max_obfuscations`` with the request obfuscation counted.
     - **Count-driven** (``exact_techniques`` set): delegates to
         :func:`sample_exact_combination`, which picks exactly that many compatible
         techniques and ignores the complexity / obfuscation budget entirely. The
@@ -92,8 +92,10 @@ def sample_combination(
         include_obfuscation: Whether to consider obfuscation-layer techniques.
         include_requests: Whether to consider request-layer techniques.
         allow_request_obfuscation: If True, optionally add a light obfuscation after
-            the request layer (encode_light or translation only). It is decided
-            (a dealer's ``include``, else an ``rng`` draw) and drawn before the
+            the request technique (encode_light or translation only). It is
+            decided (a dealer's ``include``, else an ``rng`` draw) only once a
+            request technique is picked, so a unit without one takes none,
+            and drawn before the
             other obfuscations, taking one ``max_obfuscations`` slot and its
             complexity from what they may use; with ``max_obfuscations`` 0 it
             has no slot.
@@ -187,19 +189,21 @@ def sample_combination(
 
     # Phase 3: Requests, before the obfuscations, so the rated layers take
     # their picks from the budget first; the apply order is the layers'.
+    request: Callable | None = None
     if include_requests and _include("requests", p_requests):
-        pick = _pick_from_layer("requests")
-        if pick is not None:
-            _commit(pick)
+        request = _pick_from_layer("requests")
+        if request is not None:
+            _commit(request)
 
     # Phase 5, decided and drawn before phase 4: a request-layer obfuscation
-    # (optional, if enabled). It holds one of the max_obfuscations slots and
-    # its complexity, so the obfuscations fill what it leaves and the
-    # combination never holds more than max_obfuscations of them. Its
+    # (optional, if enabled), only for a unit that holds a request, since it
+    # obfuscates the finished request. It holds one of the max_obfuscations
+    # slots and its complexity, so the obfuscations fill what it leaves and
+    # the combination never holds more than max_obfuscations of them. Its
     # families are dealt under REQUEST_SCOPE, apart from phase 4's.
     request_obfuscation: Callable | None = None
     obfuscation_slots = max_obfuscations
-    if (allow_request_obfuscation and max_obfuscations > 0
+    if (request is not None and allow_request_obfuscation and max_obfuscations > 0
             and _include("request_obfuscation", p_request_obfuscation)):
         req_obfusc_candidates = request_obfuscation_candidates(current_pool)
         if req_obfusc_candidates:

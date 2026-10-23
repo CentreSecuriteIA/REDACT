@@ -179,6 +179,19 @@ def uses_translation(pool: list[Callable]) -> bool:
     return any(TRANSLATION in getattr(fn, "families", ()) for fn in pool)
 
 
+#: The spec ``check`` values whose check the stage's check model makes: the
+#: typo check, the scenario check and the rewrite's. Translation checks its
+#: own work, and a marked-word list is parsed, not checked by a model.
+MODEL_CHECKS = ("typos", "scenario", "preserve")
+
+
+def uses_check(pool: list[Callable]) -> bool:
+    """Whether ``pool`` holds a technique whose model reply the stage's check
+    model checks (its spec ``check`` is one of :data:`MODEL_CHECKS`); without
+    one, the stage needs no check model."""
+    return any(getattr(fn, "check", None) in MODEL_CHECKS for fn in pool)
+
+
 _check_against_spec(all_techniques())
 _check_dimensions()
 _check_variant_pools()

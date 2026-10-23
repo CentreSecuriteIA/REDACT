@@ -121,6 +121,23 @@ def test_an_input_no_technique_applies_to_gets_the_empty_combination(tmp_path):
     assert [row["combination"] for row in rows] == [[], []]
 
 
+def test_a_predicate_that_raises_stops_the_plan_naming_the_technique_and_the_input(
+        tmp_path):
+    """One input a predicate fails on would otherwise stop the kind with the
+    predicate's bare error."""
+    def fails_on_x(text, entry_type):
+        if "x" in text:
+            raise TypeError("not a character")
+        return True
+
+    pool = [_technique("to_fragile", "alpha", predicate=fails_on_x),
+            _technique("to_b", "beta")]
+    with pytest.raises(RuntimeError, match="to_fragile.*TypeError.*u01") as stopped:
+        _plan(tmp_path, _inputs(["fine", "has an x", "fine too"]), pool,
+              exact_techniques=1)
+    assert isinstance(stopped.value.__cause__, TypeError)
+
+
 def test_a_predicate_true_for_every_input_changes_no_draw(monkeypatch):
     rounds = [{}, {"exact_techniques": 2}]
     pool = all_techniques()

@@ -52,6 +52,125 @@ def test_a_persona_or_cognitive_scenario_refuses_an_impersonation_either_way(
     assert not _joins(first, then)
 
 
+@pytest.mark.parametrize("persona", ["to_dan_persona_template",
+                                     "to_liberated_model_persona_template"])
+@pytest.mark.parametrize("other", [
+    "to_fsh_random_short", "to_dap_selected_long", "to_ascii_art",
+    "to_impersonate_good_person"])
+def test_a_persona_template_refuses_manipulation_ascii_art_and_impersonation(
+        persona, other):
+    """fsh and dap set their own scene, ascii_art cannot draw so long a
+    frame, and an impersonation would be a second identity."""
+    assert not _joins(persona, other)
+    assert not _joins(other, persona)
+
+
+@pytest.mark.parametrize("answer", ["to_refusal_then_comply", "to_prefix_injection",
+                                    "to_dual_answer", "to_tagged_prefix"])
+def test_a_persona_template_refuses_the_answer_formats_its_mechanics_ask_for(answer):
+    """The mechanics already ask for a dual answer or a set opening: the four
+    answer formats list the family, so every persona template refuses them."""
+    assert not _joins("to_aim_persona_template", answer)
+    assert not _joins(answer, "to_aim_persona_template")
+
+
+@pytest.mark.parametrize("other", [
+    "to_base64", "to_rot13", "to_json", "to_answer_as_code", "to_summarize",
+    "to_use_past_tense"])
+def test_a_persona_template_joins_an_encoding_a_wrapper_or_a_request(other):
+    assert _joins("to_dan_persona_template", other)
+    assert _joins(other, "to_dan_persona_template")
+
+
+@pytest.mark.parametrize("encoded", [
+    "to_base64", "to_rot13", "to_morse", "to_hex", "to_sensitive_words_encode_base64",
+    "to_sensitive_words_encode_leetspeak_basic"])
+def test_an_answer_in_an_encoding_refuses_an_encoded_prompt_either_way(encoded):
+    """A decode-and-reply-encoded request on top of an encoded prompt: the
+    ten sensitive-word encodings are encode members too."""
+    assert not _joins("to_answer_in_encoding", encoded)
+    assert not _joins(encoded, "to_answer_in_encoding")
+
+
+@pytest.mark.parametrize("other", [
+    "to_sensitive_words_split", "to_sensitive_words_variables",
+    "to_synonym_substitution", "to_french", "to_json", "to_dan_persona_template"])
+def test_an_answer_in_an_encoding_joins_what_encodes_nothing(other):
+    """It names encode alone: the sensitive-word steps that encode no word,
+    a translation, a wrapper and a persona template still join it."""
+    assert _joins("to_answer_in_encoding", other)
+    assert _joins(other, "to_answer_in_encoding")
+
+
+def test_a_persona_template_is_the_one_hacking_technique_of_its_combination():
+    for other in ("to_fictional_world", "to_psychopath_persona", "to_avi",
+                  "to_stan_persona_template"):
+        assert not _joins("to_dan_persona_template", other)
+
+
+#: What the two frame families refuse, as families, written out from the
+#: spec's rules: the layer's one pick, the cross lists, and for fake turns the
+#: manipulation block. Every family not named here must still join them, so a
+#: rule added by mistake shows as a pair that no longer joins.
+_REFUSED_BY = {
+    "to_dan_persona_template": {
+        "persona_template", "persona", "cognitive", "framing",
+        "fsh", "dap", "fake_turns", "ascii_art", "impersonation"},
+    "to_fake_history": {
+        "fake_turns", "fsh", "dap", "framing", "persona", "cognitive",
+        "persona_template", "continuation", "indirect", "structural",
+        "neutral_container", "ascii_art", "translation", "payload_split",
+        "word_art", "wording"},
+}
+#: The four answer formats a persona template's own rules refuse; no other
+#: technique of their family is refused.
+_ANSWER_FORMATS_OF_THE_MECHANICS = {
+    "to_refusal_then_comply", "to_prefix_injection", "to_dual_answer",
+    "to_tagged_prefix"}
+
+
+def _one_technique_of_each_family() -> dict[str, str]:
+    """The first technique of each family, but a heavy encoding (which
+    fake turns refuse) and the four answer formats above."""
+    first: dict[str, str] = {}
+    for fn in POOL:
+        if (getattr(fn, "encode_weight", None) == "heavy"
+                or fn.__name__ in _ANSWER_FORMATS_OF_THE_MECHANICS):
+            continue
+        first.setdefault(fn.families[0], fn.__name__)
+    return first
+
+
+_JOINING = [(frame, name) for frame, refused in _REFUSED_BY.items()
+            for family, name in _one_technique_of_each_family().items()
+            if family not in refused]
+
+
+@pytest.mark.parametrize(("frame", "other"), _JOINING,
+                         ids=[f"{frame}-{name}" for frame, name in _JOINING])
+def test_a_frame_joins_a_technique_of_every_family_it_has_no_rule_against(frame, other):
+    assert _joins(frame, other)
+    assert _joins(other, frame)
+
+
+def test_every_family_has_a_technique_to_try_and_every_refused_name_is_a_family():
+    families = {fn.families[0] for fn in POOL}
+    assert set(_one_technique_of_each_family()) == families
+    assert all(refused <= families for refused in _REFUSED_BY.values())
+
+
+@pytest.mark.parametrize("identity", ["to_impersonate_authority",
+                                      "to_impersonate_developer"])
+@pytest.mark.parametrize("scene", ["to_psychopath_persona", "to_avi",
+                                   "to_dan_persona_template"])
+def test_the_new_impersonations_are_refused_by_a_persona_or_scenario_either_way(
+        identity, scene):
+    """The family-level rule covers the spec 1.3 members with no entry of
+    their own."""
+    assert not _joins(identity, scene)
+    assert not _joins(scene, identity)
+
+
 @pytest.mark.parametrize("framing", ["to_fictional_world", "to_noble_goal"])
 def test_a_framing_still_joins_an_impersonation(framing):
     assert _joins(framing, "to_impersonate_good_person")
@@ -173,23 +292,6 @@ def test_ascii_art_keeps_the_noise_of_latin_letters(technique):
     assert _joins(technique, "to_ascii_art") and _joins("to_ascii_art", technique)
 
 
-@pytest.mark.parametrize(("first", "then"), [
-    ("to_random_capitals_low", "to_russian"),
-    ("to_greek", "to_scrambled_letters_medium"),
-    ("to_keyboard_typos_high", "to_thai"),
-    ("to_japanese", "to_keyboard_typos_low"),
-])
-def test_the_latin_letter_noise_refuses_a_translation_into_another_script(
-        first, then):
-    assert not _joins(first, then)
-
-
-@pytest.mark.parametrize("translation", ["to_thai", "to_french"])
-def test_the_emoji_sprinkle_joins_a_translation_into_any_script(translation):
-    assert _joins("to_emoji_sprinkle_low", translation)
-    assert _joins(translation, "to_emoji_sprinkle_low")
-
-
 _CONTAINERS = ["to_code_comment", "to_yaml_document", "to_csv_row",
                "to_email_message", "to_transcript_line", "to_log_entry"]
 
@@ -299,6 +401,227 @@ def test_a_family_names_only_families_the_spec_has():
     assert named and named <= set(families)
 
 
+_FAKE_TURNS = ["to_fake_system_turn", "to_fake_assistant_turn", "to_fake_history"]
+
+
+@pytest.mark.parametrize("fake", _FAKE_TURNS)
+@pytest.mark.parametrize("other", [
+    "to_continue_passage", "to_summarize", "to_fictional_world",
+    "to_psychopath_persona", "to_avi", "to_dan_persona_template",
+    "to_json", "to_markdown", "to_csv_row", "to_email_message"])
+def test_a_fake_turn_refuses_what_fsh_and_dap_refuse_and_a_wrapper_either_way(
+        fake, other):
+    """The fsh/dap list (continuation, indirect, framing, persona, cognitive),
+    the persona templates, and the structural and neutral containers: an
+    invented turn is a conversation, not a document to wrap."""
+    assert not _joins(fake, other)
+    assert not _joins(other, fake)
+
+
+@pytest.mark.parametrize("fake", _FAKE_TURNS)
+@pytest.mark.parametrize("other", [
+    "to_french", "to_thai", "to_ascii_art", "to_base64", "to_morse", "to_hex"])
+def test_a_fake_turn_takes_the_manipulation_layer_s_obfuscation_block(fake, other):
+    """manipulation_blocked_obfuscation reads the manipulation layer, so the
+    fake turns are kept from translation, ascii_art and the heavy
+    full-text encodings, as fsh and dap are."""
+    assert not _joins(fake, other)
+    assert not _joins(other, fake)
+
+
+@pytest.mark.parametrize("fake", _FAKE_TURNS)
+@pytest.mark.parametrize("other", ["to_fsh_random_short", "to_dap_selected_long",
+                                   "to_fake_system_turn"])
+def test_a_fake_turn_is_the_one_manipulation_of_its_combination(fake, other):
+    assert not _joins(fake, other)
+
+
+@pytest.mark.parametrize("fake", _FAKE_TURNS)
+@pytest.mark.parametrize("other", [
+    "to_rot13", "to_sensitive_words_encode_base64", "to_rewrite_with_typos_low",
+    "to_answer_as_code", "to_refusal_then_comply", "to_impersonate_good_person"])
+def test_a_fake_turn_joins_a_light_or_word_level_encoding_typos_or_a_request(
+        fake, other):
+    assert _joins(fake, other) and _joins(other, fake)
+
+
+_PAYLOAD_SPLITS = ["to_payload_split", "to_payload_split_semantic"]
+
+
+@pytest.mark.parametrize("split", _PAYLOAD_SPLITS)
+@pytest.mark.parametrize("other", [
+    "to_ascii_art", "to_base64", "to_rot13", "to_sensitive_words_encode_base64",
+    "to_fake_system_turn", "to_fake_history", "to_payload_split",
+    "to_payload_split_semantic"])
+def test_a_payload_split_refuses_ascii_art_encode_and_fake_turns_either_way(
+        split, other):
+    """Parts a font or a cipher would break apart, an invented turn already
+    a conversation, and one cut of the prompt is enough (a family holds one
+    technique)."""
+    assert not _joins(split, other)
+    assert not _joins(other, split)
+
+
+@pytest.mark.parametrize("split", _PAYLOAD_SPLITS)
+@pytest.mark.parametrize("other", [
+    "to_fsh_random_short", "to_fsh_selected_long", "to_dap_random_long",
+    "to_dap_selected_short"])
+def test_a_payload_split_takes_the_manipulation_layer_s_obfuscation_block(
+        split, other):
+    """manipulation_blocked_obfuscation names it: the benign pairs of fsh and
+    dap would sit between the parts and the request to join them."""
+    assert not _joins(split, other)
+    assert not _joins(other, split)
+
+
+@pytest.mark.parametrize("split", _PAYLOAD_SPLITS)
+@pytest.mark.parametrize("other", [
+    "to_rewrite_with_typos_low", "to_tokenbreak_split",
+    "to_sensitive_words_split", "to_json", "to_csv_row", "to_summarize",
+    "to_psychopath_persona", "to_fictional_world"])
+def test_a_payload_split_joins_typos_a_marking_step_a_wrapper_a_request_or_a_scene(
+        split, other):
+    assert _joins(split, other) and _joins(other, split)
+
+
+@pytest.mark.parametrize("other", [
+    "to_ascii_art", "to_payload_split", "to_payload_split_semantic", "to_base64",
+    "to_rot13", "to_sensitive_words_split", "to_sensitive_words_encode_base64",
+    "to_tokenbreak_split", "to_json", "to_code_comment", "to_fake_system_turn"])
+def test_word_art_refuses_what_draws_or_encodes_the_text_either_way(other):
+    """A font on the whole text, another split, an encoding, another word-level
+    step on the word, a wrapper and an invented turn: one disguise of the
+    word is enough, and the art is long."""
+    assert not _joins("to_word_art", other)
+    assert not _joins(other, "to_word_art")
+
+
+@pytest.mark.parametrize("other", [
+    "to_fsh_random_short", "to_fsh_selected_long", "to_dap_random_long",
+    "to_dap_selected_short"])
+def test_word_art_takes_the_manipulation_layer_s_obfuscation_block(other):
+    """manipulation_blocked_obfuscation names it: the art is long and the benign
+    pairs of fsh and dap would sit between it and the request."""
+    assert not _joins("to_word_art", other)
+    assert not _joins(other, "to_word_art")
+
+
+@pytest.mark.parametrize("other", [
+    "to_rewrite_with_typos_low", "to_adversarial_suffix_punctuation",
+    "to_random_capitals_low", "to_lowercase", "to_summarize",
+    "to_psychopath_persona", "to_fictional_world"])
+def test_word_art_joins_typos_noise_a_suffix_a_request_or_a_scene(other):
+    assert _joins("to_word_art", other) and _joins(other, "to_word_art")
+
+
+@pytest.mark.parametrize("translation", ["to_french", "to_thai", "to_hindi"])
+@pytest.mark.parametrize("marking", [
+    "to_sensitive_words_split", "to_sensitive_words_encode_base64",
+    "to_sensitive_words_variables", "to_synonym_substitution",
+    "to_tokenbreak_split", "to_tokenbreak_prepend", "to_word_art",
+    "to_pseudonym_substitution", "to_word_game"])
+def test_a_translation_refuses_a_step_that_has_a_model_mark_words_either_way(
+        translation, marking):
+    """The marking call finds a word in 62 of 100 harmful English inputs but in
+    3 to 36 of their translations, so a heavy encoding after one is discarded
+    and a light one changes nothing: the spec keeps the families apart,
+    whichever is picked first."""
+    assert not _joins(translation, marking)
+    assert not _joins(marking, translation)
+
+
+@pytest.mark.parametrize("translation", ["to_french", "to_thai", "to_hindi"])
+@pytest.mark.parametrize("typos", [
+    "to_rewrite_with_typos_low", "to_rewrite_with_typos_medium",
+    "to_rewrite_with_typos_high", "to_rewrite_with_typos_insane"])
+def test_a_translation_refuses_typos_either_way(translation, typos):
+    """A translated prompt is already hard to read, for the model that writes
+    text and for the model that answers: a rewrite with typos on top is one
+    change too many, whichever is picked first."""
+    assert not _joins(translation, typos)
+    assert not _joins(typos, translation)
+
+
+@pytest.mark.parametrize("translation", ["to_french", "to_thai", "to_hindi"])
+@pytest.mark.parametrize("casual", [
+    "to_lowercase", "to_no_sentence_capitals", "to_dropped_spaces",
+    "to_doubled_punctuation", "to_abbreviations", "to_stripped_accents"])
+def test_a_translation_refuses_casual_writing_either_way(translation, casual):
+    """Casing, spacing, punctuation, abbreviations and accents are one more
+    change to a text already hard to read."""
+    assert not _joins(translation, casual)
+    assert not _joins(casual, translation)
+
+
+@pytest.mark.parametrize("translation", ["to_french", "to_thai", "to_hindi"])
+@pytest.mark.parametrize("noise", [
+    "to_random_capitals_low", "to_scrambled_letters_medium",
+    "to_keyboard_typos_high", "to_emoji_sprinkle_low"])
+def test_a_translation_refuses_noise_either_way(translation, noise):
+    """Random capitals, scrambled letters, keyboard typos and emoji are one
+    more change to a text already hard to read, whatever its script."""
+    assert not _joins(translation, noise)
+    assert not _joins(noise, translation)
+
+
+@pytest.mark.parametrize("translation", ["to_french", "to_thai", "to_hindi"])
+@pytest.mark.parametrize("split", _PAYLOAD_SPLITS)
+def test_a_translation_refuses_a_payload_split_either_way(translation, split):
+    """The prompt cut in parts named by letters is one more change to a text
+    already hard to read."""
+    assert not _joins(translation, split)
+    assert not _joins(split, translation)
+
+
+@pytest.mark.parametrize("other", [
+    "to_adversarial_suffix_punctuation", "to_base64", "to_rot13", "to_json",
+    "to_csv_row", "to_summarize", "to_psychopath_persona", "to_fictional_world"])
+def test_a_translation_keeps_the_families_it_has_no_rule_against(other):
+    assert _joins("to_french", other) and _joins(other, "to_french")
+
+
+@pytest.mark.parametrize("wording", ["to_pseudonym_substitution", "to_word_game"])
+@pytest.mark.parametrize("other", [
+    "to_sensitive_words_split", "to_sensitive_words_variables",
+    "to_sensitive_words_encode_base64", "to_synonym_substitution",
+    "to_tokenbreak_split", "to_tokenbreak_delimiter", "to_word_art", "to_ascii_art"])
+def test_wording_refuses_the_other_word_level_steps_and_ascii_art_either_way(
+        wording, other):
+    """The other steps that put the marked words in other terms, a font on the
+    text, and (above) a translation: one disguise of the words is enough, and
+    the key or the puzzles are long."""
+    assert not _joins(wording, other)
+    assert not _joins(other, wording)
+
+
+@pytest.mark.parametrize("wording", ["to_pseudonym_substitution", "to_word_game"])
+@pytest.mark.parametrize("other", [
+    "to_fsh_random_short", "to_fsh_selected_long", "to_dap_random_long",
+    "to_dap_selected_short", "to_fake_system_turn"])
+def test_wording_takes_the_manipulation_layer_s_obfuscation_block(wording, other):
+    """manipulation_blocked_obfuscation names the family: the key or the
+    puzzles and the benign pairs of fsh and dap would sit between the reader
+    and the request."""
+    assert not _joins(wording, other)
+    assert not _joins(other, wording)
+
+
+@pytest.mark.parametrize("wording", ["to_pseudonym_substitution", "to_word_game"])
+@pytest.mark.parametrize("other", [
+    "to_rewrite_with_typos_low", "to_random_capitals_low", "to_lowercase",
+    "to_adversarial_suffix_punctuation", "to_base64", "to_rot13", "to_payload_split",
+    "to_json", "to_csv_row", "to_summarize", "to_psychopath_persona",
+    "to_fictional_world"])
+def test_wording_joins_typos_noise_a_suffix_an_encoding_a_wrapper_a_request_or_a_scene(
+        wording, other):
+    assert _joins(wording, other) and _joins(other, wording)
+
+
+def test_wording_is_one_technique_of_its_family_in_a_combination():
+    assert not _joins("to_pseudonym_substitution", "to_word_game")
+    assert not _joins("to_word_game", "to_pseudonym_substitution")
+
+
 @pytest.mark.parametrize(("first", "then"), [
     ("to_french", "to_fsh_random_short"),
     ("to_fsh_random_short", "to_french"),
@@ -342,6 +665,57 @@ def test_a_latin_only_encoding_refuses_a_translation_into_another_script(first, 
 ])
 def test_a_latin_script_translation_or_another_encoding_still_joins(first, then):
     assert _joins(first, then) and _joins(then, first)
+
+
+_PERSUASIONS = ["to_persuade_evidence_based", "to_persuade_scarcity"]
+_TENSE_REWRITES = ["to_rewrite_in_past_tense", "to_rewrite_in_future_tense"]
+_MODEL_DISTRACTORS = ["to_model_distractor_prefix", "to_model_distractor_suffix"]
+
+
+@pytest.mark.parametrize("persuasion", _PERSUASIONS)
+@pytest.mark.parametrize("other", [
+    "to_impersonate_good_person", "to_impersonate_authority", "to_ascii_art"])
+def test_a_persuasion_refuses_an_impersonation_and_ascii_art_either_way(
+        persuasion, other):
+    """Two identities in one prompt, and a font on a rewrite the model wrote
+    at length."""
+    assert not _joins(persuasion, other)
+    assert not _joins(other, persuasion)
+
+
+@pytest.mark.parametrize("tense", _TENSE_REWRITES)
+@pytest.mark.parametrize("other", [
+    "to_use_past_tense", "to_use_future_tense", "to_use_historical_era"])
+def test_a_tense_rewrite_refuses_the_temporal_requests_either_way(tense, other):
+    """The request would be set in time twice."""
+    assert not _joins(tense, other)
+    assert not _joins(other, tense)
+
+
+@pytest.mark.parametrize("distractor", _MODEL_DISTRACTORS)
+@pytest.mark.parametrize("other", [
+    "to_ascii_art", "to_distractor_prefix_related", "to_distractor_suffix_task"])
+def test_a_model_distractor_refuses_ascii_art_and_the_template_distractors_either_way(
+        distractor, other):
+    assert not _joins(distractor, other)
+    assert not _joins(other, distractor)
+
+
+@pytest.mark.parametrize("first", [*_PERSUASIONS, *_TENSE_REWRITES,
+                                   *_MODEL_DISTRACTORS])
+@pytest.mark.parametrize("second", [*_PERSUASIONS, *_TENSE_REWRITES,
+                                    *_MODEL_DISTRACTORS])
+def test_a_combination_holds_one_technique_of_the_rewrite_layer(first, second):
+    assert not _joins(first, second)
+
+
+@pytest.mark.parametrize("rewrite", [_PERSUASIONS[0], _TENSE_REWRITES[0],
+                                     _MODEL_DISTRACTORS[0]])
+@pytest.mark.parametrize("other", [
+    "to_base64", "to_french", "to_json", "to_answer_as_code", "to_fictional_world",
+    "to_psychopath_persona", "to_fsh_random_short", "to_summarize"])
+def test_a_rewrite_joins_the_other_layers_it_has_no_rule_against(rewrite, other):
+    assert _joins(rewrite, other) and _joins(other, rewrite)
 
 
 def test_every_pair_is_refused_or_admitted_both_ways():

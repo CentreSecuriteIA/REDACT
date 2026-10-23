@@ -72,6 +72,24 @@ def to_answer_as_structured_data(
     return _apply("answer_as_structured_data", prompt, rng=rng)
 
 
+@uses_pool(_FILE, "dual_answer")
+def to_dual_answer(prompt: str, *, rng: Random | None = None) -> tuple[str, str]:
+    """Request two answers to the prompt, one after the other."""
+    return _apply("dual_answer", prompt, rng=rng)
+
+
+@uses_pool(_FILE, "tagged_prefix")
+def to_tagged_prefix(prompt: str, *, rng: Random | None = None) -> tuple[str, str]:
+    """Request an answer that opens with a set tag."""
+    return _apply("tagged_prefix", prompt, rng=rng)
+
+
+@uses_pool(_FILE, "answer_in_encoding")
+def to_answer_in_encoding(prompt: str, *, rng: Random | None = None) -> tuple[str, str]:
+    """Request the answer written in an encoding."""
+    return _apply("answer_in_encoding", prompt, rng=rng)
+
+
 def get_answer_functions() -> list[Callable]:
     """Return all answer-format and output-conditioning directive functions."""
     return [
@@ -84,4 +102,7 @@ def get_answer_functions() -> list[Callable]:
         to_answer_as_dialogue,
         to_answer_as_story,
         to_answer_as_structured_data,
+        to_dual_answer,
+        to_tagged_prefix,
+        to_answer_in_encoding,
     ]

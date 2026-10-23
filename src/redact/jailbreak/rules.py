@@ -32,7 +32,8 @@ def _own_incompatible(fn: Callable) -> set[str]:
 
 
 def _unfit_for_manipulation(fn: Callable, blocked: dict) -> bool:
-    """Whether ``fn`` is an obfuscation the spec keeps away from fsh and dap.
+    """Whether ``fn`` is an obfuscation the spec keeps away from the
+    manipulation layer's families (fsh, dap, fake_turns).
 
     Word-level encoding (``sensitive_words``) is kept: it leaves the Q&A
     readable.

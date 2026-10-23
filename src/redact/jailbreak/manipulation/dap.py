@@ -27,6 +27,9 @@ def _build_dap_prompt(
 ) -> tuple[str, dict]:
     """Assemble DAP prompt with harmful question at random middle position.
 
+    The question is never first, and last only where it cannot be otherwise:
+    one shot puts it second (``harmful_idx`` 2), and no shot leaves it alone.
+
     Returns:
         (jailbreak_prompt, {"harmful_idx": harmful_idx}), harmful_idx 1-based.
     """
@@ -34,7 +37,8 @@ def _build_dap_prompt(
     shots = rng.sample(benign_pairs, min(num_shots, len(benign_pairs)))
     if not shots:
         return f"Q1: {harmful_prompt}\nA1:\n", {"harmful_idx": 1}
-    # Insert in the middle: never first (1), never last (len+1)
+    # Insert in the middle: never first (1), never last (len+1), which with one
+    # shot leaves nowhere: the question follows it.
     harmful_idx = rng.randint(2, max(2, len(shots)))
 
     lines: list[str] = []

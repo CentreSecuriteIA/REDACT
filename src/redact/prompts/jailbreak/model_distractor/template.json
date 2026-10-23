@@ -1,0 +1,13 @@
+{
+  "system_prompt": "You write short, natural filler sentences in the voice of a person who is asking a question.",
+  "template": "Write one or two sentences about an everyday subject that has nothing to do with the request below, in the voice of the person asking. They will be placed {position} the request, so they must read naturally there. Do not mention or answer the request. Return only the sentences, nothing else.\n\nRequest: {prompt}",
+  "seed_fields": [
+    "position",
+    "prompt"
+  ],
+  "few_shot_examples": [],
+  "metadata": {
+    "version": "1.0",
+    "notes": "Used by the model_distractors techniques (rewrite layer), one per position: before, after. The sentences are joined to the request by the technique; the request itself is not rewritten."
+  }
+}

@@ -5,7 +5,7 @@
 active techniques per layer and per family. A technique counts in its first
 family only, and a retired one (``deprecated``) not at all. A change to the
 spec that moves them fails here until the tables are made again, from the
-repository root, with ``PYTHONPATH=src py -m tests.jailbreak.test_docs_counts``.
+repository root, with ``PYTHONPATH=src python -m tests.jailbreak.test_docs_counts``.
 
 The few sentences that quote the totals (the jailbreak heading of
 ``CLAUDE.md``, ``README.md`` and the introduction of ``techniques.md``) are
@@ -109,8 +109,8 @@ def test_a_generated_table_of_techniques_md_is_the_spec_s(name):
 
 def _counts() -> dict[str, int]:
     """The totals the docs quote: active, registered and retired
-    techniques, the spec's layers (the rewrite layer, empty, among them) and
-    the families that hold an active technique."""
+    techniques, the spec's layers (the rewrite layer, off by default, among
+    them) and the families that hold an active technique."""
     spec = load_spec()
     by_family = _by_family()
     registered = sum(not name.startswith("_") for name in spec["techniques"])
