@@ -34,6 +34,23 @@ def test_there_is_one_technique_per_frame_of_the_file():
         *PT.PERSONAS, PT.MECHANICS}
 
 
+@pytest.mark.parametrize("template", [
+    "{prompt} and no mechanic", "{prompt} {mechanic} {mechanic}"],
+    ids=["none", "twice"])
+def test_a_frame_must_name_the_mechanic_exactly_once(monkeypatch, template):
+    """A frame without it would still report ``variant=<mechanic>`` for a
+    mechanic that was never written; with two, it would be written twice."""
+    pools = {**PT._POOLS, "dan": [{"name": "dan", "template": template}]}
+    monkeypatch.setattr(PT, "_POOLS", pools)
+    with pytest.raises(ValueError, match=r"directive 'dan': the frame needs the "
+                       r"\{mechanic\} slot exactly once"):
+        PT._check_mechanic_slots()
+
+
+def test_the_packaged_frames_name_the_mechanic_exactly_once():
+    PT._check_mechanic_slots()
+
+
 def test_every_frame_has_a_display_name():
     assert all(PT._ENTRIES[key]["display_name"].strip() for key in PT.PERSONAS)
 

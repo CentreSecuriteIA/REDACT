@@ -132,9 +132,11 @@ def to_y(prompt: str, **kwargs) -> TechniqueGen:
   file of any of the three shapes (`{name, template}` lists,
   continuation's `{name, prefix, suffix}`, structural's one template per
   technique) into lists of variants; `pool.py` checks every named pool at
-  import (`check_pools`: unique non-empty names, `{prompt}` in each template
-  and only the technique's slots, a `weight` a number of at least 0, one
-  variant above 0), naming the file, directive and variant. A pool marked
+  import (`check_pools`: unique non-empty names of letters, digits, `_` and
+  `-`, `{prompt}` exactly once in each template and only the technique's
+  slots, each written alone with no conversion or format spec, a `weight` a
+  number of at least 0, one variant above 0), naming the file, directive
+  and variant; a persona frame also names `{mechanic}` exactly once. A pool marked
   `request_slot=False` (`PoolRef.request_slot`) holds pieces the technique
   fills and sets into another template, which holds the request: its
   templates need no `{prompt}`, and one that names it fails as an unfilled

@@ -480,9 +480,11 @@ pool of one variant named after the entry. `personas.json` and
 3. **Import checks it.** `pool.py` checks every pool a technique names
    (`check_pools`) when `redact.jailbreak` is imported, and raises naming
    the file, the directive and the variant: an empty or repeated name, a
-   template without `{prompt}` (in a pool with a request slot) or with a
-   slot its technique does not fill
-   or an unpaired brace, a prefix without its suffix, an unknown key (a
+   name with a character other than a letter, a digit, `_` or `-` (it goes
+   into a row's info as `key=<name>`), a template without `{prompt}` or with
+   it more than once (in a pool with a request slot), with a slot its
+   technique does not fill, with a conversion or a format spec on a slot
+   (`{prompt!r}`, `{prompt:>9}`), or an unpaired brace, a prefix without its suffix, an unknown key (a
    misspelt `weight`), a weight that is not a number of at least 0, or
    every variant at 0.
 4. **Regenerate the digests**: the pool's techniques write other text for

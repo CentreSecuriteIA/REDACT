@@ -2,19 +2,21 @@
 of ``configs/jailbreak/hacking/persona_templates.json``, one technique per
 frame, named ``to_<key>_persona_template``. Pure: no model call.
 
-A frame holds the request slot ``{prompt}`` and a ``{mechanic}`` slot. The
-technique draws one of the file's ``mechanics`` with its ``rng``, fills the
-mechanic's ``{persona}`` with the frame's :func:`display_name` and sets it
-into the frame. The mechanics are a pool without a request slot, the one
-pool every technique draws from (its ``variant_pool``), so ``info`` is
+A frame holds the request slot ``{prompt}`` and a ``{mechanic}`` slot, each
+exactly once. The technique draws one of the file's ``mechanics`` with its
+``rng``, fills the mechanic's ``{persona}`` with the frame's
+:func:`display_name` and sets it into the frame. The mechanics are a pool
+without a request slot, the one pool every technique draws from (its
+``variant_pool``), so ``info`` is
 ``category=<key>_persona_template;variant=<mechanic>`` and a kind's variants
 table counts the mechanic each technique drew.
 
 A frame is its technique's own text, one per persona by design, not a pool
 it draws from: it is checked here at import (:func:`check_pools`, its slots
-``{prompt}`` and ``{mechanic}``) and is not among the pools the variant
-floor counts. A frame's place in the file is its technique's place in the
-registry.
+``{prompt}`` and ``{mechanic}``, and ``{mechanic}`` exactly once, so a frame
+cannot drop the mechanic or write it twice) and is not among the pools the
+variant floor counts. A frame's place in the file is its technique's place in
+the registry.
 """
 
 from collections.abc import Callable
@@ -26,6 +28,7 @@ from ..directives import (
     draw_variant,
     load_templates,
     read_pools,
+    slots_of,
     uses_pool,
 )
 
@@ -39,6 +42,19 @@ PERSONAS = [key for key in _POOLS if key != MECHANICS]
 
 check_pools(PoolRef(_FILE, key, ("prompt", "mechanic"), info_key=None)
             for key in PERSONAS)
+
+
+def _check_mechanic_slots() -> None:
+    """Raise unless each frame names ``{mechanic}`` exactly once, where its
+    mechanic is written."""
+    for key in PERSONAS:
+        where = f"configs/jailbreak/{_FILE}, directive {key!r}"
+        if slots_of(where, _POOLS[key][0]["template"]).count("mechanic") != 1:
+            raise ValueError(f"{where}: the frame needs the {{mechanic}} slot "
+                             "exactly once.")
+
+
+_check_mechanic_slots()
 
 
 def display_name(key: str) -> str:

@@ -29,15 +29,17 @@ technique's never should: a weight changes the draws of its whole pool.
 
 A technique marks the pool it draws from with :func:`uses_pool`, and
 ``pool.py`` checks every marked pool when ``redact.jailbreak`` is imported
-(:func:`check_pools`). A template holds the request slot ``{prompt}``,
-unless its pool says it has none (``request_slot=False``): a piece of text
-the technique fills with its own slots and sets into another template, as
-the persona templates' mechanics are.
+(:func:`check_pools`). A template holds the request slot ``{prompt}`` exactly
+once, unless its pool says it has none (``request_slot=False``): a piece of
+text the technique fills with its own slots and sets into another template,
+as the persona templates' mechanics are. A slot is written alone, with no
+conversion or format spec, so the text it fills is the value as it is.
 """
 
 import json
 import math
 import random
+import re
 import string
 from collections.abc import Callable, Iterable
 from dataclasses import dataclass
@@ -49,6 +51,10 @@ _CONFIGS_JAILBREAK_DIR = paths.jailbreak_configs_dir()
 
 #: The keys a variant may have.
 _VARIANT_KEYS = {"name", "template", "prefix", "suffix", "weight"}
+
+#: What a variant's name may hold: it is written into a row's info as
+#: ``key=<name>``, the keys joined by ``;``.
+_NAME = re.compile(r"[A-Za-z0-9_-]+")
 
 
 def load_templates(*relative_parts: str) -> dict:
@@ -148,13 +154,14 @@ def draw_variant(variants: list[dict], rng: random.Random | None = None) -> dict
 def check_pools(refs: Iterable[PoolRef], folder: Path = _CONFIGS_JAILBREAK_DIR) -> None:
     """Raise unless every pool of ``refs`` is one its techniques can draw.
 
-    A pool is a non-empty list of variants with non-empty names, each once;
-    a variant has a ``template``, or a ``prefix`` and a ``suffix`` (strings),
-    and no key beyond those, ``name`` and ``weight``. A template names the
-    request slot ``{prompt}`` (unless the pool has no ``request_slot``) and
-    no slot but the pool's ``slots``; a prefix and a suffix are not
-    formatted, so they hold none. A ``weight`` is a number of at least 0,
-    and at least one variant is above 0.
+    A pool is a non-empty list of variants with non-empty names of letters,
+    digits, ``_`` and ``-``, each once; a variant has a ``template``, or a
+    ``prefix`` and a ``suffix`` (strings), and no key beyond those, ``name``
+    and ``weight``. A template names the request slot ``{prompt}`` exactly
+    once (unless the pool has no ``request_slot``) and no slot but the
+    pool's ``slots``, each with no conversion or format spec; a prefix and a
+    suffix are not formatted, so they hold none. A ``weight`` is a number of
+    at least 0, and at least one variant is above 0.
 
     Raises:
         ValueError: The first problem, naming the file, the directive and
@@ -181,6 +188,11 @@ def _check_pool(ref: PoolRef, pools: dict[str, list]) -> None:
         if not isinstance(name, str) or not name:
             raise ValueError(
                 f"{where}: a variant has no name; give it a non-empty one.")
+        if not _NAME.fullmatch(name):
+            raise ValueError(
+                f"{where}, variant {name!r}: the name holds a character other "
+                "than a letter, a digit, _ or -; a name is written into a row's "
+                "info as key=<name>, where ; and = separate the parts.")
         if name in seen:
             raise ValueError(f"{where}, variant {name!r}: the name is taken; "
                              "give each variant of a directive its own.")
@@ -210,10 +222,15 @@ def _check_variant(
         template = variant["template"]
         if not isinstance(template, str):
             raise ValueError(f"{where}: the template is not a string.")
-        named = _slots_of(where, template)
+        named = slots_of(where, template)
         if request_slot and "prompt" not in named:
             raise ValueError(f"{where}: the template has no {{prompt}} slot.")
-        if extra := sorted(named - set(slots)):
+        if request_slot and named.count("prompt") > 1:
+            raise ValueError(
+                f"{where}: the template has the {{prompt}} slot "
+                f"{named.count('prompt')} times; it needs exactly one, or the "
+                "request is written more than once.")
+        if extra := sorted(set(named) - set(slots)):
             raise ValueError(
                 f"{where}: the template names {extra}, which its technique "
                 f"does not fill (it fills {list(slots)}); write a literal "
@@ -224,14 +241,34 @@ def _check_variant(
             f"{where}: a variant has a template, or a prefix and a suffix (strings).")
 
 
-def _slots_of(where: str, template: str) -> set[str]:
-    """The slots ``template`` names, as ``str.format_map`` reads them."""
+def slots_of(where: str, template: str) -> list[str]:
+    """The slots ``template`` names, as ``str.format_map`` reads them, in
+    order and once for each time it names one.
+
+    Raises:
+        ValueError: The template does not parse, or a slot has a conversion
+            or a format spec (``{prompt!r}``, ``{prompt:>9}``, which would
+            write something other than the value); the message begins with
+            ``where``.
+    """
     try:
-        return {field for _, field, _, _ in string.Formatter().parse(template)
-                if field is not None}
+        parsed = list(string.Formatter().parse(template))
     except ValueError as exc:
         raise ValueError(f"{where}: the template does not parse ({exc}); write "
                          "a literal brace as {{ or }}.") from None
+    slots = []
+    for _, field, spec, conversion in parsed:
+        if field is None:
+            continue
+        if spec or conversion:
+            written = (f"!{conversion}" if conversion else "") + (
+                f":{spec}" if spec else "")
+            raise ValueError(
+                f"{where}: the slot {{{field}}} has a conversion or a format spec "
+                f"({written}); write it as {{{field}}}, so the text it fills is "
+                "the value as it is.")
+        slots.append(field)
+    return slots
 
 
 def apply_template_directive(
