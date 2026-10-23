@@ -25,7 +25,7 @@ from functools import cache
 from pathlib import Path
 
 from redact.config_overlay import DATASET_TYPES, config_file, taxonomy_folder
-from redact.stages import STAGES, includes_general_benign
+from redact.stages import STAGES, check_count, includes_general_benign
 
 _DEFAULT_MODELS = {
     "gen": None, "check": None, "translation": None, "constitution": None,
@@ -203,6 +203,8 @@ def load_recipe(
     data["_params_file"] = None if file is None else str(file)
     given = _read_params(params if isinstance(params, dict) else file)
     data["benign_taxonomy"] = benign_taxonomy_of(data, stages, given)
+    if "build" in stages:
+        check_build_params(dtype, given, data["config_dir"])
     data["stages"] = stages
     data["dataset_type"] = dtype
     return data
@@ -275,12 +277,17 @@ def load_params(
             against ``config_dir``'s ``generation_axes.json`` when it has
             one) or a ``seed`` that is not a whole number, or
             ``params["outputs"]["modes"]`` is not a mapping of entry types
-            to answer modes, or ``params["outputs"]["outputs_per_input"]``
-            is not a whole number of at least 1.
+            to answer modes, ``params["outputs"]["outputs_per_input"]`` or
+            ``params["inputs"]["samples_per_entry"]`` is not a whole number
+            of at least 1, or ``params["paraphrase"]`` has a ``target``,
+            ``paraphrases_per_sample`` or ``min_words``
+            :func:`redact.content_moderation.paraphrase.check_settings`
+            refuses.
     """
     data = _read_params(params, base_dir)
     _check_jailbreak_params(data)
     _check_generation_params(data, config_dir)
+    _check_paraphrase_params(data)
     unknown = [key for key in data if key not in STAGES and not key.startswith("_")]
     if unknown:
         raise ValueError(
@@ -346,6 +353,43 @@ def _check_generation_params(params: dict, config_dir: str | Path | None) -> Non
         resolve_modes(outputs["modes"])
     if "outputs_per_input" in outputs:
         check_outputs_per_input(outputs["outputs_per_input"])
+    inputs = params.get("inputs") or {}
+    if "samples_per_entry" in inputs:
+        check_count("inputs.samples_per_entry", inputs["samples_per_entry"], 1)
+
+
+def _check_paraphrase_params(params: dict) -> None:
+    """Refuse a ``paraphrase`` entry whose ``target``, ``paraphrases_per_sample``
+    or ``min_words``
+    :func:`redact.content_moderation.paraphrase.check_settings` refuses, so a
+    typo such as ``"target": "output"`` stops the run before its first stage.
+
+    Raises:
+        ValueError: Naming the key.
+    """
+    from .content_moderation.paraphrase import check_settings
+
+    given = params.get("paraphrase") or {}
+    check_settings(**{key: given[key] for key in
+                      ("target", "paraphrases_per_sample", "min_words") if key in given})
+
+
+def check_build_params(dataset_type: str, params: dict | None = None,
+                       config_dir: str | Path | None = None) -> None:
+    """Refuse a build ``exclude_from`` in a ``training`` run, read as the
+    stage gets it (:func:`stage_params`: the type file's, with ``params``,
+    the params file's, over them): a training build takes none, and the
+    build front would raise only once every earlier stage had run.
+
+    Raises:
+        ValueError: Saying what to write instead.
+    """
+    if dataset_type != "eval" and stage_params(
+            "build", dataset_type, params, config_dir).get("exclude_from"):
+        raise ValueError(
+            "params['build'] sets exclude_from, which leaves out of an eval build "
+            "what another run holds; a training build takes none. Leave it out, "
+            'or run "dataset_type": "eval".')
 
 
 def benign_taxonomy_of(

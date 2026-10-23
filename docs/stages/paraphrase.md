@@ -26,7 +26,11 @@ the `paraphraser` role when you have it.
 | `outputs` | the rows of `Datasets/output_responses.csv`, or of `outputs=`, whose `accepted` reads true (`dataset.accepted_mask`); a frame without the column is taken whole | `output_response`, else `sample` | `sample_id`, the response's own id, as `response_id`; `input_id`, the input answered, is kept |
 
 `target` is `inputs` (the default), `outputs` or `both`: a call or a recipe
-that names none paraphrases the inputs alone. A target whose source has rows but
+that names none paraphrases the inputs alone. Another value, a
+`paraphrases_per_sample` that is not a whole number of at least 1, or a
+`min_words` that is not one of at least 0, raises before anything runs
+(`paraphrase.check_settings`); a recipe's params are checked when they load,
+before the run's first stage. A target whose source has rows but
 none accepted, or that is given an empty frame, is skipped with a warning
 (`paraphrase (<target>) skipped: ...`). A target with no rows at all goes to
 `run_paraphrase_target`, which takes the lock, clears the target on a fresh

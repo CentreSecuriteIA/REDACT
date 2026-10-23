@@ -122,13 +122,19 @@ models, `data_dir`, `prompt_dir`, `taxonomy`, `taxonomy_dir`,
 `constitution_df`, the jailbreak stage's `augmentation`, the build's `mode`,
 `read_back`). Parameters that take a DataFrame (`inputs`, `outputs`) cannot
 be written in JSON. The `axes`, `axes_weighting` and `seed` of `inputs`
-and `outputs`, and the `modes` and `outputs_per_input` of `outputs`, are
-checked when the params load (a params file's and a dataset type's): an
-unknown axis or value, a weight below 0, a weighting other than `"table"`
-or `"log"`, a seed that is not a whole number, a `modes` that is not an
-object of entry types to non-empty lists of distinct modes, or an
-`outputs_per_input` that is not a whole number of at least 1 raises, the axes read against the
-`config_dir`'s axes table when it has one.
+and `outputs`, the `samples_per_entry` of `inputs`, the `modes` and
+`outputs_per_input` of `outputs`, and the `target`, `paraphrases_per_sample`
+and `min_words` of `paraphrase` are checked when the params load (a params
+file's and a dataset type's): an unknown axis or value, a weight below 0, a
+weighting other than `"table"` or `"log"`, a seed that is not a whole
+number, a `modes` that is not an object of entry types to non-empty lists
+of distinct modes, a `samples_per_entry`, `outputs_per_input` or
+`paraphrases_per_sample` that is not a whole number of at least 1, a
+`target` other than `inputs`, `outputs` and `both`, or a `min_words` that is
+not a whole number of at least 0 raises, the axes read against the
+`config_dir`'s axes table when it has one. So does a `build.exclude_from`
+in a `training` run that lists the build. A typo stops the run before its
+first stage.
 
 ### `constitution`
 
@@ -149,7 +155,7 @@ names of the last two, are read for this release with a
 | Key | Default | Meaning |
 |---|---|---|
 | `style` | `"long"` | The prompt under `prompts/input/generation/from_constitution/<style>/`: `long` or `short`. With axes, the length axis sets each sample's length |
-| `samples_per_entry` | `3` | Samples per constitution entry: that many units, one sample per call |
+| `samples_per_entry` | `3` | Samples per constitution entry: that many units, one sample per call. A whole number of at least 1 |
 | `entry_types` | `null` | Use only the constitution entries of these entry types |
 | `axes` | `null`: the table's | The [generation axes](#the-generation-axes) each unit is dealt a value of: `{axis: {value: weight}}` over the table's `inputs` section, an axis as `null` to leave it out; `false` for none. The `eval` type pins `directness` |
 | `axes_weighting` | `"table"`; `"log"` in the `training` type | How the axes' weights are dealt: `"table"` as they are, `"log"` spread more evenly over each axis's values ([log weighting](#log-weighting)) |
@@ -179,10 +185,10 @@ names of the last two, are read for this release with a
 
 | Key | Default | Meaning |
 |---|---|---|
-| `target` | `"inputs"` | `inputs`, `outputs` or `both`; the outputs are an opt-in |
-| `paraphrases_per_sample` | `1` | Paraphrase units per source row |
+| `target` | `"inputs"` | `inputs`, `outputs` or `both`; the outputs are an opt-in. Another value raises at load |
+| `paraphrases_per_sample` | `1` | Paraphrase units per source row; a whole number of at least 1 |
 | `check` | `true` | Gate each paraphrase and check it with the `paraphrase_check` model ([the check](stages/paraphrase.md#the-check)); `false` accepts every paraphrase |
-| `min_words` | `12` | A text under this many words (split on whitespace) gets no paraphrase; its unit is acked `skipped`. `0` paraphrases every text |
+| `min_words` | `12` | A text under this many words (split on whitespace) gets no paraphrase; its unit is acked `skipped`. `0` paraphrases every text; a whole number of at least 0, or `null` for the default |
 | `batch_size` | `256` | Requests per grouped call; at least twice as many units are live |
 | `seed` | `42` | Seed of the assignment of units to paraphrasers |
 | `inputs_path`, `outputs_path` | `Datasets/paraphrases_inputs.csv`, `Datasets/paraphrases_outputs.csv` | Where the paraphrases go |
@@ -217,7 +223,7 @@ augmentation section has, such as `family_weights`, raises here.
 | `inputs_path` | `Datasets/constitution_inputs_merged.csv`, else the category files | The inputs part |
 | `jailbreak_path`, `variations_path`, `responses_path` | the stages' default files | The other parts |
 | `paraphrase_inputs_path`, `paraphrase_outputs_path` | the stage's default files | The paraphrase parts |
-| `exclude_from` | none | Eval only: a list of run folders or CSVs, such as a training run's; the eval files leave out every row they hold by id or by normalised text, keep and count the rows from a constitution entry they have too, and the record counts both ([build](stages/build.md#leaving-out-what-a-training-run-holds)) |
+| `exclude_from` | none | Eval only (a `training` run that lists the build refuses it at load): a list of run folders or CSVs, such as a training run's; the eval files leave out every row they hold by id or by normalised text, keep and count the rows from a constitution entry they have too, and the record counts both ([build](stages/build.md#leaving-out-what-a-training-run-holds)) |
 
 A path key moves one stage's file only. Later stages read the default paths
 unless given their own: the build has a path key per part, and the paraphrase

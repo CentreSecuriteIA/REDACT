@@ -40,6 +40,7 @@ from redact.content_moderation.paraphrase import (
 )
 from redact.content_moderation.paraphrase import (
     check_paraphrase_prompt,
+    check_settings,
     paraphrase_pool,
     run_paraphrase_target,
 )
@@ -272,10 +273,12 @@ def generate_inputs(
     Raises:
         ValueError: ``constitution_df`` is None and no constitution is saved
             under ``data_dir``, ``axes`` names an unknown axis or value or
-            ``axes_weighting`` another weighting, or the folder or its plan
+            ``axes_weighting`` another weighting, ``samples_per_entry`` is not
+            a whole number of at least 1, or the folder or its plan
             file stops the stage
             (``InputPipeline.run_from_constitution``).
     """
+    check_count("inputs.samples_per_entry", samples_per_entry, 1)
     axes = generation_axes.resolve(
         "inputs", axes, weighting=axes_weighting, config_dir=config_dir)
     if constitution_df is None:
@@ -794,6 +797,18 @@ def _has_inputs(data_dir: str | Path | None) -> bool:
     return bool(discover_categories(paths.constitution_inputs_dir(data_dir)))
 
 
+def check_count(name: str, value: object, least: int) -> None:
+    """Raise unless ``value`` is a whole number of at least ``least``; a bool
+    is not one. ``name`` names the setting, as ``<stage>.<key>``.
+
+    Raises:
+        ValueError: Naming ``name`` and ``value``.
+    """
+    if isinstance(value, bool) or not isinstance(value, int) or value < least:
+        raise ValueError(
+            f"{name} must be a whole number of at least {least}, got {value!r}.")
+
+
 def _given_or_run_inputs(
     inputs: pd.DataFrame | None, data_dir: str | Path | None
 ) -> pd.DataFrame:
@@ -922,7 +937,15 @@ def generate_paraphrases(
     Returns:
         A key per target that ran: ``{"inputs": df}`` by default,
         ``{"inputs": df, "outputs": df}`` for ``"both"``.
+
+    Raises:
+        ValueError: ``target``, ``paraphrases_per_sample`` or ``min_words``
+            breaks its rule
+            (:func:`redact.content_moderation.paraphrase.check_settings`),
+            before anything runs.
     """
+    targets = check_settings(target=target, paraphrases_per_sample=paraphrases_per_sample,
+                             min_words=min_words)
     pool = paraphrase_pool(paraphraser)
     # Before any client: a paraphraser whose prompt breaks its format stops here.
     for model in pool:
@@ -948,9 +971,6 @@ def generate_paraphrases(
         logger.info("Paraphraser(s): %s | K: %d | Checker: %s",
                     pool, paraphrases_per_sample, check_model if check else "disabled")
 
-    targets = ["inputs", "outputs"] if target == "both" else [target]
-    if not set(targets) <= {"inputs", "outputs"}:
-        raise ValueError("target must be 'inputs', 'outputs', or 'both'.")
     if "outputs" not in targets:
         _warn_stale_outputs(Path(outputs_path) if outputs_path
                             else paths.paraphrases_outputs_csv(data_dir), targets)

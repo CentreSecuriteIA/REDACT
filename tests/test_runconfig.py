@@ -1251,6 +1251,79 @@ def test_outputs_per_input_that_is_not_a_whole_number_of_one_or_more_fails_at_lo
         load_params({"outputs": {"outputs_per_input": value}})
 
 
+@pytest.mark.parametrize(("params", "named"), [
+    ({"paraphrase": {"target": "output"}},
+     "paraphrase.target must be one of ['inputs', 'outputs', 'both'], got 'output'"),
+    ({"paraphrase": {"target": None}}, "paraphrase.target must be one of"),
+    ({"paraphrase": {"paraphrases_per_sample": 0}},
+     "paraphrase.paraphrases_per_sample must be a whole number of at least 1, got 0"),
+    ({"paraphrase": {"paraphrases_per_sample": 2.5}},
+     "paraphrase.paraphrases_per_sample must be a whole number of at least 1"),
+    ({"paraphrase": {"min_words": -1}},
+     "paraphrase.min_words must be a whole number of at least 0, got -1"),
+    ({"paraphrase": {"min_words": True}}, "paraphrase.min_words must be a whole number"),
+    ({"inputs": {"samples_per_entry": 0}},
+     "inputs.samples_per_entry must be a whole number of at least 1, got 0"),
+    ({"inputs": {"samples_per_entry": 2.5}},
+     "inputs.samples_per_entry must be a whole number of at least 1"),
+])
+def test_a_wrong_paraphrase_or_sample_count_fails_at_load(params, named):
+    with pytest.raises(ValueError, match=re.escape(named)):
+        load_params(params)
+
+
+def test_the_paraphrase_settings_a_run_may_give_load():
+    params = {"paraphrase": {"target": "both", "paraphrases_per_sample": 2,
+                             "min_words": 0},
+              "inputs": {"samples_per_entry": 1}}
+    assert load_params(params) == params
+    assert load_params({"paraphrase": {"min_words": None}})
+
+
+def test_a_paraphrase_target_typo_fails_before_any_stage_runs(tmp_path, monkeypatch):
+    raised = _fails_before_any_stage_or_model(
+        monkeypatch, tmp_path, {"stages": ["outputs", "paraphrase"]},
+        {"paraphrase": {"target": "output"}})
+    assert raised.startswith("paraphrase.target must be one of")
+
+
+def test_a_training_builds_exclude_from_fails_before_any_stage_runs(
+        tmp_path, monkeypatch):
+    raised = _fails_before_any_stage_or_model(
+        monkeypatch, tmp_path,
+        {"dataset_type": "training", "stages": ["outputs", "build"]},
+        {"build": {"exclude_from": [str(tmp_path)]}})
+    assert raised.startswith("params['build'] sets exclude_from")
+    # An eval build takes it, and a training run without the build checks none.
+    load_recipe({"dataset_type": "eval", "stages": ["build"]},
+                params={"build": {"exclude_from": [str(tmp_path)]}})
+    load_recipe({"dataset_type": "training", "stages": ["outputs"]},
+                params={"build": {"exclude_from": [str(tmp_path)]}})
+
+
+@pytest.mark.parametrize(("kwargs", "named"), [
+    ({"target": "output"}, "paraphrase.target"),
+    ({"paraphrases_per_sample": 0}, "paraphrase.paraphrases_per_sample"),
+    ({"min_words": -2}, "paraphrase.min_words"),
+])
+def test_the_paraphrase_front_checks_its_settings_before_anything(
+        tmp_path, monkeypatch, kwargs, named):
+    import redact
+    from redact.llms import ModelClient
+
+    monkeypatch.setattr(ModelClient, "create",
+                        lambda *a, **k: pytest.fail("a client was built"))
+    with pytest.raises(ValueError, match=re.escape(named)):
+        redact.generate_paraphrases(data_dir=tmp_path, **kwargs)
+
+
+def test_the_inputs_front_checks_its_sample_count_before_anything(tmp_path):
+    import redact
+
+    with pytest.raises(ValueError, match=re.escape("inputs.samples_per_entry")):
+        redact.generate_inputs(data_dir=tmp_path, samples_per_entry=0)
+
+
 def test_an_answer_mode_mapping_is_read_as_written():
     params = {"outputs": {"modes": {"_note": "x", "benign": ["harmful", "helpful"]}}}
     assert load_params(params) == params
