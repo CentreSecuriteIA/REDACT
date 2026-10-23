@@ -272,6 +272,18 @@ def test_the_rules_id_moves_when_a_translation_stops_refusing_encode(monkeypatch
     assert JP.rules_id(pool) != before
 
 
+def test_the_rules_id_moves_when_a_technique_stops_refusing_ascii_art(monkeypatch):
+    """The eval release gave the heavy full-text encodings a rule of their
+    own against ``ascii_art``: a technique's own list is in the id."""
+    import redact.jailbreak.plan as JP
+
+    base64 = registry(all_techniques())["to_base64"]
+    assert base64.cross_incompatible_with == ["ascii_art"]
+    before = JP.rules_id([base64])
+    monkeypatch.setattr(base64, "cross_incompatible_with", [])
+    assert JP.rules_id([base64]) != before
+
+
 def test_a_resume_under_the_plan_s_version_and_rules_is_quiet(
         tmp_path, monkeypatch, caplog):
     out = tmp_path / "jb.csv"

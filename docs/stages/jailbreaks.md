@@ -220,8 +220,9 @@ kind no longer draws ([build.md](build.md#training-mode)). The
 5,000-character cap on `to_ascii_art` holds wherever it is drawn, the eval
 type's pool included, and changes the text a seed draws: the font changes for some
 texts from about 40 characters and for most from about 90, a text of about
-830 characters or more is rejected where it used to be drawn, and so are
-most inputs a `heavy` encoding lengthened first
+830 characters or more is rejected where it used to be drawn, and so were
+most inputs a `heavy` encoding lengthened first, a pairing a fresh plan no
+longer draws since the eval release
 ([techniques.md](../techniques.md#what-the-families-do) has the figures).
 A plan kept across this change mixes rows drawn without the cap, saved
 before, and rows drawn with it, run after: a replayed plan gives the same

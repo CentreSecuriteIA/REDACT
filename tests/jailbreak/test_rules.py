@@ -232,8 +232,49 @@ def test_tokenbreak_split_and_ascii_art_are_never_planned_together():
 
 @pytest.mark.parametrize("technique", [
     "to_adversarial_suffix_punctuation", "to_adversarial_suffix_fragments",
-    "to_base64", "to_morse", "to_rot47"])
+    "to_rot47", "to_separator"])
 def test_ascii_art_keeps_the_rest_of_their_families(technique):
+    assert _joins(technique, "to_ascii_art") and _joins("to_ascii_art", technique)
+
+
+_HEAVY_FULL_TEXT = [
+    "to_base64", "to_unicode_escape", "to_ascii_ordinal", "to_morse", "to_braille",
+    "to_hex", "to_binary", "to_html_entities", "to_base32", "to_base85"]
+
+
+@pytest.mark.parametrize("technique", _HEAVY_FULL_TEXT)
+def test_ascii_art_refuses_the_heavy_full_text_encodings_either_way(technique):
+    """A code for every character lengthens the text, so its drawing often
+    runs past the cap (unicode escapes are rejected from about 140
+    characters of input), and both disguise the whole text: one is enough."""
+    assert not _joins(technique, "to_ascii_art")
+    assert not _joins("to_ascii_art", technique)
+
+
+def test_every_heavy_full_text_encoding_the_spec_has_is_kept_from_ascii_art():
+    """The ten of ``_HEAVY_FULL_TEXT`` and any heavy ``encode`` technique added
+    later: a heavy member of ``encode`` alone (not the sensitive-word forms,
+    which encode only marked words) names ``ascii_art`` in its own entry."""
+    heavy = {fn.__name__ for fn in POOL
+             if fn.families == ["encode"] and fn.encode_weight == "heavy"}
+    assert heavy == set(_HEAVY_FULL_TEXT)
+    assert [name for name in sorted(heavy) if _joins(name, "to_ascii_art")] == []
+
+
+@pytest.mark.parametrize("technique", [
+    "to_sensitive_words_encode_base64", "to_sensitive_words_encode_unicode",
+    "to_sensitive_words_encode_ascii", "to_sensitive_words_encode_rot13",
+    "to_sensitive_words_encode_separator"])
+def test_ascii_art_keeps_the_sensitive_word_encodings_heavy_and_light(technique):
+    """They encode only the words a model marks, so the text stays short
+    and mostly plain: the heavy ones are not the heavy full-text encodings."""
+    assert _joins(technique, "to_ascii_art") and _joins("to_ascii_art", technique)
+
+
+@pytest.mark.parametrize("technique", [
+    "to_rot13", "to_rot18", "to_leetspeak_basic", "to_reversed_characters",
+    "to_url_encoding", "to_caesar_cipher", "to_atbash"])
+def test_ascii_art_keeps_the_light_encodings_that_write_ascii(technique):
     assert _joins(technique, "to_ascii_art") and _joins("to_ascii_art", technique)
 
 
@@ -245,14 +286,6 @@ def test_ascii_art_refuses_the_non_ascii_encodings_either_way(technique):
     noise, fullwidth forms), which no font draws."""
     assert not _joins(technique, "to_ascii_art")
     assert not _joins("to_ascii_art", technique)
-
-
-@pytest.mark.parametrize("technique", [
-    "to_hex", "to_binary", "to_base32", "to_base85", "to_caesar_cipher",
-    "to_atbash", "to_reversed_characters", "to_url_encoding", "to_html_entities"])
-def test_ascii_art_keeps_the_ascii_output_encodings(technique):
-    """These write ASCII, so a font can draw them."""
-    assert _joins(technique, "to_ascii_art") and _joins("to_ascii_art", technique)
 
 
 @pytest.mark.parametrize("tokenbreak", [
@@ -337,7 +370,7 @@ def test_a_new_latin_only_cipher_refuses_a_translation_into_another_script(
 
 @pytest.mark.parametrize("technique", [
     "to_adversarial_suffix_punctuation", "to_adversarial_suffix_fragments",
-    "to_base64", "to_morse", "to_rot47"])
+    "to_rot47", "to_separator"])
 def test_ascii_art_draws_a_font_for_the_rest_of_their_families(technique):
     from redact.jailbreak.obfuscation.ascii_art import to_ascii_art
 

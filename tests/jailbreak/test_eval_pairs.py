@@ -83,5 +83,17 @@ def test_the_eval_draws_no_translation_beside_an_encoding(translation, encoding)
     assert "|".join(sorted((translation, encoding))) not in snapshot()
 
 
+@pytest.mark.parametrize("encoding", [
+    "to_ascii_ordinal", "to_base64", "to_braille", "to_morse", "to_unicode_escape"])
+def test_the_eval_draws_no_ascii_art_beside_a_heavy_encoding(encoding):
+    assert "|".join(sorted(("to_ascii_art", encoding))) not in snapshot()
+
+
+def test_ascii_art_still_joins_a_suffix_a_request_and_a_scene_in_the_eval_pool():
+    joined = {pair for pair in snapshot() if "to_ascii_art" in pair.split("|")}
+    assert {"to_ascii_art|to_complete_story", "to_ascii_art|to_refusal_then_comply",
+            "to_ascii_art|to_use_past_tense"} <= joined
+
+
 if __name__ == "__main__":
     _PAIRS.write_text(_dumps(snapshot()), encoding="utf-8")

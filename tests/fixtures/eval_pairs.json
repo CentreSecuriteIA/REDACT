@@ -1,15 +1,11 @@
 {
  "_comment": "Regenerate with PYTHONPATH=src py -m tests.jailbreak.test_eval_pairs. The pairs of the 36 eval pool techniques that rules.compatible admits.",
  "pairs": [
-  "to_ascii_art|to_ascii_ordinal",
-  "to_ascii_art|to_base64",
   "to_ascii_art|to_complete_story",
   "to_ascii_art|to_continue_instructions",
   "to_ascii_art|to_continue_passage",
   "to_ascii_art|to_fill_in_blank",
-  "to_ascii_art|to_morse",
   "to_ascii_art|to_refusal_then_comply",
-  "to_ascii_art|to_unicode_escape",
   "to_ascii_art|to_use_past_tense",
   "to_ascii_ordinal|to_complete_story",
   "to_ascii_ordinal|to_continue_instructions",

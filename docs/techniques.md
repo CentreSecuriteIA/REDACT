@@ -289,7 +289,14 @@ technique is picked first. A technique may not join a combination when:
   `to_braille`, `to_tokenbreak_split`, `to_lookalike_letters`,
   `to_zero_width_noise`, `to_fullwidth`, `to_math_styled` and the three
   `to_emoji_sprinkle_*` from `ascii_art`, since no font draws the characters
-  they may leave; the other suffixes, encodings and noise may still join it.
+  they may leave. It keeps the ten `heavy` full-text encodings from it too,
+  `to_braille` and the nine others (`to_base64`, `to_unicode_escape`,
+  `to_ascii_ordinal`, `to_morse`, `to_hex`, `to_binary`, `to_html_entities`,
+  `to_base32`, `to_base85`): a code for every character lengthens the text,
+  so its drawing often runs past the cap (below), and both disguise the whole
+  text, so one is enough. The three `heavy` `to_sensitive_words_encode_*`
+  encode only the words a model marks and may still join it, as the `light`
+  encodings that write ASCII and the other suffixes and noise do.
   It keeps the four many-shot variants of `fsh` and `dap` from `typos`: a
   model rewriting so long a prompt would not return it whole. It keeps
   `to_refusal_then_comply`, `to_prefix_injection`, `to_dual_answer` and
@@ -365,10 +372,11 @@ pool. With
 attacks differ from those of a version without the cap: the font a seed
 draws changes for some texts from about 40 characters and for most from
 about 90, a text of about 830 characters or more is rejected where it used
-to be drawn, and so are most inputs when the second round pairs it with a
+to be drawn, and so were most inputs when the second round paired it with a
 `heavy` encoding that lengthens the text (`to_unicode_escape`,
-`to_ascii_ordinal`, `to_morse`). An eval plan kept across the change mixes
-the two renderings. [What the families do](#what-the-families-do) has the
+`to_ascii_ordinal`, `to_morse`); the [eval release](configuration.md#release-notes)
+keeps ASCII art from those encodings, so a fresh eval plan no longer draws
+the pairs. An eval plan kept across the change mixes the two renderings. [What the families do](#what-the-families-do) has the
 figures.
 
 ## The natural pool
@@ -836,7 +844,8 @@ wrappers. The family is attack-only, and the eval type does not draw it.
 
   A text of about 830 characters or more is rejected where it used to be
   drawn. After an encoding that lengthens the text, most inputs are
-  rejected: unicode escapes make a text about 6 times as long, so an input
+  rejected (a fresh plan no longer draws ASCII art after a `heavy` full-text
+  encoding; a kept plan may): unicode escapes make a text about 6 times as long, so an input
   of about 140 characters or more is rejected after them, one of about 230
   after ASCII ordinals (about 3.7 times) and one of about 250 after morse
   (about 3.4 times); base64 (about 1.4 times) lowers the limit to about
