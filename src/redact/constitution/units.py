@@ -70,6 +70,12 @@ def file_of(row: dict) -> str:
     return GENERAL_BENIGN if row["source_taxonomy"] == _BENIGN else row["entry_type"]
 
 
+def key_of(row: dict) -> str:
+    """The ledger key of the unit a constitution row came from: its
+    ``source_category``, then the unit's prompt, which names its file too."""
+    return f"{row['source_category']}::{file_of(row)}"
+
+
 def _prompt_kwargs(name: str, info: dict) -> dict[str, str]:
     """A taxonomy category's values for the constitution prompt."""
     subcats = info.get("subcategories", [])

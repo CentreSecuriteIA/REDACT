@@ -190,9 +190,9 @@ of its rows, and one ledger write acks them and records the sizes.
 the stage's lock and removes the output, its `.cut` and `.tmp` files, the
 `.dropping` marker, the ledger and the manifest, and returns no key. The
 lock stays held until the `CommitBuffer` exits or `release_lock` is called.
-Called with no `artifact`, as the constitution stage does, the ledger is
-plain: read as it is, with no lock, no sizes, nothing cut, and
-`resume=False` removes only the ledger and the manifest.
+Called with no `artifact`, which no stage does, the ledger is plain: read as
+it is, with no lock, no sizes, nothing cut, and `resume=False` removes only
+the ledger and the manifest.
 
 `clear_stage(artifact, *, manifest_path=None, also=())` does what a fresh
 run's `resume_state` does, for a stage that starts over with nothing to run:
@@ -304,7 +304,7 @@ taxonomy format.
 
 | Stage | `resume_state` call | Ledger key | Records also carry |
 |---|---|---|---|
-| constitution | plain: no artifact | `unit` | `status`, `attempts` when rejected |
+| constitution | `artifact=Data_cache/constitution/, pattern="*.csv"`, `units_in` (the units of `merged.csv`'s rows) | `unit` | `status`, `attempts` when rejected |
 | inputs | `artifact=folder, pattern="*/samples.csv"`, `units_in` | `sample_description`, `entry_type`, `style`, `iteration` | `ids`, `accepted`; or `status`, `attempts` |
 | outputs | `artifact=output_responses.csv` | `input_id`, `iteration` | `accepted` |
 | paraphrase | `artifact=paraphrases_<target>.csv` | `input_id`, `iteration` (inputs); `response_id`, `iteration` (outputs) | `paraphrase_model`, `status`; `input_id` (outputs); `reason`, `min_words` when `skipped` |

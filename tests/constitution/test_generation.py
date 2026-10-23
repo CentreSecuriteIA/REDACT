@@ -20,7 +20,7 @@ from redact.constitution.units import (
     rows_of,
 )
 from redact.dataset import Ledger
-from tests.conftest import MockBackend, make_client
+from tests.conftest import MockBackend, lock_is_free, make_client
 
 
 def _ledger(output_dir):
@@ -208,10 +208,11 @@ class TestConstitutionPipeline:
         assert len(backend.calls) == _ATTEMPTS
         assert result.empty
         assert not (out_dir / "merged.csv").exists()
-        acks = [json.loads(line) for line in _ledger(out_dir).path.read_text(
-            encoding="utf-8").splitlines()]
-        assert acks == [{"unit": "Cat::harmful", "status": "rejected",
-                         "attempts": _ATTEMPTS}]
+        acks = [{k: v for k, v in json.loads(line).items() if k != "_saved"}
+                for line in _ledger(out_dir).path.read_text(
+                    encoding="utf-8").splitlines()]
+        assert [ack for ack in acks if ack] == [
+            {"unit": "Cat::harmful", "status": "rejected", "attempts": _ATTEMPTS}]
 
         backend = MockBackend(_VALID_CONSTITUTION_OUTPUT)
         self._make_pipeline(backend, tmp_path).run(
@@ -480,6 +481,80 @@ class TestRunResume:
         )
         assert len(backend.calls) == 1
         assert _ledger(out_dir).completed() == {"CatA::harmful", "CatB::harmful"}
+
+    @pytest.mark.parametrize("tail", [
+        b"0123abcd,Cat,Sub,half a ro",      # died mid-row
+        b"0123abcd,Cat,Sub,(Whole),harmful,CatB,harmful,general,m\n",  # no ack
+    ])
+    def test_what_a_save_that_did_not_finish_left_is_cut_back(self, tmp_path, tail):
+        out_dir = tmp_path / "constitution"
+        with pytest.raises(ConnectionError):
+            self._make_pipeline(_DiesAfter(1), tmp_path).run(
+                taxonomy=self._TAXONOMY, entry_types=[EntryType.HARMFUL],
+                num_categories=2, verbose=False,
+            )
+        saved = (out_dir / "merged.csv").read_bytes()
+        for name in ("harmful.csv", "merged.csv"):
+            with (out_dir / name).open("ab") as fh:
+                fh.write(tail)
+
+        backend = MockBackend(_VALID_CONSTITUTION_OUTPUT)
+        self._make_pipeline(backend, tmp_path).run(
+            taxonomy=self._TAXONOMY, entry_types=[EntryType.HARMFUL],
+            num_categories=2, verbose=False,
+        )
+        assert len(backend.calls) == 1
+        merged = read_constitution(out_dir)
+        assert merged["source_category"].tolist() == ["CatA"] * _SAMPLES + [
+            "CatB"] * _SAMPLES
+        assert (out_dir / "merged.csv").read_bytes().startswith(saved)
+        assert (out_dir / "merged.csv.cut").read_bytes() == tail
+        assert len(pd.read_csv(out_dir / "harmful.csv")) == 2 * _SAMPLES
+
+    def test_a_csv_removed_by_hand_stops_the_resume(self, tmp_path):
+        out_dir = tmp_path / "constitution"
+        self._make_pipeline(MockBackend(_VALID_CONSTITUTION_OUTPUT), tmp_path).run(
+            taxonomy=self._TAXONOMY, entry_types=[EntryType.HARMFUL],
+            num_categories=2, verbose=False,
+        )
+        (out_dir / "merged.csv").unlink()
+        backend = MockBackend(_VALID_CONSTITUTION_OUTPUT)
+        with pytest.raises(RuntimeError, match="merged.csv") as stopped:
+            self._make_pipeline(backend, tmp_path).run(
+                taxonomy=self._TAXONOMY, entry_types=[EntryType.HARMFUL],
+                num_categories=2, verbose=False,
+            )
+        assert "start the whole stage over" in str(stopped.value)
+        assert backend.calls == []
+        assert lock_is_free(_ledger(out_dir).path)
+
+    @pytest.mark.parametrize("ledger", ["removed", "plain"])
+    def test_a_folder_without_sizes_is_taken_over_from_merged_csv(
+            self, tmp_path, ledger):
+        """Without its ledger, or with the plain one an earlier version wrote
+        (here without the ack of CatB, whose save died before it), a unit
+        whose rows are in merged.csv is not generated again."""
+        out_dir = tmp_path / "constitution"
+        self._make_pipeline(MockBackend(_VALID_CONSTITUTION_OUTPUT), tmp_path).run(
+            taxonomy=self._TAXONOMY, entry_types=[EntryType.HARMFUL],
+            num_categories=2, verbose=False,
+        )
+        path = _ledger(out_dir).path
+        path.unlink()
+        if ledger == "plain":
+            path.write_text('{"unit": "CatA::harmful"}\n', encoding="utf-8")
+
+        backend = MockBackend(_VALID_CONSTITUTION_OUTPUT)
+        self._make_pipeline(backend, tmp_path).run(
+            taxonomy=self._TAXONOMY,
+            entry_types=[EntryType.HARMFUL, EntryType.BENIGN],
+            num_categories=2, verbose=False,
+        )
+        assert len(backend.calls) == 2          # the benign units only
+        assert len(read_constitution(out_dir)) == 4 * _SAMPLES
+        assert _ledger(out_dir).read().saved is not None
+        assert _ledger(out_dir).completed() == {
+            "CatA::harmful", "CatB::harmful", "CatA::benign", "CatB::benign"}
 
     def test_resume_false_wipes_csvs_and_ledger(self, tmp_path):
         backend = MockBackend(_VALID_CONSTITUTION_OUTPUT)
