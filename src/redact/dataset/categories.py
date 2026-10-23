@@ -19,15 +19,15 @@ from .rows import _ID_COLUMNS, _blank_missing_text, _has_bytes, accepted_mask
 
 # The columns of an input sample row.
 SAMPLE_COLUMNS: list[str] = [
-    "sample_id",         # MD5 hash of sample text — this row's own identity
-    "sample",            # The generated text content
-    "category",          # Harm or benign category name
-    "subcategory",       # Constitution subcategory, or ""
+    "sample_id",         # Content id of the text: this row's own identity
+    "sample",            # The generated text
+    "category",          # The entry's source_category, harmful or benign taxonomy
+    "subcategory",       # The entry's constitution subcategory, or ""
     "entry_type",        # harmful / dual_use_harmful / dual_use_benign / benign
-    "turn",              # Generation turn index
+    "turn",              # 0: every sample is written in one turn
     "accepted",          # Whether the sample passed the checker
-    "rejection_reason",  # Checker reasoning on reject; "" on accept
-    "source",            # constitution / handcrafted / generated
+    "rejection_reason",  # The checker's reply on a reject; "" on accept
+    "source",            # "constitution": every input is seeded from it
 ]
 
 

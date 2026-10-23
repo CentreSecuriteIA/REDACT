@@ -108,7 +108,8 @@ normalised per axis. The `domain` axis is not dealt: it shows the entry's
 subcategory.
 
 - **Groups.** Units are dealt per `(source_category, entry_type)`, the
-  input tree's folders and the coverage table's columns. A group's units go
+  coverage table's `category` and `entry_type` columns (the input tree has
+  one folder per category, its entry types together in one file). A group's units go
   in `(sample_description, iteration)` order, so an entry's units are dealt
   one after another, from one dealer (`dataset/dealing.py`, the jailbreak
   plan's): each value goes to the unit when its count so far over its weight
@@ -150,7 +151,7 @@ Under `Datasets/constitution_inputs/`:
 
 | File | Content |
 |---|---|
-| `<category>/samples.csv` | One per category (`source_category`): a harmful-taxonomy category, or a benign one for the general-benign part; a benign category named as a harmful one shares its file, its rows told apart by `entry_type` and `source_taxonomy`. Accepted and rejected rows |
+| `<category>/samples.csv` | One per category (`source_category`): a harmful-taxonomy category, or a benign one for the general-benign part; a benign category named as a harmful one shares its file. Its general-benign rows and the harmful taxonomy's `benign` entry rows are both `benign`: only `source_taxonomy` tells them apart. Accepted and rejected rows |
 | `constitution_inputs.manifest.jsonl` | The plan of the current style, written again every run |
 | `constitution_inputs.state.jsonl` | The ledger, for every style |
 | `constitution_inputs.plan.json` | What each style's deal was made with, `{"styles": {<style>: {...}}}`: `seed`, `samples_per_entry`, and each dealt axis's weights as dealt, log-scaled with `axes_weighting` `"log"` (`null` without axes). Labels and hints are not in it: rewording them changes no deal |

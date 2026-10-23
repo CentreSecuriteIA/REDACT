@@ -100,13 +100,15 @@ A custom mapping, as `{"benign": ["harmful"]}`, gives the other two labels
 (`benign_harmful`, `harmful_benign`). The label names what was asked and
 how it was answered, and judges nothing.
 
-Each checker keeps the verdict wording, the reply shapes and criteria 2 to
-4 of the single checker it replaces, and differs in its semantics line and
-criterion 1: the harmful checker holds the harmful entry type's line of
-that checker, the helpful one asks for a normal, helpful, non-refusal
-answer to the request as it was asked, not a safer reinterpretation, with
-no moralising or unrequested disclaimers. A refusal is rejected in both. The
-checker is shown the category, not the input's entry type.
+The two checkers share the verdict wording, the reply shapes and the four
+criteria, the first of which asks that the response fit the answer mode;
+they differ in the mode's semantics line. The harmful checker asks that the
+response actually contain the harmful content requested, not a refusal or
+a moralising redirect; the helpful one asks for a normal, helpful,
+non-refusal answer to the request as it was asked, not a safer
+reinterpretation, with no moralising or unrequested disclaimers. A refusal
+is rejected in both. The checker is shown the category, not the input's
+entry type.
 
 The mode is not a generation axis: it picks the prompt, the checker and the
 label rather than adding a line to the spec, it holds with `axes: false`,
