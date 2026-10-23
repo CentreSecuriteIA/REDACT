@@ -12,9 +12,14 @@ count of parts is asked again, as for any numbered list; parts that differ
 from the prompt discard it. Both draw the count from ``rng``, at most the
 prompt's words, and discard a prompt of fewer than two words.
 
+Each part is written in double quotes with a quote or a backslash in it
+escaped, as a JSON string is (``json.dumps``), so a prompt holding quotes
+leaves the quoting balanced; a part without either reads as it did.
+
 ``info`` is ``variant=<variant>;parts=<count>``.
 """
 
+import json
 import random
 import string
 from collections.abc import Callable
@@ -64,7 +69,8 @@ def _reassembly(parts: list[str], rng: random.Random | None) -> tuple[str, str]:
     """``parts`` named A, B, ... in a variant of the pool drawn by ``rng``
     (:func:`~redact.jailbreak.directives.draw_variant`): the text, and its info."""
     names = string.ascii_uppercase[:len(parts)]
-    lines = "\n".join(f'{name}: "{part}"' for name, part in zip(names, parts))
+    lines = "\n".join(f"{name}: {json.dumps(part, ensure_ascii=False)}"
+                      for name, part in zip(names, parts))
     variant = draw_variant(_TEMPLATES["reassembly"], rng)
     text = variant["template"].format_map({"parts": lines, "names": ", ".join(names)})
     return text, f"variant={variant['name']};parts={len(parts)}"

@@ -121,12 +121,26 @@ def test_a_check_model_takes_the_check_requests_only(technique, label):
 
 @_CASES
 @pytest.mark.parametrize("reply", ["", " \n "])
-def test_an_empty_rewrite_the_check_accepts_is_still_rejected(
+def test_an_empty_rewrite_the_check_accepts_is_discarded(technique, label, reply):
+    _, (text, info) = drive(technique(PROMPT, gen_model="gen"), [reply, "Yes"])
+    assert (text, info) == (PROMPT, f"DISCARDED; reason=empty rewrite; {label}")
+
+
+@_CASES
+@pytest.mark.parametrize("reply", [PROMPT, f"  {PROMPT}\n"])
+def test_the_prompt_returned_as_the_rewrite_the_check_accepts_is_discarded(
         technique, label, reply):
-    answers = iter([reply, "Yes"])
+    _, (text, info) = drive(technique(PROMPT, gen_model="gen"), [reply, "Yes"])
+    assert (text, info) == (PROMPT, f"DISCARDED; reason=unchanged rewrite; {label}")
+
+
+@_CASES
+def test_an_empty_rewrite_the_check_accepts_leaves_a_discarded_row(technique, label):
+    answers = iter(["", "Yes"])
     _, info = drive_sync(run_chain([technique], PROMPT, gen_model="m"),
                          lambda request: next(answers))
-    assert info == f"DISCARDED; technique={technique.__name__}; reason=empty text"
+    assert info == (f"DISCARDED; technique={technique.__name__}; "
+                    f"reason=empty rewrite; {label}")
 
 
 @_CASES

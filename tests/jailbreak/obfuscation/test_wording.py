@@ -210,6 +210,30 @@ def test_each_marked_word_is_swapped_for_its_code_name_and_keyed(stand_ins):
     assert key == ["falcon = cat", "anvil = mat"]
 
 
+@pytest.mark.parametrize("alias", [
+    r"\1", "$0", r"\g<0>", "(", "a(b", r"\\", "%s", "{x}", "[w1]",
+])
+def test_a_code_name_that_reads_as_regex_syntax_is_written_as_it_is(stand_ins, alias):
+    _, (text, _) = _pseudonym(PROMPT, ["cat", alias])
+    _, request, key = _split(text, KEY_MARK)
+    assert request == f"the {alias} sat on the mat today"
+    assert key == [f"{alias} = cat"]
+
+
+def test_a_marked_word_that_holds_another_is_swapped_whole_not_in_parts():
+    """``category`` and ``cat``: the longer first, one pass."""
+    swapped = WG._swap("a category of cats", ["cat", "category"],
+                       lambda i, matched: f"<{i}>")
+    assert swapped == "a <1> of <0>s"
+
+
+@pytest.mark.parametrize("word", ["a.b", "a+b", "(x)", "a|b", "^a$", r"a\b"])
+def test_a_marked_word_with_regex_syntax_matches_only_itself(word):
+    prompt = f"keep axb and ab, swap {word} here"
+    assert WG._swap(prompt, [word], lambda i, matched: "#") == (
+        "keep axb and ab, swap # here")
+
+
 def test_a_code_name_takes_the_case_of_the_word_it_replaces(stand_ins):
     prompt = "the cat chased a CAT and Cat and cat"
     _, (text, _) = _pseudonym(prompt, ["cat", "falcon"])

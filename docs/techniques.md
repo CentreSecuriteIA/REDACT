@@ -444,13 +444,16 @@ generation model.
   request (`jailbreak/preserve_check`, at temperature 0.15). A rejected
   rewrite is made again with the check's reply as feedback, up to two
   rewrites, so 2 to 4 calls (the spec's `calls`); one rejected twice is
-  discarded (`reason=preserve check failed`).
+  discarded (`reason=preserve check failed`). A rewrite the check accepts
+  but that has no text, or is the prompt itself, is discarded too
+  (`reason=empty rewrite`, `reason=unchanged rewrite`).
 - `model_distractors` (`to_model_distractor_prefix`,
   `to_model_distractor_suffix`) has a model write a few sentences in the
   voice of the person asking (`jailbreak/model_distractor`), placed before or
   after the prompt, which is not rewritten; they are joined to it with a
-  space. No check model reads them. A reply with no text is asked for again,
-  up to 3 replies in all, and then rejects the result
+  space. No check model reads them. A reply with no text, or that is the
+  prompt itself, is asked for again, up to 3 replies in all, and then
+  rejects the result
   (`DISCARDED; reason=empty distractor`). The info is `position=<position>`.
 
 **Hacking.**
@@ -666,8 +669,9 @@ wrappers. The family is attack-only, and the eval type does not draw it.
 - `suffixes` appends an adversarial suffix: punctuation, fragments, unicode
   or emoji. Its info is `suffix=<suffix>`.
 - `payload_split` (spec version 1.3) cuts the text into two to four parts,
-  names them A, B, C ..., and writes them, one per line as `A: "..."`, in one
-  of eight variants of its pool (`reassembly` in
+  names them A, B, C ..., and writes them, one per line as `A: "..."` (a
+  quote or a backslash in a part is escaped as a JSON string does, so the
+  quoting stays balanced), in one of eight variants of its pool (`reassembly` in
   `obfuscation/payload_split_templates.json`) that asks the reader to join
   them in order. `to_payload_split` is pure: it cuts at word boundaries into
   parts of nearly equal word count (the text's whitespace becomes single

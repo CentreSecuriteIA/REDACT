@@ -3,9 +3,9 @@ the person asking (``jailbreak/model_distractor``, its ``{position}``), and
 they are joined to the prompt, before it or after it. The prompt itself is not
 rewritten, and no check model reads the reply.
 
-A reply with no text is asked again, up to :data:`MAX_REPLIES` replies, then
-the prompt is discarded (:data:`EMPTY_DISTRACTOR`). ``info`` is
-``position=<position>``.
+A reply with no text, or that is the prompt itself, is asked again, up to
+:data:`MAX_REPLIES` replies, then the prompt is discarded
+(:data:`EMPTY_DISTRACTOR`). ``info`` is ``position=<position>``.
 """
 
 from collections.abc import Callable
@@ -17,14 +17,16 @@ from redact.llms.prompting import build_messages, load_prompt
 #: The most replies asked for one prompt: a reply with no text is asked again.
 MAX_REPLIES = 3
 
-#: The info of a prompt whose replies never held a sentence.
+#: The info of a prompt whose replies never held a sentence of their own.
 EMPTY_DISTRACTOR = f"{DISCARDED}; reason=empty distractor"
 
 
-def _sentences_of(reply: str) -> list[str]:
-    """``[reply]`` stripped, or ``[]`` for a reply with no text, which
-    :func:`~redact.llm_pipeline.extracted` asks for again."""
-    return [reply.strip()] if reply.strip() else []
+def _sentences_of(reply: str, prompt: str) -> list[str]:
+    """``[reply]`` stripped, or ``[]`` for a reply with no text, or that is
+    ``prompt`` itself, which :func:`~redact.llm_pipeline.extracted` asks for
+    again."""
+    sentences = reply.strip()
+    return [sentences] if sentences and sentences != prompt.strip() else []
 
 
 def _distractor_gen(
@@ -37,7 +39,8 @@ def _distractor_gen(
         load_prompt("jailbreak", "model_distractor", prompt_dir),
         position=position, prompt=prompt)
     sentences, _attempts = yield from extracted(
-        gen_model, lambda: messages, _sentences_of, max_attempts=MAX_REPLIES)
+        gen_model, lambda: messages, lambda reply: _sentences_of(reply, prompt),
+        max_attempts=MAX_REPLIES)
     if not sentences:
         return prompt, EMPTY_DISTRACTOR
     parts = [sentences[0], prompt] if position == "before" else [prompt, sentences[0]]

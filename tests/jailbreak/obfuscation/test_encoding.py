@@ -2,6 +2,7 @@
 
 import base64
 import codecs
+import html
 import random
 import re
 import unicodedata
@@ -190,6 +191,54 @@ class TestClusters:
         for seed in range(20):
             encoded, _ = to_zero_width_noise(text, rng=random.Random(seed))
             assert [c for c in _clusters(encoded) if c not in _ZERO_WIDTH] == _clusters(text)
+
+
+LONE_SURROGATE = chr(0xD800)
+
+
+class TestEdgeInputs:
+    """What the encodings do with text no pipeline row holds in practice, so a
+    change to it is a decision."""
+
+    @pytest.mark.parametrize("fn", [to_base64, to_hex, to_binary, to_base32,
+                                    to_base85, to_url_encoding],
+                             ids=lambda fn: fn.__name__)
+    def test_a_lone_surrogate_stops_a_byte_codec_with_a_unicode_error(self, fn):
+        """No replacement character is written in its place: the unit gets an
+        error row, which names the codec and the position."""
+        with pytest.raises(UnicodeEncodeError, match="surrogates not allowed"):
+            fn("a" + LONE_SURROGATE)
+
+    @pytest.mark.parametrize("fn", [to_html_entities, to_unicode_escape,
+                                    to_ascii_ordinal],
+                             ids=lambda fn: fn.__name__)
+    def test_a_lone_surrogate_is_written_as_ascii_by_a_code_point_encoding(self, fn):
+        assert fn("a" + LONE_SURROGATE)[0].isascii()
+
+    def test_html_entities_read_back_by_html5_but_for_nul_and_the_c1_controls(self):
+        """``html.unescape`` reads ``&#0;`` as U+FFFD and 27 of ``&#128;`` to
+        ``&#159;`` as their Windows-1252 characters (``&#133;`` is an ellipsis),
+        so those characters do not come back as written; every other one does,
+        also the 5 C1 codes Windows-1252 leaves undefined."""
+        undefined = (0x81, 0x8D, 0x8F, 0x90, 0x9D)
+        text = SAMPLE + " caf" + chr(0xE9) + chr(0xA0) + chr(0x1F600) + "\t\n"
+        text += "".join(map(chr, undefined))
+        assert html.unescape(to_html_entities(text)[0]) == text
+        for code in (0, *(c for c in range(0x80, 0xA0) if c not in undefined)):
+            assert html.unescape(to_html_entities(chr(code))[0]) != chr(code), code
+
+    @pytest.mark.parametrize(("text", "back"), [
+        (chr(0x301) + "ab", "a" + chr(0x301) + "b"),     # a mark with no letter before it
+        ("ab" + chr(0x200D), "b" + chr(0x200D) + "a"),   # a joiner with nothing after it
+    ], ids=["leading-mark", "trailing-joiner"])
+    def test_reversing_twice_is_not_the_identity_for_a_mark_or_joiner_at_the_edge(
+            self, text, back):
+        """A mark stays with the letter before it and a joiner binds the
+        character after it, so a mark that starts the text lands on the letter
+        that follows it on the second pass, and a joiner that ends it binds the
+        letter that comes before it."""
+        once = to_reversed_characters(text)[0]
+        assert to_reversed_characters(once)[0] == back != text
 
 
 class TestLeetspeak:

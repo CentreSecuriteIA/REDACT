@@ -6,6 +6,7 @@ stand-ins of their own and assert on the parts, the letters, the counts and
 the verdicts, never on the packaged wording.
 """
 
+import json
 import random
 import re
 import string
@@ -165,6 +166,33 @@ def test_the_parts_have_nearly_equal_word_counts(stand_ins, seed):
         "one two three four five six seven eight nine", rng=random.Random(seed))
     sizes = [len(part.split()) for part in _parts_of(text)]
     assert max(sizes) - min(sizes) <= 1
+
+
+QUOTED = 'say "hello" to her, then \\n and back\\slash and "done"'
+
+
+@pytest.mark.parametrize("count", [2, 3, 4])
+def test_a_quote_or_a_backslash_in_the_prompt_leaves_each_part_one_balanced_string(
+        stand_ins, count):
+    """Each part reads as a JSON string whatever it holds, so the quotes round
+    it are the part's own and the parts still give the prompt back."""
+    text, _ = PS.to_payload_split(QUOTED, rng=_Count(count))
+    lines = text.split("\n")[1:]
+    parts = [json.loads(line[3:]) for line in lines]
+    assert [line[:3] for line in lines] == [
+        f"{name}: " for name in string.ascii_uppercase[:count]]
+    assert " ".join(parts) == " ".join(QUOTED.split())
+
+
+def test_the_semantic_cut_escapes_the_quotes_of_its_parts_too(stand_ins):
+    text, _ = _semantic(QUOTED, _Count(2), [_numbered(_into(2, QUOTED))])[1]
+    parts = [json.loads(line[3:]) for line in text.split("\n")[1:]]
+    assert " ".join(parts) == " ".join(QUOTED.split())
+
+
+def test_a_part_without_a_quote_or_a_backslash_is_written_as_it_was(stand_ins):
+    text, _ = PS.to_payload_split("café au lait", rng=_Count(2))
+    assert text.split("\n")[1:] == ['A: "café au"', 'B: "lait"']
 
 
 def test_the_names_are_listed_in_the_order_of_the_parts(stand_ins):

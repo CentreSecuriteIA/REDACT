@@ -46,6 +46,32 @@ def test_a_reply_with_no_text_is_asked_for_again(technique):
 
 @pytest.mark.parametrize("technique", [to_model_distractor_prefix,
                                        to_model_distractor_suffix])
+def test_a_reply_that_is_the_prompt_is_asked_for_again(technique):
+    requests, (text, _) = drive(
+        technique(PROMPT, gen_model="gen"), [PROMPT, f" {PROMPT}\n", SENTENCES])
+    assert len(requests) == 3       # noqa: PLR2004
+    assert text.count(PROMPT) == 1 and SENTENCES in text
+
+
+@pytest.mark.parametrize("technique", [to_model_distractor_prefix,
+                                       to_model_distractor_suffix])
+def test_a_prompt_every_reply_repeats_is_discarded_unchanged(technique):
+    _, (text, info) = drive(technique(PROMPT, gen_model="gen"), [PROMPT] * 3)
+    assert (text, info) == (PROMPT, EMPTY_DISTRACTOR)
+
+
+@pytest.mark.parametrize(("technique", "before"), [
+    (to_model_distractor_prefix, True), (to_model_distractor_suffix, False)])
+def test_a_newline_at_the_edge_of_the_prompt_gets_a_space_at_the_join(
+        technique, before):
+    """Joined by one space, as any other prompt is: nothing is trimmed."""
+    prompt = "\nline one\nline two\n"
+    _, (text, _) = drive(technique(prompt, gen_model="gen"), [SENTENCES])
+    assert text == (f"{SENTENCES} {prompt}" if before else f"{prompt} {SENTENCES}")
+
+
+@pytest.mark.parametrize("technique", [to_model_distractor_prefix,
+                                       to_model_distractor_suffix])
 def test_a_prompt_whose_replies_never_held_text_is_discarded_unchanged(technique):
     requests, (text, info) = drive(technique(PROMPT, gen_model="gen"), ["", "", " "])
     assert len(requests) == 3   # noqa: PLR2004
