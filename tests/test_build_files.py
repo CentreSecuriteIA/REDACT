@@ -963,11 +963,10 @@ def test_a_build_takes_no_category_folder_outside_the_inputs_tree(tmp_path):
 
 # --- a run from the first stage to the build ----------------------------------
 
-# Today's flat form, read as the adversarial kind; the natural kind is the default.
-_PURE = {
-    "pure_only": True, "include_hacking": False, "include_manipulation": False,
-    "include_requests": False,
-}
+# Pure techniques of the obfuscation layer; the natural kind is the default.
+_PURE = {"adversarial": {
+    "pure_only": True, "layers": {"deny": ["rewrite", "hacking", "manipulation", "requests"]},
+}}
 _MODELS = {"gen": "gen-model", "check": "check-model", "paraphraser": "para-model",
            "paraphrase_check": "check-model"}
 
@@ -1124,12 +1123,12 @@ def _eval_run(folder: Path, monkeypatch, before=None) -> dict:
     return {"counts": counts}
 
 
-def _packaged(flat: dict) -> dict:
-    """The packaged section with ``flat`` over it, each kind whole, so the
+def _packaged(section: dict) -> dict:
+    """The packaged section with ``section`` over it, each kind whole, so the
     eval type's section does not apply."""
     from redact.recipe import augmentations_of
 
-    return augmentations_of({"augmentations": flat})
+    return augmentations_of({"augmentations": section})
 
 
 _RUNS = {"training": _training_run, "eval": _eval_run}

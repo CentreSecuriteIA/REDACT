@@ -199,7 +199,7 @@ def test_run_pipeline_asks_no_stage_to_read_its_rows_back(tmp_path, monkeypatch)
             {"dataset_type": "training", "data_dir": str(tmp_path),
              "stages": ["constitution", "inputs", "outputs", "paraphrase", "jailbreaks",
                         "build"],
-             "augmentations": {"include_translation": False}},
+             "augmentations": {"adversarial": {"translation": False}}},
             params={}, verbose=False)
     finally:
         telemetry.uninstall()
@@ -457,7 +457,7 @@ def test_the_jailbreak_stage_gets_the_recipes_prompt_dir(tmp_path, monkeypatch):
                         lambda **k: handed.append(k["prompt_dir"]) or pd.DataFrame())
     recipe = {"dataset_type": "training", "data_dir": str(tmp_path),
               "stages": ["jailbreaks"], "prompt_dir": str(tmp_path / "prompts"),
-              "augmentations": {"include_translation": False}}
+              "augmentations": {"adversarial": {"translation": False}}}
     try:
         run_pipeline(recipe, params={}, verbose=False)
     finally:
@@ -611,7 +611,7 @@ def test_run_pipeline_counts_the_files_a_recipe_names(tmp_path, monkeypatch):
         summary = run_pipeline(
             {"dataset_type": "training", "data_dir": str(tmp_path),
              "stages": ["outputs", "paraphrase", "jailbreaks", "build"],
-             "augmentations": {"include_translation": False}},
+             "augmentations": {"adversarial": {"translation": False}}},
             params=params, verbose=False)
     finally:
         telemetry.uninstall()
@@ -1990,15 +1990,12 @@ def test_run_pipeline_eval_jailbreaks_and_build(tmp_path, monkeypatch):
         "dataset_type": "eval",
         "data_dir": str(tmp_path),
         "stages": ["jailbreaks", "build"],
-        # The packaged section with the flat form over it, in place of the eval
-        # type's.
-        "augmentations": augmentations_of({"augmentations": {
+        # The packaged section with pure techniques of the obfuscation layer
+        # only, in place of the eval type's.
+        "augmentations": augmentations_of({"augmentations": {"adversarial": {
             "pure_only": True,
-            "include_hacking": False,
-            "include_manipulation": False,
-            "include_obfuscation": True,
-            "include_requests": False,
-        }}),
+            "layers": {"deny": ["rewrite", "hacking", "manipulation", "requests"]},
+        }}}),
         "resume": True,
     }
     params = {"jailbreaks": {"seed": 7}}
@@ -2059,10 +2056,10 @@ def test_a_training_run_reads_the_inputs_it_seeded(tmp_path, monkeypatch):
         "dataset_type": "training",
         "data_dir": str(tmp_path),
         "stages": ["outputs", "paraphrase", "jailbreaks"],
-        "augmentations": {
-            "pure_only": True, "include_hacking": False, "include_manipulation": False,
-            "include_requests": False,
-        },
+        "augmentations": {"adversarial": {
+            "pure_only": True,
+            "layers": {"deny": ["rewrite", "hacking", "manipulation", "requests"]},
+        }},
     }
     try:
         summary = run_pipeline(
@@ -2149,7 +2146,7 @@ def test_run_pipeline_all_stages_mocked(tmp_path, monkeypatch):
     summary = run_pipeline(
         {"dataset_type": "training", "data_dir": str(tmp_path),
          "stages": ["constitution", "inputs", "outputs", "paraphrase", "jailbreaks", "build"],
-         "augmentations": {"include_translation": False}},
+         "augmentations": {"adversarial": {"translation": False}}},
         params={"inputs": {"samples_per_entry": 1}, "paraphrase": {"target": "inputs"}},
         verbose=True,
     )
@@ -2300,7 +2297,7 @@ def test_stage_models_follow_the_order_the_stages_run():
     """Stage order, not role name: what loads first is planned first."""
     from redact.driver import _stage_models
 
-    translating = {"include_translation": True}
+    translating = {"adversarial": {"translation": True}}
     assert _stage_models(_models(), ALL_STAGES, translating) == [
         "claude-opus-4-6",        # constitution
         "venice-uncensored",      # inputs: gen, and check falls back to it
@@ -2329,16 +2326,24 @@ def test_check_resolves_to_the_generation_model_like_the_stages(local_models):
 
 
 @pytest.mark.parametrize("augmentations", [
-    {"include_translation": False},
-    {"pure_only": True},
-    {"include_obfuscation": False},
+    {"adversarial": {"translation": False}},
+    {"adversarial": {"pure_only": True}},
+    {"adversarial": {"layers": {"deny": ["obfuscation"]}}},
 ])
 def test_translation_is_not_planned_when_the_recipe_excludes_it(augmentations):
     from redact.driver import _stage_models
 
     assert _stage_models(_models(), ["jailbreaks"], augmentations) == ["venice-uncensored"]
     assert "translategemma-27b" in _stage_models(
-        _models(), ["jailbreaks"], {"include_translation": True})
+        _models(), ["jailbreaks"], {"adversarial": {"translation": True}})
+
+
+def test_translation_is_not_planned_for_the_deprecated_flat_form_either():
+    from redact.driver import _stage_models
+
+    with pytest.deprecated_call():
+        assert _stage_models(_models(), ["jailbreaks"], {"include_translation": False}) \
+            == ["venice-uncensored"]
 
 
 def test_a_paraphraser_pool_plans_every_model_in_it(local_models):
@@ -2816,7 +2821,7 @@ def test_served_lists_a_pool_and_names_no_model_for_a_role_no_stage_calls(
     extra = local_models("_rc_served_para", roles=["paraphraser"])
     models = _models(gen="no-such-model", paraphraser="distribution")
     served = _served(models, ["paraphrase", "jailbreaks"],
-                     {"include_translation": False}, {extra: {"copies": 2}}, [])
+                     {"adversarial": {"translation": False}}, {extra: {"copies": 2}}, [])
     assert served == {
         "paraphraser": [
             # No plan: the recipe's count, or none for one left to the plan.
