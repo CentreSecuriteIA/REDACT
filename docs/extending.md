@@ -320,6 +320,11 @@ contract.
    seeds draw), so it fails on any new
    technique. Once the change is meant, regenerate the fixture from the
    repository root with `PYTHONPATH=src python -m tests.jailbreak.test_registry`.
+   `tests/jailbreak/test_family_pairs.py` pins, in
+   `tests/fixtures/family_pairs.json`, how many of the technique pairs of
+   each two families the rules refuse; a rule added, dropped or narrowed, or
+   a technique refused where its family's others are not, changes a line:
+   regenerate with `PYTHONPATH=src python -m tests.jailbreak.test_family_pairs`.
    A technique that draws a variant from a pool (it has a `variant_pool`)
    is also pinned by what it writes:
    `tests/jailbreak/test_template_draws.py` runs each registered one on two
