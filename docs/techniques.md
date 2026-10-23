@@ -323,9 +323,12 @@ the text unchanged or reversibly, or a check accepts the result.
 The pool is **pinned**: its 36 names, its two count rounds and the text each
 technique draws for a seed stay the same from release to release, so the
 results of an eval run stay comparable. `tests/fixtures/eval_pool.json` pins
-the names and a digest pins the draws; a change to the pool, or to the text or
-info of one of its techniques, is made on purpose in a review of the eval type
-(a new spec version and new fixtures) and fails the tests until then. This
+the names, `tests/fixtures/eval_pairs.json` the pairs of them the
+[rules](#compatibility-rules) admit, and a digest pins the draws; a change to
+the pool, to those pairs, or to the text or info of one of its techniques, is
+made on purpose in a review of the eval type (a new spec version, where a
+technique is added or retired, and new fixtures) and fails the tests until
+then. This
 page and the others say *pinned*, or *unchanged*, where it matters; *the next
 eval review* is that deliberate change.
 

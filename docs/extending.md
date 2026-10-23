@@ -333,6 +333,12 @@ contract.
    each two families the rules refuse; a rule added, dropped or narrowed, or
    a technique refused where its family's others are not, changes a line:
    regenerate with `PYTHONPATH=src python -m tests.jailbreak.test_family_pairs`.
+   `tests/jailbreak/test_eval_pairs.py` pins, in
+   `tests/fixtures/eval_pairs.json`, which pairs of the eval pool's 36
+   techniques the rules admit: a rule that moves the eval type's draws shows
+   as a diff of that file, regenerated with
+   `PYTHONPATH=src python -m tests.jailbreak.test_eval_pairs` in an eval
+   review.
    A technique that draws a variant from a pool (it has a `variant_pool`)
    is also pinned by what it writes:
    `tests/jailbreak/test_template_draws.py` runs each registered one on two
