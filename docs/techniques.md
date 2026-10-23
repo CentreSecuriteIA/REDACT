@@ -595,8 +595,11 @@ wrappers. The family is attack-only, and the eval type does not draw it.
   each is a translate, check and retry loop on the `translation` model. On
   a machine-translation model (`translategemma-27b`, the default) the text
   goes paragraph by paragraph; each piece is checked for its language
-  (GlotLID) and length (against the language's median ratio, measured
-  with TranslateGemma on FLORES-200), then translated back and judged by
+  (GlotLID; an undetermined `und_*` label is no verdict) and length
+  (against the language's median ratio, measured with TranslateGemma on
+  FLORES-200; not for a piece under 20 characters, which a label or a
+  digit makes longer than a sentence's ratio), then translated back and
+  judged by
   the generation
   model ([stages/jailbreaks.md](stages/jailbreaks.md#models)). A fresh plan
   never follows a translation with a step that marks words or changes the

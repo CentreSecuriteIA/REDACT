@@ -137,6 +137,15 @@ MAX_PIECE_CHARS = 1200
 #: A translation's length ratio, over its language's median, must lie within.
 LENGTH_RATIO_BAND = (0.5, 2.0)
 
+#: A piece shorter than this, in characters, is not held to the band: the
+#: medians are those of sentences, and a label, a digit or a code span keeps
+#: its characters in any language (``Q:`` is 2.9 times as long in Chinese).
+MIN_BAND_CHARS = 20
+
+#: The start of the GlotLID labels that say the language is undetermined
+#: (``und_Bali``): no verdict, as without the detector.
+UNDETERMINED = "und_"
+
 #: The judge's reply cap: a verdict and a sentence.
 JUDGE_MAX_TOKENS = 128
 
@@ -213,17 +222,22 @@ def check_translation(translation: str, source: str, slug: str) -> str | None:
     is rejected, or ``None``.
 
     Empty; a GlotLID label not among the language's accepted ones (skipped
-    without the detector); a length ratio, over the language's median,
-    outside :data:`LENGTH_RATIO_BAND`, which a reply cut at its cap is. A
-    copy of ``source`` passes: the chain records it as a no-op.
+    without the detector, and for an undetermined label, :data:`UNDETERMINED`);
+    a length ratio, over the language's median, outside
+    :data:`LENGTH_RATIO_BAND`, which a reply cut at its cap is (skipped for a
+    ``source`` under :data:`MIN_BAND_CHARS` characters). A copy of ``source``
+    passes: the chain records it as a no-op.
     """
     if not translation.strip():
         return "empty"
     if translation == source:
         return None
     label = langid.detect(translation)
-    if label is not None and label not in ACCEPTED_LABELS[slug]:
+    if (label is not None and not label.startswith(UNDETERMINED)
+            and label not in ACCEPTED_LABELS[slug]):
         return f"language={label}"
+    if len(source) < MIN_BAND_CHARS:
+        return None
     ratio = len(translation) / len(source) / MEDIAN_RATIO[slug]
     low, high = LENGTH_RATIO_BAND
     if not low <= ratio <= high:
