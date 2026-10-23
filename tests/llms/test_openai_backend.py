@@ -230,6 +230,20 @@ class TestOpenAIGenerate:
         assert call_kwargs["max_tokens"] == 500
         assert call_kwargs["temperature"] == 0.5
 
+    def test_a_model_that_rejects_sampling_gets_no_temperature(
+            self, mock_openai_client, events):
+        """claude-opus-5-5 as a checker: the check's 0.15 is not sent, on
+        either path, and the event records none."""
+        backend = OpenAIBackend.from_config(get_model_config("claude-opus-5-5"))
+        backend._client = mock_openai_client
+        backend._async_client = sdk = _async_sdk(_response("Yes", "stop"))
+        messages = [{"role": "user", "content": "hi"}]
+        backend.generate([messages], temperature=0.15)
+        aio.run(backend.agenerate(messages, temperature=0.15))
+        assert "temperature" not in mock_openai_client.chat.completions.create.call_args[1]
+        assert "temperature" not in sdk.chat.completions.create.await_args[1]
+        assert [event["temperature"] for event in events] == [None, None]
+
     def test_bound_extra_body_sent_on_every_call(self, mock_openai_client):
         """extra_body is a fact of the model, bound once, not a call argument."""
         backend = OpenAIBackend(

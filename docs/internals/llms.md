@@ -57,6 +57,12 @@ more **setups**: `api`, `vllm`, `introspect`. Every config validates itself
 when it is built, so the registry holds only coherent entries.
 [configuration.md](../configuration.md#the-model-registry) lists every field.
 
+`supports_temperature` false marks a model that rejects sampling settings
+(Claude Opus 4.7 and later; `claude-opus-5-5`): a temperature a call asks
+for, such as the checks' `CHECK_TEMPERATURE`, is not sent
+(`LLMBackend._resolve` keeps the model's default, which such a model may
+not set), and the provider samples with its own default.
+
 The registry name is the model's stable identity: it keys roles, rate-limit
 windows, telemetry and prices. `APIConfig.api_model_id` is what the provider
 receives when its own id differs (`venice-uncensored` is sent as
@@ -192,7 +198,12 @@ down and its memory freed, and a client built on it raises on its next call.
 - `AnthropicBackend` sends the system prompt as Anthropic's `system`
   parameter, runs one call at a time, and maps a 400 that says the prompt
   is too long (or that it and `max_tokens` exceed the context) to
-  `PromptTooLongError`. It warns on an empty reply.
+  `PromptTooLongError`. A temperature goes in `extra_body`: the SDK's
+  `messages.create()` has no `temperature` keyword from 1.0. API version
+  2026-10-21, which the SDK sends from 2.0, refuses one on every model, so
+  on such an SDK none is sent, with one warning. The reply is its text
+  blocks, joined (a model that thinks by default puts a thinking block
+  first). It warns on an empty reply.
 
 ### TransformersIntrospectionBackend
 

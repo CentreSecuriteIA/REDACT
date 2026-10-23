@@ -682,6 +682,25 @@ class TestModelConfigValidatesIdentityAndComposition:
         with pytest.raises(TypeError, match="default_temperature"):
             ModelConfig(name="m", default_temperature="hot")
 
+    def test_a_model_without_temperature_has_no_default_one(self):
+        with pytest.raises(ValueError, match="supports_temperature is false"):
+            ModelConfig(name="m", supports_temperature=False, default_temperature=0.5)
+        with pytest.raises(TypeError, match="supports_temperature"):
+            ModelConfig(name="m", supports_temperature="no")
+
+    def test_only_the_models_that_reject_sampling_say_so(self):
+        """Claude Opus 4.7 and later refuse any temperature; the checks
+        send 0.15 to every other model."""
+        assert [name for name, cfg in MODEL_REGISTRY.items()
+                if not cfg.supports_temperature] == ["claude-opus-5-5"]
+        name = "_test_no_temperature"
+        try:
+            register_model(name, supports_temperature=False,
+                           vllm=VLLMConfig(hf_model_id="org/m"))
+            assert MODEL_REGISTRY[name].supports_temperature is False
+        finally:
+            MODEL_REGISTRY.pop(name, None)
+
     @pytest.mark.parametrize("tokens", [0, -5])
     def test_rejects_out_of_range_max_tokens(self, tokens):
         with pytest.raises(ValueError, match="default_max_tokens"):

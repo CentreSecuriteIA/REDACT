@@ -207,6 +207,7 @@ class LLMBackend(ABC):
         supports_system_prompt: bool = True,
         rpm: int | None = None,
         max_workers: int = 1,
+        supports_temperature: bool = True,
     ):
         """Bind the model-level settings that stay fixed between calls.
 
@@ -221,11 +222,15 @@ class LLMBackend(ABC):
             rpm: Requests-per-minute budget, or ``None`` for no rate limiting.
             max_workers: Requested concurrency. Clamped to 1 when the class
                 has ``supports_parallel_calls=False``.
+            supports_temperature: False for a model that rejects sampling
+                settings: a temperature a call passes is then dropped, and
+                ``default_temperature`` applies.
         """
         self.model = model
         self.default_max_tokens = default_max_tokens
         self.default_temperature = default_temperature
         self.supports_system_prompt = supports_system_prompt
+        self.supports_temperature = supports_temperature
         self.rpm = rpm
         self.max_workers = (
             max_workers if self.compute_config.supports_parallel_calls else 1
@@ -250,6 +255,7 @@ class LLMBackend(ABC):
             "default_max_tokens": config.default_max_tokens,
             "default_temperature": config.default_temperature,
             "supports_system_prompt": config.supports_system_prompt,
+            "supports_temperature": config.supports_temperature,
         }
 
     @staticmethod
@@ -354,10 +360,16 @@ class LLMBackend(ABC):
     def _resolve(
         self, max_tokens: int | None, temperature: float | None
     ) -> tuple[int, float | None]:
-        """Fill unset overrides from the model's defaults."""
+        """Fill unset overrides from the model's defaults.
+
+        A model without ``supports_temperature`` keeps its default, ``None``
+        for a hosted one: the call's temperature is not sent.
+        """
+        if temperature is None or not self.supports_temperature:
+            temperature = self.default_temperature
         return (
             max_tokens if max_tokens is not None else self.default_max_tokens,
-            temperature if temperature is not None else self.default_temperature,
+            temperature,
         )
 
     @abstractmethod

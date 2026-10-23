@@ -168,6 +168,7 @@
     ],
     "is_uncensored": false,
     "supports_system_prompt": true,
+    "supports_temperature": false,
     "default_max_tokens": 2000,
     "api": {
       "backend_type": "openai",
@@ -179,7 +180,7 @@
       "price_per_1m_input": 4.0,
       "price_per_1m_output": 20.0
     },
-    "notes": "Claude Opus 5.5 through OpenRouter (OpenAI-compatible endpoint). OpenRouter states no rate limit, so rpm=600 is only a ceiling: the limiter needs a number. Prices are Anthropic's list price ($4/$20 per 1M in/out, 2026-10); check them against OpenRouter. Leave default_temperature unset: this model rejects sampling settings. It is not the constitution_gen default while claude-opus-4-6 is listed before it: name it in the recipe, or move this entry above that one."
+    "notes": "Claude Opus 5.5 through OpenRouter (OpenAI-compatible endpoint). OpenRouter states no rate limit, so rpm=600 is only a ceiling: the limiter needs a number. Prices are Anthropic's list price ($4/$20 per 1M in/out, 2026-10); check them against OpenRouter. supports_temperature false: the model rejects sampling settings (any temperature, top_p or top_k is a 400), so a call's temperature is not sent, the checks' 0.15 included, and it takes no default_temperature. It is not the constitution_gen default while claude-opus-4-6 is listed before it: name it in the recipe, or move this entry above that one."
   },
   "humanizer-12b": {
     "backend_type": "vllm",

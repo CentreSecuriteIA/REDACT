@@ -365,6 +365,11 @@ class ModelConfig:
         default_max_tokens: Used when a caller passes no ``max_tokens``.
         default_temperature: Used when a caller passes no temperature.
             ``None`` leaves it to the backend or provider.
+        supports_temperature: False for a model that rejects sampling
+            settings (Claude Opus 4.7 and later): a temperature a call asks
+            for, such as the checks' ``CHECK_TEMPERATURE``, is then not
+            sent, and the provider's default sampling applies. Such a model
+            takes no ``default_temperature``.
         backend_type: The default setup: "api", "vllm" or "introspect".
             ``None`` means the only setup present. The API provider is named
             by ``api.backend_type``, not here.
@@ -379,6 +384,7 @@ class ModelConfig:
     supports_system_prompt: bool = True
     default_max_tokens: int = 2000
     default_temperature: float | None = None
+    supports_temperature: bool = True
     backend_type: str | None = None
 
     api: APIConfig | None = None
@@ -413,6 +419,12 @@ class ModelConfig:
                 f"{self.name!r}: default_temperature must be within 0.0-2.0, "
                 f"got {self.default_temperature!r}",
             )
+        _check_bool(f"{self.name!r}: supports_temperature", self.supports_temperature)
+        _require(
+            self.supports_temperature or self.default_temperature is None,
+            f"{self.name!r}: default_temperature is set, but supports_temperature "
+            f"is false: a model that takes no temperature has no default one.",
+        )
 
         for field_name, value, cls in (
             ("api", self.api, APIConfig),
@@ -576,6 +588,7 @@ def register_model(
     api: APIConfig | None = None,
     vllm: VLLMConfig | None = None,
     introspect: IntrospectConfig | None = None,
+    supports_temperature: bool = True,
 ) -> None:
     """Add or replace a model in the registry for this process.
 
@@ -607,6 +620,8 @@ def register_model(
         api: Hosted-endpoint setup.
         vllm: vLLM setup.
         introspect: Internals-capture setup.
+        supports_temperature: False for a model that rejects sampling
+            settings: a call's temperature is then not sent.
 
     Raises:
         TypeError: A field has the wrong type.
@@ -622,6 +637,7 @@ def register_model(
         supports_system_prompt=supports_system_prompt,
         default_max_tokens=default_max_tokens,
         default_temperature=default_temperature,
+        supports_temperature=supports_temperature,
         backend_type=backend_type,
         api=api,
         vllm=vllm,
