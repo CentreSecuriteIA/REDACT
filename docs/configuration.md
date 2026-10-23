@@ -1450,7 +1450,16 @@ sending the encodings to the other partners they could still take); none
 does now; a plan of 300 inputs deals 279 of its 300 round-2 units another
 pair than after the first change alone.
 
-The two changes together close most pairings the ten heavy full-text
+The third change is for training only: `sensitive_words` and `tokenbreak`
+refuse each other (both entries of the spec), as `wording` and `word_art`
+refuse them and each other. Each has the model mark the text's harmful words,
+so a second marking call would read a text the first changed. Neither is in
+the eval pool, which a test asserts, so the eval type's pairs and draws do not
+move with it. In 3,000 units of the default attack kind in three groups, 50
+to 72 units (seeds 42 to 46) drew both before the rule, and none does since;
+39 technique pairs are refused that were not.
+
+The first two changes together close most pairings the ten heavy full-text
 encodings (complexity 3, which fits only a unit whose earlier picks leave 3
 points) were dealt with, so the default attack kind draws them rarely: 3 to
 5 draws of the ten in 3,000 units in three groups (seeds 42 to 46), against

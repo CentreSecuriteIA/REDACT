@@ -83,6 +83,14 @@ def test_the_eval_draws_no_translation_beside_an_encoding(translation, encoding)
     assert "|".join(sorted((translation, encoding))) not in snapshot()
 
 
+def test_the_eval_pool_has_no_word_marking_step():
+    """So a rule between the families that have the model mark words
+    (``sensitive_words``, ``tokenbreak``, ``word_art``, ``wording``) is a
+    training rule: the eval pairs and draws do not move with it."""
+    marking = {"sensitive_words", "tokenbreak", "word_art", "wording"}
+    assert [fn.__name__ for fn in _eval_pool() if marking & set(fn.families)] == []
+
+
 @pytest.mark.parametrize("encoding", [
     "to_ascii_ordinal", "to_base64", "to_braille", "to_morse", "to_unicode_escape"])
 def test_the_eval_draws_no_ascii_art_beside_a_heavy_encoding(encoding):

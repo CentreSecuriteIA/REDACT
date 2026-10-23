@@ -640,6 +640,34 @@ def test_wording_refuses_the_other_word_level_steps_and_ascii_art_either_way(
     assert not _joins(other, wording)
 
 
+_SENSITIVE_WORDS = [
+    "to_sensitive_words_split", "to_sensitive_words_variables",
+    "to_synonym_substitution", "to_sensitive_words_encode_rot13",
+    "to_sensitive_words_encode_base64"]
+_TOKENBREAKS = [
+    "to_tokenbreak_prepend", "to_tokenbreak_split", "to_tokenbreak_delimiter"]
+
+
+@pytest.mark.parametrize("sensitive", _SENSITIVE_WORDS)
+@pytest.mark.parametrize("tokenbreak", _TOKENBREAKS)
+def test_sensitive_words_and_tokenbreak_refuse_each_other_either_way(
+        sensitive, tokenbreak):
+    """Each has the model mark the text's words, so a second marking call would
+    read a text the first changed: one marking step per text, as for wording
+    and word art."""
+    assert not _joins(sensitive, tokenbreak)
+    assert not _joins(tokenbreak, sensitive)
+
+
+@pytest.mark.parametrize("marking", _SENSITIVE_WORDS + _TOKENBREAKS)
+@pytest.mark.parametrize("other", [
+    "to_rewrite_with_typos_low", "to_lowercase", "to_adversarial_suffix_punctuation",
+    "to_json", "to_csv_row", "to_summarize", "to_psychopath_persona",
+    "to_fictional_world"])
+def test_a_word_marking_step_keeps_the_families_it_has_no_rule_against(marking, other):
+    assert _joins(marking, other) and _joins(other, marking)
+
+
 @pytest.mark.parametrize("wording", ["to_pseudonym_substitution", "to_word_game"])
 @pytest.mark.parametrize("other", [
     "to_fsh_random_short", "to_fsh_selected_long", "to_dap_random_long",
@@ -769,6 +797,42 @@ def test_a_combination_holds_one_technique_of_the_rewrite_layer(first, second):
     "to_psychopath_persona", "to_fsh_random_short", "to_summarize"])
 def test_a_rewrite_joins_the_other_layers_it_has_no_rule_against(rewrite, other):
     assert _joins(rewrite, other) and _joins(other, rewrite)
+
+
+@pytest.mark.parametrize(("first", "second"), [
+    ("translation", "encode"),
+    ("sensitive_words", "tokenbreak"),
+], ids=["translation-encode", "sensitive_words-tokenbreak"])
+def test_no_planned_unit_holds_two_families_the_spec_keeps_apart(first, second):
+    """The default attacks, dealt, in a budget round and in a count round of
+    two: a unit never holds a technique of each. A technique counts under all
+    its families (a sensitive-word encoding is also ``encode``)."""
+    from tests.jailbreak import simulate
+
+    def units(rounds):
+        rows, pool = simulate.plan_kind(
+            {"rounds": rounds} if rounds else {}, simulate.inputs(900, groups=3))
+        by = {fn.__name__: fn for fn in pool}
+        return [{family for name in row["combination"] for family in by[name].families}
+                for row in rows]
+
+    for rounds in (None, [{"exact_techniques": 2}]):
+        held = units(rounds)
+        assert any(first in families for families in held)
+        assert [families for families in held if {first, second} <= families] == []
+
+
+def test_the_heavy_full_text_encodings_never_meet_ascii_art_in_a_planned_unit():
+    """The rule is on each encoding's own entry, not its family's."""
+    from tests.jailbreak import simulate
+
+    rows, pool = simulate.plan_kind(
+        {"rounds": [{"exact_techniques": 2}]}, simulate.inputs(2000, groups=3))
+    assert {"to_ascii_art"} <= {name for row in rows for name in row["combination"]}
+    held = [row["combination"] for row in rows
+            if "to_ascii_art" in row["combination"]
+            and set(_HEAVY_FULL_TEXT) & set(row["combination"])]
+    assert held == []
 
 
 def test_every_pair_is_refused_or_admitted_both_ways():

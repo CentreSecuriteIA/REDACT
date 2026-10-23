@@ -269,7 +269,10 @@ technique is picked first. A technique may not join a combination when:
   is long); `wording` with `sensitive_words`, `tokenbreak`, `word_art`,
   `translation` and `ascii_art` (the other steps that put the marked words in
   other terms, a translation the marking call fails on, and a font on a text
-  the key or the puzzles lengthen); `persona`, `cognitive`, `persona_template` and `persuasion` with
+  the key or the puzzles lengthen); `sensitive_words` with `tokenbreak` (each
+  has the model mark the text's words, so a second marking call would read a
+  text the first changed: one marking step per text, as for `word_art` and
+  `wording`; the eval pool holds neither); `persona`, `cognitive`, `persona_template` and `persuasion` with
   `impersonation`, so a prompt never carries two identities; `persuasion`
   also with `ascii_art`, `tense_rewrite` with `temporal` (the request would be
   set in time twice) and `model_distractors` with `ascii_art`,
@@ -590,7 +593,8 @@ wrappers. The family is attack-only, and the eval type does not draw it.
 - `sensitive_words` and `tokenbreak` first ask the model for the harmful
   words of the prompt (prompt `jailbreak/extract_harmful`), one call per
   technique. The encoding, splitting or substitution then applies to those
-  words. A reply that is not a list of at most ten of the prompt's words
+  words; a combination holds at most one of the two. A reply that is not a
+  list of at most ten of the prompt's words
   rejects the result (`DISCARDED; reason=malformed word list`). A word is a
   letter, then letters, digits, apostrophes, hyphens, combining marks and
   zero-width format characters (none first), so a word in Bengali, Nepali,

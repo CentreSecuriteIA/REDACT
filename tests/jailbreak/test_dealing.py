@@ -465,8 +465,12 @@ _BUDGETS = [
 # translation into another script, is gone. The rule keeping ASCII art from
 # the nine heavy full-text encodings that did not refuse it (braille did) moved
 # it once more: a draw that held both takes another technique (4 of the 240
-# dealt units, 1 of the 200 undealt draws).
-_PINNED_DRAWS = "d60e0bc42a212cd0589a39c217ce8ee79bb96f86728ca3f02ec873dad2972171"
+# dealt units, 1 of the 200 undealt draws). The rule keeping sensitive_words and
+# tokenbreak apart, one model marking step per text, moved it again: a draw that
+# held both takes another technique, and through the unit's rng and its group's
+# counts the rest of its draw (159 of the 240 dealt units, 30 of the 200
+# undealt draws).
+_PINNED_DRAWS = "e196040a3debe8e75f4389ae534035c7834f2148d449943afe9e331a64aad727"
 
 
 def test_the_budget_draws_are_the_pinned_ones():
@@ -641,6 +645,8 @@ def test_the_request_obfuscation_takes_the_family_weights(monkeypatch):
 # escapes, ASCII ordinals and morse beside it; 291 of 630 remain; braille had
 # the rule), 485 of the 3,000 round-2 units of that plan holding one after
 # the first change, and 279 of the 300 round-2 units are dealt another pair.
+# The rule keeping sensitive_words and tokenbreak apart did not move it: the
+# pool holds neither.
 _PINNED_EVAL_DRAWS = "2f6f8076ebc1470d24883d9f4ccfdc6557ba58f58a0d5791f5880c20240782f8"
 
 

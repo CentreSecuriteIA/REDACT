@@ -155,6 +155,7 @@
   "payload_split|word_art": [4, 4],
   "persona|persona_template": [396, 396],
   "persuasion|tense_rewrite": [48, 48],
+  "sensitive_words|tokenbreak": [96, 96],
   "sensitive_words|translation": [736, 736],
   "sensitive_words|word_art": [32, 32],
   "sensitive_words|wording": [64, 64],
