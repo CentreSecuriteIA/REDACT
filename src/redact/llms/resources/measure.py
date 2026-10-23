@@ -40,6 +40,9 @@ _env_lock = threading.Lock()
 # CUDA_VISIBLE_DEVICES as it was before visible_only() narrowed it, as a
 # one-tuple; None when it is not narrowed.
 _outer: tuple[str | None] | None = None
+# Set when bus_order() found CUDA started in this process before it set
+# CUDA_DEVICE_ORDER: CUDA reads the variable once, so this stays true.
+_late_order = False
 
 
 def _torch():
@@ -129,18 +132,31 @@ def visible_only(ids: list[str]):
                 _outer = None
 
 
-def bus_order() -> None:
+def bus_order() -> bool:
     """Make CUDA count the cards in PCI bus order, as ``nvidia-smi`` does.
 
     CUDA's own order puts the fastest card first, so on a machine of mixed
     cards an index the plan takes from ``nvidia-smi`` could name another card
     in a ``device_map`` or in ``CUDA_VISIBLE_DEVICES``. Sets
     ``CUDA_DEVICE_ORDER`` unless it is set, for this process and the engine
-    processes it starts. CUDA reads it once, when it starts: a warning says
-    so when it has started in this process already.
+    processes it starts.
+
+    CUDA reads the variable once, when it starts. An engine process starts
+    after this call and counts as the plan does, whatever this process did;
+    only a model loaded in this process (transformers) keeps the order its
+    CUDA started with. So this logs nothing, and the caller that places such
+    a model warns (:mod:`redact.residency.placement`).
+
+    Returns:
+        Whether CUDA had started in this process when this function set the
+        variable, at this call or an earlier one: this process then counts
+        the cards fastest first. A variable someone else set is taken as
+        theirs. A start that only ``torch.cuda.is_available()`` made is not
+        seen: torch's ``is_initialized()`` does not report it.
     """
+    global _late_order
     if "CUDA_DEVICE_ORDER" in os.environ:
-        return
+        return _late_order
     os.environ["CUDA_DEVICE_ORDER"] = "PCI_BUS_ID"
     # Looked up, not imported: importing torch here would cost an API-only run.
     torch = sys.modules.get("torch")
@@ -148,13 +164,8 @@ def bus_order() -> None:
         started = torch is not None and torch.cuda.is_initialized()
     except Exception:  # noqa: BLE001 — a broken CUDA install must not raise here
         started = False
-    if started:
-        logger.warning(
-            "[residency] CUDA started in this process before CUDA_DEVICE_ORDER "
-            "was set, so it counts the cards fastest first, not as nvidia-smi "
-            "and the plan do: a transformers model's device_map may name another "
-            "card than the plan's. Set CUDA_DEVICE_ORDER=PCI_BUS_ID before CUDA "
-            "starts.")
+    _late_order = _late_order or started
+    return _late_order
 
 
 def detect_gpus(visible: bool = False) -> tuple[str | None, int]:
@@ -183,7 +194,8 @@ def detect_gpus(visible: bool = False) -> tuple[str | None, int]:
             capture_output=True, text=True, timeout=10, check=True,
         ).stdout
     except (subprocess.SubprocessError, OSError) as exc:
-        logger.debug("nvidia-smi failed (%s: %s); reporting no GPUs", type(exc).__name__, exc)
+        logger.debug("nvidia-smi failed (%s: %s); reporting no GPUs",
+                     type(exc).__name__, exc)
         return None, 0
     names = [ln.strip() for ln in out.splitlines() if ln.strip()]
     ids = visible_gpu_ids() if visible else None

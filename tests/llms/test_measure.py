@@ -11,13 +11,16 @@ from redact.llms.resources import measure
 
 GIB = 1024 ** 3
 
-# The suite's runs see no card (conftest); these tests read the real query.
+# The suite's runs see no card and no CUDA (conftest); these tests read the
+# real query and the real torch probe, against fakes of both.
 _gpu_cards = measure.gpu_cards
+_torch = measure._torch
 
 
 @pytest.fixture(autouse=True)
 def _real_card_query(monkeypatch):
     monkeypatch.setattr(measure, "gpu_cards", _gpu_cards)
+    monkeypatch.setattr(measure, "_torch", _torch)
 
 
 class _FakeCuda:

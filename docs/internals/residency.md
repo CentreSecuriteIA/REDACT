@@ -55,8 +55,10 @@ local (`vllm` or `introspect`).
 - **KV cache** (vLLM only): always estimated, at `max_model_len`, else at
   10,000 tokens capped at the checkpoint's own maximum. Summed layer by
   layer when the attention shape varies by layer (transformers'
-  `per_layer_config`, or `layer_types` with `num_global_key_value_heads` and
-  `global_head_dim`, as Gemma 4's config has), each layer at the full
+  `per_layer_config`, or `layer_types` with `num_global_key_value_heads` or
+  `global_head_dim`; Gemma 4's `config.json` names no
+  `num_global_key_value_heads`, so read that way its full-attention layers
+  count every KV head, which errs high), each layer at the full
   context, as vLLM 0.31 allocates it. Every config field is read through
   `estimate._field`, which reads an attribute that raises (transformers
   5.17's `AmbiguousGlobalPerLayerAttributeError`, a `RuntimeError`) as unset;
@@ -85,9 +87,14 @@ another machine.
 
 The plan numbers cards as `nvidia-smi` does, in PCI bus order, and CUDA's
 own order puts the fastest card first. So a plan or a load sets
-`CUDA_DEVICE_ORDER=PCI_BUS_ID` unless it is set, warning when CUDA has
-started in this process already, and a load hands an engine its cards by
-UUID.
+`CUDA_DEVICE_ORDER=PCI_BUS_ID` unless it is set, and a load hands an engine
+its cards by UUID. CUDA reads the variable once, when it starts: an engine
+process starts after it is set and counts as the plan does, but a process
+whose CUDA started before keeps the fastest-first order. Only a model loaded
+in that process sees it, so a plan warns when CUDA started first and it
+places a transformers model off the CPU on two or more visible cards, or on
+one that `CUDA_VISIBLE_DEVICES` names by index on a machine of several
+(`measure.bus_order` says whether the setting came too late).
 
 A vLLM build narrows `CUDA_VISIBLE_DEVICES` for the whole process while it
 runs (`measure.visible_only`). Meanwhile `visible_gpu_ids()` reads the value
@@ -108,7 +115,9 @@ pinned)` places the models in the order given:
 - a transformers model where its `device_map` puts it: one card for
   `cuda:N`, none for `cpu`, the cards' combined room for `auto`,
   `balanced`, `balanced_low_0` or `sequential`;
-- an engine already loaded (`pinned`) first, on its own cards.
+- an engine already loaded (`pinned`) first, on its own cards. Only a
+  caller of `plan_residency` passes `pinned`; a run does not yet (see
+  [Limits](#limits)).
 
 A model that does not fit beside those placed starts a new **group**. More
 than one group means the models cannot be resident together.
@@ -172,9 +181,10 @@ memory out again.
 | `as_dict()` | The plan as data, for the trace and the run summary |
 | `explain()` | The plan as text, with each model's derivation, card and grant, the problems, and advice |
 
-`report(plan, stages=...)` logs `explain()` at ERROR when the plan does not
-fit, at WARNING when it has warnings, else at INFO, and records a
-`residency` event.
+`report(plan, verbose=True, stages=...)` logs `explain()` at ERROR when the
+plan does not fit and at WARNING when it has warnings, also with
+`verbose=False` (a `--quiet` run), else at INFO with `verbose` only, and
+records a `residency` event.
 
 ## Phases
 
@@ -235,7 +245,9 @@ its lines to stderr itself, with a `kill -9` line for a pid still alive.
 fails, one copy on the engine's first cards is built instead, once, with a
 WARNING naming the error and `"copies": 1` as the way to make it permanent.
 Not when a process the failed build started outlives SIGKILL, when the
-process is exiting, or when the copies were handed to the engine directly.
+process is exiting, or when the copies were handed to the engine directly
+(`data_parallel_size` in the `vllm_kwargs` of a `VLLMBackend` built by hand:
+a registry entry may not name it).
 The load event carries `planned_copies` and `fallback`.
 
 **The exit.** The exit hook releases every engine, waiting for a load in
@@ -288,4 +300,14 @@ done:
 - the unload search tries every candidate unloaded at once, and with more
   than 8 engines it can miss a run that one unload would fit;
 - a load that hangs is ended only on the way out or by a second signal; no
-  load is timed out mid-run.
+  load is timed out mid-run;
+- an engine loaded before the run (a notebook's) that a stage calls counts,
+  for the plan, only from the first stage that calls it. The stages before
+  it are planned as if its memory were free (the plan warns that it is
+  loaded already). The driver does not release it at the first stage, and
+  at a later one only when a model of the previous stage drops out (it then
+  loads again for the stage that calls it), so a model planned beside it
+  before that may fail to load. Release it before the run
+  (`residency.unload_local()`), or let the run load it. The fix, releasing
+  it on entering every such stage or planning around its cards (`pinned`),
+  is GPU-facing and not yet tried on a GPU.

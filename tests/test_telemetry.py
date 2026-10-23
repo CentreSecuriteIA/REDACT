@@ -466,6 +466,19 @@ class TestCutReplies:
         assert telemetry.summary()["cut"] == {
             "outputs": {"gen": 3, "check": 1}, "jailbreaks": {"gen": 1}}
 
+    def test_a_stage_run_again_warns_again(self, tmp_path, caplog):
+        """A second run in a notebook: its first cut reply warns at once."""
+        gen = MockBackend(model="gen")
+        with caplog.at_level(logging.WARNING, logger="redact"):
+            for _ in range(2):
+                telemetry.install(data_dir=tmp_path)
+                with telemetry.stage("outputs"):
+                    _reply(gen, True)
+                    _reply(gen, True)
+                telemetry.uninstall()
+        assert [r.getMessage() for r in caplog.records
+                if r.name.startswith("redact.llms")] == [first_cut_warning("gen", 64)] * 2
+
     def test_the_call_event_says_the_reply_was_cut(self):
         seen = []
         observe.set_emitter(seen.append)

@@ -8,21 +8,11 @@ Supported formats:
 Also provides sample cleaning (:func:`clean_sample`).
 """
 
-#TODO(driver script): handle rejected replies where the steps are driven.
-# A reply rejected by expected_count/strict comes back as an empty list, which
-# the callers still treat as "the model returned nothing". To move into the
-# driver, together with the retry helpers:
-#   - Retry a rejected reply a bounded number of times before giving up.
-#     Done for constitution inputs and the benign Q&A (llm_pipeline.extracted);
-#     the call sites below still treat a rejected reply as an empty one.
-#   - Count rejections and report them: a run that lost entries still logs
-#     "100% accepted", and skipped_entries mixes empty, rejected and duplicate.
-#   - prompts/format_instructions/numbered: the example shows two items even
-#     when one sample is requested.
-#   - Add pipeline-level tests for a wrong-count reply at each call site.
-#TODO: Future extension: end token. An end marker in the format instructions
-# would let strict mode reject trailing commentary and replies cut off at
-# max_tokens; neither can be told apart from sample text today.
+# A reply rejected by expected_count or strict comes back as an empty list;
+# both callers ask again (the inputs stage's attempts, llm_pipeline.extracted
+# for the benign pairs). Open: prompts/format_instructions/numbered shows a
+# two-item example also when one sample is asked for, as the inputs stage
+# asks in every call.
 
 import logging
 import re
@@ -39,7 +29,8 @@ logger = logging.getLogger(__name__)
 EXTRACTION_STYLES: frozenset[str] = frozenset({"numbered", "structured_qa"})
 
 
-#NOTE: Checks num_samples in prompts.get_format_instruction and expected_count in both extractors; name is the one the error reports.
+#NOTE: Checks num_samples in prompts.get_format_instruction and expected_count
+# in both extractors; name is the one the error reports.
 def _sample_count(value: object, name: str = "num_samples") -> int:
     """Validate a sample count: an int >= 1, or a string of one.
 
@@ -69,7 +60,8 @@ _CHATML_TOKEN = re.compile(
     r"<?\|im_(?:start\|?>?(?:(?:system|user|assistant)\b)?|end\|?>?)"
 )
 
-#NOTE: The format instruction asks for "1. text"; the other separators and the bold forms are accepted variants.
+#NOTE: The format instruction asks for "1. text"; the other separators and the
+# bold forms are accepted variants.
 # Groups: indent, opening "**", number, separator, closing "**". The bold
 # markers cover "**1.** text" and "**1. Title** text". The number is bounded
 # ASCII so int() cannot fail on it. The separator touches its number and is

@@ -99,7 +99,11 @@ def _build(folder: Path, source: Path, config: bytes) -> None:
         raise FileNotFoundError(
             f"{source} holds none of the tokenizer files {list(TOKENIZER_FILES)}, "
             f"so the engine has no tokenizer to load beside its replaced config.")
-    # A folder a link of which no longer resolves.
+    # A folder a link of which no longer resolves; checked again, since
+    # another process may have renamed a whole one into place meanwhile, and
+    # an engine of its may be reading it.
+    if _complete(folder):
+        return
     shutil.rmtree(folder, ignore_errors=True)
     staging = folder.with_name(f"{folder.name}.tmp-{os.getpid()}")
     shutil.rmtree(staging, ignore_errors=True)

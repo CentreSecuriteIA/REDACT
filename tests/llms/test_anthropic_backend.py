@@ -195,14 +195,69 @@ class TestAnthropicGenerate:
         )
         call_kwargs = anthropic_backend._client.messages.create.call_args[1]
         assert call_kwargs["max_tokens"] == 1000
-        assert call_kwargs["temperature"] == 0.3
+        # The SDK's create() has no temperature keyword from 1.0.
+        assert "temperature" not in call_kwargs
+        assert call_kwargs["extra_body"] == {"temperature": 0.3}
+
+    def test_a_temperature_joins_the_callers_extra_body(self, anthropic_backend):
+        anthropic_backend.generate(
+            [[{"role": "user", "content": "hi"}]], temperature=0.3,
+            extra_body={"metadata": {"user_id": "u"}})
+        call_kwargs = anthropic_backend._client.messages.create.call_args[1]
+        assert call_kwargs["extra_body"] == {
+            "metadata": {"user_id": "u"}, "temperature": 0.3}
 
     def test_omits_temperature_when_not_given(self, anthropic_backend):
         anthropic_backend.generate(
             [[{"role": "user", "content": "hi"}]],
         )
         call_kwargs = anthropic_backend._client.messages.create.call_args[1]
-        assert "temperature" not in call_kwargs
+        assert "temperature" not in call_kwargs and "extra_body" not in call_kwargs
+
+    def test_a_model_without_temperature_sends_none(self, mock_anthropic_module):
+        """Claude Opus 4.7 and later refuse any sampling setting."""
+        from redact.llms.backends import AnthropicBackend
+
+        AnthropicBackend.clear_cache()
+        backend = AnthropicBackend("claude-new", api_key="k", supports_temperature=False)
+        backend.generate([[{"role": "user", "content": "hi"}]], temperature=0.15)
+        call_kwargs = backend._client.messages.create.call_args[1]
+        assert "temperature" not in call_kwargs and "extra_body" not in call_kwargs
+        AnthropicBackend.clear_cache()
+
+    def test_api_version_2026_10_21_takes_no_temperature(
+            self, anthropic_backend, monkeypatch, caplog):
+        """The SDK sends it from 2.0, and it refuses a temperature on every
+        model: none is sent, with one warning."""
+        import redact.llms.backends.anthropic as anthropic_module
+
+        monkeypatch.setattr(anthropic_module, "_sampling_warned", False)
+        anthropic_backend._client.default_headers = {"anthropic-version": "2026-10-21"}
+        with caplog.at_level(logging.WARNING, logger="redact.llms.backends.anthropic"):
+            for _ in range(2):
+                anthropic_backend.generate(
+                    [[{"role": "user", "content": "hi"}]], temperature=0.15)
+        call_kwargs = anthropic_backend._client.messages.create.call_args[1]
+        assert "temperature" not in call_kwargs and "extra_body" not in call_kwargs
+        (line,) = [r.getMessage() for r in caplog.records]
+        assert line.startswith("claude-opus-4-6: the anthropic SDK sends API "
+                               "version 2026-10-21 or later")
+
+    def test_api_version_2023_06_01_takes_one(self, anthropic_backend):
+        anthropic_backend._client.default_headers = {"anthropic-version": "2023-06-01"}
+        anthropic_backend.generate([[{"role": "user", "content": "hi"}]], temperature=0.15)
+        call_kwargs = anthropic_backend._client.messages.create.call_args[1]
+        assert call_kwargs["extra_body"] == {"temperature": 0.15}
+
+    def test_the_reply_is_its_text_blocks(self, anthropic_backend):
+        """A model that thinks by default puts a thinking block, which has
+        no text, before its answer."""
+        thinking = MagicMock(spec=["type", "thinking"], type="thinking", thinking="")
+        anthropic_backend._client.messages.create.return_value = MagicMock(
+            content=[thinking, MagicMock(text="the "), MagicMock(text="answer")],
+            stop_reason="end_turn", usage=None)
+        assert anthropic_backend.generate(
+            [[{"role": "user", "content": "hi"}]]) == ["the answer"]
 
     def test_strips_extra_message_keys(self, anthropic_backend):
         anthropic_backend.generate(

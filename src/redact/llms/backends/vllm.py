@@ -18,6 +18,7 @@ import itertools
 import logging
 import multiprocessing
 import os
+import re
 import threading
 import time
 from collections.abc import Collection, Mapping
@@ -35,6 +36,10 @@ if TYPE_CHECKING:
     from ..model_config import ModelConfig
 
 logger = logging.getLogger(__name__)
+
+#: The oldest vLLM this backend runs on: its V1 engine (``AsyncLLM``) and
+#: the APIs used with it. pyproject's floor; requirements.lock pins it.
+MIN_VLLM = "0.31"
 
 # Backend defaults for sampling values that have no ModelConfig field.
 # Override them per model with VLLMConfig.sampling.
@@ -134,9 +139,12 @@ def _physical_ids(devices: tuple[int, ...]) -> list[str]:
     planned index is a position in it. Each card is named by the UUID
     ``nvidia-smi`` gives it, so the engine gets the card the plan sized
     whatever order CUDA counts in; without one, as the variable names it,
-    or by its index. ``[]`` when the plan names a card past the visible
-    ones: such a plan does not fit, and the engine is left the cards it can
-    see already, where vLLM fails for want of the rest.
+    or by its index. ``[]`` when the plan names a card past the entries of
+    a variable that is set: such a plan does not fit, and the engine is left
+    the cards it can see already, where vLLM fails for want of the rest.
+    With the variable unset, a card past those ``nvidia-smi`` lists is
+    named by its index, which names no card for CUDA either: the build
+    fails, and a build with copies falls back to one.
     """
     visible = measure.visible_gpu_ids()
     last = max(devices, default=-1)
@@ -256,11 +264,65 @@ def _engine_key(hf_model_id: str, quantization: str | None, vllm_kwargs: dict) -
     return (hf_model_id, quantization, repr(sorted(vllm_kwargs.items())))
 
 
+def _version(text: str) -> tuple[int, ...] | None:
+    """The leading ``major.minor`` of a version string, or ``None``."""
+    found = re.match(r"(\d+)\.(\d+)", text)
+    return tuple(map(int, found.groups())) if found else None
+
+
+def _import_vllm() -> tuple:
+    """Import what an engine build needs from vLLM.
+
+    vLLM is heavy and optional, so it is imported at the first load. An
+    installed vLLM older than :data:`MIN_VLLM` is named: in the error when
+    the import fails, else in a warning.
+
+    Returns:
+        ``(AsyncEngineArgs, UsageContext, AsyncLLM)``.
+
+    Raises:
+        ImportError: vLLM is not installed, or does not import.
+    """
+    from importlib.metadata import PackageNotFoundError, version
+
+    try:
+        installed = version("vllm")
+    except PackageNotFoundError:
+        installed = None
+    found = _version(installed) if installed else None
+    old = found is not None and found < _version(MIN_VLLM)
+    try:
+        from vllm.engine.arg_utils import AsyncEngineArgs
+        from vllm.usage.usage_lib import UsageContext
+        from vllm.v1.engine.async_llm import AsyncLLM
+    except ImportError as exc:
+        if installed is None:
+            raise ImportError(
+                "The 'vllm' package is required for VLLMBackend. "
+                "Install it with: pip install 'redact[vllm]'") from exc
+        if old:
+            raise ImportError(
+                f"vLLM {installed} is installed, but VLLMBackend needs vLLM "
+                f"{MIN_VLLM} or later, whose V1 engine (AsyncLLM) it runs; the "
+                f"import failed ({exc}). Upgrade it with: "
+                f"pip install -U 'vllm>={MIN_VLLM}'") from exc
+        raise ImportError(
+            f"vLLM {installed} is installed but failed to import ({exc}).") from exc
+    if old:
+        logger.warning(
+            "[vllm] vLLM %s is installed; VLLMBackend needs %s or later, and "
+            "an older one may fail at the load or at the first request. "
+            "Upgrade it with: pip install -U 'vllm>=%s'",
+            installed, MIN_VLLM, MIN_VLLM)
+    return AsyncEngineArgs, UsageContext, AsyncLLM
+
+
 def _prepare_environment() -> None:
     """Set up the process environment before vLLM is constructed."""
     # CUDA fails in a forked child when the parent already initialised it.
     os.environ.setdefault("VLLM_WORKER_MULTIPROC_METHOD", "spawn")
-    # The engine's processes count the cards as the plan does.
+    # The engine's processes, started after this, count the cards as the
+    # plan does, whenever CUDA started in this process.
     measure.bus_order()
 
     # WSL2 workaround: vLLM's V2 model runner fails every load there with
@@ -337,16 +399,7 @@ def _engine(hf_model_id: str, quantization: str | None, vllm_kwargs: dict):
                 f"The load of {hf_model_id} was not started: the process is exiting.")
 
         _prepare_environment()
-        try:
-            # lazy: vllm is heavy and optional
-            from vllm.engine.arg_utils import AsyncEngineArgs
-            from vllm.usage.usage_lib import UsageContext
-            from vllm.v1.engine.async_llm import AsyncLLM
-        except ImportError:
-            raise ImportError(
-                "The 'vllm' package is required for VLLMBackend. "
-                "Install it with: pip install redact[vllm]"
-            )
+        AsyncEngineArgs, UsageContext, AsyncLLM = _import_vllm()
 
         if not _exit_hook_registered:
             # Before the load, under the lock: an exit during a load then waits
@@ -361,7 +414,8 @@ def _engine(hf_model_id: str, quantization: str | None, vllm_kwargs: dict):
             atexit.register(_exit)
             _exit_hook_registered = True
 
-        # No download_dir is passed: the hub cache is $HF_HOME/hub, so HF_HOME would download again.
+        # No download_dir is passed: the hub cache is $HF_HOME/hub, so
+        # HF_HOME would download again.
         kwargs = dict(vllm_kwargs)
         # The plan's share, else the planner's whole-card one: vLLM's own
         # default is more than the plan assumes.

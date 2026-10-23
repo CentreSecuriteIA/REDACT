@@ -45,7 +45,7 @@ It must not:
 | `wrappers.py` | `RateLimiter`, `shared_limiter`, `BatchCaller` |
 | `router.py` | `generate_sample`, `batch_generate_samples`, `assert_single_sample_per_call` |
 | `aio.py` | The one event loop that runs every async model call |
-| `observe.py` | The telemetry hook: `record`, `set_emitter`, `set_stage`, `current_stage` |
+| `observe.py` | The telemetry hook: `record`, `set_emitter`, `set_stage`, `current_stage`, `first_in_stage` (a key new since the stage label was last set, for a warning once per stage run) |
 | `progress.py` | `ProgressReporter`: throttled progress lines |
 | `prompting/` | `prompts.py` (loading, overlay, rendering), `extraction.py` (parsing replies), `scaffold.py` (writing an editable prompt tree, or a setup folder) |
 | `resources/` | `estimate.py` (a model's GPU need from its HF config), `measure.py` (`nvidia-smi` probes) |
@@ -56,6 +56,12 @@ A `ModelConfig` is a model's identity (name, roles, defaults) plus one or
 more **setups**: `api`, `vllm`, `introspect`. Every config validates itself
 when it is built, so the registry holds only coherent entries.
 [configuration.md](../configuration.md#the-model-registry) lists every field.
+
+`supports_temperature` false marks a model that rejects sampling settings
+(Claude Opus 4.7 and later; `claude-opus-5-5`): a temperature a call asks
+for, such as the checks' `CHECK_TEMPERATURE`, is not sent
+(`LLMBackend._resolve` keeps the model's default, which such a model may
+not set), and the provider samples with its own default.
 
 The registry name is the model's stable identity: it keys roles, rate-limit
 windows, telemetry and prices. `APIConfig.api_model_id` is what the provider
@@ -112,6 +118,11 @@ down and its memory freed, and a client built on it raises on its next call.
   engine request, awaited on the shared loop (`aio.py`); the engine batches
   whatever is in flight. `generate` sends one request per item and waits for
   all.
+- It needs vLLM 0.31 or later (`MIN_VLLM`, the `vllm` extra's floor, the
+  version `requirements.lock` pins): the V1 engine and the APIs used with
+  it. vLLM is imported at the first load (`_import_vllm`). An installed
+  vLLM that fails to import is named in the error, which says when it is
+  too old; an older one that imports is warned about.
 - Prompts go through the chat template of the engine's tokenizer, or the
   entry's `chat_template` (a Jinja string, passed to `apply_chat_template`)
   for a checkpoint that ships none, so any checkpoint whose tokenizer ships
@@ -155,6 +166,11 @@ down and its memory freed, and a client built on it raises on its next call.
   and the config and which the planner computes without fetching anything.
 - Defaults: `temperature` 0.7 when the model sets none; `top_p` 0.85 unless
   `VLLMConfig.sampling` says otherwise.
+- The environment, before an engine loads (`_prepare_environment`), each
+  only when unset: `VLLM_WORKER_MULTIPROC_METHOD=spawn` (CUDA fails in a
+  forked child of a process that started it), `CUDA_DEVICE_ORDER=PCI_BUS_ID`
+  (the engine's processes count the cards as the plan does), and on WSL2
+  `VLLM_USE_V2_MODEL_RUNNER=0` (vLLM's V2 runner fails every load there).
 - Stats: an engine logs none (`disable_log_stats` true). With
   `"disable_log_stats": false` in `vllm_kwargs`, a task on the shared loop
   calls the engine's `do_log_stats()` every 10 s, so vLLM prints its stats
@@ -187,7 +203,12 @@ down and its memory freed, and a client built on it raises on its next call.
 - `AnthropicBackend` sends the system prompt as Anthropic's `system`
   parameter, runs one call at a time, and maps a 400 that says the prompt
   is too long (or that it and `max_tokens` exceed the context) to
-  `PromptTooLongError`. It warns on an empty reply.
+  `PromptTooLongError`. A temperature goes in `extra_body`: the SDK's
+  `messages.create()` has no `temperature` keyword from 1.0. API version
+  2026-10-21, which the SDK sends from 2.0, refuses one on every model, so
+  on such an SDK none is sent, with one warning. The reply is its text
+  blocks, joined (a model that thinks by default puts a thinking block
+  first). It warns on an empty reply.
 
 ### TransformersIntrospectionBackend
 
@@ -220,9 +241,9 @@ is known. Capture never adds a column or a row.
 
 | Stage | Capture ids |
 |---|---|
-| outputs | `<input_id>/output`, `<input_id>/val_out`; later attempts under `/attempt_<n>` |
+| outputs | `<input_id>/<iteration>/output`, `<input_id>/<iteration>/val_out`; later attempts under `/attempt_<n>` |
 | seeded inputs | `<entry id>/<iteration>/input_<style>`; `<sample_id>/val_in_<style>` |
-| paraphrase | `<input_id>/paraphrase/attempt_<iteration>`, renamed to `<input_id>/paraphrase/<sample_id>` |
+| paraphrase | `<input_id>/paraphrase/attempt_<iteration>`, renamed to `<input_id>/paraphrase/<sample_id>`; for the outputs target, `<response_id>` in place of `<input_id>` (an input may have several responses) |
 | jailbreaks | `<input_id>/<label>/attempt_<iteration>/<technique>/<n>`, the root renamed to `<input_id>/<label>/<sample_id>` |
 
 Conversations are not captured.

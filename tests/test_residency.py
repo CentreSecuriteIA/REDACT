@@ -266,6 +266,18 @@ class TestReporting:
                 residency.report(_plan([model], 48.0, 1))
             assert [r.levelname for r in caplog.records] == [level]
 
+    def test_a_quiet_report_still_tells_of_trouble(self, registered, caplog):
+        """--quiet runs with verbose=False: a plan that will fail, or may,
+        is logged all the same; a clean one is not."""
+        fine = registered("_res_quiet_ok", hf_model_id="org/qo", vram_gb=10.0)
+        big = registered("_res_quiet_err", hf_model_id="org/qe", vram_gb=60.0)
+        for model, kv, levels in ((fine, 1.0, []), (fine, None, ["WARNING"]),
+                                  (big, 1.0, ["ERROR"])):
+            caplog.clear()
+            with caplog.at_level(logging.INFO, logger=residency.logger.name), _kv(kv):
+                residency.report(_plan([model], 48.0, 1), verbose=False)
+            assert [r.levelname for r in caplog.records] == levels
+
 
 class TestMeasurement:
     """Post-hoc diagnostic only — nothing here feeds planning."""
@@ -1537,6 +1549,13 @@ class TestBusOrder:
     """CUDA counts the cards in the order nvidia-smi lists them, which the
     plan numbers them in: a load and a plan set it before CUDA starts."""
 
+    @pytest.fixture(autouse=True)
+    def _unset(self, monkeypatch):
+        """The variable as a machine has it: unset (conftest sets it), and
+        no start of CUDA seen before it."""
+        monkeypatch.delenv("CUDA_DEVICE_ORDER", raising=False)
+        monkeypatch.setattr(measure, "_late_order", False)
+
     @pytest.fixture()
     def torch_started(self, monkeypatch):
         """A torch in ``sys.modules`` whose CUDA has started or not."""
@@ -1562,20 +1581,83 @@ class TestBusOrder:
         _plan([m], 24.0, 2)
         assert os.environ["CUDA_DEVICE_ORDER"] == "PCI_BUS_ID"
 
-    def test_cuda_started_before_it_was_set_is_a_warning(
+    def test_cuda_started_before_it_was_set_is_reported_for_good(
             self, torch_started, caplog):
+        """CUDA reads the variable once: set later, it stays too late for
+        this process. The caller decides whether that matters."""
         torch_started(True)
-        with caplog.at_level(logging.WARNING, logger=measure.logger.name):
-            measure.bus_order()
-            measure.bus_order()
-        assert len(caplog.records) == 1
-        assert "CUDA_DEVICE_ORDER=PCI_BUS_ID" in caplog.text
-
-    def test_cuda_not_started_is_no_warning(self, torch_started, caplog):
-        torch_started(False)
-        with caplog.at_level(logging.WARNING, logger=measure.logger.name):
-            measure.bus_order()
+        with caplog.at_level(logging.WARNING):
+            assert measure.bus_order() is True
+            assert measure.bus_order() is True
         assert caplog.records == []
+
+    def test_cuda_not_started_is_in_time(self, torch_started):
+        torch_started(False)
+        assert measure.bus_order() is False
+        torch_started(True)        # started after the variable was set
+        assert measure.bus_order() is False
+
+    def test_a_variable_set_by_someone_else_is_theirs(self, torch_started, monkeypatch):
+        torch_started(True)
+        monkeypatch.setenv("CUDA_DEVICE_ORDER", "FASTEST_FIRST")
+        assert measure.bus_order() is False
+
+    def test_a_load_says_nothing_when_cuda_started(self, torch_started, caplog):
+        """An engine process starts after the variable is set."""
+        import redact.llms.backends.vllm as vllm_module
+
+        torch_started(True)
+        with caplog.at_level(logging.WARNING):
+            vllm_module._prepare_environment()
+        assert caplog.records == []
+
+    def _plan_logs(self, models, n_gpus, caplog):
+        with caplog.at_level(logging.WARNING, logger=placement.logger.name), _kv(0.0):
+            _plan(models, 24.0, n_gpus)
+        return [r.getMessage() for r in caplog.records
+                if "CUDA_DEVICE_ORDER" in r.getMessage()]
+
+    def test_a_transformers_model_on_two_cards_is_warned_about(
+            self, registered, torch_started, caplog):
+        """Only a model this process loads counts the cards in the order
+        its CUDA started with."""
+        intro = registered("_bo_intro", setup="introspect", hf_model_id="org/boi",
+                           vram_gb=1.0, device_map="cuda:1")
+        engine = registered("_bo_engine", hf_model_id="org/boe", vram_gb=1.0)
+        torch_started(True)
+        (line,) = self._plan_logs([engine, intro], 2, caplog)
+        assert "the device_map of _bo_intro may name another card" in line
+        assert "Set CUDA_DEVICE_ORDER=PCI_BUS_ID before CUDA starts." in line
+
+    @pytest.mark.parametrize("visible, machine, warned", [
+        ("1", 2, True), ("GPU-bbbb", 2, False), ("0", 1, False)],
+        ids=["index", "uuid", "one-card-machine"])
+    def test_one_visible_card_named_by_index_is_warned_about(
+            self, registered, torch_started, caplog, monkeypatch,
+            visible, machine, warned):
+        """CUDA reads an index of CUDA_VISIBLE_DEVICES in its own order: on
+        a machine of several cards the one visible may be another card."""
+        intro = registered("_bo_intro3", setup="introspect", hf_model_id="org/boi3",
+                           vram_gb=1.0, device_map="cuda:0")
+        torch_started(True)
+        monkeypatch.setenv("CUDA_VISIBLE_DEVICES", visible)
+        with caplog.at_level(logging.WARNING, logger=placement.logger.name), _kv(0.0),              patch.object(measure, "card_sizes_gib", return_value=[24.0]),              patch.object(measure, "detect_gpus",
+                          side_effect=lambda visible=False: ("G", 1 if visible else machine)):
+            residency.plan_residency([intro])
+        lines = [r.getMessage() for r in caplog.records
+                 if "CUDA_DEVICE_ORDER" in r.getMessage()]
+        assert bool(lines) is warned
+
+    @pytest.mark.parametrize("case", ["vllm only", "one card", "on the cpu", "in time"])
+    def test_no_warning_where_the_order_does_not_matter(
+            self, registered, torch_started, caplog, case):
+        engine = registered("_bo_engine2", hf_model_id="org/boe2", vram_gb=1.0)
+        intro = registered("_bo_intro2", setup="introspect", hf_model_id="org/boi2",
+                           vram_gb=1.0,
+                           device_map="cpu" if case == "on the cpu" else "auto")
+        torch_started(case != "in time")
+        models = [engine] if case == "vllm only" else [engine, intro]
+        assert self._plan_logs(models, 1 if case == "one card" else 2, caplog) == []
 
 
 class TestCapacityDetection:

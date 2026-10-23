@@ -463,6 +463,108 @@ class TestWorkerStartMethod:
         assert os.environ["VLLM_WORKER_MULTIPROC_METHOD"] == "spawn"
 
 
+class TestWSL2Runner:
+    """vLLM's V2 model runner fails every load on WSL2, so the V1 runner is
+    the default there; a value in the environment wins."""
+
+    @pytest.mark.parametrize("version, given, expected", [
+        ("Linux version 6.6.87.2-microsoft-standard-WSL2", None, "0"),
+        ("Linux version 6.6.87.2-microsoft-standard-WSL2", "1", "1"),
+        ("Linux version 6.8.0-87-generic", None, None),
+    ], ids=["wsl2", "wsl2-given", "linux"])
+    def test_the_v1_runner_on_wsl2(self, monkeypatch, version, given, expected):
+        import io
+
+        import redact.llms.backends.vllm as vllm_module
+
+        # Recorded, so whatever the call sets is undone after the test.
+        monkeypatch.setenv("VLLM_USE_V2_MODEL_RUNNER", "unset")
+        if given is None:
+            monkeypatch.delenv("VLLM_USE_V2_MODEL_RUNNER")
+        else:
+            monkeypatch.setenv("VLLM_USE_V2_MODEL_RUNNER", given)
+        monkeypatch.setattr(vllm_module, "open",
+                            lambda path, *a, **k: io.StringIO(version), raising=False)
+        vllm_module._prepare_environment()
+        assert os.environ.get("VLLM_USE_V2_MODEL_RUNNER") == expected
+
+    def test_no_proc_version_is_no_wsl2(self, monkeypatch):
+        import redact.llms.backends.vllm as vllm_module
+
+        def missing(path, *a, **k):
+            raise FileNotFoundError(path)
+
+        monkeypatch.setenv("VLLM_USE_V2_MODEL_RUNNER", "unset")
+        monkeypatch.delenv("VLLM_USE_V2_MODEL_RUNNER")
+        monkeypatch.setattr(vllm_module, "open", missing, raising=False)
+        vllm_module._prepare_environment()
+        assert "VLLM_USE_V2_MODEL_RUNNER" not in os.environ
+
+
+class TestVLLMImport:
+    """The backend runs vLLM's V1 engine: an installed vLLM too old for it
+    is named, not reported as missing."""
+
+    @pytest.fixture()
+    def installed(self, monkeypatch):
+        """Make vLLM installed at a version (``None``: not installed), and
+        importable or not."""
+        import importlib.metadata
+
+        def _set(version, importable):
+            def fake_version(name):
+                if name != "vllm" or version is None:
+                    raise importlib.metadata.PackageNotFoundError(name)
+                return version
+
+            monkeypatch.setattr(importlib.metadata, "version", fake_version)
+            for name, module in fake_vllm_modules(object).items():
+                monkeypatch.setitem(sys.modules, name, module if importable else None)
+        return _set
+
+    def test_not_installed(self, installed):
+        import redact.llms.backends.vllm as vllm_module
+
+        installed(None, importable=False)
+        with pytest.raises(ImportError, match=r"pip install 'redact\[vllm\]'") as err:
+            vllm_module._import_vllm()
+        assert isinstance(err.value.__cause__, ImportError)
+
+    def test_too_old_to_import(self, installed):
+        import redact.llms.backends.vllm as vllm_module
+
+        installed("0.10.1", importable=False)
+        with pytest.raises(ImportError) as err:
+            vllm_module._import_vllm()
+        message = str(err.value)
+        assert message.startswith("vLLM 0.10.1 is installed, but VLLMBackend needs "
+                                  f"vLLM {vllm_module.MIN_VLLM} or later")
+        assert f"pip install -U 'vllm>={vllm_module.MIN_VLLM}'" in message
+        assert isinstance(err.value.__cause__, ImportError)
+
+    def test_recent_but_broken(self, installed):
+        import redact.llms.backends.vllm as vllm_module
+
+        installed("0.31.0", importable=False)
+        with pytest.raises(ImportError, match=r"^vLLM 0\.31\.0 is installed but "
+                                              r"failed to import"):
+            vllm_module._import_vllm()
+
+    @pytest.mark.parametrize("version, warned", [
+        ("0.30.2", True), ("0.31.0", False), ("0.32.0rc1.dev4+g1a2b", False),
+        ("1.0.0", False), ("unknown", False)])
+    def test_an_old_one_that_imports_is_warned_about(
+            self, installed, caplog, version, warned):
+        import redact.llms.backends.vllm as vllm_module
+
+        installed(version, importable=True)
+        with caplog.at_level(logging.WARNING, logger=vllm_module.logger.name):
+            assert len(vllm_module._import_vllm()) == 3
+        assert bool(caplog.records) is warned
+        if warned:
+            assert f"vLLM {version} is installed" in caplog.text
+
+
 class TestExitHook:
     """A process that ends with an engine loaded shuts it down first, or
     multiprocessing's exit hook waits for the engine's child process forever.
@@ -1450,7 +1552,7 @@ class TestVLLMBackendGPU:
     def test_a_cut_reply_warns(self, backend, caplog):
         with caplog.at_level(logging.WARNING, logger="redact.llms.backends"):
             backend.generate([[{"role": "user", "content": "Count from 1 to 500."}]], max_tokens=4)
-        assert any("1 of 1 replies were cut" in r.getMessage() for r in caplog.records)
+        assert first_cut_warning(TEST_MODEL_NAME, 4) in [r.getMessage() for r in caplog.records]
 
     def test_batch_generate_single_item(self, backend):
         prompts = [[{"role": "user", "content": "Say the word yes."}]]

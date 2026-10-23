@@ -1,84 +1,85 @@
-"""GPU check of the residency items, in one pod session.
+"""GPU check of the residency planner and the engine lifecycle, in one session.
 
-Run on a Linux pod with two equal NVIDIA cards, from the repository root,
-with ``PYTHONPATH=src`` or redact installed::
+Run on a Linux machine with two equal NVIDIA cards, from the repository
+root, with ``PYTHONPATH=src`` or redact installed::
 
-    python scripts/gpu_check_residency.py all --root /workspace/rescheck
-    python scripts/gpu_check_residency.py STEP --root /workspace/rescheck
-    python scripts/gpu_check_residency.py report --root /workspace/rescheck
+    python scripts/gpu_check_residency.py all --root ROOT
+    python scripts/gpu_check_residency.py STEP --root ROOT
+    python scripts/gpu_check_residency.py report --root ROOT
 
-Each step writes ``<root>/results/<step>.json`` (observations and checks)
-and its run logs under ``<root>/<step>/``; ``report`` collects them into
-``<root>/gpu_check_residency.md``. No hosted model is called.
+Each step writes ``<ROOT>/results/<step>.json`` (observations and checks)
+and its run logs under ``<ROOT>/<step>/``; ``report`` collects them into
+``<ROOT>/gpu_check_residency.md``. ``--root`` defaults to
+``./gpu_check_residency``. No hosted model is called.
 
-Pod: 2 x NVIDIA RTX PRO 6000 Blackwell Server Edition (96 GB each), a CUDA
-13 host (``gpu.minCudaVersion`` 13.0), on ``leonhard_volume`` in EU-RO-1 if
-it has stock, else US-PA-1 without it. About $5 an hour; tensor parallel
-hangs after NCCL init on this card, which steps 5 and ``second-signal``
-need. Optional step 7 needs 4 x RTX PRO 4500 Blackwell, where tensor
-parallel works.
+Hardware: two equal cards of 96 GB were used to write it (the expected
+shares below are theirs), on a CUDA 13 host, as the vLLM of
+``requirements.lock`` needs. The ``hang`` and ``second-signal`` steps need
+a load that hangs: tensor parallel hung after NCCL init on those cards
+(RTX PRO 6000 Blackwell). The optional ``tp-copies`` step needs four cards
+on which tensor parallel works.
 
-Steps (``all`` runs them in this order, about 70 to 80 minutes, $6 to $7):
+Steps (``all`` runs them in this order, about 70 to 80 minutes):
 
 ====================  =========================================================
 setup (10-15 min)     Downloads bench-3b, bench-2b, bench-24b (48 GB). Prints
                       versions and ``nvidia-smi``.
-order (1 min)         Critique I2: per card, ``torch``'s UUID against
-                      ``nvidia-smi``'s, without and with
-                      ``CUDA_DEVICE_ORDER=PCI_BUS_ID``. Expected: equal with the
-                      variable; record whether they differ without it.
-plan (2 min)          Step 2: the plans of [bench-3b, bench-2b] and [bench-24b],
+order (1 min)         Per card, ``torch``'s UUID against ``nvidia-smi``'s,
+                      without and with ``CUDA_DEVICE_ORDER=PCI_BUS_ID``.
+                      Expected: equal with the variable; record whether they
+                      differ without it.
+plan (2 min)          The plans of [bench-3b, bench-2b] and [bench-24b],
                       detected, against ``gpus=2, gib_per_gpu=<detected>``.
                       Expected: the same lines after the header; header
-                      "2 x <name>, 95.6GiB each"; ``gib_per_card`` 2 equal.
-copies (20 min)       Step 3: outputs, 1,200 rows, gen=bench-24b, check=bench-2b,
+                      "2 x <name>, <size>GiB each"; ``gib_per_card`` 2 equal.
+copies (20 min)       Outputs, 1,200 rows, gen=bench-24b, check=bench-2b,
                       default copies, then ``copies: {gen: 1}``. Expected, first
                       run: 24b on cards 0-1 x2 at about 0.68, 2b on card 1 at
                       about 0.22; load events dp 2 and dp 1; three compute
                       apps, two on card 1; rows = ledger = 1,200; exit 0;
                       cards at 0 MiB after. Second run: 24b card 0 at 0.90, 2b
                       card 1 at 0.90. Both runs' tokens per second per model
-                      and net stage time are recorded (critique I13); expect
-                      the copies run about 1.5 to 1.9 x faster on the stage.
-fallback (8 min)      Step 4: a process holds 60 GB on card 1; a script plans
-                      bench-3b on cards 0 and 1, applies the plan and loads it,
-                      past the run's card check. Expected: the build with 2
-                      copies fails (free memory), the WARNING "loading one copy
-                      on <uuid of card 0> instead", the failed build's
-                      processes ended, one reply, the load event dp 1 with
-                      ``fallback`` true. ``/dev/shm`` listed before and after
-                      (critique I7): record what a failed build leaves there.
-hang (6 min)          Step 5: ``scripts/run.py`` with gen=check=bench-3b-tp2,
+                      and net stage time are recorded; expect the copies run
+                      about 1.5 to 1.9 x faster on the stage.
+fallback (8 min)      A process holds 60 GB on card 1; a script plans bench-3b
+                      on cards 0 and 1, applies the plan and loads it, past
+                      the run's card check. Expected: the build with 2 copies
+                      fails (free memory), the WARNING "loading one copy on
+                      <uuid of card 0> instead", the failed build's processes
+                      ended, one reply, the load event dp 1 with ``fallback``
+                      true. ``/dev/shm`` listed before and after: record what
+                      a failed build leaves there.
+hang (6 min)          ``scripts/run.py`` with gen=check=bench-3b-tp2,
                       ``copies: {gen: 1}``; after "vLLM is using nccl" and 60 s
                       of silence, SIGTERM. Expected: "the preload of
                       bench-3b-tp2 has not finished" about 60 s after the
                       signal, then "The load of ... has not returned" and the
                       engine pids; exit code 143 within about 100 s; cards at
                       0 MiB; no VLLM or EngineCore process.
-second-signal (4 min) Item 5 C on the same hang: SIGTERM, then SIGTERM again 5 s
-                      later. Expected: exit code 143 within about 15 s of the
-                      second; the engine processes and TP workers ended; cards
-                      at 0 MiB.
-healthy (8 min)       Step 6: gen=check=bench-24b, default copies; SIGTERM 20 s
-                      after an engine process appears. Expected: exit within
-                      about 100 s; either the load ended, or, when it finished
+second-signal (4 min) The same hang: SIGTERM, then SIGTERM again 5 s later.
+                      Expected: exit code 143 within about 15 s of the second;
+                      the engine processes and TP workers ended; cards at
+                      0 MiB.
+healthy (8 min)       gen=check=bench-24b, default copies; SIGTERM 20 s after an
+                      engine process appears. Expected: exit within about
+                      100 s; either the load ended, or, when it finished
                       within 60 s, a normal release; cards at 0 MiB; nothing
                       left. Then the same run with 200 rows completes (compile
                       cache warnings allowed).
-normal-end (3 min)    Step 8: ``generate_outputs`` with bench-3b from a script
-                      that returns with the engine loaded. Expected: exit 0
-                      within 10 s of the last row; cards at 0 MiB.
-kill9 (5 min)         Step 9: ``kill -9`` a run with bench-3b loaded, rerun.
-                      Expected: the rerun stops within seconds naming the
-                      orphan's pids, before any stage; after killing them by
-                      pid, the rerun completes.
-tp-copies (15 min)    Step 7, optional, 4 x RTX PRO 4500 only (not in ``all``):
+normal-end (3 min)    ``generate_outputs`` with bench-3b from a script that
+                      returns with the engine loaded. Expected: exit 0 within
+                      10 s of the last row; cards at 0 MiB.
+kill9 (5 min)         ``kill -9`` a run with bench-3b loaded, rerun. Expected:
+                      the rerun stops within seconds naming the orphan's pids,
+                      before any stage; after killing them by pid, the rerun
+                      completes.
+tp-copies (15 min)    Optional, four cards only (not in ``all``):
                       gen=check=bench-3b-tp2, no count. Expected: cards 0-3,
                       "x2 copies, each on 2 cards"; load dp 2 tp 2; four
                       workers; 1,200 rows; exit 0.
 ====================  =========================================================
 
-Not seen here: mixed card sizes (no mixed pod to rent; offline only).
+Not covered: mixed card sizes (the offline tests only).
 """
 
 import argparse
@@ -150,8 +151,8 @@ def child_run(recipe_path: str, params: str) -> int:
 
 
 def child_fallback() -> int:
-    """Step 4: plan bench-3b on both cards, apply it and load, past the run's
-    card check."""
+    """The fallback step: plan bench-3b on both cards, apply it and load,
+    past the run's card check."""
     import logging
 
     from redact import residency
@@ -172,8 +173,8 @@ def child_fallback() -> int:
 
 
 def child_direct(data_dir: str) -> int:
-    """Step 8: generate_outputs from a script that returns with the engine
-    loaded; the exit hook releases it."""
+    """The normal-end step: generate_outputs from a script that returns with
+    the engine loaded; the exit hook releases it."""
     import logging
 
     from redact import generate_outputs
@@ -717,7 +718,7 @@ def step_tp_copies(r: Result, root: Path) -> None:
 
 
 def report(root: Path) -> Path:
-    lines = ["# GPU check of the residency items", ""]
+    lines = ["# GPU check of the residency planner", ""]
     for path in sorted((root / "results").glob("*.json")):
         result = json.loads(path.read_text())
         ok = sum(c["ok"] for c in result["checks"])
@@ -751,8 +752,9 @@ def main(argv=None) -> int:
         return child_direct(argv[1])
     parser = argparse.ArgumentParser(description=__doc__.split("\n")[0])
     parser.add_argument("step", choices=[*RUNNERS, "all", "report"])
-    parser.add_argument("--root", default="/workspace/rescheck",
-                        help="Where the runs, logs and results go.")
+    parser.add_argument("--root", default="gpu_check_residency",
+                        help="Where the runs, logs and results go "
+                             "(default: ./gpu_check_residency).")
     args = parser.parse_args(argv)
     root = Path(args.root)
     (root / "results").mkdir(parents=True, exist_ok=True)
