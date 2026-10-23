@@ -370,6 +370,24 @@ def test_scaffold_setup_writes_the_packaged_files_as_they_are(tmp_path):
     assert "scaffold_prompts.py" in readme and "prompt_dir" in readme
 
 
+def test_the_setup_readme_runs_a_recipe_from_the_folder(tmp_path):
+    """The folder holds no scripts/: the command names the repository's
+    run.py by its absolute path, or runs the recipe from Python."""
+    import re
+
+    from redact import scaffold_setup
+
+    scaffold_setup(tmp_path)
+    readme = (tmp_path / "README.md").read_text(encoding="utf-8")
+    (command,) = [line.strip() for line in readme.splitlines()
+                  if line.startswith("    python")]
+    assert command.endswith("eval_recipe.json") or "run_pipeline('eval_recipe.json')" in command
+    script = re.match(r'python "(.+)" eval_recipe\.json$', command)
+    assert script is not None       # this test runs from a checkout
+    assert Path(script.group(1)).is_absolute()
+    assert Path(script.group(1)) == Path(__file__).parents[1] / "scripts" / "run.py"
+
+
 @pytest.mark.parametrize(("mine", "packaged"), [
     ("eval_recipe.json", "eval_example.json"),
     ("training_recipe.json", "training_example.json")])
@@ -382,7 +400,10 @@ def test_a_scaffolded_recipe_runs_as_the_packaged_example(tmp_path, mine, packag
     assert ours["config_dir"] == str(tmp_path / "setup")
     assert ours["stages"] == theirs["stages"]
     assert ours["augmentations"] == theirs["augmentations"]
-    assert ours["data_dir"] == theirs["data_dir"]
+    # Its own folder, absolute, not the example's run.
+    own = tmp_path / "setup" / "runs" / mine.split("_")[0]
+    assert ours["data_dir"] == own.as_posix()
+    assert ours["data_dir"] != theirs["data_dir"]
 
     def effective(recipe):
         ctx = RunContext(

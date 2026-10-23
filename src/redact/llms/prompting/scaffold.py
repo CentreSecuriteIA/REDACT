@@ -123,39 +123,61 @@ _SETUP_COPIES = {
     "eval_params.json": "runs/params_eval_example.json",
     "training_params.json": "runs/params_training_example.json",
 }
-# Each recipe of a setup folder: the packaged example it is written from, and
-# its params file.
+# Each recipe of a setup folder: the packaged example it is written from, its
+# params file, and its data_dir, a folder of the setup's own.
 _SETUP_RECIPES = {
-    "eval_recipe.json": ("runs/eval_example.json", "eval_params.json"),
-    "training_recipe.json": ("runs/training_example.json", "training_params.json"),
+    "eval_recipe.json": ("runs/eval_example.json", "eval_params.json", "runs/eval"),
+    "training_recipe.json": ("runs/training_example.json", "training_params.json",
+                             "runs/training"),
 }
 _SETUP_README = """\
 # Your REDACT setup
 
-Run a recipe from this folder: `python scripts/run.py eval_recipe.json`, or
-`training_recipe.json`. Each recipe's `"config_dir": "."` points the run here.
+Run a recipe from this folder:
+
+{command}
+
+and `training_recipe.json` the same way. Each recipe's `"config_dir": "."`
+points the run here, and its `data_dir` at `runs/eval` or `runs/training` in
+this folder, written as an absolute path, so its files stay apart from any
+other run's. A folder moved elsewhere needs those two paths written again.
 
 - Every file here wins over the library's packaged copy of the same file:
   `dataset_types/`, `taxonomy/`, `jailbreak/augmentations.json`,
   `generation_axes.json` and `dimensions.json`.
 - Delete every file you do not change, so you keep getting the library's
   updates to it.
-- Prompts are a separate tier: `python scripts/scaffold_prompts.py ./prompts`
-  writes an editable copy, and a recipe's `prompt_dir` points at it.
+- Prompts are a separate tier: `scripts/scaffold_prompts.py` of the REDACT
+  repository writes an editable copy, and a recipe's `prompt_dir` points at
+  it.
 - The technique spec and templates, `llm/` and `datasets/` come from the
   library only; a file of theirs here is ignored, with a warning.
 """
+
+
+def _run_command() -> str:
+    """The README's command that runs the eval recipe from the setup folder:
+    the repository's ``scripts/run.py`` by its absolute path when this
+    package sits in a checkout, else the same run from Python."""
+    script = paths.package_dir().parents[1] / "scripts" / "run.py"
+    if script.is_file():
+        return f'    python "{script.as_posix()}" eval_recipe.json'
+    return ('    python -c "import logging; logging.basicConfig(level=logging.INFO); '
+            "from redact import run_pipeline; run_pipeline('eval_recipe.json')\"")
 
 
 def scaffold_setup(target_dir: str | Path, *, overwrite: bool = False) -> list[Path]:
     """Write a setup folder: an eval and a training recipe with their params
     files, the dataset type files, the two taxonomies, the augmentation
     section's defaults, the generation axes, the dimensions, and a
-    ``README.md``.
+    ``README.md`` saying how to run a recipe from the folder.
 
-    Each recipe is its packaged example with ``"config_dir": "."`` and its
-    params file beside it, so it runs as the example does until a file here
-    is changed. The other files are byte copies of the packaged ones.
+    Each recipe is its packaged example with ``"config_dir": "."``, its
+    params file beside it, and a ``data_dir`` of the folder's own
+    (``runs/eval`` or ``runs/training`` in it, absolute, since a recipe's
+    ``data_dir`` is read from the current directory): it runs as the example
+    does, but writes apart from the example's run, until a file here is
+    changed. The other files are byte copies of the packaged ones.
 
     Returns:
         The paths written.
@@ -181,14 +203,15 @@ def scaffold_setup(target_dir: str | Path, *, overwrite: bool = False) -> list[P
         path.parent.mkdir(parents=True, exist_ok=True)
         shutil.copyfile(configs / source, path)
         written.append(path)
-    for name, (example, params) in _SETUP_RECIPES.items():
+    for name, (example, params, data_dir) in _SETUP_RECIPES.items():
         recipe = json.loads((configs / example).read_text(encoding="utf-8"))
         recipe = {"dataset_type": recipe.pop("dataset_type"), "config_dir": ".",
-                  **recipe, "params_file": params}
+                  **recipe, "params_file": params,
+                  "data_dir": (target / data_dir).absolute().as_posix()}
         path = target / name
         path.write_text(json.dumps(recipe, indent=2) + "\n", encoding="utf-8")
         written.append(path)
     readme = target / "README.md"
-    readme.write_text(_SETUP_README, encoding="utf-8")
+    readme.write_text(_SETUP_README.format(command=_run_command()), encoding="utf-8")
     written.append(readme)
     return written

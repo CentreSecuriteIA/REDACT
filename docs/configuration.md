@@ -1091,16 +1091,18 @@ start from:
 
 | File | What it is |
 |---|---|
-| `eval_recipe.json`, `training_recipe.json` | The packaged example recipes, with `"config_dir": "."` and their params file beside them |
+| `eval_recipe.json`, `training_recipe.json` | The packaged example recipes, with `"config_dir": "."`, their params file beside them, and a `data_dir` of the folder's own: `runs/eval` or `runs/training` in it, as an absolute path (a `data_dir` is read from the current directory) |
 | `eval_params.json`, `training_params.json` | The example params files, as they are |
 | `dataset_types/eval.json`, `dataset_types/training.json` | Copies of the packaged files |
 | `taxonomy/harmful.json`, `taxonomy/benign.json` | Copies of the packaged files |
 | `jailbreak/augmentations.json` | A copy of the packaged file |
 | `generation_axes.json`, `dimensions.json` | Copies of the packaged files |
-| `README.md` | What follows, in short |
+| `README.md` | What follows, in short, and a command that runs a recipe from the folder |
 
-A scaffolded recipe runs exactly as its packaged example until a file is
-changed. Every file in the folder wins over the packaged copy, so delete each
+A scaffolded recipe runs as its packaged example until a file is changed,
+but into its own `data_dir`: a run of the example and a run of the setup
+never resume into each other's files. Move the folder and write the two
+`data_dir` paths again. Every file in the folder wins over the packaged copy, so delete each
 file you do not change to keep getting the library's updates to it. A
 folder scaffolded before `training.json` set `outputs.outputs_per_input` 2
 keeps its old copy, and so one response per input in a training run: add
