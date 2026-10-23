@@ -113,7 +113,9 @@ pinned)` places the models in the order given:
 - a transformers model where its `device_map` puts it: one card for
   `cuda:N`, none for `cpu`, the cards' combined room for `auto`,
   `balanced`, `balanced_low_0` or `sequential`;
-- an engine already loaded (`pinned`) first, on its own cards.
+- an engine already loaded (`pinned`) first, on its own cards. Only a
+  caller of `plan_residency` passes `pinned`; a run does not yet (see
+  [Limits](#limits)).
 
 A model that does not fit beside those placed starts a new **group**. More
 than one group means the models cannot be resident together.
@@ -294,4 +296,14 @@ done:
 - the unload search tries every candidate unloaded at once, and with more
   than 8 engines it can miss a run that one unload would fit;
 - a load that hangs is ended only on the way out or by a second signal; no
-  load is timed out mid-run.
+  load is timed out mid-run;
+- an engine loaded before the run (a notebook's) that a stage calls counts,
+  for the plan, only from the first stage that calls it. The stages before
+  it are planned as if its memory were free (the plan warns that it is
+  loaded already). The driver does not release it at the first stage, and
+  at a later one only when a model of the previous stage drops out (it then
+  loads again for the stage that calls it), so a model planned beside it
+  before that may fail to load. Release it before the run
+  (`residency.unload_local()`), or let the run load it. The fix, releasing
+  it on entering every such stage or planning around its cards (`pinned`),
+  is GPU-facing and not yet tried on a GPU.

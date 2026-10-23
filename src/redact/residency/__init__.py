@@ -46,6 +46,19 @@ of the run, not a guarantee against running out of memory.
 #     that attempt can miss, and a run one unload would fit stays unfit.
 #   - A load that hangs is ended only on the way out (vllm.EXIT_WAIT_S) or by
 #     a second signal; the run does not time a load out.
+#   - An engine loaded before the run (a notebook's) that a stage calls is
+#     resident, for the plan, only from the first stage that calls it. The
+#     plans of the stages before hand its memory out again (_survey warns,
+#     and plan.loaded names its share and cards). The driver releases it
+#     only by chance: _enter_phase unloads nothing at the first stage, and
+#     at a later one only when a model of the previous stage drops out (it
+#     then goes with everything outside the stage's plan, and loads again
+#     for the stage that calls it). A model planned beside it before that
+#     may fail to load. Two fixes, both GPU-facing and not yet tried on one:
+#     release it on entering any stage whose plan leaves it out (the
+#     driver; costs one load), or have plan_phases count it resident from
+#     the first stage and pass its cards as pinned (placement takes pinned,
+#     but only tests pass it).
 
 import logging
 
