@@ -21,6 +21,7 @@ from pathlib import Path
 
 from .. import paths
 from .categories import check_category_name
+from .rows import _write_atomic
 
 logger = logging.getLogger(__name__)
 
@@ -55,18 +56,25 @@ def create_taxonomy(
     description: str = "",
     taxonomy_dir: str | Path | None = None,
     verbose: bool = True,
+    overwrite: bool = False,
 ) -> dict:
     """Write the taxonomy file ``name`` and return the taxonomy it holds.
 
     A category given as a bare description is written as
     ``{"description": ...}``. The file is ``name`` with ``.json`` added
     unless it ends in it. ``taxonomy_dir`` defaults to the packaged
-    ``configs/taxonomy``, where :func:`load_taxonomy` reads by default.
-    ``verbose`` logs the path written.
+    ``configs/taxonomy``, where :func:`load_taxonomy` reads by default. A
+    taxonomy packaged with the library (``harmful``, ``benign``) is written
+    over only with ``overwrite``: every run reads it by default. The file
+    goes through ``<name>.tmp``, synced, and a rename. ``verbose`` logs the
+    path written.
 
     Raises:
         ValueError: A category name cannot name a folder
-            (:func:`~redact.dataset.check_category_name`); nothing is written.
+            (:func:`~redact.dataset.check_category_name`). Nothing is
+            written.
+        FileExistsError: The file is a packaged taxonomy and ``overwrite``
+            is False. Nothing is written.
     """
     for category in categories:
         check_category_name(category)
@@ -79,10 +87,16 @@ def create_taxonomy(
         },
     }
     directory = Path(taxonomy_dir or _DEFAULT_CONFIG_DIR)
-    directory.mkdir(parents=True, exist_ok=True)
     path = _json_path(directory, name)
-    with open(path, "w", encoding="utf-8") as f:
-        json.dump(taxonomy, f, indent=2, ensure_ascii=False)
+    if (path.exists() and not overwrite
+            and path.parent.resolve() == Path(_DEFAULT_CONFIG_DIR).resolve()):
+        raise FileExistsError(
+            f"create_taxonomy: {path} is a taxonomy packaged with the library, "
+            "which every run reads by default; writing over it changes them all "
+            "(and, in an editable install, the tracked file). Write it under "
+            "another taxonomy_dir or name, or pass overwrite=True.")
+    text = json.dumps(taxonomy, indent=2, ensure_ascii=False) + "\n"
+    _write_atomic(path, [text.encode("utf-8")])
     if verbose:
         logger.info("Taxonomy '%s' saved to %s", name, path)
     return taxonomy
