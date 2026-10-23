@@ -6,9 +6,10 @@ Execute a whole REDACT run from a recipe JSON (eval or training)::
     python scripts/run.py path/to/recipe.json --params path/to/params.json
     python scripts/run.py path/to/recipe.json --data-dir ./runs/my_run
 
-The recipe's ``params_file`` is used unless ``--params`` overrides it, and
-``--data-dir`` overrides the recipe's ``data_dir``. Each stage writes a
-``{stage}.run.json`` manifest under ``{data_dir}/Datasets/``.
+The recipe's ``params_file`` is used unless ``--params`` overrides it (a
+relative path is read from the current directory, else from the recipe's
+folder), and ``--data-dir`` overrides the recipe's ``data_dir``. Each stage
+writes a ``{stage}.run.json`` run record under ``{data_dir}/Datasets/``.
 
 The first Ctrl-C (or ``kill <pid>``) releases the models and exits; a
 second one ends vLLM's engine processes and exits at once.
@@ -66,7 +67,10 @@ def _exit_through_release() -> None:
 def main(argv=None) -> int:
     parser = argparse.ArgumentParser(description="Run a REDACT pipeline from a recipe JSON.")
     parser.add_argument("recipe", help="Path to the recipe JSON.")
-    parser.add_argument("--params", help="Override the recipe's params_file.", default=None)
+    parser.add_argument(
+        "--params", default=None,
+        help="Override the recipe's params_file; a relative path is read from "
+             "the current directory, else from the recipe's folder.")
     parser.add_argument("--data-dir", help="Override the recipe's data_dir.", default=None)
     parser.add_argument("--quiet", action="store_true", help="Suppress per-stage progress.")
     parser.add_argument("--debug", action="store_true", help="Show per-item DEBUG detail.")

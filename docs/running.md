@@ -44,7 +44,9 @@ From the command line:
 python scripts/run.py src/redact/configs/runs/training_example.json --data-dir ./runs/my_run
 ```
 
-`--params` replaces the recipe's `params_file`, `--data-dir` its `data_dir`.
+`--params` replaces the recipe's `params_file`: a relative path is read
+from the current directory, else from the recipe's folder, and the run logs
+the file it read. `--data-dir` replaces the recipe's `data_dir`.
 `--quiet` logs warnings only and `--debug` logs per-item detail. The script
 prints the run summary as JSON. The first Ctrl-C, or `kill <pid>`, ends the
 run through its cleanup, which saves the finished units and releases the
@@ -145,7 +147,9 @@ the stage's name.
   names under `taxonomy_dir`, the packaged `configs/taxonomy/` by default.
 - `params_file` and `config_dir` are relative to the recipe's folder.
   `data_dir`, `prompt_dir` and `taxonomy_dir` are relative to the current
-  directory.
+  directory. A params file given in place of `params_file` (`--params`,
+  `run_pipeline(params=...)`) is read from the current directory when it is
+  there, else from the recipe's folder.
 - `config_dir` names a folder of your own configs: a dataset type
   (`eval.json` or `training.json`), taxonomy, `jailbreak/augmentations.json`,
   `generation_axes.json` or `dimensions.json` file there is read in place of

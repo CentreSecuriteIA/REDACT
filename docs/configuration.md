@@ -20,7 +20,7 @@ that starts with `_` is a comment.
 | `prompt_dir` | path | none | The prompt overlay; see [below](#the-prompt-overlay) |
 | `stages` | list of stage names | the dataset type's: all six | The stages to run, in order, each once. `[]` runs nothing |
 | `augmentations` | object | the dataset type's | The jailbreak stage's augmentation section, over the dataset type's; see [below](#the-augmentation-section) |
-| `params_file` | path | none | The params file, relative to the recipe's folder. `--params` and `run_pipeline(params=...)` override it |
+| `params_file` | path | none | The params file, relative to the recipe's folder. `--params` and `run_pipeline(params=...)` override it; their relative path is read from the current directory, else from the recipe's folder, and the run logs the file it read |
 | `config_dir` | path | none | [Your own config folder](#your-own-config-folder), relative to the recipe's folder: its dataset type, taxonomy, augmentation, generation axes and dimensions files are read in place of the packaged ones. Not a folder: raises at load |
 | `resume` | bool | `true` | `false` starts every listed stage over ([running.md](running.md#resume-fresh-runs-and-a-kill-partway-through)). Any other value than `true` or `false`, the string `"false"` too, raises |
 

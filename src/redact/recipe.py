@@ -136,6 +136,13 @@ def load_recipe(
 
     ``params`` stands in for the recipe's ``params_file``, as a run's does:
     the benign taxonomy is checked with its params over the dataset type's.
+    The recipe's ``params_file`` is read relative to the recipe's folder; a
+    relative ``params`` path relative to the current directory, else to the
+    recipe's folder (:func:`params_file_of`). The returned recipe's
+    ``_params_file`` is the file read, absolute, or ``None`` when no file is.
+
+    Raises:
+        FileNotFoundError: The params file is in neither place.
     """
     if isinstance(recipe, dict):
         data = dict(recipe)
@@ -192,12 +199,49 @@ def load_recipe(
     serving_of(data.get("models") or {})
     data["augmentations"] = augmentations_of(data)
     # Read as written: the run checks the params, and warns, when it loads them.
-    given = _read_params(data.get("params_file") if params is None else params,
-                         data["_base_dir"])
+    file = params_file_of(data, params)
+    data["_params_file"] = None if file is None else str(file)
+    given = _read_params(params if isinstance(params, dict) else file)
     data["benign_taxonomy"] = benign_taxonomy_of(data, stages, given)
     data["stages"] = stages
     data["dataset_type"] = dtype
     return data
+
+
+def params_file_of(recipe: dict, params: str | Path | dict | None = None) -> Path | None:
+    """The params file a run of ``recipe`` reads, absolute; ``None`` when it
+    reads none, or ``params`` is a dict.
+
+    ``params``, a path given in place of the recipe's ``params_file`` (as
+    ``run_pipeline(params=)`` and ``scripts/run.py --params`` give it), is
+    read relative to the current directory when it is there, else to the
+    recipe's folder (``recipe["_base_dir"]``). The recipe's own
+    ``params_file`` is read relative to the recipe's folder.
+
+    Raises:
+        FileNotFoundError: The file is in neither place, naming both.
+    """
+    base_dir = recipe.get("_base_dir")
+    if params is None:
+        given = recipe.get("params_file")
+        if given is None:
+            return None
+        path = Path(given)
+        if not path.is_absolute() and base_dir is not None:
+            path = Path(base_dir) / path
+        return path.absolute()
+    if isinstance(params, dict):
+        return None
+    path = Path(params)
+    if path.is_absolute() or path.is_file() or base_dir is None:
+        return path.absolute()
+    beside = Path(base_dir) / path
+    if beside.is_file():
+        return beside.absolute()
+    raise FileNotFoundError(
+        f"The params file {params} is neither at {path.absolute()} (from the "
+        f"current directory) nor at {beside.absolute()} (from the recipe's "
+        "folder).")
 
 
 def _read_params(params: str | Path | dict | None,

@@ -659,6 +659,70 @@ def test_run_pipeline_loads_params_file(tmp_path, monkeypatch):
     assert "build" in summary["stages"]
 
 
+class TestAParamsPathGivenInPlaceOfTheRecipes:
+    """``--params`` / ``params=``: a relative path is read from the current
+    directory, else from the recipe's folder; the recipe's own
+    ``params_file`` from the recipe's folder."""
+
+    @pytest.fixture
+    def folders(self, tmp_path, monkeypatch):
+        recipes, cwd = tmp_path / "recipes", tmp_path / "cwd"
+        recipes.mkdir()
+        cwd.mkdir()
+        monkeypatch.chdir(cwd)
+        (recipes / "recipe.json").write_text(json.dumps({
+            "dataset_type": "eval", "data_dir": str(tmp_path / "run"),
+            "stages": ["build"], "params_file": "params.json"}))
+        (recipes / "params.json").write_text(json.dumps(
+            {"build": {"include_paraphrases": True}}))
+        return recipes, cwd
+
+    def test_a_copy_in_the_current_directory_wins(self, folders):
+        recipes, cwd = folders
+        (cwd / "params.json").write_text(json.dumps(
+            {"build": {"include_paraphrases": False}}))
+        recipe = load_recipe(recipes / "recipe.json", params="params.json")
+        assert recipe["_params_file"] == str(cwd / "params.json")
+
+    def test_a_name_only_the_recipes_folder_holds_is_read_from_there(self, folders):
+        recipes, _ = folders
+        recipe = load_recipe(recipes / "recipe.json", params="params.json")
+        assert recipe["_params_file"] == str(recipes / "params.json")
+
+    def test_the_recipes_own_params_file_is_read_from_its_folder(self, folders):
+        recipes, cwd = folders
+        (cwd / "params.json").write_text("{}")
+        recipe = load_recipe(recipes / "recipe.json")
+        assert recipe["_params_file"] == str(recipes / "params.json")
+
+    def test_a_name_in_neither_place_names_both(self, folders):
+        recipes, cwd = folders
+        with pytest.raises(FileNotFoundError) as raised:
+            load_recipe(recipes / "recipe.json", params="other.json")
+        assert str(cwd / "other.json") in str(raised.value)
+        assert str(recipes / "other.json") in str(raised.value)
+
+    def test_the_run_reads_the_current_directorys_copy_and_logs_it(
+            self, folders, monkeypatch, caplog):
+        import redact
+
+        recipes, cwd = folders
+        (cwd / "params.json").write_text(json.dumps(
+            {"build": {"include_paraphrases": False}}))
+        handed = []
+        monkeypatch.setattr(redact, "build_dataset",
+                            lambda **k: handed.append(k) or pd.DataFrame())
+        try:
+            with caplog.at_level("INFO", logger="redact.driver"):
+                run_pipeline(str(recipes / "recipe.json"), params="params.json")
+        finally:
+            telemetry.uninstall()
+        assert handed[0]["include_paraphrases"] is False
+        assert f"Params file: {cwd / 'params.json'}" in caplog.messages
+        record = read_record("build", recipes.parent / "run")
+        assert record["params"]["include_paraphrases"] is False
+
+
 # --- recipe / params loading -------------------------------------------------
 
 def test_load_recipe_defaults_and_base_dir(tmp_path):

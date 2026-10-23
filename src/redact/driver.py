@@ -433,7 +433,10 @@ def run_pipeline(
 ) -> dict:
     """Run the stages a recipe names, in order, writing a run record per stage.
 
-    ``params`` replaces the recipe's ``params_file``, and ``data_dir`` its
+    ``params`` replaces the recipe's ``params_file``: a dict, or a file's
+    path, which when relative is read from the current directory, else from
+    the recipe's folder (:func:`redact.recipe.params_file_of`); with
+    ``verbose`` the file read is logged. ``data_dir`` replaces the recipe's
     ``data_dir``. A params key that is not a parameter of its stage's front,
     or that the run passes the front itself, fails before any stage runs, as
     do an augmentation section the params contradict and a generation axis
@@ -463,8 +466,8 @@ def run_pipeline(
     from . import residency
 
     recipe = load_recipe(recipe, params=params)
-    params = load_params(recipe.get("params_file") if params is None else params,
-                         base_dir=recipe.get("_base_dir"),
+    params_file = recipe["_params_file"]
+    params = load_params(params if isinstance(params, dict) else params_file,
                          config_dir=recipe.get("config_dir"))
     serving = serving_of(recipe.get("models") or {})
     stages = recipe["stages"]
@@ -492,6 +495,8 @@ def run_pipeline(
 
     if verbose:
         logger.info("Run pipeline (%s) — stages: %s", ctx.dataset_type, stages)
+        if params_file is not None:
+            logger.info("Params file: %s", params_file)
 
     # Telemetry first, so the plan and preload below are themselves recorded.
     telemetry.install(data_dir=ctx.data_dir)
