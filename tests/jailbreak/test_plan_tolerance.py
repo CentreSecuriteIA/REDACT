@@ -11,6 +11,9 @@ by hand at a version after it. The last tests are about the techniques the
 library itself retired.
 """
 
+import json
+from pathlib import Path
+
 import pandas as pd
 import pytest
 
@@ -331,28 +334,50 @@ def test_another_seed_or_section_raises_though_the_library_grew(
         _resume(out, seed=seed, **kind)
 
 
+#: The pools of the kinds at the released spec 1.2, as a plan made then
+#: recorded them (``fixtures/spec_1_2_pools.json``).
+_SPEC_1_2 = json.loads((Path(__file__).parents[1] / "fixtures" / "spec_1_2_pools.json")
+                       .read_text(encoding="utf-8"))
+_FOUR_TRANSLATIONS = ["to_amharic", "to_chinese", "to_hindi", "to_hmong"]
+
+
+def _growth_since_1_2(key: str, pool: list) -> tuple[list[str], list[str]] | None:
+    """What :func:`~redact.jailbreak.pipeline._library_change` finds in
+    ``pool`` against the pool a spec 1.2 plan recorded for ``key``."""
+    made_with = {"spec_version": "1.2", "pool": _SPEC_1_2[key]}
+    return JPipe._library_change(made_with, pool, registry(all_techniques()))
+
+
+def test_an_attack_plan_of_spec_1_2_finds_spec_1_3_s_36_techniques_as_growth():
+    """The attack pool of a plan made at 1.2 differs from today's by 36 names,
+    all dated 1.3 (the four translations switched on among them), none
+    retired: the library added them after the plan, so the plan is kept and
+    the run warns."""
+    added, retired = _growth_since_1_2(
+        "adversarial", technique_pool(resolve(None, "adversarial")))
+    assert (len(added), retired) == (36, [])     # noqa: PLR2004
+    assert set(_FOUR_TRANSLATIONS) <= set(added)
+    assert {registry(all_techniques())[name].since for name in added} == {"1.3"}
+
+
 def test_a_natural_plan_of_spec_1_2_finds_the_urgent_ask_as_the_library_s_growth():
     """Spec 1.3 added ``to_ask_with_urgency`` to the natural pool, the one
-    technique it added: the pool of a natural plan made at 1.2 differs by that
-    name alone, which the library added after the plan, so the plan is kept."""
+    technique it added there."""
     pool = technique_pool(resolve(None, "natural"))
-    made_with = {"spec_version": "1.2", "pool": sorted(
-        fn.__name__ for fn in pool if fn.__name__ != "to_ask_with_urgency")}
-    assert JPipe._library_change(made_with, pool, registry(all_techniques())) == (
-        ["to_ask_with_urgency"], [])
+    assert _growth_since_1_2("natural", pool) == (["to_ask_with_urgency"], [])
 
 
-def test_an_attack_plan_of_spec_1_2_finds_the_four_translations_as_growth():
-    """Spec 1.3 switched on the translation of Hmong, Chinese, Hindi and
-    Amharic, dated by their rows' ``translation_since``: the pool of an
-    attack plan made at 1.2 differs by those four names, which the library
-    added after the plan, so the plan is kept and the run warns."""
-    four = ["to_amharic", "to_chinese", "to_hindi", "to_hmong"]
-    pool = technique_pool(resolve(None, "adversarial"))
-    made_with = {"spec_version": "1.2", "pool": sorted(
-        fn.__name__ for fn in pool if fn.__name__ not in four)}
-    assert JPipe._library_change(made_with, pool, registry(all_techniques())) == (
-        four, [])
+def test_an_eval_plan_of_spec_1_2_finds_no_growth():
+    """The eval type's attack pool is held: the 36 techniques of 1.2 are the
+    36 of today's, so a 1.2 eval plan resumes without a pool warning."""
+    from redact.recipe import load_dataset_type
+
+    pool = technique_pool(resolve(
+        load_dataset_type("eval")["augmentations"], "adversarial"))
+    assert _growth_since_1_2("eval:adversarial", pool) == ([], [])
+    eval_pool = json.loads((Path(__file__).parents[1] / "fixtures" / "eval_pool.json")
+                           .read_text(encoding="utf-8"))
+    assert _SPEC_1_2["eval:adversarial"] == sorted(eval_pool)
 
 
 # --- the techniques the library retired ----------------------------------------
