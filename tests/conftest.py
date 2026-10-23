@@ -91,9 +91,10 @@ def _no_cut_warned():
     """A model's first cut reply in a stage warns once: a test's warning must
     not silence the next test's."""
     yield
-    from redact.llms.backends import base
+    from redact.llms import observe
 
-    base._cut_warned.clear()
+    with observe._seen_lock:
+        observe._seen.clear()
 
 
 @pytest.fixture

@@ -358,7 +358,8 @@ class ModelConfig:
         name: Model identifier used at call sites.
         roles: Logical roles this model can fill, for
             :func:`default_model_for_role`.
-        is_uncensored: True for uncensored generation models.
+        is_uncensored: True for uncensored generation models. A record
+            only: no code reads it.
         supports_system_prompt: False if the model ignores system messages.
             The backend then folds system content into the first user
             message.

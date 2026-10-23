@@ -45,7 +45,7 @@ It must not:
 | `wrappers.py` | `RateLimiter`, `shared_limiter`, `BatchCaller` |
 | `router.py` | `generate_sample`, `batch_generate_samples`, `assert_single_sample_per_call` |
 | `aio.py` | The one event loop that runs every async model call |
-| `observe.py` | The telemetry hook: `record`, `set_emitter`, `set_stage`, `current_stage` |
+| `observe.py` | The telemetry hook: `record`, `set_emitter`, `set_stage`, `current_stage`, `first_in_stage` (a key new since the stage label was last set, for a warning once per stage run) |
 | `progress.py` | `ProgressReporter`: throttled progress lines |
 | `prompting/` | `prompts.py` (loading, overlay, rendering), `extraction.py` (parsing replies), `scaffold.py` (writing an editable prompt tree, or a setup folder) |
 | `resources/` | `estimate.py` (a model's GPU need from its HF config), `measure.py` (`nvidia-smi` probes) |
@@ -166,6 +166,11 @@ down and its memory freed, and a client built on it raises on its next call.
   and the config and which the planner computes without fetching anything.
 - Defaults: `temperature` 0.7 when the model sets none; `top_p` 0.85 unless
   `VLLMConfig.sampling` says otherwise.
+- The environment, before an engine loads (`_prepare_environment`), each
+  only when unset: `VLLM_WORKER_MULTIPROC_METHOD=spawn` (CUDA fails in a
+  forked child of a process that started it), `CUDA_DEVICE_ORDER=PCI_BUS_ID`
+  (the engine's processes count the cards as the plan does), and on WSL2
+  `VLLM_USE_V2_MODEL_RUNNER=0` (vLLM's V2 runner fails every load there).
 - Stats: an engine logs none (`disable_log_stats` true). With
   `"disable_log_stats": false` in `vllm_kwargs`, a task on the shared loop
   calls the engine's `do_log_stats()` every 10 s, so vLLM prints its stats

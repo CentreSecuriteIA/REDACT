@@ -463,6 +463,44 @@ class TestWorkerStartMethod:
         assert os.environ["VLLM_WORKER_MULTIPROC_METHOD"] == "spawn"
 
 
+class TestWSL2Runner:
+    """vLLM's V2 model runner fails every load on WSL2, so the V1 runner is
+    the default there; a value in the environment wins."""
+
+    @pytest.mark.parametrize("version, given, expected", [
+        ("Linux version 6.6.87.2-microsoft-standard-WSL2", None, "0"),
+        ("Linux version 6.6.87.2-microsoft-standard-WSL2", "1", "1"),
+        ("Linux version 6.8.0-87-generic", None, None),
+    ], ids=["wsl2", "wsl2-given", "linux"])
+    def test_the_v1_runner_on_wsl2(self, monkeypatch, version, given, expected):
+        import io
+
+        import redact.llms.backends.vllm as vllm_module
+
+        # Recorded, so whatever the call sets is undone after the test.
+        monkeypatch.setenv("VLLM_USE_V2_MODEL_RUNNER", "unset")
+        if given is None:
+            monkeypatch.delenv("VLLM_USE_V2_MODEL_RUNNER")
+        else:
+            monkeypatch.setenv("VLLM_USE_V2_MODEL_RUNNER", given)
+        monkeypatch.setattr(vllm_module, "open",
+                            lambda path, *a, **k: io.StringIO(version), raising=False)
+        vllm_module._prepare_environment()
+        assert os.environ.get("VLLM_USE_V2_MODEL_RUNNER") == expected
+
+    def test_no_proc_version_is_no_wsl2(self, monkeypatch):
+        import redact.llms.backends.vllm as vllm_module
+
+        def missing(path, *a, **k):
+            raise FileNotFoundError(path)
+
+        monkeypatch.setenv("VLLM_USE_V2_MODEL_RUNNER", "unset")
+        monkeypatch.delenv("VLLM_USE_V2_MODEL_RUNNER")
+        monkeypatch.setattr(vllm_module, "open", missing, raising=False)
+        vllm_module._prepare_environment()
+        assert "VLLM_USE_V2_MODEL_RUNNER" not in os.environ
+
+
 class TestVLLMImport:
     """The backend runs vLLM's V1 engine: an installed vLLM too old for it
     is named, not reported as missing."""

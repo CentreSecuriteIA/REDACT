@@ -13,7 +13,6 @@ import gc
 import logging
 import os
 import sys
-import threading
 import time
 from abc import ABC, abstractmethod
 from collections.abc import Callable
@@ -26,10 +25,6 @@ if TYPE_CHECKING:
     from ..model_config import ModelConfig
 
 logger = logging.getLogger(__name__)
-
-# (stage, model) of each model whose first cut reply in a stage was warned about.
-_cut_warned: set[tuple[str | None, str]] = set()
-_cut_lock = threading.Lock()
 
 # Retries of a failed hosted call: the openai and anthropic SDKs' own default.
 DEFAULT_MAX_RETRIES = 2
@@ -102,10 +97,11 @@ def extract_system_prompt(messages: list[dict]) -> tuple[str | None, list[dict]]
 
     Returns:
         ``(system_prompt, rest)``. ``system_prompt`` is the content of every
-        system message joined with a blank line, or ``None`` if there is
-        none. ``rest`` is the non-system messages, in order.
+        non-empty system message joined with a blank line, or ``None`` if
+        there is none. ``rest`` is the non-system messages, in order.
     """
-    system_parts = [m["content"] for m in messages if m.get("role") == "system"]
+    system_parts = [m["content"] for m in messages
+                    if m.get("role") == "system" and m["content"]]
     rest = [m for m in messages if m.get("role") != "system"]
     system_prompt = "\n\n".join(system_parts) if system_parts else None
     return system_prompt, rest
@@ -321,7 +317,8 @@ class LLMBackend(ABC):
         provider's reason the reply ended, when it reports one. ``cut`` says
         the reply stopped at the token limit, as each backend reads its
         provider's reason: the event then carries ``cut``, which telemetry
-        counts per stage, and the model's first cut reply in a stage warns.
+        counts per stage, and the model's first cut reply in a stage run
+        warns (:func:`observe.first_in_stage`).
         A cut reply is returned as it is.
         """
         event = {
@@ -344,11 +341,7 @@ class LLMBackend(ABC):
             event["cut"] = True
         observe.record(event)
         if cut:
-            key = (observe.current_stage(), self.model)
-            with _cut_lock:
-                first = key not in _cut_warned
-                _cut_warned.add(key)
-            if first:
+            if observe.first_in_stage(("cut", self.model)):
                 logger.warning(
                     "%s: a reply was cut at the token limit (max_tokens=%s) and "
                     "is incomplete; raise max_tokens or the context length "

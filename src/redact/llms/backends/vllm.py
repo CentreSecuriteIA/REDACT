@@ -139,9 +139,12 @@ def _physical_ids(devices: tuple[int, ...]) -> list[str]:
     planned index is a position in it. Each card is named by the UUID
     ``nvidia-smi`` gives it, so the engine gets the card the plan sized
     whatever order CUDA counts in; without one, as the variable names it,
-    or by its index. ``[]`` when the plan names a card past the visible
-    ones: such a plan does not fit, and the engine is left the cards it can
-    see already, where vLLM fails for want of the rest.
+    or by its index. ``[]`` when the plan names a card past the entries of
+    a variable that is set: such a plan does not fit, and the engine is left
+    the cards it can see already, where vLLM fails for want of the rest.
+    With the variable unset, a card past those ``nvidia-smi`` lists is
+    named by its index, which names no card for CUDA either: the build
+    fails, and a build with copies falls back to one.
     """
     visible = measure.visible_gpu_ids()
     last = max(devices, default=-1)
