@@ -446,7 +446,8 @@ def paraphrase_pool(paraphraser: str | None) -> list[str]:
 
 
 def _assign_paraphraser(base_id: str, k: int, pool: list[str], seed: int) -> str:
-    """Deterministic round-robin pick (content-hash of base_id + k + seed)."""
+    """The paraphraser of a unit: a pick from ``pool`` by a seeded hash of
+    ``(seed, base_id, k)``, the same in every process (not a round-robin)."""
     if len(pool) == 1:
         return pool[0]
     h = hashlib.sha256(f"{seed}:{base_id}:{k}".encode()).hexdigest()
@@ -590,18 +591,18 @@ def run_paraphrase_target(
 
         A unit is ``(base_id, iteration, model, original_text, category,
         entry_type, input_id, labels)``, ``labels`` the source's
-        ``response_mode``, ``output_label`` and ``response_label``.
-        No list of them is held: a pass over the units costs time, not memory.
+        ``response_mode``, ``output_label`` and ``response_label``; a
+        category or entry type the source lacks, or leaves empty, is ``""``,
+        never the text ``nan``. No list of them is held: a pass over the
+        units costs time, not memory.
         """
-        blank = repeat("")      # for a source without the column
-        categories = src.get("category", blank)
-        entry_types = src.get("entry_type", blank)
         labels = zip(*(_cells(column) for column in _LABEL_COLUMNS))
         for bid, otext, cat, et, iid, label in zip(
-                ids, src[text_col], categories, entry_types, input_ids, labels):
+                ids, src[text_col], _cells("category"), _cells("entry_type"),
+                input_ids, labels):
             for iteration in range(k):
                 yield (bid, iteration, _assign_paraphraser(bid, iteration, pool, seed),
-                       str(otext), str(cat), str(et), str(iid), label)
+                       str(otext), cat, et, str(iid), label)
 
     def _keyed(bid, iteration, iid) -> dict:
         """A unit's key fields, with the input answered for the outputs target."""

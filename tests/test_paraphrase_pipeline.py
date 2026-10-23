@@ -127,6 +127,36 @@ def test_the_stage_paraphrases_the_frame_it_is_given_into_the_file_it_is_given(
     assert not paths.datasets(tmp_path).exists()
 
 
+def test_a_missing_category_or_entry_type_is_empty_not_nan(tmp_path, patched):
+    source = pd.DataFrame({"sample": ["alpha prompt", "beta prompt"],
+                           "category": ["Cyber", None],
+                           "entry_type": [float("nan"), "benign"]})
+    out = tmp_path / "paraphrased.csv"
+    CP.run_paraphrase_target(
+        "inputs", source, out, pool=["venice-paraphraser"], check=None, k=1,
+        batch_size=8, seed=0, verbose=False)
+    rows = pd.read_csv(out, keep_default_na=False)
+    assert rows[["category", "entry_type"]].values.tolist() == [
+        ["Cyber", ""], ["", "benign"]]
+    manifest = [json.loads(line) for line in
+                (tmp_path / "paraphrased.manifest.jsonl").read_text().splitlines()]
+    assert [(row["category"], row["entry_type"]) for row in manifest] == [
+        ("Cyber", ""), ("", "benign")]
+
+
+def test_an_unregistered_paraphraser_stops_the_front_before_it_clears_anything(
+        tmp_path, patched):
+    _seed_inputs(tmp_path)
+    generate_paraphrases(data_dir=tmp_path, paraphraser="venice-paraphraser",
+                         verbose=False)
+    out = paths.paraphrases_inputs_csv(tmp_path)
+    before = out.read_bytes()
+    with pytest.raises(KeyError, match="no-such-paraphraser"):
+        generate_paraphrases(data_dir=tmp_path, paraphraser="no-such-paraphraser",
+                             resume=False, verbose=False)
+    assert out.read_bytes() == before
+
+
 def test_a_paraphrase_equal_to_its_padded_original_stripped_is_dropped(
         tmp_path, patched):
     _serve(patched, paraphrase=lambda model, text: text)   # the stripped sample

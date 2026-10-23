@@ -68,7 +68,7 @@ from redact.jailbreak.obfuscation import langid
 from redact.jailbreak.obfuscation import translation as jailbreak_translation
 from redact.jailbreak.pipeline import run_augmentation
 from redact.llms import ModelClient, load_prompt
-from redact.llms.model_config import default_model_for_role
+from redact.llms.model_config import default_model_for_role, get_model_config
 from redact.types import EntryType
 
 logger = logging.getLogger(__name__)
@@ -878,8 +878,8 @@ def generate_paraphrases(
 
     Each base sample is paraphrased ``paraphrases_per_sample`` times (K units,
     driven as a pool of units, one paraphraser at a time, each with its own
-    reply cap), with paraphraser models assigned round-robin from the
-    ``paraphraser`` pool. Each paraphrase passes five gates (length, split
+    reply cap), each unit's paraphraser picked from the ``paraphraser`` pool
+    by a seeded hash of its id and iteration. Each paraphrase passes five gates (length, split
     lines, script, language, artifacts) and is then validated by a
     **separate** checker at ``CHECK_TEMPERATURE`` (no retry), and is deduped
     so no two stored samples are identical. Rows land in ``paraphrases_inputs.csv`` /
@@ -906,7 +906,9 @@ def generate_paraphrases(
             with a warning; one with no rows at all is skipped silently.
         data_dir: Working root.
         paraphraser: ``None`` → ``paraphraser`` role default; a model name; or
-            ``"distribution"`` → round-robin over all ``paraphraser``-role models.
+            ``"distribution"`` → every ``paraphraser``-role model, each unit
+            to one of them by a seeded hash. Each must be registered: an
+            unregistered one stops the front before anything is cleared.
         check_model: Validator model. ``None`` → ``uncensored_gen`` role (kept
             separate from the paraphraser; warns if they coincide).
         paraphrases_per_sample: K units per base sample (warns if K>1 with 1 model).
@@ -921,7 +923,7 @@ def generate_paraphrases(
             the inputs, ``(response_id, iteration)`` of the outputs.
         batch_size: Requests per grouped call; with ``pool_size``, how many
             units the pool keeps live.
-        seed: Round-robin assignment seed.
+        seed: The seed of the hash that assigns units to paraphrasers.
         prompt_dir: Root prompt directory for the paraphrase **and** paraphrase-check
             prompts. ``None`` (default) falls back to the bundled ``prompts/``.
         inputs_path: Path override for the ``inputs`` target's artifact.
@@ -946,8 +948,11 @@ def generate_paraphrases(
     targets = check_settings(target=target, paraphrases_per_sample=paraphrases_per_sample,
                              min_words=min_words)
     pool = paraphrase_pool(paraphraser)
-    # Before any client: a paraphraser whose prompt breaks its format stops here.
+    # Before any client, and before a fresh run clears the target: an
+    # unregistered paraphraser (KeyError), or one whose prompt breaks its
+    # format, stops here. The clients are built one paraphraser at a time.
     for model in pool:
+        get_model_config(model)
         check_paraphrase_prompt(model, prompt_dir)
     if paraphrases_per_sample > 1 and len(pool) == 1:
         warnings.warn(
