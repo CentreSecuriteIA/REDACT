@@ -158,6 +158,44 @@ def test_the_info_says_when_the_cache_held_fewer_pairs(fn, tmp_path):
     assert info.startswith(f"num_shots={cached};wanted={MANY_PAIRS};")
 
 
+def _without_short_pairs(data: dict) -> dict:
+    """``data`` as a cache whose short units were all rejected: long pairs only."""
+    return {**data, "short": [], "by_subcat_short": {}, "all_subcategories": []}
+
+
+@pytest.mark.parametrize("fn", [to_fsh_random_many, to_dap_random_many],
+                         ids=lambda fn: fn.__name__)
+def test_a_random_many_variant_raises_on_a_cache_with_no_short_pair(fn, data):
+    """Not a prompt with no shot, marked ``num_shots=0``."""
+    with pytest.raises(ValueError, match="no short pair"):
+        fn("the request", _without_short_pairs(data), rng=random.Random(0))
+
+
+@pytest.mark.parametrize("fn", [to_fsh_selected_many, to_dap_selected_many],
+                         ids=lambda fn: fn.__name__)
+def test_a_selected_many_variant_raises_before_it_asks_a_model(fn, data):
+    gen = fn("the request", benign_data=_without_short_pairs(data), gen_model="m",
+             rng=random.Random(0))
+    with pytest.raises(ValueError, match="no short pair"):
+        next(gen)       # the first step, before the request for a subcategory
+
+
+def test_a_dap_many_variant_with_one_short_pair_asks_the_request_after_it(tmp_path):
+    """Never first, and last only where it cannot be otherwise."""
+    data = _cache(tmp_path, {"Main A": {"Sub 1": 1}})
+    text, info = to_dap_random_many("the request", data, rng=random.Random(0))
+    assert _questions(text) == ["question 1", "the request"]
+    assert info == f"num_shots=1;wanted={MANY_PAIRS};harmful_idx=2;sub_category=all"
+
+
+def test_a_dap_many_variant_with_two_short_pairs_asks_the_request_between_them(
+        tmp_path):
+    data = _cache(tmp_path, {"Main A": {"Sub 1": 2}})
+    for seed in range(5):
+        text, _ = to_dap_random_many("the request", data, rng=random.Random(seed))
+        assert _questions(text)[1] == "the request"
+
+
 # What the eight short and long variants write on the placeholder cache, for
 # six seeds and a model reply that names a subcategory and one that does not,
 # pinned before the many-shot variants were added beside them.

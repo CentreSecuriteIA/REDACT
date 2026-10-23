@@ -523,7 +523,11 @@ subcategory's pairs first, then those of the other subcategories of its
 main category, then the rest, each group in an order drawn from the unit's
 rng, each question once. The prompt then shows them in a drawn order, as the
 siblings do. A cache of fewer than 32 short pairs gives them all, and the
-info says so (`num_shots=<n>;wanted=32`). Why 32: a short pair of the cache
+info says so (`num_shots=<n>;wanted=32`); with one short pair the DAP
+question follows it (`harmful_idx=2`: never first, and last only where it
+cannot be otherwise). A cache with no short pair, every short unit having
+been rejected, raises a `ValueError` that names the cache, for the unit's
+error row, instead of writing a prompt with no shot. Why 32: a short pair of the cache
 is about 150 characters as the prompt writes it, about 40 tokens at four
 characters a token, so 32 are about 1,200 tokens (1,450 at the cache's 90th
 percentile, 2,800 were every pair as long as the longest), well inside the
