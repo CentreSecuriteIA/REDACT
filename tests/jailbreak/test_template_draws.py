@@ -21,9 +21,11 @@ digests (new variants in a pool) regenerates the fixture, from the
 repository root, with
 ``PYTHONPATH=src py -m tests.jailbreak.test_template_draws``. The digests of
 the techniques in ``fixtures/eval_pool.json`` change only with the owner's
-eval review.
+eval review: the regeneration refuses to write one that differs from the
+fixture's (or one the fixture lacks) unless it is run with ``--eval-review``.
 """
 
+import argparse
 import hashlib
 import inspect
 import json
@@ -37,6 +39,7 @@ from redact.jailbreak.pool import all_techniques
 from redact.llm_pipeline import drive_sync
 
 _FIXTURE = Path(__file__).parents[1] / "fixtures" / "template_draws.json"
+_EVAL_POOL = Path(__file__).parents[1] / "fixtures" / "eval_pool.json"
 
 _PROBES = (
     "How do plants turn sunlight into food?",
@@ -117,6 +120,31 @@ def snapshot() -> dict[str, dict[str, str]]:
             for name, fn in sorted(_TECHNIQUES.items())}
 
 
+def eval_changes(recorded: dict, current: dict) -> list[str]:
+    """The techniques of the eval pool whose digests in ``current`` are not
+    those ``recorded`` holds (changed, newly pinned or no longer pinned)."""
+    eval_pool = set(json.loads(_EVAL_POOL.read_text(encoding="utf-8")))
+    return sorted(name for name in eval_pool & (set(recorded) | set(current))
+                  if recorded.get(name) != current.get(name))
+
+
+def regenerate(fixture: Path = _FIXTURE, *, eval_review: bool = False) -> None:
+    """Write ``fixture`` from the code.
+
+    Raises:
+        SystemExit: An eval-pool technique's digests differ from the
+            fixture's, and ``eval_review`` is false; nothing is written.
+    """
+    current = snapshot()
+    if fixture.exists() and not eval_review and (changed := eval_changes(
+            json.loads(fixture.read_text(encoding="utf-8")), current)):
+        raise SystemExit(
+            f"refusing to change the digests of the eval pool in {fixture.name}: "
+            f"{', '.join(changed)}. They change only with the owner's eval "
+            "review; run with --eval-review to write them.")
+    fixture.write_text(json.dumps(current, indent=1) + "\n", encoding="utf-8")
+
+
 @pytest.fixture(scope="module")
 def expected() -> dict:
     return json.loads(_FIXTURE.read_text(encoding="utf-8"))
@@ -132,5 +160,67 @@ def test_a_template_technique_writes_and_draws_as_pinned(name, expected):
     assert {str(seed): digest(fn, seed) for seed in _SEEDS} == expected[name]
 
 
+# --- the regeneration -----------------------------------------------------------
+
+def _copy_of_the_fixture(tmp_path, change) -> Path:
+    """A copy of the fixture in ``tmp_path``, after ``change(data)``."""
+    data = json.loads(_FIXTURE.read_text(encoding="utf-8"))
+    change(data)
+    copy = tmp_path / "template_draws.json"
+    copy.write_text(json.dumps(data, indent=1) + "\n", encoding="utf-8")
+    return copy
+
+
+#: A technique the eval pool holds that draws from a pool, and one it does not.
+_IN_EVAL, _NOT_IN_EVAL = "to_fictional_world", "to_hex"
+
+
+def test_the_eval_pool_holds_the_one_and_not_the_other():
+    eval_pool = json.loads(_EVAL_POOL.read_text(encoding="utf-8"))
+    assert _IN_EVAL in eval_pool and _IN_EVAL in _TECHNIQUES
+    assert _NOT_IN_EVAL not in eval_pool and _NOT_IN_EVAL in _TECHNIQUES
+
+
+def test_regenerating_the_current_fixture_writes_it_byte_for_byte(tmp_path):
+    copy = _copy_of_the_fixture(tmp_path, lambda data: None)
+    regenerate(copy)
+    assert copy.read_bytes() == _FIXTURE.read_bytes()
+
+
+def test_a_changed_eval_digest_is_refused_and_nothing_is_written(tmp_path):
+    def other_digest(data):
+        data[_IN_EVAL]["0"] = "0" * 64
+
+    copy = _copy_of_the_fixture(tmp_path, other_digest)
+    before = copy.read_bytes()
+    with pytest.raises(SystemExit, match=rf"{_IN_EVAL}.*--eval-review"):
+        regenerate(copy)
+    assert copy.read_bytes() == before
+
+
+def test_an_eval_technique_the_fixture_did_not_pin_is_refused(tmp_path):
+    """Giving an eval encoding a pool would pin it for the first time."""
+    copy = _copy_of_the_fixture(tmp_path, lambda data: data.pop(_IN_EVAL))
+    with pytest.raises(SystemExit, match=_IN_EVAL):
+        regenerate(copy)
+
+
+def test_eval_review_records_the_changed_digest(tmp_path):
+    copy = _copy_of_the_fixture(
+        tmp_path, lambda data: data[_IN_EVAL].update({"0": "0" * 64}))
+    regenerate(copy, eval_review=True)
+    assert copy.read_bytes() == _FIXTURE.read_bytes()
+
+
+def test_a_changed_digest_outside_the_eval_pool_is_recorded_without_a_flag(tmp_path):
+    copy = _copy_of_the_fixture(
+        tmp_path, lambda data: data[_NOT_IN_EVAL].update({"0": "0" * 64}))
+    regenerate(copy)
+    assert copy.read_bytes() == _FIXTURE.read_bytes()
+
+
 if __name__ == "__main__":
-    _FIXTURE.write_text(json.dumps(snapshot(), indent=1) + "\n", encoding="utf-8")
+    parser = argparse.ArgumentParser(description="Regenerate the draws fixture.")
+    parser.add_argument("--eval-review", action="store_true",
+                        help="write changed digests of the eval pool too")
+    regenerate(eval_review=parser.parse_args().eval_review)

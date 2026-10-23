@@ -23,10 +23,14 @@ Regenerate the fixture from the repository root with
 pool's family, count and floor from the code, and keeps ``known_short`` as
 the file has it (a new pool below its floor is added to the list by hand,
 with the owner's agreement); with no fixture yet, it lists every pool below
-its floor.
+its floor. It refuses to record a pool with fewer variants than the fixture
+has, or one the code no longer has: pass ``--allow-drop`` with the owner's
+agreement.
 """
 
+import argparse
 import json
+import re
 from pathlib import Path
 
 import pytest
@@ -88,6 +92,37 @@ def _dumps(pools: dict[str, dict], known_short: list[str]) -> str:
         f' "pools": {{\n{rows}\n }},\n "known_short": [\n{short}\n ]\n}}\n')
 
 
+def lost(recorded: dict[str, dict], current: dict[str, dict]) -> list[str]:
+    """The pools that have fewer variants now than ``recorded`` has for them,
+    or are gone, as ``<name>: <now> of <recorded>``."""
+    return sorted(
+        f"{name}: {current.get(name, {}).get('variants', 0)} of {entry['variants']}"
+        for name, entry in recorded.items()
+        if current.get(name, {}).get("variants", 0) < entry["variants"])
+
+
+def regenerate(fixture: Path = _FIXTURE, *, allow_drop: bool = False) -> None:
+    """Write ``fixture`` from the code, keeping its ``known_short``.
+
+    Raises:
+        SystemExit: A pool has fewer variants than the fixture records, or is
+            gone, and ``allow_drop`` is false; nothing is written.
+    """
+    existing = (json.loads(fixture.read_text(encoding="utf-8"))
+                if fixture.exists() else None)
+    pools = snapshot()
+    if existing is not None and not allow_drop and (
+            dropped := lost(existing["pools"], pools)):
+        raise SystemExit(
+            f"refusing to record fewer variants than {fixture.name} has: "
+            f"{'; '.join(dropped)}. A drop is the owner's call; run with "
+            "--allow-drop to record it.")
+    known_short = (existing["known_short"] if existing is not None
+                   else [name for name, entry in pools.items()
+                         if entry["floor"] and entry["variants"] < entry["floor"]])
+    fixture.write_text(_dumps(pools, known_short), encoding="utf-8")
+
+
 @pytest.fixture(scope="module")
 def recorded() -> dict:
     return json.loads(_FIXTURE.read_text(encoding="utf-8"))
@@ -99,10 +134,7 @@ def current() -> dict[str, dict]:
 
 
 def test_no_pool_has_fewer_variants_than_recorded(recorded, current):
-    dropped = sorted(
-        f"{name}: {current.get(name, {}).get('variants', 0)} of {entry['variants']}"
-        for name, entry in recorded["pools"].items()
-        if current.get(name, {}).get("variants", 0) < entry["variants"])
+    dropped = lost(recorded["pools"], current)
     assert dropped == [], (
         "these pools lost variants (removed, or weight 0); if that is meant, "
         "regenerate the fixture")
@@ -135,11 +167,72 @@ def test_a_known_short_pool_is_still_short(recorded, current):
     assert closed == [], "take these pools out of known_short"
 
 
+# --- the regeneration -----------------------------------------------------------
+
+def _copy_of_the_fixture(tmp_path, change=None) -> Path:
+    """A copy of the fixture in ``tmp_path``, after ``change(data)``."""
+    data = json.loads(_FIXTURE.read_text(encoding="utf-8"))
+    if change:
+        change(data)
+    copy = tmp_path / "variant_floor.json"
+    copy.write_text(json.dumps(data), encoding="utf-8")
+    return copy
+
+
+def test_regenerating_the_current_fixture_writes_it_byte_for_byte(tmp_path):
+    copy = _copy_of_the_fixture(tmp_path)
+    regenerate(copy)
+    assert copy.read_bytes() == _FIXTURE.read_bytes()
+
+
+def test_a_pool_with_fewer_variants_is_refused_and_nothing_is_written(tmp_path):
+    pool, count = next(iter(snapshot().items()))
+    count = count["variants"]
+
+    def one_more_recorded(data):
+        data["pools"][pool]["variants"] += 1
+
+    copy = _copy_of_the_fixture(tmp_path, one_more_recorded)
+    before = copy.read_bytes()
+    with pytest.raises(SystemExit, match=rf"{re.escape(pool)}: {count} of {count + 1}"):
+        regenerate(copy)
+    assert copy.read_bytes() == before
+
+
+def test_a_pool_the_code_no_longer_has_is_refused(tmp_path):
+    def a_pool_since_removed(data):
+        data["pools"]["requests/answer_templates.json:answer_as_haiku"] = {
+            "family": "answer_format", "variants": 8, "floor": 8}
+
+    copy = _copy_of_the_fixture(tmp_path, a_pool_since_removed)
+    with pytest.raises(SystemExit, match="answer_as_haiku: 0 of 8"):
+        regenerate(copy)
+
+
+def test_allow_drop_records_the_lower_count(tmp_path):
+    pool = next(iter(snapshot()))
+
+    def one_more_recorded(data):
+        data["pools"][pool]["variants"] += 1
+
+    copy = _copy_of_the_fixture(tmp_path, one_more_recorded)
+    regenerate(copy, allow_drop=True)
+    assert copy.read_bytes() == _FIXTURE.read_bytes()
+
+
+def test_a_pool_that_gained_variants_is_recorded_without_a_flag(tmp_path):
+    pool = next(iter(snapshot()))
+
+    def fewer_recorded(data):
+        data["pools"][pool]["variants"] -= 1
+
+    copy = _copy_of_the_fixture(tmp_path, fewer_recorded)
+    regenerate(copy)
+    assert copy.read_bytes() == _FIXTURE.read_bytes()
+
+
 if __name__ == "__main__":
-    existing = (json.loads(_FIXTURE.read_text(encoding="utf-8"))
-                if _FIXTURE.exists() else None)
-    pools = snapshot()
-    known_short = (existing["known_short"] if existing is not None
-                   else [name for name, entry in pools.items()
-                         if entry["floor"] and entry["variants"] < entry["floor"]])
-    _FIXTURE.write_text(_dumps(pools, known_short), encoding="utf-8")
+    parser = argparse.ArgumentParser(description="Regenerate the floor fixture.")
+    parser.add_argument("--allow-drop", action="store_true",
+                        help="record a pool that has fewer variants than before")
+    regenerate(allow_drop=parser.parse_args().allow_drop)

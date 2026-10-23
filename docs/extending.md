@@ -320,18 +320,19 @@ contract.
    seeds draw), so it fails on any new
    technique. Once the change is meant, regenerate the fixture from the
    repository root with `PYTHONPATH=src python -m tests.jailbreak.test_registry`.
-   A technique whose text comes from a template file (framing, the persona
-   templates, the fake turns, structural, the neutral containers, the pure
-   payload split, the request families, small talk and the benign roles) is
-   also pinned by what it writes:
-   `tests/jailbreak/test_template_draws.py` runs each on two neutral probes
-   for six seeds and compares a SHA-256 digest per technique and seed (of
-   the texts, the infos and the rng's state after them, no text) with
+   A technique that draws a variant from a pool (it has a `variant_pool`)
+   is also pinned by what it writes:
+   `tests/jailbreak/test_template_draws.py` runs each registered one on two
+   neutral probes for six seeds (one that calls a model is answered from a
+   script of the test's own, which a new one needs too) and compares a
+   SHA-256 digest per technique and seed (of the texts, the infos and the
+   rng's state after them, no text) with
    `tests/fixtures/template_draws.json`. A new template technique, or a
    pool given new variants, regenerates it with
    `PYTHONPATH=src python -m tests.jailbreak.test_template_draws`; the
    digests of an eval-pool technique change only with the owner's eval
-   review.
+   review, and the regeneration refuses to write one without
+   `--eval-review`.
 6. **Docs**: make the layer and family tables of
    [techniques.md](techniques.md) again from the spec with
    `PYTHONPATH=src python -m tests.jailbreak.test_docs_counts`, and update
@@ -501,7 +502,8 @@ pool of one variant named after the entry. `personas.json` and
    persona frame is its technique's own text, one per persona, not a pool
    the technique draws from, and is not counted). Regenerate it with
    `PYTHONPATH=src python -m tests.jailbreak.test_variant_floor` to record
-   the new count. The test fails when a pool has fewer variants than
+   the new count; it refuses to record a pool with fewer variants than the
+   fixture has, or one that is gone, without `--allow-drop`. The test fails when a pool has fewer variants than
    recorded (a variant removed, or at weight 0), when the fixture is not
    current, when a family has no floor, and when a pool is below its floor
    without being on the fixture's `known_short` list, which the regenerator
