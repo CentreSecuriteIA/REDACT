@@ -153,9 +153,12 @@ ones, may be the request obfuscation, which no `heavy` one is. A budget round
 deals the ten plain `heavy` ones, the full-text encodings, in a slot of their
 own beside `encode`, at the spec's `heavy_encoding_weight` (0.2) times
 `encode`'s weight, about a fifth of a family's draws: dealt as `encode`'s
-members they were seldom drawn, since one fits only a unit with 3 points of
-its budget left ([internals/jailbreak.md](internals/jailbreak.md#balanced-dealing)).
-A count round deals them as `encode`'s members.
+members they were seldom drawn in the default attacks, since one fits only a
+unit with 3 points of its budget left ([internals/jailbreak.md](internals/jailbreak.md#balanced-dealing)).
+The slot is a quota in every budget round, not a floor: about 40 draws in
+3,000 units whatever the round's budget, so round 3 of the escalation rises
+from 6 to 42 and round 4, whose budget of 9 dealt them about 121 times, falls
+to about 45. A count round deals them as `encode`'s members.
 
 Seventeen of them are tagged `needs_latin`: the ciphers `to_rot13`,
 `to_rot18`, `to_rot47`, `to_caesar_cipher`, `to_atbash`, the three

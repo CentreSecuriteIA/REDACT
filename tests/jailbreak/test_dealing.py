@@ -309,9 +309,13 @@ _HEAVY = ("to_base64", "to_unicode_escape", "to_ascii_ordinal", "to_morse",
 
 def test_the_default_attacks_draw_each_heavy_encoding_a_few_times(default_shares):
     """3,000 units in three groups at seed 42: 45 draws of the ten, 3 to 6
-    each (44 to 50 over seeds 42 to 46 in 1, 3 or 10 groups, at least 2
-    each). Dealt as encode's members they got 12, two of them never; dealt
-    as a family of their own (a weight of 1), about 200."""
+    each. The slot fixes the total, not a count for each encoding, and the
+    total grows with the number of groups, since each group's dealer starts
+    it at 0: 44 or 45 in one group, 45 in three and 46 to 50 in ten (seeds 42
+    to 50), 52 to 56 in 46 uneven groups of 30 to 100 units; the least drawn
+    of the ten is drawn 3 or 4 times in one and three groups, 0 to 3 times in
+    ten. Dealt as encode's members they got 12, two of them never; dealt as a
+    family of their own (a weight of 1), about 200."""
     counts = [default_shares[name]["count"] for name in _HEAVY]
     assert 36 <= sum(counts) <= 60  # noqa: PLR2004
     assert min(counts) >= 3  # noqa: PLR2004
@@ -321,12 +325,13 @@ def test_the_default_attacks_draw_each_heavy_encoding_a_few_times(default_shares
 def test_no_group_of_the_default_attacks_goes_without_a_heavy_encoding_or_ascii_art(
         seed):
     """Every group of 100 units, in one, three and ten groups, draws a heavy
-    full-text encoding and ASCII art: at least 2 and 4 times over seeds 1 to
-    3, 7, 42 to 46 and 123. Dealt as encode's members, the heavy encodings
-    were missing from 1 to 9 groups in 29 of those 30 plans. ASCII art
-    refuses many families (the hacking and manipulation techniques, a
-    translation, the wrappers, wording, word art, the payload split, the
-    heavy encodings), so it is drawn on the units left with none of them."""
+    full-text encoding (one of the ten, not each of them) and ASCII art: at
+    least 2 and 4 times over seeds 1 to 3, 7, 42 to 46 and 123. Dealt as
+    encode's members, the heavy encodings were missing from 1 to 9 groups in
+    29 of those 30 plans. ASCII art refuses many families (the hacking and
+    manipulation techniques, a translation, the wrappers, wording, word art,
+    the payload split, the heavy encodings), so it is drawn on the units left
+    with none of them."""
     per_group = 100
     for groups in (1, 3, 10):
         rows, _ = simulate.plan_kind(

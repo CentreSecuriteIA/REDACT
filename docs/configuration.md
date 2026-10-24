@@ -560,8 +560,11 @@ that encode the whole text) are dealt in a slot of their own beside
 `encode`, at the spec's `heavy_encoding_weight` (0.2) times `encode`'s
 weight, so they are drawn about a fifth as often as a family: the slot is
 not a family, so `family_weights` cannot name it (`"encode:heavy"` raises
-as any name the kind does not draw); weight `encode` to move both. A count
-round deals them as `encode`'s members.
+as any name the kind does not draw); weight `encode` to move both. It is a
+quota in every budget round, not a floor: a round whose budget would have
+dealt them more as `encode`'s members, the escalation's last, draws fewer
+(the sixth change of the [eval release](#release-notes)). A count round deals
+them as `encode`'s members.
 [internals/jailbreak.md](internals/jailbreak.md#balanced-dealing)
 explains the dealing.
 
@@ -751,8 +754,9 @@ a run you already have, and what you will see; each point has its note below.
   `tokenbreak` refuse each other, the request obfuscation, when it
   translates, keeps a suffix, a wrapper and a container out of the unit,
   and a budget round deals the ten heavy full-text encodings in a slot of
-  their own at the spec's `heavy_encoding_weight`, 0.2 (the note on the
-  eval release, below).
+  their own at the spec's `heavy_encoding_weight`, 0.2, a quota rather than a
+  floor (about 45 draws of the ten in 3,000 units of the escalation's last
+  round, where they were about 121; the note on the eval release, below).
 - **Stricter checks, and what they skip.** An allow list or `family_weights`
   that names a family or technique of a layer the kind leaves off raises
   (the `rewrite` layer needs `layers.allow`); a `config_dir`
@@ -1575,13 +1579,35 @@ at least one of them and ASCII art, at seeds 1 to 3, 7, 42 to 46 and 123 in
 one, three or ten groups (before, 29 of those 30 plans had a group without a
 heavy encoding). At seed 42 in three groups, `encode`'s draws per unit go from
 0.242 to 0.255, ASCII art from 219 draws to 215, the units holding a
-translation from 24.0% to 23.9%, the mean complexity from 5.63 to 5.64, and
-the obfuscations per unit stay at 1.47; every technique of the default
-attacks is drawn in 4,000 units (the test no longer leaves the ten out). The
-weight was set by measurement: 0.3 draws them 64 to 69 times, 0.5 100 to 108,
-and a weight of 1, a family's share, about 200 (`encode` then at 0.30 draws
-a unit); 0.18 gives 39 to 41, but in ten groups of 300 units one of them is
-drawn only once at two of the five seeds. A count round (the eval type's
+translation from 24.0% to 23.9%, and the obfuscations per unit stay at 1.47;
+the mean complexity per unit goes from 5.628 to 5.637 (the mean over seeds 42
+to 50, three groups). Every technique of the default attacks is drawn in
+4,000 units (the test no longer leaves the ten out).
+
+The slot is a quota, not a floor. It deals the ten at the same share of
+`encode` in every budget round, whatever the round's budget, so a round that
+dealt them more as `encode`'s members now gets fewer: that is the size it was
+set for, about 40 draws in 3,000 units. In the escalation (3,000 units a
+round in three groups, the mean of seeds 42 to 46) round 3 (`max_complexity`
+6) goes from 6 draws of the ten to 42, and round 4 (`max_complexity` 9,
+three obfuscations) from about 121 to about 45; rounds 1 and 2 are count
+rounds and do not move. The last round of the escalation therefore draws
+about as many of them as the default attacks do (44 to 50), where its budget
+alone would have made it the round that draws the most, and a kind that wants
+more of them in its late rounds cannot say so: the weight is one number of
+the spec, which a `config_dir` never overlays.
+
+The weight was set by measurement over seeds 42 to 46 in three groups: 0.3
+draws them 64 to 69 times, 0.5 100 to 108, and a weight of 1, a family's
+share, about 200 (`encode` then at 0.30 draws a unit); 0.18 gives 39 to 41.
+The total depends on how the units are grouped, since each group's dealer
+starts the slot at 0 and so deals it a share of its own: at 0.2 it is 44 or
+45 in one group, 45 in three and 46 to 50 in ten (seeds 42 to 50), and 52 to
+56 in 46 uneven groups of 30 to 100 units; at 0.15 it is 33, 33, 39 and 46 in
+those four layouts, and at 0.3 65, 65, 67 and 70. What the slot fixes is the
+total, not a count for each encoding: the least drawn of the ten is drawn 3
+or 4 times in one and in three groups, 0 to 3 times in ten groups (seeds 42
+to 50) and 1 to 3 times in the uneven layout. A count round (the eval type's
 two rounds, the natural kind, the first two escalation rounds) deals them as
 `encode`'s members, as before, so the eval type's draws do not move (its
 digest holds, and they are the same with the spec's key left out, which a

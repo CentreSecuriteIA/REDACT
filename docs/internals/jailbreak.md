@@ -411,6 +411,16 @@ order.
   seeds 42 to 46). With the slot they are drawn 44 to 50 times (seeds 42 to
   46, in one, three or ten groups), about a fifth of a family's draws, and
   `encode`'s draws per unit go from 0.242 to 0.255 (seed 42, three groups).
+  The total depends on the grouping, since each group's dealer starts the
+  slot at 0: at 0.2, 44 or 45 in one group, 45 in three, 46 to 50 in ten
+  (seeds 42 to 50) and 52 to 56 in 46 uneven groups of 30 to 100 units; the
+  least drawn of the ten is drawn 3 or 4 times in one and in three groups,
+  0 to 3 times in ten and 1 to 3 in the uneven layout (the slot fixes a
+  total, not a count for each encoding; 0.15 gives 33, 33, 39 and 46, 0.3
+  gives 65, 65, 67 and 70). It is a quota in every budget round, not a
+  floor, since the weight does not read the round's budget: in the
+  escalation (3,000 units a round, three groups, seeds 42 to 46) round 3
+  goes from 6 draws of the ten to 42 and round 4 from about 121 to about 45.
   A count draw (`exact_techniques`: the eval type, the natural kind, the
   first two escalation rounds) and a draw without a dealer deal them as
   encode's members, as before, so their draws do not move. The slot is not
