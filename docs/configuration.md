@@ -1113,8 +1113,8 @@ never resume into each other's files. Move the folder and write the two
 file you do not change to keep getting the library's updates to it. A
 folder scaffolded before `training.json` set `outputs.outputs_per_input` 2
 keeps its old copy, and so one response per input in a training run: add
-the key, or delete the copy. It
-refuses to overwrite a file the folder holds, naming them, unless asked to.
+the key, or delete the copy. `scaffold_setup` refuses to overwrite a file
+the folder holds, naming them, unless asked to.
 
 **Refreshing a stale copy.** A copy does not follow the library. A family
 the library adds to the natural kind's `families.allow` in

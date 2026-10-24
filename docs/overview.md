@@ -116,8 +116,12 @@ summary = run_pipeline("src/redact/configs/runs/training_example.json")
 
 `recipe.load_params` reads the params file, resolved against the recipe's
 folder. It refuses a key that is not a stage name (a key starting with `_`
-is a comment), and a `jailbreaks` key that belongs in the augmentation
-section.
+is a comment), a `jailbreaks` key that belongs in the augmentation section,
+and a value a stage would refuse once it ran: the generation axes and seeds,
+the outputs' `modes` and `outputs_per_input`, `samples_per_entry`, and the
+paraphrase `target`, `paraphrases_per_sample` and `min_words`
+([configuration.md](configuration.md#params-keys-per-stage)).
+`load_recipe` also refuses a build `exclude_from` in a training run.
 
 ### 2. The driver sets the run up
 
