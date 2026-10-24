@@ -288,8 +288,10 @@ def test_a_stage_writes_the_files_it_wrote_before(stage, tmp_path, monkeypatch):
     from redact.jailbreak.plan import rules_id
     from tests.jailbreak.test_pipeline_jailbreaks import broken, one_step, two_step
 
+    # No round of either kind draws a request obfuscation and no fake
+    # technique is a heavy encoding, so both plans have the id of no rounds.
     fixture = _FIXTURE.read_text(encoding="utf-8").replace(
         _SPEC_VERSION, load_spec()["version"]).replace(
-        _RULES, rules_id([one_step, two_step, broken]))
+        _RULES, rules_id([one_step, two_step, broken], rounds=[]))
     expected = json.loads(fixture)[stage]
     assert _STAGES[stage](tmp_path, monkeypatch) == expected

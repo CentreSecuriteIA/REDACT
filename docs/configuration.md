@@ -845,9 +845,11 @@ techniques until it is planned again with `resume=False`. A changed seed,
 still raises.
 
 **Release note: the rules a plan was drawn by.** A jailbreak plan file now
-also records `rules`, a content id of what a draw reads off the spec (the
-layer order, caps and rates, the manipulation and request-obfuscation
-lists, the pool's families and each pool technique's tags), since the rules
+also records `rules`, a content id of what the plan's draws read off the
+spec (the layer order, caps and rates, the manipulation list, the
+request-obfuscation lists when a round draws that step, the heavy
+encodings' weight when a budget round's pool holds one, the pool's families
+and each pool technique's tags), since the rules
 can change while the spec version does not (as they did twice within 1.3).
 The one WARNING of a kept plan is now given also when its spec version or
 its rules are not today's (and when its plan file, written before this
@@ -1594,8 +1596,9 @@ cap.
 A plan kept from before replays its recorded combinations in their recorded
 order, so it still holds the pairs now refused and applies its manipulation
 technique second: its pending units write the old text. Its plan file's
-`rules` id, which holds the layer order and the heavy encodings' weight,
-differs from today's, so a
+`rules` id, which holds the layer order (and, in a budget plan whose pool
+holds a heavy full-text encoding, the heavy encodings' weight), differs
+from today's, so a
 resume logs one WARNING that the rules a combination is drawn by changed and
 counts the pending units whose combination today's rules refuse. To take the
 new rules, run the jailbreak stage with `resume=False` (the stage starts
@@ -1603,6 +1606,17 @@ over); until then the rows of a kept eval plan are not those of a fresh one.
 The rules are the spec's, which a `config_dir` never overlays, so a run on a
 `config_dir` copy of the eval type takes them too, its pool as wide as its
 copy of `eval.json` makes it (the bullet on a stale copy, above).
+
+The `rules` id now records only what a plan's draws read: the request
+obfuscation's two lists only when a round allows that step (a budget round
+with `allow_request_obfuscation`), the heavy encodings' weight only when a
+round is a budget round and the pool holds one, and no longer the
+`needs_latin` and `script` tags, which no rule reads. A count-only plan (the
+eval type's, the natural kind's) keeps its id when those change. A plan file
+written before the id was narrowed (by an earlier build of this release)
+holds an id over more keys, so its first resume gives the one WARNING; a
+plan drawn by these rules has none of its pending units refused, and can be
+resumed as it is.
 
 ## The model registry
 

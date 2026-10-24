@@ -29,9 +29,10 @@ from .sampling import (
     HEAVY_ENCODINGS,
     REQUEST_SCOPE,
     deal_key,
+    is_heavy_encoding,
     sample_combination,
 )
-from .technique import FIRST_VERSION, LATIN, applies, heavy_encoding_weight, load_spec
+from .technique import FIRST_VERSION, applies, heavy_encoding_weight, load_spec
 
 logger = logging.getLogger(__name__)
 
@@ -371,42 +372,44 @@ def plan_inputs(
         seed=seed, rounds=rounds, pool=sorted(fn.__name__ for fn in pool),
         family_weights=family_weights, layer_rates=layer_rates,
         spec_version=load_spec().get("version", FIRST_VERSION),
-        rules=rules_id(pool))
+        rules=rules_id(pool, rounds=rounds))
 
 
 def _without_comments(entry: dict) -> dict:
     return {key: value for key, value in entry.items() if not key.startswith("_")}
 
 
-def rules_id(pool: list[Callable]) -> str:
-    """The content id of what a draw from ``pool`` reads off the spec: its
-    ``layer_order`` (the order a combination applies in, which put the
-    manipulation layer last in the eval release), ``layer_max_picks`` and
-    ``layer_rates``, the obfuscations it keeps from the manipulation layer,
-    the families a request obfuscation may draw and the families it keeps
-    out of a combination, the ``heavy_encoding_weight`` a budget draw deals
-    the heavy full-text encodings at; the ``layer``, ``within_layer_order`` and
-    ``cross_incompatible_with`` of each family of the pool; and each pool
-    technique's ``families``, ``complexity``, ``cross_incompatible_with``,
-    ``encode_weight``, ``needs_latin`` and ``script``, as its tags hold
-    them. A spec comment changes nothing. Two pools with the same names
-    give the same id while these stay as they are, so a resume can tell
-    whether a kept plan's combinations were drawn by today's rules."""
+def rules_id(pool: list[Callable], *, rounds: list[dict]) -> str:
+    """The content id of what the draws of a plan of ``pool`` by ``rounds``
+    (each round's sampler settings, as its plan file records them) read
+    off the spec: its ``layer_order`` (the order a combination applies in,
+    which put the manipulation layer last in the eval release),
+    ``layer_max_picks`` and ``layer_rates``, the obfuscations it keeps from
+    the manipulation layer; when a round allows the request obfuscation (a
+    budget round with ``allow_request_obfuscation``), the families a request
+    obfuscation may draw and the families it keeps out of a combination;
+    when a round is a budget round and the pool holds a heavy full-text
+    encoding (:func:`~redact.jailbreak.sampling.is_heavy_encoding`), the
+    ``heavy_encoding_weight`` it deals them at; the ``layer``,
+    ``within_layer_order`` and ``cross_incompatible_with`` of each family of
+    the pool; and each pool technique's ``families``, ``complexity``,
+    ``cross_incompatible_with`` and ``encode_weight``, as its tags hold
+    them. A spec comment changes nothing, nor does a key no draw of the plan
+    reads (a count-only plan never reads the request obfuscation's lists or
+    the heavy weight). Two plans with the same pool names and rounds give
+    the same id while these stay as they are, so a resume can tell whether
+    a kept plan's combinations were drawn by today's rules."""
     spec = load_spec()
     techniques = sorted(pool, key=lambda fn: fn.__name__)
     families = sorted({family for fn in techniques
                        for family in getattr(fn, "families", ())})
+    budget = [r for r in rounds if r.get("exact_techniques") is None]
     record = {
         "layer_order": spec["layer_order"],
         "layer_max_picks": spec.get("layer_max_picks", {}),
         "layer_rates": _without_comments(spec.get("layer_rates", {})),
         "manipulation_blocked_obfuscation": _without_comments(
             spec.get("manipulation_blocked_obfuscation", {})),
-        "request_obfuscation_allowed_families": spec.get(
-            "request_obfuscation_allowed_families", []),
-        "request_obfuscation_refuses": _without_comments(
-            spec.get("request_obfuscation_refuses", {})),
-        "heavy_encoding_weight": spec.get("heavy_encoding_weight"),
         "families": {
             name: {key: spec["families"].get(name, {}).get(key) for key in (
                 "layer", "within_layer_order", "cross_incompatible_with")}
@@ -418,10 +421,15 @@ def rules_id(pool: list[Callable]) -> str:
                 "cross_incompatible_with": list(
                     getattr(fn, "cross_incompatible_with", ())),
                 "encode_weight": getattr(fn, "encode_weight", None),
-                "needs_latin": getattr(fn, "needs_latin", False),
-                "script": getattr(fn, "script", LATIN),
             } for fn in techniques},
     }
+    if any(r.get("allow_request_obfuscation") for r in budget):
+        record["request_obfuscation_allowed_families"] = spec.get(
+            "request_obfuscation_allowed_families", [])
+        record["request_obfuscation_refuses"] = _without_comments(
+            spec.get("request_obfuscation_refuses", {}))
+    if budget and any(is_heavy_encoding(fn) for fn in techniques):
+        record["heavy_encoding_weight"] = spec.get("heavy_encoding_weight")
     return content_id(json.dumps(record, sort_keys=True))
 
 

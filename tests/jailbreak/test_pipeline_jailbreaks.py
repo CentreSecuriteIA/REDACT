@@ -488,7 +488,8 @@ def test_a_plan_records_what_it_was_made_with(tmp_path):
     assert made_with == {
         "seed": 1, "rounds": made_with["rounds"], "pool": ["to_base64"],
         "family_weights": None, "layer_rates": None,
-        "spec_version": load_spec()["version"], "rules": rules_id([to_base64])}
+        "spec_version": load_spec()["version"],
+        "rules": rules_id([to_base64], rounds=made_with["rounds"])}
     assert [r["exact_techniques"] for r in made_with["rounds"]] == [1]
 
 

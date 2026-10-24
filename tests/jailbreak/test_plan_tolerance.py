@@ -237,21 +237,66 @@ def test_a_plan_file_without_rules_warns_that_it_does_not_record_them(
     assert len(rows) == len(plan)
 
 
+#: A plan's rounds: one budget round with the request obfuscation on, as the
+#: packaged attacks have it, and the eval type's two count rounds.
+_BUDGET = [{"allow_request_obfuscation": True}]
+_COUNT = [{"exact_techniques": 1}, {"exact_techniques": 2}]
+
+
 def test_the_rules_id_moves_with_a_rule_not_with_the_pool_order_or_a_comment(
         monkeypatch):
     import redact.jailbreak.plan as JP
 
     every = registry(all_techniques())
     pool = [every["to_base64"], every["to_rot13"]]
-    before = JP.rules_id(pool)
-    assert JP.rules_id(pool[::-1]) == before
+    before = JP.rules_id(pool, rounds=_BUDGET)
+    assert JP.rules_id(pool[::-1], rounds=_BUDGET) == before
     spec = T.load_spec()
     with monkeypatch.context() as patch:
         patch.setattr(JP, "load_spec", lambda: {**spec, "layer_rates": {
             **spec["layer_rates"], "_comment": "reworded"}})
-        assert JP.rules_id(pool) == before
+        assert JP.rules_id(pool, rounds=_BUDGET) == before
     monkeypatch.setattr(pool[0], "complexity", pool[0].complexity + 1)
-    assert JP.rules_id(pool) != before
+    assert JP.rules_id(pool, rounds=_BUDGET) != before
+
+
+@pytest.mark.parametrize(("name", "tag", "value"), [
+    ("to_morse", "needs_latin", True),
+    ("to_thai", "script", T.LATIN),
+], ids=["needs_latin", "script"])
+def test_the_rules_id_leaves_out_the_tags_no_rule_reads(monkeypatch, name, tag, value):
+    """No rule reads ``needs_latin`` or a translation's ``script`` (the
+    family rules keep the two apart, ``test_rules`` holds it), so tagging
+    one more technique Latin-only does not make every kept plan warn."""
+    import redact.jailbreak.plan as JP
+
+    every = registry(all_techniques())
+    pool = [every["to_morse"], every["to_thai"]]
+    before = JP.rules_id(pool, rounds=_BUDGET)
+    assert getattr(every[name], tag) != value
+    monkeypatch.setattr(every[name], tag, value)
+    assert JP.rules_id(pool, rounds=_BUDGET) == before
+
+
+def test_the_rules_id_moves_with_the_obfuscations_kept_from_manipulation(monkeypatch):
+    """The eval release kept the manipulation block on purpose (lifting it
+    would admit 104 eval pairs): a plan drawn under another block list has
+    another rules id, so its resume warns."""
+    import copy
+
+    import redact.jailbreak.plan as JP
+
+    every = registry(all_techniques())
+    pool = [every["to_fsh_random_short"], every["to_base64"]]
+    before = JP.rules_id(pool, rounds=_COUNT)
+    spec = copy.deepcopy(T.load_spec())
+    blocked = spec["manipulation_blocked_obfuscation"]
+    assert "translation" in blocked["families"]
+    monkeypatch.setattr(JP, "load_spec", lambda: spec)
+    blocked["_comment"] = "reworded"
+    assert JP.rules_id(pool, rounds=_COUNT) == before
+    blocked["families"].remove("translation")
+    assert JP.rules_id(pool, rounds=_COUNT) != before
 
 
 def test_the_rules_id_moves_when_a_translation_stops_refusing_encode(monkeypatch):
@@ -263,13 +308,13 @@ def test_the_rules_id_moves_when_a_translation_stops_refusing_encode(monkeypatch
 
     every = registry(all_techniques())
     pool = [every["to_base64"], every["to_french"]]
-    before = JP.rules_id(pool)
+    before = JP.rules_id(pool, rounds=_COUNT)
     spec = copy.deepcopy(T.load_spec())
     refused = spec["families"]["translation"]["cross_incompatible_with"]
     assert "encode" in refused
     refused.remove("encode")
     monkeypatch.setattr(JP, "load_spec", lambda: spec)
-    assert JP.rules_id(pool) != before
+    assert JP.rules_id(pool, rounds=_COUNT) != before
 
 
 def test_the_rules_id_moves_when_a_technique_stops_refusing_ascii_art(monkeypatch):
@@ -279,28 +324,64 @@ def test_the_rules_id_moves_when_a_technique_stops_refusing_ascii_art(monkeypatc
 
     base64 = registry(all_techniques())["to_base64"]
     assert base64.cross_incompatible_with == ["ascii_art"]
-    before = JP.rules_id([base64])
+    before = JP.rules_id([base64], rounds=_COUNT)
     monkeypatch.setattr(base64, "cross_incompatible_with", [])
-    assert JP.rules_id([base64]) != before
+    assert JP.rules_id([base64], rounds=_COUNT) != before
 
 
-def test_the_rules_id_moves_with_what_a_request_obfuscation_keeps_out(monkeypatch):
-    """A draw with the request obfuscation on reads the spec's
-    ``request_obfuscation_refuses``, so its content is in the id, its comment
-    is not."""
+def _request_obfuscation_lists(spec: dict, key: str) -> None:
+    """Change in ``spec`` the ``key`` a request obfuscation reads: one family
+    less in what a translation drawn as one keeps out, or in the families
+    it may be drawn from."""
+    if key == "request_obfuscation_refuses":
+        spec[key]["translation"].remove("structural")
+    else:
+        spec[key].remove("encode_light")
+
+
+@pytest.mark.parametrize("key", [
+    "request_obfuscation_refuses", "request_obfuscation_allowed_families"])
+def test_the_rules_id_moves_with_what_a_request_obfuscation_reads(monkeypatch, key):
+    """A plan with a round that allows the request obfuscation reads the
+    spec's two lists of it, so their content is in its id, a comment is
+    not."""
     import copy
 
     import redact.jailbreak.plan as JP
 
     every = registry(all_techniques())
     pool = [every["to_french"], every["to_json"]]
-    before = JP.rules_id(pool)
+    before = JP.rules_id(pool, rounds=_BUDGET)
     spec = copy.deepcopy(T.load_spec())
     spec["request_obfuscation_refuses"]["_comment"] = "reworded"
     monkeypatch.setattr(JP, "load_spec", lambda: spec)
-    assert JP.rules_id(pool) == before
-    spec["request_obfuscation_refuses"]["translation"].remove("structural")
-    assert JP.rules_id(pool) != before
+    assert JP.rules_id(pool, rounds=_BUDGET) == before
+    _request_obfuscation_lists(spec, key)
+    assert JP.rules_id(pool, rounds=_BUDGET) != before
+
+
+@pytest.mark.parametrize("rounds", [
+    _COUNT, [{}], [{"exact_techniques": 1, "allow_request_obfuscation": True}]],
+    ids=["count", "budget-without-the-step", "count-with-the-key"])
+@pytest.mark.parametrize("key", [
+    "request_obfuscation_refuses", "request_obfuscation_allowed_families"])
+def test_a_plan_no_round_of_which_draws_a_request_obfuscation_keeps_its_rules_id(
+        monkeypatch, key, rounds):
+    """A count round draws no request obfuscation, whatever its settings
+    say, and a budget round only with ``allow_request_obfuscation``: a kept
+    eval or natural plan does not warn when the request obfuscation's lists
+    change."""
+    import copy
+
+    import redact.jailbreak.plan as JP
+
+    every = registry(all_techniques())
+    pool = [every["to_french"], every["to_json"]]
+    before = JP.rules_id(pool, rounds=rounds)
+    spec = copy.deepcopy(T.load_spec())
+    _request_obfuscation_lists(spec, key)
+    monkeypatch.setattr(JP, "load_spec", lambda: spec)
+    assert JP.rules_id(pool, rounds=rounds) == before
 
 
 def test_the_rules_id_moves_with_the_layer_order(monkeypatch):
@@ -311,24 +392,18 @@ def test_the_rules_id_moves_with_the_layer_order(monkeypatch):
 
     every = registry(all_techniques())
     pool = [every["to_fsh_random_short"], every["to_rot13"]]
-    before = JP.rules_id(pool)
+    before = JP.rules_id(pool, rounds=_COUNT)
     spec = T.load_spec()
     assert spec["layer_order"][-1] == "manipulation"
     monkeypatch.setattr(JP, "load_spec", lambda: {**spec, "layer_order": [
         "rewrite", "hacking", "manipulation", "obfuscation", "requests"]})
-    assert JP.rules_id(pool) != before
+    assert JP.rules_id(pool, rounds=_COUNT) != before
 
 
-@pytest.mark.parametrize("weight", [0.5, None], ids=["another", "none"])
-def test_the_rules_id_moves_with_the_heavy_encodings_weight(monkeypatch, weight):
-    """A budget draw deals the heavy full-text encodings at the spec's
-    ``heavy_encoding_weight`` (the eval release gave them the slot): a plan
-    kept from before it, or made at another weight, has another rules id, so
-    its resume warns."""
+def _heavy_weight(monkeypatch, weight) -> None:
+    """The spec with ``heavy_encoding_weight`` ``weight``, or without it."""
     import redact.jailbreak.plan as JP
 
-    pool = [registry(all_techniques())["to_base64"]]
-    before = JP.rules_id(pool)
     spec = T.load_spec()
     assert spec["heavy_encoding_weight"] == 0.2  # noqa: PLR2004
     changed = {key: value for key, value in spec.items()
@@ -336,15 +411,52 @@ def test_the_rules_id_moves_with_the_heavy_encodings_weight(monkeypatch, weight)
     if weight is not None:
         changed["heavy_encoding_weight"] = weight
     monkeypatch.setattr(JP, "load_spec", lambda: changed)
-    assert JP.rules_id(pool) != before
 
 
+@pytest.mark.parametrize("weight", [0.5, None], ids=["another", "none"])
+def test_the_rules_id_moves_with_the_heavy_encodings_weight(monkeypatch, weight):
+    """A budget draw deals the heavy full-text encodings at the spec's
+    ``heavy_encoding_weight`` (the eval release gave them the slot): a budget
+    plan of a pool that holds one, kept from before it or made at another
+    weight, has another rules id, so its resume warns."""
+    import redact.jailbreak.plan as JP
+
+    pool = [registry(all_techniques())["to_base64"]]
+    before = JP.rules_id(pool, rounds=[*_COUNT, {}])
+    _heavy_weight(monkeypatch, weight)
+    assert JP.rules_id(pool, rounds=[*_COUNT, {}]) != before
+
+
+@pytest.mark.parametrize(("names", "rounds"), [
+    (["to_base64"], _COUNT),
+    (["to_rot13", "to_sensitive_words_encode_base64"], _BUDGET),
+], ids=["count-plan", "no-heavy-full-text-encoding"])
+@pytest.mark.parametrize("weight", [0.5, None], ids=["another", "none"])
+def test_a_plan_that_deals_no_heavy_slot_keeps_its_rules_id(
+        monkeypatch, weight, names, rounds):
+    """A count round deals a heavy encoding as encode's member, and a pool
+    without one (a heavy sensitive-word encoding is ``sensitive_words``'s)
+    has nothing to deal in the slot: a kept eval or natural plan does not
+    warn when the weight changes."""
+    import redact.jailbreak.plan as JP
+
+    every = registry(all_techniques())
+    pool = [every[name] for name in names]
+    before = JP.rules_id(pool, rounds=rounds)
+    _heavy_weight(monkeypatch, weight)
+    assert JP.rules_id(pool, rounds=rounds) == before
+
+
+@pytest.mark.parametrize("kind", [{}, {"rounds": _COUNT}], ids=["budget", "count"])
 def test_a_resume_under_the_plan_s_version_and_rules_is_quiet(
-        tmp_path, monkeypatch, caplog):
+        tmp_path, monkeypatch, caplog, kind):
+    """The budget kind allows the request obfuscation and its pool holds the
+    heavy encodings, so its id holds every key; the count kind's holds
+    neither."""
     out = tmp_path / "jb.csv"
-    _planned(out, monkeypatch)
+    _planned(out, monkeypatch, **kind)
     with caplog.at_level("WARNING"):
-        _resume(out)
+        _resume(out, **kind)
     assert _warnings(caplog) == []
 
 

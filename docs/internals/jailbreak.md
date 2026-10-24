@@ -40,7 +40,7 @@ the technique names are in [techniques.md](../techniques.md).
 | `pool.py` | `all_techniques`, `technique_pool(resolved)`, `kind_of(resolved)`, `languages`, `registry`, `uses_translation`, `uses_check` (whether a pool holds a technique the check model checks), `variant_pools` (each template pool's family, techniques and count of variants on, which the variant floor test ratchets); at import, the spec against the registries, the families' dimensions and the techniques' variant pools |
 | `augmentation.py` | `KINDS`, `defaults(config_dir)`, `resolve(section, kind, base=None, config_dir=None)`, `rounds_of(resolved)`, `apply_flat_keywords`, `FLAT_KEYWORDS` |
 | `rules.py` | `compatible(selected, pool, remaining_complexity)`, `request_obfuscation_candidates`, `after_request_obfuscation` (what may still join once a pick is the request obfuscation) |
-| `sampling.py` | `sample_combination`, `sample_exact_combination`, `_pick_by_family`, `deal_key` (the name a dealer counts a technique under), `REQUEST_SCOPE`, `HEAVY_ENCODINGS` |
+| `sampling.py` | `sample_combination`, `sample_exact_combination`, `_pick_by_family`, `deal_key` (the name a dealer counts a technique under), `is_heavy_encoding`, `REQUEST_SCOPE`, `HEAVY_ENCODINGS` |
 | `plan.py` | `plan_run`, `assign_combination` (with the opt-in group budget: `_allowance`, `UNIT_HEADROOM`), `combination_of`, `coverage`, `plan_inputs` (the record of the `<stem>.plan.json` beside the manifest, written through `dataset/planfile.py`, its `spec_version` dating the pool and its `rules` the rules it was drawn by, `rules_id`), `default_escalation_schedule`; it deals from `dataset.dealing.Dealer` |
 | `chain.py` | `run_chain`, `combine_techniques`, `in_layer_order`, `apply_combination` |
 | `units.py` | `pending_units`, `is_pending`, `unit_gen`, `row_of`, `error_row_of` |
@@ -205,7 +205,7 @@ core, called once per kind:
    longer registered. Known limit: a section that newly names a family all
    of whose techniques came after the plan reads as growth, and warns. The
    rules are compared apart too (`_rules_change`): `rules_id` of the plan's
-   pool names, as the library tags them today, against the plan file's
+   pool names and rounds, as the library tags them today, against the plan file's
    `rules` (unknown in a plan file written before it recorded them). When
    the library added or retired techniques, or the plan's `spec_version` or
    rules are not today's, one WARNING (`_warn_since_plan`, given after the
@@ -510,7 +510,7 @@ plan file's `spec_version` is the spec's `version` when the plan was drawn,
 and a row's `combination_spec_version` is its plan's; the version moves
 when techniques are added or retired, not when a technique's code changes
 (the ASCII-art cap did not move it) nor always when a rule does, which the
-plan file's `rules` (`rules_id(pool)`) records instead. The
+plan file's `rules` (`rules_id(pool, rounds=)`) records instead. The
 manifest row records the round's settings and the `seed`, and
 `<stem>.plan.json` what the whole plan was made with: `seed`, `rounds`,
 `pool` (sorted names), `family_weights`, `layer_rates`, `spec_version`,

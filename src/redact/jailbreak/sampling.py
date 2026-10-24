@@ -29,19 +29,23 @@ REQUEST_SCOPE = "request_obfuscation:"
 HEAVY_ENCODINGS = "encode:heavy"
 
 
+def is_heavy_encoding(fn: Callable) -> bool:
+    """Whether ``fn`` is a heavy full-text encoding: first family ``encode``,
+    ``encode_weight`` heavy (the three heavy ``to_sensitive_words_encode_*``
+    are ``sensitive_words`` techniques first, and encode only the words a
+    model marks)."""
+    return ((getattr(fn, "families", None) or [""])[0] == "encode"
+            and getattr(fn, "encode_weight", None) == "heavy")
+
+
 def deal_key(fn: Callable, *, heavy_apart: bool = False) -> str:
     """The name a dealer counts ``fn`` under: its first family or, with
     ``heavy_apart`` and a spec that gives ``heavy_encoding_weight``,
-    :data:`HEAVY_ENCODINGS` for a heavy full-text encoding (first family
-    ``encode``, ``encode_weight`` heavy; the three heavy
-    ``to_sensitive_words_encode_*`` are ``sensitive_words`` techniques
-    first, and encode only the words a model marks)."""
-    family = (getattr(fn, "families", None) or [""])[0]
-    if (heavy_apart and family == "encode"
-            and getattr(fn, "encode_weight", None) == "heavy"
-            and heavy_encoding_weight() is not None):
+    :data:`HEAVY_ENCODINGS` for a heavy full-text encoding
+    (:func:`is_heavy_encoding`)."""
+    if heavy_apart and is_heavy_encoding(fn) and heavy_encoding_weight() is not None:
         return HEAVY_ENCODINGS
-    return family
+    return (getattr(fn, "families", None) or [""])[0]
 
 
 def _pick_by_family(

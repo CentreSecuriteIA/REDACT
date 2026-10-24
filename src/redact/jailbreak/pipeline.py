@@ -406,14 +406,15 @@ def _library_change(
 
 def _rules_change(made_with: dict, registry: dict[str, Callable]) -> str | None:
     """How the rules the plan whose plan file holds ``made_with`` was drawn
-    by compare with today's, for the techniques of its pool
+    by compare with today's, for the techniques of its pool and its rounds
     (:func:`~redact.jailbreak.plan.rules_id`): ``None`` when they are the
     same, ``"changed"`` when they differ, and ``"unknown"`` when the plan
     file, written before it recorded them, has no ``rules``."""
     if "rules" not in made_with:
         return "unknown"
     planned = [registry[name] for name in made_with.get("pool", ()) if name in registry]
-    return None if rules_id(planned) == made_with["rules"] else "changed"
+    same = rules_id(planned, rounds=made_with["rounds"]) == made_with["rules"]
+    return None if same else "changed"
 
 
 def _refused(names: list[str], registry: dict[str, Callable]) -> bool:
