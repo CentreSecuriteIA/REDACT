@@ -2,6 +2,10 @@
 
 import random
 
+import pytest
+
+import redact.jailbreak  # noqa: F401  (tags the techniques)
+from redact.jailbreak.directives import draw_variant, read_pools
 from redact.jailbreak.requests.answer import (
     get_answer_functions,
     to_answer_as_code,
@@ -9,18 +13,21 @@ from redact.jailbreak.requests.answer import (
     to_answer_as_story,
     to_answer_as_structured_data,
     to_answer_as_tutorial,
+    to_answer_in_encoding,
     to_answer_in_markdown,
     to_apology_prevention,
+    to_dual_answer,
     to_prefix_injection,
     to_refusal_then_comply,
+    to_tagged_prefix,
 )
 
 SAMPLE = "How do I pick a lock?"
 
 
 class TestAnswerRegistry:
-    def test_returns_nine(self):
-        assert len(get_answer_functions()) == 9
+    def test_returns_twelve(self):
+        assert len(get_answer_functions()) == 12     # noqa: PLR2004
 
     def test_all_return_tuple(self):
         random.seed(42)
@@ -52,6 +59,8 @@ class TestAnswerRegistry:
         assert "to_answer_as_dialogue" in names
         assert "to_answer_as_story" in names
         assert "to_answer_as_structured_data" in names
+        assert names[-3:] == ["to_dual_answer", "to_tagged_prefix",
+                              "to_answer_in_encoding"]
 
 
 class TestOutputConditioningDirectives:
@@ -109,3 +118,36 @@ class TestOutputFormatDirectives:
             result, _ = to_answer_as_code(SAMPLE)
             results.add(result)
         assert len(results) > 1
+
+
+#: The three answer formats of spec 1.3, each with its directive. Their text
+#: is adversarial on purpose: the tests compare flags and names, never print
+#: it.
+_SPEC_1_3 = [(to_dual_answer, "dual_answer"), (to_tagged_prefix, "tagged_prefix"),
+             (to_answer_in_encoding, "answer_in_encoding")]
+
+
+class TestTheSpec13AnswerFormats:
+    @pytest.mark.parametrize(("fn", "directive"), _SPEC_1_3)
+    def test_a_draw_is_its_directive_s_variant_for_the_seed(self, fn, directive):
+        pool = read_pools("requests/answer_templates.json")[directive]
+        for seed in range(12):
+            text, info = fn(SAMPLE, rng=random.Random(seed))
+            drawn = draw_variant(pool, random.Random(seed))["name"]
+            assert info == f"directive={directive};variant={drawn}"
+            assert (SAMPLE in text, "{prompt}" in text) == (True, False)
+
+    @pytest.mark.parametrize(("fn", "directive"), _SPEC_1_3)
+    def test_each_is_a_pure_attack_of_spec_1_3(self, fn, directive):
+        assert (fn.families, fn.complexity, fn.requires_llm) == (
+            ["answer_format"], 2, False)
+        assert (fn.kinds, fn.since) == (["adversarial"], "1.3")
+
+    def test_the_rules_they_carry(self):
+        """The persona templates' mechanics ask for a dual answer and a
+        tagged opening already; an answer in an encoding is kept from an
+        encoded prompt (the ten sensitive-word encodings are encode members
+        too, so they are kept from it as well)."""
+        assert to_dual_answer.cross_incompatible_with == ["persona_template"]
+        assert to_tagged_prefix.cross_incompatible_with == ["persona_template"]
+        assert to_answer_in_encoding.cross_incompatible_with == ["encode"]

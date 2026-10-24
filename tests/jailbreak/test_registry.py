@@ -1,12 +1,15 @@
 """The registered techniques, against a snapshot of them.
 
 ``fixtures/technique_registry.json`` holds each layer's techniques in registry
-order, with their spec tags, whether each has an applicability
-(``has_applicable``), whether each is a generator and its parameters,
+order, with their spec tags (``since`` and ``deprecated``, which decide
+whether a kept plan resumes, a technique's own ``cross_incompatible_with``
+and a translation's ``script`` among them), whether each has an
+applicability (``has_applicable``), whether each is a generator and its
+parameters,
 and the combinations ``sample_combination`` draws from the whole pool for five
 seeds. A change that renames, reorders, retags or re-signs a technique fails
 here. A change meant to alter them regenerates the fixture, from the
-repository root, with ``py -m tests.jailbreak.test_registry``.
+repository root, with ``python -m tests.jailbreak.test_registry``.
 """
 
 import inspect
@@ -30,7 +33,7 @@ _FIXTURE = Path(__file__).parents[1] / "fixtures" / "technique_registry.json"
 _TAGS = (
     "families", "complexity", "requires_llm", "requires_benign",
     "encode_weight", "needs_latin", "max_tokens", "layer", "within_layer_order",
-    "kinds", "check", "calls",
+    "kinds", "check", "calls", "cross_incompatible_with", "since", "deprecated",
 )
 _SEEDS = (0, 1, 2, 3, 4)
 
@@ -60,6 +63,9 @@ def snapshot() -> dict:
             {
                 "name": fn.__name__,
                 **{tag: getattr(fn, tag) for tag in _TAGS},
+                # The script a translation writes, which the rules read; the
+                # other techniques have none (read as Latin).
+                "script": getattr(fn, "script", None),
                 # Whether it has an applicability; the predicate itself is
                 # code, which JSON does not hold.
                 "has_applicable": hasattr(fn, "applicable"),

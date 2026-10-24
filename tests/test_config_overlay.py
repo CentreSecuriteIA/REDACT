@@ -11,6 +11,7 @@ import pytest
 from redact import paths, telemetry
 from redact.config_overlay import (
     config_sources,
+    extra_eval_techniques,
     report_config_sources,
     taxonomy_folder,
     unseen_natural_families,
@@ -121,6 +122,45 @@ def test_an_augmentations_file_in_the_folder_is_the_default_of_both_kinds(tmp_pa
     assert resolve(None, "adversarial")["max_complexity"] != 3     # noqa: PLR2004
 
 
+def test_an_unknown_key_in_an_augmentations_copy_is_left_out_with_a_warning(
+        tmp_path, caplog):
+    """A typo did nothing before, so a copy may hold one: the run warns and
+    resolves as without it."""
+    data = _augmentations(max_complexty=9)
+    data["adversarial"]["layers"] = {"deny": [], "alow": ["rewrite"]}
+    path = _write(tmp_path / "jailbreak" / "augmentations.json", data)
+    with caplog.at_level("WARNING", logger="redact.jailbreak.augmentation"):
+        adversarial = resolve(None, "adversarial", config_dir=tmp_path)
+    assert adversarial == resolve(None, "adversarial")
+    assert [r.getMessage().split(" which")[0] for r in caplog.records] == [
+        f"{path}: adversarial has unknown key(s) ['max_complexty'],",
+        f"{path}: adversarial.layers has unknown key(s) ['alow'],"]
+
+
+@pytest.mark.parametrize(("change", "message"), [
+    (lambda d: d["adversarial"].pop("layers"), "adversarial lacks ['layers']"),
+    (lambda d: d["natural"].pop("exact_techniques"),
+     "natural lacks ['exact_techniques']"),
+    (lambda d: d.pop("natural_only_families"), "lacks natural_only_families"),
+    (lambda d: d.__setitem__("natural", None),
+     "natural must be an object of the kind's keys, got None"),
+    (lambda d: d["adversarial"].__setitem__("exact_techniques", 1),
+     "adversarial gives exact_techniques, a key of the natural kind"),
+], ids=["no layers", "no exact_techniques", "no natural_only_families",
+        "a kind null", "a count on the attacks"])
+def test_an_augmentations_copy_that_cannot_be_read_raises_naming_the_file(
+        tmp_path, change, message):
+    """What failed as a bare KeyError, or read the attacks as the natural
+    kind, now stops the recipe at load with the file and the key."""
+    data = _augmentations()
+    change(data)
+    path = _write(tmp_path / "jailbreak" / "augmentations.json", data)
+    with pytest.raises(ValueError) as raised:
+        load_recipe({"dataset_type": "training", "config_dir": str(tmp_path)})
+    assert str(raised.value).startswith(str(path))
+    assert message in str(raised.value)
+
+
 def test_the_jailbreak_front_resolves_over_the_folder(tmp_path, monkeypatch):
     import redact.stages as P
 
@@ -200,6 +240,52 @@ def test_a_current_copy_or_none_misses_no_natural_family(tmp_path):
     assert unseen_natural_families(tmp_path) == []
     _write(tmp_path / "jailbreak" / "augmentations.json", {**data, "natural": None})
     assert unseen_natural_families(tmp_path) == []
+
+
+def _eval_before_growth() -> dict:
+    """The packaged eval.json as a copy made before the library grew would
+    hold it: the temporal family allowed whole, and two denies missing."""
+    data = json.loads((paths.configs_dir() / "dataset_types" / "eval.json")
+                      .read_text(encoding="utf-8"))
+    adversarial = data["augmentations"]["adversarial"]
+    adversarial["families"]["allow"].append("temporal")
+    adversarial["techniques"]["allow"].remove("to_use_past_tense")
+    adversarial["techniques"]["deny"].remove("to_hex")
+    adversarial["techniques"]["deny"].remove("to_fsh_random_many")
+    return data
+
+
+def test_a_stale_eval_copy_names_what_it_adds_to_the_eval_pool(tmp_path, caplog):
+    _write(tmp_path / "dataset_types" / "eval.json", _eval_before_growth())
+    extra = ["to_fsh_random_many", "to_hex", "to_use_future_tense",
+             "to_use_historical_era"]
+    assert extra_eval_techniques(tmp_path) == extra
+    with caplog.at_level("WARNING", logger="redact.config_overlay"):
+        report_config_sources(tmp_path, verbose=False, dataset_type="eval")
+    (record,) = caplog.records
+    assert record.levelname == "WARNING"
+    assert f"draw 4 technique(s) the library's eval type does not: {', '.join(extra)}" \
+        in record.getMessage()
+    assert "overwrite=True" in record.getMessage()
+
+
+def test_only_an_eval_run_is_warned_about_its_eval_copy(tmp_path, caplog):
+    _write(tmp_path / "dataset_types" / "eval.json", _eval_before_growth())
+    with caplog.at_level("WARNING", logger="redact.config_overlay"):
+        report_config_sources(tmp_path, verbose=False, dataset_type="training")
+        report_config_sources(tmp_path, verbose=False)
+    assert caplog.records == []
+
+
+def test_a_current_eval_copy_or_none_adds_nothing(tmp_path, caplog):
+    assert extra_eval_techniques(tmp_path) == []
+    _write(tmp_path / "dataset_types" / "eval.json", json.loads(
+        (paths.configs_dir() / "dataset_types" / "eval.json").read_text("utf-8")))
+    _write(tmp_path / "jailbreak" / "augmentations.json", _augmentations())
+    with caplog.at_level("WARNING", logger="redact.config_overlay"):
+        report_config_sources(tmp_path, verbose=False, dataset_type="eval")
+    assert extra_eval_techniques(tmp_path) == []
+    assert caplog.records == []
 
 
 def test_a_run_records_the_files_it_read_from_the_folder(tmp_path, monkeypatch, caplog):

@@ -17,7 +17,7 @@ _POOLS = read_pools(_FILE)
 
 
 # The wrapper is written here, not in the template file: moving it into a
-# variant pool waits for the owner's wrapper step (its text is eval-pool text).
+# variant pool waits for the next eval review (its text is eval-pool text).
 def to_json(prompt: str, *, rng: random.Random | None = None) -> tuple[str, str]:
     """Wrap prompt in JSON structure with override semantics."""
     rng = rng or random
@@ -60,8 +60,8 @@ def to_markdown(prompt: str) -> tuple[str, str]:
     """Wrap prompt in Markdown structure with override framing.
 
     It takes no ``rng``: its pool has one template, so there is no draw. A
-    second template needs the ``rng`` keyword with it (the owner's wrapper
-    step).
+    second template needs the ``rng`` keyword with it (a change for the next
+    eval review).
     """
     variant = draw_variant(_POOLS["to_markdown"])
     payload = variant["template"].format_map({"prompt": prompt})

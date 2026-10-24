@@ -9,8 +9,8 @@ Augment the accepted inputs with technique combinations, in two kinds:
 
 | Kind | Writes | Default |
 |---|---|---|
-| `adversarial` | `Datasets/jailbreaks.csv`: jailbreak attacks | one round per input, by budget, from every active technique (178 in 24 families, the nineteen translations among them) but `casual_writing` and the natural-only small talk and benign roles; half the units take a request obfuscation, a light encoding or a translation after the request |
-| `natural` | `Datasets/variations.csv`: natural variations | one technique per input, from the natural allow lists, which the spec's `kinds` narrow to 71 techniques (90 with `"translation": true`, which adds the nineteen translations) ([techniques.md](../techniques.md#the-natural-pool)) |
+| `adversarial` | `Datasets/jailbreaks.csv`: jailbreak attacks | one round per input, by budget, from 214 techniques in 29 families, the 23 translations among them: the 244 active techniques less the 16 of the `rewrite` layer (off by default), the nine `casual_writing` ones and the five natural-only small talk and benign roles; half the units take a request obfuscation, a light encoding or a translation after the request |
+| `natural` | `Datasets/variations.csv`: natural variations | one technique per input, from the natural allow lists, which the spec's `kinds` narrow to 72 techniques (95 with `"translation": true`, which adds the 23 translations) ([techniques.md](../techniques.md#the-natural-pool)) |
 
 These are the packaged defaults, which a `training` run takes: both kinds
 are on. An `eval` run's dataset type attacks the harmful inputs only, with
@@ -32,10 +32,15 @@ in [techniques.md](../techniques.md).
 
 - The accepted inputs of the run, or `inputs=`. A `sample` column is renamed
   `prompt`; the frame must have one of the two. Each row's id is its
-  `sample_id`, else the content id of its text.
+  `sample_id`, else the content id of its text. Rows that share an id (one
+  text twice, or an id given twice) are planned once, from the last of
+  them, with a WARNING; rows that share one under different entry types
+  raise a `ValueError` naming the ids, since one of the two labels would
+  be wrong.
 - Each kind keeps the rows of its `entry_types` (all by default). A kind
-  whose `entry_types` match no input logs a WARNING `<kind> kind skipped:
-  ...` and writes nothing; with `resume: false` its files are removed.
+  whose `entry_types` match no input, or whose section leaves no technique
+  in its pool, logs a WARNING `<kind> kind skipped: ...` and writes
+  nothing; with `resume: false` its files are removed.
 - With no input file the front raises `No input samples found`; with no
   accepted input it warns `jailbreaks skipped: ...` and writes nothing. With
   `resume: false` it also removes the files of each kind that is on: CSV,
@@ -47,13 +52,13 @@ in [techniques.md](../techniques.md).
 | Recipe role | Registry role | Default | Calls |
 |---|---|---|---|
 | `gen` | `uncensored_gen` | `venice-uncensored` | Every technique that calls a model, the benign data, and the judge of a machine translation |
-| `check` | `uncensored_gen` | the `gen` model | Passed to each technique as `check_model`, to check what its model writes (the typo check and the scenario check); left out, it is the `gen` model, so no other model loads. Translation keeps its own checkers: the chat translator itself, the `gen` model as a machine translation's judge |
+| `check` | `uncensored_gen` | the `gen` model | Passed to each technique as `check_model`, to check what its model writes (the typo, scenario and preserve checks); left out, it is the `gen` model, so no other model loads; given, it is created, planned and loaded only when a kind that runs draws a technique with one of those checks (the eval type's attacks draw none). Translation keeps its own checkers: the chat translator itself, the `gen` model as a machine translation's judge |
 | `translation` | `translation` | `translategemma-27b` | The `translation` family; resolved, planned and loaded only when a kind's pool holds a translation technique (`"translation": true`, as in the packaged attacks and the eval type's) |
 
 A chat translator (`deepseek-v3.2`, named in the recipe) makes up to 4
 rounds of two calls, a translation and its check, both to it.
 
-A machine-translation model (the `machine_translation` role, `translategemma-27b`) gets the text piece by piece, one request after another inside its unit: a paragraph, or a paragraph over 1,200 characters cut at sentence ends, each request capped at about three times its piece's tokens (1,536 at most). Each piece is checked at no model cost (empty; its GlotLID label among the language's accepted ones; its length ratio, over the language's median, within 0.5 to 2.0, which a reply cut at its cap is not; the medians, `translation.MEDIAN_RATIO`, are measured with TranslateGemma 27B on the FLORES-200 devtest, 0.47 for Japanese to 1.31 for Scots Gaelic), and a failing piece is resampled alone. When every piece passes, each is translated back to English and the generation model judges the original against the joined back-translation (prompt `jailbreak/translate_check_back`, 128 tokens), a rejection resampling every piece. Up to 4 rounds; the `DISCARDED` info names the piece (`piece=2/3`, `piece=all` for the judge) and why. A round is one call per piece when a piece fails, else
+A machine-translation model (the `machine_translation` role, `translategemma-27b`) gets the text piece by piece, one request after another inside its unit: a paragraph, or a paragraph over 1,200 characters cut at sentence ends, each request capped at about three times its piece's tokens (1,536 at most). Each piece is checked at no model cost (empty; its GlotLID label among the language's accepted ones (an undetermined `und_*` label is no verdict, as without the detector); its length ratio, over the language's median, within 0.5 to 2.0, which a reply cut at its cap is not, for a piece of 20 characters or more (`MIN_BAND_CHARS`: a label or a digit keeps its characters); the medians, `translation.MEDIAN_RATIO`, are measured with TranslateGemma 27B on the FLORES-200 devtest, 0.34 for Chinese to 1.31 for Scots Gaelic and Hmong), and a failing piece is resampled alone. When every piece passes, each is translated back to English and the generation model judges the original against the joined back-translation (prompt `jailbreak/translate_check_back`, 128 tokens), a rejection resampling every piece. Up to 4 rounds; the `DISCARDED` info names the piece (`piece=2/3`, `piece=all` for the judge) and why. A round is one call per piece when a piece fails, else
 two per piece and one judge call: three for a one-piece text, twelve at
 most over 4 rounds. Every request is its unit's own, on the async lane, so
 other units keep both engines busy meanwhile. Before any call the stage
@@ -93,7 +98,7 @@ its own manifest, plan file, ledger, coverage table and variants table.
 | `Datasets/jailbreaks.state.jsonl` | Its ledger |
 | `Datasets/jailbreaks.coverage.csv` | What its plan drew |
 | `Datasets/jailbreaks.variants.csv` | Which template variants its rows drew, written after each run |
-| `Datasets/jailbreaks.plan.json` | What its plan was made with: `seed`, `rounds`, `pool` (the technique names), `family_weights`, `layer_rates`, `spec_version` (the spec's `version`, which dates the pool) |
+| `Datasets/jailbreaks.plan.json` | What its plan was made with: `seed`, `rounds`, `pool` (the technique names), `family_weights`, `layer_rates`, `spec_version` (the spec's `version`, which dates the pool), `rules` (a content id of the rules the pool was drawn by) |
 | `Datasets/variations.csv` and its five sidecars | The same for the natural kind |
 | `Data_cache/benign/benign_samples.csv` | The benign data, shared by both kinds, with its `.manifest.jsonl` and `.state.jsonl` |
 
@@ -118,7 +123,7 @@ the row's own values.
 | `accepted` | Whether the row is usable |
 | `reasoning` | Why not, when `accepted` is false |
 | `iteration` | The unit's iteration |
-| `combination_spec_version` | The spec's `version` |
+| `combination_spec_version` | The spec's `version` the row's plan was drawn at |
 
 Columns of the coverage table: `level` (`layer`, `family` or `technique`),
 `name`, `category`, `entry_type`, `iteration`, `count`. It counts what the
@@ -135,15 +140,25 @@ variant a row drew (from a kept plan made with another pool). A row's
 `technique_info` joins its techniques' infos in their order, and a framing
 and a request technique both write `variant=<name>`, so the variants are
 paired by position: the n-th `variant=` of a row is the n-th of its
-techniques that writes one; a step noted `noop=` wrote none, and a rejected
+techniques that writes one. The infos and the names follow one order, the
+applied one, so the pairing holds in a fresh plan (a request, then the fake
+turn after it) as in a kept one (the fake turn first); a step noted `noop=` wrote none, and a rejected
 or error row, whose info is its rejection's, counts none. The framing
 techniques, the answer formats, the answer languages, asking, the
 distractors, impersonation, indirect, temporal, the neutral containers,
-small talk and the benign roles write `variant=`;
+small talk, the benign roles, the fake turns, the payload splits (which add
+`parts=<n>`), the word art (which adds `font=<font>` and
+`detected_words=<word>`) and the wording (which adds `detected_words=<words>`)
+write `variant=`, the
+persona templates the mechanic they drew (their frame is one per technique,
+not a variant), and an encoding with decode hints `hint=<name>` after its own
+info when it drew one (a row without one counts none and keeps its other
+variants);
 continuation writes `style=<name>`, read as its variant; structural's
 `to_xml` and `to_markdown`, one template each, name none and are not
 counted, nor is `to_json`, whose wrapper is in code. Continuation and
-structural keep their info as it is while the eval pool is held.
+structural keep their info as it is while the eval pool is pinned
+([techniques.md](../techniques.md#the-eval-pool)).
 
 ## The benign data
 
@@ -195,19 +210,21 @@ cognitive vs impersonation rule
 obfuscation (when `allow_request_obfuscation` is on, as in the packaged
 attacks and the escalation's rounds 3 and 4) against `max_obfuscations`,
 draws a technique only for the inputs it applies to, and deals the
-techniques spec 1.2 added and not the seven it retired. The
+techniques specs 1.2 and 1.3 added and not the seven spec 1.1 retired. The
 [release notes](../configuration.md#release-notes) list the changes. A
 natural plan made before the natural kind's pool was narrowed to what the
 spec's `kinds` mark natural raises on resume (its pool changed): run the
 natural kind with `resume=False`; one made since resumes with the WARNING
-below, spec 1.2 having grown the pool. The build leaves out the benign and
+below, spec 1.2 having grown the pool and spec 1.3 added one technique (the
+urgent ask). The build leaves out the benign and
 dual-use benign variations such a plan made with a technique the natural
 kind no longer draws ([build.md](build.md#training-mode)). The
 5,000-character cap on `to_ascii_art` holds wherever it is drawn, the eval
 type's pool included, and changes the text a seed draws: the font changes for some
 texts from about 40 characters and for most from about 90, a text of about
-830 characters or more is rejected where it used to be drawn, and so are
-most inputs a `heavy` encoding lengthened first
+830 characters or more is rejected where it used to be drawn, and so were
+most inputs a `heavy` encoding lengthened first, a pairing a fresh plan no
+longer draws since the eval release
 ([techniques.md](../techniques.md#what-the-families-do) has the figures).
 A plan kept across this change mixes rows drawn without the cap, saved
 before, and rows drawn with it, run after: a replayed plan gives the same
@@ -234,7 +251,13 @@ it lost was retired (`deprecated`) after it, the resume keeps the plan
 and logs one WARNING that names them: the kept plan does not draw the
 added techniques, and runs the retired ones it names. Run the kind with
 `resume=False` to plan again and draw them. Any other difference in the
-pool raises as before. A section that newly names a family all of whose
+pool raises as before. The plan file also records the rules the pool was
+drawn by (`rules`, a content id), which can change while the spec version
+does not. When the plan's spec version or rules are not today's (a plan
+file written before it recorded `rules` counts as not knowing them), the
+same WARNING says so and counts the pending units whose combination
+today's rules refuse; they run as planned, and every row records the spec
+version its plan was drawn at. A section that newly names a family all of whose
 techniques came after the plan reads as such growth too, and warns instead
 of raising.
 
@@ -245,7 +268,15 @@ packaged attacks, the one re-plan this release asks of the adversarial kind
 (its plan kept from before raises on resume, naming `rounds`; run the kind
 once with `resume=False`, the natural kind's plan is not affected); the typo
 and the scenario checks, which cost model calls; the natural pool; and the
-techniques spec 1.2 adds.
+techniques specs 1.2 and 1.3 add. A plan kept from spec 1.2 resumes with
+the growth WARNING above. An adversarial plan names all thirty-six
+techniques spec 1.3 adds to its pool (the eleven persona templates, the
+three fake turns, three answer formats, seven members of the thin request
+families, among them the urgent ask, two payload splits, the word art, the
+two wording techniques, three personas and four translations); a natural
+plan names the urgent ask alone, and the four translations too when its
+`translation` switch is on. The sixteen techniques of the `rewrite` layer
+are off by default, in no kind's pool, so no plan names them.
 
 ## Rejected and failed units
 
@@ -265,7 +296,8 @@ one `combine_techniques(...)` result, on one prompt with blocking calls, and
 returns `(text, info, accepted, reasoning)`. It loads the benign data when a
 technique needs it, generating what the cache lacks with `client`; its
 `prompt_dir` reaches the techniques and the benign data. `combine_techniques` sorts the techniques into layer
-order but does not check the compatibility rules.
+order (the manipulation layer last, around the finished question, since the
+eval release) but does not check the compatibility rules.
 
 ```python
 from redact.jailbreak import apply_combination, combine_techniques

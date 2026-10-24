@@ -1,4 +1,5 @@
-"""Distractor techniques: related or unrelated text before or after the prompt.
+"""Distractor techniques: related or unrelated text, or another task (spec
+1.3), before or after the prompt.
 
 ``info`` is ``type=<name>;variant=<variant>``.
 """
@@ -46,6 +47,22 @@ def to_distractor_suffix_unrelated(
     return _apply("suffix_unrelated", prompt, rng=rng)
 
 
+@uses_pool(_FILE, "prefix_task")
+def to_distractor_prefix_task(
+    prompt: str, *, rng: Random | None = None,
+) -> tuple[str, str]:
+    """Prepend another task before the prompt."""
+    return _apply("prefix_task", prompt, rng=rng)
+
+
+@uses_pool(_FILE, "suffix_task")
+def to_distractor_suffix_task(
+    prompt: str, *, rng: Random | None = None,
+) -> tuple[str, str]:
+    """Append another task after the prompt."""
+    return _apply("suffix_task", prompt, rng=rng)
+
+
 def get_distractor_functions() -> list[Callable]:
     """Return all distractor technique functions."""
     return [
@@ -53,4 +70,6 @@ def get_distractor_functions() -> list[Callable]:
         to_distractor_prefix_unrelated,
         to_distractor_suffix_related,
         to_distractor_suffix_unrelated,
+        to_distractor_prefix_task,
+        to_distractor_suffix_task,
     ]

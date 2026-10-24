@@ -3,7 +3,8 @@
 ``info`` lists the detected words with the tokens applied to them. A reply
 that is not a short list of the prompt's words discards the prompt. A split
 or a separator cuts a word between the characters a reader sees, never
-between a letter and its marks, since a translation may come first.
+between a letter and its marks, since a word of Bengali, Thai, Khmer or
+Nepali holds marks and a joiner that belong to its letter.
 """
 
 import random
@@ -139,7 +140,9 @@ _MAX_HARMFUL_WORDS_RESPONSE_LEN = 10
 # A list marker before a word: a bullet, or a number with "." or ")".
 _LIST_MARKER = re.compile(r"[-*•]|\d+[.)]")
 _WORD = re.compile(r"[^\W\d_][\w'’-]*")
-_SURROUNDING = ".,;:!?\"'()[]*"
+# Around a word of a reply: punctuation, brackets, markdown and quotes,
+# straight and curly, and an ellipsis.
+_SURROUNDING = ".,;:!?\"'()[]*“”‘’„«»…"
 
 #: The info of a technique whose word reply was malformed.
 MALFORMED_WORDS = f"{DISCARDED}; reason=malformed word list"
@@ -150,26 +153,46 @@ def _is_mark(char: str) -> bool:
     return unicodedata.category(char).startswith("M")
 
 
+def _is_format(char: str) -> bool:
+    """Whether ``char`` is a format character (Unicode category Cf): a zero-width
+    space, non-joiner or joiner, which Persian, Khmer or Bengali words hold."""
+    return unicodedata.category(char) == "Cf"
+
+
 def _is_word(token: str) -> bool:
     """Whether ``token`` is a word: a letter, then letters, digits,
-    apostrophes, hyphens and combining marks.
+    apostrophes, hyphens, combining marks and format characters.
 
     ``\\w`` matches no combining mark, yet most Bengali, Nepali, Thai or Khmer
-    words hold one (a vowel sign, a virama), so the marks are taken out
+    words hold one (a vowel sign, a virama), nor a zero-width joiner or
+    non-joiner, which Bengali and Persian words hold, so these are taken out
     before the match; a token may not start with one.
     """
-    if not token or _is_mark(token[0]):
+    if not token or _is_mark(token[0]) or _is_format(token[0]):
         return False
-    return _WORD.fullmatch("".join(c for c in token if not _is_mark(c))) is not None
+    letters = "".join(c for c in token if not (_is_mark(c) or _is_format(c)))
+    return _WORD.fullmatch(letters) is not None
+
+
+def _is_lone_letter(word: str) -> bool:
+    """Whether ``word`` is one letter (with its marks) that is not an
+    ideograph, such as ``a`` or ``я``: a technique would change that letter
+    wherever it stands in the prompt, inside other words too. A Chinese
+    character is a word by itself, and stays."""
+    letters = [c for c in word if not (_is_mark(c) or _is_format(c))]
+    return (len(letters) == 1
+            and not unicodedata.name(letters[0], "").startswith("CJK UNIFIED IDEOGRAPH"))
 
 
 def _parse_harmful_words(reply: str, prompt: str) -> list[str] | None:
     """The words of an extraction reply: none for a ``none``-like reply, else
     each token with list markers dropped and surrounding punctuation stripped.
 
-    Returns ``None`` for a malformed reply: more than ten words, a token that
-    is not a word (:func:`_is_word`), or a word ``prompt`` does not hold (in
-    any case).
+    A word named twice, in any case, counts once. Returns ``None`` for a
+    malformed reply: more than ten words, a token that is not a word
+    (:func:`_is_word`), a word of one letter that is no ideograph
+    (:func:`_is_lone_letter`), or a word ``prompt`` does not hold (in any
+    case).
     """
     raw = reply.strip()
     if raw.lower().strip(_SURROUNDING) in _TOKENBREAK_EMPTY_RESPONSES:
@@ -179,9 +202,13 @@ def _parse_harmful_words(reply: str, prompt: str) -> list[str] | None:
     if not words or len(words) > _MAX_HARMFUL_WORDS_RESPONSE_LEN:
         return None
     text = prompt.lower()
-    if all(_is_word(word) and word.lower() in text for word in words):
-        return words
-    return None
+    if not all(_is_word(word) and not _is_lone_letter(word) and word.lower() in text
+               for word in words):
+        return None
+    first_spelling: dict[str, str] = {}
+    for word in words:
+        first_spelling.setdefault(word.lower(), word)
+    return list(first_spelling.values())
 
 
 def harmful_words_gen(

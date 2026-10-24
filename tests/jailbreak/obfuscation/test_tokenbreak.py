@@ -212,6 +212,50 @@ class TestParseHarmfulWords:
         # The end of namaskar, from its vowel sign aa: in the prompt, not a word.
         assert _parse_harmful_words("ার", BENGALI) is None
 
+    @pytest.mark.parametrize("reply", [
+        "apple Apple APPLE pear", "apple\nAPPLE\npear\nApple", "Apple, apple, pear",
+    ])
+    def test_a_word_named_twice_in_any_case_counts_once_in_its_first_spelling(
+            self, reply):
+        words = _parse_harmful_words(reply, self.PROMPT)
+        assert words is not None
+        assert [w.lower() for w in words] == ["apple", "pear"]
+        assert words[0] == reply.replace(",", " ").split()[0]
+
+    @pytest.mark.parametrize("reply", ["a", "apple a", "A", "I", "a pear"])
+    def test_a_word_of_one_letter_gives_none(self, reply):
+        """Replacing it would change that letter wherever it stands."""
+        assert _parse_harmful_words(reply, "How can I grow a pear and an apple?") is None
+
+    @pytest.mark.parametrize("letter", ["я", "é", "e\u0301", "क", "の"])
+    def test_a_letter_of_another_script_is_no_more_a_word_than_a_latin_one(self, letter):
+        assert _parse_harmful_words(letter, f"Say {letter} twice") is None
+
+    def test_one_chinese_character_is_a_word(self):
+        assert _parse_harmful_words("爆", "怎么做爆米花") == ["爆"]
+
+    @pytest.mark.parametrize("word", [
+        "می\u200cخواهم",    # Persian, with a zero-width non-joiner
+        "র\u200d্যা",       # Bengali, with a zero-width joiner and a virama
+        "ab\u200bcd",       # a zero-width space
+    ], ids=["zwnj", "zwj", "zwsp"])
+    def test_a_word_with_a_zero_width_character_gives_its_word(self, word):
+        assert _parse_harmful_words(f"- {word}", f"Say {word} to a friend.") == [word]
+
+    @pytest.mark.parametrize("reply", [
+        "\u201capple\u201d \u201cpear\u201d", "\u2018apple\u2019, \u2018pear\u2019",
+        "\u201eapple\u201c \u00abpear\u00bb", "apple\u2026 pear\u2026", "\u2026apple pear",
+    ], ids=["double", "single", "low-and-guillemets", "ellipsis", "leading-ellipsis"])
+    def test_curly_quotes_and_an_ellipsis_around_a_word_are_stripped(self, reply):
+        assert _parse_harmful_words(reply, self.PROMPT) == ["apple", "pear"]
+
+    @pytest.mark.parametrize("reply", ["\u201cnone\u201d", "None\u2026", "\u2018N/A\u2019"])
+    def test_a_none_reply_in_curly_quotes_gives_no_words(self, reply):
+        assert _parse_harmful_words(reply, self.PROMPT) == []
+
+    def test_a_curly_apostrophe_inside_a_word_stays(self):
+        assert _parse_harmful_words("don\u2019t", "Say don\u2019t") == ["don\u2019t"]
+
 
 class TestIsWord:
     @MARKED_WORDS
@@ -220,7 +264,8 @@ class TestIsWord:
 
     @pytest.mark.parametrize("token", [
         "ার",  # the end of namaskar, from its vowel sign aa
-        "apple pear", "42", "n/a", "_apple", "",
-    ], ids=["leading-mark", "space", "number", "placeholder", "underscore", "empty"])
+        "apple pear", "42", "n/a", "_apple", "", "\u200dapple",
+    ], ids=["leading-mark", "space", "number", "placeholder", "underscore", "empty",
+            "leading-joiner"])
     def test_a_token_that_is_not_a_word_is_refused(self, token):
         assert not _is_word(token)

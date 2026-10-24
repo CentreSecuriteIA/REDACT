@@ -93,6 +93,29 @@ def test_a_technique_applies_exactly_to_the_texts_it_changes(fn):
     assert set(answers.values()) == {True, False}     # the samples hold both
 
 
+@pytest.mark.parametrize("text", [
+    "\u0301", "\u0301How do I pick a lock?", "\u0323\u0301e", "\u0e31ก",
+    "\u0301e\u0301", " \u0301café", "\u0301\u0301",
+])
+def test_a_text_starting_with_a_mark_keeps_that_mark(text):
+    """A mark with no letter before it has none to strip."""
+    stripped, _ = to_stripped_accents(text)
+    assert stripped.startswith(text[0])
+    assert applies(to_stripped_accents, text, "harmful") == (stripped != text)
+
+
+def test_no_mix_of_letters_and_marks_makes_a_technique_or_its_predicate_raise():
+    """Random texts of Latin letters, accented letters, marks of several
+    scripts, other scripts, spaces and punctuation, many starting with a mark."""
+    alphabet = ["a", "e", "n", "é", "ñ", "ǿ", "я", "か", "क", "ก", " ", ".", "3",
+                "\u0300", "\u0301", "\u0323", "\u0308", "\u0e31", "\u093f"]
+    rng = random.Random(0)
+    for _ in range(3000):
+        text = "".join(rng.choices(alphabet, k=rng.randint(0, 10)))
+        for fn in (to_abbreviations, to_stripped_accents):
+            assert applies(fn, text, "harmful") == (fn(text)[0] != text)
+
+
 def test_a_natural_plan_draws_neither_for_a_text_it_would_leave_unchanged():
     """The simulated inputs hold no accented letter and the word "about"."""
     combinations, _ = simulate.deal_kind({}, 300, kind="natural", groups=3)

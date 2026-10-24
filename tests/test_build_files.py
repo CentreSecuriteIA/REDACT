@@ -30,7 +30,7 @@ carries its answer mode and the length its spec dealt, none is.
 The plan pairs ASCII art with neither the emoji or unicode suffix, the emoji
 sprinkle, braille nor a translation, whose characters no font draws, so
 every attack of the runs is accepted. The natural kind draws only what the
-spec marks natural (71 techniques, the low and medium noise, the neutral
+spec marks natural (72 techniques, the low and medium noise, the neutral
 containers, six more answer languages, small talk and the benign roles
 among them since spec 1.2): one variation of the training run is a no-op the
 natural kind rejects, ``to_doubled_punctuation`` on a text with no full stop

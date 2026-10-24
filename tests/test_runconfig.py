@@ -45,6 +45,40 @@ def test_write_record_with_extra_and_spec(tmp_path):
     write_record("jailbreaks", data_dir=tmp_path, extra={"note": "hi"}, spec_version="1.0")
     m = read_record("jailbreaks", tmp_path)
     assert m["note"] == "hi" and m["spec_version"] == "1.0"
+    assert "rules" not in m
+
+
+def test_write_record_with_the_rules_of_each_kind(tmp_path):
+    rules = {"adversarial": "0123456789abcdef", "natural": None}
+    write_record("jailbreaks", data_dir=tmp_path, spec_version="1.3", rules=rules)
+    assert read_record("jailbreaks", tmp_path)["rules"] == rules
+
+
+def test_the_jailbreak_rules_are_read_off_each_kind_s_plan_file(tmp_path):
+    """The plan file beside each kind's manifest, the adversarial one where
+    ``manifest_path`` puts it; a kind without one has no id, a kind that is
+    off no entry."""
+    from dataclasses import replace
+
+    from redact.dataset import Manifest
+    from redact.dataset.planfile import write_plan
+    from redact.stages import jailbreak_rules
+
+    manifest = tmp_path / "elsewhere" / "attacks.manifest.jsonl"
+    manifest.parent.mkdir()
+    write_plan(manifest, {"seed": 1, "rules": "0123456789abcdef"})
+    ctx = _context("training", {"jailbreaks": {"manifest_path": str(manifest)}},
+                   tmp_path)
+    assert jailbreak_rules(ctx) == {"adversarial": "0123456789abcdef",
+                                    "natural": None}
+    natural = Manifest.sidecar(paths.variations_csv(tmp_path)).path
+    natural.parent.mkdir(parents=True)
+    write_plan(natural, {"seed": 1})
+    assert jailbreak_rules(ctx)["natural"] is None
+    write_plan(natural, {"seed": 1, "rules": "fedcba9876543210"})
+    assert jailbreak_rules(ctx)["natural"] == "fedcba9876543210"
+    off = replace(ctx, augmentations={**ctx.augmentations, "natural": None})
+    assert jailbreak_rules(off) == {"adversarial": "0123456789abcdef"}
 
 
 def _import_afresh(name: str):
@@ -1701,6 +1735,22 @@ def test_translation_is_planned_when_a_kind_switches_it_on(kind):
         "venice-uncensored"]
 
 
+def test_a_separate_check_model_is_planned_for_the_attacks_only_when_they_check():
+    """The eval type's attacks draw no technique a check model checks (no
+    typos, scenario or rewrite), so the jailbreak stage plans no check model;
+    the inputs stage still does, and the training type's attacks do."""
+    from redact.driver import _stage_models
+    from redact.recipe import load_dataset_type
+
+    models = _models(gen="venice-uncensored-fp8", check="llama-3.2-3b-debug")
+    evals = load_dataset_type("eval")["augmentations"]
+    assert _stage_models(models, ["jailbreaks"], evals) == [
+        "venice-uncensored-fp8", "translategemma-27b"]
+    assert "llama-3.2-3b-debug" in _stage_models(models, ["inputs"], evals)
+    training = load_dataset_type("training")["augmentations"]
+    assert "llama-3.2-3b-debug" in _stage_models(models, ["jailbreaks"], training)
+
+
 def test_the_default_attacks_plan_the_local_translator():
     from redact.driver import _stage_models
 
@@ -2004,6 +2054,15 @@ def test_run_pipeline_eval_jailbreaks_and_build(tmp_path, monkeypatch):
     jb_manifest = read_record("jailbreaks", tmp_path)
     assert jb_manifest["counts"]["rows"] == 6
     assert "spec_version" in jb_manifest
+    # Each kind's rules id, as its plan file records it: what tells files
+    # made before and after a change of the rules apart.
+    from redact.dataset import Manifest
+    from redact.dataset.planfile import read_plan
+    assert jb_manifest["rules"] == {
+        kind: read_plan(Manifest.sidecar(path(tmp_path)).path)["rules"]
+        for kind, path in (("adversarial", paths.jailbreaks_csv),
+                           ("natural", paths.variations_csv))}
+    assert all(isinstance(rid, str) for rid in jb_manifest["rules"].values())
     # The section recorded, the flat form read as the adversarial kind.
     assert jb_manifest["params"] == {"seed": 7}
     assert jb_manifest["dataset_type"] == "eval"

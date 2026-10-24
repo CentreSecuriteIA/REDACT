@@ -25,7 +25,9 @@ _BUDGET_OFF = {key: value for key, value in _BUDGET.items()
 def test_both_kinds_are_the_default_when_the_section_is_none():
     for kind in KINDS:
         assert resolve(None, kind) == resolve({}, kind) == resolve(defaults(), kind)
-    assert resolve(None, "natural") == defaults()["natural"]
+    # The file's natural kind, with the layer the spec has off by default denied.
+    assert resolve(None, "natural") == {
+        **defaults()["natural"], "layers": {"deny": ["rewrite"]}}
 
 
 def test_a_kind_given_as_none_is_off():
@@ -183,8 +185,15 @@ def test_the_packaged_defaults():
      "augmentations.adversarial has unknown key(s) ['max_complexty']; write only"),
     ({"natural": {"rounds": "escalation"}}, "natural",
      "augmentations.natural has unknown key(s) ['rounds']"),
-    ({"natural": {"layers": {"allow": ["hacking"]}}}, "natural",
-     "augmentations.natural.layers has unknown key(s) ['allow']; write only ['deny']"),
+    ({"natural": {"layers": {"only": ["hacking"]}}}, "natural",
+     "augmentations.natural.layers has unknown key(s) ['only']; write only "
+     "['allow', 'deny']"),
+    ({"natural": {"layers": {"allow": "rewrite"}}}, "natural",
+     "augmentations.natural.layers.allow must be a list of the layers to turn on, "
+     "[] for none, got 'rewrite'."),
+    ({"natural": {"layers": {"allow": ["rewrit"]}}}, "natural",
+     "augmentations.natural.layers.allow names 'rewrit', which is not a layer of "
+     "combination_spec.json; write one of"),
     ({"natural": {"layers": {"deny": ["hackin"]}}}, "natural",
      "augmentations.natural.layers.deny names 'hackin', which is not a layer of "
      "combination_spec.json; write one of"),
@@ -565,6 +574,33 @@ def test_allowing_only_translation_with_the_switch_off_raises():
         "true, or allow something else.")
 
 
+def test_a_layer_the_kind_denies_drops_what_its_allow_lists_name_of_it(caplog):
+    """The eval type's lists name framing, a hacking family: a run that
+    denies the layer over the type leaves framing out, says so, and keeps
+    the rest of the eval pool."""
+    from redact.recipe import load_dataset_type
+
+    base = load_dataset_type("eval")["augmentations"]
+    with caplog.at_level("WARNING", logger=_DROPPED):
+        kind = resolve({"adversarial": {"layers": {"deny": ["hacking"]}}},
+                       "adversarial", base=base)
+    (record,) = caplog.records
+    assert "the allow lists name framing (hacking)" in record.getMessage()
+    pool = technique_pool(kind)
+    assert not [fn for fn in pool if fn.layer == "hacking"]
+    assert len(pool) == 31      # the 36 less framing's five  # noqa: PLR2004
+
+
+def test_a_family_weight_of_a_layer_the_kind_denies_raises():
+    with pytest.raises(ValueError) as raised:
+        resolve({"adversarial": {"layers": {"deny": ["hacking"]},
+                                 "family_weights": {"framing": 2}}}, "adversarial")
+    assert str(raised.value) == (
+        "augmentations.adversarial.family_weights names 'framing', of the hacking "
+        "layer, which augmentations.adversarial.layers.deny names; take it out of "
+        "family_weights, or the layer out of layers.deny.")
+
+
 def test_switching_translation_off_over_the_eval_type_is_one_key(caplog):
     from redact.recipe import load_dataset_type
 
@@ -574,7 +610,8 @@ def test_switching_translation_off_over_the_eval_type_is_one_key(caplog):
                        base=base)
     assert len(caplog.records) == 1
     assert kind["family_weights"] == {}
-    assert kind["techniques"]["allow"] == ["to_refusal_then_comply"]
+    assert kind["techniques"]["allow"] == [
+        "to_refusal_then_comply", "to_use_past_tense"]
     pool = technique_pool(kind)
     from redact.jailbreak.pool import languages
     from tests.jailbreak.test_pool import EVAL_POOL
