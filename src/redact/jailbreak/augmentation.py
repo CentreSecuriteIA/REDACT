@@ -46,6 +46,10 @@ _KIND_KEYS = {
 _ROUND_KEYS = ("exact_techniques", "max_complexity", "max_obfuscations",
                "layer_rates", "allow_request_obfuscation")
 _RATE_KEYS = ("rewrite", "hacking", "manipulation", "requests", "request_obfuscation")
+#: Not the apply order (the spec's ``layer_order``, manipulation last): the
+#: order a round writes its ``include_<layer>`` keys in, so the key order of
+#: every plan file's ``rounds``, which ``tests/fixtures/stage_files.json``
+#: pins. A resume compares the rounds as values, whatever their key order.
 _LAYERS = ("rewrite", "hacking", "manipulation", "obfuscation", "requests")
 #: The layer the spec has off by default: a kind denies it unless its
 #: ``layers.allow`` names it, and a round says ``include_rewrite`` only for a
