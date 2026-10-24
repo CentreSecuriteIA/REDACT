@@ -3,6 +3,7 @@ data file, expanded into technique entries by ``load_spec``."""
 
 import json
 import shutil
+from collections.abc import Callable
 
 import pytest
 
@@ -187,6 +188,50 @@ def test_a_spec_that_breaks_a_rule_raises_when_read(tmp_path, change, message):
     with pytest.raises(ValueError) as raised:
         _read_changed(tmp_path, change)
     assert str(raised.value).startswith(message)
+
+
+def _refuses(table) -> Callable[[dict], None]:
+    return lambda s: s.__setitem__("request_obfuscation_refuses", table)
+
+
+@pytest.mark.parametrize(("change", "message"), [
+    (_refuses(["suffixes"]),
+     "combination_spec.json: request_obfuscation_refuses must be an object"),
+    (_refuses({"encode_light": ["suffixes"]}),
+     "combination_spec.json: request_obfuscation_refuses['encode_light'] must be "
+     "keyed by a family a request obfuscation is drawn from, one of ['encode', "
+     "'translation']"),
+    (_refuses({"framing": ["suffixes"]}),
+     "combination_spec.json: request_obfuscation_refuses['framing'] must be keyed"),
+    (lambda s: s.__setitem__("request_obfuscation_allowed_families", ["translation"])
+     or s["request_obfuscation_refuses"].__setitem__("encode", ["structural"]),
+     "combination_spec.json: request_obfuscation_refuses['encode'] must be keyed "
+     "by a family a request obfuscation is drawn from, one of ['translation']"),
+    (_refuses({"translation": ["suffixes", "framing"]}),
+     "combination_spec.json: request_obfuscation_refuses['translation'] must be a "
+     "list of obfuscation-layer families"),
+    (_refuses({"translation": ["fsh"]}),
+     "combination_spec.json: request_obfuscation_refuses['translation'] must be a "
+     "list of obfuscation-layer families"),
+    (_refuses({"translation": ["answer_format"]}),
+     "combination_spec.json: request_obfuscation_refuses['translation'] must be a "
+     "list of obfuscation-layer families"),
+], ids=["not an object", "encode_light", "a family never drawn", "encode not allowed",
+        "a hacking family", "a manipulation family", "a request family"])
+def test_a_refuses_table_that_could_not_act_raises_when_read(tmp_path, change, message):
+    """Phase 5 draws the request obfuscation from a translation or a light
+    encoding (``encode``, the light sensitive-word encodings among its
+    members), after every other layer's pick but the obfuscations': another
+    key is never read, and a family of another layer is drawn already."""
+    with pytest.raises(ValueError) as raised:
+        _read_changed(tmp_path, change)
+    assert str(raised.value).startswith(message)
+
+
+def test_a_light_encoding_drawn_as_the_request_obfuscation_may_refuse_too(tmp_path):
+    table = {"translation": ["suffixes"], "encode": ["structural", "neutral_container"]}
+    spec = _read_changed(tmp_path, _refuses(table))
+    assert spec["request_obfuscation_refuses"] == table
 
 
 def test_the_packaged_spec_reads_as_it_is(tmp_path):
