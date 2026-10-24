@@ -84,7 +84,7 @@ def _dealer(seed: int) -> Dealer:
 def test_the_rewrite_layer_comes_first_and_holds_16_techniques_in_three_families():
     spec = load_spec()
     assert spec["layer_order"] == [
-        "rewrite", "hacking", "manipulation", "obfuscation", "requests"]
+        "rewrite", "hacking", "obfuscation", "requests", "manipulation"]
     assert spec["layer_rates"]["rewrite"] == 0
     assert {name for name, family in spec["families"].items()
             if family["layer"] == "rewrite"} == {
@@ -315,7 +315,7 @@ def test_the_spec_may_name_only_layers_of_its_layer_order_off_by_default(
     assert str(raised.value) == (
         "combination_spec.json: layers_off_by_default must be a list of layers of "
         f"layer_order, got {off!r}; write names of ['rewrite', 'hacking', "
-        "'manipulation', 'obfuscation', 'requests'].")
+        "'obfuscation', 'requests', 'manipulation'].")
 
 
 @pytest.mark.parametrize("kind", KINDS)

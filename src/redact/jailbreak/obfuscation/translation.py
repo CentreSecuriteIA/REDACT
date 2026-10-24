@@ -28,9 +28,9 @@ MACHINE_TRANSLATION_ROLE = "machine_translation"
 #: ``configs/jailbreak/languages.json`` whose ``translation`` is true, in its
 #: order, each with its ``name``, ``slug`` (``to_<slug>``), ``complexity``
 #: and ``script`` (the ISO 15924 code of its script, the suffix of its
-#: GlotLID labels; the rules keep a translation into a script other than
-#: :data:`~redact.jailbreak.technique.LATIN` from a ``needs_latin``
-#: technique). The tables below are keyed by the slug.
+#: GlotLID labels; the family rules keep a translation into a script other
+#: than :data:`~redact.jailbreak.technique.LATIN` from every ``needs_latin``
+#: technique, which a test asserts). The tables below are keyed by the slug.
 LANGUAGES = [row for row in data_rows("languages.json") if row["translation"]]
 
 #: The code a machine-translation model is sent for each language: its

@@ -24,8 +24,15 @@ from redact.dataset.planfile import coverage_path, plan_record, write_plan
 
 from .chain import combine_techniques
 from .pool import TRANSLATION
-from .sampling import DEFAULT_MAX_COMPLEXITY, REQUEST_SCOPE, sample_combination
-from .technique import FIRST_VERSION, LATIN, applies, load_spec
+from .sampling import (
+    DEFAULT_MAX_COMPLEXITY,
+    HEAVY_ENCODINGS,
+    REQUEST_SCOPE,
+    deal_key,
+    is_heavy_encoding,
+    sample_combination,
+)
+from .technique import FIRST_VERSION, applies, heavy_encoding_weight, load_spec
 
 logger = logging.getLogger(__name__)
 
@@ -38,19 +45,22 @@ _SHORT = 2
 UNIT_HEADROOM = 3
 
 
-def _observe(dealer: Dealer, combined: Callable) -> None:
+def _observe(dealer: Dealer, combined: Callable, *, heavy_apart: bool = False) -> None:
     """Count in ``dealer`` what one unit's draw ``combined`` holds: each
     technique's first family, the technique itself (a member of that family)
     and its layer, the request obfuscation when it has one, and the
     complexity it spent, the request obfuscation's included. The request
     obfuscation's family is counted under :data:`REQUEST_SCOPE`, as phase 5
-    deals it, so it does not count against the obfuscation layer's."""
+    deals it, so it does not count against the obfuscation layer's. With
+    ``heavy_apart`` (a budget draw), a heavy full-text encoding is counted
+    under :data:`HEAVY_ENCODINGS`, as phase 4 deals it
+    (:func:`~redact.jailbreak.sampling.deal_key`)."""
     request_obfuscation = getattr(combined, "request_obfuscation", None)
     for fn in getattr(combined, "techniques", []):
-        families = getattr(fn, "families", None) or []
-        if families:
-            scope = REQUEST_SCOPE if fn is request_obfuscation else ""
-            dealer.counts[scope + families[0]] += 1
+        scope = REQUEST_SCOPE if fn is request_obfuscation else ""
+        key = deal_key(fn, heavy_apart=heavy_apart and not scope)
+        if key:
+            dealer.counts[scope + key] += 1
         dealer.members[fn.__name__] += 1
         layer = getattr(fn, "layer", None)
         if layer is not None:
@@ -101,7 +111,9 @@ def assign_combination(
     kept draw is counted in ``dealer`` (its families, techniques, layers,
     request obfuscation and complexity), so the group's next unit is dealt
     after it. ``sample_kwargs`` go to :func:`sample_combination`. An empty
-    list is the identity.
+    list is the identity. A budget draw's heavy full-text encodings are
+    counted under :data:`~redact.jailbreak.sampling.HEAVY_ENCODINGS`, as its
+    obfuscations deal them; a count draw's as encode's.
 
     With ``budget`` ``"group"`` and a ``dealer``, every draw of a budget
     round may spend the unit's allowance (:func:`_allowance`, with
@@ -109,8 +121,8 @@ def assign_combination(
     ``budget`` ``None`` or ``"unit"``, no dealer, or a count draw
     (``exact_techniques``, which has no budget) leaves the draw as it was.
     """
-    if (budget == "group" and dealer is not None
-            and sample_kwargs.get("exact_techniques") is None):
+    by_budget = sample_kwargs.get("exact_techniques") is None
+    if budget == "group" and dealer is not None and by_budget:
         mean = sample_kwargs.get("max_complexity", DEFAULT_MAX_COMPLEXITY)
         sample_kwargs["max_complexity"] = _allowance(dealer, mean, max_unit_complexity)
     used_set = {tuple(c) for c in used}
@@ -125,7 +137,7 @@ def assign_combination(
     if kept is None:
         return []
     if dealer is not None:
-        _observe(dealer, kept)
+        _observe(dealer, kept, heavy_apart=by_budget)
     return _names(kept)
 
 
@@ -206,7 +218,10 @@ def plan_run(
     (``family_weights``, equal by default) and each technique of a family as
     often as the others the unit may take, evenly across the group and
     independent of the input order; a row's ``settings`` record the weights
-    when given. A round whose settings say ``budget`` ``"group"`` banks the
+    when given. In a budget round the heavy full-text encodings are dealt
+    beside ``encode`` at the spec's ``heavy_encoding_weight`` times
+    encode's weight (:data:`~redact.jailbreak.sampling.HEAVY_ENCODINGS`).
+    A round whose settings say ``budget`` ``"group"`` banks the
     complexity over the group (:func:`assign_combination`): a unit may spend
     what the units before it left of ``max_complexity``, up to
     ``max_unit_complexity``, and the group's mean stays at or below
@@ -214,7 +229,19 @@ def plan_run(
     manifest first, and a coverage table after it; with ``verbose``, one line
     then says what the plan costs in model calls (:func:`log_model_calls`).
     Returns ``manifest_path``.
+
+    Raises:
+        ValueError: ``family_weights`` names
+            :data:`~redact.jailbreak.sampling.HEAVY_ENCODINGS`, which is no
+            family (a kind's section refuses it too): its weight is the
+            spec's times encode's.
     """
+    if HEAVY_ENCODINGS in (family_weights or {}):
+        raise ValueError(
+            f"family_weights names {HEAVY_ENCODINGS!r}, the heavy full-text "
+            "encodings' slot, which is no family: a budget draw deals it at the "
+            "spec's heavy_encoding_weight times encode's weight, so weight "
+            "encode to move it.")
     base_kwargs = dict(sample_kwargs or {})
     if layer_rates is not None:
         base_kwargs = {"sampling_probs": dict(layer_rates), **base_kwargs}
@@ -236,9 +263,13 @@ def plan_run(
     used_by_row: dict[int, list[tuple]] = defaultdict(list)
     recorded = {"family_weights": dict(family_weights)} if family_weights else {}
     # The request obfuscation's families are dealt under REQUEST_SCOPE and
-    # take the weights of the same families.
+    # take the weights of the same families. A budget round's heavy
+    # full-text encodings are dealt under HEAVY_ENCODINGS, at the spec's
+    # weight times encode's.
     weights = dict(family_weights or {})
     weights.update({REQUEST_SCOPE + name: w for name, w in weights.items()})
+    if heavy_encoding_weight() is not None:
+        weights[HEAVY_ENCODINGS] = heavy_encoding_weight() * weights.get("encode", 1.0)
 
     # Yielded to the manifest one at a time: the plan is never held whole.
     def units():
@@ -353,36 +384,44 @@ def plan_inputs(
         seed=seed, rounds=rounds, pool=sorted(fn.__name__ for fn in pool),
         family_weights=family_weights, layer_rates=layer_rates,
         spec_version=load_spec().get("version", FIRST_VERSION),
-        rules=rules_id(pool))
+        rules=rules_id(pool, rounds=rounds))
 
 
 def _without_comments(entry: dict) -> dict:
     return {key: value for key, value in entry.items() if not key.startswith("_")}
 
 
-def rules_id(pool: list[Callable]) -> str:
-    """The content id of what a draw from ``pool`` reads off the spec: its
-    ``layer_order``, ``layer_max_picks`` and ``layer_rates``, the
-    obfuscations it keeps from the manipulation layer and the families a
-    request obfuscation may draw; the ``layer``, ``within_layer_order`` and
-    ``cross_incompatible_with`` of each family of the pool; and each pool
-    technique's ``families``, ``complexity``, ``cross_incompatible_with``,
-    ``encode_weight``, ``needs_latin`` and ``script``, as its tags hold
-    them. A spec comment changes nothing. Two pools with the same names
-    give the same id while these stay as they are, so a resume can tell
-    whether a kept plan's combinations were drawn by today's rules."""
+def rules_id(pool: list[Callable], *, rounds: list[dict]) -> str:
+    """The content id of what the draws of a plan of ``pool`` by ``rounds``
+    (each round's sampler settings, as its plan file records them) read
+    off the spec: its ``layer_order`` (the order a combination applies in,
+    which put the manipulation layer last in the eval release),
+    ``layer_max_picks`` and ``layer_rates``, the obfuscations it keeps from
+    the manipulation layer; when a round allows the request obfuscation (a
+    budget round with ``allow_request_obfuscation``), the families a request
+    obfuscation may draw and the families it keeps out of a combination;
+    when a round is a budget round and the pool holds a heavy full-text
+    encoding (:func:`~redact.jailbreak.sampling.is_heavy_encoding`), the
+    ``heavy_encoding_weight`` it deals them at; the ``layer``,
+    ``within_layer_order`` and ``cross_incompatible_with`` of each family of
+    the pool; and each pool technique's ``families``, ``complexity``,
+    ``cross_incompatible_with`` and ``encode_weight``, as its tags hold
+    them. A spec comment changes nothing, nor does a key no draw of the plan
+    reads (a count-only plan never reads the request obfuscation's lists or
+    the heavy weight). Two plans with the same pool names and rounds give
+    the same id while these stay as they are, so a resume can tell whether
+    a kept plan's combinations were drawn by today's rules."""
     spec = load_spec()
     techniques = sorted(pool, key=lambda fn: fn.__name__)
     families = sorted({family for fn in techniques
                        for family in getattr(fn, "families", ())})
+    budget = [r for r in rounds if r.get("exact_techniques") is None]
     record = {
         "layer_order": spec["layer_order"],
         "layer_max_picks": spec.get("layer_max_picks", {}),
         "layer_rates": _without_comments(spec.get("layer_rates", {})),
         "manipulation_blocked_obfuscation": _without_comments(
             spec.get("manipulation_blocked_obfuscation", {})),
-        "request_obfuscation_allowed_families": spec.get(
-            "request_obfuscation_allowed_families", []),
         "families": {
             name: {key: spec["families"].get(name, {}).get(key) for key in (
                 "layer", "within_layer_order", "cross_incompatible_with")}
@@ -394,10 +433,15 @@ def rules_id(pool: list[Callable]) -> str:
                 "cross_incompatible_with": list(
                     getattr(fn, "cross_incompatible_with", ())),
                 "encode_weight": getattr(fn, "encode_weight", None),
-                "needs_latin": getattr(fn, "needs_latin", False),
-                "script": getattr(fn, "script", LATIN),
             } for fn in techniques},
     }
+    if any(r.get("allow_request_obfuscation") for r in budget):
+        record["request_obfuscation_allowed_families"] = spec.get(
+            "request_obfuscation_allowed_families", [])
+        record["request_obfuscation_refuses"] = _without_comments(
+            spec.get("request_obfuscation_refuses", {}))
+    if budget and any(is_heavy_encoding(fn) for fn in techniques):
+        record["heavy_encoding_weight"] = spec.get("heavy_encoding_weight")
     return content_id(json.dumps(record, sort_keys=True))
 
 

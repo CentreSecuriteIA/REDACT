@@ -4,8 +4,12 @@ import random
 from collections.abc import Callable
 
 from .chain import combine_techniques, in_layer_order
-from .rules import compatible, request_obfuscation_candidates
-from .technique import load_spec
+from .rules import (
+    after_request_obfuscation,
+    compatible,
+    request_obfuscation_candidates,
+)
+from .technique import heavy_encoding_weight, load_spec
 
 #: The complexity a budget draw may spend when it is given none.
 DEFAULT_MAX_COMPLEXITY = 6
@@ -15,9 +19,38 @@ DEFAULT_MAX_COMPLEXITY = 6
 #: do not starve the layer's ``encode`` and ``sensitive_words``.
 REQUEST_SCOPE = "request_obfuscation:"
 
+#: The name a budget draw's obfuscations (phase 4) deal the heavy full-text
+#: encodings under, beside the ``encode`` family, at the spec's
+#: ``heavy_encoding_weight`` times encode's weight. Of complexity 3, one fits
+#: only a unit whose earlier picks leave 3 points, and dealt as encode's
+#: members it was seldom the family's turn on such a unit, since the light
+#: members kept encode's count high. It is not a family: ``family_weights``
+#: cannot name it.
+HEAVY_ENCODINGS = "encode:heavy"
+
+
+def is_heavy_encoding(fn: Callable) -> bool:
+    """Whether ``fn`` is a heavy full-text encoding: first family ``encode``,
+    ``encode_weight`` heavy (the three heavy ``to_sensitive_words_encode_*``
+    are ``sensitive_words`` techniques first, and encode only the words a
+    model marks)."""
+    return ((getattr(fn, "families", None) or [""])[0] == "encode"
+            and getattr(fn, "encode_weight", None) == "heavy")
+
+
+def deal_key(fn: Callable, *, heavy_apart: bool = False) -> str:
+    """The name a dealer counts ``fn`` under: its first family or, with
+    ``heavy_apart`` and a spec that gives ``heavy_encoding_weight``,
+    :data:`HEAVY_ENCODINGS` for a heavy full-text encoding
+    (:func:`is_heavy_encoding`)."""
+    if heavy_apart and is_heavy_encoding(fn) and heavy_encoding_weight() is not None:
+        return HEAVY_ENCODINGS
+    return (getattr(fn, "families", None) or [""])[0]
+
 
 def _pick_by_family(
     rng: random.Random, candidates: list[Callable], dealer=None, scope: str = "",
+    *, heavy_apart: bool = False,
 ) -> Callable:
     """Pick a family, then a technique within it.
 
@@ -28,11 +61,15 @@ def _pick_by_family(
     ``rng``, so a group's families and each family's members come out even.
     The dealer counts the families under ``scope`` + their names
     (:data:`REQUEST_SCOPE` for the request obfuscation); the members' counts
-    are shared.
+    are shared. With ``heavy_apart`` (a budget draw's obfuscations) and a
+    dealer, the heavy full-text encodings are dealt under
+    :data:`HEAVY_ENCODINGS`, as a family of their own (:func:`deal_key`);
+    without a dealer they stay encode's members.
     """
+    apart = heavy_apart and dealer is not None
     family_map: dict[str, list[Callable]] = {}
     for fn in candidates:
-        fam = (getattr(fn, "families", None) or [""])[0]
+        fam = deal_key(fn, heavy_apart=apart)
         family_map.setdefault(fam, []).append(fn)
     families = list(family_map)
     if dealer is None:
@@ -107,13 +144,18 @@ def sample_combination(
             many techniques (best-effort if the pool runs out). The budget knobs are
             ignored in this mode.
         dealer: The plan's :class:`~redact.dataset.dealing.Dealer` for the unit's
-            group, which deals the layers, families and techniques; ``None``
-            draws each from ``rng``.
+            group, which deals the layers, families and techniques, and in
+            budget mode the heavy full-text encodings of the obfuscations
+            under :data:`HEAVY_ENCODINGS` (a count draw deals them as
+            encode's members); ``None`` draws each from ``rng``.
 
     Returns:
         A combined technique function, or an identity function if nothing was
-        selected. In budget mode its ``request_obfuscation`` is the request
-        obfuscation it holds (applied last), or ``None``.
+        selected, its techniques in the order they apply: the layer order
+        (``rewrite``, ``hacking``, ``obfuscation``, ``requests``,
+        ``manipulation``), the request obfuscation right after the request.
+        In budget mode its ``request_obfuscation`` is the request obfuscation
+        it holds, or ``None``.
     """
     if exact_techniques is not None:
         return sample_exact_combination(
@@ -210,16 +252,20 @@ def sample_combination(
             request_obfuscation = _pick_by_family(
                 rng, req_obfusc_candidates, dealer, scope=REQUEST_SCOPE)
             _commit(request_obfuscation)
+            current_pool = after_request_obfuscation(request_obfuscation, current_pool)
             obfuscation_slots -= 1
 
-    # Phase 4: Obfuscation (up to the slots left), what the budget leaves
+    # Phase 4: Obfuscation (up to the slots left), what the budget leaves.
+    # A dealer deals the heavy full-text encodings apart from encode's
+    # other members (HEAVY_ENCODINGS), so they get a turn on the units with
+    # 3 points left.
     if include_obfuscation:
         obfusc_count = 0
         while obfusc_count < obfuscation_slots:
             candidates = [f for f in current_pool if getattr(f, "layer", None) == "obfuscation"]
             if not candidates:
                 break
-            pick = _pick_by_family(rng, candidates, dealer)
+            pick = _pick_by_family(rng, candidates, dealer, heavy_apart=True)
             _commit(pick)
             obfusc_count += 1
 
@@ -230,11 +276,13 @@ def sample_combination(
 
     # Order the regular picks here and chain in that exact order. The request
     # obfuscation is the one pick whose position is *not* its layer's: it
-    # obfuscates the finished request, so it runs after the request template;
-    # sorting it with the others would move it back into the obfuscation slot.
+    # obfuscates the finished request, so it runs right after the request
+    # template; sorting it with the others would move it back into the
+    # obfuscation slot. The manipulation layer, last in the layer order,
+    # still comes after it: it inserts the finished question.
     ordered = in_layer_order(fn for fn in selected if fn is not request_obfuscation)
     if request_obfuscation is not None:
-        ordered.append(request_obfuscation)
+        ordered.insert(ordered.index(request) + 1, request_obfuscation)
     combined = combine_techniques(*ordered, sort_by_hierarchy=False)
     combined.request_obfuscation = request_obfuscation
     return combined
@@ -278,7 +326,10 @@ def sample_exact_combination(
         include_requests: Layer toggle, as ``include_hacking``.
 
     Returns:
-        A combined technique function (``"identity"`` if ``n <= 0`` or nothing picked).
+        A combined technique function (``"identity"`` if ``n <= 0`` or nothing
+        picked), its techniques sorted into layer order
+        (:func:`~redact.jailbreak.chain.in_layer_order`), the manipulation
+        layer last.
     """
     layer_included = {
         "hacking": include_hacking,

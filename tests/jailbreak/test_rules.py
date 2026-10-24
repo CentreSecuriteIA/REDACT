@@ -232,8 +232,49 @@ def test_tokenbreak_split_and_ascii_art_are_never_planned_together():
 
 @pytest.mark.parametrize("technique", [
     "to_adversarial_suffix_punctuation", "to_adversarial_suffix_fragments",
-    "to_base64", "to_morse", "to_rot47"])
+    "to_rot47", "to_separator"])
 def test_ascii_art_keeps_the_rest_of_their_families(technique):
+    assert _joins(technique, "to_ascii_art") and _joins("to_ascii_art", technique)
+
+
+_HEAVY_FULL_TEXT = [
+    "to_base64", "to_unicode_escape", "to_ascii_ordinal", "to_morse", "to_braille",
+    "to_hex", "to_binary", "to_html_entities", "to_base32", "to_base85"]
+
+
+@pytest.mark.parametrize("technique", _HEAVY_FULL_TEXT)
+def test_ascii_art_refuses_the_heavy_full_text_encodings_either_way(technique):
+    """A code for every character lengthens the text, so its drawing often
+    runs past the cap (unicode escapes are rejected from about 140
+    characters of input), and both disguise the whole text: one is enough."""
+    assert not _joins(technique, "to_ascii_art")
+    assert not _joins("to_ascii_art", technique)
+
+
+def test_every_heavy_full_text_encoding_the_spec_has_is_kept_from_ascii_art():
+    """The ten of ``_HEAVY_FULL_TEXT`` and any heavy ``encode`` technique added
+    later: a heavy member of ``encode`` alone (not the sensitive-word forms,
+    which encode only marked words) names ``ascii_art`` in its own entry."""
+    heavy = {fn.__name__ for fn in POOL
+             if fn.families == ["encode"] and fn.encode_weight == "heavy"}
+    assert heavy == set(_HEAVY_FULL_TEXT)
+    assert [name for name in sorted(heavy) if _joins(name, "to_ascii_art")] == []
+
+
+@pytest.mark.parametrize("technique", [
+    "to_sensitive_words_encode_base64", "to_sensitive_words_encode_unicode",
+    "to_sensitive_words_encode_ascii", "to_sensitive_words_encode_rot13",
+    "to_sensitive_words_encode_separator"])
+def test_ascii_art_keeps_the_sensitive_word_encodings_heavy_and_light(technique):
+    """They encode only the words a model marks, so the text stays short
+    and mostly plain: the heavy ones are not the heavy full-text encodings."""
+    assert _joins(technique, "to_ascii_art") and _joins("to_ascii_art", technique)
+
+
+@pytest.mark.parametrize("technique", [
+    "to_rot13", "to_rot18", "to_leetspeak_basic", "to_reversed_characters",
+    "to_url_encoding", "to_caesar_cipher", "to_atbash"])
+def test_ascii_art_keeps_the_light_encodings_that_write_ascii(technique):
     assert _joins(technique, "to_ascii_art") and _joins("to_ascii_art", technique)
 
 
@@ -245,14 +286,6 @@ def test_ascii_art_refuses_the_non_ascii_encodings_either_way(technique):
     noise, fullwidth forms), which no font draws."""
     assert not _joins(technique, "to_ascii_art")
     assert not _joins("to_ascii_art", technique)
-
-
-@pytest.mark.parametrize("technique", [
-    "to_hex", "to_binary", "to_base32", "to_base85", "to_caesar_cipher",
-    "to_atbash", "to_reversed_characters", "to_url_encoding", "to_html_entities"])
-def test_ascii_art_keeps_the_ascii_output_encodings(technique):
-    """These write ASCII, so a font can draw them."""
-    assert _joins(technique, "to_ascii_art") and _joins("to_ascii_art", technique)
 
 
 @pytest.mark.parametrize("tokenbreak", [
@@ -337,7 +370,7 @@ def test_a_new_latin_only_cipher_refuses_a_translation_into_another_script(
 
 @pytest.mark.parametrize("technique", [
     "to_adversarial_suffix_punctuation", "to_adversarial_suffix_fragments",
-    "to_base64", "to_morse", "to_rot47"])
+    "to_rot47", "to_separator"])
 def test_ascii_art_draws_a_font_for_the_rest_of_their_families(technique):
     from redact.jailbreak.obfuscation.ascii_art import to_ascii_art
 
@@ -413,7 +446,10 @@ def test_a_fake_turn_refuses_what_fsh_and_dap_refuse_and_a_wrapper_either_way(
         fake, other):
     """The fsh/dap list (continuation, indirect, framing, persona, cognitive),
     the persona templates, and the structural and neutral containers: an
-    invented turn is a conversation, not a document to wrap."""
+    invented turn was a conversation, not a document to wrap. That reason
+    went with the old order (the manipulation layer applies last, so the
+    turn stays outside a wrapper); the refusal is kept as it was, and this
+    test holds it."""
     assert not _joins(fake, other)
     assert not _joins(other, fake)
 
@@ -573,9 +609,22 @@ def test_a_translation_refuses_a_payload_split_either_way(translation, split):
     assert not _joins(split, translation)
 
 
+@pytest.mark.parametrize("translation", ["to_french", "to_thai", "to_hindi"])
+@pytest.mark.parametrize("encoding", [
+    "to_rot13", "to_leetspeak_basic", "to_separator", "to_hex", "to_base64",
+    "to_unicode_escape", "to_morse", "to_braille",
+    "to_sensitive_words_encode_rot13", "to_sensitive_words_encode_base64"])
+def test_a_translation_refuses_an_encoding_either_way(translation, encoding):
+    """Both rewrite the whole text, so one is enough: every member of the
+    ``encode`` family, light or heavy, the ten sensitive-word encodings
+    included, and into any script, whichever is picked first."""
+    assert not _joins(translation, encoding)
+    assert not _joins(encoding, translation)
+
+
 @pytest.mark.parametrize("other", [
-    "to_adversarial_suffix_punctuation", "to_base64", "to_rot13", "to_json",
-    "to_csv_row", "to_summarize", "to_psychopath_persona", "to_fictional_world"])
+    "to_adversarial_suffix_punctuation", "to_json", "to_csv_row", "to_summarize",
+    "to_psychopath_persona", "to_fictional_world"])
 def test_a_translation_keeps_the_families_it_has_no_rule_against(other):
     assert _joins("to_french", other) and _joins(other, "to_french")
 
@@ -592,6 +641,34 @@ def test_wording_refuses_the_other_word_level_steps_and_ascii_art_either_way(
     the key or the puzzles are long."""
     assert not _joins(wording, other)
     assert not _joins(other, wording)
+
+
+_SENSITIVE_WORDS = [
+    "to_sensitive_words_split", "to_sensitive_words_variables",
+    "to_synonym_substitution", "to_sensitive_words_encode_rot13",
+    "to_sensitive_words_encode_base64"]
+_TOKENBREAKS = [
+    "to_tokenbreak_prepend", "to_tokenbreak_split", "to_tokenbreak_delimiter"]
+
+
+@pytest.mark.parametrize("sensitive", _SENSITIVE_WORDS)
+@pytest.mark.parametrize("tokenbreak", _TOKENBREAKS)
+def test_sensitive_words_and_tokenbreak_refuse_each_other_either_way(
+        sensitive, tokenbreak):
+    """Each has the model mark the text's words, so a second marking call would
+    read a text the first changed: one marking step per text, as for wording
+    and word art."""
+    assert not _joins(sensitive, tokenbreak)
+    assert not _joins(tokenbreak, sensitive)
+
+
+@pytest.mark.parametrize("marking", _SENSITIVE_WORDS + _TOKENBREAKS)
+@pytest.mark.parametrize("other", [
+    "to_rewrite_with_typos_low", "to_lowercase", "to_adversarial_suffix_punctuation",
+    "to_json", "to_csv_row", "to_summarize", "to_psychopath_persona",
+    "to_fictional_world"])
+def test_a_word_marking_step_keeps_the_families_it_has_no_rule_against(marking, other):
+    assert _joins(marking, other) and _joins(other, marking)
 
 
 @pytest.mark.parametrize("wording", ["to_pseudonym_substitution", "to_word_game"])
@@ -656,15 +733,22 @@ def test_a_latin_only_encoding_refuses_a_translation_into_another_script(first, 
     assert not _joins(first, then)
 
 
-@pytest.mark.parametrize(("first", "then"), [
-    ("to_rot13", "to_french"),
-    ("to_vietnamese", "to_leetspeak_basic"),
-    ("to_base64", "to_thai"),
-    ("to_bengali", "to_separator"),
-    ("to_morse", "to_greek"),
-])
-def test_a_latin_script_translation_or_another_encoding_still_joins(first, then):
-    assert _joins(first, then) and _joins(then, first)
+def test_each_latin_only_technique_is_refused_beside_a_non_latin_translation():
+    """``needs_latin`` marks what would change nothing in a text of another
+    script, and no rule reads it: the family rules do the work, a translation
+    refusing ``encode`` (the Latin-only ciphers and their sensitive-word
+    forms) and ``noise`` (the random capitals, scrambled letters and keyboard
+    typos). A new Latin-only technique in a family a translation does not
+    refuse fails here, until the spec keeps the two apart."""
+    from redact.jailbreak.technique import LATIN
+
+    latin_only = [fn for fn in POOL if fn.needs_latin]
+    into_another_script = [fn for fn in POOL
+                           if "translation" in fn.families and fn.script != LATIN]
+    assert latin_only and into_another_script
+    joined = [(a.__name__, b.__name__) for a in latin_only for b in into_another_script
+              if b in compatible([a], [b]) or a in compatible([b], [a])]
+    assert joined == []
 
 
 _PERSUASIONS = ["to_persuade_evidence_based", "to_persuade_scarcity"]
@@ -716,6 +800,42 @@ def test_a_combination_holds_one_technique_of_the_rewrite_layer(first, second):
     "to_psychopath_persona", "to_fsh_random_short", "to_summarize"])
 def test_a_rewrite_joins_the_other_layers_it_has_no_rule_against(rewrite, other):
     assert _joins(rewrite, other) and _joins(other, rewrite)
+
+
+@pytest.mark.parametrize(("first", "second"), [
+    ("translation", "encode"),
+    ("sensitive_words", "tokenbreak"),
+], ids=["translation-encode", "sensitive_words-tokenbreak"])
+def test_no_planned_unit_holds_two_families_the_spec_keeps_apart(first, second):
+    """The default attacks, dealt, in a budget round and in a count round of
+    two: a unit never holds a technique of each. A technique counts under all
+    its families (a sensitive-word encoding is also ``encode``)."""
+    from tests.jailbreak import simulate
+
+    def units(rounds):
+        rows, pool = simulate.plan_kind(
+            {"rounds": rounds} if rounds else {}, simulate.inputs(900, groups=3))
+        by = {fn.__name__: fn for fn in pool}
+        return [{family for name in row["combination"] for family in by[name].families}
+                for row in rows]
+
+    for rounds in (None, [{"exact_techniques": 2}]):
+        held = units(rounds)
+        assert any(first in families for families in held)
+        assert [families for families in held if {first, second} <= families] == []
+
+
+def test_the_heavy_full_text_encodings_never_meet_ascii_art_in_a_planned_unit():
+    """The rule is on each encoding's own entry, not its family's."""
+    from tests.jailbreak import simulate
+
+    rows, pool = simulate.plan_kind(
+        {"rounds": [{"exact_techniques": 2}]}, simulate.inputs(2000, groups=3))
+    assert {"to_ascii_art"} <= {name for row in rows for name in row["combination"]}
+    held = [row["combination"] for row in rows
+            if "to_ascii_art" in row["combination"]
+            and set(_HEAVY_FULL_TEXT) & set(row["combination"])]
+    assert held == []
 
 
 def test_every_pair_is_refused_or_admitted_both_ways():
@@ -781,12 +901,91 @@ def test_a_budget_draw_counts_its_request_obfuscation_against_max_obfuscations(
         names = [t.__name__ for t in fn.techniques]
         obfuscations = sum(t.layer == "obfuscation" for t in fn.techniques)
         assert obfuscations <= max_obfuscations, (seed, names)
-        last = getattr(fn, "request_obfuscation", None)
-        if last is not None:
-            assert names[-1] == last.__name__, (seed, names)
+        held = getattr(fn, "request_obfuscation", None)
+        if held is not None:
+            # Right after the request it obfuscates; only the manipulation
+            # layer, which inserts the finished question, comes after it.
+            at = names.index(held.__name__)
+            assert fn.techniques[at - 1].layer == "requests", (seed, names)
+            assert {t.layer for t in fn.techniques[at + 1:]} <= {"manipulation"}, (
+                seed, names)
 
 
 def test_request_obfuscation_is_light_encoding_or_translation():
     names = {fn.__name__ for fn in request_obfuscation_candidates(POOL)}
     assert {"to_rot13", "to_french"} <= names
     assert not names & {"to_base64", "to_ascii_art", "to_summarize"}
+
+
+# --- a translation drawn as the request obfuscation ------------------------------
+# It applies right after the request, to the finished request (a manipulation
+# technique, the only one that may follow it, never meets a translation), so it
+# would translate a suffix, a wrapper's keys or a container's lines: the spec's
+# request_obfuscation_refuses keeps them out of its combination. A translation
+# drawn in phase 4 runs before those steps and meets none of these rules.
+
+_AFTER_A_TRANSLATION = [
+    "to_adversarial_suffix_punctuation", "to_adversarial_suffix_unicode",
+    "to_json", "to_xml", "to_markdown", "to_csv_row", "to_code_comment",
+    "to_email_message"]
+
+
+def test_a_request_obfuscation_that_translates_keeps_out_what_it_would_translate():
+    from redact.jailbreak.rules import after_request_obfuscation
+
+    left = {fn.__name__ for fn in after_request_obfuscation(BY_NAME["to_french"], POOL)}
+    assert not left & set(_AFTER_A_TRANSLATION)
+    assert {fn.__name__ for fn in POOL} - left == {
+        fn.__name__ for fn in POOL
+        if {"suffixes", "structural", "neutral_container"} & set(fn.families)}
+
+
+@pytest.mark.parametrize("pick", ["to_rot13", "to_sensitive_words_encode_rot13"])
+def test_a_request_obfuscation_that_is_not_a_translation_keeps_nothing_out(pick):
+    from redact.jailbreak.rules import after_request_obfuscation
+
+    assert after_request_obfuscation(BY_NAME[pick], POOL) == POOL
+
+
+_SMALL_POOL = [BY_NAME[name] for name in [
+    "to_french", "to_summarize", "to_fictional_world",
+    "to_adversarial_suffix_punctuation", "to_json", "to_csv_row"]]
+
+
+def _drawn(request_obfuscation: bool, seeds=range(200)):
+    """The combinations of a small pool where a scene and a request are sure
+    and the request obfuscation is allowed or not, drawn without and with a
+    dealer."""
+    for seed in seeds:
+        yield sample_combination(
+            random.Random(seed), _SMALL_POOL, max_complexity=12, max_obfuscations=3,
+            allow_request_obfuscation=request_obfuscation,
+            sampling_probs=dict.fromkeys(
+                ("hacking", "requests", "request_obfuscation"), 1.0),
+            include_manipulation=False,
+            dealer=Dealer(key=(seed,)) if seed % 2 else None)
+
+
+def _translates_last(fn) -> bool:
+    return "translation" in getattr(fn.request_obfuscation, "families", ())
+
+
+def test_a_translation_drawn_last_comes_without_a_suffix_wrapper_or_container():
+    translating = [fn for fn in _drawn(True) if _translates_last(fn)]
+    assert len(translating) > 20     # noqa: PLR2004
+    for fn in translating:
+        names = {t.__name__ for t in fn.techniques}
+        assert not names & set(_AFTER_A_TRANSLATION), names
+
+
+def test_a_translation_drawn_last_still_joins_a_scene_and_a_request():
+    names = {frozenset(t.__name__ for t in fn.techniques)
+             for fn in _drawn(True) if _translates_last(fn)}
+    assert names == {frozenset({"to_french", "to_summarize", "to_fictional_world"})}
+
+
+def test_a_translation_drawn_in_phase_4_still_joins_a_suffix_wrapper_container():
+    held = {t.__name__ for fn in _drawn(False)
+            if "to_french" in {t.__name__ for t in fn.techniques}
+            for t in fn.techniques}
+    assert {"to_adversarial_suffix_punctuation", "to_json", "to_csv_row"} <= held

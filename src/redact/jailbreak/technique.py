@@ -52,6 +52,10 @@ ENCODE_WEIGHTS = ("light", "heavy", None)
 MAX_COMPLEXITY = 3
 #: A spec ``layer_rates`` key that is not a layer: the request obfuscation's.
 _REQUEST_OBFUSCATION = "request_obfuscation"
+#: What ``request_obfuscation_allowed_families`` may name, and the family
+#: the request obfuscation it allows is drawn from: the key of
+#: ``request_obfuscation_refuses`` its rules are read under.
+_REQUEST_OBFUSCATION_FAMILIES = {"translation": "translation", "encode_light": "encode"}
 
 DISCARDED = "DISCARDED"
 
@@ -74,8 +78,9 @@ _VERSION = re.compile(r"[0-9]+(\.[0-9]+)*")
 
 #: The ISO 15924 code of the Latin script. A translation technique's
 #: ``script`` names the script it writes (``obfuscation/translation.py``);
-#: a technique tagged ``needs_latin`` changes only Latin text, so the rules
-#: keep it from a translation into any other.
+#: a technique tagged ``needs_latin`` changes only Latin text. No rule reads
+#: either: the family rules keep every such technique from every translation
+#: (``translation`` refuses ``encode`` and ``noise``), and a test asserts it.
 LATIN = "Latn"
 
 TechniqueResult = tuple[str, str]
@@ -139,7 +144,9 @@ def read_spec(path: Path) -> dict:
     its ``layers.allow`` names them
     (:func:`redact.jailbreak.augmentation.resolve`). ``decode_hint_rate``
     (absent is 0) is the share of hinted encodings written with a hint
-    (:func:`decode_hint_rate`).
+    (:func:`decode_hint_rate`). ``heavy_encoding_weight`` (absent is none)
+    is the weight the heavy full-text encodings are dealt at beside the
+    ``encode`` family in a budget draw (:func:`heavy_encoding_weight`).
 
     What :func:`tag` does not read off a technique is checked here: each
     family's keys (:data:`FAMILY_KEYS`) and ``layer``, the spec's
@@ -152,8 +159,13 @@ def read_spec(path: Path) -> dict:
             is malformed; a family has an unknown key or a layer that is
             not in ``layer_order``; ``layers_off_by_default`` is not a list
             of layers of ``layer_order``; a ``layer_rates`` entry is not a
-            number from 0 to 1 for a layer or ``request_obfuscation``; or
-            ``decode_hint_rate`` is not a number from 0 to 1.
+            number from 0 to 1 for a layer or ``request_obfuscation``;
+            ``request_obfuscation_refuses`` is not an object keyed by the
+            families a request obfuscation is drawn from, each with a list
+            of obfuscation-layer families
+            (:func:`_check_request_obfuscation_refuses`);
+            ``decode_hint_rate`` is not a number from 0 to 1; or
+            ``heavy_encoding_weight`` is not a number above 0 and at most 1.
     """
     spec = json.loads(Path(path).read_text(encoding="utf-8"))
     layers, off = spec["layer_order"], spec.get("layers_off_by_default", [])
@@ -167,7 +179,15 @@ def read_spec(path: Path) -> dict:
             f"combination_spec.json: decode_hint_rate must be a number from 0 "
             f"to 1, the share of hinted encodings written with a hint, got "
             f"{rate!r}.")
+    heavy = spec.get("heavy_encoding_weight", 1)
+    if not (_is_rate(heavy) and heavy > 0):
+        raise ValueError(
+            f"combination_spec.json: heavy_encoding_weight must be a number "
+            f"above 0 and at most 1, the weight the heavy full-text encodings "
+            f"are dealt at beside the encode family in a budget draw, got "
+            f"{heavy!r}; leave it out to deal them as encode's members.")
     _check_families(spec["families"], layers)
+    _check_request_obfuscation_refuses(spec)
     for key, rate in spec.get("layer_rates", {}).items():
         if not key.startswith("_") and (
                 key not in [*layers, _REQUEST_OBFUSCATION] or not _is_rate(rate)):
@@ -229,6 +249,45 @@ def _check_families(families: dict, layers: list) -> None:
                 f"{layers}, got {family.get('layer')!r}.")
 
 
+def _check_request_obfuscation_refuses(spec: dict) -> None:
+    """Raise unless the spec's ``request_obfuscation_refuses`` is an object
+    whose every entry (``_`` keys are comments) is keyed by a family a
+    request obfuscation is drawn from and holds a list of obfuscation-layer
+    families: what :func:`redact.jailbreak.rules.after_request_obfuscation`
+    reads. The keys mirror ``request_obfuscation_allowed_families``:
+    ``translation``, and ``encode`` for the light encodings it calls
+    ``encode_light`` (the light sensitive-word encodings are ``encode``'s
+    too). The request obfuscation is drawn after every other layer's pick
+    but the obfuscations', so a family of another layer, drawn already,
+    would refuse nothing, as would another key."""
+    table = spec.get("request_obfuscation_refuses", {})
+    if not isinstance(table, dict):
+        raise ValueError(
+            f"{_SPEC}: request_obfuscation_refuses must be an object of the "
+            f"families a request obfuscation is drawn from, got {table!r}.")
+    drawn = sorted(_REQUEST_OBFUSCATION_FAMILIES[name]
+                   for name in spec.get("request_obfuscation_allowed_families", [])
+                   if name in _REQUEST_OBFUSCATION_FAMILIES)
+    obfuscations = {name for name, family in spec["families"].items()
+                    if family.get("layer") == "obfuscation"}
+    for key, refused in table.items():
+        if key.startswith("_"):
+            continue
+        if key not in drawn:
+            raise ValueError(
+                f"{_SPEC}: request_obfuscation_refuses[{key!r}] must be keyed by a "
+                f"family a request obfuscation is drawn from, one of {drawn} "
+                "(encode for the light encodings request_obfuscation_allowed_"
+                "families calls encode_light); no other key is read.")
+        if not isinstance(refused, list) or any(
+                name not in obfuscations for name in refused):
+            raise ValueError(
+                f"{_SPEC}: request_obfuscation_refuses[{key!r}] must be a list of "
+                f"obfuscation-layer families of the spec, got {refused!r}; the "
+                "request obfuscation is drawn after every other layer's pick, so "
+                "it can keep out only an obfuscation.")
+
+
 def _checked_row(row: dict, family: str, generator: dict,
                  families: list[str]) -> None:
     """Raise unless the data row ``row`` of its generator's file (its slug
@@ -271,6 +330,15 @@ def decode_hint_rate() -> float:
     encoding (``obfuscation/decode_hints.json``) writes its text with a hint
     to decode it; 0 when the spec gives none."""
     return load_spec().get("decode_hint_rate", 0)
+
+
+def heavy_encoding_weight() -> float | None:
+    """The spec's ``heavy_encoding_weight``: the weight, times the ``encode``
+    family's, that a budget draw's obfuscations deal the heavy full-text
+    encodings at, under a name of their own beside the family
+    (:data:`redact.jailbreak.sampling.HEAVY_ENCODINGS`); ``None`` when the
+    spec gives none, and they are dealt as encode's members."""
+    return load_spec().get("heavy_encoding_weight")
 
 
 def data_rows(file: str, folder: Path = _CONFIGS) -> list[dict]:
@@ -357,8 +425,10 @@ def tag(funcs: list[Callable]) -> None:
 
     ``families``, ``complexity`` (0-3), ``requires_llm``, ``requires_benign``,
     ``encode_weight`` (``"light"``, ``"heavy"`` or None), ``needs_latin``
-    (whether it changes only Latin text, so a translation into another
-    script would leave it nothing to do; False when absent), ``max_tokens``
+    (whether it changes only Latin text, which a translation into another
+    script would leave it nothing to do on; no rule reads it, a test asserts
+    the family rules refuse it beside each such translation; False when
+    absent), ``max_tokens``
     (the reply limit of its model calls, None for the model's default) and
     ``cross_incompatible_with`` (the families the technique itself may not
     join, beside its families' own) come from the technique's entry;

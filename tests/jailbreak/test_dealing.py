@@ -283,17 +283,13 @@ def test_the_default_attacks_draw_every_technique_of_their_pool(section):
     """No step's picks starve another step's families: the request
     obfuscation once counted its picks as the obfuscation layer's, and 14
     encode and sensitive_words techniques were never drawn. A deprecated
-    technique, or one no simulated input may take, is not asked for. The
-    ten heavy encodings are the rarest draws (one of complexity 3 fits only
-    a unit whose earlier picks leave 3 points, and the other families of
-    complexity 3, the word art's among them, take those units too): over
-    4,000 units in three groups, each is drawn 4 to 5 times at seed 42 under
-    the unit budget (3 to 7 over seeds 42 to 46) and 7 to 9 times under the
-    group budget (4 to 9). to_braille, which ascii_art refuses, is drawn 5
-    times under the unit budget and 7 under the group budget, at seeds 42
-    and 43 alike. When the layers of one rate were locked in or out of phase
-    (commit 590babe), it was drawn 2 times at seed 42 and 14 at 43 under the
-    unit budget; one plan now holds them all."""
+    technique, or one no simulated input may take, is not asked for. When
+    the layers of one rate were locked in or out of phase (commit 590babe),
+    some techniques were drawn 2 times at seed 42 and 14 at 43; one plan now
+    holds them all. The eval release's rules left the ten heavy full-text
+    encodings 5 draws in all under the unit budget and 10 under the group
+    budget, five and two of them never, until they got a dealing slot of
+    their own (``sampling.HEAVY_ENCODINGS``)."""
     units = 4000
     drawn, pool = simulate.deal_kind(section, units, groups=3, seed=42)
     table = simulate.shares(drawn, pool)
@@ -301,6 +297,54 @@ def test_the_default_attacks_draw_every_technique_of_their_pool(section):
     asked = [fn.__name__ for fn in pool if not getattr(fn, "deprecated", None)
              and any(applies(fn, text, "harmful") for text in texts)]
     assert [name for name in asked if table[name]["count"] == 0] == []
+
+
+# The ten heavy full-text encodings, dealt in a slot of their own beside encode
+# in a budget draw (sampling.HEAVY_ENCODINGS, at the spec's
+# heavy_encoding_weight, 0.2).
+_HEAVY = ("to_base64", "to_unicode_escape", "to_ascii_ordinal", "to_morse",
+          "to_braille", "to_hex", "to_binary", "to_html_entities", "to_base32",
+          "to_base85")
+
+
+def test_the_default_attacks_draw_each_heavy_encoding_a_few_times(default_shares):
+    """3,000 units in three groups at seed 42: 45 draws of the ten, 3 to 6
+    each. The slot fixes the total, not a count for each encoding, and the
+    total grows with the number of groups, since each group's dealer starts
+    it at 0: 44 or 45 in one group, 45 in three and 46 to 50 in ten (seeds 42
+    to 50), 52 to 56 in 46 uneven groups of 30 to 100 units; the least drawn
+    of the ten is drawn 3 or 4 times in one and three groups, 0 to 3 times in
+    ten. Dealt as encode's members they got 12, two of them never; dealt as a
+    family of their own (a weight of 1), about 200."""
+    counts = [default_shares[name]["count"] for name in _HEAVY]
+    assert 36 <= sum(counts) <= 60  # noqa: PLR2004
+    assert min(counts) >= 3  # noqa: PLR2004
+
+
+@pytest.mark.parametrize("seed", [1, 2, 3, 7, 42, 43, 44, 45, 46, 123])
+def test_no_group_of_the_default_attacks_goes_without_a_heavy_encoding_or_ascii_art(
+        seed):
+    """Every group of 100 units, in one, three and ten groups, draws a heavy
+    full-text encoding (one of the ten, not each of them) and ASCII art: at
+    least 2 and 4 times over seeds 1 to 3, 7, 42 to 46 and 123. Dealt as
+    encode's members, the heavy encodings were missing from 1 to 9 groups in
+    29 of those 30 plans. ASCII art refuses many families (the hacking and
+    manipulation techniques, a translation, the wrappers, wording, word art,
+    the payload split, the heavy encodings), so it is drawn on the units left
+    with none of them."""
+    per_group = 100
+    for groups in (1, 3, 10):
+        rows, _ = simulate.plan_kind(
+            {}, simulate.inputs(per_group * groups, groups), seed=seed)
+        by_group: dict[str, Counter] = {}
+        for row in rows:
+            by_group.setdefault(row["category"], Counter()).update(row["combination"])
+        assert len(by_group) == groups
+        without = {category: [what for what, drawn in (
+            ("heavy", sum(counts[name] for name in _HEAVY)),
+            ("ascii_art", counts["to_ascii_art"])) if not drawn]
+            for category, counts in by_group.items()}
+        assert {category: what for category, what in without.items() if what} == {}
 
 
 def test_no_family_of_the_default_attacks_thins_out_in_a_group():
@@ -343,9 +387,11 @@ def test_a_kept_plan_replays_each_row_as_it_was_recorded(tmp_path):
     manifest = tmp_path / "jb.manifest.jsonl"
     plan_run(_one_group(40), technique_pool(kind), manifest_path=manifest, seed=42,
              iterations=len(rounds), settings_per_iteration=rounds, verbose=False)
-    # A row as an earlier planner wrote it: the request obfuscation last.
+    # Rows as earlier planners wrote them: the request obfuscation last, and
+    # the manipulation layer before the obfuscations and the request.
     recorded = [row["combination"] for row in Manifest(manifest).load()]
     recorded.append(["to_persona_roleplay", "to_answer_as_tutorial", "to_rot13"])
+    recorded.append(["to_fsh_random_short", "to_rot13", "to_use_past_tense"])
     every = registry(all_techniques())
     replayed = [[fn.__name__ for fn in combination_of(names, every).techniques]
                 for names in recorded]
@@ -447,11 +493,31 @@ _BUDGETS = [
 # unit's rng and its group's counts the rest of its draw (179 of the 240 dealt
 # units, 75 of the 200 undealt draws). The dealer's jitter per unit (in place
 # of one offset per layer and group, which locked the layers of one rate in or
-# out of phase for a whole group) moved it last: each layer falls on other
+# out of phase for a whole group) moved it once more: each layer falls on other
 # units of its group, at the same rate, and through the units' rng and counts
 # the rest of their draws follow (235 of the 240 dealt units; the 200 undealt
-# draws, which ask no dealer, do not move).
-_PINNED_DRAWS = "b7a07d7e3e1eb68c10737e1b57a49ef2d8e5b672247d18a914b66cb69f5c4a1c"
+# draws, which ask no dealer, do not move). The rule keeping a translation from
+# every encode technique moved it in the eval release: a draw that held both
+# now takes another technique, and through the unit's rng and its group's
+# counts the rest of its draw (128 of the 240 dealt units, 19 of the 200
+# undealt draws). The script rule it made dead, a Latin-only technique beside a
+# translation into another script, is gone. The rule keeping ASCII art from
+# the nine heavy full-text encodings that did not refuse it (braille did) moved
+# it once more: a draw that held both takes another technique (4 of the 240
+# dealt units, 1 of the 200 undealt draws). The rule keeping sensitive_words and
+# tokenbreak apart, one model marking step per text, moved it again: a draw that
+# held both takes another technique, and through the unit's rng and its group's
+# counts the rest of its draw (159 of the 240 dealt units, 30 of the 200
+# undealt draws). The manipulation layer applying last, around the finished
+# question, moved it once more, by order alone: the same techniques are drawn,
+# and a draw that holds a manipulation technique beside a later step names it
+# last (48 of the 240 dealt units, 19 of the 200 undealt draws). The heavy
+# full-text encodings' dealing slot moved it again: a budget draw's
+# obfuscations deal them under a name of their own beside encode, so the
+# group's family counts and the names the dealer breaks a tie among change
+# from the first obfuscation pick on (219 of the 240 dealt units; the 200
+# undealt draws ask no dealer and do not move).
+_PINNED_DRAWS = "93982088b48668f879bb867db3cdaf1665975b1561731774159496f26b5f01ed"
 
 
 def test_the_budget_draws_are_the_pinned_ones():
@@ -581,7 +647,7 @@ def test_a_unit_without_a_request_takes_no_request_obfuscation(dealt):
             allow_request_obfuscation=True,
             sampling_probs={"requests": 0.5, "request_obfuscation": 1.0})
         if dealer is not None:
-            JP._observe(dealer, combined)
+            JP._observe(dealer, combined, heavy_apart=True)
         held.append((any(fn.layer == "requests" for fn in combined.techniques),
                      combined.request_obfuscation is not None))
     assert [request for request, obfuscated in held if obfuscated] == [True] * sum(
@@ -613,11 +679,51 @@ def test_the_request_obfuscation_takes_the_family_weights(monkeypatch):
     assert families == {"translation": 180, "encode": 60, "sensitive_words": 60}
 
 
+def _translates_after_a_request(names: list[str], by: dict) -> bool:
+    """Whether a translation applies after the request in ``names``: it is
+    then the request obfuscation (a phase-4 translation runs before the
+    requests), wherever it stands."""
+    layers = [by[name].layer for name in names]
+    return "requests" in layers and any(
+        "translation" in by[name].families
+        for name in names[layers.index("requests") + 1:])
+
+
+def test_a_planned_request_obfuscation_that_translates_holds_nothing_to_translate():
+    """A translation applied after a request can only be the request
+    obfuscation. Of the 3,000 units about 500 take one, and none holds what
+    it would translate: a suffix, a wrapper's keys or a container's lines."""
+    rows, pool = simulate.plan_kind({}, simulate.inputs(_SIMULATED, groups=3))
+    by = {fn.__name__: fn for fn in pool}
+    translating = [row["combination"] for row in rows
+                   if _translates_after_a_request(row["combination"], by)]
+    assert len(translating) > _SIMULATED // 8
+    kept_out = {"suffixes", "structural", "neutral_container"}
+    assert [names for names in translating
+            if kept_out & {family for name in names for family in by[name].families}
+            ] == []
+
+
 # The eval type's plan of 300 inputs in three groups at its seed, 43, pinned
 # before the packaged attacks turned the request obfuscation on. The eval
 # pool and its draws are pinned (fixtures/eval_pool.json); they move only in
-# an eval review.
-_PINNED_EVAL_DRAWS = "95083fbb5221e4b1bd39125bfa297bc06bfc51ddbdadde2ad1eb45a6d59b7afb"
+# an eval review. The eval release moved it, first by the rule keeping a
+# translation from every encode technique: the pool lost 40 of its 335
+# pairs (each of its eight translations beside each of its five encodings),
+# and 283 of the 300 round-2 units are dealt another pair, the group counts
+# following the lost pairs (round 1 draws one technique and does not move).
+# In a plan of 3,000 units, 304 round-2 units held such a pair. Then ASCII art
+# refusing the heavy full-text encodings took 4 more pairs (base64, unicode
+# escapes, ASCII ordinals and morse beside it; 291 of 630 remain; braille had
+# the rule), 485 of the 3,000 round-2 units of that plan holding one after
+# the first change, and 279 of the 300 round-2 units are dealt another pair.
+# The rule keeping sensitive_words and tokenbreak apart did not move it: the
+# pool holds neither. The manipulation layer applying last moved it again, by
+# order alone: the same pairs go to the same units, and the 86 of the 300
+# round-2 units that hold fsh or dap beside to_json, to_xml, to_markdown,
+# to_refusal_then_comply or to_use_past_tense (40 of the 291 pairs) name it
+# last; a plan of 3,000 inputs holds 858 such units of its 3,000 round-2 ones.
+_PINNED_EVAL_DRAWS = "83b556e3453a5b709b14907db5d649e4b7e289a4e61796af2be771ddbc76d221"
 
 
 def _eval_draws(section: dict) -> list[list[str]]:

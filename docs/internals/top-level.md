@@ -215,8 +215,9 @@ tied to code, so they come from the package only.
    the merged `params`, `models`, `counts`, `sources`, `serving` (the roles
    the stage calls), `dataset_type` and its `dataset_type_hash`, with a
    `config_dir` that folder and `config_files`, and for the jailbreak stage
-   `spec_version` and the resolved `augmentation` section
-   ([running.md](../running.md#what-lands-on-disk)). Leaving
+   `spec_version`, `rules` (`stages.jailbreak_rules`: the `rules` id each
+   kind's plan file records, by kind) and the resolved `augmentation`
+   section ([running.md](../running.md#what-lands-on-disk)). Leaving
    `telemetry.stage` logs the stage's replies cut at the token limit, per
    model.
 9. `finally`: clear the run's serving. When the run has a plan: join the

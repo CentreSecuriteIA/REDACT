@@ -31,7 +31,7 @@ from redact.llms.client import ModelClient
 from . import pool as pool_module
 from .manipulation import get_or_generate_benign_data
 from .plan import coverage_path, plan_inputs, plan_run, rules_id
-from .rules import compatible
+from .rules import after_request_obfuscation, compatible
 from .technique import FIRST_VERSION, load_spec, version_key
 from .units import error_row_of, is_pending, pending_units, row_of
 from .variants import write_variants
@@ -406,25 +406,40 @@ def _library_change(
 
 def _rules_change(made_with: dict, registry: dict[str, Callable]) -> str | None:
     """How the rules the plan whose plan file holds ``made_with`` was drawn
-    by compare with today's, for the techniques of its pool
+    by compare with today's, for the techniques of its pool and its rounds
     (:func:`~redact.jailbreak.plan.rules_id`): ``None`` when they are the
     same, ``"changed"`` when they differ, and ``"unknown"`` when the plan
     file, written before it recorded them, has no ``rules``."""
     if "rules" not in made_with:
         return "unknown"
     planned = [registry[name] for name in made_with.get("pool", ()) if name in registry]
-    return None if rules_id(planned) == made_with["rules"] else "changed"
+    same = rules_id(planned, rounds=made_with["rounds"]) == made_with["rules"]
+    return None if same else "changed"
 
 
 def _refused(names: list[str], registry: dict[str, Callable]) -> bool:
-    """Whether today's rules refuse the combination ``names``: one of its
-    techniques may not join those before it (:func:`compatible`; the rules
-    bind both ways, so the order does not matter). A name no technique has
-    is left to the replay, which raises on it."""
+    """Whether today's rules refuse the combination ``names``, in the order
+    its plan records: one of its techniques may not join those before it
+    (:func:`compatible`; the rules bind both ways, so the order does not
+    matter), or its request obfuscation keeps out one of the others
+    (:func:`after_request_obfuscation`). The request obfuscation is the
+    obfuscation right after the request, in every plan's order: the other
+    obfuscations apply before the request, and only a manipulation
+    technique after the request obfuscation (before the eval release the
+    manipulation layer applied before the obfuscations, and the request
+    obfuscation was last). A name no technique has is left to the replay,
+    which raises on it."""
     if any(name not in registry for name in names):
         return False
     fns = [registry[name] for name in names]
-    return any(not compatible(fns[:i], [fn]) for i, fn in enumerate(fns))
+    if any(not compatible(fns[:i], [fn]) for i, fn in enumerate(fns)):
+        return True
+    layers = [getattr(fn, "layer", None) for fn in fns]
+    for i in range(1, len(fns)):
+        if layers[i - 1] == "requests" and layers[i] == "obfuscation":
+            rest = fns[:i] + fns[i + 1:]
+            return len(after_request_obfuscation(fns[i], rest)) < len(rest)
+    return False
 
 
 def _warn_since_plan(
@@ -436,16 +451,22 @@ def _warn_since_plan(
     versions it was made at and is resumed at, what the library added and
     retired, whether its rules changed or are not recorded (``rules``, as
     :func:`_rules_change` gives it), and the ``refused`` of its ``pending``
-    units whose combination today's rules refuse."""
+    units whose combination today's rules refuse. When the rules changed or
+    are not recorded it also says that each combination applies in the
+    order the plan records, which may not be today's."""
     logger.warning(
         "%s: since the plan %s was made (spec version %s, now %s), the library "
         "added %s and retired %s%s; %d of its %d pending units hold a "
         "combination today's rules refuse. A resume keeps the plan as it was "
         "made: it does not draw the added techniques, still runs the retired "
-        "ones and the refused combinations it names, and its rows record spec "
-        "version %s. Run with resume=False to plan again (the stage starts "
+        "ones and the refused combinations it names%s, and its rows record spec "
+        "version %s. Run with resume=False to plan again%s (the stage starts "
         "over).", label, plan_name, made_at, now, added, retired,
         ", and changed the rules a combination is drawn by" if rules == "changed"
         else ", and the plan file does not record the rules it was drawn by"
         if rules == "unknown" else "",
-        refused, pending, made_at)
+        refused, pending,
+        ", applies each combination in the order it records (one drawn before "
+        "the eval release applies its manipulation technique second, not last)"
+        if rules else "",
+        made_at, " by today's rules and order" if rules else "")

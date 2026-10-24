@@ -61,7 +61,7 @@ from redact.dataset import (
     take_per_group,
     write_concat,
 )
-from redact.dataset.planfile import coverage_path, plan_path, variants_path
+from redact.dataset.planfile import coverage_path, plan_path, read_plan, variants_path
 from redact.jailbreak import augmentation as augmentation_kinds
 from redact.jailbreak import pool as jailbreak_pool
 from redact.jailbreak.obfuscation import langid
@@ -1797,17 +1797,37 @@ def _jailbreaks_kwargs(ctx: RunContext) -> dict:
     )
 
 
-def _jailbreaks_files(ctx: RunContext) -> tuple[list[Path], dict]:
-    """The file of each kind that is on: a kind left out is on, one given as
-    None is off."""
+def _jailbreak_kinds(ctx: RunContext) -> dict[str, tuple[Path, Path]]:
+    """The CSV and the manifest of each kind that is on: a kind left out is
+    on, one given as None is off."""
     given = _params(ctx, "jailbreaks")
     output, variations = given.get("output_path"), given.get("variations_path")
-    files = {
-        "adversarial": Path(output) if output else paths.jailbreaks_csv(ctx.data_dir),
-        "natural": _variations_csv(ctx.data_dir, output, variations),
+    adversarial = Path(output) if output else paths.jailbreaks_csv(ctx.data_dir)
+    natural = _variations_csv(ctx.data_dir, output, variations)
+    manifest = given.get("manifest_path")
+    kinds = {
+        "adversarial": (adversarial, Path(manifest) if manifest
+                        else Manifest.sidecar(adversarial).path),
+        "natural": (natural, Manifest.sidecar(natural).path),
     }
-    return [path for kind, path in files.items()
-            if ctx.augmentations.get(kind, {}) is not None], {}
+    return {kind: files for kind, files in kinds.items()
+            if ctx.augmentations.get(kind, {}) is not None}
+
+
+def _jailbreaks_files(ctx: RunContext) -> tuple[list[Path], dict]:
+    """The file of each kind that is on."""
+    return [out for out, _manifest in _jailbreak_kinds(ctx).values()], {}
+
+
+def jailbreak_rules(ctx: RunContext) -> dict[str, str | None]:
+    """The ``rules`` id of each jailbreak kind that is on, as its plan file
+    records it (:func:`redact.jailbreak.plan.rules_id`): what the kind's
+    rows were drawn by, which tells files made before and after a change of
+    the rules apart while the spec version stays. ``None`` for a kind with
+    no plan file (one that wrote nothing), or one written before it
+    recorded the rules."""
+    return {kind: (read_plan(manifest) or {}).get("rules")
+            for kind, (_out, manifest) in _jailbreak_kinds(ctx).items()}
 
 
 def _build_kwargs(ctx: RunContext) -> dict:

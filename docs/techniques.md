@@ -26,17 +26,27 @@ are listed [below](#retired-techniques).
 ## Layers
 
 A combination applies its techniques in layer order: `rewrite`, then
-`hacking`, then `manipulation`, then `obfuscation`, then `requests`; the
+`hacking`, then `obfuscation`, then `requests`, then `manipulation`; the
 request obfuscation, when allowed (the packaged attacks allow it, for half their units, all
-among those that drew a request; the eval type does not), comes last, after the request; a
-combination without a request takes none. Within the obfuscation layer,
+among those that drew a request; the eval type does not), comes right after the request,
+before the manipulation layer; a combination without a request takes none.
+The manipulation layer comes last since the eval release: `fsh`, `dap` and
+`fake_turns` put the finished question, obfuscated and with its request
+around it, among their examples or after their invented turn, so the
+obfuscations, the request and the model steps (a typo rewrite, a marking
+call) read and change the question alone, and the examples stay as written.
+A selected `fsh` or `dap` variant picks its examples on the clean input
+([below](#what-the-families-do)). A plan made before the eval release
+applied the manipulation layer second; a kept plan replays the order its
+manifest recorded, and its resume warns that the rules changed (the plan
+file's `rules` id holds the layer order). Within the obfuscation layer,
 families apply in the order of their `within_layer_order`, numbered in tens
 so a family added later slots in between: the whole-text rewrites first
 (`translation` 10, `typos` 20, `casual_writing` 30, `noise` 35), then the word-level
 steps (`sensitive_words` 40, `wording` 45, `tokenbreak` 50, `word_art` 55), so a rewrite cannot undo a
 split, an encoded word or a code name, then `suffixes` 60, `payload_split` 65, `encode` 70, `structural` and
 `neutral_container` 80 (each excludes the other, so they share the place)
-and `ascii_art` 90, the outermost. A plan made before this order applied
+and `ascii_art` 90, the outermost obfuscation. A plan made before this order applied
 `sensitive_words` and `tokenbreak` first; a kept plan replays the order its
 manifest recorded, and a fresh plan applies translation, typos, casual
 writing and noise before the word-level steps (a fresh plan never pairs a
@@ -62,9 +72,9 @@ on. (`to_rewrite`, despite its name, is an `indirect` request technique.)
 |---|---|---|---|
 | `rewrite` | 3 | 16 | at most 1 |
 | `hacking` | 4 | 35 | at most 1 |
-| `manipulation` | 3 | 15 | at most 1 |
 | `obfuscation` | 14 | 110 | no cap |
 | `requests` | 12 | 68 | at most 1 |
+| `manipulation` | 3 | 15 | at most 1 |
 | all | 36 | 244 | |
 <!-- END layers -->
 
@@ -88,9 +98,6 @@ that call a model call the generation model.
 | hacking | `framing` | `role_framing` |  | 5 | no | no | `to_fictional_world`, `to_noble_goal`, `to_nefarious_goal`, `to_high_stake`, `to_no_moral_constraints` |
 | hacking | `persona` | `role_framing` |  | 14 | yes | no | `to_invented_persona`, `to_psychopath_persona`, `to_alien_persona`, `to_radical_politician_persona`, `to_cult_leader_persona`, `to_very_advanced_ai_persona`, `to_cartel_leader_persona`, `to_artist_persona`, `to_deformed_scientist_persona`, `to_actor_persona`, `to_someone_from_the_future_persona`, `to_mercenary_persona`, `to_underground_hacker_persona`, `to_anarchist_philosopher_persona` |
 | hacking | `persona_template` | `role_framing` |  | 11 | no | no | `to_dan_persona_template`, `to_stan_persona_template`, `to_dude_persona_template`, `to_developer_mode_persona_template`, `to_aim_persona_template`, `to_evil_confidant_persona_template`, `to_opposite_mode_persona_template`, `to_unfiltered_oracle_persona_template`, `to_rogue_ai_persona_template`, `to_maintenance_mode_persona_template`, `to_liberated_model_persona_template` |
-| manipulation | `dap` | `example_priming` |  | 6 | `to_dap_selected_short`, `to_dap_selected_long`, `to_dap_selected_many` | yes | `to_dap_random_short`, `to_dap_random_long`, `to_dap_selected_short`, `to_dap_selected_long`, `to_dap_random_many`, `to_dap_selected_many` |
-| manipulation | `fake_turns` | `example_priming` |  | 3 | no | no | `to_fake_system_turn`, `to_fake_assistant_turn`, `to_fake_history` |
-| manipulation | `fsh` | `example_priming` |  | 6 | `to_fsh_selected_short`, `to_fsh_selected_long`, `to_fsh_selected_many` | yes | `to_fsh_random_short`, `to_fsh_random_long`, `to_fsh_selected_short`, `to_fsh_selected_long`, `to_fsh_random_many`, `to_fsh_selected_many` |
 | obfuscation | `translation` | `language` | 10 | 23 | yes | no | `to_french`, `to_japanese`, `to_russian`, `to_spanish`, `to_german`, `to_arabic`, `to_turkish`, `to_czech`, `to_vietnamese`, `to_greek`, `to_croatian`, `to_swahili`, `to_thai`, `to_khmer`, `to_nepali`, `to_zulu`, `to_scots_gaelic`, `to_bengali`, `to_javanese`, `to_hmong`, `to_chinese`, `to_hindi`, `to_amharic` |
 | obfuscation | `typos` | `surface_noise` | 20 | 4 | yes | no | `to_rewrite_with_typos_low`, `to_rewrite_with_typos_medium`, `to_rewrite_with_typos_high`, `to_rewrite_with_typos_insane` |
 | obfuscation | `casual_writing` | `surface_noise` | 30 | 9 | no | no | `to_lowercase`, `to_uppercase`, `to_no_sentence_capitals`, `to_dropped_spaces`, `to_doubled_spaces`, `to_dropped_punctuation`, `to_doubled_punctuation`, `to_abbreviations`, `to_stripped_accents` |
@@ -117,6 +124,9 @@ that call a model call the generation model.
 | requests | `smalltalk_prefix` | `request_shape` |  | 1 | no | no | `to_smalltalk_prefix` |
 | requests | `smalltalk_suffix` | `request_shape` |  | 1 | no | no | `to_smalltalk_suffix` |
 | requests | `temporal` | `request_shape` |  | 3 | no | no | `to_use_past_tense`, `to_use_future_tense`, `to_use_historical_era` |
+| manipulation | `dap` | `example_priming` |  | 6 | `to_dap_selected_short`, `to_dap_selected_long`, `to_dap_selected_many` | yes | `to_dap_random_short`, `to_dap_random_long`, `to_dap_selected_short`, `to_dap_selected_long`, `to_dap_random_many`, `to_dap_selected_many` |
+| manipulation | `fake_turns` | `example_priming` |  | 3 | no | no | `to_fake_system_turn`, `to_fake_assistant_turn`, `to_fake_history` |
+| manipulation | `fsh` | `example_priming` |  | 6 | `to_fsh_selected_short`, `to_fsh_selected_long`, `to_fsh_selected_many` | yes | `to_fsh_random_short`, `to_fsh_random_long`, `to_fsh_selected_short`, `to_fsh_selected_long`, `to_fsh_random_many`, `to_fsh_selected_many` |
 <!-- END families -->
 
 Each family's dimension is a tag of `configs/dimensions.json`: what the
@@ -139,7 +149,16 @@ complexity 3). The ten `to_sensitive_words_encode_*`
 carry one too: `heavy` for base64, unicode and ascii, `light` for the rest. Of
 these ten, the `heavy` ones stay allowed with `fsh` and `dap`, which the plain
 `heavy` `encode` techniques are not; the `light` ones, like the plain `light`
-ones, may be the request obfuscation, which no `heavy` one is.
+ones, may be the request obfuscation, which no `heavy` one is. A budget round
+deals the ten plain `heavy` ones, the full-text encodings, in a slot of their
+own beside `encode`, at the spec's `heavy_encoding_weight` (0.2) times
+`encode`'s weight, about a fifth of a family's draws: dealt as `encode`'s
+members they were seldom drawn in the default attacks, since one fits only a
+unit with 3 points of its budget left ([internals/jailbreak.md](internals/jailbreak.md#balanced-dealing)).
+The slot is a quota in every budget round, not a floor: about 40 draws in
+3,000 units whatever the round's budget, so round 3 of the escalation rises
+from 6 to 42 and round 4, whose budget of 9 dealt them about 121 times, falls
+to about 45. A count round deals them as `encode`'s members.
 
 Seventeen of them are tagged `needs_latin`: the ciphers `to_rot13`,
 `to_rot18`, `to_rot47`, `to_caesar_cipher`, `to_atbash`, the three
@@ -169,16 +188,23 @@ QWERTY map only), checked on the same six scripts. The three
 `to_emoji_sprinkle_*` change a text in any script; their emoji have no glyph
 in any font, so each is kept from `ascii_art`. The `noise` family is kept
 from `typos` and `casual_writing`: one kind of surface noise per text. It is
-kept from `translation` too, whatever the script, so its tag no longer
-decides a pair with one.
+kept from `translation` too, whatever the script.
+
+No rule reads the `needs_latin` tag. A translation into another script would
+leave such a technique nothing to change, and the family rules keep the two
+apart already: a translation refuses the whole `encode` family and `noise`.
+A test asserts that every tagged technique is refused beside every
+translation into another script, so a Latin-only technique added to a family
+a translation does not refuse fails it until the spec keeps the two apart.
 
 ## The language table
 
 `configs/jailbreak/languages.json` holds one row per language: its `name`
 (as prompts and infos write it), `slug` (the end of its technique names),
 `complexity` (by resource tier: 0 high, 1 mid, 2 low), `script` (ISO 15924,
-which the script rule reads), and whether it has a `translation` technique
-(`to_<slug>`) and an `answer_language` one (`to_ask_answer_in_<slug>`). The
+the script a translation writes, which the test of `needs_latin` reads), and
+whether it has a `translation` technique (`to_<slug>`) and an
+`answer_language` one (`to_ask_answer_in_<slug>`). The
 spec's `generators` make a technique entry of each marked row as the spec
 loads, and the two families' modules build the functions from the same
 rows, in the table's order. Of the twenty-six rows, all have an
@@ -240,30 +266,40 @@ technique is picked first. A technique may not join a combination when:
   word in 62 of 100 harmful English inputs but in 3 to 36 of their
   translations, measured on nine languages and none of the European ones, so
   a heavy encoding after a translation is discarded and a light one changes
-  nothing), and with `typos`, `casual_writing`, `noise` and
+  nothing), with `typos`, `casual_writing`, `noise` and
   `payload_split` (a translated prompt is already hard to read, for the model
   that writes or marks text and for the model that answers, and one more
-  word-level or character-level change on top is too complex; `encode` and
-  `structural` stay allowed beside a translation, the eval type draws them
-  together); `ascii_art` with `framing`, `persona`, `cognitive`, `fsh`,
+  word-level or character-level change on top is too complex; `structural`
+  stays allowed beside a translation, the eval type draws them together), and
+  with `encode`, every member, light or heavy, into any script (both rewrite
+  the whole text, so one is enough, and a cipher before a translation would
+  hand the translator a cipher; the ten `to_sensitive_words_encode_*` were
+  kept from a translation by their other family already; the
+  [eval release](configuration.md#release-notes) removed from the eval pool
+  the 40 pairs of its eight translations with its five encodings);
+  `ascii_art` with `framing`, `persona`, `cognitive`, `fsh`,
   `dap`; `fsh` and `dap` with `continuation`, `indirect`, `framing`,
   `persona`, `cognitive`; `persona_template` with `fsh`, `dap` and
   `ascii_art`; `payload_split` with `ascii_art`, `encode`, `fake_turns` and
   `word_art` (a font or a cipher would break the parts apart, and an
-  invented turn is a conversation already); `word_art` with `ascii_art`,
+  invented turn was a conversation already: the pair is kept as it was, see
+  below); `word_art` with `ascii_art`,
   `payload_split`, `encode`, `sensitive_words`, `tokenbreak`, `structural`,
   `neutral_container` and `fake_turns` (one disguise of the word, and the art
   is long); `wording` with `sensitive_words`, `tokenbreak`, `word_art`,
   `translation` and `ascii_art` (the other steps that put the marked words in
   other terms, a translation the marking call fails on, and a font on a text
-  the key or the puzzles lengthen); `persona`, `cognitive`, `persona_template` and `persuasion` with
+  the key or the puzzles lengthen); `sensitive_words` with `tokenbreak` (each
+  has the model mark the text's words, so a second marking call would read a
+  text the first changed: one marking step per text, as for `word_art` and
+  `wording`; the eval pool holds neither); `persona`, `cognitive`, `persona_template` and `persuasion` with
   `impersonation`, so a prompt never carries two identities; `persuasion`
   also with `ascii_art`, `tense_rewrite` with `temporal` (the request would be
   set in time twice) and `model_distractors` with `ascii_art`,
   `distractor_prefix` and `distractor_suffix`; `fake_turns`
   with the list of `fsh` and `dap`, `persona_template`, `structural` and
-  `neutral_container` (an invented turn is a conversation, not a document
-  to wrap); `noise`
+  `neutral_container` (an invented turn was a conversation, not a document
+  to wrap: the pair is kept as it was, see below); `noise`
   with `typos` and `casual_writing`, one kind of surface noise per text; and
   `neutral_container` with `structural` (one document around the prompt)
   and `ascii_art` (no font draws a document of that length). So a
@@ -276,9 +312,18 @@ technique is picked first. A technique may not join a combination when:
   `to_braille`, `to_tokenbreak_split`, `to_lookalike_letters`,
   `to_zero_width_noise`, `to_fullwidth`, `to_math_styled` and the three
   `to_emoji_sprinkle_*` from `ascii_art`, since no font draws the characters
-  they may leave; the other suffixes, encodings and noise may still join it.
-  It keeps the four many-shot variants of `fsh` and `dap` from `typos`: a
-  model rewriting so long a prompt would not return it whole. It keeps
+  they may leave. It keeps the ten `heavy` full-text encodings from it too,
+  `to_braille` and the nine others (`to_base64`, `to_unicode_escape`,
+  `to_ascii_ordinal`, `to_morse`, `to_hex`, `to_binary`, `to_html_entities`,
+  `to_base32`, `to_base85`): a code for every character lengthens the text,
+  so its drawing often runs past the cap (below), and both disguise the whole
+  text, so one is enough. The three `heavy` `to_sensitive_words_encode_*`
+  encode only the words a model marks and may still join it, as the `light`
+  encodings that write ASCII and the other suffixes and noise do.
+  It keeps the four many-shot variants of `fsh` and `dap` from `typos`, a
+  rule written when the typo rewrite read the whole many-shot text, which a
+  model would not return whole; the manipulation layer now applies last, so
+  the rewrite reads the question alone, and the rule is kept as it was. It keeps
   `to_refusal_then_comply`, `to_prefix_injection`, `to_dual_answer` and
   `to_tagged_prefix` from `persona_template`, whose mechanics already ask
   for a dual answer or a set opening, and `to_answer_in_encoding` from
@@ -292,20 +337,51 @@ technique is picked first. A technique may not join a combination when:
 - it pairs a family of the manipulation layer (`fsh`, `dap`, `fake_turns`)
   with an obfuscation in `manipulation_blocked_obfuscation`: the
   `translation`, `ascii_art`, `payload_split`, `word_art` and `wording` families and
-  the `heavy` `encode` techniques, except those also in `sensitive_words`;
-- it pairs a `needs_latin` technique with a translation into a script
-  other than Latin: Japanese, Russian, Arabic, Greek, Thai, Khmer, Nepali,
-  Bengali, Chinese, Hindi or Amharic (each language's `script` is in its row of
-  `configs/jailbreak/languages.json`). After the translation the encoding
-  would change nothing, yet count in `num_techniques`; before it, the
-  translator would get a cipher. The Latin-script translations still join the
-  encodings. The family rules above keep `noise` and the six
-  `to_sensitive_words_encode_*` forms from every translation, so this rule
-  decides a pair only for the `encode` family's own members;
+  the `heavy` `encode` techniques, except those also in `sensitive_words`. The
+  block was written when the manipulation layer applied before the
+  obfuscations, which then changed the examples too; since the eval release
+  the layer applies last and an obfuscation changes the question alone, and
+  the block is kept as it was (lifting it would admit 104 eval pairs, each
+  `fsh` or `dap` technique beside a translation or a heavy encoding, a change
+  of the eval coverage of its own);
+- it is a suffix, a structural wrapper or a neutral container and the
+  combination's request obfuscation is a translation (budget mode with
+  `allow_request_obfuscation`). The request obfuscation applies right after
+  the request, to the finished request (a manipulation technique, the only
+  step after it, never meets a translation), so the translation would
+  translate the suffix, the keys
+  of the wrapper or the lines of the container. The spec's
+  `request_obfuscation_refuses` names these three families for a translation;
+  the sampler draws the request obfuscation before the obfuscations and keeps
+  them out of the pool the obfuscations draw from
+  (`rules.after_request_obfuscation`, not part of `compatible`, which does not
+  know which technique of a combination is the request obfuscation). A
+  translation drawn as an ordinary obfuscation runs before those steps and
+  joins them, and an encoding is kept from any translation by the family
+  rule above. Together the family rules (ten of the other thirteen
+  obfuscation families) and this table (the last three) make a translation
+  drawn as the request obfuscation the unit's only obfuscation;
 - in budget mode, its complexity is above what is left of `max_complexity`
   (under the opt-in [group budget](configuration.md#the-group-budget), of the
   unit's allowance: `max_complexity` plus what the group's earlier units left
   unspent, up to `max_unit_complexity`).
+
+Three refusals of the list were written for the order in which the
+manipulation layer applied before the obfuscations. Like the manipulation
+block and the many-shot variants' refusal of `typos`, they are kept as they
+were, though their reasons no longer hold now that the layer applies last:
+`fake_turns` with `structural` and `neutral_container` (an invented turn was a
+conversation, not a document to wrap; the wrapper now goes around the
+question alone and the turn stays outside it), `ascii_art` with `fsh` and
+`dap` (the font drew their examples too; it draws the question alone now) and
+`payload_split` with `fake_turns` (an invented turn was a conversation
+already; the parts now sit inside the turn). Lifting them is a decision of
+its own, not made here. `fake_turns` beside the nine wrappers would add 27
+pairs of the default attack kind and none of the eval pool, which holds no
+`fake_turns`. `ascii_art` with `fsh` and `dap`, and `payload_split` with
+`fake_turns`, are each refused by the manipulation block as well, so a lift
+takes both rules; no pair of the eval pool's 291 holds `ascii_art` with `fsh`
+or `dap`, and lifting both rules would admit 8.
 
 `combine_techniques` does not check these rules. It only sorts techniques
 into layer order. [internals/jailbreak.md](internals/jailbreak.md) explains
@@ -323,9 +399,12 @@ the text unchanged or reversibly, or a check accepts the result.
 The pool is **pinned**: its 36 names, its two count rounds and the text each
 technique draws for a seed stay the same from release to release, so the
 results of an eval run stay comparable. `tests/fixtures/eval_pool.json` pins
-the names and a digest pins the draws; a change to the pool, or to the text or
-info of one of its techniques, is made on purpose in a review of the eval type
-(a new spec version and new fixtures) and fails the tests until then. This
+the names, `tests/fixtures/eval_pairs.json` the pairs of them the
+[rules](#compatibility-rules) admit, and a digest pins the draws; a change to
+the pool, to those pairs, or to the text or info of one of its techniques, is
+made on purpose in a review of the eval type (a new spec version, where a
+technique is added or retired, and new fixtures) and fails the tests until
+then. This
 page and the others say *pinned*, or *unchanged*, where it matters; *the next
 eval review* is that deliberate change.
 
@@ -358,11 +437,21 @@ pool. With
 attacks differ from those of a version without the cap: the font a seed
 draws changes for some texts from about 40 characters and for most from
 about 90, a text of about 830 characters or more is rejected where it used
-to be drawn, and so are most inputs when the second round pairs it with a
+to be drawn, and so were most inputs when the second round paired it with a
 `heavy` encoding that lengthens the text (`to_unicode_escape`,
-`to_ascii_ordinal`, `to_morse`). An eval plan kept across the change mixes
-the two renderings. [What the families do](#what-the-families-do) has the
+`to_ascii_ordinal`, `to_morse`); the [eval release](configuration.md#release-notes)
+keeps ASCII art from those encodings, so a fresh eval plan no longer draws
+the pairs. An eval plan kept across the change mixes the two renderings. [What the families do](#what-the-families-do) has the
 figures.
+
+The eval release also put the manipulation layer last. The 40 pairs that
+hold one of the eight `fsh` and `dap` techniques, each beside `to_json`,
+`to_xml`, `to_markdown`, `to_refusal_then_comply` or `to_use_past_tense`,
+now wrap or reframe the question alone and insert it among the examples,
+where the wrapper or the request used to go around the whole list; no pair
+is added or taken out, and the other 251 pairs and the 36 single techniques
+write what they wrote. An eval plan kept from before writes the old text for
+its pending units (`tests/jailbreak/test_eval_pairs.py` names the 40).
 
 ## The natural pool
 
@@ -431,12 +520,12 @@ planned units; for 1,000 inputs of one category and entry type, planned
 with the packaged attack kind and seed 42:
 
 ```text
-Model calls: 886 of 1000 planned units call a model, 2103 to 8189 calls (translation 510 to 3060, from the spec's calls).
+Model calls: 855 of 1000 planned units call a model, 1997 to 7669 calls (translation 480 to 2880, from the spec's calls).
 ```
 
-Other seeds (43 to 46) give 872 to 889 units, 2,087 to 2,103 calls at the
-low end, 8,139 to 8,216 at the high end and a translation share of 500 to 510
-and 3,000 to 3,060.
+Other seeds (43 to 46) give 848 to 853 units, 1,986 to 1,994 calls at the
+low end, 7,610 to 7,732 at the high end and a translation share of 478 to 480
+and 2,868 to 2,880.
 
 The translation share goes to the translation model (a machine
 translation's judge, one call a round, to the generation model).
@@ -534,6 +623,19 @@ the answers, three to seven pairs of that subcategory.
   at a random position. With no pair at all, the prompt is the only
   question.
 
+The manipulation layer applies last, so the prompt they insert is the
+finished question: obfuscated, its request around it, its request
+obfuscation applied; the pairs stay as written. A `selected` variant shows
+its model the clean input instead, the text the unit started from, which
+`run_chain` passes the techniques that take it as `source_prompt`: it picks
+the subcategory on what the question is about, not on its cipher or its
+wrapper, then inserts the finished question. In a plan kept from before the
+eval release, where `fsh` or `dap` ran first, the clean input is the text
+the variant read, so it picks as it did; the exception is a rewrite
+technique (in a kind that allows the rewrite layer), which runs first in
+both orders: the variant is now shown the input before the rewrite, where
+a kept plan's was shown the rewritten text.
+
 The `many` variants (spec 1.2: `to_fsh_random_many`,
 `to_fsh_selected_many`, `to_dap_random_many`, `to_dap_selected_many`) show
 `MANY_PAIRS`, 32, pairs with short answers. The cache holds eight of a kind
@@ -552,14 +654,16 @@ error row, instead of writing a prompt with no shot. Why 32: a short pair of the
 is about 150 characters as the prompt writes it, about 40 tokens at four
 characters a token, so 32 are about 1,200 tokens (1,450 at the cache's 90th
 percentile, 2,800 were every pair as long as the longest), well inside the
-generation model's 10,000-token context with the request and the prompt of
-a later model step that reads the text. They refuse `typos` (a model
-rewriting so long a prompt would not return it whole) and otherwise share
+generation model's 10,000-token context; since the layer applies last, no
+later model step reads them. They refuse `typos`, a rule written when a typo
+rewrite read the pairs too (a model rewriting so long a prompt would not
+return it whole) and kept as it was, and otherwise share
 the rules of `fsh` and `dap`; their complexity is 3, the top of the scale:
 one above their `random` siblings and level with their `selected` ones.
 
 `fake_turns` (spec version 1.3) puts an invented turn of the conversation
-before the prompt, with no model call and no benign data:
+before the prompt (the finished question, as for `fsh` and `dap`), with no
+model call and no benign data:
 `to_fake_system_turn` an invented system turn, `to_fake_assistant_turn` an
 invented assistant turn, `to_fake_history` an invented earlier exchange,
 eight variants each, from
@@ -575,7 +679,8 @@ wrappers. The family is attack-only, and the eval type does not draw it.
 - `sensitive_words` and `tokenbreak` first ask the model for the harmful
   words of the prompt (prompt `jailbreak/extract_harmful`), one call per
   technique. The encoding, splitting or substitution then applies to those
-  words. A reply that is not a list of at most ten of the prompt's words
+  words; a combination holds at most one of the two. A reply that is not a
+  list of at most ten of the prompt's words
   rejects the result (`DISCARDED; reason=malformed word list`). A word is a
   letter, then letters, digits, apostrophes, hyphens, combining marks and
   zero-width format characters (none first), so a word in Bengali, Nepali,
@@ -829,7 +934,8 @@ wrappers. The family is attack-only, and the eval type does not draw it.
 
   A text of about 830 characters or more is rejected where it used to be
   drawn. After an encoding that lengthens the text, most inputs are
-  rejected: unicode escapes make a text about 6 times as long, so an input
+  rejected (a fresh plan no longer draws ASCII art after a `heavy` full-text
+  encoding; a kept plan may): unicode escapes make a text about 6 times as long, so an input
   of about 140 characters or more is rejected after them, one of about 230
   after ASCII ordinals (about 3.7 times) and one of about 250 after morse
   (about 3.4 times); base64 (about 1.4 times) lowers the limit to about

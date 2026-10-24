@@ -225,11 +225,14 @@ contract.
    `configs/jailbreak/combination_spec.json`: `families` (the first sets the
    layer and the order), `complexity` (0 to 3), `requires_llm`,
    `requires_benign`, `encode_weight` for an `encode` technique,
-   `needs_latin: true` for one that changes only Latin text (it is then
-   kept from a translation into another script; `TestLatinOnly` in
-   `tests/jailbreak/obfuscation/test_encoding.py` checks it on six other
-   scripts, and fails when an encoding that leaves them unchanged is not
-   tagged, `to_braille` aside while the eval pool is pinned),
+   `needs_latin: true` for one that changes only Latin text (no rule reads
+   it: a test asserts that the family rules refuse every tagged technique
+   beside every translation into another script, so one outside `encode`
+   and `noise` needs a rule against `translation` in the spec;
+   `TestLatinOnly` in `tests/jailbreak/obfuscation/test_encoding.py` checks
+   it on six other scripts, and fails when an encoding that leaves them
+   unchanged is not tagged, `to_braille` aside while the eval pool is
+   pinned),
    `max_tokens` to cap its calls' replies, `cross_incompatible_with` for
    families this technique, not its whole family, may not join,
    `kinds` when it should differ from its first family's (below),
@@ -333,6 +336,12 @@ contract.
    each two families the rules refuse; a rule added, dropped or narrowed, or
    a technique refused where its family's others are not, changes a line:
    regenerate with `PYTHONPATH=src python -m tests.jailbreak.test_family_pairs`.
+   `tests/jailbreak/test_eval_pairs.py` pins, in
+   `tests/fixtures/eval_pairs.json`, which pairs of the eval pool's 36
+   techniques the rules admit: a rule that moves the eval type's draws shows
+   as a diff of that file, regenerated with
+   `PYTHONPATH=src python -m tests.jailbreak.test_eval_pairs` in an eval
+   review.
    A technique that draws a variant from a pool (it has a `variant_pool`)
    is also pinned by what it writes:
    `tests/jailbreak/test_template_draws.py` runs each registered one on two

@@ -140,7 +140,9 @@ variant a row drew (from a kept plan made with another pool). A row's
 `technique_info` joins its techniques' infos in their order, and a framing
 and a request technique both write `variant=<name>`, so the variants are
 paired by position: the n-th `variant=` of a row is the n-th of its
-techniques that writes one; a step noted `noop=` wrote none, and a rejected
+techniques that writes one. The infos and the names follow one order, the
+applied one, so the pairing holds in a fresh plan (a request, then the fake
+turn after it) as in a kept one (the fake turn first); a step noted `noop=` wrote none, and a rejected
 or error row, whose info is its rejection's, counts none. The framing
 techniques, the answer formats, the answer languages, asking, the
 distractors, impersonation, indirect, temporal, the neutral containers,
@@ -220,8 +222,9 @@ kind no longer draws ([build.md](build.md#training-mode)). The
 5,000-character cap on `to_ascii_art` holds wherever it is drawn, the eval
 type's pool included, and changes the text a seed draws: the font changes for some
 texts from about 40 characters and for most from about 90, a text of about
-830 characters or more is rejected where it used to be drawn, and so are
-most inputs a `heavy` encoding lengthened first
+830 characters or more is rejected where it used to be drawn, and so were
+most inputs a `heavy` encoding lengthened first, a pairing a fresh plan no
+longer draws since the eval release
 ([techniques.md](../techniques.md#what-the-families-do) has the figures).
 A plan kept across this change mixes rows drawn without the cap, saved
 before, and rows drawn with it, run after: a replayed plan gives the same
@@ -293,7 +296,8 @@ one `combine_techniques(...)` result, on one prompt with blocking calls, and
 returns `(text, info, accepted, reasoning)`. It loads the benign data when a
 technique needs it, generating what the cache lacks with `client`; its
 `prompt_dir` reaches the techniques and the benign data. `combine_techniques` sorts the techniques into layer
-order but does not check the compatibility rules.
+order (the manipulation layer last, around the finished question, since the
+eval release) but does not check the compatibility rules.
 
 ```python
 from redact.jailbreak import apply_combination, combine_techniques
